@@ -76,35 +76,60 @@ Codex 的 `ModelInfo` 包含远超"模型名称"的信息：
 3. 认证方式可扩展（API Key、OAuth、命令行获取）
 4. 兼容 OpenAI Responses API 和 Chat Completions API
 5. 模型切换无需重启
+6. **原生全流式**：所有 LLM 调用通过 `AgentEventSender` 推送增量
 
-### Crate 映射
+### 独立 Crate：pl-model
 
-Codex 的 4 crate 模式在 pure-lang 中映射为 `pl-core` 内的子模块：
+参考 09-conventions.md 的 R7 规范（不向 pl-core 无节制添加代码），将 model 层独立为 `pl-model` crate：
 
 ```
-pl-core/
-├── src/
-│   ├── model/
-│   │   ├── mod.rs              # 模块导出
-│   │   ├── provider_info.rs    # Provider 静态配置（对应 codex-model-provider-info）
-│   │   ├── provider.rs         # Provider 运行时 trait（对应 codex-model-provider）
-│   │   ├── model_info.rs       # 模型元数据类型（对应 codex-protocol/openai_models）
-│   │   ├── manager.rs          # 模型发现与缓存（对应 codex-models-manager）
-│   │   ├── auth.rs             # 认证抽象
-│   │   └── wire_api.rs         # API 协议抽象（Responses / Chat）
-│   ├── error.rs
-│   ├── message.rs
-│   ├── permission.rs
-│   └── lib.rs
+pl-model/
+├── Cargo.toml
+└── src/
+    ├── lib.rs              # pub use 导出
+    ├── provider.rs         # ModelProvider trait + 工厂函数
+    ├── provider_info.rs    # ProviderInfo 静态配置
+    ├── model_info.rs       # ModelInfo 元数据
+    ├── manager.rs          # ModelsManager trait + DefaultModelsManager
+    ├── capabilities.rs     # ModelCapabilities / ProviderCapabilities bitflags
+    ├── auth.rs             # 认证抽象
+    ├── wire_api.rs         # WireAdapter trait
+    ├── openai.rs           # OpenAI 兼容实现
+    ├── anthropic.rs        # Anthropic 实现
+    └── sse.rs              # SSE 解析工具
 ```
 
-> **设计决策**：首版将 model 层放在 `pl-core` 中作为子模块，而非独立 crate。
-> 原因：pure-lang 的 model 层是核心基础设施，几乎所有其他 crate 都依赖它，
-> 独立成 crate 会增加维护成本但收益有限。当模型足够复杂时再拆分。
+依赖关系：
+
+```
+pl-core (无内部依赖)
+    ↑
+pl-model (依赖 pl-core)
+    ↑
+pl-tool, pl-memory, pl-runtime (各依赖 pl-core)
+```
 
 ---
 
 ## 7.3 核心类型定义
+
+### ModelCapabilities — 位标志集
+
+替代多个 `supports_*: bool` 字段：
+
+```rust
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+    pub struct ModelCapabilities: u32 {
+        const STREAMING             = 0b00000001;
+        const FUNCTION_CALLING      = 0b00000010;
+        const VISION                = 0b00000100;
+        const PARALLEL_TOOL_CALLS   = 0b00001000;
+        const REASONING             = 0b00010000;
+        const WEB_SEARCH            = 0b00100000;
+    }
+}
+```
 
 ### ModelInfo — 模型元数据
 
@@ -142,19 +167,10 @@ pub struct ModelInfo {
     /// 最大输出 token 数
     pub max_output_tokens: Option<u64>,
 
-    // ── 能力标记 ──
+    // ── 能力标记（位标志集） ──
 
-    /// 是否支持并行工具调用
-    pub supports_parallel_tool_calls: bool,
-
-    /// 是否支持流式输出
-    pub supports_streaming: bool,
-
-    /// 是否支持视觉/图片输入
-    pub supports_vision: bool,
-
-    /// 是否支持 function calling
-    pub supports_function_calling: bool,
+    /// 模型能力位标志
+    pub capabilities: ModelCapabilities,
 
     /// 支持的输入模态
     pub input_modalities: Vec<InputModality>,
@@ -207,6 +223,16 @@ impl ModelInfo {
             .map_or(default_limit, |limit| limit.min(default_limit)))
     }
 
+    /// 便捷方法：检查是否支持流式
+    pub fn supports_streaming(&self) -> bool {
+        self.capabilities.contains(ModelCapabilities::STREAMING)
+    }
+
+    /// 便捷方法：检查是否支持并行工具调用
+    pub fn supports_parallel_tool_calls(&self) -> bool {
+        self.capabilities.contains(ModelCapabilities::PARALLEL_TOOL_CALLS)
+    }
+
     /// 为未知模型创建回退元数据
     pub fn fallback(slug: &str) -> Self {
         Self {
@@ -218,12 +244,9 @@ impl ModelInfo {
             auto_compact_token_limit: None,
             default_temperature: Some(0.3),
             max_output_tokens: Some(4096),
-            supports_parallel_tool_calls: false,
-            supports_streaming: true,
-            supports_vision: false,
-            supports_function_calling: true,
+            capabilities: ModelCapabilities::STREAMING | ModelCapabilities::FUNCTION_CALLING,
             input_modalities: vec![InputModality::Text],
-            truncation_policy: TruncationPolicy::bytes(10_000),
+            truncation_policy: TruncationPolicy { mode: TruncationMode::Bytes, limit: 10_000 },
             base_instructions: String::new(),
             used_fallback: true,
         }
@@ -334,60 +357,55 @@ impl ProviderInfo {
 }
 ```
 
-### ModelProvider — 运行时 Provider Trait
-
-参考 Codex 的 `ModelProvider` trait：
+### ProviderCapabilities — 位标志集
 
 ```rust
-/// Provider 运行时能力
-#[derive(Debug, Clone, Copy)]
-pub struct ProviderCapabilities {
-    pub supports_streaming: bool,
-    pub supports_function_calling: bool,
-    pub supports_vision: bool,
-    pub supports_web_search: bool,
-}
-
-impl Default for ProviderCapabilities {
-    fn default() -> Self {
-        Self {
-            supports_streaming: true,
-            supports_function_calling: true,
-            supports_vision: true,
-            supports_web_search: false,
-        }
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy)]
+    pub struct ProviderCapabilities: u32 {
+        const STREAMING             = 0b00000001;
+        const FUNCTION_CALLING      = 0b00000010;
+        const VISION                = 0b00000100;
+        const PARALLEL_TOOL_CALLS   = 0b00001000;
     }
 }
+```
 
+### ModelProvider — 运行时 Provider Trait
+
+```rust
 /// LLM Provider 运行时抽象。
 ///
-/// 封装了认证、API 调用、能力查询等 provider 特定逻辑。
-/// 每个 provider 实现此 trait，通过工厂函数创建。
-#[async_trait]
+/// 封装认证、API 调用、能力查询等 provider 特定逻辑。
+/// 通过工厂函数 `create_provider()` 创建。
+///
+/// 实现者契约：
+/// - 通过 event_tx 推送 LLM 输出增量（TextDelta/ThinkingDelta/ToolCallDelta）
+/// - capabilities() 如实报告支持的功能
+/// - auth_token() 返回当前有效的认证凭据
 pub trait ModelProvider: Debug + Send + Sync {
     /// Provider 配置信息
     fn info(&self) -> &ProviderInfo;
 
     /// Provider 能力
-    fn capabilities(&self) -> ProviderCapabilities {
-        ProviderCapabilities::default()
-    }
+    fn capabilities(&self) -> ProviderCapabilities;
+
+    /// 流式补全请求（唯一调用入口）
+    ///
+    /// 通过 event_tx 推送增量事件，最终返回完整响应。
+    fn stream_complete(
+        &self,
+        request: CompletionRequest,
+        event_tx: AgentEventSender,
+    ) -> impl std::future::Future<Output = Result<CompletionResponse>> + Send;
 
     /// 获取认证 token
-    async fn auth_token(&self) -> Result<Option<String>>;
-
-    /// 发送补全请求（非流式）
-    async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse>;
-
-    /// 发送补全请求（流式）
-    async fn stream(&self, request: CompletionRequest)
-        -> Result<Box<dyn CompletionStream>>;
+    fn auth_token(
+        &self,
+    ) -> impl std::future::Future<Output = Result<Option<String>>> + Send;
 
     /// 获取模型元数据
     fn model_info(&self, model: &str) -> ModelInfo;
-
-    /// 列出可用模型
-    async fn list_models(&self) -> Result<Vec<ModelInfo>>;
 
     /// 获取默认模型名称
     fn default_model(&self) -> &str;
@@ -417,9 +435,6 @@ pub struct CompletionRequest {
 
     /// 最大输出 token
     pub max_tokens: Option<u64>,
-
-    /// 是否流式
-    pub stream: bool,
 }
 
 /// 补全响应
@@ -436,6 +451,9 @@ pub struct CompletionResponse {
 
     /// 完成原因
     pub finish_reason: FinishReason,
+
+    /// 使用的模型
+    pub model: String,
 }
 
 #[derive(Debug, Clone)]
@@ -467,19 +485,6 @@ pub struct ToolSchema {
     pub description: String,
     pub input_schema: serde_json::Value,
 }
-
-/// 流式响应 trait
-#[async_trait]
-pub trait CompletionStream: Send {
-    async fn next_chunk(&mut self) -> Result<Option<StreamChunk>>;
-}
-
-#[derive(Debug, Clone)]
-pub enum StreamChunk {
-    Delta { content: String },
-    ToolCallDelta { id: String, name: String, arguments_delta: String },
-    Done(CompletionResponse),
-}
 ```
 
 ---
@@ -494,74 +499,96 @@ pub enum StreamChunk {
 pub struct OpenAiCompatibleProvider {
     info: ProviderInfo,
     http_client: reqwest::Client,
+    wire_adapter: Box<dyn WireAdapter>,
     models: Vec<ModelInfo>,
 }
 
 impl OpenAiCompatibleProvider {
     pub fn new(info: ProviderInfo) -> Result<Self> {
+        let wire_adapter: Box<dyn WireAdapter> = match info.wire_api {
+            WireApi::Responses => Box::new(ResponsesApiAdapter),
+            WireApi::Chat => Box::new(ChatCompletionsAdapter),
+        };
         let http_client = reqwest::Client::builder()
             .timeout(Duration::from_secs(300))
             .build()?;
         Ok(Self {
             info,
             http_client,
+            wire_adapter,
             models: Self::default_models(),
         })
     }
 
     fn default_models() -> Vec<ModelInfo> {
-        // 编译时嵌入的默认模型列表
         serde_json::from_str(include_str!("../models/openai.json"))
             .unwrap_or_default()
     }
-
-    fn resolve_base_url(&self) -> String {
-        self.info.base_url.clone()
-            .unwrap_or_else(|| "https://api.openai.com/v1".into())
-    }
 }
 
-#[async_trait]
 impl ModelProvider for OpenAiCompatibleProvider {
     fn info(&self) -> &ProviderInfo { &self.info }
     fn default_model(&self) -> &str { "gpt-4" }
 
-    async fn auth_token(&self) -> Result<Option<String>> {
-        // 1. 优先 bearer_token
-        if let Some(token) = &self.info.bearer_token {
-            return Ok(Some(token.clone()));
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities::STREAMING
+            | ProviderCapabilities::FUNCTION_CALLING
+            | ProviderCapabilities::VISION
+            | ProviderCapabilities::PARALLEL_TOOL_CALLS
+    }
+
+    fn auth_token(
+        &self,
+    ) -> impl std::future::Future<Output = Result<Option<String>>> + Send {
+        async move {
+            // 1. 优先 bearer_token
+            if let Some(token) = &self.info.bearer_token {
+                return Ok(Some(token.clone()));
+            }
+            // 2. 其次 auth_command
+            if let Some(cmd) = &self.info.auth_command {
+                let output = tokio::process::Command::new(&cmd.command)
+                    .args(&cmd.args)
+                    .output()
+                    .await?;
+                return Ok(Some(String::from_utf8_lossy(&output.stdout).trim().into()));
+            }
+            // 3. 最后 env_key
+            if let Some(env_key) = &self.info.env_key {
+                return Ok(std::env::var(env_key).ok());
+            }
+            Ok(None)
         }
-        // 2. 其次 auth_command
-        if let Some(cmd) = &self.info.auth_command {
-            let output = tokio::process::Command::new(&cmd.command)
-                .args(&cmd.args)
-                .output()
+    }
+
+    fn stream_complete(
+        &self,
+        request: CompletionRequest,
+        event_tx: AgentEventSender,
+    ) -> impl std::future::Future<Output = Result<CompletionResponse>> + Send {
+        async move {
+            let url = format!("{}/responses", self.info.base_url.as_deref().unwrap_or(""));
+            let token = self.auth_token().await?;
+            let body = self.wire_adapter.build_request_body(&request);
+
+            let response = self.http_client
+                .post(&url)
+                .bearer_auth(token.as_deref().unwrap_or(""))
+                .json(&body)
+                .send()
                 .await?;
-            return Ok(Some(String::from_utf8_lossy(&output.stdout).trim().into()));
+
+            // SSE 流式解析
+            self.parse_sse_stream(response, &event_tx).await
         }
-        // 3. 最后 env_key
-        if let Some(env_key) = &self.info.env_key {
-            return Ok(std::env::var(env_key).ok());
-        }
-        Ok(None)
     }
 
-    async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse> {
-        let url = format!("{}/responses", self.resolve_base_url());
-        let token = self.auth_token().await?;
-
-        let body = self.build_request_body(&request);
-        let response = self.http_client
-            .post(&url)
-            .bearer_auth(token.as_deref().unwrap_or(""))
-            .json(&body)
-            .send()
-            .await?;
-
-        self.parse_response(response).await
+    fn model_info(&self, model: &str) -> ModelInfo {
+        self.models.iter()
+            .find(|m| m.slug == model)
+            .cloned()
+            .unwrap_or_else(|| ModelInfo::fallback(model))
     }
-
-    // ... stream, model_info, list_models 实现
 }
 ```
 
@@ -571,30 +598,42 @@ impl ModelProvider for OpenAiCompatibleProvider {
 pub struct AnthropicProvider {
     info: ProviderInfo,
     http_client: reqwest::Client,
+    wire_adapter: AnthropicMessagesAdapter,
 }
 
-#[async_trait]
 impl ModelProvider for AnthropicProvider {
     fn info(&self) -> &ProviderInfo { &self.info }
     fn default_model(&self) -> &str { "claude-sonnet-4-6" }
 
-    async fn complete(&self, request: CompletionRequest) -> Result<CompletionResponse> {
-        // 将内部 CompletionRequest 转换为 Anthropic Messages API 格式
-        let body = self.convert_to_anthropic_format(&request);
-        let token = self.auth_token().await?;
-
-        let response = self.http_client
-            .post("https://api.anthropic.com/v1/messages")
-            .header("x-api-key", token.as_deref().unwrap_or(""))
-            .header("anthropic-version", "2023-06-01")
-            .json(&body)
-            .send()
-            .await?;
-
-        self.parse_anthropic_response(response).await
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities::STREAMING
+            | ProviderCapabilities::FUNCTION_CALLING
+            | ProviderCapabilities::VISION
+            | ProviderCapabilities::PARALLEL_TOOL_CALLS
     }
 
-    // ...
+    fn stream_complete(
+        &self,
+        request: CompletionRequest,
+        event_tx: AgentEventSender,
+    ) -> impl std::future::Future<Output = Result<CompletionResponse>> + Send {
+        async move {
+            let body = self.wire_adapter.build_request_body(&request);
+            let token = self.auth_token().await?;
+
+            let response = self.http_client
+                .post("https://api.anthropic.com/v1/messages")
+                .header("x-api-key", token.as_deref().unwrap_or(""))
+                .header("anthropic-version", "2023-06-01")
+                .json(&body)
+                .send()
+                .await?;
+
+            self.parse_sse_stream(response, &event_tx).await
+        }
+    }
+
+    // auth_token, model_info 等实现...
 }
 ```
 
@@ -631,15 +670,22 @@ pub enum RefreshStrategy {
 }
 
 /// 模型管理器 trait
-#[async_trait]
+///
+/// 实现者契约：
+/// - Offline 策略必须不发起网络请求
+/// - Online 策略失败时应回退到 Offline
+/// - get_model_info() 对未知模型返回 fallback 元数据
 pub trait ModelsManager: Debug + Send + Sync {
-    /// 列出可用模型
-    async fn list_models(&self, strategy: RefreshStrategy) -> Vec<ModelInfo>;
+    fn list_models(
+        &self,
+        strategy: RefreshStrategy,
+    ) -> impl std::future::Future<Output = Vec<ModelInfo>> + Send;
 
-    /// 获取指定模型的元数据
-    async fn get_model_info(&self, model: &str) -> ModelInfo;
+    fn get_model_info(
+        &self,
+        model: &str,
+    ) -> impl std::future::Future<Output = ModelInfo> + Send;
 
-    /// 获取默认模型
     fn default_model(&self) -> &str;
 }
 
@@ -686,40 +732,56 @@ impl DefaultModelsManager {
     }
 }
 
-#[async_trait]
 impl ModelsManager for DefaultModelsManager {
-    async fn list_models(&self, strategy: RefreshStrategy) -> Vec<ModelInfo> {
-        match strategy {
-            RefreshStrategy::Offline => {
-                let remote = self.remote.read().await.clone();
-                Self::merge_models(&self.bundled, &remote)
-            }
-            RefreshStrategy::Online => {
-                match self.provider.list_models().await {
-                    Ok(models) => {
-                        *self.remote.write().await = models.clone();
-                        self.persist_cache(&models);
-                        Self::merge_models(&self.bundled, &models)
-                    }
-                    Err(_) => self.list_models(RefreshStrategy::Offline).await,
+    fn list_models(
+        &self,
+        strategy: RefreshStrategy,
+    ) -> impl std::future::Future<Output = Vec<ModelInfo>> + Send {
+        async move {
+            match strategy {
+                RefreshStrategy::Offline => {
+                    let remote = self.remote.read().await.clone();
+                    Self::merge_models(&self.bundled, &remote)
                 }
-            }
-            RefreshStrategy::OnlineIfUncached => {
-                if let Some(cached) = self.load_cache() {
-                    *self.remote.write().await = cached.clone();
-                    Self::merge_models(&self.bundled, &cached)
-                } else {
-                    self.list_models(RefreshStrategy::Online).await
+                RefreshStrategy::Online => {
+                    // 尝试远程拉取，失败回退 Offline
+                    let online_result = async {
+                        // self.provider.list_models().await
+                        todo!("调用 provider 的模型列表 API")
+                    }.await;
+
+                    match online_result {
+                        Ok(models) => {
+                            *self.remote.write().await = models.clone();
+                            // self.persist_cache(&models);
+                            Self::merge_models(&self.bundled, &models)
+                        }
+                        Err(_) => {
+                            self.list_models(RefreshStrategy::Offline).await
+                        }
+                    }
+                }
+                RefreshStrategy::OnlineIfUncached => {
+                    if !self.remote.read().await.is_empty() {
+                        self.list_models(RefreshStrategy::Offline).await
+                    } else {
+                        self.list_models(RefreshStrategy::Online).await
+                    }
                 }
             }
         }
     }
 
-    async fn get_model_info(&self, model: &str) -> ModelInfo {
-        let models = self.list_models(RefreshStrategy::OnlineIfUncached).await;
-        models.into_iter()
-            .find(|m| m.slug == model || model.starts_with(&m.slug))
-            .unwrap_or_else(|| ModelInfo::fallback(model))
+    fn get_model_info(
+        &self,
+        model: &str,
+    ) -> impl std::future::Future<Output = ModelInfo> + Send {
+        async move {
+            let models = self.list_models(RefreshStrategy::OnlineIfUncached).await;
+            models.into_iter()
+                .find(|m| m.slug == model || model.starts_with(&m.slug))
+                .unwrap_or_else(|| ModelInfo::fallback(model))
+        }
     }
 
     fn default_model(&self) -> &str {
@@ -741,10 +803,7 @@ impl ModelsManager for DefaultModelsManager {
     "display_name": "GPT-4",
     "context_window": 128000,
     "max_context_window": 128000,
-    "supports_parallel_tool_calls": true,
-    "supports_streaming": true,
-    "supports_vision": true,
-    "supports_function_calling": true,
+    "capabilities": ["STREAMING", "FUNCTION_CALLING", "VISION", "PARALLEL_TOOL_CALLS"],
     "input_modalities": ["text", "image"],
     "truncation_policy": { "mode": "bytes", "limit": 10000 },
     "base_instructions": ""
@@ -754,10 +813,7 @@ impl ModelsManager for DefaultModelsManager {
     "display_name": "Claude Sonnet 4.6",
     "context_window": 200000,
     "max_context_window": 200000,
-    "supports_parallel_tool_calls": true,
-    "supports_streaming": true,
-    "supports_vision": true,
-    "supports_function_calling": true,
+    "capabilities": ["STREAMING", "FUNCTION_CALLING", "VISION", "PARALLEL_TOOL_CALLS"],
     "input_modalities": ["text", "image"],
     "truncation_policy": { "mode": "bytes", "limit": 10000 },
     "base_instructions": ""
@@ -767,82 +823,7 @@ impl ModelsManager for DefaultModelsManager {
 
 ---
 
-## 7.7 配置集成
-
-### pure.toml 中的模型配置
-
-```toml
-[llm]
-provider = "openai"             # 当前使用的 provider ID
-model = "gpt-4"                 # 默认模型
-temperature = 0.3
-max_tokens = 4096
-
-[llm.providers.openai]
-name = "OpenAI"
-base_url = "https://api.openai.com/v1"
-env_key = "OPENAI_API_KEY"
-wire_api = "responses"
-
-[llm.providers.anthropic]
-name = "Anthropic"
-base_url = "https://api.anthropic.com"
-env_key = "ANTHROPIC_API_KEY"
-wire_api = "chat"
-
-[llm.providers.ollama]
-name = "Ollama"
-base_url = "http://localhost:11434/v1"
-wire_api = "chat"
-
-[llm.providers.custom-proxy]
-name = "My Proxy"
-base_url = "https://my-proxy.example.com/v1"
-env_key = "MY_API_KEY"
-wire_api = "responses"
-http_headers = { "X-Custom-Header" = "value" }
-
-# 可选：覆盖特定模型的上下文窗口
-[llm.model_overrides.gpt-4]
-context_window = 100000
-auto_compact_token_limit = 90000
-```
-
-### 配置加载流程
-
-```
-启动
-  │
-  ├── 读取 pure.toml
-  │
-  ├── 解析 [llm] 段 → 确定当前 provider ID
-  │
-  ├── 解析 [llm.providers.<id>] → ProviderInfo
-  │
-  ├── create_provider(info) → SharedModelProvider
-  │
-  ├── DefaultModelsManager::new(provider, cache_dir)
-  │
-  └── 注入到 Agent 和 Compiler
-```
-
----
-
-## 7.8 与 Codex 架构的对比
-
-| 维度 | Codex | Pure-Lang | 设计理由 |
-|------|-------|-----------|---------|
-| 模块划分 | 4 个独立 crate | pl-core 内子模块 | pure-lang 规模较小，首版不需要独立 crate |
-| Provider 实现 | OpenAI + Bedrock | OpenAI兼容 + Anthropic | 优先支持主流 provider |
-| 认证方式 | OAuth + API Key + 命令行 | API Key + 命令行 + Bearer Token | 首版简化 OAuth |
-| 模型元数据 | 远端 /models API 拉取 | bundled JSON + 远端可选 | 首版以本地为主，降低网络依赖 |
-| 协议支持 | Responses API only | Responses + Chat | 兼容更多 provider |
-| 缓存策略 | JSON 文件 + TTL | JSON 文件 + TTL | 相同 |
-| 上下文管理 | 服务端远程压缩 | 本地压缩 | 简化首版 |
-
----
-
-## 7.9 Wire API 适配层
+## 7.7 Wire API 适配层
 
 不同 provider 使用不同的 API 格式。Wire API 适配层负责统一转换：
 
@@ -865,19 +846,102 @@ auto_compact_token_limit = 90000
 ```
 
 ```rust
-/// 请求格式转换 trait
-trait WireAdapter: Send + Sync {
+/// API 协议适配器。
+///
+/// 将内部统一的 CompletionRequest 转换为不同 provider 的 wire 格式，
+/// 并将 provider 返回的响应解析回 CompletionResponse。
+///
+/// 实现者契约：
+/// - build_request_body() 产生的 JSON 必须符合目标 API 规范
+/// - parse_stream_line() 处理单行 SSE 数据，返回 None 表示跳过
+pub trait WireAdapter: Send + Sync {
     fn build_request_body(&self, request: &CompletionRequest) -> serde_json::Value;
     fn parse_response(&self, body: serde_json::Value) -> Result<CompletionResponse>;
-    fn parse_stream_chunk(&self, chunk: serde_json::Value) -> Result<Option<StreamChunk>>;
+    fn parse_stream_line(&self, line: &str) -> Result<Option<Vec<AgentEvent>>>;
 }
 
-struct ResponsesApiAdapter;   // /v1/responses
-struct ChatCompletionsAdapter; // /v1/chat/completions
-struct AnthropicMessagesAdapter; // /v1/messages
+struct ResponsesApiAdapter;       // /v1/responses
+struct ChatCompletionsAdapter;    // /v1/chat/completions
+struct AnthropicMessagesAdapter;  // /v1/messages
 ```
 
 这样每个 provider 只需选择对应的 adapter，不需要自己处理格式转换。
+
+---
+
+## 7.8 配置集成
+
+### pure.toml 中的模型配置
+
+```toml
+[model]
+provider = "openai"             # 当前使用的 provider ID
+model = "gpt-4"                 # 默认模型
+temperature = 0.3
+max_tokens = 4096
+
+[model.providers.openai]
+name = "OpenAI"
+base_url = "https://api.openai.com/v1"
+env_key = "OPENAI_API_KEY"
+wire_api = "responses"
+
+[model.providers.anthropic]
+name = "Anthropic"
+base_url = "https://api.anthropic.com"
+env_key = "ANTHROPIC_API_KEY"
+wire_api = "chat"
+
+[model.providers.ollama]
+name = "Ollama"
+base_url = "http://localhost:11434/v1"
+wire_api = "chat"
+
+[model.providers.custom-proxy]
+name = "My Proxy"
+base_url = "https://my-proxy.example.com/v1"
+env_key = "MY_API_KEY"
+wire_api = "responses"
+http_headers = { "X-Custom-Header" = "value" }
+
+# 可选：覆盖特定模型的上下文窗口
+[model.overrides.gpt-4]
+context_window = 100000
+auto_compact_token_limit = 90000
+```
+
+### 配置加载流程
+
+```
+启动
+  │
+  ├── 读取 pure.toml
+  │
+  ├── 解析 [model] 段 → 确定当前 provider ID
+  │
+  ├── 解析 [model.providers.<id>] → ProviderInfo
+  │
+  ├── create_provider(info) → SharedModelProvider
+  │
+  ├── DefaultModelsManager::new(provider, cache_dir)
+  │
+  └── 注入到 Agent 和 Compiler
+```
+
+---
+
+## 7.9 与 Codex 架构的对比
+
+| 维度 | Codex | Pure-Lang | 设计理由 |
+|------|-------|-----------|---------|
+| 模块划分 | 4 个独立 crate | 独立 `pl-model` crate | 独立成 crate 避免膨胀 pl-core |
+| Provider 实现 | OpenAI + Bedrock | OpenAI兼容 + Anthropic | 优先支持主流 provider |
+| 认证方式 | OAuth + API Key + 命令行 | API Key + 命令行 + Bearer Token | 首版简化 OAuth |
+| 模型元数据 | 远端 /models API 拉取 | bundled JSON + 远端可选 | 首版以本地为主，降低网络依赖 |
+| 协议支持 | Responses API only | Responses + Chat + Anthropic | 兼容更多 provider |
+| 缓存策略 | JSON 文件 + TTL | JSON 文件 + TTL | 相同 |
+| 上下文管理 | 服务端远程压缩 | 本地压缩 | 简化首版 |
+| 流式模式 | 服务端流式 | AgentEvent 统一流式 | 全系统统一事件流 |
 
 ---
 
@@ -885,15 +949,16 @@ struct AnthropicMessagesAdapter; // /v1/messages
 
 | 优先级 | 内容 | 说明 |
 |-------|------|------|
+| P0 | `ModelCapabilities` bitflags | 替代多个 bool 字段 |
 | P0 | `ModelInfo`, `ProviderInfo`, `CompletionRequest/Response` | 核心类型 |
-| P0 | `OpenAiCompatibleProvider` | 支持所有 OpenAI 兼容 API |
+| P0 | `OpenAiCompatibleProvider` + `stream_complete()` | 流式调用，OpenAI 兼容 |
 | P0 | `ProviderInfo::openai()`, `::ollama()` | 内置 provider 定义 |
 | P0 | `create_provider()` 工厂函数 | provider 创建入口 |
 | P0 | bundled models JSON | 编译时嵌入默认模型列表 |
+| P0 | `WireAdapter` trait + SSE 解析 | 流式响应解析 |
 | P1 | `AnthropicProvider` | Anthropic Messages API |
 | P1 | `DefaultModelsManager` + 缓存 | 模型发现与缓存 |
 | P1 | `AuthCommand` 支持 | 外部命令获取 token |
-| P1 | 流式输出 | `CompletionStream` |
 | P2 | 远端 /models 拉取 | 运行时模型发现 |
-| P2 | 模型配置覆盖 | pure.toml 中的 model_overrides |
+| P2 | 模型配置覆盖 | pure.toml 中的 model overrides |
 | P2 | Fallback 策略 | 多 provider 自动切换 |

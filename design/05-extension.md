@@ -5,12 +5,11 @@
 用户可以通过实现 `Tool` trait 来注册自定义工具：
 
 ```rust
-use pl_tool::{Tool, ToolDefinition, ToolInput, ToolOutput, ToolExecutionContext};
-use async_trait::async_trait;
+use pl_tool::{Tool, ToolDefinition, ToolInput, ToolResult, ToolExecutionContext};
+use pl_core::AgentEventSender;
 
 struct GitLogTool;
 
-#[async_trait]
 impl Tool for GitLogTool {
     fn definition(&self) -> &ToolDefinition {
         static DEF: Lazy<ToolDefinition> = Lazy::new(|| ToolDefinition {
@@ -28,23 +27,45 @@ impl Tool for GitLogTool {
         &DEF
     }
 
-    async fn execute(
+    fn execute_stream(
         &self,
         input: ToolInput,
         ctx: &ToolExecutionContext,
-    ) -> Result<ToolOutput> {
-        let count = input.arguments["count"].as_u64().unwrap_or(10);
-        let output = Command::new("git")
-            .args(["log", &format!("-{}", count)])
-            .current_dir(&ctx.workdir)
-            .output()
-            .await?;
+        event_tx: AgentEventSender,
+    ) -> impl std::future::Future<Output = Result<ToolResult>> + Send {
+        async move {
+            let count = input.arguments["count"].as_u64().unwrap_or(10);
 
-        Ok(ToolOutput {
-            content: String::from_utf8_lossy(&output.stdout).into(),
-            is_error: !output.status.success(),
-            metadata: HashMap::new(),
-        })
+            // 流式执行 git log 命令
+            let mut child = tokio::process::Command::new("git")
+                .args(["log", &format!("-{}", count)])
+                .current_dir(&ctx.workdir)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()?;
+
+            let stdout = child.stdout.take().unwrap();
+            let reader = BufReader::new(stdout);
+            let mut lines = reader.lines();
+
+            let mut output = String::new();
+            while let Some(line) = lines.next_line().await? {
+                output.push_str(&line);
+                output.push('\n');
+                // 推送增量输出
+                let _ = event_tx.send(AgentEvent::ToolOutputDelta {
+                    id: input.name.clone(),
+                    content: line,
+                });
+            }
+
+            let status = child.wait().await?;
+            Ok(ToolResult {
+                content: output,
+                is_error: !status.success(),
+                metadata: HashMap::new(),
+            })
+        }
     }
 }
 
@@ -69,26 +90,46 @@ registry.register(Box::new(GitLogTool))?;
 通过实现 `MemoryStore` trait 可以接入不同的存储后端：
 
 ```rust
-#[async_trait]
 impl MemoryStore for SqliteMemoryStore {
-    async fn store(&self, entry: MemoryEntry) -> Result<MemoryId> {
-        // INSERT INTO memories (id, content, type, scope, timestamp, relevance)
-        // VALUES (?, ?, ?, ?, ?, ?)
+    fn store(
+        &self,
+        entry: MemoryEntry,
+    ) -> impl std::future::Future<Output = Result<MemoryId>> + Send {
+        async move {
+            // INSERT INTO memories (id, content, type, scope, timestamp, relevance)
+            // VALUES (?, ?, ?, ?, ?, ?)
+        }
     }
 
-    async fn retrieve(&self, query: &MemoryQuery) -> Result<Vec<MemoryEntry>> {
-        // SELECT * FROM memories WHERE scope = ? AND type = ?
-        // ORDER BY relevance DESC LIMIT ?
+    fn retrieve(
+        &self,
+        query: &MemoryQuery,
+    ) -> impl std::future::Future<Output = Result<Vec<MemoryEntry>>> + Send {
+        async move {
+            // SELECT * FROM memories WHERE scope = ? AND type = ?
+            // ORDER BY relevance DESC LIMIT ?
+        }
     }
 
-    async fn delete(&self, id: &MemoryId) -> Result<()> {
-        // DELETE FROM memories WHERE id = ?
+    fn delete(
+        &self,
+        id: &MemoryId,
+    ) -> impl std::future::Future<Output = Result<()>> + Send {
+        async move {
+            // DELETE FROM memories WHERE id = ?
+        }
     }
 
-    async fn search(&self, keywords: &[&str], limit: usize) -> Result<Vec<MemoryEntry>> {
-        // SELECT * FROM memories
-        // WHERE content LIKE '%keyword1%' OR content LIKE '%keyword2%'
-        // ORDER BY timestamp DESC LIMIT ?
+    fn search(
+        &self,
+        keywords: &[&str],
+        limit: usize,
+    ) -> impl std::future::Future<Output = Result<Vec<MemoryEntry>>> + Send {
+        async move {
+            // SELECT * FROM memories
+            // WHERE content LIKE '%keyword1%' OR content LIKE '%keyword2%'
+            // ORDER BY timestamp DESC LIMIT ?
+        }
     }
 }
 ```
@@ -189,7 +230,7 @@ permission_level = "accept_edits"     # 权限级别
 max_iterations = 20                   # 单次请求最大 Agent 循环次数
 auto_compact = true                   # 自动压缩上下文
 
-[llm]
+[model]
 provider = "openai"                   # openai / anthropic / ollama
 model = "gpt-4"                       # 模型名称
 temperature = 0.3                      # 生成温度
@@ -260,26 +301,28 @@ pub struct McpToolAdapter {
     definition: ToolDefinition,
 }
 
-#[async_trait]
 impl Tool for McpToolAdapter {
     fn definition(&self) -> &ToolDefinition {
         &self.definition
     }
 
-    async fn execute(
+    fn execute_stream(
         &self,
         input: ToolInput,
         _ctx: &ToolExecutionContext,
-    ) -> Result<ToolOutput> {
-        let response = self.client
-            .call_tool(&input.name, input.arguments)
-            .await?;
+        event_tx: AgentEventSender,
+    ) -> impl std::future::Future<Output = Result<ToolResult>> + Send {
+        async move {
+            let response = self.client
+                .call_tool(&input.name, input.arguments)
+                .await?;
 
-        Ok(ToolOutput {
-            content: response.content,
-            is_error: response.is_error,
-            metadata: response.metadata,
-        })
+            Ok(ToolResult {
+                content: response.content,
+                is_error: response.is_error,
+                metadata: response.metadata,
+            })
+        }
     }
 }
 ```
@@ -305,22 +348,22 @@ env = { GITHUB_TOKEN = "${GITHUB_TOKEN}" }
 支持多个 LLM 提供者，通过配置切换：
 
 ```toml
-[llm]
+[model]
 provider = "openai"    # 当前使用的提供者
 
-[llm.providers.openai]
+[model.providers.openai]
 api_key_env = "OPENAI_API_KEY"
 base_url = "https://api.openai.com/v1"
 model = "gpt-4"
 context_window = 128000
 
-[llm.providers.anthropic]
+[model.providers.anthropic]
 api_key_env = "ANTHROPIC_API_KEY"
 base_url = "https://api.anthropic.com"
 model = "claude-sonnet-4-6"
 context_window = 200000
 
-[llm.providers.ollama]
+[model.providers.ollama]
 base_url = "http://localhost:11434"
 model = "codellama"
 context_window = 16000
@@ -329,7 +372,7 @@ context_window = 16000
 ### Fallback 策略
 
 ```toml
-[llm.fallback]
+[model.fallback]
 enabled = true
 chain = ["openai", "anthropic", "ollama"]  # 依次尝试
 ```
