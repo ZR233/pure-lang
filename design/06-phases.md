@@ -7,11 +7,12 @@ Phase 1 (MVP)          Phase 2              Phase 3
 最小可运行版本          功能完善              生态建设
 ──────────────    ────────────────    ────────────────
  pl-core           pl-skill 完善        MCP 协议支持
- pl-tool           FileMemoryStore      向量记忆后端
- pl-memory         上下文压缩            插件市场
- pl-runtime        OS 原生沙箱          TUI 界面
- pl-compiler       子代理并行            多语言支持
- pl-agent          审计日志              Web UI
+ pl-model          FileMemoryStore      向量记忆后端
+ pl-tool           上下文压缩            插件市场
+ pl-memory         OS 原生沙箱          TUI 界面
+ pl-runtime        子代理并行            多语言支持
+ pl-compiler       审计日志              Web UI
+ pl-agent
  pl-cli
 ```
 
@@ -27,13 +28,14 @@ Phase 1 (MVP)          Phase 2              Phase 3
 
 | 优先级 | Crate | 实现范围 |
 |-------|-------|---------|
-| P0 | `pl-core` | PureError、Message、LlmProvider trait、PermissionLevel、CompletionRequest/Response |
-| P0 | `pl-tool` | Tool trait、ToolRegistry、ReadFile、WriteFile、Execute 三个内置工具 |
-| P0 | `pl-runtime` | Runtime trait、ProcessRuntime（受限子进程，跨平台） |
+| P0 | `pl-core` | PureError、Message、PermissionLevel、AgentEvent、AgentEventSender |
+| P0 | `pl-model` | ModelProvider trait、WireAdapter、ModelsManager、OpenAI 兼容实现 |
+| P0 | `pl-tool` | Tool trait（流式）、ToolRegistry、ReadFile、WriteFile、Execute 三个内置工具 |
+| P0 | `pl-runtime` | Runtime trait（流式）、ProcessRuntime（受限子进程，跨平台） |
 | P0 | `pl-memory` | MemoryStore trait、InMemoryStore、基础 ContextManager |
-| P0 | `pl-compiler` | Compiler trait、IntentAnalyzer、CodeGenerator（LLM prompt 驱动） |
-| P0 | `pl-agent` | Agent trait、PureAgent 基础 ReAct 循环 |
-| P0 | `pl-cli` | clap 参数解析、基础交互循环、事件渲染 |
+| P0 | `pl-compiler` | Compiler trait（流式）、IntentAnalyzer、CodeGenerator（LLM prompt 驱动） |
+| P0 | `pl-agent` | Agent trait（流式）、PureAgent 基础 ReAct 循环 |
+| P0 | `pl-cli` | clap 参数解析、基础交互循环、AgentEvent 流式渲染 |
 | P0 | `pure-lang` | main.rs 入口，组装所有组件 |
 | P1 | `pl-skill` | SkillMetadata、SkillManager 基础加载（从目录） |
 
@@ -42,23 +44,23 @@ Phase 1 (MVP)          Phase 2              Phase 3
 #### 阶段 A: 基础骨架
 
 1. 创建所有 crate 目录结构和 Cargo.toml
-2. 实现 `pl-core` 基础类型（PureError、Message、PermissionLevel）
-3. 实现 `LlmProvider` trait + OpenAI 兼容 API 实现
+2. 实现 `pl-core` 基础类型（PureError、Message、PermissionLevel、AgentEvent）
+3. 实现 `pl-model` 的 `ModelProvider` trait + OpenAI 兼容 API 实现（流式）
 4. 编写配置加载逻辑（pure.toml）
 
-**产出**：所有 crate 编译通过，LLM Provider 可调用
+**产出**：所有 crate 编译通过，LLM Provider 可流式调用
 
 #### 阶段 B: 工具系统
 
-5. 实现 `Tool` trait 和 `ToolRegistry`
+5. 实现 `Tool` trait（流式 execute_stream）和 `ToolRegistry`
 6. 实现 `ReadFile`、`WriteFile`、`Execute` 三个内置工具
 7. 编写工具系统单元测试
 
-**产出**：工具可注册、查询、执行
+**产出**：工具可注册、查询、流式执行
 
 #### 阶段 C: 运行时与记忆
 
-8. 实现 `Runtime` trait 和 `ProcessRuntime`
+8. 实现 `Runtime` trait（流式 execute_stream）和 `ProcessRuntime`
 9. 实现 `MemoryStore` trait 和 `InMemoryStore`
 10. 实现 `ContextManager` 基础功能（消息添加、上下文窗口构建）
 
@@ -66,17 +68,17 @@ Phase 1 (MVP)          Phase 2              Phase 3
 
 #### 阶段 D: 编译管线
 
-11. 实现 `Compiler` trait
+11. 实现 `Compiler` trait（流式 compile_stream）
 12. 实现 `IntentAnalyzer`（LLM prompt + JSON 输出解析）
 13. 实现 `CodeGenerator`（LLM prompt + 代码提取）
 14. 实现 `Planner`（LLM prompt + 任务分解）
 
-**产出**：NL 输入可被分析意图并生成代码
+**产出**：NL 输入可被分析意图并流式生成代码
 
 #### 阶段 E: Agent 循环
 
-15. 实现 `Agent` trait
-16. 实现 `PureAgent` 的 ReAct 循环
+15. 实现 `Agent` trait（流式 handle_input）
+16. 实现 `PureAgent` 的 ReAct 循环（通过 AgentEventSender 推送事件）
 17. 集成工具调用和错误恢复
 18. 集成记忆系统
 
@@ -86,7 +88,7 @@ Phase 1 (MVP)          Phase 2              Phase 3
 
 19. 实现 CLI 参数解析（clap）
 20. 实现交互式循环
-21. 实现 AgentEvent 渲染
+21. 实现 AgentEvent 流式渲染
 22. 在 `pure-lang` main.rs 中组装所有组件
 23. 端到端集成测试
 
@@ -95,12 +97,13 @@ Phase 1 (MVP)          Phase 2              Phase 3
 ### MVP 验收标准
 
 - [ ] 用户能通过命令行输入自然语言描述
-- [ ] 系统能分析意图并生成代码
-- [ ] 代码能在沙箱（受限子进程）中执行
-- [ ] 执行结果能反馈给用户
+- [ ] 系统能分析意图并流式生成代码
+- [ ] 代码能在沙箱（受限子进程）中执行，输出通过 channel 流式推送
+- [ ] 执行结果能实时反馈给用户
 - [ ] 文件读写和命令执行工具正常工作
 - [ ] 上下文能在单次会话中持续
 - [ ] 基本的权限控制生效（危险操作需确认）
+- [ ] AgentEvent stream 作为统一的进度推送通道
 
 ---
 
@@ -116,7 +119,7 @@ Phase 1 (MVP)          Phase 2              Phase 3
 | 审计日志 | pl-core | 操作审计记录 |
 | 检查点 | pl-memory | Agent 状态快照与恢复 |
 | 搜索工具 | pl-tool | 代码搜索（grep/ripgrep） |
-| Anthropic Provider | pl-core | Claude API 支持 |
+| Anthropic Provider | pl-model | Claude API 支持 |
 
 ---
 
@@ -139,7 +142,7 @@ Phase 1 (MVP)          Phase 2              Phase 3
 | 用途 | 选型 | 说明 |
 |------|------|------|
 | 异步运行时 | tokio | 业界标准，功能完善 |
-| HTTP 客户端 | reqwest | LLM API 调用 |
+| HTTP 客户端 | reqwest | LLM API 调用（stream 特性） |
 | 序列化 | serde + serde_json | 配置和数据 |
 | 错误处理 | thiserror + anyhow | 库用 thiserror，应用用 anyhow |
 | CLI 解析 | clap (derive) | 声明式参数定义 |
@@ -147,6 +150,7 @@ Phase 1 (MVP)          Phase 2              Phase 3
 | 日志 | tracing + tracing-subscriber | 结构化日志 |
 | 模板引擎 | tera | 技能提示模板渲染 |
 | 配置 | toml | 项目配置格式 |
+| 位标志 | bitflags | ModelCapabilities 等位标志集 |
 | 测试 | tokio::test + mockall | 异步测试 + mock |
 
 ---
@@ -177,9 +181,19 @@ pure-lang/
     │       ├── lib.rs
     │       ├── error.rs
     │       ├── message.rs
-    │       ├── provider.rs
+    │       ├── event.rs
     │       ├── permission.rs
     │       └── config.rs
+    │
+    ├── pl-model/               # LLM Provider 层
+    │   ├── Cargo.toml
+    │   └── src/
+    │       ├── lib.rs
+    │       ├── provider.rs
+    │       ├── wire_api.rs
+    │       ├── manager.rs
+    │       ├── capabilities.rs
+    │       └── openai.rs
     │
     ├── pl-tool/                # 工具系统
     │   ├── Cargo.toml

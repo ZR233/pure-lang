@@ -178,8 +178,19 @@ pub enum AgentEvent {
     /// 错误
     Error {
         message: String,
-        recoverable: bool,
+        severity: ErrorSeverity,
     },
+}
+
+/// 错误严重度
+#[derive(Debug, Clone, Copy)]
+pub enum ErrorSeverity {
+    /// 瞬时错误，可自动重试
+    Transient,
+    /// 可恢复错误，Agent 可自行处理
+    Recoverable,
+    /// 致命错误，需要用户介入
+    Fatal,
 }
 
 /// 输出流类型（区分 stdout 和 stderr）
@@ -205,12 +216,12 @@ pub enum PipelineStage {
 ```rust
 /// Agent 事件流 —— 系统的核心输出通道
 ///
-/// 使用 tokio channel 而非 async stream，原因：
+/// 使用 tokio::sync::broadcast 而非 mpsc，原因：
 /// 1. 支持多消费者（CLI + 日志 + 审计）
 /// 2. 天然支持背压（channel 满时生产者等待）
-/// 3. 可广播（tokio::broadcast）
-pub type AgentEventSender = tokio::sync::mpsc::Sender<AgentEvent>;
-pub type AgentEventReceiver = tokio::sync::mpsc::Receiver<AgentEvent>;
+/// 3. 广播语义（所有订阅者都收到同一事件）
+pub type AgentEventSender = tokio::sync::broadcast::Sender<AgentEvent>;
+pub type AgentEventReceiver = tokio::sync::broadcast::Receiver<AgentEvent>;
 ```
 
 ---
@@ -228,7 +239,6 @@ async fn stream(&self, req: CompletionRequest) -> Result<Box<dyn CompletionStrea
 **修正后**：删除 `complete()`，只保留流式接口。非流式场景通过 `stream().collect()` 实现。
 
 ```rust
-#[async_trait]
 pub trait ModelProvider: Debug + Send + Sync {
     fn info(&self) -> &ProviderInfo;
     fn capabilities(&self) -> ProviderCapabilities;
@@ -237,11 +247,11 @@ pub trait ModelProvider: Debug + Send + Sync {
     ///
     /// 通过 event_tx 推送 LLM 输出增量。
     /// 调用方负责消费 event_rx。
-    async fn stream_complete(
+    fn stream_complete(
         &self,
         request: CompletionRequest,
         event_tx: AgentEventSender,
-    ) -> Result<CompletionResponse>;
+    ) -> impl std::future::Future<Output = Result<CompletionResponse>> + Send;
 }
 ```
 
@@ -316,7 +326,6 @@ async fn execute(&self, input: ToolInput, ctx: &ToolExecutionContext)
 **修正后**：工具执行通过 event_tx 流式推送输出。
 
 ```rust
-#[async_trait]
 pub trait Tool: Send + Sync {
     fn definition(&self) -> &ToolDefinition;
 
@@ -324,12 +333,12 @@ pub trait Tool: Send + Sync {
     ///
     /// 工具通过 event_tx 推送进度和输出。
     /// 返回最终的 ToolResult（摘要）。
-    async fn execute_stream(
+    fn execute_stream(
         &self,
         input: ToolInput,
         ctx: &ToolExecutionContext,
         event_tx: AgentEventSender,
-    ) -> Result<ToolResult>;
+    ) -> impl std::future::Future<Output = Result<ToolResult>> + Send;
 }
 
 /// 工具最终结果（轻量摘要）
@@ -347,14 +356,14 @@ pub struct ToolResult {
 ```rust
 pub struct ExecuteTool;
 
-#[async_trait]
 impl Tool for ExecuteTool {
-    async fn execute_stream(
+    fn execute_stream(
         &self,
         input: ToolInput,
         ctx: &ToolExecutionContext,
         event_tx: AgentEventSender,
-    ) -> Result<ToolResult> {
+    ) -> impl std::future::Future<Output = Result<ToolResult>> + Send {
+        async move {
         let call_id = input.call_id.clone();
         let mut child = spawn_sandbox_command(&input, ctx)?;
 
@@ -415,6 +424,7 @@ impl Tool for ExecuteTool {
                 }
             }
         }
+        }
     }
 }
 ```
@@ -433,17 +443,16 @@ pub struct ExecutionResult {
 **修正后**：Runtime 不再返回完整输出，而是通过 channel 流式推送。
 
 ```rust
-#[async_trait]
 pub trait Runtime: Send + Sync {
     /// 流式执行命令
     ///
     /// stdout/stderr 通过 output_tx 实时推送。
     /// 返回退出码和执行时长。
-    async fn execute_stream(
+    fn execute_stream(
         &self,
         request: ExecutionRequest,
         output_tx: tokio::sync::mpsc::Sender<ProcessOutput>,
-    ) -> Result<ProcessResult>;
+    ) -> impl std::future::Future<Output = Result<ProcessResult>> + Send;
 }
 
 pub enum ProcessOutput {
@@ -452,9 +461,14 @@ pub enum ProcessOutput {
 }
 
 pub struct ProcessResult {
-    pub exit_code: i32,
+    pub exit_status: ExitStatus,
     pub duration: Duration,
-    pub timed_out: bool,
+}
+
+pub enum ExitStatus {
+    Exited(i32),
+    TimedOut,
+    Signaled(i32),
 }
 ```
 
@@ -468,7 +482,6 @@ async fn compile(&self, input: CompileInput) -> Result<CompileOutput>;
 **修正后**：编译管线通过事件流逐步推送各阶段结果。
 
 ```rust
-#[async_trait]
 pub trait Compiler: Send + Sync {
     /// 流式编译
     ///
@@ -482,11 +495,11 @@ pub trait Compiler: Send + Sync {
     /// 7. PipelineStageStarted(CodeGeneration)
     /// 8. CodeGenerated(...)
     /// 9. PipelineStageDone(CodeGeneration)
-    async fn compile_stream(
+    fn compile_stream(
         &self,
         input: CompileInput,
         event_tx: AgentEventSender,
-    ) -> Result<CompileSummary>;
+    ) -> impl std::future::Future<Output = Result<CompileSummary>> + Send;
 }
 
 /// 编译摘要（管线结束后的轻量总结）
@@ -509,17 +522,16 @@ async fn handle_input(&self, input: AgentInput) -> Result<Vec<AgentEvent>>;
 **修正后**：Agent 不再返回事件列表，而是接管 event_tx 推送。
 
 ```rust
-#[async_trait]
 pub trait Agent: Send + Sync {
     /// 处理用户输入，通过 event_tx 流式推送所有事件
-    async fn handle_input(
+    fn handle_input(
         &self,
         input: AgentInput,
         event_tx: AgentEventSender,
-    ) -> Result<AgentSummary>;
+    ) -> impl std::future::Future<Output = Result<AgentSummary>> + Send;
 
     /// 中断当前操作
-    async fn interrupt(&self) -> Result<()>;
+    fn interrupt(&self) -> impl std::future::Future<Output = Result<()>> + Send;
 }
 
 /// Agent 处理摘要

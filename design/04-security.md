@@ -194,33 +194,76 @@ pub struct ProcessRuntime {
     // 通过约束参数限制子进程行为
 }
 
-#[async_trait]
 impl Runtime for ProcessRuntime {
-    async fn execute(&self, request: ExecutionRequest) -> Result<ExecutionResult> {
-        let mut child = tokio::process::Command::new(&request.command);
-        child
-            .args(&request.args)
-            .current_dir(&request.workdir)
-            .env_clear()
-            .envs(&request.env)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+    fn execute_stream(
+        &self,
+        request: ExecutionRequest,
+        output_tx: Sender<ProcessOutput>,
+    ) -> impl std::future::Future<Output = Result<ProcessResult>> + Send {
+        async move {
+            let mut child = tokio::process::Command::new(&request.command);
+            child
+                .args(&request.args)
+                .current_dir(&request.workdir)
+                .env_clear()
+                .envs(&request.env)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
 
-        // 超时控制
-        let output = tokio::time::timeout(
-            request.timeout,
-            child.output(),
-        ).await??;
+            // 流式读取 stdout/stderr 并通过 output_tx 推送
+            let mut child = child.spawn()?;
+            let stdout = child.stdout.take().unwrap();
+            let stderr = child.stderr.take().unwrap();
 
-        Ok(ExecutionResult {
-            exit_code: output.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&output.stdout).into(),
-            stderr: String::from_utf8_lossy(&output.stderr).into(),
-            duration: elapsed,
-            timed_out: false,
-        })
+            // 流式转发输出
+            let tx_clone = output_tx.clone();
+            let stdout_handle = tokio::spawn(async move {
+                let reader = BufReader::new(stdout);
+                let mut lines = reader.lines();
+                while let Some(line) = lines.next_line().await.unwrap_or(None) {
+                    let _ = tx_clone.send(ProcessOutput::Stdout(line));
+                }
+            });
+            let tx_clone = output_tx.clone();
+            let stderr_handle = tokio::spawn(async move {
+                let reader = BufReader::new(stderr);
+                let mut lines = reader.lines();
+                while let Some(line) = lines.next_line().await.unwrap_or(None) {
+                    let _ = tx_clone.send(ProcessOutput::Stderr(line));
+                }
+            });
+
+            // 超时控制
+            let exit_status = tokio::time::timeout(
+                request.timeout,
+                child.wait(),
+            ).await;
+
+            let exit_status = match exit_status {
+                Ok(Ok(status)) => {
+                    ExitStatus::Exited(status.code().unwrap_or(-1))
+                }
+                Ok(Err(e)) => return Err(PureError::SandboxError(e.to_string())),
+                Err(_) => {
+                    // 超时，终止子进程
+                    let _ = child.kill().await;
+                    ExitStatus::TimedOut
+                }
+            };
+
+            let _ = stdout_handle.await;
+            let _ = stderr_handle.await;
+
+            Ok(ProcessResult {
+                exit_status,
+                duration: elapsed,
+            })
+        }
     }
+
+    fn is_available(&self) -> bool { true }
+    fn sandbox_type(&self) -> SandboxType { SandboxType::Process }
 }
 ```
 
