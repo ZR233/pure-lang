@@ -14,3 +14,4 @@ Thumbs.db
 
 # Environment
 .env
+/.cargo/config.local.toml

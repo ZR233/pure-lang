@@ -152,7 +152,26 @@ impl ModelProvider for OpenAiCompatibleProvider {
     }
 
     fn default_model(&self) -> &str {
-        crate::default_models::DEFAULT_MODEL
+        self.info.default_model.as_str()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deepseek_provider_uses_provider_default_model() {
+        let provider = OpenAiCompatibleProvider::new(ProviderInfo::deepseek(None)).unwrap();
+
+        assert_eq!(provider.default_model(), "deepseek-v4-flash");
+    }
+
+    #[test]
+    fn openai_provider_uses_provider_default_model() {
+        let provider = OpenAiCompatibleProvider::new(ProviderInfo::openai(None)).unwrap();
+
+        assert_eq!(provider.default_model(), "gpt-5.5");
     }
 }
 
