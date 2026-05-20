@@ -265,6 +265,21 @@ fn chat_build_body(request: &CompletionRequest) -> serde_json::Value {
         body["max_tokens"] = serde_json::json!(max_tokens);
     }
 
+    if let Some(ref reasoning) = request.reasoning {
+        if let Some(ref effort) = reasoning.effort {
+            body["reasoning_effort"] = serde_json::json!(effort);
+        }
+
+        body["thinking"] = serde_json::json!({
+            "type": match reasoning.summary {
+                Some(crate::request::ReasoningSummary::Disabled) => "disabled",
+                Some(crate::request::ReasoningSummary::Auto)
+                | Some(crate::request::ReasoningSummary::Enabled)
+                | None => "enabled",
+            }
+        });
+    }
+
     body
 }
 
@@ -380,5 +395,13 @@ mod tests {
             body["reasoning"]["effort"],
             serde_json::json!("custom-effort")
         );
+    }
+
+    #[test]
+    fn chat_body_writes_deepseek_thinking_mode() {
+        let body = WireDispatch::Chat.build_request_body(&request_with_effort("max"));
+
+        assert_eq!(body["reasoning_effort"], serde_json::json!("max"));
+        assert_eq!(body["thinking"]["type"], serde_json::json!("enabled"));
     }
 }

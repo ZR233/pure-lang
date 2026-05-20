@@ -7,6 +7,7 @@ use crate::request::TokenUsage;
 #[allow(dead_code)]
 pub struct SseStreamEvent {
     #[serde(rename = "type")]
+    #[serde(default)]
     pub kind: String,
     pub delta: Option<String>,
     pub item: Option<serde_json::Value>,
@@ -15,6 +16,30 @@ pub struct SseStreamEvent {
     pub response: Option<serde_json::Value>,
     pub summary_index: Option<i64>,
     pub content_index: Option<i64>,
+    pub choices: Option<Vec<ChatStreamChoice>>,
+    pub usage: Option<ChatTokenUsage>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct ChatStreamChoice {
+    pub delta: ChatStreamDelta,
+    pub finish_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct ChatStreamDelta {
+    pub content: Option<String>,
+    pub reasoning_content: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct ChatTokenUsage {
+    pub prompt_tokens: Option<u64>,
+    pub completion_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
 }
 
 /// 解析后的结构化流事件
@@ -50,6 +75,34 @@ pub enum StreamEvent {
 
 /// 将原始 SSE 事件解析为结构化事件
 pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
+    if let Some(choice) = event.choices.as_ref().and_then(|choices| choices.first()) {
+        if let Some(delta) = &choice.delta.reasoning_content
+            && !delta.is_empty()
+        {
+            return Some(StreamEvent::ThinkingDelta {
+                delta: delta.clone(),
+            });
+        }
+
+        if let Some(content) = &choice.delta.content
+            && !content.is_empty()
+        {
+            return Some(StreamEvent::OutputTextDelta(content.clone()));
+        }
+
+        if choice.finish_reason.is_some() {
+            let usage = event.usage.as_ref().map(|u| TokenUsage {
+                prompt_tokens: u.prompt_tokens.unwrap_or(0),
+                completion_tokens: u.completion_tokens.unwrap_or(0),
+                total_tokens: u.total_tokens.unwrap_or(0),
+            });
+            return Some(StreamEvent::Completed {
+                response_id: None,
+                usage,
+            });
+        }
+    }
+
     match event.kind.as_str() {
         "response.created" => Some(StreamEvent::Created),
 
