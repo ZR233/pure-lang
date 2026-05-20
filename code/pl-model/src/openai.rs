@@ -170,10 +170,7 @@ async fn process_sse_stream(
     use eventsource_stream::Eventsource;
 
     let stream = response.bytes_stream().eventsource();
-    let mut content_parts: Vec<String> = Vec::new();
-    let mut tool_calls: Vec<ToolCall> = Vec::new();
-    let mut tool_call_accumulators: HashMap<String, ToolCallAccumulator> = HashMap::new();
-    let mut final_usage: Option<TokenUsage> = None;
+    let mut accumulator = StreamCompletionAccumulator::default();
 
     let mut stream = std::pin::pin!(stream);
 
@@ -199,13 +196,31 @@ async fn process_sse_stream(
             None => continue,
         };
 
+        accumulator.apply(stream_event, event_tx)?;
+    }
+
+    Ok(accumulator.finish())
+}
+
+#[derive(Default)]
+struct StreamCompletionAccumulator {
+    content_parts: Vec<String>,
+    reasoning_parts: Vec<String>,
+    tool_calls: Vec<ToolCall>,
+    tool_call_accumulators: HashMap<String, ToolCallAccumulator>,
+    final_usage: Option<TokenUsage>,
+}
+
+impl StreamCompletionAccumulator {
+    fn apply(&mut self, stream_event: StreamEvent, event_tx: &AgentEventSender) -> Result<()> {
         match stream_event {
             StreamEvent::OutputTextDelta(text) => {
-                content_parts.push(text.clone());
+                self.content_parts.push(text.clone());
                 let _ = event_tx.send(AgentEvent::TextDelta { content: text });
             }
 
             StreamEvent::ThinkingDelta { delta } => {
+                self.reasoning_parts.push(delta.clone());
                 let _ = event_tx.send(AgentEvent::ThinkingDelta { content: delta });
             }
 
@@ -215,14 +230,15 @@ async fn process_sse_stream(
                 delta,
             } => {
                 let key = call_id.as_ref().unwrap_or(&item_id).clone();
-                let acc = tool_call_accumulators
-                    .entry(key.clone())
-                    .or_insert_with(|| ToolCallAccumulator {
-                        id: item_id.clone(),
-                        call_id: call_id.clone(),
-                        name: String::new(),
-                        arguments: String::new(),
-                    });
+                let acc =
+                    self.tool_call_accumulators
+                        .entry(key)
+                        .or_insert_with(|| ToolCallAccumulator {
+                            id: item_id.clone(),
+                            call_id: call_id.clone(),
+                            name: String::new(),
+                            arguments: String::new(),
+                        });
                 acc.arguments.push_str(&delta);
                 let _ = event_tx.send(AgentEvent::ToolCallDelta {
                     id: acc.id.clone(),
@@ -262,7 +278,7 @@ async fn process_sse_stream(
                         arguments: arguments.clone(),
                     });
 
-                    tool_calls.push(ToolCall {
+                    self.tool_calls.push(ToolCall {
                         id,
                         name,
                         arguments: serde_json::from_str(&arguments)
@@ -273,7 +289,7 @@ async fn process_sse_stream(
             }
 
             StreamEvent::Completed { usage, response_id } => {
-                final_usage = usage;
+                self.final_usage = usage;
                 let _ = response_id;
             }
 
@@ -283,40 +299,51 @@ async fn process_sse_stream(
 
             StreamEvent::Created => {}
         }
+
+        Ok(())
     }
 
-    // 合并累积的工具调用（如果有 delta 但没有 output_item.done）
-    for (_, acc) in tool_call_accumulators {
-        if !tool_calls.iter().any(|tc| tc.id == acc.id) {
-            tool_calls.push(ToolCall {
-                id: acc.id.clone(),
-                name: acc.name,
-                arguments: serde_json::from_str(&acc.arguments)
-                    .unwrap_or(serde_json::Value::String(acc.arguments)),
-                call_id: acc.call_id,
-            });
+    fn finish(mut self) -> CompletionResponse {
+        // 合并累积的工具调用（如果有 delta 但没有 output_item.done）
+        for (_, acc) in self.tool_call_accumulators {
+            if !self.tool_calls.iter().any(|tc| tc.id == acc.id) {
+                self.tool_calls.push(ToolCall {
+                    id: acc.id.clone(),
+                    name: acc.name,
+                    arguments: serde_json::from_str(&acc.arguments)
+                        .unwrap_or(serde_json::Value::String(acc.arguments)),
+                    call_id: acc.call_id,
+                });
+            }
+        }
+
+        let content = if self.content_parts.is_empty() {
+            None
+        } else {
+            Some(self.content_parts.join(""))
+        };
+
+        let reasoning_content = if self.reasoning_parts.is_empty() {
+            None
+        } else {
+            Some(self.reasoning_parts.join(""))
+        };
+
+        let finish_reason = if !self.tool_calls.is_empty() {
+            FinishReason::ToolCalls
+        } else {
+            FinishReason::Stop
+        };
+
+        CompletionResponse {
+            content,
+            reasoning_content,
+            tool_calls: self.tool_calls,
+            usage: self.final_usage.unwrap_or_default(),
+            finish_reason,
+            model: String::new(),
         }
     }
-
-    let content = if content_parts.is_empty() {
-        None
-    } else {
-        Some(content_parts.join(""))
-    };
-
-    let finish_reason = if !tool_calls.is_empty() {
-        FinishReason::ToolCalls
-    } else {
-        FinishReason::Stop
-    };
-
-    Ok(CompletionResponse {
-        content,
-        tool_calls,
-        usage: final_usage.unwrap_or_default(),
-        finish_reason,
-        model: String::new(),
-    })
 }
 
 struct ToolCallAccumulator {
@@ -329,6 +356,43 @@ struct ToolCallAccumulator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stream_accumulator_returns_content_and_reasoning_content() {
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
+        let mut accumulator = StreamCompletionAccumulator::default();
+
+        accumulator
+            .apply(
+                StreamEvent::ThinkingDelta {
+                    delta: "先比较整数位。".to_string(),
+                },
+                &event_tx,
+            )
+            .unwrap();
+        accumulator
+            .apply(
+                StreamEvent::OutputTextDelta("9.11 更大。".to_string()),
+                &event_tx,
+            )
+            .unwrap();
+
+        let response = accumulator.finish();
+
+        assert_eq!(response.content.as_deref(), Some("9.11 更大。"));
+        assert_eq!(
+            response.reasoning_content.as_deref(),
+            Some("先比较整数位。")
+        );
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            AgentEvent::ThinkingDelta { .. }
+        ));
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            AgentEvent::TextDelta { .. }
+        ));
+    }
 
     #[test]
     fn deepseek_provider_uses_provider_default_model() {

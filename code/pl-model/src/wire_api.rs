@@ -201,6 +201,7 @@ fn responses_parse_response(body: serde_json::Value) -> Result<CompletionRespons
 
     Ok(CompletionResponse {
         content,
+        reasoning_content: None,
         tool_calls,
         usage: usage.unwrap_or_default(),
         finish_reason,
@@ -225,10 +226,18 @@ fn chat_build_body(request: &CompletionRequest) -> serde_json::Value {
     for msg in &request.messages {
         let role = message_role_str(&msg.role);
         let text = message_content_text(&msg.content);
-        messages.push(serde_json::json!({
+        let mut message = serde_json::json!({
             "role": role,
             "content": text
-        }));
+        });
+
+        if msg.role == pl_core::MessageRole::Assistant
+            && let Some(reasoning_content) = &msg.reasoning_content
+        {
+            message["reasoning_content"] = serde_json::json!(reasoning_content);
+        }
+
+        messages.push(message);
     }
 
     let tools: Vec<serde_json::Value> = request
@@ -291,9 +300,15 @@ fn chat_parse_response(body: serde_json::Value) -> Result<CompletionResponse> {
         .and_then(|c| c.as_array())
         .and_then(|a| a.first());
 
-    let content = choice
-        .and_then(|c| c.get("message"))
+    let message = choice.and_then(|c| c.get("message"));
+
+    let content = message
         .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_str())
+        .map(String::from);
+
+    let reasoning_content = message
+        .and_then(|m| m.get("reasoning_content"))
         .and_then(|c| c.as_str())
         .map(String::from);
 
@@ -337,6 +352,7 @@ fn chat_parse_response(body: serde_json::Value) -> Result<CompletionResponse> {
 
     Ok(CompletionResponse {
         content,
+        reasoning_content,
         tool_calls,
         usage: usage.unwrap_or_default(),
         finish_reason,
@@ -355,17 +371,22 @@ mod tests {
     use pl_core::{Message, MessageContent, MessageRole};
 
     use super::*;
-    use crate::request::ReasoningConfig;
+    use crate::request::{ReasoningConfig, ReasoningSummary};
+
+    fn text_message(role: MessageRole, content: &str) -> Message {
+        Message {
+            role,
+            content: MessageContent::Text(content.to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        }
+    }
 
     fn request_with_effort(effort: &str) -> CompletionRequest {
         CompletionRequest {
             model: "gpt-5.5".to_string(),
             instructions: None,
-            messages: vec![Message {
-                role: MessageRole::User,
-                content: MessageContent::Text("hello".to_string()),
-                metadata: HashMap::new(),
-            }],
+            messages: vec![text_message(MessageRole::User, "hello")],
             tools: Vec::new(),
             tool_choice: "auto".to_string(),
             parallel_tool_calls: true,
@@ -403,5 +424,61 @@ mod tests {
 
         assert_eq!(body["reasoning_effort"], serde_json::json!("max"));
         assert_eq!(body["thinking"]["type"], serde_json::json!("enabled"));
+    }
+
+    #[test]
+    fn chat_body_writes_disabled_thinking_mode() {
+        let mut request = request_with_effort("high");
+        request.reasoning.as_mut().unwrap().summary = Some(ReasoningSummary::Disabled);
+
+        let body = WireDispatch::Chat.build_request_body(&request);
+
+        assert_eq!(body["thinking"]["type"], serde_json::json!("disabled"));
+    }
+
+    #[test]
+    fn chat_body_writes_assistant_reasoning_content() {
+        let mut request = request_with_effort("high");
+        request.messages = vec![Message {
+            role: MessageRole::Assistant,
+            content: MessageContent::Text("9.11 更大。".to_string()),
+            reasoning_content: Some("比较小数位。".to_string()),
+            metadata: HashMap::new(),
+        }];
+
+        let body = WireDispatch::Chat.build_request_body(&request);
+
+        assert_eq!(
+            body["messages"][0]["reasoning_content"],
+            serde_json::json!("比较小数位。")
+        );
+    }
+
+    #[test]
+    fn chat_parse_response_reads_reasoning_content() {
+        let response = WireDispatch::Chat
+            .parse_response(serde_json::json!({
+                "model": "deepseek-v4-flash",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "reasoning_content": "先比较整数，再比较小数。",
+                        "content": "9.11 更大。"
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 4,
+                    "completion_tokens": 8,
+                    "total_tokens": 12
+                }
+            }))
+            .unwrap();
+
+        assert_eq!(response.content.as_deref(), Some("9.11 更大。"));
+        assert_eq!(
+            response.reasoning_content.as_deref(),
+            Some("先比较整数，再比较小数。")
+        );
     }
 }
