@@ -15,6 +15,6 @@ pub use openai::OpenAiCompatibleProvider;
 pub use provider::{ModelProvider, SharedModelProvider, create_provider};
 pub use provider_info::{AuthCommand, ProviderInfo, WireApi};
 pub use request::{
-    CompletionRequest, CompletionResponse, FinishReason, ReasoningConfig, ReasoningEffort,
-    ReasoningSummary, TokenUsage, ToolCall, ToolSchema,
+    CompletionRequest, CompletionResponse, FinishReason, ReasoningConfig, ReasoningSummary,
+    TokenUsage, ToolCall, ToolSchema,
 };

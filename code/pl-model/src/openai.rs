@@ -153,7 +153,7 @@ impl ModelProvider for OpenAiCompatibleProvider {
     }
 
     fn default_model(&self) -> &str {
-        "gpt-4o"
+        "gpt-5.5"
     }
 }
 
