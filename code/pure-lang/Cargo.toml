@@ -1,0 +1,10 @@
+[package]
+name = "pure-lang"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pl-core = { workspace = true }
+pl-model = { workspace = true }
+tokio = { workspace = true }
