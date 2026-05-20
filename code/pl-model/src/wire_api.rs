@@ -118,12 +118,8 @@ fn responses_build_body(request: &CompletionRequest) -> serde_json::Value {
 
     if let Some(ref reasoning) = request.reasoning {
         let mut r = serde_json::json!({});
-        if let Some(effort) = reasoning.effort {
-            r["effort"] = serde_json::json!(match effort {
-                crate::request::ReasoningEffort::Low => "low",
-                crate::request::ReasoningEffort::Medium => "medium",
-                crate::request::ReasoningEffort::High => "high",
-            });
+        if let Some(ref effort) = reasoning.effort {
+            r["effort"] = serde_json::json!(effort);
         }
         if let Some(summary) = reasoning.summary {
             r["summary"] = serde_json::json!(match summary {
@@ -136,6 +132,56 @@ fn responses_build_body(request: &CompletionRequest) -> serde_json::Value {
     }
 
     body
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use pl_core::{Message, MessageContent, MessageRole};
+
+    use super::*;
+    use crate::request::ReasoningConfig;
+
+    fn request_with_effort(effort: &str) -> CompletionRequest {
+        CompletionRequest {
+            model: "gpt-5.5".to_string(),
+            instructions: None,
+            messages: vec![Message {
+                role: MessageRole::User,
+                content: MessageContent::Text("hello".to_string()),
+                metadata: HashMap::new(),
+            }],
+            tools: Vec::new(),
+            tool_choice: "auto".to_string(),
+            parallel_tool_calls: true,
+            temperature: None,
+            max_tokens: None,
+            reasoning: Some(ReasoningConfig {
+                effort: Some(effort.to_string()),
+                summary: None,
+            }),
+            stream: true,
+        }
+    }
+
+    #[test]
+    fn responses_body_writes_xhigh_reasoning_effort() {
+        let body = WireDispatch::Responses.build_request_body(&request_with_effort("xhigh"));
+
+        assert_eq!(body["reasoning"]["effort"], serde_json::json!("xhigh"));
+    }
+
+    #[test]
+    fn responses_body_accepts_custom_reasoning_effort() {
+        let body =
+            WireDispatch::Responses.build_request_body(&request_with_effort("custom-effort"));
+
+        assert_eq!(
+            body["reasoning"]["effort"],
+            serde_json::json!("custom-effort")
+        );
+    }
 }
 
 fn responses_parse_response(body: serde_json::Value) -> Result<CompletionResponse> {

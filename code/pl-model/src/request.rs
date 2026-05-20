@@ -75,16 +75,8 @@ pub enum FinishReason {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReasoningConfig {
-    pub effort: Option<ReasoningEffort>,
+    pub effort: Option<String>,
     pub summary: Option<ReasoningSummary>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ReasoningEffort {
-    Low,
-    Medium,
-    High,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

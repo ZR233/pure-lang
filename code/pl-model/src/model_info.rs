@@ -15,6 +15,8 @@ pub struct ModelInfo {
 
     pub default_temperature: Option<f32>,
     pub max_output_tokens: Option<u64>,
+    #[serde(default)]
+    pub reasoning_efforts: Vec<String>,
 
     pub capabilities: ModelCapabilities,
     pub input_modalities: Vec<InputModality>,
@@ -28,6 +30,7 @@ pub struct ModelInfo {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum InputModality {
     Text,
     Image,
@@ -41,6 +44,7 @@ pub struct TruncationPolicy {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum TruncationMode {
     Bytes,
     Tokens,
@@ -70,6 +74,7 @@ impl ModelInfo {
             auto_compact_token_limit: None,
             default_temperature: Some(0.3),
             max_output_tokens: Some(4096),
+            reasoning_efforts: Vec::new(),
             capabilities: ModelCapabilities::STREAMING | ModelCapabilities::FUNCTION_CALLING,
             input_modalities: vec![InputModality::Text],
             truncation_policy: TruncationPolicy {
@@ -79,5 +84,26 @@ impl ModelInfo {
             base_instructions: String::new(),
             used_fallback: true,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundled_default_models_include_gpt_55_reasoning_efforts() {
+        let models: Vec<ModelInfo> =
+            serde_json::from_str(include_str!("../models/default.json")).unwrap();
+
+        assert!(!models.is_empty());
+        let model = models.iter().find(|model| model.slug == "gpt-5.5").unwrap();
+
+        assert!(
+            model
+                .reasoning_efforts
+                .iter()
+                .any(|effort| effort == "xhigh")
+        );
     }
 }

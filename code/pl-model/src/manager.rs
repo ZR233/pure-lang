@@ -40,15 +40,7 @@ impl ModelsManager for DefaultModelsManager {
 
     fn list_models(&self) -> Vec<ModelInfo> {
         // 通过查询常见模型 slug 列表来获取可用模型
-        let known_slugs = [
-            "gpt-4o",
-            "gpt-4o-mini",
-            "o3",
-            "o4-mini",
-            "gpt-4.1",
-            "gpt-4.1-mini",
-            "gpt-4.1-nano",
-        ];
+        let known_slugs = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"];
         known_slugs
             .iter()
             .map(|slug| self.provider.model_info(slug))
