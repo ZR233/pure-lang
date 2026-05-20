@@ -32,8 +32,7 @@ impl OpenAiCompatibleProvider {
             .build()
             .map_err(|e| PureError::HttpError(e.to_string()))?;
 
-        let bundled_models: Vec<ModelInfo> =
-            serde_json::from_str(include_str!("../models/default.json")).unwrap_or_default();
+        let bundled_models = crate::default_models::default_models();
 
         Ok(Self {
             info,
@@ -153,7 +152,7 @@ impl ModelProvider for OpenAiCompatibleProvider {
     }
 
     fn default_model(&self) -> &str {
-        "gpt-5.5"
+        crate::default_models::DEFAULT_MODEL
     }
 }
 

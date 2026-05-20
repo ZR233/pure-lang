@@ -39,9 +39,7 @@ impl ModelsManager for DefaultModelsManager {
     }
 
     fn list_models(&self) -> Vec<ModelInfo> {
-        // 通过查询常见模型 slug 列表来获取可用模型
-        let known_slugs = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"];
-        known_slugs
+        crate::default_models::default_model_slugs()
             .iter()
             .map(|slug| self.provider.model_info(slug))
             .filter(|m| m.context_window.unwrap_or(0) > 0)

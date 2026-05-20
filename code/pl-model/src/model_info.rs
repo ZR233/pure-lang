@@ -86,24 +86,3 @@ impl ModelInfo {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bundled_default_models_include_gpt_55_reasoning_efforts() {
-        let models: Vec<ModelInfo> =
-            serde_json::from_str(include_str!("../models/default.json")).unwrap();
-
-        assert!(!models.is_empty());
-        let model = models.iter().find(|model| model.slug == "gpt-5.5").unwrap();
-
-        assert!(
-            model
-                .reasoning_efforts
-                .iter()
-                .any(|effort| effort == "xhigh")
-        );
-    }
-}

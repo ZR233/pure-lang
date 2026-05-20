@@ -29,7 +29,7 @@ Phase 1 (MVP)          Phase 2              Phase 3
 | 优先级 | Crate | 实现范围 |
 |-------|-------|---------|
 | P0 | `pl-core` | PureError、Message、PermissionLevel、AgentEvent、AgentEventSender |
-| P0 | `pl-model` | ModelProvider trait、WireAdapter、ModelsManager、OpenAI 兼容实现 |
+| P0 | `pl-model` | ModelProvider trait、WireDispatch/WireAdapter、ModelsManager、OpenAI 兼容实现 |
 | P0 | `pl-tool` | Tool trait（流式）、ToolRegistry、ReadFile、WriteFile、Execute 三个内置工具 |
 | P0 | `pl-runtime` | Runtime trait（流式）、ProcessRuntime（受限子进程，跨平台） |
 | P0 | `pl-memory` | MemoryStore trait、InMemoryStore、基础 ContextManager |
@@ -189,8 +189,13 @@ pure-lang/
     │   ├── Cargo.toml
     │   └── src/
     │       ├── lib.rs
+    │       ├── default_models.rs
+    │       ├── model_info.rs
     │       ├── provider.rs
+    │       ├── provider_info.rs
+    │       ├── request.rs
     │       ├── wire_api.rs
+    │       ├── sse.rs
     │       ├── manager.rs
     │       ├── capabilities.rs
     │       └── openai.rs
