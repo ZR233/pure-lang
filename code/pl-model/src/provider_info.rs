@@ -15,6 +15,8 @@ pub struct ProviderInfo {
     pub base_url: Option<String>,
     pub env_key: Option<String>,
     pub env_key_instructions: Option<String>,
+    #[serde(default)]
+    pub default_model: String,
     pub bearer_token: Option<String>,
     pub auth_command: Option<AuthCommand>,
     #[serde(default)]
@@ -52,34 +54,27 @@ impl fmt::Display for WireApi {
 }
 
 impl ProviderInfo {
+    pub fn default_provider() -> Self {
+        Self::deepseek(None)
+    }
+
     pub fn openai(base_url: Option<String>) -> Self {
         Self {
             name: "OpenAI".into(),
             base_url: base_url.or_else(|| Some("https://api.openai.com/v1".into())),
-            env_key: Some("OPENAI_API_KEY".into()),
+            env_key: Some("API_KEY_OPENAI".into()),
+            default_model: "gpt-5.5".into(),
             wire_api: WireApi::Responses,
             ..Default::default()
         }
     }
 
-    pub fn anthropic(base_url: Option<String>) -> Self {
+    pub fn deepseek(base_url: Option<String>) -> Self {
         Self {
-            name: "Anthropic".into(),
-            base_url: base_url.or_else(|| Some("https://api.anthropic.com".into())),
-            env_key: Some("ANTHROPIC_API_KEY".into()),
-            wire_api: WireApi::Chat,
-            http_headers: Some(HashMap::from([(
-                "anthropic-version".into(),
-                "2023-06-01".into(),
-            )])),
-            ..Default::default()
-        }
-    }
-
-    pub fn ollama() -> Self {
-        Self {
-            name: "Ollama".into(),
-            base_url: Some("http://localhost:11434/v1".into()),
+            name: "DeepSeek".into(),
+            base_url: base_url.or_else(|| Some("https://api.deepseek.com".into())),
+            env_key: Some("API_KEY_DEEPSEEK".into()),
+            default_model: "deepseek-v4-flash".into(),
             wire_api: WireApi::Chat,
             ..Default::default()
         }
@@ -100,5 +95,30 @@ impl ProviderInfo {
             self.stream_idle_timeout_ms
                 .unwrap_or(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_provider_is_deepseek() {
+        let info = ProviderInfo::default_provider();
+
+        assert_eq!(info.name, "DeepSeek");
+        assert_eq!(info.env_key.as_deref(), Some("API_KEY_DEEPSEEK"));
+        assert_eq!(info.default_model, "deepseek-v4-flash");
+        assert_eq!(info.wire_api, WireApi::Chat);
+    }
+
+    #[test]
+    fn openai_uses_api_key_prefix_and_default_model() {
+        let info = ProviderInfo::openai(None);
+
+        assert_eq!(info.name, "OpenAI");
+        assert_eq!(info.env_key.as_deref(), Some("API_KEY_OPENAI"));
+        assert_eq!(info.default_model, "gpt-5.5");
+        assert_eq!(info.wire_api, WireApi::Responses);
     }
 }

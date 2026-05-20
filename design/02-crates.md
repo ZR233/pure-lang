@@ -207,6 +207,7 @@ pub struct ProviderInfo {
     pub name: String,
     pub base_url: Option<String>,
     pub env_key: Option<String>,
+    pub default_model: String,
     pub bearer_token: Option<String>,
     pub auth_command: Option<AuthCommand>,
     pub wire_api: WireApi,
@@ -264,12 +265,11 @@ pub struct TokenUsage {
 `pl-model/src/default_models.rs` 直接用 Rust 结构体提供内置模型，不再维护外部 JSON 数据文件。
 
 ```rust
-pub(crate) const DEFAULT_MODEL: &str = "gpt-5.5";
 pub(crate) fn default_model_slugs() -> &'static [&'static str];
 pub(crate) fn default_models() -> Vec<ModelInfo>;
 ```
 
-当前内置模型为 `gpt-5.5`、`gpt-5.4`、`gpt-5.4-mini`、`gpt-5.4-nano`，reasoning efforts 统一为 `none`、`low`、`medium`、`high`、`xhigh`。
+当前内置模型为 `deepseek-v4-flash`、`gpt-5.5`、`gpt-5.4`、`gpt-5.4-mini`、`gpt-5.4-nano`。默认 provider 为 DeepSeek，默认模型为 `deepseek-v4-flash`。
 
 ### WireAdapter Trait
 

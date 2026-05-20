@@ -349,24 +349,19 @@ env = { GITHUB_TOKEN = "${GITHUB_TOKEN}" }
 
 ```toml
 [model]
-provider = "openai"    # 当前使用的提供者
+provider = "deepseek"  # 当前使用的提供者
+
+[model.providers.deepseek]
+api_key_env = "API_KEY_DEEPSEEK"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
+context_window = 1000000
 
 [model.providers.openai]
-api_key_env = "OPENAI_API_KEY"
+api_key_env = "API_KEY_OPENAI"
 base_url = "https://api.openai.com/v1"
-model = "gpt-4"
-context_window = 128000
-
-[model.providers.anthropic]
-api_key_env = "ANTHROPIC_API_KEY"
-base_url = "https://api.anthropic.com"
-model = "claude-sonnet-4-6"
-context_window = 200000
-
-[model.providers.ollama]
-base_url = "http://localhost:11434"
-model = "codellama"
-context_window = 16000
+model = "gpt-5.5"
+context_window = 1050000
 ```
 
 ### Fallback 策略

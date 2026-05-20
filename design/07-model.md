@@ -258,17 +258,21 @@ impl ModelInfo {
 /// Provider 的静态配置，可从 pure.toml 反序列化。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderInfo {
-    /// 显示名称（如 "OpenAI", "Anthropic", "Ollama"）
+    /// 显示名称（如 "DeepSeek", "OpenAI"）
     pub name: String,
 
     /// API Base URL
     pub base_url: Option<String>,
 
-    /// API Key 环境变量名（如 "OPENAI_API_KEY"）
+    /// API Key 环境变量名（统一使用 API_KEY_*，如 "API_KEY_DEEPSEEK"）
     pub env_key: Option<String>,
 
     /// 环境变量设置指引
     pub env_key_instructions: Option<String>,
+
+    /// 当前 provider 的默认模型
+    #[serde(default)]
+    pub default_model: String,
 
     /// 静态 Bearer Token（不推荐，优先用 env_key）
     pub bearer_token: Option<String>,
@@ -319,34 +323,28 @@ pub enum WireApi {
 
 ```rust
 impl ProviderInfo {
+    pub fn default_provider() -> Self {
+        Self::deepseek(None)
+    }
+
+    pub fn deepseek(base_url: Option<String>) -> Self {
+        Self {
+            name: "DeepSeek".into(),
+            base_url: base_url.or_else(|| Some("https://api.deepseek.com".into())),
+            env_key: Some("API_KEY_DEEPSEEK".into()),
+            default_model: "deepseek-v4-flash".into(),
+            wire_api: WireApi::Chat,
+            ..Default::default()
+        }
+    }
+
     pub fn openai(base_url: Option<String>) -> Self {
         Self {
             name: "OpenAI".into(),
             base_url: base_url.or_else(|| Some("https://api.openai.com/v1".into())),
-            env_key: Some("OPENAI_API_KEY".into()),
+            env_key: Some("API_KEY_OPENAI".into()),
+            default_model: "gpt-5.5".into(),
             wire_api: WireApi::Responses,
-            ..Default::default()
-        }
-    }
-
-    pub fn anthropic(base_url: Option<String>) -> Self {
-        Self {
-            name: "Anthropic".into(),
-            base_url: base_url.or_else(|| Some("https://api.anthropic.com".into())),
-            env_key: Some("ANTHROPIC_API_KEY".into()),
-            wire_api: WireApi::Chat,  // Anthropic 使用 Messages API
-            http_headers: Some(HashMap::from([
-                ("anthropic-version".into(), "2023-06-01".into()),
-            ])),
-            ..Default::default()
-        }
-    }
-
-    pub fn ollama() -> Self {
-        Self {
-            name: "Ollama".into(),
-            base_url: Some("http://localhost:11434/v1".into()),
-            wire_api: WireApi::Chat,
             ..Default::default()
         }
     }
@@ -560,7 +558,7 @@ impl OpenAiCompatibleProvider {
 
 impl ModelProvider for OpenAiCompatibleProvider {
     fn info(&self) -> &ProviderInfo { &self.info }
-    fn default_model(&self) -> &str { crate::default_models::DEFAULT_MODEL }
+    fn default_model(&self) -> &str { self.info.default_model.as_str() }
 
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities::all()
@@ -621,9 +619,9 @@ impl ModelProvider for OpenAiCompatibleProvider {
 }
 ```
 
-### Anthropic Provider（后续）
+### 其他 Provider（后续）
 
-`ProviderInfo::anthropic()` 已保留静态配置构造入口，但当前 `create_provider()` 仍统一返回 OpenAI 兼容 provider。独立 Anthropic Messages wire adapter 属于后续扩展。
+当前仅提供官方 DeepSeek 和官方 OpenAI 构造器。其他 OpenAI-compatible provider 仍可通过手写 `ProviderInfo` 接入。
 
 ### Provider 工厂
 
@@ -689,10 +687,8 @@ impl ModelsManager for DefaultModelsManager {
 默认模型不再使用 JSON 文件。`default_models.rs` 直接用 Rust 结构体构造模型元数据，避免 wire 字段和 Rust 类型漂移。
 
 ```rust
-pub(crate) const DEFAULT_MODEL: &str = "gpt-5.5";
-
 pub(crate) fn default_model_slugs() -> &'static [&'static str] {
-    &["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"]
+    &["deepseek-v4-flash", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"]
 }
 
 pub(crate) fn default_models() -> Vec<ModelInfo> {
@@ -706,6 +702,7 @@ pub(crate) fn default_models() -> Vec<ModelInfo> {
 
 | slug | context_window | max_output_tokens | reasoning_efforts |
 |------|----------------|-------------------|-------------------|
+| `deepseek-v4-flash` | 1,000,000 | 384,000 | `high`, `max` |
 | `gpt-5.5` | 1,050,000 | 128,000 | `none`, `low`, `medium`, `high`, `xhigh` |
 | `gpt-5.4` | 1,050,000 | 128,000 | `none`, `low`, `medium`, `high`, `xhigh` |
 | `gpt-5.4-mini` | 400,000 | 128,000 | `none`, `low`, `medium`, `high`, `xhigh` |
@@ -770,33 +767,31 @@ Responses API 中的 `reasoning.effort` 直接从 `ReasoningConfig.effort: Optio
 
 ```toml
 [model]
-provider = "openai"             # 当前使用的 provider ID
-model = "gpt-5.5"               # 默认模型
+provider = "deepseek"           # 当前使用的 provider ID
+model = "deepseek-v4-flash"     # 默认模型
 temperature = 0.3
 max_tokens = 4096
+
+[model.providers.deepseek]
+name = "DeepSeek"
+base_url = "https://api.deepseek.com"
+env_key = "API_KEY_DEEPSEEK"
+wire_api = "chat"
+default_model = "deepseek-v4-flash"
 
 [model.providers.openai]
 name = "OpenAI"
 base_url = "https://api.openai.com/v1"
-env_key = "OPENAI_API_KEY"
+env_key = "API_KEY_OPENAI"
 wire_api = "responses"
-
-[model.providers.anthropic]
-name = "Anthropic"
-base_url = "https://api.anthropic.com"
-env_key = "ANTHROPIC_API_KEY"
-wire_api = "chat"
-
-[model.providers.ollama]
-name = "Ollama"
-base_url = "http://localhost:11434/v1"
-wire_api = "chat"
+default_model = "gpt-5.5"
 
 [model.providers.custom-proxy]
 name = "My Proxy"
 base_url = "https://my-proxy.example.com/v1"
-env_key = "MY_API_KEY"
+env_key = "API_KEY_CUSTOM_PROXY"
 wire_api = "responses"
+default_model = "my-model"
 http_headers = { "X-Custom-Header" = "value" }
 
 # 可选：覆盖特定模型的上下文窗口
@@ -830,7 +825,7 @@ auto_compact_token_limit = 90000
 | 维度 | Codex | Pure-Lang | 设计理由 |
 |------|-------|-----------|---------|
 | 模块划分 | 4 个独立 crate | 独立 `pl-model` crate | 独立成 crate 避免膨胀 pl-core |
-| Provider 实现 | OpenAI + Bedrock | OpenAI 兼容 provider | 先覆盖 Responses / Chat 兼容接口 |
+| Provider 实现 | OpenAI + Bedrock | DeepSeek + OpenAI 官方构造器，底层 OpenAI 兼容 provider | 先覆盖 Responses / Chat 兼容接口 |
 | 认证方式 | OAuth + API Key + 命令行 | API Key + 命令行 + Bearer Token | 首版简化 OAuth |
 | 模型元数据 | 远端 /models API 拉取 | Rust 内置结构体 + fallback | 首版以本地为主，避免 JSON/类型漂移 |
 | 协议支持 | Responses API only | Responses + Chat | 兼容 OpenAI、Ollama、LMStudio、自定义代理 |
@@ -847,7 +842,7 @@ auto_compact_token_limit = 90000
 | P0 | `ModelCapabilities` bitflags | 替代多个 bool 字段 |
 | P0 | `ModelInfo`, `ProviderInfo`, `CompletionRequest/Response` | 核心类型 |
 | P0 | `OpenAiCompatibleProvider` + `stream_complete()` | 流式调用，OpenAI 兼容 |
-| P0 | `ProviderInfo::openai()`, `::ollama()` | 内置 provider 定义 |
+| P0 | `ProviderInfo::default_provider()`, `::deepseek()`, `::openai()` | 内置 provider 定义 |
 | P0 | `create_provider()` 工厂函数 | provider 创建入口 |
 | P0 | `default_models.rs` | Rust 结构体定义默认模型列表 |
 | P0 | `WireDispatch` + SSE 解析 | 流式响应解析 |
