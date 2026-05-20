@@ -166,3 +166,46 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chat_event(delta: serde_json::Value) -> SseStreamEvent {
+        serde_json::from_value(serde_json::json!({
+            "choices": [{
+                "delta": delta,
+                "finish_reason": null
+            }]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn process_chat_reasoning_content_as_thinking_delta() {
+        let event = chat_event(serde_json::json!({
+            "reasoning_content": "先比较整数位。"
+        }));
+
+        match process_sse_event(&event) {
+            Some(StreamEvent::ThinkingDelta { delta }) => {
+                assert_eq!(delta, "先比较整数位。");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn process_chat_content_as_output_text_delta() {
+        let event = chat_event(serde_json::json!({
+            "content": "9.11 更大。"
+        }));
+
+        match process_sse_event(&event) {
+            Some(StreamEvent::OutputTextDelta(delta)) => {
+                assert_eq!(delta, "9.11 更大。");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+}
