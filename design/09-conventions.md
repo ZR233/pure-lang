@@ -56,7 +56,7 @@ pub trait Tool: Send + Sync {
 |------|------|------|
 | 07-model `ModelInfo::supports_streaming: bool` | 单个 bool 能力标记 | 改为 `capabilities: ModelCapabilities` 位标志集 |
 | 07-model `ModelInfo::supports_vision: bool` | 同上 | 合并到 `ModelCapabilities` |
-| 07-model `CompletionRequest::stream: bool` | 已在 08 中删除 | 已修正 |
+| 07-model `CompletionRequest::stream: bool` | wire 层当前固定构造流式请求 | 保留字段，调用点不使用裸 bool 参数 |
 | 08-streaming `AgentEvent::Error::recoverable: bool` | 模糊 bool | 改为 `severity: ErrorSeverity` 枚举 |
 | 04-security `ExecutionResult::timed_out: bool` | 模糊 bool | 改为 `ExitStatus` 枚举 |
 
@@ -243,37 +243,30 @@ pub trait ModelProvider: Debug + Send + Sync {
 ///
 /// 实现者契约：
 /// - build_request_body() 产生的 JSON 必须符合目标 API 规范
-/// - parse_stream_line() 处理单行 SSE 数据，返回 None 表示跳过
+/// - parse_stream_event() 处理单个 SSE 事件，返回 None 表示跳过
 pub trait WireAdapter: Send + Sync {
     fn build_request_body(&self, request: &CompletionRequest) -> serde_json::Value;
     fn parse_response(&self, body: serde_json::Value) -> Result<CompletionResponse>;
-    fn parse_stream_line(&self, line: &str) -> Result<Option<Vec<AgentEvent>>>;
+    fn parse_stream_event(
+        &self,
+        event: &SseStreamEvent,
+    ) -> Result<Option<StreamEvent>>;
 }
 ```
 
 ### pl-model::ModelsManager
 
 ```rust
-/// 模型发现与元数据管理。
+/// 模型元数据管理。
 ///
-/// 管理 bundled + remote + cached 三级模型元数据。
-/// 通过 RefreshStrategy 控制发现行为。
+/// 当前实现通过 provider 查询单个模型，并通过内置 default_models 列出默认模型。
 ///
 /// 实现者契约：
-/// - Offline 策略必须不发起网络请求
-/// - Online 策略失败时应回退到 Offline
-/// - get_model_info() 对未知模型返回 fallback 元数据
-pub trait ModelsManager: Debug + Send + Sync {
-    fn list_models(
-        &self,
-        strategy: RefreshStrategy,
-    ) -> impl std::future::Future<Output = Vec<ModelInfo>> + Send;
-
-    fn get_model_info(
-        &self,
-        model: &str,
-    ) -> impl std::future::Future<Output = ModelInfo> + Send;
-
+/// - model_info() 对未知模型返回 fallback 元数据
+/// - list_models() 使用 default_model_slugs()
+pub trait ModelsManager: Send + Sync {
+    fn model_info(&self, slug: &str) -> ModelInfo;
+    fn list_models(&self) -> Vec<ModelInfo>;
     fn default_model(&self) -> &str;
 }
 ```

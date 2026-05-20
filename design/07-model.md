@@ -27,13 +27,13 @@ ModelProviderInfo (静态配置) ──构建──> ModelProvider (运行时实
 **2. 模型元数据的分层管理**
 
 ```
-bundled models.json (编译时嵌入)
+bundled models.rs (编译进源码)
         │
-        ├── remote /models API (运行时拉取)
+        ├── remote /models API (后续运行时拉取)
         │
-        ├── models_cache.json (磁盘缓存，TTL 5 分钟)
+        ├── models_cache.json (后续磁盘缓存)
         │
-        └── 合并策略：remote 覆盖 bundled 中相同 slug 的条目
+        └── 当前实现：默认模型由 Rust 结构体直接构造
 ```
 
 **3. Provider 工厂模式**
@@ -59,8 +59,8 @@ Codex 的 `ModelInfo` 包含远超"模型名称"的信息：
 - `context_window` / `max_context_window` — 上下文窗口
 - `auto_compact_token_limit` — 自动压缩阈值
 - `truncation_policy` — 输出截断策略（bytes/tokens）
-- `supports_parallel_tool_calls` — 是否支持并行工具调用
-- `reasoning_effort` — 推理强度级别
+- `capabilities` — 位标志能力集，包含并行工具、推理、搜索等能力
+- `reasoning_efforts` — 模型支持的推理强度字符串列表
 - `base_instructions` / `model_messages` — 模型专属系统提示
 - `shell_type` — Shell 执行方式
 - `input_modalities` — 支持的输入模态（text/image）
@@ -87,15 +87,14 @@ pl-model/
 ├── Cargo.toml
 └── src/
     ├── lib.rs              # pub use 导出
+    ├── default_models.rs   # 内置默认模型元数据（Rust 结构体）
     ├── provider.rs         # ModelProvider trait + 工厂函数
     ├── provider_info.rs    # ProviderInfo 静态配置
     ├── model_info.rs       # ModelInfo 元数据
     ├── manager.rs          # ModelsManager trait + DefaultModelsManager
     ├── capabilities.rs     # ModelCapabilities / ProviderCapabilities bitflags
-    ├── auth.rs             # 认证抽象
     ├── wire_api.rs         # WireAdapter trait
     ├── openai.rs           # OpenAI 兼容实现
-    ├── anthropic.rs        # Anthropic 实现
     └── sse.rs              # SSE 解析工具
 ```
 
@@ -167,6 +166,10 @@ pub struct ModelInfo {
     /// 最大输出 token 数
     pub max_output_tokens: Option<u64>,
 
+    /// 支持的推理强度字符串列表，仅用于模型元数据提示，不限制请求层透传
+    #[serde(default)]
+    pub reasoning_efforts: Vec<String>,
+
     // ── 能力标记（位标志集） ──
 
     /// 模型能力位标志
@@ -191,6 +194,7 @@ pub struct ModelInfo {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum InputModality {
     Text,
     Image,
@@ -204,6 +208,7 @@ pub struct TruncationPolicy {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum TruncationMode {
     Bytes,
     Tokens,
@@ -223,16 +228,6 @@ impl ModelInfo {
             .map_or(default_limit, |limit| limit.min(default_limit)))
     }
 
-    /// 便捷方法：检查是否支持流式
-    pub fn supports_streaming(&self) -> bool {
-        self.capabilities.contains(ModelCapabilities::STREAMING)
-    }
-
-    /// 便捷方法：检查是否支持并行工具调用
-    pub fn supports_parallel_tool_calls(&self) -> bool {
-        self.capabilities.contains(ModelCapabilities::PARALLEL_TOOL_CALLS)
-    }
-
     /// 为未知模型创建回退元数据
     pub fn fallback(slug: &str) -> Self {
         Self {
@@ -244,6 +239,7 @@ impl ModelInfo {
             auto_compact_token_limit: None,
             default_temperature: Some(0.3),
             max_output_tokens: Some(4096),
+            reasoning_efforts: Vec::new(),
             capabilities: ModelCapabilities::STREAMING | ModelCapabilities::FUNCTION_CALLING,
             input_modalities: vec![InputModality::Text],
             truncation_policy: TruncationPolicy { mode: TruncationMode::Bytes, limit: 10_000 },
@@ -411,30 +407,67 @@ pub trait ModelProvider: Debug + Send + Sync {
     fn default_model(&self) -> &str;
 }
 
-/// 共享 Provider 句柄
-pub type SharedModelProvider = Arc<dyn ModelProvider>;
+/// 共享 Provider 句柄。
+///
+/// 当前实现先固定为 OpenAI 兼容 provider，后续需要多 provider 时再扩展为 trait object 或 enum。
+pub type SharedModelProvider = Arc<OpenAiCompatibleProvider>;
 ```
 
 ### CompletionRequest / CompletionResponse
 
 ```rust
 /// 补全请求
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CompletionRequest {
     /// 模型标识
     pub model: String,
+
+    /// 可选系统/开发指令
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
 
     /// 消息列表
     pub messages: Vec<Message>,
 
     /// 可调用的工具 schema 列表
+    #[serde(default)]
     pub tools: Vec<ToolSchema>,
+
+    /// 工具选择策略，默认为 auto
+    #[serde(default = "default_tool_choice")]
+    pub tool_choice: String,
+
+    /// 是否允许并行工具调用
+    #[serde(default)]
+    pub parallel_tool_calls: bool,
 
     /// 生成温度
     pub temperature: Option<f32>,
 
     /// 最大输出 token
     pub max_tokens: Option<u64>,
+
+    /// 推理模型参数，effort 为任意字符串并原样透传
+    pub reasoning: Option<ReasoningConfig>,
+
+    /// 当前实现仍保留 stream 字段，Responses/Chat wire 均按流式请求构造
+    #[serde(default = "default_true")]
+    pub stream: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReasoningConfig {
+    pub effort: Option<String>,
+    pub summary: Option<ReasoningSummary>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningSummary {
+    Auto,
+    Enabled,
+    Disabled,
 }
 
 /// 补全响应
@@ -476,6 +509,8 @@ pub struct ToolCall {
     pub id: String,
     pub name: String,
     pub arguments: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<String>,
 }
 
 /// 工具 Schema（JSON Schema 格式）
@@ -493,48 +528,42 @@ pub struct ToolSchema {
 
 ### OpenAI Compatible Provider
 
-支持所有兼容 OpenAI API 的 provider（OpenAI、Azure、自定义代理）：
+当前实现只有 `OpenAiCompatibleProvider`。OpenAI、Ollama、LMStudio、自定义代理等都通过 `ProviderInfo.wire_api` 选择 Responses 或 Chat wire 格式。
 
 ```rust
 pub struct OpenAiCompatibleProvider {
     info: ProviderInfo,
     http_client: reqwest::Client,
-    wire_adapter: Box<dyn WireAdapter>,
-    models: Vec<ModelInfo>,
+    wire_dispatch: WireDispatch,
+    bundled_models: Vec<ModelInfo>,
 }
 
 impl OpenAiCompatibleProvider {
     pub fn new(info: ProviderInfo) -> Result<Self> {
-        let wire_adapter: Box<dyn WireAdapter> = match info.wire_api {
-            WireApi::Responses => Box::new(ResponsesApiAdapter),
-            WireApi::Chat => Box::new(ChatCompletionsAdapter),
+        let wire_dispatch = match info.wire_api {
+            WireApi::Responses => WireDispatch::Responses,
+            WireApi::Chat => WireDispatch::Chat,
         };
         let http_client = reqwest::Client::builder()
             .timeout(Duration::from_secs(300))
             .build()?;
+        let bundled_models = crate::default_models::default_models();
+
         Ok(Self {
             info,
             http_client,
-            wire_adapter,
-            models: Self::default_models(),
+            wire_dispatch,
+            bundled_models,
         })
-    }
-
-    fn default_models() -> Vec<ModelInfo> {
-        serde_json::from_str(include_str!("../models/openai.json"))
-            .unwrap_or_default()
     }
 }
 
 impl ModelProvider for OpenAiCompatibleProvider {
     fn info(&self) -> &ProviderInfo { &self.info }
-    fn default_model(&self) -> &str { "gpt-4" }
+    fn default_model(&self) -> &str { crate::default_models::DEFAULT_MODEL }
 
     fn capabilities(&self) -> ProviderCapabilities {
-        ProviderCapabilities::STREAMING
-            | ProviderCapabilities::FUNCTION_CALLING
-            | ProviderCapabilities::VISION
-            | ProviderCapabilities::PARALLEL_TOOL_CALLS
+        ProviderCapabilities::all()
     }
 
     fn auth_token(
@@ -567,12 +596,12 @@ impl ModelProvider for OpenAiCompatibleProvider {
         event_tx: AgentEventSender,
     ) -> impl std::future::Future<Output = Result<CompletionResponse>> + Send {
         async move {
-            let url = format!("{}/responses", self.info.base_url.as_deref().unwrap_or(""));
+            let endpoint = self.resolve_endpoint();
             let token = self.auth_token().await?;
-            let body = self.wire_adapter.build_request_body(&request);
+            let body = self.wire_dispatch.build_request_body(&request);
 
             let response = self.http_client
-                .post(&url)
+                .post(&endpoint)
                 .bearer_auth(token.as_deref().unwrap_or(""))
                 .json(&body)
                 .send()
@@ -584,7 +613,7 @@ impl ModelProvider for OpenAiCompatibleProvider {
     }
 
     fn model_info(&self, model: &str) -> ModelInfo {
-        self.models.iter()
+        self.bundled_models.iter()
             .find(|m| m.slug == model)
             .cloned()
             .unwrap_or_else(|| ModelInfo::fallback(model))
@@ -592,196 +621,59 @@ impl ModelProvider for OpenAiCompatibleProvider {
 }
 ```
 
-### Anthropic Provider
+### Anthropic Provider（后续）
 
-```rust
-pub struct AnthropicProvider {
-    info: ProviderInfo,
-    http_client: reqwest::Client,
-    wire_adapter: AnthropicMessagesAdapter,
-}
-
-impl ModelProvider for AnthropicProvider {
-    fn info(&self) -> &ProviderInfo { &self.info }
-    fn default_model(&self) -> &str { "claude-sonnet-4-6" }
-
-    fn capabilities(&self) -> ProviderCapabilities {
-        ProviderCapabilities::STREAMING
-            | ProviderCapabilities::FUNCTION_CALLING
-            | ProviderCapabilities::VISION
-            | ProviderCapabilities::PARALLEL_TOOL_CALLS
-    }
-
-    fn stream_complete(
-        &self,
-        request: CompletionRequest,
-        event_tx: AgentEventSender,
-    ) -> impl std::future::Future<Output = Result<CompletionResponse>> + Send {
-        async move {
-            let body = self.wire_adapter.build_request_body(&request);
-            let token = self.auth_token().await?;
-
-            let response = self.http_client
-                .post("https://api.anthropic.com/v1/messages")
-                .header("x-api-key", token.as_deref().unwrap_or(""))
-                .header("anthropic-version", "2023-06-01")
-                .json(&body)
-                .send()
-                .await?;
-
-            self.parse_sse_stream(response, &event_tx).await
-        }
-    }
-
-    // auth_token, model_info 等实现...
-}
-```
+`ProviderInfo::anthropic()` 已保留静态配置构造入口，但当前 `create_provider()` 仍统一返回 OpenAI 兼容 provider。独立 Anthropic Messages wire adapter 属于后续扩展。
 
 ### Provider 工厂
 
 ```rust
 /// 根据 ProviderInfo 创建对应的 ModelProvider 实例
 pub fn create_provider(info: ProviderInfo) -> Result<SharedModelProvider> {
-    let provider: SharedModelProvider = match info.name.as_str() {
-        "Anthropic" => Arc::new(AnthropicProvider::new(info)?),
-        _ => Arc::new(OpenAiCompatibleProvider::new(info)?),
-        // OpenAI、Ollama、LMStudio、自定义代理都走 OpenAI 兼容
-    };
-    Ok(provider)
+    Ok(Arc::new(OpenAiCompatibleProvider::new(info)?))
 }
 ```
 
 ---
 
-## 7.5 ModelsManager — 模型发现与缓存
+## 7.5 ModelsManager — 模型元数据管理
 
-参考 Codex 的 `ModelsManager`，管理模型元数据的发现、缓存和合并：
+当前 `ModelsManager` 是同步的轻量封装：它委托 provider 返回单个模型信息，并通过 `default_models::default_model_slugs()` 列出内置默认模型。
 
 ```rust
-/// 模型刷新策略
-#[derive(Debug, Clone, Copy)]
-pub enum RefreshStrategy {
-    /// 总是从网络拉取
-    Online,
-    /// 只用缓存
-    Offline,
-    /// 缓存未命中时拉取
-    OnlineIfUncached,
-}
-
 /// 模型管理器 trait
 ///
 /// 实现者契约：
-/// - Offline 策略必须不发起网络请求
-/// - Online 策略失败时应回退到 Offline
-/// - get_model_info() 对未知模型返回 fallback 元数据
-pub trait ModelsManager: Debug + Send + Sync {
-    fn list_models(
-        &self,
-        strategy: RefreshStrategy,
-    ) -> impl std::future::Future<Output = Vec<ModelInfo>> + Send;
-
-    fn get_model_info(
-        &self,
-        model: &str,
-    ) -> impl std::future::Future<Output = ModelInfo> + Send;
-
+/// - model_info() 对未知模型返回 fallback 元数据
+/// - list_models() 只返回内置默认模型列表
+/// - default_model() 委托 provider 的默认模型
+pub trait ModelsManager: Send + Sync {
+    fn model_info(&self, slug: &str) -> ModelInfo;
+    fn list_models(&self) -> Vec<ModelInfo>;
     fn default_model(&self) -> &str;
 }
 
-/// 基于 bundled + remote + cache 的模型管理器
 pub struct DefaultModelsManager {
-    /// Provider
     provider: SharedModelProvider,
-    /// 编译时嵌入的模型列表
-    bundled: Vec<ModelInfo>,
-    /// 运行时缓存的远程模型
-    remote: RwLock<Vec<ModelInfo>>,
-    /// 磁盘缓存路径
-    cache_path: PathBuf,
-    /// 缓存 TTL
-    cache_ttl: Duration,
 }
 
 impl DefaultModelsManager {
-    pub fn new(provider: SharedModelProvider, cache_dir: &Path) -> Self {
-        let bundled: Vec<ModelInfo> = serde_json::from_str(
-            include_str!("../models/default.json")
-        ).unwrap_or_default();
-
-        Self {
-            provider,
-            bundled,
-            remote: RwLock::new(Vec::new()),
-            cache_path: cache_dir.join("models_cache.json"),
-            cache_ttl: Duration::from_secs(300),
-        }
-    }
-
-    /// 合并 bundled + remote 模型列表（remote 覆盖同 slug 的 bundled 条目）
-    fn merge_models(bundled: &[ModelInfo], remote: &[ModelInfo]) -> Vec<ModelInfo> {
-        let mut result = bundled.to_vec();
-        for model in remote {
-            if let Some(idx) = result.iter().position(|m| m.slug == model.slug) {
-                result[idx] = model.clone();
-            } else {
-                result.push(model.clone());
-            }
-        }
-        result
+    pub fn new(provider: SharedModelProvider) -> Self {
+        Self { provider }
     }
 }
 
 impl ModelsManager for DefaultModelsManager {
-    fn list_models(
-        &self,
-        strategy: RefreshStrategy,
-    ) -> impl std::future::Future<Output = Vec<ModelInfo>> + Send {
-        async move {
-            match strategy {
-                RefreshStrategy::Offline => {
-                    let remote = self.remote.read().await.clone();
-                    Self::merge_models(&self.bundled, &remote)
-                }
-                RefreshStrategy::Online => {
-                    // 尝试远程拉取，失败回退 Offline
-                    let online_result = async {
-                        // self.provider.list_models().await
-                        todo!("调用 provider 的模型列表 API")
-                    }.await;
-
-                    match online_result {
-                        Ok(models) => {
-                            *self.remote.write().await = models.clone();
-                            // self.persist_cache(&models);
-                            Self::merge_models(&self.bundled, &models)
-                        }
-                        Err(_) => {
-                            self.list_models(RefreshStrategy::Offline).await
-                        }
-                    }
-                }
-                RefreshStrategy::OnlineIfUncached => {
-                    if !self.remote.read().await.is_empty() {
-                        self.list_models(RefreshStrategy::Offline).await
-                    } else {
-                        self.list_models(RefreshStrategy::Online).await
-                    }
-                }
-            }
-        }
+    fn model_info(&self, slug: &str) -> ModelInfo {
+        self.provider.model_info(slug)
     }
 
-    fn get_model_info(
-        &self,
-        model: &str,
-    ) -> impl std::future::Future<Output = ModelInfo> + Send {
-        async move {
-            let models = self.list_models(RefreshStrategy::OnlineIfUncached).await;
-            models.into_iter()
-                .find(|m| m.slug == model || model.starts_with(&m.slug))
-                .unwrap_or_else(|| ModelInfo::fallback(model))
-        }
+    fn list_models(&self) -> Vec<ModelInfo> {
+        crate::default_models::default_model_slugs()
+            .iter()
+            .map(|slug| self.provider.model_info(slug))
+            .filter(|model| model.context_window.unwrap_or(0) > 0)
+            .collect()
     }
 
     fn default_model(&self) -> &str {
@@ -792,34 +684,32 @@ impl ModelsManager for DefaultModelsManager {
 
 ---
 
-## 7.6 模型数据文件
+## 7.6 内置默认模型
 
-### models/default.json（编译时嵌入）
+默认模型不再使用 JSON 文件。`default_models.rs` 直接用 Rust 结构体构造模型元数据，避免 wire 字段和 Rust 类型漂移。
 
-```json
-[
-  {
-    "slug": "gpt-4",
-    "display_name": "GPT-4",
-    "context_window": 128000,
-    "max_context_window": 128000,
-    "capabilities": ["STREAMING", "FUNCTION_CALLING", "VISION", "PARALLEL_TOOL_CALLS"],
-    "input_modalities": ["text", "image"],
-    "truncation_policy": { "mode": "bytes", "limit": 10000 },
-    "base_instructions": ""
-  },
-  {
-    "slug": "claude-sonnet-4-6",
-    "display_name": "Claude Sonnet 4.6",
-    "context_window": 200000,
-    "max_context_window": 200000,
-    "capabilities": ["STREAMING", "FUNCTION_CALLING", "VISION", "PARALLEL_TOOL_CALLS"],
-    "input_modalities": ["text", "image"],
-    "truncation_policy": { "mode": "bytes", "limit": 10000 },
-    "base_instructions": ""
-  }
-]
+```rust
+pub(crate) const DEFAULT_MODEL: &str = "gpt-5.5";
+
+pub(crate) fn default_model_slugs() -> &'static [&'static str] {
+    &["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"]
+}
+
+pub(crate) fn default_models() -> Vec<ModelInfo> {
+    // 直接构造 ModelInfo，统一包含:
+    // context_window, max_output_tokens, capabilities,
+    // input_modalities, truncation_policy, reasoning_efforts
+}
 ```
+
+当前内置模型：
+
+| slug | context_window | max_output_tokens | reasoning_efforts |
+|------|----------------|-------------------|-------------------|
+| `gpt-5.5` | 1,050,000 | 128,000 | `none`, `low`, `medium`, `high`, `xhigh` |
+| `gpt-5.4` | 1,050,000 | 128,000 | `none`, `low`, `medium`, `high`, `xhigh` |
+| `gpt-5.4-mini` | 400,000 | 128,000 | `none`, `low`, `medium`, `high`, `xhigh` |
+| `gpt-5.4-nano` | 400,000 | 128,000 | `none`, `low`, `medium`, `high`, `xhigh` |
 
 ---
 
@@ -833,16 +723,15 @@ impl ModelsManager for DefaultModelsManager {
                 │     (内部统一格式)             │
                 └──────────┬──────────────────┘
                            │
-              ┌────────────┼────────────────┐
-              │            │                │
-    ┌─────────▼──┐  ┌──────▼──────┐  ┌─────▼──────┐
-    │ Responses   │  │   Chat      │  │  Anthropic │
-    │ API Format  │  │   Completions│  │  Messages  │
-    │             │  │   Format    │  │  Format    │
-    └─────────┬──┘  └──────┬──────┘  └─────┬──────┘
-              │            │                │
-              ▼            ▼                ▼
-         OpenAI API   Ollama/LMStudio   Anthropic API
+              ┌────────────┴───────────────┐
+              │                            │
+    ┌─────────▼──┐              ┌──────────▼──────┐
+    │ Responses   │              │ Chat Completions │
+    │ API Format  │              │ API Format       │
+    └─────────┬──┘              └──────────┬──────┘
+              │                            │
+              ▼                            ▼
+         OpenAI API                 Ollama/LMStudio
 ```
 
 ```rust
@@ -853,19 +742,25 @@ impl ModelsManager for DefaultModelsManager {
 ///
 /// 实现者契约：
 /// - build_request_body() 产生的 JSON 必须符合目标 API 规范
-/// - parse_stream_line() 处理单行 SSE 数据，返回 None 表示跳过
+/// - parse_stream_event() 处理单个 SSE 事件，返回 None 表示跳过
 pub trait WireAdapter: Send + Sync {
     fn build_request_body(&self, request: &CompletionRequest) -> serde_json::Value;
     fn parse_response(&self, body: serde_json::Value) -> Result<CompletionResponse>;
-    fn parse_stream_line(&self, line: &str) -> Result<Option<Vec<AgentEvent>>>;
+    fn parse_stream_event(
+        &self,
+        event: &SseStreamEvent,
+    ) -> Result<Option<StreamEvent>>;
 }
 
-struct ResponsesApiAdapter;       // /v1/responses
-struct ChatCompletionsAdapter;    // /v1/chat/completions
-struct AnthropicMessagesAdapter;  // /v1/messages
+pub enum WireDispatch {
+    Responses,
+    Chat,
+}
 ```
 
-这样每个 provider 只需选择对应的 adapter，不需要自己处理格式转换。
+当前实现用 `WireDispatch` 在 Responses API 和 Chat Completions API 之间分发，避免为每种 wire 格式创建独立对象。
+
+Responses API 中的 `reasoning.effort` 直接从 `ReasoningConfig.effort: Option<String>` 写入 JSON，允许 `none`、`xhigh` 或 provider 自定义字符串原样透传。Chat adapter 当前不写入 `reasoning_effort`。
 
 ---
 
@@ -876,7 +771,7 @@ struct AnthropicMessagesAdapter;  // /v1/messages
 ```toml
 [model]
 provider = "openai"             # 当前使用的 provider ID
-model = "gpt-4"                 # 默认模型
+model = "gpt-5.5"               # 默认模型
 temperature = 0.3
 max_tokens = 4096
 
@@ -905,7 +800,7 @@ wire_api = "responses"
 http_headers = { "X-Custom-Header" = "value" }
 
 # 可选：覆盖特定模型的上下文窗口
-[model.overrides.gpt-4]
+[model.overrides.gpt-5.5]
 context_window = 100000
 auto_compact_token_limit = 90000
 ```
@@ -923,7 +818,7 @@ auto_compact_token_limit = 90000
   │
   ├── create_provider(info) → SharedModelProvider
   │
-  ├── DefaultModelsManager::new(provider, cache_dir)
+  ├── DefaultModelsManager::new(provider)
   │
   └── 注入到 Agent 和 Compiler
 ```
@@ -935,11 +830,11 @@ auto_compact_token_limit = 90000
 | 维度 | Codex | Pure-Lang | 设计理由 |
 |------|-------|-----------|---------|
 | 模块划分 | 4 个独立 crate | 独立 `pl-model` crate | 独立成 crate 避免膨胀 pl-core |
-| Provider 实现 | OpenAI + Bedrock | OpenAI兼容 + Anthropic | 优先支持主流 provider |
+| Provider 实现 | OpenAI + Bedrock | OpenAI 兼容 provider | 先覆盖 Responses / Chat 兼容接口 |
 | 认证方式 | OAuth + API Key + 命令行 | API Key + 命令行 + Bearer Token | 首版简化 OAuth |
-| 模型元数据 | 远端 /models API 拉取 | bundled JSON + 远端可选 | 首版以本地为主，降低网络依赖 |
-| 协议支持 | Responses API only | Responses + Chat + Anthropic | 兼容更多 provider |
-| 缓存策略 | JSON 文件 + TTL | JSON 文件 + TTL | 相同 |
+| 模型元数据 | 远端 /models API 拉取 | Rust 内置结构体 + fallback | 首版以本地为主，避免 JSON/类型漂移 |
+| 协议支持 | Responses API only | Responses + Chat | 兼容 OpenAI、Ollama、LMStudio、自定义代理 |
+| 缓存策略 | JSON 文件 + TTL | 暂无远端缓存 | 远端发现后再引入 |
 | 上下文管理 | 服务端远程压缩 | 本地压缩 | 简化首版 |
 | 流式模式 | 服务端流式 | AgentEvent 统一流式 | 全系统统一事件流 |
 
@@ -954,11 +849,12 @@ auto_compact_token_limit = 90000
 | P0 | `OpenAiCompatibleProvider` + `stream_complete()` | 流式调用，OpenAI 兼容 |
 | P0 | `ProviderInfo::openai()`, `::ollama()` | 内置 provider 定义 |
 | P0 | `create_provider()` 工厂函数 | provider 创建入口 |
-| P0 | bundled models JSON | 编译时嵌入默认模型列表 |
-| P0 | `WireAdapter` trait + SSE 解析 | 流式响应解析 |
+| P0 | `default_models.rs` | Rust 结构体定义默认模型列表 |
+| P0 | `WireDispatch` + SSE 解析 | 流式响应解析 |
 | P1 | `AnthropicProvider` | Anthropic Messages API |
-| P1 | `DefaultModelsManager` + 缓存 | 模型发现与缓存 |
+| P1 | `DefaultModelsManager` | 默认模型列表与 fallback 查询 |
 | P1 | `AuthCommand` 支持 | 外部命令获取 token |
 | P2 | 远端 /models 拉取 | 运行时模型发现 |
+| P2 | 模型缓存 | 远端模型发现后的磁盘缓存 |
 | P2 | 模型配置覆盖 | pure.toml 中的 model overrides |
 | P2 | Fallback 策略 | 多 provider 自动切换 |

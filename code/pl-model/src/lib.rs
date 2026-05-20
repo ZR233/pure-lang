@@ -1,4 +1,5 @@
 mod capabilities;
+mod default_models;
 mod manager;
 mod model_info;
 mod openai;

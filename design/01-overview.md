@@ -147,7 +147,7 @@ NL 输入不是一步到位地转换为代码，而是经过多个阶段逐步�
 | Trait            | 所在 Crate  | 职责                 |
 | ---------------- | ----------- | -------------------- |
 | `ModelProvider`  | pl-model    | LLM 流式调用抽象     |
-| `ModelsManager`  | pl-model    | 模型发现与缓存       |
+| `ModelsManager`  | pl-model    | 模型元数据管理       |
 | `Tool`           | pl-tool     | 工具定义与流式执行   |
 | `MemoryStore`    | pl-memory   | 记忆存储后端         |
 | `Runtime`        | pl-runtime  | 沙箱流式执行环境     |

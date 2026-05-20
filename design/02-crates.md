@@ -187,18 +187,33 @@ bitflags::bitflags! {
 }
 
 pub struct ModelInfo {
-    pub id: String,
-    pub name: String,
-    pub provider: String,
-    pub context_window: usize,
-    pub max_output_tokens: usize,
+    pub slug: String,
+    pub display_name: String,
+    pub description: Option<String>,
+    pub context_window: Option<u64>,
+    pub max_context_window: Option<u64>,
+    pub auto_compact_token_limit: Option<u64>,
+    pub default_temperature: Option<f32>,
+    pub max_output_tokens: Option<u64>,
+    pub reasoning_efforts: Vec<String>,
     pub capabilities: ModelCapabilities,
+    pub input_modalities: Vec<InputModality>,
+    pub truncation_policy: TruncationPolicy,
+    pub base_instructions: String,
+    pub used_fallback: bool,
 }
 
 pub struct ProviderInfo {
     pub name: String,
-    pub base_url: String,
-    pub api_version: Option<String>,
+    pub base_url: Option<String>,
+    pub env_key: Option<String>,
+    pub bearer_token: Option<String>,
+    pub auth_command: Option<AuthCommand>,
+    pub wire_api: WireApi,
+    pub http_headers: Option<HashMap<String, String>>,
+    pub request_max_retries: Option<u32>,
+    pub stream_max_retries: Option<u32>,
+    pub stream_idle_timeout_ms: Option<u64>,
 }
 
 bitflags::bitflags! {
@@ -213,24 +228,48 @@ bitflags::bitflags! {
 
 pub struct CompletionRequest {
     pub model: String,
+    pub instructions: Option<String>,
     pub messages: Vec<Message>,
     pub tools: Vec<ToolSchema>,
-    pub max_tokens: Option<usize>,
+    pub tool_choice: String,
+    pub parallel_tool_calls: bool,
     pub temperature: Option<f32>,
+    pub max_tokens: Option<u64>,
+    pub reasoning: Option<ReasoningConfig>,
+    pub stream: bool,
+}
+
+pub struct ReasoningConfig {
+    pub effort: Option<String>,
+    pub summary: Option<ReasoningSummary>,
 }
 
 pub struct CompletionResponse {
     pub content: Option<String>,
     pub tool_calls: Vec<ToolCall>,
     pub usage: TokenUsage,
+    pub finish_reason: FinishReason,
     pub model: String,
 }
 
 pub struct TokenUsage {
-    pub prompt_tokens: usize,
-    pub completion_tokens: usize,
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub total_tokens: u64,
 }
 ```
+
+### 内置默认模型
+
+`pl-model/src/default_models.rs` 直接用 Rust 结构体提供内置模型，不再维护外部 JSON 数据文件。
+
+```rust
+pub(crate) const DEFAULT_MODEL: &str = "gpt-5.5";
+pub(crate) fn default_model_slugs() -> &'static [&'static str];
+pub(crate) fn default_models() -> Vec<ModelInfo>;
+```
+
+当前内置模型为 `gpt-5.5`、`gpt-5.4`、`gpt-5.4-mini`、`gpt-5.4-nano`，reasoning efforts 统一为 `none`、`low`、`medium`、`high`、`xhigh`。
 
 ### WireAdapter Trait
 
@@ -242,43 +281,36 @@ pub struct TokenUsage {
 ///
 /// 实现者契约：
 /// - build_request_body() 产生的 JSON 必须符合目标 API 规范
-/// - parse_stream_line() 处理单行 SSE 数据，返回 None 表示跳过
+/// - parse_stream_event() 处理单个 SSE 事件，返回 None 表示跳过
 pub trait WireAdapter: Send + Sync {
     fn build_request_body(&self, request: &CompletionRequest) -> serde_json::Value;
     fn parse_response(&self, body: serde_json::Value) -> Result<CompletionResponse>;
-    fn parse_stream_line(&self, line: &str) -> Result<Option<Vec<AgentEvent>>>;
+    fn parse_stream_event(
+        &self,
+        event: &SseStreamEvent,
+    ) -> Result<Option<StreamEvent>>;
+}
+
+pub enum WireDispatch {
+    Responses,
+    Chat,
 }
 ```
 
 ### ModelsManager Trait
 
 ```rust
-/// 模型发现与元数据管理。
+/// 模型元数据管理。
 ///
-/// 管理 bundled + remote + cached 三级模型元数据。
-/// 通过 RefreshStrategy 控制发现行为。
+/// 当前实现通过 provider 查询单个模型，并通过内置 default_models 列出默认模型。
 ///
 /// 实现者契约：
-/// - Offline 策略必须不发起网络请求
-/// - Online 策略失败时应回退到 Offline
-/// - get_model_info() 对未知模型返回 fallback 元数据
-pub trait ModelsManager: Debug + Send + Sync {
-    fn list_models(
-        &self,
-        strategy: RefreshStrategy,
-    ) -> impl std::future::Future<Output = Vec<ModelInfo>> + Send;
-
-    fn get_model_info(
-        &self,
-        model: &str,
-    ) -> impl std::future::Future<Output = ModelInfo> + Send;
-
+/// - model_info() 对未知模型返回 fallback 元数据
+/// - list_models() 使用 default_model_slugs()
+pub trait ModelsManager: Send + Sync {
+    fn model_info(&self, slug: &str) -> ModelInfo;
+    fn list_models(&self) -> Vec<ModelInfo>;
     fn default_model(&self) -> &str;
-}
-
-pub enum RefreshStrategy {
-    Offline,
-    Online,
 }
 ```
 
