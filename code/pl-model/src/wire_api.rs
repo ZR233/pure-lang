@@ -50,6 +50,26 @@ impl WireDispatch {
     }
 }
 
+fn message_role_str(role: &pl_core::MessageRole) -> &str {
+    match role {
+        pl_core::MessageRole::System => "system",
+        pl_core::MessageRole::User => "user",
+        pl_core::MessageRole::Assistant => "assistant",
+        pl_core::MessageRole::Tool => "tool",
+    }
+}
+
+fn message_content_text(content: &pl_core::MessageContent) -> String {
+    match content {
+        pl_core::MessageContent::Text(t) => t.clone(),
+        pl_core::MessageContent::MultiPart(parts) => parts
+            .iter()
+            .map(|p| p.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }
+}
+
 fn responses_build_body(request: &CompletionRequest) -> serde_json::Value {
     let mut input = Vec::new();
 
@@ -62,20 +82,8 @@ fn responses_build_body(request: &CompletionRequest) -> serde_json::Value {
     }
 
     for msg in &request.messages {
-        let role = match msg.role {
-            pl_core::MessageRole::System => "system",
-            pl_core::MessageRole::User => "user",
-            pl_core::MessageRole::Assistant => "assistant",
-            pl_core::MessageRole::Tool => "tool",
-        };
-        let text = match &msg.content {
-            pl_core::MessageContent::Text(t) => t.clone(),
-            pl_core::MessageContent::MultiPart(parts) => parts
-                .iter()
-                .map(|p| p.text.as_str())
-                .collect::<Vec<_>>()
-                .join("\n"),
-        };
+        let role = message_role_str(&msg.role);
+        let text = message_content_text(&msg.content);
         input.push(serde_json::json!({
             "type": "message",
             "role": role,
@@ -132,56 +140,6 @@ fn responses_build_body(request: &CompletionRequest) -> serde_json::Value {
     }
 
     body
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::HashMap;
-
-    use pl_core::{Message, MessageContent, MessageRole};
-
-    use super::*;
-    use crate::request::ReasoningConfig;
-
-    fn request_with_effort(effort: &str) -> CompletionRequest {
-        CompletionRequest {
-            model: "gpt-5.5".to_string(),
-            instructions: None,
-            messages: vec![Message {
-                role: MessageRole::User,
-                content: MessageContent::Text("hello".to_string()),
-                metadata: HashMap::new(),
-            }],
-            tools: Vec::new(),
-            tool_choice: "auto".to_string(),
-            parallel_tool_calls: true,
-            temperature: None,
-            max_tokens: None,
-            reasoning: Some(ReasoningConfig {
-                effort: Some(effort.to_string()),
-                summary: None,
-            }),
-            stream: true,
-        }
-    }
-
-    #[test]
-    fn responses_body_writes_xhigh_reasoning_effort() {
-        let body = WireDispatch::Responses.build_request_body(&request_with_effort("xhigh"));
-
-        assert_eq!(body["reasoning"]["effort"], serde_json::json!("xhigh"));
-    }
-
-    #[test]
-    fn responses_body_accepts_custom_reasoning_effort() {
-        let body =
-            WireDispatch::Responses.build_request_body(&request_with_effort("custom-effort"));
-
-        assert_eq!(
-            body["reasoning"]["effort"],
-            serde_json::json!("custom-effort")
-        );
-    }
 }
 
 fn responses_parse_response(body: serde_json::Value) -> Result<CompletionResponse> {
@@ -244,11 +202,7 @@ fn responses_parse_response(body: serde_json::Value) -> Result<CompletionRespons
     Ok(CompletionResponse {
         content,
         tool_calls,
-        usage: usage.unwrap_or(TokenUsage {
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            total_tokens: 0,
-        }),
+        usage: usage.unwrap_or_default(),
         finish_reason,
         model: body
             .get("model")
@@ -269,20 +223,8 @@ fn chat_build_body(request: &CompletionRequest) -> serde_json::Value {
     }
 
     for msg in &request.messages {
-        let role = match msg.role {
-            pl_core::MessageRole::System => "system",
-            pl_core::MessageRole::User => "user",
-            pl_core::MessageRole::Assistant => "assistant",
-            pl_core::MessageRole::Tool => "tool",
-        };
-        let text = match &msg.content {
-            pl_core::MessageContent::Text(t) => t.clone(),
-            pl_core::MessageContent::MultiPart(parts) => parts
-                .iter()
-                .map(|p| p.text.as_str())
-                .collect::<Vec<_>>()
-                .join("\n"),
-        };
+        let role = message_role_str(&msg.role);
+        let text = message_content_text(&msg.content);
         messages.push(serde_json::json!({
             "role": role,
             "content": text
@@ -381,11 +323,7 @@ fn chat_parse_response(body: serde_json::Value) -> Result<CompletionResponse> {
     Ok(CompletionResponse {
         content,
         tool_calls,
-        usage: usage.unwrap_or(TokenUsage {
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            total_tokens: 0,
-        }),
+        usage: usage.unwrap_or_default(),
         finish_reason,
         model: body
             .get("model")
@@ -393,4 +331,54 @@ fn chat_parse_response(body: serde_json::Value) -> Result<CompletionResponse> {
             .unwrap_or("")
             .to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use pl_core::{Message, MessageContent, MessageRole};
+
+    use super::*;
+    use crate::request::ReasoningConfig;
+
+    fn request_with_effort(effort: &str) -> CompletionRequest {
+        CompletionRequest {
+            model: "gpt-5.5".to_string(),
+            instructions: None,
+            messages: vec![Message {
+                role: MessageRole::User,
+                content: MessageContent::Text("hello".to_string()),
+                metadata: HashMap::new(),
+            }],
+            tools: Vec::new(),
+            tool_choice: "auto".to_string(),
+            parallel_tool_calls: true,
+            temperature: None,
+            max_tokens: None,
+            reasoning: Some(ReasoningConfig {
+                effort: Some(effort.to_string()),
+                summary: None,
+            }),
+            stream: true,
+        }
+    }
+
+    #[test]
+    fn responses_body_writes_xhigh_reasoning_effort() {
+        let body = WireDispatch::Responses.build_request_body(&request_with_effort("xhigh"));
+
+        assert_eq!(body["reasoning"]["effort"], serde_json::json!("xhigh"));
+    }
+
+    #[test]
+    fn responses_body_accepts_custom_reasoning_effort() {
+        let body =
+            WireDispatch::Responses.build_request_body(&request_with_effort("custom-effort"));
+
+        assert_eq!(
+            body["reasoning"]["effort"],
+            serde_json::json!("custom-effort")
+        );
+    }
 }

@@ -71,29 +71,7 @@ impl ModelProvider for OpenAiCompatibleProvider {
         let bearer = self.info.bearer_token.clone();
         let auth_cmd = self.info.auth_command.clone();
         let env_key = self.info.env_key.clone();
-        async move {
-            if let Some(token) = bearer {
-                return Ok(Some(token));
-            }
-            if let Some(cmd) = auth_cmd {
-                let output = tokio::time::timeout(
-                    Duration::from_millis(cmd.timeout_ms),
-                    tokio::process::Command::new(&cmd.command)
-                        .args(&cmd.args)
-                        .output(),
-                )
-                .await
-                .map_err(|_| PureError::LlmError("auth command timed out".into()))?
-                .map_err(|e| PureError::LlmError(format!("auth command failed: {e}")))?;
-                return Ok(Some(
-                    String::from_utf8_lossy(&output.stdout).trim().to_string(),
-                ));
-            }
-            if let Some(env_key) = env_key {
-                return Ok(std::env::var(env_key).ok());
-            }
-            Ok(None)
-        }
+        get_auth_token(bearer, auth_cmd, env_key)
     }
 
     fn stream_complete(
@@ -153,25 +131,6 @@ impl ModelProvider for OpenAiCompatibleProvider {
 
     fn default_model(&self) -> &str {
         self.info.default_model.as_str()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn deepseek_provider_uses_provider_default_model() {
-        let provider = OpenAiCompatibleProvider::new(ProviderInfo::deepseek(None)).unwrap();
-
-        assert_eq!(provider.default_model(), "deepseek-v4-flash");
-    }
-
-    #[test]
-    fn openai_provider_uses_provider_default_model() {
-        let provider = OpenAiCompatibleProvider::new(ProviderInfo::openai(None)).unwrap();
-
-        assert_eq!(provider.default_model(), "gpt-5.5");
     }
 }
 
@@ -354,11 +313,7 @@ async fn process_sse_stream(
     Ok(CompletionResponse {
         content,
         tool_calls,
-        usage: final_usage.unwrap_or(TokenUsage {
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            total_tokens: 0,
-        }),
+        usage: final_usage.unwrap_or_default(),
         finish_reason,
         model: String::new(),
     })
@@ -369,4 +324,23 @@ struct ToolCallAccumulator {
     call_id: Option<String>,
     name: String,
     arguments: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deepseek_provider_uses_provider_default_model() {
+        let provider = OpenAiCompatibleProvider::new(ProviderInfo::deepseek(None)).unwrap();
+
+        assert_eq!(provider.default_model(), "deepseek-v4-flash");
+    }
+
+    #[test]
+    fn openai_provider_uses_provider_default_model() {
+        let provider = OpenAiCompatibleProvider::new(ProviderInfo::openai(None)).unwrap();
+
+        assert_eq!(provider.default_model(), "gpt-5.5");
+    }
 }
