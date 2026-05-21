@@ -69,7 +69,10 @@ impl PureCore {
 
             let completion_request = CompletionRequest {
                 model: model.clone(),
-                instructions: Some(request.mode.instructions().to_string()),
+                instructions: Some(format_instructions(
+                    request.mode.instructions(),
+                    request.workspace_instructions.as_deref(),
+                )),
                 messages: session.messages().to_vec(),
                 tools: Vec::new(),
                 tool_choice: "auto".to_string(),
@@ -111,6 +114,15 @@ impl PureCore {
     }
 }
 
+fn format_instructions(base: &str, workspace: Option<&str>) -> String {
+    match workspace {
+        Some(content) if !content.trim().is_empty() => {
+            format!("{base}\n\n# 项目记忆\n{content}")
+        }
+        _ => base.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,5 +137,24 @@ mod tests {
 
         assert_eq!(core.provider.default_model(), "deepseek-v4-flash");
         assert_eq!(core.reasoning_effort.unwrap().as_str(), "high");
+    }
+
+    #[test]
+    fn format_instructions_without_workspace() {
+        assert_eq!(format_instructions("base", None), "base");
+    }
+
+    #[test]
+    fn format_instructions_with_workspace() {
+        assert_eq!(
+            format_instructions("base", Some("project rules")),
+            "base\n\n# 项目记忆\nproject rules"
+        );
+    }
+
+    #[test]
+    fn format_instructions_ignores_empty_workspace() {
+        assert_eq!(format_instructions("base", Some("")), "base");
+        assert_eq!(format_instructions("base", Some("   ")), "base");
     }
 }

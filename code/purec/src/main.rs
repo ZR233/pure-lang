@@ -1,3 +1,6 @@
+use std::path::Path;
+use std::path::PathBuf;
+
 use clap::CommandFactory;
 use clap::Parser;
 use clap::Subcommand;
@@ -13,6 +16,7 @@ async fn main() -> pl_core::Result<()> {
         command,
         plan,
         auto,
+        workspace,
         prompt,
     } = PurecArgs::parse();
     if command.is_none() && prompt.is_empty() {
@@ -26,6 +30,7 @@ async fn main() -> pl_core::Result<()> {
                 command: None,
                 plan,
                 auto,
+                workspace,
                 prompt,
             })
             .await
@@ -46,7 +51,13 @@ fn run_without_args() -> pl_core::Result<()> {
 
 async fn run_prompt(args: PurecArgs) -> pl_core::Result<()> {
     ensure_prompt(&args)?;
-    let request = TurnRequest::new(args.prompt_text(), args.compile_mode());
+    let mut request = TurnRequest::new(args.prompt_text(), args.compile_mode());
+
+    if let Some(workspace_dir) = &args.workspace {
+        let instructions = load_workspace_instructions(workspace_dir)?;
+        request = request.with_workspace_instructions(instructions);
+    }
+
     let store = ConfigStore::default_app()?;
     let Some(config) = load_prompt_config(&args, &store)? else {
         return Ok(());
@@ -117,6 +128,14 @@ struct PurecArgs {
     #[arg(long, help = "生成自动执行导向的编译方案，但当前版本仍不会执行命令")]
     auto: bool,
 
+    #[arg(
+        short,
+        long,
+        value_name = "DIR",
+        help = "工作区目录，读取 DIR/Agents.md 作为项目记忆"
+    )]
+    workspace: Option<PathBuf>,
+
     #[arg(value_name = "PROMPT", num_args = 1..)]
     prompt: Vec<String>,
 }
@@ -157,6 +176,23 @@ fn ensure_prompt(args: &PurecArgs) -> pl_core::Result<()> {
         return Err(PureError::ConfigError("prompt is required".to_string()));
     }
     Ok(())
+}
+
+fn load_workspace_instructions(workspace_dir: &Path) -> pl_core::Result<String> {
+    if !workspace_dir.is_dir() {
+        return Err(PureError::ConfigError(format!(
+            "workspace directory not found: {}",
+            workspace_dir.display()
+        )));
+    }
+
+    let agents_file = workspace_dir.join("Agents.md");
+    if !agents_file.is_file() {
+        return Ok(String::new());
+    }
+
+    let content = std::fs::read_to_string(&agents_file)?;
+    Ok(content)
 }
 
 fn should_run_first_run_tui(command: &Option<PurecCommand>, config_exists: bool) -> bool {
@@ -252,5 +288,57 @@ mod tests {
         assert!(should_run_first_run_tui(&prompt_args.command, false));
         assert!(!should_run_first_run_tui(&prompt_args.command, true));
         assert!(!should_run_first_run_tui(&config_args.command, false));
+    }
+
+    #[test]
+    fn parses_workspace_short_flag() {
+        let args = parse(&["purec", "-w", "/tmp/project", "build app"]);
+
+        assert_eq!(args.workspace.as_deref(), Some(Path::new("/tmp/project")));
+        assert_eq!(args.prompt_text(), "build app");
+    }
+
+    #[test]
+    fn parses_workspace_long_flag() {
+        let args = parse(&["purec", "--workspace", "/tmp/project", "build app"]);
+
+        assert_eq!(args.workspace.as_deref(), Some(Path::new("/tmp/project")));
+    }
+
+    #[test]
+    fn workspace_defaults_to_none() {
+        let args = parse(&["purec", "build app"]);
+
+        assert!(args.workspace.is_none());
+    }
+
+    #[test]
+    fn load_workspace_rejects_missing_directory() {
+        let result = load_workspace_instructions(Path::new("/nonexistent/dir/abc123"));
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_workspace_returns_empty_for_missing_agents_md() {
+        let dir = std::env::temp_dir().join("purec-test-no-agents");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let result = load_workspace_instructions(&dir).unwrap();
+
+        assert!(result.is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn load_workspace_reads_agents_md_content() {
+        let dir = std::env::temp_dir().join("purec-test-with-agents");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Agents.md"), "# Test Project\nRules here").unwrap();
+
+        let result = load_workspace_instructions(&dir).unwrap();
+
+        assert_eq!(result, "# Test Project\nRules here");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -36,6 +36,7 @@ impl CompileMode {
 pub struct TurnRequest {
     pub prompt: String,
     pub mode: CompileMode,
+    pub workspace_instructions: Option<String>,
 }
 
 impl TurnRequest {
@@ -43,7 +44,13 @@ impl TurnRequest {
         Self {
             prompt: prompt.into(),
             mode,
+            workspace_instructions: None,
         }
+    }
+
+    pub fn with_workspace_instructions(mut self, instructions: String) -> Self {
+        self.workspace_instructions = Some(instructions);
+        self
     }
 }
 
