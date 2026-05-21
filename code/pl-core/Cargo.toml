@@ -8,6 +8,8 @@ license.workspace = true
 pl-protocol = { workspace = true }
 pl-model = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
 toml = { workspace = true }
 
 [dev-dependencies]
