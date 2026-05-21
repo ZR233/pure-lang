@@ -22,6 +22,7 @@ bitflags = { version = "2", features = ["serde"] }
 reqwest = { version = "0.13", features = ["json", "stream"] }
 eventsource-stream = "0.2"
 clap = { version = "4", features = ["derive"] }
+toml = "0.8"
 
 pl-protocol = { path = "code/pl-protocol" }
 pl-core = { path = "code/pl-core" }

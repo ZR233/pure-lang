@@ -42,3 +42,13 @@ pub type SharedModelProvider = Arc<OpenAiCompatibleProvider>;
 pub fn create_provider(info: ProviderInfo) -> Result<SharedModelProvider> {
     Ok(Arc::new(OpenAiCompatibleProvider::new(info)?))
 }
+
+/// 根据 ProviderInfo 和配置模型列表创建对应的 ModelProvider 实例。
+pub fn create_provider_with_models(
+    info: ProviderInfo,
+    models: Vec<ModelInfo>,
+) -> Result<SharedModelProvider> {
+    Ok(Arc::new(OpenAiCompatibleProvider::with_models(
+        info, models,
+    )?))
+}

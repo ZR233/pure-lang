@@ -10,10 +10,13 @@ mod sse;
 mod wire_api;
 
 pub use capabilities::{ModelCapabilities, ProviderCapabilities};
+pub use default_models::{default_model_slugs, default_models};
 pub use manager::{DefaultModelsManager, ModelsManager};
-pub use model_info::{InputModality, ModelInfo, TruncationPolicy};
+pub use model_info::{InputModality, ModelInfo, TruncationMode, TruncationPolicy};
 pub use openai::OpenAiCompatibleProvider;
-pub use provider::{ModelProvider, SharedModelProvider, create_provider};
+pub use provider::{
+    ModelProvider, SharedModelProvider, create_provider, create_provider_with_models,
+};
 pub use provider_info::{AuthCommand, ProviderInfo, WireApi};
 pub use request::{
     CompletionRequest, CompletionResponse, FinishReason, ReasoningConfig, ReasoningSummary,
