@@ -1,8 +1,10 @@
 use pl_model::{
-    CompletionRequest, ModelProvider, ProviderInfo, SharedModelProvider, create_provider,
+    CompletionRequest, ModelProvider, ProviderInfo, ReasoningConfig, ReasoningSummary,
+    SharedModelProvider, create_provider, create_provider_with_models,
 };
 use pl_protocol::{AgentEvent, AgentEventSender, Result};
 
+use crate::config::{ModelRole, PureConfig, ReasoningEffort};
 use crate::session::CoreSession;
 use crate::turn::{TurnRequest, TurnResult};
 
@@ -13,11 +15,25 @@ use crate::turn::{TurnRequest, TurnResult};
 #[derive(Debug, Clone)]
 pub struct PureCore {
     provider: SharedModelProvider,
+    reasoning_effort: Option<ReasoningEffort>,
 }
 
 impl PureCore {
     pub fn new(provider: SharedModelProvider) -> Self {
-        Self { provider }
+        Self {
+            provider,
+            reasoning_effort: None,
+        }
+    }
+
+    pub fn with_reasoning_effort(
+        provider: SharedModelProvider,
+        reasoning_effort: ReasoningEffort,
+    ) -> Self {
+        Self {
+            provider,
+            reasoning_effort: Some(reasoning_effort),
+        }
     }
 
     pub fn from_provider_info(info: ProviderInfo) -> Result<Self> {
@@ -28,6 +44,15 @@ impl PureCore {
         Self::from_provider_info(ProviderInfo::default_provider())
     }
 
+    pub fn from_config(config: &PureConfig, role: ModelRole) -> Result<Self> {
+        let resolved = config.resolve_role(role)?;
+        let provider = create_provider_with_models(resolved.provider_info, resolved.models)?;
+        Ok(Self::with_reasoning_effort(
+            provider,
+            resolved.role_config.effort,
+        ))
+    }
+
     pub fn run_turn<'a>(
         &'a self,
         session: &'a mut CoreSession,
@@ -35,6 +60,7 @@ impl PureCore {
         event_tx: AgentEventSender,
     ) -> impl std::future::Future<Output = Result<TurnResult>> + Send + 'a {
         let provider = self.provider.clone();
+        let reasoning_effort = self.reasoning_effort.clone();
 
         async move {
             let _ = event_tx.send(AgentEvent::TurnStarted);
@@ -50,7 +76,14 @@ impl PureCore {
                 parallel_tool_calls: false,
                 temperature: None,
                 max_tokens: None,
-                reasoning: None,
+                reasoning: reasoning_effort.map(|effort| ReasoningConfig {
+                    effort: Some(effort.as_str().to_string()),
+                    summary: Some(if effort.is_none() {
+                        ReasoningSummary::Disabled
+                    } else {
+                        ReasoningSummary::Enabled
+                    }),
+                }),
                 stream: true,
             };
 
@@ -75,5 +108,22 @@ impl PureCore {
                 session_message_count: session.messages().len(),
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ConfigStore, ModelRole};
+
+    #[test]
+    fn config_core_uses_planner_role_model_and_effort() {
+        let config = ConfigStore::new(crate::ConfigPaths::from_home("unused"))
+            .load_or_default()
+            .unwrap();
+        let core = PureCore::from_config(&config, ModelRole::Planner).unwrap();
+
+        assert_eq!(core.provider.default_model(), "deepseek-v4-flash");
+        assert_eq!(core.reasoning_effort.unwrap().as_str(), "high");
     }
 }

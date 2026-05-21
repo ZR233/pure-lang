@@ -6,6 +6,8 @@
 
 ```text
 purec args
+  → ConfigStore 读取 ~/.pure/config.toml
+  → planner RoleConfig
   → TurnRequest
   → CoreSession
   → PureCore
@@ -25,11 +27,14 @@ purec args
 
 `Auto` 只影响模型提示词，使输出更偏执行导向；当前版本仍不会执行命令、写文件或调用沙箱。
 
+普通 prompt 默认使用 `ModelRole::Planner`。`RoleConfig` 提供 provider、model 和 effort。
+
 ## 3.3 核心 turn
 
 `PureCore::run_turn(...)` 的职责：
 
 - 将用户 prompt 追加到 `CoreSession`。
+- 按角色配置选择 provider/model/effort。
 - 根据 `CompileMode` 生成系统 instructions。
 - 构造 `CompletionRequest`。
 - 调用 `pl-model` provider。
@@ -47,5 +52,6 @@ purec args
 - `usage`
 - `mode`
 - `session_message_count`
+- 角色使用的 provider/model/effort 由配置决定。
 
 `purec` 首版只渲染最终内容；后续可消费 `AgentEvent` 实现实时渲染。

@@ -6,8 +6,8 @@
 | --- | --- |
 | `pl-protocol` | 公共错误、消息、事件、权限类型 |
 | `pl-model` | LLM provider、模型元数据、wire API、SSE |
-| `pl-core` | turn、session、核心编译流程编排 |
-| `purec` | clap 参数解析、调用核心层、渲染结果 |
+| `pl-core` | turn、session、角色化配置、核心编译流程编排 |
+| `purec` | clap 参数解析、配置子命令、调用核心层、渲染结果 |
 
 P0 不包含命令执行、文件编辑、工具系统或沙箱。
 
@@ -15,7 +15,6 @@ P0 不包含命令执行、文件编辑、工具系统或沙箱。
 
 - 增加可替换的 session/store 抽象。
 - 完善 `AgentEvent` 的编译阶段事件。
-- 增加配置加载。
 - 增加 `purec` 的流式渲染。
 - 增加更多 provider 配置入口。
 

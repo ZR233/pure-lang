@@ -28,7 +28,7 @@ pub struct ProviderInfo {
     pub stream_idle_timeout_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthCommand {
     pub command: String,
     #[serde(default)]

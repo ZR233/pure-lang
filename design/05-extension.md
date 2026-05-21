@@ -5,10 +5,13 @@
 新增模型 provider 时优先扩展 `pl-model`：
 
 - 新增 `ProviderInfo` 构造或配置来源。
+- 在 `~/.pure/config.toml` 中新增 provider 和完整 models 列表。
 - 实现或复用 `ModelProvider`。
 - 适配目标 API 的 request/response wire 格式。
 
 公共消息、事件和错误类型继续来自 `pl-protocol`。
+
+配置里的模型信息会覆盖或补充 bundled model，使用户可以接入自定义模型。
 
 ## 5.2 核心流程扩展
 
@@ -19,6 +22,8 @@
 - CLI 参数只在 `purec` 中解析。
 - 进入核心层前转换为明确 enum 或 options struct。
 - 避免把 bool 参数暴露到核心 API。
+
+需要影响角色、provider/model 路由或配置持久化时扩展 `pl-core` 的配置模块。
 
 ## 5.3 前端扩展
 

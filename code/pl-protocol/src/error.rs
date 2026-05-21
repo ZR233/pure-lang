@@ -23,6 +23,9 @@ pub enum PureError {
     #[error("memory store error: {0}")]
     MemoryError(String),
 
+    #[error("configuration error: {0}")]
+    ConfigError(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

@@ -50,16 +50,22 @@
 - `TurnResult`
 - `CoreSession`
 - `PureCore::run_turn(...)`
+- `PureConfig`
+- `ConfigStore`
+- `ModelRole`
+- `RoleConfig`
 
 `pl-core` 负责：
 
 - 保存和读取核心会话消息。
+- 读取和保存 `~/.pure/config.toml`。
+- 校验固定角色到 provider/model/effort 的路由。
 - 将自然语言 prompt 转换为模型请求。
 - 调用 `pl-model` provider。
 - 接收并转发 `AgentEvent`。
 - 汇总模型返回为 `TurnResult`。
 
-当前版本不执行命令、不写文件、不提供独立执行层。
+配置文件由显式 `purec config` 命令写入。当前版本不执行命令、不写业务文件、不提供独立执行层。
 
 ## 2.4 purec
 
@@ -71,10 +77,14 @@
 purec "创建 HTTP 服务器"
 purec --plan "创建 HTTP 服务器"
 purec --auto "创建 HTTP 服务器"
+purec config path
+purec config show
+purec config init
 purec --help
 ```
 
 `purec` 使用 `clap` 解析参数。CLI flag 只存在于入口层，进入核心 API 前会被归一化为 `CompileMode`。
+普通对话默认使用 `planner` 角色。
 
 ## 2.5 Workspace
 
@@ -90,4 +100,5 @@ pl-protocol = { path = "code/pl-protocol" }
 pl-model = { path = "code/pl-model" }
 pl-core = { path = "code/pl-core" }
 clap = { version = "4", features = ["derive"] }
+toml = "0.8"
 ```

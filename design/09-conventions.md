@@ -56,3 +56,12 @@ CLI flag 应在 `purec` 内转换为明确类型，例如 `CompileMode`。
 - 公共协议层：`pl-protocol`。
 
 当前版本不承诺独立执行层、工具系统或沙箱。
+
+## 9.7 配置约定
+
+- 配置文件固定为 `~/.pure/config.toml`。
+- 本地 TOML 使用 `snake_case`。
+- 不设置 `active_provider`。
+- 固定角色 key：`explorer`、`planner`、`executor`、`reviewer`。
+- 普通对话默认使用 `planner`。
+- provider 必须持久化完整 models 列表，以支持用户自定义模型。

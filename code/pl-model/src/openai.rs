@@ -23,6 +23,10 @@ pub struct OpenAiCompatibleProvider {
 
 impl OpenAiCompatibleProvider {
     pub fn new(info: ProviderInfo) -> Result<Self> {
+        Self::with_models(info, Vec::new())
+    }
+
+    pub fn with_models(info: ProviderInfo, configured_models: Vec<ModelInfo>) -> Result<Self> {
         let wire_dispatch = match info.wire_api {
             WireApi::Responses => WireDispatch::Responses,
             WireApi::Chat => WireDispatch::Chat,
@@ -32,7 +36,8 @@ impl OpenAiCompatibleProvider {
             .build()
             .map_err(|e| PureError::HttpError(e.to_string()))?;
 
-        let bundled_models = crate::default_models::default_models();
+        let bundled_models =
+            merge_models(crate::default_models::default_models(), configured_models);
 
         Ok(Self {
             info,
@@ -56,6 +61,22 @@ impl OpenAiCompatibleProvider {
             WireApi::Chat => format!("{base}/chat/completions"),
         }
     }
+}
+
+fn merge_models(
+    mut bundled_models: Vec<ModelInfo>,
+    configured_models: Vec<ModelInfo>,
+) -> Vec<ModelInfo> {
+    for model in configured_models {
+        match bundled_models
+            .iter_mut()
+            .find(|existing| existing.slug == model.slug)
+        {
+            Some(existing) => *existing = model,
+            None => bundled_models.push(model),
+        }
+    }
+    bundled_models
 }
 
 impl ModelProvider for OpenAiCompatibleProvider {
@@ -406,5 +427,19 @@ mod tests {
         let provider = OpenAiCompatibleProvider::new(ProviderInfo::openai(None)).unwrap();
 
         assert_eq!(provider.default_model(), "gpt-5.5");
+    }
+
+    #[test]
+    fn configured_models_override_bundled_models() {
+        let mut model = ModelInfo::fallback("deepseek-v4-flash");
+        model.display_name = "Custom DeepSeek".to_string();
+        let provider =
+            OpenAiCompatibleProvider::with_models(ProviderInfo::deepseek(None), vec![model])
+                .unwrap();
+
+        assert_eq!(
+            provider.model_info("deepseek-v4-flash").display_name,
+            "Custom DeepSeek"
+        );
     }
 }

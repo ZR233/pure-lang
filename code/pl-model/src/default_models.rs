@@ -11,11 +11,11 @@ const DEFAULT_MODEL_SLUGS: &[&str] = &[
 const OPENAI_REASONING_EFFORTS: &[&str] = &["none", "low", "medium", "high", "xhigh"];
 const DEEPSEEK_REASONING_EFFORTS: &[&str] = &["high", "max"];
 
-pub(crate) fn default_model_slugs() -> &'static [&'static str] {
+pub fn default_model_slugs() -> &'static [&'static str] {
     DEFAULT_MODEL_SLUGS
 }
 
-pub(crate) fn default_models() -> Vec<ModelInfo> {
+pub fn default_models() -> Vec<ModelInfo> {
     vec![
         deepseek_model(),
         openai_model(
