@@ -21,6 +21,8 @@ tracing-subscriber = "0.3"
 bitflags = { version = "2", features = ["serde"] }
 reqwest = { version = "0.13", features = ["json", "stream"] }
 eventsource-stream = "0.2"
+clap = { version = "4", features = ["derive"] }
 
+pl-protocol = { path = "code/pl-protocol" }
 pl-core = { path = "code/pl-core" }
 pl-model = { path = "code/pl-model" }

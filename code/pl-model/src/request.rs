@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use pl_core::Message;
+use pl_protocol::Message;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

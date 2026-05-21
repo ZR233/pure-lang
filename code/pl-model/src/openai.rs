@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use futures::StreamExt;
-use pl_core::{AgentEvent, AgentEventSender, PureError, Result};
+use pl_protocol::{AgentEvent, AgentEventSender, PureError, Result};
 use tracing::{debug, warn};
 
 use crate::capabilities::ProviderCapabilities;

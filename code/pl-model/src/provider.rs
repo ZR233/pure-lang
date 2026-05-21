@@ -1,8 +1,8 @@
 use std::fmt;
 use std::sync::Arc;
 
-use pl_core::AgentEventSender;
-use pl_core::Result;
+use pl_protocol::AgentEventSender;
+use pl_protocol::Result;
 
 use crate::capabilities::ProviderCapabilities;
 use crate::model_info::ModelInfo;

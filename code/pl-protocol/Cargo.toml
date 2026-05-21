@@ -1,10 +1,11 @@
 [package]
-name = "pure-lang"
+name = "pl-protocol"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-pl-core = { workspace = true }
-pl-model = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
 tokio = { workspace = true }

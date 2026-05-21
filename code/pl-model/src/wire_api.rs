@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use pl_core::Result;
+use pl_protocol::Result;
 
 use crate::request::{CompletionRequest, CompletionResponse};
 
@@ -50,19 +50,19 @@ impl WireDispatch {
     }
 }
 
-fn message_role_str(role: &pl_core::MessageRole) -> &str {
+fn message_role_str(role: &pl_protocol::MessageRole) -> &str {
     match role {
-        pl_core::MessageRole::System => "system",
-        pl_core::MessageRole::User => "user",
-        pl_core::MessageRole::Assistant => "assistant",
-        pl_core::MessageRole::Tool => "tool",
+        pl_protocol::MessageRole::System => "system",
+        pl_protocol::MessageRole::User => "user",
+        pl_protocol::MessageRole::Assistant => "assistant",
+        pl_protocol::MessageRole::Tool => "tool",
     }
 }
 
-fn message_content_text(content: &pl_core::MessageContent) -> String {
+fn message_content_text(content: &pl_protocol::MessageContent) -> String {
     match content {
-        pl_core::MessageContent::Text(t) => t.clone(),
-        pl_core::MessageContent::MultiPart(parts) => parts
+        pl_protocol::MessageContent::Text(t) => t.clone(),
+        pl_protocol::MessageContent::MultiPart(parts) => parts
             .iter()
             .map(|p| p.text.as_str())
             .collect::<Vec<_>>()
@@ -231,7 +231,7 @@ fn chat_build_body(request: &CompletionRequest) -> serde_json::Value {
             "content": text
         });
 
-        if msg.role == pl_core::MessageRole::Assistant
+        if msg.role == pl_protocol::MessageRole::Assistant
             && let Some(reasoning_content) = &msg.reasoning_content
         {
             message["reasoning_content"] = serde_json::json!(reasoning_content);
@@ -368,7 +368,7 @@ fn chat_parse_response(body: serde_json::Value) -> Result<CompletionResponse> {
 mod tests {
     use std::collections::HashMap;
 
-    use pl_core::{Message, MessageContent, MessageRole};
+    use pl_protocol::{Message, MessageContent, MessageRole};
 
     use super::*;
     use crate::request::{ReasoningConfig, ReasoningSummary};

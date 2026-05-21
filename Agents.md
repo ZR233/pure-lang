@@ -5,7 +5,7 @@
 ## Crate 命名
 
 - 所有 crate 名称以 `pl-` 为前缀，例如 `pl-core`、`pl-tool`、`pl-agent`。
-- 二进制 crate 例外，使用 `pure-lang`。
+- 二进制 crate 例外，使用 `purec`。
 
 ## 异步 Trait
 
@@ -91,10 +91,12 @@ pub trait ModelProvider: Debug + Send + Sync {
 
 ## `pl-core` 边界
 
-`pl-core` 容易膨胀。向其中添加新概念或功能前，先判断：
+`pl-core` 是核心逻辑层，负责组合 turn、session、model、store 等编译流程。
+跨 crate 公共协议类型放在 `pl-protocol`，provider 适配和模型元数据放在 `pl-model`。
+向 `pl-core` 添加新概念或功能前，先判断：
 
-1. 是否有其他 crate 更适合放置这段代码。
-2. 是否应该创建一个新 crate。
+1. 是否属于核心编译流程。
+2. 是否应下沉到 `pl-protocol` 或保留在更具体的 crate。
 
 ## 格式化偏好
 

@@ -6,6 +6,7 @@ pub type AgentEventSender = broadcast::Sender<AgentEvent>;
 pub type AgentEventReceiver = broadcast::Receiver<AgentEvent>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum AgentEvent {
     TextDelta {
         content: String,
@@ -32,6 +33,7 @@ pub enum AgentEvent {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum ErrorSeverity {
     Transient,
     Recoverable,
@@ -39,12 +41,14 @@ pub enum ErrorSeverity {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum OutputStream {
     Stdout,
     Stderr,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum PipelineStage {
     IntentAnalysis,
     Planning,
