@@ -2,6 +2,7 @@ mod config;
 mod core;
 mod first_run;
 mod session;
+mod tool;
 mod turn;
 
 pub use config::{
@@ -20,4 +21,8 @@ pub use pl_protocol::{
     Result,
 };
 pub use session::CoreSession;
+pub use tool::{
+    BashInput, BashTool, OutputTruncation, Tool, ToolInput, ToolOutput, TruncatedOutput,
+    TruncationStrategy,
+};
 pub use turn::{CompileMode, TurnRequest, TurnResult};

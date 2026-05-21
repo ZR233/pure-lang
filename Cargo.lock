@@ -1065,6 +1065,8 @@ dependencies = [
  "pl-protocol",
  "pretty_assertions",
  "serde",
+ "serde_json",
+ "tokio",
  "toml",
 ]
 
@@ -1092,10 +1094,6 @@ dependencies = [
  "thiserror",
  "tokio",
 ]
-
-[[package]]
-name = "pl-runtime"
-version = "0.1.0"
 
 [[package]]
 name = "potential_utf"
