@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use pl_core::{AgentEvent, Message, MessageContent, MessageRole};
 use pl_model::{
     CompletionRequest, ModelProvider, ProviderInfo, ReasoningConfig, ReasoningSummary,
     create_provider,
 };
+use pl_protocol::{AgentEvent, Message, MessageContent, MessageRole};
 
 fn user_message(content: &str) -> Message {
     Message {

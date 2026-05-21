@@ -1,7 +1,7 @@
 use crate::model_info::ModelInfo;
 use crate::provider::{ModelProvider, SharedModelProvider};
 use crate::provider_info::ProviderInfo;
-use pl_core::Result;
+use pl_protocol::Result;
 
 /// 模型管理器 trait。
 ///

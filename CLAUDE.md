@@ -5,7 +5,7 @@
 ## Crate 命名
 
 - 所有 crate 名称以 `pl-` 为前缀（如 `pl-core`、`pl-tool`、`pl-agent`）
-- 二进制 crate 例外：`pure-lang`
+- 二进制 crate 例外：`purec`
 
 ## 异步 Trait（禁止 `#[async_trait]`）
 
@@ -127,12 +127,14 @@ match event {
 
 如果一个方法只在一个地方被引用，不要提取它。保持代码局部性。
 
-## 禁止向 pl-core 无节制添加代码
+## pl-core 核心边界
 
-`pl-core` 容易膨胀。添加新概念/功能前，先考虑：
+`pl-core` 是核心逻辑层，负责组合 turn、session、model、store 等编译流程。
+跨 crate 公共协议类型放在 `pl-protocol`，provider 适配和模型元数据放在 `pl-model`。
+添加新概念/功能前，先考虑：
 
-1. 是否有其他 crate 更适合放置这段代码？
-2. 是否应该创建一个新 crate？
+1. 是否属于核心编译流程？
+2. 是否应下沉到 `pl-protocol` 或保留在更具体的 crate？
 
 ## 格式化
 
