@@ -64,8 +64,9 @@
 - 调用 `pl-model` provider。
 - 接收并转发 `AgentEvent`。
 - 汇总模型返回为 `TurnResult`。
+- 提供首次配置 TUI 使用的纯配置构造逻辑。
 
-配置文件由显式 `purec config` 命令写入。当前版本不执行命令、不写业务文件、不提供独立执行层。
+配置文件由显式 `purec config` 命令或首次配置 TUI 的确认保存动作写入。当前版本不执行命令、不写业务文件、不提供独立执行层。
 
 ## 2.4 purec
 
@@ -86,6 +87,8 @@ purec --help
 `purec` 使用 `clap` 解析参数。CLI flag 只存在于入口层，进入核心 API 前会被归一化为 `CompileMode`。
 普通对话默认使用 `planner` 角色。
 
+当普通对话路径发现 `~/.pure/config.toml` 不存在时，`purec` 进入首次配置 TUI。TUI 负责收集 provider、API key 和模型配置输入，并调用 `pl-core` 的纯配置构造逻辑生成 `PureConfig` 后保存。`purec config` 子命令不触发 TUI。
+
 ## 2.5 Workspace
 
 ```toml
@@ -101,4 +104,6 @@ pl-model = { path = "code/pl-model" }
 pl-core = { path = "code/pl-core" }
 clap = { version = "4", features = ["derive"] }
 toml = "0.8"
+ratatui = "0.29"
+crossterm = "0.28"
 ```

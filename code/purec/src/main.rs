@@ -1,6 +1,11 @@
+use clap::CommandFactory;
 use clap::Parser;
 use clap::Subcommand;
-use pl_core::{CompileMode, ConfigStore, CoreSession, ModelRole, PureCore, PureError, TurnRequest};
+use pl_core::{
+    CompileMode, ConfigStore, CoreSession, ModelRole, PureConfig, PureCore, PureError, TurnRequest,
+};
+
+mod first_run_tui;
 
 #[tokio::main]
 async fn main() -> pl_core::Result<()> {
@@ -10,6 +15,10 @@ async fn main() -> pl_core::Result<()> {
         auto,
         prompt,
     } = PurecArgs::parse();
+    if command.is_none() && prompt.is_empty() {
+        return run_without_args();
+    }
+
     match command {
         Some(command) => run_command(command),
         None => {
@@ -24,11 +33,24 @@ async fn main() -> pl_core::Result<()> {
     }
 }
 
+fn run_without_args() -> pl_core::Result<()> {
+    let store = ConfigStore::default_app()?;
+    if should_run_first_run_tui(&None, store.config_exists()) {
+        let _ = first_run_tui::run(&store)?;
+    } else {
+        PurecArgs::command().print_help()?;
+        println!();
+    }
+    Ok(())
+}
+
 async fn run_prompt(args: PurecArgs) -> pl_core::Result<()> {
     ensure_prompt(&args)?;
     let request = TurnRequest::new(args.prompt_text(), args.compile_mode());
     let store = ConfigStore::default_app()?;
-    let config = store.load_or_default()?;
+    let Some(config) = load_prompt_config(&args, &store)? else {
+        return Ok(());
+    };
     let core = PureCore::from_config(&config, ModelRole::Planner)?;
     let mut session = CoreSession::new();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(256);
@@ -39,6 +61,20 @@ async fn run_prompt(args: PurecArgs) -> pl_core::Result<()> {
     }
 
     Ok(())
+}
+
+fn load_prompt_config(
+    args: &PurecArgs,
+    store: &ConfigStore,
+) -> pl_core::Result<Option<PureConfig>> {
+    if !should_run_first_run_tui(&args.command, store.config_exists()) {
+        return store.load().map(Some);
+    }
+
+    match first_run_tui::run(store)? {
+        Some(_) => store.load().map(Some),
+        None => Ok(None),
+    }
 }
 
 fn run_command(command: PurecCommand) -> pl_core::Result<()> {
@@ -66,12 +102,7 @@ fn run_config_command(command: ConfigCommand) -> pl_core::Result<()> {
 }
 
 #[derive(Debug, Parser)]
-#[command(
-    name = "purec",
-    about = "Pure-Lang 命令行编译器前端",
-    version,
-    arg_required_else_help = true
-)]
+#[command(name = "purec", about = "Pure-Lang 命令行编译器前端", version)]
 struct PurecArgs {
     #[command(subcommand)]
     command: Option<PurecCommand>,
@@ -128,12 +159,24 @@ fn ensure_prompt(args: &PurecArgs) -> pl_core::Result<()> {
     Ok(())
 }
 
+fn should_run_first_run_tui(command: &Option<PurecCommand>, config_exists: bool) -> bool {
+    command.is_none() && !config_exists
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn parse(args: &[&str]) -> PurecArgs {
         PurecArgs::try_parse_from(args).unwrap()
+    }
+
+    #[test]
+    fn parses_no_args_for_top_level_help_or_first_run() {
+        let args = parse(&["purec"]);
+
+        assert!(args.command.is_none());
+        assert!(args.prompt.is_empty());
     }
 
     #[test]
@@ -199,5 +242,15 @@ mod tests {
                 command: ConfigCommand::Init
             })
         ));
+    }
+
+    #[test]
+    fn first_run_tui_triggers_only_for_prompt_path_without_config() {
+        let prompt_args = parse(&["purec", "创建 HTTP 服务器"]);
+        let config_args = parse(&["purec", "config", "path"]);
+
+        assert!(should_run_first_run_tui(&prompt_args.command, false));
+        assert!(!should_run_first_run_tui(&prompt_args.command, true));
+        assert!(!should_run_first_run_tui(&config_args.command, false));
     }
 }

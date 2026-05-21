@@ -9,3 +9,6 @@ pl-protocol = { workspace = true }
 pl-model = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
