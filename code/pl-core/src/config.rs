@@ -524,8 +524,12 @@ impl ConfigStore {
         &self.paths
     }
 
+    pub fn config_exists(&self) -> bool {
+        self.paths.config_file().exists()
+    }
+
     pub fn load_or_default(&self) -> Result<PureConfig> {
-        if self.paths.config_file().exists() {
+        if self.config_exists() {
             self.load()
         } else {
             Ok(PureConfig::default_config())

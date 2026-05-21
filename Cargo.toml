@@ -23,6 +23,9 @@ reqwest = { version = "0.13", features = ["json", "stream"] }
 eventsource-stream = "0.2"
 clap = { version = "4", features = ["derive"] }
 toml = "0.8"
+crossterm = "0.28.1"
+ratatui = "0.29.0"
+pretty_assertions = "1.4.1"
 
 pl-protocol = { path = "code/pl-protocol" }
 pl-core = { path = "code/pl-core" }

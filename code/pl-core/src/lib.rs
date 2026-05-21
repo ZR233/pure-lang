@@ -1,5 +1,6 @@
 mod config;
 mod core;
+mod first_run;
 mod session;
 mod turn;
 
@@ -9,6 +10,10 @@ pub use config::{
     TruncationPolicyConfig,
 };
 pub use core::PureCore;
+pub use first_run::{
+    FirstRunConfigDraft, FirstRunModelDraft, FirstRunProviderDraft, ProviderTemplateKind,
+};
+pub use pl_model::{InputModality, TruncationMode};
 pub use pl_protocol::{
     AgentEvent, AgentEventReceiver, AgentEventSender, ContentPart, ContentPartType, ErrorSeverity,
     Message, MessageContent, MessageRole, OutputStream, PermissionLevel, PipelineStage, PureError,

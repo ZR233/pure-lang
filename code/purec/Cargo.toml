@@ -6,5 +6,10 @@ license.workspace = true
 
 [dependencies]
 clap = { workspace = true }
+crossterm = { workspace = true }
 pl-core = { workspace = true }
+ratatui = { workspace = true }
 tokio = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }

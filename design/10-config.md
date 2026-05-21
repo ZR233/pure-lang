@@ -14,7 +14,9 @@ Windows 下对应：
 %USERPROFILE%\.pure\config.toml
 ```
 
-普通对话运行时只读取配置；配置文件不存在时使用内存默认值，不隐式写盘。写入配置必须由显式命令触发，例如 `purec config init`。
+普通对话运行时读取配置；当 `purec <prompt>` 路径发现配置文件不存在时，进入首次配置 TUI。用户在 TUI 中确认保存后，`purec` 写入 `~/.pure/config.toml`，随后重新读取磁盘配置并继续执行原 prompt。
+
+`purec config path/show/init` 等配置子命令不触发首次配置 TUI，保持脚本友好。写入配置仍必须由用户显式确认触发，例如 `purec config init` 或首次配置 TUI 的保存动作。
 
 ## 10.2 配置职责
 
@@ -123,11 +125,35 @@ truncation_policy = { mode = "tokens", limit = 10000 }
 
 配置里的模型会覆盖或补充 bundled model。角色引用的 model 必须存在于对应 provider 的 `models` 中。
 
-## 10.6 凭据策略
+## 10.6 首次配置 TUI
+
+首次配置 TUI 属于 `purec` 前端职责；配置构造和校验的纯逻辑属于 `pl-core`。
+
+TUI 首版支持以下能力：
+
+- 默认选中 DeepSeek provider，也可切换为 OpenAI provider。
+- 至少配置一个 provider。
+- 可继续添加多个 provider 实例，允许同类 provider 重复，例如 `deepseek`、`deepseek-2`、`openai`、`openai-work`。
+- 每个 provider key 必须唯一。
+- DeepSeek 模板来自 `ProviderInfo::deepseek(None)`，OpenAI 模板来自 `ProviderInfo::openai(None)`。
+- 每个 provider 的模型列表包含模板默认模型，并可追加用户自定义模型。
+- 用户选择一个默认 provider；四个模型角色默认都指向该 provider 的默认模型和默认 effort。
+
+TUI 保存前必须完成本地校验：
+
+- provider key 非空且唯一。
+- API key 非空。
+- provider 的 default model 必须存在于该 provider 模型列表中。
+- 同一 provider 下模型 slug 不重复。
+- 角色引用的默认模型必须声明至少一个 `reasoning_efforts`，用于生成角色 `effort`。
+
+## 10.7 凭据策略
 
 配置允许持久化明文 `bearer_token`，但这会把 API token 直接写入 `~/.pure/config.toml`。文档和默认模板应优先展示 `env_key`，只有用户明确需要时才写 `bearer_token`。
 
-## 10.7 purec 命令
+首次配置 TUI 按用户确认会把输入的 API key 明文写入对应 provider 的 `bearer_token`。后续版本可以增加系统凭据库或环境变量模式，但首版不改变现有 TOML schema。
+
+## 10.8 purec 命令
 
 首版提供最小配置命令：
 
