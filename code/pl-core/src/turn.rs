@@ -14,12 +14,8 @@ pub enum CompileMode {
 impl CompileMode {
     pub fn instructions(self) -> &'static str {
         match self {
-            Self::Plan => {
-                "你是 Pure-Lang 的核心编译器。请把用户的自然语言需求整理成清晰的编译计划，说明目标、步骤和需要确认的风险。不要执行命令或修改文件。"
-            }
-            Self::Auto => {
-                "你是 Pure-Lang 的核心编译器。请根据用户的自然语言需求生成可执行导向的编译方案和下一步动作建议，但当前前端不会执行命令、修改文件或调用沙箱。"
-            }
+            Self::Plan => include_str!("../prompts/plan.md"),
+            Self::Auto => include_str!("../prompts/auto.md"),
         }
     }
 
