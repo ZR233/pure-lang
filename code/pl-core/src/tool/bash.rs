@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use pl_protocol::PureError;
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 use super::truncation::{OutputTruncation, TruncationStrategy};
@@ -60,7 +59,6 @@ impl BashTool {
         self
     }
 
-    /// 输出文件路径：{workspace_root}/target/pure/{session_id}/{tool_id}/output.log
     fn output_path(&self, session_id: &str, tool_id: &str) -> PathBuf {
         self.workspace_root
             .join(TOOL_OUTPUT_DIR)
@@ -69,7 +67,6 @@ impl BashTool {
             .join(OUTPUT_LOG_FILE)
     }
 
-    /// 平台特定的 shell 命令和参数前缀。
     fn shell_command() -> (&'static str, &'static str) {
         if cfg!(target_os = "windows") {
             ("cmd", "/C")
@@ -78,7 +75,6 @@ impl BashTool {
         }
     }
 
-    /// 从原始 tool call arguments 解析 BashInput。
     fn parse_input(arguments: serde_json::Value, tool_name: &str) -> Result<BashInput, PureError> {
         serde_json::from_value(arguments).map_err(|e| PureError::ToolExecutionFailed {
             tool: tool_name.to_string(),
@@ -91,6 +87,29 @@ impl BashTool {
             tool: self.name().to_string(),
             error: msg.to_string(),
         }
+    }
+}
+
+/// 当 `wait_with_output` 因超时被丢弃时，通过 PID 杀死已孤立的子进程。
+fn kill_orphan_process(child_id: Option<u32>) {
+    let Some(id) = child_id else { return };
+    let result = if cfg!(unix) {
+        std::process::Command::new("kill")
+            .arg("-9")
+            .arg(id.to_string())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+    } else {
+        std::process::Command::new("taskkill")
+            .args(["/F", "/PID", &id.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+    };
+    // 尽力而为；如果进程已经退出，kill 会失败（无害）
+    if let Ok(mut child) = result {
+        let _ = child.wait();
     }
 }
 
@@ -134,7 +153,6 @@ impl Tool for BashTool {
             .map(Duration::from_secs)
             .unwrap_or(self.default_timeout);
 
-        // 构建命令
         let (shell, flag) = Self::shell_command();
         let mut command = Command::new(shell);
         command.args([flag, &bash_input.command]);
@@ -146,10 +164,10 @@ impl Tool for BashTool {
         command.stdout(std::process::Stdio::piped());
         command.stderr(std::process::Stdio::piped());
 
-        // 执行并等待（带超时）
         let child = command
             .spawn()
             .map_err(|e| self.tool_error(format!("failed to spawn command: {e}")))?;
+        let child_id = child.id();
 
         let (stdout, stderr, exit_code, timed_out);
 
@@ -163,7 +181,8 @@ impl Tool for BashTool {
             Ok(Err(e)) => {
                 return Err(self.tool_error(format!("command execution failed: {e}")));
             }
-            Err(_) => {
+            Err(_elapsed) => {
+                kill_orphan_process(child_id);
                 timed_out = true;
                 stdout = String::new();
                 stderr = format!("Command timed out after {} seconds", timeout.as_secs());
@@ -171,7 +190,6 @@ impl Tool for BashTool {
             }
         }
 
-        // 写入完整输出文件
         let output_path = self.output_path(&input.session_id, &input.tool_id);
         if let Some(parent) = output_path.parent() {
             tokio::fs::create_dir_all(parent)
@@ -180,31 +198,17 @@ impl Tool for BashTool {
         }
 
         {
-            let mut file = tokio::fs::File::create(&output_path)
+            let combined = format!(
+                "=== STDOUT ===\n{stdout}\n\n=== STDERR ===\n{stderr}\n"
+            );
+            tokio::fs::write(&output_path, combined.as_bytes())
                 .await
-                .map_err(|e| self.tool_error(format!("failed to create output file: {e}")))?;
-            file.write_all(b"=== STDOUT ===\n")
-                .await
-                .map_err(|e| self.tool_error(format!("failed to write output: {e}")))?;
-            file.write_all(stdout.as_bytes())
-                .await
-                .map_err(|e| self.tool_error(format!("failed to write output: {e}")))?;
-            file.write_all(b"\n\n=== STDERR ===\n")
-                .await
-                .map_err(|e| self.tool_error(format!("failed to write output: {e}")))?;
-            file.write_all(stderr.as_bytes())
-                .await
-                .map_err(|e| self.tool_error(format!("failed to write output: {e}")))?;
-            file.write_all(b"\n")
-                .await
-                .map_err(|e| self.tool_error(format!("failed to write output: {e}")))?;
+                .map_err(|e| self.tool_error(format!("failed to write output file: {e}")))?;
         }
 
-        // 截断输出
         let stdout_truncated = self.truncation.truncate(&stdout);
         let stderr_truncated = self.truncation.truncate(&stderr);
 
-        // 构建描述
         let description = if timed_out {
             format!("Command timed out after {} seconds", timeout.as_secs())
         } else {

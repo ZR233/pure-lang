@@ -179,20 +179,24 @@ fn ensure_prompt(args: &PurecArgs) -> pl_core::Result<()> {
 }
 
 fn load_workspace_instructions(workspace_dir: &Path) -> pl_core::Result<String> {
-    if !workspace_dir.is_dir() {
-        return Err(PureError::ConfigError(format!(
-            "workspace directory not found: {}",
-            workspace_dir.display()
-        )));
-    }
-
     let agents_file = workspace_dir.join("Agents.md");
-    if !agents_file.is_file() {
-        return Ok(String::new());
+    match std::fs::read_to_string(&agents_file) {
+        Ok(content) => Ok(content),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // 区分"目录不存在"和"目录存在但无 Agents.md"
+            if workspace_dir.is_dir() {
+                Ok(String::new())
+            } else {
+                Err(PureError::ConfigError(format!(
+                    "workspace directory not found: {}",
+                    workspace_dir.display()
+                )))
+            }
+        }
+        Err(e) => Err(PureError::ConfigError(format!(
+            "failed to read workspace instructions: {e}"
+        ))),
     }
-
-    let content = std::fs::read_to_string(&agents_file)?;
-    Ok(content)
 }
 
 fn should_run_first_run_tui(command: &Option<PurecCommand>, config_exists: bool) -> bool {
