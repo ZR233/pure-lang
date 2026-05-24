@@ -2,7 +2,8 @@
 /target
 
 # IDE
-/.claude
+/.claude/*
+!/.claude/skills/
 /.vscode
 /.idea
 *.swp
