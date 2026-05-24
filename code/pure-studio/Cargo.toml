@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+icu_provider = { workspace = true }
 pl-core = { workspace = true }
 pl-protocol = { workspace = true }
 rfd = { workspace = true }
