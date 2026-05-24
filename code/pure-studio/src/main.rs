@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use pl_core::{
-    ConfigStore, ProjectRecord, PureConfig, SessionRecord, StudioRuntime, ToolApprovalCallback,
-    ToolApprovalDecision, ToolApprovalRequest,
+    ConfigStore, ProjectRecord, ProviderConfig, PureConfig, SessionRecord, StudioRuntime,
+    ToolApprovalCallback, ToolApprovalDecision, ToolApprovalRequest,
 };
 use pl_protocol::{AgentEvent, MessageContent, MessageRole};
 use slint::{ModelRc, SharedString, VecModel};
@@ -34,8 +34,9 @@ fn main() -> Result<()> {
         approvals: Arc::new(Mutex::new(HashMap::new())),
     };
 
-    app.set_config_toml(load_config_text(state.studio.config_store())?.into());
+    initialize_config_ui(&app, state.studio.config_store())?;
     app.set_active_page(0);
+    app.set_active_settings_tab(0);
     app.set_status_text("Ready".into());
     install_callbacks(&app, runtime.handle().clone(), state.clone());
     runtime.block_on(bootstrap(&app, state.clone()))?;
@@ -154,9 +155,21 @@ fn install_callbacks(app: &MainWindow, handle: tokio::runtime::Handle, state: Ap
     });
 
     let weak = app.as_weak();
+    let settings_state = state.clone();
     app.on_show_settings(move || {
         if let Some(ui) = weak.upgrade() {
-            ui.set_active_page(1);
+            match load_config_ui(settings_state.studio.config_store()) {
+                Ok((toml, providers)) => {
+                    ui.set_config_toml(toml.into());
+                    apply_provider_rows(&ui, providers, None);
+                    ui.set_active_settings_tab(0);
+                    ui.set_active_page(1);
+                }
+                Err(error) => {
+                    ui.set_active_page(1);
+                    ui.set_status_text(format!("Config load failed: {error}").into());
+                }
+            }
         }
     });
 
@@ -167,6 +180,9 @@ fn install_callbacks(app: &MainWindow, handle: tokio::runtime::Handle, state: Ap
             Ok(text) => {
                 if let Some(ui) = weak.upgrade() {
                     ui.set_config_toml(text.into());
+                    if let Ok((_, providers)) = load_config_ui(reload_state.studio.config_store()) {
+                        apply_provider_rows(&ui, providers, None);
+                    }
                     ui.set_status_text("Config reloaded".into());
                 }
             }
@@ -178,11 +194,50 @@ fn install_callbacks(app: &MainWindow, handle: tokio::runtime::Handle, state: Ap
     let save_state = state.clone();
     app.on_save_config(move |content| {
         let content = content.to_string();
-        match PureConfig::from_toml(&content)
-            .and_then(|config| save_state.studio.config_store().save(&config))
-        {
-            Ok(()) => set_status(&weak, "Config saved".to_string()),
+        match PureConfig::from_toml(&content) {
+            Ok(config) => match save_state.studio.config_store().save(&config) {
+                Ok(()) => {
+                    if let Some(ui) = weak.upgrade() {
+                        apply_provider_rows(&ui, provider_rows(&config), None);
+                    }
+                    set_status(&weak, "Config saved".to_string());
+                }
+                Err(error) => set_status(&weak, format!("Config save failed: {error}")),
+            },
             Err(error) => set_status(&weak, format!("Config invalid: {error}")),
+        }
+    });
+
+    let weak = app.as_weak();
+    app.on_select_settings_tab(move |index| {
+        if let Some(ui) = weak.upgrade() {
+            ui.set_active_settings_tab(index);
+        }
+    });
+
+    let weak = app.as_weak();
+    app.on_add_provider_placeholder(move || {
+        if let Some(ui) = weak.upgrade() {
+            ui.set_status_text(
+                "Add Provider is a placeholder for the next settings iteration".into(),
+            );
+        }
+    });
+
+    let weak = app.as_weak();
+    let provider_state = state.clone();
+    app.on_select_provider(move |provider_id| {
+        let provider_id = provider_id.to_string();
+        if let Some(ui) = weak.upgrade() {
+            match load_config_ui(provider_state.studio.config_store()) {
+                Ok((_, providers)) => {
+                    apply_provider_rows(&ui, providers, Some(&provider_id));
+                    ui.set_status_text(format!("Selected provider: {provider_id}").into());
+                }
+                Err(error) => {
+                    ui.set_status_text(format!("Config load failed: {error}").into());
+                }
+            }
         }
     });
 
@@ -613,6 +668,100 @@ fn empty_messages() -> ModelRc<ChatMessageRow> {
     ModelRc::new(VecModel::from(Vec::<ChatMessageRow>::new()))
 }
 
+fn initialize_config_ui(app: &MainWindow, store: &ConfigStore) -> pl_core::Result<()> {
+    let (toml, providers) = load_config_ui(store)?;
+    app.set_config_toml(toml.into());
+    apply_provider_rows(app, providers, None);
+    Ok(())
+}
+
+fn load_config_ui(store: &ConfigStore) -> pl_core::Result<(String, Vec<ProviderRow>)> {
+    let config = store.load_or_default()?;
+    Ok((config.to_toml_pretty()?, provider_rows(&config)))
+}
+
 fn load_config_text(store: &ConfigStore) -> pl_core::Result<String> {
     store.load_or_default()?.to_toml_pretty()
+}
+
+fn provider_rows(config: &PureConfig) -> Vec<ProviderRow> {
+    config
+        .providers
+        .iter()
+        .map(|(provider_key, provider)| ProviderRow {
+            id: provider_key.clone().into(),
+            name: provider.name.clone().into(),
+            subtitle: format!("{} Platform", provider.name).into(),
+            status: provider_status(provider).into(),
+            base_url: provider
+                .base_url
+                .clone()
+                .unwrap_or_else(|| "(default)".to_string())
+                .into(),
+            model_count: provider.models.len().to_string().into(),
+            updated_at: "Loaded".into(),
+            wire_api: provider_wire_api_label(provider).into(),
+        })
+        .collect()
+}
+
+fn provider_status(provider: &ProviderConfig) -> &'static str {
+    if provider.bearer_token.is_some()
+        || provider.env_key.is_some()
+        || provider.auth_command.is_some()
+    {
+        "Healthy"
+    } else {
+        "Needs setup"
+    }
+}
+
+fn provider_wire_api_label(provider: &ProviderConfig) -> String {
+    match provider.wire_api.to_string().as_str() {
+        "chat" => "OpenAI Compatible".to_string(),
+        "responses" => "Responses API".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn apply_provider_rows(
+    ui: &MainWindow,
+    providers: Vec<ProviderRow>,
+    preferred_provider_id: Option<&str>,
+) {
+    let selected = preferred_provider_id
+        .and_then(|provider_id| {
+            providers
+                .iter()
+                .find(|provider| provider.id.as_str() == provider_id)
+        })
+        .or_else(|| providers.first())
+        .cloned();
+    ui.set_providers(ModelRc::new(VecModel::from(providers)));
+    match selected {
+        Some(provider) => set_selected_provider(ui, &provider),
+        None => clear_selected_provider(ui),
+    }
+}
+
+fn set_selected_provider(ui: &MainWindow, provider: &ProviderRow) {
+    ui.set_selected_provider_id(provider.id.clone());
+    ui.set_selected_provider_name(provider.name.clone());
+    ui.set_selected_provider_subtitle(provider.subtitle.clone());
+    ui.set_selected_provider_status(provider.status.clone());
+    ui.set_selected_provider_base_url(provider.base_url.clone());
+    ui.set_selected_provider_models(provider.model_count.clone());
+    ui.set_selected_provider_wire_api(provider.wire_api.clone());
+    ui.set_selected_provider_updated_at(provider.updated_at.clone());
+}
+
+fn clear_selected_provider(ui: &MainWindow) {
+    ui.set_selected_provider_id("".into());
+    ui.set_selected_provider_name("No provider".into());
+    ui.set_selected_provider_subtitle("".into());
+    ui.set_selected_provider_status("Needs setup".into());
+    ui.set_selected_provider_base_url("".into());
+    ui.set_selected_provider_models("0".into());
+    ui.set_selected_provider_wire_api("".into());
+    ui.set_selected_provider_updated_at("".into());
 }
