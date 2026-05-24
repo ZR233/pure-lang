@@ -27,14 +27,14 @@ export component ChatPage inherits Rectangle {
     callback approve_tool(string);
     callback deny_tool(string);
 
-    background: #f5f7f9;
+    background: #faf9f7;
 
     HorizontalLayout {
         spacing: 0px;
 
         Rectangle {
             width: 300px;
-            background: #17202a;
+            background: #2d2d30;
 
             VerticalLayout {
                 padding: 12px;
@@ -43,7 +43,7 @@ export component ChatPage inherits Rectangle {
                 Text {
                     text: "Pure Studio";
                     color: #ffffff;
-                    font-size: 24px;
+                    font-size: 20px;
                     font-weight: 700;
                 }
 
@@ -60,7 +60,7 @@ export component ChatPage inherits Rectangle {
 
                 Text {
                     text: "Projects";
-                    color: #c9d3dd;
+                    color: #e0e0e0;
                     font-size: 13px;
                     font-weight: 700;
                 }
@@ -99,7 +99,7 @@ export component ChatPage inherits Rectangle {
                     spacing: 8px;
                     Text {
                         text: "Sessions";
-                        color: #c9d3dd;
+                        color: #e0e0e0;
                         font-size: 13px;
                         font-weight: 700;
                     }
@@ -128,29 +128,29 @@ export component ChatPage inherits Rectangle {
             background: #ffffff;
 
             VerticalLayout {
-                padding: 18px;
-                spacing: 12px;
+                padding: 24px;
+                spacing: 16px;
 
                 Rectangle {
-                    height: 42px;
+                    height: 48px;
                     background: #ffffff;
-                    border-color: #d7dee7;
+                    border-color: #e1dfdd;
                     border-width: 1px;
                     border-radius: 4px;
 
                     HorizontalLayout {
-                        padding-left: 12px;
-                        padding-right: 12px;
+                        padding-left: 16px;
+                        padding-right: 16px;
                         Text {
                             text: "Conversation";
-                            font-size: 20px;
+                            font-size: 22px;
                             font-weight: 700;
-                            color: #1b2733;
+                            color: #1b1a19;
                             vertical-alignment: center;
                         }
                         Text {
                             text: root.status_text;
-                            color: #536575;
+                            color: #605e5c;
                             horizontal-alignment: right;
                             vertical-alignment: center;
                         }
@@ -160,60 +160,54 @@ export component ChatPage inherits Rectangle {
                 ScrollView {
                     viewport-width: parent.width;
                     VerticalLayout {
-                        spacing: 10px;
+                        spacing: 8px;
                         for message in root.messages : Rectangle {
-                            background: message.role == "user" ? #eef5ff : #f8fafc;
-                            border-color: #d7dee7;
-                            border-width: 1px;
-                            border-radius: 5px;
-                            min-height: 56px;
+                            background: message.role == "user" ? #deecf9 : #f3f2f1;
+                            border-radius: 8px;
+                            min-height: 48px;
 
                             VerticalLayout {
-                                padding: 10px;
+                                padding: 12px;
                                 spacing: 4px;
                                 Text {
                                     text: message.role;
-                                    color: #566b7d;
+                                    color: #605e5c;
                                     font-size: 12px;
                                     font-weight: 700;
                                 }
                                 Text {
                                     text: message.content;
-                                    color: #15202b;
+                                    color: #1b1a19;
                                     wrap: word-wrap;
                                 }
                             }
                         }
                         Rectangle {
                             visible: root.thinking_text != "";
-                            background: #fff9e8;
-                            border-color: #ead595;
-                            border-width: 1px;
-                            border-radius: 5px;
+                            background: #fff4ce;
+                            border-radius: 8px;
                             min-height: 46px;
                             Text {
                                 text: root.thinking_text;
-                                color: #5f4a08;
+                                color: #835500;
                                 wrap: word-wrap;
-                                x: 10px;
-                                y: 10px;
-                                width: parent.width - 20px;
+                                x: 12px;
+                                y: 12px;
+                                width: parent.width - 24px;
                             }
                         }
                         Rectangle {
                             visible: root.streaming_text != "";
-                            background: #f2fbf7;
-                            border-color: #b7dfce;
-                            border-width: 1px;
-                            border-radius: 5px;
+                            background: #dff6dd;
+                            border-radius: 8px;
                             min-height: 60px;
                             Text {
                                 text: root.streaming_text;
-                                color: #123326;
+                                color: #0b7940;
                                 wrap: word-wrap;
-                                x: 10px;
-                                y: 10px;
-                                width: parent.width - 20px;
+                                x: 12px;
+                                y: 12px;
+                                width: parent.width - 24px;
                             }
                         }
                     }
@@ -221,18 +215,16 @@ export component ChatPage inherits Rectangle {
 
                 Rectangle {
                     visible: root.approval_visible;
-                    height: 128px;
-                    background: #fff4f0;
-                    border-color: #e5a38d;
-                    border-width: 1px;
-                    border-radius: 5px;
+                    height: 120px;
+                    background: #fde7e9;
+                    border-radius: 8px;
 
                     VerticalLayout {
-                        padding: 10px;
+                        padding: 12px;
                         spacing: 8px;
                         Text {
                             text: root.approval_text;
-                            color: #4f2416;
+                            color: #c42b1c;
                             wrap: word-wrap;
                         }
                         HorizontalLayout {

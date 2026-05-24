@@ -14,16 +14,14 @@ component ProviderNameCell inherits Rectangle {
         Rectangle {
             width: 42px;
             height: 42px;
-            border-radius: 6px;
-            border-width: 1px;
-            border-color: #d8e0e8;
-            background: #f8fbff;
+            border-radius: 4px;
+            background: #deecf9;
 
             Text {
                 width: parent.width;
                 height: parent.height;
                 text: root.name == "OpenAI" ? "AI" : "DS";
-                color: #096895;
+                color: #0078d4;
                 font-size: 15px;
                 font-weight: 700;
                 horizontal-alignment: center;
@@ -38,14 +36,14 @@ component ProviderNameCell inherits Rectangle {
 
             Text {
                 text: root.name;
-                color: #151c28;
+                color: #1b1a19;
                 font-size: 15px;
                 font-weight: 700;
             }
 
             Text {
                 text: root.subtitle;
-                color: #617080;
+                color: #605e5c;
                 font-size: 12px;
             }
         }
@@ -64,19 +62,19 @@ component StatusCell inherits Rectangle {
             Rectangle { horizontal-stretch: 1; }
 
             Rectangle {
-                width: 68px;
-                height: 26px;
-                border-radius: 6px;
-                background: root.status == "Healthy" ? #e9f8ef : #fff5e6;
-                border-color: root.status == "Healthy" ? #9edbb5 : #e7bf7e;
+                width: 70px;
+                height: 24px;
+                border-radius: 12px;
+                background: root.status == "Healthy" ? #dff6dd : #fff4ce;
+                border-color: root.status == "Healthy" ? #a4cfba : #e3cc93;
                 border-width: 1px;
 
                 Text {
                     width: parent.width;
                     height: parent.height;
                     text: root.status;
-                    color: root.status == "Healthy" ? #168448 : #9a6400;
-                    font-size: 12px;
+                    color: root.status == "Healthy" ? #0b7940 : #835500;
+                    font-size: 11px;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
@@ -99,7 +97,7 @@ component TextCell inherits Rectangle {
         width: parent.width;
         height: parent.height;
         text: root.text;
-        color: #1c2733;
+        color: #1b1a19;
         font-size: 13px;
         vertical-alignment: center;
     }
@@ -115,7 +113,7 @@ component FixedTextCell inherits Rectangle {
         width: parent.width;
         height: parent.height;
         text: root.text;
-        color: #566577;
+        color: #605e5c;
         font-size: 13px;
         vertical-alignment: center;
         horizontal-alignment: root.align_center ? center : left;
@@ -130,8 +128,9 @@ component HeaderTextCell inherits Rectangle {
         width: parent.width;
         height: parent.height;
         text: root.text;
-        color: #596777;
+        color: #605e5c;
         font-size: 12px;
+        font-weight: 600;
         vertical-alignment: center;
         horizontal-alignment: root.align_center ? center : left;
     }
@@ -167,15 +166,13 @@ component ProviderListRow inherits Rectangle {
     in property <bool> selected;
     callback clicked(string);
 
-    height: 68px;
-    background: selected ? #eef7fb : #ffffff;
-    border-color: selected ? #9dd6e9 : #e3e8ef;
-    border-width: 1px;
+    height: 64px;
+    background: selected ? #f3f2f1 : #ffffff;
 
     HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
-        spacing: 10px;
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 12px;
 
         ProviderNameCell {
             name: root.name;
@@ -213,15 +210,15 @@ component DetailLine inherits Rectangle {
     in property <string> label;
     in property <string> value;
 
-    height: 30px;
+    height: 32px;
 
     HorizontalLayout {
-        spacing: 14px;
+        spacing: 16px;
 
         Text {
             width: 140px;
             text: label;
-            color: #5a6878;
+            color: #605e5c;
             font-size: 13px;
             vertical-alignment: center;
         }
@@ -229,7 +226,7 @@ component DetailLine inherits Rectangle {
         Text {
             horizontal-stretch: 1;
             text: value;
-            color: #182230;
+            color: #1b1a19;
             font-size: 13px;
             vertical-alignment: center;
             wrap: word-wrap;
@@ -247,24 +244,22 @@ component ProviderListPanel inherits Rectangle {
     horizontal-stretch: 1;
     vertical-stretch: 1;
     background: #ffffff;
-    border-color: #d9e0e8;
+    border-color: #e1dfdd;
     border-width: 1px;
-    border-radius: 6px;
+    border-radius: 8px;
 
     VerticalLayout {
         spacing: 0px;
 
         Rectangle {
-            height: 72px;
+            height: 68px;
             background: #ffffff;
-            border-color: #e4e9ef;
-            border-width: 1px;
 
             VerticalLayout {
                 padding-top: 16px;
                 padding-bottom: 16px;
-                padding-left: 18px;
-                padding-right: 18px;
+                padding-left: 16px;
+                padding-right: 16px;
 
                 HorizontalLayout {
                     spacing: 12px;
@@ -272,14 +267,14 @@ component ProviderListPanel inherits Rectangle {
                     LineEdit {
                         min-width: 190px;
                         horizontal-stretch: 1;
-                        height: 40px;
+                        height: 36px;
                         text <=> root.provider_search_text;
                         placeholder-text: "Search providers...";
                     }
 
                     Button {
-                        width: 116px;
-                        height: 40px;
+                        width: 120px;
+                        height: 36px;
                         text: "+ Add Provider";
                         clicked => { root.add_provider_placeholder(); }
                     }
@@ -288,15 +283,13 @@ component ProviderListPanel inherits Rectangle {
         }
 
         Rectangle {
-            height: 42px;
-            background: #fbfcfd;
-            border-color: #e4e9ef;
-            border-width: 1px;
+            height: 40px;
+            background: #faf9f7;
 
             HorizontalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
-                spacing: 10px;
+                padding-left: 16px;
+                padding-right: 16px;
+                spacing: 12px;
 
                 ProviderHeaderCell {}
 
@@ -349,24 +342,24 @@ component ProviderListPanel inherits Rectangle {
 
         Rectangle {
             height: 44px;
-            border-color: #e4e9ef;
+            border-color: #e1dfdd;
             border-width: 1px;
-            background: #fbfcfd;
+            background: #faf9f7;
 
             HorizontalLayout {
-                padding-left: 18px;
-                padding-right: 18px;
+                padding-left: 16px;
+                padding-right: 16px;
 
                 Text {
                     text: root.providers.length + " providers";
-                    color: #8494a6;
+                    color: #8a8886;
                     font-size: 12px;
                     vertical-alignment: center;
                 }
 
                 Text {
                     text: "Refresh";
-                    color: #096895;
+                    color: #0078d4;
                     font-size: 12px;
                     horizontal-alignment: right;
                     vertical-alignment: center;
@@ -386,43 +379,39 @@ component ProviderDetailsCard inherits Rectangle {
     in property <string> selected_provider_wire_api;
     in property <string> selected_provider_updated_at;
 
-    height: 240px;
+    height: 256px;
     horizontal-stretch: 1;
     background: #ffffff;
-    border-color: #d9e0e8;
+    border-color: #e1dfdd;
     border-width: 1px;
-    border-radius: 6px;
+    border-radius: 8px;
 
     VerticalLayout {
         spacing: 0px;
 
         Rectangle {
-            height: 88px;
-            border-color: #e4e9ef;
-            border-width: 1px;
+            height: 96px;
             background: #ffffff;
 
             HorizontalLayout {
-                padding-left: 18px;
-                padding-right: 18px;
-                padding-top: 12px;
-                padding-bottom: 12px;
-                spacing: 14px;
+                padding-left: 20px;
+                padding-right: 20px;
+                padding-top: 16px;
+                padding-bottom: 16px;
+                spacing: 16px;
 
                 Rectangle {
-                    width: 56px;
-                    height: 56px;
+                    width: 64px;
+                    height: 64px;
                     border-radius: 8px;
-                    border-width: 1px;
-                    border-color: #d8e0e8;
-                    background: #f0f6fb;
+                    background: #deecf9;
 
                     Text {
                         width: parent.width;
                         height: parent.height;
                         text: root.selected_provider_name == "OpenAI" ? "AI" : "DS";
-                        color: #096895;
-                        font-size: 18px;
+                        color: #0078d4;
+                        font-size: 20px;
                         font-weight: 700;
                         horizontal-alignment: center;
                         vertical-alignment: center;
@@ -436,22 +425,22 @@ component ProviderDetailsCard inherits Rectangle {
 
                     Text {
                         text: root.selected_provider_name;
-                        color: #121a26;
-                        font-size: 18px;
+                        color: #1b1a19;
+                        font-size: 20px;
                         font-weight: 700;
                         vertical-alignment: center;
                     }
 
                     Text {
                         text: root.selected_provider_subtitle;
-                        color: #6b7a8b;
+                        color: #605e5c;
                         font-size: 12px;
                         vertical-alignment: center;
                     }
 
                     Text {
                         text: root.selected_provider_base_url;
-                        color: #8895a4;
+                        color: #8a8886;
                         font-size: 12px;
                         vertical-alignment: center;
                     }
@@ -464,11 +453,11 @@ component ProviderDetailsCard inherits Rectangle {
         }
 
         VerticalLayout {
-            padding-left: 22px;
-            padding-right: 22px;
-            padding-top: 14px;
-            padding-bottom: 14px;
-            spacing: 8px;
+            padding-left: 24px;
+            padding-right: 24px;
+            padding-top: 16px;
+            padding-bottom: 16px;
+            spacing: 10px;
 
             DetailLine { label: "Provider ID"; value: root.selected_provider_id; }
             DetailLine { label: "Protocol"; value: root.selected_provider_wire_api; }
@@ -482,9 +471,9 @@ component ProviderEditPlaceholder inherits Rectangle {
     horizontal-stretch: 1;
     vertical-stretch: 1;
     background: #ffffff;
-    border-color: #d9e0e8;
+    border-color: #e1dfdd;
     border-width: 1px;
-    border-radius: 6px;
+    border-radius: 8px;
 
     VerticalLayout {
         padding: 32px;
@@ -495,15 +484,15 @@ component ProviderEditPlaceholder inherits Rectangle {
 
         Text {
             text: "Provider details";
-            color: #151c28;
-            font-size: 15px;
+            color: #1b1a19;
+            font-size: 16px;
             font-weight: 600;
             horizontal-alignment: center;
         }
 
         Text {
             text: "Select a provider to view details and configure settings.";
-            color: #8494a6;
+            color: #8a8886;
             font-size: 13px;
             wrap: word-wrap;
             horizontal-alignment: center;
@@ -525,10 +514,10 @@ component ProviderDetailColumn inherits Rectangle {
 
     horizontal-stretch: 1;
     vertical-stretch: 1;
-    background: #f6f8fb;
+    background: #faf9f7;
 
     VerticalLayout {
-        spacing: 18px;
+        spacing: 16px;
 
         ProviderDetailsCard {
             selected_provider_id: root.selected_provider_id;
@@ -563,14 +552,14 @@ export component ProviderSettingsPage inherits Rectangle {
 
     horizontal-stretch: 1;
     vertical-stretch: 1;
-    background: #f6f8fb;
+    background: #faf9f7;
 
     if !root.compact_layout : HorizontalLayout {
-        padding: 18px;
-        spacing: 18px;
+        padding: 24px;
+        spacing: 16px;
 
         ProviderListPanel {
-            min-width: 560px;
+            min-width: 580px;
             horizontal-stretch: 3;
             providers: root.providers;
             provider_search_text <=> root.provider_search_text;
@@ -580,8 +569,8 @@ export component ProviderSettingsPage inherits Rectangle {
         }
 
         ProviderDetailColumn {
-            preferred-width: 420px;
-            min-width: 340px;
+            preferred-width: 400px;
+            min-width: 360px;
             horizontal-stretch: 0;
             selected_provider_id: root.selected_provider_id;
             selected_provider_name: root.selected_provider_name;
@@ -599,8 +588,8 @@ export component ProviderSettingsPage inherits Rectangle {
         viewport-height: parent.height;
 
         VerticalLayout {
-            padding: 18px;
-            spacing: 18px;
+            padding: 24px;
+            spacing: 16px;
 
             ProviderListPanel {
                 height: 390px;
