@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use pl_model::ToolCall;
 use pl_protocol::{Message, MessageContent, MessageRole};
 
 /// 核心编译会话。
@@ -39,5 +40,147 @@ impl CoreSession {
             reasoning_content,
             metadata: HashMap::new(),
         });
+    }
+
+    /// 推入 assistant 的 tool_calls 消息。
+    ///
+    /// tool_calls 序列化后存入 metadata，供 wire_api 层构造正确的 wire 格式。
+    pub fn push_assistant_tool_calls(
+        &mut self,
+        content: Option<String>,
+        tool_calls: Vec<ToolCall>,
+        reasoning_content: Option<String>,
+    ) {
+        let mut metadata = HashMap::new();
+        let json = serde_json::to_string(&tool_calls)
+            .expect("ToolCall serialization should be infallible");
+        metadata.insert("tool_calls".to_string(), json);
+        self.messages.push(Message {
+            role: MessageRole::Assistant,
+            content: MessageContent::Text(content.unwrap_or_default()),
+            reasoning_content,
+            metadata,
+        });
+    }
+
+    /// 推入 tool result 消息。
+    pub fn push_tool_result(&mut self, tool_call_id: String, tool_name: String, result: String) {
+        let mut metadata = HashMap::new();
+        metadata.insert("tool_call_id".to_string(), tool_call_id);
+        metadata.insert("tool_name".to_string(), tool_name);
+        self.messages.push(Message {
+            role: MessageRole::Tool,
+            content: MessageContent::Text(result),
+            reasoning_content: None,
+            metadata,
+        });
+    }
+
+    pub fn len(&self) -> usize {
+        self.messages.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.messages.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_model::ToolCall;
+
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn new_session_is_empty() {
+        let session = CoreSession::new();
+        assert!(session.is_empty());
+        assert_eq!(session.len(), 0);
+    }
+
+    #[test]
+    fn push_user_prompt_adds_message() {
+        let mut session = CoreSession::new();
+        session.push_user_prompt("hello".to_string());
+
+        assert_eq!(session.len(), 1);
+        assert_eq!(session.messages()[0].role, MessageRole::User);
+        match &session.messages()[0].content {
+            MessageContent::Text(t) => assert_eq!(t, "hello"),
+            _ => panic!("expected Text content"),
+        }
+    }
+
+    #[test]
+    fn push_assistant_response_adds_message() {
+        let mut session = CoreSession::new();
+        session.push_assistant_response("reply".to_string(), Some("thinking".to_string()));
+
+        assert_eq!(session.len(), 1);
+        assert_eq!(session.messages()[0].role, MessageRole::Assistant);
+        assert_eq!(
+            session.messages()[0].reasoning_content,
+            Some("thinking".to_string())
+        );
+    }
+
+    #[test]
+    fn push_assistant_tool_calls_stores_metadata() {
+        let mut session = CoreSession::new();
+        let tool_calls = vec![ToolCall {
+            id: "call-1".to_string(),
+            name: "bash".to_string(),
+            arguments: serde_json::json!({"command": "ls"}),
+            call_id: Some("call-1".to_string()),
+        }];
+        session.push_assistant_tool_calls(Some("running...".to_string()), tool_calls, None);
+
+        assert_eq!(session.len(), 1);
+        assert_eq!(session.messages()[0].role, MessageRole::Assistant);
+        assert!(session.messages()[0].metadata.contains_key("tool_calls"));
+    }
+
+    #[test]
+    fn push_tool_result_stores_metadata() {
+        let mut session = CoreSession::new();
+        session.push_tool_result(
+            "call-1".to_string(),
+            "bash".to_string(),
+            "output".to_string(),
+        );
+
+        assert_eq!(session.len(), 1);
+        assert_eq!(session.messages()[0].role, MessageRole::Tool);
+        assert_eq!(
+            session.messages()[0].metadata.get("tool_call_id").unwrap(),
+            "call-1"
+        );
+        assert_eq!(
+            session.messages()[0].metadata.get("tool_name").unwrap(),
+            "bash"
+        );
+    }
+
+    #[test]
+    fn from_messages_preserves_order() {
+        let msgs = vec![
+            Message {
+                role: MessageRole::User,
+                content: MessageContent::Text("q".to_string()),
+                reasoning_content: None,
+                metadata: HashMap::new(),
+            },
+            Message {
+                role: MessageRole::Assistant,
+                content: MessageContent::Text("a".to_string()),
+                reasoning_content: None,
+                metadata: HashMap::new(),
+            },
+        ];
+        let session = CoreSession::from_messages(msgs.clone());
+        assert_eq!(session.len(), 2);
+        assert_eq!(session.messages()[0].role, MessageRole::User);
+        assert_eq!(session.messages()[1].role, MessageRole::Assistant);
     }
 }

@@ -70,6 +70,15 @@ fn message_content_text(content: &pl_protocol::MessageContent) -> String {
     }
 }
 
+/// 从 metadata 中解析 tool_calls（由 CoreSession::push_assistant_tool_calls 写入）。
+fn parse_tool_calls_from_metadata(
+    metadata: &std::collections::HashMap<String, String>,
+) -> Option<Vec<crate::request::ToolCall>> {
+    metadata
+        .get("tool_calls")
+        .and_then(|json| serde_json::from_str(json).ok())
+}
+
 fn responses_build_body(request: &CompletionRequest) -> serde_json::Value {
     let mut input = Vec::new();
 
@@ -82,13 +91,54 @@ fn responses_build_body(request: &CompletionRequest) -> serde_json::Value {
     }
 
     for msg in &request.messages {
-        let role = message_role_str(&msg.role);
-        let text = message_content_text(&msg.content);
-        input.push(serde_json::json!({
-            "type": "message",
-            "role": role,
-            "content": [{"type": "input_text", "text": text}]
-        }));
+        match msg.role {
+            pl_protocol::MessageRole::Assistant if msg.metadata.contains_key("tool_calls") => {
+                // Assistant 消息带 tool_calls
+                let text = message_content_text(&msg.content);
+                if !text.is_empty() {
+                    input.push(serde_json::json!({
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": text}]
+                    }));
+                }
+                if let Some(tool_calls) = parse_tool_calls_from_metadata(&msg.metadata) {
+                    for tc in &tool_calls {
+                        input.push(serde_json::json!({
+                            "type": "function_call",
+                            "id": tc.id,
+                            "name": tc.name,
+                            "arguments": serde_json::to_string(&tc.arguments).unwrap_or_default(),
+                            "call_id": tc.call_id.as_deref().unwrap_or(&tc.id),
+                        }));
+                    }
+                }
+            }
+            pl_protocol::MessageRole::Tool => {
+                // Tool result 消息
+                let call_id = msg
+                    .metadata
+                    .get("tool_call_id")
+                    .cloned()
+                    .unwrap_or_default();
+                let text = message_content_text(&msg.content);
+                input.push(serde_json::json!({
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": text,
+                }));
+            }
+            _ => {
+                // 普通消息
+                let role = message_role_str(&msg.role);
+                let text = message_content_text(&msg.content);
+                input.push(serde_json::json!({
+                    "type": "message",
+                    "role": role,
+                    "content": [{"type": "input_text", "text": text}]
+                }));
+            }
+        }
     }
 
     let tools: Vec<serde_json::Value> = request
@@ -224,20 +274,61 @@ fn chat_build_body(request: &CompletionRequest) -> serde_json::Value {
     }
 
     for msg in &request.messages {
-        let role = message_role_str(&msg.role);
-        let text = message_content_text(&msg.content);
-        let mut message = serde_json::json!({
-            "role": role,
-            "content": text
-        });
-
-        if msg.role == pl_protocol::MessageRole::Assistant
-            && let Some(reasoning_content) = &msg.reasoning_content
-        {
-            message["reasoning_content"] = serde_json::json!(reasoning_content);
+        match msg.role {
+            pl_protocol::MessageRole::Assistant if msg.metadata.contains_key("tool_calls") => {
+                // Assistant 消息带 tool_calls
+                let text = message_content_text(&msg.content);
+                let mut message = serde_json::json!({
+                    "role": "assistant",
+                    "content": if text.is_empty() { serde_json::Value::Null } else { serde_json::json!(text) }
+                });
+                if let Some(ref reasoning_content) = msg.reasoning_content {
+                    message["reasoning_content"] = serde_json::json!(reasoning_content);
+                }
+                if let Some(tool_calls) = parse_tool_calls_from_metadata(&msg.metadata) {
+                    message["tool_calls"] = serde_json::json!(tool_calls.iter().map(|tc| {
+                        serde_json::json!({
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": serde_json::to_string(&tc.arguments).unwrap_or_default()
+                            }
+                        })
+                    }).collect::<Vec<_>>());
+                }
+                messages.push(message);
+            }
+            pl_protocol::MessageRole::Tool => {
+                // Tool result 消息
+                let tool_call_id = msg
+                    .metadata
+                    .get("tool_call_id")
+                    .cloned()
+                    .unwrap_or_default();
+                let text = message_content_text(&msg.content);
+                messages.push(serde_json::json!({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": text,
+                }));
+            }
+            _ => {
+                // 普通消息
+                let role = message_role_str(&msg.role);
+                let text = message_content_text(&msg.content);
+                let mut message = serde_json::json!({
+                    "role": role,
+                    "content": text
+                });
+                if msg.role == pl_protocol::MessageRole::Assistant
+                    && let Some(reasoning_content) = &msg.reasoning_content
+                {
+                    message["reasoning_content"] = serde_json::json!(reasoning_content);
+                }
+                messages.push(message);
+            }
         }
-
-        messages.push(message);
     }
 
     let tools: Vec<serde_json::Value> = request

@@ -22,7 +22,7 @@ pub use pl_protocol::{
 };
 pub use session::CoreSession;
 pub use tool::{
-    BashInput, BashTool, OutputTruncation, Tool, ToolInput, ToolOutput, TruncatedOutput,
-    TruncationStrategy,
+    BashInput, BashTool, OutputTruncation, SubagentInput, SubagentTool, Tool, ToolInput,
+    ToolOutput, ToolRegistry, TruncatedOutput, TruncationStrategy,
 };
-pub use turn::{CompileMode, TurnRequest, TurnResult};
+pub use turn::{CompileMode, DEFAULT_MAX_TOOL_ITERATIONS, TurnRequest, TurnResult};

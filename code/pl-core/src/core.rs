@@ -6,16 +6,30 @@ use pl_protocol::{AgentEvent, AgentEventSender, Result};
 
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
 use crate::session::CoreSession;
-use crate::turn::{TurnRequest, TurnResult};
+use crate::tool::{ToolInput, ToolRegistry};
+use crate::turn::{DEFAULT_MAX_TOOL_ITERATIONS, TurnRequest, TurnResult};
+
+/// 生成唯一的会话 ID（毫秒时间戳 + 序列号）。
+fn generate_session_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{ts:x}-{seq:x}")
+}
 
 /// Pure-Lang 核心逻辑层。
 ///
-/// 负责组合会话状态、模型 provider 和单轮编译请求。它不执行命令、不写文件，
-/// 也不依赖独立执行层。
-#[derive(Debug, Clone)]
+/// 负责组合会话状态、模型 provider、工具注册表和单轮编译请求。
+/// 不执行命令、不写文件，也不依赖独立执行层。
+#[derive(Debug)]
 pub struct PureCore {
     provider: SharedModelProvider,
     reasoning_effort: Option<ReasoningEffort>,
+    tools: ToolRegistry,
 }
 
 impl PureCore {
@@ -23,6 +37,7 @@ impl PureCore {
         Self {
             provider,
             reasoning_effort: None,
+            tools: ToolRegistry::new(),
         }
     }
 
@@ -33,6 +48,7 @@ impl PureCore {
         Self {
             provider,
             reasoning_effort: Some(reasoning_effort),
+            tools: ToolRegistry::new(),
         }
     }
 
@@ -53,6 +69,11 @@ impl PureCore {
         ))
     }
 
+    /// 注册一个工具。
+    pub fn register_tool(&mut self, tool: impl crate::tool::Tool + 'static) {
+        self.tools.register(tool);
+    }
+
     pub fn run_turn<'a>(
         &'a self,
         session: &'a mut CoreSession,
@@ -61,54 +82,136 @@ impl PureCore {
     ) -> impl std::future::Future<Output = Result<TurnResult>> + Send + 'a {
         let provider = self.provider.clone();
         let reasoning_effort = self.reasoning_effort.clone();
+        let tool_schemas = self.tools.schemas();
+        let max_iterations = if self.tools.is_empty() {
+            1
+        } else {
+            request
+                .max_tool_iterations
+                .clamp(1, DEFAULT_MAX_TOOL_ITERATIONS)
+        };
 
         async move {
             let _ = event_tx.send(AgentEvent::TurnStarted);
+            let session_id = generate_session_id();
             session.push_user_prompt(request.prompt);
             let model = provider.default_model().to_string();
 
-            let completion_request = CompletionRequest {
-                model: model.clone(),
-                instructions: Some(format_instructions(
-                    request.mode.instructions(),
-                    request.workspace_instructions.as_deref(),
-                )),
-                messages: session.messages().to_vec(),
-                tools: Vec::new(),
-                tool_choice: "auto".to_string(),
-                parallel_tool_calls: false,
-                temperature: None,
-                max_tokens: None,
-                reasoning: reasoning_effort.map(|effort| ReasoningConfig {
-                    effort: Some(effort.as_str().to_string()),
-                    summary: Some(if effort.is_none() {
-                        ReasoningSummary::Disabled
-                    } else {
-                        ReasoningSummary::Enabled
-                    }),
-                }),
-                stream: true,
-            };
+            let mut last_content = String::new();
+            let mut last_reasoning_content = None;
+            let mut last_model = model.clone();
+            let mut total_usage = pl_model::TokenUsage::default();
+            let mut session_message_count = 0;
 
-            let response = provider
-                .stream_complete(completion_request, event_tx.clone())
-                .await?;
-            let content = response.content.unwrap_or_default();
-            let reasoning_content = response.reasoning_content;
-            session.push_assistant_response(content.clone(), reasoning_content.clone());
+            let instructions = format_instructions(
+                request.mode.instructions(),
+                request.workspace_instructions.as_deref(),
+            );
+            let reasoning = reasoning_effort.as_ref().map(|effort| ReasoningConfig {
+                effort: Some(effort.as_str().to_string()),
+                summary: Some(if effort.is_none() {
+                    ReasoningSummary::Disabled
+                } else {
+                    ReasoningSummary::Enabled
+                }),
+            });
+
+            let mut messages = session.messages().to_vec();
+            for _ in 0..max_iterations {
+                let completion_request = CompletionRequest {
+                    model: model.clone(),
+                    instructions: Some(instructions.clone()),
+                    messages: messages.clone(),
+                    tools: tool_schemas.clone(),
+                    tool_choice: "auto".to_string(),
+                    parallel_tool_calls: false,
+                    temperature: None,
+                    max_tokens: None,
+                    reasoning: reasoning.clone(),
+                    stream: true,
+                };
+
+                let response = provider
+                    .stream_complete(completion_request, event_tx.clone())
+                    .await?;
+
+                let content = response.content.unwrap_or_default();
+                let reasoning_content = response.reasoning_content.clone();
+                let tool_calls = response.tool_calls;
+
+                total_usage.prompt_tokens += response.usage.prompt_tokens;
+                total_usage.completion_tokens += response.usage.completion_tokens;
+
+                if !response.model.is_empty() {
+                    last_model = response.model;
+                }
+
+                if tool_calls.is_empty() {
+                    session.push_assistant_response(content.clone(), reasoning_content.clone());
+                    last_content = content;
+                    last_reasoning_content = reasoning_content;
+                    session_message_count = session.messages().len();
+                    break;
+                }
+
+                session.push_assistant_tool_calls(
+                    if content.is_empty() {
+                        None
+                    } else {
+                        Some(content.clone())
+                    },
+                    tool_calls.clone(),
+                    reasoning_content.clone(),
+                );
+                last_content = content;
+                last_reasoning_content = reasoning_content;
+
+                for tool_call in &tool_calls {
+                    let _ = event_tx.send(AgentEvent::ToolCallComplete {
+                        id: tool_call.id.clone(),
+                        name: tool_call.name.clone(),
+                        arguments: serde_json::to_string(&tool_call.arguments).unwrap_or_default(),
+                    });
+
+                    let tool_input = ToolInput {
+                        arguments: tool_call.arguments.clone(),
+                        session_id: session_id.clone(),
+                        tool_id: tool_call.id.clone(),
+                    };
+
+                    let result = match self.tools.get(&tool_call.name) {
+                        Some(tool) => match tool.execute(tool_input).await {
+                            Ok(output) => output.description,
+                            Err(e) => format!("Tool execution error: {e}"),
+                        },
+                        None => format!("Unknown tool: {}", tool_call.name),
+                    };
+
+                    session.push_tool_result(
+                        tool_call
+                            .call_id
+                            .clone()
+                            .unwrap_or_else(|| tool_call.id.clone()),
+                        tool_call.name.clone(),
+                        result,
+                    );
+                }
+
+                session_message_count = session.messages().len();
+                messages = session.messages().to_vec();
+            }
+
+            total_usage.total_tokens = total_usage.prompt_tokens + total_usage.completion_tokens;
+
             let _ = event_tx.send(AgentEvent::Done);
 
             Ok(TurnResult {
-                content,
-                reasoning_content,
-                model: if response.model.is_empty() {
-                    model
-                } else {
-                    response.model
-                },
-                usage: response.usage,
+                content: last_content,
+                reasoning_content: last_reasoning_content,
+                model: last_model,
+                usage: total_usage,
                 mode: request.mode,
-                session_message_count: session.messages().len(),
+                session_message_count,
             })
         }
     }
