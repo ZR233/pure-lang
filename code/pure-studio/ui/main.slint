@@ -1,0 +1,333 @@
+import { Button, LineEdit, ScrollView, TextEdit } from "std-widgets.slint";
+
+export struct ProjectRow {
+    id: string,
+    name: string,
+    path: string,
+}
+
+export struct SessionRow {
+    id: string,
+    title: string,
+    updated_at: string,
+}
+
+export struct ChatMessageRow {
+    role: string,
+    content: string,
+}
+
+export component MainWindow inherits Window {
+    title: "Pure Studio";
+    width: 1180px;
+    height: 760px;
+
+    in property <[ProjectRow]> projects;
+    in property <[SessionRow]> sessions;
+    in property <[ChatMessageRow]> messages;
+    in-out property <string> manual_project_path;
+    in-out property <string> prompt_text;
+    in-out property <string> config_toml;
+    in property <string> selected_project_id;
+    in property <string> selected_session_id;
+    in property <string> status_text;
+    in property <string> streaming_text;
+    in property <string> thinking_text;
+    in property <bool> is_busy;
+    in property <bool> approval_visible;
+    in property <string> approval_id;
+    in property <string> approval_text;
+    in property <int> active_page;
+
+    callback add_project_dialog();
+    callback add_project_path(string);
+    callback select_project(string);
+    callback new_session();
+    callback select_session(string);
+    callback send_prompt(string);
+    callback save_config(string);
+    callback reload_config();
+    callback show_chat();
+    callback show_settings();
+    callback approve_tool(string);
+    callback deny_tool(string);
+
+    background: #f5f7f9;
+
+    HorizontalLayout {
+        spacing: 0px;
+
+        Rectangle {
+            width: 300px;
+            background: #17202a;
+
+            VerticalLayout {
+                padding: 12px;
+                spacing: 10px;
+
+                Text {
+                    text: "Pure Studio";
+                    color: #ffffff;
+                    font-size: 24px;
+                    font-weight: 700;
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Button {
+                        text: "Chat";
+                        clicked => { root.show_chat(); }
+                    }
+                    Button {
+                        text: "Settings";
+                        clicked => { root.show_settings(); }
+                    }
+                }
+
+                Text {
+                    text: "Projects";
+                    color: #c9d3dd;
+                    font-size: 13px;
+                    font-weight: 700;
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    LineEdit {
+                        text <=> root.manual_project_path;
+                        placeholder-text: "Project path";
+                    }
+                    Button {
+                        text: "+";
+                        clicked => { root.add_project_path(root.manual_project_path); }
+                    }
+                }
+
+                Button {
+                    text: "Choose Folder";
+                    clicked => { root.add_project_dialog(); }
+                }
+
+                ScrollView {
+                    height: 200px;
+                    viewport-width: parent.width;
+                    VerticalLayout {
+                        spacing: 6px;
+                        for project in root.projects : Button {
+                            text: project.name;
+                            checked: project.id == root.selected_project_id;
+                            clicked => { root.select_project(project.id); }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: "Sessions";
+                        color: #c9d3dd;
+                        font-size: 13px;
+                        font-weight: 700;
+                    }
+                    Button {
+                        text: "+";
+                        enabled: root.selected_project_id != "";
+                        clicked => { root.new_session(); }
+                    }
+                }
+
+                ScrollView {
+                    viewport-width: parent.width;
+                    VerticalLayout {
+                        spacing: 6px;
+                        for session in root.sessions : Button {
+                            text: session.title;
+                            checked: session.id == root.selected_session_id;
+                            clicked => { root.select_session(session.id); }
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            background: #ffffff;
+
+            VerticalLayout {
+                padding: 18px;
+                spacing: 12px;
+
+                Rectangle {
+                    height: 42px;
+                    background: #ffffff;
+                    border-color: #d7dee7;
+                    border-width: 1px;
+                    border-radius: 4px;
+
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        Text {
+                            text: root.active_page == 0 ? "Conversation" : "Settings";
+                            font-size: 20px;
+                            font-weight: 700;
+                            color: #1b2733;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: root.status_text;
+                            color: #536575;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                Rectangle {
+                    visible: root.active_page == 0;
+                    background: #ffffff;
+
+                    VerticalLayout {
+                        spacing: 10px;
+
+                        ScrollView {
+                            viewport-width: parent.width;
+                            VerticalLayout {
+                                spacing: 10px;
+                                for message in root.messages : Rectangle {
+                                    background: message.role == "user" ? #eef5ff : #f8fafc;
+                                    border-color: #d7dee7;
+                                    border-width: 1px;
+                                    border-radius: 5px;
+                                    min-height: 56px;
+
+                                    VerticalLayout {
+                                        padding: 10px;
+                                        spacing: 4px;
+                                        Text {
+                                            text: message.role;
+                                            color: #566b7d;
+                                            font-size: 12px;
+                                            font-weight: 700;
+                                        }
+                                        Text {
+                                            text: message.content;
+                                            color: #15202b;
+                                            wrap: word-wrap;
+                                        }
+                                    }
+                                }
+                                Rectangle {
+                                    visible: root.thinking_text != "";
+                                    background: #fff9e8;
+                                    border-color: #ead595;
+                                    border-width: 1px;
+                                    border-radius: 5px;
+                                    min-height: 46px;
+                                    Text {
+                                        text: root.thinking_text;
+                                        color: #5f4a08;
+                                        wrap: word-wrap;
+                                        x: 10px;
+                                        y: 10px;
+                                        width: parent.width - 20px;
+                                    }
+                                }
+                                Rectangle {
+                                    visible: root.streaming_text != "";
+                                    background: #f2fbf7;
+                                    border-color: #b7dfce;
+                                    border-width: 1px;
+                                    border-radius: 5px;
+                                    min-height: 60px;
+                                    Text {
+                                        text: root.streaming_text;
+                                        color: #123326;
+                                        wrap: word-wrap;
+                                        x: 10px;
+                                        y: 10px;
+                                        width: parent.width - 20px;
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            visible: root.approval_visible;
+                            height: 128px;
+                            background: #fff4f0;
+                            border-color: #e5a38d;
+                            border-width: 1px;
+                            border-radius: 5px;
+
+                            VerticalLayout {
+                                padding: 10px;
+                                spacing: 8px;
+                                Text {
+                                    text: root.approval_text;
+                                    color: #4f2416;
+                                    wrap: word-wrap;
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button {
+                                        text: "Approve";
+                                        clicked => { root.approve_tool(root.approval_id); }
+                                    }
+                                    Button {
+                                        text: "Deny";
+                                        clicked => { root.deny_tool(root.approval_id); }
+                                    }
+                                }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 8px;
+                            LineEdit {
+                                text <=> root.prompt_text;
+                                placeholder-text: root.selected_session_id == "" ? "Create or select a session" : "Ask Pure Studio";
+                                enabled: root.selected_session_id != "" && !root.is_busy;
+                                accepted => { root.send_prompt(root.prompt_text); }
+                            }
+                            Button {
+                                text: root.is_busy ? "Running" : "Send";
+                                enabled: root.selected_session_id != "" && root.prompt_text != "" && !root.is_busy;
+                                clicked => { root.send_prompt(root.prompt_text); }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    visible: root.active_page == 1;
+                    background: #ffffff;
+
+                    VerticalLayout {
+                        spacing: 10px;
+                        Text {
+                            text: "Edit ~/.pure/config.toml";
+                            color: #354657;
+                            font-size: 14px;
+                            font-weight: 700;
+                        }
+                        TextEdit {
+                            text <=> root.config_toml;
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Button {
+                                text: "Reload";
+                                clicked => { root.reload_config(); }
+                            }
+                            Button {
+                                text: "Validate & Save";
+                                clicked => { root.save_config(root.config_toml); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -2,8 +2,10 @@ mod config;
 mod core;
 mod first_run;
 mod session;
+mod studio;
 mod tool;
 mod turn;
+mod workspace;
 
 pub use config::{
     ConfigPaths, ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProviderConfig,
@@ -21,8 +23,16 @@ pub use pl_protocol::{
     Result,
 };
 pub use session::CoreSession;
+pub use studio::{
+    ProjectRecord, SessionRecord, StudioPromptOutcome, StudioRuntime, StudioStore,
+    ToolApprovalRecord,
+};
 pub use tool::{
     BashInput, BashTool, OutputTruncation, SubagentInput, SubagentTool, Tool, ToolInput,
     ToolOutput, ToolRegistry, TruncatedOutput, TruncationStrategy,
 };
-pub use turn::{CompileMode, DEFAULT_MAX_TOOL_ITERATIONS, TurnRequest, TurnResult};
+pub use turn::{
+    CompileMode, DEFAULT_MAX_TOOL_ITERATIONS, ToolApprovalCallback, ToolApprovalDecision,
+    ToolApprovalPolicy, ToolApprovalRequest, TurnOptions, TurnRequest, TurnResult,
+};
+pub use workspace::load_workspace_instructions;

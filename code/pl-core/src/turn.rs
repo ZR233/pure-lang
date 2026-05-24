@@ -1,4 +1,9 @@
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+
 use pl_model::TokenUsage;
+use serde::{Deserialize, Serialize};
 
 /// 工具分发循环默认最大迭代次数。
 pub const DEFAULT_MAX_TOOL_ITERATIONS: usize = 10;
@@ -58,6 +63,84 @@ impl TurnRequest {
     pub fn with_max_tool_iterations(mut self, max: usize) -> Self {
         self.max_tool_iterations = max;
         self
+    }
+}
+
+pub type ToolApprovalFuture = Pin<Box<dyn Future<Output = ToolApprovalDecision> + Send>>;
+pub type ToolApprovalCallback =
+    Arc<dyn Fn(ToolApprovalRequest) -> ToolApprovalFuture + Send + Sync>;
+
+/// 工具审批策略。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ToolApprovalPolicy {
+    #[default]
+    AutoAllow,
+    Manual,
+    DenyAll,
+}
+
+/// 单次工具调用审批请求。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolApprovalRequest {
+    pub id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+    pub working_directory: Option<String>,
+}
+
+/// 单次工具调用审批结果。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ToolApprovalDecision {
+    Approved,
+    Denied { reason: String },
+}
+
+/// 单轮运行选项。
+///
+/// 用于前端控制工具审批等运行时行为。默认值保持历史行为：已注册工具自动执行。
+#[derive(Clone)]
+pub struct TurnOptions {
+    pub tool_approval_policy: ToolApprovalPolicy,
+    pub tool_approval_callback: Option<ToolApprovalCallback>,
+}
+
+impl TurnOptions {
+    pub fn new(tool_approval_policy: ToolApprovalPolicy) -> Self {
+        Self {
+            tool_approval_policy,
+            tool_approval_callback: None,
+        }
+    }
+
+    pub fn manual(callback: ToolApprovalCallback) -> Self {
+        Self {
+            tool_approval_policy: ToolApprovalPolicy::Manual,
+            tool_approval_callback: Some(callback),
+        }
+    }
+
+    pub fn deny_all() -> Self {
+        Self::new(ToolApprovalPolicy::DenyAll)
+    }
+}
+
+impl Default for TurnOptions {
+    fn default() -> Self {
+        Self::new(ToolApprovalPolicy::AutoAllow)
+    }
+}
+
+impl std::fmt::Debug for TurnOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TurnOptions")
+            .field("tool_approval_policy", &self.tool_approval_policy)
+            .field(
+                "tool_approval_callback",
+                &self.tool_approval_callback.as_ref().map(|_| "<callback>"),
+            )
+            .finish()
     }
 }
 

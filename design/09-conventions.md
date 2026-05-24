@@ -3,7 +3,7 @@
 ## 9.1 Crate 命名
 
 - 库 crate 使用 `pl-` 前缀。
-- 二进制 crate 使用 `purec`。
+- Slint 桌面应用 crate 例外使用 `pure-studio`，因为它是面向用户安装和运行的二进制应用。
 - 公共协议类型放入 `pl-protocol`。
 
 ## 9.2 依赖方向
@@ -15,7 +15,7 @@ pl-model
     ↑
 pl-core
     ↑
-purec
+pure-studio
 ```
 
 允许 `pl-core` 同时直接依赖 `pl-protocol` 和 `pl-model`。
@@ -39,7 +39,7 @@ pub trait ModelProvider: Send + Sync {
 
 核心 API 不暴露语义模糊的 `bool` 或 `Option<bool>`。
 
-CLI flag 应在 `purec` 内转换为明确类型，例如 `CompileMode`。
+前端输入应在 `pure-studio` 边界转换为明确类型，例如 `CompileMode`。
 
 ## 9.5 模块和导出
 
@@ -50,12 +50,12 @@ CLI flag 应在 `purec` 内转换为明确类型，例如 `CompileMode`。
 ## 9.6 文档口径
 
 - 项目名：Pure-Lang。
-- 命令行编译器前端：`purec`。
+- 桌面编译器前端：`pure-studio`。
 - 核心逻辑层：`pl-core`。
 - LLM provider 层：`pl-model`。
 - 公共协议层：`pl-protocol`。
 
-当前版本不承诺独立执行层、工具系统或沙箱。
+当前版本不承诺独立沙箱。工具系统必须由明确审批策略控制。
 
 ## 9.7 配置约定
 

@@ -14,9 +14,17 @@ Windows 下对应：
 %USERPROFILE%\.pure\config.toml
 ```
 
-普通对话运行时读取配置；当 `purec <prompt>` 路径发现配置文件不存在时，进入首次配置 TUI。用户在 TUI 中确认保存后，`purec` 写入 `~/.pure/config.toml`，随后重新读取磁盘配置并继续执行原 prompt。
+`pure-studio` 的桌面端状态单独保存在：
 
-`purec config path/show/init` 等配置子命令不触发首次配置 TUI，保持脚本友好。写入配置仍必须由用户显式确认触发，例如 `purec config init` 或首次配置 TUI 的保存动作。
+```text
+~/.pure/studio/studio_1.sqlite
+```
+
+SQLite 只保存 Studio 状态，例如项目、会话、消息、工具审批和应用设置，并由 `pl-core` 通过 SeaORM 纯异步访问。provider/model/role 配置仍只由 `~/.pure/config.toml` 表达。
+
+普通对话运行时读取配置；当配置文件不存在时，`pure-studio` 设置页展示默认配置草稿。写入配置必须由用户显式保存触发。
+
+`pure-studio` 设置页同样必须由用户显式保存后才写入 `~/.pure/config.toml`。
 
 ## 10.2 配置职责
 
@@ -40,7 +48,7 @@ Windows 下对应：
 | `executor` | 执行者 | 后续执行型任务 |
 | `reviewer` | 审查者 | 代码审查和结果检查 |
 
-普通 `purec "prompt"` 默认使用 `planner` 角色。
+普通桌面对话默认使用 `planner` 角色。
 
 每个角色必须配置：
 
@@ -125,11 +133,9 @@ truncation_policy = { mode = "tokens", limit = 10000 }
 
 配置里的模型会覆盖或补充 bundled model。角色引用的 model 必须存在于对应 provider 的 `models` 中。
 
-## 10.6 首次配置 TUI
+## 10.6 配置草稿
 
-首次配置 TUI 属于 `purec` 前端职责；配置构造和校验的纯逻辑属于 `pl-core`。
-
-TUI 首版支持以下能力：
+配置构造和校验的纯逻辑属于 `pl-core`。`pure-studio` 设置页可以使用默认配置草稿，并支持：
 
 - 默认选中 DeepSeek provider，也可切换为 OpenAI provider。
 - 至少配置一个 provider。
@@ -139,7 +145,7 @@ TUI 首版支持以下能力：
 - 每个 provider 的模型列表包含模板默认模型，并可追加用户自定义模型。
 - 用户选择一个默认 provider；四个模型角色默认都指向该 provider 的默认模型和默认 effort。
 
-TUI 保存前必须完成本地校验：
+设置页保存前必须完成本地校验：
 
 - provider key 非空且唯一。
 - API key 非空。
@@ -147,22 +153,19 @@ TUI 保存前必须完成本地校验：
 - 同一 provider 下模型 slug 不重复。
 - 角色引用的默认模型必须声明至少一个 `reasoning_efforts`，用于生成角色 `effort`。
 
-## 10.7 凭据策略
+## 10.7 pure-studio 设置页
+
+`pure-studio` 设置页复用 `pl-core` 的配置类型和校验逻辑，首版覆盖：
+
+- DeepSeek / OpenAI provider。
+- API key、base URL、provider key 和显示名。
+- provider 默认模型和自定义模型。
+- 四个模型角色到 provider/model/effort 的路由。
+
+保存前必须执行 `PureConfig::validate()`；失败时只在 UI 中展示错误，不写入磁盘。
+
+## 10.8 凭据策略
 
 配置允许持久化明文 `bearer_token`，但这会把 API token 直接写入 `~/.pure/config.toml`。文档和默认模板应优先展示 `env_key`，只有用户明确需要时才写 `bearer_token`。
 
-首次配置 TUI 按用户确认会把输入的 API key 明文写入对应 provider 的 `bearer_token`。后续版本可以增加系统凭据库或环境变量模式，但首版不改变现有 TOML schema。
-
-## 10.8 purec 命令
-
-首版提供最小配置命令：
-
-```powershell
-purec config path
-purec config show
-purec config init
-```
-
-- `path` 输出配置文件路径。
-- `show` 输出当前解析后的 TOML 配置。
-- `init` 创建默认配置文件；如果文件已存在则报错，避免覆盖用户配置。
+`pure-studio` 设置页按用户确认会把输入的 API key 明文写入对应 provider 的 `bearer_token`。后续版本可以增加系统凭据库或环境变量模式，但首版不改变现有 TOML schema。

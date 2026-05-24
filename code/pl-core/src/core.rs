@@ -6,8 +6,11 @@ use pl_protocol::{AgentEvent, AgentEventSender, Result};
 
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
 use crate::session::CoreSession;
-use crate::tool::{ToolInput, ToolRegistry};
-use crate::turn::{DEFAULT_MAX_TOOL_ITERATIONS, TurnRequest, TurnResult};
+use crate::tool::{BashTool, SubagentTool, ToolInput, ToolRegistry};
+use crate::turn::{
+    DEFAULT_MAX_TOOL_ITERATIONS, ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest,
+    TurnOptions, TurnRequest, TurnResult,
+};
 
 /// 生成唯一的会话 ID（毫秒时间戳 + 序列号）。
 fn generate_session_id() -> String {
@@ -74,11 +77,37 @@ impl PureCore {
         self.tools.register(tool);
     }
 
+    /// 注册默认工具集合。
+    ///
+    /// 当前包含 `bash` 和 `subagent`。调用方应通过 `TurnOptions` 控制审批策略。
+    pub fn register_default_tools(
+        &mut self,
+        workspace_root: impl Into<std::path::PathBuf>,
+        workspace_instructions: Option<String>,
+    ) {
+        self.register_tool(BashTool::new(workspace_root.into()));
+        self.register_tool(SubagentTool::new(
+            self.provider.clone(),
+            self.reasoning_effort.clone(),
+            workspace_instructions,
+        ));
+    }
+
     pub fn run_turn<'a>(
         &'a self,
         session: &'a mut CoreSession,
         request: TurnRequest,
         event_tx: AgentEventSender,
+    ) -> impl std::future::Future<Output = Result<TurnResult>> + Send + 'a {
+        self.run_turn_with_options(session, request, event_tx, TurnOptions::default())
+    }
+
+    pub fn run_turn_with_options<'a>(
+        &'a self,
+        session: &'a mut CoreSession,
+        request: TurnRequest,
+        event_tx: AgentEventSender,
+        options: TurnOptions,
     ) -> impl std::future::Future<Output = Result<TurnResult>> + Send + 'a {
         let provider = self.provider.clone();
         let reasoning_effort = self.reasoning_effort.clone();
@@ -173,17 +202,37 @@ impl PureCore {
                         arguments: serde_json::to_string(&tool_call.arguments).unwrap_or_default(),
                     });
 
-                    let tool_input = ToolInput {
-                        arguments: tool_call.arguments.clone(),
-                        session_id: session_id.clone(),
-                        tool_id: tool_call.id.clone(),
-                    };
-
                     let result = match self.tools.get(&tool_call.name) {
-                        Some(tool) => match tool.execute(tool_input).await {
-                            Ok(output) => output.description,
-                            Err(e) => format!("Tool execution error: {e}"),
-                        },
+                        Some(tool) => {
+                            let approval_request = approval_request(tool_call);
+                            match approve_tool_call(&options, &approval_request, event_tx.clone())
+                                .await
+                            {
+                                ToolApprovalDecision::Approved => {
+                                    let _ = event_tx.send(AgentEvent::ToolApprovalGranted {
+                                        id: approval_request.id.clone(),
+                                        name: approval_request.name.clone(),
+                                    });
+                                    let tool_input = ToolInput {
+                                        arguments: tool_call.arguments.clone(),
+                                        session_id: session_id.clone(),
+                                        tool_id: tool_call.id.clone(),
+                                    };
+                                    match tool.execute(tool_input).await {
+                                        Ok(output) => output.description,
+                                        Err(e) => format!("Tool execution error: {e}"),
+                                    }
+                                }
+                                ToolApprovalDecision::Denied { reason } => {
+                                    let _ = event_tx.send(AgentEvent::ToolApprovalDenied {
+                                        id: approval_request.id.clone(),
+                                        name: approval_request.name.clone(),
+                                        reason: reason.clone(),
+                                    });
+                                    format!("Tool execution denied: {reason}")
+                                }
+                            }
+                        }
                         None => format!("Unknown tool: {}", tool_call.name),
                     };
 
@@ -217,6 +266,48 @@ impl PureCore {
     }
 }
 
+fn approval_request(tool_call: &pl_model::ToolCall) -> ToolApprovalRequest {
+    let working_directory = tool_call
+        .arguments
+        .get("workingDirectory")
+        .or_else(|| tool_call.arguments.get("working_directory"))
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned);
+    ToolApprovalRequest {
+        id: tool_call.id.clone(),
+        name: tool_call.name.clone(),
+        arguments: tool_call.arguments.clone(),
+        working_directory,
+    }
+}
+
+async fn approve_tool_call(
+    options: &TurnOptions,
+    request: &ToolApprovalRequest,
+    event_tx: AgentEventSender,
+) -> ToolApprovalDecision {
+    match options.tool_approval_policy {
+        ToolApprovalPolicy::AutoAllow => ToolApprovalDecision::Approved,
+        ToolApprovalPolicy::DenyAll => ToolApprovalDecision::Denied {
+            reason: "tool execution denied by policy".to_string(),
+        },
+        ToolApprovalPolicy::Manual => {
+            let _ = event_tx.send(AgentEvent::ToolApprovalRequested {
+                id: request.id.clone(),
+                name: request.name.clone(),
+                arguments: serde_json::to_string(&request.arguments).unwrap_or_default(),
+                working_directory: request.working_directory.clone(),
+            });
+            match &options.tool_approval_callback {
+                Some(callback) => callback(request.clone()).await,
+                None => ToolApprovalDecision::Denied {
+                    reason: "manual approval required but no approver is configured".to_string(),
+                },
+            }
+        }
+    }
+}
+
 fn format_instructions(base: &str, workspace: Option<&str>) -> String {
     match workspace {
         Some(content) if !content.trim().is_empty() => {
@@ -230,6 +321,8 @@ fn format_instructions(base: &str, workspace: Option<&str>) -> String {
 mod tests {
     use super::*;
     use crate::{ConfigStore, ModelRole};
+    use pl_model::ToolCall;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn config_core_uses_planner_role_model_and_effort() {
@@ -259,5 +352,92 @@ mod tests {
     fn format_instructions_ignores_empty_workspace() {
         assert_eq!(format_instructions("base", Some("")), "base");
         assert_eq!(format_instructions("base", Some("   ")), "base");
+    }
+
+    #[test]
+    fn default_turn_options_auto_allow_tools() {
+        let options = TurnOptions::default();
+
+        assert_eq!(options.tool_approval_policy, ToolApprovalPolicy::AutoAllow);
+        assert!(options.tool_approval_callback.is_none());
+    }
+
+    #[tokio::test]
+    async fn manual_tool_approval_can_approve() {
+        let options = TurnOptions::manual(std::sync::Arc::new(|request| {
+            Box::pin(async move {
+                assert_eq!(request.name, "bash");
+                ToolApprovalDecision::Approved
+            })
+        }));
+        let request = ToolApprovalRequest {
+            id: "call-1".to_string(),
+            name: "bash".to_string(),
+            arguments: serde_json::json!({"command": "echo hi"}),
+            working_directory: None,
+        };
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
+
+        let decision = approve_tool_call(&options, &request, event_tx).await;
+        let event = event_rx.recv().await.unwrap();
+
+        assert_eq!(decision, ToolApprovalDecision::Approved);
+        assert!(matches!(
+            event,
+            AgentEvent::ToolApprovalRequested {
+                id,
+                name,
+                ..
+            } if id == "call-1" && name == "bash"
+        ));
+    }
+
+    #[tokio::test]
+    async fn deny_all_tool_approval_denies_without_request_event() {
+        let options = TurnOptions::deny_all();
+        let request = ToolApprovalRequest {
+            id: "call-1".to_string(),
+            name: "bash".to_string(),
+            arguments: serde_json::json!({"command": "echo hi"}),
+            working_directory: None,
+        };
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
+
+        let decision = approve_tool_call(&options, &request, event_tx).await;
+
+        assert_eq!(
+            decision,
+            ToolApprovalDecision::Denied {
+                reason: "tool execution denied by policy".to_string()
+            }
+        );
+        assert!(event_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn approval_request_extracts_working_directory() {
+        let call = ToolCall {
+            id: "call-1".to_string(),
+            name: "bash".to_string(),
+            arguments: serde_json::json!({
+                "command": "pwd",
+                "workingDirectory": "C:/work"
+            }),
+            call_id: None,
+        };
+
+        let request = approval_request(&call);
+
+        assert_eq!(request.working_directory.as_deref(), Some("C:/work"));
+    }
+
+    #[test]
+    fn default_tools_register_bash_and_subagent() {
+        let mut core = PureCore::default_provider().unwrap();
+
+        core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()));
+
+        assert!(core.tools.get("bash").is_some());
+        assert!(core.tools.get("subagent").is_some());
     }
 }
