@@ -29,7 +29,7 @@
 
 `pure-studio` 是当前前端。后续可以增加 CLI、Web 或 IDE 前端，但都应调用 `pl-core`，并复用 `pl-protocol` 的事件和消息类型。
 
-`pure-studio` 使用 Slint 实现跨平台桌面 GUI。桌面端状态通过 `pl-core::StudioStore` 纯异步写入 SQLite，业务配置仍通过 `pl-core::ConfigStore` 读写 `~/.pure/config.toml`。
+`pure-studio` 使用 Tauri 2 实现跨平台桌面应用，UI 使用 React、Vite 和 TypeScript。桌面端状态通过 `pl-core::StudioStore` 纯异步写入 SQLite，业务配置仍通过 `pl-core::ConfigStore` 读写 `~/.pure/config.toml`。
 
 ## 5.4 执行能力扩展
 

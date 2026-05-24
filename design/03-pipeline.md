@@ -13,7 +13,8 @@ pure-studio UI action
   → CoreSession
   → PureCore
   → AgentEvent stream
-  → Slint UI 实时渲染
+  → Tauri event
+  → React UI 实时渲染
   → pl-core StudioStore 持久化消息和工具审批
 ```
 
@@ -62,4 +63,4 @@ pure-studio UI action
 - `session_message_count`
 - 角色使用的 provider/model/effort 由配置决定。
 
-`pure-studio` 必须消费 `AgentEvent` 实时渲染 `TextDelta`、`ThinkingDelta`、工具调用状态、审批状态和错误。
+`pure-studio` 必须通过 Tauri event 把 `AgentEvent` 转发给 React 前端，实时渲染 `TextDelta`、`ThinkingDelta`、工具调用状态、审批状态和错误。

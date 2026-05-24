@@ -7,7 +7,7 @@
 | `pl-protocol` | 公共错误、消息、事件、权限类型 |
 | `pl-model` | LLM provider、模型元数据、wire API、SSE |
 | `pl-core` | turn、session、Studio SQLite、角色化配置、工具审批、核心编译流程编排 |
-| `pure-studio` | Slint 桌面前端，负责 UI 渲染和输入回调 |
+| `pure-studio` | Tauri 2 桌面前端，负责 React UI、命令桥接、事件推送和输入回调 |
 
 P0 不包含独立沙箱。`pure-studio` 可以接入工具系统，但首版必须手动审批。
 
@@ -39,4 +39,7 @@ cargo test -p pl-model
 cargo test -p pl-core
 cargo test -p pure-studio
 cargo build -p pure-studio
+npm --prefix code/pure-studio run typecheck
+npm --prefix code/pure-studio run build
+npm --prefix code/pure-studio run tauri:build
 ```

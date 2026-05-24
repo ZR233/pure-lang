@@ -3,7 +3,7 @@ members = [
     "code/pl-protocol",
     "code/pl-model",
     "code/pl-core",
-    "code/pure-studio",
+    "code/pure-studio/src-tauri",
 ]
 resolver = "3"
 
@@ -26,10 +26,9 @@ reqwest = { version = "0.13", features = ["json", "stream"] }
 eventsource-stream = "0.2"
 toml = "0.8"
 pretty_assertions = "1.4.1"
-slint = "1.16.1"
-slint-build = "1.16.1"
-rfd = "0.17.2"
-icu_provider = { version = "2.2.0", features = ["logging"] }
+tauri = "2"
+tauri-build = "2"
+tauri-plugin-dialog = "2"
 sea-orm = { version = "1.1.20", default-features = false, features = [
     "macros",
     "runtime-tokio-rustls",

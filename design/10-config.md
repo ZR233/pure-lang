@@ -164,17 +164,17 @@ truncation_policy = { mode = "tokens", limit = 10000 }
 
 保存前必须执行 `PureConfig::validate()`；失败时只在 UI 中展示错误，不写入磁盘。
 
-设置页 UI 按页面模块拆分，`MainWindow` 只负责顶层路由和共享状态，具体页面放在 `ui/pages`。Provider 标签页优先从 `PureConfig.providers` 派生列表和详情，不引入新的配置存储。当前阶段的 `Add Provider` 是视觉和交互占位，只更新 UI 状态提示，不创建 provider，也不写入 `~/.pure/config.toml`。
+设置页 UI 按 React 页面模块拆分，顶层 App 负责页面路由和共享状态，具体页面放在 `src/pages`，可复用组件放在 `src/components`，Tauri 命令封装放在 `src/lib`。Provider 标签页优先从 `PureConfig.providers` 派生列表和详情，不引入新的配置存储。当前阶段的 `Add Provider` 是视觉和交互占位，只更新 UI 状态提示，不创建 provider，也不写入 `~/.pure/config.toml`。
 
 桌面窗口必须支持自由缩放。`pure-studio` 只声明首选窗口尺寸，不把 UI 绑定到固定宽高；设置页内容跟随窗口尺寸自适应。Provider 标签页在常规桌面宽度使用 provider 列表和详情双栏布局，在窄窗口下切换为上下堆叠并允许滚动，避免表格和详情面板被裁剪。
 
-为了支持设计验证，`pure-studio` 的 Slint 页面应提供只依赖静态 fixture 的 preview 组件。Provider 设置页的单页预览入口固定为：
+为了支持设计验证，`pure-studio` 的 React 页面应支持 Vite dev server 中的 fixture 状态预览。Provider 设置页的本地预览入口固定为：
 
 ```powershell
-slint-viewer --auto-reload -I code\pure-studio\ui --component SettingsProvidersPreview code\pure-studio\ui\previews\settings_providers_preview.slint
+npm --prefix code/pure-studio run dev
 ```
 
-预览组件只用于布局和视觉对照，最终应用行为仍以 `cargo run -p pure-studio` 为准。
+Vite 预览只用于布局和视觉对照，最终应用行为仍以 Tauri 运行结果为准。
 
 ## 10.8 凭据策略
 

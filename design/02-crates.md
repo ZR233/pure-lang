@@ -78,13 +78,13 @@
 
 ## 2.4 pure-studio
 
-**职责**：Slint 桌面前端。
+**职责**：Tauri 2 桌面前端。
 
 能力：
 
 - 渲染多个项目和多个会话。
 - 订阅 `AgentEvent` 实时渲染文本、思考、错误和工具审批状态。
-- 通过原生目录选择器或手动路径把用户输入传给 `pl-core`。
+- 通过 Tauri command、event 和 dialog 插件把用户输入传给 `pl-core`，并把核心事件推送到 React UI。
 
 `pure-studio` 只依赖 `pl-core` 和必要 UI 依赖，不直接调用 `pl-model`，也不拥有数据库逻辑。Studio 状态由 `pl-core` 使用 SeaORM 保存到：
 
@@ -102,7 +102,7 @@ members = [
     "code/pl-protocol",
     "code/pl-model",
     "code/pl-core",
-    "code/pure-studio",
+    "code/pure-studio/src-tauri",
 ]
 resolver = "3"
 
@@ -110,9 +110,9 @@ resolver = "3"
 pl-protocol = { path = "code/pl-protocol" }
 pl-model = { path = "code/pl-model" }
 pl-core = { path = "code/pl-core" }
-slint = "1.16.1"
-slint-build = "1.16.1"
+tauri = "2"
+tauri-build = "2"
+tauri-plugin-dialog = "2"
 sea-orm = "1.1.20"
-rfd = "0.17.2"
 toml = "0.8"
 ```
