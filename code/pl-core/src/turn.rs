@@ -1,5 +1,8 @@
 use pl_model::TokenUsage;
 
+/// 工具分发循环默认最大迭代次数。
+pub const DEFAULT_MAX_TOOL_ITERATIONS: usize = 10;
+
 /// 编译请求的执行模式。
 ///
 /// `Plan` 只要求核心流程产出规划与解释；`Auto` 允许模型生成更主动的
@@ -33,6 +36,8 @@ pub struct TurnRequest {
     pub prompt: String,
     pub mode: CompileMode,
     pub workspace_instructions: Option<String>,
+    /// 工具分发循环最大迭代次数（默认 10）。
+    pub max_tool_iterations: usize,
 }
 
 impl TurnRequest {
@@ -41,11 +46,17 @@ impl TurnRequest {
             prompt: prompt.into(),
             mode,
             workspace_instructions: None,
+            max_tool_iterations: DEFAULT_MAX_TOOL_ITERATIONS,
         }
     }
 
     pub fn with_workspace_instructions(mut self, instructions: String) -> Self {
         self.workspace_instructions = Some(instructions);
+        self
+    }
+
+    pub fn with_max_tool_iterations(mut self, max: usize) -> Self {
+        self.max_tool_iterations = max;
         self
     }
 }

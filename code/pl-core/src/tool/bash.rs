@@ -145,89 +145,92 @@ impl Tool for BashTool {
         })
     }
 
-    async fn execute(&self, input: ToolInput) -> Result<ToolOutput, PureError> {
-        let bash_input = Self::parse_input(input.arguments, self.name())?;
+    fn execute<'a>(
+        &'a self,
+        input: ToolInput,
+    ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
+        Box::pin(async move {
+            let bash_input = Self::parse_input(input.arguments, self.name())?;
 
-        let timeout = bash_input
-            .timeout_seconds
-            .map(Duration::from_secs)
-            .unwrap_or(self.default_timeout);
+            let timeout = bash_input
+                .timeout_seconds
+                .map(Duration::from_secs)
+                .unwrap_or(self.default_timeout);
 
-        let (shell, flag) = Self::shell_command();
-        let mut command = Command::new(shell);
-        command.args([flag, &bash_input.command]);
+            let (shell, flag) = Self::shell_command();
+            let mut command = Command::new(shell);
+            command.args([flag, &bash_input.command]);
 
-        if let Some(dir) = &bash_input.working_directory {
-            command.current_dir(dir);
-        }
-
-        command.stdout(std::process::Stdio::piped());
-        command.stderr(std::process::Stdio::piped());
-
-        let child = command
-            .spawn()
-            .map_err(|e| self.tool_error(format!("failed to spawn command: {e}")))?;
-        let child_id = child.id();
-
-        let (stdout, stderr, exit_code, timed_out);
-
-        match tokio::time::timeout(timeout, child.wait_with_output()).await {
-            Ok(Ok(output)) => {
-                timed_out = false;
-                stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                exit_code = output.status.code();
+            if let Some(dir) = &bash_input.working_directory {
+                command.current_dir(dir);
             }
-            Ok(Err(e)) => {
-                return Err(self.tool_error(format!("command execution failed: {e}")));
+
+            command.stdout(std::process::Stdio::piped());
+            command.stderr(std::process::Stdio::piped());
+
+            let child = command
+                .spawn()
+                .map_err(|e| self.tool_error(format!("failed to spawn command: {e}")))?;
+            let child_id = child.id();
+
+            let (stdout, stderr, exit_code, timed_out);
+
+            match tokio::time::timeout(timeout, child.wait_with_output()).await {
+                Ok(Ok(output)) => {
+                    timed_out = false;
+                    stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                    stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                    exit_code = output.status.code();
+                }
+                Ok(Err(e)) => {
+                    return Err(self.tool_error(format!("command execution failed: {e}")));
+                }
+                Err(_elapsed) => {
+                    kill_orphan_process(child_id);
+                    timed_out = true;
+                    stdout = String::new();
+                    stderr = format!("Command timed out after {} seconds", timeout.as_secs());
+                    exit_code = None;
+                }
             }
-            Err(_elapsed) => {
-                kill_orphan_process(child_id);
-                timed_out = true;
-                stdout = String::new();
-                stderr = format!("Command timed out after {} seconds", timeout.as_secs());
-                exit_code = None;
+
+            let output_path = self.output_path(&input.session_id, &input.tool_id);
+            if let Some(parent) = output_path.parent() {
+                tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                    self.tool_error(format!("failed to create output directory: {e}"))
+                })?;
             }
-        }
 
-        let output_path = self.output_path(&input.session_id, &input.tool_id);
-        if let Some(parent) = output_path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| self.tool_error(format!("failed to create output directory: {e}")))?;
-        }
-
-        {
-            let combined = format!(
-                "=== STDOUT ===\n{stdout}\n\n=== STDERR ===\n{stderr}\n"
-            );
-            tokio::fs::write(&output_path, combined.as_bytes())
-                .await
-                .map_err(|e| self.tool_error(format!("failed to write output file: {e}")))?;
-        }
-
-        let stdout_truncated = self.truncation.truncate(&stdout);
-        let stderr_truncated = self.truncation.truncate(&stderr);
-
-        let description = if timed_out {
-            format!("Command timed out after {} seconds", timeout.as_secs())
-        } else {
-            match exit_code {
-                Some(0) => "Command exited successfully (code 0)".to_string(),
-                Some(code) => format!("Command exited with code {code}"),
-                None => "Command terminated (no exit code available)".to_string(),
+            {
+                let combined = format!("=== STDOUT ===\n{stdout}\n\n=== STDERR ===\n{stderr}\n");
+                tokio::fs::write(&output_path, combined.as_bytes())
+                    .await
+                    .map_err(|e| self.tool_error(format!("failed to write output file: {e}")))?;
             }
-        };
 
-        Ok(ToolOutput {
-            description,
-            truncated: OutputTruncation {
-                stdout: stdout_truncated,
-                stderr: stderr_truncated,
-            },
-            output_file: output_path,
-            exit_code,
-            timed_out,
+            let stdout_truncated = self.truncation.truncate(&stdout);
+            let stderr_truncated = self.truncation.truncate(&stderr);
+
+            let description = if timed_out {
+                format!("Command timed out after {} seconds", timeout.as_secs())
+            } else {
+                match exit_code {
+                    Some(0) => "Command exited successfully (code 0)".to_string(),
+                    Some(code) => format!("Command exited with code {code}"),
+                    None => "Command terminated (no exit code available)".to_string(),
+                }
+            };
+
+            Ok(ToolOutput {
+                description,
+                truncated: OutputTruncation {
+                    stdout: stdout_truncated,
+                    stderr: stderr_truncated,
+                },
+                output_file: output_path,
+                exit_code,
+                timed_out,
+            })
         })
     }
 }
