@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   BootstrapPayload,
   ConfigPayload,
+  ProviderSettingsInput,
   ProjectSelectionPayload,
   RunPromptResponse,
   SessionSelectionPayload,
@@ -48,4 +49,8 @@ export function loadConfig() {
 
 export function saveConfig(toml: string) {
   return invoke<ConfigPayload>("save_config", { toml });
+}
+
+export function saveProviderSettings(input: ProviderSettingsInput) {
+  return invoke<ConfigPayload>("save_provider_settings", { input });
 }

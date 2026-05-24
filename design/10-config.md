@@ -164,7 +164,15 @@ truncation_policy = { mode = "tokens", limit = 10000 }
 
 保存前必须执行 `PureConfig::validate()`；失败时只在 UI 中展示错误，不写入磁盘。
 
-设置页 UI 按 React 页面模块拆分，顶层 App 负责页面路由和共享状态，具体页面放在 `src/pages`，可复用组件放在 `src/components`，Tauri 命令封装放在 `src/lib`。Provider 标签页优先从 `PureConfig.providers` 派生列表和详情，不引入新的配置存储。当前阶段的 `Add Provider` 是视觉和交互占位，只更新 UI 状态提示，不创建 provider，也不写入 `~/.pure/config.toml`。
+设置页 UI 按 React 页面模块拆分，顶层 App 负责页面路由和共享状态，具体页面放在 `src/pages`，可复用组件放在 `src/components`，Tauri 命令封装放在 `src/lib`。Provider 标签页优先从 `PureConfig.providers` 派生列表和详情，不引入新的配置存储。
+
+Provider 标签页必须提供结构化编辑能力：
+
+- 添加 DeepSeek 或 OpenAI provider，自动生成唯一 provider key。
+- 编辑 provider key、显示名、base URL、环境变量名、API key、wire API 和默认模型。
+- 展示 provider 模板自带的默认模型列表。
+- 允许追加用户自定义模型，保存时由 `pl-core` 将模板默认模型排在前面，再追加用户自定义模型。
+- 保存前由 `pl-core` 构造 `PureConfig` 并执行 `PureConfig::validate()`；校验失败时只在 UI 中展示错误，不写入磁盘。
 
 桌面窗口必须支持自由缩放。`pure-studio` 只声明首选窗口尺寸，不把 UI 绑定到固定宽高；设置页内容跟随窗口尺寸自适应。Provider 标签页在常规桌面宽度使用 provider 列表和详情双栏布局，在窄窗口下切换为上下堆叠并允许滚动，避免表格和详情面板被裁剪。
 

@@ -18,6 +18,25 @@ pub enum ProviderTemplateKind {
 }
 
 impl ProviderTemplateKind {
+    pub fn all() -> [Self; 2] {
+        [Self::DeepSeek, Self::OpenAi]
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        match key {
+            "deepseek" => Some(Self::DeepSeek),
+            "openai" => Some(Self::OpenAi),
+            _ => None,
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::DeepSeek => "deepseek",
+            Self::OpenAi => "openai",
+        }
+    }
+
     pub fn key_prefix(self) -> &'static str {
         match self {
             Self::DeepSeek => "deepseek",
@@ -32,19 +51,49 @@ impl ProviderTemplateKind {
         }
     }
 
-    fn provider_info(self) -> ProviderInfo {
+    pub(crate) fn provider_info(self) -> ProviderInfo {
         match self {
             Self::DeepSeek => ProviderInfo::deepseek(None),
             Self::OpenAi => ProviderInfo::openai(None),
         }
     }
 
+    pub fn default_models(self) -> Result<Vec<ModelConfig>> {
+        let bundled_models = default_models();
+        self.default_model_slugs()
+            .iter()
+            .map(|slug| {
+                bundled_models
+                    .iter()
+                    .find(|model| model.slug == *slug)
+                    .cloned()
+                    .map(ModelConfig::from_model_info)
+                    .ok_or_else(|| {
+                        PureError::ConfigError(format!("default model template is missing: {slug}"))
+                    })
+            })
+            .collect()
+    }
+
+    pub fn default_model_slugs(self) -> &'static [&'static str] {
+        match self {
+            Self::DeepSeek => &["deepseek-v4-flash"],
+            Self::OpenAi => &["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"],
+        }
+    }
+
+    pub fn provider_config(self) -> Result<ProviderConfig> {
+        Ok(ProviderConfig::from_provider_info(
+            self.provider_info(),
+            self.default_models()?,
+        ))
+    }
+
     fn template_model(self) -> Result<ModelConfig> {
         let info = self.provider_info();
-        default_models()
+        self.default_models()?
             .into_iter()
             .find(|model| model.slug == info.default_model)
-            .map(ModelConfig::from_model_info)
             .ok_or_else(|| {
                 PureError::ConfigError(format!(
                     "default model template is missing: {}",
