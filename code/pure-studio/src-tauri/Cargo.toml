@@ -6,19 +6,16 @@ license.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-icu_provider = { workspace = true }
 pl-core = { workspace = true }
 pl-protocol = { workspace = true }
-rfd = { workspace = true }
-sea-orm = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-slint = { workspace = true }
+tauri = { workspace = true }
+tauri-plugin-dialog = { workspace = true }
 tokio = { workspace = true }
-toml = { workspace = true }
 
 [build-dependencies]
-slint-build = { workspace = true }
+tauri-build = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

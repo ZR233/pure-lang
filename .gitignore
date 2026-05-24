@@ -1,5 +1,8 @@
 # Build artifacts
 /target
+/code/pure-studio/node_modules
+/code/pure-studio/dist
+/code/pure-studio/src-tauri/gen
 
 # IDE
 /.claude/*

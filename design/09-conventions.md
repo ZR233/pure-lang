@@ -3,7 +3,7 @@
 ## 9.1 Crate 命名
 
 - 库 crate 使用 `pl-` 前缀。
-- Slint 桌面应用 crate 例外使用 `pure-studio`，因为它是面向用户安装和运行的二进制应用。
+- Tauri 桌面应用 crate 例外使用 `pure-studio`，因为它是面向用户安装和运行的二进制应用。
 - 公共协议类型放入 `pl-protocol`。
 
 ## 9.2 依赖方向

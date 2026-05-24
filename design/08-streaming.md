@@ -24,7 +24,7 @@ pl-model provider
   → pure-studio 实时渲染
 ```
 
-`pure-studio` 必须订阅同一 `AgentEventReceiver`，并把事件转换为 Slint UI 状态：
+`pure-studio` 必须订阅同一 `AgentEventReceiver`，并通过 Tauri event 把事件转换为 React 前端应用状态：
 
 - `TextDelta` 追加到当前 assistant 消息。
 - `ThinkingDelta` 追加到当前思考区域。
@@ -40,4 +40,4 @@ pl-model provider
 
 ## 8.4 事件边界
 
-事件类型属于协议层，不应包含 provider 私有结构，也不应绑定具体前端。工具审批事件只承载通用工具名、参数和审批结果，不包含 Slint 或桌面端私有状态。
+事件类型属于协议层，不应包含 provider 私有结构，也不应绑定具体前端。工具审批事件只承载通用工具名、参数和审批结果，不包含 Tauri、React 或桌面端私有状态。
