@@ -5,7 +5,7 @@
 ## Crate 命名
 
 - 所有 crate 名称以 `pl-` 为前缀，例如 `pl-core`、`pl-tool`、`pl-agent`。
-- 二进制 crate 例外，使用 `purec`。
+- Slint 桌面二进制 crate 例外，使用 `pure-studio`。
 
 ## 异步 Trait
 

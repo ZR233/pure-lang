@@ -49,7 +49,13 @@
 - `TurnRequest`
 - `TurnResult`
 - `CoreSession`
+- `StudioStore`
+- `ProjectRecord`
+- `SessionRecord`
 - `PureCore::run_turn(...)`
+- `PureCore::run_turn_with_options(...)`
+- `TurnOptions`
+- `ToolApprovalPolicy`
 - `PureConfig`
 - `ConfigStore`
 - `ModelRole`
@@ -59,42 +65,44 @@
 
 - 保存和读取核心会话消息。
 - 读取和保存 `~/.pure/config.toml`。
+- 使用 SeaORM 纯异步读写 `~/.pure/studio/studio_1.sqlite`。
 - 校验固定角色到 provider/model/effort 的路由。
 - 将自然语言 prompt 转换为模型请求。
 - 调用 `pl-model` provider。
 - 接收并转发 `AgentEvent`。
+- 按 `TurnOptions` 管理工具注册和工具审批。
 - 汇总模型返回为 `TurnResult`。
-- 提供首次配置 TUI 使用的纯配置构造逻辑。
+- 提供设置页使用的纯配置构造逻辑。
 
-配置文件由显式 `purec config` 命令或首次配置 TUI 的确认保存动作写入。当前版本不执行命令、不写业务文件、不提供独立执行层。
+配置文件由 `pure-studio` 设置页的确认保存动作写入。工具执行必须经过明确的审批策略；当前版本不提供独立沙箱层。
 
-## 2.4 purec
+## 2.4 pure-studio
 
-**职责**：命令行编译器前端。
+**职责**：Slint 桌面前端。
 
-命令：
+能力：
 
-```powershell
-purec "创建 HTTP 服务器"
-purec --plan "创建 HTTP 服务器"
-purec --auto "创建 HTTP 服务器"
-purec config path
-purec config show
-purec config init
-purec --help
+- 渲染多个项目和多个会话。
+- 订阅 `AgentEvent` 实时渲染文本、思考、错误和工具审批状态。
+- 通过原生目录选择器或手动路径把用户输入传给 `pl-core`。
+
+`pure-studio` 只依赖 `pl-core` 和必要 UI 依赖，不直接调用 `pl-model`，也不拥有数据库逻辑。Studio 状态由 `pl-core` 使用 SeaORM 保存到：
+
+```text
+~/.pure/studio/studio_1.sqlite
 ```
 
-`purec` 使用 `clap` 解析参数。CLI flag 只存在于入口层，进入核心 API 前会被归一化为 `CompileMode`。
-普通对话默认使用 `planner` 角色。
-
-当普通对话路径发现 `~/.pure/config.toml` 不存在时，`purec` 进入首次配置 TUI。TUI 负责收集 provider、API key 和模型配置输入，并调用 `pl-core` 的纯配置构造逻辑生成 `PureConfig` 后保存。`purec config` 子命令不触发 TUI。
+`~/.pure/config.toml` 仍是 provider/model/role 配置的唯一来源。
 
 ## 2.5 Workspace
 
 ```toml
 [workspace]
 members = [
-    "code/*",
+    "code/pl-protocol",
+    "code/pl-model",
+    "code/pl-core",
+    "code/pure-studio",
 ]
 resolver = "3"
 
@@ -102,8 +110,9 @@ resolver = "3"
 pl-protocol = { path = "code/pl-protocol" }
 pl-model = { path = "code/pl-model" }
 pl-core = { path = "code/pl-core" }
-clap = { version = "4", features = ["derive"] }
+slint = "1.16.1"
+slint-build = "1.16.1"
+sea-orm = "1.1.20"
+rfd = "0.17.2"
 toml = "0.8"
-ratatui = "0.29"
-crossterm = "0.28"
 ```

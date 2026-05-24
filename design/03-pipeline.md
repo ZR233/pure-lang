@@ -2,24 +2,24 @@
 
 ## 3.1 总览
 
-当前编译流程是一个单轮 turn 编排：
+当前编译流程是一个由 `pl-core` 编排的单轮 turn。`pure-studio` 只负责 UI 输入输出：
 
 ```text
-purec args
+pure-studio UI action
+  → pl-core Studio API
   → ConfigStore 读取 ~/.pure/config.toml
-  → planner RoleConfig
-  → TurnRequest
+  → StudioStore 通过 SeaORM 读取 SQLite 项目和会话消息
+  → TurnRequest + TurnOptions
   → CoreSession
   → PureCore
-  → CompletionRequest
-  → pl-model provider
   → AgentEvent stream
-  → TurnResult
+  → Slint UI 实时渲染
+  → pl-core StudioStore 持久化消息和工具审批
 ```
 
 ## 3.2 输入
 
-`purec` 接收自然语言 prompt，并将 CLI 模式转换为 `CompileMode`：
+`pure-studio` 的 UI 操作进入 `pl-core` 前转换为明确类型，例如 `CompileMode`：
 
 - 默认：`CompileMode::Plan`
 - `--plan`：`CompileMode::Plan`
@@ -42,6 +42,14 @@ purec args
 - 将模型结果追加为 assistant 消息。
 - 返回 `TurnResult`。
 
+`PureCore::run_turn_with_options(...)` 在上述流程上额外接收 `TurnOptions`：
+
+- `ToolApprovalPolicy::AutoAllow`：工具调用直接执行。
+- `ToolApprovalPolicy::Manual`：工具调用先发出审批请求，前端批准后执行。
+- `ToolApprovalPolicy::DenyAll`：工具调用一律作为拒绝结果写回会话。
+
+`pure-studio` 首版通过 `pl-core` 使用 `Manual`。
+
 ## 3.4 输出
 
 `TurnResult` 包含：
@@ -54,4 +62,4 @@ purec args
 - `session_message_count`
 - 角色使用的 provider/model/effort 由配置决定。
 
-`purec` 首版只渲染最终内容；后续可消费 `AgentEvent` 实现实时渲染。
+`pure-studio` 必须消费 `AgentEvent` 实时渲染 `TextDelta`、`ThinkingDelta`、工具调用状态、审批状态和错误。

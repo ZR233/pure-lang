@@ -1,6 +1,9 @@
 [workspace]
 members = [
-    "code/*",
+    "code/pl-protocol",
+    "code/pl-model",
+    "code/pl-core",
+    "code/pure-studio",
 ]
 resolver = "3"
 
@@ -21,11 +24,16 @@ tracing-subscriber = "0.3"
 bitflags = { version = "2", features = ["serde"] }
 reqwest = { version = "0.13", features = ["json", "stream"] }
 eventsource-stream = "0.2"
-clap = { version = "4", features = ["derive"] }
 toml = "0.8"
-crossterm = "0.28.1"
-ratatui = "0.29.0"
 pretty_assertions = "1.4.1"
+slint = "1.16.1"
+slint-build = "1.16.1"
+rfd = "0.17.2"
+sea-orm = { version = "1.1.20", default-features = false, features = [
+    "macros",
+    "runtime-tokio-rustls",
+    "sqlx-sqlite",
+] }
 
 pl-protocol = { path = "code/pl-protocol" }
 pl-core = { path = "code/pl-core" }
