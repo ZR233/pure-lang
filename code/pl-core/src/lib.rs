@@ -1,4 +1,5 @@
 mod config;
+mod config_editor;
 mod core;
 mod first_run;
 mod session;
@@ -11,6 +12,9 @@ pub use config::{
     ConfigPaths, ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProviderConfig,
     PureConfig, ReasoningEffort, ResolvedRoleConfig, RoleConfig, RoleConfigs,
     TruncationPolicyConfig,
+};
+pub use config_editor::{
+    ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, infer_provider_template_kind,
 };
 pub use core::PureCore;
 pub use first_run::{

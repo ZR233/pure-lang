@@ -21,19 +21,62 @@ export type ChatMessage = {
 
 export type ProviderRecord = {
   id: string;
+  templateKind: ProviderKind;
   name: string;
   subtitle: string;
   status: string;
   baseUrl: string;
+  envKey: string;
+  bearerToken: string;
+  defaultModel: string;
   modelCount: string;
   updatedAt: string;
   wireApi: string;
+  models: ModelRecord[];
+  defaultModels: ModelRecord[];
+  customModels: ModelRecord[];
+};
+
+export type ProviderKind = "deepseek" | "openai";
+
+export type ModelRecord = {
+  slug: string;
+  displayName: string;
+  reasoningEfforts: string[];
+};
+
+export type ProviderTemplateRecord = {
+  id: ProviderKind;
+  name: string;
+  baseUrl: string;
+  envKey: string;
+  defaultModel: string;
+  wireApi: string;
+  defaultModels: ModelRecord[];
 };
 
 export type ConfigPayload = {
   toml: string;
   providers: ProviderRecord[];
+  templates: ProviderTemplateRecord[];
   configExists: boolean;
+};
+
+export type ProviderSettingsInput = {
+  defaultProviderId?: string | null;
+  providers: ProviderInput[];
+};
+
+export type ProviderInput = {
+  id: string;
+  templateKind: ProviderKind;
+  name: string;
+  baseUrl: string;
+  envKey: string;
+  bearerToken: string;
+  defaultModel: string;
+  wireApi: string;
+  customModels: ModelRecord[];
 };
 
 export type BootstrapPayload = {

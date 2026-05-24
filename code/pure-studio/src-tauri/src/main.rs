@@ -4,11 +4,12 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use pl_core::{
-    ConfigStore, ProjectRecord, ProviderConfig, PureConfig, SessionRecord, StudioRuntime,
-    ToolApprovalCallback, ToolApprovalDecision, ToolApprovalRequest,
+    ConfigStore, ModelConfig, ProjectRecord, ProviderConfig, ProviderEdit, ProviderModelEdit,
+    ProviderSettingsEdit, ProviderTemplateKind, PureConfig, SessionRecord, StudioRuntime,
+    ToolApprovalCallback, ToolApprovalDecision, ToolApprovalRequest, infer_provider_template_kind,
 };
 use pl_protocol::{AgentEvent, Message, MessageContent, MessageRole, PureError};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{Mutex, oneshot};
 
@@ -84,13 +85,40 @@ struct MessageDto {
 #[serde(rename_all = "camelCase")]
 struct ProviderDto {
     id: String,
+    template_kind: String,
     name: String,
     subtitle: String,
     status: String,
     base_url: String,
+    env_key: String,
+    bearer_token: String,
+    default_model: String,
     model_count: String,
     updated_at: String,
     wire_api: String,
+    models: Vec<ModelDto>,
+    default_models: Vec<ModelDto>,
+    custom_models: Vec<ModelDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderTemplateDto {
+    id: String,
+    name: String,
+    base_url: String,
+    env_key: String,
+    default_model: String,
+    wire_api: String,
+    default_models: Vec<ModelDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelDto {
+    slug: String,
+    display_name: String,
+    reasoning_efforts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -98,7 +126,37 @@ struct ProviderDto {
 struct ConfigDto {
     toml: String,
     providers: Vec<ProviderDto>,
+    templates: Vec<ProviderTemplateDto>,
     config_exists: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderSettingsInput {
+    default_provider_id: Option<String>,
+    providers: Vec<ProviderInput>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderInput {
+    id: String,
+    template_kind: String,
+    name: String,
+    base_url: String,
+    env_key: String,
+    bearer_token: String,
+    default_model: String,
+    wire_api: String,
+    custom_models: Vec<ModelInput>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelInput {
+    slug: String,
+    display_name: String,
+    reasoning_efforts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -192,6 +250,7 @@ fn main() {
             deny_tool,
             load_config,
             save_config,
+            save_provider_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Pure Studio");
@@ -394,6 +453,25 @@ fn save_config(toml: String, state: State<'_, AppState>) -> CommandResult<Config
     config_dto(state.studio.config_store())
 }
 
+#[tauri::command]
+fn save_provider_settings(
+    input: ProviderSettingsInput,
+    state: State<'_, AppState>,
+) -> CommandResult<ConfigDto> {
+    let current = state.studio.config_store().load_or_default()?;
+    let edit = ProviderSettingsEdit {
+        default_provider: input.default_provider_id,
+        providers: input
+            .providers
+            .into_iter()
+            .map(provider_edit)
+            .collect::<CommandResult<Vec<_>>>()?,
+    };
+    let config = edit.to_config(&current)?;
+    state.studio.config_store().save(&config)?;
+    config_dto(state.studio.config_store())
+}
+
 async fn select_project_data(
     state: &State<'_, AppState>,
     project_id: String,
@@ -499,6 +577,7 @@ fn config_dto(store: &ConfigStore) -> CommandResult<ConfigDto> {
     Ok(ConfigDto {
         toml: config.to_toml_pretty()?,
         providers: provider_dtos(&config),
+        templates: provider_template_dtos()?,
         config_exists: store.config_exists(),
     })
 }
@@ -507,20 +586,62 @@ fn provider_dtos(config: &PureConfig) -> Vec<ProviderDto> {
     config
         .providers
         .iter()
-        .map(|(provider_key, provider)| ProviderDto {
-            id: provider_key.clone(),
-            name: provider.name.clone(),
-            subtitle: format!("{} Platform", provider.name),
-            status: provider_status(provider).to_string(),
-            base_url: provider
-                .base_url
-                .clone()
-                .unwrap_or_else(|| "(default)".to_string()),
-            model_count: provider.models.len().to_string(),
-            updated_at: "Loaded".to_string(),
-            wire_api: provider_wire_api_label(provider),
-        })
+        .map(|(provider_key, provider)| provider_dto(provider_key, provider))
         .collect()
+}
+
+fn provider_dto(provider_key: &str, provider: &ProviderConfig) -> ProviderDto {
+    let kind = infer_provider_template_kind(provider_key, provider);
+    let default_slugs = kind.default_model_slugs();
+    let default_models = kind.default_models().unwrap_or_default();
+    let custom_models = provider
+        .models
+        .iter()
+        .filter(|model| !default_slugs.contains(&model.slug.as_str()))
+        .map(model_dto)
+        .collect::<Vec<_>>();
+    let models = default_models
+        .iter()
+        .map(model_dto)
+        .chain(custom_models.iter().cloned())
+        .collect::<Vec<_>>();
+    ProviderDto {
+        id: provider_key.to_string(),
+        template_kind: kind.key().to_string(),
+        name: provider.name.clone(),
+        subtitle: format!("{} Platform", provider.name),
+        status: provider_status(provider).to_string(),
+        base_url: provider.base_url.clone().unwrap_or_default(),
+        env_key: provider.env_key.clone().unwrap_or_default(),
+        bearer_token: provider.bearer_token.clone().unwrap_or_default(),
+        default_model: provider.default_model.clone(),
+        model_count: models.len().to_string(),
+        updated_at: "Loaded".to_string(),
+        wire_api: provider.wire_api.to_string(),
+        models,
+        default_models: default_models.iter().map(model_dto).collect(),
+        custom_models,
+    }
+}
+
+fn provider_template_dtos() -> CommandResult<Vec<ProviderTemplateDto>> {
+    ProviderTemplateKind::all()
+        .into_iter()
+        .map(provider_template_dto)
+        .collect()
+}
+
+fn provider_template_dto(kind: ProviderTemplateKind) -> CommandResult<ProviderTemplateDto> {
+    let info = kind.provider_config()?;
+    Ok(ProviderTemplateDto {
+        id: kind.key().to_string(),
+        name: info.name,
+        base_url: info.base_url.unwrap_or_default(),
+        env_key: info.env_key.unwrap_or_default(),
+        default_model: info.default_model,
+        wire_api: info.wire_api.to_string(),
+        default_models: kind.default_models()?.iter().map(model_dto).collect(),
+    })
 }
 
 fn provider_status(provider: &ProviderConfig) -> &'static str {
@@ -534,12 +655,40 @@ fn provider_status(provider: &ProviderConfig) -> &'static str {
     }
 }
 
-fn provider_wire_api_label(provider: &ProviderConfig) -> String {
-    match provider.wire_api.to_string().as_str() {
-        "chat" => "OpenAI Compatible".to_string(),
-        "responses" => "Responses API".to_string(),
-        other => other.to_string(),
+fn model_dto(model: &ModelConfig) -> ModelDto {
+    ModelDto {
+        slug: model.slug.clone(),
+        display_name: model.display_name.clone(),
+        reasoning_efforts: model.reasoning_efforts.clone(),
     }
+}
+
+fn provider_edit(input: ProviderInput) -> CommandResult<ProviderEdit> {
+    Ok(ProviderEdit {
+        key: input.id,
+        kind: provider_template_kind(&input.template_kind)?,
+        name: input.name,
+        base_url: Some(input.base_url),
+        env_key: Some(input.env_key),
+        bearer_token: Some(input.bearer_token),
+        default_model: input.default_model,
+        wire_api: input.wire_api,
+        custom_models: input
+            .custom_models
+            .into_iter()
+            .map(|model| ProviderModelEdit {
+                slug: model.slug,
+                display_name: model.display_name,
+                reasoning_efforts: model.reasoning_efforts,
+            })
+            .collect(),
+    })
+}
+
+fn provider_template_kind(value: &str) -> CommandResult<ProviderTemplateKind> {
+    ProviderTemplateKind::from_key(value).ok_or_else(|| {
+        CommandError::from_display(format!("unsupported provider template: {value}"))
+    })
 }
 
 fn project_dtos(projects: Vec<ProjectRecord>) -> Vec<ProjectDto> {

@@ -8,7 +8,6 @@ import {
   Plus,
   RefreshCw,
   Save,
-  Search,
   Send,
   Settings,
   ShieldAlert,
@@ -16,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { ProviderSettings } from "./components/ProviderSettings";
 import {
   approveTool,
   bootstrapStudio,
@@ -25,6 +25,7 @@ import {
   openProject,
   runPrompt,
   saveConfig,
+  saveProviderSettings,
   selectProject,
   selectSession,
 } from "./lib/tauri";
@@ -36,6 +37,7 @@ import {
   ProjectRecord,
   PromptFailed,
   ProviderRecord,
+  ProviderTemplateRecord,
   RunPromptResponse,
   SessionRecord,
   SessionSelectionPayload,
@@ -73,6 +75,7 @@ export function App() {
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [providers, setProviders] = useState<ProviderRecord[]>([]);
+  const [providerTemplates, setProviderTemplates] = useState<ProviderTemplateRecord[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [manualPath, setManualPath] = useState("");
@@ -92,19 +95,6 @@ export function App() {
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
   const selectedSession = sessions.find((session) => session.id === selectedSessionId) ?? null;
-  const filteredProviders = providers.filter((provider) => {
-    const query = providerSearch.trim().toLowerCase();
-    if (!query) {
-      return true;
-    }
-    return (
-      provider.name.toLowerCase().includes(query) ||
-      provider.id.toLowerCase().includes(query) ||
-      provider.baseUrl.toLowerCase().includes(query)
-    );
-  });
-  const selectedProvider =
-    providers.find((provider) => provider.id === selectedProviderId) ?? providers[0] ?? null;
 
   const liveMessages = useMemo(() => {
     const rows = [...messages];
@@ -206,6 +196,7 @@ export function App() {
 
   function applyConfig(payload: ConfigPayload) {
     setProviders(payload.providers);
+    setProviderTemplates(payload.templates);
     setConfigToml(payload.toml);
     setConfigExists(payload.configExists);
     setSelectedProviderId((current) => {
@@ -326,6 +317,34 @@ export function App() {
       setStatus("Config saved");
     } catch (error) {
       setStatus(`Config invalid: ${errorText(error)}`);
+    }
+  }
+
+  async function onSaveProviderSettings() {
+    try {
+      applyConfig(
+        await saveProviderSettings({
+          defaultProviderId: selectedProviderId,
+          providers: providers.map((provider) => ({
+            id: provider.id,
+            templateKind: provider.templateKind,
+            name: provider.name,
+            baseUrl: provider.baseUrl,
+            envKey: provider.envKey,
+            bearerToken: provider.bearerToken,
+            defaultModel: provider.defaultModel,
+            wireApi: provider.wireApi,
+            customModels: provider.customModels.map((model) => ({
+              slug: model.slug,
+              displayName: model.displayName,
+              reasoningEfforts: [...model.reasoningEfforts],
+            })),
+          })),
+        }),
+      );
+      setStatus("Provider settings saved");
+    } catch (error) {
+      setStatus(`Provider settings invalid: ${errorText(error)}`);
     }
   }
 
@@ -557,7 +576,14 @@ export function App() {
                 <RefreshCw size={16} />
                 Reload
               </button>
-              <button className="primary" onClick={() => void onSaveConfig()}>
+              <button
+                className="primary"
+                onClick={() =>
+                  activeSettingsTab === "providers"
+                    ? void onSaveProviderSettings()
+                    : void onSaveConfig()
+                }
+              >
                 <Save size={16} />
                 Save
               </button>
@@ -579,87 +605,18 @@ export function App() {
           </nav>
 
           {activeSettingsTab === "providers" ? (
-            <div className="provider-settings">
-              <section className="provider-list-card">
-                <div className="provider-toolbar">
-                  <div className="search-box">
-                    <Search size={16} />
-                    <input
-                      value={providerSearch}
-                      onChange={(event) => setProviderSearch(event.target.value)}
-                      placeholder="Search providers..."
-                    />
-                  </div>
-                  <button onClick={() => setStatus("Add Provider is a placeholder")}>
-                    <Plus size={16} />
-                    Add Provider
-                  </button>
-                </div>
-                <div className="provider-table">
-                  <div className="provider-row header">
-                    <span className="provider-name-header">Provider</span>
-                    <span>Status</span>
-                    <span>Base URL</span>
-                    <span>Models</span>
-                    <span>Updated</span>
-                  </div>
-                  {filteredProviders.map((provider) => (
-                    <button
-                      key={provider.id}
-                      className={`provider-row ${provider.id === selectedProvider?.id ? "active" : ""}`}
-                      onClick={() => setSelectedProviderId(provider.id)}
-                    >
-                      <span className="provider-name-cell">
-                        <span className="provider-badge">{initials(provider.name)}</span>
-                        <span>
-                          <strong>{provider.name}</strong>
-                          <small>{provider.subtitle}</small>
-                        </span>
-                      </span>
-                      <span className="health">{provider.status}</span>
-                      <span>{provider.baseUrl}</span>
-                      <span>{provider.modelCount}</span>
-                      <span>{provider.updatedAt}</span>
-                    </button>
-                  ))}
-                </div>
-              </section>
-
-              <section className="provider-detail-card">
-                {selectedProvider ? (
-                  <>
-                    <div className="provider-detail-head">
-                      <span className="provider-badge large">{initials(selectedProvider.name)}</span>
-                      <div>
-                        <h2>{selectedProvider.name}</h2>
-                        <p>{selectedProvider.subtitle}</p>
-                      </div>
-                      <span className="health">{selectedProvider.status}</span>
-                    </div>
-                    <dl>
-                      <dt>Provider ID</dt>
-                      <dd>{selectedProvider.id}</dd>
-                      <dt>Protocol</dt>
-                      <dd>{selectedProvider.wireApi}</dd>
-                      <dt>Base URL</dt>
-                      <dd>{selectedProvider.baseUrl}</dd>
-                      <dt>Models</dt>
-                      <dd>{selectedProvider.modelCount}</dd>
-                    </dl>
-                  </>
-                ) : (
-                  <p className="muted">No provider configured.</p>
-                )}
-              </section>
-
-              <section className="config-editor-card">
-                <div>
-                  <h2>Config TOML</h2>
-                  <p>Validate and save writes to ~/.pure/config.toml.</p>
-                </div>
-                <textarea value={configToml} onChange={(event) => setConfigToml(event.target.value)} />
-              </section>
-            </div>
+            <ProviderSettings
+              providers={providers}
+              templates={providerTemplates}
+              selectedProviderId={selectedProviderId}
+              providerSearch={providerSearch}
+              configToml={configToml}
+              setProviders={setProviders}
+              setSelectedProviderId={setSelectedProviderId}
+              setProviderSearch={setProviderSearch}
+              setConfigToml={setConfigToml}
+              onSaveToml={() => void onSaveConfig()}
+            />
           ) : (
             <div className="settings-placeholder">
               <h2>Coming soon</h2>
