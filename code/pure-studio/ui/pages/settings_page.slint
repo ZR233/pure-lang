@@ -7,22 +7,20 @@ component SettingsTab inherits Rectangle {
     in property <int> active_index;
     callback selected(int);
 
-    preferred-width: 108px;
-    min-width: 72px;
-    height: 36px;
+    preferred-width: 100px;
+    min-width: 64px;
+    height: 32px;
     horizontal-stretch: 1;
-    border-radius: 6px;
+    border-radius: 4px;
     background: root.index == root.active_index ? #ffffff : transparent;
-    border-color: root.index == root.active_index ? #d6e2ec : transparent;
-    border-width: root.index == root.active_index ? 1px : 0px;
 
     Text {
         width: parent.width;
         height: parent.height;
         text: root.label;
-        color: root.index == root.active_index ? #096895 : #5a6878;
+        color: root.index == root.active_index ? #1b1a19 : #605e5c;
         font-size: 13px;
-        font-weight: root.index == root.active_index ? 700 : 500;
+        font-weight: root.index == root.active_index ? 600 : 500;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
@@ -53,36 +51,34 @@ export component SettingsPage inherits Rectangle {
     callback add_provider_placeholder();
     callback select_provider(string);
 
-    background: #f6f8fb;
+    background: #faf9f7;
 
     VerticalLayout {
         spacing: 0px;
 
         Rectangle {
-            height: 98px;
+            height: 104px;
             background: #ffffff;
-            border-color: #d9e0e8;
-            border-width: 1px;
 
             VerticalLayout {
-                padding-left: 24px;
-                padding-right: 24px;
-                padding-top: 14px;
+                padding-left: 32px;
+                padding-right: 32px;
+                padding-top: 20px;
                 spacing: 0px;
 
                 HorizontalLayout {
-                    height: 44px;
+                    height: 48px;
                     spacing: 12px;
 
                     Rectangle {
-                        width: 36px;
-                        height: 36px;
-                        border-radius: 6px;
-                        background: #f0f4f8;
+                        width: 40px;
+                        height: 40px;
+                        border-radius: 4px;
+                        background: #f3f2f1;
 
                         Text {
-                            text: "←";
-                            color: #1c2835;
+                            text: "\u{2190}";
+                            color: #1b1a19;
                             font-size: 20px;
                             vertical-alignment: center;
                             horizontal-alignment: center;
@@ -97,8 +93,8 @@ export component SettingsPage inherits Rectangle {
 
                     Text {
                         text: "Settings";
-                        color: #111827;
-                        font-size: 22px;
+                        color: #1b1a19;
+                        font-size: 24px;
                         font-weight: 700;
                         vertical-alignment: center;
                     }
@@ -107,20 +103,20 @@ export component SettingsPage inherits Rectangle {
 
                     Text {
                         text: root.status_text;
-                        color: #8895a4;
+                        color: #8a8886;
                         font-size: 12px;
                         vertical-alignment: center;
                     }
                 }
 
                 Rectangle {
-                    preferred-width: 572px;
-                    min-width: 400px;
-                    max-width: 572px;
-                    height: 44px;
+                    preferred-width: 560px;
+                    min-width: 380px;
+                    max-width: 560px;
+                    height: 40px;
                     border-radius: 8px;
-                    background: #eef3f7;
-                    border-color: #dce5ed;
+                    background: #f3f2f1;
+                    border-color: #e1dfdd;
                     border-width: 1px;
 
                     HorizontalLayout {
@@ -152,20 +148,20 @@ export component SettingsPage inherits Rectangle {
         }
 
         if root.active_settings_tab != 0 : Rectangle {
-            background: #f6f8fb;
+            background: #faf9f7;
             VerticalLayout {
-                padding: 48px;
+                padding: 64px;
                 spacing: 12px;
                 Text {
                     text: "Coming soon";
-                    color: #151c28;
-                    font-size: 22px;
+                    color: #1b1a19;
+                    font-size: 20px;
                     font-weight: 700;
                     horizontal-alignment: center;
                 }
                 Text {
                     text: "This settings tab will be wired in a later iteration.";
-                    color: #657386;
+                    color: #605e5c;
                     font-size: 14px;
                     horizontal-alignment: center;
                 }
