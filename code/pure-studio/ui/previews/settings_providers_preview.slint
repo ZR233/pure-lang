@@ -1,0 +1,73 @@
+import { SettingsPage } from "../pages/settings_page.slint";
+import { ProviderRow } from "../types.slint";
+
+export component SettingsProvidersPreview inherits Window {
+    title: "Pure Studio Settings Preview";
+    preferred-width: 1180px;
+    preferred-height: 760px;
+
+    property <[ProviderRow]> sample_providers: [
+        {
+            id: "deepseek",
+            name: "DeepSeek",
+            subtitle: "DeepSeek Platform",
+            status: "Healthy",
+            base_url: "https://api.deepseek.com",
+            model_count: "24",
+            updated_at: "2 minutes ago",
+            wire_api: "OpenAI Compatible",
+        },
+        {
+            id: "openai",
+            name: "OpenAI",
+            subtitle: "OpenAI Platform",
+            status: "Healthy",
+            base_url: "https://api.openai.com/v1",
+            model_count: "67",
+            updated_at: "1 hour ago",
+            wire_api: "Responses API",
+        },
+    ];
+
+    in-out property <string> provider_search_text;
+    property <string> selected_provider_id: "deepseek";
+    property <string> selected_provider_name: "DeepSeek";
+    property <string> selected_provider_subtitle: "DeepSeek Platform";
+    property <string> selected_provider_status: "Healthy";
+    property <string> selected_provider_base_url: "https://api.deepseek.com";
+    property <string> selected_provider_models: "24";
+    property <string> selected_provider_wire_api: "OpenAI Compatible";
+    property <string> selected_provider_updated_at: "2 minutes ago";
+    property <string> status_text: "Preview";
+    property <int> active_settings_tab: 0;
+
+    SettingsPage {
+        width: root.width;
+        height: root.height;
+        providers: root.sample_providers;
+        provider_search_text <=> root.provider_search_text;
+        selected_provider_id: root.selected_provider_id;
+        selected_provider_name: root.selected_provider_name;
+        selected_provider_subtitle: root.selected_provider_subtitle;
+        selected_provider_status: root.selected_provider_status;
+        selected_provider_base_url: root.selected_provider_base_url;
+        selected_provider_models: root.selected_provider_models;
+        selected_provider_wire_api: root.selected_provider_wire_api;
+        selected_provider_updated_at: root.selected_provider_updated_at;
+        status_text: root.status_text;
+        active_settings_tab: root.active_settings_tab;
+        show_chat => { root.status_text = "Back to chat"; }
+        select_settings_tab(index) => { root.active_settings_tab = index; }
+        add_provider_placeholder => { root.status_text = "Add Provider is a placeholder"; }
+        select_provider(provider_id) => {
+            root.selected_provider_id = provider_id;
+            root.selected_provider_name = provider_id == "openai" ? "OpenAI" : "DeepSeek";
+            root.selected_provider_subtitle = provider_id == "openai" ? "OpenAI Platform" : "DeepSeek Platform";
+            root.selected_provider_base_url = provider_id == "openai" ? "https://api.openai.com/v1" : "https://api.deepseek.com";
+            root.selected_provider_models = provider_id == "openai" ? "67" : "24";
+            root.selected_provider_wire_api = provider_id == "openai" ? "Responses API" : "OpenAI Compatible";
+            root.selected_provider_updated_at = provider_id == "openai" ? "1 hour ago" : "2 minutes ago";
+            root.status_text = "Selected " + root.selected_provider_name;
+        }
+    }
+}
