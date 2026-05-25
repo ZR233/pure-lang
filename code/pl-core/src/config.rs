@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use pl_model::{
     AuthCommand, InputModality, ModelCapabilities, ModelInfo, ProviderInfo, TruncationMode,
-    TruncationPolicy, WireApi, default_models,
+    TruncationPolicy, WireApi, deepseek_default_model_slugs, default_models,
 };
 use pl_protocol::{PureError, Result};
 use serde::Deserialize;
@@ -267,9 +267,10 @@ pub struct ProviderConfig {
 impl ProviderConfig {
     pub fn default_deepseek() -> Self {
         let info = ProviderInfo::deepseek(None);
+        let slugs = deepseek_default_model_slugs();
         let models = default_models()
             .into_iter()
-            .filter(|model| model.slug == info.default_model)
+            .filter(|model| slugs.contains(&model.slug.as_str()))
             .map(ModelConfig::from_model_info)
             .collect();
         Self::from_provider_info(info, models)
@@ -607,7 +608,13 @@ mod tests {
             config.role_config(ModelRole::Explorer).effort.as_str(),
             "high"
         );
-        assert_eq!(config.providers["deepseek"].models.len(), 1);
+        assert_eq!(config.providers["deepseek"].models.len(), 2);
+        assert!(
+            config.providers["deepseek"]
+                .models
+                .iter()
+                .any(|model| model.slug == "deepseek-v4-pro")
+        );
     }
 
     #[test]

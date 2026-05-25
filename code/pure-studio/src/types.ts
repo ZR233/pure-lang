@@ -26,7 +26,6 @@ export type ProviderRecord = {
   subtitle: string;
   status: string;
   baseUrl: string;
-  envKey: string;
   bearerToken: string;
   defaultModel: string;
   modelCount: string;
@@ -42,14 +41,23 @@ export type ProviderKind = "deepseek" | "openai";
 export type ModelRecord = {
   slug: string;
   displayName: string;
+  description?: string | null;
+  contextWindow?: number | null;
+  maxContextWindow?: number | null;
+  autoCompactTokenLimit?: number | null;
+  defaultTemperature?: number | null;
+  maxOutputTokens?: number | null;
   reasoningEfforts: string[];
+  capabilities?: string[];
+  inputModalities?: string[];
+  truncationMode?: string;
+  truncationLimit?: number;
 };
 
 export type ProviderTemplateRecord = {
   id: ProviderKind;
   name: string;
   baseUrl: string;
-  envKey: string;
   defaultModel: string;
   wireApi: string;
   defaultModels: ModelRecord[];
@@ -72,7 +80,6 @@ export type ProviderInput = {
   templateKind: ProviderKind;
   name: string;
   baseUrl: string;
-  envKey: string;
   bearerToken: string;
   defaultModel: string;
   wireApi: string;

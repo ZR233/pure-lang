@@ -28,6 +28,7 @@ import {
   saveProviderSettings,
   selectProject,
   selectSession,
+  isTauriRuntime,
 } from "./lib/tauri";
 import {
   AgentEventPayload,
@@ -123,6 +124,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+
     const unlisteners = [
       listen<AgentEventPayload>("studio-agent-event", ({ payload }) => {
         const event = payload.event;
@@ -330,7 +335,6 @@ export function App() {
             templateKind: provider.templateKind,
             name: provider.name,
             baseUrl: provider.baseUrl,
-            envKey: provider.envKey,
             bearerToken: provider.bearerToken,
             defaultModel: provider.defaultModel,
             wireApi: provider.wireApi,
@@ -610,12 +614,9 @@ export function App() {
               templates={providerTemplates}
               selectedProviderId={selectedProviderId}
               providerSearch={providerSearch}
-              configToml={configToml}
               setProviders={setProviders}
               setSelectedProviderId={setSelectedProviderId}
               setProviderSearch={setProviderSearch}
-              setConfigToml={setConfigToml}
-              onSaveToml={() => void onSaveConfig()}
             />
           ) : (
             <div className="settings-placeholder">

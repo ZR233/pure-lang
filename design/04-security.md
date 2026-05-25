@@ -26,7 +26,7 @@
 
 `~/.pure/config.toml` 允许保存明文 `bearer_token`。这意味着读取该文件的本机用户或进程可以直接获得 API token。
 
-默认配置模板优先使用 `env_key`，只有用户明确需要时才写入 `bearer_token`。
+当前 provider 运行时只使用配置中保存的 `bearer_token` 作为 API key。`env_key` 只作为旧配置兼容字段和测试辅助信息保留，不在 `pure-studio` 界面展示，也不作为运行时鉴权来源。
 
 ## 4.4 未来执行策略
 

@@ -10,7 +10,9 @@ mod sse;
 mod wire_api;
 
 pub use capabilities::{ModelCapabilities, ProviderCapabilities};
-pub use default_models::{default_model_slugs, default_models};
+pub use default_models::{
+    deepseek_default_model_slugs, default_model_slugs, default_models, openai_default_model_slugs,
+};
 pub use manager::{DefaultModelsManager, ModelsManager};
 pub use model_info::{InputModality, ModelInfo, TruncationMode, TruncationPolicy};
 pub use openai::OpenAiCompatibleProvider;
