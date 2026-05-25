@@ -12,6 +12,7 @@ import {
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 import type { ModelRecord, ProviderKind, ProviderRecord, ProviderTemplateRecord } from "../types";
+import { cloneModel } from "../lib/provider-mapper";
 import { ProviderEditPage } from "./ProviderEditPage";
 
 type ProviderSettingsProps = {
@@ -82,24 +83,6 @@ function suggestProviderId(providers: ProviderRecord[], kind: ProviderKind) {
       return candidate;
     }
   }
-}
-
-function cloneModel(model: ModelRecord): ModelRecord {
-  return {
-    slug: model.slug,
-    displayName: model.displayName,
-    description: model.description ?? null,
-    contextWindow: model.contextWindow ?? null,
-    maxContextWindow: model.maxContextWindow ?? null,
-    autoCompactTokenLimit: model.autoCompactTokenLimit ?? null,
-    defaultTemperature: model.defaultTemperature ?? null,
-    maxOutputTokens: model.maxOutputTokens ?? null,
-    reasoningEfforts: [...model.reasoningEfforts],
-    capabilities: [...(model.capabilities ?? [])],
-    inputModalities: [...(model.inputModalities ?? [])],
-    truncationMode: model.truncationMode,
-    truncationLimit: model.truncationLimit,
-  };
 }
 
 function providerStatusClass(provider: ProviderRecord) {
