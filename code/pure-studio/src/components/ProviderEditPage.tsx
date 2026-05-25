@@ -1,4 +1,5 @@
 import { ArrowLeft, CheckCircle2, Link2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { ModelRecord, ProviderKind, ProviderRecord, ProviderTemplateRecord } from "../types";
 import { ProviderModelEditor } from "./ProviderModelEditor";
 
@@ -21,6 +22,15 @@ function providerStatusClass(provider: ProviderRecord) {
   return provider.status.toLowerCase().includes("healthy") ? "ready" : "needs-setup";
 }
 
+const STATUS_KEY_MAP: Record<string, string> = {
+  Healthy: "provider.healthy",
+  "Needs setup": "provider.needsSetup",
+};
+
+function translateStatus(status: string, t: (key: string) => string) {
+  return t(STATUS_KEY_MAP[status] ?? status);
+}
+
 export function ProviderEditPage({
   provider,
   templates,
@@ -31,6 +41,7 @@ export function ProviderEditPage({
   onUpdateCustomModel,
   onRemoveCustomModel,
 }: ProviderEditPageProps) {
+  const { t } = useTranslation();
   const models = allModels(provider);
 
   return (
@@ -44,12 +55,12 @@ export function ProviderEditPage({
             <h2>{provider.name || provider.id}</h2>
             <span className={`provider-state ${providerStatusClass(provider)}`}>
               <CheckCircle2 size={14} />
-              {provider.status}
+              {translateStatus(provider.status, t)}
             </span>
           </div>
           <p>
             <Link2 size={14} />
-            {provider.baseUrl || "(default base URL)"}
+            {provider.baseUrl || t("provider.defaultBaseUrl")}
           </p>
         </div>
       </header>
@@ -57,7 +68,7 @@ export function ProviderEditPage({
       <div className="provider-edit-scroll">
         <div className="provider-form-grid">
           <label>
-            <span>Provider Key</span>
+            <span>{t("provider.providerKey")}</span>
             <input
               value={provider.id}
               onChange={(event) =>
@@ -69,7 +80,7 @@ export function ProviderEditPage({
             />
           </label>
           <label>
-            <span>Template</span>
+            <span>{t("provider.template")}</span>
             <select
               value={provider.templateKind}
               onChange={(event) => onChangeTemplate(event.target.value as ProviderKind)}
@@ -82,7 +93,7 @@ export function ProviderEditPage({
             </select>
           </label>
           <label>
-            <span>显示名</span>
+            <span>{t("provider.displayName")}</span>
             <input
               value={provider.name}
               onChange={(event) =>
@@ -94,11 +105,11 @@ export function ProviderEditPage({
             />
           </label>
           <label>
-            <span>协议类型</span>
+            <span>{t("provider.protocolType")}</span>
             <span className="readonly-field">{provider.wireApi}</span>
           </label>
           <label className="wide">
-            <span>Base URL</span>
+            <span>{t("provider.baseUrl")}</span>
             <input
               value={provider.baseUrl}
               onChange={(event) =>
@@ -110,7 +121,7 @@ export function ProviderEditPage({
             />
           </label>
           <label>
-            <span>API Key</span>
+            <span>{t("provider.apiKey")}</span>
             <input
               type="password"
               value={provider.bearerToken}
@@ -123,7 +134,7 @@ export function ProviderEditPage({
             />
           </label>
           <label className="wide">
-            <span>Default Model</span>
+            <span>{t("provider.defaultModel")}</span>
             <select
               value={provider.defaultModel}
               onChange={(event) =>

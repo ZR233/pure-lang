@@ -1,4 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
+import { useTranslation } from "react-i18next";
 import type { ModelRecord, ProviderRecord, RoleKey, RoleRecord } from "../types";
 
 type RoleSettingsProps = {
@@ -7,18 +8,11 @@ type RoleSettingsProps = {
   setRoles: Dispatch<SetStateAction<RoleRecord[]>>;
 };
 
-const ROLE_LABELS: Record<RoleKey, string> = {
-  explorer: "探索者",
-  planner: "计划者",
-  executor: "执行者",
-  reviewer: "审查者",
-};
-
-const ROLE_HINTS: Record<RoleKey, string> = {
-  explorer: "代码、文档和上下文探索",
-  planner: "默认聊天和计划生成",
-  executor: "subagent 默认执行角色",
-  reviewer: "代码审查和结果检查",
+const ROLE_I18N_KEYS: Record<RoleKey, { label: string; hint: string }> = {
+  explorer: { label: "roles.explorer", hint: "roles.explorerHint" },
+  planner: { label: "roles.planner", hint: "roles.plannerHint" },
+  executor: { label: "roles.executor", hint: "roles.executorHint" },
+  reviewer: { label: "roles.reviewer", hint: "roles.reviewerHint" },
 };
 
 const ROLE_ORDER: RoleKey[] = ["explorer", "planner", "executor", "reviewer"];
@@ -59,7 +53,7 @@ export function normalizeRolesForProviders(
   if (!fallbackProvider) {
     return ROLE_ORDER.map((key) => ({
       key,
-      displayName: ROLE_LABELS[key],
+      displayName: key,
       provider: "",
       model: "",
       effort: "",
@@ -74,7 +68,7 @@ export function normalizeRolesForProviders(
       : providerDefaultModel(provider);
     return {
       key,
-      displayName: role?.displayName || ROLE_LABELS[key],
+      displayName: role?.displayName || key,
       provider: provider.id,
       model,
       effort: effortForModel(provider, model, role?.effort),
@@ -83,6 +77,7 @@ export function normalizeRolesForProviders(
 }
 
 export function RoleSettings({ roles, providers, setRoles }: RoleSettingsProps) {
+  const { t } = useTranslation();
   const normalizedRoles = normalizeRolesForProviders(roles, providers);
 
   function replaceRole(nextRole: RoleRecord) {
@@ -126,8 +121,8 @@ export function RoleSettings({ roles, providers, setRoles }: RoleSettingsProps) 
     <section className="role-settings">
       <div className="role-settings-head">
         <div>
-          <h2>角色路由</h2>
-          <p>固定四个模型角色，聊天使用计划者，subagent 默认使用执行者。</p>
+          <h2>{t("settings.roleRoute")}</h2>
+          <p>{t("settings.roleRouteDesc")}</p>
         </div>
       </div>
 
@@ -137,13 +132,14 @@ export function RoleSettings({ roles, providers, setRoles }: RoleSettingsProps) 
           const models = provider ? allModels(provider) : [];
           const selectedModel = models.find((model) => model.slug === role.model);
           const efforts = selectedModel?.reasoningEfforts ?? [];
+          const roleI18n = ROLE_I18N_KEYS[role.key];
 
           return (
             <article className="role-card" key={role.key}>
               <div className="role-card-title">
                 <div>
-                  <h3>{role.displayName}</h3>
-                  <p>{ROLE_HINTS[role.key]}</p>
+                  <h3>{t(roleI18n.label)}</h3>
+                  <p>{t(roleI18n.hint)}</p>
                 </div>
                 <span>{role.key}</span>
               </div>

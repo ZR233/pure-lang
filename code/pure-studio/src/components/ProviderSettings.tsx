@@ -10,6 +10,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useState, type Dispatch, type SetStateAction } from "react";
+import { useTranslation } from "react-i18next";
 import type { ModelRecord, ProviderKind, ProviderRecord, ProviderTemplateRecord } from "../types";
 import { ProviderEditPage } from "./ProviderEditPage";
 
@@ -105,6 +106,24 @@ function providerStatusClass(provider: ProviderRecord) {
   return provider.status.toLowerCase().includes("healthy") ? "ready" : "needs-setup";
 }
 
+const STATUS_KEY_MAP: Record<string, string> = {
+  Healthy: "provider.healthy",
+  "Needs setup": "provider.needsSetup",
+};
+
+function translateStatus(status: string, t: (key: string) => string) {
+  return t(STATUS_KEY_MAP[status] ?? status);
+}
+
+const UPDATED_AT_KEY_MAP: Record<string, string> = {
+  Draft: "provider.draft",
+  Preview: "provider.draft",
+};
+
+function translateUpdatedAt(value: string, t: (key: string) => string) {
+  return UPDATED_AT_KEY_MAP[value] ? t(UPDATED_AT_KEY_MAP[value]) : value;
+}
+
 export function ProviderSettings({
   providers,
   templates,
@@ -114,6 +133,7 @@ export function ProviderSettings({
   setSelectedProviderId,
   setProviderSearch,
 }: ProviderSettingsProps) {
+  const { t } = useTranslation();
   const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
   const filteredProviders = providers.filter((provider) => {
     const query = providerSearch.trim().toLowerCase();
@@ -240,8 +260,8 @@ export function ProviderSettings({
         <section className="provider-directory">
           <div className="provider-console-head">
             <div>
-              <h2>Provider 路由</h2>
-              <p>配置 ~/.pure/config.toml 中的模型接入点。</p>
+              <h2>{t("settings.providerRoute")}</h2>
+              <p>{t("settings.providerRouteDesc")}</p>
             </div>
             <div className="provider-console-tools">
               <label className="search-box">
@@ -249,14 +269,14 @@ export function ProviderSettings({
                 <input
                   value={providerSearch}
                   onChange={(event) => setProviderSearch(event.target.value)}
-                  placeholder="搜索 provider、key 或 base URL"
+                  placeholder={t("provider.searchPlaceholder")}
                 />
               </label>
               <div className="provider-add-actions">
                 {templates.map((template) => (
                   <button key={template.id} onClick={() => addProvider(template.id)}>
                     <Plus size={16} />
-                    {template.name}
+                    {t("provider.addProvider", { name: template.name })}
                   </button>
                 ))}
               </div>
@@ -267,8 +287,8 @@ export function ProviderSettings({
             {filteredProviders.length === 0 ? (
               <div className="provider-empty-state">
                 <Server size={28} />
-                <strong>没有匹配的 provider</strong>
-                <span>清空搜索条件后可查看完整列表。</span>
+                <strong>{t("provider.noMatchingProviders")}</strong>
+                <span>{t("provider.clearSearchHint")}</span>
               </div>
             ) : (
               filteredProviders.map((provider) => {
@@ -280,7 +300,7 @@ export function ProviderSettings({
                 const defaultModel =
                   models.find((model) => model.slug === provider.defaultModel)?.displayName ||
                   provider.defaultModel ||
-                  "未选择";
+                  t("provider.notSelected");
                 const previewModels = models.slice(0, 4);
                 const remainingModels = Math.max(0, models.length - previewModels.length);
 
@@ -302,13 +322,13 @@ export function ProviderSettings({
                             <strong>{provider.name || provider.id}</strong>
                             <span className={`provider-state ${providerStatusClass(provider)}`}>
                               <CheckCircle2 size={14} />
-                              {provider.status}
+                              {translateStatus(provider.status, t)}
                             </span>
-                            {isActive ? <span className="default-route">默认路由</span> : null}
+                            {isActive ? <span className="default-route">{t("provider.defaultRoute")}</span> : null}
                           </span>
                           <span className="provider-url">
                             <Link2 size={14} />
-                            {provider.baseUrl || "(default base URL)"}
+                            {provider.baseUrl || t("provider.defaultBaseUrl")}
                           </span>
                         </span>
                       </button>
@@ -317,7 +337,7 @@ export function ProviderSettings({
                         <button
                           className="icon-button provider-icon-action"
                           onClick={() => setEditingProviderId(provider.id)}
-                          title="编辑 provider"
+                          title={t("provider.editTooltip")}
                         >
                           <Pencil size={16} />
                         </button>
@@ -325,7 +345,7 @@ export function ProviderSettings({
                           className="icon-button provider-icon-action danger"
                           disabled={providers.length <= 1}
                           onClick={() => removeProvider(provider.id)}
-                          title="删除 provider"
+                          title={t("provider.deleteTooltip")}
                         >
                           <Trash2 size={16} />
                         </button>
@@ -335,35 +355,35 @@ export function ProviderSettings({
                     <div className="provider-card-meta">
                       <span>
                         <Server size={14} />
-                        <small>Key</small>
+                        <small>{t("provider.key")}</small>
                         <strong>{provider.id}</strong>
                       </span>
                       <span>
                         <Cpu size={14} />
-                        <small>Default model</small>
+                        <small>{t("provider.defaultModel")}</small>
                         <strong>{defaultModel}</strong>
                       </span>
                       <span>
                         <KeyRound size={14} />
-                        <small>API Key</small>
-                        <strong>{provider.bearerToken ? "已保存" : "未配置"}</strong>
+                        <small>{t("provider.apiKey")}</small>
+                        <strong>{provider.bearerToken ? t("provider.saved") : t("provider.notConfigured")}</strong>
                       </span>
                       <span>
-                        <small>Template</small>
+                        <small>{t("provider.template")}</small>
                         <strong>{templateName}</strong>
                       </span>
                       <span>
-                        <small>协议类型</small>
+                        <small>{t("provider.protocolType")}</small>
                         <strong>{provider.wireApi}</strong>
                       </span>
                       <span>
-                        <small>Updated</small>
-                        <strong>{provider.updatedAt}</strong>
+                        <small>{t("provider.updated")}</small>
+                        <strong>{translateUpdatedAt(provider.updatedAt, t)}</strong>
                       </span>
                     </div>
 
                     <div className="provider-model-strip">
-                      <span className="model-count-pill">{provider.modelCount} models</span>
+                      <span className="model-count-pill">{t("provider.models", { count: provider.modelCount })}</span>
                       {previewModels.map((model) => (
                         <span
                           key={model.slug}
