@@ -26,7 +26,7 @@ pure-studio UI action
 - `--plan`：`CompileMode::Plan`
 - `--auto`：`CompileMode::Auto`
 
-`Auto` 只影响模型提示词，使输出更偏执行导向；当前版本仍不会执行命令、写文件或调用沙箱。
+`CompileMode` 只影响模型提示词和行为边界，工具可用性由 `PureCore` 已注册的工具集合和 `TurnOptions` 审批策略决定。`Plan` 模式也可以使用工具做探索、读取和验证，但不应执行会修改工作区或外部环境的动作。`Auto` 模式更偏执行导向，可在审批策略允许时使用工具完成更主动的子任务。
 
 普通 prompt 默认使用 `ModelRole::Planner`。`RoleConfig` 提供 provider、model 和 effort。配置缺失某个角色时，运行时按默认模型补齐：按配置 key 顺序取首个 provider，并使用该 provider 的 `default_model`。
 
@@ -52,6 +52,8 @@ pure-studio UI action
 `pure-studio` 首版通过 `pl-core` 使用 `Manual`。
 
 `subagent` 工具可接收 `role` 参数，值为 `explorer`、`planner`、`executor` 或 `reviewer`。未传 `role` 时默认使用 `executor`。子代理使用所选角色的 provider/model/effort 创建独立会话，不沿用父会话的 provider。
+
+Plan 和 Auto 模式进行项目探索时，应优先把可独立观察的子组件拆给 `role = "explorer"` 的 subagent。例如 Rust workspace 有多个 crate、前后端分层、或同一任务涉及若干目录时，父代理负责拆分边界和汇总结论，多个 explorer subagent 分别读取对应子组件并返回结构、关键文件、风险点和建议入口。探索子代理默认只做读取和分析，不应擅自修改文件。
 
 `subagent` 运行时使用固定状态机：`queued`、`awaitingApproval`、`running`、`awaitingToolApproval`、`succeeded`、`failed`、`denied`。GUI 只观察状态和摘要，不把子代理的完整 text/thinking delta 混入主聊天流。
 
