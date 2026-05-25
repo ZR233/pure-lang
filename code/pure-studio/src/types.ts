@@ -19,6 +19,32 @@ export type ChatMessage = {
   reasoningContent?: string | null;
 };
 
+export type SubagentStatus =
+  | "queued"
+  | "awaitingApproval"
+  | "running"
+  | "awaitingToolApproval"
+  | "succeeded"
+  | "failed"
+  | "denied";
+
+export type SubagentActivity = {
+  eventId: string;
+  id: string;
+  parentId?: string | null;
+  role: string;
+  task: string;
+  status: SubagentStatus;
+  summary?: string | null;
+  depth: number;
+  error?: string | null;
+  updatedAt: number;
+};
+
+export type SubagentEventPayload = Omit<SubagentActivity, "eventId"> & {
+  eventId?: string;
+};
+
 export type ProviderRecord = {
   id: string;
   templateKind: ProviderKind;
@@ -111,6 +137,7 @@ export type BootstrapPayload = {
   sessions: SessionRecord[];
   selectedSessionId?: string | null;
   messages: ChatMessage[];
+  subagentEvents: SubagentActivity[];
   config: ConfigPayload;
 };
 
@@ -120,18 +147,21 @@ export type ProjectSelectionPayload = {
   sessions: SessionRecord[];
   selectedSessionId?: string | null;
   messages: ChatMessage[];
+  subagentEvents: SubagentActivity[];
 };
 
 export type SessionSelectionPayload = {
   sessionId: string;
   sessions: SessionRecord[];
   messages: ChatMessage[];
+  subagentEvents: SubagentActivity[];
 };
 
 export type RunPromptResponse = {
   sessionId: string;
   sessions: SessionRecord[];
   messages: ChatMessage[];
+  subagentEvents: SubagentActivity[];
 };
 
 export type AgentEvent =
@@ -149,6 +179,7 @@ export type AgentEvent =
     }
   | { toolApprovalGranted: { id: string; name: string } }
   | { toolApprovalDenied: { id: string; name: string; reason: string } }
+  | { subagentStateChanged: SubagentEventPayload }
   | "turnStarted"
   | "done"
   | { error: { message: string; severity: string } };
@@ -164,6 +195,7 @@ export type ToolApprovalRequest = {
   name: string;
   arguments: unknown;
   workingDirectory?: string | null;
+  parentSubagentId?: string | null;
 };
 
 export type ToolApprovalResolved = {

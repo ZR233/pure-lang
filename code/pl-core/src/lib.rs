@@ -24,16 +24,16 @@ pub use pl_model::{InputModality, TruncationMode};
 pub use pl_protocol::{
     AgentEvent, AgentEventReceiver, AgentEventSender, ContentPart, ContentPartType, ErrorSeverity,
     Message, MessageContent, MessageRole, OutputStream, PermissionLevel, PipelineStage, PureError,
-    Result,
+    Result, SubagentStatus,
 };
 pub use session::CoreSession;
 pub use studio::{
     ProjectRecord, SessionRecord, StudioPromptOutcome, StudioRuntime, StudioStore,
-    ToolApprovalRecord,
+    SubagentEventRecord, ToolApprovalRecord,
 };
 pub use tool::{
-    BashInput, BashTool, OutputTruncation, SubagentInput, SubagentTool, Tool, ToolInput,
-    ToolOutput, ToolRegistry, TruncatedOutput, TruncationStrategy,
+    BashInput, BashTool, OutputTruncation, SubagentContext, SubagentInput, SubagentTool, Tool,
+    ToolContext, ToolInput, ToolOutput, ToolRegistry, TruncatedOutput, TruncationStrategy,
 };
 pub use turn::{
     CompileMode, DEFAULT_MAX_TOOL_ITERATIONS, ToolApprovalCallback, ToolApprovalDecision,

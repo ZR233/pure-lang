@@ -1,12 +1,14 @@
+use std::path::PathBuf;
+
 use pl_model::{
     CompletionRequest, ModelProvider, ProviderInfo, ReasoningConfig, ReasoningSummary,
     SharedModelProvider, create_provider, create_provider_with_models,
 };
-use pl_protocol::{AgentEvent, AgentEventSender, Result};
+use pl_protocol::{AgentEvent, AgentEventSender, Result, SubagentStatus};
 
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
 use crate::session::CoreSession;
-use crate::tool::{BashTool, SubagentTool, ToolInput, ToolRegistry};
+use crate::tool::{BashTool, SubagentContext, SubagentTool, ToolContext, ToolInput, ToolRegistry};
 use crate::turn::{
     DEFAULT_MAX_TOOL_ITERATIONS, ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest,
     TurnOptions, TurnRequest, TurnResult,
@@ -33,6 +35,9 @@ pub struct PureCore {
     provider: SharedModelProvider,
     reasoning_effort: Option<ReasoningEffort>,
     config: Option<PureConfig>,
+    workspace_root: Option<PathBuf>,
+    workspace_instructions: Option<String>,
+    active_subagent: Option<SubagentContext>,
     tools: ToolRegistry,
 }
 
@@ -42,6 +47,9 @@ impl PureCore {
             provider,
             reasoning_effort: None,
             config: None,
+            workspace_root: None,
+            workspace_instructions: None,
+            active_subagent: None,
             tools: ToolRegistry::new(),
         }
     }
@@ -54,6 +62,9 @@ impl PureCore {
             provider,
             reasoning_effort: Some(reasoning_effort),
             config: None,
+            workspace_root: None,
+            workspace_instructions: None,
+            active_subagent: None,
             tools: ToolRegistry::new(),
         }
     }
@@ -73,8 +84,16 @@ impl PureCore {
             provider,
             reasoning_effort: Some(resolved.role_config.effort),
             config: Some(config.clone()),
+            workspace_root: None,
+            workspace_instructions: None,
+            active_subagent: None,
             tools: ToolRegistry::new(),
         })
+    }
+
+    pub(crate) fn with_subagent_context(mut self, context: SubagentContext) -> Self {
+        self.active_subagent = Some(context);
+        self
     }
 
     /// 注册一个工具。
@@ -90,7 +109,10 @@ impl PureCore {
         workspace_root: impl Into<std::path::PathBuf>,
         workspace_instructions: Option<String>,
     ) {
-        self.register_tool(BashTool::new(workspace_root.into()));
+        let workspace_root = workspace_root.into();
+        self.workspace_root = Some(workspace_root.clone());
+        self.workspace_instructions = workspace_instructions.clone();
+        self.register_tool(BashTool::new(workspace_root));
         self.register_tool(SubagentTool::new(
             self.provider.clone(),
             self.reasoning_effort.clone(),
@@ -117,6 +139,12 @@ impl PureCore {
     ) -> impl std::future::Future<Output = Result<TurnResult>> + Send + 'a {
         let provider = self.provider.clone();
         let reasoning_effort = self.reasoning_effort.clone();
+        let workspace_root = self
+            .workspace_root
+            .clone()
+            .unwrap_or_else(default_workspace_root);
+        let workspace_instructions = self.workspace_instructions.clone();
+        let active_subagent = self.active_subagent.clone();
         let tool_schemas = self.tools.schemas();
         let max_iterations = if self.tools.is_empty() {
             1
@@ -210,9 +238,44 @@ impl PureCore {
 
                     let result = match self.tools.get(&tool_call.name) {
                         Some(tool) => {
-                            let approval_request = approval_request(tool_call);
-                            match approve_tool_call(&options, &approval_request, event_tx.clone())
-                                .await
+                            let tool_context = ToolContext {
+                                event_tx: event_tx.clone(),
+                                options: options.clone(),
+                                workspace_root: workspace_root.clone(),
+                                workspace_instructions: workspace_instructions.clone(),
+                                active_subagent: active_subagent.clone(),
+                            };
+                            if tool_call.name == "subagent" {
+                                emit_subagent_tool_state(
+                                    tool_call,
+                                    &tool_context,
+                                    SubagentStatus::Queued,
+                                    None,
+                                    None,
+                                );
+                            }
+                            let approval_request = approval_request(tool_call, &tool_context);
+                            if tool_call.name == "subagent"
+                                && matches!(
+                                    options.tool_approval_policy,
+                                    ToolApprovalPolicy::Manual
+                                )
+                            {
+                                emit_subagent_tool_state(
+                                    tool_call,
+                                    &tool_context,
+                                    SubagentStatus::AwaitingApproval,
+                                    Some("等待工具审批".to_string()),
+                                    None,
+                                );
+                            }
+                            match approve_tool_call(
+                                &options,
+                                &approval_request,
+                                event_tx.clone(),
+                                &tool_context,
+                            )
+                            .await
                             {
                                 ToolApprovalDecision::Approved => {
                                     let _ = event_tx.send(AgentEvent::ToolApprovalGranted {
@@ -224,7 +287,7 @@ impl PureCore {
                                         session_id: session_id.clone(),
                                         tool_id: tool_call.id.clone(),
                                     };
-                                    match tool.execute(tool_input).await {
+                                    match tool.execute(tool_input, tool_context).await {
                                         Ok(output) => output.description,
                                         Err(e) => format!("Tool execution error: {e}"),
                                     }
@@ -235,6 +298,15 @@ impl PureCore {
                                         name: approval_request.name.clone(),
                                         reason: reason.clone(),
                                     });
+                                    if tool_call.name == "subagent" {
+                                        emit_subagent_tool_state(
+                                            tool_call,
+                                            &tool_context,
+                                            SubagentStatus::Denied,
+                                            None,
+                                            Some(reason.clone()),
+                                        );
+                                    }
                                     format!("Tool execution denied: {reason}")
                                 }
                             }
@@ -272,7 +344,7 @@ impl PureCore {
     }
 }
 
-fn approval_request(tool_call: &pl_model::ToolCall) -> ToolApprovalRequest {
+fn approval_request(tool_call: &pl_model::ToolCall, context: &ToolContext) -> ToolApprovalRequest {
     let working_directory = tool_call
         .arguments
         .get("workingDirectory")
@@ -284,6 +356,10 @@ fn approval_request(tool_call: &pl_model::ToolCall) -> ToolApprovalRequest {
         name: tool_call.name.clone(),
         arguments: tool_call.arguments.clone(),
         working_directory,
+        parent_subagent_id: context
+            .active_subagent
+            .as_ref()
+            .map(|subagent| subagent.id.clone()),
     }
 }
 
@@ -291,6 +367,7 @@ async fn approve_tool_call(
     options: &TurnOptions,
     request: &ToolApprovalRequest,
     event_tx: AgentEventSender,
+    context: &ToolContext,
 ) -> ToolApprovalDecision {
     match options.tool_approval_policy {
         ToolApprovalPolicy::AutoAllow => ToolApprovalDecision::Approved,
@@ -298,6 +375,17 @@ async fn approve_tool_call(
             reason: "tool execution denied by policy".to_string(),
         },
         ToolApprovalPolicy::Manual => {
+            if request.name != "subagent"
+                && let Some(subagent) = &context.active_subagent
+            {
+                emit_subagent_state(
+                    &event_tx,
+                    subagent,
+                    SubagentStatus::AwaitingToolApproval,
+                    Some(format!("等待工具审批：{}", request.name)),
+                    None,
+                );
+            }
             let _ = event_tx.send(AgentEvent::ToolApprovalRequested {
                 id: request.id.clone(),
                 name: request.name.clone(),
@@ -312,6 +400,98 @@ async fn approve_tool_call(
             }
         }
     }
+}
+
+fn emit_subagent_tool_state(
+    tool_call: &pl_model::ToolCall,
+    context: &ToolContext,
+    status: SubagentStatus,
+    summary: Option<String>,
+    error: Option<String>,
+) {
+    let (role, task) = subagent_tool_parts(tool_call);
+    let depth = context
+        .active_subagent
+        .as_ref()
+        .map(|subagent| subagent.depth + 1)
+        .unwrap_or(1);
+    let parent_id = context
+        .active_subagent
+        .as_ref()
+        .map(|subagent| subagent.id.clone());
+    let _ = context.event_tx.send(AgentEvent::SubagentStateChanged {
+        id: tool_call.id.clone(),
+        parent_id,
+        role,
+        task,
+        status,
+        summary,
+        depth,
+        error,
+        updated_at: unix_seconds(),
+    });
+}
+
+pub(crate) fn emit_subagent_state(
+    event_tx: &AgentEventSender,
+    subagent: &SubagentContext,
+    status: SubagentStatus,
+    summary: Option<String>,
+    error: Option<String>,
+) {
+    let _ = event_tx.send(AgentEvent::SubagentStateChanged {
+        id: subagent.id.clone(),
+        parent_id: subagent.parent_id.clone(),
+        role: subagent.role.clone(),
+        task: subagent.task.clone(),
+        status,
+        summary,
+        depth: subagent.depth,
+        error,
+        updated_at: unix_seconds(),
+    });
+}
+
+fn subagent_tool_parts(tool_call: &pl_model::ToolCall) -> (String, String) {
+    let role = tool_call
+        .arguments
+        .get("role")
+        .and_then(serde_json::Value::as_str)
+        .filter(|role| !role.trim().is_empty())
+        .unwrap_or("executor")
+        .to_string();
+    let task = tool_call
+        .arguments
+        .get("task")
+        .and_then(serde_json::Value::as_str)
+        .map(compact_text)
+        .unwrap_or_else(|| "(missing task)".to_string());
+    (role, task)
+}
+
+pub(crate) fn compact_text(text: &str) -> String {
+    const MAX_CHARS: usize = 240;
+    let trimmed = text.trim();
+    let mut result = String::new();
+    for (index, ch) in trimmed.chars().enumerate() {
+        if index >= MAX_CHARS {
+            result.push_str("...");
+            return result;
+        }
+        result.push(ch);
+    }
+    result
+}
+
+fn default_workspace_root() -> PathBuf {
+    std::env::current_dir().unwrap_or_default()
+}
+
+fn unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 fn format_instructions(base: &str, workspace: Option<&str>) -> String {
@@ -329,6 +509,16 @@ mod tests {
     use crate::{ConfigStore, ModelRole};
     use pl_model::ToolCall;
     use pretty_assertions::assert_eq;
+
+    fn test_tool_context(event_tx: AgentEventSender) -> ToolContext {
+        ToolContext {
+            event_tx,
+            options: TurnOptions::default(),
+            workspace_root: std::env::temp_dir(),
+            workspace_instructions: None,
+            active_subagent: None,
+        }
+    }
 
     #[test]
     fn config_core_uses_planner_role_model_and_effort() {
@@ -381,10 +571,12 @@ mod tests {
             name: "bash".to_string(),
             arguments: serde_json::json!({"command": "echo hi"}),
             working_directory: None,
+            parent_subagent_id: None,
         };
         let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
+        let context = test_tool_context(event_tx.clone());
 
-        let decision = approve_tool_call(&options, &request, event_tx).await;
+        let decision = approve_tool_call(&options, &request, event_tx, &context).await;
         let event = event_rx.recv().await.unwrap();
 
         assert_eq!(decision, ToolApprovalDecision::Approved);
@@ -406,10 +598,12 @@ mod tests {
             name: "bash".to_string(),
             arguments: serde_json::json!({"command": "echo hi"}),
             working_directory: None,
+            parent_subagent_id: None,
         };
         let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
+        let context = test_tool_context(event_tx.clone());
 
-        let decision = approve_tool_call(&options, &request, event_tx).await;
+        let decision = approve_tool_call(&options, &request, event_tx, &context).await;
 
         assert_eq!(
             decision,
@@ -432,9 +626,87 @@ mod tests {
             call_id: None,
         };
 
-        let request = approval_request(&call);
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let request = approval_request(&call, &test_tool_context(event_tx));
 
         assert_eq!(request.working_directory.as_deref(), Some("C:/work"));
+    }
+
+    #[test]
+    fn approval_request_marks_parent_subagent() {
+        let call = ToolCall {
+            id: "call-1".to_string(),
+            name: "bash".to_string(),
+            arguments: serde_json::json!({"command": "pwd"}),
+            call_id: None,
+        };
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let mut context = test_tool_context(event_tx);
+        context.active_subagent = Some(SubagentContext {
+            id: "subagent-1".to_string(),
+            parent_id: None,
+            role: "executor".to_string(),
+            task: "inspect".to_string(),
+            depth: 1,
+        });
+
+        let request = approval_request(&call, &context);
+
+        assert_eq!(request.parent_subagent_id.as_deref(), Some("subagent-1"));
+    }
+
+    #[test]
+    fn subagent_state_helpers_emit_default_lifecycle() {
+        let call = ToolCall {
+            id: "subagent-1".to_string(),
+            name: "subagent".to_string(),
+            arguments: serde_json::json!({"task": "inspect workspace"}),
+            call_id: None,
+        };
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
+        let context = test_tool_context(event_tx.clone());
+        let subagent = SubagentContext {
+            id: "subagent-1".to_string(),
+            parent_id: None,
+            role: "executor".to_string(),
+            task: "inspect workspace".to_string(),
+            depth: 1,
+        };
+
+        emit_subagent_tool_state(&call, &context, SubagentStatus::Queued, None, None);
+        emit_subagent_state(
+            &event_tx,
+            &subagent,
+            SubagentStatus::Running,
+            Some("started".to_string()),
+            None,
+        );
+        emit_subagent_state(
+            &event_tx,
+            &subagent,
+            SubagentStatus::Succeeded,
+            Some("done".to_string()),
+            None,
+        );
+
+        let statuses = [
+            event_rx.try_recv().unwrap(),
+            event_rx.try_recv().unwrap(),
+            event_rx.try_recv().unwrap(),
+        ]
+        .map(|event| match event {
+            AgentEvent::SubagentStateChanged { status, .. } => status,
+            other => panic!("unexpected event: {other:?}"),
+        });
+
+        assert_eq!(
+            statuses,
+            [
+                SubagentStatus::Queued,
+                SubagentStatus::Running,
+                SubagentStatus::Succeeded,
+            ]
+        );
     }
 
     #[test]

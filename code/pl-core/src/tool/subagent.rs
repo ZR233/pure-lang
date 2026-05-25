@@ -1,20 +1,23 @@
 use std::path::PathBuf;
 
 use pl_model::SharedModelProvider;
-use pl_protocol::PureError;
+use pl_protocol::{AgentEvent, PureError, SubagentStatus};
 use serde::{Deserialize, Serialize};
 
 use super::truncation::{OutputTruncation, TruncatedOutput};
-use super::{Tool, ToolInput, ToolOutput};
+use super::{SubagentContext, Tool, ToolContext, ToolInput, ToolOutput};
 use crate::PureCore;
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
+use crate::core::{compact_text, emit_subagent_state};
 use crate::session::CoreSession;
 use crate::turn::CompileMode;
+
+const MAX_SUBAGENT_DEPTH: u32 = 3;
 
 /// 子代理工具。
 ///
 /// 将子任务委托给独立的 LLM 会话执行。
-/// 子代理拥有独立的会话历史，共享父代理的 provider，不携带工具。
+/// 子代理拥有独立的会话历史，并注册完整默认工具能力。
 #[derive(Debug, Clone)]
 pub struct SubagentTool {
     provider: SharedModelProvider,
@@ -112,38 +115,178 @@ impl Tool for SubagentTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
+        context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            let subagent_input = Self::parse_input(input.arguments)?;
-            let role = Self::role(&subagent_input)?;
-            let core = match &self.config {
-                Some(config) => PureCore::from_config(config, role)?,
-                None => match &self.reasoning_effort {
+            let depth = context
+                .active_subagent
+                .as_ref()
+                .map(|subagent| subagent.depth + 1)
+                .unwrap_or(1);
+            let fallback_context = SubagentContext {
+                id: input.tool_id.clone(),
+                parent_id: context
+                    .active_subagent
+                    .as_ref()
+                    .map(|subagent| subagent.id.clone()),
+                role: input
+                    .arguments
+                    .get("role")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|role| !role.trim().is_empty())
+                    .unwrap_or("executor")
+                    .to_string(),
+                task: input
+                    .arguments
+                    .get("task")
+                    .and_then(serde_json::Value::as_str)
+                    .map(compact_text)
+                    .unwrap_or_else(|| "(missing task)".to_string()),
+                depth,
+            };
+            let subagent_input = match Self::parse_input(input.arguments) {
+                Ok(input) => input,
+                Err(error) => {
+                    emit_subagent_state(
+                        &context.event_tx,
+                        &fallback_context,
+                        SubagentStatus::Failed,
+                        None,
+                        Some(error.to_string()),
+                    );
+                    return Err(error);
+                }
+            };
+            let role = match Self::role(&subagent_input) {
+                Ok(role) => role,
+                Err(error) => {
+                    emit_subagent_state(
+                        &context.event_tx,
+                        &fallback_context,
+                        SubagentStatus::Failed,
+                        None,
+                        Some(error.to_string()),
+                    );
+                    return Err(error);
+                }
+            };
+            let subagent_context = SubagentContext {
+                id: input.tool_id.clone(),
+                parent_id: fallback_context.parent_id.clone(),
+                role: role.key().to_string(),
+                task: compact_text(&subagent_input.task),
+                depth,
+            };
+
+            if depth > MAX_SUBAGENT_DEPTH {
+                let error = format!("subagent nesting depth exceeds {MAX_SUBAGENT_DEPTH}");
+                emit_subagent_state(
+                    &context.event_tx,
+                    &subagent_context,
+                    SubagentStatus::Failed,
+                    None,
+                    Some(error.clone()),
+                );
+                return Err(PureError::ToolExecutionFailed {
+                    tool: "subagent".to_string(),
+                    error,
+                });
+            }
+
+            emit_subagent_state(
+                &context.event_tx,
+                &subagent_context,
+                SubagentStatus::Running,
+                Some("子代理已启动".to_string()),
+                None,
+            );
+
+            let core_result = match &self.config {
+                Some(config) => PureCore::from_config(config, role),
+                None => Ok(match &self.reasoning_effort {
                     Some(effort) => {
                         PureCore::with_reasoning_effort(self.provider.clone(), effort.clone())
                     }
                     None => PureCore::new(self.provider.clone()),
-                },
+                }),
             };
+            let mut core = match core_result {
+                Ok(core) => core.with_subagent_context(subagent_context.clone()),
+                Err(error) => {
+                    emit_subagent_state(
+                        &context.event_tx,
+                        &subagent_context,
+                        SubagentStatus::Failed,
+                        None,
+                        Some(error.to_string()),
+                    );
+                    return Err(error);
+                }
+            };
+            core.register_default_tools(
+                context.workspace_root.clone(),
+                context
+                    .workspace_instructions
+                    .clone()
+                    .or_else(|| self.workspace_instructions.clone()),
+            );
 
             let mut request = crate::turn::TurnRequest::new(subagent_input.task, CompileMode::Auto);
             if let Some(max) = subagent_input.max_iterations {
                 request = request.with_max_tool_iterations(max as usize);
             }
-            if let Some(ref instructions) = self.workspace_instructions {
+            if let Some(instructions) = context
+                .workspace_instructions
+                .clone()
+                .or_else(|| self.workspace_instructions.clone())
+            {
                 request = request.with_workspace_instructions(instructions.clone());
             }
 
             let mut session = CoreSession::new();
-            let (event_tx, _event_rx) = tokio::sync::broadcast::channel(256);
+            let (subagent_event_tx, subagent_event_rx) = tokio::sync::broadcast::channel(256);
+            let drain_task = tokio::spawn(forward_subagent_events(
+                subagent_event_rx,
+                context.event_tx.clone(),
+            ));
 
-            let result = core.run_turn(&mut session, request, event_tx).await?;
+            let result = core
+                .run_turn_with_options(
+                    &mut session,
+                    request,
+                    subagent_event_tx.clone(),
+                    context.options.clone(),
+                )
+                .await;
+            drop(subagent_event_tx);
+            let _ = drain_task.await;
+            let result = match result {
+                Ok(result) => result,
+                Err(error) => {
+                    let message = error.to_string();
+                    emit_subagent_state(
+                        &context.event_tx,
+                        &subagent_context,
+                        SubagentStatus::Failed,
+                        None,
+                        Some(message.clone()),
+                    );
+                    return Err(error);
+                }
+            };
 
             let description = if result.content.trim().is_empty() {
                 "Subagent completed with no output.".to_string()
             } else {
                 result.content.trim().to_string()
             };
+            emit_subagent_state(
+                &context.event_tx,
+                &subagent_context,
+                SubagentStatus::Succeeded,
+                Some(compact_text(&description)),
+                None,
+            );
 
             Ok(ToolOutput {
                 description,
@@ -167,9 +310,51 @@ impl Tool for SubagentTool {
     }
 }
 
+async fn forward_subagent_events(
+    mut event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
+    parent_event_tx: pl_protocol::AgentEventSender,
+) {
+    loop {
+        match event_rx.recv().await {
+            Ok(event @ AgentEvent::SubagentStateChanged { .. }) => {
+                let _ = parent_event_tx.send(event);
+            }
+            Ok(_) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pl_model::{ProviderInfo, create_provider};
+
+    fn test_tool() -> SubagentTool {
+        SubagentTool::new(
+            create_provider(ProviderInfo::default_provider()).unwrap(),
+            None,
+            None,
+            None,
+        )
+    }
+
+    fn test_context(
+        active_subagent: Option<SubagentContext>,
+    ) -> (ToolContext, tokio::sync::broadcast::Receiver<AgentEvent>) {
+        let (event_tx, event_rx) = tokio::sync::broadcast::channel(8);
+        (
+            ToolContext {
+                event_tx,
+                options: crate::turn::TurnOptions::default(),
+                workspace_root: std::env::temp_dir(),
+                workspace_instructions: None,
+                active_subagent,
+            },
+            event_rx,
+        )
+    }
 
     #[test]
     fn subagent_input_defaults_to_executor_role() {
@@ -203,5 +388,72 @@ mod tests {
         let error = SubagentTool::role(&input).unwrap_err().to_string();
 
         assert!(error.contains("unsupported role"));
+    }
+
+    #[tokio::test]
+    async fn subagent_depth_limit_emits_failed_state() {
+        let tool = test_tool();
+        let (context, mut event_rx) = test_context(Some(SubagentContext {
+            id: "parent".to_string(),
+            parent_id: None,
+            role: "executor".to_string(),
+            task: "parent task".to_string(),
+            depth: MAX_SUBAGENT_DEPTH,
+        }));
+
+        let result = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({"task": "too deep"}),
+                    session_id: "session".to_string(),
+                    tool_id: "child".to_string(),
+                },
+                context,
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(matches!(
+            event_rx.recv().await.unwrap(),
+            AgentEvent::SubagentStateChanged {
+                id,
+                parent_id,
+                status: SubagentStatus::Failed,
+                depth,
+                ..
+            } if id == "child" && parent_id.as_deref() == Some("parent") && depth == 4
+        ));
+    }
+
+    #[tokio::test]
+    async fn subagent_invalid_role_emits_failed_state() {
+        let tool = test_tool();
+        let (context, mut event_rx) = test_context(None);
+
+        let result = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({
+                        "task": "review this",
+                        "role": "critic"
+                    }),
+                    session_id: "session".to_string(),
+                    tool_id: "child".to_string(),
+                },
+                context,
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(matches!(
+            event_rx.recv().await.unwrap(),
+            AgentEvent::SubagentStateChanged {
+                id,
+                role,
+                status: SubagentStatus::Failed,
+                task,
+                ..
+            } if id == "child" && role == "critic" && task == "review this"
+        ));
     }
 }

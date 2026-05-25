@@ -30,6 +30,7 @@ pl-model provider
 - `ThinkingDelta` 追加到当前思考区域。
 - `ToolCallDelta` / `ToolCallComplete` 展示工具调用状态。
 - `ToolApprovalRequested` / `ToolApprovalGranted` / `ToolApprovalDenied` 展示并记录审批流程。
+- `SubagentStateChanged` 展示子代理状态、角色、任务摘要、最终摘要或错误。
 - `Error` 渲染为可恢复或致命错误提示。
 
 ## 8.3 背压与容量
@@ -41,3 +42,5 @@ pl-model provider
 ## 8.4 事件边界
 
 事件类型属于协议层，不应包含 provider 私有结构，也不应绑定具体前端。工具审批事件只承载通用工具名、参数和审批结果，不包含 Tauri、React 或桌面端私有状态。
+
+子代理内部事件不直接转发完整文本流。`pl-core` 将子代理生命周期压缩为 `SubagentStateChanged`，状态固定为 `queued`、`awaitingApproval`、`running`、`awaitingToolApproval`、`succeeded`、`failed`、`denied`。`pure-studio` 可持久化这些状态事件，并在聊天界面渲染状态和摘要。

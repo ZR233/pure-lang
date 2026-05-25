@@ -8,8 +8,10 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 use pl_model::ToolSchema;
-use pl_protocol::PureError;
+use pl_protocol::{AgentEventSender, PureError};
 use serde::{Deserialize, Serialize};
+
+use crate::turn::TurnOptions;
 
 pub use bash::{BashInput, BashTool};
 pub use subagent::{SubagentInput, SubagentTool};
@@ -21,12 +23,17 @@ type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 /// 工具执行抽象（dyn-compatible）。
 ///
 /// `execute` 返回 `BoxFuture` 以支持 trait object。
+/// `ToolContext` 提供事件转发、审批策略和当前 subagent 运行边界。
 /// 具体实现中可用 `Box::pin(async move { ... })` 包裹异步逻辑。
 pub trait Tool: fmt::Debug + Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn input_schema(&self) -> serde_json::Value;
-    fn execute<'a>(&'a self, input: ToolInput) -> BoxFuture<'a, Result<ToolOutput, PureError>>;
+    fn execute<'a>(
+        &'a self,
+        input: ToolInput,
+        context: ToolContext,
+    ) -> BoxFuture<'a, Result<ToolOutput, PureError>>;
 
     fn to_schema(&self) -> ToolSchema {
         ToolSchema {
@@ -34,6 +41,38 @@ pub trait Tool: fmt::Debug + Send + Sync {
             description: self.description().to_string(),
             input_schema: self.input_schema(),
         }
+    }
+}
+
+/// 单次工具执行上下文。
+///
+/// 由核心 turn 循环注入，工具通过它访问事件流、审批策略、
+/// workspace 信息，以及当前 subagent 的父子关系。
+#[derive(Clone)]
+pub struct ToolContext {
+    pub event_tx: AgentEventSender,
+    pub options: TurnOptions,
+    pub workspace_root: PathBuf,
+    pub workspace_instructions: Option<String>,
+    pub active_subagent: Option<SubagentContext>,
+}
+
+/// 当前工具调用所在的 subagent 运行边界。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentContext {
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub role: String,
+    pub task: String,
+    pub depth: u32,
+}
+
+impl fmt::Debug for ToolContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ToolContext")
+            .field("workspace_root", &self.workspace_root)
+            .field("active_subagent", &self.active_subagent)
+            .finish_non_exhaustive()
     }
 }
 
@@ -147,6 +186,7 @@ mod tests {
         fn execute<'a>(
             &'a self,
             _input: ToolInput,
+            _context: ToolContext,
         ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
             Box::pin(async {
                 Ok(ToolOutput {
