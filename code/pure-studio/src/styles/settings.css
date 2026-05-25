@@ -1,0 +1,107 @@
+.settings-page {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  background: #f6f8fb;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px clamp(16px, 2.2vw, 26px) 14px;
+  border-bottom: 1px solid #dce5ee;
+  background: #ffffff;
+}
+
+.settings-header > div:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  width: min(620px, calc(100vw - clamp(36px, 4.5vw, 52px)));
+  margin: 14px clamp(16px, 2.2vw, 26px) 0;
+  padding: 4px;
+  border: 1px solid #dce5ed;
+  border-radius: 8px;
+  background: #eef3f7;
+}
+
+.settings-tabs button {
+  flex: 1;
+  height: 36px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #526579;
+  background: transparent;
+}
+
+.settings-tabs button.active {
+  border-color: #d3e2ed;
+  color: #096895;
+  background: #ffffff;
+  font-weight: 800;
+}
+
+.config-editor-card {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: auto 1fr;
+  padding: 18px;
+}
+
+.config-editor-card textarea {
+  min-height: 0;
+  width: 100%;
+  margin-top: 12px;
+  resize: none;
+  padding: 12px;
+  border: 1px solid #d6e0ea;
+  border-radius: 8px;
+  color: #162235;
+  background: #fbfdff;
+  font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.config-editor-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.config-editor-card h2 {
+  margin: 0 0 6px;
+}
+
+.config-editor-card p {
+  margin: 0;
+  color: #768598;
+  font-size: 12px;
+}
+
+.settings-placeholder {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  color: #657386;
+}
+
+.settings-placeholder h2 {
+  margin: 0 0 6px;
+  color: #17202c;
+}

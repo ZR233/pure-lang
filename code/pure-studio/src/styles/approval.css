@@ -1,0 +1,39 @@
+.approval-stack {
+  position: fixed;
+  right: clamp(12px, 2vw, 24px);
+  bottom: clamp(12px, 2vw, 24px);
+  z-index: 20;
+  display: grid;
+  width: min(440px, calc(100vw - clamp(24px, 4vw, 48px)));
+  gap: 12px;
+}
+
+.approval-card {
+  padding: 16px;
+  box-shadow: 0 20px 45px rgb(17 24 39 / 18%);
+}
+
+.approval-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  color: #7a3e11;
+}
+
+.approval-heading strong,
+.approval-heading span {
+  display: block;
+}
+
+.approval-heading span {
+  color: #7d8b9b;
+  font-size: 12px;
+}
+
+.approval-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}

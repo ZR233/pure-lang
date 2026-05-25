@@ -13,6 +13,7 @@ import { useState, type Dispatch, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 import type { ModelRecord, ProviderKind, ProviderRecord, ProviderTemplateRecord } from "../types";
 import { cloneModel } from "../lib/provider-mapper";
+import { allModels, initials, providerStatusClass, translateStatus, translateUpdatedAt } from "../lib/utils";
 import { ProviderEditPage } from "./ProviderEditPage";
 
 type ProviderSettingsProps = {
@@ -24,19 +25,6 @@ type ProviderSettingsProps = {
   setSelectedProviderId: Dispatch<SetStateAction<string | null>>;
   setProviderSearch: Dispatch<SetStateAction<string>>;
 };
-
-function initials(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("");
-}
-
-function allModels(provider: ProviderRecord) {
-  return [...provider.defaultModels, ...provider.customModels];
-}
 
 function normalizeProvider(provider: ProviderRecord): ProviderRecord {
   const models = allModels(provider);
@@ -83,28 +71,6 @@ function suggestProviderId(providers: ProviderRecord[], kind: ProviderKind) {
       return candidate;
     }
   }
-}
-
-function providerStatusClass(provider: ProviderRecord) {
-  return provider.status.toLowerCase().includes("healthy") ? "ready" : "needs-setup";
-}
-
-const STATUS_KEY_MAP: Record<string, string> = {
-  Healthy: "provider.healthy",
-  "Needs setup": "provider.needsSetup",
-};
-
-function translateStatus(status: string, t: (key: string) => string) {
-  return t(STATUS_KEY_MAP[status] ?? status);
-}
-
-const UPDATED_AT_KEY_MAP: Record<string, string> = {
-  Draft: "provider.draft",
-  Preview: "provider.draft",
-};
-
-function translateUpdatedAt(value: string, t: (key: string) => string) {
-  return UPDATED_AT_KEY_MAP[value] ? t(UPDATED_AT_KEY_MAP[value]) : value;
 }
 
 export function ProviderSettings({

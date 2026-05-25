@@ -1,6 +1,7 @@
 import { ArrowLeft, CheckCircle2, Link2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ModelRecord, ProviderKind, ProviderRecord, ProviderTemplateRecord } from "../types";
+import { allModels, providerStatusClass, translateStatus } from "../lib/utils";
 import { ProviderModelEditor } from "./ProviderModelEditor";
 
 type ProviderEditPageProps = {
@@ -13,23 +14,6 @@ type ProviderEditPageProps = {
   onUpdateCustomModel: (index: number, patch: Partial<ModelRecord>) => void;
   onRemoveCustomModel: (index: number) => void;
 };
-
-function allModels(provider: ProviderRecord) {
-  return [...provider.defaultModels, ...provider.customModels];
-}
-
-function providerStatusClass(provider: ProviderRecord) {
-  return provider.status.toLowerCase().includes("healthy") ? "ready" : "needs-setup";
-}
-
-const STATUS_KEY_MAP: Record<string, string> = {
-  Healthy: "provider.healthy",
-  "Needs setup": "provider.needsSetup",
-};
-
-function translateStatus(status: string, t: (key: string) => string) {
-  return t(STATUS_KEY_MAP[status] ?? status);
-}
 
 export function ProviderEditPage({
   provider,

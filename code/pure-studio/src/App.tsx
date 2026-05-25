@@ -1,24 +1,13 @@
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import {
-  Activity,
-  ArrowLeft,
-  Check,
-  FolderOpen,
-  MessageSquare,
-  Plus,
-  RefreshCw,
-  Save,
-  Send,
-  Settings,
-  ShieldAlert,
-  Terminal,
-  X,
-} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ProviderSettings } from "./components/ProviderSettings";
-import { RoleSettings, normalizeRolesForProviders } from "./components/RoleSettings";
+import { ApprovalOverlay } from "./components/ApprovalOverlay";
+import { ContextPanel } from "./components/ContextPanel";
+import { ConversationPanel } from "./components/ConversationPanel";
+import { ProjectRail } from "./components/ProjectRail";
+import { SettingsPage } from "./components/SettingsPage";
+import { normalizeRolesForProviders } from "./components/RoleSettings";
 import {
   approveTool,
   bootstrapStudio,
@@ -33,7 +22,8 @@ import {
   selectSession,
   isTauriRuntime,
 } from "./lib/tauri";
-import {
+import { errorText } from "./lib/utils";
+import type {
   AgentEventPayload,
   ChatMessage,
   ConfigPayload,
@@ -72,39 +62,6 @@ const roleI18nKeys: Record<string, string> = {
   reviewer: "roles.reviewer",
 };
 
-const statusClassNames: Record<SubagentStatus, string> = {
-  queued: "queued",
-  awaitingApproval: "awaiting-approval",
-  running: "running",
-  awaitingToolApproval: "awaiting-tool-approval",
-  succeeded: "succeeded",
-  failed: "failed",
-  denied: "denied",
-};
-
-function errorText(error: unknown) {
-  if (typeof error === "object" && error !== null && "message" in error) {
-    return String((error as { message: unknown }).message);
-  }
-  return String(error);
-}
-
-function initials(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("");
-}
-
-function formatTime(value: number) {
-  if (!value) {
-    return "";
-  }
-  return new Date(value * 1000).toLocaleString();
-}
-
 function normalizeSubagentActivity(event: SubagentEventPayload): SubagentActivity {
   return {
     eventId:
@@ -136,16 +93,6 @@ function mergeSubagentActivities(
     }
     return left.depth - right.depth;
   });
-}
-
-function subagentSummary(activity: SubagentActivity, t: (key: string) => string) {
-  if (activity.error) {
-    return activity.error;
-  }
-  if (activity.summary) {
-    return activity.summary;
-  }
-  return activity.status === "queued" ? t("subagent.waitingToStart") : t("subagent.noSummaryYet");
 }
 
 export function App() {
@@ -488,303 +435,68 @@ export function App() {
 
   return (
     <main className="app-shell">
-      <aside className="project-rail">
-        <div className="brand">
-          <div className="brand-mark">P</div>
-          <div>
-            <div className="brand-title">Pure Studio</div>
-            <div className="brand-subtitle">{t("brand.subtitle")}</div>
-          </div>
-        </div>
+      <ProjectRail
+        projects={projects}
+        sessions={sessions}
+        selectedProjectId={selectedProjectId}
+        selectedSessionId={selectedSessionId}
+        manualPath={manualPath}
+        onSetManualPath={setManualPath}
+        onAddProject={(path) => void addProject(path)}
+        onSelectProject={(id) => void onSelectProject(id)}
+        onNewSession={() => void onNewSession()}
+        onSelectSession={(id) => void onSelectSession(id)}
+        onOpenSettings={() => void openSettings()}
+        chooseFolder={() => void chooseFolder()}
+      />
 
-        <button className="settings-entry" onClick={() => void openSettings()}>
-          <Settings size={17} />
-          <span>{t("nav.settings")}</span>
-        </button>
+      <ConversationPanel
+        selectedSession={selectedSession}
+        selectedProject={selectedProject}
+        status={status}
+        isBusy={isBusy}
+        liveMessages={liveMessages}
+        subagentActivities={subagentActivities}
+        prompt={prompt}
+        onSetPrompt={setPrompt}
+        onSendPrompt={() => void onSendPrompt()}
+      />
 
-        <section className="rail-section">
-          <div className="section-heading">
-            <span>{t("nav.projects")}</span>
-            <button className="icon-button" onClick={chooseFolder} title={t("common.chooseFolder")}>
-              <FolderOpen size={16} />
-            </button>
-          </div>
-          <div className="path-add">
-            <input
-              value={manualPath}
-              onChange={(event) => setManualPath(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  void addProject(manualPath);
-                }
-              }}
-              placeholder={t("common.projectPath")}
-            />
-            <button className="icon-button" onClick={() => void addProject(manualPath)}>
-              <Plus size={16} />
-            </button>
-          </div>
-          <div className="project-list">
-            {projects.map((project) => (
-              <button
-                key={project.id}
-                className={`project-row ${project.id === selectedProjectId ? "active" : ""}`}
-                onClick={() => void onSelectProject(project.id)}
-              >
-                <span className="project-avatar">{initials(project.name) || "P"}</span>
-                <span>
-                  <strong>{project.name}</strong>
-                  <small>{project.path}</small>
-                </span>
-              </button>
-            ))}
-          </div>
-        </section>
+      <ContextPanel
+        selectedProject={selectedProject}
+        sessions={sessions}
+        messages={messages}
+        providers={providers}
+        recentActivities={recentActivities}
+      />
 
-        <section className="rail-section sessions-section">
-          <div className="section-heading">
-            <span>{t("nav.sessions")}</span>
-            <button
-              className="icon-button"
-              disabled={!selectedProjectId}
-              onClick={() => void onNewSession()}
-              title={t("common.newSession")}
-            >
-              <Plus size={16} />
-            </button>
-          </div>
-          <div className="session-list">
-            {sessions.map((session) => (
-              <button
-                key={session.id}
-                className={`session-row ${session.id === selectedSessionId ? "active" : ""}`}
-                onClick={() => void onSelectSession(session.id)}
-              >
-                <MessageSquare size={16} />
-                <span>
-                  <strong>{session.title}</strong>
-                  <small>{formatTime(session.updatedAt)}</small>
-                </span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-      </aside>
-
-      <section className="conversation">
-        <header className="conversation-header">
-          <div>
-            <h1>{selectedSession?.title ?? t("conversation.defaultTitle")}</h1>
-            <p>{selectedProject?.path ?? t("conversation.addProjectHint")}</p>
-          </div>
-          <div className={`status-pill ${isBusy ? "running" : ""}`}>{status}</div>
-        </header>
-
-        <div className="message-stream">
-          {liveMessages.length === 0 && subagentActivities.length === 0 ? (
-            <div className="empty-state">
-              <Terminal size={34} />
-              <h2>{t("conversation.emptyTitle")}</h2>
-              <p>{t("conversation.emptyDescription")}</p>
-            </div>
-          ) : (
-            <>
-              {liveMessages.map((message, index) => (
-                <article key={`${message.role}-${index}`} className={`message ${message.role}`}>
-                  <div className="message-role">{message.role}</div>
-                  {message.reasoningContent ? (
-                    <pre className="thinking-block">{message.reasoningContent}</pre>
-                  ) : null}
-                  <div className="message-content">{message.content}</div>
-                </article>
-              ))}
-              {subagentActivities.length > 0 ? (
-                <section className="subagent-timeline" aria-label="Subagent activity">
-                  <div className="subagent-timeline-head">
-                    <Activity size={16} />
-                    <span>{t("subagent.title")}</span>
-                  </div>
-                  {subagentActivities.map((activity) => (
-                    <article
-                      key={activity.id}
-                      className={`subagent-card status-${statusClassNames[activity.status]}`}
-                      style={{ '--subagent-depth': Math.max(0, activity.depth - 1) } as React.CSSProperties}
-                    >
-                      <div className="subagent-card-head">
-                        <span className="subagent-role">
-                          {t(roleI18nKeys[activity.role] ?? `roles.${activity.role}`)}
-                        </span>
-                        <span className="subagent-status">
-                          {t(subagentStatusKeys[activity.status])}
-                        </span>
-                      </div>
-                      <p className="subagent-task">{activity.task}</p>
-                      <p className="subagent-result">{subagentSummary(activity, t)}</p>
-                      <div className="subagent-meta">
-                        <span>{t("subagent.depth")} {activity.depth}</span>
-                        {activity.parentId ? <span>{t("subagent.parent")} {activity.parentId}</span> : null}
-                        <span>{formatTime(activity.updatedAt)}</span>
-                      </div>
-                    </article>
-                  ))}
-                </section>
-              ) : null}
-            </>
-          )}
-        </div>
-
-        <footer className="composer">
-          <textarea
-            value={prompt}
-            disabled={!selectedSessionId || isBusy}
-            onChange={(event) => setPrompt(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                void onSendPrompt();
-              }
-            }}
-            placeholder={selectedSessionId ? t("conversation.askPlaceholder") : t("conversation.noSessionPlaceholder")}
-          />
-          <button
-            className="send-button"
-            disabled={!prompt.trim() || !selectedSessionId || isBusy}
-            onClick={() => void onSendPrompt()}
-          >
-            <Send size={18} />
-            <span>{isBusy ? t("status.running") : t("actions.send")}</span>
-          </button>
-        </footer>
-      </section>
-
-      <aside className="context-panel">
-        <section className="context-card">
-          <h2>{t("context.project")}</h2>
-          <p className="context-title">{selectedProject?.name ?? t("context.noProject")}</p>
-          <p className="muted">{selectedProject?.path ?? t("context.chooseFolder")}</p>
-        </section>
-        <section className="context-card">
-          <h2>{t("context.runtime")}</h2>
-          <div className="metric-row">
-            <span>{t("context.sessions")}</span>
-            <strong>{sessions.length}</strong>
-          </div>
-          <div className="metric-row">
-            <span>{t("context.messages")}</span>
-            <strong>{messages.length}</strong>
-          </div>
-          <div className="metric-row">
-            <span>{t("context.providers")}</span>
-            <strong>{providers.length}</strong>
-          </div>
-        </section>
-        <section className="context-card">
-          <h2>{t("context.tools")}</h2>
-          {recentActivities.length === 0 ? (
-            <p className="muted">{t("context.noActivity")}</p>
-          ) : (
-            recentActivities.map((item) => (
-              <div className="activity-row" key={item.id}>
-                <strong>{item.title}</strong>
-                <span>{item.detail}</span>
-              </div>
-            ))
-          )}
-        </section>
-      </aside>
-
-      {approvals.length > 0 ? (
-        <div className="approval-stack">
-          {approvals.map((approval) => (
-            <section className="approval-card" key={approval.approvalId}>
-              <div className="approval-heading">
-                <ShieldAlert size={19} />
-                <div>
-                  <strong>{approval.name}</strong>
-                  <span>{approval.workingDirectory ?? t("subagent.defaultWorkingDirectory")}</span>
-                  {approval.parentSubagentId ? (
-                    <span>{t("subagent.subagentLabel", { id: approval.parentSubagentId })}</span>
-                  ) : null}
-                </div>
-              </div>
-              <pre>{JSON.stringify(approval.arguments, null, 2)}</pre>
-              <div className="approval-actions">
-                <button onClick={() => void onDeny(approval.approvalId)}>
-                  <X size={16} />
-                  {t("actions.deny")}
-                </button>
-                <button className="primary" onClick={() => void onApprove(approval.approvalId)}>
-                  <Check size={16} />
-                  {t("actions.approve")}
-                </button>
-              </div>
-            </section>
-          ))}
-        </div>
-      ) : null}
+      <ApprovalOverlay
+        approvals={approvals}
+        onApprove={(id) => void onApprove(id)}
+        onDeny={(id) => void onDeny(id)}
+      />
 
       {settingsOpen ? (
-        <section className="settings-page">
-          <header className="settings-header">
-            <button className="back-button" onClick={() => setSettingsOpen(false)}>
-              <ArrowLeft size={18} />
-            </button>
-            <div>
-              <h1>{t("settings.title")}</h1>
-              <p>{configExists ? "~/.pure/config.toml" : t("settings.defaultConfigDraft")}</p>
-            </div>
-            <div className="settings-actions">
-              <button onClick={() => void onReloadConfig()}>
-                <RefreshCw size={16} />
-                {t("actions.reload")}
-              </button>
-              <button
-                className="primary"
-                onClick={() =>
-                  activeSettingsTab === "providers" || activeSettingsTab === "roles"
-                    ? void onSaveProviderSettings()
-                    : void onSaveConfig()
-                }
-              >
-                <Save size={16} />
-                {t("actions.save")}
-              </button>
-            </div>
-          </header>
-
-          <nav className="settings-tabs">
-            {(["providers", "models", "roles", "security", "general"] as SettingsTab[]).map(
-              (tab) => (
-                <button
-                  key={tab}
-                  className={tab === activeSettingsTab ? "active" : ""}
-                  onClick={() => setActiveSettingsTab(tab)}
-                >
-                  {t(`settings.tabs.${tab}`)}
-                </button>
-              ),
-            )}
-          </nav>
-
-          {activeSettingsTab === "providers" ? (
-            <ProviderSettings
-              providers={providers}
-              templates={providerTemplates}
-              selectedProviderId={selectedProviderId}
-              providerSearch={providerSearch}
-              setProviders={setProviders}
-              setSelectedProviderId={setSelectedProviderId}
-              setProviderSearch={setProviderSearch}
-            />
-          ) : activeSettingsTab === "roles" ? (
-            <RoleSettings providers={providers} roles={roles} setRoles={setRoles} />
-          ) : (
-            <div className="settings-placeholder">
-              <h2>{t("settings.comingSoon")}</h2>
-              <p>{t("settings.comingSoonDesc")}</p>
-            </div>
-          )}
-        </section>
+        <SettingsPage
+          activeSettingsTab={activeSettingsTab}
+          providers={providers}
+          providerTemplates={providerTemplates}
+          roles={roles}
+          selectedProviderId={selectedProviderId}
+          providerSearch={providerSearch}
+          configExists={configExists}
+          configToml={configToml}
+          setProviders={setProviders}
+          setRoles={setRoles}
+          setSelectedProviderId={setSelectedProviderId}
+          setProviderSearch={setProviderSearch}
+          setConfigToml={setConfigToml}
+          onClose={() => setSettingsOpen(false)}
+          onSetActiveTab={setActiveSettingsTab}
+          onSaveProviderSettings={() => void onSaveProviderSettings()}
+          onSaveConfig={() => void onSaveConfig()}
+          onReloadConfig={() => void onReloadConfig()}
+        />
       ) : null}
     </main>
   );
