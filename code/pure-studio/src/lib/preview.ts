@@ -24,7 +24,7 @@ export const previewSessions: SessionRecord[] = [
   {
     id: "preview-session",
     projectId: "pure-lang",
-    title: "Provider settings preview",
+    title: "模型服务设置预览",
     mode: "manual",
     updatedAt: 1779688800,
   },
@@ -33,7 +33,7 @@ export const previewSessions: SessionRecord[] = [
 export const previewMessages: ChatMessage[] = [
   {
     role: "assistant",
-    content: "Pure Studio preview state is loaded for browser layout checks.",
+    content: "Pure Studio 预览状态已加载，可用于浏览器布局检查。",
     reasoningContent: null,
   },
 ];
@@ -44,9 +44,9 @@ export const previewSubagentEvents: SubagentActivity[] = [
     id: "subagent-preview-executor",
     parentId: null,
     role: "executor",
-    task: "Inspect the current workspace changes and report the likely next step.",
+    task: "检查当前工作区变更并报告可能的下一步。",
     status: "succeeded",
-    summary: "Workspace inspection finished; settings and routing code are ready to verify.",
+    summary: "工作区检查已完成；设置和路由代码可以验证。",
     depth: 1,
     error: null,
     updatedAt: 1779688800,
@@ -56,9 +56,9 @@ export const previewSubagentEvents: SubagentActivity[] = [
     id: "subagent-preview-reviewer",
     parentId: "subagent-preview-executor",
     role: "reviewer",
-    task: "Review nested tool output before finalizing.",
+    task: "最终确认前审查嵌套工具输出。",
     status: "awaitingToolApproval",
-    summary: "Waiting on a nested bash approval.",
+    summary: "正在等待嵌套 bash 审批。",
     depth: 2,
     error: null,
     updatedAt: 1779688860,

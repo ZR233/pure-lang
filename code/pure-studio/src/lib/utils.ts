@@ -45,6 +45,7 @@ export function translateStatus(status: string, t: (key: string) => string) {
 
 const UPDATED_AT_KEY_MAP: Record<string, string> = {
   Draft: "provider.draft",
+  Loaded: "provider.loaded",
   Preview: "provider.draft",
 };
 

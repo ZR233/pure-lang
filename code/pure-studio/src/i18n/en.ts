@@ -143,6 +143,7 @@ const en = {
     updated: "Updated",
     platform: "{{name}} Platform",
     draft: "Draft",
+    loaded: "Loaded",
     healthy: "Healthy",
     needsSetup: "Needs setup",
     providerKey: "Provider Key",
@@ -151,11 +152,18 @@ const en = {
     addProvider: "Add {{name}}",
   },
 
+  roleRoute: {
+    provider: "Provider",
+    model: "Model",
+    effort: "Effort",
+  },
+
   model: {
     title: "Models",
     defaultModels: "Default Models",
     customModels: "Custom Models",
     customModelButton: "Custom Model",
+    defaultCustomModelName: "Custom Model",
     noCustomModels: "No custom models.",
     defaultModelDesc: "Default models come from the template. Custom models are appended below.",
     context: "Context",
