@@ -17,7 +17,10 @@ use crate::{
     CompileMode, CoreSession, PureCore, ToolApprovalCallback, ToolApprovalDecision,
     ToolApprovalRequest, TurnOptions, TurnRequest, TurnResult, load_workspace_instructions,
 };
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/0001_init.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/0001_init.sql"),
+    include_str!("../migrations/0002_subagent_events.sql"),
+];
 
 static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -113,6 +116,32 @@ pub mod entities {
         impl ActiveModelBehavior for ActiveModel {}
     }
 
+    pub mod subagent_event {
+        use super::*;
+
+        #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+        #[sea_orm(table_name = "subagent_events")]
+        pub struct Model {
+            #[sea_orm(primary_key, auto_increment = false)]
+            pub id: String,
+            pub session_id: String,
+            pub subagent_id: String,
+            pub parent_id: Option<String>,
+            pub role: String,
+            pub task: String,
+            pub status: String,
+            pub summary: Option<String>,
+            pub depth: i32,
+            pub error: Option<String>,
+            pub created_at: i64,
+        }
+
+        #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+        pub enum Relation {}
+
+        impl ActiveModelBehavior for ActiveModel {}
+    }
+
     pub mod app_setting {
         use super::*;
 
@@ -158,6 +187,21 @@ pub struct ToolApprovalRecord {
     pub working_directory: Option<String>,
     pub decision: String,
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentEventRecord {
+    pub event_id: String,
+    pub session_id: String,
+    pub subagent_id: String,
+    pub parent_id: Option<String>,
+    pub role: String,
+    pub task: String,
+    pub status: String,
+    pub summary: Option<String>,
+    pub depth: i32,
+    pub error: Option<String>,
+    pub created_at: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -501,6 +545,37 @@ impl StudioStore {
         Ok(())
     }
 
+    pub async fn record_subagent_event(&self, record: SubagentEventRecord) -> Result<()> {
+        use entities::subagent_event;
+        subagent_event::ActiveModel {
+            id: Set(record.event_id),
+            session_id: Set(record.session_id),
+            subagent_id: Set(record.subagent_id),
+            parent_id: Set(record.parent_id),
+            role: Set(record.role),
+            task: Set(record.task),
+            status: Set(record.status),
+            summary: Set(record.summary),
+            depth: Set(record.depth),
+            error: Set(record.error),
+            created_at: Set(record.created_at),
+        }
+        .insert(&self.db)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_subagent_events(&self, session_id: &str) -> Result<Vec<SubagentEventRecord>> {
+        use entities::subagent_event;
+        let rows = subagent_event::Entity::find()
+            .filter(subagent_event::Column::SessionId.eq(session_id.to_string()))
+            .order_by_asc(subagent_event::Column::CreatedAt)
+            .order_by_asc(subagent_event::Column::Id)
+            .all(&self.db)
+            .await?;
+        Ok(rows.into_iter().map(subagent_event_record).collect())
+    }
+
     pub async fn save_setting(&self, key: &str, value: &str) -> Result<()> {
         use entities::app_setting;
         let now = unix_seconds();
@@ -550,6 +625,22 @@ fn session_record(model: entities::session::Model) -> SessionRecord {
         title: model.title,
         mode: model.mode,
         updated_at: model.updated_at,
+    }
+}
+
+fn subagent_event_record(model: entities::subagent_event::Model) -> SubagentEventRecord {
+    SubagentEventRecord {
+        event_id: model.id,
+        session_id: model.session_id,
+        subagent_id: model.subagent_id,
+        parent_id: model.parent_id,
+        role: model.role,
+        task: model.task,
+        status: model.status,
+        summary: model.summary,
+        depth: model.depth,
+        error: model.error,
+        created_at: model.created_at,
     }
 }
 
@@ -827,6 +918,55 @@ mod tests {
             })
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn records_subagent_events_in_session_order() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/alpha").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Build app", CompileMode::Auto)
+            .await
+            .unwrap();
+
+        store
+            .record_subagent_event(SubagentEventRecord {
+                event_id: "event-1".to_string(),
+                session_id: session.id.clone(),
+                subagent_id: "subagent-1".to_string(),
+                parent_id: None,
+                role: "executor".to_string(),
+                task: "inspect".to_string(),
+                status: "running".to_string(),
+                summary: None,
+                depth: 1,
+                error: None,
+                created_at: 10,
+            })
+            .await
+            .unwrap();
+        store
+            .record_subagent_event(SubagentEventRecord {
+                event_id: "event-2".to_string(),
+                session_id: session.id.clone(),
+                subagent_id: "subagent-1".to_string(),
+                parent_id: None,
+                role: "executor".to_string(),
+                task: "inspect".to_string(),
+                status: "succeeded".to_string(),
+                summary: Some("done".to_string()),
+                depth: 1,
+                error: None,
+                created_at: 11,
+            })
+            .await
+            .unwrap();
+
+        let events = store.list_subagent_events(&session.id).await.unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].status, "running");
+        assert_eq!(events[1].summary.as_deref(), Some("done"));
     }
 
     #[tokio::test]

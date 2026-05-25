@@ -14,6 +14,7 @@ import {
   RunPromptResponse,
   SessionRecord,
   SessionSelectionPayload,
+  SubagentActivity,
 } from "../types";
 
 type TauriWindow = Window & {
@@ -132,6 +133,33 @@ const previewMessages = [
   },
 ];
 
+const previewSubagentEvents: SubagentActivity[] = [
+  {
+    eventId: "preview-subagent-1",
+    id: "subagent-preview-executor",
+    parentId: null,
+    role: "executor",
+    task: "Inspect the current workspace changes and report the likely next step.",
+    status: "succeeded",
+    summary: "Workspace inspection finished; settings and routing code are ready to verify.",
+    depth: 1,
+    error: null,
+    updatedAt: 1779688800,
+  },
+  {
+    eventId: "preview-subagent-2",
+    id: "subagent-preview-reviewer",
+    parentId: "subagent-preview-executor",
+    role: "reviewer",
+    task: "Review nested tool output before finalizing.",
+    status: "awaitingToolApproval",
+    summary: "Waiting on a nested bash approval.",
+    depth: 2,
+    error: null,
+    updatedAt: 1779688860,
+  },
+];
+
 const previewRoles: RoleRecord[] = [
   {
     key: "explorer",
@@ -238,6 +266,7 @@ export function bootstrapStudio() {
         sessions: previewSessions,
         selectedSessionId: previewSessions[0]?.id ?? null,
         messages: previewMessages,
+        subagentEvents: previewSubagentEvents,
         config: previewConfig,
       }),
     );
@@ -261,6 +290,7 @@ export function openProject(path: string) {
         sessions: previewSessions,
         selectedSessionId: previewSessions[0]?.id ?? null,
         messages: previewMessages,
+        subagentEvents: previewSubagentEvents,
       }),
     );
   }
@@ -276,6 +306,7 @@ export function selectProject(projectId: string) {
         sessions: previewSessions,
         selectedSessionId: previewSessions[0]?.id ?? null,
         messages: previewMessages,
+        subagentEvents: previewSubagentEvents,
       }),
     );
   }
@@ -296,6 +327,7 @@ export function createSession(projectId: string, title?: string) {
         sessionId: session.id,
         sessions: [session, ...previewSessions],
         messages: [],
+        subagentEvents: [],
       }),
     );
   }
@@ -312,6 +344,7 @@ export function selectSession(sessionId: string) {
         sessionId,
         sessions: previewSessions,
         messages: previewMessages,
+        subagentEvents: previewSubagentEvents,
       }),
     );
   }
@@ -327,6 +360,21 @@ export function runPrompt(sessionId: string, prompt: string) {
         messages: [
           ...previewMessages,
           { role: "user" as const, content: prompt, reasoningContent: null },
+        ],
+        subagentEvents: [
+          ...previewSubagentEvents,
+          {
+            eventId: `preview-subagent-${Date.now()}`,
+            id: "subagent-preview-latest",
+            parentId: null,
+            role: "executor",
+            task: prompt,
+            status: "succeeded" as const,
+            summary: "Preview run completed.",
+            depth: 1,
+            error: null,
+            updatedAt: Math.floor(Date.now() / 1000),
+          },
         ],
       }),
     );

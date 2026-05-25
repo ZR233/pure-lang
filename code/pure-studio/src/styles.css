@@ -351,6 +351,107 @@ button:disabled {
   word-break: break-word;
 }
 
+.subagent-timeline {
+  display: grid;
+  width: min(100%, 880px);
+  max-width: 880px;
+  gap: 10px;
+  margin: 4px 0 16px;
+}
+
+.subagent-timeline-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #637387;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.subagent-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid #d9e3ed;
+  border-left: 4px solid #7aa9bd;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.subagent-card.status-running,
+.subagent-card.status-awaiting-tool-approval {
+  border-left-color: #0c8ca5;
+  background: #f4fbfd;
+}
+
+.subagent-card.status-succeeded {
+  border-left-color: #2d9a63;
+  background: #f5fbf7;
+}
+
+.subagent-card.status-failed,
+.subagent-card.status-denied {
+  border-left-color: #c44949;
+  background: #fff7f7;
+}
+
+.subagent-card-head,
+.subagent-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.subagent-card-head {
+  justify-content: space-between;
+}
+
+.subagent-role {
+  min-width: 0;
+  overflow: hidden;
+  color: #172235;
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-status {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: 1px solid #d5e1ea;
+  border-radius: 8px;
+  color: #526579;
+  background: #f8fafc;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.subagent-task,
+.subagent-result {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.subagent-task {
+  color: #29384a;
+  font-size: 13px;
+}
+
+.subagent-result {
+  color: #657386;
+  font-size: 12px;
+}
+
+.subagent-meta {
+  flex-wrap: wrap;
+  color: #7d8b9b;
+  font-size: 11px;
+}
+
 .thinking-block,
 .approval-card pre {
   overflow: auto;
@@ -453,6 +554,36 @@ button:disabled {
 
 .metric-row:last-child {
   border-bottom: 0;
+}
+
+.activity-row {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid #edf1f5;
+}
+
+.activity-row:last-child {
+  border-bottom: 0;
+}
+
+.activity-row strong,
+.activity-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-row strong {
+  color: #223044;
+  font-size: 12px;
+}
+
+.activity-row span {
+  color: #718196;
+  font-size: 11px;
 }
 
 .approval-stack {

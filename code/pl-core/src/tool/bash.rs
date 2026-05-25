@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
 use super::truncation::{OutputTruncation, TruncationStrategy};
-use super::{Tool, ToolInput, ToolOutput};
+use super::{Tool, ToolContext, ToolInput, ToolOutput};
 
 const TOOL_OUTPUT_DIR: &str = "target/pure";
 const OUTPUT_LOG_FILE: &str = "output.log";
@@ -148,6 +148,7 @@ impl Tool for BashTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
+        _context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
             let bash_input = Self::parse_input(input.arguments, self.name())?;
@@ -252,11 +253,22 @@ mod tests {
         BashTool::new(std::env::temp_dir().join("pure-test-tool"))
     }
 
+    fn test_context() -> ToolContext {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        ToolContext {
+            event_tx,
+            options: crate::turn::TurnOptions::default(),
+            workspace_root: std::env::temp_dir(),
+            workspace_instructions: None,
+            active_subagent: None,
+        }
+    }
+
     #[tokio::test]
     async fn echoes_hello() {
         let tool = test_tool();
         let output = tool
-            .execute(tool_input("echo hello", "s1", "t1"))
+            .execute(tool_input("echo hello", "s1", "t1"), test_context())
             .await
             .unwrap();
 
@@ -271,7 +283,7 @@ mod tests {
     async fn captures_stderr() {
         let tool = test_tool();
         let output = tool
-            .execute(tool_input("echo err >&2", "s2", "t2"))
+            .execute(tool_input("echo err >&2", "s2", "t2"), test_context())
             .await
             .unwrap();
 
@@ -282,7 +294,7 @@ mod tests {
     async fn exit_code_nonzero() {
         let tool = test_tool();
         let output = tool
-            .execute(tool_input("exit 42", "s3", "t3"))
+            .execute(tool_input("exit 42", "s3", "t3"), test_context())
             .await
             .unwrap();
 
@@ -294,11 +306,14 @@ mod tests {
     async fn invalid_input_returns_error() {
         let tool = test_tool();
         let result = tool
-            .execute(ToolInput {
-                arguments: serde_json::json!({}),
-                session_id: "s4".to_string(),
-                tool_id: "t4".to_string(),
-            })
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({}),
+                    session_id: "s4".to_string(),
+                    tool_id: "t4".to_string(),
+                },
+                test_context(),
+            )
             .await;
 
         assert!(result.is_err());
@@ -308,7 +323,7 @@ mod tests {
     async fn full_output_saved_to_file() {
         let tool = test_tool();
         let output = tool
-            .execute(tool_input("echo test", "s5", "t5"))
+            .execute(tool_input("echo test", "s5", "t5"), test_context())
             .await
             .unwrap();
 
@@ -328,7 +343,10 @@ mod tests {
     async fn output_file_path_follows_convention() {
         let tool = test_tool();
         let output = tool
-            .execute(tool_input("echo ok", "my-session", "my-tool"))
+            .execute(
+                tool_input("echo ok", "my-session", "my-tool"),
+                test_context(),
+            )
             .await
             .unwrap();
 

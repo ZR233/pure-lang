@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
+  Activity,
   ArrowLeft,
   Check,
   FolderOpen,
@@ -44,11 +45,41 @@ import {
   RunPromptResponse,
   SessionRecord,
   SessionSelectionPayload,
+  SubagentActivity,
+  SubagentEventPayload,
+  SubagentStatus,
   ToolApprovalRequest,
   ToolApprovalResolved,
 } from "./types";
 
 type SettingsTab = "providers" | "models" | "roles" | "security" | "general";
+
+const roleLabels: Record<string, string> = {
+  explorer: "探索者",
+  planner: "计划者",
+  executor: "执行者",
+  reviewer: "审查者",
+};
+
+const statusLabels: Record<SubagentStatus, string> = {
+  queued: "Queued",
+  awaitingApproval: "Awaiting approval",
+  running: "Running",
+  awaitingToolApproval: "Awaiting tool",
+  succeeded: "Succeeded",
+  failed: "Failed",
+  denied: "Denied",
+};
+
+const statusClassNames: Record<SubagentStatus, string> = {
+  queued: "queued",
+  awaitingApproval: "awaiting-approval",
+  running: "running",
+  awaitingToolApproval: "awaiting-tool-approval",
+  succeeded: "succeeded",
+  failed: "failed",
+  denied: "denied",
+};
 
 function errorText(error: unknown) {
   if (typeof error === "object" && error !== null && "message" in error) {
@@ -73,6 +104,49 @@ function formatTime(value: number) {
   return new Date(value * 1000).toLocaleString();
 }
 
+function normalizeSubagentActivity(event: SubagentEventPayload): SubagentActivity {
+  return {
+    eventId:
+      event.eventId ??
+      `${event.id}-${event.updatedAt}-${event.status}-${Math.random().toString(16).slice(2)}`,
+    id: event.id,
+    parentId: event.parentId ?? null,
+    role: event.role,
+    task: event.task,
+    status: event.status,
+    summary: event.summary ?? null,
+    depth: event.depth,
+    error: event.error ?? null,
+    updatedAt: event.updatedAt,
+  };
+}
+
+function mergeSubagentActivities(
+  current: SubagentActivity[],
+  events: SubagentEventPayload[],
+): SubagentActivity[] {
+  const byId = new Map(current.map((activity) => [activity.id, activity]));
+  for (const event of events) {
+    byId.set(event.id, normalizeSubagentActivity(event));
+  }
+  return [...byId.values()].sort((left, right) => {
+    if (right.updatedAt !== left.updatedAt) {
+      return right.updatedAt - left.updatedAt;
+    }
+    return left.depth - right.depth;
+  });
+}
+
+function subagentSummary(activity: SubagentActivity) {
+  if (activity.error) {
+    return activity.error;
+  }
+  if (activity.summary) {
+    return activity.summary;
+  }
+  return activity.status === "queued" ? "Waiting to start." : "No summary yet.";
+}
+
 export function App() {
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
@@ -89,6 +163,7 @@ export function App() {
   const [streamingText, setStreamingText] = useState("");
   const [thinkingText, setThinkingText] = useState("");
   const [toolStatuses, setToolStatuses] = useState<string[]>([]);
+  const [subagentActivities, setSubagentActivities] = useState<SubagentActivity[]>([]);
   const [approvals, setApprovals] = useState<ToolApprovalRequest[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("providers");
@@ -112,6 +187,22 @@ export function App() {
     return rows;
   }, [messages, streamingText, thinkingText]);
 
+  const recentActivities = useMemo(
+    () => [
+      ...subagentActivities.slice(0, 4).map((activity) => ({
+        id: `subagent-${activity.id}`,
+        title: `${roleLabels[activity.role] ?? activity.role} · ${statusLabels[activity.status]}`,
+        detail: activity.task,
+      })),
+      ...toolStatuses.slice(0, 4).map((item) => ({
+        id: `tool-${item}`,
+        title: item,
+        detail: "Tool call",
+      })),
+    ].slice(0, 5),
+    [subagentActivities, toolStatuses],
+  );
+
   useEffect(() => {
     bootstrapStudio()
       .then((payload) => {
@@ -120,6 +211,7 @@ export function App() {
         setSessions(payload.sessions);
         setSelectedSessionId(payload.selectedSessionId ?? null);
         setMessages(payload.messages);
+        setSubagentActivities(mergeSubagentActivities([], payload.subagentEvents));
         applyConfig(payload.config);
         setStatus("Ready");
       })
@@ -167,6 +259,15 @@ export function App() {
         }
         if ("toolApprovalDenied" in event) {
           setStatus(`Denied: ${event.toolApprovalDenied.name}`);
+          return;
+        }
+        if ("subagentStateChanged" in event) {
+          setSubagentActivities((current) =>
+            mergeSubagentActivities(current, [event.subagentStateChanged]),
+          );
+          setStatus(
+            `Subagent ${statusLabels[event.subagentStateChanged.status].toLowerCase()}`,
+          );
           return;
         }
         if ("error" in event) {
@@ -222,6 +323,7 @@ export function App() {
     setSessions(payload.sessions);
     setSelectedSessionId(payload.selectedSessionId ?? null);
     setMessages(payload.messages);
+    setSubagentActivities(mergeSubagentActivities([], payload.subagentEvents));
     setStreamingText("");
     setThinkingText("");
     setStatus("Project loaded");
@@ -233,6 +335,7 @@ export function App() {
     }
     setSelectedSessionId(payload.sessionId);
     setMessages(payload.messages);
+    setSubagentActivities(mergeSubagentActivities([], payload.subagentEvents));
     setStreamingText("");
     setThinkingText("");
     setStatus("Session loaded");
@@ -242,6 +345,7 @@ export function App() {
     setSelectedSessionId(payload.sessionId);
     setSessions(payload.sessions);
     setMessages(payload.messages);
+    setSubagentActivities(mergeSubagentActivities([], payload.subagentEvents));
     setStreamingText("");
     setThinkingText("");
     setStatus("Done");
@@ -476,22 +580,55 @@ export function App() {
         </header>
 
         <div className="message-stream">
-          {liveMessages.length === 0 ? (
+          {liveMessages.length === 0 && subagentActivities.length === 0 ? (
             <div className="empty-state">
               <Terminal size={34} />
               <h2>Ready when you are</h2>
               <p>Select a project and ask Pure Studio to explore, plan, or execute.</p>
             </div>
           ) : (
-            liveMessages.map((message, index) => (
-              <article key={`${message.role}-${index}`} className={`message ${message.role}`}>
-                <div className="message-role">{message.role}</div>
-                {message.reasoningContent ? (
-                  <pre className="thinking-block">{message.reasoningContent}</pre>
-                ) : null}
-                <div className="message-content">{message.content}</div>
-              </article>
-            ))
+            <>
+              {liveMessages.map((message, index) => (
+                <article key={`${message.role}-${index}`} className={`message ${message.role}`}>
+                  <div className="message-role">{message.role}</div>
+                  {message.reasoningContent ? (
+                    <pre className="thinking-block">{message.reasoningContent}</pre>
+                  ) : null}
+                  <div className="message-content">{message.content}</div>
+                </article>
+              ))}
+              {subagentActivities.length > 0 ? (
+                <section className="subagent-timeline" aria-label="Subagent activity">
+                  <div className="subagent-timeline-head">
+                    <Activity size={16} />
+                    <span>Subagents</span>
+                  </div>
+                  {subagentActivities.map((activity) => (
+                    <article
+                      key={activity.id}
+                      className={`subagent-card status-${statusClassNames[activity.status]}`}
+                      style={{ marginLeft: `${Math.max(0, activity.depth - 1) * 14}px` }}
+                    >
+                      <div className="subagent-card-head">
+                        <span className="subagent-role">
+                          {roleLabels[activity.role] ?? activity.role}
+                        </span>
+                        <span className="subagent-status">
+                          {statusLabels[activity.status]}
+                        </span>
+                      </div>
+                      <p className="subagent-task">{activity.task}</p>
+                      <p className="subagent-result">{subagentSummary(activity)}</p>
+                      <div className="subagent-meta">
+                        <span>Depth {activity.depth}</span>
+                        {activity.parentId ? <span>Parent {activity.parentId}</span> : null}
+                        <span>{formatTime(activity.updatedAt)}</span>
+                      </div>
+                    </article>
+                  ))}
+                </section>
+              ) : null}
+            </>
           )}
         </div>
 
@@ -541,10 +678,15 @@ export function App() {
         </section>
         <section className="context-card">
           <h2>Tools</h2>
-          {toolStatuses.length === 0 ? (
-            <p className="muted">Tool activity appears here after approval.</p>
+          {recentActivities.length === 0 ? (
+            <p className="muted">Subagent and tool activity appears here after a run.</p>
           ) : (
-            toolStatuses.map((item) => <p key={item}>{item}</p>)
+            recentActivities.map((item) => (
+              <div className="activity-row" key={item.id}>
+                <strong>{item.title}</strong>
+                <span>{item.detail}</span>
+              </div>
+            ))
           )}
         </section>
       </aside>
@@ -558,6 +700,9 @@ export function App() {
                 <div>
                   <strong>{approval.name}</strong>
                   <span>{approval.workingDirectory ?? "(default working directory)"}</span>
+                  {approval.parentSubagentId ? (
+                    <span>Subagent {approval.parentSubagentId}</span>
+                  ) : null}
                 </div>
               </div>
               <pre>{JSON.stringify(approval.arguments, null, 2)}</pre>

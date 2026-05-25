@@ -1,21 +1,27 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use pl_core::{
     ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProjectRecord, ProviderConfig,
     ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, ProviderTemplateKind, PureConfig,
-    RoleEdit, SessionRecord, StudioRuntime, ToolApprovalCallback, ToolApprovalDecision,
-    ToolApprovalRequest, infer_provider_template_kind,
+    RoleEdit, SessionRecord, StudioRuntime, StudioStore, SubagentEventRecord, ToolApprovalCallback,
+    ToolApprovalDecision, ToolApprovalRequest, infer_provider_template_kind,
 };
-use pl_protocol::{AgentEvent, Message, MessageContent, MessageRole, PureError};
+use pl_protocol::{AgentEvent, Message, MessageContent, MessageRole, PureError, SubagentStatus};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{Mutex, oneshot};
 
 type ApprovalWaiters = Arc<Mutex<HashMap<String, oneshot::Sender<ToolApprovalDecision>>>>;
 type CommandResult<T> = std::result::Result<T, CommandError>;
+
+static EVENT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone)]
 struct AppState {
@@ -80,6 +86,21 @@ struct MessageDto {
     role: String,
     content: String,
     reasoning_content: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SubagentEventDto {
+    event_id: String,
+    id: String,
+    parent_id: Option<String>,
+    role: String,
+    task: String,
+    status: String,
+    summary: Option<String>,
+    depth: i32,
+    error: Option<String>,
+    updated_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -197,6 +218,7 @@ struct BootstrapDto {
     sessions: Vec<SessionDto>,
     selected_session_id: Option<String>,
     messages: Vec<MessageDto>,
+    subagent_events: Vec<SubagentEventDto>,
     config: ConfigDto,
 }
 
@@ -208,6 +230,7 @@ struct ProjectSelectionDto {
     sessions: Vec<SessionDto>,
     selected_session_id: Option<String>,
     messages: Vec<MessageDto>,
+    subagent_events: Vec<SubagentEventDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -216,6 +239,7 @@ struct SessionSelectionDto {
     session_id: String,
     sessions: Vec<SessionDto>,
     messages: Vec<MessageDto>,
+    subagent_events: Vec<SubagentEventDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -224,6 +248,7 @@ struct RunPromptResponse {
     session_id: String,
     messages: Vec<MessageDto>,
     sessions: Vec<SessionDto>,
+    subagent_events: Vec<SubagentEventDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -241,6 +266,7 @@ struct ToolApprovalRequestPayload {
     name: String,
     arguments: serde_json::Value,
     working_directory: Option<String>,
+    parent_subagent_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -299,6 +325,7 @@ async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Bootstrap
     let mut sessions = Vec::new();
     let mut selected_session_id = None;
     let mut messages = Vec::new();
+    let mut subagent_events = Vec::new();
 
     if let Some(project) = projects.first() {
         selected_project_id = Some(project.id.clone());
@@ -306,6 +333,11 @@ async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Bootstrap
         if let Some(session) = sessions.first() {
             selected_session_id = Some(session.id.clone());
             messages = state.studio.store().load_messages(&session.id).await?;
+            subagent_events = state
+                .studio
+                .store()
+                .list_subagent_events(&session.id)
+                .await?;
         }
     }
 
@@ -315,6 +347,7 @@ async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Bootstrap
         sessions: session_dtos(sessions),
         selected_session_id,
         messages: message_dtos(messages),
+        subagent_events: subagent_event_dtos(subagent_events),
         config: config_dto(state.studio.config_store())?,
     })
 }
@@ -358,6 +391,7 @@ async fn create_session(
         session_id: session.id,
         sessions: session_dtos(sessions),
         messages: Vec::new(),
+        subagent_events: Vec::new(),
     })
 }
 
@@ -367,10 +401,16 @@ async fn select_session(
     state: State<'_, AppState>,
 ) -> CommandResult<SessionSelectionDto> {
     let messages = state.studio.store().load_messages(&session_id).await?;
+    let subagent_events = state
+        .studio
+        .store()
+        .list_subagent_events(&session_id)
+        .await?;
     Ok(SessionSelectionDto {
         session_id,
         sessions: Vec::new(),
         messages: message_dtos(messages),
+        subagent_events: subagent_event_dtos(subagent_events),
     })
 }
 
@@ -386,8 +426,12 @@ async fn run_prompt(
     }
 
     let (event_tx, event_rx) = tokio::sync::broadcast::channel(256);
-    let event_task =
-        tauri::async_runtime::spawn(drain_events(session_id.clone(), event_rx, app.clone()));
+    let event_task = tauri::async_runtime::spawn(drain_events(
+        session_id.clone(),
+        event_rx,
+        app.clone(),
+        state.studio.store().clone(),
+    ));
     let result = state
         .studio
         .run_prompt(
@@ -417,6 +461,13 @@ async fn run_prompt(
                 session_id: session_id.clone(),
                 messages: message_dtos(outcome.messages),
                 sessions: session_dtos(sessions),
+                subagent_events: subagent_event_dtos(
+                    state
+                        .studio
+                        .store()
+                        .list_subagent_events(&session_id)
+                        .await?,
+                ),
             };
             let _ = app.emit("studio-prompt-finished", response.clone());
             Ok(response)
@@ -518,12 +569,23 @@ async fn select_project_data(
         Some(session_id) => state.studio.store().load_messages(session_id).await?,
         None => Vec::new(),
     };
+    let subagent_events = match &selected_session_id {
+        Some(session_id) => {
+            state
+                .studio
+                .store()
+                .list_subagent_events(session_id)
+                .await?
+        }
+        None => Vec::new(),
+    };
     Ok(ProjectSelectionDto {
         project_id,
         projects: project_dtos(state.studio.list_projects().await?),
         sessions: session_dtos(sessions),
         selected_session_id,
         messages: message_dtos(messages),
+        subagent_events: subagent_event_dtos(subagent_events),
     })
 }
 
@@ -547,6 +609,7 @@ fn approval_callback(
                     name: request.name,
                     arguments: request.arguments,
                     working_directory: request.working_directory,
+                    parent_subagent_id: request.parent_subagent_id,
                 },
             );
 
@@ -584,12 +647,16 @@ async fn drain_events(
     session_id: String,
     mut event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
     app: AppHandle,
+    store: StudioStore,
 ) {
     loop {
         let Ok(event) = event_rx.recv().await else {
             break;
         };
         let done = matches!(event, AgentEvent::Done);
+        if let Some(record) = subagent_event_record(&session_id, &event) {
+            let _ = store.record_subagent_event(record).await;
+        }
         let _ = app.emit(
             "studio-agent-event",
             AgentEventPayload {
@@ -600,6 +667,35 @@ async fn drain_events(
         if done {
             break;
         }
+    }
+}
+
+fn subagent_event_record(session_id: &str, event: &AgentEvent) -> Option<SubagentEventRecord> {
+    match event {
+        AgentEvent::SubagentStateChanged {
+            id,
+            parent_id,
+            role,
+            task,
+            status,
+            summary,
+            depth,
+            error,
+            updated_at,
+        } => Some(SubagentEventRecord {
+            event_id: new_event_id("subagent-event"),
+            session_id: session_id.to_string(),
+            subagent_id: id.clone(),
+            parent_id: parent_id.clone(),
+            role: role.clone(),
+            task: task.clone(),
+            status: subagent_status_label(*status).to_string(),
+            summary: summary.clone(),
+            depth: *depth as i32,
+            error: error.clone(),
+            created_at: *updated_at,
+        }),
+        _ => None,
     }
 }
 
@@ -801,6 +897,25 @@ fn message_dtos(messages: Vec<Message>) -> Vec<MessageDto> {
     messages.into_iter().map(message_dto).collect()
 }
 
+fn subagent_event_dtos(events: Vec<SubagentEventRecord>) -> Vec<SubagentEventDto> {
+    events.into_iter().map(subagent_event_dto).collect()
+}
+
+fn subagent_event_dto(event: SubagentEventRecord) -> SubagentEventDto {
+    SubagentEventDto {
+        event_id: event.event_id,
+        id: event.subagent_id,
+        parent_id: event.parent_id,
+        role: event.role,
+        task: event.task,
+        status: event.status,
+        summary: event.summary,
+        depth: event.depth,
+        error: event.error,
+        updated_at: event.created_at,
+    }
+}
+
 fn message_dto(message: Message) -> MessageDto {
     let role = match message.role {
         MessageRole::System => "system",
@@ -814,6 +929,27 @@ fn message_dto(message: Message) -> MessageDto {
         content: message_content_text(message.content),
         reasoning_content: message.reasoning_content,
     }
+}
+
+fn subagent_status_label(status: SubagentStatus) -> &'static str {
+    match status {
+        SubagentStatus::Queued => "queued",
+        SubagentStatus::AwaitingApproval => "awaitingApproval",
+        SubagentStatus::Running => "running",
+        SubagentStatus::AwaitingToolApproval => "awaitingToolApproval",
+        SubagentStatus::Succeeded => "succeeded",
+        SubagentStatus::Failed => "failed",
+        SubagentStatus::Denied => "denied",
+    }
+}
+
+fn new_event_id(prefix: &str) -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros();
+    let seq = EVENT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}-{now:x}-{seq:x}")
 }
 
 fn message_content_text(content: MessageContent) -> String {
