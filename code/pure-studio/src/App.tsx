@@ -607,7 +607,7 @@ export function App() {
                     <article
                       key={activity.id}
                       className={`subagent-card status-${statusClassNames[activity.status]}`}
-                      style={{ marginLeft: `${Math.max(0, activity.depth - 1) * 14}px` }}
+                      style={{ '--subagent-depth': Math.max(0, activity.depth - 1) } as React.CSSProperties}
                     >
                       <div className="subagent-card-head">
                         <span className="subagent-role">
