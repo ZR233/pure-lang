@@ -1,4 +1,5 @@
 import { Plus, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { ModelRecord, ProviderRecord } from "../types";
 
 type ProviderModelEditorProps = {
@@ -19,9 +20,13 @@ function effortsFromText(value: string) {
     .filter(Boolean);
 }
 
-function formatTokens(value?: number | null) {
+function notConfigured(t: (key: string) => string) {
+  return t("provider.notConfigured");
+}
+
+function formatTokens(value: number | undefined | null, t: (key: string) => string) {
   if (value === undefined || value === null) {
-    return "未配置";
+    return notConfigured(t);
   }
   if (value >= 1_000_000) {
     return `${trimNumber(value / 1_000_000)}M`;
@@ -36,46 +41,46 @@ function trimNumber(value: number) {
   return Number.isInteger(value) ? value.toString() : value.toFixed(1);
 }
 
-function formatList(values?: string[]) {
-  return values && values.length > 0 ? values.join(", ") : "未配置";
+function formatList(values: string[] | undefined, t: (key: string) => string) {
+  return values && values.length > 0 ? values.join(", ") : notConfigured(t);
 }
 
-function ModelParameterGrid({ model }: { model: ModelRecord }) {
+function ModelParameterGrid({ model, t }: { model: ModelRecord; t: (key: string) => string }) {
   return (
     <div className="model-parameter-grid">
       <span>
-        <small>Context</small>
-        <strong>{formatTokens(model.contextWindow ?? model.maxContextWindow)}</strong>
+        <small>{t("model.context")}</small>
+        <strong>{formatTokens(model.contextWindow ?? model.maxContextWindow, t)}</strong>
       </span>
       <span>
-        <small>Max output</small>
-        <strong>{formatTokens(model.maxOutputTokens)}</strong>
+        <small>{t("model.maxOutput")}</small>
+        <strong>{formatTokens(model.maxOutputTokens, t)}</strong>
       </span>
       <span>
-        <small>Auto compact</small>
-        <strong>{formatTokens(model.autoCompactTokenLimit)}</strong>
+        <small>{t("model.autoCompact")}</small>
+        <strong>{formatTokens(model.autoCompactTokenLimit, t)}</strong>
       </span>
       <span>
-        <small>Temperature</small>
-        <strong>{model.defaultTemperature ?? "未配置"}</strong>
+        <small>{t("model.temperature")}</small>
+        <strong>{model.defaultTemperature ?? notConfigured(t)}</strong>
       </span>
       <span>
-        <small>Efforts</small>
-        <strong>{modelEffortsText(model) || "未配置"}</strong>
+        <small>{t("model.efforts")}</small>
+        <strong>{modelEffortsText(model) || notConfigured(t)}</strong>
       </span>
       <span>
-        <small>Truncation</small>
+        <small>{t("model.truncation")}</small>
         <strong>
-          {model.truncationMode ?? "tokens"} / {formatTokens(model.truncationLimit)}
+          {model.truncationMode ?? "tokens"} / {formatTokens(model.truncationLimit, t)}
         </strong>
       </span>
       <span className="wide">
-        <small>Capabilities</small>
-        <strong>{formatList(model.capabilities)}</strong>
+        <small>{t("model.capabilities")}</small>
+        <strong>{formatList(model.capabilities, t)}</strong>
       </span>
       <span className="wide">
-        <small>Input</small>
-        <strong>{formatList(model.inputModalities)}</strong>
+        <small>{t("model.input")}</small>
+        <strong>{formatList(model.inputModalities, t)}</strong>
       </span>
     </div>
   );
@@ -87,20 +92,21 @@ export function ProviderModelEditor({
   onUpdateCustomModel,
   onRemoveCustomModel,
 }: ProviderModelEditorProps) {
+  const { t } = useTranslation();
   return (
     <div className="inline-model-editor">
       <div className="inline-model-heading">
         <div>
-          <h3>Models</h3>
-          <p>默认模型由模板提供，自定义模型追加在后面。</p>
+          <h3>{t("model.title")}</h3>
+          <p>{t("model.defaultModelDesc")}</p>
         </div>
         <button onClick={onAddCustomModel}>
           <Plus size={16} />
-          Custom Model
+          {t("model.customModelButton")}
         </button>
       </div>
 
-      <div className="model-section-title">Default Models</div>
+      <div className="model-section-title">{t("model.defaultModels")}</div>
       <div className="model-list">
         {provider.defaultModels.map((model) => (
           <div className="model-row readonly detailed" key={model.slug}>
@@ -109,15 +115,15 @@ export function ProviderModelEditor({
               <span>{model.slug}</span>
             </div>
             {model.description ? <p>{model.description}</p> : null}
-            <ModelParameterGrid model={model} />
+            <ModelParameterGrid model={model} t={t} />
           </div>
         ))}
       </div>
 
-      <div className="model-section-title">Custom Models</div>
+      <div className="model-section-title">{t("model.customModels")}</div>
       <div className="custom-model-list">
         {provider.customModels.length === 0 ? (
-          <p className="muted">No custom models.</p>
+          <p className="muted">{t("model.noCustomModels")}</p>
         ) : (
           provider.customModels.map((model, index) => (
             <div className="custom-model-row detailed" key={`${model.slug}-${index}`}>
@@ -125,14 +131,14 @@ export function ProviderModelEditor({
                 <input
                   value={model.slug}
                   onChange={(event) => onUpdateCustomModel(index, { slug: event.target.value })}
-                  placeholder="model-slug"
+                  placeholder={t("model.slugPlaceholder")}
                 />
                 <input
                   value={model.displayName}
                   onChange={(event) =>
                     onUpdateCustomModel(index, { displayName: event.target.value })
                   }
-                  placeholder="Display name"
+                  placeholder={t("model.displayNamePlaceholder")}
                 />
                 <input
                   value={modelEffortsText(model)}
@@ -141,17 +147,17 @@ export function ProviderModelEditor({
                       reasoningEfforts: effortsFromText(event.target.value),
                     })
                   }
-                  placeholder="high, xhigh"
+                  placeholder={t("model.effortsPlaceholder")}
                 />
                 <button
                   className="icon-button"
                   onClick={() => onRemoveCustomModel(index)}
-                  title="删除自定义模型"
+                  title={t("model.deleteTooltip")}
                 >
                   <Trash2 size={16} />
                 </button>
               </div>
-              <ModelParameterGrid model={model} />
+              <ModelParameterGrid model={model} t={t} />
             </div>
           ))
         )}
