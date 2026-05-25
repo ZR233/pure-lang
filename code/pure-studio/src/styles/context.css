@@ -1,0 +1,75 @@
+.context-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+  border-left: 1px solid #dfe7ef;
+  background: #f5f7fa;
+}
+
+.context-card,
+.config-editor-card,
+.approval-card {
+  border: 1px solid #d7e0ea;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.context-card {
+  padding: 16px;
+}
+
+.context-card h2,
+.config-editor-card h2 {
+  margin: 0 0 10px;
+  color: #121a26;
+  font-size: 14px;
+}
+
+.context-title {
+  margin: 0 0 6px;
+  font-weight: 800;
+}
+
+.metric-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #edf1f5;
+}
+
+.metric-row:last-child {
+  border-bottom: 0;
+}
+
+.activity-row {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid #edf1f5;
+}
+
+.activity-row:last-child {
+  border-bottom: 0;
+}
+
+.activity-row strong,
+.activity-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-row strong {
+  color: #223044;
+  font-size: 12px;
+}
+
+.activity-row span {
+  color: #718196;
+  font-size: 11px;
+}

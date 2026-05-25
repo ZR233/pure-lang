@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 import type { ModelRecord, ProviderRecord, RoleKey, RoleRecord } from "../types";
+import { allModels } from "../lib/utils";
 
 type RoleSettingsProps = {
   roles: RoleRecord[];
@@ -16,12 +17,6 @@ const ROLE_I18N_KEYS: Record<RoleKey, { label: string; hint: string }> = {
 };
 
 const ROLE_ORDER: RoleKey[] = ["explorer", "planner", "executor", "reviewer"];
-
-function allModels(provider: ProviderRecord) {
-  return provider.models.length > 0
-    ? provider.models
-    : [...provider.defaultModels, ...provider.customModels];
-}
 
 function modelForProvider(provider: ProviderRecord, modelSlug: string): ModelRecord | null {
   return allModels(provider).find((model) => model.slug === modelSlug) ?? null;
