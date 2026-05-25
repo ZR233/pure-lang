@@ -4,9 +4,10 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use pl_core::{
-    ConfigStore, ModelConfig, ProjectRecord, ProviderConfig, ProviderEdit, ProviderModelEdit,
-    ProviderSettingsEdit, ProviderTemplateKind, PureConfig, SessionRecord, StudioRuntime,
-    ToolApprovalCallback, ToolApprovalDecision, ToolApprovalRequest, infer_provider_template_kind,
+    ConfigStore, ModelCapabilityConfig, ModelConfig, ProjectRecord, ProviderConfig, ProviderEdit,
+    ProviderModelEdit, ProviderSettingsEdit, ProviderTemplateKind, PureConfig, SessionRecord,
+    StudioRuntime, ToolApprovalCallback, ToolApprovalDecision, ToolApprovalRequest,
+    infer_provider_template_kind,
 };
 use pl_protocol::{AgentEvent, Message, MessageContent, MessageRole, PureError};
 use serde::{Deserialize, Serialize};
@@ -90,7 +91,6 @@ struct ProviderDto {
     subtitle: String,
     status: String,
     base_url: String,
-    env_key: String,
     bearer_token: String,
     default_model: String,
     model_count: String,
@@ -107,7 +107,6 @@ struct ProviderTemplateDto {
     id: String,
     name: String,
     base_url: String,
-    env_key: String,
     default_model: String,
     wire_api: String,
     default_models: Vec<ModelDto>,
@@ -118,7 +117,17 @@ struct ProviderTemplateDto {
 struct ModelDto {
     slug: String,
     display_name: String,
+    description: Option<String>,
+    context_window: Option<u64>,
+    max_context_window: Option<u64>,
+    auto_compact_token_limit: Option<u64>,
+    default_temperature: Option<f32>,
+    max_output_tokens: Option<u64>,
     reasoning_efforts: Vec<String>,
+    capabilities: Vec<String>,
+    input_modalities: Vec<String>,
+    truncation_mode: String,
+    truncation_limit: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -144,7 +153,6 @@ struct ProviderInput {
     template_kind: String,
     name: String,
     base_url: String,
-    env_key: String,
     bearer_token: String,
     default_model: String,
     wire_api: String,
@@ -612,7 +620,6 @@ fn provider_dto(provider_key: &str, provider: &ProviderConfig) -> ProviderDto {
         subtitle: format!("{} Platform", provider.name),
         status: provider_status(provider).to_string(),
         base_url: provider.base_url.clone().unwrap_or_default(),
-        env_key: provider.env_key.clone().unwrap_or_default(),
         bearer_token: provider.bearer_token.clone().unwrap_or_default(),
         default_model: provider.default_model.clone(),
         model_count: models.len().to_string(),
@@ -637,7 +644,6 @@ fn provider_template_dto(kind: ProviderTemplateKind) -> CommandResult<ProviderTe
         id: kind.key().to_string(),
         name: info.name,
         base_url: info.base_url.unwrap_or_default(),
-        env_key: info.env_key.unwrap_or_default(),
         default_model: info.default_model,
         wire_api: info.wire_api.to_string(),
         default_models: kind.default_models()?.iter().map(model_dto).collect(),
@@ -645,10 +651,7 @@ fn provider_template_dto(kind: ProviderTemplateKind) -> CommandResult<ProviderTe
 }
 
 fn provider_status(provider: &ProviderConfig) -> &'static str {
-    if provider.bearer_token.is_some()
-        || provider.env_key.is_some()
-        || provider.auth_command.is_some()
-    {
+    if provider.bearer_token.is_some() {
         "Healthy"
     } else {
         "Needs setup"
@@ -659,7 +662,37 @@ fn model_dto(model: &ModelConfig) -> ModelDto {
     ModelDto {
         slug: model.slug.clone(),
         display_name: model.display_name.clone(),
+        description: model.description.clone(),
+        context_window: model.context_window,
+        max_context_window: model.max_context_window,
+        auto_compact_token_limit: model.auto_compact_token_limit,
+        default_temperature: model.default_temperature,
+        max_output_tokens: model.max_output_tokens,
         reasoning_efforts: model.reasoning_efforts.clone(),
+        capabilities: model
+            .capabilities
+            .iter()
+            .map(capability_name)
+            .map(str::to_string)
+            .collect(),
+        input_modalities: model
+            .input_modalities
+            .iter()
+            .map(|modality| format!("{modality:?}").to_ascii_lowercase())
+            .collect(),
+        truncation_mode: format!("{:?}", model.truncation_policy.mode).to_ascii_lowercase(),
+        truncation_limit: model.truncation_policy.limit,
+    }
+}
+
+fn capability_name(capability: &ModelCapabilityConfig) -> &'static str {
+    match capability {
+        ModelCapabilityConfig::Streaming => "streaming",
+        ModelCapabilityConfig::FunctionCalling => "function_calling",
+        ModelCapabilityConfig::Vision => "vision",
+        ModelCapabilityConfig::ParallelToolCalls => "parallel_tool_calls",
+        ModelCapabilityConfig::Reasoning => "reasoning",
+        ModelCapabilityConfig::WebSearch => "web_search",
     }
 }
 
@@ -669,7 +702,6 @@ fn provider_edit(input: ProviderInput) -> CommandResult<ProviderEdit> {
         kind: provider_template_kind(&input.template_kind)?,
         name: input.name,
         base_url: Some(input.base_url),
-        env_key: Some(input.env_key),
         bearer_token: Some(input.bearer_token),
         default_model: input.default_model,
         wire_api: input.wire_api,

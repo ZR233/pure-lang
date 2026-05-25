@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-use pl_model::{ModelInfo, ProviderInfo, default_models};
+use pl_model::{
+    ModelInfo, ProviderInfo, deepseek_default_model_slugs, default_models,
+    openai_default_model_slugs,
+};
 use pl_protocol::{PureError, Result};
 
 use crate::config::{
@@ -77,8 +80,8 @@ impl ProviderTemplateKind {
 
     pub fn default_model_slugs(self) -> &'static [&'static str] {
         match self {
-            Self::DeepSeek => &["deepseek-v4-flash"],
-            Self::OpenAi => &["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"],
+            Self::DeepSeek => deepseek_default_model_slugs(),
+            Self::OpenAi => openai_default_model_slugs(),
         }
     }
 
@@ -87,19 +90,6 @@ impl ProviderTemplateKind {
             self.provider_info(),
             self.default_models()?,
         ))
-    }
-
-    fn template_model(self) -> Result<ModelConfig> {
-        let info = self.provider_info();
-        self.default_models()?
-            .into_iter()
-            .find(|model| model.slug == info.default_model)
-            .ok_or_else(|| {
-                PureError::ConfigError(format!(
-                    "default model template is missing: {}",
-                    info.default_model
-                ))
-            })
     }
 }
 
@@ -146,12 +136,8 @@ impl FirstRunProviderDraft {
         }
     }
 
-    pub fn template_model(&self) -> Result<ModelConfig> {
-        self.kind.template_model()
-    }
-
     pub fn all_models(&self) -> Result<Vec<ModelConfig>> {
-        let mut models = vec![self.template_model()?];
+        let mut models = self.kind.default_models()?;
         models.extend(self.models.iter().map(|model| model.config.clone()));
         Ok(models)
     }
@@ -382,6 +368,12 @@ mod tests {
         assert_eq!(
             config.providers["deepseek"].default_model,
             "deepseek-v4-flash"
+        );
+        assert!(
+            config.providers["deepseek"]
+                .models
+                .iter()
+                .any(|model| model.slug == "deepseek-v4-pro")
         );
     }
 

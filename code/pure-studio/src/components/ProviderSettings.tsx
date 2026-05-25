@@ -1,18 +1,26 @@
-import { Plus, Save, Search, Trash2 } from "lucide-react";
-import type { Dispatch, SetStateAction } from "react";
+import {
+  CheckCircle2,
+  Cpu,
+  KeyRound,
+  Link2,
+  Pencil,
+  Plus,
+  Search,
+  Server,
+  Trash2,
+} from "lucide-react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import type { ModelRecord, ProviderKind, ProviderRecord, ProviderTemplateRecord } from "../types";
+import { ProviderEditPage } from "./ProviderEditPage";
 
 type ProviderSettingsProps = {
   providers: ProviderRecord[];
   templates: ProviderTemplateRecord[];
   selectedProviderId: string | null;
   providerSearch: string;
-  configToml: string;
   setProviders: Dispatch<SetStateAction<ProviderRecord[]>>;
   setSelectedProviderId: Dispatch<SetStateAction<string | null>>;
   setProviderSearch: Dispatch<SetStateAction<string>>;
-  setConfigToml: Dispatch<SetStateAction<string>>;
-  onSaveToml: () => void;
 };
 
 function initials(name: string) {
@@ -36,7 +44,7 @@ function normalizeProvider(provider: ProviderRecord): ProviderRecord {
   return {
     ...provider,
     subtitle: `${provider.name || provider.id} Platform`,
-    status: provider.bearerToken.trim() || provider.envKey.trim() ? "Healthy" : "Needs setup",
+    status: provider.bearerToken.trim() ? "Healthy" : "Needs setup",
     defaultModel,
     models,
     modelCount: models.length.toString(),
@@ -51,7 +59,6 @@ function templateProvider(template: ProviderTemplateRecord, id: string): Provide
     subtitle: `${template.name} Platform`,
     status: "Needs setup",
     baseUrl: template.baseUrl,
-    envKey: template.envKey,
     bearerToken: "",
     defaultModel: template.defaultModel,
     modelCount: template.defaultModels.length.toString(),
@@ -76,23 +83,26 @@ function suggestProviderId(providers: ProviderRecord[], kind: ProviderKind) {
   }
 }
 
-function modelEffortsText(model: ModelRecord) {
-  return model.reasoningEfforts.join(", ");
-}
-
-function effortsFromText(value: string) {
-  return value
-    .split(",")
-    .map((effort) => effort.trim())
-    .filter(Boolean);
-}
-
 function cloneModel(model: ModelRecord): ModelRecord {
   return {
     slug: model.slug,
     displayName: model.displayName,
+    description: model.description ?? null,
+    contextWindow: model.contextWindow ?? null,
+    maxContextWindow: model.maxContextWindow ?? null,
+    autoCompactTokenLimit: model.autoCompactTokenLimit ?? null,
+    defaultTemperature: model.defaultTemperature ?? null,
+    maxOutputTokens: model.maxOutputTokens ?? null,
     reasoningEfforts: [...model.reasoningEfforts],
+    capabilities: [...(model.capabilities ?? [])],
+    inputModalities: [...(model.inputModalities ?? [])],
+    truncationMode: model.truncationMode,
+    truncationLimit: model.truncationLimit,
   };
+}
+
+function providerStatusClass(provider: ProviderRecord) {
+  return provider.status.toLowerCase().includes("healthy") ? "ready" : "needs-setup";
 }
 
 export function ProviderSettings({
@@ -100,13 +110,11 @@ export function ProviderSettings({
   templates,
   selectedProviderId,
   providerSearch,
-  configToml,
   setProviders,
   setSelectedProviderId,
   setProviderSearch,
-  setConfigToml,
-  onSaveToml,
 }: ProviderSettingsProps) {
+  const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
   const filteredProviders = providers.filter((provider) => {
     const query = providerSearch.trim().toLowerCase();
     if (!query) {
@@ -120,16 +128,20 @@ export function ProviderSettings({
   });
   const selectedProvider =
     providers.find((provider) => provider.id === selectedProviderId) ?? providers[0] ?? null;
+  const editingProvider =
+    providers.find((provider) => provider.id === editingProviderId) ?? null;
 
-  function updateSelectedProvider(updater: (provider: ProviderRecord) => ProviderRecord) {
-    if (!selectedProvider) {
+  function updateEditingProvider(updater: (provider: ProviderRecord) => ProviderRecord) {
+    if (!editingProvider) {
       return;
     }
-    const nextProvider = normalizeProvider(updater(selectedProvider));
+    const previousId = editingProvider.id;
+    const nextProvider = normalizeProvider(updater(editingProvider));
     setProviders((current) =>
-      current.map((provider) => (provider.id === selectedProvider.id ? nextProvider : provider)),
+      current.map((provider) => (provider.id === previousId ? nextProvider : provider)),
     );
-    setSelectedProviderId(nextProvider.id);
+    setEditingProviderId(nextProvider.id);
+    setSelectedProviderId((current) => (current === previousId ? nextProvider.id : current));
   }
 
   function addProvider(kind: ProviderKind) {
@@ -139,20 +151,20 @@ export function ProviderSettings({
     }
     const nextProvider = templateProvider(template, suggestProviderId(providers, kind));
     setProviders((current) => [...current, nextProvider]);
-    setSelectedProviderId(nextProvider.id);
+    setSelectedProviderId((current) => current ?? nextProvider.id);
+    setEditingProviderId(nextProvider.id);
   }
 
-  function changeTemplate(kind: ProviderKind) {
+  function changeEditingTemplate(kind: ProviderKind) {
     const template = templates.find((item) => item.id === kind);
     if (!template) {
       return;
     }
-    updateSelectedProvider((provider) => ({
+    updateEditingProvider((provider) => ({
       ...provider,
       templateKind: kind,
       name: provider.name || template.name,
       baseUrl: template.baseUrl,
-      envKey: template.envKey,
       wireApi: template.wireApi,
       defaultModel: template.defaultModel,
       defaultModels: template.defaultModels.map(cloneModel),
@@ -160,7 +172,7 @@ export function ProviderSettings({
   }
 
   function addCustomModel() {
-    updateSelectedProvider((provider) => {
+    updateEditingProvider((provider) => {
       const existing = new Set(allModels(provider).map((model) => model.slug));
       let slug = "custom-model";
       for (let index = 2; existing.has(slug); index += 1) {
@@ -182,7 +194,7 @@ export function ProviderSettings({
   }
 
   function updateCustomModel(index: number, patch: Partial<ModelRecord>) {
-    updateSelectedProvider((provider) => ({
+    updateEditingProvider((provider) => ({
       ...provider,
       customModels: provider.customModels.map((model, modelIndex) =>
         modelIndex === index ? { ...model, ...patch } : model,
@@ -191,269 +203,189 @@ export function ProviderSettings({
   }
 
   function removeCustomModel(index: number) {
-    updateSelectedProvider((provider) => ({
+    updateEditingProvider((provider) => ({
       ...provider,
       customModels: provider.customModels.filter((_, modelIndex) => modelIndex !== index),
     }));
   }
 
+  function removeProvider(providerId: string) {
+    if (providers.length <= 1) {
+      return;
+    }
+    const remainingProviders = providers.filter((provider) => provider.id !== providerId);
+    setProviders(remainingProviders);
+    setSelectedProviderId((current) =>
+      current === providerId ? (remainingProviders[0]?.id ?? null) : current,
+    );
+    if (editingProviderId === providerId) {
+      setEditingProviderId(null);
+    }
+  }
+
   return (
     <div className="provider-settings">
-      <section className="provider-list-card">
-        <div className="provider-toolbar">
-          <div className="search-box">
-            <Search size={16} />
-            <input
-              value={providerSearch}
-              onChange={(event) => setProviderSearch(event.target.value)}
-              placeholder="Search providers..."
-            />
-          </div>
-          <div className="provider-add-actions">
-            <button onClick={() => addProvider("deepseek")}>
-              <Plus size={16} />
-              DeepSeek
-            </button>
-            <button onClick={() => addProvider("openai")}>
-              <Plus size={16} />
-              OpenAI
-            </button>
-          </div>
-        </div>
-        <div className="provider-table">
-          <div className="provider-row header">
-            <span className="provider-name-header">Provider</span>
-            <span>Status</span>
-            <span>Base URL</span>
-            <span>Models</span>
-            <span>Updated</span>
-          </div>
-          {filteredProviders.map((provider) => (
-            <button
-              key={provider.id}
-              className={`provider-row ${provider.id === selectedProvider?.id ? "active" : ""}`}
-              onClick={() => setSelectedProviderId(provider.id)}
-            >
-              <span className="provider-name-cell">
-                <span className="provider-badge">{initials(provider.name) || "P"}</span>
-                <span>
-                  <strong>{provider.name || provider.id}</strong>
-                  <small>{provider.id}</small>
-                </span>
-              </span>
-              <span className="health">{provider.status}</span>
-              <span>{provider.baseUrl || "(default)"}</span>
-              <span>{provider.modelCount}</span>
-              <span>{provider.updatedAt}</span>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className="provider-detail-card editable">
-        {selectedProvider ? (
-          <>
-            <div className="provider-detail-head">
-              <span className="provider-badge large">{initials(selectedProvider.name) || "P"}</span>
-              <div>
-                <h2>{selectedProvider.name || selectedProvider.id}</h2>
-                <p>{selectedProvider.id}</p>
+      {editingProvider ? (
+        <ProviderEditPage
+          provider={editingProvider}
+          templates={templates}
+          onBack={() => setEditingProviderId(null)}
+          onChangeTemplate={changeEditingTemplate}
+          onUpdateProvider={updateEditingProvider}
+          onAddCustomModel={addCustomModel}
+          onUpdateCustomModel={updateCustomModel}
+          onRemoveCustomModel={removeCustomModel}
+        />
+      ) : (
+        <section className="provider-directory">
+          <div className="provider-console-head">
+            <div>
+              <h2>Provider 路由</h2>
+              <p>配置 ~/.pure/config.toml 中的模型接入点。</p>
+            </div>
+            <div className="provider-console-tools">
+              <label className="search-box">
+                <Search size={16} />
+                <input
+                  value={providerSearch}
+                  onChange={(event) => setProviderSearch(event.target.value)}
+                  placeholder="搜索 provider、key 或 base URL"
+                />
+              </label>
+              <div className="provider-add-actions">
+                {templates.map((template) => (
+                  <button key={template.id} onClick={() => addProvider(template.id)}>
+                    <Plus size={16} />
+                    {template.name}
+                  </button>
+                ))}
               </div>
-              <span className="health">{selectedProvider.status}</span>
             </div>
-
-            <div className="provider-form-grid">
-              <label>
-                <span>Provider Key</span>
-                <input
-                  value={selectedProvider.id}
-                  onChange={(event) =>
-                    updateSelectedProvider((provider) => ({
-                      ...provider,
-                      id: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                <span>Template</span>
-                <select
-                  value={selectedProvider.templateKind}
-                  onChange={(event) => changeTemplate(event.target.value as ProviderKind)}
-                >
-                  {templates.map((template) => (
-                    <option key={template.id} value={template.id}>
-                      {template.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>Name</span>
-                <input
-                  value={selectedProvider.name}
-                  onChange={(event) =>
-                    updateSelectedProvider((provider) => ({
-                      ...provider,
-                      name: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                <span>Wire API</span>
-                <select
-                  value={selectedProvider.wireApi}
-                  onChange={(event) =>
-                    updateSelectedProvider((provider) => ({
-                      ...provider,
-                      wireApi: event.target.value,
-                    }))
-                  }
-                >
-                  <option value="chat">OpenAI Chat</option>
-                  <option value="responses">Responses</option>
-                </select>
-              </label>
-              <label className="wide">
-                <span>Base URL</span>
-                <input
-                  value={selectedProvider.baseUrl}
-                  onChange={(event) =>
-                    updateSelectedProvider((provider) => ({
-                      ...provider,
-                      baseUrl: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                <span>Env Key</span>
-                <input
-                  value={selectedProvider.envKey}
-                  onChange={(event) =>
-                    updateSelectedProvider((provider) => ({
-                      ...provider,
-                      envKey: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                <span>API Key</span>
-                <input
-                  type="password"
-                  value={selectedProvider.bearerToken}
-                  onChange={(event) =>
-                    updateSelectedProvider((provider) => ({
-                      ...provider,
-                      bearerToken: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="wide">
-                <span>Default Model</span>
-                <select
-                  value={selectedProvider.defaultModel}
-                  onChange={(event) =>
-                    updateSelectedProvider((provider) => ({
-                      ...provider,
-                      defaultModel: event.target.value,
-                    }))
-                  }
-                >
-                  {allModels(selectedProvider).map((model) => (
-                    <option key={model.slug} value={model.slug}>
-                      {model.displayName} ({model.slug})
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          </>
-        ) : (
-          <p className="muted">No provider configured.</p>
-        )}
-      </section>
-
-      <section className="model-editor-card">
-        {selectedProvider ? (
-          <>
-            <div className="model-editor-heading">
-              <div>
-                <h2>Models</h2>
-                <p>Default models are saved first. Custom models are appended after them.</p>
-              </div>
-              <button onClick={addCustomModel}>
-                <Plus size={16} />
-                Custom Model
-              </button>
-            </div>
-
-            <div className="model-section-title">Default Models</div>
-            <div className="model-list">
-              {selectedProvider.defaultModels.map((model) => (
-                <div className="model-row readonly" key={model.slug}>
-                  <strong>{model.displayName}</strong>
-                  <span>{model.slug}</span>
-                  <small>{modelEffortsText(model)}</small>
-                </div>
-              ))}
-            </div>
-
-            <div className="model-section-title">Custom Models</div>
-            <div className="custom-model-list">
-              {selectedProvider.customModels.length === 0 ? (
-                <p className="muted">No custom models.</p>
-              ) : (
-                selectedProvider.customModels.map((model, index) => (
-                  <div className="custom-model-row" key={`${model.slug}-${index}`}>
-                    <input
-                      value={model.slug}
-                      onChange={(event) => updateCustomModel(index, { slug: event.target.value })}
-                      placeholder="model-slug"
-                    />
-                    <input
-                      value={model.displayName}
-                      onChange={(event) =>
-                        updateCustomModel(index, { displayName: event.target.value })
-                      }
-                      placeholder="Display name"
-                    />
-                    <input
-                      value={modelEffortsText(model)}
-                      onChange={(event) =>
-                        updateCustomModel(index, {
-                          reasoningEfforts: effortsFromText(event.target.value),
-                        })
-                      }
-                      placeholder="high, xhigh"
-                    />
-                    <button className="icon-button" onClick={() => removeCustomModel(index)}>
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          </>
-        ) : null}
-      </section>
-
-      <section className="config-editor-card">
-        <div className="config-editor-heading">
-          <div>
-            <h2>Config TOML</h2>
-            <p>Advanced editor. Structured provider save regenerates this document.</p>
           </div>
-          <button onClick={onSaveToml}>
-            <Save size={16} />
-            Save TOML
-          </button>
-        </div>
-        <textarea value={configToml} onChange={(event) => setConfigToml(event.target.value)} />
-      </section>
+
+          <div className="provider-card-list">
+            {filteredProviders.length === 0 ? (
+              <div className="provider-empty-state">
+                <Server size={28} />
+                <strong>没有匹配的 provider</strong>
+                <span>清空搜索条件后可查看完整列表。</span>
+              </div>
+            ) : (
+              filteredProviders.map((provider) => {
+                const isActive = provider.id === selectedProvider?.id;
+                const models = allModels(provider);
+                const templateName =
+                  templates.find((template) => template.id === provider.templateKind)?.name ??
+                  provider.templateKind;
+                const defaultModel =
+                  models.find((model) => model.slug === provider.defaultModel)?.displayName ||
+                  provider.defaultModel ||
+                  "未选择";
+                const previewModels = models.slice(0, 4);
+                const remainingModels = Math.max(0, models.length - previewModels.length);
+
+                return (
+                  <article
+                    key={provider.id}
+                    className={`provider-card ${isActive ? "active" : ""}`}
+                  >
+                    <div className="provider-card-shell">
+                      <button
+                        className="provider-card-select"
+                        onClick={() => setSelectedProviderId(provider.id)}
+                      >
+                        <span className={`provider-badge provider-${provider.templateKind}`}>
+                          {initials(provider.name) || "P"}
+                        </span>
+                        <span className="provider-title-block">
+                          <span className="provider-title-line">
+                            <strong>{provider.name || provider.id}</strong>
+                            <span className={`provider-state ${providerStatusClass(provider)}`}>
+                              <CheckCircle2 size={14} />
+                              {provider.status}
+                            </span>
+                            {isActive ? <span className="default-route">默认路由</span> : null}
+                          </span>
+                          <span className="provider-url">
+                            <Link2 size={14} />
+                            {provider.baseUrl || "(default base URL)"}
+                          </span>
+                        </span>
+                      </button>
+
+                      <div className="provider-card-actions">
+                        <button
+                          className="icon-button provider-icon-action"
+                          onClick={() => setEditingProviderId(provider.id)}
+                          title="编辑 provider"
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        <button
+                          className="icon-button provider-icon-action danger"
+                          disabled={providers.length <= 1}
+                          onClick={() => removeProvider(provider.id)}
+                          title="删除 provider"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="provider-card-meta">
+                      <span>
+                        <Server size={14} />
+                        <small>Key</small>
+                        <strong>{provider.id}</strong>
+                      </span>
+                      <span>
+                        <Cpu size={14} />
+                        <small>Default model</small>
+                        <strong>{defaultModel}</strong>
+                      </span>
+                      <span>
+                        <KeyRound size={14} />
+                        <small>API Key</small>
+                        <strong>{provider.bearerToken ? "已保存" : "未配置"}</strong>
+                      </span>
+                      <span>
+                        <small>Template</small>
+                        <strong>{templateName}</strong>
+                      </span>
+                      <span>
+                        <small>协议类型</small>
+                        <strong>{provider.wireApi}</strong>
+                      </span>
+                      <span>
+                        <small>Updated</small>
+                        <strong>{provider.updatedAt}</strong>
+                      </span>
+                    </div>
+
+                    <div className="provider-model-strip">
+                      <span className="model-count-pill">{provider.modelCount} models</span>
+                      {previewModels.map((model) => (
+                        <span
+                          key={model.slug}
+                          className={
+                            model.slug === provider.defaultModel ? "model-chip active" : "model-chip"
+                          }
+                        >
+                          {model.displayName || model.slug}
+                        </span>
+                      ))}
+                      {remainingModels > 0 ? (
+                        <span className="model-chip muted-chip">+{remainingModels}</span>
+                      ) : null}
+                    </div>
+                  </article>
+                );
+              })
+            )}
+          </div>
+        </section>
+      )}
+
     </div>
   );
 }

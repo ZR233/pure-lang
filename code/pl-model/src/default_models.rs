@@ -1,8 +1,11 @@
 use crate::capabilities::ModelCapabilities;
 use crate::model_info::{InputModality, ModelInfo, TruncationMode, TruncationPolicy};
 
+const DEEPSEEK_DEFAULT_MODEL_SLUGS: &[&str] = &["deepseek-v4-flash", "deepseek-v4-pro"];
+const OPENAI_DEFAULT_MODEL_SLUGS: &[&str] = &["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"];
 const DEFAULT_MODEL_SLUGS: &[&str] = &[
     "deepseek-v4-flash",
+    "deepseek-v4-pro",
     "gpt-5.5",
     "gpt-5.4",
     "gpt-5.4-mini",
@@ -15,9 +18,26 @@ pub fn default_model_slugs() -> &'static [&'static str] {
     DEFAULT_MODEL_SLUGS
 }
 
+pub fn deepseek_default_model_slugs() -> &'static [&'static str] {
+    DEEPSEEK_DEFAULT_MODEL_SLUGS
+}
+
+pub fn openai_default_model_slugs() -> &'static [&'static str] {
+    OPENAI_DEFAULT_MODEL_SLUGS
+}
+
 pub fn default_models() -> Vec<ModelInfo> {
     vec![
-        deepseek_model(),
+        deepseek_model(
+            "deepseek-v4-flash",
+            "DeepSeek V4 Flash",
+            "DeepSeek fast reasoning model with thinking mode.",
+        ),
+        deepseek_model(
+            "deepseek-v4-pro",
+            "DeepSeek V4 Pro",
+            "DeepSeek flagship reasoning model with thinking mode.",
+        ),
         openai_model(
             "gpt-5.5",
             "GPT-5.5",
@@ -81,11 +101,11 @@ fn openai_model(
     }
 }
 
-fn deepseek_model() -> ModelInfo {
+fn deepseek_model(slug: &str, display_name: &str, description: &str) -> ModelInfo {
     ModelInfo {
-        slug: "deepseek-v4-flash".to_string(),
-        display_name: "DeepSeek V4 Flash".to_string(),
-        description: Some("DeepSeek fast reasoning model with thinking mode.".to_string()),
+        slug: slug.to_string(),
+        display_name: display_name.to_string(),
+        description: Some(description.to_string()),
         context_window: Some(1_000_000),
         max_context_window: Some(1_000_000),
         auto_compact_token_limit: None,
@@ -139,15 +159,15 @@ mod tests {
     }
 
     #[test]
-    fn default_models_include_deepseek_v4_flash() {
+    fn default_models_include_deepseek_v4_models() {
         let models = default_models();
-        let model = models
-            .iter()
-            .find(|model| model.slug == "deepseek-v4-flash")
-            .unwrap();
 
-        assert_eq!(model.context_window, Some(1_000_000));
-        assert_eq!(model.max_output_tokens, Some(384_000));
-        assert!(model.reasoning_efforts.iter().any(|effort| effort == "max"));
+        for slug in deepseek_default_model_slugs() {
+            let model = models.iter().find(|model| model.slug == *slug).unwrap();
+
+            assert_eq!(model.context_window, Some(1_000_000));
+            assert_eq!(model.max_output_tokens, Some(384_000));
+            assert!(model.reasoning_efforts.iter().any(|effort| effort == "max"));
+        }
     }
 }

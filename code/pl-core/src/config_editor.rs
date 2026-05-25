@@ -23,7 +23,6 @@ pub struct ProviderEdit {
     pub kind: ProviderTemplateKind,
     pub name: String,
     pub base_url: Option<String>,
-    pub env_key: Option<String>,
     pub bearer_token: Option<String>,
     pub default_model: String,
     pub wire_api: String,
@@ -73,10 +72,9 @@ impl ProviderEdit {
         let mut info = self.kind.provider_info();
         info.name = non_empty_trimmed(&self.name, "provider name")?;
         info.base_url = trim_optional(self.base_url.as_deref());
-        info.env_key = trim_optional(self.env_key.as_deref());
+        info.env_key = None;
         info.default_model = non_empty_trimmed(&self.default_model, "provider default_model")?;
         info.bearer_token = trim_optional(self.bearer_token.as_deref());
-        info.wire_api = parse_wire_api(&self.wire_api)?;
 
         let mut models = self.kind.default_models()?;
         models.extend(
@@ -271,16 +269,6 @@ fn normalized_efforts(values: &[String]) -> Vec<String> {
     }
 }
 
-fn parse_wire_api(value: &str) -> Result<WireApi> {
-    match value.trim() {
-        "chat" => Ok(WireApi::Chat),
-        "responses" => Ok(WireApi::Responses),
-        other => Err(PureError::ConfigError(format!(
-            "unsupported wire_api: {other}"
-        ))),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -293,9 +281,21 @@ mod tests {
             kind: ProviderTemplateKind::OpenAi,
             name: "OpenAI".to_string(),
             base_url: Some("https://api.openai.com/v1".to_string()),
-            env_key: Some("API_KEY_OPENAI".to_string()),
             bearer_token: None,
             default_model: "gpt-5.5".to_string(),
+            wire_api: "responses".to_string(),
+            custom_models: Vec::new(),
+        }
+    }
+
+    fn deepseek_edit() -> ProviderEdit {
+        ProviderEdit {
+            key: "deepseek".to_string(),
+            kind: ProviderTemplateKind::DeepSeek,
+            name: "DeepSeek".to_string(),
+            base_url: Some("https://api.deepseek.com".to_string()),
+            bearer_token: None,
+            default_model: "deepseek-v4-flash".to_string(),
             wire_api: "responses".to_string(),
             custom_models: Vec::new(),
         }
@@ -348,6 +348,21 @@ mod tests {
 
         assert_eq!(config.roles.planner.provider, "openai");
         assert_eq!(config.roles.planner.model, "gpt-5.5");
+    }
+
+    #[test]
+    fn deepseek_provider_edit_uses_template_chat_wire_api() {
+        let current = PureConfig::default_config();
+
+        let config = ProviderSettingsEdit {
+            default_provider: Some("deepseek".to_string()),
+            providers: vec![deepseek_edit()],
+        }
+        .to_config(&current)
+        .unwrap();
+
+        assert_eq!(config.providers["deepseek"].wire_api, WireApi::Chat);
+        assert_eq!(config.providers["deepseek"].env_key, None);
     }
 
     #[test]

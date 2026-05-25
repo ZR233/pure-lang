@@ -88,7 +88,7 @@ effort = "high"
 [providers.deepseek]
 name = "DeepSeek"
 base_url = "https://api.deepseek.com"
-env_key = "API_KEY_DEEPSEEK"
+bearer_token = "sk-..."
 default_model = "deepseek-v4-flash"
 wire_api = "chat"
 
@@ -104,13 +104,26 @@ capabilities = ["streaming", "function_calling", "parallel_tool_calls", "reasoni
 input_modalities = ["text"]
 base_instructions = ""
 truncation_policy = { mode = "tokens", limit = 10000 }
+
+[[providers.deepseek.models]]
+slug = "deepseek-v4-pro"
+display_name = "DeepSeek V4 Pro"
+description = "DeepSeek flagship reasoning model with thinking mode."
+context_window = 1000000
+max_context_window = 1000000
+max_output_tokens = 384000
+reasoning_efforts = ["high", "max"]
+capabilities = ["streaming", "function_calling", "parallel_tool_calls", "reasoning"]
+input_modalities = ["text"]
+base_instructions = ""
+truncation_policy = { mode = "tokens", limit = 10000 }
 ```
 
 ## 10.5 Provider 和 Model
 
 `providers` 可保存多个 provider。每个 provider 持久化：
 
-- provider 运行配置，例如 `name`、`base_url`、`env_key`、`bearer_token`、`wire_api`。
+- provider 运行配置，例如 `name`、`base_url`、`bearer_token`、`wire_api`。
 - 完整 `models` 列表。
 
 模型配置必须能完整表达运行时 `ModelInfo` 的可持久化字段：
@@ -164,17 +177,24 @@ truncation_policy = { mode = "tokens", limit = 10000 }
 
 保存前必须执行 `PureConfig::validate()`；失败时只在 UI 中展示错误，不写入磁盘。
 
-设置页 UI 按 React 页面模块拆分，顶层 App 负责页面路由和共享状态，具体页面放在 `src/pages`，可复用组件放在 `src/components`，Tauri 命令封装放在 `src/lib`。Provider 标签页优先从 `PureConfig.providers` 派生列表和详情，不引入新的配置存储。
+设置页 UI 按 React 页面模块拆分，顶层 App 负责页面路由和共享状态，具体页面放在 `src/pages`，可复用组件放在 `src/components`，Tauri 命令封装放在 `src/lib`。Provider 标签页优先从 `PureConfig.providers` 派生 provider 卡片列表，不引入新的配置存储。
 
 Provider 标签页必须提供结构化编辑能力：
 
 - 添加 DeepSeek 或 OpenAI provider，自动生成唯一 provider key。
-- 编辑 provider key、显示名、base URL、环境变量名、API key、wire API 和默认模型。
+- 编辑 provider key、显示名、base URL、API key 和默认模型。
+- 以 provider 卡片作为主要信息载体，展示 provider key、base URL、状态、wire API、默认模型、模型数量和更新时间等摘要信息。
+- Provider 列表页不直接编辑字段；点击卡片编辑按钮进入 provider 编辑页。
+- Provider 编辑页提供返回列表入口，并承载结构化编辑区和模型增删能力。
+- Provider 卡片必须提供删除按钮；列表页不使用独立右侧详情面板。
+- Provider 标签页不展示 raw TOML 配置编辑器，确保列表和编辑页占据主要工作区。
 - 展示 provider 模板自带的默认模型列表。
 - 允许追加用户自定义模型，保存时由 `pl-core` 将模板默认模型排在前面，再追加用户自定义模型。
+- 模型列表应展示关键参数，例如上下文窗口、最大输出 token、自动压缩阈值、temperature、reasoning efforts、capabilities、输入模态和截断策略。
+- `wire_api` 由 provider 模板固定，不在 UI 中提供选择；DeepSeek 固定为 `chat`，OpenAI 固定为 `responses`。
 - 保存前由 `pl-core` 构造 `PureConfig` 并执行 `PureConfig::validate()`；校验失败时只在 UI 中展示错误，不写入磁盘。
 
-桌面窗口必须支持自由缩放。`pure-studio` 只声明首选窗口尺寸，不把 UI 绑定到固定宽高；设置页内容跟随窗口尺寸自适应。Provider 标签页在常规桌面宽度使用 provider 列表和详情双栏布局，在窄窗口下切换为上下堆叠并允许滚动，避免表格和详情面板被裁剪。
+桌面窗口必须支持自由缩放。`pure-studio` 只声明首选窗口尺寸，不把 UI 绑定到固定宽高；设置页内容跟随窗口尺寸自适应。Provider 标签页在常规桌面宽度使用单栏 provider 卡片列表，卡片内部承载摘要、操作和展开编辑内容；在窄窗口下保持单栏滚动并压缩卡片元信息，避免表格和编辑区域被裁剪。
 
 为了支持设计验证，`pure-studio` 的 React 页面应支持 Vite dev server 中的 fixture 状态预览。Provider 设置页的本地预览入口固定为：
 
@@ -186,6 +206,6 @@ Vite 预览只用于布局和视觉对照，最终应用行为仍以 Tauri 运�
 
 ## 10.8 凭据策略
 
-配置允许持久化明文 `bearer_token`，但这会把 API token 直接写入 `~/.pure/config.toml`。文档和默认模板应优先展示 `env_key`，只有用户明确需要时才写 `bearer_token`。
+配置允许持久化明文 `bearer_token`，但这会把 API token 直接写入 `~/.pure/config.toml`。当前运行时只使用配置中保存的 `bearer_token` 作为 provider API key。
 
-`pure-studio` 设置页按用户确认会把输入的 API key 明文写入对应 provider 的 `bearer_token`。后续版本可以增加系统凭据库或环境变量模式，但首版不改变现有 TOML schema。
+`env_key` 字段保留为旧 TOML schema 的兼容字段和测试辅助信息，不作为运行时鉴权来源，也不在 `pure-studio` provider 设置界面展示或写入。`pure-studio` 设置页按用户确认会把输入的 API key 明文写入对应 provider 的 `bearer_token`。后续版本可以增加系统凭据库模式，但首版不从环境变量读取 provider key。

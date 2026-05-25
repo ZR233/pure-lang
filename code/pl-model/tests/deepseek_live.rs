@@ -6,6 +6,8 @@ use pl_model::{
 };
 use pl_protocol::{AgentEvent, Message, MessageContent, MessageRole};
 
+const DEEPSEEK_LIVE_ENV_KEY: &str = "API_KEY_DEEPSEEK";
+
 fn user_message(content: &str) -> Message {
     Message {
         role: MessageRole::User,
@@ -24,13 +26,13 @@ fn assistant_message(content: String, reasoning_content: String) -> Message {
     }
 }
 
-fn skip_reason_without_api_key(info: &ProviderInfo) -> Option<String> {
-    let env_key = info.env_key.as_deref()?;
-    match std::env::var(env_key) {
-        Ok(value) if !value.trim().is_empty() => None,
-        _ => Some(format!(
-            "{env_key} is not set; skipping live DeepSeek API test"
-        )),
+fn live_api_key() -> Option<String> {
+    match std::env::var(DEEPSEEK_LIVE_ENV_KEY) {
+        Ok(value) if !value.trim().is_empty() => Some(value),
+        _ => {
+            eprintln!("{DEEPSEEK_LIVE_ENV_KEY} is not set; skipping live DeepSeek API test");
+            None
+        }
     }
 }
 
@@ -52,8 +54,10 @@ fn deepseek_request(messages: Vec<Message>) -> CompletionRequest {
     }
 }
 
-async fn run_turn(messages: Vec<Message>) -> (String, String, usize, usize) {
-    let provider = create_provider(ProviderInfo::deepseek(None)).unwrap();
+async fn run_turn(api_key: &str, messages: Vec<Message>) -> (String, String, usize, usize) {
+    let mut info = ProviderInfo::deepseek(None);
+    info.bearer_token = Some(api_key.to_string());
+    let provider = create_provider(info).unwrap();
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(256);
 
     let event_counter = tokio::spawn(async move {
@@ -91,17 +95,15 @@ async fn run_turn(messages: Vec<Message>) -> (String, String, usize, usize) {
 
 #[tokio::test]
 async fn deepseek_streams_multi_turn_with_thinking_mode() {
-    let info = ProviderInfo::deepseek(None);
-    if let Some(reason) = skip_reason_without_api_key(&info) {
-        eprintln!("{reason}");
+    let Some(api_key) = live_api_key() else {
         return;
-    }
+    };
 
     let first_messages = vec![user_message(
         "比较 9.11 和 9.8 哪个更大，只给结论和一句理由。",
     )];
     let (first_answer, first_reasoning_content, first_text_delta_count, first_thinking_delta_count) =
-        run_turn(first_messages.clone()).await;
+        run_turn(&api_key, first_messages.clone()).await;
 
     assert!(!first_answer.trim().is_empty());
     assert!(!first_reasoning_content.trim().is_empty());
@@ -118,7 +120,7 @@ async fn deepseek_streams_multi_turn_with_thinking_mode() {
         second_reasoning_content,
         second_text_delta_count,
         second_thinking_delta_count,
-    ) = run_turn(second_messages).await;
+    ) = run_turn(&api_key, second_messages).await;
 
     assert!(!second_answer.trim().is_empty());
     assert!(!second_reasoning_content.trim().is_empty());

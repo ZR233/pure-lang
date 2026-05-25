@@ -90,9 +90,7 @@ impl ModelProvider for OpenAiCompatibleProvider {
 
     fn auth_token(&self) -> impl std::future::Future<Output = Result<Option<String>>> + Send {
         let bearer = self.info.bearer_token.clone();
-        let auth_cmd = self.info.auth_command.clone();
-        let env_key = self.info.env_key.clone();
-        get_auth_token(bearer, auth_cmd, env_key)
+        get_auth_token(bearer)
     }
 
     fn stream_complete(
@@ -106,9 +104,7 @@ impl ModelProvider for OpenAiCompatibleProvider {
         let info = self.info.clone();
         async move {
             let bearer = info.bearer_token.clone();
-            let auth_cmd = info.auth_command.clone();
-            let env_key = info.env_key.clone();
-            let token = get_auth_token(bearer, auth_cmd, env_key).await?;
+            let token = get_auth_token(bearer).await?;
 
             let body = wire_dispatch.build_request_body(&request);
 
@@ -155,30 +151,9 @@ impl ModelProvider for OpenAiCompatibleProvider {
     }
 }
 
-async fn get_auth_token(
-    bearer: Option<String>,
-    auth_cmd: Option<crate::provider_info::AuthCommand>,
-    env_key: Option<String>,
-) -> Result<Option<String>> {
+async fn get_auth_token(bearer: Option<String>) -> Result<Option<String>> {
     if let Some(token) = bearer {
         return Ok(Some(token));
-    }
-    if let Some(cmd) = auth_cmd {
-        let output = tokio::time::timeout(
-            Duration::from_millis(cmd.timeout_ms),
-            tokio::process::Command::new(&cmd.command)
-                .args(&cmd.args)
-                .output(),
-        )
-        .await
-        .map_err(|_| PureError::LlmError("auth command timed out".into()))?
-        .map_err(|e| PureError::LlmError(format!("auth command failed: {e}")))?;
-        return Ok(Some(
-            String::from_utf8_lossy(&output.stdout).trim().to_string(),
-        ));
-    }
-    if let Some(env_key) = env_key {
-        return Ok(std::env::var(env_key).ok());
     }
     Ok(None)
 }
