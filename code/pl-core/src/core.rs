@@ -32,6 +32,7 @@ fn generate_session_id() -> String {
 pub struct PureCore {
     provider: SharedModelProvider,
     reasoning_effort: Option<ReasoningEffort>,
+    config: Option<PureConfig>,
     tools: ToolRegistry,
 }
 
@@ -40,6 +41,7 @@ impl PureCore {
         Self {
             provider,
             reasoning_effort: None,
+            config: None,
             tools: ToolRegistry::new(),
         }
     }
@@ -51,6 +53,7 @@ impl PureCore {
         Self {
             provider,
             reasoning_effort: Some(reasoning_effort),
+            config: None,
             tools: ToolRegistry::new(),
         }
     }
@@ -66,10 +69,12 @@ impl PureCore {
     pub fn from_config(config: &PureConfig, role: ModelRole) -> Result<Self> {
         let resolved = config.resolve_role(role)?;
         let provider = create_provider_with_models(resolved.provider_info, resolved.models)?;
-        Ok(Self::with_reasoning_effort(
+        Ok(Self {
             provider,
-            resolved.role_config.effort,
-        ))
+            reasoning_effort: Some(resolved.role_config.effort),
+            config: Some(config.clone()),
+            tools: ToolRegistry::new(),
+        })
     }
 
     /// 注册一个工具。
@@ -89,6 +94,7 @@ impl PureCore {
         self.register_tool(SubagentTool::new(
             self.provider.clone(),
             self.reasoning_effort.clone(),
+            self.config.clone(),
             workspace_instructions,
         ));
     }

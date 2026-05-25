@@ -28,7 +28,7 @@ pure-studio UI action
 
 `Auto` 只影响模型提示词，使输出更偏执行导向；当前版本仍不会执行命令、写文件或调用沙箱。
 
-普通 prompt 默认使用 `ModelRole::Planner`。`RoleConfig` 提供 provider、model 和 effort。
+普通 prompt 默认使用 `ModelRole::Planner`。`RoleConfig` 提供 provider、model 和 effort。配置缺失某个角色时，运行时按默认模型补齐：按配置 key 顺序取首个 provider，并使用该 provider 的 `default_model`。
 
 ## 3.3 核心 turn
 
@@ -50,6 +50,8 @@ pure-studio UI action
 - `ToolApprovalPolicy::DenyAll`：工具调用一律作为拒绝结果写回会话。
 
 `pure-studio` 首版通过 `pl-core` 使用 `Manual`。
+
+`subagent` 工具可接收 `role` 参数，值为 `explorer`、`planner`、`executor` 或 `reviewer`。未传 `role` 时默认使用 `executor`。子代理使用所选角色的 provider/model/effort 创建独立会话，不沿用父会话的 provider。
 
 ## 3.4 输出
 

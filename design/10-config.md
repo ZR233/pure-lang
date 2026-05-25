@@ -58,6 +58,8 @@ SQLite 只保存 Studio 状态，例如项目、会话、消息、工具审批�
 
 `effort` 使用字符串枚举，首版校验 against 对应模型的 `reasoning_efforts`。
 
+为了兼容旧配置，读取 TOML 时允许缺失某个 `[roles.<key>]` 块。缺失角色按默认模型补齐：按配置 key 顺序取首个 provider，并使用该 provider 的 `default_model` 和该模型的第一个 `reasoning_efforts`。如果角色块存在但引用了不存在的 provider、model 或 effort，配置仍视为无效并返回错误。
+
 ## 10.4 TOML 示例
 
 本地 TOML 使用 `snake_case`，不同于 API wire 格式。
@@ -193,6 +195,8 @@ Provider 标签页必须提供结构化编辑能力：
 - 模型列表应展示关键参数，例如上下文窗口、最大输出 token、自动压缩阈值、temperature、reasoning efforts、capabilities、输入模态和截断策略。
 - `wire_api` 由 provider 模板固定，不在 UI 中提供选择；DeepSeek 固定为 `chat`，OpenAI 固定为 `responses`。
 - 保存前由 `pl-core` 构造 `PureConfig` 并执行 `PureConfig::validate()`；校验失败时只在 UI 中展示错误，不写入磁盘。
+
+Roles 标签页必须展示固定四个角色：探索者、计划者、执行者、审查者。每个角色提供 provider、model 和 effort 下拉选择。provider 改变时，model 默认切换为该 provider 的 `default_model`；model 改变时，effort 默认切换为该模型的第一个可用 effort。保存 provider 设置时同步提交 roles，`pl-core` 统一校验后写入 `~/.pure/config.toml`。
 
 桌面窗口必须支持自由缩放。`pure-studio` 只声明首选窗口尺寸，不把 UI 绑定到固定宽高；设置页内容跟随窗口尺寸自适应。Provider 标签页在常规桌面宽度使用单栏 provider 卡片列表，卡片内部承载摘要、操作和展开编辑内容；在窄窗口下保持单栏滚动并压缩卡片元信息，避免表格和编辑区域被裁剪。
 

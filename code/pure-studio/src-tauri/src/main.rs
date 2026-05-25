@@ -4,10 +4,10 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use pl_core::{
-    ConfigStore, ModelCapabilityConfig, ModelConfig, ProjectRecord, ProviderConfig, ProviderEdit,
-    ProviderModelEdit, ProviderSettingsEdit, ProviderTemplateKind, PureConfig, SessionRecord,
-    StudioRuntime, ToolApprovalCallback, ToolApprovalDecision, ToolApprovalRequest,
-    infer_provider_template_kind,
+    ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProjectRecord, ProviderConfig,
+    ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, ProviderTemplateKind, PureConfig,
+    RoleEdit, SessionRecord, StudioRuntime, ToolApprovalCallback, ToolApprovalDecision,
+    ToolApprovalRequest, infer_provider_template_kind,
 };
 use pl_protocol::{AgentEvent, Message, MessageContent, MessageRole, PureError};
 use serde::{Deserialize, Serialize};
@@ -114,6 +114,16 @@ struct ProviderTemplateDto {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct RoleDto {
+    key: String,
+    display_name: String,
+    provider: String,
+    model: String,
+    effort: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ModelDto {
     slug: String,
     display_name: String,
@@ -135,6 +145,7 @@ struct ModelDto {
 struct ConfigDto {
     toml: String,
     providers: Vec<ProviderDto>,
+    roles: Vec<RoleDto>,
     templates: Vec<ProviderTemplateDto>,
     config_exists: bool,
 }
@@ -144,6 +155,8 @@ struct ConfigDto {
 struct ProviderSettingsInput {
     default_provider_id: Option<String>,
     providers: Vec<ProviderInput>,
+    #[serde(default)]
+    roles: Vec<RoleInput>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -165,6 +178,15 @@ struct ModelInput {
     slug: String,
     display_name: String,
     reasoning_efforts: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RoleInput {
+    key: String,
+    provider: String,
+    model: String,
+    effort: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -474,6 +496,7 @@ fn save_provider_settings(
             .into_iter()
             .map(provider_edit)
             .collect::<CommandResult<Vec<_>>>()?,
+        roles: input.roles.into_iter().map(role_edit).collect(),
     };
     let config = edit.to_config(&current)?;
     state.studio.config_store().save(&config)?;
@@ -585,9 +608,26 @@ fn config_dto(store: &ConfigStore) -> CommandResult<ConfigDto> {
     Ok(ConfigDto {
         toml: config.to_toml_pretty()?,
         providers: provider_dtos(&config),
+        roles: role_dtos(&config),
         templates: provider_template_dtos()?,
         config_exists: store.config_exists(),
     })
+}
+
+fn role_dtos(config: &PureConfig) -> Vec<RoleDto> {
+    ModelRole::all()
+        .into_iter()
+        .map(|role| {
+            let role_config = config.role_config(role);
+            RoleDto {
+                key: role.key().to_string(),
+                display_name: role.display_name().to_string(),
+                provider: role_config.provider.clone(),
+                model: role_config.model.clone(),
+                effort: role_config.effort.as_str().to_string(),
+            }
+        })
+        .collect()
 }
 
 fn provider_dtos(config: &PureConfig) -> Vec<ProviderDto> {
@@ -715,6 +755,15 @@ fn provider_edit(input: ProviderInput) -> CommandResult<ProviderEdit> {
             })
             .collect(),
     })
+}
+
+fn role_edit(input: RoleInput) -> RoleEdit {
+    RoleEdit {
+        key: input.key,
+        provider: input.provider,
+        model: input.model,
+        effort: input.effort,
+    }
 }
 
 fn provider_template_kind(value: &str) -> CommandResult<ProviderTemplateKind> {

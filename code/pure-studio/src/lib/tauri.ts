@@ -9,6 +9,8 @@ import {
   ProviderRecord,
   ProviderSettingsInput,
   ProviderTemplateRecord,
+  RoleInput,
+  RoleRecord,
   RunPromptResponse,
   SessionRecord,
   SessionSelectionPayload,
@@ -130,8 +132,59 @@ const previewMessages = [
   },
 ];
 
+const previewRoles: RoleRecord[] = [
+  {
+    key: "explorer",
+    displayName: "探索者",
+    provider: "deepseek",
+    model: "deepseek-v4-flash",
+    effort: "high",
+  },
+  {
+    key: "planner",
+    displayName: "计划者",
+    provider: "deepseek",
+    model: "deepseek-v4-flash",
+    effort: "high",
+  },
+  {
+    key: "executor",
+    displayName: "执行者",
+    provider: "deepseek",
+    model: "deepseek-v4-flash",
+    effort: "high",
+  },
+  {
+    key: "reviewer",
+    displayName: "审查者",
+    provider: "deepseek",
+    model: "deepseek-v4-flash",
+    effort: "high",
+  },
+];
+
 let previewConfig: ConfigPayload = {
   toml: `schema_version = 1
+
+[roles.explorer]
+provider = "deepseek"
+model = "deepseek-v4-flash"
+effort = "high"
+
+[roles.planner]
+provider = "deepseek"
+model = "deepseek-v4-flash"
+effort = "high"
+
+[roles.executor]
+provider = "deepseek"
+model = "deepseek-v4-flash"
+effort = "high"
+
+[roles.reviewer]
+provider = "deepseek"
+model = "deepseek-v4-flash"
+effort = "high"
 
 [providers.deepseek]
 name = "DeepSeek"
@@ -167,6 +220,7 @@ wire_api = "responses"
       customModels: [],
     }),
   ],
+  roles: previewRoles,
   templates: previewTemplates,
   configExists: false,
 };
@@ -315,6 +369,7 @@ export function saveProviderSettings(input: ProviderSettingsInput) {
       ...previewConfig,
       toml: renderPreviewToml(input),
       providers: input.providers.map(makeProvider),
+      roles: input.roles.map(makeRole),
       configExists: true,
     };
     return Promise.resolve(clone(previewConfig));
@@ -348,6 +403,18 @@ function makeProvider(input: ProviderInput): ProviderRecord {
   };
 }
 
+function makeRole(input: RoleInput): RoleRecord {
+  const displayName =
+    previewRoles.find((role) => role.key === input.key)?.displayName ?? input.key;
+  return {
+    key: input.key,
+    displayName,
+    provider: input.provider,
+    model: input.model,
+    effort: input.effort,
+  };
+}
+
 function cloneModel(model: ModelRecord): ModelRecord {
   return {
     slug: model.slug,
@@ -370,6 +437,13 @@ function renderPreviewToml(input: ProviderSettingsInput) {
   return [
     "schema_version = 1",
     "",
+    ...input.roles.flatMap((role) => [
+      `[roles.${role.key}]`,
+      `provider = "${role.provider}"`,
+      `model = "${role.model}"`,
+      `effort = "${role.effort}"`,
+      "",
+    ]),
     ...input.providers.flatMap((provider) => [
       `[providers.${provider.id}]`,
       `name = "${provider.name}"`,
