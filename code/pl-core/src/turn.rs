@@ -10,8 +10,8 @@ pub const DEFAULT_MAX_TOOL_ITERATIONS: usize = 10;
 
 /// 编译请求的执行模式。
 ///
-/// `Plan` 只要求核心流程产出规划与解释；`Auto` 允许模型生成更主动的
-/// 编译步骤，但当前版本不会执行命令、写文件或调用沙箱。
+/// `Plan` 产出规划与解释，也可以在已注册工具边界内做只读探索；
+/// `Auto` 允许模型生成更主动的编译步骤和子任务。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum CompileMode {
     #[default]

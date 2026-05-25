@@ -29,7 +29,7 @@ fn generate_session_id() -> String {
 /// Pure-Lang 核心逻辑层。
 ///
 /// 负责组合会话状态、模型 provider、工具注册表和单轮编译请求。
-/// 不执行命令、不写文件，也不依赖独立执行层。
+/// 工具能力由调用方显式注册，并通过 `TurnOptions` 控制审批策略。
 #[derive(Debug)]
 pub struct PureCore {
     provider: SharedModelProvider,
