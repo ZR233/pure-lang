@@ -147,7 +147,7 @@ export function runPrompt(sessionId: string, prompt: string) {
             role: "executor",
             task: prompt,
             status: "succeeded" as const,
-            summary: "Preview run completed.",
+            summary: "预览运行已完成。",
             depth: 1,
             error: null,
             updatedAt: Math.floor(Date.now() / 1000),

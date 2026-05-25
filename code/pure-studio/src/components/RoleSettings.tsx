@@ -141,7 +141,7 @@ export function RoleSettings({ roles, providers, setRoles }: RoleSettingsProps) 
 
               <div className="role-form-grid">
                 <label>
-                  <span>Provider</span>
+                  <span>{t("roleRoute.provider")}</span>
                   <select
                     value={role.provider}
                     onChange={(event) => changeProvider(role, event.target.value)}
@@ -154,7 +154,7 @@ export function RoleSettings({ roles, providers, setRoles }: RoleSettingsProps) 
                   </select>
                 </label>
                 <label>
-                  <span>Model</span>
+                  <span>{t("roleRoute.model")}</span>
                   <select
                     value={role.model}
                     onChange={(event) => changeModel(role, event.target.value)}
@@ -167,7 +167,7 @@ export function RoleSettings({ roles, providers, setRoles }: RoleSettingsProps) 
                   </select>
                 </label>
                 <label>
-                  <span>Effort</span>
+                  <span>{t("roleRoute.effort")}</span>
                   <select
                     value={role.effort}
                     onChange={(event) => changeEffort(role, event.target.value)}

@@ -153,7 +153,7 @@ export function ProviderSettings({
           ...provider.customModels,
           {
             slug,
-            displayName: "Custom Model",
+            displayName: t("model.defaultCustomModelName"),
             reasoningEfforts: ["high"],
           },
         ],
