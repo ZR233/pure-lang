@@ -27,6 +27,26 @@ pub struct PureConfig {
     pub providers: BTreeMap<String, ProviderConfig>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct PureConfigToml {
+    pub schema_version: u32,
+    #[serde(default)]
+    pub roles: Option<RoleConfigsToml>,
+    pub providers: BTreeMap<String, ProviderConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RoleConfigsToml {
+    #[serde(default)]
+    pub explorer: Option<RoleConfig>,
+    #[serde(default)]
+    pub planner: Option<RoleConfig>,
+    #[serde(default)]
+    pub executor: Option<RoleConfig>,
+    #[serde(default)]
+    pub reviewer: Option<RoleConfig>,
+}
+
 impl PureConfig {
     pub fn default_config() -> Self {
         let role = RoleConfig {
@@ -131,8 +151,23 @@ impl PureConfig {
     }
 
     pub fn from_toml(content: &str) -> Result<Self> {
-        let config: Self = toml::from_str(content)
+        let raw: PureConfigToml = toml::from_str(content)
             .map_err(|error| PureError::ConfigError(format!("failed to parse config: {error}")))?;
+        if raw.schema_version != CONFIG_SCHEMA_VERSION {
+            return Err(PureError::ConfigError(format!(
+                "unsupported config schema version: {}",
+                raw.schema_version
+            )));
+        }
+        let roles = match raw.roles {
+            Some(roles) => roles.into_role_configs(&raw.providers)?,
+            None => RoleConfigs::from_default_role(default_role_config(&raw.providers)?),
+        };
+        let config = Self {
+            schema_version: raw.schema_version,
+            roles,
+            providers: raw.providers,
+        };
         config.validate()?;
         Ok(config)
     }
@@ -144,6 +179,35 @@ impl Default for PureConfig {
     }
 }
 
+fn default_role_config(providers: &BTreeMap<String, ProviderConfig>) -> Result<RoleConfig> {
+    let (provider_key, provider) = providers
+        .iter()
+        .next()
+        .ok_or_else(|| PureError::ConfigError("at least one provider is required".to_string()))?;
+    let model = provider
+        .models
+        .iter()
+        .find(|model| model.slug == provider.default_model)
+        .ok_or_else(|| {
+            PureError::ConfigError(format!(
+                "default model is missing from provider: {}",
+                provider.default_model
+            ))
+        })?;
+    let effort = model.reasoning_efforts.first().cloned().ok_or_else(|| {
+        PureError::ConfigError(format!(
+            "default model {} must define reasoning_efforts",
+            provider.default_model
+        ))
+    })?;
+
+    Ok(RoleConfig {
+        provider: provider_key.clone(),
+        model: provider.default_model.clone(),
+        effort: ReasoningEffort::new(effort),
+    })
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RoleConfigs {
     pub explorer: RoleConfig,
@@ -153,6 +217,15 @@ pub struct RoleConfigs {
 }
 
 impl RoleConfigs {
+    pub fn from_default_role(role: RoleConfig) -> Self {
+        Self {
+            explorer: role.clone(),
+            planner: role.clone(),
+            executor: role.clone(),
+            reviewer: role,
+        }
+    }
+
     pub fn get(&self, role: ModelRole) -> &RoleConfig {
         match role {
             ModelRole::Explorer => &self.explorer,
@@ -161,6 +234,38 @@ impl RoleConfigs {
             ModelRole::Reviewer => &self.reviewer,
         }
     }
+}
+
+impl RoleConfigsToml {
+    fn into_role_configs(
+        self,
+        providers: &BTreeMap<String, ProviderConfig>,
+    ) -> Result<RoleConfigs> {
+        let fallback_role = if self.explorer.is_none()
+            || self.planner.is_none()
+            || self.executor.is_none()
+            || self.reviewer.is_none()
+        {
+            Some(default_role_config(providers)?)
+        } else {
+            None
+        };
+        Ok(RoleConfigs {
+            explorer: role_or_default(self.explorer, &fallback_role),
+            planner: role_or_default(self.planner, &fallback_role),
+            executor: role_or_default(self.executor, &fallback_role),
+            reviewer: role_or_default(self.reviewer, &fallback_role),
+        })
+    }
+}
+
+fn role_or_default(role: Option<RoleConfig>, fallback_role: &Option<RoleConfig>) -> RoleConfig {
+    role.unwrap_or_else(|| {
+        fallback_role
+            .as_ref()
+            .expect("fallback role exists when a role is missing")
+            .clone()
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -179,7 +284,7 @@ pub struct ResolvedRoleConfig {
     pub models: Vec<ModelInfo>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ModelRole {
     Explorer,
     Planner,
@@ -203,6 +308,16 @@ impl ModelRole {
             Self::Planner => "planner",
             Self::Executor => "executor",
             Self::Reviewer => "reviewer",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        match key {
+            "explorer" => Some(Self::Explorer),
+            "planner" => Some(Self::Planner),
+            "executor" => Some(Self::Executor),
+            "reviewer" => Some(Self::Reviewer),
+            _ => None,
         }
     }
 
@@ -591,6 +706,24 @@ mod tests {
         env::temp_dir().join(format!("pure-lang-{name}-{}-{stamp}", std::process::id()))
     }
 
+    fn without_section(content: &str, section: &str) -> String {
+        let mut filtered = Vec::new();
+        let mut skipping = false;
+        for line in content.lines() {
+            if line.trim() == section {
+                skipping = true;
+                continue;
+            }
+            if skipping && line.starts_with('[') {
+                skipping = false;
+            }
+            if !skipping {
+                filtered.push(line);
+            }
+        }
+        filtered.join("\n")
+    }
+
     #[test]
     fn default_path_uses_pure_directory_under_home() {
         let paths = ConfigPaths::from_home("C:/Users/example");
@@ -634,6 +767,62 @@ mod tests {
         assert_eq!(
             parsed.providers["deepseek"].models[0].capabilities,
             config.providers["deepseek"].models[0].capabilities
+        );
+    }
+
+    #[test]
+    fn missing_single_role_uses_first_provider_default_model() {
+        let mut config = PureConfig::default_config();
+        config.roles.reviewer.model = "deepseek-v4-pro".to_string();
+        let toml = without_section(&config.to_toml_pretty().unwrap(), "[roles.reviewer]");
+
+        let parsed = PureConfig::from_toml(&toml).unwrap();
+
+        assert_eq!(parsed.roles.reviewer.provider, "deepseek");
+        assert_eq!(parsed.roles.reviewer.model, "deepseek-v4-flash");
+        assert_eq!(parsed.roles.reviewer.effort.as_str(), "high");
+    }
+
+    #[test]
+    fn missing_all_roles_uses_first_provider_default_model() {
+        let mut toml = PureConfig::default_config().to_toml_pretty().unwrap();
+        for section in [
+            "[roles.explorer]",
+            "[roles.planner]",
+            "[roles.executor]",
+            "[roles.reviewer]",
+        ] {
+            toml = without_section(&toml, section);
+        }
+
+        let parsed = PureConfig::from_toml(&toml).unwrap();
+
+        for role in ModelRole::all() {
+            assert_eq!(parsed.role_config(role).provider, "deepseek");
+            assert_eq!(parsed.role_config(role).model, "deepseek-v4-flash");
+        }
+    }
+
+    #[test]
+    fn complete_roles_do_not_require_default_model_effort_for_fallback() {
+        let mut config = PureConfig::default_config();
+        for role in ModelRole::all() {
+            match role {
+                ModelRole::Explorer => config.roles.explorer.model = "deepseek-v4-pro".to_string(),
+                ModelRole::Planner => config.roles.planner.model = "deepseek-v4-pro".to_string(),
+                ModelRole::Executor => config.roles.executor.model = "deepseek-v4-pro".to_string(),
+                ModelRole::Reviewer => config.roles.reviewer.model = "deepseek-v4-pro".to_string(),
+            }
+        }
+        config.providers.get_mut("deepseek").unwrap().models[0]
+            .reasoning_efforts
+            .clear();
+
+        let parsed = PureConfig::from_toml(&config.to_toml_pretty().unwrap()).unwrap();
+
+        assert_eq!(
+            parsed.role_config(ModelRole::Planner).model,
+            "deepseek-v4-pro"
         );
     }
 

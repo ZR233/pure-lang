@@ -14,7 +14,7 @@ pub use config::{
     TruncationPolicyConfig,
 };
 pub use config_editor::{
-    ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, infer_provider_template_kind,
+    ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit, infer_provider_template_kind,
 };
 pub use core::PureCore;
 pub use first_run::{

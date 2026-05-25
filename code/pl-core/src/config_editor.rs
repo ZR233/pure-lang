@@ -5,8 +5,8 @@ use pl_model::{ModelInfo, WireApi};
 use pl_protocol::{PureError, Result};
 
 use crate::config::{
-    CONFIG_SCHEMA_VERSION, ModelConfig, ProviderConfig, PureConfig, ReasoningEffort, RoleConfig,
-    RoleConfigs,
+    CONFIG_SCHEMA_VERSION, ModelConfig, ModelRole, ProviderConfig, PureConfig, ReasoningEffort,
+    RoleConfig, RoleConfigs,
 };
 use crate::first_run::ProviderTemplateKind;
 
@@ -33,6 +33,15 @@ pub struct ProviderEdit {
 pub struct ProviderSettingsEdit {
     pub default_provider: Option<String>,
     pub providers: Vec<ProviderEdit>,
+    pub roles: Vec<RoleEdit>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoleEdit {
+    pub key: String,
+    pub provider: String,
+    pub model: String,
+    pub effort: String,
 }
 
 pub fn infer_provider_template_kind(
@@ -123,11 +132,15 @@ impl ProviderSettingsEdit {
             .ok_or_else(|| PureError::ConfigError("at least one provider is required".to_string()))?
             .to_string();
 
-        let roles = RoleConfigs {
-            explorer: reconciled_role(&current.roles.explorer, &providers, &fallback_provider)?,
-            planner: reconciled_role(&current.roles.planner, &providers, &fallback_provider)?,
-            executor: reconciled_role(&current.roles.executor, &providers, &fallback_provider)?,
-            reviewer: reconciled_role(&current.roles.reviewer, &providers, &fallback_provider)?,
+        let roles = if self.roles.is_empty() {
+            RoleConfigs {
+                explorer: reconciled_role(&current.roles.explorer, &providers, &fallback_provider)?,
+                planner: reconciled_role(&current.roles.planner, &providers, &fallback_provider)?,
+                executor: reconciled_role(&current.roles.executor, &providers, &fallback_provider)?,
+                reviewer: reconciled_role(&current.roles.reviewer, &providers, &fallback_provider)?,
+            }
+        } else {
+            role_edits_to_configs(&self.roles, &providers)?
         };
         let config = PureConfig {
             schema_version: CONFIG_SCHEMA_VERSION,
@@ -137,6 +150,90 @@ impl ProviderSettingsEdit {
         config.validate()?;
         Ok(config)
     }
+}
+
+fn role_edits_to_configs(
+    edits: &[RoleEdit],
+    providers: &BTreeMap<String, ProviderConfig>,
+) -> Result<RoleConfigs> {
+    let fallback_provider = providers
+        .keys()
+        .next()
+        .ok_or_else(|| PureError::ConfigError("at least one provider is required".to_string()))?
+        .clone();
+    let fallback_role = role_for_provider_default(providers, &fallback_provider)?;
+    let mut roles = RoleConfigs::from_default_role(fallback_role);
+    let mut seen = BTreeSet::new();
+
+    for edit in edits {
+        let role = ModelRole::from_key(edit.key.trim()).ok_or_else(|| {
+            PureError::ConfigError(format!("unsupported model role: {}", edit.key))
+        })?;
+        if !seen.insert(role) {
+            return Err(PureError::ConfigError(format!(
+                "duplicate model role: {}",
+                role.key()
+            )));
+        }
+        let config = role_edit_to_config(edit, providers, role)?;
+        match role {
+            ModelRole::Explorer => roles.explorer = config,
+            ModelRole::Planner => roles.planner = config,
+            ModelRole::Executor => roles.executor = config,
+            ModelRole::Reviewer => roles.reviewer = config,
+        }
+    }
+
+    Ok(roles)
+}
+
+fn role_edit_to_config(
+    edit: &RoleEdit,
+    providers: &BTreeMap<String, ProviderConfig>,
+    role: ModelRole,
+) -> Result<RoleConfig> {
+    let provider_key = non_empty_trimmed(&edit.provider, "role provider")?;
+    let provider = providers.get(&provider_key).ok_or_else(|| {
+        PureError::ConfigError(format!(
+            "role {} references missing provider: {provider_key}",
+            role.key()
+        ))
+    })?;
+    let model_slug = non_empty_trimmed(&edit.model, "role model")?;
+    let model = provider
+        .models
+        .iter()
+        .find(|model| model.slug == model_slug)
+        .ok_or_else(|| {
+            PureError::ConfigError(format!(
+                "role {} references missing model: {provider_key}.{model_slug}",
+                role.key()
+            ))
+        })?;
+    let effort = edit.effort.trim();
+    let effort = if effort.is_empty() {
+        model.reasoning_efforts.first().cloned().ok_or_else(|| {
+            PureError::ConfigError(format!("role {} model must define effort", role.key()))
+        })?
+    } else if model
+        .reasoning_efforts
+        .iter()
+        .any(|candidate| candidate == effort)
+    {
+        effort.to_string()
+    } else {
+        return Err(PureError::ConfigError(format!(
+            "role {} uses unsupported effort '{}' for model {provider_key}.{model_slug}",
+            role.key(),
+            effort
+        )));
+    };
+
+    Ok(RoleConfig {
+        provider: provider_key,
+        model: model_slug,
+        effort: ReasoningEffort::new(effort),
+    })
 }
 
 fn reconciled_role(
@@ -166,9 +263,16 @@ fn reconciled_role(
         }
     }
 
-    let provider = providers.get(fallback_provider).ok_or_else(|| {
+    role_for_provider_default(providers, fallback_provider)
+}
+
+fn role_for_provider_default(
+    providers: &BTreeMap<String, ProviderConfig>,
+    provider_key: &str,
+) -> Result<RoleConfig> {
+    let provider = providers.get(provider_key).ok_or_else(|| {
         PureError::ConfigError(format!(
-            "default provider references missing provider: {fallback_provider}"
+            "default provider references missing provider: {provider_key}"
         ))
     })?;
     let model = provider
@@ -189,7 +293,7 @@ fn reconciled_role(
     })?;
 
     Ok(RoleConfig {
-        provider: fallback_provider.to_string(),
+        provider: provider_key.to_string(),
         model: provider.default_model.clone(),
         effort: ReasoningEffort::new(effort),
     })
@@ -314,6 +418,7 @@ mod tests {
         let config = ProviderSettingsEdit {
             default_provider: Some("openai".to_string()),
             providers: vec![edit],
+            roles: Vec::new(),
         }
         .to_config(&current)
         .unwrap();
@@ -342,6 +447,7 @@ mod tests {
         let config = ProviderSettingsEdit {
             default_provider: Some("openai".to_string()),
             providers: vec![openai_edit()],
+            roles: Vec::new(),
         }
         .to_config(&current)
         .unwrap();
@@ -357,12 +463,45 @@ mod tests {
         let config = ProviderSettingsEdit {
             default_provider: Some("deepseek".to_string()),
             providers: vec![deepseek_edit()],
+            roles: Vec::new(),
         }
         .to_config(&current)
         .unwrap();
 
         assert_eq!(config.providers["deepseek"].wire_api, WireApi::Chat);
         assert_eq!(config.providers["deepseek"].env_key, None);
+    }
+
+    #[test]
+    fn provider_settings_edit_saves_explicit_role_routes() {
+        let current = PureConfig::default_config();
+
+        let config = ProviderSettingsEdit {
+            default_provider: Some("openai".to_string()),
+            providers: vec![openai_edit()],
+            roles: vec![
+                RoleEdit {
+                    key: "planner".to_string(),
+                    provider: "openai".to_string(),
+                    model: "gpt-5.4-mini".to_string(),
+                    effort: "medium".to_string(),
+                },
+                RoleEdit {
+                    key: "reviewer".to_string(),
+                    provider: "openai".to_string(),
+                    model: "gpt-5.5".to_string(),
+                    effort: "high".to_string(),
+                },
+            ],
+        }
+        .to_config(&current)
+        .unwrap();
+
+        assert_eq!(config.roles.planner.provider, "openai");
+        assert_eq!(config.roles.planner.model, "gpt-5.4-mini");
+        assert_eq!(config.roles.planner.effort.as_str(), "medium");
+        assert_eq!(config.roles.reviewer.model, "gpt-5.5");
+        assert_eq!(config.roles.executor.model, "gpt-5.5");
     }
 
     #[test]
@@ -378,6 +517,7 @@ mod tests {
         let error = ProviderSettingsEdit {
             default_provider: Some("openai".to_string()),
             providers: vec![edit],
+            roles: Vec::new(),
         }
         .to_config(&current)
         .unwrap_err()

@@ -38,6 +38,16 @@ export type ProviderRecord = {
 
 export type ProviderKind = "deepseek" | "openai";
 
+export type RoleKey = "explorer" | "planner" | "executor" | "reviewer";
+
+export type RoleRecord = {
+  key: RoleKey;
+  displayName: string;
+  provider: string;
+  model: string;
+  effort: string;
+};
+
 export type ModelRecord = {
   slug: string;
   displayName: string;
@@ -66,6 +76,7 @@ export type ProviderTemplateRecord = {
 export type ConfigPayload = {
   toml: string;
   providers: ProviderRecord[];
+  roles: RoleRecord[];
   templates: ProviderTemplateRecord[];
   configExists: boolean;
 };
@@ -73,6 +84,7 @@ export type ConfigPayload = {
 export type ProviderSettingsInput = {
   defaultProviderId?: string | null;
   providers: ProviderInput[];
+  roles: RoleInput[];
 };
 
 export type ProviderInput = {
@@ -84,6 +96,13 @@ export type ProviderInput = {
   defaultModel: string;
   wireApi: string;
   customModels: ModelRecord[];
+};
+
+export type RoleInput = {
+  key: RoleKey;
+  provider: string;
+  model: string;
+  effort: string;
 };
 
 export type BootstrapPayload = {

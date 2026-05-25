@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ProviderSettings } from "./components/ProviderSettings";
+import { RoleSettings, normalizeRolesForProviders } from "./components/RoleSettings";
 import {
   approveTool,
   bootstrapStudio,
@@ -39,6 +40,7 @@ import {
   PromptFailed,
   ProviderRecord,
   ProviderTemplateRecord,
+  RoleRecord,
   RunPromptResponse,
   SessionRecord,
   SessionSelectionPayload,
@@ -76,6 +78,7 @@ export function App() {
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [providers, setProviders] = useState<ProviderRecord[]>([]);
+  const [roles, setRoles] = useState<RoleRecord[]>([]);
   const [providerTemplates, setProviderTemplates] = useState<ProviderTemplateRecord[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -201,6 +204,7 @@ export function App() {
 
   function applyConfig(payload: ConfigPayload) {
     setProviders(payload.providers);
+    setRoles(payload.roles);
     setProviderTemplates(payload.templates);
     setConfigToml(payload.toml);
     setConfigExists(payload.configExists);
@@ -327,6 +331,7 @@ export function App() {
 
   async function onSaveProviderSettings() {
     try {
+      const normalizedRoles = normalizeRolesForProviders(roles, providers);
       applyConfig(
         await saveProviderSettings({
           defaultProviderId: selectedProviderId,
@@ -343,6 +348,12 @@ export function App() {
               displayName: model.displayName,
               reasoningEfforts: [...model.reasoningEfforts],
             })),
+          })),
+          roles: normalizedRoles.map((role) => ({
+            key: role.key,
+            provider: role.provider,
+            model: role.model,
+            effort: role.effort,
           })),
         }),
       );
@@ -583,7 +594,7 @@ export function App() {
               <button
                 className="primary"
                 onClick={() =>
-                  activeSettingsTab === "providers"
+                  activeSettingsTab === "providers" || activeSettingsTab === "roles"
                     ? void onSaveProviderSettings()
                     : void onSaveConfig()
                 }
@@ -618,6 +629,8 @@ export function App() {
               setSelectedProviderId={setSelectedProviderId}
               setProviderSearch={setProviderSearch}
             />
+          ) : activeSettingsTab === "roles" ? (
+            <RoleSettings providers={providers} roles={roles} setRoles={setRoles} />
           ) : (
             <div className="settings-placeholder">
               <h2>Coming soon</h2>

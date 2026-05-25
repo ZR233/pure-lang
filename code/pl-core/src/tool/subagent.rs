@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use super::truncation::{OutputTruncation, TruncatedOutput};
 use super::{Tool, ToolInput, ToolOutput};
 use crate::PureCore;
-use crate::config::ReasoningEffort;
+use crate::config::{ModelRole, PureConfig, ReasoningEffort};
 use crate::session::CoreSession;
 use crate::turn::CompileMode;
 
@@ -19,6 +19,7 @@ use crate::turn::CompileMode;
 pub struct SubagentTool {
     provider: SharedModelProvider,
     reasoning_effort: Option<ReasoningEffort>,
+    config: Option<PureConfig>,
     workspace_instructions: Option<String>,
 }
 
@@ -28,6 +29,9 @@ pub struct SubagentTool {
 pub struct SubagentInput {
     /// 子任务描述。
     pub task: String,
+    /// 子代理使用的模型角色，缺省为执行者。
+    #[serde(default)]
+    pub role: Option<String>,
     /// 最大迭代次数（当前版本未使用，预留扩展）。
     #[serde(default)]
     pub max_iterations: Option<u32>,
@@ -37,11 +41,13 @@ impl SubagentTool {
     pub fn new(
         provider: SharedModelProvider,
         reasoning_effort: Option<ReasoningEffort>,
+        config: Option<PureConfig>,
         workspace_instructions: Option<String>,
     ) -> Self {
         Self {
             provider,
             reasoning_effort,
+            config,
             workspace_instructions,
         }
     }
@@ -51,6 +57,21 @@ impl SubagentTool {
             tool: "subagent".to_string(),
             error: format!("invalid input: {e}"),
         })
+    }
+
+    fn role(input: &SubagentInput) -> Result<ModelRole, PureError> {
+        match input
+            .role
+            .as_deref()
+            .map(str::trim)
+            .filter(|role| !role.is_empty())
+        {
+            Some(role) => ModelRole::from_key(role).ok_or_else(|| PureError::ToolExecutionFailed {
+                tool: "subagent".to_string(),
+                error: format!("unsupported role: {role}"),
+            }),
+            None => Ok(ModelRole::Executor),
+        }
     }
 }
 
@@ -62,7 +83,8 @@ impl Tool for SubagentTool {
     fn description(&self) -> &str {
         "Delegate a subtask to an independent LLM session. The subagent \
          receives the task, processes it, and returns the result. Use this \
-         to parallelize independent subtasks or isolate context."
+         to parallelize independent subtasks or isolate context. Optionally \
+         choose one of the fixed model roles."
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -72,6 +94,11 @@ impl Tool for SubagentTool {
                 "task": {
                     "type": "string",
                     "description": "The task description for the subagent to execute"
+                },
+                "role": {
+                    "type": "string",
+                    "enum": ["explorer", "planner", "executor", "reviewer"],
+                    "description": "The model role used by the subagent. Defaults to executor."
                 },
                 "maxIterations": {
                     "type": "integer",
@@ -88,11 +115,16 @@ impl Tool for SubagentTool {
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
             let subagent_input = Self::parse_input(input.arguments)?;
-
-            let mut core = PureCore::new(self.provider.clone());
-            if let Some(ref effort) = self.reasoning_effort {
-                core = PureCore::with_reasoning_effort(self.provider.clone(), effort.clone());
-            }
+            let role = Self::role(&subagent_input)?;
+            let core = match &self.config {
+                Some(config) => PureCore::from_config(config, role)?,
+                None => match &self.reasoning_effort {
+                    Some(effort) => {
+                        PureCore::with_reasoning_effort(self.provider.clone(), effort.clone())
+                    }
+                    None => PureCore::new(self.provider.clone()),
+                },
+            };
 
             let mut request = crate::turn::TurnRequest::new(subagent_input.task, CompileMode::Auto);
             if let Some(max) = subagent_input.max_iterations {
@@ -132,5 +164,44 @@ impl Tool for SubagentTool {
                 timed_out: false,
             })
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subagent_input_defaults_to_executor_role() {
+        let input = SubagentTool::parse_input(serde_json::json!({
+            "task": "inspect files"
+        }))
+        .unwrap();
+
+        assert_eq!(SubagentTool::role(&input).unwrap(), ModelRole::Executor);
+    }
+
+    #[test]
+    fn subagent_input_accepts_explicit_role() {
+        let input = SubagentTool::parse_input(serde_json::json!({
+            "task": "review changes",
+            "role": "reviewer"
+        }))
+        .unwrap();
+
+        assert_eq!(SubagentTool::role(&input).unwrap(), ModelRole::Reviewer);
+    }
+
+    #[test]
+    fn subagent_input_rejects_unknown_role() {
+        let input = SubagentTool::parse_input(serde_json::json!({
+            "task": "review changes",
+            "role": "critic"
+        }))
+        .unwrap();
+
+        let error = SubagentTool::role(&input).unwrap_err().to_string();
+
+        assert!(error.contains("unsupported role"));
     }
 }
