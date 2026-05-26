@@ -120,6 +120,10 @@ impl ToolRegistry {
         self.tools.len()
     }
 
+    pub fn names(&self) -> Vec<&str> {
+        self.tools.iter().map(|t| t.name()).collect()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.tools.is_empty()
     }

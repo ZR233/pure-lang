@@ -17,7 +17,30 @@ export type ChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
   reasoningContent?: string | null;
+  metadata?: Record<string, string> | null;
 };
+
+export type ToolCallStatus =
+  | "streaming"
+  | "completed"
+  | "pending_approval"
+  | "approved"
+  | "denied"
+  | "result_ready";
+
+export type TrackedToolCall = {
+  id: string;
+  name: string;
+  arguments: string;
+  status: ToolCallStatus;
+  workingDirectory?: string | null;
+  result?: string | null;
+  startedAt: number;
+};
+
+export type ChatItem =
+  | { kind: "message"; message: ChatMessage; key: string }
+  | { kind: "tool_call"; toolCall: TrackedToolCall; key: string };
 
 export type SubagentStatus =
   | "queued"

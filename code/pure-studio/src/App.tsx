@@ -25,6 +25,7 @@ import {
 import { errorText } from "./lib/utils";
 import type {
   AgentEventPayload,
+  ChatItem,
   ChatMessage,
   ConfigPayload,
   ProjectSelectionPayload,
@@ -41,6 +42,7 @@ import type {
   SubagentStatus,
   ToolApprovalRequest,
   ToolApprovalResolved,
+  TrackedToolCall,
 } from "./types";
 
 type SettingsTab = "providers" | "models" | "roles" | "security" | "general";
@@ -112,6 +114,7 @@ export function App() {
   const [streamingText, setStreamingText] = useState("");
   const [thinkingText, setThinkingText] = useState("");
   const [toolStatuses, setToolStatuses] = useState<string[]>([]);
+  const [toolCalls, setToolCalls] = useState<Map<string, TrackedToolCall>>(new Map());
   const [subagentActivities, setSubagentActivities] = useState<SubagentActivity[]>([]);
   const [approvals, setApprovals] = useState<ToolApprovalRequest[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -124,17 +127,50 @@ export function App() {
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
   const selectedSession = sessions.find((session) => session.id === selectedSessionId) ?? null;
 
-  const liveMessages = useMemo(() => {
-    const rows = [...messages];
+  const chatItems = useMemo((): ChatItem[] => {
+    const items: ChatItem[] = [];
+    let index = 0;
+
+    for (const msg of messages) {
+      if (msg.role === "tool" && msg.metadata?.tool_call_id) {
+        items.push({
+          kind: "tool_call",
+          toolCall: {
+            id: msg.metadata.tool_call_id,
+            name: msg.metadata.tool_name ?? "tool",
+            arguments: msg.metadata.tool_call_arguments ?? "",
+            status: "result_ready",
+            result: msg.content,
+            startedAt: 0,
+          },
+          key: `tc-${msg.metadata.tool_call_id}`,
+        });
+      } else {
+        items.push({ kind: "message", message: msg, key: `msg-${index}` });
+      }
+      index++;
+    }
+
     if (thinkingText || streamingText) {
-      rows.push({
-        role: "assistant",
-        content: streamingText || t("status.thinking"),
-        reasoningContent: thinkingText || null,
+      items.push({
+        kind: "message",
+        message: {
+          role: "assistant",
+          content: streamingText || t("status.thinking"),
+          reasoningContent: thinkingText || null,
+        },
+        key: "streaming",
       });
     }
-    return rows;
-  }, [messages, streamingText, thinkingText]);
+
+    for (const tc of toolCalls.values()) {
+      if (!items.some((item) => item.kind === "tool_call" && item.key === `tc-${tc.id}`)) {
+        items.push({ kind: "tool_call", toolCall: tc, key: `tc-${tc.id}` });
+      }
+    }
+
+    return items;
+  }, [messages, toolCalls, streamingText, thinkingText, t]);
 
   const recentActivities = useMemo(
     () => [
@@ -193,6 +229,25 @@ export function App() {
         }
         if ("toolCallDelta" in event) {
           setStatus(t("status.toolInput", { name: event.toolCallDelta.name }));
+          setToolCalls((current) => {
+            const next = new Map(current);
+            const existing = next.get(event.toolCallDelta.id);
+            if (existing) {
+              next.set(event.toolCallDelta.id, {
+                ...existing,
+                arguments: existing.arguments + event.toolCallDelta.argumentsDelta,
+              });
+            } else {
+              next.set(event.toolCallDelta.id, {
+                id: event.toolCallDelta.id,
+                name: event.toolCallDelta.name,
+                arguments: event.toolCallDelta.argumentsDelta,
+                status: "streaming",
+                startedAt: Date.now(),
+              });
+            }
+            return next;
+          });
           return;
         }
         if ("toolCallComplete" in event) {
@@ -200,14 +255,51 @@ export function App() {
             t("status.toolCompleted", { name: event.toolCallComplete.name }),
             ...current.slice(0, 4),
           ]);
+          setToolCalls((current) => {
+            const next = new Map(current);
+            const existing = next.get(event.toolCallComplete.id);
+            if (existing) {
+              next.set(event.toolCallComplete.id, {
+                ...existing,
+                name: event.toolCallComplete.name || existing.name,
+                status: "completed",
+                arguments: event.toolCallComplete.arguments,
+              });
+            } else {
+              next.set(event.toolCallComplete.id, {
+                id: event.toolCallComplete.id,
+                name: event.toolCallComplete.name,
+                arguments: event.toolCallComplete.arguments,
+                status: "completed",
+                startedAt: Date.now(),
+              });
+            }
+            return next;
+          });
           return;
         }
         if ("toolApprovalGranted" in event) {
           setStatus(t("status.approved", { name: event.toolApprovalGranted.name }));
+          setToolCalls((current) => {
+            const next = new Map(current);
+            const existing = next.get(event.toolApprovalGranted.id);
+            if (existing) {
+              next.set(event.toolApprovalGranted.id, { ...existing, status: "approved" });
+            }
+            return next;
+          });
           return;
         }
         if ("toolApprovalDenied" in event) {
           setStatus(t("status.denied", { name: event.toolApprovalDenied.name }));
+          setToolCalls((current) => {
+            const next = new Map(current);
+            const existing = next.get(event.toolApprovalDenied.id);
+            if (existing) {
+              next.set(event.toolApprovalDenied.id, { ...existing, status: "denied" });
+            }
+            return next;
+          });
           return;
         }
         if ("subagentStateChanged" in event) {
@@ -275,6 +367,7 @@ export function App() {
     setSubagentActivities(mergeSubagentActivities([], payload.subagentEvents));
     setStreamingText("");
     setThinkingText("");
+    setToolCalls(new Map());
     setStatus(t("status.projectLoaded"));
   }
 
@@ -287,6 +380,7 @@ export function App() {
     setSubagentActivities(mergeSubagentActivities([], payload.subagentEvents));
     setStreamingText("");
     setThinkingText("");
+    setToolCalls(new Map());
     setStatus(t("status.sessionLoaded"));
   }
 
@@ -455,7 +549,7 @@ export function App() {
         selectedProject={selectedProject}
         status={status}
         isBusy={isBusy}
-        liveMessages={liveMessages}
+        chatItems={chatItems}
         subagentActivities={subagentActivities}
         prompt={prompt}
         onSetPrompt={setPrompt}

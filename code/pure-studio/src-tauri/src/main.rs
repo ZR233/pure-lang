@@ -86,6 +86,8 @@ struct MessageDto {
     role: String,
     content: String,
     reasoning_content: Option<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    metadata: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -930,6 +932,7 @@ fn message_dto(message: Message) -> MessageDto {
         role,
         content: message_content_text(message.content),
         reasoning_content: message.reasoning_content,
+        metadata: message.metadata,
     }
 }
 

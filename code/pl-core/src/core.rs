@@ -325,7 +325,14 @@ impl PureCore {
                                 }
                             }
                         }
-                        None => format!("Unknown tool: {}", tool_call.name),
+                        None => {
+                            let available: Vec<&str> = self.tools.names();
+                            eprintln!(
+                                "[pl-core] Unknown tool: {:?}, available: {:?}",
+                                tool_call.name, available
+                            );
+                            format!("Unknown tool: {}", tool_call.name)
+                        }
                     };
 
                     session.push_tool_result(
@@ -336,6 +343,8 @@ impl PureCore {
                         tool_call.name.clone(),
                         tool_call.kind(),
                         result,
+                        serde_json::to_string(&tool_call.arguments_for_display())
+                            .unwrap_or_default(),
                     );
                 }
 

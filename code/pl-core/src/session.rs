@@ -70,6 +70,7 @@ impl CoreSession {
         tool_name: String,
         tool_call_kind: ToolCallKind,
         result: String,
+        tool_arguments: String,
     ) {
         let mut metadata = HashMap::new();
         metadata.insert("tool_call_id".to_string(), tool_call_id);
@@ -78,6 +79,7 @@ impl CoreSession {
             "tool_call_kind".to_string(),
             tool_call_kind.as_str().to_string(),
         );
+        metadata.insert("tool_call_arguments".to_string(), tool_arguments);
         self.messages.push(Message {
             role: MessageRole::Tool,
             content: MessageContent::Text(result),
@@ -159,6 +161,7 @@ mod tests {
             "bash".to_string(),
             ToolCallKind::Function,
             "output".to_string(),
+            r#"{"command":"echo hi"}"#.to_string(),
         );
 
         assert_eq!(session.len(), 1);
@@ -177,6 +180,13 @@ mod tests {
                 .get("tool_call_kind")
                 .unwrap(),
             "function"
+        );
+        assert_eq!(
+            session.messages()[0]
+                .metadata
+                .get("tool_call_arguments")
+                .unwrap(),
+            r#"{"command":"echo hi"}"#
         );
     }
 

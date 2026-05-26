@@ -1,7 +1,9 @@
-import { Activity, Send, Terminal } from "lucide-react";
+import { Activity, ChevronDown, Send, Terminal } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ChatMessage, SessionRecord, SubagentActivity, SubagentStatus, ProjectRecord } from "../types";
+import type { ChatItem, ChatMessage, SessionRecord, SubagentActivity, SubagentStatus, ProjectRecord } from "../types";
 import { formatTime } from "../lib/utils";
+import { ToolCallBlock } from "./ToolCallBlock";
 
 const subagentStatusKeys: Record<SubagentStatus, string> = {
   queued: "subagent.queued",
@@ -40,30 +42,87 @@ function subagentSummary(activity: SubagentActivity, t: (key: string) => string)
   return activity.status === "queued" ? t("subagent.waitingToStart") : t("subagent.noSummaryYet");
 }
 
+function MessageBubble({ message }: { message: ChatMessage }) {
+  return (
+    <article className={`message ${message.role}`}>
+      <div className="message-role">{message.role}</div>
+      {message.reasoningContent ? (
+        <pre className="thinking-block">{message.reasoningContent}</pre>
+      ) : null}
+      <div className="message-content">{message.content}</div>
+    </article>
+  );
+}
+
 type ConversationPanelProps = {
   selectedSession: SessionRecord | null;
   selectedProject: ProjectRecord | null;
   status: string;
   isBusy: boolean;
-  liveMessages: ChatMessage[];
+  chatItems: ChatItem[];
   subagentActivities: SubagentActivity[];
   prompt: string;
   onSetPrompt: (value: string) => void;
   onSendPrompt: () => void;
 };
 
+const SCROLL_THRESHOLD = 40;
+
 export function ConversationPanel({
   selectedSession,
   selectedProject,
   status,
   isBusy,
-  liveMessages,
+  chatItems,
   subagentActivities,
   prompt,
   onSetPrompt,
   onSendPrompt,
 }: ConversationPanelProps) {
   const { t } = useTranslation();
+  const messageStreamRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const prevBusyRef = useRef(isBusy);
+
+  useEffect(() => {
+    const el = messageStreamRef.current;
+    if (!el) return;
+
+    const handleScroll = () => {
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
+      isAtBottomRef.current = atBottom;
+      setShowScrollButton(!atBottom);
+    };
+
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  useEffect(() => {
+    if (isAtBottomRef.current && messageStreamRef.current) {
+      messageStreamRef.current.scrollTop = messageStreamRef.current.scrollHeight;
+    }
+  }, [chatItems]);
+
+  useEffect(() => {
+    if (isBusy && !prevBusyRef.current) {
+      isAtBottomRef.current = true;
+      if (messageStreamRef.current) {
+        messageStreamRef.current.scrollTop = messageStreamRef.current.scrollHeight;
+      }
+    }
+    prevBusyRef.current = isBusy;
+  }, [isBusy]);
+
+  function scrollToBottom() {
+    const el = messageStreamRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      isAtBottomRef.current = true;
+      setShowScrollButton(false);
+    }
+  }
 
   return (
     <section className="conversation">
@@ -75,8 +134,8 @@ export function ConversationPanel({
         <div className={`status-pill ${isBusy ? "running" : ""}`}>{status}</div>
       </header>
 
-      <div className="message-stream">
-        {liveMessages.length === 0 && subagentActivities.length === 0 ? (
+      <div className="message-stream" ref={messageStreamRef}>
+        {chatItems.length === 0 && subagentActivities.length === 0 ? (
           <div className="empty-state">
             <Terminal size={34} />
             <h2>{t("conversation.emptyTitle")}</h2>
@@ -84,15 +143,13 @@ export function ConversationPanel({
           </div>
         ) : (
           <>
-            {liveMessages.map((message, index) => (
-              <article key={`${message.role}-${index}`} className={`message ${message.role}`}>
-                <div className="message-role">{message.role}</div>
-                {message.reasoningContent ? (
-                  <pre className="thinking-block">{message.reasoningContent}</pre>
-                ) : null}
-                <div className="message-content">{message.content}</div>
-              </article>
-            ))}
+            {chatItems.map((item) =>
+              item.kind === "message" ? (
+                <MessageBubble key={item.key} message={item.message} />
+              ) : (
+                <ToolCallBlock key={item.key} toolCall={item.toolCall} />
+              ),
+            )}
             {subagentActivities.length > 0 ? (
               <section className="subagent-timeline" aria-label="Subagent activity">
                 <div className="subagent-timeline-head">
@@ -125,6 +182,11 @@ export function ConversationPanel({
               </section>
             ) : null}
           </>
+        )}
+        {showScrollButton && (
+          <button className="scroll-to-bottom" onClick={scrollToBottom}>
+            <ChevronDown size={18} />
+          </button>
         )}
       </div>
 

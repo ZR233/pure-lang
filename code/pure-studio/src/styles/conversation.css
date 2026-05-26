@@ -61,11 +61,35 @@
 }
 
 .message-stream {
+  position: relative;
   min-height: 0;
   padding: 22px clamp(12px, 2vw, 24px);
   overflow-x: hidden;
   overflow-y: auto;
   background: linear-gradient(#ffffff, #f8fafc);
+}
+
+.scroll-to-bottom {
+  position: sticky;
+  bottom: 12px;
+  left: 50%;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin: 0 auto;
+  border: 1px solid #cfd9e5;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 12%);
+  cursor: pointer;
+  color: #536579;
+}
+
+.scroll-to-bottom:hover {
+  background: #f5f7fa;
 }
 
 .empty-state {
@@ -283,4 +307,132 @@
   border-color: #0b74a5;
   color: #ffffff;
   background: #096895;
+}
+
+/* Tool call block */
+
+.tool-call-block {
+  width: min(100%, 880px);
+  max-width: 880px;
+  margin: 0 0 10px;
+  border: 1px solid #e0e7ef;
+  border-left: 3px solid #7aa9bd;
+  border-radius: 8px;
+  background: #fafbfc;
+}
+
+.tool-call-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+}
+
+.tool-call-icon {
+  flex-shrink: 0;
+  color: #5a7a8f;
+}
+
+.tool-call-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: #29384a;
+  font-weight: 700;
+  font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-call-status-badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.tool-call-status-badge.streaming {
+  color: #096895;
+  background: #e6f4fb;
+}
+
+.tool-call-status-badge.completed,
+.tool-call-status-badge.approved,
+.tool-call-status-badge.result_ready {
+  color: #168448;
+  background: #e9f8ef;
+}
+
+.tool-call-status-badge.pending_approval {
+  color: #9a6b0a;
+  background: #fff9e5;
+}
+
+.tool-call-status-badge.denied {
+  color: #c44949;
+  background: #fff7f7;
+}
+
+.tool-call-chevron {
+  flex-shrink: 0;
+  color: #7d8b9b;
+  transition: transform 0.15s ease;
+}
+
+.tool-call-chevron.expanded {
+  transform: rotate(90deg);
+}
+
+.tool-call-body {
+  padding: 0 14px 12px;
+}
+
+.tool-call-body-label {
+  margin-bottom: 4px;
+  color: #7d8b9b;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.tool-call-arguments {
+  overflow: auto;
+  margin: 0 0 8px;
+  padding: 10px;
+  border-radius: 6px;
+  background: #f0f2f5;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tool-call-result {
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border-radius: 6px;
+  background: #f5fbf7;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
 }

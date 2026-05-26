@@ -80,6 +80,18 @@ const zhCN = {
     subagentLabel: "子代理 {{id}}",
   },
 
+  toolCall: {
+    streaming: "运行中",
+    completed: "已完成",
+    pendingApproval: "等待审批",
+    approved: "已批准",
+    denied: "已拒绝",
+    resultReady: "已完成",
+    arguments: "参数",
+    result: "结果",
+    scrollToBottom: "滚动到底部",
+  },
+
   conversation: {
     defaultTitle: "对话",
     addProjectHint: "添加或选择项目以开始",

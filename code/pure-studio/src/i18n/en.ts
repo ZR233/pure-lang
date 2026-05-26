@@ -80,6 +80,18 @@ const en = {
     subagentLabel: "Subagent {{id}}",
   },
 
+  toolCall: {
+    streaming: "Running",
+    completed: "Completed",
+    pendingApproval: "Awaiting approval",
+    approved: "Approved",
+    denied: "Denied",
+    resultReady: "Done",
+    arguments: "Arguments",
+    result: "Result",
+    scrollToBottom: "Scroll to bottom",
+  },
+
   conversation: {
     defaultTitle: "Conversation",
     addProjectHint: "Add or select a project to begin",
