@@ -5,8 +5,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use pl_model::{
-    AuthCommand, InputModality, ModelCapabilities, ModelInfo, ProviderInfo, TruncationMode,
-    TruncationPolicy, WireApi, deepseek_default_model_slugs, default_models,
+    ApplyPatchToolType, AuthCommand, InputModality, ModelCapabilities, ModelInfo, ProviderInfo,
+    TruncationMode, TruncationPolicy, WireApi, deepseek_default_model_slugs, default_models,
 };
 use pl_protocol::{PureError, Result};
 use serde::Deserialize;
@@ -375,6 +375,12 @@ pub struct ProviderConfig {
     pub stream_max_retries: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_idle_timeout_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_custom_tools: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_freeform_tools: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apply_patch_tool_type: Option<ApplyPatchToolType>,
     #[serde(default)]
     pub models: Vec<ModelConfig>,
 }
@@ -406,6 +412,9 @@ impl ProviderConfig {
             request_max_retries: info.request_max_retries,
             stream_max_retries: info.stream_max_retries,
             stream_idle_timeout_ms: info.stream_idle_timeout_ms,
+            supports_custom_tools: info.supports_custom_tools,
+            supports_freeform_tools: info.supports_freeform_tools,
+            apply_patch_tool_type: info.apply_patch_tool_type,
             models,
         }
     }
@@ -425,6 +434,9 @@ impl ProviderConfig {
             request_max_retries: self.request_max_retries,
             stream_max_retries: self.stream_max_retries,
             stream_idle_timeout_ms: self.stream_idle_timeout_ms,
+            supports_custom_tools: self.supports_custom_tools,
+            supports_freeform_tools: self.supports_freeform_tools,
+            apply_patch_tool_type: self.apply_patch_tool_type,
         }
     }
 
@@ -533,6 +545,8 @@ pub enum ModelCapabilityConfig {
     ParallelToolCalls,
     Reasoning,
     WebSearch,
+    CustomTools,
+    FreeformTools,
 }
 
 impl ModelCapabilityConfig {
@@ -547,6 +561,8 @@ impl ModelCapabilityConfig {
             ),
             (ModelCapabilities::REASONING, Self::Reasoning),
             (ModelCapabilities::WEB_SEARCH, Self::WebSearch),
+            (ModelCapabilities::CUSTOM_TOOLS, Self::CustomTools),
+            (ModelCapabilities::FREEFORM_TOOLS, Self::FreeformTools),
         ]
         .into_iter()
         .filter_map(|(flag, config)| capabilities.contains(flag).then_some(config))
@@ -565,6 +581,8 @@ impl ModelCapabilityConfig {
                         Self::ParallelToolCalls => ModelCapabilities::PARALLEL_TOOL_CALLS,
                         Self::Reasoning => ModelCapabilities::REASONING,
                         Self::WebSearch => ModelCapabilities::WEB_SEARCH,
+                        Self::CustomTools => ModelCapabilities::CUSTOM_TOOLS,
+                        Self::FreeformTools => ModelCapabilities::FREEFORM_TOOLS,
                     }
             })
     }

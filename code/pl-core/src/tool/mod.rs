@@ -1,4 +1,5 @@
 mod bash;
+mod file;
 mod subagent;
 mod truncation;
 
@@ -14,6 +15,10 @@ use serde::{Deserialize, Serialize};
 use crate::turn::TurnOptions;
 
 pub use bash::{BashInput, BashTool};
+pub use file::{
+    ApplyPatchTool, CopyPathTool, CreateDirectoryTool, DeletePathTool, ListFilesTool, MovePathTool,
+    ReadFileTool, SearchFilesTool, StatPathTool, WriteFileTool,
+};
 pub use subagent::{SubagentInput, SubagentTool};
 pub use truncation::{OutputTruncation, TruncatedOutput, TruncationStrategy};
 
@@ -36,11 +41,7 @@ pub trait Tool: fmt::Debug + Send + Sync {
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>>;
 
     fn to_schema(&self) -> ToolSchema {
-        ToolSchema {
-            name: self.name().to_string(),
-            description: self.description().to_string(),
-            input_schema: self.input_schema(),
-        }
+        ToolSchema::function(self.name(), self.description(), self.input_schema())
     }
 }
 
@@ -218,7 +219,7 @@ mod tests {
 
         let schemas = reg.schemas();
         assert_eq!(schemas.len(), 1);
-        assert_eq!(schemas[0].name, "echo");
+        assert_eq!(schemas[0].name(), "echo");
     }
 
     #[test]

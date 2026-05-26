@@ -47,17 +47,214 @@ pub struct CompletionResponse {
 pub struct ToolCall {
     pub id: String,
     pub name: String,
-    pub arguments: serde_json::Value,
+    pub payload: ToolCallPayload,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub call_id: Option<String>,
 }
 
+impl ToolCall {
+    pub fn function(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        arguments: serde_json::Value,
+        call_id: Option<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            payload: ToolCallPayload::Function { arguments },
+            call_id,
+        }
+    }
+
+    pub fn custom(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        input: impl Into<String>,
+        call_id: Option<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            payload: ToolCallPayload::Custom {
+                input: input.into(),
+            },
+            call_id,
+        }
+    }
+
+    pub fn kind(&self) -> ToolCallKind {
+        match self.payload {
+            ToolCallPayload::Function { .. } => ToolCallKind::Function,
+            ToolCallPayload::Custom { .. } => ToolCallKind::Custom,
+        }
+    }
+
+    pub fn arguments_for_tool(&self) -> serde_json::Value {
+        match &self.payload {
+            ToolCallPayload::Function { arguments } => arguments.clone(),
+            ToolCallPayload::Custom { input } => serde_json::json!({
+                "input": input,
+                "patch": input,
+            }),
+        }
+    }
+
+    pub fn arguments_for_display(&self) -> serde_json::Value {
+        match &self.payload {
+            ToolCallPayload::Function { arguments } => arguments.clone(),
+            ToolCallPayload::Custom { input } => serde_json::json!({ "input": input }),
+        }
+    }
+
+    pub fn payload_text(&self) -> String {
+        match &self.payload {
+            ToolCallPayload::Function { arguments } => {
+                serde_json::to_string(arguments).unwrap_or_default()
+            }
+            ToolCallPayload::Custom { input } => input.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallKind {
+    Function,
+    Custom,
+}
+
+impl ToolCallKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Function => "function",
+            Self::Custom => "custom",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ToolCallPayload {
+    Function { arguments: serde_json::Value },
+    Custom { input: String },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ToolSchema {
-    pub name: String,
-    pub description: String,
-    pub input_schema: serde_json::Value,
+#[serde(tag = "kind")]
+pub enum ToolSchema {
+    Function {
+        name: String,
+        description: String,
+        input_schema: serde_json::Value,
+    },
+    Custom {
+        name: String,
+        description: String,
+        format: ToolFormat,
+    },
+}
+
+impl ToolSchema {
+    pub fn function(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        input_schema: serde_json::Value,
+    ) -> Self {
+        Self::Function {
+            name: name.into(),
+            description: description.into(),
+            input_schema,
+        }
+    }
+
+    pub fn custom_grammar(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        syntax: impl Into<String>,
+        definition: impl Into<String>,
+    ) -> Self {
+        Self::Custom {
+            name: name.into(),
+            description: description.into(),
+            format: ToolFormat::Grammar {
+                syntax: syntax.into(),
+                definition: definition.into(),
+            },
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Function { name, .. } | Self::Custom { name, .. } => name,
+        }
+    }
+
+    pub fn description(&self) -> &str {
+        match self {
+            Self::Function { description, .. } | Self::Custom { description, .. } => description,
+        }
+    }
+
+    pub fn provider_compatible(self, supports_custom_tools: bool) -> Self {
+        if supports_custom_tools {
+            return self;
+        }
+
+        match self {
+            Self::Custom {
+                name, description, ..
+            } if name == "apply_patch" => Self::function(
+                name,
+                description,
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "patch": {
+                            "type": "string",
+                            "description": "Complete apply_patch patch text beginning with *** Begin Patch and ending with *** End Patch"
+                        }
+                    },
+                    "required": ["patch"],
+                    "additionalProperties": false
+                }),
+            ),
+            Self::Custom {
+                name, description, ..
+            } => Self::function(
+                name,
+                description,
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "input": { "type": "string" }
+                    },
+                    "required": ["input"],
+                    "additionalProperties": false
+                }),
+            ),
+            function => function,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum ToolFormat {
+    Text,
+    Grammar { syntax: String, definition: String },
+}
+
+impl CompletionRequest {
+    pub fn provider_compatible(mut self, supports_custom_tools: bool) -> Self {
+        self.tools = self
+            .tools
+            .into_iter()
+            .map(|tool| tool.provider_compatible(supports_custom_tools))
+            .collect();
+        self
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

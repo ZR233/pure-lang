@@ -10,6 +10,8 @@ bitflags::bitflags! {
         const PARALLEL_TOOL_CALLS   = 0b00001000;
         const REASONING             = 0b00010000;
         const WEB_SEARCH            = 0b00100000;
+        const CUSTOM_TOOLS          = 0b01000000;
+        const FREEFORM_TOOLS        = 0b10000000;
     }
 }
 
@@ -25,6 +27,8 @@ impl Serialize for ModelCapabilities {
             (Self::PARALLEL_TOOL_CALLS, "PARALLEL_TOOL_CALLS"),
             (Self::REASONING, "REASONING"),
             (Self::WEB_SEARCH, "WEB_SEARCH"),
+            (Self::CUSTOM_TOOLS, "CUSTOM_TOOLS"),
+            (Self::FREEFORM_TOOLS, "FREEFORM_TOOLS"),
         ]
         .iter()
         .filter(|(flag, _)| self.contains(*flag))
@@ -49,6 +53,8 @@ impl<'de> Deserialize<'de> for ModelCapabilities {
                 "PARALLEL_TOOL_CALLS" => caps |= Self::PARALLEL_TOOL_CALLS,
                 "REASONING" => caps |= Self::REASONING,
                 "WEB_SEARCH" => caps |= Self::WEB_SEARCH,
+                "CUSTOM_TOOLS" => caps |= Self::CUSTOM_TOOLS,
+                "FREEFORM_TOOLS" => caps |= Self::FREEFORM_TOOLS,
                 _ => {}
             }
         }
@@ -67,6 +73,14 @@ impl ModelCapabilities {
 
     pub fn supports_parallel_tool_calls(self) -> bool {
         self.contains(Self::PARALLEL_TOOL_CALLS)
+    }
+
+    pub fn supports_custom_tools(self) -> bool {
+        self.contains(Self::CUSTOM_TOOLS)
+    }
+
+    pub fn supports_freeform_tools(self) -> bool {
+        self.contains(Self::FREEFORM_TOOLS)
     }
 }
 
