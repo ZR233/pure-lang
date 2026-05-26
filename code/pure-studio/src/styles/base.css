@@ -35,11 +35,11 @@ button:disabled {
 
 .app-shell {
   display: grid;
-  grid-template-columns: minmax(248px, 18vw) minmax(420px, 1fr) minmax(260px, 22vw);
+  grid-template-columns: minmax(248px, 266px) minmax(0, 1fr);
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background: #f5f7fa;
+  background: #f7f9fb;
 }
 
 .app-shell > * {

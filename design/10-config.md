@@ -67,6 +67,10 @@ SQLite 只保存 Studio 状态，例如项目、会话、消息、工具审批�
 ```toml
 schema_version = 1
 
+[runtime]
+active_skills = ["rust", "git", "doc"]
+active_mcp_servers = ["github", "filesystem"]
+
 [roles.explorer]
 provider = "deepseek"
 model = "deepseek-v4-flash"
@@ -101,6 +105,10 @@ description = "DeepSeek fast reasoning model with thinking mode."
 context_window = 1000000
 max_context_window = 1000000
 max_output_tokens = 384000
+currency = "CNY"
+input_price_per_mtok = 8.0
+output_price_per_mtok = 32.0
+cache_read_price_per_mtok = 2.0
 reasoning_efforts = ["high", "max"]
 capabilities = ["streaming", "function_calling", "parallel_tool_calls", "reasoning"]
 input_modalities = ["text"]
@@ -138,6 +146,10 @@ truncation_policy = { mode = "tokens", limit = 10000 }
 - `auto_compact_token_limit`
 - `default_temperature`
 - `max_output_tokens`
+- `currency`
+- `input_price_per_mtok`
+- `output_price_per_mtok`
+- `cache_read_price_per_mtok`
 - `reasoning_efforts`
 - `capabilities`
 - `input_modalities`
@@ -146,9 +158,20 @@ truncation_policy = { mode = "tokens", limit = 10000 }
 
 `used_fallback` 是运行时状态，不写入 TOML。
 
+价格字段为可选字段，用于本地 UI 估算费用。`currency` 只作为展示单位，系统不做汇率转换；三个 `*_price_per_mtok` 字段均表示每百万 token 单价。缺失任一参与计算的价格时，费用显示为未配置。
+
 配置里的模型会覆盖或补充 bundled model。角色引用的 model 必须存在于对应 provider 的 `models` 中。
 
-## 10.6 配置草稿
+## 10.6 运行态声明
+
+`[runtime]` 保存本地 Studio 运行态展示所需的可选声明。首版字段：
+
+- `active_skills`
+- `active_mcp_servers`
+
+这两个列表仅声明当前 GUI 状态栏展示的已激活 Skill / MCP 名称，不负责安装、启动或连接真实 Skill/MCP 管理器。缺失 `[runtime]` 或字段时按空列表处理。
+
+## 10.7 配置草稿
 
 配置构造和校验的纯逻辑属于 `pl-core`。`pure-studio` 设置页可以使用默认配置草稿，并支持：
 
@@ -168,7 +191,7 @@ truncation_policy = { mode = "tokens", limit = 10000 }
 - 同一 provider 下模型 slug 不重复。
 - 角色引用的默认模型必须声明至少一个 `reasoning_efforts`，用于生成角色 `effort`。
 
-## 10.7 pure-studio 设置页
+## 10.8 pure-studio 设置页
 
 `pure-studio` 设置页复用 `pl-core` 的配置类型和校验逻辑，首版覆盖：
 
@@ -210,7 +233,9 @@ Vite 预览只用于布局和视觉对照，最终应用行为仍以 Tauri 运�
 
 聊天界面应展示 subagent 活动面板，信息来自 Studio SQLite 中的 subagent 事件表和当前实时事件流。面板只展示角色、状态、任务摘要、最终摘要或错误，不展示子代理完整推理流。
 
-## 10.8 凭据策略
+聊天界面使用双栏布局：左侧项目/会话栏和主聊天区，不再展示右侧工具历史面板。主聊天区底部状态栏展示当前模型、会话、上下文使用量、费用估算、Skill 数量和 MCP 数量；Skill/MCP 默认只显示数量，悬浮或键盘聚焦时展示完整列表。
+
+## 10.9 凭据策略
 
 配置允许持久化明文 `bearer_token`，但这会把 API token 直接写入 `~/.pure/config.toml`。当前运行时只使用配置中保存的 `bearer_token` 作为 provider API key。
 

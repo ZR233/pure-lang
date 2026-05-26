@@ -20,6 +20,7 @@ use crate::{
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_init.sql"),
     include_str!("../migrations/0002_subagent_events.sql"),
+    include_str!("../migrations/0003_session_runtime.sql"),
 ];
 
 static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -142,6 +143,32 @@ pub mod entities {
         impl ActiveModelBehavior for ActiveModel {}
     }
 
+    pub mod session_runtime_snapshot {
+        use super::*;
+
+        #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+        #[sea_orm(table_name = "session_runtime_snapshots")]
+        pub struct Model {
+            #[sea_orm(primary_key, auto_increment = false)]
+            pub session_id: String,
+            pub model: String,
+            pub context_window: Option<i64>,
+            pub latest_context_tokens: i64,
+            pub prompt_tokens: i64,
+            pub completion_tokens: i64,
+            pub cached_prompt_tokens: i64,
+            pub total_tokens: i64,
+            pub currency: Option<String>,
+            pub estimated_cost: Option<f64>,
+            pub updated_at: i64,
+        }
+
+        #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+        pub enum Relation {}
+
+        impl ActiveModelBehavior for ActiveModel {}
+    }
+
     pub mod app_setting {
         use super::*;
 
@@ -202,6 +229,21 @@ pub struct SubagentEventRecord {
     pub depth: i32,
     pub error: Option<String>,
     pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionRuntimeRecord {
+    pub session_id: String,
+    pub model: String,
+    pub context_window: Option<u64>,
+    pub latest_context_tokens: u64,
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub cached_prompt_tokens: u64,
+    pub total_tokens: u64,
+    pub currency: Option<String>,
+    pub estimated_cost: Option<f64>,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -270,6 +312,20 @@ impl StudioRuntime {
             .await
     }
 
+    pub async fn session_runtime(&self, session_id: &str) -> Result<SessionRuntimeRecord> {
+        if let Some(snapshot) = self.store.load_session_runtime(session_id).await? {
+            return Ok(snapshot);
+        }
+        let config = self.config_store.load_or_default()?;
+        let resolved = config.resolve_role(ModelRole::Planner)?;
+        let model = resolved
+            .models
+            .iter()
+            .find(|model| model.slug == resolved.role_config.model)
+            .or_else(|| resolved.models.first());
+        Ok(default_session_runtime_record(session_id, model))
+    }
+
     pub async fn run_prompt(
         &self,
         session_id: &str,
@@ -301,6 +357,21 @@ impl StudioRuntime {
         let options = TurnOptions::default();
         let result = core
             .run_turn_with_options(&mut session, request, event_tx, options)
+            .await?;
+        let resolved = config.resolve_role(ModelRole::Planner)?;
+        let model = resolved
+            .models
+            .iter()
+            .find(|model| model.slug == result.model)
+            .or_else(|| {
+                resolved
+                    .models
+                    .iter()
+                    .find(|model| model.slug == resolved.role_config.model)
+            })
+            .or_else(|| resolved.models.first());
+        self.store
+            .upsert_session_runtime(session_id, &result, model)
             .await?;
         self.store
             .append_messages(session_id, &session.messages()[previous_len..])
@@ -572,6 +643,104 @@ impl StudioStore {
         Ok(rows.into_iter().map(subagent_event_record).collect())
     }
 
+    pub async fn load_session_runtime(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<SessionRuntimeRecord>> {
+        use entities::session_runtime_snapshot;
+        Ok(
+            session_runtime_snapshot::Entity::find_by_id(session_id.to_string())
+                .one(&self.db)
+                .await?
+                .map(session_runtime_record),
+        )
+    }
+
+    pub async fn upsert_session_runtime(
+        &self,
+        session_id: &str,
+        result: &TurnResult,
+        model: Option<&pl_model::ModelInfo>,
+    ) -> Result<()> {
+        use entities::session_runtime_snapshot;
+
+        let existing = self.load_session_runtime(session_id).await?;
+        let prompt_tokens = existing
+            .as_ref()
+            .map(|record| record.prompt_tokens)
+            .unwrap_or(0)
+            + result.usage.prompt_tokens;
+        let completion_tokens = existing
+            .as_ref()
+            .map(|record| record.completion_tokens)
+            .unwrap_or(0)
+            + result.usage.completion_tokens;
+        let cached_prompt_tokens = existing
+            .as_ref()
+            .map(|record| record.cached_prompt_tokens)
+            .unwrap_or(0)
+            + result.usage.cached_prompt_tokens;
+        let total_tokens = prompt_tokens + completion_tokens;
+        let model_name = if result.model.is_empty() {
+            model
+                .map(|model| model.slug.clone())
+                .unwrap_or_else(|| "unknown".to_string())
+        } else {
+            result.model.clone()
+        };
+        let currency = model.and_then(|model| model.currency.clone());
+        let estimated_cost = model.and_then(|model| {
+            estimate_cost(
+                prompt_tokens,
+                completion_tokens,
+                cached_prompt_tokens,
+                model.input_price_per_mtok,
+                model.output_price_per_mtok,
+                model.cache_read_price_per_mtok,
+            )
+        });
+        let now = unix_seconds();
+
+        if let Some(row) = session_runtime_snapshot::Entity::find_by_id(session_id.to_string())
+            .one(&self.db)
+            .await?
+        {
+            let mut active: session_runtime_snapshot::ActiveModel = row.into();
+            active.model = Set(model_name);
+            active.context_window = Set(model
+                .and_then(pl_model::ModelInfo::resolved_context_window)
+                .map(|value| value as i64));
+            active.latest_context_tokens = Set(result.usage.prompt_tokens as i64);
+            active.prompt_tokens = Set(prompt_tokens as i64);
+            active.completion_tokens = Set(completion_tokens as i64);
+            active.cached_prompt_tokens = Set(cached_prompt_tokens as i64);
+            active.total_tokens = Set(total_tokens as i64);
+            active.currency = Set(currency);
+            active.estimated_cost = Set(estimated_cost);
+            active.updated_at = Set(now);
+            active.update(&self.db).await?;
+        } else {
+            session_runtime_snapshot::ActiveModel {
+                session_id: Set(session_id.to_string()),
+                model: Set(model_name),
+                context_window: Set(model
+                    .and_then(pl_model::ModelInfo::resolved_context_window)
+                    .map(|value| value as i64)),
+                latest_context_tokens: Set(result.usage.prompt_tokens as i64),
+                prompt_tokens: Set(prompt_tokens as i64),
+                completion_tokens: Set(completion_tokens as i64),
+                cached_prompt_tokens: Set(cached_prompt_tokens as i64),
+                total_tokens: Set(total_tokens as i64),
+                currency: Set(currency),
+                estimated_cost: Set(estimated_cost),
+                updated_at: Set(now),
+            }
+            .insert(&self.db)
+            .await?;
+        }
+        Ok(())
+    }
+
     pub async fn save_setting(&self, key: &str, value: &str) -> Result<()> {
         use entities::app_setting;
         let now = unix_seconds();
@@ -638,6 +807,66 @@ fn subagent_event_record(model: entities::subagent_event::Model) -> SubagentEven
         error: model.error,
         created_at: model.created_at,
     }
+}
+
+fn session_runtime_record(
+    model: entities::session_runtime_snapshot::Model,
+) -> SessionRuntimeRecord {
+    SessionRuntimeRecord {
+        session_id: model.session_id,
+        model: model.model,
+        context_window: model.context_window.map(|value| value as u64),
+        latest_context_tokens: model.latest_context_tokens as u64,
+        prompt_tokens: model.prompt_tokens as u64,
+        completion_tokens: model.completion_tokens as u64,
+        cached_prompt_tokens: model.cached_prompt_tokens as u64,
+        total_tokens: model.total_tokens as u64,
+        currency: model.currency,
+        estimated_cost: model.estimated_cost,
+        updated_at: model.updated_at,
+    }
+}
+
+fn default_session_runtime_record(
+    session_id: &str,
+    model: Option<&pl_model::ModelInfo>,
+) -> SessionRuntimeRecord {
+    SessionRuntimeRecord {
+        session_id: session_id.to_string(),
+        model: model
+            .map(|model| model.slug.clone())
+            .unwrap_or_else(|| "unknown".to_string()),
+        context_window: model.and_then(pl_model::ModelInfo::resolved_context_window),
+        latest_context_tokens: 0,
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        cached_prompt_tokens: 0,
+        total_tokens: 0,
+        currency: model.and_then(|model| model.currency.clone()),
+        estimated_cost: None,
+        updated_at: unix_seconds(),
+    }
+}
+
+fn estimate_cost(
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    cached_prompt_tokens: u64,
+    input_price_per_mtok: Option<f64>,
+    output_price_per_mtok: Option<f64>,
+    cache_read_price_per_mtok: Option<f64>,
+) -> Option<f64> {
+    let input_price = input_price_per_mtok?;
+    let output_price = output_price_per_mtok?;
+    let cache_price = cache_read_price_per_mtok?;
+    let cached = cached_prompt_tokens.min(prompt_tokens);
+    let uncached_input = prompt_tokens.saturating_sub(cached);
+    Some(
+        (uncached_input as f64 * input_price
+            + completion_tokens as f64 * output_price
+            + cached as f64 * cache_price)
+            / 1_000_000.0,
+    )
 }
 
 fn row_to_message(row: entities::message::Model) -> Result<Message> {
@@ -928,6 +1157,63 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].status, "running");
         assert_eq!(events[1].summary.as_deref(), Some("done"));
+    }
+
+    #[tokio::test]
+    async fn session_runtime_snapshot_accumulates_usage_and_cost() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/alpha").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Build app", CompileMode::Auto)
+            .await
+            .unwrap();
+        let mut model = pl_model::ModelInfo::fallback("priced-model");
+        model.context_window = Some(1_000_000);
+        model.currency = Some("CNY".to_string());
+        model.input_price_per_mtok = Some(8.0);
+        model.output_price_per_mtok = Some(32.0);
+        model.cache_read_price_per_mtok = Some(2.0);
+        let result = TurnResult {
+            content: "ok".to_string(),
+            reasoning_content: None,
+            model: "priced-model".to_string(),
+            usage: pl_model::TokenUsage {
+                prompt_tokens: 100_000,
+                completion_tokens: 10_000,
+                total_tokens: 110_000,
+                cached_prompt_tokens: 40_000,
+            },
+            mode: CompileMode::Auto,
+            session_message_count: 2,
+        };
+
+        store
+            .upsert_session_runtime(&session.id, &result, Some(&model))
+            .await
+            .unwrap();
+        store
+            .upsert_session_runtime(&session.id, &result, Some(&model))
+            .await
+            .unwrap();
+
+        let runtime = store
+            .load_session_runtime(&session.id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(runtime.model, "priced-model");
+        assert_eq!(runtime.context_window, Some(1_000_000));
+        assert_eq!(runtime.latest_context_tokens, 100_000);
+        assert_eq!(runtime.prompt_tokens, 200_000);
+        assert_eq!(runtime.completion_tokens, 20_000);
+        assert_eq!(runtime.cached_prompt_tokens, 80_000);
+        assert_eq!(runtime.currency.as_deref(), Some("CNY"));
+        assert!(
+            runtime
+                .estimated_cost
+                .is_some_and(|cost| (cost - 1.76).abs() < 0.000_001)
+        );
     }
 
     #[tokio::test]

@@ -8,6 +8,7 @@
 
 - `pl-core`：`TurnStarted`、`Done`、核心错误事件。
 - `pl-model`：文本增量、思考增量、工具调用增量。
+- `pl-model`：完成事件中的 token usage，包括 provider 能提供的缓存命中 token。
 
 当前事件消费者：
 
@@ -50,3 +51,9 @@ pl-model provider
 `pl-model` 负责把 provider 的工具调用 delta 聚合为完整的 `ToolCall` 后再交给 `pl-core` 执行。Chat Completions 流式响应中的后续参数片段可能只带 `index`，不再重复 `id` 或 `name`；Responses API 的 custom/freeform 输入 delta 也可能只带 `item_id` / `call_id`。因此聚合层必须使用稳定的流式序号或 item/call id 合并片段，并保留最早出现的 provider id、工具名和调用种类。
 
 聚合完成前不得把缺少工具名的参数片段当作新的工具调用执行。只有在 `output_item.done` 缺失时，才允许用已聚合的 delta 兜底生成工具调用；该兜底调用仍必须带有前面片段提供的真实工具名。
+
+## 8.6 Usage 与状态栏
+
+`pl-model::TokenUsage` 保留输入、输出和总 token，并额外记录 `cached_prompt_tokens`。Chat Completions 和 Responses API 的 usage detail 字段不同，provider 适配层负责尽可能读取缓存 token；缺失时按 `0` 处理。
+
+`pl-core` 不把费用估算作为 provider 事件暴露，而是在 turn 完成后结合模型价格配置生成 Studio 会话运行态快照。React 状态栏消费快照，不直接推断 provider 私有 usage 字段。

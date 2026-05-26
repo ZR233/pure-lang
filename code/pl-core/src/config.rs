@@ -23,6 +23,8 @@ const DEFAULT_EFFORT: &str = "high";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PureConfig {
     pub schema_version: u32,
+    #[serde(default, skip_serializing_if = "RuntimeConfig::is_empty")]
+    pub runtime: RuntimeConfig,
     pub roles: RoleConfigs,
     pub providers: BTreeMap<String, ProviderConfig>,
 }
@@ -30,6 +32,8 @@ pub struct PureConfig {
 #[derive(Debug, Clone, Deserialize)]
 struct PureConfigToml {
     pub schema_version: u32,
+    #[serde(default)]
+    pub runtime: RuntimeConfig,
     #[serde(default)]
     pub roles: Option<RoleConfigsToml>,
     pub providers: BTreeMap<String, ProviderConfig>,
@@ -62,6 +66,7 @@ impl PureConfig {
 
         Self {
             schema_version: CONFIG_SCHEMA_VERSION,
+            runtime: RuntimeConfig::default(),
             roles: RoleConfigs {
                 explorer: role.clone(),
                 planner: role.clone(),
@@ -165,6 +170,7 @@ impl PureConfig {
         };
         let config = Self {
             schema_version: raw.schema_version,
+            runtime: raw.runtime,
             roles,
             providers: raw.providers,
         };
@@ -273,6 +279,20 @@ pub struct RoleConfig {
     pub provider: String,
     pub model: String,
     pub effort: ReasoningEffort,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeConfig {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub active_skills: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub active_mcp_servers: Vec<String>,
+}
+
+impl RuntimeConfig {
+    pub fn is_empty(&self) -> bool {
+        self.active_skills.is_empty() && self.active_mcp_servers.is_empty()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -486,6 +506,14 @@ pub struct ModelConfig {
     pub default_temperature: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_price_per_mtok: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_price_per_mtok: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_price_per_mtok: Option<f64>,
     #[serde(default)]
     pub reasoning_efforts: Vec<String>,
     #[serde(default)]
@@ -508,6 +536,10 @@ impl ModelConfig {
             auto_compact_token_limit: model.auto_compact_token_limit,
             default_temperature: model.default_temperature,
             max_output_tokens: model.max_output_tokens,
+            currency: model.currency,
+            input_price_per_mtok: model.input_price_per_mtok,
+            output_price_per_mtok: model.output_price_per_mtok,
+            cache_read_price_per_mtok: model.cache_read_price_per_mtok,
             reasoning_efforts: model.reasoning_efforts,
             capabilities: ModelCapabilityConfig::from_capabilities(model.capabilities),
             input_modalities: model.input_modalities,
@@ -526,6 +558,10 @@ impl ModelConfig {
             auto_compact_token_limit: self.auto_compact_token_limit,
             default_temperature: self.default_temperature,
             max_output_tokens: self.max_output_tokens,
+            currency: self.currency,
+            input_price_per_mtok: self.input_price_per_mtok,
+            output_price_per_mtok: self.output_price_per_mtok,
+            cache_read_price_per_mtok: self.cache_read_price_per_mtok,
             reasoning_efforts: self.reasoning_efforts,
             capabilities: ModelCapabilityConfig::to_capabilities(&self.capabilities),
             input_modalities: self.input_modalities,
@@ -773,6 +809,13 @@ mod tests {
         let mut config = PureConfig::default_config();
         config.providers.get_mut("deepseek").unwrap().bearer_token =
             Some("secret-token".to_string());
+        config.runtime.active_skills = vec!["rust".to_string(), "git".to_string()];
+        config.runtime.active_mcp_servers = vec!["github".to_string()];
+        let model = &mut config.providers.get_mut("deepseek").unwrap().models[0];
+        model.currency = Some("CNY".to_string());
+        model.input_price_per_mtok = Some(8.0);
+        model.output_price_per_mtok = Some(32.0);
+        model.cache_read_price_per_mtok = Some(2.0);
 
         let toml = config.to_toml_pretty().unwrap();
         let parsed = PureConfig::from_toml(&toml).unwrap();
@@ -786,6 +829,31 @@ mod tests {
             parsed.providers["deepseek"].models[0].capabilities,
             config.providers["deepseek"].models[0].capabilities
         );
+        assert_eq!(
+            parsed.runtime.active_skills,
+            vec!["rust".to_string(), "git".to_string()]
+        );
+        assert_eq!(
+            parsed.runtime.active_mcp_servers,
+            vec!["github".to_string()]
+        );
+        assert_eq!(
+            parsed.providers["deepseek"].models[0].currency.as_deref(),
+            Some("CNY")
+        );
+        assert_eq!(
+            parsed.providers["deepseek"].models[0].input_price_per_mtok,
+            Some(8.0)
+        );
+    }
+
+    #[test]
+    fn missing_runtime_defaults_to_empty_lists() {
+        let toml = PureConfig::default_config().to_toml_pretty().unwrap();
+        let parsed = PureConfig::from_toml(&toml).unwrap();
+
+        assert!(parsed.runtime.active_skills.is_empty());
+        assert!(parsed.runtime.active_mcp_servers.is_empty());
     }
 
     #[test]

@@ -80,6 +80,10 @@ fn openai_model(
         auto_compact_token_limit: None,
         default_temperature: None,
         max_output_tokens: Some(128_000),
+        currency: None,
+        input_price_per_mtok: None,
+        output_price_per_mtok: None,
+        cache_read_price_per_mtok: None,
         reasoning_efforts: OPENAI_REASONING_EFFORTS
             .iter()
             .copied()
@@ -113,6 +117,10 @@ fn deepseek_model(slug: &str, display_name: &str, description: &str) -> ModelInf
         auto_compact_token_limit: None,
         default_temperature: None,
         max_output_tokens: Some(384_000),
+        currency: None,
+        input_price_per_mtok: None,
+        output_price_per_mtok: None,
+        cache_read_price_per_mtok: None,
         reasoning_efforts: DEEPSEEK_REASONING_EFFORTS
             .iter()
             .copied()

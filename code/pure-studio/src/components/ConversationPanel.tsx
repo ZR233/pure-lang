@@ -1,9 +1,18 @@
 import { Activity, ChevronDown, Send, Terminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ChatItem, ChatMessage, SessionRecord, SubagentActivity, SubagentStatus, ProjectRecord } from "../types";
+import type {
+  ChatItem,
+  ChatMessage,
+  ProjectRecord,
+  SessionRecord,
+  SessionRuntime,
+  SubagentActivity,
+  SubagentStatus,
+} from "../types";
 import { formatTime } from "../lib/utils";
 import { ToolCallBlock } from "./ToolCallBlock";
+import { SessionStatusBar } from "./SessionStatusBar";
 
 const subagentStatusKeys: Record<SubagentStatus, string> = {
   queued: "subagent.queued",
@@ -57,10 +66,10 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 type ConversationPanelProps = {
   selectedSession: SessionRecord | null;
   selectedProject: ProjectRecord | null;
-  status: string;
   isBusy: boolean;
   chatItems: ChatItem[];
   subagentActivities: SubagentActivity[];
+  sessionRuntime: SessionRuntime | null;
   prompt: string;
   onSetPrompt: (value: string) => void;
   onSendPrompt: () => void;
@@ -71,10 +80,10 @@ const SCROLL_THRESHOLD = 40;
 export function ConversationPanel({
   selectedSession,
   selectedProject,
-  status,
   isBusy,
   chatItems,
   subagentActivities,
+  sessionRuntime,
   prompt,
   onSetPrompt,
   onSendPrompt,
@@ -131,7 +140,6 @@ export function ConversationPanel({
           <h1>{selectedSession?.title ?? t("conversation.defaultTitle")}</h1>
           <p>{selectedProject?.path ?? t("conversation.addProjectHint")}</p>
         </div>
-        <div className={`status-pill ${isBusy ? "running" : ""}`}>{status}</div>
       </header>
 
       <div className="message-stream" ref={messageStreamRef}>
@@ -190,26 +198,34 @@ export function ConversationPanel({
         )}
       </div>
 
-      <footer className="composer">
-        <textarea
-          value={prompt}
-          disabled={!selectedSession || isBusy}
-          onChange={(event) => onSetPrompt(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-              onSendPrompt();
-            }
-          }}
-          placeholder={selectedSession ? t("conversation.askPlaceholder") : t("conversation.noSessionPlaceholder")}
+      <footer className="conversation-footer">
+        <SessionStatusBar
+          runtime={sessionRuntime}
+          selectedSession={selectedSession}
+          selectedProject={selectedProject}
         />
-        <button
-          className="send-button"
-          disabled={!prompt.trim() || !selectedSession || isBusy}
-          onClick={onSendPrompt}
-        >
-          <Send size={18} />
-          <span>{isBusy ? t("status.running") : t("actions.send")}</span>
-        </button>
+        <div className="composer">
+          <textarea
+            value={prompt}
+            disabled={!selectedSession || isBusy}
+            onChange={(event) => onSetPrompt(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                onSendPrompt();
+              }
+            }}
+            placeholder={selectedSession ? t("conversation.askPlaceholder") : t("conversation.noSessionPlaceholder")}
+            aria-label={t("conversation.askPlaceholder")}
+          />
+          <button
+            className="send-button"
+            disabled={!prompt.trim() || !selectedSession || isBusy}
+            onClick={onSendPrompt}
+          >
+            <Send size={18} />
+            <span>{isBusy ? t("status.running") : t("actions.send")}</span>
+          </button>
+        </div>
       </footer>
     </section>
   );

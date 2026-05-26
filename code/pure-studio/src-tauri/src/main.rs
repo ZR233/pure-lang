@@ -10,8 +10,8 @@ use anyhow::Context;
 use pl_core::{
     ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProjectRecord, ProviderConfig,
     ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, ProviderTemplateKind, PureConfig,
-    RoleEdit, SessionRecord, StudioRuntime, StudioStore, SubagentEventRecord, ToolApprovalCallback,
-    ToolApprovalDecision, ToolApprovalRequest, infer_provider_template_kind,
+    RoleEdit, SessionRecord, SessionRuntimeRecord, StudioRuntime, StudioStore, SubagentEventRecord,
+    ToolApprovalCallback, ToolApprovalDecision, ToolApprovalRequest, infer_provider_template_kind,
 };
 use pl_protocol::{AgentEvent, Message, MessageContent, MessageRole, PureError, SubagentStatus};
 use serde::{Deserialize, Serialize};
@@ -156,6 +156,13 @@ struct ModelDto {
     auto_compact_token_limit: Option<u64>,
     default_temperature: Option<f32>,
     max_output_tokens: Option<u64>,
+    currency: Option<String>,
+    #[serde(rename = "inputPricePerMTok")]
+    input_price_per_mtok: Option<f64>,
+    #[serde(rename = "outputPricePerMTok")]
+    output_price_per_mtok: Option<f64>,
+    #[serde(rename = "cacheReadPricePerMTok")]
+    cache_read_price_per_mtok: Option<f64>,
     reasoning_efforts: Vec<String>,
     capabilities: Vec<String>,
     input_modalities: Vec<String>,
@@ -171,6 +178,31 @@ struct ConfigDto {
     roles: Vec<RoleDto>,
     templates: Vec<ProviderTemplateDto>,
     config_exists: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionRuntimeDto {
+    session_id: String,
+    model: String,
+    context_window: Option<u64>,
+    latest_context_tokens: u64,
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    cached_prompt_tokens: u64,
+    total_tokens: u64,
+    cache_hit_rate: Option<f64>,
+    currency: Option<String>,
+    #[serde(rename = "inputPricePerMTok")]
+    input_price_per_mtok: Option<f64>,
+    #[serde(rename = "outputPricePerMTok")]
+    output_price_per_mtok: Option<f64>,
+    #[serde(rename = "cacheReadPricePerMTok")]
+    cache_read_price_per_mtok: Option<f64>,
+    estimated_cost: Option<f64>,
+    active_skills: Vec<String>,
+    active_mcp_servers: Vec<String>,
+    updated_at: i64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -221,6 +253,7 @@ struct BootstrapDto {
     selected_session_id: Option<String>,
     messages: Vec<MessageDto>,
     subagent_events: Vec<SubagentEventDto>,
+    session_runtime: Option<SessionRuntimeDto>,
     config: ConfigDto,
 }
 
@@ -233,6 +266,7 @@ struct ProjectSelectionDto {
     selected_session_id: Option<String>,
     messages: Vec<MessageDto>,
     subagent_events: Vec<SubagentEventDto>,
+    session_runtime: Option<SessionRuntimeDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -242,6 +276,7 @@ struct SessionSelectionDto {
     sessions: Vec<SessionDto>,
     messages: Vec<MessageDto>,
     subagent_events: Vec<SubagentEventDto>,
+    session_runtime: Option<SessionRuntimeDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -251,6 +286,7 @@ struct RunPromptResponse {
     messages: Vec<MessageDto>,
     sessions: Vec<SessionDto>,
     subagent_events: Vec<SubagentEventDto>,
+    session_runtime: SessionRuntimeDto,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -342,6 +378,10 @@ async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Bootstrap
                 .await?;
         }
     }
+    let session_runtime = match selected_session_id.as_deref() {
+        Some(session_id) => Some(load_session_runtime_dto(&state.studio, session_id).await?),
+        None => None,
+    };
 
     Ok(BootstrapDto {
         projects: project_dtos(projects),
@@ -350,6 +390,7 @@ async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Bootstrap
         selected_session_id,
         messages: message_dtos(messages),
         subagent_events: subagent_event_dtos(subagent_events),
+        session_runtime,
         config: config_dto(state.studio.config_store())?,
     })
 }
@@ -390,10 +431,11 @@ async fn create_session(
     let session = state.studio.create_session(&project_id, &title).await?;
     let sessions = state.studio.store().list_sessions(&project_id).await?;
     Ok(SessionSelectionDto {
-        session_id: session.id,
+        session_id: session.id.clone(),
         sessions: session_dtos(sessions),
         messages: Vec::new(),
         subagent_events: Vec::new(),
+        session_runtime: Some(load_session_runtime_dto(&state.studio, &session.id).await?),
     })
 }
 
@@ -409,6 +451,7 @@ async fn select_session(
         .list_subagent_events(&session_id)
         .await?;
     Ok(SessionSelectionDto {
+        session_runtime: Some(load_session_runtime_dto(&state.studio, &session_id).await?),
         session_id,
         sessions: Vec::new(),
         messages: message_dtos(messages),
@@ -470,6 +513,7 @@ async fn run_prompt(
                         .list_subagent_events(&session_id)
                         .await?,
                 ),
+                session_runtime: load_session_runtime_dto(&state.studio, &session_id).await?,
             };
             let _ = app.emit("studio-prompt-finished", response.clone());
             Ok(response)
@@ -581,6 +625,10 @@ async fn select_project_data(
         }
         None => Vec::new(),
     };
+    let session_runtime = match selected_session_id.as_deref() {
+        Some(session_id) => Some(load_session_runtime_dto(&state.studio, session_id).await?),
+        None => None,
+    };
     Ok(ProjectSelectionDto {
         project_id,
         projects: project_dtos(state.studio.list_projects().await?),
@@ -588,6 +636,7 @@ async fn select_project_data(
         selected_session_id,
         messages: message_dtos(messages),
         subagent_events: subagent_event_dtos(subagent_events),
+        session_runtime,
     })
 }
 
@@ -712,6 +761,69 @@ fn config_dto(store: &ConfigStore) -> CommandResult<ConfigDto> {
     })
 }
 
+async fn load_session_runtime_dto(
+    studio: &StudioRuntime,
+    session_id: &str,
+) -> CommandResult<SessionRuntimeDto> {
+    let config = studio.config_store().load_or_default()?;
+    let record = studio.session_runtime(session_id).await?;
+    Ok(session_runtime_dto(record, &config))
+}
+
+fn session_runtime_dto(record: SessionRuntimeRecord, config: &PureConfig) -> SessionRuntimeDto {
+    let cache_hit_rate = if record.prompt_tokens == 0 {
+        None
+    } else {
+        Some(record.cached_prompt_tokens as f64 / record.prompt_tokens as f64)
+    };
+    let current_model = config
+        .resolve_role(ModelRole::Planner)
+        .ok()
+        .and_then(|resolved| {
+            resolved
+                .models
+                .iter()
+                .find(|model| model.slug == record.model)
+                .cloned()
+                .or_else(|| {
+                    resolved
+                        .models
+                        .iter()
+                        .find(|model| model.slug == resolved.role_config.model)
+                        .cloned()
+                })
+        });
+    SessionRuntimeDto {
+        session_id: record.session_id,
+        model: record.model,
+        context_window: record.context_window,
+        latest_context_tokens: record.latest_context_tokens,
+        prompt_tokens: record.prompt_tokens,
+        completion_tokens: record.completion_tokens,
+        cached_prompt_tokens: record.cached_prompt_tokens,
+        total_tokens: record.total_tokens,
+        cache_hit_rate,
+        currency: record.currency.or_else(|| {
+            current_model
+                .as_ref()
+                .and_then(|model| model.currency.clone())
+        }),
+        input_price_per_mtok: current_model
+            .as_ref()
+            .and_then(|model| model.input_price_per_mtok),
+        output_price_per_mtok: current_model
+            .as_ref()
+            .and_then(|model| model.output_price_per_mtok),
+        cache_read_price_per_mtok: current_model
+            .as_ref()
+            .and_then(|model| model.cache_read_price_per_mtok),
+        estimated_cost: record.estimated_cost,
+        active_skills: config.runtime.active_skills.clone(),
+        active_mcp_servers: config.runtime.active_mcp_servers.clone(),
+        updated_at: record.updated_at,
+    }
+}
+
 fn role_dtos(config: &PureConfig) -> Vec<RoleDto> {
     ModelRole::all()
         .into_iter()
@@ -806,6 +918,10 @@ fn model_dto(model: &ModelConfig) -> ModelDto {
         auto_compact_token_limit: model.auto_compact_token_limit,
         default_temperature: model.default_temperature,
         max_output_tokens: model.max_output_tokens,
+        currency: model.currency.clone(),
+        input_price_per_mtok: model.input_price_per_mtok,
+        output_price_per_mtok: model.output_price_per_mtok,
+        cache_read_price_per_mtok: model.cache_read_price_per_mtok,
         reasoning_efforts: model.reasoning_efforts.clone(),
         capabilities: model
             .capabilities

@@ -262,6 +262,8 @@ pub struct TokenUsage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub total_tokens: u64,
+    #[serde(default)]
+    pub cached_prompt_tokens: u64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

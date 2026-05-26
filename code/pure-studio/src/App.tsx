@@ -3,7 +3,6 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ApprovalOverlay } from "./components/ApprovalOverlay";
-import { ContextPanel } from "./components/ContextPanel";
 import { ConversationPanel } from "./components/ConversationPanel";
 import { ProjectRail } from "./components/ProjectRail";
 import { SettingsPage } from "./components/SettingsPage";
@@ -36,6 +35,7 @@ import type {
   RoleRecord,
   RunPromptResponse,
   SessionRecord,
+  SessionRuntime,
   SessionSelectionPayload,
   SubagentActivity,
   SubagentEventPayload,
@@ -55,13 +55,6 @@ const subagentStatusKeys: Record<SubagentStatus, string> = {
   succeeded: "subagent.succeeded",
   failed: "subagent.failed",
   denied: "subagent.denied",
-};
-
-const roleI18nKeys: Record<string, string> = {
-  explorer: "roles.explorer",
-  planner: "roles.planner",
-  executor: "roles.executor",
-  reviewer: "roles.reviewer",
 };
 
 function normalizeSubagentActivity(event: SubagentEventPayload): SubagentActivity {
@@ -113,9 +106,9 @@ export function App() {
   const [isBusy, setIsBusy] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [thinkingText, setThinkingText] = useState("");
-  const [toolStatuses, setToolStatuses] = useState<string[]>([]);
   const [toolCalls, setToolCalls] = useState<Map<string, TrackedToolCall>>(new Map());
   const [subagentActivities, setSubagentActivities] = useState<SubagentActivity[]>([]);
+  const [sessionRuntime, setSessionRuntime] = useState<SessionRuntime | null>(null);
   const [approvals, setApprovals] = useState<ToolApprovalRequest[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("providers");
@@ -172,22 +165,6 @@ export function App() {
     return items;
   }, [messages, toolCalls, streamingText, thinkingText, t]);
 
-  const recentActivities = useMemo(
-    () => [
-      ...subagentActivities.slice(0, 4).map((activity) => ({
-        id: `subagent-${activity.id}`,
-        title: `${t(roleI18nKeys[activity.role] ?? `roles.${activity.role}`)} · ${t(subagentStatusKeys[activity.status])}`,
-        detail: activity.task,
-      })),
-      ...toolStatuses.slice(0, 4).map((item) => ({
-        id: `tool-${item}`,
-        title: item,
-        detail: t("subagent.toolCall"),
-      })),
-    ].slice(0, 5),
-    [subagentActivities, toolStatuses, t],
-  );
-
   useEffect(() => {
     bootstrapStudio()
       .then((payload) => {
@@ -197,6 +174,7 @@ export function App() {
         setSelectedSessionId(payload.selectedSessionId ?? null);
         setMessages(payload.messages);
         setSubagentActivities(mergeSubagentActivities([], payload.subagentEvents));
+        setSessionRuntime(payload.sessionRuntime ?? null);
         applyConfig(payload.config);
         setStatus(t("status.ready"));
       })
@@ -251,10 +229,6 @@ export function App() {
           return;
         }
         if ("toolCallComplete" in event) {
-          setToolStatuses((current) => [
-            t("status.toolCompleted", { name: event.toolCallComplete.name }),
-            ...current.slice(0, 4),
-          ]);
           setToolCalls((current) => {
             const next = new Map(current);
             const existing = next.get(event.toolCallComplete.id);
@@ -365,6 +339,7 @@ export function App() {
     setSelectedSessionId(payload.selectedSessionId ?? null);
     setMessages(payload.messages);
     setSubagentActivities(mergeSubagentActivities([], payload.subagentEvents));
+    setSessionRuntime(payload.sessionRuntime ?? null);
     setStreamingText("");
     setThinkingText("");
     setToolCalls(new Map());
@@ -378,6 +353,7 @@ export function App() {
     setSelectedSessionId(payload.sessionId);
     setMessages(payload.messages);
     setSubagentActivities(mergeSubagentActivities([], payload.subagentEvents));
+    setSessionRuntime(payload.sessionRuntime ?? null);
     setStreamingText("");
     setThinkingText("");
     setToolCalls(new Map());
@@ -389,6 +365,7 @@ export function App() {
     setSessions(payload.sessions);
     setMessages(payload.messages);
     setSubagentActivities(mergeSubagentActivities([], payload.subagentEvents));
+    setSessionRuntime(payload.sessionRuntime);
     setStreamingText("");
     setThinkingText("");
     setStatus(t("status.done"));
@@ -547,21 +524,13 @@ export function App() {
       <ConversationPanel
         selectedSession={selectedSession}
         selectedProject={selectedProject}
-        status={status}
         isBusy={isBusy}
         chatItems={chatItems}
         subagentActivities={subagentActivities}
+        sessionRuntime={sessionRuntime}
         prompt={prompt}
         onSetPrompt={setPrompt}
         onSendPrompt={() => void onSendPrompt()}
-      />
-
-      <ContextPanel
-        selectedProject={selectedProject}
-        sessions={sessions}
-        messages={messages}
-        providers={providers}
-        recentActivities={recentActivities}
       />
 
       <ApprovalOverlay

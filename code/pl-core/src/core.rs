@@ -218,6 +218,7 @@ impl PureCore {
 
                 total_usage.prompt_tokens += response.usage.prompt_tokens;
                 total_usage.completion_tokens += response.usage.completion_tokens;
+                total_usage.cached_prompt_tokens += response.usage.cached_prompt_tokens;
 
                 if !response.model.is_empty() {
                     last_model = response.model;

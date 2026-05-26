@@ -17,10 +17,6 @@
     grid-template-columns: 240px minmax(420px, 1fr);
   }
 
-  .context-panel {
-    display: none;
-  }
-
   .provider-settings {
     grid-template-rows: minmax(0, 1fr);
   }
@@ -121,7 +117,16 @@
   }
 
   .composer {
-    padding: 12px 16px;
+    padding: 12px 16px 14px;
+  }
+
+  .session-status-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .status-group {
+    justify-content: space-between;
   }
 
   .provider-settings {

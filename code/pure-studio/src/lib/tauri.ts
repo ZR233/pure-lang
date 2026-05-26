@@ -12,6 +12,7 @@ import {
   previewMessages,
   previewProjects,
   previewSessions,
+  previewSessionRuntime,
   previewSubagentEvents,
 } from "./preview";
 import { makeProvider, makeRole } from "./provider-mapper";
@@ -44,6 +45,7 @@ export function bootstrapStudio() {
         selectedSessionId: previewSessions[0]?.id ?? null,
         messages: previewMessages,
         subagentEvents: previewSubagentEvents,
+        sessionRuntime: previewSessionRuntime,
         config: previewConfig,
       }),
     );
@@ -68,6 +70,7 @@ export function openProject(path: string) {
         selectedSessionId: previewSessions[0]?.id ?? null,
         messages: previewMessages,
         subagentEvents: previewSubagentEvents,
+        sessionRuntime: previewSessionRuntime,
       }),
     );
   }
@@ -84,6 +87,7 @@ export function selectProject(projectId: string) {
         selectedSessionId: previewSessions[0]?.id ?? null,
         messages: previewMessages,
         subagentEvents: previewSubagentEvents,
+        sessionRuntime: previewSessionRuntime,
       }),
     );
   }
@@ -105,6 +109,17 @@ export function createSession(projectId: string, title?: string) {
         sessions: [session, ...previewSessions],
         messages: [],
         subagentEvents: [],
+        sessionRuntime: {
+          ...previewSessionRuntime,
+          sessionId: session.id,
+          latestContextTokens: 0,
+          promptTokens: 0,
+          completionTokens: 0,
+          cachedPromptTokens: 0,
+          totalTokens: 0,
+          cacheHitRate: null,
+          estimatedCost: null,
+        },
       }),
     );
   }
@@ -122,6 +137,7 @@ export function selectSession(sessionId: string) {
         sessions: previewSessions,
         messages: previewMessages,
         subagentEvents: previewSubagentEvents,
+        sessionRuntime: previewSessionRuntime,
       }),
     );
   }
@@ -153,6 +169,12 @@ export function runPrompt(sessionId: string, prompt: string) {
             updatedAt: Math.floor(Date.now() / 1000),
           },
         ],
+        sessionRuntime: {
+          ...previewSessionRuntime,
+          promptTokens: previewSessionRuntime.promptTokens + 1200,
+          completionTokens: previewSessionRuntime.completionTokens + 260,
+          totalTokens: previewSessionRuntime.totalTokens + 1460,
+        },
       }),
     );
   }

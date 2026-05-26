@@ -10,7 +10,7 @@ mod workspace;
 
 pub use config::{
     ConfigPaths, ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProviderConfig,
-    PureConfig, ReasoningEffort, ResolvedRoleConfig, RoleConfig, RoleConfigs,
+    PureConfig, ReasoningEffort, ResolvedRoleConfig, RoleConfig, RoleConfigs, RuntimeConfig,
     TruncationPolicyConfig,
 };
 pub use config_editor::{
@@ -28,8 +28,8 @@ pub use pl_protocol::{
 };
 pub use session::CoreSession;
 pub use studio::{
-    ProjectRecord, SessionRecord, StudioPromptOutcome, StudioRuntime, StudioStore,
-    SubagentEventRecord, ToolApprovalRecord,
+    ProjectRecord, SessionRecord, SessionRuntimeRecord, StudioPromptOutcome, StudioRuntime,
+    StudioStore, SubagentEventRecord, ToolApprovalRecord,
 };
 pub use tool::{
     BashInput, BashTool, OutputTruncation, SubagentContext, SubagentInput, SubagentTool, Tool,
