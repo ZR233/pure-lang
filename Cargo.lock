@@ -2615,6 +2615,7 @@ dependencies = [
  "eventsource-stream",
  "futures",
  "pl-protocol",
+ "pretty_assertions",
  "reqwest",
  "serde",
  "serde_json",
