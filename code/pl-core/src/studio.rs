@@ -14,8 +14,8 @@ const STUDIO_DIR_NAME: &str = "studio";
 const STUDIO_DB_FILE_NAME: &str = "studio_1.sqlite";
 use crate::config::{CONFIG_DIR_NAME, ConfigStore, ModelRole};
 use crate::{
-    CompileMode, CoreSession, PureCore, ToolApprovalCallback, ToolApprovalDecision,
-    ToolApprovalRequest, TurnOptions, TurnRequest, TurnResult, load_workspace_instructions,
+    CompileMode, CoreSession, PureCore, ToolApprovalCallback, TurnOptions, TurnRequest, TurnResult,
+    load_workspace_instructions,
 };
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_init.sql"),
@@ -275,7 +275,7 @@ impl StudioRuntime {
         session_id: &str,
         prompt: String,
         event_tx: AgentEventSender,
-        approval_callback: ToolApprovalCallback,
+        _approval_callback: ToolApprovalCallback,
     ) -> Result<StudioPromptOutcome> {
         let session_record = self
             .store
@@ -298,11 +298,7 @@ impl StudioRuntime {
 
         let mut core = PureCore::from_config(&config, ModelRole::Planner)?;
         core.register_default_tools(PathBuf::from(&project.path), Some(workspace_instructions));
-        let options = TurnOptions::manual(recording_approval_callback(
-            self.store.clone(),
-            session_id.to_string(),
-            approval_callback,
-        ));
+        let options = TurnOptions::default();
         let result = core
             .run_turn_with_options(&mut session, request, event_tx, options)
             .await?;
@@ -674,41 +670,6 @@ fn message_to_row_parts(message: &Message) -> Result<(String, String)> {
         MessageContent::MultiPart(parts) => serde_json::to_string(parts)?,
     };
     Ok((role.to_string(), content))
-}
-
-fn recording_approval_callback(
-    store: StudioStore,
-    session_id: String,
-    callback: ToolApprovalCallback,
-) -> ToolApprovalCallback {
-    std::sync::Arc::new(move |request: ToolApprovalRequest| {
-        let store = store.clone();
-        let session_id = session_id.clone();
-        let callback = callback.clone();
-        Box::pin(async move {
-            let arguments_json = serde_json::to_string_pretty(&request.arguments)
-                .unwrap_or_else(|_| "{}".to_string());
-            let decision = callback(request.clone()).await;
-            let (decision_text, reason) = match &decision {
-                ToolApprovalDecision::Approved => ("approved".to_string(), None),
-                ToolApprovalDecision::Denied { reason } => {
-                    ("denied".to_string(), Some(reason.clone()))
-                }
-            };
-            let _ = store
-                .record_tool_approval(ToolApprovalRecord {
-                    session_id,
-                    tool_call_id: request.id,
-                    tool_name: request.name,
-                    arguments_json,
-                    working_directory: request.working_directory,
-                    decision: decision_text,
-                    reason,
-                })
-                .await;
-            decision
-        })
-    })
 }
 
 async fn configure_sqlite(db: &DatabaseConnection) -> Result<()> {

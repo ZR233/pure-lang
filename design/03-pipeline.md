@@ -15,7 +15,7 @@ pure-studio UI action
   → AgentEvent stream
   → Tauri event
   → React UI 实时渲染
-  → pl-core StudioStore 持久化消息和工具审批
+  → pl-core StudioStore 持久化消息和按策略产生的工具审批记录
 ```
 
 ## 3.2 输入
@@ -49,7 +49,7 @@ pure-studio UI action
 - `ToolApprovalPolicy::Manual`：工具调用先发出审批请求，前端批准后执行。
 - `ToolApprovalPolicy::DenyAll`：工具调用一律作为拒绝结果写回会话。
 
-`pure-studio` 首版通过 `pl-core` 使用 `Manual`。
+`pure-studio` 当前通过 `pl-core` 使用 `AutoAllow`，用于先放开已注册工具的执行。`Manual` 审批流程和前端事件仍保留，后续可以切回手动审批或接入更细粒度策略。
 
 `subagent` 工具可接收 `role` 参数，值为 `explorer`、`planner`、`executor` 或 `reviewer`。未传 `role` 时默认使用 `executor`。子代理使用所选角色的 provider/model/effort 创建独立会话，不沿用父会话的 provider。
 

@@ -41,3 +41,7 @@ button:disabled {
   overflow: hidden;
   background: #f5f7fa;
 }
+
+.app-shell > * {
+  min-height: 0;
+}
