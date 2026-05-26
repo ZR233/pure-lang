@@ -36,3 +36,9 @@
 命令执行、文件编辑、工具系统和沙箱能力必须以独立策略接入，并通过权限模型和事件流暴露给核心流程。
 
 首版桌面端允许注册 `bash` 和 `subagent` 工具，但必须使用手动审批。审批结果通过 `AgentEvent` 和 Studio SeaORM 状态记录，拒绝时将拒绝原因作为 tool result 写回会话。
+
+文件工具作为 `pl-core` 工具系统的一部分注册，当前不新增独立 `pl-tool` crate。文件工具包括读取、写入、列目录、搜索、stat、建目录、删除、复制、移动和 `apply_patch`。只读工具仍受工作区路径边界限制；修改工具进入现有工具审批流程。
+
+`apply_patch` 的主协议是 Codex 风格 freeform patch。OpenAI Responses 和支持 custom tools 的 Chat Completions provider 使用 `type: "custom"` 工具，并通过 Lark grammar 描述 patch 格式。不支持 custom/freeform 的 Chat-compatible provider 使用普通 function fallback，将完整 patch 放入 `patch` 字段；执行层仍复用同一个 parser、preflight 和 apply 流程。
+
+工具调用历史必须保留调用种类。`function_call` 的历史回放写回 `function_call_output`；custom/freeform 工具写回 `custom_tool_call_output`。不得只保存 JSON arguments 后在下一轮统一当作 function tool 回放。

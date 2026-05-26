@@ -2,6 +2,7 @@
 use pl_protocol::Result;
 
 use crate::request::{CompletionRequest, CompletionResponse};
+use crate::request::{ToolCall, ToolCallKind, ToolCallPayload, ToolFormat, ToolSchema};
 
 /// API 协议适配器。
 ///
@@ -79,6 +80,79 @@ fn parse_tool_calls_from_metadata(
         .and_then(|json| serde_json::from_str(json).ok())
 }
 
+fn tool_result_kind(metadata: &std::collections::HashMap<String, String>) -> ToolCallKind {
+    match metadata.get("tool_call_kind").map(String::as_str) {
+        Some("custom") => ToolCallKind::Custom,
+        Some("function") | None => ToolCallKind::Function,
+        Some(_) => ToolCallKind::Function,
+    }
+}
+
+fn tool_format_json(format: &ToolFormat) -> serde_json::Value {
+    match format {
+        ToolFormat::Text => serde_json::json!({ "type": "text" }),
+        ToolFormat::Grammar { syntax, definition } => serde_json::json!({
+            "type": "grammar",
+            "syntax": syntax,
+            "definition": definition,
+        }),
+    }
+}
+
+fn responses_tool_json(tool: &ToolSchema) -> serde_json::Value {
+    match tool {
+        ToolSchema::Function {
+            name,
+            description,
+            input_schema,
+        } => serde_json::json!({
+            "type": "function",
+            "name": name,
+            "description": description,
+            "parameters": input_schema,
+        }),
+        ToolSchema::Custom {
+            name,
+            description,
+            format,
+        } => serde_json::json!({
+            "type": "custom",
+            "name": name,
+            "description": description,
+            "format": tool_format_json(format),
+        }),
+    }
+}
+
+fn chat_tool_json(tool: &ToolSchema) -> serde_json::Value {
+    match tool {
+        ToolSchema::Function {
+            name,
+            description,
+            input_schema,
+        } => serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": description,
+                "parameters": input_schema,
+            }
+        }),
+        ToolSchema::Custom {
+            name,
+            description,
+            format,
+        } => serde_json::json!({
+            "type": "custom",
+            "custom": {
+                "name": name,
+                "description": description,
+                "format": tool_format_json(format),
+            }
+        }),
+    }
+}
+
 fn responses_build_body(request: &CompletionRequest) -> serde_json::Value {
     let mut input = Vec::new();
 
@@ -104,13 +178,26 @@ fn responses_build_body(request: &CompletionRequest) -> serde_json::Value {
                 }
                 if let Some(tool_calls) = parse_tool_calls_from_metadata(&msg.metadata) {
                     for tc in &tool_calls {
-                        input.push(serde_json::json!({
-                            "type": "function_call",
-                            "id": tc.id,
-                            "name": tc.name,
-                            "arguments": serde_json::to_string(&tc.arguments).unwrap_or_default(),
-                            "call_id": tc.call_id.as_deref().unwrap_or(&tc.id),
-                        }));
+                        match &tc.payload {
+                            ToolCallPayload::Function { arguments } => {
+                                input.push(serde_json::json!({
+                                    "type": "function_call",
+                                    "id": tc.id,
+                                    "name": tc.name,
+                                    "arguments": serde_json::to_string(arguments).unwrap_or_default(),
+                                    "call_id": tc.call_id.as_deref().unwrap_or(&tc.id),
+                                }));
+                            }
+                            ToolCallPayload::Custom { input: tool_input } => {
+                                input.push(serde_json::json!({
+                                    "type": "custom_tool_call",
+                                    "id": tc.id,
+                                    "name": tc.name,
+                                    "input": tool_input,
+                                    "call_id": tc.call_id.as_deref().unwrap_or(&tc.id),
+                                }));
+                            }
+                        }
                     }
                 }
             }
@@ -122,11 +209,23 @@ fn responses_build_body(request: &CompletionRequest) -> serde_json::Value {
                     .cloned()
                     .unwrap_or_default();
                 let text = message_content_text(&msg.content);
-                input.push(serde_json::json!({
-                    "type": "function_call_output",
-                    "call_id": call_id,
-                    "output": text,
-                }));
+                match tool_result_kind(&msg.metadata) {
+                    ToolCallKind::Function => {
+                        input.push(serde_json::json!({
+                            "type": "function_call_output",
+                            "call_id": call_id,
+                            "output": text,
+                        }));
+                    }
+                    ToolCallKind::Custom => {
+                        input.push(serde_json::json!({
+                            "type": "custom_tool_call_output",
+                            "call_id": call_id,
+                            "name": msg.metadata.get("tool_name").cloned(),
+                            "output": text,
+                        }));
+                    }
+                }
             }
             _ => {
                 // 普通消息
@@ -141,18 +240,7 @@ fn responses_build_body(request: &CompletionRequest) -> serde_json::Value {
         }
     }
 
-    let tools: Vec<serde_json::Value> = request
-        .tools
-        .iter()
-        .map(|t| {
-            serde_json::json!({
-                "type": "function",
-                "name": t.name,
-                "description": t.description,
-                "parameters": t.input_schema,
-            })
-        })
-        .collect();
+    let tools: Vec<serde_json::Value> = request.tools.iter().map(responses_tool_json).collect();
 
     let mut body = serde_json::json!({
         "model": request.model,
@@ -193,7 +281,7 @@ fn responses_build_body(request: &CompletionRequest) -> serde_json::Value {
 }
 
 fn responses_parse_response(body: serde_json::Value) -> Result<CompletionResponse> {
-    use crate::request::{FinishReason, TokenUsage, ToolCall};
+    use crate::request::{FinishReason, TokenUsage};
 
     let content = body
         .get("output")
@@ -219,18 +307,7 @@ fn responses_parse_response(body: serde_json::Value) -> Result<CompletionRespons
         .map(|items| {
             items
                 .iter()
-                .filter(|item| item.get("type").and_then(|t| t.as_str()) == Some("function_call"))
-                .filter_map(|item| {
-                    Some(ToolCall {
-                        id: item.get("id")?.as_str()?.to_string(),
-                        name: item.get("name")?.as_str()?.to_string(),
-                        arguments: serde_json::from_str(item.get("arguments")?.as_str()?).ok()?,
-                        call_id: item
-                            .get("call_id")
-                            .and_then(|v| v.as_str())
-                            .map(String::from),
-                    })
-                })
+                .filter_map(parse_responses_tool_call)
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
@@ -263,6 +340,31 @@ fn responses_parse_response(body: serde_json::Value) -> Result<CompletionRespons
     })
 }
 
+fn parse_responses_tool_call(item: &serde_json::Value) -> Option<ToolCall> {
+    match item.get("type")?.as_str()? {
+        "function_call" => Some(ToolCall::function(
+            item.get("id")?.as_str()?.to_string(),
+            item.get("name")?.as_str()?.to_string(),
+            serde_json::from_str(item.get("arguments")?.as_str()?).ok()?,
+            item.get("call_id")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+        )),
+        "custom_tool_call" => Some(ToolCall::custom(
+            item.get("id")
+                .and_then(|v| v.as_str())
+                .or_else(|| item.get("call_id").and_then(|v| v.as_str()))?
+                .to_string(),
+            item.get("name")?.as_str()?.to_string(),
+            item.get("input")?.as_str()?.to_string(),
+            item.get("call_id")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+        )),
+        _ => None,
+    }
+}
+
 fn chat_build_body(request: &CompletionRequest) -> serde_json::Value {
     let mut messages = Vec::new();
 
@@ -287,14 +389,24 @@ fn chat_build_body(request: &CompletionRequest) -> serde_json::Value {
                 }
                 if let Some(tool_calls) = parse_tool_calls_from_metadata(&msg.metadata) {
                     message["tool_calls"] = serde_json::json!(tool_calls.iter().map(|tc| {
-                        serde_json::json!({
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.name,
-                                "arguments": serde_json::to_string(&tc.arguments).unwrap_or_default()
-                            }
-                        })
+                        match &tc.payload {
+                            ToolCallPayload::Function { arguments } => serde_json::json!({
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.name,
+                                    "arguments": serde_json::to_string(arguments).unwrap_or_default()
+                                }
+                            }),
+                            ToolCallPayload::Custom { input } => serde_json::json!({
+                                "id": tc.id,
+                                "type": "custom",
+                                "custom": {
+                                    "name": tc.name,
+                                    "input": input
+                                }
+                            }),
+                        }
                     }).collect::<Vec<_>>());
                 }
                 messages.push(message);
@@ -331,20 +443,7 @@ fn chat_build_body(request: &CompletionRequest) -> serde_json::Value {
         }
     }
 
-    let tools: Vec<serde_json::Value> = request
-        .tools
-        .iter()
-        .map(|t| {
-            serde_json::json!({
-                "type": "function",
-                "function": {
-                    "name": t.name,
-                    "description": t.description,
-                    "parameters": t.input_schema,
-                }
-            })
-        })
-        .collect();
+    let tools: Vec<serde_json::Value> = request.tools.iter().map(chat_tool_json).collect();
 
     let mut body = serde_json::json!({
         "model": request.model,
@@ -384,7 +483,7 @@ fn chat_build_body(request: &CompletionRequest) -> serde_json::Value {
 }
 
 fn chat_parse_response(body: serde_json::Value) -> Result<CompletionResponse> {
-    use crate::request::{FinishReason, TokenUsage, ToolCall};
+    use crate::request::{FinishReason, TokenUsage};
 
     let choice = body
         .get("choices")
@@ -409,15 +508,7 @@ fn chat_parse_response(body: serde_json::Value) -> Result<CompletionResponse> {
         .and_then(|tc| tc.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|item| {
-                    let func = item.get("function")?;
-                    Some(ToolCall {
-                        id: item.get("id")?.as_str()?.to_string(),
-                        name: func.get("name")?.as_str()?.to_string(),
-                        arguments: serde_json::from_str(func.get("arguments")?.as_str()?).ok()?,
-                        call_id: None,
-                    })
-                })
+                .filter_map(parse_chat_tool_call)
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
@@ -453,6 +544,30 @@ fn chat_parse_response(body: serde_json::Value) -> Result<CompletionResponse> {
             .unwrap_or("")
             .to_string(),
     })
+}
+
+fn parse_chat_tool_call(item: &serde_json::Value) -> Option<ToolCall> {
+    match item.get("type").and_then(|value| value.as_str()) {
+        Some("custom") => {
+            let custom = item.get("custom")?;
+            Some(ToolCall::custom(
+                item.get("id")?.as_str()?.to_string(),
+                custom.get("name")?.as_str()?.to_string(),
+                custom.get("input")?.as_str()?.to_string(),
+                None,
+            ))
+        }
+        Some("function") | None => {
+            let func = item.get("function")?;
+            Some(ToolCall::function(
+                item.get("id")?.as_str()?.to_string(),
+                func.get("name")?.as_str()?.to_string(),
+                serde_json::from_str(func.get("arguments")?.as_str()?).ok()?,
+                None,
+            ))
+        }
+        Some(_) => None,
+    }
 }
 
 #[cfg(test)]
@@ -570,6 +685,188 @@ mod tests {
         assert_eq!(
             response.reasoning_content.as_deref(),
             Some("先比较整数，再比较小数。")
+        );
+    }
+
+    #[test]
+    fn responses_body_writes_custom_grammar_tool() {
+        let mut request = request_with_effort("xhigh");
+        request.tools = vec![ToolSchema::custom_grammar(
+            "apply_patch",
+            "edit files",
+            "lark",
+            "start: patch",
+        )];
+
+        let body = WireDispatch::Responses.build_request_body(&request);
+
+        assert_eq!(body["tools"][0]["type"], serde_json::json!("custom"));
+        assert_eq!(body["tools"][0]["name"], serde_json::json!("apply_patch"));
+        assert_eq!(
+            body["tools"][0]["format"],
+            serde_json::json!({
+                "type": "grammar",
+                "syntax": "lark",
+                "definition": "start: patch"
+            })
+        );
+    }
+
+    #[test]
+    fn chat_body_writes_custom_grammar_tool() {
+        let mut request = request_with_effort("xhigh");
+        request.tools = vec![ToolSchema::custom_grammar(
+            "apply_patch",
+            "edit files",
+            "lark",
+            "start: patch",
+        )];
+
+        let body = WireDispatch::Chat.build_request_body(&request);
+
+        assert_eq!(body["tools"][0]["type"], serde_json::json!("custom"));
+        assert_eq!(
+            body["tools"][0]["custom"]["name"],
+            serde_json::json!("apply_patch")
+        );
+    }
+
+    #[test]
+    fn provider_compatible_turns_custom_apply_patch_into_function_fallback() {
+        let mut request = request_with_effort("high");
+        request.tools = vec![ToolSchema::custom_grammar(
+            "apply_patch",
+            "edit files",
+            "lark",
+            "start: patch",
+        )];
+
+        let request = request.provider_compatible(false);
+        let body = WireDispatch::Chat.build_request_body(&request);
+
+        assert_eq!(body["tools"][0]["type"], serde_json::json!("function"));
+        assert_eq!(
+            body["tools"][0]["function"]["parameters"]["required"],
+            serde_json::json!(["patch"])
+        );
+    }
+
+    #[test]
+    fn responses_parse_response_reads_custom_tool_call() {
+        let response = WireDispatch::Responses
+            .parse_response(serde_json::json!({
+                "model": "gpt-5.5",
+                "output": [{
+                    "type": "custom_tool_call",
+                    "id": "ctc_1",
+                    "call_id": "call_1",
+                    "name": "apply_patch",
+                    "input": "*** Begin Patch\n*** End Patch"
+                }],
+                "usage": {
+                    "input_tokens": 1,
+                    "output_tokens": 1,
+                    "total_tokens": 2
+                }
+            }))
+            .unwrap();
+
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].name, "apply_patch");
+        match &response.tool_calls[0].payload {
+            ToolCallPayload::Custom { input } => {
+                assert_eq!(input, "*** Begin Patch\n*** End Patch");
+            }
+            other => panic!("unexpected payload: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn chat_parse_response_reads_custom_tool_call() {
+        let response = WireDispatch::Chat
+            .parse_response(serde_json::json!({
+                "model": "gpt-5.5",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "type": "custom",
+                            "custom": {
+                                "name": "apply_patch",
+                                "input": "*** Begin Patch\n*** End Patch"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2
+                }
+            }))
+            .unwrap();
+
+        assert_eq!(response.tool_calls.len(), 1);
+        assert!(matches!(
+            response.tool_calls[0].payload,
+            ToolCallPayload::Custom { .. }
+        ));
+    }
+
+    #[test]
+    fn responses_history_replays_custom_tool_call_and_output() {
+        let mut metadata = HashMap::new();
+        let calls = vec![ToolCall::custom(
+            "ctc_1",
+            "apply_patch",
+            "*** Begin Patch\n*** End Patch",
+            Some("call_1".to_string()),
+        )];
+        metadata.insert(
+            "tool_calls".to_string(),
+            serde_json::to_string(&calls).unwrap(),
+        );
+        let mut tool_metadata = HashMap::new();
+        tool_metadata.insert("tool_call_id".to_string(), "call_1".to_string());
+        tool_metadata.insert("tool_call_kind".to_string(), "custom".to_string());
+        tool_metadata.insert("tool_name".to_string(), "apply_patch".to_string());
+        let request = CompletionRequest {
+            model: "gpt-5.5".to_string(),
+            instructions: None,
+            messages: vec![
+                Message {
+                    role: MessageRole::Assistant,
+                    content: MessageContent::Text(String::new()),
+                    reasoning_content: None,
+                    metadata,
+                },
+                Message {
+                    role: MessageRole::Tool,
+                    content: MessageContent::Text("ok".to_string()),
+                    reasoning_content: None,
+                    metadata: tool_metadata,
+                },
+            ],
+            tools: Vec::new(),
+            tool_choice: "auto".to_string(),
+            parallel_tool_calls: false,
+            temperature: None,
+            max_tokens: None,
+            reasoning: None,
+            stream: true,
+        };
+
+        let body = WireDispatch::Responses.build_request_body(&request);
+
+        assert_eq!(
+            body["input"][0]["type"],
+            serde_json::json!("custom_tool_call")
+        );
+        assert_eq!(
+            body["input"][1]["type"],
+            serde_json::json!("custom_tool_call_output")
         );
     }
 }

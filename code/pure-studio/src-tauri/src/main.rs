@@ -829,6 +829,8 @@ fn capability_name(capability: &ModelCapabilityConfig) -> &'static str {
         ModelCapabilityConfig::ParallelToolCalls => "parallel_tool_calls",
         ModelCapabilityConfig::Reasoning => "reasoning",
         ModelCapabilityConfig::WebSearch => "web_search",
+        ModelCapabilityConfig::CustomTools => "custom_tools",
+        ModelCapabilityConfig::FreeformTools => "freeform_tools",
     }
 }
 

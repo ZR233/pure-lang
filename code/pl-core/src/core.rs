@@ -8,7 +8,11 @@ use pl_protocol::{AgentEvent, AgentEventSender, Result, SubagentStatus};
 
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
 use crate::session::CoreSession;
-use crate::tool::{BashTool, SubagentContext, SubagentTool, ToolContext, ToolInput, ToolRegistry};
+use crate::tool::{
+    ApplyPatchTool, BashTool, CopyPathTool, CreateDirectoryTool, DeletePathTool, ListFilesTool,
+    MovePathTool, ReadFileTool, SearchFilesTool, StatPathTool, SubagentContext, SubagentTool,
+    ToolContext, ToolInput, ToolRegistry, WriteFileTool,
+};
 use crate::turn::{
     DEFAULT_MAX_TOOL_ITERATIONS, ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest,
     TurnOptions, TurnRequest, TurnResult,
@@ -103,7 +107,7 @@ impl PureCore {
 
     /// 注册默认工具集合。
     ///
-    /// 当前包含 `bash` 和 `subagent`。调用方应通过 `TurnOptions` 控制审批策略。
+    /// 当前包含 shell、subagent 和 workspace 文件工具。调用方应通过 `TurnOptions` 控制审批策略。
     pub fn register_default_tools(
         &mut self,
         workspace_root: impl Into<std::path::PathBuf>,
@@ -113,6 +117,16 @@ impl PureCore {
         self.workspace_root = Some(workspace_root.clone());
         self.workspace_instructions = workspace_instructions.clone();
         self.register_tool(BashTool::new(workspace_root));
+        self.register_tool(ReadFileTool::new());
+        self.register_tool(WriteFileTool);
+        self.register_tool(ListFilesTool);
+        self.register_tool(SearchFilesTool);
+        self.register_tool(StatPathTool);
+        self.register_tool(CreateDirectoryTool);
+        self.register_tool(DeletePathTool);
+        self.register_tool(CopyPathTool);
+        self.register_tool(MovePathTool);
+        self.register_tool(ApplyPatchTool);
         self.register_tool(SubagentTool::new(
             self.provider.clone(),
             self.reasoning_effort.clone(),
@@ -233,7 +247,7 @@ impl PureCore {
                     let _ = event_tx.send(AgentEvent::ToolCallComplete {
                         id: tool_call.id.clone(),
                         name: tool_call.name.clone(),
-                        arguments: serde_json::to_string(&tool_call.arguments).unwrap_or_default(),
+                        arguments: tool_call.payload_text(),
                     });
 
                     let result = match self.tools.get(&tool_call.name) {
@@ -283,7 +297,7 @@ impl PureCore {
                                         name: approval_request.name.clone(),
                                     });
                                     let tool_input = ToolInput {
-                                        arguments: tool_call.arguments.clone(),
+                                        arguments: tool_call.arguments_for_tool(),
                                         session_id: session_id.clone(),
                                         tool_id: tool_call.id.clone(),
                                     };
@@ -320,6 +334,7 @@ impl PureCore {
                             .clone()
                             .unwrap_or_else(|| tool_call.id.clone()),
                         tool_call.name.clone(),
+                        tool_call.kind(),
                         result,
                     );
                 }
@@ -345,22 +360,28 @@ impl PureCore {
 }
 
 fn approval_request(tool_call: &pl_model::ToolCall, context: &ToolContext) -> ToolApprovalRequest {
-    let working_directory = tool_call
-        .arguments
-        .get("workingDirectory")
-        .or_else(|| tool_call.arguments.get("working_directory"))
-        .and_then(serde_json::Value::as_str)
-        .map(ToOwned::to_owned);
+    let arguments = tool_call.arguments_for_display();
+    let tool_arguments = tool_call.arguments_for_tool();
+    let working_directory =
+        get_working_directory(&tool_arguments).or_else(|| get_working_directory(&arguments));
     ToolApprovalRequest {
         id: tool_call.id.clone(),
         name: tool_call.name.clone(),
-        arguments: tool_call.arguments.clone(),
+        arguments,
         working_directory,
         parent_subagent_id: context
             .active_subagent
             .as_ref()
             .map(|subagent| subagent.id.clone()),
     }
+}
+
+fn get_working_directory(arguments: &serde_json::Value) -> Option<String> {
+    arguments
+        .get("workingDirectory")
+        .or_else(|| arguments.get("working_directory"))
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned)
 }
 
 async fn approve_tool_call(
@@ -453,15 +474,14 @@ pub(crate) fn emit_subagent_state(
 }
 
 fn subagent_tool_parts(tool_call: &pl_model::ToolCall) -> (String, String) {
-    let role = tool_call
-        .arguments
+    let arguments = tool_call.arguments_for_tool();
+    let role = arguments
         .get("role")
         .and_then(serde_json::Value::as_str)
         .filter(|role| !role.trim().is_empty())
         .unwrap_or("executor")
         .to_string();
-    let task = tool_call
-        .arguments
+    let task = arguments
         .get("task")
         .and_then(serde_json::Value::as_str)
         .map(compact_text)
@@ -616,15 +636,15 @@ mod tests {
 
     #[test]
     fn approval_request_extracts_working_directory() {
-        let call = ToolCall {
-            id: "call-1".to_string(),
-            name: "bash".to_string(),
-            arguments: serde_json::json!({
+        let call = ToolCall::function(
+            "call-1",
+            "bash",
+            serde_json::json!({
                 "command": "pwd",
                 "workingDirectory": "C:/work"
             }),
-            call_id: None,
-        };
+            None,
+        );
 
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
         let request = approval_request(&call, &test_tool_context(event_tx));
@@ -634,12 +654,12 @@ mod tests {
 
     #[test]
     fn approval_request_marks_parent_subagent() {
-        let call = ToolCall {
-            id: "call-1".to_string(),
-            name: "bash".to_string(),
-            arguments: serde_json::json!({"command": "pwd"}),
-            call_id: None,
-        };
+        let call = ToolCall::function(
+            "call-1",
+            "bash",
+            serde_json::json!({"command": "pwd"}),
+            None,
+        );
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
         let mut context = test_tool_context(event_tx);
         context.active_subagent = Some(SubagentContext {
@@ -657,12 +677,12 @@ mod tests {
 
     #[test]
     fn subagent_state_helpers_emit_default_lifecycle() {
-        let call = ToolCall {
-            id: "subagent-1".to_string(),
-            name: "subagent".to_string(),
-            arguments: serde_json::json!({"task": "inspect workspace"}),
-            call_id: None,
-        };
+        let call = ToolCall::function(
+            "subagent-1",
+            "subagent",
+            serde_json::json!({"task": "inspect workspace"}),
+            None,
+        );
         let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
         let context = test_tool_context(event_tx.clone());
         let subagent = SubagentContext {
@@ -717,5 +737,7 @@ mod tests {
 
         assert!(core.tools.get("bash").is_some());
         assert!(core.tools.get("subagent").is_some());
+        assert!(core.tools.get("read_file").is_some());
+        assert!(core.tools.get("apply_patch").is_some());
     }
 }

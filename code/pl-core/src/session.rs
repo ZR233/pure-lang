@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use pl_model::ToolCall;
+use pl_model::{ToolCall, ToolCallKind};
 use pl_protocol::{Message, MessageContent, MessageRole};
 
 /// 核心编译会话。
@@ -64,10 +64,20 @@ impl CoreSession {
     }
 
     /// 推入 tool result 消息。
-    pub fn push_tool_result(&mut self, tool_call_id: String, tool_name: String, result: String) {
+    pub fn push_tool_result(
+        &mut self,
+        tool_call_id: String,
+        tool_name: String,
+        tool_call_kind: ToolCallKind,
+        result: String,
+    ) {
         let mut metadata = HashMap::new();
         metadata.insert("tool_call_id".to_string(), tool_call_id);
         metadata.insert("tool_name".to_string(), tool_name);
+        metadata.insert(
+            "tool_call_kind".to_string(),
+            tool_call_kind.as_str().to_string(),
+        );
         self.messages.push(Message {
             role: MessageRole::Tool,
             content: MessageContent::Text(result),
@@ -87,7 +97,7 @@ impl CoreSession {
 
 #[cfg(test)]
 mod tests {
-    use pl_model::ToolCall;
+    use pl_model::{ToolCall, ToolCallKind};
 
     use super::*;
     use pretty_assertions::assert_eq;
@@ -128,12 +138,12 @@ mod tests {
     #[test]
     fn push_assistant_tool_calls_stores_metadata() {
         let mut session = CoreSession::new();
-        let tool_calls = vec![ToolCall {
-            id: "call-1".to_string(),
-            name: "bash".to_string(),
-            arguments: serde_json::json!({"command": "ls"}),
-            call_id: Some("call-1".to_string()),
-        }];
+        let tool_calls = vec![ToolCall::function(
+            "call-1",
+            "bash",
+            serde_json::json!({"command": "ls"}),
+            Some("call-1".to_string()),
+        )];
         session.push_assistant_tool_calls(Some("running...".to_string()), tool_calls, None);
 
         assert_eq!(session.len(), 1);
@@ -147,6 +157,7 @@ mod tests {
         session.push_tool_result(
             "call-1".to_string(),
             "bash".to_string(),
+            ToolCallKind::Function,
             "output".to_string(),
         );
 
@@ -159,6 +170,13 @@ mod tests {
         assert_eq!(
             session.messages()[0].metadata.get("tool_name").unwrap(),
             "bash"
+        );
+        assert_eq!(
+            session.messages()[0]
+                .metadata
+                .get("tool_call_kind")
+                .unwrap(),
+            "function"
         );
     }
 

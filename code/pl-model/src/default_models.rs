@@ -90,7 +90,9 @@ fn openai_model(
             | ModelCapabilities::VISION
             | ModelCapabilities::PARALLEL_TOOL_CALLS
             | ModelCapabilities::REASONING
-            | ModelCapabilities::WEB_SEARCH,
+            | ModelCapabilities::WEB_SEARCH
+            | ModelCapabilities::CUSTOM_TOOLS
+            | ModelCapabilities::FREEFORM_TOOLS,
         input_modalities: vec![InputModality::Text, InputModality::Image],
         truncation_policy: TruncationPolicy {
             mode: TruncationMode::Tokens,

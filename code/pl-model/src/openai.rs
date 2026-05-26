@@ -10,7 +10,7 @@ use crate::model_info::ModelInfo;
 use crate::provider::ModelProvider;
 use crate::provider_info::{ProviderInfo, WireApi};
 use crate::request::{CompletionRequest, CompletionResponse, FinishReason, TokenUsage, ToolCall};
-use crate::sse::{self, StreamEvent};
+use crate::sse::{self, StreamEvent, ToolCallDeltaPayload};
 use crate::wire_api::WireDispatch;
 
 #[derive(Debug)]
@@ -102,10 +102,14 @@ impl ModelProvider for OpenAiCompatibleProvider {
         let endpoint = self.resolve_endpoint();
         let wire_dispatch = self.wire_dispatch;
         let info = self.info.clone();
+        let model_info = self.model_info(&request.model);
         async move {
             let bearer = info.bearer_token.clone();
             let token = get_auth_token(bearer).await?;
 
+            let supports_custom_tools = info.supports_custom_tools_for_model(&model_info)
+                && info.supports_freeform_tools_for_model(&model_info);
+            let request = request.provider_compatible(supports_custom_tools);
             let body = wire_dispatch.build_request_body(&request);
 
             let mut req_builder = http_client
@@ -223,7 +227,8 @@ impl StreamCompletionAccumulator {
             StreamEvent::ToolCallDelta {
                 item_id,
                 call_id,
-                delta,
+                name,
+                payload_delta,
             } => {
                 let key = call_id.as_ref().unwrap_or(&item_id).clone();
                 let acc =
@@ -233,13 +238,19 @@ impl StreamCompletionAccumulator {
                             id: item_id.clone(),
                             call_id: call_id.clone(),
                             name: String::new(),
-                            arguments: String::new(),
+                            payload: ToolCallPayloadAccumulator::FunctionArguments(String::new()),
                         });
-                acc.arguments.push_str(&delta);
+                if let Some(name) = name
+                    && !name.is_empty()
+                {
+                    acc.name = name;
+                }
+                let delta_text = payload_delta.text().to_string();
+                acc.push_delta(payload_delta);
                 let _ = event_tx.send(AgentEvent::ToolCallDelta {
                     id: acc.id.clone(),
-                    name: String::new(),
-                    arguments_delta: delta,
+                    name: acc.name.clone(),
+                    arguments_delta: delta_text,
                 });
             }
 
@@ -274,13 +285,45 @@ impl StreamCompletionAccumulator {
                         arguments: arguments.clone(),
                     });
 
-                    self.tool_calls.push(ToolCall {
+                    self.tool_calls.push(ToolCall::function(
                         id,
                         name,
-                        arguments: serde_json::from_str(&arguments)
+                        serde_json::from_str(&arguments)
                             .unwrap_or(serde_json::Value::String(arguments)),
-                        call_id: Some(call_id),
+                        Some(call_id),
+                    ));
+                } else if let Some(custom_call) = value.get("type").and_then(|t| t.as_str())
+                    && custom_call == "custom_tool_call"
+                {
+                    let name = value
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let call_id = value
+                        .get("call_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let id = value
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(call_id.as_str())
+                        .to_string();
+                    let input = value
+                        .get("input")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+
+                    let _ = event_tx.send(AgentEvent::ToolCallComplete {
+                        id: id.clone(),
+                        name: name.clone(),
+                        arguments: input.clone(),
                     });
+
+                    self.tool_calls
+                        .push(ToolCall::custom(id, name, input, Some(call_id)));
                 }
             }
 
@@ -303,13 +346,7 @@ impl StreamCompletionAccumulator {
         // 合并累积的工具调用（如果有 delta 但没有 output_item.done）
         for (_, acc) in self.tool_call_accumulators {
             if !self.tool_calls.iter().any(|tc| tc.id == acc.id) {
-                self.tool_calls.push(ToolCall {
-                    id: acc.id.clone(),
-                    name: acc.name,
-                    arguments: serde_json::from_str(&acc.arguments)
-                        .unwrap_or(serde_json::Value::String(acc.arguments)),
-                    call_id: acc.call_id,
-                });
+                self.tool_calls.push(acc.into_tool_call());
             }
         }
 
@@ -346,7 +383,47 @@ struct ToolCallAccumulator {
     id: String,
     call_id: Option<String>,
     name: String,
-    arguments: String,
+    payload: ToolCallPayloadAccumulator,
+}
+
+impl ToolCallAccumulator {
+    fn push_delta(&mut self, payload_delta: ToolCallDeltaPayload) {
+        match (&mut self.payload, payload_delta) {
+            (
+                ToolCallPayloadAccumulator::FunctionArguments(arguments),
+                ToolCallDeltaPayload::FunctionArguments(delta),
+            ) => arguments.push_str(&delta),
+            (
+                ToolCallPayloadAccumulator::CustomInput(input),
+                ToolCallDeltaPayload::CustomInput(delta),
+            ) => input.push_str(&delta),
+            (_, ToolCallDeltaPayload::FunctionArguments(delta)) => {
+                self.payload = ToolCallPayloadAccumulator::FunctionArguments(delta);
+            }
+            (_, ToolCallDeltaPayload::CustomInput(delta)) => {
+                self.payload = ToolCallPayloadAccumulator::CustomInput(delta);
+            }
+        }
+    }
+
+    fn into_tool_call(self) -> ToolCall {
+        match self.payload {
+            ToolCallPayloadAccumulator::FunctionArguments(arguments) => ToolCall::function(
+                self.id,
+                self.name,
+                serde_json::from_str(&arguments).unwrap_or(serde_json::Value::String(arguments)),
+                self.call_id,
+            ),
+            ToolCallPayloadAccumulator::CustomInput(input) => {
+                ToolCall::custom(self.id, self.name, input, self.call_id)
+            }
+        }
+    }
+}
+
+enum ToolCallPayloadAccumulator {
+    FunctionArguments(String),
+    CustomInput(String),
 }
 
 #[cfg(test)]

@@ -32,6 +32,32 @@ pub struct ChatStreamChoice {
 pub struct ChatStreamDelta {
     pub content: Option<String>,
     pub reasoning_content: Option<String>,
+    pub tool_calls: Option<Vec<ChatStreamToolCallDelta>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct ChatStreamToolCallDelta {
+    pub index: Option<usize>,
+    pub id: Option<String>,
+    #[serde(rename = "type")]
+    pub kind: Option<String>,
+    pub function: Option<ChatStreamFunctionDelta>,
+    pub custom: Option<ChatStreamCustomDelta>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct ChatStreamFunctionDelta {
+    pub name: Option<String>,
+    pub arguments: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct ChatStreamCustomDelta {
+    pub name: Option<String>,
+    pub input: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -57,7 +83,8 @@ pub enum StreamEvent {
     ToolCallDelta {
         item_id: String,
         call_id: Option<String>,
-        delta: String,
+        name: Option<String>,
+        payload_delta: ToolCallDeltaPayload,
     },
 
     OutputItemDone(serde_json::Value),
@@ -71,6 +98,21 @@ pub enum StreamEvent {
         code: Option<String>,
         message: String,
     },
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub enum ToolCallDeltaPayload {
+    FunctionArguments(String),
+    CustomInput(String),
+}
+
+impl ToolCallDeltaPayload {
+    pub fn text(&self) -> &str {
+        match self {
+            Self::FunctionArguments(delta) | Self::CustomInput(delta) => delta,
+        }
+    }
 }
 
 /// 将原始 SSE 事件解析为结构化事件
@@ -88,6 +130,38 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
             && !content.is_empty()
         {
             return Some(StreamEvent::OutputTextDelta(content.clone()));
+        }
+
+        if let Some(tool_call) = choice
+            .delta
+            .tool_calls
+            .as_ref()
+            .and_then(|tool_calls| tool_calls.first())
+        {
+            let item_id = tool_call
+                .id
+                .clone()
+                .unwrap_or_else(|| tool_call.index.unwrap_or_default().to_string());
+            if let Some(custom) = &tool_call.custom {
+                return Some(StreamEvent::ToolCallDelta {
+                    item_id,
+                    call_id: None,
+                    name: custom.name.clone(),
+                    payload_delta: ToolCallDeltaPayload::CustomInput(
+                        custom.input.clone().unwrap_or_default(),
+                    ),
+                });
+            }
+            if let Some(function) = &tool_call.function {
+                return Some(StreamEvent::ToolCallDelta {
+                    item_id,
+                    call_id: None,
+                    name: function.name.clone(),
+                    payload_delta: ToolCallDeltaPayload::FunctionArguments(
+                        function.arguments.clone().unwrap_or_default(),
+                    ),
+                });
+            }
         }
 
         if choice.finish_reason.is_some() {
@@ -119,7 +193,23 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
         "response.function_call_arguments.delta" => Some(StreamEvent::ToolCallDelta {
             item_id: event.item_id.clone().unwrap_or_default(),
             call_id: event.call_id.clone(),
-            delta: event.delta.clone().unwrap_or_default(),
+            name: None,
+            payload_delta: ToolCallDeltaPayload::FunctionArguments(
+                event.delta.clone().unwrap_or_default(),
+            ),
+        }),
+
+        "response.custom_tool_call_input.delta" => Some(StreamEvent::ToolCallDelta {
+            item_id: event
+                .item_id
+                .clone()
+                .or_else(|| event.call_id.clone())
+                .unwrap_or_default(),
+            call_id: event.call_id.clone(),
+            name: None,
+            payload_delta: ToolCallDeltaPayload::CustomInput(
+                event.delta.clone().unwrap_or_default(),
+            ),
         }),
 
         "response.output_item.done" => event
@@ -204,6 +294,60 @@ mod tests {
         match process_sse_event(&event) {
             Some(StreamEvent::OutputTextDelta(delta)) => {
                 assert_eq!(delta, "9.11 更大。");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn process_responses_custom_tool_delta() {
+        let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.custom_tool_call_input.delta",
+            "item_id": "ctc_1",
+            "call_id": "call_1",
+            "delta": "*** Begin Patch\n"
+        }))
+        .unwrap();
+
+        match process_sse_event(&event) {
+            Some(StreamEvent::ToolCallDelta {
+                item_id,
+                call_id,
+                payload_delta: ToolCallDeltaPayload::CustomInput(delta),
+                ..
+            }) => {
+                assert_eq!(item_id, "ctc_1");
+                assert_eq!(call_id.as_deref(), Some("call_1"));
+                assert_eq!(delta, "*** Begin Patch\n");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn process_chat_custom_tool_delta() {
+        let event = chat_event(serde_json::json!({
+            "tool_calls": [{
+                "index": 0,
+                "id": "call_1",
+                "type": "custom",
+                "custom": {
+                    "name": "apply_patch",
+                    "input": "*** Begin Patch\n"
+                }
+            }]
+        }));
+
+        match process_sse_event(&event) {
+            Some(StreamEvent::ToolCallDelta {
+                item_id,
+                name,
+                payload_delta: ToolCallDeltaPayload::CustomInput(delta),
+                ..
+            }) => {
+                assert_eq!(item_id, "call_1");
+                assert_eq!(name.as_deref(), Some("apply_patch"));
+                assert_eq!(delta, "*** Begin Patch\n");
             }
             other => panic!("unexpected event: {other:?}"),
         }

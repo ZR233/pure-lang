@@ -26,6 +26,12 @@ pub struct ProviderInfo {
     pub request_max_retries: Option<u32>,
     pub stream_max_retries: Option<u32>,
     pub stream_idle_timeout_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_custom_tools: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_freeform_tools: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apply_patch_tool_type: Option<ApplyPatchToolType>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +48,12 @@ pub enum WireApi {
     #[default]
     Responses,
     Chat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplyPatchToolType {
+    Freeform,
 }
 
 impl fmt::Display for WireApi {
@@ -64,6 +76,9 @@ impl ProviderInfo {
             base_url: base_url.or_else(|| Some("https://api.openai.com/v1".into())),
             default_model: "gpt-5.5".into(),
             wire_api: WireApi::Responses,
+            supports_custom_tools: Some(true),
+            supports_freeform_tools: Some(true),
+            apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
             ..Default::default()
         }
     }
@@ -74,8 +89,21 @@ impl ProviderInfo {
             base_url: base_url.or_else(|| Some("https://api.deepseek.com".into())),
             default_model: "deepseek-v4-flash".into(),
             wire_api: WireApi::Chat,
+            supports_custom_tools: Some(false),
+            supports_freeform_tools: Some(false),
+            apply_patch_tool_type: None,
             ..Default::default()
         }
+    }
+
+    pub fn supports_custom_tools_for_model(&self, model: &crate::model_info::ModelInfo) -> bool {
+        self.supports_custom_tools
+            .unwrap_or_else(|| model.capabilities.supports_custom_tools())
+    }
+
+    pub fn supports_freeform_tools_for_model(&self, model: &crate::model_info::ModelInfo) -> bool {
+        self.supports_freeform_tools
+            .unwrap_or_else(|| model.capabilities.supports_freeform_tools())
     }
 
     pub fn request_max_retries(&self) -> u32 {
