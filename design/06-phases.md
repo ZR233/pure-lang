@@ -9,7 +9,7 @@
 | `pl-core` | turn、session、Studio SQLite、角色化配置、工具审批、核心编译流程编排 |
 | `pure-studio` | Tauri 2 桌面前端，负责 React UI、命令桥接、事件推送和输入回调 |
 
-P0 不包含独立沙箱。`pure-studio` 可以接入工具系统，但首版必须手动审批。
+P0 不包含独立沙箱。`pure-studio` 可以接入工具系统；当前 Studio 运行路径暂时使用 `AutoAllow`，后续再补充更细粒度的手动审批、持久化授权和沙箱实现。
 
 ## 6.2 P1：核心能力完善
 

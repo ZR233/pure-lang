@@ -55,7 +55,7 @@ pub trait ModelProvider: Send + Sync {
 - LLM provider 层：`pl-model`。
 - 公共协议层：`pl-protocol`。
 
-当前版本不承诺独立沙箱。工具系统必须由明确审批策略控制。
+当前版本不承诺独立沙箱。工具系统必须由明确 `ToolApprovalPolicy` 控制；Studio 当前使用 `AutoAllow`，保留切回 `Manual` 的事件和 UI 能力。
 
 ## 9.7 配置约定
 

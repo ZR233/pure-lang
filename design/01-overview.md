@@ -34,8 +34,8 @@ pl-protocol
 - `pl-protocol` 不依赖内部 crate，是协议和类型边界。
 - `pl-model` 只依赖 `pl-protocol`，不承担核心流程编排。
 - `pl-core` 可以依赖 `pl-model` 和 `pl-protocol`，负责组合核心逻辑、持久化配置和 Studio SQLite 状态。
-- `pure-studio` 是薄桌面入口层，Tauri Rust 侧只做命令桥接、事件推送和工具审批等待；React 前端负责用户输入、页面状态和渲染。
-- 当前版本没有独立沙箱层；桌面端仅在用户显式批准工具调用后执行已注册工具。
+- `pure-studio` 是薄桌面入口层，Tauri Rust 侧只做命令桥接、事件推送，并保留工具审批回调能力；React 前端负责用户输入、页面状态和渲染。
+- 当前版本没有独立沙箱层；Studio 运行路径暂时使用 `ToolApprovalPolicy::AutoAllow`，已注册工具会按 `pl-core` 的工作区边界和工具实现直接执行。
 
 ## 1.4 桌面编译路径
 
@@ -47,8 +47,8 @@ pl-protocol
   → pl-core 构造 TurnRequest 和 TurnOptions
   → pl-core 读取项目 Agents.md 并运行 turn
   → pl-model 推送 AgentEvent
-  → pure-studio 通过 Tauri event 转发并在 React UI 中流式渲染内容、思考和工具审批
-  → pl-core 通过 SeaORM 保存会话消息和审批记录到 SQLite
+  → pure-studio 通过 Tauri event 转发并在 React UI 中流式渲染内容、思考和工具状态
+  → pl-core 通过 SeaORM 保存会话消息和按策略产生的审批记录到 SQLite
 ```
 
 ## 1.5 依赖规则

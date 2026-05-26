@@ -2,7 +2,10 @@
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: auto 1fr auto;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   background: #ffffff;
 }
 
@@ -60,7 +63,8 @@
 .message-stream {
   min-height: 0;
   padding: 22px clamp(12px, 2vw, 24px);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: linear-gradient(#ffffff, #f8fafc);
 }
 
@@ -235,6 +239,7 @@
 .composer {
   display: grid;
   grid-template-columns: 1fr auto;
+  flex: 0 0 auto;
   gap: 12px;
   padding: 16px clamp(12px, 2vw, 24px);
   border-top: 1px solid #dfe7ef;
