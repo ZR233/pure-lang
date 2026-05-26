@@ -15,6 +15,10 @@ pub struct ModelInfo {
 
     pub default_temperature: Option<f32>,
     pub max_output_tokens: Option<u64>,
+    pub currency: Option<String>,
+    pub input_price_per_mtok: Option<f64>,
+    pub output_price_per_mtok: Option<f64>,
+    pub cache_read_price_per_mtok: Option<f64>,
     #[serde(default)]
     pub reasoning_efforts: Vec<String>,
 
@@ -74,6 +78,10 @@ impl ModelInfo {
             auto_compact_token_limit: None,
             default_temperature: Some(0.3),
             max_output_tokens: Some(4096),
+            currency: None,
+            input_price_per_mtok: None,
+            output_price_per_mtok: None,
+            cache_read_price_per_mtok: None,
             reasoning_efforts: Vec::new(),
             capabilities: ModelCapabilities::STREAMING | ModelCapabilities::FUNCTION_CALLING,
             input_modalities: vec![InputModality::Text],

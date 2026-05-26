@@ -153,6 +153,32 @@ fn chat_tool_json(tool: &ToolSchema) -> serde_json::Value {
     }
 }
 
+fn cached_tokens_from_usage(usage: &serde_json::Value) -> u64 {
+    usage
+        .get("prompt_cache_hit_tokens")
+        .or_else(|| usage.get("cached_prompt_tokens"))
+        .and_then(serde_json::Value::as_u64)
+        .or_else(|| {
+            usage
+                .get("input_tokens_details")
+                .and_then(cached_tokens_from_details)
+        })
+        .or_else(|| {
+            usage
+                .get("prompt_tokens_details")
+                .and_then(cached_tokens_from_details)
+        })
+        .unwrap_or(0)
+}
+
+fn cached_tokens_from_details(details: &serde_json::Value) -> Option<u64> {
+    details
+        .get("cached_tokens")
+        .or_else(|| details.get("cache_read_tokens"))
+        .or_else(|| details.get("cached_input_tokens"))
+        .and_then(serde_json::Value::as_u64)
+}
+
 fn responses_build_body(request: &CompletionRequest) -> serde_json::Value {
     let mut input = Vec::new();
 
@@ -317,6 +343,7 @@ fn responses_parse_response(body: serde_json::Value) -> Result<CompletionRespons
             prompt_tokens: u.get("input_tokens")?.as_u64()?,
             completion_tokens: u.get("output_tokens")?.as_u64()?,
             total_tokens: u.get("total_tokens")?.as_u64().unwrap_or(0),
+            cached_prompt_tokens: cached_tokens_from_usage(u),
         })
     });
 
@@ -518,6 +545,7 @@ fn chat_parse_response(body: serde_json::Value) -> Result<CompletionResponse> {
             prompt_tokens: u.get("prompt_tokens")?.as_u64()?,
             completion_tokens: u.get("completion_tokens")?.as_u64()?,
             total_tokens: u.get("total_tokens")?.as_u64()?,
+            cached_prompt_tokens: cached_tokens_from_usage(u),
         })
     });
 
@@ -687,6 +715,55 @@ mod tests {
             response.reasoning_content.as_deref(),
             Some("先比较整数，再比较小数。")
         );
+    }
+
+    #[test]
+    fn chat_parse_response_reads_cached_prompt_tokens() {
+        let response = WireDispatch::Chat
+            .parse_response(serde_json::json!({
+                "model": "deepseek-v4-flash",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "ok"
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 20,
+                    "total_tokens": 120,
+                    "prompt_tokens_details": {
+                        "cached_tokens": 40
+                    }
+                }
+            }))
+            .unwrap();
+
+        assert_eq!(response.usage.cached_prompt_tokens, 40);
+    }
+
+    #[test]
+    fn responses_parse_response_reads_cached_input_tokens() {
+        let response = WireDispatch::Responses
+            .parse_response(serde_json::json!({
+                "model": "gpt-5.5",
+                "output": [{
+                    "type": "message",
+                    "content": [{ "text": "ok" }]
+                }],
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": 20,
+                    "total_tokens": 120,
+                    "input_tokens_details": {
+                        "cached_tokens": 55
+                    }
+                }
+            }))
+            .unwrap();
+
+        assert_eq!(response.usage.cached_prompt_tokens, 55);
     }
 
     #[test]

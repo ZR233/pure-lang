@@ -5,6 +5,7 @@ import type {
   RoleRecord,
   SessionRecord,
   SubagentActivity,
+  SessionRuntime,
 } from "../types";
 import { makeProvider, makeRole } from "./provider-mapper";
 import { previewTemplates } from "./templates";
@@ -15,7 +16,7 @@ export const previewProjects: ProjectRecord[] = [
   {
     id: "pure-lang",
     name: "pure-lang",
-    path: "D:\\Users\\zrufo\\Documents\\opensource\\pure-lang",
+    path: "C:\\Users\\zhoudongsheng\\Documents\\opensource\\pure-lang",
     updatedAt: 1779688800,
   },
 ];
@@ -24,7 +25,7 @@ export const previewSessions: SessionRecord[] = [
   {
     id: "preview-session",
     projectId: "pure-lang",
-    title: "模型服务设置预览",
+    title: "介绍项目",
     mode: "manual",
     updatedAt: 1779688800,
   },
@@ -32,11 +33,47 @@ export const previewSessions: SessionRecord[] = [
 
 export const previewMessages: ChatMessage[] = [
   {
+    role: "user",
+    content: "修复 Unknown tool: \"\" 的问题",
+    reasoningContent: null,
+  },
+  {
     role: "assistant",
-    content: "Pure Studio 预览状态已加载，可用于浏览器布局检查。",
+    content:
+      "我将修复工具调用解析中工具名为空的问题。首先分析 SSE 流中 tool_call 的 delta 结构。\n\n已读取 3 个文件：sse.rs、openai.rs、wire_api.rs\n\n问题原因：Chat Completions 流中，后续参数片段只带 index 不带 name，导致累积的工具名丢失。\n\n修复完成，工具调用将正确识别工具名。",
+    reasoningContent: null,
+  },
+  {
+    role: "user",
+    content: "帮我再跑一次 clippy",
+    reasoningContent: null,
+  },
+  {
+    role: "assistant",
+    content: "好的，正在运行 clippy 检查代码质量。\n\ncargo clippy --all-targets --all-features -- -D warnings\n\n检查通过，没有发现新的 warning。",
     reasoningContent: null,
   },
 ];
+
+export const previewSessionRuntime: SessionRuntime = {
+  sessionId: "preview-session",
+  model: "deepseek-v4-flash",
+  contextWindow: 1_000_000,
+  latestContextTokens: 128_000,
+  promptTokens: 84_200,
+  completionTokens: 3_100,
+  cachedPromptTokens: 51_800,
+  totalTokens: 87_300,
+  cacheHitRate: 0.62,
+  currency: "CNY",
+  inputPricePerMTok: 8,
+  outputPricePerMTok: 32,
+  cacheReadPricePerMTok: 2,
+  estimatedCost: 0.38,
+  activeSkills: ["rust", "git", "doc"],
+  activeMcpServers: ["github", "filesystem"],
+  updatedAt: 1779688800,
+};
 
 export const previewSubagentEvents: SubagentActivity[] = [
   {
@@ -77,6 +114,10 @@ export function createPreviewConfig(): ConfigPayload {
   return {
     toml: `schema_version = 1
 
+[runtime]
+active_skills = ["rust", "git", "doc"]
+active_mcp_servers = ["github", "filesystem"]
+
 [roles.explorer]
 provider = "deepseek"
 model = "deepseek-v4-flash"
@@ -102,6 +143,21 @@ name = "DeepSeek"
 base_url = "https://api.deepseek.com"
 default_model = "deepseek-v4-flash"
 wire_api = "chat"
+
+[[providers.deepseek.models]]
+slug = "deepseek-v4-flash"
+display_name = "DeepSeek V4 Flash"
+context_window = 1000000
+max_context_window = 1000000
+max_output_tokens = 384000
+currency = "CNY"
+input_price_per_mtok = 8.0
+output_price_per_mtok = 32.0
+cache_read_price_per_mtok = 2.0
+reasoning_efforts = ["high", "max"]
+capabilities = ["streaming", "function_calling", "parallel_tool_calls", "reasoning"]
+input_modalities = ["text"]
+truncation_policy = { mode = "tokens", limit = 10000 }
 
 [providers.openai]
 name = "OpenAI"

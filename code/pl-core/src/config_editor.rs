@@ -144,6 +144,7 @@ impl ProviderSettingsEdit {
         };
         let config = PureConfig {
             schema_version: CONFIG_SCHEMA_VERSION,
+            runtime: current.runtime.clone(),
             roles,
             providers,
         };

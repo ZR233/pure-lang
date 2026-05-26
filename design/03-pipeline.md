@@ -72,3 +72,13 @@ Plan 和 Auto 模式进行项目探索时，应优先把可独立观察的子组
 - 角色使用的 provider/model/effort 由配置决定。
 
 `pure-studio` 必须通过 Tauri event 把 `AgentEvent` 转发给 React 前端，实时渲染 `TextDelta`、`ThinkingDelta`、工具调用状态、审批状态、subagent 状态和错误。
+
+`pure-studio` 还必须维护会话运行态快照，用于底部状态栏展示：
+
+- 当前模型和模型上下文窗口。
+- 最新请求上下文 token 数。
+- 会话累计输入、输出、缓存读取 token 和缓存命中率。
+- 按模型可选价格字段估算的费用和货币单位。
+- 配置声明的已激活 Skill / MCP 列表。
+
+运行态快照来自 `TurnResult.usage`、角色解析后的模型配置和 `[runtime]` 配置声明。费用只按配置的每百万 token 单价估算，不做货币转换；价格字段缺失时费用显示为未配置。

@@ -66,6 +66,9 @@ pub struct ChatTokenUsage {
     pub prompt_tokens: Option<u64>,
     pub completion_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
+    pub prompt_tokens_details: Option<serde_json::Value>,
+    pub input_tokens_details: Option<serde_json::Value>,
+    pub prompt_cache_hit_tokens: Option<u64>,
 }
 
 /// 解析后的结构化流事件
@@ -171,6 +174,19 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
                 prompt_tokens: u.prompt_tokens.unwrap_or(0),
                 completion_tokens: u.completion_tokens.unwrap_or(0),
                 total_tokens: u.total_tokens.unwrap_or(0),
+                cached_prompt_tokens: u
+                    .prompt_cache_hit_tokens
+                    .or_else(|| {
+                        u.prompt_tokens_details
+                            .as_ref()
+                            .and_then(cached_tokens_from_details)
+                    })
+                    .or_else(|| {
+                        u.input_tokens_details
+                            .as_ref()
+                            .and_then(cached_tokens_from_details)
+                    })
+                    .unwrap_or(0),
             });
             return Some(StreamEvent::Completed {
                 response_id: None,
@@ -230,6 +246,15 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
                         prompt_tokens: u.get("input_tokens")?.as_u64()?,
                         completion_tokens: u.get("output_tokens")?.as_u64()?,
                         total_tokens: u.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                        cached_prompt_tokens: u
+                            .get("input_tokens_details")
+                            .and_then(cached_tokens_from_details)
+                            .or_else(|| {
+                                u.get("prompt_tokens_details")
+                                    .and_then(cached_tokens_from_details)
+                            })
+                            .or_else(|| u.get("prompt_cache_hit_tokens").and_then(|v| v.as_u64()))
+                            .unwrap_or(0),
                     })
                 })
             });
@@ -261,6 +286,14 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
 
         _ => None,
     }
+}
+
+fn cached_tokens_from_details(details: &serde_json::Value) -> Option<u64> {
+    details
+        .get("cached_tokens")
+        .or_else(|| details.get("cache_read_tokens"))
+        .or_else(|| details.get("cached_input_tokens"))
+        .and_then(serde_json::Value::as_u64)
 }
 
 fn output_item_tool_delta(item: &serde_json::Value) -> Option<StreamEvent> {
@@ -335,6 +368,34 @@ mod tests {
         match process_sse_event(&event) {
             Some(StreamEvent::OutputTextDelta(delta)) => {
                 assert_eq!(delta, "9.11 更大。");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn process_chat_completed_reads_cached_prompt_tokens() {
+        let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "choices": [{
+                "delta": {},
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_tokens_details": {
+                    "cached_tokens": 35
+                }
+            }
+        }))
+        .unwrap();
+
+        match process_sse_event(&event) {
+            Some(StreamEvent::Completed {
+                usage: Some(usage), ..
+            }) => {
+                assert_eq!(usage.cached_prompt_tokens, 35);
             }
             other => panic!("unexpected event: {other:?}"),
         }

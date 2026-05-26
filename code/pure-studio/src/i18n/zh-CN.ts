@@ -113,6 +113,23 @@ const zhCN = {
     providers: "模型服务",
   },
 
+  statusBar: {
+    label: "会话状态栏",
+    model: "模型",
+    noModel: "未选择模型",
+    session: "会话",
+    context: "上下文",
+    cacheHit: "缓存命中",
+    input: "输入",
+    output: "输出",
+    cacheRead: "缓存读取",
+    cost: "费用",
+    costHint: "按百万 token 单价估算，不做汇率转换",
+    costNotConfigured: "未配置",
+    notConfigured: "未配置",
+    modelPricing: "模型计价（可选）",
+  },
+
   approval: {
     title: "工具审批",
   },

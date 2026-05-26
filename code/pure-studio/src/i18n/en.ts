@@ -113,6 +113,23 @@ const en = {
     providers: "Providers",
   },
 
+  statusBar: {
+    label: "Session status bar",
+    model: "Model",
+    noModel: "No model",
+    session: "Session",
+    context: "Context",
+    cacheHit: "Cache hit",
+    input: "Input",
+    output: "Output",
+    cacheRead: "Cache read",
+    cost: "Cost",
+    costHint: "Estimated from per-million-token prices; no currency conversion",
+    costNotConfigured: "Not configured",
+    notConfigured: "Not configured",
+    modelPricing: "Model pricing (optional)",
+  },
+
   approval: {
     title: "Tool Approval",
   },

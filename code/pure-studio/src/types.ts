@@ -106,11 +106,35 @@ export type ModelRecord = {
   autoCompactTokenLimit?: number | null;
   defaultTemperature?: number | null;
   maxOutputTokens?: number | null;
+  currency?: string | null;
+  inputPricePerMTok?: number | null;
+  outputPricePerMTok?: number | null;
+  cacheReadPricePerMTok?: number | null;
   reasoningEfforts: string[];
   capabilities?: string[];
   inputModalities?: string[];
   truncationMode?: string;
   truncationLimit?: number;
+};
+
+export type SessionRuntime = {
+  sessionId: string;
+  model: string;
+  contextWindow?: number | null;
+  latestContextTokens: number;
+  promptTokens: number;
+  completionTokens: number;
+  cachedPromptTokens: number;
+  totalTokens: number;
+  cacheHitRate?: number | null;
+  currency?: string | null;
+  inputPricePerMTok?: number | null;
+  outputPricePerMTok?: number | null;
+  cacheReadPricePerMTok?: number | null;
+  estimatedCost?: number | null;
+  activeSkills: string[];
+  activeMcpServers: string[];
+  updatedAt: number;
 };
 
 export type ProviderTemplateRecord = {
@@ -161,6 +185,7 @@ export type BootstrapPayload = {
   selectedSessionId?: string | null;
   messages: ChatMessage[];
   subagentEvents: SubagentActivity[];
+  sessionRuntime?: SessionRuntime | null;
   config: ConfigPayload;
 };
 
@@ -171,6 +196,7 @@ export type ProjectSelectionPayload = {
   selectedSessionId?: string | null;
   messages: ChatMessage[];
   subagentEvents: SubagentActivity[];
+  sessionRuntime?: SessionRuntime | null;
 };
 
 export type SessionSelectionPayload = {
@@ -178,6 +204,7 @@ export type SessionSelectionPayload = {
   sessions: SessionRecord[];
   messages: ChatMessage[];
   subagentEvents: SubagentActivity[];
+  sessionRuntime?: SessionRuntime | null;
 };
 
 export type RunPromptResponse = {
@@ -185,6 +212,7 @@ export type RunPromptResponse = {
   sessions: SessionRecord[];
   messages: ChatMessage[];
   subagentEvents: SubagentActivity[];
+  sessionRuntime: SessionRuntime;
 };
 
 export type AgentEvent =
