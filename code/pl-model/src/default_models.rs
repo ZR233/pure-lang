@@ -134,6 +134,8 @@ fn deepseek_model(slug: &str, display_name: &str, description: &str) -> ModelInf
 
 #[cfg(test)]
 mod tests {
+    use pretty_assertions::assert_eq;
+
     use super::*;
 
     #[test]

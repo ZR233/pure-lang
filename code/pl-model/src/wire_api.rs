@@ -575,6 +575,7 @@ mod tests {
     use std::collections::HashMap;
 
     use pl_protocol::{Message, MessageContent, MessageRole};
+    use pretty_assertions::assert_eq;
 
     use super::*;
     use crate::request::{ReasoningConfig, ReasoningSummary};

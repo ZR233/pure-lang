@@ -81,6 +81,7 @@ pub enum StreamEvent {
     },
 
     ToolCallDelta {
+        stream_id: Option<String>,
         item_id: String,
         call_id: Option<String>,
         name: Option<String>,
@@ -138,12 +139,12 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
             .as_ref()
             .and_then(|tool_calls| tool_calls.first())
         {
-            let item_id = tool_call
-                .id
-                .clone()
-                .unwrap_or_else(|| tool_call.index.unwrap_or_default().to_string());
+            let index = tool_call.index.unwrap_or_default();
+            let stream_id = Some(format!("chat_tool_call:{index}"));
+            let item_id = tool_call.id.clone().unwrap_or_default();
             if let Some(custom) = &tool_call.custom {
                 return Some(StreamEvent::ToolCallDelta {
+                    stream_id,
                     item_id,
                     call_id: None,
                     name: custom.name.clone(),
@@ -154,6 +155,7 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
             }
             if let Some(function) = &tool_call.function {
                 return Some(StreamEvent::ToolCallDelta {
+                    stream_id,
                     item_id,
                     call_id: None,
                     name: function.name.clone(),
@@ -191,6 +193,7 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
             .map(|d| StreamEvent::ThinkingDelta { delta: d.clone() }),
 
         "response.function_call_arguments.delta" => Some(StreamEvent::ToolCallDelta {
+            stream_id: None,
             item_id: event.item_id.clone().unwrap_or_default(),
             call_id: event.call_id.clone(),
             name: None,
@@ -200,6 +203,7 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
         }),
 
         "response.custom_tool_call_input.delta" => Some(StreamEvent::ToolCallDelta {
+            stream_id: None,
             item_id: event
                 .item_id
                 .clone()
@@ -211,6 +215,8 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
                 event.delta.clone().unwrap_or_default(),
             ),
         }),
+
+        "response.output_item.added" => event.item.as_ref().and_then(output_item_tool_delta),
 
         "response.output_item.done" => event
             .item
@@ -257,8 +263,43 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
     }
 }
 
+fn output_item_tool_delta(item: &serde_json::Value) -> Option<StreamEvent> {
+    let kind = item.get("type")?.as_str()?;
+    let item_id = item
+        .get("id")
+        .and_then(|v| v.as_str())
+        .or_else(|| item.get("call_id").and_then(|v| v.as_str()))
+        .unwrap_or_default()
+        .to_string();
+    let call_id = item
+        .get("call_id")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let name = item.get("name").and_then(|v| v.as_str()).map(String::from);
+
+    match kind {
+        "function_call" => Some(StreamEvent::ToolCallDelta {
+            stream_id: None,
+            item_id,
+            call_id,
+            name,
+            payload_delta: ToolCallDeltaPayload::FunctionArguments(String::new()),
+        }),
+        "custom_tool_call" => Some(StreamEvent::ToolCallDelta {
+            stream_id: None,
+            item_id,
+            call_id,
+            name,
+            payload_delta: ToolCallDeltaPayload::CustomInput(String::new()),
+        }),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use pretty_assertions::assert_eq;
+
     use super::*;
 
     fn chat_event(delta: serde_json::Value) -> SseStreamEvent {
@@ -340,14 +381,74 @@ mod tests {
 
         match process_sse_event(&event) {
             Some(StreamEvent::ToolCallDelta {
+                stream_id,
                 item_id,
                 name,
                 payload_delta: ToolCallDeltaPayload::CustomInput(delta),
                 ..
             }) => {
+                assert_eq!(stream_id.as_deref(), Some("chat_tool_call:0"));
                 assert_eq!(item_id, "call_1");
                 assert_eq!(name.as_deref(), Some("apply_patch"));
                 assert_eq!(delta, "*** Begin Patch\n");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn process_chat_followup_tool_delta_keeps_stream_id_without_item_id() {
+        let event = chat_event(serde_json::json!({
+            "tool_calls": [{
+                "index": 0,
+                "function": {
+                    "arguments": "{\"path\":\"Cargo.toml\"}"
+                }
+            }]
+        }));
+
+        match process_sse_event(&event) {
+            Some(StreamEvent::ToolCallDelta {
+                stream_id,
+                item_id,
+                name,
+                payload_delta: ToolCallDeltaPayload::FunctionArguments(delta),
+                ..
+            }) => {
+                assert_eq!(stream_id.as_deref(), Some("chat_tool_call:0"));
+                assert_eq!(item_id, "");
+                assert_eq!(name, None);
+                assert_eq!(delta, "{\"path\":\"Cargo.toml\"}");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn process_responses_output_item_added_captures_tool_name() {
+        let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.output_item.added",
+            "item": {
+                "type": "custom_tool_call",
+                "id": "ctc_1",
+                "call_id": "call_1",
+                "name": "apply_patch"
+            }
+        }))
+        .unwrap();
+
+        match process_sse_event(&event) {
+            Some(StreamEvent::ToolCallDelta {
+                item_id,
+                call_id,
+                name,
+                payload_delta: ToolCallDeltaPayload::CustomInput(delta),
+                ..
+            }) => {
+                assert_eq!(item_id, "ctc_1");
+                assert_eq!(call_id.as_deref(), Some("call_1"));
+                assert_eq!(name.as_deref(), Some("apply_patch"));
+                assert_eq!(delta, "");
             }
             other => panic!("unexpected event: {other:?}"),
         }
