@@ -4,7 +4,9 @@ use pl_model::{
     CompletionRequest, ModelProvider, ProviderInfo, ReasoningConfig, ReasoningSummary,
     SharedModelProvider, create_provider, create_provider_with_models,
 };
-use pl_protocol::{AgentEvent, AgentEventSender, Result, SubagentStatus};
+use pl_protocol::{
+    AgentEvent, AgentEventSender, Result, SubagentStatus, TokenUsageSnapshot, TraceEventKind,
+};
 
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
 use crate::session::CoreSession;
@@ -13,6 +15,7 @@ use crate::tool::{
     MovePathTool, ReadFileTool, SearchFilesTool, StatPathTool, SubagentContext, SubagentTool,
     ToolContext, ToolInput, ToolRegistry, WriteFileTool,
 };
+use crate::trace::TraceRecorder;
 use crate::turn::{
     DEFAULT_MAX_TOOL_ITERATIONS, ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest,
     TurnOptions, TurnRequest, TurnResult,
@@ -144,13 +147,25 @@ impl PureCore {
         self.run_turn_with_options(session, request, event_tx, TurnOptions::default())
     }
 
-    pub fn run_turn_with_options<'a>(
-        &'a self,
-        session: &'a mut CoreSession,
+    pub async fn run_turn_with_options(
+        &self,
+        session: &mut CoreSession,
         request: TurnRequest,
         event_tx: AgentEventSender,
         options: TurnOptions,
-    ) -> impl std::future::Future<Output = Result<TurnResult>> + Send + 'a {
+    ) -> Result<TurnResult> {
+        let mut recorder = TraceRecorder::disabled(event_tx);
+        self.run_turn_with_trace(session, request, &mut recorder, options)
+            .await
+    }
+
+    pub async fn run_turn_with_trace(
+        &self,
+        session: &mut CoreSession,
+        request: TurnRequest,
+        recorder: &mut TraceRecorder,
+        options: TurnOptions,
+    ) -> Result<TurnResult> {
         let provider = self.provider.clone();
         let reasoning_effort = self.reasoning_effort.clone();
         let workspace_root = self
@@ -168,204 +183,262 @@ impl PureCore {
                 .clamp(1, DEFAULT_MAX_TOOL_ITERATIONS)
         };
 
-        async move {
-            let _ = event_tx.send(AgentEvent::TurnStarted);
-            let session_id = generate_session_id();
-            session.push_user_prompt(request.prompt);
-            let model = provider.default_model().to_string();
+        recorder.broadcast(AgentEvent::TurnStarted);
+        let session_id = generate_session_id();
+        recorder.record_trace_only(TraceEventKind::TurnStarted {
+            turn_id: session_id.clone(),
+        });
+        session.push_user_prompt(request.prompt);
+        let model = provider.default_model().to_string();
 
-            let mut last_content = String::new();
-            let mut last_reasoning_content = None;
-            let mut last_model = model.clone();
-            let mut total_usage = pl_model::TokenUsage::default();
-            let mut session_message_count = 0;
+        let mut last_content = String::new();
+        let mut last_reasoning_content = None;
+        let mut last_model = model.clone();
+        let mut total_usage = pl_model::TokenUsage::default();
+        let mut session_message_count = 0;
 
-            let instructions = format_instructions(
-                request.mode.instructions(),
-                request.workspace_instructions.as_deref(),
-            );
-            let reasoning = reasoning_effort.as_ref().map(|effort| ReasoningConfig {
-                effort: Some(effort.as_str().to_string()),
-                summary: Some(if effort.is_none() {
-                    ReasoningSummary::Disabled
-                } else {
-                    ReasoningSummary::Enabled
-                }),
+        let instructions = format_instructions(
+            request.mode.instructions(),
+            request.workspace_instructions.as_deref(),
+        );
+        let reasoning = reasoning_effort.as_ref().map(|effort| ReasoningConfig {
+            effort: Some(effort.as_str().to_string()),
+            summary: Some(if effort.is_none() {
+                ReasoningSummary::Disabled
+            } else {
+                ReasoningSummary::Enabled
+            }),
+        });
+
+        let mut messages = session.messages().to_vec();
+        for iteration in 0..max_iterations {
+            let inference_id = format!("{session_id}-inf-{iteration}");
+            recorder.record_trace_only(TraceEventKind::InferenceStarted {
+                turn_id: session_id.clone(),
+                inference_id: inference_id.clone(),
+                model: model.clone(),
             });
 
-            let mut messages = session.messages().to_vec();
-            for _ in 0..max_iterations {
-                let completion_request = CompletionRequest {
-                    model: model.clone(),
-                    instructions: Some(instructions.clone()),
-                    messages: messages.clone(),
-                    tools: tool_schemas.clone(),
-                    tool_choice: "auto".to_string(),
-                    parallel_tool_calls: false,
-                    temperature: None,
-                    max_tokens: None,
-                    reasoning: reasoning.clone(),
-                    stream: true,
-                };
+            let completion_request = CompletionRequest {
+                model: model.clone(),
+                instructions: Some(instructions.clone()),
+                messages: messages.clone(),
+                tools: tool_schemas.clone(),
+                tool_choice: "auto".to_string(),
+                parallel_tool_calls: false,
+                temperature: None,
+                max_tokens: None,
+                reasoning: reasoning.clone(),
+                stream: true,
+            };
 
-                let response = provider
-                    .stream_complete(completion_request, event_tx.clone())
-                    .await?;
+            let response = provider
+                .stream_complete(completion_request, recorder.sender().clone())
+                .await?;
 
-                let content = response.content.unwrap_or_default();
-                let reasoning_content = response.reasoning_content.clone();
-                let tool_calls = response.tool_calls;
+            recorder.record_trace_only(TraceEventKind::InferenceCompleted {
+                turn_id: session_id.clone(),
+                inference_id: inference_id.clone(),
+                usage: TokenUsageSnapshot {
+                    prompt_tokens: response.usage.prompt_tokens,
+                    completion_tokens: response.usage.completion_tokens,
+                    cached_prompt_tokens: response.usage.cached_prompt_tokens,
+                    total_tokens: response.usage.prompt_tokens + response.usage.completion_tokens,
+                },
+            });
 
-                total_usage.prompt_tokens += response.usage.prompt_tokens;
-                total_usage.completion_tokens += response.usage.completion_tokens;
-                total_usage.cached_prompt_tokens += response.usage.cached_prompt_tokens;
+            let content = response.content.unwrap_or_default();
+            let reasoning_content = response.reasoning_content.clone();
+            let tool_calls = response.tool_calls;
 
-                if !response.model.is_empty() {
-                    last_model = response.model;
-                }
+            total_usage.prompt_tokens += response.usage.prompt_tokens;
+            total_usage.completion_tokens += response.usage.completion_tokens;
+            total_usage.cached_prompt_tokens += response.usage.cached_prompt_tokens;
 
-                if tool_calls.is_empty() {
-                    session.push_assistant_response(content.clone(), reasoning_content.clone());
-                    last_content = content;
-                    last_reasoning_content = reasoning_content;
-                    session_message_count = session.messages().len();
-                    break;
-                }
-
-                session.push_assistant_tool_calls(
-                    if content.is_empty() {
-                        None
-                    } else {
-                        Some(content.clone())
-                    },
-                    tool_calls.clone(),
-                    reasoning_content.clone(),
-                );
-                last_content = content;
-                last_reasoning_content = reasoning_content;
-
-                for tool_call in &tool_calls {
-                    let _ = event_tx.send(AgentEvent::ToolCallComplete {
-                        id: tool_call.id.clone(),
-                        name: tool_call.name.clone(),
-                        arguments: tool_call.payload_text(),
-                    });
-
-                    let result = match self.tools.get(&tool_call.name) {
-                        Some(tool) => {
-                            let tool_context = ToolContext {
-                                event_tx: event_tx.clone(),
-                                options: options.clone(),
-                                workspace_root: workspace_root.clone(),
-                                workspace_instructions: workspace_instructions.clone(),
-                                active_subagent: active_subagent.clone(),
-                            };
-                            if tool_call.name == "subagent" {
-                                emit_subagent_tool_state(
-                                    tool_call,
-                                    &tool_context,
-                                    SubagentStatus::Queued,
-                                    None,
-                                    None,
-                                );
-                            }
-                            let approval_request = approval_request(tool_call, &tool_context);
-                            if tool_call.name == "subagent"
-                                && matches!(
-                                    options.tool_approval_policy,
-                                    ToolApprovalPolicy::Manual
-                                )
-                            {
-                                emit_subagent_tool_state(
-                                    tool_call,
-                                    &tool_context,
-                                    SubagentStatus::AwaitingApproval,
-                                    Some("等待工具审批".to_string()),
-                                    None,
-                                );
-                            }
-                            match approve_tool_call(
-                                &options,
-                                &approval_request,
-                                event_tx.clone(),
-                                &tool_context,
-                            )
-                            .await
-                            {
-                                ToolApprovalDecision::Approved => {
-                                    let _ = event_tx.send(AgentEvent::ToolApprovalGranted {
-                                        id: approval_request.id.clone(),
-                                        name: approval_request.name.clone(),
-                                    });
-                                    let tool_input = ToolInput {
-                                        arguments: tool_call.arguments_for_tool(),
-                                        session_id: session_id.clone(),
-                                        tool_id: tool_call.id.clone(),
-                                    };
-                                    match tool.execute(tool_input, tool_context).await {
-                                        Ok(output) => output.description,
-                                        Err(e) => format!("Tool execution error: {e}"),
-                                    }
-                                }
-                                ToolApprovalDecision::Denied { reason } => {
-                                    let _ = event_tx.send(AgentEvent::ToolApprovalDenied {
-                                        id: approval_request.id.clone(),
-                                        name: approval_request.name.clone(),
-                                        reason: reason.clone(),
-                                    });
-                                    if tool_call.name == "subagent" {
-                                        emit_subagent_tool_state(
-                                            tool_call,
-                                            &tool_context,
-                                            SubagentStatus::Denied,
-                                            None,
-                                            Some(reason.clone()),
-                                        );
-                                    }
-                                    format!("Tool execution denied: {reason}")
-                                }
-                            }
-                        }
-                        None => {
-                            let available: Vec<&str> = self.tools.names();
-                            eprintln!(
-                                "[pl-core] Unknown tool: {:?}, available: {:?}",
-                                tool_call.name, available
-                            );
-                            format!("Unknown tool: {}", tool_call.name)
-                        }
-                    };
-
-                    session.push_tool_result(
-                        tool_call
-                            .call_id
-                            .clone()
-                            .unwrap_or_else(|| tool_call.id.clone()),
-                        tool_call.name.clone(),
-                        tool_call.kind(),
-                        result,
-                        serde_json::to_string(&tool_call.arguments_for_display())
-                            .unwrap_or_default(),
-                    );
-                }
-
-                session_message_count = session.messages().len();
-                messages = session.messages().to_vec();
+            if !response.model.is_empty() {
+                last_model = response.model;
             }
 
-            total_usage.total_tokens = total_usage.prompt_tokens + total_usage.completion_tokens;
+            if tool_calls.is_empty() {
+                session.push_assistant_response(content.clone(), reasoning_content.clone());
+                last_content = content;
+                last_reasoning_content = reasoning_content;
+                session_message_count = session.messages().len();
+                break;
+            }
 
-            let _ = event_tx.send(AgentEvent::Done);
+            session.push_assistant_tool_calls(
+                if content.is_empty() {
+                    None
+                } else {
+                    Some(content.clone())
+                },
+                tool_calls.clone(),
+                reasoning_content.clone(),
+            );
+            last_content = content;
+            last_reasoning_content = reasoning_content;
 
-            Ok(TurnResult {
-                content: last_content,
-                reasoning_content: last_reasoning_content,
-                model: last_model,
-                usage: total_usage,
-                mode: request.mode,
-                session_message_count,
-            })
+            for tool_call in &tool_calls {
+                recorder.broadcast(AgentEvent::ToolCallComplete {
+                    id: tool_call.id.clone(),
+                    name: tool_call.name.clone(),
+                    arguments: tool_call.payload_text(),
+                });
+                recorder.record_trace_only(TraceEventKind::ToolCallStarted {
+                    turn_id: session_id.clone(),
+                    tool_call_id: tool_call.id.clone(),
+                    name: tool_call.name.clone(),
+                    arguments: tool_call.payload_text(),
+                });
+
+                let result = match self.tools.get(&tool_call.name) {
+                    Some(tool) => {
+                        let tool_context = ToolContext {
+                            event_tx: recorder.sender().clone(),
+                            options: options.clone(),
+                            workspace_root: workspace_root.clone(),
+                            workspace_instructions: workspace_instructions.clone(),
+                            active_subagent: active_subagent.clone(),
+                        };
+                        if tool_call.name == "subagent" {
+                            emit_subagent_tool_state(
+                                tool_call,
+                                &tool_context,
+                                SubagentStatus::Queued,
+                                None,
+                                None,
+                            );
+                        }
+                        let approval_request = approval_request(tool_call, &tool_context);
+                        if tool_call.name == "subagent"
+                            && matches!(options.tool_approval_policy, ToolApprovalPolicy::Manual)
+                        {
+                            emit_subagent_tool_state(
+                                tool_call,
+                                &tool_context,
+                                SubagentStatus::AwaitingApproval,
+                                Some("等待工具审批".to_string()),
+                                None,
+                            );
+                        }
+                        match approve_tool_call(
+                            &options,
+                            &approval_request,
+                            recorder.sender().clone(),
+                            &tool_context,
+                        )
+                        .await
+                        {
+                            ToolApprovalDecision::Approved => {
+                                recorder.broadcast(AgentEvent::ToolApprovalGranted {
+                                    id: approval_request.id.clone(),
+                                    name: approval_request.name.clone(),
+                                });
+                                recorder.record_trace_only(TraceEventKind::ToolCallApproved {
+                                    tool_call_id: tool_call.id.clone(),
+                                });
+                                let tool_input = ToolInput {
+                                    arguments: tool_call.arguments_for_tool(),
+                                    session_id: session_id.clone(),
+                                    tool_id: tool_call.id.clone(),
+                                };
+                                match tool.execute(tool_input, tool_context).await {
+                                    Ok(output) => {
+                                        recorder.record_trace_only(
+                                            TraceEventKind::ToolCallCompleted {
+                                                tool_call_id: tool_call.id.clone(),
+                                                result: output.description.clone(),
+                                                exit_code: None,
+                                                timed_out: false,
+                                            },
+                                        );
+                                        output.description
+                                    }
+                                    Err(e) => {
+                                        recorder.record_trace_only(
+                                            TraceEventKind::ToolCallFailed {
+                                                tool_call_id: tool_call.id.clone(),
+                                                error: e.to_string(),
+                                            },
+                                        );
+                                        format!("Tool execution error: {e}")
+                                    }
+                                }
+                            }
+                            ToolApprovalDecision::Denied { reason } => {
+                                recorder.broadcast(AgentEvent::ToolApprovalDenied {
+                                    id: approval_request.id.clone(),
+                                    name: approval_request.name.clone(),
+                                    reason: reason.clone(),
+                                });
+                                recorder.record_trace_only(TraceEventKind::ToolCallDenied {
+                                    tool_call_id: tool_call.id.clone(),
+                                    reason: reason.clone(),
+                                });
+                                if tool_call.name == "subagent" {
+                                    emit_subagent_tool_state(
+                                        tool_call,
+                                        &tool_context,
+                                        SubagentStatus::Denied,
+                                        None,
+                                        Some(reason.clone()),
+                                    );
+                                }
+                                format!("Tool execution denied: {reason}")
+                            }
+                        }
+                    }
+                    None => {
+                        let available: Vec<&str> = self.tools.names();
+                        eprintln!(
+                            "[pl-core] Unknown tool: {:?}, available: {:?}",
+                            tool_call.name, available
+                        );
+                        format!("Unknown tool: {}", tool_call.name)
+                    }
+                };
+
+                session.push_tool_result(
+                    tool_call
+                        .call_id
+                        .clone()
+                        .unwrap_or_else(|| tool_call.id.clone()),
+                    tool_call.name.clone(),
+                    tool_call.kind(),
+                    result,
+                    serde_json::to_string(&tool_call.arguments_for_display()).unwrap_or_default(),
+                );
+            }
+
+            session_message_count = session.messages().len();
+            messages = session.messages().to_vec();
         }
+
+        total_usage.total_tokens = total_usage.prompt_tokens + total_usage.completion_tokens;
+
+        recorder.record_trace_only(TraceEventKind::TurnCompleted {
+            turn_id: session_id.clone(),
+            content: last_content.clone(),
+            model: last_model.clone(),
+            usage: TokenUsageSnapshot {
+                prompt_tokens: total_usage.prompt_tokens,
+                completion_tokens: total_usage.completion_tokens,
+                cached_prompt_tokens: total_usage.cached_prompt_tokens,
+                total_tokens: total_usage.total_tokens,
+            },
+        });
+        recorder.broadcast(AgentEvent::Done);
+
+        Ok(TurnResult {
+            content: last_content,
+            reasoning_content: last_reasoning_content,
+            model: last_model,
+            usage: total_usage,
+            mode: request.mode,
+            session_message_count,
+            trace_events: recorder.drain(),
+        })
     }
 }
 

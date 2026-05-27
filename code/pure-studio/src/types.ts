@@ -137,6 +137,46 @@ export type SessionRuntime = {
   updatedAt: number;
 };
 
+export type ToolCallStatus2 =
+  | "started"
+  | "awaiting_approval"
+  | "approved"
+  | "denied"
+  | "completed"
+  | "failed";
+
+export type TurnStatus = "started" | "completed" | "failed";
+
+export type UsageSnapshot = {
+  promptTokens: number;
+  completionTokens: number;
+  cachedPromptTokens: number;
+  totalTokens: number;
+};
+
+export type TimelineItem = {
+  kind: "turn" | "tool_call" | "inference";
+  sequence: number;
+  timestamp: number;
+  turnId?: string | null;
+  toolCallId?: string | null;
+  toolName?: string | null;
+  toolArguments?: string | null;
+  toolStatus?: ToolCallStatus2 | null;
+  toolResult?: string | null;
+  inferenceModel?: string | null;
+  inferenceUsage?: UsageSnapshot | null;
+  turnStatus?: TurnStatus | null;
+  turnModel?: string | null;
+  turnUsage?: UsageSnapshot | null;
+};
+
+export type SessionTimeline = {
+  sessionId: string;
+  items: TimelineItem[];
+  nextSequence: number;
+};
+
 export type ProviderTemplateRecord = {
   id: ProviderKind;
   name: string;
@@ -213,6 +253,7 @@ export type RunPromptResponse = {
   messages: ChatMessage[];
   subagentEvents: SubagentActivity[];
   sessionRuntime: SessionRuntime;
+  timelineItems: TimelineItem[];
 };
 
 export type AgentEvent =

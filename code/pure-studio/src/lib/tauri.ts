@@ -6,6 +6,7 @@ import type {
   ProviderSettingsInput,
   RunPromptResponse,
   SessionSelectionPayload,
+  SessionTimeline,
 } from "../types";
 import {
   createPreviewConfig,
@@ -222,4 +223,25 @@ export function saveProviderSettings(input: ProviderSettingsInput) {
     return Promise.resolve(clone(previewConfig));
   }
   return invoke<ConfigPayload>("save_provider_settings", { input });
+}
+
+export function loadSessionTimeline(
+  sessionId: string,
+  afterSequence?: number,
+  limit?: number,
+) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(
+      clone({
+        sessionId,
+        items: [],
+        nextSequence: 0,
+      }),
+    );
+  }
+  return invoke<SessionTimeline>("load_session_timeline", {
+    sessionId,
+    afterSequence: afterSequence ?? null,
+    limit: limit ?? null,
+  });
 }

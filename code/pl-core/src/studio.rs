@@ -7,20 +7,21 @@ use pl_protocol::{AgentEventSender, Message, MessageContent, MessageRole};
 use sea_orm::entity::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ConnectOptions, ConnectionTrait, Database, DatabaseBackend,
-    DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, Statement,
+    DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Statement,
 };
 
 const STUDIO_DIR_NAME: &str = "studio";
 const STUDIO_DB_FILE_NAME: &str = "studio_1.sqlite";
 use crate::config::{CONFIG_DIR_NAME, ConfigStore, ModelRole};
 use crate::{
-    CompileMode, CoreSession, PureCore, ToolApprovalCallback, TurnOptions, TurnRequest, TurnResult,
-    load_workspace_instructions,
+    CompileMode, CoreSession, PureCore, ToolApprovalCallback, TraceEvent, TraceRecorder,
+    TurnOptions, TurnRequest, TurnResult, load_workspace_instructions,
 };
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_init.sql"),
     include_str!("../migrations/0002_subagent_events.sql"),
     include_str!("../migrations/0003_session_runtime.sql"),
+    include_str!("../migrations/0004_trace_events.sql"),
 ];
 
 static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -143,6 +144,27 @@ pub mod entities {
         impl ActiveModelBehavior for ActiveModel {}
     }
 
+    pub mod trace_event {
+        use super::*;
+
+        #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+        #[sea_orm(table_name = "trace_events")]
+        pub struct Model {
+            #[sea_orm(primary_key, auto_increment = false)]
+            pub id: String,
+            pub session_id: String,
+            pub sequence: i64,
+            pub timestamp: i64,
+            pub kind: String,
+            pub payload_json: String,
+        }
+
+        #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+        pub enum Relation {}
+
+        impl ActiveModelBehavior for ActiveModel {}
+    }
+
     pub mod session_runtime_snapshot {
         use super::*;
 
@@ -232,6 +254,16 @@ pub struct SubagentEventRecord {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct TraceEventRecord {
+    pub id: String,
+    pub session_id: String,
+    pub sequence: i64,
+    pub timestamp: i64,
+    pub kind: String,
+    pub payload_json: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct SessionRuntimeRecord {
     pub session_id: String,
     pub model: String,
@@ -250,6 +282,7 @@ pub struct SessionRuntimeRecord {
 pub struct StudioPromptOutcome {
     pub result: TurnResult,
     pub messages: Vec<Message>,
+    pub trace_events: Vec<TraceEvent>,
 }
 
 #[derive(Clone)]
@@ -355,9 +388,15 @@ impl StudioRuntime {
         let mut core = PureCore::from_config(&config, ModelRole::Planner)?;
         core.register_default_tools(PathBuf::from(&project.path), Some(workspace_instructions));
         let options = TurnOptions::default();
+        let starting_sequence = self.store.next_sequence(session_id).await?;
+        let mut recorder = TraceRecorder::new(session_id.to_string(), event_tx, starting_sequence);
         let result = core
-            .run_turn_with_options(&mut session, request, event_tx, options)
+            .run_turn_with_trace(&mut session, request, &mut recorder, options)
             .await?;
+        let trace_events = recorder.drain();
+        if !trace_events.is_empty() {
+            self.store.append_trace_events(&trace_events).await?;
+        }
         let resolved = config.resolve_role(ModelRole::Planner)?;
         let model = resolved
             .models
@@ -382,7 +421,11 @@ impl StudioRuntime {
                 .await?;
         }
         let messages = self.store.load_messages(session_id).await?;
-        Ok(StudioPromptOutcome { result, messages })
+        Ok(StudioPromptOutcome {
+            result,
+            messages,
+            trace_events,
+        })
     }
 }
 
@@ -643,6 +686,62 @@ impl StudioStore {
         Ok(rows.into_iter().map(subagent_event_record).collect())
     }
 
+    pub async fn append_trace_events(&self, events: &[TraceEvent]) -> Result<()> {
+        if events.is_empty() {
+            return Ok(());
+        }
+        use entities::trace_event;
+        let models: Vec<trace_event::ActiveModel> = events
+            .iter()
+            .map(|event| {
+                let payload = serde_json::to_string(&event.kind).unwrap_or_default();
+                trace_event::ActiveModel {
+                    id: Set(new_trace_event_id()),
+                    session_id: Set(event.session_id.clone()),
+                    sequence: Set(event.sequence as i64),
+                    timestamp: Set(event.timestamp),
+                    kind: Set(trace_event_kind_label(&event.kind).to_string()),
+                    payload_json: Set(payload),
+                }
+            })
+            .collect();
+        trace_event::Entity::insert_many(models)
+            .exec(&self.db)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn load_trace_events(
+        &self,
+        session_id: &str,
+        after_sequence: Option<i64>,
+        limit: Option<i64>,
+    ) -> Result<Vec<TraceEventRecord>> {
+        use entities::trace_event;
+        let mut query = trace_event::Entity::find()
+            .filter(trace_event::Column::SessionId.eq(session_id.to_string()));
+        if let Some(after) = after_sequence {
+            query = query.filter(trace_event::Column::Sequence.gt(after));
+        }
+        query = query.order_by_asc(trace_event::Column::Sequence);
+        if let Some(limit) = limit {
+            query = query.limit(limit as u64);
+        }
+        let rows = query.all(&self.db).await?;
+        Ok(rows.into_iter().map(trace_event_record).collect())
+    }
+
+    pub async fn next_sequence(&self, session_id: &str) -> Result<u64> {
+        use entities::trace_event;
+        let max_seq: Option<i64> = trace_event::Entity::find()
+            .filter(trace_event::Column::SessionId.eq(session_id.to_string()))
+            .order_by_desc(trace_event::Column::Sequence)
+            .one(&self.db)
+            .await?
+            .map(|row| row.sequence);
+        Ok(max_seq.map(|s| (s + 1) as u64).unwrap_or(0))
+    }
+
     pub async fn load_session_runtime(
         &self,
         session_id: &str,
@@ -807,6 +906,41 @@ fn subagent_event_record(model: entities::subagent_event::Model) -> SubagentEven
         error: model.error,
         created_at: model.created_at,
     }
+}
+
+fn trace_event_record(model: entities::trace_event::Model) -> TraceEventRecord {
+    TraceEventRecord {
+        id: model.id,
+        session_id: model.session_id,
+        sequence: model.sequence,
+        timestamp: model.timestamp,
+        kind: model.kind,
+        payload_json: model.payload_json,
+    }
+}
+
+fn trace_event_kind_label(kind: &pl_protocol::TraceEventKind) -> &'static str {
+    match kind {
+        pl_protocol::TraceEventKind::TurnStarted { .. } => "TurnStarted",
+        pl_protocol::TraceEventKind::TurnCompleted { .. } => "TurnCompleted",
+        pl_protocol::TraceEventKind::TurnFailed { .. } => "TurnFailed",
+        pl_protocol::TraceEventKind::InferenceStarted { .. } => "InferenceStarted",
+        pl_protocol::TraceEventKind::InferenceCompleted { .. } => "InferenceCompleted",
+        pl_protocol::TraceEventKind::ToolCallStarted { .. } => "ToolCallStarted",
+        pl_protocol::TraceEventKind::ToolCallApproved { .. } => "ToolCallApproved",
+        pl_protocol::TraceEventKind::ToolCallDenied { .. } => "ToolCallDenied",
+        pl_protocol::TraceEventKind::ToolCallCompleted { .. } => "ToolCallCompleted",
+        pl_protocol::TraceEventKind::ToolCallFailed { .. } => "ToolCallFailed",
+    }
+}
+
+fn new_trace_event_id() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros();
+    let seq = ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("trace-{now:x}-{seq:x}")
 }
 
 fn session_runtime_record(
@@ -1185,6 +1319,7 @@ mod tests {
             },
             mode: CompileMode::Auto,
             session_message_count: 2,
+            trace_events: Vec::new(),
         };
 
         store

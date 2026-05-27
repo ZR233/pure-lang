@@ -98,6 +98,93 @@ pub enum PipelineStage {
     Integration,
 }
 
+/// Token usage snapshot for trace events.
+///
+/// Lightweight copy of `pl_model::TokenUsage` to avoid coupling `pl-protocol` to `pl-model`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenUsageSnapshot {
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub cached_prompt_tokens: u64,
+    pub total_tokens: u64,
+}
+
+/// Append-only trace event for structured session lifecycle tracking.
+///
+/// Each event belongs to a session and carries a monotonic sequence number
+/// for causal ordering. The `kind` field discriminates the event type.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TraceEvent {
+    pub session_id: String,
+    pub sequence: u64,
+    pub timestamp: i64,
+    pub kind: TraceEventKind,
+}
+
+/// Trace event variants for turn, inference, and tool call lifecycle.
+///
+/// Grouped by correlation IDs:
+/// - `turn_id` correlates events within a single turn
+/// - `inference_id` correlates inference call events
+/// - `tool_call_id` correlates tool lifecycle events
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
+pub enum TraceEventKind {
+    TurnStarted {
+        turn_id: String,
+    },
+    TurnCompleted {
+        turn_id: String,
+        content: String,
+        model: String,
+        usage: TokenUsageSnapshot,
+    },
+    TurnFailed {
+        turn_id: String,
+        error: String,
+    },
+    InferenceStarted {
+        turn_id: String,
+        inference_id: String,
+        model: String,
+    },
+    InferenceCompleted {
+        turn_id: String,
+        inference_id: String,
+        usage: TokenUsageSnapshot,
+    },
+    ToolCallStarted {
+        turn_id: String,
+        tool_call_id: String,
+        name: String,
+        arguments: String,
+    },
+    ToolCallApproved {
+        tool_call_id: String,
+    },
+    ToolCallDenied {
+        tool_call_id: String,
+        reason: String,
+    },
+    ToolCallCompleted {
+        tool_call_id: String,
+        result: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        exit_code: Option<i32>,
+        timed_out: bool,
+    },
+    ToolCallFailed {
+        tool_call_id: String,
+        error: String,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,6 +247,86 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn serializes_trace_event_turn_started_as_camel_case() {
+        let event = TraceEvent {
+            session_id: "sess-1".to_string(),
+            sequence: 0,
+            timestamp: 1_779_688_800,
+            kind: TraceEventKind::TurnStarted {
+                turn_id: "turn-1".to_string(),
+            },
+        };
+
+        let json = serde_json::to_value(event).unwrap();
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "sessionId": "sess-1",
+                "sequence": 0,
+                "timestamp": 1779688800,
+                "kind": {
+                    "type": "turnStarted",
+                    "turnId": "turn-1"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_trace_event_tool_call_completed_as_camel_case() {
+        let event = TraceEvent {
+            session_id: "sess-1".to_string(),
+            sequence: 5,
+            timestamp: 1_779_688_900,
+            kind: TraceEventKind::ToolCallCompleted {
+                tool_call_id: "call-1".to_string(),
+                result: "ok".to_string(),
+                exit_code: Some(0),
+                timed_out: false,
+            },
+        };
+
+        let json = serde_json::to_value(event).unwrap();
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "sessionId": "sess-1",
+                "sequence": 5,
+                "timestamp": 1779688900,
+                "kind": {
+                    "type": "toolCallCompleted",
+                    "toolCallId": "call-1",
+                    "result": "ok",
+                    "exitCode": 0,
+                    "timedOut": false
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn trace_event_tool_call_completed_omits_none_exit_code() {
+        let event = TraceEvent {
+            session_id: "sess-1".to_string(),
+            sequence: 3,
+            timestamp: 1_779_688_900,
+            kind: TraceEventKind::ToolCallCompleted {
+                tool_call_id: "call-1".to_string(),
+                result: "done".to_string(),
+                exit_code: None,
+                timed_out: false,
+            },
+        };
+
+        let json = serde_json::to_value(event).unwrap();
+        let kind = json.get("kind").unwrap();
+
+        assert!(kind.get("exitCode").is_none());
     }
 
     #[test]

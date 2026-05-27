@@ -40,6 +40,7 @@ import type {
   SubagentActivity,
   SubagentEventPayload,
   SubagentStatus,
+  TimelineItem,
   ToolApprovalRequest,
   ToolApprovalResolved,
   TrackedToolCall,
@@ -90,6 +91,18 @@ function mergeSubagentActivities(
   });
 }
 
+function mergeTimelineItems(
+  current: TimelineItem[],
+  incoming: TimelineItem[],
+): TimelineItem[] {
+  if (incoming.length === 0) return current;
+  const bySeq = new Map(current.map((item) => [item.sequence, item]));
+  for (const item of incoming) {
+    bySeq.set(item.sequence, item);
+  }
+  return [...bySeq.values()].sort((a, b) => a.sequence - b.sequence);
+}
+
 export function App() {
   const { t } = useTranslation();
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
@@ -108,6 +121,7 @@ export function App() {
   const [thinkingText, setThinkingText] = useState("");
   const [toolCalls, setToolCalls] = useState<Map<string, TrackedToolCall>>(new Map());
   const [subagentActivities, setSubagentActivities] = useState<SubagentActivity[]>([]);
+  const [timelineItems, setTimelineItems] = useState<TimelineItem[]>([]);
   const [sessionRuntime, setSessionRuntime] = useState<SessionRuntime | null>(null);
   const [approvals, setApprovals] = useState<ToolApprovalRequest[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -340,6 +354,7 @@ export function App() {
     setMessages(payload.messages);
     setSubagentActivities(mergeSubagentActivities([], payload.subagentEvents));
     setSessionRuntime(payload.sessionRuntime ?? null);
+    setTimelineItems([]);
     setStreamingText("");
     setThinkingText("");
     setToolCalls(new Map());
@@ -354,6 +369,7 @@ export function App() {
     setMessages(payload.messages);
     setSubagentActivities(mergeSubagentActivities([], payload.subagentEvents));
     setSessionRuntime(payload.sessionRuntime ?? null);
+    setTimelineItems([]);
     setStreamingText("");
     setThinkingText("");
     setToolCalls(new Map());
@@ -366,6 +382,7 @@ export function App() {
     setMessages(payload.messages);
     setSubagentActivities(mergeSubagentActivities([], payload.subagentEvents));
     setSessionRuntime(payload.sessionRuntime);
+    setTimelineItems((current) => mergeTimelineItems(current, payload.timelineItems));
     setStreamingText("");
     setThinkingText("");
     setStatus(t("status.done"));
@@ -527,6 +544,7 @@ export function App() {
         isBusy={isBusy}
         chatItems={chatItems}
         subagentActivities={subagentActivities}
+        timelineItems={timelineItems}
         sessionRuntime={sessionRuntime}
         prompt={prompt}
         onSetPrompt={setPrompt}

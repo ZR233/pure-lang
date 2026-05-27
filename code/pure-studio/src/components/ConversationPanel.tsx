@@ -1,4 +1,4 @@
-import { Activity, ChevronDown, Send, Terminal } from "lucide-react";
+import { Activity, ChevronDown, Clock, Send, Terminal, Wrench } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
@@ -9,6 +9,7 @@ import type {
   SessionRuntime,
   SubagentActivity,
   SubagentStatus,
+  TimelineItem,
 } from "../types";
 import { formatTime } from "../lib/utils";
 import { ToolCallBlock } from "./ToolCallBlock";
@@ -69,6 +70,7 @@ type ConversationPanelProps = {
   isBusy: boolean;
   chatItems: ChatItem[];
   subagentActivities: SubagentActivity[];
+  timelineItems: TimelineItem[];
   sessionRuntime: SessionRuntime | null;
   prompt: string;
   onSetPrompt: (value: string) => void;
@@ -77,12 +79,77 @@ type ConversationPanelProps = {
 
 const SCROLL_THRESHOLD = 40;
 
+function formatUsage(usage?: { promptTokens: number; completionTokens: number; totalTokens: number } | null) {
+  if (!usage) return null;
+  return `${usage.promptTokens}p + ${usage.completionTokens}c = ${usage.totalTokens}t`;
+}
+
+function TimelineSection({ items }: { items: TimelineItem[] }) {
+  const { t } = useTranslation();
+  if (items.length === 0) return null;
+
+  return (
+    <section className="timeline-section" aria-label="Session timeline">
+      <div className="subagent-timeline-head">
+        <Clock size={16} />
+        <span>{t("timeline.title", "Timeline")}</span>
+      </div>
+      {items.map((item) => {
+        if (item.kind === "turn") {
+          return (
+            <article key={`tl-${item.sequence}`} className={`timeline-item turn status-${item.turnStatus ?? "started"}`}>
+              <div className="timeline-item-header">
+                <Activity size={14} />
+                <span className="timeline-item-kind">
+                  {t("timeline.turn", "Turn")}
+                </span>
+                <span className={`timeline-status status-${item.turnStatus}`}>
+                  {item.turnStatus}
+                </span>
+              </div>
+              {item.turnModel ? <p className="timeline-detail">{item.turnModel}</p> : null}
+              {item.turnUsage ? (
+                <p className="timeline-meta">{formatUsage(item.turnUsage)}</p>
+              ) : null}
+            </article>
+          );
+        }
+
+        if (item.kind === "tool_call") {
+          return (
+            <article key={`tl-${item.sequence}`} className={`timeline-item tool-call status-${item.toolStatus ?? "started"}`}>
+              <div className="timeline-item-header">
+                <Wrench size={14} />
+                <span className="timeline-item-kind">
+                  {item.toolName ?? t("timeline.toolCall", "Tool Call")}
+                </span>
+                <span className={`timeline-status status-${item.toolStatus}`}>
+                  {item.toolStatus}
+                </span>
+              </div>
+              {item.toolArguments ? (
+                <pre className="timeline-arguments">{item.toolArguments}</pre>
+              ) : null}
+              {item.toolResult ? (
+                <p className="timeline-result">{item.toolResult}</p>
+              ) : null}
+            </article>
+          );
+        }
+
+        return null;
+      })}
+    </section>
+  );
+}
+
 export function ConversationPanel({
   selectedSession,
   selectedProject,
   isBusy,
   chatItems,
   subagentActivities,
+  timelineItems,
   sessionRuntime,
   prompt,
   onSetPrompt,
@@ -188,6 +255,9 @@ export function ConversationPanel({
                   </article>
                 ))}
               </section>
+            ) : null}
+            {timelineItems.length > 0 ? (
+              <TimelineSection items={timelineItems} />
             ) : null}
           </>
         )}

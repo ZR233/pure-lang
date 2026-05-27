@@ -661,3 +661,116 @@ button.status-item {
 .spin {
   animation: spin 1s linear infinite;
 }
+
+/* Timeline section */
+.timeline-section {
+  display: grid;
+  width: min(100%, 1160px);
+  max-width: 1160px;
+  gap: 8px;
+  margin: 4px auto 16px;
+}
+
+.timeline-item {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 14px;
+  border: 1px solid #d9e3ed;
+  border-left: 4px solid #7aa9bd;
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+
+.timeline-item.turn {
+  border-left-color: #6c8ebf;
+}
+
+.timeline-item.tool-call {
+  border-left-color: #82a87d;
+}
+
+.timeline-item.status-completed {
+  border-left-color: #59a88c;
+}
+
+.timeline-item.status-failed {
+  border-left-color: #d9736c;
+}
+
+.timeline-item.status-denied {
+  border-left-color: #c4925b;
+}
+
+.timeline-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.timeline-item-kind {
+  font-weight: 600;
+  color: #29384a;
+}
+
+.timeline-status {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #637387;
+  background: #edf1f7;
+}
+
+.timeline-status.status-completed {
+  color: #2b7a5f;
+  background: #e6f5ee;
+}
+
+.timeline-status.status-failed {
+  color: #b34438;
+  background: #fce8e6;
+}
+
+.timeline-status.status-started {
+  color: #3d6eaa;
+  background: #e3ecf7;
+}
+
+.timeline-detail {
+  color: #53657b;
+  font-size: 12px;
+  margin: 0;
+}
+
+.timeline-meta {
+  color: #7d8b9b;
+  font-size: 11px;
+  margin: 0;
+}
+
+.timeline-arguments {
+  overflow: auto;
+  margin: 0;
+  padding: 8px;
+  border-radius: 4px;
+  background: #f0f3f7;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #53657b;
+}
+
+.timeline-result {
+  color: #53657b;
+  font-size: 12px;
+  margin: 0;
+  padding: 8px;
+  border-radius: 4px;
+  background: #f5fbf7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
