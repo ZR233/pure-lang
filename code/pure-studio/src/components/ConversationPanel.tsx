@@ -1,10 +1,13 @@
 import { Activity, ChevronDown, Clock, Send, Terminal, Wrench } from "lucide-react";
+import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   ChatItem,
   ChatMessage,
   ProjectRecord,
+  ProviderRecord,
+  RoleRecord,
   SessionRecord,
   SessionRuntime,
   SubagentActivity,
@@ -56,9 +59,6 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   return (
     <article className={`message ${message.role}`}>
       <div className="message-role">{message.role}</div>
-      {message.reasoningContent ? (
-        <pre className="thinking-block">{message.reasoningContent}</pre>
-      ) : null}
       <div className="message-content">{message.content}</div>
     </article>
   );
@@ -73,6 +73,11 @@ type ConversationPanelProps = {
   timelineItems: TimelineItem[];
   sessionRuntime: SessionRuntime | null;
   prompt: string;
+  status: string;
+  providers: ProviderRecord[];
+  roles: RoleRecord[];
+  setRoles: Dispatch<SetStateAction<RoleRecord[]>>;
+  onSaveProviderSettings: (explicitRoles?: RoleRecord[]) => void;
   onSetPrompt: (value: string) => void;
   onSendPrompt: () => void;
 };
@@ -152,6 +157,11 @@ export function ConversationPanel({
   timelineItems,
   sessionRuntime,
   prompt,
+  status,
+  providers,
+  roles,
+  setRoles,
+  onSaveProviderSettings,
   onSetPrompt,
   onSendPrompt,
 }: ConversationPanelProps) {
@@ -273,6 +283,10 @@ export function ConversationPanel({
           runtime={sessionRuntime}
           selectedSession={selectedSession}
           selectedProject={selectedProject}
+          providers={providers}
+          roles={roles}
+          setRoles={setRoles}
+          onSaveProviderSettings={onSaveProviderSettings}
         />
         <div className="composer">
           <textarea
@@ -293,7 +307,7 @@ export function ConversationPanel({
             onClick={onSendPrompt}
           >
             <Send size={18} />
-            <span>{isBusy ? t("status.running") : t("actions.send")}</span>
+            <span>{isBusy ? status : t("actions.send")}</span>
           </button>
         </div>
       </footer>

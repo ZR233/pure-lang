@@ -47,7 +47,7 @@ type ToolCallBlockProps = {
 
 export function ToolCallBlock({ toolCall }: ToolCallBlockProps) {
   const { t } = useTranslation();
-  const defaultExpanded = toolCall.status === "streaming" || toolCall.status === "pending_approval";
+  const defaultExpanded = false;
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   return (

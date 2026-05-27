@@ -213,10 +213,12 @@ export function App() {
         }
         if ("textDelta" in event) {
           setStreamingText((current) => current + event.textDelta.content);
+          setStatus(t("status.running"));
           return;
         }
         if ("thinkingDelta" in event) {
           setThinkingText((current) => current + event.thinkingDelta.content);
+          setStatus(t("status.thinking"));
           return;
         }
         if ("toolCallDelta" in event) {
@@ -470,9 +472,10 @@ export function App() {
     }
   }
 
-  async function onSaveProviderSettings() {
+  async function onSaveProviderSettings(explicitRoles?: RoleRecord[]) {
     try {
-      const normalizedRoles = normalizeRolesForProviders(roles, providers);
+      const rolesToSave = explicitRoles ?? roles;
+      const normalizedRoles = normalizeRolesForProviders(rolesToSave, providers);
       applyConfig(
         await saveProviderSettings({
           defaultProviderId: selectedProviderId,
@@ -547,6 +550,11 @@ export function App() {
         timelineItems={timelineItems}
         sessionRuntime={sessionRuntime}
         prompt={prompt}
+        status={status}
+        providers={providers}
+        roles={roles}
+        setRoles={setRoles}
+        onSaveProviderSettings={(explicitRoles) => void onSaveProviderSettings(explicitRoles)}
         onSetPrompt={setPrompt}
         onSendPrompt={() => void onSendPrompt()}
       />

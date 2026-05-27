@@ -1,12 +1,18 @@
-import { Boxes, ChevronDown, Cpu, Database, FolderGit2, Settings } from "lucide-react";
-import type { ReactNode } from "react";
+import { Boxes, ChevronDown, Cpu, Database, FolderGit2 } from "lucide-react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ProjectRecord, SessionRecord, SessionRuntime } from "../types";
+import type { ModelRecord, ProjectRecord, ProviderRecord, RoleRecord, SessionRecord, SessionRuntime } from "../types";
+import { allModels } from "../lib/utils";
 
 type SessionStatusBarProps = {
   runtime: SessionRuntime | null;
   selectedSession: SessionRecord | null;
   selectedProject: ProjectRecord | null;
+  providers: ProviderRecord[];
+  roles: RoleRecord[];
+  setRoles: Dispatch<SetStateAction<RoleRecord[]>>;
+  onSaveProviderSettings: (explicitRoles?: RoleRecord[]) => void;
 };
 
 function formatTokenCount(value?: number | null): string {
@@ -36,10 +42,6 @@ function formatCost(runtime: SessionRuntime | null, fallback: string): string {
     return fallback;
   }
   return `${runtime.currency} ${runtime.estimatedCost.toFixed(2)}`;
-}
-
-function formatPrice(value: number | null | undefined, fallback: string): string {
-  return value == null ? fallback : value.toFixed(2);
 }
 
 function contextPercent(runtime: SessionRuntime | null): number {
@@ -86,10 +88,157 @@ function ListPopover({ title, items }: { title: string; items: string[] }) {
   );
 }
 
+function findPlannerRole(roles: RoleRecord[]): RoleRecord | null {
+  return roles.find((r) => r.key === "planner") ?? null;
+}
+
+function findModelInProviders(
+  providers: ProviderRecord[],
+  modelSlug: string,
+): { provider: ProviderRecord; model: ModelRecord } | null {
+  for (const provider of providers) {
+    const model = allModels(provider).find((m) => m.slug === modelSlug);
+    if (model) return { provider, model };
+  }
+  return null;
+}
+
+function ModelSelector({
+  runtime,
+  providers,
+  roles,
+  setRoles,
+  onSaveProviderSettings,
+}: {
+  runtime: SessionRuntime | null;
+  providers: ProviderRecord[];
+  roles: RoleRecord[];
+  setRoles: Dispatch<SetStateAction<RoleRecord[]>>;
+  onSaveProviderSettings: (explicitRoles?: RoleRecord[]) => void;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const plannerRole = findPlannerRole(roles);
+  const currentModelSlug = plannerRole?.model ?? runtime?.model ?? "";
+  const currentModelInfo = findModelInProviders(providers, currentModelSlug);
+  const currentEffort = plannerRole?.effort ?? "";
+  const currentEfforts = currentModelInfo?.model.reasoningEfforts ?? [];
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(event: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  function buildUpdatedPlannerRole(
+    providerId: string,
+    modelSlug: string,
+    effort: string,
+  ): RoleRecord[] {
+    return roles.map((r) =>
+      r.key === "planner"
+        ? { ...r, provider: providerId, model: modelSlug, effort }
+        : r,
+    );
+  }
+
+  function handleSelectModel(providerId: string, modelSlug: string) {
+    if (!plannerRole) return;
+    const provider = providers.find((p) => p.id === providerId);
+    if (!provider) return;
+    const model = allModels(provider).find((m) => m.slug === modelSlug);
+    if (!model) return;
+    const effort = model.reasoningEfforts.includes(currentEffort)
+      ? currentEffort
+      : (model.reasoningEfforts[0] ?? "");
+    const newRoles = buildUpdatedPlannerRole(providerId, modelSlug, effort);
+    setRoles(newRoles);
+    onSaveProviderSettings(newRoles);
+    setOpen(false);
+  }
+
+  function handleSelectEffort(effort: string) {
+    if (!plannerRole) return;
+    const newRoles = roles.map((r) =>
+      r.key === "planner" ? { ...r, effort } : r,
+    );
+    setRoles(newRoles);
+    onSaveProviderSettings(newRoles);
+  }
+
+  const grouped: { provider: ProviderRecord; models: ModelRecord[] }[] = [];
+  for (const provider of providers) {
+    const models = allModels(provider);
+    if (models.length > 0) {
+      grouped.push({ provider, models });
+    }
+  }
+
+  return (
+    <div className="model-selector-wrap" ref={wrapRef}>
+      <button
+        className="status-item status-model"
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Cpu size={14} />
+        <span>{t("statusBar.model")}</span>
+        <strong>{currentModelInfo?.model.displayName ?? currentModelSlug ?? t("statusBar.noModel")}</strong>
+        <ChevronDown size={13} />
+      </button>
+      {open && (
+        <div className="model-selector-dropdown">
+          <div className="model-selector-list">
+            {grouped.map((group) => (
+              <div className="model-selector-group" key={group.provider.id}>
+                <div className="model-selector-provider-label">
+                  {group.provider.name || group.provider.id}
+                </div>
+                {group.models.map((model) => (
+                  <button
+                    key={model.slug}
+                    className={`model-selector-option${model.slug === currentModelSlug ? " active" : ""}`}
+                    onClick={() => handleSelectModel(group.provider.id, model.slug)}
+                  >
+                    <span className="model-selector-name">{model.displayName || model.slug}</span>
+                    {model.slug === currentModelSlug && currentEfforts.length > 0 ? (
+                      <div className="model-selector-efforts" onClick={(e) => e.stopPropagation()}>
+                        {currentEfforts.map((effort) => (
+                          <button
+                            key={effort}
+                            className={`model-selector-effort${effort === currentEffort ? " active" : ""}`}
+                            onClick={() => handleSelectEffort(effort)}
+                          >
+                            {effort}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SessionStatusBar({
   runtime,
   selectedSession,
   selectedProject,
+  providers,
+  roles,
+  setRoles,
+  onSaveProviderSettings,
 }: SessionStatusBarProps) {
   const { t } = useTranslation();
   const contextLabel = `${formatTokenCount(runtime?.latestContextTokens)} / ${formatTokenCount(runtime?.contextWindow)}`;
@@ -97,37 +246,17 @@ export function SessionStatusBar({
   const contextWidth = `${contextPercent(runtime)}%`;
   const skills = runtime?.activeSkills ?? [];
   const mcpServers = runtime?.activeMcpServers ?? [];
-  const notConfigured = t("statusBar.notConfigured");
 
   return (
     <div className="session-status-bar" aria-label={t("statusBar.label")}>
       <div className="status-group status-left">
-        <StatusPopover
-          trigger={
-            <button className="status-item status-model" type="button">
-              <Cpu size={14} />
-              <span>{t("statusBar.model")}</span>
-              <strong>{runtime?.model ?? t("statusBar.noModel")}</strong>
-              <ChevronDown size={13} />
-            </button>
-          }
-        >
-          <div className="status-price-popover">
-            <div className="status-popover-title">
-              {t("statusBar.modelPricing")}
-              <Settings size={13} />
-            </div>
-            <span>currency: {runtime?.currency ?? notConfigured}</span>
-            <span>inputPricePerMTok: {formatPrice(runtime?.inputPricePerMTok, notConfigured)}</span>
-            <span>
-              outputPricePerMTok: {formatPrice(runtime?.outputPricePerMTok, notConfigured)}
-            </span>
-            <span>
-              cacheReadPricePerMTok:{" "}
-              {formatPrice(runtime?.cacheReadPricePerMTok, notConfigured)}
-            </span>
-          </div>
-        </StatusPopover>
+        <ModelSelector
+          runtime={runtime}
+          providers={providers}
+          roles={roles}
+          setRoles={setRoles}
+          onSaveProviderSettings={onSaveProviderSettings}
+        />
 
         <div className="status-item status-session">
           <FolderGit2 size={14} />
