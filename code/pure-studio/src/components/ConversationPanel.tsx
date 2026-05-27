@@ -281,8 +281,6 @@ export function ConversationPanel({
       <footer className="conversation-footer">
         <SessionStatusBar
           runtime={sessionRuntime}
-          selectedSession={selectedSession}
-          selectedProject={selectedProject}
           providers={providers}
           roles={roles}
           setRoles={setRoles}

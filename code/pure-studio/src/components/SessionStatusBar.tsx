@@ -1,14 +1,12 @@
-import { Boxes, ChevronDown, Cpu, Database, FolderGit2 } from "lucide-react";
+import { Boxes, ChevronDown, Cpu } from "lucide-react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ModelRecord, ProjectRecord, ProviderRecord, RoleRecord, SessionRecord, SessionRuntime } from "../types";
+import type { ModelRecord, ProviderRecord, RoleRecord, SessionRuntime } from "../types";
 import { allModels } from "../lib/utils";
 
 type SessionStatusBarProps = {
   runtime: SessionRuntime | null;
-  selectedSession: SessionRecord | null;
-  selectedProject: ProjectRecord | null;
   providers: ProviderRecord[];
   roles: RoleRecord[];
   setRoles: Dispatch<SetStateAction<RoleRecord[]>>;
@@ -188,7 +186,6 @@ function ModelSelector({
         onClick={() => setOpen((v) => !v)}
       >
         <Cpu size={14} />
-        <span>{t("statusBar.model")}</span>
         <strong>{currentModelInfo?.model.displayName ?? currentModelSlug ?? t("statusBar.noModel")}</strong>
         <ChevronDown size={13} />
       </button>
@@ -233,8 +230,6 @@ function ModelSelector({
 
 export function SessionStatusBar({
   runtime,
-  selectedSession,
-  selectedProject,
   providers,
   roles,
   setRoles,
@@ -257,16 +252,6 @@ export function SessionStatusBar({
           setRoles={setRoles}
           onSaveProviderSettings={onSaveProviderSettings}
         />
-
-        <div className="status-item status-session">
-          <FolderGit2 size={14} />
-          <span>{t("statusBar.session")}</span>
-          <strong>{selectedSession?.title ?? t("conversation.defaultTitle")}</strong>
-        </div>
-        <div className="status-item status-workspace">
-          <Database size={14} />
-          <strong>{selectedProject?.name ?? t("context.noProject")}</strong>
-        </div>
       </div>
 
       <div className="status-group status-center">
@@ -303,11 +288,6 @@ export function SessionStatusBar({
             <small>{t("statusBar.costHint")}</small>
           </div>
         </StatusPopover>
-
-        <div className="status-item status-cost">
-          <span>{t("statusBar.cost")}</span>
-          <strong>{costLabel}</strong>
-        </div>
       </div>
 
       <div className="status-group status-right">
@@ -315,23 +295,15 @@ export function SessionStatusBar({
           trigger={
             <button className="status-item status-count" type="button">
               <Boxes size={14} />
-              <strong>Skills {skills.length}</strong>
+              <strong>{skills.length + mcpServers.length}</strong>
               <ChevronDown size={13} />
             </button>
           }
         >
-          <ListPopover title="Skills" items={skills} />
-        </StatusPopover>
-        <StatusPopover
-          trigger={
-            <button className="status-item status-count" type="button">
-              <Database size={14} />
-              <strong>MCP {mcpServers.length}</strong>
-              <ChevronDown size={13} />
-            </button>
-          }
-        >
-          <ListPopover title="MCP" items={mcpServers} />
+          <div className="status-extensions-popover">
+            <ListPopover title="Skills" items={skills} />
+            <ListPopover title="MCP" items={mcpServers} />
+          </div>
         </StatusPopover>
       </div>
     </div>
