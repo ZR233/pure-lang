@@ -3,6 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use pl_model::TokenUsage;
+use pl_protocol::TraceEvent;
 use serde::{Deserialize, Serialize};
 
 /// 工具分发循环默认最大迭代次数。
@@ -155,4 +156,6 @@ pub struct TurnResult {
     pub usage: TokenUsage,
     pub mode: CompileMode,
     pub session_message_count: usize,
+    /// Structured trace events recorded during this turn (if tracing was enabled).
+    pub trace_events: Vec<TraceEvent>,
 }

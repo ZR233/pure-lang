@@ -5,6 +5,7 @@ mod first_run;
 mod session;
 mod studio;
 mod tool;
+mod trace;
 mod turn;
 mod workspace;
 
@@ -24,7 +25,7 @@ pub use pl_model::{InputModality, TruncationMode};
 pub use pl_protocol::{
     AgentEvent, AgentEventReceiver, AgentEventSender, ContentPart, ContentPartType, ErrorSeverity,
     Message, MessageContent, MessageRole, OutputStream, PermissionLevel, PipelineStage, PureError,
-    Result, SubagentStatus,
+    Result, SubagentStatus, TokenUsageSnapshot, TraceEvent, TraceEventKind,
 };
 pub use session::CoreSession;
 pub use studio::{
@@ -35,6 +36,7 @@ pub use tool::{
     BashInput, BashTool, OutputTruncation, SubagentContext, SubagentInput, SubagentTool, Tool,
     ToolContext, ToolInput, ToolOutput, ToolRegistry, TruncatedOutput, TruncationStrategy,
 };
+pub use trace::TraceRecorder;
 pub use turn::{
     CompileMode, DEFAULT_MAX_TOOL_ITERATIONS, ToolApprovalCallback, ToolApprovalDecision,
     ToolApprovalPolicy, ToolApprovalRequest, TurnOptions, TurnRequest, TurnResult,

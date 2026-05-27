@@ -11,7 +11,8 @@ use pl_core::{
     ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProjectRecord, ProviderConfig,
     ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, ProviderTemplateKind, PureConfig,
     RoleEdit, SessionRecord, SessionRuntimeRecord, StudioRuntime, StudioStore, SubagentEventRecord,
-    ToolApprovalCallback, ToolApprovalDecision, ToolApprovalRequest, infer_provider_template_kind,
+    ToolApprovalCallback, ToolApprovalDecision, ToolApprovalRequest, TraceEvent, TraceEventKind,
+    infer_provider_template_kind,
 };
 use pl_protocol::{AgentEvent, Message, MessageContent, MessageRole, PureError, SubagentStatus};
 use serde::{Deserialize, Serialize};
@@ -287,6 +288,43 @@ struct RunPromptResponse {
     sessions: Vec<SessionDto>,
     subagent_events: Vec<SubagentEventDto>,
     session_runtime: SessionRuntimeDto,
+    timeline_items: Vec<TimelineItemDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UsageDto {
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    cached_prompt_tokens: u64,
+    total_tokens: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TimelineItemDto {
+    kind: String,
+    sequence: u64,
+    timestamp: i64,
+    turn_id: Option<String>,
+    tool_call_id: Option<String>,
+    tool_name: Option<String>,
+    tool_arguments: Option<String>,
+    tool_status: Option<String>,
+    tool_result: Option<String>,
+    inference_model: Option<String>,
+    inference_usage: Option<UsageDto>,
+    turn_status: Option<String>,
+    turn_model: Option<String>,
+    turn_usage: Option<UsageDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionTimelineDto {
+    session_id: String,
+    items: Vec<TimelineItemDto>,
+    next_sequence: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -340,6 +378,7 @@ fn main() {
             create_session,
             select_session,
             run_prompt,
+            load_session_timeline,
             approve_tool,
             deny_tool,
             load_config,
@@ -514,6 +553,7 @@ async fn run_prompt(
                         .await?,
                 ),
                 session_runtime: load_session_runtime_dto(&state.studio, &session_id).await?,
+                timeline_items: trace_events_to_timeline_items(&outcome.trace_events),
             };
             let _ = app.emit("studio-prompt-finished", response.clone());
             Ok(response)
@@ -530,6 +570,38 @@ async fn run_prompt(
             Err(CommandError { message })
         }
     }
+}
+
+#[tauri::command]
+async fn load_session_timeline(
+    session_id: String,
+    after_sequence: Option<i64>,
+    limit: Option<i64>,
+    state: State<'_, AppState>,
+) -> CommandResult<SessionTimelineDto> {
+    let records = state
+        .studio
+        .store()
+        .load_trace_events(&session_id, after_sequence, limit)
+        .await?;
+    let next_sequence = state.studio.store().next_sequence(&session_id).await?;
+    let trace_events: Vec<TraceEvent> = records
+        .iter()
+        .filter_map(|record| {
+            let kind: TraceEventKind = serde_json::from_str(&record.payload_json).ok()?;
+            Some(TraceEvent {
+                session_id: record.session_id.clone(),
+                sequence: record.sequence as u64,
+                timestamp: record.timestamp,
+                kind,
+            })
+        })
+        .collect();
+    Ok(SessionTimelineDto {
+        session_id,
+        items: trace_events_to_timeline_items(&trace_events),
+        next_sequence,
+    })
 }
 
 #[tauri::command]
@@ -1061,6 +1133,209 @@ fn subagent_status_label(status: SubagentStatus) -> &'static str {
         SubagentStatus::Succeeded => "succeeded",
         SubagentStatus::Failed => "failed",
         SubagentStatus::Denied => "denied",
+    }
+}
+
+fn trace_events_to_timeline_items(events: &[TraceEvent]) -> Vec<TimelineItemDto> {
+    events.iter().map(trace_event_to_timeline_item).collect()
+}
+
+fn trace_event_to_timeline_item(event: &TraceEvent) -> TimelineItemDto {
+    let sequence = event.sequence;
+    let timestamp = event.timestamp;
+    match &event.kind {
+        TraceEventKind::TurnStarted { turn_id } => TimelineItemDto {
+            kind: "turn".to_string(),
+            sequence,
+            timestamp,
+            turn_id: Some(turn_id.clone()),
+            tool_call_id: None,
+            tool_name: None,
+            tool_arguments: None,
+            tool_status: None,
+            tool_result: None,
+            inference_model: None,
+            inference_usage: None,
+            turn_status: Some("started".to_string()),
+            turn_model: None,
+            turn_usage: None,
+        },
+        TraceEventKind::TurnCompleted {
+            turn_id,
+            model,
+            usage,
+            ..
+        } => TimelineItemDto {
+            kind: "turn".to_string(),
+            sequence,
+            timestamp,
+            turn_id: Some(turn_id.clone()),
+            tool_call_id: None,
+            tool_name: None,
+            tool_arguments: None,
+            tool_status: None,
+            tool_result: None,
+            inference_model: None,
+            inference_usage: None,
+            turn_status: Some("completed".to_string()),
+            turn_model: Some(model.clone()),
+            turn_usage: Some(UsageDto {
+                prompt_tokens: usage.prompt_tokens,
+                completion_tokens: usage.completion_tokens,
+                cached_prompt_tokens: usage.cached_prompt_tokens,
+                total_tokens: usage.total_tokens,
+            }),
+        },
+        TraceEventKind::TurnFailed { turn_id, .. } => TimelineItemDto {
+            kind: "turn".to_string(),
+            sequence,
+            timestamp,
+            turn_id: Some(turn_id.clone()),
+            tool_call_id: None,
+            tool_name: None,
+            tool_arguments: None,
+            tool_status: None,
+            tool_result: None,
+            inference_model: None,
+            inference_usage: None,
+            turn_status: Some("failed".to_string()),
+            turn_model: None,
+            turn_usage: None,
+        },
+        TraceEventKind::InferenceStarted { model, .. } => TimelineItemDto {
+            kind: "inference".to_string(),
+            sequence,
+            timestamp,
+            turn_id: None,
+            tool_call_id: None,
+            tool_name: None,
+            tool_arguments: None,
+            tool_status: None,
+            tool_result: None,
+            inference_model: Some(model.clone()),
+            inference_usage: None,
+            turn_status: None,
+            turn_model: None,
+            turn_usage: None,
+        },
+        TraceEventKind::InferenceCompleted { usage, .. } => TimelineItemDto {
+            kind: "inference".to_string(),
+            sequence,
+            timestamp,
+            turn_id: None,
+            tool_call_id: None,
+            tool_name: None,
+            tool_arguments: None,
+            tool_status: None,
+            tool_result: None,
+            inference_model: None,
+            inference_usage: Some(UsageDto {
+                prompt_tokens: usage.prompt_tokens,
+                completion_tokens: usage.completion_tokens,
+                cached_prompt_tokens: usage.cached_prompt_tokens,
+                total_tokens: usage.total_tokens,
+            }),
+            turn_status: None,
+            turn_model: None,
+            turn_usage: None,
+        },
+        TraceEventKind::ToolCallStarted {
+            tool_call_id,
+            name,
+            arguments,
+            ..
+        } => TimelineItemDto {
+            kind: "tool_call".to_string(),
+            sequence,
+            timestamp,
+            turn_id: None,
+            tool_call_id: Some(tool_call_id.clone()),
+            tool_name: Some(name.clone()),
+            tool_arguments: Some(arguments.clone()),
+            tool_status: Some("started".to_string()),
+            tool_result: None,
+            inference_model: None,
+            inference_usage: None,
+            turn_status: None,
+            turn_model: None,
+            turn_usage: None,
+        },
+        TraceEventKind::ToolCallApproved { tool_call_id } => TimelineItemDto {
+            kind: "tool_call".to_string(),
+            sequence,
+            timestamp,
+            turn_id: None,
+            tool_call_id: Some(tool_call_id.clone()),
+            tool_name: None,
+            tool_arguments: None,
+            tool_status: Some("approved".to_string()),
+            tool_result: None,
+            inference_model: None,
+            inference_usage: None,
+            turn_status: None,
+            turn_model: None,
+            turn_usage: None,
+        },
+        TraceEventKind::ToolCallDenied {
+            tool_call_id,
+            reason,
+            ..
+        } => TimelineItemDto {
+            kind: "tool_call".to_string(),
+            sequence,
+            timestamp,
+            turn_id: None,
+            tool_call_id: Some(tool_call_id.clone()),
+            tool_name: None,
+            tool_arguments: None,
+            tool_status: Some("denied".to_string()),
+            tool_result: Some(reason.clone()),
+            inference_model: None,
+            inference_usage: None,
+            turn_status: None,
+            turn_model: None,
+            turn_usage: None,
+        },
+        TraceEventKind::ToolCallCompleted {
+            tool_call_id,
+            result,
+            ..
+        } => TimelineItemDto {
+            kind: "tool_call".to_string(),
+            sequence,
+            timestamp,
+            turn_id: None,
+            tool_call_id: Some(tool_call_id.clone()),
+            tool_name: None,
+            tool_arguments: None,
+            tool_status: Some("completed".to_string()),
+            tool_result: Some(result.clone()),
+            inference_model: None,
+            inference_usage: None,
+            turn_status: None,
+            turn_model: None,
+            turn_usage: None,
+        },
+        TraceEventKind::ToolCallFailed {
+            tool_call_id,
+            error,
+            ..
+        } => TimelineItemDto {
+            kind: "tool_call".to_string(),
+            sequence,
+            timestamp,
+            turn_id: None,
+            tool_call_id: Some(tool_call_id.clone()),
+            tool_name: None,
+            tool_arguments: None,
+            tool_status: Some("failed".to_string()),
+            tool_result: Some(error.clone()),
+            inference_model: None,
+            inference_usage: None,
+            turn_status: None,
+            turn_model: None,
+            turn_usage: None,
+        },
     }
 }
 

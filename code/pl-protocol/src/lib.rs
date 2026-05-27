@@ -6,7 +6,7 @@ mod permission;
 pub use error::{PureError, Result};
 pub use event::{
     AgentEvent, AgentEventReceiver, AgentEventSender, ErrorSeverity, OutputStream, PipelineStage,
-    SubagentStatus,
+    SubagentStatus, TokenUsageSnapshot, TraceEvent, TraceEventKind,
 };
 pub use message::{ContentPart, ContentPartType, Message, MessageContent, MessageRole};
 pub use permission::PermissionLevel;
