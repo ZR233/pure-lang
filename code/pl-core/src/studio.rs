@@ -364,7 +364,8 @@ impl StudioRuntime {
         session_id: &str,
         prompt: String,
         event_tx: AgentEventSender,
-        _approval_callback: ToolApprovalCallback,
+        approval_callback: ToolApprovalCallback,
+        mut options: TurnOptions,
     ) -> Result<StudioPromptOutcome> {
         let session_record = self
             .store
@@ -387,13 +388,19 @@ impl StudioRuntime {
 
         let mut core = PureCore::from_config(&config, ModelRole::Planner)?;
         core.register_default_tools(PathBuf::from(&project.path), Some(workspace_instructions));
-        let options = TurnOptions::default();
+        if matches!(
+            options.tool_approval_policy,
+            crate::turn::ToolApprovalPolicy::Manual
+        ) && options.tool_approval_callback.is_none()
+        {
+            options.tool_approval_callback = Some(approval_callback);
+        }
         let starting_sequence = self.store.next_sequence(session_id).await?;
         let mut recorder = TraceRecorder::new(session_id.to_string(), event_tx, starting_sequence);
         let result = core
             .run_turn_with_trace(&mut session, request, &mut recorder, options)
             .await?;
-        let trace_events = recorder.drain();
+        let trace_events = result.trace_events.clone();
         if !trace_events.is_empty() {
             self.store.append_trace_events(&trace_events).await?;
         }
@@ -924,6 +931,7 @@ fn trace_event_kind_label(kind: &pl_protocol::TraceEventKind) -> &'static str {
         pl_protocol::TraceEventKind::TurnStarted { .. } => "TurnStarted",
         pl_protocol::TraceEventKind::TurnCompleted { .. } => "TurnCompleted",
         pl_protocol::TraceEventKind::TurnFailed { .. } => "TurnFailed",
+        pl_protocol::TraceEventKind::TurnInterrupted { .. } => "TurnInterrupted",
         pl_protocol::TraceEventKind::InferenceStarted { .. } => "InferenceStarted",
         pl_protocol::TraceEventKind::InferenceCompleted { .. } => "InferenceCompleted",
         pl_protocol::TraceEventKind::ToolCallStarted { .. } => "ToolCallStarted",
@@ -1319,6 +1327,7 @@ mod tests {
             },
             mode: CompileMode::Auto,
             session_message_count: 2,
+            status: crate::turn::TurnResultStatus::Completed,
             trace_events: Vec::new(),
         };
 

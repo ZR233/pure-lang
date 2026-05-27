@@ -10,7 +10,7 @@ use crate::PureCore;
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
 use crate::core::{compact_text, emit_subagent_state};
 use crate::session::CoreSession;
-use crate::turn::CompileMode;
+use crate::turn::{CompileMode, TurnResultStatus};
 
 const MAX_SUBAGENT_DEPTH: u32 = 3;
 
@@ -280,6 +280,19 @@ impl Tool for SubagentTool {
             } else {
                 result.content.trim().to_string()
             };
+            if result.status == TurnResultStatus::Interrupted {
+                emit_subagent_state(
+                    &context.event_tx,
+                    &subagent_context,
+                    SubagentStatus::Failed,
+                    Some(compact_text(&description)),
+                    Some("interrupted by user".to_string()),
+                );
+                return Err(PureError::ToolExecutionFailed {
+                    tool: "subagent".to_string(),
+                    error: "subagent interrupted by user".to_string(),
+                });
+            }
             emit_subagent_state(
                 &context.event_tx,
                 &subagent_context,

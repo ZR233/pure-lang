@@ -878,3 +878,410 @@ button.status-item {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* Unified conversation timeline */
+.conversation-timeline {
+  position: relative;
+  width: min(100%, 1180px);
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 4px 0 28px 30px;
+}
+
+.conversation-timeline::before {
+  position: absolute;
+  top: 8px;
+  bottom: 0;
+  left: 10px;
+  width: 1px;
+  background: #dce6ef;
+  content: "";
+}
+
+.timeline-entry {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+  margin: 0 0 16px -30px;
+}
+
+.timeline-node {
+  position: relative;
+  z-index: 1;
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  border: 1px solid #c9d8e6;
+  border-radius: 50%;
+  color: #668097;
+  background: #ffffff;
+}
+
+.timeline-entry-message.role-user .timeline-node {
+  border-color: #90bdd4;
+  color: #0b6ea8;
+  background: #edf7fc;
+}
+
+.timeline-entry-tool .timeline-node,
+.timeline-entry-subagent .timeline-node {
+  border-color: #9ccfb4;
+  color: #238153;
+  background: #eefaf3;
+}
+
+.timeline-entry-thought .timeline-node,
+.timeline-entry-trace .timeline-node {
+  border-color: #c4ced8;
+  color: #6f7d8b;
+  background: #f8fafc;
+}
+
+.timeline-entry-card {
+  min-width: 0;
+  padding: 0 0 16px;
+  border-bottom: 1px solid #e5ebf2;
+}
+
+.timeline-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 7px;
+  color: #28374d;
+  font-size: 13px;
+}
+
+.timeline-entry-head strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #253247;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-entry-meta,
+.timeline-entry-meta-inline {
+  color: #7a899a;
+  font-size: 11px;
+}
+
+.timeline-entry-meta-inline {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.timeline-message-content,
+.timeline-task,
+.timeline-result {
+  overflow-wrap: anywhere;
+}
+
+.timeline-message-content {
+  color: #202b3d;
+  font-size: 14px;
+  line-height: 1.72;
+  white-space: pre-wrap;
+}
+
+.timeline-entry-message.role-user .timeline-entry-card {
+  padding: 12px 14px;
+  border: 1px solid #d7e5f0;
+  border-radius: 8px;
+  background: #f8fbfd;
+}
+
+.timeline-entry-tool .timeline-entry-card,
+.timeline-entry-subagent .timeline-entry-card {
+  padding: 10px 12px;
+  border: 1px solid #dce7ef;
+  border-left: 3px solid #88afc3;
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.timeline-entry-subagent.status-running .timeline-entry-card,
+.timeline-entry-subagent.status-awaitingToolApproval .timeline-entry-card,
+.timeline-entry-subagent.status-awaitingApproval .timeline-entry-card {
+  border-left-color: #2c9b6c;
+  background: #f7fcf9;
+}
+
+.timeline-entry-subagent.status-failed .timeline-entry-card,
+.timeline-entry-subagent.status-denied .timeline-entry-card,
+.timeline-entry-trace.status-failed .timeline-entry-card,
+.timeline-entry-trace.status-interrupted .timeline-entry-card {
+  border-left-color: #c44d58;
+  background: #fff8f8;
+}
+
+.timeline-thought {
+  color: #596879;
+}
+
+.timeline-thought summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  list-style: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.timeline-thought summary::-webkit-details-marker {
+  display: none;
+}
+
+.timeline-thought[open] summary svg {
+  transform: rotate(180deg);
+}
+
+.timeline-thought pre,
+.timeline-code {
+  overflow: auto;
+  max-height: 260px;
+  margin: 8px 0 0;
+  padding: 9px 10px;
+  border-radius: 6px;
+  color: #314056;
+  background: #f1f5f8;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.timeline-task {
+  margin: 0 0 6px;
+  color: #29384a;
+  font-size: 13px;
+}
+
+.timeline-result {
+  margin: 6px 0 0;
+  padding: 0;
+  color: #637387;
+  background: transparent;
+  font-size: 12px;
+}
+
+.timeline-entry-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 0;
+}
+
+.timeline-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: #637387;
+  background: #edf2f6;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.timeline-badge.status-completed,
+.timeline-badge.status-result_ready,
+.timeline-badge.status-approved,
+.timeline-badge.status-succeeded {
+  color: #1e7a4e;
+  background: #e9f8ef;
+}
+
+.timeline-badge.status-running,
+.timeline-badge.status-streaming,
+.timeline-badge.status-awaitingToolApproval,
+.timeline-badge.status-awaitingApproval {
+  color: #096895;
+  background: #e7f4fb;
+}
+
+.timeline-badge.status-denied,
+.timeline-badge.status-failed {
+  color: #b8424c;
+  background: #fdebed;
+}
+
+/* Status bar redesign */
+.session-status-bar {
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 50px;
+}
+
+.status-left {
+  flex: 0 0 auto;
+}
+
+.status-right {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.turn-status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid #d9e3ed;
+  border-radius: 8px;
+  color: #53657b;
+  background: #ffffff;
+}
+
+.turn-status-indicator strong {
+  color: #1d293b;
+  font-weight: 800;
+}
+
+.turn-status-indicator span {
+  color: #7d8b9b;
+  font-size: 11px;
+}
+
+.turn-status-indicator.phase-running,
+.turn-status-indicator.phase-thinking,
+.turn-status-indicator.phase-tool,
+.turn-status-indicator.phase-subagent,
+.turn-status-indicator.phase-approval {
+  border-color: #b9dceb;
+  color: #0b6ea8;
+  background: #f1f9fd;
+}
+
+.turn-status-indicator.phase-stopping,
+.turn-status-indicator.phase-interrupted,
+.turn-status-indicator.phase-failed {
+  border-color: #efc7cd;
+  color: #b8424c;
+  background: #fff8f8;
+}
+
+.status-subagent-popover {
+  display: grid;
+  gap: 10px;
+  width: 360px;
+  max-width: min(360px, calc(100vw - 48px));
+  padding: 14px;
+  border: 1px solid #d8e2eb;
+  border-radius: 8px;
+  color: #1b2638;
+  background: #ffffff;
+  box-shadow: 0 12px 34px rgb(15 23 42 / 22%);
+}
+
+.status-subagent-popover > strong {
+  font-size: 13px;
+}
+
+.status-subagent-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 9px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #edf1f5;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.status-subagent-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: #a8b3bf;
+}
+
+.status-subagent-row.status-running .status-subagent-dot,
+.status-subagent-row.status-awaitingToolApproval .status-subagent-dot,
+.status-subagent-row.status-awaitingApproval .status-subagent-dot {
+  background: #2c9b6c;
+}
+
+.status-subagent-row.status-failed .status-subagent-dot,
+.status-subagent-row.status-denied .status-subagent-dot {
+  background: #c44d58;
+}
+
+.status-subagent-role {
+  display: block;
+  color: #1f2d3d;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.status-subagent-row p {
+  min-width: 0;
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: #637387;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-subagent-badge {
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: #526579;
+  background: #edf2f6;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.status-subagents strong,
+.status-count strong {
+  max-width: 120px;
+}
+
+.send-button.stop-button {
+  border-color: #c85662;
+  color: #ffffff;
+  background: #bb3f4c;
+}
+
+.send-button.stop-button:hover:not(:disabled) {
+  background: #a93743;
+}
+
+.send-button.stop-button:disabled {
+  border-color: #e1b0b7;
+  background: #d98b95;
+}
+
+@media (max-width: 860px) {
+  .session-status-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .status-left,
+  .status-right {
+    width: 100%;
+  }
+
+  .status-right {
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+
+  .conversation-timeline {
+    padding-left: 26px;
+  }
+}

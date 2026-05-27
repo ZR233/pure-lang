@@ -5,6 +5,7 @@ use std::sync::Arc;
 use pl_model::TokenUsage;
 use pl_protocol::TraceEvent;
 use serde::{Deserialize, Serialize};
+use tokio_util::sync::CancellationToken;
 
 /// 工具分发循环默认最大迭代次数。
 pub const DEFAULT_MAX_TOOL_ITERATIONS: usize = 10;
@@ -107,6 +108,7 @@ pub enum ToolApprovalDecision {
 pub struct TurnOptions {
     pub tool_approval_policy: ToolApprovalPolicy,
     pub tool_approval_callback: Option<ToolApprovalCallback>,
+    pub cancellation_token: Option<CancellationToken>,
 }
 
 impl TurnOptions {
@@ -114,6 +116,7 @@ impl TurnOptions {
         Self {
             tool_approval_policy,
             tool_approval_callback: None,
+            cancellation_token: None,
         }
     }
 
@@ -121,11 +124,17 @@ impl TurnOptions {
         Self {
             tool_approval_policy: ToolApprovalPolicy::Manual,
             tool_approval_callback: Some(callback),
+            cancellation_token: None,
         }
     }
 
     pub fn deny_all() -> Self {
         Self::new(ToolApprovalPolicy::DenyAll)
+    }
+
+    pub fn with_cancellation(mut self, cancellation_token: CancellationToken) -> Self {
+        self.cancellation_token = Some(cancellation_token);
+        self
     }
 }
 
@@ -143,8 +152,19 @@ impl std::fmt::Debug for TurnOptions {
                 "tool_approval_callback",
                 &self.tool_approval_callback.as_ref().map(|_| "<callback>"),
             )
+            .field(
+                "cancellation_token",
+                &self.cancellation_token.as_ref().map(|_| "<token>"),
+            )
             .finish()
     }
+}
+
+/// 单轮运行的最终状态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnResultStatus {
+    Completed,
+    Interrupted,
 }
 
 /// 单轮核心编译结果。
@@ -156,6 +176,7 @@ pub struct TurnResult {
     pub usage: TokenUsage,
     pub mode: CompileMode,
     pub session_message_count: usize,
+    pub status: TurnResultStatus,
     /// Structured trace events recorded during this turn (if tracing was enabled).
     pub trace_events: Vec<TraceEvent>,
 }

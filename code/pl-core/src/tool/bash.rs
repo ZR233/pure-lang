@@ -148,7 +148,7 @@ impl Tool for BashTool {
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        _context: ToolContext,
+        context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
             let bash_input = Self::parse_input(input.arguments, self.name())?;
@@ -174,25 +174,48 @@ impl Tool for BashTool {
                 .map_err(|e| self.tool_error(format!("failed to spawn command: {e}")))?;
             let child_id = child.id();
 
-            let (stdout, stderr, exit_code, timed_out);
+            let wait_for_output = async {
+                match tokio::time::timeout(timeout, child.wait_with_output()).await {
+                    Ok(Ok(output)) => Ok((
+                        String::from_utf8_lossy(&output.stdout).to_string(),
+                        String::from_utf8_lossy(&output.stderr).to_string(),
+                        output.status.code(),
+                        false,
+                    )),
+                    Ok(Err(e)) => Err(self.tool_error(format!("command execution failed: {e}"))),
+                    Err(_elapsed) => {
+                        kill_orphan_process(child_id);
+                        Ok((
+                            String::new(),
+                            format!("Command timed out after {} seconds", timeout.as_secs()),
+                            None,
+                            true,
+                        ))
+                    }
+                }
+            };
 
-            match tokio::time::timeout(timeout, child.wait_with_output()).await {
-                Ok(Ok(output)) => {
-                    timed_out = false;
-                    stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                    stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                    exit_code = output.status.code();
+            let (stdout, stderr, exit_code, timed_out) = match &context.options.cancellation_token {
+                Some(token) => {
+                    tokio::select! {
+                        result = wait_for_output => result?,
+                        _ = token.cancelled() => {
+                            kill_orphan_process(child_id);
+                            return Err(self.tool_error("command interrupted by user"));
+                        }
+                    }
                 }
-                Ok(Err(e)) => {
-                    return Err(self.tool_error(format!("command execution failed: {e}")));
-                }
-                Err(_elapsed) => {
-                    kill_orphan_process(child_id);
-                    timed_out = true;
-                    stdout = String::new();
-                    stderr = format!("Command timed out after {} seconds", timeout.as_secs());
-                    exit_code = None;
-                }
+                None => wait_for_output.await?,
+            };
+
+            if context
+                .options
+                .cancellation_token
+                .as_ref()
+                .is_some_and(|token| token.is_cancelled())
+            {
+                kill_orphan_process(child_id);
+                return Err(self.tool_error("command interrupted by user"));
             }
 
             let output_path = self.output_path(&input.session_id, &input.tool_id);

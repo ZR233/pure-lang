@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use pl_model::{
     CompletionRequest, ModelProvider, ProviderInfo, ReasoningConfig, ReasoningSummary,
-    SharedModelProvider, create_provider, create_provider_with_models,
+    SharedModelProvider, TokenUsage, create_provider, create_provider_with_models,
 };
 use pl_protocol::{
     AgentEvent, AgentEventSender, Result, SubagentStatus, TokenUsageSnapshot, TraceEventKind,
@@ -18,7 +18,7 @@ use crate::tool::{
 use crate::trace::TraceRecorder;
 use crate::turn::{
     DEFAULT_MAX_TOOL_ITERATIONS, ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest,
-    TurnOptions, TurnRequest, TurnResult,
+    TurnOptions, TurnRequest, TurnResult, TurnResultStatus,
 };
 
 /// 生成唯一的会话 ID（毫秒时间戳 + 序列号）。
@@ -174,6 +174,7 @@ impl PureCore {
             .unwrap_or_else(default_workspace_root);
         let workspace_instructions = self.workspace_instructions.clone();
         let active_subagent = self.active_subagent.clone();
+        let cancellation_token = options.cancellation_token.clone();
         let tool_schemas = self.tools.schemas();
         let max_iterations = if self.tools.is_empty() {
             1
@@ -212,6 +213,20 @@ impl PureCore {
 
         let mut messages = session.messages().to_vec();
         for iteration in 0..max_iterations {
+            if is_cancelled(&options) {
+                return Ok(interrupted_turn_result(
+                    recorder,
+                    &session_id,
+                    request.mode,
+                    last_content,
+                    last_reasoning_content,
+                    last_model,
+                    total_usage,
+                    session.messages().len(),
+                    cancellation_reason(),
+                ));
+            }
+
             let inference_id = format!("{session_id}-inf-{iteration}");
             recorder.record_trace_only(TraceEventKind::InferenceStarted {
                 turn_id: session_id.clone(),
@@ -232,9 +247,54 @@ impl PureCore {
                 stream: true,
             };
 
-            let response = provider
-                .stream_complete(completion_request, recorder.sender().clone())
-                .await?;
+            let response_result = match &cancellation_token {
+                Some(token) => {
+                    tokio::select! {
+                        result = provider.stream_complete(completion_request, recorder.sender().clone()) => result,
+                        _ = token.cancelled() => {
+                            return Ok(interrupted_turn_result(
+                                recorder,
+                                &session_id,
+                                request.mode,
+                                last_content,
+                                last_reasoning_content,
+                                last_model,
+                                total_usage,
+                                session.messages().len(),
+                                cancellation_reason(),
+                            ));
+                        }
+                    }
+                }
+                None => {
+                    provider
+                        .stream_complete(completion_request, recorder.sender().clone())
+                        .await
+                }
+            };
+            let response = match response_result {
+                Ok(response) => response,
+                Err(_) if is_cancelled(&options) => {
+                    return Ok(interrupted_turn_result(
+                        recorder,
+                        &session_id,
+                        request.mode,
+                        last_content,
+                        last_reasoning_content,
+                        last_model,
+                        total_usage,
+                        session.messages().len(),
+                        cancellation_reason(),
+                    ));
+                }
+                Err(error) => {
+                    recorder.record_trace_only(TraceEventKind::TurnFailed {
+                        turn_id: session_id.clone(),
+                        error: error.to_string(),
+                    });
+                    return Err(error);
+                }
+            };
 
             recorder.record_trace_only(TraceEventKind::InferenceCompleted {
                 turn_id: session_id.clone(),
@@ -335,6 +395,19 @@ impl PureCore {
                         .await
                         {
                             ToolApprovalDecision::Approved => {
+                                if is_cancelled(&options) {
+                                    return Ok(interrupted_turn_result(
+                                        recorder,
+                                        &session_id,
+                                        request.mode,
+                                        last_content,
+                                        last_reasoning_content,
+                                        last_model,
+                                        total_usage,
+                                        session.messages().len(),
+                                        cancellation_reason(),
+                                    ));
+                                }
                                 recorder.broadcast(AgentEvent::ToolApprovalGranted {
                                     id: approval_request.id.clone(),
                                     name: approval_request.name.clone(),
@@ -347,7 +420,21 @@ impl PureCore {
                                     session_id: session_id.clone(),
                                     tool_id: tool_call.id.clone(),
                                 };
-                                match tool.execute(tool_input, tool_context).await {
+                                let tool_result = tool.execute(tool_input, tool_context).await;
+                                if is_cancelled(&options) {
+                                    return Ok(interrupted_turn_result(
+                                        recorder,
+                                        &session_id,
+                                        request.mode,
+                                        last_content,
+                                        last_reasoning_content,
+                                        last_model,
+                                        total_usage,
+                                        session.messages().len(),
+                                        cancellation_reason(),
+                                    ));
+                                }
+                                match tool_result {
                                     Ok(output) => {
                                         recorder.record_trace_only(
                                             TraceEventKind::ToolCallCompleted {
@@ -371,6 +458,19 @@ impl PureCore {
                                 }
                             }
                             ToolApprovalDecision::Denied { reason } => {
+                                if is_cancelled(&options) {
+                                    return Ok(interrupted_turn_result(
+                                        recorder,
+                                        &session_id,
+                                        request.mode,
+                                        last_content,
+                                        last_reasoning_content,
+                                        last_model,
+                                        total_usage,
+                                        session.messages().len(),
+                                        reason,
+                                    ));
+                                }
                                 recorder.broadcast(AgentEvent::ToolApprovalDenied {
                                     id: approval_request.id.clone(),
                                     name: approval_request.name.clone(),
@@ -420,6 +520,19 @@ impl PureCore {
         }
 
         total_usage.total_tokens = total_usage.prompt_tokens + total_usage.completion_tokens;
+        if is_cancelled(&options) {
+            return Ok(interrupted_turn_result(
+                recorder,
+                &session_id,
+                request.mode,
+                last_content,
+                last_reasoning_content,
+                last_model,
+                total_usage,
+                session_message_count,
+                cancellation_reason(),
+            ));
+        }
 
         recorder.record_trace_only(TraceEventKind::TurnCompleted {
             turn_id: session_id.clone(),
@@ -441,8 +554,52 @@ impl PureCore {
             usage: total_usage,
             mode: request.mode,
             session_message_count,
+            status: TurnResultStatus::Completed,
             trace_events: recorder.drain(),
         })
+    }
+}
+
+fn is_cancelled(options: &TurnOptions) -> bool {
+    options
+        .cancellation_token
+        .as_ref()
+        .is_some_and(|token| token.is_cancelled())
+}
+
+fn cancellation_reason() -> String {
+    "interrupted by user".to_string()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn interrupted_turn_result(
+    recorder: &mut TraceRecorder,
+    turn_id: &str,
+    mode: crate::turn::CompileMode,
+    content: String,
+    reasoning_content: Option<String>,
+    model: String,
+    mut usage: TokenUsage,
+    session_message_count: usize,
+    reason: String,
+) -> TurnResult {
+    usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
+    recorder.record_trace_only(TraceEventKind::TurnInterrupted {
+        turn_id: turn_id.to_string(),
+        reason: reason.clone(),
+    });
+    recorder.broadcast(AgentEvent::TurnInterrupted { reason });
+    recorder.broadcast(AgentEvent::Done);
+
+    TurnResult {
+        content,
+        reasoning_content,
+        model,
+        usage,
+        mode,
+        session_message_count,
+        status: TurnResultStatus::Interrupted,
+        trace_events: recorder.drain(),
     }
 }
 
@@ -501,7 +658,17 @@ async fn approve_tool_call(
                 working_directory: request.working_directory.clone(),
             });
             match &options.tool_approval_callback {
-                Some(callback) => callback(request.clone()).await,
+                Some(callback) => match &options.cancellation_token {
+                    Some(token) => {
+                        tokio::select! {
+                            decision = callback(request.clone()) => decision,
+                            _ = token.cancelled() => ToolApprovalDecision::Denied {
+                                reason: cancellation_reason(),
+                            },
+                        }
+                    }
+                    None => callback(request.clone()).await,
+                },
                 None => ToolApprovalDecision::Denied {
                     reason: "manual approval required but no approver is configured".to_string(),
                 },
