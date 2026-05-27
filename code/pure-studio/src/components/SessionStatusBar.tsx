@@ -1,8 +1,16 @@
-import { Boxes, ChevronDown, Cpu } from "lucide-react";
+import { Activity, Boxes, Bot, ChevronDown, Cpu, Loader2 } from "lucide-react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ModelRecord, ProviderRecord, RoleRecord, SessionRuntime } from "../types";
+import type {
+  ModelRecord,
+  ProviderRecord,
+  RoleRecord,
+  SessionRuntime,
+  SubagentActivity,
+  SubagentStatus,
+  TurnPhase,
+} from "../types";
 import { allModels } from "../lib/utils";
 
 type SessionStatusBarProps = {
@@ -11,6 +19,39 @@ type SessionStatusBarProps = {
   roles: RoleRecord[];
   setRoles: Dispatch<SetStateAction<RoleRecord[]>>;
   onSaveProviderSettings: (explicitRoles?: RoleRecord[]) => void;
+  turnPhase: TurnPhase;
+  turnStartedAt: number | null;
+  subagentActivities: SubagentActivity[];
+};
+
+const turnPhaseKeys: Record<TurnPhase, string> = {
+  idle: "turnPhase.idle",
+  running: "turnPhase.running",
+  thinking: "turnPhase.thinking",
+  tool: "turnPhase.tool",
+  subagent: "turnPhase.subagent",
+  approval: "turnPhase.approval",
+  stopping: "turnPhase.stopping",
+  completed: "turnPhase.completed",
+  interrupted: "turnPhase.interrupted",
+  failed: "turnPhase.failed",
+};
+
+const activeSubagentStatuses = new Set<SubagentStatus>([
+  "running",
+  "awaitingApproval",
+  "awaitingToolApproval",
+  "queued",
+]);
+
+const subagentStatusKeys: Record<SubagentStatus, string> = {
+  queued: "subagent.queued",
+  awaitingApproval: "subagent.awaitingApproval",
+  running: "subagent.running",
+  awaitingToolApproval: "subagent.awaitingTool",
+  succeeded: "subagent.succeeded",
+  failed: "subagent.failed",
+  denied: "subagent.denied",
 };
 
 function formatTokenCount(value?: number | null): string {
@@ -40,6 +81,18 @@ function formatCost(runtime: SessionRuntime | null, fallback: string): string {
     return fallback;
   }
   return `${runtime.currency} ${runtime.estimatedCost.toFixed(2)}`;
+}
+
+function formatElapsed(startedAt: number | null, now: number): string | null {
+  if (!startedAt) {
+    return null;
+  }
+  const seconds = Math.max(0, Math.floor((now - startedAt) / 1000));
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${seconds % 60}s`;
 }
 
 function contextPercent(runtime: SessionRuntime | null): number {
@@ -83,6 +136,85 @@ function ListPopover({ title, items }: { title: string; items: string[] }) {
         ))
       )}
     </div>
+  );
+}
+
+function sortSubagents(activities: SubagentActivity[]): SubagentActivity[] {
+  return [...activities].sort((left, right) => {
+    const leftActive = activeSubagentStatuses.has(left.status) ? 1 : 0;
+    const rightActive = activeSubagentStatuses.has(right.status) ? 1 : 0;
+    if (leftActive !== rightActive) {
+      return rightActive - leftActive;
+    }
+    if (right.updatedAt !== left.updatedAt) {
+      return right.updatedAt - left.updatedAt;
+    }
+    return left.role.localeCompare(right.role);
+  });
+}
+
+function TurnStatusIndicator({
+  turnPhase,
+  turnStartedAt,
+}: {
+  turnPhase: TurnPhase;
+  turnStartedAt: number | null;
+}) {
+  const { t } = useTranslation();
+  const [now, setNow] = useState(Date.now());
+  const elapsed = formatElapsed(turnStartedAt, now);
+  const isActive = ["running", "thinking", "tool", "subagent", "approval", "stopping"].includes(turnPhase);
+
+  useEffect(() => {
+    if (!turnStartedAt || !isActive) {
+      return;
+    }
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [turnStartedAt, isActive]);
+
+  return (
+    <div className={`turn-status-indicator phase-${turnPhase}`} aria-live="polite">
+      {isActive ? <Loader2 size={14} className="spin" /> : <Activity size={14} />}
+      <strong>{t(turnPhaseKeys[turnPhase])}</strong>
+      {elapsed ? <span>{elapsed}</span> : null}
+    </div>
+  );
+}
+
+function SubagentPopover({ activities }: { activities: SubagentActivity[] }) {
+  const { t } = useTranslation();
+  const items = sortSubagents(activities);
+
+  return (
+    <StatusPopover
+      className="subagent-popover-wrap"
+      trigger={
+        <button className="status-item status-subagents" type="button">
+          <Bot size={14} />
+          <strong>{t("statusBar.subagents")} {activities.length}</strong>
+          <ChevronDown size={13} />
+        </button>
+      }
+    >
+      <div className="status-subagent-popover">
+        <strong>{t("statusBar.subagents")}</strong>
+        {items.length === 0 ? (
+          <span className="status-empty">{t("statusBar.noSubagents")}</span>
+        ) : (
+          items.map((activity) => (
+            <div key={activity.id} className={`status-subagent-row status-${activity.status}`}>
+              <span className="status-subagent-dot" aria-hidden="true" />
+              <div>
+                <span className="status-subagent-role">{activity.role}</span>
+                <p>{activity.task}</p>
+              </div>
+              <span className="status-subagent-badge">{t(subagentStatusKeys[activity.status])}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </StatusPopover>
   );
 }
 
@@ -234,6 +366,9 @@ export function SessionStatusBar({
   roles,
   setRoles,
   onSaveProviderSettings,
+  turnPhase,
+  turnStartedAt,
+  subagentActivities,
 }: SessionStatusBarProps) {
   const { t } = useTranslation();
   const contextLabel = `${formatTokenCount(runtime?.latestContextTokens)} / ${formatTokenCount(runtime?.contextWindow)}`;
@@ -245,6 +380,10 @@ export function SessionStatusBar({
   return (
     <div className="session-status-bar" aria-label={t("statusBar.label")}>
       <div className="status-group status-left">
+        <TurnStatusIndicator turnPhase={turnPhase} turnStartedAt={turnStartedAt} />
+      </div>
+
+      <div className="status-group status-right">
         <ModelSelector
           runtime={runtime}
           providers={providers}
@@ -252,9 +391,7 @@ export function SessionStatusBar({
           setRoles={setRoles}
           onSaveProviderSettings={onSaveProviderSettings}
         />
-      </div>
 
-      <div className="status-group status-center">
         <StatusPopover
           className="context-popover-wrap"
           trigger={
@@ -288,14 +425,12 @@ export function SessionStatusBar({
             <small>{t("statusBar.costHint")}</small>
           </div>
         </StatusPopover>
-      </div>
 
-      <div className="status-group status-right">
         <StatusPopover
           trigger={
             <button className="status-item status-count" type="button">
               <Boxes size={14} />
-              <strong>{skills.length + mcpServers.length}</strong>
+              <strong>{t("statusBar.capabilities")} {skills.length + mcpServers.length}</strong>
               <ChevronDown size={13} />
             </button>
           }
@@ -305,6 +440,8 @@ export function SessionStatusBar({
             <ListPopover title="MCP" items={mcpServers} />
           </div>
         </StatusPopover>
+
+        <SubagentPopover activities={subagentActivities} />
       </div>
     </div>
   );

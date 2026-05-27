@@ -12,6 +12,7 @@ import {
   bootstrapStudio,
   createSession,
   denyTool,
+  loadSessionTimeline,
   loadConfig,
   openProject,
   runPrompt,
@@ -20,6 +21,7 @@ import {
   selectProject,
   selectSession,
   isTauriRuntime,
+  stopPrompt,
 } from "./lib/tauri";
 import { errorText } from "./lib/utils";
 import type {
@@ -41,6 +43,8 @@ import type {
   SubagentEventPayload,
   SubagentStatus,
   TimelineItem,
+  TurnPhase,
+  TurnStatus,
   ToolApprovalRequest,
   ToolApprovalResolved,
   TrackedToolCall,
@@ -103,6 +107,19 @@ function mergeTimelineItems(
   return [...bySeq.values()].sort((a, b) => a.sequence - b.sequence);
 }
 
+function phaseForTurnStatus(status: TurnStatus): TurnPhase {
+  switch (status) {
+    case "started":
+      return "running";
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+    case "interrupted":
+      return "interrupted";
+  }
+}
+
 export function App() {
   const { t } = useTranslation();
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
@@ -116,6 +133,8 @@ export function App() {
   const [manualPath, setManualPath] = useState("");
   const [prompt, setPrompt] = useState("");
   const [status, setStatus] = useState(t("status.starting"));
+  const [turnPhase, setTurnPhase] = useState<TurnPhase>("idle");
+  const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [thinkingText, setThinkingText] = useState("");
@@ -191,9 +210,22 @@ export function App() {
         setSessionRuntime(payload.sessionRuntime ?? null);
         applyConfig(payload.config);
         setStatus(t("status.ready"));
+        setTurnPhase("idle");
       })
       .catch((error) => setStatus(t("status.bootstrapFailed", { error: errorText(error) })));
   }, []);
+
+  useEffect(() => {
+    if (!selectedSessionId) {
+      setTimelineItems([]);
+      return;
+    }
+    loadSessionTimeline(selectedSessionId)
+      .then((payload) => setTimelineItems(payload.items))
+      .catch((error) => {
+        setStatus(t("status.timelineLoadFailed", { error: errorText(error) }));
+      });
+  }, [selectedSessionId, t]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -205,24 +237,38 @@ export function App() {
         const event = payload.event;
         if (event === "turnStarted") {
           setStatus(t("status.running"));
+          setTurnPhase("running");
+          setTurnStartedAt(Date.now());
           return;
         }
         if (event === "done") {
           setStatus(t("status.done"));
+          setTurnPhase((current) =>
+            current === "interrupted" || current === "failed" ? current : "completed",
+          );
+          setTurnStartedAt(null);
+          return;
+        }
+        if ("turnInterrupted" in event) {
+          setStatus(t("status.interrupted"));
+          setTurnPhase("interrupted");
           return;
         }
         if ("textDelta" in event) {
           setStreamingText((current) => current + event.textDelta.content);
           setStatus(t("status.running"));
+          setTurnPhase("running");
           return;
         }
         if ("thinkingDelta" in event) {
           setThinkingText((current) => current + event.thinkingDelta.content);
           setStatus(t("status.thinking"));
+          setTurnPhase("thinking");
           return;
         }
         if ("toolCallDelta" in event) {
           setStatus(t("status.toolInput", { name: event.toolCallDelta.name }));
+          setTurnPhase("tool");
           setToolCalls((current) => {
             const next = new Map(current);
             const existing = next.get(event.toolCallDelta.id);
@@ -245,6 +291,7 @@ export function App() {
           return;
         }
         if ("toolCallComplete" in event) {
+          setTurnPhase("tool");
           setToolCalls((current) => {
             const next = new Map(current);
             const existing = next.get(event.toolCallComplete.id);
@@ -270,6 +317,7 @@ export function App() {
         }
         if ("toolApprovalGranted" in event) {
           setStatus(t("status.approved", { name: event.toolApprovalGranted.name }));
+          setTurnPhase("tool");
           setToolCalls((current) => {
             const next = new Map(current);
             const existing = next.get(event.toolApprovalGranted.id);
@@ -282,6 +330,7 @@ export function App() {
         }
         if ("toolApprovalDenied" in event) {
           setStatus(t("status.denied", { name: event.toolApprovalDenied.name }));
+          setTurnPhase((current) => (current === "stopping" ? "stopping" : "tool"));
           setToolCalls((current) => {
             const next = new Map(current);
             const existing = next.get(event.toolApprovalDenied.id);
@@ -296,6 +345,7 @@ export function App() {
           setSubagentActivities((current) =>
             mergeSubagentActivities(current, [event.subagentStateChanged]),
           );
+          setTurnPhase("subagent");
           setStatus(
             t("status.subagentStatus", { status: t(subagentStatusKeys[event.subagentStateChanged.status]).toLowerCase() }),
           );
@@ -303,17 +353,20 @@ export function App() {
         }
         if ("error" in event) {
           setStatus(t("status.error", { message: event.error.message }));
+          setTurnPhase("failed");
         }
       }),
       listen<ToolApprovalRequest>("studio-tool-approval-requested", ({ payload }) => {
         setApprovals((current) => [payload, ...current]);
         setStatus(t("status.approvalRequired", { name: payload.name }));
+        setTurnPhase("approval");
       }),
       listen<ToolApprovalResolved>("studio-tool-approval-resolved", ({ payload }) => {
         setApprovals((current) =>
           current.filter((approval) => approval.approvalId !== payload.approvalId),
         );
         setStatus(payload.decision === "approved" ? t("status.toolApproved") : t("status.toolDenied"));
+        setTurnPhase((current) => (current === "stopping" ? "stopping" : "tool"));
       }),
       listen<RunPromptResponse>("studio-prompt-finished", ({ payload }) => {
         applyRunPrompt(payload);
@@ -321,6 +374,8 @@ export function App() {
       }),
       listen<PromptFailed>("studio-prompt-failed", ({ payload }) => {
         setStatus(payload.message);
+        setTurnPhase("failed");
+        setTurnStartedAt(null);
         setIsBusy(false);
       }),
     ];
@@ -361,6 +416,8 @@ export function App() {
     setThinkingText("");
     setToolCalls(new Map());
     setStatus(t("status.projectLoaded"));
+    setTurnPhase("idle");
+    setTurnStartedAt(null);
   }
 
   function applySessionSelection(payload: SessionSelectionPayload) {
@@ -376,6 +433,8 @@ export function App() {
     setThinkingText("");
     setToolCalls(new Map());
     setStatus(t("status.sessionLoaded"));
+    setTurnPhase("idle");
+    setTurnStartedAt(null);
   }
 
   function applyRunPrompt(payload: RunPromptResponse) {
@@ -387,7 +446,10 @@ export function App() {
     setTimelineItems((current) => mergeTimelineItems(current, payload.timelineItems));
     setStreamingText("");
     setThinkingText("");
-    setStatus(t("status.done"));
+    setToolCalls(new Map());
+    setTurnPhase(phaseForTurnStatus(payload.turnStatus));
+    setTurnStartedAt(null);
+    setStatus(payload.turnStatus === "interrupted" ? t("status.interrupted") : t("status.done"));
   }
 
   async function addProject(path: string) {
@@ -445,10 +507,42 @@ export function App() {
     setThinkingText("");
     setMessages((current) => [...current, { role: "user", content }]);
     setStatus(t("status.running"));
+    setTurnPhase("running");
+    setTurnStartedAt(Date.now());
     try {
       applyRunPrompt(await runPrompt(selectedSessionId, content));
+      setIsBusy(false);
     } catch (error) {
       setStatus(t("status.runFailed", { error: errorText(error) }));
+      setTurnPhase("failed");
+      setTurnStartedAt(null);
+      setIsBusy(false);
+    }
+  }
+
+  async function onStopPrompt() {
+    if (!selectedSessionId || !isBusy || turnPhase === "stopping") {
+      return;
+    }
+    setTurnPhase("stopping");
+    setStatus(t("status.stopping"));
+    try {
+      const result = await stopPrompt(selectedSessionId);
+      if (!result.stopped) {
+        setStatus(t("status.interrupted"));
+        setTurnPhase("interrupted");
+        setTurnStartedAt(null);
+        setIsBusy(false);
+      } else if (!isTauriRuntime()) {
+        setStatus(t("status.interrupted"));
+        setTurnPhase("interrupted");
+        setTurnStartedAt(null);
+        setIsBusy(false);
+      }
+    } catch (error) {
+      setStatus(t("status.stopFailed", { error: errorText(error) }));
+      setTurnPhase("failed");
+      setTurnStartedAt(null);
       setIsBusy(false);
     }
   }
@@ -551,12 +645,15 @@ export function App() {
         sessionRuntime={sessionRuntime}
         prompt={prompt}
         status={status}
+        turnPhase={turnPhase}
+        turnStartedAt={turnStartedAt}
         providers={providers}
         roles={roles}
         setRoles={setRoles}
         onSaveProviderSettings={(explicitRoles) => void onSaveProviderSettings(explicitRoles)}
         onSetPrompt={setPrompt}
         onSendPrompt={() => void onSendPrompt()}
+        onStopPrompt={() => void onStopPrompt()}
       />
 
       <ApprovalOverlay

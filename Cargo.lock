@@ -2604,6 +2604,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-util",
  "toml 0.8.2",
 ]
 
@@ -2834,6 +2835,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

@@ -12,14 +12,16 @@ use pl_core::{
     ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, ProviderTemplateKind, PureConfig,
     RoleEdit, SessionRecord, SessionRuntimeRecord, StudioRuntime, StudioStore, SubagentEventRecord,
     ToolApprovalCallback, ToolApprovalDecision, ToolApprovalRequest, TraceEvent, TraceEventKind,
-    infer_provider_template_kind,
+    TurnOptions, TurnResultStatus, infer_provider_template_kind,
 };
 use pl_protocol::{AgentEvent, Message, MessageContent, MessageRole, PureError, SubagentStatus};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{Mutex, oneshot};
+use tokio_util::sync::CancellationToken;
 
-type ApprovalWaiters = Arc<Mutex<HashMap<String, oneshot::Sender<ToolApprovalDecision>>>>;
+type ApprovalWaiters = Arc<Mutex<HashMap<String, ApprovalWaiter>>>;
+type ActiveTurns = Arc<Mutex<HashMap<String, CancellationToken>>>;
 type CommandResult<T> = std::result::Result<T, CommandError>;
 
 static EVENT_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -28,6 +30,12 @@ static EVENT_COUNTER: AtomicU64 = AtomicU64::new(0);
 struct AppState {
     studio: StudioRuntime,
     approvals: ApprovalWaiters,
+    active_turns: ActiveTurns,
+}
+
+struct ApprovalWaiter {
+    session_id: String,
+    sender: oneshot::Sender<ToolApprovalDecision>,
 }
 
 #[derive(Debug, Serialize)]
@@ -289,6 +297,14 @@ struct RunPromptResponse {
     subagent_events: Vec<SubagentEventDto>,
     session_runtime: SessionRuntimeDto,
     timeline_items: Vec<TimelineItemDto>,
+    turn_status: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StopPromptResponse {
+    session_id: String,
+    stopped: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -366,6 +382,7 @@ fn main() {
     let state = AppState {
         studio,
         approvals: Arc::new(Mutex::new(HashMap::new())),
+        active_turns: Arc::new(Mutex::new(HashMap::new())),
     };
 
     tauri::Builder::default()
@@ -378,6 +395,7 @@ fn main() {
             create_session,
             select_session,
             run_prompt,
+            stop_prompt,
             load_session_timeline,
             approve_tool,
             deny_tool,
@@ -509,6 +527,17 @@ async fn run_prompt(
         return Err(CommandError::from_display("prompt is empty"));
     }
 
+    let cancellation_token = CancellationToken::new();
+    {
+        let mut active_turns = state.active_turns.lock().await;
+        if active_turns.contains_key(&session_id) {
+            return Err(CommandError::from_display(
+                "session already has an active turn",
+            ));
+        }
+        active_turns.insert(session_id.clone(), cancellation_token.clone());
+    }
+
     let (event_tx, event_rx) = tokio::sync::broadcast::channel(256);
     let event_task = tauri::async_runtime::spawn(drain_events(
         session_id.clone(),
@@ -516,17 +545,23 @@ async fn run_prompt(
         app.clone(),
         state.studio.store().clone(),
     ));
+    let approval_callback =
+        approval_callback(state.approvals.clone(), app.clone(), session_id.clone());
+    let options = TurnOptions::manual(approval_callback.clone())
+        .with_cancellation(cancellation_token.clone());
     let result = state
         .studio
         .run_prompt(
             &session_id,
             prompt,
             event_tx.clone(),
-            approval_callback(state.approvals.clone(), app.clone(), session_id.clone()),
+            approval_callback,
+            options,
         )
         .await;
     drop(event_tx);
     let _ = event_task.await;
+    state.active_turns.lock().await.remove(&session_id);
 
     match result {
         Ok(outcome) => {
@@ -554,6 +589,7 @@ async fn run_prompt(
                 ),
                 session_runtime: load_session_runtime_dto(&state.studio, &session_id).await?,
                 timeline_items: trace_events_to_timeline_items(&outcome.trace_events),
+                turn_status: turn_result_status_label(outcome.result.status).to_string(),
             };
             let _ = app.emit("studio-prompt-finished", response.clone());
             Ok(response)
@@ -570,6 +606,35 @@ async fn run_prompt(
             Err(CommandError { message })
         }
     }
+}
+
+#[tauri::command]
+async fn stop_prompt(
+    session_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> CommandResult<StopPromptResponse> {
+    let token = state.active_turns.lock().await.get(&session_id).cloned();
+    let Some(token) = token else {
+        return Ok(StopPromptResponse {
+            session_id,
+            stopped: false,
+        });
+    };
+
+    token.cancel();
+    deny_session_approvals(
+        &session_id,
+        "interrupted by user",
+        &app,
+        state.approvals.clone(),
+    )
+    .await;
+
+    Ok(StopPromptResponse {
+        session_id,
+        stopped: true,
+    })
 }
 
 #[tauri::command]
@@ -723,7 +788,13 @@ fn approval_callback(
         let session_id = session_id.clone();
         Box::pin(async move {
             let (tx, rx) = oneshot::channel();
-            approvals.lock().await.insert(request.id.clone(), tx);
+            approvals.lock().await.insert(
+                request.id.clone(),
+                ApprovalWaiter {
+                    session_id: session_id.clone(),
+                    sender: tx,
+                },
+            );
             let _ = app.emit(
                 "studio-tool-approval-requested",
                 ToolApprovalRequestPayload {
@@ -749,8 +820,8 @@ async fn resolve_tool_approval(
     app: AppHandle,
     approvals: ApprovalWaiters,
 ) {
-    if let Some(sender) = approvals.lock().await.remove(&approval_id) {
-        let _ = sender.send(decision.clone());
+    if let Some(waiter) = approvals.lock().await.remove(&approval_id) {
+        let _ = waiter.sender.send(decision.clone());
     }
     let (decision_label, reason) = match decision {
         ToolApprovalDecision::Approved => ("approved".to_string(), None),
@@ -764,6 +835,45 @@ async fn resolve_tool_approval(
             reason,
         },
     );
+}
+
+async fn deny_session_approvals(
+    session_id: &str,
+    reason: &str,
+    app: &AppHandle,
+    approvals: ApprovalWaiters,
+) {
+    let denied = {
+        let mut approvals = approvals.lock().await;
+        let approval_ids: Vec<String> = approvals
+            .iter()
+            .filter(|(_, waiter)| waiter.session_id == session_id)
+            .map(|(approval_id, _)| approval_id.clone())
+            .collect();
+        approval_ids
+            .into_iter()
+            .filter_map(|approval_id| {
+                approvals
+                    .remove(&approval_id)
+                    .map(|waiter| (approval_id, waiter))
+            })
+            .collect::<Vec<_>>()
+    };
+
+    for (approval_id, waiter) in denied {
+        let decision = ToolApprovalDecision::Denied {
+            reason: reason.to_string(),
+        };
+        let _ = waiter.sender.send(decision);
+        let _ = app.emit(
+            "studio-tool-approval-resolved",
+            ToolApprovalResolvedPayload {
+                approval_id,
+                decision: "denied".to_string(),
+                reason: Some(reason.to_string()),
+            },
+        );
+    }
 }
 
 async fn drain_events(
@@ -1136,6 +1246,13 @@ fn subagent_status_label(status: SubagentStatus) -> &'static str {
     }
 }
 
+fn turn_result_status_label(status: TurnResultStatus) -> &'static str {
+    match status {
+        TurnResultStatus::Completed => "completed",
+        TurnResultStatus::Interrupted => "interrupted",
+    }
+}
+
 fn trace_events_to_timeline_items(events: &[TraceEvent]) -> Vec<TimelineItemDto> {
     events.iter().map(trace_event_to_timeline_item).collect()
 }
@@ -1199,6 +1316,22 @@ fn trace_event_to_timeline_item(event: &TraceEvent) -> TimelineItemDto {
             inference_model: None,
             inference_usage: None,
             turn_status: Some("failed".to_string()),
+            turn_model: None,
+            turn_usage: None,
+        },
+        TraceEventKind::TurnInterrupted { turn_id, reason } => TimelineItemDto {
+            kind: "turn".to_string(),
+            sequence,
+            timestamp,
+            turn_id: Some(turn_id.clone()),
+            tool_call_id: None,
+            tool_name: None,
+            tool_arguments: None,
+            tool_status: None,
+            tool_result: Some(reason.clone()),
+            inference_model: None,
+            inference_usage: None,
+            turn_status: Some("interrupted".to_string()),
             turn_model: None,
             turn_usage: None,
         },

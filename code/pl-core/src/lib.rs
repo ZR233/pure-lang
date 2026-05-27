@@ -40,5 +40,6 @@ pub use trace::TraceRecorder;
 pub use turn::{
     CompileMode, DEFAULT_MAX_TOOL_ITERATIONS, ToolApprovalCallback, ToolApprovalDecision,
     ToolApprovalPolicy, ToolApprovalRequest, TurnOptions, TurnRequest, TurnResult,
+    TurnResultStatus,
 };
 pub use workspace::load_workspace_instructions;

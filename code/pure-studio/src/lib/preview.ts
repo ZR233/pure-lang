@@ -6,6 +6,7 @@ import type {
   SessionRecord,
   SubagentActivity,
   SessionRuntime,
+  TimelineItem,
 } from "../types";
 import { makeProvider, makeRole } from "./provider-mapper";
 import { previewTemplates } from "./templates";
@@ -34,24 +35,34 @@ export const previewSessions: SessionRecord[] = [
 export const previewMessages: ChatMessage[] = [
   {
     role: "user",
-    content: "修复 Unknown tool: \"\" 的问题",
+    content: "修复窗口缩放后状态栏挤压和 timeline 过宽的问题",
     reasoningContent: null,
   },
   {
     role: "assistant",
-    content:
-      "我将修复工具调用解析中工具名为空的问题。首先分析 SSE 流中 tool_call 的 delta 结构。\n\n已读取 3 个文件：sse.rs、openai.rs、wire_api.rs\n\n问题原因：Chat Completions 流中，后续参数片段只带 index 不带 name，导致累积的工具名丢失。\n\n修复完成，工具调用将正确识别工具名。",
+    content: "我先定位状态栏和对话面板的布局代码，然后把状态栏元素收拢到右侧。",
+    reasoningContent: "Thought for 6s\n需要先找到 SessionStatusBar 和 ConversationPanel 的渲染边界。",
+  },
+  {
+    role: "tool",
+    content: "Found 17 lines of output",
     reasoningContent: null,
+    metadata: {
+      tool_call_id: "preview-tool-1",
+      tool_name: "grep",
+      tool_call_arguments:
+        "\"status|StatusBar|sessionRuntime|skills|mcp\" in src, glob: *.{ts,tsx,css}",
+    },
   },
   {
     role: "user",
-    content: "帮我再跑一次 clippy",
+    content: "状态栏增加子代理数量，点击可以展开子代理列表",
     reasoningContent: null,
   },
   {
     role: "assistant",
-    content: "好的，正在运行 clippy 检查代码质量。\n\ncargo clippy --all-targets --all-features -- -D warnings\n\n检查通过，没有发现新的 warning。",
-    reasoningContent: null,
+    content: "已把子代理数量放到状态栏右侧，并增加向上展开的列表，运行中和等待中会排在前面。",
+    reasoningContent: "Thought for 5s\n子代理入口应该和 skills/MCP 分开，否则数量语义不清楚。",
   },
 ];
 
@@ -99,6 +110,47 @@ export const previewSubagentEvents: SubagentActivity[] = [
     depth: 2,
     error: null,
     updatedAt: 1779688860,
+  },
+];
+
+export const previewTimelineItems: TimelineItem[] = [
+  {
+    kind: "turn",
+    sequence: 0,
+    timestamp: 1779688800,
+    turnId: "preview-turn-1",
+    turnStatus: "started",
+  },
+  {
+    kind: "inference",
+    sequence: 1,
+    timestamp: 1779688801,
+    inferenceModel: "deepseek-v4-flash",
+  },
+  {
+    kind: "tool_call",
+    sequence: 2,
+    timestamp: 1779688802,
+    toolCallId: "preview-tool-1",
+    toolName: "grep",
+    toolArguments:
+      "\"status|StatusBar|sessionRuntime|skills|mcp\" in src, glob: *.{ts,tsx,css}",
+    toolStatus: "completed",
+    toolResult: "Found 17 lines of output",
+  },
+  {
+    kind: "turn",
+    sequence: 3,
+    timestamp: 1779688860,
+    turnId: "preview-turn-1",
+    turnStatus: "completed",
+    turnModel: "deepseek-v4-flash",
+    turnUsage: {
+      promptTokens: 42000,
+      completionTokens: 1200,
+      cachedPromptTokens: 18000,
+      totalTokens: 43200,
+    },
   },
 ];
 

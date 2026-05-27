@@ -145,7 +145,19 @@ export type ToolCallStatus2 =
   | "completed"
   | "failed";
 
-export type TurnStatus = "started" | "completed" | "failed";
+export type TurnStatus = "started" | "completed" | "failed" | "interrupted";
+
+export type TurnPhase =
+  | "idle"
+  | "running"
+  | "thinking"
+  | "tool"
+  | "subagent"
+  | "approval"
+  | "stopping"
+  | "completed"
+  | "interrupted"
+  | "failed";
 
 export type UsageSnapshot = {
   promptTokens: number;
@@ -254,6 +266,12 @@ export type RunPromptResponse = {
   subagentEvents: SubagentActivity[];
   sessionRuntime: SessionRuntime;
   timelineItems: TimelineItem[];
+  turnStatus: TurnStatus;
+};
+
+export type StopPromptResponse = {
+  sessionId: string;
+  stopped: boolean;
 };
 
 export type AgentEvent =
@@ -273,6 +291,7 @@ export type AgentEvent =
   | { toolApprovalDenied: { id: string; name: string; reason: string } }
   | { subagentStateChanged: SubagentEventPayload }
   | "turnStarted"
+  | { turnInterrupted: { reason: string } }
   | "done"
   | { error: { message: string; severity: string } };
 

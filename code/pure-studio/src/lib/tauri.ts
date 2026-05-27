@@ -15,6 +15,7 @@ import {
   previewSessions,
   previewSessionRuntime,
   previewSubagentEvents,
+  previewTimelineItems,
 } from "./preview";
 import { makeProvider, makeRole } from "./provider-mapper";
 import { renderPreviewToml } from "./toml-renderer";
@@ -176,10 +177,40 @@ export function runPrompt(sessionId: string, prompt: string) {
           completionTokens: previewSessionRuntime.completionTokens + 260,
           totalTokens: previewSessionRuntime.totalTokens + 1460,
         },
+        timelineItems: [
+          ...previewTimelineItems,
+          {
+            kind: "turn" as const,
+            sequence: previewTimelineItems.length + 10,
+            timestamp: Math.floor(Date.now() / 1000),
+            turnId: "preview-turn-latest",
+            turnStatus: "completed" as const,
+            turnModel: previewSessionRuntime.model,
+            turnUsage: {
+              promptTokens: 1200,
+              completionTokens: 260,
+              cachedPromptTokens: 0,
+              totalTokens: 1460,
+            },
+          },
+        ],
+        turnStatus: "completed" as const,
       }),
     );
   }
   return invoke<RunPromptResponse>("run_prompt", { sessionId, prompt });
+}
+
+export function stopPrompt(sessionId: string) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(
+      clone({
+        sessionId,
+        stopped: true,
+      }),
+    );
+  }
+  return invoke<{ sessionId: string; stopped: boolean }>("stop_prompt", { sessionId });
 }
 
 export function approveTool(approvalId: string) {
@@ -234,8 +265,8 @@ export function loadSessionTimeline(
     return Promise.resolve(
       clone({
         sessionId,
-        items: [],
-        nextSequence: 0,
+        items: previewTimelineItems,
+        nextSequence: previewTimelineItems.length,
       }),
     );
   }

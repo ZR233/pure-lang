@@ -12,6 +12,8 @@ const zhCN = {
 
   actions: {
     send: "发送",
+    stop: "停止",
+    stopping: "停止中",
     save: "保存",
     reload: "重新加载",
     approve: "批准",
@@ -25,6 +27,8 @@ const zhCN = {
     running: "运行中",
     done: "完成",
     thinking: "思考中...",
+    stopping: "正在停止",
+    interrupted: "已中断",
     projectLoaded: "项目已加载",
     sessionLoaded: "会话已加载",
     configSaved: "配置已保存",
@@ -38,6 +42,8 @@ const zhCN = {
     newSessionFailed: "新建会话失败：{{error}}",
     selectSessionFailed: "选择会话失败：{{error}}",
     runFailed: "运行失败：{{error}}",
+    stopFailed: "停止失败：{{error}}",
+    timelineLoadFailed: "Timeline 加载失败：{{error}}",
     configLoadFailed: "配置加载失败：{{error}}",
     configInvalid: "配置无效：{{error}}",
     providerSettingsInvalid: "模型服务设置无效：{{error}}",
@@ -49,6 +55,19 @@ const zhCN = {
     toolCompleted: "{{name}} 已完成",
     subagentStatus: "子代理 {{status}}",
     error: "错误：{{message}}",
+  },
+
+  turnPhase: {
+    idle: "空闲",
+    running: "运行中",
+    thinking: "思考中",
+    tool: "工具中",
+    subagent: "子代理中",
+    approval: "等待审批",
+    stopping: "停止中",
+    completed: "已完成",
+    interrupted: "已中断",
+    failed: "已失败",
   },
 
   roles: {
@@ -128,6 +147,9 @@ const zhCN = {
     costNotConfigured: "未配置",
     notConfigured: "未配置",
     modelPricing: "模型计价（可选）",
+    capabilities: "能力",
+    subagents: "子代理",
+    noSubagents: "暂无子代理",
   },
 
   approval: {

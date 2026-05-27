@@ -54,6 +54,9 @@ pub enum AgentEvent {
         updated_at: i64,
     },
     TurnStarted,
+    TurnInterrupted {
+        reason: String,
+    },
     Done,
     Error {
         message: String,
@@ -148,6 +151,10 @@ pub enum TraceEventKind {
     TurnFailed {
         turn_id: String,
         error: String,
+    },
+    TurnInterrupted {
+        turn_id: String,
+        reason: String,
     },
     InferenceStarted {
         turn_id: String,
@@ -271,6 +278,53 @@ mod tests {
                 "kind": {
                     "type": "turnStarted",
                     "turnId": "turn-1"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_turn_interrupted_as_camel_case() {
+        let event = AgentEvent::TurnInterrupted {
+            reason: "stopped by user".to_string(),
+        };
+
+        let json = serde_json::to_value(event).unwrap();
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "turnInterrupted": {
+                    "reason": "stopped by user"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_trace_event_turn_interrupted_as_camel_case() {
+        let event = TraceEvent {
+            session_id: "sess-1".to_string(),
+            sequence: 2,
+            timestamp: 1_779_688_820,
+            kind: TraceEventKind::TurnInterrupted {
+                turn_id: "turn-1".to_string(),
+                reason: "stopped by user".to_string(),
+            },
+        };
+
+        let json = serde_json::to_value(event).unwrap();
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "sessionId": "sess-1",
+                "sequence": 2,
+                "timestamp": 1779688820,
+                "kind": {
+                    "type": "turnInterrupted",
+                    "turnId": "turn-1",
+                    "reason": "stopped by user"
                 }
             })
         );

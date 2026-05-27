@@ -12,6 +12,8 @@ const en = {
 
   actions: {
     send: "Send",
+    stop: "Stop",
+    stopping: "Stopping",
     save: "Save",
     reload: "Reload",
     approve: "Approve",
@@ -25,6 +27,8 @@ const en = {
     running: "Running",
     done: "Done",
     thinking: "Thinking...",
+    stopping: "Stopping",
+    interrupted: "Interrupted",
     projectLoaded: "Project loaded",
     sessionLoaded: "Session loaded",
     configSaved: "Config saved",
@@ -38,6 +42,8 @@ const en = {
     newSessionFailed: "New session failed: {{error}}",
     selectSessionFailed: "Select session failed: {{error}}",
     runFailed: "Run failed: {{error}}",
+    stopFailed: "Stop failed: {{error}}",
+    timelineLoadFailed: "Timeline load failed: {{error}}",
     configLoadFailed: "Config load failed: {{error}}",
     configInvalid: "Config invalid: {{error}}",
     providerSettingsInvalid: "Provider settings invalid: {{error}}",
@@ -49,6 +55,19 @@ const en = {
     toolCompleted: "{{name}} completed",
     subagentStatus: "Subagent {{status}}",
     error: "Error: {{message}}",
+  },
+
+  turnPhase: {
+    idle: "Idle",
+    running: "Running",
+    thinking: "Thinking",
+    tool: "Tool",
+    subagent: "Subagent",
+    approval: "Approval",
+    stopping: "Stopping",
+    completed: "Completed",
+    interrupted: "Interrupted",
+    failed: "Failed",
   },
 
   roles: {
@@ -128,6 +147,9 @@ const en = {
     costNotConfigured: "Not configured",
     notConfigured: "Not configured",
     modelPricing: "Model pricing (optional)",
+    capabilities: "Capabilities",
+    subagents: "Subagents",
+    noSubagents: "No subagents",
   },
 
   approval: {
