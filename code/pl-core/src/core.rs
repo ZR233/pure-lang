@@ -276,8 +276,12 @@ impl PureCore {
                 tool_calls.clone(),
                 reasoning_content.clone(),
             );
-            last_content = content;
-            last_reasoning_content = reasoning_content;
+            if !content.is_empty() {
+                last_content = content;
+            }
+            if reasoning_content.is_some() {
+                last_reasoning_content = reasoning_content;
+            }
 
             for tool_call in &tool_calls {
                 recorder.broadcast(AgentEvent::ToolCallComplete {
