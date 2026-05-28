@@ -276,7 +276,9 @@ function reduceAgentEvent(state: StudioState, event: AgentEvent, statusText: str
       ...state,
       status: statusText,
       turnPhase:
-        state.turnPhase === "interrupted" || state.turnPhase === "failed"
+        state.turnPhase === "interrupted" ||
+        state.turnPhase === "failed" ||
+        state.turnPhase === "budgetLimited"
           ? state.turnPhase
           : "completed",
       turnStartedAt: null,
@@ -287,6 +289,13 @@ function reduceAgentEvent(state: StudioState, event: AgentEvent, statusText: str
       ...state,
       status: statusText,
       turnPhase: "interrupted",
+    };
+  }
+  if ("turnBudgetLimited" in event) {
+    return {
+      ...state,
+      status: statusText,
+      turnPhase: "budgetLimited",
     };
   }
   if ("textDelta" in event) {
@@ -437,6 +446,9 @@ export function normalizeAgentActivity(event: AgentActivityPayload): AgentActivi
     summary: event.summary ?? null,
     depth: event.depth,
     error: event.error ?? null,
+    reason: event.reason ?? null,
+    budgetLimitKind: event.budgetLimitKind ?? null,
+    budgetUsage: event.budgetUsage ?? null,
     updatedAt: event.updatedAt,
   };
 }
@@ -466,5 +478,7 @@ export function phaseForTurnStatus(status: TurnStatus): TurnPhase {
       return "failed";
     case "interrupted":
       return "interrupted";
+    case "budgetLimited":
+      return "budgetLimited";
   }
 }

@@ -51,6 +51,7 @@ pub fn agent_status_from_label(status: &str) -> AgentStatus {
         "completed" => AgentStatus::Completed,
         "failed" => AgentStatus::Failed,
         "interrupted" => AgentStatus::Interrupted,
+        "budgetLimited" => AgentStatus::BudgetLimited,
         "closed" => AgentStatus::Closed,
         _ => AgentStatus::Failed,
     }
@@ -112,6 +113,7 @@ pub fn trace_event_kind_label(kind: &pl_protocol::TraceEventKind) -> &'static st
         pl_protocol::TraceEventKind::TurnCompleted { .. } => "TurnCompleted",
         pl_protocol::TraceEventKind::TurnFailed { .. } => "TurnFailed",
         pl_protocol::TraceEventKind::TurnInterrupted { .. } => "TurnInterrupted",
+        pl_protocol::TraceEventKind::TurnBudgetLimited { .. } => "TurnBudgetLimited",
         pl_protocol::TraceEventKind::InferenceStarted { .. } => "InferenceStarted",
         pl_protocol::TraceEventKind::InferenceCompleted { .. } => "InferenceCompleted",
         pl_protocol::TraceEventKind::ToolCallStarted { .. } => "ToolCallStarted",

@@ -6,7 +6,7 @@ pub type AgentEventSender = broadcast::Sender<AgentEvent>;
 pub type AgentEventReceiver = broadcast::Receiver<AgentEvent>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum AgentEvent {
     TextDelta {
         content: String,
@@ -51,12 +51,23 @@ pub enum AgentEvent {
         summary: Option<String>,
         depth: u32,
         error: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        budget_limit_kind: Option<BudgetLimitKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        budget_usage: Option<BudgetUsage>,
         #[serde(rename = "updatedAt")]
         updated_at: i64,
     },
     TurnStarted,
     TurnInterrupted {
         reason: String,
+    },
+    TurnBudgetLimited {
+        reason: String,
+        limit_kind: BudgetLimitKind,
+        usage: BudgetUsage,
     },
     Done,
     Error {
@@ -82,6 +93,7 @@ pub enum AgentStatus {
     Completed,
     Failed,
     Interrupted,
+    BudgetLimited,
     Closed,
 }
 
@@ -94,6 +106,7 @@ impl AgentStatus {
             Self::Completed => "completed",
             Self::Failed => "failed",
             Self::Interrupted => "interrupted",
+            Self::BudgetLimited => "budgetLimited",
             Self::Closed => "closed",
         }
     }
@@ -101,9 +114,46 @@ impl AgentStatus {
     pub fn is_final(self) -> bool {
         matches!(
             self,
-            Self::Completed | Self::Failed | Self::Interrupted | Self::Closed
+            Self::Completed | Self::Failed | Self::Interrupted | Self::BudgetLimited | Self::Closed
         )
     }
+}
+
+/// Kind of runtime budget that stopped a turn or agent.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BudgetLimitKind {
+    ModelStep,
+    ToolCall,
+    Wait,
+    WallClock,
+    AgentCount,
+    AgentDepth,
+    Finalization,
+}
+
+impl BudgetLimitKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ModelStep => "modelStep",
+            Self::ToolCall => "toolCall",
+            Self::Wait => "wait",
+            Self::WallClock => "wallClock",
+            Self::AgentCount => "agentCount",
+            Self::AgentDepth => "agentDepth",
+            Self::Finalization => "finalization",
+        }
+    }
+}
+
+/// Snapshot of consumed turn budgets.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BudgetUsage {
+    pub model_steps: u32,
+    pub tool_calls: u32,
+    pub wait_calls: u32,
+    pub elapsed_ms: u64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -177,6 +227,13 @@ pub enum TraceEventKind {
     TurnInterrupted {
         turn_id: String,
         reason: String,
+    },
+    TurnBudgetLimited {
+        turn_id: String,
+        reason: String,
+        limit_kind: BudgetLimitKind,
+        usage: BudgetUsage,
+        last_content: String,
     },
     InferenceStarted {
         turn_id: String,
@@ -324,6 +381,38 @@ mod tests {
     }
 
     #[test]
+    fn serializes_turn_budget_limited_as_camel_case() {
+        let event = AgentEvent::TurnBudgetLimited {
+            reason: "budget limited".to_string(),
+            limit_kind: BudgetLimitKind::ToolCall,
+            usage: BudgetUsage {
+                model_steps: 3,
+                tool_calls: 121,
+                wait_calls: 2,
+                elapsed_ms: 42,
+            },
+        };
+
+        let json = serde_json::to_value(event).unwrap();
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "turnBudgetLimited": {
+                    "reason": "budget limited",
+                    "limitKind": "toolCall",
+                    "usage": {
+                        "modelSteps": 3,
+                        "toolCalls": 121,
+                        "waitCalls": 2,
+                        "elapsedMs": 42
+                    }
+                }
+            })
+        );
+    }
+
+    #[test]
     fn serializes_trace_event_turn_interrupted_as_camel_case() {
         let event = TraceEvent {
             session_id: "sess-1".to_string(),
@@ -347,6 +436,51 @@ mod tests {
                     "type": "turnInterrupted",
                     "turnId": "turn-1",
                     "reason": "stopped by user"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_trace_event_turn_budget_limited_as_camel_case() {
+        let event = TraceEvent {
+            session_id: "sess-1".to_string(),
+            sequence: 3,
+            timestamp: 1_779_688_830,
+            kind: TraceEventKind::TurnBudgetLimited {
+                turn_id: "turn-1".to_string(),
+                reason: "tool budget".to_string(),
+                limit_kind: BudgetLimitKind::ToolCall,
+                usage: BudgetUsage {
+                    model_steps: 4,
+                    tool_calls: 121,
+                    wait_calls: 1,
+                    elapsed_ms: 50,
+                },
+                last_content: "partial".to_string(),
+            },
+        };
+
+        let json = serde_json::to_value(event).unwrap();
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "sessionId": "sess-1",
+                "sequence": 3,
+                "timestamp": 1779688830,
+                "kind": {
+                    "type": "turnBudgetLimited",
+                    "turnId": "turn-1",
+                    "reason": "tool budget",
+                    "limitKind": "toolCall",
+                    "usage": {
+                        "modelSteps": 4,
+                        "toolCalls": 121,
+                        "waitCalls": 1,
+                        "elapsedMs": 50
+                    },
+                    "lastContent": "partial"
                 }
             })
         );

@@ -67,6 +67,7 @@ const en = {
     stopping: "Stopping",
     completed: "Completed",
     interrupted: "Interrupted",
+    budgetLimited: "Budget limited",
     failed: "Failed",
   },
 
@@ -97,6 +98,7 @@ const en = {
     awaitingTool: "Awaiting tool",
     succeeded: "Succeeded",
     failed: "Failed",
+    budgetLimited: "Budget limited",
     denied: "Denied",
     toolCall: "Tool call",
     defaultWorkingDirectory: "(default working directory)",

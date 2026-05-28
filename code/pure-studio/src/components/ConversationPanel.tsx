@@ -41,6 +41,7 @@ const agentStatusKeys: Record<AgentStatus, string> = {
   completed: "turnPhase.completed",
   failed: "subagent.failed",
   interrupted: "turnPhase.interrupted",
+  budgetLimited: "turnPhase.budgetLimited",
   closed: "status.done",
 };
 
@@ -306,6 +307,8 @@ function turnStatusLabel(status: TimelineItem["turnStatus"], t: TFunction): stri
       return t("turnPhase.failed");
     case "interrupted":
       return t("turnPhase.interrupted");
+    case "budgetLimited":
+      return t("turnPhase.budgetLimited");
     default:
       return t("turnPhase.running");
   }
@@ -360,7 +363,12 @@ function timelineEntries(
     }
     if (item.kind === "tool_call") {
       entries.push({ kind: "trace", key: `trace-${item.sequence}`, item });
-    } else if (item.kind === "turn" && (item.turnStatus === "failed" || item.turnStatus === "interrupted")) {
+    } else if (
+      item.kind === "turn" &&
+      (item.turnStatus === "failed" ||
+        item.turnStatus === "interrupted" ||
+        item.turnStatus === "budgetLimited")
+    ) {
       entries.push({ kind: "trace", key: `trace-${item.sequence}`, item });
     }
   }

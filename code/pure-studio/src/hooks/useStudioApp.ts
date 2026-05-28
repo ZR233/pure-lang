@@ -42,6 +42,7 @@ function statusTextForEvent(event: AgentEvent, t: (key: string, args?: Record<st
   if (event === "turnStarted") return t("status.running");
   if (event === "done") return t("status.done");
   if ("turnInterrupted" in event) return t("status.interrupted");
+  if ("turnBudgetLimited" in event) return t("turnPhase.budgetLimited");
   if ("textDelta" in event) return t("status.running");
   if ("thinkingDelta" in event) return t("status.thinking");
   if ("toolCallDelta" in event) return t("status.toolInput", { name: event.toolCallDelta.name });

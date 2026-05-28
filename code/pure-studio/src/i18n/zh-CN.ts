@@ -67,6 +67,7 @@ const zhCN = {
     stopping: "停止中",
     completed: "已完成",
     interrupted: "已中断",
+    budgetLimited: "预算受限",
     failed: "已失败",
   },
 
@@ -97,6 +98,7 @@ const zhCN = {
     awaitingTool: "等待工具",
     succeeded: "已成功",
     failed: "已失败",
+    budgetLimited: "预算受限",
     denied: "已拒绝",
     toolCall: "工具调用",
     defaultWorkingDirectory: "（默认工作目录）",

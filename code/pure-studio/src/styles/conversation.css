@@ -1125,8 +1125,10 @@ button.status-item {
 }
 
 .timeline-entry-subagent.status-failed .timeline-entry-card,
+.timeline-entry-subagent.status-budgetLimited .timeline-entry-card,
 .timeline-entry-subagent.status-denied .timeline-entry-card,
 .timeline-entry-trace.status-failed .timeline-entry-card,
+.timeline-entry-trace.status-budgetLimited .timeline-entry-card,
 .timeline-entry-trace.status-interrupted .timeline-entry-card {
   background: transparent;
 }
@@ -1253,7 +1255,8 @@ button.status-item {
 }
 
 .timeline-badge.status-denied,
-.timeline-badge.status-failed {
+.timeline-badge.status-failed,
+.timeline-badge.status-budgetLimited {
   color: #b8424c;
   background: #fdebed;
 }
@@ -1308,6 +1311,7 @@ button.status-item {
 }
 
 .turn-status-indicator.phase-stopping,
+.turn-status-indicator.phase-budgetLimited,
 .turn-status-indicator.phase-interrupted,
 .turn-status-indicator.phase-failed {
   border-color: #efc7cd;
@@ -1359,6 +1363,7 @@ button.status-item {
 }
 
 .status-subagent-row.status-failed .status-subagent-dot,
+.status-subagent-row.status-budgetLimited .status-subagent-dot,
 .status-subagent-row.status-denied .status-subagent-dot {
   background: #c44d58;
 }

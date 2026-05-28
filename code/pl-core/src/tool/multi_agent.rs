@@ -10,7 +10,7 @@ use crate::agent::{AgentRecord, AgentSpawnInput, MessageDeliveryMode};
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
 use crate::core::compact_text;
 use crate::session::CoreSession;
-use crate::turn::{CompileMode, TurnResultStatus};
+use crate::turn::{CompileMode, TurnBudget, TurnResultStatus};
 use crate::{AgentControl, AgentPath, PureCore};
 
 const DEFAULT_WAIT_TIMEOUT_MS: i64 = 30_000;
@@ -232,7 +232,7 @@ impl Tool for SpawnAgentTool {
                 agent_path: handle.path.clone(),
                 role,
                 message: args.message,
-                max_tool_iterations: None,
+                budget: context.budget_policy.agent_budget.child_turn_budget,
             };
             tokio::spawn(run_agent_turn(run));
 
@@ -411,7 +411,7 @@ impl Tool for FollowupTaskTool {
                     agent_path: record.path,
                     role: record.role,
                     message,
-                    max_tool_iterations: None,
+                    budget: context.budget_policy.agent_budget.child_turn_budget,
                 };
                 tokio::spawn(run_agent_turn(run));
             }
@@ -526,7 +526,7 @@ pub(super) struct AgentRunConfig {
     pub agent_path: String,
     pub role: String,
     pub message: String,
-    pub max_tool_iterations: Option<usize>,
+    pub budget: TurnBudget,
 }
 
 pub(super) async fn run_agent_turn(config: AgentRunConfig) {
@@ -575,10 +575,8 @@ pub(super) async fn run_agent_turn(config: AgentRunConfig) {
         .load_session(&config.agent_id)
         .await
         .unwrap_or_else(CoreSession::new);
-    let mut request = crate::turn::TurnRequest::new(config.message.clone(), CompileMode::Auto);
-    if let Some(max) = config.max_tool_iterations {
-        request = request.with_max_tool_iterations(max);
-    }
+    let mut request = crate::turn::TurnRequest::new(config.message.clone(), CompileMode::Auto)
+        .with_budget(config.budget);
     if let Some(instructions) = config.workspace_instructions.clone() {
         request = request.with_workspace_instructions(instructions);
     }
@@ -608,15 +606,25 @@ pub(super) async fn run_agent_turn(config: AgentRunConfig) {
                 TurnResultStatus::Completed => AgentStatus::Completed,
                 TurnResultStatus::Interrupted => AgentStatus::Interrupted,
                 TurnResultStatus::Failed => AgentStatus::Failed,
+                TurnResultStatus::BudgetLimited => AgentStatus::BudgetLimited,
             };
             let summary = result.content.trim().to_string();
+            let error = match result.status {
+                TurnResultStatus::BudgetLimited => Some("subagent budget limited".to_string()),
+                TurnResultStatus::Failed if summary.is_empty() => {
+                    Some("subagent failed".to_string())
+                }
+                TurnResultStatus::Completed
+                | TurnResultStatus::Interrupted
+                | TurnResultStatus::Failed => None,
+            };
             if let Some(record) = config
                 .agent_control
                 .update_status(
                     &config.agent_id,
                     status,
                     (!summary.is_empty()).then_some(summary.clone()),
-                    None,
+                    error,
                 )
                 .await
             {
@@ -659,6 +667,7 @@ async fn forward_agent_lifecycle_events(
                 | AgentEvent::ToolApprovalDenied { .. }
                 | AgentEvent::TurnStarted
                 | AgentEvent::TurnInterrupted { .. }
+                | AgentEvent::TurnBudgetLimited { .. }
                 | AgentEvent::Error { .. },
             ) => {}
             Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
@@ -699,6 +708,9 @@ pub(super) fn emit_agent_record(event_tx: &pl_protocol::AgentEventSender, record
         summary: record.summary.clone(),
         depth: record.depth,
         error: record.error.clone(),
+        reason: record.error.clone(),
+        budget_limit_kind: None,
+        budget_usage: None,
         updated_at: record.updated_at,
     });
 }
