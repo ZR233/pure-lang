@@ -57,6 +57,7 @@ pub struct ProviderDto {
     pub status: String,
     pub base_url: String,
     pub bearer_token: String,
+    pub has_bearer_token: bool,
     pub default_model: String,
     pub model_count: String,
     pub updated_at: String,

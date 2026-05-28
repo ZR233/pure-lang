@@ -76,6 +76,7 @@ export type ProviderRecord = {
   status: string;
   baseUrl: string;
   bearerToken: string;
+  hasBearerToken?: boolean;
   defaultModel: string;
   modelCount: string;
   updatedAt: string;
