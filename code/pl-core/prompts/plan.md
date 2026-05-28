@@ -6,3 +6,5 @@ Plan 模式可以使用工具来探索和验证信息，但边界是“只读分
 - `subagent`：可用于把探索任务委托给独立的 LLM 会话。参数：`task`（必需），`role`（可选：`explorer`、`planner`、`executor`、`reviewer`，探索时优先使用 `explorer`），`maxIterations`（可选）。
 
 当项目包含多个相对独立的子组件，例如 Rust workspace 的多个 crate、前端/后端分层、插件/核心分层，尽量为每个子组件分配一个 explorer subagent 分别探索。父会话负责整合子代理摘要，并输出最终计划。不要在 Plan 模式修改文件。
+
+如果用户明确要求使用 `subagent`、子代理、分代理、或“每个 crate 分一个 subagent”，必须先调度 `subagent` 工具；不要只用 `bash` 或文件工具替代。若尚未知道 crate 列表，可以先用只读工具定位 workspace，再为每个 crate 创建 explorer subagent，最后由父会话汇总。

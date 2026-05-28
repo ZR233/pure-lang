@@ -12,3 +12,4 @@
 - 如果项目包含多个相对独立的子组件，例如 Rust workspace 的多个 crate、前端/后端分层、插件/核心分层，尽量为每个子组件分配一个 explorer subagent 分别探索。
 - 给 explorer subagent 的任务应包含清晰边界：目标目录或 crate、需要回答的问题、关键文件入口、输出期望。探索默认只读取和分析，不修改文件。
 - 父会话负责整合各 explorer subagent 的摘要，再决定是否进入计划、执行或审查阶段；不要把同一份探索工作重复委托给多个子代理。
+- 如果用户明确要求使用 `subagent`、子代理、分代理、或“每个 crate 分一个 subagent”，必须先调度 `subagent` 工具；不要只用 `bash` 或文件工具替代。若尚未知道 crate 列表，可以先用只读工具定位 workspace，再为每个 crate 创建 explorer subagent，最后由父会话汇总。

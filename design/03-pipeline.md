@@ -32,6 +32,7 @@ React action
 - 方案乙不保留旧命令别名和旧字段兜底
 - `ToolApprovalPolicy::AutoAllow` 为默认且主路径
 - 手动审批接口保留在系统能力中，但不作为默认流程
+- 用户显式要求 `subagent`/子代理分工时，核心提示必须将 `subagent` 作为强约束；普通 shell 或文件探索不能替代子代理调度
 
 ## 3.3 核心 turn 编排
 
@@ -43,6 +44,12 @@ React action
 4. 执行 `run_turn_with_trace`
 5. 事务化批量落库：message + trace + runtime snapshot
 6. 输出命令响应 DTO 与 timeline DTO
+
+工具迭代收尾原则：
+
+- 工具循环必须以 assistant 最终文本收尾
+- 当模型连续调用工具直到 `maxToolIterations` 上限时，核心层必须发起一次无工具总结推理
+- 无工具总结仍未返回内容时，核心层返回明确兜底文本，不能静默 `completed`
 
 持久化原则：
 
