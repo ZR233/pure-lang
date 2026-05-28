@@ -52,9 +52,9 @@ export type AgentStatus =
   | "shutdown"
   | "notFound";
 
-export type AgentActivity = {
-  eventId: string;
+export type AgentDto = {
   id: string;
+  sessionId: string;
   path: string;
   parentPath?: string | null;
   role: string;
@@ -74,8 +74,16 @@ export type AgentActivity = {
   updatedAt: number;
 };
 
-export type AgentActivityPayload = Omit<AgentActivity, "eventId"> & {
-  eventId?: string;
+export type AgentTimelineEvent = {
+  eventId: string;
+  sessionId: string;
+  sequence: number;
+  kind: string;
+  agentId?: string | null;
+  path?: string | null;
+  parentPath?: string | null;
+  payload: Record<string, unknown> | null;
+  createdAt: number;
 };
 
 export type ProviderRecord = {
@@ -250,7 +258,8 @@ export type BootstrapPayload = {
   sessions: SessionRecord[];
   selectedSessionId?: string | null;
   messages: ChatMessage[];
-  agentEvents: AgentActivity[];
+  agentEvents: AgentTimelineEvent[];
+  agents: AgentDto[];
   sessionRuntime?: SessionRuntime | null;
   config: ConfigPayload;
 };
@@ -261,7 +270,8 @@ export type ProjectSelectionPayload = {
   sessions: SessionRecord[];
   selectedSessionId?: string | null;
   messages: ChatMessage[];
-  agentEvents: AgentActivity[];
+  agentEvents: AgentTimelineEvent[];
+  agents: AgentDto[];
   sessionRuntime?: SessionRuntime | null;
 };
 
@@ -269,7 +279,8 @@ export type SessionSelectionPayload = {
   sessionId: string;
   sessions: SessionRecord[];
   messages: ChatMessage[];
-  agentEvents: AgentActivity[];
+  agentEvents: AgentTimelineEvent[];
+  agents: AgentDto[];
   sessionRuntime?: SessionRuntime | null;
 };
 
@@ -277,7 +288,8 @@ export type RunPromptResponse = {
   sessionId: string;
   sessions: SessionRecord[];
   messages: ChatMessage[];
-  agentEvents: AgentActivity[];
+  agentEvents: AgentTimelineEvent[];
+  agents: AgentDto[];
   sessionRuntime: SessionRuntime;
   timelineItems: TimelineItem[];
   turnStatus: TurnStatus;
@@ -304,7 +316,7 @@ export type AgentEvent =
     }
   | { toolApprovalGranted: { id: string; name: string } }
   | { toolApprovalDenied: { id: string; name: string; reason: string } }
-  | { agentStateChanged: AgentActivityPayload }
+  | { agentStateChanged: AgentDto }
   | "turnStarted"
   | { turnInterrupted: { reason: string } }
   | {
@@ -324,7 +336,9 @@ export type AgentEvent =
 
 export type AgentEventPayload = {
   sessionId: string;
-  event: AgentEvent;
+  event?: AgentEvent | null;
+  timelineEvent?: AgentTimelineEvent | null;
+  agent?: AgentDto | null;
 };
 
 export type ToolApprovalRequest = {

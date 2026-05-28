@@ -8,8 +8,8 @@ mod store;
 mod store_support;
 
 pub use records::{
-    AgentEventRecord, ProjectRecord, SessionRecord, SessionRuntimeRecord, StudioPromptOutcome,
-    ToolApprovalRecord, TraceEventRecord,
+    AgentSnapshotRecord, AgentTimelineEventRecord, ProjectRecord, SessionRecord,
+    SessionRuntimeRecord, StudioPromptOutcome, ToolApprovalRecord, TraceEventRecord,
 };
 pub use runtime::StudioRuntime;
 pub use store::StudioStore;
@@ -19,7 +19,7 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
-    use pl_protocol::{Message, MessageContent, MessageRole};
+    use pl_protocol::{AgentStatus, Message, MessageContent, MessageRole};
     use pretty_assertions::assert_eq;
 
     use crate::{CompileMode, TurnResult};
@@ -89,6 +89,78 @@ mod tests {
             })
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn agent_timeline_events_are_append_only_and_agents_are_snapshots() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/alpha").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Agent work", CompileMode::Auto)
+            .await
+            .unwrap();
+
+        let base_snapshot = AgentSnapshotRecord {
+            id: "agent-1".to_string(),
+            session_id: session.id.clone(),
+            path: "/root/research".to_string(),
+            parent_path: None,
+            role: "executor".to_string(),
+            task: "research".to_string(),
+            status: AgentStatus::Running,
+            summary: None,
+            depth: 1,
+            error: None,
+            reason: None,
+            budget_limit_kind: None,
+            budget_usage: None,
+            updated_at: 10,
+        };
+        store
+            .upsert_agent_snapshot(base_snapshot.clone())
+            .await
+            .unwrap();
+        store
+            .upsert_agent_snapshot(AgentSnapshotRecord {
+                status: AgentStatus::Completed,
+                summary: Some("done".to_string()),
+                updated_at: 20,
+                ..base_snapshot.clone()
+            })
+            .await
+            .unwrap();
+
+        for sequence in [1, 2, 3] {
+            store
+                .record_agent_event(AgentTimelineEventRecord {
+                    event_id: format!("event-{sequence}"),
+                    session_id: session.id.clone(),
+                    sequence,
+                    kind: "agentStatus".to_string(),
+                    agent_id: Some("agent-1".to_string()),
+                    path: Some("/root/research".to_string()),
+                    parent_path: None,
+                    payload_json: format!(r#"{{"sequence":{sequence}}}"#),
+                    created_at: sequence,
+                })
+                .await
+                .unwrap();
+        }
+
+        let agents = store.list_agents(&session.id).await.unwrap();
+        let events = store.list_agent_events(&session.id).await.unwrap();
+
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].status, AgentStatus::Completed);
+        assert_eq!(agents[0].summary.as_deref(), Some("done"));
+        assert_eq!(events.len(), 3);
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.event_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["event-1", "event-2", "event-3"],
+        );
     }
 
     #[tokio::test]

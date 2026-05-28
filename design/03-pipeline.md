@@ -68,11 +68,18 @@ React action
 - 无工具总结或普通 assistant 文本中若出现未执行的工具调用标记，必须按 `budgetLimited` 收尾并写入 `TurnBudgetLimited`；不能把原始 tool-call 文本作为最终回答
 - 用户显式要求子代理分工时，turn 完成前必须验证本轮实际创建了 agent；否则按 `failed` 收尾，不写入伪完成 assistant 消息
 
+Agent 协作 timeline 与状态分层：
+
+- agent timeline 是 append-only 协作事件流，只记录 spawn、wait、message、followup、close、final status 等事实事件
+- agent tree 是 latest snapshot，只按 `agent_id/path` 覆盖最新状态，供状态栏、树视图和 `list_agents` 使用
+- 前端不得用 latest snapshot 渲染 timeline；同一个 agent 的多次状态变化必须在 timeline 中保留为多条独立事件
+- `AgentStateChanged` 只用于更新 latest snapshot；UI timeline 消费 `agentEvents` 中的 append-only event
+
 持久化原则：
 
 - 消息和 trace 采用事务批量写入，避免逐条写放大
 - timeline 读取以 `sequence` 为单调游标
-- agent tree、agent events、agent messages 与 turn snapshot 分表持久化；运行期只读写 `agent_events`
+- agent tree、agent events、agent messages 与 turn snapshot 分表持久化；`agents` 为 latest snapshot，`agent_events` 为 append-only event log
 
 ## 3.4 事件管线
 

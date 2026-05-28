@@ -60,6 +60,68 @@ pub enum AgentEvent {
         #[serde(rename = "updatedAt")]
         updated_at: i64,
     },
+    CollabAgentSpawnBegin {
+        call_id: String,
+        started_at: i64,
+        sender_path: String,
+        task_name: String,
+        prompt: String,
+        role: String,
+        model: Option<String>,
+        reasoning_effort: Option<String>,
+    },
+    CollabAgentSpawnEnd {
+        call_id: String,
+        completed_at: i64,
+        sender_path: String,
+        agent_id: Option<String>,
+        path: Option<String>,
+        role: Option<String>,
+        status: AgentStatus,
+        prompt: String,
+        error: Option<String>,
+    },
+    CollabAgentInteractionBegin {
+        call_id: String,
+        started_at: i64,
+        sender_path: String,
+        receiver_path: String,
+        prompt: String,
+    },
+    CollabAgentInteractionEnd {
+        call_id: String,
+        completed_at: i64,
+        sender_path: String,
+        receiver_path: String,
+        status: AgentStatus,
+        prompt: String,
+        error: Option<String>,
+    },
+    CollabWaitingBegin {
+        call_id: String,
+        started_at: i64,
+        sender_path: String,
+    },
+    CollabWaitingEnd {
+        call_id: String,
+        completed_at: i64,
+        sender_path: String,
+        timed_out: bool,
+    },
+    CollabCloseBegin {
+        call_id: String,
+        started_at: i64,
+        sender_path: String,
+        receiver_path: String,
+    },
+    CollabCloseEnd {
+        call_id: String,
+        completed_at: i64,
+        sender_path: String,
+        receiver_path: String,
+        status: AgentStatus,
+        error: Option<String>,
+    },
     TurnStarted,
     TurnInterrupted {
         reason: String,
@@ -407,6 +469,65 @@ mod tests {
                         "waitCalls": 2,
                         "elapsedMs": 42
                     }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_collab_agent_spawn_events_as_camel_case() {
+        let begin = serde_json::to_value(AgentEvent::CollabAgentSpawnBegin {
+            call_id: "call-1".to_string(),
+            started_at: 1_779_688_800,
+            sender_path: "/root".to_string(),
+            task_name: "scan_crate".to_string(),
+            prompt: "scan crate".to_string(),
+            role: "executor".to_string(),
+            model: Some("deepseek-v4-flash".to_string()),
+            reasoning_effort: Some("high".to_string()),
+        })
+        .unwrap();
+        let end = serde_json::to_value(AgentEvent::CollabAgentSpawnEnd {
+            call_id: "call-1".to_string(),
+            completed_at: 1_779_688_801,
+            sender_path: "/root".to_string(),
+            agent_id: Some("agent-1".to_string()),
+            path: Some("/root/scan_crate".to_string()),
+            role: Some("executor".to_string()),
+            status: AgentStatus::Queued,
+            prompt: "scan crate".to_string(),
+            error: None,
+        })
+        .unwrap();
+
+        assert_eq!(
+            begin,
+            serde_json::json!({
+                "collabAgentSpawnBegin": {
+                    "callId": "call-1",
+                    "startedAt": 1779688800,
+                    "senderPath": "/root",
+                    "taskName": "scan_crate",
+                    "prompt": "scan crate",
+                    "role": "executor",
+                    "model": "deepseek-v4-flash",
+                    "reasoningEffort": "high"
+                }
+            })
+        );
+        assert_eq!(
+            end,
+            serde_json::json!({
+                "collabAgentSpawnEnd": {
+                    "callId": "call-1",
+                    "completedAt": 1779688801,
+                    "senderPath": "/root",
+                    "agentId": "agent-1",
+                    "path": "/root/scan_crate",
+                    "role": "executor",
+                    "status": "queued",
+                    "prompt": "scan crate",
+                    "error": null
                 }
             })
         );

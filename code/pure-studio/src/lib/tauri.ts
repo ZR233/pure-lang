@@ -14,6 +14,7 @@ import {
   previewProjects,
   previewSessions,
   previewSessionRuntime,
+  previewAgents,
   previewAgentEvents,
   previewTimelineItems,
 } from "./preview";
@@ -48,6 +49,7 @@ export function bootstrapStudio() {
         selectedSessionId: previewSessions[0]?.id ?? null,
         messages: previewMessages,
         agentEvents: previewAgentEvents,
+        agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
         config: previewConfig,
       }),
@@ -73,6 +75,7 @@ export function openProject(path: string) {
         selectedSessionId: previewSessions[0]?.id ?? null,
         messages: previewMessages,
         agentEvents: previewAgentEvents,
+        agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
       }),
     );
@@ -90,6 +93,7 @@ export function selectProject(projectId: string) {
         selectedSessionId: previewSessions[0]?.id ?? null,
         messages: previewMessages,
         agentEvents: previewAgentEvents,
+        agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
       }),
     );
@@ -112,6 +116,7 @@ export function createSession(projectId: string, title?: string) {
         sessions: [session, ...previewSessions],
         messages: [],
         agentEvents: [],
+        agents: [],
         sessionRuntime: {
           ...previewSessionRuntime,
           sessionId: session.id,
@@ -140,6 +145,7 @@ export function selectSession(sessionId: string) {
         sessions: previewSessions,
         messages: previewMessages,
         agentEvents: previewAgentEvents,
+        agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
       }),
     );
@@ -153,6 +159,23 @@ export function runPrompt(sessionId: string, prompt: string) {
     return new Promise<RunPromptResponse>((resolve) => {
       window.setTimeout(() => {
         const interrupted = previewInterruptedSessions.delete(sessionId);
+        const now = Math.floor(Date.now() / 1000);
+        const latestAgent = {
+          id: "agent-preview-latest",
+          sessionId,
+          path: "/root/preview_latest",
+          parentPath: null,
+          role: "executor",
+          task: prompt,
+          status: interrupted ? "interrupted" as const : "completed" as const,
+          summary: interrupted ? "预览运行已停止。" : "预览运行已完成。",
+          depth: 1,
+          error: null,
+          reason: interrupted ? "interrupted" : null,
+          budgetLimitKind: null,
+          budgetUsage: null,
+          updatedAt: now,
+        };
         resolve(clone({
         sessionId,
         sessions: previewSessions,
@@ -163,19 +186,34 @@ export function runPrompt(sessionId: string, prompt: string) {
         agentEvents: [
           ...previewAgentEvents,
           {
-            eventId: `preview-agent-${Date.now()}`,
-            id: "agent-preview-latest",
-            path: "/root/preview_latest",
+            eventId: `preview-agent-event-${Date.now()}`,
+            sessionId,
+            sequence: previewAgentEvents.length + 1,
+            kind: "agentStatus",
+            agentId: latestAgent.id,
+            path: latestAgent.path,
             parentPath: null,
-            role: "executor",
-            task: prompt,
-            status: interrupted ? "interrupted" as const : "completed" as const,
-            summary: interrupted ? "预览运行已停止。" : "预览运行已完成。",
-            depth: 1,
-            error: null,
-            updatedAt: Math.floor(Date.now() / 1000),
+            payload: {
+              agentStateChanged: {
+                id: latestAgent.id,
+                path: latestAgent.path,
+                parentPath: latestAgent.parentPath,
+                role: latestAgent.role,
+                task: latestAgent.task,
+                status: latestAgent.status,
+                summary: latestAgent.summary,
+                depth: latestAgent.depth,
+                error: latestAgent.error,
+                reason: latestAgent.reason,
+                budgetLimitKind: latestAgent.budgetLimitKind,
+                budgetUsage: latestAgent.budgetUsage,
+                updatedAt: latestAgent.updatedAt,
+              },
+            },
+            createdAt: now,
           },
         ],
+        agents: [...previewAgents, latestAgent],
         sessionRuntime: {
           ...previewSessionRuntime,
           promptTokens: previewSessionRuntime.promptTokens + 1200,

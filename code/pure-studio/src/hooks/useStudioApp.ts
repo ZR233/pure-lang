@@ -38,7 +38,11 @@ import type {
   ToolApprovalResolved,
 } from "../types";
 
-function statusTextForEvent(event: AgentEvent, t: (key: string, args?: Record<string, unknown>) => string) {
+function statusTextForEvent(
+  event: AgentEvent | null | undefined,
+  t: (key: string, args?: Record<string, unknown>) => string,
+) {
+  if (!event) return t("turnPhase.subagent");
   if (event === "turnStarted") return t("status.running");
   if (event === "done") return t("status.done");
   if ("turnInterrupted" in event) return t("status.interrupted");
@@ -106,6 +110,8 @@ export function useStudioApp() {
         dispatch({
           type: "agentEvent",
           event: payload.event,
+          timelineEvent: payload.timelineEvent,
+          agent: payload.agent,
           statusText: statusTextForEvent(payload.event, t),
         });
       }),

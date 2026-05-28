@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use pl_model::SharedModelProvider;
-use pl_protocol::{AgentStatus, PureError};
+use pl_protocol::{AgentEvent, AgentStatus, PureError};
 use serde::{Deserialize, Serialize};
 
 use super::multi_agent::{
@@ -117,15 +117,54 @@ impl Tool for SubagentTool {
             let subagent_input = Self::parse_input(input.arguments)?;
             let role = Self::role(&subagent_input)?;
             let task_name = task_name_from_tool_id(&input.tool_id);
-            let handle = context
+            let parent_path = current_agent_path(&context);
+            let _ = context.event_tx.send(AgentEvent::CollabAgentSpawnBegin {
+                call_id: input.tool_id.clone(),
+                started_at: unix_seconds(),
+                sender_path: parent_path.clone(),
+                task_name: task_name.clone(),
+                prompt: subagent_input.task.clone(),
+                role: role.key().to_string(),
+                model: None,
+                reasoning_effort: None,
+            });
+            let spawn_result = context
                 .agent_control
                 .spawn_agent(AgentSpawnInput {
                     task_name,
                     message: subagent_input.task.clone(),
                     role: role.key().to_string(),
-                    parent_path: Some(current_agent_path(&context)),
+                    parent_path: Some(parent_path.clone()),
                 })
-                .await?;
+                .await;
+            let handle = match spawn_result {
+                Ok(handle) => handle,
+                Err(error) => {
+                    let _ = context.event_tx.send(AgentEvent::CollabAgentSpawnEnd {
+                        call_id: input.tool_id,
+                        completed_at: unix_seconds(),
+                        sender_path: parent_path,
+                        agent_id: None,
+                        path: None,
+                        role: Some(role.key().to_string()),
+                        status: AgentStatus::NotFound,
+                        prompt: subagent_input.task,
+                        error: Some(error.to_string()),
+                    });
+                    return Err(error);
+                }
+            };
+            let _ = context.event_tx.send(AgentEvent::CollabAgentSpawnEnd {
+                call_id: input.tool_id.clone(),
+                completed_at: unix_seconds(),
+                sender_path: parent_path,
+                agent_id: Some(handle.id.clone()),
+                path: Some(handle.path.clone()),
+                role: Some(role.key().to_string()),
+                status: AgentStatus::Queued,
+                prompt: subagent_input.task.clone(),
+                error: None,
+            });
             let record = context
                 .agent_control
                 .record(&handle.id)
@@ -143,6 +182,11 @@ impl Tool for SubagentTool {
                     .attach_cancellation_token(&handle.id, token)
                     .await;
             }
+            let _ = context.event_tx.send(AgentEvent::CollabWaitingBegin {
+                call_id: input.tool_id.clone(),
+                started_at: unix_seconds(),
+                sender_path: current_agent_path(&context),
+            });
             run_agent_turn(AgentRunConfig {
                 provider: self.provider.clone(),
                 reasoning_effort: self.reasoning_effort.clone(),
@@ -165,6 +209,12 @@ impl Tool for SubagentTool {
                     .unwrap_or(context.budget_policy.agent_budget.child_turn_budget),
             })
             .await;
+            let _ = context.event_tx.send(AgentEvent::CollabWaitingEnd {
+                call_id: input.tool_id.clone(),
+                completed_at: unix_seconds(),
+                sender_path: current_agent_path(&context),
+                timed_out: false,
+            });
 
             let record = context
                 .agent_control
@@ -242,6 +292,13 @@ fn empty_truncation() -> OutputTruncation {
             original_length: 0,
         },
     }
+}
+
+fn unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 #[cfg(test)]

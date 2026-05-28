@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   ModelRecord,
-  AgentActivity,
+  AgentDto,
   AgentStatus,
   ProviderRecord,
   RoleRecord,
@@ -21,7 +21,7 @@ type SessionStatusBarProps = {
   onSaveProviderSettings: (explicitRoles?: RoleRecord[]) => void;
   turnPhase: TurnPhase;
   turnStartedAt: number | null;
-  agentActivities: AgentActivity[];
+  agents: AgentDto[];
 };
 
 const turnPhaseKeys: Record<TurnPhase, string> = {
@@ -142,8 +142,8 @@ function ListPopover({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function sortAgents(activities: AgentActivity[]): AgentActivity[] {
-  return [...activities].sort((left, right) => {
+function sortAgents(agents: AgentDto[]): AgentDto[] {
+  return [...agents].sort((left, right) => {
     const leftActive = activeAgentStatuses.has(left.status) ? 1 : 0;
     const rightActive = activeAgentStatuses.has(right.status) ? 1 : 0;
     if (leftActive !== rightActive) {
@@ -185,9 +185,9 @@ function TurnStatusIndicator({
   );
 }
 
-function AgentPopover({ activities }: { activities: AgentActivity[] }) {
+function AgentPopover({ agents }: { agents: AgentDto[] }) {
   const { t } = useTranslation();
-  const items = sortAgents(activities);
+  const items = sortAgents(agents);
 
   return (
     <StatusPopover
@@ -195,7 +195,7 @@ function AgentPopover({ activities }: { activities: AgentActivity[] }) {
       trigger={
         <button className="status-item status-subagents" type="button">
           <Bot size={14} />
-          <strong>{t("statusBar.subagents")} {activities.length}</strong>
+          <strong>{t("statusBar.subagents")} {agents.length}</strong>
           <ChevronDown size={13} />
         </button>
       }
@@ -371,7 +371,7 @@ export function SessionStatusBar({
   onSaveProviderSettings,
   turnPhase,
   turnStartedAt,
-  agentActivities,
+  agents,
 }: SessionStatusBarProps) {
   const { t } = useTranslation();
   const contextLabel = `${formatTokenCount(runtime?.latestContextTokens)} / ${formatTokenCount(runtime?.contextWindow)}`;
@@ -445,7 +445,7 @@ export function SessionStatusBar({
           </div>
         </StatusPopover>
 
-        <AgentPopover activities={agentActivities} />
+        <AgentPopover agents={agents} />
       </div>
     </div>
   );

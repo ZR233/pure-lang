@@ -11,13 +11,14 @@ use sea_orm::{
 use crate::studio::entities;
 use crate::studio::ids::{new_id, new_trace_event_id, unix_seconds};
 use crate::studio::mappers::{
-    agent_event_record, estimate_cost, message_to_row_parts, project_record, row_to_message,
-    session_record, session_runtime_record, trace_event_kind_label, trace_event_record,
+    agent_snapshot_record, agent_timeline_event_record, estimate_cost, message_to_row_parts,
+    project_record, row_to_message, session_record, session_runtime_record, trace_event_kind_label,
+    trace_event_record,
 };
 use crate::studio::paths::{prepare_database_switch, project_name, sqlite_url};
 use crate::studio::records::{
-    AgentEventRecord, ProjectRecord, SessionRecord, SessionRuntimeRecord, ToolApprovalRecord,
-    TraceEventRecord,
+    AgentSnapshotRecord, AgentTimelineEventRecord, ProjectRecord, SessionRecord,
+    SessionRuntimeRecord, ToolApprovalRecord, TraceEventRecord,
 };
 use crate::studio::store_support::{
     configure_sqlite, insert_message_with_tx, non_empty_title, run_migrations,
@@ -262,27 +263,79 @@ impl StudioStore {
         Ok(())
     }
 
-    pub async fn record_agent_event(&self, record: AgentEventRecord) -> Result<()> {
+    pub async fn upsert_agent_snapshot(&self, record: AgentSnapshotRecord) -> Result<()> {
+        use entities::agent;
+        if let Some(existing) = agent::Entity::find_by_id(record.id.clone())
+            .one(&self.db)
+            .await?
+        {
+            let mut active: agent::ActiveModel = existing.into();
+            active.session_id = Set(record.session_id);
+            active.path = Set(record.path);
+            active.parent_path = Set(record.parent_path);
+            active.role = Set(record.role);
+            active.task = Set(record.task);
+            active.status = Set(record.status.as_str().to_string());
+            active.summary = Set(record.summary);
+            active.error = Set(record.error);
+            active.reason = Set(record.reason);
+            active.budget_limit_kind = Set(record
+                .budget_limit_kind
+                .map(|kind| kind.as_str().to_string()));
+            active.budget_usage_json = Set(record
+                .budget_usage
+                .and_then(|usage| serde_json::to_string(&usage).ok()));
+            active.depth = Set(record.depth);
+            active.updated_at = Set(record.updated_at);
+            active.update(&self.db).await?;
+        } else {
+            agent::ActiveModel {
+                id: Set(record.id),
+                session_id: Set(record.session_id),
+                path: Set(record.path),
+                parent_path: Set(record.parent_path),
+                role: Set(record.role),
+                task: Set(record.task),
+                status: Set(record.status.as_str().to_string()),
+                summary: Set(record.summary),
+                error: Set(record.error),
+                reason: Set(record.reason),
+                budget_limit_kind: Set(record
+                    .budget_limit_kind
+                    .map(|kind| kind.as_str().to_string())),
+                budget_usage_json: Set(record
+                    .budget_usage
+                    .and_then(|usage| serde_json::to_string(&usage).ok())),
+                depth: Set(record.depth),
+                updated_at: Set(record.updated_at),
+            }
+            .insert(&self.db)
+            .await?;
+        }
+        Ok(())
+    }
+
+    pub async fn list_agents(&self, session_id: &str) -> Result<Vec<AgentSnapshotRecord>> {
+        use entities::agent;
+        let rows = agent::Entity::find()
+            .filter(agent::Column::SessionId.eq(session_id.to_string()))
+            .order_by_asc(agent::Column::Path)
+            .all(&self.db)
+            .await?;
+        Ok(rows.into_iter().map(agent_snapshot_record).collect())
+    }
+
+    pub async fn record_agent_event(&self, record: AgentTimelineEventRecord) -> Result<()> {
         use entities::agent_event;
         agent_event::ActiveModel {
             id: Set(record.event_id),
             session_id: Set(record.session_id),
+            sequence: Set(record.sequence),
+            kind: Set(record.kind),
             agent_id: Set(record.agent_id),
             path: Set(record.path),
             parent_path: Set(record.parent_path),
-            role: Set(record.role),
-            task: Set(record.task),
-            status: Set(record.status.as_str().to_string()),
-            summary: Set(record.summary),
-            depth: Set(record.depth),
-            error: Set(record.error),
-            reason: Set(record.reason),
-            budget_limit_kind: Set(record
-                .budget_limit_kind
-                .map(|kind| kind.as_str().to_string())),
-            budget_usage_json: Set(record
-                .budget_usage
-                .and_then(|usage| serde_json::to_string(&usage).ok())),
+            payload_json: Set(record.payload_json),
             created_at: Set(record.created_at),
         }
         .insert(&self.db)
@@ -290,15 +343,28 @@ impl StudioStore {
         Ok(())
     }
 
-    pub async fn list_agent_events(&self, session_id: &str) -> Result<Vec<AgentEventRecord>> {
+    pub async fn list_agent_events(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<AgentTimelineEventRecord>> {
         use entities::agent_event;
         let rows = agent_event::Entity::find()
             .filter(agent_event::Column::SessionId.eq(session_id.to_string()))
-            .order_by_asc(agent_event::Column::CreatedAt)
-            .order_by_asc(agent_event::Column::Id)
+            .order_by_asc(agent_event::Column::Sequence)
             .all(&self.db)
             .await?;
-        Ok(rows.into_iter().map(agent_event_record).collect())
+        Ok(rows.into_iter().map(agent_timeline_event_record).collect())
+    }
+
+    pub async fn next_agent_event_sequence(&self, session_id: &str) -> Result<i64> {
+        use entities::agent_event;
+        let max_seq = agent_event::Entity::find()
+            .filter(agent_event::Column::SessionId.eq(session_id.to_string()))
+            .order_by_desc(agent_event::Column::Sequence)
+            .one(&self.db)
+            .await?
+            .map(|row| row.sequence);
+        Ok(max_seq.map(|sequence| sequence + 1).unwrap_or(0))
     }
 
     pub async fn append_trace_events(&self, events: &[TraceEvent]) -> Result<()> {

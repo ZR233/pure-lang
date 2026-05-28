@@ -104,6 +104,16 @@ const zhCN = {
     toolCall: "工具调用",
     defaultWorkingDirectory: "（默认工作目录）",
     subagentLabel: "子代理 {{id}}",
+    spawnBegin: "启动子代理",
+    spawnEnd: "子代理已启动",
+    interactionBegin: "发送子代理消息",
+    interactionEnd: "子代理消息已发送",
+    waitingBegin: "等待子代理",
+    waitingEnd: "等待结束",
+    closeBegin: "关闭子代理",
+    closeEnd: "子代理已关闭",
+    waitTimedOut: "等待已超时。",
+    waitCompleted: "等待已完成。",
   },
 
   toolCall: {

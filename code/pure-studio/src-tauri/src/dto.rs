@@ -36,7 +36,21 @@ pub struct MessageDto {
 #[serde(rename_all = "camelCase")]
 pub struct AgentEventDto {
     pub event_id: String,
+    pub session_id: String,
+    pub sequence: i64,
+    pub kind: String,
+    pub agent_id: Option<String>,
+    pub path: Option<String>,
+    pub parent_path: Option<String>,
+    pub payload: serde_json::Value,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentDto {
     pub id: String,
+    pub session_id: String,
     pub path: String,
     pub parent_path: Option<String>,
     pub role: String,
@@ -209,6 +223,7 @@ pub struct BootstrapDto {
     pub selected_session_id: Option<String>,
     pub messages: Vec<MessageDto>,
     pub agent_events: Vec<AgentEventDto>,
+    pub agents: Vec<AgentDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
     pub config: ConfigDto,
 }
@@ -222,6 +237,7 @@ pub struct ProjectSelectionDto {
     pub selected_session_id: Option<String>,
     pub messages: Vec<MessageDto>,
     pub agent_events: Vec<AgentEventDto>,
+    pub agents: Vec<AgentDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
 }
 
@@ -232,6 +248,7 @@ pub struct SessionSelectionDto {
     pub sessions: Vec<SessionDto>,
     pub messages: Vec<MessageDto>,
     pub agent_events: Vec<AgentEventDto>,
+    pub agents: Vec<AgentDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
 }
 
@@ -242,6 +259,7 @@ pub struct RunPromptResponse {
     pub messages: Vec<MessageDto>,
     pub sessions: Vec<SessionDto>,
     pub agent_events: Vec<AgentEventDto>,
+    pub agents: Vec<AgentDto>,
     pub session_runtime: SessionRuntimeDto,
     pub timeline_items: Vec<TimelineItemDto>,
     pub turn_status: String,
@@ -295,7 +313,12 @@ pub struct SessionTimelineDto {
 #[serde(rename_all = "camelCase")]
 pub struct AgentEventPayload {
     pub session_id: String,
-    pub event: AgentEvent,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event: Option<AgentEvent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeline_event: Option<AgentEventDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]

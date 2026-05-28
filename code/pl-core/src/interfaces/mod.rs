@@ -5,7 +5,7 @@ use pl_protocol::{AgentEvent, Message, TraceEvent};
 
 use crate::{
     ConfigStore, CoreSession, ProjectRecord, SessionRecord, SessionRuntimeRecord,
-    StudioAgentEventRecord, StudioStore, ToolApprovalRecord, TurnResult,
+    StudioAgentTimelineEventRecord, StudioStore, ToolApprovalRecord, TurnResult,
 };
 
 /// 会话与项目存储端口。
@@ -59,7 +59,7 @@ pub trait EventSink: Send + Sync {
     -> impl Future<Output = Result<()>> + Send;
     fn record_agent_event(
         &self,
-        record: StudioAgentEventRecord,
+        record: StudioAgentTimelineEventRecord,
     ) -> impl Future<Output = Result<()>> + Send;
     fn record_tool_approval(
         &self,
@@ -140,7 +140,7 @@ impl EventSink for StudioStore {
         self.append_trace_events(events).await
     }
 
-    async fn record_agent_event(&self, record: StudioAgentEventRecord) -> Result<()> {
+    async fn record_agent_event(&self, record: StudioAgentTimelineEventRecord) -> Result<()> {
         self.record_agent_event(record).await
     }
 
