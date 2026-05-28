@@ -8,4 +8,4 @@ pub use control::{
 };
 pub use path::AgentPath;
 pub use pl_protocol::AgentStatus;
-pub use record::{AgentEventRecord, AgentRecord};
+pub use record::AgentRecord;

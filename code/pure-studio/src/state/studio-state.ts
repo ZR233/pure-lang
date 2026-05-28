@@ -1,7 +1,7 @@
 import type {
   AgentEvent,
-  AgentActivity,
-  AgentActivityPayload,
+  AgentDto,
+  AgentTimelineEvent,
   BootstrapPayload,
   ChatMessage,
   ConfigPayload,
@@ -42,7 +42,8 @@ export type StudioState = {
   streamingText: string;
   thinkingText: string;
   toolCalls: Map<string, TrackedToolCall>;
-  agentActivities: AgentActivity[];
+  agents: AgentDto[];
+  agentTimelineEvents: AgentTimelineEvent[];
   timelineItems: TimelineItem[];
   sessionRuntime: SessionRuntime | null;
   approvals: ToolApprovalRequest[];
@@ -77,7 +78,13 @@ export type StudioAction =
   | { type: "resolveApproval"; payload: ToolApprovalResolved; status: string }
   | { type: "stopRequested"; status: string }
   | { type: "stopFallback"; status: string }
-  | { type: "agentEvent"; event: AgentEvent; statusText: string }
+  | {
+      type: "agentEvent";
+      event?: AgentEvent | null;
+      timelineEvent?: AgentTimelineEvent | null;
+      agent?: AgentDto | null;
+      statusText: string;
+    }
   | { type: "appendUserPrompt"; content: string; status: string; startedAt: number };
 
 export const initialStudioState = (startingStatus: string): StudioState => ({
@@ -98,7 +105,8 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   streamingText: "",
   thinkingText: "",
   toolCalls: new Map(),
-  agentActivities: [],
+  agents: [],
+  agentTimelineEvents: [],
   timelineItems: [],
   sessionRuntime: null,
   approvals: [],
@@ -120,7 +128,8 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         sessions: action.payload.sessions,
         selectedSessionId: action.payload.selectedSessionId ?? null,
         messages: action.payload.messages,
-        agentActivities: mergeAgentActivities([], action.payload.agentEvents ?? []),
+        agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
+        agents: mergeAgents([], action.payload.agents ?? []),
         sessionRuntime: action.payload.sessionRuntime ?? null,
         ...configFields(state.selectedProviderId, action.payload.config),
         status: action.status,
@@ -140,7 +149,8 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         sessions: action.payload.sessions,
         selectedSessionId: action.payload.selectedSessionId ?? null,
         messages: action.payload.messages,
-        agentActivities: mergeAgentActivities([], action.payload.agentEvents ?? []),
+        agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
+        agents: mergeAgents([], action.payload.agents ?? []),
         sessionRuntime: action.payload.sessionRuntime ?? null,
         timelineItems: [],
         streamingText: "",
@@ -156,7 +166,8 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         sessions: action.payload.sessions.length > 0 ? action.payload.sessions : state.sessions,
         selectedSessionId: action.payload.sessionId,
         messages: action.payload.messages,
-        agentActivities: mergeAgentActivities([], action.payload.agentEvents ?? []),
+        agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
+        agents: mergeAgents([], action.payload.agents ?? []),
         sessionRuntime: action.payload.sessionRuntime ?? null,
         timelineItems: [],
         streamingText: "",
@@ -172,7 +183,11 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         selectedSessionId: action.payload.sessionId,
         sessions: action.payload.sessions,
         messages: action.payload.messages,
-        agentActivities: mergeAgentActivities([], action.payload.agentEvents ?? []),
+        agentTimelineEvents: mergeAgentTimelineEvents(
+          state.agentTimelineEvents,
+          action.payload.agentEvents ?? [],
+        ),
+        agents: mergeAgents(state.agents, action.payload.agents ?? []),
         sessionRuntime: action.payload.sessionRuntime,
         timelineItems: mergeTimelineItems(state.timelineItems, action.payload.timelineItems),
         streamingText: "",
@@ -256,13 +271,34 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         turnStartedAt: action.startedAt,
       };
     case "agentEvent":
-      return reduceAgentEvent(state, action.event, action.statusText);
+      return reduceAgentEvent(
+        {
+          ...state,
+          agentTimelineEvents: action.timelineEvent
+            ? mergeAgentTimelineEvents(state.agentTimelineEvents, [action.timelineEvent])
+            : state.agentTimelineEvents,
+          agents: action.agent ? mergeAgents(state.agents, [action.agent]) : state.agents,
+        },
+        action.event,
+        action.statusText,
+      );
     default:
       return state;
   }
 }
 
-function reduceAgentEvent(state: StudioState, event: AgentEvent, statusText: string): StudioState {
+function reduceAgentEvent(
+  state: StudioState,
+  event: AgentEvent | null | undefined,
+  statusText: string,
+): StudioState {
+  if (!event) {
+    return {
+      ...state,
+      status: statusText,
+      turnPhase: state.turnPhase === "idle" ? "subagent" : state.turnPhase,
+    };
+  }
   if (event === "turnStarted") {
     return {
       ...state,
@@ -389,14 +425,7 @@ function reduceAgentEvent(state: StudioState, event: AgentEvent, statusText: str
       toolCalls: next,
     };
   }
-  if ("agentStateChanged" in event) {
-    return {
-      ...state,
-      agentActivities: mergeAgentActivities(state.agentActivities, [event.agentStateChanged]),
-      turnPhase: "subagent",
-      status: statusText,
-    };
-  }
+  if ("agentStateChanged" in event) return { ...state, turnPhase: "subagent", status: statusText };
   if ("error" in event) {
     return {
       ...state,
@@ -416,13 +445,26 @@ export function mergeTimelineItems(current: TimelineItem[], incoming: TimelineIt
   return [...bySeq.values()].sort((a, b) => a.sequence - b.sequence);
 }
 
-export function mergeAgentActivities(
-  current: AgentActivity[],
-  events: AgentActivityPayload[],
-): AgentActivity[] {
-  const byId = new Map(current.map((activity) => [activity.id, activity]));
-  for (const event of events) {
-    byId.set(event.id, normalizeAgentActivity(event));
+export function mergeAgentTimelineEvents(
+  current: AgentTimelineEvent[],
+  incoming: AgentTimelineEvent[],
+): AgentTimelineEvent[] {
+  if (incoming.length === 0) return current;
+  const byId = new Map(current.map((event) => [event.eventId, event]));
+  for (const event of incoming) {
+    byId.set(event.eventId, event);
+  }
+  return [...byId.values()].sort((left, right) => {
+    if (left.sequence !== right.sequence) return left.sequence - right.sequence;
+    return left.eventId.localeCompare(right.eventId);
+  });
+}
+
+export function mergeAgents(current: AgentDto[], incoming: AgentDto[]): AgentDto[] {
+  if (incoming.length === 0) return current;
+  const byId = new Map(current.map((agent) => [agent.id, agent]));
+  for (const agent of incoming) {
+    byId.set(agent.id, agent);
   }
   return [...byId.values()].sort((left, right) => {
     if (left.path !== right.path) {
@@ -430,27 +472,6 @@ export function mergeAgentActivities(
     }
     return right.updatedAt - left.updatedAt;
   });
-}
-
-export function normalizeAgentActivity(event: AgentActivityPayload): AgentActivity {
-  return {
-    eventId:
-      event.eventId ??
-      `${event.id}-${event.updatedAt}-${event.status}-${Math.random().toString(16).slice(2)}`,
-    id: event.id,
-    path: event.path,
-    parentPath: event.parentPath ?? null,
-    role: event.role,
-    task: event.task,
-    status: event.status,
-    summary: event.summary ?? null,
-    depth: event.depth,
-    error: event.error ?? null,
-    reason: event.reason ?? null,
-    budgetLimitKind: event.budgetLimitKind ?? null,
-    budgetUsage: event.budgetUsage ?? null,
-    updatedAt: event.updatedAt,
-  };
 }
 
 function configFields(selectedProviderId: string | null, payload: ConfigPayload) {

@@ -13,7 +13,7 @@ use crate::dto::{
 };
 use crate::events::drain_events;
 use crate::mappers::{
-    agent_event_dtos, config_dto, load_session_runtime_dto, message_dtos, project_dtos,
+    agent_dtos, agent_event_dtos, config_dto, load_session_runtime_dto, message_dtos, project_dtos,
     provider_settings_to_edit, session_dtos, trace_events_to_timeline_items,
     turn_result_status_label,
 };
@@ -33,6 +33,7 @@ pub async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Boots
     let mut selected_session_id = None;
     let mut messages = Vec::new();
     let mut agent_events = Vec::new();
+    let mut agents = Vec::new();
 
     if let Some(project) = projects.first() {
         selected_project_id = Some(project.id.clone());
@@ -41,6 +42,7 @@ pub async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Boots
             selected_session_id = Some(session.id.clone());
             messages = state.studio.store().load_messages(&session.id).await?;
             agent_events = state.studio.store().list_agent_events(&session.id).await?;
+            agents = state.studio.store().list_agents(&session.id).await?;
         }
     }
     let session_runtime = match selected_session_id.as_deref() {
@@ -55,6 +57,7 @@ pub async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Boots
         selected_session_id,
         messages: message_dtos(messages),
         agent_events: agent_event_dtos(agent_events),
+        agents: agent_dtos(agents),
         session_runtime,
         config: config_dto(state.studio.config_store())?,
     })
@@ -100,6 +103,7 @@ pub async fn create_session(
         sessions: session_dtos(sessions),
         messages: Vec::new(),
         agent_events: Vec::new(),
+        agents: Vec::new(),
         session_runtime: Some(load_session_runtime_dto(&state.studio, &session.id).await?),
     })
 }
@@ -111,12 +115,14 @@ pub async fn select_session(
 ) -> CommandResult<SessionSelectionDto> {
     let messages = state.studio.store().load_messages(&session_id).await?;
     let agent_events = state.studio.store().list_agent_events(&session_id).await?;
+    let agents = state.studio.store().list_agents(&session_id).await?;
     Ok(SessionSelectionDto {
         session_runtime: Some(load_session_runtime_dto(&state.studio, &session_id).await?),
         session_id,
         sessions: Vec::new(),
         messages: message_dtos(messages),
         agent_events: agent_event_dtos(agent_events),
+        agents: agent_dtos(agents),
     })
 }
 
@@ -186,6 +192,7 @@ pub async fn run_prompt(
                 agent_events: agent_event_dtos(
                     state.studio.store().list_agent_events(&session_id).await?,
                 ),
+                agents: agent_dtos(state.studio.store().list_agents(&session_id).await?),
                 session_runtime: load_session_runtime_dto(&state.studio, &session_id).await?,
                 timeline_items: trace_events_to_timeline_items(&outcome.trace_events),
                 turn_status: turn_result_status_label(outcome.result.status).to_string(),
@@ -351,6 +358,10 @@ async fn select_project_data(
         Some(session_id) => state.studio.store().list_agent_events(session_id).await?,
         None => Vec::new(),
     };
+    let agents = match &selected_session_id {
+        Some(session_id) => state.studio.store().list_agents(session_id).await?,
+        None => Vec::new(),
+    };
     let session_runtime = match selected_session_id.as_deref() {
         Some(session_id) => Some(load_session_runtime_dto(&state.studio, session_id).await?),
         None => None,
@@ -362,6 +373,7 @@ async fn select_project_data(
         selected_session_id,
         messages: message_dtos(messages),
         agent_events: agent_event_dtos(agent_events),
+        agents: agent_dtos(agents),
         session_runtime,
     })
 }

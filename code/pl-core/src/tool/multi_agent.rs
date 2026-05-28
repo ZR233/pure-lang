@@ -198,15 +198,56 @@ impl Tool for SpawnAgentTool {
                 serde_json::from_value(input.arguments).map_err(invalid_spawn_input)?;
             let role = role_key(args.agent_type.as_deref())?;
             let parent_path = current_agent_path(&context);
-            let handle = context
+            let prompt = args.message.clone();
+            let _ = context.event_tx.send(AgentEvent::CollabAgentSpawnBegin {
+                call_id: input.tool_id.clone(),
+                started_at: unix_seconds(),
+                sender_path: parent_path.clone(),
+                task_name: args.task_name.clone(),
+                prompt: prompt.clone(),
+                role: role.clone(),
+                model: args.model.clone(),
+                reasoning_effort: args.reasoning_effort.clone(),
+            });
+            let spawn_result = context
                 .agent_control
                 .spawn_agent(AgentSpawnInput {
                     task_name: args.task_name.clone(),
-                    message: args.message.clone(),
+                    message: prompt.clone(),
                     role: role.clone(),
-                    parent_path: Some(parent_path),
+                    parent_path: Some(parent_path.clone()),
                 })
-                .await?;
+                .await;
+            let handle = match spawn_result {
+                Ok(handle) => {
+                    let _ = context.event_tx.send(AgentEvent::CollabAgentSpawnEnd {
+                        call_id: input.tool_id.clone(),
+                        completed_at: unix_seconds(),
+                        sender_path: parent_path,
+                        agent_id: Some(handle.id.clone()),
+                        path: Some(handle.path.clone()),
+                        role: Some(role.clone()),
+                        status: AgentStatus::Queued,
+                        prompt: prompt.clone(),
+                        error: None,
+                    });
+                    handle
+                }
+                Err(error) => {
+                    let _ = context.event_tx.send(AgentEvent::CollabAgentSpawnEnd {
+                        call_id: input.tool_id,
+                        completed_at: unix_seconds(),
+                        sender_path: parent_path,
+                        agent_id: None,
+                        path: None,
+                        role: Some(role),
+                        status: AgentStatus::NotFound,
+                        prompt,
+                        error: Some(error.to_string()),
+                    });
+                    return Err(error);
+                }
+            };
             let record = context
                 .agent_control
                 .record(&handle.id)
@@ -239,7 +280,7 @@ impl Tool for SpawnAgentTool {
                 agent_id: handle.id.clone(),
                 agent_path: handle.path.clone(),
                 role,
-                message: args.message,
+                message: prompt,
                 budget: context.budget_policy.agent_budget.child_turn_budget,
             };
             tokio::spawn(run_agent_turn(run));
@@ -283,10 +324,22 @@ impl Tool for WaitAgentTool {
         Box::pin(async move {
             let args: WaitAgentArgs = serde_json::from_value(input.arguments)
                 .unwrap_or(WaitAgentArgs { timeout_ms: None });
+            let sender_path = current_agent_path(&context);
+            let _ = context.event_tx.send(AgentEvent::CollabWaitingBegin {
+                call_id: input.tool_id.clone(),
+                started_at: unix_seconds(),
+                sender_path: sender_path.clone(),
+            });
             let outcome = context
                 .agent_control
                 .wait_for_activity(args.timeout_ms.unwrap_or(DEFAULT_WAIT_TIMEOUT_MS))
                 .await;
+            let _ = context.event_tx.send(AgentEvent::CollabWaitingEnd {
+                call_id: input.tool_id,
+                completed_at: unix_seconds(),
+                sender_path,
+                timed_out: outcome.timed_out,
+            });
             let message = if outcome.timed_out {
                 "wait_agent timed out before new agent activity.".to_string()
             } else {
@@ -474,16 +527,45 @@ impl Tool for CloseAgentTool {
                         error: format!("invalid input: {error}"),
                     }
                 })?;
+            let sender_path = current_agent_path(&context);
+            let _ = context.event_tx.send(AgentEvent::CollabCloseBegin {
+                call_id: input.tool_id.clone(),
+                started_at: unix_seconds(),
+                sender_path: sender_path.clone(),
+                receiver_path: args.target.clone(),
+            });
             let previous = context
                 .agent_control
-                .close_agent(&current_agent_path(&context), &args.target)
-                .await?;
+                .close_agent(&sender_path, &args.target)
+                .await;
+            let previous = match previous {
+                Ok(previous) => previous,
+                Err(error) => {
+                    let _ = context.event_tx.send(AgentEvent::CollabCloseEnd {
+                        call_id: input.tool_id,
+                        completed_at: unix_seconds(),
+                        sender_path,
+                        receiver_path: args.target,
+                        status: AgentStatus::NotFound,
+                        error: Some(error.to_string()),
+                    });
+                    return Err(error);
+                }
+            };
             let shutdown = context
                 .agent_control
                 .record(&previous.id)
                 .await
                 .unwrap_or_else(|| previous.clone());
             emit_agent_record(&context.event_tx, &shutdown);
+            let _ = context.event_tx.send(AgentEvent::CollabCloseEnd {
+                call_id: input.tool_id,
+                completed_at: unix_seconds(),
+                sender_path,
+                receiver_path: previous.path.clone(),
+                status: previous.status,
+                error: None,
+            });
             json_output(MessageResult {
                 target: previous.path,
                 status: previous.status,
@@ -504,15 +586,50 @@ async fn handle_message_tool(
             error: format!("invalid input: {error}"),
         }
     })?;
+    let sender_path = current_agent_path(&context);
+    let _ = context
+        .event_tx
+        .send(AgentEvent::CollabAgentInteractionBegin {
+            call_id: input.tool_id.clone(),
+            started_at: unix_seconds(),
+            sender_path: sender_path.clone(),
+            receiver_path: args.target.clone(),
+            prompt: args.message.clone(),
+        });
     let record = context
         .agent_control
-        .append_message(
-            &current_agent_path(&context),
-            &args.target,
-            args.message,
-            mode,
-        )
-        .await?;
+        .append_message(&sender_path, &args.target, args.message.clone(), mode)
+        .await;
+    let record = match record {
+        Ok(record) => {
+            let _ = context
+                .event_tx
+                .send(AgentEvent::CollabAgentInteractionEnd {
+                    call_id: input.tool_id,
+                    completed_at: unix_seconds(),
+                    sender_path,
+                    receiver_path: record.path.clone(),
+                    status: record.status,
+                    prompt: args.message,
+                    error: None,
+                });
+            record
+        }
+        Err(error) => {
+            let _ = context
+                .event_tx
+                .send(AgentEvent::CollabAgentInteractionEnd {
+                    call_id: input.tool_id,
+                    completed_at: unix_seconds(),
+                    sender_path,
+                    receiver_path: args.target,
+                    status: AgentStatus::NotFound,
+                    prompt: args.message,
+                    error: Some(error.to_string()),
+                });
+            return Err(error);
+        }
+    };
     emit_agent_record(&context.event_tx, &record);
     json_output(MessageResult {
         target: record.path,
@@ -718,7 +835,17 @@ async fn forward_agent_lifecycle_events(
 ) {
     loop {
         match event_rx.recv().await {
-            Ok(event @ AgentEvent::AgentStateChanged { .. }) => {
+            Ok(
+                event @ (AgentEvent::AgentStateChanged { .. }
+                | AgentEvent::CollabAgentSpawnBegin { .. }
+                | AgentEvent::CollabAgentSpawnEnd { .. }
+                | AgentEvent::CollabAgentInteractionBegin { .. }
+                | AgentEvent::CollabAgentInteractionEnd { .. }
+                | AgentEvent::CollabWaitingBegin { .. }
+                | AgentEvent::CollabWaitingEnd { .. }
+                | AgentEvent::CollabCloseBegin { .. }
+                | AgentEvent::CollabCloseEnd { .. }),
+            ) => {
                 let _ = parent_event_tx.send(event);
             }
             Ok(AgentEvent::Done) => break,
@@ -811,6 +938,13 @@ fn json_output(value: impl Serialize) -> Result<ToolOutput, PureError> {
         exit_code: None,
         timed_out: false,
     })
+}
+
+fn unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 pub(super) fn child_agent_options(options: &crate::TurnOptions) -> crate::TurnOptions {

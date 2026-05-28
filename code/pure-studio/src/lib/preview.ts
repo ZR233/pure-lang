@@ -1,7 +1,8 @@
 import type {
   ChatMessage,
   ConfigPayload,
-  AgentActivity,
+  AgentDto,
+  AgentTimelineEvent,
   ProjectRecord,
   RoleRecord,
   SessionRecord,
@@ -86,10 +87,10 @@ export const previewSessionRuntime: SessionRuntime = {
   updatedAt: 1779688800,
 };
 
-export const previewAgentEvents: AgentActivity[] = [
+export const previewAgents: AgentDto[] = [
   {
-    eventId: "preview-agent-1",
     id: "agent-preview-executor",
+    sessionId: "preview-session",
     path: "/root/preview_executor",
     parentPath: null,
     role: "executor",
@@ -101,8 +102,8 @@ export const previewAgentEvents: AgentActivity[] = [
     updatedAt: 1779688800,
   },
   {
-    eventId: "preview-agent-2",
     id: "agent-preview-reviewer",
+    sessionId: "preview-session",
     path: "/root/preview_executor/reviewer",
     parentPath: "/root/preview_executor",
     role: "reviewer",
@@ -112,6 +113,98 @@ export const previewAgentEvents: AgentActivity[] = [
     depth: 2,
     error: null,
     updatedAt: 1779688860,
+  },
+];
+
+export const previewAgentEvents: AgentTimelineEvent[] = [
+  {
+    eventId: "preview-agent-event-1",
+    sessionId: "preview-session",
+    sequence: 1,
+    kind: "spawnBegin",
+    agentId: null,
+    path: "/root/preview_executor",
+    parentPath: null,
+    payload: {
+      collabAgentSpawnBegin: {
+        callId: "preview-spawn-1",
+        startedAt: 1779688798,
+        senderPath: "/root",
+        taskName: "preview_executor",
+        prompt: "检查当前工作区变更并报告可能的下一步。",
+        role: "executor",
+        model: "deepseek-v4-flash",
+        reasoningEffort: "high",
+      },
+    },
+    createdAt: 1779688798,
+  },
+  {
+    eventId: "preview-agent-event-2",
+    sessionId: "preview-session",
+    sequence: 2,
+    kind: "spawnEnd",
+    agentId: "agent-preview-executor",
+    path: "/root/preview_executor",
+    parentPath: null,
+    payload: {
+      collabAgentSpawnEnd: {
+        callId: "preview-spawn-1",
+        completedAt: 1779688800,
+        senderPath: "/root",
+        agentId: "agent-preview-executor",
+        path: "/root/preview_executor",
+        role: "executor",
+        status: "running",
+        prompt: "检查当前工作区变更并报告可能的下一步。",
+        error: null,
+      },
+    },
+    createdAt: 1779688800,
+  },
+  {
+    eventId: "preview-agent-event-3",
+    sessionId: "preview-session",
+    sequence: 3,
+    kind: "agentStatus",
+    agentId: "agent-preview-executor",
+    path: "/root/preview_executor",
+    parentPath: null,
+    payload: {
+      agentStateChanged: {
+        id: "agent-preview-executor",
+        path: "/root/preview_executor",
+        parentPath: null,
+        role: "executor",
+        task: "检查当前工作区变更并报告可能的下一步。",
+        status: "completed",
+        summary: "工作区检查已完成；设置和路由代码可以验证。",
+        depth: 1,
+        error: null,
+        reason: null,
+        budgetLimitKind: null,
+        budgetUsage: null,
+        updatedAt: 1779688800,
+      },
+    },
+    createdAt: 1779688800,
+  },
+  {
+    eventId: "preview-agent-event-4",
+    sessionId: "preview-session",
+    sequence: 4,
+    kind: "waitingBegin",
+    agentId: "agent-preview-reviewer",
+    path: "/root/preview_executor/reviewer",
+    parentPath: "/root/preview_executor",
+    payload: {
+      collabWaitingBegin: {
+        callId: "preview-wait-1",
+        startedAt: 1779688858,
+        senderPath: "/root/preview_executor",
+      },
+    },
+    createdAt: 1779688858,
   },
 ];
 

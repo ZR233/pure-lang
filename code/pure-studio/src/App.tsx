@@ -30,7 +30,8 @@ export function App() {
         selectedProject={studio.selectedProject}
         isBusy={state.isBusy}
         chatItems={studio.chatItems}
-        agentActivities={state.agentActivities}
+        agents={state.agents}
+        agentTimelineEvents={state.agentTimelineEvents}
         timelineItems={state.timelineItems}
         sessionRuntime={state.sessionRuntime}
         prompt={state.prompt}

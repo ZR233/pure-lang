@@ -106,6 +106,9 @@ pub mod agent {
         pub status: String,
         pub summary: Option<String>,
         pub error: Option<String>,
+        pub reason: Option<String>,
+        pub budget_limit_kind: Option<String>,
+        pub budget_usage_json: Option<String>,
         pub depth: i32,
         pub updated_at: i64,
     }
@@ -125,18 +128,12 @@ pub mod agent_event {
         #[sea_orm(primary_key, auto_increment = false)]
         pub id: String,
         pub session_id: String,
-        pub agent_id: String,
-        pub path: String,
+        pub sequence: i64,
+        pub kind: String,
+        pub agent_id: Option<String>,
+        pub path: Option<String>,
         pub parent_path: Option<String>,
-        pub role: String,
-        pub task: String,
-        pub status: String,
-        pub summary: Option<String>,
-        pub error: Option<String>,
-        pub reason: Option<String>,
-        pub budget_limit_kind: Option<String>,
-        pub budget_usage_json: Option<String>,
-        pub depth: i32,
+        pub payload_json: String,
         pub created_at: i64,
     }
 

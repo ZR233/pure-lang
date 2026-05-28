@@ -1,15 +1,15 @@
 use pl_core::{
     ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProjectRecord, ProviderConfig,
     ProviderEdit, ProviderModelEdit, ProviderTemplateKind, PureConfig, RoleEdit, SessionRecord,
-    SessionRuntimeRecord, StudioAgentEventRecord, StudioRuntime, TraceEvent, TraceEventKind,
-    TurnResultStatus, infer_provider_template_kind,
+    SessionRuntimeRecord, StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord, StudioRuntime,
+    TraceEvent, TraceEventKind, TurnResultStatus, infer_provider_template_kind,
 };
 use pl_protocol::{Message, MessageContent, MessageRole};
 
 use crate::dto::{
-    AgentEventDto, ConfigDto, MessageDto, ModelDto, ProjectDto, ProviderDto, ProviderInput,
-    ProviderSettingsInput, ProviderTemplateDto, RoleDto, RoleInput, SessionDto, SessionRuntimeDto,
-    TimelineItemDto, UsageDto,
+    AgentDto, AgentEventDto, ConfigDto, MessageDto, ModelDto, ProjectDto, ProviderDto,
+    ProviderInput, ProviderSettingsInput, ProviderTemplateDto, RoleDto, RoleInput, SessionDto,
+    SessionRuntimeDto, TimelineItemDto, UsageDto,
 };
 use crate::state::{CommandError, CommandResult};
 
@@ -292,33 +292,51 @@ pub fn message_dtos(messages: Vec<Message>) -> Vec<MessageDto> {
     messages.into_iter().map(message_dto).collect()
 }
 
-pub fn agent_event_dtos(events: Vec<StudioAgentEventRecord>) -> Vec<AgentEventDto> {
+pub fn agent_event_dtos(events: Vec<StudioAgentTimelineEventRecord>) -> Vec<AgentEventDto> {
     events.into_iter().map(agent_event_dto).collect()
 }
 
-pub fn agent_event_dto(event: StudioAgentEventRecord) -> AgentEventDto {
+pub fn agent_event_dto(event: StudioAgentTimelineEventRecord) -> AgentEventDto {
     AgentEventDto {
         event_id: event.event_id,
-        id: event.agent_id,
+        session_id: event.session_id,
+        sequence: event.sequence,
+        kind: event.kind,
+        agent_id: event.agent_id,
         path: event.path,
         parent_path: event.parent_path,
-        role: event.role,
-        task: event.task,
-        status: event.status.as_str().to_string(),
-        summary: event.summary,
-        depth: event.depth,
-        reason: event.reason,
-        error: event.error,
-        budget_limit_kind: event
+        payload: serde_json::from_str(&event.payload_json).unwrap_or(serde_json::Value::Null),
+        created_at: event.created_at,
+    }
+}
+
+pub fn agent_dtos(agents: Vec<StudioAgentSnapshotRecord>) -> Vec<AgentDto> {
+    agents.into_iter().map(agent_dto).collect()
+}
+
+pub fn agent_dto(agent: StudioAgentSnapshotRecord) -> AgentDto {
+    AgentDto {
+        id: agent.id,
+        session_id: agent.session_id,
+        path: agent.path,
+        parent_path: agent.parent_path,
+        role: agent.role,
+        task: agent.task,
+        status: agent.status.as_str().to_string(),
+        summary: agent.summary,
+        depth: agent.depth,
+        reason: agent.reason,
+        error: agent.error,
+        budget_limit_kind: agent
             .budget_limit_kind
             .map(|kind| kind.as_str().to_string()),
-        budget_usage: event.budget_usage.map(|usage| crate::dto::BudgetUsageDto {
+        budget_usage: agent.budget_usage.map(|usage| crate::dto::BudgetUsageDto {
             model_steps: usage.model_steps,
             tool_calls: usage.tool_calls,
             wait_calls: usage.wait_calls,
             elapsed_ms: usage.elapsed_ms,
         }),
-        updated_at: event.created_at,
+        updated_at: agent.updated_at,
     }
 }
 

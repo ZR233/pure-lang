@@ -31,10 +31,9 @@ pub struct ToolApprovalRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AgentEventRecord {
-    pub event_id: String,
+pub struct AgentSnapshotRecord {
+    pub id: String,
     pub session_id: String,
-    pub agent_id: String,
     pub path: String,
     pub parent_path: Option<String>,
     pub role: String,
@@ -46,6 +45,19 @@ pub struct AgentEventRecord {
     pub reason: Option<String>,
     pub budget_limit_kind: Option<BudgetLimitKind>,
     pub budget_usage: Option<BudgetUsage>,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTimelineEventRecord {
+    pub event_id: String,
+    pub session_id: String,
+    pub sequence: i64,
+    pub kind: String,
+    pub agent_id: Option<String>,
+    pub path: Option<String>,
+    pub parent_path: Option<String>,
+    pub payload_json: String,
     pub created_at: i64,
 }
 

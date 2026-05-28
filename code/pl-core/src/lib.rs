@@ -15,8 +15,8 @@ mod turn;
 mod workspace;
 
 pub use agent::{
-    AgentControl, AgentEventRecord, AgentHandle, AgentMailboxMessage, AgentPath, AgentRecord,
-    AgentSpawnInput, AgentStatus, AgentStatusUpdate, AgentWaitOutcome, MessageDeliveryMode,
+    AgentControl, AgentHandle, AgentMailboxMessage, AgentPath, AgentRecord, AgentSpawnInput,
+    AgentStatus, AgentStatusUpdate, AgentWaitOutcome, MessageDeliveryMode,
 };
 pub use config::{
     ConfigPaths, ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProviderConfig,
@@ -42,8 +42,9 @@ pub use pl_protocol::{
 };
 pub use session::CoreSession;
 pub use studio::{
-    AgentEventRecord as StudioAgentEventRecord, ProjectRecord, SessionRecord, SessionRuntimeRecord,
-    StudioPromptOutcome, StudioRuntime, StudioStore, ToolApprovalRecord,
+    AgentSnapshotRecord as StudioAgentSnapshotRecord,
+    AgentTimelineEventRecord as StudioAgentTimelineEventRecord, ProjectRecord, SessionRecord,
+    SessionRuntimeRecord, StudioPromptOutcome, StudioRuntime, StudioStore, ToolApprovalRecord,
 };
 pub use tool::{
     BashInput, BashTool, OutputTruncation, SubagentContext, SubagentInput, SubagentTool, Tool,

@@ -4,7 +4,8 @@ use pl_protocol::{AgentStatus, Message, MessageContent, MessageRole};
 use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::records::{
-    AgentEventRecord, ProjectRecord, SessionRecord, SessionRuntimeRecord, TraceEventRecord,
+    AgentSnapshotRecord, AgentTimelineEventRecord, ProjectRecord, SessionRecord,
+    SessionRuntimeRecord, TraceEventRecord,
 };
 
 pub fn project_record(model: entities::project::Model) -> ProjectRecord {
@@ -26,15 +27,14 @@ pub fn session_record(model: entities::session::Model) -> SessionRecord {
     }
 }
 
-pub fn agent_event_record(model: entities::agent_event::Model) -> AgentEventRecord {
+pub fn agent_snapshot_record(model: entities::agent::Model) -> AgentSnapshotRecord {
     let budget_usage = model
         .budget_usage_json
         .as_deref()
         .and_then(|json| serde_json::from_str(json).ok());
-    AgentEventRecord {
-        event_id: model.id,
+    AgentSnapshotRecord {
+        id: model.id,
         session_id: model.session_id,
-        agent_id: model.agent_id,
         path: model.path,
         parent_path: model.parent_path,
         role: model.role,
@@ -49,6 +49,22 @@ pub fn agent_event_record(model: entities::agent_event::Model) -> AgentEventReco
             .as_deref()
             .and_then(budget_limit_kind_from_label),
         budget_usage,
+        updated_at: model.updated_at,
+    }
+}
+
+pub fn agent_timeline_event_record(
+    model: entities::agent_event::Model,
+) -> AgentTimelineEventRecord {
+    AgentTimelineEventRecord {
+        event_id: model.id,
+        session_id: model.session_id,
+        sequence: model.sequence,
+        kind: model.kind,
+        agent_id: model.agent_id,
+        path: model.path,
+        parent_path: model.parent_path,
+        payload_json: model.payload_json,
         created_at: model.created_at,
     }
 }

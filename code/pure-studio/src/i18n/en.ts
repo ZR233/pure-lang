@@ -104,6 +104,16 @@ const en = {
     toolCall: "Tool call",
     defaultWorkingDirectory: "(default working directory)",
     subagentLabel: "Subagent {{id}}",
+    spawnBegin: "Spawn subagent",
+    spawnEnd: "Subagent spawned",
+    interactionBegin: "Send subagent message",
+    interactionEnd: "Subagent message sent",
+    waitingBegin: "Wait for subagent",
+    waitingEnd: "Wait finished",
+    closeBegin: "Close subagent",
+    closeEnd: "Subagent closed",
+    waitTimedOut: "Wait timed out.",
+    waitCompleted: "Wait completed.",
   },
 
   toolCall: {

@@ -18,7 +18,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   ChatItem,
-  AgentActivity,
+  AgentDto,
+  AgentTimelineEvent,
   AgentStatus,
   ProjectRecord,
   ProviderRecord,
@@ -61,7 +62,7 @@ type TimelineEntry =
     }
   | { kind: "thought"; key: string; content: string }
   | { kind: "tool"; key: string; toolCall: TrackedToolCall }
-  | { kind: "agent"; key: string; activity: AgentActivity }
+  | { kind: "agent"; key: string; event: AgentTimelineEvent }
   | { kind: "trace"; key: string; item: TimelineItem };
 
 type ConversationPanelProps = {
@@ -69,7 +70,8 @@ type ConversationPanelProps = {
   selectedProject: ProjectRecord | null;
   isBusy: boolean;
   chatItems: ChatItem[];
-  agentActivities: AgentActivity[];
+  agents: AgentDto[];
+  agentTimelineEvents: AgentTimelineEvent[];
   timelineItems: TimelineItem[];
   sessionRuntime: SessionRuntime | null;
   prompt: string;
@@ -254,14 +256,86 @@ function MarkdownContent({ content }: { content: string }) {
   return <div className="markdown-content">{blocks}</div>;
 }
 
-function agentSummary(activity: AgentActivity, t: TFunction) {
-  if (activity.error) {
-    return activity.error;
+function payloadObject(event: AgentTimelineEvent, key: string): Record<string, unknown> | null {
+  const payload = event.payload;
+  if (!payload || typeof payload !== "object") return null;
+  const value = payload[key];
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function payloadString(payload: Record<string, unknown> | null, key: string): string | null {
+  const value = payload?.[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function payloadBool(payload: Record<string, unknown> | null, key: string): boolean | null {
+  const value = payload?.[key];
+  return typeof value === "boolean" ? value : null;
+}
+
+function agentTimelinePayload(event: AgentTimelineEvent): Record<string, unknown> | null {
+  return (
+    payloadObject(event, "agentStateChanged") ??
+    payloadObject(event, "collabAgentSpawnBegin") ??
+    payloadObject(event, "collabAgentSpawnEnd") ??
+    payloadObject(event, "collabAgentInteractionBegin") ??
+    payloadObject(event, "collabAgentInteractionEnd") ??
+    payloadObject(event, "collabWaitingBegin") ??
+    payloadObject(event, "collabWaitingEnd") ??
+    payloadObject(event, "collabCloseBegin") ??
+    payloadObject(event, "collabCloseEnd")
+  );
+}
+
+function agentTimelineTitle(event: AgentTimelineEvent, t: TFunction): string {
+  switch (event.kind) {
+    case "spawnBegin":
+      return t("subagent.spawnBegin");
+    case "spawnEnd":
+      return t("subagent.spawnEnd");
+    case "interactionBegin":
+      return t("subagent.interactionBegin");
+    case "interactionEnd":
+      return t("subagent.interactionEnd");
+    case "waitingBegin":
+      return t("subagent.waitingBegin");
+    case "waitingEnd":
+      return t("subagent.waitingEnd");
+    case "closeBegin":
+      return t("subagent.closeBegin");
+    case "closeEnd":
+      return t("subagent.closeEnd");
+    case "agentStatus":
+      return t("subagent.title");
+    default:
+      return event.kind;
   }
-  if (activity.summary) {
-    return activity.summary;
-  }
-  return activity.status === "queued" ? t("subagent.waitingToStart") : t("subagent.noSummaryYet");
+}
+
+function agentTimelineStatus(event: AgentTimelineEvent): AgentStatus | null {
+  const payload = agentTimelinePayload(event);
+  const value = payloadString(payload, "status");
+  return value && value in agentStatusKeys ? (value as AgentStatus) : null;
+}
+
+function agentTimelineSummary(event: AgentTimelineEvent, t: TFunction): string {
+  const payload = agentTimelinePayload(event);
+  const error = payloadString(payload, "error");
+  if (error) return error;
+  const summary = payloadString(payload, "summary");
+  if (summary) return summary;
+  const reason = payloadString(payload, "reason");
+  if (reason) return reason;
+  const timedOut = payloadBool(payload, "timedOut");
+  if (timedOut !== null) return timedOut ? t("subagent.waitTimedOut") : t("subagent.waitCompleted");
+  const status = agentTimelineStatus(event);
+  if (status === "queued") return t("subagent.waitingToStart");
+  return "";
+}
+
+function agentTimelinePrompt(event: AgentTimelineEvent): string | null {
+  const payload = agentTimelinePayload(event);
+  return payloadString(payload, "prompt") ?? payloadString(payload, "task");
 }
 
 function formatUsage(usage?: { promptTokens: number; completionTokens: number; totalTokens: number } | null) {
@@ -400,7 +474,7 @@ function ToolDetails({
 
 function timelineEntries(
   chatItems: ChatItem[],
-  agentActivities: AgentActivity[],
+  agentTimelineEvents: AgentTimelineEvent[],
   timelineItems: TimelineItem[],
 ): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
@@ -433,11 +507,11 @@ function timelineEntries(
     }
   });
 
-  for (const activity of agentActivities) {
+  for (const event of agentTimelineEvents) {
     entries.push({
       kind: "agent",
-      key: `agent-${activity.eventId}`,
-      activity,
+      key: `agent-${event.eventId}`,
+      event,
     });
   }
 
@@ -535,33 +609,39 @@ function ToolEntry({ toolCall, t }: { toolCall: TrackedToolCall; t: TFunction })
 }
 
 function AgentEntry({
-  activity,
+  event,
   t,
 }: {
-  activity: AgentActivity;
+  event: AgentTimelineEvent;
   t: TFunction;
 }) {
+  const status = agentTimelineStatus(event);
+  const prompt = agentTimelinePrompt(event);
+  const summary = agentTimelineSummary(event, t);
+  const path = event.path ?? payloadString(agentTimelinePayload(event), "path");
   return (
-    <EntryShell className={`timeline-entry-subagent status-${activity.status}`} icon={<Activity size={14} />}>
+    <EntryShell className={`timeline-entry-subagent status-${status ?? event.kind}`} icon={<Activity size={14} />}>
       <div className="timeline-entry-head">
-        <strong>Agent: {t(roleI18nKeys[activity.role] ?? `roles.${activity.role}`)}</strong>
-        <span className={`timeline-badge status-${activity.status}`}>
-          {t(agentStatusKeys[activity.status])}
-        </span>
+        <strong>{agentTimelineTitle(event, t)}</strong>
+        {path ? <code className="timeline-inline-code">{path}</code> : null}
+        {status ? (
+          <span className={`timeline-badge status-${status}`}>{t(agentStatusKeys[status])}</span>
+        ) : null}
       </div>
       <div className="timeline-entry-meta">
-        <span>{t("subagent.depth")} {activity.depth}</span>
-        {activity.parentPath ? <span>{t("subagent.parent")} {activity.parentPath}</span> : null}
-        <span>{formatTime(activity.updatedAt)}</span>
+        {event.parentPath ? <span>{t("subagent.parent")} {event.parentPath}</span> : null}
+        <span>{formatTime(event.createdAt)}</span>
       </div>
-      <details className="timeline-details">
-        <summary>
-          <span>{t("subagent.prompt")}</span>
-          <ChevronDown size={14} />
-        </summary>
-        <p className="timeline-task">{activity.task}</p>
-        <p className="timeline-result">{agentSummary(activity, t)}</p>
-      </details>
+      {prompt || summary ? (
+        <details className="timeline-details">
+          <summary>
+            <span>{prompt ? t("subagent.prompt") : t("subagent.noSummaryYet")}</span>
+            <ChevronDown size={14} />
+          </summary>
+          {prompt ? <p className="timeline-task">{prompt}</p> : null}
+          {summary ? <p className="timeline-result">{summary}</p> : null}
+        </details>
+      ) : null}
     </EntryShell>
   );
 }
@@ -628,7 +708,8 @@ export function ConversationPanel({
   selectedProject,
   isBusy,
   chatItems,
-  agentActivities,
+  agents,
+  agentTimelineEvents,
   timelineItems,
   sessionRuntime,
   prompt,
@@ -656,8 +737,8 @@ export function ConversationPanel({
   const [showScrollButton, setShowScrollButton] = useState(false);
   const prevBusyRef = useRef(isBusy);
   const entries = useMemo(
-    () => timelineEntries(chatItems, agentActivities, timelineItems),
-    [chatItems, agentActivities, timelineItems],
+    () => timelineEntries(chatItems, agentTimelineEvents, timelineItems),
+    [chatItems, agentTimelineEvents, timelineItems],
   );
   const stopping = turnPhase === "stopping";
 
@@ -852,7 +933,7 @@ export function ConversationPanel({
                 return <ToolEntry key={entry.key} toolCall={entry.toolCall} t={t} />;
               }
               if (entry.kind === "agent") {
-                return <AgentEntry key={entry.key} activity={entry.activity} t={t} />;
+                return <AgentEntry key={entry.key} event={entry.event} t={t} />;
               }
               return <TraceEntry key={entry.key} item={entry.item} t={t} />;
             })}
@@ -880,7 +961,7 @@ export function ConversationPanel({
           onSaveProviderSettings={onSaveProviderSettings}
           turnPhase={turnPhase}
           turnStartedAt={turnStartedAt}
-          agentActivities={agentActivities}
+          agents={agents}
         />
         <div className="composer">
           <textarea
