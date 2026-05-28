@@ -295,7 +295,7 @@ function reduceAgentEvent(state: StudioState, event: AgentEvent, statusText: str
     return {
       ...state,
       status: statusText,
-      turnPhase: "budgetLimited",
+      turnPhase: "interrupted",
     };
   }
   if ("textDelta" in event) {
@@ -474,11 +474,9 @@ export function phaseForTurnStatus(status: TurnStatus): TurnPhase {
       return "running";
     case "completed":
       return "completed";
-    case "failed":
+    case "errored":
       return "failed";
-    case "interrupted":
+    case "aborted":
       return "interrupted";
-    case "budgetLimited":
-      return "budgetLimited";
   }
 }

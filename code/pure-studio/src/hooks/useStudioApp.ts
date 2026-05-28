@@ -127,7 +127,7 @@ export function useStudioApp() {
         dispatch({
           type: "runPromptLoaded",
           payload,
-          status: payload.turnStatus === "interrupted" ? t("status.interrupted") : t("status.done"),
+          status: payload.turnAbortReason === "interrupted" ? t("status.interrupted") : t("status.done"),
         });
       }),
       listen<PromptFailed>("studio-prompt-failed", ({ payload }) => {
@@ -244,7 +244,7 @@ export function useStudioApp() {
       dispatch({
         type: "runPromptLoaded",
         payload,
-        status: payload.turnStatus === "interrupted" ? t("status.interrupted") : t("status.done"),
+        status: payload.turnAbortReason === "interrupted" ? t("status.interrupted") : t("status.done"),
       });
     } catch (error) {
       dispatch({

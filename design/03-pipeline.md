@@ -37,6 +37,10 @@ React action
 - 用户显式要求 `subagent`/子代理分工时，核心提示必须将 `subagent` 作为强约束；普通 shell 或文件探索不能替代子代理调度
 - 显式子代理分工允许最多两轮只读定位；若仍未创建 agent，后续推理只暴露 `spawn_agent` / `subagent` 并保持 `auto` tool choice，避免触发不支持 required tool choice 的 provider 限制
 - 多 agent 协作通过 `spawn_agent`、`wait_agent`、`list_agents`、`send_message`、`followup_task`、`close_agent` 组成；`subagent` 仅是同步便捷入口，底层创建 managed agent 并等待结果
+- agent 运行时状态对齐 Codex：`queued | running | waiting | completed | errored | interrupted | shutdown | notFound`
+- `budgetLimited` 不是 agent 状态，而是 turn abort reason；子 agent 预算耗尽时状态为 `interrupted`，并携带 `reason`、`budgetLimitKind` 和 `budgetUsage`
+- `interrupted` 是可恢复的非终局状态；`completed | errored | shutdown | notFound` 是终局状态
+- 父 agent 因中断、错误、预算限制或关闭而停止时，必须级联关闭仍在运行的子树，避免后台子 agent 残留为 `running`
 
 ## 3.3 核心 turn 编排
 
@@ -58,7 +62,7 @@ React action
 - child agent 默认预算为 `modelStepBudget = 24`、`toolCallBudget = 80`、`waitBudget = 12`、`wallClockMs = 120000`
 - `wait_agent` 消耗 wait 预算；其他工具消耗 tool call 预算；模型采样消耗 model step 预算
 - agent tree 默认限制为 `maxAgents = 16`、`maxDepth = 3`
-- 预算耗尽属于 `budgetLimited`，必须写入 `TurnBudgetLimited` trace，不得伪装为 `failed` 或 `completed`
+- 预算耗尽属于 `TurnAborted(reason=budgetLimited)`，必须写入 `TurnBudgetLimited` trace，不得伪装为 `failed` 或 `completed`
 - 预算耗尽后核心层保留一次 `tool_choice = "none"` 的无工具收尾采样；该采样不消耗普通工具预算
 - 无工具总结仍未返回内容时，核心层返回明确兜底文本，不能静默 `completed`
 - 无工具总结或普通 assistant 文本中若出现未执行的工具调用标记，必须按 `budgetLimited` 收尾并写入 `TurnBudgetLimited`；不能把原始 tool-call 文本作为最终回答
@@ -88,13 +92,12 @@ turn 生命周期持久化语义固定：
 
 - `started`
 - `completed`
-- `failed`
-- `interrupted`
-- `budgetLimited`
+- `aborted`（具体原因见 `turnAbortReason`）
+- `errored`
 
-用户停止属于 `interrupted`，不可被延迟完成覆盖。
-工具、模型或 agent 基座错误属于 `failed`，必须写入 `TurnFailed` trace。
-工具、等待、模型采样或 agent tree 预算耗尽属于 `budgetLimited`，必须写入 `TurnBudgetLimited` trace。
+用户停止属于 `aborted(reason=interrupted)`，不可被延迟完成覆盖。
+工具、模型或 agent 基座错误属于 `errored`，必须写入 `TurnFailed` trace。
+工具、等待、模型采样或 agent tree 预算耗尽属于 `aborted(reason=budgetLimited)`，必须写入 `TurnBudgetLimited` trace。
 
 ## 3.6 输出模型
 

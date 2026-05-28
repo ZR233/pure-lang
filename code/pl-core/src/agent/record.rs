@@ -1,4 +1,4 @@
-use pl_protocol::AgentStatus;
+use pl_protocol::{AgentStatus, BudgetLimitKind, BudgetUsage};
 use serde::{Deserialize, Serialize};
 
 /// Snapshot of an agent known to the current collaboration tree.
@@ -13,6 +13,9 @@ pub struct AgentRecord {
     pub status: AgentStatus,
     pub summary: Option<String>,
     pub error: Option<String>,
+    pub reason: Option<String>,
+    pub budget_limit_kind: Option<BudgetLimitKind>,
+    pub budget_usage: Option<BudgetUsage>,
     pub depth: u32,
     pub updated_at: i64,
 }
@@ -31,6 +34,9 @@ pub struct AgentEventRecord {
     pub status: AgentStatus,
     pub summary: Option<String>,
     pub error: Option<String>,
+    pub reason: Option<String>,
+    pub budget_limit_kind: Option<BudgetLimitKind>,
+    pub budget_usage: Option<BudgetUsage>,
     pub depth: u32,
     pub created_at: i64,
 }

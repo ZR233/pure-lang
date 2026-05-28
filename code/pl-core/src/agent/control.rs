@@ -1,8 +1,9 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
-use pl_protocol::{BudgetLimitKind, PureError};
+use pl_protocol::{BudgetLimitKind, BudgetUsage, PureError};
 use tokio::sync::{Mutex, Notify};
+use tokio_util::sync::CancellationToken;
 
 use super::{AgentPath, AgentRecord, AgentStatus};
 use crate::CoreSession;
@@ -60,10 +61,34 @@ pub struct AgentWaitOutcome {
 }
 
 #[derive(Debug, Clone)]
+pub struct AgentStatusUpdate {
+    pub status: AgentStatus,
+    pub summary: Option<String>,
+    pub error: Option<String>,
+    pub reason: Option<String>,
+    pub budget_limit_kind: Option<BudgetLimitKind>,
+    pub budget_usage: Option<BudgetUsage>,
+}
+
+impl AgentStatusUpdate {
+    pub fn new(status: AgentStatus) -> Self {
+        Self {
+            status,
+            summary: None,
+            error: None,
+            reason: None,
+            budget_limit_kind: None,
+            budget_usage: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct AgentEntry {
     record: AgentRecord,
     session: CoreSession,
     mailbox: VecDeque<AgentMailboxMessage>,
+    cancellation_token: Option<CancellationToken>,
 }
 
 #[derive(Debug)]
@@ -93,6 +118,9 @@ impl Default for AgentControlState {
             status: AgentStatus::Running,
             summary: None,
             error: None,
+            reason: None,
+            budget_limit_kind: None,
+            budget_usage: None,
             depth: 0,
             updated_at: unix_seconds(),
         };
@@ -103,6 +131,7 @@ impl Default for AgentControlState {
                 record: root,
                 session: CoreSession::new(),
                 mailbox: VecDeque::new(),
+                cancellation_token: None,
             },
         );
         state
@@ -185,6 +214,9 @@ impl AgentControl {
             status: AgentStatus::Queued,
             summary: None,
             error: None,
+            reason: None,
+            budget_limit_kind: None,
+            budget_usage: None,
             depth,
             updated_at: unix_seconds(),
         };
@@ -195,6 +227,7 @@ impl AgentControl {
                 record,
                 session: CoreSession::new(),
                 mailbox: VecDeque::new(),
+                cancellation_token: None,
             },
         );
         self.notify.notify_waiters();
@@ -268,14 +301,45 @@ impl AgentControl {
         summary: Option<String>,
         error: Option<String>,
     ) -> Option<AgentRecord> {
+        self.update_status_with(
+            agent_id,
+            AgentStatusUpdate {
+                status,
+                summary,
+                error,
+                reason: None,
+                budget_limit_kind: None,
+                budget_usage: None,
+            },
+        )
+        .await
+    }
+
+    pub async fn update_status_with(
+        &self,
+        agent_id: &str,
+        update: AgentStatusUpdate,
+    ) -> Option<AgentRecord> {
         let mut state = self.state.lock().await;
         let entry = state.agents.get_mut(agent_id)?;
-        entry.record.status = status;
-        if summary.is_some() {
-            entry.record.summary = summary;
+        if entry.record.status.is_final() {
+            return Some(entry.record.clone());
         }
-        if error.is_some() {
-            entry.record.error = error;
+        entry.record.status = update.status;
+        if update.summary.is_some() {
+            entry.record.summary = update.summary;
+        }
+        if update.error.is_some() {
+            entry.record.error = update.error;
+        }
+        if update.reason.is_some() {
+            entry.record.reason = update.reason;
+        }
+        if update.budget_limit_kind.is_some() {
+            entry.record.budget_limit_kind = update.budget_limit_kind;
+        }
+        if update.budget_usage.is_some() {
+            entry.record.budget_usage = update.budget_usage;
         }
         entry.record.updated_at = unix_seconds();
         let record = entry.record.clone();
@@ -355,6 +419,12 @@ impl AgentControl {
         }
     }
 
+    pub async fn attach_cancellation_token(&self, agent_id: &str, token: CancellationToken) {
+        if let Some(entry) = self.state.lock().await.agents.get_mut(agent_id) {
+            entry.cancellation_token = Some(token);
+        }
+    }
+
     pub async fn close_agent(
         &self,
         current_path: &str,
@@ -376,12 +446,47 @@ impl AgentControl {
                 error: "root is not a spawned agent".to_string(),
             });
         }
-        entry.record.status = AgentStatus::Closed;
-        entry.record.updated_at = unix_seconds();
         let record = entry.record.clone();
+        let affected = descendant_ids(&state, &agent_id);
+        for id in std::iter::once(agent_id.clone()).chain(affected) {
+            if let Some(entry) = state.agents.get_mut(&id)
+                && !entry.record.status.is_final()
+            {
+                entry.record.status = AgentStatus::Shutdown;
+                entry.record.reason = Some("closed".to_string());
+                entry.record.updated_at = unix_seconds();
+                if let Some(token) = &entry.cancellation_token {
+                    token.cancel();
+                }
+            }
+        }
         drop(state);
         self.notify.notify_waiters();
         Ok(record)
+    }
+
+    pub async fn shutdown_descendants(&self, agent_id: &str, reason: &str) -> Vec<AgentRecord> {
+        let mut state = self.state.lock().await;
+        let ids = descendant_ids(&state, agent_id);
+        let mut records = Vec::new();
+        for id in ids {
+            if let Some(entry) = state.agents.get_mut(&id)
+                && !entry.record.status.is_final()
+            {
+                entry.record.status = AgentStatus::Shutdown;
+                entry.record.reason = Some(reason.to_string());
+                entry.record.updated_at = unix_seconds();
+                if let Some(token) = &entry.cancellation_token {
+                    token.cancel();
+                }
+                records.push(entry.record.clone());
+            }
+        }
+        drop(state);
+        if !records.is_empty() {
+            self.notify.notify_waiters();
+        }
+        records
     }
 
     pub async fn wait_for_activity(&self, timeout_ms: i64) -> AgentWaitOutcome {
@@ -397,6 +502,20 @@ impl AgentControl {
             agents: self.list_agents(None).await,
         }
     }
+}
+
+fn descendant_ids(state: &AgentControlState, agent_id: &str) -> Vec<String> {
+    let Some(root) = state.agents.get(agent_id) else {
+        return Vec::new();
+    };
+    let prefix = format!("{}/", root.record.path);
+    state
+        .agents
+        .iter()
+        .filter_map(|(id, entry)| {
+            (id != agent_id && entry.record.path.starts_with(&prefix)).then_some(id.clone())
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -441,11 +560,15 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(record.status, AgentStatus::Queued);
-        let closed = control
+        let previous = control
             .close_agent(AgentPath::ROOT, "worker")
             .await
             .unwrap();
-        assert_eq!(closed.status, AgentStatus::Closed);
+        assert_eq!(previous.status, AgentStatus::Queued);
+        assert_eq!(
+            control.record(&previous.id).await.unwrap().status,
+            AgentStatus::Shutdown
+        );
         assert!(
             control
                 .close_agent(AgentPath::ROOT, AgentPath::ROOT)
@@ -471,5 +594,37 @@ mod tests {
             .to_string();
 
         assert!(error.contains("agentCount"));
+    }
+
+    #[tokio::test]
+    async fn shutdown_descendants_marks_live_children() {
+        let control = AgentControl::default();
+        let parent = control
+            .spawn_agent(AgentSpawnInput {
+                task_name: "worker".to_string(),
+                message: "inspect".to_string(),
+                role: "explorer".to_string(),
+                parent_path: None,
+            })
+            .await
+            .unwrap();
+        let child = control
+            .spawn_agent(AgentSpawnInput {
+                task_name: "child".to_string(),
+                message: "inspect child".to_string(),
+                role: "explorer".to_string(),
+                parent_path: Some(parent.path),
+            })
+            .await
+            .unwrap();
+
+        let records = control
+            .shutdown_descendants(&parent.id, "budgetLimited")
+            .await;
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].id, child.id);
+        assert_eq!(records[0].status, AgentStatus::Shutdown);
+        assert_eq!(records[0].reason.as_deref(), Some("budgetLimited"));
     }
 }

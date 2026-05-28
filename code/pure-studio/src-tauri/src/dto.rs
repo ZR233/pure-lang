@@ -245,6 +245,7 @@ pub struct RunPromptResponse {
     pub session_runtime: SessionRuntimeDto,
     pub timeline_items: Vec<TimelineItemDto>,
     pub turn_status: String,
+    pub turn_abort_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

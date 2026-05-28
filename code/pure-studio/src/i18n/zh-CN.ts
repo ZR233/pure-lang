@@ -99,6 +99,7 @@ const zhCN = {
     succeeded: "已成功",
     failed: "已失败",
     budgetLimited: "预算受限",
+    notFound: "未找到",
     denied: "已拒绝",
     toolCall: "工具调用",
     defaultWorkingDirectory: "（默认工作目录）",

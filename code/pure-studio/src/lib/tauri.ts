@@ -189,7 +189,7 @@ export function runPrompt(sessionId: string, prompt: string) {
             sequence: previewTimelineItems.length + 10,
             timestamp: Math.floor(Date.now() / 1000),
             turnId: "preview-turn-latest",
-            turnStatus: interrupted ? "interrupted" as const : "completed" as const,
+            turnStatus: interrupted ? "aborted" as const : "completed" as const,
             turnModel: previewSessionRuntime.model,
             turnUsage: {
               promptTokens: 1200,
@@ -199,7 +199,8 @@ export function runPrompt(sessionId: string, prompt: string) {
             },
           },
         ],
-        turnStatus: interrupted ? "interrupted" as const : "completed" as const,
+        turnStatus: interrupted ? "aborted" as const : "completed" as const,
+        turnAbortReason: interrupted ? "interrupted" : null,
         }));
       }, 900);
     });

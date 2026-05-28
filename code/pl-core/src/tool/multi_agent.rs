@@ -3,14 +3,15 @@ use std::path::PathBuf;
 use pl_model::SharedModelProvider;
 use pl_protocol::{AgentEvent, AgentStatus, PureError};
 use serde::{Deserialize, Serialize};
+use tokio_util::sync::CancellationToken;
 
 use super::truncation::{OutputTruncation, TruncatedOutput};
 use super::{SubagentContext, Tool, ToolContext, ToolInput, ToolOutput};
-use crate::agent::{AgentRecord, AgentSpawnInput, MessageDeliveryMode};
+use crate::agent::{AgentRecord, AgentSpawnInput, AgentStatusUpdate, MessageDeliveryMode};
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
 use crate::core::compact_text;
 use crate::session::CoreSession;
-use crate::turn::{CompileMode, TurnBudget, TurnResultStatus};
+use crate::turn::{CompileMode, TurnAbortReason, TurnBudget, TurnResultStatus};
 use crate::{AgentControl, AgentPath, PureCore};
 
 const DEFAULT_WAIT_TIMEOUT_MS: i64 = 30_000;
@@ -124,8 +125,8 @@ struct SpawnAgentResult {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WaitAgentResult {
+    message: String,
     timed_out: bool,
-    agents: Vec<AgentRecord>,
 }
 
 #[derive(Debug, Serialize)]
@@ -216,6 +217,13 @@ impl Tool for SpawnAgentTool {
                 })?;
             emit_agent_record(&context.event_tx, &record);
 
+            let options = child_agent_options(&context.options);
+            if let Some(token) = options.cancellation_token.clone() {
+                context
+                    .agent_control
+                    .attach_cancellation_token(&handle.id, token)
+                    .await;
+            }
             let run = AgentRunConfig {
                 provider: self.provider.clone(),
                 reasoning_effort: self.reasoning_effort.clone(),
@@ -225,7 +233,7 @@ impl Tool for SpawnAgentTool {
                     .clone()
                     .or_else(|| self.workspace_instructions.clone()),
                 workspace_root: context.workspace_root.clone(),
-                options: context.options.clone(),
+                options,
                 agent_control: context.agent_control.clone(),
                 event_tx: context.event_tx.clone(),
                 agent_id: handle.id.clone(),
@@ -279,9 +287,14 @@ impl Tool for WaitAgentTool {
                 .agent_control
                 .wait_for_activity(args.timeout_ms.unwrap_or(DEFAULT_WAIT_TIMEOUT_MS))
                 .await;
+            let message = if outcome.timed_out {
+                "wait_agent timed out before new agent activity.".to_string()
+            } else {
+                "wait_agent observed agent activity.".to_string()
+            };
             json_output(WaitAgentResult {
+                message,
                 timed_out: outcome.timed_out,
-                agents: outcome.agents,
             })
         })
     }
@@ -404,15 +417,21 @@ impl Tool for FollowupTaskTool {
                         .clone()
                         .or_else(|| self.workspace_instructions.clone()),
                     workspace_root: context.workspace_root.clone(),
-                    options: context.options.clone(),
+                    options: child_agent_options(&context.options),
                     agent_control: context.agent_control.clone(),
                     event_tx: context.event_tx.clone(),
-                    agent_id,
+                    agent_id: agent_id.clone(),
                     agent_path: record.path,
                     role: record.role,
                     message,
                     budget: context.budget_policy.agent_budget.child_turn_budget,
                 };
+                if let Some(token) = run.options.cancellation_token.clone() {
+                    context
+                        .agent_control
+                        .attach_cancellation_token(&agent_id, token)
+                        .await;
+                }
                 tokio::spawn(run_agent_turn(run));
             }
             Ok(output)
@@ -455,14 +474,19 @@ impl Tool for CloseAgentTool {
                         error: format!("invalid input: {error}"),
                     }
                 })?;
-            let record = context
+            let previous = context
                 .agent_control
                 .close_agent(&current_agent_path(&context), &args.target)
                 .await?;
-            emit_agent_record(&context.event_tx, &record);
+            let shutdown = context
+                .agent_control
+                .record(&previous.id)
+                .await
+                .unwrap_or_else(|| previous.clone());
+            emit_agent_record(&context.event_tx, &shutdown);
             json_output(MessageResult {
-                target: record.path,
-                status: record.status,
+                target: previous.path,
+                status: previous.status,
             })
         })
     }
@@ -604,31 +628,55 @@ pub(super) async fn run_agent_turn(config: AgentRunConfig) {
         Ok(result) => {
             let status = match result.status {
                 TurnResultStatus::Completed => AgentStatus::Completed,
-                TurnResultStatus::Interrupted => AgentStatus::Interrupted,
-                TurnResultStatus::Failed => AgentStatus::Failed,
-                TurnResultStatus::BudgetLimited => AgentStatus::BudgetLimited,
+                TurnResultStatus::Aborted => AgentStatus::Interrupted,
+                TurnResultStatus::Errored => AgentStatus::Errored,
             };
             let summary = result.content.trim().to_string();
+            let reason = result
+                .abort_reason
+                .map(|reason| reason.as_str().to_string());
             let error = match result.status {
-                TurnResultStatus::BudgetLimited => Some("subagent budget limited".to_string()),
-                TurnResultStatus::Failed if summary.is_empty() => {
-                    Some("subagent failed".to_string())
+                TurnResultStatus::Aborted
+                    if matches!(result.abort_reason, Some(TurnAbortReason::BudgetLimited)) =>
+                {
+                    Some("subagent budget limited".to_string())
+                }
+                TurnResultStatus::Errored if summary.is_empty() => {
+                    Some("subagent errored".to_string())
                 }
                 TurnResultStatus::Completed
-                | TurnResultStatus::Interrupted
-                | TurnResultStatus::Failed => None,
+                | TurnResultStatus::Aborted
+                | TurnResultStatus::Errored => None,
             };
             if let Some(record) = config
                 .agent_control
-                .update_status(
+                .update_status_with(
                     &config.agent_id,
-                    status,
-                    (!summary.is_empty()).then_some(summary.clone()),
-                    error,
+                    AgentStatusUpdate {
+                        status,
+                        summary: (!summary.is_empty()).then_some(summary.clone()),
+                        error,
+                        reason,
+                        budget_limit_kind: result.budget_limit_kind,
+                        budget_usage: result.budget_usage,
+                    },
                 )
                 .await
             {
                 emit_agent_record(&config.event_tx, &record);
+            }
+            if !matches!(result.status, TurnResultStatus::Completed) {
+                let reason = result
+                    .abort_reason
+                    .map(|reason| reason.as_str())
+                    .unwrap_or("errored");
+                for record in config
+                    .agent_control
+                    .shutdown_descendants(&config.agent_id, reason)
+                    .await
+                {
+                    emit_agent_record(&config.event_tx, &record);
+                }
             }
         }
         Err(error) => {
@@ -640,7 +688,24 @@ pub(super) async fn run_agent_turn(config: AgentRunConfig) {
 async fn mark_agent_failed(config: &AgentRunConfig, error: String) {
     if let Some(record) = config
         .agent_control
-        .update_status(&config.agent_id, AgentStatus::Failed, None, Some(error))
+        .update_status_with(
+            &config.agent_id,
+            AgentStatusUpdate {
+                status: AgentStatus::Errored,
+                summary: None,
+                error: Some(error),
+                reason: Some("errored".to_string()),
+                budget_limit_kind: None,
+                budget_usage: None,
+            },
+        )
+        .await
+    {
+        emit_agent_record(&config.event_tx, &record);
+    }
+    for record in config
+        .agent_control
+        .shutdown_descendants(&config.agent_id, "errored")
         .await
     {
         emit_agent_record(&config.event_tx, &record);
@@ -708,9 +773,9 @@ pub(super) fn emit_agent_record(event_tx: &pl_protocol::AgentEventSender, record
         summary: record.summary.clone(),
         depth: record.depth,
         error: record.error.clone(),
-        reason: record.error.clone(),
-        budget_limit_kind: None,
-        budget_usage: None,
+        reason: record.reason.clone(),
+        budget_limit_kind: record.budget_limit_kind,
+        budget_usage: record.budget_usage,
         updated_at: record.updated_at,
     });
 }
@@ -746,4 +811,13 @@ fn json_output(value: impl Serialize) -> Result<ToolOutput, PureError> {
         exit_code: None,
         timed_out: false,
     })
+}
+
+pub(super) fn child_agent_options(options: &crate::TurnOptions) -> crate::TurnOptions {
+    let token = options
+        .cancellation_token
+        .as_ref()
+        .map(CancellationToken::child_token)
+        .unwrap_or_default();
+    options.clone().with_cancellation(token)
 }

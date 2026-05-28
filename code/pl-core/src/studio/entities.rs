@@ -133,6 +133,9 @@ pub mod agent_event {
         pub status: String,
         pub summary: Option<String>,
         pub error: Option<String>,
+        pub reason: Option<String>,
+        pub budget_limit_kind: Option<String>,
+        pub budget_usage_json: Option<String>,
         pub depth: i32,
         pub created_at: i64,
     }
