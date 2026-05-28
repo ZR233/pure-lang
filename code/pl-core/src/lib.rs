@@ -54,4 +54,4 @@ pub use turn::{
     ToolApprovalPolicy, ToolApprovalRequest, TurnOptions, TurnRequest, TurnResult,
     TurnResultStatus,
 };
-pub use workspace::load_workspace_instructions;
+pub use workspace::{load_workspace_instructions, resolve_workspace_root};

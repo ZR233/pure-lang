@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use pl_protocol::PureError;
@@ -88,6 +88,34 @@ impl BashTool {
             error: msg.to_string(),
         }
     }
+
+    fn resolve_working_directory(
+        &self,
+        working_directory: Option<&Path>,
+    ) -> Result<PathBuf, PureError> {
+        let workspace_root = std::fs::canonicalize(&self.workspace_root).map_err(|error| {
+            self.tool_error(format!("failed to resolve workspace root: {error}"))
+        })?;
+        let candidate = match working_directory {
+            Some(dir) if dir.is_absolute() => dir.to_path_buf(),
+            Some(dir) => workspace_root.join(dir),
+            None => workspace_root.clone(),
+        };
+        let canonical = std::fs::canonicalize(&candidate).map_err(|error| {
+            self.tool_error(format!(
+                "failed to resolve working directory '{}': {error}",
+                candidate.display()
+            ))
+        })?;
+        if canonical.starts_with(&workspace_root) {
+            Ok(canonical)
+        } else {
+            Err(self.tool_error(format!(
+                "working directory '{}' is outside the workspace",
+                candidate.display()
+            )))
+        }
+    }
 }
 
 /// 当 `wait_with_output` 因超时被丢弃时，通过 PID 杀死已孤立的子进程。
@@ -162,9 +190,9 @@ impl Tool for BashTool {
             let mut command = Command::new(shell);
             command.args([flag, &bash_input.command]);
 
-            if let Some(dir) = &bash_input.working_directory {
-                command.current_dir(dir);
-            }
+            let working_directory =
+                self.resolve_working_directory(bash_input.working_directory.as_deref())?;
+            command.current_dir(working_directory);
 
             command.stdout(std::process::Stdio::piped());
             command.stderr(std::process::Stdio::piped());
@@ -273,7 +301,9 @@ mod tests {
     }
 
     fn test_tool() -> BashTool {
-        BashTool::new(std::env::temp_dir().join("pure-test-tool"))
+        let root = std::env::temp_dir().join("pure-test-tool");
+        std::fs::create_dir_all(&root).unwrap();
+        BashTool::new(root)
     }
 
     fn test_context() -> ToolContext {
@@ -335,6 +365,42 @@ mod tests {
                     arguments: serde_json::json!({}),
                     session_id: "s4".to_string(),
                     tool_id: "t4".to_string(),
+                },
+                test_context(),
+            )
+            .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn defaults_to_workspace_root_as_current_directory() {
+        let tool = test_tool();
+        let output = tool
+            .execute(
+                tool_input("echo marker > cwd-check.txt", "cwd-session", "cwd-tool"),
+                test_context(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(output.exit_code, Some(0));
+        assert!(tool.workspace_root.join("cwd-check.txt").exists());
+        let _ = tokio::fs::remove_file(tool.workspace_root.join("cwd-check.txt")).await;
+    }
+
+    #[tokio::test]
+    async fn rejects_working_directory_outside_workspace() {
+        let tool = test_tool();
+        let result = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({
+                        "command": "echo no",
+                        "workingDirectory": ".."
+                    }),
+                    session_id: "cwd-session".to_string(),
+                    tool_id: "escape-tool".to_string(),
                 },
                 test_context(),
             )

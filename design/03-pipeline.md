@@ -27,12 +27,15 @@ React action
 - `turnOptions.toolApprovalPolicy`：默认固定 `autoAllow`
 - `prompt`、`sessionId`、`workspaceRoot` 等进入 application service
 
+`workspaceRoot` 是运行期有效工作区，而不是简单等于 UI 当前选中的目录。Studio 读取 project path 后先解析到规范化目录；如果该目录位于 Git 仓库中，则提升到最近的 Git 仓库根。这样用户从子 crate 或桌面壳层进入项目时，工具仍能访问完整仓库上下文。工作区记忆优先读取 `AGENTS.md`，兼容读取 `Agents.md`。
+
 策略约束：
 
 - 方案乙不保留旧命令别名和旧字段兜底
 - `ToolApprovalPolicy::AutoAllow` 为默认且主路径
 - 手动审批接口保留在系统能力中，但不作为默认流程
 - 用户显式要求 `subagent`/子代理分工时，核心提示必须将 `subagent` 作为强约束；普通 shell 或文件探索不能替代子代理调度
+- 显式子代理分工允许最多两轮只读定位；若仍未创建 agent，后续推理只暴露 `spawn_agent` / `subagent` 并保持 `auto` tool choice，避免触发不支持 required tool choice 的 provider 限制
 - 多 agent 协作通过 `spawn_agent`、`wait_agent`、`list_agents`、`send_message`、`followup_task`、`close_agent` 组成；`subagent` 仅是同步便捷入口，底层创建 managed agent 并等待结果
 
 ## 3.3 核心 turn 编排
@@ -45,6 +48,8 @@ React action
 4. 执行 `run_turn_with_trace`
 5. 事务化批量落库：message + trace + runtime snapshot
 6. 输出命令响应 DTO 与 timeline DTO
+
+文件与 shell 工具都以有效 `workspaceRoot` 为边界。`bash` 默认在 workspace root 下执行，`workingDirectory` 也按 workspace root 解析并拒绝逃逸；文件工具继续只允许访问 workspace root 内的路径。
 
 工具迭代收尾原则：
 
