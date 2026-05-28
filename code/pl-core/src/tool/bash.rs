@@ -284,6 +284,7 @@ mod tests {
             workspace_root: std::env::temp_dir(),
             workspace_instructions: None,
             active_subagent: None,
+            agent_control: crate::AgentControl::default(),
         }
     }
 

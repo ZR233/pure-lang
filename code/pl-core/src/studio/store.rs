@@ -11,13 +11,14 @@ use sea_orm::{
 use crate::studio::entities;
 use crate::studio::ids::{new_id, new_trace_event_id, unix_seconds};
 use crate::studio::mappers::{
-    estimate_cost, message_to_row_parts, project_record, row_to_message, session_record,
-    session_runtime_record, subagent_event_record, trace_event_kind_label, trace_event_record,
+    agent_event_record, estimate_cost, message_to_row_parts, project_record, row_to_message,
+    session_record, session_runtime_record, subagent_event_record, trace_event_kind_label,
+    trace_event_record,
 };
 use crate::studio::paths::{prepare_database_switch, project_name, sqlite_url};
 use crate::studio::records::{
-    ProjectRecord, SessionRecord, SessionRuntimeRecord, SubagentEventRecord, ToolApprovalRecord,
-    TraceEventRecord,
+    AgentEventRecord, ProjectRecord, SessionRecord, SessionRuntimeRecord, SubagentEventRecord,
+    ToolApprovalRecord, TraceEventRecord,
 };
 use crate::studio::store_support::{
     configure_sqlite, insert_message_with_tx, non_empty_title, run_migrations,
@@ -291,6 +292,38 @@ impl StudioStore {
             .all(&self.db)
             .await?;
         Ok(rows.into_iter().map(subagent_event_record).collect())
+    }
+
+    pub async fn record_agent_event(&self, record: AgentEventRecord) -> Result<()> {
+        use entities::agent_event;
+        agent_event::ActiveModel {
+            id: Set(record.event_id),
+            session_id: Set(record.session_id),
+            agent_id: Set(record.agent_id),
+            path: Set(record.path),
+            parent_path: Set(record.parent_path),
+            role: Set(record.role),
+            task: Set(record.task),
+            status: Set(record.status.as_str().to_string()),
+            summary: Set(record.summary),
+            depth: Set(record.depth),
+            error: Set(record.error),
+            created_at: Set(record.created_at),
+        }
+        .insert(&self.db)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_agent_events(&self, session_id: &str) -> Result<Vec<AgentEventRecord>> {
+        use entities::agent_event;
+        let rows = agent_event::Entity::find()
+            .filter(agent_event::Column::SessionId.eq(session_id.to_string()))
+            .order_by_asc(agent_event::Column::CreatedAt)
+            .order_by_asc(agent_event::Column::Id)
+            .all(&self.db)
+            .await?;
+        Ok(rows.into_iter().map(agent_event_record).collect())
     }
 
     pub async fn append_trace_events(&self, events: &[TraceEvent]) -> Result<()> {

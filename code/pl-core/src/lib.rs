@@ -1,3 +1,4 @@
+mod agent;
 pub mod application;
 mod config;
 mod config_editor;
@@ -13,6 +14,10 @@ mod trace;
 mod turn;
 mod workspace;
 
+pub use agent::{
+    AgentControl, AgentEventRecord, AgentHandle, AgentMailboxMessage, AgentPath, AgentRecord,
+    AgentSpawnInput, AgentStatus, AgentWaitOutcome, MessageDeliveryMode,
+};
 pub use config::{
     ConfigPaths, ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProviderConfig,
     PureConfig, ReasoningEffort, ResolvedRoleConfig, RoleConfig, RoleConfigs, RuntimeConfig,
@@ -36,8 +41,8 @@ pub use pl_protocol::{
 };
 pub use session::CoreSession;
 pub use studio::{
-    ProjectRecord, SessionRecord, SessionRuntimeRecord, StudioPromptOutcome, StudioRuntime,
-    StudioStore, SubagentEventRecord, ToolApprovalRecord,
+    AgentEventRecord as StudioAgentEventRecord, ProjectRecord, SessionRecord, SessionRuntimeRecord,
+    StudioPromptOutcome, StudioRuntime, StudioStore, SubagentEventRecord, ToolApprovalRecord,
 };
 pub use tool::{
     BashInput, BashTool, OutputTruncation, SubagentContext, SubagentInput, SubagentTool, Tool,

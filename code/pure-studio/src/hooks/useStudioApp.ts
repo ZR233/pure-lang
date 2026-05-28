@@ -63,6 +63,11 @@ function statusTextForEvent(event: AgentEvent, t: (key: string, args?: Record<st
       status: t(subagentStatusKeys[event.subagentStateChanged.status]).toLowerCase(),
     });
   }
+  if ("agentStateChanged" in event) {
+    return t("status.subagentStatus", {
+      status: event.agentStateChanged.status,
+    });
+  }
   if ("error" in event) return t("status.error", { message: event.error.message });
   return t("status.running");
 }

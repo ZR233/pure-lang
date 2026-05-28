@@ -1,5 +1,6 @@
 mod bash;
 mod file;
+mod multi_agent;
 mod subagent;
 mod truncation;
 
@@ -12,12 +13,17 @@ use pl_model::ToolSchema;
 use pl_protocol::{AgentEventSender, PureError};
 use serde::{Deserialize, Serialize};
 
+use crate::AgentControl;
 use crate::turn::TurnOptions;
 
 pub use bash::{BashInput, BashTool};
 pub use file::{
     ApplyPatchTool, CopyPathTool, CreateDirectoryTool, DeletePathTool, ListFilesTool, MovePathTool,
     ReadFileTool, SearchFilesTool, StatPathTool, WriteFileTool,
+};
+pub use multi_agent::{
+    CloseAgentTool, FollowupTaskTool, ListAgentsTool, SendMessageTool, SpawnAgentTool,
+    WaitAgentTool,
 };
 pub use subagent::{SubagentInput, SubagentTool};
 pub use truncation::{OutputTruncation, TruncatedOutput, TruncationStrategy};
@@ -56,6 +62,7 @@ pub struct ToolContext {
     pub workspace_root: PathBuf,
     pub workspace_instructions: Option<String>,
     pub active_subagent: Option<SubagentContext>,
+    pub agent_control: AgentControl,
 }
 
 /// 当前工具调用所在的 subagent 运行边界。
@@ -63,6 +70,7 @@ pub struct ToolContext {
 pub struct SubagentContext {
     pub id: String,
     pub parent_id: Option<String>,
+    pub agent_path: Option<String>,
     pub role: String,
     pub task: String,
     pub depth: u32,

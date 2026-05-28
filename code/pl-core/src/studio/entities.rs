@@ -115,6 +115,60 @@ pub mod subagent_event {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
+#[allow(dead_code)]
+pub mod agent {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "agents")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub session_id: String,
+        pub path: String,
+        pub parent_path: Option<String>,
+        pub role: String,
+        pub task: String,
+        pub status: String,
+        pub summary: Option<String>,
+        pub error: Option<String>,
+        pub depth: i32,
+        pub updated_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod agent_event {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "agent_events")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub session_id: String,
+        pub agent_id: String,
+        pub path: String,
+        pub parent_path: Option<String>,
+        pub role: String,
+        pub task: String,
+        pub status: String,
+        pub summary: Option<String>,
+        pub error: Option<String>,
+        pub depth: i32,
+        pub created_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 pub mod trace_event {
     use super::*;
 

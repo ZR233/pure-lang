@@ -784,6 +784,7 @@ mod tests {
             workspace_root: root.to_path_buf(),
             workspace_instructions: None,
             active_subagent: None,
+            agent_control: crate::AgentControl::default(),
         }
     }
 

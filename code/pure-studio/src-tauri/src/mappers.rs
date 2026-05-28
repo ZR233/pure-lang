@@ -1,15 +1,15 @@
 use pl_core::{
     ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProjectRecord, ProviderConfig,
     ProviderEdit, ProviderModelEdit, ProviderTemplateKind, PureConfig, RoleEdit, SessionRecord,
-    SessionRuntimeRecord, StudioRuntime, SubagentEventRecord, TraceEvent, TraceEventKind,
-    TurnResultStatus, infer_provider_template_kind,
+    SessionRuntimeRecord, StudioAgentEventRecord, StudioRuntime, SubagentEventRecord, TraceEvent,
+    TraceEventKind, TurnResultStatus, infer_provider_template_kind,
 };
 use pl_protocol::{Message, MessageContent, MessageRole, SubagentStatus};
 
 use crate::dto::{
-    ConfigDto, MessageDto, ModelDto, ProjectDto, ProviderDto, ProviderInput, ProviderSettingsInput,
-    ProviderTemplateDto, RoleDto, RoleInput, SessionDto, SessionRuntimeDto, SubagentEventDto,
-    TimelineItemDto, UsageDto,
+    AgentEventDto, ConfigDto, MessageDto, ModelDto, ProjectDto, ProviderDto, ProviderInput,
+    ProviderSettingsInput, ProviderTemplateDto, RoleDto, RoleInput, SessionDto, SessionRuntimeDto,
+    SubagentEventDto, TimelineItemDto, UsageDto,
 };
 use crate::state::{CommandError, CommandResult};
 
@@ -296,6 +296,10 @@ pub fn subagent_event_dtos(events: Vec<SubagentEventRecord>) -> Vec<SubagentEven
     events.into_iter().map(subagent_event_dto).collect()
 }
 
+pub fn agent_event_dtos(events: Vec<StudioAgentEventRecord>) -> Vec<AgentEventDto> {
+    events.into_iter().map(agent_event_dto).collect()
+}
+
 pub fn subagent_event_dto(event: SubagentEventRecord) -> SubagentEventDto {
     SubagentEventDto {
         event_id: event.event_id,
@@ -304,6 +308,22 @@ pub fn subagent_event_dto(event: SubagentEventRecord) -> SubagentEventDto {
         role: event.role,
         task: event.task,
         status: event.status,
+        summary: event.summary,
+        depth: event.depth,
+        error: event.error,
+        updated_at: event.created_at,
+    }
+}
+
+pub fn agent_event_dto(event: StudioAgentEventRecord) -> AgentEventDto {
+    AgentEventDto {
+        event_id: event.event_id,
+        id: event.agent_id,
+        path: event.path,
+        parent_path: event.parent_path,
+        role: event.role,
+        task: event.task,
+        status: event.status.as_str().to_string(),
         summary: event.summary,
         depth: event.depth,
         error: event.error,
@@ -342,6 +362,7 @@ pub fn subagent_status_label(status: SubagentStatus) -> &'static str {
 pub fn turn_result_status_label(status: TurnResultStatus) -> &'static str {
     match status {
         TurnResultStatus::Completed => "completed",
+        TurnResultStatus::Failed => "failed",
         TurnResultStatus::Interrupted => "interrupted",
     }
 }

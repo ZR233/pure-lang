@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pl_core::{StudioStore, SubagentEventRecord};
+use pl_core::{StudioAgentEventRecord, StudioStore, SubagentEventRecord};
 use pl_protocol::AgentEvent;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::broadcast::error::RecvError;
@@ -24,6 +24,9 @@ pub async fn drain_events(
                 if let Some(record) = subagent_event_record(&session_id, &event) {
                     let _ = store.record_subagent_event(record).await;
                 }
+                if let Some(record) = agent_event_record(&session_id, &event) {
+                    let _ = store.record_agent_event(record).await;
+                }
                 let _ = app.emit(
                     "studio-agent-event",
                     AgentEventPayload {
@@ -42,6 +45,37 @@ pub async fn drain_events(
                 break;
             }
         }
+    }
+}
+
+pub fn agent_event_record(session_id: &str, event: &AgentEvent) -> Option<StudioAgentEventRecord> {
+    match event {
+        AgentEvent::AgentStateChanged {
+            id,
+            path,
+            parent_path,
+            role,
+            task,
+            status,
+            summary,
+            depth,
+            error,
+            updated_at,
+        } => Some(StudioAgentEventRecord {
+            event_id: new_event_id("agent-event"),
+            session_id: session_id.to_string(),
+            agent_id: id.clone(),
+            path: path.clone(),
+            parent_path: parent_path.clone(),
+            role: role.clone(),
+            task: task.clone(),
+            status: *status,
+            summary: summary.clone(),
+            depth: *depth as i32,
+            error: error.clone(),
+            created_at: *updated_at,
+        }),
+        _ => None,
     }
 }
 

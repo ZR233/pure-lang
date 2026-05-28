@@ -33,6 +33,7 @@ React action
 - `ToolApprovalPolicy::AutoAllow` 为默认且主路径
 - 手动审批接口保留在系统能力中，但不作为默认流程
 - 用户显式要求 `subagent`/子代理分工时，核心提示必须将 `subagent` 作为强约束；普通 shell 或文件探索不能替代子代理调度
+- 多 agent 协作通过 `spawn_agent`、`wait_agent`、`list_agents`、`send_message`、`followup_task`、`close_agent` 组成；`subagent` 仅是兼容 wrapper
 
 ## 3.3 核心 turn 编排
 
@@ -55,6 +56,7 @@ React action
 
 - 消息和 trace 采用事务批量写入，避免逐条写放大
 - timeline 读取以 `sequence` 为单调游标
+- agent tree、agent events、agent messages 与 turn snapshot 分表持久化；旧 `subagent_events` 不作为新流程的读取来源
 
 ## 3.4 事件管线
 
@@ -66,6 +68,8 @@ React action
 
 这保证高频 delta 下 UI 不会因为 lagged 直接断流。
 
+`Done`、turn final、agent final 属于 lossless 事件：转发层必须确保它们不会因为普通 delta 的背压被丢弃。
+
 ## 3.5 Turn 收尾语义
 
 turn 生命周期持久化语义固定：
@@ -76,6 +80,7 @@ turn 生命周期持久化语义固定：
 - `interrupted`
 
 用户停止属于 `interrupted`，不可被延迟完成覆盖。
+工具、模型或 agent 基座错误属于 `failed`，必须写入 `TurnFailed` trace。
 
 ## 3.6 输出模型
 

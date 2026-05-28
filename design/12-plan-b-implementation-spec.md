@@ -56,8 +56,9 @@ SQLite：
 
 1. 检测旧库
 2. 生成时间戳备份
-3. 创建新 schema（v2）
+3. 创建新 schema（v2+agent）
 4. 不读取旧表
+5. `subagent_events` 被 `agent_events` 替代；旧表只允许因历史迁移存在，不参与运行期兼容
 
 config：
 
@@ -88,6 +89,8 @@ config：
 3. 新 schema 启动切换可重复执行且有备份
 4. 工具迭代达到上限时必须触发无工具总结，最终响应不能为空
 5. 用户显式要求 `subagent`/子代理分工时，核心提示必须要求先调度子代理，再由父会话汇总
+6. `spawn_agent`、`wait_agent`、`list_agents`、`send_message`、`followup_task`、`close_agent` 形成完整协作闭环
+7. `Done`、turn final、agent final 作为 lossless 事件处理，不因普通 delta 背压丢失
 
 桥接：
 
