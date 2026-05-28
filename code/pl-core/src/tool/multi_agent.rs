@@ -281,7 +281,7 @@ impl Tool for SpawnAgentTool {
                 agent_path: handle.path.clone(),
                 role,
                 message: prompt,
-                budget: context.budget_policy.agent_budget.child_turn_budget,
+                budget: crate::turn::TurnBudget::child_default(),
             };
             tokio::spawn(run_agent_turn(run));
 
@@ -477,7 +477,7 @@ impl Tool for FollowupTaskTool {
                     agent_path: record.path,
                     role: record.role,
                     message,
-                    budget: context.budget_policy.agent_budget.child_turn_budget,
+                    budget: crate::turn::TurnBudget::child_default(),
                 };
                 if let Some(token) = run.options.cancellation_token.clone() {
                     context

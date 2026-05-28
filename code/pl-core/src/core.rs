@@ -19,8 +19,9 @@ use crate::tool::{
 };
 use crate::trace::TraceRecorder;
 use crate::turn::{
-    BudgetLimit, BudgetPolicy, BudgetTracker, ToolApprovalDecision, ToolApprovalPolicy,
-    ToolApprovalRequest, TurnOptions, TurnRequest, TurnResult, TurnResultStatus,
+    BudgetLimit, BudgetTracker, ToolApprovalDecision, ToolApprovalPolicy,
+    ToolApprovalRequest, TurnOptions, TurnRequest, TurnResult, TurnResultStatus, AGENT_MAX_COUNT,
+    AGENT_MAX_DEPTH,
 };
 
 /// 生成唯一的会话 ID（毫秒时间戳 + 序列号）。
@@ -202,12 +203,8 @@ impl PureCore {
         let workspace_instructions = self.workspace_instructions.clone();
         let active_subagent = self.active_subagent.clone();
         let agent_control = self.agent_control.clone();
-        let budget_policy = BudgetPolicy::default();
         agent_control
-            .configure_limits(
-                budget_policy.agent_budget.max_agents,
-                budget_policy.agent_budget.max_depth,
-            )
+            .configure_limits(AGENT_MAX_COUNT, AGENT_MAX_DEPTH)
             .await;
         let cancellation_token = options.cancellation_token.clone();
         let tool_schemas = self.tools.schemas();
@@ -233,7 +230,6 @@ impl PureCore {
         let mut last_model = model.clone();
         let mut total_usage = pl_model::TokenUsage::default();
         let mut session_message_count = 0;
-        let mut completed_with_assistant_response = false;
 
         let mut instructions = format_instructions(
             request.mode.instructions(),
@@ -278,10 +274,7 @@ impl PureCore {
                 budget_limit = Some(limit);
                 break;
             }
-            if let Err(limit) = budget_tracker.consume_model_step() {
-                budget_limit = Some(limit);
-                break;
-            }
+            budget_tracker.record_model_step();
 
             let iteration_tools = if must_dispatch_agent_now {
                 tool_schemas
@@ -436,7 +429,6 @@ impl PureCore {
                 last_content = content;
                 last_reasoning_content = reasoning_content;
                 session_message_count = session.messages().len();
-                completed_with_assistant_response = true;
                 break;
             }
 
@@ -468,26 +460,7 @@ impl PureCore {
                     name: tool_call.name.clone(),
                     arguments: tool_call.payload_text(),
                 });
-                if let Err(limit) = budget_tracker.consume_tool_call(&tool_call.name) {
-                    let message = budget_limit_message(limit.kind, &limit.usage);
-                    recorder.record_trace_only(TraceEventKind::ToolCallFailed {
-                        tool_call_id: tool_call.id.clone(),
-                        error: message.clone(),
-                    });
-                    session.push_tool_result(
-                        tool_call
-                            .call_id
-                            .clone()
-                            .unwrap_or_else(|| tool_call.id.clone()),
-                        tool_call.name.clone(),
-                        tool_call.kind(),
-                        message,
-                        serde_json::to_string(&tool_call.arguments_for_display())
-                            .unwrap_or_default(),
-                    );
-                    budget_limit = Some(limit);
-                    break;
-                }
+                budget_tracker.record_tool_call(&tool_call.name);
 
                 let result = match self.tools.get(&tool_call.name) {
                     Some(tool) => {
@@ -498,7 +471,6 @@ impl PureCore {
                             workspace_instructions: workspace_instructions.clone(),
                             active_subagent: active_subagent.clone(),
                             agent_control: agent_control.clone(),
-                            budget_policy,
                         };
                         let approval_request = approval_request(tool_call, &tool_context);
                         match approve_tool_call(
@@ -629,205 +601,6 @@ impl PureCore {
             iteration += 1;
         }
 
-        if !completed_with_assistant_response {
-            if is_cancelled(&options) {
-                return Ok(interrupted_turn_result(
-                    recorder,
-                    &session_id,
-                    request.mode,
-                    last_content,
-                    last_reasoning_content,
-                    last_model,
-                    total_usage,
-                    session_message_count,
-                    cancellation_reason(),
-                ));
-            }
-
-            let inference_id = format!("{session_id}-inf-final");
-            recorder.record_trace_only(TraceEventKind::InferenceStarted {
-                turn_id: session_id.clone(),
-                inference_id: inference_id.clone(),
-                model: model.clone(),
-            });
-
-            let completion_request = CompletionRequest {
-                model: model.clone(),
-                instructions: Some(format!(
-                    "{}\n\n{}",
-                    instructions,
-                    finalization_instruction(budget_limit.as_ref())
-                )),
-                messages: session.messages().to_vec(),
-                tools: Vec::new(),
-                tool_choice: "none".to_string(),
-                parallel_tool_calls: false,
-                temperature: None,
-                max_tokens: None,
-                reasoning: reasoning.clone(),
-                stream: true,
-            };
-
-            let response_result = match &cancellation_token {
-                Some(token) => {
-                    tokio::select! {
-                        result = provider.stream_complete(completion_request, recorder.sender().clone()) => result,
-                        _ = token.cancelled() => {
-                            return Ok(interrupted_turn_result(
-                                recorder,
-                                &session_id,
-                                request.mode,
-                                last_content,
-                                last_reasoning_content,
-                                last_model,
-                                total_usage,
-                                session.messages().len(),
-                                cancellation_reason(),
-                            ));
-                        }
-                    }
-                }
-                None => {
-                    provider
-                        .stream_complete(completion_request, recorder.sender().clone())
-                        .await
-                }
-            };
-            let response = match response_result {
-                Ok(response) => response,
-                Err(_) if is_cancelled(&options) => {
-                    return Ok(interrupted_turn_result(
-                        recorder,
-                        &session_id,
-                        request.mode,
-                        last_content,
-                        last_reasoning_content,
-                        last_model,
-                        total_usage,
-                        session.messages().len(),
-                        cancellation_reason(),
-                    ));
-                }
-                Err(error) => {
-                    if let Some(limit) = budget_limit {
-                        return Ok(budget_limited_turn_result(
-                            recorder,
-                            &session_id,
-                            request.mode,
-                            last_content,
-                            last_reasoning_content,
-                            last_model,
-                            total_usage,
-                            session.messages().len(),
-                            limit.kind,
-                            limit.usage,
-                            format!("预算耗尽后的最终总结失败：{error}"),
-                        ));
-                    }
-                    return Ok(failed_turn_result(
-                        recorder,
-                        &session_id,
-                        request.mode,
-                        last_content,
-                        last_reasoning_content,
-                        last_model,
-                        total_usage,
-                        session.messages().len(),
-                        error.to_string(),
-                    ));
-                }
-            };
-
-            recorder.record_trace_only(TraceEventKind::InferenceCompleted {
-                turn_id: session_id.clone(),
-                inference_id,
-                usage: TokenUsageSnapshot {
-                    prompt_tokens: response.usage.prompt_tokens,
-                    completion_tokens: response.usage.completion_tokens,
-                    cached_prompt_tokens: response.usage.cached_prompt_tokens,
-                    total_tokens: response.usage.prompt_tokens + response.usage.completion_tokens,
-                },
-            });
-
-            total_usage.prompt_tokens += response.usage.prompt_tokens;
-            total_usage.completion_tokens += response.usage.completion_tokens;
-            total_usage.cached_prompt_tokens += response.usage.cached_prompt_tokens;
-            if !response.model.is_empty() {
-                last_model = response.model;
-            }
-
-            let tool_calls = response.tool_calls;
-            if !tool_calls.is_empty() {
-                return Ok(budget_limited_turn_result(
-                    recorder,
-                    &session_id,
-                    request.mode,
-                    last_content,
-                    last_reasoning_content,
-                    last_model,
-                    total_usage,
-                    session.messages().len(),
-                    budget_limit
-                        .map(|limit| limit.kind)
-                        .unwrap_or(BudgetLimitKind::Finalization),
-                    budget_limit
-                        .map(|limit| limit.usage)
-                        .unwrap_or_else(|| budget_tracker.usage()),
-                    "模型在最终总结阶段仍返回了工具调用，本轮受到预算限制，没有可靠完成。"
-                        .to_string(),
-                ));
-            }
-
-            let mut content = response.content.unwrap_or_default();
-            if looks_like_unexecuted_tool_call_text(&content) {
-                return Ok(budget_limited_turn_result(
-                    recorder,
-                    &session_id,
-                    request.mode,
-                    last_content,
-                    last_reasoning_content,
-                    last_model,
-                    total_usage,
-                    session.messages().len(),
-                    budget_limit
-                        .map(|limit| limit.kind)
-                        .unwrap_or(BudgetLimitKind::Finalization),
-                    budget_limit
-                        .map(|limit| limit.usage)
-                        .unwrap_or_else(|| budget_tracker.usage()),
-                    "模型在最终总结阶段返回了未执行的工具调用文本，本轮受到预算限制，没有可靠完成。".to_string(),
-                ));
-            }
-            if content.trim().is_empty() {
-                content = budget_limit
-                    .map(|limit| budget_limited_fallback(limit.kind))
-                    .unwrap_or_else(|| {
-                        "已完成工具调用，但模型没有返回最终总结。请重试或提高预算。".to_string()
-                    });
-            }
-            if let Some(initial_count) = initial_agent_count {
-                let current_count = agent_control.list_agents(None).await.len();
-                if current_count <= initial_count {
-                    return Ok(failed_turn_result(
-                        recorder,
-                        &session_id,
-                        request.mode,
-                        last_content,
-                        last_reasoning_content,
-                        last_model,
-                        total_usage,
-                        session.messages().len(),
-                        "用户明确要求子代理分工，但本轮没有实际创建任何 agent。".to_string(),
-                    ));
-                }
-            }
-            let reasoning_content = response.reasoning_content.clone();
-            session.push_assistant_response(content.clone(), reasoning_content.clone());
-            last_content = content;
-            last_reasoning_content = reasoning_content;
-            session_message_count = session.messages().len();
-        }
-
         total_usage.total_tokens = total_usage.prompt_tokens + total_usage.completion_tokens;
         if is_cancelled(&options) {
             return Ok(interrupted_turn_result(
@@ -899,16 +672,6 @@ fn cancellation_reason() -> String {
     "interrupted by user".to_string()
 }
 
-fn finalization_instruction(limit: Option<&BudgetLimit>) -> String {
-    match limit {
-        Some(limit) => format!(
-            "本轮已触达 {} 预算限制。请基于当前会话中已有的工具结果给出预算受限的最终回答，说明已完成内容、缺失内容和可继续方向。不要再调用工具。",
-            limit.kind.as_str()
-        ),
-        None => "请基于当前会话中已有的工具结果给出最终回答。不要再调用工具。".to_string(),
-    }
-}
-
 fn budget_limit_message(kind: BudgetLimitKind, usage: &BudgetUsage) -> String {
     format!(
         "budget limited by {} budget (modelSteps={}, toolCalls={}, waitCalls={}, elapsedMs={})",
@@ -917,13 +680,6 @@ fn budget_limit_message(kind: BudgetLimitKind, usage: &BudgetUsage) -> String {
         usage.tool_calls,
         usage.wait_calls,
         usage.elapsed_ms
-    )
-}
-
-fn budget_limited_fallback(kind: BudgetLimitKind) -> String {
-    format!(
-        "本轮受到 {} 预算限制，模型没有返回最终总结。已保留当前工具结果，可继续追问以补完剩余工作。",
-        kind.as_str()
     )
 }
 
@@ -1187,7 +943,6 @@ mod tests {
             workspace_instructions: None,
             active_subagent: None,
             agent_control: crate::AgentControl::default(),
-            budget_policy: BudgetPolicy::default(),
         }
     }
 
