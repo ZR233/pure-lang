@@ -24,8 +24,8 @@ export function ApprovalOverlay({ approvals, onApprove, onDeny }: ApprovalOverla
             <div>
               <strong>{approval.name}</strong>
               <span>{approval.workingDirectory ?? t("subagent.defaultWorkingDirectory")}</span>
-              {approval.parentSubagentId ? (
-                <span>{t("subagent.subagentLabel", { id: approval.parentSubagentId })}</span>
+              {approval.parentAgentId ? (
+                <span>{t("subagent.subagentLabel", { id: approval.parentAgentId })}</span>
               ) : null}
             </div>
           </div>

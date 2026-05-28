@@ -58,7 +58,7 @@ SQLite：
 2. 生成时间戳备份
 3. 创建新 schema（v2+agent）
 4. 不读取旧表
-5. `subagent_events` 被 `agent_events` 替代；旧表只允许因历史迁移存在，不参与运行期兼容
+5. `subagent_events` 被 `agent_events` 替代；新 schema 不再创建旧表，运行期不读写旧表
 
 config：
 

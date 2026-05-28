@@ -4,11 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   ModelRecord,
+  AgentActivity,
+  AgentStatus,
   ProviderRecord,
   RoleRecord,
   SessionRuntime,
-  SubagentActivity,
-  SubagentStatus,
   TurnPhase,
 } from "../types";
 import { allModels } from "../lib/utils";
@@ -21,7 +21,7 @@ type SessionStatusBarProps = {
   onSaveProviderSettings: (explicitRoles?: RoleRecord[]) => void;
   turnPhase: TurnPhase;
   turnStartedAt: number | null;
-  subagentActivities: SubagentActivity[];
+  agentActivities: AgentActivity[];
 };
 
 const turnPhaseKeys: Record<TurnPhase, string> = {
@@ -37,21 +37,20 @@ const turnPhaseKeys: Record<TurnPhase, string> = {
   failed: "turnPhase.failed",
 };
 
-const activeSubagentStatuses = new Set<SubagentStatus>([
+const activeAgentStatuses = new Set<AgentStatus>([
   "running",
-  "awaitingApproval",
-  "awaitingToolApproval",
+  "waiting",
   "queued",
 ]);
 
-const subagentStatusKeys: Record<SubagentStatus, string> = {
+const agentStatusKeys: Record<AgentStatus, string> = {
   queued: "subagent.queued",
-  awaitingApproval: "subagent.awaitingApproval",
   running: "subagent.running",
-  awaitingToolApproval: "subagent.awaitingTool",
-  succeeded: "subagent.succeeded",
+  waiting: "subagent.awaitingTool",
+  completed: "turnPhase.completed",
   failed: "subagent.failed",
-  denied: "subagent.denied",
+  interrupted: "turnPhase.interrupted",
+  closed: "status.done",
 };
 
 function formatTokenCount(value?: number | null): string {
@@ -139,10 +138,10 @@ function ListPopover({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function sortSubagents(activities: SubagentActivity[]): SubagentActivity[] {
+function sortAgents(activities: AgentActivity[]): AgentActivity[] {
   return [...activities].sort((left, right) => {
-    const leftActive = activeSubagentStatuses.has(left.status) ? 1 : 0;
-    const rightActive = activeSubagentStatuses.has(right.status) ? 1 : 0;
+    const leftActive = activeAgentStatuses.has(left.status) ? 1 : 0;
+    const rightActive = activeAgentStatuses.has(right.status) ? 1 : 0;
     if (leftActive !== rightActive) {
       return rightActive - leftActive;
     }
@@ -182,9 +181,9 @@ function TurnStatusIndicator({
   );
 }
 
-function SubagentPopover({ activities }: { activities: SubagentActivity[] }) {
+function AgentPopover({ activities }: { activities: AgentActivity[] }) {
   const { t } = useTranslation();
-  const items = sortSubagents(activities);
+  const items = sortAgents(activities);
 
   return (
     <StatusPopover
@@ -209,7 +208,7 @@ function SubagentPopover({ activities }: { activities: SubagentActivity[] }) {
                 <span className="status-subagent-role">{activity.role}</span>
                 <p>{activity.task}</p>
               </div>
-              <span className="status-subagent-badge">{t(subagentStatusKeys[activity.status])}</span>
+              <span className="status-subagent-badge">{t(agentStatusKeys[activity.status])}</span>
             </div>
           ))
         )}
@@ -368,7 +367,7 @@ export function SessionStatusBar({
   onSaveProviderSettings,
   turnPhase,
   turnStartedAt,
-  subagentActivities,
+  agentActivities,
 }: SessionStatusBarProps) {
   const { t } = useTranslation();
   const contextLabel = `${formatTokenCount(runtime?.latestContextTokens)} / ${formatTokenCount(runtime?.contextWindow)}`;
@@ -442,7 +441,7 @@ export function SessionStatusBar({
           </div>
         </StatusPopover>
 
-        <SubagentPopover activities={subagentActivities} />
+        <AgentPopover activities={agentActivities} />
       </div>
     </div>
   );

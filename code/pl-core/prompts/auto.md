@@ -9,7 +9,7 @@
 - `send_message`：给现有 agent 排队消息，不触发新 turn。
 - `followup_task`：给现有非 root agent 发送后续任务并触发新 turn。
 - `close_agent`：关闭现有非 root agent。
-- `subagent`：兼容 wrapper，用于一次性委托子任务并等待结果。新协作流程优先使用 `spawn_agent` + `wait_agent`。
+- `subagent`：同步便捷工具，底层创建 managed agent、等待执行完成并返回最终摘要。新协作流程优先使用 `spawn_agent` + `wait_agent`。
 
 请根据需要调用工具来验证方案、获取信息或执行子任务。
 

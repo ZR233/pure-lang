@@ -20,7 +20,7 @@ Windows 下对应：
 ~/.pure/studio/studio_1.sqlite
 ```
 
-SQLite 只保存 Studio 状态，例如项目、会话、消息、工具审批、subagent 状态事件和应用设置，并由 `pl-core` 通过 SeaORM 纯异步访问。provider/model/role 配置仍只由 `~/.pure/config.toml` 表达。
+SQLite 只保存 Studio 状态，例如项目、会话、消息、工具审批、agent 状态事件和应用设置，并由 `pl-core` 通过 SeaORM 纯异步访问。provider/model/role 配置仍只由 `~/.pure/config.toml` 表达。
 
 普通对话运行时读取配置；当配置文件不存在时，`pure-studio` 设置页展示默认配置草稿。写入配置必须由用户显式保存触发。
 
@@ -231,7 +231,7 @@ npm --prefix code/pure-studio run dev
 
 Vite 预览只用于布局和视觉对照，最终应用行为仍以 Tauri 运行结果为准。
 
-聊天界面应展示 subagent 活动面板，信息来自 Studio SQLite 中的 subagent 事件表和当前实时事件流。面板只展示角色、状态、任务摘要、最终摘要或错误，不展示子代理完整推理流。
+聊天界面应展示 agent 活动面板，信息来自 Studio SQLite 中的 `agent_events` 和当前实时事件流。面板只展示路径、角色、状态、任务摘要、最终摘要或错误，不展示子代理完整推理流。
 
 聊天界面使用双栏布局：左侧项目/会话栏和主聊天区，不再展示右侧工具历史面板。主聊天区底部状态栏展示当前模型、会话、上下文使用量、费用估算、Skill 数量和 MCP 数量；Skill/MCP 默认只显示数量，悬浮或键盘聚焦时展示完整列表。
 

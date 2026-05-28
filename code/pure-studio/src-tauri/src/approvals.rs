@@ -33,7 +33,7 @@ pub fn approval_callback(
                     name: request.name,
                     arguments: request.arguments,
                     working_directory: request.working_directory,
-                    parent_subagent_id: request.parent_subagent_id,
+                    parent_agent_id: request.parent_agent_id,
                 },
             );
 

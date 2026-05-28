@@ -18,13 +18,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   ChatItem,
+  AgentActivity,
+  AgentStatus,
   ProjectRecord,
   ProviderRecord,
   RoleRecord,
   SessionRecord,
   SessionRuntime,
-  SubagentActivity,
-  SubagentStatus,
   TimelineItem,
   TrackedToolCall,
   TurnPhase,
@@ -34,14 +34,14 @@ import type {
 import { formatTime } from "../lib/utils";
 import { SessionStatusBar } from "./SessionStatusBar";
 
-const subagentStatusKeys: Record<SubagentStatus, string> = {
+const agentStatusKeys: Record<AgentStatus, string> = {
   queued: "subagent.queued",
-  awaitingApproval: "subagent.awaitingApproval",
   running: "subagent.running",
-  awaitingToolApproval: "subagent.awaitingTool",
-  succeeded: "subagent.succeeded",
+  waiting: "subagent.awaitingTool",
+  completed: "turnPhase.completed",
   failed: "subagent.failed",
-  denied: "subagent.denied",
+  interrupted: "turnPhase.interrupted",
+  closed: "status.done",
 };
 
 const roleI18nKeys: Record<string, string> = {
@@ -60,7 +60,7 @@ type TimelineEntry =
     }
   | { kind: "thought"; key: string; content: string }
   | { kind: "tool"; key: string; toolCall: TrackedToolCall }
-  | { kind: "subagent"; key: string; activity: SubagentActivity }
+  | { kind: "agent"; key: string; activity: AgentActivity }
   | { kind: "trace"; key: string; item: TimelineItem };
 
 type ConversationPanelProps = {
@@ -68,7 +68,7 @@ type ConversationPanelProps = {
   selectedProject: ProjectRecord | null;
   isBusy: boolean;
   chatItems: ChatItem[];
-  subagentActivities: SubagentActivity[];
+  agentActivities: AgentActivity[];
   timelineItems: TimelineItem[];
   sessionRuntime: SessionRuntime | null;
   prompt: string;
@@ -94,7 +94,7 @@ function compact(value: string, max = 220): string {
   return `${text.slice(0, max)}...`;
 }
 
-function subagentSummary(activity: SubagentActivity, t: TFunction) {
+function agentSummary(activity: AgentActivity, t: TFunction) {
   if (activity.error) {
     return activity.error;
   }
@@ -154,7 +154,7 @@ function turnStatusLabel(status: TimelineItem["turnStatus"], t: TFunction): stri
 
 function timelineEntries(
   chatItems: ChatItem[],
-  subagentActivities: SubagentActivity[],
+  agentActivities: AgentActivity[],
   timelineItems: TimelineItem[],
 ): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
@@ -187,10 +187,10 @@ function timelineEntries(
     }
   });
 
-  for (const activity of subagentActivities) {
+  for (const activity of agentActivities) {
     entries.push({
-      kind: "subagent",
-      key: `subagent-${activity.eventId}`,
+      kind: "agent",
+      key: `agent-${activity.eventId}`,
       activity,
     });
   }
@@ -273,11 +273,11 @@ function ToolEntry({ toolCall, t }: { toolCall: TrackedToolCall; t: TFunction })
   );
 }
 
-function SubagentEntry({
+function AgentEntry({
   activity,
   t,
 }: {
-  activity: SubagentActivity;
+  activity: AgentActivity;
   t: TFunction;
 }) {
   return (
@@ -285,14 +285,14 @@ function SubagentEntry({
       <div className="timeline-entry-head">
         <strong>Agent: {t(roleI18nKeys[activity.role] ?? `roles.${activity.role}`)}</strong>
         <span className={`timeline-badge status-${activity.status}`}>
-          {t(subagentStatusKeys[activity.status])}
+          {t(agentStatusKeys[activity.status])}
         </span>
       </div>
       <p className="timeline-task">{activity.task}</p>
-      <p className="timeline-result">{subagentSummary(activity, t)}</p>
+      <p className="timeline-result">{agentSummary(activity, t)}</p>
       <div className="timeline-entry-meta">
         <span>{t("subagent.depth")} {activity.depth}</span>
-        {activity.parentId ? <span>{t("subagent.parent")} {activity.parentId}</span> : null}
+        {activity.parentPath ? <span>{t("subagent.parent")} {activity.parentPath}</span> : null}
         <span>{formatTime(activity.updatedAt)}</span>
       </div>
     </EntryShell>
@@ -350,7 +350,7 @@ export function ConversationPanel({
   selectedProject,
   isBusy,
   chatItems,
-  subagentActivities,
+  agentActivities,
   timelineItems,
   sessionRuntime,
   prompt,
@@ -372,8 +372,8 @@ export function ConversationPanel({
   const [showScrollButton, setShowScrollButton] = useState(false);
   const prevBusyRef = useRef(isBusy);
   const entries = useMemo(
-    () => timelineEntries(chatItems, subagentActivities, timelineItems),
-    [chatItems, subagentActivities, timelineItems],
+    () => timelineEntries(chatItems, agentActivities, timelineItems),
+    [chatItems, agentActivities, timelineItems],
   );
   const stopping = turnPhase === "stopping";
 
@@ -451,8 +451,8 @@ export function ConversationPanel({
               if (entry.kind === "tool") {
                 return <ToolEntry key={entry.key} toolCall={entry.toolCall} t={t} />;
               }
-              if (entry.kind === "subagent") {
-                return <SubagentEntry key={entry.key} activity={entry.activity} t={t} />;
+              if (entry.kind === "agent") {
+                return <AgentEntry key={entry.key} activity={entry.activity} t={t} />;
               }
               return <TraceEntry key={entry.key} item={entry.item} t={t} />;
             })}
@@ -474,7 +474,7 @@ export function ConversationPanel({
           onSaveProviderSettings={onSaveProviderSettings}
           turnPhase={turnPhase}
           turnStartedAt={turnStartedAt}
-          subagentActivities={subagentActivities}
+          agentActivities={agentActivities}
         />
         <div className="composer">
           <textarea

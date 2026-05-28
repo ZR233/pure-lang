@@ -90,7 +90,7 @@ pub struct ToolApprovalRequest {
     pub arguments: serde_json::Value,
     pub working_directory: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_subagent_id: Option<String>,
+    pub parent_agent_id: Option<String>,
 }
 
 /// 单次工具调用审批结果。
