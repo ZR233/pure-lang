@@ -51,6 +51,8 @@ React action
 - 工具循环必须以 assistant 最终文本收尾
 - 当模型连续调用工具直到 `maxToolIterations` 上限时，核心层必须发起一次无工具总结推理
 - 无工具总结仍未返回内容时，核心层返回明确兜底文本，不能静默 `completed`
+- 无工具总结或普通 assistant 文本中若出现未执行的工具调用标记，必须按 `failed` 收尾并写入 `TurnFailed`；不能把原始 tool-call 文本作为最终回答
+- 用户显式要求子代理分工时，turn 完成前必须验证本轮实际创建了 agent；否则按 `failed` 收尾，不写入伪完成 assistant 消息
 
 持久化原则：
 

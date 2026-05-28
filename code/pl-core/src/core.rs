@@ -215,6 +215,11 @@ impl PureCore {
             turn_id: session_id.clone(),
         });
         let requires_subagent_dispatch = prompt_requires_subagent_dispatch(&request.prompt);
+        let initial_agent_count = if requires_subagent_dispatch {
+            Some(agent_control.list_agents(None).await.len())
+        } else {
+            None
+        };
         session.push_user_prompt(request.prompt);
         let model = provider.default_model().to_string();
 
@@ -358,6 +363,35 @@ impl PureCore {
             }
 
             if tool_calls.is_empty() {
+                if looks_like_unexecuted_tool_call_text(&content) {
+                    return Ok(failed_turn_result(
+                        recorder,
+                        &session_id,
+                        request.mode,
+                        last_content,
+                        last_reasoning_content,
+                        last_model,
+                        total_usage,
+                        session.messages().len(),
+                        "模型返回了未执行的工具调用文本，未产生可执行 tool call。".to_string(),
+                    ));
+                }
+                if let Some(initial_count) = initial_agent_count {
+                    let current_count = agent_control.list_agents(None).await.len();
+                    if current_count <= initial_count {
+                        return Ok(failed_turn_result(
+                            recorder,
+                            &session_id,
+                            request.mode,
+                            last_content,
+                            last_reasoning_content,
+                            last_model,
+                            total_usage,
+                            session.messages().len(),
+                            "用户明确要求子代理分工，但本轮没有实际创建任何 agent。".to_string(),
+                        ));
+                    }
+                }
                 session.push_assistant_response(content.clone(), reasoning_content.clone());
                 last_content = content;
                 last_reasoning_content = reasoning_content;
@@ -640,10 +674,54 @@ impl PureCore {
                 last_model = response.model;
             }
 
+            let tool_calls = response.tool_calls;
+            if !tool_calls.is_empty() {
+                return Ok(failed_turn_result(
+                    recorder,
+                    &session_id,
+                    request.mode,
+                    last_content,
+                    last_reasoning_content,
+                    last_model,
+                    total_usage,
+                    session.messages().len(),
+                    "模型在最终总结阶段仍返回了工具调用，本轮没有可靠完成。".to_string(),
+                ));
+            }
+
             let mut content = response.content.unwrap_or_default();
+            if looks_like_unexecuted_tool_call_text(&content) {
+                return Ok(failed_turn_result(
+                    recorder,
+                    &session_id,
+                    request.mode,
+                    last_content,
+                    last_reasoning_content,
+                    last_model,
+                    total_usage,
+                    session.messages().len(),
+                    "模型在最终总结阶段返回了未执行的工具调用文本，本轮没有可靠完成。".to_string(),
+                ));
+            }
             if content.trim().is_empty() {
                 content = "已完成工具调用，但模型没有返回最终总结。请重试或提高工具迭代上限。"
                     .to_string();
+            }
+            if let Some(initial_count) = initial_agent_count {
+                let current_count = agent_control.list_agents(None).await.len();
+                if current_count <= initial_count {
+                    return Ok(failed_turn_result(
+                        recorder,
+                        &session_id,
+                        request.mode,
+                        last_content,
+                        last_reasoning_content,
+                        last_model,
+                        total_usage,
+                        session.messages().len(),
+                        "用户明确要求子代理分工，但本轮没有实际创建任何 agent。".to_string(),
+                    ));
+                }
             }
             let reasoning_content = response.reasoning_content.clone();
             session.push_assistant_response(content.clone(), reasoning_content.clone());
@@ -870,6 +948,35 @@ fn prompt_requires_subagent_dispatch(prompt: &str) -> bool {
     mentions_subagent && requests_partition
 }
 
+fn looks_like_unexecuted_tool_call_text(content: &str) -> bool {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    let mentions_known_tool = [
+        "spawn_agent",
+        "wait_agent",
+        "list_agents",
+        "send_message",
+        "followup_task",
+        "close_agent",
+        "subagent",
+    ]
+    .iter()
+    .any(|name| lower.contains(name));
+
+    trimmed.contains("<｜｜DSML｜｜tool_calls>")
+        || trimmed.contains("<｜｜DSML｜｜invoke name=")
+        || lower.contains("<tool_call>")
+        || lower.contains("<tool_calls>")
+        || lower.contains("\"tool_calls\"")
+        || (mentions_known_tool
+            && (lower.contains("tool_calls")
+                || lower.contains("invoke name=")
+                || lower.contains("\"name\"")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -929,6 +1036,19 @@ mod tests {
         assert!(!prompt_requires_subagent_dispatch("介绍整个项目"));
         assert!(!prompt_requires_subagent_dispatch(
             "用 bash 看一下每个 crate"
+        ));
+    }
+
+    #[test]
+    fn detects_unexecuted_tool_call_text() {
+        assert!(looks_like_unexecuted_tool_call_text(
+            "<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"spawn_agent\">"
+        ));
+        assert!(looks_like_unexecuted_tool_call_text(
+            r#"{"tool_calls":[{"name":"spawn_agent"}]}"#
+        ));
+        assert!(!looks_like_unexecuted_tool_call_text(
+            "已完成探索，没有工具调用文本。"
         ));
     }
 
