@@ -44,7 +44,7 @@ pl-model provider
 
 事件类型属于协议层，不应包含 provider 私有结构，也不应绑定具体前端。工具审批事件只承载通用工具名、参数和审批结果，不包含 Tauri、React 或桌面端私有状态。
 
-子代理内部事件不直接转发完整文本流。`pl-core` 将子代理生命周期压缩为 `AgentStateChanged`，状态固定为 `queued`、`running`、`waiting`、`completed`、`failed`、`interrupted`、`closed`。`pure-studio` 持久化这些状态事件，并在聊天界面渲染路径、状态和摘要。
+子代理内部事件不直接转发完整文本流、思考流、工具调用流或工具输出。`pl-core` 将子代理生命周期压缩为 `AgentStateChanged`，状态固定为 `queued`、`running`、`waiting`、`completed`、`failed`、`interrupted`、`closed`。`pure-studio` 持久化这些状态事件，并在聊天界面只渲染路径、状态和摘要，避免把子代理内部执行细节混入父会话 chat。
 
 ## 8.5 流式工具调用聚合
 

@@ -582,14 +582,21 @@ pub(super) async fn run_agent_turn(config: AgentRunConfig) {
     if let Some(instructions) = config.workspace_instructions.clone() {
         request = request.with_workspace_instructions(instructions);
     }
+    let (agent_event_tx, agent_event_rx) = tokio::sync::broadcast::channel(256);
+    let forward_task = tokio::spawn(forward_agent_lifecycle_events(
+        agent_event_rx,
+        config.event_tx.clone(),
+    ));
     let result = core
         .run_turn_with_options(
             &mut session,
             request,
-            config.event_tx.clone(),
+            agent_event_tx.clone(),
             config.options.clone(),
         )
         .await;
+    drop(agent_event_tx);
+    let _ = forward_task.await;
     config
         .agent_control
         .store_session(&config.agent_id, session)
@@ -629,6 +636,34 @@ async fn mark_agent_failed(config: &AgentRunConfig, error: String) {
         .await
     {
         emit_agent_record(&config.event_tx, &record);
+    }
+}
+
+async fn forward_agent_lifecycle_events(
+    mut event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
+    parent_event_tx: pl_protocol::AgentEventSender,
+) {
+    loop {
+        match event_rx.recv().await {
+            Ok(event @ AgentEvent::AgentStateChanged { .. }) => {
+                let _ = parent_event_tx.send(event);
+            }
+            Ok(AgentEvent::Done) => break,
+            Ok(
+                AgentEvent::TextDelta { .. }
+                | AgentEvent::ThinkingDelta { .. }
+                | AgentEvent::ToolCallDelta { .. }
+                | AgentEvent::ToolCallComplete { .. }
+                | AgentEvent::ToolApprovalRequested { .. }
+                | AgentEvent::ToolApprovalGranted { .. }
+                | AgentEvent::ToolApprovalDenied { .. }
+                | AgentEvent::TurnStarted
+                | AgentEvent::TurnInterrupted { .. }
+                | AgentEvent::Error { .. },
+            ) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+        }
     }
 }
 

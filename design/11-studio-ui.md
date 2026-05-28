@@ -28,6 +28,9 @@ reducer 分域：
 - 空 assistant 不渲染
 - 工具调用使用紧凑行密度
 - 子代理使用行内状态，不做嵌套大卡片
+- 子代理内部 text delta、thinking delta、tool call 和工具输出不进入父会话 timeline；父会话只展示 agent 生命周期状态与最终摘要
+- 用户与 assistant 正文按 Markdown 渲染，支持标题、列表、引用、代码块、行内代码、强调和链接
+- 自动跟随最新内容以“用户是否停留在底部”为准；高频 timeline 刷新时仍应在 layout 阶段滚动到最新，用户手动上滚后暂停跟随
 
 ## 3. Turn 生命周期
 
