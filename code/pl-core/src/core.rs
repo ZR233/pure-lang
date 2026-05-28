@@ -189,6 +189,7 @@ impl PureCore {
         recorder.record_trace_only(TraceEventKind::TurnStarted {
             turn_id: session_id.clone(),
         });
+        let requires_subagent_dispatch = prompt_requires_subagent_dispatch(&request.prompt);
         session.push_user_prompt(request.prompt);
         let model = provider.default_model().to_string();
 
@@ -197,11 +198,17 @@ impl PureCore {
         let mut last_model = model.clone();
         let mut total_usage = pl_model::TokenUsage::default();
         let mut session_message_count = 0;
+        let mut completed_with_assistant_response = false;
 
-        let instructions = format_instructions(
+        let mut instructions = format_instructions(
             request.mode.instructions(),
             request.workspace_instructions.as_deref(),
         );
+        if requires_subagent_dispatch {
+            instructions.push_str(
+                "\n\n# 子代理调度约束\n用户明确要求使用 subagent/子代理分工时，必须先调度 `subagent` 工具；不要只用 `bash` 或文件工具替代。若尚未知道 crate 列表，可以先用只读工具定位 workspace，再为每个 crate 创建 explorer subagent，最后由父会话汇总。",
+            );
+        }
         let reasoning = reasoning_effort.as_ref().map(|effort| ReasoningConfig {
             effort: Some(effort.as_str().to_string()),
             summary: Some(if effort.is_none() {
@@ -324,6 +331,7 @@ impl PureCore {
                 last_content = content;
                 last_reasoning_content = reasoning_content;
                 session_message_count = session.messages().len();
+                completed_with_assistant_response = true;
                 break;
             }
 
@@ -517,6 +525,122 @@ impl PureCore {
 
             session_message_count = session.messages().len();
             messages = session.messages().to_vec();
+        }
+
+        if !completed_with_assistant_response {
+            if is_cancelled(&options) {
+                return Ok(interrupted_turn_result(
+                    recorder,
+                    &session_id,
+                    request.mode,
+                    last_content,
+                    last_reasoning_content,
+                    last_model,
+                    total_usage,
+                    session_message_count,
+                    cancellation_reason(),
+                ));
+            }
+
+            let inference_id = format!("{session_id}-inf-final");
+            recorder.record_trace_only(TraceEventKind::InferenceStarted {
+                turn_id: session_id.clone(),
+                inference_id: inference_id.clone(),
+                model: model.clone(),
+            });
+
+            let completion_request = CompletionRequest {
+                model: model.clone(),
+                instructions: Some(format!(
+                    "{instructions}\n\n请基于当前会话中已有的工具结果给出最终回答。不要再调用工具。"
+                )),
+                messages: session.messages().to_vec(),
+                tools: Vec::new(),
+                tool_choice: "none".to_string(),
+                parallel_tool_calls: false,
+                temperature: None,
+                max_tokens: None,
+                reasoning: reasoning.clone(),
+                stream: true,
+            };
+
+            let response_result = match &cancellation_token {
+                Some(token) => {
+                    tokio::select! {
+                        result = provider.stream_complete(completion_request, recorder.sender().clone()) => result,
+                        _ = token.cancelled() => {
+                            return Ok(interrupted_turn_result(
+                                recorder,
+                                &session_id,
+                                request.mode,
+                                last_content,
+                                last_reasoning_content,
+                                last_model,
+                                total_usage,
+                                session.messages().len(),
+                                cancellation_reason(),
+                            ));
+                        }
+                    }
+                }
+                None => {
+                    provider
+                        .stream_complete(completion_request, recorder.sender().clone())
+                        .await
+                }
+            };
+            let response = match response_result {
+                Ok(response) => response,
+                Err(_) if is_cancelled(&options) => {
+                    return Ok(interrupted_turn_result(
+                        recorder,
+                        &session_id,
+                        request.mode,
+                        last_content,
+                        last_reasoning_content,
+                        last_model,
+                        total_usage,
+                        session.messages().len(),
+                        cancellation_reason(),
+                    ));
+                }
+                Err(error) => {
+                    recorder.record_trace_only(TraceEventKind::TurnFailed {
+                        turn_id: session_id.clone(),
+                        error: error.to_string(),
+                    });
+                    return Err(error);
+                }
+            };
+
+            recorder.record_trace_only(TraceEventKind::InferenceCompleted {
+                turn_id: session_id.clone(),
+                inference_id,
+                usage: TokenUsageSnapshot {
+                    prompt_tokens: response.usage.prompt_tokens,
+                    completion_tokens: response.usage.completion_tokens,
+                    cached_prompt_tokens: response.usage.cached_prompt_tokens,
+                    total_tokens: response.usage.prompt_tokens + response.usage.completion_tokens,
+                },
+            });
+
+            total_usage.prompt_tokens += response.usage.prompt_tokens;
+            total_usage.completion_tokens += response.usage.completion_tokens;
+            total_usage.cached_prompt_tokens += response.usage.cached_prompt_tokens;
+            if !response.model.is_empty() {
+                last_model = response.model;
+            }
+
+            let mut content = response.content.unwrap_or_default();
+            if content.trim().is_empty() {
+                content = "已完成工具调用，但模型没有返回最终总结。请重试或提高工具迭代上限。"
+                    .to_string();
+            }
+            let reasoning_content = response.reasoning_content.clone();
+            session.push_assistant_response(content.clone(), reasoning_content.clone());
+            last_content = content;
+            last_reasoning_content = reasoning_content;
+            session_message_count = session.messages().len();
         }
 
         total_usage.total_tokens = total_usage.prompt_tokens + total_usage.completion_tokens;
@@ -777,6 +901,15 @@ fn format_instructions(base: &str, workspace: Option<&str>) -> String {
     }
 }
 
+fn prompt_requires_subagent_dispatch(prompt: &str) -> bool {
+    let lower = prompt.to_ascii_lowercase();
+    let mentions_subagent =
+        lower.contains("subagent") || prompt.contains("子代理") || prompt.contains("分代理");
+    let requests_partition =
+        lower.contains("crate") || prompt.contains("每个") || prompt.contains("分别");
+    mentions_subagent && requests_partition
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -822,6 +955,20 @@ mod tests {
     fn format_instructions_ignores_empty_workspace() {
         assert_eq!(format_instructions("base", Some("")), "base");
         assert_eq!(format_instructions("base", Some("   ")), "base");
+    }
+
+    #[test]
+    fn detects_explicit_subagent_partition_requests() {
+        assert!(prompt_requires_subagent_dispatch(
+            "每个 crate 分一个 subagent 探索，然后介绍整个项目"
+        ));
+        assert!(prompt_requires_subagent_dispatch(
+            "请分别用子代理探索前端和后端"
+        ));
+        assert!(!prompt_requires_subagent_dispatch("介绍整个项目"));
+        assert!(!prompt_requires_subagent_dispatch(
+            "用 bash 看一下每个 crate"
+        ));
     }
 
     #[test]

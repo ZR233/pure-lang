@@ -86,8 +86,10 @@ impl Tool for SubagentTool {
     fn description(&self) -> &str {
         "Delegate a subtask to an independent LLM session. The subagent \
          receives the task, processes it, and returns the result. Use this \
-         to parallelize independent subtasks or isolate context. Optionally \
-         choose one of the fixed model roles."
+         to parallelize independent subtasks or isolate context. When the \
+         user explicitly asks for subagents or per-crate exploration, call \
+         this tool instead of replacing that request with shell/file tools. \
+         Optionally choose one of the fixed model roles."
     }
 
     fn input_schema(&self) -> serde_json::Value {
