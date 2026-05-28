@@ -40,19 +40,6 @@ pub enum AgentEvent {
         name: String,
         reason: String,
     },
-    SubagentStateChanged {
-        id: String,
-        #[serde(rename = "parentId")]
-        parent_id: Option<String>,
-        role: String,
-        task: String,
-        status: SubagentStatus,
-        summary: Option<String>,
-        depth: u32,
-        error: Option<String>,
-        #[serde(rename = "updatedAt")]
-        updated_at: i64,
-    },
     AgentStateChanged {
         id: String,
         path: String,
@@ -84,18 +71,6 @@ pub enum ErrorSeverity {
     Transient,
     Recoverable,
     Fatal,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum SubagentStatus {
-    Queued,
-    AwaitingApproval,
-    Running,
-    AwaitingToolApproval,
-    Succeeded,
-    Failed,
-    Denied,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -428,39 +403,5 @@ mod tests {
         let kind = json.get("kind").unwrap();
 
         assert!(kind.get("exitCode").is_none());
-    }
-
-    #[test]
-    fn serializes_subagent_state_changed_as_camel_case() {
-        let event = AgentEvent::SubagentStateChanged {
-            id: "subagent-1".to_string(),
-            parent_id: Some("parent-1".to_string()),
-            role: "executor".to_string(),
-            task: "inspect workspace".to_string(),
-            status: SubagentStatus::AwaitingToolApproval,
-            summary: Some("running bash".to_string()),
-            depth: 2,
-            error: None,
-            updated_at: 1_779_688_800,
-        };
-
-        let json = serde_json::to_value(event).unwrap();
-
-        assert_eq!(
-            json,
-            serde_json::json!({
-                "subagentStateChanged": {
-                    "id": "subagent-1",
-                    "parentId": "parent-1",
-                    "role": "executor",
-                    "task": "inspect workspace",
-                    "status": "awaitingToolApproval",
-                    "summary": "running bash",
-                    "depth": 2,
-                    "error": null,
-                    "updatedAt": 1779688800
-                }
-            })
-        );
     }
 }

@@ -14,7 +14,7 @@ use crate::dto::{
 use crate::events::drain_events;
 use crate::mappers::{
     agent_event_dtos, config_dto, load_session_runtime_dto, message_dtos, project_dtos,
-    provider_settings_to_edit, session_dtos, subagent_event_dtos, trace_events_to_timeline_items,
+    provider_settings_to_edit, session_dtos, trace_events_to_timeline_items,
     turn_result_status_label,
 };
 use crate::state::{AppState, CommandError, CommandResult};
@@ -32,7 +32,6 @@ pub async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Boots
     let mut sessions = Vec::new();
     let mut selected_session_id = None;
     let mut messages = Vec::new();
-    let mut subagent_events = Vec::new();
     let mut agent_events = Vec::new();
 
     if let Some(project) = projects.first() {
@@ -41,11 +40,6 @@ pub async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Boots
         if let Some(session) = sessions.first() {
             selected_session_id = Some(session.id.clone());
             messages = state.studio.store().load_messages(&session.id).await?;
-            subagent_events = state
-                .studio
-                .store()
-                .list_subagent_events(&session.id)
-                .await?;
             agent_events = state.studio.store().list_agent_events(&session.id).await?;
         }
     }
@@ -60,7 +54,6 @@ pub async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Boots
         sessions: session_dtos(sessions),
         selected_session_id,
         messages: message_dtos(messages),
-        subagent_events: subagent_event_dtos(subagent_events),
         agent_events: agent_event_dtos(agent_events),
         session_runtime,
         config: config_dto(state.studio.config_store())?,
@@ -106,7 +99,6 @@ pub async fn create_session(
         session_id: session.id.clone(),
         sessions: session_dtos(sessions),
         messages: Vec::new(),
-        subagent_events: Vec::new(),
         agent_events: Vec::new(),
         session_runtime: Some(load_session_runtime_dto(&state.studio, &session.id).await?),
     })
@@ -118,18 +110,12 @@ pub async fn select_session(
     state: State<'_, AppState>,
 ) -> CommandResult<SessionSelectionDto> {
     let messages = state.studio.store().load_messages(&session_id).await?;
-    let subagent_events = state
-        .studio
-        .store()
-        .list_subagent_events(&session_id)
-        .await?;
     let agent_events = state.studio.store().list_agent_events(&session_id).await?;
     Ok(SessionSelectionDto {
         session_runtime: Some(load_session_runtime_dto(&state.studio, &session_id).await?),
         session_id,
         sessions: Vec::new(),
         messages: message_dtos(messages),
-        subagent_events: subagent_event_dtos(subagent_events),
         agent_events: agent_event_dtos(agent_events),
     })
 }
@@ -197,13 +183,6 @@ pub async fn run_prompt(
                 session_id: session_id.clone(),
                 messages: message_dtos(outcome.messages),
                 sessions: session_dtos(sessions),
-                subagent_events: subagent_event_dtos(
-                    state
-                        .studio
-                        .store()
-                        .list_subagent_events(&session_id)
-                        .await?,
-                ),
                 agent_events: agent_event_dtos(
                     state.studio.store().list_agent_events(&session_id).await?,
                 ),
@@ -364,16 +343,6 @@ async fn select_project_data(
         Some(session_id) => state.studio.store().load_messages(session_id).await?,
         None => Vec::new(),
     };
-    let subagent_events = match &selected_session_id {
-        Some(session_id) => {
-            state
-                .studio
-                .store()
-                .list_subagent_events(session_id)
-                .await?
-        }
-        None => Vec::new(),
-    };
     let agent_events = match &selected_session_id {
         Some(session_id) => state.studio.store().list_agent_events(session_id).await?,
         None => Vec::new(),
@@ -388,7 +357,6 @@ async fn select_project_data(
         sessions: session_dtos(sessions),
         selected_session_id,
         messages: message_dtos(messages),
-        subagent_events: subagent_event_dtos(subagent_events),
         agent_events: agent_event_dtos(agent_events),
         session_runtime,
     })

@@ -31,21 +31,6 @@ pub struct ToolApprovalRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SubagentEventRecord {
-    pub event_id: String,
-    pub session_id: String,
-    pub subagent_id: String,
-    pub parent_id: Option<String>,
-    pub role: String,
-    pub task: String,
-    pub status: String,
-    pub summary: Option<String>,
-    pub depth: i32,
-    pub error: Option<String>,
-    pub created_at: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentEventRecord {
     pub event_id: String,
     pub session_id: String,

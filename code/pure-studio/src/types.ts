@@ -42,32 +42,6 @@ export type ChatItem =
   | { kind: "message"; message: ChatMessage; key: string }
   | { kind: "tool_call"; toolCall: TrackedToolCall; key: string };
 
-export type SubagentStatus =
-  | "queued"
-  | "awaitingApproval"
-  | "running"
-  | "awaitingToolApproval"
-  | "succeeded"
-  | "failed"
-  | "denied";
-
-export type SubagentActivity = {
-  eventId: string;
-  id: string;
-  parentId?: string | null;
-  role: string;
-  task: string;
-  status: SubagentStatus;
-  summary?: string | null;
-  depth: number;
-  error?: string | null;
-  updatedAt: number;
-};
-
-export type SubagentEventPayload = Omit<SubagentActivity, "eventId"> & {
-  eventId?: string;
-};
-
 export type AgentStatus =
   | "queued"
   | "running"
@@ -264,7 +238,6 @@ export type BootstrapPayload = {
   sessions: SessionRecord[];
   selectedSessionId?: string | null;
   messages: ChatMessage[];
-  subagentEvents: SubagentActivity[];
   agentEvents: AgentActivity[];
   sessionRuntime?: SessionRuntime | null;
   config: ConfigPayload;
@@ -276,7 +249,6 @@ export type ProjectSelectionPayload = {
   sessions: SessionRecord[];
   selectedSessionId?: string | null;
   messages: ChatMessage[];
-  subagentEvents: SubagentActivity[];
   agentEvents: AgentActivity[];
   sessionRuntime?: SessionRuntime | null;
 };
@@ -285,7 +257,6 @@ export type SessionSelectionPayload = {
   sessionId: string;
   sessions: SessionRecord[];
   messages: ChatMessage[];
-  subagentEvents: SubagentActivity[];
   agentEvents: AgentActivity[];
   sessionRuntime?: SessionRuntime | null;
 };
@@ -294,7 +265,6 @@ export type RunPromptResponse = {
   sessionId: string;
   sessions: SessionRecord[];
   messages: ChatMessage[];
-  subagentEvents: SubagentActivity[];
   agentEvents: AgentActivity[];
   sessionRuntime: SessionRuntime;
   timelineItems: TimelineItem[];
@@ -321,7 +291,6 @@ export type AgentEvent =
     }
   | { toolApprovalGranted: { id: string; name: string } }
   | { toolApprovalDenied: { id: string; name: string; reason: string } }
-  | { subagentStateChanged: SubagentEventPayload }
   | { agentStateChanged: AgentActivityPayload }
   | "turnStarted"
   | { turnInterrupted: { reason: string } }
@@ -339,7 +308,7 @@ export type ToolApprovalRequest = {
   name: string;
   arguments: unknown;
   workingDirectory?: string | null;
-  parentSubagentId?: string | null;
+  parentAgentId?: string | null;
 };
 
 export type ToolApprovalResolved = {

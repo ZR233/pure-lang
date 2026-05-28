@@ -4,8 +4,7 @@ use pl_protocol::{AgentStatus, Message, MessageContent, MessageRole};
 use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::records::{
-    AgentEventRecord, ProjectRecord, SessionRecord, SessionRuntimeRecord, SubagentEventRecord,
-    TraceEventRecord,
+    AgentEventRecord, ProjectRecord, SessionRecord, SessionRuntimeRecord, TraceEventRecord,
 };
 
 pub fn project_record(model: entities::project::Model) -> ProjectRecord {
@@ -24,22 +23,6 @@ pub fn session_record(model: entities::session::Model) -> SessionRecord {
         title: model.title,
         mode: model.mode,
         updated_at: model.updated_at,
-    }
-}
-
-pub fn subagent_event_record(model: entities::subagent_event::Model) -> SubagentEventRecord {
-    SubagentEventRecord {
-        event_id: model.id,
-        session_id: model.session_id,
-        subagent_id: model.subagent_id,
-        parent_id: model.parent_id,
-        role: model.role,
-        task: model.task,
-        status: model.status,
-        summary: model.summary,
-        depth: model.depth,
-        error: model.error,
-        created_at: model.created_at,
     }
 }
 

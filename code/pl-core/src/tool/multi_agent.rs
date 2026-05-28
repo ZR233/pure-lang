@@ -1,14 +1,14 @@
 use std::path::PathBuf;
 
 use pl_model::SharedModelProvider;
-use pl_protocol::{AgentEvent, AgentStatus, PureError, SubagentStatus};
+use pl_protocol::{AgentEvent, AgentStatus, PureError};
 use serde::{Deserialize, Serialize};
 
 use super::truncation::{OutputTruncation, TruncatedOutput};
 use super::{SubagentContext, Tool, ToolContext, ToolInput, ToolOutput};
 use crate::agent::{AgentRecord, AgentSpawnInput, MessageDeliveryMode};
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
-use crate::core::{compact_text, emit_subagent_state};
+use crate::core::compact_text;
 use crate::session::CoreSession;
 use crate::turn::{CompileMode, TurnResultStatus};
 use crate::{AgentControl, AgentPath, PureCore};
@@ -215,7 +215,6 @@ impl Tool for SpawnAgentTool {
                     error: "spawned agent disappeared".to_string(),
                 })?;
             emit_agent_record(&context.event_tx, &record);
-            emit_subagent_compat(&context.event_tx, &record, SubagentStatus::Queued);
 
             let run = AgentRunConfig {
                 provider: self.provider.clone(),
@@ -233,6 +232,7 @@ impl Tool for SpawnAgentTool {
                 agent_path: handle.path.clone(),
                 role,
                 message: args.message,
+                max_tool_iterations: None,
             };
             tokio::spawn(run_agent_turn(run));
 
@@ -411,6 +411,7 @@ impl Tool for FollowupTaskTool {
                     agent_path: record.path,
                     role: record.role,
                     message,
+                    max_tool_iterations: None,
                 };
                 tokio::spawn(run_agent_turn(run));
             }
@@ -459,7 +460,6 @@ impl Tool for CloseAgentTool {
                 .close_agent(&current_agent_path(&context), &args.target)
                 .await?;
             emit_agent_record(&context.event_tx, &record);
-            emit_subagent_compat(&context.event_tx, &record, SubagentStatus::Failed);
             json_output(MessageResult {
                 target: record.path,
                 status: record.status,
@@ -513,22 +513,23 @@ fn message_schema() -> serde_json::Value {
     })
 }
 
-struct AgentRunConfig {
-    provider: SharedModelProvider,
-    reasoning_effort: Option<ReasoningEffort>,
-    config: Option<PureConfig>,
-    workspace_instructions: Option<String>,
-    workspace_root: PathBuf,
-    options: crate::TurnOptions,
-    agent_control: AgentControl,
-    event_tx: pl_protocol::AgentEventSender,
-    agent_id: String,
-    agent_path: String,
-    role: String,
-    message: String,
+pub(super) struct AgentRunConfig {
+    pub provider: SharedModelProvider,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub config: Option<PureConfig>,
+    pub workspace_instructions: Option<String>,
+    pub workspace_root: PathBuf,
+    pub options: crate::TurnOptions,
+    pub agent_control: AgentControl,
+    pub event_tx: pl_protocol::AgentEventSender,
+    pub agent_id: String,
+    pub agent_path: String,
+    pub role: String,
+    pub message: String,
+    pub max_tool_iterations: Option<usize>,
 }
 
-async fn run_agent_turn(config: AgentRunConfig) {
+pub(super) async fn run_agent_turn(config: AgentRunConfig) {
     let Some(record) = config
         .agent_control
         .update_status(&config.agent_id, AgentStatus::Running, None, None)
@@ -537,7 +538,6 @@ async fn run_agent_turn(config: AgentRunConfig) {
         return;
     };
     emit_agent_record(&config.event_tx, &record);
-    emit_subagent_compat(&config.event_tx, &record, SubagentStatus::Running);
 
     let role = ModelRole::from_key(&config.role).unwrap_or(ModelRole::Executor);
     let core_result = match &config.config {
@@ -576,6 +576,9 @@ async fn run_agent_turn(config: AgentRunConfig) {
         .await
         .unwrap_or_else(CoreSession::new);
     let mut request = crate::turn::TurnRequest::new(config.message.clone(), CompileMode::Auto);
+    if let Some(max) = config.max_tool_iterations {
+        request = request.with_max_tool_iterations(max);
+    }
     if let Some(instructions) = config.workspace_instructions.clone() {
         request = request.with_workspace_instructions(instructions);
     }
@@ -611,12 +614,6 @@ async fn run_agent_turn(config: AgentRunConfig) {
                 .await
             {
                 emit_agent_record(&config.event_tx, &record);
-                let compat_status = match status {
-                    AgentStatus::Completed => SubagentStatus::Succeeded,
-                    AgentStatus::Interrupted | AgentStatus::Failed => SubagentStatus::Failed,
-                    _ => SubagentStatus::Running,
-                };
-                emit_subagent_compat(&config.event_tx, &record, compat_status);
             }
         }
         Err(error) => {
@@ -632,7 +629,6 @@ async fn mark_agent_failed(config: &AgentRunConfig, error: String) {
         .await
     {
         emit_agent_record(&config.event_tx, &record);
-        emit_subagent_compat(&config.event_tx, &record, SubagentStatus::Failed);
     }
 }
 
@@ -649,7 +645,7 @@ fn role_key(role: Option<&str>) -> Result<String, PureError> {
         })
 }
 
-fn current_agent_path(context: &ToolContext) -> String {
+pub(super) fn current_agent_path(context: &ToolContext) -> String {
     context
         .active_subagent
         .as_ref()
@@ -657,7 +653,7 @@ fn current_agent_path(context: &ToolContext) -> String {
         .unwrap_or_else(|| AgentPath::ROOT.to_string())
 }
 
-fn emit_agent_record(event_tx: &pl_protocol::AgentEventSender, record: &AgentRecord) {
+pub(super) fn emit_agent_record(event_tx: &pl_protocol::AgentEventSender, record: &AgentRecord) {
     let _ = event_tx.send(AgentEvent::AgentStateChanged {
         id: record.id.clone(),
         path: record.path.clone(),
@@ -670,28 +666,6 @@ fn emit_agent_record(event_tx: &pl_protocol::AgentEventSender, record: &AgentRec
         error: record.error.clone(),
         updated_at: record.updated_at,
     });
-}
-
-fn emit_subagent_compat(
-    event_tx: &pl_protocol::AgentEventSender,
-    record: &AgentRecord,
-    status: SubagentStatus,
-) {
-    let subagent = SubagentContext {
-        id: record.id.clone(),
-        parent_id: record.parent_path.clone(),
-        agent_path: Some(record.path.clone()),
-        role: record.role.clone(),
-        task: compact_text(&record.task),
-        depth: record.depth,
-    };
-    emit_subagent_state(
-        event_tx,
-        &subagent,
-        status,
-        record.summary.as_ref().map(|summary| compact_text(summary)),
-        record.error.clone(),
-    );
 }
 
 fn invalid_spawn_input(error: serde_json::Error) -> PureError {

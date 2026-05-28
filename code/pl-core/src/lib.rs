@@ -37,12 +37,12 @@ pub use pl_model::{InputModality, TruncationMode};
 pub use pl_protocol::{
     AgentEvent, AgentEventReceiver, AgentEventSender, ContentPart, ContentPartType, ErrorSeverity,
     Message, MessageContent, MessageRole, OutputStream, PermissionLevel, PipelineStage, PureError,
-    Result, SubagentStatus, TokenUsageSnapshot, TraceEvent, TraceEventKind,
+    Result, TokenUsageSnapshot, TraceEvent, TraceEventKind,
 };
 pub use session::CoreSession;
 pub use studio::{
     AgentEventRecord as StudioAgentEventRecord, ProjectRecord, SessionRecord, SessionRuntimeRecord,
-    StudioPromptOutcome, StudioRuntime, StudioStore, SubagentEventRecord, ToolApprovalRecord,
+    StudioPromptOutcome, StudioRuntime, StudioStore, ToolApprovalRecord,
 };
 pub use tool::{
     BashInput, BashTool, OutputTruncation, SubagentContext, SubagentInput, SubagentTool, Tool,

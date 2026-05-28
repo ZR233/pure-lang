@@ -9,7 +9,7 @@ mod store_support;
 
 pub use records::{
     AgentEventRecord, ProjectRecord, SessionRecord, SessionRuntimeRecord, StudioPromptOutcome,
-    SubagentEventRecord, ToolApprovalRecord, TraceEventRecord,
+    ToolApprovalRecord, TraceEventRecord,
 };
 pub use runtime::StudioRuntime;
 pub use store::StudioStore;
@@ -89,55 +89,6 @@ mod tests {
             })
             .await
             .unwrap();
-    }
-
-    #[tokio::test]
-    async fn records_subagent_events_in_session_order() {
-        let store = StudioStore::open_memory().await.unwrap();
-        let project = store.upsert_project("C:/work/alpha").await.unwrap();
-        let session = store
-            .create_session(&project.id, "Build app", CompileMode::Auto)
-            .await
-            .unwrap();
-
-        store
-            .record_subagent_event(SubagentEventRecord {
-                event_id: "event-1".to_string(),
-                session_id: session.id.clone(),
-                subagent_id: "subagent-1".to_string(),
-                parent_id: None,
-                role: "executor".to_string(),
-                task: "inspect".to_string(),
-                status: "running".to_string(),
-                summary: None,
-                depth: 1,
-                error: None,
-                created_at: 10,
-            })
-            .await
-            .unwrap();
-        store
-            .record_subagent_event(SubagentEventRecord {
-                event_id: "event-2".to_string(),
-                session_id: session.id.clone(),
-                subagent_id: "subagent-1".to_string(),
-                parent_id: None,
-                role: "executor".to_string(),
-                task: "inspect".to_string(),
-                status: "succeeded".to_string(),
-                summary: Some("done".to_string()),
-                depth: 1,
-                error: None,
-                created_at: 11,
-            })
-            .await
-            .unwrap();
-
-        let events = store.list_subagent_events(&session.id).await.unwrap();
-
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0].status, "running");
-        assert_eq!(events[1].summary.as_deref(), Some("done"));
     }
 
     #[tokio::test]

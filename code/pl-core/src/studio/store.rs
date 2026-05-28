@@ -12,13 +12,12 @@ use crate::studio::entities;
 use crate::studio::ids::{new_id, new_trace_event_id, unix_seconds};
 use crate::studio::mappers::{
     agent_event_record, estimate_cost, message_to_row_parts, project_record, row_to_message,
-    session_record, session_runtime_record, subagent_event_record, trace_event_kind_label,
-    trace_event_record,
+    session_record, session_runtime_record, trace_event_kind_label, trace_event_record,
 };
 use crate::studio::paths::{prepare_database_switch, project_name, sqlite_url};
 use crate::studio::records::{
-    AgentEventRecord, ProjectRecord, SessionRecord, SessionRuntimeRecord, SubagentEventRecord,
-    ToolApprovalRecord, TraceEventRecord,
+    AgentEventRecord, ProjectRecord, SessionRecord, SessionRuntimeRecord, ToolApprovalRecord,
+    TraceEventRecord,
 };
 use crate::studio::store_support::{
     configure_sqlite, insert_message_with_tx, non_empty_title, run_migrations,
@@ -261,37 +260,6 @@ impl StudioStore {
         .insert(&self.db)
         .await?;
         Ok(())
-    }
-
-    pub async fn record_subagent_event(&self, record: SubagentEventRecord) -> Result<()> {
-        use entities::subagent_event;
-        subagent_event::ActiveModel {
-            id: Set(record.event_id),
-            session_id: Set(record.session_id),
-            subagent_id: Set(record.subagent_id),
-            parent_id: Set(record.parent_id),
-            role: Set(record.role),
-            task: Set(record.task),
-            status: Set(record.status),
-            summary: Set(record.summary),
-            depth: Set(record.depth),
-            error: Set(record.error),
-            created_at: Set(record.created_at),
-        }
-        .insert(&self.db)
-        .await?;
-        Ok(())
-    }
-
-    pub async fn list_subagent_events(&self, session_id: &str) -> Result<Vec<SubagentEventRecord>> {
-        use entities::subagent_event;
-        let rows = subagent_event::Entity::find()
-            .filter(subagent_event::Column::SessionId.eq(session_id.to_string()))
-            .order_by_asc(subagent_event::Column::CreatedAt)
-            .order_by_asc(subagent_event::Column::Id)
-            .all(&self.db)
-            .await?;
-        Ok(rows.into_iter().map(subagent_event_record).collect())
     }
 
     pub async fn record_agent_event(&self, record: AgentEventRecord) -> Result<()> {
