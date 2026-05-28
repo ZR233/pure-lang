@@ -70,6 +70,10 @@ const en = {
     failed: "Failed",
   },
 
+  timeline: {
+    turn: "Turn",
+  },
+
   roles: {
     explorer: "Explorer",
     planner: "Planner",

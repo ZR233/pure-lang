@@ -376,6 +376,7 @@ export function SessionStatusBar({
   const contextWidth = `${contextPercent(runtime)}%`;
   const skills = runtime?.activeSkills ?? [];
   const mcpServers = runtime?.activeMcpServers ?? [];
+  const capabilityCount = skills.length;
 
   return (
     <div className="session-status-bar" aria-label={t("statusBar.label")}>
@@ -430,7 +431,7 @@ export function SessionStatusBar({
           trigger={
             <button className="status-item status-count" type="button">
               <Boxes size={14} />
-              <strong>{t("statusBar.capabilities")} {skills.length + mcpServers.length}</strong>
+              <strong>{t("statusBar.capabilities")} {capabilityCount}</strong>
               <ChevronDown size={13} />
             </button>
           }

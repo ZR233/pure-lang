@@ -17,7 +17,7 @@ export const previewProjects: ProjectRecord[] = [
   {
     id: "pure-lang",
     name: "pure-lang",
-    path: "C:\\Users\\zhoudongsheng\\Documents\\opensource\\pure-lang",
+    path: "D:\\Users\\zrufo\\Documents\\opensource\\pure-lang\\code\\pure-studio\\src-tauri",
     updatedAt: 1779688800,
   },
 ];
@@ -26,7 +26,7 @@ export const previewSessions: SessionRecord[] = [
   {
     id: "preview-session",
     projectId: "pure-lang",
-    title: "介绍项目",
+    title: "分析项目架构",
     mode: "manual",
     updatedAt: 1779688800,
   },
@@ -70,7 +70,7 @@ export const previewSessionRuntime: SessionRuntime = {
   sessionId: "preview-session",
   model: "deepseek-v4-flash",
   contextWindow: 1_000_000,
-  latestContextTokens: 128_000,
+  latestContextTokens: 42_600,
   promptTokens: 84_200,
   completionTokens: 3_100,
   cachedPromptTokens: 51_800,

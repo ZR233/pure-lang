@@ -372,7 +372,7 @@
 }
 
 button.status-item {
-  cursor: default;
+  cursor: pointer;
 }
 
 .status-item strong {
@@ -882,29 +882,29 @@ button.status-item {
 /* Unified conversation timeline */
 .conversation-timeline {
   position: relative;
-  width: min(100%, 1180px);
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 4px 0 28px 30px;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 4px 0 28px 28px;
 }
 
 .conversation-timeline::before {
   position: absolute;
   top: 8px;
   bottom: 0;
-  left: 10px;
+  left: 5px;
   width: 1px;
-  background: #dce6ef;
+  background: #d9e2eb;
   content: "";
 }
 
 .timeline-entry {
   position: relative;
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr);
   gap: 10px;
   min-width: 0;
-  margin: 0 0 16px -30px;
+  margin: 0 0 12px -28px;
 }
 
 .timeline-node {
@@ -912,38 +912,43 @@ button.status-item {
   z-index: 1;
   display: inline-grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
-  margin-top: 2px;
-  border: 1px solid #c9d8e6;
+  justify-self: center;
+  width: 9px;
+  height: 9px;
+  margin-top: 8px;
+  border: 0;
   border-radius: 50%;
-  color: #668097;
-  background: #ffffff;
+  color: transparent;
+  background: #a3adb8;
+}
+
+.timeline-node svg {
+  display: none;
 }
 
 .timeline-entry-message.role-user .timeline-node {
-  border-color: #90bdd4;
-  color: #0b6ea8;
-  background: #edf7fc;
+  background: #2f8cf0;
+  box-shadow: 0 0 0 3px #e4f1ff;
 }
 
 .timeline-entry-tool .timeline-node,
 .timeline-entry-subagent .timeline-node {
-  border-color: #9ccfb4;
-  color: #238153;
-  background: #eefaf3;
+  background: #33bd76;
+}
+
+.timeline-entry-subagent .timeline-node {
+  background: #2f8cf0;
+  box-shadow: 0 0 0 3px #e4f1ff;
 }
 
 .timeline-entry-thought .timeline-node,
 .timeline-entry-trace .timeline-node {
-  border-color: #c4ced8;
-  color: #6f7d8b;
-  background: #f8fafc;
+  background: #9aa4af;
 }
 
 .timeline-entry-card {
   min-width: 0;
-  padding: 0 0 16px;
+  padding: 0 0 12px;
   border-bottom: 1px solid #e5ebf2;
 }
 
@@ -952,7 +957,7 @@ button.status-item {
   align-items: center;
   gap: 8px;
   min-width: 0;
-  margin-bottom: 7px;
+  margin-bottom: 6px;
   color: #28374d;
   font-size: 13px;
 }
@@ -991,34 +996,40 @@ button.status-item {
 }
 
 .timeline-entry-message.role-user .timeline-entry-card {
-  padding: 12px 14px;
-  border: 1px solid #d7e5f0;
+  padding: 13px 14px;
+  border: 1px solid #d8e5ef;
   border-radius: 8px;
-  background: #f8fbfd;
+  background: #fbfdff;
 }
 
 .timeline-entry-tool .timeline-entry-card,
 .timeline-entry-subagent .timeline-entry-card {
-  padding: 10px 12px;
-  border: 1px solid #dce7ef;
-  border-left: 3px solid #88afc3;
-  border-radius: 8px;
-  background: #fbfdff;
+  padding: 0 0 12px;
+  border: 0;
+  border-bottom: 1px solid #e7edf4;
+  border-radius: 0;
+  background: transparent;
+}
+
+.timeline-entry-subagent .timeline-entry-card {
+  padding: 0 0 12px;
+  border: 0;
+  border-bottom: 1px solid #e7edf4;
+  border-radius: 0;
+  background: transparent;
 }
 
 .timeline-entry-subagent.status-running .timeline-entry-card,
 .timeline-entry-subagent.status-awaitingToolApproval .timeline-entry-card,
 .timeline-entry-subagent.status-awaitingApproval .timeline-entry-card {
-  border-left-color: #2c9b6c;
-  background: #f7fcf9;
+  background: transparent;
 }
 
 .timeline-entry-subagent.status-failed .timeline-entry-card,
 .timeline-entry-subagent.status-denied .timeline-entry-card,
 .timeline-entry-trace.status-failed .timeline-entry-card,
 .timeline-entry-trace.status-interrupted .timeline-entry-card {
-  border-left-color: #c44d58;
-  background: #fff8f8;
+  background: transparent;
 }
 
 .timeline-thought {
@@ -1028,7 +1039,7 @@ button.status-item {
 .timeline-thought summary {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   list-style: none;
   cursor: pointer;
   font-size: 13px;
@@ -1047,21 +1058,43 @@ button.status-item {
 .timeline-code {
   overflow: auto;
   max-height: 260px;
-  margin: 8px 0 0;
-  padding: 9px 10px;
-  border-radius: 6px;
+  margin: 4px 0 0;
+  padding: 0;
+  border-radius: 0;
   color: #314056;
-  background: #f1f5f8;
+  background: transparent;
   font-size: 12px;
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
+.timeline-inline-code {
+  min-width: 0;
+  overflow: hidden;
+  color: #4f5f73;
+  font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-thought pre {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f4f7fa;
+}
+
 .timeline-task {
-  margin: 0 0 6px;
+  margin: 0 0 5px;
   color: #29384a;
   font-size: 13px;
+}
+
+.timeline-entry-subagent .timeline-task {
+  margin: 6px 0 0;
 }
 
 .timeline-result {
@@ -1091,12 +1124,25 @@ button.status-item {
   font-weight: 800;
 }
 
+.timeline-entry-tool .timeline-badge {
+  margin-left: auto;
+}
+
 .timeline-badge.status-completed,
 .timeline-badge.status-result_ready,
 .timeline-badge.status-approved,
 .timeline-badge.status-succeeded {
   color: #1e7a4e;
   background: #e9f8ef;
+}
+
+.timeline-entry-tool .timeline-badge.status-completed,
+.timeline-entry-tool .timeline-badge.status-result_ready,
+.timeline-entry-tool .timeline-badge.status-approved {
+  padding: 0;
+  color: #6f7f92;
+  background: transparent;
+  font-weight: 700;
 }
 
 .timeline-badge.status-running,
@@ -1117,7 +1163,7 @@ button.status-item {
 .session-status-bar {
   justify-content: space-between;
   gap: 16px;
-  min-height: 50px;
+  min-height: 48px;
 }
 
 .status-left {
@@ -1135,11 +1181,11 @@ button.status-item {
   align-items: center;
   gap: 8px;
   min-height: 30px;
-  padding: 5px 10px;
-  border: 1px solid #d9e3ed;
-  border-radius: 8px;
+  padding: 5px 0;
+  border: 0;
+  border-radius: 0;
   color: #53657b;
-  background: #ffffff;
+  background: transparent;
 }
 
 .turn-status-indicator strong {
@@ -1159,7 +1205,7 @@ button.status-item {
 .turn-status-indicator.phase-approval {
   border-color: #b9dceb;
   color: #0b6ea8;
-  background: #f1f9fd;
+  background: transparent;
 }
 
 .turn-status-indicator.phase-stopping,
@@ -1167,7 +1213,7 @@ button.status-item {
 .turn-status-indicator.phase-failed {
   border-color: #efc7cd;
   color: #b8424c;
-  background: #fff8f8;
+  background: transparent;
 }
 
 .status-subagent-popover {
@@ -1256,6 +1302,25 @@ button.status-item {
   background: #bb3f4c;
 }
 
+.send-button {
+  min-width: 112px;
+  min-height: 76px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.send-button:disabled {
+  opacity: 1;
+  border-color: #2f80ed;
+  color: #ffffff;
+  background: #2f80ed;
+}
+
+.send-button.stop-button:disabled {
+  border-color: #e1b0b7;
+  background: #d98b95;
+}
+
 .send-button.stop-button:hover:not(:disabled) {
   background: #a93743;
 }
@@ -1283,5 +1348,35 @@ button.status-item {
 
   .conversation-timeline {
     padding-left: 26px;
+  }
+}
+
+@media (max-width: 640px) {
+  .conversation-header {
+    padding: 16px;
+  }
+
+  .conversation-header h1,
+  .settings-header h1 {
+    font-size: 20px;
+  }
+
+  .message-stream {
+    padding: 16px;
+  }
+
+  .composer {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 12px 16px 14px;
+  }
+
+  .composer textarea {
+    min-height: 74px;
+  }
+
+  .send-button {
+    width: 100%;
+    min-height: 46px;
   }
 }

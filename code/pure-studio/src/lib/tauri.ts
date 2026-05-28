@@ -25,6 +25,7 @@ type TauriWindow = Window & {
 };
 
 let previewConfig = createPreviewConfig();
+const previewInterruptedSessions = new Set<string>();
 
 function clone<T>(value: T): T {
   if (typeof structuredClone === "function") {
@@ -148,8 +149,11 @@ export function selectSession(sessionId: string) {
 
 export function runPrompt(sessionId: string, prompt: string) {
   if (!isTauriRuntime()) {
-    return Promise.resolve(
-      clone({
+    previewInterruptedSessions.delete(sessionId);
+    return new Promise<RunPromptResponse>((resolve) => {
+      window.setTimeout(() => {
+        const interrupted = previewInterruptedSessions.delete(sessionId);
+        resolve(clone({
         sessionId,
         sessions: previewSessions,
         messages: [
@@ -164,8 +168,8 @@ export function runPrompt(sessionId: string, prompt: string) {
             parentId: null,
             role: "executor",
             task: prompt,
-            status: "succeeded" as const,
-            summary: "预览运行已完成。",
+            status: interrupted ? "denied" as const : "succeeded" as const,
+            summary: interrupted ? "预览运行已停止。" : "预览运行已完成。",
             depth: 1,
             error: null,
             updatedAt: Math.floor(Date.now() / 1000),
@@ -184,7 +188,7 @@ export function runPrompt(sessionId: string, prompt: string) {
             sequence: previewTimelineItems.length + 10,
             timestamp: Math.floor(Date.now() / 1000),
             turnId: "preview-turn-latest",
-            turnStatus: "completed" as const,
+            turnStatus: interrupted ? "interrupted" as const : "completed" as const,
             turnModel: previewSessionRuntime.model,
             turnUsage: {
               promptTokens: 1200,
@@ -194,15 +198,17 @@ export function runPrompt(sessionId: string, prompt: string) {
             },
           },
         ],
-        turnStatus: "completed" as const,
-      }),
-    );
+        turnStatus: interrupted ? "interrupted" as const : "completed" as const,
+        }));
+      }, 900);
+    });
   }
   return invoke<RunPromptResponse>("run_prompt", { sessionId, prompt });
 }
 
 export function stopPrompt(sessionId: string) {
   if (!isTauriRuntime()) {
+    previewInterruptedSessions.add(sessionId);
     return Promise.resolve(
       clone({
         sessionId,
