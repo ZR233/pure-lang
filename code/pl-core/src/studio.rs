@@ -118,6 +118,9 @@ mod tests {
             mode: CompileMode::Auto,
             session_message_count: 2,
             status: crate::turn::TurnResultStatus::Completed,
+            abort_reason: None,
+            budget_limit_kind: None,
+            budget_usage: None,
             trace_events: Vec::new(),
         };
 

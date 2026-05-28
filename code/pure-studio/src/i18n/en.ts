@@ -99,6 +99,7 @@ const en = {
     succeeded: "Succeeded",
     failed: "Failed",
     budgetLimited: "Budget limited",
+    notFound: "Not found",
     denied: "Denied",
     toolCall: "Tool call",
     defaultWorkingDirectory: "(default working directory)",

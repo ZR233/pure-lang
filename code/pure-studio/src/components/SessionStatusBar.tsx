@@ -33,8 +33,10 @@ const turnPhaseKeys: Record<TurnPhase, string> = {
   approval: "turnPhase.approval",
   stopping: "turnPhase.stopping",
   completed: "turnPhase.completed",
+  aborted: "turnPhase.interrupted",
   interrupted: "turnPhase.interrupted",
   budgetLimited: "turnPhase.budgetLimited",
+  errored: "turnPhase.failed",
   failed: "turnPhase.failed",
 };
 
@@ -49,10 +51,10 @@ const agentStatusKeys: Record<AgentStatus, string> = {
   running: "subagent.running",
   waiting: "subagent.awaitingTool",
   completed: "turnPhase.completed",
-  failed: "subagent.failed",
+  errored: "subagent.failed",
   interrupted: "turnPhase.interrupted",
-  budgetLimited: "turnPhase.budgetLimited",
-  closed: "status.done",
+  shutdown: "status.done",
+  notFound: "subagent.notFound",
 };
 
 function formatTokenCount(value?: number | null): string {

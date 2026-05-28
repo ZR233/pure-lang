@@ -276,6 +276,13 @@ impl StudioStore {
             summary: Set(record.summary),
             depth: Set(record.depth),
             error: Set(record.error),
+            reason: Set(record.reason),
+            budget_limit_kind: Set(record
+                .budget_limit_kind
+                .map(|kind| kind.as_str().to_string())),
+            budget_usage_json: Set(record
+                .budget_usage
+                .and_then(|usage| serde_json::to_string(&usage).ok())),
             created_at: Set(record.created_at),
         }
         .insert(&self.db)

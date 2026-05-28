@@ -56,8 +56,10 @@ pub fn agent_event_record(session_id: &str, event: &AgentEvent) -> Option<Studio
             summary,
             depth,
             error,
+            reason,
+            budget_limit_kind,
+            budget_usage,
             updated_at,
-            ..
         } => Some(StudioAgentEventRecord {
             event_id: new_event_id("agent-event"),
             session_id: session_id.to_string(),
@@ -70,6 +72,9 @@ pub fn agent_event_record(session_id: &str, event: &AgentEvent) -> Option<Studio
             summary: summary.clone(),
             depth: *depth as i32,
             error: error.clone(),
+            reason: reason.clone(),
+            budget_limit_kind: *budget_limit_kind,
+            budget_usage: *budget_usage,
             created_at: *updated_at,
         }),
         _ => None,

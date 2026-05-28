@@ -27,6 +27,10 @@ pub fn session_record(model: entities::session::Model) -> SessionRecord {
 }
 
 pub fn agent_event_record(model: entities::agent_event::Model) -> AgentEventRecord {
+    let budget_usage = model
+        .budget_usage_json
+        .as_deref()
+        .and_then(|json| serde_json::from_str(json).ok());
     AgentEventRecord {
         event_id: model.id,
         session_id: model.session_id,
@@ -39,7 +43,26 @@ pub fn agent_event_record(model: entities::agent_event::Model) -> AgentEventReco
         summary: model.summary,
         depth: model.depth,
         error: model.error,
+        reason: model.reason,
+        budget_limit_kind: model
+            .budget_limit_kind
+            .as_deref()
+            .and_then(budget_limit_kind_from_label),
+        budget_usage,
         created_at: model.created_at,
+    }
+}
+
+fn budget_limit_kind_from_label(label: &str) -> Option<pl_protocol::BudgetLimitKind> {
+    match label {
+        "modelStep" => Some(pl_protocol::BudgetLimitKind::ModelStep),
+        "toolCall" => Some(pl_protocol::BudgetLimitKind::ToolCall),
+        "wait" => Some(pl_protocol::BudgetLimitKind::Wait),
+        "wallClock" => Some(pl_protocol::BudgetLimitKind::WallClock),
+        "agentCount" => Some(pl_protocol::BudgetLimitKind::AgentCount),
+        "agentDepth" => Some(pl_protocol::BudgetLimitKind::AgentDepth),
+        "finalization" => Some(pl_protocol::BudgetLimitKind::Finalization),
+        _ => None,
     }
 }
 
@@ -49,11 +72,11 @@ pub fn agent_status_from_label(status: &str) -> AgentStatus {
         "running" => AgentStatus::Running,
         "waiting" => AgentStatus::Waiting,
         "completed" => AgentStatus::Completed,
-        "failed" => AgentStatus::Failed,
+        "errored" => AgentStatus::Errored,
         "interrupted" => AgentStatus::Interrupted,
-        "budgetLimited" => AgentStatus::BudgetLimited,
-        "closed" => AgentStatus::Closed,
-        _ => AgentStatus::Failed,
+        "shutdown" => AgentStatus::Shutdown,
+        "notFound" => AgentStatus::NotFound,
+        _ => AgentStatus::Errored,
     }
 }
 

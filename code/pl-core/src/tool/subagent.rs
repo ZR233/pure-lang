@@ -4,7 +4,9 @@ use pl_model::SharedModelProvider;
 use pl_protocol::{AgentStatus, PureError};
 use serde::{Deserialize, Serialize};
 
-use super::multi_agent::{AgentRunConfig, current_agent_path, emit_agent_record, run_agent_turn};
+use super::multi_agent::{
+    AgentRunConfig, child_agent_options, current_agent_path, emit_agent_record, run_agent_turn,
+};
 use super::truncation::{OutputTruncation, TruncatedOutput};
 use super::{Tool, ToolContext, ToolInput, ToolOutput};
 use crate::agent::AgentSpawnInput;
@@ -134,6 +136,13 @@ impl Tool for SubagentTool {
                 })?;
             emit_agent_record(&context.event_tx, &record);
 
+            let options = child_agent_options(&context.options);
+            if let Some(token) = options.cancellation_token.clone() {
+                context
+                    .agent_control
+                    .attach_cancellation_token(&handle.id, token)
+                    .await;
+            }
             run_agent_turn(AgentRunConfig {
                 provider: self.provider.clone(),
                 reasoning_effort: self.reasoning_effort.clone(),
@@ -143,7 +152,7 @@ impl Tool for SubagentTool {
                     .clone()
                     .or_else(|| self.workspace_instructions.clone()),
                 workspace_root: context.workspace_root.clone(),
-                options: context.options.clone(),
+                options,
                 agent_control: context.agent_control.clone(),
                 event_tx: context.event_tx.clone(),
                 agent_id: handle.id.clone(),
@@ -178,26 +187,29 @@ impl Tool for SubagentTool {
                     exit_code: None,
                     timed_out: false,
                 }),
-                AgentStatus::Interrupted => Err(PureError::ToolExecutionFailed {
-                    tool: "subagent".to_string(),
-                    error: "subagent interrupted by user".to_string(),
-                }),
-                AgentStatus::BudgetLimited => Err(PureError::ToolExecutionFailed {
+                AgentStatus::Interrupted => {
+                    let error = match record.reason.as_deref() {
+                        Some("budgetLimited") => record
+                            .error
+                            .unwrap_or_else(|| "subagent budget limited".to_string()),
+                        _ => "subagent interrupted by user".to_string(),
+                    };
+                    Err(PureError::ToolExecutionFailed {
+                        tool: "subagent".to_string(),
+                        error,
+                    })
+                }
+                AgentStatus::Errored => Err(PureError::ToolExecutionFailed {
                     tool: "subagent".to_string(),
                     error: record
                         .error
-                        .unwrap_or_else(|| "subagent budget limited".to_string()),
-                }),
-                AgentStatus::Failed => Err(PureError::ToolExecutionFailed {
-                    tool: "subagent".to_string(),
-                    error: record
-                        .error
-                        .unwrap_or_else(|| "subagent failed".to_string()),
+                        .unwrap_or_else(|| "subagent errored".to_string()),
                 }),
                 AgentStatus::Queued
                 | AgentStatus::Running
                 | AgentStatus::Waiting
-                | AgentStatus::Closed => Err(PureError::ToolExecutionFailed {
+                | AgentStatus::Shutdown
+                | AgentStatus::NotFound => Err(PureError::ToolExecutionFailed {
                     tool: "subagent".to_string(),
                     error: format!("subagent ended in invalid status: {:?}", record.status),
                 }),

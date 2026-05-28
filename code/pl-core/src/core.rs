@@ -880,6 +880,9 @@ impl PureCore {
             mode: request.mode,
             session_message_count,
             status: TurnResultStatus::Completed,
+            abort_reason: None,
+            budget_limit_kind: None,
+            budget_usage: None,
             trace_events: recorder.drain(),
         })
     }
@@ -951,7 +954,10 @@ fn interrupted_turn_result(
         usage,
         mode,
         session_message_count,
-        status: TurnResultStatus::Interrupted,
+        status: TurnResultStatus::Aborted,
+        abort_reason: Some(crate::turn::TurnAbortReason::Interrupted),
+        budget_limit_kind: None,
+        budget_usage: None,
         trace_events: recorder.drain(),
     }
 }
@@ -986,7 +992,10 @@ fn failed_turn_result(
         usage,
         mode,
         session_message_count,
-        status: TurnResultStatus::Failed,
+        status: TurnResultStatus::Errored,
+        abort_reason: Some(crate::turn::TurnAbortReason::ProviderError),
+        budget_limit_kind: None,
+        budget_usage: None,
         trace_events: recorder.drain(),
     }
 }
@@ -1027,7 +1036,10 @@ fn budget_limited_turn_result(
         usage,
         mode,
         session_message_count,
-        status: TurnResultStatus::BudgetLimited,
+        status: TurnResultStatus::Aborted,
+        abort_reason: Some(crate::turn::TurnAbortReason::BudgetLimited),
+        budget_limit_kind: Some(limit_kind),
+        budget_usage: Some(budget_usage),
         trace_events: recorder.drain(),
     }
 }

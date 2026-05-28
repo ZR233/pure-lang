@@ -16,7 +16,7 @@ mod workspace;
 
 pub use agent::{
     AgentControl, AgentEventRecord, AgentHandle, AgentMailboxMessage, AgentPath, AgentRecord,
-    AgentSpawnInput, AgentStatus, AgentWaitOutcome, MessageDeliveryMode,
+    AgentSpawnInput, AgentStatus, AgentStatusUpdate, AgentWaitOutcome, MessageDeliveryMode,
 };
 pub use config::{
     ConfigPaths, ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProviderConfig,
@@ -52,7 +52,7 @@ pub use tool::{
 pub use trace::TraceRecorder;
 pub use turn::{
     AgentBudget, BudgetPolicy, CompileMode, DEFAULT_MAX_TOOL_ITERATIONS, ToolApprovalCallback,
-    ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest, TurnBudget, TurnOptions,
-    TurnRequest, TurnResult, TurnResultStatus,
+    ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest, TurnAbortReason, TurnBudget,
+    TurnOptions, TurnRequest, TurnResult, TurnResultStatus,
 };
 pub use workspace::{load_workspace_instructions, resolve_workspace_root};

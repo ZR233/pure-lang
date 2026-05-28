@@ -47,10 +47,10 @@ export type AgentStatus =
   | "running"
   | "waiting"
   | "completed"
-  | "failed"
+  | "errored"
   | "interrupted"
-  | "budgetLimited"
-  | "closed";
+  | "shutdown"
+  | "notFound";
 
 export type AgentActivity = {
   eventId: string;
@@ -156,7 +156,7 @@ export type ToolCallStatus2 =
   | "completed"
   | "failed";
 
-export type TurnStatus = "started" | "completed" | "failed" | "interrupted" | "budgetLimited";
+export type TurnStatus = "started" | "completed" | "aborted" | "errored";
 
 export type TurnPhase =
   | "idle"
@@ -167,8 +167,10 @@ export type TurnPhase =
   | "approval"
   | "stopping"
   | "completed"
+  | "aborted"
   | "interrupted"
   | "budgetLimited"
+  | "errored"
   | "failed";
 
 export type UsageSnapshot = {
@@ -279,6 +281,7 @@ export type RunPromptResponse = {
   sessionRuntime: SessionRuntime;
   timelineItems: TimelineItem[];
   turnStatus: TurnStatus;
+  turnAbortReason?: string | null;
 };
 
 export type StopPromptResponse = {

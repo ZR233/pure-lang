@@ -307,10 +307,17 @@ pub fn agent_event_dto(event: StudioAgentEventRecord) -> AgentEventDto {
         status: event.status.as_str().to_string(),
         summary: event.summary,
         depth: event.depth,
-        reason: event.error.clone(),
+        reason: event.reason,
         error: event.error,
-        budget_limit_kind: None,
-        budget_usage: None,
+        budget_limit_kind: event
+            .budget_limit_kind
+            .map(|kind| kind.as_str().to_string()),
+        budget_usage: event.budget_usage.map(|usage| crate::dto::BudgetUsageDto {
+            model_steps: usage.model_steps,
+            tool_calls: usage.tool_calls,
+            wait_calls: usage.wait_calls,
+            elapsed_ms: usage.elapsed_ms,
+        }),
         updated_at: event.created_at,
     }
 }
@@ -334,9 +341,8 @@ pub fn message_dto(message: Message) -> MessageDto {
 pub fn turn_result_status_label(status: TurnResultStatus) -> &'static str {
     match status {
         TurnResultStatus::Completed => "completed",
-        TurnResultStatus::Failed => "failed",
-        TurnResultStatus::Interrupted => "interrupted",
-        TurnResultStatus::BudgetLimited => "budgetLimited",
+        TurnResultStatus::Aborted => "aborted",
+        TurnResultStatus::Errored => "errored",
     }
 }
 
@@ -402,7 +408,7 @@ pub fn trace_event_to_timeline_item(event: &TraceEvent) -> TimelineItemDto {
             tool_result: None,
             inference_model: None,
             inference_usage: None,
-            turn_status: Some("failed".to_string()),
+            turn_status: Some("errored".to_string()),
             turn_model: None,
             turn_usage: None,
         },
@@ -418,7 +424,7 @@ pub fn trace_event_to_timeline_item(event: &TraceEvent) -> TimelineItemDto {
             tool_result: Some(reason.clone()),
             inference_model: None,
             inference_usage: None,
-            turn_status: Some("interrupted".to_string()),
+            turn_status: Some("aborted".to_string()),
             turn_model: None,
             turn_usage: None,
         },
@@ -436,7 +442,7 @@ pub fn trace_event_to_timeline_item(event: &TraceEvent) -> TimelineItemDto {
             tool_result: Some(reason.clone()),
             inference_model: None,
             inference_usage: None,
-            turn_status: Some("budgetLimited".to_string()),
+            turn_status: Some("aborted".to_string()),
             turn_model: None,
             turn_usage: None,
         },

@@ -189,6 +189,10 @@ pub async fn run_prompt(
                 session_runtime: load_session_runtime_dto(&state.studio, &session_id).await?,
                 timeline_items: trace_events_to_timeline_items(&outcome.trace_events),
                 turn_status: turn_result_status_label(outcome.result.status).to_string(),
+                turn_abort_reason: outcome
+                    .result
+                    .abort_reason
+                    .map(|reason| reason.as_str().to_string()),
             };
             let _ = app.emit("studio-prompt-finished", response.clone());
             Ok(response)

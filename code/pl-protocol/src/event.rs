@@ -91,10 +91,10 @@ pub enum AgentStatus {
     Running,
     Waiting,
     Completed,
-    Failed,
+    Errored,
     Interrupted,
-    BudgetLimited,
-    Closed,
+    Shutdown,
+    NotFound,
 }
 
 impl AgentStatus {
@@ -104,17 +104,17 @@ impl AgentStatus {
             Self::Running => "running",
             Self::Waiting => "waiting",
             Self::Completed => "completed",
-            Self::Failed => "failed",
+            Self::Errored => "errored",
             Self::Interrupted => "interrupted",
-            Self::BudgetLimited => "budgetLimited",
-            Self::Closed => "closed",
+            Self::Shutdown => "shutdown",
+            Self::NotFound => "notFound",
         }
     }
 
     pub fn is_final(self) -> bool {
         matches!(
             self,
-            Self::Completed | Self::Failed | Self::Interrupted | Self::BudgetLimited | Self::Closed
+            Self::Completed | Self::Errored | Self::Shutdown | Self::NotFound
         )
     }
 }

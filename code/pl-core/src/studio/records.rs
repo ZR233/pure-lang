@@ -1,4 +1,4 @@
-use pl_protocol::{AgentStatus, Message, TraceEvent};
+use pl_protocol::{AgentStatus, BudgetLimitKind, BudgetUsage, Message, TraceEvent};
 
 use crate::TurnResult;
 
@@ -43,6 +43,9 @@ pub struct AgentEventRecord {
     pub summary: Option<String>,
     pub depth: i32,
     pub error: Option<String>,
+    pub reason: Option<String>,
+    pub budget_limit_kind: Option<BudgetLimitKind>,
+    pub budget_usage: Option<BudgetUsage>,
     pub created_at: i64,
 }
 
