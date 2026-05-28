@@ -1,84 +1,83 @@
-# 03 - 编译流程
+# 03 - 编译流程（方案乙）
 
 ## 3.1 总览
 
-当前编译流程是一个由 `pl-core` 编排的单轮 turn。`pure-studio` 只负责 UI 输入输出：
+方案乙将流程明确分成“桥接层 -> 应用层 -> 领域核心 -> 适配器”：
 
 ```text
-pure-studio UI action
-  → pl-core Studio API
-  → ConfigStore 读取 ~/.pure/config.toml
-  → StudioStore 通过 SeaORM 读取 SQLite 项目和会话消息
-  → TurnRequest + TurnOptions
-  → CoreSession
-  → PureCore
-  → AgentEvent stream
-  → Tauri event
-  → React UI 实时渲染
-  → pl-core StudioStore 持久化消息和按策略产生的工具审批记录
+React action
+  -> Tauri commands
+  -> pl-core application service (StudioRuntime)
+  -> interfaces ports
+  -> infrastructure adapters (sqlite/config/fs/event/tool)
+  -> PureCore turn pipeline
+  -> AgentEvent / TraceEvent
+  -> Tauri event
+  -> reducer action
+  -> UI rendering
 ```
 
-## 3.2 输入
+`main.rs` 不承载流程逻辑，只负责注册。
 
-`pure-studio` 的 UI 操作进入 `pl-core` 前转换为明确类型，例如 `CompileMode`：
+## 3.2 输入与策略
 
-- 默认：`CompileMode::Plan`
-- `--plan`：`CompileMode::Plan`
-- `--auto`：`CompileMode::Auto`
+运行输入统一为新 DTO 契约（camelCase wire）。
 
-`CompileMode` 只影响模型提示词和行为边界，工具可用性由 `PureCore` 已注册的工具集合和 `TurnOptions` 审批策略决定。`Plan` 模式也可以使用工具做探索、读取和验证，但不应执行会修改工作区或外部环境的动作。`Auto` 模式更偏执行导向，可在审批策略允许时使用工具完成更主动的子任务。
+- `compileMode`：`plan | auto`
+- `turnOptions.toolApprovalPolicy`：默认固定 `autoAllow`
+- `prompt`、`sessionId`、`workspaceRoot` 等进入 application service
 
-普通 prompt 默认使用 `ModelRole::Planner`。`RoleConfig` 提供 provider、model 和 effort。配置缺失某个角色时，运行时按默认模型补齐：按配置 key 顺序取首个 provider，并使用该 provider 的 `default_model`。
+策略约束：
 
-## 3.3 核心 turn
+- 方案乙不保留旧命令别名和旧字段兜底
+- `ToolApprovalPolicy::AutoAllow` 为默认且主路径
+- 手动审批接口保留在系统能力中，但不作为默认流程
 
-`PureCore::run_turn(...)` 的职责：
+## 3.3 核心 turn 编排
 
-- 将用户 prompt 追加到 `CoreSession`。
-- 按角色配置选择 provider/model/effort。
-- 根据 `CompileMode` 生成系统 instructions。
-- 构造 `CompletionRequest`。
-- 调用 `pl-model` provider。
-- 将 provider 的流式输出作为 `AgentEvent` 推送。
-- 将模型结果追加为 assistant 消息。
-- 返回 `TurnResult`。
+`StudioRuntime` 只做 use case 编排：
 
-`PureCore::run_turn_with_options(...)` 在上述流程上额外接收 `TurnOptions`：
+1. 读取 session/project/config
+2. 构造 `TurnRequest` 与 `TurnOptions`
+3. 组装 `PureCore`（含工具注册）
+4. 执行 `run_turn_with_trace`
+5. 事务化批量落库：message + trace + runtime snapshot
+6. 输出命令响应 DTO 与 timeline DTO
 
-- `ToolApprovalPolicy::AutoAllow`：工具调用直接执行。
-- `ToolApprovalPolicy::Manual`：工具调用先发出审批请求，前端批准后执行。
-- `ToolApprovalPolicy::DenyAll`：工具调用一律作为拒绝结果写回会话。
+持久化原则：
 
-`pure-studio` 当前通过 `pl-core` 使用 `AutoAllow`，用于先放开已注册工具的执行。`Manual` 审批流程和前端事件仍保留，后续可以切回手动审批或接入更细粒度策略。
+- 消息和 trace 采用事务批量写入，避免逐条写放大
+- timeline 读取以 `sequence` 为单调游标
 
-`subagent` 工具可接收 `role` 参数，值为 `explorer`、`planner`、`executor` 或 `reviewer`。未传 `role` 时默认使用 `executor`。子代理使用所选角色的 provider/model/effort 创建独立会话，不沿用父会话的 provider。
+## 3.4 事件管线
 
-Plan 和 Auto 模式进行项目探索时，应优先把可独立观察的子组件拆给 `role = "explorer"` 的 subagent。例如 Rust workspace 有多个 crate、前后端分层、或同一任务涉及若干目录时，父代理负责拆分边界和汇总结论，多个 explorer subagent 分别读取对应子组件并返回结构、关键文件、风险点和建议入口。探索子代理默认只做读取和分析，不应擅自修改文件。
+`drain_events` 使用显式分支处理广播通道状态：
 
-`subagent` 运行时使用固定状态机：`queued`、`awaitingApproval`、`running`、`awaitingToolApproval`、`succeeded`、`failed`、`denied`。GUI 只观察状态和摘要，不把子代理的完整 text/thinking delta 混入主聊天流。
+- `Ok(event)`：正常转发
+- `Err(Lagged(n))`：记录丢帧指标并继续 drain，不退出
+- `Err(Closed)`：结束循环
 
-子代理内部允许注册完整默认工具，包括 `bash` 和嵌套 `subagent`。为避免递归失控，嵌套 subagent 最大深度固定为 3；超过限制时子代理进入 `failed` 状态。
+这保证高频 delta 下 UI 不会因为 lagged 直接断流。
 
-## 3.4 输出
+## 3.5 Turn 收尾语义
 
-`TurnResult` 包含：
+turn 生命周期持久化语义固定：
 
-- `content`
-- `reasoning_content`
-- `model`
-- `usage`
-- `mode`
-- `session_message_count`
-- 角色使用的 provider/model/effort 由配置决定。
+- `started`
+- `completed`
+- `failed`
+- `interrupted`
 
-`pure-studio` 必须通过 Tauri event 把 `AgentEvent` 转发给 React 前端，实时渲染 `TextDelta`、`ThinkingDelta`、工具调用状态、审批状态、subagent 状态和错误。
+用户停止属于 `interrupted`，不可被延迟完成覆盖。
 
-`pure-studio` 还必须维护会话运行态快照，用于底部状态栏展示：
+## 3.6 输出模型
 
-- 当前模型和模型上下文窗口。
-- 最新请求上下文 token 数。
-- 会话累计输入、输出、缓存读取 token 和缓存命中率。
-- 按模型可选价格字段估算的费用和货币单位。
-- 配置声明的已激活 Skill / MCP 列表。
+命令输出统一采用新 DTO：
 
-运行态快照来自 `TurnResult.usage`、角色解析后的模型配置和 `[runtime]` 配置声明。费用只按配置的每百万 token 单价估算，不做货币转换；价格字段缺失时费用显示为未配置。
+- `bootstrapResponse`
+- `projectSelectionResponse`
+- `sessionSelectionResponse`
+- `runPromptResponse`
+- `sessionTimelineResponse`
+
+前端 reducer 只消费 action 输入类型，不再由事件监听器直接拼装复杂 UI 状态。

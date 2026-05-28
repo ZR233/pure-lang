@@ -1,101 +1,79 @@
-# 02 - Crate 设计
+# 02 - Crate 设计（方案乙）
 
-## 2.1 pl-protocol
+## 2.1 总体形态
 
-**职责**：定义跨 crate 共享的协议类型。
+本仓库继续保持模块化单体，不新增常驻进程。核心边界采用端口-适配器：
 
-包含：
+- `pl-protocol`：跨 crate 协议与事件
+- `pl-model`：模型 provider 适配
+- `pl-core`：应用编排、领域模型、端口定义、基础设施适配器
+- `pure-studio`：Tauri 桥接与 React UI
 
-- `PureError` / `Result`
-- `Message` / `MessageContent` / `MessageRole`
-- `AgentEvent` / `AgentEventSender` / `AgentEventReceiver`
-- `PermissionLevel`
+## 2.2 pl-protocol
 
-依赖：
+职责保持不变：定义稳定 wire 协议、错误与事件类型。
 
-- `serde`
-- `serde_json`
-- `thiserror`
-- `tokio`
+- 放置 `PureError`、`Message`、`AgentEvent`、`TraceEvent` 等跨层共享类型
+- 不依赖任何内部 crate
+- 不包含运行时行为与存储实现
 
-`pl-protocol` 不依赖任何内部 crate。
+## 2.3 pl-model
 
-## 2.2 pl-model
+职责保持不变：封装 provider 差异，不承担会话编排。
 
-**职责**：LLM provider 层。
+- `ModelProvider` / `CompletionRequest` / `CompletionResponse`
+- OpenAI-compatible wire 适配
+- 依赖 `pl-protocol`，不依赖 `pl-core`
 
-包含：
+## 2.4 pl-core（端口-适配器）
 
-- `ProviderInfo`
-- `ModelProvider`
-- `CompletionRequest` / `CompletionResponse`
-- `ModelsManager`
-- OpenAI-compatible provider
-- Responses API / Chat Completions API wire 适配
+`pl-core` 调整为四层目录语义：
 
-依赖：
+- `application`：use case 编排（`StudioRuntime`）
+- `domain`：会话、项目、timeline、审批等领域记录类型
+- `interfaces`：端口 trait（RPITIT + `Send`）
+- `infrastructure`：SQLite、文件系统、事件发射、工具执行等适配器
 
-- `pl-protocol`
+核心端口（示例）：
 
-`pl-model` 不编排 turn、session 或 store，也不直接承担 CLI 行为。
+- `SessionRepository`
+- `ConfigRepository`
+- `TraceRepository`
+- `EventSink`
+- `ToolExecutor`
 
-## 2.3 pl-core
+约束：
 
-**职责**：核心逻辑层。
+- trait 异步方法统一使用原生 RPITIT，并显式 `+ Send`
+- `lib.rs` 只做模块声明与 `pub use` 出口
+- `StudioRuntime` 不直接嵌入具体数据库/文件系统细节
 
-包含：
+审批默认策略固定为 `ToolApprovalPolicy::AutoAllow`。手动审批链路保留接口，但不是默认执行路径。
 
-- `CompileMode::{Plan, Auto}`
-- `TurnRequest`
-- `TurnResult`
-- `CoreSession`
-- `StudioStore`
-- `ProjectRecord`
-- `SessionRecord`
-- `PureCore::run_turn(...)`
-- `PureCore::run_turn_with_options(...)`
-- `TurnOptions`
-- `ToolApprovalPolicy`
-- `PureConfig`
-- `ConfigStore`
-- `ModelRole`
-- `RoleConfig`
+## 2.5 pure-studio（桥接 + UI）
 
-`pl-core` 负责：
+`pure-studio/src-tauri` 采用壳层 main：
 
-- 保存和读取核心会话消息。
-- 读取和保存 `~/.pure/config.toml`。
-- 使用 SeaORM 纯异步读写 `~/.pure/studio/studio_1.sqlite`。
-- 校验固定角色到 provider/model/effort 的路由。
-- 将自然语言 prompt 转换为模型请求。
-- 调用 `pl-model` provider。
-- 接收并转发 `AgentEvent`。
-- 按 `TurnOptions` 管理工具注册和工具审批。
-- 汇总模型返回为 `TurnResult`。
-- 提供设置页使用的纯配置构造逻辑。
-- 提供本地 workspace 文件工具，并在执行前应用路径边界和工具审批策略。
+- `main.rs`：启动、状态注入、命令注册
+- `commands/*`：命令处理
+- `dto/*`：命令与事件 DTO
+- `events/*`：事件映射与分发
+- `approvals/*`：审批等待队列与解析
+- `state/*`：共享状态
 
-配置文件由 `pure-studio` 设置页的确认保存动作写入。工具执行必须经过明确的审批策略；当前版本不提供独立沙箱层。
+前端 `src/App.tsx` 改为页面装配壳层，状态迁移到 reducer。
 
-## 2.4 pure-studio
+## 2.6 本地数据版本
 
-**职责**：Tauri 2 桌面前端。
+方案乙采用破坏性升级，不保留运行期兼容层：
 
-能力：
+- SQLite 切换到新 schema（v2）
+- `config.toml` 切换到新结构（v2）
+- 启动时检测旧格式：先备份，再重建新结构
 
-- 渲染多个项目和多个会话。
-- 订阅 `AgentEvent` 实时渲染文本、思考、错误和工具审批状态。
-- 通过 Tauri command、event 和 dialog 插件把用户输入传给 `pl-core`，并把核心事件推送到 React UI。
+## 2.7 Workspace
 
-`pure-studio` 只依赖 `pl-core` 和必要 UI 依赖，不直接调用 `pl-model`，也不拥有数据库逻辑。Studio 状态由 `pl-core` 使用 SeaORM 保存到：
-
-```text
-~/.pure/studio/studio_1.sqlite
-```
-
-`~/.pure/config.toml` 仍是 provider/model/role 配置的唯一来源。
-
-## 2.5 Workspace
+workspace crate 组成保持不变：
 
 ```toml
 [workspace]
@@ -106,14 +84,4 @@ members = [
     "code/pure-studio/src-tauri",
 ]
 resolver = "3"
-
-[workspace.dependencies]
-pl-protocol = { path = "code/pl-protocol" }
-pl-model = { path = "code/pl-model" }
-pl-core = { path = "code/pl-core" }
-tauri = "2"
-tauri-build = "2"
-tauri-plugin-dialog = "2"
-sea-orm = "1.1.20"
-toml = "0.8"
 ```

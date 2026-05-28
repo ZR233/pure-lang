@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use pl_model::{
     ApplyPatchToolType, AuthCommand, InputModality, ModelCapabilities, ModelInfo, ProviderInfo,
@@ -14,7 +15,8 @@ use serde::Serialize;
 
 pub const CONFIG_DIR_NAME: &str = ".pure";
 pub const CONFIG_FILE_NAME: &str = "config.toml";
-pub const CONFIG_SCHEMA_VERSION: u32 = 1;
+pub const CONFIG_SCHEMA_VERSION: u32 = 2;
+pub const LEGACY_CONFIG_SCHEMA_VERSION: u32 = 1;
 
 const DEFAULT_PROVIDER_KEY: &str = "deepseek";
 const DEFAULT_MODEL: &str = "deepseek-v4-flash";
@@ -700,7 +702,19 @@ impl ConfigStore {
 
     pub fn load_or_default(&self) -> Result<PureConfig> {
         if self.config_exists() {
-            self.load()
+            let content = fs::read_to_string(self.paths.config_file())?;
+            match PureConfig::from_toml(&content) {
+                Ok(config) => Ok(config),
+                Err(error) => {
+                    if parse_schema_version(&content)? == Some(LEGACY_CONFIG_SCHEMA_VERSION) {
+                        let migrated = migrate_legacy_config(&content)?;
+                        self.backup_legacy_config()?;
+                        self.save(&migrated)?;
+                        return Ok(migrated);
+                    }
+                    Err(error)
+                }
+            }
         } else {
             Ok(PureConfig::default_config())
         }
@@ -730,6 +744,68 @@ impl ConfigStore {
         self.save(&config)?;
         Ok(config)
     }
+
+    fn backup_legacy_config(&self) -> Result<PathBuf> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let backup = self
+            .paths
+            .config_dir()
+            .join(format!("config.v1.backup.{now}.toml"));
+        fs::copy(self.paths.config_file(), &backup)?;
+        Ok(backup)
+    }
+}
+
+fn parse_schema_version(content: &str) -> Result<Option<u32>> {
+    let value: toml::Value = toml::from_str(content)
+        .map_err(|error| PureError::ConfigError(format!("failed to parse config: {error}")))?;
+    Ok(value
+        .as_table()
+        .and_then(|table| table.get("schema_version"))
+        .and_then(toml::Value::as_integer)
+        .and_then(|value| u32::try_from(value).ok()))
+}
+
+fn migrate_legacy_config(content: &str) -> Result<PureConfig> {
+    let value: toml::Value = toml::from_str(content).map_err(|error| {
+        PureError::ConfigError(format!("failed to parse legacy config: {error}"))
+    })?;
+    let table = value
+        .as_table()
+        .ok_or_else(|| PureError::ConfigError("legacy config root must be table".to_string()))?;
+
+    let mut migrated = PureConfig::default_config();
+
+    if let Some(runtime_value) = table.get("runtime")
+        && let Ok(runtime) = runtime_value.clone().try_into::<RuntimeConfig>()
+    {
+        migrated.runtime = runtime;
+    }
+
+    if let Some(providers_value) = table.get("providers")
+        && let Ok(providers) = providers_value
+            .clone()
+            .try_into::<BTreeMap<String, ProviderConfig>>()
+        && !providers.is_empty()
+    {
+        migrated.providers = providers;
+    }
+
+    if let Some(roles_value) = table.get("roles")
+        && let Ok(roles_toml) = roles_value.clone().try_into::<RoleConfigsToml>()
+    {
+        migrated.roles = roles_toml.into_role_configs(&migrated.providers)?;
+    } else {
+        let fallback = default_role_config(&migrated.providers)?;
+        migrated.roles = RoleConfigs::from_default_role(fallback);
+    }
+
+    migrated.schema_version = CONFIG_SCHEMA_VERSION;
+    migrated.validate()?;
+    Ok(migrated)
 }
 
 fn user_home_dir() -> Result<PathBuf> {
@@ -940,6 +1016,37 @@ mod tests {
         store.init_default().unwrap();
 
         assert!(home.join(".pure").join("config.toml").exists());
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn legacy_schema_is_backed_up_and_migrated() {
+        let home = temp_home("legacy-migrate");
+        let store = ConfigStore::new(ConfigPaths::from_home(&home));
+        let mut legacy = PureConfig::default_config();
+        legacy.schema_version = LEGACY_CONFIG_SCHEMA_VERSION;
+        fs::create_dir_all(store.paths().config_dir()).unwrap();
+        fs::write(
+            store.paths().config_file(),
+            legacy.to_toml_pretty().unwrap(),
+        )
+        .unwrap();
+
+        let migrated = store.load_or_default().unwrap();
+        let saved = store.load().unwrap();
+        let backup_exists = fs::read_dir(store.paths().config_dir())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("config.v1.backup.")
+            });
+
+        assert_eq!(migrated.schema_version, CONFIG_SCHEMA_VERSION);
+        assert_eq!(saved.schema_version, CONFIG_SCHEMA_VERSION);
+        assert!(backup_exists);
         fs::remove_dir_all(home).unwrap();
     }
 }
