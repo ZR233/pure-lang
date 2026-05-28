@@ -49,6 +49,22 @@ pub struct SubagentEventDto {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AgentEventDto {
+    pub event_id: String,
+    pub id: String,
+    pub path: String,
+    pub parent_path: Option<String>,
+    pub role: String,
+    pub task: String,
+    pub status: String,
+    pub summary: Option<String>,
+    pub depth: i32,
+    pub error: Option<String>,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProviderDto {
     pub id: String,
     pub template_kind: String,
@@ -196,6 +212,7 @@ pub struct BootstrapDto {
     pub selected_session_id: Option<String>,
     pub messages: Vec<MessageDto>,
     pub subagent_events: Vec<SubagentEventDto>,
+    pub agent_events: Vec<AgentEventDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
     pub config: ConfigDto,
 }
@@ -209,6 +226,7 @@ pub struct ProjectSelectionDto {
     pub selected_session_id: Option<String>,
     pub messages: Vec<MessageDto>,
     pub subagent_events: Vec<SubagentEventDto>,
+    pub agent_events: Vec<AgentEventDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
 }
 
@@ -219,6 +237,7 @@ pub struct SessionSelectionDto {
     pub sessions: Vec<SessionDto>,
     pub messages: Vec<MessageDto>,
     pub subagent_events: Vec<SubagentEventDto>,
+    pub agent_events: Vec<AgentEventDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
 }
 
@@ -229,6 +248,7 @@ pub struct RunPromptResponse {
     pub messages: Vec<MessageDto>,
     pub sessions: Vec<SessionDto>,
     pub subagent_events: Vec<SubagentEventDto>,
+    pub agent_events: Vec<AgentEventDto>,
     pub session_runtime: SessionRuntimeDto,
     pub timeline_items: Vec<TimelineItemDto>,
     pub turn_status: String,

@@ -164,6 +164,7 @@ impl std::fmt::Debug for TurnOptions {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnResultStatus {
     Completed,
+    Failed,
     Interrupted,
 }
 

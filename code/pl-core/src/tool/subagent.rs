@@ -131,6 +131,10 @@ impl Tool for SubagentTool {
                     .active_subagent
                     .as_ref()
                     .map(|subagent| subagent.id.clone()),
+                agent_path: context
+                    .active_subagent
+                    .as_ref()
+                    .and_then(|subagent| subagent.agent_path.clone()),
                 role: input
                     .arguments
                     .get("role")
@@ -175,6 +179,7 @@ impl Tool for SubagentTool {
             let subagent_context = SubagentContext {
                 id: input.tool_id.clone(),
                 parent_id: fallback_context.parent_id.clone(),
+                agent_path: fallback_context.agent_path.clone(),
                 role: role.key().to_string(),
                 task: compact_text(&subagent_input.task),
                 depth,
@@ -213,7 +218,9 @@ impl Tool for SubagentTool {
                 }),
             };
             let mut core = match core_result {
-                Ok(core) => core.with_subagent_context(subagent_context.clone()),
+                Ok(core) => core
+                    .with_agent_control(context.agent_control.clone())
+                    .with_subagent_context(subagent_context.clone()),
                 Err(error) => {
                     emit_subagent_state(
                         &context.event_tx,
@@ -366,6 +373,7 @@ mod tests {
                 workspace_root: std::env::temp_dir(),
                 workspace_instructions: None,
                 active_subagent,
+                agent_control: crate::AgentControl::default(),
             },
             event_rx,
         )
@@ -411,6 +419,7 @@ mod tests {
         let (context, mut event_rx) = test_context(Some(SubagentContext {
             id: "parent".to_string(),
             parent_id: None,
+            agent_path: None,
             role: "executor".to_string(),
             task: "parent task".to_string(),
             depth: MAX_SUBAGENT_DEPTH,

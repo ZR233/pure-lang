@@ -1,4 +1,4 @@
-use pl_protocol::{Message, TraceEvent};
+use pl_protocol::{AgentStatus, Message, TraceEvent};
 
 use crate::TurnResult;
 
@@ -39,6 +39,22 @@ pub struct SubagentEventRecord {
     pub role: String,
     pub task: String,
     pub status: String,
+    pub summary: Option<String>,
+    pub depth: i32,
+    pub error: Option<String>,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentEventRecord {
+    pub event_id: String,
+    pub session_id: String,
+    pub agent_id: String,
+    pub path: String,
+    pub parent_path: Option<String>,
+    pub role: String,
+    pub task: String,
+    pub status: AgentStatus,
     pub summary: Option<String>,
     pub depth: i32,
     pub error: Option<String>,

@@ -4,8 +4,8 @@ use anyhow::Result;
 use pl_protocol::{AgentEvent, Message, TraceEvent};
 
 use crate::{
-    ConfigStore, CoreSession, ProjectRecord, SessionRecord, SessionRuntimeRecord, StudioStore,
-    SubagentEventRecord, ToolApprovalRecord, TurnResult,
+    ConfigStore, CoreSession, ProjectRecord, SessionRecord, SessionRuntimeRecord,
+    StudioAgentEventRecord, StudioStore, SubagentEventRecord, ToolApprovalRecord, TurnResult,
 };
 
 /// 会话与项目存储端口。
@@ -60,6 +60,10 @@ pub trait EventSink: Send + Sync {
     fn record_subagent_event(
         &self,
         record: SubagentEventRecord,
+    ) -> impl Future<Output = Result<()>> + Send;
+    fn record_agent_event(
+        &self,
+        record: StudioAgentEventRecord,
     ) -> impl Future<Output = Result<()>> + Send;
     fn record_tool_approval(
         &self,
@@ -142,6 +146,10 @@ impl EventSink for StudioStore {
 
     async fn record_subagent_event(&self, record: SubagentEventRecord) -> Result<()> {
         self.record_subagent_event(record).await
+    }
+
+    async fn record_agent_event(&self, record: StudioAgentEventRecord) -> Result<()> {
+        self.record_agent_event(record).await
     }
 
     async fn record_tool_approval(&self, record: ToolApprovalRecord) -> Result<()> {

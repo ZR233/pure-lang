@@ -53,6 +53,20 @@ pub enum AgentEvent {
         #[serde(rename = "updatedAt")]
         updated_at: i64,
     },
+    AgentStateChanged {
+        id: String,
+        path: String,
+        #[serde(rename = "parentPath")]
+        parent_path: Option<String>,
+        role: String,
+        task: String,
+        status: AgentStatus,
+        summary: Option<String>,
+        depth: u32,
+        error: Option<String>,
+        #[serde(rename = "updatedAt")]
+        updated_at: i64,
+    },
     TurnStarted,
     TurnInterrupted {
         reason: String,
@@ -82,6 +96,39 @@ pub enum SubagentStatus {
     Succeeded,
     Failed,
     Denied,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentStatus {
+    Queued,
+    Running,
+    Waiting,
+    Completed,
+    Failed,
+    Interrupted,
+    Closed,
+}
+
+impl AgentStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Waiting => "waiting",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Interrupted => "interrupted",
+            Self::Closed => "closed",
+        }
+    }
+
+    pub fn is_final(self) -> bool {
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Interrupted | Self::Closed
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

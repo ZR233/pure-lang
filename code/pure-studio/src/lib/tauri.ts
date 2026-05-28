@@ -48,6 +48,7 @@ export function bootstrapStudio() {
         selectedSessionId: previewSessions[0]?.id ?? null,
         messages: previewMessages,
         subagentEvents: previewSubagentEvents,
+        agentEvents: [],
         sessionRuntime: previewSessionRuntime,
         config: previewConfig,
       }),
@@ -73,6 +74,7 @@ export function openProject(path: string) {
         selectedSessionId: previewSessions[0]?.id ?? null,
         messages: previewMessages,
         subagentEvents: previewSubagentEvents,
+        agentEvents: [],
         sessionRuntime: previewSessionRuntime,
       }),
     );
@@ -90,6 +92,7 @@ export function selectProject(projectId: string) {
         selectedSessionId: previewSessions[0]?.id ?? null,
         messages: previewMessages,
         subagentEvents: previewSubagentEvents,
+        agentEvents: [],
         sessionRuntime: previewSessionRuntime,
       }),
     );
@@ -112,6 +115,7 @@ export function createSession(projectId: string, title?: string) {
         sessions: [session, ...previewSessions],
         messages: [],
         subagentEvents: [],
+        agentEvents: [],
         sessionRuntime: {
           ...previewSessionRuntime,
           sessionId: session.id,
@@ -140,6 +144,7 @@ export function selectSession(sessionId: string) {
         sessions: previewSessions,
         messages: previewMessages,
         subagentEvents: previewSubagentEvents,
+        agentEvents: [],
         sessionRuntime: previewSessionRuntime,
       }),
     );
@@ -175,6 +180,7 @@ export function runPrompt(sessionId: string, prompt: string) {
             updatedAt: Math.floor(Date.now() / 1000),
           },
         ],
+        agentEvents: [],
         sessionRuntime: {
           ...previewSessionRuntime,
           promptTokens: previewSessionRuntime.promptTokens + 1200,

@@ -68,6 +68,33 @@ export type SubagentEventPayload = Omit<SubagentActivity, "eventId"> & {
   eventId?: string;
 };
 
+export type AgentStatus =
+  | "queued"
+  | "running"
+  | "waiting"
+  | "completed"
+  | "failed"
+  | "interrupted"
+  | "closed";
+
+export type AgentActivity = {
+  eventId: string;
+  id: string;
+  path: string;
+  parentPath?: string | null;
+  role: string;
+  task: string;
+  status: AgentStatus;
+  summary?: string | null;
+  depth: number;
+  error?: string | null;
+  updatedAt: number;
+};
+
+export type AgentActivityPayload = Omit<AgentActivity, "eventId"> & {
+  eventId?: string;
+};
+
 export type ProviderRecord = {
   id: string;
   templateKind: ProviderKind;
@@ -238,6 +265,7 @@ export type BootstrapPayload = {
   selectedSessionId?: string | null;
   messages: ChatMessage[];
   subagentEvents: SubagentActivity[];
+  agentEvents: AgentActivity[];
   sessionRuntime?: SessionRuntime | null;
   config: ConfigPayload;
 };
@@ -249,6 +277,7 @@ export type ProjectSelectionPayload = {
   selectedSessionId?: string | null;
   messages: ChatMessage[];
   subagentEvents: SubagentActivity[];
+  agentEvents: AgentActivity[];
   sessionRuntime?: SessionRuntime | null;
 };
 
@@ -257,6 +286,7 @@ export type SessionSelectionPayload = {
   sessions: SessionRecord[];
   messages: ChatMessage[];
   subagentEvents: SubagentActivity[];
+  agentEvents: AgentActivity[];
   sessionRuntime?: SessionRuntime | null;
 };
 
@@ -265,6 +295,7 @@ export type RunPromptResponse = {
   sessions: SessionRecord[];
   messages: ChatMessage[];
   subagentEvents: SubagentActivity[];
+  agentEvents: AgentActivity[];
   sessionRuntime: SessionRuntime;
   timelineItems: TimelineItem[];
   turnStatus: TurnStatus;
@@ -291,6 +322,7 @@ export type AgentEvent =
   | { toolApprovalGranted: { id: string; name: string } }
   | { toolApprovalDenied: { id: string; name: string; reason: string } }
   | { subagentStateChanged: SubagentEventPayload }
+  | { agentStateChanged: AgentActivityPayload }
   | "turnStarted"
   | { turnInterrupted: { reason: string } }
   | "done"

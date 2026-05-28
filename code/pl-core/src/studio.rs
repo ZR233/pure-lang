@@ -8,8 +8,8 @@ mod store;
 mod store_support;
 
 pub use records::{
-    ProjectRecord, SessionRecord, SessionRuntimeRecord, StudioPromptOutcome, SubagentEventRecord,
-    ToolApprovalRecord, TraceEventRecord,
+    AgentEventRecord, ProjectRecord, SessionRecord, SessionRuntimeRecord, StudioPromptOutcome,
+    SubagentEventRecord, ToolApprovalRecord, TraceEventRecord,
 };
 pub use runtime::StudioRuntime;
 pub use store::StudioStore;

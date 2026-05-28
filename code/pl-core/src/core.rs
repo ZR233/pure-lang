@@ -11,9 +11,10 @@ use pl_protocol::{
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
 use crate::session::CoreSession;
 use crate::tool::{
-    ApplyPatchTool, BashTool, CopyPathTool, CreateDirectoryTool, DeletePathTool, ListFilesTool,
-    MovePathTool, ReadFileTool, SearchFilesTool, StatPathTool, SubagentContext, SubagentTool,
-    ToolContext, ToolInput, ToolRegistry, WriteFileTool,
+    ApplyPatchTool, BashTool, CloseAgentTool, CopyPathTool, CreateDirectoryTool, DeletePathTool,
+    FollowupTaskTool, ListAgentsTool, ListFilesTool, MovePathTool, ReadFileTool, SearchFilesTool,
+    SendMessageTool, SpawnAgentTool, StatPathTool, SubagentContext, SubagentTool, ToolContext,
+    ToolInput, ToolRegistry, WaitAgentTool, WriteFileTool,
 };
 use crate::trace::TraceRecorder;
 use crate::turn::{
@@ -45,6 +46,7 @@ pub struct PureCore {
     workspace_root: Option<PathBuf>,
     workspace_instructions: Option<String>,
     active_subagent: Option<SubagentContext>,
+    agent_control: crate::AgentControl,
     tools: ToolRegistry,
 }
 
@@ -57,6 +59,7 @@ impl PureCore {
             workspace_root: None,
             workspace_instructions: None,
             active_subagent: None,
+            agent_control: crate::AgentControl::default(),
             tools: ToolRegistry::new(),
         }
     }
@@ -72,6 +75,7 @@ impl PureCore {
             workspace_root: None,
             workspace_instructions: None,
             active_subagent: None,
+            agent_control: crate::AgentControl::default(),
             tools: ToolRegistry::new(),
         }
     }
@@ -94,12 +98,18 @@ impl PureCore {
             workspace_root: None,
             workspace_instructions: None,
             active_subagent: None,
+            agent_control: crate::AgentControl::default(),
             tools: ToolRegistry::new(),
         })
     }
 
     pub(crate) fn with_subagent_context(mut self, context: SubagentContext) -> Self {
         self.active_subagent = Some(context);
+        self
+    }
+
+    pub(crate) fn with_agent_control(mut self, agent_control: crate::AgentControl) -> Self {
+        self.agent_control = agent_control;
         self
     }
 
@@ -130,6 +140,22 @@ impl PureCore {
         self.register_tool(CopyPathTool);
         self.register_tool(MovePathTool);
         self.register_tool(ApplyPatchTool);
+        self.register_tool(SpawnAgentTool::new(
+            self.provider.clone(),
+            self.reasoning_effort.clone(),
+            self.config.clone(),
+            workspace_instructions.clone(),
+        ));
+        self.register_tool(WaitAgentTool);
+        self.register_tool(ListAgentsTool);
+        self.register_tool(SendMessageTool);
+        self.register_tool(FollowupTaskTool::new(
+            self.provider.clone(),
+            self.reasoning_effort.clone(),
+            self.config.clone(),
+            workspace_instructions.clone(),
+        ));
+        self.register_tool(CloseAgentTool);
         self.register_tool(SubagentTool::new(
             self.provider.clone(),
             self.reasoning_effort.clone(),
@@ -174,6 +200,7 @@ impl PureCore {
             .unwrap_or_else(default_workspace_root);
         let workspace_instructions = self.workspace_instructions.clone();
         let active_subagent = self.active_subagent.clone();
+        let agent_control = self.agent_control.clone();
         let cancellation_token = options.cancellation_token.clone();
         let tool_schemas = self.tools.schemas();
         let max_iterations = if self.tools.is_empty() {
@@ -206,7 +233,7 @@ impl PureCore {
         );
         if requires_subagent_dispatch {
             instructions.push_str(
-                "\n\n# 子代理调度约束\n用户明确要求使用 subagent/子代理分工时，必须先调度 `subagent` 工具；不要只用 `bash` 或文件工具替代。若尚未知道 crate 列表，可以先用只读工具定位 workspace，再为每个 crate 创建 explorer subagent，最后由父会话汇总。",
+                "\n\n# 子代理调度约束\n用户明确要求使用 subagent/子代理分工时，必须先调度 `spawn_agent` 或 `subagent` 工具；不要只用 `bash` 或文件工具替代。若尚未知道 crate 列表，可以先用只读工具定位 workspace，再为每个 crate 创建 explorer agent，最后由父会话汇总。",
             );
         }
         let reasoning = reasoning_effort.as_ref().map(|effort| ReasoningConfig {
@@ -295,11 +322,17 @@ impl PureCore {
                     ));
                 }
                 Err(error) => {
-                    recorder.record_trace_only(TraceEventKind::TurnFailed {
-                        turn_id: session_id.clone(),
-                        error: error.to_string(),
-                    });
-                    return Err(error);
+                    return Ok(failed_turn_result(
+                        recorder,
+                        &session_id,
+                        request.mode,
+                        last_content,
+                        last_reasoning_content,
+                        last_model,
+                        total_usage,
+                        session.messages().len(),
+                        error.to_string(),
+                    ));
                 }
             };
 
@@ -372,6 +405,7 @@ impl PureCore {
                             workspace_root: workspace_root.clone(),
                             workspace_instructions: workspace_instructions.clone(),
                             active_subagent: active_subagent.clone(),
+                            agent_control: agent_control.clone(),
                         };
                         if tool_call.name == "subagent" {
                             emit_subagent_tool_state(
@@ -605,11 +639,17 @@ impl PureCore {
                     ));
                 }
                 Err(error) => {
-                    recorder.record_trace_only(TraceEventKind::TurnFailed {
-                        turn_id: session_id.clone(),
-                        error: error.to_string(),
-                    });
-                    return Err(error);
+                    return Ok(failed_turn_result(
+                        recorder,
+                        &session_id,
+                        request.mode,
+                        last_content,
+                        last_reasoning_content,
+                        last_model,
+                        total_usage,
+                        session.messages().len(),
+                        error.to_string(),
+                    ));
                 }
             };
 
@@ -723,6 +763,41 @@ fn interrupted_turn_result(
         mode,
         session_message_count,
         status: TurnResultStatus::Interrupted,
+        trace_events: recorder.drain(),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn failed_turn_result(
+    recorder: &mut TraceRecorder,
+    turn_id: &str,
+    mode: crate::turn::CompileMode,
+    content: String,
+    reasoning_content: Option<String>,
+    model: String,
+    mut usage: TokenUsage,
+    session_message_count: usize,
+    error: String,
+) -> TurnResult {
+    usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
+    recorder.record_trace_only(TraceEventKind::TurnFailed {
+        turn_id: turn_id.to_string(),
+        error: error.clone(),
+    });
+    recorder.broadcast(AgentEvent::Error {
+        message: error,
+        severity: pl_protocol::ErrorSeverity::Recoverable,
+    });
+    recorder.broadcast(AgentEvent::Done);
+
+    TurnResult {
+        content,
+        reasoning_content,
+        model,
+        usage,
+        mode,
+        session_message_count,
+        status: TurnResultStatus::Failed,
         trace_events: recorder.drain(),
     }
 }
@@ -924,6 +999,7 @@ mod tests {
             workspace_root: std::env::temp_dir(),
             workspace_instructions: None,
             active_subagent: None,
+            agent_control: crate::AgentControl::default(),
         }
     }
 
@@ -1066,6 +1142,7 @@ mod tests {
         context.active_subagent = Some(SubagentContext {
             id: "subagent-1".to_string(),
             parent_id: None,
+            agent_path: None,
             role: "executor".to_string(),
             task: "inspect".to_string(),
             depth: 1,
@@ -1089,6 +1166,7 @@ mod tests {
         let subagent = SubagentContext {
             id: "subagent-1".to_string(),
             parent_id: None,
+            agent_path: None,
             role: "executor".to_string(),
             task: "inspect workspace".to_string(),
             depth: 1,

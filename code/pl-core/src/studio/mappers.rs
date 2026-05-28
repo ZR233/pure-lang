@@ -1,10 +1,11 @@
 use anyhow::{Context, Result, bail};
-use pl_protocol::{Message, MessageContent, MessageRole};
+use pl_protocol::{AgentStatus, Message, MessageContent, MessageRole};
 
 use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::records::{
-    ProjectRecord, SessionRecord, SessionRuntimeRecord, SubagentEventRecord, TraceEventRecord,
+    AgentEventRecord, ProjectRecord, SessionRecord, SessionRuntimeRecord, SubagentEventRecord,
+    TraceEventRecord,
 };
 
 pub fn project_record(model: entities::project::Model) -> ProjectRecord {
@@ -39,6 +40,36 @@ pub fn subagent_event_record(model: entities::subagent_event::Model) -> Subagent
         depth: model.depth,
         error: model.error,
         created_at: model.created_at,
+    }
+}
+
+pub fn agent_event_record(model: entities::agent_event::Model) -> AgentEventRecord {
+    AgentEventRecord {
+        event_id: model.id,
+        session_id: model.session_id,
+        agent_id: model.agent_id,
+        path: model.path,
+        parent_path: model.parent_path,
+        role: model.role,
+        task: model.task,
+        status: agent_status_from_label(&model.status),
+        summary: model.summary,
+        depth: model.depth,
+        error: model.error,
+        created_at: model.created_at,
+    }
+}
+
+pub fn agent_status_from_label(status: &str) -> AgentStatus {
+    match status {
+        "queued" => AgentStatus::Queued,
+        "running" => AgentStatus::Running,
+        "waiting" => AgentStatus::Waiting,
+        "completed" => AgentStatus::Completed,
+        "failed" => AgentStatus::Failed,
+        "interrupted" => AgentStatus::Interrupted,
+        "closed" => AgentStatus::Closed,
+        _ => AgentStatus::Failed,
     }
 }
 
