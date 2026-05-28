@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import type { TFunction } from "i18next";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   ChatItem,
@@ -92,6 +92,165 @@ function compact(value: string, max = 220): string {
     return text;
   }
   return `${text.slice(0, max)}...`;
+}
+
+function linkHref(href: string): string | null {
+  const value = href.trim();
+  if (
+    value.startsWith("http://") ||
+    value.startsWith("https://") ||
+    value.startsWith("mailto:") ||
+    value.startsWith("#")
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g;
+  let cursor = 0;
+  let index = 0;
+  for (const match of text.matchAll(pattern)) {
+    const token = match[0];
+    const start = match.index ?? 0;
+    if (start > cursor) {
+      nodes.push(text.slice(cursor, start));
+    }
+    const key = `${keyPrefix}-inline-${index}`;
+    if (token.startsWith("`")) {
+      nodes.push(<code key={key}>{token.slice(1, -1)}</code>);
+    } else if (token.startsWith("**")) {
+      nodes.push(<strong key={key}>{renderInlineMarkdown(token.slice(2, -2), key)}</strong>);
+    } else if (token.startsWith("*")) {
+      nodes.push(<em key={key}>{renderInlineMarkdown(token.slice(1, -1), key)}</em>);
+    } else {
+      const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      const href = linkHref(link?.[2] ?? "");
+      nodes.push(
+        href ? (
+          <a key={key} href={href} target="_blank" rel="noreferrer">
+            {renderInlineMarkdown(link?.[1] ?? "", key)}
+          </a>
+        ) : (
+          token
+        ),
+      );
+    }
+    cursor = start + token.length;
+    index++;
+  }
+  if (cursor < text.length) {
+    nodes.push(text.slice(cursor));
+  }
+  return nodes;
+}
+
+function flushParagraph(blocks: ReactNode[], paragraph: string[], keyPrefix: string) {
+  if (paragraph.length === 0) {
+    return;
+  }
+  const text = paragraph.join("\n").trim();
+  if (text) {
+    blocks.push(<p key={`${keyPrefix}-p-${blocks.length}`}>{renderInlineMarkdown(text, `${keyPrefix}-p-${blocks.length}`)}</p>);
+  }
+  paragraph.length = 0;
+}
+
+function MarkdownContent({ content }: { content: string }) {
+  const blocks: ReactNode[] = [];
+  const paragraph: string[] = [];
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (line.match(/^```(\w+)?\s*$/)) {
+      flushParagraph(blocks, paragraph, "md");
+      const code: string[] = [];
+      index++;
+      while (index < lines.length && !lines[index].startsWith("```")) {
+        code.push(lines[index]);
+        index++;
+      }
+      blocks.push(
+        <pre key={`md-code-${blocks.length}`} className="markdown-code">
+          <code>{code.join("\n")}</code>
+        </pre>,
+      );
+      continue;
+    }
+    if (!line.trim()) {
+      flushParagraph(blocks, paragraph, "md");
+      continue;
+    }
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      flushParagraph(blocks, paragraph, "md");
+      const level = heading[1].length;
+      const children = renderInlineMarkdown(heading[2], `md-h-${blocks.length}`);
+      blocks.push(
+        level === 1 ? (
+          <h2 key={`md-h-${blocks.length}`}>{children}</h2>
+        ) : level === 2 ? (
+          <h3 key={`md-h-${blocks.length}`}>{children}</h3>
+        ) : (
+          <h4 key={`md-h-${blocks.length}`}>{children}</h4>
+        ),
+      );
+      continue;
+    }
+    const quote = line.match(/^>\s?(.+)$/);
+    if (quote) {
+      flushParagraph(blocks, paragraph, "md");
+      blocks.push(
+        <blockquote key={`md-quote-${blocks.length}`}>
+          {renderInlineMarkdown(quote[1], `md-quote-${blocks.length}`)}
+        </blockquote>,
+      );
+      continue;
+    }
+    const bullet = line.match(/^\s*[-*]\s+(.+)$/);
+    if (bullet) {
+      flushParagraph(blocks, paragraph, "md");
+      const items = [bullet[1]];
+      while (index + 1 < lines.length) {
+        const next = lines[index + 1].match(/^\s*[-*]\s+(.+)$/);
+        if (!next) break;
+        items.push(next[1]);
+        index++;
+      }
+      blocks.push(
+        <ul key={`md-ul-${blocks.length}`}>
+          {items.map((item, itemIndex) => (
+            <li key={itemIndex}>{renderInlineMarkdown(item, `md-ul-${blocks.length}-${itemIndex}`)}</li>
+          ))}
+        </ul>,
+      );
+      continue;
+    }
+    const ordered = line.match(/^\s*\d+\.\s+(.+)$/);
+    if (ordered) {
+      flushParagraph(blocks, paragraph, "md");
+      const items = [ordered[1]];
+      while (index + 1 < lines.length) {
+        const next = lines[index + 1].match(/^\s*\d+\.\s+(.+)$/);
+        if (!next) break;
+        items.push(next[1]);
+        index++;
+      }
+      blocks.push(
+        <ol key={`md-ol-${blocks.length}`}>
+          {items.map((item, itemIndex) => (
+            <li key={itemIndex}>{renderInlineMarkdown(item, `md-ol-${blocks.length}-${itemIndex}`)}</li>
+          ))}
+        </ol>,
+      );
+      continue;
+    }
+    paragraph.push(line);
+  }
+  flushParagraph(blocks, paragraph, "md");
+  return <div className="markdown-content">{blocks}</div>;
 }
 
 function agentSummary(activity: AgentActivity, t: TFunction) {
@@ -237,7 +396,9 @@ function MessageEntry({ entry }: { entry: Extract<TimelineEntry, { kind: "messag
           <strong>{entry.role.toUpperCase()}</strong>
         </div>
       )}
-      <div className="timeline-message-content">{entry.content}</div>
+      <div className="timeline-message-content">
+        <MarkdownContent content={entry.content} />
+      </div>
     </EntryShell>
   );
 }
@@ -368,6 +529,7 @@ export function ConversationPanel({
   const { t } = useTranslation();
   const messageStreamRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
+  const autoFollowRef = useRef(true);
   const didRenderEntriesRef = useRef(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const prevBusyRef = useRef(isBusy);
@@ -384,6 +546,7 @@ export function ConversationPanel({
     const handleScroll = () => {
       const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
       isAtBottomRef.current = atBottom;
+      autoFollowRef.current = atBottom;
       setShowScrollButton(!atBottom);
     };
 
@@ -391,7 +554,7 @@ export function ConversationPanel({
     return () => el.removeEventListener("scroll", handleScroll);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!didRenderEntriesRef.current) {
       didRenderEntriesRef.current = true;
       return;
@@ -399,14 +562,21 @@ export function ConversationPanel({
     if (!isBusy) {
       return;
     }
-    if (isAtBottomRef.current && messageStreamRef.current) {
-      messageStreamRef.current.scrollTop = messageStreamRef.current.scrollHeight;
+    if (autoFollowRef.current && messageStreamRef.current) {
+      const el = messageStreamRef.current;
+      el.scrollTop = el.scrollHeight;
+      window.requestAnimationFrame(() => {
+        if (autoFollowRef.current) {
+          el.scrollTop = el.scrollHeight;
+        }
+      });
     }
   }, [entries, isBusy]);
 
   useEffect(() => {
     if (isBusy && !prevBusyRef.current) {
       isAtBottomRef.current = true;
+      autoFollowRef.current = true;
       if (messageStreamRef.current) {
         messageStreamRef.current.scrollTop = messageStreamRef.current.scrollHeight;
       }
@@ -419,6 +589,7 @@ export function ConversationPanel({
     if (el) {
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
       isAtBottomRef.current = true;
+      autoFollowRef.current = true;
       setShowScrollButton(false);
     }
   }
