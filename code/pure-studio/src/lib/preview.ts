@@ -1,10 +1,10 @@
 import type {
   ChatMessage,
   ConfigPayload,
+  AgentActivity,
   ProjectRecord,
   RoleRecord,
   SessionRecord,
-  SubagentActivity,
   SessionRuntime,
   TimelineItem,
 } from "../types";
@@ -86,26 +86,28 @@ export const previewSessionRuntime: SessionRuntime = {
   updatedAt: 1779688800,
 };
 
-export const previewSubagentEvents: SubagentActivity[] = [
+export const previewAgentEvents: AgentActivity[] = [
   {
-    eventId: "preview-subagent-1",
-    id: "subagent-preview-executor",
-    parentId: null,
+    eventId: "preview-agent-1",
+    id: "agent-preview-executor",
+    path: "/root/preview_executor",
+    parentPath: null,
     role: "executor",
     task: "检查当前工作区变更并报告可能的下一步。",
-    status: "succeeded",
+    status: "completed",
     summary: "工作区检查已完成；设置和路由代码可以验证。",
     depth: 1,
     error: null,
     updatedAt: 1779688800,
   },
   {
-    eventId: "preview-subagent-2",
-    id: "subagent-preview-reviewer",
-    parentId: "subagent-preview-executor",
+    eventId: "preview-agent-2",
+    id: "agent-preview-reviewer",
+    path: "/root/preview_executor/reviewer",
+    parentPath: "/root/preview_executor",
     role: "reviewer",
     task: "最终确认前审查嵌套工具输出。",
-    status: "awaitingToolApproval",
+    status: "waiting",
     summary: "正在等待嵌套 bash 审批。",
     depth: 2,
     error: null,

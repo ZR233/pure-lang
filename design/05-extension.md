@@ -35,7 +35,7 @@
 
 命令执行、文件编辑、工具系统和沙箱能力必须以独立策略接入，并通过权限模型和事件流暴露给核心流程。
 
-桌面端允许注册 `bash`、`subagent` 和文件工具。当前 Studio 运行路径暂时使用 `AutoAllow` 直接执行已注册工具；切换到 `Manual` 时，审批结果通过 `AgentEvent` 和 Studio SeaORM 状态记录，拒绝时将拒绝原因作为 tool result 写回会话。
+桌面端允许注册 `bash`、完整 agent 协作工具和文件工具。当前 Studio 运行路径默认使用 `AutoAllow` 直接执行已注册工具；切换到 `Manual` 时，审批结果通过 `AgentEvent` 和 Studio SeaORM 状态记录，拒绝时将拒绝原因作为 tool result 写回会话。
 
 文件工具作为 `pl-core` 工具系统的一部分注册，当前不新增独立 `pl-tool` crate。文件工具包括读取、写入、列目录、搜索、stat、建目录、删除、复制、移动和 `apply_patch`。只读工具仍受工作区路径边界限制；修改工具进入现有工具审批流程。
 

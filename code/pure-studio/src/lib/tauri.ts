@@ -14,7 +14,7 @@ import {
   previewProjects,
   previewSessions,
   previewSessionRuntime,
-  previewSubagentEvents,
+  previewAgentEvents,
   previewTimelineItems,
 } from "./preview";
 import { makeProvider, makeRole } from "./provider-mapper";
@@ -47,8 +47,7 @@ export function bootstrapStudio() {
         sessions: previewSessions,
         selectedSessionId: previewSessions[0]?.id ?? null,
         messages: previewMessages,
-        subagentEvents: previewSubagentEvents,
-        agentEvents: [],
+        agentEvents: previewAgentEvents,
         sessionRuntime: previewSessionRuntime,
         config: previewConfig,
       }),
@@ -73,8 +72,7 @@ export function openProject(path: string) {
         sessions: previewSessions,
         selectedSessionId: previewSessions[0]?.id ?? null,
         messages: previewMessages,
-        subagentEvents: previewSubagentEvents,
-        agentEvents: [],
+        agentEvents: previewAgentEvents,
         sessionRuntime: previewSessionRuntime,
       }),
     );
@@ -91,8 +89,7 @@ export function selectProject(projectId: string) {
         sessions: previewSessions,
         selectedSessionId: previewSessions[0]?.id ?? null,
         messages: previewMessages,
-        subagentEvents: previewSubagentEvents,
-        agentEvents: [],
+        agentEvents: previewAgentEvents,
         sessionRuntime: previewSessionRuntime,
       }),
     );
@@ -114,7 +111,6 @@ export function createSession(projectId: string, title?: string) {
         sessionId: session.id,
         sessions: [session, ...previewSessions],
         messages: [],
-        subagentEvents: [],
         agentEvents: [],
         sessionRuntime: {
           ...previewSessionRuntime,
@@ -143,8 +139,7 @@ export function selectSession(sessionId: string) {
         sessionId,
         sessions: previewSessions,
         messages: previewMessages,
-        subagentEvents: previewSubagentEvents,
-        agentEvents: [],
+        agentEvents: previewAgentEvents,
         sessionRuntime: previewSessionRuntime,
       }),
     );
@@ -165,22 +160,22 @@ export function runPrompt(sessionId: string, prompt: string) {
           ...previewMessages,
           { role: "user" as const, content: prompt, reasoningContent: null },
         ],
-        subagentEvents: [
-          ...previewSubagentEvents,
+        agentEvents: [
+          ...previewAgentEvents,
           {
-            eventId: `preview-subagent-${Date.now()}`,
-            id: "subagent-preview-latest",
-            parentId: null,
+            eventId: `preview-agent-${Date.now()}`,
+            id: "agent-preview-latest",
+            path: "/root/preview_latest",
+            parentPath: null,
             role: "executor",
             task: prompt,
-            status: interrupted ? "denied" as const : "succeeded" as const,
+            status: interrupted ? "interrupted" as const : "completed" as const,
             summary: interrupted ? "预览运行已停止。" : "预览运行已完成。",
             depth: 1,
             error: null,
             updatedAt: Math.floor(Date.now() / 1000),
           },
         ],
-        agentEvents: [],
         sessionRuntime: {
           ...previewSessionRuntime,
           promptTokens: previewSessionRuntime.promptTokens + 1200,

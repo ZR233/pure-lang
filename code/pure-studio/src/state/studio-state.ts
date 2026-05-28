@@ -14,8 +14,6 @@ import type {
   SessionRecord,
   SessionRuntime,
   SessionSelectionPayload,
-  SubagentActivity,
-  SubagentEventPayload,
   TimelineItem,
   TurnPhase,
   TurnStatus,
@@ -44,7 +42,6 @@ export type StudioState = {
   streamingText: string;
   thinkingText: string;
   toolCalls: Map<string, TrackedToolCall>;
-  subagentActivities: SubagentActivity[];
   agentActivities: AgentActivity[];
   timelineItems: TimelineItem[];
   sessionRuntime: SessionRuntime | null;
@@ -101,7 +98,6 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   streamingText: "",
   thinkingText: "",
   toolCalls: new Map(),
-  subagentActivities: [],
   agentActivities: [],
   timelineItems: [],
   sessionRuntime: null,
@@ -124,7 +120,6 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         sessions: action.payload.sessions,
         selectedSessionId: action.payload.selectedSessionId ?? null,
         messages: action.payload.messages,
-        subagentActivities: mergeSubagentActivities([], action.payload.subagentEvents),
         agentActivities: mergeAgentActivities([], action.payload.agentEvents ?? []),
         sessionRuntime: action.payload.sessionRuntime ?? null,
         ...configFields(state.selectedProviderId, action.payload.config),
@@ -145,7 +140,6 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         sessions: action.payload.sessions,
         selectedSessionId: action.payload.selectedSessionId ?? null,
         messages: action.payload.messages,
-        subagentActivities: mergeSubagentActivities([], action.payload.subagentEvents),
         agentActivities: mergeAgentActivities([], action.payload.agentEvents ?? []),
         sessionRuntime: action.payload.sessionRuntime ?? null,
         timelineItems: [],
@@ -162,7 +156,6 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         sessions: action.payload.sessions.length > 0 ? action.payload.sessions : state.sessions,
         selectedSessionId: action.payload.sessionId,
         messages: action.payload.messages,
-        subagentActivities: mergeSubagentActivities([], action.payload.subagentEvents),
         agentActivities: mergeAgentActivities([], action.payload.agentEvents ?? []),
         sessionRuntime: action.payload.sessionRuntime ?? null,
         timelineItems: [],
@@ -179,7 +172,6 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         selectedSessionId: action.payload.sessionId,
         sessions: action.payload.sessions,
         messages: action.payload.messages,
-        subagentActivities: mergeSubagentActivities([], action.payload.subagentEvents),
         agentActivities: mergeAgentActivities([], action.payload.agentEvents ?? []),
         sessionRuntime: action.payload.sessionRuntime,
         timelineItems: mergeTimelineItems(state.timelineItems, action.payload.timelineItems),
@@ -388,14 +380,6 @@ function reduceAgentEvent(state: StudioState, event: AgentEvent, statusText: str
       toolCalls: next,
     };
   }
-  if ("subagentStateChanged" in event) {
-    return {
-      ...state,
-      subagentActivities: mergeSubagentActivities(state.subagentActivities, [event.subagentStateChanged]),
-      turnPhase: "subagent",
-      status: statusText,
-    };
-  }
   if ("agentStateChanged" in event) {
     return {
       ...state,
@@ -412,22 +396,6 @@ function reduceAgentEvent(state: StudioState, event: AgentEvent, statusText: str
     };
   }
   return state;
-}
-
-export function mergeSubagentActivities(
-  current: SubagentActivity[],
-  events: SubagentEventPayload[],
-): SubagentActivity[] {
-  const byId = new Map(current.map((activity) => [activity.id, activity]));
-  for (const event of events) {
-    byId.set(event.id, normalizeSubagentActivity(event));
-  }
-  return [...byId.values()].sort((left, right) => {
-    if (right.updatedAt !== left.updatedAt) {
-      return right.updatedAt - left.updatedAt;
-    }
-    return left.depth - right.depth;
-  });
 }
 
 export function mergeTimelineItems(current: TimelineItem[], incoming: TimelineItem[]): TimelineItem[] {
@@ -463,23 +431,6 @@ export function normalizeAgentActivity(event: AgentActivityPayload): AgentActivi
     id: event.id,
     path: event.path,
     parentPath: event.parentPath ?? null,
-    role: event.role,
-    task: event.task,
-    status: event.status,
-    summary: event.summary ?? null,
-    depth: event.depth,
-    error: event.error ?? null,
-    updatedAt: event.updatedAt,
-  };
-}
-
-export function normalizeSubagentActivity(event: SubagentEventPayload): SubagentActivity {
-  return {
-    eventId:
-      event.eventId ??
-      `${event.id}-${event.updatedAt}-${event.status}-${Math.random().toString(16).slice(2)}`,
-    id: event.id,
-    parentId: event.parentId ?? null,
     role: event.role,
     task: event.task,
     status: event.status,

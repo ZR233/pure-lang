@@ -36,18 +36,7 @@ import type {
   RunPromptResponse,
   ToolApprovalRequest,
   ToolApprovalResolved,
-  SubagentStatus,
 } from "../types";
-
-const subagentStatusKeys: Record<SubagentStatus, string> = {
-  queued: "subagent.queued",
-  awaitingApproval: "subagent.awaitingApproval",
-  running: "subagent.running",
-  awaitingToolApproval: "subagent.awaitingTool",
-  succeeded: "subagent.succeeded",
-  failed: "subagent.failed",
-  denied: "subagent.denied",
-};
 
 function statusTextForEvent(event: AgentEvent, t: (key: string, args?: Record<string, unknown>) => string) {
   if (event === "turnStarted") return t("status.running");
@@ -58,11 +47,6 @@ function statusTextForEvent(event: AgentEvent, t: (key: string, args?: Record<st
   if ("toolCallDelta" in event) return t("status.toolInput", { name: event.toolCallDelta.name });
   if ("toolApprovalGranted" in event) return t("status.approved", { name: event.toolApprovalGranted.name });
   if ("toolApprovalDenied" in event) return t("status.denied", { name: event.toolApprovalDenied.name });
-  if ("subagentStateChanged" in event) {
-    return t("status.subagentStatus", {
-      status: t(subagentStatusKeys[event.subagentStateChanged.status]).toLowerCase(),
-    });
-  }
   if ("agentStateChanged" in event) {
     return t("status.subagentStatus", {
       status: event.agentStateChanged.status,

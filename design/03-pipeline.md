@@ -33,7 +33,7 @@ React action
 - `ToolApprovalPolicy::AutoAllow` 为默认且主路径
 - 手动审批接口保留在系统能力中，但不作为默认流程
 - 用户显式要求 `subagent`/子代理分工时，核心提示必须将 `subagent` 作为强约束；普通 shell 或文件探索不能替代子代理调度
-- 多 agent 协作通过 `spawn_agent`、`wait_agent`、`list_agents`、`send_message`、`followup_task`、`close_agent` 组成；`subagent` 仅是兼容 wrapper
+- 多 agent 协作通过 `spawn_agent`、`wait_agent`、`list_agents`、`send_message`、`followup_task`、`close_agent` 组成；`subagent` 仅是同步便捷入口，底层创建 managed agent 并等待结果
 
 ## 3.3 核心 turn 编排
 
@@ -56,7 +56,7 @@ React action
 
 - 消息和 trace 采用事务批量写入，避免逐条写放大
 - timeline 读取以 `sequence` 为单调游标
-- agent tree、agent events、agent messages 与 turn snapshot 分表持久化；旧 `subagent_events` 不作为新流程的读取来源
+- agent tree、agent events、agent messages 与 turn snapshot 分表持久化；运行期只读写 `agent_events`
 
 ## 3.4 事件管线
 
