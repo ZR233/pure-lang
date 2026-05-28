@@ -51,12 +51,17 @@ React action
 
 文件与 shell 工具都以有效 `workspaceRoot` 为边界。`bash` 默认在 workspace root 下执行，`workingDirectory` 也按 workspace root 解析并拒绝逃逸；文件工具继续只允许访问 workspace root 内的路径。
 
-工具迭代收尾原则：
+工具预算与收尾原则：
 
-- 工具循环必须以 assistant 最终文本收尾
-- 当模型连续调用工具直到 `maxToolIterations` 上限时，核心层必须发起一次无工具总结推理
+- 工具调用或 provider 返回 `end_turn = false` 只表示 `needsFollowUp`，不是完成条件
+- root turn 默认预算为 `modelStepBudget = 32`、`toolCallBudget = 120`、`waitBudget = 16`、`wallClockMs = 180000`
+- child agent 默认预算为 `modelStepBudget = 24`、`toolCallBudget = 80`、`waitBudget = 12`、`wallClockMs = 120000`
+- `wait_agent` 消耗 wait 预算；其他工具消耗 tool call 预算；模型采样消耗 model step 预算
+- agent tree 默认限制为 `maxAgents = 16`、`maxDepth = 3`
+- 预算耗尽属于 `budgetLimited`，必须写入 `TurnBudgetLimited` trace，不得伪装为 `failed` 或 `completed`
+- 预算耗尽后核心层保留一次 `tool_choice = "none"` 的无工具收尾采样；该采样不消耗普通工具预算
 - 无工具总结仍未返回内容时，核心层返回明确兜底文本，不能静默 `completed`
-- 无工具总结或普通 assistant 文本中若出现未执行的工具调用标记，必须按 `failed` 收尾并写入 `TurnFailed`；不能把原始 tool-call 文本作为最终回答
+- 无工具总结或普通 assistant 文本中若出现未执行的工具调用标记，必须按 `budgetLimited` 收尾并写入 `TurnBudgetLimited`；不能把原始 tool-call 文本作为最终回答
 - 用户显式要求子代理分工时，turn 完成前必须验证本轮实际创建了 agent；否则按 `failed` 收尾，不写入伪完成 assistant 消息
 
 持久化原则：
@@ -85,9 +90,11 @@ turn 生命周期持久化语义固定：
 - `completed`
 - `failed`
 - `interrupted`
+- `budgetLimited`
 
 用户停止属于 `interrupted`，不可被延迟完成覆盖。
 工具、模型或 agent 基座错误属于 `failed`，必须写入 `TurnFailed` trace。
+工具、等待、模型采样或 agent tree 预算耗尽属于 `budgetLimited`，必须写入 `TurnBudgetLimited` trace。
 
 ## 3.6 输出模型
 

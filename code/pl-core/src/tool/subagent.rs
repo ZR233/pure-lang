@@ -150,7 +150,10 @@ impl Tool for SubagentTool {
                 agent_path: handle.path.clone(),
                 role: role.key().to_string(),
                 message: subagent_input.task,
-                max_tool_iterations: subagent_input.max_iterations.map(|value| value as usize),
+                budget: subagent_input
+                    .max_iterations
+                    .map(|value| crate::TurnBudget::from_legacy_max_tool_iterations(value as usize))
+                    .unwrap_or(context.budget_policy.agent_budget.child_turn_budget),
             })
             .await;
 
@@ -178,6 +181,12 @@ impl Tool for SubagentTool {
                 AgentStatus::Interrupted => Err(PureError::ToolExecutionFailed {
                     tool: "subagent".to_string(),
                     error: "subagent interrupted by user".to_string(),
+                }),
+                AgentStatus::BudgetLimited => Err(PureError::ToolExecutionFailed {
+                    tool: "subagent".to_string(),
+                    error: record
+                        .error
+                        .unwrap_or_else(|| "subagent budget limited".to_string()),
                 }),
                 AgentStatus::Failed => Err(PureError::ToolExecutionFailed {
                     tool: "subagent".to_string(),

@@ -14,7 +14,7 @@ use pl_protocol::{AgentEventSender, PureError};
 use serde::{Deserialize, Serialize};
 
 use crate::AgentControl;
-use crate::turn::TurnOptions;
+use crate::turn::{BudgetPolicy, TurnOptions};
 
 pub use bash::{BashInput, BashTool};
 pub use file::{
@@ -63,6 +63,7 @@ pub struct ToolContext {
     pub workspace_instructions: Option<String>,
     pub active_subagent: Option<SubagentContext>,
     pub agent_control: AgentControl,
+    pub budget_policy: BudgetPolicy,
 }
 
 /// 当前工具调用所在的 subagent 运行边界。

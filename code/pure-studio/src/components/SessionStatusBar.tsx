@@ -34,6 +34,7 @@ const turnPhaseKeys: Record<TurnPhase, string> = {
   stopping: "turnPhase.stopping",
   completed: "turnPhase.completed",
   interrupted: "turnPhase.interrupted",
+  budgetLimited: "turnPhase.budgetLimited",
   failed: "turnPhase.failed",
 };
 
@@ -50,6 +51,7 @@ const agentStatusKeys: Record<AgentStatus, string> = {
   completed: "turnPhase.completed",
   failed: "subagent.failed",
   interrupted: "turnPhase.interrupted",
+  budgetLimited: "turnPhase.budgetLimited",
   closed: "status.done",
 };
 

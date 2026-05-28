@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
-use pl_protocol::PureError;
+use pl_protocol::{BudgetLimitKind, PureError};
 use tokio::sync::{Mutex, Notify};
 
 use super::{AgentPath, AgentRecord, AgentStatus};
@@ -122,6 +122,12 @@ pub struct AgentControl {
 }
 
 impl AgentControl {
+    pub async fn configure_limits(&self, max_agents: usize, max_depth: u32) {
+        let mut state = self.state.lock().await;
+        state.max_agents = max_agents;
+        state.max_depth = max_depth;
+    }
+
     pub async fn spawn_agent(&self, input: AgentSpawnInput) -> Result<AgentHandle, PureError> {
         let parent_path = input
             .parent_path
@@ -139,13 +145,21 @@ impl AgentControl {
         if depth > state.max_depth {
             return Err(PureError::ToolExecutionFailed {
                 tool: "spawn_agent".to_string(),
-                error: format!("agent nesting depth exceeds {}", state.max_depth),
+                error: format!(
+                    "budget limited by {} budget: agent nesting depth exceeds {}",
+                    BudgetLimitKind::AgentDepth.as_str(),
+                    state.max_depth
+                ),
             });
         }
         if state.agents.len().saturating_sub(1) >= state.max_agents {
             return Err(PureError::ToolExecutionFailed {
                 tool: "spawn_agent".to_string(),
-                error: format!("agent limit reached: {}", state.max_agents),
+                error: format!(
+                    "budget limited by {} budget: agent limit reached {}",
+                    BudgetLimitKind::AgentCount.as_str(),
+                    state.max_agents
+                ),
             });
         }
         let path = AgentPath::try_from(parent_path.as_str())
@@ -438,5 +452,24 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn spawn_reports_agent_budget_limits() {
+        let control = AgentControl::default();
+        control.configure_limits(0, 3).await;
+
+        let error = control
+            .spawn_agent(AgentSpawnInput {
+                task_name: "worker".to_string(),
+                message: "inspect".to_string(),
+                role: "explorer".to_string(),
+                parent_path: None,
+            })
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("agentCount"));
     }
 }

@@ -315,6 +315,7 @@ mod tests {
             workspace_instructions: None,
             active_subagent: None,
             agent_control: crate::AgentControl::default(),
+            budget_policy: crate::BudgetPolicy::default(),
         }
     }
 

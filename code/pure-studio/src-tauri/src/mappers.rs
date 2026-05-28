@@ -307,7 +307,10 @@ pub fn agent_event_dto(event: StudioAgentEventRecord) -> AgentEventDto {
         status: event.status.as_str().to_string(),
         summary: event.summary,
         depth: event.depth,
+        reason: event.error.clone(),
         error: event.error,
+        budget_limit_kind: None,
+        budget_usage: None,
         updated_at: event.created_at,
     }
 }
@@ -333,6 +336,7 @@ pub fn turn_result_status_label(status: TurnResultStatus) -> &'static str {
         TurnResultStatus::Completed => "completed",
         TurnResultStatus::Failed => "failed",
         TurnResultStatus::Interrupted => "interrupted",
+        TurnResultStatus::BudgetLimited => "budgetLimited",
     }
 }
 
@@ -415,6 +419,24 @@ pub fn trace_event_to_timeline_item(event: &TraceEvent) -> TimelineItemDto {
             inference_model: None,
             inference_usage: None,
             turn_status: Some("interrupted".to_string()),
+            turn_model: None,
+            turn_usage: None,
+        },
+        TraceEventKind::TurnBudgetLimited {
+            turn_id, reason, ..
+        } => TimelineItemDto {
+            kind: "turn".to_string(),
+            sequence,
+            timestamp,
+            turn_id: Some(turn_id.clone()),
+            tool_call_id: None,
+            tool_name: None,
+            tool_arguments: None,
+            tool_status: None,
+            tool_result: Some(reason.clone()),
+            inference_model: None,
+            inference_usage: None,
+            turn_status: Some("budgetLimited".to_string()),
             turn_model: None,
             turn_usage: None,
         },

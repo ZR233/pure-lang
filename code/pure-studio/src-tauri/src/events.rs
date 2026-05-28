@@ -57,6 +57,7 @@ pub fn agent_event_record(session_id: &str, event: &AgentEvent) -> Option<Studio
             depth,
             error,
             updated_at,
+            ..
         } => Some(StudioAgentEventRecord {
             event_id: new_event_id("agent-event"),
             session_id: session_id.to_string(),

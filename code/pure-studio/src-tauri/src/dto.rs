@@ -45,7 +45,19 @@ pub struct AgentEventDto {
     pub summary: Option<String>,
     pub depth: i32,
     pub error: Option<String>,
+    pub reason: Option<String>,
+    pub budget_limit_kind: Option<String>,
+    pub budget_usage: Option<BudgetUsageDto>,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BudgetUsageDto {
+    pub model_steps: u32,
+    pub tool_calls: u32,
+    pub wait_calls: u32,
+    pub elapsed_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]

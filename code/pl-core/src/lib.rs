@@ -35,9 +35,10 @@ pub use interfaces::{
 };
 pub use pl_model::{InputModality, TruncationMode};
 pub use pl_protocol::{
-    AgentEvent, AgentEventReceiver, AgentEventSender, ContentPart, ContentPartType, ErrorSeverity,
-    Message, MessageContent, MessageRole, OutputStream, PermissionLevel, PipelineStage, PureError,
-    Result, TokenUsageSnapshot, TraceEvent, TraceEventKind,
+    AgentEvent, AgentEventReceiver, AgentEventSender, BudgetLimitKind, BudgetUsage, ContentPart,
+    ContentPartType, ErrorSeverity, Message, MessageContent, MessageRole, OutputStream,
+    PermissionLevel, PipelineStage, PureError, Result, TokenUsageSnapshot, TraceEvent,
+    TraceEventKind,
 };
 pub use session::CoreSession;
 pub use studio::{
@@ -50,8 +51,8 @@ pub use tool::{
 };
 pub use trace::TraceRecorder;
 pub use turn::{
-    CompileMode, DEFAULT_MAX_TOOL_ITERATIONS, ToolApprovalCallback, ToolApprovalDecision,
-    ToolApprovalPolicy, ToolApprovalRequest, TurnOptions, TurnRequest, TurnResult,
-    TurnResultStatus,
+    AgentBudget, BudgetPolicy, CompileMode, DEFAULT_MAX_TOOL_ITERATIONS, ToolApprovalCallback,
+    ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest, TurnBudget, TurnOptions,
+    TurnRequest, TurnResult, TurnResultStatus,
 };
 pub use workspace::{load_workspace_instructions, resolve_workspace_root};

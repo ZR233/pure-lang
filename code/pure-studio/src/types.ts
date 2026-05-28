@@ -49,6 +49,7 @@ export type AgentStatus =
   | "completed"
   | "failed"
   | "interrupted"
+  | "budgetLimited"
   | "closed";
 
 export type AgentActivity = {
@@ -62,6 +63,14 @@ export type AgentActivity = {
   summary?: string | null;
   depth: number;
   error?: string | null;
+  reason?: string | null;
+  budgetLimitKind?: string | null;
+  budgetUsage?: {
+    modelSteps: number;
+    toolCalls: number;
+    waitCalls: number;
+    elapsedMs: number;
+  } | null;
   updatedAt: number;
 };
 
@@ -147,7 +156,7 @@ export type ToolCallStatus2 =
   | "completed"
   | "failed";
 
-export type TurnStatus = "started" | "completed" | "failed" | "interrupted";
+export type TurnStatus = "started" | "completed" | "failed" | "interrupted" | "budgetLimited";
 
 export type TurnPhase =
   | "idle"
@@ -159,6 +168,7 @@ export type TurnPhase =
   | "stopping"
   | "completed"
   | "interrupted"
+  | "budgetLimited"
   | "failed";
 
 export type UsageSnapshot = {
@@ -294,6 +304,18 @@ export type AgentEvent =
   | { agentStateChanged: AgentActivityPayload }
   | "turnStarted"
   | { turnInterrupted: { reason: string } }
+  | {
+      turnBudgetLimited: {
+        reason: string;
+        limitKind: string;
+        usage: {
+          modelSteps: number;
+          toolCalls: number;
+          waitCalls: number;
+          elapsedMs: number;
+        };
+      };
+    }
   | "done"
   | { error: { message: string; severity: string } };
 
