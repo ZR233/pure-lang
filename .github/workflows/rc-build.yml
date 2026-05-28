@@ -1,0 +1,52 @@
+name: RC Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*-rc*"
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: code/pure-studio/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: npm ci
+        working-directory: code/pure-studio
+        run: npm ci
+      - name: web build
+        working-directory: code/pure-studio
+        run: npm run build
+      - name: rust release build
+        run: cargo build -p pure-studio --release
+      - name: pack artifact (windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          New-Item -Path dist -ItemType Directory -Force | Out-Null
+          Copy-Item target\release\pure-studio.exe dist\pure-studio.exe
+      - name: pack artifact (unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p dist
+          cp target/release/pure-studio dist/pure-studio
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pure-studio-${{ matrix.os }}
+          path: dist/*

@@ -1,7 +1,11 @@
+pub mod application;
 mod config;
 mod config_editor;
 mod core;
+pub mod domain;
 mod first_run;
+pub mod infrastructure;
+pub mod interfaces;
 mod session;
 mod studio;
 mod tool;
@@ -20,6 +24,9 @@ pub use config_editor::{
 pub use core::PureCore;
 pub use first_run::{
     FirstRunConfigDraft, FirstRunModelDraft, FirstRunProviderDraft, ProviderTemplateKind,
+};
+pub use interfaces::{
+    ConfigRepository, EventSink, RuntimeEventEmitter, SessionRepository, TurnSnapshotRepository,
 };
 pub use pl_model::{InputModality, TruncationMode};
 pub use pl_protocol::{

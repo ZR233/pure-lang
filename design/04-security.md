@@ -1,46 +1,59 @@
-# 04 - 安全边界
+# 04 - 安全边界（方案乙）
 
-## 4.1 当前安全模型
+## 4.1 执行默认
 
-当前没有 CLI 路径。`CompileMode::Auto` 不是无人值守执行模式，而是“生成自动执行导向方案”的模型提示模式。
+方案乙默认执行策略固定为：
 
-桌面端 `pure-studio` 可以启用工具系统。当前 Studio 运行路径暂时使用 `ToolApprovalPolicy::AutoAllow`，已注册工具会直接执行；`Manual` 审批策略、审批事件和审批记录仍保留，后续可以重新启用手动确认或更细粒度策略。
+- `ToolApprovalPolicy::AutoAllow`
 
-安全边界：
+这是破坏性升级后的默认行为，不再根据旧 UI 选择分支切换默认值。手动审批能力保留为可选能力，不是默认控制面。
 
-- `pure-studio` 只接收用户输入并展示结果。
-- `pl-core` 维护配置、会话和模型调用。
-- `pl-core` 维护 Studio SQLite 状态。
-- `pl-core` 维护工具注册和审批策略。
-- `pl-model` 只访问配置的模型 API。
-- `pl-protocol` 只承载公共类型。
-- `pure-studio` 保留把用户批准或拒绝传给 `pl-core` 的能力；当前 `AutoAllow` 路径不会产生手动审批等待。
+## 4.2 分层边界
 
-文件工具的安全边界由 `pl-core` 维护：
+安全边界按端口-适配器落位：
 
-- 所有路径必须解析到当前 `workspace_root` 内，拒绝路径穿越和逃逸到工作区外的绝对路径。
-- 读工具默认只读取 UTF-8 文本；二进制内容返回明确错误，不作为文本发送给模型。
-- 写入、删除、复制、移动和 `apply_patch` 属于修改操作，是否等待用户确认由当前 `ToolApprovalPolicy` 决定。
-- 文件写入不得通过 shell 间接执行；`apply_patch` 只解析 patch 文本并直接操作文件系统。
-- 对符号链接写入保持保守策略：目标不在工作区内或无法确认目标时拒绝。
+- `pure-studio`：输入收集、事件展示、命令调用
+- `pl-core/application`：策略编排与约束
+- `pl-core/interfaces`：安全相关端口抽象
+- `pl-core/infrastructure`：文件、数据库、工具执行、事件落盘
+- `pl-model`：仅访问已配置 API
 
-## 4.2 权限类型
+`pl-protocol` 只承载类型，不持有策略实现。
 
-`PermissionLevel` 保留在 `pl-protocol`，用于未来工具、文件编辑和执行策略。
+## 4.3 文件与工具约束
 
-`PermissionLevel` 仍作为长期权限模型保留。当前桌面端使用 `ToolApprovalPolicy` 和工具审批事件作为执行判定入口，不把 `PermissionLevel` 作为执行判定来源。
+文件工具继续遵守工作区边界：
 
-## 4.3 凭据配置
+- 解析后路径必须位于 `workspace_root` 内
+- 二进制读取返回明确错误
+- `apply_patch` 直接改文件，不经 shell 转发
+- 符号链接目标不可确认或越界时拒绝
 
-`~/.pure/config.toml` 允许保存明文 `bearer_token`。这意味着读取该文件的本机用户或进程可以直接获得 API token。
+## 4.4 凭据暴露面
 
-当前 provider 运行时只使用配置中保存的 `bearer_token` 作为 API key。`env_key` 只作为旧配置兼容字段和测试辅助信息保留，不在 `pure-studio` 界面展示，也不作为运行时鉴权来源。
+`config.toml` 仍为本地凭据来源，但方案乙收紧暴露面：
 
-## 4.4 未来执行策略
+- UI 默认不回显完整 token
+- 日志与事件 payload 不输出 token
+- 错误信息禁止拼接敏感字段
 
-命令执行或文件编辑必须作为明确的执行策略接入：
+## 4.5 Tauri CSP
 
-- 默认拒绝破坏性操作。
-- 文件写入和命令执行必须经过权限策略。
-- 执行输出通过 `AgentEvent` 推送。
-- 平台细节应保持在专门实现中，不污染 `pl-protocol`。
+方案乙将 Tauri CSP 从 `null` 改为显式最小策略，禁止默认放开。
+
+最小策略目标：
+
+- `default-src 'self'`
+- 仅放行开发环境 HMR 与本地资源必需源
+- 禁止不必要的远程脚本注入入口
+
+## 4.6 数据切换安全
+
+破坏性升级流程：
+
+1. 检测旧 SQLite / 旧 config
+2. 先生成时间戳备份
+3. 再创建新结构文件
+4. 不做旧结构运行期兼容读取
+
+恢复路径只通过备份回滚，不通过应用内双栈兼容。

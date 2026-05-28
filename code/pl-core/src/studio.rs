@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -7,11 +8,13 @@ use pl_protocol::{AgentEventSender, Message, MessageContent, MessageRole};
 use sea_orm::entity::prelude::*;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ConnectOptions, ConnectionTrait, Database, DatabaseBackend,
-    DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Statement,
+    DatabaseConnection, DatabaseTransaction, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+    Statement, TransactionTrait,
 };
 
 const STUDIO_DIR_NAME: &str = "studio";
-const STUDIO_DB_FILE_NAME: &str = "studio_1.sqlite";
+const STUDIO_DB_FILE_NAME: &str = "studio_2.sqlite";
+const LEGACY_STUDIO_DB_FILE_NAME: &str = "studio_1.sqlite";
 use crate::config::{CONFIG_DIR_NAME, ConfigStore, ModelRole};
 use crate::{
     CompileMode, CoreSession, PureCore, ToolApprovalCallback, TraceEvent, TraceRecorder,
@@ -401,9 +404,10 @@ impl StudioRuntime {
             .run_turn_with_trace(&mut session, request, &mut recorder, options)
             .await?;
         let trace_events = result.trace_events.clone();
-        if !trace_events.is_empty() {
-            self.store.append_trace_events(&trace_events).await?;
-        }
+        let new_messages = &session.messages()[previous_len..];
+        self.store
+            .append_turn_records(session_id, &trace_events, new_messages)
+            .await?;
         let resolved = config.resolve_role(ModelRole::Planner)?;
         let model = resolved
             .models
@@ -418,9 +422,6 @@ impl StudioRuntime {
             .or_else(|| resolved.models.first());
         self.store
             .upsert_session_runtime(session_id, &result, model)
-            .await?;
-        self.store
-            .append_messages(session_id, &session.messages()[previous_len..])
             .await?;
         if previous_len == 0 {
             self.store
@@ -438,7 +439,7 @@ impl StudioRuntime {
 
 impl StudioStore {
     pub async fn default_app() -> Result<Self> {
-        let db_path = default_db_path()?;
+        let db_path = prepare_database_switch()?;
         Self::open(db_path).await
     }
 
@@ -623,9 +624,16 @@ impl StudioStore {
     }
 
     pub async fn append_messages(&self, session_id: &str, messages: &[Message]) -> Result<()> {
-        for message in messages {
-            self.append_message(session_id, message).await?;
+        if messages.is_empty() {
+            return Ok(());
         }
+        let tx = self.db.begin().await?;
+        let now = unix_seconds();
+        for message in messages {
+            insert_message_with_tx(&tx, session_id, message, now).await?;
+        }
+        touch_session_with_tx(&tx, session_id, now).await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -715,6 +723,46 @@ impl StudioStore {
         trace_event::Entity::insert_many(models)
             .exec(&self.db)
             .await?;
+        Ok(())
+    }
+
+    pub async fn append_turn_records(
+        &self,
+        session_id: &str,
+        trace_events: &[TraceEvent],
+        messages: &[Message],
+    ) -> Result<()> {
+        if trace_events.is_empty() && messages.is_empty() {
+            return Ok(());
+        }
+
+        let tx = self.db.begin().await?;
+        if !trace_events.is_empty() {
+            use entities::trace_event;
+            let models: Vec<trace_event::ActiveModel> = trace_events
+                .iter()
+                .map(|event| {
+                    let payload = serde_json::to_string(&event.kind).unwrap_or_default();
+                    trace_event::ActiveModel {
+                        id: Set(new_trace_event_id()),
+                        session_id: Set(event.session_id.clone()),
+                        sequence: Set(event.sequence as i64),
+                        timestamp: Set(event.timestamp),
+                        kind: Set(trace_event_kind_label(&event.kind).to_string()),
+                        payload_json: Set(payload),
+                    }
+                })
+                .collect();
+            trace_event::Entity::insert_many(models).exec(&tx).await?;
+        }
+        if !messages.is_empty() {
+            let now = unix_seconds();
+            for message in messages {
+                insert_message_with_tx(&tx, session_id, message, now).await?;
+            }
+            touch_session_with_tx(&tx, session_id, now).await?;
+        }
+        tx.commit().await?;
         Ok(())
     }
 
@@ -878,6 +926,42 @@ impl StudioStore {
             .await?
             .map(|setting| setting.value))
     }
+}
+
+async fn insert_message_with_tx(
+    tx: &DatabaseTransaction,
+    session_id: &str,
+    message: &Message,
+    now: i64,
+) -> Result<()> {
+    use entities::message as message_entity;
+    let (role, content) = message_to_row_parts(message)?;
+    let metadata_json = serde_json::to_string(&message.metadata)?;
+    message_entity::ActiveModel {
+        id: Set(new_id("message")),
+        session_id: Set(session_id.to_string()),
+        role: Set(role),
+        content: Set(content),
+        reasoning_content: Set(message.reasoning_content.clone()),
+        metadata_json: Set(metadata_json),
+        created_at: Set(now),
+    }
+    .insert(tx)
+    .await?;
+    Ok(())
+}
+
+async fn touch_session_with_tx(tx: &DatabaseTransaction, session_id: &str, now: i64) -> Result<()> {
+    use entities::session;
+    if let Some(existing) = session::Entity::find_by_id(session_id.to_string())
+        .one(tx)
+        .await?
+    {
+        let mut active: session::ActiveModel = existing.into();
+        active.updated_at = Set(now);
+        active.update(tx).await?;
+    }
+    Ok(())
 }
 
 fn project_record(model: entities::project::Model) -> ProjectRecord {
@@ -1112,11 +1196,39 @@ fn split_sql(sql: &str) -> Vec<String> {
         .collect()
 }
 
+fn prepare_database_switch() -> Result<PathBuf> {
+    let target = default_db_path()?;
+    let legacy = legacy_db_path()?;
+    if target.exists() || !legacy.exists() {
+        return Ok(target);
+    }
+
+    let now = unix_seconds();
+    let backup = legacy.with_extension(format!("sqlite.v1.backup.{now}"));
+    fs::copy(&legacy, &backup).with_context(|| {
+        format!(
+            "failed to backup legacy studio db from {} to {}",
+            legacy.display(),
+            backup.display()
+        )
+    })?;
+    fs::remove_file(&legacy)
+        .with_context(|| format!("failed to remove legacy studio db: {}", legacy.display()))?;
+    Ok(target)
+}
+
 pub fn default_db_path() -> Result<PathBuf> {
     Ok(user_home_dir()?
         .join(CONFIG_DIR_NAME)
         .join(STUDIO_DIR_NAME)
         .join(STUDIO_DB_FILE_NAME))
+}
+
+fn legacy_db_path() -> Result<PathBuf> {
+    Ok(user_home_dir()?
+        .join(CONFIG_DIR_NAME)
+        .join(STUDIO_DIR_NAME)
+        .join(LEGACY_STUDIO_DB_FILE_NAME))
 }
 
 fn user_home_dir() -> Result<PathBuf> {
