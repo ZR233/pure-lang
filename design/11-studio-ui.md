@@ -7,7 +7,8 @@ Pure Studio 的主对话区采用明亮主题的连续 timeline。界面以正�
 - 主内容区保留顶部会话标题和项目路径。
 - 消息流使用一条连续纵线和节点表达 turn 内事件顺序。
 - 用户消息、assistant 文本、Thought、工具调用、子代理活动使用统一 timeline 行。
-- 工具调用默认保持紧凑行高，展示工具名、状态和摘要；参数或结果只在需要时折叠展开。
+- 工具调用默认保持紧凑行高，展示工具名、状态和摘要；完成态使用弱提示，避免绿色状态胶囊抢占 timeline 视觉重心。
+- 子代理活动在主 timeline 中按 `Agent: role` 日志行展示，不作为嵌套大卡片；状态详情放在行内 badge 和底部子代理弹层。
 - 不渲染空 assistant 块；只有 content 或 reasoning 存在时才生成对应 timeline 行。
 - trace 事件是 timeline 的持久化来源，前端可将 `TimelineItem` 和消息投影合并展示，但不能因为 trace 被二次 drain 而丢失。
 
@@ -35,6 +36,7 @@ Pure Studio 的主对话区采用明亮主题的连续 timeline。界面以正�
 - 用户停止是真实 interrupt：模型 streaming、工具执行和审批等待都要响应取消。
 - 中断通过 finished response 返回 `turnStatus=interrupted`，不走 prompt failed 通道。
 - Bash 工具收到取消时必须尽力终止子进程，并让 turn 以 interrupted 收尾。
+- 浏览器预览模式也要模拟停止闭环，避免停止后被延迟完成结果覆盖为 completed。
 
 ## 验收
 

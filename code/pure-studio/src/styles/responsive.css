@@ -191,13 +191,30 @@
 @media (max-width: 480px) {
   .app-shell {
     grid-template-columns: minmax(0, 1fr);
+    width: 100vw;
+    max-width: 100vw;
+    min-width: 0;
   }
 
   .project-rail {
     display: none;
   }
 
-  .conversation {
+  .conversation,
+  .conversation-footer,
+  .session-status-bar,
+  .composer {
+    width: 100%;
+    max-width: 100vw;
+    min-width: 0;
+  }
+
+  .composer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .composer textarea,
+  .send-button {
     min-width: 0;
   }
 

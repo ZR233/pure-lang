@@ -70,6 +70,10 @@ const zhCN = {
     failed: "已失败",
   },
 
+  timeline: {
+    turn: "回合",
+  },
+
   roles: {
     explorer: "探索者",
     planner: "计划者",
