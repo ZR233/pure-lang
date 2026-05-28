@@ -7,92 +7,79 @@ use pl_protocol::{BudgetLimitKind, BudgetUsage, TraceEvent};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-/// 旧接口的工具分发循环默认值。
+/// 旧接口的工具分发循环默认值（保留向后兼容）。
 pub const DEFAULT_MAX_TOOL_ITERATIONS: usize = 10;
 
-pub const ROOT_MODEL_STEP_BUDGET: u32 = 32;
-pub const ROOT_TOOL_CALL_BUDGET: u32 = 120;
-pub const ROOT_WAIT_BUDGET: u32 = 16;
-pub const ROOT_WALL_CLOCK_BUDGET_MS: u64 = 180_000;
-pub const CHILD_MODEL_STEP_BUDGET: u32 = 24;
-pub const CHILD_TOOL_CALL_BUDGET: u32 = 80;
-pub const CHILD_WAIT_BUDGET: u32 = 12;
-pub const CHILD_WALL_CLOCK_BUDGET_MS: u64 = 120_000;
+/// Agent 树结构限制常量。
+pub const AGENT_MAX_COUNT: usize = 16;
+pub const AGENT_MAX_DEPTH: u32 = 3;
+/// 默认 wall-clock 安全上限（10 分钟），参考 Codex 的 agent_job_max_runtime_seconds。
+pub const DEFAULT_WALL_CLOCK_MS: u64 = 600_000;
 
-/// 单轮模型与工具执行预算。
+/// 单轮 wall-clock 安全预算。
+///
+/// 参考 Codex 的设计：不限制 model step / tool call 迭代次数，
+/// 让模型自己决定何时完成（通过返回无 tool call 的 content-only 响应）。
+/// 仅保留 wall-clock 作为防止无限运行的安全兜底。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnBudget {
-    pub model_step_budget: u32,
-    pub tool_call_budget: u32,
-    pub wait_budget: u32,
+    /// Wall-clock 安全上限（毫秒）。超时后 turn 将被终止。
     pub wall_clock_ms: u64,
 }
 
 impl TurnBudget {
+    pub fn new(wall_clock_ms: u64) -> Self {
+        Self { wall_clock_ms }
+    }
+
     pub fn root_default() -> Self {
         Self {
-            model_step_budget: ROOT_MODEL_STEP_BUDGET,
-            tool_call_budget: ROOT_TOOL_CALL_BUDGET,
-            wait_budget: ROOT_WAIT_BUDGET,
-            wall_clock_ms: ROOT_WALL_CLOCK_BUDGET_MS,
+            wall_clock_ms: DEFAULT_WALL_CLOCK_MS,
         }
     }
 
     pub fn child_default() -> Self {
         Self {
-            model_step_budget: CHILD_MODEL_STEP_BUDGET,
-            tool_call_budget: CHILD_TOOL_CALL_BUDGET,
-            wait_budget: CHILD_WAIT_BUDGET,
-            wall_clock_ms: CHILD_WALL_CLOCK_BUDGET_MS,
+            wall_clock_ms: DEFAULT_WALL_CLOCK_MS,
         }
     }
 
-    pub fn from_legacy_max_tool_iterations(max: usize) -> Self {
-        let max = max.max(1) as u32;
-        Self {
-            model_step_budget: max,
-            tool_call_budget: max,
-            wait_budget: ROOT_WAIT_BUDGET,
-            wall_clock_ms: ROOT_WALL_CLOCK_BUDGET_MS,
-        }
+    pub fn from_legacy_max_tool_iterations(_max: usize) -> Self {
+        Self::root_default()
     }
 }
 
-/// Agent tree 预算策略。
+impl Default for TurnBudget {
+    fn default() -> Self {
+        Self::root_default()
+    }
+}
+
+/// Agent tree 结构限制。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentBudget {
     pub max_agents: usize,
     pub max_depth: u32,
-    pub child_turn_budget: TurnBudget,
 }
 
 impl Default for AgentBudget {
     fn default() -> Self {
         Self {
-            max_agents: 16,
-            max_depth: 3,
-            child_turn_budget: TurnBudget::child_default(),
+            max_agents: AGENT_MAX_COUNT,
+            max_depth: AGENT_MAX_DEPTH,
         }
     }
 }
 
-/// Turn 与 agent 协作的完整预算策略。
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+/// Turn 与 agent 协作的配置策略。
+///
+/// 参考 Codex：不使用 step-based 预算，仅保留 wall-clock 和 agent 结构限制。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BudgetPolicy {
-    pub root_turn_budget: TurnBudget,
     pub agent_budget: AgentBudget,
-}
-
-impl Default for BudgetPolicy {
-    fn default() -> Self {
-        Self {
-            root_turn_budget: TurnBudget::root_default(),
-            agent_budget: AgentBudget::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,74 +88,20 @@ pub(crate) struct BudgetLimit {
     pub usage: BudgetUsage,
 }
 
+/// 运行时用量追踪器。
+///
+/// 仅追踪 wall-clock 安全上限；model step / tool call 仅做可观测性计数，不强制。
 #[derive(Debug, Clone)]
 pub(crate) struct BudgetTracker {
-    budget: TurnBudget,
+    wall_clock_ms: u64,
     usage: BudgetUsage,
     started_at: std::time::Instant,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
-
-    #[test]
-    fn default_budget_policy_matches_studio_contract() {
-        let policy = BudgetPolicy::default();
-
-        assert_eq!(policy.root_turn_budget.model_step_budget, 32);
-        assert_eq!(policy.root_turn_budget.tool_call_budget, 120);
-        assert_eq!(policy.root_turn_budget.wait_budget, 16);
-        assert_eq!(policy.root_turn_budget.wall_clock_ms, 180_000);
-        assert_eq!(policy.agent_budget.max_agents, 16);
-        assert_eq!(policy.agent_budget.max_depth, 3);
-        assert_eq!(policy.agent_budget.child_turn_budget.model_step_budget, 24);
-        assert_eq!(policy.agent_budget.child_turn_budget.tool_call_budget, 80);
-        assert_eq!(policy.agent_budget.child_turn_budget.wait_budget, 12);
-        assert_eq!(policy.agent_budget.child_turn_budget.wall_clock_ms, 120_000);
-    }
-
-    #[test]
-    fn budget_tracker_separates_tool_and_wait_calls() {
-        let mut tracker = BudgetTracker::new(TurnBudget {
-            model_step_budget: 2,
-            tool_call_budget: 1,
-            wait_budget: 1,
-            wall_clock_ms: 60_000,
-        });
-
-        tracker.consume_model_step().unwrap();
-        tracker.consume_tool_call("bash").unwrap();
-        tracker.consume_tool_call("wait_agent").unwrap();
-
-        let usage = tracker.usage();
-        assert_eq!(usage.model_steps, 1);
-        assert_eq!(usage.tool_calls, 1);
-        assert_eq!(usage.wait_calls, 1);
-    }
-
-    #[test]
-    fn budget_tracker_reports_limit_kind() {
-        let mut tracker = BudgetTracker::new(TurnBudget {
-            model_step_budget: 1,
-            tool_call_budget: 1,
-            wait_budget: 1,
-            wall_clock_ms: 60_000,
-        });
-
-        tracker.consume_model_step().unwrap();
-        let limit = tracker.consume_model_step().unwrap_err();
-
-        assert_eq!(limit.kind, BudgetLimitKind::ModelStep);
-        assert_eq!(limit.usage.model_steps, 2);
-    }
 }
 
 impl BudgetTracker {
     pub fn new(budget: TurnBudget) -> Self {
         Self {
-            budget,
+            wall_clock_ms: budget.wall_clock_ms,
             usage: BudgetUsage::default(),
             started_at: std::time::Instant::now(),
         }
@@ -180,50 +113,30 @@ impl BudgetTracker {
         usage
     }
 
-    pub fn consume_model_step(&mut self) -> std::result::Result<BudgetUsage, BudgetLimit> {
+    /// 记录一次模型推理（仅追踪，不限制）。
+    pub fn record_model_step(&mut self) {
         self.usage.model_steps += 1;
-        self.ensure_within_budget(BudgetLimitKind::ModelStep)?;
-        Ok(self.usage())
     }
 
-    pub fn consume_tool_call(&mut self, tool_name: &str) -> std::result::Result<(), BudgetLimit> {
+    /// 记录一次工具调用（仅追踪，不限制）。
+    pub fn record_tool_call(&mut self, tool_name: &str) {
         if tool_name == "wait_agent" {
             self.usage.wait_calls += 1;
-            self.ensure_within_budget(BudgetLimitKind::Wait)
         } else {
             self.usage.tool_calls += 1;
-            self.ensure_within_budget(BudgetLimitKind::ToolCall)
         }
     }
 
+    /// 检查 wall-clock 安全上限。
     pub fn check_wall_clock(&self) -> std::result::Result<(), BudgetLimit> {
-        self.ensure_within_budget(BudgetLimitKind::WallClock)
-    }
-
-    fn ensure_within_budget(
-        &self,
-        default_kind: BudgetLimitKind,
-    ) -> std::result::Result<(), BudgetLimit> {
         let usage = self.usage();
-        let kind = if usage.elapsed_ms > self.budget.wall_clock_ms {
-            BudgetLimitKind::WallClock
-        } else if usage.model_steps > self.budget.model_step_budget {
-            BudgetLimitKind::ModelStep
-        } else if usage.tool_calls > self.budget.tool_call_budget {
-            BudgetLimitKind::ToolCall
-        } else if usage.wait_calls > self.budget.wait_budget {
-            BudgetLimitKind::Wait
-        } else {
-            return Ok(());
-        };
-        Err(BudgetLimit {
-            kind: if matches!(kind, BudgetLimitKind::WallClock) {
-                kind
-            } else {
-                default_kind
-            },
-            usage,
-        })
+        if usage.elapsed_ms > self.wall_clock_ms {
+            return Err(BudgetLimit {
+                kind: BudgetLimitKind::WallClock,
+                usage,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -426,4 +339,59 @@ pub struct TurnResult {
     pub budget_usage: Option<BudgetUsage>,
     /// Structured trace events recorded during this turn (if tracing was enabled).
     pub trace_events: Vec<TraceEvent>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn default_budget_policy_matches_codex_style() {
+        let policy = BudgetPolicy::default();
+
+        assert_eq!(policy.agent_budget.max_agents, 16);
+        assert_eq!(policy.agent_budget.max_depth, 3);
+    }
+
+    #[test]
+    fn turn_budget_has_generous_wall_clock() {
+        let root = TurnBudget::root_default();
+        let child = TurnBudget::child_default();
+
+        assert_eq!(root.wall_clock_ms, 600_000);
+        assert_eq!(child.wall_clock_ms, 600_000);
+    }
+
+    #[test]
+    fn budget_tracker_records_observability() {
+        let mut tracker = BudgetTracker::new(TurnBudget::new(60_000));
+
+        tracker.record_model_step();
+        tracker.record_tool_call("bash");
+        tracker.record_tool_call("wait_agent");
+
+        let usage = tracker.usage();
+        assert_eq!(usage.model_steps, 1);
+        assert_eq!(usage.tool_calls, 1);
+        assert_eq!(usage.wait_calls, 1);
+    }
+
+    #[test]
+    fn budget_tracker_only_enforces_wall_clock() {
+        let mut tracker = BudgetTracker::new(TurnBudget::new(60_000));
+
+        // Model steps 和 tool calls 不再受限制
+        for _ in 0..200 {
+            tracker.record_model_step();
+            tracker.record_tool_call("bash");
+        }
+
+        // Wall-clock 未超，不应触发限制
+        assert!(tracker.check_wall_clock().is_ok());
+
+        let usage = tracker.usage();
+        assert_eq!(usage.model_steps, 200);
+        assert_eq!(usage.tool_calls, 200);
+    }
 }

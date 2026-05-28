@@ -206,7 +206,7 @@ impl Tool for SubagentTool {
                 budget: subagent_input
                     .max_iterations
                     .map(|value| crate::TurnBudget::from_legacy_max_tool_iterations(value as usize))
-                    .unwrap_or(context.budget_policy.agent_budget.child_turn_budget),
+                    .unwrap_or(crate::turn::TurnBudget::child_default()),
             })
             .await;
             let _ = context.event_tx.send(AgentEvent::CollabWaitingEnd {

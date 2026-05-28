@@ -36,6 +36,12 @@ export function selectChatItems(
     index++;
   }
 
+  for (const tc of state.toolCalls.values()) {
+    if (!items.some((item) => item.kind === "tool_call" && item.key === `tc-${tc.id}`)) {
+      items.push({ kind: "tool_call", toolCall: tc, key: `tc-${tc.id}` });
+    }
+  }
+
   if (state.thinkingText || state.streamingText) {
     items.push({
       kind: "message",
@@ -46,12 +52,6 @@ export function selectChatItems(
       },
       key: "streaming",
     });
-  }
-
-  for (const tc of state.toolCalls.values()) {
-    if (!items.some((item) => item.kind === "tool_call" && item.key === `tc-${tc.id}`)) {
-      items.push({ kind: "tool_call", toolCall: tc, key: `tc-${tc.id}` });
-    }
   }
 
   return items;
