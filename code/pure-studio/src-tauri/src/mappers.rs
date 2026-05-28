@@ -133,7 +133,11 @@ pub fn provider_dto(provider_key: &str, provider: &ProviderConfig) -> ProviderDt
         subtitle: format!("{} Platform", provider.name),
         status: provider_status(provider).to_string(),
         base_url: provider.base_url.clone().unwrap_or_default(),
-        bearer_token: provider.bearer_token.clone().unwrap_or_default(),
+        bearer_token: String::new(),
+        has_bearer_token: provider
+            .bearer_token
+            .as_ref()
+            .is_some_and(|token| !token.trim().is_empty()),
         default_model: provider.default_model.clone(),
         model_count: models.len().to_string(),
         updated_at: "Loaded".to_string(),
@@ -215,13 +219,21 @@ pub fn capability_name(capability: &ModelCapabilityConfig) -> &'static str {
     }
 }
 
-pub fn provider_edit(input: ProviderInput) -> CommandResult<ProviderEdit> {
+pub fn provider_edit(
+    input: ProviderInput,
+    current_token: Option<String>,
+) -> CommandResult<ProviderEdit> {
+    let bearer_token = if input.bearer_token.trim().is_empty() {
+        current_token
+    } else {
+        Some(input.bearer_token)
+    };
     Ok(ProviderEdit {
         key: input.id,
         kind: provider_template_kind(&input.template_kind)?,
         name: input.name,
         base_url: Some(input.base_url),
-        bearer_token: Some(input.bearer_token),
+        bearer_token,
         default_model: input.default_model,
         wire_api: input.wire_api,
         custom_models: input
@@ -564,13 +576,20 @@ pub fn message_content_text(content: MessageContent) -> String {
 
 pub fn provider_settings_to_edit(
     input: ProviderSettingsInput,
+    current: &PureConfig,
 ) -> CommandResult<pl_core::ProviderSettingsEdit> {
     Ok(pl_core::ProviderSettingsEdit {
         default_provider: input.default_provider_id,
         providers: input
             .providers
             .into_iter()
-            .map(provider_edit)
+            .map(|provider| {
+                let current_token = current
+                    .providers
+                    .get(&provider.id)
+                    .and_then(|current_provider| current_provider.bearer_token.clone());
+                provider_edit(provider, current_token)
+            })
             .collect::<CommandResult<Vec<_>>>()?,
         roles: input.roles.into_iter().map(role_edit).collect(),
     })

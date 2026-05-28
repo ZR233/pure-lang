@@ -333,7 +333,7 @@ pub fn save_provider_settings(
     state: State<'_, AppState>,
 ) -> CommandResult<ConfigDto> {
     let current = state.studio.config_store().load_or_default()?;
-    let edit = provider_settings_to_edit(input)?;
+    let edit = provider_settings_to_edit(input, &current)?;
     let config = edit.to_config(&current)?;
     state.studio.config_store().save(&config)?;
     config_dto(state.studio.config_store())
