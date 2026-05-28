@@ -314,6 +314,92 @@ function turnStatusLabel(status: TimelineItem["turnStatus"], t: TFunction): stri
   }
 }
 
+function toolDisplayName(name: string | null | undefined): string {
+  return name ?? "Tool call";
+}
+
+function parseToolArguments(argumentsText: string | null | undefined): Record<string, unknown> | null {
+  if (!argumentsText?.trim()) return null;
+  try {
+    const parsed = JSON.parse(argumentsText);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function toolPathSummary(name: string | null | undefined, argumentsText: string | null | undefined): string | null {
+  const args = parseToolArguments(argumentsText);
+  if (!args) return null;
+  const pathValue =
+    args.path ??
+    args.filePath ??
+    args.file_path ??
+    args.targetPath ??
+    args.target_path ??
+    args.directory ??
+    args.root;
+  if (typeof pathValue === "string" && pathValue.trim()) {
+    return pathValue;
+  }
+  const command = args.command;
+  if (name === "bash" && typeof command === "string" && command.trim()) {
+    return compact(command, 90);
+  }
+  return null;
+}
+
+function isQuietFileTool(name: string | null | undefined): boolean {
+  return matchesToolName(name, ["read_file", "write_file", "list_files", "list_file"]);
+}
+
+function hidesToolResult(name: string | null | undefined): boolean {
+  return matchesToolName(name, ["read_file", "write_file", "list_files", "list_file"]);
+}
+
+function matchesToolName(name: string | null | undefined, names: string[]): boolean {
+  const normalized = name?.toLowerCase();
+  return Boolean(normalized && names.includes(normalized));
+}
+
+function ToolDetails({
+  argumentsText,
+  result,
+  hideResult,
+  t,
+}: {
+  argumentsText?: string | null;
+  result?: string | null;
+  hideResult: boolean;
+  t: TFunction;
+}) {
+  const hasArguments = Boolean(argumentsText?.trim());
+  const hasResult = Boolean(result?.trim()) && !hideResult;
+  if (!hasArguments && !hasResult) return null;
+  return (
+    <details className="timeline-details">
+      <summary>
+        <span>{t("toolCall.details")}</span>
+        <ChevronDown size={14} />
+      </summary>
+      {hasArguments ? (
+        <>
+          <div className="timeline-detail-label">{t("toolCall.arguments")}</div>
+          <pre className="timeline-code">{argumentsText}</pre>
+        </>
+      ) : null}
+      {hasResult ? (
+        <>
+          <div className="timeline-detail-label">{t("toolCall.result")}</div>
+          <pre className="timeline-code">{result}</pre>
+        </>
+      ) : null}
+    </details>
+  );
+}
+
 function timelineEntries(
   chatItems: ChatItem[],
   agentActivities: AgentActivity[],
@@ -426,18 +512,28 @@ function ThoughtEntry({ content }: { content: string }) {
 }
 
 function ToolEntry({ toolCall, t }: { toolCall: TrackedToolCall; t: TFunction }) {
+  const pathSummary = toolPathSummary(toolCall.name, toolCall.arguments);
+  const hideResult = hidesToolResult(toolCall.name);
   return (
     <EntryShell className={`timeline-entry-tool status-${toolCall.status}`} icon={<Wrench size={14} />}>
       <div className="timeline-entry-head">
         <strong>{toolCall.name}</strong>
-        {toolCall.arguments ? (
-          <code className="timeline-inline-code" title={toolCall.arguments}>
-            {compact(toolCall.arguments, 180)}
+        {pathSummary ? (
+          <code className="timeline-inline-code" title={pathSummary}>
+            {pathSummary}
           </code>
         ) : null}
         <span className={`timeline-badge status-${toolCall.status}`}>{toolStatusLabel(toolCall.status, t)}</span>
       </div>
-      {toolCall.result ? <p className="timeline-result">{compact(toolCall.result, 520)}</p> : null}
+      {!pathSummary && !isQuietFileTool(toolCall.name) && toolCall.arguments ? (
+        <p className="timeline-result">{compact(toolCall.arguments, 160)}</p>
+      ) : null}
+      <ToolDetails
+        argumentsText={isQuietFileTool(toolCall.name) ? null : toolCall.arguments}
+        result={toolCall.result}
+        hideResult={hideResult}
+        t={t}
+      />
     </EntryShell>
   );
 }
@@ -457,13 +553,19 @@ function AgentEntry({
           {t(agentStatusKeys[activity.status])}
         </span>
       </div>
-      <p className="timeline-task">{activity.task}</p>
-      <p className="timeline-result">{agentSummary(activity, t)}</p>
       <div className="timeline-entry-meta">
         <span>{t("subagent.depth")} {activity.depth}</span>
         {activity.parentPath ? <span>{t("subagent.parent")} {activity.parentPath}</span> : null}
         <span>{formatTime(activity.updatedAt)}</span>
       </div>
+      <details className="timeline-details">
+        <summary>
+          <span>{t("subagent.prompt")}</span>
+          <ChevronDown size={14} />
+        </summary>
+        <p className="timeline-task">{activity.task}</p>
+        <p className="timeline-result">{agentSummary(activity, t)}</p>
+      </details>
     </EntryShell>
   );
 }
@@ -482,20 +584,31 @@ function TraceEntry({ item, t }: { item: TimelineItem; t: TFunction }) {
   }
 
   if (item.kind === "tool_call") {
+    const name = toolDisplayName(item.toolName);
+    const pathSummary = toolPathSummary(item.toolName, item.toolArguments);
+    const hideResult = hidesToolResult(item.toolName);
     return (
       <EntryShell className={`timeline-entry-tool status-${item.toolStatus ?? "started"}`} icon={<Wrench size={14} />}>
         <div className="timeline-entry-head">
-          <strong>{item.toolName ?? "Tool call"}</strong>
-          {item.toolArguments ? (
-            <code className="timeline-inline-code" title={item.toolArguments}>
-              {compact(item.toolArguments, 180)}
+          <strong>{name}</strong>
+          {pathSummary ? (
+            <code className="timeline-inline-code" title={pathSummary}>
+              {pathSummary}
             </code>
           ) : null}
           <span className={`timeline-badge status-${item.toolStatus ?? "started"}`}>
             {toolStatusLabel(item.toolStatus, t)}
           </span>
         </div>
-        {item.toolResult ? <p className="timeline-result">{compact(item.toolResult, 520)}</p> : null}
+        {!pathSummary && !isQuietFileTool(item.toolName) && item.toolArguments ? (
+          <p className="timeline-result">{compact(item.toolArguments, 160)}</p>
+        ) : null}
+        <ToolDetails
+          argumentsText={isQuietFileTool(item.toolName) ? null : item.toolArguments}
+          result={item.toolResult}
+          hideResult={hideResult}
+          t={t}
+        />
       </EntryShell>
     );
   }
@@ -539,10 +652,10 @@ export function ConversationPanel({
   const timelineRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
-  const autoFollowRef = useRef(true);
-  const suppressProgrammaticScrollRef = useRef(false);
-  const userScrollIntentRef = useRef(false);
-  const userScrollIntentTimerRef = useRef<number | null>(null);
+  const followModeRef = useRef<"following" | "paused">("following");
+  const programmaticScrollRef = useRef(false);
+  const userInteractingRef = useRef(false);
+  const userInteractingTimerRef = useRef<number | null>(null);
   const didRenderEntriesRef = useRef(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const prevBusyRef = useRef(isBusy);
@@ -556,72 +669,114 @@ export function ConversationPanel({
     const el = messageStreamRef.current;
     if (!el) return;
 
-    const markUserScrollIntent = () => {
-      userScrollIntentRef.current = true;
-      if (userScrollIntentTimerRef.current !== null) {
-        window.clearTimeout(userScrollIntentTimerRef.current);
+    const updateBottomState = () => {
+      const atBottom = isNearBottom(el);
+      isAtBottomRef.current = atBottom;
+      if (atBottom) {
+        followModeRef.current = "following";
       }
-      userScrollIntentTimerRef.current = window.setTimeout(() => {
-        userScrollIntentRef.current = false;
-        userScrollIntentTimerRef.current = null;
-      }, 180);
+      setShowScrollButton(followModeRef.current === "paused" || !atBottom);
+      return atBottom;
+    };
+
+    const markUserInteraction = () => {
+      userInteractingRef.current = true;
+      if (userInteractingTimerRef.current !== null) {
+        window.clearTimeout(userInteractingTimerRef.current);
+      }
+      userInteractingTimerRef.current = window.setTimeout(() => {
+        userInteractingRef.current = false;
+        userInteractingTimerRef.current = null;
+      }, 220);
     };
 
     const handleScroll = () => {
-      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
+      const atBottom = isNearBottom(el);
       isAtBottomRef.current = atBottom;
-      if (suppressProgrammaticScrollRef.current) {
-        if (atBottom) {
-          autoFollowRef.current = true;
-        }
-      } else if (isBusy && autoFollowRef.current && !userScrollIntentRef.current) {
-        followLatest();
-      } else {
-        autoFollowRef.current = atBottom;
+      if (programmaticScrollRef.current) {
+        setShowScrollButton(false);
+        return;
       }
-      setShowScrollButton(!atBottom);
+
       if (atBottom) {
-        userScrollIntentRef.current = false;
+        followModeRef.current = "following";
+        userInteractingRef.current = false;
+      } else if (userInteractingRef.current) {
+        followModeRef.current = "paused";
       }
+      setShowScrollButton(followModeRef.current === "paused" || !atBottom);
     };
 
-    el.addEventListener("wheel", markUserScrollIntent, { passive: true });
-    el.addEventListener("touchmove", markUserScrollIntent, { passive: true });
-    el.addEventListener("pointerdown", markUserScrollIntent);
-    el.addEventListener("keydown", markUserScrollIntent);
+    const handleUserScrollIntent = () => {
+      markUserInteraction();
+      window.requestAnimationFrame(updateBottomState);
+    };
+
+    el.addEventListener("wheel", handleUserScrollIntent, { passive: true });
+    el.addEventListener("touchmove", handleUserScrollIntent, { passive: true });
+    el.addEventListener("pointerdown", handleUserScrollIntent);
+    el.addEventListener("keydown", handleUserScrollIntent);
     el.addEventListener("scroll", handleScroll, { passive: true });
     return () => {
-      el.removeEventListener("wheel", markUserScrollIntent);
-      el.removeEventListener("touchmove", markUserScrollIntent);
-      el.removeEventListener("pointerdown", markUserScrollIntent);
-      el.removeEventListener("keydown", markUserScrollIntent);
+      el.removeEventListener("wheel", handleUserScrollIntent);
+      el.removeEventListener("touchmove", handleUserScrollIntent);
+      el.removeEventListener("pointerdown", handleUserScrollIntent);
+      el.removeEventListener("keydown", handleUserScrollIntent);
       el.removeEventListener("scroll", handleScroll);
-      if (userScrollIntentTimerRef.current !== null) {
-        window.clearTimeout(userScrollIntentTimerRef.current);
+      if (userInteractingTimerRef.current !== null) {
+        window.clearTimeout(userInteractingTimerRef.current);
       }
     };
-  }, [isBusy]);
+  }, []);
 
-  function followLatest() {
+  function isNearBottom(el: HTMLDivElement): boolean {
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_THRESHOLD;
+  }
+
+  function scrollToLatest(mode: "preserve" | "force") {
     const el = messageStreamRef.current;
     if (!el) return;
-    suppressProgrammaticScrollRef.current = true;
+    if (mode === "preserve" && followModeRef.current !== "following") {
+      setShowScrollButton(true);
+      return;
+    }
+    if (mode === "force") {
+      followModeRef.current = "following";
+    }
+    programmaticScrollRef.current = true;
 
     const scroll = () => {
       bottomRef.current?.scrollIntoView({ block: "end" });
       el.scrollTop = el.scrollHeight;
       isAtBottomRef.current = true;
-      autoFollowRef.current = true;
-      userScrollIntentRef.current = false;
+      if (mode === "force" || followModeRef.current === "following") {
+        followModeRef.current = "following";
+      }
+      userInteractingRef.current = false;
       setShowScrollButton(false);
     };
 
     scroll();
     window.requestAnimationFrame(() => {
+      if (mode === "preserve" && followModeRef.current !== "following") {
+        programmaticScrollRef.current = false;
+        return;
+      }
       scroll();
       window.requestAnimationFrame(() => {
+        if (mode === "preserve" && followModeRef.current !== "following") {
+          programmaticScrollRef.current = false;
+          return;
+        }
         scroll();
-        suppressProgrammaticScrollRef.current = false;
+        window.setTimeout(() => {
+          if (mode === "preserve" && followModeRef.current !== "following") {
+            programmaticScrollRef.current = false;
+            return;
+          }
+          scroll();
+          programmaticScrollRef.current = false;
+        }, 80);
       });
     });
   }
@@ -634,8 +789,8 @@ export function ConversationPanel({
     if (!isBusy) {
       return;
     }
-    if (autoFollowRef.current) {
-      followLatest();
+    if (followModeRef.current === "following") {
+      scrollToLatest("preserve");
     }
   }, [entries, isBusy]);
 
@@ -643,8 +798,10 @@ export function ConversationPanel({
     const timeline = timelineRef.current;
     if (!timeline) return;
     const observer = new ResizeObserver(() => {
-      if (isBusy && autoFollowRef.current) {
-        followLatest();
+      if (isBusy && followModeRef.current === "following") {
+        scrollToLatest("preserve");
+      } else if (messageStreamRef.current) {
+        setShowScrollButton(!isNearBottom(messageStreamRef.current));
       }
     });
     observer.observe(timeline);
@@ -654,8 +811,8 @@ export function ConversationPanel({
   useEffect(() => {
     if (isBusy && !prevBusyRef.current) {
       isAtBottomRef.current = true;
-      autoFollowRef.current = true;
-      followLatest();
+      followModeRef.current = "following";
+      scrollToLatest("force");
     }
     prevBusyRef.current = isBusy;
   }, [isBusy]);
@@ -664,8 +821,8 @@ export function ConversationPanel({
     const el = messageStreamRef.current;
     if (el) {
       isAtBottomRef.current = true;
-      autoFollowRef.current = true;
-      followLatest();
+      followModeRef.current = "following";
+      scrollToLatest("force");
       setShowScrollButton(false);
     }
   }
@@ -707,7 +864,12 @@ export function ConversationPanel({
           </div>
         )}
         {showScrollButton && (
-          <button className="scroll-to-bottom" onClick={scrollToBottom}>
+          <button
+            className="scroll-to-bottom"
+            onClick={scrollToBottom}
+            title={t("toolCall.scrollToBottom")}
+            aria-label={t("toolCall.scrollToBottom")}
+          >
             <ChevronDown size={18} />
           </button>
         )}

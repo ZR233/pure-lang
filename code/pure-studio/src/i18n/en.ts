@@ -114,6 +114,7 @@ const en = {
     resultReady: "Done",
     arguments: "Arguments",
     result: "Result",
+    details: "Details",
     scrollToBottom: "Scroll to bottom",
   },
 

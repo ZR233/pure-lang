@@ -114,6 +114,7 @@ const zhCN = {
     resultReady: "已完成",
     arguments: "参数",
     result: "结果",
+    details: "详情",
     scrollToBottom: "滚动到底部",
   },
 
