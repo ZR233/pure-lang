@@ -1,4 +1,3 @@
 pub use crate::studio::{
-    ProjectRecord, SessionRecord, SessionRuntimeRecord, SubagentEventRecord, ToolApprovalRecord,
-    TraceEventRecord,
+    ProjectRecord, SessionRecord, SessionRuntimeRecord, ToolApprovalRecord, TraceEventRecord,
 };

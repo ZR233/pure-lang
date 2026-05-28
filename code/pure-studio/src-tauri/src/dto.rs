@@ -34,21 +34,6 @@ pub struct MessageDto {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SubagentEventDto {
-    pub event_id: String,
-    pub id: String,
-    pub parent_id: Option<String>,
-    pub role: String,
-    pub task: String,
-    pub status: String,
-    pub summary: Option<String>,
-    pub depth: i32,
-    pub error: Option<String>,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct AgentEventDto {
     pub event_id: String,
     pub id: String,
@@ -211,7 +196,6 @@ pub struct BootstrapDto {
     pub sessions: Vec<SessionDto>,
     pub selected_session_id: Option<String>,
     pub messages: Vec<MessageDto>,
-    pub subagent_events: Vec<SubagentEventDto>,
     pub agent_events: Vec<AgentEventDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
     pub config: ConfigDto,
@@ -225,7 +209,6 @@ pub struct ProjectSelectionDto {
     pub sessions: Vec<SessionDto>,
     pub selected_session_id: Option<String>,
     pub messages: Vec<MessageDto>,
-    pub subagent_events: Vec<SubagentEventDto>,
     pub agent_events: Vec<AgentEventDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
 }
@@ -236,7 +219,6 @@ pub struct SessionSelectionDto {
     pub session_id: String,
     pub sessions: Vec<SessionDto>,
     pub messages: Vec<MessageDto>,
-    pub subagent_events: Vec<SubagentEventDto>,
     pub agent_events: Vec<AgentEventDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
 }
@@ -247,7 +229,6 @@ pub struct RunPromptResponse {
     pub session_id: String,
     pub messages: Vec<MessageDto>,
     pub sessions: Vec<SessionDto>,
-    pub subagent_events: Vec<SubagentEventDto>,
     pub agent_events: Vec<AgentEventDto>,
     pub session_runtime: SessionRuntimeDto,
     pub timeline_items: Vec<TimelineItemDto>,
@@ -312,7 +293,7 @@ pub struct ToolApprovalRequestPayload {
     pub name: String,
     pub arguments: serde_json::Value,
     pub working_directory: Option<String>,
-    pub parent_subagent_id: Option<String>,
+    pub parent_agent_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

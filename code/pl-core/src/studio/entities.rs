@@ -89,32 +89,6 @@ pub mod tool_approval {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
-pub mod subagent_event {
-    use super::*;
-
-    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
-    #[sea_orm(table_name = "subagent_events")]
-    pub struct Model {
-        #[sea_orm(primary_key, auto_increment = false)]
-        pub id: String,
-        pub session_id: String,
-        pub subagent_id: String,
-        pub parent_id: Option<String>,
-        pub role: String,
-        pub task: String,
-        pub status: String,
-        pub summary: Option<String>,
-        pub depth: i32,
-        pub error: Option<String>,
-        pub created_at: i64,
-    }
-
-    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-    pub enum Relation {}
-
-    impl ActiveModelBehavior for ActiveModel {}
-}
-
 #[allow(dead_code)]
 pub mod agent {
     use super::*;

@@ -1,15 +1,15 @@
 use pl_core::{
     ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProjectRecord, ProviderConfig,
     ProviderEdit, ProviderModelEdit, ProviderTemplateKind, PureConfig, RoleEdit, SessionRecord,
-    SessionRuntimeRecord, StudioAgentEventRecord, StudioRuntime, SubagentEventRecord, TraceEvent,
-    TraceEventKind, TurnResultStatus, infer_provider_template_kind,
+    SessionRuntimeRecord, StudioAgentEventRecord, StudioRuntime, TraceEvent, TraceEventKind,
+    TurnResultStatus, infer_provider_template_kind,
 };
-use pl_protocol::{Message, MessageContent, MessageRole, SubagentStatus};
+use pl_protocol::{Message, MessageContent, MessageRole};
 
 use crate::dto::{
     AgentEventDto, ConfigDto, MessageDto, ModelDto, ProjectDto, ProviderDto, ProviderInput,
     ProviderSettingsInput, ProviderTemplateDto, RoleDto, RoleInput, SessionDto, SessionRuntimeDto,
-    SubagentEventDto, TimelineItemDto, UsageDto,
+    TimelineItemDto, UsageDto,
 };
 use crate::state::{CommandError, CommandResult};
 
@@ -292,27 +292,8 @@ pub fn message_dtos(messages: Vec<Message>) -> Vec<MessageDto> {
     messages.into_iter().map(message_dto).collect()
 }
 
-pub fn subagent_event_dtos(events: Vec<SubagentEventRecord>) -> Vec<SubagentEventDto> {
-    events.into_iter().map(subagent_event_dto).collect()
-}
-
 pub fn agent_event_dtos(events: Vec<StudioAgentEventRecord>) -> Vec<AgentEventDto> {
     events.into_iter().map(agent_event_dto).collect()
-}
-
-pub fn subagent_event_dto(event: SubagentEventRecord) -> SubagentEventDto {
-    SubagentEventDto {
-        event_id: event.event_id,
-        id: event.subagent_id,
-        parent_id: event.parent_id,
-        role: event.role,
-        task: event.task,
-        status: event.status,
-        summary: event.summary,
-        depth: event.depth,
-        error: event.error,
-        updated_at: event.created_at,
-    }
 }
 
 pub fn agent_event_dto(event: StudioAgentEventRecord) -> AgentEventDto {
@@ -344,18 +325,6 @@ pub fn message_dto(message: Message) -> MessageDto {
         content: message_content_text(message.content),
         reasoning_content: message.reasoning_content,
         metadata: message.metadata,
-    }
-}
-
-pub fn subagent_status_label(status: SubagentStatus) -> &'static str {
-    match status {
-        SubagentStatus::Queued => "queued",
-        SubagentStatus::AwaitingApproval => "awaitingApproval",
-        SubagentStatus::Running => "running",
-        SubagentStatus::AwaitingToolApproval => "awaitingToolApproval",
-        SubagentStatus::Succeeded => "succeeded",
-        SubagentStatus::Failed => "failed",
-        SubagentStatus::Denied => "denied",
     }
 }
 

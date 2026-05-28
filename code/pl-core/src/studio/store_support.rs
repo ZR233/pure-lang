@@ -11,7 +11,6 @@ use crate::studio::mappers::message_to_row_parts;
 
 const MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/0001_init.sql"),
-    include_str!("../../migrations/0002_subagent_events.sql"),
     include_str!("../../migrations/0003_session_runtime.sql"),
     include_str!("../../migrations/0004_trace_events.sql"),
     include_str!("../../migrations/0005_agent_events.sql"),
