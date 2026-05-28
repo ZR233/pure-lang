@@ -1133,11 +1133,13 @@ button.status-item {
   background: transparent;
 }
 
-.timeline-thought {
+.timeline-thought,
+.timeline-details {
   color: #596879;
 }
 
-.timeline-thought summary {
+.timeline-thought summary,
+.timeline-details summary {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1147,11 +1149,13 @@ button.status-item {
   font-weight: 700;
 }
 
-.timeline-thought summary::-webkit-details-marker {
+.timeline-thought summary::-webkit-details-marker,
+.timeline-details summary::-webkit-details-marker {
   display: none;
 }
 
-.timeline-thought[open] summary svg {
+.timeline-thought[open] summary svg,
+.timeline-details[open] summary svg {
   transform: rotate(180deg);
 }
 
@@ -1183,6 +1187,30 @@ button.status-item {
 
 .timeline-thought pre {
   margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f4f7fa;
+}
+
+.timeline-details {
+  margin-top: 8px;
+}
+
+.timeline-details summary {
+  color: #6a7a8e;
+  font-size: 12px;
+}
+
+.timeline-detail-label {
+  margin-top: 8px;
+  color: #728197;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.timeline-details .timeline-code {
+  margin-top: 4px;
   padding: 8px 10px;
   border-radius: 6px;
   background: #f4f7fa;
