@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use pl_protocol::AgentEventSender;
@@ -11,7 +11,7 @@ use crate::studio::records::{
 };
 use crate::{
     CompileMode, PureCore, ToolApprovalCallback, TraceRecorder, TurnOptions, TurnRequest,
-    load_workspace_instructions,
+    load_workspace_instructions, resolve_workspace_root,
 };
 
 #[derive(Clone)]
@@ -104,14 +104,15 @@ impl StudioRuntime {
         let mut session = self.store.load_core_session(session_id).await?;
         let previous_len = session.len();
         let config = self.config_store.load_or_default()?;
-        let workspace_instructions = load_workspace_instructions(Path::new(&project.path))?;
+        let workspace_root = resolve_workspace_root(Path::new(&project.path))?;
+        let workspace_instructions = load_workspace_instructions(&workspace_root)?;
         let mut request = TurnRequest::new(prompt.clone(), CompileMode::Auto);
         if !workspace_instructions.trim().is_empty() {
             request = request.with_workspace_instructions(workspace_instructions.clone());
         }
 
         let mut core = PureCore::from_config(&config, ModelRole::Planner)?;
-        core.register_default_tools(PathBuf::from(&project.path), Some(workspace_instructions));
+        core.register_default_tools(workspace_root, Some(workspace_instructions));
         if matches!(
             options.tool_approval_policy,
             crate::turn::ToolApprovalPolicy::Manual

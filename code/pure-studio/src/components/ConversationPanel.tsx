@@ -528,8 +528,13 @@ export function ConversationPanel({
 }: ConversationPanelProps) {
   const { t } = useTranslation();
   const messageStreamRef = useRef<HTMLDivElement>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
   const autoFollowRef = useRef(true);
+  const suppressProgrammaticScrollRef = useRef(false);
+  const userScrollIntentRef = useRef(false);
+  const userScrollIntentTimerRef = useRef<number | null>(null);
   const didRenderEntriesRef = useRef(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const prevBusyRef = useRef(isBusy);
@@ -543,16 +548,75 @@ export function ConversationPanel({
     const el = messageStreamRef.current;
     if (!el) return;
 
+    const markUserScrollIntent = () => {
+      userScrollIntentRef.current = true;
+      if (userScrollIntentTimerRef.current !== null) {
+        window.clearTimeout(userScrollIntentTimerRef.current);
+      }
+      userScrollIntentTimerRef.current = window.setTimeout(() => {
+        userScrollIntentRef.current = false;
+        userScrollIntentTimerRef.current = null;
+      }, 180);
+    };
+
     const handleScroll = () => {
       const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_THRESHOLD;
       isAtBottomRef.current = atBottom;
-      autoFollowRef.current = atBottom;
+      if (suppressProgrammaticScrollRef.current) {
+        if (atBottom) {
+          autoFollowRef.current = true;
+        }
+      } else if (isBusy && autoFollowRef.current && !userScrollIntentRef.current) {
+        followLatest();
+      } else {
+        autoFollowRef.current = atBottom;
+      }
       setShowScrollButton(!atBottom);
+      if (atBottom) {
+        userScrollIntentRef.current = false;
+      }
     };
 
+    el.addEventListener("wheel", markUserScrollIntent, { passive: true });
+    el.addEventListener("touchmove", markUserScrollIntent, { passive: true });
+    el.addEventListener("pointerdown", markUserScrollIntent);
+    el.addEventListener("keydown", markUserScrollIntent);
     el.addEventListener("scroll", handleScroll, { passive: true });
-    return () => el.removeEventListener("scroll", handleScroll);
-  }, []);
+    return () => {
+      el.removeEventListener("wheel", markUserScrollIntent);
+      el.removeEventListener("touchmove", markUserScrollIntent);
+      el.removeEventListener("pointerdown", markUserScrollIntent);
+      el.removeEventListener("keydown", markUserScrollIntent);
+      el.removeEventListener("scroll", handleScroll);
+      if (userScrollIntentTimerRef.current !== null) {
+        window.clearTimeout(userScrollIntentTimerRef.current);
+      }
+    };
+  }, [isBusy]);
+
+  function followLatest() {
+    const el = messageStreamRef.current;
+    if (!el) return;
+    suppressProgrammaticScrollRef.current = true;
+
+    const scroll = () => {
+      bottomRef.current?.scrollIntoView({ block: "end" });
+      el.scrollTop = el.scrollHeight;
+      isAtBottomRef.current = true;
+      autoFollowRef.current = true;
+      userScrollIntentRef.current = false;
+      setShowScrollButton(false);
+    };
+
+    scroll();
+    window.requestAnimationFrame(() => {
+      scroll();
+      window.requestAnimationFrame(() => {
+        scroll();
+        suppressProgrammaticScrollRef.current = false;
+      });
+    });
+  }
 
   useLayoutEffect(() => {
     if (!didRenderEntriesRef.current) {
@@ -562,24 +626,28 @@ export function ConversationPanel({
     if (!isBusy) {
       return;
     }
-    if (autoFollowRef.current && messageStreamRef.current) {
-      const el = messageStreamRef.current;
-      el.scrollTop = el.scrollHeight;
-      window.requestAnimationFrame(() => {
-        if (autoFollowRef.current) {
-          el.scrollTop = el.scrollHeight;
-        }
-      });
+    if (autoFollowRef.current) {
+      followLatest();
     }
   }, [entries, isBusy]);
+
+  useEffect(() => {
+    const timeline = timelineRef.current;
+    if (!timeline) return;
+    const observer = new ResizeObserver(() => {
+      if (isBusy && autoFollowRef.current) {
+        followLatest();
+      }
+    });
+    observer.observe(timeline);
+    return () => observer.disconnect();
+  }, [isBusy]);
 
   useEffect(() => {
     if (isBusy && !prevBusyRef.current) {
       isAtBottomRef.current = true;
       autoFollowRef.current = true;
-      if (messageStreamRef.current) {
-        messageStreamRef.current.scrollTop = messageStreamRef.current.scrollHeight;
-      }
+      followLatest();
     }
     prevBusyRef.current = isBusy;
   }, [isBusy]);
@@ -587,9 +655,9 @@ export function ConversationPanel({
   function scrollToBottom() {
     const el = messageStreamRef.current;
     if (el) {
-      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
       isAtBottomRef.current = true;
       autoFollowRef.current = true;
+      followLatest();
       setShowScrollButton(false);
     }
   }
@@ -611,7 +679,7 @@ export function ConversationPanel({
             <p>{t("conversation.emptyDescription")}</p>
           </div>
         ) : (
-          <div className="conversation-timeline">
+          <div className="conversation-timeline" ref={timelineRef}>
             {entries.map((entry) => {
               if (entry.kind === "message") {
                 return <MessageEntry key={entry.key} entry={entry} />;
@@ -627,6 +695,7 @@ export function ConversationPanel({
               }
               return <TraceEntry key={entry.key} item={entry.item} t={t} />;
             })}
+            <div className="timeline-bottom-anchor" ref={bottomRef} aria-hidden="true" />
           </div>
         )}
         {showScrollButton && (

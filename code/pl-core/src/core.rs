@@ -250,6 +250,11 @@ impl PureCore {
 
         let mut messages = session.messages().to_vec();
         for iteration in 0..max_iterations {
+            let must_dispatch_agent_now = if let Some(initial_count) = initial_agent_count {
+                iteration >= 2 && agent_control.list_agents(None).await.len() <= initial_count
+            } else {
+                false
+            };
             if is_cancelled(&options) {
                 return Ok(interrupted_turn_result(
                     recorder,
@@ -264,6 +269,23 @@ impl PureCore {
                 ));
             }
 
+            let iteration_tools = if must_dispatch_agent_now {
+                tool_schemas
+                    .iter()
+                    .filter(|schema| matches!(schema.name(), "spawn_agent" | "subagent"))
+                    .cloned()
+                    .collect()
+            } else {
+                tool_schemas.clone()
+            };
+            let iteration_instructions = if must_dispatch_agent_now {
+                format!(
+                    "{instructions}\n\n# 当前轮强制要求\n前面已进行了必要定位但尚未创建 agent。本轮必须调用 `spawn_agent` 或 `subagent`，不要继续调用文件、shell 或搜索工具，也不要输出最终回答。"
+                )
+            } else {
+                instructions.clone()
+            };
+
             let inference_id = format!("{session_id}-inf-{iteration}");
             recorder.record_trace_only(TraceEventKind::InferenceStarted {
                 turn_id: session_id.clone(),
@@ -273,9 +295,9 @@ impl PureCore {
 
             let completion_request = CompletionRequest {
                 model: model.clone(),
-                instructions: Some(instructions.clone()),
+                instructions: Some(iteration_instructions),
                 messages: messages.clone(),
-                tools: tool_schemas.clone(),
+                tools: iteration_tools,
                 tool_choice: "auto".to_string(),
                 parallel_tool_calls: false,
                 temperature: None,
