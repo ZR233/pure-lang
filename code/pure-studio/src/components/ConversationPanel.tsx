@@ -14,12 +14,10 @@ import {
 } from "lucide-react";
 import type { TFunction } from "i18next";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
-  ChatItem,
   AgentDto,
-  AgentTimelineEvent,
   AgentStatus,
   ProjectRecord,
   ProviderRecord,
@@ -27,12 +25,10 @@ import type {
   SessionRecord,
   SessionRuntime,
   TimelineItem,
-  TrackedToolCall,
   TurnPhase,
-  ToolCallStatus,
   ToolCallStatus2,
 } from "../types";
-import { formatTime } from "../lib/utils";
+import type { TimelineEntry } from "../state/selectors";
 import { SessionStatusBar } from "./SessionStatusBar";
 
 const agentStatusKeys: Record<AgentStatus, string> = {
@@ -46,33 +42,12 @@ const agentStatusKeys: Record<AgentStatus, string> = {
   notFound: "subagent.notFound",
 };
 
-const roleI18nKeys: Record<string, string> = {
-  explorer: "roles.explorer",
-  planner: "roles.planner",
-  executor: "roles.executor",
-  reviewer: "roles.reviewer",
-};
-
-type TimelineEntry =
-  | {
-      kind: "message";
-      key: string;
-      role: "system" | "user" | "assistant" | "tool";
-      content: string;
-    }
-  | { kind: "thought"; key: string; content: string }
-  | { kind: "tool"; key: string; toolCall: TrackedToolCall }
-  | { kind: "agent"; key: string; event: AgentTimelineEvent }
-  | { kind: "trace"; key: string; item: TimelineItem };
-
 type ConversationPanelProps = {
   selectedSession: SessionRecord | null;
   selectedProject: ProjectRecord | null;
   isBusy: boolean;
-  chatItems: ChatItem[];
+  entries: TimelineEntry[];
   agents: AgentDto[];
-  agentTimelineEvents: AgentTimelineEvent[];
-  timelineItems: TimelineItem[];
   sessionRuntime: SessionRuntime | null;
   prompt: string;
   status: string;
@@ -256,88 +231,6 @@ function MarkdownContent({ content }: { content: string }) {
   return <div className="markdown-content">{blocks}</div>;
 }
 
-function payloadObject(event: AgentTimelineEvent, key: string): Record<string, unknown> | null {
-  const payload = event.payload;
-  if (!payload || typeof payload !== "object") return null;
-  const value = payload[key];
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
-}
-
-function payloadString(payload: Record<string, unknown> | null, key: string): string | null {
-  const value = payload?.[key];
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
-function payloadBool(payload: Record<string, unknown> | null, key: string): boolean | null {
-  const value = payload?.[key];
-  return typeof value === "boolean" ? value : null;
-}
-
-function agentTimelinePayload(event: AgentTimelineEvent): Record<string, unknown> | null {
-  return (
-    payloadObject(event, "agentStateChanged") ??
-    payloadObject(event, "collabAgentSpawnBegin") ??
-    payloadObject(event, "collabAgentSpawnEnd") ??
-    payloadObject(event, "collabAgentInteractionBegin") ??
-    payloadObject(event, "collabAgentInteractionEnd") ??
-    payloadObject(event, "collabWaitingBegin") ??
-    payloadObject(event, "collabWaitingEnd") ??
-    payloadObject(event, "collabCloseBegin") ??
-    payloadObject(event, "collabCloseEnd")
-  );
-}
-
-function agentTimelineTitle(event: AgentTimelineEvent, t: TFunction): string {
-  switch (event.kind) {
-    case "spawnBegin":
-      return t("subagent.spawnBegin");
-    case "spawnEnd":
-      return t("subagent.spawnEnd");
-    case "interactionBegin":
-      return t("subagent.interactionBegin");
-    case "interactionEnd":
-      return t("subagent.interactionEnd");
-    case "waitingBegin":
-      return t("subagent.waitingBegin");
-    case "waitingEnd":
-      return t("subagent.waitingEnd");
-    case "closeBegin":
-      return t("subagent.closeBegin");
-    case "closeEnd":
-      return t("subagent.closeEnd");
-    case "agentStatus":
-      return t("subagent.title");
-    default:
-      return event.kind;
-  }
-}
-
-function agentTimelineStatus(event: AgentTimelineEvent): AgentStatus | null {
-  const payload = agentTimelinePayload(event);
-  const value = payloadString(payload, "status");
-  return value && value in agentStatusKeys ? (value as AgentStatus) : null;
-}
-
-function agentTimelineSummary(event: AgentTimelineEvent, t: TFunction): string {
-  const payload = agentTimelinePayload(event);
-  const error = payloadString(payload, "error");
-  if (error) return error;
-  const summary = payloadString(payload, "summary");
-  if (summary) return summary;
-  const reason = payloadString(payload, "reason");
-  if (reason) return reason;
-  const timedOut = payloadBool(payload, "timedOut");
-  if (timedOut !== null) return timedOut ? t("subagent.waitTimedOut") : t("subagent.waitCompleted");
-  const status = agentTimelineStatus(event);
-  if (status === "queued") return t("subagent.waitingToStart");
-  return "";
-}
-
-function agentTimelinePrompt(event: AgentTimelineEvent): string | null {
-  const payload = agentTimelinePayload(event);
-  return payloadString(payload, "prompt") ?? payloadString(payload, "task");
-}
-
 function formatUsage(usage?: { promptTokens: number; completionTokens: number; totalTokens: number } | null) {
   if (!usage) return null;
   return `${usage.promptTokens}p + ${usage.completionTokens}c = ${usage.totalTokens}t`;
@@ -348,46 +241,48 @@ function thoughtLabel(content: string): string {
   return firstLine?.toLowerCase().startsWith("thought") ? firstLine : "Thought";
 }
 
-function toolStatusLabel(status: ToolCallStatus | ToolCallStatus2 | null | undefined, t: TFunction): string {
+function toolStatusLabel(status: ToolCallStatus2 | null | undefined, t: TFunction): string {
   switch (status) {
     case "streaming":
     case "started":
+    case "running":
       return t("toolCall.streaming");
     case "completed":
       return t("toolCall.completed");
-    case "pending_approval":
-    case "awaiting_approval":
+    case "awaitingApproval":
       return t("toolCall.pendingApproval");
     case "approved":
       return t("toolCall.approved");
     case "denied":
       return t("toolCall.denied");
-    case "result_ready":
-      return t("toolCall.resultReady");
     case "failed":
       return t("subagent.failed");
+    case "interrupted":
+      return t("turnPhase.interrupted");
+    case "budgetLimited":
+      return t("turnPhase.budgetLimited");
     default:
       return t("toolCall.streaming");
   }
 }
 
-function turnStatusLabel(status: TimelineItem["turnStatus"], t: TFunction): string {
+function turnStatusLabel(status: TimelineItem["status"], t: TFunction): string {
   switch (status) {
     case "started":
+    case "streaming":
+    case "running":
       return t("turnPhase.running");
     case "completed":
       return t("turnPhase.completed");
-    case "errored":
+    case "failed":
       return t("turnPhase.failed");
-    case "aborted":
+    case "interrupted":
       return t("turnPhase.interrupted");
+    case "budgetLimited":
+      return t("turnPhase.budgetLimited");
     default:
       return t("turnPhase.running");
   }
-}
-
-function toolDisplayName(name: string | null | undefined): string {
-  return name ?? "Tool call";
 }
 
 function parseToolArguments(argumentsText: string | null | undefined): Record<string, unknown> | null {
@@ -472,66 +367,6 @@ function ToolDetails({
   );
 }
 
-function timelineEntries(
-  chatItems: ChatItem[],
-  agentTimelineEvents: AgentTimelineEvent[],
-  timelineItems: TimelineItem[],
-): TimelineEntry[] {
-  const entries: TimelineEntry[] = [];
-  const seenToolIds = new Set<string>();
-
-  chatItems.forEach((item, index) => {
-    if (item.kind === "tool_call") {
-      seenToolIds.add(item.toolCall.id);
-      entries.push({ kind: "tool", key: item.key, toolCall: item.toolCall });
-      return;
-    }
-
-    const { message } = item;
-    const hasReasoning = Boolean(message.reasoningContent?.trim());
-    const hasContent = Boolean(message.content.trim());
-    if (hasReasoning) {
-      entries.push({
-        kind: "thought",
-        key: `${item.key}-thought`,
-        content: message.reasoningContent ?? "",
-      });
-    }
-    if (hasContent || message.role !== "assistant") {
-      entries.push({
-        kind: "message",
-        key: `${item.key}-${index}`,
-        role: message.role,
-        content: message.content,
-      });
-    }
-  });
-
-  for (const event of agentTimelineEvents) {
-    entries.push({
-      kind: "agent",
-      key: `agent-${event.eventId}`,
-      event,
-    });
-  }
-
-  for (const item of timelineItems) {
-    if (item.kind === "tool_call" && item.toolCallId && seenToolIds.has(item.toolCallId)) {
-      continue;
-    }
-    if (item.kind === "tool_call") {
-      entries.push({ kind: "trace", key: `trace-${item.sequence}`, item });
-    } else if (
-      item.kind === "turn" &&
-      (item.turnStatus === "errored" || item.turnStatus === "aborted")
-    ) {
-      entries.push({ kind: "trace", key: `trace-${item.sequence}`, item });
-    }
-  }
-
-  return entries;
-}
-
 function EntryShell({
   className,
   icon,
@@ -581,26 +416,29 @@ function ThoughtEntry({ content }: { content: string }) {
   );
 }
 
-function ToolEntry({ toolCall, t }: { toolCall: TrackedToolCall; t: TFunction }) {
-  const pathSummary = toolPathSummary(toolCall.name, toolCall.arguments);
-  const hideResult = hidesToolResult(toolCall.name);
+function ToolEntry({ item, t }: { item: Extract<TimelineEntry, { kind: "tool" }>["item"]; t: TFunction }) {
+  const tool = item.tool;
+  const name = tool?.name ?? "Tool call";
+  const argumentsText = tool?.arguments ?? "";
+  const pathSummary = toolPathSummary(name, argumentsText);
+  const hideResult = hidesToolResult(name);
   return (
-    <EntryShell className={`timeline-entry-tool status-${toolCall.status}`} icon={<Wrench size={14} />}>
+    <EntryShell className={`timeline-entry-tool status-${item.status}`} icon={<Wrench size={14} />}>
       <div className="timeline-entry-head">
-        <strong>{toolCall.name}</strong>
+        <strong>{name}</strong>
         {pathSummary ? (
           <code className="timeline-inline-code" title={pathSummary}>
             {pathSummary}
           </code>
         ) : null}
-        <span className={`timeline-badge status-${toolCall.status}`}>{toolStatusLabel(toolCall.status, t)}</span>
+        <span className={`timeline-badge status-${item.status}`}>{toolStatusLabel(item.status, t)}</span>
       </div>
-      {!pathSummary && !isQuietFileTool(toolCall.name) && toolCall.arguments ? (
-        <p className="timeline-result">{compact(toolCall.arguments, 160)}</p>
+      {!pathSummary && !isQuietFileTool(name) && argumentsText ? (
+        <p className="timeline-result">{compact(argumentsText, 160)}</p>
       ) : null}
       <ToolDetails
-        argumentsText={isQuietFileTool(toolCall.name) ? null : toolCall.arguments}
-        result={toolCall.result}
+        argumentsText={isQuietFileTool(name) ? null : argumentsText}
+        result={tool?.result}
         hideResult={hideResult}
         t={t}
       />
@@ -609,28 +447,29 @@ function ToolEntry({ toolCall, t }: { toolCall: TrackedToolCall; t: TFunction })
 }
 
 function AgentEntry({
-  event,
+  item,
   t,
 }: {
-  event: AgentTimelineEvent;
+  item: Extract<TimelineEntry, { kind: "agent" }>["item"];
   t: TFunction;
 }) {
-  const status = agentTimelineStatus(event);
-  const prompt = agentTimelinePrompt(event);
-  const summary = agentTimelineSummary(event, t);
-  const path = event.path ?? payloadString(agentTimelinePayload(event), "path");
+  const agent = item.agent;
+  const status = agent?.status ?? null;
+  const prompt = agent?.task ?? null;
+  const summary = agent?.error ?? agent?.summary ?? agent?.reason ?? "";
+  const path = agent?.path ?? null;
   return (
-    <EntryShell className={`timeline-entry-subagent status-${status ?? event.kind}`} icon={<Activity size={14} />}>
+    <EntryShell className={`timeline-entry-subagent status-${status ?? item.status}`} icon={<Activity size={14} />}>
       <div className="timeline-entry-head">
-        <strong>{agentTimelineTitle(event, t)}</strong>
+        <strong>{t("subagent.title")}</strong>
         {path ? <code className="timeline-inline-code">{path}</code> : null}
         {status ? (
           <span className={`timeline-badge status-${status}`}>{t(agentStatusKeys[status])}</span>
         ) : null}
       </div>
       <div className="timeline-entry-meta">
-        {event.parentPath ? <span>{t("subagent.parent")} {event.parentPath}</span> : null}
-        <span>{formatTime(event.createdAt)}</span>
+        {agent?.parentPath ? <span>{t("subagent.parent")} {agent.parentPath}</span> : null}
+        <span>{new Date(item.updatedAt * 1000).toLocaleTimeString()}</span>
       </div>
       {prompt || summary ? (
         <details className="timeline-details">
@@ -648,57 +487,25 @@ function AgentEntry({
 
 function TraceEntry({ item, t }: { item: TimelineItem; t: TFunction }) {
   if (item.kind === "inference") {
-    const usage = formatUsage(item.inferenceUsage);
+    const usage = formatUsage(item.usage);
     return (
       <EntryShell className="timeline-entry-trace status-inference" icon={<Clock size={14} />}>
         <div className="timeline-entry-head">
-          <strong>{item.inferenceModel ?? "Inference"}</strong>
+          <strong>{item.inference?.model ?? "Inference"}</strong>
           {usage ? <span className="timeline-entry-meta-inline">{usage}</span> : null}
         </div>
       </EntryShell>
     );
   }
-
-  if (item.kind === "tool_call") {
-    const name = toolDisplayName(item.toolName);
-    const pathSummary = toolPathSummary(item.toolName, item.toolArguments);
-    const hideResult = hidesToolResult(item.toolName);
-    return (
-      <EntryShell className={`timeline-entry-tool status-${item.toolStatus ?? "started"}`} icon={<Wrench size={14} />}>
-        <div className="timeline-entry-head">
-          <strong>{name}</strong>
-          {pathSummary ? (
-            <code className="timeline-inline-code" title={pathSummary}>
-              {pathSummary}
-            </code>
-          ) : null}
-          <span className={`timeline-badge status-${item.toolStatus ?? "started"}`}>
-            {toolStatusLabel(item.toolStatus, t)}
-          </span>
-        </div>
-        {!pathSummary && !isQuietFileTool(item.toolName) && item.toolArguments ? (
-          <p className="timeline-result">{compact(item.toolArguments, 160)}</p>
-        ) : null}
-        <ToolDetails
-          argumentsText={isQuietFileTool(item.toolName) ? null : item.toolArguments}
-          result={item.toolResult}
-          hideResult={hideResult}
-          t={t}
-        />
-      </EntryShell>
-    );
-  }
-
-  const icon = item.turnStatus === "completed" ? <CheckCircle2 size={14} /> : <Circle size={14} />;
-  const usage = formatUsage(item.turnUsage);
+  const icon = item.status === "completed" ? <CheckCircle2 size={14} /> : <Circle size={14} />;
+  const usage = formatUsage(item.usage);
   return (
-    <EntryShell className={`timeline-entry-trace status-${item.turnStatus ?? "started"}`} icon={icon}>
+    <EntryShell className={`timeline-entry-trace status-${item.status ?? "started"}`} icon={icon}>
       <div className="timeline-entry-head">
-        <strong>{t("timeline.turn")} {turnStatusLabel(item.turnStatus, t)}</strong>
-        {item.turnModel ? <span className="timeline-entry-meta-inline">{item.turnModel}</span> : null}
+        <strong>{t("timeline.turn")} {turnStatusLabel(item.status, t)}</strong>
       </div>
       {usage ? <p className="timeline-entry-meta">{usage}</p> : null}
-      {item.toolResult ? <p className="timeline-result">{compact(item.toolResult, 260)}</p> : null}
+      {item.content ? <p className="timeline-result">{compact(item.content, 260)}</p> : null}
     </EntryShell>
   );
 }
@@ -707,10 +514,8 @@ export function ConversationPanel({
   selectedSession,
   selectedProject,
   isBusy,
-  chatItems,
+  entries,
   agents,
-  agentTimelineEvents,
-  timelineItems,
   sessionRuntime,
   prompt,
   status,
@@ -736,10 +541,6 @@ export function ConversationPanel({
   const didRenderEntriesRef = useRef(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const prevBusyRef = useRef(isBusy);
-  const entries = useMemo(
-    () => timelineEntries(chatItems, agentTimelineEvents, timelineItems),
-    [chatItems, agentTimelineEvents, timelineItems],
-  );
   const stopping = turnPhase === "stopping";
 
   useEffect(() => {
@@ -930,10 +731,10 @@ export function ConversationPanel({
                 return <ThoughtEntry key={entry.key} content={entry.content} />;
               }
               if (entry.kind === "tool") {
-                return <ToolEntry key={entry.key} toolCall={entry.toolCall} t={t} />;
+                return <ToolEntry key={entry.key} item={entry.item} t={t} />;
               }
               if (entry.kind === "agent") {
-                return <AgentEntry key={entry.key} event={entry.event} t={t} />;
+                return <AgentEntry key={entry.key} item={entry.item} t={t} />;
               }
               return <TraceEntry key={entry.key} item={entry.item} t={t} />;
             })}

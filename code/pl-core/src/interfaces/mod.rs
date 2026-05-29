@@ -51,12 +51,14 @@ pub trait ConfigRepository: Send + Sync {
     fn load_or_default(&self) -> impl Future<Output = Result<crate::PureConfig>> + Send;
 }
 
-/// 运行时事件与 trace 落盘端口。
+/// 运行时事件与 timeline 落盘端口。
 ///
 /// 用于将运行中的事件统一持久化，保证 timeline 可回放。
 pub trait EventSink: Send + Sync {
-    fn append_trace_events(&self, events: &[TraceEvent])
-    -> impl Future<Output = Result<()>> + Send;
+    fn append_timeline_events(
+        &self,
+        events: &[TraceEvent],
+    ) -> impl Future<Output = Result<()>> + Send;
     fn record_agent_event(
         &self,
         record: StudioAgentTimelineEventRecord,
@@ -136,8 +138,8 @@ impl ConfigRepository for ConfigStore {
 }
 
 impl EventSink for StudioStore {
-    async fn append_trace_events(&self, events: &[TraceEvent]) -> Result<()> {
-        self.append_trace_events(events).await
+    async fn append_timeline_events(&self, events: &[TraceEvent]) -> Result<()> {
+        self.append_timeline_events(events).await
     }
 
     async fn record_agent_event(&self, record: StudioAgentTimelineEventRecord) -> Result<()> {

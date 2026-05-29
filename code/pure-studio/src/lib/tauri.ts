@@ -10,7 +10,6 @@ import type {
 } from "../types";
 import {
   createPreviewConfig,
-  previewMessages,
   previewProjects,
   previewSessions,
   previewSessionRuntime,
@@ -47,7 +46,6 @@ export function bootstrapStudio() {
         selectedProjectId: previewProjects[0]?.id ?? null,
         sessions: previewSessions,
         selectedSessionId: previewSessions[0]?.id ?? null,
-        messages: previewMessages,
         agentEvents: previewAgentEvents,
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
@@ -73,7 +71,6 @@ export function openProject(path: string) {
         projects: [project, ...previewProjects],
         sessions: previewSessions,
         selectedSessionId: previewSessions[0]?.id ?? null,
-        messages: previewMessages,
         agentEvents: previewAgentEvents,
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
@@ -91,7 +88,6 @@ export function selectProject(projectId: string) {
         projects: previewProjects,
         sessions: previewSessions,
         selectedSessionId: previewSessions[0]?.id ?? null,
-        messages: previewMessages,
         agentEvents: previewAgentEvents,
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
@@ -114,7 +110,6 @@ export function createSession(projectId: string, title?: string) {
       clone({
         sessionId: session.id,
         sessions: [session, ...previewSessions],
-        messages: [],
         agentEvents: [],
         agents: [],
         sessionRuntime: {
@@ -143,7 +138,6 @@ export function selectSession(sessionId: string) {
       clone({
         sessionId,
         sessions: previewSessions,
-        messages: previewMessages,
         agentEvents: previewAgentEvents,
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
@@ -179,10 +173,6 @@ export function runPrompt(sessionId: string, prompt: string) {
         resolve(clone({
         sessionId,
         sessions: previewSessions,
-        messages: [
-          ...previewMessages,
-          { role: "user" as const, content: prompt, reasoningContent: null },
-        ],
         agentEvents: [
           ...previewAgentEvents,
           {
@@ -223,13 +213,28 @@ export function runPrompt(sessionId: string, prompt: string) {
         timelineItems: [
           ...previewTimelineItems,
           {
-            kind: "turn" as const,
-            sequence: previewTimelineItems.length + 10,
-            timestamp: Math.floor(Date.now() / 1000),
             turnId: "preview-turn-latest",
-            turnStatus: interrupted ? "aborted" as const : "completed" as const,
-            turnModel: previewSessionRuntime.model,
-            turnUsage: {
+            itemId: `preview-user-${Date.now()}`,
+            sequence: previewTimelineItems.length + 8,
+            kind: "text" as const,
+            status: "completed" as const,
+            createdAt: now,
+            updatedAt: now,
+            role: "user" as const,
+            content: prompt,
+            thinkingChunks: [],
+          },
+          {
+            turnId: "preview-turn-latest",
+            itemId: `preview-turn-latest-${Date.now()}`,
+            sequence: previewTimelineItems.length + 10,
+            kind: "turn" as const,
+            status: interrupted ? "interrupted" as const : "completed" as const,
+            createdAt: Math.floor(Date.now() / 1000),
+            updatedAt: Math.floor(Date.now() / 1000),
+            content: "",
+            thinkingChunks: [],
+            usage: {
               promptTokens: 1200,
               completionTokens: 260,
               cachedPromptTokens: 0,

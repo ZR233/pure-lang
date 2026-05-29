@@ -235,6 +235,16 @@ pub enum ToolApprovalDecision {
     Denied { reason: String },
 }
 
+/// 模型工具调用与本地工具执行的并行策略。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ToolExecutionMode {
+    #[default]
+    ModelDefault,
+    Sequential,
+    Parallel,
+}
+
 /// 单轮运行选项。
 ///
 /// 用于前端控制工具审批等运行时行为。默认值保持历史行为：已注册工具自动执行。
@@ -243,6 +253,7 @@ pub struct TurnOptions {
     pub tool_approval_policy: ToolApprovalPolicy,
     pub tool_approval_callback: Option<ToolApprovalCallback>,
     pub cancellation_token: Option<CancellationToken>,
+    pub tool_execution_mode: ToolExecutionMode,
 }
 
 impl TurnOptions {
@@ -251,6 +262,7 @@ impl TurnOptions {
             tool_approval_policy,
             tool_approval_callback: None,
             cancellation_token: None,
+            tool_execution_mode: ToolExecutionMode::ModelDefault,
         }
     }
 
@@ -259,6 +271,7 @@ impl TurnOptions {
             tool_approval_policy: ToolApprovalPolicy::Manual,
             tool_approval_callback: Some(callback),
             cancellation_token: None,
+            tool_execution_mode: ToolExecutionMode::ModelDefault,
         }
     }
 
@@ -268,6 +281,11 @@ impl TurnOptions {
 
     pub fn with_cancellation(mut self, cancellation_token: CancellationToken) -> Self {
         self.cancellation_token = Some(cancellation_token);
+        self
+    }
+
+    pub fn with_tool_execution_mode(mut self, tool_execution_mode: ToolExecutionMode) -> Self {
+        self.tool_execution_mode = tool_execution_mode;
         self
     }
 }
@@ -290,6 +308,7 @@ impl std::fmt::Debug for TurnOptions {
                 "cancellation_token",
                 &self.cancellation_token.as_ref().map(|_| "<token>"),
             )
+            .field("tool_execution_mode", &self.tool_execution_mode)
             .finish()
     }
 }
@@ -337,8 +356,8 @@ pub struct TurnResult {
     pub abort_reason: Option<TurnAbortReason>,
     pub budget_limit_kind: Option<BudgetLimitKind>,
     pub budget_usage: Option<BudgetUsage>,
-    /// Structured trace events recorded during this turn (if tracing was enabled).
-    pub trace_events: Vec<TraceEvent>,
+    /// Structured timeline events recorded during this turn (if tracing was enabled).
+    pub timeline_events: Vec<TraceEvent>,
 }
 
 #[cfg(test)]

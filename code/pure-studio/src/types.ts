@@ -13,35 +13,6 @@ export type SessionRecord = {
   updatedAt: number;
 };
 
-export type ChatMessage = {
-  role: "system" | "user" | "assistant" | "tool";
-  content: string;
-  reasoningContent?: string | null;
-  metadata?: Record<string, string> | null;
-};
-
-export type ToolCallStatus =
-  | "streaming"
-  | "completed"
-  | "pending_approval"
-  | "approved"
-  | "denied"
-  | "result_ready";
-
-export type TrackedToolCall = {
-  id: string;
-  name: string;
-  arguments: string;
-  status: ToolCallStatus;
-  workingDirectory?: string | null;
-  result?: string | null;
-  startedAt: number;
-};
-
-export type ChatItem =
-  | { kind: "message"; message: ChatMessage; key: string }
-  | { kind: "tool_call"; toolCall: TrackedToolCall; key: string };
-
 export type AgentStatus =
   | "queued"
   | "running"
@@ -158,11 +129,15 @@ export type SessionRuntime = {
 
 export type ToolCallStatus2 =
   | "started"
-  | "awaiting_approval"
+  | "streaming"
+  | "awaitingApproval"
   | "approved"
   | "denied"
+  | "running"
   | "completed"
-  | "failed";
+  | "failed"
+  | "interrupted"
+  | "budgetLimited";
 
 export type TurnStatus = "started" | "completed" | "aborted" | "errored";
 
@@ -189,20 +164,45 @@ export type UsageSnapshot = {
 };
 
 export type TimelineItem = {
-  kind: "turn" | "tool_call" | "inference";
+  turnId: string;
+  itemId: string;
   sequence: number;
-  timestamp: number;
-  turnId?: string | null;
-  toolCallId?: string | null;
-  toolName?: string | null;
-  toolArguments?: string | null;
-  toolStatus?: ToolCallStatus2 | null;
-  toolResult?: string | null;
-  inferenceModel?: string | null;
-  inferenceUsage?: UsageSnapshot | null;
-  turnStatus?: TurnStatus | null;
-  turnModel?: string | null;
-  turnUsage?: UsageSnapshot | null;
+  kind: "text" | "thinking" | "tool" | "agent" | "turn" | "inference";
+  status: ToolCallStatus2;
+  createdAt: number;
+  updatedAt: number;
+  role?: "user" | "assistant" | null;
+  content: string;
+  thinkingChunks: { chunkIndex: number; content: string }[];
+  tool?: {
+    toolCallId: string;
+    callId?: string | null;
+    providerItemId?: string | null;
+    name: string;
+    arguments: string;
+    result?: string | null;
+    exitCode?: number | null;
+    timedOut: boolean;
+    workingDirectory?: string | null;
+    denialReason?: string | null;
+  } | null;
+  agent?: {
+    id: string;
+    path: string;
+    parentPath?: string | null;
+    role: string;
+    task: string;
+    status: AgentStatus;
+    summary?: string | null;
+    depth: number;
+    error?: string | null;
+    reason?: string | null;
+  } | null;
+  inference?: {
+    inferenceId: string;
+    model: string;
+  } | null;
+  usage?: UsageSnapshot | null;
 };
 
 export type SessionTimeline = {
@@ -257,7 +257,6 @@ export type BootstrapPayload = {
   selectedProjectId?: string | null;
   sessions: SessionRecord[];
   selectedSessionId?: string | null;
-  messages: ChatMessage[];
   agentEvents: AgentTimelineEvent[];
   agents: AgentDto[];
   sessionRuntime?: SessionRuntime | null;
@@ -269,7 +268,6 @@ export type ProjectSelectionPayload = {
   projects: ProjectRecord[];
   sessions: SessionRecord[];
   selectedSessionId?: string | null;
-  messages: ChatMessage[];
   agentEvents: AgentTimelineEvent[];
   agents: AgentDto[];
   sessionRuntime?: SessionRuntime | null;
@@ -278,7 +276,6 @@ export type ProjectSelectionPayload = {
 export type SessionSelectionPayload = {
   sessionId: string;
   sessions: SessionRecord[];
-  messages: ChatMessage[];
   agentEvents: AgentTimelineEvent[];
   agents: AgentDto[];
   sessionRuntime?: SessionRuntime | null;
@@ -287,7 +284,6 @@ export type SessionSelectionPayload = {
 export type RunPromptResponse = {
   sessionId: string;
   sessions: SessionRecord[];
-  messages: ChatMessage[];
   agentEvents: AgentTimelineEvent[];
   agents: AgentDto[];
   sessionRuntime: SessionRuntime;
@@ -302,10 +298,10 @@ export type StopPromptResponse = {
 };
 
 export type AgentEvent =
-  | { textDelta: { content: string } }
-  | { thinkingDelta: { content: string } }
-  | { toolCallDelta: { id: string; name: string; argumentsDelta: string } }
-  | { toolCallComplete: { id: string; name: string; arguments: string } }
+  | { timelineItemStarted: { item: TimelineItem } }
+  | { timelineItemDelta: { event: TimelineItemDeltaEvent } }
+  | { timelineItemCompleted: { sequence: number; item: TimelineItem } }
+  | { timelineItemFailed: { sequence: number; item: TimelineItem; error: string } }
   | {
       toolApprovalRequested: {
         id: string;
@@ -317,7 +313,6 @@ export type AgentEvent =
   | { toolApprovalGranted: { id: string; name: string } }
   | { toolApprovalDenied: { id: string; name: string; reason: string } }
   | { agentStateChanged: AgentDto }
-  | "turnStarted"
   | { turnInterrupted: { reason: string } }
   | {
       turnBudgetLimited: {
@@ -333,6 +328,21 @@ export type AgentEvent =
     }
   | "done"
   | { error: { message: string; severity: string } };
+
+export type TimelineItemDeltaEvent = {
+  turnId: string;
+  itemId: string;
+  sequence: number;
+  kind: TimelineItem["kind"];
+  status: TimelineItem["status"];
+  createdAt: number;
+  updatedAt: number;
+  delta:
+    | { type: "text"; delta: string }
+    | { type: "thinking"; chunkIndex: number; delta: string }
+    | { type: "toolArguments"; delta: string }
+    | { type: "toolResult"; delta: string };
+};
 
 export type AgentEventPayload = {
   sessionId: string;

@@ -2,14 +2,21 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use futures::StreamExt;
-use pl_protocol::{AgentEvent, AgentEventSender, PureError, Result};
+use pl_protocol::{
+    AgentEvent, AgentEventSender, PureError, Result, TimelineDelta, TimelineItem,
+    TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus, TimelineTextRole,
+    TimelineThinkingChunk, TimelineToolItem, TraceEvent, TraceEventKind,
+};
 use tracing::{debug, warn};
 
 use crate::capabilities::ProviderCapabilities;
 use crate::model_info::ModelInfo;
 use crate::provider::ModelProvider;
 use crate::provider_info::{ProviderInfo, WireApi};
-use crate::request::{CompletionRequest, CompletionResponse, FinishReason, TokenUsage, ToolCall};
+use crate::request::{
+    CompletionRequest, CompletionResponse, CompletionTimelineContext, FinishReason, TokenUsage,
+    ToolCall,
+};
 use crate::sse::{self, StreamEvent, ToolCallDeltaPayload};
 use crate::wire_api::WireDispatch;
 
@@ -109,6 +116,7 @@ impl ModelProvider for OpenAiCompatibleProvider {
 
             let supports_custom_tools = info.supports_custom_tools_for_model(&model_info)
                 && info.supports_freeform_tools_for_model(&model_info);
+            let timeline = request.timeline.clone();
             let request = request.provider_compatible(supports_custom_tools);
             let body = wire_dispatch.build_request_body(&request);
 
@@ -138,7 +146,7 @@ impl ModelProvider for OpenAiCompatibleProvider {
                 return Err(PureError::LlmError(format!("API error {status}: {body}")));
             }
 
-            process_sse_stream(response, &event_tx, &wire_dispatch).await
+            process_sse_stream(response, &event_tx, &wire_dispatch, timeline).await
         }
     }
 
@@ -166,11 +174,12 @@ async fn process_sse_stream(
     response: reqwest::Response,
     event_tx: &AgentEventSender,
     wire_dispatch: &WireDispatch,
+    timeline: Option<CompletionTimelineContext>,
 ) -> Result<CompletionResponse> {
     use eventsource_stream::Eventsource;
 
     let stream = response.bytes_stream().eventsource();
-    let mut accumulator = StreamCompletionAccumulator::default();
+    let mut accumulator = StreamCompletionAccumulator::new(timeline);
 
     let mut stream = std::pin::pin!(stream);
 
@@ -199,29 +208,48 @@ async fn process_sse_stream(
         accumulator.apply(stream_event, event_tx)?;
     }
 
-    Ok(accumulator.finish())
+    Ok(accumulator.finish(event_tx))
 }
 
-#[derive(Default)]
 struct StreamCompletionAccumulator {
     content_parts: Vec<String>,
     reasoning_parts: Vec<String>,
     tool_calls: Vec<ToolCall>,
     tool_call_accumulators: HashMap<String, ToolCallAccumulator>,
     final_usage: Option<TokenUsage>,
+    timeline: Option<TimelineState>,
+    text_item_id: Option<String>,
+    thinking_item_id: Option<String>,
 }
 
 impl StreamCompletionAccumulator {
+    fn new(timeline: Option<CompletionTimelineContext>) -> Self {
+        Self {
+            content_parts: Vec::new(),
+            reasoning_parts: Vec::new(),
+            tool_calls: Vec::new(),
+            tool_call_accumulators: HashMap::new(),
+            final_usage: None,
+            timeline: timeline.map(TimelineState::new),
+            text_item_id: None,
+            thinking_item_id: None,
+        }
+    }
+
     fn apply(&mut self, stream_event: StreamEvent, event_tx: &AgentEventSender) -> Result<()> {
         match stream_event {
-            StreamEvent::OutputTextDelta(text) => {
-                self.content_parts.push(text.clone());
-                let _ = event_tx.send(AgentEvent::TextDelta { content: text });
+            StreamEvent::OutputTextDelta { item_id, delta } => {
+                self.content_parts.push(delta.clone());
+                self.record_text_delta(item_id, delta, event_tx, TimelineTextRole::Assistant);
             }
 
-            StreamEvent::ThinkingDelta { delta } => {
+            StreamEvent::ThinkingDelta {
+                item_id,
+                chunk_index,
+                delta,
+            } => {
                 self.reasoning_parts.push(delta.clone());
-                let _ = event_tx.send(AgentEvent::ThinkingDelta { content: delta });
+                self.record_thinking_delta(item_id, chunk_index, delta, event_tx);
             }
 
             StreamEvent::ToolCallDelta {
@@ -241,23 +269,22 @@ impl StreamCompletionAccumulator {
                     .as_ref()
                     .filter(|call_id| !call_id.is_empty())
                     .cloned();
-                let acc = self
-                    .tool_call_accumulators
-                    .entry(key.clone())
-                    .or_insert_with(|| ToolCallAccumulator {
-                        id: initial_id,
-                        call_id: initial_call_id,
-                        name: String::new(),
-                        payload: ToolCallPayloadAccumulator::FunctionArguments(String::new()),
-                    });
-                acc.merge_metadata(&key, &item_id, call_id.as_ref(), name);
-                let delta_text = payload_delta.text().to_string();
-                acc.push_delta(payload_delta);
-                let _ = event_tx.send(AgentEvent::ToolCallDelta {
-                    id: acc.id.clone(),
-                    name: acc.name.clone(),
-                    arguments_delta: delta_text,
-                });
+                let (snapshot, delta_text) = {
+                    let acc = self
+                        .tool_call_accumulators
+                        .entry(key.clone())
+                        .or_insert_with(|| ToolCallAccumulator {
+                            id: initial_id,
+                            call_id: initial_call_id,
+                            name: String::new(),
+                            payload: ToolCallPayloadAccumulator::FunctionArguments(String::new()),
+                        });
+                    acc.merge_metadata(&key, &item_id, call_id.as_ref(), name);
+                    let delta_text = payload_delta.text().to_string();
+                    acc.push_delta(payload_delta);
+                    (acc.snapshot(), delta_text)
+                };
+                self.record_tool_delta(&snapshot, delta_text, event_tx);
             }
 
             StreamEvent::OutputItemDone(value) => {
@@ -287,20 +314,16 @@ impl StreamCompletionAccumulator {
                         })
                         .unwrap_or_default();
                     let id = id.unwrap_or_default();
-
-                    let _ = event_tx.send(AgentEvent::ToolCallComplete {
-                        id: id.clone(),
-                        name: name.clone(),
-                        arguments: arguments.clone(),
-                    });
-
-                    self.tool_calls.push(ToolCall::function(
+                    let call = ToolCall::function(
                         id,
                         name,
                         serde_json::from_str(&arguments)
                             .unwrap_or(serde_json::Value::String(arguments)),
                         call_id,
-                    ));
+                    );
+                    self.complete_tool_item(&call, event_tx);
+
+                    self.tool_calls.push(call);
                 } else if let Some(custom_call) = value.get("type").and_then(|t| t.as_str())
                     && custom_call == "custom_tool_call"
                 {
@@ -324,15 +347,10 @@ impl StreamCompletionAccumulator {
                         .or_else(|| acc.as_ref().and_then(ToolCallAccumulator::custom_input))
                         .unwrap_or_default();
                     let id = id.unwrap_or_default();
+                    let call = ToolCall::custom(id, name, input, call_id);
+                    self.complete_tool_item(&call, event_tx);
 
-                    let _ = event_tx.send(AgentEvent::ToolCallComplete {
-                        id: id.clone(),
-                        name: name.clone(),
-                        arguments: input.clone(),
-                    });
-
-                    self.tool_calls
-                        .push(ToolCall::custom(id, name, input, call_id));
+                    self.tool_calls.push(call);
                 }
             }
 
@@ -376,11 +394,19 @@ impl StreamCompletionAccumulator {
         fallback_key.and_then(|key| self.tool_call_accumulators.remove(&key))
     }
 
-    fn finish(mut self) -> CompletionResponse {
+    fn finish(mut self, event_tx: &AgentEventSender) -> CompletionResponse {
         // 合并累积的工具调用（如果有 delta 但没有 output_item.done）
-        for (_, acc) in self.tool_call_accumulators {
+        let remaining_accumulators = std::mem::take(&mut self.tool_call_accumulators);
+        for (_, acc) in remaining_accumulators {
             if !self.tool_calls.iter().any(|tc| tc.id == acc.id) {
-                self.tool_calls.push(acc.into_tool_call());
+                let call = acc.into_tool_call();
+                self.complete_tool_item_without_broadcast(&call);
+                self.tool_calls.push(call);
+            }
+        }
+        if let Some(timeline) = self.timeline.as_mut() {
+            for event in timeline.complete_streaming_items() {
+                let _ = event_tx.send(event);
             }
         }
 
@@ -402,13 +428,94 @@ impl StreamCompletionAccumulator {
             FinishReason::Stop
         };
 
+        let timeline_events = self
+            .timeline
+            .as_ref()
+            .map(TimelineState::events)
+            .unwrap_or_default();
+        let next_sequence = self
+            .timeline
+            .as_ref()
+            .map(TimelineState::next_sequence)
+            .unwrap_or(0);
+
         CompletionResponse {
             content,
             reasoning_content,
             tool_calls: self.tool_calls,
+            timeline_events,
+            next_sequence,
             usage: self.final_usage.unwrap_or_default(),
             finish_reason,
             model: String::new(),
+        }
+    }
+
+    fn record_text_delta(
+        &mut self,
+        item_id: Option<String>,
+        delta: String,
+        event_tx: &AgentEventSender,
+        role: TimelineTextRole,
+    ) {
+        let Some(timeline) = self.timeline.as_mut() else {
+            return;
+        };
+        let item_id = item_id
+            .filter(|value| !value.is_empty())
+            .or_else(|| self.text_item_id.clone())
+            .unwrap_or_else(|| timeline.item_id("text"));
+        self.text_item_id = Some(item_id.clone());
+        for event in timeline.append_text_delta(&item_id, role, delta) {
+            let _ = event_tx.send(event);
+        }
+    }
+
+    fn record_thinking_delta(
+        &mut self,
+        item_id: Option<String>,
+        chunk_index: u32,
+        delta: String,
+        event_tx: &AgentEventSender,
+    ) {
+        let Some(timeline) = self.timeline.as_mut() else {
+            return;
+        };
+        let item_id = item_id
+            .filter(|value| !value.is_empty())
+            .or_else(|| self.thinking_item_id.clone())
+            .unwrap_or_else(|| timeline.item_id("thinking"));
+        self.thinking_item_id = Some(item_id.clone());
+        for event in timeline.append_thinking_delta(&item_id, chunk_index, delta) {
+            let _ = event_tx.send(event);
+        }
+    }
+
+    fn record_tool_delta(
+        &mut self,
+        snapshot: &ToolCallAccumulatorSnapshot,
+        delta: String,
+        event_tx: &AgentEventSender,
+    ) {
+        let Some(timeline) = self.timeline.as_mut() else {
+            return;
+        };
+        for event in timeline.append_tool_arguments_delta(snapshot, delta) {
+            let _ = event_tx.send(event);
+        }
+    }
+
+    fn complete_tool_item(&mut self, call: &ToolCall, event_tx: &AgentEventSender) {
+        let Some(timeline) = self.timeline.as_mut() else {
+            return;
+        };
+        let event = timeline.complete_tool_call(call);
+        let _ = event_tx.send(event);
+    }
+
+    fn complete_tool_item_without_broadcast(&mut self, call: &ToolCall) {
+        if let Some(timeline) = self.timeline.as_mut() {
+            timeline.complete_tool_call_trace_only(call);
         }
     }
 }
@@ -480,6 +587,15 @@ impl ToolCallAccumulator {
         }
     }
 
+    fn snapshot(&self) -> ToolCallAccumulatorSnapshot {
+        ToolCallAccumulatorSnapshot {
+            id: self.id.clone(),
+            call_id: self.call_id.clone(),
+            name: self.name.clone(),
+            arguments: self.payload.text().to_string(),
+        }
+    }
+
     fn into_tool_call(self) -> ToolCall {
         match self.payload {
             ToolCallPayloadAccumulator::FunctionArguments(arguments) => ToolCall::function(
@@ -498,6 +614,373 @@ impl ToolCallAccumulator {
 enum ToolCallPayloadAccumulator {
     FunctionArguments(String),
     CustomInput(String),
+}
+
+impl ToolCallPayloadAccumulator {
+    fn text(&self) -> &str {
+        match self {
+            Self::FunctionArguments(arguments) | Self::CustomInput(arguments) => arguments,
+        }
+    }
+}
+
+struct ToolCallAccumulatorSnapshot {
+    id: String,
+    call_id: Option<String>,
+    name: String,
+    arguments: String,
+}
+
+struct TimelineState {
+    session_id: String,
+    turn_id: String,
+    inference_id: String,
+    sequence: u64,
+    started: HashMap<String, TimelineItem>,
+    events: Vec<TraceEvent>,
+}
+
+impl TimelineState {
+    fn new(context: CompletionTimelineContext) -> Self {
+        Self {
+            session_id: context.session_id,
+            turn_id: context.turn_id,
+            inference_id: context.inference_id,
+            sequence: context.starting_sequence,
+            started: HashMap::new(),
+            events: Vec::new(),
+        }
+    }
+
+    fn events(&self) -> Vec<TraceEvent> {
+        self.events.clone()
+    }
+
+    fn next_sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    fn item_id(&self, prefix: &str) -> String {
+        format!("{}-{prefix}", self.inference_id)
+    }
+
+    fn append_text_delta(
+        &mut self,
+        item_id: &str,
+        role: TimelineTextRole,
+        delta: String,
+    ) -> Vec<AgentEvent> {
+        let now = unix_seconds();
+        let mut events = Vec::new();
+        if !self.started.contains_key(item_id) {
+            let item = TimelineItem {
+                turn_id: self.turn_id.clone(),
+                item_id: item_id.to_string(),
+                sequence: self.sequence,
+                kind: TimelineItemKind::Text,
+                status: TimelineItemStatus::Streaming,
+                created_at: now,
+                updated_at: now,
+                role: Some(role),
+                content: String::new(),
+                thinking_chunks: Vec::new(),
+                tool: None,
+                agent: None,
+                inference: None,
+                usage: None,
+            };
+            self.record(
+                TraceEventKind::TimelineItemStarted { item: item.clone() },
+                now,
+            );
+            events.push(AgentEvent::TimelineItemStarted { item: item.clone() });
+            self.started.insert(item_id.to_string(), item);
+        }
+        if let Some(item) = self.started.get_mut(item_id) {
+            item.status = TimelineItemStatus::Streaming;
+            item.updated_at = now;
+            item.content.push_str(&delta);
+        }
+        let event = TimelineItemDeltaEvent {
+            turn_id: self.turn_id.clone(),
+            item_id: item_id.to_string(),
+            sequence: self.sequence,
+            kind: TimelineItemKind::Text,
+            status: TimelineItemStatus::Streaming,
+            created_at: now,
+            updated_at: now,
+            delta: TimelineDelta::Text { delta },
+        };
+        self.record(
+            TraceEventKind::TimelineItemDelta {
+                event: event.clone(),
+            },
+            now,
+        );
+        events.push(AgentEvent::TimelineItemDelta { event });
+        events
+    }
+
+    fn append_thinking_delta(
+        &mut self,
+        item_id: &str,
+        chunk_index: u32,
+        delta: String,
+    ) -> Vec<AgentEvent> {
+        let now = unix_seconds();
+        let mut events = Vec::new();
+        if !self.started.contains_key(item_id) {
+            let item = TimelineItem {
+                turn_id: self.turn_id.clone(),
+                item_id: item_id.to_string(),
+                sequence: self.sequence,
+                kind: TimelineItemKind::Thinking,
+                status: TimelineItemStatus::Streaming,
+                created_at: now,
+                updated_at: now,
+                role: None,
+                content: String::new(),
+                thinking_chunks: Vec::new(),
+                tool: None,
+                agent: None,
+                inference: None,
+                usage: None,
+            };
+            self.record(
+                TraceEventKind::TimelineItemStarted { item: item.clone() },
+                now,
+            );
+            events.push(AgentEvent::TimelineItemStarted { item: item.clone() });
+            self.started.insert(item_id.to_string(), item);
+        }
+        if let Some(item) = self.started.get_mut(item_id) {
+            item.status = TimelineItemStatus::Streaming;
+            item.updated_at = now;
+            match item
+                .thinking_chunks
+                .iter_mut()
+                .find(|chunk| chunk.chunk_index == chunk_index)
+            {
+                Some(chunk) => chunk.content.push_str(&delta),
+                None => item.thinking_chunks.push(TimelineThinkingChunk {
+                    chunk_index,
+                    content: delta.clone(),
+                }),
+            }
+            item.thinking_chunks.sort_by_key(|chunk| chunk.chunk_index);
+        }
+        let event = TimelineItemDeltaEvent {
+            turn_id: self.turn_id.clone(),
+            item_id: item_id.to_string(),
+            sequence: self.sequence,
+            kind: TimelineItemKind::Thinking,
+            status: TimelineItemStatus::Streaming,
+            created_at: now,
+            updated_at: now,
+            delta: TimelineDelta::Thinking { chunk_index, delta },
+        };
+        self.record(
+            TraceEventKind::TimelineItemDelta {
+                event: event.clone(),
+            },
+            now,
+        );
+        events.push(AgentEvent::TimelineItemDelta { event });
+        events
+    }
+
+    fn append_tool_arguments_delta(
+        &mut self,
+        snapshot: &ToolCallAccumulatorSnapshot,
+        delta: String,
+    ) -> Vec<AgentEvent> {
+        let now = unix_seconds();
+        let item_id = timeline_tool_item_id(snapshot.call_id.as_ref(), &snapshot.id);
+        let mut events = Vec::new();
+        if !self.started.contains_key(&item_id) {
+            let item = TimelineItem {
+                turn_id: self.turn_id.clone(),
+                item_id: item_id.clone(),
+                sequence: self.sequence,
+                kind: TimelineItemKind::Tool,
+                status: TimelineItemStatus::Streaming,
+                created_at: now,
+                updated_at: now,
+                role: None,
+                content: String::new(),
+                thinking_chunks: Vec::new(),
+                tool: Some(TimelineToolItem {
+                    tool_call_id: item_id.clone(),
+                    call_id: snapshot.call_id.clone(),
+                    provider_item_id: (!snapshot.id.is_empty()).then(|| snapshot.id.clone()),
+                    name: snapshot.name.clone(),
+                    arguments: String::new(),
+                    result: None,
+                    exit_code: None,
+                    timed_out: false,
+                    working_directory: None,
+                    denial_reason: None,
+                }),
+                agent: None,
+                inference: None,
+                usage: None,
+            };
+            self.record(
+                TraceEventKind::TimelineItemStarted { item: item.clone() },
+                now,
+            );
+            events.push(AgentEvent::TimelineItemStarted { item: item.clone() });
+            self.started.insert(item_id.clone(), item);
+        }
+        if let Some(item) = self.started.get_mut(&item_id) {
+            item.status = TimelineItemStatus::Streaming;
+            item.updated_at = now;
+            if let Some(tool) = &mut item.tool {
+                tool.name = snapshot.name.clone();
+                tool.arguments = snapshot.arguments.clone();
+                tool.call_id = snapshot.call_id.clone();
+                tool.provider_item_id = (!snapshot.id.is_empty()).then(|| snapshot.id.clone());
+            }
+        }
+        let event = TimelineItemDeltaEvent {
+            turn_id: self.turn_id.clone(),
+            item_id,
+            sequence: self.sequence,
+            kind: TimelineItemKind::Tool,
+            status: TimelineItemStatus::Streaming,
+            created_at: now,
+            updated_at: now,
+            delta: TimelineDelta::ToolArguments { delta },
+        };
+        self.record(
+            TraceEventKind::TimelineItemDelta {
+                event: event.clone(),
+            },
+            now,
+        );
+        events.push(AgentEvent::TimelineItemDelta { event });
+        events
+    }
+
+    fn complete_tool_call(&mut self, call: &ToolCall) -> AgentEvent {
+        let item = self.complete_tool_call_item(call, TimelineItemStatus::Started);
+        let sequence = self.sequence;
+        self.record(
+            TraceEventKind::TimelineItemCompleted { item: item.clone() },
+            item.updated_at,
+        );
+        AgentEvent::TimelineItemCompleted { sequence, item }
+    }
+
+    fn complete_streaming_items(&mut self) -> Vec<AgentEvent> {
+        let item_ids = self
+            .started
+            .iter()
+            .filter(|(_, item)| {
+                matches!(
+                    item.kind,
+                    TimelineItemKind::Text | TimelineItemKind::Thinking
+                )
+            })
+            .map(|(item_id, _)| item_id.clone())
+            .collect::<Vec<_>>();
+        let mut events = Vec::new();
+        for item_id in item_ids {
+            let Some(item) = self.started.get_mut(&item_id) else {
+                continue;
+            };
+            if item.status == TimelineItemStatus::Completed {
+                continue;
+            }
+            item.status = TimelineItemStatus::Completed;
+            item.updated_at = unix_seconds();
+            let item = item.clone();
+            let sequence = self.sequence;
+            self.record(
+                TraceEventKind::TimelineItemCompleted { item: item.clone() },
+                item.updated_at,
+            );
+            events.push(AgentEvent::TimelineItemCompleted { sequence, item });
+        }
+        events
+    }
+
+    fn complete_tool_call_trace_only(&mut self, call: &ToolCall) {
+        let item = self.complete_tool_call_item(call, TimelineItemStatus::Started);
+        self.record(
+            TraceEventKind::TimelineItemCompleted { item },
+            unix_seconds(),
+        );
+    }
+
+    fn complete_tool_call_item(
+        &mut self,
+        call: &ToolCall,
+        status: TimelineItemStatus,
+    ) -> TimelineItem {
+        let now = unix_seconds();
+        let item_id = timeline_tool_item_id(call.call_id.as_ref(), &call.id);
+        let arguments = call.payload_text();
+        let tool_item = TimelineToolItem {
+            tool_call_id: item_id.clone(),
+            call_id: call.call_id.clone(),
+            provider_item_id: Some(call.id.clone()),
+            name: call.name.clone(),
+            arguments,
+            result: None,
+            exit_code: None,
+            timed_out: false,
+            working_directory: None,
+            denial_reason: None,
+        };
+        let item = self
+            .started
+            .entry(item_id.clone())
+            .or_insert_with(|| TimelineItem {
+                turn_id: self.turn_id.clone(),
+                item_id: item_id.clone(),
+                sequence: self.sequence,
+                kind: TimelineItemKind::Tool,
+                status,
+                created_at: now,
+                updated_at: now,
+                role: None,
+                content: String::new(),
+                thinking_chunks: Vec::new(),
+                tool: Some(tool_item.clone()),
+                agent: None,
+                inference: None,
+                usage: None,
+            });
+        item.status = status;
+        item.updated_at = now;
+        item.tool = Some(tool_item);
+        item.clone()
+    }
+
+    fn record(&mut self, kind: TraceEventKind, timestamp: i64) {
+        self.events.push(TraceEvent {
+            session_id: self.session_id.clone(),
+            sequence: self.sequence,
+            timestamp,
+            kind,
+        });
+        self.sequence += 1;
+    }
+}
+
+fn timeline_tool_item_id(call_id: Option<&String>, id: &str) -> String {
+    call_id
+        .filter(|call_id| !call_id.is_empty())
+        .cloned()
+        .unwrap_or_else(|| id.to_string())
+}
+
+fn unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 fn tool_call_accumulator_key(
@@ -535,11 +1018,18 @@ mod tests {
     #[test]
     fn stream_accumulator_returns_content_and_reasoning_content() {
         let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
-        let mut accumulator = StreamCompletionAccumulator::default();
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTimelineContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "inf-1".to_string(),
+            starting_sequence: 0,
+        }));
 
         accumulator
             .apply(
                 StreamEvent::ThinkingDelta {
+                    item_id: None,
+                    chunk_index: 0,
                     delta: "先比较整数位。".to_string(),
                 },
                 &event_tx,
@@ -547,12 +1037,15 @@ mod tests {
             .unwrap();
         accumulator
             .apply(
-                StreamEvent::OutputTextDelta("9.11 更大。".to_string()),
+                StreamEvent::OutputTextDelta {
+                    item_id: None,
+                    delta: "9.11 更大。".to_string(),
+                },
                 &event_tx,
             )
             .unwrap();
 
-        let response = accumulator.finish();
+        let response = accumulator.finish(&event_tx);
 
         assert_eq!(response.content.as_deref(), Some("9.11 更大。"));
         assert_eq!(
@@ -561,18 +1054,26 @@ mod tests {
         );
         assert!(matches!(
             event_rx.try_recv().unwrap(),
-            AgentEvent::ThinkingDelta { .. }
+            AgentEvent::TimelineItemStarted { .. }
         ));
         assert!(matches!(
             event_rx.try_recv().unwrap(),
-            AgentEvent::TextDelta { .. }
+            AgentEvent::TimelineItemDelta { .. }
+        ));
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            AgentEvent::TimelineItemStarted { .. }
+        ));
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            AgentEvent::TimelineItemDelta { .. }
         ));
     }
 
     #[test]
     fn stream_accumulator_merges_chat_tool_call_chunks_by_index() {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-        let mut accumulator = StreamCompletionAccumulator::default();
+        let mut accumulator = StreamCompletionAccumulator::new(None);
 
         accumulator
             .apply(
@@ -601,7 +1102,7 @@ mod tests {
             )
             .unwrap();
 
-        let response = accumulator.finish();
+        let response = accumulator.finish(&event_tx);
 
         assert_eq!(response.tool_calls.len(), 1);
         assert_eq!(response.tool_calls[0].id, "call_1");
@@ -617,7 +1118,7 @@ mod tests {
     #[test]
     fn stream_accumulator_uses_responses_added_item_name_when_done_omits_name() {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-        let mut accumulator = StreamCompletionAccumulator::default();
+        let mut accumulator = StreamCompletionAccumulator::new(None);
 
         accumulator
             .apply(
@@ -657,7 +1158,7 @@ mod tests {
             )
             .unwrap();
 
-        let response = accumulator.finish();
+        let response = accumulator.finish(&event_tx);
 
         assert_eq!(response.tool_calls.len(), 1);
         assert_eq!(response.tool_calls[0].id, "ctc_1");

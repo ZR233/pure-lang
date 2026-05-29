@@ -17,12 +17,13 @@ reducer 分域：
 
 ## 2. Timeline 视图
 
-主区保持单线 timeline 语义，数据来源统一为：
+主区保持单线 timeline 语义，数据来源统一为 item-first timeline：
 
-- 历史 `messages`
 - 持久化 `timelineItems`
-- 运行中增量 `AgentEvent` 投影
-- append-only `agentEvents`
+- 运行中 `TimelineItemStarted`
+- 运行中 `TimelineItemDelta`
+- 运行中 `TimelineItemCompleted`
+- 运行中 `TimelineItemFailed`
 
 约束：
 
@@ -35,6 +36,13 @@ reducer 分域：
 - `AgentStateChanged` 只更新 latest snapshot，不直接作为 timeline 数据源
 - 用户与 assistant 正文按 Markdown 渲染，支持标题、列表、引用、代码块、行内代码、强调和链接
 - 自动跟随最新内容以“用户是否停留在底部”为准；高频 timeline 刷新时仍应在 layout 阶段滚动到最新，用户手动上滚后暂停跟随
+
+前端 reducer 的 timeline 状态固定为：
+
+- `timelineItems: Map<itemId, TimelineItem>`
+- `timelineOrder: string[]`
+
+`timelineOrder` 只在 item 首次出现时按 `sequence` 插入；后续 delta/completed/failed 不改变展示位置。组件不得再把 `messages`、运行中 tool map、agent events 和 trace items 临时拼接成主 timeline。
 
 ## 3. Turn 生命周期
 
@@ -63,13 +71,13 @@ turn 展示语义固定：
 - `RunPromptResponse`
 - `SessionTimelineResponse`
 
-旧字段别名与旧 payload 解析逻辑在方案乙中删除。
+旧字段别名、旧 payload 解析逻辑、旧 text/thinking/tool delta reducer 分支在方案乙中删除。`RunPromptResponse.timelineItems` 与 `SessionTimelineResponse.items` 使用同一个 `TimelineItem` 结构。
 
 ## 5. 选择器与派生数据
 
 从 reducer state 派生：
 
-- `chatItems`
+- `timelineEntries`
 - `selectedProject`
 - `selectedSession`
 - `activeSubagentCount`

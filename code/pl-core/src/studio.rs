@@ -9,7 +9,7 @@ mod store_support;
 
 pub use records::{
     AgentSnapshotRecord, AgentTimelineEventRecord, ProjectRecord, SessionRecord,
-    SessionRuntimeRecord, StudioPromptOutcome, ToolApprovalRecord, TraceEventRecord,
+    SessionRuntimeRecord, StudioPromptOutcome, TimelineEventRecord, ToolApprovalRecord,
 };
 pub use runtime::StudioRuntime;
 pub use store::StudioStore;
@@ -193,7 +193,7 @@ mod tests {
             abort_reason: None,
             budget_limit_kind: None,
             budget_usage: None,
-            trace_events: Vec::new(),
+            timeline_events: Vec::new(),
         };
 
         store

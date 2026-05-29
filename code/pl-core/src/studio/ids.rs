@@ -12,8 +12,8 @@ pub fn new_id(prefix: &str) -> String {
     format!("{prefix}-{now:x}-{seq:x}")
 }
 
-pub fn new_trace_event_id() -> String {
-    new_id("trace")
+pub fn new_timeline_event_id() -> String {
+    new_id("timeline")
 }
 
 pub fn unix_seconds() -> i64 {

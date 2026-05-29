@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use pl_protocol::Message;
+use pl_protocol::{Message, TraceEvent};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,6 +21,8 @@ pub struct CompletionRequest {
     pub reasoning: Option<ReasoningConfig>,
     #[serde(default = "default_true")]
     pub stream: bool,
+    #[serde(skip)]
+    pub timeline: Option<CompletionTimelineContext>,
 }
 
 fn default_tool_choice() -> String {
@@ -38,9 +40,21 @@ pub struct CompletionResponse {
     pub reasoning_content: Option<String>,
     #[serde(default)]
     pub tool_calls: Vec<ToolCall>,
+    #[serde(default)]
+    pub timeline_events: Vec<TraceEvent>,
+    #[serde(default)]
+    pub next_sequence: u64,
     pub usage: TokenUsage,
     pub finish_reason: FinishReason,
     pub model: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompletionTimelineContext {
+    pub session_id: String,
+    pub turn_id: String,
+    pub inference_id: String,
+    pub starting_sequence: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

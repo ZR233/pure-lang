@@ -93,3 +93,9 @@ bitflags::bitflags! {
         const PARALLEL_TOOL_CALLS   = 0b00001000;
     }
 }
+
+impl ProviderCapabilities {
+    pub fn supports_parallel_tool_calls(self) -> bool {
+        self.contains(Self::PARALLEL_TOOL_CALLS)
+    }
+}

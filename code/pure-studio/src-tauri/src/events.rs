@@ -40,16 +40,15 @@ pub async fn drain_events(
                 } else {
                     None
                 };
-                let event_for_legacy = if matches!(
+                let event_for_timeline = if matches!(
                     event,
-                    AgentEvent::TextDelta { .. }
-                        | AgentEvent::ThinkingDelta { .. }
-                        | AgentEvent::ToolCallDelta { .. }
-                        | AgentEvent::ToolCallComplete { .. }
+                    AgentEvent::TimelineItemStarted { .. }
+                        | AgentEvent::TimelineItemDelta { .. }
+                        | AgentEvent::TimelineItemCompleted { .. }
+                        | AgentEvent::TimelineItemFailed { .. }
                         | AgentEvent::ToolApprovalRequested { .. }
                         | AgentEvent::ToolApprovalGranted { .. }
                         | AgentEvent::ToolApprovalDenied { .. }
-                        | AgentEvent::TurnStarted
                         | AgentEvent::TurnInterrupted { .. }
                         | AgentEvent::TurnBudgetLimited { .. }
                         | AgentEvent::Done
@@ -59,12 +58,12 @@ pub async fn drain_events(
                 } else {
                     None
                 };
-                if event_for_legacy.is_some() || timeline_event.is_some() || agent.is_some() {
+                if event_for_timeline.is_some() || timeline_event.is_some() || agent.is_some() {
                     let _ = app.emit(
                         "studio-agent-event",
                         AgentEventPayload {
                             session_id: session_id.clone(),
-                            event: event_for_legacy,
+                            event: event_for_timeline,
                             timeline_event,
                             agent,
                         },
@@ -201,14 +200,13 @@ pub fn agent_timeline_event_record(
             Some(receiver_path.clone()),
             Some(sender_path.clone()),
         ),
-        AgentEvent::TextDelta { .. }
-        | AgentEvent::ThinkingDelta { .. }
-        | AgentEvent::ToolCallDelta { .. }
-        | AgentEvent::ToolCallComplete { .. }
+        AgentEvent::TimelineItemStarted { .. }
+        | AgentEvent::TimelineItemDelta { .. }
+        | AgentEvent::TimelineItemCompleted { .. }
+        | AgentEvent::TimelineItemFailed { .. }
         | AgentEvent::ToolApprovalRequested { .. }
         | AgentEvent::ToolApprovalGranted { .. }
         | AgentEvent::ToolApprovalDenied { .. }
-        | AgentEvent::TurnStarted
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::Done

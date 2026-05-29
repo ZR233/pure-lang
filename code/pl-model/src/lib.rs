@@ -21,6 +21,7 @@ pub use provider::{
 };
 pub use provider_info::{ApplyPatchToolType, AuthCommand, ProviderInfo, WireApi};
 pub use request::{
-    CompletionRequest, CompletionResponse, FinishReason, ReasoningConfig, ReasoningSummary,
-    TokenUsage, ToolCall, ToolCallKind, ToolCallPayload, ToolFormat, ToolSchema,
+    CompletionRequest, CompletionResponse, CompletionTimelineContext, FinishReason,
+    ReasoningConfig, ReasoningSummary, TokenUsage, ToolCall, ToolCallKind, ToolCallPayload,
+    ToolFormat, ToolSchema,
 };

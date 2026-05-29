@@ -179,6 +179,10 @@ impl Tool for ReadFileTool {
         })
     }
 
+    fn supports_parallel_tool_calls(&self) -> bool {
+        true
+    }
+
     fn execute<'a>(
         &'a self,
         input: ToolInput,
@@ -310,6 +314,10 @@ impl Tool for ListFilesTool {
         })
     }
 
+    fn supports_parallel_tool_calls(&self) -> bool {
+        true
+    }
+
     fn execute<'a>(
         &'a self,
         input: ToolInput,
@@ -352,6 +360,10 @@ impl Tool for SearchFilesTool {
         })
     }
 
+    fn supports_parallel_tool_calls(&self) -> bool {
+        true
+    }
+
     fn execute<'a>(
         &'a self,
         input: ToolInput,
@@ -390,6 +402,10 @@ impl Tool for StatPathTool {
 
     fn input_schema(&self) -> serde_json::Value {
         path_schema()
+    }
+
+    fn supports_parallel_tool_calls(&self) -> bool {
+        true
     }
 
     fn execute<'a>(

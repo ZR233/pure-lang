@@ -357,6 +357,8 @@ fn responses_parse_response(body: serde_json::Value) -> Result<CompletionRespons
         content,
         reasoning_content: None,
         tool_calls,
+        timeline_events: Vec::new(),
+        next_sequence: 0,
         usage: usage.unwrap_or_default(),
         finish_reason,
         model: body
@@ -564,6 +566,8 @@ fn chat_parse_response(body: serde_json::Value) -> Result<CompletionResponse> {
         content,
         reasoning_content,
         tool_calls,
+        timeline_events: Vec::new(),
+        next_sequence: 0,
         usage: usage.unwrap_or_default(),
         finish_reason,
         model: body
@@ -632,6 +636,7 @@ mod tests {
                 summary: None,
             }),
             stream: true,
+            timeline: None,
         }
     }
 
@@ -934,6 +939,7 @@ mod tests {
             max_tokens: None,
             reasoning: None,
             stream: true,
+            timeline: None,
         };
 
         let body = WireDispatch::Responses.build_request_body(&request);

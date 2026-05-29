@@ -8,21 +8,20 @@ pub type AgentEventReceiver = broadcast::Receiver<AgentEvent>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum AgentEvent {
-    TextDelta {
-        content: String,
+    TimelineItemStarted {
+        item: TimelineItem,
     },
-    ThinkingDelta {
-        content: String,
+    TimelineItemDelta {
+        event: TimelineItemDeltaEvent,
     },
-    ToolCallDelta {
-        id: String,
-        name: String,
-        arguments_delta: String,
+    TimelineItemCompleted {
+        sequence: u64,
+        item: TimelineItem,
     },
-    ToolCallComplete {
-        id: String,
-        name: String,
-        arguments: String,
+    TimelineItemFailed {
+        sequence: u64,
+        item: TimelineItem,
+        error: String,
     },
     ToolApprovalRequested {
         id: String,
@@ -122,7 +121,6 @@ pub enum AgentEvent {
         status: AgentStatus,
         error: Option<String>,
     },
-    TurnStarted,
     TurnInterrupted {
         reason: String,
     },
@@ -136,6 +134,204 @@ pub enum AgentEvent {
         message: String,
         severity: ErrorSeverity,
     },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TimelineItemKind {
+    Text,
+    Thinking,
+    Tool,
+    Agent,
+    Turn,
+    Inference,
+}
+
+impl TimelineItemKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Thinking => "thinking",
+            Self::Tool => "tool",
+            Self::Agent => "agent",
+            Self::Turn => "turn",
+            Self::Inference => "inference",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TimelineItemStatus {
+    Started,
+    Streaming,
+    AwaitingApproval,
+    Approved,
+    Denied,
+    Running,
+    Completed,
+    Failed,
+    Interrupted,
+    BudgetLimited,
+}
+
+impl TimelineItemStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Started => "started",
+            Self::Streaming => "streaming",
+            Self::AwaitingApproval => "awaitingApproval",
+            Self::Approved => "approved",
+            Self::Denied => "denied",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Interrupted => "interrupted",
+            Self::BudgetLimited => "budgetLimited",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TimelineTextRole {
+    User,
+    Assistant,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineThinkingChunk {
+    pub chunk_index: u32,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineToolItem {
+    pub tool_call_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_item_id: Option<String>,
+    pub name: String,
+    pub arguments: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    pub timed_out: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_directory: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub denial_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineAgentItem {
+    pub id: String,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_path: Option<String>,
+    pub role: String,
+    pub task: String,
+    pub status: AgentStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    pub depth: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineInferenceItem {
+    pub inference_id: String,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineItem {
+    pub turn_id: String,
+    pub item_id: String,
+    pub sequence: u64,
+    pub kind: TimelineItemKind,
+    pub status: TimelineItemStatus,
+    pub created_at: i64,
+    pub updated_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<TimelineTextRole>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub content: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub thinking_chunks: Vec<TimelineThinkingChunk>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<TimelineToolItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<TimelineAgentItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inference: Option<TimelineInferenceItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<TokenUsageSnapshot>,
+}
+
+impl TimelineItem {
+    pub fn text(
+        turn_id: impl Into<String>,
+        item_id: impl Into<String>,
+        sequence: u64,
+        role: TimelineTextRole,
+        content: impl Into<String>,
+        status: TimelineItemStatus,
+        timestamp: i64,
+    ) -> Self {
+        Self {
+            turn_id: turn_id.into(),
+            item_id: item_id.into(),
+            sequence,
+            kind: TimelineItemKind::Text,
+            status,
+            created_at: timestamp,
+            updated_at: timestamp,
+            role: Some(role),
+            content: content.into(),
+            thinking_chunks: Vec::new(),
+            tool: None,
+            agent: None,
+            inference: None,
+            usage: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
+pub enum TimelineDelta {
+    Text { delta: String },
+    Thinking { chunk_index: u32, delta: String },
+    ToolArguments { delta: String },
+    ToolResult { delta: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineItemDeltaEvent {
+    pub turn_id: String,
+    pub item_id: String,
+    pub sequence: u64,
+    pub kind: TimelineItemKind,
+    pub status: TimelineItemStatus,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub delta: TimelineDelta,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -247,7 +443,7 @@ pub struct TokenUsageSnapshot {
     pub total_tokens: u64,
 }
 
-/// Append-only trace event for structured session lifecycle tracking.
+/// Append-only timeline event for structured session lifecycle tracking.
 ///
 /// Each event belongs to a session and carries a monotonic sequence number
 /// for causal ordering. The `kind` field discriminates the event type.
@@ -260,12 +456,7 @@ pub struct TraceEvent {
     pub kind: TraceEventKind,
 }
 
-/// Trace event variants for turn, inference, and tool call lifecycle.
-///
-/// Grouped by correlation IDs:
-/// - `turn_id` correlates events within a single turn
-/// - `inference_id` correlates inference call events
-/// - `tool_call_id` correlates tool lifecycle events
+/// Item-first trace events for turn, inference, text, thinking, tool and agent lifecycle.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(
     rename_all = "camelCase",
@@ -273,64 +464,10 @@ pub struct TraceEvent {
     tag = "type"
 )]
 pub enum TraceEventKind {
-    TurnStarted {
-        turn_id: String,
-    },
-    TurnCompleted {
-        turn_id: String,
-        content: String,
-        model: String,
-        usage: TokenUsageSnapshot,
-    },
-    TurnFailed {
-        turn_id: String,
-        error: String,
-    },
-    TurnInterrupted {
-        turn_id: String,
-        reason: String,
-    },
-    TurnBudgetLimited {
-        turn_id: String,
-        reason: String,
-        limit_kind: BudgetLimitKind,
-        usage: BudgetUsage,
-        last_content: String,
-    },
-    InferenceStarted {
-        turn_id: String,
-        inference_id: String,
-        model: String,
-    },
-    InferenceCompleted {
-        turn_id: String,
-        inference_id: String,
-        usage: TokenUsageSnapshot,
-    },
-    ToolCallStarted {
-        turn_id: String,
-        tool_call_id: String,
-        name: String,
-        arguments: String,
-    },
-    ToolCallApproved {
-        tool_call_id: String,
-    },
-    ToolCallDenied {
-        tool_call_id: String,
-        reason: String,
-    },
-    ToolCallCompleted {
-        tool_call_id: String,
-        result: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        exit_code: Option<i32>,
-        timed_out: bool,
-    },
-    ToolCallFailed {
-        tool_call_id: String,
-        error: String,
-    },
+    TimelineItemStarted { item: TimelineItem },
+    TimelineItemDelta { event: TimelineItemDeltaEvent },
+    TimelineItemCompleted { item: TimelineItem },
+    TimelineItemFailed { item: TimelineItem, error: String },
 }
 
 #[cfg(test)]
@@ -397,14 +534,26 @@ mod tests {
         );
     }
 
+    fn timeline_text_item() -> TimelineItem {
+        TimelineItem::text(
+            "turn-1",
+            "item-1",
+            0,
+            TimelineTextRole::Assistant,
+            "hello",
+            TimelineItemStatus::Completed,
+            1_779_688_800,
+        )
+    }
+
     #[test]
-    fn serializes_trace_event_turn_started_as_camel_case() {
+    fn serializes_timeline_item_started_as_camel_case() {
         let event = TraceEvent {
             session_id: "sess-1".to_string(),
             sequence: 0,
             timestamp: 1_779_688_800,
-            kind: TraceEventKind::TurnStarted {
-                turn_id: "turn-1".to_string(),
+            kind: TraceEventKind::TimelineItemStarted {
+                item: timeline_text_item(),
             },
         };
 
@@ -417,8 +566,18 @@ mod tests {
                 "sequence": 0,
                 "timestamp": 1779688800,
                 "kind": {
-                    "type": "turnStarted",
-                    "turnId": "turn-1"
+                    "type": "timelineItemStarted",
+                    "item": {
+                        "turnId": "turn-1",
+                        "itemId": "item-1",
+                        "sequence": 0,
+                        "kind": "text",
+                        "status": "completed",
+                        "createdAt": 1779688800,
+                        "updatedAt": 1779688800,
+                        "role": "assistant",
+                        "content": "hello"
+                    }
                 }
             })
         );
@@ -534,51 +693,20 @@ mod tests {
     }
 
     #[test]
-    fn serializes_trace_event_turn_interrupted_as_camel_case() {
-        let event = TraceEvent {
-            session_id: "sess-1".to_string(),
-            sequence: 2,
-            timestamp: 1_779_688_820,
-            kind: TraceEventKind::TurnInterrupted {
+    fn serializes_timeline_delta_as_camel_case() {
+        let event = AgentEvent::TimelineItemDelta {
+            event: TimelineItemDeltaEvent {
                 turn_id: "turn-1".to_string(),
-                reason: "stopped by user".to_string(),
-            },
-        };
-
-        let json = serde_json::to_value(event).unwrap();
-
-        assert_eq!(
-            json,
-            serde_json::json!({
-                "sessionId": "sess-1",
-                "sequence": 2,
-                "timestamp": 1779688820,
-                "kind": {
-                    "type": "turnInterrupted",
-                    "turnId": "turn-1",
-                    "reason": "stopped by user"
-                }
-            })
-        );
-    }
-
-    #[test]
-    fn serializes_trace_event_turn_budget_limited_as_camel_case() {
-        let event = TraceEvent {
-            session_id: "sess-1".to_string(),
-            sequence: 3,
-            timestamp: 1_779_688_830,
-            kind: TraceEventKind::TurnBudgetLimited {
-                turn_id: "turn-1".to_string(),
-                reason: "tool budget".to_string(),
-                limit_kind: BudgetLimitKind::ToolCall,
-                usage: BudgetUsage {
-                    model_steps: 4,
-                    tool_calls: 121,
-                    wait_calls: 1,
-                    elapsed_ms: 50,
+                item_id: "item-1".to_string(),
+                sequence: 2,
+                kind: TimelineItemKind::Thinking,
+                status: TimelineItemStatus::Streaming,
+                created_at: 1_779_688_800,
+                updated_at: 1_779_688_801,
+                delta: TimelineDelta::Thinking {
+                    chunk_index: 1,
+                    delta: "思考".to_string(),
                 },
-                last_content: "partial".to_string(),
             },
         };
 
@@ -587,76 +715,23 @@ mod tests {
         assert_eq!(
             json,
             serde_json::json!({
-                "sessionId": "sess-1",
-                "sequence": 3,
-                "timestamp": 1779688830,
-                "kind": {
-                    "type": "turnBudgetLimited",
-                    "turnId": "turn-1",
-                    "reason": "tool budget",
-                    "limitKind": "toolCall",
-                    "usage": {
-                        "modelSteps": 4,
-                        "toolCalls": 121,
-                        "waitCalls": 1,
-                        "elapsedMs": 50
-                    },
-                    "lastContent": "partial"
+                "timelineItemDelta": {
+                    "event": {
+                        "turnId": "turn-1",
+                        "itemId": "item-1",
+                        "sequence": 2,
+                        "kind": "thinking",
+                        "status": "streaming",
+                        "createdAt": 1779688800,
+                        "updatedAt": 1779688801,
+                        "delta": {
+                            "type": "thinking",
+                            "chunkIndex": 1,
+                            "delta": "思考"
+                        }
+                    }
                 }
             })
         );
-    }
-
-    #[test]
-    fn serializes_trace_event_tool_call_completed_as_camel_case() {
-        let event = TraceEvent {
-            session_id: "sess-1".to_string(),
-            sequence: 5,
-            timestamp: 1_779_688_900,
-            kind: TraceEventKind::ToolCallCompleted {
-                tool_call_id: "call-1".to_string(),
-                result: "ok".to_string(),
-                exit_code: Some(0),
-                timed_out: false,
-            },
-        };
-
-        let json = serde_json::to_value(event).unwrap();
-
-        assert_eq!(
-            json,
-            serde_json::json!({
-                "sessionId": "sess-1",
-                "sequence": 5,
-                "timestamp": 1779688900,
-                "kind": {
-                    "type": "toolCallCompleted",
-                    "toolCallId": "call-1",
-                    "result": "ok",
-                    "exitCode": 0,
-                    "timedOut": false
-                }
-            })
-        );
-    }
-
-    #[test]
-    fn trace_event_tool_call_completed_omits_none_exit_code() {
-        let event = TraceEvent {
-            session_id: "sess-1".to_string(),
-            sequence: 3,
-            timestamp: 1_779_688_900,
-            kind: TraceEventKind::ToolCallCompleted {
-                tool_call_id: "call-1".to_string(),
-                result: "done".to_string(),
-                exit_code: None,
-                timed_out: false,
-            },
-        };
-
-        let json = serde_json::to_value(event).unwrap();
-        let kind = json.get("kind").unwrap();
-
-        assert!(kind.get("exitCode").is_none());
     }
 }

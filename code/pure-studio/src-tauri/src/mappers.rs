@@ -4,12 +4,10 @@ use pl_core::{
     SessionRuntimeRecord, StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord, StudioRuntime,
     TraceEvent, TraceEventKind, TurnResultStatus, infer_provider_template_kind,
 };
-use pl_protocol::{Message, MessageContent, MessageRole};
 
 use crate::dto::{
-    AgentDto, AgentEventDto, ConfigDto, MessageDto, ModelDto, ProjectDto, ProviderDto,
-    ProviderInput, ProviderSettingsInput, ProviderTemplateDto, RoleDto, RoleInput, SessionDto,
-    SessionRuntimeDto, TimelineItemDto, UsageDto,
+    AgentDto, AgentEventDto, ConfigDto, ModelDto, ProjectDto, ProviderDto, ProviderInput,
+    ProviderSettingsInput, ProviderTemplateDto, RoleDto, RoleInput, SessionDto, SessionRuntimeDto,
 };
 use crate::state::{CommandError, CommandResult};
 
@@ -288,10 +286,6 @@ pub fn session_dtos(sessions: Vec<SessionRecord>) -> Vec<SessionDto> {
         .collect()
 }
 
-pub fn message_dtos(messages: Vec<Message>) -> Vec<MessageDto> {
-    messages.into_iter().map(message_dto).collect()
-}
-
 pub fn agent_event_dtos(events: Vec<StudioAgentTimelineEventRecord>) -> Vec<AgentEventDto> {
     events.into_iter().map(agent_event_dto).collect()
 }
@@ -340,22 +334,6 @@ pub fn agent_dto(agent: StudioAgentSnapshotRecord) -> AgentDto {
     }
 }
 
-pub fn message_dto(message: Message) -> MessageDto {
-    let role = match message.role {
-        MessageRole::System => "system",
-        MessageRole::User => "user",
-        MessageRole::Assistant => "assistant",
-        MessageRole::Tool => "tool",
-    }
-    .to_string();
-    MessageDto {
-        role,
-        content: message_content_text(message.content),
-        reasoning_content: message.reasoning_content,
-        metadata: message.metadata,
-    }
-}
-
 pub fn turn_result_status_label(status: TurnResultStatus) -> &'static str {
     match status {
         TurnResultStatus::Completed => "completed",
@@ -364,250 +342,97 @@ pub fn turn_result_status_label(status: TurnResultStatus) -> &'static str {
     }
 }
 
-pub fn trace_events_to_timeline_items(events: &[TraceEvent]) -> Vec<TimelineItemDto> {
-    events.iter().map(trace_event_to_timeline_item).collect()
-}
-
-pub fn trace_event_to_timeline_item(event: &TraceEvent) -> TimelineItemDto {
-    let sequence = event.sequence;
-    let timestamp = event.timestamp;
-    match &event.kind {
-        TraceEventKind::TurnStarted { turn_id } => TimelineItemDto {
-            kind: "turn".to_string(),
-            sequence,
-            timestamp,
-            turn_id: Some(turn_id.clone()),
-            tool_call_id: None,
-            tool_name: None,
-            tool_arguments: None,
-            tool_status: None,
-            tool_result: None,
-            inference_model: None,
-            inference_usage: None,
-            turn_status: Some("started".to_string()),
-            turn_model: None,
-            turn_usage: None,
-        },
-        TraceEventKind::TurnCompleted {
-            turn_id,
-            model,
-            usage,
-            ..
-        } => TimelineItemDto {
-            kind: "turn".to_string(),
-            sequence,
-            timestamp,
-            turn_id: Some(turn_id.clone()),
-            tool_call_id: None,
-            tool_name: None,
-            tool_arguments: None,
-            tool_status: None,
-            tool_result: None,
-            inference_model: None,
-            inference_usage: None,
-            turn_status: Some("completed".to_string()),
-            turn_model: Some(model.clone()),
-            turn_usage: Some(UsageDto {
-                prompt_tokens: usage.prompt_tokens,
-                completion_tokens: usage.completion_tokens,
-                cached_prompt_tokens: usage.cached_prompt_tokens,
-                total_tokens: usage.total_tokens,
-            }),
-        },
-        TraceEventKind::TurnFailed { turn_id, .. } => TimelineItemDto {
-            kind: "turn".to_string(),
-            sequence,
-            timestamp,
-            turn_id: Some(turn_id.clone()),
-            tool_call_id: None,
-            tool_name: None,
-            tool_arguments: None,
-            tool_status: None,
-            tool_result: None,
-            inference_model: None,
-            inference_usage: None,
-            turn_status: Some("errored".to_string()),
-            turn_model: None,
-            turn_usage: None,
-        },
-        TraceEventKind::TurnInterrupted { turn_id, reason } => TimelineItemDto {
-            kind: "turn".to_string(),
-            sequence,
-            timestamp,
-            turn_id: Some(turn_id.clone()),
-            tool_call_id: None,
-            tool_name: None,
-            tool_arguments: None,
-            tool_status: None,
-            tool_result: Some(reason.clone()),
-            inference_model: None,
-            inference_usage: None,
-            turn_status: Some("aborted".to_string()),
-            turn_model: None,
-            turn_usage: None,
-        },
-        TraceEventKind::TurnBudgetLimited {
-            turn_id, reason, ..
-        } => TimelineItemDto {
-            kind: "turn".to_string(),
-            sequence,
-            timestamp,
-            turn_id: Some(turn_id.clone()),
-            tool_call_id: None,
-            tool_name: None,
-            tool_arguments: None,
-            tool_status: None,
-            tool_result: Some(reason.clone()),
-            inference_model: None,
-            inference_usage: None,
-            turn_status: Some("aborted".to_string()),
-            turn_model: None,
-            turn_usage: None,
-        },
-        TraceEventKind::InferenceStarted { model, .. } => TimelineItemDto {
-            kind: "inference".to_string(),
-            sequence,
-            timestamp,
-            turn_id: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_arguments: None,
-            tool_status: None,
-            tool_result: None,
-            inference_model: Some(model.clone()),
-            inference_usage: None,
-            turn_status: None,
-            turn_model: None,
-            turn_usage: None,
-        },
-        TraceEventKind::InferenceCompleted { usage, .. } => TimelineItemDto {
-            kind: "inference".to_string(),
-            sequence,
-            timestamp,
-            turn_id: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_arguments: None,
-            tool_status: None,
-            tool_result: None,
-            inference_model: None,
-            inference_usage: Some(UsageDto {
-                prompt_tokens: usage.prompt_tokens,
-                completion_tokens: usage.completion_tokens,
-                cached_prompt_tokens: usage.cached_prompt_tokens,
-                total_tokens: usage.total_tokens,
-            }),
-            turn_status: None,
-            turn_model: None,
-            turn_usage: None,
-        },
-        TraceEventKind::ToolCallStarted {
-            tool_call_id,
-            name,
-            arguments,
-            ..
-        } => TimelineItemDto {
-            kind: "tool_call".to_string(),
-            sequence,
-            timestamp,
-            turn_id: None,
-            tool_call_id: Some(tool_call_id.clone()),
-            tool_name: Some(name.clone()),
-            tool_arguments: Some(arguments.clone()),
-            tool_status: Some("started".to_string()),
-            tool_result: None,
-            inference_model: None,
-            inference_usage: None,
-            turn_status: None,
-            turn_model: None,
-            turn_usage: None,
-        },
-        TraceEventKind::ToolCallApproved { tool_call_id } => TimelineItemDto {
-            kind: "tool_call".to_string(),
-            sequence,
-            timestamp,
-            turn_id: None,
-            tool_call_id: Some(tool_call_id.clone()),
-            tool_name: None,
-            tool_arguments: None,
-            tool_status: Some("approved".to_string()),
-            tool_result: None,
-            inference_model: None,
-            inference_usage: None,
-            turn_status: None,
-            turn_model: None,
-            turn_usage: None,
-        },
-        TraceEventKind::ToolCallDenied {
-            tool_call_id,
-            reason,
-            ..
-        } => TimelineItemDto {
-            kind: "tool_call".to_string(),
-            sequence,
-            timestamp,
-            turn_id: None,
-            tool_call_id: Some(tool_call_id.clone()),
-            tool_name: None,
-            tool_arguments: None,
-            tool_status: Some("denied".to_string()),
-            tool_result: Some(reason.clone()),
-            inference_model: None,
-            inference_usage: None,
-            turn_status: None,
-            turn_model: None,
-            turn_usage: None,
-        },
-        TraceEventKind::ToolCallCompleted {
-            tool_call_id,
-            result,
-            ..
-        } => TimelineItemDto {
-            kind: "tool_call".to_string(),
-            sequence,
-            timestamp,
-            turn_id: None,
-            tool_call_id: Some(tool_call_id.clone()),
-            tool_name: None,
-            tool_arguments: None,
-            tool_status: Some("completed".to_string()),
-            tool_result: Some(result.clone()),
-            inference_model: None,
-            inference_usage: None,
-            turn_status: None,
-            turn_model: None,
-            turn_usage: None,
-        },
-        TraceEventKind::ToolCallFailed {
-            tool_call_id,
-            error,
-            ..
-        } => TimelineItemDto {
-            kind: "tool_call".to_string(),
-            sequence,
-            timestamp,
-            turn_id: None,
-            tool_call_id: Some(tool_call_id.clone()),
-            tool_name: None,
-            tool_arguments: None,
-            tool_status: Some("failed".to_string()),
-            tool_result: Some(error.clone()),
-            inference_model: None,
-            inference_usage: None,
-            turn_status: None,
-            turn_model: None,
-            turn_usage: None,
-        },
-    }
-}
-
-pub fn message_content_text(content: MessageContent) -> String {
-    match content {
-        MessageContent::Text(text) => text,
-        MessageContent::MultiPart(parts) => {
-            serde_json::to_string_pretty(&parts).unwrap_or_default()
+pub fn timeline_events_to_items(events: &[TraceEvent]) -> Vec<pl_protocol::TimelineItem> {
+    let mut items = std::collections::HashMap::new();
+    for event in events {
+        match &event.kind {
+            TraceEventKind::TimelineItemStarted { item } => upsert_timeline_item(&mut items, item),
+            TraceEventKind::TimelineItemCompleted { item }
+            | TraceEventKind::TimelineItemFailed { item, .. } => {
+                upsert_timeline_item(&mut items, item)
+            }
+            TraceEventKind::TimelineItemDelta { event } => {
+                let entry = items.entry(event.item_id.clone()).or_insert_with(|| {
+                    pl_protocol::TimelineItem {
+                        turn_id: event.turn_id.clone(),
+                        item_id: event.item_id.clone(),
+                        sequence: event.sequence,
+                        kind: event.kind,
+                        status: event.status,
+                        created_at: event.created_at,
+                        updated_at: event.updated_at,
+                        role: None,
+                        content: String::new(),
+                        thinking_chunks: Vec::new(),
+                        tool: None,
+                        agent: None,
+                        inference: None,
+                        usage: None,
+                    }
+                });
+                entry.status = event.status;
+                entry.updated_at = event.updated_at;
+                match &event.delta {
+                    pl_protocol::TimelineDelta::Text { delta } => {
+                        entry.content.push_str(delta);
+                    }
+                    pl_protocol::TimelineDelta::Thinking { chunk_index, delta } => {
+                        match entry
+                            .thinking_chunks
+                            .iter_mut()
+                            .find(|chunk| chunk.chunk_index == *chunk_index)
+                        {
+                            Some(chunk) => chunk.content.push_str(delta),
+                            None => {
+                                entry
+                                    .thinking_chunks
+                                    .push(pl_protocol::TimelineThinkingChunk {
+                                        chunk_index: *chunk_index,
+                                        content: delta.clone(),
+                                    })
+                            }
+                        }
+                    }
+                    pl_protocol::TimelineDelta::ToolArguments { delta } => {
+                        if let Some(tool) = &mut entry.tool {
+                            tool.arguments.push_str(delta);
+                        }
+                    }
+                    pl_protocol::TimelineDelta::ToolResult { delta } => {
+                        if let Some(tool) = &mut entry.tool {
+                            let result = tool.result.get_or_insert_with(String::new);
+                            result.push_str(delta);
+                        }
+                    }
+                }
+            }
         }
     }
+    let mut items = items.into_values().collect::<Vec<_>>();
+    items.sort_by_key(|item| item.sequence);
+    items
+}
+
+fn upsert_timeline_item(
+    items: &mut std::collections::HashMap<String, pl_protocol::TimelineItem>,
+    item: &pl_protocol::TimelineItem,
+) {
+    let mut next = item.clone();
+    if let Some(existing) = items.get(&item.item_id) {
+        next.sequence = existing.sequence;
+        next.created_at = existing.created_at;
+        if next.content.is_empty() {
+            next.content = existing.content.clone();
+        }
+        if next.thinking_chunks.is_empty() {
+            next.thinking_chunks = existing.thinking_chunks.clone();
+        }
+        next.tool = next.tool.or_else(|| existing.tool.clone());
+        next.agent = next.agent.or_else(|| existing.agent.clone());
+        next.inference = next.inference.or_else(|| existing.inference.clone());
+        next.usage = next.usage.or_else(|| existing.usage.clone());
+    }
+    items.insert(item.item_id.clone(), next);
 }
 
 pub fn provider_settings_to_edit(

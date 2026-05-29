@@ -1,58 +1,63 @@
-import type { ChatItem } from "../types";
-import type { StudioStateLike } from "./types";
+import type { TimelineItem } from "../types";
+import type { StudioState } from "./studio-state";
 
-export function selectSelectedProject(state: StudioStateLike) {
+export type TimelineEntry =
+  | {
+      kind: "message";
+      key: string;
+      role: "user" | "assistant";
+      content: string;
+    }
+  | { kind: "thought"; key: string; content: string }
+  | { kind: "tool"; key: string; item: TimelineItem }
+  | { kind: "agent"; key: string; item: TimelineItem }
+  | { kind: "trace"; key: string; item: TimelineItem };
+
+export function selectSelectedProject(state: StudioState) {
   return state.projects.find((project) => project.id === state.selectedProjectId) ?? null;
 }
 
-export function selectSelectedSession(state: StudioStateLike) {
+export function selectSelectedSession(state: StudioState) {
   return state.sessions.find((session) => session.id === state.selectedSessionId) ?? null;
 }
 
-export function selectChatItems(
-  state: StudioStateLike,
-  thinkingFallbackText: string,
-): ChatItem[] {
-  const items: ChatItem[] = [];
-  let index = 0;
-
-  for (const msg of state.messages) {
-    if (msg.role === "tool" && msg.metadata?.tool_call_id) {
-      items.push({
-        kind: "tool_call",
-        toolCall: {
-          id: msg.metadata.tool_call_id,
-          name: msg.metadata.tool_name ?? "tool",
-          arguments: msg.metadata.tool_call_arguments ?? "",
-          status: "result_ready",
-          result: msg.content,
-          startedAt: 0,
-        },
-        key: `tc-${msg.metadata.tool_call_id}`,
-      });
-    } else {
-      items.push({ kind: "message", message: msg, key: `msg-${index}` });
+export function selectTimelineEntries(state: StudioState): TimelineEntry[] {
+  const entries: TimelineEntry[] = [];
+  for (const itemId of state.timelineOrder) {
+    const item = state.timelineItems.get(itemId);
+    if (!item) continue;
+    switch (item.kind) {
+      case "text":
+        if (!item.content.trim()) break;
+        entries.push({
+          kind: "message",
+          key: `text-${item.itemId}`,
+          role: item.role === "user" ? "user" : "assistant",
+          content: item.content,
+        });
+        break;
+      case "thinking": {
+        const content = item.thinkingChunks
+          .slice()
+          .sort((left, right) => left.chunkIndex - right.chunkIndex)
+          .map((chunk) => chunk.content)
+          .join("");
+        if (content.trim()) {
+          entries.push({ kind: "thought", key: `thinking-${item.itemId}`, content });
+        }
+        break;
+      }
+      case "tool":
+        entries.push({ kind: "tool", key: `tool-${item.itemId}`, item });
+        break;
+      case "agent":
+        entries.push({ kind: "agent", key: `agent-${item.itemId}`, item });
+        break;
+      case "turn":
+      case "inference":
+        entries.push({ kind: "trace", key: `trace-${item.itemId}`, item });
+        break;
     }
-    index++;
   }
-
-  for (const tc of state.toolCalls.values()) {
-    if (!items.some((item) => item.kind === "tool_call" && item.key === `tc-${tc.id}`)) {
-      items.push({ kind: "tool_call", toolCall: tc, key: `tc-${tc.id}` });
-    }
-  }
-
-  if (state.thinkingText || state.streamingText) {
-    items.push({
-      kind: "message",
-      message: {
-        role: "assistant",
-        content: state.streamingText || thinkingFallbackText,
-        reasoningContent: state.thinkingText || null,
-      },
-      key: "streaming",
-    });
-  }
-
-  return items;
+  return entries;
 }

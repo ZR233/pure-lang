@@ -77,9 +77,14 @@ pub struct ChatTokenUsage {
 pub enum StreamEvent {
     Created,
 
-    OutputTextDelta(String),
+    OutputTextDelta {
+        item_id: Option<String>,
+        delta: String,
+    },
 
     ThinkingDelta {
+        item_id: Option<String>,
+        chunk_index: u32,
         delta: String,
     },
 
@@ -126,6 +131,8 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
             && !delta.is_empty()
         {
             return Some(StreamEvent::ThinkingDelta {
+                item_id: None,
+                chunk_index: 0,
                 delta: delta.clone(),
             });
         }
@@ -133,7 +140,10 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
         if let Some(content) = &choice.delta.content
             && !content.is_empty()
         {
-            return Some(StreamEvent::OutputTextDelta(content.clone()));
+            return Some(StreamEvent::OutputTextDelta {
+                item_id: None,
+                delta: content.clone(),
+            });
         }
 
         if let Some(tool_call) = choice
@@ -198,15 +208,24 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
     match event.kind.as_str() {
         "response.created" => Some(StreamEvent::Created),
 
-        "response.output_text.delta" => event
-            .delta
-            .as_ref()
-            .map(|d| StreamEvent::OutputTextDelta(d.clone())),
+        "response.output_text.delta" => {
+            event.delta.as_ref().map(|d| StreamEvent::OutputTextDelta {
+                item_id: event.item_id.clone(),
+                delta: d.clone(),
+            })
+        }
 
-        "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => event
-            .delta
-            .as_ref()
-            .map(|d| StreamEvent::ThinkingDelta { delta: d.clone() }),
+        "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
+            event.delta.as_ref().map(|d| StreamEvent::ThinkingDelta {
+                item_id: event.item_id.clone(),
+                chunk_index: event
+                    .summary_index
+                    .or(event.content_index)
+                    .unwrap_or(0)
+                    .max(0) as u32,
+                delta: d.clone(),
+            })
+        }
 
         "response.function_call_arguments.delta" => Some(StreamEvent::ToolCallDelta {
             stream_id: None,
@@ -352,7 +371,7 @@ mod tests {
         }));
 
         match process_sse_event(&event) {
-            Some(StreamEvent::ThinkingDelta { delta }) => {
+            Some(StreamEvent::ThinkingDelta { delta, .. }) => {
                 assert_eq!(delta, "先比较整数位。");
             }
             other => panic!("unexpected event: {other:?}"),
@@ -366,7 +385,7 @@ mod tests {
         }));
 
         match process_sse_event(&event) {
-            Some(StreamEvent::OutputTextDelta(delta)) => {
+            Some(StreamEvent::OutputTextDelta { delta, .. }) => {
                 assert_eq!(delta, "9.11 更大。");
             }
             other => panic!("unexpected event: {other:?}"),

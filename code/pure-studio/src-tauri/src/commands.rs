@@ -13,9 +13,8 @@ use crate::dto::{
 };
 use crate::events::drain_events;
 use crate::mappers::{
-    agent_dtos, agent_event_dtos, config_dto, load_session_runtime_dto, message_dtos, project_dtos,
-    provider_settings_to_edit, session_dtos, trace_events_to_timeline_items,
-    turn_result_status_label,
+    agent_dtos, agent_event_dtos, config_dto, load_session_runtime_dto, project_dtos,
+    provider_settings_to_edit, session_dtos, timeline_events_to_items, turn_result_status_label,
 };
 use crate::state::{AppState, CommandError, CommandResult};
 
@@ -31,7 +30,6 @@ pub async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Boots
     let mut selected_project_id = None;
     let mut sessions = Vec::new();
     let mut selected_session_id = None;
-    let mut messages = Vec::new();
     let mut agent_events = Vec::new();
     let mut agents = Vec::new();
 
@@ -40,7 +38,6 @@ pub async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Boots
         sessions = state.studio.ensure_project_sessions(&project.id).await?;
         if let Some(session) = sessions.first() {
             selected_session_id = Some(session.id.clone());
-            messages = state.studio.store().load_messages(&session.id).await?;
             agent_events = state.studio.store().list_agent_events(&session.id).await?;
             agents = state.studio.store().list_agents(&session.id).await?;
         }
@@ -55,7 +52,6 @@ pub async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Boots
         selected_project_id,
         sessions: session_dtos(sessions),
         selected_session_id,
-        messages: message_dtos(messages),
         agent_events: agent_event_dtos(agent_events),
         agents: agent_dtos(agents),
         session_runtime,
@@ -101,7 +97,6 @@ pub async fn create_session(
     Ok(SessionSelectionDto {
         session_id: session.id.clone(),
         sessions: session_dtos(sessions),
-        messages: Vec::new(),
         agent_events: Vec::new(),
         agents: Vec::new(),
         session_runtime: Some(load_session_runtime_dto(&state.studio, &session.id).await?),
@@ -113,14 +108,12 @@ pub async fn select_session(
     session_id: String,
     state: State<'_, AppState>,
 ) -> CommandResult<SessionSelectionDto> {
-    let messages = state.studio.store().load_messages(&session_id).await?;
     let agent_events = state.studio.store().list_agent_events(&session_id).await?;
     let agents = state.studio.store().list_agents(&session_id).await?;
     Ok(SessionSelectionDto {
         session_runtime: Some(load_session_runtime_dto(&state.studio, &session_id).await?),
         session_id,
         sessions: Vec::new(),
-        messages: message_dtos(messages),
         agent_events: agent_event_dtos(agent_events),
         agents: agent_dtos(agents),
     })
@@ -187,21 +180,19 @@ pub async fn run_prompt(
                 .await?;
             let response = RunPromptResponse {
                 session_id: session_id.clone(),
-                messages: message_dtos(outcome.messages),
                 sessions: session_dtos(sessions),
                 agent_events: agent_event_dtos(
                     state.studio.store().list_agent_events(&session_id).await?,
                 ),
                 agents: agent_dtos(state.studio.store().list_agents(&session_id).await?),
                 session_runtime: load_session_runtime_dto(&state.studio, &session_id).await?,
-                timeline_items: trace_events_to_timeline_items(&outcome.trace_events),
+                timeline_items: timeline_events_to_items(&outcome.timeline_events),
                 turn_status: turn_result_status_label(outcome.result.status).to_string(),
                 turn_abort_reason: outcome
                     .result
                     .abort_reason
                     .map(|reason| reason.as_str().to_string()),
             };
-            let _ = app.emit("studio-prompt-finished", response.clone());
             Ok(response)
         }
         Err(error) => {
@@ -257,24 +248,28 @@ pub async fn load_session_timeline(
     let records = state
         .studio
         .store()
-        .load_trace_events(&session_id, after_sequence, limit)
+        .load_timeline_events(&session_id, after_sequence, limit)
         .await?;
-    let next_sequence = state.studio.store().next_sequence(&session_id).await?;
-    let trace_events: Vec<TraceEvent> = records
+    let next_sequence = state
+        .studio
+        .store()
+        .next_timeline_sequence(&session_id)
+        .await?;
+    let timeline_events: Vec<TraceEvent> = records
         .iter()
         .filter_map(|record| {
             let kind: TraceEventKind = serde_json::from_str(&record.payload_json).ok()?;
             Some(TraceEvent {
                 session_id: record.session_id.clone(),
                 sequence: record.sequence as u64,
-                timestamp: record.timestamp,
+                timestamp: record.created_at,
                 kind,
             })
         })
         .collect();
     Ok(SessionTimelineDto {
         session_id,
-        items: trace_events_to_timeline_items(&trace_events),
+        items: timeline_events_to_items(&timeline_events),
         next_sequence,
     })
 }
@@ -350,10 +345,6 @@ async fn select_project_data(
         .await?;
     let sessions = state.studio.ensure_project_sessions(&project_id).await?;
     let selected_session_id = sessions.first().map(|session| session.id.clone());
-    let messages = match &selected_session_id {
-        Some(session_id) => state.studio.store().load_messages(session_id).await?,
-        None => Vec::new(),
-    };
     let agent_events = match &selected_session_id {
         Some(session_id) => state.studio.store().list_agent_events(session_id).await?,
         None => Vec::new(),
@@ -371,7 +362,6 @@ async fn select_project_data(
         projects: project_dtos(state.studio.list_projects().await?),
         sessions: session_dtos(sessions),
         selected_session_id,
-        messages: message_dtos(messages),
         agent_events: agent_event_dtos(agent_events),
         agents: agent_dtos(agents),
         session_runtime,

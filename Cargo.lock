@@ -2597,6 +2597,7 @@ name = "pl-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "futures",
  "pl-model",
  "pl-protocol",
  "pretty_assertions",

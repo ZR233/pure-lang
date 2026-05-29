@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-
-use pl_protocol::AgentEvent;
+use pl_protocol::{AgentEvent, TimelineItem};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize)]
@@ -20,16 +18,6 @@ pub struct SessionDto {
     pub title: String,
     pub mode: String,
     pub updated_at: i64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MessageDto {
-    pub role: String,
-    pub content: String,
-    pub reasoning_content: Option<String>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub metadata: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -221,7 +209,6 @@ pub struct BootstrapDto {
     pub selected_project_id: Option<String>,
     pub sessions: Vec<SessionDto>,
     pub selected_session_id: Option<String>,
-    pub messages: Vec<MessageDto>,
     pub agent_events: Vec<AgentEventDto>,
     pub agents: Vec<AgentDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
@@ -235,7 +222,6 @@ pub struct ProjectSelectionDto {
     pub projects: Vec<ProjectDto>,
     pub sessions: Vec<SessionDto>,
     pub selected_session_id: Option<String>,
-    pub messages: Vec<MessageDto>,
     pub agent_events: Vec<AgentEventDto>,
     pub agents: Vec<AgentDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
@@ -246,7 +232,6 @@ pub struct ProjectSelectionDto {
 pub struct SessionSelectionDto {
     pub session_id: String,
     pub sessions: Vec<SessionDto>,
-    pub messages: Vec<MessageDto>,
     pub agent_events: Vec<AgentEventDto>,
     pub agents: Vec<AgentDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
@@ -256,12 +241,11 @@ pub struct SessionSelectionDto {
 #[serde(rename_all = "camelCase")]
 pub struct RunPromptResponse {
     pub session_id: String,
-    pub messages: Vec<MessageDto>,
     pub sessions: Vec<SessionDto>,
     pub agent_events: Vec<AgentEventDto>,
     pub agents: Vec<AgentDto>,
     pub session_runtime: SessionRuntimeDto,
-    pub timeline_items: Vec<TimelineItemDto>,
+    pub timeline_items: Vec<TimelineItem>,
     pub turn_status: String,
     pub turn_abort_reason: Option<String>,
 }
@@ -275,37 +259,9 @@ pub struct StopPromptResponse {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UsageDto {
-    pub prompt_tokens: u64,
-    pub completion_tokens: u64,
-    pub cached_prompt_tokens: u64,
-    pub total_tokens: u64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TimelineItemDto {
-    pub kind: String,
-    pub sequence: u64,
-    pub timestamp: i64,
-    pub turn_id: Option<String>,
-    pub tool_call_id: Option<String>,
-    pub tool_name: Option<String>,
-    pub tool_arguments: Option<String>,
-    pub tool_status: Option<String>,
-    pub tool_result: Option<String>,
-    pub inference_model: Option<String>,
-    pub inference_usage: Option<UsageDto>,
-    pub turn_status: Option<String>,
-    pub turn_model: Option<String>,
-    pub turn_usage: Option<UsageDto>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SessionTimelineDto {
     pub session_id: String,
-    pub items: Vec<TimelineItemDto>,
+    pub items: Vec<TimelineItem>,
     pub next_sequence: u64,
 }
 

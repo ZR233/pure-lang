@@ -5,7 +5,7 @@ use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::records::{
     AgentSnapshotRecord, AgentTimelineEventRecord, ProjectRecord, SessionRecord,
-    SessionRuntimeRecord, TraceEventRecord,
+    SessionRuntimeRecord, TimelineEventRecord,
 };
 
 pub fn project_record(model: entities::project::Model) -> ProjectRecord {
@@ -96,12 +96,12 @@ pub fn agent_status_from_label(status: &str) -> AgentStatus {
     }
 }
 
-pub fn trace_event_record(model: entities::trace_event::Model) -> TraceEventRecord {
-    TraceEventRecord {
+pub fn timeline_event_record(model: entities::timeline_event::Model) -> TimelineEventRecord {
+    TimelineEventRecord {
         id: model.id,
         session_id: model.session_id,
         sequence: model.sequence,
-        timestamp: model.timestamp,
+        created_at: model.created_at,
         kind: model.kind,
         payload_json: model.payload_json,
     }
@@ -148,18 +148,10 @@ pub fn default_session_runtime_record(
 
 pub fn trace_event_kind_label(kind: &pl_protocol::TraceEventKind) -> &'static str {
     match kind {
-        pl_protocol::TraceEventKind::TurnStarted { .. } => "TurnStarted",
-        pl_protocol::TraceEventKind::TurnCompleted { .. } => "TurnCompleted",
-        pl_protocol::TraceEventKind::TurnFailed { .. } => "TurnFailed",
-        pl_protocol::TraceEventKind::TurnInterrupted { .. } => "TurnInterrupted",
-        pl_protocol::TraceEventKind::TurnBudgetLimited { .. } => "TurnBudgetLimited",
-        pl_protocol::TraceEventKind::InferenceStarted { .. } => "InferenceStarted",
-        pl_protocol::TraceEventKind::InferenceCompleted { .. } => "InferenceCompleted",
-        pl_protocol::TraceEventKind::ToolCallStarted { .. } => "ToolCallStarted",
-        pl_protocol::TraceEventKind::ToolCallApproved { .. } => "ToolCallApproved",
-        pl_protocol::TraceEventKind::ToolCallDenied { .. } => "ToolCallDenied",
-        pl_protocol::TraceEventKind::ToolCallCompleted { .. } => "ToolCallCompleted",
-        pl_protocol::TraceEventKind::ToolCallFailed { .. } => "ToolCallFailed",
+        pl_protocol::TraceEventKind::TimelineItemStarted { .. } => "TimelineItemStarted",
+        pl_protocol::TraceEventKind::TimelineItemDelta { .. } => "TimelineItemDelta",
+        pl_protocol::TraceEventKind::TimelineItemCompleted { .. } => "TimelineItemCompleted",
+        pl_protocol::TraceEventKind::TimelineItemFailed { .. } => "TimelineItemFailed",
     }
 }
 

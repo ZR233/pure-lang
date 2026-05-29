@@ -16,6 +16,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/0005_agent_events.sql"),
     include_str!("../../migrations/0006_agent_codex_lifecycle.sql"),
     include_str!("../../migrations/0007_agent_timeline_split.sql"),
+    include_str!("../../migrations/0008_timeline_events.sql"),
 ];
 
 pub(super) async fn insert_message_with_tx(
