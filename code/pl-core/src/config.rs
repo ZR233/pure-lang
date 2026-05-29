@@ -889,9 +889,9 @@ mod tests {
         config.runtime.active_mcp_servers = vec!["github".to_string()];
         let model = &mut config.providers.get_mut("deepseek").unwrap().models[0];
         model.currency = Some("CNY".to_string());
-        model.input_price_per_mtok = Some(8.0);
-        model.output_price_per_mtok = Some(32.0);
-        model.cache_read_price_per_mtok = Some(2.0);
+        model.input_price_per_mtok = Some(1.0);
+        model.output_price_per_mtok = Some(2.0);
+        model.cache_read_price_per_mtok = Some(0.02);
 
         let toml = config.to_toml_pretty().unwrap();
         let parsed = PureConfig::from_toml(&toml).unwrap();
@@ -919,7 +919,7 @@ mod tests {
         );
         assert_eq!(
             parsed.providers["deepseek"].models[0].input_price_per_mtok,
-            Some(8.0)
+            Some(1.0)
         );
     }
 

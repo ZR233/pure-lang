@@ -174,9 +174,9 @@ mod tests {
         let mut model = pl_model::ModelInfo::fallback("priced-model");
         model.context_window = Some(1_000_000);
         model.currency = Some("CNY".to_string());
-        model.input_price_per_mtok = Some(8.0);
-        model.output_price_per_mtok = Some(32.0);
-        model.cache_read_price_per_mtok = Some(2.0);
+        model.input_price_per_mtok = Some(1.0);
+        model.output_price_per_mtok = Some(2.0);
+        model.cache_read_price_per_mtok = Some(0.02);
         let result = TurnResult {
             content: "ok".to_string(),
             reasoning_content: None,
@@ -221,7 +221,7 @@ mod tests {
         assert!(
             runtime
                 .estimated_cost
-                .is_some_and(|cost| (cost - 1.76).abs() < 0.000_001)
+                .is_some_and(|cost| (cost - 0.1616).abs() < 0.000_001)
         );
     }
 

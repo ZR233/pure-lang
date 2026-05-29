@@ -241,6 +241,7 @@ const en = {
     temperature: "Temperature",
     efforts: "Efforts",
     truncation: "Truncation",
+    pricing: "Pricing",
     capabilities: "Capabilities",
     input: "Input",
     deleteTooltip: "Delete custom model",

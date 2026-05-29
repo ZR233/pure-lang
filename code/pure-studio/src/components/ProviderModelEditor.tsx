@@ -45,6 +45,18 @@ function formatList(values: string[] | undefined, t: (key: string) => string) {
   return values && values.length > 0 ? values.join(", ") : notConfigured(t);
 }
 
+function formatPrice(model: ModelRecord, t: (key: string) => string) {
+  if (
+    !model.currency ||
+    model.inputPricePerMTok == null ||
+    model.outputPricePerMTok == null ||
+    model.cacheReadPricePerMTok == null
+  ) {
+    return notConfigured(t);
+  }
+  return `${model.currency} ${model.cacheReadPricePerMTok}/${model.inputPricePerMTok}/${model.outputPricePerMTok}`;
+}
+
 function ModelParameterGrid({ model, t }: { model: ModelRecord; t: (key: string) => string }) {
   return (
     <div className="model-parameter-grid">
@@ -73,6 +85,10 @@ function ModelParameterGrid({ model, t }: { model: ModelRecord; t: (key: string)
         <strong>
           {model.truncationMode ?? "tokens"} / {formatTokens(model.truncationLimit, t)}
         </strong>
+      </span>
+      <span className="wide">
+        <small>{t("model.pricing")}</small>
+        <strong>{formatPrice(model, t)}</strong>
       </span>
       <span className="wide">
         <small>{t("model.capabilities")}</small>

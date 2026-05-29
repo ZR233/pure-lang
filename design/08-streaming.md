@@ -81,4 +81,6 @@ pl-model provider
 
 `pl-model::TokenUsage` 保留输入、输出和总 token，并额外记录 `cached_prompt_tokens`。Chat Completions 和 Responses API 的 usage detail 字段不同，provider 适配层负责尽可能读取缓存 token；缺失时按 `0` 处理。
 
-`pl-core` 不把费用估算作为 provider 事件暴露，而是在 turn 完成后结合模型价格配置生成 Studio 会话运行态快照。React 状态栏消费快照，不直接推断 provider 私有 usage 字段。
+Studio 状态栏必须在运行中即时反映上下文和费用。流式事件里的 `inference` item 在完成时携带本次模型调用 usage；前端 reducer 用当前模型价格对 `sessionRuntime` 做增量更新，展示最新上下文、累计输入/输出、缓存命中和费用估算。turn 完成后后端仍返回持久化后的 `sessionRuntime` 快照作为最终校准。
+
+`pl-core` 不把费用估算作为 provider 事件暴露；费用只由 Studio 结合模型价格配置估算。React 状态栏消费运行态快照和 inference usage，不直接解析 provider 私有 usage 字段。

@@ -201,9 +201,9 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
     case "setSelectedProviderId":
       return { ...state, selectedProviderId: action.providerId };
     case "setRoles":
-      return { ...state, roles: action.roles };
+      return refreshSessionRuntimeModel({ ...state, roles: action.roles });
     case "setProviders":
-      return { ...state, providers: action.providers };
+      return refreshSessionRuntimeModel({ ...state, providers: action.providers });
     case "setConfigToml":
       return { ...state, configToml: action.toml };
     case "setSettingsOpen":
@@ -213,11 +213,11 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         activeSettingsTab: action.tab ?? state.activeSettingsTab,
       };
     case "configLoaded":
-      return {
+      return refreshSessionRuntimeModel({
         ...state,
         ...configFields(state.selectedProviderId, action.payload),
         status: action.status ?? state.status,
-      };
+      });
     case "enqueueApproval":
       return {
         ...state,
@@ -315,8 +315,10 @@ function reduceAgentEvent(
     };
   }
   if ("timelineItemCompleted" in event) {
+    const existingItem = state.timelineItems.get(event.timelineItemCompleted.item.itemId);
+    const nextState = upsertTimelineItem(state, event.timelineItemCompleted.item);
     return {
-      ...upsertTimelineItem(state, event.timelineItemCompleted.item),
+      ...applyRuntimeUsage(nextState, event.timelineItemCompleted.item, existingItem),
       status: statusText,
       turnPhase: phaseForTimelineItem(event.timelineItemCompleted.item, state.turnPhase),
     };
@@ -475,6 +477,167 @@ function normalizeTimelineItem(item: TimelineItem): TimelineItem {
     inference: item.inference ?? null,
     usage: item.usage ?? null,
   };
+}
+
+function applyRuntimeUsage(
+  state: StudioState,
+  item: TimelineItem,
+  existingItem: TimelineItem | undefined,
+): StudioState {
+  if (
+    item.kind !== "inference" ||
+    !item.usage ||
+    !state.sessionRuntime ||
+    isDuplicateInferenceUsage(existingItem, item)
+  ) {
+    return state;
+  }
+  const usage = item.usage;
+  const modelSlug = item.inference?.model ?? state.sessionRuntime.model;
+  const model = findRuntimeModel(state, modelSlug);
+  const inputPricePerMTok =
+    model?.inputPricePerMTok ?? state.sessionRuntime.inputPricePerMTok;
+  const outputPricePerMTok =
+    model?.outputPricePerMTok ?? state.sessionRuntime.outputPricePerMTok;
+  const cacheReadPricePerMTok =
+    model?.cacheReadPricePerMTok ?? state.sessionRuntime.cacheReadPricePerMTok;
+  const promptTokens = state.sessionRuntime.promptTokens + usage.promptTokens;
+  const completionTokens = state.sessionRuntime.completionTokens + usage.completionTokens;
+  const cachedPromptTokens = state.sessionRuntime.cachedPromptTokens + usage.cachedPromptTokens;
+  const totalTokens = promptTokens + completionTokens;
+  const estimatedCost = estimateRuntimeCost(
+    promptTokens,
+    completionTokens,
+    cachedPromptTokens,
+    inputPricePerMTok,
+    outputPricePerMTok,
+    cacheReadPricePerMTok,
+  );
+  return {
+    ...state,
+    sessionRuntime: {
+      ...state.sessionRuntime,
+      model: modelSlug,
+      contextWindow:
+        model?.contextWindow ?? model?.maxContextWindow ?? state.sessionRuntime.contextWindow,
+      latestContextTokens: usage.promptTokens,
+      promptTokens,
+      completionTokens,
+      cachedPromptTokens,
+      totalTokens,
+      cacheHitRate: promptTokens === 0 ? null : cachedPromptTokens / promptTokens,
+      currency: model?.currency ?? state.sessionRuntime.currency,
+      inputPricePerMTok,
+      outputPricePerMTok,
+      cacheReadPricePerMTok,
+      estimatedCost,
+      updatedAt: item.updatedAt,
+    },
+  };
+}
+
+function refreshSessionRuntimeModel(state: StudioState): StudioState {
+  if (!state.sessionRuntime) {
+    return state;
+  }
+  const plannerRole = state.roles.find((role) => role.key === "planner");
+  const model = plannerRole
+    ? findProviderModel(state, plannerRole.provider, plannerRole.model)
+    : findRuntimeModel(state, state.sessionRuntime.model);
+  if (!model) {
+    return state;
+  }
+  const inputPricePerMTok = model.inputPricePerMTok ?? state.sessionRuntime.inputPricePerMTok;
+  const outputPricePerMTok = model.outputPricePerMTok ?? state.sessionRuntime.outputPricePerMTok;
+  const cacheReadPricePerMTok =
+    model.cacheReadPricePerMTok ?? state.sessionRuntime.cacheReadPricePerMTok;
+  return {
+    ...state,
+    sessionRuntime: {
+      ...state.sessionRuntime,
+      model: model.slug,
+      contextWindow:
+        model.contextWindow ?? model.maxContextWindow ?? state.sessionRuntime.contextWindow,
+      currency: model.currency ?? state.sessionRuntime.currency,
+      inputPricePerMTok,
+      outputPricePerMTok,
+      cacheReadPricePerMTok,
+      estimatedCost: estimateRuntimeCost(
+        state.sessionRuntime.promptTokens,
+        state.sessionRuntime.completionTokens,
+        state.sessionRuntime.cachedPromptTokens,
+        inputPricePerMTok,
+        outputPricePerMTok,
+        cacheReadPricePerMTok,
+      ),
+    },
+  };
+}
+
+function isDuplicateInferenceUsage(
+  existingItem: TimelineItem | undefined,
+  item: TimelineItem,
+): boolean {
+  if (existingItem?.kind !== "inference" || existingItem.status !== "completed") {
+    return false;
+  }
+  return (
+    existingItem.usage?.promptTokens === item.usage?.promptTokens &&
+    existingItem.usage?.completionTokens === item.usage?.completionTokens &&
+    existingItem.usage?.cachedPromptTokens === item.usage?.cachedPromptTokens &&
+    existingItem.usage?.totalTokens === item.usage?.totalTokens
+  );
+}
+
+function findProviderModel(state: StudioState, providerId: string, slug: string) {
+  const provider = state.providers.find((item) => item.id === providerId);
+  if (!provider) {
+    return null;
+  }
+  return providerModels(provider).find((item) => item.slug === slug) ?? null;
+}
+
+function findRuntimeModel(state: StudioState, slug: string) {
+  for (const provider of state.providers) {
+    const model = providerModels(provider).find((item) => item.slug === slug);
+    if (model) {
+      return model;
+    }
+  }
+  return null;
+}
+
+function providerModels(provider: StudioState["providers"][number]) {
+  return [
+    ...(provider.models ?? []),
+    ...(provider.defaultModels ?? []),
+    ...(provider.customModels ?? []),
+  ];
+}
+
+function estimateRuntimeCost(
+  promptTokens: number,
+  completionTokens: number,
+  cachedPromptTokens: number,
+  inputPricePerMTok?: number | null,
+  outputPricePerMTok?: number | null,
+  cacheReadPricePerMTok?: number | null,
+): number | null {
+  if (
+    inputPricePerMTok == null ||
+    outputPricePerMTok == null ||
+    cacheReadPricePerMTok == null
+  ) {
+    return null;
+  }
+  const cached = Math.min(promptTokens, cachedPromptTokens);
+  const uncachedInput = Math.max(0, promptTokens - cached);
+  return (
+    (uncachedInput * inputPricePerMTok +
+      completionTokens * outputPricePerMTok +
+      cached * cacheReadPricePerMTok) /
+    1_000_000
+  );
 }
 
 export function mergeAgentTimelineEvents(

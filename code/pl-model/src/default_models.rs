@@ -32,11 +32,21 @@ pub fn default_models() -> Vec<ModelInfo> {
             "deepseek-v4-flash",
             "DeepSeek V4 Flash",
             "DeepSeek fast reasoning model with thinking mode.",
+            DeepSeekPrice {
+                cache_read_per_mtok: 0.02,
+                input_per_mtok: 1.0,
+                output_per_mtok: 2.0,
+            },
         ),
         deepseek_model(
             "deepseek-v4-pro",
             "DeepSeek V4 Pro",
             "DeepSeek flagship reasoning model with thinking mode.",
+            DeepSeekPrice {
+                cache_read_per_mtok: 0.025,
+                input_per_mtok: 3.0,
+                output_per_mtok: 6.0,
+            },
         ),
         openai_model(
             "gpt-5.5",
@@ -107,7 +117,18 @@ fn openai_model(
     }
 }
 
-fn deepseek_model(slug: &str, display_name: &str, description: &str) -> ModelInfo {
+struct DeepSeekPrice {
+    cache_read_per_mtok: f64,
+    input_per_mtok: f64,
+    output_per_mtok: f64,
+}
+
+fn deepseek_model(
+    slug: &str,
+    display_name: &str,
+    description: &str,
+    price: DeepSeekPrice,
+) -> ModelInfo {
     ModelInfo {
         slug: slug.to_string(),
         display_name: display_name.to_string(),
@@ -117,10 +138,10 @@ fn deepseek_model(slug: &str, display_name: &str, description: &str) -> ModelInf
         auto_compact_token_limit: None,
         default_temperature: None,
         max_output_tokens: Some(384_000),
-        currency: None,
-        input_price_per_mtok: None,
-        output_price_per_mtok: None,
-        cache_read_price_per_mtok: None,
+        currency: Some("CNY".to_string()),
+        input_price_per_mtok: Some(price.input_per_mtok),
+        output_price_per_mtok: Some(price.output_per_mtok),
+        cache_read_price_per_mtok: Some(price.cache_read_per_mtok),
         reasoning_efforts: DEEPSEEK_REASONING_EFFORTS
             .iter()
             .copied()
@@ -179,7 +200,28 @@ mod tests {
 
             assert_eq!(model.context_window, Some(1_000_000));
             assert_eq!(model.max_output_tokens, Some(384_000));
+            assert_eq!(model.currency.as_deref(), Some("CNY"));
             assert!(model.reasoning_efforts.iter().any(|effort| effort == "max"));
         }
+    }
+
+    #[test]
+    fn deepseek_default_models_use_china_pricing() {
+        let models = default_models();
+        let flash = models
+            .iter()
+            .find(|model| model.slug == "deepseek-v4-flash")
+            .unwrap();
+        let pro = models
+            .iter()
+            .find(|model| model.slug == "deepseek-v4-pro")
+            .unwrap();
+
+        assert_eq!(flash.cache_read_price_per_mtok, Some(0.02));
+        assert_eq!(flash.input_price_per_mtok, Some(1.0));
+        assert_eq!(flash.output_price_per_mtok, Some(2.0));
+        assert_eq!(pro.cache_read_price_per_mtok, Some(0.025));
+        assert_eq!(pro.input_price_per_mtok, Some(3.0));
+        assert_eq!(pro.output_price_per_mtok, Some(6.0));
     }
 }

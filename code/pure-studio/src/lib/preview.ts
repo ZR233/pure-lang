@@ -43,10 +43,10 @@ export const previewSessionRuntime: SessionRuntime = {
   totalTokens: 87_300,
   cacheHitRate: 0.62,
   currency: "CNY",
-  inputPricePerMTok: 8,
-  outputPricePerMTok: 32,
-  cacheReadPricePerMTok: 2,
-  estimatedCost: 0.38,
+  inputPricePerMTok: 1,
+  outputPricePerMTok: 2,
+  cacheReadPricePerMTok: 0.02,
+  estimatedCost: 0.04,
   activeSkills: ["rust", "git", "doc"],
   activeMcpServers: ["github", "filesystem"],
   updatedAt: 1779688800,
@@ -298,9 +298,9 @@ context_window = 1000000
 max_context_window = 1000000
 max_output_tokens = 384000
 currency = "CNY"
-input_price_per_mtok = 8.0
-output_price_per_mtok = 32.0
-cache_read_price_per_mtok = 2.0
+input_price_per_mtok = 1.0
+output_price_per_mtok = 2.0
+cache_read_price_per_mtok = 0.02
 reasoning_efforts = ["high", "max"]
 capabilities = ["streaming", "function_calling", "parallel_tool_calls", "reasoning"]
 input_modalities = ["text"]
