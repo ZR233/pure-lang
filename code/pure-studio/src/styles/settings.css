@@ -1,7 +1,7 @@
 .settings-page {
   position: fixed;
   inset: 0;
-  z-index: 10;
+  z-index: 100;
   display: grid;
   grid-template-rows: auto auto 1fr;
   background: #f6f8fb;

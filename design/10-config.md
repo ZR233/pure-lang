@@ -106,9 +106,9 @@ context_window = 1000000
 max_context_window = 1000000
 max_output_tokens = 384000
 currency = "CNY"
-input_price_per_mtok = 8.0
-output_price_per_mtok = 32.0
-cache_read_price_per_mtok = 2.0
+input_price_per_mtok = 1.0
+output_price_per_mtok = 2.0
+cache_read_price_per_mtok = 0.02
 reasoning_efforts = ["high", "max"]
 capabilities = ["streaming", "function_calling", "parallel_tool_calls", "reasoning"]
 input_modalities = ["text"]
@@ -122,6 +122,10 @@ description = "DeepSeek flagship reasoning model with thinking mode."
 context_window = 1000000
 max_context_window = 1000000
 max_output_tokens = 384000
+currency = "CNY"
+input_price_per_mtok = 3.0
+output_price_per_mtok = 6.0
+cache_read_price_per_mtok = 0.025
 reasoning_efforts = ["high", "max"]
 capabilities = ["streaming", "function_calling", "parallel_tool_calls", "reasoning"]
 input_modalities = ["text"]
@@ -159,6 +163,8 @@ truncation_policy = { mode = "tokens", limit = 10000 }
 `used_fallback` 是运行时状态，不写入 TOML。
 
 价格字段为可选字段，用于本地 UI 估算费用。`currency` 只作为展示单位，系统不做汇率转换；三个 `*_price_per_mtok` 字段均表示每百万 token 单价。缺失任一参与计算的价格时，费用显示为未配置。
+
+Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-flash` 为缓存命中输入 0.02 元、缓存未命中输入 1 元、输出 2 元；`deepseek-v4-pro` 为缓存命中输入 0.025 元、缓存未命中输入 3 元、输出 6 元。`input_price_per_mtok` 表示缓存未命中输入价，`cache_read_price_per_mtok` 表示缓存命中输入价。
 
 配置里的模型会覆盖或补充 bundled model。角色引用的 model 必须存在于对应 provider 的 `models` 中。
 

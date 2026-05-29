@@ -241,6 +241,7 @@ const zhCN = {
     temperature: "温度",
     efforts: "推理强度",
     truncation: "截断",
+    pricing: "价格",
     capabilities: "能力",
     input: "输入",
     deleteTooltip: "删除自定义模型",

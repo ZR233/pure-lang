@@ -325,7 +325,7 @@
 
 .session-status-bar {
   position: relative;
-  z-index: 20;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -430,7 +430,7 @@ button.status-item {
   position: absolute;
   bottom: calc(100% + 10px);
   left: 50%;
-  z-index: 50;
+  z-index: 6;
   min-width: 220px;
   transform: translateX(-50%) translateY(4px);
   visibility: hidden;

@@ -80,10 +80,13 @@ turn 展示语义固定：
 - `timelineEntries`
 - `selectedProject`
 - `selectedSession`
+- `sessionRuntime`
 - `activeSubagentCount`
 - `turnElapsedMs`
 
 组件通过 selectors 读取，不直接拼装跨域状态。
+
+状态栏固定渲染在聊天底部，只展示当前 turn phase、模型、上下文、费用、能力和 agent latest snapshot。运行中收到 inference usage 后必须即时更新 `sessionRuntime`，不能等 `RunPromptResponse` 返回后才刷新。设置页作为全屏 overlay 打开时必须覆盖聊天状态栏与其 popover，状态栏不得浮到设置页之上。
 
 ## 6. 验收目标
 
