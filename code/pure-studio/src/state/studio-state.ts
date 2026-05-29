@@ -81,7 +81,7 @@ export type StudioAction =
       agent?: AgentDto | null;
       statusText: string;
     }
-  | { type: "appendUserPrompt"; content: string; status: string; startedAt: number };
+  | { type: "promptSubmitted"; status: string; startedAt: number };
 
 export const initialStudioState = (startingStatus: string): StudioState => ({
   projects: [],
@@ -130,7 +130,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
     case "bootstrapFailed":
       return { ...state, status: action.status };
     case "timelineLoaded":
-      return replaceTimelineItems(state, action.items);
+      return replaceTimelineItems(state, action.items ?? []);
     case "timelineLoadFailed":
       return { ...state, status: action.status };
     case "projectSelectionLoaded":
@@ -165,7 +165,10 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       };
     case "runPromptLoaded":
       return {
-        ...mergeTimelineItems(removeOptimisticTimelineItems(state), action.payload.timelineItems),
+        ...mergeTimelineItems(
+          removeOptimisticTimelineItems(state),
+          action.payload.timelineItems ?? [],
+        ),
         selectedSessionId: action.payload.sessionId,
         sessions: action.payload.sessions,
         agentTimelineEvents: mergeAgentTimelineEvents(
@@ -239,18 +242,15 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         turnStartedAt: null,
         isBusy: false,
       };
-    case "appendUserPrompt":
-      return upsertTimelineItem(
-        {
-          ...state,
-          prompt: "",
-          isBusy: true,
-          status: action.status,
-          turnPhase: "running",
-          turnStartedAt: action.startedAt,
-        },
-        optimisticUserItem(action.content, action.startedAt),
-      );
+    case "promptSubmitted":
+      return {
+        ...removeOptimisticTimelineItems(state),
+        prompt: "",
+        isBusy: true,
+        status: action.status,
+        turnPhase: "running",
+        turnStartedAt: action.startedAt,
+      };
     case "agentEvent":
       return reduceAgentEvent(
         {
@@ -364,13 +364,17 @@ function removeOptimisticTimelineItems(state: StudioState): StudioState {
 
 export function mergeTimelineItems(state: StudioState, incoming: TimelineItem[]): StudioState {
   let next = state;
-  for (const item of incoming) {
+  for (const item of incoming ?? []) {
+    if (!item?.itemId) continue;
     next = upsertTimelineItem(next, item);
   }
   return next;
 }
 
 function upsertTimelineItem(state: StudioState, item: TimelineItem): StudioState {
+  if (!item?.itemId) {
+    return state;
+  }
   const timelineItems = new Map(state.timelineItems);
   const existing = timelineItems.get(item.itemId);
   timelineItems.set(item.itemId, mergeTimelineItem(existing, item));
@@ -385,21 +389,23 @@ function upsertTimelineItem(state: StudioState, item: TimelineItem): StudioState
 }
 
 function mergeTimelineItem(existing: TimelineItem | undefined, item: TimelineItem): TimelineItem {
+  const incoming = normalizeTimelineItem(item);
   if (!existing) {
-    return normalizeTimelineItem(item);
+    return incoming;
   }
+  const current = normalizeTimelineItem(existing);
   return {
-    ...normalizeTimelineItem(existing),
-    ...normalizeTimelineItem(item),
-    content: item.content || existing.content || "",
+    ...current,
+    ...incoming,
+    content: incoming.content || current.content || "",
     thinkingChunks:
-      item.thinkingChunks.length > 0 ? item.thinkingChunks : existing.thinkingChunks,
-    tool: item.tool ?? existing.tool ?? null,
-    agent: item.agent ?? existing.agent ?? null,
-    inference: item.inference ?? existing.inference ?? null,
-    usage: item.usage ?? existing.usage ?? null,
-    sequence: existing.sequence,
-    createdAt: existing.createdAt,
+      incoming.thinkingChunks.length > 0 ? incoming.thinkingChunks : current.thinkingChunks,
+    tool: incoming.tool ?? current.tool ?? null,
+    agent: incoming.agent ?? current.agent ?? null,
+    inference: incoming.inference ?? current.inference ?? null,
+    usage: incoming.usage ?? current.usage ?? null,
+    sequence: current.sequence,
+    createdAt: current.createdAt,
   };
 }
 
@@ -468,26 +474,6 @@ function normalizeTimelineItem(item: TimelineItem): TimelineItem {
     agent: item.agent ?? null,
     inference: item.inference ?? null,
     usage: item.usage ?? null,
-  };
-}
-
-function optimisticUserItem(content: string, startedAt: number): TimelineItem {
-  const seconds = Math.floor(startedAt / 1000);
-  return {
-    turnId: `optimistic-${startedAt}`,
-    itemId: `optimistic-user-${startedAt}`,
-    sequence: Number.MAX_SAFE_INTEGER - startedAt,
-    kind: "text",
-    status: "completed",
-    createdAt: seconds,
-    updatedAt: seconds,
-    role: "user",
-    content,
-    thinkingChunks: [],
-    tool: null,
-    agent: null,
-    inference: null,
-    usage: null,
   };
 }
 

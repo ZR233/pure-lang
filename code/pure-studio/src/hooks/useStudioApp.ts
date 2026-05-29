@@ -235,8 +235,7 @@ export function useStudioApp() {
       return;
     }
     dispatch({
-      type: "appendUserPrompt",
-      content,
+      type: "promptSubmitted",
       status: t("status.running"),
       startedAt: Date.now(),
     });

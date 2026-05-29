@@ -24,7 +24,8 @@ export function selectSelectedSession(state: StudioState) {
 export function selectTimelineEntries(state: StudioState): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
   for (const itemId of state.timelineOrder) {
-    const item = state.timelineItems.get(itemId);
+    const rawItem = state.timelineItems.get(itemId);
+    const item = rawItem ? normalizeTimelineItem(rawItem) : null;
     if (!item) continue;
     switch (item.kind) {
       case "text":
@@ -60,4 +61,16 @@ export function selectTimelineEntries(state: StudioState): TimelineEntry[] {
     }
   }
   return entries;
+}
+
+function normalizeTimelineItem(item: TimelineItem): TimelineItem {
+  return {
+    ...item,
+    content: item.content ?? "",
+    thinkingChunks: item.thinkingChunks ?? [],
+    tool: item.tool ?? null,
+    agent: item.agent ?? null,
+    inference: item.inference ?? null,
+    usage: item.usage ?? null,
+  };
 }

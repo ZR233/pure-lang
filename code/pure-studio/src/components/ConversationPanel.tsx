@@ -675,6 +675,12 @@ export function ConversationPanel({
   useEffect(() => {
     const timeline = timelineRef.current;
     if (!timeline) return;
+    if (typeof ResizeObserver === "undefined") {
+      if (isBusy && followModeRef.current === "following") {
+        scrollToLatest("preserve");
+      }
+      return;
+    }
     const observer = new ResizeObserver(() => {
       if (isBusy && followModeRef.current === "following") {
         scrollToLatest("preserve");
