@@ -40,6 +40,10 @@ pub trait Tool: fmt::Debug + Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn input_schema(&self) -> serde_json::Value;
+    fn supports_parallel_tool_calls(&self) -> bool {
+        false
+    }
+
     fn execute<'a>(
         &'a self,
         input: ToolInput,

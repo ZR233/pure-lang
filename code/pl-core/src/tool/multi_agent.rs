@@ -188,6 +188,10 @@ impl Tool for SpawnAgentTool {
         })
     }
 
+    fn supports_parallel_tool_calls(&self) -> bool {
+        true
+    }
+
     fn execute<'a>(
         &'a self,
         input: ToolInput,
@@ -316,6 +320,10 @@ impl Tool for WaitAgentTool {
         })
     }
 
+    fn supports_parallel_tool_calls(&self) -> bool {
+        true
+    }
+
     fn execute<'a>(
         &'a self,
         input: ToolInput,
@@ -372,6 +380,10 @@ impl Tool for ListAgentsTool {
                 }
             }
         })
+    }
+
+    fn supports_parallel_tool_calls(&self) -> bool {
+        true
     }
 
     fn execute<'a>(
@@ -850,14 +862,13 @@ async fn forward_agent_lifecycle_events(
             }
             Ok(AgentEvent::Done) => break,
             Ok(
-                AgentEvent::TextDelta { .. }
-                | AgentEvent::ThinkingDelta { .. }
-                | AgentEvent::ToolCallDelta { .. }
-                | AgentEvent::ToolCallComplete { .. }
+                AgentEvent::TimelineItemStarted { .. }
+                | AgentEvent::TimelineItemDelta { .. }
+                | AgentEvent::TimelineItemCompleted { .. }
+                | AgentEvent::TimelineItemFailed { .. }
                 | AgentEvent::ToolApprovalRequested { .. }
                 | AgentEvent::ToolApprovalGranted { .. }
                 | AgentEvent::ToolApprovalDenied { .. }
-                | AgentEvent::TurnStarted
                 | AgentEvent::TurnInterrupted { .. }
                 | AgentEvent::TurnBudgetLimited { .. }
                 | AgentEvent::Error { .. },

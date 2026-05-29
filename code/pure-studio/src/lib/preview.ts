@@ -1,5 +1,4 @@
 import type {
-  ChatMessage,
   ConfigPayload,
   AgentDto,
   AgentTimelineEvent,
@@ -30,40 +29,6 @@ export const previewSessions: SessionRecord[] = [
     title: "分析项目架构",
     mode: "manual",
     updatedAt: 1779688800,
-  },
-];
-
-export const previewMessages: ChatMessage[] = [
-  {
-    role: "user",
-    content: "修复窗口缩放后状态栏挤压和 timeline 过宽的问题",
-    reasoningContent: null,
-  },
-  {
-    role: "assistant",
-    content: "我先定位状态栏和对话面板的布局代码，然后把状态栏元素收拢到右侧。",
-    reasoningContent: "Thought for 6s\n需要先找到 SessionStatusBar 和 ConversationPanel 的渲染边界。",
-  },
-  {
-    role: "tool",
-    content: "Found 17 lines of output",
-    reasoningContent: null,
-    metadata: {
-      tool_call_id: "preview-tool-1",
-      tool_name: "grep",
-      tool_call_arguments:
-        "\"status|StatusBar|sessionRuntime|skills|mcp\" in src, glob: *.{ts,tsx,css}",
-    },
-  },
-  {
-    role: "user",
-    content: "状态栏增加子代理数量，点击可以展开子代理列表",
-    reasoningContent: null,
-  },
-  {
-    role: "assistant",
-    content: "已把子代理数量放到状态栏右侧，并增加向上展开的列表，运行中和等待中会排在前面。",
-    reasoningContent: "Thought for 5s\n子代理入口应该和 skills/MCP 分开，否则数量语义不清楚。",
   },
 ];
 
@@ -210,37 +175,72 @@ export const previewAgentEvents: AgentTimelineEvent[] = [
 
 export const previewTimelineItems: TimelineItem[] = [
   {
-    kind: "turn",
+    turnId: "preview-turn-1",
+    itemId: "preview-user-1",
     sequence: 0,
-    timestamp: 1779688800,
-    turnId: "preview-turn-1",
-    turnStatus: "started",
+    kind: "text",
+    status: "completed",
+    createdAt: 1779688798,
+    updatedAt: 1779688798,
+    role: "user",
+    content: "修复窗口缩放后状态栏挤压和 timeline 过宽的问题",
+    thinkingChunks: [],
   },
   {
-    kind: "inference",
+    turnId: "preview-turn-1",
+    itemId: "preview-thinking-1",
     sequence: 1,
-    timestamp: 1779688801,
-    inferenceModel: "deepseek-v4-flash",
+    kind: "thinking",
+    status: "completed",
+    createdAt: 1779688799,
+    updatedAt: 1779688799,
+    content: "",
+    thinkingChunks: [{ chunkIndex: 0, content: "Thought for 6s\n需要先找到 SessionStatusBar 和 ConversationPanel 的渲染边界。" }],
   },
   {
-    kind: "tool_call",
-    sequence: 2,
-    timestamp: 1779688802,
-    toolCallId: "preview-tool-1",
-    toolName: "grep",
-    toolArguments:
-      "\"status|StatusBar|sessionRuntime|skills|mcp\" in src, glob: *.{ts,tsx,css}",
-    toolStatus: "completed",
-    toolResult: "Found 17 lines of output",
-  },
-  {
-    kind: "turn",
-    sequence: 3,
-    timestamp: 1779688860,
     turnId: "preview-turn-1",
-    turnStatus: "completed",
-    turnModel: "deepseek-v4-flash",
-    turnUsage: {
+    itemId: "preview-assistant-1",
+    sequence: 2,
+    kind: "text",
+    status: "completed",
+    createdAt: 1779688800,
+    updatedAt: 1779688800,
+    role: "assistant",
+    content: "我先定位状态栏和对话面板的布局代码，然后把状态栏元素收拢到右侧。",
+    thinkingChunks: [],
+  },
+  {
+    turnId: "preview-turn-1",
+    itemId: "preview-tool-1",
+    sequence: 3,
+    kind: "tool",
+    status: "completed",
+    createdAt: 1779688802,
+    updatedAt: 1779688803,
+    content: "",
+    thinkingChunks: [],
+    tool: {
+      toolCallId: "preview-tool-1",
+      callId: "preview-tool-1",
+      providerItemId: "preview-tool-1",
+      name: "grep",
+      arguments: "{\"query\":\"status|StatusBar|sessionRuntime|skills|mcp\",\"path\":\"src\"}",
+      result: "Found 17 lines of output",
+      exitCode: 0,
+      timedOut: false,
+    },
+  },
+  {
+    turnId: "preview-turn-1",
+    itemId: "preview-turn-1-turn",
+    sequence: 4,
+    kind: "turn",
+    status: "completed",
+    createdAt: 1779688860,
+    updatedAt: 1779688860,
+    content: "",
+    thinkingChunks: [],
+    usage: {
       promptTokens: 42000,
       completionTokens: 1200,
       cachedPromptTokens: 18000,

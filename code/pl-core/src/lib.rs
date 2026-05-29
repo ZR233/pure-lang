@@ -52,9 +52,9 @@ pub use tool::{
 };
 pub use trace::TraceRecorder;
 pub use turn::{
-    AgentBudget, BudgetPolicy, CompileMode, DEFAULT_MAX_TOOL_ITERATIONS, ToolApprovalCallback,
-    ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest, TurnAbortReason, TurnBudget,
-    TurnOptions, TurnRequest, TurnResult, TurnResultStatus, AGENT_MAX_COUNT, AGENT_MAX_DEPTH,
-    DEFAULT_WALL_CLOCK_MS,
+    AGENT_MAX_COUNT, AGENT_MAX_DEPTH, AgentBudget, BudgetPolicy, CompileMode,
+    DEFAULT_MAX_TOOL_ITERATIONS, DEFAULT_WALL_CLOCK_MS, ToolApprovalCallback, ToolApprovalDecision,
+    ToolApprovalPolicy, ToolApprovalRequest, ToolExecutionMode, TurnAbortReason, TurnBudget,
+    TurnOptions, TurnRequest, TurnResult, TurnResultStatus,
 };
 pub use workspace::{load_workspace_instructions, resolve_workspace_root};

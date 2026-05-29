@@ -29,10 +29,8 @@ export function App() {
         selectedSession={studio.selectedSession}
         selectedProject={studio.selectedProject}
         isBusy={state.isBusy}
-        chatItems={studio.chatItems}
+        entries={studio.timelineEntries}
         agents={state.agents}
-        agentTimelineEvents={state.agentTimelineEvents}
-        timelineItems={state.timelineItems}
         sessionRuntime={state.sessionRuntime}
         prompt={state.prompt}
         status={state.status}

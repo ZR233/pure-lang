@@ -51,6 +51,12 @@ fn deepseek_request(messages: Vec<Message>) -> CompletionRequest {
             summary: Some(ReasoningSummary::Enabled),
         }),
         stream: true,
+        timeline: Some(pl_model::CompletionTimelineContext {
+            session_id: "live-session".to_string(),
+            turn_id: "live-turn".to_string(),
+            inference_id: "live-inference".to_string(),
+            starting_sequence: 0,
+        }),
     }
 }
 
@@ -66,8 +72,12 @@ async fn run_turn(api_key: &str, messages: Vec<Message>) -> (String, String, usi
 
         loop {
             match event_rx.recv().await {
-                Ok(AgentEvent::TextDelta { .. }) => text_delta_count += 1,
-                Ok(AgentEvent::ThinkingDelta { .. }) => thinking_delta_count += 1,
+                Ok(AgentEvent::TimelineItemDelta { event }) => match event.delta {
+                    pl_protocol::TimelineDelta::Text { .. } => text_delta_count += 1,
+                    pl_protocol::TimelineDelta::Thinking { .. } => thinking_delta_count += 1,
+                    pl_protocol::TimelineDelta::ToolArguments { .. }
+                    | pl_protocol::TimelineDelta::ToolResult { .. } => {}
+                },
                 Ok(_) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}

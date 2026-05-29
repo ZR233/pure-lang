@@ -17,7 +17,7 @@ use crate::request::CompletionResponse;
 /// 通过工厂函数 `create_provider()` 创建。
 ///
 /// 实现者契约：
-/// - 通过 event_tx 推送 LLM 输出增量（TextDelta/ThinkingDelta/ToolCallDelta）
+/// - 通过 event_tx 推送 item-first timeline 增量
 /// - capabilities() 如实报告支持的功能
 /// - auth_token() 返回当前有效的认证凭据
 pub trait ModelProvider: fmt::Debug + Send + Sync {

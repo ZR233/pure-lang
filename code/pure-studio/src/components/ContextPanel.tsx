@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import type { ChatMessage, ProjectRecord, ProviderRecord, SessionRecord } from "../types";
+import type { ProjectRecord, ProviderRecord, SessionRecord } from "../types";
 
 type RecentActivity = {
   id: string;
@@ -10,7 +10,7 @@ type RecentActivity = {
 type ContextPanelProps = {
   selectedProject: ProjectRecord | null;
   sessions: SessionRecord[];
-  messages: ChatMessage[];
+  timelineCount: number;
   providers: ProviderRecord[];
   recentActivities: RecentActivity[];
 };
@@ -18,7 +18,7 @@ type ContextPanelProps = {
 export function ContextPanel({
   selectedProject,
   sessions,
-  messages,
+  timelineCount,
   providers,
   recentActivities,
 }: ContextPanelProps) {
@@ -39,7 +39,7 @@ export function ContextPanel({
         </div>
         <div className="metric-row">
           <span>{t("context.messages")}</span>
-          <strong>{messages.length}</strong>
+          <strong>{timelineCount}</strong>
         </div>
         <div className="metric-row">
           <span>{t("context.providers")}</span>

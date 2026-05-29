@@ -62,11 +62,11 @@ pub struct AgentTimelineEventRecord {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct TraceEventRecord {
+pub struct TimelineEventRecord {
     pub id: String,
     pub session_id: String,
     pub sequence: i64,
-    pub timestamp: i64,
+    pub created_at: i64,
     pub kind: String,
     pub payload_json: String,
 }
@@ -90,5 +90,5 @@ pub struct SessionRuntimeRecord {
 pub struct StudioPromptOutcome {
     pub result: TurnResult,
     pub messages: Vec<Message>,
-    pub trace_events: Vec<TraceEvent>,
+    pub timeline_events: Vec<TraceEvent>,
 }

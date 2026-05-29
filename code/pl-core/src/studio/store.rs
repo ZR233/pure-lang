@@ -9,16 +9,16 @@ use sea_orm::{
 };
 
 use crate::studio::entities;
-use crate::studio::ids::{new_id, new_trace_event_id, unix_seconds};
+use crate::studio::ids::{new_id, new_timeline_event_id, unix_seconds};
 use crate::studio::mappers::{
     agent_snapshot_record, agent_timeline_event_record, estimate_cost, message_to_row_parts,
-    project_record, row_to_message, session_record, session_runtime_record, trace_event_kind_label,
-    trace_event_record,
+    project_record, row_to_message, session_record, session_runtime_record, timeline_event_record,
+    trace_event_kind_label,
 };
 use crate::studio::paths::{prepare_database_switch, project_name, sqlite_url};
 use crate::studio::records::{
     AgentSnapshotRecord, AgentTimelineEventRecord, ProjectRecord, SessionRecord,
-    SessionRuntimeRecord, ToolApprovalRecord, TraceEventRecord,
+    SessionRuntimeRecord, TimelineEventRecord, ToolApprovalRecord,
 };
 use crate::studio::store_support::{
     configure_sqlite, insert_message_with_tx, non_empty_title, run_migrations,
@@ -367,26 +367,26 @@ impl StudioStore {
         Ok(max_seq.map(|sequence| sequence + 1).unwrap_or(0))
     }
 
-    pub async fn append_trace_events(&self, events: &[TraceEvent]) -> Result<()> {
+    pub async fn append_timeline_events(&self, events: &[TraceEvent]) -> Result<()> {
         if events.is_empty() {
             return Ok(());
         }
-        use entities::trace_event;
-        let models: Vec<trace_event::ActiveModel> = events
+        use entities::timeline_event;
+        let models: Vec<timeline_event::ActiveModel> = events
             .iter()
             .map(|event| {
                 let payload = serde_json::to_string(&event.kind).unwrap_or_default();
-                trace_event::ActiveModel {
-                    id: Set(new_trace_event_id()),
+                timeline_event::ActiveModel {
+                    id: Set(new_timeline_event_id()),
                     session_id: Set(event.session_id.clone()),
                     sequence: Set(event.sequence as i64),
-                    timestamp: Set(event.timestamp),
+                    created_at: Set(event.timestamp),
                     kind: Set(trace_event_kind_label(&event.kind).to_string()),
                     payload_json: Set(payload),
                 }
             })
             .collect();
-        trace_event::Entity::insert_many(models)
+        timeline_event::Entity::insert_many(models)
             .exec(&self.db)
             .await?;
         Ok(())
@@ -395,31 +395,33 @@ impl StudioStore {
     pub async fn append_turn_records(
         &self,
         session_id: &str,
-        trace_events: &[TraceEvent],
+        timeline_events: &[TraceEvent],
         messages: &[Message],
     ) -> Result<()> {
-        if trace_events.is_empty() && messages.is_empty() {
+        if timeline_events.is_empty() && messages.is_empty() {
             return Ok(());
         }
 
         let tx = self.db.begin().await?;
-        if !trace_events.is_empty() {
-            use entities::trace_event;
-            let models: Vec<trace_event::ActiveModel> = trace_events
+        if !timeline_events.is_empty() {
+            use entities::timeline_event;
+            let models: Vec<timeline_event::ActiveModel> = timeline_events
                 .iter()
                 .map(|event| {
                     let payload = serde_json::to_string(&event.kind).unwrap_or_default();
-                    trace_event::ActiveModel {
-                        id: Set(new_trace_event_id()),
+                    timeline_event::ActiveModel {
+                        id: Set(new_timeline_event_id()),
                         session_id: Set(event.session_id.clone()),
                         sequence: Set(event.sequence as i64),
-                        timestamp: Set(event.timestamp),
+                        created_at: Set(event.timestamp),
                         kind: Set(trace_event_kind_label(&event.kind).to_string()),
                         payload_json: Set(payload),
                     }
                 })
                 .collect();
-            trace_event::Entity::insert_many(models).exec(&tx).await?;
+            timeline_event::Entity::insert_many(models)
+                .exec(&tx)
+                .await?;
         }
         if !messages.is_empty() {
             let now = unix_seconds();
@@ -432,31 +434,31 @@ impl StudioStore {
         Ok(())
     }
 
-    pub async fn load_trace_events(
+    pub async fn load_timeline_events(
         &self,
         session_id: &str,
         after_sequence: Option<i64>,
         limit: Option<i64>,
-    ) -> Result<Vec<TraceEventRecord>> {
-        use entities::trace_event;
-        let mut query = trace_event::Entity::find()
-            .filter(trace_event::Column::SessionId.eq(session_id.to_string()));
+    ) -> Result<Vec<TimelineEventRecord>> {
+        use entities::timeline_event;
+        let mut query = timeline_event::Entity::find()
+            .filter(timeline_event::Column::SessionId.eq(session_id.to_string()));
         if let Some(after) = after_sequence {
-            query = query.filter(trace_event::Column::Sequence.gt(after));
+            query = query.filter(timeline_event::Column::Sequence.gt(after));
         }
-        query = query.order_by_asc(trace_event::Column::Sequence);
+        query = query.order_by_asc(timeline_event::Column::Sequence);
         if let Some(limit) = limit {
             query = query.limit(limit as u64);
         }
         let rows = query.all(&self.db).await?;
-        Ok(rows.into_iter().map(trace_event_record).collect())
+        Ok(rows.into_iter().map(timeline_event_record).collect())
     }
 
-    pub async fn next_sequence(&self, session_id: &str) -> Result<u64> {
-        use entities::trace_event;
-        let max_seq: Option<i64> = trace_event::Entity::find()
-            .filter(trace_event::Column::SessionId.eq(session_id.to_string()))
-            .order_by_desc(trace_event::Column::Sequence)
+    pub async fn next_timeline_sequence(&self, session_id: &str) -> Result<u64> {
+        use entities::timeline_event;
+        let max_seq: Option<i64> = timeline_event::Entity::find()
+            .filter(timeline_event::Column::SessionId.eq(session_id.to_string()))
+            .order_by_desc(timeline_event::Column::Sequence)
             .one(&self.db)
             .await?
             .map(|row| row.sequence);

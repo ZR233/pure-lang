@@ -1,13 +1,18 @@
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use futures::future::{BoxFuture, join_all};
 use pl_model::{
-    CompletionRequest, ModelProvider, ProviderInfo, ReasoningConfig, ReasoningSummary,
-    SharedModelProvider, TokenUsage, create_provider, create_provider_with_models,
+    CompletionRequest, ModelProvider, ProviderCapabilities, ProviderInfo, ReasoningConfig,
+    ReasoningSummary, SharedModelProvider, TokenUsage, ToolCallKind, create_provider,
+    create_provider_with_models,
 };
 use pl_protocol::{
-    AgentEvent, AgentEventSender, BudgetLimitKind, BudgetUsage, Result, TokenUsageSnapshot,
-    TraceEventKind,
+    AgentEvent, AgentEventSender, BudgetLimitKind, BudgetUsage, Result, TimelineItem,
+    TimelineItemStatus, TokenUsageSnapshot,
 };
+use tokio::sync::RwLock;
 
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
 use crate::session::CoreSession;
@@ -15,13 +20,13 @@ use crate::tool::{
     ApplyPatchTool, BashTool, CloseAgentTool, CopyPathTool, CreateDirectoryTool, DeletePathTool,
     FollowupTaskTool, ListAgentsTool, ListFilesTool, MovePathTool, ReadFileTool, SearchFilesTool,
     SendMessageTool, SpawnAgentTool, StatPathTool, SubagentContext, SubagentTool, ToolContext,
-    ToolInput, ToolRegistry, WaitAgentTool, WriteFileTool,
+    ToolInput, ToolOutput, ToolRegistry, WaitAgentTool, WriteFileTool,
 };
 use crate::trace::TraceRecorder;
 use crate::turn::{
-    BudgetLimit, BudgetTracker, ToolApprovalDecision, ToolApprovalPolicy,
-    ToolApprovalRequest, TurnOptions, TurnRequest, TurnResult, TurnResultStatus, AGENT_MAX_COUNT,
-    AGENT_MAX_DEPTH,
+    AGENT_MAX_COUNT, AGENT_MAX_DEPTH, BudgetLimit, BudgetTracker, ToolApprovalDecision,
+    ToolApprovalPolicy, ToolApprovalRequest, ToolExecutionMode, TurnOptions, TurnRequest,
+    TurnResult, TurnResultStatus,
 };
 
 /// 生成唯一的会话 ID（毫秒时间戳 + 序列号）。
@@ -211,17 +216,16 @@ impl PureCore {
         let mut budget_tracker = BudgetTracker::new(request.budget);
         let mut budget_limit: Option<BudgetLimit> = None;
 
-        recorder.broadcast(AgentEvent::TurnStarted);
         let session_id = generate_session_id();
-        recorder.record_trace_only(TraceEventKind::TurnStarted {
-            turn_id: session_id.clone(),
-        });
+        let turn_item = recorder.turn_item(&session_id, TimelineItemStatus::Running);
+        recorder.start_item(turn_item.clone());
         let requires_subagent_dispatch = prompt_requires_subagent_dispatch(&request.prompt);
         let initial_agent_count = if requires_subagent_dispatch {
             Some(agent_control.list_agents(None).await.len())
         } else {
             None
         };
+        recorder.user_text_item(&session_id, request.prompt.clone());
         session.push_user_prompt(request.prompt);
         let model = provider.default_model().to_string();
 
@@ -294,11 +298,10 @@ impl PureCore {
             };
 
             let inference_id = format!("{session_id}-inf-{iteration}");
-            recorder.record_trace_only(TraceEventKind::InferenceStarted {
-                turn_id: session_id.clone(),
-                inference_id: inference_id.clone(),
-                model: model.clone(),
-            });
+            let inference_item = recorder.inference_item(&session_id, &inference_id, &model);
+            recorder.start_item(inference_item.clone());
+            let parallel_tool_calls =
+                should_request_parallel_tool_calls(provider.capabilities(), &options);
 
             let completion_request = CompletionRequest {
                 model: model.clone(),
@@ -306,11 +309,17 @@ impl PureCore {
                 messages: messages.clone(),
                 tools: iteration_tools,
                 tool_choice: "auto".to_string(),
-                parallel_tool_calls: false,
+                parallel_tool_calls,
                 temperature: None,
                 max_tokens: None,
                 reasoning: reasoning.clone(),
                 stream: true,
+                timeline: Some(pl_model::CompletionTimelineContext {
+                    session_id: recorder.session_id().to_string(),
+                    turn_id: session_id.clone(),
+                    inference_id: inference_id.clone(),
+                    starting_sequence: recorder.current_sequence(),
+                }),
             };
 
             let response_result = match &cancellation_token {
@@ -372,16 +381,19 @@ impl PureCore {
                 break;
             }
 
-            recorder.record_trace_only(TraceEventKind::InferenceCompleted {
-                turn_id: session_id.clone(),
-                inference_id: inference_id.clone(),
-                usage: TokenUsageSnapshot {
+            recorder.record_events(response.timeline_events.clone());
+            if recorder.current_sequence() < response.next_sequence {
+                recorder.advance_sequence(response.next_sequence);
+            }
+            recorder.complete_inference_item(
+                inference_item,
+                TokenUsageSnapshot {
                     prompt_tokens: response.usage.prompt_tokens,
                     completion_tokens: response.usage.completion_tokens,
                     cached_prompt_tokens: response.usage.cached_prompt_tokens,
                     total_tokens: response.usage.prompt_tokens + response.usage.completion_tokens,
                 },
-            });
+            );
 
             let content = response.content.unwrap_or_default();
             let reasoning_content = response.reasoning_content.clone();
@@ -448,148 +460,41 @@ impl PureCore {
                 last_reasoning_content = reasoning_content;
             }
 
-            for tool_call in &tool_calls {
-                recorder.broadcast(AgentEvent::ToolCallComplete {
-                    id: tool_call.id.clone(),
-                    name: tool_call.name.clone(),
-                    arguments: tool_call.payload_text(),
-                });
-                recorder.record_trace_only(TraceEventKind::ToolCallStarted {
-                    turn_id: session_id.clone(),
-                    tool_call_id: tool_call.id.clone(),
-                    name: tool_call.name.clone(),
-                    arguments: tool_call.payload_text(),
-                });
-                budget_tracker.record_tool_call(&tool_call.name);
-
-                let result = match self.tools.get(&tool_call.name) {
-                    Some(tool) => {
-                        let tool_context = ToolContext {
-                            event_tx: recorder.sender().clone(),
-                            options: options.clone(),
-                            workspace_root: workspace_root.clone(),
-                            workspace_instructions: workspace_instructions.clone(),
-                            active_subagent: active_subagent.clone(),
-                            agent_control: agent_control.clone(),
-                        };
-                        let approval_request = approval_request(tool_call, &tool_context);
-                        match approve_tool_call(
-                            &options,
-                            &approval_request,
-                            recorder.sender().clone(),
-                            &tool_context,
-                        )
-                        .await
-                        {
-                            ToolApprovalDecision::Approved => {
-                                if is_cancelled(&options) {
-                                    return Ok(interrupted_turn_result(
-                                        recorder,
-                                        &session_id,
-                                        request.mode,
-                                        last_content,
-                                        last_reasoning_content,
-                                        last_model,
-                                        total_usage,
-                                        session.messages().len(),
-                                        cancellation_reason(),
-                                    ));
-                                }
-                                recorder.broadcast(AgentEvent::ToolApprovalGranted {
-                                    id: approval_request.id.clone(),
-                                    name: approval_request.name.clone(),
-                                });
-                                recorder.record_trace_only(TraceEventKind::ToolCallApproved {
-                                    tool_call_id: tool_call.id.clone(),
-                                });
-                                let tool_input = ToolInput {
-                                    arguments: tool_call.arguments_for_tool(),
-                                    session_id: session_id.clone(),
-                                    tool_id: tool_call.id.clone(),
-                                };
-                                let tool_result = tool.execute(tool_input, tool_context).await;
-                                if is_cancelled(&options) {
-                                    return Ok(interrupted_turn_result(
-                                        recorder,
-                                        &session_id,
-                                        request.mode,
-                                        last_content,
-                                        last_reasoning_content,
-                                        last_model,
-                                        total_usage,
-                                        session.messages().len(),
-                                        cancellation_reason(),
-                                    ));
-                                }
-                                match tool_result {
-                                    Ok(output) => {
-                                        recorder.record_trace_only(
-                                            TraceEventKind::ToolCallCompleted {
-                                                tool_call_id: tool_call.id.clone(),
-                                                result: output.description.clone(),
-                                                exit_code: None,
-                                                timed_out: false,
-                                            },
-                                        );
-                                        output.description
-                                    }
-                                    Err(e) => {
-                                        recorder.record_trace_only(
-                                            TraceEventKind::ToolCallFailed {
-                                                tool_call_id: tool_call.id.clone(),
-                                                error: e.to_string(),
-                                            },
-                                        );
-                                        format!("Tool execution error: {e}")
-                                    }
-                                }
-                            }
-                            ToolApprovalDecision::Denied { reason } => {
-                                if is_cancelled(&options) {
-                                    return Ok(interrupted_turn_result(
-                                        recorder,
-                                        &session_id,
-                                        request.mode,
-                                        last_content,
-                                        last_reasoning_content,
-                                        last_model,
-                                        total_usage,
-                                        session.messages().len(),
-                                        reason,
-                                    ));
-                                }
-                                recorder.broadcast(AgentEvent::ToolApprovalDenied {
-                                    id: approval_request.id.clone(),
-                                    name: approval_request.name.clone(),
-                                    reason: reason.clone(),
-                                });
-                                recorder.record_trace_only(TraceEventKind::ToolCallDenied {
-                                    tool_call_id: tool_call.id.clone(),
-                                    reason: reason.clone(),
-                                });
-                                format!("Tool execution denied: {reason}")
-                            }
-                        }
-                    }
-                    None => {
-                        let available: Vec<&str> = self.tools.names();
-                        eprintln!(
-                            "[pl-core] Unknown tool: {:?}, available: {:?}",
-                            tool_call.name, available
-                        );
-                        format!("Unknown tool: {}", tool_call.name)
-                    }
-                };
-
+            let tool_results = execute_tool_calls(
+                &tool_calls,
+                &mut budget_tracker,
+                recorder,
+                ToolExecutionContext {
+                    core: self,
+                    options: &options,
+                    session_id: &session_id,
+                    workspace_root: &workspace_root,
+                    workspace_instructions: workspace_instructions.clone(),
+                    active_subagent: active_subagent.clone(),
+                    agent_control: agent_control.clone(),
+                },
+            )
+            .await;
+            if is_cancelled(&options) {
+                return Ok(interrupted_turn_result(
+                    recorder,
+                    &session_id,
+                    request.mode,
+                    last_content,
+                    last_reasoning_content,
+                    last_model,
+                    total_usage,
+                    session.messages().len(),
+                    cancellation_reason(),
+                ));
+            }
+            for tool_result in tool_results {
                 session.push_tool_result(
-                    tool_call
-                        .call_id
-                        .clone()
-                        .unwrap_or_else(|| tool_call.id.clone()),
-                    tool_call.name.clone(),
-                    tool_call.kind(),
-                    result,
-                    serde_json::to_string(&tool_call.arguments_for_display()).unwrap_or_default(),
+                    tool_result.call_id,
+                    tool_result.name,
+                    tool_result.kind,
+                    tool_result.result,
+                    tool_result.arguments,
                 );
             }
 
@@ -632,17 +537,16 @@ impl PureCore {
             ));
         }
 
-        recorder.record_trace_only(TraceEventKind::TurnCompleted {
-            turn_id: session_id.clone(),
-            content: last_content.clone(),
-            model: last_model.clone(),
-            usage: TokenUsageSnapshot {
-                prompt_tokens: total_usage.prompt_tokens,
-                completion_tokens: total_usage.completion_tokens,
-                cached_prompt_tokens: total_usage.cached_prompt_tokens,
-                total_tokens: total_usage.total_tokens,
-            },
+        let mut completed_turn_item =
+            recorder.turn_item(&session_id, TimelineItemStatus::Completed);
+        completed_turn_item.content = last_content.clone();
+        completed_turn_item.usage = Some(TokenUsageSnapshot {
+            prompt_tokens: total_usage.prompt_tokens,
+            completion_tokens: total_usage.completion_tokens,
+            cached_prompt_tokens: total_usage.cached_prompt_tokens,
+            total_tokens: total_usage.total_tokens,
         });
+        recorder.complete_item(completed_turn_item);
         recorder.broadcast(AgentEvent::Done);
 
         Ok(TurnResult {
@@ -656,8 +560,260 @@ impl PureCore {
             abort_reason: None,
             budget_limit_kind: None,
             budget_usage: None,
-            trace_events: recorder.drain(),
+            timeline_events: recorder.drain(),
         })
+    }
+}
+
+struct ToolExecutionRecord {
+    call_id: String,
+    name: String,
+    kind: ToolCallKind,
+    result: String,
+    arguments: String,
+    status: TimelineItemStatus,
+    exit_code: Option<i32>,
+    timed_out: bool,
+}
+
+struct ScheduledToolExecution<'a> {
+    tool_call: pl_model::ToolCall,
+    item: TimelineItem,
+    future: BoxFuture<'a, ToolExecutionRecord>,
+}
+
+struct ToolExecutionContext<'a> {
+    core: &'a PureCore,
+    options: &'a TurnOptions,
+    session_id: &'a str,
+    workspace_root: &'a Path,
+    workspace_instructions: Option<String>,
+    active_subagent: Option<SubagentContext>,
+    agent_control: crate::AgentControl,
+}
+
+async fn execute_tool_calls(
+    tool_calls: &[pl_model::ToolCall],
+    budget_tracker: &mut BudgetTracker,
+    recorder: &mut TraceRecorder,
+    context: ToolExecutionContext<'_>,
+) -> Vec<ToolExecutionRecord> {
+    let mut scheduled = Vec::new();
+    let mut initial_items = HashMap::new();
+    let runtime_lock = Arc::new(RwLock::new(()));
+
+    for tool_call in tool_calls {
+        if is_cancelled(context.options) {
+            break;
+        }
+        let tool_call_id = tool_call
+            .call_id
+            .clone()
+            .unwrap_or_else(|| tool_call.id.clone());
+        let mut item = recorder.tool_item(
+            context.session_id,
+            &tool_call_id,
+            tool_call.name.clone(),
+            tool_call.payload_text(),
+            tool_call.call_id.clone(),
+            Some(tool_call.id.clone()),
+        );
+        initial_items.insert(tool_call_id.clone(), item.clone());
+        recorder.start_item(item.clone());
+        budget_tracker.record_tool_call(&tool_call.name);
+
+        let Some(tool) = context.core.tools.get(&tool_call.name) else {
+            let available: Vec<&str> = context.core.tools.names();
+            eprintln!(
+                "[pl-core] Unknown tool: {:?}, available: {:?}",
+                tool_call.name, available
+            );
+            item.status = TimelineItemStatus::Failed;
+            item.updated_at = unix_seconds();
+            if let Some(tool) = &mut item.tool {
+                tool.result = Some(format!("Unknown tool: {}", tool_call.name));
+            }
+            recorder.fail_item(item, format!("Unknown tool: {}", tool_call.name));
+            scheduled.push(ScheduledToolExecution {
+                tool_call: tool_call.clone(),
+                item: initial_items[&tool_call_id].clone(),
+                future: Box::pin(ready_tool_execution_record(
+                    tool_call.clone(),
+                    format!("Unknown tool: {}", tool_call.name),
+                    TimelineItemStatus::Failed,
+                    None,
+                    false,
+                )),
+            });
+            continue;
+        };
+
+        let supports_parallel = tool.supports_parallel_tool_calls()
+            && matches!(
+                context.options.tool_execution_mode,
+                ToolExecutionMode::ModelDefault | ToolExecutionMode::Parallel
+            );
+        let tool_context = ToolContext {
+            event_tx: recorder.sender().clone(),
+            options: context.options.clone(),
+            workspace_root: context.workspace_root.to_path_buf(),
+            workspace_instructions: context.workspace_instructions.clone(),
+            active_subagent: context.active_subagent.clone(),
+            agent_control: context.agent_control.clone(),
+        };
+        let approval_request = approval_request(tool_call, &tool_context);
+        let decision = approve_tool_call(
+            context.options,
+            &approval_request,
+            recorder.sender().clone(),
+            &tool_context,
+        )
+        .await;
+        if is_cancelled(context.options) {
+            return Vec::new();
+        }
+
+        match decision {
+            ToolApprovalDecision::Approved => {
+                item.status = TimelineItemStatus::Approved;
+                item.updated_at = unix_seconds();
+                recorder.complete_item(item.clone());
+                let tool_input = ToolInput {
+                    arguments: tool_call.arguments_for_tool(),
+                    session_id: context.session_id.to_string(),
+                    tool_id: tool_call_id.clone(),
+                };
+                let lock = runtime_lock.clone();
+                let tool_name = tool_call.name.clone();
+                let tool_call_for_task = tool_call.clone();
+                scheduled.push(ScheduledToolExecution {
+                    tool_call: tool_call.clone(),
+                    item,
+                    future: Box::pin(async move {
+                        let result = if supports_parallel {
+                            let _guard = lock.read().await;
+                            tool.execute(tool_input, tool_context).await
+                        } else {
+                            let _guard = lock.write().await;
+                            tool.execute(tool_input, tool_context).await
+                        };
+                        tool_execution_record(tool_call_for_task, tool_name, result)
+                    }),
+                });
+            }
+            ToolApprovalDecision::Denied { reason } => {
+                item.status = TimelineItemStatus::Denied;
+                item.updated_at = unix_seconds();
+                if let Some(tool) = &mut item.tool {
+                    tool.denial_reason = Some(reason.clone());
+                    tool.result = Some(format!("Tool execution denied: {reason}"));
+                }
+                recorder.complete_item(item);
+                scheduled.push(ScheduledToolExecution {
+                    tool_call: tool_call.clone(),
+                    item: initial_items[&tool_call_id].clone(),
+                    future: Box::pin(ready_tool_execution_record(
+                        tool_call.clone(),
+                        format!("Tool execution denied: {reason}"),
+                        TimelineItemStatus::Denied,
+                        None,
+                        false,
+                    )),
+                });
+            }
+        }
+    }
+
+    let mut records = Vec::new();
+    let futures = scheduled
+        .into_iter()
+        .map(|scheduled| async move {
+            let record = scheduled.future.await;
+            (scheduled.tool_call, scheduled.item, record)
+        })
+        .collect::<Vec<_>>();
+    for (_tool_call, mut item, record) in join_all(futures).await {
+        item.status = record.status;
+        item.updated_at = unix_seconds();
+        if let Some(tool) = &mut item.tool {
+            tool.result = Some(record.result.clone());
+            tool.exit_code = record.exit_code;
+            tool.timed_out = record.timed_out;
+        }
+        if item.status == TimelineItemStatus::Failed {
+            recorder.fail_item(item, record.result.clone());
+        } else {
+            recorder.complete_item(item);
+        }
+        records.push(record);
+    }
+    records
+}
+
+async fn ready_tool_execution_record(
+    tool_call: pl_model::ToolCall,
+    result: String,
+    status: TimelineItemStatus,
+    exit_code: Option<i32>,
+    timed_out: bool,
+) -> ToolExecutionRecord {
+    ToolExecutionRecord {
+        call_id: tool_call
+            .call_id
+            .clone()
+            .unwrap_or_else(|| tool_call.id.clone()),
+        name: tool_call.name.clone(),
+        kind: tool_call.kind(),
+        arguments: serde_json::to_string(&tool_call.arguments_for_display()).unwrap_or_default(),
+        result,
+        status,
+        exit_code,
+        timed_out,
+    }
+}
+
+fn tool_execution_record(
+    tool_call: pl_model::ToolCall,
+    tool_name: String,
+    result: std::result::Result<ToolOutput, pl_protocol::PureError>,
+) -> ToolExecutionRecord {
+    let (result, status, exit_code, timed_out) = match result {
+        Ok(output) => (
+            output.description,
+            TimelineItemStatus::Completed,
+            output.exit_code,
+            output.timed_out,
+        ),
+        Err(error) => (
+            format!("Tool execution error: {error}"),
+            TimelineItemStatus::Failed,
+            None,
+            false,
+        ),
+    };
+    ToolExecutionRecord {
+        call_id: tool_call
+            .call_id
+            .clone()
+            .unwrap_or_else(|| tool_call.id.clone()),
+        name: tool_name,
+        kind: tool_call.kind(),
+        arguments: serde_json::to_string(&tool_call.arguments_for_display()).unwrap_or_default(),
+        result,
+        status,
+        exit_code,
+        timed_out,
+    }
+}
+
+fn should_request_parallel_tool_calls(
+    capabilities: ProviderCapabilities,
+    options: &TurnOptions,
+) -> bool {
+    match options.tool_execution_mode {
+        ToolExecutionMode::Sequential => false,
+        ToolExecutionMode::Parallel => true,
+        ToolExecutionMode::ModelDefault => capabilities.supports_parallel_tool_calls(),
     }
 }
 
@@ -666,6 +822,13 @@ fn is_cancelled(options: &TurnOptions) -> bool {
         .cancellation_token
         .as_ref()
         .is_some_and(|token| token.is_cancelled())
+}
+
+fn unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 fn cancellation_reason() -> String {
@@ -696,10 +859,9 @@ fn interrupted_turn_result(
     reason: String,
 ) -> TurnResult {
     usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
-    recorder.record_trace_only(TraceEventKind::TurnInterrupted {
-        turn_id: turn_id.to_string(),
-        reason: reason.clone(),
-    });
+    let mut item = recorder.turn_item(turn_id, TimelineItemStatus::Interrupted);
+    item.content = content.clone();
+    recorder.fail_item(item, reason.clone());
     recorder.broadcast(AgentEvent::TurnInterrupted { reason });
     recorder.broadcast(AgentEvent::Done);
 
@@ -714,7 +876,7 @@ fn interrupted_turn_result(
         abort_reason: Some(crate::turn::TurnAbortReason::Interrupted),
         budget_limit_kind: None,
         budget_usage: None,
-        trace_events: recorder.drain(),
+        timeline_events: recorder.drain(),
     }
 }
 
@@ -731,10 +893,9 @@ fn failed_turn_result(
     error: String,
 ) -> TurnResult {
     usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
-    recorder.record_trace_only(TraceEventKind::TurnFailed {
-        turn_id: turn_id.to_string(),
-        error: error.clone(),
-    });
+    let mut item = recorder.turn_item(turn_id, TimelineItemStatus::Failed);
+    item.content = content.clone();
+    recorder.fail_item(item, error.clone());
     recorder.broadcast(AgentEvent::Error {
         message: error,
         severity: pl_protocol::ErrorSeverity::Recoverable,
@@ -752,7 +913,7 @@ fn failed_turn_result(
         abort_reason: Some(crate::turn::TurnAbortReason::ProviderError),
         budget_limit_kind: None,
         budget_usage: None,
-        trace_events: recorder.drain(),
+        timeline_events: recorder.drain(),
     }
 }
 
@@ -771,13 +932,15 @@ fn budget_limited_turn_result(
     reason: String,
 ) -> TurnResult {
     usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
-    recorder.record_trace_only(TraceEventKind::TurnBudgetLimited {
-        turn_id: turn_id.to_string(),
-        reason: reason.clone(),
-        limit_kind,
-        usage: budget_usage,
-        last_content: content.clone(),
+    let mut item = recorder.turn_item(turn_id, TimelineItemStatus::BudgetLimited);
+    item.content = content.clone();
+    item.usage = Some(TokenUsageSnapshot {
+        prompt_tokens: usage.prompt_tokens,
+        completion_tokens: usage.completion_tokens,
+        cached_prompt_tokens: usage.cached_prompt_tokens,
+        total_tokens: usage.total_tokens,
     });
+    recorder.fail_item(item, reason.clone());
     recorder.broadcast(AgentEvent::TurnBudgetLimited {
         reason,
         limit_kind,
@@ -796,7 +959,7 @@ fn budget_limited_turn_result(
         abort_reason: Some(crate::turn::TurnAbortReason::BudgetLimited),
         budget_limit_kind: Some(limit_kind),
         budget_usage: Some(budget_usage),
-        trace_events: recorder.drain(),
+        timeline_events: recorder.drain(),
     }
 }
 

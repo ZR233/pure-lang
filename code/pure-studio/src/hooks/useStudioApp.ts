@@ -22,18 +22,16 @@ import {
 } from "../lib/tauri";
 import { errorText } from "../lib/utils";
 import {
-  selectChatItems,
   selectSelectedProject,
   selectSelectedSession,
+  selectTimelineEntries,
 } from "../state/selectors";
 import { initialStudioState, studioReducer } from "../state/studio-state";
 import type {
   AgentEvent,
   AgentEventPayload,
-  ChatItem,
   PromptFailed,
   RoleRecord,
-  RunPromptResponse,
   ToolApprovalRequest,
   ToolApprovalResolved,
 } from "../types";
@@ -43,20 +41,24 @@ function statusTextForEvent(
   t: (key: string, args?: Record<string, unknown>) => string,
 ) {
   if (!event) return t("turnPhase.subagent");
-  if (event === "turnStarted") return t("status.running");
   if (event === "done") return t("status.done");
   if ("turnInterrupted" in event) return t("status.interrupted");
   if ("turnBudgetLimited" in event) return t("turnPhase.budgetLimited");
-  if ("textDelta" in event) return t("status.running");
-  if ("thinkingDelta" in event) return t("status.thinking");
-  if ("toolCallDelta" in event) return t("status.toolInput", { name: event.toolCallDelta.name });
+  if ("timelineItemStarted" in event) return t("status.running");
+  if ("timelineItemDelta" in event) {
+    const itemEvent = event.timelineItemDelta.event;
+    if (itemEvent.kind === "thinking") return t("status.thinking");
+    if (itemEvent.kind === "tool") return t("status.toolInput", { name: "tool" });
+    return t("status.running");
+  }
+  if ("timelineItemCompleted" in event) {
+    const item = event.timelineItemCompleted.item;
+    if (item.kind === "tool") return t("status.toolCompleted", { name: item.tool?.name ?? "tool" });
+    return t("status.running");
+  }
+  if ("timelineItemFailed" in event) return t("status.error", { message: event.timelineItemFailed.error });
   if ("toolApprovalGranted" in event) return t("status.approved", { name: event.toolApprovalGranted.name });
   if ("toolApprovalDenied" in event) return t("status.denied", { name: event.toolApprovalDenied.name });
-  if ("agentStateChanged" in event) {
-    return t("status.subagentStatus", {
-      status: event.agentStateChanged.status,
-    });
-  }
   if ("error" in event) return t("status.error", { message: event.error.message });
   return t("status.running");
 }
@@ -68,9 +70,9 @@ export function useStudioApp() {
   const selectedProject = selectSelectedProject(state);
   const selectedSession = selectSelectedSession(state);
 
-  const chatItems = useMemo((): ChatItem[] => {
-    return selectChatItems(state, t("status.thinking"));
-  }, [state.messages, state.toolCalls, state.streamingText, state.thinkingText, t]);
+  const timelineEntries = useMemo(() => {
+    return selectTimelineEntries(state);
+  }, [state.timelineItems, state.timelineOrder]);
 
   useEffect(() => {
     bootstrapStudio()
@@ -127,13 +129,6 @@ export function useStudioApp() {
           type: "resolveApproval",
           payload,
           status: payload.decision === "approved" ? t("status.toolApproved") : t("status.toolDenied"),
-        });
-      }),
-      listen<RunPromptResponse>("studio-prompt-finished", ({ payload }) => {
-        dispatch({
-          type: "runPromptLoaded",
-          payload,
-          status: payload.turnAbortReason === "interrupted" ? t("status.interrupted") : t("status.done"),
         });
       }),
       listen<PromptFailed>("studio-prompt-failed", ({ payload }) => {
@@ -369,7 +364,7 @@ export function useStudioApp() {
 
   return {
     state,
-    chatItems,
+    timelineEntries,
     selectedProject,
     selectedSession,
     setRolesState,

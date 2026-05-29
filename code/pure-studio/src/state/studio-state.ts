@@ -1,9 +1,8 @@
 import type {
-  AgentEvent,
   AgentDto,
+  AgentEvent,
   AgentTimelineEvent,
   BootstrapPayload,
-  ChatMessage,
   ConfigPayload,
   ProjectRecord,
   ProjectSelectionPayload,
@@ -15,11 +14,11 @@ import type {
   SessionRuntime,
   SessionSelectionPayload,
   TimelineItem,
+  TimelineItemDeltaEvent,
   TurnPhase,
   TurnStatus,
   ToolApprovalRequest,
   ToolApprovalResolved,
-  TrackedToolCall,
 } from "../types";
 
 export type SettingsTab = "providers" | "models" | "roles" | "security" | "general";
@@ -27,7 +26,6 @@ export type SettingsTab = "providers" | "models" | "roles" | "security" | "gener
 export type StudioState = {
   projects: ProjectRecord[];
   sessions: SessionRecord[];
-  messages: ChatMessage[];
   providers: ProviderRecord[];
   roles: RoleRecord[];
   providerTemplates: ProviderTemplateRecord[];
@@ -39,12 +37,10 @@ export type StudioState = {
   turnPhase: TurnPhase;
   turnStartedAt: number | null;
   isBusy: boolean;
-  streamingText: string;
-  thinkingText: string;
-  toolCalls: Map<string, TrackedToolCall>;
   agents: AgentDto[];
   agentTimelineEvents: AgentTimelineEvent[];
-  timelineItems: TimelineItem[];
+  timelineItems: Map<string, TimelineItem>;
+  timelineOrder: string[];
   sessionRuntime: SessionRuntime | null;
   approvals: ToolApprovalRequest[];
   settingsOpen: boolean;
@@ -90,7 +86,6 @@ export type StudioAction =
 export const initialStudioState = (startingStatus: string): StudioState => ({
   projects: [],
   sessions: [],
-  messages: [],
   providers: [],
   roles: [],
   providerTemplates: [],
@@ -102,12 +97,10 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   turnPhase: "idle",
   turnStartedAt: null,
   isBusy: false,
-  streamingText: "",
-  thinkingText: "",
-  toolCalls: new Map(),
   agents: [],
   agentTimelineEvents: [],
-  timelineItems: [],
+  timelineItems: new Map(),
+  timelineOrder: [],
   sessionRuntime: null,
   approvals: [],
   settingsOpen: false,
@@ -127,7 +120,6 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         selectedProjectId: action.payload.selectedProjectId ?? null,
         sessions: action.payload.sessions,
         selectedSessionId: action.payload.selectedSessionId ?? null,
-        messages: action.payload.messages,
         agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
         agents: mergeAgents([], action.payload.agents ?? []),
         sessionRuntime: action.payload.sessionRuntime ?? null,
@@ -138,7 +130,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
     case "bootstrapFailed":
       return { ...state, status: action.status };
     case "timelineLoaded":
-      return { ...state, timelineItems: action.items };
+      return replaceTimelineItems(state, action.items);
     case "timelineLoadFailed":
       return { ...state, status: action.status };
     case "projectSelectionLoaded":
@@ -148,14 +140,11 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         selectedProjectId: action.payload.projectId,
         sessions: action.payload.sessions,
         selectedSessionId: action.payload.selectedSessionId ?? null,
-        messages: action.payload.messages,
         agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
         agents: mergeAgents([], action.payload.agents ?? []),
         sessionRuntime: action.payload.sessionRuntime ?? null,
-        timelineItems: [],
-        streamingText: "",
-        thinkingText: "",
-        toolCalls: new Map(),
+        timelineItems: new Map(),
+        timelineOrder: [],
         status: action.status,
         turnPhase: "idle",
         turnStartedAt: null,
@@ -165,34 +154,26 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         ...state,
         sessions: action.payload.sessions.length > 0 ? action.payload.sessions : state.sessions,
         selectedSessionId: action.payload.sessionId,
-        messages: action.payload.messages,
         agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
         agents: mergeAgents([], action.payload.agents ?? []),
         sessionRuntime: action.payload.sessionRuntime ?? null,
-        timelineItems: [],
-        streamingText: "",
-        thinkingText: "",
-        toolCalls: new Map(),
+        timelineItems: new Map(),
+        timelineOrder: [],
         status: action.status,
         turnPhase: "idle",
         turnStartedAt: null,
       };
     case "runPromptLoaded":
       return {
-        ...state,
+        ...mergeTimelineItems(removeOptimisticTimelineItems(state), action.payload.timelineItems),
         selectedSessionId: action.payload.sessionId,
         sessions: action.payload.sessions,
-        messages: action.payload.messages,
         agentTimelineEvents: mergeAgentTimelineEvents(
           state.agentTimelineEvents,
           action.payload.agentEvents ?? [],
         ),
         agents: mergeAgents(state.agents, action.payload.agents ?? []),
         sessionRuntime: action.payload.sessionRuntime,
-        timelineItems: mergeTimelineItems(state.timelineItems, action.payload.timelineItems),
-        streamingText: "",
-        thinkingText: "",
-        toolCalls: new Map(),
         turnPhase: phaseForTurnStatus(action.payload.turnStatus),
         turnStartedAt: null,
         status: action.status,
@@ -259,17 +240,17 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         isBusy: false,
       };
     case "appendUserPrompt":
-      return {
-        ...state,
-        prompt: "",
-        isBusy: true,
-        streamingText: "",
-        thinkingText: "",
-        messages: [...state.messages, { role: "user", content: action.content }],
-        status: action.status,
-        turnPhase: "running",
-        turnStartedAt: action.startedAt,
-      };
+      return upsertTimelineItem(
+        {
+          ...state,
+          prompt: "",
+          isBusy: true,
+          status: action.status,
+          turnPhase: "running",
+          turnStartedAt: action.startedAt,
+        },
+        optimisticUserItem(action.content, action.startedAt),
+      );
     case "agentEvent":
       return reduceAgentEvent(
         {
@@ -299,14 +280,6 @@ function reduceAgentEvent(
       turnPhase: state.turnPhase === "idle" ? "subagent" : state.turnPhase,
     };
   }
-  if (event === "turnStarted") {
-    return {
-      ...state,
-      status: statusText,
-      turnPhase: "running",
-      turnStartedAt: Date.now(),
-    };
-  }
   if (event === "done") {
     return {
       ...state,
@@ -321,128 +294,201 @@ function reduceAgentEvent(
     };
   }
   if ("turnInterrupted" in event) {
-    return {
-      ...state,
-      status: statusText,
-      turnPhase: "interrupted",
-    };
+    return { ...state, status: statusText, turnPhase: "interrupted" };
   }
   if ("turnBudgetLimited" in event) {
+    return { ...state, status: statusText, turnPhase: "budgetLimited" };
+  }
+  if ("timelineItemStarted" in event) {
     return {
-      ...state,
+      ...upsertTimelineItem(state, event.timelineItemStarted.item),
       status: statusText,
-      turnPhase: "interrupted",
+      turnPhase: phaseForTimelineItem(event.timelineItemStarted.item, state.turnPhase),
+      turnStartedAt: state.turnStartedAt ?? Date.now(),
     };
   }
-  if ("textDelta" in event) {
+  if ("timelineItemDelta" in event) {
     return {
-      ...state,
-      streamingText: state.streamingText + event.textDelta.content,
+      ...applyTimelineDelta(state, event.timelineItemDelta.event),
       status: statusText,
-      turnPhase: "running",
+      turnPhase: phaseForTimelineDelta(event.timelineItemDelta.event, state.turnPhase),
     };
   }
-  if ("thinkingDelta" in event) {
+  if ("timelineItemCompleted" in event) {
     return {
-      ...state,
-      thinkingText: state.thinkingText + event.thinkingDelta.content,
+      ...upsertTimelineItem(state, event.timelineItemCompleted.item),
       status: statusText,
-      turnPhase: "thinking",
+      turnPhase: phaseForTimelineItem(event.timelineItemCompleted.item, state.turnPhase),
     };
   }
-  if ("toolCallDelta" in event) {
-    const next = new Map(state.toolCalls);
-    const existing = next.get(event.toolCallDelta.id);
-    if (existing) {
-      next.set(event.toolCallDelta.id, {
-        ...existing,
-        arguments: existing.arguments + event.toolCallDelta.argumentsDelta,
-      });
-    } else {
-      next.set(event.toolCallDelta.id, {
-        id: event.toolCallDelta.id,
-        name: event.toolCallDelta.name,
-        arguments: event.toolCallDelta.argumentsDelta,
-        status: "streaming",
-        startedAt: Date.now(),
-      });
-    }
+  if ("timelineItemFailed" in event) {
     return {
-      ...state,
+      ...upsertTimelineItem(state, event.timelineItemFailed.item),
       status: statusText,
-      turnPhase: "tool",
-      toolCalls: next,
+      turnPhase:
+        event.timelineItemFailed.item.status === "budgetLimited"
+          ? "budgetLimited"
+          : event.timelineItemFailed.item.status === "interrupted"
+            ? "interrupted"
+            : "failed",
     };
   }
-  if ("toolCallComplete" in event) {
-    const next = new Map(state.toolCalls);
-    const existing = next.get(event.toolCallComplete.id);
-    if (existing) {
-      next.set(event.toolCallComplete.id, {
-        ...existing,
-        name: event.toolCallComplete.name || existing.name,
-        status: "completed",
-        arguments: event.toolCallComplete.arguments,
-      });
-    } else {
-      next.set(event.toolCallComplete.id, {
-        id: event.toolCallComplete.id,
-        name: event.toolCallComplete.name,
-        arguments: event.toolCallComplete.arguments,
-        status: "completed",
-        startedAt: Date.now(),
-      });
-    }
-    return {
-      ...state,
-      turnPhase: "tool",
-      toolCalls: next,
-    };
-  }
-  if ("toolApprovalGranted" in event) {
-    const next = new Map(state.toolCalls);
-    const existing = next.get(event.toolApprovalGranted.id);
-    if (existing) {
-      next.set(event.toolApprovalGranted.id, { ...existing, status: "approved" });
-    }
-    return {
-      ...state,
-      status: statusText,
-      turnPhase: "tool",
-      toolCalls: next,
-    };
-  }
-  if ("toolApprovalDenied" in event) {
-    const next = new Map(state.toolCalls);
-    const existing = next.get(event.toolApprovalDenied.id);
-    if (existing) {
-      next.set(event.toolApprovalDenied.id, { ...existing, status: "denied" });
-    }
-    return {
-      ...state,
-      status: statusText,
-      turnPhase: state.turnPhase === "stopping" ? "stopping" : "tool",
-      toolCalls: next,
-    };
-  }
-  if ("agentStateChanged" in event) return { ...state, turnPhase: "subagent", status: statusText };
   if ("error" in event) {
-    return {
-      ...state,
-      status: statusText,
-      turnPhase: "failed",
-    };
+    return { ...state, status: statusText, turnPhase: "failed" };
   }
-  return state;
+  return { ...state, status: statusText };
 }
 
-export function mergeTimelineItems(current: TimelineItem[], incoming: TimelineItem[]): TimelineItem[] {
-  if (incoming.length === 0) return current;
-  const bySeq = new Map(current.map((item) => [item.sequence, item]));
-  for (const item of incoming) {
-    bySeq.set(item.sequence, item);
+function replaceTimelineItems(state: StudioState, items: TimelineItem[]): StudioState {
+  const next = {
+    ...state,
+    timelineItems: new Map<string, TimelineItem>(),
+    timelineOrder: [],
+  };
+  return mergeTimelineItems(next, items);
+}
+
+function removeOptimisticTimelineItems(state: StudioState): StudioState {
+  const timelineItems = new Map(state.timelineItems);
+  for (const itemId of state.timelineOrder) {
+    if (itemId.startsWith("optimistic-")) {
+      timelineItems.delete(itemId);
+    }
   }
-  return [...bySeq.values()].sort((a, b) => a.sequence - b.sequence);
+  return {
+    ...state,
+    timelineItems,
+    timelineOrder: state.timelineOrder.filter((itemId) => !itemId.startsWith("optimistic-")),
+  };
+}
+
+export function mergeTimelineItems(state: StudioState, incoming: TimelineItem[]): StudioState {
+  let next = state;
+  for (const item of incoming) {
+    next = upsertTimelineItem(next, item);
+  }
+  return next;
+}
+
+function upsertTimelineItem(state: StudioState, item: TimelineItem): StudioState {
+  const timelineItems = new Map(state.timelineItems);
+  const existing = timelineItems.get(item.itemId);
+  timelineItems.set(item.itemId, mergeTimelineItem(existing, item));
+  const timelineOrder = existing
+    ? state.timelineOrder
+    : [...state.timelineOrder, item.itemId].sort((left, right) => {
+        const leftItem = timelineItems.get(left);
+        const rightItem = timelineItems.get(right);
+        return (leftItem?.sequence ?? 0) - (rightItem?.sequence ?? 0);
+      });
+  return { ...state, timelineItems, timelineOrder };
+}
+
+function mergeTimelineItem(existing: TimelineItem | undefined, item: TimelineItem): TimelineItem {
+  if (!existing) {
+    return normalizeTimelineItem(item);
+  }
+  return {
+    ...normalizeTimelineItem(existing),
+    ...normalizeTimelineItem(item),
+    content: item.content || existing.content || "",
+    thinkingChunks:
+      item.thinkingChunks.length > 0 ? item.thinkingChunks : existing.thinkingChunks,
+    tool: item.tool ?? existing.tool ?? null,
+    agent: item.agent ?? existing.agent ?? null,
+    inference: item.inference ?? existing.inference ?? null,
+    usage: item.usage ?? existing.usage ?? null,
+    sequence: existing.sequence,
+    createdAt: existing.createdAt,
+  };
+}
+
+function applyTimelineDelta(state: StudioState, event: TimelineItemDeltaEvent): StudioState {
+  const existing = state.timelineItems.get(event.itemId) ?? blankTimelineItem(event);
+  const item = normalizeTimelineItem(existing);
+  item.status = event.status;
+  item.updatedAt = event.updatedAt;
+  const delta = event.delta;
+  switch (delta.type) {
+    case "text":
+      item.content += delta.delta;
+      break;
+    case "thinking": {
+      const chunk = item.thinkingChunks.find((part) => part.chunkIndex === delta.chunkIndex);
+      if (chunk) {
+        chunk.content += delta.delta;
+      } else {
+        item.thinkingChunks.push({
+          chunkIndex: delta.chunkIndex,
+          content: delta.delta,
+        });
+      }
+      item.thinkingChunks.sort((left, right) => left.chunkIndex - right.chunkIndex);
+      break;
+    }
+    case "toolArguments":
+      if (item.tool) {
+        item.tool.arguments += delta.delta;
+      }
+      break;
+    case "toolResult":
+      if (item.tool) {
+        item.tool.result = `${item.tool.result ?? ""}${delta.delta}`;
+      }
+      break;
+  }
+  return upsertTimelineItem(state, item);
+}
+
+function blankTimelineItem(event: TimelineItemDeltaEvent): TimelineItem {
+  return {
+    turnId: event.turnId,
+    itemId: event.itemId,
+    sequence: event.sequence,
+    kind: event.kind,
+    status: event.status,
+    createdAt: event.createdAt,
+    updatedAt: event.updatedAt,
+    role: null,
+    content: "",
+    thinkingChunks: [],
+    tool: null,
+    agent: null,
+    inference: null,
+    usage: null,
+  };
+}
+
+function normalizeTimelineItem(item: TimelineItem): TimelineItem {
+  return {
+    ...item,
+    content: item.content ?? "",
+    thinkingChunks: item.thinkingChunks ?? [],
+    tool: item.tool ?? null,
+    agent: item.agent ?? null,
+    inference: item.inference ?? null,
+    usage: item.usage ?? null,
+  };
+}
+
+function optimisticUserItem(content: string, startedAt: number): TimelineItem {
+  const seconds = Math.floor(startedAt / 1000);
+  return {
+    turnId: `optimistic-${startedAt}`,
+    itemId: `optimistic-user-${startedAt}`,
+    sequence: Number.MAX_SAFE_INTEGER - startedAt,
+    kind: "text",
+    status: "completed",
+    createdAt: seconds,
+    updatedAt: seconds,
+    role: "user",
+    content,
+    thinkingChunks: [],
+    tool: null,
+    agent: null,
+    inference: null,
+    usage: null,
+  };
 }
 
 export function mergeAgentTimelineEvents(
@@ -487,6 +533,25 @@ function configFields(selectedProviderId: string | null, payload: ConfigPayload)
     configExists: payload.configExists,
     selectedProviderId: nextProviderId,
   };
+}
+
+function phaseForTimelineItem(item: TimelineItem, current: TurnPhase): TurnPhase {
+  if (current === "stopping") return "stopping";
+  if (item.kind === "thinking") return "thinking";
+  if (item.kind === "tool") return "tool";
+  if (item.kind === "agent") return "subagent";
+  if (item.status === "failed") return "failed";
+  if (item.status === "interrupted") return "interrupted";
+  if (item.status === "budgetLimited") return "budgetLimited";
+  if (item.kind === "turn" && item.status === "completed") return "completed";
+  return "running";
+}
+
+function phaseForTimelineDelta(event: TimelineItemDeltaEvent, current: TurnPhase): TurnPhase {
+  if (current === "stopping") return "stopping";
+  if (event.kind === "thinking") return "thinking";
+  if (event.kind === "tool") return "tool";
+  return "running";
 }
 
 export function phaseForTurnStatus(status: TurnStatus): TurnPhase {

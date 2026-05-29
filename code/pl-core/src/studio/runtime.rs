@@ -120,15 +120,15 @@ impl StudioRuntime {
         {
             options.tool_approval_callback = Some(approval_callback);
         }
-        let starting_sequence = self.store.next_sequence(session_id).await?;
+        let starting_sequence = self.store.next_timeline_sequence(session_id).await?;
         let mut recorder = TraceRecorder::new(session_id.to_string(), event_tx, starting_sequence);
         let result = core
             .run_turn_with_trace(&mut session, request, &mut recorder, options)
             .await?;
-        let trace_events = result.trace_events.clone();
+        let timeline_events = result.timeline_events.clone();
         let new_messages = &session.messages()[previous_len..];
         self.store
-            .append_turn_records(session_id, &trace_events, new_messages)
+            .append_turn_records(session_id, &timeline_events, new_messages)
             .await?;
         let resolved = config.resolve_role(ModelRole::Planner)?;
         let model = resolved
@@ -154,7 +154,7 @@ impl StudioRuntime {
         Ok(StudioPromptOutcome {
             result,
             messages,
-            trace_events,
+            timeline_events,
         })
     }
 }
