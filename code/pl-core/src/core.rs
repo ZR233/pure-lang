@@ -220,7 +220,8 @@ impl PureCore {
         let session_id = generate_session_id();
         let turn_item = recorder.turn_item(&session_id, TimelineItemStatus::Running);
         recorder.start_item(turn_item.clone());
-        let requires_subagent_dispatch = prompt_requires_subagent_dispatch(&request.prompt);
+        let requires_subagent_dispatch =
+            active_subagent.is_none() && prompt_requires_subagent_dispatch(&request.prompt);
         let initial_agent_count = if requires_subagent_dispatch {
             Some(agent_control.list_agents(None).await.len())
         } else {
@@ -1069,8 +1070,13 @@ fn format_instructions(base: &str, workspace: Option<&str>) -> String {
 
 fn prompt_requires_subagent_dispatch(prompt: &str) -> bool {
     let lower = prompt.to_ascii_lowercase();
-    let mentions_subagent =
-        lower.contains("subagent") || prompt.contains("子代理") || prompt.contains("分代理");
+    let lower_without_file_mentions = lower
+        .replace("subagent.rs", "")
+        .replace("subagent.md", "")
+        .replace("subagent.toml", "");
+    let mentions_subagent = lower_without_file_mentions.contains("subagent")
+        || prompt.contains("子代理")
+        || prompt.contains("分代理");
     let requests_partition =
         lower.contains("crate") || prompt.contains("每个") || prompt.contains("分别");
     mentions_subagent && requests_partition
@@ -1082,27 +1088,49 @@ fn looks_like_unexecuted_tool_call_text(content: &str) -> bool {
         return false;
     }
     let lower = trimmed.to_ascii_lowercase();
-    let mentions_known_tool = [
-        "spawn_agent",
-        "wait_agent",
-        "list_agents",
-        "send_message",
-        "followup_task",
-        "close_agent",
-        "subagent",
-    ]
-    .iter()
-    .any(|name| lower.contains(name));
 
     trimmed.contains("<｜｜DSML｜｜tool_calls>")
         || trimmed.contains("<｜｜DSML｜｜invoke name=")
         || lower.contains("<tool_call>")
         || lower.contains("<tool_calls>")
-        || lower.contains("\"tool_calls\"")
-        || (mentions_known_tool
-            && (lower.contains("tool_calls")
-                || lower.contains("invoke name=")
-                || lower.contains("\"name\"")))
+        || looks_like_json_tool_calls_text(trimmed)
+}
+
+fn looks_like_json_tool_calls_text(trimmed: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+        return false;
+    };
+    has_tool_calls_shape(&value)
+}
+
+fn has_tool_calls_shape(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(map) => map
+            .get("tool_calls")
+            .or_else(|| map.get("toolCalls"))
+            .is_some_and(|tool_calls| {
+                tool_calls
+                    .as_array()
+                    .is_some_and(|items| has_tool_call_entries(items))
+            }),
+        serde_json::Value::Array(items) => has_tool_call_entries(items),
+        serde_json::Value::Null
+        | serde_json::Value::Bool(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::String(_) => false,
+    }
+}
+
+fn has_tool_call_entries(items: &[serde_json::Value]) -> bool {
+    !items.is_empty()
+        && items.iter().all(|item| {
+            item.as_object().is_some_and(|entry| {
+                entry.contains_key("name")
+                    || entry.contains_key("function")
+                    || entry.contains_key("arguments")
+                    || entry.contains_key("input")
+            })
+        })
 }
 
 #[cfg(test)]
@@ -1165,6 +1193,9 @@ mod tests {
         assert!(!prompt_requires_subagent_dispatch(
             "用 bash 看一下每个 crate"
         ));
+        assert!(!prompt_requires_subagent_dispatch(
+            "读取 src/tool/subagent.rs，并总结每个模块的职责"
+        ));
     }
 
     #[test]
@@ -1174,6 +1205,12 @@ mod tests {
         ));
         assert!(looks_like_unexecuted_tool_call_text(
             r#"{"tool_calls":[{"name":"spawn_agent"}]}"#
+        ));
+        assert!(!looks_like_unexecuted_tool_call_text(
+            "源码中有 tool_calls 字段、name 字段和 subagent.rs 文件。"
+        ));
+        assert!(!looks_like_unexecuted_tool_call_text(
+            r#"{"summary":"tool_calls and name are discussed in docs"}"#
         ));
         assert!(!looks_like_unexecuted_tool_call_text(
             "已完成探索，没有工具调用文本。"
