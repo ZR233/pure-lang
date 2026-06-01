@@ -59,6 +59,7 @@ function statusTextForEvent(
   if ("timelineItemFailed" in event) return t("status.error", { message: event.timelineItemFailed.error });
   if ("toolApprovalGranted" in event) return t("status.approved", { name: event.toolApprovalGranted.name });
   if ("toolApprovalDenied" in event) return t("status.denied", { name: event.toolApprovalDenied.name });
+  if ("agentRuntimeUpdated" in event) return t("status.running");
   if ("error" in event) return t("status.error", { message: event.error.message });
   return t("status.running");
 }
@@ -114,6 +115,7 @@ export function useStudioApp() {
           event: payload.event,
           timelineEvent: payload.timelineEvent,
           agent: payload.agent,
+          sessionRuntime: payload.sessionRuntime,
           statusText: statusTextForEvent(payload.event, t),
         });
       }),

@@ -1,4 +1,6 @@
-use pl_protocol::{AgentStatus, BudgetLimitKind, BudgetUsage, Message, TraceEvent};
+use pl_protocol::{
+    AgentStatus, BudgetLimitKind, BudgetUsage, Message, RuntimeUsageSnapshot, TraceEvent,
+};
 
 use crate::TurnResult;
 
@@ -30,7 +32,7 @@ pub struct ToolApprovalRecord {
     pub reason: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AgentSnapshotRecord {
     pub id: String,
     pub session_id: String,
@@ -45,6 +47,7 @@ pub struct AgentSnapshotRecord {
     pub reason: Option<String>,
     pub budget_limit_kind: Option<BudgetLimitKind>,
     pub budget_usage: Option<BudgetUsage>,
+    pub runtime_usage: Option<RuntimeUsageSnapshot>,
     pub updated_at: i64,
 }
 
@@ -83,6 +86,8 @@ pub struct SessionRuntimeRecord {
     pub total_tokens: u64,
     pub currency: Option<String>,
     pub estimated_cost: Option<f64>,
+    pub estimated_costs: Vec<pl_protocol::RuntimeCostAmount>,
+    pub has_unpriced_usage: bool,
     pub updated_at: i64,
 }
 

@@ -42,6 +42,7 @@ export type AgentDto = {
     waitCalls: number;
     elapsedMs: number;
   } | null;
+  runtimeUsage?: RuntimeUsage | null;
   updatedAt: number;
 };
 
@@ -107,8 +108,12 @@ export type ModelRecord = {
   truncationLimit?: number;
 };
 
-export type SessionRuntime = {
-  sessionId: string;
+export type RuntimeCostAmount = {
+  currency: string;
+  amount: number;
+};
+
+export type RuntimeUsage = {
   model: string;
   contextWindow?: number | null;
   latestContextTokens: number;
@@ -117,11 +122,14 @@ export type SessionRuntime = {
   cachedPromptTokens: number;
   totalTokens: number;
   cacheHitRate?: number | null;
-  currency?: string | null;
-  inputPricePerMTok?: number | null;
-  outputPricePerMTok?: number | null;
-  cacheReadPricePerMTok?: number | null;
-  estimatedCost?: number | null;
+  estimatedCosts: RuntimeCostAmount[];
+  hasUnpricedUsage: boolean;
+  updatedAt: number;
+};
+
+export type SessionRuntime = {
+  sessionId: string;
+  usage: RuntimeUsage;
   activeSkills: string[];
   activeMcpServers: string[];
   updatedAt: number;
@@ -313,6 +321,7 @@ export type AgentEvent =
   | { toolApprovalGranted: { id: string; name: string } }
   | { toolApprovalDenied: { id: string; name: string; reason: string } }
   | { agentStateChanged: AgentDto }
+  | { agentRuntimeUpdated: { delta: AgentRuntimeDelta } }
   | { turnInterrupted: { reason: string } }
   | {
       turnBudgetLimited: {
@@ -344,11 +353,26 @@ export type TimelineItemDeltaEvent = {
     | { type: "toolResult"; delta: string };
 };
 
+export type AgentRuntimeDelta = {
+  inferenceId: string;
+  agentId: string;
+  path: string;
+  parentPath?: string | null;
+  role: string;
+  model: string;
+  contextWindow?: number | null;
+  usage: UsageSnapshot;
+  estimatedCosts: RuntimeCostAmount[];
+  hasUnpricedUsage: boolean;
+  updatedAt: number;
+};
+
 export type AgentEventPayload = {
   sessionId: string;
   event?: AgentEvent | null;
   timelineEvent?: AgentTimelineEvent | null;
   agent?: AgentDto | null;
+  sessionRuntime?: SessionRuntime | null;
 };
 
 export type ToolApprovalRequest = {

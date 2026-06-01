@@ -55,6 +55,8 @@ pl-model provider
 
 子代理内部事件不直接转发完整文本流、思考流、工具调用流或工具输出。`pl-core` 将子代理生命周期压缩为 `agent` timeline item 和 `AgentStateChanged` snapshot，状态固定为 `queued`、`running`、`waiting`、`completed`、`errored`、`interrupted`、`shutdown`、`notFound`。`pure-studio` 持久化这些状态事件，并在聊天界面只渲染路径、状态和摘要，避免把子代理内部执行细节混入父会话 timeline。
 
+子代理的运行指标使用独立的压缩事件转发。`AgentRuntimeUpdated` 只携带 agent 身份、实际模型、上下文窗口、本次 inference token、按币种估算的费用和未计价标记；不携带子代理内部正文、思考、工具参数或工具输出。
+
 ## 8.5 流式工具调用聚合与 ID
 
 `pl-model` 负责把 provider 的工具调用 delta 聚合为完整的 `ToolCall` 后再交给 `pl-core` 执行。Chat Completions 流式响应中的后续参数片段可能只带 `index`，不再重复 `id` 或 `name`；Responses API 的 custom/freeform 输入 delta 也可能只带 `item_id` / `call_id`。因此聚合层必须使用稳定的流式序号或 item/call id 合并片段，并保留最早出现的 provider id、工具名和调用种类。
@@ -81,6 +83,13 @@ pl-model provider
 
 `pl-model::TokenUsage` 保留输入、输出和总 token，并额外记录 `cached_prompt_tokens`。Chat Completions 和 Responses API 的 usage detail 字段不同，provider 适配层负责尽可能读取缓存 token；缺失时按 `0` 处理。
 
-Studio 状态栏必须在运行中即时反映上下文和费用。流式事件里的 `inference` item 在完成时携带本次模型调用 usage；前端 reducer 用当前模型价格对 `sessionRuntime` 做增量更新，展示最新上下文、累计输入/输出、缓存命中和费用估算。turn 完成后后端仍返回持久化后的 `sessionRuntime` 快照作为最终校准。
+root agent 和 subagent 使用同一套 runtime usage 数据模型。每次模型 inference 完成后，`pl-core` 以实际使用的 model 计算本次运行指标，并发出 `AgentRuntimeUpdated`：
 
-`pl-core` 不把费用估算作为 provider 事件暴露；费用只由 Studio 结合模型价格配置估算。React 状态栏消费运行态快照和 inference usage，不直接解析 provider 私有 usage 字段。
+- `inferenceId` 作为幂等键，防止实时事件和历史回放重复计费。
+- `usage` 记录本次 prompt/completion/cache token。
+- `estimatedCosts` 按货币分组，只保存能由本地模型价格完整估算的费用。
+- `hasUnpricedUsage` 表示存在 token 使用但缺少 currency 或价格字段，UI 不应把它并入任意币种。
+
+Studio 状态栏必须在运行中即时反映上下文和费用。前端消费后端聚合后的运行态快照，并以 `RunPromptResponse.sessionRuntime` 作为完成后的最终校准。前端不得同时按 inference item 和 turn item 重复累计费用。
+
+费用为本地估算值，使用配置中的每百万 token 单价。不同货币不做汇率转换，也不合并为单一数字。React 状态栏消费通用 runtime snapshot，不直接解析 provider 私有 usage 字段。

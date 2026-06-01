@@ -7,6 +7,7 @@ pub mod domain;
 mod first_run;
 pub mod infrastructure;
 pub mod interfaces;
+mod runtime_usage;
 mod session;
 mod studio;
 mod tool;
@@ -35,10 +36,10 @@ pub use interfaces::{
 };
 pub use pl_model::{InputModality, TruncationMode};
 pub use pl_protocol::{
-    AgentEvent, AgentEventReceiver, AgentEventSender, BudgetLimitKind, BudgetUsage, ContentPart,
-    ContentPartType, ErrorSeverity, Message, MessageContent, MessageRole, OutputStream,
-    PermissionLevel, PipelineStage, PureError, Result, TokenUsageSnapshot, TraceEvent,
-    TraceEventKind,
+    AgentEvent, AgentEventReceiver, AgentEventSender, AgentRuntimeDelta, BudgetLimitKind,
+    BudgetUsage, ContentPart, ContentPartType, ErrorSeverity, Message, MessageContent, MessageRole,
+    OutputStream, PermissionLevel, PipelineStage, PureError, Result, RuntimeCostAmount,
+    RuntimeUsageSnapshot, TokenUsageSnapshot, TraceEvent, TraceEventKind,
 };
 pub use session::CoreSession;
 pub use studio::{

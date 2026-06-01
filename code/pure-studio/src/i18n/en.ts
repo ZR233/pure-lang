@@ -163,6 +163,7 @@ const en = {
     cost: "Cost",
     costHint: "Estimated from per-million-token prices; no currency conversion",
     costNotConfigured: "Not configured",
+    costUnpriced: "Unpriced/partially unpriced",
     notConfigured: "Not configured",
     modelPricing: "Model pricing (optional)",
     capabilities: "Capabilities",

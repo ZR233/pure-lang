@@ -1,19 +1,24 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
 use anyhow::Result;
-use pl_protocol::Message;
+use pl_protocol::{AgentRuntimeDelta, Message, RuntimeUsageSnapshot};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, Database, DatabaseConnection,
     EntityTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
 };
 
+use crate::runtime_usage::{
+    ROOT_AGENT_ID, ROOT_AGENT_PATH, ROOT_AGENT_ROLE, aggregate_runtime_usage, cost_for_usage,
+    merge_costs, token_usage_snapshot,
+};
 use crate::studio::entities;
 use crate::studio::ids::{new_id, new_timeline_event_id, unix_seconds};
 use crate::studio::mappers::{
-    agent_snapshot_record, agent_timeline_event_record, estimate_cost, message_to_row_parts,
-    project_record, row_to_message, session_record, session_runtime_record, timeline_event_record,
-    trace_event_kind_label,
+    agent_runtime_snapshot_record, agent_snapshot_record, agent_timeline_event_record,
+    costs_to_json, message_to_row_parts, project_record, row_to_message, session_record,
+    session_runtime_record, timeline_event_record, trace_event_kind_label,
 };
 use crate::studio::paths::{prepare_database_switch, project_name, sqlite_url};
 use crate::studio::records::{
@@ -322,7 +327,33 @@ impl StudioStore {
             .order_by_asc(agent::Column::Path)
             .all(&self.db)
             .await?;
-        Ok(rows.into_iter().map(agent_snapshot_record).collect())
+        let runtime_by_agent = self.agent_runtime_usage_by_agent(session_id).await?;
+        Ok(rows
+            .into_iter()
+            .map(agent_snapshot_record)
+            .map(|mut record| {
+                record.runtime_usage = runtime_by_agent.get(&record.id).cloned();
+                record
+            })
+            .collect())
+    }
+
+    pub async fn agent_runtime_usage_by_agent(
+        &self,
+        session_id: &str,
+    ) -> Result<HashMap<String, RuntimeUsageSnapshot>> {
+        use entities::agent_runtime_snapshot;
+        let rows = agent_runtime_snapshot::Entity::find()
+            .filter(agent_runtime_snapshot::Column::SessionId.eq(session_id.to_string()))
+            .all(&self.db)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let agent_id = row.agent_id.clone();
+                (agent_id, agent_runtime_snapshot_record(row))
+            })
+            .collect())
     }
 
     pub async fn record_agent_event(&self, record: AgentTimelineEventRecord) -> Result<()> {
@@ -465,6 +496,169 @@ impl StudioStore {
         Ok(max_seq.map(|s| (s + 1) as u64).unwrap_or(0))
     }
 
+    pub async fn record_agent_runtime_delta(
+        &self,
+        session_id: &str,
+        delta: &AgentRuntimeDelta,
+    ) -> Result<bool> {
+        use entities::{agent_runtime_event, agent_runtime_snapshot};
+
+        let exists = agent_runtime_event::Entity::find()
+            .filter(agent_runtime_event::Column::SessionId.eq(session_id.to_string()))
+            .filter(agent_runtime_event::Column::InferenceId.eq(delta.inference_id.clone()))
+            .one(&self.db)
+            .await?
+            .is_some();
+        if exists {
+            return Ok(false);
+        }
+
+        let costs_json = costs_to_json(&delta.estimated_costs);
+        agent_runtime_event::ActiveModel {
+            id: Set(new_id("agent-runtime-event")),
+            session_id: Set(session_id.to_string()),
+            inference_id: Set(delta.inference_id.clone()),
+            agent_id: Set(delta.agent_id.clone()),
+            path: Set(delta.path.clone()),
+            parent_path: Set(delta.parent_path.clone()),
+            role: Set(delta.role.clone()),
+            model: Set(delta.model.clone()),
+            context_window: Set(delta.context_window.map(|value| value as i64)),
+            prompt_tokens: Set(delta.usage.prompt_tokens as i64),
+            completion_tokens: Set(delta.usage.completion_tokens as i64),
+            cached_prompt_tokens: Set(delta.usage.cached_prompt_tokens as i64),
+            total_tokens: Set(delta.usage.total_tokens as i64),
+            estimated_costs_json: Set(costs_json.clone()),
+            has_unpriced_usage: Set(i32::from(delta.has_unpriced_usage)),
+            created_at: Set(delta.updated_at),
+        }
+        .insert(&self.db)
+        .await?;
+
+        let existing = agent_runtime_snapshot::Entity::find()
+            .filter(agent_runtime_snapshot::Column::SessionId.eq(session_id.to_string()))
+            .filter(agent_runtime_snapshot::Column::AgentId.eq(delta.agent_id.clone()))
+            .one(&self.db)
+            .await?;
+        if let Some(row) = existing {
+            let mut costs = crate::studio::mappers::costs_from_json(&row.estimated_costs_json);
+            merge_costs(&mut costs, &delta.estimated_costs);
+            let prompt_tokens = row.prompt_tokens + delta.usage.prompt_tokens as i64;
+            let completion_tokens = row.completion_tokens + delta.usage.completion_tokens as i64;
+            let cached_prompt_tokens =
+                row.cached_prompt_tokens + delta.usage.cached_prompt_tokens as i64;
+            let total_tokens = row.total_tokens + delta.usage.total_tokens as i64;
+            let has_unpriced_usage = row.has_unpriced_usage != 0 || delta.has_unpriced_usage;
+            let mut active: agent_runtime_snapshot::ActiveModel = row.into();
+            active.path = Set(delta.path.clone());
+            active.parent_path = Set(delta.parent_path.clone());
+            active.role = Set(delta.role.clone());
+            active.model = Set(delta.model.clone());
+            active.context_window = Set(delta.context_window.map(|value| value as i64));
+            active.latest_context_tokens = Set(delta.usage.prompt_tokens as i64);
+            active.prompt_tokens = Set(prompt_tokens);
+            active.completion_tokens = Set(completion_tokens);
+            active.cached_prompt_tokens = Set(cached_prompt_tokens);
+            active.total_tokens = Set(total_tokens);
+            active.estimated_costs_json = Set(costs_to_json(&costs));
+            active.has_unpriced_usage = Set(i32::from(has_unpriced_usage));
+            active.updated_at = Set(delta.updated_at);
+            active.update(&self.db).await?;
+        } else {
+            agent_runtime_snapshot::ActiveModel {
+                id: Set(runtime_snapshot_id(session_id, &delta.agent_id)),
+                session_id: Set(session_id.to_string()),
+                agent_id: Set(delta.agent_id.clone()),
+                path: Set(delta.path.clone()),
+                parent_path: Set(delta.parent_path.clone()),
+                role: Set(delta.role.clone()),
+                model: Set(delta.model.clone()),
+                context_window: Set(delta.context_window.map(|value| value as i64)),
+                latest_context_tokens: Set(delta.usage.prompt_tokens as i64),
+                prompt_tokens: Set(delta.usage.prompt_tokens as i64),
+                completion_tokens: Set(delta.usage.completion_tokens as i64),
+                cached_prompt_tokens: Set(delta.usage.cached_prompt_tokens as i64),
+                total_tokens: Set(delta.usage.total_tokens as i64),
+                estimated_costs_json: Set(costs_json),
+                has_unpriced_usage: Set(i32::from(delta.has_unpriced_usage)),
+                updated_at: Set(delta.updated_at),
+            }
+            .insert(&self.db)
+            .await?;
+        }
+
+        self.rebuild_session_runtime_from_agent_snapshots(session_id)
+            .await?;
+        Ok(true)
+    }
+
+    pub async fn rebuild_session_runtime_from_agent_snapshots(
+        &self,
+        session_id: &str,
+    ) -> Result<()> {
+        use entities::{agent_runtime_snapshot, session_runtime_snapshot};
+
+        let rows = agent_runtime_snapshot::Entity::find()
+            .filter(agent_runtime_snapshot::Column::SessionId.eq(session_id.to_string()))
+            .all(&self.db)
+            .await?;
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let aggregate = aggregate_runtime_usage(
+            "unknown",
+            rows.into_iter().map(agent_runtime_snapshot_record),
+        );
+        let (currency, estimated_cost) = if aggregate.estimated_costs.len() == 1 {
+            (
+                Some(aggregate.estimated_costs[0].currency.clone()),
+                Some(aggregate.estimated_costs[0].amount),
+            )
+        } else {
+            (None, None)
+        };
+        let costs_json = costs_to_json(&aggregate.estimated_costs);
+
+        if let Some(row) = session_runtime_snapshot::Entity::find_by_id(session_id.to_string())
+            .one(&self.db)
+            .await?
+        {
+            let mut active: session_runtime_snapshot::ActiveModel = row.into();
+            active.model = Set(aggregate.model);
+            active.context_window = Set(aggregate.context_window.map(|value| value as i64));
+            active.latest_context_tokens = Set(aggregate.latest_context_tokens as i64);
+            active.prompt_tokens = Set(aggregate.prompt_tokens as i64);
+            active.completion_tokens = Set(aggregate.completion_tokens as i64);
+            active.cached_prompt_tokens = Set(aggregate.cached_prompt_tokens as i64);
+            active.total_tokens = Set(aggregate.total_tokens as i64);
+            active.currency = Set(currency);
+            active.estimated_cost = Set(estimated_cost);
+            active.estimated_costs_json = Set(costs_json);
+            active.has_unpriced_usage = Set(i32::from(aggregate.has_unpriced_usage));
+            active.updated_at = Set(aggregate.updated_at);
+            active.update(&self.db).await?;
+        } else {
+            session_runtime_snapshot::ActiveModel {
+                session_id: Set(session_id.to_string()),
+                model: Set(aggregate.model),
+                context_window: Set(aggregate.context_window.map(|value| value as i64)),
+                latest_context_tokens: Set(aggregate.latest_context_tokens as i64),
+                prompt_tokens: Set(aggregate.prompt_tokens as i64),
+                completion_tokens: Set(aggregate.completion_tokens as i64),
+                cached_prompt_tokens: Set(aggregate.cached_prompt_tokens as i64),
+                total_tokens: Set(aggregate.total_tokens as i64),
+                currency: Set(currency),
+                estimated_cost: Set(estimated_cost),
+                estimated_costs_json: Set(costs_json),
+                has_unpriced_usage: Set(i32::from(aggregate.has_unpriced_usage)),
+                updated_at: Set(aggregate.updated_at),
+            }
+            .insert(&self.db)
+            .await?;
+        }
+        Ok(())
+    }
+
     pub async fn load_session_runtime(
         &self,
         session_id: &str,
@@ -484,25 +678,23 @@ impl StudioStore {
         result: &TurnResult,
         model: Option<&pl_model::ModelInfo>,
     ) -> Result<()> {
-        use entities::session_runtime_snapshot;
+        use entities::agent_runtime_snapshot;
 
-        let existing = self.load_session_runtime(session_id).await?;
-        let prompt_tokens = existing
-            .as_ref()
-            .map(|record| record.prompt_tokens)
-            .unwrap_or(0)
-            + result.usage.prompt_tokens;
-        let completion_tokens = existing
-            .as_ref()
-            .map(|record| record.completion_tokens)
-            .unwrap_or(0)
-            + result.usage.completion_tokens;
-        let cached_prompt_tokens = existing
-            .as_ref()
-            .map(|record| record.cached_prompt_tokens)
-            .unwrap_or(0)
-            + result.usage.cached_prompt_tokens;
-        let total_tokens = prompt_tokens + completion_tokens;
+        let has_agent_runtime = agent_runtime_snapshot::Entity::find()
+            .filter(agent_runtime_snapshot::Column::SessionId.eq(session_id.to_string()))
+            .one(&self.db)
+            .await?
+            .is_some();
+        if has_agent_runtime {
+            return self
+                .rebuild_session_runtime_from_agent_snapshots(session_id)
+                .await;
+        }
+
+        let usage = token_usage_snapshot(&result.usage);
+        if usage.total_tokens == 0 {
+            return Ok(());
+        }
         let model_name = if result.model.is_empty() {
             model
                 .map(|model| model.slug.clone())
@@ -510,56 +702,21 @@ impl StudioStore {
         } else {
             result.model.clone()
         };
-        let currency = model.and_then(|model| model.currency.clone());
-        let estimated_cost = model.and_then(|model| {
-            estimate_cost(
-                prompt_tokens,
-                completion_tokens,
-                cached_prompt_tokens,
-                model.input_price_per_mtok,
-                model.output_price_per_mtok,
-                model.cache_read_price_per_mtok,
-            )
-        });
-        let now = unix_seconds();
-
-        if let Some(row) = session_runtime_snapshot::Entity::find_by_id(session_id.to_string())
-            .one(&self.db)
-            .await?
-        {
-            let mut active: session_runtime_snapshot::ActiveModel = row.into();
-            active.model = Set(model_name);
-            active.context_window = Set(model
-                .and_then(pl_model::ModelInfo::resolved_context_window)
-                .map(|value| value as i64));
-            active.latest_context_tokens = Set(result.usage.prompt_tokens as i64);
-            active.prompt_tokens = Set(prompt_tokens as i64);
-            active.completion_tokens = Set(completion_tokens as i64);
-            active.cached_prompt_tokens = Set(cached_prompt_tokens as i64);
-            active.total_tokens = Set(total_tokens as i64);
-            active.currency = Set(currency);
-            active.estimated_cost = Set(estimated_cost);
-            active.updated_at = Set(now);
-            active.update(&self.db).await?;
-        } else {
-            session_runtime_snapshot::ActiveModel {
-                session_id: Set(session_id.to_string()),
-                model: Set(model_name),
-                context_window: Set(model
-                    .and_then(pl_model::ModelInfo::resolved_context_window)
-                    .map(|value| value as i64)),
-                latest_context_tokens: Set(result.usage.prompt_tokens as i64),
-                prompt_tokens: Set(prompt_tokens as i64),
-                completion_tokens: Set(completion_tokens as i64),
-                cached_prompt_tokens: Set(cached_prompt_tokens as i64),
-                total_tokens: Set(total_tokens as i64),
-                currency: Set(currency),
-                estimated_cost: Set(estimated_cost),
-                updated_at: Set(now),
-            }
-            .insert(&self.db)
-            .await?;
-        }
+        let (estimated_costs, has_unpriced_usage) = cost_for_usage(&usage, model);
+        let delta = AgentRuntimeDelta {
+            inference_id: new_id("legacy-runtime"),
+            agent_id: ROOT_AGENT_ID.to_string(),
+            path: ROOT_AGENT_PATH.to_string(),
+            parent_path: None,
+            role: ROOT_AGENT_ROLE.to_string(),
+            model: model_name,
+            context_window: model.and_then(pl_model::ModelInfo::resolved_context_window),
+            usage,
+            estimated_costs,
+            has_unpriced_usage,
+            updated_at: unix_seconds(),
+        };
+        self.record_agent_runtime_delta(session_id, &delta).await?;
         Ok(())
     }
 
@@ -594,4 +751,8 @@ impl StudioStore {
             .await?
             .map(|setting| setting.value))
     }
+}
+
+fn runtime_snapshot_id(session_id: &str, agent_id: &str) -> String {
+    format!("{session_id}:{agent_id}")
 }

@@ -163,6 +163,7 @@ const zhCN = {
     cost: "费用",
     costHint: "按百万 token 单价估算，不做汇率转换",
     costNotConfigured: "未配置",
+    costUnpriced: "未配置/部分未配置",
     notConfigured: "未配置",
     modelPricing: "模型计价（可选）",
     capabilities: "能力",

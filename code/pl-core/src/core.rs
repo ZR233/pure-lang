@@ -15,6 +15,7 @@ use pl_protocol::{
 use tokio::sync::RwLock;
 
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
+use crate::runtime_usage::{agent_runtime_delta, identity_for_subagent, token_usage_snapshot};
 use crate::session::CoreSession;
 use crate::tool::{
     ApplyPatchTool, BashTool, CloseAgentTool, CopyPathTool, CreateDirectoryTool, DeletePathTool,
@@ -298,7 +299,7 @@ impl PureCore {
             };
 
             let inference_id = format!("{session_id}-inf-{iteration}");
-            let inference_item = recorder.inference_item(&session_id, &inference_id, &model);
+            let mut inference_item = recorder.inference_item(&session_id, &inference_id, &model);
             recorder.start_item(inference_item.clone());
             let parallel_tool_calls =
                 should_request_parallel_tool_calls(provider.capabilities(), &options);
@@ -385,15 +386,26 @@ impl PureCore {
             if recorder.current_sequence() < response.next_sequence {
                 recorder.advance_sequence(response.next_sequence);
             }
-            recorder.complete_inference_item(
-                inference_item,
-                TokenUsageSnapshot {
-                    prompt_tokens: response.usage.prompt_tokens,
-                    completion_tokens: response.usage.completion_tokens,
-                    cached_prompt_tokens: response.usage.cached_prompt_tokens,
-                    total_tokens: response.usage.prompt_tokens + response.usage.completion_tokens,
-                },
-            );
+            let actual_model = if response.model.is_empty() {
+                model.clone()
+            } else {
+                response.model.clone()
+            };
+            if let Some(inference) = &mut inference_item.inference {
+                inference.model = actual_model.clone();
+            }
+            let usage_snapshot = token_usage_snapshot(&response.usage);
+            recorder.complete_inference_item(inference_item, usage_snapshot.clone());
+            let model_info = provider.model_info(&actual_model);
+            recorder.broadcast(AgentEvent::AgentRuntimeUpdated {
+                delta: agent_runtime_delta(
+                    inference_id.clone(),
+                    identity_for_subagent(active_subagent.as_ref()),
+                    &model_info,
+                    usage_snapshot,
+                    unix_seconds(),
+                ),
+            });
 
             let content = response.content.unwrap_or_default();
             let reasoning_content = response.reasoning_content.clone();
@@ -403,9 +415,7 @@ impl PureCore {
             total_usage.completion_tokens += response.usage.completion_tokens;
             total_usage.cached_prompt_tokens += response.usage.cached_prompt_tokens;
 
-            if !response.model.is_empty() {
-                last_model = response.model;
-            }
+            last_model = actual_model;
 
             if tool_calls.is_empty() {
                 if looks_like_unexecuted_tool_call_text(&content) {

@@ -181,6 +181,70 @@ pub mod session_runtime_snapshot {
         pub total_tokens: i64,
         pub currency: Option<String>,
         pub estimated_cost: Option<f64>,
+        pub estimated_costs_json: String,
+        pub has_unpriced_usage: i32,
+        pub updated_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod agent_runtime_event {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "agent_runtime_events")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub session_id: String,
+        pub inference_id: String,
+        pub agent_id: String,
+        pub path: String,
+        pub parent_path: Option<String>,
+        pub role: String,
+        pub model: String,
+        pub context_window: Option<i64>,
+        pub prompt_tokens: i64,
+        pub completion_tokens: i64,
+        pub cached_prompt_tokens: i64,
+        pub total_tokens: i64,
+        pub estimated_costs_json: String,
+        pub has_unpriced_usage: i32,
+        pub created_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod agent_runtime_snapshot {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "agent_runtime_snapshots")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub session_id: String,
+        pub agent_id: String,
+        pub path: String,
+        pub parent_path: Option<String>,
+        pub role: String,
+        pub model: String,
+        pub context_window: Option<i64>,
+        pub latest_context_tokens: i64,
+        pub prompt_tokens: i64,
+        pub completion_tokens: i64,
+        pub cached_prompt_tokens: i64,
+        pub total_tokens: i64,
+        pub estimated_costs_json: String,
+        pub has_unpriced_usage: i32,
         pub updated_at: i64,
     }
 

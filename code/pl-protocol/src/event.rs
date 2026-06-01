@@ -59,6 +59,9 @@ pub enum AgentEvent {
         #[serde(rename = "updatedAt")]
         updated_at: i64,
     },
+    AgentRuntimeUpdated {
+        delta: AgentRuntimeDelta,
+    },
     CollabAgentSpawnBegin {
         call_id: String,
         started_at: i64,
@@ -414,6 +417,64 @@ pub struct BudgetUsage {
     pub elapsed_ms: u64,
 }
 
+/// Estimated runtime cost in a single currency.
+///
+/// Costs are local estimates derived from configured per-million-token prices.
+/// Different currencies must remain separate and are never converted or summed
+/// together.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeCostAmount {
+    pub currency: String,
+    pub amount: f64,
+}
+
+/// Cumulative runtime usage snapshot.
+///
+/// Used by Studio DTOs to expose the current usage total for either a session
+/// or a single agent. `estimated_costs` is grouped by currency.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeUsageSnapshot {
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
+    pub latest_context_tokens: u64,
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub cached_prompt_tokens: u64,
+    pub total_tokens: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub estimated_costs: Vec<RuntimeCostAmount>,
+    #[serde(default)]
+    pub has_unpriced_usage: bool,
+    pub updated_at: i64,
+}
+
+/// Per-inference runtime usage attributed to a root or child agent.
+///
+/// `inference_id` is stable for a model call and is used by Studio persistence
+/// as an idempotency key.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRuntimeDelta {
+    pub inference_id: String,
+    pub agent_id: String,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_path: Option<String>,
+    pub role: String,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
+    pub usage: TokenUsageSnapshot,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub estimated_costs: Vec<RuntimeCostAmount>,
+    #[serde(default)]
+    pub has_unpriced_usage: bool,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum OutputStream {
@@ -627,6 +688,66 @@ mod tests {
                         "toolCalls": 121,
                         "waitCalls": 2,
                         "elapsedMs": 42
+                    }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_agent_runtime_updated_as_camel_case() {
+        let event = AgentEvent::AgentRuntimeUpdated {
+            delta: AgentRuntimeDelta {
+                inference_id: "inf-1".to_string(),
+                agent_id: "agent-1".to_string(),
+                path: "/root/research".to_string(),
+                parent_path: Some("/root".to_string()),
+                role: "explorer".to_string(),
+                model: "deepseek-v4-flash".to_string(),
+                context_window: Some(1_000_000),
+                usage: TokenUsageSnapshot {
+                    prompt_tokens: 100,
+                    completion_tokens: 20,
+                    cached_prompt_tokens: 40,
+                    total_tokens: 120,
+                },
+                estimated_costs: vec![RuntimeCostAmount {
+                    currency: "CNY".to_string(),
+                    amount: 0.001,
+                }],
+                has_unpriced_usage: false,
+                updated_at: 1_779_688_800,
+            },
+        };
+
+        let json = serde_json::to_value(event).unwrap();
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "agentRuntimeUpdated": {
+                    "delta": {
+                        "inferenceId": "inf-1",
+                        "agentId": "agent-1",
+                        "path": "/root/research",
+                        "parentPath": "/root",
+                        "role": "explorer",
+                        "model": "deepseek-v4-flash",
+                        "contextWindow": 1000000,
+                        "usage": {
+                            "promptTokens": 100,
+                            "completionTokens": 20,
+                            "cachedPromptTokens": 40,
+                            "totalTokens": 120
+                        },
+                        "estimatedCosts": [
+                            {
+                                "currency": "CNY",
+                                "amount": 0.001
+                            }
+                        ],
+                        "hasUnpricedUsage": false,
+                        "updatedAt": 1779688800
                     }
                 }
             })
