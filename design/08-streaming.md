@@ -67,7 +67,9 @@ pl-model provider
 
 聚合完成前不得把缺少工具名的参数片段当作新的工具调用执行。只有在 `output_item.done` 缺失时，才允许用已聚合的 delta 兜底生成工具调用；该兜底调用仍必须带有前面片段提供的真实工具名和稳定 `toolCallId`。
 
-如果 provider 把工具调用以正文形式返回，例如 DSML/tool-call 标记或 JSON `tool_calls` 文本，`pl-core` 不得把它作为 assistant 最终消息流给主 chat。该情况属于模型未产出可执行工具调用，turn 应以 `failed` 收尾并触发 `Error` + `Done`。
+如果 provider 把工具调用以正文形式返回，例如 DSML/tool-call 标记或完整 JSON `tool_calls` 块，`pl-core` 不得把它作为 assistant 最终消息流给主 chat。该情况属于模型未产出可执行工具调用，turn 应以 `failed` 收尾并触发 `Error` + `Done`。检测必须只针对明显的协议/JSON tool-call 形状，不能因为普通摘要、源码解释或文档内容提到 `tool_calls`、`name`、`subagent` 等词而误判。
+
+显式子代理分工的强制调度只适用于 root turn。子代理任务文本中可能包含 `subagent.rs`、`agent` 生命周期或“每个模块”等普通分析目标，这些内容不能触发子代理递归创建约束。
 
 ## 8.6 工具并行
 
