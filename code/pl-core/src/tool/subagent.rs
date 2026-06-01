@@ -7,9 +7,12 @@ use serde::{Deserialize, Serialize};
 use super::multi_agent::{
     AgentRunConfig, child_agent_options, current_agent_path, emit_agent_record, run_agent_turn,
 };
+use super::recoverable::{
+    is_recoverable_subagent_capacity_error, recoverable_subagent_tool_output,
+};
 use super::truncation::{OutputTruncation, TruncatedOutput};
 use super::{Tool, ToolContext, ToolInput, ToolOutput};
-use crate::agent::AgentSpawnInput;
+use crate::agent::{AgentRecord, AgentSpawnInput};
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
 
 /// Subagent 便捷工具。
@@ -118,12 +121,13 @@ impl Tool for SubagentTool {
             let role = Self::role(&subagent_input)?;
             let task_name = task_name_from_tool_id(&input.tool_id);
             let parent_path = current_agent_path(&context);
+            let task = subagent_input.task.clone();
             let _ = context.event_tx.send(AgentEvent::CollabAgentSpawnBegin {
                 call_id: input.tool_id.clone(),
                 started_at: unix_seconds(),
                 sender_path: parent_path.clone(),
                 task_name: task_name.clone(),
-                prompt: subagent_input.task.clone(),
+                prompt: task.clone(),
                 role: role.key().to_string(),
                 model: None,
                 reasoning_effort: None,
@@ -132,7 +136,7 @@ impl Tool for SubagentTool {
                 .agent_control
                 .spawn_agent(AgentSpawnInput {
                     task_name,
-                    message: subagent_input.task.clone(),
+                    message: task.clone(),
                     role: role.key().to_string(),
                     parent_path: Some(parent_path.clone()),
                 })
@@ -140,6 +144,7 @@ impl Tool for SubagentTool {
             let handle = match spawn_result {
                 Ok(handle) => handle,
                 Err(error) => {
+                    let error_message = error.to_string();
                     let _ = context.event_tx.send(AgentEvent::CollabAgentSpawnEnd {
                         call_id: input.tool_id,
                         completed_at: unix_seconds(),
@@ -148,9 +153,12 @@ impl Tool for SubagentTool {
                         path: None,
                         role: Some(role.key().to_string()),
                         status: AgentStatus::NotFound,
-                        prompt: subagent_input.task,
-                        error: Some(error.to_string()),
+                        prompt: task.clone(),
+                        error: Some(error_message.clone()),
                     });
+                    if is_recoverable_subagent_capacity_error(&error_message) {
+                        return Ok(recoverable_subagent_tool_output(&task, &error_message));
+                    }
                     return Err(error);
                 }
             };
@@ -162,7 +170,7 @@ impl Tool for SubagentTool {
                 path: Some(handle.path.clone()),
                 role: Some(role.key().to_string()),
                 status: AgentStatus::Queued,
-                prompt: subagent_input.task.clone(),
+                prompt: task.clone(),
                 error: None,
             });
             let record = context
@@ -202,7 +210,7 @@ impl Tool for SubagentTool {
                 agent_id: handle.id.clone(),
                 agent_path: handle.path.clone(),
                 role: role.key().to_string(),
-                message: subagent_input.task,
+                message: task.clone(),
                 budget: subagent_input
                     .max_iterations
                     .map(|value| crate::TurnBudget::from_legacy_max_tool_iterations(value as usize))
@@ -224,47 +232,65 @@ impl Tool for SubagentTool {
                     tool: "subagent".to_string(),
                     error: "completed agent disappeared".to_string(),
                 })?;
-            let description = record
-                .summary
-                .clone()
-                .filter(|summary| !summary.trim().is_empty())
-                .unwrap_or_else(|| "Subagent completed with no output.".to_string());
-            match record.status {
-                AgentStatus::Completed => Ok(ToolOutput {
-                    description,
-                    truncated: empty_truncation(),
-                    output_file: PathBuf::new(),
-                    exit_code: None,
-                    timed_out: false,
-                }),
-                AgentStatus::Interrupted => {
-                    let error = match record.reason.as_deref() {
-                        Some("budgetLimited") => record
-                            .error
-                            .unwrap_or_else(|| "subagent budget limited".to_string()),
-                        _ => "subagent interrupted by user".to_string(),
-                    };
-                    Err(PureError::ToolExecutionFailed {
-                        tool: "subagent".to_string(),
-                        error,
-                    })
-                }
-                AgentStatus::Errored => Err(PureError::ToolExecutionFailed {
-                    tool: "subagent".to_string(),
-                    error: record
-                        .error
-                        .unwrap_or_else(|| "subagent errored".to_string()),
-                }),
-                AgentStatus::Queued
-                | AgentStatus::Running
-                | AgentStatus::Waiting
-                | AgentStatus::Shutdown
-                | AgentStatus::NotFound => Err(PureError::ToolExecutionFailed {
-                    tool: "subagent".to_string(),
-                    error: format!("subagent ended in invalid status: {:?}", record.status),
-                }),
-            }
+            terminal_subagent_output(&record, &task)
         })
+    }
+}
+
+fn terminal_subagent_output(record: &AgentRecord, task: &str) -> Result<ToolOutput, PureError> {
+    let description = record
+        .summary
+        .clone()
+        .filter(|summary| !summary.trim().is_empty())
+        .unwrap_or_else(|| "Subagent completed with no output.".to_string());
+    match record.status {
+        AgentStatus::Completed => Ok(ToolOutput {
+            description,
+            truncated: empty_truncation(),
+            output_file: PathBuf::new(),
+            exit_code: None,
+            timed_out: false,
+        }),
+        AgentStatus::Interrupted => {
+            let error = match record.reason.as_deref() {
+                Some("budgetLimited") => record
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "subagent budget limited".to_string()),
+                _ => record
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "subagent interrupted by user".to_string()),
+            };
+            if is_recoverable_subagent_capacity_error(&error) {
+                return Ok(recoverable_subagent_tool_output(task, &error));
+            }
+            Err(PureError::ToolExecutionFailed {
+                tool: "subagent".to_string(),
+                error,
+            })
+        }
+        AgentStatus::Errored => {
+            let error = record
+                .error
+                .clone()
+                .unwrap_or_else(|| "subagent errored".to_string());
+            if is_recoverable_subagent_capacity_error(&error) {
+                return Ok(recoverable_subagent_tool_output(task, &error));
+            }
+            Err(PureError::ToolExecutionFailed {
+                tool: "subagent".to_string(),
+                error,
+            })
+        }
+        AgentStatus::Queued
+        | AgentStatus::Running
+        | AgentStatus::Waiting
+        | AgentStatus::Shutdown
+        | AgentStatus::NotFound => Err(PureError::ToolExecutionFailed {
+            tool: "subagent".to_string(),
+            error: format!("subagent ended in invalid status: {:?}", record.status),
+        }),
     }
 }
 
@@ -316,6 +342,24 @@ mod tests {
         )
     }
 
+    fn terminal_record(status: AgentStatus, error: Option<&str>) -> AgentRecord {
+        AgentRecord {
+            id: "agent-1".to_string(),
+            path: "/root/worker".to_string(),
+            parent_path: Some("/root".to_string()),
+            role: "executor".to_string(),
+            task: "inspect worker".to_string(),
+            status,
+            summary: None,
+            error: error.map(str::to_string),
+            reason: None,
+            budget_limit_kind: None,
+            budget_usage: None,
+            depth: 1,
+            updated_at: 1,
+        }
+    }
+
     #[test]
     fn subagent_input_defaults_to_executor_role() {
         let input = SubagentTool::parse_input(serde_json::json!({
@@ -359,5 +403,31 @@ mod tests {
     #[test]
     fn tool_is_constructible() {
         assert_eq!(test_tool().name(), "subagent");
+    }
+
+    #[test]
+    fn terminal_output_recovers_provider_429() {
+        let record = terminal_record(
+            AgentStatus::Errored,
+            Some("API error 429 Too Many Requests: concurrency limit reached"),
+        );
+
+        let output = terminal_subagent_output(&record, "inspect worker").unwrap();
+
+        assert!(
+            output
+                .description
+                .contains("recoverableSubagentProvider429")
+        );
+        assert!(output.description.contains("Continue this task"));
+    }
+
+    #[test]
+    fn terminal_output_keeps_non_429_failures_fatal() {
+        let record = terminal_record(AgentStatus::Errored, Some("API error 500"));
+
+        let error = terminal_subagent_output(&record, "inspect worker").unwrap_err();
+
+        assert!(error.to_string().contains("API error 500"));
     }
 }

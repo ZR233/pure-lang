@@ -7,6 +7,7 @@ pub mod domain;
 mod first_run;
 pub mod infrastructure;
 pub mod interfaces;
+mod provider_error;
 mod runtime_usage;
 mod session;
 mod studio;
