@@ -9,19 +9,20 @@ use pl_model::{
     create_provider_with_models,
 };
 use pl_protocol::{
-    AgentEvent, AgentEventSender, BudgetLimitKind, BudgetUsage, Result, TimelineItem,
-    TimelineItemStatus, TokenUsageSnapshot,
+    AgentEvent, AgentEventSender, BudgetLimitKind, BudgetUsage, ErrorSeverity, Result,
+    TimelineItem, TimelineItemStatus, TokenUsageSnapshot,
 };
 use tokio::sync::RwLock;
 
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
+use crate::provider_error::is_provider_429_error;
 use crate::runtime_usage::{agent_runtime_delta, identity_for_subagent, token_usage_snapshot};
 use crate::session::CoreSession;
 use crate::tool::{
     ApplyPatchTool, BashTool, CloseAgentTool, CopyPathTool, CreateDirectoryTool, DeletePathTool,
-    FollowupTaskTool, ListAgentsTool, ListFilesTool, MovePathTool, ReadFileTool, SearchFilesTool,
-    SendMessageTool, SpawnAgentTool, StatPathTool, SubagentContext, SubagentTool, ToolContext,
-    ToolInput, ToolOutput, ToolRegistry, WaitAgentTool, WriteFileTool,
+    FollowupTaskTool, ListAgentsTool, ListFilesTool, MovePathTool, RECOVERABLE_SUBAGENT_429_MARKER,
+    ReadFileTool, SearchFilesTool, SendMessageTool, SpawnAgentTool, StatPathTool, SubagentContext,
+    SubagentTool, ToolContext, ToolInput, ToolOutput, ToolRegistry, WaitAgentTool, WriteFileTool,
 };
 use crate::trace::TraceRecorder;
 use crate::turn::{
@@ -41,6 +42,10 @@ fn generate_session_id() -> String {
     let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("{ts:x}-{seq:x}")
 }
+
+const SUBAGENT_DISPATCH_CONSTRAINT: &str = "\n\n# 子代理调度约束\n用户明确要求使用 subagent/子代理分工时，必须先调度 `spawn_agent` 或 `subagent` 工具；不要只用 `bash` 或文件工具替代。若尚未知道 crate 列表，可以先用只读工具定位 workspace，再为每个 crate 创建 explorer agent，最后由父会话汇总。如果 `subagent`、`wait_agent` 或 `list_agents` 返回 `recoverableSubagentProvider429` 或 `recoverableFailures`，表示 provider 429 并发/容量上限导致子代理不可用；此时停止继续创建或重试子代理，由当前父 agent 自己完成剩余工作。";
+
+const SUBAGENT_FORCE_DISPATCH_INSTRUCTION: &str = "# 当前轮强制要求\n前面已进行了必要定位但尚未创建 agent。本轮必须调用 `spawn_agent` 或 `subagent`，不要继续调用文件、shell 或搜索工具，也不要输出最终回答。若工具结果提示 `recoverableSubagentProvider429`，后续不再重试创建子代理，改由当前 agent 自己完成任务。";
 
 /// Pure-Lang 核心逻辑层。
 ///
@@ -227,6 +232,7 @@ impl PureCore {
         } else {
             None
         };
+        let mut subagent_dispatch_recovered = false;
         recorder.user_text_item(&session_id, request.prompt.clone());
         session.push_user_prompt(request.prompt);
         let model = provider.default_model().to_string();
@@ -242,9 +248,7 @@ impl PureCore {
             request.workspace_instructions.as_deref(),
         );
         if requires_subagent_dispatch {
-            instructions.push_str(
-                "\n\n# 子代理调度约束\n用户明确要求使用 subagent/子代理分工时，必须先调度 `spawn_agent` 或 `subagent` 工具；不要只用 `bash` 或文件工具替代。若尚未知道 crate 列表，可以先用只读工具定位 workspace，再为每个 crate 创建 explorer agent，最后由父会话汇总。",
-            );
+            instructions.push_str(SUBAGENT_DISPATCH_CONSTRAINT);
         }
         let reasoning = reasoning_effort.as_ref().map(|effort| ReasoningConfig {
             effort: Some(effort.as_str().to_string()),
@@ -259,7 +263,9 @@ impl PureCore {
         let mut iteration = 0_u32;
         loop {
             let must_dispatch_agent_now = if let Some(initial_count) = initial_agent_count {
-                iteration >= 2 && agent_control.list_agents(None).await.len() <= initial_count
+                iteration >= 2
+                    && !subagent_dispatch_recovered
+                    && agent_control.list_agents(None).await.len() <= initial_count
             } else {
                 false
             };
@@ -292,9 +298,7 @@ impl PureCore {
                 tool_schemas.clone()
             };
             let iteration_instructions = if must_dispatch_agent_now {
-                format!(
-                    "{instructions}\n\n# 当前轮强制要求\n前面已进行了必要定位但尚未创建 agent。本轮必须调用 `spawn_agent` 或 `subagent`，不要继续调用文件、shell 或搜索工具，也不要输出最终回答。"
-                )
+                format!("{instructions}\n\n{SUBAGENT_FORCE_DISPATCH_INSTRUCTION}")
             } else {
                 instructions.clone()
             };
@@ -365,6 +369,8 @@ impl PureCore {
                     ));
                 }
                 Err(error) => {
+                    let error = error.to_string();
+                    let severity = provider_error_severity(active_subagent.as_ref(), &error);
                     return Ok(failed_turn_result(
                         recorder,
                         &session_id,
@@ -374,7 +380,8 @@ impl PureCore {
                         last_model,
                         total_usage,
                         session.messages().len(),
-                        error.to_string(),
+                        error,
+                        severity,
                     ));
                 }
             };
@@ -430,11 +437,12 @@ impl PureCore {
                         total_usage,
                         session.messages().len(),
                         "模型返回了未执行的工具调用文本，未产生可执行 tool call。".to_string(),
+                        ErrorSeverity::Recoverable,
                     ));
                 }
                 if let Some(initial_count) = initial_agent_count {
                     let current_count = agent_control.list_agents(None).await.len();
-                    if current_count <= initial_count {
+                    if current_count <= initial_count && !subagent_dispatch_recovered {
                         return Ok(failed_turn_result(
                             recorder,
                             &session_id,
@@ -445,6 +453,7 @@ impl PureCore {
                             total_usage,
                             session.messages().len(),
                             "用户明确要求子代理分工，但本轮没有实际创建任何 agent。".to_string(),
+                            ErrorSeverity::Recoverable,
                         ));
                     }
                 }
@@ -486,6 +495,9 @@ impl PureCore {
                 },
             )
             .await;
+            if tool_results_include_recoverable_subagent_capacity(&tool_results) {
+                subagent_dispatch_recovered = true;
+            }
             if is_cancelled(&options) {
                 return Ok(interrupted_turn_result(
                     recorder,
@@ -818,6 +830,30 @@ fn tool_execution_record(
     }
 }
 
+fn tool_results_include_recoverable_subagent_capacity(
+    tool_results: &[ToolExecutionRecord],
+) -> bool {
+    tool_results.iter().any(|tool_result| {
+        tool_result.status == TimelineItemStatus::Completed
+            && matches!(
+                tool_result.name.as_str(),
+                "subagent" | "spawn_agent" | "wait_agent" | "list_agents"
+            )
+            && tool_result.result.contains(RECOVERABLE_SUBAGENT_429_MARKER)
+    })
+}
+
+fn provider_error_severity(
+    active_subagent: Option<&SubagentContext>,
+    error: &str,
+) -> ErrorSeverity {
+    if active_subagent.is_none() && is_provider_429_error(error) {
+        ErrorSeverity::Transient
+    } else {
+        ErrorSeverity::Recoverable
+    }
+}
+
 fn should_request_parallel_tool_calls(
     capabilities: ProviderCapabilities,
     options: &TurnOptions,
@@ -904,6 +940,7 @@ fn failed_turn_result(
     mut usage: TokenUsage,
     session_message_count: usize,
     error: String,
+    severity: ErrorSeverity,
 ) -> TurnResult {
     usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
     let mut item = recorder.turn_item(turn_id, TimelineItemStatus::Failed);
@@ -911,7 +948,7 @@ fn failed_turn_result(
     recorder.fail_item(item, error.clone());
     recorder.broadcast(AgentEvent::Error {
         message: error.clone(),
-        severity: pl_protocol::ErrorSeverity::Recoverable,
+        severity,
     });
     recorder.broadcast(AgentEvent::Done);
 
@@ -1199,6 +1236,69 @@ mod tests {
     }
 
     #[test]
+    fn subagent_dispatch_instructions_describe_recoverable_429() {
+        assert!(SUBAGENT_DISPATCH_CONSTRAINT.contains("429"));
+        assert!(SUBAGENT_DISPATCH_CONSTRAINT.contains("recoverableSubagentProvider429"));
+        assert!(SUBAGENT_FORCE_DISPATCH_INSTRUCTION.contains("429"));
+    }
+
+    #[test]
+    fn detects_recoverable_subagent_tool_result_marker() {
+        let records = vec![
+            ToolExecutionRecord {
+                call_id: "call-1".to_string(),
+                name: "subagent".to_string(),
+                kind: ToolCallKind::Function,
+                arguments: "{}".to_string(),
+                result: "recoverableSubagentProvider429: retry locally".to_string(),
+                status: TimelineItemStatus::Completed,
+                exit_code: None,
+                timed_out: false,
+            },
+            ToolExecutionRecord {
+                call_id: "call-2".to_string(),
+                name: "bash".to_string(),
+                kind: ToolCallKind::Function,
+                arguments: "{}".to_string(),
+                result: "recoverableSubagentProvider429: unrelated text".to_string(),
+                status: TimelineItemStatus::Completed,
+                exit_code: None,
+                timed_out: false,
+            },
+        ];
+
+        assert!(tool_results_include_recoverable_subagent_capacity(&records));
+        assert!(!tool_results_include_recoverable_subagent_capacity(
+            &records[1..]
+        ));
+    }
+
+    #[test]
+    fn root_provider_429_is_transient_but_subagent_provider_429_stays_recoverable() {
+        assert!(matches!(
+            provider_error_severity(None, "API error 429 Too Many Requests"),
+            ErrorSeverity::Transient
+        ));
+
+        let subagent = SubagentContext {
+            id: "agent-1".to_string(),
+            parent_id: None,
+            agent_path: Some("/root/worker".to_string()),
+            role: "executor".to_string(),
+            task: "inspect worker".to_string(),
+            depth: 1,
+        };
+        assert!(matches!(
+            provider_error_severity(Some(&subagent), "API error 429 Too Many Requests"),
+            ErrorSeverity::Recoverable
+        ));
+        assert!(matches!(
+            provider_error_severity(None, "API error 500"),
+            ErrorSeverity::Recoverable
+        ));
+    }
+
+    #[test]
     fn detects_unexecuted_tool_call_text() {
         assert!(looks_like_unexecuted_tool_call_text(
             "<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"spawn_agent\">"
@@ -1219,7 +1319,7 @@ mod tests {
 
     #[test]
     fn failed_turn_result_preserves_error_message() {
-        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
         let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
 
         let result = failed_turn_result(
@@ -1232,6 +1332,7 @@ mod tests {
             TokenUsage::default(),
             3,
             "provider rejected request".to_string(),
+            ErrorSeverity::Transient,
         );
 
         assert_eq!(result.status, TurnResultStatus::Errored);
@@ -1241,6 +1342,18 @@ mod tests {
         );
         assert_eq!(result.content, "partial summary");
         assert_eq!(result.error.as_deref(), Some("provider rejected request"));
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            AgentEvent::TimelineItemFailed { .. }
+        ));
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            AgentEvent::Error {
+                severity: ErrorSeverity::Transient,
+                ..
+            }
+        ));
+        assert!(matches!(event_rx.try_recv().unwrap(), AgentEvent::Done));
     }
 
     #[test]

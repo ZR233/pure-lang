@@ -1,6 +1,7 @@
 mod bash;
 mod file;
 mod multi_agent;
+mod recoverable;
 mod subagent;
 mod truncation;
 
@@ -25,6 +26,7 @@ pub use multi_agent::{
     CloseAgentTool, FollowupTaskTool, ListAgentsTool, SendMessageTool, SpawnAgentTool,
     WaitAgentTool,
 };
+pub(crate) use recoverable::RECOVERABLE_SUBAGENT_429_MARKER;
 pub use subagent::{SubagentInput, SubagentTool};
 pub use truncation::{OutputTruncation, TruncatedOutput, TruncationStrategy};
 
