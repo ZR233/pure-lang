@@ -90,14 +90,22 @@ export function useStudioApp() {
 
   useEffect(() => {
     if (!state.selectedSessionId) {
-      dispatch({ type: "timelineLoaded", items: [] });
+      dispatch({ type: "timelineLoaded", sessionId: null, items: [] });
       return;
     }
-    loadSessionTimeline(state.selectedSessionId)
-      .then((payload) => dispatch({ type: "timelineLoaded", items: payload.items }))
+    const sessionId = state.selectedSessionId;
+    loadSessionTimeline(sessionId)
+      .then((payload) =>
+        dispatch({
+          type: "timelineLoaded",
+          sessionId: payload.sessionId,
+          items: payload.items,
+        }),
+      )
       .catch((error) => {
         dispatch({
           type: "timelineLoadFailed",
+          sessionId,
           status: t("status.timelineLoadFailed", { error: errorText(error) }),
         });
       });
@@ -112,6 +120,7 @@ export function useStudioApp() {
       listen<AgentEventPayload>("studio-agent-event", ({ payload }) => {
         dispatch({
           type: "agentEvent",
+          sessionId: payload.sessionId,
           event: payload.event,
           timelineEvent: payload.timelineEvent,
           agent: payload.agent,
@@ -134,7 +143,11 @@ export function useStudioApp() {
         });
       }),
       listen<PromptFailed>("studio-prompt-failed", ({ payload }) => {
-        dispatch({ type: "runPromptFailed", status: payload.message });
+        dispatch({
+          type: "runPromptFailed",
+          sessionId: payload.sessionId,
+          status: payload.message,
+        });
       }),
     ];
 
@@ -233,7 +246,8 @@ export function useStudioApp() {
 
   async function onSendPrompt() {
     const content = state.prompt.trim();
-    if (!content || !state.selectedSessionId || state.isBusy) {
+    const sessionId = state.selectedSessionId;
+    if (!content || !sessionId || state.isBusy) {
       return;
     }
     dispatch({
@@ -242,7 +256,7 @@ export function useStudioApp() {
       startedAt: Date.now(),
     });
     try {
-      const payload = await runPrompt(state.selectedSessionId, content);
+      const payload = await runPrompt(sessionId, content);
       dispatch({
         type: "runPromptLoaded",
         payload,
@@ -251,24 +265,27 @@ export function useStudioApp() {
     } catch (error) {
       dispatch({
         type: "runPromptFailed",
+        sessionId,
         status: t("status.runFailed", { error: errorText(error) }),
       });
     }
   }
 
   async function onStopPrompt() {
-    if (!state.selectedSessionId || !state.isBusy || state.turnPhase === "stopping") {
+    const sessionId = state.selectedSessionId;
+    if (!sessionId || !state.isBusy || state.turnPhase === "stopping") {
       return;
     }
     dispatch({ type: "stopRequested", status: t("status.stopping") });
     try {
-      const result = await stopPrompt(state.selectedSessionId);
+      const result = await stopPrompt(sessionId);
       if (!result.stopped || !isTauriRuntime()) {
         dispatch({ type: "stopFallback", status: t("status.interrupted") });
       }
     } catch (error) {
       dispatch({
         type: "runPromptFailed",
+        sessionId,
         status: t("status.stopFailed", { error: errorText(error) }),
       });
     }
