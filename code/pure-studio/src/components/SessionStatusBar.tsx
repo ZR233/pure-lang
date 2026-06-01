@@ -254,7 +254,7 @@ function AgentPopover({ agents }: { agents: AgentDto[] }) {
               <span className="status-subagent-dot" aria-hidden="true" />
               <div>
                 <span className="status-subagent-role">{activity.role}</span>
-                <p>{activity.task}</p>
+                <p>{agentPopoverDetail(activity, t)}</p>
               </div>
               <span className="status-subagent-cost">
                 {formatRuntimeCost(activity.runtimeUsage, fallback, unpriced)}
@@ -266,6 +266,35 @@ function AgentPopover({ agents }: { agents: AgentDto[] }) {
       </div>
     </StatusPopover>
   );
+}
+
+function agentPopoverDetail(agent: AgentDto, t: (key: string) => string): string {
+  if (["errored", "interrupted", "shutdown", "notFound"].includes(agent.status)) {
+    if (agent.error?.trim()) {
+      return agent.error;
+    }
+    if (agent.reason?.trim()) {
+      return translateAgentReason(agent.reason, t);
+    }
+  }
+  return agent.task;
+}
+
+function translateAgentReason(reason: string, t: (key: string) => string): string {
+  switch (reason) {
+    case "providerError":
+      return t("subagent.providerError");
+    case "toolError":
+      return t("subagent.toolError");
+    case "budgetLimited":
+      return t("subagent.budgetLimited");
+    case "interrupted":
+      return t("subagent.interrupted");
+    case "shutdown":
+      return t("subagent.shutdown");
+    default:
+      return reason;
+  }
 }
 
 function CostRows({ usage }: { usage: RuntimeUsage | null }) {

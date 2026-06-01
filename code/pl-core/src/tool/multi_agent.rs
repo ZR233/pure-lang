@@ -768,14 +768,16 @@ pub(super) async fn run_agent_turn(config: AgentRunConfig) {
                 TurnResultStatus::Aborted
                     if matches!(result.abort_reason, Some(TurnAbortReason::BudgetLimited)) =>
                 {
-                    Some("subagent budget limited".to_string())
+                    result
+                        .error
+                        .clone()
+                        .or_else(|| Some("subagent budget limited".to_string()))
                 }
-                TurnResultStatus::Errored if summary.is_empty() => {
-                    Some("subagent errored".to_string())
-                }
-                TurnResultStatus::Completed
-                | TurnResultStatus::Aborted
-                | TurnResultStatus::Errored => None,
+                TurnResultStatus::Errored => result
+                    .error
+                    .clone()
+                    .or_else(|| Some("subagent errored".to_string())),
+                TurnResultStatus::Completed | TurnResultStatus::Aborted => result.error.clone(),
             };
             if let Some(record) = config
                 .agent_control
