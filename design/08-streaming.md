@@ -53,7 +53,9 @@ pl-model provider
 
 事件类型属于协议层，不应包含 provider 私有结构，也不应绑定具体前端。工具审批事件只承载通用工具名、参数和审批结果，不包含 Tauri、React 或桌面端私有状态。
 
-子代理内部事件不直接转发完整文本流、思考流、工具调用流或工具输出。`pl-core` 将子代理生命周期压缩为 `agent` timeline item 和 `AgentStateChanged` snapshot，状态固定为 `queued`、`running`、`waiting`、`completed`、`errored`、`interrupted`、`shutdown`、`notFound`。`pure-studio` 持久化这些状态事件，并在聊天界面只渲染路径、状态和摘要，避免把子代理内部执行细节混入父会话 timeline。
+子代理内部事件不直接转发完整文本流、思考流、工具调用流或工具输出。`pl-core` 将子代理生命周期压缩为 `agent` timeline item 和 `AgentStateChanged` snapshot，状态固定为 `queued`、`running`、`waiting`、`completed`、`errored`、`interrupted`、`shutdown`、`notFound`。`pure-studio` 持久化这些状态事件，并在聊天界面只渲染路径、状态、摘要和最终错误文本，避免把子代理内部执行细节混入父会话 timeline。
+
+失败的子代理必须在 latest snapshot 的 `error` 字段保留可展示的失败文本。`reason` 只作为结构化分类，例如 `providerError`、`toolError`、`budgetLimited` 或 `interrupted`，不能替代 `error`。如果 provider 在子代理已有部分摘要后失败，最终状态仍必须把 provider/tool 错误写入 `error`，否则 UI 无法解释失败原因。
 
 子代理的运行指标使用独立的压缩事件转发。`AgentRuntimeUpdated` 只携带 agent 身份、实际模型、上下文窗口、本次 inference token、按币种估算的费用和未计价标记；不携带子代理内部正文、思考、工具参数或工具输出。
 

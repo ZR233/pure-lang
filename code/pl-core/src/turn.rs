@@ -354,6 +354,7 @@ pub struct TurnResult {
     pub session_message_count: usize,
     pub status: TurnResultStatus,
     pub abort_reason: Option<TurnAbortReason>,
+    pub error: Option<String>,
     pub budget_limit_kind: Option<BudgetLimitKind>,
     pub budget_usage: Option<BudgetUsage>,
     /// Structured timeline events recorded during this turn (if tracing was enabled).

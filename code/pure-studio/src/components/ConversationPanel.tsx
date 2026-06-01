@@ -456,7 +456,8 @@ function AgentEntry({
   const agent = item.agent;
   const status = agent?.status ?? null;
   const prompt = agent?.task ?? null;
-  const summary = agent?.error ?? agent?.summary ?? agent?.reason ?? "";
+  const failureDetail = agentFailureDetail(agent, t);
+  const summary = failureDetail ?? agent?.summary ?? "";
   const path = agent?.path ?? null;
   return (
     <EntryShell className={`timeline-entry-subagent status-${status ?? item.status}`} icon={<Activity size={14} />}>
@@ -483,6 +484,35 @@ function AgentEntry({
       ) : null}
     </EntryShell>
   );
+}
+
+function agentFailureDetail(
+  agent: Extract<TimelineEntry, { kind: "agent" }>["item"]["agent"],
+  t: TFunction,
+): string | null {
+  if (!agent || !["errored", "interrupted", "shutdown", "notFound"].includes(agent.status)) {
+    return null;
+  }
+  if (agent.error?.trim()) {
+    return agent.error;
+  }
+  if (!agent.reason?.trim()) {
+    return null;
+  }
+  switch (agent.reason) {
+    case "providerError":
+      return t("subagent.providerError");
+    case "toolError":
+      return t("subagent.toolError");
+    case "budgetLimited":
+      return t("subagent.budgetLimited");
+    case "interrupted":
+      return t("subagent.interrupted");
+    case "shutdown":
+      return t("subagent.shutdown");
+    default:
+      return agent.reason;
+  }
 }
 
 function TraceEntry({ item, t }: { item: TimelineItem; t: TFunction }) {

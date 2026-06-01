@@ -568,6 +568,7 @@ impl PureCore {
             session_message_count,
             status: TurnResultStatus::Completed,
             abort_reason: None,
+            error: None,
             budget_limit_kind: None,
             budget_usage: None,
             timeline_events: recorder.drain(),
@@ -884,6 +885,7 @@ fn interrupted_turn_result(
         session_message_count,
         status: TurnResultStatus::Aborted,
         abort_reason: Some(crate::turn::TurnAbortReason::Interrupted),
+        error: None,
         budget_limit_kind: None,
         budget_usage: None,
         timeline_events: recorder.drain(),
@@ -907,7 +909,7 @@ fn failed_turn_result(
     item.content = content.clone();
     recorder.fail_item(item, error.clone());
     recorder.broadcast(AgentEvent::Error {
-        message: error,
+        message: error.clone(),
         severity: pl_protocol::ErrorSeverity::Recoverable,
     });
     recorder.broadcast(AgentEvent::Done);
@@ -921,6 +923,7 @@ fn failed_turn_result(
         session_message_count,
         status: TurnResultStatus::Errored,
         abort_reason: Some(crate::turn::TurnAbortReason::ProviderError),
+        error: Some(error),
         budget_limit_kind: None,
         budget_usage: None,
         timeline_events: recorder.drain(),
@@ -967,6 +970,7 @@ fn budget_limited_turn_result(
         session_message_count,
         status: TurnResultStatus::Aborted,
         abort_reason: Some(crate::turn::TurnAbortReason::BudgetLimited),
+        error: None,
         budget_limit_kind: Some(limit_kind),
         budget_usage: Some(budget_usage),
         timeline_events: recorder.drain(),
@@ -1174,6 +1178,32 @@ mod tests {
         assert!(!looks_like_unexecuted_tool_call_text(
             "已完成探索，没有工具调用文本。"
         ));
+    }
+
+    #[test]
+    fn failed_turn_result_preserves_error_message() {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+
+        let result = failed_turn_result(
+            &mut recorder,
+            "turn-1",
+            crate::turn::CompileMode::Auto,
+            "partial summary".to_string(),
+            None,
+            "model-a".to_string(),
+            TokenUsage::default(),
+            3,
+            "provider rejected request".to_string(),
+        );
+
+        assert_eq!(result.status, TurnResultStatus::Errored);
+        assert_eq!(
+            result.abort_reason,
+            Some(crate::turn::TurnAbortReason::ProviderError),
+        );
+        assert_eq!(result.content, "partial summary");
+        assert_eq!(result.error.as_deref(), Some("provider rejected request"));
     }
 
     #[test]
