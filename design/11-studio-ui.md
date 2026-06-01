@@ -88,6 +88,8 @@ turn 展示语义固定：
 
 状态栏固定渲染在聊天底部，只展示当前 turn phase、模型、上下文、按货币分组的费用、能力和 agent latest snapshot。运行中收到 `AgentRuntimeUpdated` 后必须即时用后端聚合快照更新 `sessionRuntime` 和对应 agent 的 `runtimeUsage`，不能等 `RunPromptResponse` 返回后才刷新。设置页作为全屏 overlay 打开时必须覆盖聊天状态栏与其 popover，状态栏不得浮到设置页之上。
 
+agent latest snapshot、agent timeline event、session runtime 和审批状态必须以当前 `sessionId` 为边界。切换项目、切换会话或新建会话时，前端必须用后端返回的当前会话快照替换本地 agent 列表；运行中收到的实时事件如果属于非当前会话，不能更新当前状态栏、子代理 popover 或 timeline。`RunPromptResponse.agents` 是当前会话完成后的权威快照，不能与旧会话遗留 agents 合并。
+
 子代理 popover 每行展示角色、任务、状态和该 agent 的费用摘要。存在 token 但缺少价格配置时显示未配置，不把未计价 token 混入任意币种。
 
 失败子代理的 `error` 文本必须优先展示在 timeline 和 latest snapshot UI 中；`reason` 仅用于机器可读分类，不应作为用户可见失败说明的唯一来源。

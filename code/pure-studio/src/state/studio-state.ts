@@ -54,12 +54,12 @@ export type StudioState = {
 export type StudioAction =
   | { type: "bootstrapLoaded"; payload: BootstrapPayload; status: string }
   | { type: "bootstrapFailed"; status: string }
-  | { type: "timelineLoaded"; items: TimelineItem[] }
-  | { type: "timelineLoadFailed"; status: string }
+  | { type: "timelineLoaded"; sessionId: string | null; items: TimelineItem[] }
+  | { type: "timelineLoadFailed"; sessionId: string | null; status: string }
   | { type: "projectSelectionLoaded"; payload: ProjectSelectionPayload; status: string }
   | { type: "sessionSelectionLoaded"; payload: SessionSelectionPayload; status: string }
   | { type: "runPromptLoaded"; payload: RunPromptResponse; status: string }
-  | { type: "runPromptFailed"; status: string }
+  | { type: "runPromptFailed"; sessionId?: string | null; status: string }
   | { type: "setBusy"; value: boolean }
   | { type: "setPrompt"; prompt: string }
   | { type: "setManualPath"; path: string }
@@ -76,6 +76,7 @@ export type StudioAction =
   | { type: "stopFallback"; status: string }
   | {
       type: "agentEvent";
+      sessionId: string;
       event?: AgentEvent | null;
       timelineEvent?: AgentTimelineEvent | null;
       agent?: AgentDto | null;
@@ -131,8 +132,10 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
     case "bootstrapFailed":
       return { ...state, status: action.status };
     case "timelineLoaded":
+      if (action.sessionId !== state.selectedSessionId) return state;
       return replaceTimelineItems(state, action.items ?? []);
     case "timelineLoadFailed":
+      if (action.sessionId !== state.selectedSessionId) return state;
       return { ...state, status: action.status };
     case "projectSelectionLoaded":
       return {
@@ -146,9 +149,11 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         sessionRuntime: action.payload.sessionRuntime ?? null,
         timelineItems: new Map(),
         timelineOrder: [],
+        approvals: [],
         status: action.status,
         turnPhase: "idle",
         turnStartedAt: null,
+        isBusy: false,
       };
     case "sessionSelectionLoaded":
       return {
@@ -160,11 +165,16 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         sessionRuntime: action.payload.sessionRuntime ?? null,
         timelineItems: new Map(),
         timelineOrder: [],
+        approvals: [],
         status: action.status,
         turnPhase: "idle",
         turnStartedAt: null,
+        isBusy: false,
       };
     case "runPromptLoaded":
+      if (action.payload.sessionId !== state.selectedSessionId) {
+        return state;
+      }
       return {
         ...mergeTimelineItems(
           removeOptimisticTimelineItems(state),
@@ -172,11 +182,8 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         ),
         selectedSessionId: action.payload.sessionId,
         sessions: action.payload.sessions,
-        agentTimelineEvents: mergeAgentTimelineEvents(
-          state.agentTimelineEvents,
-          action.payload.agentEvents ?? [],
-        ),
-        agents: mergeAgents(state.agents, action.payload.agents ?? []),
+        agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
+        agents: mergeAgents([], action.payload.agents ?? []),
         sessionRuntime: action.payload.sessionRuntime,
         turnPhase: phaseForTurnStatus(action.payload.turnStatus),
         turnStartedAt: null,
@@ -184,6 +191,9 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         isBusy: false,
       };
     case "runPromptFailed":
+      if (action.sessionId && action.sessionId !== state.selectedSessionId) {
+        return state;
+      }
       return {
         ...state,
         status: action.status,
@@ -220,6 +230,9 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         status: action.status ?? state.status,
       };
     case "enqueueApproval":
+      if (action.payload.sessionId !== state.selectedSessionId) {
+        return state;
+      }
       return {
         ...state,
         approvals: [action.payload, ...state.approvals],
@@ -253,6 +266,9 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         turnStartedAt: action.startedAt,
       };
     case "agentEvent":
+      if (action.sessionId !== state.selectedSessionId) {
+        return state;
+      }
       return reduceAgentEvent(
         {
           ...state,
