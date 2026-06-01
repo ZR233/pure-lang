@@ -7,7 +7,8 @@ use pl_core::{
 
 use crate::dto::{
     AgentDto, AgentEventDto, ConfigDto, ModelDto, ProjectDto, ProviderDto, ProviderInput,
-    ProviderSettingsInput, ProviderTemplateDto, RoleDto, RoleInput, SessionDto, SessionRuntimeDto,
+    ProviderSettingsInput, ProviderTemplateDto, RoleDto, RoleInput, RuntimeCostAmountDto,
+    RuntimeUsageDto, SessionDto, SessionRuntimeDto,
 };
 use crate::state::{CommandError, CommandResult};
 
@@ -32,30 +33,7 @@ pub async fn load_session_runtime_dto(
 }
 
 pub fn session_runtime_dto(record: SessionRuntimeRecord, config: &PureConfig) -> SessionRuntimeDto {
-    let cache_hit_rate = if record.prompt_tokens == 0 {
-        None
-    } else {
-        Some(record.cached_prompt_tokens as f64 / record.prompt_tokens as f64)
-    };
-    let current_model = config
-        .resolve_role(ModelRole::Planner)
-        .ok()
-        .and_then(|resolved| {
-            resolved
-                .models
-                .iter()
-                .find(|model| model.slug == record.model)
-                .cloned()
-                .or_else(|| {
-                    resolved
-                        .models
-                        .iter()
-                        .find(|model| model.slug == resolved.role_config.model)
-                        .cloned()
-                })
-        });
-    SessionRuntimeDto {
-        session_id: record.session_id,
+    let usage = runtime_usage_dto(pl_core::RuntimeUsageSnapshot {
         model: record.model,
         context_window: record.context_window,
         latest_context_tokens: record.latest_context_tokens,
@@ -63,25 +41,44 @@ pub fn session_runtime_dto(record: SessionRuntimeRecord, config: &PureConfig) ->
         completion_tokens: record.completion_tokens,
         cached_prompt_tokens: record.cached_prompt_tokens,
         total_tokens: record.total_tokens,
-        cache_hit_rate,
-        currency: record.currency.or_else(|| {
-            current_model
-                .as_ref()
-                .and_then(|model| model.currency.clone())
-        }),
-        input_price_per_mtok: current_model
-            .as_ref()
-            .and_then(|model| model.input_price_per_mtok),
-        output_price_per_mtok: current_model
-            .as_ref()
-            .and_then(|model| model.output_price_per_mtok),
-        cache_read_price_per_mtok: current_model
-            .as_ref()
-            .and_then(|model| model.cache_read_price_per_mtok),
-        estimated_cost: record.estimated_cost,
+        estimated_costs: record.estimated_costs,
+        has_unpriced_usage: record.has_unpriced_usage,
+        updated_at: record.updated_at,
+    });
+    SessionRuntimeDto {
+        session_id: record.session_id,
+        updated_at: usage.updated_at,
+        usage,
         active_skills: config.runtime.active_skills.clone(),
         active_mcp_servers: config.runtime.active_mcp_servers.clone(),
-        updated_at: record.updated_at,
+    }
+}
+
+pub fn runtime_usage_dto(usage: pl_core::RuntimeUsageSnapshot) -> RuntimeUsageDto {
+    let cache_hit_rate = if usage.prompt_tokens == 0 {
+        None
+    } else {
+        Some(usage.cached_prompt_tokens as f64 / usage.prompt_tokens as f64)
+    };
+    RuntimeUsageDto {
+        model: usage.model,
+        context_window: usage.context_window,
+        latest_context_tokens: usage.latest_context_tokens,
+        prompt_tokens: usage.prompt_tokens,
+        completion_tokens: usage.completion_tokens,
+        cached_prompt_tokens: usage.cached_prompt_tokens,
+        total_tokens: usage.total_tokens,
+        cache_hit_rate,
+        estimated_costs: usage
+            .estimated_costs
+            .into_iter()
+            .map(|cost| RuntimeCostAmountDto {
+                currency: cost.currency,
+                amount: cost.amount,
+            })
+            .collect(),
+        has_unpriced_usage: usage.has_unpriced_usage,
+        updated_at: usage.updated_at,
     }
 }
 
@@ -330,6 +327,7 @@ pub fn agent_dto(agent: StudioAgentSnapshotRecord) -> AgentDto {
             wait_calls: usage.wait_calls,
             elapsed_ms: usage.elapsed_ms,
         }),
+        runtime_usage: agent.runtime_usage.map(runtime_usage_dto),
         updated_at: agent.updated_at,
     }
 }
@@ -454,4 +452,106 @@ pub fn provider_settings_to_edit(
             .collect::<CommandResult<Vec<_>>>()?,
         roles: input.roles.into_iter().map(role_edit).collect(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_core::{RuntimeUsageSnapshot, SessionRuntimeRecord, StudioAgentSnapshotRecord};
+    use pl_protocol::{AgentStatus, RuntimeCostAmount};
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[test]
+    fn session_runtime_dto_exposes_nested_runtime_usage_and_costs() {
+        let mut config = PureConfig::default();
+        config.runtime.active_skills = vec!["search".to_string()];
+        config.runtime.active_mcp_servers = vec!["filesystem".to_string()];
+        let dto = session_runtime_dto(
+            SessionRuntimeRecord {
+                session_id: "session-1".to_string(),
+                model: "model-a".to_string(),
+                context_window: Some(1_000_000),
+                latest_context_tokens: 42_000,
+                prompt_tokens: 100_000,
+                completion_tokens: 20_000,
+                cached_prompt_tokens: 25_000,
+                total_tokens: 120_000,
+                currency: None,
+                estimated_cost: None,
+                estimated_costs: vec![
+                    RuntimeCostAmount {
+                        currency: "CNY".to_string(),
+                        amount: 0.12,
+                    },
+                    RuntimeCostAmount {
+                        currency: "USD".to_string(),
+                        amount: 0.03,
+                    },
+                ],
+                has_unpriced_usage: true,
+                updated_at: 99,
+            },
+            &config,
+        );
+
+        assert_eq!(dto.session_id, "session-1");
+        assert_eq!(dto.updated_at, 99);
+        assert_eq!(dto.active_skills, vec!["search"]);
+        assert_eq!(dto.active_mcp_servers, vec!["filesystem"]);
+        assert_eq!(dto.usage.model, "model-a");
+        assert_eq!(dto.usage.context_window, Some(1_000_000));
+        assert_eq!(dto.usage.cache_hit_rate, Some(0.25));
+        assert!(dto.usage.has_unpriced_usage);
+        assert_eq!(
+            dto.usage
+                .estimated_costs
+                .iter()
+                .map(|cost| cost.currency.as_str())
+                .collect::<Vec<_>>(),
+            vec!["CNY", "USD"],
+        );
+    }
+
+    #[test]
+    fn agent_dto_includes_runtime_usage() {
+        let dto = agent_dto(StudioAgentSnapshotRecord {
+            id: "agent-1".to_string(),
+            session_id: "session-1".to_string(),
+            path: "/root/research".to_string(),
+            parent_path: Some("/root".to_string()),
+            role: "executor".to_string(),
+            task: "research".to_string(),
+            status: AgentStatus::Completed,
+            summary: Some("done".to_string()),
+            depth: 1,
+            error: None,
+            reason: None,
+            budget_limit_kind: None,
+            budget_usage: None,
+            runtime_usage: Some(RuntimeUsageSnapshot {
+                model: "model-b".to_string(),
+                context_window: Some(400_000),
+                latest_context_tokens: 12_000,
+                prompt_tokens: 24_000,
+                completion_tokens: 2_000,
+                cached_prompt_tokens: 6_000,
+                total_tokens: 26_000,
+                estimated_costs: vec![RuntimeCostAmount {
+                    currency: "USD".to_string(),
+                    amount: 0.04,
+                }],
+                has_unpriced_usage: false,
+                updated_at: 123,
+            }),
+            updated_at: 124,
+        });
+
+        let usage = dto.runtime_usage.expect("runtime usage");
+        assert_eq!(dto.id, "agent-1");
+        assert_eq!(usage.model, "model-b");
+        assert_eq!(usage.cache_hit_rate, Some(0.25));
+        assert_eq!(usage.estimated_costs[0].currency, "USD");
+        assert!((usage.estimated_costs[0].amount - 0.04).abs() < 0.000_001);
+    }
 }

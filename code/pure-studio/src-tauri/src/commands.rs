@@ -146,7 +146,7 @@ pub async fn run_prompt(
         session_id.clone(),
         event_rx,
         app.clone(),
-        state.studio.store().clone(),
+        state.studio.clone(),
     ));
     let approval_callback =
         approval_callback(state.approvals.clone(), app.clone(), session_id.clone());

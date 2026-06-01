@@ -8,6 +8,8 @@ import type {
   AgentStatus,
   ProviderRecord,
   RoleRecord,
+  RuntimeCostAmount,
+  RuntimeUsage,
   SessionRuntime,
   TurnPhase,
 } from "../types";
@@ -79,11 +81,51 @@ function formatPercent(value?: number | null): string {
   return `${Math.round(value * 100)}%`;
 }
 
-function formatCost(runtime: SessionRuntime | null, fallback: string): string {
-  if (!runtime?.currency || runtime.estimatedCost == null) {
+function pricedCosts(costs: RuntimeCostAmount[] | null | undefined): RuntimeCostAmount[] {
+  return (costs ?? []).filter((cost) => cost.currency && Number.isFinite(cost.amount));
+}
+
+function formatCostNumber(value: number): string {
+  const absolute = Math.abs(value);
+  if (absolute > 0 && absolute < 0.01) {
+    return value.toFixed(4);
+  }
+  return value.toFixed(2);
+}
+
+function formatCostAmounts(
+  costs: RuntimeCostAmount[] | null | undefined,
+  hasUnpricedUsage: boolean | undefined,
+  fallback: string,
+  unpriced: string,
+): string {
+  const priced = pricedCosts(costs);
+  if (priced.length === 0) {
+    return hasUnpricedUsage ? unpriced : fallback;
+  }
+  const label = priced
+    .map((cost) => `${cost.currency} ${formatCostNumber(cost.amount)}`)
+    .join(" + ");
+  return hasUnpricedUsage ? `${label} + ${unpriced}` : label;
+}
+
+function formatCost(runtime: SessionRuntime | null, fallback: string, unpriced: string): string {
+  if (!runtime?.usage) {
     return fallback;
   }
-  return `${runtime.currency} ${runtime.estimatedCost.toFixed(2)}`;
+  return formatCostAmounts(
+    runtime.usage.estimatedCosts,
+    runtime.usage.hasUnpricedUsage,
+    fallback,
+    unpriced,
+  );
+}
+
+function formatRuntimeCost(usage: RuntimeUsage | null | undefined, fallback: string, unpriced: string): string {
+  if (!usage || usage.totalTokens === 0) {
+    return fallback;
+  }
+  return formatCostAmounts(usage.estimatedCosts, usage.hasUnpricedUsage, fallback, unpriced);
 }
 
 function formatElapsed(startedAt: number | null, now: number): string | null {
@@ -98,11 +140,11 @@ function formatElapsed(startedAt: number | null, now: number): string | null {
   return `${minutes}m ${seconds % 60}s`;
 }
 
-function contextPercent(runtime: SessionRuntime | null): number {
-  if (!runtime?.contextWindow) {
+function contextPercent(usage: RuntimeUsage | null): number {
+  if (!usage?.contextWindow) {
     return 0;
   }
-  return Math.min(100, (runtime.latestContextTokens / runtime.contextWindow) * 100);
+  return Math.min(100, (usage.latestContextTokens / usage.contextWindow) * 100);
 }
 
 function StatusPopover({
@@ -188,6 +230,8 @@ function TurnStatusIndicator({
 function AgentPopover({ agents }: { agents: AgentDto[] }) {
   const { t } = useTranslation();
   const items = sortAgents(agents);
+  const fallback = t("statusBar.costNotConfigured");
+  const unpriced = t("statusBar.costUnpriced");
 
   return (
     <StatusPopover
@@ -212,12 +256,45 @@ function AgentPopover({ agents }: { agents: AgentDto[] }) {
                 <span className="status-subagent-role">{activity.role}</span>
                 <p>{activity.task}</p>
               </div>
+              <span className="status-subagent-cost">
+                {formatRuntimeCost(activity.runtimeUsage, fallback, unpriced)}
+              </span>
               <span className="status-subagent-badge">{t(agentStatusKeys[activity.status])}</span>
             </div>
           ))
         )}
       </div>
     </StatusPopover>
+  );
+}
+
+function CostRows({ usage }: { usage: RuntimeUsage | null }) {
+  const { t } = useTranslation();
+  const rows = pricedCosts(usage?.estimatedCosts);
+  const hasUnpricedUsage = usage?.hasUnpricedUsage ?? false;
+
+  if (rows.length === 0) {
+    return (
+      <span>
+        {t("statusBar.cost")}{" "}
+        <strong>{hasUnpricedUsage ? t("statusBar.costUnpriced") : t("statusBar.costNotConfigured")}</strong>
+      </span>
+    );
+  }
+
+  return (
+    <>
+      {rows.map((cost) => (
+        <span className="status-cost-row" key={cost.currency}>
+          {cost.currency} <strong>{formatCostNumber(cost.amount)}</strong>
+        </span>
+      ))}
+      {hasUnpricedUsage ? (
+        <span className="status-cost-row status-cost-unpriced">
+          {t("statusBar.cost")} <strong>{t("statusBar.costUnpriced")}</strong>
+        </span>
+      ) : null}
+    </>
   );
 }
 
@@ -253,7 +330,7 @@ function ModelSelector({
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const plannerRole = findPlannerRole(roles);
-  const currentModelSlug = plannerRole?.model ?? runtime?.model ?? "";
+  const currentModelSlug = plannerRole?.model ?? runtime?.usage.model ?? "";
   const currentModelInfo = findModelInProviders(providers, currentModelSlug);
   const currentEffort = plannerRole?.effort ?? "";
   const currentEfforts = currentModelInfo?.model.reasoningEfforts ?? [];
@@ -374,9 +451,10 @@ export function SessionStatusBar({
   agents,
 }: SessionStatusBarProps) {
   const { t } = useTranslation();
-  const contextLabel = `${formatTokenCount(runtime?.latestContextTokens)} / ${formatTokenCount(runtime?.contextWindow)}`;
-  const costLabel = formatCost(runtime, t("statusBar.costNotConfigured"));
-  const contextWidth = `${contextPercent(runtime)}%`;
+  const usage = runtime?.usage ?? null;
+  const contextLabel = `${formatTokenCount(usage?.latestContextTokens)} / ${formatTokenCount(usage?.contextWindow)}`;
+  const costLabel = formatCost(runtime, t("statusBar.costNotConfigured"), t("statusBar.costUnpriced"));
+  const contextWidth = `${contextPercent(usage)}%`;
   const skills = runtime?.activeSkills ?? [];
   const mcpServers = runtime?.activeMcpServers ?? [];
   const capabilityCount = skills.length;
@@ -410,22 +488,35 @@ export function SessionStatusBar({
         >
           <div className="status-usage-popover">
             <span>
-              {t("statusBar.cacheHit")} <strong>{formatPercent(runtime?.cacheHitRate)}</strong>
+              {t("statusBar.cacheHit")} <strong>{formatPercent(usage?.cacheHitRate)}</strong>
             </span>
             <span>
-              {t("statusBar.input")} <strong>{formatTokenCount(runtime?.promptTokens)}</strong>
+              {t("statusBar.input")} <strong>{formatTokenCount(usage?.promptTokens)}</strong>
             </span>
             <span>
-              {t("statusBar.output")} <strong>{formatTokenCount(runtime?.completionTokens)}</strong>
+              {t("statusBar.output")} <strong>{formatTokenCount(usage?.completionTokens)}</strong>
             </span>
             <span>
               {t("statusBar.cacheRead")}{" "}
-              <strong>{formatTokenCount(runtime?.cachedPromptTokens)}</strong>
+              <strong>{formatTokenCount(usage?.cachedPromptTokens)}</strong>
             </span>
             <hr />
-            <span>
-              {t("statusBar.cost")} <strong>{costLabel}</strong>
-            </span>
+            <CostRows usage={usage} />
+            <small>{t("statusBar.costHint")}</small>
+          </div>
+        </StatusPopover>
+
+        <StatusPopover
+          className="cost-popover-wrap"
+          trigger={
+            <button className="status-item status-cost" type="button">
+              <span>{t("statusBar.cost")}</span>
+              <strong>{costLabel}</strong>
+            </button>
+          }
+        >
+          <div className="status-usage-popover">
+            <CostRows usage={usage} />
             <small>{t("statusBar.costHint")}</small>
           </div>
         </StatusPopover>

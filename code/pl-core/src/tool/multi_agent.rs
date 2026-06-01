@@ -849,6 +849,7 @@ async fn forward_agent_lifecycle_events(
         match event_rx.recv().await {
             Ok(
                 event @ (AgentEvent::AgentStateChanged { .. }
+                | AgentEvent::AgentRuntimeUpdated { .. }
                 | AgentEvent::CollabAgentSpawnBegin { .. }
                 | AgentEvent::CollabAgentSpawnEnd { .. }
                 | AgentEvent::CollabAgentInteractionBegin { .. }

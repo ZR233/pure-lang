@@ -19,10 +19,13 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
-    use pl_protocol::{AgentStatus, Message, MessageContent, MessageRole};
+    use pl_protocol::{
+        AgentRuntimeDelta, AgentStatus, Message, MessageContent, MessageRole, RuntimeCostAmount,
+        TokenUsageSnapshot,
+    };
     use pretty_assertions::assert_eq;
 
-    use crate::{CompileMode, TurnResult};
+    use crate::CompileMode;
 
     use super::*;
 
@@ -114,6 +117,7 @@ mod tests {
             reason: None,
             budget_limit_kind: None,
             budget_usage: None,
+            runtime_usage: None,
             updated_at: 10,
         };
         store
@@ -171,57 +175,169 @@ mod tests {
             .create_session(&project.id, "Build app", CompileMode::Auto)
             .await
             .unwrap();
-        let mut model = pl_model::ModelInfo::fallback("priced-model");
-        model.context_window = Some(1_000_000);
-        model.currency = Some("CNY".to_string());
-        model.input_price_per_mtok = Some(1.0);
-        model.output_price_per_mtok = Some(2.0);
-        model.cache_read_price_per_mtok = Some(0.02);
-        let result = TurnResult {
-            content: "ok".to_string(),
-            reasoning_content: None,
-            model: "priced-model".to_string(),
-            usage: pl_model::TokenUsage {
-                prompt_tokens: 100_000,
-                completion_tokens: 10_000,
-                total_tokens: 110_000,
-                cached_prompt_tokens: 40_000,
-            },
-            mode: CompileMode::Auto,
-            session_message_count: 2,
-            status: crate::turn::TurnResultStatus::Completed,
-            abort_reason: None,
-            budget_limit_kind: None,
-            budget_usage: None,
-            timeline_events: Vec::new(),
-        };
 
         store
-            .upsert_session_runtime(&session.id, &result, Some(&model))
+            .upsert_agent_snapshot(AgentSnapshotRecord {
+                id: "agent-1".to_string(),
+                session_id: session.id.clone(),
+                path: "/root/research".to_string(),
+                parent_path: Some("/root".to_string()),
+                role: "executor".to_string(),
+                task: "research".to_string(),
+                status: AgentStatus::Completed,
+                summary: Some("done".to_string()),
+                depth: 1,
+                error: None,
+                reason: None,
+                budget_limit_kind: None,
+                budget_usage: None,
+                runtime_usage: None,
+                updated_at: 5,
+            })
             .await
             .unwrap();
-        store
-            .upsert_session_runtime(&session.id, &result, Some(&model))
-            .await
-            .unwrap();
+
+        let root_usage = TokenUsageSnapshot {
+            prompt_tokens: 100_000,
+            completion_tokens: 10_000,
+            total_tokens: 110_000,
+            cached_prompt_tokens: 40_000,
+        };
+        let root_delta = AgentRuntimeDelta {
+            inference_id: "root-1".to_string(),
+            agent_id: "agent-root".to_string(),
+            path: "/root".to_string(),
+            parent_path: None,
+            role: "root".to_string(),
+            model: "priced-model".to_string(),
+            context_window: Some(1_000_000),
+            usage: root_usage.clone(),
+            estimated_costs: vec![RuntimeCostAmount {
+                currency: "CNY".to_string(),
+                amount: 0.0808,
+            }],
+            has_unpriced_usage: false,
+            updated_at: 10,
+        };
+        let second_root_delta = AgentRuntimeDelta {
+            inference_id: "root-2".to_string(),
+            updated_at: 20,
+            ..root_delta.clone()
+        };
+        let subagent_delta = AgentRuntimeDelta {
+            inference_id: "agent-1-inference".to_string(),
+            agent_id: "agent-1".to_string(),
+            path: "/root/research".to_string(),
+            parent_path: Some("/root".to_string()),
+            role: "executor".to_string(),
+            model: "usd-model".to_string(),
+            context_window: Some(400_000),
+            usage: TokenUsageSnapshot {
+                prompt_tokens: 50_000,
+                completion_tokens: 5_000,
+                total_tokens: 55_000,
+                cached_prompt_tokens: 0,
+            },
+            estimated_costs: vec![RuntimeCostAmount {
+                currency: "USD".to_string(),
+                amount: 0.06,
+            }],
+            has_unpriced_usage: false,
+            updated_at: 30,
+        };
+        let unpriced_delta = AgentRuntimeDelta {
+            inference_id: "agent-1-unpriced".to_string(),
+            agent_id: "agent-1".to_string(),
+            path: "/root/research".to_string(),
+            parent_path: Some("/root".to_string()),
+            role: "executor".to_string(),
+            model: "unpriced-model".to_string(),
+            context_window: Some(400_000),
+            usage: TokenUsageSnapshot {
+                prompt_tokens: 10_000,
+                completion_tokens: 1_000,
+                total_tokens: 11_000,
+                cached_prompt_tokens: 0,
+            },
+            estimated_costs: Vec::new(),
+            has_unpriced_usage: true,
+            updated_at: 40,
+        };
+
+        assert!(
+            store
+                .record_agent_runtime_delta(&session.id, &root_delta)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .record_agent_runtime_delta(&session.id, &root_delta)
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .record_agent_runtime_delta(&session.id, &second_root_delta)
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .record_agent_runtime_delta(&session.id, &subagent_delta)
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .record_agent_runtime_delta(&session.id, &unpriced_delta)
+                .await
+                .unwrap()
+        );
 
         let runtime = store
             .load_session_runtime(&session.id)
             .await
             .unwrap()
             .unwrap();
+        let agents = store.list_agents(&session.id).await.unwrap();
 
-        assert_eq!(runtime.model, "priced-model");
-        assert_eq!(runtime.context_window, Some(1_000_000));
-        assert_eq!(runtime.latest_context_tokens, 100_000);
-        assert_eq!(runtime.prompt_tokens, 200_000);
-        assert_eq!(runtime.completion_tokens, 20_000);
+        assert_eq!(runtime.model, "unpriced-model");
+        assert_eq!(runtime.context_window, Some(400_000));
+        assert_eq!(runtime.latest_context_tokens, 10_000);
+        assert_eq!(runtime.prompt_tokens, 260_000);
+        assert_eq!(runtime.completion_tokens, 26_000);
         assert_eq!(runtime.cached_prompt_tokens, 80_000);
-        assert_eq!(runtime.currency.as_deref(), Some("CNY"));
-        assert!(
+        assert_eq!(runtime.total_tokens, 286_000);
+        assert_eq!(runtime.currency, None);
+        assert_eq!(runtime.estimated_cost, None);
+        assert_eq!(
             runtime
-                .estimated_cost
-                .is_some_and(|cost| (cost - 0.1616).abs() < 0.000_001)
+                .estimated_costs
+                .iter()
+                .map(|cost| cost.currency.as_str())
+                .collect::<Vec<_>>(),
+            vec!["CNY", "USD"],
+        );
+        assert!(
+            runtime.estimated_costs[0].amount.is_finite()
+                && (runtime.estimated_costs[0].amount - 0.1616).abs() < 0.000_001
+        );
+        assert!(
+            runtime.estimated_costs[1].amount.is_finite()
+                && (runtime.estimated_costs[1].amount - 0.06).abs() < 0.000_001
+        );
+        assert!(runtime.has_unpriced_usage);
+        assert_eq!(agents.len(), 1);
+        assert_eq!(
+            agents[0].runtime_usage.as_ref().map(|usage| (
+                usage.model.as_str(),
+                usage.prompt_tokens,
+                usage.completion_tokens,
+                usage.total_tokens,
+                usage.has_unpriced_usage,
+            )),
+            Some(("unpriced-model", 60_000, 6_000, 66_000, true)),
         );
     }
 

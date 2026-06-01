@@ -50,6 +50,7 @@ pub struct AgentDto {
     pub reason: Option<String>,
     pub budget_limit_kind: Option<String>,
     pub budget_usage: Option<BudgetUsageDto>,
+    pub runtime_usage: Option<RuntimeUsageDto>,
     pub updated_at: i64,
 }
 
@@ -142,6 +143,15 @@ pub struct ConfigDto {
 #[serde(rename_all = "camelCase")]
 pub struct SessionRuntimeDto {
     pub session_id: String,
+    pub usage: RuntimeUsageDto,
+    pub active_skills: Vec<String>,
+    pub active_mcp_servers: Vec<String>,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeUsageDto {
     pub model: String,
     pub context_window: Option<u64>,
     pub latest_context_tokens: u64,
@@ -150,17 +160,16 @@ pub struct SessionRuntimeDto {
     pub cached_prompt_tokens: u64,
     pub total_tokens: u64,
     pub cache_hit_rate: Option<f64>,
-    pub currency: Option<String>,
-    #[serde(rename = "inputPricePerMTok")]
-    pub input_price_per_mtok: Option<f64>,
-    #[serde(rename = "outputPricePerMTok")]
-    pub output_price_per_mtok: Option<f64>,
-    #[serde(rename = "cacheReadPricePerMTok")]
-    pub cache_read_price_per_mtok: Option<f64>,
-    pub estimated_cost: Option<f64>,
-    pub active_skills: Vec<String>,
-    pub active_mcp_servers: Vec<String>,
+    pub estimated_costs: Vec<RuntimeCostAmountDto>,
+    pub has_unpriced_usage: bool,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeCostAmountDto {
+    pub currency: String,
+    pub amount: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -275,6 +284,8 @@ pub struct AgentEventPayload {
     pub timeline_event: Option<AgentEventDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_runtime: Option<SessionRuntimeDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]

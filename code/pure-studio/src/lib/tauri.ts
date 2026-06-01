@@ -115,13 +115,17 @@ export function createSession(projectId: string, title?: string) {
         sessionRuntime: {
           ...previewSessionRuntime,
           sessionId: session.id,
-          latestContextTokens: 0,
-          promptTokens: 0,
-          completionTokens: 0,
-          cachedPromptTokens: 0,
-          totalTokens: 0,
-          cacheHitRate: null,
-          estimatedCost: null,
+          usage: {
+            ...previewSessionRuntime.usage,
+            latestContextTokens: 0,
+            promptTokens: 0,
+            completionTokens: 0,
+            cachedPromptTokens: 0,
+            totalTokens: 0,
+            cacheHitRate: null,
+            estimatedCosts: [],
+            hasUnpricedUsage: false,
+          },
         },
       }),
     );
@@ -206,9 +210,12 @@ export function runPrompt(sessionId: string, prompt: string) {
         agents: [...previewAgents, latestAgent],
         sessionRuntime: {
           ...previewSessionRuntime,
-          promptTokens: previewSessionRuntime.promptTokens + 1200,
-          completionTokens: previewSessionRuntime.completionTokens + 260,
-          totalTokens: previewSessionRuntime.totalTokens + 1460,
+          usage: {
+            ...previewSessionRuntime.usage,
+            promptTokens: previewSessionRuntime.usage.promptTokens + 1200,
+            completionTokens: previewSessionRuntime.usage.completionTokens + 260,
+            totalTokens: previewSessionRuntime.usage.totalTokens + 1460,
+          },
         },
         timelineItems: [
           ...previewTimelineItems,

@@ -30,7 +30,7 @@ reducer 分域：
 - 空 assistant 不渲染
 - 工具调用使用紧凑行密度
 - 子代理使用行内状态，不做嵌套大卡片
-- 子代理内部 text delta、thinking delta、tool call 和工具输出不进入父会话 timeline；父会话只展示 agent 生命周期状态与最终摘要
+- 子代理内部 text delta、thinking delta、tool call 和工具输出不进入父会话 timeline；父会话只展示 agent 生命周期状态、最终摘要和压缩后的 runtime usage
 - agent timeline 与 agent latest snapshot 必须分离；timeline 渲染 append-only `agentEvents`，状态栏渲染 latest `agents`
 - 同一个 agent 的 spawn、wait、message、close、final status 必须保留为多条 timeline 事件，不能按 agent id 覆盖成一条
 - `AgentStateChanged` 只更新 latest snapshot，不直接作为 timeline 数据源
@@ -86,7 +86,9 @@ turn 展示语义固定：
 
 组件通过 selectors 读取，不直接拼装跨域状态。
 
-状态栏固定渲染在聊天底部，只展示当前 turn phase、模型、上下文、费用、能力和 agent latest snapshot。运行中收到 inference usage 后必须即时更新 `sessionRuntime`，不能等 `RunPromptResponse` 返回后才刷新。设置页作为全屏 overlay 打开时必须覆盖聊天状态栏与其 popover，状态栏不得浮到设置页之上。
+状态栏固定渲染在聊天底部，只展示当前 turn phase、模型、上下文、按货币分组的费用、能力和 agent latest snapshot。运行中收到 `AgentRuntimeUpdated` 后必须即时用后端聚合快照更新 `sessionRuntime` 和对应 agent 的 `runtimeUsage`，不能等 `RunPromptResponse` 返回后才刷新。设置页作为全屏 overlay 打开时必须覆盖聊天状态栏与其 popover，状态栏不得浮到设置页之上。
+
+子代理 popover 每行展示角色、任务、状态和该 agent 的费用摘要。存在 token 但缺少价格配置时显示未配置，不把未计价 token 混入任意币种。
 
 ## 6. 验收目标
 

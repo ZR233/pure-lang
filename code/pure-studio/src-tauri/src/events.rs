@@ -1,13 +1,13 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pl_core::{StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord, StudioStore};
+use pl_core::{StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord, StudioRuntime};
 use pl_protocol::AgentEvent;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::dto::AgentEventPayload;
-use crate::mappers::{agent_dto, agent_event_dto};
+use crate::mappers::{agent_dto, agent_event_dto, load_session_runtime_dto};
 
 static EVENT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -15,24 +15,55 @@ pub async fn drain_events(
     session_id: String,
     mut event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
     app: AppHandle,
-    store: StudioStore,
+    studio: StudioRuntime,
 ) {
     loop {
         match event_rx.recv().await {
             Ok(event) => {
-                let done = matches!(event, AgentEvent::Done);
                 let agent = if let Some(record) = agent_snapshot_record(&session_id, &event) {
-                    let _ = store.upsert_agent_snapshot(record.clone()).await;
+                    let _ = studio.store().upsert_agent_snapshot(record.clone()).await;
                     Some(agent_dto(record))
                 } else {
                     None
                 };
+                let runtime_updated = if let AgentEvent::AgentRuntimeUpdated { delta } = &event {
+                    studio
+                        .store()
+                        .record_agent_runtime_delta(&session_id, delta)
+                        .await
+                        .unwrap_or(false)
+                } else {
+                    false
+                };
+                let session_runtime = if runtime_updated {
+                    load_session_runtime_dto(&studio, &session_id).await.ok()
+                } else {
+                    None
+                };
+                let agent = if agent.is_none()
+                    && let AgentEvent::AgentRuntimeUpdated { delta } = &event
+                    && delta.agent_id != "agent-root"
+                {
+                    studio
+                        .store()
+                        .list_agents(&session_id)
+                        .await
+                        .ok()
+                        .and_then(|agents| {
+                            agents
+                                .into_iter()
+                                .find(|agent| agent.id == delta.agent_id)
+                                .map(agent_dto)
+                        })
+                } else {
+                    agent
+                };
                 let timeline_event = if let Ok(sequence) =
-                    store.next_agent_event_sequence(&session_id).await
+                    studio.store().next_agent_event_sequence(&session_id).await
                 {
                     if let Some(record) = agent_timeline_event_record(&session_id, sequence, &event)
                     {
-                        let _ = store.record_agent_event(record.clone()).await;
+                        let _ = studio.store().record_agent_event(record.clone()).await;
                         Some(agent_event_dto(record))
                     } else {
                         None
@@ -49,6 +80,7 @@ pub async fn drain_events(
                         | AgentEvent::ToolApprovalRequested { .. }
                         | AgentEvent::ToolApprovalGranted { .. }
                         | AgentEvent::ToolApprovalDenied { .. }
+                        | AgentEvent::AgentRuntimeUpdated { .. }
                         | AgentEvent::TurnInterrupted { .. }
                         | AgentEvent::TurnBudgetLimited { .. }
                         | AgentEvent::Done
@@ -58,7 +90,11 @@ pub async fn drain_events(
                 } else {
                     None
                 };
-                if event_for_timeline.is_some() || timeline_event.is_some() || agent.is_some() {
+                if event_for_timeline.is_some()
+                    || timeline_event.is_some()
+                    || agent.is_some()
+                    || session_runtime.is_some()
+                {
                     let _ = app.emit(
                         "studio-agent-event",
                         AgentEventPayload {
@@ -66,11 +102,9 @@ pub async fn drain_events(
                             event: event_for_timeline,
                             timeline_event,
                             agent,
+                            session_runtime,
                         },
                     );
-                }
-                if done {
-                    break;
                 }
             }
             Err(RecvError::Lagged(_)) => {
@@ -116,6 +150,7 @@ pub fn agent_snapshot_record(
             reason: reason.clone(),
             budget_limit_kind: *budget_limit_kind,
             budget_usage: *budget_usage,
+            runtime_usage: None,
             updated_at: *updated_at,
         }),
         _ => None,
@@ -207,6 +242,7 @@ pub fn agent_timeline_event_record(
         | AgentEvent::ToolApprovalRequested { .. }
         | AgentEvent::ToolApprovalGranted { .. }
         | AgentEvent::ToolApprovalDenied { .. }
+        | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::Done

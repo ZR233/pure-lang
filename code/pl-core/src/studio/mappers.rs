@@ -1,5 +1,7 @@
 use anyhow::{Context, Result, bail};
-use pl_protocol::{AgentStatus, Message, MessageContent, MessageRole};
+use pl_protocol::{
+    AgentStatus, Message, MessageContent, MessageRole, RuntimeCostAmount, RuntimeUsageSnapshot,
+};
 
 use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
@@ -49,6 +51,24 @@ pub fn agent_snapshot_record(model: entities::agent::Model) -> AgentSnapshotReco
             .as_deref()
             .and_then(budget_limit_kind_from_label),
         budget_usage,
+        runtime_usage: None,
+        updated_at: model.updated_at,
+    }
+}
+
+pub fn agent_runtime_snapshot_record(
+    model: entities::agent_runtime_snapshot::Model,
+) -> RuntimeUsageSnapshot {
+    RuntimeUsageSnapshot {
+        model: model.model,
+        context_window: model.context_window.map(|value| value as u64),
+        latest_context_tokens: model.latest_context_tokens as u64,
+        prompt_tokens: model.prompt_tokens as u64,
+        completion_tokens: model.completion_tokens as u64,
+        cached_prompt_tokens: model.cached_prompt_tokens as u64,
+        total_tokens: model.total_tokens as u64,
+        estimated_costs: costs_from_json(&model.estimated_costs_json),
+        has_unpriced_usage: model.has_unpriced_usage != 0,
         updated_at: model.updated_at,
     }
 }
@@ -121,6 +141,8 @@ pub fn session_runtime_record(
         total_tokens: model.total_tokens as u64,
         currency: model.currency,
         estimated_cost: model.estimated_cost,
+        estimated_costs: costs_from_json(&model.estimated_costs_json),
+        has_unpriced_usage: model.has_unpriced_usage != 0,
         updated_at: model.updated_at,
     }
 }
@@ -142,6 +164,8 @@ pub fn default_session_runtime_record(
         total_tokens: 0,
         currency: model.and_then(|model| model.currency.clone()),
         estimated_cost: None,
+        estimated_costs: Vec::new(),
+        has_unpriced_usage: false,
         updated_at: unix_seconds(),
     }
 }
@@ -155,25 +179,14 @@ pub fn trace_event_kind_label(kind: &pl_protocol::TraceEventKind) -> &'static st
     }
 }
 
-pub fn estimate_cost(
-    prompt_tokens: u64,
-    completion_tokens: u64,
-    cached_prompt_tokens: u64,
-    input_price_per_mtok: Option<f64>,
-    output_price_per_mtok: Option<f64>,
-    cache_read_price_per_mtok: Option<f64>,
-) -> Option<f64> {
-    let input_price = input_price_per_mtok?;
-    let output_price = output_price_per_mtok?;
-    let cache_price = cache_read_price_per_mtok?;
-    let cached = cached_prompt_tokens.min(prompt_tokens);
-    let uncached_input = prompt_tokens.saturating_sub(cached);
-    Some(
-        (uncached_input as f64 * input_price
-            + completion_tokens as f64 * output_price
-            + cached as f64 * cache_price)
-            / 1_000_000.0,
-    )
+pub fn costs_from_json(json: &str) -> Vec<RuntimeCostAmount> {
+    let mut costs = serde_json::from_str::<Vec<RuntimeCostAmount>>(json).unwrap_or_default();
+    costs.sort_by(|left, right| left.currency.cmp(&right.currency));
+    costs
+}
+
+pub fn costs_to_json(costs: &[RuntimeCostAmount]) -> String {
+    serde_json::to_string(costs).unwrap_or_else(|_| "[]".to_string())
 }
 
 pub fn row_to_message(row: entities::message::Model) -> Result<Message> {
