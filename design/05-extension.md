@@ -39,7 +39,7 @@
 
 文件工具作为 `pl-core` 工具系统的一部分注册，当前不新增独立 `pl-tool` crate。文件工具包括读取、写入、列目录、搜索、stat、建目录、删除、复制、移动和 `apply_patch`。只读工具仍受工作区路径边界限制；修改工具进入现有工具审批流程。
 
-`apply_patch` 的唯一正式输入协议是 Codex 风格 freeform patch：外层使用 `*** Begin Patch` / `*** End Patch`，每个文件操作必须以 `*** Add File:`、`*** Delete File:` 或 `*** Update File:` 开头。OpenAI Responses 和支持 custom tools 的 Chat Completions provider 使用 `type: "custom"` 工具，并通过 Lark grammar 描述 patch 格式。不支持 custom/freeform 的 Chat-compatible provider 使用普通 function fallback，将完整 patch 放入 `patch` 字段；执行层仍复用同一个 parser、preflight 和 apply 流程。执行层可以剥离单个 patch block 外部的 markdown fence、heredoc-like wrapper 或前后说明文字，但 `---/+++` unified diff、`*** File:` 元数据头和自然语言编辑指令不属于 `apply_patch` 输入格式，应返回可纠正的错误提示。
+`apply_patch` 的唯一正式输入协议是 Codex 风格 freeform patch：外层使用 `*** Begin Patch` / `*** End Patch`，每个文件操作必须以 `*** Add File:`、`*** Delete File:` 或 `*** Update File:` 开头。OpenAI Responses 和支持 custom tools 的 Chat Completions provider 使用 `type: "custom"` 工具，并通过 Lark grammar 描述 patch 格式。不支持 custom/freeform 的 Chat-compatible provider 使用普通 function fallback，将完整 patch 放入 `patch` 字段；工具描述和 function fallback schema 必须给出一个最小有效 `*** Update File:` 示例，帮助真实模型生成可执行格式。执行层仍复用同一个 parser、preflight 和 apply 流程。执行层可以剥离单个 patch block 外部的 markdown fence、heredoc-like wrapper 或前后说明文字，但 `---/+++` unified diff、`*** File:` 元数据头和自然语言编辑指令不属于 `apply_patch` 输入格式，应返回可纠正的错误提示。
 
 工具调用历史必须保留调用种类。`function_call` 的历史回放写回 `function_call_output`；custom/freeform 工具写回 `custom_tool_call_output`。不得只保存 JSON arguments 后在下一轮统一当作 function tool 回放。
 

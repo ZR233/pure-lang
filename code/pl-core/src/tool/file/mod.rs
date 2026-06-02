@@ -46,6 +46,12 @@ pub struct MovePathTool;
 #[derive(Debug)]
 pub struct ApplyPatchTool;
 
+const APPLY_PATCH_TOOL_DESCRIPTION: &str = "Apply a Codex-style patch to workspace files. The patch must begin with *** Begin Patch and use *** Add File:, *** Delete File:, or *** Update File: hunk headers; do not use ---/+++ unified diff, *** File:, or natural-language edit instructions. Minimal update example:\n*** Begin Patch\n*** Update File: notes.txt\n@@\n-old line\n+new line\n*** End Patch";
+
+const APPLY_PATCH_INPUT_DESCRIPTION: &str = "Complete Codex-style patch text beginning with *** Begin Patch and ending with *** End Patch. File operations must use *** Add File:, *** Delete File:, or *** Update File:. Do not use ---/+++ unified diff, *** File:, or natural-language edit instructions. Minimal update example:\n*** Begin Patch\n*** Update File: notes.txt\n@@\n-old line\n+new line\n*** End Patch";
+
+const APPLY_PATCH_CUSTOM_TOOL_DESCRIPTION: &str = "Use the `apply_patch` tool to edit workspace files. This is a FREEFORM tool, so do not wrap the patch in JSON. The patch must begin with *** Begin Patch, end with *** End Patch, and each file operation must use *** Add File:, *** Delete File:, or *** Update File:. Do not use ---/+++ unified diff, *** File:, or natural-language edit instructions. Minimal update example:\n*** Begin Patch\n*** Update File: notes.txt\n@@\n-old line\n+new line\n*** End Patch";
+
 impl ReadFileTool {
     pub fn new() -> Self {
         Self::default()
@@ -604,7 +610,7 @@ impl Tool for ApplyPatchTool {
     }
 
     fn description(&self) -> &str {
-        "Apply a Codex-style patch to workspace files. The patch must begin with *** Begin Patch and use *** Add File:, *** Delete File:, or *** Update File: hunk headers; do not use ---/+++ unified diff, *** File:, or natural-language edit instructions."
+        APPLY_PATCH_TOOL_DESCRIPTION
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -613,7 +619,7 @@ impl Tool for ApplyPatchTool {
             "properties": {
                 "patch": {
                     "type": "string",
-                    "description": "Complete Codex-style patch text beginning with *** Begin Patch and ending with *** End Patch. File operations must use *** Add File:, *** Delete File:, or *** Update File:. Do not use ---/+++ unified diff, *** File:, or natural-language edit instructions."
+                    "description": APPLY_PATCH_INPUT_DESCRIPTION
                 }
             },
             "required": ["patch"],
@@ -624,7 +630,7 @@ impl Tool for ApplyPatchTool {
     fn to_schema(&self) -> ToolSchema {
         ToolSchema::custom_grammar(
             self.name(),
-            "Use the `apply_patch` tool to edit workspace files. This is a FREEFORM tool, so do not wrap the patch in JSON. The patch must begin with *** Begin Patch, end with *** End Patch, and each file operation must use *** Add File:, *** Delete File:, or *** Update File:. Do not use ---/+++ unified diff, *** File:, or natural-language edit instructions.",
+            APPLY_PATCH_CUSTOM_TOOL_DESCRIPTION,
             "lark",
             APPLY_PATCH_LARK_GRAMMAR,
         )

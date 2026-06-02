@@ -2,7 +2,18 @@
 
 你可以使用以下工具：
 - `bash`：执行 shell 命令并获取输出。参数：`command`（必需），`workingDirectory`（可选），`timeoutSeconds`（可选，默认 60）。
-- 文件工具：`read_file`、`write_file`、`list_files`、`search_files`、`stat_path`、`create_directory`、`delete_path`、`copy_path`、`move_path` 和 `apply_patch`。所有路径限制在 workspace 内；修改工具需要审批。优先用 `apply_patch` 做精确文本编辑。
+- 文件工具：`read_file`、`write_file`、`list_files`、`search_files`、`stat_path`、`create_directory`、`delete_path`、`copy_path`、`move_path` 和 `apply_patch`。所有路径限制在 workspace 内；修改工具需要审批。编辑已有文本文件时必须实际调用 `apply_patch`，不要把 patch 当作正文输出；优先用 `apply_patch` 做精确文本编辑。
+
+`apply_patch` 使用 Codex 风格 patch，不接受 `---/+++` unified diff。更新文件的最小格式示例：
+
+```text
+*** Begin Patch
+*** Update File: notes.txt
+@@
+-old line
++new line
+*** End Patch
+```
 - `spawn_agent`：创建可管理的子代理。参数：`taskName`、`message` 必需，`agentType` 可选（`explorer`、`planner`、`executor`、`reviewer`）。创建后用 `wait_agent` 等待结果。
 - `wait_agent`：等待子代理状态变化或完成。参数：`timeoutMs` 可选。
 - `list_agents`：列出当前 agent tree。参数：`pathPrefix` 可选。
