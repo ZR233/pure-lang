@@ -75,6 +75,8 @@ platforms: ["windows", "linux", "macos"]
 
 系统 skills 与用户/外部 skills 一样对 root agent 和 subagent 可见，但只读。模型如需沉淀新的项目经验，必须通过 `skill_manage` 写入项目目录。
 
+Studio 状态栏的 Skills 只展示当前会话已激活的 skills。激活定义为该会话中 `skill_view` 成功返回并把 skill 内容或支持文件内容写入上下文；仅出现在索引中但未 `skill_view` 的 skill 不计入。
+
 ## 13.6 自学习
 
 `StudioRuntime::run_prompt` 完成主 turn 并保存记录后，如果 `[skills].auto_learn = true`，后台启动 reviewer 复盘本轮对话。reviewer 只注册 skills 工具，不注册 shell、文件或 subagent 工具。
