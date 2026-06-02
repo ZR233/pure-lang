@@ -24,7 +24,7 @@ pub use agent::{
 pub use config::{
     ConfigPaths, ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProviderConfig,
     PureConfig, ReasoningEffort, ResolvedRoleConfig, RoleConfig, RoleConfigs, RuntimeConfig,
-    SkillsConfig, TruncationPolicyConfig,
+    SkillsConfig, SystemSkillsConfig, TruncationPolicyConfig,
 };
 pub use config_editor::{
     ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit, infer_provider_template_kind,

@@ -80,6 +80,9 @@ external_dirs = []
 disabled = []
 auto_learn_min_tool_calls = 5
 
+[skills.system]
+enabled = true
+
 [roles.explorer]
 provider = "deepseek"
 model = "deepseek-v4-flash"
@@ -198,11 +201,14 @@ Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-
 - `auto_learn`：是否在 Studio 主 turn 结束后启动后台 reviewer 自动沉淀项目 skill，默认 `true`。
 - `project_dir`：项目级 skills 目录，相对 `workspace_root` 解析，默认 `skills`。
 - `user_dir`：用户级只读 skills 目录，默认 `~/.pure/skills`。
+- `system.enabled`：是否启用内置系统 skills，默认 `true`。
 - `external_dirs`：额外只读 skills 目录列表，默认空。
 - `disabled`：禁用的 skill 名称列表，默认空。
 - `auto_learn_min_tool_calls`：触发自学习 review 的最少工具调用数，默认 `5`。
 
-加载优先级固定为：项目 skills > 用户 skills > external dirs。同名 skill 只暴露最高优先级来源。自学习和 `skill_manage` 写入只作用于项目 skills 目录，不会修改用户目录或外部目录。
+加载优先级固定为：项目 skills > 用户 skills > 系统 skills > external dirs。同名 skill 只暴露最高优先级来源。自学习和 `skill_manage` 写入只作用于项目 skills 目录，不会修改用户目录、系统目录或外部目录。
+
+系统 skills 来自编译进 `pl-core` 的内置资源，并同步缓存到 `~/.pure/skills/.system/`。该目录由 Pure 管理，用户需要覆盖系统 skill 时应在项目 `skills/` 目录创建同名 skill。
 
 ## 10.8 配置草稿
 

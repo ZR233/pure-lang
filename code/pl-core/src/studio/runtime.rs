@@ -26,6 +26,7 @@ const SELF_LEARNING_REVIEW_PROMPT: &str = r#"你是 Pure-Lang 项目 skills 自�
 - 没有合适项目 skill 时，才 create 一个泛化的项目 skill。
 - 不要记录一次性任务、瞬时环境失败、负面工具断言、provider 临时错误或纯用户私密偏好。
 - 不要修改用户级或外部只读 skill；如需复用，创建项目级覆盖或项目级新 skill。
+- 不要修改系统内置 skill；如需覆盖或沉淀项目经验，创建/更新项目级 skill。
 - 如果没有值得沉淀的内容，直接简短说明无需更新，不要调用工具。
 "#;
 

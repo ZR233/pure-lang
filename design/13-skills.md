@@ -20,11 +20,14 @@ Skills 是可复用的任务知识文档，供 agent 在需要时按需读取。
 
 1. 项目目录：`<workspace_root>/skills/`
 2. 用户目录：`~/.pure/skills/`
-3. 配置里的外部目录：`[skills].external_dirs`
+3. 系统目录：`~/.pure/skills/.system/`
+4. 配置里的外部目录：`[skills].external_dirs`
 
-同名 skill 只保留最高优先级来源。项目目录是唯一写入目标；用户目录和外部目录仅参与只读发现。若模型尝试修改来自用户目录或外部目录的 skill，工具必须拒绝原地修改，并提示在项目目录创建同名项目覆盖或新建项目 skill。
+同名 skill 只保留最高优先级来源。项目目录是唯一写入目标；用户目录、系统目录和外部目录仅参与只读发现。若模型尝试修改来自用户目录、系统目录或外部目录的 skill，工具必须拒绝原地修改，并提示在项目目录创建同名项目覆盖或新建项目 skill。
 
 `[skills].project_dir` 是相对工作区根目录的路径，默认 `skills`。解析后必须位于 `workspace_root` 内。
+
+系统 skills 是编译进 `pl-core` 的内置能力。启动或加载 skills 时，系统将内置资源同步到 `~/.pure/skills/.system/`。该目录由 Pure 管理，用户不应手动编辑；若需要覆盖系统 skill，应在项目目录创建同名 skill。
 
 ## 13.3 Skill 格式
 
@@ -70,10 +73,12 @@ platforms: ["windows", "linux", "macos"]
 
 `register_default_tools` 是 root agent 和 subagent 的共同工具入口，因此 subagent 与父 agent 使用同一项目 skills 上下文和同一加载优先级。
 
+系统 skills 与用户/外部 skills 一样对 root agent 和 subagent 可见，但只读。模型如需沉淀新的项目经验，必须通过 `skill_manage` 写入项目目录。
+
 ## 13.6 自学习
 
 `StudioRuntime::run_prompt` 完成主 turn 并保存记录后，如果 `[skills].auto_learn = true`，后台启动 reviewer 复盘本轮对话。reviewer 只注册 skills 工具，不注册 shell、文件或 subagent 工具。
 
-自学习默认写入项目目录。reviewer 优先修补本轮已读取的项目 skill，其次修补已有项目 umbrella skill，最后才创建新的泛化 skill。reviewer 不应记录一次性任务、瞬时环境失败、负面工具断言或纯用户私密偏好。
+自学习默认写入项目目录。reviewer 优先修补本轮已读取的项目 skill，其次修补已有项目 umbrella skill，最后才创建新的泛化 skill。reviewer 不得修改系统、用户或外部 skill；如果系统 skill 给出了通用指导，而本轮产生了项目特定经验，应创建或更新项目 skill。reviewer 不应记录一次性任务、瞬时环境失败、负面工具断言或纯用户私密偏好。
 
 自学习失败只写日志，不影响用户 turn 的结果。

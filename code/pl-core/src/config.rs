@@ -311,6 +311,8 @@ pub struct SkillsConfig {
     pub enabled: bool,
     #[serde(default = "default_true")]
     pub auto_learn: bool,
+    #[serde(default)]
+    pub system: SystemSkillsConfig,
     #[serde(default = "default_project_skills_dir")]
     pub project_dir: String,
     #[serde(default = "default_user_skills_dir")]
@@ -328,12 +330,25 @@ impl Default for SkillsConfig {
         Self {
             enabled: true,
             auto_learn: true,
+            system: SystemSkillsConfig::default(),
             project_dir: default_project_skills_dir(),
             user_dir: default_user_skills_dir(),
             external_dirs: Vec::new(),
             disabled: Vec::new(),
             auto_learn_min_tool_calls: default_auto_learn_min_tool_calls(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SystemSkillsConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for SystemSkillsConfig {
+    fn default() -> Self {
+        Self { enabled: true }
     }
 }
 

@@ -468,6 +468,7 @@ fn writable_project_skill<'a>(
         let source = match skill.source {
             SkillSourceKind::Project => "project",
             SkillSourceKind::User => "user",
+            SkillSourceKind::System => "system",
             SkillSourceKind::External => "external",
         };
         return Err(tool_error(
@@ -599,7 +600,7 @@ mod tests {
                 description: "shared".to_string(),
                 category: None,
                 platforms: Vec::new(),
-                source: SkillSourceKind::User,
+                source: SkillSourceKind::System,
                 path: PathBuf::from("user/shared"),
             }],
             warnings: Vec::new(),
@@ -609,6 +610,6 @@ mod tests {
             .unwrap_err()
             .to_string();
 
-        assert!(error.contains("read-only user"));
+        assert!(error.contains("read-only system"));
     }
 }
