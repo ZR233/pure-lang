@@ -3,6 +3,8 @@ use serde::Serialize;
 
 use pl_protocol::{Message, TraceEvent};
 
+const APPLY_PATCH_FUNCTION_FALLBACK_DESCRIPTION: &str = "Complete Codex-style apply_patch text beginning with *** Begin Patch and ending with *** End Patch. Each file operation must use one of these hunk headers: *** Add File: <path>, *** Delete File: <path>, or *** Update File: <path>. Do not use ---/+++ unified diff, *** File: metadata, or natural-language edit instructions. Minimal update example:\n*** Begin Patch\n*** Update File: notes.txt\n@@\n-old line\n+new line\n*** End Patch";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompletionRequest {
@@ -227,7 +229,7 @@ impl ToolSchema {
                     "properties": {
                         "patch": {
                             "type": "string",
-                            "description": "Complete Codex-style apply_patch text beginning with *** Begin Patch and ending with *** End Patch. Each file operation must use one of these hunk headers: *** Add File: <path>, *** Delete File: <path>, or *** Update File: <path>. Do not use ---/+++ unified diff, *** File: metadata, or natural-language edit instructions."
+                            "description": APPLY_PATCH_FUNCTION_FALLBACK_DESCRIPTION
                         }
                     },
                     "required": ["patch"],

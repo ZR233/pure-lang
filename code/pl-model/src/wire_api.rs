@@ -839,6 +839,10 @@ mod tests {
         assert!(description.contains("*** Add File:"));
         assert!(description.contains("*** Update File:"));
         assert!(description.contains("---/+++ unified diff"));
+        assert!(description.contains("Minimal update example:"));
+        assert!(description.contains("*** Update File: notes.txt"));
+        assert!(description.contains("-old line"));
+        assert!(description.contains("+new line"));
     }
 
     #[test]
