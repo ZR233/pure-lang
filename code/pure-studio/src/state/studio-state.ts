@@ -515,7 +515,11 @@ export function mergeAgents(current: AgentDto[], incoming: AgentDto[]): AgentDto
   if (incoming.length === 0) return current;
   const byId = new Map(current.map((agent) => [agent.id, agent]));
   for (const agent of incoming) {
-    byId.set(agent.id, agent);
+    const existing = byId.get(agent.id);
+    byId.set(agent.id, {
+      ...agent,
+      runtimeUsage: agent.runtimeUsage ?? existing?.runtimeUsage ?? null,
+    });
   }
   return [...byId.values()].sort((left, right) => {
     if (left.path !== right.path) {
