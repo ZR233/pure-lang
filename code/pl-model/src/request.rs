@@ -227,7 +227,7 @@ impl ToolSchema {
                     "properties": {
                         "patch": {
                             "type": "string",
-                            "description": "Complete apply_patch patch text beginning with *** Begin Patch and ending with *** End Patch"
+                            "description": "Complete Codex-style apply_patch text beginning with *** Begin Patch and ending with *** End Patch. Each file operation must use one of these hunk headers: *** Add File: <path>, *** Delete File: <path>, or *** Update File: <path>. Do not use ---/+++ unified diff, *** File: metadata, or natural-language edit instructions."
                         }
                     },
                     "required": ["patch"],

@@ -604,14 +604,17 @@ impl Tool for ApplyPatchTool {
     }
 
     fn description(&self) -> &str {
-        "Apply a freeform patch to workspace files. The input must use the *** Begin Patch grammar."
+        "Apply a Codex-style patch to workspace files. The patch must begin with *** Begin Patch and use *** Add File:, *** Delete File:, or *** Update File: hunk headers; do not use ---/+++ unified diff, *** File:, or natural-language edit instructions."
     }
 
     fn input_schema(&self) -> serde_json::Value {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "patch": { "type": "string" }
+                "patch": {
+                    "type": "string",
+                    "description": "Complete Codex-style patch text beginning with *** Begin Patch and ending with *** End Patch. File operations must use *** Add File:, *** Delete File:, or *** Update File:. Do not use ---/+++ unified diff, *** File:, or natural-language edit instructions."
+                }
             },
             "required": ["patch"],
             "additionalProperties": false
@@ -621,7 +624,7 @@ impl Tool for ApplyPatchTool {
     fn to_schema(&self) -> ToolSchema {
         ToolSchema::custom_grammar(
             self.name(),
-            "Use the `apply_patch` tool to edit workspace files. This is a FREEFORM tool, so do not wrap the patch in JSON.",
+            "Use the `apply_patch` tool to edit workspace files. This is a FREEFORM tool, so do not wrap the patch in JSON. The patch must begin with *** Begin Patch, end with *** End Patch, and each file operation must use *** Add File:, *** Delete File:, or *** Update File:. Do not use ---/+++ unified diff, *** File:, or natural-language edit instructions.",
             "lark",
             APPLY_PATCH_LARK_GRAMMAR,
         )
@@ -908,6 +911,168 @@ mod tests {
                 .unwrap(),
             "old\n"
         );
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn apply_patch_accepts_wrapped_single_patch_block() {
+        let root = unique_temp_dir("patch-wrapper");
+        let tool = ApplyPatchTool;
+        let patch = "Here is the patch:\n```patch\n*** Begin Patch\n*** Add File: wrapped.txt\n+ok\n*** End Patch\n```";
+
+        tool.execute(
+            input(serde_json::json!({ "patch": patch })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            tokio::fs::read_to_string(root.join("wrapped.txt"))
+                .await
+                .unwrap(),
+            "ok\n"
+        );
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn apply_patch_rejects_missing_end_marker() {
+        let root = unique_temp_dir("patch-missing-end");
+        let tool = ApplyPatchTool;
+        let result = tool
+            .execute(
+                input(serde_json::json!({
+                    "patch": "*** Begin Patch\n*** Add File: missing.txt\n+nope"
+                })),
+                context(&root).await,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(result.to_string().contains("last line must be"));
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn apply_patch_rejects_unified_diff_header() {
+        let root = unique_temp_dir("patch-unified");
+        let tool = ApplyPatchTool;
+        let result = tool
+            .execute(
+                input(serde_json::json!({
+                    "patch": "*** Begin Patch\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n*** End Patch"
+                })),
+                context(&root).await,
+            )
+            .await
+            .unwrap_err();
+
+        let error = result.to_string();
+        assert!(error.contains("unified diff"));
+        assert!(error.contains("*** Update File:"));
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn apply_patch_rejects_file_metadata_header() {
+        let root = unique_temp_dir("patch-file-header");
+        let tool = ApplyPatchTool;
+        let result = tool
+            .execute(
+                input(serde_json::json!({
+                    "patch": "*** Begin Patch\n*** File: src/lib.rs\n*** End Patch"
+                })),
+                context(&root).await,
+            )
+            .await
+            .unwrap_err();
+
+        let error = result.to_string();
+        assert!(error.contains("*** File:"));
+        assert!(error.contains("*** Update File:"));
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn apply_patch_move_only_update_moves_file() {
+        let root = unique_temp_dir("patch-move-only");
+        tokio::fs::create_dir_all(root.join("old")).await.unwrap();
+        tokio::fs::write(root.join("old/name.txt"), "same\n")
+            .await
+            .unwrap();
+        let tool = ApplyPatchTool;
+        let patch = "*** Begin Patch\n*** Update File: old/name.txt\n*** Move to: new/name.txt\n*** End Patch";
+
+        tool.execute(
+            input(serde_json::json!({ "patch": patch })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            !tokio::fs::try_exists(root.join("old/name.txt"))
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(root.join("new/name.txt"))
+                .await
+                .unwrap(),
+            "same\n"
+        );
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn apply_patch_inserts_after_context_for_pure_addition_chunk() {
+        let root = unique_temp_dir("patch-insert-after-context");
+        tokio::fs::create_dir_all(&root).await.unwrap();
+        tokio::fs::write(
+            root.join("page.html"),
+            "<head>\n<title>x</title>\n</head>\n",
+        )
+        .await
+        .unwrap();
+        let tool = ApplyPatchTool;
+        let patch = "*** Begin Patch\n*** Update File: page.html\n@@ <head>\n+<script></script>\n*** End Patch";
+
+        tool.execute(
+            input(serde_json::json!({ "patch": patch })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            tokio::fs::read_to_string(root.join("page.html"))
+                .await
+                .unwrap(),
+            "<head>\n<script></script>\n<title>x</title>\n</head>\n"
+        );
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn apply_patch_rejects_duplicate_target() {
+        let root = unique_temp_dir("patch-duplicate-target");
+        tokio::fs::create_dir_all(&root).await.unwrap();
+        tokio::fs::write(root.join("src.rs"), "one\ntwo\n")
+            .await
+            .unwrap();
+        let tool = ApplyPatchTool;
+        let patch = "*** Begin Patch\n*** Update File: src.rs\n@@\n-one\n+1\n*** Update File: src.rs\n@@\n-two\n+2\n*** End Patch";
+
+        let result = tool
+            .execute(
+                input(serde_json::json!({ "patch": patch })),
+                context(&root).await,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(result.to_string().contains("more than once"));
         let _ = tokio::fs::remove_dir_all(root).await;
     }
 }
