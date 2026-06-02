@@ -1,9 +1,12 @@
+use std::collections::HashSet;
+
 use pl_core::{
     ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProjectRecord, ProviderConfig,
     ProviderEdit, ProviderModelEdit, ProviderTemplateKind, PureConfig, RoleEdit, SessionRecord,
     SessionRuntimeRecord, StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord, StudioRuntime,
     TraceEvent, TraceEventKind, TurnResultStatus, infer_provider_template_kind,
 };
+use pl_protocol::{Message, MessageContent, MessageRole};
 
 use crate::dto::{
     AgentDto, AgentEventDto, ConfigDto, ModelDto, ProjectDto, ProviderDto, ProviderInput,
@@ -29,10 +32,19 @@ pub async fn load_session_runtime_dto(
 ) -> CommandResult<SessionRuntimeDto> {
     let config = studio.config_store().load_or_default()?;
     let record = studio.session_runtime(session_id).await?;
-    Ok(session_runtime_dto(record, &config))
+    let messages = studio.store().load_messages(session_id).await?;
+    Ok(session_runtime_dto(
+        record,
+        &config,
+        active_skill_names_from_messages(&messages),
+    ))
 }
 
-pub fn session_runtime_dto(record: SessionRuntimeRecord, config: &PureConfig) -> SessionRuntimeDto {
+pub fn session_runtime_dto(
+    record: SessionRuntimeRecord,
+    config: &PureConfig,
+    active_skills: Vec<String>,
+) -> SessionRuntimeDto {
     let usage = runtime_usage_dto(pl_core::RuntimeUsageSnapshot {
         model: record.model,
         context_window: record.context_window,
@@ -49,9 +61,44 @@ pub fn session_runtime_dto(record: SessionRuntimeRecord, config: &PureConfig) ->
         session_id: record.session_id,
         updated_at: usage.updated_at,
         usage,
-        active_skills: config.runtime.active_skills.clone(),
+        active_skills,
         active_mcp_servers: config.runtime.active_mcp_servers.clone(),
     }
+}
+
+fn active_skill_names_from_messages(messages: &[Message]) -> Vec<String> {
+    let mut skills = Vec::new();
+    let mut seen = HashSet::new();
+    for message in messages {
+        if message.role != MessageRole::Tool {
+            continue;
+        }
+        if message.metadata.get("tool_name").map(String::as_str) != Some("skill_view") {
+            continue;
+        }
+        let MessageContent::Text(content) = &message.content else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(content) else {
+            continue;
+        };
+        if value.get("success").and_then(serde_json::Value::as_bool) != Some(true) {
+            continue;
+        }
+        let Some(name) = value
+            .get("skill")
+            .and_then(|skill| skill.get("name"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        else {
+            continue;
+        };
+        if seen.insert(name.to_ascii_lowercase()) {
+            skills.push(name.to_string());
+        }
+    }
+    skills
 }
 
 pub fn runtime_usage_dto(usage: pl_core::RuntimeUsageSnapshot) -> RuntimeUsageDto {
@@ -456,6 +503,8 @@ pub fn provider_settings_to_edit(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use pl_core::{RuntimeUsageSnapshot, SessionRuntimeRecord, StudioAgentSnapshotRecord};
     use pl_protocol::{AgentStatus, RuntimeCostAmount};
     use pretty_assertions::assert_eq;
@@ -465,7 +514,6 @@ mod tests {
     #[test]
     fn session_runtime_dto_exposes_nested_runtime_usage_and_costs() {
         let mut config = PureConfig::default();
-        config.runtime.active_skills = vec!["search".to_string()];
         config.runtime.active_mcp_servers = vec!["filesystem".to_string()];
         let dto = session_runtime_dto(
             SessionRuntimeRecord {
@@ -493,11 +541,12 @@ mod tests {
                 updated_at: 99,
             },
             &config,
+            vec!["skill-creator".to_string()],
         );
 
         assert_eq!(dto.session_id, "session-1");
         assert_eq!(dto.updated_at, 99);
-        assert_eq!(dto.active_skills, vec!["search"]);
+        assert_eq!(dto.active_skills, vec!["skill-creator"]);
         assert_eq!(dto.active_mcp_servers, vec!["filesystem"]);
         assert_eq!(dto.usage.model, "model-a");
         assert_eq!(dto.usage.context_window, Some(1_000_000));
@@ -511,6 +560,79 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["CNY", "USD"],
         );
+    }
+
+    #[test]
+    fn active_skill_names_from_messages_extracts_successful_skill_view_results() {
+        let messages = vec![
+            tool_result_message(
+                "skill_view",
+                r#"{
+                    "success": true,
+                    "skill": {"name": "skill-creator"},
+                    "filePath": "SKILL.md",
+                    "content": "body"
+                }"#,
+            ),
+            tool_result_message(
+                "skill_view",
+                r#"{
+                    "success": true,
+                    "skill": {"name": "subagent-workflow"},
+                    "filePath": "references/example.md",
+                    "content": "reference"
+                }"#,
+            ),
+        ];
+
+        let skills = active_skill_names_from_messages(&messages);
+
+        assert_eq!(skills, vec!["skill-creator", "subagent-workflow"]);
+    }
+
+    #[test]
+    fn active_skill_names_from_messages_dedupes_and_ignores_non_active_results() {
+        let messages = vec![
+            tool_result_message(
+                "skill_view",
+                r#"{"success":true,"skill":{"name":"skill-creator"},"content":"body"}"#,
+            ),
+            tool_result_message(
+                "skill_view",
+                r#"{"success":true,"skill":{"name":"Skill-Creator"},"content":"body again"}"#,
+            ),
+            tool_result_message("skills_list", r#"{"success":true,"skills":[]}"#),
+            tool_result_message(
+                "skill_view",
+                r#"{"success":false,"skill":{"name":"failed-skill"}}"#,
+            ),
+            tool_result_message("skill_view", "not json"),
+            assistant_message("plain answer"),
+        ];
+
+        let skills = active_skill_names_from_messages(&messages);
+
+        assert_eq!(skills, vec!["skill-creator"]);
+    }
+
+    fn tool_result_message(tool_name: &str, content: &str) -> Message {
+        let mut metadata = HashMap::new();
+        metadata.insert("tool_name".to_string(), tool_name.to_string());
+        Message {
+            role: MessageRole::Tool,
+            content: MessageContent::Text(content.to_string()),
+            reasoning_content: None,
+            metadata,
+        }
+    }
+
+    fn assistant_message(content: &str) -> Message {
+        Message {
+            role: MessageRole::Assistant,
+            content: MessageContent::Text(content.to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        }
     }
 
     #[test]
