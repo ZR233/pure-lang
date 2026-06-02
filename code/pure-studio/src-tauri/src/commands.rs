@@ -8,13 +8,15 @@ use tokio_util::sync::CancellationToken;
 
 use crate::approvals::{approval_callback, deny_session_approvals, resolve_tool_approval};
 use crate::dto::{
-    BootstrapDto, ConfigDto, ProjectSelectionDto, PromptFailedPayload, ProviderSettingsInput,
-    RunPromptResponse, SessionSelectionDto, SessionTimelineDto, StopPromptResponse,
+    BootstrapDto, ConfigDto, DiscoveredSkillsDto, ProjectSelectionDto, PromptFailedPayload,
+    ProviderSettingsInput, RunPromptResponse, SessionSelectionDto, SessionTimelineDto,
+    StopPromptResponse,
 };
 use crate::events::drain_events;
 use crate::mappers::{
-    agent_dtos, agent_event_dtos, config_dto, load_session_runtime_dto, project_dtos,
-    provider_settings_to_edit, session_dtos, timeline_events_to_items, turn_result_status_label,
+    agent_dtos, agent_event_dtos, config_dto, discovered_skills_dto, load_session_runtime_dto,
+    project_dtos, provider_settings_to_edit, session_dtos, timeline_events_to_items,
+    turn_result_status_label,
 };
 use crate::state::{AppState, CommandError, CommandResult};
 
@@ -332,6 +334,15 @@ pub fn save_provider_settings(
     let config = edit.to_config(&current)?;
     state.studio.config_store().save(&config)?;
     config_dto(state.studio.config_store())
+}
+
+#[tauri::command]
+pub async fn list_discovered_skills(
+    project_id: String,
+    state: State<'_, AppState>,
+) -> CommandResult<DiscoveredSkillsDto> {
+    let catalog = state.studio.discovered_skills(&project_id).await?;
+    Ok(discovered_skills_dto(catalog))
 }
 
 async fn select_project_data(

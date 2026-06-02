@@ -77,6 +77,8 @@ platforms: ["windows", "linux", "macos"]
 
 Studio 状态栏的 Skills 只展示当前会话已激活的 skills。激活定义为该会话中 `skill_view` 成功返回并把 skill 内容或支持文件内容写入上下文；仅出现在索引中但未 `skill_view` 的 skill 不计入。
 
+Studio 设置页的 Skills 标签页展示当前项目可发现的 skills 只读列表，用于查看 discovery 结果和来源范围。该列表来自同一套 project/user/system/external 发现规则，并显示每个 skill 的 scope；它不调用 `skill_view`，不改变会话 active skills，也不写入使用统计。
+
 ## 13.6 自学习
 
 `StudioRuntime::run_prompt` 完成主 turn 并保存记录后，如果 `[skills].auto_learn = true`，后台启动 reviewer 复盘本轮对话。reviewer 只注册 skills 工具，不注册 shell、文件或 subagent 工具。

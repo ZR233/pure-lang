@@ -21,7 +21,7 @@ import type {
   ToolApprovalResolved,
 } from "../types";
 
-export type SettingsTab = "providers" | "models" | "roles" | "security" | "general";
+export type SettingsTab = "providers" | "skills" | "roles" | "security" | "general";
 
 export type StudioState = {
   projects: ProjectRecord[];

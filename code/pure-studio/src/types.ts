@@ -108,6 +108,23 @@ export type ModelRecord = {
   truncationLimit?: number;
 };
 
+export type SkillScope = "project" | "user" | "system" | "external";
+
+export type SkillRecord = {
+  name: string;
+  description: string;
+  category?: string | null;
+  platforms: string[];
+  scope: SkillScope;
+  path: string;
+};
+
+export type DiscoveredSkillsPayload = {
+  projectDir: string;
+  skills: SkillRecord[];
+  warnings: string[];
+};
+
 export type RuntimeCostAmount = {
   currency: string;
   amount: number;

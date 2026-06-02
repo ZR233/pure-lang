@@ -39,6 +39,7 @@ fn main() {
             commands::load_config,
             commands::save_config,
             commands::save_provider_settings,
+            commands::list_discovered_skills,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Pure Studio");

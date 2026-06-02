@@ -190,7 +190,7 @@ const en = {
     comingSoonDesc: "This settings tab will be wired in a later iteration.",
     tabs: {
       providers: "Providers",
-      models: "Models",
+      skills: "Skills",
       roles: "Roles",
       security: "Security",
       general: "General",
@@ -253,6 +253,26 @@ const en = {
     slugPlaceholder: "model-slug",
     displayNamePlaceholder: "Display name",
     effortsPlaceholder: "high, xhigh",
+  },
+
+  skills: {
+    title: "Skills",
+    subtitle: "Skills discovered for the current project.",
+    searchPlaceholder: "Search name, description, category, scope or path",
+    count: "{{count}} skills",
+    noProject: "No project selected",
+    loading: "Discovering skills",
+    loadFailed: "Failed to load skills",
+    empty: "No skills discovered",
+    noMatches: "No matching skills",
+    uncategorized: "Uncategorized",
+    allPlatforms: "All platforms",
+    scope: {
+      project: "Project",
+      user: "User",
+      system: "System",
+      external: "External",
+    },
   },
 
   common: {

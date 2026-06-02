@@ -1,16 +1,17 @@
 import { ArrowLeft, RefreshCw, Save } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import type { SettingsTab } from "../state/studio-state";
 import type { ProviderRecord, ProviderTemplateRecord, RoleRecord } from "../types";
 import { ProviderSettings } from "./ProviderSettings";
-import { RoleSettings, normalizeRolesForProviders } from "./RoleSettings";
-
-type SettingsTab = "providers" | "models" | "roles" | "security" | "general";
+import { RoleSettings } from "./RoleSettings";
+import { SkillsSettings } from "./SkillsSettings";
 
 type SettingsPageProps = {
   activeSettingsTab: SettingsTab;
   providers: ProviderRecord[];
   providerTemplates: ProviderTemplateRecord[];
   roles: RoleRecord[];
+  selectedProjectId: string | null;
   selectedProviderId: string | null;
   providerSearch: string;
   configExists: boolean;
@@ -27,13 +28,14 @@ type SettingsPageProps = {
   onReloadConfig: () => void;
 };
 
-const SETTINGS_TABS: SettingsTab[] = ["providers", "models", "roles", "security", "general"];
+const SETTINGS_TABS: SettingsTab[] = ["providers", "skills", "roles", "security", "general"];
 
 export function SettingsPage({
   activeSettingsTab,
   providers,
   providerTemplates,
   roles,
+  selectedProjectId,
   selectedProviderId,
   providerSearch,
   configExists,
@@ -48,6 +50,7 @@ export function SettingsPage({
   setProviderSearch,
 }: SettingsPageProps) {
   const { t } = useTranslation();
+  const showSaveAction = activeSettingsTab !== "skills";
 
   return (
     <section className="settings-page">
@@ -64,17 +67,19 @@ export function SettingsPage({
             <RefreshCw size={16} />
             {t("actions.reload")}
           </button>
-          <button
-            className="primary"
-            onClick={() =>
-              activeSettingsTab === "providers" || activeSettingsTab === "roles"
-                ? onSaveProviderSettings()
-                : onSaveConfig()
-            }
-          >
-            <Save size={16} />
-            {t("actions.save")}
-          </button>
+          {showSaveAction ? (
+            <button
+              className="primary"
+              onClick={() =>
+                activeSettingsTab === "providers" || activeSettingsTab === "roles"
+                  ? onSaveProviderSettings()
+                  : onSaveConfig()
+              }
+            >
+              <Save size={16} />
+              {t("actions.save")}
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -102,6 +107,8 @@ export function SettingsPage({
         />
       ) : activeSettingsTab === "roles" ? (
         <RoleSettings providers={providers} roles={roles} setRoles={setRoles} />
+      ) : activeSettingsTab === "skills" ? (
+        <SkillsSettings selectedProjectId={selectedProjectId} />
       ) : (
         <div className="settings-placeholder">
           <h2>{t("settings.comingSoon")}</h2>
