@@ -27,6 +27,8 @@ pub struct PureConfig {
     pub schema_version: u32,
     #[serde(default, skip_serializing_if = "RuntimeConfig::is_empty")]
     pub runtime: RuntimeConfig,
+    #[serde(default, skip_serializing_if = "SkillsConfig::is_default")]
+    pub skills: SkillsConfig,
     pub roles: RoleConfigs,
     pub providers: BTreeMap<String, ProviderConfig>,
 }
@@ -36,6 +38,8 @@ struct PureConfigToml {
     pub schema_version: u32,
     #[serde(default)]
     pub runtime: RuntimeConfig,
+    #[serde(default)]
+    pub skills: SkillsConfig,
     #[serde(default)]
     pub roles: Option<RoleConfigsToml>,
     pub providers: BTreeMap<String, ProviderConfig>,
@@ -69,6 +73,7 @@ impl PureConfig {
         Self {
             schema_version: CONFIG_SCHEMA_VERSION,
             runtime: RuntimeConfig::default(),
+            skills: SkillsConfig::default(),
             roles: RoleConfigs {
                 explorer: role.clone(),
                 planner: role.clone(),
@@ -94,6 +99,8 @@ impl PureConfig {
         for role in ModelRole::all() {
             self.resolve_role(role)?;
         }
+
+        crate::skill::validate_skills_config(&self.skills)?;
 
         Ok(())
     }
@@ -173,6 +180,7 @@ impl PureConfig {
         let config = Self {
             schema_version: raw.schema_version,
             runtime: raw.runtime,
+            skills: raw.skills,
             roles,
             providers: raw.providers,
         };
@@ -295,6 +303,60 @@ impl RuntimeConfig {
     pub fn is_empty(&self) -> bool {
         self.active_skills.is_empty() && self.active_mcp_servers.is_empty()
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillsConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub auto_learn: bool,
+    #[serde(default = "default_project_skills_dir")]
+    pub project_dir: String,
+    #[serde(default = "default_user_skills_dir")]
+    pub user_dir: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub external_dirs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disabled: Vec<String>,
+    #[serde(default = "default_auto_learn_min_tool_calls")]
+    pub auto_learn_min_tool_calls: u32,
+}
+
+impl Default for SkillsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_learn: true,
+            project_dir: default_project_skills_dir(),
+            user_dir: default_user_skills_dir(),
+            external_dirs: Vec::new(),
+            disabled: Vec::new(),
+            auto_learn_min_tool_calls: default_auto_learn_min_tool_calls(),
+        }
+    }
+}
+
+impl SkillsConfig {
+    pub fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_project_skills_dir() -> String {
+    "skills".to_string()
+}
+
+fn default_user_skills_dir() -> String {
+    "~/.pure/skills".to_string()
+}
+
+fn default_auto_learn_min_tool_calls() -> u32 {
+    5
 }
 
 #[derive(Debug, Clone)]
@@ -785,6 +847,12 @@ fn migrate_legacy_config(content: &str) -> Result<PureConfig> {
         migrated.runtime = runtime;
     }
 
+    if let Some(skills_value) = table.get("skills")
+        && let Ok(skills) = skills_value.clone().try_into::<SkillsConfig>()
+    {
+        migrated.skills = skills;
+    }
+
     if let Some(providers_value) = table.get("providers")
         && let Ok(providers) = providers_value
             .clone()
@@ -878,6 +946,7 @@ mod tests {
                 .iter()
                 .any(|model| model.slug == "deepseek-v4-pro")
         );
+        assert_eq!(config.skills, SkillsConfig::default());
     }
 
     #[test]
@@ -887,6 +956,8 @@ mod tests {
             Some("secret-token".to_string());
         config.runtime.active_skills = vec!["rust".to_string(), "git".to_string()];
         config.runtime.active_mcp_servers = vec!["github".to_string()];
+        config.skills.auto_learn = false;
+        config.skills.disabled = vec!["old-flow".to_string()];
         let model = &mut config.providers.get_mut("deepseek").unwrap().models[0];
         model.currency = Some("CNY".to_string());
         model.input_price_per_mtok = Some(1.0);
@@ -913,6 +984,8 @@ mod tests {
             parsed.runtime.active_mcp_servers,
             vec!["github".to_string()]
         );
+        assert!(!parsed.skills.auto_learn);
+        assert_eq!(parsed.skills.disabled, vec!["old-flow".to_string()]);
         assert_eq!(
             parsed.providers["deepseek"].models[0].currency.as_deref(),
             Some("CNY")
@@ -930,6 +1003,17 @@ mod tests {
 
         assert!(parsed.runtime.active_skills.is_empty());
         assert!(parsed.runtime.active_mcp_servers.is_empty());
+        assert_eq!(parsed.skills, SkillsConfig::default());
+    }
+
+    #[test]
+    fn skills_config_rejects_workspace_escape_project_dir() {
+        let mut config = PureConfig::default_config();
+        config.skills.project_dir = "../skills".to_string();
+
+        let error = config.validate().unwrap_err().to_string();
+
+        assert!(error.contains("project_dir"));
     }
 
     #[test]

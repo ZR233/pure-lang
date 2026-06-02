@@ -245,6 +245,7 @@ impl FirstRunConfigDraft {
         let config = PureConfig {
             schema_version: CONFIG_SCHEMA_VERSION,
             runtime: Default::default(),
+            skills: Default::default(),
             roles: RoleConfigs {
                 explorer: role.clone(),
                 planner: role.clone(),

@@ -29,6 +29,8 @@ React action
 
 `workspaceRoot` 是运行期有效工作区，而不是简单等于 UI 当前选中的目录。Studio 读取 project path 后先解析到规范化目录；如果该目录位于 Git 仓库中，则提升到最近的 Git 仓库根。这样用户从子 crate 或桌面壳层进入项目时，工具仍能访问完整仓库上下文。工作区记忆优先读取 `AGENTS.md`，兼容读取 `Agents.md`。
 
+当启用 skills 时，运行时从 `<workspaceRoot>/skills/`、`~/.pure/skills/` 和配置外部目录发现 skills，并在核心提示中注入简短索引。项目 skills 优先于用户和外部只读 skills；自学习写入始终落到 `<workspaceRoot>/skills/`。
+
 策略约束：
 
 - 方案乙不保留旧命令别名和旧字段兜底
@@ -53,7 +55,11 @@ React action
 5. 事务化批量落库：message + trace + runtime snapshot
 6. 输出命令响应 DTO 与 timeline DTO
 
+主 turn 保存完成后，如果 `[skills].auto_learn = true` 且本轮达到自学习触发条件，`StudioRuntime` 启动后台 reviewer。reviewer 只开放 skills 工具，复盘结果只写项目 skills 目录；失败只记录日志，不改变本轮响应。
+
 文件与 shell 工具都以有效 `workspaceRoot` 为边界。`bash` 默认在 workspace root 下执行，`workingDirectory` 也按 workspace root 解析并拒绝逃逸；文件工具继续只允许访问 workspace root 内的路径。
+
+Skills 管理工具同样以 `workspaceRoot` 为边界，但写入面收窄到 `<workspaceRoot>/<skills.project_dir>/`。用户级和外部 skills 只读参与发现，不允许被工具原地修改。
 
 工具预算与收尾原则：
 
