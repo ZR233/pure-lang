@@ -832,6 +832,13 @@ mod tests {
             body["tools"][0]["function"]["parameters"]["required"],
             serde_json::json!(["patch"])
         );
+        let description =
+            body["tools"][0]["function"]["parameters"]["properties"]["patch"]["description"]
+                .as_str()
+                .unwrap();
+        assert!(description.contains("*** Add File:"));
+        assert!(description.contains("*** Update File:"));
+        assert!(description.contains("---/+++ unified diff"));
     }
 
     #[test]

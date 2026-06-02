@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use pl_protocol::PureError;
@@ -11,6 +13,7 @@ const UPDATE_FILE: &str = "*** Update File: ";
 const DELETE_FILE: &str = "*** Delete File: ";
 const MOVE_TO: &str = "*** Move to: ";
 const EOF_MARKER: &str = "*** End of File";
+const VALID_HUNK_HEADERS: &str = "valid hunk headers are '*** Add File: {path}', '*** Delete File: {path}', '*** Update File: {path}'";
 
 pub const APPLY_PATCH_LARK_GRAMMAR: &str = r#"start: begin_patch hunk+ end_patch
 begin_patch: "*** Begin Patch" LF
@@ -109,12 +112,14 @@ struct UpdateChunk {
 pub async fn plan_patch(patch: &str, paths: &WorkspacePaths) -> Result<PatchPlan, PureError> {
     let hunks = parse_patch(patch)?;
     let mut changes = Vec::new();
+    let mut touched_paths = HashSet::new();
 
     for hunk in hunks {
         match hunk {
             Hunk::Add { path, content } => {
                 let target = paths.resolve_for_write(&path).await?;
                 paths.reject_symlink_write(&target).await?;
+                reserve_patch_path(&mut touched_paths, &target)?;
                 if tokio::fs::try_exists(&target).await? {
                     return Err(tool_error(format!(
                         "cannot add '{}': target already exists",
@@ -129,6 +134,7 @@ pub async fn plan_patch(patch: &str, paths: &WorkspacePaths) -> Result<PatchPlan
             Hunk::Delete { path } => {
                 let target = paths.resolve_existing(&path).await?;
                 paths.reject_symlink_write(&target).await?;
+                reserve_patch_path(&mut touched_paths, &target)?;
                 let metadata = tokio::fs::metadata(&target).await?;
                 if !metadata.is_file() {
                     return Err(tool_error(format!(
@@ -145,15 +151,21 @@ pub async fn plan_patch(patch: &str, paths: &WorkspacePaths) -> Result<PatchPlan
             } => {
                 let source = paths.resolve_existing(&path).await?;
                 paths.reject_symlink_write(&source).await?;
+                reserve_patch_path(&mut touched_paths, &source)?;
                 let old_content = tokio::fs::read_to_string(&source).await.map_err(|error| {
                     tool_error(format!("failed to read '{}': {error}", source.display()))
                 })?;
-                let new_content = apply_chunks(&old_content, &source, &chunks)?;
+                let new_content = if chunks.is_empty() {
+                    old_content.clone()
+                } else {
+                    apply_chunks(&old_content, &source, &chunks)?
+                };
                 let mut delete_after_update = None;
                 let target = match move_path {
                     Some(move_path) => {
                         let target = paths.resolve_for_write(&move_path).await?;
                         paths.reject_symlink_write(&target).await?;
+                        reserve_patch_path(&mut touched_paths, &target)?;
                         if tokio::fs::try_exists(&target).await? {
                             return Err(tool_error(format!(
                                 "cannot move to '{}': target already exists",
@@ -180,14 +192,24 @@ pub async fn plan_patch(patch: &str, paths: &WorkspacePaths) -> Result<PatchPlan
 }
 
 fn parse_patch(patch: &str) -> Result<Vec<Hunk>, PureError> {
+    let patch = normalize_patch_input(patch)?;
     let lines: Vec<&str> = patch.trim().lines().collect();
     match (
         lines.first().map(|line| line.trim()),
         lines.last().map(|line| line.trim()),
     ) {
         (Some(BEGIN_PATCH), Some(END_PATCH)) => {}
-        (Some(_), _) => return Err(tool_error("first line must be '*** Begin Patch'")),
-        _ => return Err(tool_error("last line must be '*** End Patch'")),
+        (Some(first), _) if first != BEGIN_PATCH => {
+            return Err(tool_error("first line must be '*** Begin Patch'"));
+        }
+        (_, Some(last)) if last != END_PATCH => {
+            return Err(tool_error("last line must be '*** End Patch'"));
+        }
+        _ => {
+            return Err(tool_error(
+                "patch is empty; first line must be '*** Begin Patch'",
+            ));
+        }
     }
 
     let mut hunks = Vec::new();
@@ -237,7 +259,7 @@ fn parse_patch(patch: &str) -> Result<Vec<Hunk>, PureError> {
                 chunks.push(chunk);
                 index += consumed;
             }
-            if chunks.is_empty() {
+            if chunks.is_empty() && move_path.is_none() {
                 return Err(tool_error(format!("update hunk for '{path}' is empty")));
             }
             hunks.push(Hunk::Update {
@@ -248,7 +270,7 @@ fn parse_patch(patch: &str) -> Result<Vec<Hunk>, PureError> {
         } else if line.is_empty() {
             index += 1;
         } else {
-            return Err(tool_error(format!("invalid hunk header: '{line}'")));
+            return Err(invalid_hunk_header(line));
         }
     }
 
@@ -258,12 +280,70 @@ fn parse_patch(patch: &str) -> Result<Vec<Hunk>, PureError> {
     Ok(hunks)
 }
 
+fn normalize_patch_input(patch: &str) -> Result<Cow<'_, str>, PureError> {
+    let trimmed = patch.trim();
+    let lines: Vec<&str> = trimmed.lines().collect();
+    let begin_indices: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| (line.trim() == BEGIN_PATCH).then_some(index))
+        .collect();
+    let end_indices: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| (line.trim() == END_PATCH).then_some(index))
+        .collect();
+
+    if begin_indices.len() > 1 || end_indices.len() > 1 {
+        return Err(tool_error(
+            "patch input contains multiple patch blocks; send exactly one *** Begin Patch block",
+        ));
+    }
+    let Some(begin_index) = begin_indices.first().copied() else {
+        return Ok(Cow::Borrowed(trimmed));
+    };
+    let Some(end_index) = end_indices.first().copied() else {
+        return Err(tool_error("last line must be '*** End Patch'"));
+    };
+    if end_index < begin_index {
+        return Err(tool_error("last line must be '*** End Patch'"));
+    }
+    if begin_index == 0 && end_index + 1 == lines.len() {
+        return Ok(Cow::Borrowed(trimmed));
+    }
+    Ok(Cow::Owned(lines[begin_index..=end_index].join("\n")))
+}
+
+fn invalid_hunk_header(line: &str) -> PureError {
+    let lower = line.to_ascii_lowercase();
+    let guidance = if line.starts_with("--- ") || line.starts_with("+++ ") {
+        "standard unified diff headers are not supported; use '*** Update File: <path>' with @@ chunks instead"
+    } else if line.starts_with("*** File:") {
+        "'*** File:' metadata headers are not supported; use one of the file operation headers"
+    } else if lower.starts_with("insert ")
+        || lower.starts_with("replace ")
+        || lower.starts_with("delete ")
+    {
+        "natural-language edit instructions are not supported; express the edit as an Add/Delete/Update file hunk"
+    } else {
+        "unsupported patch hunk header"
+    };
+    tool_error(format!(
+        "invalid hunk header: '{line}'. {guidance}; {VALID_HUNK_HEADERS}"
+    ))
+}
+
 fn parse_update_chunk(lines: &[&str]) -> Result<(UpdateChunk, usize), PureError> {
     let mut index = 0;
     let context = match lines.first().copied() {
         Some("@@") => {
             index = 1;
             None
+        }
+        Some(line) if line.starts_with("@@ -") => {
+            return Err(tool_error(
+                "unified diff hunk ranges are not supported; use '@@' or '@@ <search context>'",
+            ));
         }
         Some(line) if line.starts_with("@@ ") => {
             index = 1;
@@ -343,7 +423,9 @@ fn apply_chunks(content: &str, path: &Path, chunks: &[UpdateChunk]) -> Result<St
         }
 
         if chunk.old_lines.is_empty() {
-            replacements.push((lines.len(), 0, chunk.new_lines.clone()));
+            let insert_at = cursor.min(lines.len());
+            replacements.push((insert_at, 0, chunk.new_lines.clone()));
+            cursor = insert_at;
             continue;
         }
 
@@ -384,6 +466,16 @@ fn find_sequence(lines: &[String], pattern: &[String], start: usize, eof: bool) 
         }
     }
     None
+}
+
+fn reserve_patch_path(seen: &mut HashSet<PathBuf>, path: &Path) -> Result<(), PureError> {
+    if seen.insert(path.to_path_buf()) {
+        return Ok(());
+    }
+    Err(tool_error(format!(
+        "patch touches '{}' more than once; combine edits for one file into a single hunk with multiple @@ chunks",
+        path.display()
+    )))
 }
 
 fn tool_error(error: impl std::fmt::Display) -> PureError {
