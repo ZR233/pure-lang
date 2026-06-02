@@ -44,6 +44,7 @@ pub use pl_protocol::{
     RuntimeUsageSnapshot, TokenUsageSnapshot, TraceEvent, TraceEventKind,
 };
 pub use session::CoreSession;
+pub use skill::{SkillCatalog, SkillMetadata, SkillSourceKind};
 pub use studio::{
     AgentSnapshotRecord as StudioAgentSnapshotRecord,
     AgentTimelineEventRecord as StudioAgentTimelineEventRecord, ProjectRecord, SessionRecord,

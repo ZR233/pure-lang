@@ -141,6 +141,25 @@ pub struct ConfigDto {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SkillDto {
+    pub name: String,
+    pub description: String,
+    pub category: Option<String>,
+    pub platforms: Vec<String>,
+    pub scope: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredSkillsDto {
+    pub project_dir: String,
+    pub skills: Vec<SkillDto>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionRuntimeDto {
     pub session_id: String,
     pub usage: RuntimeUsageDto,

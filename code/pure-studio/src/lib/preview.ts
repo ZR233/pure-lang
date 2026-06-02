@@ -6,6 +6,7 @@ import type {
   RoleRecord,
   SessionRecord,
   SessionRuntime,
+  SkillRecord,
   TimelineItem,
 } from "../types";
 import { makeProvider, makeRole } from "./provider-mapper";
@@ -51,6 +52,33 @@ export const previewSessionRuntime: SessionRuntime = {
   activeMcpServers: ["github", "filesystem"],
   updatedAt: 1779688800,
 };
+
+export const previewSkills: SkillRecord[] = [
+  {
+    name: "skill-creator",
+    description: "创建和更新 Pure 项目 skills 的结构化工作流。",
+    category: "skills",
+    platforms: [],
+    scope: "system",
+    path: "C:\\Users\\preview\\.pure\\skills\\.system\\skill-creator",
+  },
+  {
+    name: "subagent-workflow",
+    description: "规划子代理分工、等待结果和汇总输出的内置指导。",
+    category: "agents",
+    platforms: [],
+    scope: "system",
+    path: "C:\\Users\\preview\\.pure\\skills\\.system\\subagent-workflow",
+  },
+  {
+    name: "pure-studio-local",
+    description: "当前项目的 Studio 调试和验证流程。",
+    category: "project",
+    platforms: ["windows"],
+    scope: "project",
+    path: "D:\\Users\\zrufo\\Documents\\opensource\\pure-lang\\skills\\pure-studio-local",
+  },
+];
 
 export const previewAgents: AgentDto[] = [
   {

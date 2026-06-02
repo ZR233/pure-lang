@@ -57,6 +57,7 @@ export function App() {
           providers={state.providers}
           providerTemplates={state.providerTemplates}
           roles={state.roles}
+          selectedProjectId={state.selectedProjectId}
           selectedProviderId={state.selectedProviderId}
           providerSearch={state.providerSearch}
           configExists={state.configExists}

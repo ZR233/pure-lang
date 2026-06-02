@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use pl_protocol::{AgentEventSender, TimelineItemKind, TraceEvent, TraceEventKind};
 
 use crate::config::{ConfigStore, ModelRole};
+use crate::skill::SkillCatalog;
 use crate::studio::StudioStore;
 use crate::studio::mappers::default_session_runtime_record;
 use crate::studio::records::{
@@ -97,6 +98,17 @@ impl StudioRuntime {
             .find(|model| model.slug == resolved.role_config.model)
             .or_else(|| resolved.models.first());
         Ok(default_session_runtime_record(session_id, model))
+    }
+
+    pub async fn discovered_skills(&self, project_id: &str) -> Result<SkillCatalog> {
+        let project = self
+            .store
+            .read_project(project_id)
+            .await?
+            .context("selected project not found")?;
+        let config = self.config_store.load_or_default()?;
+        let workspace_root = resolve_workspace_root(Path::new(&project.path))?;
+        Ok(SkillCatalog::discover(&workspace_root, &config.skills)?)
     }
 
     pub async fn run_prompt(

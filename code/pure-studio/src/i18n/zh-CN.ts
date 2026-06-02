@@ -190,7 +190,7 @@ const zhCN = {
     comingSoonDesc: "此设置标签页将在后续版本中实现。",
     tabs: {
       providers: "模型服务",
-      models: "模型",
+      skills: "技能",
       roles: "角色",
       security: "安全",
       general: "通用",
@@ -253,6 +253,26 @@ const zhCN = {
     slugPlaceholder: "model-slug",
     displayNamePlaceholder: "显示名称",
     effortsPlaceholder: "high, xhigh",
+  },
+
+  skills: {
+    title: "技能",
+    subtitle: "当前项目按发现规则可用的 skills。",
+    searchPlaceholder: "搜索名称、描述、分类、scope 或路径",
+    count: "{{count}} 个技能",
+    noProject: "未选择项目",
+    loading: "正在发现 skills",
+    loadFailed: "加载 skills 失败",
+    empty: "未发现 skills",
+    noMatches: "没有匹配的 skills",
+    uncategorized: "未分类",
+    allPlatforms: "所有平台",
+    scope: {
+      project: "项目",
+      user: "用户",
+      system: "系统",
+      external: "外部",
+    },
   },
 
   common: {

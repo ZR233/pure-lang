@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   BootstrapPayload,
   ConfigPayload,
+  DiscoveredSkillsPayload,
   ProjectSelectionPayload,
   ProviderSettingsInput,
   RunPromptResponse,
@@ -16,6 +17,7 @@ import {
   previewAgents,
   previewAgentEvents,
   previewTimelineItems,
+  previewSkills,
 } from "./preview";
 import { makeProvider, makeRole } from "./provider-mapper";
 import { renderPreviewToml } from "./toml-renderer";
@@ -312,6 +314,19 @@ export function saveProviderSettings(input: ProviderSettingsInput) {
     return Promise.resolve(clone(previewConfig));
   }
   return invoke<ConfigPayload>("save_provider_settings", { input });
+}
+
+export function listDiscoveredSkills(projectId: string) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(
+      clone({
+        projectDir: `${previewProjects.find((project) => project.id === projectId)?.path ?? ""}\\skills`,
+        skills: previewSkills,
+        warnings: [],
+      }),
+    );
+  }
+  return invoke<DiscoveredSkillsPayload>("list_discovered_skills", { projectId });
 }
 
 export function loadSessionTimeline(

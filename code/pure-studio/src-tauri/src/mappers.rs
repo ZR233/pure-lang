@@ -3,15 +3,16 @@ use std::collections::HashSet;
 use pl_core::{
     ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProjectRecord, ProviderConfig,
     ProviderEdit, ProviderModelEdit, ProviderTemplateKind, PureConfig, RoleEdit, SessionRecord,
-    SessionRuntimeRecord, StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord, StudioRuntime,
-    TraceEvent, TraceEventKind, TurnResultStatus, infer_provider_template_kind,
+    SessionRuntimeRecord, SkillCatalog, SkillMetadata, SkillSourceKind, StudioAgentSnapshotRecord,
+    StudioAgentTimelineEventRecord, StudioRuntime, TraceEvent, TraceEventKind, TurnResultStatus,
+    infer_provider_template_kind,
 };
 use pl_protocol::{Message, MessageContent, MessageRole};
 
 use crate::dto::{
-    AgentDto, AgentEventDto, ConfigDto, ModelDto, ProjectDto, ProviderDto, ProviderInput,
-    ProviderSettingsInput, ProviderTemplateDto, RoleDto, RoleInput, RuntimeCostAmountDto,
-    RuntimeUsageDto, SessionDto, SessionRuntimeDto,
+    AgentDto, AgentEventDto, ConfigDto, DiscoveredSkillsDto, ModelDto, ProjectDto, ProviderDto,
+    ProviderInput, ProviderSettingsInput, ProviderTemplateDto, RoleDto, RoleInput,
+    RuntimeCostAmountDto, RuntimeUsageDto, SessionDto, SessionRuntimeDto, SkillDto,
 };
 use crate::state::{CommandError, CommandResult};
 
@@ -24,6 +25,34 @@ pub fn config_dto(store: &ConfigStore) -> CommandResult<ConfigDto> {
         templates: provider_template_dtos()?,
         config_exists: store.config_exists(),
     })
+}
+
+pub fn discovered_skills_dto(catalog: SkillCatalog) -> DiscoveredSkillsDto {
+    DiscoveredSkillsDto {
+        project_dir: catalog.project_dir.to_string_lossy().to_string(),
+        skills: catalog.skills.into_iter().map(skill_dto).collect(),
+        warnings: catalog.warnings,
+    }
+}
+
+pub fn skill_dto(skill: SkillMetadata) -> SkillDto {
+    SkillDto {
+        name: skill.name,
+        description: skill.description,
+        category: skill.category,
+        platforms: skill.platforms,
+        scope: skill_scope(skill.source).to_string(),
+        path: skill.path.to_string_lossy().to_string(),
+    }
+}
+
+fn skill_scope(source: SkillSourceKind) -> &'static str {
+    match source {
+        SkillSourceKind::Project => "project",
+        SkillSourceKind::User => "user",
+        SkillSourceKind::System => "system",
+        SkillSourceKind::External => "external",
+    }
 }
 
 pub async fn load_session_runtime_dto(
@@ -504,12 +533,48 @@ pub fn provider_settings_to_edit(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::path::PathBuf;
 
     use pl_core::{RuntimeUsageSnapshot, SessionRuntimeRecord, StudioAgentSnapshotRecord};
     use pl_protocol::{AgentStatus, RuntimeCostAmount};
     use pretty_assertions::assert_eq;
 
     use super::*;
+
+    #[test]
+    fn discovered_skills_dto_maps_scopes_and_warnings() {
+        let dto = discovered_skills_dto(SkillCatalog {
+            project_dir: PathBuf::from("C:/work/app/skills"),
+            skills: vec![
+                test_skill("project-skill", SkillSourceKind::Project),
+                test_skill("user-skill", SkillSourceKind::User),
+                test_skill("system-skill", SkillSourceKind::System),
+                test_skill("external-skill", SkillSourceKind::External),
+            ],
+            warnings: vec!["bad skill".to_string()],
+        });
+
+        assert_eq!(dto.project_dir, "C:/work/app/skills");
+        assert_eq!(
+            dto.skills
+                .iter()
+                .map(|skill| skill.scope.as_str())
+                .collect::<Vec<_>>(),
+            vec!["project", "user", "system", "external"],
+        );
+        assert_eq!(dto.warnings, vec!["bad skill"]);
+    }
+
+    fn test_skill(name: &str, source: SkillSourceKind) -> SkillMetadata {
+        SkillMetadata {
+            name: name.to_string(),
+            description: format!("{name} description"),
+            category: Some("demo".to_string()),
+            platforms: vec!["windows".to_string()],
+            source,
+            path: PathBuf::from(format!("C:/skills/{name}")),
+        }
+    }
 
     #[test]
     fn session_runtime_dto_exposes_nested_runtime_usage_and_costs() {
