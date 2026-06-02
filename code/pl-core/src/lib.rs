@@ -10,6 +10,7 @@ pub mod interfaces;
 mod provider_error;
 mod runtime_usage;
 mod session;
+mod skill;
 mod studio;
 mod tool;
 mod trace;
@@ -23,7 +24,7 @@ pub use agent::{
 pub use config::{
     ConfigPaths, ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProviderConfig,
     PureConfig, ReasoningEffort, ResolvedRoleConfig, RoleConfig, RoleConfigs, RuntimeConfig,
-    TruncationPolicyConfig,
+    SkillsConfig, TruncationPolicyConfig,
 };
 pub use config_editor::{
     ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit, infer_provider_template_kind,

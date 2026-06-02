@@ -21,8 +21,9 @@ use crate::session::CoreSession;
 use crate::tool::{
     ApplyPatchTool, BashTool, CloseAgentTool, CopyPathTool, CreateDirectoryTool, DeletePathTool,
     FollowupTaskTool, ListAgentsTool, ListFilesTool, MovePathTool, RECOVERABLE_SUBAGENT_429_MARKER,
-    ReadFileTool, SearchFilesTool, SendMessageTool, SpawnAgentTool, StatPathTool, SubagentContext,
-    SubagentTool, ToolContext, ToolInput, ToolOutput, ToolRegistry, WaitAgentTool, WriteFileTool,
+    ReadFileTool, SearchFilesTool, SendMessageTool, SkillManageTool, SkillViewTool, SkillsListTool,
+    SpawnAgentTool, StatPathTool, SubagentContext, SubagentTool, ToolContext, ToolInput,
+    ToolOutput, ToolRegistry, WaitAgentTool, WriteFileTool,
 };
 use crate::trace::TraceRecorder;
 use crate::turn::{
@@ -142,6 +143,10 @@ impl PureCore {
         let workspace_root = workspace_root.into();
         self.workspace_root = Some(workspace_root.clone());
         self.workspace_instructions = workspace_instructions.clone();
+        self.register_skill_tools_for_workspace(
+            workspace_root.clone(),
+            workspace_instructions.clone(),
+        );
         self.register_tool(BashTool::new(workspace_root));
         self.register_tool(ReadFileTool::new());
         self.register_tool(WriteFileTool);
@@ -175,6 +180,32 @@ impl PureCore {
             self.config.clone(),
             workspace_instructions,
         ));
+    }
+
+    pub(crate) fn register_skill_tools(
+        &mut self,
+        workspace_root: impl Into<std::path::PathBuf>,
+        workspace_instructions: Option<String>,
+    ) {
+        self.register_skill_tools_for_workspace(workspace_root.into(), workspace_instructions);
+    }
+
+    fn register_skill_tools_for_workspace(
+        &mut self,
+        workspace_root: std::path::PathBuf,
+        workspace_instructions: Option<String>,
+    ) {
+        self.workspace_root = Some(workspace_root);
+        self.workspace_instructions = workspace_instructions;
+        let Some(config) = self.config.as_ref().map(|config| config.skills.clone()) else {
+            return;
+        };
+        if !config.enabled {
+            return;
+        }
+        self.register_tool(SkillsListTool::new(config.clone()));
+        self.register_tool(SkillViewTool::new(config.clone()));
+        self.register_tool(SkillManageTool::new(config));
     }
 
     pub fn run_turn<'a>(
@@ -243,8 +274,18 @@ impl PureCore {
         let mut total_usage = pl_model::TokenUsage::default();
         let mut session_message_count = 0;
 
+        let skills_instructions = self.config.as_ref().and_then(|config| {
+            match crate::skill::build_skills_prompt(&workspace_root, &config.skills) {
+                Ok(instructions) => instructions,
+                Err(error) => {
+                    eprintln!("[pl-core] failed to load skills prompt: {error}");
+                    None
+                }
+            }
+        });
         let mut instructions = format_instructions(
             request.mode.instructions(),
+            skills_instructions.as_deref(),
             request.workspace_instructions.as_deref(),
         );
         if requires_subagent_dispatch {
@@ -1096,13 +1137,21 @@ fn default_workspace_root() -> PathBuf {
     std::env::current_dir().unwrap_or_default()
 }
 
-fn format_instructions(base: &str, workspace: Option<&str>) -> String {
-    match workspace {
-        Some(content) if !content.trim().is_empty() => {
-            format!("{base}\n\n# 项目记忆\n{content}")
-        }
-        _ => base.to_string(),
+fn format_instructions(base: &str, skills: Option<&str>, workspace: Option<&str>) -> String {
+    let mut instructions = base.to_string();
+    if let Some(content) = skills
+        && !content.trim().is_empty()
+    {
+        instructions.push_str("\n\n");
+        instructions.push_str(content);
     }
+    if let Some(content) = workspace
+        && !content.trim().is_empty()
+    {
+        instructions.push_str("\n\n# 项目记忆\n");
+        instructions.push_str(content);
+    }
+    instructions
 }
 
 fn prompt_requires_subagent_dispatch(prompt: &str) -> bool {
@@ -1201,21 +1250,29 @@ mod tests {
 
     #[test]
     fn format_instructions_without_workspace() {
-        assert_eq!(format_instructions("base", None), "base");
+        assert_eq!(format_instructions("base", None, None), "base");
     }
 
     #[test]
     fn format_instructions_with_workspace() {
         assert_eq!(
-            format_instructions("base", Some("project rules")),
+            format_instructions("base", None, Some("project rules")),
             "base\n\n# 项目记忆\nproject rules"
         );
     }
 
     #[test]
+    fn format_instructions_injects_skills_before_workspace() {
+        assert_eq!(
+            format_instructions("base", Some("# Skills\n- rust"), Some("project rules")),
+            "base\n\n# Skills\n- rust\n\n# 项目记忆\nproject rules"
+        );
+    }
+
+    #[test]
     fn format_instructions_ignores_empty_workspace() {
-        assert_eq!(format_instructions("base", Some("")), "base");
-        assert_eq!(format_instructions("base", Some("   ")), "base");
+        assert_eq!(format_instructions("base", None, Some("")), "base");
+        assert_eq!(format_instructions("base", None, Some("   ")), "base");
     }
 
     #[test]

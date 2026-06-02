@@ -2,6 +2,7 @@ mod bash;
 mod file;
 mod multi_agent;
 mod recoverable;
+mod skill;
 mod subagent;
 mod truncation;
 
@@ -27,6 +28,7 @@ pub use multi_agent::{
     WaitAgentTool,
 };
 pub(crate) use recoverable::RECOVERABLE_SUBAGENT_429_MARKER;
+pub use skill::{SkillManageTool, SkillViewTool, SkillsListTool};
 pub use subagent::{SubagentInput, SubagentTool};
 pub use truncation::{OutputTruncation, TruncatedOutput, TruncationStrategy};
 

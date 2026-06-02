@@ -65,11 +65,20 @@ SQLite 只保存 Studio 状态，例如项目、会话、消息、工具审批�
 本地 TOML 使用 `snake_case`，不同于 API wire 格式。
 
 ```toml
-schema_version = 1
+schema_version = 2
 
 [runtime]
 active_skills = ["rust", "git", "doc"]
 active_mcp_servers = ["github", "filesystem"]
+
+[skills]
+enabled = true
+auto_learn = true
+project_dir = "skills"
+user_dir = "~/.pure/skills"
+external_dirs = []
+disabled = []
+auto_learn_min_tool_calls = 5
 
 [roles.explorer]
 provider = "deepseek"
@@ -179,7 +188,23 @@ Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-
 
 这两个列表仅声明当前 GUI 状态栏展示的已激活 Skill / MCP 名称，不负责安装、启动或连接真实 Skill/MCP 管理器。缺失 `[runtime]` 或字段时按空列表处理。
 
-## 10.7 配置草稿
+真实 skills 能力由 `[skills]` 配置和项目目录驱动。`active_skills` 不作为启停来源，也不影响模型可见的 skills 列表。
+
+## 10.7 Skills 配置
+
+`[skills]` 控制本地 skills 系统：
+
+- `enabled`：是否启用 skills 发现、prompt 注入和工具注册，默认 `true`。
+- `auto_learn`：是否在 Studio 主 turn 结束后启动后台 reviewer 自动沉淀项目 skill，默认 `true`。
+- `project_dir`：项目级 skills 目录，相对 `workspace_root` 解析，默认 `skills`。
+- `user_dir`：用户级只读 skills 目录，默认 `~/.pure/skills`。
+- `external_dirs`：额外只读 skills 目录列表，默认空。
+- `disabled`：禁用的 skill 名称列表，默认空。
+- `auto_learn_min_tool_calls`：触发自学习 review 的最少工具调用数，默认 `5`。
+
+加载优先级固定为：项目 skills > 用户 skills > external dirs。同名 skill 只暴露最高优先级来源。自学习和 `skill_manage` 写入只作用于项目 skills 目录，不会修改用户目录或外部目录。
+
+## 10.8 配置草稿
 
 配置构造和校验的纯逻辑属于 `pl-core`。`pure-studio` 设置页可以使用默认配置草稿，并支持：
 
@@ -199,7 +224,7 @@ Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-
 - 同一 provider 下模型 slug 不重复。
 - 角色引用的默认模型必须声明至少一个 `reasoning_efforts`，用于生成角色 `effort`。
 
-## 10.8 pure-studio 设置页
+## 10.9 pure-studio 设置页
 
 `pure-studio` 设置页复用 `pl-core` 的配置类型和校验逻辑，首版覆盖：
 

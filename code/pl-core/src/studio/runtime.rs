@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use pl_protocol::AgentEventSender;
+use pl_protocol::{AgentEventSender, TimelineItemKind, TraceEvent, TraceEventKind};
 
 use crate::config::{ConfigStore, ModelRole};
 use crate::studio::StudioStore;
@@ -10,9 +10,24 @@ use crate::studio::records::{
     ProjectRecord, SessionRecord, SessionRuntimeRecord, StudioPromptOutcome,
 };
 use crate::{
-    CompileMode, PureCore, ToolApprovalCallback, TraceRecorder, TurnOptions, TurnRequest,
-    load_workspace_instructions, resolve_workspace_root,
+    CompileMode, CoreSession, PureCore, ToolApprovalCallback, TraceRecorder, TurnBudget,
+    TurnOptions, TurnRequest, TurnResultStatus, load_workspace_instructions,
+    resolve_workspace_root,
 };
+
+const SELF_LEARNING_REVIEW_PROMPT: &str = r#"你是 Pure-Lang 项目 skills 自学习 reviewer。
+
+请复盘上一轮完整对话和工具结果，只在发现可复用项目经验时更新当前项目 `skills/` 目录。
+
+规则：
+- 只能使用 `skills_list`、`skill_view`、`skill_manage`。
+- 优先 patch 本轮已经读取过的项目 skill。
+- 其次 patch 现有项目 umbrella skill。
+- 没有合适项目 skill 时，才 create 一个泛化的项目 skill。
+- 不要记录一次性任务、瞬时环境失败、负面工具断言、provider 临时错误或纯用户私密偏好。
+- 不要修改用户级或外部只读 skill；如需复用，创建项目级覆盖或项目级新 skill。
+- 如果没有值得沉淀的内容，直接简短说明无需更新，不要调用工具。
+"#;
 
 #[derive(Clone)]
 pub struct StudioRuntime {
@@ -112,7 +127,7 @@ impl StudioRuntime {
         }
 
         let mut core = PureCore::from_config(&config, ModelRole::Planner)?;
-        core.register_default_tools(workspace_root, Some(workspace_instructions));
+        core.register_default_tools(workspace_root.clone(), Some(workspace_instructions.clone()));
         if matches!(
             options.tool_approval_policy,
             crate::turn::ToolApprovalPolicy::Manual
@@ -145,6 +160,15 @@ impl StudioRuntime {
         self.store
             .upsert_session_runtime(session_id, &result, model)
             .await?;
+        if should_start_self_learning(&config, &result.status, &timeline_events) {
+            let review_messages = session.messages().to_vec();
+            spawn_self_learning_review(
+                config.clone(),
+                workspace_root.clone(),
+                workspace_instructions.clone(),
+                review_messages,
+            );
+        }
         if previous_len == 0 {
             self.store
                 .rename_session(session_id, &session_title_from_prompt(&prompt))
@@ -159,10 +183,105 @@ impl StudioRuntime {
     }
 }
 
+fn should_start_self_learning(
+    config: &crate::config::PureConfig,
+    status: &TurnResultStatus,
+    timeline_events: &[TraceEvent],
+) -> bool {
+    config.skills.enabled
+        && config.skills.auto_learn
+        && matches!(status, TurnResultStatus::Completed)
+        && tool_call_count(timeline_events) >= config.skills.auto_learn_min_tool_calls
+}
+
+fn tool_call_count(timeline_events: &[TraceEvent]) -> u32 {
+    timeline_events
+        .iter()
+        .filter(|event| match &event.kind {
+            TraceEventKind::TimelineItemStarted { item } => item.kind == TimelineItemKind::Tool,
+            TraceEventKind::TimelineItemDelta { .. }
+            | TraceEventKind::TimelineItemCompleted { .. }
+            | TraceEventKind::TimelineItemFailed { .. } => false,
+        })
+        .count() as u32
+}
+
+fn spawn_self_learning_review(
+    config: crate::config::PureConfig,
+    workspace_root: std::path::PathBuf,
+    workspace_instructions: String,
+    messages: Vec<pl_protocol::Message>,
+) {
+    tokio::spawn(async move {
+        if let Err(error) =
+            run_self_learning_review(config, workspace_root, workspace_instructions, messages).await
+        {
+            eprintln!("[pl-core] self-learning skill review failed: {error}");
+        }
+    });
+}
+
+async fn run_self_learning_review(
+    config: crate::config::PureConfig,
+    workspace_root: std::path::PathBuf,
+    workspace_instructions: String,
+    messages: Vec<pl_protocol::Message>,
+) -> Result<()> {
+    let mut core = PureCore::from_config(&config, ModelRole::Reviewer)?;
+    core.register_skill_tools(workspace_root, Some(workspace_instructions.clone()));
+    let mut session = CoreSession::from_messages(messages);
+    let request = TurnRequest::new(SELF_LEARNING_REVIEW_PROMPT.to_string(), CompileMode::Auto)
+        .with_workspace_instructions(workspace_instructions)
+        .with_budget(TurnBudget::new(120_000));
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+    let mut recorder = TraceRecorder::disabled(event_tx);
+    let _ = core
+        .run_turn_with_trace(&mut session, request, &mut recorder, TurnOptions::default())
+        .await?;
+    Ok(())
+}
+
 fn session_title_from_prompt(prompt: &str) -> String {
     let prompt = prompt.trim();
     if prompt.is_empty() {
         return "新会话".to_string();
     }
     prompt.chars().take(42).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_protocol::{TimelineItem, TimelineItemStatus};
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[test]
+    fn counts_started_tool_items_for_self_learning_threshold() {
+        let event = TraceEvent {
+            session_id: "session".to_string(),
+            sequence: 1,
+            timestamp: 1,
+            kind: TraceEventKind::TimelineItemStarted {
+                item: TimelineItem {
+                    turn_id: "turn".to_string(),
+                    item_id: "tool".to_string(),
+                    sequence: 1,
+                    kind: TimelineItemKind::Tool,
+                    status: TimelineItemStatus::Running,
+                    created_at: 1,
+                    updated_at: 1,
+                    role: None,
+                    content: String::new(),
+                    thinking_chunks: Vec::new(),
+                    tool: None,
+                    agent: None,
+                    inference: None,
+                    usage: None,
+                },
+            },
+        };
+
+        assert_eq!(tool_call_count(&[event]), 1);
+    }
 }
