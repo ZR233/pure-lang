@@ -1187,8 +1187,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_patch_failure_keeps_committed_prefix_and_reports_delta() {
-        let root = unique_temp_dir("patch-prefix-failure");
+    async fn apply_patch_plan_failure_does_not_commit_prefix() {
+        let root = unique_temp_dir("patch-plan-failure");
         tokio::fs::create_dir_all(&root).await.unwrap();
         let tool = ApplyPatchTool;
         let patch = "*** Begin Patch\n*** Add File: created.txt\n+hello\n*** Update File: missing.txt\n@@\n-old\n+new\n*** End Patch";
@@ -1203,13 +1203,39 @@ mod tests {
 
         let error = result.to_string();
         assert!(error.contains("failed to resolve path 'missing.txt'"));
-        assert!(error.contains("Committed changes before failure:"));
-        assert!(error.contains("A created.txt"));
+        assert!(
+            !tokio::fs::try_exists(root.join("created.txt"))
+                .await
+                .unwrap()
+        );
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn apply_patch_rejects_conflicting_non_update_operations_before_write() {
+        let root = unique_temp_dir("patch-conflicting-operations");
+        tokio::fs::create_dir_all(&root).await.unwrap();
+        tokio::fs::write(root.join("notes.txt"), "old\n")
+            .await
+            .unwrap();
+        let tool = ApplyPatchTool;
+        let patch = "*** Begin Patch\n*** Add File: notes.txt\n+new\n*** Update File: notes.txt\n@@\n-new\n+newer\n*** End Patch";
+
+        let result = tool
+            .execute(
+                input(serde_json::json!({ "patch": patch })),
+                context(&root).await,
+            )
+            .await
+            .unwrap_err();
+
+        let error = result.to_string();
+        assert!(error.contains("conflicting file operations"));
         assert_eq!(
-            tokio::fs::read_to_string(root.join("created.txt"))
+            tokio::fs::read_to_string(root.join("notes.txt"))
                 .await
                 .unwrap(),
-            "hello\n"
+            "old\n"
         );
         let _ = tokio::fs::remove_dir_all(root).await;
     }
