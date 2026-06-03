@@ -1,7 +1,7 @@
 use pl_protocol::{
-    AgentEvent, AgentEventSender, TimelineAgentItem, TimelineInferenceItem, TimelineItem,
-    TimelineItemStatus, TimelineTextRole, TimelineToolItem, TokenUsageSnapshot, TraceEvent,
-    TraceEventKind,
+    AgentEvent, AgentEventSender, TimelineAgentItem, TimelineDelta, TimelineInferenceItem,
+    TimelineItem, TimelineItemKind, TimelineItemStatus, TimelineTextRole, TimelineToolItem,
+    TokenUsageSnapshot, TraceEvent, TraceEventKind,
 };
 
 /// In-memory timeline recorder that captures structured lifecycle events during a turn.
@@ -131,6 +131,24 @@ impl TraceRecorder {
             self.sequence,
             TimelineTextRole::User,
             content,
+            TimelineItemStatus::Completed,
+            timestamp,
+        );
+        self.record_and_broadcast_item_start(item.clone());
+        self.complete_item(item);
+    }
+
+    pub fn ensure_assistant_text_item(&mut self, turn_id: &str, content: &str) {
+        if content.trim().is_empty() || self.has_assistant_text_content(turn_id) {
+            return;
+        }
+        let timestamp = unix_seconds();
+        let item = TimelineItem::text(
+            turn_id,
+            format!("{turn_id}-assistant"),
+            self.sequence,
+            TimelineTextRole::Assistant,
+            content.to_string(),
             TimelineItemStatus::Completed,
             timestamp,
         );
@@ -301,6 +319,24 @@ impl TraceRecorder {
         self.events.push(event);
         self.broadcast(AgentEvent::TimelineItemStarted { item });
     }
+
+    fn has_assistant_text_content(&self, turn_id: &str) -> bool {
+        self.events.iter().any(|event| match &event.kind {
+            TraceEventKind::TimelineItemStarted { item }
+            | TraceEventKind::TimelineItemCompleted { item }
+            | TraceEventKind::TimelineItemFailed { item, .. } => {
+                item.turn_id == turn_id
+                    && item.kind == TimelineItemKind::Text
+                    && item.role == Some(TimelineTextRole::Assistant)
+                    && !item.content.trim().is_empty()
+            }
+            TraceEventKind::TimelineItemDelta { event } => {
+                event.turn_id == turn_id
+                    && event.kind == TimelineItemKind::Text
+                    && matches!(&event.delta, TimelineDelta::Text { delta } if !delta.trim().is_empty())
+            }
+        })
+    }
 }
 
 fn unix_seconds() -> i64 {
@@ -369,5 +405,43 @@ mod tests {
 
         let second = recorder.drain();
         assert!(second.is_empty());
+    }
+
+    #[test]
+    fn ensure_assistant_text_item_records_fallback_text_once() {
+        let (mut recorder, _rx) = make_recorder();
+
+        recorder.ensure_assistant_text_item("t1", "final answer");
+        recorder.ensure_assistant_text_item("t1", "final answer");
+
+        let events = recorder.drain();
+        let text_items = events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                TraceEventKind::TimelineItemStarted { item }
+                | TraceEventKind::TimelineItemCompleted { item }
+                    if item.kind == TimelineItemKind::Text =>
+                {
+                    Some((item.item_id.as_str(), item.content.as_str(), item.role))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            text_items,
+            vec![
+                (
+                    "t1-assistant",
+                    "final answer",
+                    Some(TimelineTextRole::Assistant)
+                ),
+                (
+                    "t1-assistant",
+                    "final answer",
+                    Some(TimelineTextRole::Assistant)
+                ),
+            ],
+        );
     }
 }

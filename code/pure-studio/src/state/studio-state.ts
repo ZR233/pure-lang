@@ -20,10 +20,18 @@ import type {
   ToolApprovalRequest,
   ToolApprovalResolved,
 } from "../types";
+import {
+  applyLiveTimelineEvent,
+  emptyTimelineState,
+  mergeRunPromptTimeline,
+  mergeTimelineSnapshot,
+  removeOptimisticTimelineItems,
+  type TimelineStateSlice,
+} from "./timeline-state";
 
 export type SettingsTab = "providers" | "skills" | "roles" | "security" | "general";
 
-export type StudioState = {
+export type StudioState = TimelineStateSlice & {
   projects: ProjectRecord[];
   sessions: SessionRecord[];
   providers: ProviderRecord[];
@@ -39,9 +47,6 @@ export type StudioState = {
   isBusy: boolean;
   agents: AgentDto[];
   agentTimelineEvents: AgentTimelineEvent[];
-  timelineItems: Map<string, TimelineItem>;
-  timelineOrder: string[];
-  timelineMaxSequence: number;
   sessionRuntime: SessionRuntime | null;
   approvals: ToolApprovalRequest[];
   settingsOpen: boolean;
@@ -55,7 +60,7 @@ export type StudioState = {
 export type StudioAction =
   | { type: "bootstrapLoaded"; payload: BootstrapPayload; status: string }
   | { type: "bootstrapFailed"; status: string }
-  | { type: "timelineLoaded"; sessionId: string | null; items: TimelineItem[] }
+  | { type: "timelineLoaded"; sessionId: string | null; items: TimelineItem[]; nextSequence: number }
   | { type: "timelineLoadFailed"; sessionId: string | null; status: string }
   | { type: "projectSelectionLoaded"; payload: ProjectSelectionPayload; status: string }
   | { type: "sessionSelectionLoaded"; payload: SessionSelectionPayload; status: string }
@@ -102,9 +107,7 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   isBusy: false,
   agents: [],
   agentTimelineEvents: [],
-  timelineItems: new Map(),
-  timelineOrder: [],
-  timelineMaxSequence: -1,
+  ...emptyTimelineState(),
   sessionRuntime: null,
   approvals: [],
   settingsOpen: false,
@@ -127,9 +130,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
         agents: mergeAgents([], action.payload.agents ?? []),
         sessionRuntime: action.payload.sessionRuntime ?? null,
-        timelineItems: new Map(),
-        timelineOrder: [],
-        timelineMaxSequence: -1,
+        ...emptyTimelineState(),
         ...configFields(state.selectedProviderId, action.payload.config),
         status: action.status,
         turnPhase: "idle",
@@ -138,7 +139,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, status: action.status };
     case "timelineLoaded":
       if (action.sessionId !== state.selectedSessionId) return state;
-      return mergeOrReplaceLoadedTimeline(state, action.items ?? []);
+      return mergeTimelineSnapshot(state, action.sessionId, action.items ?? [], action.nextSequence);
     case "timelineLoadFailed":
       if (action.sessionId !== state.selectedSessionId) return state;
       return { ...state, status: action.status };
@@ -152,9 +153,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
         agents: mergeAgents([], action.payload.agents ?? []),
         sessionRuntime: action.payload.sessionRuntime ?? null,
-        timelineItems: new Map(),
-        timelineOrder: [],
-        timelineMaxSequence: -1,
+        ...emptyTimelineState(),
         approvals: [],
         status: action.status,
         turnPhase: "idle",
@@ -169,9 +168,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
         agents: mergeAgents([], action.payload.agents ?? []),
         sessionRuntime: action.payload.sessionRuntime ?? null,
-        timelineItems: new Map(),
-        timelineOrder: [],
-        timelineMaxSequence: -1,
+        ...emptyTimelineState(),
         approvals: [],
         status: action.status,
         turnPhase: "idle",
@@ -183,9 +180,11 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         return state;
       }
       return {
-        ...mergeTimelineItems(
+        ...mergeRunPromptTimeline(
           removeOptimisticTimelineItems(state),
+          action.payload.sessionId,
           action.payload.timelineItems ?? [],
+          action.payload.timelineNextSequence,
         ),
         selectedSessionId: action.payload.sessionId,
         sessions: action.payload.sessions,
@@ -325,22 +324,24 @@ function reduceAgentEvent(
     return { ...state, status: statusText, turnPhase: "budgetLimited" };
   }
   if ("timelineItemStarted" in event) {
+    const timelineState = applyLiveTimelineEvent(state, state.selectedSessionId ?? "", event);
     return {
-      ...upsertTimelineItem(state, event.timelineItemStarted.item),
+      ...timelineState,
       status: statusText,
       turnPhase: phaseForTimelineItem(event.timelineItemStarted.item, state.turnPhase),
       turnStartedAt: state.turnStartedAt ?? Date.now(),
     };
   }
   if ("timelineItemDelta" in event) {
+    const timelineState = applyLiveTimelineEvent(state, state.selectedSessionId ?? "", event);
     return {
-      ...applyTimelineDelta(state, event.timelineItemDelta.event),
+      ...timelineState,
       status: statusText,
       turnPhase: phaseForTimelineDelta(event.timelineItemDelta.event, state.turnPhase),
     };
   }
   if ("timelineItemCompleted" in event) {
-    const nextState = upsertTimelineItem(state, event.timelineItemCompleted.item);
+    const nextState = applyLiveTimelineEvent(state, state.selectedSessionId ?? "", event);
     return {
       ...nextState,
       status: statusText,
@@ -349,7 +350,7 @@ function reduceAgentEvent(
   }
   if ("timelineItemFailed" in event) {
     return {
-      ...upsertTimelineItem(state, event.timelineItemFailed.item),
+      ...applyLiveTimelineEvent(state, state.selectedSessionId ?? "", event),
       status: statusText,
       turnPhase:
         event.timelineItemFailed.item.status === "budgetLimited"
@@ -363,175 +364,6 @@ function reduceAgentEvent(
     return { ...state, status: statusText, turnPhase: "failed" };
   }
   return { ...state, status: statusText };
-}
-
-function replaceTimelineItems(state: StudioState, items: TimelineItem[]): StudioState {
-  const next = {
-    ...state,
-    timelineItems: new Map<string, TimelineItem>(),
-    timelineOrder: [],
-    timelineMaxSequence: -1,
-  };
-  return mergeTimelineItems(next, items);
-}
-
-function mergeOrReplaceLoadedTimeline(state: StudioState, items: TimelineItem[]): StudioState {
-  if (isStaleTimelineSnapshot(state, items)) {
-    return mergeMissingTimelineItems(state, items);
-  }
-  return replaceTimelineItems(state, items);
-}
-
-function removeOptimisticTimelineItems(state: StudioState): StudioState {
-  const timelineItems = new Map(state.timelineItems);
-  for (const itemId of state.timelineOrder) {
-    if (itemId.startsWith("optimistic-")) {
-      timelineItems.delete(itemId);
-    }
-  }
-  return {
-    ...state,
-    timelineItems,
-    timelineOrder: state.timelineOrder.filter((itemId) => !itemId.startsWith("optimistic-")),
-    timelineMaxSequence: maxTimelineSequence([...timelineItems.values()]),
-  };
-}
-
-export function mergeTimelineItems(state: StudioState, incoming: TimelineItem[]): StudioState {
-  let next = state;
-  for (const item of incoming ?? []) {
-    if (!item?.itemId) continue;
-    next = upsertTimelineItem(next, item);
-  }
-  return next;
-}
-
-function mergeMissingTimelineItems(state: StudioState, incoming: TimelineItem[]): StudioState {
-  let next = state;
-  for (const item of incoming ?? []) {
-    if (!item?.itemId || next.timelineItems.has(item.itemId)) continue;
-    next = upsertTimelineItem(next, item);
-  }
-  return next;
-}
-
-function upsertTimelineItem(state: StudioState, item: TimelineItem): StudioState {
-  if (!item?.itemId) {
-    return state;
-  }
-  const timelineItems = new Map(state.timelineItems);
-  const existing = timelineItems.get(item.itemId);
-  timelineItems.set(item.itemId, mergeTimelineItem(existing, item));
-  const timelineOrder = existing
-    ? state.timelineOrder
-    : [...state.timelineOrder, item.itemId].sort((left, right) => {
-        const leftItem = timelineItems.get(left);
-        const rightItem = timelineItems.get(right);
-        return (leftItem?.sequence ?? 0) - (rightItem?.sequence ?? 0);
-      });
-  return {
-    ...state,
-    timelineItems,
-    timelineOrder,
-    timelineMaxSequence: Math.max(state.timelineMaxSequence, item.sequence ?? -1),
-  };
-}
-
-function isStaleTimelineSnapshot(state: StudioState, items: TimelineItem[]): boolean {
-  return state.timelineOrder.length > 0 && maxTimelineSequence(items) < state.timelineMaxSequence;
-}
-
-function maxTimelineSequence(items: TimelineItem[]): number {
-  return items.reduce((max, item) => Math.max(max, item?.sequence ?? -1), -1);
-}
-
-function mergeTimelineItem(existing: TimelineItem | undefined, item: TimelineItem): TimelineItem {
-  const incoming = normalizeTimelineItem(item);
-  if (!existing) {
-    return incoming;
-  }
-  const current = normalizeTimelineItem(existing);
-  return {
-    ...current,
-    ...incoming,
-    content: incoming.content || current.content || "",
-    thinkingChunks:
-      incoming.thinkingChunks.length > 0 ? incoming.thinkingChunks : current.thinkingChunks,
-    tool: incoming.tool ?? current.tool ?? null,
-    agent: incoming.agent ?? current.agent ?? null,
-    inference: incoming.inference ?? current.inference ?? null,
-    usage: incoming.usage ?? current.usage ?? null,
-    sequence: current.sequence,
-    createdAt: current.createdAt,
-  };
-}
-
-function applyTimelineDelta(state: StudioState, event: TimelineItemDeltaEvent): StudioState {
-  const existing = state.timelineItems.get(event.itemId) ?? blankTimelineItem(event);
-  const item = normalizeTimelineItem(existing);
-  item.status = event.status;
-  item.updatedAt = event.updatedAt;
-  const delta = event.delta;
-  switch (delta.type) {
-    case "text":
-      item.content += delta.delta;
-      break;
-    case "thinking": {
-      const chunk = item.thinkingChunks.find((part) => part.chunkIndex === delta.chunkIndex);
-      if (chunk) {
-        chunk.content += delta.delta;
-      } else {
-        item.thinkingChunks.push({
-          chunkIndex: delta.chunkIndex,
-          content: delta.delta,
-        });
-      }
-      item.thinkingChunks.sort((left, right) => left.chunkIndex - right.chunkIndex);
-      break;
-    }
-    case "toolArguments":
-      if (item.tool) {
-        item.tool.arguments += delta.delta;
-      }
-      break;
-    case "toolResult":
-      if (item.tool) {
-        item.tool.result = `${item.tool.result ?? ""}${delta.delta}`;
-      }
-      break;
-  }
-  return upsertTimelineItem(state, item);
-}
-
-function blankTimelineItem(event: TimelineItemDeltaEvent): TimelineItem {
-  return {
-    turnId: event.turnId,
-    itemId: event.itemId,
-    sequence: event.sequence,
-    kind: event.kind,
-    status: event.status,
-    createdAt: event.createdAt,
-    updatedAt: event.updatedAt,
-    role: null,
-    content: "",
-    thinkingChunks: [],
-    tool: null,
-    agent: null,
-    inference: null,
-    usage: null,
-  };
-}
-
-function normalizeTimelineItem(item: TimelineItem): TimelineItem {
-  return {
-    ...item,
-    content: item.content ?? "",
-    thinkingChunks: item.thinkingChunks ?? [],
-    tool: item.tool ?? null,
-    agent: item.agent ?? null,
-    inference: item.inference ?? null,
-    usage: item.usage ?? null,
-  };
 }
 
 export function mergeAgentTimelineEvents(

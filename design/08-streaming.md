@@ -20,7 +20,9 @@ timeline item 类型固定为：
 - `turn`
 - `inference`
 
-每个 item 必须携带 `turnId`、`itemId`、`sequence`、`createdAt`、`updatedAt` 和 `status`。`sequence` 是会话内单调递增顺序号，item 的展示顺序以首次创建时的 `sequence` 为准；后续 delta 和 completed/failed 事件只 upsert 同一个 item。
+每个 item 必须携带 `turnId`、`itemId`、`sequence`、`createdAt`、`updatedAt` 和 `status`。`sequence` 是会话内单调递增的 timeline event 顺序号；item 的展示顺序以首次创建时的 `sequence` 为准；后续 delta 和 completed/failed 事件只 upsert 同一个 item，并且不得改变该 item 的首次展示顺序。
+
+历史加载和运行完成响应必须暴露 `nextSequence`/`timelineNextSequence` 作为事件游标。前端只能用该事件游标判断 snapshot 新旧，不能用 item 列表里的最大 `sequence` 代替游标。旧 snapshot 只能补齐缺失 item，不能覆盖已经通过实时事件或更新响应接收的新 turn 内容。
 
 ## 8.2 数据流
 
@@ -43,11 +45,18 @@ pl-model provider
 
 `TextDelta`、`ThinkingDelta`、`ToolCallDelta`、`ToolCallComplete` 不再是 Studio 的协议或兼容入口。
 
+Studio 前端的实时事件、`load_session_timeline` 历史 snapshot 和 `run_prompt` 完成响应必须进入同一个 timeline reducer：
+
+- `load_session_timeline` 是可替换 snapshot，但只有当 `nextSequence` 不落后于当前游标时才能覆盖已有 snapshot。
+- 如果 `nextSequence` 落后于当前游标，则该 snapshot 只用于补齐当前状态中不存在的 item。
+- `run_prompt` 完成响应是当前 turn 的最终校准，只 upsert 返回的 items 并推进 `timelineNextSequence`，不得清空非 optimistic item。
+- `Done` 只表示 turn 状态完成，不携带 timeline 内容；最终正文必须通过 `text` item 表达。
+
 ## 8.3 背压与容量
 
 事件通道使用 `tokio::sync::broadcast`。默认容量由调用方创建，目前建议为 `256`。
 
-高频 delta 允许通过 broadcast 丢失实时帧，但 turn 最终的 timeline event 集合必须随消息一起批量落库。`TimelineItemCompleted` 携带最终 snapshot，历史加载不依赖实时 delta 是否完整到达前端。
+高频 delta 允许通过 broadcast 丢失实时帧，但 turn 最终的 timeline event 集合必须随消息一起批量落库。`TimelineItemCompleted` 携带最终 snapshot，历史加载不依赖实时 delta 是否完整到达前端。只要 turn 最终有 assistant 正文，最终 timeline 集合中必须存在 completed assistant `text` item；不能只把正文写到 `turn` trace item。
 
 ## 8.4 事件边界
 

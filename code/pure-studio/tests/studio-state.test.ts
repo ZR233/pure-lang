@@ -4,6 +4,7 @@ import type {
   RunPromptResponse,
   SessionRuntime,
   TimelineItem,
+  TimelineItemDeltaEvent,
 } from "../src/types";
 
 function assertEqual<T>(actual: T, expected: T) {
@@ -48,7 +49,7 @@ const runtime: SessionRuntime = {
 
 function textItem(itemId: string, sequence: number, content: string): TimelineItem {
   return {
-    turnId: itemId.split("-")[0] ?? "turn",
+    turnId: itemId.split("-").slice(0, 2).join("-") || "turn",
     itemId,
     sequence,
     kind: "text",
@@ -62,6 +63,8 @@ function textItem(itemId: string, sequence: number, content: string): TimelineIt
 }
 
 function response(timelineItems: TimelineItem[]): RunPromptResponse {
+  const timelineNextSequence =
+    timelineItems.reduce((max, item) => Math.max(max, item.sequence), -1) + 1;
   return {
     sessionId: "session-1",
     sessions: [
@@ -77,8 +80,19 @@ function response(timelineItems: TimelineItem[]): RunPromptResponse {
     agents: [],
     sessionRuntime: runtime,
     timelineItems,
+    timelineNextSequence,
     turnStatus: "completed",
     turnAbortReason: null,
+  };
+}
+
+function responseWithSequence(
+  timelineItems: TimelineItem[],
+  timelineNextSequence: number,
+): RunPromptResponse {
+  return {
+    ...response(timelineItems),
+    timelineNextSequence,
   };
 }
 
@@ -120,11 +134,12 @@ function staleTimelineLoadKeepsNewTurnItems() {
     type: "timelineLoaded",
     sessionId: "session-1",
     items: [oldItem],
+    nextSequence: 2,
   });
 
   assertDeepEqual(afterStaleLoad.timelineOrder, ["turn-1-text", "turn-2-text"]);
   assertEqual(afterStaleLoad.timelineItems.get("turn-2-text")?.content, "new");
-  assertEqual(afterStaleLoad.timelineMaxSequence, 10);
+  assertEqual(afterStaleLoad.timelineNextSequence, 11);
 }
 
 function freshTimelineLoadMayReplaceSnapshot() {
@@ -134,18 +149,117 @@ function freshTimelineLoadMayReplaceSnapshot() {
     type: "timelineLoaded",
     sessionId: "session-1",
     items: [firstItem],
+    nextSequence: 2,
   });
 
   const refreshed = studioReducer(loaded, {
     type: "timelineLoaded",
     sessionId: "session-1",
     items: [replacement],
+    nextSequence: 3,
   });
 
   assertDeepEqual(refreshed.timelineOrder, ["turn-1-text"]);
   assertEqual(refreshed.timelineItems.get("turn-1-text")?.content, "replacement");
-  assertEqual(refreshed.timelineMaxSequence, 2);
+  assertEqual(refreshed.timelineNextSequence, 3);
+}
+
+function staleTimelineLoadDoesNotOverwriteLiveDelta() {
+  const oldItem = textItem("turn-1-text", 1, "old");
+  const started = {
+    ...textItem("turn-2-text", 10, ""),
+    status: "streaming" as const,
+  };
+  const delta: TimelineItemDeltaEvent = {
+    turnId: "turn-2",
+    itemId: "turn-2-text",
+    sequence: 11,
+    kind: "text",
+    status: "streaming",
+    createdAt: 10,
+    updatedAt: 11,
+    delta: { type: "text", delta: "new" },
+  };
+  const completed = textItem("turn-2-text", 12, "new");
+  const liveStarted = studioReducer(selectedState(), {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemStarted: { item: started } },
+    statusText: "running",
+  });
+  const liveDelta = studioReducer(liveStarted, {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemDelta: { event: delta } },
+    statusText: "running",
+  });
+  const liveCompleted = studioReducer(liveDelta, {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemCompleted: { sequence: 12, item: completed } },
+    statusText: "done",
+  });
+
+  const afterStaleLoad = studioReducer(liveCompleted, {
+    type: "timelineLoaded",
+    sessionId: "session-1",
+    items: [oldItem],
+    nextSequence: 2,
+  });
+
+  assertDeepEqual(afterStaleLoad.timelineOrder, ["turn-1-text", "turn-2-text"]);
+  assertEqual(afterStaleLoad.timelineItems.get("turn-2-text")?.content, "new");
+  assertEqual(afterStaleLoad.timelineNextSequence, 13);
+}
+
+function runPromptLoadedWithEmptyItemsDoesNotDeleteLiveContent() {
+  const liveItem = textItem("turn-2-text", 10, "live");
+  const liveState = studioReducer(selectedState(), {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemCompleted: { sequence: 10, item: liveItem } },
+    statusText: "done",
+  });
+
+  const completed = studioReducer(liveState, {
+    type: "runPromptLoaded",
+    payload: responseWithSequence([], 20),
+    status: "done",
+  });
+
+  assertDeepEqual(completed.timelineOrder, ["turn-2-text"]);
+  assertEqual(completed.timelineItems.get("turn-2-text")?.content, "live");
+  assertEqual(completed.timelineNextSequence, 20);
+}
+
+function completedSnapshotKeepsFirstItemSequence() {
+  const started = {
+    ...textItem("turn-2-text", 10, ""),
+    status: "streaming" as const,
+  };
+  const completed = textItem("turn-2-text", 12, "final");
+  const liveStarted = studioReducer(selectedState(), {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemStarted: { item: started } },
+    statusText: "running",
+  });
+
+  const liveCompleted = studioReducer(liveStarted, {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemCompleted: { sequence: 12, item: completed } },
+    statusText: "done",
+  });
+
+  assertDeepEqual(liveCompleted.timelineOrder, ["turn-2-text"]);
+  assertEqual(liveCompleted.timelineItems.get("turn-2-text")?.sequence, 10);
+  assertEqual(liveCompleted.timelineItems.get("turn-2-text")?.content, "final");
+  assertEqual(liveCompleted.timelineNextSequence, 13);
 }
 
 staleTimelineLoadKeepsNewTurnItems();
 freshTimelineLoadMayReplaceSnapshot();
+staleTimelineLoadDoesNotOverwriteLiveDelta();
+runPromptLoadedWithEmptyItemsDoesNotDeleteLiveContent();
+completedSnapshotKeepsFirstItemSequence();

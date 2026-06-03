@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::Context;
-use pl_core::{PureConfig, TurnOptions};
+use pl_core::{PureConfig, TimelineEventRecord, TurnOptions};
 use pl_protocol::{TraceEvent, TraceEventKind};
 use tauri::{AppHandle, Emitter, State};
 use tokio_util::sync::CancellationToken;
@@ -189,6 +189,11 @@ pub async fn run_prompt(
                 agents: agent_dtos(state.studio.store().list_agents(&session_id).await?),
                 session_runtime: load_session_runtime_dto(&state.studio, &session_id).await?,
                 timeline_items: timeline_events_to_items(&outcome.timeline_events),
+                timeline_next_sequence: state
+                    .studio
+                    .store()
+                    .next_timeline_sequence(&session_id)
+                    .await?,
                 turn_status: turn_result_status_label(outcome.result.status).to_string(),
                 turn_abort_reason: outcome
                     .result
@@ -257,23 +262,35 @@ pub async fn load_session_timeline(
         .store()
         .next_timeline_sequence(&session_id)
         .await?;
-    let timeline_events: Vec<TraceEvent> = records
+    let timeline_events = timeline_records_to_trace_events(&records)?;
+    Ok(SessionTimelineDto {
+        session_id,
+        items: timeline_events_to_items(&timeline_events),
+        next_sequence,
+    })
+}
+
+fn timeline_records_to_trace_events(
+    records: &[TimelineEventRecord],
+) -> CommandResult<Vec<TraceEvent>> {
+    records
         .iter()
-        .filter_map(|record| {
-            let kind: TraceEventKind = serde_json::from_str(&record.payload_json).ok()?;
-            Some(TraceEvent {
+        .map(|record| {
+            let kind: TraceEventKind =
+                serde_json::from_str(&record.payload_json).map_err(|error| {
+                    CommandError::from_display(format!(
+                        "failed to parse timeline event {} for session {} at sequence {}: {error}",
+                        record.id, record.session_id, record.sequence
+                    ))
+                })?;
+            Ok(TraceEvent {
                 session_id: record.session_id.clone(),
                 sequence: record.sequence as u64,
                 timestamp: record.created_at,
                 kind,
             })
         })
-        .collect();
-    Ok(SessionTimelineDto {
-        session_id,
-        items: timeline_events_to_items(&timeline_events),
-        next_sequence,
-    })
+        .collect()
 }
 
 #[tauri::command]
@@ -377,4 +394,27 @@ async fn select_project_data(
         agents: agent_dtos(agents),
         session_runtime,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timeline_record_parse_error_reports_session_and_sequence() {
+        let records = vec![TimelineEventRecord {
+            id: "event-1".to_string(),
+            session_id: "session-1".to_string(),
+            sequence: 42,
+            created_at: 10,
+            kind: "TimelineItemStarted".to_string(),
+            payload_json: "{not valid json".to_string(),
+        }];
+
+        let error = timeline_records_to_trace_events(&records).unwrap_err();
+
+        assert!(error.message.contains("event-1"));
+        assert!(error.message.contains("session-1"));
+        assert!(error.message.contains("sequence 42"));
+    }
 }

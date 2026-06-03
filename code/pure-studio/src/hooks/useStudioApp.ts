@@ -90,7 +90,7 @@ export function useStudioApp() {
 
   useEffect(() => {
     if (!state.selectedSessionId) {
-      dispatch({ type: "timelineLoaded", sessionId: null, items: [] });
+      dispatch({ type: "timelineLoaded", sessionId: null, items: [], nextSequence: 0 });
       return;
     }
     const sessionId = state.selectedSessionId;
@@ -100,6 +100,7 @@ export function useStudioApp() {
           type: "timelineLoaded",
           sessionId: payload.sessionId,
           items: payload.items,
+          nextSequence: payload.nextSequence,
         }),
       )
       .catch((error) => {

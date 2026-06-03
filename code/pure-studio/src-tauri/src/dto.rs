@@ -274,6 +274,7 @@ pub struct RunPromptResponse {
     pub agents: Vec<AgentDto>,
     pub session_runtime: SessionRuntimeDto,
     pub timeline_items: Vec<TimelineItem>,
+    pub timeline_next_sequence: u64,
     pub turn_status: String,
     pub turn_abort_reason: Option<String>,
 }

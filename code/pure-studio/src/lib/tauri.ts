@@ -251,6 +251,7 @@ export function runPrompt(sessionId: string, prompt: string) {
             },
           },
         ],
+        timelineNextSequence: previewTimelineItems.length + 11,
         turnStatus: interrupted ? "aborted" as const : "completed" as const,
         turnAbortReason: interrupted ? "interrupted" : null,
         }));
