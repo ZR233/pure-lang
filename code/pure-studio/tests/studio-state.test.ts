@@ -591,7 +591,7 @@ function abnormalTurnTraceIsKeptWithContent() {
   );
 }
 
-function template(kind: "deepseek" | "openai") {
+function template(kind: "deepseek" | "openai" | "zhipu-api" | "zhipu-coding-plan") {
   const item = previewTemplates.find((candidate) => candidate.id === kind);
   if (!item) {
     throw new Error(`Missing ${kind} template`);
@@ -630,6 +630,42 @@ function providerDraftTemplateSwitchUpdatesTemplateFields() {
     switched.defaultModels.map((model) => model.slug),
     openai.defaultModels.map((model) => model.slug),
   );
+}
+
+function providerDraftTemplateSwitchSupportsZhipuCodingPlan() {
+  const deepseek = template("deepseek");
+  const zhipuCodingPlan = template("zhipu-coding-plan");
+  const draft = createProviderFromTemplate(deepseek, "deepseek");
+  const switched = applyProviderTemplate(draft, zhipuCodingPlan, {
+    id: "zhipu-coding-plan",
+    name: zhipuCodingPlan.name,
+  });
+
+  assertEqual(switched.id, "zhipu-coding-plan");
+  assertEqual(switched.name, "Zhipu GLM Coding Plan");
+  assertEqual(switched.templateKind, "zhipu-coding-plan");
+  assertEqual(switched.baseUrl, "https://open.bigmodel.cn/api/coding/paas/v4");
+  assertEqual(switched.wireApi, "chat");
+  assertEqual(switched.defaultModel, "glm-5.1");
+  assertDeepEqual(
+    switched.defaultModels.map((model) => model.slug),
+    ["glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.7-flashx", "glm-4.7-flash"],
+  );
+}
+
+function zhipuProviderDraftUsesUniqueKey() {
+  const zhipuApi = template("zhipu-api");
+  const existing = [
+    createProviderFromTemplate(zhipuApi, "zhipu-api"),
+    createProviderFromTemplate(zhipuApi, "zhipu-api-2"),
+  ];
+  const nextId = suggestProviderId(existing, zhipuApi.id);
+  const draft = createProviderFromTemplate(zhipuApi, nextId);
+
+  assertEqual(nextId, "zhipu-api-3");
+  assertEqual(draft.id, "zhipu-api-3");
+  assertEqual(draft.templateKind, "zhipu-api");
+  assertEqual(draft.defaultModel, "glm-5.1");
 }
 
 function editingProviderDraftDoesNotMutateProviderList() {
@@ -688,5 +724,7 @@ inferenceAndNormalTurnTraceAreHidden();
 abnormalTurnTraceIsKeptWithContent();
 providerDraftUsesSingleAddEntryAndUniqueKey();
 providerDraftTemplateSwitchUpdatesTemplateFields();
+providerDraftTemplateSwitchSupportsZhipuCodingPlan();
+zhipuProviderDraftUsesUniqueKey();
 editingProviderDraftDoesNotMutateProviderList();
 roleChangeProducesCompleteNormalizedSnapshot();

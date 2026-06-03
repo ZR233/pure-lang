@@ -1,7 +1,6 @@
 import {
   CheckCircle2,
   Cpu,
-  KeyRound,
   Link2,
   Pencil,
   Plus,
@@ -26,7 +25,7 @@ import {
   replaceProvider,
   suggestProviderId,
 } from "../lib/provider-settings";
-import { allModels, initials, providerStatusClass, translateStatus, translateUpdatedAt } from "../lib/utils";
+import { allModels, initials, providerStatusClass, translateStatus } from "../lib/utils";
 import { ProviderEditPage } from "./ProviderEditPage";
 
 type ProviderSettingsProps = {
@@ -283,9 +282,6 @@ export function ProviderSettings({
               filteredProviders.map((provider) => {
                 const isActive = provider.id === selectedProvider?.id;
                 const models = allModels(provider);
-                const templateName =
-                  templates.find((template) => template.id === provider.templateKind)?.name ??
-                  provider.templateKind;
                 const defaultModel =
                   models.find((model) => model.slug === provider.defaultModel)?.displayName ||
                   provider.defaultModel ||
@@ -318,9 +314,9 @@ export function ProviderSettings({
                               <span className="default-route">{t("provider.defaultRoute")}</span>
                             ) : null}
                           </span>
-                          <span className="provider-url">
-                            <Link2 size={14} />
-                            {provider.baseUrl || t("provider.defaultBaseUrl")}
+                          <span className="provider-card-key">
+                            <Server size={14} />
+                            <span>{provider.id}</span>
                           </span>
                         </span>
                       </button>
@@ -347,35 +343,19 @@ export function ProviderSettings({
 
                     <div className="provider-card-meta">
                       <span>
-                        <Server size={14} />
-                        <small>{t("provider.key")}</small>
-                        <strong>{provider.id}</strong>
-                      </span>
-                      <span>
                         <Cpu size={14} />
                         <small>{t("provider.defaultModel")}</small>
                         <strong>{defaultModel}</strong>
                       </span>
                       <span>
-                        <KeyRound size={14} />
-                        <small>{t("provider.apiKey")}</small>
-                        <strong>
-                          {provider.bearerToken || provider.hasBearerToken
-                            ? t("provider.saved")
-                            : t("provider.notConfigured")}
-                        </strong>
+                        <Server size={14} />
+                        <small>{t("model.title")}</small>
+                        <strong>{t("provider.models", { count: provider.modelCount })}</strong>
                       </span>
-                      <span>
-                        <small>{t("provider.template")}</small>
-                        <strong>{templateName}</strong>
-                      </span>
-                      <span>
-                        <small>{t("provider.protocolType")}</small>
-                        <strong>{provider.wireApi}</strong>
-                      </span>
-                      <span>
-                        <small>{t("provider.updated")}</small>
-                        <strong>{translateUpdatedAt(provider.updatedAt, t)}</strong>
+                      <span className="wide">
+                        <Link2 size={14} />
+                        <small>{t("provider.baseUrl")}</small>
+                        <strong>{provider.baseUrl || t("provider.defaultBaseUrl")}</strong>
                       </span>
                     </div>
 

@@ -214,11 +214,11 @@ Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-
 
 配置构造和校验的纯逻辑属于 `pl-core`。`pure-studio` 设置页可以使用默认配置草稿，并支持：
 
-- 默认选中 DeepSeek provider，也可切换为 OpenAI provider。
+- 默认选中 DeepSeek provider，也可切换为 OpenAI、Zhipu GLM API 或 Zhipu GLM Coding Plan provider。
 - 至少配置一个 provider。
 - 可继续添加多个 provider 实例，允许同类 provider 重复，例如 `deepseek`、`deepseek-2`、`openai`、`openai-work`。
 - 每个 provider key 必须唯一。
-- DeepSeek 模板来自 `ProviderInfo::deepseek(None)`，OpenAI 模板来自 `ProviderInfo::openai(None)`。
+- DeepSeek 模板来自 `ProviderInfo::deepseek(None)`，OpenAI 模板来自 `ProviderInfo::openai(None)`，智谱模板来自 `ProviderInfo::zhipu_api(None)` 和 `ProviderInfo::zhipu_coding_plan(None)`。
 - 每个 provider 的模型列表包含模板默认模型，并可追加用户自定义模型。
 - 用户选择一个默认 provider；四个模型角色默认都指向该 provider 的默认模型和默认 effort。
 
@@ -234,7 +234,7 @@ Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-
 
 `pure-studio` 设置页复用 `pl-core` 的配置类型和校验逻辑，首版覆盖：
 
-- DeepSeek / OpenAI provider。
+- DeepSeek / OpenAI / Zhipu GLM API / Zhipu GLM Coding Plan provider。
 - API key、base URL、provider key 和显示名。
 - provider 默认模型和自定义模型。
 - 四个模型角色到 provider/model/effort 的路由。
@@ -246,7 +246,7 @@ Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-
 Provider 标签页必须提供结构化编辑能力：
 
 - Provider 列表页只提供一个“添加供应商”入口；点击后进入 Provider 编辑页。
-- 新增 Provider 默认使用模板列表第一项，自动生成唯一 provider key；编辑页通过供应商类型下拉切换 DeepSeek / OpenAI 等模板。
+- 新增 Provider 默认使用模板列表第一项，自动生成唯一 provider key；编辑页通过供应商类型下拉切换 DeepSeek / OpenAI / Zhipu GLM API / Zhipu GLM Coding Plan 等模板。
 - 编辑 provider key、显示名、base URL、API key 和默认模型。
 - 以 provider 卡片作为主要信息载体，展示 provider key、base URL、状态、wire API、默认模型、模型数量和更新时间等摘要信息。
 - Provider 列表页不直接编辑字段；点击卡片编辑按钮进入 provider 编辑页。
@@ -256,7 +256,8 @@ Provider 标签页必须提供结构化编辑能力：
 - 展示 provider 模板自带的默认模型列表。
 - 允许追加用户自定义模型，保存时由 `pl-core` 将模板默认模型排在前面，再追加用户自定义模型。
 - 模型列表应展示关键参数，例如上下文窗口、最大输出 token、自动压缩阈值、temperature、reasoning efforts、capabilities、输入模态和截断策略。
-- `wire_api` 由 provider 模板固定，不在 UI 中提供选择；DeepSeek 固定为 `chat`，OpenAI 固定为 `responses`。
+- `wire_api` 由 provider 模板固定，不在 UI 中提供选择；DeepSeek 固定为 `chat`，OpenAI 固定为 `responses`，两个智谱模板固定为 OpenAI 兼容 `chat`。
+- 智谱 OpenAI 兼容 `chat` 请求固定使用流式 `chat/completions`；模型 `reasoning_efforts` 使用 `enabled` / `none` 表达 thinking 开关，不发送 wire-level `reasoning_effort`。thinking 按官方请求体 `thinking.type = enabled/disabled` 控制，开启时设置 `clear_thinking = false` 并保留/回传历史 `reasoning_content`；Coding Plan 模板使用专属 base URL `https://open.bigmodel.cn/api/coding/paas/v4`。
 - 写入前由 `pl-core` 构造 `PureConfig` 并执行 `PureConfig::validate()`；校验失败时只在 UI 中展示错误，不写入磁盘。
 
 Roles 标签页必须展示固定四个角色：探索者、计划者、执行者、审查者。每个角色提供 provider、model 和 effort 下拉选择。provider 改变时，model 默认切换为该 provider 的 `default_model`；model 改变时，effort 默认切换为该模型的第一个可用 effort。角色路由下拉变更后即时提交完整 roles 快照，`pl-core` 统一校验后写入 `~/.pure/config.toml`。

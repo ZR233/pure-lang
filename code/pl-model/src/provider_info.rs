@@ -96,6 +96,33 @@ impl ProviderInfo {
         }
     }
 
+    pub fn zhipu_api(base_url: Option<String>) -> Self {
+        Self {
+            name: "Zhipu GLM API".into(),
+            base_url: base_url.or_else(|| Some("https://open.bigmodel.cn/api/paas/v4".into())),
+            default_model: "glm-5.1".into(),
+            wire_api: WireApi::Chat,
+            supports_custom_tools: Some(false),
+            supports_freeform_tools: Some(false),
+            apply_patch_tool_type: None,
+            ..Default::default()
+        }
+    }
+
+    pub fn zhipu_coding_plan(base_url: Option<String>) -> Self {
+        Self {
+            name: "Zhipu GLM Coding Plan".into(),
+            base_url: base_url
+                .or_else(|| Some("https://open.bigmodel.cn/api/coding/paas/v4".into())),
+            default_model: "glm-5.1".into(),
+            wire_api: WireApi::Chat,
+            supports_custom_tools: Some(false),
+            supports_freeform_tools: Some(false),
+            apply_patch_tool_type: None,
+            ..Default::default()
+        }
+    }
+
     pub fn supports_custom_tools_for_model(&self, model: &crate::model_info::ModelInfo) -> bool {
         self.supports_custom_tools
             .unwrap_or_else(|| model.capabilities.supports_custom_tools())
@@ -121,6 +148,20 @@ impl ProviderInfo {
             self.stream_idle_timeout_ms
                 .unwrap_or(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
         )
+    }
+
+    pub fn uses_zhipu_glm_chat_api(&self) -> bool {
+        let base_url = self.base_url.as_deref().unwrap_or_default();
+        matches!(self.wire_api, WireApi::Chat)
+            && (base_url.contains("open.bigmodel.cn/api/")
+                || base_url.contains("api.z.ai/api/")
+                || self.name.starts_with("Zhipu GLM"))
+    }
+
+    pub fn uses_deepseek_chat_api(&self) -> bool {
+        let base_url = self.base_url.as_deref().unwrap_or_default();
+        matches!(self.wire_api, WireApi::Chat)
+            && (base_url.contains("api.deepseek.com") || self.name == "DeepSeek")
     }
 }
 
@@ -148,5 +189,49 @@ mod tests {
         assert_eq!(info.env_key, None);
         assert_eq!(info.default_model, "gpt-5.5");
         assert_eq!(info.wire_api, WireApi::Responses);
+    }
+
+    #[test]
+    fn zhipu_api_uses_openai_compatible_chat_wire_api() {
+        let info = ProviderInfo::zhipu_api(None);
+
+        assert_eq!(info.name, "Zhipu GLM API");
+        assert_eq!(
+            info.base_url.as_deref(),
+            Some("https://open.bigmodel.cn/api/paas/v4")
+        );
+        assert_eq!(info.default_model, "glm-5.1");
+        assert_eq!(info.wire_api, WireApi::Chat);
+        assert!(info.uses_zhipu_glm_chat_api());
+    }
+
+    #[test]
+    fn zhipu_coding_plan_uses_coding_endpoint() {
+        let info = ProviderInfo::zhipu_coding_plan(None);
+
+        assert_eq!(info.name, "Zhipu GLM Coding Plan");
+        assert_eq!(
+            info.base_url.as_deref(),
+            Some("https://open.bigmodel.cn/api/coding/paas/v4")
+        );
+        assert_eq!(info.default_model, "glm-5.1");
+        assert_eq!(info.wire_api, WireApi::Chat);
+        assert!(info.uses_zhipu_glm_chat_api());
+    }
+
+    #[test]
+    fn deepseek_uses_provider_specific_chat_api() {
+        let info = ProviderInfo::deepseek(None);
+
+        assert!(info.uses_deepseek_chat_api());
+        assert!(!info.uses_zhipu_glm_chat_api());
+    }
+
+    #[test]
+    fn openai_does_not_use_provider_specific_chat_api() {
+        let info = ProviderInfo::openai(None);
+
+        assert!(!info.uses_deepseek_chat_api());
+        assert!(!info.uses_zhipu_glm_chat_api());
     }
 }

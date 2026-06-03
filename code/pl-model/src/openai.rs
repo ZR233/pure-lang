@@ -36,6 +36,8 @@ impl OpenAiCompatibleProvider {
     pub fn with_models(info: ProviderInfo, configured_models: Vec<ModelInfo>) -> Result<Self> {
         let wire_dispatch = match info.wire_api {
             WireApi::Responses => WireDispatch::Responses,
+            WireApi::Chat if info.uses_zhipu_glm_chat_api() => WireDispatch::ZhipuChat,
+            WireApi::Chat if info.uses_deepseek_chat_api() => WireDispatch::DeepSeekChat,
             WireApi::Chat => WireDispatch::Chat,
         };
         let http_client = reqwest::Client::builder()
@@ -1252,6 +1254,36 @@ mod tests {
         let provider = OpenAiCompatibleProvider::new(ProviderInfo::openai(None)).unwrap();
 
         assert_eq!(provider.default_model(), "gpt-5.5");
+    }
+
+    #[test]
+    fn deepseek_provider_uses_deepseek_chat_dispatch() {
+        let provider = OpenAiCompatibleProvider::new(ProviderInfo::deepseek(None)).unwrap();
+
+        assert_eq!(provider.wire_dispatch, WireDispatch::DeepSeekChat);
+    }
+
+    #[test]
+    fn zhipu_provider_uses_zhipu_chat_dispatch() {
+        let api_provider = OpenAiCompatibleProvider::new(ProviderInfo::zhipu_api(None)).unwrap();
+        let coding_provider =
+            OpenAiCompatibleProvider::new(ProviderInfo::zhipu_coding_plan(None)).unwrap();
+
+        assert_eq!(api_provider.wire_dispatch, WireDispatch::ZhipuChat);
+        assert_eq!(coding_provider.wire_dispatch, WireDispatch::ZhipuChat);
+    }
+
+    #[test]
+    fn custom_chat_provider_uses_plain_chat_dispatch() {
+        let info = ProviderInfo {
+            name: "Custom Chat".to_string(),
+            base_url: Some("https://example.com/v1".to_string()),
+            wire_api: WireApi::Chat,
+            ..Default::default()
+        };
+        let provider = OpenAiCompatibleProvider::new(info).unwrap();
+
+        assert_eq!(provider.wire_dispatch, WireDispatch::Chat);
     }
 
     #[test]
