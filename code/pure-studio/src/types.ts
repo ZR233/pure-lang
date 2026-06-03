@@ -76,7 +76,7 @@ export type ProviderRecord = {
   customModels: ModelRecord[];
 };
 
-export type ProviderKind = "deepseek" | "openai";
+export type ProviderKind = "deepseek" | "openai" | "zhipu-api" | "zhipu-coding-plan";
 
 export type RoleKey = "explorer" | "planner" | "executor" | "reviewer";
 

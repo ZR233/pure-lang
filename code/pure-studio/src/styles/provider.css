@@ -81,7 +81,6 @@
 .provider-card {
   position: relative;
   min-width: 0;
-  overflow: hidden;
   border: 1px solid #dbe4ed;
   border-radius: 8px;
   background: #ffffff;
@@ -138,10 +137,18 @@
   background: #f6f8fb;
 }
 
+.provider-badge.provider-zhipu-api,
+.provider-badge.provider-zhipu-coding-plan {
+  border-color: #c9d8ff;
+  color: #174ea6;
+  background: #f2f6ff;
+}
+
 .provider-title-block {
   display: grid;
   gap: 5px;
   min-width: 0;
+  flex: 1;
 }
 
 .provider-title-line {
@@ -153,8 +160,10 @@
 }
 
 .provider-title-line strong {
+  min-width: 0;
   color: #101925;
   font-size: 17px;
+  overflow-wrap: anywhere;
 }
 
 .provider-state,
@@ -193,16 +202,19 @@
   font-weight: 800;
 }
 
-.provider-url {
+.provider-card-key {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  overflow: hidden;
   color: #5f7084;
   font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+}
+
+.provider-card-key svg {
+  flex: 0 0 auto;
+  color: #7d91a5;
 }
 
 .provider-card-actions {
@@ -226,7 +238,7 @@
 
 .provider-card-meta {
   display: grid;
-  grid-template-columns: minmax(130px, 0.8fr) minmax(180px, 1.2fr) minmax(150px, 0.9fr) minmax(110px, 0.7fr) minmax(90px, 0.55fr) minmax(90px, 0.55fr);
+  grid-template-columns: minmax(180px, 1fr) minmax(130px, 0.55fr) minmax(260px, 1.45fr);
   gap: 8px;
   padding: 0 14px 10px 18px;
 }
@@ -246,6 +258,10 @@
   background: #fbfdff;
 }
 
+.provider-card-meta > span.wide {
+  min-width: 0;
+}
+
 .provider-card-meta svg {
   grid-area: icon;
   color: #7890a4;
@@ -260,11 +276,10 @@
 .provider-card-meta strong {
   grid-area: value;
   min-width: 0;
-  overflow: hidden;
   color: #223044;
   font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .provider-model-strip {
@@ -285,6 +300,12 @@
   border-color: #e7c98a;
   color: #80560c;
   background: #fff8e7;
+}
+
+.model-chip {
+  max-width: 100%;
+  line-height: 1.25;
+  white-space: normal;
 }
 
 .muted-chip {

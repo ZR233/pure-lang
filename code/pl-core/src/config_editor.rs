@@ -50,7 +50,25 @@ pub fn infer_provider_template_kind(
 ) -> ProviderTemplateKind {
     let key = provider_key.to_ascii_lowercase();
     let name = provider.name.to_ascii_lowercase();
-    if key.contains("openai")
+    let base_url = provider
+        .base_url
+        .as_deref()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if key.contains("coding-plan")
+        || name.contains("coding plan")
+        || base_url.contains("/api/coding/paas/v4")
+    {
+        ProviderTemplateKind::ZhipuCodingPlan
+    } else if key.contains("zhipu")
+        || key.contains("glm")
+        || name.contains("zhipu")
+        || name.contains("glm")
+        || provider.default_model.starts_with("glm-")
+        || base_url.contains("open.bigmodel.cn")
+    {
+        ProviderTemplateKind::ZhipuApi
+    } else if key.contains("openai")
         || name.contains("openai")
         || provider.default_model.starts_with("gpt-")
         || matches!(provider.wire_api, WireApi::Responses)
@@ -407,6 +425,19 @@ mod tests {
         }
     }
 
+    fn zhipu_coding_plan_edit() -> ProviderEdit {
+        ProviderEdit {
+            key: "zhipu-coding-plan".to_string(),
+            kind: ProviderTemplateKind::ZhipuCodingPlan,
+            name: "Zhipu GLM Coding Plan".to_string(),
+            base_url: Some("https://open.bigmodel.cn/api/coding/paas/v4".to_string()),
+            bearer_token: None,
+            default_model: "glm-5.1".to_string(),
+            wire_api: "responses".to_string(),
+            custom_models: Vec::new(),
+        }
+    }
+
     #[test]
     fn provider_edit_appends_custom_models_after_template_defaults() {
         let mut edit = openai_edit();
@@ -472,6 +503,49 @@ mod tests {
 
         assert_eq!(config.providers["deepseek"].wire_api, WireApi::Chat);
         assert_eq!(config.providers["deepseek"].env_key, None);
+    }
+
+    #[test]
+    fn zhipu_provider_edit_uses_template_chat_wire_api() {
+        let current = PureConfig::default_config();
+
+        let config = ProviderSettingsEdit {
+            default_provider: Some("zhipu-coding-plan".to_string()),
+            providers: vec![zhipu_coding_plan_edit()],
+            roles: Vec::new(),
+        }
+        .to_config(&current)
+        .unwrap();
+
+        assert_eq!(
+            config.providers["zhipu-coding-plan"].base_url.as_deref(),
+            Some("https://open.bigmodel.cn/api/coding/paas/v4")
+        );
+        assert_eq!(
+            config.providers["zhipu-coding-plan"].default_model,
+            "glm-5.1"
+        );
+        assert_eq!(
+            config.providers["zhipu-coding-plan"].wire_api,
+            WireApi::Chat
+        );
+        assert!(
+            config.providers["zhipu-coding-plan"]
+                .models
+                .iter()
+                .any(|model| model.slug == "glm-4.7-flashx")
+        );
+    }
+
+    #[test]
+    fn zhipu_provider_template_inference_prefers_coding_plan_endpoint() {
+        let provider = zhipu_coding_plan_edit()
+            .to_provider_config()
+            .expect("zhipu coding plan config");
+
+        let kind = infer_provider_template_kind("glm-team", &provider);
+
+        assert_eq!(kind, ProviderTemplateKind::ZhipuCodingPlan);
     }
 
     #[test]

@@ -26,20 +26,26 @@ pub trait WireAdapter: Send + Sync {
 pub enum WireDispatch {
     Responses,
     Chat,
+    DeepSeekChat,
+    ZhipuChat,
 }
 
 impl WireDispatch {
     pub fn build_request_body(&self, request: &CompletionRequest) -> serde_json::Value {
         match self {
             WireDispatch::Responses => responses_build_body(request),
-            WireDispatch::Chat => chat_build_body(request),
+            WireDispatch::Chat => chat_build_body(request, ChatReasoningStyle::Plain),
+            WireDispatch::DeepSeekChat => chat_build_body(request, ChatReasoningStyle::DeepSeek),
+            WireDispatch::ZhipuChat => chat_build_body(request, ChatReasoningStyle::Zhipu),
         }
     }
 
     pub fn parse_response(&self, body: serde_json::Value) -> Result<CompletionResponse> {
         match self {
             WireDispatch::Responses => responses_parse_response(body),
-            WireDispatch::Chat => chat_parse_response(body),
+            WireDispatch::Chat | WireDispatch::DeepSeekChat | WireDispatch::ZhipuChat => {
+                chat_parse_response(body)
+            }
         }
     }
 
@@ -49,6 +55,13 @@ impl WireDispatch {
     ) -> Result<Option<crate::sse::StreamEvent>> {
         Ok(crate::sse::process_sse_event(event))
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChatReasoningStyle {
+    Plain,
+    DeepSeek,
+    Zhipu,
 }
 
 fn message_role_str(role: &pl_protocol::MessageRole) -> &str {
@@ -394,7 +407,10 @@ fn parse_responses_tool_call(item: &serde_json::Value) -> Option<ToolCall> {
     }
 }
 
-fn chat_build_body(request: &CompletionRequest) -> serde_json::Value {
+fn chat_build_body(
+    request: &CompletionRequest,
+    reasoning_style: ChatReasoningStyle,
+) -> serde_json::Value {
     let mut messages = Vec::new();
 
     if let Some(ref instructions) = request.instructions {
@@ -494,21 +510,37 @@ fn chat_build_body(request: &CompletionRequest) -> serde_json::Value {
     }
 
     if let Some(ref reasoning) = request.reasoning {
-        if let Some(ref effort) = reasoning.effort {
-            body["reasoning_effort"] = serde_json::json!(effort);
-        }
-
-        body["thinking"] = serde_json::json!({
-            "type": match reasoning.summary {
-                Some(crate::request::ReasoningSummary::Disabled) => "disabled",
-                Some(crate::request::ReasoningSummary::Auto)
-                | Some(crate::request::ReasoningSummary::Enabled)
-                | None => "enabled",
+        match reasoning_style {
+            ChatReasoningStyle::Plain => {}
+            ChatReasoningStyle::DeepSeek => {
+                if let Some(ref effort) = reasoning.effort {
+                    body["reasoning_effort"] = serde_json::json!(effort);
+                }
+                body["thinking"] = serde_json::json!({
+                    "type": chat_thinking_type(reasoning)
+                });
             }
-        });
+            ChatReasoningStyle::Zhipu => {
+                let thinking_type = chat_thinking_type(reasoning);
+                let mut thinking = serde_json::json!({ "type": thinking_type });
+                if thinking_type == "enabled" {
+                    thinking["clear_thinking"] = serde_json::json!(false);
+                }
+                body["thinking"] = thinking;
+            }
+        }
     }
 
     body
+}
+
+fn chat_thinking_type(reasoning: &crate::request::ReasoningConfig) -> &'static str {
+    match reasoning.summary {
+        Some(crate::request::ReasoningSummary::Disabled) => "disabled",
+        Some(crate::request::ReasoningSummary::Auto)
+        | Some(crate::request::ReasoningSummary::Enabled)
+        | None => "enabled",
+    }
 }
 
 fn chat_parse_response(body: serde_json::Value) -> Result<CompletionResponse> {
@@ -659,21 +691,50 @@ mod tests {
     }
 
     #[test]
-    fn chat_body_writes_deepseek_thinking_mode() {
+    fn generic_chat_body_omits_provider_specific_reasoning_fields() {
         let body = WireDispatch::Chat.build_request_body(&request_with_effort("max"));
+
+        assert!(body.get("reasoning_effort").is_none());
+        assert!(body.get("thinking").is_none());
+    }
+
+    #[test]
+    fn deepseek_chat_body_writes_thinking_mode() {
+        let body = WireDispatch::DeepSeekChat.build_request_body(&request_with_effort("max"));
 
         assert_eq!(body["reasoning_effort"], serde_json::json!("max"));
         assert_eq!(body["thinking"]["type"], serde_json::json!("enabled"));
     }
 
     #[test]
-    fn chat_body_writes_disabled_thinking_mode() {
+    fn deepseek_chat_body_writes_disabled_thinking_mode() {
         let mut request = request_with_effort("high");
         request.reasoning.as_mut().unwrap().summary = Some(ReasoningSummary::Disabled);
 
-        let body = WireDispatch::Chat.build_request_body(&request);
+        let body = WireDispatch::DeepSeekChat.build_request_body(&request);
 
         assert_eq!(body["thinking"]["type"], serde_json::json!("disabled"));
+    }
+
+    #[test]
+    fn zhipu_chat_body_writes_official_thinking_mode() {
+        let body = WireDispatch::ZhipuChat.build_request_body(&request_with_effort("enabled"));
+
+        assert!(body.get("reasoning_effort").is_none());
+        assert_eq!(body["thinking"]["type"], serde_json::json!("enabled"));
+        assert_eq!(body["thinking"]["clear_thinking"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn zhipu_chat_body_writes_disabled_thinking_mode() {
+        let mut request = request_with_effort("none");
+        request.reasoning.as_mut().unwrap().summary = Some(ReasoningSummary::Disabled);
+
+        let body = WireDispatch::ZhipuChat.build_request_body(&request);
+
+        assert!(body.get("reasoning_effort").is_none());
+        assert_eq!(body["thinking"]["type"], serde_json::json!("disabled"));
+        assert!(body["thinking"].get("clear_thinking").is_none());
     }
 
     #[test]

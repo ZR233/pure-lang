@@ -1,5 +1,72 @@
 import type { ProviderTemplateRecord } from "../types";
 
+function zhipuTextModel(
+  slug: string,
+  displayName: string,
+  description: string,
+  contextWindow: number,
+  maxOutputTokens: number,
+) {
+  return {
+    slug,
+    displayName,
+    description,
+    contextWindow,
+    maxContextWindow: contextWindow,
+    maxOutputTokens,
+    reasoningEfforts: ["enabled", "none"],
+    capabilities: ["streaming", "function_calling", "parallel_tool_calls", "reasoning"],
+    inputModalities: ["text"],
+    truncationMode: "tokens",
+    truncationLimit: 10_000,
+  };
+}
+
+const zhipuDefaultModels = [
+  zhipuTextModel(
+    "glm-5.1",
+    "GLM-5.1",
+    "Zhipu latest flagship model with stronger coding and long-horizon agent work.",
+    200_000,
+    128_000,
+  ),
+  zhipuTextModel(
+    "glm-5",
+    "GLM-5",
+    "Zhipu high-intelligence foundation model for coding and agentic planning.",
+    200_000,
+    128_000,
+  ),
+  zhipuTextModel(
+    "glm-5-turbo",
+    "GLM-5-Turbo",
+    "Zhipu GLM-5 Turbo model optimized for long task continuity.",
+    200_000,
+    128_000,
+  ),
+  zhipuTextModel(
+    "glm-4.7",
+    "GLM-4.7",
+    "Zhipu high-intelligence model for dialogue, reasoning, agents, and coding.",
+    200_000,
+    128_000,
+  ),
+  zhipuTextModel(
+    "glm-4.7-flashx",
+    "GLM-4.7-FlashX",
+    "Zhipu lightweight high-speed model for general text tasks.",
+    200_000,
+    128_000,
+  ),
+  zhipuTextModel(
+    "glm-4.7-flash",
+    "GLM-4.7-Flash",
+    "Zhipu free GLM-4.7 base model.",
+    200_000,
+    128_000,
+  ),
+];
+
 export const previewTemplates: ProviderTemplateRecord[] = [
   {
     id: "deepseek",
@@ -98,5 +165,21 @@ export const previewTemplates: ProviderTemplateRecord[] = [
         truncationLimit: 10_000,
       },
     ],
+  },
+  {
+    id: "zhipu-api",
+    name: "Zhipu GLM API",
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    defaultModel: "glm-5.1",
+    wireApi: "chat",
+    defaultModels: zhipuDefaultModels,
+  },
+  {
+    id: "zhipu-coding-plan",
+    name: "Zhipu GLM Coding Plan",
+    baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
+    defaultModel: "glm-5.1",
+    wireApi: "chat",
+    defaultModels: zhipuDefaultModels,
   },
 ];
