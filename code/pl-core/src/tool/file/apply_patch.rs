@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use pl_protocol::PureError;
@@ -178,12 +179,37 @@ struct UpdateChunk {
     eof: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PlannedChange {
+    Add {
+        path: PathBuf,
+        content: String,
+        overwritten_content: Option<String>,
+    },
+    Update {
+        path: PathBuf,
+        old_content: String,
+        new_content: String,
+    },
+    Delete {
+        path: PathBuf,
+        content: String,
+    },
+    Move {
+        source: PathBuf,
+        target: PathBuf,
+        old_content: String,
+        new_content: String,
+        overwritten_target_content: Option<String>,
+    },
+}
+
 pub async fn apply_patch(patch: &str, paths: &WorkspacePaths) -> Result<PatchOutcome, PureError> {
-    let hunks = parse_patch(patch)?;
+    let changes = plan_patch(patch, paths).await?;
     let mut outcome = PatchOutcome::default();
 
-    for hunk in hunks {
-        if let Err(error) = apply_hunk(hunk, paths, &mut outcome).await {
+    for change in changes {
+        if let Err(error) = apply_change(change, &mut outcome).await {
             let error = error_message(error);
             return Err(tool_error(format!(
                 "{error}{}",
@@ -195,16 +221,128 @@ pub async fn apply_patch(patch: &str, paths: &WorkspacePaths) -> Result<PatchOut
     Ok(outcome)
 }
 
-async fn apply_hunk(
-    hunk: Hunk,
-    paths: &WorkspacePaths,
-    outcome: &mut PatchOutcome,
-) -> Result<(), PureError> {
-    match hunk {
-        Hunk::Add { path, content } => {
-            let target = paths.resolve_for_write(&path).await?;
-            paths.reject_symlink_write(&target).await?;
-            let overwritten_content = read_optional_text(&target).await?;
+async fn plan_patch(patch: &str, paths: &WorkspacePaths) -> Result<Vec<PlannedChange>, PureError> {
+    let hunks = parse_patch(patch)?;
+    let mut changes = Vec::new();
+    let mut exclusive_paths = HashSet::new();
+    let mut update_indices = HashMap::new();
+
+    for hunk in hunks {
+        match hunk {
+            Hunk::Add { path, content } => {
+                let target = paths.resolve_for_write(&path).await?;
+                paths.reject_symlink_write(&target).await?;
+                reserve_exclusive_patch_path(&mut exclusive_paths, &update_indices, &target)?;
+                let overwritten_content = read_optional_text(&target).await?;
+                changes.push(PlannedChange::Add {
+                    path: target,
+                    content,
+                    overwritten_content,
+                });
+            }
+            Hunk::Delete { path } => {
+                let target = paths.resolve_existing(&path).await?;
+                paths.reject_symlink_write(&target).await?;
+                reserve_exclusive_patch_path(&mut exclusive_paths, &update_indices, &target)?;
+                let metadata = tokio::fs::metadata(&target).await?;
+                if !metadata.is_file() {
+                    return Err(tool_error(format!(
+                        "cannot delete '{}': path is not a file",
+                        target.display()
+                    )));
+                }
+                let content = tokio::fs::read_to_string(&target).await.map_err(|error| {
+                    tool_error(format!("failed to read '{}': {error}", target.display()))
+                })?;
+                changes.push(PlannedChange::Delete {
+                    path: target,
+                    content,
+                });
+            }
+            Hunk::Update {
+                path,
+                move_path,
+                chunks,
+            } => {
+                let source = paths.resolve_existing(&path).await?;
+                paths.reject_symlink_write(&source).await?;
+
+                match move_path {
+                    Some(move_path) => {
+                        reserve_exclusive_patch_path(
+                            &mut exclusive_paths,
+                            &update_indices,
+                            &source,
+                        )?;
+                        let old_content =
+                            tokio::fs::read_to_string(&source).await.map_err(|error| {
+                                tool_error(format!(
+                                    "failed to read '{}': {error}",
+                                    source.display()
+                                ))
+                            })?;
+                        let new_content = if chunks.is_empty() {
+                            old_content.clone()
+                        } else {
+                            apply_chunks(&old_content, &source, &chunks)?
+                        };
+                        let target = paths.resolve_for_write(&move_path).await?;
+                        paths.reject_symlink_write(&target).await?;
+                        reserve_exclusive_patch_path(
+                            &mut exclusive_paths,
+                            &update_indices,
+                            &target,
+                        )?;
+                        let overwritten_target_content = read_optional_text(&target).await?;
+                        changes.push(PlannedChange::Move {
+                            source,
+                            target,
+                            old_content,
+                            new_content,
+                            overwritten_target_content,
+                        });
+                    }
+                    None => {
+                        ensure_path_not_exclusive(&exclusive_paths, &source)?;
+                        if let Some(index) = update_indices.get(&source).copied() {
+                            let PlannedChange::Update { new_content, .. } = &mut changes[index]
+                            else {
+                                unreachable!("plain update indices only point to update changes");
+                            };
+                            *new_content = apply_chunks(new_content, &source, &chunks)?;
+                        } else {
+                            let old_content =
+                                tokio::fs::read_to_string(&source).await.map_err(|error| {
+                                    tool_error(format!(
+                                        "failed to read '{}': {error}",
+                                        source.display()
+                                    ))
+                                })?;
+                            let new_content = apply_chunks(&old_content, &source, &chunks)?;
+                            let index = changes.len();
+                            changes.push(PlannedChange::Update {
+                                path: source.clone(),
+                                old_content,
+                                new_content,
+                            });
+                            update_indices.insert(source, index);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(changes)
+}
+
+async fn apply_change(change: PlannedChange, outcome: &mut PatchOutcome) -> Result<(), PureError> {
+    match change {
+        PlannedChange::Add {
+            path: target,
+            content,
+            overwritten_content,
+        } => {
             if let Some(parent) = target.parent() {
                 tokio::fs::create_dir_all(parent).await?;
             }
@@ -217,19 +355,10 @@ async fn apply_hunk(
                 overwritten_content,
             });
         }
-        Hunk::Delete { path } => {
-            let target = paths.resolve_existing(&path).await?;
-            paths.reject_symlink_write(&target).await?;
-            let metadata = tokio::fs::metadata(&target).await?;
-            if !metadata.is_file() {
-                return Err(tool_error(format!(
-                    "cannot delete '{}': path is not a file",
-                    target.display()
-                )));
-            }
-            let content = tokio::fs::read_to_string(&target).await.map_err(|error| {
-                tool_error(format!("failed to read '{}': {error}", target.display()))
-            })?;
+        PlannedChange::Delete {
+            path: target,
+            content,
+        } => {
             tokio::fs::remove_file(&target).await.map_err(|error| {
                 tool_error(format!("failed to delete '{}': {error}", target.display()))
             })?;
@@ -238,71 +367,87 @@ async fn apply_hunk(
                 content,
             });
         }
-        Hunk::Update {
-            path,
-            move_path,
-            chunks,
+        PlannedChange::Update {
+            path: source,
+            old_content,
+            new_content,
         } => {
-            let source = paths.resolve_existing(&path).await?;
-            paths.reject_symlink_write(&source).await?;
-            let old_content = tokio::fs::read_to_string(&source).await.map_err(|error| {
-                tool_error(format!("failed to read '{}': {error}", source.display()))
-            })?;
-            let new_content = if chunks.is_empty() {
-                old_content.clone()
-            } else {
-                apply_chunks(&old_content, &source, &chunks)?
-            };
-
-            match move_path {
-                Some(move_path) => {
-                    let target = paths.resolve_for_write(&move_path).await?;
-                    paths.reject_symlink_write(&target).await?;
-                    let overwritten_target_content = read_optional_text(&target).await?;
-                    if let Some(parent) = target.parent() {
-                        tokio::fs::create_dir_all(parent).await?;
-                    }
-                    tokio::fs::write(&target, &new_content)
-                        .await
-                        .map_err(|error| {
-                            tool_error(format!("failed to write '{}': {error}", target.display()))
-                        })?;
-                    let target_commit_index = outcome.committed.len();
-                    outcome.committed.push(CommittedChange::Add {
-                        path: target.clone(),
-                        content: new_content.clone(),
-                        overwritten_content: overwritten_target_content.clone(),
-                    });
-                    tokio::fs::remove_file(&source).await.map_err(|error| {
-                        tool_error(format!(
-                            "failed to remove original '{}': {error}",
-                            source.display()
-                        ))
-                    })?;
-                    outcome.committed[target_commit_index] = CommittedChange::Move {
-                        source,
-                        target,
-                        old_content,
-                        new_content,
-                        overwritten_target_content,
-                    };
-                }
-                None => {
-                    tokio::fs::write(&source, &new_content)
-                        .await
-                        .map_err(|error| {
-                            tool_error(format!("failed to write '{}': {error}", source.display()))
-                        })?;
-                    outcome.committed.push(CommittedChange::Update {
-                        path: source,
-                        old_content,
-                        new_content,
-                    });
-                }
+            tokio::fs::write(&source, &new_content)
+                .await
+                .map_err(|error| {
+                    tool_error(format!("failed to write '{}': {error}", source.display()))
+                })?;
+            outcome.committed.push(CommittedChange::Update {
+                path: source,
+                old_content,
+                new_content,
+            });
+        }
+        PlannedChange::Move {
+            source,
+            target,
+            old_content,
+            new_content,
+            overwritten_target_content,
+        } => {
+            if let Some(parent) = target.parent() {
+                tokio::fs::create_dir_all(parent).await?;
             }
+            tokio::fs::write(&target, &new_content)
+                .await
+                .map_err(|error| {
+                    tool_error(format!("failed to write '{}': {error}", target.display()))
+                })?;
+            let target_commit_index = outcome.committed.len();
+            outcome.committed.push(CommittedChange::Add {
+                path: target.clone(),
+                content: new_content.clone(),
+                overwritten_content: overwritten_target_content.clone(),
+            });
+            tokio::fs::remove_file(&source).await.map_err(|error| {
+                tool_error(format!(
+                    "failed to remove original '{}': {error}",
+                    source.display()
+                ))
+            })?;
+            outcome.committed[target_commit_index] = CommittedChange::Move {
+                source,
+                target,
+                old_content,
+                new_content,
+                overwritten_target_content,
+            };
         }
     }
     Ok(())
+}
+
+fn reserve_exclusive_patch_path(
+    seen: &mut HashSet<PathBuf>,
+    update_indices: &HashMap<PathBuf, usize>,
+    path: &Path,
+) -> Result<(), PureError> {
+    if update_indices.contains_key(path) {
+        return Err(conflicting_patch_path(path));
+    }
+    if seen.insert(path.to_path_buf()) {
+        return Ok(());
+    }
+    Err(conflicting_patch_path(path))
+}
+
+fn ensure_path_not_exclusive(seen: &HashSet<PathBuf>, path: &Path) -> Result<(), PureError> {
+    if seen.contains(path) {
+        return Err(conflicting_patch_path(path));
+    }
+    Ok(())
+}
+
+fn conflicting_patch_path(path: &Path) -> PureError {
+    tool_error(format!(
+        "patch has conflicting file operations for '{}'; only plain Update File hunks may repeat the same file",
+        path.display()
+    ))
 }
 
 async fn read_optional_text(path: &Path) -> Result<Option<String>, PureError> {
