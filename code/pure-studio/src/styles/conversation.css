@@ -945,6 +945,7 @@ button.status-item {
 }
 
 .timeline-entry-tool .timeline-node,
+.timeline-entry-tool-group .timeline-node,
 .timeline-entry-subagent .timeline-node {
   background: #33bd76;
 }
@@ -1108,12 +1109,22 @@ button.status-item {
 }
 
 .timeline-entry-tool .timeline-entry-card,
+.timeline-entry-tool-group .timeline-entry-card,
 .timeline-entry-subagent .timeline-entry-card {
   padding: 0 0 12px;
   border: 0;
   border-bottom: 1px solid #e7edf4;
   border-radius: 0;
   background: transparent;
+}
+
+.timeline-entry-message.role-assistant .timeline-entry-card {
+  padding-bottom: 14px;
+}
+
+.timeline-entry-message.role-assistant .timeline-message-content {
+  color: #182538;
+  font-size: 15px;
 }
 
 .timeline-entry-subagent .timeline-entry-card {
@@ -1137,8 +1148,26 @@ button.status-item {
 .timeline-entry-trace.status-failed .timeline-entry-card,
 .timeline-entry-trace.status-errored .timeline-entry-card,
 .timeline-entry-trace.status-budgetLimited .timeline-entry-card,
+.timeline-entry-trace.status-denied .timeline-entry-card,
 .timeline-entry-trace.status-interrupted .timeline-entry-card {
   background: transparent;
+}
+
+.timeline-entry-trace .timeline-entry-card {
+  padding: 0 0 12px;
+  border: 0;
+  border-bottom: 1px solid #edf2f6;
+  border-radius: 0;
+  background: transparent;
+}
+
+.timeline-entry-trace .timeline-entry-head {
+  margin-bottom: 2px;
+}
+
+.timeline-entry-trace .timeline-entry-head strong,
+.timeline-entry-trace .timeline-result {
+  color: #6c7b8f;
 }
 
 .timeline-thought,
@@ -1224,6 +1253,72 @@ button.status-item {
   background: #f4f7fa;
 }
 
+.timeline-entry-tool-group .timeline-entry-head {
+  align-items: flex-start;
+  margin-bottom: 2px;
+}
+
+.timeline-entry-tool-group .timeline-entry-head strong {
+  color: #526174;
+  font-weight: 750;
+}
+
+.timeline-tool-group-summary {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.timeline-tool-chip {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 2px 7px;
+  border: 1px solid #dce6ee;
+  border-radius: 999px;
+  color: #536478;
+  background: #f6f9fb;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.timeline-tool-group-details {
+  margin-top: 6px;
+}
+
+.timeline-tool-group-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.timeline-tool-group-row {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #e2e9f0;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.timeline-tool-group-row-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.timeline-tool-group-row-head strong {
+  flex: 0 0 auto;
+  color: #334255;
+  font-size: 12px;
+}
+
+.timeline-tool-group-row-head .timeline-badge {
+  margin-left: auto;
+}
+
 .timeline-task {
   margin: 0 0 5px;
   color: #29384a;
@@ -1261,7 +1356,8 @@ button.status-item {
   font-weight: 800;
 }
 
-.timeline-entry-tool .timeline-badge {
+.timeline-entry-tool .timeline-badge,
+.timeline-entry-tool-group .timeline-badge {
   margin-left: auto;
 }
 
@@ -1275,7 +1371,10 @@ button.status-item {
 
 .timeline-entry-tool .timeline-badge.status-completed,
 .timeline-entry-tool .timeline-badge.status-result_ready,
-.timeline-entry-tool .timeline-badge.status-approved {
+.timeline-entry-tool .timeline-badge.status-approved,
+.timeline-entry-tool-group .timeline-badge.status-completed,
+.timeline-entry-tool-group .timeline-badge.status-result_ready,
+.timeline-entry-tool-group .timeline-badge.status-approved {
   padding: 0;
   color: #6f7f92;
   background: transparent;

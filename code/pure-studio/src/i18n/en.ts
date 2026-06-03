@@ -73,6 +73,7 @@ const en = {
 
   timeline: {
     turn: "Turn",
+    notice: "Notice",
   },
 
   roles: {
@@ -131,6 +132,22 @@ const en = {
     result: "Result",
     details: "Details",
     scrollToBottom: "Scroll to bottom",
+  },
+
+  toolGroup: {
+    title: "Tools",
+    readFiles: "Read {{count}} files",
+    readFilesOne: "Read {{count}} file",
+    editFiles: "Edit {{count}} files",
+    editFilesOne: "Edit {{count}} file",
+    runCommands: "Run {{count}} commands",
+    runCommandsOne: "Run {{count}} command",
+    coordinateAgents: "Coordinate {{count}} agents",
+    coordinateAgentsOne: "Coordinate {{count}} agent",
+    useTools: "Use {{count}} tools",
+    useToolsOne: "Use {{count}} tool",
+    details: "{{count}} tool calls",
+    details_one: "{{count}} tool call",
   },
 
   conversation: {
