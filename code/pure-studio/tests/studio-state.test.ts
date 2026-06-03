@@ -64,6 +64,21 @@ function textItem(itemId: string, sequence: number, content: string): TimelineIt
   };
 }
 
+function thinkingItem(itemId: string, turnId: string, sequence: number, content: string): TimelineItem {
+  return {
+    turnId,
+    itemId,
+    sequence,
+    kind: "thinking",
+    status: "completed",
+    createdAt: sequence,
+    updatedAt: sequence,
+    role: null,
+    content: "",
+    thinkingChunks: [{ chunkIndex: 0, content }],
+  };
+}
+
 function toolItem(
   itemId: string,
   turnId: string,
@@ -367,6 +382,83 @@ function consecutiveToolsCollapseIntoToolGroup() {
   ]);
 }
 
+function thinkingDoesNotBreakToolGroup() {
+  const entries = entriesForTimeline([
+    toolItem("turn-1-read-a", "turn-1", 1, "read_file", { path: "a.ts" }),
+    thinkingItem("turn-1-thinking", "turn-1", 2, "checking the next file"),
+    toolItem("turn-1-read-b", "turn-1", 3, "read_file", { path: "b.ts" }),
+  ]);
+
+  assertDeepEqual(entries.map((entry) => entry.kind), ["toolGroup", "thought"]);
+  const group = entries[0];
+  if (group?.kind !== "toolGroup") {
+    throw new Error(`Expected toolGroup entry, got ${group?.kind}`);
+  }
+  assertEqual(group.items.length, 2);
+  assertDeepEqual(group.summaryParts, [{ kind: "readFiles", count: 2 }]);
+  const thought = entries[1];
+  if (thought?.kind !== "thought") {
+    throw new Error(`Expected thought entry, got ${thought?.kind}`);
+  }
+  assertEqual(thought.content, "checking the next file");
+}
+
+function inferenceDoesNotBreakToolGroup() {
+  const entries = entriesForTimeline([
+    toolItem("turn-1-read-a", "turn-1", 1, "read_file", { path: "a.ts" }),
+    inferenceItem("turn-1-inference", "turn-1", 2),
+    toolItem("turn-1-read-b", "turn-1", 3, "read_file", { path: "b.ts" }),
+  ]);
+
+  assertDeepEqual(entries.map((entry) => entry.kind), ["toolGroup"]);
+  const group = entries[0];
+  if (group?.kind !== "toolGroup") {
+    throw new Error(`Expected toolGroup entry, got ${group?.kind}`);
+  }
+  assertEqual(group.items.length, 2);
+  assertDeepEqual(group.summaryParts, [{ kind: "readFiles", count: 2 }]);
+}
+
+function repeatedThinkingItemsCollapseIntoOneThought() {
+  const entries = entriesForTimeline([
+    toolItem("turn-1-read-a", "turn-1", 1, "read_file", { path: "a.ts" }),
+    thinkingItem("turn-1-thinking-a", "turn-1", 2, "checking a"),
+    toolItem("turn-1-read-b", "turn-1", 3, "read_file", { path: "b.ts" }),
+    inferenceItem("turn-1-inference", "turn-1", 4),
+    thinkingItem("turn-1-thinking-b", "turn-1", 5, "checking b"),
+    toolItem("turn-1-read-c", "turn-1", 6, "read_file", { path: "c.ts" }),
+  ]);
+
+  assertDeepEqual(entries.map((entry) => entry.kind), ["toolGroup", "thought"]);
+  const group = entries[0];
+  const thought = entries[1];
+  if (group?.kind !== "toolGroup") {
+    throw new Error(`Expected toolGroup entry, got ${group?.kind}`);
+  }
+  if (thought?.kind !== "thought") {
+    throw new Error(`Expected thought entry, got ${thought?.kind}`);
+  }
+  assertEqual(group.items.length, 3);
+  assertDeepEqual(group.summaryParts, [{ kind: "readFiles", count: 3 }]);
+  assertEqual(thought.content, "checking a\n\nchecking b");
+}
+
+function thinkingFromDifferentTurnsDoesNotMerge() {
+  const entries = entriesForTimeline([
+    thinkingItem("turn-1-thinking", "turn-1", 1, "first turn"),
+    thinkingItem("turn-2-thinking", "turn-2", 2, "second turn"),
+  ]);
+
+  assertDeepEqual(entries.map((entry) => entry.kind), ["thought", "thought"]);
+  const first = entries[0];
+  const second = entries[1];
+  if (first?.kind !== "thought" || second?.kind !== "thought") {
+    throw new Error("Expected both entries to be thought");
+  }
+  assertEqual(first.content, "first turn");
+  assertEqual(second.content, "second turn");
+}
+
 function assistantTextBreaksToolGroup() {
   const entries = entriesForTimeline([
     toolItem("turn-1-read", "turn-1", 1, "read_file", { path: "a.ts" }),
@@ -495,6 +587,10 @@ staleTimelineLoadDoesNotOverwriteLiveDelta();
 runPromptLoadedWithEmptyItemsDoesNotDeleteLiveContent();
 completedSnapshotKeepsFirstItemSequence();
 consecutiveToolsCollapseIntoToolGroup();
+thinkingDoesNotBreakToolGroup();
+inferenceDoesNotBreakToolGroup();
+repeatedThinkingItemsCollapseIntoOneThought();
+thinkingFromDifferentTurnsDoesNotMerge();
 assistantTextBreaksToolGroup();
 toolsFromDifferentTurnsDoNotMerge();
 toolGroupStatusUsesPriority();

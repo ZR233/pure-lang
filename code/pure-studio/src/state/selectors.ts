@@ -33,6 +33,9 @@ export type TimelineEntry =
   | { kind: "agent"; key: string; item: TimelineItem }
   | { kind: "trace"; key: string; item: TimelineItem };
 
+type ThoughtEntry = Extract<TimelineEntry, { kind: "thought" }>;
+type ToolGroupEntry = Extract<TimelineEntry, { kind: "toolGroup" }>;
+
 export function selectSelectedProject(state: StudioState) {
   return state.projects.find((project) => project.id === state.selectedProjectId) ?? null;
 }
@@ -43,12 +46,54 @@ export function selectSelectedSession(state: StudioState) {
 
 export function selectTimelineEntries(state: StudioState): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
-  let toolGroup: TimelineItem[] = [];
+  let activeThought: ThoughtEntry | null = null;
+  let activeThoughtTurnId: string | null = null;
+  let activeToolGroup: ToolGroupEntry | null = null;
 
-  const flushToolGroup = () => {
-    if (toolGroup.length === 0) return;
-    entries.push(buildToolGroupEntry(toolGroup));
-    toolGroup = [];
+  const closeThought = () => {
+    activeThought = null;
+    activeThoughtTurnId = null;
+  };
+
+  const closeToolGroup = () => {
+    activeToolGroup = null;
+  };
+
+  const closeDisplaySegment = () => {
+    closeThought();
+    closeToolGroup();
+  };
+
+  const closeCrossTurnSegment = (turnId: string) => {
+    const thoughtCrossedTurn = activeThoughtTurnId !== null && activeThoughtTurnId !== turnId;
+    const toolCrossedTurn = activeToolGroup !== null && activeToolGroup.turnId !== turnId;
+    if (thoughtCrossedTurn || toolCrossedTurn) {
+      closeDisplaySegment();
+    }
+  };
+
+  const appendThinkingItem = (item: TimelineItem) => {
+    closeCrossTurnSegment(item.turnId);
+    const content = thinkingContent(item);
+    if (!content.trim()) return;
+    if (activeThought && activeThoughtTurnId === item.turnId) {
+      activeThought.content = appendThoughtContent(activeThought.content, content);
+      return;
+    }
+    activeThought = { kind: "thought", key: `thinking-${item.itemId}`, content };
+    activeThoughtTurnId = item.turnId;
+    entries.push(activeThought);
+  };
+
+  const appendToolItem = (item: TimelineItem) => {
+    closeCrossTurnSegment(item.turnId);
+    if (!activeToolGroup || activeToolGroup.turnId !== item.turnId) {
+      activeToolGroup = buildToolGroupEntry([item]);
+      entries.push(activeToolGroup);
+      return;
+    }
+    activeToolGroup.items.push(item);
+    refreshToolGroupEntry(activeToolGroup);
   };
 
   for (const itemId of state.timelineOrder) {
@@ -57,7 +102,7 @@ export function selectTimelineEntries(state: StudioState): TimelineEntry[] {
     if (!item) continue;
     switch (item.kind) {
       case "text":
-        flushToolGroup();
+        closeDisplaySegment();
         if (!item.content.trim()) break;
         entries.push({
           kind: "message",
@@ -67,40 +112,43 @@ export function selectTimelineEntries(state: StudioState): TimelineEntry[] {
         });
         break;
       case "thinking": {
-        flushToolGroup();
-        const content = item.thinkingChunks
-          .slice()
-          .sort((left, right) => left.chunkIndex - right.chunkIndex)
-          .map((chunk) => chunk.content)
-          .join("");
-        if (content.trim()) {
-          entries.push({ kind: "thought", key: `thinking-${item.itemId}`, content });
-        }
+        appendThinkingItem(item);
         break;
       }
       case "tool":
-        if (toolGroup.length > 0 && toolGroup[0].turnId !== item.turnId) {
-          flushToolGroup();
-        }
-        toolGroup.push(item);
+        appendToolItem(item);
         break;
       case "agent":
-        flushToolGroup();
+        closeDisplaySegment();
         entries.push({ kind: "agent", key: `agent-${item.itemId}`, item });
         break;
       case "turn":
-        flushToolGroup();
+        closeDisplaySegment();
         if (shouldShowTurnTrace(item)) {
           entries.push({ kind: "trace", key: `trace-${item.itemId}`, item });
         }
         break;
       case "inference":
-        flushToolGroup();
         break;
     }
   }
-  flushToolGroup();
   return entries;
+}
+
+function thinkingContent(item: TimelineItem): string {
+  return item.thinkingChunks
+    .slice()
+    .sort((left, right) => left.chunkIndex - right.chunkIndex)
+    .map((chunk) => chunk.content)
+    .join("");
+}
+
+function appendThoughtContent(current: string, next: string): string {
+  const left = current.trimEnd();
+  const right = next.trimStart();
+  if (!left) return next;
+  if (!right) return current;
+  return `${left}\n\n${right}`;
 }
 
 function shouldShowTurnTrace(item: TimelineItem): boolean {
@@ -131,6 +179,14 @@ function buildToolGroupEntry(items: TimelineItem[]): Extract<TimelineEntry, { ki
     summaryParts: summarizeToolGroup(items),
     status: aggregateToolStatus(items),
   };
+}
+
+function refreshToolGroupEntry(entry: ToolGroupEntry) {
+  const first = entry.items[0];
+  const last = entry.items[entry.items.length - 1];
+  entry.key = `tool-group-${first.itemId}-${last.itemId}`;
+  entry.summaryParts = summarizeToolGroup(entry.items);
+  entry.status = aggregateToolStatus(entry.items);
 }
 
 function summarizeToolGroup(items: TimelineItem[]): ToolGroupSummaryPart[] {
