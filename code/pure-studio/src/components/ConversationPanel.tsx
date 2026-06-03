@@ -694,25 +694,22 @@ export function ConversationPanel({
       didRenderEntriesRef.current = true;
       return;
     }
-    if (!isBusy) {
-      return;
-    }
     if (followModeRef.current === "following") {
       scrollToLatest("preserve");
     }
-  }, [entries, isBusy]);
+  }, [entries]);
 
   useEffect(() => {
     const timeline = timelineRef.current;
     if (!timeline) return;
     if (typeof ResizeObserver === "undefined") {
-      if (isBusy && followModeRef.current === "following") {
+      if (followModeRef.current === "following") {
         scrollToLatest("preserve");
       }
       return;
     }
     const observer = new ResizeObserver(() => {
-      if (isBusy && followModeRef.current === "following") {
+      if (followModeRef.current === "following") {
         scrollToLatest("preserve");
       } else if (messageStreamRef.current) {
         setShowScrollButton(!isNearBottom(messageStreamRef.current));
@@ -720,7 +717,7 @@ export function ConversationPanel({
     });
     observer.observe(timeline);
     return () => observer.disconnect();
-  }, [isBusy]);
+  }, [entries.length]);
 
   useEffect(() => {
     if (isBusy && !prevBusyRef.current) {

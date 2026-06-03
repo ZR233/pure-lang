@@ -675,15 +675,16 @@ async fn execute_tool_calls(
             .call_id
             .clone()
             .unwrap_or_else(|| tool_call.id.clone());
+        let timeline_item_id = namespaced_tool_timeline_item_id(context.session_id, &tool_call_id);
         let mut item = recorder.tool_item(
             context.session_id,
-            &tool_call_id,
+            &timeline_item_id,
             tool_call.name.clone(),
             tool_call.payload_text(),
             tool_call.call_id.clone(),
             Some(tool_call.id.clone()),
         );
-        initial_items.insert(tool_call_id.clone(), item.clone());
+        initial_items.insert(timeline_item_id.clone(), item.clone());
         recorder.start_item(item.clone());
         budget_tracker.record_tool_call(&tool_call.name);
 
@@ -701,7 +702,7 @@ async fn execute_tool_calls(
             recorder.fail_item(item, format!("Unknown tool: {}", tool_call.name));
             scheduled.push(ScheduledToolExecution {
                 tool_call: tool_call.clone(),
-                item: initial_items[&tool_call_id].clone(),
+                item: initial_items[&timeline_item_id].clone(),
                 future: Box::pin(ready_tool_execution_record(
                     tool_call.clone(),
                     format!("Unknown tool: {}", tool_call.name),
@@ -776,7 +777,7 @@ async fn execute_tool_calls(
                 recorder.complete_item(item);
                 scheduled.push(ScheduledToolExecution {
                     tool_call: tool_call.clone(),
-                    item: initial_items[&tool_call_id].clone(),
+                    item: initial_items[&timeline_item_id].clone(),
                     future: Box::pin(ready_tool_execution_record(
                         tool_call.clone(),
                         format!("Tool execution denied: {reason}"),
@@ -813,6 +814,13 @@ async fn execute_tool_calls(
         records.push(record);
     }
     records
+}
+
+fn namespaced_tool_timeline_item_id(turn_id: &str, tool_call_id: &str) -> String {
+    if tool_call_id.starts_with(turn_id) {
+        return tool_call_id.to_string();
+    }
+    format!("{turn_id}-{tool_call_id}")
 }
 
 async fn ready_tool_execution_record(
@@ -1328,6 +1336,18 @@ mod tests {
         assert!(!tool_results_include_recoverable_subagent_capacity(
             &records[1..]
         ));
+    }
+
+    #[test]
+    fn tool_timeline_item_ids_are_scoped_to_turn() {
+        assert_eq!(
+            namespaced_tool_timeline_item_id("turn-1", "call_0"),
+            "turn-1-call_0"
+        );
+        assert_eq!(
+            namespaced_tool_timeline_item_id("turn-1", "turn-1-call_0"),
+            "turn-1-call_0"
+        );
     }
 
     #[test]

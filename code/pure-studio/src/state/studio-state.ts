@@ -41,6 +41,7 @@ export type StudioState = {
   agentTimelineEvents: AgentTimelineEvent[];
   timelineItems: Map<string, TimelineItem>;
   timelineOrder: string[];
+  timelineMaxSequence: number;
   sessionRuntime: SessionRuntime | null;
   approvals: ToolApprovalRequest[];
   settingsOpen: boolean;
@@ -103,6 +104,7 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   agentTimelineEvents: [],
   timelineItems: new Map(),
   timelineOrder: [],
+  timelineMaxSequence: -1,
   sessionRuntime: null,
   approvals: [],
   settingsOpen: false,
@@ -125,6 +127,9 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
         agents: mergeAgents([], action.payload.agents ?? []),
         sessionRuntime: action.payload.sessionRuntime ?? null,
+        timelineItems: new Map(),
+        timelineOrder: [],
+        timelineMaxSequence: -1,
         ...configFields(state.selectedProviderId, action.payload.config),
         status: action.status,
         turnPhase: "idle",
@@ -133,7 +138,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, status: action.status };
     case "timelineLoaded":
       if (action.sessionId !== state.selectedSessionId) return state;
-      return replaceTimelineItems(state, action.items ?? []);
+      return mergeOrReplaceLoadedTimeline(state, action.items ?? []);
     case "timelineLoadFailed":
       if (action.sessionId !== state.selectedSessionId) return state;
       return { ...state, status: action.status };
@@ -149,6 +154,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         sessionRuntime: action.payload.sessionRuntime ?? null,
         timelineItems: new Map(),
         timelineOrder: [],
+        timelineMaxSequence: -1,
         approvals: [],
         status: action.status,
         turnPhase: "idle",
@@ -165,6 +171,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         sessionRuntime: action.payload.sessionRuntime ?? null,
         timelineItems: new Map(),
         timelineOrder: [],
+        timelineMaxSequence: -1,
         approvals: [],
         status: action.status,
         turnPhase: "idle",
@@ -363,8 +370,16 @@ function replaceTimelineItems(state: StudioState, items: TimelineItem[]): Studio
     ...state,
     timelineItems: new Map<string, TimelineItem>(),
     timelineOrder: [],
+    timelineMaxSequence: -1,
   };
   return mergeTimelineItems(next, items);
+}
+
+function mergeOrReplaceLoadedTimeline(state: StudioState, items: TimelineItem[]): StudioState {
+  if (isStaleTimelineSnapshot(state, items)) {
+    return mergeMissingTimelineItems(state, items);
+  }
+  return replaceTimelineItems(state, items);
 }
 
 function removeOptimisticTimelineItems(state: StudioState): StudioState {
@@ -378,6 +393,7 @@ function removeOptimisticTimelineItems(state: StudioState): StudioState {
     ...state,
     timelineItems,
     timelineOrder: state.timelineOrder.filter((itemId) => !itemId.startsWith("optimistic-")),
+    timelineMaxSequence: maxTimelineSequence([...timelineItems.values()]),
   };
 }
 
@@ -385,6 +401,15 @@ export function mergeTimelineItems(state: StudioState, incoming: TimelineItem[])
   let next = state;
   for (const item of incoming ?? []) {
     if (!item?.itemId) continue;
+    next = upsertTimelineItem(next, item);
+  }
+  return next;
+}
+
+function mergeMissingTimelineItems(state: StudioState, incoming: TimelineItem[]): StudioState {
+  let next = state;
+  for (const item of incoming ?? []) {
+    if (!item?.itemId || next.timelineItems.has(item.itemId)) continue;
     next = upsertTimelineItem(next, item);
   }
   return next;
@@ -404,7 +429,20 @@ function upsertTimelineItem(state: StudioState, item: TimelineItem): StudioState
         const rightItem = timelineItems.get(right);
         return (leftItem?.sequence ?? 0) - (rightItem?.sequence ?? 0);
       });
-  return { ...state, timelineItems, timelineOrder };
+  return {
+    ...state,
+    timelineItems,
+    timelineOrder,
+    timelineMaxSequence: Math.max(state.timelineMaxSequence, item.sequence ?? -1),
+  };
+}
+
+function isStaleTimelineSnapshot(state: StudioState, items: TimelineItem[]): boolean {
+  return state.timelineOrder.length > 0 && maxTimelineSequence(items) < state.timelineMaxSequence;
+}
+
+function maxTimelineSequence(items: TimelineItem[]): number {
+  return items.reduce((max, item) => Math.max(max, item?.sequence ?? -1), -1);
 }
 
 function mergeTimelineItem(existing: TimelineItem | undefined, item: TimelineItem): TimelineItem {
