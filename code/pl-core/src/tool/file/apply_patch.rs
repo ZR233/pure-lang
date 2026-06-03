@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use pl_protocol::PureError;
@@ -112,14 +112,19 @@ struct UpdateChunk {
 pub async fn plan_patch(patch: &str, paths: &WorkspacePaths) -> Result<PatchPlan, PureError> {
     let hunks = parse_patch(patch)?;
     let mut changes = Vec::new();
-    let mut touched_paths = HashSet::new();
+    let mut exclusive_paths = HashSet::new();
+    let mut update_indices = HashMap::new();
 
     for hunk in hunks {
         match hunk {
             Hunk::Add { path, content } => {
                 let target = paths.resolve_for_write(&path).await?;
                 paths.reject_symlink_write(&target).await?;
-                reserve_patch_path(&mut touched_paths, &target)?;
+                reserve_exclusive_patch_path(
+                    &mut exclusive_paths,
+                    &update_indices,
+                    &target,
+                )?;
                 if tokio::fs::try_exists(&target).await? {
                     return Err(tool_error(format!(
                         "cannot add '{}': target already exists",
@@ -134,7 +139,11 @@ pub async fn plan_patch(patch: &str, paths: &WorkspacePaths) -> Result<PatchPlan
             Hunk::Delete { path } => {
                 let target = paths.resolve_existing(&path).await?;
                 paths.reject_symlink_write(&target).await?;
-                reserve_patch_path(&mut touched_paths, &target)?;
+                reserve_exclusive_patch_path(
+                    &mut exclusive_paths,
+                    &update_indices,
+                    &target,
+                )?;
                 let metadata = tokio::fs::metadata(&target).await?;
                 if !metadata.is_file() {
                     return Err(tool_error(format!(
@@ -151,38 +160,67 @@ pub async fn plan_patch(patch: &str, paths: &WorkspacePaths) -> Result<PatchPlan
             } => {
                 let source = paths.resolve_existing(&path).await?;
                 paths.reject_symlink_write(&source).await?;
-                reserve_patch_path(&mut touched_paths, &source)?;
-                let old_content = tokio::fs::read_to_string(&source).await.map_err(|error| {
-                    tool_error(format!("failed to read '{}': {error}", source.display()))
-                })?;
-                let new_content = if chunks.is_empty() {
-                    old_content.clone()
-                } else {
-                    apply_chunks(&old_content, &source, &chunks)?
-                };
-                let mut delete_after_update = None;
-                let target = match move_path {
+
+                match move_path {
                     Some(move_path) => {
+                        reserve_exclusive_patch_path(
+                            &mut exclusive_paths,
+                            &update_indices,
+                            &source,
+                        )?;
+                        let old_content = tokio::fs::read_to_string(&source).await.map_err(
+                            |error| {
+                                tool_error(format!("failed to read '{}': {error}", source.display()))
+                            },
+                        )?;
+                        let new_content = if chunks.is_empty() {
+                            old_content.clone()
+                        } else {
+                            apply_chunks(&old_content, &source, &chunks)?
+                        };
                         let target = paths.resolve_for_write(&move_path).await?;
                         paths.reject_symlink_write(&target).await?;
-                        reserve_patch_path(&mut touched_paths, &target)?;
+                        reserve_exclusive_patch_path(
+                            &mut exclusive_paths,
+                            &update_indices,
+                            &target,
+                        )?;
                         if tokio::fs::try_exists(&target).await? {
                             return Err(tool_error(format!(
                                 "cannot move to '{}': target already exists",
                                 target.display()
                             )));
                         }
-                        delete_after_update = Some(source.clone());
-                        target
+                        changes.push(PlannedChange::Update {
+                            path: target,
+                            content: new_content,
+                        });
+                        changes.push(PlannedChange::Delete { path: source });
                     }
-                    None => source,
-                };
-                changes.push(PlannedChange::Update {
-                    path: target,
-                    content: new_content,
-                });
-                if let Some(path) = delete_after_update {
-                    changes.push(PlannedChange::Delete { path });
+                    None => {
+                        ensure_path_not_exclusive(&exclusive_paths, &source)?;
+                        if let Some(index) = update_indices.get(&source).copied() {
+                            let PlannedChange::Update { content, .. } = &mut changes[index] else {
+                                unreachable!("plain update indices only point to update changes");
+                            };
+                            *content = apply_chunks(content.as_str(), &source, &chunks)?;
+                        } else {
+                            let old_content =
+                                tokio::fs::read_to_string(&source).await.map_err(|error| {
+                                    tool_error(format!(
+                                        "failed to read '{}': {error}",
+                                        source.display()
+                                    ))
+                                })?;
+                            let new_content = apply_chunks(&old_content, &source, &chunks)?;
+                            let index = changes.len();
+                            changes.push(PlannedChange::Update {
+                                path: source.clone(),
+                                content: new_content,
+                            });
+                            update_indices.insert(source, index);
+                        }
+                    }
                 }
             }
         }
@@ -468,14 +506,32 @@ fn find_sequence(lines: &[String], pattern: &[String], start: usize, eof: bool) 
     None
 }
 
-fn reserve_patch_path(seen: &mut HashSet<PathBuf>, path: &Path) -> Result<(), PureError> {
+fn reserve_exclusive_patch_path(
+    seen: &mut HashSet<PathBuf>,
+    update_indices: &HashMap<PathBuf, usize>,
+    path: &Path,
+) -> Result<(), PureError> {
+    if update_indices.contains_key(path) {
+        return Err(conflicting_patch_path(path));
+    }
     if seen.insert(path.to_path_buf()) {
         return Ok(());
     }
-    Err(tool_error(format!(
-        "patch touches '{}' more than once; combine edits for one file into a single hunk with multiple @@ chunks",
+    Err(conflicting_patch_path(path))
+}
+
+fn ensure_path_not_exclusive(seen: &HashSet<PathBuf>, path: &Path) -> Result<(), PureError> {
+    if seen.contains(path) {
+        return Err(conflicting_patch_path(path));
+    }
+    Ok(())
+}
+
+fn conflicting_patch_path(path: &Path) -> PureError {
+    tool_error(format!(
+        "patch has conflicting file operations for '{}'; only plain Update File hunks may repeat the same file",
         path.display()
-    )))
+    ))
 }
 
 fn tool_error(error: impl std::fmt::Display) -> PureError {
