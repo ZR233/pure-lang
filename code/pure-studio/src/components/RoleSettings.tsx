@@ -7,6 +7,7 @@ type RoleSettingsProps = {
   roles: RoleRecord[];
   providers: ProviderRecord[];
   setRoles: Dispatch<SetStateAction<RoleRecord[]>>;
+  onSaveRoles: (roles: RoleRecord[]) => Promise<boolean>;
 };
 
 const ROLE_I18N_KEYS: Record<RoleKey, { label: string; hint: string }> = {
@@ -71,15 +72,16 @@ export function normalizeRolesForProviders(
   });
 }
 
-export function RoleSettings({ roles, providers, setRoles }: RoleSettingsProps) {
+export function RoleSettings({ roles, providers, setRoles, onSaveRoles }: RoleSettingsProps) {
   const { t } = useTranslation();
   const normalizedRoles = normalizeRolesForProviders(roles, providers);
 
   function replaceRole(nextRole: RoleRecord) {
-    setRoles((current) => {
-      const normalized = normalizeRolesForProviders(current, providers);
-      return normalized.map((role) => (role.key === nextRole.key ? nextRole : role));
-    });
+    const nextRoles = normalizedRoles.map((role) =>
+      role.key === nextRole.key ? nextRole : role,
+    );
+    setRoles(nextRoles);
+    void onSaveRoles(nextRoles);
   }
 
   function changeProvider(role: RoleRecord, providerId: string) {

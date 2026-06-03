@@ -1,7 +1,13 @@
-import { ArrowLeft, RefreshCw, Save } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+import type { Dispatch, SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 import type { SettingsTab } from "../state/studio-state";
-import type { ProviderRecord, ProviderTemplateRecord, RoleRecord } from "../types";
+import type {
+  ProviderRecord,
+  ProviderSettingsSaveSnapshot,
+  ProviderTemplateRecord,
+  RoleRecord,
+} from "../types";
 import { ProviderSettings } from "./ProviderSettings";
 import { RoleSettings } from "./RoleSettings";
 import { SkillsSettings } from "./SkillsSettings";
@@ -15,17 +21,11 @@ type SettingsPageProps = {
   selectedProviderId: string | null;
   providerSearch: string;
   configExists: boolean;
-  configToml: string;
-  setProviders: React.Dispatch<React.SetStateAction<ProviderRecord[]>>;
-  setRoles: React.Dispatch<React.SetStateAction<RoleRecord[]>>;
-  setSelectedProviderId: React.Dispatch<React.SetStateAction<string | null>>;
-  setProviderSearch: React.Dispatch<React.SetStateAction<string>>;
-  setConfigToml: React.Dispatch<React.SetStateAction<string>>;
+  setRoles: Dispatch<SetStateAction<RoleRecord[]>>;
+  setProviderSearch: Dispatch<SetStateAction<string>>;
   onClose: () => void;
   onSetActiveTab: (tab: SettingsTab) => void;
-  onSaveProviderSettings: () => void;
-  onSaveConfig: () => void;
-  onReloadConfig: () => void;
+  onSaveProviderSettings: (snapshot?: ProviderSettingsSaveSnapshot) => Promise<boolean>;
 };
 
 const SETTINGS_TABS: SettingsTab[] = ["providers", "skills", "roles", "security", "general"];
@@ -42,15 +42,10 @@ export function SettingsPage({
   onClose,
   onSetActiveTab,
   onSaveProviderSettings,
-  onSaveConfig,
-  onReloadConfig,
-  setProviders,
   setRoles,
-  setSelectedProviderId,
   setProviderSearch,
 }: SettingsPageProps) {
   const { t } = useTranslation();
-  const showSaveAction = activeSettingsTab !== "skills";
 
   return (
     <section className="settings-page">
@@ -61,25 +56,6 @@ export function SettingsPage({
         <div>
           <h1>{t("settings.title")}</h1>
           <p>{configExists ? "~/.pure/config.toml" : t("settings.defaultConfigDraft")}</p>
-        </div>
-        <div className="settings-actions">
-          <button onClick={onReloadConfig}>
-            <RefreshCw size={16} />
-            {t("actions.reload")}
-          </button>
-          {showSaveAction ? (
-            <button
-              className="primary"
-              onClick={() =>
-                activeSettingsTab === "providers" || activeSettingsTab === "roles"
-                  ? onSaveProviderSettings()
-                  : onSaveConfig()
-              }
-            >
-              <Save size={16} />
-              {t("actions.save")}
-            </button>
-          ) : null}
         </div>
       </header>
 
@@ -101,12 +77,16 @@ export function SettingsPage({
           templates={providerTemplates}
           selectedProviderId={selectedProviderId}
           providerSearch={providerSearch}
-          setProviders={setProviders}
-          setSelectedProviderId={setSelectedProviderId}
           setProviderSearch={setProviderSearch}
+          onSaveProviderSettings={onSaveProviderSettings}
         />
       ) : activeSettingsTab === "roles" ? (
-        <RoleSettings providers={providers} roles={roles} setRoles={setRoles} />
+        <RoleSettings
+          providers={providers}
+          roles={roles}
+          setRoles={setRoles}
+          onSaveRoles={(nextRoles) => onSaveProviderSettings({ roles: nextRoles })}
+        />
       ) : activeSettingsTab === "skills" ? (
         <SkillsSettings selectedProjectId={selectedProjectId} />
       ) : (

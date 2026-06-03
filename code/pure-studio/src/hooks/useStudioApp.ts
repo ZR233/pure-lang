@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type { Dispatch, SetStateAction } from "react";
-import { useEffect, useMemo, useReducer } from "react";
+import { useEffect, useMemo, useReducer, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { normalizeRolesForProviders } from "../components/RoleSettings";
 import {
@@ -31,10 +31,29 @@ import type {
   AgentEvent,
   AgentEventPayload,
   PromptFailed,
+  ProviderRecord,
+  ProviderSettingsSaveSnapshot,
   RoleRecord,
   ToolApprovalRequest,
   ToolApprovalResolved,
 } from "../types";
+
+function providerInput(provider: ProviderRecord) {
+  return {
+    id: provider.id,
+    templateKind: provider.templateKind,
+    name: provider.name,
+    baseUrl: provider.baseUrl,
+    bearerToken: provider.bearerToken,
+    defaultModel: provider.defaultModel,
+    wireApi: provider.wireApi,
+    customModels: provider.customModels.map((model) => ({
+      slug: model.slug,
+      displayName: model.displayName,
+      reasoningEfforts: [...model.reasoningEfforts],
+    })),
+  };
+}
 
 function statusTextForEvent(
   event: AgentEvent | null | undefined,
@@ -67,6 +86,8 @@ function statusTextForEvent(
 export function useStudioApp() {
   const { t } = useTranslation();
   const [state, dispatch] = useReducer(studioReducer, initialStudioState(t("status.starting")));
+  const providerSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const providerSaveVersionRef = useRef(0);
 
   const selectedProject = selectSelectedProject(state);
   const selectedSession = selectSelectedSession(state);
@@ -319,43 +340,58 @@ export function useStudioApp() {
     }
   }
 
-  async function onSaveProviderSettings(explicitRoles?: RoleRecord[]) {
-    try {
-      const rolesToSave = explicitRoles ?? state.roles;
-      const normalizedRoles = normalizeRolesForProviders(rolesToSave, state.providers);
-      dispatch({
-        type: "configLoaded",
-        payload: await saveProviderSettings({
-          defaultProviderId: state.selectedProviderId,
-          providers: state.providers.map((provider) => ({
-            id: provider.id,
-            templateKind: provider.templateKind,
-            name: provider.name,
-            baseUrl: provider.baseUrl,
-            bearerToken: provider.bearerToken,
-            defaultModel: provider.defaultModel,
-            wireApi: provider.wireApi,
-            customModels: provider.customModels.map((model) => ({
-              slug: model.slug,
-              displayName: model.displayName,
-              reasoningEfforts: [...model.reasoningEfforts],
-            })),
-          })),
-          roles: normalizedRoles.map((role) => ({
-            key: role.key,
-            provider: role.provider,
-            model: role.model,
-            effort: role.effort,
-          })),
-        }),
-        status: t("status.providerSettingsSaved"),
+  async function onSaveProviderSettings(
+    snapshotOrRoles?: ProviderSettingsSaveSnapshot | RoleRecord[],
+  ): Promise<boolean> {
+    const snapshot = Array.isArray(snapshotOrRoles)
+      ? { roles: snapshotOrRoles }
+      : (snapshotOrRoles ?? {});
+    const providersToSave = snapshot.providers ?? state.providers;
+    const rolesToSave = snapshot.roles ?? state.roles;
+    const selectedProviderId =
+      snapshot.selectedProviderId !== undefined
+        ? snapshot.selectedProviderId
+        : state.selectedProviderId;
+    const normalizedRoles = normalizeRolesForProviders(rolesToSave, providersToSave);
+    const input = {
+      defaultProviderId: selectedProviderId,
+      providers: providersToSave.map(providerInput),
+      roles: normalizedRoles.map((role) => ({
+        key: role.key,
+        provider: role.provider,
+        model: role.model,
+        effort: role.effort,
+      })),
+    };
+    const requestVersion = providerSaveVersionRef.current + 1;
+    providerSaveVersionRef.current = requestVersion;
+
+    const saveTask = providerSaveQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          const payload = await saveProviderSettings(input);
+          if (requestVersion === providerSaveVersionRef.current) {
+            dispatch({
+              type: "configLoaded",
+              payload,
+              status: t("status.providerSettingsSaved"),
+            });
+            dispatch({ type: "setSelectedProviderId", providerId: selectedProviderId });
+          }
+          return true;
+        } catch (error) {
+          if (requestVersion === providerSaveVersionRef.current) {
+            dispatch({
+              type: "bootstrapFailed",
+              status: t("status.providerSettingsInvalid", { error: errorText(error) }),
+            });
+          }
+          return false;
+        }
       });
-    } catch (error) {
-      dispatch({
-        type: "bootstrapFailed",
-        status: t("status.providerSettingsInvalid", { error: errorText(error) }),
-      });
-    }
+    providerSaveQueueRef.current = saveTask.then(() => undefined, () => undefined);
+    return saveTask;
   }
 
   async function onReloadConfig() {
