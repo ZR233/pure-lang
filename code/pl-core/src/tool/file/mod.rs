@@ -1352,6 +1352,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn apply_patch_accepts_unprefixed_zero_indent_context_line() {
+        let root = unique_temp_dir("patch-unprefixed-zero-indent-context");
+        tokio::fs::create_dir_all(&root).await.unwrap();
+        tokio::fs::write(root.join("page.html"), "<body>\nold\n</body>\n")
+            .await
+            .unwrap();
+        let tool = ApplyPatchTool;
+        let patch =
+            "*** Begin Patch\n*** Update File: page.html\n@@\n-old\n+new\n</body>\n*** End Patch";
+
+        tool.execute(
+            input(serde_json::json!({ "patch": patch })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            tokio::fs::read_to_string(root.join("page.html"))
+                .await
+                .unwrap(),
+            "<body>\nnew\n</body>\n"
+        );
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
     async fn apply_patch_collapses_duplicated_edge_context_for_insert_before() {
         let root = unique_temp_dir("patch-duplicated-edge-context");
         tokio::fs::create_dir_all(&root).await.unwrap();
