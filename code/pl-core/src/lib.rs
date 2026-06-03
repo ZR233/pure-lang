@@ -48,7 +48,8 @@ pub use skill::{SkillCatalog, SkillMetadata, SkillSourceKind};
 pub use studio::{
     AgentSnapshotRecord as StudioAgentSnapshotRecord,
     AgentTimelineEventRecord as StudioAgentTimelineEventRecord, ProjectRecord, SessionRecord,
-    SessionRuntimeRecord, StudioPromptOutcome, StudioRuntime, StudioStore, ToolApprovalRecord,
+    SessionRuntimeRecord, StudioPromptOutcome, StudioRuntime, StudioStore, TimelineEventRecord,
+    ToolApprovalRecord,
 };
 pub use tool::{
     BashInput, BashTool, OutputTruncation, SubagentContext, SubagentInput, SubagentTool, Tool,

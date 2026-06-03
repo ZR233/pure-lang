@@ -601,6 +601,7 @@ impl PureCore {
             ));
         }
 
+        recorder.ensure_assistant_text_item(&session_id, &last_content);
         let mut completed_turn_item =
             recorder.turn_item(&session_id, TimelineItemStatus::Completed);
         completed_turn_item.content = last_content.clone();
@@ -956,6 +957,7 @@ fn interrupted_turn_result(
     reason: String,
 ) -> TurnResult {
     usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
+    recorder.ensure_assistant_text_item(turn_id, &content);
     let mut item = recorder.turn_item(turn_id, TimelineItemStatus::Interrupted);
     item.content = content.clone();
     recorder.fail_item(item, reason.clone());
@@ -992,6 +994,7 @@ fn failed_turn_result(
     severity: ErrorSeverity,
 ) -> TurnResult {
     usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
+    recorder.ensure_assistant_text_item(turn_id, &content);
     let mut item = recorder.turn_item(turn_id, TimelineItemStatus::Failed);
     item.content = content.clone();
     recorder.fail_item(item, error.clone());
@@ -1032,6 +1035,7 @@ fn budget_limited_turn_result(
     reason: String,
 ) -> TurnResult {
     usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
+    recorder.ensure_assistant_text_item(turn_id, &content);
     let mut item = recorder.turn_item(turn_id, TimelineItemStatus::BudgetLimited);
     item.content = content.clone();
     item.usage = Some(TokenUsageSnapshot {
@@ -1232,6 +1236,7 @@ mod tests {
     use super::*;
     use crate::{ConfigStore, ModelRole};
     use pl_model::ToolCall;
+    use pl_protocol::TimelineTextRole;
     use pretty_assertions::assert_eq;
 
     fn test_tool_context(event_tx: AgentEventSender) -> ToolContext {
@@ -1421,7 +1426,21 @@ mod tests {
         assert_eq!(result.error.as_deref(), Some("provider rejected request"));
         assert!(matches!(
             event_rx.try_recv().unwrap(),
-            AgentEvent::TimelineItemFailed { .. }
+            AgentEvent::TimelineItemStarted { item }
+                if item.item_id == "turn-1-assistant"
+                    && item.role == Some(TimelineTextRole::Assistant)
+                    && item.content == "partial summary"
+        ));
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            AgentEvent::TimelineItemCompleted { item, .. }
+                if item.item_id == "turn-1-assistant"
+                    && item.role == Some(TimelineTextRole::Assistant)
+                    && item.content == "partial summary"
+        ));
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            AgentEvent::TimelineItemFailed { item, .. } if item.item_id == "turn-1-turn"
         ));
         assert!(matches!(
             event_rx.try_recv().unwrap(),

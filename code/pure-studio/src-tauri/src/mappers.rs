@@ -536,7 +536,10 @@ mod tests {
     use std::path::PathBuf;
 
     use pl_core::{RuntimeUsageSnapshot, SessionRuntimeRecord, StudioAgentSnapshotRecord};
-    use pl_protocol::{AgentStatus, RuntimeCostAmount};
+    use pl_protocol::{
+        AgentStatus, RuntimeCostAmount, TimelineDelta, TimelineItem, TimelineItemDeltaEvent,
+        TimelineItemKind, TimelineItemStatus, TimelineTextRole,
+    };
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -740,5 +743,68 @@ mod tests {
         assert_eq!(usage.cache_hit_rate, Some(0.25));
         assert_eq!(usage.estimated_costs[0].currency, "USD");
         assert!((usage.estimated_costs[0].amount - 0.04).abs() < 0.000_001);
+    }
+
+    #[test]
+    fn timeline_events_to_items_folds_start_delta_and_completed_snapshot() {
+        let started = TimelineItem::text(
+            "turn-1",
+            "turn-1-assistant",
+            1,
+            TimelineTextRole::Assistant,
+            "",
+            TimelineItemStatus::Streaming,
+            10,
+        );
+        let completed = TimelineItem::text(
+            "turn-1",
+            "turn-1-assistant",
+            3,
+            TimelineTextRole::Assistant,
+            "hello world",
+            TimelineItemStatus::Completed,
+            12,
+        );
+        let events = vec![
+            TraceEvent {
+                session_id: "session-1".to_string(),
+                sequence: 1,
+                timestamp: 10,
+                kind: TraceEventKind::TimelineItemStarted { item: started },
+            },
+            TraceEvent {
+                session_id: "session-1".to_string(),
+                sequence: 2,
+                timestamp: 11,
+                kind: TraceEventKind::TimelineItemDelta {
+                    event: TimelineItemDeltaEvent {
+                        turn_id: "turn-1".to_string(),
+                        item_id: "turn-1-assistant".to_string(),
+                        sequence: 2,
+                        kind: TimelineItemKind::Text,
+                        status: TimelineItemStatus::Streaming,
+                        created_at: 10,
+                        updated_at: 11,
+                        delta: TimelineDelta::Text {
+                            delta: "hello".to_string(),
+                        },
+                    },
+                },
+            },
+            TraceEvent {
+                session_id: "session-1".to_string(),
+                sequence: 3,
+                timestamp: 12,
+                kind: TraceEventKind::TimelineItemCompleted { item: completed },
+            },
+        ];
+
+        let items = timeline_events_to_items(&events);
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item_id, "turn-1-assistant");
+        assert_eq!(items[0].sequence, 1);
+        assert_eq!(items[0].content, "hello world");
+        assert_eq!(items[0].status, TimelineItemStatus::Completed);
     }
 }

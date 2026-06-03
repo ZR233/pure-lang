@@ -313,6 +313,7 @@ export type RunPromptResponse = {
   agents: AgentDto[];
   sessionRuntime: SessionRuntime;
   timelineItems: TimelineItem[];
+  timelineNextSequence: number;
   turnStatus: TurnStatus;
   turnAbortReason?: string | null;
 };
