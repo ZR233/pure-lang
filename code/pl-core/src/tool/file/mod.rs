@@ -4,7 +4,7 @@ mod path;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use apply_patch::{APPLY_PATCH_LARK_GRAMMAR, plan_patch};
+use apply_patch::{APPLY_PATCH_LARK_GRAMMAR, apply_patch};
 use path::{WorkspacePaths, matches_pattern};
 use pl_model::ToolSchema;
 use pl_protocol::PureError;
@@ -261,6 +261,7 @@ impl Tool for WriteFileTool {
         context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
+            let _write_guard = context.workspace_write_lock().await;
             let input: WriteFileInput = parse_input(input.arguments, self.name())?;
             let paths = workspace(&context).await?;
             let path = paths.resolve_for_write(&input.path).await?;
@@ -462,6 +463,7 @@ impl Tool for CreateDirectoryTool {
         context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
+            let _write_guard = context.workspace_write_lock().await;
             let input: PathInput = parse_input(input.arguments, self.name())?;
             let paths = workspace(&context).await?;
             let path = paths.resolve_for_write(&input.path).await?;
@@ -502,6 +504,7 @@ impl Tool for DeletePathTool {
         context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
+            let _write_guard = context.workspace_write_lock().await;
             let input: DeletePathInput = parse_input(input.arguments, self.name())?;
             let paths = workspace(&context).await?;
             let path = paths.resolve_existing(&input.path).await?;
@@ -546,6 +549,7 @@ impl Tool for CopyPathTool {
         context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
+            let _write_guard = context.workspace_write_lock().await;
             let input: CopyMoveInput = parse_input(input.arguments, self.name())?;
             let paths = workspace(&context).await?;
             let from = paths.resolve_existing(&input.from).await?;
@@ -584,6 +588,7 @@ impl Tool for MovePathTool {
         context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
+            let _write_guard = context.workspace_write_lock().await;
             let input: CopyMoveInput = parse_input(input.arguments, self.name())?;
             let paths = workspace(&context).await?;
             let from = paths.resolve_existing(&input.from).await?;
@@ -642,11 +647,11 @@ impl Tool for ApplyPatchTool {
         context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
+            let _write_guard = context.workspace_write_lock().await;
             let patch = extract_patch(input.arguments)?;
             let paths = workspace(&context).await?;
-            let plan = plan_patch(&patch, &paths).await?;
-            let summary = plan.summary(&paths);
-            plan.apply().await?;
+            let outcome = apply_patch(&patch, &paths).await?;
+            let summary = outcome.summary(&paths);
             Ok(text_output(summary))
         })
     }
@@ -866,6 +871,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn write_file_waits_for_workspace_write_lock() {
+        let root = unique_temp_dir("write-lock-tool");
+        let context = context(&root).await;
+        let guard = context.workspace_write_lock().await;
+        let tool = WriteFileTool;
+        let write_context = context.clone();
+        let write_task = tokio::spawn(async move {
+            tool.execute(
+                input(serde_json::json!({
+                    "path": "locked.txt",
+                    "content": "after\n",
+                    "mode": "create"
+                })),
+                write_context,
+            )
+            .await
+        });
+        tokio::task::yield_now().await;
+
+        assert!(!write_task.is_finished());
+        drop(guard);
+        write_task.await.unwrap().unwrap();
+        assert_eq!(
+            tokio::fs::read_to_string(root.join("locked.txt"))
+                .await
+                .unwrap(),
+            "after\n"
+        );
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
     async fn apply_patch_adds_file() {
         let root = unique_temp_dir("patch-add");
         let tool = ApplyPatchTool;
@@ -1061,14 +1098,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_patch_merges_repeated_update_hunks_for_same_file() {
+    async fn apply_patch_applies_repeated_update_hunks_in_order() {
         let root = unique_temp_dir("patch-repeated-update-target");
         tokio::fs::create_dir_all(&root).await.unwrap();
         tokio::fs::write(root.join("src.rs"), "one\ntwo\nthree\n")
             .await
             .unwrap();
         let tool = ApplyPatchTool;
-        let patch = "*** Begin Patch\n*** Update File: src.rs\n@@\n-one\n+1\n*** Update File: src.rs\n@@\n-two\n+2\n*** End Patch";
+        let patch = "*** Begin Patch\n*** Update File: src.rs\n@@\n-one\n+first\n*** Update File: src.rs\n@@\n-first\n+second\n*** End Patch";
 
         tool.execute(
             input(serde_json::json!({ "patch": patch })),
@@ -1081,20 +1118,80 @@ mod tests {
             tokio::fs::read_to_string(root.join("src.rs"))
                 .await
                 .unwrap(),
-            "1\n2\nthree\n"
+            "second\ntwo\nthree\n"
         );
         let _ = tokio::fs::remove_dir_all(root).await;
     }
 
     #[tokio::test]
-    async fn apply_patch_rejects_repeated_file_lifecycle_operations() {
-        let root = unique_temp_dir("patch-repeated-lifecycle");
+    async fn apply_patch_add_overwrites_existing_file() {
+        let root = unique_temp_dir("patch-add-overwrite");
         tokio::fs::create_dir_all(&root).await.unwrap();
-        tokio::fs::write(root.join("src.rs"), "one\ntwo\n")
+        tokio::fs::write(root.join("duplicate.txt"), "old\n")
             .await
             .unwrap();
         let tool = ApplyPatchTool;
-        let patch = "*** Begin Patch\n*** Update File: src.rs\n@@\n-one\n+1\n*** Delete File: src.rs\n*** End Patch";
+        let patch = "*** Begin Patch\n*** Add File: duplicate.txt\n+new\n*** End Patch";
+
+        let output = tool
+            .execute(
+                input(serde_json::json!({ "patch": patch })),
+                context(&root).await,
+            )
+            .await
+            .unwrap();
+
+        assert!(output.description.contains("A duplicate.txt"));
+        assert_eq!(
+            tokio::fs::read_to_string(root.join("duplicate.txt"))
+                .await
+                .unwrap(),
+            "new\n"
+        );
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn apply_patch_move_overwrites_existing_target() {
+        let root = unique_temp_dir("patch-move-overwrite");
+        tokio::fs::create_dir_all(root.join("old")).await.unwrap();
+        tokio::fs::create_dir_all(root.join("new")).await.unwrap();
+        tokio::fs::write(root.join("old/name.txt"), "from\n")
+            .await
+            .unwrap();
+        tokio::fs::write(root.join("new/name.txt"), "existing\n")
+            .await
+            .unwrap();
+        let tool = ApplyPatchTool;
+        let patch = "*** Begin Patch\n*** Update File: old/name.txt\n*** Move to: new/name.txt\n@@\n-from\n+to\n*** End Patch";
+
+        tool.execute(
+            input(serde_json::json!({ "patch": patch })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            !tokio::fs::try_exists(root.join("old/name.txt"))
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(root.join("new/name.txt"))
+                .await
+                .unwrap(),
+            "to\n"
+        );
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn apply_patch_failure_keeps_committed_prefix_and_reports_delta() {
+        let root = unique_temp_dir("patch-prefix-failure");
+        tokio::fs::create_dir_all(&root).await.unwrap();
+        let tool = ApplyPatchTool;
+        let patch = "*** Begin Patch\n*** Add File: created.txt\n+hello\n*** Update File: missing.txt\n@@\n-old\n+new\n*** End Patch";
 
         let result = tool
             .execute(
@@ -1104,7 +1201,16 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(result.to_string().contains("conflicting file operations"));
+        let error = result.to_string();
+        assert!(error.contains("failed to resolve path 'missing.txt'"));
+        assert!(error.contains("Committed changes before failure:"));
+        assert!(error.contains("A created.txt"));
+        assert_eq!(
+            tokio::fs::read_to_string(root.join("created.txt"))
+                .await
+                .unwrap(),
+            "hello\n"
+        );
         let _ = tokio::fs::remove_dir_all(root).await;
     }
 }

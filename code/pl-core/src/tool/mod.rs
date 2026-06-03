@@ -10,10 +10,12 @@ use std::fmt;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::{Arc, OnceLock};
 
 use pl_model::ToolSchema;
 use pl_protocol::{AgentEventSender, PureError};
 use serde::{Deserialize, Serialize};
+use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::AgentControl;
 use crate::turn::TurnOptions;
@@ -91,6 +93,39 @@ impl fmt::Debug for ToolContext {
             .field("active_subagent", &self.active_subagent)
             .finish_non_exhaustive()
     }
+}
+
+impl ToolContext {
+    pub(crate) async fn workspace_write_lock(&self) -> WorkspaceWriteGuard {
+        workspace_write_locks().lock_for(&self.workspace_root).await
+    }
+}
+
+type WorkspaceWriteGuard = OwnedMutexGuard<()>;
+
+#[derive(Default)]
+struct WorkspaceWriteLocks {
+    locks: std::sync::Mutex<std::collections::HashMap<PathBuf, Arc<Mutex<()>>>>,
+}
+
+impl WorkspaceWriteLocks {
+    async fn lock_for(&self, workspace_root: &std::path::Path) -> WorkspaceWriteGuard {
+        let key =
+            std::fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
+        let lock = {
+            let mut locks = self.locks.lock().expect("workspace write locks poisoned");
+            locks
+                .entry(key)
+                .or_insert_with(|| Arc::new(Mutex::new(())))
+                .clone()
+        };
+        lock.lock_owned().await
+    }
+}
+
+fn workspace_write_locks() -> &'static WorkspaceWriteLocks {
+    static LOCKS: OnceLock<WorkspaceWriteLocks> = OnceLock::new();
+    LOCKS.get_or_init(WorkspaceWriteLocks::default)
 }
 
 /// 工具注册表。
@@ -256,5 +291,36 @@ mod tests {
 
         let debug = format!("{reg:?}");
         assert!(debug.contains("echo"));
+    }
+
+    #[tokio::test]
+    async fn workspace_write_lock_is_shared_for_same_workspace() {
+        let root = std::env::temp_dir().join(format!(
+            "pure-lang-write-lock-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&root).await.unwrap();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let context = ToolContext {
+            event_tx,
+            options: TurnOptions::default(),
+            workspace_root: root.clone(),
+            workspace_instructions: None,
+            active_subagent: None,
+            agent_control: AgentControl::default(),
+        };
+        let first_guard = context.workspace_write_lock().await;
+        let second_context = context.clone();
+        let second = tokio::spawn(async move { second_context.workspace_write_lock().await });
+        tokio::task::yield_now().await;
+
+        assert!(!second.is_finished());
+        drop(first_guard);
+        let second_guard = second.await.unwrap();
+        drop(second_guard);
+        let _ = tokio::fs::remove_dir_all(root).await;
     }
 }
