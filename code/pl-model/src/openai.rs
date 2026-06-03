@@ -664,6 +664,13 @@ impl TimelineState {
         format!("{}-{prefix}", self.inference_id)
     }
 
+    fn namespaced_item_id(&self, item_id: &str) -> String {
+        if item_id.starts_with(&self.turn_id) {
+            return item_id.to_string();
+        }
+        format!("{}-{item_id}", self.turn_id)
+    }
+
     fn append_text_delta(
         &mut self,
         item_id: &str,
@@ -671,11 +678,12 @@ impl TimelineState {
         delta: String,
     ) -> Vec<AgentEvent> {
         let now = unix_seconds();
+        let item_id = self.namespaced_item_id(item_id);
         let mut events = Vec::new();
-        if !self.started.contains_key(item_id) {
+        if !self.started.contains_key(&item_id) {
             let item = TimelineItem {
                 turn_id: self.turn_id.clone(),
-                item_id: item_id.to_string(),
+                item_id: item_id.clone(),
                 sequence: self.sequence,
                 kind: TimelineItemKind::Text,
                 status: TimelineItemStatus::Streaming,
@@ -694,16 +702,16 @@ impl TimelineState {
                 now,
             );
             events.push(AgentEvent::TimelineItemStarted { item: item.clone() });
-            self.started.insert(item_id.to_string(), item);
+            self.started.insert(item_id.clone(), item);
         }
-        if let Some(item) = self.started.get_mut(item_id) {
+        if let Some(item) = self.started.get_mut(&item_id) {
             item.status = TimelineItemStatus::Streaming;
             item.updated_at = now;
             item.content.push_str(&delta);
         }
         let event = TimelineItemDeltaEvent {
             turn_id: self.turn_id.clone(),
-            item_id: item_id.to_string(),
+            item_id,
             sequence: self.sequence,
             kind: TimelineItemKind::Text,
             status: TimelineItemStatus::Streaming,
@@ -728,11 +736,12 @@ impl TimelineState {
         delta: String,
     ) -> Vec<AgentEvent> {
         let now = unix_seconds();
+        let item_id = self.namespaced_item_id(item_id);
         let mut events = Vec::new();
-        if !self.started.contains_key(item_id) {
+        if !self.started.contains_key(&item_id) {
             let item = TimelineItem {
                 turn_id: self.turn_id.clone(),
-                item_id: item_id.to_string(),
+                item_id: item_id.clone(),
                 sequence: self.sequence,
                 kind: TimelineItemKind::Thinking,
                 status: TimelineItemStatus::Streaming,
@@ -751,9 +760,9 @@ impl TimelineState {
                 now,
             );
             events.push(AgentEvent::TimelineItemStarted { item: item.clone() });
-            self.started.insert(item_id.to_string(), item);
+            self.started.insert(item_id.clone(), item);
         }
-        if let Some(item) = self.started.get_mut(item_id) {
+        if let Some(item) = self.started.get_mut(&item_id) {
             item.status = TimelineItemStatus::Streaming;
             item.updated_at = now;
             match item
@@ -771,7 +780,7 @@ impl TimelineState {
         }
         let event = TimelineItemDeltaEvent {
             turn_id: self.turn_id.clone(),
-            item_id: item_id.to_string(),
+            item_id,
             sequence: self.sequence,
             kind: TimelineItemKind::Thinking,
             status: TimelineItemStatus::Streaming,
@@ -795,7 +804,10 @@ impl TimelineState {
         delta: String,
     ) -> Vec<AgentEvent> {
         let now = unix_seconds();
-        let item_id = timeline_tool_item_id(snapshot.call_id.as_ref(), &snapshot.id);
+        let item_id = self.namespaced_item_id(&timeline_tool_item_id(
+            snapshot.call_id.as_ref(),
+            &snapshot.id,
+        ));
         let mut events = Vec::new();
         if !self.started.contains_key(&item_id) {
             let item = TimelineItem {
@@ -919,7 +931,8 @@ impl TimelineState {
         status: TimelineItemStatus,
     ) -> TimelineItem {
         let now = unix_seconds();
-        let item_id = timeline_tool_item_id(call.call_id.as_ref(), &call.id);
+        let item_id =
+            self.namespaced_item_id(&timeline_tool_item_id(call.call_id.as_ref(), &call.id));
         let arguments = call.payload_text();
         let tool_item = TimelineToolItem {
             tool_call_id: item_id.clone(),
@@ -1113,6 +1126,62 @@ mod tests {
             }
             other => panic!("unexpected payload: {other:?}"),
         }
+    }
+
+    #[test]
+    fn stream_timeline_item_ids_are_scoped_to_turn() {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTimelineContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "turn-1-inf-0".to_string(),
+            starting_sequence: 0,
+        }));
+
+        accumulator
+            .apply(
+                StreamEvent::ToolCallDelta {
+                    stream_id: None,
+                    item_id: "call_0".to_string(),
+                    call_id: Some("call_0".to_string()),
+                    name: Some("bash".to_string()),
+                    payload_delta: ToolCallDeltaPayload::FunctionArguments(
+                        r#"{"command":"pwd"}"#.to_string(),
+                    ),
+                },
+                &event_tx,
+            )
+            .unwrap();
+        accumulator
+            .apply(
+                StreamEvent::OutputItemDone(serde_json::json!({
+                    "type": "function_call",
+                    "id": "call_0",
+                    "call_id": "call_0",
+                    "name": "bash",
+                    "arguments": "{\"command\":\"pwd\"}"
+                })),
+                &event_tx,
+            )
+            .unwrap();
+
+        let response = accumulator.finish(&event_tx);
+
+        assert_eq!(response.tool_calls[0].id, "call_0");
+        let item_ids = response
+            .timeline_events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                TraceEventKind::TimelineItemStarted { item }
+                | TraceEventKind::TimelineItemCompleted { item } => Some(item.item_id.as_str()),
+                TraceEventKind::TimelineItemDelta { event } => Some(event.item_id.as_str()),
+                TraceEventKind::TimelineItemFailed { item, .. } => Some(item.item_id.as_str()),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            item_ids,
+            vec!["turn-1-call_0", "turn-1-call_0", "turn-1-call_0"]
+        );
     }
 
     #[test]

@@ -2,6 +2,7 @@
 /target
 /code/pure-studio/node_modules
 /code/pure-studio/dist
+/code/pure-studio/.tmp-tests
 /code/pure-studio/src-tauri/gen
 
 # IDE
