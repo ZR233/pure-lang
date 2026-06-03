@@ -4,6 +4,7 @@ import type { ModelRecord, ProviderRecord } from "../types";
 
 type ProviderModelEditorProps = {
   provider: ProviderRecord;
+  disabled?: boolean;
   onAddCustomModel: () => void;
   onUpdateCustomModel: (index: number, patch: Partial<ModelRecord>) => void;
   onRemoveCustomModel: (index: number) => void;
@@ -104,6 +105,7 @@ function ModelParameterGrid({ model, t }: { model: ModelRecord; t: (key: string)
 
 export function ProviderModelEditor({
   provider,
+  disabled = false,
   onAddCustomModel,
   onUpdateCustomModel,
   onRemoveCustomModel,
@@ -116,7 +118,7 @@ export function ProviderModelEditor({
           <h3>{t("model.title")}</h3>
           <p>{t("model.defaultModelDesc")}</p>
         </div>
-        <button onClick={onAddCustomModel}>
+        <button disabled={disabled} onClick={onAddCustomModel}>
           <Plus size={16} />
           {t("model.customModelButton")}
         </button>
@@ -145,11 +147,13 @@ export function ProviderModelEditor({
             <div className="custom-model-row detailed" key={`${model.slug}-${index}`}>
               <div className="custom-model-fields">
                 <input
+                  disabled={disabled}
                   value={model.slug}
                   onChange={(event) => onUpdateCustomModel(index, { slug: event.target.value })}
                   placeholder={t("model.slugPlaceholder")}
                 />
                 <input
+                  disabled={disabled}
                   value={model.displayName}
                   onChange={(event) =>
                     onUpdateCustomModel(index, { displayName: event.target.value })
@@ -157,6 +161,7 @@ export function ProviderModelEditor({
                   placeholder={t("model.displayNamePlaceholder")}
                 />
                 <input
+                  disabled={disabled}
                   value={modelEffortsText(model)}
                   onChange={(event) =>
                     onUpdateCustomModel(index, {
@@ -167,6 +172,7 @@ export function ProviderModelEditor({
                 />
                 <button
                   className="icon-button"
+                  disabled={disabled}
                   onClick={() => onRemoveCustomModel(index)}
                   title={t("model.deleteTooltip")}
                 >

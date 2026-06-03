@@ -259,6 +259,12 @@ export type ProviderSettingsInput = {
   roles: RoleInput[];
 };
 
+export type ProviderSettingsSaveSnapshot = {
+  selectedProviderId?: string | null;
+  providers?: ProviderRecord[];
+  roles?: RoleRecord[];
+};
+
 export type ProviderInput = {
   id: string;
   templateKind: ProviderKind;

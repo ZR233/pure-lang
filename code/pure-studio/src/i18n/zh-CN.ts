@@ -19,6 +19,7 @@ const zhCN = {
     approve: "批准",
     deny: "拒绝",
     back: "返回",
+    cancel: "取消",
   },
 
   status: {
@@ -238,9 +239,11 @@ const zhCN = {
     healthy: "正常",
     needsSetup: "需要配置",
     providerKey: "服务标识",
+    providerType: "供应商类型",
     displayName: "显示名",
     baseUrl: "基础 URL",
-    addProvider: "添加 {{name}}",
+    addProvider: "添加供应商",
+    newProvider: "新增模型服务",
   },
 
   roleRoute: {

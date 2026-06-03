@@ -11,8 +11,21 @@ import {
 } from "lucide-react";
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
-import type { ModelRecord, ProviderKind, ProviderRecord, ProviderTemplateRecord } from "../types";
-import { cloneModel } from "../lib/provider-mapper";
+import type {
+  ModelRecord,
+  ProviderKind,
+  ProviderRecord,
+  ProviderSettingsSaveSnapshot,
+  ProviderTemplateRecord,
+} from "../types";
+import {
+  applyProviderTemplate,
+  cloneProvider,
+  createProviderFromTemplate,
+  normalizeProvider,
+  replaceProvider,
+  suggestProviderId,
+} from "../lib/provider-settings";
 import { allModels, initials, providerStatusClass, translateStatus, translateUpdatedAt } from "../lib/utils";
 import { ProviderEditPage } from "./ProviderEditPage";
 
@@ -21,69 +34,29 @@ type ProviderSettingsProps = {
   templates: ProviderTemplateRecord[];
   selectedProviderId: string | null;
   providerSearch: string;
-  setProviders: Dispatch<SetStateAction<ProviderRecord[]>>;
-  setSelectedProviderId: Dispatch<SetStateAction<string | null>>;
   setProviderSearch: Dispatch<SetStateAction<string>>;
+  onSaveProviderSettings: (snapshot: ProviderSettingsSaveSnapshot) => Promise<boolean>;
 };
 
-function normalizeProvider(provider: ProviderRecord): ProviderRecord {
-  const models = allModels(provider);
-  const defaultModel = models.some((model) => model.slug === provider.defaultModel)
-    ? provider.defaultModel
-    : (models[0]?.slug ?? "");
-  return {
-    ...provider,
-    subtitle: `${provider.name || provider.id} Platform`,
-    status: provider.bearerToken.trim() ? "Healthy" : "Needs setup",
-    defaultModel,
-    models,
-    modelCount: models.length.toString(),
-  };
-}
-
-function templateProvider(template: ProviderTemplateRecord, id: string): ProviderRecord {
-  const provider: ProviderRecord = {
-    id,
-    templateKind: template.id,
-    name: template.name,
-    subtitle: `${template.name} Platform`,
-    status: "Needs setup",
-    baseUrl: template.baseUrl,
-    bearerToken: "",
-    defaultModel: template.defaultModel,
-    modelCount: template.defaultModels.length.toString(),
-    updatedAt: "Draft",
-    wireApi: template.wireApi,
-    models: template.defaultModels,
-    defaultModels: template.defaultModels,
-    customModels: [],
-  };
-  return normalizeProvider(provider);
-}
-
-function suggestProviderId(providers: ProviderRecord[], kind: ProviderKind) {
-  if (!providers.some((provider) => provider.id === kind)) {
-    return kind;
-  }
-  for (let index = 2; ; index += 1) {
-    const candidate = `${kind}-${index}`;
-    if (!providers.some((provider) => provider.id === candidate)) {
-      return candidate;
-    }
-  }
-}
+type ProviderDraft = {
+  mode: "create" | "edit";
+  originalId: string | null;
+  provider: ProviderRecord;
+  autoId: string;
+  autoName: string;
+};
 
 export function ProviderSettings({
   providers,
   templates,
   selectedProviderId,
   providerSearch,
-  setProviders,
-  setSelectedProviderId,
   setProviderSearch,
+  onSaveProviderSettings,
 }: ProviderSettingsProps) {
   const { t } = useTranslation();
-  const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<ProviderDraft | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const filteredProviders = providers.filter((provider) => {
     const query = providerSearch.trim().toLowerCase();
     if (!query) {
@@ -97,51 +70,86 @@ export function ProviderSettings({
   });
   const selectedProvider =
     providers.find((provider) => provider.id === selectedProviderId) ?? providers[0] ?? null;
-  const editingProvider =
-    providers.find((provider) => provider.id === editingProviderId) ?? null;
 
-  function updateEditingProvider(updater: (provider: ProviderRecord) => ProviderRecord) {
-    if (!editingProvider) {
+  async function saveSnapshot(snapshot: ProviderSettingsSaveSnapshot) {
+    if (isSaving) {
+      return false;
+    }
+    setIsSaving(true);
+    try {
+      return await onSaveProviderSettings(snapshot);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function startAddProvider() {
+    const template = templates[0];
+    if (!template) {
       return;
     }
-    const previousId = editingProvider.id;
-    const nextProvider = normalizeProvider(updater(editingProvider));
-    setProviders((current) =>
-      current.map((provider) => (provider.id === previousId ? nextProvider : provider)),
+    const id = suggestProviderId(providers, template.id);
+    setDraft({
+      mode: "create",
+      originalId: null,
+      provider: createProviderFromTemplate(template, id),
+      autoId: id,
+      autoName: template.name,
+    });
+  }
+
+  function startEditProvider(provider: ProviderRecord) {
+    setDraft({
+      mode: "edit",
+      originalId: provider.id,
+      provider: cloneProvider(provider),
+      autoId: provider.id,
+      autoName: provider.name,
+    });
+  }
+
+  function updateDraftProvider(updater: (provider: ProviderRecord) => ProviderRecord) {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            provider: normalizeProvider(updater(current.provider)),
+          }
+        : current,
     );
-    setEditingProviderId(nextProvider.id);
-    setSelectedProviderId((current) => (current === previousId ? nextProvider.id : current));
   }
 
-  function addProvider(kind: ProviderKind) {
+  function changeDraftTemplate(kind: ProviderKind) {
     const template = templates.find((item) => item.id === kind);
     if (!template) {
       return;
     }
-    const nextProvider = templateProvider(template, suggestProviderId(providers, kind));
-    setProviders((current) => [...current, nextProvider]);
-    setSelectedProviderId((current) => current ?? nextProvider.id);
-    setEditingProviderId(nextProvider.id);
-  }
-
-  function changeEditingTemplate(kind: ProviderKind) {
-    const template = templates.find((item) => item.id === kind);
-    if (!template) {
-      return;
-    }
-    updateEditingProvider((provider) => ({
-      ...provider,
-      templateKind: kind,
-      name: provider.name || template.name,
-      baseUrl: template.baseUrl,
-      wireApi: template.wireApi,
-      defaultModel: template.defaultModel,
-      defaultModels: template.defaultModels.map(cloneModel),
-    }));
+    setDraft((current) => {
+      if (!current) {
+        return current;
+      }
+      const shouldUseTemplateId =
+        current.mode === "create" && current.provider.id === current.autoId;
+      const shouldUseTemplateName =
+        current.mode === "create" && current.provider.name === current.autoName;
+      const nextId = shouldUseTemplateId
+        ? suggestProviderId(providers, template.id)
+        : current.provider.id;
+      const nextName = shouldUseTemplateName ? template.name : current.provider.name;
+      return {
+        ...current,
+        provider: applyProviderTemplate(current.provider, template, {
+          id: nextId,
+          name: nextName,
+        }),
+        autoId: current.mode === "create" ? nextId : current.autoId,
+        autoName: current.mode === "create" ? template.name : current.autoName,
+      };
+    });
   }
 
   function addCustomModel() {
-    updateEditingProvider((provider) => {
+    updateDraftProvider((provider) => {
       const existing = new Set(allModels(provider).map((model) => model.slug));
       let slug = "custom-model";
       for (let index = 2; existing.has(slug); index += 1) {
@@ -163,7 +171,7 @@ export function ProviderSettings({
   }
 
   function updateCustomModel(index: number, patch: Partial<ModelRecord>) {
-    updateEditingProvider((provider) => ({
+    updateDraftProvider((provider) => ({
       ...provider,
       customModels: provider.customModels.map((model, modelIndex) =>
         modelIndex === index ? { ...model, ...patch } : model,
@@ -172,35 +180,69 @@ export function ProviderSettings({
   }
 
   function removeCustomModel(index: number) {
-    updateEditingProvider((provider) => ({
+    updateDraftProvider((provider) => ({
       ...provider,
       customModels: provider.customModels.filter((_, modelIndex) => modelIndex !== index),
     }));
   }
 
-  function removeProvider(providerId: string) {
+  async function saveDraft() {
+    if (!draft) {
+      return;
+    }
+    const nextProvider = normalizeProvider(draft.provider);
+    const nextProviders =
+      draft.mode === "create"
+        ? [...providers, nextProvider]
+        : replaceProvider(providers, draft.originalId ?? nextProvider.id, nextProvider);
+    const nextSelectedProviderId =
+      draft.mode === "create" || selectedProviderId === draft.originalId
+        ? nextProvider.id
+        : selectedProviderId;
+    const saved = await saveSnapshot({
+      providers: nextProviders,
+      selectedProviderId: nextSelectedProviderId,
+    });
+    if (saved) {
+      setDraft(null);
+    }
+  }
+
+  async function selectProvider(providerId: string) {
+    if (providerId === selectedProviderId) {
+      return;
+    }
+    await saveSnapshot({ selectedProviderId: providerId });
+  }
+
+  async function removeProvider(providerId: string) {
     if (providers.length <= 1) {
       return;
     }
     const remainingProviders = providers.filter((provider) => provider.id !== providerId);
-    setProviders(remainingProviders);
-    setSelectedProviderId((current) =>
-      current === providerId ? (remainingProviders[0]?.id ?? null) : current,
-    );
-    if (editingProviderId === providerId) {
-      setEditingProviderId(null);
+    const nextSelectedProviderId =
+      selectedProviderId === providerId ? (remainingProviders[0]?.id ?? null) : selectedProviderId;
+    const saved = await saveSnapshot({
+      providers: remainingProviders,
+      selectedProviderId: nextSelectedProviderId,
+    });
+    if (saved && draft?.originalId === providerId) {
+      setDraft(null);
     }
   }
 
   return (
     <div className="provider-settings">
-      {editingProvider ? (
+      {draft ? (
         <ProviderEditPage
-          provider={editingProvider}
+          mode={draft.mode}
+          provider={draft.provider}
           templates={templates}
-          onBack={() => setEditingProviderId(null)}
-          onChangeTemplate={changeEditingTemplate}
-          onUpdateProvider={updateEditingProvider}
+          isSaving={isSaving}
+          onCancel={() => setDraft(null)}
+          onSave={() => void saveDraft()}
+          onChangeTemplate={changeDraftTemplate}
+          onUpdateProvider={updateDraftProvider}
           onAddCustomModel={addCustomModel}
           onUpdateCustomModel={updateCustomModel}
           onRemoveCustomModel={removeCustomModel}
@@ -222,12 +264,10 @@ export function ProviderSettings({
                 />
               </label>
               <div className="provider-add-actions">
-                {templates.map((template) => (
-                  <button key={template.id} onClick={() => addProvider(template.id)}>
-                    <Plus size={16} />
-                    {t("provider.addProvider", { name: template.name })}
-                  </button>
-                ))}
+                <button disabled={isSaving || templates.length === 0} onClick={startAddProvider}>
+                  <Plus size={16} />
+                  {t("provider.addProvider")}
+                </button>
               </div>
             </div>
           </div>
@@ -261,7 +301,8 @@ export function ProviderSettings({
                     <div className="provider-card-shell">
                       <button
                         className="provider-card-select"
-                        onClick={() => setSelectedProviderId(provider.id)}
+                        disabled={isSaving}
+                        onClick={() => void selectProvider(provider.id)}
                       >
                         <span className={`provider-badge provider-${provider.templateKind}`}>
                           {initials(provider.name) || "P"}
@@ -273,7 +314,9 @@ export function ProviderSettings({
                               <CheckCircle2 size={14} />
                               {translateStatus(provider.status, t)}
                             </span>
-                            {isActive ? <span className="default-route">{t("provider.defaultRoute")}</span> : null}
+                            {isActive ? (
+                              <span className="default-route">{t("provider.defaultRoute")}</span>
+                            ) : null}
                           </span>
                           <span className="provider-url">
                             <Link2 size={14} />
@@ -285,15 +328,16 @@ export function ProviderSettings({
                       <div className="provider-card-actions">
                         <button
                           className="icon-button provider-icon-action"
-                          onClick={() => setEditingProviderId(provider.id)}
+                          disabled={isSaving}
+                          onClick={() => startEditProvider(provider)}
                           title={t("provider.editTooltip")}
                         >
                           <Pencil size={16} />
                         </button>
                         <button
                           className="icon-button provider-icon-action danger"
-                          disabled={providers.length <= 1}
-                          onClick={() => removeProvider(provider.id)}
+                          disabled={isSaving || providers.length <= 1}
+                          onClick={() => void removeProvider(provider.id)}
                           title={t("provider.deleteTooltip")}
                         >
                           <Trash2 size={16} />
@@ -315,7 +359,11 @@ export function ProviderSettings({
                       <span>
                         <KeyRound size={14} />
                         <small>{t("provider.apiKey")}</small>
-                        <strong>{provider.bearerToken ? t("provider.saved") : t("provider.notConfigured")}</strong>
+                        <strong>
+                          {provider.bearerToken || provider.hasBearerToken
+                            ? t("provider.saved")
+                            : t("provider.notConfigured")}
+                        </strong>
                       </span>
                       <span>
                         <small>{t("provider.template")}</small>
@@ -332,7 +380,9 @@ export function ProviderSettings({
                     </div>
 
                     <div className="provider-model-strip">
-                      <span className="model-count-pill">{t("provider.models", { count: provider.modelCount })}</span>
+                      <span className="model-count-pill">
+                        {t("provider.models", { count: provider.modelCount })}
+                      </span>
                       {previewModels.map((model) => (
                         <span
                           key={model.slug}
@@ -354,7 +404,6 @@ export function ProviderSettings({
           </div>
         </section>
       )}
-
     </div>
   );
 }

@@ -1,13 +1,16 @@
-import { ArrowLeft, CheckCircle2, Link2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Link2, Save, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ModelRecord, ProviderKind, ProviderRecord, ProviderTemplateRecord } from "../types";
 import { allModels, providerStatusClass, translateStatus } from "../lib/utils";
 import { ProviderModelEditor } from "./ProviderModelEditor";
 
 type ProviderEditPageProps = {
+  mode: "create" | "edit";
   provider: ProviderRecord;
   templates: ProviderTemplateRecord[];
-  onBack: () => void;
+  isSaving: boolean;
+  onCancel: () => void;
+  onSave: () => void;
   onChangeTemplate: (kind: ProviderKind) => void;
   onUpdateProvider: (updater: (provider: ProviderRecord) => ProviderRecord) => void;
   onAddCustomModel: () => void;
@@ -16,9 +19,12 @@ type ProviderEditPageProps = {
 };
 
 export function ProviderEditPage({
+  mode,
   provider,
   templates,
-  onBack,
+  isSaving,
+  onCancel,
+  onSave,
   onChangeTemplate,
   onUpdateProvider,
   onAddCustomModel,
@@ -31,12 +37,12 @@ export function ProviderEditPage({
   return (
     <section className="provider-edit-page">
       <header className="provider-edit-head">
-        <button className="back-button" onClick={onBack}>
+        <button className="back-button" disabled={isSaving} onClick={onCancel}>
           <ArrowLeft size={18} />
         </button>
         <div className="provider-edit-title">
           <div className="provider-title-line">
-            <h2>{provider.name || provider.id}</h2>
+            <h2>{mode === "create" ? t("provider.newProvider") : provider.name || provider.id}</h2>
             <span className={`provider-state ${providerStatusClass(provider)}`}>
               <CheckCircle2 size={14} />
               {translateStatus(provider.status, t)}
@@ -47,6 +53,16 @@ export function ProviderEditPage({
             {provider.baseUrl || t("provider.defaultBaseUrl")}
           </p>
         </div>
+        <div className="provider-edit-actions">
+          <button disabled={isSaving} onClick={onCancel}>
+            <X size={16} />
+            {t("actions.cancel")}
+          </button>
+          <button className="primary" disabled={isSaving} onClick={onSave}>
+            <Save size={16} />
+            {t("actions.save")}
+          </button>
+        </div>
       </header>
 
       <div className="provider-edit-scroll">
@@ -54,6 +70,7 @@ export function ProviderEditPage({
           <label>
             <span>{t("provider.providerKey")}</span>
             <input
+              disabled={isSaving}
               value={provider.id}
               onChange={(event) =>
                 onUpdateProvider((current) => ({
@@ -64,8 +81,9 @@ export function ProviderEditPage({
             />
           </label>
           <label>
-            <span>{t("provider.template")}</span>
+            <span>{t("provider.providerType")}</span>
             <select
+              disabled={isSaving}
               value={provider.templateKind}
               onChange={(event) => onChangeTemplate(event.target.value as ProviderKind)}
             >
@@ -79,6 +97,7 @@ export function ProviderEditPage({
           <label>
             <span>{t("provider.displayName")}</span>
             <input
+              disabled={isSaving}
               value={provider.name}
               onChange={(event) =>
                 onUpdateProvider((current) => ({
@@ -95,6 +114,7 @@ export function ProviderEditPage({
           <label className="wide">
             <span>{t("provider.baseUrl")}</span>
             <input
+              disabled={isSaving}
               value={provider.baseUrl}
               onChange={(event) =>
                 onUpdateProvider((current) => ({
@@ -107,6 +127,7 @@ export function ProviderEditPage({
           <label>
             <span>{t("provider.apiKey")}</span>
             <input
+              disabled={isSaving}
               type="password"
               value={provider.bearerToken}
               onChange={(event) =>
@@ -120,6 +141,7 @@ export function ProviderEditPage({
           <label className="wide">
             <span>{t("provider.defaultModel")}</span>
             <select
+              disabled={isSaving}
               value={provider.defaultModel}
               onChange={(event) =>
                 onUpdateProvider((current) => ({
@@ -139,6 +161,7 @@ export function ProviderEditPage({
 
         <ProviderModelEditor
           provider={provider}
+          disabled={isSaving}
           onAddCustomModel={onAddCustomModel}
           onUpdateCustomModel={onUpdateCustomModel}
           onRemoveCustomModel={onRemoveCustomModel}

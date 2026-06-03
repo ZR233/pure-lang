@@ -61,17 +61,11 @@ export function App() {
           selectedProviderId={state.selectedProviderId}
           providerSearch={state.providerSearch}
           configExists={state.configExists}
-          configToml={state.configToml}
-          setProviders={studio.setProvidersState}
           setRoles={studio.setRolesState}
-          setSelectedProviderId={studio.setSelectedProviderIdState}
           setProviderSearch={studio.setProviderSearchState}
-          setConfigToml={studio.setConfigTomlState}
           onClose={() => studio.dispatch({ type: "setSettingsOpen", value: false })}
           onSetActiveTab={(tab) => studio.dispatch({ type: "setSettingsOpen", value: true, tab })}
-          onSaveProviderSettings={() => void studio.onSaveProviderSettings()}
-          onSaveConfig={() => void studio.onSaveConfig()}
-          onReloadConfig={() => void studio.onReloadConfig()}
+          onSaveProviderSettings={(snapshot) => studio.onSaveProviderSettings(snapshot)}
         />
       ) : null}
     </main>

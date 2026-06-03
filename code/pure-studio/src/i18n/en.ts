@@ -19,6 +19,7 @@ const en = {
     approve: "Approve",
     deny: "Deny",
     back: "Back",
+    cancel: "Cancel",
   },
 
   status: {
@@ -238,9 +239,11 @@ const en = {
     healthy: "Healthy",
     needsSetup: "Needs setup",
     providerKey: "Provider Key",
+    providerType: "Provider type",
     displayName: "Display name",
     baseUrl: "Base URL",
-    addProvider: "Add {{name}}",
+    addProvider: "Add provider",
+    newProvider: "New provider",
   },
 
   roleRoute: {

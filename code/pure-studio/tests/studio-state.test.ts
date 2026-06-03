@@ -1,7 +1,17 @@
 import { initialStudioState, studioReducer } from "../src/state/studio-state";
 import { selectTimelineEntries } from "../src/state/selectors";
+import { normalizeRolesForProviders } from "../src/components/RoleSettings";
+import {
+  applyProviderTemplate,
+  cloneProvider,
+  createProviderFromTemplate,
+  suggestProviderId,
+} from "../src/lib/provider-settings";
+import { previewTemplates } from "../src/lib/templates";
 import type {
   ConfigPayload,
+  ProviderRecord,
+  RoleRecord,
   RunPromptResponse,
   SessionRuntime,
   TimelineItem,
@@ -581,6 +591,84 @@ function abnormalTurnTraceIsKeptWithContent() {
   );
 }
 
+function template(kind: "deepseek" | "openai") {
+  const item = previewTemplates.find((candidate) => candidate.id === kind);
+  if (!item) {
+    throw new Error(`Missing ${kind} template`);
+  }
+  return item;
+}
+
+function providerDraftUsesSingleAddEntryAndUniqueKey() {
+  const deepseek = template("deepseek");
+  const existing = [
+    createProviderFromTemplate(deepseek, "deepseek"),
+    createProviderFromTemplate(deepseek, "deepseek-2"),
+  ];
+  const nextId = suggestProviderId(existing, deepseek.id);
+  const draft = createProviderFromTemplate(deepseek, nextId);
+
+  assertEqual(nextId, "deepseek-3");
+  assertEqual(draft.id, "deepseek-3");
+  assertEqual(draft.templateKind, "deepseek");
+  assertEqual(draft.defaultModel, deepseek.defaultModel);
+}
+
+function providerDraftTemplateSwitchUpdatesTemplateFields() {
+  const deepseek = template("deepseek");
+  const openai = template("openai");
+  const draft = createProviderFromTemplate(deepseek, "deepseek");
+  const switched = applyProviderTemplate(draft, openai, { id: "openai", name: openai.name });
+
+  assertEqual(switched.id, "openai");
+  assertEqual(switched.name, "OpenAI");
+  assertEqual(switched.templateKind, "openai");
+  assertEqual(switched.baseUrl, openai.baseUrl);
+  assertEqual(switched.wireApi, openai.wireApi);
+  assertEqual(switched.defaultModel, openai.defaultModel);
+  assertDeepEqual(
+    switched.defaultModels.map((model) => model.slug),
+    openai.defaultModels.map((model) => model.slug),
+  );
+}
+
+function editingProviderDraftDoesNotMutateProviderList() {
+  const deepseek = template("deepseek");
+  const openai = template("openai");
+  const providers: ProviderRecord[] = [createProviderFromTemplate(deepseek, "deepseek")];
+  const before = JSON.stringify(providers);
+  const draft = applyProviderTemplate(cloneProvider(providers[0]), openai, {
+    id: "openai",
+    name: openai.name,
+  });
+
+  assertEqual(draft.templateKind, "openai");
+  assertEqual(JSON.stringify(providers), before);
+  assertEqual(providers[0].templateKind, "deepseek");
+}
+
+function roleChangeProducesCompleteNormalizedSnapshot() {
+  const deepseekProvider = createProviderFromTemplate(template("deepseek"), "deepseek");
+  const openaiProvider = createProviderFromTemplate(template("openai"), "openai");
+  const roles: RoleRecord[] = [
+    {
+      key: "planner",
+      displayName: "Planner",
+      provider: "openai",
+      model: openaiProvider.defaultModel,
+      effort: "medium",
+    },
+  ];
+  const normalized = normalizeRolesForProviders(roles, [deepseekProvider, openaiProvider]);
+
+  assertDeepEqual(
+    normalized.map((role) => role.key),
+    ["explorer", "planner", "executor", "reviewer"],
+  );
+  assertEqual(normalized.find((role) => role.key === "planner")?.provider, "openai");
+  assertEqual(normalized.find((role) => role.key === "explorer")?.provider, "deepseek");
+}
+
 staleTimelineLoadKeepsNewTurnItems();
 freshTimelineLoadMayReplaceSnapshot();
 staleTimelineLoadDoesNotOverwriteLiveDelta();
@@ -598,3 +686,7 @@ applyPatchCountsFilesFromResultSummary();
 unknownToolsUseFallbackAndKeepDetails();
 inferenceAndNormalTurnTraceAreHidden();
 abnormalTurnTraceIsKeptWithContent();
+providerDraftUsesSingleAddEntryAndUniqueKey();
+providerDraftTemplateSwitchUpdatesTemplateFields();
+editingProviderDraftDoesNotMutateProviderList();
+roleChangeProducesCompleteNormalizedSnapshot();

@@ -321,6 +321,7 @@
 
 .provider-edit-title {
   display: grid;
+  flex: 1;
   gap: 5px;
   min-width: 0;
 }
@@ -342,6 +343,26 @@
   font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.provider-edit-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.provider-edit-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid #cfd9e5;
+  border-radius: 8px;
+  color: #142033;
+  background: #ffffff;
 }
 
 .provider-edit-scroll {

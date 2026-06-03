@@ -22,9 +22,9 @@ Windows 下对应：
 
 SQLite 只保存 Studio 状态，例如项目、会话、消息、工具审批、agent 状态事件和应用设置，并由 `pl-core` 通过 SeaORM 纯异步访问。provider/model/role 配置仍只由 `~/.pure/config.toml` 表达。
 
-普通对话运行时读取配置；当配置文件不存在时，`pure-studio` 设置页展示默认配置草稿。写入配置必须由用户显式保存触发。
+普通对话运行时读取配置；当配置文件不存在时，`pure-studio` 设置页展示默认配置草稿。写入配置必须由用户在具体设置操作中显式触发，例如 provider 编辑页保存、删除 provider、选择默认 provider 或调整角色路由。
 
-`pure-studio` 设置页同样必须由用户显式保存后才写入 `~/.pure/config.toml`。
+`pure-studio` 设置页不提供全局保存按钮；各设置项确认后即时写入 `~/.pure/config.toml`，校验失败时只展示错误并保留当前页面状态。
 
 ## 10.2 配置职责
 
@@ -222,7 +222,7 @@ Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-
 - 每个 provider 的模型列表包含模板默认模型，并可追加用户自定义模型。
 - 用户选择一个默认 provider；四个模型角色默认都指向该 provider 的默认模型和默认 effort。
 
-设置页保存前必须完成本地校验：
+设置项写入前必须完成本地校验：
 
 - provider key 非空且唯一。
 - API key 非空。
@@ -239,26 +239,27 @@ Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-
 - provider 默认模型和自定义模型。
 - 四个模型角色到 provider/model/effort 的路由。
 
-保存前必须执行 `PureConfig::validate()`；失败时只在 UI 中展示错误，不写入磁盘。
+每次设置项写入前必须执行 `PureConfig::validate()`；失败时只在 UI 中展示错误，不写入磁盘。
 
 设置页 UI 按 React 页面模块拆分，顶层 App 负责页面路由和共享状态，具体页面放在 `src/pages`，可复用组件放在 `src/components`，Tauri 命令封装放在 `src/lib`。Provider 标签页优先从 `PureConfig.providers` 派生 provider 卡片列表，不引入新的配置存储。
 
 Provider 标签页必须提供结构化编辑能力：
 
-- 添加 DeepSeek 或 OpenAI provider，自动生成唯一 provider key。
+- Provider 列表页只提供一个“添加供应商”入口；点击后进入 Provider 编辑页。
+- 新增 Provider 默认使用模板列表第一项，自动生成唯一 provider key；编辑页通过供应商类型下拉切换 DeepSeek / OpenAI 等模板。
 - 编辑 provider key、显示名、base URL、API key 和默认模型。
 - 以 provider 卡片作为主要信息载体，展示 provider key、base URL、状态、wire API、默认模型、模型数量和更新时间等摘要信息。
 - Provider 列表页不直接编辑字段；点击卡片编辑按钮进入 provider 编辑页。
-- Provider 编辑页提供返回列表入口，并承载结构化编辑区和模型增删能力。
-- Provider 卡片必须提供删除按钮；列表页不使用独立右侧详情面板。
+- Provider 编辑页使用本地草稿，提供保存和取消按钮；保存成功后即时写入配置并返回列表，取消或返回列表不修改当前配置。
+- Provider 卡片必须提供删除按钮；删除和默认 provider 选择都即时写入配置，列表页不使用独立右侧详情面板。
 - Provider 标签页不展示 raw TOML 配置编辑器，确保列表和编辑页占据主要工作区。
 - 展示 provider 模板自带的默认模型列表。
 - 允许追加用户自定义模型，保存时由 `pl-core` 将模板默认模型排在前面，再追加用户自定义模型。
 - 模型列表应展示关键参数，例如上下文窗口、最大输出 token、自动压缩阈值、temperature、reasoning efforts、capabilities、输入模态和截断策略。
 - `wire_api` 由 provider 模板固定，不在 UI 中提供选择；DeepSeek 固定为 `chat`，OpenAI 固定为 `responses`。
-- 保存前由 `pl-core` 构造 `PureConfig` 并执行 `PureConfig::validate()`；校验失败时只在 UI 中展示错误，不写入磁盘。
+- 写入前由 `pl-core` 构造 `PureConfig` 并执行 `PureConfig::validate()`；校验失败时只在 UI 中展示错误，不写入磁盘。
 
-Roles 标签页必须展示固定四个角色：探索者、计划者、执行者、审查者。每个角色提供 provider、model 和 effort 下拉选择。provider 改变时，model 默认切换为该 provider 的 `default_model`；model 改变时，effort 默认切换为该模型的第一个可用 effort。保存 provider 设置时同步提交 roles，`pl-core` 统一校验后写入 `~/.pure/config.toml`。
+Roles 标签页必须展示固定四个角色：探索者、计划者、执行者、审查者。每个角色提供 provider、model 和 effort 下拉选择。provider 改变时，model 默认切换为该 provider 的 `default_model`；model 改变时，effort 默认切换为该模型的第一个可用 effort。角色路由下拉变更后即时提交完整 roles 快照，`pl-core` 统一校验后写入 `~/.pure/config.toml`。
 
 桌面窗口必须支持自由缩放。`pure-studio` 只声明首选窗口尺寸，不把 UI 绑定到固定宽高；设置页内容跟随窗口尺寸自适应。Provider 标签页在常规桌面宽度使用单栏 provider 卡片列表，卡片内部承载摘要、操作和展开编辑内容；在窄窗口下保持单栏滚动并压缩卡片元信息，避免表格和编辑区域被裁剪。
 
