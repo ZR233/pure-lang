@@ -29,6 +29,8 @@ reducer 分域：
 
 - 空 assistant 不渲染
 - 主 timeline 以用户与 assistant 正文为主；工具调用使用紧凑行密度，连续 tool items 可在 selector 中聚合为派生展示项，例如 `Read 3 files · Edit 1 file`，但原始 `timelineItems`、`timelineOrder` 和 reducer 仍保持 item-first append-only 语义
+- 工具聚合只属于 selector 展示层：同一 turn 内的 `thinking` 和隐藏 `inference` 不结束当前工具组；assistant `text`、`agent`、`turn` trace 或跨 turn 的 tool item 才开启新的工具展示段。`thinking` 内容仍作为 thought entry 渲染。
+- 同一 turn 内连续模型 step 产生的多个 `thinking` item 必须在 selector 中合并为一个 thought entry；tool item 和隐藏 `inference` 对 thought 聚合透明，避免工具循环后在主 timeline 连续出现多张思考卡片。
 - 模型调用、普通 turn 状态和 token 用量不作为主 timeline 内容展示；usage 和费用归属底部状态栏及其 popover
 - 失败、中断、预算受限等异常 turn trace 可作为低权重 notice 保留在主 timeline，避免关键错误被隐藏
 - 子代理使用行内状态，不做嵌套大卡片
