@@ -2,10 +2,8 @@ import {
   Activity,
   Bot,
   Brain,
-  CheckCircle2,
   ChevronDown,
   Circle,
-  Clock,
   Send,
   Square,
   Terminal,
@@ -28,7 +26,7 @@ import type {
   TurnPhase,
   ToolCallStatus2,
 } from "../types";
-import type { TimelineEntry } from "../state/selectors";
+import type { TimelineEntry, ToolGroupSummaryPart } from "../state/selectors";
 import { SessionStatusBar } from "./SessionStatusBar";
 
 const agentStatusKeys: Record<AgentStatus, string> = {
@@ -231,11 +229,6 @@ function MarkdownContent({ content }: { content: string }) {
   return <div className="markdown-content">{blocks}</div>;
 }
 
-function formatUsage(usage?: { promptTokens: number; completionTokens: number; totalTokens: number } | null) {
-  if (!usage) return null;
-  return `${usage.promptTokens}p + ${usage.completionTokens}c = ${usage.totalTokens}t`;
-}
-
 function thoughtLabel(content: string): string {
   const firstLine = content.trim().split(/\r?\n/, 1)[0]?.trim();
   return firstLine?.toLowerCase().startsWith("thought") ? firstLine : "Thought";
@@ -274,6 +267,8 @@ function turnStatusLabel(status: TimelineItem["status"], t: TFunction): string {
       return t("turnPhase.running");
     case "completed":
       return t("turnPhase.completed");
+    case "denied":
+      return t("toolCall.denied");
     case "failed":
       return t("turnPhase.failed");
     case "interrupted":
@@ -300,6 +295,24 @@ function parseToolArguments(argumentsText: string | null | undefined): Record<st
 function toolPathSummary(name: string | null | undefined, argumentsText: string | null | undefined): string | null {
   const args = parseToolArguments(argumentsText);
   if (!args) return null;
+  const command = args.command;
+  if (name === "bash" && typeof command === "string" && command.trim()) {
+    return compact(command, 90);
+  }
+  const from = args.from;
+  const to = args.to;
+  if (typeof from === "string" && from.trim() && typeof to === "string" && to.trim()) {
+    return compact(`${from.trim()} -> ${to.trim()}`, 90);
+  }
+  const paths = args.paths;
+  if (Array.isArray(paths)) {
+    const summary = paths.filter(
+      (path): path is string => typeof path === "string" && Boolean(path.trim()),
+    );
+    if (summary.length > 0) {
+      return compact(summary.map((path) => path.trim()).join(", "), 90);
+    }
+  }
   const pathValue =
     args.path ??
     args.filePath ??
@@ -311,19 +324,27 @@ function toolPathSummary(name: string | null | undefined, argumentsText: string 
   if (typeof pathValue === "string" && pathValue.trim()) {
     return pathValue;
   }
-  const command = args.command;
-  if (name === "bash" && typeof command === "string" && command.trim()) {
-    return compact(command, 90);
-  }
   return null;
 }
 
 function isQuietFileTool(name: string | null | undefined): boolean {
-  return matchesToolName(name, ["read_file", "write_file", "list_files", "list_file"]);
+  return matchesToolName(name, [
+    "read_file",
+    "write_file",
+    "list_files",
+    "list_file",
+    "search_files",
+    "stat_path",
+    "create_directory",
+    "delete_path",
+    "copy_path",
+    "move_path",
+    "apply_patch",
+  ]);
 }
 
 function hidesToolResult(name: string | null | undefined): boolean {
-  return matchesToolName(name, ["read_file", "write_file", "list_files", "list_file"]);
+  return matchesToolName(name, ["read_file", "list_files", "list_file", "search_files", "stat_path"]);
 }
 
 function matchesToolName(name: string | null | undefined, names: string[]): boolean {
@@ -446,6 +467,76 @@ function ToolEntry({ item, t }: { item: Extract<TimelineEntry, { kind: "tool" }>
   );
 }
 
+function ToolGroupEntry({
+  entry,
+  t,
+}: {
+  entry: Extract<TimelineEntry, { kind: "toolGroup" }>;
+  t: TFunction;
+}) {
+  return (
+    <EntryShell className={`timeline-entry-tool-group status-${entry.status}`} icon={<Wrench size={14} />}>
+      <div className="timeline-entry-head">
+        <strong>{t("toolGroup.title")}</strong>
+        <div className="timeline-tool-group-summary">
+          {entry.summaryParts.map((part) => (
+            <span key={part.kind} className={`timeline-tool-chip kind-${part.kind}`}>
+              {toolGroupPartLabel(part, t)}
+            </span>
+          ))}
+        </div>
+        <span className={`timeline-badge status-${entry.status}`}>{toolStatusLabel(entry.status, t)}</span>
+      </div>
+      <details className="timeline-details timeline-tool-group-details">
+        <summary>
+          <span>{t("toolGroup.details", { count: entry.items.length })}</span>
+          <ChevronDown size={14} />
+        </summary>
+        <div className="timeline-tool-group-list">
+          {entry.items.map((item) => (
+            <ToolGroupDetailRow key={item.itemId} item={item} t={t} />
+          ))}
+        </div>
+      </details>
+    </EntryShell>
+  );
+}
+
+function toolGroupPartLabel(part: ToolGroupSummaryPart, t: TFunction): string {
+  const suffix = part.count === 1 ? "One" : "";
+  return t(`toolGroup.${part.kind}${suffix}`, { count: part.count });
+}
+
+function ToolGroupDetailRow({ item, t }: { item: TimelineItem; t: TFunction }) {
+  const tool = item.tool;
+  const name = tool?.name ?? "Tool call";
+  const argumentsText = tool?.arguments ?? "";
+  const pathSummary = toolPathSummary(name, argumentsText);
+  const hideResult = hidesToolResult(name);
+  return (
+    <div className="timeline-tool-group-row">
+      <div className="timeline-tool-group-row-head">
+        <strong>{name}</strong>
+        {pathSummary ? (
+          <code className="timeline-inline-code" title={pathSummary}>
+            {pathSummary}
+          </code>
+        ) : null}
+        <span className={`timeline-badge status-${item.status}`}>{toolStatusLabel(item.status, t)}</span>
+      </div>
+      {!pathSummary && !isQuietFileTool(name) && argumentsText ? (
+        <p className="timeline-result">{compact(argumentsText, 140)}</p>
+      ) : null}
+      <ToolDetails
+        argumentsText={isQuietFileTool(name) ? null : argumentsText}
+        result={tool?.result}
+        hideResult={hideResult}
+        t={t}
+      />
+    </div>
+  );
+}
+
 function AgentEntry({
   item,
   t,
@@ -516,26 +607,13 @@ function agentFailureDetail(
 }
 
 function TraceEntry({ item, t }: { item: TimelineItem; t: TFunction }) {
-  if (item.kind === "inference") {
-    const usage = formatUsage(item.usage);
-    return (
-      <EntryShell className="timeline-entry-trace status-inference" icon={<Clock size={14} />}>
-        <div className="timeline-entry-head">
-          <strong>{item.inference?.model ?? "Inference"}</strong>
-          {usage ? <span className="timeline-entry-meta-inline">{usage}</span> : null}
-        </div>
-      </EntryShell>
-    );
-  }
-  const icon = item.status === "completed" ? <CheckCircle2 size={14} /> : <Circle size={14} />;
-  const usage = formatUsage(item.usage);
+  const content = item.content.trim();
   return (
-    <EntryShell className={`timeline-entry-trace status-${item.status ?? "started"}`} icon={icon}>
+    <EntryShell className={`timeline-entry-trace status-${item.status ?? "started"}`} icon={<Circle size={14} />}>
       <div className="timeline-entry-head">
-        <strong>{t("timeline.turn")} {turnStatusLabel(item.status, t)}</strong>
+        <strong>{t("timeline.notice")} {turnStatusLabel(item.status, t)}</strong>
       </div>
-      {usage ? <p className="timeline-entry-meta">{usage}</p> : null}
-      {item.content ? <p className="timeline-result">{compact(item.content, 260)}</p> : null}
+      {content ? <p className="timeline-result">{compact(content, 260)}</p> : null}
     </EntryShell>
   );
 }
@@ -765,6 +843,9 @@ export function ConversationPanel({
               }
               if (entry.kind === "tool") {
                 return <ToolEntry key={entry.key} item={entry.item} t={t} />;
+              }
+              if (entry.kind === "toolGroup") {
+                return <ToolGroupEntry key={entry.key} entry={entry} t={t} />;
               }
               if (entry.kind === "agent") {
                 return <AgentEntry key={entry.key} item={entry.item} t={t} />;

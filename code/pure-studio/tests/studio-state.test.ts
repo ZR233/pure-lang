@@ -1,10 +1,12 @@
 import { initialStudioState, studioReducer } from "../src/state/studio-state";
+import { selectTimelineEntries } from "../src/state/selectors";
 import type {
   ConfigPayload,
   RunPromptResponse,
   SessionRuntime,
   TimelineItem,
   TimelineItemDeltaEvent,
+  ToolCallStatus2,
 } from "../src/types";
 
 function assertEqual<T>(actual: T, expected: T) {
@@ -59,6 +61,83 @@ function textItem(itemId: string, sequence: number, content: string): TimelineIt
     role: "assistant",
     content,
     thinkingChunks: [],
+  };
+}
+
+function toolItem(
+  itemId: string,
+  turnId: string,
+  sequence: number,
+  name: string,
+  args: Record<string, unknown> | string,
+  status: ToolCallStatus2 = "completed",
+  result: string | null = null,
+): TimelineItem {
+  return {
+    turnId,
+    itemId,
+    sequence,
+    kind: "tool",
+    status,
+    createdAt: sequence,
+    updatedAt: sequence,
+    role: null,
+    content: "",
+    thinkingChunks: [],
+    tool: {
+      toolCallId: `call-${itemId}`,
+      name,
+      arguments: typeof args === "string" ? args : JSON.stringify(args),
+      result,
+      exitCode: null,
+      timedOut: false,
+    },
+  };
+}
+
+function turnItem(
+  itemId: string,
+  turnId: string,
+  sequence: number,
+  status: ToolCallStatus2,
+  content = "",
+): TimelineItem {
+  return {
+    turnId,
+    itemId,
+    sequence,
+    kind: "turn",
+    status,
+    createdAt: sequence,
+    updatedAt: sequence,
+    role: null,
+    content,
+    thinkingChunks: [],
+  };
+}
+
+function inferenceItem(itemId: string, turnId: string, sequence: number): TimelineItem {
+  return {
+    turnId,
+    itemId,
+    sequence,
+    kind: "inference",
+    status: "completed",
+    createdAt: sequence,
+    updatedAt: sequence,
+    role: null,
+    content: "",
+    thinkingChunks: [],
+    inference: {
+      inferenceId: `inference-${itemId}`,
+      model: "deepseek-v4-flash",
+    },
+    usage: {
+      promptTokens: 32412,
+      completionTokens: 88,
+      cachedPromptTokens: 0,
+      totalTokens: 32500,
+    },
   };
 }
 
@@ -119,6 +198,16 @@ function selectedState() {
       config,
     },
   });
+}
+
+function entriesForTimeline(items: TimelineItem[]) {
+  const loaded = studioReducer(selectedState(), {
+    type: "timelineLoaded",
+    sessionId: "session-1",
+    items,
+    nextSequence: items.reduce((max, item) => Math.max(max, item.sequence), -1) + 1,
+  });
+  return selectTimelineEntries(loaded);
 }
 
 function staleTimelineLoadKeepsNewTurnItems() {
@@ -258,8 +347,158 @@ function completedSnapshotKeepsFirstItemSequence() {
   assertEqual(liveCompleted.timelineNextSequence, 13);
 }
 
+function consecutiveToolsCollapseIntoToolGroup() {
+  const entries = entriesForTimeline([
+    toolItem("turn-1-read-a", "turn-1", 1, "read_file", { path: "a.ts" }),
+    toolItem("turn-1-read-many", "turn-1", 2, "search_files", { paths: ["b.ts", "c.ts"] }),
+    toolItem("turn-1-edit", "turn-1", 3, "write_file", { path: "d.ts" }),
+  ]);
+
+  assertEqual(entries.length, 1);
+  const entry = entries[0];
+  if (entry?.kind !== "toolGroup") {
+    throw new Error(`Expected toolGroup entry, got ${entry?.kind}`);
+  }
+  assertEqual(entry.turnId, "turn-1");
+  assertEqual(entry.items.length, 3);
+  assertDeepEqual(entry.summaryParts, [
+    { kind: "readFiles", count: 3 },
+    { kind: "editFiles", count: 1 },
+  ]);
+}
+
+function assistantTextBreaksToolGroup() {
+  const entries = entriesForTimeline([
+    toolItem("turn-1-read", "turn-1", 1, "read_file", { path: "a.ts" }),
+    textItem("turn-1-text", 2, "agent text"),
+    toolItem("turn-1-edit", "turn-1", 3, "write_file", { path: "b.ts" }),
+  ]);
+
+  assertDeepEqual(entries.map((entry) => entry.kind), ["toolGroup", "message", "toolGroup"]);
+  const message = entries[1];
+  if (message?.kind !== "message") {
+    throw new Error(`Expected message entry, got ${message?.kind}`);
+  }
+  assertEqual(message.content, "agent text");
+}
+
+function toolsFromDifferentTurnsDoNotMerge() {
+  const entries = entriesForTimeline([
+    toolItem("turn-1-read", "turn-1", 1, "read_file", { path: "a.ts" }),
+    toolItem("turn-2-read", "turn-2", 2, "read_file", { path: "b.ts" }),
+  ]);
+
+  assertDeepEqual(entries.map((entry) => entry.kind), ["toolGroup", "toolGroup"]);
+  const first = entries[0];
+  const second = entries[1];
+  if (first?.kind !== "toolGroup" || second?.kind !== "toolGroup") {
+    throw new Error("Expected both entries to be toolGroup");
+  }
+  assertEqual(first.turnId, "turn-1");
+  assertEqual(second.turnId, "turn-2");
+}
+
+function toolGroupStatusUsesPriority() {
+  const failedEntries = entriesForTimeline([
+    toolItem("turn-1-read", "turn-1", 1, "read_file", { path: "a.ts" }, "completed"),
+    toolItem("turn-1-run", "turn-1", 2, "bash", { command: "npm test" }, "running"),
+    toolItem("turn-1-approval", "turn-1", 3, "write_file", { path: "b.ts" }, "awaitingApproval"),
+    toolItem("turn-1-failed", "turn-1", 4, "write_file", { path: "c.ts" }, "failed"),
+  ]);
+  const failedGroup = failedEntries[0];
+  if (failedGroup?.kind !== "toolGroup") {
+    throw new Error(`Expected toolGroup entry, got ${failedGroup?.kind}`);
+  }
+  assertEqual(failedGroup.status, "failed");
+
+  const awaitingEntries = entriesForTimeline([
+    toolItem("turn-2-run", "turn-2", 1, "bash", { command: "npm test" }, "running"),
+    toolItem("turn-2-approval", "turn-2", 2, "write_file", { path: "b.ts" }, "awaitingApproval"),
+  ]);
+  const awaitingGroup = awaitingEntries[0];
+  if (awaitingGroup?.kind !== "toolGroup") {
+    throw new Error(`Expected toolGroup entry, got ${awaitingGroup?.kind}`);
+  }
+  assertEqual(awaitingGroup.status, "awaitingApproval");
+}
+
+function applyPatchCountsFilesFromResultSummary() {
+  const entries = entriesForTimeline([
+    toolItem(
+      "turn-1-patch",
+      "turn-1",
+      1,
+      "apply_patch",
+      { patch: "*** Begin Patch\n*** End Patch" },
+      "completed",
+      "M src/a.ts\nA src/b.ts\nD src/c.ts",
+    ),
+  ]);
+
+  const group = entries[0];
+  if (group?.kind !== "toolGroup") {
+    throw new Error(`Expected toolGroup entry, got ${group?.kind}`);
+  }
+  assertDeepEqual(group.summaryParts, [{ kind: "editFiles", count: 3 }]);
+}
+
+function unknownToolsUseFallbackAndKeepDetails() {
+  const entries = entriesForTimeline([
+    toolItem("turn-1-custom-a", "turn-1", 1, "custom_tool", { value: 1 }),
+    toolItem("turn-1-custom-b", "turn-1", 2, "another_tool", { value: 2 }),
+  ]);
+
+  const group = entries[0];
+  if (group?.kind !== "toolGroup") {
+    throw new Error(`Expected toolGroup entry, got ${group?.kind}`);
+  }
+  assertDeepEqual(group.summaryParts, [{ kind: "useTools", count: 2 }]);
+  assertDeepEqual(
+    group.items.map((item) => item.tool?.name),
+    ["custom_tool", "another_tool"],
+  );
+}
+
+function inferenceAndNormalTurnTraceAreHidden() {
+  const entries = entriesForTimeline([
+    inferenceItem("turn-1-inference", "turn-1", 1),
+    turnItem("turn-1-started", "turn-1", 2, "running"),
+    turnItem("turn-1-completed", "turn-1", 3, "completed"),
+    textItem("turn-1-text", 4, "agent text"),
+  ]);
+
+  assertDeepEqual(entries.map((entry) => entry.kind), ["message"]);
+  const message = entries[0];
+  if (message?.kind !== "message") {
+    throw new Error(`Expected message entry, got ${message?.kind}`);
+  }
+  assertEqual(message.content, "agent text");
+}
+
+function abnormalTurnTraceIsKeptWithContent() {
+  const entries = entriesForTimeline([
+    turnItem("turn-1-failed", "turn-1", 1, "failed", "provider error"),
+    turnItem("turn-2-interrupted", "turn-2", 2, "interrupted", "stopped by user"),
+    turnItem("turn-3-budget", "turn-3", 3, "budgetLimited", "budget limit reached"),
+  ]);
+
+  assertDeepEqual(entries.map((entry) => entry.kind), ["trace", "trace", "trace"]);
+  assertDeepEqual(
+    entries.map((entry) => (entry.kind === "trace" ? entry.item.content : "")),
+    ["provider error", "stopped by user", "budget limit reached"],
+  );
+}
+
 staleTimelineLoadKeepsNewTurnItems();
 freshTimelineLoadMayReplaceSnapshot();
 staleTimelineLoadDoesNotOverwriteLiveDelta();
 runPromptLoadedWithEmptyItemsDoesNotDeleteLiveContent();
 completedSnapshotKeepsFirstItemSequence();
+consecutiveToolsCollapseIntoToolGroup();
+assistantTextBreaksToolGroup();
+toolsFromDifferentTurnsDoNotMerge();
+toolGroupStatusUsesPriority();
+applyPatchCountsFilesFromResultSummary();
+unknownToolsUseFallbackAndKeepDetails();
+inferenceAndNormalTurnTraceAreHidden();
+abnormalTurnTraceIsKeptWithContent();

@@ -73,6 +73,7 @@ const zhCN = {
 
   timeline: {
     turn: "回合",
+    notice: "提示",
   },
 
   roles: {
@@ -131,6 +132,22 @@ const zhCN = {
     result: "结果",
     details: "详情",
     scrollToBottom: "滚动到底部",
+  },
+
+  toolGroup: {
+    title: "工具",
+    readFiles: "读取 {{count}} 个文件",
+    readFilesOne: "读取 {{count}} 个文件",
+    editFiles: "编辑 {{count}} 个文件",
+    editFilesOne: "编辑 {{count}} 个文件",
+    runCommands: "运行 {{count}} 条命令",
+    runCommandsOne: "运行 {{count}} 条命令",
+    coordinateAgents: "协作 {{count}} 个 agent",
+    coordinateAgentsOne: "协作 {{count}} 个 agent",
+    useTools: "使用 {{count}} 个工具",
+    useToolsOne: "使用 {{count}} 个工具",
+    details: "{{count}} 次工具调用",
+    details_one: "{{count}} 次工具调用",
   },
 
   conversation: {

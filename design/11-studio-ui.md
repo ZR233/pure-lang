@@ -28,7 +28,9 @@ reducer 分域：
 约束：
 
 - 空 assistant 不渲染
-- 工具调用使用紧凑行密度
+- 主 timeline 以用户与 assistant 正文为主；工具调用使用紧凑行密度，连续 tool items 可在 selector 中聚合为派生展示项，例如 `Read 3 files · Edit 1 file`，但原始 `timelineItems`、`timelineOrder` 和 reducer 仍保持 item-first append-only 语义
+- 模型调用、普通 turn 状态和 token 用量不作为主 timeline 内容展示；usage 和费用归属底部状态栏及其 popover
+- 失败、中断、预算受限等异常 turn trace 可作为低权重 notice 保留在主 timeline，避免关键错误被隐藏
 - 子代理使用行内状态，不做嵌套大卡片
 - 子代理内部 text delta、thinking delta、tool call 和工具输出不进入父会话 timeline；父会话只展示 agent 生命周期状态、最终摘要、最终错误文本和压缩后的 runtime usage
 - agent timeline 与 agent latest snapshot 必须分离；timeline 渲染 append-only `agentEvents`，状态栏渲染 latest `agents`
@@ -45,7 +47,7 @@ reducer 分域：
 - `timelineItems: Map<itemId, TimelineItem>`
 - `timelineOrder: string[]`
 
-`timelineOrder` 只在 item 首次出现时按 `sequence` 插入；后续 delta/completed/failed 不改变展示位置。组件不得再把 `messages`、运行中 tool map、agent events 和 trace items 临时拼接成主 timeline。
+`timelineOrder` 只在 item 首次出现时按 `sequence` 插入；后续 delta/completed/failed 不改变展示位置。组件不得再把 `messages`、运行中 tool map、agent events 和 trace items 临时拼接成主 timeline。工具聚合与普通 trace 过滤只能作为 `timelineEntries` 派生显示层逻辑，不能写回 reducer 状态或后端 DTO。
 
 ## 3. Turn 生命周期
 
