@@ -1061,14 +1061,40 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn apply_patch_rejects_duplicate_target() {
-        let root = unique_temp_dir("patch-duplicate-target");
+    async fn apply_patch_merges_repeated_update_hunks_for_same_file() {
+        let root = unique_temp_dir("patch-repeated-update-target");
+        tokio::fs::create_dir_all(&root).await.unwrap();
+        tokio::fs::write(root.join("src.rs"), "one\ntwo\nthree\n")
+            .await
+            .unwrap();
+        let tool = ApplyPatchTool;
+        let patch = "*** Begin Patch\n*** Update File: src.rs\n@@\n-one\n+1\n*** Update File: src.rs\n@@\n-two\n+2\n*** End Patch";
+
+        tool.execute(
+            input(serde_json::json!({ "patch": patch })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            tokio::fs::read_to_string(root.join("src.rs"))
+                .await
+                .unwrap(),
+            "1\n2\nthree\n"
+        );
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn apply_patch_rejects_repeated_file_lifecycle_operations() {
+        let root = unique_temp_dir("patch-repeated-lifecycle");
         tokio::fs::create_dir_all(&root).await.unwrap();
         tokio::fs::write(root.join("src.rs"), "one\ntwo\n")
             .await
             .unwrap();
         let tool = ApplyPatchTool;
-        let patch = "*** Begin Patch\n*** Update File: src.rs\n@@\n-one\n+1\n*** Update File: src.rs\n@@\n-two\n+2\n*** End Patch";
+        let patch = "*** Begin Patch\n*** Update File: src.rs\n@@\n-one\n+1\n*** Delete File: src.rs\n*** End Patch";
 
         let result = tool
             .execute(
@@ -1078,7 +1104,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(result.to_string().contains("more than once"));
+        assert!(result.to_string().contains("conflicting file operations"));
         let _ = tokio::fs::remove_dir_all(root).await;
     }
 }
