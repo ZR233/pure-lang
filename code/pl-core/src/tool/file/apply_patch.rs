@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use pl_protocol::PureError;
@@ -12,11 +11,13 @@ const ADD_FILE: &str = "*** Add File: ";
 const UPDATE_FILE: &str = "*** Update File: ";
 const DELETE_FILE: &str = "*** Delete File: ";
 const MOVE_TO: &str = "*** Move to: ";
+const ENVIRONMENT_ID: &str = "*** Environment ID: ";
 const EOF_MARKER: &str = "*** End of File";
 const VALID_HUNK_HEADERS: &str = "valid hunk headers are '*** Add File: {path}', '*** Delete File: {path}', '*** Update File: {path}'";
 
-pub const APPLY_PATCH_LARK_GRAMMAR: &str = r#"start: begin_patch hunk+ end_patch
+pub const APPLY_PATCH_LARK_GRAMMAR: &str = r#"start: begin_patch environment_id? hunk+ end_patch
 begin_patch: "*** Begin Patch" LF
+environment_id: "*** Environment ID: " filename LF
 end_patch: "*** End Patch" LF?
 
 hunk: add_hunk | delete_hunk | update_hunk
@@ -36,9 +37,19 @@ eof_line: "*** End of File" LF
 %import common.LF
 "#;
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PatchOutcome {
     committed: Vec<CommittedChange>,
+    exact: bool,
+}
+
+impl Default for PatchOutcome {
+    fn default() -> Self {
+        Self {
+            committed: Vec::new(),
+            exact: true,
+        }
+    }
 }
 
 impl PatchOutcome {
@@ -52,12 +63,19 @@ impl PatchOutcome {
 
     fn failure_suffix(&self, paths: &WorkspacePaths) -> String {
         if self.committed.is_empty() {
-            return "\nNo files were modified before failure.".to_string();
+            let mut output = "\nNo files were modified before failure.".to_string();
+            if !self.exact {
+                output.push_str("\nA write may have partially modified a file before failure.");
+            }
+            return output;
         }
 
         let mut output = String::from("\nCommitted changes before failure:\n");
         for change in &self.committed {
             output.push_str(&change.failure_line(paths));
+        }
+        if !self.exact {
+            output.push_str("Committed changes may be incomplete because a write failed.\n");
         }
         output
     }
@@ -179,37 +197,12 @@ struct UpdateChunk {
     eof: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum PlannedChange {
-    Add {
-        path: PathBuf,
-        content: String,
-        overwritten_content: Option<String>,
-    },
-    Update {
-        path: PathBuf,
-        old_content: String,
-        new_content: String,
-    },
-    Delete {
-        path: PathBuf,
-        content: String,
-    },
-    Move {
-        source: PathBuf,
-        target: PathBuf,
-        old_content: String,
-        new_content: String,
-        overwritten_target_content: Option<String>,
-    },
-}
-
 pub async fn apply_patch(patch: &str, paths: &WorkspacePaths) -> Result<PatchOutcome, PureError> {
-    let changes = plan_patch(patch, paths).await?;
+    let hunks = parse_patch(patch)?;
     let mut outcome = PatchOutcome::default();
 
-    for change in changes {
-        if let Err(error) = apply_change(change, &mut outcome).await {
+    for hunk in hunks {
+        if let Err(error) = apply_hunk(hunk, paths, &mut outcome).await {
             let error = error_message(error);
             return Err(tool_error(format!(
                 "{error}{}",
@@ -221,144 +214,39 @@ pub async fn apply_patch(patch: &str, paths: &WorkspacePaths) -> Result<PatchOut
     Ok(outcome)
 }
 
-async fn plan_patch(patch: &str, paths: &WorkspacePaths) -> Result<Vec<PlannedChange>, PureError> {
-    let hunks = parse_patch(patch)?;
-    let mut changes = Vec::new();
-    let mut exclusive_paths = HashSet::new();
-    let mut update_indices = HashMap::new();
-
-    for hunk in hunks {
-        match hunk {
-            Hunk::Add { path, content } => {
-                let target = paths.resolve_for_write(&path).await?;
-                paths.reject_symlink_write(&target).await?;
-                reserve_exclusive_patch_path(&mut exclusive_paths, &update_indices, &target)?;
-                let overwritten_content = read_optional_text(&target).await?;
-                changes.push(PlannedChange::Add {
-                    path: target,
-                    content,
-                    overwritten_content,
-                });
-            }
-            Hunk::Delete { path } => {
-                let target = paths.resolve_existing(&path).await?;
-                paths.reject_symlink_write(&target).await?;
-                reserve_exclusive_patch_path(&mut exclusive_paths, &update_indices, &target)?;
-                let metadata = tokio::fs::metadata(&target).await?;
-                if !metadata.is_file() {
-                    return Err(tool_error(format!(
-                        "cannot delete '{}': path is not a file",
-                        target.display()
-                    )));
-                }
-                let content = tokio::fs::read_to_string(&target).await.map_err(|error| {
-                    tool_error(format!("failed to read '{}': {error}", target.display()))
-                })?;
-                changes.push(PlannedChange::Delete {
-                    path: target,
-                    content,
-                });
-            }
-            Hunk::Update {
-                path,
-                move_path,
-                chunks,
-            } => {
-                let source = paths.resolve_existing(&path).await?;
-                paths.reject_symlink_write(&source).await?;
-
-                match move_path {
-                    Some(move_path) => {
-                        reserve_exclusive_patch_path(
-                            &mut exclusive_paths,
-                            &update_indices,
-                            &source,
-                        )?;
-                        let old_content =
-                            tokio::fs::read_to_string(&source).await.map_err(|error| {
-                                tool_error(format!(
-                                    "failed to read '{}': {error}",
-                                    source.display()
-                                ))
-                            })?;
-                        let new_content = if chunks.is_empty() {
-                            old_content.clone()
-                        } else {
-                            apply_chunks(&old_content, &source, &chunks)?
-                        };
-                        let target = paths.resolve_for_write(&move_path).await?;
-                        paths.reject_symlink_write(&target).await?;
-                        reserve_exclusive_patch_path(
-                            &mut exclusive_paths,
-                            &update_indices,
-                            &target,
-                        )?;
-                        let overwritten_target_content = read_optional_text(&target).await?;
-                        changes.push(PlannedChange::Move {
-                            source,
-                            target,
-                            old_content,
-                            new_content,
-                            overwritten_target_content,
-                        });
-                    }
-                    None => {
-                        ensure_path_not_exclusive(&exclusive_paths, &source)?;
-                        if let Some(index) = update_indices.get(&source).copied() {
-                            let PlannedChange::Update { new_content, .. } = &mut changes[index]
-                            else {
-                                unreachable!("plain update indices only point to update changes");
-                            };
-                            *new_content = apply_chunks(new_content, &source, &chunks)?;
-                        } else {
-                            let old_content =
-                                tokio::fs::read_to_string(&source).await.map_err(|error| {
-                                    tool_error(format!(
-                                        "failed to read '{}': {error}",
-                                        source.display()
-                                    ))
-                                })?;
-                            let new_content = apply_chunks(&old_content, &source, &chunks)?;
-                            let index = changes.len();
-                            changes.push(PlannedChange::Update {
-                                path: source.clone(),
-                                old_content,
-                                new_content,
-                            });
-                            update_indices.insert(source, index);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(changes)
-}
-
-async fn apply_change(change: PlannedChange, outcome: &mut PatchOutcome) -> Result<(), PureError> {
-    match change {
-        PlannedChange::Add {
-            path: target,
-            content,
-            overwritten_content,
-        } => {
+async fn apply_hunk(
+    hunk: Hunk,
+    paths: &WorkspacePaths,
+    outcome: &mut PatchOutcome,
+) -> Result<(), PureError> {
+    match hunk {
+        Hunk::Add { path, content } => {
+            let target = paths.resolve_for_write(&path).await?;
+            paths.reject_symlink_write(&target).await?;
+            let overwritten_content = read_optional_text(&target).await?;
             if let Some(parent) = target.parent() {
                 tokio::fs::create_dir_all(parent).await?;
             }
-            tokio::fs::write(&target, &content).await.map_err(|error| {
-                tool_error(format!("failed to write '{}': {error}", target.display()))
-            })?;
+            write_text(&target, &content, outcome).await?;
             outcome.committed.push(CommittedChange::Add {
                 path: target,
                 content,
                 overwritten_content,
             });
         }
-        PlannedChange::Delete {
-            path: target,
-            content,
-        } => {
+        Hunk::Delete { path } => {
+            let target = paths.resolve_existing(&path).await?;
+            paths.reject_symlink_write(&target).await?;
+            let metadata = tokio::fs::metadata(&target).await?;
+            if !metadata.is_file() {
+                return Err(tool_error(format!(
+                    "cannot delete '{}': path is not a file",
+                    target.display()
+                )));
+            }
+            let content = tokio::fs::read_to_string(&target).await.map_err(|error| {
+                tool_error(format!("failed to read '{}': {error}", target.display()))
+            })?;
             tokio::fs::remove_file(&target).await.map_err(|error| {
                 tool_error(format!("failed to delete '{}': {error}", target.display()))
             })?;
@@ -367,87 +255,80 @@ async fn apply_change(change: PlannedChange, outcome: &mut PatchOutcome) -> Resu
                 content,
             });
         }
-        PlannedChange::Update {
-            path: source,
-            old_content,
-            new_content,
+        Hunk::Update {
+            path,
+            move_path,
+            chunks,
         } => {
-            tokio::fs::write(&source, &new_content)
-                .await
-                .map_err(|error| {
-                    tool_error(format!("failed to write '{}': {error}", source.display()))
-                })?;
-            outcome.committed.push(CommittedChange::Update {
-                path: source,
-                old_content,
-                new_content,
-            });
-        }
-        PlannedChange::Move {
-            source,
-            target,
-            old_content,
-            new_content,
-            overwritten_target_content,
-        } => {
-            if let Some(parent) = target.parent() {
-                tokio::fs::create_dir_all(parent).await?;
-            }
-            tokio::fs::write(&target, &new_content)
-                .await
-                .map_err(|error| {
-                    tool_error(format!("failed to write '{}': {error}", target.display()))
-                })?;
-            let target_commit_index = outcome.committed.len();
-            outcome.committed.push(CommittedChange::Add {
-                path: target.clone(),
-                content: new_content.clone(),
-                overwritten_content: overwritten_target_content.clone(),
-            });
-            tokio::fs::remove_file(&source).await.map_err(|error| {
-                tool_error(format!(
-                    "failed to remove original '{}': {error}",
-                    source.display()
-                ))
+            let source = paths.resolve_existing(&path).await?;
+            paths.reject_symlink_write(&source).await?;
+            let old_content = tokio::fs::read_to_string(&source).await.map_err(|error| {
+                tool_error(format!("failed to read '{}': {error}", source.display()))
             })?;
-            outcome.committed[target_commit_index] = CommittedChange::Move {
-                source,
-                target,
-                old_content,
-                new_content,
-                overwritten_target_content,
+            let new_content = if chunks.is_empty() {
+                old_content.clone()
+            } else {
+                apply_chunks(&old_content, &source, &chunks)?
             };
+
+            if let Some(move_path) = move_path {
+                let target = paths.resolve_for_write(&move_path).await?;
+                paths.reject_symlink_write(&target).await?;
+                if target == source {
+                    write_text(&source, &new_content, outcome).await?;
+                    outcome.committed.push(CommittedChange::Update {
+                        path: source,
+                        old_content,
+                        new_content,
+                    });
+                    return Ok(());
+                }
+                let overwritten_target_content = read_optional_text(&target).await?;
+                if let Some(parent) = target.parent() {
+                    tokio::fs::create_dir_all(parent).await?;
+                }
+                write_text(&target, &new_content, outcome).await?;
+                let target_commit_index = outcome.committed.len();
+                outcome.committed.push(CommittedChange::Add {
+                    path: target.clone(),
+                    content: new_content.clone(),
+                    overwritten_content: overwritten_target_content.clone(),
+                });
+                tokio::fs::remove_file(&source).await.map_err(|error| {
+                    tool_error(format!(
+                        "failed to remove original '{}': {error}",
+                        source.display()
+                    ))
+                })?;
+                outcome.committed[target_commit_index] = CommittedChange::Move {
+                    source,
+                    target,
+                    old_content,
+                    new_content,
+                    overwritten_target_content,
+                };
+            } else {
+                write_text(&source, &new_content, outcome).await?;
+                outcome.committed.push(CommittedChange::Update {
+                    path: source,
+                    old_content,
+                    new_content,
+                });
+            }
         }
     }
     Ok(())
 }
 
-fn reserve_exclusive_patch_path(
-    seen: &mut HashSet<PathBuf>,
-    update_indices: &HashMap<PathBuf, usize>,
+async fn write_text(
     path: &Path,
+    content: &str,
+    outcome: &mut PatchOutcome,
 ) -> Result<(), PureError> {
-    if update_indices.contains_key(path) {
-        return Err(conflicting_patch_path(path));
-    }
-    if seen.insert(path.to_path_buf()) {
-        return Ok(());
-    }
-    Err(conflicting_patch_path(path))
-}
-
-fn ensure_path_not_exclusive(seen: &HashSet<PathBuf>, path: &Path) -> Result<(), PureError> {
-    if seen.contains(path) {
-        return Err(conflicting_patch_path(path));
-    }
-    Ok(())
-}
-
-fn conflicting_patch_path(path: &Path) -> PureError {
-    tool_error(format!(
-        "patch has conflicting file operations for '{}'; only plain Update File hunks may repeat the same file",
-        path.display()
-    ))
+    tokio::fs::write(path, content).await.map_err(|error| {
+        outcome.exact = false;
+        tool_error(format!("failed to write '{}': {error}", path.display()))
+    })
 }
 
 async fn read_optional_text(path: &Path) -> Result<Option<String>, PureError> {
@@ -491,6 +372,14 @@ fn parse_patch(patch: &str) -> Result<Vec<Hunk>, PureError> {
 
     let mut hunks = Vec::new();
     let mut index = 1;
+    if let Some(line) = lines.get(index)
+        && let Some(environment_id) = line.trim_start().strip_prefix(ENVIRONMENT_ID)
+    {
+        if environment_id.trim().is_empty() {
+            return Err(tool_error("apply_patch environment_id cannot be empty"));
+        }
+        index += 1;
+    }
     while index + 1 < lines.len() {
         let line = lines[index].trim();
         if let Some(path) = line.strip_prefix(ADD_FILE) {
@@ -504,9 +393,6 @@ fn parse_patch(patch: &str) -> Result<Vec<Hunk>, PureError> {
                 content.push_str(added);
                 content.push('\n');
                 index += 1;
-            }
-            if content.is_empty() {
-                return Err(tool_error(format!("add hunk for '{path}' is empty")));
             }
             hunks.push(Hunk::Add {
                 path: path.to_string(),
@@ -529,10 +415,15 @@ fn parse_patch(patch: &str) -> Result<Vec<Hunk>, PureError> {
             let mut chunks = Vec::new();
             while index + 1 < lines.len() {
                 let line = lines[index];
+                if line.trim().is_empty() {
+                    index += 1;
+                    continue;
+                }
                 if line.trim().starts_with("*** ") {
                     break;
                 }
-                let (chunk, consumed) = parse_update_chunk(&lines[index..lines.len() - 1])?;
+                let (chunk, consumed) =
+                    parse_update_chunk(&lines[index..lines.len() - 1], index + 1)?;
                 chunks.push(chunk);
                 index += consumed;
             }
@@ -547,7 +438,7 @@ fn parse_patch(patch: &str) -> Result<Vec<Hunk>, PureError> {
         } else if line.is_empty() {
             index += 1;
         } else {
-            return Err(invalid_hunk_header(line));
+            return Err(invalid_hunk_header(line, index + 1));
         }
     }
 
@@ -560,6 +451,15 @@ fn parse_patch(patch: &str) -> Result<Vec<Hunk>, PureError> {
 fn normalize_patch_input(patch: &str) -> Result<Cow<'_, str>, PureError> {
     let trimmed = patch.trim();
     let lines: Vec<&str> = trimmed.lines().collect();
+    if let Some(inner) = strip_heredoc_wrapper(&lines)? {
+        return Ok(Cow::Owned(inner.join("\n")));
+    }
+    if lines
+        .first()
+        .is_some_and(|line| line.trim_start().starts_with("<<"))
+    {
+        return Ok(Cow::Borrowed(trimmed));
+    }
     let begin_indices: Vec<usize> = lines
         .iter()
         .enumerate()
@@ -591,7 +491,28 @@ fn normalize_patch_input(patch: &str) -> Result<Cow<'_, str>, PureError> {
     Ok(Cow::Owned(lines[begin_index..=end_index].join("\n")))
 }
 
-fn invalid_hunk_header(line: &str) -> PureError {
+fn strip_heredoc_wrapper<'a>(lines: &'a [&'a str]) -> Result<Option<Vec<&'a str>>, PureError> {
+    let [first, .., last] = lines else {
+        return Ok(None);
+    };
+    let first = first.trim();
+    if !matches!(first, "<<EOF" | "<<'EOF'" | "<<\"EOF\"") {
+        return Ok(None);
+    }
+    if last.trim_end() != "EOF" {
+        return Err(tool_error(
+            "missing closing EOF marker for apply_patch heredoc",
+        ));
+    }
+    if lines.len() < 4 {
+        return Err(tool_error(
+            "apply_patch heredoc does not contain a patch block",
+        ));
+    }
+    Ok(Some(lines[1..lines.len() - 1].to_vec()))
+}
+
+fn invalid_hunk_header(line: &str, line_number: usize) -> PureError {
     let lower = line.to_ascii_lowercase();
     let guidance = if line.starts_with("--- ") || line.starts_with("+++ ") {
         "standard unified diff headers are not supported; use '*** Update File: <path>' with @@ chunks instead"
@@ -606,11 +527,14 @@ fn invalid_hunk_header(line: &str) -> PureError {
         "unsupported patch hunk header"
     };
     tool_error(format!(
-        "invalid hunk header: '{line}'. {guidance}; {VALID_HUNK_HEADERS}"
+        "invalid hunk header at line {line_number}: '{line}'. {guidance}; {VALID_HUNK_HEADERS}"
     ))
 }
 
-fn parse_update_chunk(lines: &[&str]) -> Result<(UpdateChunk, usize), PureError> {
+fn parse_update_chunk(
+    lines: &[&str],
+    line_number: usize,
+) -> Result<(UpdateChunk, usize), PureError> {
     let mut index = 0;
     let context = match lines.first().copied() {
         Some("@@") => {
@@ -618,16 +542,20 @@ fn parse_update_chunk(lines: &[&str]) -> Result<(UpdateChunk, usize), PureError>
             None
         }
         Some(line) if line.starts_with("@@ -") => {
-            return Err(tool_error(
-                "unified diff hunk ranges are not supported; use '@@' or '@@ <search context>'",
-            ));
+            return Err(tool_error(format!(
+                "invalid update hunk at line {line_number}: unified diff hunk ranges are not supported; use '@@' or '@@ <search context>'"
+            )));
         }
         Some(line) if line.starts_with("@@ ") => {
             index = 1;
             Some(line.trim_start_matches("@@ ").to_string())
         }
         Some(_) => None,
-        None => return Err(tool_error("update chunk is empty")),
+        None => {
+            return Err(tool_error(format!(
+                "update chunk at line {line_number} is empty"
+            )));
+        }
     };
 
     let mut old_lines = Vec::new();
@@ -635,7 +563,7 @@ fn parse_update_chunk(lines: &[&str]) -> Result<(UpdateChunk, usize), PureError>
     let mut eof = false;
     while index < lines.len() {
         let line = lines[index];
-        if line == EOF_MARKER {
+        if line.trim() == EOF_MARKER {
             eof = true;
             index += 1;
             break;
@@ -656,7 +584,8 @@ fn parse_update_chunk(lines: &[&str]) -> Result<(UpdateChunk, usize), PureError>
             }
             Some(_) => {
                 return Err(tool_error(format!(
-                    "invalid update line: '{line}', expected ' ', '+' or '-'"
+                    "invalid update line at line {}: '{line}', expected ' ', '+' or '-'",
+                    line_number + index
                 )));
             }
         }
@@ -664,7 +593,9 @@ fn parse_update_chunk(lines: &[&str]) -> Result<(UpdateChunk, usize), PureError>
     }
 
     if old_lines.is_empty() && new_lines.is_empty() {
-        return Err(tool_error("update chunk does not contain changes"));
+        return Err(tool_error(format!(
+            "update chunk at line {line_number} does not contain changes"
+        )));
     }
 
     Ok((
@@ -700,21 +631,22 @@ fn apply_chunks(content: &str, path: &Path, chunks: &[UpdateChunk]) -> Result<St
         }
 
         if chunk.old_lines.is_empty() {
-            let insert_at = cursor.min(lines.len());
+            let insert_at = lines.len();
             replacements.push((insert_at, 0, chunk.new_lines.clone()));
             cursor = insert_at;
             continue;
         }
 
-        let Some(start) = find_sequence(&lines, &chunk.old_lines, cursor, chunk.eof) else {
+        let Some((start, old_len, new_lines)) = find_chunk_replacement(&lines, chunk, cursor)
+        else {
             return Err(tool_error(format!(
                 "failed to find expected lines in {}:\n{}",
                 path.display(),
                 chunk.old_lines.join("\n")
             )));
         };
-        replacements.push((start, chunk.old_lines.len(), chunk.new_lines.clone()));
-        cursor = start + chunk.old_lines.len();
+        replacements.push((start, old_len, new_lines));
+        cursor = start + old_len;
     }
 
     replacements.sort_by_key(|(start, _, _)| *start);
@@ -725,6 +657,77 @@ fn apply_chunks(content: &str, path: &Path, chunks: &[UpdateChunk]) -> Result<St
         lines.push(String::new());
     }
     Ok(lines.join("\n"))
+}
+
+fn find_chunk_replacement(
+    lines: &[String],
+    chunk: &UpdateChunk,
+    cursor: usize,
+) -> Option<(usize, usize, Vec<String>)> {
+    let mut candidates = vec![(chunk.old_lines.clone(), chunk.new_lines.clone())];
+    if let Some(candidate) = duplicated_edge_context_candidate(chunk) {
+        candidates.push(candidate);
+    }
+
+    for (old_lines, new_lines) in candidates {
+        if let Some(start) = find_sequence(lines, &old_lines, cursor, chunk.eof) {
+            let matched_lines = lines[start..start + old_lines.len()].to_vec();
+            let new_lines = preserve_matched_context_lines(&old_lines, &new_lines, &matched_lines);
+            return Some((start, old_lines.len(), new_lines));
+        }
+        if old_lines.last().is_some_and(String::is_empty) {
+            let old_lines = old_lines[..old_lines.len() - 1].to_vec();
+            let new_lines = if new_lines.last().is_some_and(String::is_empty) {
+                new_lines[..new_lines.len() - 1].to_vec()
+            } else {
+                new_lines
+            };
+            if let Some(start) = find_sequence(lines, &old_lines, cursor, chunk.eof) {
+                let matched_lines = lines[start..start + old_lines.len()].to_vec();
+                let new_lines =
+                    preserve_matched_context_lines(&old_lines, &new_lines, &matched_lines);
+                return Some((start, old_lines.len(), new_lines));
+            }
+        }
+    }
+    None
+}
+
+fn preserve_matched_context_lines(
+    old_lines: &[String],
+    new_lines: &[String],
+    matched_lines: &[String],
+) -> Vec<String> {
+    let mut old_index = 0;
+    new_lines
+        .iter()
+        .map(|line| {
+            if old_index < old_lines.len() && lines_equivalent(line, &old_lines[old_index]) {
+                let matched = matched_lines[old_index].clone();
+                old_index += 1;
+                matched
+            } else {
+                line.clone()
+            }
+        })
+        .collect()
+}
+
+fn duplicated_edge_context_candidate(chunk: &UpdateChunk) -> Option<(Vec<String>, Vec<String>)> {
+    if chunk.old_lines.len() != 2 || chunk.new_lines.len() <= chunk.old_lines.len() {
+        return None;
+    }
+    let first_old = chunk.old_lines.first()?;
+    let last_old = chunk.old_lines.last()?;
+    if !lines_equivalent(first_old, last_old) {
+        return None;
+    }
+    let first_new = chunk.new_lines.first()?;
+    let last_new = chunk.new_lines.last()?;
+    if !lines_equivalent(first_new, first_old) || !lines_equivalent(last_new, last_old) {
+        return None;
+    }
+    Some((vec![last_old.clone()], chunk.new_lines[1..].to_vec()))
 }
 
 fn find_sequence(lines: &[String], pattern: &[String], start: usize, eof: bool) -> Option<usize> {
@@ -742,7 +745,61 @@ fn find_sequence(lines: &[String], pattern: &[String], start: usize, eof: bool) 
             return Some(index);
         }
     }
+    for index in start..=lines.len().saturating_sub(pattern.len()) {
+        if eof && index + pattern.len() != lines.len() {
+            continue;
+        }
+        if pattern
+            .iter()
+            .enumerate()
+            .all(|(offset, expected)| lines[index + offset].trim_end() == expected.trim_end())
+        {
+            return Some(index);
+        }
+    }
+    for index in start..=lines.len().saturating_sub(pattern.len()) {
+        if eof && index + pattern.len() != lines.len() {
+            continue;
+        }
+        if pattern
+            .iter()
+            .enumerate()
+            .all(|(offset, expected)| lines_equivalent(&lines[index + offset], expected))
+        {
+            return Some(index);
+        }
+    }
+    for index in start..=lines.len().saturating_sub(pattern.len()) {
+        if eof && index + pattern.len() != lines.len() {
+            continue;
+        }
+        if pattern.iter().enumerate().all(|(offset, expected)| {
+            normalize_line_for_match(&lines[index + offset]) == normalize_line_for_match(expected)
+        }) {
+            return Some(index);
+        }
+    }
     None
+}
+
+fn lines_equivalent(left: &str, right: &str) -> bool {
+    left.trim() == right.trim() || normalize_line_for_match(left) == normalize_line_for_match(right)
+}
+
+fn normalize_line_for_match(line: &str) -> String {
+    line.trim()
+        .chars()
+        .map(|ch| match ch {
+            '\u{2010}' | '\u{2011}' | '\u{2012}' | '\u{2013}' | '\u{2014}' | '\u{2015}'
+            | '\u{2212}' => '-',
+            '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}' => '\'',
+            '\u{201C}' | '\u{201D}' | '\u{201E}' | '\u{201F}' => '"',
+            '\u{00A0}' | '\u{2002}' | '\u{2003}' | '\u{2004}' | '\u{2005}' | '\u{2006}'
+            | '\u{2007}' | '\u{2008}' | '\u{2009}' | '\u{200A}' | '\u{202F}' | '\u{205F}'
+            | '\u{3000}' => ' ',
+            other => other,
+        })
+        .collect()
 }
 
 fn tool_error(error: impl std::fmt::Display) -> PureError {
