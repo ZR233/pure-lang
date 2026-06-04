@@ -275,6 +275,10 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       if (action.sessionId !== state.selectedSessionId) {
         return state;
       }
+      const nextRuntime = mergeLiveSkillIntoRuntime(
+        action.sessionRuntime ?? state.sessionRuntime,
+        action.event,
+      );
       return reduceAgentEvent(
         {
           ...state,
@@ -282,7 +286,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
             ? mergeAgentTimelineEvents(state.agentTimelineEvents, [action.timelineEvent])
             : state.agentTimelineEvents,
           agents: action.agent ? mergeAgents(state.agents, [action.agent]) : state.agents,
-          sessionRuntime: action.sessionRuntime ?? state.sessionRuntime,
+          sessionRuntime: nextRuntime,
         },
         action.event,
         action.statusText,
@@ -364,6 +368,64 @@ function reduceAgentEvent(
     return { ...state, status: statusText, turnPhase: "failed" };
   }
   return { ...state, status: statusText };
+}
+
+function mergeLiveSkillIntoRuntime(
+  runtime: SessionRuntime | null,
+  event: AgentEvent | null | undefined,
+): SessionRuntime | null {
+  if (!runtime || !isRecord(event) || !("timelineItemCompleted" in event)) {
+    return runtime;
+  }
+  const completed = event.timelineItemCompleted;
+  if (!isRecord(completed)) {
+    return runtime;
+  }
+  const skillName = skillNameFromCompletedItem(completed.item as TimelineItem);
+  if (!skillName) {
+    return runtime;
+  }
+  const activeSkills: string[] = [];
+  const seen = new Set<string>();
+  for (const name of [...runtime.activeSkills, skillName]) {
+    const key = name.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    activeSkills.push(name);
+  }
+  if (
+    activeSkills.length === runtime.activeSkills.length &&
+    activeSkills.every((name, index) => name === runtime.activeSkills[index])
+  ) {
+    return runtime;
+  }
+  return {
+    ...runtime,
+    activeSkills,
+  };
+}
+
+function skillNameFromCompletedItem(item: TimelineItem): string | null {
+  if (item.kind !== "tool" || item.tool?.name !== "skill_view" || !item.tool.result) {
+    return null;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(item.tool.result);
+  } catch {
+    return null;
+  }
+  if (!isRecord(value) || value.success !== true || !isRecord(value.skill)) {
+    return null;
+  }
+  const name = value.skill.name;
+  return typeof name === "string" && name.trim() ? name.trim() : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function mergeAgentTimelineEvents(

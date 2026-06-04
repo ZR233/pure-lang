@@ -544,6 +544,193 @@ function applyPatchCountsFilesFromResultSummary() {
   assertDeepEqual(group.summaryParts, [{ kind: "editFiles", count: 3 }]);
 }
 
+function successfulSkillViewImmediatelyUpdatesActiveSkills() {
+  const state = studioReducer(selectedState(), {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: {
+      timelineItemCompleted: {
+        sequence: 10,
+        item: toolItem(
+          "turn-1-skill",
+          "turn-1",
+          10,
+          "skill_view",
+          { name: "skill-creator" },
+          "completed",
+          JSON.stringify({
+            success: true,
+            skill: { name: "skill-creator" },
+            content: "body",
+          }),
+        ),
+      },
+    },
+    statusText: "running",
+  });
+
+  assertDeepEqual(state.sessionRuntime?.activeSkills, ["skill-creator"]);
+}
+
+function repeatedSkillViewDoesNotDuplicateActiveSkills() {
+  const existing = studioReducer(selectedState(), {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: {
+      timelineItemCompleted: {
+        sequence: 10,
+        item: toolItem(
+          "turn-1-skill-a",
+          "turn-1",
+          10,
+          "skill_view",
+          { name: "skill-creator" },
+          "completed",
+          JSON.stringify({
+            success: true,
+            skill: { name: "skill-creator" },
+            content: "body",
+          }),
+        ),
+      },
+    },
+    statusText: "running",
+  });
+
+  const repeated = studioReducer(existing, {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: {
+      timelineItemCompleted: {
+        sequence: 11,
+        item: toolItem(
+          "turn-1-skill-b",
+          "turn-1",
+          11,
+          "skill_view",
+          { name: "Skill-Creator" },
+          "completed",
+          JSON.stringify({
+            success: true,
+            skill: { name: "Skill-Creator" },
+            content: "body again",
+          }),
+        ),
+      },
+    },
+    statusText: "running",
+  });
+
+  assertDeepEqual(repeated.sessionRuntime?.activeSkills, ["skill-creator"]);
+}
+
+function skillViewAppliesAfterRuntimeSnapshot() {
+  const state = studioReducer(selectedState(), {
+    type: "agentEvent",
+    sessionId: "session-1",
+    sessionRuntime: {
+      ...runtime,
+      activeSkills: ["openai-docs"],
+      updatedAt: 2,
+    },
+    event: {
+      timelineItemCompleted: {
+        sequence: 10,
+        item: toolItem(
+          "turn-1-skill",
+          "turn-1",
+          10,
+          "skill_view",
+          { name: "skill-creator" },
+          "completed",
+          JSON.stringify({
+            success: true,
+            skill: { name: "skill-creator" },
+            content: "body",
+          }),
+        ),
+      },
+    },
+    statusText: "running",
+  });
+
+  assertDeepEqual(state.sessionRuntime?.activeSkills, ["openai-docs", "skill-creator"]);
+}
+
+function invalidSkillViewResultsDoNotUpdateActiveSkills() {
+  const cases = [
+    toolItem(
+      "turn-1-skill-failed",
+      "turn-1",
+      10,
+      "skill_view",
+      { name: "failed-skill" },
+      "completed",
+      JSON.stringify({
+        success: false,
+        skill: { name: "failed-skill" },
+      }),
+    ),
+    toolItem(
+      "turn-1-skill-invalid-json",
+      "turn-1",
+      11,
+      "skill_view",
+      { name: "bad-json" },
+      "completed",
+      "not json",
+    ),
+    toolItem(
+      "turn-1-skills-list",
+      "turn-1",
+      12,
+      "skills_list",
+      {},
+      "completed",
+      JSON.stringify({ success: true, skills: [] }),
+    ),
+  ];
+  let state = selectedState();
+  for (const item of cases) {
+    state = studioReducer(state, {
+      type: "agentEvent",
+      sessionId: "session-1",
+      event: { timelineItemCompleted: { sequence: item.sequence, item } },
+      statusText: "running",
+    });
+  }
+
+  assertDeepEqual(state.sessionRuntime?.activeSkills, []);
+}
+
+function skillViewFromOtherSessionDoesNotUpdateActiveSkills() {
+  const state = studioReducer(selectedState(), {
+    type: "agentEvent",
+    sessionId: "session-2",
+    event: {
+      timelineItemCompleted: {
+        sequence: 10,
+        item: toolItem(
+          "turn-1-skill",
+          "turn-1",
+          10,
+          "skill_view",
+          { name: "skill-creator" },
+          "completed",
+          JSON.stringify({
+            success: true,
+            skill: { name: "skill-creator" },
+            content: "body",
+          }),
+        ),
+      },
+    },
+    statusText: "running",
+  });
+
+  assertDeepEqual(state.sessionRuntime?.activeSkills, []);
+}
+
 function unknownToolsUseFallbackAndKeepDetails() {
   const entries = entriesForTimeline([
     toolItem("turn-1-custom-a", "turn-1", 1, "custom_tool", { value: 1 }),
@@ -719,6 +906,11 @@ assistantTextBreaksToolGroup();
 toolsFromDifferentTurnsDoNotMerge();
 toolGroupStatusUsesPriority();
 applyPatchCountsFilesFromResultSummary();
+successfulSkillViewImmediatelyUpdatesActiveSkills();
+repeatedSkillViewDoesNotDuplicateActiveSkills();
+skillViewAppliesAfterRuntimeSnapshot();
+invalidSkillViewResultsDoNotUpdateActiveSkills();
+skillViewFromOtherSessionDoesNotUpdateActiveSkills();
 unknownToolsUseFallbackAndKeepDetails();
 inferenceAndNormalTurnTraceAreHidden();
 abnormalTurnTraceIsKeptWithContent();
