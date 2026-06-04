@@ -1,5 +1,6 @@
 use serde::Deserialize;
 
+use crate::tool::WorkspaceAccess;
 use crate::turn::{
     CompileMode, PermissionMode, ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest,
     TurnOptions,
@@ -7,9 +8,9 @@ use crate::turn::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PermissionDecision {
-    Approved,
-    NeedsUserApproval,
-    NeedsAiReview,
+    Approved { workspace_access: WorkspaceAccess },
+    NeedsUserApproval { workspace_access: WorkspaceAccess },
+    NeedsAiReview { workspace_access: WorkspaceAccess },
     Denied { reason: String },
 }
 
@@ -17,6 +18,7 @@ pub(crate) fn decide_tool_permission(
     options: &TurnOptions,
     mode: CompileMode,
     request: &ToolApprovalRequest,
+    requested_access: WorkspaceAccess,
 ) -> PermissionDecision {
     if matches!(options.tool_approval_policy, ToolApprovalPolicy::DenyAll) {
         return PermissionDecision::Denied {
@@ -27,35 +29,31 @@ pub(crate) fn decide_tool_permission(
     if matches!(options.tool_approval_policy, ToolApprovalPolicy::Manual)
         || (mode == CompileMode::Plan && request.name == "bash")
     {
-        return PermissionDecision::NeedsUserApproval;
+        return PermissionDecision::NeedsUserApproval {
+            workspace_access: requested_access,
+        };
     }
 
     match options.permission_mode {
-        PermissionMode::RequestApproval if is_high_risk_tool(&request.name) => {
-            PermissionDecision::NeedsUserApproval
+        PermissionMode::RequestApproval if requested_access.allows_external() => {
+            PermissionDecision::NeedsUserApproval {
+                workspace_access: requested_access,
+            }
         }
-        PermissionMode::AutoReview if is_high_risk_tool(&request.name) => {
-            PermissionDecision::NeedsAiReview
+        PermissionMode::AutoReview if requested_access.allows_external() => {
+            PermissionDecision::NeedsAiReview {
+                workspace_access: requested_access,
+            }
         }
-        PermissionMode::RequestApproval
-        | PermissionMode::AutoReview
-        | PermissionMode::WorkspaceWrite
-        | PermissionMode::FullAccess => PermissionDecision::Approved,
+        PermissionMode::FullAccess => PermissionDecision::Approved {
+            workspace_access: WorkspaceAccess::ExternalAllowed,
+        },
+        PermissionMode::RequestApproval | PermissionMode::AutoReview => {
+            PermissionDecision::Approved {
+                workspace_access: WorkspaceAccess::WorkspaceOnly,
+            }
+        }
     }
-}
-
-pub(crate) fn is_high_risk_tool(name: &str) -> bool {
-    matches!(
-        name,
-        "bash"
-            | "write_file"
-            | "create_directory"
-            | "delete_path"
-            | "copy_path"
-            | "move_path"
-            | "apply_patch"
-            | "skill_manage"
-    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,7 +95,7 @@ mod tests {
     }
 
     #[test]
-    fn permission_modes_decide_high_risk_tools() {
+    fn permission_modes_decide_external_access() {
         let read = request("read_file");
         let write = request("write_file");
         let bash = request("bash");
@@ -105,30 +103,52 @@ mod tests {
         let request_approval =
             TurnOptions::default().with_permission_mode(PermissionMode::RequestApproval);
         assert_eq!(
-            decide_tool_permission(&request_approval, CompileMode::Auto, &read),
-            PermissionDecision::Approved
+            decide_tool_permission(
+                &request_approval,
+                CompileMode::Auto,
+                &write,
+                WorkspaceAccess::WorkspaceOnly,
+            ),
+            PermissionDecision::Approved {
+                workspace_access: WorkspaceAccess::WorkspaceOnly
+            }
         );
         assert_eq!(
-            decide_tool_permission(&request_approval, CompileMode::Auto, &write),
-            PermissionDecision::NeedsUserApproval
+            decide_tool_permission(
+                &request_approval,
+                CompileMode::Auto,
+                &read,
+                WorkspaceAccess::ExternalAllowed,
+            ),
+            PermissionDecision::NeedsUserApproval {
+                workspace_access: WorkspaceAccess::ExternalAllowed
+            }
         );
 
         let auto_review = TurnOptions::default().with_permission_mode(PermissionMode::AutoReview);
         assert_eq!(
-            decide_tool_permission(&auto_review, CompileMode::Auto, &bash),
-            PermissionDecision::NeedsAiReview
-        );
-
-        let workspace = TurnOptions::default().with_permission_mode(PermissionMode::WorkspaceWrite);
-        assert_eq!(
-            decide_tool_permission(&workspace, CompileMode::Auto, &write),
-            PermissionDecision::Approved
+            decide_tool_permission(
+                &auto_review,
+                CompileMode::Auto,
+                &bash,
+                WorkspaceAccess::ExternalAllowed,
+            ),
+            PermissionDecision::NeedsAiReview {
+                workspace_access: WorkspaceAccess::ExternalAllowed
+            }
         );
 
         let full_access = TurnOptions::default().with_permission_mode(PermissionMode::FullAccess);
         assert_eq!(
-            decide_tool_permission(&full_access, CompileMode::Auto, &bash),
-            PermissionDecision::Approved
+            decide_tool_permission(
+                &full_access,
+                CompileMode::Auto,
+                &bash,
+                WorkspaceAccess::WorkspaceOnly,
+            ),
+            PermissionDecision::Approved {
+                workspace_access: WorkspaceAccess::ExternalAllowed
+            }
         );
     }
 
@@ -138,12 +158,24 @@ mod tests {
         let mut manual = TurnOptions::default();
         manual.tool_approval_policy = ToolApprovalPolicy::Manual;
         assert_eq!(
-            decide_tool_permission(&manual, CompileMode::Auto, &read),
-            PermissionDecision::NeedsUserApproval
+            decide_tool_permission(
+                &manual,
+                CompileMode::Auto,
+                &read,
+                WorkspaceAccess::WorkspaceOnly,
+            ),
+            PermissionDecision::NeedsUserApproval {
+                workspace_access: WorkspaceAccess::WorkspaceOnly
+            }
         );
 
         assert_eq!(
-            decide_tool_permission(&TurnOptions::deny_all(), CompileMode::Auto, &read),
+            decide_tool_permission(
+                &TurnOptions::deny_all(),
+                CompileMode::Auto,
+                &read,
+                WorkspaceAccess::WorkspaceOnly,
+            ),
             PermissionDecision::Denied {
                 reason: "tool execution denied by policy".to_string()
             }
@@ -154,8 +186,15 @@ mod tests {
     fn plan_mode_bash_requires_user_approval_even_with_full_access() {
         let options = TurnOptions::default().with_permission_mode(PermissionMode::FullAccess);
         assert_eq!(
-            decide_tool_permission(&options, CompileMode::Plan, &request("bash")),
-            PermissionDecision::NeedsUserApproval
+            decide_tool_permission(
+                &options,
+                CompileMode::Plan,
+                &request("bash"),
+                WorkspaceAccess::WorkspaceOnly,
+            ),
+            PermissionDecision::NeedsUserApproval {
+                workspace_access: WorkspaceAccess::WorkspaceOnly
+            }
         );
     }
 

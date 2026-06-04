@@ -4,7 +4,7 @@
 
 方案乙默认权限模式固定为：
 
-- `PermissionMode::WorkspaceWrite`
+- `PermissionMode::RequestApproval`
 
 这是破坏性升级后的默认行为，不再根据旧 UI 选择分支切换默认值。旧 `ToolApprovalPolicy::AutoAllow | Manual | DenyAll` 保留为兼容构造，但核心执行前统一以 `PermissionMode` 做策略判断。手动审批能力保留为可选能力，不是默认控制面。
 
@@ -12,9 +12,8 @@ Pure v1 的权限模式是本地策略层，不是 OS 沙箱、网络沙箱或�
 
 权限模式：
 
-- `request-approval`：只读工具直接放行；写入类工具、`bash` 和 `skill_manage` 请求用户批准。
-- `auto-review`：只读工具直接放行；写入类工具、`bash` 和 `skill_manage` 交给 reviewer 模型审批。reviewer 只返回是否批准，不执行工具。
-- `workspace-write`：默认模式。workspace 内文件读写、`apply_patch`、项目 skill 写入和 workspace cwd 的 `bash` 直接放行；workspace 外访问拒绝。
+- `request-approval`：默认模式。workspace 内文件读写、`apply_patch`、项目 skill 写入和 workspace cwd 的 `bash` 直接放行；工具请求访问 workspace 外路径或 workspace 外 cwd 时请求用户批准。
+- `auto-review`：workspace 内行为同 `request-approval`；工具请求访问 workspace 外路径或 workspace 外 cwd 时交给 reviewer 模型审批。reviewer 只返回是否批准，不执行工具。
 - `full-access`：所有已注册工具在策略层直接放行；文件工具可解析 workspace 外路径，`bash.workingDirectory` 可指向 workspace 外已存在目录。
 
 Plan Mode 的工具白名单优先于权限模式。即使当前权限模式是 `full-access`，Plan Mode 仍不能执行写入类工具；Plan Mode 中的 `bash` 仍走手动审批。

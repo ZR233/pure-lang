@@ -227,9 +227,8 @@ const en = {
       title: "Permission Mode",
       description: "Pure v1 uses a local policy layer to decide whether registered tools run directly, ask the user, or ask a reviewer model. This is not an OS sandbox.",
       modeDesc: {
-        "request-approval": "Read-only tools run directly; write tools, bash, and skill_manage ask the user for approval.",
-        "auto-review": "Read-only tools run directly; high-risk tools are reviewed by the reviewer model and denied unless clearly approved.",
-        "workspace-write": "Default mode. Workspace reads/writes, apply_patch, project skills, and bash in the workspace cwd run directly.",
+        "request-approval": "Workspace file reads/writes, apply_patch, project skills, and bash in the workspace cwd run directly; workspace-external access asks the user.",
+        "auto-review": "Workspace access runs directly; workspace-external access is reviewed by the reviewer model and denied unless clearly approved.",
         "full-access": "Relaxes Pure file paths and bash cwd beyond the workspace boundary while still limiting execution to registered tools.",
       },
     },
@@ -238,7 +237,6 @@ const en = {
   permissionMode: {
     "request-approval": "Request approval",
     "auto-review": "Review for me",
-    "workspace-write": "Workspace write",
     "full-access": "Full access",
   },
 

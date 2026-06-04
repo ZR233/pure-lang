@@ -35,7 +35,7 @@ function assertDeepEqual<T>(actual: T, expected: T) {
 
 const config: ConfigPayload = {
   toml: "",
-  permissionMode: "workspace-write",
+  permissionMode: "request-approval",
   providers: [],
   roles: [],
   templates: [],

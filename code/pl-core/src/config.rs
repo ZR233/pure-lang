@@ -1028,7 +1028,7 @@ mod tests {
         assert!(parsed.runtime.active_mcp_servers.is_empty());
         assert_eq!(
             parsed.runtime.permission_mode,
-            PermissionMode::WorkspaceWrite
+            PermissionMode::RequestApproval
         );
         assert_eq!(parsed.skills, SkillsConfig::default());
     }

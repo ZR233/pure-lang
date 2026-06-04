@@ -5,7 +5,7 @@ export function renderPreviewToml(input: ProviderSettingsInput) {
     "schema_version = 1",
     "",
     "[runtime]",
-    'permission_mode = "workspace-write"',
+    'permission_mode = "request-approval"',
     'active_skills = ["rust", "git", "doc"]',
     'active_mcp_servers = ["github", "filesystem"]',
     "",

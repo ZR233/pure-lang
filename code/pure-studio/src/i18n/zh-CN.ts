@@ -227,9 +227,8 @@ const zhCN = {
       title: "权限模式",
       description: "Pure v1 使用本地策略层控制已注册工具是否直接执行、请求用户批准或交给 reviewer 审批；这不是 OS 沙箱。",
       modeDesc: {
-        "request-approval": "只读工具直接运行；写入工具、bash 和 skill_manage 会请求用户批准。",
-        "auto-review": "只读工具直接运行；高风险工具由 reviewer 模型审批，失败或非明确批准时拒绝。",
-        "workspace-write": "默认模式。workspace 内读写、apply_patch、项目 skills 和 workspace cwd 的 bash 直接放行。",
+        "request-approval": "workspace 内文件读写、apply_patch、项目 skills 和 workspace cwd 的 bash 直接放行；workspace 外访问请求用户批准。",
+        "auto-review": "workspace 内直接放行；workspace 外访问由 reviewer 模型审批，失败或非明确批准时拒绝。",
         "full-access": "放宽 Pure 文件路径和 bash 工作目录的 workspace 边界；仍只执行已注册工具。",
       },
     },
@@ -238,7 +237,6 @@ const zhCN = {
   permissionMode: {
     "request-approval": "请求批准",
     "auto-review": "替我审批",
-    "workspace-write": "Workspace 读写",
     "full-access": "完全访问",
   },
 

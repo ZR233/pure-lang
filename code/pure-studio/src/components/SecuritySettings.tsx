@@ -1,4 +1,4 @@
-import { Bot, ShieldCheck, Unlock, UserCheck, type LucideIcon } from "lucide-react";
+import { Bot, Unlock, UserCheck, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { PermissionMode } from "../types";
 
@@ -11,7 +11,6 @@ const permissionOptions: Array<{
   mode: PermissionMode;
   icon: LucideIcon;
 }> = [
-  { mode: "workspace-write", icon: ShieldCheck },
   { mode: "request-approval", icon: UserCheck },
   { mode: "auto-review", icon: Bot },
   { mode: "full-access", icon: Unlock },

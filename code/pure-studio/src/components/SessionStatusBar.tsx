@@ -46,7 +46,6 @@ const turnPhaseKeys: Record<TurnPhase, string> = {
 };
 
 const permissionModes: PermissionMode[] = [
-  "workspace-write",
   "request-approval",
   "auto-review",
   "full-access",
