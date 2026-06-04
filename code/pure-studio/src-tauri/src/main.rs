@@ -31,6 +31,7 @@ fn main() {
             commands::select_project,
             commands::create_session,
             commands::select_session,
+            commands::set_session_mode,
             commands::run_prompt,
             commands::stop_prompt,
             commands::load_session_timeline,

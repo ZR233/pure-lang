@@ -186,6 +186,7 @@ function applyTimelineDelta<T extends TimelineStateSlice>(
   const delta = event.delta;
   switch (delta.type) {
     case "text":
+    case "plan":
       item.content += delta.delta;
       break;
     case "thinking": {

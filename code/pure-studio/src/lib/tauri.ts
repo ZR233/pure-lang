@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   BootstrapPayload,
+  CompileMode,
   ConfigPayload,
   DiscoveredSkillsPayload,
   ProjectSelectionPayload,
@@ -105,7 +106,7 @@ export function createSession(projectId: string, title?: string) {
       id: "preview-new-session",
       projectId,
       title: title ?? "New session",
-      mode: "manual",
+      mode: "auto",
       updatedAt: Math.floor(Date.now() / 1000),
     };
     return Promise.resolve(
@@ -151,6 +152,27 @@ export function selectSession(sessionId: string) {
     );
   }
   return invoke<SessionSelectionPayload>("select_session", { sessionId });
+}
+
+export function setSessionMode(sessionId: string, mode: CompileMode) {
+  if (!isTauriRuntime()) {
+    previewSessions.forEach((session) => {
+      if (session.id === sessionId) {
+        session.mode = mode;
+        session.updatedAt = Math.floor(Date.now() / 1000);
+      }
+    });
+    return Promise.resolve(
+      clone({
+        sessionId,
+        sessions: previewSessions,
+        agentEvents: previewAgentEvents,
+        agents: previewAgents,
+        sessionRuntime: previewSessionRuntime,
+      }),
+    );
+  }
+  return invoke<SessionSelectionPayload>("set_session_mode", { sessionId, mode });
 }
 
 export function runPrompt(sessionId: string, prompt: string) {

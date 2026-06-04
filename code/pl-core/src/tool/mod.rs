@@ -69,6 +69,7 @@ pub trait Tool: fmt::Debug + Send + Sync {
 pub struct ToolContext {
     pub event_tx: AgentEventSender,
     pub options: TurnOptions,
+    pub mode: crate::turn::CompileMode,
     pub workspace_root: PathBuf,
     pub workspace_instructions: Option<String>,
     pub active_subagent: Option<SubagentContext>,
@@ -307,6 +308,7 @@ mod tests {
         let context = ToolContext {
             event_tx,
             options: TurnOptions::default(),
+            mode: crate::turn::CompileMode::Auto,
             workspace_root: root.clone(),
             workspace_instructions: None,
             active_subagent: None,

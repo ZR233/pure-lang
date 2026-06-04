@@ -367,6 +367,7 @@ fn responses_parse_response(body: serde_json::Value) -> Result<CompletionRespons
     };
 
     Ok(CompletionResponse {
+        raw_content: content.clone(),
         content,
         reasoning_content: None,
         tool_calls,
@@ -595,6 +596,7 @@ fn chat_parse_response(body: serde_json::Value) -> Result<CompletionResponse> {
         .unwrap_or(FinishReason::Stop);
 
     Ok(CompletionResponse {
+        raw_content: content.clone(),
         content,
         reasoning_content,
         tool_calls,

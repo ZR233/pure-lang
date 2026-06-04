@@ -5,6 +5,8 @@ export type ProjectRecord = {
   updatedAt: number;
 };
 
+export type CompileMode = "auto" | "plan";
+
 export type SessionRecord = {
   id: string;
   projectId: string;
@@ -192,7 +194,7 @@ export type TimelineItem = {
   turnId: string;
   itemId: string;
   sequence: number;
-  kind: "text" | "thinking" | "tool" | "agent" | "turn" | "inference";
+  kind: "text" | "thinking" | "tool" | "agent" | "turn" | "inference" | "plan";
   status: ToolCallStatus2;
   createdAt: number;
   updatedAt: number;
@@ -374,7 +376,8 @@ export type TimelineItemDeltaEvent = {
     | { type: "text"; delta: string }
     | { type: "thinking"; chunkIndex: number; delta: string }
     | { type: "toolArguments"; delta: string }
-    | { type: "toolResult"; delta: string };
+    | { type: "toolResult"; delta: string }
+    | { type: "plan"; delta: string };
 };
 
 export type AgentRuntimeDelta = {

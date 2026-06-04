@@ -252,7 +252,12 @@ impl PureCore {
             .configure_limits(AGENT_MAX_COUNT, AGENT_MAX_DEPTH)
             .await;
         let cancellation_token = options.cancellation_token.clone();
-        let tool_schemas = self.tools.schemas();
+        let tool_schemas = self
+            .tools
+            .schemas()
+            .into_iter()
+            .filter(|schema| tool_allowed_in_mode(request.mode, schema.name()))
+            .collect::<Vec<_>>();
         let mut budget_tracker = BudgetTracker::new(request.budget);
         let mut budget_limit: Option<BudgetLimit> = None;
 
@@ -432,6 +437,7 @@ impl PureCore {
                     turn_id: session_id.clone(),
                     inference_id: inference_id.clone(),
                     starting_sequence: recorder.current_sequence(),
+                    plan_mode: matches!(request.mode, crate::turn::CompileMode::Plan),
                 }),
             };
 
@@ -527,6 +533,7 @@ impl PureCore {
             });
 
             let content = response.content.unwrap_or_default();
+            let raw_content = response.raw_content.unwrap_or_else(|| content.clone());
             let reasoning_content = response.reasoning_content.clone();
             let tool_calls = response.tool_calls;
 
@@ -568,7 +575,7 @@ impl PureCore {
                         ));
                     }
                 }
-                session.push_assistant_response(content.clone(), reasoning_content.clone());
+                session.push_assistant_response(raw_content, reasoning_content.clone());
                 last_content = content;
                 last_reasoning_content = reasoning_content;
                 session_message_count = session.messages().len();
@@ -576,10 +583,10 @@ impl PureCore {
             }
 
             session.push_assistant_tool_calls(
-                if content.is_empty() {
+                if raw_content.is_empty() {
                     None
                 } else {
-                    Some(content.clone())
+                    Some(raw_content)
                 },
                 tool_calls.clone(),
                 reasoning_content.clone(),
@@ -601,6 +608,7 @@ impl PureCore {
                 ToolExecutionContext {
                     core: self,
                     options: &options,
+                    mode: request.mode,
                     session_id: &session_id,
                     workspace_root: &workspace_root,
                     workspace_instructions: workspace_instructions.clone(),
@@ -723,6 +731,7 @@ struct ScheduledToolExecution<'a> {
 struct ToolExecutionContext<'a> {
     core: &'a PureCore,
     options: &'a TurnOptions,
+    mode: crate::turn::CompileMode,
     session_id: &'a str,
     workspace_root: &'a Path,
     workspace_instructions: Option<String>,
@@ -761,6 +770,31 @@ async fn execute_tool_calls(
         recorder.start_item(item.clone());
         budget_tracker.record_tool_call(&tool_call.name);
 
+        if !tool_allowed_in_mode(context.mode, &tool_call.name) {
+            let mode = context.mode.label();
+            let name = &tool_call.name;
+            let message = format!("Tool disabled in {mode} mode: {name}");
+            item.status = TimelineItemStatus::Denied;
+            item.updated_at = unix_seconds();
+            if let Some(tool) = &mut item.tool {
+                tool.denial_reason = Some(message.clone());
+                tool.result = Some(message.clone());
+            }
+            recorder.complete_item(item);
+            scheduled.push(ScheduledToolExecution {
+                tool_call: tool_call.clone(),
+                item: initial_items[&timeline_item_id].clone(),
+                future: Box::pin(ready_tool_execution_record(
+                    tool_call.clone(),
+                    message,
+                    TimelineItemStatus::Denied,
+                    None,
+                    false,
+                )),
+            });
+            continue;
+        }
+
         let Some(tool) = context.core.tools.get(&tool_call.name) else {
             let available: Vec<&str> = context.core.tools.names();
             eprintln!(
@@ -795,6 +829,7 @@ async fn execute_tool_calls(
         let tool_context = ToolContext {
             event_tx: recorder.sender().clone(),
             options: context.options.clone(),
+            mode: context.mode,
             workspace_root: context.workspace_root.to_path_buf(),
             workspace_instructions: context.workspace_instructions.clone(),
             active_subagent: context.active_subagent.clone(),
@@ -987,6 +1022,29 @@ fn should_request_parallel_tool_calls(
     }
 }
 
+fn tool_allowed_in_mode(mode: crate::turn::CompileMode, name: &str) -> bool {
+    match mode {
+        crate::turn::CompileMode::Auto => true,
+        crate::turn::CompileMode::Plan => matches!(
+            name,
+            "bash"
+                | "read_file"
+                | "list_files"
+                | "search_files"
+                | "stat_path"
+                | "skills_list"
+                | "skill_view"
+                | "spawn_agent"
+                | "wait_agent"
+                | "list_agents"
+                | "send_message"
+                | "followup_task"
+                | "close_agent"
+                | "subagent"
+        ),
+    }
+}
+
 fn is_cancelled(options: &TurnOptions) -> bool {
     options
         .cancellation_token
@@ -1169,9 +1227,14 @@ async fn approve_tool_call(
     options: &TurnOptions,
     request: &ToolApprovalRequest,
     event_tx: AgentEventSender,
-    _context: &ToolContext,
+    context: &ToolContext,
 ) -> ToolApprovalDecision {
-    match options.tool_approval_policy {
+    let policy = if context.mode == crate::turn::CompileMode::Plan && request.name == "bash" {
+        ToolApprovalPolicy::Manual
+    } else {
+        options.tool_approval_policy
+    };
+    match policy {
         ToolApprovalPolicy::AutoAllow => ToolApprovalDecision::Approved,
         ToolApprovalPolicy::DenyAll => ToolApprovalDecision::Denied {
             reason: "tool execution denied by policy".to_string(),
@@ -1315,6 +1378,7 @@ mod tests {
         ToolContext {
             event_tx,
             options: TurnOptions::default(),
+            mode: crate::turn::CompileMode::Auto,
             workspace_root: std::env::temp_dir(),
             workspace_instructions: None,
             active_subagent: None,
@@ -1413,6 +1477,26 @@ mod tests {
         assert!(!tool_results_include_recoverable_subagent_capacity(
             &records[1..]
         ));
+    }
+
+    #[test]
+    fn plan_mode_tool_allowlist_exposes_only_read_and_agent_tools() {
+        let auto = crate::turn::CompileMode::Auto;
+        let plan = crate::turn::CompileMode::Plan;
+
+        assert!(tool_allowed_in_mode(auto, "write_file"));
+        assert!(tool_allowed_in_mode(plan, "read_file"));
+        assert!(tool_allowed_in_mode(plan, "search_files"));
+        assert!(tool_allowed_in_mode(plan, "skills_list"));
+        assert!(tool_allowed_in_mode(plan, "skill_view"));
+        assert!(tool_allowed_in_mode(plan, "spawn_agent"));
+        assert!(tool_allowed_in_mode(plan, "followup_task"));
+        assert!(tool_allowed_in_mode(plan, "subagent"));
+        assert!(tool_allowed_in_mode(plan, "bash"));
+        assert!(!tool_allowed_in_mode(plan, "write_file"));
+        assert!(!tool_allowed_in_mode(plan, "apply_patch"));
+        assert!(!tool_allowed_in_mode(plan, "delete_path"));
+        assert!(!tool_allowed_in_mode(plan, "skill_manage"));
     }
 
     #[test]
@@ -1562,6 +1646,96 @@ mod tests {
                 ..
             } if id == "call-1" && name == "bash"
         ));
+    }
+
+    #[tokio::test]
+    async fn plan_mode_bash_requires_manual_approval_even_when_auto_allowed() {
+        let options = TurnOptions::default();
+        let request = ToolApprovalRequest {
+            id: "call-1".to_string(),
+            name: "bash".to_string(),
+            arguments: serde_json::json!({"command": "pwd"}),
+            working_directory: None,
+            parent_agent_id: None,
+        };
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
+        let mut context = test_tool_context(event_tx.clone());
+        context.mode = crate::turn::CompileMode::Plan;
+
+        let decision = approve_tool_call(&options, &request, event_tx, &context).await;
+
+        assert_eq!(
+            decision,
+            ToolApprovalDecision::Denied {
+                reason: "manual approval required but no approver is configured".to_string()
+            }
+        );
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            AgentEvent::ToolApprovalRequested {
+                id,
+                name,
+                ..
+            } if id == "call-1" && name == "bash"
+        ));
+    }
+
+    #[tokio::test]
+    async fn plan_mode_read_tool_still_uses_auto_allow() {
+        let options = TurnOptions::default();
+        let request = ToolApprovalRequest {
+            id: "call-1".to_string(),
+            name: "read_file".to_string(),
+            arguments: serde_json::json!({"path": "Cargo.toml"}),
+            working_directory: None,
+            parent_agent_id: None,
+        };
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
+        let mut context = test_tool_context(event_tx.clone());
+        context.mode = crate::turn::CompileMode::Plan;
+
+        let decision = approve_tool_call(&options, &request, event_tx, &context).await;
+
+        assert_eq!(decision, ToolApprovalDecision::Approved);
+        assert!(event_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn plan_mode_denies_disallowed_tool_before_execution() {
+        let core = PureCore::default_provider().unwrap();
+        let tool_call = ToolCall::function(
+            "call-1",
+            "write_file",
+            serde_json::json!({"path": "a.txt", "content": "oops"}),
+            None,
+        );
+        let options = TurnOptions::default();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+        let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+        let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+        let workspace_root = std::env::temp_dir();
+
+        let records = execute_tool_calls(
+            &[tool_call],
+            &mut budget,
+            &mut recorder,
+            ToolExecutionContext {
+                core: &core,
+                options: &options,
+                mode: crate::turn::CompileMode::Plan,
+                session_id: "turn-1",
+                workspace_root: &workspace_root,
+                workspace_instructions: None,
+                active_subagent: None,
+                agent_control: crate::AgentControl::default(),
+            },
+        )
+        .await;
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].status, TimelineItemStatus::Denied);
+        assert_eq!(records[0].name, "write_file");
+        assert_eq!(records[0].result, "Tool disabled in plan mode: write_file");
     }
 
     #[tokio::test]

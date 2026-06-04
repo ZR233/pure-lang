@@ -299,6 +299,7 @@ impl Tool for SpawnAgentTool {
                 agent_path: handle.path.clone(),
                 role,
                 message: prompt,
+                mode: context.mode,
                 budget: crate::turn::TurnBudget::child_default(),
             };
             tokio::spawn(run_agent_turn(run));
@@ -514,6 +515,7 @@ impl Tool for FollowupTaskTool {
                     agent_path: record.path,
                     role: record.role,
                     message,
+                    mode: context.mode,
                     budget: crate::turn::TurnBudget::child_default(),
                 };
                 if let Some(token) = run.options.cancellation_token.clone() {
@@ -704,6 +706,7 @@ pub(super) struct AgentRunConfig {
     pub agent_path: String,
     pub role: String,
     pub message: String,
+    pub mode: CompileMode,
     pub budget: TurnBudget,
 }
 
@@ -753,7 +756,7 @@ pub(super) async fn run_agent_turn(config: AgentRunConfig) {
         .load_session(&config.agent_id)
         .await
         .unwrap_or_else(CoreSession::new);
-    let mut request = crate::turn::TurnRequest::new(config.message.clone(), CompileMode::Auto)
+    let mut request = crate::turn::TurnRequest::new(config.message.clone(), config.mode)
         .with_budget(config.budget);
     if let Some(instructions) = config.workspace_instructions.clone() {
         request = request.with_workspace_instructions(instructions);

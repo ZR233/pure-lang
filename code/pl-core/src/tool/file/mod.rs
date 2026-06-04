@@ -811,6 +811,7 @@ mod tests {
         ToolContext {
             event_tx,
             options: TurnOptions::default(),
+            mode: crate::turn::CompileMode::Auto,
             workspace_root: root.to_path_buf(),
             workspace_instructions: None,
             active_subagent: None,

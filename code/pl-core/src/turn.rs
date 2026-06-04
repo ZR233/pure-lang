@@ -165,6 +165,14 @@ impl CompileMode {
             Self::Auto => "auto",
         }
     }
+
+    pub fn from_label(label: &str) -> Self {
+        match label {
+            "plan" => Self::Plan,
+            "auto" => Self::Auto,
+            _ => Self::Auto,
+        }
+    }
 }
 
 /// 单轮核心编译请求。
@@ -381,6 +389,14 @@ mod tests {
 
         assert_eq!(root.wall_clock_ms, 600_000);
         assert_eq!(child.wall_clock_ms, 600_000);
+    }
+
+    #[test]
+    fn compile_mode_from_label_keeps_old_values_auto_compatible() {
+        assert_eq!(CompileMode::from_label("plan"), CompileMode::Plan);
+        assert_eq!(CompileMode::from_label("auto"), CompileMode::Auto);
+        assert_eq!(CompileMode::from_label("manual"), CompileMode::Auto);
+        assert_eq!(CompileMode::from_label(""), CompileMode::Auto);
     }
 
     #[test]

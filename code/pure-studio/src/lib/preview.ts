@@ -28,7 +28,7 @@ export const previewSessions: SessionRecord[] = [
     id: "preview-session",
     projectId: "pure-lang",
     title: "分析项目架构",
-    mode: "manual",
+    mode: "auto",
     updatedAt: 1779688800,
   },
 ];

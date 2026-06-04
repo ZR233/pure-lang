@@ -148,6 +148,7 @@ pub enum TimelineItemKind {
     Agent,
     Turn,
     Inference,
+    Plan,
 }
 
 impl TimelineItemKind {
@@ -159,6 +160,7 @@ impl TimelineItemKind {
             Self::Agent => "agent",
             Self::Turn => "turn",
             Self::Inference => "inference",
+            Self::Plan => "plan",
         }
     }
 }
@@ -322,6 +324,7 @@ pub enum TimelineDelta {
     Thinking { chunk_index: u32, delta: String },
     ToolArguments { delta: String },
     ToolResult { delta: String },
+    Plan { delta: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -851,6 +854,68 @@ mod tests {
                             "delta": "思考"
                         }
                     }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_plan_timeline_item_and_delta_as_camel_case() {
+        let item = TimelineItem {
+            turn_id: "turn-1".to_string(),
+            item_id: "turn-1-plan".to_string(),
+            sequence: 1,
+            kind: TimelineItemKind::Plan,
+            status: TimelineItemStatus::Streaming,
+            created_at: 1_779_688_800,
+            updated_at: 1_779_688_800,
+            role: None,
+            content: "# Plan".to_string(),
+            thinking_chunks: Vec::new(),
+            tool: None,
+            agent: None,
+            inference: None,
+            usage: None,
+        };
+        let delta = TimelineItemDeltaEvent {
+            turn_id: "turn-1".to_string(),
+            item_id: "turn-1-plan".to_string(),
+            sequence: 2,
+            kind: TimelineItemKind::Plan,
+            status: TimelineItemStatus::Streaming,
+            created_at: 1_779_688_800,
+            updated_at: 1_779_688_801,
+            delta: TimelineDelta::Plan {
+                delta: "\n- step".to_string(),
+            },
+        };
+
+        assert_eq!(
+            serde_json::to_value(item).unwrap(),
+            serde_json::json!({
+                "turnId": "turn-1",
+                "itemId": "turn-1-plan",
+                "sequence": 1,
+                "kind": "plan",
+                "status": "streaming",
+                "createdAt": 1779688800,
+                "updatedAt": 1779688800,
+                "content": "# Plan"
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(delta).unwrap(),
+            serde_json::json!({
+                "turnId": "turn-1",
+                "itemId": "turn-1-plan",
+                "sequence": 2,
+                "kind": "plan",
+                "status": "streaming",
+                "createdAt": 1779688800,
+                "updatedAt": 1779688801,
+                "delta": {
+                    "type": "plan",
+                    "delta": "\n- step"
                 }
             })
         );

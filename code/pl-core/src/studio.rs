@@ -104,6 +104,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn set_session_mode_persists_mode_label() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/alpha").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Plan work", CompileMode::Auto)
+            .await
+            .unwrap();
+
+        store
+            .set_session_mode(&session.id, CompileMode::Plan)
+            .await
+            .unwrap();
+        let updated = store.read_session(&session.id).await.unwrap().unwrap();
+
+        assert_eq!(updated.mode, "plan");
+    }
+
+    #[tokio::test]
     async fn records_tool_approval() {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project("C:/work/alpha").await.unwrap();

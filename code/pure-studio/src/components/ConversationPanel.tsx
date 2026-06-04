@@ -4,6 +4,8 @@ import {
   Brain,
   ChevronDown,
   Circle,
+  FileText,
+  Play,
   Send,
   Square,
   Terminal,
@@ -17,6 +19,7 @@ import { useTranslation } from "react-i18next";
 import type {
   AgentDto,
   AgentStatus,
+  CompileMode,
   ProjectRecord,
   ProviderRecord,
   RoleRecord,
@@ -56,6 +59,8 @@ type ConversationPanelProps = {
   setRoles: Dispatch<SetStateAction<RoleRecord[]>>;
   onSaveProviderSettings: (explicitRoles?: RoleRecord[]) => void;
   onSetPrompt: (value: string) => void;
+  onSetSessionMode: (mode: CompileMode) => void;
+  onImplementPlan: (plan: string) => void;
   onSendPrompt: () => void;
   onStopPrompt: () => void;
 };
@@ -467,6 +472,36 @@ function ToolEntry({ item, t }: { item: Extract<TimelineEntry, { kind: "tool" }>
   );
 }
 
+function PlanEntry({
+  entry,
+  onImplementPlan,
+  isBusy,
+  t,
+}: {
+  entry: Extract<TimelineEntry, { kind: "plan" }>;
+  onImplementPlan: (plan: string) => void;
+  isBusy: boolean;
+  t: TFunction;
+}) {
+  return (
+    <EntryShell className={`timeline-entry-plan status-${entry.item.status}`} icon={<FileText size={14} />}>
+      <div className="timeline-entry-head">
+        <strong>{t("timeline.plan")}</strong>
+        <span className={`timeline-badge status-${entry.item.status}`}>{turnStatusLabel(entry.item.status, t)}</span>
+      </div>
+      <div className="timeline-message-content">
+        <MarkdownContent content={entry.content} />
+      </div>
+      <div className="timeline-plan-actions">
+        <button type="button" onClick={() => onImplementPlan(entry.content)} disabled={isBusy || !entry.content.trim()}>
+          <Play size={14} />
+          <span>{t("actions.implementPlan")}</span>
+        </button>
+      </div>
+    </EntryShell>
+  );
+}
+
 function ToolGroupEntry({
   entry,
   t,
@@ -634,6 +669,8 @@ export function ConversationPanel({
   setRoles,
   onSaveProviderSettings,
   onSetPrompt,
+  onSetSessionMode,
+  onImplementPlan,
   onSendPrompt,
   onStopPrompt,
 }: ConversationPanelProps) {
@@ -650,6 +687,7 @@ export function ConversationPanel({
   const [showScrollButton, setShowScrollButton] = useState(false);
   const prevBusyRef = useRef(isBusy);
   const stopping = turnPhase === "stopping";
+  const currentMode: CompileMode = selectedSession?.mode === "plan" ? "plan" : "auto";
 
   useEffect(() => {
     const el = messageStreamRef.current;
@@ -838,6 +876,17 @@ export function ConversationPanel({
               if (entry.kind === "message") {
                 return <MessageEntry key={entry.key} entry={entry} />;
               }
+              if (entry.kind === "plan") {
+                return (
+                  <PlanEntry
+                    key={entry.key}
+                    entry={entry}
+                    onImplementPlan={onImplementPlan}
+                    isBusy={isBusy}
+                    t={t}
+                  />
+                );
+              }
               if (entry.kind === "thought") {
                 return <ThoughtEntry key={entry.key} content={entry.content} />;
               }
@@ -879,6 +928,28 @@ export function ConversationPanel({
           agents={agents}
         />
         <div className="composer">
+          <div className="composer-mode-toggle" role="group" aria-label={t("conversation.modeLabel")}>
+            <button
+              type="button"
+              className={currentMode === "auto" ? "active" : ""}
+              disabled={!selectedSession || isBusy}
+              onClick={() => onSetSessionMode("auto")}
+              title={t("conversation.autoMode")}
+            >
+              <Bot size={14} />
+              <span>{t("conversation.autoMode")}</span>
+            </button>
+            <button
+              type="button"
+              className={currentMode === "plan" ? "active" : ""}
+              disabled={!selectedSession || isBusy}
+              onClick={() => onSetSessionMode("plan")}
+              title={t("conversation.planMode")}
+            >
+              <Brain size={14} />
+              <span>{t("conversation.planMode")}</span>
+            </button>
+          </div>
           <textarea
             value={prompt}
             disabled={!selectedSession || isBusy}

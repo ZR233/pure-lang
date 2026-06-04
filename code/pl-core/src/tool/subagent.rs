@@ -211,6 +211,7 @@ impl Tool for SubagentTool {
                 agent_path: handle.path.clone(),
                 role: role.key().to_string(),
                 message: task.clone(),
+                mode: context.mode,
                 budget: subagent_input
                     .max_iterations
                     .map(|value| crate::TurnBudget::from_legacy_max_tool_iterations(value as usize))

@@ -311,6 +311,7 @@ mod tests {
         ToolContext {
             event_tx,
             options: crate::turn::TurnOptions::default(),
+            mode: crate::turn::CompileMode::Auto,
             workspace_root: std::env::temp_dir(),
             workspace_instructions: None,
             active_subagent: None,
