@@ -44,6 +44,7 @@ reducer 分域：
 - 同一 session 内继续对话不会触发 `selectedSessionId` 变化；当前轮 `RunPromptResponse.timelineItems` 与实时 `TimelineItem*` 事件必须直接合并进本地 timeline
 - 异步 `loadSessionTimeline` 只能替换不晚于本地状态的快照；如果加载结果落后于本地已收到的当前轮 item，只能作为历史补齐合并，不能覆盖当前 timeline
 - 自动跟随只取决于用户是否停留在底部，不取决于 `isBusy`；命令完成时 `isBusy` 已变为 false，但 `RunPromptResponse.timelineItems` 仍可能追加最终内容
+- timeline 渲染层可以在 `selectTimelineEntries()` 之后使用 headless 虚拟滚动库承载大列表；虚拟化只负责测量、滚动定位和 DOM 数量控制，不消费 raw `TimelineItem`，也不承载 tool 聚合、thinking 合并、trace 过滤或 plan 行为
 
 前端 reducer 的 timeline 状态固定为：
 
@@ -51,6 +52,8 @@ reducer 分域：
 - `timelineOrder: string[]`
 
 `timelineOrder` 只在 item 首次出现时按 `sequence` 插入；后续 delta/completed/failed 不改变展示位置。组件不得再把 `messages`、运行中 tool map、agent events 和 trace items 临时拼接成主 timeline。工具聚合与普通 trace 过滤只能作为 `timelineEntries` 派生显示层逻辑，不能写回 reducer 状态或后端 DTO。
+
+主聊天 timeline 的滚动容器由独立渲染适配层负责。该适配层输入 `TimelineEntry[]`，输出现有 message、plan、thought、tool、tool group、agent 和 trace entry 组件；它必须保持稳定 key、支持可变高度内容重测量，并维持“在底部才自动跟随”的规则。用户上滚阅读历史时，实时 delta 只能显示跳到最新入口，不能抢占滚动位置。
 
 ## 3. Turn 生命周期
 

@@ -37,6 +37,10 @@ impl CoreSession {
         self.revision = self.revision.saturating_add(1);
     }
 
+    pub(crate) fn truncate_messages(&mut self, len: usize) {
+        self.messages.truncate(len);
+    }
+
     pub fn push_user_prompt(&mut self, prompt: String) {
         self.messages.push(Message {
             role: MessageRole::User,
@@ -241,5 +245,23 @@ mod tests {
 
         assert_eq!(session.revision(), original_revision + 1);
         assert_eq!(session.messages(), messages.as_slice());
+    }
+
+    #[test]
+    fn truncate_messages_keeps_prefix_without_revision_change() {
+        let mut session = CoreSession::new();
+        session.push_user_prompt("first".to_string());
+        session.push_assistant_response("second".to_string(), None);
+        let original_revision = session.revision();
+
+        session.truncate_messages(1);
+
+        assert_eq!(session.revision(), original_revision);
+        assert_eq!(session.len(), 1);
+        assert_eq!(session.messages()[0].role, MessageRole::User);
+        assert_eq!(
+            session.messages()[0].content,
+            MessageContent::Text("first".to_string())
+        );
     }
 }
