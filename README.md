@@ -113,8 +113,8 @@ pure-lang/
 | 构建工具 | Vite |
 | UI 图标 | lucide-react |
 | 国际化 | i18next + react-i18next |
-| LLM 集成 | OpenAI 兼容 API（SSE 流式） |
-| 流式解析 | eventsource-stream |
+| LLM 集成 | OpenAI 兼容 API（async-openai + SSE 流式） |
+| 流式解析 | async-openai stream |
 
 ## 核心概念
 

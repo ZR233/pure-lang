@@ -13,7 +13,8 @@ tracing = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 reqwest = { workspace = true }
-eventsource-stream = { workspace = true }
+async-openai = { workspace = true }
+secrecy = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

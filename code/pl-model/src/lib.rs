@@ -9,6 +9,7 @@ mod provider_info;
 mod request;
 mod sse;
 mod wire_api;
+mod wire_response;
 
 pub use capabilities::{ModelCapabilities, ProviderCapabilities};
 pub use default_models::{

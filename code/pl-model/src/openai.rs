@@ -1,13 +1,19 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use async_openai::Client;
+use async_openai::config::Config;
+use async_openai::error::OpenAIError;
+use async_openai::types::stream::StreamResponse;
 use futures::StreamExt;
 use pl_protocol::{
     AgentEvent, AgentEventSender, PureError, Result, TimelineDelta, TimelineItem,
     TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus, TimelineTextRole,
     TimelineThinkingChunk, TimelineToolItem, TraceEvent, TraceEventKind,
 };
-use tracing::{debug, warn};
+use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue};
+use secrecy::SecretString;
+use tracing::warn;
 
 use crate::capabilities::ProviderCapabilities;
 use crate::model_info::ModelInfo;
@@ -19,7 +25,7 @@ use crate::request::{
     ToolCall,
 };
 use crate::sse::{self, StreamEvent, ToolCallDeltaPayload};
-use crate::wire_api::WireDispatch;
+use crate::wire_api::{ProviderRequestBody, WireDispatch};
 
 #[derive(Debug)]
 pub struct OpenAiCompatibleProvider {
@@ -62,14 +68,8 @@ impl OpenAiCompatibleProvider {
             .base_url
             .clone()
             .unwrap_or_else(|| "https://api.openai.com/v1".into())
-    }
-
-    fn resolve_endpoint(&self) -> String {
-        let base = self.resolve_base_url();
-        match self.info.wire_api {
-            WireApi::Responses => format!("{base}/responses"),
-            WireApi::Chat => format!("{base}/chat/completions"),
-        }
+            .trim_end_matches('/')
+            .to_string()
     }
 }
 
@@ -109,7 +109,7 @@ impl ModelProvider for OpenAiCompatibleProvider {
         event_tx: AgentEventSender,
     ) -> impl std::future::Future<Output = Result<CompletionResponse>> + Send {
         let http_client = self.http_client.clone();
-        let endpoint = self.resolve_endpoint();
+        let api_base = self.resolve_base_url();
         let wire_dispatch = self.wire_dispatch;
         let info = self.info.clone();
         let model_info = self.model_info(&request.model);
@@ -121,35 +121,23 @@ impl ModelProvider for OpenAiCompatibleProvider {
                 && info.supports_freeform_tools_for_model(&model_info);
             let timeline = request.timeline.clone();
             let request = request.provider_compatible(supports_custom_tools);
-            let body = wire_dispatch.build_request_body(&request);
+            let body = wire_dispatch.build_request(&request);
+            let config = PureOpenAiConfig::new(api_base, token, info.http_headers.as_ref())?;
+            let client = Client::build(http_client, config);
+            let stream: StreamResponse<sse::SseStreamEvent> = match body {
+                ProviderRequestBody::Responses(body) => client
+                    .responses()
+                    .create_stream_byot(body)
+                    .await
+                    .map_err(openai_error_to_pure)?,
+                ProviderRequestBody::Chat(body) => client
+                    .chat()
+                    .create_stream_byot(body)
+                    .await
+                    .map_err(openai_error_to_pure)?,
+            };
 
-            let mut req_builder = http_client
-                .post(&endpoint)
-                .header("Content-Type", "application/json");
-
-            if let Some(ref token) = token {
-                req_builder = req_builder.bearer_auth(token);
-            }
-
-            if let Some(headers) = &info.http_headers {
-                for (key, value) in headers {
-                    req_builder = req_builder.header(key.as_str(), value.as_str());
-                }
-            }
-
-            let response = req_builder
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| PureError::HttpError(e.to_string()))?;
-
-            if !response.status().is_success() {
-                let status = response.status();
-                let body = response.text().await.unwrap_or_default();
-                return Err(PureError::LlmError(format!("API error {status}: {body}")));
-            }
-
-            process_sse_stream(response, &event_tx, &wire_dispatch, timeline).await
+            process_provider_stream(stream, &event_tx, &wire_dispatch, timeline).await
         }
     }
 
@@ -173,33 +161,104 @@ async fn get_auth_token(bearer: Option<String>) -> Result<Option<String>> {
     Ok(None)
 }
 
-async fn process_sse_stream(
-    response: reqwest::Response,
+#[derive(Debug, Clone)]
+struct PureOpenAiConfig {
+    api_base: String,
+    api_key: SecretString,
+    bearer_token: Option<String>,
+    custom_headers: HeaderMap,
+}
+
+impl PureOpenAiConfig {
+    fn new(
+        api_base: String,
+        bearer_token: Option<String>,
+        http_headers: Option<&HashMap<String, String>>,
+    ) -> Result<Self> {
+        let mut custom_headers = HeaderMap::new();
+        if let Some(headers) = http_headers {
+            for (key, value) in headers {
+                let name = HeaderName::from_bytes(key.as_bytes())
+                    .map_err(|e| PureError::HttpError(e.to_string()))?;
+                let value = HeaderValue::from_str(value)
+                    .map_err(|e| PureError::HttpError(e.to_string()))?;
+                custom_headers.insert(name, value);
+            }
+        }
+
+        Ok(Self {
+            api_base,
+            api_key: bearer_token.clone().unwrap_or_default().into(),
+            bearer_token,
+            custom_headers,
+        })
+    }
+}
+
+impl Config for PureOpenAiConfig {
+    fn headers(&self) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        if let Some(token) = &self.bearer_token
+            && let Ok(value) = HeaderValue::from_str(&format!("Bearer {token}"))
+        {
+            headers.insert(AUTHORIZATION, value);
+        }
+
+        for (key, value) in &self.custom_headers {
+            headers.insert(key, value.clone());
+        }
+
+        headers
+    }
+
+    fn url(&self, path: &str) -> String {
+        format!("{}{}", self.api_base, path)
+    }
+
+    fn query(&self) -> Vec<(&str, &str)> {
+        Vec::new()
+    }
+
+    fn api_base(&self) -> &str {
+        &self.api_base
+    }
+
+    fn api_key(&self) -> &SecretString {
+        &self.api_key
+    }
+}
+
+fn openai_error_to_pure(error: OpenAIError) -> PureError {
+    match error {
+        OpenAIError::ApiError(api_error) => PureError::LlmError(format!("API error {api_error}")),
+        OpenAIError::Reqwest(error) => PureError::HttpError(error.to_string()),
+        OpenAIError::JSONDeserialize(error, content) => {
+            PureError::HttpError(format!("{error}: {content}"))
+        }
+        OpenAIError::StreamError(error) => PureError::HttpError(error.to_string()),
+        OpenAIError::InvalidArgument(message) => PureError::ConfigError(message),
+        OpenAIError::FileSaveError(message) | OpenAIError::FileReadError(message) => {
+            PureError::Io(std::io::Error::other(message))
+        }
+    }
+}
+
+async fn process_provider_stream(
+    stream: StreamResponse<sse::SseStreamEvent>,
     event_tx: &AgentEventSender,
     wire_dispatch: &WireDispatch,
     timeline: Option<CompletionTimelineContext>,
 ) -> Result<CompletionResponse> {
-    use eventsource_stream::Eventsource;
-
-    let stream = response.bytes_stream().eventsource();
     let mut accumulator = StreamCompletionAccumulator::new(timeline);
 
     let mut stream = std::pin::pin!(stream);
 
     while let Some(event) = stream.next().await {
-        let event = match event {
+        let sse_event = match event {
             Ok(e) => e,
             Err(e) => {
                 warn!("SSE parse error: {e}");
                 break;
-            }
-        };
-
-        let sse_event: sse::SseStreamEvent = match serde_json::from_str(&event.data) {
-            Ok(e) => e,
-            Err(e) => {
-                debug!("Skipping unparseable SSE event: {e}");
-                continue;
             }
         };
 
@@ -1161,10 +1220,189 @@ fn value_string(value: &serde_json::Value, field: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use pl_protocol::{Message, MessageContent, MessageRole};
     use pretty_assertions::assert_eq;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     use super::*;
-    use crate::request::ToolCallPayload;
+    use crate::request::{CompletionRequest, ToolCallPayload};
+
+    #[derive(Debug)]
+    struct CapturedHttpRequest {
+        request_line: String,
+        headers: HashMap<String, String>,
+        body: serde_json::Value,
+    }
+
+    async fn serve_sse_once(
+        sse_body: String,
+    ) -> (String, tokio::task::JoinHandle<CapturedHttpRequest>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = Vec::new();
+            let mut temp = [0_u8; 1024];
+            let (header_end, content_length) = loop {
+                let n = socket.read(&mut temp).await.unwrap();
+                assert_ne!(n, 0);
+                buffer.extend_from_slice(&temp[..n]);
+                if let Some(header_end) = find_header_end(&buffer) {
+                    let headers = String::from_utf8_lossy(&buffer[..header_end]);
+                    let content_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().ok())?
+                        })
+                        .unwrap_or(0);
+                    break (header_end, content_length);
+                }
+            };
+
+            while buffer.len() < header_end + 4 + content_length {
+                let n = socket.read(&mut temp).await.unwrap();
+                assert_ne!(n, 0);
+                buffer.extend_from_slice(&temp[..n]);
+            }
+
+            let request_head = String::from_utf8_lossy(&buffer[..header_end]);
+            let mut lines = request_head.lines();
+            let request_line = lines.next().unwrap_or_default().to_string();
+            let headers = lines
+                .filter_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    Some((name.to_ascii_lowercase(), value.trim().to_string()))
+                })
+                .collect::<HashMap<_, _>>();
+            let body_slice = &buffer[header_end + 4..header_end + 4 + content_length];
+            let body = serde_json::from_slice(body_slice).unwrap();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                sse_body.len(),
+                sse_body
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+            socket.shutdown().await.unwrap();
+
+            CapturedHttpRequest {
+                request_line,
+                headers,
+                body,
+            }
+        });
+
+        (format!("http://{addr}"), handle)
+    }
+
+    fn find_header_end(buffer: &[u8]) -> Option<usize> {
+        buffer.windows(4).position(|window| window == b"\r\n\r\n")
+    }
+
+    fn minimal_request(model: &str) -> CompletionRequest {
+        CompletionRequest {
+            model: model.to_string(),
+            instructions: None,
+            messages: vec![Message {
+                role: MessageRole::User,
+                content: MessageContent::Text("hello".to_string()),
+                reasoning_content: None,
+                metadata: HashMap::new(),
+            }],
+            tools: Vec::new(),
+            tool_choice: "auto".to_string(),
+            parallel_tool_calls: false,
+            temperature: None,
+            max_tokens: None,
+            reasoning: None,
+            stream: false,
+            timeline: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn stream_complete_uses_chat_endpoint_without_auth_when_token_missing() {
+        let sse_body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\n",
+            "data: [DONE]\n\n"
+        )
+        .to_string();
+        let (base_url, handle) = serve_sse_once(sse_body).await;
+        let provider = OpenAiCompatibleProvider::new(ProviderInfo {
+            name: "Local Chat".to_string(),
+            base_url: Some(base_url),
+            wire_api: WireApi::Chat,
+            supports_custom_tools: Some(false),
+            supports_freeform_tools: Some(false),
+            default_model: "local-chat".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+
+        let response = provider
+            .stream_complete(minimal_request("local-chat"), event_tx)
+            .await
+            .unwrap();
+        let captured = handle.await.unwrap();
+
+        assert_eq!(response.content.as_deref(), Some("ok"));
+        assert_eq!(response.usage.total_tokens, 3);
+        assert_eq!(captured.request_line, "POST /chat/completions HTTP/1.1");
+        assert!(!captured.headers.contains_key("authorization"));
+        assert_eq!(captured.body["stream"], serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn stream_complete_sends_responses_bearer_and_custom_headers() {
+        let sse_body = concat!(
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+            "data: [DONE]\n\n"
+        )
+        .to_string();
+        let (base_url, handle) = serve_sse_once(sse_body).await;
+        let provider = OpenAiCompatibleProvider::new(ProviderInfo {
+            name: "Local Responses".to_string(),
+            base_url: Some(base_url),
+            bearer_token: Some("test-token".to_string()),
+            http_headers: Some(HashMap::from([(
+                "x-provider-test".to_string(),
+                "present".to_string(),
+            )])),
+            wire_api: WireApi::Responses,
+            supports_custom_tools: Some(true),
+            supports_freeform_tools: Some(true),
+            default_model: "local-responses".to_string(),
+            ..Default::default()
+        })
+        .unwrap();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+
+        let response = provider
+            .stream_complete(minimal_request("local-responses"), event_tx)
+            .await
+            .unwrap();
+        let captured = handle.await.unwrap();
+
+        assert_eq!(response.content.as_deref(), Some("ok"));
+        assert_eq!(response.usage.total_tokens, 3);
+        assert_eq!(captured.request_line, "POST /responses HTTP/1.1");
+        assert_eq!(
+            captured.headers.get("authorization").map(String::as_str),
+            Some("Bearer test-token")
+        );
+        assert_eq!(
+            captured.headers.get("x-provider-test").map(String::as_str),
+            Some("present")
+        );
+        assert_eq!(captured.body["stream"], serde_json::json!(true));
+    }
 
     #[test]
     fn stream_accumulator_returns_content_and_reasoning_content() {

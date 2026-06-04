@@ -267,7 +267,7 @@ Provider 标签页必须提供结构化编辑能力：
 - 展示 provider 模板自带的默认模型列表。
 - 允许追加用户自定义模型，保存时由 `pl-core` 将模板默认模型排在前面，再追加用户自定义模型。
 - 模型列表应展示关键参数，例如上下文窗口、最大输出 token、自动压缩阈值、temperature、reasoning efforts、capabilities、输入模态和截断策略。
-- `wire_api` 由 provider 模板固定，不在 UI 中提供选择；DeepSeek 固定为 `chat`，OpenAI 固定为 `responses`，两个智谱模板固定为 OpenAI 兼容 `chat`。
+- `wire_api` 由 provider 模板固定，不在 UI 中提供选择；DeepSeek 固定为 `chat`，OpenAI 固定为 `responses`，两个智谱模板固定为 OpenAI 兼容 `chat`。运行时由 `pl-model` 内部 typed wire 层转换为 async-openai 请求，用户配置中的 base URL 不自动追加或改写版本路径，只去除末尾多余 `/` 后与对应 API path 拼接。
 - 智谱 OpenAI 兼容 `chat` 请求固定使用流式 `chat/completions`；模型 `reasoning_efforts` 使用 `enabled` / `none` 表达 thinking 开关，不发送 wire-level `reasoning_effort`。thinking 按官方请求体 `thinking.type = enabled/disabled` 控制，开启时设置 `clear_thinking = false` 并保留/回传历史 `reasoning_content`；Coding Plan 模板使用专属 base URL `https://open.bigmodel.cn/api/coding/paas/v4`。
 - 写入前由 `pl-core` 构造 `PureConfig` 并执行 `PureConfig::validate()`；校验失败时只在 UI 中展示错误，不写入磁盘。
 
