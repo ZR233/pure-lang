@@ -26,6 +26,12 @@ pub(crate) fn decide_tool_permission(
         };
     }
 
+    if matches!(options.permission_mode, PermissionMode::FullAccess) {
+        return PermissionDecision::Approved {
+            workspace_access: WorkspaceAccess::ExternalAllowed,
+        };
+    }
+
     if matches!(options.tool_approval_policy, ToolApprovalPolicy::Manual)
         || (mode == CompileMode::Plan && request.name == "bash")
     {
@@ -183,8 +189,8 @@ mod tests {
     }
 
     #[test]
-    fn plan_mode_bash_requires_user_approval_even_with_full_access() {
-        let options = TurnOptions::default().with_permission_mode(PermissionMode::FullAccess);
+    fn plan_mode_bash_requires_user_approval_without_full_access() {
+        let options = TurnOptions::default().with_permission_mode(PermissionMode::RequestApproval);
         assert_eq!(
             decide_tool_permission(
                 &options,
@@ -194,6 +200,22 @@ mod tests {
             ),
             PermissionDecision::NeedsUserApproval {
                 workspace_access: WorkspaceAccess::WorkspaceOnly
+            }
+        );
+    }
+
+    #[test]
+    fn full_access_approves_plan_bash_without_user_approval() {
+        let options = TurnOptions::default().with_permission_mode(PermissionMode::FullAccess);
+        assert_eq!(
+            decide_tool_permission(
+                &options,
+                CompileMode::Plan,
+                &request("bash"),
+                WorkspaceAccess::WorkspaceOnly,
+            ),
+            PermissionDecision::Approved {
+                workspace_access: WorkspaceAccess::ExternalAllowed
             }
         );
     }

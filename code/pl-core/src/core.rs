@@ -1934,6 +1934,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn full_access_plan_bash_does_not_request_manual_approval() {
+        let options = TurnOptions::default().with_permission_mode(PermissionMode::FullAccess);
+        let request = ToolApprovalRequest {
+            id: "call-1".to_string(),
+            name: "bash".to_string(),
+            arguments: serde_json::json!({"command": "pwd"}),
+            working_directory: None,
+            parent_agent_id: None,
+        };
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
+        let mut context = test_tool_context(event_tx.clone());
+        context.mode = crate::turn::CompileMode::Plan;
+
+        let decision = approve_tool_call(&options, &request, event_tx, &context).await;
+
+        assert_eq!(decision, ToolApprovalDecision::Approved);
+        assert!(event_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
     async fn plan_mode_read_tool_still_uses_auto_allow() {
         let options = TurnOptions::default();
         let request = ToolApprovalRequest {
