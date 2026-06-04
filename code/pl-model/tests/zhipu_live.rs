@@ -72,6 +72,7 @@ fn zhipu_coding_plan_thinking_request() -> CompletionRequest {
             turn_id: "zhipu-live-thinking-turn".to_string(),
             inference_id: "zhipu-live-thinking-inference".to_string(),
             starting_sequence: 0,
+            plan_mode: false,
         }),
     }
 }
@@ -85,7 +86,9 @@ async fn collect_timeline_delta_counts(
             Ok(AgentEvent::TimelineItemDelta { event }) => match event.delta {
                 TimelineDelta::Text { .. } => counts.text += 1,
                 TimelineDelta::Thinking { .. } => counts.thinking += 1,
-                TimelineDelta::ToolArguments { .. } | TimelineDelta::ToolResult { .. } => {}
+                TimelineDelta::ToolArguments { .. }
+                | TimelineDelta::ToolResult { .. }
+                | TimelineDelta::Plan { .. } => {}
             },
             Ok(_) => {}
             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,

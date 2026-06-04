@@ -261,6 +261,21 @@ impl StudioStore {
         Ok(())
     }
 
+    pub async fn set_session_mode(&self, session_id: &str, mode: CompileMode) -> Result<()> {
+        use entities::session;
+        if let Some(existing) = session::Entity::find_by_id(session_id.to_string())
+            .one(&self.db)
+            .await?
+        {
+            let now = unix_seconds();
+            let mut active: session::ActiveModel = existing.into();
+            active.mode = Set(mode.label().to_string());
+            active.updated_at = Set(now);
+            active.update(&self.db).await?;
+        }
+        Ok(())
+    }
+
     pub async fn record_tool_approval(&self, record: ToolApprovalRecord) -> Result<()> {
         use entities::tool_approval;
         tool_approval::ActiveModel {

@@ -274,11 +274,38 @@
 
 .composer {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: stretch;
   flex: 0 0 auto;
   gap: 12px;
   padding: 14px clamp(24px, 3vw, 46px) 16px;
   background: #ffffff;
+}
+
+.composer-mode-toggle {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.composer-mode-toggle button,
+.timeline-plan-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid #cfd9e5;
+  border-radius: 8px;
+  color: #34445a;
+  background: #ffffff;
+}
+
+.composer-mode-toggle button.active {
+  border-color: #0b74a5;
+  color: #075985;
+  background: #e8f4fb;
 }
 
 .composer textarea {
@@ -1125,6 +1152,30 @@ button.status-item {
 .timeline-entry-message.role-assistant .timeline-message-content {
   color: #182538;
   font-size: 15px;
+}
+
+.timeline-entry-plan .timeline-node {
+  color: #075985;
+  background: #e8f4fb;
+}
+
+.timeline-entry-plan .timeline-entry-card {
+  padding: 14px;
+  border: 1px solid #b8d7e8;
+  border-radius: 8px;
+  background: #f7fbfd;
+}
+
+.timeline-plan-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.timeline-plan-actions button {
+  border-color: #0b74a5;
+  color: #ffffff;
+  background: #096895;
 }
 
 .timeline-entry-subagent .timeline-entry-card {

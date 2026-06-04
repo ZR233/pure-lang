@@ -56,6 +56,7 @@ fn deepseek_request(messages: Vec<Message>) -> CompletionRequest {
             turn_id: "live-turn".to_string(),
             inference_id: "live-inference".to_string(),
             starting_sequence: 0,
+            plan_mode: false,
         }),
     }
 }
@@ -76,7 +77,8 @@ async fn run_turn(api_key: &str, messages: Vec<Message>) -> (String, String, usi
                     pl_protocol::TimelineDelta::Text { .. } => text_delta_count += 1,
                     pl_protocol::TimelineDelta::Thinking { .. } => thinking_delta_count += 1,
                     pl_protocol::TimelineDelta::ToolArguments { .. }
-                    | pl_protocol::TimelineDelta::ToolResult { .. } => {}
+                    | pl_protocol::TimelineDelta::ToolResult { .. }
+                    | pl_protocol::TimelineDelta::Plan { .. } => {}
                 },
                 Ok(_) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,

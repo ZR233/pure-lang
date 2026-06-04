@@ -450,6 +450,9 @@ pub fn timeline_events_to_items(events: &[TraceEvent]) -> Vec<pl_protocol::Timel
                     pl_protocol::TimelineDelta::Text { delta } => {
                         entry.content.push_str(delta);
                     }
+                    pl_protocol::TimelineDelta::Plan { delta } => {
+                        entry.content.push_str(delta);
+                    }
                     pl_protocol::TimelineDelta::Thinking { chunk_index, delta } => {
                         match entry
                             .thinking_chunks

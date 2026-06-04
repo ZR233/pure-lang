@@ -11,6 +11,7 @@ use tracing::{debug, warn};
 
 use crate::capabilities::ProviderCapabilities;
 use crate::model_info::ModelInfo;
+use crate::proposed_plan::{ProposedPlanParser, ProposedPlanSegment};
 use crate::provider::ModelProvider;
 use crate::provider_info::{ProviderInfo, WireApi};
 use crate::request::{
@@ -215,6 +216,7 @@ async fn process_sse_stream(
 
 struct StreamCompletionAccumulator {
     content_parts: Vec<String>,
+    raw_content_parts: Vec<String>,
     reasoning_parts: Vec<String>,
     tool_calls: Vec<ToolCall>,
     tool_call_accumulators: HashMap<String, ToolCallAccumulator>,
@@ -222,12 +224,15 @@ struct StreamCompletionAccumulator {
     timeline: Option<TimelineState>,
     text_item_id: Option<String>,
     thinking_item_id: Option<String>,
+    plan_parser: Option<ProposedPlanParser>,
 }
 
 impl StreamCompletionAccumulator {
     fn new(timeline: Option<CompletionTimelineContext>) -> Self {
+        let plan_mode = timeline.as_ref().is_some_and(|context| context.plan_mode);
         Self {
             content_parts: Vec::new(),
+            raw_content_parts: Vec::new(),
             reasoning_parts: Vec::new(),
             tool_calls: Vec::new(),
             tool_call_accumulators: HashMap::new(),
@@ -235,14 +240,21 @@ impl StreamCompletionAccumulator {
             timeline: timeline.map(TimelineState::new),
             text_item_id: None,
             thinking_item_id: None,
+            plan_parser: plan_mode.then(ProposedPlanParser::new),
         }
     }
 
     fn apply(&mut self, stream_event: StreamEvent, event_tx: &AgentEventSender) -> Result<()> {
         match stream_event {
             StreamEvent::OutputTextDelta { item_id, delta } => {
-                self.content_parts.push(delta.clone());
-                self.record_text_delta(item_id, delta, event_tx, TimelineTextRole::Assistant);
+                self.raw_content_parts.push(delta.clone());
+                if let Some(parser) = self.plan_parser.as_mut() {
+                    let segments = parser.push_str(&delta).segments;
+                    self.apply_proposed_plan_segments(item_id, segments, event_tx);
+                } else {
+                    self.content_parts.push(delta.clone());
+                    self.record_text_delta(item_id, delta, event_tx, TimelineTextRole::Assistant);
+                }
             }
 
             StreamEvent::ThinkingDelta {
@@ -397,6 +409,10 @@ impl StreamCompletionAccumulator {
     }
 
     fn finish(mut self, event_tx: &AgentEventSender) -> CompletionResponse {
+        if let Some(parser) = self.plan_parser.as_mut() {
+            let segments = parser.finish().segments;
+            self.apply_proposed_plan_segments(None, segments, event_tx);
+        }
         // 合并累积的工具调用（如果有 delta 但没有 output_item.done）
         let remaining_accumulators = std::mem::take(&mut self.tool_call_accumulators);
         for (_, acc) in remaining_accumulators {
@@ -416,6 +432,11 @@ impl StreamCompletionAccumulator {
             None
         } else {
             Some(self.content_parts.join(""))
+        };
+        let raw_content = if self.raw_content_parts.is_empty() {
+            None
+        } else {
+            Some(self.raw_content_parts.join(""))
         };
 
         let reasoning_content = if self.reasoning_parts.is_empty() {
@@ -443,6 +464,7 @@ impl StreamCompletionAccumulator {
 
         CompletionResponse {
             content,
+            raw_content,
             reasoning_content,
             tool_calls: self.tool_calls,
             timeline_events,
@@ -469,6 +491,57 @@ impl StreamCompletionAccumulator {
             .unwrap_or_else(|| timeline.item_id("text"));
         self.text_item_id = Some(item_id.clone());
         for event in timeline.append_text_delta(&item_id, role, delta) {
+            let _ = event_tx.send(event);
+        }
+    }
+
+    fn apply_proposed_plan_segments(
+        &mut self,
+        item_id: Option<String>,
+        segments: Vec<ProposedPlanSegment>,
+        event_tx: &AgentEventSender,
+    ) {
+        for segment in segments {
+            match segment {
+                ProposedPlanSegment::Normal(text) => {
+                    if text.is_empty() {
+                        continue;
+                    }
+                    self.content_parts.push(text.clone());
+                    self.record_text_delta(
+                        item_id.clone(),
+                        text,
+                        event_tx,
+                        TimelineTextRole::Assistant,
+                    );
+                }
+                ProposedPlanSegment::ProposedPlanStart => {
+                    self.record_plan_start(event_tx);
+                }
+                ProposedPlanSegment::ProposedPlanDelta(delta) => {
+                    if !delta.is_empty() {
+                        self.record_plan_delta(delta, event_tx);
+                    }
+                }
+                ProposedPlanSegment::ProposedPlanEnd => {}
+            }
+        }
+    }
+
+    fn record_plan_start(&mut self, event_tx: &AgentEventSender) {
+        let Some(timeline) = self.timeline.as_mut() else {
+            return;
+        };
+        for event in timeline.append_plan_start() {
+            let _ = event_tx.send(event);
+        }
+    }
+
+    fn record_plan_delta(&mut self, delta: String, event_tx: &AgentEventSender) {
+        let Some(timeline) = self.timeline.as_mut() else {
+            return;
+        };
+        for event in timeline.append_plan_delta(delta) {
             let _ = event_tx.send(event);
         }
     }
@@ -666,6 +739,10 @@ impl TimelineState {
         format!("{}-{prefix}", self.inference_id)
     }
 
+    fn plan_item_id(&self) -> String {
+        format!("{}-plan", self.turn_id)
+    }
+
     fn namespaced_item_id(&self, item_id: &str) -> String {
         if item_id.starts_with(&self.turn_id) {
             return item_id.to_string();
@@ -720,6 +797,65 @@ impl TimelineState {
             created_at: now,
             updated_at: now,
             delta: TimelineDelta::Text { delta },
+        };
+        self.record(
+            TraceEventKind::TimelineItemDelta {
+                event: event.clone(),
+            },
+            now,
+        );
+        events.push(AgentEvent::TimelineItemDelta { event });
+        events
+    }
+
+    fn append_plan_start(&mut self) -> Vec<AgentEvent> {
+        let now = unix_seconds();
+        let item_id = self.plan_item_id();
+        if self.started.contains_key(&item_id) {
+            return Vec::new();
+        }
+        let item = TimelineItem {
+            turn_id: self.turn_id.clone(),
+            item_id: item_id.clone(),
+            sequence: self.sequence,
+            kind: TimelineItemKind::Plan,
+            status: TimelineItemStatus::Streaming,
+            created_at: now,
+            updated_at: now,
+            role: None,
+            content: String::new(),
+            thinking_chunks: Vec::new(),
+            tool: None,
+            agent: None,
+            inference: None,
+            usage: None,
+        };
+        self.record(
+            TraceEventKind::TimelineItemStarted { item: item.clone() },
+            now,
+        );
+        self.started.insert(item_id, item.clone());
+        vec![AgentEvent::TimelineItemStarted { item }]
+    }
+
+    fn append_plan_delta(&mut self, delta: String) -> Vec<AgentEvent> {
+        let now = unix_seconds();
+        let mut events = self.append_plan_start();
+        let item_id = self.plan_item_id();
+        if let Some(item) = self.started.get_mut(&item_id) {
+            item.status = TimelineItemStatus::Streaming;
+            item.updated_at = now;
+            item.content.push_str(&delta);
+        }
+        let event = TimelineItemDeltaEvent {
+            turn_id: self.turn_id.clone(),
+            item_id,
+            sequence: self.sequence,
+            kind: TimelineItemKind::Plan,
+            status: TimelineItemStatus::Streaming,
+            created_at: now,
+            updated_at: now,
+            delta: TimelineDelta::Plan { delta },
         };
         self.record(
             TraceEventKind::TimelineItemDelta {
@@ -893,7 +1029,7 @@ impl TimelineState {
             .filter(|(_, item)| {
                 matches!(
                     item.kind,
-                    TimelineItemKind::Text | TimelineItemKind::Thinking
+                    TimelineItemKind::Text | TimelineItemKind::Thinking | TimelineItemKind::Plan
                 )
             })
             .map(|(item_id, _)| item_id.clone())
@@ -1038,6 +1174,7 @@ mod tests {
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
             starting_sequence: 0,
+            plan_mode: false,
         }));
 
         accumulator
@@ -1063,6 +1200,7 @@ mod tests {
         let response = accumulator.finish(&event_tx);
 
         assert_eq!(response.content.as_deref(), Some("9.11 更大。"));
+        assert_eq!(response.raw_content.as_deref(), Some("9.11 更大。"));
         assert_eq!(
             response.reasoning_content.as_deref(),
             Some("先比较整数位。")
@@ -1083,6 +1221,60 @@ mod tests {
             event_rx.try_recv().unwrap(),
             AgentEvent::TimelineItemDelta { .. }
         ));
+    }
+
+    #[test]
+    fn stream_accumulator_extracts_proposed_plan_item() {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTimelineContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "inf-1".to_string(),
+            starting_sequence: 0,
+            plan_mode: true,
+        }));
+
+        for delta in [
+            "Intro\n<prop",
+            "osed_plan>\n- step\n",
+            "</proposed_plan>\nOutro",
+        ] {
+            accumulator
+                .apply(
+                    StreamEvent::OutputTextDelta {
+                        item_id: None,
+                        delta: delta.to_string(),
+                    },
+                    &event_tx,
+                )
+                .unwrap();
+        }
+
+        let response = accumulator.finish(&event_tx);
+
+        assert_eq!(response.content.as_deref(), Some("Intro\n\nOutro"));
+        assert_eq!(
+            response.raw_content.as_deref(),
+            Some("Intro\n<proposed_plan>\n- step\n</proposed_plan>\nOutro")
+        );
+        let completed_plan = response
+            .timeline_events
+            .iter()
+            .find_map(|event| match &event.kind {
+                TraceEventKind::TimelineItemCompleted { item }
+                    if item.kind == TimelineItemKind::Plan =>
+                {
+                    Some(item)
+                }
+                TraceEventKind::TimelineItemStarted { .. }
+                | TraceEventKind::TimelineItemDelta { .. }
+                | TraceEventKind::TimelineItemCompleted { .. }
+                | TraceEventKind::TimelineItemFailed { .. } => None,
+            });
+        assert_eq!(
+            completed_plan.map(|item| item.content.as_str()),
+            Some("\n- step\n")
+        );
     }
 
     #[test]
@@ -1138,6 +1330,7 @@ mod tests {
             turn_id: "turn-1".to_string(),
             inference_id: "turn-1-inf-0".to_string(),
             starting_sequence: 0,
+            plan_mode: false,
         }));
 
         accumulator

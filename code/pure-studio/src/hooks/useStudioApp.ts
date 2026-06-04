@@ -17,6 +17,7 @@ import {
   saveProviderSettings,
   selectProject,
   selectSession,
+  setSessionMode,
   isTauriRuntime,
   stopPrompt,
 } from "../lib/tauri";
@@ -30,6 +31,7 @@ import { initialStudioState, studioReducer } from "../state/studio-state";
 import type {
   AgentEvent,
   AgentEventPayload,
+  CompileMode,
   PromptFailed,
   ProviderRecord,
   ProviderSettingsSaveSnapshot,
@@ -266,12 +268,51 @@ export function useStudioApp() {
     }
   }
 
+  async function onSetSessionMode(mode: CompileMode) {
+    const sessionId = state.selectedSessionId;
+    if (!sessionId || state.isBusy) {
+      return;
+    }
+    try {
+      const payload = await setSessionMode(sessionId, mode);
+      dispatch({ type: "sessionModeUpdated", payload, status: t("status.modeUpdated") });
+    } catch (error) {
+      dispatch({
+        type: "bootstrapFailed",
+        status: t("status.modeUpdateFailed", { error: errorText(error) }),
+      });
+    }
+  }
+
   async function onSendPrompt() {
     const content = state.prompt.trim();
     const sessionId = state.selectedSessionId;
     if (!content || !sessionId || state.isBusy) {
       return;
     }
+    await submitPrompt(sessionId, content);
+  }
+
+  async function onImplementPlan(plan: string) {
+    const content = plan.trim();
+    const sessionId = state.selectedSessionId;
+    if (!content || !sessionId || state.isBusy) {
+      return;
+    }
+    try {
+      const modePayload = await setSessionMode(sessionId, "auto");
+      dispatch({ type: "sessionModeUpdated", payload: modePayload, status: t("status.modeUpdated") });
+      await submitPrompt(sessionId, `PLEASE IMPLEMENT THIS PLAN:\n\n${content}`);
+    } catch (error) {
+      dispatch({
+        type: "runPromptFailed",
+        sessionId,
+        status: t("status.runFailed", { error: errorText(error) }),
+      });
+    }
+  }
+
+  async function submitPrompt(sessionId: string, content: string) {
     dispatch({
       type: "promptSubmitted",
       status: t("status.running"),
@@ -433,7 +474,9 @@ export function useStudioApp() {
     onSelectProject,
     onNewSession,
     onSelectSession,
+    onSetSessionMode,
     onSendPrompt,
+    onImplementPlan,
     onStopPrompt,
     openSettings,
     onSaveConfig,

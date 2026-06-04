@@ -74,6 +74,21 @@ function textItem(itemId: string, sequence: number, content: string): TimelineIt
   };
 }
 
+function planItem(itemId: string, turnId: string, sequence: number, content: string): TimelineItem {
+  return {
+    turnId,
+    itemId,
+    sequence,
+    kind: "plan",
+    status: "completed",
+    createdAt: sequence,
+    updatedAt: sequence,
+    role: null,
+    content,
+    thinkingChunks: [],
+  };
+}
+
 function thinkingItem(itemId: string, turnId: string, sequence: number, content: string): TimelineItem {
   return {
     turnId,
@@ -484,6 +499,59 @@ function assistantTextBreaksToolGroup() {
   assertEqual(message.content, "agent text");
 }
 
+function planEntryBreaksToolGroupAndRendersAsPlan() {
+  const entries = entriesForTimeline([
+    toolItem("turn-1-read", "turn-1", 1, "read_file", { path: "a.ts" }),
+    planItem("turn-1-plan", "turn-1", 2, "1. Read\n2. Implement"),
+    toolItem("turn-1-read-b", "turn-1", 3, "read_file", { path: "b.ts" }),
+  ]);
+
+  assertDeepEqual(entries.map((entry) => entry.kind), ["toolGroup", "plan", "toolGroup"]);
+  const plan = entries[1];
+  if (plan?.kind !== "plan") {
+    throw new Error(`Expected plan entry, got ${plan?.kind}`);
+  }
+  assertEqual(plan.content, "1. Read\n2. Implement");
+}
+
+function livePlanDeltaCreatesPlanEntry() {
+  const started = {
+    ...planItem("turn-1-plan", "turn-1", 10, ""),
+    status: "streaming" as const,
+  };
+  const delta: TimelineItemDeltaEvent = {
+    turnId: "turn-1",
+    itemId: "turn-1-plan",
+    sequence: 11,
+    kind: "plan",
+    status: "streaming",
+    createdAt: 10,
+    updatedAt: 11,
+    delta: { type: "plan", delta: "1. Inspect\n" },
+  };
+  const liveStarted = studioReducer(selectedState(), {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemStarted: { item: started } },
+    statusText: "running",
+  });
+  const liveDelta = studioReducer(liveStarted, {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemDelta: { event: delta } },
+    statusText: "running",
+  });
+  const entries = selectTimelineEntries(liveDelta);
+
+  assertDeepEqual(entries.map((entry) => entry.kind), ["plan"]);
+  const plan = entries[0];
+  if (plan?.kind !== "plan") {
+    throw new Error(`Expected plan entry, got ${plan?.kind}`);
+  }
+  assertEqual(plan.content, "1. Inspect\n");
+  assertEqual(liveDelta.timelineItems.get("turn-1-plan")?.content, "1. Inspect\n");
+}
+
 function toolsFromDifferentTurnsDoNotMerge() {
   const entries = entriesForTimeline([
     toolItem("turn-1-read", "turn-1", 1, "read_file", { path: "a.ts" }),
@@ -522,6 +590,40 @@ function toolGroupStatusUsesPriority() {
     throw new Error(`Expected toolGroup entry, got ${awaitingGroup?.kind}`);
   }
   assertEqual(awaitingGroup.status, "awaitingApproval");
+}
+
+function sessionModeUpdateKeepsTimelineAndUpdatesSessions() {
+  const liveItem = planItem("turn-1-plan", "turn-1", 10, "1. Inspect");
+  const liveState = studioReducer(selectedState(), {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemCompleted: { sequence: 10, item: liveItem } },
+    statusText: "running",
+  });
+
+  const updated = studioReducer(liveState, {
+    type: "sessionModeUpdated",
+    status: "mode updated",
+    payload: {
+      sessionId: "session-1",
+      sessions: [
+        {
+          id: "session-1",
+          projectId: "project-1",
+          title: "Session",
+          mode: "plan",
+          updatedAt: 3,
+        },
+      ],
+      agentEvents: [],
+      agents: [],
+      sessionRuntime: runtime,
+    },
+  });
+
+  assertEqual(updated.sessions[0]?.mode, "plan");
+  assertDeepEqual(updated.timelineOrder, ["turn-1-plan"]);
+  assertEqual(updated.timelineItems.get("turn-1-plan")?.content, "1. Inspect");
 }
 
 function applyPatchCountsFilesFromResultSummary() {
@@ -903,8 +1005,11 @@ inferenceDoesNotBreakToolGroup();
 repeatedThinkingItemsCollapseIntoOneThought();
 thinkingFromDifferentTurnsDoesNotMerge();
 assistantTextBreaksToolGroup();
+planEntryBreaksToolGroupAndRendersAsPlan();
+livePlanDeltaCreatesPlanEntry();
 toolsFromDifferentTurnsDoNotMerge();
 toolGroupStatusUsesPriority();
+sessionModeUpdateKeepsTimelineAndUpdatesSessions();
 applyPatchCountsFilesFromResultSummary();
 successfulSkillViewImmediatelyUpdatesActiveSkills();
 repeatedSkillViewDoesNotDuplicateActiveSkills();

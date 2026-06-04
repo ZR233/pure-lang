@@ -20,6 +20,7 @@ const zhCN = {
     deny: "拒绝",
     back: "返回",
     cancel: "取消",
+    implementPlan: "实现计划",
   },
 
   status: {
@@ -35,6 +36,7 @@ const zhCN = {
     configSaved: "配置已保存",
     configReloaded: "配置已重新加载",
     providerSettingsSaved: "模型服务设置已保存",
+    modeUpdated: "模式已更新",
     toolApproved: "工具已批准",
     toolDenied: "工具已拒绝",
     bootstrapFailed: "启动失败：{{error}}",
@@ -48,6 +50,7 @@ const zhCN = {
     configLoadFailed: "配置加载失败：{{error}}",
     configInvalid: "配置无效：{{error}}",
     providerSettingsInvalid: "模型服务设置无效：{{error}}",
+    modeUpdateFailed: "模式更新失败：{{error}}",
     reloadFailed: "重新加载失败：{{error}}",
     approvalRequired: "需要审批：{{name}}",
     approved: "已批准：{{name}}",
@@ -75,6 +78,7 @@ const zhCN = {
   timeline: {
     turn: "回合",
     notice: "提示",
+    plan: "计划",
   },
 
   roles: {
@@ -158,6 +162,9 @@ const zhCN = {
     emptyDescription: "选择一个项目，然后让 Pure Studio 探索、规划或执行。",
     askPlaceholder: "向 Pure Studio 提问...",
     noSessionPlaceholder: "创建或选择一个会话",
+    modeLabel: "协作模式",
+    autoMode: "Auto",
+    planMode: "Plan",
   },
 
   context: {

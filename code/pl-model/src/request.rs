@@ -38,6 +38,7 @@ fn default_true() -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletionResponse {
     pub content: Option<String>,
+    pub raw_content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
     #[serde(default)]
@@ -57,6 +58,7 @@ pub struct CompletionTimelineContext {
     pub turn_id: String,
     pub inference_id: String,
     pub starting_sequence: u64,
+    pub plan_mode: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

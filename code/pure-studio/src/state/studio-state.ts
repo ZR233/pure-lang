@@ -64,6 +64,7 @@ export type StudioAction =
   | { type: "timelineLoadFailed"; sessionId: string | null; status: string }
   | { type: "projectSelectionLoaded"; payload: ProjectSelectionPayload; status: string }
   | { type: "sessionSelectionLoaded"; payload: SessionSelectionPayload; status: string }
+  | { type: "sessionModeUpdated"; payload: SessionSelectionPayload; status: string }
   | { type: "runPromptLoaded"; payload: RunPromptResponse; status: string }
   | { type: "runPromptFailed"; sessionId?: string | null; status: string }
   | { type: "setBusy"; value: boolean }
@@ -174,6 +175,19 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         turnPhase: "idle",
         turnStartedAt: null,
         isBusy: false,
+      };
+    case "sessionModeUpdated":
+      if (action.payload.sessionId !== state.selectedSessionId) {
+        return state;
+      }
+      return {
+        ...state,
+        sessions: action.payload.sessions.length > 0 ? action.payload.sessions : state.sessions,
+        selectedSessionId: action.payload.sessionId,
+        agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
+        agents: mergeAgents([], action.payload.agents ?? []),
+        sessionRuntime: action.payload.sessionRuntime ?? state.sessionRuntime,
+        status: action.status,
       };
     case "runPromptLoaded":
       if (action.payload.sessionId !== state.selectedSessionId) {
@@ -481,6 +495,7 @@ function phaseForTimelineItem(item: TimelineItem, current: TurnPhase): TurnPhase
   if (item.kind === "thinking") return "thinking";
   if (item.kind === "tool") return "tool";
   if (item.kind === "agent") return "subagent";
+  if (item.kind === "plan") return current === "idle" ? "running" : current;
   if (item.status === "failed") return "failed";
   if (item.status === "interrupted") return "interrupted";
   if (item.status === "budgetLimited") return "budgetLimited";
@@ -492,6 +507,7 @@ function phaseForTimelineDelta(event: TimelineItemDeltaEvent, current: TurnPhase
   if (current === "stopping") return "stopping";
   if (event.kind === "thinking") return "thinking";
   if (event.kind === "tool") return "tool";
+  if (event.kind === "plan") return current === "idle" ? "running" : current;
   return "running";
 }
 

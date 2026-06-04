@@ -3,6 +3,7 @@ mod default_models;
 mod manager;
 mod model_info;
 mod openai;
+mod proposed_plan;
 mod provider;
 mod provider_info;
 mod request;

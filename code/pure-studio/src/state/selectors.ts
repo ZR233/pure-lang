@@ -20,6 +20,7 @@ export type TimelineEntry =
       role: "user" | "assistant";
       content: string;
     }
+  | { kind: "plan"; key: string; content: string; item: TimelineItem }
   | { kind: "thought"; key: string; content: string }
   | { kind: "tool"; key: string; item: TimelineItem }
   | {
@@ -109,6 +110,16 @@ export function selectTimelineEntries(state: StudioState): TimelineEntry[] {
           key: `text-${item.itemId}`,
           role: item.role === "user" ? "user" : "assistant",
           content: item.content,
+        });
+        break;
+      case "plan":
+        closeDisplaySegment();
+        if (!item.content.trim()) break;
+        entries.push({
+          kind: "plan",
+          key: `plan-${item.itemId}`,
+          content: item.content,
+          item,
         });
         break;
       case "thinking": {

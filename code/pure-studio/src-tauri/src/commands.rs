@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::Context;
-use pl_core::{PureConfig, TimelineEventRecord, TurnOptions};
+use pl_core::{CompileMode, PureConfig, TimelineEventRecord, TurnOptions};
 use pl_protocol::{TraceEvent, TraceEventKind};
 use tauri::{AppHandle, Emitter, State};
 use tokio_util::sync::CancellationToken;
@@ -116,6 +116,40 @@ pub async fn select_session(
         session_runtime: Some(load_session_runtime_dto(&state.studio, &session_id).await?),
         session_id,
         sessions: Vec::new(),
+        agent_events: agent_event_dtos(agent_events),
+        agents: agent_dtos(agents),
+    })
+}
+
+#[tauri::command]
+pub async fn set_session_mode(
+    session_id: String,
+    mode: String,
+    state: State<'_, AppState>,
+) -> CommandResult<SessionSelectionDto> {
+    let compile_mode = CompileMode::from_label(&mode);
+    state
+        .studio
+        .store()
+        .set_session_mode(&session_id, compile_mode)
+        .await?;
+    let session = state
+        .studio
+        .store()
+        .read_session(&session_id)
+        .await?
+        .context("selected session not found")?;
+    let sessions = state
+        .studio
+        .store()
+        .list_sessions(&session.project_id)
+        .await?;
+    let agent_events = state.studio.store().list_agent_events(&session_id).await?;
+    let agents = state.studio.store().list_agents(&session_id).await?;
+    Ok(SessionSelectionDto {
+        session_runtime: Some(load_session_runtime_dto(&state.studio, &session_id).await?),
+        session_id,
+        sessions: session_dtos(sessions),
         agent_events: agent_event_dtos(agent_events),
         agents: agent_dtos(agents),
     })

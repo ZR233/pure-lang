@@ -20,6 +20,7 @@ const en = {
     deny: "Deny",
     back: "Back",
     cancel: "Cancel",
+    implementPlan: "Implement plan",
   },
 
   status: {
@@ -35,6 +36,7 @@ const en = {
     configSaved: "Config saved",
     configReloaded: "Config reloaded",
     providerSettingsSaved: "Provider settings saved",
+    modeUpdated: "Mode updated",
     toolApproved: "Tool approved",
     toolDenied: "Tool denied",
     bootstrapFailed: "Bootstrap failed: {{error}}",
@@ -48,6 +50,7 @@ const en = {
     configLoadFailed: "Config load failed: {{error}}",
     configInvalid: "Config invalid: {{error}}",
     providerSettingsInvalid: "Provider settings invalid: {{error}}",
+    modeUpdateFailed: "Mode update failed: {{error}}",
     reloadFailed: "Reload failed: {{error}}",
     approvalRequired: "Approval required: {{name}}",
     approved: "Approved: {{name}}",
@@ -75,6 +78,7 @@ const en = {
   timeline: {
     turn: "Turn",
     notice: "Notice",
+    plan: "Plan",
   },
 
   roles: {
@@ -158,6 +162,9 @@ const en = {
     emptyDescription: "Select a project and ask Pure Studio to explore, plan, or execute.",
     askPlaceholder: "Ask Pure Studio...",
     noSessionPlaceholder: "Create or select a session",
+    modeLabel: "Collaboration mode",
+    autoMode: "Auto",
+    planMode: "Plan",
   },
 
   context: {
