@@ -50,7 +50,7 @@ function providerInput(provider: ProviderRecord) {
     baseUrl: provider.baseUrl,
     bearerToken: provider.bearerToken,
     defaultModel: provider.defaultModel,
-    wireApi: provider.wireApi,
+    providerKind: provider.providerKind,
     customModels: provider.customModels.map((model) => ({
       slug: model.slug,
       displayName: model.displayName,
@@ -322,10 +322,17 @@ export function useStudioApp() {
     });
     try {
       const payload = await runPrompt(sessionId, content);
+      const turnError = payload.turnError ?? payload.turnAbortReason ?? t("subagent.providerError");
+      const status =
+        payload.turnStatus === "errored"
+          ? t("status.runFailed", { error: turnError })
+          : payload.turnAbortReason === "interrupted"
+            ? t("status.interrupted")
+            : t("status.done");
       dispatch({
         type: "runPromptLoaded",
         payload,
-        status: payload.turnAbortReason === "interrupted" ? t("status.interrupted") : t("status.done"),
+        status,
       });
     } catch (error) {
       dispatch({

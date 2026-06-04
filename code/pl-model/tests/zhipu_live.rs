@@ -27,15 +27,15 @@ fn live_api_key() -> Option<String> {
     match std::env::var(ZHIPU_LIVE_ENV_KEY) {
         Ok(value) if !value.trim().is_empty() => Some(value),
         _ => {
-            eprintln!("{ZHIPU_LIVE_ENV_KEY} is not set; skipping live Zhipu Coding Plan API test");
+            eprintln!("{ZHIPU_LIVE_ENV_KEY} is not set; skipping live Zhipu API test");
             None
         }
     }
 }
 
-fn zhipu_coding_plan_disabled_request() -> CompletionRequest {
+fn zhipu_disabled_request() -> CompletionRequest {
     CompletionRequest {
-        model: ProviderInfo::zhipu_coding_plan(None).default_model,
+        model: ProviderInfo::zhipu(None).default_model,
         instructions: Some("请用简短中文回答。".to_string()),
         messages: vec![user_message("请回答：2 + 2 等于几？")],
         tools: Vec::new(),
@@ -52,9 +52,9 @@ fn zhipu_coding_plan_disabled_request() -> CompletionRequest {
     }
 }
 
-fn zhipu_coding_plan_thinking_request() -> CompletionRequest {
+fn zhipu_thinking_request() -> CompletionRequest {
     CompletionRequest {
-        model: ProviderInfo::zhipu_coding_plan(None).default_model,
+        model: ProviderInfo::zhipu(None).default_model,
         instructions: Some("请先思考，最后用一句中文简短作答。".to_string()),
         messages: vec![user_message("比较 9.11 和 9.8 哪个更大？")],
         tools: Vec::new(),
@@ -100,40 +100,56 @@ async fn collect_timeline_delta_counts(
     counts
 }
 
-async fn run_coding_plan(
+async fn run_zhipu(
     api_key: String,
     request: CompletionRequest,
-) -> (CompletionResponse, TimelineDeltaCounts) {
-    let mut info = ProviderInfo::zhipu_coding_plan(None);
+) -> Option<(CompletionResponse, TimelineDeltaCounts)> {
+    let mut info = ProviderInfo::zhipu(None);
     info.bearer_token = Some(api_key);
     let provider = create_provider(info).unwrap();
     let (event_tx, event_rx) = tokio::sync::broadcast::channel(4096);
     let counter = tokio::spawn(collect_timeline_delta_counts(event_rx));
 
-    let response = provider.stream_complete(request, event_tx).await.unwrap();
+    let response = match provider.stream_complete(request, event_tx).await {
+        Ok(response) => response,
+        Err(error) if is_live_quota_error(&error.to_string()) => {
+            eprintln!("skipping live Zhipu API test: {error}");
+            let _ = counter.await;
+            return None;
+        }
+        Err(error) => panic!("live Zhipu API request failed: {error}"),
+    };
     let counts = counter.await.unwrap();
 
-    (response, counts)
+    Some((response, counts))
+}
+
+fn is_live_quota_error(error: &str) -> bool {
+    error.contains("429") || error.contains("余额不足") || error.contains("无可用资源包")
 }
 
 #[tokio::test]
-async fn zhipu_coding_plan_chat_completion_smoke() {
+async fn zhipu_chat_completion_smoke() {
     let Some(api_key) = live_api_key() else {
         return;
     };
 
-    let (response, _counts) = run_coding_plan(api_key, zhipu_coding_plan_disabled_request()).await;
+    let Some((response, _counts)) = run_zhipu(api_key, zhipu_disabled_request()).await else {
+        return;
+    };
 
     assert!(!response.content.unwrap_or_default().trim().is_empty());
 }
 
 #[tokio::test]
-async fn zhipu_coding_plan_streams_thinking_mode() {
+async fn zhipu_streams_thinking_mode() {
     let Some(api_key) = live_api_key() else {
         return;
     };
 
-    let (response, counts) = run_coding_plan(api_key, zhipu_coding_plan_thinking_request()).await;
+    let Some((response, counts)) = run_zhipu(api_key, zhipu_thinking_request()).await else {
+        return;
+    };
 
     assert!(!response.content.unwrap_or_default().trim().is_empty());
     assert!(

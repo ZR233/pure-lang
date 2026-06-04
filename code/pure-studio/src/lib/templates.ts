@@ -73,7 +73,7 @@ export const previewTemplates: ProviderTemplateRecord[] = [
     name: "DeepSeek",
     baseUrl: "https://api.deepseek.com",
     defaultModel: "deepseek-v4-flash",
-    wireApi: "chat",
+    providerKind: "deep_seek",
     defaultModels: [
       {
         slug: "deepseek-v4-flash",
@@ -115,12 +115,12 @@ export const previewTemplates: ProviderTemplateRecord[] = [
     id: "openai",
     name: "OpenAI",
     baseUrl: "https://api.openai.com/v1",
-    defaultModel: "gpt-4.1",
-    wireApi: "responses",
+    defaultModel: "gpt-5.5",
+    providerKind: "open_ai",
     defaultModels: [
       {
-        slug: "gpt-4.1",
-        displayName: "GPT-4.1",
+        slug: "gpt-5.5",
+        displayName: "GPT-5.5",
         contextWindow: 1_050_000,
         maxContextWindow: 1_050_000,
         maxOutputTokens: 128_000,
@@ -128,7 +128,7 @@ export const previewTemplates: ProviderTemplateRecord[] = [
         inputPricePerMTok: 2,
         outputPricePerMTok: 8,
         cacheReadPricePerMTok: 0.5,
-        reasoningEfforts: ["medium", "high"],
+        reasoningEfforts: ["none", "low", "medium", "high", "xhigh"],
         capabilities: [
           "streaming",
           "function_calling",
@@ -142,8 +142,8 @@ export const previewTemplates: ProviderTemplateRecord[] = [
         truncationLimit: 10_000,
       },
       {
-        slug: "o4-mini",
-        displayName: "o4 mini",
+        slug: "gpt-5.4-mini",
+        displayName: "GPT-5.4 Mini",
         contextWindow: 400_000,
         maxContextWindow: 400_000,
         maxOutputTokens: 128_000,
@@ -167,19 +167,11 @@ export const previewTemplates: ProviderTemplateRecord[] = [
     ],
   },
   {
-    id: "zhipu-api",
-    name: "Zhipu GLM API",
+    id: "zhipu",
+    name: "Zhipu",
     baseUrl: "https://open.bigmodel.cn/api/paas/v4",
     defaultModel: "glm-5.1",
-    wireApi: "chat",
-    defaultModels: zhipuDefaultModels,
-  },
-  {
-    id: "zhipu-coding-plan",
-    name: "Zhipu GLM Coding Plan",
-    baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
-    defaultModel: "glm-5.1",
-    wireApi: "chat",
+    providerKind: "zhipu",
     defaultModels: zhipuDefaultModels,
   },
 ];

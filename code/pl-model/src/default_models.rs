@@ -11,40 +11,9 @@ const ZHIPU_GLM_DEFAULT_MODEL_SLUGS: &[&str] = &[
     "glm-4.7-flashx",
     "glm-4.7-flash",
 ];
-const DEFAULT_MODEL_SLUGS: &[&str] = &[
-    "deepseek-v4-flash",
-    "deepseek-v4-pro",
-    "gpt-5.5",
-    "gpt-5.4",
-    "gpt-5.4-mini",
-    "gpt-5.4-nano",
-    "glm-5.1",
-    "glm-5",
-    "glm-5-turbo",
-    "glm-4.7",
-    "glm-4.7-flashx",
-    "glm-4.6",
-    "glm-4.5-air",
-    "glm-4.5-airx",
-    "glm-4-long",
-    "glm-4-flashx-250414",
-    "glm-4.7-flash",
-    "glm-4.5-flash",
-    "glm-4-flash-250414",
-    "glm-5v-turbo",
-    "glm-4.6v",
-    "glm-4.1v-thinking-flashx",
-    "glm-4.6v-flash",
-    "glm-4.1v-thinking-flash",
-    "glm-4v-flash",
-];
 const OPENAI_REASONING_EFFORTS: &[&str] = &["none", "low", "medium", "high", "xhigh"];
 const DEEPSEEK_REASONING_EFFORTS: &[&str] = &["high", "max"];
 const ZHIPU_REASONING_EFFORTS: &[&str] = &["enabled", "none"];
-
-pub fn default_model_slugs() -> &'static [&'static str] {
-    DEFAULT_MODEL_SLUGS
-}
 
 pub fn deepseek_default_model_slugs() -> &'static [&'static str] {
     DEEPSEEK_DEFAULT_MODEL_SLUGS
@@ -54,11 +23,7 @@ pub fn openai_default_model_slugs() -> &'static [&'static str] {
     OPENAI_DEFAULT_MODEL_SLUGS
 }
 
-pub fn zhipu_api_default_model_slugs() -> &'static [&'static str] {
-    ZHIPU_GLM_DEFAULT_MODEL_SLUGS
-}
-
-pub fn zhipu_coding_plan_default_model_slugs() -> &'static [&'static str] {
+pub fn zhipu_default_model_slugs() -> &'static [&'static str] {
     ZHIPU_GLM_DEFAULT_MODEL_SLUGS
 }
 
@@ -433,10 +398,14 @@ mod tests {
     }
 
     #[test]
-    fn default_model_slugs_are_backed_by_default_models() {
+    fn provider_default_model_slugs_are_backed_by_default_models() {
         let models = default_models();
 
-        for slug in default_model_slugs() {
+        for slug in deepseek_default_model_slugs()
+            .iter()
+            .chain(openai_default_model_slugs())
+            .chain(zhipu_default_model_slugs())
+        {
             assert!(models.iter().any(|model| model.slug == *slug));
         }
     }
@@ -532,7 +501,7 @@ mod tests {
     #[test]
     fn zhipu_default_model_list_excludes_phasing_out_glm_45_flash() {
         assert_eq!(
-            zhipu_api_default_model_slugs(),
+            zhipu_default_model_slugs(),
             [
                 "glm-5.1",
                 "glm-5",
@@ -542,8 +511,12 @@ mod tests {
                 "glm-4.7-flash"
             ]
         );
-        assert!(!zhipu_api_default_model_slugs().contains(&"glm-4.5-flash"));
-        assert!(!zhipu_api_default_model_slugs().contains(&"glm-5v-turbo"));
-        assert!(default_model_slugs().contains(&"glm-4.5-flash"));
+        assert!(!zhipu_default_model_slugs().contains(&"glm-4.5-flash"));
+        assert!(!zhipu_default_model_slugs().contains(&"glm-5v-turbo"));
+        assert!(
+            default_models()
+                .iter()
+                .any(|model| model.slug == "glm-4.5-flash")
+        );
     }
 }

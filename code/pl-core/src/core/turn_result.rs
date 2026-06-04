@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use pl_model::ProviderCapabilities;
+use pl_model::ModelCapabilities;
 use pl_protocol::{AgentEvent, BudgetLimitKind, BudgetUsage, ErrorSeverity, TimelineItemStatus};
 
 use crate::trace::TraceRecorder;
@@ -18,7 +18,7 @@ pub(super) fn provider_error_severity(
 }
 
 pub(super) fn should_request_parallel_tool_calls(
-    capabilities: ProviderCapabilities,
+    capabilities: ModelCapabilities,
     options: &TurnOptions,
 ) -> bool {
     match options.tool_execution_mode {

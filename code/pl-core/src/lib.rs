@@ -38,7 +38,7 @@ pub use first_run::{
 pub use interfaces::{
     ConfigRepository, EventSink, RuntimeEventEmitter, SessionRepository, TurnSnapshotRepository,
 };
-pub use pl_model::{InputModality, TruncationMode};
+pub use pl_model::{InputModality, ProviderKind, ToolWirePolicy, TruncationMode};
 pub use pl_protocol::{
     AgentEvent, AgentEventReceiver, AgentEventSender, AgentRuntimeDelta, BudgetLimitKind,
     BudgetUsage, ContentPart, ContentPartType, ErrorSeverity, Message, MessageContent, MessageRole,

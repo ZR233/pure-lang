@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-use pl_model::{ModelInfo, WireApi};
+use pl_model::{ModelInfo, ProviderKind};
 use pl_protocol::{PureError, Result};
 
 use crate::config::{
@@ -25,7 +25,6 @@ pub struct ProviderEdit {
     pub base_url: Option<String>,
     pub bearer_token: Option<String>,
     pub default_model: String,
-    pub wire_api: String,
     pub custom_models: Vec<ProviderModelEdit>,
 }
 
@@ -48,34 +47,11 @@ pub fn infer_provider_template_kind(
     provider_key: &str,
     provider: &ProviderConfig,
 ) -> ProviderTemplateKind {
-    let key = provider_key.to_ascii_lowercase();
-    let name = provider.name.to_ascii_lowercase();
-    let base_url = provider
-        .base_url
-        .as_deref()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if key.contains("coding-plan")
-        || name.contains("coding plan")
-        || base_url.contains("/api/coding/paas/v4")
-    {
-        ProviderTemplateKind::ZhipuCodingPlan
-    } else if key.contains("zhipu")
-        || key.contains("glm")
-        || name.contains("zhipu")
-        || name.contains("glm")
-        || provider.default_model.starts_with("glm-")
-        || base_url.contains("open.bigmodel.cn")
-    {
-        ProviderTemplateKind::ZhipuApi
-    } else if key.contains("openai")
-        || name.contains("openai")
-        || provider.default_model.starts_with("gpt-")
-        || matches!(provider.wire_api, WireApi::Responses)
-    {
-        ProviderTemplateKind::OpenAi
-    } else {
-        ProviderTemplateKind::DeepSeek
+    let _ = provider_key;
+    match provider.provider_kind {
+        ProviderKind::OpenAi => ProviderTemplateKind::OpenAi,
+        ProviderKind::DeepSeek => ProviderTemplateKind::DeepSeek,
+        ProviderKind::Zhipu => ProviderTemplateKind::Zhipu,
     }
 }
 
@@ -98,8 +74,9 @@ impl ProviderEdit {
         let provider_key = self.provider_key()?;
         let mut info = self.kind.provider_info();
         info.name = non_empty_trimmed(&self.name, "provider name")?;
-        info.base_url = trim_optional(self.base_url.as_deref());
-        info.env_key = None;
+        info.base_url = trim_optional(self.base_url.as_deref()).ok_or_else(|| {
+            PureError::ConfigError("provider base_url must not be empty".to_string())
+        })?;
         info.default_model = non_empty_trimmed(&self.default_model, "provider default_model")?;
         info.bearer_token = trim_optional(self.bearer_token.as_deref());
 
@@ -407,7 +384,6 @@ mod tests {
             base_url: Some("https://api.openai.com/v1".to_string()),
             bearer_token: None,
             default_model: "gpt-5.5".to_string(),
-            wire_api: "responses".to_string(),
             custom_models: Vec::new(),
         }
     }
@@ -420,20 +396,18 @@ mod tests {
             base_url: Some("https://api.deepseek.com".to_string()),
             bearer_token: None,
             default_model: "deepseek-v4-flash".to_string(),
-            wire_api: "responses".to_string(),
             custom_models: Vec::new(),
         }
     }
 
-    fn zhipu_coding_plan_edit() -> ProviderEdit {
+    fn zhipu_edit() -> ProviderEdit {
         ProviderEdit {
-            key: "zhipu-coding-plan".to_string(),
-            kind: ProviderTemplateKind::ZhipuCodingPlan,
-            name: "Zhipu GLM Coding Plan".to_string(),
-            base_url: Some("https://open.bigmodel.cn/api/coding/paas/v4".to_string()),
+            key: "zhipu".to_string(),
+            kind: ProviderTemplateKind::Zhipu,
+            name: "Zhipu".to_string(),
+            base_url: Some("https://open.bigmodel.cn/api/paas/v4".to_string()),
             bearer_token: None,
             default_model: "glm-5.1".to_string(),
-            wire_api: "responses".to_string(),
             custom_models: Vec::new(),
         }
     }
@@ -490,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_provider_edit_uses_template_chat_wire_api() {
+    fn deepseek_provider_edit_uses_template_provider_kind() {
         let current = PureConfig::default_config();
 
         let config = ProviderSettingsEdit {
@@ -501,36 +475,32 @@ mod tests {
         .to_config(&current)
         .unwrap();
 
-        assert_eq!(config.providers["deepseek"].wire_api, WireApi::Chat);
-        assert_eq!(config.providers["deepseek"].env_key, None);
+        assert_eq!(
+            config.providers["deepseek"].provider_kind,
+            ProviderKind::DeepSeek
+        );
     }
 
     #[test]
-    fn zhipu_provider_edit_uses_template_chat_wire_api() {
+    fn zhipu_provider_edit_uses_template_provider_kind() {
         let current = PureConfig::default_config();
 
         let config = ProviderSettingsEdit {
-            default_provider: Some("zhipu-coding-plan".to_string()),
-            providers: vec![zhipu_coding_plan_edit()],
+            default_provider: Some("zhipu".to_string()),
+            providers: vec![zhipu_edit()],
             roles: Vec::new(),
         }
         .to_config(&current)
         .unwrap();
 
         assert_eq!(
-            config.providers["zhipu-coding-plan"].base_url.as_deref(),
-            Some("https://open.bigmodel.cn/api/coding/paas/v4")
+            config.providers["zhipu"].base_url,
+            "https://open.bigmodel.cn/api/paas/v4"
         );
-        assert_eq!(
-            config.providers["zhipu-coding-plan"].default_model,
-            "glm-5.1"
-        );
-        assert_eq!(
-            config.providers["zhipu-coding-plan"].wire_api,
-            WireApi::Chat
-        );
+        assert_eq!(config.providers["zhipu"].default_model, "glm-5.1");
+        assert_eq!(config.providers["zhipu"].provider_kind, ProviderKind::Zhipu);
         assert!(
-            config.providers["zhipu-coding-plan"]
+            config.providers["zhipu"]
                 .models
                 .iter()
                 .any(|model| model.slug == "glm-4.7-flashx")
@@ -538,14 +508,12 @@ mod tests {
     }
 
     #[test]
-    fn zhipu_provider_template_inference_prefers_coding_plan_endpoint() {
-        let provider = zhipu_coding_plan_edit()
-            .to_provider_config()
-            .expect("zhipu coding plan config");
+    fn zhipu_provider_template_inference_uses_provider_kind() {
+        let provider = zhipu_edit().to_provider_config().expect("zhipu config");
 
         let kind = infer_provider_template_kind("glm-team", &provider);
 
-        assert_eq!(kind, ProviderTemplateKind::ZhipuCodingPlan);
+        assert_eq!(kind, ProviderTemplateKind::Zhipu);
     }
 
     #[test]

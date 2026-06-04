@@ -301,7 +301,7 @@ export const previewRoles: RoleRecord[] = [
 export function createPreviewConfig(): ConfigPayload {
   const roles = previewRoles;
   return {
-    toml: `schema_version = 1
+    toml: `schema_version = 3
 
 [runtime]
 permission_mode = "request-approval"
@@ -329,10 +329,10 @@ model = "deepseek-v4-flash"
 effort = "high"
 
 [providers.deepseek]
+provider_kind = "deep_seek"
 name = "DeepSeek"
 base_url = "https://api.deepseek.com"
 default_model = "deepseek-v4-flash"
-wire_api = "chat"
 
 [[providers.deepseek.models]]
 slug = "deepseek-v4-flash"
@@ -350,10 +350,10 @@ input_modalities = ["text"]
 truncation_policy = { mode = "tokens", limit = 10000 }
 
 [providers.openai]
+provider_kind = "open_ai"
 name = "OpenAI"
 base_url = "https://api.openai.com/v1"
-default_model = "gpt-4.1"
-wire_api = "responses"
+default_model = "gpt-5.5"
 `,
     permissionMode: "request-approval",
     providers: [
@@ -364,7 +364,7 @@ wire_api = "responses"
         baseUrl: "https://api.deepseek.com",
         bearerToken: "",
         defaultModel: "deepseek-v4-flash",
-        wireApi: "chat",
+        providerKind: "deep_seek",
         customModels: [],
       }),
       makeProvider({
@@ -373,8 +373,8 @@ wire_api = "responses"
         name: "OpenAI Work",
         baseUrl: "https://api.openai.com/v1",
         bearerToken: "",
-        defaultModel: "gpt-4.1",
-        wireApi: "responses",
+        defaultModel: "gpt-5.5",
+        providerKind: "open_ai",
         customModels: [],
       }),
     ],

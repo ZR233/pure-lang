@@ -2,27 +2,25 @@ mod capabilities;
 mod default_models;
 mod manager;
 mod model_info;
-mod openai;
 mod proposed_plan;
+mod protocol;
 mod provider;
 mod provider_info;
 mod request;
-mod sse;
-mod wire_api;
-mod wire_response;
+mod stream;
 
 pub use capabilities::{ModelCapabilities, ProviderCapabilities};
 pub use default_models::{
-    deepseek_default_model_slugs, default_model_slugs, default_models, openai_default_model_slugs,
-    zhipu_api_default_model_slugs, zhipu_coding_plan_default_model_slugs,
+    deepseek_default_model_slugs, default_models, openai_default_model_slugs,
+    zhipu_default_model_slugs,
 };
 pub use manager::{DefaultModelsManager, ModelsManager};
 pub use model_info::{InputModality, ModelInfo, TruncationMode, TruncationPolicy};
-pub use openai::OpenAiCompatibleProvider;
 pub use provider::{
-    ModelProvider, SharedModelProvider, create_provider, create_provider_with_models,
+    DeepSeekProvider, ModelProvider, OpenAiProvider, ProviderRuntime, SharedModelProvider,
+    ZhipuProvider, create_provider, create_provider_with_models,
 };
-pub use provider_info::{ApplyPatchToolType, AuthCommand, ProviderInfo, WireApi};
+pub use provider_info::{ApplyPatchToolType, ProviderInfo, ProviderKind, ToolWirePolicy};
 pub use request::{
     CompletionRequest, CompletionResponse, CompletionTimelineContext, FinishReason,
     ReasoningConfig, ReasoningSummary, TokenUsage, ToolCall, ToolCallKind, ToolCallPayload,

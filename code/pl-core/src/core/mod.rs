@@ -6,9 +6,7 @@ use pl_model::{
     SharedModelProvider, create_provider, create_provider_with_models,
 };
 #[cfg(test)]
-use pl_protocol::{
-    AgentEvent, BudgetLimitKind, BudgetUsage, ErrorSeverity, TimelineItemStatus, TokenUsageSnapshot,
-};
+use pl_protocol::{AgentEvent, ErrorSeverity, TimelineItemStatus};
 use pl_protocol::{AgentEventSender, Message, MessageContent, MessageRole, Result};
 
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
@@ -322,7 +320,7 @@ impl PureCore {
 
 // Re-export for tests
 #[cfg(test)]
-use permission::{approval_request, approve_tool_call, request_user_approval};
+use permission::{approval_request, approve_tool_call};
 #[cfg(test)]
 use pl_model::{TokenUsage, ToolCallKind};
 #[cfg(test)]
@@ -332,9 +330,8 @@ use tool_dispatch::{
 };
 #[cfg(test)]
 use turn_result::{
-    failed_turn_result, format_instructions, interrupted_turn_result,
-    looks_like_unexecuted_tool_call_text, prompt_requires_subagent_dispatch,
-    provider_error_severity, tool_allowed_in_mode,
+    failed_turn_result, format_instructions, looks_like_unexecuted_tool_call_text,
+    prompt_requires_subagent_dispatch, provider_error_severity, tool_allowed_in_mode,
 };
 
 #[cfg(test)]

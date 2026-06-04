@@ -76,9 +76,16 @@ export function applyLiveTimelineEvent<T extends TimelineStateSlice>(
     );
   }
   if ("timelineItemFailed" in event) {
+    const item = {
+      ...event.timelineItemFailed.item,
+      content:
+        event.timelineItemFailed.item.content?.trim() ||
+        event.timelineItemFailed.error ||
+        event.timelineItemFailed.item.content,
+    };
     return upsertTimelineItem(
       state,
-      event.timelineItemFailed.item,
+      item,
       event.timelineItemFailed.sequence,
     );
   }

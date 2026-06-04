@@ -2,7 +2,7 @@ import type { ProviderSettingsInput } from "../types";
 
 export function renderPreviewToml(input: ProviderSettingsInput) {
   return [
-    "schema_version = 1",
+    "schema_version = 3",
     "",
     "[runtime]",
     'permission_mode = "request-approval"',
@@ -18,11 +18,11 @@ export function renderPreviewToml(input: ProviderSettingsInput) {
     ]),
     ...input.providers.flatMap((provider) => [
       `[providers.${provider.id}]`,
+      `provider_kind = "${provider.providerKind}"`,
       `name = "${provider.name}"`,
       `base_url = "${provider.baseUrl}"`,
       `bearer_token = "${provider.bearerToken}"`,
       `default_model = "${provider.defaultModel}"`,
-      `wire_api = "${provider.wireApi}"`,
       "",
     ]),
   ].join("\n");

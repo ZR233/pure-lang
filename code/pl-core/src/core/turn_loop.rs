@@ -217,8 +217,8 @@ pub(super) async fn run_turn_with_trace(
         let inference_id = format!("{session_id}-inf-{iteration}");
         let mut inference_item = recorder.inference_item(&session_id, &inference_id, &model);
         recorder.start_item(inference_item.clone());
-        let parallel_tool_calls =
-            should_request_parallel_tool_calls(provider.capabilities(), &options);
+        let model_capabilities = provider.effective_model_capabilities(&model);
+        let parallel_tool_calls = should_request_parallel_tool_calls(model_capabilities, &options);
 
         let completion_request = CompletionRequest {
             model: model.clone(),

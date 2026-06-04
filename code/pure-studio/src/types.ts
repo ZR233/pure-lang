@@ -77,13 +77,13 @@ export type ProviderRecord = {
   defaultModel: string;
   modelCount: string;
   updatedAt: string;
-  wireApi: string;
+  providerKind: string;
   models: ModelRecord[];
   defaultModels: ModelRecord[];
   customModels: ModelRecord[];
 };
 
-export type ProviderKind = "deepseek" | "openai" | "zhipu-api" | "zhipu-coding-plan";
+export type ProviderKind = "deepseek" | "openai" | "zhipu";
 
 export type RoleKey = "explorer" | "planner" | "executor" | "reviewer";
 
@@ -248,7 +248,7 @@ export type ProviderTemplateRecord = {
   name: string;
   baseUrl: string;
   defaultModel: string;
-  wireApi: string;
+  providerKind: string;
   defaultModels: ModelRecord[];
 };
 
@@ -280,7 +280,7 @@ export type ProviderInput = {
   baseUrl: string;
   bearerToken: string;
   defaultModel: string;
-  wireApi: string;
+  providerKind: string;
   customModels: ModelRecord[];
 };
 
@@ -330,6 +330,7 @@ export type RunPromptResponse = {
   timelineNextSequence: number;
   turnStatus: TurnStatus;
   turnAbortReason?: string | null;
+  turnError?: string | null;
 };
 
 export type StopPromptResponse = {
