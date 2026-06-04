@@ -1366,11 +1366,11 @@ mod tests {
         let item_ids = response
             .timeline_events
             .iter()
-            .filter_map(|event| match &event.kind {
+            .map(|event| match &event.kind {
                 TraceEventKind::TimelineItemStarted { item }
-                | TraceEventKind::TimelineItemCompleted { item } => Some(item.item_id.as_str()),
-                TraceEventKind::TimelineItemDelta { event } => Some(event.item_id.as_str()),
-                TraceEventKind::TimelineItemFailed { item, .. } => Some(item.item_id.as_str()),
+                | TraceEventKind::TimelineItemCompleted { item } => item.item_id.as_str(),
+                TraceEventKind::TimelineItemDelta { event } => event.item_id.as_str(),
+                TraceEventKind::TimelineItemFailed { item, .. } => item.item_id.as_str(),
             })
             .collect::<Vec<_>>();
         assert_eq!(

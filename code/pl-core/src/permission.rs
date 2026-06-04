@@ -161,8 +161,10 @@ mod tests {
     #[test]
     fn legacy_manual_and_deny_all_still_wrap_permission_mode() {
         let read = request("read_file");
-        let mut manual = TurnOptions::default();
-        manual.tool_approval_policy = ToolApprovalPolicy::Manual;
+        let manual = TurnOptions {
+            tool_approval_policy: ToolApprovalPolicy::Manual,
+            ..Default::default()
+        };
         assert_eq!(
             decide_tool_permission(
                 &manual,
