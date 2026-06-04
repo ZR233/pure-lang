@@ -60,6 +60,7 @@ type ConversationPanelProps = {
   roles: RoleRecord[];
   setRoles: Dispatch<SetStateAction<RoleRecord[]>>;
   onSaveProviderSettings: (explicitRoles?: RoleRecord[]) => void;
+  onSavePermissionMode: (mode: PermissionMode) => void;
   onSetPrompt: (value: string) => void;
   onSetSessionMode: (mode: CompileMode) => void;
   onImplementPlan: (plan: string) => void;
@@ -671,6 +672,7 @@ export function ConversationPanel({
   roles,
   setRoles,
   onSaveProviderSettings,
+  onSavePermissionMode,
   onSetPrompt,
   onSetSessionMode,
   onImplementPlan,
@@ -926,6 +928,7 @@ export function ConversationPanel({
           roles={roles}
           setRoles={setRoles}
           onSaveProviderSettings={onSaveProviderSettings}
+          onSavePermissionMode={onSavePermissionMode}
           turnPhase={turnPhase}
           turnStartedAt={turnStartedAt}
           permissionMode={permissionMode}

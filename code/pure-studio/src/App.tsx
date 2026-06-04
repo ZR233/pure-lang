@@ -41,6 +41,7 @@ export function App() {
         roles={state.roles}
         setRoles={studio.setRolesState}
         onSaveProviderSettings={(explicitRoles) => void studio.onSaveProviderSettings(explicitRoles)}
+        onSavePermissionMode={(mode) => void studio.onSavePermissionMode(mode)}
         onSetPrompt={(value) => studio.dispatch({ type: "setPrompt", prompt: value })}
         onSetSessionMode={(mode) => void studio.onSetSessionMode(mode)}
         onImplementPlan={(plan) => void studio.onImplementPlan(plan)}

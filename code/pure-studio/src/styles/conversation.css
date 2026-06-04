@@ -459,6 +459,32 @@ button.status-item {
   line-height: 1.45;
 }
 
+.status-permission-actions {
+  display: grid;
+  gap: 6px;
+}
+
+.status-permission-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 30px;
+  padding: 6px 8px;
+  border: 1px solid #d8e2eb;
+  border-radius: 6px;
+  color: #33475f;
+  background: #ffffff;
+  font-size: 12px;
+  text-align: left;
+}
+
+.status-permission-actions button.active {
+  border-color: #1882b5;
+  color: #075c86;
+  background: #eef8fc;
+  font-weight: 800;
+}
+
 .context-meter {
   position: relative;
   display: inline-flex;

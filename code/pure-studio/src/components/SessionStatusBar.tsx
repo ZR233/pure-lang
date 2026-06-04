@@ -22,6 +22,7 @@ type SessionStatusBarProps = {
   roles: RoleRecord[];
   setRoles: Dispatch<SetStateAction<RoleRecord[]>>;
   onSaveProviderSettings: (explicitRoles?: RoleRecord[]) => void;
+  onSavePermissionMode: (mode: PermissionMode) => void;
   turnPhase: TurnPhase;
   turnStartedAt: number | null;
   permissionMode: PermissionMode;
@@ -43,6 +44,13 @@ const turnPhaseKeys: Record<TurnPhase, string> = {
   errored: "turnPhase.failed",
   failed: "turnPhase.failed",
 };
+
+const permissionModes: PermissionMode[] = [
+  "workspace-write",
+  "request-approval",
+  "auto-review",
+  "full-access",
+];
 
 const activeAgentStatuses = new Set<AgentStatus>([
   "running",
@@ -477,6 +485,7 @@ export function SessionStatusBar({
   roles,
   setRoles,
   onSaveProviderSettings,
+  onSavePermissionMode,
   turnPhase,
   turnStartedAt,
   permissionMode,
@@ -566,6 +575,22 @@ export function SessionStatusBar({
           <div className="status-permission-popover">
             <strong>{t("statusBar.permissionMode")}</strong>
             <p>{t(`settings.security.modeDesc.${permissionMode}`)}</p>
+            <div className="status-permission-actions" role="group" aria-label={t("statusBar.permissionMode")}>
+              {permissionModes.map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={mode === permissionMode ? "active" : ""}
+                  onClick={() => {
+                    if (mode !== permissionMode) {
+                      onSavePermissionMode(mode);
+                    }
+                  }}
+                >
+                  {t(`permissionMode.${mode}`)}
+                </button>
+              ))}
+            </div>
           </div>
         </StatusPopover>
 
