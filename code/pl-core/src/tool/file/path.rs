@@ -5,31 +5,41 @@ use pl_protocol::PureError;
 #[derive(Debug, Clone)]
 pub struct WorkspacePaths {
     root_canonical: PathBuf,
+    allow_workspace_escape: bool,
 }
 
 impl WorkspacePaths {
-    pub async fn new(root: PathBuf) -> Result<Self, PureError> {
+    pub async fn new(root: PathBuf, allow_workspace_escape: bool) -> Result<Self, PureError> {
         let root_canonical = tokio::fs::canonicalize(&root).await.map_err(|error| {
             PureError::ToolExecutionFailed {
                 tool: "file".to_string(),
                 error: format!("failed to resolve workspace root: {error}"),
             }
         })?;
-        Ok(Self { root_canonical })
+        Ok(Self {
+            root_canonical,
+            allow_workspace_escape,
+        })
     }
 
     pub async fn resolve_existing(&self, path: &str) -> Result<PathBuf, PureError> {
-        self.reject_parent_components(path)?;
+        if !self.allow_workspace_escape {
+            self.reject_parent_components(path)?;
+        }
         let candidate = self.candidate(path);
         let canonical = tokio::fs::canonicalize(&candidate)
             .await
             .map_err(|error| self.error(format!("failed to resolve path '{path}': {error}")))?;
-        self.ensure_inside_workspace(&canonical, path)?;
+        if !self.allow_workspace_escape {
+            self.ensure_inside_workspace(&canonical, path)?;
+        }
         Ok(canonical)
     }
 
     pub async fn resolve_for_write(&self, path: &str) -> Result<PathBuf, PureError> {
-        self.reject_parent_components(path)?;
+        if !self.allow_workspace_escape {
+            self.reject_parent_components(path)?;
+        }
         let candidate = self.candidate(path);
         let mut ancestor = candidate
             .parent()
@@ -88,7 +98,9 @@ impl WorkspacePaths {
                 "failed to resolve parent for path '{original}': {error}"
             ))
         })?;
-        self.ensure_inside_workspace(&canonical, original)?;
+        if !self.allow_workspace_escape {
+            self.ensure_inside_workspace(&canonical, original)?;
+        }
         Ok(canonical)
     }
 
@@ -152,4 +164,63 @@ pub fn matches_pattern(path: &str, pattern: Option<&str>) -> bool {
     }
 
     pattern.ends_with('*') || remainder.is_empty()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    fn unique_temp_dir(prefix: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "pure-{prefix}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    #[tokio::test]
+    async fn workspace_write_rejects_paths_outside_workspace() {
+        let workspace = unique_temp_dir("workspace-boundary");
+        let outside = unique_temp_dir("workspace-outside");
+        tokio::fs::create_dir_all(&workspace).await.unwrap();
+        tokio::fs::create_dir_all(&outside).await.unwrap();
+        tokio::fs::write(outside.join("secret.txt"), "no")
+            .await
+            .unwrap();
+        let paths = WorkspacePaths::new(workspace.clone(), false).await.unwrap();
+
+        let result = paths
+            .resolve_existing(outside.join("secret.txt").to_str().unwrap())
+            .await;
+
+        assert!(result.is_err());
+        let _ = tokio::fs::remove_dir_all(workspace).await;
+        let _ = tokio::fs::remove_dir_all(outside).await;
+    }
+
+    #[tokio::test]
+    async fn full_access_allows_paths_outside_workspace() {
+        let workspace = unique_temp_dir("full-access-workspace");
+        let outside = unique_temp_dir("full-access-outside");
+        tokio::fs::create_dir_all(&workspace).await.unwrap();
+        tokio::fs::create_dir_all(&outside).await.unwrap();
+        let outside_file = outside.join("allowed.txt");
+        tokio::fs::write(&outside_file, "yes").await.unwrap();
+        let paths = WorkspacePaths::new(workspace.clone(), true).await.unwrap();
+
+        let resolved = paths
+            .resolve_existing(outside_file.to_str().unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resolved,
+            tokio::fs::canonicalize(&outside_file).await.unwrap()
+        );
+        let _ = tokio::fs::remove_dir_all(workspace).await;
+        let _ = tokio::fs::remove_dir_all(outside).await;
+    }
 }

@@ -6,10 +6,12 @@ import type {
   ProviderRecord,
   ProviderSettingsSaveSnapshot,
   ProviderTemplateRecord,
+  PermissionMode,
   RoleRecord,
 } from "../types";
 import { ProviderSettings } from "./ProviderSettings";
 import { RoleSettings } from "./RoleSettings";
+import { SecuritySettings } from "./SecuritySettings";
 import { SkillsSettings } from "./SkillsSettings";
 
 type SettingsPageProps = {
@@ -21,11 +23,13 @@ type SettingsPageProps = {
   selectedProviderId: string | null;
   providerSearch: string;
   configExists: boolean;
+  permissionMode: PermissionMode;
   setRoles: Dispatch<SetStateAction<RoleRecord[]>>;
   setProviderSearch: Dispatch<SetStateAction<string>>;
   onClose: () => void;
   onSetActiveTab: (tab: SettingsTab) => void;
   onSaveProviderSettings: (snapshot?: ProviderSettingsSaveSnapshot) => Promise<boolean>;
+  onSavePermissionMode: (mode: PermissionMode) => Promise<void>;
 };
 
 const SETTINGS_TABS: SettingsTab[] = ["providers", "skills", "roles", "security", "general"];
@@ -39,9 +43,11 @@ export function SettingsPage({
   selectedProviderId,
   providerSearch,
   configExists,
+  permissionMode,
   onClose,
   onSetActiveTab,
   onSaveProviderSettings,
+  onSavePermissionMode,
   setRoles,
   setProviderSearch,
 }: SettingsPageProps) {
@@ -89,6 +95,11 @@ export function SettingsPage({
         />
       ) : activeSettingsTab === "skills" ? (
         <SkillsSettings selectedProjectId={selectedProjectId} />
+      ) : activeSettingsTab === "security" ? (
+        <SecuritySettings
+          permissionMode={permissionMode}
+          onSavePermissionMode={onSavePermissionMode}
+        />
       ) : (
         <div className="settings-placeholder">
           <h2>{t("settings.comingSoon")}</h2>

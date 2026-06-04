@@ -9,14 +9,17 @@ use pl_model::{
     create_provider_with_models,
 };
 use pl_protocol::{
-    AgentEvent, AgentEventSender, BudgetLimitKind, BudgetUsage, ErrorSeverity, Result,
-    TimelineItem, TimelineItemStatus, TokenUsageSnapshot,
+    AgentEvent, AgentEventSender, BudgetLimitKind, BudgetUsage, ErrorSeverity, Message,
+    MessageContent, MessageRole, Result, TimelineItem, TimelineItemStatus, TokenUsageSnapshot,
 };
 use tokio::sync::RwLock;
 
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
 use crate::context_compaction::{
     CompactionOutcome, CompactionTrigger, ContextCompactionRequest, maybe_compact_session,
+};
+use crate::permission::{
+    PermissionDecision, decide_tool_permission, is_high_risk_tool, parse_reviewer_decision,
 };
 use crate::provider_error::is_provider_429_error;
 use crate::runtime_usage::{agent_runtime_delta, identity_for_subagent, token_usage_snapshot};
@@ -31,8 +34,7 @@ use crate::tool::{
 use crate::trace::TraceRecorder;
 use crate::turn::{
     AGENT_MAX_COUNT, AGENT_MAX_DEPTH, BudgetLimit, BudgetTracker, ToolApprovalDecision,
-    ToolApprovalPolicy, ToolApprovalRequest, ToolExecutionMode, TurnOptions, TurnRequest,
-    TurnResult, TurnResultStatus,
+    ToolApprovalRequest, ToolExecutionMode, TurnOptions, TurnRequest, TurnResult, TurnResultStatus,
 };
 
 /// 生成唯一的会话 ID（毫秒时间戳 + 序列号）。
@@ -209,6 +211,82 @@ impl PureCore {
         self.register_tool(SkillsListTool::new(config.clone()));
         self.register_tool(SkillViewTool::new(config.clone()));
         self.register_tool(SkillManageTool::new(config));
+    }
+
+    async fn review_tool_call_with_ai(
+        &self,
+        request: &ToolApprovalRequest,
+        context: &ToolContext,
+    ) -> ToolApprovalDecision {
+        let (provider, reasoning_effort) = match &self.config {
+            Some(config) => match PureCore::from_config(config, ModelRole::Reviewer) {
+                Ok(core) => (core.provider, core.reasoning_effort),
+                Err(error) => {
+                    return ToolApprovalDecision::Denied {
+                        reason: format!("AI reviewer is unavailable: {error}"),
+                    };
+                }
+            },
+            None => (self.provider.clone(), self.reasoning_effort.clone()),
+        };
+        let reasoning = reasoning_effort.as_ref().map(|effort| ReasoningConfig {
+            effort: Some(effort.as_str().to_string()),
+            summary: Some(ReasoningSummary::Enabled),
+        });
+        let payload = serde_json::json!({
+            "toolName": &request.name,
+            "arguments": &request.arguments,
+            "workingDirectory": &request.working_directory,
+            "parentAgentId": &request.parent_agent_id,
+            "permissionMode": context.options.permission_mode.label(),
+            "compileMode": context.mode.label(),
+            "workspaceRoot": context.workspace_root.display().to_string(),
+            "riskSummary": permission_risk_summary(&request.name),
+        });
+        let message = Message {
+            role: MessageRole::User,
+            content: MessageContent::Text(
+                serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string()),
+            ),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        };
+        let completion_request = CompletionRequest {
+            model: provider.default_model().to_string(),
+            instructions: Some(include_str!("../prompts/permission_review.md").to_string()),
+            messages: vec![message],
+            tools: Vec::new(),
+            tool_choice: "none".to_string(),
+            parallel_tool_calls: false,
+            temperature: Some(0.0),
+            max_tokens: Some(512),
+            reasoning,
+            stream: false,
+            timeline: None,
+        };
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(1);
+        match provider.stream_complete(completion_request, event_tx).await {
+            Ok(response) => {
+                let content = response
+                    .raw_content
+                    .or(response.content)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                if content.is_empty() {
+                    return ToolApprovalDecision::Denied {
+                        reason: "AI reviewer returned an empty decision".to_string(),
+                    };
+                }
+                match parse_reviewer_decision(&content) {
+                    Ok(decision) => decision,
+                    Err(error) => ToolApprovalDecision::Denied { reason: error },
+                }
+            }
+            Err(error) => ToolApprovalDecision::Denied {
+                reason: format!("AI reviewer failed: {error}"),
+            },
+        }
     }
 
     pub fn run_turn<'a>(
@@ -836,13 +914,25 @@ async fn execute_tool_calls(
             agent_control: context.agent_control.clone(),
         };
         let approval_request = approval_request(tool_call, &tool_context);
-        let decision = approve_tool_call(
-            context.options,
-            &approval_request,
-            recorder.sender().clone(),
-            &tool_context,
-        )
-        .await;
+        let decision =
+            match decide_tool_permission(context.options, context.mode, &approval_request) {
+                PermissionDecision::Approved => ToolApprovalDecision::Approved,
+                PermissionDecision::NeedsUserApproval => {
+                    request_user_approval(
+                        context.options,
+                        &approval_request,
+                        recorder.sender().clone(),
+                    )
+                    .await
+                }
+                PermissionDecision::NeedsAiReview => {
+                    context
+                        .core
+                        .review_tool_call_with_ai(&approval_request, &tool_context)
+                        .await
+                }
+                PermissionDecision::Denied { reason } => ToolApprovalDecision::Denied { reason },
+            };
         if is_cancelled(context.options) {
             return Vec::new();
         }
@@ -1223,46 +1313,66 @@ fn get_working_directory(arguments: &serde_json::Value) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn permission_risk_summary(tool_name: &str) -> &'static str {
+    match tool_name {
+        "bash" => "shell command; may execute arbitrary process actions",
+        "write_file" => "file write; may create, overwrite, or append content",
+        "create_directory" => "filesystem write; creates directories",
+        "delete_path" => "destructive filesystem operation",
+        "copy_path" => "filesystem write; copies files or directories",
+        "move_path" => "filesystem write; moves or renames paths",
+        "apply_patch" => "batch filesystem edit",
+        "skill_manage" => "project skill write or management",
+        name if is_high_risk_tool(name) => "high-risk tool",
+        _ => "read-only or coordination tool",
+    }
+}
+
+#[cfg(test)]
 async fn approve_tool_call(
     options: &TurnOptions,
     request: &ToolApprovalRequest,
     event_tx: AgentEventSender,
     context: &ToolContext,
 ) -> ToolApprovalDecision {
-    let policy = if context.mode == crate::turn::CompileMode::Plan && request.name == "bash" {
-        ToolApprovalPolicy::Manual
-    } else {
-        options.tool_approval_policy
-    };
-    match policy {
-        ToolApprovalPolicy::AutoAllow => ToolApprovalDecision::Approved,
-        ToolApprovalPolicy::DenyAll => ToolApprovalDecision::Denied {
-            reason: "tool execution denied by policy".to_string(),
-        },
-        ToolApprovalPolicy::Manual => {
-            let _ = event_tx.send(AgentEvent::ToolApprovalRequested {
-                id: request.id.clone(),
-                name: request.name.clone(),
-                arguments: serde_json::to_string(&request.arguments).unwrap_or_default(),
-                working_directory: request.working_directory.clone(),
-            });
-            match &options.tool_approval_callback {
-                Some(callback) => match &options.cancellation_token {
-                    Some(token) => {
-                        tokio::select! {
-                            decision = callback(request.clone()) => decision,
-                            _ = token.cancelled() => ToolApprovalDecision::Denied {
-                                reason: cancellation_reason(),
-                            },
-                        }
-                    }
-                    None => callback(request.clone()).await,
-                },
-                None => ToolApprovalDecision::Denied {
-                    reason: "manual approval required but no approver is configured".to_string(),
-                },
-            }
+    match decide_tool_permission(options, context.mode, request) {
+        PermissionDecision::Approved => ToolApprovalDecision::Approved,
+        PermissionDecision::NeedsUserApproval => {
+            request_user_approval(options, request, event_tx).await
         }
+        PermissionDecision::NeedsAiReview => ToolApprovalDecision::Denied {
+            reason: "AI reviewer approval requires the core execution path".to_string(),
+        },
+        PermissionDecision::Denied { reason } => ToolApprovalDecision::Denied { reason },
+    }
+}
+
+async fn request_user_approval(
+    options: &TurnOptions,
+    request: &ToolApprovalRequest,
+    event_tx: AgentEventSender,
+) -> ToolApprovalDecision {
+    let _ = event_tx.send(AgentEvent::ToolApprovalRequested {
+        id: request.id.clone(),
+        name: request.name.clone(),
+        arguments: serde_json::to_string(&request.arguments).unwrap_or_default(),
+        working_directory: request.working_directory.clone(),
+    });
+    match &options.tool_approval_callback {
+        Some(callback) => match &options.cancellation_token {
+            Some(token) => {
+                tokio::select! {
+                    decision = callback(request.clone()) => decision,
+                    _ = token.cancelled() => ToolApprovalDecision::Denied {
+                        reason: cancellation_reason(),
+                    },
+                }
+            }
+            None => callback(request.clone()).await,
+        },
+        None => ToolApprovalDecision::Denied {
+            reason: "manual approval required but no approver is configured".to_string(),
+        },
     }
 }
 
@@ -1369,6 +1479,7 @@ fn has_tool_call_entries(items: &[serde_json::Value]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::turn::{PermissionMode, ToolApprovalPolicy};
     use crate::{ConfigStore, ModelRole};
     use pl_model::ToolCall;
     use pl_protocol::TimelineTextRole;
@@ -1613,6 +1724,7 @@ mod tests {
         let options = TurnOptions::default();
 
         assert_eq!(options.tool_approval_policy, ToolApprovalPolicy::AutoAllow);
+        assert_eq!(options.permission_mode, PermissionMode::WorkspaceWrite);
         assert!(options.tool_approval_callback.is_none());
     }
 
@@ -1701,7 +1813,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn plan_mode_denies_disallowed_tool_before_execution() {
+    async fn plan_mode_denies_disallowed_tool_before_execution_even_with_full_access() {
         let core = PureCore::default_provider().unwrap();
         let tool_call = ToolCall::function(
             "call-1",
@@ -1709,7 +1821,7 @@ mod tests {
             serde_json::json!({"path": "a.txt", "content": "oops"}),
             None,
         );
-        let options = TurnOptions::default();
+        let options = TurnOptions::default().with_permission_mode(PermissionMode::FullAccess);
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
         let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
         let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));

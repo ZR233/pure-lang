@@ -4,6 +4,7 @@ import type {
   CompileMode,
   ConfigPayload,
   DiscoveredSkillsPayload,
+  PermissionMode,
   ProjectSelectionPayload,
   ProviderSettingsInput,
   RunPromptResponse,
@@ -337,6 +338,18 @@ export function saveProviderSettings(input: ProviderSettingsInput) {
     return Promise.resolve(clone(previewConfig));
   }
   return invoke<ConfigPayload>("save_provider_settings", { input });
+}
+
+export function savePermissionMode(mode: PermissionMode) {
+  if (!isTauriRuntime()) {
+    previewConfig = {
+      ...previewConfig,
+      permissionMode: mode,
+      configExists: true,
+    };
+    return Promise.resolve(clone(previewConfig));
+  }
+  return invoke<ConfigPayload>("save_permission_mode", { mode });
 }
 
 export function listDiscoveredSkills(projectId: string) {

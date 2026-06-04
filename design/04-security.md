@@ -2,11 +2,22 @@
 
 ## 4.1 执行默认
 
-方案乙默认执行策略固定为：
+方案乙默认权限模式固定为：
 
-- `ToolApprovalPolicy::AutoAllow`
+- `PermissionMode::WorkspaceWrite`
 
-这是破坏性升级后的默认行为，不再根据旧 UI 选择分支切换默认值。手动审批能力保留为可选能力，不是默认控制面。
+这是破坏性升级后的默认行为，不再根据旧 UI 选择分支切换默认值。旧 `ToolApprovalPolicy::AutoAllow | Manual | DenyAll` 保留为兼容构造，但核心执行前统一以 `PermissionMode` 做策略判断。手动审批能力保留为可选能力，不是默认控制面。
+
+Pure v1 的权限模式是本地策略层，不是 OS 沙箱、网络沙箱或系统级进程隔离。策略层只决定 Pure 已注册工具是否放行、请求用户审批、请求 AI reviewer 审批或拒绝；直接放行也不会绕过工具自身 schema 校验、工作区写锁、超时、输出截断和 timeline 记录。
+
+权限模式：
+
+- `request-approval`：只读工具直接放行；写入类工具、`bash` 和 `skill_manage` 请求用户批准。
+- `auto-review`：只读工具直接放行；写入类工具、`bash` 和 `skill_manage` 交给 reviewer 模型审批。reviewer 只返回是否批准，不执行工具。
+- `workspace-write`：默认模式。workspace 内文件读写、`apply_patch`、项目 skill 写入和 workspace cwd 的 `bash` 直接放行；workspace 外访问拒绝。
+- `full-access`：所有已注册工具在策略层直接放行；文件工具可解析 workspace 外路径，`bash.workingDirectory` 可指向 workspace 外已存在目录。
+
+Plan Mode 的工具白名单优先于权限模式。即使当前权限模式是 `full-access`，Plan Mode 仍不能执行写入类工具；Plan Mode 中的 `bash` 仍走手动审批。
 
 ## 4.2 分层边界
 
@@ -22,12 +33,14 @@
 
 ## 4.3 文件与工具约束
 
-文件工具继续遵守工作区边界：
+文件工具默认遵守工作区边界：
 
 - 解析后路径必须位于 `workspace_root` 内
 - 二进制读取返回明确错误
 - `apply_patch` 直接改文件，不经 shell 转发
 - 符号链接目标不可确认或越界时拒绝
+
+当用户显式选择 `full-access` 时，Pure 放宽文件工具和 `bash.workingDirectory` 的 workspace 边界：绝对路径和 `..` 可以解析到 workspace 外。该模式仍只影响 Pure 工具的本地策略，不代表系统级完全隔离或提权。
 
 ## 4.4 凭据暴露面
 

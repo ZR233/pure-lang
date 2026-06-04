@@ -415,6 +415,7 @@ button.status-item {
 .status-model,
 .status-context,
 .status-cost,
+.status-permission,
 .status-count {
   border-color: #d7e1eb;
   background: #ffffff;
@@ -433,6 +434,29 @@ button.status-item {
   background: #ffffff;
   box-shadow: 0 12px 34px rgb(15 23 42 / 22%);
   color: #1b2638;
+}
+
+.status-permission-popover {
+  display: grid;
+  gap: 8px;
+  max-width: 260px;
+  padding: 14px 16px;
+  border: 1px solid #d8e2eb;
+  border-radius: 8px;
+  color: #1b2638;
+  background: #ffffff;
+  box-shadow: 0 12px 34px rgb(15 23 42 / 22%);
+}
+
+.status-permission-popover strong {
+  color: #152033;
+}
+
+.status-permission-popover p {
+  margin: 0;
+  color: #5c6d80;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .context-meter {

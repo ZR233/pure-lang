@@ -1,4 +1,4 @@
-import { Activity, Boxes, Bot, ChevronDown, Cpu, Loader2 } from "lucide-react";
+import { Activity, Boxes, Bot, ChevronDown, Cpu, Loader2, ShieldCheck } from "lucide-react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -7,6 +7,7 @@ import type {
   AgentDto,
   AgentStatus,
   ProviderRecord,
+  PermissionMode,
   RoleRecord,
   RuntimeCostAmount,
   RuntimeUsage,
@@ -23,6 +24,7 @@ type SessionStatusBarProps = {
   onSaveProviderSettings: (explicitRoles?: RoleRecord[]) => void;
   turnPhase: TurnPhase;
   turnStartedAt: number | null;
+  permissionMode: PermissionMode;
   agents: AgentDto[];
 };
 
@@ -477,6 +479,7 @@ export function SessionStatusBar({
   onSaveProviderSettings,
   turnPhase,
   turnStartedAt,
+  permissionMode,
   agents,
 }: SessionStatusBarProps) {
   const { t } = useTranslation();
@@ -547,6 +550,22 @@ export function SessionStatusBar({
           <div className="status-usage-popover">
             <CostRows usage={usage} />
             <small>{t("statusBar.costHint")}</small>
+          </div>
+        </StatusPopover>
+
+        <StatusPopover
+          className="permission-popover-wrap"
+          trigger={
+            <button className="status-item status-permission" type="button">
+              <ShieldCheck size={14} />
+              <strong>{t(`permissionMode.${permissionMode}`)}</strong>
+              <ChevronDown size={13} />
+            </button>
+          }
+        >
+          <div className="status-permission-popover">
+            <strong>{t("statusBar.permissionMode")}</strong>
+            <p>{t(`settings.security.modeDesc.${permissionMode}`)}</p>
           </div>
         </StatusPopover>
 

@@ -35,6 +35,7 @@ function assertDeepEqual<T>(actual: T, expected: T) {
 
 const config: ConfigPayload = {
   toml: "",
+  permissionMode: "workspace-write",
   providers: [],
   roles: [],
   templates: [],
@@ -626,6 +627,20 @@ function sessionModeUpdateKeepsTimelineAndUpdatesSessions() {
   assertEqual(updated.timelineItems.get("turn-1-plan")?.content, "1. Inspect");
 }
 
+function configLoadedUpdatesPermissionMode() {
+  const state = studioReducer(selectedState(), {
+    type: "configLoaded",
+    payload: {
+      ...config,
+      permissionMode: "auto-review",
+    },
+    status: "saved",
+  });
+
+  assertEqual(state.permissionMode, "auto-review");
+  assertEqual(state.status, "saved");
+}
+
 function applyPatchCountsFilesFromResultSummary() {
   const entries = entriesForTimeline([
     toolItem(
@@ -1010,6 +1025,7 @@ livePlanDeltaCreatesPlanEntry();
 toolsFromDifferentTurnsDoNotMerge();
 toolGroupStatusUsesPriority();
 sessionModeUpdateKeepsTimelineAndUpdatesSessions();
+configLoadedUpdatesPermissionMode();
 applyPatchCountsFilesFromResultSummary();
 successfulSkillViewImmediatelyUpdatesActiveSkills();
 repeatedSkillViewDoesNotDuplicateActiveSkills();

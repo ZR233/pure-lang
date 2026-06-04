@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::Context;
-use pl_core::{CompileMode, PureConfig, TimelineEventRecord, TurnOptions};
+use pl_core::{CompileMode, PermissionMode, PureConfig, TimelineEventRecord, TurnOptions};
 use pl_protocol::{TraceEvent, TraceEventKind};
 use tauri::{AppHandle, Emitter, State};
 use tokio_util::sync::CancellationToken;
@@ -383,6 +383,14 @@ pub fn save_provider_settings(
     let current = state.studio.config_store().load_or_default()?;
     let edit = provider_settings_to_edit(input, &current)?;
     let config = edit.to_config(&current)?;
+    state.studio.config_store().save(&config)?;
+    config_dto(state.studio.config_store())
+}
+
+#[tauri::command]
+pub fn save_permission_mode(mode: String, state: State<'_, AppState>) -> CommandResult<ConfigDto> {
+    let mut config = state.studio.config_store().load_or_default()?;
+    config.runtime.permission_mode = PermissionMode::from_label(&mode);
     state.studio.config_store().save(&config)?;
     config_dto(state.studio.config_store())
 }

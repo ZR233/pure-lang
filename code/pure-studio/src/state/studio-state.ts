@@ -4,6 +4,7 @@ import type {
   AgentTimelineEvent,
   BootstrapPayload,
   ConfigPayload,
+  PermissionMode,
   ProjectRecord,
   ProjectSelectionPayload,
   ProviderRecord,
@@ -54,6 +55,7 @@ export type StudioState = TimelineStateSlice & {
   providerSearch: string;
   selectedProviderId: string | null;
   configToml: string;
+  permissionMode: PermissionMode;
   configExists: boolean;
 };
 
@@ -116,6 +118,7 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   providerSearch: "",
   selectedProviderId: null,
   configToml: "",
+  permissionMode: "workspace-write",
   configExists: false,
 });
 
@@ -485,6 +488,7 @@ function configFields(selectedProviderId: string | null, payload: ConfigPayload)
     roles: payload.roles,
     providerTemplates: payload.templates,
     configToml: payload.toml,
+    permissionMode: payload.permissionMode,
     configExists: payload.configExists,
     selectedProviderId: nextProviderId,
   };

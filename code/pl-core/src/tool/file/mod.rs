@@ -160,7 +160,11 @@ fn tool_error(tool: &str, error: impl std::fmt::Display) -> PureError {
 }
 
 async fn workspace(context: &ToolContext) -> Result<WorkspacePaths, PureError> {
-    WorkspacePaths::new(context.workspace_root.clone()).await
+    WorkspacePaths::new(
+        context.workspace_root.clone(),
+        context.allows_workspace_escape(),
+    )
+    .await
 }
 
 impl Tool for ReadFileTool {
