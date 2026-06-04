@@ -9,6 +9,8 @@
 - 实现或复用 `ModelProvider`。
 - 适配目标 API 的 request/response wire 格式。
 
+OpenAI-compatible provider 应复用 `pl-model` 现有 `OpenAiCompatibleProvider`。新增 provider 差异优先通过 `ProviderInfo`、模型能力和内部 typed wire 扩展表达；不得把 provider 私有 request/stream 结构泄漏到 `pl-core`。如果目标 API 兼容 Chat Completions 或 Responses 但增加了私有字段，应新增本地强类型扩展并继续通过 `async-openai` client/stream 发送。
+
 公共消息、事件和错误类型继续来自 `pl-protocol`。
 
 配置里的模型信息会覆盖或补充 bundled model，使用户可以接入自定义模型。

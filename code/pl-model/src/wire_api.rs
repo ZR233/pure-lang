@@ -1,19 +1,25 @@
 #![allow(dead_code)]
-use pl_protocol::Result;
+use std::collections::HashMap;
 
-use crate::request::{CompletionRequest, CompletionResponse};
-use crate::request::{ToolCall, ToolCallKind, ToolCallPayload, ToolFormat, ToolSchema};
+use pl_protocol::{MessageContent, MessageRole, Result};
+use serde::Serialize;
+
+use crate::request::{
+    CompletionRequest, CompletionResponse, ReasoningConfig, ReasoningSummary, ToolCall,
+    ToolCallKind, ToolCallPayload, ToolFormat, ToolSchema,
+};
+use crate::wire_response::{chat_parse_response, responses_parse_response};
 
 /// API 协议适配器。
 ///
-/// 将内部统一的 CompletionRequest 转换为不同 provider 的 wire 格式，
+/// 将内部统一的 CompletionRequest 转换为不同 provider 的 typed wire 格式，
 /// 并将 provider 返回的响应解析回 CompletionResponse。
 ///
 /// 实现者契约：
-/// - build_request_body() 产生的 JSON 必须符合目标 API 规范
-/// - parse_stream_event() 处理单个 SSE 事件，返回 None 表示跳过
-pub trait WireAdapter: Send + Sync {
-    fn build_request_body(&self, request: &CompletionRequest) -> serde_json::Value;
+/// - build_request() 产生的强类型请求必须符合目标 API 规范
+/// - parse_stream_event() 处理单个 typed SSE 事件，返回 None 表示跳过
+pub(crate) trait WireAdapter: Send + Sync {
+    fn build_request(&self, request: &CompletionRequest) -> ProviderRequestBody;
     fn parse_response(&self, body: serde_json::Value) -> Result<CompletionResponse>;
     fn parse_stream_event(
         &self,
@@ -21,7 +27,7 @@ pub trait WireAdapter: Send + Sync {
     ) -> Result<Option<crate::sse::StreamEvent>>;
 }
 
-/// Wire 协议分发：Responses API vs Chat Completions API
+/// Wire 协议分发：Responses API vs Chat Completions API。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WireDispatch {
     Responses,
@@ -31,13 +37,29 @@ pub enum WireDispatch {
 }
 
 impl WireDispatch {
-    pub fn build_request_body(&self, request: &CompletionRequest) -> serde_json::Value {
+    pub(crate) fn build_request(&self, request: &CompletionRequest) -> ProviderRequestBody {
         match self {
-            WireDispatch::Responses => responses_build_body(request),
-            WireDispatch::Chat => chat_build_body(request, ChatReasoningStyle::Plain),
-            WireDispatch::DeepSeekChat => chat_build_body(request, ChatReasoningStyle::DeepSeek),
-            WireDispatch::ZhipuChat => chat_build_body(request, ChatReasoningStyle::Zhipu),
+            WireDispatch::Responses => {
+                ProviderRequestBody::Responses(ResponsesRequestBody::from_request(request))
+            }
+            WireDispatch::Chat => ProviderRequestBody::Chat(ChatRequestBody::from_request(
+                request,
+                ChatReasoningStyle::Plain,
+            )),
+            WireDispatch::DeepSeekChat => ProviderRequestBody::Chat(ChatRequestBody::from_request(
+                request,
+                ChatReasoningStyle::DeepSeek,
+            )),
+            WireDispatch::ZhipuChat => ProviderRequestBody::Chat(ChatRequestBody::from_request(
+                request,
+                ChatReasoningStyle::Zhipu,
+            )),
         }
+    }
+
+    pub fn build_request_body(&self, request: &CompletionRequest) -> serde_json::Value {
+        serde_json::to_value(self.build_request(request))
+            .expect("typed provider request should serialize")
     }
 
     pub fn parse_response(&self, body: serde_json::Value) -> Result<CompletionResponse> {
@@ -57,6 +79,13 @@ impl WireDispatch {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub(crate) enum ProviderRequestBody {
+    Responses(ResponsesRequestBody),
+    Chat(ChatRequestBody),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ChatReasoningStyle {
     Plain,
@@ -64,575 +93,550 @@ enum ChatReasoningStyle {
     Zhipu,
 }
 
-fn message_role_str(role: &pl_protocol::MessageRole) -> &str {
-    match role {
-        pl_protocol::MessageRole::System => "system",
-        pl_protocol::MessageRole::User => "user",
-        pl_protocol::MessageRole::Assistant => "assistant",
-        pl_protocol::MessageRole::Tool => "tool",
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ResponsesRequestBody {
+    model: String,
+    input: Vec<ResponsesInputItem>,
+    stream: bool,
+    tool_choice: String,
+    parallel_tool_calls: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<ResponsesTool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_output_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning: Option<ResponsesReasoning>,
+}
+
+impl ResponsesRequestBody {
+    fn from_request(request: &CompletionRequest) -> Self {
+        let mut input = Vec::new();
+
+        if let Some(instructions) = &request.instructions {
+            input.push(ResponsesInputItem::message(
+                ResponsesRole::System,
+                vec![ResponsesContent::InputText {
+                    text: instructions.clone(),
+                }],
+            ));
+        }
+
+        for msg in &request.messages {
+            match msg.role {
+                MessageRole::Assistant if msg.metadata.contains_key("tool_calls") => {
+                    let text = message_content_text(&msg.content);
+                    if !text.is_empty() {
+                        input.push(ResponsesInputItem::message(
+                            ResponsesRole::Assistant,
+                            vec![ResponsesContent::OutputText { text }],
+                        ));
+                    }
+                    if let Some(tool_calls) = parse_tool_calls_from_metadata(&msg.metadata) {
+                        input.extend(
+                            tool_calls
+                                .into_iter()
+                                .map(ResponsesInputItem::from_tool_call),
+                        );
+                    }
+                }
+                MessageRole::Tool => {
+                    let call_id = msg
+                        .metadata
+                        .get("tool_call_id")
+                        .cloned()
+                        .unwrap_or_default();
+                    let output = message_content_text(&msg.content);
+                    match tool_result_kind(&msg.metadata) {
+                        ToolCallKind::Function => {
+                            input.push(ResponsesInputItem::FunctionCallOutput { call_id, output });
+                        }
+                        ToolCallKind::Custom => {
+                            input.push(ResponsesInputItem::CustomToolCallOutput {
+                                call_id,
+                                name: msg.metadata.get("tool_name").cloned(),
+                                output,
+                            });
+                        }
+                    }
+                }
+                MessageRole::System | MessageRole::User | MessageRole::Assistant => {
+                    input.push(ResponsesInputItem::message(
+                        ResponsesRole::from_message_role(msg.role),
+                        vec![ResponsesContent::InputText {
+                            text: message_content_text(&msg.content),
+                        }],
+                    ));
+                }
+            }
+        }
+
+        let tools = (!request.tools.is_empty()).then(|| {
+            request
+                .tools
+                .iter()
+                .map(ResponsesTool::from_schema)
+                .collect()
+        });
+
+        Self {
+            model: request.model.clone(),
+            input,
+            stream: true,
+            tool_choice: request.tool_choice.clone(),
+            parallel_tool_calls: request.parallel_tool_calls,
+            tools,
+            temperature: request.temperature,
+            max_output_tokens: request.max_tokens,
+            reasoning: request
+                .reasoning
+                .as_ref()
+                .map(ResponsesReasoning::from_config),
+        }
     }
 }
 
-fn message_content_text(content: &pl_protocol::MessageContent) -> String {
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ResponsesInputItem {
+    Message {
+        role: ResponsesRole,
+        content: Vec<ResponsesContent>,
+    },
+    FunctionCall {
+        id: String,
+        name: String,
+        arguments: String,
+        call_id: String,
+    },
+    FunctionCallOutput {
+        call_id: String,
+        output: String,
+    },
+    CustomToolCall {
+        id: String,
+        name: String,
+        input: String,
+        call_id: String,
+    },
+    CustomToolCallOutput {
+        call_id: String,
+        name: Option<String>,
+        output: String,
+    },
+}
+
+impl ResponsesInputItem {
+    fn message(role: ResponsesRole, content: Vec<ResponsesContent>) -> Self {
+        Self::Message { role, content }
+    }
+
+    fn from_tool_call(tool_call: ToolCall) -> Self {
+        match tool_call.payload {
+            ToolCallPayload::Function { arguments } => Self::FunctionCall {
+                id: tool_call.id.clone(),
+                name: tool_call.name,
+                arguments: serde_json::to_string(&arguments).unwrap_or_default(),
+                call_id: tool_call.call_id.unwrap_or(tool_call.id),
+            },
+            ToolCallPayload::Custom { input } => Self::CustomToolCall {
+                id: tool_call.id.clone(),
+                name: tool_call.name,
+                input,
+                call_id: tool_call.call_id.unwrap_or(tool_call.id),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ResponsesRole {
+    System,
+    User,
+    Assistant,
+    Tool,
+}
+
+impl ResponsesRole {
+    fn from_message_role(role: MessageRole) -> Self {
+        match role {
+            MessageRole::System => Self::System,
+            MessageRole::User => Self::User,
+            MessageRole::Assistant => Self::Assistant,
+            MessageRole::Tool => Self::Tool,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ResponsesContent {
+    InputText { text: String },
+    OutputText { text: String },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ResponsesTool {
+    Function {
+        name: String,
+        description: String,
+        parameters: serde_json::Value,
+    },
+    Custom {
+        name: String,
+        description: String,
+        format: ToolFormatBody,
+    },
+}
+
+impl ResponsesTool {
+    fn from_schema(tool: &ToolSchema) -> Self {
+        match tool {
+            ToolSchema::Function {
+                name,
+                description,
+                input_schema,
+            } => Self::Function {
+                name: name.clone(),
+                description: description.clone(),
+                parameters: input_schema.clone(),
+            },
+            ToolSchema::Custom {
+                name,
+                description,
+                format,
+            } => Self::Custom {
+                name: name.clone(),
+                description: description.clone(),
+                format: ToolFormatBody::from_format(format),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ToolFormatBody {
+    Text,
+    Grammar { syntax: String, definition: String },
+}
+
+impl ToolFormatBody {
+    fn from_format(format: &ToolFormat) -> Self {
+        match format {
+            ToolFormat::Text => Self::Text,
+            ToolFormat::Grammar { syntax, definition } => Self::Grammar {
+                syntax: syntax.clone(),
+                definition: definition.clone(),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ResponsesReasoning {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summary: Option<ResponsesReasoningSummary>,
+}
+
+impl ResponsesReasoning {
+    fn from_config(reasoning: &ReasoningConfig) -> Self {
+        Self {
+            effort: reasoning.effort.clone(),
+            summary: reasoning
+                .summary
+                .map(ResponsesReasoningSummary::from_summary),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ResponsesReasoningSummary {
+    Auto,
+    Enabled,
+    Disabled,
+}
+
+impl ResponsesReasoningSummary {
+    fn from_summary(summary: ReasoningSummary) -> Self {
+        match summary {
+            ReasoningSummary::Auto => Self::Auto,
+            ReasoningSummary::Enabled => Self::Enabled,
+            ReasoningSummary::Disabled => Self::Disabled,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ChatRequestBody {
+    model: String,
+    messages: Vec<ChatMessage>,
+    stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<ChatTool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_choice: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<ChatThinking>,
+}
+
+impl ChatRequestBody {
+    fn from_request(request: &CompletionRequest, reasoning_style: ChatReasoningStyle) -> Self {
+        let mut messages = Vec::new();
+
+        if let Some(instructions) = &request.instructions {
+            messages.push(ChatMessage::System {
+                content: instructions.clone(),
+            });
+        }
+
+        for msg in &request.messages {
+            match msg.role {
+                MessageRole::Assistant if msg.metadata.contains_key("tool_calls") => {
+                    let text = message_content_text(&msg.content);
+                    messages.push(ChatMessage::Assistant {
+                        content: (!text.is_empty()).then_some(text),
+                        reasoning_content: msg.reasoning_content.clone(),
+                        tool_calls: parse_tool_calls_from_metadata(&msg.metadata).map(|calls| {
+                            calls
+                                .into_iter()
+                                .map(ChatMessageToolCall::from_tool_call)
+                                .collect()
+                        }),
+                    });
+                }
+                MessageRole::Tool => {
+                    messages.push(ChatMessage::Tool {
+                        tool_call_id: msg
+                            .metadata
+                            .get("tool_call_id")
+                            .cloned()
+                            .unwrap_or_default(),
+                        content: message_content_text(&msg.content),
+                    });
+                }
+                MessageRole::System => messages.push(ChatMessage::System {
+                    content: message_content_text(&msg.content),
+                }),
+                MessageRole::User => messages.push(ChatMessage::User {
+                    content: message_content_text(&msg.content),
+                }),
+                MessageRole::Assistant => messages.push(ChatMessage::Assistant {
+                    content: Some(message_content_text(&msg.content)),
+                    reasoning_content: msg.reasoning_content.clone(),
+                    tool_calls: None,
+                }),
+            }
+        }
+
+        let tools = (!request.tools.is_empty())
+            .then(|| request.tools.iter().map(ChatTool::from_schema).collect());
+        let tool_choice = tools.as_ref().map(|_| request.tool_choice.clone());
+
+        let (reasoning_effort, thinking) = match (reasoning_style, request.reasoning.as_ref()) {
+            (ChatReasoningStyle::Plain, _) | (_, None) => (None, None),
+            (ChatReasoningStyle::DeepSeek, Some(reasoning)) => (
+                reasoning.effort.clone(),
+                Some(ChatThinking {
+                    kind: chat_thinking_type(reasoning).to_string(),
+                    clear_thinking: None,
+                }),
+            ),
+            (ChatReasoningStyle::Zhipu, Some(reasoning)) => {
+                let kind = chat_thinking_type(reasoning).to_string();
+                let clear_thinking = (kind == "enabled").then_some(false);
+                (
+                    None,
+                    Some(ChatThinking {
+                        kind,
+                        clear_thinking,
+                    }),
+                )
+            }
+        };
+
+        Self {
+            model: request.model.clone(),
+            messages,
+            stream: true,
+            tools,
+            tool_choice,
+            temperature: request.temperature,
+            max_tokens: request.max_tokens,
+            reasoning_effort,
+            thinking,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "role", rename_all = "lowercase")]
+enum ChatMessage {
+    System {
+        content: String,
+    },
+    User {
+        content: String,
+    },
+    Assistant {
+        content: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reasoning_content: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tool_calls: Option<Vec<ChatMessageToolCall>>,
+    },
+    Tool {
+        tool_call_id: String,
+        content: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ChatMessageToolCall {
+    Function {
+        id: String,
+        function: ChatFunctionCall,
+    },
+    Custom {
+        id: String,
+        custom: ChatCustomToolCall,
+    },
+}
+
+impl ChatMessageToolCall {
+    fn from_tool_call(tool_call: ToolCall) -> Self {
+        match tool_call.payload {
+            ToolCallPayload::Function { arguments } => Self::Function {
+                id: tool_call.id,
+                function: ChatFunctionCall {
+                    name: tool_call.name,
+                    arguments: serde_json::to_string(&arguments).unwrap_or_default(),
+                },
+            },
+            ToolCallPayload::Custom { input } => Self::Custom {
+                id: tool_call.id,
+                custom: ChatCustomToolCall {
+                    name: tool_call.name,
+                    input,
+                },
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ChatFunctionCall {
+    name: String,
+    arguments: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ChatCustomToolCall {
+    name: String,
+    input: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ChatTool {
+    Function { function: ChatToolFunction },
+    Custom { custom: ChatToolCustom },
+}
+
+impl ChatTool {
+    fn from_schema(tool: &ToolSchema) -> Self {
+        match tool {
+            ToolSchema::Function {
+                name,
+                description,
+                input_schema,
+            } => Self::Function {
+                function: ChatToolFunction {
+                    name: name.clone(),
+                    description: description.clone(),
+                    parameters: input_schema.clone(),
+                },
+            },
+            ToolSchema::Custom {
+                name,
+                description,
+                format,
+            } => Self::Custom {
+                custom: ChatToolCustom {
+                    name: name.clone(),
+                    description: description.clone(),
+                    format: ToolFormatBody::from_format(format),
+                },
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ChatToolFunction {
+    name: String,
+    description: String,
+    parameters: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ChatToolCustom {
+    name: String,
+    description: String,
+    format: ToolFormatBody,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ChatThinking {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    clear_thinking: Option<bool>,
+}
+
+fn chat_thinking_type(reasoning: &ReasoningConfig) -> &'static str {
+    match reasoning.summary {
+        Some(ReasoningSummary::Disabled) => "disabled",
+        Some(ReasoningSummary::Auto) | Some(ReasoningSummary::Enabled) | None => "enabled",
+    }
+}
+
+fn message_content_text(content: &MessageContent) -> String {
     match content {
-        pl_protocol::MessageContent::Text(t) => t.clone(),
-        pl_protocol::MessageContent::MultiPart(parts) => parts
+        MessageContent::Text(text) => text.clone(),
+        MessageContent::MultiPart(parts) => parts
             .iter()
-            .map(|p| p.text.as_str())
+            .map(|part| part.text.as_str())
             .collect::<Vec<_>>()
             .join("\n"),
     }
 }
 
 /// 从 metadata 中解析 tool_calls（由 CoreSession::push_assistant_tool_calls 写入）。
-fn parse_tool_calls_from_metadata(
-    metadata: &std::collections::HashMap<String, String>,
-) -> Option<Vec<crate::request::ToolCall>> {
+fn parse_tool_calls_from_metadata(metadata: &HashMap<String, String>) -> Option<Vec<ToolCall>> {
     metadata
         .get("tool_calls")
         .and_then(|json| serde_json::from_str(json).ok())
 }
 
-fn tool_result_kind(metadata: &std::collections::HashMap<String, String>) -> ToolCallKind {
+fn tool_result_kind(metadata: &HashMap<String, String>) -> ToolCallKind {
     match metadata.get("tool_call_kind").map(String::as_str) {
         Some("custom") => ToolCallKind::Custom,
         Some("function") | None => ToolCallKind::Function,
         Some(_) => ToolCallKind::Function,
-    }
-}
-
-fn tool_format_json(format: &ToolFormat) -> serde_json::Value {
-    match format {
-        ToolFormat::Text => serde_json::json!({ "type": "text" }),
-        ToolFormat::Grammar { syntax, definition } => serde_json::json!({
-            "type": "grammar",
-            "syntax": syntax,
-            "definition": definition,
-        }),
-    }
-}
-
-fn responses_tool_json(tool: &ToolSchema) -> serde_json::Value {
-    match tool {
-        ToolSchema::Function {
-            name,
-            description,
-            input_schema,
-        } => serde_json::json!({
-            "type": "function",
-            "name": name,
-            "description": description,
-            "parameters": input_schema,
-        }),
-        ToolSchema::Custom {
-            name,
-            description,
-            format,
-        } => serde_json::json!({
-            "type": "custom",
-            "name": name,
-            "description": description,
-            "format": tool_format_json(format),
-        }),
-    }
-}
-
-fn chat_tool_json(tool: &ToolSchema) -> serde_json::Value {
-    match tool {
-        ToolSchema::Function {
-            name,
-            description,
-            input_schema,
-        } => serde_json::json!({
-            "type": "function",
-            "function": {
-                "name": name,
-                "description": description,
-                "parameters": input_schema,
-            }
-        }),
-        ToolSchema::Custom {
-            name,
-            description,
-            format,
-        } => serde_json::json!({
-            "type": "custom",
-            "custom": {
-                "name": name,
-                "description": description,
-                "format": tool_format_json(format),
-            }
-        }),
-    }
-}
-
-fn cached_tokens_from_usage(usage: &serde_json::Value) -> u64 {
-    usage
-        .get("prompt_cache_hit_tokens")
-        .or_else(|| usage.get("cached_prompt_tokens"))
-        .and_then(serde_json::Value::as_u64)
-        .or_else(|| {
-            usage
-                .get("input_tokens_details")
-                .and_then(cached_tokens_from_details)
-        })
-        .or_else(|| {
-            usage
-                .get("prompt_tokens_details")
-                .and_then(cached_tokens_from_details)
-        })
-        .unwrap_or(0)
-}
-
-fn cached_tokens_from_details(details: &serde_json::Value) -> Option<u64> {
-    details
-        .get("cached_tokens")
-        .or_else(|| details.get("cache_read_tokens"))
-        .or_else(|| details.get("cached_input_tokens"))
-        .and_then(serde_json::Value::as_u64)
-}
-
-fn responses_build_body(request: &CompletionRequest) -> serde_json::Value {
-    let mut input = Vec::new();
-
-    if let Some(ref instructions) = request.instructions {
-        input.push(serde_json::json!({
-            "type": "message",
-            "role": "system",
-            "content": [{"type": "input_text", "text": instructions}]
-        }));
-    }
-
-    for msg in &request.messages {
-        match msg.role {
-            pl_protocol::MessageRole::Assistant if msg.metadata.contains_key("tool_calls") => {
-                // Assistant 消息带 tool_calls
-                let text = message_content_text(&msg.content);
-                if !text.is_empty() {
-                    input.push(serde_json::json!({
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [{"type": "output_text", "text": text}]
-                    }));
-                }
-                if let Some(tool_calls) = parse_tool_calls_from_metadata(&msg.metadata) {
-                    for tc in &tool_calls {
-                        match &tc.payload {
-                            ToolCallPayload::Function { arguments } => {
-                                input.push(serde_json::json!({
-                                    "type": "function_call",
-                                    "id": tc.id,
-                                    "name": tc.name,
-                                    "arguments": serde_json::to_string(arguments).unwrap_or_default(),
-                                    "call_id": tc.call_id.as_deref().unwrap_or(&tc.id),
-                                }));
-                            }
-                            ToolCallPayload::Custom { input: tool_input } => {
-                                input.push(serde_json::json!({
-                                    "type": "custom_tool_call",
-                                    "id": tc.id,
-                                    "name": tc.name,
-                                    "input": tool_input,
-                                    "call_id": tc.call_id.as_deref().unwrap_or(&tc.id),
-                                }));
-                            }
-                        }
-                    }
-                }
-            }
-            pl_protocol::MessageRole::Tool => {
-                // Tool result 消息
-                let call_id = msg
-                    .metadata
-                    .get("tool_call_id")
-                    .cloned()
-                    .unwrap_or_default();
-                let text = message_content_text(&msg.content);
-                match tool_result_kind(&msg.metadata) {
-                    ToolCallKind::Function => {
-                        input.push(serde_json::json!({
-                            "type": "function_call_output",
-                            "call_id": call_id,
-                            "output": text,
-                        }));
-                    }
-                    ToolCallKind::Custom => {
-                        input.push(serde_json::json!({
-                            "type": "custom_tool_call_output",
-                            "call_id": call_id,
-                            "name": msg.metadata.get("tool_name").cloned(),
-                            "output": text,
-                        }));
-                    }
-                }
-            }
-            _ => {
-                // 普通消息
-                let role = message_role_str(&msg.role);
-                let text = message_content_text(&msg.content);
-                input.push(serde_json::json!({
-                    "type": "message",
-                    "role": role,
-                    "content": [{"type": "input_text", "text": text}]
-                }));
-            }
-        }
-    }
-
-    let tools: Vec<serde_json::Value> = request.tools.iter().map(responses_tool_json).collect();
-
-    let mut body = serde_json::json!({
-        "model": request.model,
-        "input": input,
-        "stream": true,
-        "tool_choice": request.tool_choice,
-        "parallel_tool_calls": request.parallel_tool_calls,
-    });
-
-    if !tools.is_empty() {
-        body["tools"] = serde_json::json!(tools);
-    }
-
-    if let Some(temp) = request.temperature {
-        body["temperature"] = serde_json::json!(temp);
-    }
-
-    if let Some(max_tokens) = request.max_tokens {
-        body["max_output_tokens"] = serde_json::json!(max_tokens);
-    }
-
-    if let Some(ref reasoning) = request.reasoning {
-        let mut r = serde_json::json!({});
-        if let Some(ref effort) = reasoning.effort {
-            r["effort"] = serde_json::json!(effort);
-        }
-        if let Some(summary) = reasoning.summary {
-            r["summary"] = serde_json::json!(match summary {
-                crate::request::ReasoningSummary::Auto => "auto",
-                crate::request::ReasoningSummary::Enabled => "enabled",
-                crate::request::ReasoningSummary::Disabled => "disabled",
-            });
-        }
-        body["reasoning"] = r;
-    }
-
-    body
-}
-
-fn responses_parse_response(body: serde_json::Value) -> Result<CompletionResponse> {
-    use crate::request::{FinishReason, TokenUsage};
-
-    let content = body
-        .get("output")
-        .and_then(|o| o.as_array())
-        .and_then(|items| {
-            items.iter().find_map(|item| {
-                if item.get("type")?.as_str()? == "message" {
-                    item.get("content")?
-                        .as_array()?
-                        .first()?
-                        .get("text")?
-                        .as_str()
-                        .map(String::from)
-                } else {
-                    None
-                }
-            })
-        });
-
-    let tool_calls = body
-        .get("output")
-        .and_then(|o| o.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(parse_responses_tool_call)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    let usage = body.get("usage").and_then(|u| {
-        Some(TokenUsage {
-            prompt_tokens: u.get("input_tokens")?.as_u64()?,
-            completion_tokens: u.get("output_tokens")?.as_u64()?,
-            total_tokens: u.get("total_tokens")?.as_u64().unwrap_or(0),
-            cached_prompt_tokens: cached_tokens_from_usage(u),
-        })
-    });
-
-    let finish_reason = if !tool_calls.is_empty() {
-        FinishReason::ToolCalls
-    } else {
-        FinishReason::Stop
-    };
-
-    Ok(CompletionResponse {
-        raw_content: content.clone(),
-        content,
-        reasoning_content: None,
-        tool_calls,
-        timeline_events: Vec::new(),
-        next_sequence: 0,
-        usage: usage.unwrap_or_default(),
-        finish_reason,
-        model: body
-            .get("model")
-            .and_then(|m| m.as_str())
-            .unwrap_or("")
-            .to_string(),
-    })
-}
-
-fn parse_responses_tool_call(item: &serde_json::Value) -> Option<ToolCall> {
-    match item.get("type")?.as_str()? {
-        "function_call" => Some(ToolCall::function(
-            item.get("id")?.as_str()?.to_string(),
-            item.get("name")?.as_str()?.to_string(),
-            serde_json::from_str(item.get("arguments")?.as_str()?).ok()?,
-            item.get("call_id")
-                .and_then(|v| v.as_str())
-                .map(String::from),
-        )),
-        "custom_tool_call" => Some(ToolCall::custom(
-            item.get("id")
-                .and_then(|v| v.as_str())
-                .or_else(|| item.get("call_id").and_then(|v| v.as_str()))?
-                .to_string(),
-            item.get("name")?.as_str()?.to_string(),
-            item.get("input")?.as_str()?.to_string(),
-            item.get("call_id")
-                .and_then(|v| v.as_str())
-                .map(String::from),
-        )),
-        _ => None,
-    }
-}
-
-fn chat_build_body(
-    request: &CompletionRequest,
-    reasoning_style: ChatReasoningStyle,
-) -> serde_json::Value {
-    let mut messages = Vec::new();
-
-    if let Some(ref instructions) = request.instructions {
-        messages.push(serde_json::json!({
-            "role": "system",
-            "content": instructions
-        }));
-    }
-
-    for msg in &request.messages {
-        match msg.role {
-            pl_protocol::MessageRole::Assistant if msg.metadata.contains_key("tool_calls") => {
-                // Assistant 消息带 tool_calls
-                let text = message_content_text(&msg.content);
-                let mut message = serde_json::json!({
-                    "role": "assistant",
-                    "content": if text.is_empty() { serde_json::Value::Null } else { serde_json::json!(text) }
-                });
-                if let Some(ref reasoning_content) = msg.reasoning_content {
-                    message["reasoning_content"] = serde_json::json!(reasoning_content);
-                }
-                if let Some(tool_calls) = parse_tool_calls_from_metadata(&msg.metadata) {
-                    message["tool_calls"] = serde_json::json!(tool_calls.iter().map(|tc| {
-                        match &tc.payload {
-                            ToolCallPayload::Function { arguments } => serde_json::json!({
-                                "id": tc.id,
-                                "type": "function",
-                                "function": {
-                                    "name": tc.name,
-                                    "arguments": serde_json::to_string(arguments).unwrap_or_default()
-                                }
-                            }),
-                            ToolCallPayload::Custom { input } => serde_json::json!({
-                                "id": tc.id,
-                                "type": "custom",
-                                "custom": {
-                                    "name": tc.name,
-                                    "input": input
-                                }
-                            }),
-                        }
-                    }).collect::<Vec<_>>());
-                }
-                messages.push(message);
-            }
-            pl_protocol::MessageRole::Tool => {
-                // Tool result 消息
-                let tool_call_id = msg
-                    .metadata
-                    .get("tool_call_id")
-                    .cloned()
-                    .unwrap_or_default();
-                let text = message_content_text(&msg.content);
-                messages.push(serde_json::json!({
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": text,
-                }));
-            }
-            _ => {
-                // 普通消息
-                let role = message_role_str(&msg.role);
-                let text = message_content_text(&msg.content);
-                let mut message = serde_json::json!({
-                    "role": role,
-                    "content": text
-                });
-                if msg.role == pl_protocol::MessageRole::Assistant
-                    && let Some(reasoning_content) = &msg.reasoning_content
-                {
-                    message["reasoning_content"] = serde_json::json!(reasoning_content);
-                }
-                messages.push(message);
-            }
-        }
-    }
-
-    let tools: Vec<serde_json::Value> = request.tools.iter().map(chat_tool_json).collect();
-
-    let mut body = serde_json::json!({
-        "model": request.model,
-        "messages": messages,
-        "stream": true,
-    });
-
-    if !tools.is_empty() {
-        body["tools"] = serde_json::json!(tools);
-        body["tool_choice"] = serde_json::json!(request.tool_choice);
-    }
-
-    if let Some(temp) = request.temperature {
-        body["temperature"] = serde_json::json!(temp);
-    }
-
-    if let Some(max_tokens) = request.max_tokens {
-        body["max_tokens"] = serde_json::json!(max_tokens);
-    }
-
-    if let Some(ref reasoning) = request.reasoning {
-        match reasoning_style {
-            ChatReasoningStyle::Plain => {}
-            ChatReasoningStyle::DeepSeek => {
-                if let Some(ref effort) = reasoning.effort {
-                    body["reasoning_effort"] = serde_json::json!(effort);
-                }
-                body["thinking"] = serde_json::json!({
-                    "type": chat_thinking_type(reasoning)
-                });
-            }
-            ChatReasoningStyle::Zhipu => {
-                let thinking_type = chat_thinking_type(reasoning);
-                let mut thinking = serde_json::json!({ "type": thinking_type });
-                if thinking_type == "enabled" {
-                    thinking["clear_thinking"] = serde_json::json!(false);
-                }
-                body["thinking"] = thinking;
-            }
-        }
-    }
-
-    body
-}
-
-fn chat_thinking_type(reasoning: &crate::request::ReasoningConfig) -> &'static str {
-    match reasoning.summary {
-        Some(crate::request::ReasoningSummary::Disabled) => "disabled",
-        Some(crate::request::ReasoningSummary::Auto)
-        | Some(crate::request::ReasoningSummary::Enabled)
-        | None => "enabled",
-    }
-}
-
-fn chat_parse_response(body: serde_json::Value) -> Result<CompletionResponse> {
-    use crate::request::{FinishReason, TokenUsage};
-
-    let choice = body
-        .get("choices")
-        .and_then(|c| c.as_array())
-        .and_then(|a| a.first());
-
-    let message = choice.and_then(|c| c.get("message"));
-
-    let content = message
-        .and_then(|m| m.get("content"))
-        .and_then(|c| c.as_str())
-        .map(String::from);
-
-    let reasoning_content = message
-        .and_then(|m| m.get("reasoning_content"))
-        .and_then(|c| c.as_str())
-        .map(String::from);
-
-    let tool_calls = choice
-        .and_then(|c| c.get("message"))
-        .and_then(|m| m.get("tool_calls"))
-        .and_then(|tc| tc.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(parse_chat_tool_call)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    let usage = body.get("usage").and_then(|u| {
-        Some(TokenUsage {
-            prompt_tokens: u.get("prompt_tokens")?.as_u64()?,
-            completion_tokens: u.get("completion_tokens")?.as_u64()?,
-            total_tokens: u.get("total_tokens")?.as_u64()?,
-            cached_prompt_tokens: cached_tokens_from_usage(u),
-        })
-    });
-
-    let finish_reason = choice
-        .and_then(|c| c.get("finish_reason"))
-        .and_then(|r| r.as_str())
-        .map(|r| match r {
-            "tool_calls" => FinishReason::ToolCalls,
-            "length" => FinishReason::MaxTokens,
-            "content_filter" => FinishReason::ContentFilter,
-            _ => FinishReason::Stop,
-        })
-        .unwrap_or(FinishReason::Stop);
-
-    Ok(CompletionResponse {
-        raw_content: content.clone(),
-        content,
-        reasoning_content,
-        tool_calls,
-        timeline_events: Vec::new(),
-        next_sequence: 0,
-        usage: usage.unwrap_or_default(),
-        finish_reason,
-        model: body
-            .get("model")
-            .and_then(|m| m.as_str())
-            .unwrap_or("")
-            .to_string(),
-    })
-}
-
-fn parse_chat_tool_call(item: &serde_json::Value) -> Option<ToolCall> {
-    match item.get("type").and_then(|value| value.as_str()) {
-        Some("custom") => {
-            let custom = item.get("custom")?;
-            Some(ToolCall::custom(
-                item.get("id")?.as_str()?.to_string(),
-                custom.get("name")?.as_str()?.to_string(),
-                custom.get("input")?.as_str()?.to_string(),
-                None,
-            ))
-        }
-        Some("function") | None => {
-            let func = item.get("function")?;
-            Some(ToolCall::function(
-                item.get("id")?.as_str()?.to_string(),
-                func.get("name")?.as_str()?.to_string(),
-                serde_json::from_str(func.get("arguments")?.as_str()?).ok()?,
-                None,
-            ))
-        }
-        Some(_) => None,
     }
 }
 

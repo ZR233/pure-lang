@@ -29,6 +29,8 @@ timeline item 类型固定为：
 
 ```text
 pl-model provider
+  → async-openai stream
+  → typed provider stream event mapper
   → item-aware stream accumulator
   → AgentEventSender
   → pl-core TimelineRecorder 汇总 TurnResult
@@ -80,7 +82,7 @@ root agent 的 provider `429` 错误码是当前轮的终止错误，不进入�
 
 ## 8.5 流式工具调用聚合与 ID
 
-`pl-model` 负责把 provider 的工具调用 delta 聚合为完整的 `ToolCall` 后再交给 `pl-core` 执行。Chat Completions 流式响应中的后续参数片段可能只带 `index`，不再重复 `id` 或 `name`；Responses API 的 custom/freeform 输入 delta 也可能只带 `item_id` / `call_id`。因此聚合层必须使用稳定的流式序号或 item/call id 合并片段，并保留最早出现的 provider id、工具名和调用种类。
+`pl-model` 负责把 provider 的工具调用 delta 聚合为完整的 `ToolCall` 后再交给 `pl-core` 执行。OpenAI-compatible provider 通过 `async-openai` stream 消费 SSE，并先映射为 `pl-model` 内部 typed stream event。Chat Completions 流式响应中的后续参数片段可能只带 `index`，不再重复 `id` 或 `name`；Responses API 的 custom/freeform 输入 delta 也可能只带 `item_id` / `call_id`。因此聚合层必须使用稳定的流式序号或 item/call id 合并片段，并保留最早出现的 provider id、工具名和调用种类。
 
 工具 timeline item 的 `itemId` 使用 `toolCallId`。当 provider 提供 `call_id` 时，`toolCallId` 优先使用该值；provider 的原始 item id 只作为聚合辅助信息保留在内部。工具参数流、审批、执行和结果都 upsert 到同一个 tool item。
 
@@ -104,7 +106,7 @@ root agent 的 provider `429` 错误码是当前轮的终止错误，不进入�
 
 ## 8.7 Usage 与状态栏
 
-`pl-model::TokenUsage` 保留输入、输出和总 token，并额外记录 `cached_prompt_tokens`。Chat Completions 和 Responses API 的 usage detail 字段不同，provider 适配层负责尽可能读取缓存 token；缺失时按 `0` 处理。
+`pl-model::TokenUsage` 保留输入、输出和总 token，并额外记录 `cached_prompt_tokens`。Chat Completions 和 Responses API 的 usage detail 字段不同，provider 适配层负责尽可能读取缓存 token；OpenAI 官方字段和兼容 provider 私有字段都在内部 typed usage 结构中归一化，缺失时按 `0` 处理。
 
 root agent 和 subagent 使用同一套 runtime usage 数据模型。每次模型 inference 完成后，`pl-core` 以实际使用的 model 计算本次运行指标，并发出 `AgentRuntimeUpdated`：
 

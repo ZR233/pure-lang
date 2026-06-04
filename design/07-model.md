@@ -17,12 +17,14 @@ pl-model
 pl-core
 ```
 
-`pl-model` 只依赖 `pl-protocol`，使用其中的：
+`pl-model` 的公共协议边界只依赖 `pl-protocol`，使用其中的：
 
 - `Message`
 - `AgentEventSender`
 - `PureError`
 - `Result`
+
+provider 适配实现可以依赖 `async-openai`、`reqwest` 和 `serde`。这些依赖只用于 `pl-model` 内部的 OpenAI-compatible transport、typed wire request 和 typed stream event 解析，不向 `pl-core` 暴露。
 
 ## 7.3 Provider 抽象
 
@@ -45,6 +47,10 @@ pl-core
 - Chat Completions API
 
 不同 wire API 的差异保持在 `pl-model` 内部，核心层只看到 `CompletionRequest`、`CompletionResponse` 和事件流。
+
+OpenAI-compatible provider 使用 `async-openai` 的 client/stream 能力发送请求。请求体不再由散落的 `serde_json::json!` 直接拼接，而是先转换为 `pl-model` 内部强类型 request，再由 serde 序列化。内部 request 类型对齐 OpenAI Responses 和 Chat Completions wire shape，并用本地强类型扩展补齐 custom reasoning effort、`reasoning_content`、`thinking`、custom/freeform tool 和兼容 provider 私有 usage detail。
+
+`CompletionRequest.stream` 不改变 `stream_complete` 的 wire 行为；`stream_complete` 始终发起流式请求。该字段只保留为统一请求类型的一部分。
 
 ## 7.5 自定义模型
 
