@@ -55,6 +55,10 @@ React action
 5. 事务化批量落库：message + trace + runtime snapshot
 6. 输出命令响应 DTO 与 timeline DTO
 
+`run_turn_with_trace` 在每次模型请求前执行自动上下文压缩检查。压缩阈值来自当前模型的 `autoCompactTokenLimit`，未配置时使用有效上下文窗口的 90%；模型没有上下文窗口信息时不触发自动压缩。压缩由 `pl-core` 本地摘要完成：用当前模型和固定 compact prompt 生成 handoff summary，再用一条带 metadata 的用户摘要消息加最近真实用户消息替换原始历史。工具调用、工具结果和 assistant 中间过程不以原始片段保留，避免压缩后出现破碎的 tool-call 配对。
+
+子代理没有独立的压缩实现。`spawn_agent`、`followup_task` 和 `subagent` 创建的 child session 复用同一个 `PureCore` turn pipeline，因此每个子代理独立维护自己的压缩历史；父会话不会替子代理压缩，也不会因为子代理压缩而改写父历史。
+
 主 turn 保存完成后，如果 `[skills].auto_learn = true` 且本轮达到自学习触发条件，`StudioRuntime` 启动后台 reviewer。reviewer 只开放 skills 工具，复盘结果只写项目 skills 目录；失败只记录日志，不改变本轮响应。
 
 文件与 shell 工具都以有效 `workspaceRoot` 为边界。`bash` 默认在 workspace root 下执行，`workingDirectory` 也按 workspace root 解析并拒绝逃逸；文件工具继续只允许访问 workspace root 内的路径。
@@ -84,6 +88,7 @@ Agent 协作 timeline 与状态分层：
 持久化原则：
 
 - 消息和 trace 采用事务批量写入，避免逐条写放大
+- 如果 turn 内发生上下文压缩，`CoreSession` revision 会变化，Studio 以事务重写当前 session 的消息历史并追加本轮 trace；未发生压缩时继续使用追加写入
 - timeline 读取以 `sequence` 为单调游标
 - agent tree、agent events、agent messages 与 turn snapshot 分表持久化；`agents` 为 latest snapshot，`agent_events` 为 append-only event log
 

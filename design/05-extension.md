@@ -17,6 +17,8 @@
 
 需要影响 turn、session、store 或编译阶段时扩展 `pl-core`。
 
+上下文压缩属于 `pl-core` 扩展点：模型层只暴露窗口、阈值和 provider 调用能力，turn pipeline 负责判断触发、生成摘要、替换 `CoreSession` 历史，并在 Studio store 中同步持久化改写后的消息。
+
 扩展时保持入口层薄：
 
 - UI 输入只在 `pure-studio` 中收集。

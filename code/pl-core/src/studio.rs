@@ -72,6 +72,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn replace_session_messages_rewrites_history() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/alpha").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Build app", CompileMode::Auto)
+            .await
+            .unwrap();
+        let first = Message {
+            role: MessageRole::User,
+            content: MessageContent::Text("first".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        };
+        let second = Message {
+            role: MessageRole::User,
+            content: MessageContent::Text("second".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        };
+
+        store.append_message(&session.id, &first).await.unwrap();
+        store
+            .replace_session_messages(&session.id, std::slice::from_ref(&second))
+            .await
+            .unwrap();
+        let restored = store.load_messages(&session.id).await.unwrap();
+
+        assert_eq!(restored.len(), 1);
+        assert_eq!(restored[0], second);
+    }
+
+    #[tokio::test]
     async fn records_tool_approval() {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project("C:/work/alpha").await.unwrap();

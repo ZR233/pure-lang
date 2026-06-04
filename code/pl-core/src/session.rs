@@ -9,6 +9,7 @@ use pl_protocol::{Message, MessageContent, MessageRole};
 #[derive(Debug, Clone, Default)]
 pub struct CoreSession {
     messages: Vec<Message>,
+    revision: u64,
 }
 
 impl CoreSession {
@@ -17,11 +18,23 @@ impl CoreSession {
     }
 
     pub fn from_messages(messages: Vec<Message>) -> Self {
-        Self { messages }
+        Self {
+            messages,
+            revision: 0,
+        }
     }
 
     pub fn messages(&self) -> &[Message] {
         &self.messages
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub fn replace_messages(&mut self, messages: Vec<Message>) {
+        self.messages = messages;
+        self.revision = self.revision.saturating_add(1);
     }
 
     pub fn push_user_prompt(&mut self, prompt: String) {
@@ -210,5 +223,23 @@ mod tests {
         assert_eq!(session.len(), 2);
         assert_eq!(session.messages()[0].role, MessageRole::User);
         assert_eq!(session.messages()[1].role, MessageRole::Assistant);
+    }
+
+    #[test]
+    fn replace_messages_updates_history_and_revision() {
+        let mut session = CoreSession::new();
+        session.push_user_prompt("old".to_string());
+        let original_revision = session.revision();
+        let messages = vec![Message {
+            role: MessageRole::User,
+            content: MessageContent::Text("summary".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        }];
+
+        session.replace_messages(messages.clone());
+
+        assert_eq!(session.revision(), original_revision + 1);
+        assert_eq!(session.messages(), messages.as_slice());
     }
 }
