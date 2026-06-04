@@ -77,7 +77,7 @@ pub struct ProviderDto {
     pub default_model: String,
     pub model_count: String,
     pub updated_at: String,
-    pub wire_api: String,
+    pub provider_kind: String,
     pub models: Vec<ModelDto>,
     pub default_models: Vec<ModelDto>,
     pub custom_models: Vec<ModelDto>,
@@ -90,7 +90,7 @@ pub struct ProviderTemplateDto {
     pub name: String,
     pub base_url: String,
     pub default_model: String,
-    pub wire_api: String,
+    pub provider_kind: String,
     pub default_models: Vec<ModelDto>,
 }
 
@@ -210,7 +210,6 @@ pub struct ProviderInput {
     pub base_url: String,
     pub bearer_token: String,
     pub default_model: String,
-    pub wire_api: String,
     pub custom_models: Vec<ModelInput>,
 }
 
@@ -278,6 +277,7 @@ pub struct RunPromptResponse {
     pub timeline_next_sequence: u64,
     pub turn_status: String,
     pub turn_abort_reason: Option<String>,
+    pub turn_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

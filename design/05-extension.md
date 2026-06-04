@@ -4,12 +4,12 @@
 
 新增模型 provider 时优先扩展 `pl-model`：
 
-- 新增 `ProviderInfo` 构造或配置来源。
+- 新增明确的 provider 类型、`ProviderInfo` 构造或配置来源。
 - 在 `~/.pure/config.toml` 中新增 provider 和完整 models 列表。
 - 实现或复用 `ModelProvider`。
 - 适配目标 API 的 request/response wire 格式。
 
-OpenAI-compatible provider 应复用 `pl-model` 现有 `OpenAiCompatibleProvider`。新增 provider 差异优先通过 `ProviderInfo`、模型能力和内部 typed wire 扩展表达；不得把 provider 私有 request/stream 结构泄漏到 `pl-core`。如果目标 API 兼容 Chat Completions 或 Responses 但增加了私有字段，应新增本地强类型扩展并继续通过 `async-openai` client/stream 发送。
+OpenAI-compatible 不是一等公共 provider 抽象。新增供应商必须显式建模为 provider，并通过 `protocol::openai` 或未来其他 protocol 复用底层 API 协议。provider 私有 request/stream 结构不得泄漏到 `pl-core`；如果目标 API 兼容 Chat Completions 或 Responses 但增加了私有字段，应新增本地强类型扩展并继续通过 `async-openai` client/stream 发送。
 
 公共消息、事件和错误类型继续来自 `pl-protocol`。
 

@@ -39,11 +39,7 @@ impl ModelsManager for DefaultModelsManager {
     }
 
     fn list_models(&self) -> Vec<ModelInfo> {
-        crate::default_models::default_model_slugs()
-            .iter()
-            .map(|slug| self.provider.model_info(slug))
-            .filter(|m| m.context_window.unwrap_or(0) > 0)
-            .collect()
+        self.provider.list_models()
     }
 
     fn default_model(&self) -> &str {

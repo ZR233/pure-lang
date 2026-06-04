@@ -42,7 +42,7 @@ export function makeProvider(input: ProviderInput): ProviderRecord {
     defaultModel,
     modelCount: models.length.toString(),
     updatedAt: "Preview",
-    wireApi: input.wireApi,
+    providerKind: input.providerKind,
     models,
     defaultModels,
     customModels,

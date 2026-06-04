@@ -233,6 +233,7 @@ pub async fn run_prompt(
                     .result
                     .abort_reason
                     .map(|reason| reason.as_str().to_string()),
+                turn_error: outcome.result.error.clone(),
             };
             Ok(response)
         }

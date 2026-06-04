@@ -109,7 +109,7 @@ export function ProviderEditPage({
           </label>
           <label>
             <span>{t("provider.protocolType")}</span>
-            <span className="readonly-field">{provider.wireApi}</span>
+            <span className="readonly-field">{provider.providerKind}</span>
           </label>
           <label className="wide">
             <span>{t("provider.baseUrl")}</span>

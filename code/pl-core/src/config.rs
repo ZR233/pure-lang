@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pl_model::{
-    ApplyPatchToolType, AuthCommand, InputModality, ModelCapabilities, ModelInfo, ProviderInfo,
-    TruncationMode, TruncationPolicy, WireApi, deepseek_default_model_slugs, default_models,
+    ApplyPatchToolType, InputModality, ModelCapabilities, ModelInfo, ProviderInfo, ProviderKind,
+    ToolWirePolicy, TruncationMode, TruncationPolicy, deepseek_default_model_slugs, default_models,
 };
 use pl_protocol::{PureError, Result};
 use serde::Deserialize;
@@ -17,8 +17,7 @@ use crate::turn::PermissionMode;
 
 pub const CONFIG_DIR_NAME: &str = ".pure";
 pub const CONFIG_FILE_NAME: &str = "config.toml";
-pub const CONFIG_SCHEMA_VERSION: u32 = 2;
-pub const LEGACY_CONFIG_SCHEMA_VERSION: u32 = 1;
+pub const CONFIG_SCHEMA_VERSION: u32 = 3;
 
 const DEFAULT_PROVIDER_KEY: &str = "deepseek";
 const DEFAULT_MODEL: &str = "deepseek-v4-flash";
@@ -456,34 +455,16 @@ impl ReasoningEffort {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProviderConfig {
+    pub provider_kind: ProviderKind,
     pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env_key_instructions: Option<String>,
+    pub base_url: String,
     pub default_model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bearer_token: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auth_command: Option<AuthCommand>,
-    #[serde(default)]
-    pub wire_api: WireApi,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_headers: Option<HashMap<String, String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub env_http_headers: Option<HashMap<String, String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub request_max_retries: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stream_max_retries: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stream_idle_timeout_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub supports_custom_tools: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub supports_freeform_tools: Option<bool>,
+    #[serde(default)]
+    pub tool_wire_policy: ToolWirePolicy,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apply_patch_tool_type: Option<ApplyPatchToolType>,
     #[serde(default)]
@@ -504,21 +485,13 @@ impl ProviderConfig {
 
     pub fn from_provider_info(info: ProviderInfo, models: Vec<ModelConfig>) -> Self {
         Self {
+            provider_kind: info.provider_kind,
             name: info.name,
             base_url: info.base_url,
-            env_key: info.env_key,
-            env_key_instructions: info.env_key_instructions,
             default_model: info.default_model,
             bearer_token: info.bearer_token,
-            auth_command: info.auth_command,
-            wire_api: info.wire_api,
             http_headers: info.http_headers,
-            env_http_headers: info.env_http_headers,
-            request_max_retries: info.request_max_retries,
-            stream_max_retries: info.stream_max_retries,
-            stream_idle_timeout_ms: info.stream_idle_timeout_ms,
-            supports_custom_tools: info.supports_custom_tools,
-            supports_freeform_tools: info.supports_freeform_tools,
+            tool_wire_policy: info.tool_wire_policy,
             apply_patch_tool_type: info.apply_patch_tool_type,
             models,
         }
@@ -526,21 +499,13 @@ impl ProviderConfig {
 
     pub fn to_provider_info(&self, default_model: &str) -> ProviderInfo {
         ProviderInfo {
+            provider_kind: self.provider_kind,
             name: self.name.clone(),
             base_url: self.base_url.clone(),
-            env_key: self.env_key.clone(),
-            env_key_instructions: self.env_key_instructions.clone(),
             default_model: default_model.to_string(),
             bearer_token: self.bearer_token.clone(),
-            auth_command: self.auth_command.clone(),
-            wire_api: self.wire_api,
             http_headers: self.http_headers.clone(),
-            env_http_headers: self.env_http_headers.clone(),
-            request_max_retries: self.request_max_retries,
-            stream_max_retries: self.stream_max_retries,
-            stream_idle_timeout_ms: self.stream_idle_timeout_ms,
-            supports_custom_tools: self.supports_custom_tools,
-            supports_freeform_tools: self.supports_freeform_tools,
+            tool_wire_policy: self.tool_wire_policy,
             apply_patch_tool_type: self.apply_patch_tool_type,
         }
     }
@@ -549,6 +514,11 @@ impl ProviderConfig {
         if self.name.trim().is_empty() {
             return Err(PureError::ConfigError(format!(
                 "provider {provider_key} has empty name"
+            )));
+        }
+        if self.base_url.trim().is_empty() {
+            return Err(PureError::ConfigError(format!(
+                "provider {provider_key} has empty base_url"
             )));
         }
         if self.default_model.trim().is_empty() {
@@ -784,23 +754,12 @@ impl ConfigStore {
     }
 
     pub fn load_or_default(&self) -> Result<PureConfig> {
-        if self.config_exists() {
-            let content = fs::read_to_string(self.paths.config_file())?;
-            match PureConfig::from_toml(&content) {
-                Ok(config) => Ok(config),
-                Err(error) => {
-                    if parse_schema_version(&content)? == Some(LEGACY_CONFIG_SCHEMA_VERSION) {
-                        let migrated = migrate_legacy_config(&content)?;
-                        self.backup_legacy_config()?;
-                        self.save(&migrated)?;
-                        return Ok(migrated);
-                    }
-                    Err(error)
-                }
-            }
-        } else {
-            Ok(PureConfig::default_config())
+        if !self.config_exists() {
+            return Ok(PureConfig::default_config());
         }
+
+        self.load()
+            .or_else(|_| self.backup_invalid_and_save_default())
     }
 
     pub fn load(&self) -> Result<PureConfig> {
@@ -828,73 +787,35 @@ impl ConfigStore {
         Ok(config)
     }
 
-    fn backup_legacy_config(&self) -> Result<PathBuf> {
-        let now = SystemTime::now()
+    fn backup_invalid_and_save_default(&self) -> Result<PureConfig> {
+        let backup_file = self.invalid_config_backup_file();
+        fs::copy(self.paths.config_file(), &backup_file).map_err(|error| {
+            PureError::ConfigError(format!(
+                "failed to backup invalid config to {}: {error}",
+                backup_file.display()
+            ))
+        })?;
+
+        let config = PureConfig::default_config();
+        self.save(&config)?;
+        Ok(config)
+    }
+
+    fn invalid_config_backup_file(&self) -> PathBuf {
+        let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let backup = self
-            .paths
-            .config_dir()
-            .join(format!("config.v1.backup.{now}.toml"));
-        fs::copy(self.paths.config_file(), &backup)?;
-        Ok(backup)
+            .map(|duration| duration.as_secs())
+            .unwrap_or_default();
+        let config_dir = self.paths.config_dir();
+        let mut candidate = config_dir.join(format!("config.invalid.backup.{stamp}.toml"));
+        for index in 2.. {
+            if !candidate.exists() {
+                return candidate;
+            }
+            candidate = config_dir.join(format!("config.invalid.backup.{stamp}.{index}.toml"));
+        }
+        candidate
     }
-}
-
-fn parse_schema_version(content: &str) -> Result<Option<u32>> {
-    let value: toml::Value = toml::from_str(content)
-        .map_err(|error| PureError::ConfigError(format!("failed to parse config: {error}")))?;
-    Ok(value
-        .as_table()
-        .and_then(|table| table.get("schema_version"))
-        .and_then(toml::Value::as_integer)
-        .and_then(|value| u32::try_from(value).ok()))
-}
-
-fn migrate_legacy_config(content: &str) -> Result<PureConfig> {
-    let value: toml::Value = toml::from_str(content).map_err(|error| {
-        PureError::ConfigError(format!("failed to parse legacy config: {error}"))
-    })?;
-    let table = value
-        .as_table()
-        .ok_or_else(|| PureError::ConfigError("legacy config root must be table".to_string()))?;
-
-    let mut migrated = PureConfig::default_config();
-
-    if let Some(runtime_value) = table.get("runtime")
-        && let Ok(runtime) = runtime_value.clone().try_into::<RuntimeConfig>()
-    {
-        migrated.runtime = runtime;
-    }
-
-    if let Some(skills_value) = table.get("skills")
-        && let Ok(skills) = skills_value.clone().try_into::<SkillsConfig>()
-    {
-        migrated.skills = skills;
-    }
-
-    if let Some(providers_value) = table.get("providers")
-        && let Ok(providers) = providers_value
-            .clone()
-            .try_into::<BTreeMap<String, ProviderConfig>>()
-        && !providers.is_empty()
-    {
-        migrated.providers = providers;
-    }
-
-    if let Some(roles_value) = table.get("roles")
-        && let Ok(roles_toml) = roles_value.clone().try_into::<RoleConfigsToml>()
-    {
-        migrated.roles = roles_toml.into_role_configs(&migrated.providers)?;
-    } else {
-        let fallback = default_role_config(&migrated.providers)?;
-        migrated.roles = RoleConfigs::from_default_role(fallback);
-    }
-
-    migrated.schema_version = CONFIG_SCHEMA_VERSION;
-    migrated.validate()?;
-    Ok(migrated)
 }
 
 fn user_home_dir() -> Result<PathBuf> {
@@ -1131,33 +1052,47 @@ mod tests {
     }
 
     #[test]
-    fn legacy_schema_is_backed_up_and_migrated() {
-        let home = temp_home("legacy-migrate");
-        let store = ConfigStore::new(ConfigPaths::from_home(&home));
-        let mut legacy = PureConfig::default_config();
-        legacy.schema_version = LEGACY_CONFIG_SCHEMA_VERSION;
-        fs::create_dir_all(store.paths().config_dir()).unwrap();
-        fs::write(
-            store.paths().config_file(),
-            legacy.to_toml_pretty().unwrap(),
-        )
-        .unwrap();
+    fn old_schema_toml_is_rejected_without_migration() {
+        let mut old_config = PureConfig::default_config();
+        old_config.schema_version = 2;
 
-        let migrated = store.load_or_default().unwrap();
-        let saved = store.load().unwrap();
-        let backup_exists = fs::read_dir(store.paths().config_dir())
+        let error = PureConfig::from_toml(&old_config.to_toml_pretty().unwrap())
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("unsupported config schema version: 2"));
+    }
+
+    #[test]
+    fn invalid_existing_config_is_backed_up_and_replaced_with_default() {
+        let home = temp_home("old-schema");
+        let store = ConfigStore::new(ConfigPaths::from_home(&home));
+        let mut old_config = PureConfig::default_config();
+        old_config.schema_version = 2;
+        let old_toml = old_config.to_toml_pretty().unwrap();
+        fs::create_dir_all(store.paths().config_dir()).unwrap();
+        fs::write(store.paths().config_file(), &old_toml).unwrap();
+
+        let config = store.load_or_default().unwrap();
+        let repaired_toml = fs::read_to_string(store.paths().config_file()).unwrap();
+        let backups = fs::read_dir(store.paths().config_dir())
             .unwrap()
             .filter_map(|entry| entry.ok())
-            .any(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with("config.v1.backup.")
-            });
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("config.invalid.backup."))
+            })
+            .collect::<Vec<_>>();
 
-        assert_eq!(migrated.schema_version, CONFIG_SCHEMA_VERSION);
-        assert_eq!(saved.schema_version, CONFIG_SCHEMA_VERSION);
-        assert!(backup_exists);
+        assert_eq!(config.schema_version, CONFIG_SCHEMA_VERSION);
+        assert_eq!(backups.len(), 1);
+        assert_eq!(fs::read_to_string(&backups[0]).unwrap(), old_toml);
+        assert_eq!(
+            PureConfig::from_toml(&repaired_toml).unwrap(),
+            PureConfig::default_config()
+        );
         fs::remove_dir_all(home).unwrap();
     }
 }

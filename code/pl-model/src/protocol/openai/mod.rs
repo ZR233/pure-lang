@@ -1,93 +1,93 @@
-#![allow(dead_code)]
 use std::collections::HashMap;
 
 use pl_protocol::{MessageContent, MessageRole, Result};
 use serde::Serialize;
 
+#[cfg(test)]
+use crate::request::CompletionResponse;
 use crate::request::{
-    CompletionRequest, CompletionResponse, ReasoningConfig, ReasoningSummary, ToolCall,
-    ToolCallKind, ToolCallPayload, ToolFormat, ToolSchema,
+    CompletionRequest, ReasoningConfig, ReasoningSummary, ToolCall, ToolCallKind, ToolCallPayload,
+    ToolFormat, ToolSchema,
 };
-use crate::wire_response::{chat_parse_response, responses_parse_response};
 
-/// API 协议适配器。
-///
-/// 将内部统一的 CompletionRequest 转换为不同 provider 的 typed wire 格式，
-/// 并将 provider 返回的响应解析回 CompletionResponse。
-///
-/// 实现者契约：
-/// - build_request() 产生的强类型请求必须符合目标 API 规范
-/// - parse_stream_event() 处理单个 typed SSE 事件，返回 None 表示跳过
-pub(crate) trait WireAdapter: Send + Sync {
-    fn build_request(&self, request: &CompletionRequest) -> ProviderRequestBody;
-    fn parse_response(&self, body: serde_json::Value) -> Result<CompletionResponse>;
-    fn parse_stream_event(
-        &self,
-        event: &crate::sse::SseStreamEvent,
-    ) -> Result<Option<crate::sse::StreamEvent>>;
-}
+#[cfg(test)]
+mod response;
+pub(crate) mod sse;
 
-/// Wire 协议分发：Responses API vs Chat Completions API。
+#[cfg(test)]
+use response::{chat_parse_response, responses_parse_response};
+
+/// OpenAI API 协议端点。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WireDispatch {
+pub(crate) enum OpenAiEndpoint {
     Responses,
-    Chat,
-    DeepSeekChat,
-    ZhipuChat,
+    ChatCompletions,
 }
 
-impl WireDispatch {
-    pub(crate) fn build_request(&self, request: &CompletionRequest) -> ProviderRequestBody {
-        match self {
-            WireDispatch::Responses => {
-                ProviderRequestBody::Responses(ResponsesRequestBody::from_request(request))
-            }
-            WireDispatch::Chat => ProviderRequestBody::Chat(ChatRequestBody::from_request(
-                request,
-                ChatReasoningStyle::Plain,
-            )),
-            WireDispatch::DeepSeekChat => ProviderRequestBody::Chat(ChatRequestBody::from_request(
-                request,
-                ChatReasoningStyle::DeepSeek,
-            )),
-            WireDispatch::ZhipuChat => ProviderRequestBody::Chat(ChatRequestBody::from_request(
-                request,
-                ChatReasoningStyle::Zhipu,
-            )),
+/// OpenAI 协议编解码器。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OpenAiProtocol {
+    endpoint: OpenAiEndpoint,
+    chat_reasoning: ChatReasoningStyle,
+}
+
+impl OpenAiProtocol {
+    pub(crate) fn responses() -> Self {
+        Self {
+            endpoint: OpenAiEndpoint::Responses,
+            chat_reasoning: ChatReasoningStyle::Plain,
         }
     }
 
-    pub fn build_request_body(&self, request: &CompletionRequest) -> serde_json::Value {
+    pub(crate) fn chat(chat_reasoning: ChatReasoningStyle) -> Self {
+        Self {
+            endpoint: OpenAiEndpoint::ChatCompletions,
+            chat_reasoning,
+        }
+    }
+
+    pub(crate) fn build_request(&self, request: &CompletionRequest) -> OpenAiRequestBody {
+        match self.endpoint {
+            OpenAiEndpoint::Responses => {
+                OpenAiRequestBody::Responses(ResponsesRequestBody::from_request(request))
+            }
+            OpenAiEndpoint::ChatCompletions => {
+                OpenAiRequestBody::Chat(ChatRequestBody::from_request(request, self.chat_reasoning))
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn build_request_body(&self, request: &CompletionRequest) -> serde_json::Value {
         serde_json::to_value(self.build_request(request))
             .expect("typed provider request should serialize")
     }
 
-    pub fn parse_response(&self, body: serde_json::Value) -> Result<CompletionResponse> {
-        match self {
-            WireDispatch::Responses => responses_parse_response(body),
-            WireDispatch::Chat | WireDispatch::DeepSeekChat | WireDispatch::ZhipuChat => {
-                chat_parse_response(body)
-            }
+    #[cfg(test)]
+    fn parse_response(&self, body: serde_json::Value) -> Result<CompletionResponse> {
+        match self.endpoint {
+            OpenAiEndpoint::Responses => responses_parse_response(body),
+            OpenAiEndpoint::ChatCompletions => chat_parse_response(body),
         }
     }
 
-    pub fn parse_stream_event(
+    pub(crate) fn parse_stream_event(
         &self,
-        event: &crate::sse::SseStreamEvent,
-    ) -> Result<Option<crate::sse::StreamEvent>> {
-        Ok(crate::sse::process_sse_event(event))
+        event: &sse::SseStreamEvent,
+    ) -> Result<Option<sse::StreamEvent>> {
+        Ok(sse::process_sse_event(event))
     }
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
-pub(crate) enum ProviderRequestBody {
+pub(crate) enum OpenAiRequestBody {
     Responses(ResponsesRequestBody),
     Chat(ChatRequestBody),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ChatReasoningStyle {
+pub(crate) enum ChatReasoningStyle {
     Plain,
     DeepSeek,
     Zhipu,
@@ -680,7 +680,7 @@ mod tests {
 
     #[test]
     fn responses_body_writes_xhigh_reasoning_effort() {
-        let body = WireDispatch::Responses.build_request_body(&request_with_effort("xhigh"));
+        let body = OpenAiProtocol::responses().build_request_body(&request_with_effort("xhigh"));
 
         assert_eq!(body["reasoning"]["effort"], serde_json::json!("xhigh"));
     }
@@ -688,7 +688,7 @@ mod tests {
     #[test]
     fn responses_body_accepts_custom_reasoning_effort() {
         let body =
-            WireDispatch::Responses.build_request_body(&request_with_effort("custom-effort"));
+            OpenAiProtocol::responses().build_request_body(&request_with_effort("custom-effort"));
 
         assert_eq!(
             body["reasoning"]["effort"],
@@ -698,7 +698,8 @@ mod tests {
 
     #[test]
     fn generic_chat_body_omits_provider_specific_reasoning_fields() {
-        let body = WireDispatch::Chat.build_request_body(&request_with_effort("max"));
+        let body = OpenAiProtocol::chat(ChatReasoningStyle::Plain)
+            .build_request_body(&request_with_effort("max"));
 
         assert!(body.get("reasoning_effort").is_none());
         assert!(body.get("thinking").is_none());
@@ -706,7 +707,8 @@ mod tests {
 
     #[test]
     fn deepseek_chat_body_writes_thinking_mode() {
-        let body = WireDispatch::DeepSeekChat.build_request_body(&request_with_effort("max"));
+        let body = OpenAiProtocol::chat(ChatReasoningStyle::DeepSeek)
+            .build_request_body(&request_with_effort("max"));
 
         assert_eq!(body["reasoning_effort"], serde_json::json!("max"));
         assert_eq!(body["thinking"]["type"], serde_json::json!("enabled"));
@@ -717,14 +719,15 @@ mod tests {
         let mut request = request_with_effort("high");
         request.reasoning.as_mut().unwrap().summary = Some(ReasoningSummary::Disabled);
 
-        let body = WireDispatch::DeepSeekChat.build_request_body(&request);
+        let body = OpenAiProtocol::chat(ChatReasoningStyle::DeepSeek).build_request_body(&request);
 
         assert_eq!(body["thinking"]["type"], serde_json::json!("disabled"));
     }
 
     #[test]
     fn zhipu_chat_body_writes_official_thinking_mode() {
-        let body = WireDispatch::ZhipuChat.build_request_body(&request_with_effort("enabled"));
+        let body = OpenAiProtocol::chat(ChatReasoningStyle::Zhipu)
+            .build_request_body(&request_with_effort("enabled"));
 
         assert!(body.get("reasoning_effort").is_none());
         assert_eq!(body["thinking"]["type"], serde_json::json!("enabled"));
@@ -736,7 +739,7 @@ mod tests {
         let mut request = request_with_effort("none");
         request.reasoning.as_mut().unwrap().summary = Some(ReasoningSummary::Disabled);
 
-        let body = WireDispatch::ZhipuChat.build_request_body(&request);
+        let body = OpenAiProtocol::chat(ChatReasoningStyle::Zhipu).build_request_body(&request);
 
         assert!(body.get("reasoning_effort").is_none());
         assert_eq!(body["thinking"]["type"], serde_json::json!("disabled"));
@@ -753,7 +756,7 @@ mod tests {
             metadata: HashMap::new(),
         }];
 
-        let body = WireDispatch::Chat.build_request_body(&request);
+        let body = OpenAiProtocol::chat(ChatReasoningStyle::Plain).build_request_body(&request);
 
         assert_eq!(
             body["messages"][0]["reasoning_content"],
@@ -763,7 +766,7 @@ mod tests {
 
     #[test]
     fn chat_parse_response_reads_reasoning_content() {
-        let response = WireDispatch::Chat
+        let response = OpenAiProtocol::chat(ChatReasoningStyle::Plain)
             .parse_response(serde_json::json!({
                 "model": "deepseek-v4-flash",
                 "choices": [{
@@ -791,7 +794,7 @@ mod tests {
 
     #[test]
     fn chat_parse_response_reads_cached_prompt_tokens() {
-        let response = WireDispatch::Chat
+        let response = OpenAiProtocol::chat(ChatReasoningStyle::Plain)
             .parse_response(serde_json::json!({
                 "model": "deepseek-v4-flash",
                 "choices": [{
@@ -817,7 +820,7 @@ mod tests {
 
     #[test]
     fn responses_parse_response_reads_cached_input_tokens() {
-        let response = WireDispatch::Responses
+        let response = OpenAiProtocol::responses()
             .parse_response(serde_json::json!({
                 "model": "gpt-5.5",
                 "output": [{
@@ -848,7 +851,7 @@ mod tests {
             "start: patch",
         )];
 
-        let body = WireDispatch::Responses.build_request_body(&request);
+        let body = OpenAiProtocol::responses().build_request_body(&request);
 
         assert_eq!(body["tools"][0]["type"], serde_json::json!("custom"));
         assert_eq!(body["tools"][0]["name"], serde_json::json!("apply_patch"));
@@ -872,7 +875,7 @@ mod tests {
             "start: patch",
         )];
 
-        let body = WireDispatch::Chat.build_request_body(&request);
+        let body = OpenAiProtocol::chat(ChatReasoningStyle::Plain).build_request_body(&request);
 
         assert_eq!(body["tools"][0]["type"], serde_json::json!("custom"));
         assert_eq!(
@@ -892,7 +895,7 @@ mod tests {
         )];
 
         let request = request.provider_compatible(false);
-        let body = WireDispatch::Chat.build_request_body(&request);
+        let body = OpenAiProtocol::chat(ChatReasoningStyle::Plain).build_request_body(&request);
 
         assert_eq!(body["tools"][0]["type"], serde_json::json!("function"));
         assert_eq!(
@@ -914,7 +917,7 @@ mod tests {
 
     #[test]
     fn responses_parse_response_reads_custom_tool_call() {
-        let response = WireDispatch::Responses
+        let response = OpenAiProtocol::responses()
             .parse_response(serde_json::json!({
                 "model": "gpt-5.5",
                 "output": [{
@@ -944,7 +947,7 @@ mod tests {
 
     #[test]
     fn chat_parse_response_reads_custom_tool_call() {
-        let response = WireDispatch::Chat
+        let response = OpenAiProtocol::chat(ChatReasoningStyle::Plain)
             .parse_response(serde_json::json!({
                 "model": "gpt-5.5",
                 "choices": [{
@@ -1020,7 +1023,7 @@ mod tests {
             timeline: None,
         };
 
-        let body = WireDispatch::Responses.build_request_body(&request);
+        let body = OpenAiProtocol::responses().build_request_body(&request);
 
         assert_eq!(
             body["input"][0]["type"],

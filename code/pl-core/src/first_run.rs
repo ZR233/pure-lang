@@ -3,8 +3,7 @@ use std::collections::BTreeSet;
 
 use pl_model::{
     ModelInfo, ProviderInfo, deepseek_default_model_slugs, default_models,
-    openai_default_model_slugs, zhipu_api_default_model_slugs,
-    zhipu_coding_plan_default_model_slugs,
+    openai_default_model_slugs, zhipu_default_model_slugs,
 };
 use pl_protocol::{PureError, Result};
 
@@ -19,26 +18,19 @@ const DEFAULT_ROLE_EFFORT: &str = "high";
 pub enum ProviderTemplateKind {
     DeepSeek,
     OpenAi,
-    ZhipuApi,
-    ZhipuCodingPlan,
+    Zhipu,
 }
 
 impl ProviderTemplateKind {
-    pub fn all() -> [Self; 4] {
-        [
-            Self::DeepSeek,
-            Self::OpenAi,
-            Self::ZhipuApi,
-            Self::ZhipuCodingPlan,
-        ]
+    pub fn all() -> [Self; 3] {
+        [Self::DeepSeek, Self::OpenAi, Self::Zhipu]
     }
 
     pub fn from_key(key: &str) -> Option<Self> {
         match key {
             "deepseek" => Some(Self::DeepSeek),
             "openai" => Some(Self::OpenAi),
-            "zhipu-api" => Some(Self::ZhipuApi),
-            "zhipu-coding-plan" => Some(Self::ZhipuCodingPlan),
+            "zhipu" => Some(Self::Zhipu),
             _ => None,
         }
     }
@@ -47,8 +39,7 @@ impl ProviderTemplateKind {
         match self {
             Self::DeepSeek => "deepseek",
             Self::OpenAi => "openai",
-            Self::ZhipuApi => "zhipu-api",
-            Self::ZhipuCodingPlan => "zhipu-coding-plan",
+            Self::Zhipu => "zhipu",
         }
     }
 
@@ -56,8 +47,7 @@ impl ProviderTemplateKind {
         match self {
             Self::DeepSeek => "deepseek",
             Self::OpenAi => "openai",
-            Self::ZhipuApi => "zhipu-api",
-            Self::ZhipuCodingPlan => "zhipu-coding-plan",
+            Self::Zhipu => "zhipu",
         }
     }
 
@@ -65,8 +55,7 @@ impl ProviderTemplateKind {
         match self {
             Self::DeepSeek => "DeepSeek",
             Self::OpenAi => "OpenAI",
-            Self::ZhipuApi => "Zhipu GLM API",
-            Self::ZhipuCodingPlan => "Zhipu GLM Coding Plan",
+            Self::Zhipu => "Zhipu",
         }
     }
 
@@ -74,8 +63,7 @@ impl ProviderTemplateKind {
         match self {
             Self::DeepSeek => ProviderInfo::deepseek(None),
             Self::OpenAi => ProviderInfo::openai(None),
-            Self::ZhipuApi => ProviderInfo::zhipu_api(None),
-            Self::ZhipuCodingPlan => ProviderInfo::zhipu_coding_plan(None),
+            Self::Zhipu => ProviderInfo::zhipu(None),
         }
     }
 
@@ -100,8 +88,7 @@ impl ProviderTemplateKind {
         match self {
             Self::DeepSeek => deepseek_default_model_slugs(),
             Self::OpenAi => openai_default_model_slugs(),
-            Self::ZhipuApi => zhipu_api_default_model_slugs(),
-            Self::ZhipuCodingPlan => zhipu_coding_plan_default_model_slugs(),
+            Self::Zhipu => zhipu_default_model_slugs(),
         }
     }
 
@@ -149,7 +136,7 @@ impl FirstRunProviderDraft {
             key: key.into(),
             kind,
             name: info.name,
-            base_url: info.base_url,
+            base_url: Some(info.base_url),
             bearer_token: String::new(),
             default_model: info.default_model,
             models: Vec::new(),
@@ -174,7 +161,9 @@ impl FirstRunProviderDraft {
 
         let mut info = self.kind.provider_info();
         info.name = non_empty_trimmed(&self.name, "provider name")?;
-        info.base_url = trim_optional(self.base_url.as_deref());
+        info.base_url = trim_optional(self.base_url.as_deref()).ok_or_else(|| {
+            PureError::ConfigError(format!("provider {} base_url must not be empty", self.key))
+        })?;
         info.default_model = non_empty_trimmed(&self.default_model, "provider default_model")?;
         info.bearer_token = Some(bearer_token.to_string());
 
@@ -421,29 +410,26 @@ mod tests {
     }
 
     #[test]
-    fn zhipu_coding_plan_draft_uses_glm_51_and_coding_endpoint() {
+    fn zhipu_draft_uses_glm_51_and_provider_endpoint() {
         let mut draft = FirstRunConfigDraft {
-            default_provider: "zhipu-coding-plan".to_string(),
+            default_provider: "zhipu".to_string(),
             providers: vec![FirstRunProviderDraft::from_template(
-                "zhipu-coding-plan",
-                ProviderTemplateKind::ZhipuCodingPlan,
+                "zhipu",
+                ProviderTemplateKind::Zhipu,
             )],
         };
         draft.providers[0].bearer_token = "sk-zhipu".to_string();
 
         let config = draft.to_config().unwrap();
 
-        assert_eq!(
-            config.role_config(ModelRole::Planner).provider,
-            "zhipu-coding-plan"
-        );
+        assert_eq!(config.role_config(ModelRole::Planner).provider, "zhipu");
         assert_eq!(config.role_config(ModelRole::Planner).model, "glm-5.1");
         assert_eq!(
-            config.providers["zhipu-coding-plan"].base_url.as_deref(),
-            Some("https://open.bigmodel.cn/api/coding/paas/v4")
+            config.providers["zhipu"].base_url,
+            "https://open.bigmodel.cn/api/paas/v4"
         );
         assert!(
-            config.providers["zhipu-coding-plan"]
+            config.providers["zhipu"]
                 .models
                 .iter()
                 .any(|model| model.slug == "glm-4.7")
@@ -456,9 +442,8 @@ mod tests {
         draft.add_provider(ProviderTemplateKind::DeepSeek);
         draft.add_provider(ProviderTemplateKind::OpenAi);
         draft.add_provider(ProviderTemplateKind::OpenAi);
-        draft.add_provider(ProviderTemplateKind::ZhipuApi);
-        draft.add_provider(ProviderTemplateKind::ZhipuCodingPlan);
-        draft.add_provider(ProviderTemplateKind::ZhipuCodingPlan);
+        draft.add_provider(ProviderTemplateKind::Zhipu);
+        draft.add_provider(ProviderTemplateKind::Zhipu);
 
         let keys = draft
             .providers
@@ -473,9 +458,8 @@ mod tests {
                 "deepseek-2",
                 "openai",
                 "openai-2",
-                "zhipu-api",
-                "zhipu-coding-plan",
-                "zhipu-coding-plan-2"
+                "zhipu",
+                "zhipu-2"
             ]
         );
     }

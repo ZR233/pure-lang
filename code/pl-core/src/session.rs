@@ -61,7 +61,7 @@ impl CoreSession {
 
     /// 推入 assistant 的 tool_calls 消息。
     ///
-    /// tool_calls 序列化后存入 metadata，供 wire_api 层构造正确的 wire 格式。
+    /// tool_calls 序列化后存入 metadata，供 pl-model protocol 层构造正确的 wire 格式。
     pub fn push_assistant_tool_calls(
         &mut self,
         content: Option<String>,

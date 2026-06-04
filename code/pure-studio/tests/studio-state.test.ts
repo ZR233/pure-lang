@@ -203,6 +203,7 @@ function response(timelineItems: TimelineItem[]): RunPromptResponse {
     timelineNextSequence,
     turnStatus: "completed",
     turnAbortReason: null,
+    turnError: null,
   };
 }
 
@@ -360,6 +361,24 @@ function runPromptLoadedWithEmptyItemsDoesNotDeleteLiveContent() {
   assertDeepEqual(completed.timelineOrder, ["turn-2-text"]);
   assertEqual(completed.timelineItems.get("turn-2-text")?.content, "live");
   assertEqual(completed.timelineNextSequence, 20);
+}
+
+function runPromptLoadedErroredKeepsFailedStatusText() {
+  const failedResponse: RunPromptResponse = {
+    ...response([turnItem("turn-1-turn", "turn-1", 3, "failed", "provider error")]),
+    turnStatus: "errored",
+    turnAbortReason: "providerError",
+    turnError: "provider error",
+  };
+
+  const state = studioReducer(selectedState(), {
+    type: "runPromptLoaded",
+    payload: failedResponse,
+    status: "运行失败：provider error",
+  });
+
+  assertEqual(state.turnPhase, "failed");
+  assertEqual(state.status, "运行失败：provider error");
 }
 
 function completedSnapshotKeepsFirstItemSequence() {
@@ -895,7 +914,31 @@ function abnormalTurnTraceIsKeptWithContent() {
   );
 }
 
-function template(kind: "deepseek" | "openai" | "zhipu-api" | "zhipu-coding-plan") {
+function liveFailedTimelineItemKeepsErrorMessage() {
+  const state = studioReducer(selectedState(), {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: {
+      timelineItemFailed: {
+        sequence: 10,
+        item: turnItem("turn-1-turn", "turn-1", 10, "failed"),
+        error: "LLM provider error: missing API key",
+      },
+    },
+    statusText: "error",
+  });
+
+  const entries = selectTimelineEntries(state);
+
+  assertEqual(state.timelineItems.get("turn-1-turn")?.content, "LLM provider error: missing API key");
+  assertDeepEqual(entries.map((entry) => entry.kind), ["trace"]);
+  assertEqual(
+    entries[0]?.kind === "trace" ? entries[0].item.content : "",
+    "LLM provider error: missing API key",
+  );
+}
+
+function template(kind: "deepseek" | "openai" | "zhipu") {
   const item = previewTemplates.find((candidate) => candidate.id === kind);
   if (!item) {
     throw new Error(`Missing ${kind} template`);
@@ -928,7 +971,7 @@ function providerDraftTemplateSwitchUpdatesTemplateFields() {
   assertEqual(switched.name, "OpenAI");
   assertEqual(switched.templateKind, "openai");
   assertEqual(switched.baseUrl, openai.baseUrl);
-  assertEqual(switched.wireApi, openai.wireApi);
+  assertEqual(switched.providerKind, openai.providerKind);
   assertEqual(switched.defaultModel, openai.defaultModel);
   assertDeepEqual(
     switched.defaultModels.map((model) => model.slug),
@@ -936,20 +979,20 @@ function providerDraftTemplateSwitchUpdatesTemplateFields() {
   );
 }
 
-function providerDraftTemplateSwitchSupportsZhipuCodingPlan() {
+function providerDraftTemplateSwitchSupportsZhipu() {
   const deepseek = template("deepseek");
-  const zhipuCodingPlan = template("zhipu-coding-plan");
+  const zhipu = template("zhipu");
   const draft = createProviderFromTemplate(deepseek, "deepseek");
-  const switched = applyProviderTemplate(draft, zhipuCodingPlan, {
-    id: "zhipu-coding-plan",
-    name: zhipuCodingPlan.name,
+  const switched = applyProviderTemplate(draft, zhipu, {
+    id: "zhipu",
+    name: zhipu.name,
   });
 
-  assertEqual(switched.id, "zhipu-coding-plan");
-  assertEqual(switched.name, "Zhipu GLM Coding Plan");
-  assertEqual(switched.templateKind, "zhipu-coding-plan");
-  assertEqual(switched.baseUrl, "https://open.bigmodel.cn/api/coding/paas/v4");
-  assertEqual(switched.wireApi, "chat");
+  assertEqual(switched.id, "zhipu");
+  assertEqual(switched.name, "Zhipu");
+  assertEqual(switched.templateKind, "zhipu");
+  assertEqual(switched.baseUrl, "https://open.bigmodel.cn/api/paas/v4");
+  assertEqual(switched.providerKind, "zhipu");
   assertEqual(switched.defaultModel, "glm-5.1");
   assertDeepEqual(
     switched.defaultModels.map((model) => model.slug),
@@ -958,17 +1001,17 @@ function providerDraftTemplateSwitchSupportsZhipuCodingPlan() {
 }
 
 function zhipuProviderDraftUsesUniqueKey() {
-  const zhipuApi = template("zhipu-api");
+  const zhipu = template("zhipu");
   const existing = [
-    createProviderFromTemplate(zhipuApi, "zhipu-api"),
-    createProviderFromTemplate(zhipuApi, "zhipu-api-2"),
+    createProviderFromTemplate(zhipu, "zhipu"),
+    createProviderFromTemplate(zhipu, "zhipu-2"),
   ];
-  const nextId = suggestProviderId(existing, zhipuApi.id);
-  const draft = createProviderFromTemplate(zhipuApi, nextId);
+  const nextId = suggestProviderId(existing, zhipu.id);
+  const draft = createProviderFromTemplate(zhipu, nextId);
 
-  assertEqual(nextId, "zhipu-api-3");
-  assertEqual(draft.id, "zhipu-api-3");
-  assertEqual(draft.templateKind, "zhipu-api");
+  assertEqual(nextId, "zhipu-3");
+  assertEqual(draft.id, "zhipu-3");
+  assertEqual(draft.templateKind, "zhipu");
   assertEqual(draft.defaultModel, "glm-5.1");
 }
 
@@ -1013,6 +1056,7 @@ staleTimelineLoadKeepsNewTurnItems();
 freshTimelineLoadMayReplaceSnapshot();
 staleTimelineLoadDoesNotOverwriteLiveDelta();
 runPromptLoadedWithEmptyItemsDoesNotDeleteLiveContent();
+runPromptLoadedErroredKeepsFailedStatusText();
 completedSnapshotKeepsFirstItemSequence();
 consecutiveToolsCollapseIntoToolGroup();
 thinkingDoesNotBreakToolGroup();
@@ -1035,9 +1079,10 @@ skillViewFromOtherSessionDoesNotUpdateActiveSkills();
 unknownToolsUseFallbackAndKeepDetails();
 inferenceAndNormalTurnTraceAreHidden();
 abnormalTurnTraceIsKeptWithContent();
+liveFailedTimelineItemKeepsErrorMessage();
 providerDraftUsesSingleAddEntryAndUniqueKey();
 providerDraftTemplateSwitchUpdatesTemplateFields();
-providerDraftTemplateSwitchSupportsZhipuCodingPlan();
+providerDraftTemplateSwitchSupportsZhipu();
 zhipuProviderDraftUsesUniqueKey();
 editingProviderDraftDoesNotMutateProviderList();
 roleChangeProducesCompleteNormalizedSnapshot();

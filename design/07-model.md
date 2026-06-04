@@ -2,10 +2,16 @@
 
 ## 7.1 职责
 
-`pl-model` 是 LLM provider 层，负责把核心层的统一请求转为具体 provider 的 API 请求，并把流式结果转换为 `AgentEvent` 和 `CompletionResponse`。
+`pl-model` 是 LLM provider 与模型协议适配层，负责把核心层的统一请求转为具体 provider 的 API 请求，并把流式结果转换为 `AgentEvent` 和 `CompletionResponse`。
 
 `pl-model` 不维护会话，不解析 CLI，也不决定编译阶段。
 `pl-model` 可以消费已经解析好的自定义模型列表，但不读取配置文件。
+
+内部按三层组织：
+
+- `provider`：一等供应商运行时，当前只包含 OpenAI、DeepSeek 和 Zhipu。
+- `protocol`：API 协议编解码，当前实现 OpenAI Responses / Chat Completions，Anthropic 仅保留占位。
+- `stream`：provider 无关的流式事件聚合、工具调用合并、plan 提取和 timeline 投影。
 
 ## 7.2 依赖
 
@@ -24,7 +30,7 @@ pl-core
 - `PureError`
 - `Result`
 
-provider 适配实现可以依赖 `async-openai`、`reqwest` 和 `serde`。这些依赖只用于 `pl-model` 内部的 OpenAI-compatible transport、typed wire request 和 typed stream event 解析，不向 `pl-core` 暴露。
+provider 适配实现可以依赖 `async-openai`、`reqwest` 和 `serde`。这些依赖只用于 `pl-model` 内部 transport、typed protocol request 和 typed stream event 解析，不向 `pl-core` 暴露。
 
 ## 7.3 Provider 抽象
 
@@ -35,20 +41,28 @@ provider 适配实现可以依赖 `async-openai`、`reqwest` 和 `serde`。这�
 - `stream_complete(...)`
 - `auth_token()`
 - `model_info(...)`
+- `list_models()`
+- `effective_model_capabilities(...)`
 - `default_model()`
 
 异步 trait 方法使用原生 RPITIT，并显式声明 `Send` bound。
 
-## 7.4 Wire API
+`SharedModelProvider` 是 `Arc<ProviderRuntime>`。`ProviderRuntime` 是穷尽枚举分发，当前变体为 OpenAI、DeepSeek 和 Zhipu；不使用 `dyn ModelProvider`，也不引入 `async_trait`。
+
+每个 provider 拥有自己的 profile：默认 base URL、默认模型、模型目录、tool wire policy、reasoning/thinking policy 和协议 endpoint policy。模型目录只包含该 provider 的 bundled/configured 模型，不从全局模型列表兜底生成 provider 列表。
+
+## 7.4 Protocol API
 
 `pl-model` 当前支持：
 
 - Responses API
 - Chat Completions API
 
-不同 wire API 的差异保持在 `pl-model` 内部，核心层只看到 `CompletionRequest`、`CompletionResponse` 和事件流。
+不同 protocol API 的差异保持在 `pl-model` 内部，核心层只看到 `CompletionRequest`、`CompletionResponse` 和事件流。
 
-OpenAI-compatible provider 使用 `async-openai` 的 client/stream 能力发送请求。请求体不再由散落的 `serde_json::json!` 直接拼接，而是先转换为 `pl-model` 内部强类型 request，再由 serde 序列化。内部 request 类型对齐 OpenAI Responses 和 Chat Completions wire shape，并用本地强类型扩展补齐 custom reasoning effort、`reasoning_content`、`thinking`、custom/freeform tool 和兼容 provider 私有 usage detail。
+OpenAI、DeepSeek 和 Zhipu 都复用 `protocol::openai`。OpenAI 默认使用 Responses endpoint；DeepSeek 和 Zhipu 使用 Chat Completions endpoint。DeepSeek/Zhipu 的 `reasoning_effort`、`thinking`、`clear_thinking`、`reasoning_content` 等私有扩展由 provider profile 通过强类型 options 注入 OpenAI protocol，不作为独立 wire variant 存在。
+
+请求体不再由散落的 `serde_json::json!` 直接拼接，而是先转换为 `pl-model` 内部强类型 request，再由 serde 序列化。动态 JSON 只允许出现在 JSON Schema、工具参数、provider 返回的任意 JSON 参数和协议扩展 escape hatch。
 
 `CompletionRequest.stream` 不改变 `stream_complete` 的 wire 行为；`stream_complete` 始终发起流式请求。该字段只保留为统一请求类型的一部分。
 

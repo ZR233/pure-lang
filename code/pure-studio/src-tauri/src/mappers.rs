@@ -2,10 +2,10 @@ use std::collections::HashSet;
 
 use pl_core::{
     ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProjectRecord, ProviderConfig,
-    ProviderEdit, ProviderModelEdit, ProviderTemplateKind, PureConfig, RoleEdit, SessionRecord,
-    SessionRuntimeRecord, SkillCatalog, SkillMetadata, SkillSourceKind, StudioAgentSnapshotRecord,
-    StudioAgentTimelineEventRecord, StudioRuntime, TraceEvent, TraceEventKind, TurnResultStatus,
-    infer_provider_template_kind,
+    ProviderEdit, ProviderKind, ProviderModelEdit, ProviderTemplateKind, PureConfig, RoleEdit,
+    SessionRecord, SessionRuntimeRecord, SkillCatalog, SkillMetadata, SkillSourceKind,
+    StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord, StudioRuntime, TraceEvent,
+    TraceEventKind, TurnResultStatus, infer_provider_template_kind,
 };
 use pl_protocol::{Message, MessageContent, MessageRole};
 
@@ -204,7 +204,7 @@ pub fn provider_dto(provider_key: &str, provider: &ProviderConfig) -> ProviderDt
         name: provider.name.clone(),
         subtitle: format!("{} Platform", provider.name),
         status: provider_status(provider).to_string(),
-        base_url: provider.base_url.clone().unwrap_or_default(),
+        base_url: provider.base_url.clone(),
         bearer_token: String::new(),
         has_bearer_token: provider
             .bearer_token
@@ -213,7 +213,7 @@ pub fn provider_dto(provider_key: &str, provider: &ProviderConfig) -> ProviderDt
         default_model: provider.default_model.clone(),
         model_count: models.len().to_string(),
         updated_at: "Loaded".to_string(),
-        wire_api: provider.wire_api.to_string(),
+        provider_kind: provider_kind_name(provider.provider_kind).to_string(),
         models,
         default_models: default_models.iter().map(model_dto).collect(),
         custom_models,
@@ -232,9 +232,9 @@ pub fn provider_template_dto(kind: ProviderTemplateKind) -> CommandResult<Provid
     Ok(ProviderTemplateDto {
         id: kind.key().to_string(),
         name: info.name,
-        base_url: info.base_url.unwrap_or_default(),
+        base_url: info.base_url,
         default_model: info.default_model,
-        wire_api: info.wire_api.to_string(),
+        provider_kind: provider_kind_name(info.provider_kind).to_string(),
         default_models: kind.default_models()?.iter().map(model_dto).collect(),
     })
 }
@@ -307,7 +307,6 @@ pub fn provider_edit(
         base_url: Some(input.base_url),
         bearer_token,
         default_model: input.default_model,
-        wire_api: input.wire_api,
         custom_models: input
             .custom_models
             .into_iter()
@@ -318,6 +317,14 @@ pub fn provider_edit(
             })
             .collect(),
     })
+}
+
+fn provider_kind_name(kind: ProviderKind) -> &'static str {
+    match kind {
+        ProviderKind::OpenAi => "open_ai",
+        ProviderKind::DeepSeek => "deep_seek",
+        ProviderKind::Zhipu => "zhipu",
+    }
 }
 
 pub fn role_edit(input: RoleInput) -> RoleEdit {
@@ -422,9 +429,15 @@ pub fn timeline_events_to_items(events: &[TraceEvent]) -> Vec<pl_protocol::Timel
     for event in events {
         match &event.kind {
             TraceEventKind::TimelineItemStarted { item } => upsert_timeline_item(&mut items, item),
-            TraceEventKind::TimelineItemCompleted { item }
-            | TraceEventKind::TimelineItemFailed { item, .. } => {
+            TraceEventKind::TimelineItemCompleted { item } => {
                 upsert_timeline_item(&mut items, item)
+            }
+            TraceEventKind::TimelineItemFailed { item, error } => {
+                let mut failed = item.clone();
+                if failed.content.trim().is_empty() {
+                    failed.content = error.clone();
+                }
+                upsert_timeline_item(&mut items, &failed)
             }
             TraceEventKind::TimelineItemDelta { event } => {
                 let entry = items.entry(event.item_id.clone()).or_insert_with(|| {
@@ -545,7 +558,7 @@ mod tests {
     };
     use pl_protocol::{
         AgentStatus, RuntimeCostAmount, TimelineDelta, TimelineItem, TimelineItemDeltaEvent,
-        TimelineItemKind, TimelineItemStatus, TimelineTextRole,
+        TimelineItemKind, TimelineItemStatus, TimelineTextRole, TraceEvent, TraceEventKind,
     };
     use pretty_assertions::assert_eq;
 
@@ -833,5 +846,41 @@ mod tests {
         assert_eq!(items[0].sequence, 1);
         assert_eq!(items[0].content, "hello world");
         assert_eq!(items[0].status, TimelineItemStatus::Completed);
+    }
+
+    #[test]
+    fn timeline_events_to_items_keeps_failed_error_when_content_is_empty() {
+        let failed = TimelineItem {
+            turn_id: "turn-1".to_string(),
+            item_id: "turn-1-turn".to_string(),
+            sequence: 1,
+            kind: TimelineItemKind::Turn,
+            status: TimelineItemStatus::Failed,
+            created_at: 10,
+            updated_at: 10,
+            role: None,
+            content: String::new(),
+            thinking_chunks: Vec::new(),
+            tool: None,
+            agent: None,
+            inference: None,
+            usage: None,
+        };
+        let events = vec![TraceEvent {
+            session_id: "session-1".to_string(),
+            sequence: 1,
+            timestamp: 10,
+            kind: TraceEventKind::TimelineItemFailed {
+                item: failed,
+                error: "LLM provider error: missing API key".to_string(),
+            },
+        }];
+
+        let items = timeline_events_to_items(&events);
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item_id, "turn-1-turn");
+        assert_eq!(items[0].status, TimelineItemStatus::Failed);
+        assert_eq!(items[0].content, "LLM provider error: missing API key");
     }
 }
