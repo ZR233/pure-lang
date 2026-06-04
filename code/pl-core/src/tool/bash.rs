@@ -92,6 +92,7 @@ impl BashTool {
     fn resolve_working_directory(
         &self,
         working_directory: Option<&Path>,
+        allow_workspace_escape: bool,
     ) -> Result<PathBuf, PureError> {
         let workspace_root = std::fs::canonicalize(&self.workspace_root).map_err(|error| {
             self.tool_error(format!("failed to resolve workspace root: {error}"))
@@ -107,7 +108,7 @@ impl BashTool {
                 candidate.display()
             ))
         })?;
-        if canonical.starts_with(&workspace_root) {
+        if allow_workspace_escape || canonical.starts_with(&workspace_root) {
             Ok(canonical)
         } else {
             Err(self.tool_error(format!(
@@ -190,8 +191,10 @@ impl Tool for BashTool {
             let mut command = Command::new(shell);
             command.args([flag, &bash_input.command]);
 
-            let working_directory =
-                self.resolve_working_directory(bash_input.working_directory.as_deref())?;
+            let working_directory = self.resolve_working_directory(
+                bash_input.working_directory.as_deref(),
+                context.allows_workspace_escape(),
+            )?;
             command.current_dir(working_directory);
 
             command.stdout(std::process::Stdio::piped());
@@ -408,6 +411,34 @@ mod tests {
             .await;
 
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn full_access_allows_working_directory_outside_workspace() {
+        let tool = test_tool();
+        let outside = tool.workspace_root.parent().unwrap().to_path_buf();
+        let mut context = test_context();
+        context.options = crate::turn::TurnOptions::default()
+            .with_permission_mode(crate::turn::PermissionMode::FullAccess);
+        let output = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({
+                        "command": "echo yes",
+                        "workingDirectory": outside,
+                    }),
+                    session_id: "cwd-session".to_string(),
+                    tool_id: "full-access-cwd".to_string(),
+                },
+                context,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(output.exit_code, Some(0));
+        let _ = tokio::fs::remove_file(&output.output_file).await;
+        let _ =
+            tokio::fs::remove_dir_all(output.output_file.parent().unwrap().parent().unwrap()).await;
     }
 
     #[tokio::test]

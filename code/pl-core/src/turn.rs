@@ -214,6 +214,49 @@ pub type ToolApprovalFuture = Pin<Box<dyn Future<Output = ToolApprovalDecision> 
 pub type ToolApprovalCallback =
     Arc<dyn Fn(ToolApprovalRequest) -> ToolApprovalFuture + Send + Sync>;
 
+/// 会话级权限模式。
+///
+/// Pure v1 只实现本地策略层，不提供 OS 沙箱。该模式决定高风险工具
+/// 是直接放行、请求用户审批、请求 reviewer 审批，还是拒绝 workspace 外访问。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PermissionMode {
+    RequestApproval,
+    AutoReview,
+    #[default]
+    WorkspaceWrite,
+    FullAccess,
+}
+
+impl PermissionMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::RequestApproval => "request-approval",
+            Self::AutoReview => "auto-review",
+            Self::WorkspaceWrite => "workspace-write",
+            Self::FullAccess => "full-access",
+        }
+    }
+
+    pub fn from_label(label: &str) -> Self {
+        match label {
+            "request-approval" => Self::RequestApproval,
+            "auto-review" => Self::AutoReview,
+            "workspace-write" => Self::WorkspaceWrite,
+            "full-access" => Self::FullAccess,
+            _ => Self::WorkspaceWrite,
+        }
+    }
+
+    pub fn allows_workspace_escape(self) -> bool {
+        matches!(self, Self::FullAccess)
+    }
+
+    pub fn is_default(&self) -> bool {
+        matches!(self, Self::WorkspaceWrite)
+    }
+}
+
 /// 工具审批策略。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ToolApprovalPolicy {
@@ -259,6 +302,7 @@ pub enum ToolExecutionMode {
 #[derive(Clone)]
 pub struct TurnOptions {
     pub tool_approval_policy: ToolApprovalPolicy,
+    pub permission_mode: PermissionMode,
     pub tool_approval_callback: Option<ToolApprovalCallback>,
     pub cancellation_token: Option<CancellationToken>,
     pub tool_execution_mode: ToolExecutionMode,
@@ -268,6 +312,11 @@ impl TurnOptions {
     pub fn new(tool_approval_policy: ToolApprovalPolicy) -> Self {
         Self {
             tool_approval_policy,
+            permission_mode: match tool_approval_policy {
+                ToolApprovalPolicy::AutoAllow => PermissionMode::WorkspaceWrite,
+                ToolApprovalPolicy::Manual => PermissionMode::RequestApproval,
+                ToolApprovalPolicy::DenyAll => PermissionMode::RequestApproval,
+            },
             tool_approval_callback: None,
             cancellation_token: None,
             tool_execution_mode: ToolExecutionMode::ModelDefault,
@@ -277,6 +326,7 @@ impl TurnOptions {
     pub fn manual(callback: ToolApprovalCallback) -> Self {
         Self {
             tool_approval_policy: ToolApprovalPolicy::Manual,
+            permission_mode: PermissionMode::RequestApproval,
             tool_approval_callback: Some(callback),
             cancellation_token: None,
             tool_execution_mode: ToolExecutionMode::ModelDefault,
@@ -296,6 +346,16 @@ impl TurnOptions {
         self.tool_execution_mode = tool_execution_mode;
         self
     }
+
+    pub fn with_permission_mode(mut self, permission_mode: PermissionMode) -> Self {
+        self.permission_mode = permission_mode;
+        self
+    }
+
+    pub fn requires_user_approval_callback(&self) -> bool {
+        matches!(self.permission_mode, PermissionMode::RequestApproval)
+            || matches!(self.tool_approval_policy, ToolApprovalPolicy::Manual)
+    }
 }
 
 impl Default for TurnOptions {
@@ -308,6 +368,7 @@ impl std::fmt::Debug for TurnOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TurnOptions")
             .field("tool_approval_policy", &self.tool_approval_policy)
+            .field("permission_mode", &self.permission_mode)
             .field(
                 "tool_approval_callback",
                 &self.tool_approval_callback.as_ref().map(|_| "<callback>"),
@@ -397,6 +458,32 @@ mod tests {
         assert_eq!(CompileMode::from_label("auto"), CompileMode::Auto);
         assert_eq!(CompileMode::from_label("manual"), CompileMode::Auto);
         assert_eq!(CompileMode::from_label(""), CompileMode::Auto);
+    }
+
+    #[test]
+    fn permission_mode_from_label_keeps_unknown_values_safe() {
+        assert_eq!(
+            PermissionMode::from_label("request-approval"),
+            PermissionMode::RequestApproval
+        );
+        assert_eq!(
+            PermissionMode::from_label("auto-review"),
+            PermissionMode::AutoReview
+        );
+        assert_eq!(
+            PermissionMode::from_label("workspace-write"),
+            PermissionMode::WorkspaceWrite
+        );
+        assert_eq!(
+            PermissionMode::from_label("full-access"),
+            PermissionMode::FullAccess
+        );
+        assert_eq!(
+            PermissionMode::from_label("old-auto-allow"),
+            PermissionMode::WorkspaceWrite
+        );
+        assert!(PermissionMode::FullAccess.allows_workspace_escape());
+        assert!(!PermissionMode::WorkspaceWrite.allows_workspace_escape());
     }
 
     #[test]

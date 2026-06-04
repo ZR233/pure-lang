@@ -36,6 +36,7 @@ const zhCN = {
     configSaved: "配置已保存",
     configReloaded: "配置已重新加载",
     providerSettingsSaved: "模型服务设置已保存",
+    permissionModeSaved: "权限模式已保存",
     modeUpdated: "模式已更新",
     toolApproved: "工具已批准",
     toolDenied: "工具已拒绝",
@@ -50,6 +51,7 @@ const zhCN = {
     configLoadFailed: "配置加载失败：{{error}}",
     configInvalid: "配置无效：{{error}}",
     providerSettingsInvalid: "模型服务设置无效：{{error}}",
+    permissionModeSaveFailed: "权限模式保存失败：{{error}}",
     modeUpdateFailed: "模式更新失败：{{error}}",
     reloadFailed: "重新加载失败：{{error}}",
     approvalRequired: "需要审批：{{name}}",
@@ -196,6 +198,7 @@ const zhCN = {
     notConfigured: "未配置",
     modelPricing: "模型计价（可选）",
     capabilities: "能力",
+    permissionMode: "权限模式",
     subagents: "子代理",
     noSubagents: "暂无子代理",
   },
@@ -220,6 +223,23 @@ const zhCN = {
       security: "安全",
       general: "通用",
     },
+    security: {
+      title: "权限模式",
+      description: "Pure v1 使用本地策略层控制已注册工具是否直接执行、请求用户批准或交给 reviewer 审批；这不是 OS 沙箱。",
+      modeDesc: {
+        "request-approval": "只读工具直接运行；写入工具、bash 和 skill_manage 会请求用户批准。",
+        "auto-review": "只读工具直接运行；高风险工具由 reviewer 模型审批，失败或非明确批准时拒绝。",
+        "workspace-write": "默认模式。workspace 内读写、apply_patch、项目 skills 和 workspace cwd 的 bash 直接放行。",
+        "full-access": "放宽 Pure 文件路径和 bash 工作目录的 workspace 边界；仍只执行已注册工具。",
+      },
+    },
+  },
+
+  permissionMode: {
+    "request-approval": "请求批准",
+    "auto-review": "替我审批",
+    "workspace-write": "Workspace 读写",
+    "full-access": "完全访问",
   },
 
   provider: {

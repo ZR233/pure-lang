@@ -68,6 +68,7 @@ SQLite 只保存 Studio 状态，例如项目、会话、消息、工具审批�
 schema_version = 2
 
 [runtime]
+permission_mode = "workspace-write"
 active_skills = ["rust", "git", "doc"]
 active_mcp_servers = ["github", "filesystem"]
 
@@ -186,10 +187,20 @@ Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-
 
 `[runtime]` 保存本地 Studio 运行态展示所需的可选声明。首版字段：
 
+- `permission_mode`
 - `active_skills`
 - `active_mcp_servers`
 
-这两个列表仅声明旧版 GUI 状态栏展示所需的 Skill / MCP 名称，不负责安装、启动或连接真实 Skill/MCP 管理器。缺失 `[runtime]` 或字段时按空列表处理。
+`permission_mode` 是会话 turn 的默认权限模式，缺失时按 `workspace-write` 处理。可选值：
+
+- `request-approval`
+- `auto-review`
+- `workspace-write`
+- `full-access`
+
+Pure v1 的权限模式是本地策略层，不是 OS 沙箱。`full-access` 会放宽 Pure 文件工具和 `bash.workingDirectory` 的 workspace 边界；其他模式仍拒绝 workspace 外访问。
+
+`active_skills` 和 `active_mcp_servers` 仅声明旧版 GUI 状态栏展示所需的 Skill / MCP 名称，不负责安装、启动或连接真实 Skill/MCP 管理器。缺失 `[runtime]` 或字段时按空列表处理；缺失 `permission_mode` 时按 `workspace-write` 处理。
 
 真实 skills 能力由 `[skills]` 配置和项目目录驱动。`active_skills` 不作为启停来源，不影响模型可见的 skills 列表，也不作为当前会话状态栏 Skills 的来源。Studio 当前会话的 `activeSkills` 由该会话中成功执行过的 `skill_view` 工具结果派生，表示 skill 内容已经进入上下文。
 
@@ -238,6 +249,7 @@ Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-
 - API key、base URL、provider key 和显示名。
 - provider 默认模型和自定义模型。
 - 四个模型角色到 provider/model/effort 的路由。
+- Security 标签页选择权限模式：请求批准、替我审批、Workspace 读写、完全访问。选择后即时写入 `[runtime].permission_mode`。
 
 每次设置项写入前必须执行 `PureConfig::validate()`；失败时只在 UI 中展示错误，不写入磁盘。
 

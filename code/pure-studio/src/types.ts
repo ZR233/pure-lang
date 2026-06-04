@@ -7,6 +7,12 @@ export type ProjectRecord = {
 
 export type CompileMode = "auto" | "plan";
 
+export type PermissionMode =
+  | "request-approval"
+  | "auto-review"
+  | "workspace-write"
+  | "full-access";
+
 export type SessionRecord = {
   id: string;
   projectId: string;
@@ -249,6 +255,7 @@ export type ProviderTemplateRecord = {
 
 export type ConfigPayload = {
   toml: string;
+  permissionMode: PermissionMode;
   providers: ProviderRecord[];
   roles: RoleRecord[];
   templates: ProviderTemplateRecord[];

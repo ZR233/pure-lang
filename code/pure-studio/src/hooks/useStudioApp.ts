@@ -14,6 +14,7 @@ import {
   openProject,
   runPrompt,
   saveConfig,
+  savePermissionMode,
   saveProviderSettings,
   selectProject,
   selectSession,
@@ -32,6 +33,7 @@ import type {
   AgentEvent,
   AgentEventPayload,
   CompileMode,
+  PermissionMode,
   PromptFailed,
   ProviderRecord,
   ProviderSettingsSaveSnapshot,
@@ -450,6 +452,21 @@ export function useStudioApp() {
     }
   }
 
+  async function onSavePermissionMode(mode: PermissionMode) {
+    try {
+      dispatch({
+        type: "configLoaded",
+        payload: await savePermissionMode(mode),
+        status: t("status.permissionModeSaved"),
+      });
+    } catch (error) {
+      dispatch({
+        type: "bootstrapFailed",
+        status: t("status.permissionModeSaveFailed", { error: errorText(error) }),
+      });
+    }
+  }
+
   async function onApprove(approvalId: string) {
     await approveTool(approvalId);
   }
@@ -481,6 +498,7 @@ export function useStudioApp() {
     openSettings,
     onSaveConfig,
     onSaveProviderSettings,
+    onSavePermissionMode,
     onReloadConfig,
     onApprove,
     onDeny,

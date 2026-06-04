@@ -36,6 +36,7 @@ const en = {
     configSaved: "Config saved",
     configReloaded: "Config reloaded",
     providerSettingsSaved: "Provider settings saved",
+    permissionModeSaved: "Permission mode saved",
     modeUpdated: "Mode updated",
     toolApproved: "Tool approved",
     toolDenied: "Tool denied",
@@ -50,6 +51,7 @@ const en = {
     configLoadFailed: "Config load failed: {{error}}",
     configInvalid: "Config invalid: {{error}}",
     providerSettingsInvalid: "Provider settings invalid: {{error}}",
+    permissionModeSaveFailed: "Permission mode save failed: {{error}}",
     modeUpdateFailed: "Mode update failed: {{error}}",
     reloadFailed: "Reload failed: {{error}}",
     approvalRequired: "Approval required: {{name}}",
@@ -196,6 +198,7 @@ const en = {
     notConfigured: "Not configured",
     modelPricing: "Model pricing (optional)",
     capabilities: "Capabilities",
+    permissionMode: "Permission mode",
     subagents: "Subagents",
     noSubagents: "No subagents",
   },
@@ -220,6 +223,23 @@ const en = {
       security: "Security",
       general: "General",
     },
+    security: {
+      title: "Permission Mode",
+      description: "Pure v1 uses a local policy layer to decide whether registered tools run directly, ask the user, or ask a reviewer model. This is not an OS sandbox.",
+      modeDesc: {
+        "request-approval": "Read-only tools run directly; write tools, bash, and skill_manage ask the user for approval.",
+        "auto-review": "Read-only tools run directly; high-risk tools are reviewed by the reviewer model and denied unless clearly approved.",
+        "workspace-write": "Default mode. Workspace reads/writes, apply_patch, project skills, and bash in the workspace cwd run directly.",
+        "full-access": "Relaxes Pure file paths and bash cwd beyond the workspace boundary while still limiting execution to registered tools.",
+      },
+    },
+  },
+
+  permissionMode: {
+    "request-approval": "Request approval",
+    "auto-review": "Review for me",
+    "workspace-write": "Workspace write",
+    "full-access": "Full access",
   },
 
   provider: {

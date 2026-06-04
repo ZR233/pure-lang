@@ -24,7 +24,7 @@ React action
 运行输入统一为新 DTO 契约（camelCase wire）。
 
 - `compileMode`：`plan | auto`
-- `turnOptions.toolApprovalPolicy`：默认固定 `autoAllow`
+- `turnOptions.permissionMode`：默认固定 `workspace-write`
 - `prompt`、`sessionId`、`workspaceRoot` 等进入 application service
 
 `compileMode` 是会话级协作模式。`auto` 是默认执行模式，允许模型在审批策略约束内主动修改工作区；`plan` 是 Codex 风格规划模式，允许读取、搜索、运行经审批的探索命令和调度探索型子代理，但最终交付物应是一段可执行计划，而不是直接修改文件。Plan Mode 的最终计划使用 `<proposed_plan>...</proposed_plan>` 包裹，由 streaming 层提取为独立 timeline item；普通 assistant 正文不显示这些标签。
@@ -36,8 +36,10 @@ React action
 策略约束：
 
 - 方案乙不保留旧命令别名和旧字段兜底
-- `ToolApprovalPolicy::AutoAllow` 为默认且主路径
-- 手动审批接口保留在系统能力中，但不作为默认流程
+- `PermissionMode::WorkspaceWrite` 为默认且主路径；旧 `ToolApprovalPolicy` 仅作为兼容构造
+- 手动审批接口保留在系统能力中，但不作为默认流程；`request-approval` 模式才会对高风险工具弹出用户审批
+- `auto-review` 模式使用 reviewer 角色模型审批高风险工具。reviewer 只返回批准或拒绝，不执行工具；解析失败、provider 失败或非明确批准均按拒绝处理
+- `full-access` 放宽 Pure 文件工具和 `bash.workingDirectory` 的 workspace 边界，但仍只执行已注册工具，不提供 OS 沙箱或系统级提权
 - Studio 中的 Plan Mode 会保留 `bash` 探索能力，但 bash 必须走手动审批；明确写入类工具不会暴露给模型，也不能执行模型幻觉出的写入工具调用
 - 用户显式要求 `subagent`/子代理分工时，核心提示必须将 `subagent` 作为强约束；普通 shell 或文件探索不能替代子代理调度
 - 显式子代理分工允许最多两轮只读定位；若仍未创建 agent，后续推理只暴露 `spawn_agent` / `subagent` 并保持 `auto` tool choice，避免触发不支持 required tool choice 的 provider 限制
@@ -66,7 +68,7 @@ React action
 
 主 turn 保存完成后，如果 `[skills].auto_learn = true` 且本轮达到自学习触发条件，`StudioRuntime` 启动后台 reviewer。reviewer 只开放 skills 工具，复盘结果只写项目 skills 目录；失败只记录日志，不改变本轮响应。
 
-文件与 shell 工具都以有效 `workspaceRoot` 为边界。`bash` 默认在 workspace root 下执行，`workingDirectory` 也按 workspace root 解析并拒绝逃逸；文件工具继续只允许访问 workspace root 内的路径。
+文件与 shell 工具都以有效 `workspaceRoot` 为默认边界。`bash` 默认在 workspace root 下执行，`workingDirectory` 也按 workspace root 解析并拒绝逃逸；文件工具默认只允许访问 workspace root 内的路径。`full-access` 模式会放宽该边界，允许文件路径和 `bash.workingDirectory` 指向 workspace 外，但不绕过工具自身校验、写锁、超时、输出截断和 timeline 记录。
 
 Skills 管理工具同样以 `workspaceRoot` 为边界，但写入面收窄到 `<workspaceRoot>/<skills.project_dir>/`。用户级、系统和外部 skills 只读参与发现，不允许被工具原地修改。
 

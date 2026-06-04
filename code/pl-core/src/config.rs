@@ -13,6 +13,8 @@ use pl_protocol::{PureError, Result};
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::turn::PermissionMode;
+
 pub const CONFIG_DIR_NAME: &str = ".pure";
 pub const CONFIG_FILE_NAME: &str = "config.toml";
 pub const CONFIG_SCHEMA_VERSION: u32 = 2;
@@ -293,6 +295,8 @@ pub struct RoleConfig {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RuntimeConfig {
+    #[serde(default, skip_serializing_if = "PermissionMode::is_default")]
+    pub permission_mode: PermissionMode,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub active_skills: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -301,7 +305,9 @@ pub struct RuntimeConfig {
 
 impl RuntimeConfig {
     pub fn is_empty(&self) -> bool {
-        self.active_skills.is_empty() && self.active_mcp_servers.is_empty()
+        self.permission_mode.is_default()
+            && self.active_skills.is_empty()
+            && self.active_mcp_servers.is_empty()
     }
 }
 
@@ -969,6 +975,7 @@ mod tests {
         let mut config = PureConfig::default_config();
         config.providers.get_mut("deepseek").unwrap().bearer_token =
             Some("secret-token".to_string());
+        config.runtime.permission_mode = PermissionMode::AutoReview;
         config.runtime.active_skills = vec!["rust".to_string(), "git".to_string()];
         config.runtime.active_mcp_servers = vec!["github".to_string()];
         config.skills.auto_learn = false;
@@ -991,6 +998,7 @@ mod tests {
             parsed.providers["deepseek"].models[0].capabilities,
             config.providers["deepseek"].models[0].capabilities
         );
+        assert_eq!(parsed.runtime.permission_mode, PermissionMode::AutoReview);
         assert_eq!(
             parsed.runtime.active_skills,
             vec!["rust".to_string(), "git".to_string()]
@@ -1018,6 +1026,10 @@ mod tests {
 
         assert!(parsed.runtime.active_skills.is_empty());
         assert!(parsed.runtime.active_mcp_servers.is_empty());
+        assert_eq!(
+            parsed.runtime.permission_mode,
+            PermissionMode::WorkspaceWrite
+        );
         assert_eq!(parsed.skills, SkillsConfig::default());
     }
 

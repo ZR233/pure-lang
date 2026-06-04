@@ -20,6 +20,7 @@ import type {
   AgentDto,
   AgentStatus,
   CompileMode,
+  PermissionMode,
   ProjectRecord,
   ProviderRecord,
   RoleRecord,
@@ -54,6 +55,7 @@ type ConversationPanelProps = {
   status: string;
   turnPhase: TurnPhase;
   turnStartedAt: number | null;
+  permissionMode: PermissionMode;
   providers: ProviderRecord[];
   roles: RoleRecord[];
   setRoles: Dispatch<SetStateAction<RoleRecord[]>>;
@@ -664,6 +666,7 @@ export function ConversationPanel({
   status,
   turnPhase,
   turnStartedAt,
+  permissionMode,
   providers,
   roles,
   setRoles,
@@ -925,6 +928,7 @@ export function ConversationPanel({
           onSaveProviderSettings={onSaveProviderSettings}
           turnPhase={turnPhase}
           turnStartedAt={turnStartedAt}
+          permissionMode={permissionMode}
           agents={agents}
         />
         <div className="composer">

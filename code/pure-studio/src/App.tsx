@@ -36,6 +36,7 @@ export function App() {
         status={state.status}
         turnPhase={state.turnPhase}
         turnStartedAt={state.turnStartedAt}
+        permissionMode={state.permissionMode}
         providers={state.providers}
         roles={state.roles}
         setRoles={studio.setRolesState}
@@ -63,11 +64,13 @@ export function App() {
           selectedProviderId={state.selectedProviderId}
           providerSearch={state.providerSearch}
           configExists={state.configExists}
+          permissionMode={state.permissionMode}
           setRoles={studio.setRolesState}
           setProviderSearch={studio.setProviderSearchState}
           onClose={() => studio.dispatch({ type: "setSettingsOpen", value: false })}
           onSetActiveTab={(tab) => studio.dispatch({ type: "setSettingsOpen", value: true, tab })}
           onSaveProviderSettings={(snapshot) => studio.onSaveProviderSettings(snapshot)}
+          onSavePermissionMode={(mode) => studio.onSavePermissionMode(mode)}
         />
       ) : null}
     </main>

@@ -40,6 +40,7 @@ fn main() {
             commands::load_config,
             commands::save_config,
             commands::save_provider_settings,
+            commands::save_permission_mode,
             commands::list_discovered_skills,
         ])
         .run(tauri::generate_context!())

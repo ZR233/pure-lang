@@ -91,12 +91,17 @@ impl fmt::Debug for ToolContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ToolContext")
             .field("workspace_root", &self.workspace_root)
+            .field("permission_mode", &self.options.permission_mode)
             .field("active_subagent", &self.active_subagent)
             .finish_non_exhaustive()
     }
 }
 
 impl ToolContext {
+    pub(crate) fn allows_workspace_escape(&self) -> bool {
+        self.options.permission_mode.allows_workspace_escape()
+    }
+
     pub(crate) async fn workspace_write_lock(&self) -> WorkspaceWriteGuard {
         workspace_write_locks().lock_for(&self.workspace_root).await
     }

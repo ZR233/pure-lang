@@ -8,6 +8,7 @@ pub mod domain;
 mod first_run;
 pub mod infrastructure;
 pub mod interfaces;
+mod permission;
 mod provider_error;
 mod runtime_usage;
 mod session;
@@ -59,8 +60,8 @@ pub use tool::{
 pub use trace::TraceRecorder;
 pub use turn::{
     AGENT_MAX_COUNT, AGENT_MAX_DEPTH, AgentBudget, BudgetPolicy, CompileMode,
-    DEFAULT_MAX_TOOL_ITERATIONS, DEFAULT_WALL_CLOCK_MS, ToolApprovalCallback, ToolApprovalDecision,
-    ToolApprovalPolicy, ToolApprovalRequest, ToolExecutionMode, TurnAbortReason, TurnBudget,
-    TurnOptions, TurnRequest, TurnResult, TurnResultStatus,
+    DEFAULT_MAX_TOOL_ITERATIONS, DEFAULT_WALL_CLOCK_MS, PermissionMode, ToolApprovalCallback,
+    ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest, ToolExecutionMode,
+    TurnAbortReason, TurnBudget, TurnOptions, TurnRequest, TurnResult, TurnResultStatus,
 };
 pub use workspace::{load_workspace_instructions, resolve_workspace_root};

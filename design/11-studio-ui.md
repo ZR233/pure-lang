@@ -94,9 +94,11 @@ turn 展示语义固定：
 
 组件通过 selectors 读取，不直接拼装跨域状态。
 
-状态栏固定渲染在聊天底部，只展示当前 turn phase、模型、上下文、按货币分组的费用、能力和 agent latest snapshot。Skills 数量和列表表示当前会话已经成功 `skill_view`、内容进入上下文的 skills，不是配置声明，也不是可 discover 的全部 skills。运行中收到成功的 `skill_view` completed event 后，前端必须立即把该 skill 合并到当前会话 `activeSkills`；`RunPromptResponse.sessionRuntime` 仍作为 turn 完成后的最终校准。设置页的 Skills 标签页则展示当前项目按 discovery 规则发现的只读 skills 列表，并显示每项 scope；该列表不代表当前会话已激活。运行中收到 `AgentRuntimeUpdated` 后必须即时用后端聚合快照更新 `sessionRuntime` 和对应 agent 的 `runtimeUsage`，不能等 `RunPromptResponse` 返回后才刷新。设置页作为全屏 overlay 打开时必须覆盖聊天状态栏与其 popover，状态栏不得浮到设置页之上。
+状态栏固定渲染在聊天底部，只展示当前 turn phase、模型、上下文、按货币分组的费用、能力、权限模式和 agent latest snapshot。权限模式来自当前配置：请求批准、替我审批、Workspace 读写或完全访问。Skills 数量和列表表示当前会话已经成功 `skill_view`、内容进入上下文的 skills，不是配置声明，也不是可 discover 的全部 skills。运行中收到成功的 `skill_view` completed event 后，前端必须立即把该 skill 合并到当前会话 `activeSkills`；`RunPromptResponse.sessionRuntime` 仍作为 turn 完成后的最终校准。设置页的 Skills 标签页则展示当前项目按 discovery 规则发现的只读 skills 列表，并显示每项 scope；该列表不代表当前会话已激活。运行中收到 `AgentRuntimeUpdated` 后必须即时用后端聚合快照更新 `sessionRuntime` 和对应 agent 的 `runtimeUsage`，不能等 `RunPromptResponse` 返回后才刷新。设置页作为全屏 overlay 打开时必须覆盖聊天状态栏与其 popover，状态栏不得浮到设置页之上。
 
 聊天输入区提供 `Auto / Plan` 模式切换，当前值来自选中 session 的 `mode` 并通过后端命令持久化。新会话默认 `auto`。Plan 卡片提供“实现计划”动作：点击后先把当前 session 切回 `auto`，再自动提交 `PLEASE IMPLEMENT THIS PLAN:\n\n{plan}`。v1 不提供 fresh thread、清上下文执行或 todo list。
+
+设置页 Security 标签页提供会话级权限模式选择。`request-approval` 使用现有 ApprovalOverlay 弹出用户审批；`auto-review` 由 reviewer 模型自动审批高风险工具，前端不弹用户审批卡片，只通过工具结果展示已批准或已拒绝的事实；`workspace-write` 是默认自动执行体验；`full-access` 明确展示为会放宽 workspace 外文件路径和 shell cwd 边界的模式。
 
 agent latest snapshot、agent timeline event、session runtime 和审批状态必须以当前 `sessionId` 为边界。切换项目、切换会话或新建会话时，前端必须用后端返回的当前会话快照替换本地 agent 列表；运行中收到的实时事件如果属于非当前会话，不能更新当前状态栏、子代理 popover 或 timeline。`RunPromptResponse.agents` 是当前会话完成后的权威快照，不能与旧会话遗留 agents 合并。
 

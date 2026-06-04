@@ -133,6 +133,7 @@ pub struct ModelDto {
 #[serde(rename_all = "camelCase")]
 pub struct ConfigDto {
     pub toml: String,
+    pub permission_mode: String,
     pub providers: Vec<ProviderDto>,
     pub roles: Vec<RoleDto>,
     pub templates: Vec<ProviderTemplateDto>,

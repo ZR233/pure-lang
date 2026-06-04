@@ -20,6 +20,7 @@ pub fn config_dto(store: &ConfigStore) -> CommandResult<ConfigDto> {
     let config = store.load_or_default()?;
     Ok(ConfigDto {
         toml: config.to_toml_pretty()?,
+        permission_mode: config.runtime.permission_mode.label().to_string(),
         providers: provider_dtos(&config),
         roles: role_dtos(&config),
         templates: provider_template_dtos()?,
@@ -538,7 +539,10 @@ mod tests {
     use std::collections::HashMap;
     use std::path::PathBuf;
 
-    use pl_core::{RuntimeUsageSnapshot, SessionRuntimeRecord, StudioAgentSnapshotRecord};
+    use pl_core::{
+        ConfigPaths, ConfigStore, PermissionMode, PureConfig, RuntimeUsageSnapshot,
+        SessionRuntimeRecord, StudioAgentSnapshotRecord,
+    };
     use pl_protocol::{
         AgentStatus, RuntimeCostAmount, TimelineDelta, TimelineItem, TimelineItemDeltaEvent,
         TimelineItemKind, TimelineItemStatus, TimelineTextRole,
@@ -546,6 +550,26 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+
+    #[test]
+    fn config_dto_exposes_permission_mode() {
+        let home = std::env::temp_dir().join(format!(
+            "pure-studio-config-dto-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = ConfigStore::new(ConfigPaths::from_home(&home));
+        let mut config = PureConfig::default_config();
+        config.runtime.permission_mode = PermissionMode::FullAccess;
+        store.save(&config).unwrap();
+
+        let dto = config_dto(&store).unwrap();
+
+        assert_eq!(dto.permission_mode, "full-access");
+        let _ = std::fs::remove_dir_all(home);
+    }
 
     #[test]
     fn discovered_skills_dto_maps_scopes_and_warnings() {
