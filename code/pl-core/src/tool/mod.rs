@@ -69,11 +69,26 @@ pub trait Tool: fmt::Debug + Send + Sync {
 pub struct ToolContext {
     pub event_tx: AgentEventSender,
     pub options: TurnOptions,
+    pub workspace_access: WorkspaceAccess,
     pub mode: crate::turn::CompileMode,
     pub workspace_root: PathBuf,
     pub workspace_instructions: Option<String>,
     pub active_subagent: Option<SubagentContext>,
     pub agent_control: AgentControl,
+}
+
+/// 单次工具调用的路径访问策略。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WorkspaceAccess {
+    #[default]
+    WorkspaceOnly,
+    ExternalAllowed,
+}
+
+impl WorkspaceAccess {
+    pub fn allows_external(self) -> bool {
+        matches!(self, Self::ExternalAllowed)
+    }
 }
 
 /// 当前工具调用所在的 subagent 运行边界。
@@ -92,6 +107,7 @@ impl fmt::Debug for ToolContext {
         f.debug_struct("ToolContext")
             .field("workspace_root", &self.workspace_root)
             .field("permission_mode", &self.options.permission_mode)
+            .field("workspace_access", &self.workspace_access)
             .field("active_subagent", &self.active_subagent)
             .finish_non_exhaustive()
     }
@@ -100,6 +116,7 @@ impl fmt::Debug for ToolContext {
 impl ToolContext {
     pub(crate) fn allows_workspace_escape(&self) -> bool {
         self.options.permission_mode.allows_workspace_escape()
+            || self.workspace_access.allows_external()
     }
 
     pub(crate) async fn workspace_write_lock(&self) -> WorkspaceWriteGuard {
@@ -313,6 +330,7 @@ mod tests {
         let context = ToolContext {
             event_tx,
             options: TurnOptions::default(),
+            workspace_access: WorkspaceAccess::WorkspaceOnly,
             mode: crate::turn::CompileMode::Auto,
             workspace_root: root.clone(),
             workspace_instructions: None,

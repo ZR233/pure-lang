@@ -18,9 +18,7 @@ use crate::config::{ModelRole, PureConfig, ReasoningEffort};
 use crate::context_compaction::{
     CompactionOutcome, CompactionTrigger, ContextCompactionRequest, maybe_compact_session,
 };
-use crate::permission::{
-    PermissionDecision, decide_tool_permission, is_high_risk_tool, parse_reviewer_decision,
-};
+use crate::permission::{PermissionDecision, decide_tool_permission, parse_reviewer_decision};
 use crate::provider_error::is_provider_429_error;
 use crate::runtime_usage::{agent_runtime_delta, identity_for_subagent, token_usage_snapshot};
 use crate::session::CoreSession;
@@ -29,7 +27,7 @@ use crate::tool::{
     FollowupTaskTool, ListAgentsTool, ListFilesTool, MovePathTool, RECOVERABLE_SUBAGENT_429_MARKER,
     ReadFileTool, SearchFilesTool, SendMessageTool, SkillManageTool, SkillViewTool, SkillsListTool,
     SpawnAgentTool, StatPathTool, SubagentContext, SubagentTool, ToolContext, ToolInput,
-    ToolOutput, ToolRegistry, WaitAgentTool, WriteFileTool,
+    ToolOutput, ToolRegistry, WaitAgentTool, WorkspaceAccess, WriteFileTool,
 };
 use crate::trace::TraceRecorder;
 use crate::turn::{
@@ -239,6 +237,7 @@ impl PureCore {
             "workingDirectory": &request.working_directory,
             "parentAgentId": &request.parent_agent_id,
             "permissionMode": context.options.permission_mode.label(),
+            "workspaceAccess": format!("{:?}", context.workspace_access),
             "compileMode": context.mode.label(),
             "workspaceRoot": context.workspace_root.display().to_string(),
             "riskSummary": permission_risk_summary(&request.name),
@@ -907,6 +906,7 @@ async fn execute_tool_calls(
         let tool_context = ToolContext {
             event_tx: recorder.sender().clone(),
             options: context.options.clone(),
+            workspace_access: WorkspaceAccess::WorkspaceOnly,
             mode: context.mode,
             workspace_root: context.workspace_root.to_path_buf(),
             workspace_instructions: context.workspace_instructions.clone(),
@@ -914,31 +914,52 @@ async fn execute_tool_calls(
             agent_control: context.agent_control.clone(),
         };
         let approval_request = approval_request(tool_call, &tool_context);
-        let decision =
-            match decide_tool_permission(context.options, context.mode, &approval_request) {
-                PermissionDecision::Approved => ToolApprovalDecision::Approved,
-                PermissionDecision::NeedsUserApproval => {
-                    request_user_approval(
-                        context.options,
-                        &approval_request,
-                        recorder.sender().clone(),
-                    )
-                    .await
+        let requested_access = requested_workspace_access(tool_call, context.workspace_root);
+        let mut execution_workspace_access = WorkspaceAccess::WorkspaceOnly;
+        let decision = match decide_tool_permission(
+            context.options,
+            context.mode,
+            &approval_request,
+            requested_access,
+        ) {
+            PermissionDecision::Approved { workspace_access } => {
+                execution_workspace_access = workspace_access;
+                ToolApprovalDecision::Approved
+            }
+            PermissionDecision::NeedsUserApproval { workspace_access } => {
+                let decision = request_user_approval(
+                    context.options,
+                    &approval_request,
+                    recorder.sender().clone(),
+                )
+                .await;
+                if matches!(decision, ToolApprovalDecision::Approved) {
+                    execution_workspace_access = workspace_access;
                 }
-                PermissionDecision::NeedsAiReview => {
-                    context
-                        .core
-                        .review_tool_call_with_ai(&approval_request, &tool_context)
-                        .await
+                decision
+            }
+            PermissionDecision::NeedsAiReview { workspace_access } => {
+                let mut review_context = tool_context.clone();
+                review_context.workspace_access = workspace_access;
+                let decision = context
+                    .core
+                    .review_tool_call_with_ai(&approval_request, &review_context)
+                    .await;
+                if matches!(decision, ToolApprovalDecision::Approved) {
+                    execution_workspace_access = workspace_access;
                 }
-                PermissionDecision::Denied { reason } => ToolApprovalDecision::Denied { reason },
-            };
+                decision
+            }
+            PermissionDecision::Denied { reason } => ToolApprovalDecision::Denied { reason },
+        };
         if is_cancelled(context.options) {
             return Vec::new();
         }
 
         match decision {
             ToolApprovalDecision::Approved => {
+                let mut tool_context = tool_context;
+                tool_context.workspace_access = execution_workspace_access;
                 item.status = TimelineItemStatus::Approved;
                 item.updated_at = unix_seconds();
                 recorder.complete_item(item.clone());
@@ -1313,6 +1334,116 @@ fn get_working_directory(arguments: &serde_json::Value) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn requested_workspace_access(
+    tool_call: &pl_model::ToolCall,
+    workspace_root: &Path,
+) -> WorkspaceAccess {
+    let arguments = tool_call.arguments_for_tool();
+    let paths = requested_paths_for_tool(&tool_call.name, &arguments);
+    let Some(root) = canonical_workspace_root(workspace_root) else {
+        return WorkspaceAccess::ExternalAllowed;
+    };
+    if paths
+        .iter()
+        .any(|path| path_requires_external_access(path, &root))
+    {
+        WorkspaceAccess::ExternalAllowed
+    } else {
+        WorkspaceAccess::WorkspaceOnly
+    }
+}
+
+fn requested_paths_for_tool(name: &str, arguments: &serde_json::Value) -> Vec<String> {
+    match name {
+        "bash" => get_working_directory(arguments).into_iter().collect(),
+        "read_file" | "write_file" | "stat_path" | "create_directory" | "delete_path" => {
+            argument_path(arguments, "path").into_iter().collect()
+        }
+        "list_files" | "search_files" => argument_path(arguments, "path")
+            .into_iter()
+            .filter(|path| !path.trim().is_empty())
+            .collect(),
+        "copy_path" | "move_path" => ["from", "to"]
+            .into_iter()
+            .filter_map(|key| argument_path(arguments, key))
+            .collect(),
+        "apply_patch" => arguments
+            .get("patch")
+            .or_else(|| arguments.get("input"))
+            .and_then(serde_json::Value::as_str)
+            .map(paths_from_patch_text)
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+fn argument_path(arguments: &serde_json::Value, key: &str) -> Option<String> {
+    arguments
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+fn paths_from_patch_text(patch: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    for line in patch.lines() {
+        let line = line.trim_start();
+        for prefix in [
+            "*** Add File:",
+            "*** Delete File:",
+            "*** Update File:",
+            "*** Move to:",
+        ] {
+            if let Some(path) = line.strip_prefix(prefix) {
+                paths.push(path.trim().to_string());
+            }
+        }
+    }
+    paths
+}
+
+fn canonical_workspace_root(workspace_root: &Path) -> Option<PathBuf> {
+    std::fs::canonicalize(workspace_root).ok()
+}
+
+fn path_requires_external_access(path: &str, workspace_root: &Path) -> bool {
+    let path = Path::new(path.trim());
+    if path.as_os_str().is_empty() {
+        return false;
+    }
+    if path
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return true;
+    }
+    let candidate = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        workspace_root.join(path)
+    };
+    let resolved = canonicalize_existing_or_parent(&candidate);
+    !resolved.starts_with(workspace_root)
+}
+
+fn canonicalize_existing_or_parent(candidate: &Path) -> PathBuf {
+    let mut current = candidate.to_path_buf();
+    loop {
+        if current.exists()
+            && let Ok(canonical) = std::fs::canonicalize(&current)
+        {
+            return canonical;
+        }
+        let Some(parent) = current.parent() else {
+            return candidate.to_path_buf();
+        };
+        if parent == current {
+            return candidate.to_path_buf();
+        }
+        current = parent.to_path_buf();
+    }
+}
+
 fn permission_risk_summary(tool_name: &str) -> &'static str {
     match tool_name {
         "bash" => "shell command; may execute arbitrary process actions",
@@ -1323,7 +1454,6 @@ fn permission_risk_summary(tool_name: &str) -> &'static str {
         "move_path" => "filesystem write; moves or renames paths",
         "apply_patch" => "batch filesystem edit",
         "skill_manage" => "project skill write or management",
-        name if is_high_risk_tool(name) => "high-risk tool",
         _ => "read-only or coordination tool",
     }
 }
@@ -1335,12 +1465,12 @@ async fn approve_tool_call(
     event_tx: AgentEventSender,
     context: &ToolContext,
 ) -> ToolApprovalDecision {
-    match decide_tool_permission(options, context.mode, request) {
-        PermissionDecision::Approved => ToolApprovalDecision::Approved,
-        PermissionDecision::NeedsUserApproval => {
+    match decide_tool_permission(options, context.mode, request, context.workspace_access) {
+        PermissionDecision::Approved { .. } => ToolApprovalDecision::Approved,
+        PermissionDecision::NeedsUserApproval { .. } => {
             request_user_approval(options, request, event_tx).await
         }
-        PermissionDecision::NeedsAiReview => ToolApprovalDecision::Denied {
+        PermissionDecision::NeedsAiReview { .. } => ToolApprovalDecision::Denied {
             reason: "AI reviewer approval requires the core execution path".to_string(),
         },
         PermissionDecision::Denied { reason } => ToolApprovalDecision::Denied { reason },
@@ -1489,6 +1619,7 @@ mod tests {
         ToolContext {
             event_tx,
             options: TurnOptions::default(),
+            workspace_access: WorkspaceAccess::WorkspaceOnly,
             mode: crate::turn::CompileMode::Auto,
             workspace_root: std::env::temp_dir(),
             workspace_instructions: None,
@@ -1724,7 +1855,7 @@ mod tests {
         let options = TurnOptions::default();
 
         assert_eq!(options.tool_approval_policy, ToolApprovalPolicy::AutoAllow);
-        assert_eq!(options.permission_mode, PermissionMode::WorkspaceWrite);
+        assert_eq!(options.permission_mode, PermissionMode::RequestApproval);
         assert!(options.tool_approval_callback.is_none());
     }
 
@@ -1848,6 +1979,72 @@ mod tests {
         assert_eq!(records[0].status, TimelineItemStatus::Denied);
         assert_eq!(records[0].name, "write_file");
         assert_eq!(records[0].result, "Tool disabled in plan mode: write_file");
+    }
+
+    #[tokio::test]
+    async fn request_approval_allows_external_path_after_user_approval() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let workspace_root =
+            std::env::temp_dir().join(format!("pure-permission-workspace-{unique}"));
+        let outside_root = std::env::temp_dir().join(format!("pure-permission-outside-{unique}"));
+        tokio::fs::create_dir_all(&workspace_root).await.unwrap();
+        tokio::fs::create_dir_all(&outside_root).await.unwrap();
+        let outside_file = outside_root.join("note.txt");
+        tokio::fs::write(&outside_file, "external ok")
+            .await
+            .unwrap();
+        let mut core = PureCore::default_provider().unwrap();
+        core.register_tool(ReadFileTool::new());
+        let tool_call = ToolCall::function(
+            "call-1",
+            "read_file",
+            serde_json::json!({"path": outside_file.to_string_lossy()}),
+            None,
+        );
+        let mut options = TurnOptions::default();
+        options.tool_approval_callback = Some(std::sync::Arc::new(|request| {
+            Box::pin(async move {
+                assert_eq!(request.name, "read_file");
+                ToolApprovalDecision::Approved
+            })
+        }));
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
+        let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+        let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+
+        let records = execute_tool_calls(
+            &[tool_call],
+            &mut budget,
+            &mut recorder,
+            ToolExecutionContext {
+                core: &core,
+                options: &options,
+                mode: crate::turn::CompileMode::Auto,
+                session_id: "turn-1",
+                workspace_root: &workspace_root,
+                workspace_instructions: None,
+                active_subagent: None,
+                agent_control: crate::AgentControl::default(),
+            },
+        )
+        .await;
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].status, TimelineItemStatus::Completed);
+        assert!(records[0].result.contains("external ok"));
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            AgentEvent::TimelineItemStarted { .. }
+        ));
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            AgentEvent::ToolApprovalRequested { name, .. } if name == "read_file"
+        ));
+        let _ = tokio::fs::remove_dir_all(workspace_root).await;
+        let _ = tokio::fs::remove_dir_all(outside_root).await;
     }
 
     #[tokio::test]

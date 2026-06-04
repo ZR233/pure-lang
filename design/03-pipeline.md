@@ -24,7 +24,7 @@ React action
 运行输入统一为新 DTO 契约（camelCase wire）。
 
 - `compileMode`：`plan | auto`
-- `turnOptions.permissionMode`：默认固定 `workspace-write`
+- `turnOptions.permissionMode`：默认固定 `request-approval`
 - `prompt`、`sessionId`、`workspaceRoot` 等进入 application service
 
 `compileMode` 是会话级协作模式。`auto` 是默认执行模式，允许模型在审批策略约束内主动修改工作区；`plan` 是 Codex 风格规划模式，允许读取、搜索、运行经审批的探索命令和调度探索型子代理，但最终交付物应是一段可执行计划，而不是直接修改文件。Plan Mode 的最终计划使用 `<proposed_plan>...</proposed_plan>` 包裹，由 streaming 层提取为独立 timeline item；普通 assistant 正文不显示这些标签。
@@ -36,9 +36,9 @@ React action
 策略约束：
 
 - 方案乙不保留旧命令别名和旧字段兜底
-- `PermissionMode::WorkspaceWrite` 为默认且主路径；旧 `ToolApprovalPolicy` 仅作为兼容构造
-- 手动审批接口保留在系统能力中，但不作为默认流程；`request-approval` 模式才会对高风险工具弹出用户审批
-- `auto-review` 模式使用 reviewer 角色模型审批高风险工具。reviewer 只返回批准或拒绝，不执行工具；解析失败、provider 失败或非明确批准均按拒绝处理
+- `PermissionMode::RequestApproval` 为默认且主路径；旧 `ToolApprovalPolicy` 仅作为兼容构造
+- 手动审批接口保留在系统能力中，但不作为默认流程；`request-approval` 模式只在工具请求 workspace 外访问时弹出用户审批，workspace 内读写直接放行
+- `auto-review` 模式使用 reviewer 角色模型审批 workspace 外访问。reviewer 只返回批准或拒绝，不执行工具；解析失败、provider 失败或非明确批准均按拒绝处理
 - `full-access` 放宽 Pure 文件工具和 `bash.workingDirectory` 的 workspace 边界，但仍只执行已注册工具，不提供 OS 沙箱或系统级提权
 - Studio 中的 Plan Mode 会保留 `bash` 探索能力，但 bash 必须走手动审批；明确写入类工具不会暴露给模型，也不能执行模型幻觉出的写入工具调用
 - 用户显式要求 `subagent`/子代理分工时，核心提示必须将 `subagent` 作为强约束；普通 shell 或文件探索不能替代子代理调度

@@ -216,15 +216,15 @@ pub type ToolApprovalCallback =
 
 /// 会话级权限模式。
 ///
-/// Pure v1 只实现本地策略层，不提供 OS 沙箱。该模式决定高风险工具
-/// 是直接放行、请求用户审批、请求 reviewer 审批，还是拒绝 workspace 外访问。
+/// Pure v1 只实现本地策略层，不提供 OS 沙箱。该模式决定 workspace 外访问
+/// 是请求用户审批、请求 reviewer 审批，还是直接放行。
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum PermissionMode {
+    #[default]
+    #[serde(alias = "workspace-write")]
     RequestApproval,
     AutoReview,
-    #[default]
-    WorkspaceWrite,
     FullAccess,
 }
 
@@ -233,7 +233,6 @@ impl PermissionMode {
         match self {
             Self::RequestApproval => "request-approval",
             Self::AutoReview => "auto-review",
-            Self::WorkspaceWrite => "workspace-write",
             Self::FullAccess => "full-access",
         }
     }
@@ -242,9 +241,9 @@ impl PermissionMode {
         match label {
             "request-approval" => Self::RequestApproval,
             "auto-review" => Self::AutoReview,
-            "workspace-write" => Self::WorkspaceWrite,
+            "workspace-write" => Self::RequestApproval,
             "full-access" => Self::FullAccess,
-            _ => Self::WorkspaceWrite,
+            _ => Self::RequestApproval,
         }
     }
 
@@ -253,7 +252,7 @@ impl PermissionMode {
     }
 
     pub fn is_default(&self) -> bool {
-        matches!(self, Self::WorkspaceWrite)
+        matches!(self, Self::RequestApproval)
     }
 }
 
@@ -298,7 +297,8 @@ pub enum ToolExecutionMode {
 
 /// 单轮运行选项。
 ///
-/// 用于前端控制工具审批等运行时行为。默认值保持历史行为：已注册工具自动执行。
+/// 用于前端控制工具审批等运行时行为。默认值允许 workspace 内工具直接执行，
+/// workspace 外访问按权限模式请求审批。
 #[derive(Clone)]
 pub struct TurnOptions {
     pub tool_approval_policy: ToolApprovalPolicy,
@@ -313,7 +313,7 @@ impl TurnOptions {
         Self {
             tool_approval_policy,
             permission_mode: match tool_approval_policy {
-                ToolApprovalPolicy::AutoAllow => PermissionMode::WorkspaceWrite,
+                ToolApprovalPolicy::AutoAllow => PermissionMode::RequestApproval,
                 ToolApprovalPolicy::Manual => PermissionMode::RequestApproval,
                 ToolApprovalPolicy::DenyAll => PermissionMode::RequestApproval,
             },
@@ -472,7 +472,7 @@ mod tests {
         );
         assert_eq!(
             PermissionMode::from_label("workspace-write"),
-            PermissionMode::WorkspaceWrite
+            PermissionMode::RequestApproval
         );
         assert_eq!(
             PermissionMode::from_label("full-access"),
@@ -480,10 +480,10 @@ mod tests {
         );
         assert_eq!(
             PermissionMode::from_label("old-auto-allow"),
-            PermissionMode::WorkspaceWrite
+            PermissionMode::RequestApproval
         );
         assert!(PermissionMode::FullAccess.allows_workspace_escape());
-        assert!(!PermissionMode::WorkspaceWrite.allows_workspace_escape());
+        assert!(!PermissionMode::RequestApproval.allows_workspace_escape());
     }
 
     #[test]

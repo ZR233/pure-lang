@@ -10,7 +10,6 @@ export type CompileMode = "auto" | "plan";
 export type PermissionMode =
   | "request-approval"
   | "auto-review"
-  | "workspace-write"
   | "full-access";
 
 export type SessionRecord = {

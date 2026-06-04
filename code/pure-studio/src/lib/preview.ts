@@ -304,7 +304,7 @@ export function createPreviewConfig(): ConfigPayload {
     toml: `schema_version = 1
 
 [runtime]
-permission_mode = "workspace-write"
+permission_mode = "request-approval"
 active_skills = ["rust", "git", "doc"]
 active_mcp_servers = ["github", "filesystem"]
 
@@ -355,7 +355,7 @@ base_url = "https://api.openai.com/v1"
 default_model = "gpt-4.1"
 wire_api = "responses"
 `,
-    permissionMode: "workspace-write",
+    permissionMode: "request-approval",
     providers: [
       makeProvider({
         id: "deepseek",

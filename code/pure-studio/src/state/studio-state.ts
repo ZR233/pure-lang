@@ -118,7 +118,7 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   providerSearch: "",
   selectedProviderId: null,
   configToml: "",
-  permissionMode: "workspace-write",
+  permissionMode: "request-approval",
   configExists: false,
 });
 
