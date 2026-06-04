@@ -15,6 +15,9 @@ use pl_protocol::{
 use tokio::sync::RwLock;
 
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
+use crate::context_compaction::{
+    CompactionOutcome, CompactionTrigger, ContextCompactionRequest, maybe_compact_session,
+};
 use crate::provider_error::is_provider_429_error;
 use crate::runtime_usage::{agent_runtime_delta, identity_for_subagent, token_usage_snapshot};
 use crate::session::CoreSession;
@@ -300,7 +303,9 @@ impl PureCore {
             }),
         });
 
-        let mut messages = session.messages().to_vec();
+        let mut messages;
+        let mut provider_prompt_tokens_for_compaction = None;
+        let mut last_compacted_state = None;
         let mut iteration = 0_u32;
         loop {
             let must_dispatch_agent_now = if let Some(initial_count) = initial_agent_count {
@@ -327,7 +332,6 @@ impl PureCore {
                 budget_limit = Some(limit);
                 break;
             }
-            budget_tracker.record_model_step();
 
             let iteration_tools = if must_dispatch_agent_now {
                 tool_schemas
@@ -343,6 +347,68 @@ impl PureCore {
             } else {
                 instructions.clone()
             };
+
+            let compaction_trigger = provider_prompt_tokens_for_compaction
+                .take()
+                .map_or(CompactionTrigger::EstimatedTokens, |prompt_tokens| {
+                    CompactionTrigger::ProviderPromptTokens(prompt_tokens)
+                });
+            let current_compaction_state = (session.revision(), session.len());
+            if last_compacted_state != Some(current_compaction_state) {
+                let compaction_result = maybe_compact_session(
+                    session,
+                    ContextCompactionRequest {
+                        provider: &provider,
+                        model: &model,
+                        request_instructions: &iteration_instructions,
+                        trigger: compaction_trigger,
+                        event_tx: recorder.sender().clone(),
+                    },
+                )
+                .await;
+                match compaction_result {
+                    Ok(CompactionOutcome::Skipped) => {}
+                    Ok(CompactionOutcome::Compacted { usage }) => {
+                        last_compacted_state = Some((session.revision(), session.len()));
+                        total_usage.prompt_tokens += usage.prompt_tokens;
+                        total_usage.completion_tokens += usage.completion_tokens;
+                        total_usage.cached_prompt_tokens += usage.cached_prompt_tokens;
+                        let usage_snapshot = token_usage_snapshot(&usage);
+                        let model_info = provider.model_info(&model);
+                        recorder.broadcast(AgentEvent::AgentRuntimeUpdated {
+                            delta: agent_runtime_delta(
+                                format!("{session_id}-compact-{iteration}"),
+                                identity_for_subagent(active_subagent.as_ref()),
+                                &model_info,
+                                usage_snapshot,
+                                unix_seconds(),
+                            ),
+                        });
+                    }
+                    Err(error) => {
+                        let error = error.to_string();
+                        let severity = provider_error_severity(active_subagent.as_ref(), &error);
+                        return Ok(failed_turn_result(
+                            recorder,
+                            &session_id,
+                            request.mode,
+                            last_content,
+                            last_reasoning_content,
+                            last_model,
+                            total_usage,
+                            session.messages().len(),
+                            error,
+                            severity,
+                        ));
+                    }
+                }
+            }
+            messages = session.messages().to_vec();
+            if let Err(limit) = budget_tracker.check_wall_clock() {
+                budget_limit = Some(limit);
+                break;
+            }
+            budget_tracker.record_model_step();
 
             let inference_id = format!("{session_id}-inf-{iteration}");
             let mut inference_item = recorder.inference_item(&session_id, &inference_id, &model);
@@ -446,6 +512,10 @@ impl PureCore {
             let usage_snapshot = token_usage_snapshot(&response.usage);
             recorder.complete_inference_item(inference_item, usage_snapshot.clone());
             let model_info = provider.model_info(&actual_model);
+            let response_prompt_tokens = response.usage.prompt_tokens;
+            let response_reached_auto_compact_limit = model_info
+                .resolved_auto_compact_limit()
+                .is_some_and(|limit| response_prompt_tokens >= limit);
             recorder.broadcast(AgentEvent::AgentRuntimeUpdated {
                 delta: agent_runtime_delta(
                     inference_id.clone(),
@@ -520,6 +590,9 @@ impl PureCore {
             if reasoning_content.is_some() {
                 last_reasoning_content = reasoning_content;
             }
+            if response_reached_auto_compact_limit {
+                provider_prompt_tokens_for_compaction = Some(response_prompt_tokens);
+            }
 
             let tool_results = execute_tool_calls(
                 &tool_calls,
@@ -566,7 +639,6 @@ impl PureCore {
             if budget_limit.is_some() {
                 break;
             }
-            messages = session.messages().to_vec();
             iteration += 1;
         }
 

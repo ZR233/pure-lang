@@ -2,6 +2,7 @@ mod agent;
 pub mod application;
 mod config;
 mod config_editor;
+mod context_compaction;
 mod core;
 pub mod domain;
 mod first_run;

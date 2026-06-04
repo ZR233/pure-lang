@@ -235,6 +235,17 @@ impl StudioStore {
         Ok(())
     }
 
+    pub async fn replace_session_messages(
+        &self,
+        session_id: &str,
+        messages: &[Message],
+    ) -> Result<()> {
+        let tx = self.db.begin().await?;
+        replace_session_messages_with_tx(&tx, session_id, messages).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn rename_session(&self, session_id: &str, title: &str) -> Result<()> {
         use entities::session;
         if let Some(existing) = session::Entity::find_by_id(session_id.to_string())
@@ -435,24 +446,7 @@ impl StudioStore {
 
         let tx = self.db.begin().await?;
         if !timeline_events.is_empty() {
-            use entities::timeline_event;
-            let models: Vec<timeline_event::ActiveModel> = timeline_events
-                .iter()
-                .map(|event| {
-                    let payload = serde_json::to_string(&event.kind).unwrap_or_default();
-                    timeline_event::ActiveModel {
-                        id: Set(new_timeline_event_id()),
-                        session_id: Set(event.session_id.clone()),
-                        sequence: Set(event.sequence as i64),
-                        created_at: Set(event.timestamp),
-                        kind: Set(trace_event_kind_label(&event.kind).to_string()),
-                        payload_json: Set(payload),
-                    }
-                })
-                .collect();
-            timeline_event::Entity::insert_many(models)
-                .exec(&tx)
-                .await?;
+            insert_timeline_events_with_tx(&tx, timeline_events).await?;
         }
         if !messages.is_empty() {
             let now = unix_seconds();
@@ -461,6 +455,21 @@ impl StudioStore {
             }
             touch_session_with_tx(&tx, session_id, now).await?;
         }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn replace_turn_records(
+        &self,
+        session_id: &str,
+        timeline_events: &[TraceEvent],
+        messages: &[Message],
+    ) -> Result<()> {
+        let tx = self.db.begin().await?;
+        if !timeline_events.is_empty() {
+            insert_timeline_events_with_tx(&tx, timeline_events).await?;
+        }
+        replace_session_messages_with_tx(&tx, session_id, messages).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -755,4 +764,48 @@ impl StudioStore {
 
 fn runtime_snapshot_id(session_id: &str, agent_id: &str) -> String {
     format!("{session_id}:{agent_id}")
+}
+
+async fn insert_timeline_events_with_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    timeline_events: &[TraceEvent],
+) -> Result<()> {
+    if timeline_events.is_empty() {
+        return Ok(());
+    }
+    use entities::timeline_event;
+    let models: Vec<timeline_event::ActiveModel> = timeline_events
+        .iter()
+        .map(|event| {
+            let payload = serde_json::to_string(&event.kind).unwrap_or_default();
+            timeline_event::ActiveModel {
+                id: Set(new_timeline_event_id()),
+                session_id: Set(event.session_id.clone()),
+                sequence: Set(event.sequence as i64),
+                created_at: Set(event.timestamp),
+                kind: Set(trace_event_kind_label(&event.kind).to_string()),
+                payload_json: Set(payload),
+            }
+        })
+        .collect();
+    timeline_event::Entity::insert_many(models).exec(tx).await?;
+    Ok(())
+}
+
+async fn replace_session_messages_with_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    session_id: &str,
+    messages: &[Message],
+) -> Result<()> {
+    use entities::message;
+    let now = unix_seconds();
+    message::Entity::delete_many()
+        .filter(message::Column::SessionId.eq(session_id.to_string()))
+        .exec(tx)
+        .await?;
+    for message in messages {
+        insert_message_with_tx(tx, session_id, message, now).await?;
+    }
+    touch_session_with_tx(tx, session_id, now).await?;
+    Ok(())
 }

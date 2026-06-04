@@ -130,10 +130,11 @@ impl StudioRuntime {
             .await?
             .context("selected project not found")?;
         let mut session = self.store.load_core_session(session_id).await?;
-        let previous_len = session.len();
         let config = self.config_store.load_or_default()?;
         let workspace_root = resolve_workspace_root(Path::new(&project.path))?;
         let workspace_instructions = load_workspace_instructions(&workspace_root)?;
+        let previous_revision = session.revision();
+        let previous_len = session.len();
         let mut request = TurnRequest::new(prompt.clone(), CompileMode::Auto);
         if !workspace_instructions.trim().is_empty() {
             request = request.with_workspace_instructions(workspace_instructions.clone());
@@ -154,10 +155,16 @@ impl StudioRuntime {
             .run_turn_with_trace(&mut session, request, &mut recorder, options)
             .await?;
         let timeline_events = result.timeline_events.clone();
-        let new_messages = &session.messages()[previous_len..];
-        self.store
-            .append_turn_records(session_id, &timeline_events, new_messages)
-            .await?;
+        if session.revision() != previous_revision {
+            self.store
+                .replace_turn_records(session_id, &timeline_events, session.messages())
+                .await?;
+        } else {
+            let new_messages = &session.messages()[previous_len..];
+            self.store
+                .append_turn_records(session_id, &timeline_events, new_messages)
+                .await?;
+        }
         let resolved = config.resolve_role(ModelRole::Planner)?;
         let model = resolved
             .models
