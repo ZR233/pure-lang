@@ -75,7 +75,7 @@ platforms: ["windows", "linux", "macos"]
 
 系统 skills 与用户/外部 skills 一样对 root agent 和 subagent 可见，但只读。模型如需沉淀新的项目经验，必须通过 `skill_manage` 写入项目目录。
 
-Studio 状态栏的 Skills 只展示当前会话已激活的 skills。激活定义为该会话中 `skill_view` 成功返回并把 skill 内容或支持文件内容写入上下文；仅出现在索引中但未 `skill_view` 的 skill 不计入。
+Studio 状态栏的 Skills 只展示当前会话已激活的 skills。激活定义为该会话中 `skill_view` 成功返回并把 skill 内容或支持文件内容写入上下文；仅出现在索引中但未 `skill_view` 的 skill 不计入。运行中收到成功的 `skill_view` completed event 后，前端应立即更新状态栏；完成响应中的 `sessionRuntime.activeSkills` 作为最终校准。
 
 Studio 设置页的 Skills 标签页展示当前项目可发现的 skills 只读列表，用于查看 discovery 结果和来源范围。该列表来自同一套 project/user/system/external 发现规则，并显示每个 skill 的 scope；它不调用 `skill_view`，不改变会话 active skills，也不写入使用统计。
 

@@ -2,30 +2,56 @@
 
 自然语言编译器 — 将用户的自然语言需求整理为可执行导向的编译计划、代码生成意图和后续动作建议。
 
+## 项目概览
+
+Pure-Lang 是一个**自然语言编译器**：接收用户的自然语言需求，将其编译为可执行的计划、代码生成意图和后续动作建议。项目采用模块化单体架构，通过 Tauri 2 桌面应用提供交互界面，核心编译引擎基于 Rust 实现。
+
+> 📖 详细设计文档见 [`design/`](./design/) 目录
+
 ## 架构
 
 ```text
-pure-studio            Tauri 2 桌面应用：React UI、命令桥接、事件推送
-    │
-pl-core                核心逻辑层：turn、session、配置、工具审批、编译流程编排
-    │
-pl-model               LLM provider 层：模型元数据、API 适配、SSE 流式响应
-    │
-pl-protocol            公共协议层：消息、事件、错误、权限等跨 crate 共享类型
+pure-studio               Tauri 2 桌面应用
+  │                       React UI + Tauri 命令桥接 + 事件推送
+  ▼
+pl-core                   核心编译引擎
+  │                       turn/session 编排、配置管理、工具审批、
+  │                       Studio SQLite 持久化、技能系统
+  ├────► pl-model         LLM Provider 适配层
+  │                       OpenAI 兼容 wire API、SSE 流式、模型元数据
+  ▼
+pl-protocol               公共协议层
+                          Message、AgentEvent、PureError 等跨 crate 共享类型
+```
+
+### Workspace Crate
+
+| Crate | 路径 | 职责 |
+|-------|------|------|
+| `pl-protocol` | `code/pl-protocol/` | 跨 crate 协议类型：消息、事件、错误、权限 |
+| `pl-model` | `code/pl-model/` | LLM provider 抽象与适配：OpenAI 兼容 API、SSE 流式、模型元数据管理 |
+| `pl-core` | `code/pl-core/` | 核心编译引擎：端口-适配器架构，含 `application`、`domain`、`infrastructure`、`interfaces` 四层 |
+| `pure-studio` | `code/pure-studio/` | Tauri 2 桌面应用：React 前端 + Rust Tauri 桥接 |
+
+### 依赖规则
+
+```
+pl-protocol  ←  pl-model  ←  pl-core  ←  pure-studio
+（底层）                                    （顶层）
 ```
 
 ## 快速开始
 
 ### 前置条件
 
-- [Rust](https://rustup.rs/) (edition 2024)
+- [Rust](https://rustup.rs/)（edition 2024）
 - [Node.js](https://nodejs.org/) LTS
 - Windows / macOS / Linux
 
-### 启动开发环境
+### 启动 Pure Studio 桌面应用
 
 ```powershell
-# Windows
+# Windows（一键启动，自动检查依赖）
 ./run-pure-studio.ps1
 
 # 或手动启动
@@ -34,27 +60,44 @@ npm install
 npm run tauri:dev
 ```
 
-### 配置
-
-首次启动后，在 Pure Studio 设置页面配置 LLM provider。配置保存在：
+首次启动后，在 Pure Studio 设置页面配置 LLM Provider。配置保存在：
 
 ```text
-~/.pure/config.toml                 # provider/model/role 配置
-~/.pure/studio/studio_1.sqlite      # 会话、消息、工具审批记录
+~/.pure/config.toml                 # 全局配置（provider、模型、角色）
+~/.pure/studio/studio_*.sqlite      # Studio 数据库（会话、消息、运行时记录）
 ```
 
-## 项目结构
+### 项目结构
 
-```text
+```
 pure-lang/
 ├── code/
-│   ├── pl-protocol/     # 跨 crate 公共协议类型
-│   ├── pl-model/        # LLM provider 适配
-│   ├── pl-core/         # 核心编译逻辑
-│   └── pure-studio/     # Tauri 2 桌面应用
-│       ├── src-tauri/   # Rust 后端（Tauri 命令桥接）
-│       └── src/         # React + TypeScript 前端
-└── design/              # 架构设计文档
+│   ├── pl-protocol/          # 公共协议层
+│   ├── pl-model/             # LLM provider 适配
+│   ├── pl-core/              # 核心编译引擎
+│   │   ├── src/application/    # Use case 编排
+│   │   ├── src/domain/         # 领域模型
+│   │   ├── src/infrastructure/ # 基础设施适配器（SQLite、文件系统）
+│   │   ├── src/interfaces/     # 端口定义
+│   │   ├── src/agent/          # 子代理系统
+│   │   ├── src/tool/           # 工具系统（Bash、Subagent、文件操作）
+│   │   ├── src/studio/         # Studio 运行时
+│   │   ├── src/skill/          # 技能系统
+│   │   └── migrations/         # SeaORM SQLite 迁移
+│   └── pure-studio/          # Tauri 2 桌面应用
+│       ├── src-tauri/          # Rust 后端（命令桥接、事件、审批）
+│       └── src/                # React + TypeScript 前端
+├── design/                   # 架构设计文档（13 份）
+│   ├── 01-overview.md
+│   ├── 02-crates.md
+│   ├── 03-pipeline.md
+│   ├── ...
+│   └── 13-skills.md
+├── .claude/skills/           # 项目技能（Codex 协作规则）
+├── .cargo/config.toml        # Cargo 配置
+├── CLAUDE.md                 # 项目规范
+├── Agents.md                 # Codex 项目记忆
+└── run-pure-studio.ps1       # Windows 启动脚本
 ```
 
 ## 技术栈
@@ -62,18 +105,39 @@ pure-lang/
 | 层级 | 技术 |
 |------|------|
 | 桌面框架 | Tauri 2 |
-| 后端 | Rust, tokio, SeaORM (SQLite) |
-| 前端 | React 18, TypeScript, Vite |
-| LLM 集成 | OpenAI 兼容 API, SSE 流式 |
-| 序列化 | serde, TOML |
+| 后端语言 | Rust（edition 2024） |
+| 异步运行时 | tokio |
+| 数据库 | SQLite via SeaORM（SQLx 后端） |
+| 序列化 | serde + serde_json + toml |
+| 前端框架 | React 18 + TypeScript |
+| 构建工具 | Vite |
+| UI 图标 | lucide-react |
+| 国际化 | i18next + react-i18next |
+| LLM 集成 | OpenAI 兼容 API（SSE 流式） |
+| 流式解析 | eventsource-stream |
+
+## 核心概念
+
+| 概念 | 说明 |
+|------|------|
+| **Turn** | 单轮编译请求，包含消息、工具调用、模型交互的完整生命周期 |
+| **Session** | 多轮会话管理，维护消息历史和上下文 |
+| **Tool** | 可执行工具（Bash、Subagent、文件操作等），通过 `ToolRegistry` 注册 |
+| **Agent** | 子代理系统，支持分层任务分解与编排 |
+| **Skill** | 项目技能系统，定义 Codex 协作规则和可复用流程 |
+| **Studio** | Pure Studio 桌面运行时，管理项目、会话和配置 |
+| **Provider** | LLM Provider 抽象（OpenAI、DeepSeek、智谱等） |
+| **CompileMode** | 编译模式（auto / plan / compact） |
 
 ## 开发
+
+### Rust 后端
 
 ```bash
 # 格式化
 cargo fmt
 
-# Lint
+# Lint（严格模式）
 cargo clippy -- -D warnings
 
 # 运行各 crate 测试
@@ -81,12 +145,57 @@ cargo test -p pl-protocol
 cargo test -p pl-model
 cargo test -p pl-core
 
-# 前端类型检查
+# 运行全部测试
+cargo test --workspace
+```
+
+### 前端
+
+```bash
+# 类型检查
 npm --prefix code/pure-studio run typecheck
 
-# 前端构建
+# 构建
 npm --prefix code/pure-studio run build
+
+# 运行前端测试
+npm --prefix code/pure-studio run test
 ```
+
+### Tauri 开发
+
+```bash
+cd code/pure-studio
+npm run tauri:dev       # 启动开发模式（热重载）
+npm run tauri:build     # 生产构建
+```
+
+## 设计文档
+
+项目完整的架构决策和设计说明收录在 [`design/`](./design/) 目录：
+
+| 文档 | 内容 |
+|------|------|
+| [01-overview.md](./design/01-overview.md) | 系统总览与定位 |
+| [02-crates.md](./design/02-crates.md) | Crate 设计与端口-适配器架构 |
+| [03-pipeline.md](./design/03-pipeline.md) | 编译管线流程 |
+| [04-security.md](./design/04-security.md) | 安全与权限模型 |
+| [05-extension.md](./design/05-extension.md) | 扩展机制 |
+| [06-phases.md](./design/06-phases.md) | 编译阶段说明 |
+| [07-model.md](./design/07-model.md) | 模型与 Provider 设计 |
+| [08-streaming.md](./design/08-streaming.md) | SSE 流式处理 |
+| [09-conventions.md](./design/09-conventions.md) | 编码约定 |
+| [10-config.md](./design/10-config.md) | 配置系统 |
+| [11-studio-ui.md](./design/11-studio-ui.md) | Studio UI 设计 |
+| [12-plan-b-implementation-spec.md](./design/12-plan-b-implementation-spec.md) | 方案乙实现规约 |
+| [13-skills.md](./design/13-skills.md) | 技能系统设计 |
+
+## 项目规范
+
+详细的编码约定和协作规则见：
+
+- [`CLAUDE.md`](./CLAUDE.md) — 项目规范（RPITIT、模块设计、导出、测试等）
+- [`Agents.md`](./Agents.md) — 项目记忆与 Codex 协作约定
 
 ## License
 
