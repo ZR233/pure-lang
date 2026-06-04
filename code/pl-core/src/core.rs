@@ -2034,13 +2034,15 @@ mod tests {
             serde_json::json!({"path": outside_file.to_string_lossy()}),
             None,
         );
-        let mut options = TurnOptions::default();
-        options.tool_approval_callback = Some(std::sync::Arc::new(|request| {
-            Box::pin(async move {
-                assert_eq!(request.name, "read_file");
-                ToolApprovalDecision::Approved
-            })
-        }));
+        let options = TurnOptions {
+            tool_approval_callback: Some(std::sync::Arc::new(|request| {
+                Box::pin(async move {
+                    assert_eq!(request.name, "read_file");
+                    ToolApprovalDecision::Approved
+                })
+            })),
+            ..Default::default()
+        };
         let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
         let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
         let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
