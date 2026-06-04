@@ -357,7 +357,8 @@ impl PureCore {
         let mut last_reasoning_content = None;
         let mut last_model = model.clone();
         let mut total_usage = pl_model::TokenUsage::default();
-        let mut session_message_count = 0;
+        let mut safe_message_count = session.len();
+        let mut session_message_count = safe_message_count;
 
         let skills_instructions = self.config.as_ref().and_then(|config| {
             match crate::skill::build_skills_prompt(&workspace_root, &config.skills) {
@@ -398,6 +399,7 @@ impl PureCore {
                 false
             };
             if is_cancelled(&options) {
+                session.truncate_messages(safe_message_count);
                 return Ok(interrupted_turn_result(
                     recorder,
                     &session_id,
@@ -406,7 +408,7 @@ impl PureCore {
                     last_reasoning_content,
                     last_model,
                     total_usage,
-                    session.messages().len(),
+                    safe_message_count,
                     cancellation_reason(),
                 ));
             }
@@ -452,6 +454,8 @@ impl PureCore {
                     Ok(CompactionOutcome::Skipped) => {}
                     Ok(CompactionOutcome::Compacted { usage }) => {
                         last_compacted_state = Some((session.revision(), session.len()));
+                        safe_message_count = session.len();
+                        session_message_count = safe_message_count;
                         total_usage.prompt_tokens += usage.prompt_tokens;
                         total_usage.completion_tokens += usage.completion_tokens;
                         total_usage.cached_prompt_tokens += usage.cached_prompt_tokens;
@@ -523,6 +527,7 @@ impl PureCore {
                     tokio::select! {
                         result = provider.stream_complete(completion_request, recorder.sender().clone()) => result,
                         _ = token.cancelled() => {
+                            session.truncate_messages(safe_message_count);
                             return Ok(interrupted_turn_result(
                                 recorder,
                                 &session_id,
@@ -531,7 +536,7 @@ impl PureCore {
                                 last_reasoning_content,
                                 last_model,
                                 total_usage,
-                                session.messages().len(),
+                                safe_message_count,
                                 cancellation_reason(),
                             ));
                         }
@@ -546,6 +551,7 @@ impl PureCore {
             let response = match response_result {
                 Ok(response) => response,
                 Err(_) if is_cancelled(&options) => {
+                    session.truncate_messages(safe_message_count);
                     return Ok(interrupted_turn_result(
                         recorder,
                         &session_id,
@@ -554,7 +560,7 @@ impl PureCore {
                         last_reasoning_content,
                         last_model,
                         total_usage,
-                        session.messages().len(),
+                        safe_message_count,
                         cancellation_reason(),
                     ));
                 }
@@ -656,6 +662,7 @@ impl PureCore {
                 last_content = content;
                 last_reasoning_content = reasoning_content;
                 session_message_count = session.messages().len();
+                safe_message_count = session_message_count;
                 break;
             }
 
@@ -698,6 +705,7 @@ impl PureCore {
                 subagent_dispatch_recovered = true;
             }
             if is_cancelled(&options) {
+                session.truncate_messages(safe_message_count);
                 return Ok(interrupted_turn_result(
                     recorder,
                     &session_id,
@@ -706,7 +714,7 @@ impl PureCore {
                     last_reasoning_content,
                     last_model,
                     total_usage,
-                    session.messages().len(),
+                    safe_message_count,
                     cancellation_reason(),
                 ));
             }
@@ -721,6 +729,7 @@ impl PureCore {
             }
 
             session_message_count = session.messages().len();
+            safe_message_count = session_message_count;
             if budget_limit.is_some() {
                 break;
             }
@@ -729,6 +738,7 @@ impl PureCore {
 
         total_usage.total_tokens = total_usage.prompt_tokens + total_usage.completion_tokens;
         if is_cancelled(&options) {
+            session.truncate_messages(safe_message_count);
             return Ok(interrupted_turn_result(
                 recorder,
                 &session_id,
@@ -737,7 +747,7 @@ impl PureCore {
                 last_reasoning_content,
                 last_model,
                 total_usage,
-                session_message_count,
+                safe_message_count,
                 cancellation_reason(),
             ));
         }

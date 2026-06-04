@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 import type { TFunction } from "i18next";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   AgentDto,
@@ -32,6 +31,7 @@ import type {
 } from "../types";
 import type { TimelineEntry, ToolGroupSummaryPart } from "../state/selectors";
 import { SessionStatusBar } from "./SessionStatusBar";
+import { ConversationTimeline } from "./ConversationTimeline";
 
 const agentStatusKeys: Record<AgentStatus, string> = {
   queued: "subagent.queued",
@@ -67,8 +67,6 @@ type ConversationPanelProps = {
   onSendPrompt: () => void;
   onStopPrompt: () => void;
 };
-
-const SCROLL_THRESHOLD = 40;
 
 function compact(value: string, max = 220): string {
   const text = value.trim();
@@ -680,183 +678,29 @@ export function ConversationPanel({
   onStopPrompt,
 }: ConversationPanelProps) {
   const { t } = useTranslation();
-  const messageStreamRef = useRef<HTMLDivElement>(null);
-  const timelineRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const isAtBottomRef = useRef(true);
-  const followModeRef = useRef<"following" | "paused">("following");
-  const programmaticScrollRef = useRef(false);
-  const userInteractingRef = useRef(false);
-  const userInteractingTimerRef = useRef<number | null>(null);
-  const didRenderEntriesRef = useRef(false);
-  const [showScrollButton, setShowScrollButton] = useState(false);
-  const prevBusyRef = useRef(isBusy);
   const stopping = turnPhase === "stopping";
   const currentMode: CompileMode = selectedSession?.mode === "plan" ? "plan" : "auto";
 
-  useEffect(() => {
-    const el = messageStreamRef.current;
-    if (!el) return;
-
-    const updateBottomState = () => {
-      const atBottom = isNearBottom(el);
-      isAtBottomRef.current = atBottom;
-      if (atBottom) {
-        followModeRef.current = "following";
-      }
-      setShowScrollButton(followModeRef.current === "paused" || !atBottom);
-      return atBottom;
-    };
-
-    const markUserInteraction = () => {
-      userInteractingRef.current = true;
-      if (userInteractingTimerRef.current !== null) {
-        window.clearTimeout(userInteractingTimerRef.current);
-      }
-      userInteractingTimerRef.current = window.setTimeout(() => {
-        userInteractingRef.current = false;
-        userInteractingTimerRef.current = null;
-      }, 220);
-    };
-
-    const handleScroll = () => {
-      const atBottom = isNearBottom(el);
-      isAtBottomRef.current = atBottom;
-      if (programmaticScrollRef.current) {
-        setShowScrollButton(false);
-        return;
-      }
-
-      if (atBottom) {
-        followModeRef.current = "following";
-        userInteractingRef.current = false;
-      } else if (userInteractingRef.current) {
-        followModeRef.current = "paused";
-      }
-      setShowScrollButton(followModeRef.current === "paused" || !atBottom);
-    };
-
-    const handleUserScrollIntent = () => {
-      markUserInteraction();
-      window.requestAnimationFrame(updateBottomState);
-    };
-
-    el.addEventListener("wheel", handleUserScrollIntent, { passive: true });
-    el.addEventListener("touchmove", handleUserScrollIntent, { passive: true });
-    el.addEventListener("pointerdown", handleUserScrollIntent);
-    el.addEventListener("keydown", handleUserScrollIntent);
-    el.addEventListener("scroll", handleScroll, { passive: true });
-    return () => {
-      el.removeEventListener("wheel", handleUserScrollIntent);
-      el.removeEventListener("touchmove", handleUserScrollIntent);
-      el.removeEventListener("pointerdown", handleUserScrollIntent);
-      el.removeEventListener("keydown", handleUserScrollIntent);
-      el.removeEventListener("scroll", handleScroll);
-      if (userInteractingTimerRef.current !== null) {
-        window.clearTimeout(userInteractingTimerRef.current);
-      }
-    };
-  }, []);
-
-  function isNearBottom(el: HTMLDivElement): boolean {
-    return el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_THRESHOLD;
-  }
-
-  function scrollToLatest(mode: "preserve" | "force") {
-    const el = messageStreamRef.current;
-    if (!el) return;
-    if (mode === "preserve" && followModeRef.current !== "following") {
-      setShowScrollButton(true);
-      return;
+  function renderTimelineEntry(entry: TimelineEntry) {
+    if (entry.kind === "message") {
+      return <MessageEntry entry={entry} />;
     }
-    if (mode === "force") {
-      followModeRef.current = "following";
+    if (entry.kind === "plan") {
+      return <PlanEntry entry={entry} onImplementPlan={onImplementPlan} isBusy={isBusy} t={t} />;
     }
-    programmaticScrollRef.current = true;
-
-    const scroll = () => {
-      bottomRef.current?.scrollIntoView({ block: "end" });
-      el.scrollTop = el.scrollHeight;
-      isAtBottomRef.current = true;
-      if (mode === "force" || followModeRef.current === "following") {
-        followModeRef.current = "following";
-      }
-      userInteractingRef.current = false;
-      setShowScrollButton(false);
-    };
-
-    scroll();
-    window.requestAnimationFrame(() => {
-      if (mode === "preserve" && followModeRef.current !== "following") {
-        programmaticScrollRef.current = false;
-        return;
-      }
-      scroll();
-      window.requestAnimationFrame(() => {
-        if (mode === "preserve" && followModeRef.current !== "following") {
-          programmaticScrollRef.current = false;
-          return;
-        }
-        scroll();
-        window.setTimeout(() => {
-          if (mode === "preserve" && followModeRef.current !== "following") {
-            programmaticScrollRef.current = false;
-            return;
-          }
-          scroll();
-          programmaticScrollRef.current = false;
-        }, 80);
-      });
-    });
-  }
-
-  useLayoutEffect(() => {
-    if (!didRenderEntriesRef.current) {
-      didRenderEntriesRef.current = true;
-      return;
+    if (entry.kind === "thought") {
+      return <ThoughtEntry content={entry.content} />;
     }
-    if (followModeRef.current === "following") {
-      scrollToLatest("preserve");
+    if (entry.kind === "tool") {
+      return <ToolEntry item={entry.item} t={t} />;
     }
-  }, [entries]);
-
-  useEffect(() => {
-    const timeline = timelineRef.current;
-    if (!timeline) return;
-    if (typeof ResizeObserver === "undefined") {
-      if (followModeRef.current === "following") {
-        scrollToLatest("preserve");
-      }
-      return;
+    if (entry.kind === "toolGroup") {
+      return <ToolGroupEntry entry={entry} t={t} />;
     }
-    const observer = new ResizeObserver(() => {
-      if (followModeRef.current === "following") {
-        scrollToLatest("preserve");
-      } else if (messageStreamRef.current) {
-        setShowScrollButton(!isNearBottom(messageStreamRef.current));
-      }
-    });
-    observer.observe(timeline);
-    return () => observer.disconnect();
-  }, [entries.length]);
-
-  useEffect(() => {
-    if (isBusy && !prevBusyRef.current) {
-      isAtBottomRef.current = true;
-      followModeRef.current = "following";
-      scrollToLatest("force");
+    if (entry.kind === "agent") {
+      return <AgentEntry item={entry.item} t={t} />;
     }
-    prevBusyRef.current = isBusy;
-  }, [isBusy]);
-
-  function scrollToBottom() {
-    const el = messageStreamRef.current;
-    if (el) {
-      isAtBottomRef.current = true;
-      followModeRef.current = "following";
-      scrollToLatest("force");
-      setShowScrollButton(false);
-    }
+    return <TraceEntry item={entry.item} t={t} />;
   }
 
   return (
@@ -868,58 +712,20 @@ export function ConversationPanel({
         </div>
       </header>
 
-      <div className="message-stream" ref={messageStreamRef}>
-        {entries.length === 0 ? (
+      <ConversationTimeline
+        sessionId={selectedSession?.id ?? null}
+        entries={entries}
+        isBusy={isBusy}
+        scrollToBottomLabel={t("toolCall.scrollToBottom")}
+        renderEntry={renderTimelineEntry}
+        emptyState={
           <div className="empty-state">
             <Terminal size={34} />
             <h2>{t("conversation.emptyTitle")}</h2>
             <p>{t("conversation.emptyDescription")}</p>
           </div>
-        ) : (
-          <div className="conversation-timeline" ref={timelineRef}>
-            {entries.map((entry) => {
-              if (entry.kind === "message") {
-                return <MessageEntry key={entry.key} entry={entry} />;
-              }
-              if (entry.kind === "plan") {
-                return (
-                  <PlanEntry
-                    key={entry.key}
-                    entry={entry}
-                    onImplementPlan={onImplementPlan}
-                    isBusy={isBusy}
-                    t={t}
-                  />
-                );
-              }
-              if (entry.kind === "thought") {
-                return <ThoughtEntry key={entry.key} content={entry.content} />;
-              }
-              if (entry.kind === "tool") {
-                return <ToolEntry key={entry.key} item={entry.item} t={t} />;
-              }
-              if (entry.kind === "toolGroup") {
-                return <ToolGroupEntry key={entry.key} entry={entry} t={t} />;
-              }
-              if (entry.kind === "agent") {
-                return <AgentEntry key={entry.key} item={entry.item} t={t} />;
-              }
-              return <TraceEntry key={entry.key} item={entry.item} t={t} />;
-            })}
-            <div className="timeline-bottom-anchor" ref={bottomRef} aria-hidden="true" />
-          </div>
-        )}
-        {showScrollButton && (
-          <button
-            className="scroll-to-bottom"
-            onClick={scrollToBottom}
-            title={t("toolCall.scrollToBottom")}
-            aria-label={t("toolCall.scrollToBottom")}
-          >
-            <ChevronDown size={18} />
-          </button>
-        )}
-      </div>
+        }
+      />
 
       <footer className="conversation-footer">
         <SessionStatusBar

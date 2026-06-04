@@ -56,6 +56,8 @@ Studio 前端的实时事件、`load_session_timeline` 历史 snapshot 和 `run_
 - `Done` 只表示 turn 状态完成，不携带 timeline 内容；最终正文必须通过 `text` item 表达。
 - Plan Mode 的最终可执行计划必须通过 `plan` item 表达；如果模型只输出计划块而没有普通正文，不应生成空 assistant `text` item。
 
+Studio 渲染可以在 selector 派生出展示项后使用虚拟滚动优化大 timeline，但虚拟滚动层不得改变 item-first 协议语义、事件游标或 reducer 合并规则。动态高度、流式 delta 和自动跟随底部属于前端渲染适配层职责；协议层仍只表达 timeline item 与 delta。
+
 ## 8.3 背压与容量
 
 事件通道使用 `tokio::sync::broadcast`。默认容量由调用方创建，目前建议为 `256`。
