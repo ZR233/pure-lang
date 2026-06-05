@@ -14,12 +14,31 @@ pub struct TruncatedOutput {
     pub original_length: usize,
 }
 
+impl TruncatedOutput {
+    pub fn empty() -> Self {
+        Self {
+            content: String::new(),
+            was_truncated: false,
+            original_length: 0,
+        }
+    }
+}
+
 /// stdout/stderr 各自的截断结果。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OutputTruncation {
     pub stdout: TruncatedOutput,
     pub stderr: TruncatedOutput,
+}
+
+impl OutputTruncation {
+    pub fn empty() -> Self {
+        Self {
+            stdout: TruncatedOutput::empty(),
+            stderr: TruncatedOutput::empty(),
+        }
+    }
 }
 
 /// 可配置的输出截断策略。

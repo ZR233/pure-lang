@@ -85,11 +85,7 @@ impl Tool for ReadFileTool {
                 description,
                 truncated: OutputTruncation {
                     stdout: truncated,
-                    stderr: TruncatedOutput {
-                        content: String::new(),
-                        was_truncated: false,
-                        original_length: 0,
-                    },
+                    stderr: TruncatedOutput::empty(),
                 },
                 output_file: PathBuf::new(),
                 exit_code: Some(0),
