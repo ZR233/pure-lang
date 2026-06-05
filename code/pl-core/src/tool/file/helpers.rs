@@ -6,7 +6,6 @@ use super::path::WorkspacePaths;
 use crate::tool::truncation::{OutputTruncation, TruncatedOutput};
 use crate::tool::{ToolContext, ToolOutput};
 
-
 pub(super) fn parse_input<T: serde::de::DeserializeOwned>(
     arguments: serde_json::Value,
     tool: &str,
