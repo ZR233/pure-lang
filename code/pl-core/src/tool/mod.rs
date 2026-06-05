@@ -229,18 +229,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     fn empty_truncation() -> OutputTruncation {
-        OutputTruncation {
-            stdout: TruncatedOutput {
-                content: String::new(),
-                was_truncated: false,
-                original_length: 0,
-            },
-            stderr: TruncatedOutput {
-                content: String::new(),
-                was_truncated: false,
-                original_length: 0,
-            },
-        }
+        OutputTruncation::empty()
     }
 
     #[derive(Debug)]

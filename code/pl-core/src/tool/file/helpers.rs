@@ -6,6 +6,7 @@ use super::path::WorkspacePaths;
 use crate::tool::truncation::{OutputTruncation, TruncatedOutput};
 use crate::tool::{ToolContext, ToolOutput};
 
+
 pub(super) fn parse_input<T: serde::de::DeserializeOwned>(
     arguments: serde_json::Value,
     tool: &str,
@@ -26,11 +27,7 @@ pub(super) fn text_output(description: String) -> ToolOutput {
         description: stdout.content.clone(),
         truncated: OutputTruncation {
             stdout,
-            stderr: TruncatedOutput {
-                content: String::new(),
-                was_truncated: false,
-                original_length: 0,
-            },
+            stderr: TruncatedOutput::empty(),
         },
         output_file: PathBuf::new(),
         exit_code: Some(0),

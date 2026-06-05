@@ -527,11 +527,7 @@ fn json_output(value: serde_json::Value) -> Result<ToolOutput, PureError> {
         description: stdout.content.clone(),
         truncated: OutputTruncation {
             stdout,
-            stderr: TruncatedOutput {
-                content: String::new(),
-                was_truncated: false,
-                original_length: 0,
-            },
+            stderr: TruncatedOutput::empty(),
         },
         output_file: PathBuf::new(),
         exit_code: Some(0),

@@ -10,7 +10,7 @@ use super::multi_agent::{
 use super::recoverable::{
     is_recoverable_subagent_capacity_error, recoverable_subagent_tool_output,
 };
-use super::truncation::{OutputTruncation, TruncatedOutput};
+use super::truncation::OutputTruncation;
 use super::{Tool, ToolContext, ToolInput, ToolOutput};
 use crate::agent::{AgentRecord, AgentSpawnInput};
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
@@ -307,18 +307,7 @@ fn task_name_from_tool_id(tool_id: &str) -> String {
 }
 
 fn empty_truncation() -> OutputTruncation {
-    OutputTruncation {
-        stdout: TruncatedOutput {
-            content: String::new(),
-            was_truncated: false,
-            original_length: 0,
-        },
-        stderr: TruncatedOutput {
-            content: String::new(),
-            was_truncated: false,
-            original_length: 0,
-        },
-    }
+    OutputTruncation::empty()
 }
 
 fn unix_seconds() -> i64 {

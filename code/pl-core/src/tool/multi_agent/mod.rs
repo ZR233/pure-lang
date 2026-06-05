@@ -67,18 +67,7 @@ fn json_output(value: impl Serialize) -> Result<ToolOutput, PureError> {
         })?;
     Ok(ToolOutput {
         description,
-        truncated: super::truncation::OutputTruncation {
-            stdout: super::truncation::TruncatedOutput {
-                content: String::new(),
-                was_truncated: false,
-                original_length: 0,
-            },
-            stderr: super::truncation::TruncatedOutput {
-                content: String::new(),
-                was_truncated: false,
-                original_length: 0,
-            },
-        },
+        truncated: super::truncation::OutputTruncation::empty(),
         output_file: std::path::PathBuf::new(),
         exit_code: None,
         timed_out: false,

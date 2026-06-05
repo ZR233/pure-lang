@@ -4,7 +4,7 @@ use pl_protocol::AgentStatus;
 use serde::Serialize;
 
 use super::ToolOutput;
-use super::truncation::{OutputTruncation, TruncatedOutput};
+use super::truncation::OutputTruncation;
 use crate::agent::AgentRecord;
 use crate::core::compact_text;
 use crate::provider_error::is_provider_429_error;
@@ -77,18 +77,7 @@ pub(super) fn recoverable_subagent_failures_message(count: usize) -> String {
 }
 
 fn empty_truncation() -> OutputTruncation {
-    OutputTruncation {
-        stdout: TruncatedOutput {
-            content: String::new(),
-            was_truncated: false,
-            original_length: 0,
-        },
-        stderr: TruncatedOutput {
-            content: String::new(),
-            was_truncated: false,
-            original_length: 0,
-        },
-    }
+    OutputTruncation::empty()
 }
 
 #[cfg(test)]
