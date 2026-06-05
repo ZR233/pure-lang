@@ -1,39 +1,28 @@
-use std::path::PathBuf;
-
-use pl_model::SharedModelProvider;
 use pl_protocol::{AgentEvent, AgentStatus, PureError};
-use serde::{Deserialize, Serialize};
-use tokio_util::sync::CancellationToken;
 
-use super::recoverable::{
-    RecoverableSubagentFailure, is_recoverable_subagent_capacity_error,
-    recoverable_subagent_failures, recoverable_subagent_failures_message,
-    recoverable_subagent_tool_output,
+use super::events::emit_agent_record;
+use super::runner::run_agent_turn;
+use super::types::{
+    AgentMessageArgs, AgentRunConfig, CloseAgentArgs, FollowupTaskTool, ListAgentsArgs,
+    ListAgentsResult, ListAgentsTool, MessageResult, SendMessageTool, SpawnAgentArgs,
+    SpawnAgentResult, SpawnAgentTool, WaitAgentArgs, WaitAgentResult, WaitAgentTool,
 };
-use super::truncation::{OutputTruncation, TruncatedOutput};
-use super::{SubagentContext, Tool, ToolContext, ToolInput, ToolOutput};
-use crate::agent::{AgentRecord, AgentSpawnInput, AgentStatusUpdate, MessageDeliveryMode};
-use crate::config::{ModelRole, PureConfig, ReasoningEffort};
-use crate::core::compact_text;
-use crate::session::CoreSession;
-use crate::turn::{CompileMode, TurnAbortReason, TurnBudget, TurnResultStatus};
-use crate::{AgentControl, AgentPath, PureCore};
-
-const DEFAULT_WAIT_TIMEOUT_MS: i64 = 30_000;
-
-#[derive(Debug, Clone)]
-pub struct SpawnAgentTool {
-    provider: SharedModelProvider,
-    reasoning_effort: Option<ReasoningEffort>,
-    config: Option<PureConfig>,
-    workspace_instructions: Option<String>,
-}
+use super::{
+    CloseAgentTool, Tool, ToolContext, ToolInput, ToolOutput, child_agent_options,
+    current_agent_path, invalid_spawn_input, json_output, message_schema, unix_seconds,
+};
+use crate::agent::{AgentSpawnInput, MessageDeliveryMode};
+use crate::tool::recoverable::{
+    is_recoverable_subagent_capacity_error, recoverable_subagent_failures,
+    recoverable_subagent_failures_message, recoverable_subagent_tool_output,
+};
+use crate::turn::TurnBudget;
 
 impl SpawnAgentTool {
     pub fn new(
-        provider: SharedModelProvider,
-        reasoning_effort: Option<ReasoningEffort>,
-        config: Option<PureConfig>,
+        provider: pl_model::SharedModelProvider,
+        reasoning_effort: Option<crate::config::ReasoningEffort>,
+        config: Option<crate::config::PureConfig>,
         workspace_instructions: Option<String>,
     ) -> Self {
         Self {
@@ -43,30 +32,13 @@ impl SpawnAgentTool {
             workspace_instructions,
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct WaitAgentTool;
-
-#[derive(Debug, Clone)]
-pub struct ListAgentsTool;
-
-#[derive(Debug, Clone)]
-pub struct SendMessageTool;
-
-#[derive(Debug, Clone)]
-pub struct FollowupTaskTool {
-    provider: SharedModelProvider,
-    reasoning_effort: Option<ReasoningEffort>,
-    config: Option<PureConfig>,
-    workspace_instructions: Option<String>,
 }
 
 impl FollowupTaskTool {
     pub fn new(
-        provider: SharedModelProvider,
-        reasoning_effort: Option<ReasoningEffort>,
-        config: Option<PureConfig>,
+        provider: pl_model::SharedModelProvider,
+        reasoning_effort: Option<crate::config::ReasoningEffort>,
+        config: Option<crate::config::PureConfig>,
         workspace_instructions: Option<String>,
     ) -> Self {
         Self {
@@ -76,77 +48,6 @@ impl FollowupTaskTool {
             workspace_instructions,
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct CloseAgentTool;
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[allow(dead_code)]
-struct SpawnAgentArgs {
-    task_name: String,
-    message: String,
-    agent_type: Option<String>,
-    model: Option<String>,
-    reasoning_effort: Option<String>,
-    fork_turns: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WaitAgentArgs {
-    timeout_ms: Option<i64>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ListAgentsArgs {
-    path_prefix: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct AgentMessageArgs {
-    target: String,
-    message: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CloseAgentArgs {
-    target: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SpawnAgentResult {
-    agent_id: String,
-    task_name: String,
-    path: String,
-    status: AgentStatus,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WaitAgentResult {
-    message: String,
-    timed_out: bool,
-    recoverable_failures: Vec<RecoverableSubagentFailure>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ListAgentsResult {
-    agents: Vec<AgentRecord>,
-    recoverable_failures: Vec<RecoverableSubagentFailure>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MessageResult {
-    target: String,
-    status: AgentStatus,
 }
 
 impl Tool for SpawnAgentTool {
@@ -207,7 +108,7 @@ impl Tool for SpawnAgentTool {
         Box::pin(async move {
             let args: SpawnAgentArgs =
                 serde_json::from_value(input.arguments).map_err(invalid_spawn_input)?;
-            let role = role_key(args.agent_type.as_deref())?;
+            let role = super::role_key(args.agent_type.as_deref())?;
             let parent_path = current_agent_path(&context);
             let prompt = args.message.clone();
             let _ = context.event_tx.send(AgentEvent::CollabAgentSpawnBegin {
@@ -300,7 +201,7 @@ impl Tool for SpawnAgentTool {
                 role,
                 message: prompt,
                 mode: context.mode,
-                budget: crate::turn::TurnBudget::child_default(),
+                budget: TurnBudget::child_default(),
             };
             tokio::spawn(run_agent_turn(run));
 
@@ -355,7 +256,10 @@ impl Tool for WaitAgentTool {
             });
             let outcome = context
                 .agent_control
-                .wait_for_activity(args.timeout_ms.unwrap_or(DEFAULT_WAIT_TIMEOUT_MS))
+                .wait_for_activity(
+                    args.timeout_ms
+                        .unwrap_or(super::types::DEFAULT_WAIT_TIMEOUT_MS),
+                )
                 .await;
             let _ = context.event_tx.send(AgentEvent::CollabWaitingEnd {
                 call_id: input.tool_id,
@@ -516,7 +420,7 @@ impl Tool for FollowupTaskTool {
                     role: record.role,
                     message,
                     mode: context.mode,
-                    budget: crate::turn::TurnBudget::child_default(),
+                    budget: TurnBudget::child_default(),
                 };
                 if let Some(token) = run.options.cancellation_token.clone() {
                     context
@@ -674,404 +578,4 @@ async fn handle_message_tool(
         target: record.path,
         status: record.status,
     })
-}
-
-fn message_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "object",
-        "properties": {
-            "target": {
-                "type": "string",
-                "description": "Agent id, relative path, or canonical path."
-            },
-            "message": {
-                "type": "string",
-                "description": "Message to send to the target agent."
-            }
-        },
-        "required": ["target", "message"]
-    })
-}
-
-pub(super) struct AgentRunConfig {
-    pub provider: SharedModelProvider,
-    pub reasoning_effort: Option<ReasoningEffort>,
-    pub config: Option<PureConfig>,
-    pub workspace_instructions: Option<String>,
-    pub workspace_root: PathBuf,
-    pub options: crate::TurnOptions,
-    pub agent_control: AgentControl,
-    pub event_tx: pl_protocol::AgentEventSender,
-    pub agent_id: String,
-    pub agent_path: String,
-    pub role: String,
-    pub message: String,
-    pub mode: CompileMode,
-    pub budget: TurnBudget,
-}
-
-pub(super) async fn run_agent_turn(config: AgentRunConfig) {
-    let Some(record) = config
-        .agent_control
-        .update_status(&config.agent_id, AgentStatus::Running, None, None)
-        .await
-    else {
-        return;
-    };
-    emit_agent_record(&config.event_tx, &record);
-
-    let role = ModelRole::from_key(&config.role).unwrap_or(ModelRole::Executor);
-    let core_result = match &config.config {
-        Some(pure_config) => PureCore::from_config(pure_config, role),
-        None => Ok(match &config.reasoning_effort {
-            Some(effort) => {
-                PureCore::with_reasoning_effort(config.provider.clone(), effort.clone())
-            }
-            None => PureCore::new(config.provider.clone()),
-        }),
-    };
-    let mut core = match core_result {
-        Ok(core) => core
-            .with_agent_control(config.agent_control.clone())
-            .with_subagent_context(SubagentContext {
-                id: config.agent_id.clone(),
-                parent_id: record.parent_path.clone(),
-                agent_path: Some(config.agent_path.clone()),
-                role: config.role.clone(),
-                task: compact_text(&config.message),
-                depth: record.depth,
-            }),
-        Err(error) => {
-            mark_agent_failed(&config, error.to_string()).await;
-            return;
-        }
-    };
-    core.register_default_tools(
-        config.workspace_root.clone(),
-        config.workspace_instructions.clone(),
-    );
-
-    let mut session = config
-        .agent_control
-        .load_session(&config.agent_id)
-        .await
-        .unwrap_or_else(CoreSession::new);
-    let mut request = crate::turn::TurnRequest::new(config.message.clone(), config.mode)
-        .with_budget(config.budget);
-    if let Some(instructions) = config.workspace_instructions.clone() {
-        request = request.with_workspace_instructions(instructions);
-    }
-    let (agent_event_tx, agent_event_rx) = tokio::sync::broadcast::channel(256);
-    let forward_task = tokio::spawn(forward_agent_lifecycle_events(
-        agent_event_rx,
-        config.event_tx.clone(),
-    ));
-    let result = core
-        .run_turn_with_options(
-            &mut session,
-            request,
-            agent_event_tx.clone(),
-            config.options.clone(),
-        )
-        .await;
-    drop(agent_event_tx);
-    let _ = forward_task.await;
-    config
-        .agent_control
-        .store_session(&config.agent_id, session)
-        .await;
-
-    match result {
-        Ok(result) => {
-            let status = match result.status {
-                TurnResultStatus::Completed => AgentStatus::Completed,
-                TurnResultStatus::Aborted => AgentStatus::Interrupted,
-                TurnResultStatus::Errored => AgentStatus::Errored,
-            };
-            let summary = result.content.trim().to_string();
-            let reason = result
-                .abort_reason
-                .map(|reason| reason.as_str().to_string());
-            let error = match result.status {
-                TurnResultStatus::Aborted
-                    if matches!(result.abort_reason, Some(TurnAbortReason::BudgetLimited)) =>
-                {
-                    result
-                        .error
-                        .clone()
-                        .or_else(|| Some("subagent budget limited".to_string()))
-                }
-                TurnResultStatus::Errored => result
-                    .error
-                    .clone()
-                    .or_else(|| Some("subagent errored".to_string())),
-                TurnResultStatus::Completed | TurnResultStatus::Aborted => result.error.clone(),
-            };
-            if let Some(record) = config
-                .agent_control
-                .update_status_with(
-                    &config.agent_id,
-                    AgentStatusUpdate {
-                        status,
-                        summary: (!summary.is_empty()).then_some(summary.clone()),
-                        error,
-                        reason,
-                        budget_limit_kind: result.budget_limit_kind,
-                        budget_usage: result.budget_usage,
-                    },
-                )
-                .await
-            {
-                emit_agent_record(&config.event_tx, &record);
-            }
-            if !matches!(result.status, TurnResultStatus::Completed) {
-                let reason = result
-                    .abort_reason
-                    .map(|reason| reason.as_str())
-                    .unwrap_or("errored");
-                for record in config
-                    .agent_control
-                    .shutdown_descendants(&config.agent_id, reason)
-                    .await
-                {
-                    emit_agent_record(&config.event_tx, &record);
-                }
-            }
-        }
-        Err(error) => {
-            mark_agent_failed(&config, error.to_string()).await;
-        }
-    }
-}
-
-async fn mark_agent_failed(config: &AgentRunConfig, error: String) {
-    if let Some(record) = config
-        .agent_control
-        .update_status_with(
-            &config.agent_id,
-            AgentStatusUpdate {
-                status: AgentStatus::Errored,
-                summary: None,
-                error: Some(error),
-                reason: Some("errored".to_string()),
-                budget_limit_kind: None,
-                budget_usage: None,
-            },
-        )
-        .await
-    {
-        emit_agent_record(&config.event_tx, &record);
-    }
-    for record in config
-        .agent_control
-        .shutdown_descendants(&config.agent_id, "errored")
-        .await
-    {
-        emit_agent_record(&config.event_tx, &record);
-    }
-}
-
-async fn forward_agent_lifecycle_events(
-    mut event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
-    parent_event_tx: pl_protocol::AgentEventSender,
-) {
-    loop {
-        match event_rx.recv().await {
-            Ok(
-                event @ (AgentEvent::AgentStateChanged { .. }
-                | AgentEvent::AgentRuntimeUpdated { .. }
-                | AgentEvent::CollabAgentSpawnBegin { .. }
-                | AgentEvent::CollabAgentSpawnEnd { .. }
-                | AgentEvent::CollabAgentInteractionBegin { .. }
-                | AgentEvent::CollabAgentInteractionEnd { .. }
-                | AgentEvent::CollabWaitingBegin { .. }
-                | AgentEvent::CollabWaitingEnd { .. }
-                | AgentEvent::CollabCloseBegin { .. }
-                | AgentEvent::CollabCloseEnd { .. }),
-            ) => {
-                let _ = parent_event_tx.send(event);
-            }
-            Ok(AgentEvent::Done) => break,
-            Ok(
-                AgentEvent::TimelineItemStarted { .. }
-                | AgentEvent::TimelineItemDelta { .. }
-                | AgentEvent::TimelineItemCompleted { .. }
-                | AgentEvent::TimelineItemFailed { .. }
-                | AgentEvent::ToolApprovalRequested { .. }
-                | AgentEvent::ToolApprovalGranted { .. }
-                | AgentEvent::ToolApprovalDenied { .. }
-                | AgentEvent::TurnInterrupted { .. }
-                | AgentEvent::TurnBudgetLimited { .. }
-                | AgentEvent::Error { .. },
-            ) => {}
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-        }
-    }
-}
-
-fn role_key(role: Option<&str>) -> Result<String, PureError> {
-    let role = role
-        .map(str::trim)
-        .filter(|role| !role.is_empty())
-        .unwrap_or("executor");
-    ModelRole::from_key(role)
-        .map(|role| role.key().to_string())
-        .ok_or_else(|| PureError::ToolExecutionFailed {
-            tool: "spawn_agent".to_string(),
-            error: format!("unsupported agentType: {role}"),
-        })
-}
-
-pub(super) fn current_agent_path(context: &ToolContext) -> String {
-    context
-        .active_subagent
-        .as_ref()
-        .and_then(|subagent| subagent.agent_path.clone())
-        .unwrap_or_else(|| AgentPath::ROOT.to_string())
-}
-
-pub(super) fn emit_agent_record(event_tx: &pl_protocol::AgentEventSender, record: &AgentRecord) {
-    let _ = event_tx.send(AgentEvent::AgentStateChanged {
-        id: record.id.clone(),
-        path: record.path.clone(),
-        parent_path: record.parent_path.clone(),
-        role: record.role.clone(),
-        task: record.task.clone(),
-        status: record.status,
-        summary: record.summary.clone(),
-        depth: record.depth,
-        error: record.error.clone(),
-        reason: record.reason.clone(),
-        budget_limit_kind: record.budget_limit_kind,
-        budget_usage: record.budget_usage,
-        updated_at: record.updated_at,
-    });
-}
-
-fn invalid_spawn_input(error: serde_json::Error) -> PureError {
-    PureError::ToolExecutionFailed {
-        tool: "spawn_agent".to_string(),
-        error: format!("invalid input: {error}"),
-    }
-}
-
-fn json_output(value: impl Serialize) -> Result<ToolOutput, PureError> {
-    let description =
-        serde_json::to_string(&value).map_err(|error| PureError::ToolExecutionFailed {
-            tool: "agent".to_string(),
-            error: format!("failed to serialize output: {error}"),
-        })?;
-    Ok(ToolOutput {
-        description,
-        truncated: OutputTruncation {
-            stdout: TruncatedOutput {
-                content: String::new(),
-                was_truncated: false,
-                original_length: 0,
-            },
-            stderr: TruncatedOutput {
-                content: String::new(),
-                was_truncated: false,
-                original_length: 0,
-            },
-        },
-        output_file: PathBuf::new(),
-        exit_code: None,
-        timed_out: false,
-    })
-}
-
-fn unix_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
-}
-
-pub(super) fn child_agent_options(options: &crate::TurnOptions) -> crate::TurnOptions {
-    let token = options
-        .cancellation_token
-        .as_ref()
-        .map(CancellationToken::child_token)
-        .unwrap_or_default();
-    options.clone().with_cancellation(token)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
-
-    fn agent_record(id: &str, status: AgentStatus, error: Option<&str>) -> AgentRecord {
-        AgentRecord {
-            id: id.to_string(),
-            path: format!("/root/{id}"),
-            parent_path: Some("/root".to_string()),
-            role: "executor".to_string(),
-            task: format!("inspect {id}"),
-            status,
-            summary: None,
-            error: error.map(str::to_string),
-            reason: None,
-            budget_limit_kind: None,
-            budget_usage: None,
-            depth: 1,
-            updated_at: 1,
-        }
-    }
-
-    #[test]
-    fn wait_agent_result_serializes_recoverable_failures() {
-        let agents = vec![
-            agent_record(
-                "agent-1",
-                AgentStatus::Errored,
-                Some("API error 429 Too Many Requests"),
-            ),
-            agent_record("agent-2", AgentStatus::Completed, None),
-        ];
-        let recoverable_failures = recoverable_subagent_failures(&agents);
-        let output = json_output(WaitAgentResult {
-            message: recoverable_subagent_failures_message(recoverable_failures.len()),
-            timed_out: false,
-            recoverable_failures,
-        })
-        .unwrap();
-        let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
-
-        assert_eq!(value["timedOut"], false);
-        assert_eq!(
-            value["message"],
-            "recoverableSubagentProvider429: 1 subagent(s) are unavailable because the provider returned 429 concurrency/rate-limit capacity. Stop creating or retrying subagents and continue the remaining work in the current agent."
-        );
-        assert_eq!(value["recoverableFailures"][0]["agentId"], "agent-1");
-        assert_eq!(value["recoverableFailures"][0]["path"], "/root/agent-1");
-    }
-
-    #[test]
-    fn list_agents_result_keeps_agents_and_recoverable_failures() {
-        let agents = vec![
-            agent_record(
-                "agent-1",
-                AgentStatus::Interrupted,
-                Some("provider returned status 429"),
-            ),
-            agent_record("agent-2", AgentStatus::Completed, None),
-        ];
-        let recoverable_failures = recoverable_subagent_failures(&agents);
-        let output = json_output(ListAgentsResult {
-            agents,
-            recoverable_failures,
-        })
-        .unwrap();
-        let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
-
-        assert_eq!(value["agents"].as_array().unwrap().len(), 2);
-        assert_eq!(value["recoverableFailures"][0]["agentId"], "agent-1");
-        assert_eq!(
-            value["recoverableFailures"][0]["error"],
-            "provider returned status 429"
-        );
-    }
 }
