@@ -2,7 +2,7 @@ use pl_protocol::PureError;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 
-use super::helpers::{ensure_overwrite, parse_input, text_output, workspace};
+use super::helpers::{ensure_overwrite, parse_input, text_output, tool_error, workspace};
 use super::input::{
     CopyMoveInput, DeletePathInput, PathInput, WriteFileInput, WriteMode, copy_move_schema,
     path_schema,
@@ -161,7 +161,7 @@ impl Tool for DeletePathTool {
                 if input.recursive.unwrap_or(false) {
                     tokio::fs::remove_dir_all(&path).await?;
                 } else {
-                    return Err(super::helpers::tool_error(
+                    return Err(tool_error(
                         self.name(),
                         "directory delete requires recursive true",
                     ));

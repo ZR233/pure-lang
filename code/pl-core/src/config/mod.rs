@@ -20,7 +20,7 @@ pub const CONFIG_DIR_NAME: &str = ".pure";
 pub const CONFIG_FILE_NAME: &str = "config.toml";
 pub const CONFIG_SCHEMA_VERSION: u32 = 3;
 
-pub(super) const DEFAULT_PROVIDER_KEY: &str = "deepseek";
+const DEFAULT_PROVIDER_KEY: &str = "deepseek";
 pub(super) const DEFAULT_MODEL: &str = "deepseek-v4-flash";
 const DEFAULT_EFFORT: &str = "high";
 
