@@ -1,6 +1,6 @@
-pub(crate) mod catalog;
-pub(crate) mod scanning;
-pub(crate) mod system;
+mod catalog;
+mod scanning;
+mod system;
 mod util;
 
 #[cfg(test)]

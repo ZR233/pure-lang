@@ -1,7 +1,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use include_dir::Dir;
 use pl_protocol::Result;
@@ -92,5 +92,3 @@ fn write_embedded_dir(dir: &Dir<'_>, dest: &Path) -> Result<()> {
     }
     Ok(())
 }
-
-use std::path::PathBuf;

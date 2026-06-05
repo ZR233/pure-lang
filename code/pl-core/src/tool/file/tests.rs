@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use crate::tool::{Tool, ToolContext, ToolInput};
@@ -17,7 +17,7 @@ fn unique_temp_dir(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("pure-lang-{name}-{id}"))
 }
 
-async fn context(root: &PathBuf) -> ToolContext {
+async fn context(root: &Path) -> ToolContext {
     tokio::fs::create_dir_all(root).await.unwrap();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
     ToolContext {
@@ -25,7 +25,7 @@ async fn context(root: &PathBuf) -> ToolContext {
         options: TurnOptions::default(),
         workspace_access: crate::tool::WorkspaceAccess::WorkspaceOnly,
         mode: crate::turn::CompileMode::Auto,
-        workspace_root: root.clone(),
+        workspace_root: root.to_path_buf(),
         workspace_instructions: None,
         active_subagent: None,
         agent_control: crate::AgentControl::default(),
