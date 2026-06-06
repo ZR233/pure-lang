@@ -180,6 +180,7 @@ export type TurnPhase =
   | "tool"
   | "subagent"
   | "approval"
+  | "userInput"
   | "stopping"
   | "completed"
   | "aborted"
@@ -353,6 +354,14 @@ export type AgentEvent =
     }
   | { toolApprovalGranted: { id: string; name: string } }
   | { toolApprovalDenied: { id: string; name: string; reason: string } }
+  | {
+      userInputRequested: {
+        requestId: string;
+        toolId: string;
+        questions: UserQuestion[];
+      };
+    }
+  | { userInputAnswered: { requestId: string } }
   | { agentStateChanged: AgentDto }
   | { agentRuntimeUpdated: { delta: AgentRuntimeDelta } }
   | { turnInterrupted: { reason: string } }
@@ -422,6 +431,39 @@ export type ToolApprovalResolved = {
   approvalId: string;
   decision: "approved" | "denied";
   reason?: string | null;
+};
+
+export type UserQuestionOption = {
+  label: string;
+  description: string;
+};
+
+export type UserQuestion = {
+  id: string;
+  header: string;
+  question: string;
+  isOther?: boolean;
+  isSecret?: boolean;
+  options?: UserQuestionOption[] | null;
+};
+
+export type UserInputAnswer = {
+  answers: string[];
+};
+
+export type UserInputResponse = {
+  answers: Record<string, UserInputAnswer>;
+};
+
+export type UserInputRequest = {
+  requestId: string;
+  sessionId: string;
+  toolId: string;
+  questions: UserQuestion[];
+};
+
+export type UserInputResolved = {
+  requestId: string;
 };
 
 export type PromptFailed = {

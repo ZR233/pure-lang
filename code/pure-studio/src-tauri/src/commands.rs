@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 use anyhow::Context;
-use pl_core::{CompileMode, PermissionMode, PureConfig, TimelineEventRecord, TurnOptions};
+use pl_core::{
+    CompileMode, PermissionMode, PureConfig, TimelineEventRecord, TurnOptions, UserInputResponse,
+};
 use pl_protocol::{TraceEvent, TraceEventKind};
 use tauri::{AppHandle, Emitter, State};
 use tokio_util::sync::CancellationToken;
@@ -19,6 +21,7 @@ use crate::mappers::{
     turn_result_status_label,
 };
 use crate::state::{AppState, CommandError, CommandResult};
+use crate::user_input::{cancel_session_user_inputs, resolve_user_input, user_input_callback};
 
 #[tauri::command]
 pub async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<BootstrapDto> {
@@ -186,7 +189,11 @@ pub async fn run_prompt(
     ));
     let approval_callback =
         approval_callback(state.approvals.clone(), app.clone(), session_id.clone());
-    let options = TurnOptions::default().with_cancellation(cancellation_token.clone());
+    let user_input_callback =
+        user_input_callback(state.user_inputs.clone(), app.clone(), session_id.clone());
+    let options = TurnOptions::default()
+        .with_cancellation(cancellation_token.clone())
+        .with_user_input_callback(user_input_callback);
     let result = state
         .studio
         .run_prompt(
@@ -200,6 +207,7 @@ pub async fn run_prompt(
     drop(event_tx);
     let _ = event_task.await;
     state.active_turns.lock().await.remove(&session_id);
+    cancel_session_user_inputs(&session_id, &app, state.user_inputs.clone()).await;
 
     match result {
         Ok(outcome) => {
@@ -273,6 +281,7 @@ pub async fn stop_prompt(
         state.approvals.clone(),
     )
     .await;
+    cancel_session_user_inputs(&session_id, &app, state.user_inputs.clone()).await;
 
     Ok(StopPromptResponse {
         session_id,
@@ -361,6 +370,17 @@ pub async fn deny_tool(
         state.approvals.clone(),
     )
     .await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn answer_user_input(
+    request_id: String,
+    response: UserInputResponse,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> CommandResult<()> {
+    resolve_user_input(request_id, response, app, state.user_inputs.clone()).await;
     Ok(())
 }
 

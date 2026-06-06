@@ -1,9 +1,52 @@
+use std::collections::HashMap;
+
 use serde::Deserialize;
 use serde::Serialize;
 use tokio::sync::broadcast;
 
 pub type AgentEventSender = broadcast::Sender<AgentEvent>;
 pub type AgentEventReceiver = broadcast::Receiver<AgentEvent>;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UserQuestionOption {
+    pub label: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UserQuestion {
+    pub id: String,
+    pub header: String,
+    pub question: String,
+    #[serde(default)]
+    pub is_other: bool,
+    #[serde(default)]
+    pub is_secret: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<Vec<UserQuestionOption>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UserInputRequest {
+    pub request_id: String,
+    pub tool_id: String,
+    pub questions: Vec<UserQuestion>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UserInputAnswer {
+    pub answers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UserInputResponse {
+    pub answers: HashMap<String, UserInputAnswer>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
@@ -38,6 +81,14 @@ pub enum AgentEvent {
         id: String,
         name: String,
         reason: String,
+    },
+    UserInputRequested {
+        request_id: String,
+        tool_id: String,
+        questions: Vec<UserQuestion>,
+    },
+    UserInputAnswered {
+        request_id: String,
     },
     AgentStateChanged {
         id: String,
@@ -593,6 +644,88 @@ mod tests {
                     "id": "call-2",
                     "name": "subagent",
                     "reason": "not now"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_user_input_requested_as_camel_case() {
+        let event = AgentEvent::UserInputRequested {
+            request_id: "ask-1".to_string(),
+            tool_id: "call-1".to_string(),
+            questions: vec![UserQuestion {
+                id: "choice".to_string(),
+                header: "Mode".to_string(),
+                question: "Which mode?".to_string(),
+                is_other: true,
+                is_secret: false,
+                options: Some(vec![UserQuestionOption {
+                    label: "Fast".to_string(),
+                    description: "Use the fast path.".to_string(),
+                }]),
+            }],
+        };
+
+        let json = serde_json::to_value(event).unwrap();
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "userInputRequested": {
+                    "requestId": "ask-1",
+                    "toolId": "call-1",
+                    "questions": [{
+                        "id": "choice",
+                        "header": "Mode",
+                        "question": "Which mode?",
+                        "isOther": true,
+                        "isSecret": false,
+                        "options": [{
+                            "label": "Fast",
+                            "description": "Use the fast path."
+                        }]
+                    }]
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn user_input_defaults_and_response_shape_match_codex_style() {
+        let question: UserQuestion = serde_json::from_value(serde_json::json!({
+            "id": "notes",
+            "header": "Notes",
+            "question": "Anything else?"
+        }))
+        .unwrap();
+        let response = UserInputResponse {
+            answers: HashMap::from([(
+                "notes".to_string(),
+                UserInputAnswer {
+                    answers: vec!["Ship it".to_string()],
+                },
+            )]),
+        };
+
+        assert_eq!(
+            question,
+            UserQuestion {
+                id: "notes".to_string(),
+                header: "Notes".to_string(),
+                question: "Anything else?".to_string(),
+                is_other: false,
+                is_secret: false,
+                options: None,
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(response).unwrap(),
+            serde_json::json!({
+                "answers": {
+                    "notes": {
+                        "answers": ["Ship it"]
+                    }
                 }
             })
         );

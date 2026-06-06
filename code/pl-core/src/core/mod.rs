@@ -15,10 +15,11 @@ use crate::session::CoreSession;
 #[cfg(test)]
 use crate::tool::WorkspaceAccess;
 use crate::tool::{
-    ApplyPatchTool, BashTool, CloseAgentTool, CopyPathTool, CreateDirectoryTool, DeletePathTool,
-    FollowupTaskTool, ListAgentsTool, ListFilesTool, MovePathTool, ReadFileTool, SearchFilesTool,
-    SendMessageTool, SkillManageTool, SkillViewTool, SkillsListTool, SpawnAgentTool, StatPathTool,
-    SubagentContext, ToolContext, ToolRegistry, WaitAgentTool, WriteFileTool,
+    ApplyPatchTool, AskUserTool, BashTool, CloseAgentTool, CopyPathTool, CreateDirectoryTool,
+    DeletePathTool, FollowupTaskTool, ListAgentsTool, ListFilesTool, MovePathTool, ReadFileTool,
+    SearchFilesTool, SendMessageTool, SkillManageTool, SkillViewTool, SkillsListTool,
+    SpawnAgentTool, StatPathTool, SubagentContext, ToolContext, ToolRegistry, WaitAgentTool,
+    WriteFileTool,
 };
 use crate::trace::TraceRecorder;
 #[cfg(test)]
@@ -175,6 +176,7 @@ impl PureCore {
             workspace_instructions.clone(),
         ));
         self.register_tool(CloseAgentTool);
+        self.register_tool(AskUserTool);
     }
 
     pub(crate) fn register_skill_tools(
@@ -421,6 +423,7 @@ mod tests {
                 kind: ToolCallKind::Function,
                 arguments: "{}".to_string(),
                 result: "recoverableSubagentProvider429: retry locally".to_string(),
+                display_result: "recoverableSubagentProvider429: retry locally".to_string(),
                 status: TimelineItemStatus::Completed,
                 exit_code: None,
                 timed_out: false,
@@ -431,6 +434,7 @@ mod tests {
                 kind: ToolCallKind::Function,
                 arguments: "{}".to_string(),
                 result: "recoverableSubagentProvider429: unrelated text".to_string(),
+                display_result: "recoverableSubagentProvider429: unrelated text".to_string(),
                 status: TimelineItemStatus::Completed,
                 exit_code: None,
                 timed_out: false,
@@ -455,6 +459,7 @@ mod tests {
         assert!(tool_allowed_in_mode(plan, "skill_view"));
         assert!(tool_allowed_in_mode(plan, "spawn_agent"));
         assert!(tool_allowed_in_mode(plan, "followup_task"));
+        assert!(tool_allowed_in_mode(plan, "request_user_input"));
         assert!(tool_allowed_in_mode(plan, "bash"));
         assert!(!tool_allowed_in_mode(plan, "subagent"));
         assert!(!tool_allowed_in_mode(plan, "write_file"));
@@ -867,6 +872,7 @@ mod tests {
         assert!(core.tools.get("spawn_agent").is_some());
         assert!(core.tools.get("wait_agent").is_some());
         assert!(core.tools.get("list_agents").is_some());
+        assert!(core.tools.get("request_user_input").is_some());
         assert!(core.tools.get("subagent").is_none());
         assert!(core.tools.get("read_file").is_some());
         assert!(core.tools.get("apply_patch").is_some());

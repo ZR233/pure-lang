@@ -40,6 +40,8 @@ const en = {
     modeUpdated: "Mode updated",
     toolApproved: "Tool approved",
     toolDenied: "Tool denied",
+    userInputRequired: "Waiting for your answer",
+    userInputAnswered: "Answer sent",
     bootstrapFailed: "Bootstrap failed: {{error}}",
     addProjectFailed: "Add project failed: {{error}}",
     selectProjectFailed: "Select project failed: {{error}}",
@@ -70,6 +72,7 @@ const en = {
     tool: "Tool",
     subagent: "Subagent",
     approval: "Approval",
+    userInput: "Needs input",
     stopping: "Stopping",
     completed: "Completed",
     interrupted: "Interrupted",
@@ -205,6 +208,14 @@ const en = {
 
   approval: {
     title: "Tool Approval",
+  },
+
+  askUser: {
+    awaiting: "Assistant needs input",
+    answer: "Answer",
+    answerPlaceholder: "Type your answer...",
+    customPlaceholder: "Add a custom answer...",
+    secretPlaceholder: "Enter secret answer",
   },
 
   settings: {

@@ -43,7 +43,8 @@ pub use pl_protocol::{
     AgentEvent, AgentEventReceiver, AgentEventSender, AgentRuntimeDelta, BudgetLimitKind,
     BudgetUsage, ContentPart, ContentPartType, ErrorSeverity, Message, MessageContent, MessageRole,
     OutputStream, PermissionLevel, PipelineStage, PureError, Result, RuntimeCostAmount,
-    RuntimeUsageSnapshot, TokenUsageSnapshot, TraceEvent, TraceEventKind,
+    RuntimeUsageSnapshot, TokenUsageSnapshot, TraceEvent, TraceEventKind, UserInputAnswer,
+    UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
 };
 pub use session::CoreSession;
 pub use skill::{SkillCatalog, SkillMetadata, SkillSourceKind};
@@ -54,14 +55,14 @@ pub use studio::{
     ToolApprovalRecord,
 };
 pub use tool::{
-    BashInput, BashTool, OutputTruncation, SubagentContext, Tool, ToolContext, ToolInput,
-    ToolOutput, ToolRegistry, TruncatedOutput, TruncationStrategy,
+    AskUserTool, BashInput, BashTool, OutputTruncation, SubagentContext, Tool, ToolContext,
+    ToolInput, ToolOutput, ToolRegistry, TruncatedOutput, TruncationStrategy,
 };
 pub use trace::TraceRecorder;
 pub use turn::{
     AGENT_MAX_COUNT, AGENT_MAX_DEPTH, AgentBudget, BudgetPolicy, CompileMode,
     DEFAULT_WALL_CLOCK_MS, PermissionMode, ToolApprovalCallback, ToolApprovalDecision,
     ToolApprovalPolicy, ToolApprovalRequest, ToolExecutionMode, TurnAbortReason, TurnBudget,
-    TurnOptions, TurnRequest, TurnResult, TurnResultStatus,
+    TurnOptions, TurnRequest, TurnResult, TurnResultStatus, UserInputCallback,
 };
 pub use workspace::{load_workspace_instructions, resolve_workspace_root};

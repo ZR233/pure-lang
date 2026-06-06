@@ -1,4 +1,4 @@
-use pl_protocol::{AgentEvent, TimelineItem};
+use pl_protocol::{AgentEvent, TimelineItem, UserQuestion};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize)]
@@ -326,6 +326,21 @@ pub struct ToolApprovalResolvedPayload {
     pub approval_id: String,
     pub decision: String,
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserInputRequestPayload {
+    pub request_id: String,
+    pub session_id: String,
+    pub tool_id: String,
+    pub questions: Vec<UserQuestion>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserInputResolvedPayload {
+    pub request_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

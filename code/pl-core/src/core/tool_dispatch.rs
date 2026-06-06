@@ -23,6 +23,7 @@ pub(super) struct ToolExecutionRecord {
     pub(super) name: String,
     pub(super) kind: ToolCallKind,
     pub(super) result: String,
+    pub(super) display_result: String,
     pub(super) arguments: String,
     pub(super) status: TimelineItemStatus,
     pub(super) exit_code: Option<i32>,
@@ -251,12 +252,12 @@ pub(super) async fn execute_tool_calls(
         item.status = record.status;
         item.updated_at = unix_seconds();
         if let Some(tool) = &mut item.tool {
-            tool.result = Some(record.result.clone());
+            tool.result = Some(record.display_result.clone());
             tool.exit_code = record.exit_code;
             tool.timed_out = record.timed_out;
         }
         if item.status == TimelineItemStatus::Failed {
-            recorder.fail_item(item, record.result.clone());
+            recorder.fail_item(item, record.display_result.clone());
         } else {
             recorder.complete_item(item);
         }
@@ -287,6 +288,7 @@ async fn ready_tool_execution_record(
         name: tool_call.name.clone(),
         kind: tool_call.kind(),
         arguments: serde_json::to_string(&tool_call.arguments_for_display()).unwrap_or_default(),
+        display_result: result.clone(),
         result,
         status,
         exit_code,
@@ -313,6 +315,7 @@ fn tool_execution_record(
             false,
         ),
     };
+    let display_result = display_result_for_tool(&tool_call, &tool_name, &result, status);
     ToolExecutionRecord {
         call_id: tool_call
             .call_id
@@ -322,10 +325,63 @@ fn tool_execution_record(
         kind: tool_call.kind(),
         arguments: serde_json::to_string(&tool_call.arguments_for_display()).unwrap_or_default(),
         result,
+        display_result,
         status,
         exit_code,
         timed_out,
     }
+}
+
+fn display_result_for_tool(
+    tool_call: &pl_model::ToolCall,
+    tool_name: &str,
+    result: &str,
+    status: TimelineItemStatus,
+) -> String {
+    if tool_name == "request_user_input" && status == TimelineItemStatus::Completed {
+        return redact_user_input_display_result(&tool_call.arguments_for_tool(), result);
+    }
+    result.to_string()
+}
+
+fn redact_user_input_display_result(arguments: &serde_json::Value, result: &str) -> String {
+    let secret_ids = arguments
+        .get("questions")
+        .and_then(serde_json::Value::as_array)
+        .map(|questions| {
+            questions
+                .iter()
+                .filter(|question| {
+                    question
+                        .get("isSecret")
+                        .or_else(|| question.get("is_secret"))
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+                })
+                .filter_map(|question| question.get("id").and_then(serde_json::Value::as_str))
+                .map(ToOwned::to_owned)
+                .collect::<std::collections::HashSet<_>>()
+        })
+        .unwrap_or_default();
+    if secret_ids.is_empty() {
+        return result.to_string();
+    }
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(result) else {
+        return "[redacted user input]".to_string();
+    };
+    if let Some(answers) = value
+        .get_mut("answers")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for id in secret_ids {
+            if let Some(answer) = answers.get_mut(&id)
+                && let Some(answer_object) = answer.as_object_mut()
+            {
+                answer_object.insert("answers".to_string(), serde_json::json!(["[redacted]"]));
+            }
+        }
+    }
+    serde_json::to_string(&value).unwrap_or_else(|_| "[redacted user input]".to_string())
 }
 
 pub(super) fn tool_results_include_recoverable_subagent_capacity(
@@ -339,4 +395,40 @@ pub(super) fn tool_results_include_recoverable_subagent_capacity(
             )
             && tool_result.result.contains(RECOVERABLE_SUBAGENT_429_MARKER)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::redact_user_input_display_result;
+
+    #[test]
+    fn redacts_secret_user_input_answers_for_timeline_display() {
+        let arguments = serde_json::json!({
+            "questions": [
+                { "id": "api_key", "header": "Key", "question": "API key?", "isSecret": true },
+                { "id": "mode", "header": "Mode", "question": "Mode?", "isSecret": false }
+            ]
+        });
+        let result = serde_json::json!({
+            "answers": {
+                "api_key": { "answers": ["sk-secret"] },
+                "mode": { "answers": ["Fast"] }
+            }
+        })
+        .to_string();
+
+        let display = redact_user_input_display_result(&arguments, &result);
+
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&display).unwrap(),
+            serde_json::json!({
+                "answers": {
+                    "api_key": { "answers": ["[redacted]"] },
+                    "mode": { "answers": ["Fast"] }
+                }
+            })
+        );
+    }
 }

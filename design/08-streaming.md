@@ -70,6 +70,8 @@ Studio 渲染可以在 selector 派生出展示项后使用虚拟滚动优化大
 
 事件类型属于协议层，不应包含 provider 私有结构，也不应绑定具体前端。工具审批事件只承载通用工具名、参数和审批结果，不包含 Tauri、React 或桌面端私有状态。
 
+`UserInputRequested` / `UserInputAnswered` 表示模型通过 `request_user_input` 工具请求用户参与。请求事件携带 `requestId`、`toolId` 和结构化 `questions`；回答事件只携带 `requestId`，不回传答案明文，避免 secret 答案进入通用事件流。Studio 可以用这些事件更新运行状态，但实际等待和回答通过 runtime callback 与 Tauri command 完成。
+
 子代理内部事件不直接转发完整文本流、思考流、工具调用流或工具输出。`pl-core` 将子代理生命周期压缩为 `agent` timeline item 和 `AgentStateChanged` snapshot，状态固定为 `queued`、`running`、`waiting`、`completed`、`errored`、`interrupted`、`shutdown`、`notFound`。`pure-studio` 持久化这些状态事件，并在聊天界面只渲染路径、状态、摘要和最终错误文本，避免把子代理内部执行细节混入父会话 timeline。
 
 失败的子代理必须在 latest snapshot 的 `error` 字段保留可展示的失败文本。`reason` 只作为结构化分类，例如 `providerError`、`toolError`、`budgetLimited` 或 `interrupted`，不能替代 `error`。如果 provider 在子代理已有部分摘要后失败，最终状态仍必须把 provider/tool 错误写入 `error`，否则 UI 无法解释失败原因。

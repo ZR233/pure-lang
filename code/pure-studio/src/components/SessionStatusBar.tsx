@@ -60,6 +60,7 @@ const turnPhaseKeys: Record<TurnPhase, string> = {
   tool: "turnPhase.tool",
   subagent: "turnPhase.subagent",
   approval: "turnPhase.approval",
+  userInput: "turnPhase.userInput",
   stopping: "turnPhase.stopping",
   completed: "turnPhase.completed",
   aborted: "turnPhase.interrupted",

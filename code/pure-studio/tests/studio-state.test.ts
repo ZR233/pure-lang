@@ -17,6 +17,7 @@ import type {
   TimelineItem,
   TimelineItemDeltaEvent,
   ToolCallStatus2,
+  UserInputRequest,
 } from "../src/types";
 
 function assertEqual<T>(actual: T, expected: T) {
@@ -379,6 +380,54 @@ function runPromptLoadedErroredKeepsFailedStatusText() {
 
   assertEqual(state.turnPhase, "failed");
   assertEqual(state.status, "运行失败：provider error");
+}
+
+function userInputRequestStoresPendingComposerState() {
+  const request: UserInputRequest = {
+    requestId: "call-ask",
+    sessionId: "session-1",
+    toolId: "call-ask",
+    questions: [
+      {
+        id: "mode",
+        header: "Mode",
+        question: "Which mode?",
+        options: [{ label: "Fast", description: "Use the fast path." }],
+      },
+    ],
+  };
+
+  const state = studioReducer(selectedState(), {
+    type: "userInputRequested",
+    payload: request,
+    status: "waiting",
+  });
+
+  assertEqual(state.turnPhase, "userInput");
+  assertDeepEqual(state.pendingUserInput, request);
+}
+
+function userInputResolvedClearsPendingComposerState() {
+  const request: UserInputRequest = {
+    requestId: "call-ask",
+    sessionId: "session-1",
+    toolId: "call-ask",
+    questions: [{ id: "notes", header: "Notes", question: "Anything else?" }],
+  };
+  const pending = studioReducer(selectedState(), {
+    type: "userInputRequested",
+    payload: request,
+    status: "waiting",
+  });
+
+  const resolved = studioReducer(pending, {
+    type: "userInputResolved",
+    payload: { requestId: "call-ask" },
+    status: "answered",
+  });
+
+  assertEqual(resolved.pendingUserInput, null);
+  assertEqual(resolved.turnPhase, "tool");
 }
 
 function completedSnapshotKeepsFirstItemSequence() {
@@ -1057,6 +1106,8 @@ freshTimelineLoadMayReplaceSnapshot();
 staleTimelineLoadDoesNotOverwriteLiveDelta();
 runPromptLoadedWithEmptyItemsDoesNotDeleteLiveContent();
 runPromptLoadedErroredKeepsFailedStatusText();
+userInputRequestStoresPendingComposerState();
+userInputResolvedClearsPendingComposerState();
 completedSnapshotKeepsFirstItemSequence();
 consecutiveToolsCollapseIntoToolGroup();
 thinkingDoesNotBreakToolGroup();

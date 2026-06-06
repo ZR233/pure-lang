@@ -8,6 +8,7 @@ use tokio::sync::{Mutex, oneshot};
 use tokio_util::sync::CancellationToken;
 
 pub type ApprovalWaiters = Arc<Mutex<HashMap<String, ApprovalWaiter>>>;
+pub type UserInputWaiters = Arc<Mutex<HashMap<String, UserInputWaiter>>>;
 pub type ActiveTurns = Arc<Mutex<HashMap<String, CancellationToken>>>;
 pub type CommandResult<T> = std::result::Result<T, CommandError>;
 
@@ -15,12 +16,18 @@ pub type CommandResult<T> = std::result::Result<T, CommandError>;
 pub struct AppState {
     pub studio: StudioRuntime,
     pub approvals: ApprovalWaiters,
+    pub user_inputs: UserInputWaiters,
     pub active_turns: ActiveTurns,
 }
 
 pub struct ApprovalWaiter {
     pub session_id: String,
     pub sender: oneshot::Sender<pl_core::ToolApprovalDecision>,
+}
+
+pub struct UserInputWaiter {
+    pub session_id: String,
+    pub sender: oneshot::Sender<pl_core::UserInputResponse>,
 }
 
 #[derive(Debug, Serialize)]

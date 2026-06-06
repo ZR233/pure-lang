@@ -40,6 +40,8 @@ const zhCN = {
     modeUpdated: "模式已更新",
     toolApproved: "工具已批准",
     toolDenied: "工具已拒绝",
+    userInputRequired: "等待你的回答",
+    userInputAnswered: "回答已发送",
     bootstrapFailed: "启动失败：{{error}}",
     addProjectFailed: "添加项目失败：{{error}}",
     selectProjectFailed: "选择项目失败：{{error}}",
@@ -70,6 +72,7 @@ const zhCN = {
     tool: "工具中",
     subagent: "子代理中",
     approval: "等待审批",
+    userInput: "等待输入",
     stopping: "停止中",
     completed: "已完成",
     interrupted: "已中断",
@@ -205,6 +208,14 @@ const zhCN = {
 
   approval: {
     title: "工具审批",
+  },
+
+  askUser: {
+    awaiting: "助手需要你补充信息",
+    answer: "回答",
+    answerPlaceholder: "输入你的回答...",
+    customPlaceholder: "补充自定义回答...",
+    secretPlaceholder: "输入敏感回答",
   },
 
   settings: {

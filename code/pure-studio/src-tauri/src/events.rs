@@ -80,6 +80,8 @@ pub async fn drain_events(
                         | AgentEvent::ToolApprovalRequested { .. }
                         | AgentEvent::ToolApprovalGranted { .. }
                         | AgentEvent::ToolApprovalDenied { .. }
+                        | AgentEvent::UserInputRequested { .. }
+                        | AgentEvent::UserInputAnswered { .. }
                         | AgentEvent::AgentRuntimeUpdated { .. }
                         | AgentEvent::TurnInterrupted { .. }
                         | AgentEvent::TurnBudgetLimited { .. }
@@ -242,6 +244,8 @@ pub fn agent_timeline_event_record(
         | AgentEvent::ToolApprovalRequested { .. }
         | AgentEvent::ToolApprovalGranted { .. }
         | AgentEvent::ToolApprovalDenied { .. }
+        | AgentEvent::UserInputRequested { .. }
+        | AgentEvent::UserInputAnswered { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
