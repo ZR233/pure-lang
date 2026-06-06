@@ -1,6 +1,5 @@
 import {
   Activity,
-  Bot,
   Brain,
   ChevronDown,
   Circle,
@@ -414,7 +413,7 @@ function EntryShell({
 }
 
 function MessageEntry({ entry }: { entry: Extract<TimelineEntry, { kind: "message" }> }) {
-  const roleIcon = entry.role === "user" ? <UserRound size={14} /> : <Bot size={14} />;
+  const roleIcon = entry.role === "user" ? <UserRound size={14} /> : <span className="timeline-avatar-letter">P</span>;
   return (
     <EntryShell className={`timeline-entry-message role-${entry.role}`} icon={roleIcon}>
       {entry.role === "user" ? null : (
@@ -706,10 +705,9 @@ export function ConversationPanel({
   return (
     <section className="conversation" data-status={status}>
       <header className="conversation-header">
-        <div>
-          <h1>{selectedSession?.title ?? t("conversation.defaultTitle")}</h1>
-          <p>{selectedProject?.path ?? t("conversation.addProjectHint")}</p>
-        </div>
+        <h1>{selectedSession?.title ?? t("conversation.defaultTitle")}</h1>
+        <span className="header-sep">·</span>
+        <p>{selectedProject?.path ?? t("conversation.addProjectHint")}</p>
       </header>
 
       <ConversationTimeline
@@ -728,6 +726,34 @@ export function ConversationPanel({
       />
 
       <footer className="conversation-footer">
+        <div className="composer">
+          <div className="composer-box">
+            <textarea
+              value={prompt}
+              disabled={!selectedSession || isBusy}
+              onChange={(event) => onSetPrompt(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                  onSendPrompt();
+                }
+              }}
+              placeholder={selectedSession ? t("conversation.askPlaceholder") : t("conversation.noSessionPlaceholder")}
+              aria-label={t("conversation.askPlaceholder")}
+            />
+            <div className="composer-toolbar">
+              <span className="shortcut-hint"><kbd>⌘</kbd> + <kbd>Enter</kbd></span>
+              <span />
+            </div>
+          </div>
+          <button
+            className={`send-button${isBusy ? " stop-button" : ""}`}
+            disabled={isBusy ? stopping : !prompt.trim() || !selectedSession}
+            onClick={isBusy ? onStopPrompt : onSendPrompt}
+          >
+            {isBusy ? <Square size={18} /> : <Send size={18} />}
+          </button>
+        </div>
+
         <SessionStatusBar
           runtime={sessionRuntime}
           providers={providers}
@@ -735,55 +761,15 @@ export function ConversationPanel({
           setRoles={setRoles}
           onSaveProviderSettings={onSaveProviderSettings}
           onSavePermissionMode={onSavePermissionMode}
+          onSetSessionMode={onSetSessionMode}
+          currentMode={currentMode}
+          isBusy={isBusy}
+          selectedSession={selectedSession}
           turnPhase={turnPhase}
           turnStartedAt={turnStartedAt}
           permissionMode={permissionMode}
           agents={agents}
         />
-        <div className="composer">
-          <div className="composer-mode-toggle" role="group" aria-label={t("conversation.modeLabel")}>
-            <button
-              type="button"
-              className={currentMode === "auto" ? "active" : ""}
-              disabled={!selectedSession || isBusy}
-              onClick={() => onSetSessionMode("auto")}
-              title={t("conversation.autoMode")}
-            >
-              <Bot size={14} />
-              <span>{t("conversation.autoMode")}</span>
-            </button>
-            <button
-              type="button"
-              className={currentMode === "plan" ? "active" : ""}
-              disabled={!selectedSession || isBusy}
-              onClick={() => onSetSessionMode("plan")}
-              title={t("conversation.planMode")}
-            >
-              <Brain size={14} />
-              <span>{t("conversation.planMode")}</span>
-            </button>
-          </div>
-          <textarea
-            value={prompt}
-            disabled={!selectedSession || isBusy}
-            onChange={(event) => onSetPrompt(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                onSendPrompt();
-              }
-            }}
-            placeholder={selectedSession ? t("conversation.askPlaceholder") : t("conversation.noSessionPlaceholder")}
-            aria-label={t("conversation.askPlaceholder")}
-          />
-          <button
-            className={`send-button${isBusy ? " stop-button" : ""}`}
-            disabled={isBusy ? stopping : !prompt.trim() || !selectedSession}
-            onClick={isBusy ? onStopPrompt : onSendPrompt}
-          >
-            {isBusy ? <Square size={18} /> : <Send size={18} />}
-            <span>{isBusy ? t(stopping ? "actions.stopping" : "actions.stop") : t("actions.send")}</span>
-          </button>
-        </div>
       </footer>
     </section>
   );

@@ -1,16 +1,36 @@
-import { Activity, Boxes, Bot, ChevronDown, Cpu, Loader2, ShieldCheck } from "lucide-react";
+import {
+  Activity,
+  Boxes,
+  Brain,
+  Bot,
+  ChevronDown,
+  Clock,
+  Circle,
+  Cpu,
+  DollarSign,
+  Loader2,
+  MoreVertical,
+  Send,
+  Settings,
+  ShieldCheck,
+  Smile,
+  Users,
+} from "lucide-react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
+  CompileMode,
   ModelRecord,
   AgentDto,
   AgentStatus,
-  ProviderRecord,
   PermissionMode,
+  ProjectRecord,
+  ProviderRecord,
   RoleRecord,
   RuntimeCostAmount,
   RuntimeUsage,
+  SessionRecord,
   SessionRuntime,
   TurnPhase,
 } from "../types";
@@ -23,6 +43,10 @@ type SessionStatusBarProps = {
   setRoles: Dispatch<SetStateAction<RoleRecord[]>>;
   onSaveProviderSettings: (explicitRoles?: RoleRecord[]) => void;
   onSavePermissionMode: (mode: PermissionMode) => void;
+  onSetSessionMode: (mode: CompileMode) => void;
+  currentMode: CompileMode;
+  isBusy: boolean;
+  selectedSession: SessionRecord | null;
   turnPhase: TurnPhase;
   turnStartedAt: number | null;
   permissionMode: PermissionMode;
@@ -57,25 +81,12 @@ const activeAgentStatuses = new Set<AgentStatus>([
   "queued",
 ]);
 
-const agentStatusKeys: Record<AgentStatus, string> = {
-  queued: "subagent.queued",
-  running: "subagent.running",
-  waiting: "subagent.awaitingTool",
-  completed: "turnPhase.completed",
-  errored: "subagent.failed",
-  interrupted: "turnPhase.interrupted",
-  shutdown: "status.done",
-  notFound: "subagent.notFound",
-};
+/* ===== Helpers ===== */
 
 function formatTokenCount(value?: number | null): string {
   const tokens = value ?? 0;
-  if (tokens >= 1_000_000) {
-    return `${formatNumber(tokens / 1_000_000)}m`;
-  }
-  if (tokens >= 1_000) {
-    return `${formatNumber(tokens / 1_000)}k`;
-  }
+  if (tokens >= 1_000_000) return `${formatNumber(tokens / 1_000_000)}m`;
+  if (tokens >= 1_000) return `${formatNumber(tokens / 1_000)}k`;
   return tokens.toString();
 }
 
@@ -84,9 +95,7 @@ function formatNumber(value: number): string {
 }
 
 function formatPercent(value?: number | null): string {
-  if (value == null) {
-    return "0%";
-  }
+  if (value == null) return "0%";
   return `${Math.round(value * 100)}%`;
 }
 
@@ -96,9 +105,7 @@ function pricedCosts(costs: RuntimeCostAmount[] | null | undefined): RuntimeCost
 
 function formatCostNumber(value: number): string {
   const absolute = Math.abs(value);
-  if (absolute > 0 && absolute < 0.01) {
-    return value.toFixed(4);
-  }
+  if (absolute > 0 && absolute < 0.01) return value.toFixed(4);
   return value.toFixed(2);
 }
 
@@ -109,9 +116,7 @@ function formatCostAmounts(
   unpriced: string,
 ): string {
   const priced = pricedCosts(costs);
-  if (priced.length === 0) {
-    return hasUnpricedUsage ? unpriced : fallback;
-  }
+  if (priced.length === 0) return hasUnpricedUsage ? unpriced : fallback;
   const label = priced
     .map((cost) => `${cost.currency} ${formatCostNumber(cost.amount)}`)
     .join(" + ");
@@ -119,9 +124,7 @@ function formatCostAmounts(
 }
 
 function formatCost(runtime: SessionRuntime | null, fallback: string, unpriced: string): string {
-  if (!runtime?.usage) {
-    return fallback;
-  }
+  if (!runtime?.usage) return fallback;
   return formatCostAmounts(
     runtime.usage.estimatedCosts,
     runtime.usage.hasUnpricedUsage,
@@ -131,44 +134,80 @@ function formatCost(runtime: SessionRuntime | null, fallback: string, unpriced: 
 }
 
 function formatRuntimeCost(usage: RuntimeUsage | null | undefined, fallback: string, unpriced: string): string {
-  if (!usage || usage.totalTokens === 0) {
-    return fallback;
-  }
+  if (!usage || usage.totalTokens === 0) return fallback;
   return formatCostAmounts(usage.estimatedCosts, usage.hasUnpricedUsage, fallback, unpriced);
 }
 
+function contextPercent(usage: RuntimeUsage | null): number {
+  if (!usage?.contextWindow) return 0;
+  return Math.min(100, (usage.latestContextTokens / usage.contextWindow) * 100);
+}
+
 function formatElapsed(startedAt: number | null, now: number): string | null {
-  if (!startedAt) {
-    return null;
-  }
+  if (!startedAt) return null;
   const seconds = Math.max(0, Math.floor((now - startedAt) / 1000));
-  if (seconds < 60) {
-    return `${seconds}s`;
-  }
+  if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   return `${minutes}m ${seconds % 60}s`;
 }
 
-function contextPercent(usage: RuntimeUsage | null): number {
-  if (!usage?.contextWindow) {
-    return 0;
+function findPlannerRole(roles: RoleRecord[]): RoleRecord | null {
+  return roles.find((r) => r.key === "planner") ?? null;
+}
+
+function findModelInProviders(
+  providers: ProviderRecord[],
+  modelSlug: string,
+): { provider: ProviderRecord; model: ModelRecord } | null {
+  for (const provider of providers) {
+    const model = allModels(provider).find((m) => m.slug === modelSlug);
+    if (model) return { provider, model };
   }
-  return Math.min(100, (usage.latestContextTokens / usage.contextWindow) * 100);
+  return null;
+}
+
+function agentStatusKeys(status: AgentStatus): string {
+  const map: Record<AgentStatus, string> = {
+    queued: "subagent.queued",
+    running: "subagent.running",
+    waiting: "subagent.awaitingTool",
+    completed: "turnPhase.completed",
+    errored: "subagent.failed",
+    interrupted: "turnPhase.interrupted",
+    shutdown: "status.done",
+    notFound: "subagent.notFound",
+  };
+  return map[status];
 }
 
 function StatusPopover({
-  className,
-  trigger,
   children,
+  priority,
+  trigger,
 }: {
-  className?: string;
-  trigger: ReactNode;
   children: ReactNode;
+  priority?: string;
+  trigger: ReactNode;
 }) {
+  const [open, setOpen] = useState(false);
+
   return (
-    <div className={`status-popover-wrap ${className ?? ""}`} tabIndex={0}>
+    <div
+      className={`status-popover-wrap${open ? " open" : ""}`}
+      data-priority={priority}
+      tabIndex={0}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocusCapture={() => setOpen(true)}
+      onBlurCapture={(event) => {
+        const nextFocus = event.relatedTarget;
+        if (!(nextFocus instanceof Node) || !event.currentTarget.contains(nextFocus)) {
+          setOpen(false);
+        }
+      }}
+    >
       {trigger}
-      <div className="status-popover">{children}</div>
+      <div className={`status-popover${open ? " open" : ""}`}>{children}</div>
     </div>
   );
 }
@@ -191,119 +230,6 @@ function ListPopover({ title, items }: { title: string; items: string[] }) {
       )}
     </div>
   );
-}
-
-function sortAgents(agents: AgentDto[]): AgentDto[] {
-  return [...agents].sort((left, right) => {
-    const leftActive = activeAgentStatuses.has(left.status) ? 1 : 0;
-    const rightActive = activeAgentStatuses.has(right.status) ? 1 : 0;
-    if (leftActive !== rightActive) {
-      return rightActive - leftActive;
-    }
-    if (right.updatedAt !== left.updatedAt) {
-      return right.updatedAt - left.updatedAt;
-    }
-    return left.role.localeCompare(right.role);
-  });
-}
-
-function TurnStatusIndicator({
-  turnPhase,
-  turnStartedAt,
-}: {
-  turnPhase: TurnPhase;
-  turnStartedAt: number | null;
-}) {
-  const { t } = useTranslation();
-  const [now, setNow] = useState(Date.now());
-  const elapsed = formatElapsed(turnStartedAt, now);
-  const isActive = ["running", "thinking", "tool", "subagent", "approval", "stopping"].includes(turnPhase);
-
-  useEffect(() => {
-    if (!turnStartedAt || !isActive) {
-      return;
-    }
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, [turnStartedAt, isActive]);
-
-  return (
-    <div className={`turn-status-indicator phase-${turnPhase}`} aria-live="polite">
-      {isActive ? <Loader2 size={14} className="spin" /> : <Activity size={14} />}
-      <strong>{t(turnPhaseKeys[turnPhase])}</strong>
-      {elapsed ? <span>{elapsed}</span> : null}
-    </div>
-  );
-}
-
-function AgentPopover({ agents }: { agents: AgentDto[] }) {
-  const { t } = useTranslation();
-  const items = sortAgents(agents);
-  const fallback = t("statusBar.costNotConfigured");
-  const unpriced = t("statusBar.costUnpriced");
-
-  return (
-    <StatusPopover
-      className="subagent-popover-wrap"
-      trigger={
-        <button className="status-item status-subagents" type="button">
-          <Bot size={14} />
-          <strong>{t("statusBar.subagents")} {agents.length}</strong>
-          <ChevronDown size={13} />
-        </button>
-      }
-    >
-      <div className="status-subagent-popover">
-        <strong>{t("statusBar.subagents")}</strong>
-        {items.length === 0 ? (
-          <span className="status-empty">{t("statusBar.noSubagents")}</span>
-        ) : (
-          items.map((activity) => (
-            <div key={activity.id} className={`status-subagent-row status-${activity.status}`}>
-              <span className="status-subagent-dot" aria-hidden="true" />
-              <div>
-                <span className="status-subagent-role">{activity.role}</span>
-                <p>{agentPopoverDetail(activity, t)}</p>
-              </div>
-              <span className="status-subagent-cost">
-                {formatRuntimeCost(activity.runtimeUsage, fallback, unpriced)}
-              </span>
-              <span className="status-subagent-badge">{t(agentStatusKeys[activity.status])}</span>
-            </div>
-          ))
-        )}
-      </div>
-    </StatusPopover>
-  );
-}
-
-function agentPopoverDetail(agent: AgentDto, t: (key: string) => string): string {
-  if (["errored", "interrupted", "shutdown", "notFound"].includes(agent.status)) {
-    if (agent.error?.trim()) {
-      return agent.error;
-    }
-    if (agent.reason?.trim()) {
-      return translateAgentReason(agent.reason, t);
-    }
-  }
-  return agent.task;
-}
-
-function translateAgentReason(reason: string, t: (key: string) => string): string {
-  switch (reason) {
-    case "providerError":
-      return t("subagent.providerError");
-    case "toolError":
-      return t("subagent.toolError");
-    case "budgetLimited":
-      return t("subagent.budgetLimited");
-    case "interrupted":
-      return t("subagent.interrupted");
-    case "shutdown":
-      return t("subagent.shutdown");
-    default:
-      return reason;
-  }
 }
 
 function CostRows({ usage }: { usage: RuntimeUsage | null }) {
@@ -336,20 +262,193 @@ function CostRows({ usage }: { usage: RuntimeUsage | null }) {
   );
 }
 
-function findPlannerRole(roles: RoleRecord[]): RoleRecord | null {
-  return roles.find((r) => r.key === "planner") ?? null;
+function sortAgents(agents: AgentDto[]): AgentDto[] {
+  return [...agents].sort((left, right) => {
+    const leftActive = activeAgentStatuses.has(left.status) ? 1 : 0;
+    const rightActive = activeAgentStatuses.has(right.status) ? 1 : 0;
+    if (leftActive !== rightActive) {
+      return rightActive - leftActive;
+    }
+    if (right.updatedAt !== left.updatedAt) {
+      return right.updatedAt - left.updatedAt;
+    }
+    return left.role.localeCompare(right.role);
+  });
 }
 
-function findModelInProviders(
-  providers: ProviderRecord[],
-  modelSlug: string,
-): { provider: ProviderRecord; model: ModelRecord } | null {
-  for (const provider of providers) {
-    const model = allModels(provider).find((m) => m.slug === modelSlug);
-    if (model) return { provider, model };
+function agentPopoverDetail(agent: AgentDto, t: (key: string) => string): string {
+  if (["errored", "interrupted", "shutdown", "notFound"].includes(agent.status)) {
+    if (agent.error?.trim()) {
+      return agent.error;
+    }
+    if (agent.reason?.trim()) {
+      return translateAgentReason(agent.reason, t);
+    }
   }
-  return null;
+  return agent.task;
 }
+
+function translateAgentReason(reason: string, t: (key: string) => string): string {
+  switch (reason) {
+    case "providerError":
+      return t("subagent.providerError");
+    case "toolError":
+      return t("subagent.toolError");
+    case "budgetLimited":
+      return t("subagent.budgetLimited");
+    case "interrupted":
+      return t("subagent.interrupted");
+    case "shutdown":
+      return t("subagent.shutdown");
+    default:
+      return reason;
+  }
+}
+
+function AgentPopover({ agents, count }: { agents: AgentDto[]; count: number }) {
+  const { t } = useTranslation();
+  const items = sortAgents(agents);
+  const fallback = t("statusBar.costNotConfigured");
+  const unpriced = t("statusBar.costUnpriced");
+
+  return (
+    <StatusPopover
+      priority="4"
+      trigger={
+        <button className="status-readonly status-readonly-trigger" type="button">
+          <Users size={12} />
+          {count}
+        </button>
+      }
+    >
+      <div className="status-subagent-popover">
+        <strong>{t("statusBar.subagents")}</strong>
+        {items.length === 0 ? (
+          <span className="status-empty">{t("statusBar.noSubagents")}</span>
+        ) : (
+          items.map((activity) => (
+            <div key={activity.id} className={`status-subagent-row status-${activity.status}`}>
+              <span className="status-subagent-dot" aria-hidden="true" />
+              <div>
+                <span className="status-subagent-role">{activity.role}</span>
+                <p>{agentPopoverDetail(activity, t)}</p>
+              </div>
+              <span className="status-subagent-cost">
+                {formatRuntimeCost(activity.runtimeUsage, fallback, unpriced)}
+              </span>
+              <span className="status-subagent-badge">{t(agentStatusKeys(activity.status))}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </StatusPopover>
+  );
+}
+
+/* ===== Dropdown primitive ===== */
+
+function Dropdown({
+  trigger,
+  children,
+  className,
+}: {
+  trigger: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(event: MouseEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  return (
+    <div
+      ref={ref}
+      className={`status-dropdown-wrap${open ? " open" : ""}`}
+      style={{ position: "relative", display: "inline-flex" }}
+    >
+      <button
+        className={`status-chip selectable ${className ?? ""}`}
+        style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+      >
+        {trigger}
+        <ChevronDown size={12} />
+      </button>
+      <div className={`status-dropdown ${open ? "open" : ""}`}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ===== Mode Selector ===== */
+
+function ModeSelector({
+  currentMode,
+  onSetSessionMode,
+  isBusy,
+  selectedSession,
+}: {
+  currentMode: CompileMode;
+  onSetSessionMode: (mode: CompileMode) => void;
+  isBusy: boolean;
+  selectedSession: SessionRecord | null;
+}) {
+  const { t } = useTranslation();
+
+  const modeIcon = currentMode === "auto"
+    ? <Bot size={13} />
+    : <Brain size={13} />;
+
+  const modeLabel = currentMode === "auto" ? t("conversation.autoMode") : t("conversation.planMode");
+
+  return (
+    <Dropdown
+      className="status-chip mode-chip selectable"
+      trigger={<>{modeIcon} {modeLabel}</>}
+    >
+      <button
+        className={`status-dropdown-item ${currentMode === "auto" ? "active" : ""}`}
+        onClick={() => {
+          onSetSessionMode("auto");
+        }}
+        disabled={isBusy || !selectedSession}
+      >
+        <Bot size={16} />
+        <span>
+          <strong>{t("conversation.autoMode")}</strong>
+          <small>自动执行，直接生成代码</small>
+        </span>
+      </button>
+      <button
+        className={`status-dropdown-item ${currentMode === "plan" ? "active" : ""}`}
+        onClick={() => {
+          onSetSessionMode("plan");
+        }}
+        disabled={isBusy || !selectedSession}
+      >
+        <Brain size={16} />
+        <span>
+          <strong>{t("conversation.planMode")}</strong>
+          <small>先规划方案，确认后执行</small>
+        </span>
+      </button>
+    </Dropdown>
+  );
+}
+
+/* ===== Model Selector ===== */
 
 function ModelSelector({
   runtime,
@@ -384,18 +483,6 @@ function ModelSelector({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [open]);
 
-  function buildUpdatedPlannerRole(
-    providerId: string,
-    modelSlug: string,
-    effort: string,
-  ): RoleRecord[] {
-    return roles.map((r) =>
-      r.key === "planner"
-        ? { ...r, provider: providerId, model: modelSlug, effort }
-        : r,
-    );
-  }
-
   function handleSelectModel(providerId: string, modelSlug: string) {
     if (!plannerRole) return;
     const provider = providers.find((p) => p.id === providerId);
@@ -405,7 +492,11 @@ function ModelSelector({
     const effort = model.reasoningEfforts.includes(currentEffort)
       ? currentEffort
       : (model.reasoningEfforts[0] ?? "");
-    const newRoles = buildUpdatedPlannerRole(providerId, modelSlug, effort);
+    const newRoles = roles.map((r) =>
+      r.key === "planner"
+        ? { ...r, provider: providerId, model: modelSlug, effort }
+        : r,
+    );
     setRoles(newRoles);
     onSaveProviderSettings(newRoles);
     setOpen(false);
@@ -429,15 +520,15 @@ function ModelSelector({
   }
 
   return (
-    <div className="model-selector-wrap" ref={wrapRef}>
+    <div className={`model-selector-wrap${open ? " open" : ""}`} ref={wrapRef}>
       <button
-        className="status-item status-model"
+        className="status-chip selectable model-chip"
         type="button"
         onClick={() => setOpen((v) => !v)}
       >
-        <Cpu size={14} />
-        <strong>{currentModelInfo?.model.displayName ?? currentModelSlug ?? t("statusBar.noModel")}</strong>
-        <ChevronDown size={13} />
+        <Cpu size={13} />
+        {currentModelInfo?.model.displayName ?? currentModelSlug ?? t("statusBar.noModel")}
+        <ChevronDown size={12} />
       </button>
       {open && (
         <div className="model-selector-dropdown">
@@ -448,10 +539,18 @@ function ModelSelector({
                   {group.provider.name || group.provider.id}
                 </div>
                 {group.models.map((model) => (
-                  <button
+                  <div
                     key={model.slug}
                     className={`model-selector-option${model.slug === currentModelSlug ? " active" : ""}`}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => handleSelectModel(group.provider.id, model.slug)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        handleSelectModel(group.provider.id, model.slug);
+                      }
+                    }}
                   >
                     <span className="model-selector-name">{model.displayName || model.slug}</span>
                     {model.slug === currentModelSlug && currentEfforts.length > 0 ? (
@@ -467,7 +566,7 @@ function ModelSelector({
                         ))}
                       </div>
                     ) : null}
-                  </button>
+                  </div>
                 ))}
               </div>
             ))}
@@ -478,6 +577,98 @@ function ModelSelector({
   );
 }
 
+/* ===== Effort Selector ===== */
+
+function EffortSelector({
+  providers,
+  roles,
+  setRoles,
+  onSaveProviderSettings,
+}: {
+  providers: ProviderRecord[];
+  roles: RoleRecord[];
+  setRoles: Dispatch<SetStateAction<RoleRecord[]>>;
+  onSaveProviderSettings: (explicitRoles?: RoleRecord[]) => void;
+}) {
+  const { t } = useTranslation();
+  const plannerRole = findPlannerRole(roles);
+  const currentModelSlug = plannerRole?.model ?? "";
+  const currentModelInfo = currentModelSlug ? findModelInProviders(providers, currentModelSlug) : null;
+  const efforts = currentModelInfo?.model.reasoningEfforts ?? [];
+  const currentEffort = plannerRole?.effort && efforts.includes(plannerRole.effort)
+    ? plannerRole.effort
+    : (efforts[0] ?? "");
+
+  if (!plannerRole || efforts.length === 0) {
+    return null;
+  }
+
+  function handleSelectEffort(effort: string) {
+    const newRoles = roles.map((role) =>
+      role.key === "planner" ? { ...role, effort } : role,
+    );
+    setRoles(newRoles);
+    onSaveProviderSettings(newRoles);
+  }
+
+  return (
+    <Dropdown
+      className="status-chip effort-chip selectable"
+      trigger={<><Clock size={13} /> {currentEffort || t("roleRoute.effort")}</>}
+    >
+      <div className="status-dropdown-title">{t("roleRoute.effort")}</div>
+      {efforts.map((effort) => (
+        <button
+          key={effort}
+          className={`status-dropdown-item ${effort === currentEffort ? "active" : ""}`}
+          onClick={() => handleSelectEffort(effort)}
+        >
+          <strong>{effort}</strong>
+        </button>
+      ))}
+    </Dropdown>
+  );
+}
+
+/* ===== Permission Selector ===== */
+
+function PermissionSelector({
+  permissionMode,
+  onSavePermissionMode,
+}: {
+  permissionMode: PermissionMode;
+  onSavePermissionMode: (mode: PermissionMode) => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <Dropdown
+      className="status-chip permission-chip selectable"
+      trigger={
+        <>
+          <ShieldCheck size={13} />
+          {t(`permissionMode.${permissionMode}`)}
+        </>
+      }
+    >
+      <div className="status-dropdown-title">{t("statusBar.permissionMode")}</div>
+      {permissionModes.map((mode) => (
+        <button
+          key={mode}
+          className={`status-dropdown-item ${mode === permissionMode ? "active" : ""}`}
+          onClick={() => {
+            if (mode !== permissionMode) onSavePermissionMode(mode);
+          }}
+        >
+          <strong>{t(`permissionMode.${mode}`)}</strong>
+        </button>
+      ))}
+    </Dropdown>
+  );
+}
+
+/* ===== Main: SessionStatusBar ===== */
+
 export function SessionStatusBar({
   runtime,
   providers,
@@ -485,6 +676,10 @@ export function SessionStatusBar({
   setRoles,
   onSaveProviderSettings,
   onSavePermissionMode,
+  onSetSessionMode,
+  currentMode,
+  isBusy,
+  selectedSession,
   turnPhase,
   turnStartedAt,
   permissionMode,
@@ -498,14 +693,21 @@ export function SessionStatusBar({
   const skills = runtime?.activeSkills ?? [];
   const mcpServers = runtime?.activeMcpServers ?? [];
   const capabilityCount = skills.length;
+  const activeAgentCount = agents.filter(
+    (a) => a.status === "running" || a.status === "waiting" || a.status === "queued",
+  ).length;
 
   return (
-    <div className="session-status-bar" aria-label={t("statusBar.label")}>
-      <div className="status-group status-left">
-        <TurnStatusIndicator turnPhase={turnPhase} turnStartedAt={turnStartedAt} />
-      </div>
+    <div className="bottom-status-bar">
+      {/* Left: Interactive/selectable */}
+      <div className="bottom-status-left">
+        <ModeSelector
+          currentMode={currentMode}
+          onSetSessionMode={onSetSessionMode}
+          isBusy={isBusy}
+          selectedSession={selectedSession}
+        />
 
-      <div className="status-group status-right">
         <ModelSelector
           runtime={runtime}
           providers={providers}
@@ -514,15 +716,31 @@ export function SessionStatusBar({
           onSaveProviderSettings={onSaveProviderSettings}
         />
 
+        <EffortSelector
+          providers={providers}
+          roles={roles}
+          setRoles={setRoles}
+          onSaveProviderSettings={onSaveProviderSettings}
+        />
+
+        <PermissionSelector
+          permissionMode={permissionMode}
+          onSavePermissionMode={onSavePermissionMode}
+        />
+      </div>
+
+      {/* Right: Read-only status */}
+      <div className="bottom-status-right">
         <StatusPopover
-          className="context-popover-wrap"
+          priority="1"
           trigger={
-            <button className="status-item status-context" type="button">
-              <span>{t("statusBar.context")}</span>
-              <strong>{contextLabel}</strong>
-              <span className="context-meter" aria-hidden="true">
-                <span style={{ width: contextWidth }} />
-              </span>
+            <button className="status-readonly status-readonly-trigger" type="button">
+              <div className="context-meter-inline">
+                <span>{contextLabel}</span>
+                <span className="context-meter-bar">
+                  <span className="context-meter-fill" style={{ width: contextWidth }} />
+                </span>
+              </div>
             </button>
           }
         >
@@ -547,11 +765,11 @@ export function SessionStatusBar({
         </StatusPopover>
 
         <StatusPopover
-          className="cost-popover-wrap"
+          priority="2"
           trigger={
-            <button className="status-item status-cost" type="button">
-              <span>{t("statusBar.cost")}</span>
-              <strong>{costLabel}</strong>
+            <button className="status-readonly status-readonly-trigger" type="button">
+              <DollarSign size={12} />
+              {costLabel}
             </button>
           }
         >
@@ -562,43 +780,11 @@ export function SessionStatusBar({
         </StatusPopover>
 
         <StatusPopover
-          className="permission-popover-wrap"
+          priority="3"
           trigger={
-            <button className="status-item status-permission" type="button">
-              <ShieldCheck size={14} />
-              <strong>{t(`permissionMode.${permissionMode}`)}</strong>
-              <ChevronDown size={13} />
-            </button>
-          }
-        >
-          <div className="status-permission-popover">
-            <strong>{t("statusBar.permissionMode")}</strong>
-            <p>{t(`settings.security.modeDesc.${permissionMode}`)}</p>
-            <div className="status-permission-actions" role="group" aria-label={t("statusBar.permissionMode")}>
-              {permissionModes.map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  className={mode === permissionMode ? "active" : ""}
-                  onClick={() => {
-                    if (mode !== permissionMode) {
-                      onSavePermissionMode(mode);
-                    }
-                  }}
-                >
-                  {t(`permissionMode.${mode}`)}
-                </button>
-              ))}
-            </div>
-          </div>
-        </StatusPopover>
-
-        <StatusPopover
-          trigger={
-            <button className="status-item status-count" type="button">
-              <Boxes size={14} />
-              <strong>{t("statusBar.capabilities")} {capabilityCount}</strong>
-              <ChevronDown size={13} />
+            <button className="status-readonly status-readonly-trigger" type="button">
+              <Boxes size={12} />
+              {capabilityCount}
             </button>
           }
         >
@@ -608,8 +794,13 @@ export function SessionStatusBar({
           </div>
         </StatusPopover>
 
-        <AgentPopover agents={agents} />
+        <AgentPopover agents={agents} count={activeAgentCount} />
       </div>
+
+      {/* More overflow button */}
+      <button className="status-more-btn" type="button">
+        <MoreVertical size={16} />
+      </button>
     </div>
   );
 }

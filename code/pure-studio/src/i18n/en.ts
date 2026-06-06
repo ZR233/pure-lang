@@ -162,7 +162,7 @@ const en = {
     addProjectHint: "Add or select a project to begin",
     emptyTitle: "Ready when you are",
     emptyDescription: "Select a project and ask Pure Studio to explore, plan, or execute.",
-    askPlaceholder: "Ask Pure Studio...",
+    askPlaceholder: "Type a message to start...",
     noSessionPlaceholder: "Create or select a session",
     modeLabel: "Collaboration mode",
     autoMode: "Auto",

@@ -1,12 +1,12 @@
+/* ===== Responsive Breakpoints ===== */
+
 @media (max-width: 1200px) {
   .provider-card-meta {
     grid-template-columns: minmax(170px, 1fr) minmax(120px, 0.55fr) minmax(220px, 1.2fr);
   }
-
   .provider-console-head {
     grid-template-columns: minmax(0, 1fr);
   }
-
   .provider-console-tools {
     flex-wrap: wrap;
   }
@@ -16,37 +16,38 @@
   .app-shell {
     grid-template-columns: 240px minmax(420px, 1fr);
   }
-
   .provider-settings {
     grid-template-rows: minmax(0, 1fr);
   }
-
   .provider-console-head {
     grid-template-columns: minmax(0, 1fr);
   }
-
   .provider-console-tools {
     justify-content: flex-start;
   }
-
   .provider-card-meta {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
-
   .provider-form-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
   .model-parameter-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
   .role-card-list {
     grid-template-columns: minmax(0, 1fr);
   }
-
   .conversation-header {
-    padding: 16px clamp(12px, 2vw, 20px);
+    padding: 0 20px;
+  }
+  .message-stream {
+    padding: 16px 20px;
+  }
+  .composer {
+    padding: 12px 20px 8px;
+  }
+  .bottom-status-bar {
+    padding: 6px 20px 10px;
   }
 }
 
@@ -54,47 +55,46 @@
   .model-row {
     grid-template-columns: minmax(0, 1fr);
   }
-
   .custom-model-row,
   .custom-model-fields {
     grid-template-columns: minmax(0, 1fr);
   }
-
   .provider-card-meta {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
   .provider-card-meta > span.wide {
     grid-column: 1 / -1;
   }
-
   .provider-form-grid {
     grid-template-columns: minmax(0, 1fr);
   }
-
   .provider-form-grid label.wide {
     grid-column: auto;
   }
-
   .model-parameter-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
   .settings-header {
     padding: 14px 18px 10px;
   }
-
   .settings-tabs {
     width: min(620px, calc(100vw - 36px));
     margin: 10px 18px 0;
   }
-
   .provider-settings {
     padding: 14px 18px 18px;
   }
-
   .role-settings {
     padding: 16px;
+  }
+
+  /* Bottom status bar: hide low-priority items, show more button */
+  .bottom-status-right .status-popover-wrap[data-priority="3"],
+  .bottom-status-right .status-popover-wrap[data-priority="4"] {
+    display: none;
+  }
+  .status-more-btn {
+    display: inline-flex;
   }
 }
 
@@ -102,107 +102,100 @@
   .app-shell {
     grid-template-columns: 220px minmax(0, 1fr);
   }
-
   .project-rail {
-    padding: 14px;
+    padding: 0;
   }
-
-  .brand-subtitle,
+  .brand-name {
+    display: none;
+  }
   .project-row small {
     display: none;
   }
-
   .conversation-header {
-    padding: 16px;
+    padding: 0 16px;
   }
-
   .message-stream {
-    padding: 16px;
+    padding: 12px 16px;
   }
-
   .composer {
-    padding: 12px 16px 14px;
+    padding: 10px 16px 6px;
   }
-
-  .session-status-bar {
-    align-items: stretch;
-    flex-direction: column;
+  .bottom-status-bar {
+    padding: 4px 16px 8px;
+    flex-wrap: wrap;
   }
-
-  .status-group {
-    justify-content: space-between;
+  .bottom-status-left {
+    flex: 1 1 auto;
+    overflow-x: auto;
+    padding-bottom: 2px;
   }
-
+  .bottom-status-bar:has(.status-dropdown-wrap.open),
+  .bottom-status-bar:has(.model-selector-wrap.open),
+  .bottom-status-left:has(.status-dropdown-wrap.open),
+  .bottom-status-left:has(.model-selector-wrap.open) {
+    overflow: visible;
+  }
   .provider-settings {
     grid-template-rows: minmax(0, 1fr);
     padding: 18px;
   }
-
   .role-settings {
     padding: 18px;
   }
-
   .provider-console-tools,
   .inline-model-heading,
   .config-editor-heading {
     align-items: stretch;
     flex-direction: column;
   }
-
   .provider-card-shell {
     flex-wrap: wrap;
     align-items: flex-start;
   }
-
   .provider-edit-head {
     flex-wrap: wrap;
     align-items: flex-start;
   }
-
   .provider-edit-actions {
     width: 100%;
     justify-content: flex-end;
   }
-
   .provider-card-actions {
     width: 100%;
     justify-content: flex-end;
   }
-
   .search-box {
     min-width: 0;
     max-width: 100%;
   }
-
   .provider-card-meta {
     grid-template-columns: minmax(0, 1fr);
   }
-
   .provider-card-meta > span.wide {
     grid-column: auto;
   }
-
   .provider-add-actions {
     width: 100%;
   }
-
   .provider-add-actions button {
     flex: 1;
   }
-
   .provider-form-grid,
   .custom-model-row,
   .custom-model-fields,
   .model-parameter-grid {
     grid-template-columns: minmax(0, 1fr);
   }
-
   .model-parameter-grid > span.wide {
     grid-column: auto;
   }
-
   .model-row {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Hide cost in status bar */
+  .bottom-status-right .status-popover-wrap[data-priority="2"] {
+    display: none;
   }
 }
 
@@ -213,35 +206,73 @@
     max-width: 100vw;
     min-width: 0;
   }
-
   .project-rail {
     display: none;
   }
-
   .conversation,
+  .conversation-header,
+  .message-stream,
   .conversation-footer,
-  .session-status-bar,
+  .bottom-status-bar,
   .composer {
     width: 100%;
     max-width: 100vw;
     min-width: 0;
   }
-
   .composer {
     grid-template-columns: minmax(0, 1fr);
   }
-
+  .message-stream {
+    overflow-x: hidden;
+  }
+  .conversation-timeline,
+  .timeline-virtual-spacer,
+  .timeline-virtual-row,
+  .timeline-entry,
+  .timeline-entry-card {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .timeline-entry-message.role-user .timeline-entry-card {
+    max-width: calc(100vw - 56px);
+  }
+  .bottom-status-bar {
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+  .bottom-status-bar:has(.status-dropdown-wrap.open),
+  .bottom-status-bar:has(.model-selector-wrap.open) {
+    overflow: visible;
+  }
+  .bottom-status-left {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .bottom-status-left:has(.status-dropdown-wrap.open),
+  .bottom-status-left:has(.model-selector-wrap.open) {
+    overflow: visible;
+  }
+  .bottom-status-left::-webkit-scrollbar {
+    display: none;
+  }
+  .bottom-status-left .status-chip {
+    flex: 0 0 auto;
+  }
   .composer textarea,
   .send-button {
     min-width: 0;
   }
-
-  .conversation-header h1,
-  .settings-header h1 {
-    font-size: 18px;
+  .conversation-header h1 {
+    font-size: 13px;
   }
 
-  .message {
-    padding: 10px 12px;
+  /* Hide entire right side, show more button */
+  .bottom-status-right {
+    display: none;
+  }
+  .status-more-btn {
+    display: inline-flex;
   }
 }

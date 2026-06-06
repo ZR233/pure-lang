@@ -1,182 +1,247 @@
+/* ===== Sidebar ===== */
 .project-rail {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 18px;
-  padding: 18px;
-  color: #dbe7f2;
-  background: #111a24;
-  border-right: 1px solid #243342;
+  gap: 0;
+  color: #cbd5e1;
+  background: #0f172a;
+  border-right: 1px solid #1e293b;
+  overflow: hidden;
+}
+
+/* Header */
+.rail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
-}
-
-.brand-mark,
-.project-avatar,
-.provider-badge {
-  display: inline-grid;
-  place-items: center;
-  flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
-  border: 1px solid #d8e2eb;
-  border-radius: 8px;
-  color: #096895;
-  background: #f4f9fd;
-  font-weight: 800;
+  gap: 10px;
 }
 
 .brand-mark {
-  border-color: #2f80ed;
-  color: #ffffff;
-  background: #0b6ea8;
-}
-
-.brand-title {
-  color: #ffffff;
-  font-size: 16px;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  color: #fff;
+  display: grid;
+  place-items: center;
   font-weight: 800;
+  font-size: 14px;
 }
 
-.brand-subtitle,
-.muted {
-  color: #738195;
-  font-size: 12px;
+.brand-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f1f5f9;
+  letter-spacing: -0.3px;
 }
 
+.rail-icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  color: #64748b;
+  transition: all 0.15s;
+}
+.rail-icon-btn:hover {
+  background: #1e293b;
+  color: #cbd5e1;
+}
+
+/* New Session Button */
+.new-session-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 12px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.12);
+  color: #93c5fd;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.15s;
+  width: calc(100% - 24px);
+}
+.new-session-btn:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.2);
+  color: #bfdbfe;
+}
+.new-session-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Sections */
 .rail-section {
   display: flex;
   min-height: 0;
   flex-direction: column;
-  gap: 10px;
+  gap: 2px;
+  padding: 4px 10px;
 }
 
 .sessions-section {
   flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.section-heading {
+.section-label {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: #b7c5d3;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+  padding: 8px 4px 6px;
 }
 
-.icon-button,
-.back-button {
-  display: inline-grid;
+.section-label-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
-  border: 1px solid #dce5ee;
-  border-radius: 8px;
-  color: #243244;
-  background: #ffffff;
+  color: #475569;
+  transition: all 0.12s;
+}
+.section-label-btn:hover {
+  background: #1e293b;
+  color: #cbd5e1;
 }
 
-.project-rail .icon-button {
-  border-color: #344658;
-  color: #d9e5ee;
-  background: #1a2633;
-}
-
-.path-add {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.path-add input,
-.search-box input {
-  min-width: 0;
-  width: 100%;
-  border: 0;
-  outline: 0;
-  color: inherit;
-  background: transparent;
-}
-
-.path-add input {
-  height: 36px;
-  padding: 0 10px;
-  border: 1px solid #344658;
-  border-radius: 8px;
-  color: #dbe7f2;
-  background: #172332;
-}
-
-.project-list,
-.session-list {
+/* Project list */
+.project-list {
   display: flex;
   min-height: 0;
   flex-direction: column;
-  gap: 8px;
-  overflow: auto;
+  gap: 1px;
+  overflow-y: auto;
 }
 
-.project-row,
-.session-row {
+.project-row {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
   min-width: 0;
-  padding: 10px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  color: #cbd8e3;
+  padding: 8px 8px;
+  border-radius: 6px;
+  color: #cbd5e1;
   background: transparent;
   text-align: left;
+  transition: all 0.12s;
+}
+.project-row:hover {
+  background: #1e293b;
+}
+.project-row.active {
+  background: #1e3a5f;
+  color: #f1f5f9;
 }
 
-.project-row.active,
-.session-row.active {
-  border-color: #2d638a;
-  background: #172f43;
-}
-
-.project-row span:last-child,
-.session-row span:last-child {
-  min-width: 0;
-}
-
-.project-row strong,
-.session-row strong {
-  display: block;
-  overflow: hidden;
-  color: #ffffff;
-  font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-row small,
-.session-row small {
-  display: block;
-  overflow: hidden;
-  color: #8194a8;
+.project-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(99, 102, 241, 0.15);
+  color: #a5b4fc;
   font-size: 11px;
+  font-weight: 700;
+}
+
+.project-row-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.project-row strong {
+  display: block;
+  overflow: hidden;
+  color: #f1f5f9;
+  font-size: 12px;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.settings-entry {
+.project-row small {
+  display: block;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Session list */
+.session-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.session-row {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 8px;
-  flex: 0 0 42px;
-  width: auto;
-  height: 42px;
-  border: 1px solid #355064;
-  border-radius: 8px;
-  color: #edf6ff;
-  background: #172332;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #cbd5e1;
+  background: transparent;
+  text-align: left;
+  transition: all 0.12s;
+  width: 100%;
+}
+.session-row:hover {
+  background: #1e293b;
+}
+.session-row.active {
+  background: #1e3a5f;
+  color: #f1f5f9;
+}
+
+.session-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #475569;
+  flex-shrink: 0;
+}
+.session-row.active .session-dot {
+  background: #3b82f6;
+}
+
+.session-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.session-time {
+  font-size: 10px;
+  color: #64748b;
+  flex-shrink: 0;
 }
