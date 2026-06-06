@@ -20,6 +20,8 @@ import type {
   TurnStatus,
   ToolApprovalRequest,
   ToolApprovalResolved,
+  UserInputRequest,
+  UserInputResolved,
 } from "../types";
 import {
   applyLiveTimelineEvent,
@@ -50,6 +52,7 @@ export type StudioState = TimelineStateSlice & {
   agentTimelineEvents: AgentTimelineEvent[];
   sessionRuntime: SessionRuntime | null;
   approvals: ToolApprovalRequest[];
+  pendingUserInput: UserInputRequest | null;
   settingsOpen: boolean;
   activeSettingsTab: SettingsTab;
   providerSearch: string;
@@ -81,6 +84,8 @@ export type StudioAction =
   | { type: "configLoaded"; payload: ConfigPayload; status?: string }
   | { type: "enqueueApproval"; payload: ToolApprovalRequest; status: string }
   | { type: "resolveApproval"; payload: ToolApprovalResolved; status: string }
+  | { type: "userInputRequested"; payload: UserInputRequest; status: string }
+  | { type: "userInputResolved"; payload: UserInputResolved; status: string }
   | { type: "stopRequested"; status: string }
   | { type: "stopFallback"; status: string }
   | {
@@ -113,6 +118,7 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   ...emptyTimelineState(),
   sessionRuntime: null,
   approvals: [],
+  pendingUserInput: null,
   settingsOpen: false,
   activeSettingsTab: "providers",
   providerSearch: "",
@@ -159,6 +165,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         sessionRuntime: action.payload.sessionRuntime ?? null,
         ...emptyTimelineState(),
         approvals: [],
+        pendingUserInput: null,
         status: action.status,
         turnPhase: "idle",
         turnStartedAt: null,
@@ -174,6 +181,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         sessionRuntime: action.payload.sessionRuntime ?? null,
         ...emptyTimelineState(),
         approvals: [],
+        pendingUserInput: null,
         status: action.status,
         turnPhase: "idle",
         turnStartedAt: null,
@@ -212,6 +220,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         turnStartedAt: null,
         status: action.status,
         isBusy: false,
+        pendingUserInput: null,
       };
     case "runPromptFailed":
       if (action.sessionId && action.sessionId !== state.selectedSessionId) {
@@ -223,6 +232,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         turnPhase: "failed",
         turnStartedAt: null,
         isBusy: false,
+        pendingUserInput: null,
       };
     case "setBusy":
       return { ...state, isBusy: action.value };
@@ -269,6 +279,26 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         status: action.status,
         turnPhase: state.turnPhase === "stopping" ? "stopping" : "tool",
       };
+    case "userInputRequested":
+      if (action.payload.sessionId !== state.selectedSessionId) {
+        return state;
+      }
+      return {
+        ...state,
+        pendingUserInput: action.payload,
+        status: action.status,
+        turnPhase: "userInput",
+      };
+    case "userInputResolved":
+      if (state.pendingUserInput?.requestId !== action.payload.requestId) {
+        return state;
+      }
+      return {
+        ...state,
+        pendingUserInput: null,
+        status: action.status,
+        turnPhase: state.turnPhase === "stopping" ? "stopping" : "tool",
+      };
     case "stopRequested":
       return { ...state, turnPhase: "stopping", status: action.status };
     case "stopFallback":
@@ -278,6 +308,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         turnPhase: "interrupted",
         turnStartedAt: null,
         isBusy: false,
+        pendingUserInput: null,
       };
     case "promptSubmitted":
       return {
@@ -287,6 +318,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         status: action.status,
         turnPhase: "running",
         turnStartedAt: action.startedAt,
+        pendingUserInput: null,
       };
     case "agentEvent":
       if (action.sessionId !== state.selectedSessionId) {
@@ -343,6 +375,16 @@ function reduceAgentEvent(
   }
   if ("turnBudgetLimited" in event) {
     return { ...state, status: statusText, turnPhase: "budgetLimited" };
+  }
+  if ("userInputRequested" in event) {
+    return { ...state, status: statusText, turnPhase: "userInput" };
+  }
+  if ("userInputAnswered" in event) {
+    return {
+      ...state,
+      status: statusText,
+      turnPhase: state.turnPhase === "stopping" ? "stopping" : "tool",
+    };
   }
   if ("timelineItemStarted" in event) {
     const timelineState = applyLiveTimelineEvent(state, state.selectedSessionId ?? "", event);

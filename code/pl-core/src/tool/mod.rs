@@ -1,3 +1,4 @@
+mod ask_user;
 mod bash;
 mod file;
 mod multi_agent;
@@ -19,6 +20,7 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 use crate::AgentControl;
 use crate::turn::TurnOptions;
 
+pub use ask_user::AskUserTool;
 pub use bash::{BashInput, BashTool};
 pub use file::{
     ApplyPatchTool, CopyPathTool, CreateDirectoryTool, DeletePathTool, ListFilesTool, MovePathTool,

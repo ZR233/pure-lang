@@ -10,6 +10,7 @@ pub use event::{
     RuntimeUsageSnapshot, TimelineAgentItem, TimelineDelta, TimelineInferenceItem, TimelineItem,
     TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus, TimelineTextRole,
     TimelineThinkingChunk, TimelineToolItem, TokenUsageSnapshot, TraceEvent, TraceEventKind,
+    UserInputAnswer, UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
 };
 pub use message::{ContentPart, ContentPartType, Message, MessageContent, MessageRole};
 pub use permission::PermissionLevel;

@@ -1,6 +1,9 @@
 use pl_protocol::AgentStatus;
+use pl_protocol::UserInputResponse;
 use pretty_assertions::assert_eq;
+use std::sync::Arc;
 
+use super::child_agent_options;
 use super::json_output;
 use super::types::{ListAgentsResult, WaitAgentResult};
 use crate::agent::AgentRecord;
@@ -82,4 +85,15 @@ fn list_agents_result_keeps_agents_and_recoverable_failures() {
         value["recoverableFailures"][0]["error"],
         "provider returned status 429"
     );
+}
+
+#[test]
+fn child_agent_options_inherit_user_input_callback() {
+    let callback: crate::UserInputCallback =
+        Arc::new(|_request| Box::pin(async { UserInputResponse::default() }));
+    let parent = crate::TurnOptions::default().with_user_input_callback(callback);
+
+    let child = child_agent_options(&parent);
+
+    assert!(child.user_input_callback.is_some());
 }

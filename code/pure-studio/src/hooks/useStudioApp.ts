@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { normalizeRolesForProviders } from "../components/RoleSettings";
 import {
   approveTool,
+  answerUserInput,
   bootstrapStudio,
   createSession,
   denyTool,
@@ -40,6 +41,9 @@ import type {
   RoleRecord,
   ToolApprovalRequest,
   ToolApprovalResolved,
+  UserInputRequest,
+  UserInputResolved,
+  UserInputResponse,
 } from "../types";
 
 function providerInput(provider: ProviderRecord) {
@@ -82,6 +86,8 @@ function statusTextForEvent(
   if ("timelineItemFailed" in event) return t("status.error", { message: event.timelineItemFailed.error });
   if ("toolApprovalGranted" in event) return t("status.approved", { name: event.toolApprovalGranted.name });
   if ("toolApprovalDenied" in event) return t("status.denied", { name: event.toolApprovalDenied.name });
+  if ("userInputRequested" in event) return t("status.userInputRequired");
+  if ("userInputAnswered" in event) return t("status.userInputAnswered");
   if ("agentRuntimeUpdated" in event) return t("status.running");
   if ("error" in event) return t("status.error", { message: event.error.message });
   return t("status.running");
@@ -166,6 +172,20 @@ export function useStudioApp() {
           type: "resolveApproval",
           payload,
           status: payload.decision === "approved" ? t("status.toolApproved") : t("status.toolDenied"),
+        });
+      }),
+      listen<UserInputRequest>("studio-user-input-requested", ({ payload }) => {
+        dispatch({
+          type: "userInputRequested",
+          payload,
+          status: t("status.userInputRequired"),
+        });
+      }),
+      listen<UserInputResolved>("studio-user-input-resolved", ({ payload }) => {
+        dispatch({
+          type: "userInputResolved",
+          payload,
+          status: t("status.userInputAnswered"),
         });
       }),
       listen<PromptFailed>("studio-prompt-failed", ({ payload }) => {
@@ -482,6 +502,25 @@ export function useStudioApp() {
     await denyTool(approvalId, "denied by user");
   }
 
+  async function onAnswerUserInput(requestId: string, response: UserInputResponse) {
+    try {
+      await answerUserInput(requestId, response);
+      if (!isTauriRuntime()) {
+        dispatch({
+          type: "userInputResolved",
+          payload: { requestId },
+          status: t("status.userInputAnswered"),
+        });
+      }
+    } catch (error) {
+      dispatch({
+        type: "runPromptFailed",
+        sessionId: state.selectedSessionId,
+        status: t("status.runFailed", { error: errorText(error) }),
+      });
+    }
+  }
+
   return {
     state,
     timelineEntries,
@@ -509,5 +548,6 @@ export function useStudioApp() {
     onReloadConfig,
     onApprove,
     onDeny,
+    onAnswerUserInput,
   };
 }

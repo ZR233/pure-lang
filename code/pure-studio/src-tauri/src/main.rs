@@ -10,6 +10,7 @@ mod dto;
 mod events;
 mod mappers;
 mod state;
+mod user_input;
 
 use state::AppState;
 
@@ -19,6 +20,7 @@ fn main() {
     let state = AppState {
         studio,
         approvals: Arc::new(Mutex::new(HashMap::new())),
+        user_inputs: Arc::new(Mutex::new(HashMap::new())),
         active_turns: Arc::new(Mutex::new(HashMap::new())),
     };
 
@@ -37,6 +39,7 @@ fn main() {
             commands::load_session_timeline,
             commands::approve_tool,
             commands::deny_tool,
+            commands::answer_user_input,
             commands::load_config,
             commands::save_config,
             commands::save_provider_settings,

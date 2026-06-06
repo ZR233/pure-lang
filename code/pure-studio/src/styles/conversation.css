@@ -667,6 +667,131 @@
   padding: 4px 8px 6px;
 }
 
+.ask-user-composer {
+  gap: 10px;
+  padding: 12px 14px 8px;
+}
+
+.ask-user-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ask-user-question-list {
+  display: grid;
+  gap: 10px;
+}
+
+.ask-user-question {
+  display: grid;
+  gap: 8px;
+}
+
+.ask-user-question-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.ask-user-question-copy strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.ask-user-question-copy p {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ask-user-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+.ask-user-options button {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #0f172a;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ask-user-options button.selected {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+
+.ask-user-options button span {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ask-user-options button small {
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.ask-user-question input,
+.ask-user-question textarea {
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  outline: none;
+  color: #0f172a;
+  background: #ffffff;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ask-user-question textarea {
+  max-height: 120px;
+  resize: vertical;
+}
+
+.ask-user-question input:focus,
+.ask-user-question textarea:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.ask-user-toolbar {
+  padding: 2px 0 0;
+}
+
+.ask-user-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: #3b82f6;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ask-user-toolbar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .shortcut-hint {
   font-size: 11px;
   color: #94a3b8;

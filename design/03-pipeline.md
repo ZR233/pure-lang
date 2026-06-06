@@ -44,6 +44,7 @@ React action
 - 用户显式要求 `subagent`/子代理分工时，核心提示必须将异步 agent 调度作为强约束；普通 shell 或文件探索不能替代子代理调度
 - 显式子代理分工允许最多两轮只读定位；若仍未创建 agent，后续推理只暴露 `spawn_agent` 并保持 `auto` tool choice，避免触发不支持 required tool choice 的 provider 限制
 - 多 agent 协作只通过 `spawn_agent`、`wait_agent`、`list_agents`、`send_message`、`followup_task`、`close_agent` 组成，不提供同步等待到最终摘要的 `subagent` 入口
+- `request_user_input` 是 Codex 风格的瞬时交互工具，root agent 与 subagent 都可用；工具通过结构化问题请求用户输入，等待前端回答后把答案作为工具结果返回，不作为普通用户聊天消息写入历史
 - agent 运行时状态对齐 Codex：`queued | running | waiting | completed | errored | interrupted | shutdown | notFound`
 - `budgetLimited` 不是 agent 状态，而是 turn abort reason；子 agent 预算耗尽时状态为 `interrupted`，并携带 `reason`、`budgetLimitKind` 和 `budgetUsage`
 - `interrupted` 是可恢复的非终局状态；`completed | errored | shutdown | notFound` 是终局状态
@@ -66,6 +67,8 @@ React action
 
 子代理同样继承父 turn 的 `compileMode`。父会话处于 Plan Mode 时，child session 也以 Plan Mode 运行，并复用同一套工具边界和 proposed-plan 输出约定；父会话处于 Auto Mode 时，child session 按 Auto Mode 执行。
 
+子代理同样继承父 turn 的用户交互回调。`request_user_input` 在 root 或 child agent 中被调用时，核心层广播 `UserInputRequested`，Studio 用底部回答 UI 替换普通输入框并把回答发送回原工具调用；回答完成后广播 `UserInputAnswered`。该交互只解除当前工具等待，不触发新 turn，也不进入 agent timeline。
+
 主 turn 保存完成后，如果 `[skills].auto_learn = true` 且本轮达到自学习触发条件，`StudioRuntime` 启动后台 reviewer。reviewer 只开放 skills 工具，复盘结果只写项目 skills 目录；失败只记录日志，不改变本轮响应。
 
 文件与 shell 工具都以有效 `workspaceRoot` 为默认边界。`bash` 默认在 workspace root 下执行，`workingDirectory` 也按 workspace root 解析并拒绝逃逸；文件工具默认只允许访问 workspace root 内的路径。`full-access` 模式会放宽该边界，允许文件路径和 `bash.workingDirectory` 指向 workspace 外，但不绕过工具自身校验、写锁、超时、输出截断和 timeline 记录。
@@ -77,6 +80,7 @@ Skills 管理工具同样以 `workspaceRoot` 为边界，但写入面收窄到 `
 - 工具调用或 provider 返回 `end_turn = false` 只表示 `needsFollowUp`，不是完成条件
 - root turn 和 child agent 默认只强制 `wallClockMs = 1800000`
 - 模型采样、普通工具调用和 `wait_agent` 调用只记录 `modelSteps`、`toolCalls`、`waitCalls` 观测计数，不触发 step/tool/wait 限制
+- `request_user_input` 等待用户期间仍受当前 turn 的 cancellation token 和 wall-clock 预算约束；用户停止时 pending 输入被取消并返回空回答
 - agent tree 默认限制为 `maxAgents = 16`、`maxDepth = 3`
 - 预算耗尽属于 `TurnAborted(reason=budgetLimited)`，必须写入 `TurnBudgetLimited` trace，不得伪装为 `failed` 或 `completed`
 - wall-clock 预算耗尽时核心层按 `budgetLimited` 收尾，并在 trace 中保留预算用量

@@ -10,6 +10,7 @@ import type {
   RunPromptResponse,
   SessionSelectionPayload,
   SessionTimeline,
+  UserInputResponse,
 } from "../types";
 import {
   createPreviewConfig,
@@ -319,6 +320,13 @@ export function denyTool(approvalId: string, reason?: string) {
     return Promise.resolve(void approvalId);
   }
   return invoke<void>("deny_tool", { approvalId, reason: reason ?? null });
+}
+
+export function answerUserInput(requestId: string, response: UserInputResponse) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve(void requestId);
+  }
+  return invoke<void>("answer_user_input", { requestId, response });
 }
 
 export function loadConfig() {

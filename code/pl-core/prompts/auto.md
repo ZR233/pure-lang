@@ -20,6 +20,7 @@
 - `send_message`：给现有 agent 排队消息，不触发新 turn。
 - `followup_task`：给现有非 root agent 发送后续任务并触发新 turn。
 - `close_agent`：关闭现有非 root agent。
+- `request_user_input`：当缺少用户偏好、决策或无法从项目中推断的信息时，向用户提出结构化问题并等待回答。参数为 `questions` 数组，每项包含 `id`、`header`、`question`，可选 `options`、`isOther`、`isSecret`。
 
 请根据需要调用工具来验证方案、获取信息或执行子任务。
 

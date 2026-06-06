@@ -12,7 +12,8 @@ import {
   Wrench,
 } from "lucide-react";
 import type { TFunction } from "i18next";
-import type { Dispatch, ReactNode, SetStateAction } from "react";
+import type { Dispatch, KeyboardEvent, ReactNode, SetStateAction } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   AgentDto,
@@ -27,6 +28,9 @@ import type {
   TimelineItem,
   TurnPhase,
   ToolCallStatus2,
+  UserInputRequest,
+  UserInputResponse,
+  UserQuestion,
 } from "../types";
 import type { TimelineEntry, ToolGroupSummaryPart } from "../state/selectors";
 import { SessionStatusBar } from "./SessionStatusBar";
@@ -50,6 +54,7 @@ type ConversationPanelProps = {
   entries: TimelineEntry[];
   agents: AgentDto[];
   sessionRuntime: SessionRuntime | null;
+  pendingUserInput: UserInputRequest | null;
   prompt: string;
   status: string;
   turnPhase: TurnPhase;
@@ -65,6 +70,7 @@ type ConversationPanelProps = {
   onImplementPlan: (plan: string) => void;
   onSendPrompt: () => void;
   onStopPrompt: () => void;
+  onAnswerUserInput: (requestId: string, response: UserInputResponse) => void;
 };
 
 function compact(value: string, max = 220): string {
@@ -653,6 +659,158 @@ function TraceEntry({ item, t }: { item: TimelineItem; t: TFunction }) {
   );
 }
 
+type AskDraftEntry = {
+  selected: string | null;
+  text: string;
+};
+
+type AskDraft = Record<string, AskDraftEntry>;
+
+function initialAskDraft(questions: UserQuestion[]): AskDraft {
+  const draft: AskDraft = {};
+  for (const question of questions) {
+    draft[question.id] = {
+      selected: null,
+      text: "",
+    };
+  }
+  return draft;
+}
+
+function AskUserComposer({
+  request,
+  stopping,
+  onAnswer,
+  t,
+}: {
+  request: UserInputRequest;
+  stopping: boolean;
+  onAnswer: (requestId: string, response: UserInputResponse) => void;
+  t: TFunction;
+}) {
+  const [draft, setDraft] = useState<AskDraft>(() => initialAskDraft(request.questions));
+  const questionCount = request.questions.length;
+  const submitLabel = useMemo(
+    () => t("askUser.answer", { count: questionCount }),
+    [questionCount, t],
+  );
+
+  useEffect(() => {
+    setDraft(initialAskDraft(request.questions));
+  }, [request.requestId, request.questions]);
+
+  function updateDraft(id: string, update: Partial<AskDraftEntry>) {
+    setDraft((current) => ({
+      ...current,
+      [id]: {
+        selected: current[id]?.selected ?? null,
+        text: current[id]?.text ?? "",
+        ...update,
+      },
+    }));
+  }
+
+  function submit() {
+    const answers: UserInputResponse["answers"] = {};
+    for (const question of request.questions) {
+      const entry = draft[question.id] ?? { selected: null, text: "" };
+      const values: string[] = [];
+      if (entry.selected) {
+        values.push(entry.selected);
+      }
+      const text = entry.text.trim();
+      if (text) {
+        values.push(text);
+      }
+      answers[question.id] = { answers: values };
+    }
+    onAnswer(request.requestId, { answers });
+  }
+
+  function submitOnShortcut(event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      submit();
+    }
+  }
+
+  return (
+    <div className="composer-box ask-user-composer">
+      <div className="ask-user-heading">
+        <UserRound size={16} />
+        <span>{t("askUser.awaiting")}</span>
+      </div>
+      <div className="ask-user-question-list">
+        {request.questions.map((question) => {
+          const options = question.options ?? [];
+          const entry = draft[question.id] ?? { selected: null, text: "" };
+          const showFreeText = options.length === 0 || question.isOther;
+          return (
+            <section className="ask-user-question" key={question.id}>
+              <div className="ask-user-question-copy">
+                <strong>{question.header}</strong>
+                <p>{question.question}</p>
+              </div>
+              {options.length > 0 ? (
+                <div className="ask-user-options">
+                  {options.map((option) => (
+                    <button
+                      type="button"
+                      key={`${question.id}-${option.label}`}
+                      className={entry.selected === option.label ? "selected" : ""}
+                      onClick={() =>
+                        updateDraft(question.id, {
+                          selected: entry.selected === option.label ? null : option.label,
+                        })
+                      }
+                    >
+                      <span>{option.label}</span>
+                      <small>{option.description}</small>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {showFreeText ? (
+                question.isSecret ? (
+                  <input
+                    type="password"
+                    value={entry.text}
+                    onChange={(event) => updateDraft(question.id, { text: event.target.value })}
+                    onKeyDown={submitOnShortcut}
+                    placeholder={t("askUser.secretPlaceholder")}
+                    aria-label={question.question}
+                  />
+                ) : (
+                  <textarea
+                    value={entry.text}
+                    onChange={(event) => updateDraft(question.id, { text: event.target.value })}
+                    onKeyDown={submitOnShortcut}
+                    placeholder={
+                      options.length > 0
+                        ? t("askUser.customPlaceholder")
+                        : t("askUser.answerPlaceholder")
+                    }
+                    aria-label={question.question}
+                  />
+                )
+              ) : null}
+            </section>
+          );
+        })}
+      </div>
+      <div className="composer-toolbar ask-user-toolbar">
+        <span className="shortcut-hint">
+          <kbd>⌘</kbd> + <kbd>Enter</kbd>
+        </span>
+        <button type="button" onClick={submit} disabled={stopping}>
+          <Send size={14} />
+          <span>{submitLabel}</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function ConversationPanel({
   selectedSession,
   selectedProject,
@@ -660,6 +818,7 @@ export function ConversationPanel({
   entries,
   agents,
   sessionRuntime,
+  pendingUserInput,
   prompt,
   status,
   turnPhase,
@@ -675,6 +834,7 @@ export function ConversationPanel({
   onImplementPlan,
   onSendPrompt,
   onStopPrompt,
+  onAnswerUserInput,
 }: ConversationPanelProps) {
   const { t } = useTranslation();
   const stopping = turnPhase === "stopping";
@@ -727,24 +887,33 @@ export function ConversationPanel({
 
       <footer className="conversation-footer">
         <div className="composer">
-          <div className="composer-box">
-            <textarea
-              value={prompt}
-              disabled={!selectedSession || isBusy}
-              onChange={(event) => onSetPrompt(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                  onSendPrompt();
-                }
-              }}
-              placeholder={selectedSession ? t("conversation.askPlaceholder") : t("conversation.noSessionPlaceholder")}
-              aria-label={t("conversation.askPlaceholder")}
+          {pendingUserInput ? (
+            <AskUserComposer
+              request={pendingUserInput}
+              stopping={stopping}
+              onAnswer={onAnswerUserInput}
+              t={t}
             />
-            <div className="composer-toolbar">
-              <span className="shortcut-hint"><kbd>⌘</kbd> + <kbd>Enter</kbd></span>
-              <span />
+          ) : (
+            <div className="composer-box">
+              <textarea
+                value={prompt}
+                disabled={!selectedSession || isBusy}
+                onChange={(event) => onSetPrompt(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                    onSendPrompt();
+                  }
+                }}
+                placeholder={selectedSession ? t("conversation.askPlaceholder") : t("conversation.noSessionPlaceholder")}
+                aria-label={t("conversation.askPlaceholder")}
+              />
+              <div className="composer-toolbar">
+                <span className="shortcut-hint"><kbd>⌘</kbd> + <kbd>Enter</kbd></span>
+                <span />
+              </div>
             </div>
-          </div>
+          )}
           <button
             className={`send-button${isBusy ? " stop-button" : ""}`}
             disabled={isBusy ? stopping : !prompt.trim() || !selectedSession}

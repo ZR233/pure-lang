@@ -10,6 +10,7 @@ reducer 分域：
 - `session`
 - `turn`
 - `approval`
+- `userInput`
 - `settings`
 - `timeline`
 
@@ -100,6 +101,8 @@ turn 展示语义固定：
 状态栏固定渲染在聊天底部，只展示当前 turn phase、模型、上下文、按货币分组的费用、能力、权限模式和 agent latest snapshot。权限模式来自当前配置：请求批准、替我审批或完全访问。Skills 数量和列表表示当前会话已经成功 `skill_view`、内容进入上下文的 skills，不是配置声明，也不是可 discover 的全部 skills。运行中收到成功的 `skill_view` completed event 后，前端必须立即把该 skill 合并到当前会话 `activeSkills`；`RunPromptResponse.sessionRuntime` 仍作为 turn 完成后的最终校准。设置页的 Skills 标签页则展示当前项目按 discovery 规则发现的只读 skills 列表，并显示每项 scope；该列表不代表当前会话已激活。运行中收到 `AgentRuntimeUpdated` 后必须即时用后端聚合快照更新 `sessionRuntime` 和对应 agent 的 `runtimeUsage`，不能等 `RunPromptResponse` 返回后才刷新。设置页作为全屏 overlay 打开时必须覆盖聊天状态栏与其 popover，状态栏不得浮到设置页之上。
 
 聊天输入区提供 `Auto / Plan` 模式切换，当前值来自选中 session 的 `mode` 并通过后端命令持久化。新会话默认 `auto`。Plan 卡片提供“实现计划”动作：点击后先把当前 session 切回 `auto`，再自动提交 `PLEASE IMPLEMENT THIS PLAN:\n\n{plan}`。v1 不提供 fresh thread、清上下文执行或 todo list。
+
+运行中如果收到 `request_user_input` 的 pending 请求，聊天底部普通输入框必须被 `AskUserComposer` 替换。该 UI 显示结构化问题、选项和必要的自由输入；提交后通过 Tauri command 回答当前 request，并恢复普通 composer。ask-user 期间用户不能发送新的普通 prompt，但停止按钮仍可中断当前 turn。
 
 设置页 Security 标签页提供会话级权限模式选择。`request-approval` 在 workspace 内直接执行，访问 workspace 外时使用现有 ApprovalOverlay 弹出用户审批；`auto-review` 在 workspace 内直接执行，访问 workspace 外时由 reviewer 模型自动审批，前端不弹用户审批卡片，只通过工具结果展示已批准或已拒绝的事实；`full-access` 明确展示为会放宽 workspace 外文件路径和 shell cwd 边界并直接放行的模式。
 

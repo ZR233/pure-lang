@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use pl_model::TokenUsage;
-use pl_protocol::{BudgetLimitKind, BudgetUsage, TraceEvent};
+use pl_protocol::{BudgetLimitKind, BudgetUsage, TraceEvent, UserInputRequest, UserInputResponse};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
@@ -201,6 +201,8 @@ impl TurnRequest {
 pub type ToolApprovalFuture = Pin<Box<dyn Future<Output = ToolApprovalDecision> + Send>>;
 pub type ToolApprovalCallback =
     Arc<dyn Fn(ToolApprovalRequest) -> ToolApprovalFuture + Send + Sync>;
+pub type UserInputFuture = Pin<Box<dyn Future<Output = UserInputResponse> + Send>>;
+pub type UserInputCallback = Arc<dyn Fn(UserInputRequest) -> UserInputFuture + Send + Sync>;
 
 /// 会话级权限模式。
 ///
@@ -292,6 +294,7 @@ pub struct TurnOptions {
     pub tool_approval_policy: ToolApprovalPolicy,
     pub permission_mode: PermissionMode,
     pub tool_approval_callback: Option<ToolApprovalCallback>,
+    pub user_input_callback: Option<UserInputCallback>,
     pub cancellation_token: Option<CancellationToken>,
     pub tool_execution_mode: ToolExecutionMode,
 }
@@ -306,6 +309,7 @@ impl TurnOptions {
                 ToolApprovalPolicy::DenyAll => PermissionMode::RequestApproval,
             },
             tool_approval_callback: None,
+            user_input_callback: None,
             cancellation_token: None,
             tool_execution_mode: ToolExecutionMode::ModelDefault,
         }
@@ -316,6 +320,7 @@ impl TurnOptions {
             tool_approval_policy: ToolApprovalPolicy::Manual,
             permission_mode: PermissionMode::RequestApproval,
             tool_approval_callback: Some(callback),
+            user_input_callback: None,
             cancellation_token: None,
             tool_execution_mode: ToolExecutionMode::ModelDefault,
         }
@@ -332,6 +337,11 @@ impl TurnOptions {
 
     pub fn with_tool_execution_mode(mut self, tool_execution_mode: ToolExecutionMode) -> Self {
         self.tool_execution_mode = tool_execution_mode;
+        self
+    }
+
+    pub fn with_user_input_callback(mut self, callback: UserInputCallback) -> Self {
+        self.user_input_callback = Some(callback);
         self
     }
 
@@ -360,6 +370,10 @@ impl std::fmt::Debug for TurnOptions {
             .field(
                 "tool_approval_callback",
                 &self.tool_approval_callback.as_ref().map(|_| "<callback>"),
+            )
+            .field(
+                "user_input_callback",
+                &self.user_input_callback.as_ref().map(|_| "<callback>"),
             )
             .field(
                 "cancellation_token",

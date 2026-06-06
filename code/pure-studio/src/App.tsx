@@ -32,6 +32,7 @@ export function App() {
         entries={studio.timelineEntries}
         agents={state.agents}
         sessionRuntime={state.sessionRuntime}
+        pendingUserInput={state.pendingUserInput}
         prompt={state.prompt}
         status={state.status}
         turnPhase={state.turnPhase}
@@ -47,6 +48,7 @@ export function App() {
         onImplementPlan={(plan) => void studio.onImplementPlan(plan)}
         onSendPrompt={() => void studio.onSendPrompt()}
         onStopPrompt={() => void studio.onStopPrompt()}
+        onAnswerUserInput={(requestId, response) => void studio.onAnswerUserInput(requestId, response)}
       />
 
       <ApprovalOverlay
