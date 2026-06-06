@@ -23,8 +23,6 @@ export function ProjectRail({
   sessions,
   selectedProjectId,
   selectedSessionId,
-  manualPath,
-  onSetManualPath,
   onAddProject,
   onSelectProject,
   onNewSession,
@@ -36,39 +34,30 @@ export function ProjectRail({
 
   return (
     <aside className="project-rail">
-      <div className="brand">
-        <div className="brand-mark">P</div>
-        <div>
-          <div className="brand-title">Pure Studio</div>
-          <div className="brand-subtitle">{t("brand.subtitle")}</div>
+      <div className="rail-header">
+        <div className="brand">
+          <div className="brand-mark">P</div>
+          <span className="brand-name">Pure Studio</span>
         </div>
+        <button className="rail-icon-btn" onClick={onOpenSettings} title={t("nav.settings")}>
+          <Settings size={16} />
+        </button>
       </div>
 
-      <button className="settings-entry" onClick={onOpenSettings}>
-        <Settings size={17} />
-        <span>{t("nav.settings")}</span>
+      <button
+        className="new-session-btn"
+        disabled={!selectedProjectId}
+        onClick={onNewSession}
+      >
+        <Plus size={16} />
+        {t("common.newSession")}
       </button>
 
-      <section className="rail-section">
-        <div className="section-heading">
-          <span>{t("nav.projects")}</span>
-          <button className="icon-button" onClick={chooseFolder} title={t("common.chooseFolder")}>
-            <FolderOpen size={16} />
-          </button>
-        </div>
-        <div className="path-add">
-          <input
-            value={manualPath}
-            onChange={(event) => onSetManualPath(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                onAddProject(manualPath);
-              }
-            }}
-            placeholder={t("common.projectPath")}
-          />
-          <button className="icon-button" onClick={() => onAddProject(manualPath)}>
-            <Plus size={16} />
+      <section className="rail-section" style={{ flex: "0 0 auto", maxHeight: 180 }}>
+        <div className="section-label">
+          {t("nav.projects")}
+          <button className="section-label-btn" onClick={chooseFolder} title={t("common.chooseFolder")}>
+            <FolderOpen size={12} />
           </button>
         </div>
         <div className="project-list">
@@ -79,27 +68,17 @@ export function ProjectRail({
               onClick={() => onSelectProject(project.id)}
             >
               <span className="project-avatar">{initials(project.name) || "P"}</span>
-              <span>
+              <div className="project-row-text">
                 <strong>{project.name}</strong>
                 <small>{project.path}</small>
-              </span>
+              </div>
             </button>
           ))}
         </div>
       </section>
 
       <section className="rail-section sessions-section">
-        <div className="section-heading">
-          <span>{t("nav.sessions")}</span>
-          <button
-            className="icon-button"
-            disabled={!selectedProjectId}
-            onClick={onNewSession}
-            title={t("common.newSession")}
-          >
-            <Plus size={16} />
-          </button>
-        </div>
+        <div className="section-label">{t("nav.sessions")}</div>
         <div className="session-list">
           {sessions.map((session) => (
             <button
@@ -107,11 +86,9 @@ export function ProjectRail({
               className={`session-row ${session.id === selectedSessionId ? "active" : ""}`}
               onClick={() => onSelectSession(session.id)}
             >
-              <MessageSquare size={16} />
-              <span>
-                <strong>{session.title}</strong>
-                <small>{session.updatedAt}</small>
-              </span>
+              <span className="session-dot" />
+              <span className="session-title">{session.title}</span>
+              <span className="session-time">{session.updatedAt}</span>
             </button>
           ))}
         </div>

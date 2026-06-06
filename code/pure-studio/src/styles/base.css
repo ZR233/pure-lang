@@ -22,9 +22,13 @@ input,
 select,
 textarea {
   font: inherit;
+  color: inherit;
 }
 
 button {
+  padding: 0;
+  border: 0;
+  background: transparent;
   cursor: pointer;
 }
 
@@ -35,11 +39,11 @@ button:disabled {
 
 .app-shell {
   display: grid;
-  grid-template-columns: minmax(248px, 266px) minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 256px) minmax(0, 1fr);
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background: #f7f9fb;
+  background: #f9fafb;
 }
 
 .app-shell > * {

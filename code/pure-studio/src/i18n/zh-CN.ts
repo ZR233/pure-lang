@@ -162,7 +162,7 @@ const zhCN = {
     addProjectHint: "添加或选择项目以开始",
     emptyTitle: "准备就绪",
     emptyDescription: "选择一个项目，然后让 Pure Studio 探索、规划或执行。",
-    askPlaceholder: "向 Pure Studio 提问...",
+    askPlaceholder: "输入消息，开始对话...",
     noSessionPlaceholder: "创建或选择一个会话",
     modeLabel: "协作模式",
     autoMode: "Auto",

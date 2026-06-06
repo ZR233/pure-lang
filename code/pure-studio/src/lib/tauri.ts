@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import type {
   BootstrapPayload,
   CompileMode,
@@ -24,8 +24,10 @@ import {
 import { makeProvider, makeRole } from "./provider-mapper";
 import { renderPreviewToml } from "./toml-renderer";
 
-type TauriWindow = Window & {
+type TauriGlobal = typeof globalThis & {
   __TAURI_INTERNALS__?: unknown;
+  __TAURI__?: unknown;
+  isTauri?: boolean;
 };
 
 let previewConfig = createPreviewConfig();
@@ -39,7 +41,14 @@ function clone<T>(value: T): T {
 }
 
 export function isTauriRuntime() {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in (window as TauriWindow);
+  if (typeof globalThis === "undefined") {
+    return false;
+  }
+  if (isTauri()) {
+    return true;
+  }
+  const tauriGlobal = globalThis as TauriGlobal;
+  return Boolean(tauriGlobal.__TAURI_INTERNALS__ || tauriGlobal.__TAURI__ || tauriGlobal.isTauri);
 }
 
 export function bootstrapStudio() {
