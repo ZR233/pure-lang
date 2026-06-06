@@ -54,14 +54,14 @@ pub use studio::{
     ToolApprovalRecord,
 };
 pub use tool::{
-    BashInput, BashTool, OutputTruncation, SubagentContext, SubagentInput, SubagentTool, Tool,
-    ToolContext, ToolInput, ToolOutput, ToolRegistry, TruncatedOutput, TruncationStrategy,
+    BashInput, BashTool, OutputTruncation, SubagentContext, Tool, ToolContext, ToolInput,
+    ToolOutput, ToolRegistry, TruncatedOutput, TruncationStrategy,
 };
 pub use trace::TraceRecorder;
 pub use turn::{
     AGENT_MAX_COUNT, AGENT_MAX_DEPTH, AgentBudget, BudgetPolicy, CompileMode,
-    DEFAULT_MAX_TOOL_ITERATIONS, DEFAULT_WALL_CLOCK_MS, PermissionMode, ToolApprovalCallback,
-    ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest, ToolExecutionMode,
-    TurnAbortReason, TurnBudget, TurnOptions, TurnRequest, TurnResult, TurnResultStatus,
+    DEFAULT_WALL_CLOCK_MS, PermissionMode, ToolApprovalCallback, ToolApprovalDecision,
+    ToolApprovalPolicy, ToolApprovalRequest, ToolExecutionMode, TurnAbortReason, TurnBudget,
+    TurnOptions, TurnRequest, TurnResult, TurnResultStatus,
 };
 pub use workspace::{load_workspace_instructions, resolve_workspace_root};

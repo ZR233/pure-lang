@@ -335,7 +335,7 @@ pub(super) fn tool_results_include_recoverable_subagent_capacity(
         tool_result.status == TimelineItemStatus::Completed
             && matches!(
                 tool_result.name.as_str(),
-                "subagent" | "spawn_agent" | "wait_agent" | "list_agents"
+                "spawn_agent" | "wait_agent" | "list_agents"
             )
             && tool_result.result.contains(RECOVERABLE_SUBAGENT_429_MARKER)
     })

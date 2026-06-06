@@ -281,6 +281,7 @@ impl Tool for WaitAgentTool {
             json_output(WaitAgentResult {
                 message,
                 timed_out: outcome.timed_out,
+                agents: outcome.agents,
                 recoverable_failures,
             })
         })

@@ -137,7 +137,7 @@ pub(super) async fn run_turn_with_trace(
         let iteration_tools = if must_dispatch_agent_now {
             tool_schemas
                 .iter()
-                .filter(|schema| matches!(schema.name(), "spawn_agent" | "subagent"))
+                .filter(|schema| schema.name() == "spawn_agent")
                 .cloned()
                 .collect()
         } else {

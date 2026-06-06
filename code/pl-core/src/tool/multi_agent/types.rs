@@ -90,6 +90,7 @@ pub(super) struct SpawnAgentResult {
 pub(super) struct WaitAgentResult {
     pub message: String,
     pub timed_out: bool,
+    pub agents: Vec<AgentRecord>,
     pub recoverable_failures: Vec<RecoverableSubagentFailure>,
 }
 

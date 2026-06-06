@@ -3,7 +3,6 @@ mod file;
 mod multi_agent;
 mod recoverable;
 mod skill;
-mod subagent;
 mod truncation;
 
 use std::fmt;
@@ -31,7 +30,6 @@ pub use multi_agent::{
 };
 pub(crate) use recoverable::RECOVERABLE_SUBAGENT_429_MARKER;
 pub use skill::{SkillManageTool, SkillViewTool, SkillsListTool};
-pub use subagent::{SubagentInput, SubagentTool};
 pub use truncation::{OutputTruncation, TruncatedOutput, TruncationStrategy};
 
 /// 便捷类型别名：boxed future。

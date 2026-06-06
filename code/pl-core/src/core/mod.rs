@@ -18,7 +18,7 @@ use crate::tool::{
     ApplyPatchTool, BashTool, CloseAgentTool, CopyPathTool, CreateDirectoryTool, DeletePathTool,
     FollowupTaskTool, ListAgentsTool, ListFilesTool, MovePathTool, ReadFileTool, SearchFilesTool,
     SendMessageTool, SkillManageTool, SkillViewTool, SkillsListTool, SpawnAgentTool, StatPathTool,
-    SubagentContext, SubagentTool, ToolContext, ToolRegistry, WaitAgentTool, WriteFileTool,
+    SubagentContext, ToolContext, ToolRegistry, WaitAgentTool, WriteFileTool,
 };
 use crate::trace::TraceRecorder;
 #[cfg(test)]
@@ -45,9 +45,9 @@ fn generate_session_id() -> String {
     format!("{ts:x}-{seq:x}")
 }
 
-const SUBAGENT_DISPATCH_CONSTRAINT: &str = "\n\n# 子代理调度约束\n用户明确要求使用 subagent/子代理分工时，必须先调度 `spawn_agent` 或 `subagent` 工具；不要只用 `bash` 或文件工具替代。若尚未知道 crate 列表，可以先用只读工具定位 workspace，再为每个 crate 创建 explorer agent，最后由父会话汇总。如果 `subagent`、`wait_agent` 或 `list_agents` 返回 `recoverableSubagentProvider429` 或 `recoverableFailures`，表示 provider 429 并发/容量上限导致子代理不可用；此时停止继续创建或重试子代理，由当前父 agent 自己完成剩余工作。";
+const SUBAGENT_DISPATCH_CONSTRAINT: &str = "\n\n# 子代理调度约束\n用户明确要求使用 subagent/子代理分工时，必须先调度 `spawn_agent` 工具；不要只用 `bash` 或文件工具替代。若尚未知道 crate 列表，可以先用只读工具定位 workspace，再为每个 crate 创建 explorer agent，最后由父会话汇总。如果 `wait_agent` 或 `list_agents` 返回 `recoverableSubagentProvider429` 或 `recoverableFailures`，表示 provider 429 并发/容量上限导致子代理不可用；此时停止继续创建或重试子代理，由当前父 agent 自己完成剩余工作。";
 
-const SUBAGENT_FORCE_DISPATCH_INSTRUCTION: &str = "# 当前轮强制要求\n前面已进行了必要定位但尚未创建 agent。本轮必须调用 `spawn_agent` 或 `subagent`，不要继续调用文件、shell 或搜索工具，也不要输出最终回答。若工具结果提示 `recoverableSubagentProvider429`，后续不再重试创建子代理，改由当前 agent 自己完成任务。";
+const SUBAGENT_FORCE_DISPATCH_INSTRUCTION: &str = "# 当前轮强制要求\n前面已进行了必要定位但尚未创建 agent。本轮必须调用 `spawn_agent`，不要继续调用文件、shell 或搜索工具，也不要输出最终回答。若工具结果提示 `recoverableSubagentProvider429`，后续不再重试创建子代理，改由当前 agent 自己完成任务。";
 
 /// Pure-Lang 核心逻辑层。
 ///
@@ -135,7 +135,7 @@ impl PureCore {
 
     /// 注册默认工具集合。
     ///
-    /// 当前包含 shell、subagent 和 workspace 文件工具。调用方应通过 `TurnOptions` 控制审批策略。
+    /// 当前包含 shell、异步 agent 协作工具和 workspace 文件工具。调用方应通过 `TurnOptions` 控制审批策略。
     pub fn register_default_tools(
         &mut self,
         workspace_root: impl Into<std::path::PathBuf>,
@@ -175,12 +175,6 @@ impl PureCore {
             workspace_instructions.clone(),
         ));
         self.register_tool(CloseAgentTool);
-        self.register_tool(SubagentTool::new(
-            self.provider.clone(),
-            self.reasoning_effort.clone(),
-            self.config.clone(),
-            workspace_instructions,
-        ));
     }
 
     pub(crate) fn register_skill_tools(
@@ -423,7 +417,7 @@ mod tests {
         let records = vec![
             ToolExecutionRecord {
                 call_id: "call-1".to_string(),
-                name: "subagent".to_string(),
+                name: "spawn_agent".to_string(),
                 kind: ToolCallKind::Function,
                 arguments: "{}".to_string(),
                 result: "recoverableSubagentProvider429: retry locally".to_string(),
@@ -461,8 +455,8 @@ mod tests {
         assert!(tool_allowed_in_mode(plan, "skill_view"));
         assert!(tool_allowed_in_mode(plan, "spawn_agent"));
         assert!(tool_allowed_in_mode(plan, "followup_task"));
-        assert!(tool_allowed_in_mode(plan, "subagent"));
         assert!(tool_allowed_in_mode(plan, "bash"));
+        assert!(!tool_allowed_in_mode(plan, "subagent"));
         assert!(!tool_allowed_in_mode(plan, "write_file"));
         assert!(!tool_allowed_in_mode(plan, "apply_patch"));
         assert!(!tool_allowed_in_mode(plan, "delete_path"));
@@ -864,13 +858,16 @@ mod tests {
     }
 
     #[test]
-    fn default_tools_register_bash_and_subagent() {
+    fn default_tools_register_bash_and_agent_tools() {
         let mut core = PureCore::default_provider().unwrap();
 
         core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()));
 
         assert!(core.tools.get("bash").is_some());
-        assert!(core.tools.get("subagent").is_some());
+        assert!(core.tools.get("spawn_agent").is_some());
+        assert!(core.tools.get("wait_agent").is_some());
+        assert!(core.tools.get("list_agents").is_some());
+        assert!(core.tools.get("subagent").is_none());
         assert!(core.tools.get("read_file").is_some());
         assert!(core.tools.get("apply_patch").is_some());
     }

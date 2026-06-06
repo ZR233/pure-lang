@@ -74,7 +74,7 @@ Studio 渲染可以在 selector 派生出展示项后使用虚拟滚动优化大
 
 失败的子代理必须在 latest snapshot 的 `error` 字段保留可展示的失败文本。`reason` 只作为结构化分类，例如 `providerError`、`toolError`、`budgetLimited` 或 `interrupted`，不能替代 `error`。如果 provider 在子代理已有部分摘要后失败，最终状态仍必须把 provider/tool 错误写入 `error`，否则 UI 无法解释失败原因。
 
-子代理执行遇到 provider `429` 错误码时，视为子代理并发或容量上限。父会话不得因为该子代理不可用而把整轮直接标记为失败；`subagent`、`wait_agent` 或 `list_agents` 的工具结果必须给父 agent 一个可恢复信号，要求当前 agent 停止继续创建子代理并自行完成剩余工作。对应子代理记录仍保持最终失败状态，并在 `error` 字段保留原始 429 错误文本，供 UI 和历史诊断使用。
+子代理执行遇到 provider `429` 错误码时，视为子代理并发或容量上限。父会话不得因为该子代理不可用而把整轮直接标记为失败；`wait_agent` 或 `list_agents` 的工具结果必须给父 agent 一个可恢复信号，要求当前 agent 停止继续创建子代理并自行完成剩余工作。对应子代理记录仍保持最终失败状态，并在 `error` 字段保留原始 429 错误文本，供 UI 和历史诊断使用。
 
 root agent 的 provider `429` 错误码是当前轮的终止错误，不进入子代理可恢复降级路径。root 收到 429 错误码后必须立即以 failed turn 收尾，广播 `Error` 和 `Done`，不继续工具调用、不继续模型循环，也不写入 assistant 成功消息；会话本身保持可继续，用户之后可以发起新一轮。
 
