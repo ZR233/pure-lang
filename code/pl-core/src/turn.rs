@@ -7,14 +7,11 @@ use pl_protocol::{BudgetLimitKind, BudgetUsage, TraceEvent};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-/// 旧接口的工具分发循环默认值（保留向后兼容）。
-pub const DEFAULT_MAX_TOOL_ITERATIONS: usize = 10;
-
 /// Agent 树结构限制常量。
 pub const AGENT_MAX_COUNT: usize = 16;
 pub const AGENT_MAX_DEPTH: u32 = 3;
-/// 默认 wall-clock 安全上限（10 分钟），参考 Codex 的 agent_job_max_runtime_seconds。
-pub const DEFAULT_WALL_CLOCK_MS: u64 = 600_000;
+/// 默认 wall-clock 安全上限（30 分钟），参考 Codex 的 agent_job_max_runtime_seconds。
+pub const DEFAULT_WALL_CLOCK_MS: u64 = 1_800_000;
 
 /// 单轮 wall-clock 安全预算。
 ///
@@ -43,10 +40,6 @@ impl TurnBudget {
         Self {
             wall_clock_ms: DEFAULT_WALL_CLOCK_MS,
         }
-    }
-
-    pub fn from_legacy_max_tool_iterations(_max: usize) -> Self {
-        Self::root_default()
     }
 }
 
@@ -196,11 +189,6 @@ impl TurnRequest {
 
     pub fn with_workspace_instructions(mut self, instructions: String) -> Self {
         self.workspace_instructions = Some(instructions);
-        self
-    }
-
-    pub fn with_max_tool_iterations(mut self, max: usize) -> Self {
-        self.budget = TurnBudget::from_legacy_max_tool_iterations(max);
         self
     }
 
@@ -448,8 +436,8 @@ mod tests {
         let root = TurnBudget::root_default();
         let child = TurnBudget::child_default();
 
-        assert_eq!(root.wall_clock_ms, 600_000);
-        assert_eq!(child.wall_clock_ms, 600_000);
+        assert_eq!(root.wall_clock_ms, 1_800_000);
+        assert_eq!(child.wall_clock_ms, 1_800_000);
     }
 
     #[test]

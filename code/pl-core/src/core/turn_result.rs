@@ -46,7 +46,6 @@ pub(super) fn tool_allowed_in_mode(mode: CompileMode, name: &str) -> bool {
                 | "send_message"
                 | "followup_task"
                 | "close_agent"
-                | "subagent"
         ),
     }
 }

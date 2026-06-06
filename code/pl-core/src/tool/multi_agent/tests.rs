@@ -40,6 +40,7 @@ fn wait_agent_result_serializes_recoverable_failures() {
     let output = json_output(WaitAgentResult {
         message: recoverable_subagent_failures_message(recoverable_failures.len()),
         timed_out: false,
+        agents,
         recoverable_failures,
     })
     .unwrap();
@@ -52,6 +53,9 @@ fn wait_agent_result_serializes_recoverable_failures() {
     );
     assert_eq!(value["recoverableFailures"][0]["agentId"], "agent-1");
     assert_eq!(value["recoverableFailures"][0]["path"], "/root/agent-1");
+    assert_eq!(value["agents"].as_array().unwrap().len(), 2);
+    assert_eq!(value["agents"][0]["status"], "errored");
+    assert_eq!(value["agents"][1]["status"], "completed");
 }
 
 #[test]

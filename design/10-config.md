@@ -17,7 +17,7 @@ Windows 下对应：
 `pure-studio` 的桌面端状态单独保存在：
 
 ```text
-~/.pure/studio/studio_1.sqlite
+~/.pure/studio/studio_2.sqlite
 ```
 
 SQLite 只保存 Studio 状态，例如项目、会话、消息、工具审批、agent 状态事件和应用设置，并由 `pl-core` 通过 SeaORM 纯异步访问。provider/model/role 配置仍只由 `~/.pure/config.toml` 表达。

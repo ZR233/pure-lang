@@ -18,10 +18,6 @@ pub use types::{
     WaitAgentTool,
 };
 
-pub(super) use events::emit_agent_record;
-pub(super) use runner::run_agent_turn;
-pub(super) use types::AgentRunConfig;
-
 fn role_key(role: Option<&str>) -> Result<String, PureError> {
     let role = role
         .map(str::trim)

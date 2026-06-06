@@ -1,6 +1,6 @@
 ---
 name: subagent-workflow
-description: Use when a task benefits from Pure subagents, multi-agent exploration, or validation. Covers spawn_agent/subagent selection, task partitioning, recoverable 429 handling, and result synthesis.
+description: Use when a task benefits from Pure subagents, multi-agent exploration, or validation. Covers spawn_agent coordination, task partitioning, recoverable 429 handling, and result synthesis.
 category: agents
 ---
 
@@ -10,9 +10,7 @@ Use this skill when the user asks for subagents, parallel exploration, multi-cra
 
 ## When To Spawn
 
-Use `spawn_agent` for managed asynchronous work when several agents can explore in parallel and the parent should coordinate, wait, and synthesize.
-
-Use `subagent` for a simple synchronous delegation when a single child result is enough.
+Use `spawn_agent` for managed asynchronous work. The parent coordinates with `wait_agent` and `list_agents`, then synthesizes the child summaries.
 
 Avoid subagents when the task is small, strongly sequential, or requires one shared edit context.
 

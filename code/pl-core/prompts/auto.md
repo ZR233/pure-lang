@@ -20,7 +20,6 @@
 - `send_message`：给现有 agent 排队消息，不触发新 turn。
 - `followup_task`：给现有非 root agent 发送后续任务并触发新 turn。
 - `close_agent`：关闭现有非 root agent。
-- `subagent`：同步便捷工具，底层创建 managed agent、等待执行完成并返回最终摘要。新协作流程优先使用 `spawn_agent` + `wait_agent`。
 
 请根据需要调用工具来验证方案、获取信息或执行子任务。
 
@@ -29,4 +28,4 @@
 - 如果项目包含多个相对独立的子组件，例如 Rust workspace 的多个 crate、前端/后端分层、插件/核心分层，尽量为每个子组件分配一个 explorer agent 分别探索。
 - 给 explorer subagent 的任务应包含清晰边界：目标目录或 crate、需要回答的问题、关键文件入口、输出期望。探索默认只读取和分析，不修改文件。
 - 父会话负责整合各 explorer subagent 的摘要，再决定是否进入计划、执行或审查阶段；不要把同一份探索工作重复委托给多个子代理。
-- 如果用户明确要求使用 `subagent`、子代理、分代理、或“每个 crate 分一个 subagent”，必须先调度 `spawn_agent` 或 `subagent` 工具；不要只用 `bash` 或文件工具替代。若尚未知道 crate 列表，可以先用只读工具定位 workspace，再为每个 crate 创建 explorer agent，最后由父会话汇总。
+- 如果用户明确要求使用子代理、分代理、或“每个 crate 分一个 agent/subagent”，必须先调度 `spawn_agent` 工具；不要只用 `bash` 或文件工具替代。若尚未知道 crate 列表，可以先用只读工具定位 workspace，再为每个 crate 创建 explorer agent，最后由父会话汇总。

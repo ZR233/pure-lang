@@ -63,7 +63,7 @@ turn 展示语义固定：
 - `running`
 - `thinking`
 - `tool`
-- `subagent`
+- `agent`
 - `approval`
 - `stopping`
 - `completed`
