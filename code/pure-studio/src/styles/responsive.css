@@ -1,5 +1,76 @@
 /* ===== Responsive Breakpoints ===== */
 
+@media (max-width: 1320px) {
+  .bottom-status-left {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: visible;
+    scrollbar-width: none;
+  }
+  .bottom-status-controls {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .bottom-status-controls::-webkit-scrollbar {
+    display: none;
+  }
+  .bottom-status-controls .status-chip {
+    flex: 0 0 auto;
+  }
+  .bottom-status-right {
+    margin-right: 36px;
+  }
+  .bottom-status-right .status-popover-wrap[data-priority="3"],
+  .bottom-status-right .status-popover-wrap[data-priority="2"],
+  .bottom-status-right .status-popover-wrap[data-priority="4"] {
+    display: none;
+  }
+  .status-more-btn {
+    display: inline-flex;
+  }
+  .status-more-menu .status-more-section[data-priority="2"],
+  .status-more-menu .status-more-section[data-priority="3"],
+  .status-more-menu .status-more-section[data-priority="4"] {
+    display: grid;
+  }
+}
+
+@container status-footer (max-width: 1040px) {
+  .bottom-status-right .status-popover-wrap[data-priority="3"],
+  .bottom-status-right .status-popover-wrap[data-priority="4"] {
+    display: none;
+  }
+  .status-more-btn {
+    display: inline-flex;
+  }
+  .status-more-menu .status-more-section[data-priority="3"],
+  .status-more-menu .status-more-section[data-priority="4"] {
+    display: grid;
+  }
+}
+
+@container status-footer (max-width: 760px) {
+  .bottom-status-right .status-popover-wrap[data-priority="2"] {
+    display: none;
+  }
+  .status-more-menu .status-more-section[data-priority="2"] {
+    display: grid;
+  }
+}
+
+@container status-footer (max-width: 520px) {
+  .bottom-status-right {
+    display: none;
+  }
+  .status-more-btn {
+    display: inline-flex;
+  }
+  .status-more-menu .status-more-section[data-priority="1"] {
+    display: grid;
+  }
+}
+
 @media (max-width: 1200px) {
   .provider-card-meta {
     grid-template-columns: minmax(170px, 1fr) minmax(120px, 0.55fr) minmax(220px, 1.2fr);
@@ -88,18 +159,6 @@
     padding: 16px;
   }
 
-  /* Bottom status bar: hide low-priority items, show more button */
-  .bottom-status-right .status-popover-wrap[data-priority="3"],
-  .bottom-status-right .status-popover-wrap[data-priority="4"] {
-    display: none;
-  }
-  .status-more-btn {
-    display: inline-flex;
-  }
-  .status-more-menu .status-more-section[data-priority="3"],
-  .status-more-menu .status-more-section[data-priority="4"] {
-    display: grid;
-  }
 }
 
 @media (max-width: 780px) {
@@ -130,13 +189,23 @@
   }
   .bottom-status-left {
     flex: 1 1 auto;
-    overflow-x: auto;
+    overflow: visible;
     padding-bottom: 2px;
+  }
+  .bottom-status-controls {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .bottom-status-controls::-webkit-scrollbar {
+    display: none;
   }
   .bottom-status-bar:has(.status-dropdown-wrap.open),
   .bottom-status-bar:has(.model-selector-wrap.open),
   .bottom-status-left:has(.status-dropdown-wrap.open),
-  .bottom-status-left:has(.model-selector-wrap.open) {
+  .bottom-status-left:has(.model-selector-wrap.open),
+  .bottom-status-controls:has(.status-dropdown-wrap.open),
+  .bottom-status-controls:has(.model-selector-wrap.open) {
     overflow: visible;
   }
   .provider-settings {
@@ -245,7 +314,7 @@
   }
   .bottom-status-bar {
     flex-wrap: nowrap;
-    overflow: hidden;
+    overflow: visible;
   }
   .bottom-status-bar:has(.status-dropdown-wrap.open),
   .bottom-status-bar:has(.model-selector-wrap.open) {
@@ -254,17 +323,24 @@
   .bottom-status-left {
     min-width: 0;
     flex: 1 1 auto;
-    overflow-x: auto;
+    overflow: visible;
     scrollbar-width: none;
   }
   .bottom-status-left:has(.status-dropdown-wrap.open),
-  .bottom-status-left:has(.model-selector-wrap.open) {
+  .bottom-status-left:has(.model-selector-wrap.open),
+  .bottom-status-controls:has(.status-dropdown-wrap.open),
+  .bottom-status-controls:has(.model-selector-wrap.open) {
     overflow: visible;
   }
-  .bottom-status-left::-webkit-scrollbar {
+  .bottom-status-controls {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .bottom-status-controls::-webkit-scrollbar {
     display: none;
   }
-  .bottom-status-left .status-chip {
+  .bottom-status-controls .status-chip {
     flex: 0 0 auto;
   }
   .composer textarea,

@@ -27,7 +27,6 @@ export function App() {
 
       <ConversationPanel
         selectedSession={studio.selectedSession}
-        selectedProject={studio.selectedProject}
         isBusy={state.isBusy}
         entries={studio.timelineEntries}
         agents={state.agents}
