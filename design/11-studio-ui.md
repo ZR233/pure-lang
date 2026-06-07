@@ -98,7 +98,9 @@ turn 展示语义固定：
 
 组件通过 selectors 读取，不直接拼装跨域状态。
 
-状态栏固定渲染在聊天底部，只展示当前 turn phase、模型、上下文、按货币分组的费用、能力、权限模式和 agent latest snapshot。权限模式来自当前配置：请求批准、替我审批或完全访问。Skills 数量和列表表示当前会话已经成功 `skill_view`、内容进入上下文的 skills，不是配置声明，也不是可 discover 的全部 skills。运行中收到成功的 `skill_view` completed event 后，前端必须立即把该 skill 合并到当前会话 `activeSkills`；`RunPromptResponse.sessionRuntime` 仍作为 turn 完成后的最终校准。设置页的 Skills 标签页则展示当前项目按 discovery 规则发现的只读 skills 列表，并显示每项 scope；该列表不代表当前会话已激活。运行中收到 `AgentRuntimeUpdated` 后必须即时用后端聚合快照更新 `sessionRuntime` 和对应 agent 的 `runtimeUsage`，不能等 `RunPromptResponse` 返回后才刷新。设置页作为全屏 overlay 打开时必须覆盖聊天状态栏与其 popover，状态栏不得浮到设置页之上。
+状态栏固定渲染在聊天底部。左侧展示高频控制：`Auto / Plan` 模式、模型、推理强度和权限模式；右侧展示只读状态：上下文使用量、按货币分组的费用估算、能力数量和 agent latest snapshot。权限模式来自当前配置：请求批准、替我审批或完全访问。Skills 数量和列表表示当前会话已经成功 `skill_view`、内容进入上下文的 skills，不是配置声明，也不是可 discover 的全部 skills。运行中收到成功的 `skill_view` completed event 后，前端必须立即把该 skill 合并到当前会话 `activeSkills`；`RunPromptResponse.sessionRuntime` 仍作为 turn 完成后的最终校准。设置页的 Skills 标签页则展示当前项目按 discovery 规则发现的只读 skills 列表，并显示每项 scope；该列表不代表当前会话已激活。运行中收到 `AgentRuntimeUpdated` 后必须即时用后端聚合快照更新 `sessionRuntime` 和对应 agent 的 `runtimeUsage`，不能等 `RunPromptResponse` 返回后才刷新。设置页作为全屏 overlay 打开时必须覆盖聊天状态栏与其 popover，状态栏不得浮到设置页之上。
+
+状态栏在窄窗口下保留左侧高频控制，并把右侧只读状态按优先级收入“更多”菜单：`900px` 以下收起能力和子代理，`780px` 以下额外收起费用，`480px` 以下额外收起上下文。更多菜单直接展示被收起状态的摘要和详情，不依赖悬浮 popover，必须支持点击、键盘聚焦、外部点击和 `Escape` 关闭。
 
 聊天输入区提供 `Auto / Plan` 模式切换，当前值来自选中 session 的 `mode` 并通过后端命令持久化。新会话默认 `auto`。Plan 卡片提供“实现计划”动作：点击后先把当前 session 切回 `auto`，再自动提交 `PLEASE IMPLEMENT THIS PLAN:\n\n{plan}`。v1 不提供 fresh thread、清上下文执行或 todo list。
 

@@ -96,6 +96,10 @@
   .status-more-btn {
     display: inline-flex;
   }
+  .status-more-menu .status-more-section[data-priority="3"],
+  .status-more-menu .status-more-section[data-priority="4"] {
+    display: grid;
+  }
 }
 
 @media (max-width: 780px) {
@@ -197,6 +201,9 @@
   .bottom-status-right .status-popover-wrap[data-priority="2"] {
     display: none;
   }
+  .status-more-menu .status-more-section[data-priority="2"] {
+    display: grid;
+  }
 }
 
 @media (max-width: 480px) {
@@ -274,5 +281,8 @@
   }
   .status-more-btn {
     display: inline-flex;
+  }
+  .status-more-menu .status-more-section[data-priority="1"] {
+    display: grid;
   }
 }

@@ -214,10 +214,18 @@ function StatusPopover({
 }
 
 function ListPopover({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="status-list-popover">
+      <StatusListContent title={title} items={items} />
+    </div>
+  );
+}
+
+function StatusListContent({ title, items }: { title: string; items: string[] }) {
   const { t } = useTranslation();
 
   return (
-    <div className="status-list-popover">
+    <>
       <strong>{title}</strong>
       {items.length === 0 ? (
         <span className="status-empty">{t("statusBar.notConfigured")}</span>
@@ -229,6 +237,41 @@ function ListPopover({ title, items }: { title: string; items: string[] }) {
           </span>
         ))
       )}
+    </>
+  );
+}
+
+function UsageMetricRows({ usage }: { usage: RuntimeUsage | null }) {
+  const { t } = useTranslation();
+
+  return (
+    <>
+      <span>
+        {t("statusBar.cacheHit")} <strong>{formatPercent(usage?.cacheHitRate)}</strong>
+      </span>
+      <span>
+        {t("statusBar.input")} <strong>{formatTokenCount(usage?.promptTokens)}</strong>
+      </span>
+      <span>
+        {t("statusBar.output")} <strong>{formatTokenCount(usage?.completionTokens)}</strong>
+      </span>
+      <span>
+        {t("statusBar.cacheRead")}{" "}
+        <strong>{formatTokenCount(usage?.cachedPromptTokens)}</strong>
+      </span>
+    </>
+  );
+}
+
+function UsagePopoverContent({ usage }: { usage: RuntimeUsage | null }) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="status-usage-popover">
+      <UsageMetricRows usage={usage} />
+      <hr />
+      <CostRows usage={usage} />
+      <small>{t("statusBar.costHint")}</small>
     </div>
   );
 }
@@ -306,11 +349,37 @@ function translateAgentReason(reason: string, t: (key: string) => string): strin
   }
 }
 
-function AgentPopover({ agents, count }: { agents: AgentDto[]; count: number }) {
+function SubagentRows({ agents }: { agents: AgentDto[] }) {
   const { t } = useTranslation();
   const items = sortAgents(agents);
   const fallback = t("statusBar.costNotConfigured");
   const unpriced = t("statusBar.costUnpriced");
+
+  if (items.length === 0) {
+    return <span className="status-empty">{t("statusBar.noSubagents")}</span>;
+  }
+
+  return (
+    <>
+      {items.map((activity) => (
+        <div key={activity.id} className={`status-subagent-row status-${activity.status}`}>
+          <span className="status-subagent-dot" aria-hidden="true" />
+          <div>
+            <span className="status-subagent-role">{activity.role}</span>
+            <p>{agentPopoverDetail(activity, t)}</p>
+          </div>
+          <span className="status-subagent-cost">
+            {formatRuntimeCost(activity.runtimeUsage, fallback, unpriced)}
+          </span>
+          <span className="status-subagent-badge">{t(agentStatusKeys(activity.status))}</span>
+        </div>
+      ))}
+    </>
+  );
+}
+
+function AgentPopover({ agents, count }: { agents: AgentDto[]; count: number }) {
+  const { t } = useTranslation();
 
   return (
     <StatusPopover
@@ -324,23 +393,7 @@ function AgentPopover({ agents, count }: { agents: AgentDto[]; count: number }) 
     >
       <div className="status-subagent-popover">
         <strong>{t("statusBar.subagents")}</strong>
-        {items.length === 0 ? (
-          <span className="status-empty">{t("statusBar.noSubagents")}</span>
-        ) : (
-          items.map((activity) => (
-            <div key={activity.id} className={`status-subagent-row status-${activity.status}`}>
-              <span className="status-subagent-dot" aria-hidden="true" />
-              <div>
-                <span className="status-subagent-role">{activity.role}</span>
-                <p>{agentPopoverDetail(activity, t)}</p>
-              </div>
-              <span className="status-subagent-cost">
-                {formatRuntimeCost(activity.runtimeUsage, fallback, unpriced)}
-              </span>
-              <span className="status-subagent-badge">{t(agentStatusKeys(activity.status))}</span>
-            </div>
-          ))
-        )}
+        <SubagentRows agents={agents} />
       </div>
     </StatusPopover>
   );
@@ -352,10 +405,24 @@ function Dropdown({
   trigger,
   children,
   className,
+  buttonClassName,
+  dropdownClassName,
+  align = "left",
+  hideChevron = false,
+  ariaLabel,
+  ariaHaspopup = "menu",
+  menuRole,
 }: {
   trigger: ReactNode;
   children: ReactNode;
   className?: string;
+  buttonClassName?: string;
+  dropdownClassName?: string;
+  align?: "left" | "right";
+  hideChevron?: boolean;
+  ariaLabel?: string;
+  ariaHaspopup?: "menu" | "dialog";
+  menuRole?: "menu" | "dialog";
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -367,26 +434,41 @@ function Dropdown({
         setOpen(false);
       }
     }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    }
     document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
   }, [open]);
 
   return (
     <div
       ref={ref}
-      className={`status-dropdown-wrap${open ? " open" : ""}`}
+      className={`status-dropdown-wrap${open ? " open" : ""}${align === "right" ? " align-right" : ""}`}
       style={{ position: "relative", display: "inline-flex" }}
     >
       <button
-        className={`status-chip selectable ${className ?? ""}`}
-        style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+        className={buttonClassName ?? `status-chip selectable ${className ?? ""}`}
+        style={buttonClassName ? undefined : { display: "inline-flex", alignItems: "center", gap: 4 }}
         type="button"
+        aria-label={ariaLabel}
+        aria-haspopup={ariaHaspopup}
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
         {trigger}
-        <ChevronDown size={12} />
+        {hideChevron ? null : <ChevronDown size={12} />}
       </button>
-      <div className={`status-dropdown ${open ? "open" : ""}`}>
+      <div
+        className={`status-dropdown${align === "right" ? " right" : ""}${dropdownClassName ? ` ${dropdownClassName}` : ""} ${open ? "open" : ""}`}
+        role={menuRole}
+      >
         {children}
       </div>
     </div>
@@ -668,6 +750,199 @@ function PermissionSelector({
   );
 }
 
+type StatusReadoutsProps = {
+  usage: RuntimeUsage | null;
+  contextLabel: string;
+  contextWidth: string;
+  costLabel: string;
+  skills: string[];
+  mcpServers: string[];
+  capabilityCount: number;
+  agents: AgentDto[];
+  activeAgentCount: number;
+};
+
+function StatusReadoutPopovers({
+  usage,
+  contextLabel,
+  contextWidth,
+  costLabel,
+  skills,
+  mcpServers,
+  capabilityCount,
+  agents,
+  activeAgentCount,
+}: StatusReadoutsProps) {
+  const { t } = useTranslation();
+
+  return (
+    <>
+      <StatusPopover
+        priority="1"
+        trigger={
+          <button className="status-readonly status-readonly-trigger" type="button">
+            <div className="context-meter-inline">
+              <span>{contextLabel}</span>
+              <span className="context-meter-bar">
+                <span className="context-meter-fill" style={{ width: contextWidth }} />
+              </span>
+            </div>
+          </button>
+        }
+      >
+        <UsagePopoverContent usage={usage} />
+      </StatusPopover>
+
+      <StatusPopover
+        priority="2"
+        trigger={
+          <button className="status-readonly status-readonly-trigger" type="button">
+            <DollarSign size={12} />
+            {costLabel}
+          </button>
+        }
+      >
+        <div className="status-usage-popover">
+          <CostRows usage={usage} />
+          <small>{t("statusBar.costHint")}</small>
+        </div>
+      </StatusPopover>
+
+      <StatusPopover
+        priority="3"
+        trigger={
+          <button className="status-readonly status-readonly-trigger" type="button">
+            <Boxes size={12} />
+            {capabilityCount}
+          </button>
+        }
+      >
+        <div className="status-extensions-popover">
+          <ListPopover title={t("statusBar.skills")} items={skills} />
+          <ListPopover title={t("statusBar.mcpServers")} items={mcpServers} />
+        </div>
+      </StatusPopover>
+
+      <AgentPopover agents={agents} count={activeAgentCount} />
+    </>
+  );
+}
+
+function StatusMoreSection({
+  priority,
+  icon,
+  label,
+  summary,
+  children,
+}: {
+  priority: string;
+  icon: ReactNode;
+  label: string;
+  summary: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="status-more-section" data-priority={priority} aria-label={label}>
+      <div className="status-more-section-head">
+        <span className="status-more-section-icon" aria-hidden="true">
+          {icon}
+        </span>
+        <div className="status-more-section-copy">
+          <span>{label}</span>
+          <strong>{summary}</strong>
+        </div>
+      </div>
+      <div className="status-more-section-body">{children}</div>
+    </section>
+  );
+}
+
+function MoreStatusMenu({
+  usage,
+  contextLabel,
+  contextWidth,
+  costLabel,
+  skills,
+  mcpServers,
+  capabilityCount,
+  agents,
+  activeAgentCount,
+}: StatusReadoutsProps) {
+  const { t } = useTranslation();
+
+  return (
+    <Dropdown
+      align="right"
+      ariaLabel={t("statusBar.more")}
+      buttonClassName="status-more-btn"
+      dropdownClassName="more-dropdown status-more-menu"
+      hideChevron
+      menuRole="menu"
+      trigger={<MoreVertical size={16} aria-hidden="true" />}
+    >
+      <StatusMoreSection
+        priority="1"
+        icon={<Activity size={14} />}
+        label={t("statusBar.context")}
+        summary={
+          <span className="status-more-context-summary">
+            {contextLabel}
+            <span className="context-meter-bar">
+              <span className="context-meter-fill" style={{ width: contextWidth }} />
+            </span>
+          </span>
+        }
+      >
+        <div className="status-more-metrics">
+          <UsageMetricRows usage={usage} />
+        </div>
+        <div className="status-more-cost-lines">
+          <CostRows usage={usage} />
+        </div>
+      </StatusMoreSection>
+
+      <StatusMoreSection
+        priority="2"
+        icon={<DollarSign size={14} />}
+        label={t("statusBar.cost")}
+        summary={costLabel}
+      >
+        <div className="status-more-cost-lines">
+          <CostRows usage={usage} />
+        </div>
+        <small>{t("statusBar.costHint")}</small>
+      </StatusMoreSection>
+
+      <StatusMoreSection
+        priority="3"
+        icon={<Boxes size={14} />}
+        label={t("statusBar.capabilities")}
+        summary={capabilityCount}
+      >
+        <div className="status-more-lists">
+          <div className="status-more-list-block">
+            <StatusListContent title={t("statusBar.skills")} items={skills} />
+          </div>
+          <div className="status-more-list-block">
+            <StatusListContent title={t("statusBar.mcpServers")} items={mcpServers} />
+          </div>
+        </div>
+      </StatusMoreSection>
+
+      <StatusMoreSection
+        priority="4"
+        icon={<Users size={14} />}
+        label={t("statusBar.subagents")}
+        summary={activeAgentCount}
+      >
+        <div className="status-more-subagents">
+          <SubagentRows agents={agents} />
+        </div>
+      </StatusMoreSection>
+    </Dropdown>
+  );
+}
+
 /* ===== Main: SessionStatusBar ===== */
 
 export function SessionStatusBar({
@@ -697,6 +972,17 @@ export function SessionStatusBar({
   const activeAgentCount = agents.filter(
     (a) => a.status === "running" || a.status === "waiting" || a.status === "queued",
   ).length;
+  const statusReadouts = {
+    usage,
+    contextLabel,
+    contextWidth,
+    costLabel,
+    skills,
+    mcpServers,
+    capabilityCount,
+    agents,
+    activeAgentCount,
+  };
 
   return (
     <div className="bottom-status-bar">
@@ -732,76 +1018,10 @@ export function SessionStatusBar({
 
       {/* Right: Read-only status */}
       <div className="bottom-status-right">
-        <StatusPopover
-          priority="1"
-          trigger={
-            <button className="status-readonly status-readonly-trigger" type="button">
-              <div className="context-meter-inline">
-                <span>{contextLabel}</span>
-                <span className="context-meter-bar">
-                  <span className="context-meter-fill" style={{ width: contextWidth }} />
-                </span>
-              </div>
-            </button>
-          }
-        >
-          <div className="status-usage-popover">
-            <span>
-              {t("statusBar.cacheHit")} <strong>{formatPercent(usage?.cacheHitRate)}</strong>
-            </span>
-            <span>
-              {t("statusBar.input")} <strong>{formatTokenCount(usage?.promptTokens)}</strong>
-            </span>
-            <span>
-              {t("statusBar.output")} <strong>{formatTokenCount(usage?.completionTokens)}</strong>
-            </span>
-            <span>
-              {t("statusBar.cacheRead")}{" "}
-              <strong>{formatTokenCount(usage?.cachedPromptTokens)}</strong>
-            </span>
-            <hr />
-            <CostRows usage={usage} />
-            <small>{t("statusBar.costHint")}</small>
-          </div>
-        </StatusPopover>
-
-        <StatusPopover
-          priority="2"
-          trigger={
-            <button className="status-readonly status-readonly-trigger" type="button">
-              <DollarSign size={12} />
-              {costLabel}
-            </button>
-          }
-        >
-          <div className="status-usage-popover">
-            <CostRows usage={usage} />
-            <small>{t("statusBar.costHint")}</small>
-          </div>
-        </StatusPopover>
-
-        <StatusPopover
-          priority="3"
-          trigger={
-            <button className="status-readonly status-readonly-trigger" type="button">
-              <Boxes size={12} />
-              {capabilityCount}
-            </button>
-          }
-        >
-          <div className="status-extensions-popover">
-            <ListPopover title="Skills" items={skills} />
-            <ListPopover title="MCP" items={mcpServers} />
-          </div>
-        </StatusPopover>
-
-        <AgentPopover agents={agents} count={activeAgentCount} />
+        <StatusReadoutPopovers {...statusReadouts} />
       </div>
 
-      {/* More overflow button */}
-      <button className="status-more-btn" type="button">
-        <MoreVertical size={16} />
-      </button>
+      <MoreStatusMenu {...statusReadouts} />
     </div>
   );
 }

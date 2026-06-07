@@ -204,6 +204,9 @@ const zhCN = {
     permissionMode: "权限模式",
     subagents: "子代理",
     noSubagents: "暂无子代理",
+    more: "更多",
+    skills: "Skills",
+    mcpServers: "MCP",
   },
 
   approval: {
