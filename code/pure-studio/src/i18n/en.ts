@@ -204,6 +204,9 @@ const en = {
     permissionMode: "Permission mode",
     subagents: "Subagents",
     noSubagents: "No subagents",
+    more: "More",
+    skills: "Skills",
+    mcpServers: "MCP",
   },
 
   approval: {
