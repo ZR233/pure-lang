@@ -16,8 +16,9 @@ import {
   Smile,
   Users,
 } from "lucide-react";
-import type { Dispatch, ReactNode, SetStateAction } from "react";
+import type { CSSProperties, Dispatch, ReactNode, SetStateAction } from "react";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type {
   CompileMode,
@@ -405,6 +406,7 @@ function Dropdown({
   trigger,
   children,
   className,
+  wrapClassName,
   buttonClassName,
   dropdownClassName,
   align = "left",
@@ -416,6 +418,7 @@ function Dropdown({
   trigger: ReactNode;
   children: ReactNode;
   className?: string;
+  wrapClassName?: string;
   buttonClassName?: string;
   dropdownClassName?: string;
   align?: "left" | "right";
@@ -450,7 +453,7 @@ function Dropdown({
   return (
     <div
       ref={ref}
-      className={`status-dropdown-wrap${open ? " open" : ""}${align === "right" ? " align-right" : ""}`}
+      className={`status-dropdown-wrap${open ? " open" : ""}${align === "right" ? " align-right" : ""}${wrapClassName ? ` ${wrapClassName}` : ""}`}
       style={{ position: "relative", display: "inline-flex" }}
     >
       <button
@@ -869,16 +872,67 @@ function MoreStatusMenu({
   activeAgentCount,
 }: StatusReadoutsProps) {
   const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
-  return (
-    <Dropdown
-      align="right"
-      ariaLabel={t("statusBar.more")}
-      buttonClassName="status-more-btn"
-      dropdownClassName="more-dropdown status-more-menu"
-      hideChevron
-      menuRole="menu"
-      trigger={<MoreVertical size={16} aria-hidden="true" />}
+  function getMenuStyle(): CSSProperties | null {
+    const button = buttonRef.current;
+    if (!button) return null;
+    const rect = button.getBoundingClientRect();
+    const menuWidth = Math.min(360, window.innerWidth - 24);
+    const maxLeft = Math.max(12, window.innerWidth - menuWidth - 12);
+    const left = Math.min(Math.max(12, rect.right - menuWidth), maxLeft);
+    return {
+      bottom: `${Math.max(12, window.innerHeight - rect.top + 6)}px`,
+      left: `${left}px`,
+      position: "fixed",
+      right: "auto",
+      top: "auto",
+    };
+  }
+
+  useEffect(() => {
+    if (!open) return;
+
+    function updatePosition() {
+      setMenuStyle(getMenuStyle());
+    }
+    function handleClick(event: MouseEvent) {
+      const target = event.target as Node;
+      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) {
+        return;
+      }
+      setOpen(false);
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+        buttonRef.current?.focus();
+      }
+    }
+
+    updatePosition();
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open]);
+
+  const menu = (
+    <div
+      ref={menuRef}
+      className="status-dropdown more-dropdown status-more-menu status-more-menu-fixed open"
+      role="dialog"
+      aria-label={t("statusBar.more")}
+      style={menuStyle ?? undefined}
     >
       <StatusMoreSection
         priority="1"
@@ -939,7 +993,29 @@ function MoreStatusMenu({
           <SubagentRows agents={agents} />
         </div>
       </StatusMoreSection>
-    </Dropdown>
+    </div>
+  );
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        className="status-more-btn"
+        type="button"
+        aria-label={t("statusBar.more")}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => {
+          if (!open) {
+            setMenuStyle(getMenuStyle());
+          }
+          setOpen((value) => !value);
+        }}
+      >
+        <MoreVertical size={16} aria-hidden="true" />
+      </button>
+      {open && menuStyle && typeof document !== "undefined" ? createPortal(menu, document.body) : null}
+    </>
   );
 }
 
@@ -988,32 +1064,36 @@ export function SessionStatusBar({
     <div className="bottom-status-bar">
       {/* Left: Interactive/selectable */}
       <div className="bottom-status-left">
-        <ModeSelector
-          currentMode={currentMode}
-          onSetSessionMode={onSetSessionMode}
-          isBusy={isBusy}
-          selectedSession={selectedSession}
-        />
+        <div className="bottom-status-controls">
+          <ModeSelector
+            currentMode={currentMode}
+            onSetSessionMode={onSetSessionMode}
+            isBusy={isBusy}
+            selectedSession={selectedSession}
+          />
 
-        <ModelSelector
-          runtime={runtime}
-          providers={providers}
-          roles={roles}
-          setRoles={setRoles}
-          onSaveProviderSettings={onSaveProviderSettings}
-        />
+          <ModelSelector
+            runtime={runtime}
+            providers={providers}
+            roles={roles}
+            setRoles={setRoles}
+            onSaveProviderSettings={onSaveProviderSettings}
+          />
 
-        <EffortSelector
-          providers={providers}
-          roles={roles}
-          setRoles={setRoles}
-          onSaveProviderSettings={onSaveProviderSettings}
-        />
+          <EffortSelector
+            providers={providers}
+            roles={roles}
+            setRoles={setRoles}
+            onSaveProviderSettings={onSaveProviderSettings}
+          />
 
-        <PermissionSelector
-          permissionMode={permissionMode}
-          onSavePermissionMode={onSavePermissionMode}
-        />
+          <PermissionSelector
+            permissionMode={permissionMode}
+            onSavePermissionMode={onSavePermissionMode}
+          />
+        </div>
+
+        <MoreStatusMenu {...statusReadouts} />
       </div>
 
       {/* Right: Read-only status */}
@@ -1021,7 +1101,6 @@ export function SessionStatusBar({
         <StatusReadoutPopovers {...statusReadouts} />
       </div>
 
-      <MoreStatusMenu {...statusReadouts} />
     </div>
   );
 }

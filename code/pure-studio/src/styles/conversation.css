@@ -23,6 +23,7 @@
 }
 
 .conversation-header h1 {
+  min-width: 0;
   margin: 0;
   color: #0f172a;
   font-size: 14px;
@@ -30,23 +31,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.conversation-header .header-sep {
-  color: #e2e8f0;
-  font-size: 14px;
-  flex-shrink: 0;
-}
-
-.conversation-header p {
-  margin: 0;
-  overflow: hidden;
-  color: #64748b;
-  font-size: 12px;
-  font-family: "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
 }
 
 /* ===== Message Stream ===== */
@@ -613,6 +597,8 @@
 .conversation-footer {
   position: relative;
   z-index: 20;
+  container-name: status-footer;
+  container-type: inline-size;
   border-top: 1px solid #e2e8f0;
   background: #ffffff;
   overflow: visible;
@@ -858,6 +844,14 @@
   overflow: visible;
 }
 
+.bottom-status-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: visible;
+}
+
 .bottom-status-right {
   display: flex;
   align-items: center;
@@ -865,6 +859,7 @@
   min-width: 0;
   justify-content: flex-end;
   flex: 1;
+  margin-right: 36px;
   overflow: visible;
 }
 
@@ -904,6 +899,11 @@
   background: #eff6ff;
   color: #3b82f6;
   font-weight: 600;
+}
+.bottom-status-bar .status-chip.model-chip {
+  max-width: none;
+  line-height: 1;
+  white-space: nowrap;
 }
 .status-chip.model-chip:hover {
   background: #dbeafe;
@@ -1082,7 +1082,7 @@
 
 /* More overflow button */
 .status-more-btn {
-  display: none;
+  display: inline-flex;
   width: 28px;
   height: 28px;
   border-radius: 6px;
@@ -1180,6 +1180,9 @@
   right: 0;
   left: auto;
 }
+.status-more-menu-fixed {
+  z-index: 260;
+}
 .status-more-menu {
   display: grid;
   gap: 8px;
@@ -1193,6 +1196,11 @@
 }
 .status-more-menu .status-more-section {
   display: none;
+}
+.status-more-menu .status-more-section[data-priority="2"],
+.status-more-menu .status-more-section[data-priority="3"],
+.status-more-menu .status-more-section[data-priority="4"] {
+  display: grid;
 }
 .status-more-section {
   min-width: 0;

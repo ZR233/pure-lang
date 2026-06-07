@@ -20,7 +20,6 @@ import type {
   AgentStatus,
   CompileMode,
   PermissionMode,
-  ProjectRecord,
   ProviderRecord,
   RoleRecord,
   SessionRecord,
@@ -49,7 +48,6 @@ const agentStatusKeys: Record<AgentStatus, string> = {
 
 type ConversationPanelProps = {
   selectedSession: SessionRecord | null;
-  selectedProject: ProjectRecord | null;
   isBusy: boolean;
   entries: TimelineEntry[];
   agents: AgentDto[];
@@ -813,7 +811,6 @@ function AskUserComposer({
 
 export function ConversationPanel({
   selectedSession,
-  selectedProject,
   isBusy,
   entries,
   agents,
@@ -866,8 +863,6 @@ export function ConversationPanel({
     <section className="conversation" data-status={status}>
       <header className="conversation-header">
         <h1>{selectedSession?.title ?? t("conversation.defaultTitle")}</h1>
-        <span className="header-sep">·</span>
-        <p>{selectedProject?.path ?? t("conversation.addProjectHint")}</p>
       </header>
 
       <ConversationTimeline
