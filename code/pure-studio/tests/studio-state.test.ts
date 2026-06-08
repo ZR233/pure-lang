@@ -761,7 +761,7 @@ function promptSubmittedCreatesOptimisticTimelineFeedback() {
   assertEqual(state.isBusy, true);
 }
 
-function realTimelineEventClearsOptimisticTimelineFeedback() {
+function modelTimelineEventClearsWaitingFeedback() {
   const submitted = studioReducer(selectedState(), {
     type: "promptSubmitted",
     status: "running",
@@ -776,9 +776,71 @@ function realTimelineEventClearsOptimisticTimelineFeedback() {
     statusText: "running",
   });
 
-  assertDeepEqual(updated.timelineOrder, ["turn-1-text"]);
-  assertEqual(updated.timelineItems.has("optimistic-user-1234"), false);
+  assertDeepEqual(updated.timelineOrder, ["optimistic-user-1234", "turn-1-text"]);
+  assertEqual(updated.timelineItems.has("optimistic-user-1234"), true);
   assertEqual(updated.timelineItems.has("optimistic-waiting-1234"), false);
+}
+
+function userTimelineEventKeepsWaitingFeedback() {
+  const submitted = studioReducer(selectedState(), {
+    type: "promptSubmitted",
+    status: "running",
+    startedAt: 1234,
+    prompt: "Build the thing",
+  });
+  const realUser = textItem("turn-1-user", 1, "Build the thing");
+  realUser.role = "user";
+  const updated = studioReducer(submitted, {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemStarted: { item: realUser } },
+    statusText: "running",
+  });
+  const entries = selectTimelineEntries(updated);
+
+  assertDeepEqual(entries.map((entry) => entry.kind), ["message", "status"]);
+  const message = entries[0];
+  const status = entries[1];
+  if (message?.kind !== "message" || status?.kind !== "status") {
+    throw new Error("Expected real user message followed by waiting status");
+  }
+  assertEqual(message.content, "Build the thing");
+  assertEqual(status.content, "waitingForModel");
+  assertEqual(updated.timelineItems.has("optimistic-user-1234"), false);
+  assertEqual(updated.timelineItems.has("optimistic-waiting-1234"), true);
+}
+
+function inferenceStartKeepsWaitingFeedback() {
+  const submitted = studioReducer(selectedState(), {
+    type: "promptSubmitted",
+    status: "running",
+    startedAt: 1234,
+    prompt: "Build the thing",
+  });
+  const inference: TimelineItem = {
+    turnId: "turn-1",
+    itemId: "turn-1-inf-0",
+    sequence: 2,
+    kind: "inference",
+    status: "running",
+    createdAt: 2,
+    updatedAt: 2,
+    role: null,
+    content: "",
+    thinkingChunks: [],
+    inference: {
+      inferenceId: "turn-1-inf-0",
+      model: "model-a",
+    },
+  };
+  const updated = studioReducer(submitted, {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemStarted: { item: inference } },
+    statusText: "running",
+  });
+
+  assertEqual(updated.timelineItems.has("optimistic-waiting-1234"), true);
 }
 
 function runPromptLoadedClearsOptimisticTimelineFeedback() {
@@ -797,6 +859,25 @@ function runPromptLoadedClearsOptimisticTimelineFeedback() {
   assertDeepEqual(loaded.timelineOrder, ["turn-1-text"]);
   assertEqual(loaded.timelineItems.has("optimistic-user-1234"), false);
   assertEqual(loaded.timelineItems.has("optimistic-waiting-1234"), false);
+}
+
+function runPromptFailedClearsWaitingFeedback() {
+  const submitted = studioReducer(selectedState(), {
+    type: "promptSubmitted",
+    status: "running",
+    startedAt: 1234,
+    prompt: "Build the thing",
+  });
+  const failed = studioReducer(submitted, {
+    type: "runPromptFailed",
+    sessionId: "session-1",
+    status: "failed",
+  });
+  const entries = selectTimelineEntries(failed);
+
+  assertDeepEqual(entries.map((entry) => entry.kind), ["message"]);
+  assertEqual(failed.timelineItems.has("optimistic-user-1234"), true);
+  assertEqual(failed.timelineItems.has("optimistic-waiting-1234"), false);
 }
 
 function thinkingEntriesExposeStreamingStatusAndDuration() {
@@ -1387,8 +1468,11 @@ setPlanActionModeUpdatesPendingPlanAction();
 historicalTimelineLoadDoesNotCreatePlanAction();
 laterRunWithoutPlanDoesNotReopenHistoricalPlan();
 promptSubmittedCreatesOptimisticTimelineFeedback();
-realTimelineEventClearsOptimisticTimelineFeedback();
+modelTimelineEventClearsWaitingFeedback();
+userTimelineEventKeepsWaitingFeedback();
+inferenceStartKeepsWaitingFeedback();
 runPromptLoadedClearsOptimisticTimelineFeedback();
+runPromptFailedClearsWaitingFeedback();
 thinkingEntriesExposeStreamingStatusAndDuration();
 completedThinkingEntryUsesDuration();
 liveCompletedPlanCreatesPendingPlanAction();
