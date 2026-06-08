@@ -5,10 +5,9 @@ import {
   Brain,
   ChevronDown,
   Circle,
+  CornerDownLeft,
   FileText,
   Loader2,
-  MessageCircle,
-  Play,
   Send,
   Square,
   Terminal,
@@ -17,7 +16,7 @@ import {
 } from "lucide-react";
 import type { TFunction } from "i18next";
 import type { Dispatch, KeyboardEvent, ReactNode, SetStateAction } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   AgentDto,
@@ -865,17 +864,39 @@ function PlanConfirmComposer({
   t: TFunction;
 }) {
   const [message, setMessage] = useState("");
+  const composerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const discussing = action.mode === "discuss";
 
   useEffect(() => {
     setMessage("");
   }, [action.planId, action.mode]);
 
+  useEffect(() => {
+    if (discussing) {
+      textareaRef.current?.focus();
+    } else {
+      composerRef.current?.focus();
+    }
+  }, [action.planId, discussing]);
+
   function submitDiscussion() {
+    if (stopping) return;
     const content = message.trim();
     if (!content) return;
     onCancel();
     onSendPromptContent(content);
+  }
+
+  function submitSelected() {
+    if (stopping) return;
+    if (discussing) {
+      submitDiscussion();
+      return;
+    }
+    if (!action.content.trim()) return;
+    onCancel();
+    onImplementPlan(action.content);
   }
 
   function submitOnShortcut(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -885,15 +906,76 @@ function PlanConfirmComposer({
     }
   }
 
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (!stopping) {
+        onCancel();
+      }
+      return;
+    }
+
+    if (
+      event.target instanceof HTMLTextAreaElement ||
+      event.target instanceof HTMLButtonElement ||
+      event.target instanceof HTMLInputElement ||
+      event.target instanceof HTMLSelectElement
+    ) {
+      return;
+    }
+
+    if (event.key === "1") {
+      event.preventDefault();
+      onSetMode("choice");
+      return;
+    }
+    if (event.key === "2") {
+      event.preventDefault();
+      onSetMode("discuss");
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitSelected();
+    }
+  }
+
   return (
-    <div className="composer-box plan-confirm-composer">
-      <div className="ask-user-heading">
-        <FileText size={16} />
-        <span>{t("planConfirm.title")}</span>
+    <div
+      ref={composerRef}
+      className={`composer-box plan-confirm-composer${discussing ? " discussing" : ""}`}
+      onKeyDown={handleComposerKeyDown}
+      tabIndex={-1}
+    >
+      <div className="plan-choice-title">{t("planConfirm.promptTitle")}</div>
+      <div className="plan-choice-list" role="radiogroup" aria-label={t("planConfirm.promptTitle")}>
+        <button
+          type="button"
+          className={`plan-choice-row${discussing ? "" : " selected"}`}
+          role="radio"
+          aria-checked={!discussing}
+          onClick={() => onSetMode("choice")}
+          disabled={stopping}
+        >
+          <span className="plan-choice-index">1.</span>
+          <span className="plan-choice-copy">{t("planConfirm.implementChoice")}</span>
+        </button>
+        <button
+          type="button"
+          className={`plan-choice-row${discussing ? " selected" : ""}`}
+          role="radio"
+          aria-checked={discussing}
+          onClick={() => onSetMode("discuss")}
+          disabled={stopping}
+        >
+          <span className="plan-choice-index">2.</span>
+          <span className="plan-choice-copy">{t("planConfirm.adjustChoice")}</span>
+        </button>
       </div>
-      <p className="plan-confirm-summary">{compact(action.content, 260)}</p>
       {discussing ? (
         <textarea
+          ref={textareaRef}
+          className="plan-choice-textarea"
           value={message}
           onChange={(event) => setMessage(event.target.value)}
           onKeyDown={submitOnShortcut}
@@ -901,36 +983,23 @@ function PlanConfirmComposer({
           aria-label={t("planConfirm.discussPlaceholder")}
         />
       ) : null}
-      <div className="composer-toolbar ask-user-toolbar">
+      <div className="composer-toolbar plan-choice-toolbar">
         <span className="shortcut-hint">
-          {discussing ? <><kbd>⌘</kbd> + <kbd>Enter</kbd></> : t("planConfirm.hint")}
+          {discussing ? <><kbd>⌘</kbd> + <kbd>Enter</kbd></> : null}
         </span>
-        <div className="ask-user-toolbar-actions">
-          <button type="button" onClick={onCancel} disabled={stopping}>
-            <span>{t("actions.cancel")}</span>
+        <div className="plan-choice-toolbar-actions">
+          <button type="button" className="plan-choice-ignore" onClick={onCancel} disabled={stopping}>
+            <span>{t("planConfirm.ignore")}</span>
+            <kbd>ESC</kbd>
           </button>
-          {discussing ? (
-            <button type="button" onClick={submitDiscussion} disabled={stopping || !message.trim()}>
-              <Send size={14} />
-              <span>{t("actions.send")}</span>
-            </button>
-          ) : (
-            <button type="button" onClick={() => onSetMode("discuss")} disabled={stopping}>
-              <MessageCircle size={14} />
-              <span>{t("planConfirm.continueDiscussion")}</span>
-            </button>
-          )}
           <button
             type="button"
-            className="primary"
-            onClick={() => {
-              onCancel();
-              onImplementPlan(action.content);
-            }}
-            disabled={stopping || !action.content.trim()}
+            className="plan-choice-submit"
+            onClick={submitSelected}
+            disabled={stopping || (discussing ? !message.trim() : !action.content.trim())}
           >
-            <Play size={14} />
-            <span>{t("actions.implementPlan")}</span>
+            <span>{t("planConfirm.submit")}</span>
+            <CornerDownLeft size={13} />
           </button>
         </div>
       </div>
@@ -970,6 +1039,7 @@ export function ConversationPanel({
   const stopping = turnPhase === "stopping";
   const currentMode: CompileMode = selectedSession?.mode === "plan" ? "plan" : "auto";
   const activePlanAction = isBusy ? null : planAction;
+  const composerHasInlineActions = Boolean(pendingUserInput || activePlanAction);
 
   function renderTimelineEntry(entry: TimelineEntry) {
     if (entry.kind === "message") {
@@ -1016,7 +1086,7 @@ export function ConversationPanel({
       />
 
       <footer className="conversation-footer">
-        <div className="composer">
+        <div className={`composer${composerHasInlineActions ? " composer-inline-action" : ""}`}>
           {pendingUserInput ? (
             <AskUserComposer
               request={pendingUserInput}
@@ -1054,13 +1124,15 @@ export function ConversationPanel({
               </div>
             </div>
           )}
-          <button
-            className={`send-button${isBusy ? " stop-button" : ""}`}
-            disabled={isBusy ? stopping : Boolean(activePlanAction) || !prompt.trim() || !selectedSession}
-            onClick={isBusy ? onStopPrompt : onSendPrompt}
-          >
-            {isBusy ? <Square size={18} /> : <Send size={18} />}
-          </button>
+          {composerHasInlineActions ? null : (
+            <button
+              className={`send-button${isBusy ? " stop-button" : ""}`}
+              disabled={isBusy ? stopping : !prompt.trim() || !selectedSession}
+              onClick={isBusy ? onStopPrompt : onSendPrompt}
+            >
+              {isBusy ? <Square size={18} /> : <Send size={18} />}
+            </button>
+          )}
         </div>
 
         <SessionStatusBar

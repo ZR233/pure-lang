@@ -232,7 +232,12 @@ const en = {
 
   planConfirm: {
     title: "Confirm plan",
+    promptTitle: "Implement this plan?",
     hint: "Choose what happens next",
+    implementChoice: "Yes, implement this plan",
+    adjustChoice: "No, tell Codex how to adjust",
+    ignore: "Ignore",
+    submit: "Submit",
     continueDiscussion: "Continue discussion",
     discussPlaceholder: "Type what you want to discuss or change about the plan...",
   },

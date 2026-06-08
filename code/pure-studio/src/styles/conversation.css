@@ -631,6 +631,10 @@
   padding: 12px 32px 8px;
 }
 
+.composer-inline-action {
+  grid-template-columns: 1fr;
+}
+
 .composer-box {
   position: relative;
   border: 1.5px solid #e2e8f0;
@@ -675,6 +679,11 @@
 .plan-confirm-composer {
   gap: 10px;
   padding: 12px 14px 8px;
+}
+
+.plan-confirm-composer {
+  gap: 8px;
+  position: relative;
 }
 
 .timeline-thought summary {
@@ -909,17 +918,167 @@
   cursor: not-allowed;
 }
 
-.plan-confirm-summary {
-  max-height: 96px;
-  margin: 0;
-  overflow: auto;
-  padding: 8px 10px;
-  border: 1px solid #e2e8f0;
+.plan-choice-title {
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.plan-choice-list {
+  display: grid;
+  gap: 6px;
+}
+
+.plan-choice-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
   border-radius: 8px;
+  background: transparent;
   color: #475569;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.plan-choice-row:hover:not(:disabled) {
+  border-color: #dbe4f0;
   background: #f8fafc;
+  color: #0f172a;
+}
+
+.plan-choice-row.selected {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #0f172a;
+}
+
+.plan-choice-row:focus-visible {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.plan-choice-row:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.plan-choice-index {
+  color: #94a3b8;
   font-size: 12px;
-  line-height: 1.45;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.plan-choice-row.selected .plan-choice-index {
+  color: #2563eb;
+}
+
+.plan-choice-copy {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-choice-textarea {
+  min-height: 58px;
+}
+
+.plan-choice-toolbar {
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+}
+
+.plan-confirm-composer:not(.discussing) .plan-choice-toolbar {
+  position: absolute;
+  right: 14px;
+  bottom: 10px;
+}
+
+.plan-choice-toolbar > .shortcut-hint:empty {
+  display: none;
+}
+
+.plan-choice-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  margin-left: auto;
+}
+
+.plan-confirm-composer:not(.discussing) .plan-choice-row:last-child {
+  padding-right: 174px;
+}
+
+.plan-choice-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.plan-choice-toolbar button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.plan-choice-toolbar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.plan-choice-ignore {
+  padding: 0 4px;
+  background: transparent;
+  color: #64748b;
+}
+
+.plan-choice-ignore:hover:not(:disabled) {
+  color: #334155;
+}
+
+.plan-choice-ignore kbd {
+  padding: 1px 5px;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  background: #f1f5f9;
+  color: #475569;
+  font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.plan-choice-submit {
+  padding: 0 11px 0 12px;
+  border-color: #3b82f6;
+  background: #3b82f6;
+  color: #ffffff;
+}
+
+.plan-choice-submit:hover:not(:disabled) {
+  background: #2563eb;
 }
 
 .shortcut-hint {
@@ -933,6 +1092,34 @@
   border: 1px solid #e2e8f0;
   font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
   font-size: 10px;
+}
+
+@container status-footer (max-width: 560px) {
+  .composer {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .plan-confirm-composer:not(.discussing) .plan-choice-toolbar {
+    position: static;
+  }
+
+  .plan-confirm-composer:not(.discussing) .plan-choice-row:last-child {
+    padding-right: 10px;
+  }
+
+  .plan-choice-toolbar {
+    align-items: flex-end;
+    flex-direction: column;
+  }
+
+  .plan-choice-toolbar-actions {
+    width: 100%;
+  }
+
+  .plan-choice-submit {
+    flex: 1 1 120px;
+  }
 }
 
 /* Send button */

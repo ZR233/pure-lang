@@ -232,7 +232,12 @@ const zhCN = {
 
   planConfirm: {
     title: "确认计划",
+    promptTitle: "实施此计划?",
     hint: "选择下一步",
+    implementChoice: "是，实施此计划",
+    adjustChoice: "否，请告知 Codex 如何调整",
+    ignore: "忽略",
+    submit: "提交",
     continueDiscussion: "继续讨论",
     discussPlaceholder: "输入想继续讨论或调整计划的内容...",
   },
