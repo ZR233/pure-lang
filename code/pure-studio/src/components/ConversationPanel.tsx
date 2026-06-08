@@ -482,13 +482,9 @@ function ToolEntry({ item, t }: { item: Extract<TimelineEntry, { kind: "tool" }>
 
 function PlanEntry({
   entry,
-  onPreparePlan,
-  isBusy,
   t,
 }: {
   entry: Extract<TimelineEntry, { kind: "plan" }>;
-  onPreparePlan: (plan: string) => void;
-  isBusy: boolean;
   t: TFunction;
 }) {
   return (
@@ -499,12 +495,6 @@ function PlanEntry({
       </div>
       <div className="timeline-message-content">
         <MarkdownContent content={entry.content} />
-      </div>
-      <div className="timeline-plan-actions">
-        <button type="button" onClick={() => onPreparePlan(entry.content)} disabled={isBusy || !entry.content.trim()}>
-          <Play size={14} />
-          <span>{t("actions.implementPlan")}</span>
-        </button>
       </div>
     </EntryShell>
   );
@@ -957,10 +947,19 @@ export function ConversationPanel({
   const { t } = useTranslation();
   const stopping = turnPhase === "stopping";
   const currentMode: CompileMode = selectedSession?.mode === "plan" ? "plan" : "auto";
-  const [planConfirmation, setPlanConfirmation] = useState<string | null>(null);
+  const [dismissedPlanId, setDismissedPlanId] = useState<string | null>(null);
+  const latestPlanEntry = [...entries]
+    .reverse()
+    .find((entry): entry is Extract<TimelineEntry, { kind: "plan" }> =>
+      entry.kind === "plan" && Boolean(entry.content.trim()),
+    );
+  const planConfirmation =
+    !isBusy && latestPlanEntry && latestPlanEntry.item.itemId !== dismissedPlanId
+      ? latestPlanEntry
+      : null;
 
   useEffect(() => {
-    setPlanConfirmation(null);
+    setDismissedPlanId(null);
   }, [selectedSession?.id]);
 
   function renderTimelineEntry(entry: TimelineEntry) {
@@ -968,7 +967,7 @@ export function ConversationPanel({
       return <MessageEntry entry={entry} />;
     }
     if (entry.kind === "plan") {
-      return <PlanEntry entry={entry} onPreparePlan={setPlanConfirmation} isBusy={isBusy} t={t} />;
+      return <PlanEntry entry={entry} t={t} />;
     }
     if (entry.kind === "thought") {
       return <ThoughtEntry content={entry.content} />;
@@ -1017,11 +1016,11 @@ export function ConversationPanel({
             />
           ) : planConfirmation ? (
             <PlanConfirmComposer
-              plan={planConfirmation}
+              plan={planConfirmation.content}
               stopping={stopping}
               onImplementPlan={onImplementPlan}
               onSendPromptContent={onSendPromptContent}
-              onCancel={() => setPlanConfirmation(null)}
+              onCancel={() => setDismissedPlanId(planConfirmation.item.itemId)}
               t={t}
             />
           ) : (
