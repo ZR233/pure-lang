@@ -93,16 +93,31 @@ export function applyLiveTimelineEvent<T extends TimelineStateSlice>(
 }
 
 export function removeOptimisticTimelineItems<T extends TimelineStateSlice>(state: T): T {
+  return removeOptimisticTimelineItemsMatching(state, (itemId) => itemId.startsWith("optimistic-"));
+}
+
+export function removeOptimisticUserTimelineItems<T extends TimelineStateSlice>(state: T): T {
+  return removeOptimisticTimelineItemsMatching(state, (itemId) => itemId.startsWith("optimistic-user-"));
+}
+
+export function removeOptimisticWaitingTimelineItems<T extends TimelineStateSlice>(state: T): T {
+  return removeOptimisticTimelineItemsMatching(state, (itemId) => itemId.startsWith("optimistic-waiting-"));
+}
+
+function removeOptimisticTimelineItemsMatching<T extends TimelineStateSlice>(
+  state: T,
+  shouldRemove: (itemId: string) => boolean,
+): T {
   const timelineItems = new Map(state.timelineItems);
   for (const itemId of state.timelineOrder) {
-    if (itemId.startsWith("optimistic-")) {
+    if (shouldRemove(itemId)) {
       timelineItems.delete(itemId);
     }
   }
   return {
     ...state,
     timelineItems,
-    timelineOrder: state.timelineOrder.filter((itemId) => !itemId.startsWith("optimistic-")),
+    timelineOrder: state.timelineOrder.filter((itemId) => !shouldRemove(itemId)),
   };
 }
 
@@ -143,12 +158,9 @@ function upsertTimelineItem<T extends TimelineStateSlice>(
   timelineItems.set(item.itemId, mergeTimelineItem(existing, item));
   const timelineOrder = existing
     ? state.timelineOrder
-    : [...state.timelineOrder, item.itemId].sort((left, right) => {
-        const leftItem = timelineItems.get(left);
-        const rightItem = timelineItems.get(right);
-        const order = (leftItem?.sequence ?? 0) - (rightItem?.sequence ?? 0);
-        return order === 0 ? left.localeCompare(right) : order;
-      });
+    : [...state.timelineOrder, item.itemId].sort((left, right) =>
+        compareTimelineItemOrder(left, right, timelineItems),
+      );
   return {
     ...state,
     timelineItems,
@@ -158,6 +170,25 @@ function upsertTimelineItem<T extends TimelineStateSlice>(
         ? state.timelineNextSequence
         : Math.max(state.timelineNextSequence, eventSequence + 1),
   };
+}
+
+function compareTimelineItemOrder(
+  left: string,
+  right: string,
+  timelineItems: Map<string, TimelineItem>,
+): number {
+  const leftItem = timelineItems.get(left);
+  const rightItem = timelineItems.get(right);
+  const order = (leftItem?.sequence ?? 0) - (rightItem?.sequence ?? 0);
+  if (order !== 0) {
+    return order;
+  }
+  const leftWaiting = left.startsWith("optimistic-waiting-");
+  const rightWaiting = right.startsWith("optimistic-waiting-");
+  if (leftWaiting !== rightWaiting) {
+    return leftWaiting ? 1 : -1;
+  }
+  return left.localeCompare(right);
 }
 
 function mergeTimelineItem(existing: TimelineItem | undefined, item: TimelineItem): TimelineItem {

@@ -45,7 +45,7 @@ reducer 分域：
 - 同一 session 内继续对话不会触发 `selectedSessionId` 变化；当前轮 `RunPromptResponse.timelineItems` 与实时 `TimelineItem*` 事件必须直接合并进本地 timeline
 - 异步 `loadSessionTimeline` 只能替换不晚于本地状态的快照；如果加载结果落后于本地已收到的当前轮 item，只能作为历史补齐合并，不能覆盖当前 timeline
 - 自动跟随只取决于用户是否停留在底部，不取决于 `isBusy`；命令完成时 `isBusy` 已变为 false，但 `RunPromptResponse.timelineItems` 仍可能追加最终内容
-- 用户提交 prompt 后，前端 reducer 立即插入仅本地存在的 optimistic 用户消息 item 和 waiting turn item。waiting item 在 selector 中派生为轻量状态行，用于展示“正在等待模型响应”。这些 item 不持久化、不进入后端 DTO；收到首个真实 `TimelineItemStarted/Delta/Completed/Failed` 事件或最终 `RunPromptResponse` 后必须从本地 timeline 清理，避免和真实 timeline 重复。
+- 用户提交 prompt 后，前端 reducer 立即插入仅本地存在的 optimistic 用户消息 item 和 waiting turn item。waiting item 在 selector 中派生为轻量状态行，用于展示“正在等待模型响应”。这些 item 不持久化、不进入后端 DTO；真实 user text item 到达时只清理 optimistic 用户消息，不能清掉 waiting。waiting 必须持续覆盖 turn start、user text 和 inference start 到首个模型侧可见事件，例如 assistant text、thinking、plan、tool event、inference completed、terminal turn failure 或最终 `RunPromptResponse`。如果 run command 自身失败，waiting 应移除或替换为失败状态，不能残留。
 - 用户提交 prompt 属于显式回到底部的动作；即使用户此前停在历史位置，发送后 timeline 也应立即跟随到底部，让 optimistic 消息和等待状态可见。后续 streaming delta 仍遵守“用户在底部才跟随”的规则，用户再次上滚后不抢占滚动位置。
 - `thinking` item 在 selector 中派生为 thought entry，并携带 `status`、`startedAt`、`updatedAt` 与 `durationSeconds`。`started/streaming/running` 状态展示思考中动画；`completed` 状态根据 `createdAt/updatedAt` 展示耗时；`failed/interrupted/budgetLimited` 等异常状态展示对应异常语义。多个连续 thinking item 合并时，耗时取最早 `createdAt` 与最晚 `updatedAt`。
 - timeline 渲染层可以在 `selectTimelineEntries()` 之后使用 headless 虚拟滚动库承载大列表；虚拟化只负责测量、滚动定位和 DOM 数量控制，不消费 raw `TimelineItem`，也不承载 tool 聚合、thinking 合并、trace 过滤或 plan 行为
@@ -119,7 +119,7 @@ turn 展示语义固定：
 
 设置页 Security 标签页提供会话级权限模式选择。`request-approval` 在 workspace 内直接执行，访问 workspace 外时使用现有 ApprovalOverlay 弹出用户审批；`auto-review` 在 workspace 内直接执行，访问 workspace 外时由 reviewer 模型自动审批，前端不弹用户审批卡片，只通过工具结果展示已批准或已拒绝的事实；`full-access` 明确展示为会放宽 workspace 外文件路径和 shell cwd 边界并直接放行的模式。
 
-工具调用展示遵循 `design/13-tool-calling-runtime.md` 的生命周期语义。工具 entry 和工具组详情必须展示工具名称、状态和关键路径或命令摘要；静默文件工具的成功结果可以隐藏，但 failed、denied、interrupted、budgetLimited 等异常状态必须展示 result/error 详情。前端只做展示派生，不改变 raw `TimelineItem` 的状态或结果内容。
+工具调用展示遵循 `design/13-tool-calling-runtime.md` 的生命周期语义。工具 entry 和工具组详情必须展示工具名称、状态和关键路径或命令摘要；静默文件工具的成功结果可以隐藏，但 failed、denied、interrupted、budgetLimited 等异常状态必须展示 result/error 详情。前端只做展示派生，不改变 raw `TimelineItem` 的状态或结果内容。实时状态文案必须以 `TimelineItem.status` 为准；`TimelineItemCompleted` 事件可能携带 `approved`、`denied` 或 `completed` 等状态，组件不得仅根据事件名显示“工具完成”。
 
 agent latest snapshot、agent timeline event、session runtime 和审批状态必须以当前 `sessionId` 为边界。切换项目、切换会话或新建会话时，前端必须用后端返回的当前会话快照替换本地 agent 列表；运行中收到的实时事件如果属于非当前会话，不能更新当前状态栏、子代理 popover 或 timeline。`RunPromptResponse.agents` 是当前会话完成后的权威快照，不能与旧会话遗留 agents 合并。
 

@@ -40,6 +40,7 @@ import type {
   ProviderRecord,
   ProviderSettingsSaveSnapshot,
   RoleRecord,
+  TimelineItem,
   ToolApprovalRequest,
   ToolApprovalResolved,
   UserInputRequest,
@@ -81,7 +82,7 @@ function statusTextForEvent(
   }
   if ("timelineItemCompleted" in event) {
     const item = event.timelineItemCompleted.item;
-    if (item.kind === "tool") return t("status.toolCompleted", { name: item.tool?.name ?? "tool" });
+    if (item.kind === "tool") return statusTextForToolItem(item, t);
     return t("status.running");
   }
   if ("timelineItemFailed" in event) return t("status.error", { message: event.timelineItemFailed.error });
@@ -92,6 +93,33 @@ function statusTextForEvent(
   if ("agentRuntimeUpdated" in event) return t("status.running");
   if ("error" in event) return t("status.error", { message: event.error.message });
   return t("status.running");
+}
+
+function statusTextForToolItem(
+  item: TimelineItem,
+  t: (key: string, args?: Record<string, unknown>) => string,
+) {
+  const name = item.tool?.name ?? "tool";
+  switch (item.status) {
+    case "approved":
+      return t("status.approved", { name });
+    case "denied":
+      return t("status.denied", { name });
+    case "failed":
+      return t("status.error", { message: item.tool?.result ?? name });
+    case "completed":
+      return t("status.toolCompleted", { name });
+    case "awaitingApproval":
+      return t("status.approvalRequired", { name });
+    case "interrupted":
+      return t("status.interrupted");
+    case "budgetLimited":
+      return t("turnPhase.budgetLimited");
+    case "started":
+    case "streaming":
+    case "running":
+      return t("status.toolInput", { name });
+  }
 }
 
 export function useStudioApp() {

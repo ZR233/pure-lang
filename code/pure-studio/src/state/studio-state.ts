@@ -29,6 +29,8 @@ import {
   mergeRunPromptTimeline,
   mergeTimelineSnapshot,
   removeOptimisticTimelineItems,
+  removeOptimisticUserTimelineItems,
+  removeOptimisticWaitingTimelineItems,
   type TimelineStateSlice,
 } from "./timeline-state";
 
@@ -258,7 +260,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         return state;
       }
       return {
-        ...state,
+        ...removeOptimisticWaitingTimelineItems(state),
         status: action.status,
         turnPhase: "failed",
         turnStartedAt: null,
@@ -369,9 +371,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       if (action.sessionId !== state.selectedSessionId) {
         return state;
       }
-      const eventBase = shouldClearOptimisticTimeline(action.event)
-        ? removeOptimisticTimelineItems(state)
-        : state;
+      const eventBase = applyOptimisticTimelineCleanup(state, action.event);
       const nextRuntime = mergeLiveSkillIntoRuntime(
         action.sessionRuntime ?? eventBase.sessionRuntime,
         action.event,
@@ -499,15 +499,98 @@ function appendOptimisticPrompt(state: StudioState, prompt: string, startedAt: n
   };
 }
 
-function shouldClearOptimisticTimeline(event: AgentEvent | null | undefined): boolean {
-  return Boolean(
-    event &&
-      typeof event === "object" &&
-      ("timelineItemStarted" in event ||
-        "timelineItemDelta" in event ||
-        "timelineItemCompleted" in event ||
-        "timelineItemFailed" in event),
-  );
+function applyOptimisticTimelineCleanup(
+  state: StudioState,
+  event: AgentEvent | null | undefined,
+): StudioState {
+  let next = state;
+  if (shouldClearOptimisticUserTimeline(event)) {
+    next = removeOptimisticUserTimelineItems(next);
+  }
+  if (shouldClearOptimisticWaitingTimeline(event)) {
+    next = removeOptimisticWaitingTimelineItems(next);
+  }
+  return next;
+}
+
+function shouldClearOptimisticUserTimeline(event: AgentEvent | null | undefined): boolean {
+  if (!isRecord(event)) {
+    return false;
+  }
+  const item = timelineEventItem(event);
+  return item?.kind === "text" && item.role === "user";
+}
+
+function shouldClearOptimisticWaitingTimeline(event: AgentEvent | null | undefined): boolean {
+  if (event === "done") {
+    return true;
+  }
+  if (!isRecord(event)) {
+    return false;
+  }
+  if ("timelineItemDelta" in event && isRecord(event.timelineItemDelta)) {
+    const timelineEvent = event.timelineItemDelta.event as TimelineItemDeltaEvent | undefined;
+    return timelineEvent ? isModelVisibleTimelineKind(timelineEvent.kind) : false;
+  }
+  const item = timelineEventItem(event);
+  if (!item) {
+    return "turnInterrupted" in event || "turnBudgetLimited" in event || "error" in event;
+  }
+  if (isModelVisibleTimelineItem(item)) {
+    return true;
+  }
+  return item.kind === "turn" && isTerminalTimelineStatus(item.status);
+}
+
+function timelineEventItem(event: Record<string, unknown>): TimelineItem | null {
+  if ("timelineItemStarted" in event && isRecord(event.timelineItemStarted)) {
+    return event.timelineItemStarted.item as TimelineItem;
+  }
+  if ("timelineItemCompleted" in event && isRecord(event.timelineItemCompleted)) {
+    return event.timelineItemCompleted.item as TimelineItem;
+  }
+  if ("timelineItemFailed" in event && isRecord(event.timelineItemFailed)) {
+    return event.timelineItemFailed.item as TimelineItem;
+  }
+  return null;
+}
+
+function isModelVisibleTimelineItem(item: TimelineItem): boolean {
+  if (item.kind === "text") {
+    return item.role === "assistant";
+  }
+  return isModelVisibleTimelineKind(item.kind) || item.kind === "inference" && item.status === "completed";
+}
+
+function isModelVisibleTimelineKind(kind: TimelineItem["kind"]): boolean {
+  switch (kind) {
+    case "text":
+    case "thinking":
+    case "tool":
+    case "agent":
+    case "plan":
+      return true;
+    case "turn":
+    case "inference":
+      return false;
+  }
+}
+
+function isTerminalTimelineStatus(status: TimelineItem["status"]): boolean {
+  switch (status) {
+    case "completed":
+    case "failed":
+    case "denied":
+    case "interrupted":
+    case "budgetLimited":
+      return true;
+    case "started":
+    case "streaming":
+    case "awaitingApproval":
+    case "approved":
+    case "running":
+      return false;
+  }
 }
 
 function reduceAgentEvent(
