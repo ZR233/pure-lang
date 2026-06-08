@@ -46,6 +46,7 @@ export function App() {
         onSetSessionMode={(mode) => void studio.onSetSessionMode(mode)}
         onImplementPlan={(plan) => void studio.onImplementPlan(plan)}
         onSendPrompt={() => void studio.onSendPrompt()}
+        onSendPromptContent={(content) => void studio.onSendPromptContent(content)}
         onStopPrompt={() => void studio.onStopPrompt()}
         onAnswerUserInput={(requestId, response) => void studio.onAnswerUserInput(requestId, response)}
       />

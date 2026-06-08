@@ -216,9 +216,19 @@ const en = {
   askUser: {
     awaiting: "Assistant needs input",
     answer: "Answer",
+    next: "Next",
+    submit: "Submit answers",
+    progress: "Question {{current}} / {{total}}",
     answerPlaceholder: "Type your answer...",
     customPlaceholder: "Add a custom answer...",
     secretPlaceholder: "Enter secret answer",
+  },
+
+  planConfirm: {
+    title: "Confirm plan",
+    hint: "Choose what happens next",
+    continueDiscussion: "Continue discussion",
+    discussPlaceholder: "Type what you want to discuss or change about the plan...",
   },
 
   settings: {

@@ -216,9 +216,19 @@ const zhCN = {
   askUser: {
     awaiting: "助手需要你补充信息",
     answer: "回答",
+    next: "下一题",
+    submit: "提交回答",
+    progress: "第 {{current}} / {{total}} 题",
     answerPlaceholder: "输入你的回答...",
     customPlaceholder: "补充自定义回答...",
     secretPlaceholder: "输入敏感回答",
+  },
+
+  planConfirm: {
+    title: "确认计划",
+    hint: "选择下一步",
+    continueDiscussion: "继续讨论",
+    discussPlaceholder: "输入想继续讨论或调整计划的内容...",
   },
 
   settings: {
