@@ -984,6 +984,74 @@ mod tests {
     }
 
     #[test]
+    fn timeline_events_to_items_preserves_tool_result_delta_before_start() {
+        let completed = TimelineItem {
+            turn_id: "turn-1".to_string(),
+            item_id: "turn-1-call-1".to_string(),
+            sequence: 11,
+            kind: TimelineItemKind::Tool,
+            status: TimelineItemStatus::Completed,
+            created_at: 11,
+            updated_at: 11,
+            role: None,
+            content: String::new(),
+            thinking_chunks: Vec::new(),
+            tool: Some(TimelineToolItem {
+                tool_call_id: "turn-1-call-1".to_string(),
+                call_id: Some("call-1".to_string()),
+                provider_item_id: Some("provider-1".to_string()),
+                name: "read_file".to_string(),
+                arguments: "{\"path\":\"a.ts\"}".to_string(),
+                result: None,
+                exit_code: None,
+                timed_out: false,
+                working_directory: None,
+                denial_reason: None,
+            }),
+            agent: None,
+            inference: None,
+            usage: None,
+        };
+        let events = vec![
+            TraceEvent {
+                session_id: "session-1".to_string(),
+                sequence: 10,
+                timestamp: 10,
+                kind: TraceEventKind::TimelineItemDelta {
+                    event: TimelineItemDeltaEvent {
+                        turn_id: "turn-1".to_string(),
+                        item_id: "turn-1-call-1".to_string(),
+                        sequence: 10,
+                        kind: TimelineItemKind::Tool,
+                        status: TimelineItemStatus::Streaming,
+                        created_at: 10,
+                        updated_at: 10,
+                        delta: TimelineDelta::ToolResult {
+                            delta: "partial result".to_string(),
+                        },
+                    },
+                },
+            },
+            TraceEvent {
+                session_id: "session-1".to_string(),
+                sequence: 11,
+                timestamp: 11,
+                kind: TraceEventKind::TimelineItemCompleted { item: completed },
+            },
+        ];
+
+        let items = timeline_events_to_items(&events);
+
+        assert_eq!(items.len(), 1);
+        let tool = items[0].tool.as_ref().expect("tool item");
+        assert_eq!(tool.name, "read_file");
+        assert_eq!(tool.arguments, "{\"path\":\"a.ts\"}");
+        assert_eq!(tool.result.as_deref(), Some("partial result"));
+        assert_eq!(tool.call_id.as_deref(), Some("call-1"));
+        assert_eq!(tool.provider_item_id.as_deref(), Some("provider-1"));
+    }
+
+    #[test]
     fn timeline_events_to_items_keeps_failed_error_when_content_is_empty() {
         let failed = TimelineItem {
             turn_id: "turn-1".to_string(),
