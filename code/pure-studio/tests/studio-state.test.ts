@@ -383,6 +383,37 @@ function toolArgumentDeltaBeforeStartIsPreserved() {
   assertEqual(tool?.arguments, "{\"path\":\"a.ts\"");
 }
 
+function toolResultDeltaBeforeStartIsPreserved() {
+  const delta: TimelineItemDeltaEvent = {
+    turnId: "turn-1",
+    itemId: "turn-1-call-1",
+    sequence: 10,
+    kind: "tool",
+    status: "streaming",
+    createdAt: 10,
+    updatedAt: 10,
+    delta: { type: "toolResult", delta: "partial result" },
+  };
+  const completed = toolItem("turn-1-call-1", "turn-1", 11, "read_file", { path: "a.ts" });
+  const withDelta = studioReducer(selectedState(), {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemDelta: { event: delta } },
+    statusText: "running",
+  });
+  const withCompleted = studioReducer(withDelta, {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemCompleted: { sequence: 11, item: completed } },
+    statusText: "done",
+  });
+
+  const tool = withCompleted.timelineItems.get("turn-1-call-1")?.tool;
+  assertEqual(tool?.name, "read_file");
+  assertEqual(tool?.arguments, "{\"path\":\"a.ts\"}");
+  assertEqual(tool?.result, "partial result");
+}
+
 function runPromptLoadedWithEmptyItemsDoesNotDeleteLiveContent() {
   const liveItem = textItem("turn-2-text", 10, "live");
   const liveState = studioReducer(selectedState(), {
@@ -1486,6 +1517,7 @@ staleTimelineLoadKeepsNewTurnItems();
 freshTimelineLoadMayReplaceSnapshot();
 staleTimelineLoadDoesNotOverwriteLiveDelta();
 toolArgumentDeltaBeforeStartIsPreserved();
+toolResultDeltaBeforeStartIsPreserved();
 runPromptLoadedWithEmptyItemsDoesNotDeleteLiveContent();
 runPromptLoadedErroredKeepsFailedStatusText();
 userInputRequestStoresPendingComposerState();

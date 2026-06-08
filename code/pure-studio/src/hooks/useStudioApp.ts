@@ -99,7 +99,7 @@ function statusTextForToolItem(
   item: TimelineItem,
   t: (key: string, args?: Record<string, unknown>) => string,
 ) {
-  const name = item.tool?.name ?? "tool";
+  const name = item.tool?.name || "tool";
   switch (item.status) {
     case "approved":
       return t("status.approved", { name });

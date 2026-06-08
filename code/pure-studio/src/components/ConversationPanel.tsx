@@ -465,7 +465,7 @@ function StatusEntry({ entry, t }: { entry: Extract<TimelineEntry, { kind: "stat
 
 function ToolEntry({ item, t }: { item: Extract<TimelineEntry, { kind: "tool" }>["item"]; t: TFunction }) {
   const tool = item.tool;
-  const name = tool?.name ?? "Tool call";
+  const name = tool?.name || "Tool call";
   const argumentsText = tool?.arguments ?? "";
   const pathSummary = toolPathSummary(name, argumentsText);
   const hideResult = hidesToolResult(name, item.status);
@@ -555,7 +555,7 @@ function toolGroupPartLabel(part: ToolGroupSummaryPart, t: TFunction): string {
 
 function ToolGroupDetailRow({ item, t }: { item: TimelineItem; t: TFunction }) {
   const tool = item.tool;
-  const name = tool?.name ?? "Tool call";
+  const name = tool?.name || "Tool call";
   const argumentsText = tool?.arguments ?? "";
   const pathSummary = toolPathSummary(name, argumentsText);
   const hideResult = hidesToolResult(name, item.status);
