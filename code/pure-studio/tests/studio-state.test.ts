@@ -345,6 +345,44 @@ function staleTimelineLoadDoesNotOverwriteLiveDelta() {
   assertEqual(afterStaleLoad.timelineNextSequence, 13);
 }
 
+function toolArgumentDeltaBeforeStartIsPreserved() {
+  const delta: TimelineItemDeltaEvent = {
+    turnId: "turn-1",
+    itemId: "turn-1-call-1",
+    sequence: 10,
+    kind: "tool",
+    status: "streaming",
+    createdAt: 10,
+    updatedAt: 10,
+    delta: { type: "toolArguments", delta: "{\"path\":\"a.ts\"" },
+  };
+  const started = toolItem("turn-1-call-1", "turn-1", 9, "read_file", "");
+  started.status = "streaming";
+  const completed = toolItem("turn-1-call-1", "turn-1", 11, "read_file", "");
+  const withDelta = studioReducer(selectedState(), {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemDelta: { event: delta } },
+    statusText: "running",
+  });
+  const withStart = studioReducer(withDelta, {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemStarted: { item: started } },
+    statusText: "running",
+  });
+  const withCompleted = studioReducer(withStart, {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemCompleted: { sequence: 11, item: completed } },
+    statusText: "done",
+  });
+
+  const tool = withCompleted.timelineItems.get("turn-1-call-1")?.tool;
+  assertEqual(tool?.name, "read_file");
+  assertEqual(tool?.arguments, "{\"path\":\"a.ts\"");
+}
+
 function runPromptLoadedWithEmptyItemsDoesNotDeleteLiveContent() {
   const liveItem = textItem("turn-2-text", 10, "live");
   const liveState = studioReducer(selectedState(), {
@@ -1447,6 +1485,7 @@ function roleChangeProducesCompleteNormalizedSnapshot() {
 staleTimelineLoadKeepsNewTurnItems();
 freshTimelineLoadMayReplaceSnapshot();
 staleTimelineLoadDoesNotOverwriteLiveDelta();
+toolArgumentDeltaBeforeStartIsPreserved();
 runPromptLoadedWithEmptyItemsDoesNotDeleteLiveContent();
 runPromptLoadedErroredKeepsFailedStatusText();
 userInputRequestStoresPendingComposerState();

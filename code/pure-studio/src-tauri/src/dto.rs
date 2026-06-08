@@ -300,6 +300,10 @@ pub struct SessionTimelineDto {
 pub struct AgentEventPayload {
     pub session_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeline_stale: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lagged_events: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub event: Option<AgentEvent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeline_event: Option<AgentEventDto>,

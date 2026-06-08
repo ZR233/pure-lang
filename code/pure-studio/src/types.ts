@@ -412,6 +412,8 @@ export type AgentRuntimeDelta = {
 
 export type AgentEventPayload = {
   sessionId: string;
+  timelineStale?: boolean | null;
+  laggedEvents?: number | null;
   event?: AgentEvent | null;
   timelineEvent?: AgentTimelineEvent | null;
   agent?: AgentDto | null;
