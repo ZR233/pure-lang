@@ -245,7 +245,9 @@ function estimateEntrySize(entry: TimelineEntry | undefined): number {
     case "plan":
       return 220;
     case "thought":
-      return 74;
+      return 108;
+    case "status":
+      return 72;
     case "tool":
       return 86;
     case "toolGroup":

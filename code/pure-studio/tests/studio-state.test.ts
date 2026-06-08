@@ -726,6 +726,7 @@ function laterRunWithoutPlanDoesNotReopenHistoricalPlan() {
     type: "promptSubmitted",
     status: "running",
     startedAt: 100,
+    prompt: "continue",
   });
   const completed = studioReducer(submitted, {
     type: "runPromptLoaded",
@@ -734,6 +735,97 @@ function laterRunWithoutPlanDoesNotReopenHistoricalPlan() {
   });
 
   assertEqual(completed.planAction, null);
+}
+
+function promptSubmittedCreatesOptimisticTimelineFeedback() {
+  const state = studioReducer(selectedState(), {
+    type: "promptSubmitted",
+    status: "running",
+    startedAt: 1234,
+    prompt: "Build the thing",
+  });
+  const entries = selectTimelineEntries(state);
+
+  assertDeepEqual(entries.map((entry) => entry.kind), ["message", "status"]);
+  const message = entries[0];
+  const status = entries[1];
+  if (message?.kind !== "message" || status?.kind !== "status") {
+    throw new Error("Expected optimistic message and status entries");
+  }
+  assertEqual(message.role, "user");
+  assertEqual(message.content, "Build the thing");
+  assertEqual(status.status, "running");
+  assertEqual(status.content, "waitingForModel");
+  assertDeepEqual(state.timelineOrder, ["optimistic-user-1234", "optimistic-waiting-1234"]);
+  assertEqual(state.prompt, "");
+  assertEqual(state.isBusy, true);
+}
+
+function realTimelineEventClearsOptimisticTimelineFeedback() {
+  const submitted = studioReducer(selectedState(), {
+    type: "promptSubmitted",
+    status: "running",
+    startedAt: 1234,
+    prompt: "Build the thing",
+  });
+  const realItem = textItem("turn-1-text", 10, "Working");
+  const updated = studioReducer(submitted, {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemStarted: { item: realItem } },
+    statusText: "running",
+  });
+
+  assertDeepEqual(updated.timelineOrder, ["turn-1-text"]);
+  assertEqual(updated.timelineItems.has("optimistic-user-1234"), false);
+  assertEqual(updated.timelineItems.has("optimistic-waiting-1234"), false);
+}
+
+function runPromptLoadedClearsOptimisticTimelineFeedback() {
+  const submitted = studioReducer(selectedState(), {
+    type: "promptSubmitted",
+    status: "running",
+    startedAt: 1234,
+    prompt: "Build the thing",
+  });
+  const loaded = studioReducer(submitted, {
+    type: "runPromptLoaded",
+    payload: response([textItem("turn-1-text", 10, "Done")]),
+    status: "done",
+  });
+
+  assertDeepEqual(loaded.timelineOrder, ["turn-1-text"]);
+  assertEqual(loaded.timelineItems.has("optimistic-user-1234"), false);
+  assertEqual(loaded.timelineItems.has("optimistic-waiting-1234"), false);
+}
+
+function thinkingEntriesExposeStreamingStatusAndDuration() {
+  const item = thinkingItem("turn-1-thinking", "turn-1", 10, "Inspecting context");
+  item.status = "streaming";
+  item.createdAt = 100;
+  item.updatedAt = 100;
+  const entries = entriesForTimeline([item]);
+  const thought = entries[0];
+
+  if (thought?.kind !== "thought") {
+    throw new Error(`Expected thought entry, got ${thought?.kind}`);
+  }
+  assertEqual(thought.status, "streaming");
+  assertEqual(thought.durationSeconds, 0);
+}
+
+function completedThinkingEntryUsesDuration() {
+  const item = thinkingItem("turn-1-thinking", "turn-1", 10, "Inspecting context");
+  item.createdAt = 10;
+  item.updatedAt = 135;
+  const entries = entriesForTimeline([item]);
+  const thought = entries[0];
+
+  if (thought?.kind !== "thought") {
+    throw new Error(`Expected thought entry, got ${thought?.kind}`);
+  }
+  assertEqual(thought.status, "completed");
+  assertEqual(thought.durationSeconds, 125);
 }
 
 function liveCompletedPlanCreatesPendingPlanAction() {
@@ -1294,6 +1386,11 @@ dismissPlanActionPreventsSamePlanFromReopening();
 setPlanActionModeUpdatesPendingPlanAction();
 historicalTimelineLoadDoesNotCreatePlanAction();
 laterRunWithoutPlanDoesNotReopenHistoricalPlan();
+promptSubmittedCreatesOptimisticTimelineFeedback();
+realTimelineEventClearsOptimisticTimelineFeedback();
+runPromptLoadedClearsOptimisticTimelineFeedback();
+thinkingEntriesExposeStreamingStatusAndDuration();
+completedThinkingEntryUsesDuration();
 liveCompletedPlanCreatesPendingPlanAction();
 sessionSelectionClearsPlanActionState();
 toolsFromDifferentTurnsDoNotMerge();

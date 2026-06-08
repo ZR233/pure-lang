@@ -350,6 +350,7 @@ export function useStudioApp() {
       type: "promptSubmitted",
       status: t("status.running"),
       startedAt: Date.now(),
+      prompt: content,
     });
     try {
       const payload = await runPrompt(sessionId, content);

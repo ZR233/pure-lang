@@ -84,6 +84,12 @@ const en = {
     turn: "Turn",
     notice: "Notice",
     plan: "Plan",
+    waitingForModel: "Waiting for the model...",
+    thinking: "Thinking",
+    thinkingActive: "Thinking...",
+    thoughtDurationSubSecond: "Thought for less than 1 second",
+    thoughtDurationSeconds: "Thought for {{seconds}} seconds",
+    thoughtDurationMinutes: "Thought for {{minutes}} min {{seconds}} sec",
   },
 
   roles: {

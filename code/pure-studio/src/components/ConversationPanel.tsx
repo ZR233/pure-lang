@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Circle,
   FileText,
+  Loader2,
   MessageCircle,
   Play,
   Send,
@@ -247,9 +248,25 @@ function MarkdownContent({ content }: { content: string }) {
   return <div className="markdown-content">{blocks}</div>;
 }
 
-function thoughtLabel(content: string): string {
+function thoughtLabel(content: string, t: TFunction): string {
   const firstLine = content.trim().split(/\r?\n/, 1)[0]?.trim();
-  return firstLine?.toLowerCase().startsWith("thought") ? firstLine : "Thought";
+  return firstLine?.toLowerCase().startsWith("thought") ? firstLine : t("timeline.thinking");
+}
+
+function isActiveStatus(status: TimelineItem["status"]): boolean {
+  return status === "started" || status === "streaming" || status === "running";
+}
+
+function thoughtDurationLabel(seconds: number, t: TFunction): string {
+  if (seconds <= 0) {
+    return t("timeline.thoughtDurationSubSecond");
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes > 0) {
+    return t("timeline.thoughtDurationMinutes", { minutes, seconds: remainingSeconds });
+  }
+  return t("timeline.thoughtDurationSeconds", { seconds });
 }
 
 function toolStatusLabel(status: ToolCallStatus2 | null | undefined, t: TFunction): string {
@@ -416,16 +433,32 @@ function MessageEntry({ entry }: { entry: Extract<TimelineEntry, { kind: "messag
   );
 }
 
-function ThoughtEntry({ content }: { content: string }) {
+function ThoughtEntry({ entry, t }: { entry: Extract<TimelineEntry, { kind: "thought" }>; t: TFunction }) {
+  const active = isActiveStatus(entry.status);
   return (
-    <EntryShell className="timeline-entry-thought" icon={<Brain size={14} />}>
+    <EntryShell className={`timeline-entry-thought status-${entry.status}${active ? " is-active" : ""}`} icon={<Brain size={14} />}>
       <details className="timeline-thought">
         <summary>
-          <span>{thoughtLabel(content)}</span>
+          <span className="timeline-thought-label">
+            {active ? t("timeline.thinkingActive") : thoughtDurationLabel(entry.durationSeconds, t)}
+          </span>
+          {active ? <span className="timeline-thinking-dots" aria-hidden="true"><i /><i /><i /></span> : null}
+          {!active && entry.content.trim() ? <span className="timeline-thought-preview">{thoughtLabel(entry.content, t)}</span> : null}
           <ChevronDown size={14} />
         </summary>
-        <pre>{content}</pre>
+        <pre>{entry.content}</pre>
       </details>
+    </EntryShell>
+  );
+}
+
+function StatusEntry({ entry, t }: { entry: Extract<TimelineEntry, { kind: "status" }>; t: TFunction }) {
+  return (
+    <EntryShell className={`timeline-entry-status status-${entry.status}`} icon={<Loader2 size={14} />}>
+      <div className="timeline-status-row">
+        <span className="timeline-status-pulse" aria-hidden="true" />
+        <span>{entry.content === "waitingForModel" ? t("timeline.waitingForModel") : entry.content}</span>
+      </div>
     </EntryShell>
   );
 }
@@ -946,8 +979,9 @@ export function ConversationPanel({
       return <PlanEntry entry={entry} t={t} />;
     }
     if (entry.kind === "thought") {
-      return <ThoughtEntry content={entry.content} />;
+      return <ThoughtEntry entry={entry} t={t} />;
     }
+    if (entry.kind === "status") return <StatusEntry entry={entry} t={t} />;
     if (entry.kind === "tool") {
       return <ToolEntry item={entry.item} t={t} />;
     }
