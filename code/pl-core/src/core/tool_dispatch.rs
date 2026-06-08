@@ -19,7 +19,8 @@ use super::permission::{approval_request, request_user_approval, requested_works
 use super::turn_result::{is_cancelled, tool_allowed_in_mode, unix_seconds};
 
 pub(super) struct ToolExecutionRecord {
-    pub(super) call_id: String,
+    pub(super) id: String,
+    pub(super) call_id: Option<String>,
     pub(super) name: String,
     pub(super) kind: ToolCallKind,
     pub(super) result: String,
@@ -281,10 +282,8 @@ async fn ready_tool_execution_record(
     timed_out: bool,
 ) -> ToolExecutionRecord {
     ToolExecutionRecord {
-        call_id: tool_call
-            .call_id
-            .clone()
-            .unwrap_or_else(|| tool_call.id.clone()),
+        id: tool_call.id.clone(),
+        call_id: tool_call.call_id.clone(),
         name: tool_call.name.clone(),
         kind: tool_call.kind(),
         arguments: serde_json::to_string(&tool_call.arguments_for_display()).unwrap_or_default(),
@@ -317,10 +316,8 @@ fn tool_execution_record(
     };
     let display_result = display_result_for_tool(&tool_call, &tool_name, &result, status);
     ToolExecutionRecord {
-        call_id: tool_call
-            .call_id
-            .clone()
-            .unwrap_or_else(|| tool_call.id.clone()),
+        id: tool_call.id.clone(),
+        call_id: tool_call.call_id.clone(),
         name: tool_name,
         kind: tool_call.kind(),
         arguments: serde_json::to_string(&tool_call.arguments_for_display()).unwrap_or_default(),

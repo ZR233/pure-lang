@@ -84,12 +84,16 @@ impl CoreSession {
     pub fn push_tool_result(
         &mut self,
         tool_call_id: String,
+        tool_call_call_id: Option<String>,
         tool_name: String,
         tool_call_kind: ToolCallKind,
         result: String,
         tool_arguments: String,
     ) {
         let mut metadata = HashMap::new();
+        if let Some(call_id) = tool_call_call_id {
+            metadata.insert("tool_call_call_id".to_string(), call_id);
+        }
         metadata.insert("tool_call_id".to_string(), tool_call_id);
         metadata.insert("tool_name".to_string(), tool_name);
         metadata.insert(
@@ -174,7 +178,8 @@ mod tests {
     fn push_tool_result_stores_metadata() {
         let mut session = CoreSession::new();
         session.push_tool_result(
-            "call-1".to_string(),
+            "provider-item-1".to_string(),
+            Some("call-1".to_string()),
             "bash".to_string(),
             ToolCallKind::Function,
             "output".to_string(),
@@ -185,6 +190,13 @@ mod tests {
         assert_eq!(session.messages()[0].role, MessageRole::Tool);
         assert_eq!(
             session.messages()[0].metadata.get("tool_call_id").unwrap(),
+            "provider-item-1"
+        );
+        assert_eq!(
+            session.messages()[0]
+                .metadata
+                .get("tool_call_call_id")
+                .unwrap(),
             "call-1"
         );
         assert_eq!(
