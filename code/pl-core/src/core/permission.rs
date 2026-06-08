@@ -57,6 +57,7 @@ pub(super) fn requested_workspace_access(
 pub(super) fn requested_paths_for_tool(name: &str, arguments: &serde_json::Value) -> Vec<String> {
     match name {
         "bash" => get_working_directory(arguments).into_iter().collect(),
+        "write_stdin" => Vec::new(),
         "read_file" | "write_file" | "stat_path" | "create_directory" | "delete_path" => {
             argument_path(arguments, "path").into_iter().collect()
         }
@@ -148,6 +149,7 @@ pub(super) fn canonicalize_existing_or_parent(candidate: &Path) -> PathBuf {
 pub(super) fn permission_risk_summary(tool_name: &str) -> &'static str {
     match tool_name {
         "bash" => "shell command; may execute arbitrary process actions",
+        "write_stdin" => "stdin or polling for an already approved shell process",
         "write_file" => "file write; may create, overwrite, or append content",
         "create_directory" => "filesystem write; creates directories",
         "delete_path" => "destructive filesystem operation",

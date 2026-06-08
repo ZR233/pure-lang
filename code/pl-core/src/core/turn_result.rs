@@ -34,6 +34,7 @@ pub(super) fn tool_allowed_in_mode(mode: CompileMode, name: &str) -> bool {
         CompileMode::Plan => matches!(
             name,
             "bash"
+                | "write_stdin"
                 | "read_file"
                 | "list_files"
                 | "search_files"

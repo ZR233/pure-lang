@@ -8,8 +8,9 @@ use super::types::{
     SpawnAgentResult, SpawnAgentTool, WaitAgentArgs, WaitAgentResult, WaitAgentTool,
 };
 use super::{
-    CloseAgentTool, Tool, ToolContext, ToolInput, ToolOutput, child_agent_options,
-    current_agent_path, invalid_spawn_input, json_output, message_schema, unix_seconds,
+    CloseAgentTool, ForkTurns, Tool, ToolContext, ToolInput, ToolOutput, agent_tool_records,
+    child_agent_options, current_agent_path, fork_session, invalid_spawn_input, json_output,
+    message_schema, unix_seconds,
 };
 use crate::agent::{AgentSpawnInput, MessageDeliveryMode};
 use crate::tool::recoverable::{
@@ -89,7 +90,7 @@ impl Tool for SpawnAgentTool {
                 },
                 "forkTurns": {
                     "type": "string",
-                    "description": "Reserved history fork mode; current implementation starts with the provided message."
+                    "description": "Parent history to inherit: none, all, or a positive integer string. Defaults to none. Inherited history is filtered to remove tool calls/results and reasoning."
                 }
             },
             "required": ["taskName", "message"]
@@ -109,6 +110,7 @@ impl Tool for SpawnAgentTool {
             let args: SpawnAgentArgs =
                 serde_json::from_value(input.arguments).map_err(invalid_spawn_input)?;
             let role = super::role_key(args.agent_type.as_deref())?;
+            let fork_turns = ForkTurns::parse(args.fork_turns.as_deref())?;
             let parent_path = current_agent_path(&context);
             let prompt = args.message.clone();
             let _ = context.event_tx.send(AgentEvent::CollabAgentSpawnBegin {
@@ -177,6 +179,12 @@ impl Tool for SpawnAgentTool {
                 })?;
             emit_agent_record(&context.event_tx, &record);
 
+            let child_session = fork_session(&context.parent_session, fork_turns);
+            context
+                .agent_control
+                .store_session(&handle.id, child_session)
+                .await;
+
             let options = child_agent_options(&context.options);
             if let Some(token) = options.cancellation_token.clone() {
                 context
@@ -231,6 +239,10 @@ impl Tool for WaitAgentTool {
                 "timeoutMs": {
                     "type": "integer",
                     "description": "Wait timeout in milliseconds. Defaults to 30000."
+                },
+                "includeDetails": {
+                    "type": "boolean",
+                    "description": "Return full AgentRecord entries instead of compact summaries. Defaults to false."
                 }
             }
         })
@@ -246,8 +258,11 @@ impl Tool for WaitAgentTool {
         context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            let args: WaitAgentArgs = serde_json::from_value(input.arguments)
-                .unwrap_or(WaitAgentArgs { timeout_ms: None });
+            let args: WaitAgentArgs =
+                serde_json::from_value(input.arguments).unwrap_or(WaitAgentArgs {
+                    timeout_ms: None,
+                    include_details: false,
+                });
             let sender_path = current_agent_path(&context);
             let _ = context.event_tx.send(AgentEvent::CollabWaitingBegin {
                 call_id: input.tool_id.clone(),
@@ -281,7 +296,7 @@ impl Tool for WaitAgentTool {
             json_output(WaitAgentResult {
                 message,
                 timed_out: outcome.timed_out,
-                agents: outcome.agents,
+                agents: agent_tool_records(&outcome.agents, args.include_details),
                 recoverable_failures,
             })
         })
@@ -304,6 +319,10 @@ impl Tool for ListAgentsTool {
                 "pathPrefix": {
                     "type": "string",
                     "description": "Optional canonical path prefix, such as /root/research."
+                },
+                "includeDetails": {
+                    "type": "boolean",
+                    "description": "Return full AgentRecord entries instead of compact summaries. Defaults to false."
                 }
             }
         })
@@ -319,15 +338,18 @@ impl Tool for ListAgentsTool {
         context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            let args: ListAgentsArgs = serde_json::from_value(input.arguments)
-                .unwrap_or(ListAgentsArgs { path_prefix: None });
+            let args: ListAgentsArgs =
+                serde_json::from_value(input.arguments).unwrap_or(ListAgentsArgs {
+                    path_prefix: None,
+                    include_details: false,
+                });
             let agents = context
                 .agent_control
                 .list_agents(args.path_prefix.as_deref())
                 .await;
             let recoverable_failures = recoverable_subagent_failures(&agents);
             json_output(ListAgentsResult {
-                agents,
+                agents: agent_tool_records(&agents, args.include_details),
                 recoverable_failures,
             })
         })

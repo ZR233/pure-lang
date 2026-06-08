@@ -1,5 +1,6 @@
 use pl_model::{CompletionRequest, ModelProvider, ReasoningConfig, ReasoningSummary};
 use pl_protocol::{AgentEvent, ErrorSeverity, Result, TimelineItemStatus, TokenUsageSnapshot};
+use std::sync::Arc;
 
 use crate::context_compaction::{
     CompactionOutcome, ContextCompactionRequest, maybe_compact_session,
@@ -416,6 +417,7 @@ pub(super) async fn run_turn_with_trace(
                 workspace_instructions: workspace_instructions.clone(),
                 active_subagent: active_subagent.clone(),
                 agent_control: agent_control.clone(),
+                parent_session: Arc::new(CoreSession::from_messages(messages.clone())),
             },
         )
         .await;

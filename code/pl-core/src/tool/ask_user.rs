@@ -202,6 +202,7 @@ mod tests {
             workspace_instructions: None,
             active_subagent: None,
             agent_control: AgentControl::default(),
+            parent_session: Arc::new(crate::CoreSession::new()),
         }
     }
 

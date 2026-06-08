@@ -1,5 +1,6 @@
 mod ask_user;
 mod bash;
+mod command;
 mod file;
 mod multi_agent;
 mod recoverable;
@@ -21,7 +22,8 @@ use crate::AgentControl;
 use crate::turn::TurnOptions;
 
 pub use ask_user::AskUserTool;
-pub use bash::{BashInput, BashTool};
+pub(crate) use bash::command_tool_pair;
+pub use bash::{BashInput, BashTool, WriteStdinTool};
 pub use file::{
     ApplyPatchTool, CopyPathTool, CreateDirectoryTool, DeletePathTool, ListFilesTool, MovePathTool,
     ReadFileTool, SearchFilesTool, StatPathTool, WriteFileTool,
@@ -75,6 +77,7 @@ pub struct ToolContext {
     pub workspace_instructions: Option<String>,
     pub active_subagent: Option<SubagentContext>,
     pub agent_control: AgentControl,
+    pub parent_session: Arc<crate::session::CoreSession>,
 }
 
 /// 单次工具调用的路径访问策略。
@@ -325,6 +328,7 @@ mod tests {
             workspace_instructions: None,
             active_subagent: None,
             agent_control: AgentControl::default(),
+            parent_session: Arc::new(crate::session::CoreSession::new()),
         };
         let first_guard = context.workspace_write_lock().await;
         let second_context = context.clone();

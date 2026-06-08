@@ -41,6 +41,20 @@ Timeline 的工具 item id 使用可展示、可去重的运行时 id：优先�
 
 `apply_patch` 的解析或上下文匹配失败属于本地执行错误，仍使用 `Tool execution error: {error}` 前缀写回模型上下文。错误文本应包含可恢复提示：不要重复同一个失败 patch；先重新读取目标文件当前内容，再生成更小、更精确的 Codex 风格 patch 重试。成功前已提交的 hunk 必须在错误文本中列出 committed delta，方便后续模型只处理剩余改动。
 
+`bash` 和 `write_stdin` 成功执行时，写回模型上下文的 result 是一个紧凑 JSON 字符串，而不是完整原始输出。字段包括：
+
+- `status`：`running`、`completed`、`failed`、`timedOut` 或 `interrupted`。
+- `processId`：后台进程 id；仅当命令仍可继续观察或写入时存在。
+- `exitCode`：进程已退出时的退出码，无法取得时为 `null`。
+- `timedOut`：是否因 `timeoutSeconds` 触发终止。
+- `stdout` / `stderr`：按 `maxOutputChars` 或默认 head/tail 预算截断后的文本。
+- `outputFile`：完整 stdout/stderr 文件路径。
+- `message`：面向模型的下一步提示。
+
+当 `bash` 在 `yieldTimeMs` 内未完成时，result 使用 `running` 状态并带 `processId`。后续模型必须用 `write_stdin` 携带该 `processId` 发送输入或传空 `chars` 轮询，不应重复执行同一条 `bash` 命令。需要完整输出时，模型应使用文件读取工具读取 `outputFile`，不要要求命令工具把大输出完整塞回上下文。`write_stdin` 找不到 live process、进程数量达到上限、stdin 写入失败或后台命令已被终止时，应返回可恢复错误，让模型等待、轮询或解释当前状态。
+
+`wait_agent` 和 `list_agents` 默认只回传紧凑 agent 摘要，避免把完整 agent snapshot 反复写入模型上下文。调用方显式传入 `includeDetails: true` 时，工具结果可包含完整 `AgentRecord`，用于诊断；普通协作流程应优先依赖精简摘要和最终子代理总结。`spawn_agent.forkTurns` 的历史继承只复制过滤后的父会话消息，不复制工具结果、工具调用 metadata、reasoning 内容或运行时调度提示。
+
 ## Studio 展示
 
 Studio timeline 以 item-first 数据为准。工具 entry 和工具组详情必须显示工具名称、状态、关键路径或命令摘要。静默文件工具的成功结果可以隐藏；但失败、拒绝、中断和预算受限时必须展示 result/error 详情，避免用户只看到“工具调用失败”而无法定位原因。

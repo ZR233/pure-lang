@@ -56,7 +56,7 @@ pub use studio::{
 };
 pub use tool::{
     AskUserTool, BashInput, BashTool, OutputTruncation, SubagentContext, Tool, ToolContext,
-    ToolInput, ToolOutput, ToolRegistry, TruncatedOutput, TruncationStrategy,
+    ToolInput, ToolOutput, ToolRegistry, TruncatedOutput, TruncationStrategy, WriteStdinTool,
 };
 pub use trace::TraceRecorder;
 pub use turn::{

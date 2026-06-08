@@ -15,11 +15,10 @@ use crate::session::CoreSession;
 #[cfg(test)]
 use crate::tool::WorkspaceAccess;
 use crate::tool::{
-    ApplyPatchTool, AskUserTool, BashTool, CloseAgentTool, CopyPathTool, CreateDirectoryTool,
-    DeletePathTool, FollowupTaskTool, ListAgentsTool, ListFilesTool, MovePathTool, ReadFileTool,
-    SearchFilesTool, SendMessageTool, SkillManageTool, SkillViewTool, SkillsListTool,
-    SpawnAgentTool, StatPathTool, SubagentContext, ToolContext, ToolRegistry, WaitAgentTool,
-    WriteFileTool,
+    ApplyPatchTool, AskUserTool, CloseAgentTool, CopyPathTool, CreateDirectoryTool, DeletePathTool,
+    FollowupTaskTool, ListAgentsTool, ListFilesTool, MovePathTool, ReadFileTool, SearchFilesTool,
+    SendMessageTool, SkillManageTool, SkillViewTool, SkillsListTool, SpawnAgentTool, StatPathTool,
+    SubagentContext, ToolContext, ToolRegistry, WaitAgentTool, WriteFileTool, command_tool_pair,
 };
 use crate::trace::TraceRecorder;
 #[cfg(test)]
@@ -149,7 +148,9 @@ impl PureCore {
             workspace_root.clone(),
             workspace_instructions.clone(),
         );
-        self.register_tool(BashTool::new(workspace_root));
+        let (bash_tool, write_stdin_tool) = command_tool_pair(workspace_root.clone());
+        self.register_tool(bash_tool);
+        self.register_tool(write_stdin_tool);
         self.register_tool(ReadFileTool::new());
         self.register_tool(WriteFileTool);
         self.register_tool(ListFilesTool);
@@ -349,6 +350,7 @@ mod tests {
             workspace_instructions: None,
             active_subagent: None,
             agent_control: crate::AgentControl::default(),
+            parent_session: std::sync::Arc::new(CoreSession::new()),
         }
     }
 
@@ -736,6 +738,7 @@ mod tests {
                 workspace_instructions: None,
                 active_subagent: None,
                 agent_control: crate::AgentControl::default(),
+                parent_session: std::sync::Arc::new(CoreSession::new()),
             },
         )
         .await;
@@ -795,6 +798,7 @@ mod tests {
                 workspace_instructions: None,
                 active_subagent: None,
                 agent_control: crate::AgentControl::default(),
+                parent_session: std::sync::Arc::new(CoreSession::new()),
             },
         )
         .await;
@@ -848,6 +852,7 @@ mod tests {
                 workspace_instructions: None,
                 active_subagent: None,
                 agent_control: crate::AgentControl::default(),
+                parent_session: std::sync::Arc::new(CoreSession::new()),
             },
         )
         .await;
@@ -888,6 +893,7 @@ mod tests {
                 workspace_instructions: None,
                 active_subagent: None,
                 agent_control: crate::AgentControl::default(),
+                parent_session: std::sync::Arc::new(CoreSession::new()),
             },
         )
         .await;
@@ -946,6 +952,7 @@ mod tests {
                 workspace_instructions: None,
                 active_subagent: None,
                 agent_control: crate::AgentControl::default(),
+                parent_session: std::sync::Arc::new(CoreSession::new()),
             },
         )
         .await;
@@ -1034,6 +1041,7 @@ mod tests {
         core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()));
 
         assert!(core.tools.get("bash").is_some());
+        assert!(core.tools.get("write_stdin").is_some());
         assert!(core.tools.get("spawn_agent").is_some());
         assert!(core.tools.get("wait_agent").is_some());
         assert!(core.tools.get("list_agents").is_some());

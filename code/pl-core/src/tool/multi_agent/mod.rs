@@ -7,11 +7,15 @@ mod types;
 mod tests;
 
 use pl_protocol::PureError;
+use pl_protocol::{Message, MessageRole};
 use serde::Serialize;
 
 use crate::config::ModelRole;
+use crate::session::CoreSession;
 
 use super::{BoxFuture, Tool, ToolContext, ToolInput, ToolOutput};
+use crate::agent::AgentRecord;
+use types::{AgentToolRecord, CompactAgentRecord};
 
 pub use types::{
     CloseAgentTool, FollowupTaskTool, ListAgentsTool, SendMessageTool, SpawnAgentTool,
@@ -53,6 +57,117 @@ fn invalid_spawn_input(error: serde_json::Error) -> PureError {
         tool: "spawn_agent".to_string(),
         error: format!("invalid input: {error}"),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ForkTurns {
+    None,
+    All,
+    Last(usize),
+}
+
+impl ForkTurns {
+    fn parse(value: Option<&str>) -> Result<Self, PureError> {
+        let value = value
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("none");
+        if value.eq_ignore_ascii_case("none") {
+            return Ok(Self::None);
+        }
+        if value.eq_ignore_ascii_case("all") {
+            return Ok(Self::All);
+        }
+        let turns = value
+            .parse::<usize>()
+            .map_err(|_| PureError::ToolExecutionFailed {
+                tool: "spawn_agent".to_string(),
+                error: "forkTurns must be `none`, `all`, or a positive integer string".to_string(),
+            })?;
+        if turns == 0 {
+            return Err(PureError::ToolExecutionFailed {
+                tool: "spawn_agent".to_string(),
+                error: "forkTurns must be `none`, `all`, or a positive integer string".to_string(),
+            });
+        }
+        Ok(Self::Last(turns))
+    }
+}
+
+fn fork_session(parent: &CoreSession, mode: ForkTurns) -> CoreSession {
+    match mode {
+        ForkTurns::None => CoreSession::new(),
+        ForkTurns::All => CoreSession::from_messages(filtered_parent_messages(parent.messages())),
+        ForkTurns::Last(turns) => CoreSession::from_messages(last_user_turns(
+            filtered_parent_messages(parent.messages()),
+            turns,
+        )),
+    }
+}
+
+fn filtered_parent_messages(messages: &[Message]) -> Vec<Message> {
+    messages
+        .iter()
+        .filter_map(|message| match message.role {
+            MessageRole::System | MessageRole::User => Some(filtered_message(message)),
+            MessageRole::Assistant if !message.metadata.contains_key("tool_calls") => {
+                Some(filtered_message(message))
+            }
+            MessageRole::Assistant | MessageRole::Tool => None,
+        })
+        .collect()
+}
+
+fn filtered_message(message: &Message) -> Message {
+    Message {
+        role: message.role,
+        content: message.content.clone(),
+        reasoning_content: None,
+        metadata: std::collections::HashMap::new(),
+    }
+}
+
+fn last_user_turns(messages: Vec<Message>, turns: usize) -> Vec<Message> {
+    let (system_messages, conversation): (Vec<_>, Vec<_>) = messages
+        .into_iter()
+        .partition(|message| message.role == MessageRole::System);
+    let mut start = 0;
+    let mut seen = 0;
+    for (index, message) in conversation.iter().enumerate().rev() {
+        if message.role == MessageRole::User {
+            seen += 1;
+            if seen == turns {
+                start = index;
+                break;
+            }
+        }
+    }
+    let mut result = system_messages;
+    result.extend(conversation.into_iter().skip(start));
+    result
+}
+
+fn agent_tool_records(agents: &[AgentRecord], include_details: bool) -> Vec<AgentToolRecord> {
+    agents
+        .iter()
+        .cloned()
+        .map(|agent| {
+            if include_details {
+                AgentToolRecord::Detailed(agent)
+            } else {
+                AgentToolRecord::Compact(CompactAgentRecord {
+                    path: agent.path,
+                    status: agent.status,
+                    role: agent.role,
+                    task: crate::core::compact_text(&agent.task),
+                    summary: agent
+                        .summary
+                        .map(|summary| crate::core::compact_text(&summary)),
+                    error: agent.error.map(|error| crate::core::compact_text(&error)),
+                })
+            }
+        })
+        .collect()
 }
 
 fn json_output(value: impl Serialize) -> Result<ToolOutput, PureError> {
