@@ -181,7 +181,6 @@ pub(super) async fn execute_tool_calls(
                 tool_context.workspace_access = execution_workspace_access;
                 item.status = TimelineItemStatus::Approved;
                 item.updated_at = unix_seconds();
-                recorder.complete_item(item.clone());
                 let tool_input = ToolInput {
                     arguments: tool_call.arguments_for_tool(),
                     session_id: context.session_id.to_string(),
