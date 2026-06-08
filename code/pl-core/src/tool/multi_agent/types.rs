@@ -41,7 +41,6 @@ pub struct CloseAgentTool;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[allow(dead_code)]
 pub(super) struct SpawnAgentArgs {
     pub task_name: String,
     pub message: String,
@@ -55,12 +54,16 @@ pub(super) struct SpawnAgentArgs {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct WaitAgentArgs {
     pub timeout_ms: Option<i64>,
+    #[serde(default)]
+    pub include_details: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct ListAgentsArgs {
     pub path_prefix: Option<String>,
+    #[serde(default)]
+    pub include_details: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -90,15 +93,33 @@ pub(super) struct SpawnAgentResult {
 pub(super) struct WaitAgentResult {
     pub message: String,
     pub timed_out: bool,
-    pub agents: Vec<AgentRecord>,
+    pub agents: Vec<AgentToolRecord>,
     pub recoverable_failures: Vec<RecoverableSubagentFailure>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct ListAgentsResult {
-    pub agents: Vec<AgentRecord>,
+    pub agents: Vec<AgentToolRecord>,
     pub recoverable_failures: Vec<RecoverableSubagentFailure>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct CompactAgentRecord {
+    pub path: String,
+    pub status: AgentStatus,
+    pub role: String,
+    pub task: String,
+    pub summary: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub(super) enum AgentToolRecord {
+    Compact(CompactAgentRecord),
+    Detailed(AgentRecord),
 }
 
 #[derive(Debug, Serialize, Deserialize)]

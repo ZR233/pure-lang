@@ -7,6 +7,7 @@ use pl_protocol::TimelineItemStatus;
 use tokio::sync::RwLock;
 
 use crate::permission::{PermissionDecision, decide_tool_permission};
+use crate::session::CoreSession;
 use crate::tool::{
     RECOVERABLE_SUBAGENT_429_MARKER, SubagentContext, ToolContext, ToolInput, ToolOutput,
     WorkspaceAccess,
@@ -45,6 +46,7 @@ pub(super) struct ToolExecutionContext<'a> {
     pub(super) workspace_instructions: Option<String>,
     pub(super) active_subagent: Option<SubagentContext>,
     pub(super) agent_control: crate::AgentControl,
+    pub(super) parent_session: Arc<CoreSession>,
 }
 
 pub(super) async fn execute_tool_calls(
@@ -131,6 +133,7 @@ pub(super) async fn execute_tool_calls(
             workspace_instructions: context.workspace_instructions.clone(),
             active_subagent: context.active_subagent.clone(),
             agent_control: context.agent_control.clone(),
+            parent_session: context.parent_session.clone(),
         };
         let approval_request = approval_request(tool_call, &tool_context);
         let requested_access = requested_workspace_access(tool_call, context.workspace_root);

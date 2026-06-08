@@ -3,7 +3,10 @@ use pl_protocol::UserInputResponse;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
+use super::ForkTurns;
+use super::agent_tool_records;
 use super::child_agent_options;
+use super::fork_session;
 use super::json_output;
 use super::types::{ListAgentsResult, WaitAgentResult};
 use crate::agent::AgentRecord;
@@ -43,7 +46,7 @@ fn wait_agent_result_serializes_recoverable_failures() {
     let output = json_output(WaitAgentResult {
         message: recoverable_subagent_failures_message(recoverable_failures.len()),
         timed_out: false,
-        agents,
+        agents: agent_tool_records(&agents, false),
         recoverable_failures,
     })
     .unwrap();
@@ -59,10 +62,12 @@ fn wait_agent_result_serializes_recoverable_failures() {
     assert_eq!(value["agents"].as_array().unwrap().len(), 2);
     assert_eq!(value["agents"][0]["status"], "errored");
     assert_eq!(value["agents"][1]["status"], "completed");
+    assert!(value["agents"][0]["id"].is_null());
+    assert!(value["agents"][0]["updatedAt"].is_null());
 }
 
 #[test]
-fn list_agents_result_keeps_agents_and_recoverable_failures() {
+fn list_agents_result_defaults_to_compact_agents_and_recoverable_failures() {
     let agents = vec![
         agent_record(
             "agent-1",
@@ -73,17 +78,132 @@ fn list_agents_result_keeps_agents_and_recoverable_failures() {
     ];
     let recoverable_failures = recoverable_subagent_failures(&agents);
     let output = json_output(ListAgentsResult {
-        agents,
+        agents: agent_tool_records(&agents, false),
         recoverable_failures,
     })
     .unwrap();
     let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
 
     assert_eq!(value["agents"].as_array().unwrap().len(), 2);
+    assert_eq!(value["agents"][0]["path"], "/root/agent-1");
+    assert!(value["agents"][0]["id"].is_null());
     assert_eq!(value["recoverableFailures"][0]["agentId"], "agent-1");
     assert_eq!(
         value["recoverableFailures"][0]["error"],
         "provider returned status 429"
+    );
+}
+
+#[test]
+fn list_agents_result_can_include_full_details() {
+    let agents = vec![agent_record("agent-1", AgentStatus::Completed, None)];
+    let output = json_output(ListAgentsResult {
+        agents: agent_tool_records(&agents, true),
+        recoverable_failures: Vec::new(),
+    })
+    .unwrap();
+    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+
+    assert_eq!(value["agents"][0]["id"], "agent-1");
+    assert_eq!(value["agents"][0]["updatedAt"], 1);
+}
+
+#[test]
+fn fork_turns_filters_tool_history_and_reasoning() {
+    use std::collections::HashMap;
+
+    use pl_protocol::{Message, MessageContent, MessageRole};
+
+    let mut tool_metadata = HashMap::new();
+    tool_metadata.insert("tool_calls".to_string(), "[]".to_string());
+    let session = crate::CoreSession::from_messages(vec![
+        Message {
+            role: MessageRole::System,
+            content: MessageContent::Text("system".to_string()),
+            reasoning_content: Some("hidden".to_string()),
+            metadata: HashMap::new(),
+        },
+        Message {
+            role: MessageRole::User,
+            content: MessageContent::Text("first".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        },
+        Message {
+            role: MessageRole::Assistant,
+            content: MessageContent::Text("final one".to_string()),
+            reasoning_content: Some("reasoning".to_string()),
+            metadata: HashMap::new(),
+        },
+        Message {
+            role: MessageRole::Assistant,
+            content: MessageContent::Text("calling tool".to_string()),
+            reasoning_content: None,
+            metadata: tool_metadata,
+        },
+        Message {
+            role: MessageRole::Tool,
+            content: MessageContent::Text("large output".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        },
+        Message {
+            role: MessageRole::User,
+            content: MessageContent::Text("second".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        },
+    ]);
+
+    let forked = fork_session(&session, ForkTurns::All);
+
+    assert_eq!(forked.len(), 4);
+    assert_eq!(forked.messages()[0].role, MessageRole::System);
+    assert_eq!(forked.messages()[2].role, MessageRole::Assistant);
+    assert!(forked.messages().iter().all(|message| {
+        message.reasoning_content.is_none() && !message.metadata.contains_key("tool_calls")
+    }));
+    assert!(
+        !forked
+            .messages()
+            .iter()
+            .any(|message| message.role == MessageRole::Tool)
+    );
+}
+
+#[test]
+fn fork_turns_last_n_keeps_recent_user_turns() {
+    use std::collections::HashMap;
+
+    use pl_protocol::{Message, MessageContent, MessageRole};
+
+    let session = crate::CoreSession::from_messages(vec![
+        Message {
+            role: MessageRole::User,
+            content: MessageContent::Text("first".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        },
+        Message {
+            role: MessageRole::Assistant,
+            content: MessageContent::Text("first answer".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        },
+        Message {
+            role: MessageRole::User,
+            content: MessageContent::Text("second".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        },
+    ]);
+
+    let forked = fork_session(&session, ForkTurns::Last(1));
+
+    assert_eq!(forked.len(), 1);
+    assert_eq!(
+        forked.messages()[0].content,
+        MessageContent::Text("second".to_string())
     );
 }
 

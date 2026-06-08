@@ -26,6 +26,12 @@ pub(crate) fn decide_tool_permission(
         };
     }
 
+    if request.name == "write_stdin" {
+        return PermissionDecision::Approved {
+            workspace_access: requested_access,
+        };
+    }
+
     if matches!(options.permission_mode, PermissionMode::FullAccess) {
         return PermissionDecision::Approved {
             workspace_access: WorkspaceAccess::ExternalAllowed,
@@ -161,6 +167,7 @@ mod tests {
     #[test]
     fn legacy_manual_and_deny_all_still_wrap_permission_mode() {
         let read = request("read_file");
+        let write_stdin = request("write_stdin");
         let manual = TurnOptions {
             tool_approval_policy: ToolApprovalPolicy::Manual,
             ..Default::default()
@@ -173,6 +180,17 @@ mod tests {
                 WorkspaceAccess::WorkspaceOnly,
             ),
             PermissionDecision::NeedsUserApproval {
+                workspace_access: WorkspaceAccess::WorkspaceOnly
+            }
+        );
+        assert_eq!(
+            decide_tool_permission(
+                &manual,
+                CompileMode::Auto,
+                &write_stdin,
+                WorkspaceAccess::WorkspaceOnly,
+            ),
+            PermissionDecision::Approved {
                 workspace_access: WorkspaceAccess::WorkspaceOnly
             }
         );
