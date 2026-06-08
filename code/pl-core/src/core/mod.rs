@@ -810,6 +810,14 @@ mod tests {
             event_rx.try_recv().unwrap(),
             AgentEvent::ToolApprovalRequested { name, .. } if name == "read_file"
         ));
+        let events = recorder.drain();
+        assert_eq!(terminal_tool_event_count(&events), 1);
+        assert!(!events.iter().any(|event| matches!(
+            &event.kind,
+            TraceEventKind::TimelineItemCompleted { item }
+                if item.kind == pl_protocol::TimelineItemKind::Tool
+                    && item.status == TimelineItemStatus::Approved
+        )));
         let _ = tokio::fs::remove_dir_all(workspace_root).await;
         let _ = tokio::fs::remove_dir_all(outside_root).await;
     }
