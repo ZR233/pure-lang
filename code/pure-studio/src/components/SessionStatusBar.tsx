@@ -54,6 +54,10 @@ type SessionStatusBarProps = {
   agents: AgentDto[];
 };
 
+type DropdownPosition = CSSProperties & {
+  "--dropdown-max-height"?: string;
+};
+
 const turnPhaseKeys: Record<TurnPhase, string> = {
   idle: "turnPhase.idle",
   running: "turnPhase.running",
@@ -428,27 +432,79 @@ function Dropdown({
   menuRole?: "menu" | "dialog";
 }) {
   const [open, setOpen] = useState(false);
+  const [dropdownStyle, setDropdownStyle] = useState<DropdownPosition | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  function getDropdownStyle(): DropdownPosition | null {
+    const button = buttonRef.current;
+    if (!button) return null;
+    const rect = button.getBoundingClientRect();
+    const dropdownWidth = Math.min(280, window.innerWidth - 24);
+    const left = align === "right"
+      ? Math.max(12, Math.min(rect.right - dropdownWidth, window.innerWidth - dropdownWidth - 12))
+      : Math.max(12, Math.min(rect.left, window.innerWidth - dropdownWidth - 12));
+    const bottom = Math.max(12, window.innerHeight - rect.top + 6);
+    const maxHeight = Math.max(140, Math.min(360, rect.top - 18));
+    return {
+      bottom: `${bottom}px`,
+      left: `${left}px`,
+      position: "fixed",
+      right: "auto",
+      top: "auto",
+      width: `${dropdownWidth}px`,
+      "--dropdown-max-height": `${maxHeight}px`,
+    };
+  }
 
   useEffect(() => {
     if (!open) return;
+    function updatePosition() {
+      setDropdownStyle(getDropdownStyle());
+    }
     function handleClick(event: MouseEvent) {
-      if (ref.current && !ref.current.contains(event.target as Node)) {
-        setOpen(false);
+      const target = event.target as Node;
+      if (ref.current?.contains(target) || dropdownRef.current?.contains(target)) {
+        return;
       }
+      setOpen(false);
     }
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setOpen(false);
       }
     }
+    updatePosition();
     document.addEventListener("mousedown", handleClick);
     document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
     return () => {
       document.removeEventListener("mousedown", handleClick);
       document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
     };
   }, [open]);
+
+  const dropdown = (
+    <div
+      ref={dropdownRef}
+      className={`status-dropdown${align === "right" ? " right" : ""}${dropdownClassName ? ` ${dropdownClassName}` : ""} ${open ? "open" : ""}`}
+      role={menuRole}
+      style={dropdownStyle ?? undefined}
+      onClick={(event) => {
+        const target = event.target;
+        const button = target instanceof Element ? target.closest("button") : null;
+        if (button instanceof HTMLButtonElement && !button.disabled) {
+          setOpen(false);
+        }
+      }}
+    >
+      {children}
+    </div>
+  );
 
   return (
     <div
@@ -457,6 +513,7 @@ function Dropdown({
       style={{ position: "relative", display: "inline-flex" }}
     >
       <button
+        ref={buttonRef}
         className={buttonClassName ?? `status-chip selectable ${className ?? ""}`}
         style={buttonClassName ? undefined : { display: "inline-flex", alignItems: "center", gap: 4 }}
         type="button"
@@ -468,12 +525,9 @@ function Dropdown({
         {trigger}
         {hideChevron ? null : <ChevronDown size={12} />}
       </button>
-      <div
-        className={`status-dropdown${align === "right" ? " right" : ""}${dropdownClassName ? ` ${dropdownClassName}` : ""} ${open ? "open" : ""}`}
-        role={menuRole}
-      >
-        {children}
-      </div>
+      {open && dropdownStyle && typeof document !== "undefined"
+        ? createPortal(dropdown, document.body)
+        : null}
     </div>
   );
 }
@@ -551,22 +605,62 @@ function ModelSelector({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [dropdownStyle, setDropdownStyle] = useState<DropdownPosition | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const plannerRole = findPlannerRole(roles);
   const currentModelSlug = plannerRole?.model ?? runtime?.usage.model ?? "";
   const currentModelInfo = findModelInProviders(providers, currentModelSlug);
   const currentEffort = plannerRole?.effort ?? "";
   const currentEfforts = currentModelInfo?.model.reasoningEfforts ?? [];
 
+  function getDropdownStyle(): DropdownPosition | null {
+    const button = buttonRef.current;
+    if (!button) return null;
+    const rect = button.getBoundingClientRect();
+    const dropdownWidth = Math.min(340, window.innerWidth - 24);
+    const left = Math.max(12, Math.min(rect.left, window.innerWidth - dropdownWidth - 12));
+    const maxHeight = Math.max(160, Math.min(360, rect.top - 18));
+    return {
+      bottom: `${Math.max(12, window.innerHeight - rect.top + 6)}px`,
+      left: `${left}px`,
+      position: "fixed",
+      right: "auto",
+      top: "auto",
+      width: `${dropdownWidth}px`,
+      "--dropdown-max-height": `${maxHeight}px`,
+    };
+  }
+
   useEffect(() => {
     if (!open) return;
+    function updatePosition() {
+      setDropdownStyle(getDropdownStyle());
+    }
     function handleClickOutside(event: MouseEvent) {
-      if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (wrapRef.current?.contains(target) || dropdownRef.current?.contains(target)) {
+        return;
+      }
+      setOpen(false);
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
         setOpen(false);
       }
     }
+    updatePosition();
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
   }, [open]);
 
   function handleSelectModel(providerId: string, modelSlug: string) {
@@ -595,6 +689,7 @@ function ModelSelector({
     );
     setRoles(newRoles);
     onSaveProviderSettings(newRoles);
+    setOpen(false);
   }
 
   const grouped: { provider: ProviderRecord; models: ModelRecord[] }[] = [];
@@ -605,60 +700,70 @@ function ModelSelector({
     }
   }
 
+  const dropdown = (
+    <div ref={dropdownRef} className="model-selector-dropdown" style={dropdownStyle ?? undefined}>
+      <div className="model-selector-list">
+        {grouped.map((group) => (
+          <div className="model-selector-group" key={group.provider.id}>
+            <div className="model-selector-provider-label">
+              {group.provider.name || group.provider.id}
+            </div>
+            {group.models.map((model) => (
+              <div
+                key={model.slug}
+                className={`model-selector-option${model.slug === currentModelSlug ? " active" : ""}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => handleSelectModel(group.provider.id, model.slug)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    handleSelectModel(group.provider.id, model.slug);
+                  }
+                }}
+              >
+                <span className="model-selector-name">{model.displayName || model.slug}</span>
+                {model.slug === currentModelSlug && currentEfforts.length > 0 ? (
+                  <div className="model-selector-efforts" onClick={(e) => e.stopPropagation()}>
+                    {currentEfforts.map((effort) => (
+                      <button
+                        key={effort}
+                        className={`model-selector-effort${effort === currentEffort ? " active" : ""}`}
+                        onClick={() => handleSelectEffort(effort)}
+                      >
+                        {effort}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <div className={`model-selector-wrap${open ? " open" : ""}`} ref={wrapRef}>
       <button
+        ref={buttonRef}
         className="status-chip selectable model-chip"
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (!open) {
+            setDropdownStyle(getDropdownStyle());
+          }
+          setOpen((v) => !v);
+        }}
       >
         <Cpu size={13} />
         {currentModelInfo?.model.displayName ?? currentModelSlug ?? t("statusBar.noModel")}
         <ChevronDown size={12} />
       </button>
-      {open && (
-        <div className="model-selector-dropdown">
-          <div className="model-selector-list">
-            {grouped.map((group) => (
-              <div className="model-selector-group" key={group.provider.id}>
-                <div className="model-selector-provider-label">
-                  {group.provider.name || group.provider.id}
-                </div>
-                {group.models.map((model) => (
-                  <div
-                    key={model.slug}
-                    className={`model-selector-option${model.slug === currentModelSlug ? " active" : ""}`}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => handleSelectModel(group.provider.id, model.slug)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        handleSelectModel(group.provider.id, model.slug);
-                      }
-                    }}
-                  >
-                    <span className="model-selector-name">{model.displayName || model.slug}</span>
-                    {model.slug === currentModelSlug && currentEfforts.length > 0 ? (
-                      <div className="model-selector-efforts" onClick={(e) => e.stopPropagation()}>
-                        {currentEfforts.map((effort) => (
-                          <button
-                            key={effort}
-                            className={`model-selector-effort${effort === currentEffort ? " active" : ""}`}
-                            onClick={() => handleSelectEffort(effort)}
-                          >
-                            {effort}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {open && dropdownStyle && typeof document !== "undefined"
+        ? createPortal(dropdown, document.body)
+        : null}
     </div>
   );
 }
