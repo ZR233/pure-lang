@@ -719,6 +719,48 @@ mod tests {
         }
     }
 
+    fn request_with_function_tool_history(
+        tool_metadata: HashMap<String, String>,
+    ) -> CompletionRequest {
+        let calls = vec![ToolCall::function(
+            "fc_1",
+            "read_file",
+            serde_json::json!({ "path": "Cargo.toml" }),
+            Some("call_1".to_string()),
+        )];
+        let mut assistant_metadata = HashMap::new();
+        assistant_metadata.insert(
+            "tool_calls".to_string(),
+            serde_json::to_string(&calls).unwrap(),
+        );
+        CompletionRequest {
+            model: "gpt-5.5".to_string(),
+            instructions: None,
+            messages: vec![
+                Message {
+                    role: MessageRole::Assistant,
+                    content: MessageContent::Text(String::new()),
+                    reasoning_content: None,
+                    metadata: assistant_metadata,
+                },
+                Message {
+                    role: MessageRole::Tool,
+                    content: MessageContent::Text("ok".to_string()),
+                    reasoning_content: None,
+                    metadata: tool_metadata,
+                },
+            ],
+            tools: Vec::new(),
+            tool_choice: "auto".to_string(),
+            parallel_tool_calls: false,
+            temperature: None,
+            max_tokens: None,
+            reasoning: None,
+            stream: true,
+            timeline: None,
+        }
+    }
+
     #[test]
     fn responses_body_writes_xhigh_reasoning_effort() {
         let body = OpenAiProtocol::responses().build_request_body(&request_with_effort("xhigh"));
@@ -1060,6 +1102,29 @@ mod tests {
         assert_eq!(
             chat_body["messages"][1]["tool_call_id"],
             serde_json::json!("ctc_1")
+        );
+    }
+
+    #[test]
+    fn function_tool_result_ids_are_protocol_specific() {
+        let mut tool_metadata = HashMap::new();
+        tool_metadata.insert("tool_call_id".to_string(), "fc_1".to_string());
+        tool_metadata.insert("tool_call_call_id".to_string(), "call_1".to_string());
+        tool_metadata.insert("tool_call_kind".to_string(), "function".to_string());
+        tool_metadata.insert("tool_name".to_string(), "read_file".to_string());
+        let request = request_with_function_tool_history(tool_metadata);
+
+        let responses_body = OpenAiProtocol::responses().build_request_body(&request);
+        let chat_body =
+            OpenAiProtocol::chat(ChatReasoningStyle::Plain).build_request_body(&request);
+
+        assert_eq!(
+            responses_body["input"][1]["call_id"],
+            serde_json::json!("call_1")
+        );
+        assert_eq!(
+            chat_body["messages"][1]["tool_call_id"],
+            serde_json::json!("fc_1")
         );
     }
 }

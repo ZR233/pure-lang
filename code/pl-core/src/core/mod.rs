@@ -6,7 +6,7 @@ use pl_model::{
     SharedModelProvider, create_provider, create_provider_with_models,
 };
 #[cfg(test)]
-use pl_protocol::{AgentEvent, ErrorSeverity, TimelineItemStatus};
+use pl_protocol::{AgentEvent, ErrorSeverity, TimelineItemStatus, TraceEvent};
 use pl_protocol::{AgentEventSender, Message, MessageContent, MessageRole, Result};
 
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
@@ -336,7 +336,7 @@ mod tests {
     use crate::turn::{PermissionMode, ToolApprovalPolicy};
     use crate::{ConfigStore, ModelRole};
     use pl_model::ToolCall;
-    use pl_protocol::TimelineTextRole;
+    use pl_protocol::{TimelineTextRole, TraceEventKind};
     use pretty_assertions::assert_eq;
 
     fn test_tool_context(event_tx: AgentEventSender) -> ToolContext {
@@ -350,6 +350,22 @@ mod tests {
             active_subagent: None,
             agent_control: crate::AgentControl::default(),
         }
+    }
+
+    fn terminal_tool_event_count(events: &[TraceEvent]) -> usize {
+        events
+            .iter()
+            .filter(|event| match &event.kind {
+                TraceEventKind::TimelineItemCompleted { item } => {
+                    item.kind == pl_protocol::TimelineItemKind::Tool
+                }
+                TraceEventKind::TimelineItemFailed { item, .. } => {
+                    item.kind == pl_protocol::TimelineItemKind::Tool
+                }
+                TraceEventKind::TimelineItemStarted { .. }
+                | TraceEventKind::TimelineItemDelta { .. } => false,
+            })
+            .count()
     }
 
     #[test]
@@ -796,6 +812,145 @@ mod tests {
         ));
         let _ = tokio::fs::remove_dir_all(workspace_root).await;
         let _ = tokio::fs::remove_dir_all(outside_root).await;
+    }
+
+    #[tokio::test]
+    async fn unknown_tool_records_one_terminal_event_and_tool_result() {
+        let core = PureCore::default_provider().unwrap();
+        let tool_call = ToolCall::function(
+            "provider-item-1",
+            "missing_tool",
+            serde_json::json!({"value": 1}),
+            Some("call-1".to_string()),
+        );
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+        let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+        let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+
+        let records = execute_tool_calls(
+            &[tool_call],
+            &mut budget,
+            &mut recorder,
+            ToolExecutionContext {
+                core: &core,
+                options: &TurnOptions::default(),
+                mode: crate::turn::CompileMode::Auto,
+                session_id: "turn-1",
+                workspace_root: &std::env::temp_dir(),
+                workspace_instructions: None,
+                active_subagent: None,
+                agent_control: crate::AgentControl::default(),
+            },
+        )
+        .await;
+        let events = recorder.drain();
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].status, TimelineItemStatus::Failed);
+        assert_eq!(records[0].id, "provider-item-1");
+        assert_eq!(records[0].call_id.as_deref(), Some("call-1"));
+        assert!(records[0].result.contains("Unknown tool: missing_tool"));
+        assert_eq!(terminal_tool_event_count(&events), 1);
+    }
+
+    #[tokio::test]
+    async fn plan_disabled_tool_records_one_terminal_event_and_tool_result() {
+        let mut core = PureCore::default_provider().unwrap();
+        core.register_tool(WriteFileTool);
+        let tool_call = ToolCall::function(
+            "provider-item-1",
+            "write_file",
+            serde_json::json!({"path": "note.txt", "content": "nope"}),
+            Some("call-1".to_string()),
+        );
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+        let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+        let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+
+        let records = execute_tool_calls(
+            &[tool_call],
+            &mut budget,
+            &mut recorder,
+            ToolExecutionContext {
+                core: &core,
+                options: &TurnOptions::default(),
+                mode: crate::turn::CompileMode::Plan,
+                session_id: "turn-1",
+                workspace_root: &std::env::temp_dir(),
+                workspace_instructions: None,
+                active_subagent: None,
+                agent_control: crate::AgentControl::default(),
+            },
+        )
+        .await;
+        let events = recorder.drain();
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].status, TimelineItemStatus::Denied);
+        assert!(
+            records[0]
+                .result
+                .contains("Tool disabled in plan mode: write_file")
+        );
+        assert_eq!(terminal_tool_event_count(&events), 1);
+        let terminal = events
+            .iter()
+            .find_map(|event| match &event.kind {
+                TraceEventKind::TimelineItemCompleted { item } => Some(item),
+                TraceEventKind::TimelineItemStarted { .. }
+                | TraceEventKind::TimelineItemDelta { .. }
+                | TraceEventKind::TimelineItemFailed { .. } => None,
+            })
+            .expect("terminal tool item");
+        assert_eq!(
+            terminal
+                .tool
+                .as_ref()
+                .and_then(|tool| tool.denial_reason.as_deref()),
+            Some("Tool disabled in plan mode: write_file")
+        );
+    }
+
+    #[tokio::test]
+    async fn policy_denied_tool_records_one_terminal_event_and_tool_result() {
+        let mut core = PureCore::default_provider().unwrap();
+        core.register_tool(ReadFileTool::new());
+        let tool_call = ToolCall::function(
+            "provider-item-1",
+            "read_file",
+            serde_json::json!({"path": "note.txt"}),
+            Some("call-1".to_string()),
+        );
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+        let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+        let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+
+        let records = execute_tool_calls(
+            &[tool_call],
+            &mut budget,
+            &mut recorder,
+            ToolExecutionContext {
+                core: &core,
+                options: &TurnOptions::deny_all(),
+                mode: crate::turn::CompileMode::Auto,
+                session_id: "turn-1",
+                workspace_root: &std::env::temp_dir(),
+                workspace_instructions: None,
+                active_subagent: None,
+                agent_control: crate::AgentControl::default(),
+            },
+        )
+        .await;
+        let events = recorder.drain();
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].status, TimelineItemStatus::Denied);
+        assert!(
+            records[0]
+                .result
+                .contains("Tool execution denied: tool execution denied by policy")
+        );
+        assert_eq!(terminal_tool_event_count(&events), 1);
     }
 
     #[tokio::test]

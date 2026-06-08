@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -55,7 +54,6 @@ pub(super) async fn execute_tool_calls(
     context: ToolExecutionContext<'_>,
 ) -> Vec<ToolExecutionRecord> {
     let mut scheduled = Vec::new();
-    let mut initial_items = HashMap::new();
     let runtime_lock = Arc::new(RwLock::new(()));
 
     for tool_call in tool_calls {
@@ -75,7 +73,6 @@ pub(super) async fn execute_tool_calls(
             tool_call.call_id.clone(),
             Some(tool_call.id.clone()),
         );
-        initial_items.insert(timeline_item_id.clone(), item.clone());
         recorder.start_item(item.clone());
         budget_tracker.record_tool_call(&tool_call.name);
 
@@ -83,16 +80,12 @@ pub(super) async fn execute_tool_calls(
             let mode = context.mode.label();
             let name = &tool_call.name;
             let message = format!("Tool disabled in {mode} mode: {name}");
-            item.status = TimelineItemStatus::Denied;
-            item.updated_at = unix_seconds();
             if let Some(tool) = &mut item.tool {
                 tool.denial_reason = Some(message.clone());
-                tool.result = Some(message.clone());
             }
-            recorder.complete_item(item);
             scheduled.push(ScheduledToolExecution {
                 tool_call: tool_call.clone(),
-                item: initial_items[&timeline_item_id].clone(),
+                item,
                 future: Box::pin(ready_tool_execution_record(
                     tool_call.clone(),
                     message,
@@ -110,15 +103,9 @@ pub(super) async fn execute_tool_calls(
                 "[pl-core] Unknown tool: {:?}, available: {:?}",
                 tool_call.name, available
             );
-            item.status = TimelineItemStatus::Failed;
-            item.updated_at = unix_seconds();
-            if let Some(tool) = &mut item.tool {
-                tool.result = Some(format!("Unknown tool: {}", tool_call.name));
-            }
-            recorder.fail_item(item, format!("Unknown tool: {}", tool_call.name));
             scheduled.push(ScheduledToolExecution {
                 tool_call: tool_call.clone(),
-                item: initial_items[&timeline_item_id].clone(),
+                item,
                 future: Box::pin(ready_tool_execution_record(
                     tool_call.clone(),
                     format!("Unknown tool: {}", tool_call.name),
@@ -219,16 +206,12 @@ pub(super) async fn execute_tool_calls(
                 });
             }
             ToolApprovalDecision::Denied { reason } => {
-                item.status = TimelineItemStatus::Denied;
-                item.updated_at = unix_seconds();
                 if let Some(tool) = &mut item.tool {
                     tool.denial_reason = Some(reason.clone());
-                    tool.result = Some(format!("Tool execution denied: {reason}"));
                 }
-                recorder.complete_item(item);
                 scheduled.push(ScheduledToolExecution {
                     tool_call: tool_call.clone(),
-                    item: initial_items[&timeline_item_id].clone(),
+                    item,
                     future: Box::pin(ready_tool_execution_record(
                         tool_call.clone(),
                         format!("Tool execution denied: {reason}"),
