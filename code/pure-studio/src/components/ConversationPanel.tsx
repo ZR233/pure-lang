@@ -35,6 +35,8 @@ import type {
   UserQuestion,
 } from "../types";
 import type { TimelineEntry, ToolGroupSummaryPart } from "../state/selectors";
+import type { PlanActionMode, PlanActionState } from "../state/studio-state";
+import { hidesToolResult, isQuietFileTool } from "../lib/tool-display";
 import { SessionStatusBar } from "./SessionStatusBar";
 import { ConversationTimeline } from "./ConversationTimeline";
 
@@ -56,6 +58,7 @@ type ConversationPanelProps = {
   agents: AgentDto[];
   sessionRuntime: SessionRuntime | null;
   pendingUserInput: UserInputRequest | null;
+  planAction: PlanActionState | null;
   prompt: string;
   status: string;
   turnPhase: TurnPhase;
@@ -71,6 +74,8 @@ type ConversationPanelProps = {
   onImplementPlan: (plan: string) => void;
   onSendPrompt: () => void;
   onSendPromptContent: (content: string) => void;
+  onSetPlanActionMode: (mode: PlanActionMode) => void;
+  onDismissPlanAction: () => void;
   onStopPrompt: () => void;
   onAnswerUserInput: (requestId: string, response: UserInputResponse) => void;
 };
@@ -340,31 +345,6 @@ function toolPathSummary(name: string | null | undefined, argumentsText: string 
   return null;
 }
 
-function isQuietFileTool(name: string | null | undefined): boolean {
-  return matchesToolName(name, [
-    "read_file",
-    "write_file",
-    "list_files",
-    "list_file",
-    "search_files",
-    "stat_path",
-    "create_directory",
-    "delete_path",
-    "copy_path",
-    "move_path",
-    "apply_patch",
-  ]);
-}
-
-function hidesToolResult(name: string | null | undefined): boolean {
-  return matchesToolName(name, ["read_file", "list_files", "list_file", "search_files", "stat_path"]);
-}
-
-function matchesToolName(name: string | null | undefined, names: string[]): boolean {
-  const normalized = name?.toLowerCase();
-  return Boolean(normalized && names.includes(normalized));
-}
-
 function ToolDetails({
   argumentsText,
   result,
@@ -455,7 +435,7 @@ function ToolEntry({ item, t }: { item: Extract<TimelineEntry, { kind: "tool" }>
   const name = tool?.name ?? "Tool call";
   const argumentsText = tool?.arguments ?? "";
   const pathSummary = toolPathSummary(name, argumentsText);
-  const hideResult = hidesToolResult(name);
+  const hideResult = hidesToolResult(name, item.status);
   return (
     <EntryShell className={`timeline-entry-tool status-${item.status}`} icon={<Wrench size={14} />}>
       <div className="timeline-entry-head">
@@ -545,7 +525,7 @@ function ToolGroupDetailRow({ item, t }: { item: TimelineItem; t: TFunction }) {
   const name = tool?.name ?? "Tool call";
   const argumentsText = tool?.arguments ?? "";
   const pathSummary = toolPathSummary(name, argumentsText);
-  const hideResult = hidesToolResult(name);
+  const hideResult = hidesToolResult(name, item.status);
   return (
     <div className="timeline-tool-group-row">
       <div className="timeline-tool-group-row-head">
@@ -835,22 +815,28 @@ function AskUserComposer({
 }
 
 function PlanConfirmComposer({
-  plan,
+  action,
   stopping,
   onImplementPlan,
   onSendPromptContent,
+  onSetMode,
   onCancel,
   t,
 }: {
-  plan: string;
+  action: PlanActionState;
   stopping: boolean;
   onImplementPlan: (plan: string) => void;
   onSendPromptContent: (content: string) => void;
+  onSetMode: (mode: PlanActionMode) => void;
   onCancel: () => void;
   t: TFunction;
 }) {
-  const [discussing, setDiscussing] = useState(false);
   const [message, setMessage] = useState("");
+  const discussing = action.mode === "discuss";
+
+  useEffect(() => {
+    setMessage("");
+  }, [action.planId, action.mode]);
 
   function submitDiscussion() {
     const content = message.trim();
@@ -872,7 +858,7 @@ function PlanConfirmComposer({
         <FileText size={16} />
         <span>{t("planConfirm.title")}</span>
       </div>
-      <p className="plan-confirm-summary">{compact(plan, 260)}</p>
+      <p className="plan-confirm-summary">{compact(action.content, 260)}</p>
       {discussing ? (
         <textarea
           value={message}
@@ -896,7 +882,7 @@ function PlanConfirmComposer({
               <span>{t("actions.send")}</span>
             </button>
           ) : (
-            <button type="button" onClick={() => setDiscussing(true)} disabled={stopping}>
+            <button type="button" onClick={() => onSetMode("discuss")} disabled={stopping}>
               <MessageCircle size={14} />
               <span>{t("planConfirm.continueDiscussion")}</span>
             </button>
@@ -906,9 +892,9 @@ function PlanConfirmComposer({
             className="primary"
             onClick={() => {
               onCancel();
-              onImplementPlan(plan);
+              onImplementPlan(action.content);
             }}
-            disabled={stopping || !plan.trim()}
+            disabled={stopping || !action.content.trim()}
           >
             <Play size={14} />
             <span>{t("actions.implementPlan")}</span>
@@ -926,6 +912,7 @@ export function ConversationPanel({
   agents,
   sessionRuntime,
   pendingUserInput,
+  planAction,
   prompt,
   status,
   turnPhase,
@@ -941,26 +928,15 @@ export function ConversationPanel({
   onImplementPlan,
   onSendPrompt,
   onSendPromptContent,
+  onSetPlanActionMode,
+  onDismissPlanAction,
   onStopPrompt,
   onAnswerUserInput,
 }: ConversationPanelProps) {
   const { t } = useTranslation();
   const stopping = turnPhase === "stopping";
   const currentMode: CompileMode = selectedSession?.mode === "plan" ? "plan" : "auto";
-  const [dismissedPlanId, setDismissedPlanId] = useState<string | null>(null);
-  const latestPlanEntry = [...entries]
-    .reverse()
-    .find((entry): entry is Extract<TimelineEntry, { kind: "plan" }> =>
-      entry.kind === "plan" && Boolean(entry.content.trim()),
-    );
-  const planConfirmation =
-    !isBusy && latestPlanEntry && latestPlanEntry.item.itemId !== dismissedPlanId
-      ? latestPlanEntry
-      : null;
-
-  useEffect(() => {
-    setDismissedPlanId(null);
-  }, [selectedSession?.id]);
+  const activePlanAction = isBusy ? null : planAction;
 
   function renderTimelineEntry(entry: TimelineEntry) {
     if (entry.kind === "message") {
@@ -1014,13 +990,14 @@ export function ConversationPanel({
               onAnswer={onAnswerUserInput}
               t={t}
             />
-          ) : planConfirmation ? (
+          ) : activePlanAction ? (
             <PlanConfirmComposer
-              plan={planConfirmation.content}
+              action={activePlanAction}
               stopping={stopping}
               onImplementPlan={onImplementPlan}
               onSendPromptContent={onSendPromptContent}
-              onCancel={() => setDismissedPlanId(planConfirmation.item.itemId)}
+              onSetMode={onSetPlanActionMode}
+              onCancel={onDismissPlanAction}
               t={t}
             />
           ) : (
@@ -1045,7 +1022,7 @@ export function ConversationPanel({
           )}
           <button
             className={`send-button${isBusy ? " stop-button" : ""}`}
-            disabled={isBusy ? stopping : Boolean(planConfirmation) || !prompt.trim() || !selectedSession}
+            disabled={isBusy ? stopping : Boolean(activePlanAction) || !prompt.trim() || !selectedSession}
             onClick={isBusy ? onStopPrompt : onSendPrompt}
           >
             {isBusy ? <Square size={18} /> : <Send size={18} />}

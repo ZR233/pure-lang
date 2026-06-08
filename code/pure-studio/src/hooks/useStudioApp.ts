@@ -27,6 +27,7 @@ import { errorText } from "../lib/utils";
 import {
   selectSelectedProject,
   selectSelectedSession,
+  selectPlanAction,
   selectTimelineEntries,
 } from "../state/selectors";
 import { initialStudioState, studioReducer } from "../state/studio-state";
@@ -101,6 +102,7 @@ export function useStudioApp() {
 
   const selectedProject = selectSelectedProject(state);
   const selectedSession = selectSelectedSession(state);
+  const planAction = selectPlanAction(state);
 
   const timelineEntries = useMemo(() => {
     return selectTimelineEntries(state);
@@ -535,6 +537,7 @@ export function useStudioApp() {
     timelineEntries,
     selectedProject,
     selectedSession,
+    planAction,
     setRolesState,
     setProvidersState,
     setSelectedProviderIdState,
@@ -550,6 +553,8 @@ export function useStudioApp() {
     onSendPrompt,
     onSendPromptContent,
     onImplementPlan,
+    onSetPlanActionMode: (mode: "choice" | "discuss") => dispatch({ type: "setPlanActionMode", mode }),
+    onDismissPlanAction: () => dispatch({ type: "dismissPlanAction" }),
     onStopPrompt,
     openSettings,
     onSaveConfig,

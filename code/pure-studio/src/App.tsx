@@ -32,6 +32,7 @@ export function App() {
         agents={state.agents}
         sessionRuntime={state.sessionRuntime}
         pendingUserInput={state.pendingUserInput}
+        planAction={studio.planAction}
         prompt={state.prompt}
         status={state.status}
         turnPhase={state.turnPhase}
@@ -47,6 +48,8 @@ export function App() {
         onImplementPlan={(plan) => void studio.onImplementPlan(plan)}
         onSendPrompt={() => void studio.onSendPrompt()}
         onSendPromptContent={(content) => void studio.onSendPromptContent(content)}
+        onSetPlanActionMode={(mode) => studio.onSetPlanActionMode(mode)}
+        onDismissPlanAction={() => studio.onDismissPlanAction()}
         onStopPrompt={() => void studio.onStopPrompt()}
         onAnswerUserInput={(requestId, response) => void studio.onAnswerUserInput(requestId, response)}
       />

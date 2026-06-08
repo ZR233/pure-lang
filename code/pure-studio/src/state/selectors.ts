@@ -45,6 +45,10 @@ export function selectSelectedSession(state: StudioState) {
   return state.sessions.find((session) => session.id === state.selectedSessionId) ?? null;
 }
 
+export function selectPlanAction(state: StudioState) {
+  return state.planAction;
+}
+
 export function selectTimelineEntries(state: StudioState): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
   let activeThought: ThoughtEntry | null = null;
