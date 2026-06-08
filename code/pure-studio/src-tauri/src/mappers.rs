@@ -485,15 +485,17 @@ pub fn timeline_events_to_items(events: &[TraceEvent]) -> Vec<pl_protocol::Timel
                         }
                     }
                     pl_protocol::TimelineDelta::ToolArguments { delta } => {
-                        if let Some(tool) = &mut entry.tool {
-                            tool.arguments.push_str(delta);
-                        }
+                        let tool = entry
+                            .tool
+                            .get_or_insert_with(|| blank_timeline_tool_item(&event.item_id));
+                        tool.arguments.push_str(delta);
                     }
                     pl_protocol::TimelineDelta::ToolResult { delta } => {
-                        if let Some(tool) = &mut entry.tool {
-                            let result = tool.result.get_or_insert_with(String::new);
-                            result.push_str(delta);
-                        }
+                        let tool = entry
+                            .tool
+                            .get_or_insert_with(|| blank_timeline_tool_item(&event.item_id));
+                        let result = tool.result.get_or_insert_with(String::new);
+                        result.push_str(delta);
                     }
                 }
             }
@@ -518,12 +520,65 @@ fn upsert_timeline_item(
         if next.thinking_chunks.is_empty() {
             next.thinking_chunks = existing.thinking_chunks.clone();
         }
-        next.tool = next.tool.or_else(|| existing.tool.clone());
+        next.tool = merge_timeline_tool_item(existing.tool.clone(), next.tool);
         next.agent = next.agent.or_else(|| existing.agent.clone());
         next.inference = next.inference.or_else(|| existing.inference.clone());
         next.usage = next.usage.or_else(|| existing.usage.clone());
     }
     items.insert(item.item_id.clone(), next);
+}
+
+fn blank_timeline_tool_item(item_id: &str) -> pl_protocol::TimelineToolItem {
+    pl_protocol::TimelineToolItem {
+        tool_call_id: item_id.to_string(),
+        call_id: None,
+        provider_item_id: None,
+        name: String::new(),
+        arguments: String::new(),
+        result: None,
+        exit_code: None,
+        timed_out: false,
+        working_directory: None,
+        denial_reason: None,
+    }
+}
+
+fn merge_timeline_tool_item(
+    existing: Option<pl_protocol::TimelineToolItem>,
+    incoming: Option<pl_protocol::TimelineToolItem>,
+) -> Option<pl_protocol::TimelineToolItem> {
+    match (existing, incoming) {
+        (None, None) => None,
+        (Some(tool), None) | (None, Some(tool)) => Some(tool),
+        (Some(existing), Some(mut incoming)) => {
+            if incoming.name.is_empty() {
+                incoming.name = existing.name;
+            }
+            if incoming.arguments.is_empty() {
+                incoming.arguments = existing.arguments;
+            }
+            if incoming.result.is_none() {
+                incoming.result = existing.result;
+            }
+            if incoming.exit_code.is_none() {
+                incoming.exit_code = existing.exit_code;
+            }
+            incoming.timed_out = incoming.timed_out || existing.timed_out;
+            if incoming.working_directory.is_none() {
+                incoming.working_directory = existing.working_directory;
+            }
+            if incoming.denial_reason.is_none() {
+                incoming.denial_reason = existing.denial_reason;
+            }
+            if incoming.call_id.is_none() {
+                incoming.call_id = existing.call_id;
+            }
+            if incoming.provider_item_id.is_none() {
+                incoming.provider_item_id = existing.provider_item_id;
+            }
+            Some(incoming)
+        }
+    }
 }
 
 pub fn provider_settings_to_edit(
@@ -558,7 +613,8 @@ mod tests {
     };
     use pl_protocol::{
         AgentStatus, RuntimeCostAmount, TimelineDelta, TimelineItem, TimelineItemDeltaEvent,
-        TimelineItemKind, TimelineItemStatus, TimelineTextRole, TraceEvent, TraceEventKind,
+        TimelineItemKind, TimelineItemStatus, TimelineTextRole, TimelineToolItem, TraceEvent,
+        TraceEventKind,
     };
     use pretty_assertions::assert_eq;
 
@@ -846,6 +902,85 @@ mod tests {
         assert_eq!(items[0].sequence, 1);
         assert_eq!(items[0].content, "hello world");
         assert_eq!(items[0].status, TimelineItemStatus::Completed);
+    }
+
+    #[test]
+    fn timeline_events_to_items_preserves_tool_delta_before_start() {
+        let started = TimelineItem {
+            turn_id: "turn-1".to_string(),
+            item_id: "turn-1-call-1".to_string(),
+            sequence: 9,
+            kind: TimelineItemKind::Tool,
+            status: TimelineItemStatus::Streaming,
+            created_at: 9,
+            updated_at: 9,
+            role: None,
+            content: String::new(),
+            thinking_chunks: Vec::new(),
+            tool: Some(TimelineToolItem {
+                tool_call_id: "turn-1-call-1".to_string(),
+                call_id: Some("call-1".to_string()),
+                provider_item_id: Some("provider-1".to_string()),
+                name: "read_file".to_string(),
+                arguments: String::new(),
+                result: None,
+                exit_code: None,
+                timed_out: false,
+                working_directory: None,
+                denial_reason: None,
+            }),
+            agent: None,
+            inference: None,
+            usage: None,
+        };
+        let completed = TimelineItem {
+            status: TimelineItemStatus::Completed,
+            updated_at: 11,
+            ..started.clone()
+        };
+        let events = vec![
+            TraceEvent {
+                session_id: "session-1".to_string(),
+                sequence: 10,
+                timestamp: 10,
+                kind: TraceEventKind::TimelineItemDelta {
+                    event: TimelineItemDeltaEvent {
+                        turn_id: "turn-1".to_string(),
+                        item_id: "turn-1-call-1".to_string(),
+                        sequence: 10,
+                        kind: TimelineItemKind::Tool,
+                        status: TimelineItemStatus::Streaming,
+                        created_at: 10,
+                        updated_at: 10,
+                        delta: TimelineDelta::ToolArguments {
+                            delta: "{\"path\":\"a.ts\"".to_string(),
+                        },
+                    },
+                },
+            },
+            TraceEvent {
+                session_id: "session-1".to_string(),
+                sequence: 9,
+                timestamp: 9,
+                kind: TraceEventKind::TimelineItemStarted { item: started },
+            },
+            TraceEvent {
+                session_id: "session-1".to_string(),
+                sequence: 11,
+                timestamp: 11,
+                kind: TraceEventKind::TimelineItemCompleted { item: completed },
+            },
+        ];
+
+        let items = timeline_events_to_items(&events);
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].sequence, 10);
+        let tool = items[0].tool.as_ref().expect("tool item");
+        assert_eq!(tool.name, "read_file");
+        assert_eq!(tool.arguments, "{\"path\":\"a.ts\"");
+        assert_eq!(tool.call_id.as_deref(), Some("call-1"));
+        assert_eq!(tool.provider_item_id.as_deref(), Some("provider-1"));
     }
 
     #[test]

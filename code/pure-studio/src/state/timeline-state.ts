@@ -203,12 +203,38 @@ function mergeTimelineItem(existing: TimelineItem | undefined, item: TimelineIte
     content: incoming.content || current.content || "",
     thinkingChunks:
       incoming.thinkingChunks.length > 0 ? incoming.thinkingChunks : current.thinkingChunks,
-    tool: incoming.tool ?? current.tool ?? null,
+    tool: mergeTimelineTool(current.tool, incoming.tool),
     agent: incoming.agent ?? current.agent ?? null,
     inference: incoming.inference ?? current.inference ?? null,
     usage: incoming.usage ?? current.usage ?? null,
     sequence: current.sequence,
     createdAt: current.createdAt,
+  };
+}
+
+function mergeTimelineTool(
+  current: TimelineItem["tool"] | null | undefined,
+  incoming: TimelineItem["tool"] | null | undefined,
+): TimelineItem["tool"] | null {
+  if (!current && !incoming) {
+    return null;
+  }
+  if (!current) {
+    return incoming ? { ...incoming } : null;
+  }
+  if (!incoming) {
+    return { ...current };
+  }
+  return {
+    ...current,
+    ...incoming,
+    name: incoming.name || current.name,
+    arguments: incoming.arguments || current.arguments || "",
+    result: incoming.result ?? current.result ?? null,
+    exitCode: incoming.exitCode ?? current.exitCode ?? null,
+    timedOut: incoming.timedOut || current.timedOut || false,
+    workingDirectory: incoming.workingDirectory ?? current.workingDirectory ?? null,
+    denialReason: incoming.denialReason ?? current.denialReason ?? null,
   };
 }
 
@@ -241,14 +267,12 @@ function applyTimelineDelta<T extends TimelineStateSlice>(
       break;
     }
     case "toolArguments":
-      if (item.tool) {
-        item.tool.arguments += delta.delta;
-      }
+      item.tool = item.tool ?? blankTimelineToolItem(item.itemId);
+      item.tool.arguments += delta.delta;
       break;
     case "toolResult":
-      if (item.tool) {
-        item.tool.result = `${item.tool.result ?? ""}${delta.delta}`;
-      }
+      item.tool = item.tool ?? blankTimelineToolItem(item.itemId);
+      item.tool.result = `${item.tool.result ?? ""}${delta.delta}`;
       break;
   }
   return upsertTimelineItem(state, item, eventSequence);
@@ -282,5 +306,18 @@ function normalizeTimelineItem(item: TimelineItem): TimelineItem {
     agent: item.agent ? { ...item.agent } : null,
     inference: item.inference ? { ...item.inference } : null,
     usage: item.usage ? { ...item.usage } : null,
+  };
+}
+
+function blankTimelineToolItem(itemId: string): NonNullable<TimelineItem["tool"]> {
+  return {
+    toolCallId: itemId,
+    name: "",
+    arguments: "",
+    result: null,
+    exitCode: null,
+    timedOut: false,
+    workingDirectory: null,
+    denialReason: null,
   };
 }

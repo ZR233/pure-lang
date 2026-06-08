@@ -155,22 +155,7 @@ export function useStudioApp() {
       return;
     }
     const sessionId = state.selectedSessionId;
-    loadSessionTimeline(sessionId)
-      .then((payload) =>
-        dispatch({
-          type: "timelineLoaded",
-          sessionId: payload.sessionId,
-          items: payload.items,
-          nextSequence: payload.nextSequence,
-        }),
-      )
-      .catch((error) => {
-        dispatch({
-          type: "timelineLoadFailed",
-          sessionId,
-          status: t("status.timelineLoadFailed", { error: errorText(error) }),
-        });
-      });
+    reloadTimeline(sessionId);
   }, [state.selectedSessionId, t]);
 
   useEffect(() => {
@@ -180,6 +165,12 @@ export function useStudioApp() {
 
     const unlisteners = [
       listen<AgentEventPayload>("studio-agent-event", ({ payload }) => {
+        if (payload.timelineStale) {
+          void reloadTimeline(payload.sessionId);
+          if (!payload.event && !payload.timelineEvent && !payload.agent && !payload.sessionRuntime) {
+            return;
+          }
+        }
         dispatch({
           type: "agentEvent",
           sessionId: payload.sessionId,
@@ -235,6 +226,25 @@ export function useStudioApp() {
       });
     };
   }, [t]);
+
+  function reloadTimeline(sessionId: string) {
+    return loadSessionTimeline(sessionId)
+      .then((payload) =>
+        dispatch({
+          type: "timelineLoaded",
+          sessionId: payload.sessionId,
+          items: payload.items,
+          nextSequence: payload.nextSequence,
+        }),
+      )
+      .catch((error) => {
+        dispatch({
+          type: "timelineLoadFailed",
+          sessionId,
+          status: t("status.timelineLoadFailed", { error: errorText(error) }),
+        });
+      });
+  }
 
   const setRolesState: Dispatch<SetStateAction<RoleRecord[]>> = (value) => {
     const next = typeof value === "function" ? value(state.roles) : value;

@@ -101,6 +101,8 @@ pub async fn drain_events(
                         "studio-agent-event",
                         AgentEventPayload {
                             session_id: session_id.clone(),
+                            timeline_stale: None,
+                            lagged_events: None,
                             event: event_for_timeline,
                             timeline_event,
                             agent,
@@ -109,8 +111,19 @@ pub async fn drain_events(
                     );
                 }
             }
-            Err(RecvError::Lagged(_)) => {
-                continue;
+            Err(RecvError::Lagged(skipped)) => {
+                let _ = app.emit(
+                    "studio-agent-event",
+                    AgentEventPayload {
+                        session_id: session_id.clone(),
+                        timeline_stale: Some(true),
+                        lagged_events: Some(skipped),
+                        event: None,
+                        timeline_event: None,
+                        agent: None,
+                        session_runtime: None,
+                    },
+                );
             }
             Err(RecvError::Closed) => {
                 break;
