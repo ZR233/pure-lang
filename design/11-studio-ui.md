@@ -102,9 +102,13 @@ turn 展示语义固定：
 
 状态栏在窄窗口下保留左侧高频控制，并把右侧只读状态按优先级收入“更多”菜单；更多入口固定跟随左侧控制组显示，避免右侧只读状态挤压时入口也被裁剪。由于桌面布局含左侧项目/会话栏，响应式必须优先按聊天 footer 自身宽度判断，并保留整窗宽度兜底：聊天 footer 约 `1040px` 以下收起能力和子代理，footer 约 `760px` 以下额外收起费用，footer 约 `520px` 以下额外收起上下文。整窗兜底在 `1320px` 以下直接收起费用、能力和子代理，避免不支持 container query 的 WebView2 环境按整窗宽度误判聊天列空间。更多菜单直接展示被收起状态的摘要和详情，不依赖悬浮 popover，必须支持点击、键盘聚焦、外部点击和 `Escape` 关闭，且不得被状态栏横向滚动容器或窗口边界裁剪。
 
-聊天输入区提供 `Auto / Plan` 模式切换，当前值来自选中 session 的 `mode` 并通过后端命令持久化。新会话默认 `auto`。Plan 卡片提供“实现计划”动作：点击后先把当前 session 切回 `auto`，再自动提交 `PLEASE IMPLEMENT THIS PLAN:\n\n{plan}`。v1 不提供 fresh thread、清上下文执行或 todo list。
+聊天输入区提供 `Auto / Plan` 模式切换，当前值来自选中 session 的 `mode` 并通过后端命令持久化。新会话默认 `auto`。Plan 卡片提供“实现计划”动作：点击后不立即提交，而是用计划确认 composer 替换普通输入框。确认 composer 必须展示计划摘要，并提供三个动作：
 
-运行中如果收到 `request_user_input` 的 pending 请求，聊天底部普通输入框必须被 `AskUserComposer` 替换。该 UI 显示结构化问题、选项和必要的自由输入；提交后通过 Tauri command 回答当前 request，并恢复普通 composer。ask-user 期间用户不能发送新的普通 prompt，但停止按钮仍可中断当前 turn。
+- `实现计划`：先把当前 session 切回 `auto`，再提交 `PLEASE IMPLEMENT THIS PLAN:\n\n{plan}`。
+- `继续讨论`：展开自由输入框，用户输入后作为普通 prompt 发送，用于继续追问或修改计划，不自动切换到 `auto`。
+- `取消`：关闭确认 composer，恢复普通输入框，不提交任何内容。
+
+运行中如果收到 `request_user_input` 的 pending 请求，聊天底部普通输入框必须被 `AskUserComposer` 替换。该 UI 逐个展示结构化问题，用户可以在问题之间前进和返回；只有最终点击提交时才通过 Tauri command 一次性回答当前 request 并恢复普通 composer。每个问题支持选项和必要的自由输入，选项选择不会立即提交。ask-user 期间用户不能发送新的普通 prompt，但停止按钮仍可中断当前 turn。
 
 设置页 Security 标签页提供会话级权限模式选择。`request-approval` 在 workspace 内直接执行，访问 workspace 外时使用现有 ApprovalOverlay 弹出用户审批；`auto-review` 在 workspace 内直接执行，访问 workspace 外时由 reviewer 模型自动审批，前端不弹用户审批卡片，只通过工具结果展示已批准或已拒绝的事实；`full-access` 明确展示为会放宽 workspace 外文件路径和 shell cwd 边界并直接放行的模式。
 

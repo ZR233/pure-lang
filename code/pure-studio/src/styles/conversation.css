@@ -653,7 +653,8 @@
   padding: 4px 8px 6px;
 }
 
-.ask-user-composer {
+.ask-user-composer,
+.plan-confirm-composer {
   gap: 10px;
   padding: 12px 14px 8px;
 }
@@ -662,9 +663,22 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   color: #475569;
   font-size: 12px;
   font-weight: 700;
+}
+
+.ask-user-heading span {
+  min-width: 0;
+}
+
+.ask-user-heading small {
+  margin-left: auto;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .ask-user-question-list {
@@ -730,7 +744,8 @@
 }
 
 .ask-user-question input,
-.ask-user-question textarea {
+.ask-user-question textarea,
+.plan-confirm-composer textarea {
   width: 100%;
   min-height: 36px;
   padding: 8px 10px;
@@ -743,19 +758,30 @@
   line-height: 1.45;
 }
 
-.ask-user-question textarea {
+.ask-user-question textarea,
+.plan-confirm-composer textarea {
   max-height: 120px;
   resize: vertical;
 }
 
 .ask-user-question input:focus,
-.ask-user-question textarea:focus {
+.ask-user-question textarea:focus,
+.plan-confirm-composer textarea:focus {
   border-color: #3b82f6;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .ask-user-toolbar {
   padding: 2px 0 0;
+}
+
+.ask-user-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
 }
 
 .ask-user-toolbar button {
@@ -766,16 +792,46 @@
   padding: 0 10px;
   border: none;
   border-radius: 8px;
-  background: #3b82f6;
-  color: #ffffff;
+  border: 1px solid #dbe4f0;
+  background: #f8fafc;
+  color: #334155;
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
 }
 
+.ask-user-toolbar button:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.ask-user-toolbar button.primary,
+.ask-user-toolbar button:last-child {
+  border-color: #3b82f6;
+  background: #3b82f6;
+  color: #ffffff;
+}
+
+.ask-user-toolbar button.primary:hover:not(:disabled),
+.ask-user-toolbar button:last-child:hover:not(:disabled) {
+  background: #2563eb;
+}
+
 .ask-user-toolbar button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.plan-confirm-summary {
+  max-height: 96px;
+  margin: 0;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #475569;
+  background: #f8fafc;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .shortcut-hint {

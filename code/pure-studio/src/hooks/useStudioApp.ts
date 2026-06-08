@@ -315,6 +315,15 @@ export function useStudioApp() {
     await submitPrompt(sessionId, content);
   }
 
+  async function onSendPromptContent(content: string) {
+    const trimmed = content.trim();
+    const sessionId = state.selectedSessionId;
+    if (!trimmed || !sessionId || state.isBusy) {
+      return;
+    }
+    await submitPrompt(sessionId, trimmed);
+  }
+
   async function onImplementPlan(plan: string) {
     const content = plan.trim();
     const sessionId = state.selectedSessionId;
@@ -539,6 +548,7 @@ export function useStudioApp() {
     onSelectSession,
     onSetSessionMode,
     onSendPrompt,
+    onSendPromptContent,
     onImplementPlan,
     onStopPrompt,
     openSettings,

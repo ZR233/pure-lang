@@ -1,9 +1,12 @@
 import {
   Activity,
+  ArrowLeft,
+  ArrowRight,
   Brain,
   ChevronDown,
   Circle,
   FileText,
+  MessageCircle,
   Play,
   Send,
   Square,
@@ -67,6 +70,7 @@ type ConversationPanelProps = {
   onSetSessionMode: (mode: CompileMode) => void;
   onImplementPlan: (plan: string) => void;
   onSendPrompt: () => void;
+  onSendPromptContent: (content: string) => void;
   onStopPrompt: () => void;
   onAnswerUserInput: (requestId: string, response: UserInputResponse) => void;
 };
@@ -478,12 +482,12 @@ function ToolEntry({ item, t }: { item: Extract<TimelineEntry, { kind: "tool" }>
 
 function PlanEntry({
   entry,
-  onImplementPlan,
+  onPreparePlan,
   isBusy,
   t,
 }: {
   entry: Extract<TimelineEntry, { kind: "plan" }>;
-  onImplementPlan: (plan: string) => void;
+  onPreparePlan: (plan: string) => void;
   isBusy: boolean;
   t: TFunction;
 }) {
@@ -497,7 +501,7 @@ function PlanEntry({
         <MarkdownContent content={entry.content} />
       </div>
       <div className="timeline-plan-actions">
-        <button type="button" onClick={() => onImplementPlan(entry.content)} disabled={isBusy || !entry.content.trim()}>
+        <button type="button" onClick={() => onPreparePlan(entry.content)} disabled={isBusy || !entry.content.trim()}>
           <Play size={14} />
           <span>{t("actions.implementPlan")}</span>
         </button>
@@ -687,14 +691,19 @@ function AskUserComposer({
   t: TFunction;
 }) {
   const [draft, setDraft] = useState<AskDraft>(() => initialAskDraft(request.questions));
+  const [currentIndex, setCurrentIndex] = useState(0);
   const questionCount = request.questions.length;
-  const submitLabel = useMemo(
-    () => t("askUser.answer", { count: questionCount }),
-    [questionCount, t],
+  const currentQuestion = request.questions[currentIndex] ?? request.questions[0];
+  const isFirst = currentIndex === 0;
+  const isLast = currentIndex >= questionCount - 1;
+  const progressLabel = useMemo(
+    () => t("askUser.progress", { current: Math.min(currentIndex + 1, questionCount), total: questionCount }),
+    [currentIndex, questionCount, t],
   );
 
   useEffect(() => {
     setDraft(initialAskDraft(request.questions));
+    setCurrentIndex(0);
   }, [request.requestId, request.questions]);
 
   function updateDraft(id: string, update: Partial<AskDraftEntry>) {
@@ -728,82 +737,193 @@ function AskUserComposer({
   function submitOnShortcut(event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
-      submit();
+      if (isLast) {
+        submit();
+      } else {
+        setCurrentIndex((value) => Math.min(value + 1, questionCount - 1));
+      }
     }
   }
+
+  if (!currentQuestion) {
+    return null;
+  }
+
+  const options = currentQuestion.options ?? [];
+  const entry = draft[currentQuestion.id] ?? { selected: null, text: "" };
+  const showFreeText = options.length === 0 || currentQuestion.isOther;
 
   return (
     <div className="composer-box ask-user-composer">
       <div className="ask-user-heading">
         <UserRound size={16} />
         <span>{t("askUser.awaiting")}</span>
+        <small>{progressLabel}</small>
       </div>
       <div className="ask-user-question-list">
-        {request.questions.map((question) => {
-          const options = question.options ?? [];
-          const entry = draft[question.id] ?? { selected: null, text: "" };
-          const showFreeText = options.length === 0 || question.isOther;
-          return (
-            <section className="ask-user-question" key={question.id}>
-              <div className="ask-user-question-copy">
-                <strong>{question.header}</strong>
-                <p>{question.question}</p>
-              </div>
-              {options.length > 0 ? (
-                <div className="ask-user-options">
-                  {options.map((option) => (
-                    <button
-                      type="button"
-                      key={`${question.id}-${option.label}`}
-                      className={entry.selected === option.label ? "selected" : ""}
-                      onClick={() =>
-                        updateDraft(question.id, {
-                          selected: entry.selected === option.label ? null : option.label,
-                        })
-                      }
-                    >
-                      <span>{option.label}</span>
-                      <small>{option.description}</small>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-              {showFreeText ? (
-                question.isSecret ? (
-                  <input
-                    type="password"
-                    value={entry.text}
-                    onChange={(event) => updateDraft(question.id, { text: event.target.value })}
-                    onKeyDown={submitOnShortcut}
-                    placeholder={t("askUser.secretPlaceholder")}
-                    aria-label={question.question}
-                  />
-                ) : (
-                  <textarea
-                    value={entry.text}
-                    onChange={(event) => updateDraft(question.id, { text: event.target.value })}
-                    onKeyDown={submitOnShortcut}
-                    placeholder={
-                      options.length > 0
-                        ? t("askUser.customPlaceholder")
-                        : t("askUser.answerPlaceholder")
-                    }
-                    aria-label={question.question}
-                  />
-                )
-              ) : null}
-            </section>
-          );
-        })}
+        <section className="ask-user-question" key={currentQuestion.id}>
+          <div className="ask-user-question-copy">
+            <strong>{currentQuestion.header}</strong>
+            <p>{currentQuestion.question}</p>
+          </div>
+          {options.length > 0 ? (
+            <div className="ask-user-options">
+              {options.map((option) => (
+                <button
+                  type="button"
+                  key={`${currentQuestion.id}-${option.label}`}
+                  className={entry.selected === option.label ? "selected" : ""}
+                  onClick={() =>
+                    updateDraft(currentQuestion.id, {
+                      selected: entry.selected === option.label ? null : option.label,
+                    })
+                  }
+                >
+                  <span>{option.label}</span>
+                  <small>{option.description}</small>
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {showFreeText ? (
+            currentQuestion.isSecret ? (
+              <input
+                type="password"
+                value={entry.text}
+                onChange={(event) => updateDraft(currentQuestion.id, { text: event.target.value })}
+                onKeyDown={submitOnShortcut}
+                placeholder={t("askUser.secretPlaceholder")}
+                aria-label={currentQuestion.question}
+              />
+            ) : (
+              <textarea
+                value={entry.text}
+                onChange={(event) => updateDraft(currentQuestion.id, { text: event.target.value })}
+                onKeyDown={submitOnShortcut}
+                placeholder={
+                  options.length > 0
+                    ? t("askUser.customPlaceholder")
+                    : t("askUser.answerPlaceholder")
+                }
+                aria-label={currentQuestion.question}
+              />
+            )
+          ) : null}
+        </section>
       </div>
       <div className="composer-toolbar ask-user-toolbar">
         <span className="shortcut-hint">
           <kbd>⌘</kbd> + <kbd>Enter</kbd>
         </span>
-        <button type="button" onClick={submit} disabled={stopping}>
-          <Send size={14} />
-          <span>{submitLabel}</span>
-        </button>
+        <div className="ask-user-toolbar-actions">
+          <button
+            type="button"
+            onClick={() => setCurrentIndex((value) => Math.max(0, value - 1))}
+            disabled={stopping || isFirst}
+          >
+            <ArrowLeft size={14} />
+            <span>{t("actions.back")}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (isLast) {
+                submit();
+              } else {
+                setCurrentIndex((value) => Math.min(questionCount - 1, value + 1));
+              }
+            }}
+            disabled={stopping}
+          >
+            {isLast ? <Send size={14} /> : <ArrowRight size={14} />}
+            <span>{isLast ? t("askUser.submit") : t("askUser.next")}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlanConfirmComposer({
+  plan,
+  stopping,
+  onImplementPlan,
+  onSendPromptContent,
+  onCancel,
+  t,
+}: {
+  plan: string;
+  stopping: boolean;
+  onImplementPlan: (plan: string) => void;
+  onSendPromptContent: (content: string) => void;
+  onCancel: () => void;
+  t: TFunction;
+}) {
+  const [discussing, setDiscussing] = useState(false);
+  const [message, setMessage] = useState("");
+
+  function submitDiscussion() {
+    const content = message.trim();
+    if (!content) return;
+    onCancel();
+    onSendPromptContent(content);
+  }
+
+  function submitOnShortcut(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      submitDiscussion();
+    }
+  }
+
+  return (
+    <div className="composer-box plan-confirm-composer">
+      <div className="ask-user-heading">
+        <FileText size={16} />
+        <span>{t("planConfirm.title")}</span>
+      </div>
+      <p className="plan-confirm-summary">{compact(plan, 260)}</p>
+      {discussing ? (
+        <textarea
+          value={message}
+          onChange={(event) => setMessage(event.target.value)}
+          onKeyDown={submitOnShortcut}
+          placeholder={t("planConfirm.discussPlaceholder")}
+          aria-label={t("planConfirm.discussPlaceholder")}
+        />
+      ) : null}
+      <div className="composer-toolbar ask-user-toolbar">
+        <span className="shortcut-hint">
+          {discussing ? <><kbd>⌘</kbd> + <kbd>Enter</kbd></> : t("planConfirm.hint")}
+        </span>
+        <div className="ask-user-toolbar-actions">
+          <button type="button" onClick={onCancel} disabled={stopping}>
+            <span>{t("actions.cancel")}</span>
+          </button>
+          {discussing ? (
+            <button type="button" onClick={submitDiscussion} disabled={stopping || !message.trim()}>
+              <Send size={14} />
+              <span>{t("actions.send")}</span>
+            </button>
+          ) : (
+            <button type="button" onClick={() => setDiscussing(true)} disabled={stopping}>
+              <MessageCircle size={14} />
+              <span>{t("planConfirm.continueDiscussion")}</span>
+            </button>
+          )}
+          <button
+            type="button"
+            className="primary"
+            onClick={() => {
+              onCancel();
+              onImplementPlan(plan);
+            }}
+            disabled={stopping || !plan.trim()}
+          >
+            <Play size={14} />
+            <span>{t("actions.implementPlan")}</span>
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -830,19 +950,25 @@ export function ConversationPanel({
   onSetSessionMode,
   onImplementPlan,
   onSendPrompt,
+  onSendPromptContent,
   onStopPrompt,
   onAnswerUserInput,
 }: ConversationPanelProps) {
   const { t } = useTranslation();
   const stopping = turnPhase === "stopping";
   const currentMode: CompileMode = selectedSession?.mode === "plan" ? "plan" : "auto";
+  const [planConfirmation, setPlanConfirmation] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPlanConfirmation(null);
+  }, [selectedSession?.id]);
 
   function renderTimelineEntry(entry: TimelineEntry) {
     if (entry.kind === "message") {
       return <MessageEntry entry={entry} />;
     }
     if (entry.kind === "plan") {
-      return <PlanEntry entry={entry} onImplementPlan={onImplementPlan} isBusy={isBusy} t={t} />;
+      return <PlanEntry entry={entry} onPreparePlan={setPlanConfirmation} isBusy={isBusy} t={t} />;
     }
     if (entry.kind === "thought") {
       return <ThoughtEntry content={entry.content} />;
@@ -889,6 +1015,15 @@ export function ConversationPanel({
               onAnswer={onAnswerUserInput}
               t={t}
             />
+          ) : planConfirmation ? (
+            <PlanConfirmComposer
+              plan={planConfirmation}
+              stopping={stopping}
+              onImplementPlan={onImplementPlan}
+              onSendPromptContent={onSendPromptContent}
+              onCancel={() => setPlanConfirmation(null)}
+              t={t}
+            />
           ) : (
             <div className="composer-box">
               <textarea
@@ -911,7 +1046,7 @@ export function ConversationPanel({
           )}
           <button
             className={`send-button${isBusy ? " stop-button" : ""}`}
-            disabled={isBusy ? stopping : !prompt.trim() || !selectedSession}
+            disabled={isBusy ? stopping : Boolean(planConfirmation) || !prompt.trim() || !selectedSession}
             onClick={isBusy ? onStopPrompt : onSendPrompt}
           >
             {isBusy ? <Square size={18} /> : <Send size={18} />}
