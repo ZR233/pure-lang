@@ -418,7 +418,8 @@ mod tests {
     fn detects_recoverable_subagent_tool_result_marker() {
         let records = vec![
             ToolExecutionRecord {
-                call_id: "call-1".to_string(),
+                id: "item-1".to_string(),
+                call_id: Some("call-1".to_string()),
                 name: "spawn_agent".to_string(),
                 kind: ToolCallKind::Function,
                 arguments: "{}".to_string(),
@@ -429,7 +430,8 @@ mod tests {
                 timed_out: false,
             },
             ToolExecutionRecord {
-                call_id: "call-2".to_string(),
+                id: "item-2".to_string(),
+                call_id: Some("call-2".to_string()),
                 name: "bash".to_string(),
                 kind: ToolCallKind::Function,
                 arguments: "{}".to_string(),

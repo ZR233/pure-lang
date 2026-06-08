@@ -438,6 +438,7 @@ pub(super) async fn run_turn_with_trace(
         }
         for tool_result in tool_results {
             session.push_tool_result(
+                tool_result.id,
                 tool_result.call_id,
                 tool_result.name,
                 tool_result.kind,
