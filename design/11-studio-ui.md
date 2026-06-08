@@ -45,6 +45,9 @@ reducer 分域：
 - 同一 session 内继续对话不会触发 `selectedSessionId` 变化；当前轮 `RunPromptResponse.timelineItems` 与实时 `TimelineItem*` 事件必须直接合并进本地 timeline
 - 异步 `loadSessionTimeline` 只能替换不晚于本地状态的快照；如果加载结果落后于本地已收到的当前轮 item，只能作为历史补齐合并，不能覆盖当前 timeline
 - 自动跟随只取决于用户是否停留在底部，不取决于 `isBusy`；命令完成时 `isBusy` 已变为 false，但 `RunPromptResponse.timelineItems` 仍可能追加最终内容
+- 用户提交 prompt 后，前端 reducer 立即插入仅本地存在的 optimistic 用户消息 item 和 waiting turn item。waiting item 在 selector 中派生为轻量状态行，用于展示“正在等待模型响应”。这些 item 不持久化、不进入后端 DTO；收到首个真实 `TimelineItemStarted/Delta/Completed/Failed` 事件或最终 `RunPromptResponse` 后必须从本地 timeline 清理，避免和真实 timeline 重复。
+- 用户提交 prompt 属于显式回到底部的动作；即使用户此前停在历史位置，发送后 timeline 也应立即跟随到底部，让 optimistic 消息和等待状态可见。后续 streaming delta 仍遵守“用户在底部才跟随”的规则，用户再次上滚后不抢占滚动位置。
+- `thinking` item 在 selector 中派生为 thought entry，并携带 `status`、`startedAt`、`updatedAt` 与 `durationSeconds`。`started/streaming/running` 状态展示思考中动画；`completed` 状态根据 `createdAt/updatedAt` 展示耗时；`failed/interrupted/budgetLimited` 等异常状态展示对应异常语义。多个连续 thinking item 合并时，耗时取最早 `createdAt` 与最晚 `updatedAt`。
 - timeline 渲染层可以在 `selectTimelineEntries()` 之后使用 headless 虚拟滚动库承载大列表；虚拟化只负责测量、滚动定位和 DOM 数量控制，不消费 raw `TimelineItem`，也不承载 tool 聚合、thinking 合并、trace 过滤或 plan 行为
 
 前端 reducer 的 timeline 状态固定为：
@@ -55,6 +58,8 @@ reducer 分域：
 `timelineOrder` 只在 item 首次出现时按 `sequence` 插入；后续 delta/completed/failed 不改变展示位置。组件不得再把 `messages`、运行中 tool map、agent events 和 trace items 临时拼接成主 timeline。工具聚合与普通 trace 过滤只能作为 `timelineEntries` 派生显示层逻辑，不能写回 reducer 状态或后端 DTO。
 
 主聊天 timeline 的滚动容器由独立渲染适配层负责。该适配层输入 `TimelineEntry[]`，输出现有 message、plan、thought、tool、tool group、agent 和 trace entry 组件；它必须保持稳定 key、支持可变高度内容重测量，并维持“在底部才自动跟随”的规则。用户上滚阅读历史时，实时 delta 只能显示跳到最新入口，不能抢占滚动位置。
+
+Markdown 阅读样式属于 timeline 展示层：assistant 正文和 plan 卡片正文需要保留舒适内边距、最大阅读宽度、段落间距、列表缩进、引用和代码块层次；用户消息仍保持紧凑气泡，不套用 assistant 的大内边距。移动端和窄窗口下 Markdown 内容必须允许代码块横向滚动，并避免长链接、长路径和行内代码撑破聊天列。
 
 ## 3. Turn 生命周期
 

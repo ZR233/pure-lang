@@ -21,7 +21,22 @@ export type TimelineEntry =
       content: string;
     }
   | { kind: "plan"; key: string; content: string; item: TimelineItem }
-  | { kind: "thought"; key: string; content: string }
+  | {
+      kind: "thought";
+      key: string;
+      content: string;
+      status: TimelineItem["status"];
+      startedAt: number;
+      updatedAt: number;
+      durationSeconds: number;
+    }
+  | {
+      kind: "status";
+      key: string;
+      status: TimelineItem["status"];
+      content: string;
+      item: TimelineItem;
+    }
   | { kind: "tool"; key: string; item: TimelineItem }
   | {
       kind: "toolGroup";
@@ -83,9 +98,21 @@ export function selectTimelineEntries(state: StudioState): TimelineEntry[] {
     if (!content.trim()) return;
     if (activeThought && activeThoughtTurnId === item.turnId) {
       activeThought.content = appendThoughtContent(activeThought.content, content);
+      activeThought.status = mergeThoughtStatus(activeThought.status, item.status);
+      activeThought.startedAt = Math.min(activeThought.startedAt, item.createdAt);
+      activeThought.updatedAt = Math.max(activeThought.updatedAt, item.updatedAt);
+      activeThought.durationSeconds = thoughtDurationSeconds(activeThought.startedAt, activeThought.updatedAt);
       return;
     }
-    activeThought = { kind: "thought", key: `thinking-${item.itemId}`, content };
+    activeThought = {
+      kind: "thought",
+      key: `thinking-${item.itemId}`,
+      content,
+      status: item.status,
+      startedAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      durationSeconds: thoughtDurationSeconds(item.createdAt, item.updatedAt),
+    };
     activeThoughtTurnId = item.turnId;
     entries.push(activeThought);
   };
@@ -139,6 +166,16 @@ export function selectTimelineEntries(state: StudioState): TimelineEntry[] {
         break;
       case "turn":
         closeDisplaySegment();
+        if (shouldShowStatusEntry(item)) {
+          entries.push({
+            kind: "status",
+            key: `status-${item.itemId}`,
+            status: item.status,
+            content: item.content,
+            item,
+          });
+          break;
+        }
         if (shouldShowTurnTrace(item)) {
           entries.push({ kind: "trace", key: `trace-${item.itemId}`, item });
         }
@@ -148,6 +185,21 @@ export function selectTimelineEntries(state: StudioState): TimelineEntry[] {
     }
   }
   return entries;
+}
+
+function shouldShowStatusEntry(item: TimelineItem): boolean {
+  return item.itemId.startsWith("optimistic-") && item.status === "running";
+}
+
+function mergeThoughtStatus(
+  current: TimelineItem["status"],
+  next: TimelineItem["status"],
+): TimelineItem["status"] {
+  return toolStatusPriority(next) > toolStatusPriority(current) ? next : current;
+}
+
+function thoughtDurationSeconds(startedAt: number, updatedAt: number): number {
+  return Math.max(0, updatedAt - startedAt);
 }
 
 function thinkingContent(item: TimelineItem): string {

@@ -115,7 +115,7 @@ export type StudioAction =
       sessionRuntime?: SessionRuntime | null;
       statusText: string;
     }
-  | { type: "promptSubmitted"; status: string; startedAt: number };
+  | { type: "promptSubmitted"; status: string; startedAt: number; prompt: string };
 
 export const initialStudioState = (startingStatus: string): StudioState => ({
   projects: [],
@@ -356,7 +356,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       };
     case "promptSubmitted":
       return {
-        ...removeOptimisticTimelineItems(state),
+        ...appendOptimisticPrompt(removeOptimisticTimelineItems(state), action.prompt, action.startedAt),
         prompt: "",
         isBusy: true,
         status: action.status,
@@ -369,17 +369,20 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       if (action.sessionId !== state.selectedSessionId) {
         return state;
       }
+      const eventBase = shouldClearOptimisticTimeline(action.event)
+        ? removeOptimisticTimelineItems(state)
+        : state;
       const nextRuntime = mergeLiveSkillIntoRuntime(
-        action.sessionRuntime ?? state.sessionRuntime,
+        action.sessionRuntime ?? eventBase.sessionRuntime,
         action.event,
       );
       return reduceAgentEvent(
         {
-          ...state,
+          ...eventBase,
           agentTimelineEvents: action.timelineEvent
-            ? mergeAgentTimelineEvents(state.agentTimelineEvents, [action.timelineEvent])
-            : state.agentTimelineEvents,
-          agents: action.agent ? mergeAgents(state.agents, [action.agent]) : state.agents,
+            ? mergeAgentTimelineEvents(eventBase.agentTimelineEvents, [action.timelineEvent])
+            : eventBase.agentTimelineEvents,
+          agents: action.agent ? mergeAgents(eventBase.agents, [action.agent]) : eventBase.agents,
           sessionRuntime: nextRuntime,
         },
         action.event,
@@ -451,6 +454,60 @@ function extractProposedPlanContent(content: string): string | null {
   const match = content.match(/<proposed_plan>\s*([\s\S]*?)\s*<\/proposed_plan>/i);
   const plan = match?.[1]?.trim();
   return plan || null;
+}
+
+function appendOptimisticPrompt(state: StudioState, prompt: string, startedAt: number): StudioState {
+  const content = prompt.trim();
+  if (!content) {
+    return state;
+  }
+  const createdAt = Math.floor(startedAt / 1000);
+  const turnId = `optimistic-turn-${startedAt}`;
+  const nextSequence = state.timelineNextSequence;
+  const userItem: TimelineItem = {
+    turnId,
+    itemId: `optimistic-user-${startedAt}`,
+    sequence: nextSequence,
+    kind: "text",
+    status: "completed",
+    createdAt,
+    updatedAt: createdAt,
+    role: "user",
+    content,
+    thinkingChunks: [],
+  };
+  const waitingItem: TimelineItem = {
+    turnId,
+    itemId: `optimistic-waiting-${startedAt}`,
+    sequence: nextSequence + 1,
+    kind: "turn",
+    status: "running",
+    createdAt,
+    updatedAt: createdAt,
+    role: null,
+    content: "waitingForModel",
+    thinkingChunks: [],
+  };
+  const timelineItems = new Map(state.timelineItems);
+  timelineItems.set(userItem.itemId, userItem);
+  timelineItems.set(waitingItem.itemId, waitingItem);
+  return {
+    ...state,
+    timelineItems,
+    timelineOrder: [...state.timelineOrder, userItem.itemId, waitingItem.itemId],
+    timelineNextSequence: nextSequence + 2,
+  };
+}
+
+function shouldClearOptimisticTimeline(event: AgentEvent | null | undefined): boolean {
+  return Boolean(
+    event &&
+      typeof event === "object" &&
+      ("timelineItemStarted" in event ||
+        "timelineItemDelta" in event ||
+        "timelineItemCompleted" in event ||
+        "timelineItemFailed" in event),
+  );
 }
 
 function reduceAgentEvent(

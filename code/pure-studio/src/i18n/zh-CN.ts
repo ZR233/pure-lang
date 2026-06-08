@@ -84,6 +84,12 @@ const zhCN = {
     turn: "回合",
     notice: "提示",
     plan: "计划",
+    waitingForModel: "正在等待模型响应...",
+    thinking: "思考",
+    thinkingActive: "思考中...",
+    thoughtDurationSubSecond: "思考了不到 1 秒",
+    thoughtDurationSeconds: "思考了 {{seconds}} 秒",
+    thoughtDurationMinutes: "思考了 {{minutes}} 分 {{seconds}} 秒",
   },
 
   roles: {
