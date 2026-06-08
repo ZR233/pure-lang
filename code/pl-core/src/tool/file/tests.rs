@@ -160,6 +160,9 @@ async fn apply_patch_context_mismatch_does_not_write() {
         .await;
 
     assert!(result.is_err());
+    let error = result.unwrap_err().to_string();
+    assert!(error.contains("Recovery: read the target file again"));
+    assert!(error.contains("Do not repeat the same failed patch"));
     assert_eq!(
         tokio::fs::read_to_string(root.join("src/lib.rs"))
             .await
@@ -432,7 +435,36 @@ async fn apply_patch_rejects_missing_end_marker() {
         .await
         .unwrap_err();
 
-    assert!(result.to_string().contains("last line must be"));
+    let error = result.to_string();
+    assert!(error.contains("last line must be"));
+    assert!(error.contains("send the complete patch"));
+    assert!(error.contains("Recovery: read the target file again"));
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn apply_patch_eof_marker_falls_back_to_normal_search() {
+    let root = unique_temp_dir("patch-eof-fallback");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    tokio::fs::write(root.join("lines.txt"), "first\nmiddle\nlast\n")
+        .await
+        .unwrap();
+    let tool = ApplyPatchTool;
+    let patch = "*** Begin Patch\n*** Update File: lines.txt\n@@\n-middle\n+updated\n*** End of File\n*** End Patch";
+
+    tool.execute(
+        input(serde_json::json!({ "patch": patch })),
+        context(&root).await,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        tokio::fs::read_to_string(root.join("lines.txt"))
+            .await
+            .unwrap(),
+        "first\nupdated\nlast\n"
+    );
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
@@ -453,6 +485,7 @@ async fn apply_patch_rejects_unified_diff_header() {
     let error = result.to_string();
     assert!(error.contains("unified diff"));
     assert!(error.contains("*** Update File:"));
+    assert!(error.contains("Recovery: read the target file again"));
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
@@ -473,6 +506,28 @@ async fn apply_patch_rejects_file_metadata_header() {
     let error = result.to_string();
     assert!(error.contains("*** File:"));
     assert!(error.contains("*** Update File:"));
+    assert!(error.contains("Recovery: read the target file again"));
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn apply_patch_rejects_natural_language_instruction_with_recovery_guidance() {
+    let root = unique_temp_dir("patch-natural-language");
+    let tool = ApplyPatchTool;
+    let result = tool
+        .execute(
+            input(serde_json::json!({
+                "patch": "*** Begin Patch\nInsert after '<meta name=\"viewport\">':\n+<script></script>\n*** End Patch"
+            })),
+            context(&root).await,
+        )
+        .await
+        .unwrap_err();
+
+    let error = result.to_string();
+    assert!(error.contains("natural-language edit instructions"));
+    assert!(error.contains("*** Update File:"));
+    assert!(error.contains("Recovery: read the target file again"));
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
@@ -588,6 +643,35 @@ async fn apply_patch_accepts_unprefixed_zero_indent_context_line() {
             .await
             .unwrap(),
         "<body>\nnew\n</body>\n"
+    );
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn apply_patch_accepts_html_insert_before_unprefixed_body_context() {
+    let root = unique_temp_dir("patch-html-body-context");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    tokio::fs::write(
+        root.join("page.html"),
+        "<footer>\n  <p>done</p>\n</footer>\n\n</body>\n",
+    )
+    .await
+    .unwrap();
+    let tool = ApplyPatchTool;
+    let patch = "*** Begin Patch\n*** Update File: page.html\n@@\n <footer>\n   <p>done</p>\n </footer>\n\n+<script type=\"module\">\n+console.log('ready');\n+</script>\n</body>\n*** End Patch";
+
+    tool.execute(
+        input(serde_json::json!({ "patch": patch })),
+        context(&root).await,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        tokio::fs::read_to_string(root.join("page.html"))
+            .await
+            .unwrap(),
+        "<footer>\n  <p>done</p>\n</footer>\n\n<script type=\"module\">\nconsole.log('ready');\n</script>\n</body>\n"
     );
     let _ = tokio::fs::remove_dir_all(root).await;
 }

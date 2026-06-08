@@ -14,6 +14,7 @@ const MOVE_TO: &str = "*** Move to: ";
 const ENVIRONMENT_ID: &str = "*** Environment ID: ";
 const EOF_MARKER: &str = "*** End of File";
 const VALID_HUNK_HEADERS: &str = "valid hunk headers are '*** Add File: {path}', '*** Delete File: {path}', '*** Update File: {path}'";
+const PATCH_RETRY_GUIDANCE: &str = "Recovery: read the target file again, then retry with a smaller Codex-style patch built from the current file contents. Do not repeat the same failed patch.";
 
 pub const APPLY_PATCH_LARK_GRAMMAR: &str = r#"start: begin_patch environment_id? hunk+ end_patch
 begin_patch: "*** Begin Patch" LF
@@ -358,15 +359,19 @@ fn parse_patch(patch: &str) -> Result<Vec<Hunk>, PureError> {
     ) {
         (Some(BEGIN_PATCH), Some(END_PATCH)) => {}
         (Some(first), _) if first != BEGIN_PATCH => {
-            return Err(tool_error("first line must be '*** Begin Patch'"));
+            return Err(tool_error(format!(
+                "first line must be '*** Begin Patch'. {PATCH_RETRY_GUIDANCE}"
+            )));
         }
         (_, Some(last)) if last != END_PATCH => {
-            return Err(tool_error("last line must be '*** End Patch'"));
+            return Err(tool_error(format!(
+                "last line must be '*** End Patch'; send the complete patch including the closing marker. {PATCH_RETRY_GUIDANCE}"
+            )));
         }
         _ => {
-            return Err(tool_error(
-                "patch is empty; first line must be '*** Begin Patch'",
-            ));
+            return Err(tool_error(format!(
+                "patch is empty; first line must be '*** Begin Patch'. {PATCH_RETRY_GUIDANCE}"
+            )));
         }
     }
 
@@ -480,10 +485,14 @@ fn normalize_patch_input(patch: &str) -> Result<Cow<'_, str>, PureError> {
         return Ok(Cow::Borrowed(trimmed));
     };
     let Some(end_index) = end_indices.first().copied() else {
-        return Err(tool_error("last line must be '*** End Patch'"));
+        return Err(tool_error(format!(
+            "last line must be '*** End Patch'; send the complete patch including the closing marker. {PATCH_RETRY_GUIDANCE}"
+        )));
     };
     if end_index < begin_index {
-        return Err(tool_error("last line must be '*** End Patch'"));
+        return Err(tool_error(format!(
+            "last line must be '*** End Patch'. {PATCH_RETRY_GUIDANCE}"
+        )));
     }
     if begin_index == 0 && end_index + 1 == lines.len() {
         return Ok(Cow::Borrowed(trimmed));
@@ -527,7 +536,7 @@ fn invalid_hunk_header(line: &str, line_number: usize) -> PureError {
         "unsupported patch hunk header"
     };
     tool_error(format!(
-        "invalid hunk header at line {line_number}: '{line}'. {guidance}; {VALID_HUNK_HEADERS}"
+        "invalid hunk header at line {line_number}: '{line}'. {guidance}; {VALID_HUNK_HEADERS}. {PATCH_RETRY_GUIDANCE}"
     ))
 }
 
@@ -621,8 +630,8 @@ fn apply_chunks(content: &str, path: &Path, chunks: &[UpdateChunk]) -> Result<St
                 find_sequence(&lines, std::slice::from_ref(context), cursor, false)
             else {
                 return Err(tool_error(format!(
-                    "failed to find context '{context}' in {}",
-                    path.display()
+                    "failed to find context '{context}' in {}. {PATCH_RETRY_GUIDANCE}",
+                    path.display(),
                 )));
             };
             cursor = context_index + 1;
@@ -638,7 +647,7 @@ fn apply_chunks(content: &str, path: &Path, chunks: &[UpdateChunk]) -> Result<St
         let Some((start, old_len, new_lines)) = find_chunk_replacement(&lines, chunk, cursor)
         else {
             return Err(tool_error(format!(
-                "failed to find expected lines in {}:\n{}",
+                "failed to find expected lines in {}:\n{}\n{PATCH_RETRY_GUIDANCE}",
                 path.display(),
                 chunk.old_lines.join("\n")
             )));
@@ -735,18 +744,30 @@ fn find_sequence(lines: &[String], pattern: &[String], start: usize, eof: bool) 
     if pattern.len() > lines.len() {
         return None;
     }
-    for index in start..=lines.len().saturating_sub(pattern.len()) {
-        if eof && index + pattern.len() != lines.len() {
-            continue;
+    let last_start = lines.len().saturating_sub(pattern.len());
+    if eof {
+        let end_indices = [last_start];
+        if let Some(index) = find_sequence_in_indices(lines, pattern, end_indices) {
+            return Some(index);
         }
+    }
+    if start > last_start {
+        return None;
+    }
+    find_sequence_in_indices(lines, pattern, start..=last_start)
+}
+
+fn find_sequence_in_indices(
+    lines: &[String],
+    pattern: &[String],
+    indices: impl IntoIterator<Item = usize> + Clone,
+) -> Option<usize> {
+    for index in indices.clone() {
         if lines[index..index + pattern.len()] == *pattern {
             return Some(index);
         }
     }
-    for index in start..=lines.len().saturating_sub(pattern.len()) {
-        if eof && index + pattern.len() != lines.len() {
-            continue;
-        }
+    for index in indices.clone() {
         if pattern
             .iter()
             .enumerate()
@@ -755,29 +776,20 @@ fn find_sequence(lines: &[String], pattern: &[String], start: usize, eof: bool) 
             return Some(index);
         }
     }
-    for index in start..=lines.len().saturating_sub(pattern.len()) {
-        if eof && index + pattern.len() != lines.len() {
-            continue;
-        }
+    for index in indices.clone() {
         if pattern
             .iter()
             .enumerate()
-            .all(|(offset, expected)| lines_equivalent(&lines[index + offset], expected))
+            .all(|(offset, expected)| lines[index + offset].trim() == expected.trim())
         {
             return Some(index);
         }
     }
-    for index in start..=lines.len().saturating_sub(pattern.len()) {
-        if eof && index + pattern.len() != lines.len() {
-            continue;
-        }
-        if pattern.iter().enumerate().all(|(offset, expected)| {
+    indices.into_iter().find(|&index| {
+        pattern.iter().enumerate().all(|(offset, expected)| {
             normalize_line_for_match(&lines[index + offset]) == normalize_line_for_match(expected)
-        }) {
-            return Some(index);
-        }
-    }
-    None
+        })
+    })
 }
 
 fn lines_equivalent(left: &str, right: &str) -> bool {

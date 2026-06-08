@@ -14,6 +14,7 @@
 +new line
 *** End Patch
 ```
+必须使用 `*** Add File:`、`*** Delete File:` 或 `*** Update File:` 文件操作头；不要使用 `*** File:` 元数据头，也不要写 “Insert after ...” 这类自然语言编辑指令。如果 `apply_patch` 因上下文不匹配或格式错误失败，先用 `read_file` 重新读取目标文件当前内容，再提交更小、更精确的 patch；不要重复提交同一个失败 patch。
 - `spawn_agent`：创建可管理的子代理。参数：`taskName`、`message` 必需，`agentType` 可选（`explorer`、`planner`、`executor`、`reviewer`）。创建后用 `wait_agent` 等待结果。
 - `wait_agent`：等待子代理状态变化或完成。参数：`timeoutMs` 可选。
 - `list_agents`：列出当前 agent tree。参数：`pathPrefix` 可选。
