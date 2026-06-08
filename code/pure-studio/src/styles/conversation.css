@@ -568,31 +568,6 @@
   margin-left: auto;
 }
 
-/* Plan actions */
-.timeline-plan-actions {
-  display: flex;
-  justify-content: flex-end;
-  padding: 8px 12px;
-  border-top: 1px solid #dbeafe;
-}
-.timeline-plan-actions button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border-radius: 6px;
-  border: none;
-  background: #3b82f6;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.timeline-plan-actions button:hover {
-  background: #2563eb;
-}
-
 /* ===== Footer (composer + bottom bar) ===== */
 .conversation-footer {
   position: relative;

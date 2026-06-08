@@ -7,6 +7,7 @@ import {
   createProviderFromTemplate,
   suggestProviderId,
 } from "../src/lib/provider-settings";
+import { hidesToolResult, isQuietFileTool } from "../src/lib/tool-display";
 import { previewTemplates } from "../src/lib/templates";
 import type {
   ConfigPayload,
@@ -619,6 +620,167 @@ function livePlanDeltaCreatesPlanEntry() {
   }
   assertEqual(plan.content, "1. Inspect\n");
   assertEqual(liveDelta.timelineItems.get("turn-1-plan")?.content, "1. Inspect\n");
+  assertEqual(liveDelta.planAction, null);
+}
+
+function runPromptLoadedPlanCreatesPendingPlanAction() {
+  const state = studioReducer(selectedState(), {
+    type: "runPromptLoaded",
+    payload: response([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
+    status: "done",
+  });
+
+  assertDeepEqual(state.planAction, {
+    planId: "turn-1-plan",
+    content: "1. Inspect",
+    mode: "choice",
+  });
+}
+
+function runPromptLoadedStreamingPlanCreatesPendingPlanAction() {
+  const streamingPlan = {
+    ...planItem("turn-1-plan", "turn-1", 10, "1. Inspect"),
+    status: "streaming" as const,
+  };
+  const state = studioReducer(selectedState(), {
+    type: "runPromptLoaded",
+    payload: response([streamingPlan]),
+    status: "done",
+  });
+
+  assertDeepEqual(state.planAction, {
+    planId: "turn-1-plan",
+    content: "1. Inspect",
+    mode: "choice",
+  });
+}
+
+function runPromptLoadedProposedPlanTextCreatesPendingPlanAction() {
+  const state = studioReducer(selectedState(), {
+    type: "runPromptLoaded",
+    payload: response([
+      textItem(
+        "turn-1-text",
+        10,
+        "好的，计划如下：\n\n<proposed_plan>\n# 修复雨滴效果\n\n## 摘要\n- 调整 canvas 雨滴。\n</proposed_plan>",
+      ),
+    ]),
+    status: "done",
+  });
+
+  assertDeepEqual(state.planAction, {
+    planId: "turn-1-text",
+    content: "# 修复雨滴效果\n\n## 摘要\n- 调整 canvas 雨滴。",
+    mode: "choice",
+  });
+}
+
+function dismissPlanActionPreventsSamePlanFromReopening() {
+  const withPlan = studioReducer(selectedState(), {
+    type: "runPromptLoaded",
+    payload: response([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
+    status: "done",
+  });
+  const dismissed = studioReducer(withPlan, { type: "dismissPlanAction" });
+  const reloaded = studioReducer(dismissed, {
+    type: "runPromptLoaded",
+    payload: response([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
+    status: "done",
+  });
+
+  assertEqual(dismissed.planAction, null);
+  assertEqual(dismissed.dismissedPlanId, "turn-1-plan");
+  assertEqual(reloaded.planAction, null);
+}
+
+function setPlanActionModeUpdatesPendingPlanAction() {
+  const withPlan = studioReducer(selectedState(), {
+    type: "runPromptLoaded",
+    payload: response([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
+    status: "done",
+  });
+  const discussing = studioReducer(withPlan, { type: "setPlanActionMode", mode: "discuss" });
+
+  assertEqual(discussing.planAction?.mode, "discuss");
+}
+
+function historicalTimelineLoadDoesNotCreatePlanAction() {
+  const state = studioReducer(selectedState(), {
+    type: "timelineLoaded",
+    sessionId: "session-1",
+    items: [planItem("turn-1-plan", "turn-1", 10, "1. Inspect")],
+    nextSequence: 11,
+  });
+
+  assertEqual(state.planAction, null);
+}
+
+function laterRunWithoutPlanDoesNotReopenHistoricalPlan() {
+  const withHistory = studioReducer(selectedState(), {
+    type: "timelineLoaded",
+    sessionId: "session-1",
+    items: [planItem("turn-1-plan", "turn-1", 10, "1. Inspect")],
+    nextSequence: 11,
+  });
+  const submitted = studioReducer(withHistory, {
+    type: "promptSubmitted",
+    status: "running",
+    startedAt: 100,
+  });
+  const completed = studioReducer(submitted, {
+    type: "runPromptLoaded",
+    payload: response([textItem("turn-2-text", 20, "continue")]),
+    status: "done",
+  });
+
+  assertEqual(completed.planAction, null);
+}
+
+function liveCompletedPlanCreatesPendingPlanAction() {
+  const item = planItem("turn-1-plan", "turn-1", 10, "1. Inspect");
+  const state = studioReducer(selectedState(), {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemCompleted: { sequence: 10, item } },
+    statusText: "running",
+  });
+
+  assertDeepEqual(state.planAction, {
+    planId: "turn-1-plan",
+    content: "1. Inspect",
+    mode: "choice",
+  });
+}
+
+function sessionSelectionClearsPlanActionState() {
+  const withPlan = studioReducer(selectedState(), {
+    type: "runPromptLoaded",
+    payload: response([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
+    status: "done",
+  });
+  const dismissed = studioReducer(withPlan, { type: "dismissPlanAction" });
+  const switched = studioReducer(dismissed, {
+    type: "sessionSelectionLoaded",
+    status: "loaded",
+    payload: {
+      sessionId: "session-2",
+      sessions: [
+        {
+          id: "session-2",
+          projectId: "project-1",
+          title: "Session 2",
+          mode: "auto",
+          updatedAt: 3,
+        },
+      ],
+      agentEvents: [],
+      agents: [],
+      sessionRuntime: runtime,
+    },
+  });
+
+  assertEqual(switched.planAction, null);
+  assertEqual(switched.dismissedPlanId, null);
 }
 
 function toolsFromDifferentTurnsDoNotMerge() {
@@ -933,6 +1095,14 @@ function unknownToolsUseFallbackAndKeepDetails() {
   );
 }
 
+function quietFileToolFailureKeepsResultVisible() {
+  assertEqual(isQuietFileTool("read_file"), true);
+  assertEqual(hidesToolResult("read_file", "completed"), true);
+  assertEqual(hidesToolResult("read_file", "failed"), false);
+  assertEqual(hidesToolResult("search_files", "interrupted"), false);
+  assertEqual(hidesToolResult("bash", "completed"), false);
+}
+
 function inferenceAndNormalTurnTraceAreHidden() {
   const entries = entriesForTimeline([
     inferenceItem("turn-1-inference", "turn-1", 1),
@@ -1117,6 +1287,15 @@ thinkingFromDifferentTurnsDoesNotMerge();
 assistantTextBreaksToolGroup();
 planEntryBreaksToolGroupAndRendersAsPlan();
 livePlanDeltaCreatesPlanEntry();
+runPromptLoadedPlanCreatesPendingPlanAction();
+runPromptLoadedStreamingPlanCreatesPendingPlanAction();
+runPromptLoadedProposedPlanTextCreatesPendingPlanAction();
+dismissPlanActionPreventsSamePlanFromReopening();
+setPlanActionModeUpdatesPendingPlanAction();
+historicalTimelineLoadDoesNotCreatePlanAction();
+laterRunWithoutPlanDoesNotReopenHistoricalPlan();
+liveCompletedPlanCreatesPendingPlanAction();
+sessionSelectionClearsPlanActionState();
 toolsFromDifferentTurnsDoNotMerge();
 toolGroupStatusUsesPriority();
 sessionModeUpdateKeepsTimelineAndUpdatesSessions();
@@ -1128,6 +1307,7 @@ skillViewAppliesAfterRuntimeSnapshot();
 invalidSkillViewResultsDoNotUpdateActiveSkills();
 skillViewFromOtherSessionDoesNotUpdateActiveSkills();
 unknownToolsUseFallbackAndKeepDetails();
+quietFileToolFailureKeepsResultVisible();
 inferenceAndNormalTurnTraceAreHidden();
 abnormalTurnTraceIsKeptWithContent();
 liveFailedTimelineItemKeepsErrorMessage();

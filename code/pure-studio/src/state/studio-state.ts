@@ -33,6 +33,20 @@ import {
 } from "./timeline-state";
 
 export type SettingsTab = "providers" | "skills" | "roles" | "security" | "general";
+export type PlanActionMode = "choice" | "discuss";
+
+export type PlanActionState = {
+  planId: string;
+  content: string;
+  mode: PlanActionMode;
+};
+
+type PlanActionEligibility = "completedPlan" | "currentRunPlan";
+
+type PlanActionCandidate = {
+  planId: string;
+  content: string;
+};
 
 export type StudioState = TimelineStateSlice & {
   projects: ProjectRecord[];
@@ -53,6 +67,8 @@ export type StudioState = TimelineStateSlice & {
   sessionRuntime: SessionRuntime | null;
   approvals: ToolApprovalRequest[];
   pendingUserInput: UserInputRequest | null;
+  planAction: PlanActionState | null;
+  dismissedPlanId: string | null;
   settingsOpen: boolean;
   activeSettingsTab: SettingsTab;
   providerSearch: string;
@@ -86,6 +102,8 @@ export type StudioAction =
   | { type: "resolveApproval"; payload: ToolApprovalResolved; status: string }
   | { type: "userInputRequested"; payload: UserInputRequest; status: string }
   | { type: "userInputResolved"; payload: UserInputResolved; status: string }
+  | { type: "setPlanActionMode"; mode: PlanActionMode }
+  | { type: "dismissPlanAction" }
   | { type: "stopRequested"; status: string }
   | { type: "stopFallback"; status: string }
   | {
@@ -119,6 +137,8 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   sessionRuntime: null,
   approvals: [],
   pendingUserInput: null,
+  planAction: null,
+  dismissedPlanId: null,
   settingsOpen: false,
   activeSettingsTab: "providers",
   providerSearch: "",
@@ -144,6 +164,8 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         ...configFields(state.selectedProviderId, action.payload.config),
         status: action.status,
         turnPhase: "idle",
+        planAction: null,
+        dismissedPlanId: null,
       };
     case "bootstrapFailed":
       return { ...state, status: action.status };
@@ -166,6 +188,8 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         ...emptyTimelineState(),
         approvals: [],
         pendingUserInput: null,
+        planAction: null,
+        dismissedPlanId: null,
         status: action.status,
         turnPhase: "idle",
         turnStartedAt: null,
@@ -182,6 +206,8 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         ...emptyTimelineState(),
         approvals: [],
         pendingUserInput: null,
+        planAction: null,
+        dismissedPlanId: null,
         status: action.status,
         turnPhase: "idle",
         turnStartedAt: null,
@@ -200,11 +226,15 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         sessionRuntime: action.payload.sessionRuntime ?? state.sessionRuntime,
         status: action.status,
       };
-    case "runPromptLoaded":
+    case "runPromptLoaded": {
       if (action.payload.sessionId !== state.selectedSessionId) {
         return state;
       }
-      return {
+      const currentTimelineItemIds = new Set(
+        (action.payload.timelineItems ?? [])
+          .map((item) => item.itemId),
+      );
+      return setPendingPlanAction({
         ...mergeRunPromptTimeline(
           removeOptimisticTimelineItems(state),
           action.payload.sessionId,
@@ -221,7 +251,8 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         status: action.status,
         isBusy: false,
         pendingUserInput: null,
-      };
+      }, currentTimelineItemIds, "currentRunPlan");
+    }
     case "runPromptFailed":
       if (action.sessionId && action.sessionId !== state.selectedSessionId) {
         return state;
@@ -233,6 +264,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         turnStartedAt: null,
         isBusy: false,
         pendingUserInput: null,
+        planAction: null,
       };
     case "setBusy":
       return { ...state, isBusy: action.value };
@@ -286,6 +318,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return {
         ...state,
         pendingUserInput: action.payload,
+        planAction: null,
         status: action.status,
         turnPhase: "userInput",
       };
@@ -299,6 +332,16 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         status: action.status,
         turnPhase: state.turnPhase === "stopping" ? "stopping" : "tool",
       };
+    case "setPlanActionMode":
+      return state.planAction
+        ? { ...state, planAction: { ...state.planAction, mode: action.mode } }
+        : state;
+    case "dismissPlanAction":
+      return {
+        ...state,
+        dismissedPlanId: state.planAction?.planId ?? state.dismissedPlanId,
+        planAction: null,
+      };
     case "stopRequested":
       return { ...state, turnPhase: "stopping", status: action.status };
     case "stopFallback":
@@ -309,6 +352,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         turnStartedAt: null,
         isBusy: false,
         pendingUserInput: null,
+        planAction: null,
       };
     case "promptSubmitted":
       return {
@@ -319,6 +363,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         turnPhase: "running",
         turnStartedAt: action.startedAt,
         pendingUserInput: null,
+        planAction: null,
       };
     case "agentEvent":
       if (action.sessionId !== state.selectedSessionId) {
@@ -343,6 +388,69 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
     default:
       return state;
   }
+}
+
+function setPendingPlanAction(
+  state: StudioState,
+  eligiblePlanIds: Set<string>,
+  eligibility: PlanActionEligibility,
+): StudioState {
+  const plan = latestEligiblePlanCandidate(state, eligiblePlanIds, eligibility);
+  if (!plan) {
+    return state;
+  }
+  if (plan.planId === state.dismissedPlanId) {
+    return state.planAction ? { ...state, planAction: null } : state;
+  }
+  const currentPlanAction = state.planAction;
+  const samePlanStillPending = currentPlanAction?.planId === plan.planId;
+  const mode = samePlanStillPending ? currentPlanAction.mode : "choice";
+  const nextPlanAction = {
+    planId: plan.planId,
+    content: plan.content,
+    mode,
+  };
+  if (
+    state.planAction?.planId === nextPlanAction.planId &&
+    state.planAction.content === nextPlanAction.content &&
+    state.planAction.mode === nextPlanAction.mode
+  ) {
+    return state;
+  }
+  return { ...state, planAction: nextPlanAction };
+}
+
+function latestEligiblePlanCandidate(
+  state: StudioState,
+  eligiblePlanIds: Set<string>,
+  eligibility: PlanActionEligibility,
+): PlanActionCandidate | null {
+  for (let index = state.timelineOrder.length - 1; index >= 0; index--) {
+    const itemId = state.timelineOrder[index];
+    if (!itemId || !eligiblePlanIds.has(itemId)) {
+      continue;
+    }
+    const item = state.timelineItems.get(itemId);
+    if (!item?.content.trim()) {
+      continue;
+    }
+    if (item.kind === "plan" && (eligibility === "currentRunPlan" || item.status === "completed")) {
+      return { planId: item.itemId, content: item.content };
+    }
+    if (eligibility === "currentRunPlan" && item.kind === "text" && item.role === "assistant") {
+      const proposedPlan = extractProposedPlanContent(item.content);
+      if (proposedPlan) {
+        return { planId: item.itemId, content: proposedPlan };
+      }
+    }
+  }
+  return null;
+}
+
+function extractProposedPlanContent(content: string): string | null {
+  const match = content.match(/<proposed_plan>\s*([\s\S]*?)\s*<\/proposed_plan>/i);
+  const plan = match?.[1]?.trim();
+  return plan || null;
 }
 
 function reduceAgentEvent(
@@ -405,11 +513,12 @@ function reduceAgentEvent(
   }
   if ("timelineItemCompleted" in event) {
     const nextState = applyLiveTimelineEvent(state, state.selectedSessionId ?? "", event);
-    return {
+    const completed = event.timelineItemCompleted.item;
+    return setPendingPlanAction({
       ...nextState,
       status: statusText,
-      turnPhase: phaseForTimelineItem(event.timelineItemCompleted.item, state.turnPhase),
-    };
+      turnPhase: phaseForTimelineItem(completed, state.turnPhase),
+    }, new Set([completed.itemId]), "completedPlan");
   }
   if ("timelineItemFailed" in event) {
     return {
