@@ -6,9 +6,12 @@ import type {
   ProviderRecord,
   ProviderSettingsSaveSnapshot,
   ProviderTemplateRecord,
+  McpServerInput,
+  McpServerRecord,
   PermissionMode,
   RoleRecord,
 } from "../types";
+import { McpSettings } from "./McpSettings";
 import { ProviderSettings } from "./ProviderSettings";
 import { RoleSettings } from "./RoleSettings";
 import { SecuritySettings } from "./SecuritySettings";
@@ -17,6 +20,7 @@ import { SkillsSettings } from "./SkillsSettings";
 type SettingsPageProps = {
   activeSettingsTab: SettingsTab;
   providers: ProviderRecord[];
+  mcpServers: McpServerRecord[];
   providerTemplates: ProviderTemplateRecord[];
   roles: RoleRecord[];
   selectedProjectId: string | null;
@@ -30,13 +34,15 @@ type SettingsPageProps = {
   onSetActiveTab: (tab: SettingsTab) => void;
   onSaveProviderSettings: (snapshot?: ProviderSettingsSaveSnapshot) => Promise<boolean>;
   onSavePermissionMode: (mode: PermissionMode) => Promise<void>;
+  onSaveMcpSettings: (servers: McpServerInput[]) => Promise<boolean>;
 };
 
-const SETTINGS_TABS: SettingsTab[] = ["providers", "skills", "roles", "security", "general"];
+const SETTINGS_TABS: SettingsTab[] = ["providers", "skills", "roles", "mcp", "security", "general"];
 
 export function SettingsPage({
   activeSettingsTab,
   providers,
+  mcpServers,
   providerTemplates,
   roles,
   selectedProjectId,
@@ -48,6 +54,7 @@ export function SettingsPage({
   onSetActiveTab,
   onSaveProviderSettings,
   onSavePermissionMode,
+  onSaveMcpSettings,
   setRoles,
   setProviderSearch,
 }: SettingsPageProps) {
@@ -95,6 +102,8 @@ export function SettingsPage({
         />
       ) : activeSettingsTab === "skills" ? (
         <SkillsSettings selectedProjectId={selectedProjectId} />
+      ) : activeSettingsTab === "mcp" ? (
+        <McpSettings servers={mcpServers} onSaveMcpSettings={onSaveMcpSettings} />
       ) : activeSettingsTab === "security" ? (
         <SecuritySettings
           permissionMode={permissionMode}

@@ -64,6 +64,7 @@ export function App() {
         <SettingsPage
           activeSettingsTab={state.activeSettingsTab}
           providers={state.providers}
+          mcpServers={state.mcpServers}
           providerTemplates={state.providerTemplates}
           roles={state.roles}
           selectedProjectId={state.selectedProjectId}
@@ -77,6 +78,7 @@ export function App() {
           onSetActiveTab={(tab) => studio.dispatch({ type: "setSettingsOpen", value: true, tab })}
           onSaveProviderSettings={(snapshot) => studio.onSaveProviderSettings(snapshot)}
           onSavePermissionMode={(mode) => studio.onSavePermissionMode(mode)}
+          onSaveMcpSettings={(servers) => studio.onSaveMcpSettings(servers)}
         />
       ) : null}
     </main>

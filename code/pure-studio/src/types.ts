@@ -132,6 +132,27 @@ export type DiscoveredSkillsPayload = {
   warnings: string[];
 };
 
+export type McpTransport = "stdio" | "streamableHttp";
+
+export type KeyValuePair = {
+  key: string;
+  value: string;
+};
+
+export type McpServerRecord = {
+  id: string;
+  enabled: boolean;
+  transport: McpTransport;
+  command?: string | null;
+  args: string[];
+  env: KeyValuePair[];
+  cwd?: string | null;
+  url?: string | null;
+  bearerTokenEnvVar?: string | null;
+  headers: KeyValuePair[];
+  endpoint: string;
+};
+
 export type RuntimeCostAmount = {
   currency: string;
   amount: number;
@@ -281,6 +302,7 @@ export type ConfigPayload = {
   providers: ProviderRecord[];
   roles: RoleRecord[];
   templates: ProviderTemplateRecord[];
+  mcpServers: McpServerRecord[];
   configExists: boolean;
 };
 
@@ -294,6 +316,23 @@ export type ProviderSettingsSaveSnapshot = {
   selectedProviderId?: string | null;
   providers?: ProviderRecord[];
   roles?: RoleRecord[];
+};
+
+export type McpSettingsInput = {
+  servers: McpServerInput[];
+};
+
+export type McpServerInput = {
+  id: string;
+  enabled: boolean;
+  transport: McpTransport;
+  command?: string | null;
+  args: string[];
+  env: KeyValuePair[];
+  cwd?: string | null;
+  url?: string | null;
+  bearerTokenEnvVar?: string | null;
+  headers: KeyValuePair[];
 };
 
 export type ProviderInput = {

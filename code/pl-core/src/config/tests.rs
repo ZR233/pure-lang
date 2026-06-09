@@ -6,7 +6,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::role::{ModelRole, ReasoningEffort};
 use super::runtime::SkillsConfig;
 use super::store::{ConfigPaths, ConfigStore};
-use super::{CONFIG_SCHEMA_VERSION, DEFAULT_MODEL, PureConfig};
+use super::{
+    CONFIG_SCHEMA_VERSION, DEFAULT_MODEL, McpServerConfig, McpServerTransport, PureConfig,
+    active_mcp_server_names,
+};
 use crate::turn::PermissionMode;
 
 fn temp_home(name: &str) -> PathBuf {
@@ -69,6 +72,26 @@ fn toml_round_trip_preserves_roles_models_and_token() {
     config.runtime.permission_mode = PermissionMode::AutoReview;
     config.runtime.active_skills = vec!["rust".to_string(), "git".to_string()];
     config.runtime.active_mcp_servers = vec!["github".to_string()];
+    config.mcp_servers.insert(
+        "filesystem".to_string(),
+        McpServerConfig {
+            command: Some("npx".to_string()),
+            args: vec![
+                "-y".to_string(),
+                "@modelcontextprotocol/server-filesystem".to_string(),
+            ],
+            ..Default::default()
+        },
+    );
+    config.mcp_servers.insert(
+        "github".to_string(),
+        McpServerConfig {
+            transport: McpServerTransport::StreamableHttp,
+            url: Some("https://example.com/mcp".to_string()),
+            bearer_token_env_var: Some("GITHUB_MCP_TOKEN".to_string()),
+            ..Default::default()
+        },
+    );
     config.skills.auto_learn = false;
     config.skills.disabled = vec!["old-flow".to_string()];
     let model = &mut config.providers.get_mut("deepseek").unwrap().models[0];
@@ -98,6 +121,18 @@ fn toml_round_trip_preserves_roles_models_and_token() {
         parsed.runtime.active_mcp_servers,
         vec!["github".to_string()]
     );
+    assert_eq!(
+        active_mcp_server_names(&parsed.mcp_servers),
+        vec!["filesystem".to_string(), "github".to_string()]
+    );
+    assert_eq!(
+        parsed.mcp_servers["filesystem"].command.as_deref(),
+        Some("npx")
+    );
+    assert_eq!(
+        parsed.mcp_servers["github"].transport,
+        McpServerTransport::StreamableHttp
+    );
     assert!(!parsed.skills.auto_learn);
     assert_eq!(parsed.skills.disabled, vec!["old-flow".to_string()]);
     assert_eq!(
@@ -108,6 +143,65 @@ fn toml_round_trip_preserves_roles_models_and_token() {
         parsed.providers["deepseek"].models[0].input_price_per_mtok,
         Some(1.0)
     );
+}
+
+#[test]
+fn mcp_config_rejects_invalid_server_id() {
+    let mut config = PureConfig::default_config();
+    config.mcp_servers.insert(
+        "bad server".to_string(),
+        McpServerConfig {
+            command: Some("npx".to_string()),
+            ..Default::default()
+        },
+    );
+
+    let error = config.validate().unwrap_err().to_string();
+
+    assert!(error.contains("MCP server id"));
+}
+
+#[test]
+fn mcp_config_rejects_enabled_stdio_without_command() {
+    let mut config = PureConfig::default_config();
+    config
+        .mcp_servers
+        .insert("filesystem".to_string(), McpServerConfig::default());
+
+    let error = config.validate().unwrap_err().to_string();
+
+    assert!(error.contains("stdio command is required"));
+}
+
+#[test]
+fn mcp_config_rejects_enabled_http_without_url() {
+    let mut config = PureConfig::default_config();
+    config.mcp_servers.insert(
+        "github".to_string(),
+        McpServerConfig {
+            transport: McpServerTransport::StreamableHttp,
+            ..Default::default()
+        },
+    );
+
+    let error = config.validate().unwrap_err().to_string();
+
+    assert!(error.contains("streamable HTTP url is required"));
+}
+
+#[test]
+fn disabled_mcp_server_can_keep_incomplete_draft() {
+    let mut config = PureConfig::default_config();
+    config.mcp_servers.insert(
+        "draft".to_string(),
+        McpServerConfig {
+            enabled: false,
+            ..Default::default()
+        },
+    );
+
+    config.validate().unwrap();
+    assert!(active_mcp_server_names(&config.mcp_servers).is_empty());
 }
 
 #[test]

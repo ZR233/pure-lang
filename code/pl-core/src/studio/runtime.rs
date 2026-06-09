@@ -144,6 +144,7 @@ impl StudioRuntime {
 
         let mut core = PureCore::from_config(&config, ModelRole::Planner)?;
         core.register_default_tools(workspace_root.clone(), Some(workspace_instructions.clone()));
+        core.register_configured_mcp_tools().await?;
         if options.tool_approval_callback.is_none()
             && (options.requires_user_approval_callback() || mode == CompileMode::Plan)
         {

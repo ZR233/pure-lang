@@ -1,18 +1,20 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use pl_core::{
-    ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProjectRecord, ProviderConfig,
-    ProviderEdit, ProviderKind, ProviderModelEdit, ProviderTemplateKind, PureConfig, RoleEdit,
-    SessionRecord, SessionRuntimeRecord, SkillCatalog, SkillMetadata, SkillSourceKind,
-    StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord, StudioRuntime, TraceEvent,
-    TraceEventKind, TurnResultStatus, infer_provider_template_kind,
+    ConfigStore, McpServerConfig, McpServerTransport, ModelCapabilityConfig, ModelConfig,
+    ModelRole, ProjectRecord, ProviderConfig, ProviderEdit, ProviderKind, ProviderModelEdit,
+    ProviderTemplateKind, PureConfig, RoleEdit, SessionRecord, SessionRuntimeRecord, SkillCatalog,
+    SkillMetadata, SkillSourceKind, StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord,
+    StudioRuntime, TraceEvent, TraceEventKind, TurnResultStatus, active_mcp_server_names,
+    infer_provider_template_kind,
 };
 use pl_protocol::{Message, MessageContent, MessageRole};
 
 use crate::dto::{
-    AgentDto, AgentEventDto, ConfigDto, DiscoveredSkillsDto, ModelDto, PlanStateDto, ProjectDto,
-    ProviderDto, ProviderInput, ProviderSettingsInput, ProviderTemplateDto, RoleDto, RoleInput,
-    RuntimeCostAmountDto, RuntimeUsageDto, SessionDto, SessionRuntimeDto, SkillDto,
+    AgentDto, AgentEventDto, ConfigDto, DiscoveredSkillsDto, KeyValueDto, McpServerDto,
+    McpSettingsInput, ModelDto, PlanStateDto, ProjectDto, ProviderDto, ProviderInput,
+    ProviderSettingsInput, ProviderTemplateDto, RoleDto, RoleInput, RuntimeCostAmountDto,
+    RuntimeUsageDto, SessionDto, SessionRuntimeDto, SkillDto,
 };
 use crate::state::{CommandError, CommandResult};
 
@@ -24,6 +26,7 @@ pub fn config_dto(store: &ConfigStore) -> CommandResult<ConfigDto> {
         providers: provider_dtos(&config),
         roles: role_dtos(&config),
         templates: provider_template_dtos()?,
+        mcp_servers: mcp_server_dtos(&config),
         config_exists: store.config_exists(),
     })
 }
@@ -92,8 +95,38 @@ pub fn session_runtime_dto(
         updated_at: usage.updated_at,
         usage,
         active_skills,
-        active_mcp_servers: config.runtime.active_mcp_servers.clone(),
+        active_mcp_servers: active_mcp_server_names(&config.mcp_servers),
     }
+}
+
+pub fn mcp_server_dtos(config: &PureConfig) -> Vec<McpServerDto> {
+    config
+        .mcp_servers
+        .iter()
+        .map(|(server_id, server)| McpServerDto {
+            id: server_id.clone(),
+            enabled: server.enabled,
+            transport: server.transport.as_str().to_string(),
+            command: server.command.clone(),
+            args: server.args.clone(),
+            env: key_value_dtos(&server.env),
+            cwd: server.cwd.clone(),
+            url: server.url.clone(),
+            bearer_token_env_var: server.bearer_token_env_var.clone(),
+            headers: key_value_dtos(&server.headers),
+            endpoint: server.endpoint_summary(),
+        })
+        .collect()
+}
+
+fn key_value_dtos(values: &BTreeMap<String, String>) -> Vec<KeyValueDto> {
+    values
+        .iter()
+        .map(|(key, value)| KeyValueDto {
+            key: key.clone(),
+            value: value.clone(),
+        })
+        .collect()
 }
 
 fn active_skill_names_from_messages(messages: &[Message]) -> Vec<String> {
@@ -631,14 +664,92 @@ pub fn provider_settings_to_edit(
     })
 }
 
+pub fn mcp_settings_to_servers(
+    input: McpSettingsInput,
+) -> CommandResult<BTreeMap<String, McpServerConfig>> {
+    let mut servers = BTreeMap::new();
+    for server in input.servers {
+        let id = non_empty(server.id, "mcp server id")?;
+        if servers.contains_key(&id) {
+            return Err(CommandError::from_display(format!(
+                "duplicate mcp server id: {id}"
+            )));
+        }
+        let transport = match server.transport.as_str() {
+            "stdio" => McpServerTransport::Stdio,
+            "streamableHttp" => McpServerTransport::StreamableHttp,
+            value => {
+                return Err(CommandError::from_display(format!(
+                    "unsupported mcp transport: {value}"
+                )));
+            }
+        };
+        servers.insert(
+            id,
+            McpServerConfig {
+                enabled: server.enabled,
+                transport,
+                command: optional_non_empty(server.command),
+                args: server
+                    .args
+                    .into_iter()
+                    .map(|arg| arg.trim().to_string())
+                    .filter(|arg| !arg.is_empty())
+                    .collect(),
+                env: key_value_map(server.env, "env")?,
+                cwd: optional_non_empty(server.cwd),
+                url: optional_non_empty(server.url),
+                bearer_token_env_var: optional_non_empty(server.bearer_token_env_var),
+                headers: key_value_map(server.headers, "headers")?,
+            },
+        );
+    }
+    Ok(servers)
+}
+
+fn key_value_map(values: Vec<KeyValueDto>, label: &str) -> CommandResult<BTreeMap<String, String>> {
+    let mut map = BTreeMap::new();
+    for value in values {
+        let key = value.key.trim().to_string();
+        if key.is_empty() && value.value.trim().is_empty() {
+            continue;
+        }
+        if key.is_empty() {
+            return Err(CommandError::from_display(format!(
+                "{label} key is required"
+            )));
+        }
+        if map.insert(key.clone(), value.value).is_some() {
+            return Err(CommandError::from_display(format!(
+                "duplicate {label} key: {key}"
+            )));
+        }
+    }
+    Ok(map)
+}
+
+fn non_empty(value: String, label: &str) -> CommandResult<String> {
+    let trimmed = value.trim().to_string();
+    if trimmed.is_empty() {
+        return Err(CommandError::from_display(format!("{label} is required")));
+    }
+    Ok(trimmed)
+}
+
+fn optional_non_empty(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
     use std::path::PathBuf;
 
     use pl_core::{
-        ConfigPaths, ConfigStore, PermissionMode, PureConfig, RuntimeUsageSnapshot,
-        SessionRuntimeRecord, StudioAgentSnapshotRecord,
+        ConfigPaths, ConfigStore, McpServerConfig, McpServerTransport, PermissionMode, PureConfig,
+        RuntimeUsageSnapshot, SessionRuntimeRecord, StudioAgentSnapshotRecord,
     };
     use pl_protocol::{
         AgentStatus, PlanLifecycleEvent, PlanLifecycleState, RuntimeCostAmount, TimelineDelta,
@@ -661,11 +772,22 @@ mod tests {
         let store = ConfigStore::new(ConfigPaths::from_home(&home));
         let mut config = PureConfig::default_config();
         config.runtime.permission_mode = PermissionMode::FullAccess;
+        config.mcp_servers.insert(
+            "filesystem".to_string(),
+            McpServerConfig {
+                command: Some("npx".to_string()),
+                args: vec!["-y".to_string(), "mcp-server".to_string()],
+                ..Default::default()
+            },
+        );
         store.save(&config).unwrap();
 
         let dto = config_dto(&store).unwrap();
 
         assert_eq!(dto.permission_mode, "full-access");
+        assert_eq!(dto.mcp_servers.len(), 1);
+        assert_eq!(dto.mcp_servers[0].id, "filesystem");
+        assert_eq!(dto.mcp_servers[0].transport, "stdio");
         let _ = std::fs::remove_dir_all(home);
     }
 
@@ -708,6 +830,14 @@ mod tests {
     fn session_runtime_dto_exposes_nested_runtime_usage_and_costs() {
         let mut config = PureConfig::default();
         config.runtime.active_mcp_servers = vec!["filesystem".to_string()];
+        config.mcp_servers.insert(
+            "github".to_string(),
+            McpServerConfig {
+                transport: McpServerTransport::StreamableHttp,
+                url: Some("https://example.com/mcp".to_string()),
+                ..Default::default()
+            },
+        );
         let dto = session_runtime_dto(
             SessionRuntimeRecord {
                 session_id: "session-1".to_string(),
@@ -740,7 +870,7 @@ mod tests {
         assert_eq!(dto.session_id, "session-1");
         assert_eq!(dto.updated_at, 99);
         assert_eq!(dto.active_skills, vec!["skill-creator"]);
-        assert_eq!(dto.active_mcp_servers, vec!["filesystem"]);
+        assert_eq!(dto.active_mcp_servers, vec!["github"]);
         assert_eq!(dto.usage.model, "model-a");
         assert_eq!(dto.usage.context_window, Some(1_000_000));
         assert_eq!(dto.usage.cache_hit_rate, Some(0.25));

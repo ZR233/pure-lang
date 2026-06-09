@@ -141,6 +141,7 @@ impl ProviderSettingsEdit {
             schema_version: CONFIG_SCHEMA_VERSION,
             runtime: current.runtime.clone(),
             skills: current.skills.clone(),
+            mcp_servers: current.mcp_servers.clone(),
             roles,
             providers,
         };

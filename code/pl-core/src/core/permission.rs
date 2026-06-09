@@ -147,6 +147,9 @@ pub(super) fn canonicalize_existing_or_parent(candidate: &Path) -> PathBuf {
 }
 
 pub(super) fn permission_risk_summary(tool_name: &str) -> &'static str {
+    if crate::mcp::is_mcp_tool_name(tool_name) {
+        return "trusted MCP server tool";
+    }
     match tool_name {
         "bash" => "shell command; may execute arbitrary process actions",
         "write_stdin" => "stdin or polling for an already approved shell process",

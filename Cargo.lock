@@ -2736,6 +2736,7 @@ dependencies = [
  "pl-model",
  "pl-protocol",
  "pretty_assertions",
+ "reqwest",
  "sea-orm",
  "serde",
  "serde_json",

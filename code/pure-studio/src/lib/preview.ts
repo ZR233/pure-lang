@@ -2,6 +2,7 @@ import type {
   ConfigPayload,
   AgentDto,
   AgentTimelineEvent,
+  McpServerRecord,
   ProjectRecord,
   RoleRecord,
   SessionRecord,
@@ -77,6 +78,35 @@ export const previewSkills: SkillRecord[] = [
     platforms: ["windows"],
     scope: "project",
     path: "D:\\Users\\zrufo\\Documents\\opensource\\pure-lang\\skills\\pure-studio-local",
+  },
+];
+
+export const previewMcpServers: McpServerRecord[] = [
+  {
+    id: "filesystem",
+    enabled: true,
+    transport: "stdio",
+    command: "npx",
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "D:/workspace"],
+    env: [],
+    cwd: null,
+    url: null,
+    bearerTokenEnvVar: null,
+    headers: [],
+    endpoint: "npx",
+  },
+  {
+    id: "github",
+    enabled: true,
+    transport: "streamableHttp",
+    command: null,
+    args: [],
+    env: [],
+    cwd: null,
+    url: "https://example.com/mcp",
+    bearerTokenEnvVar: "GITHUB_MCP_TOKEN",
+    headers: [],
+    endpoint: "https://example.com/mcp",
   },
 ];
 
@@ -308,6 +338,16 @@ permission_mode = "request-approval"
 active_skills = ["rust", "git", "doc"]
 active_mcp_servers = ["github", "filesystem"]
 
+[mcp_servers.filesystem]
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "D:/workspace"]
+
+[mcp_servers.github]
+transport = "streamableHttp"
+url = "https://example.com/mcp"
+bearer_token_env_var = "GITHUB_MCP_TOKEN"
+
 [roles.explorer]
 provider = "deepseek"
 model = "deepseek-v4-flash"
@@ -380,6 +420,7 @@ default_model = "gpt-5.5"
     ],
     roles,
     templates: previewTemplates,
+    mcpServers: previewMcpServers,
     configExists: false,
   };
 }

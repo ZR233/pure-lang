@@ -42,6 +42,7 @@ const config: ConfigPayload = {
   providers: [],
   roles: [],
   templates: [],
+  mcpServers: [],
   configExists: false,
 };
 
@@ -1168,11 +1169,27 @@ function configLoadedUpdatesPermissionMode() {
     payload: {
       ...config,
       permissionMode: "auto-review",
+      mcpServers: [
+        {
+          id: "github",
+          enabled: true,
+          transport: "streamableHttp",
+          command: null,
+          args: [],
+          env: [],
+          cwd: null,
+          url: "https://example.com/mcp",
+          bearerTokenEnvVar: "GITHUB_MCP_TOKEN",
+          headers: [],
+          endpoint: "https://example.com/mcp",
+        },
+      ],
     },
     status: "saved",
   });
 
   assertEqual(state.permissionMode, "auto-review");
+  assertDeepEqual(state.mcpServers.map((server) => server.id), ["github"]);
   assertEqual(state.status, "saved");
 }
 

@@ -72,6 +72,20 @@ permission_mode = "request-approval"
 active_skills = ["rust", "git", "doc"]
 active_mcp_servers = ["github", "filesystem"]
 
+[mcp_servers.filesystem]
+enabled = true
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "D:/workspace"]
+env = {}
+
+[mcp_servers.github]
+enabled = true
+transport = "streamableHttp"
+url = "https://example.com/mcp"
+bearer_token_env_var = "GITHUB_MCP_TOKEN"
+headers = {}
+
 [skills]
 enabled = true
 auto_learn = true
@@ -196,7 +210,7 @@ Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-
 
 ## 10.6 运行态声明
 
-`[runtime]` 保存本地 Studio 运行态展示所需的可选声明。首版字段：
+`[runtime]` 保存本地 Studio 运行态展示所需的可选声明。字段：
 
 - `permission_mode`
 - `active_skills`
@@ -210,11 +224,43 @@ Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-
 
 Pure v1 的权限模式是本地策略层，不是 OS 沙箱。`request-approval` 和 `auto-review` 都直接允许 workspace 内读写；工具请求 workspace 外路径或 workspace 外 cwd 时分别走用户审批或 reviewer 审批。`full-access` 会放宽 Pure 文件工具和 `bash.workingDirectory` 的 workspace 边界并直接放行。
 
-`active_skills` 和 `active_mcp_servers` 仅声明旧版 GUI 状态栏展示所需的 Skill / MCP 名称，不负责安装、启动或连接真实 Skill/MCP 管理器。缺失 `[runtime]` 或字段时按空列表处理；缺失 `permission_mode` 时按 `request-approval` 处理。旧配置里的 `workspace-write` 兼容读取为 `request-approval`，新配置不再输出该值。
+`active_skills` 仅声明旧版 GUI 状态栏展示所需的 Skill 名称，不作为真实 skills 启停来源。`active_mcp_servers` 是兼容旧配置和旧状态栏的字段，真实 MCP server 启停来源改为 `[mcp_servers.<id>].enabled`。缺失 `[runtime]` 或字段时按空列表处理；缺失 `permission_mode` 时按 `request-approval` 处理。旧配置里的 `workspace-write` 兼容读取为 `request-approval`，新配置不再输出该值。
 
 真实 skills 能力由 `[skills]` 配置和项目目录驱动。`active_skills` 不作为启停来源，不影响模型可见的 skills 列表，也不作为当前会话状态栏 Skills 的来源。Studio 当前会话的 `activeSkills` 由该会话中成功执行过的 `skill_view` 工具结果派生，表示 skill 内容已经进入上下文。
 
-## 10.7 Skills 配置
+## 10.7 MCP 配置
+
+MCP server 配置保存在顶层 `[mcp_servers.<server_id>]` 表，参考 Codex 的 MCP 配置形态。`server_id` 必须非空，且只能包含 ASCII 字母、数字、`_` 和 `-`，因为它会参与模型可见工具名。
+
+每个 MCP server 必须配置：
+
+- `enabled`：是否启用该 server，默认 `true`。
+- `transport`：`stdio` 或 `streamableHttp`。
+
+`stdio` server 必须配置：
+
+- `command`
+- `args`
+- `env`
+- `cwd`（可选）
+
+`streamableHttp` server 必须配置：
+
+- `url`
+- `bearer_token_env_var`（可选）
+- `headers`
+
+Pure 在普通对话、Auto Mode 和 Plan Mode 中都会向模型暴露已启用 MCP server 的 tools。启用 MCP server 表示用户显式信任该 server；MCP tool 调用不再触发额外审批弹窗。由于 MCP tool 不声明可靠的本地读写能力，Pure 不把 MCP 原始协议类型写入 `pl-protocol`，只通过现有 tool timeline 和 tool result 字符串表达执行状态。
+
+模型可见的 MCP tool 名称固定为：
+
+```text
+mcp__{server_id}__{tool_name}
+```
+
+该命名避免远端 tool 与本地工具或其他 server tool 冲突。若 server id、远端 tool name 或合成后的工具名不满足 provider function name 约束，注册阶段必须返回清晰配置/运行时错误。
+
+## 10.8 Skills 配置
 
 `[skills]` 控制本地 skills 系统：
 
@@ -231,7 +277,7 @@ Pure v1 的权限模式是本地策略层，不是 OS 沙箱。`request-approval
 
 系统 skills 来自编译进 `pl-core` 的内置资源，并同步缓存到 `~/.pure/skills/.system/`。该目录由 Pure 管理，用户需要覆盖系统 skill 时应在项目 `skills/` 目录创建同名 skill。
 
-## 10.8 配置草稿
+## 10.9 配置草稿
 
 配置构造和校验的纯逻辑属于 `pl-core`。`pure-studio` 设置页可以使用默认配置草稿，并支持：
 
@@ -252,7 +298,7 @@ Pure v1 的权限模式是本地策略层，不是 OS 沙箱。`request-approval
 - 同一 provider 下模型 slug 不重复。
 - 角色引用的默认模型必须声明至少一个 `reasoning_efforts`，用于生成角色 `effort`。
 
-## 10.9 pure-studio 设置页
+## 10.10 pure-studio 设置页
 
 `pure-studio` 设置页复用 `pl-core` 的配置类型和校验逻辑，首版覆盖：
 
@@ -261,8 +307,11 @@ Pure v1 的权限模式是本地策略层，不是 OS 沙箱。`request-approval
 - provider 默认模型和自定义模型。
 - 四个模型角色到 provider/model/effort 的路由。
 - Security 标签页选择权限模式：请求批准、替我审批、完全访问。选择后即时写入 `[runtime].permission_mode`。
+- MCP 标签页管理 `[mcp_servers]`，包括 server id、启用状态、stdio/Streamable HTTP 传输方式、命令参数、环境变量、HTTP URL 和 token 环境变量。
 
 每次设置项写入前必须执行 `PureConfig::validate()`；失败时只在 UI 中展示错误，不写入磁盘。
+
+MCP 标签页使用结构化表单，不展示 raw TOML。新增和编辑 server 使用本地草稿；保存成功后即时写入 `~/.pure/config.toml` 并刷新设置页状态。删除 server 和启用切换同样即时写入。设置页状态栏展示的 MCP 数量和列表来自当前配置中 `enabled = true` 的 server。
 
 设置页 UI 按 React 页面模块拆分，顶层 App 负责页面路由和共享状态，具体页面放在 `src/pages`，可复用组件放在 `src/components`，Tauri 命令封装放在 `src/lib`。Provider 标签页优先从 `PureConfig.providers` 派生 provider 卡片列表，不引入新的配置存储。
 
@@ -299,8 +348,10 @@ Vite 预览只用于布局和视觉对照，最终应用行为仍以 Tauri 运�
 
 聊天界面使用双栏布局：左侧项目/会话栏和主聊天区，不再展示右侧工具历史面板。主聊天区底部状态栏左侧展示 `Auto / Plan` 模式、当前模型、推理强度、权限模式和更多入口，右侧展示上下文使用量、按货币分组的费用估算、Skill/MCP 数量和子代理数量；Skill/MCP 默认只显示数量，悬浮或键盘聚焦时展示完整列表。由于左侧栏会占用窗口宽度，状态栏响应式优先按聊天 footer 自身宽度判断，并保留整窗宽度兜底：footer 约 `1040px` 以下能力和子代理进入更多菜单，footer 约 `760px` 以下费用也进入更多菜单，footer 约 `520px` 以下上下文也进入更多菜单。整窗 `1320px` 以下直接把费用、能力和子代理收入更多菜单，用于不支持 container query 的 WebView2 兜底。更多菜单直接展示被收起状态的摘要和详情，并且不得被状态栏滚动容器或窗口边界裁剪。子代理列表展示每个 agent 的运行费用摘要。
 
-## 10.10 凭据策略
+## 10.11 凭据策略
 
 配置允许持久化明文 `bearer_token`，但这会把 API token 直接写入 `~/.pure/config.toml`。当前运行时只使用配置中保存的 `bearer_token` 作为 provider API key。
 
 schema v3 不再保留 `env_key`、`auth_command` 或 `env_http_headers` 字段。`pure-studio` 设置页按用户确认会把输入的 API key 明文写入对应 provider 的 `bearer_token`。后续版本可以增加系统凭据库模式，但当前运行时不从环境变量读取 provider key。
+
+MCP stdio server 的 `env` 会按配置原样传给子进程，可能包含明文凭据。Streamable HTTP 的 `bearer_token_env_var` 只保存环境变量名，运行时从 Pure 进程环境读取对应 token 并构造 Authorization header。
