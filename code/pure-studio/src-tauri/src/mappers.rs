@@ -1,11 +1,12 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use pl_core::{
-    ConfigStore, McpServerConfig, McpServerTransport, ModelCapabilityConfig, ModelConfig,
-    ModelRole, ProjectRecord, ProviderConfig, ProviderEdit, ProviderKind, ProviderModelEdit,
-    ProviderTemplateKind, PureConfig, RoleEdit, SessionRecord, SessionRuntimeRecord, SkillCatalog,
-    SkillMetadata, SkillSourceKind, StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord,
-    StudioRuntime, TraceEvent, TraceEventKind, TurnResultStatus, active_mcp_server_names,
+    BuiltinMcpServerState, ConfigStore, McpServerConfig, McpServerTransport, ModelCapabilityConfig,
+    ModelConfig, ModelRole, ProjectRecord, ProviderConfig, ProviderEdit, ProviderKind,
+    ProviderModelEdit, ProviderTemplateKind, PureConfig, RoleEdit, SessionRecord,
+    SessionRuntimeRecord, SkillCatalog, SkillMetadata, SkillSourceKind, StudioAgentSnapshotRecord,
+    StudioAgentTimelineEventRecord, StudioRuntime, TraceEvent, TraceEventKind, TurnResultStatus,
+    active_mcp_server_names, builtin_mcp_server_ids, effective_mcp_servers,
     infer_provider_template_kind,
 };
 use pl_protocol::{Message, MessageContent, MessageRole};
@@ -95,26 +96,31 @@ pub fn session_runtime_dto(
         updated_at: usage.updated_at,
         usage,
         active_skills,
-        active_mcp_servers: active_mcp_server_names(&config.mcp_servers),
+        active_mcp_servers: active_mcp_server_names(config),
     }
 }
 
 pub fn mcp_server_dtos(config: &PureConfig) -> Vec<McpServerDto> {
-    config
-        .mcp_servers
-        .iter()
-        .map(|(server_id, server)| McpServerDto {
-            id: server_id.clone(),
-            enabled: server.enabled,
-            transport: server.transport.as_str().to_string(),
-            command: server.command.clone(),
-            args: server.args.clone(),
-            env: key_value_dtos(&server.env),
-            cwd: server.cwd.clone(),
-            url: server.url.clone(),
-            bearer_token_env_var: server.bearer_token_env_var.clone(),
-            headers: key_value_dtos(&server.headers),
-            endpoint: server.endpoint_summary(),
+    effective_mcp_servers(config)
+        .into_values()
+        .map(|server| McpServerDto {
+            id: server.id,
+            enabled: server.config.enabled,
+            transport: server.config.transport.as_str().to_string(),
+            command: server.config.command.clone(),
+            args: server.config.args.clone(),
+            env: key_value_dtos(&server.config.env),
+            cwd: server.config.cwd.clone(),
+            url: server.config.url.clone(),
+            bearer_token_env_var: server.config.bearer_token_env_var.clone(),
+            headers: key_value_dtos(&server.config.headers),
+            endpoint: server.config.endpoint_summary(),
+            source_kind: server.source_kind.as_str().to_string(),
+            source_label: server.source_label,
+            source_detail: server.source_detail,
+            status_kind: server.status_kind.as_str().to_string(),
+            status_message: server.status_message,
+            mutation_policy: server.mutation_policy.as_str().to_string(),
         })
         .collect()
 }
@@ -670,6 +676,9 @@ pub fn mcp_settings_to_servers(
     let mut servers = BTreeMap::new();
     for server in input.servers {
         let id = non_empty(server.id, "mcp server id")?;
+        if builtin_mcp_server_ids().contains(&id.as_str()) {
+            continue;
+        }
         if servers.contains_key(&id) {
             return Err(CommandError::from_display(format!(
                 "duplicate mcp server id: {id}"
@@ -705,6 +714,25 @@ pub fn mcp_settings_to_servers(
         );
     }
     Ok(servers)
+}
+
+pub fn mcp_settings_to_builtin_states(
+    input: &McpSettingsInput,
+    current: &PureConfig,
+) -> BTreeMap<String, BuiltinMcpServerState> {
+    let mut states = current.builtin_mcp_servers.clone();
+    for server in &input.servers {
+        let id = server.id.trim();
+        if builtin_mcp_server_ids().contains(&id) {
+            states.insert(
+                id.to_string(),
+                BuiltinMcpServerState {
+                    enabled: server.enabled,
+                },
+            );
+        }
+    }
+    states
 }
 
 fn key_value_map(values: Vec<KeyValueDto>, label: &str) -> CommandResult<BTreeMap<String, String>> {
@@ -758,6 +786,8 @@ mod tests {
     };
     use pretty_assertions::assert_eq;
 
+    use crate::dto::McpServerInput;
+
     use super::*;
 
     #[test]
@@ -785,10 +815,57 @@ mod tests {
         let dto = config_dto(&store).unwrap();
 
         assert_eq!(dto.permission_mode, "full-access");
-        assert_eq!(dto.mcp_servers.len(), 1);
+        assert_eq!(dto.mcp_servers.len(), 5);
         assert_eq!(dto.mcp_servers[0].id, "filesystem");
         assert_eq!(dto.mcp_servers[0].transport, "stdio");
+        assert_eq!(dto.mcp_servers[0].source_kind, "user");
+        let zhipu_search = dto
+            .mcp_servers
+            .iter()
+            .find(|server| server.id == "zhipu_search")
+            .unwrap();
+        assert_eq!(zhipu_search.source_kind, "builtIn");
+        assert_eq!(zhipu_search.status_kind, "missingCredential");
+        assert_eq!(zhipu_search.mutation_policy, "lockedIdentity");
         let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn mcp_settings_to_servers_ignores_builtin_servers_from_client_payload() {
+        let input = McpSettingsInput {
+            servers: vec![
+                McpServerInput {
+                    id: "zhipu_search".to_string(),
+                    enabled: true,
+                    transport: "streamableHttp".to_string(),
+                    command: None,
+                    args: Vec::new(),
+                    env: Vec::new(),
+                    cwd: None,
+                    url: Some("https://open.bigmodel.cn/api/mcp/web_search_prime/mcp".to_string()),
+                    bearer_token_env_var: None,
+                    headers: Vec::new(),
+                },
+                McpServerInput {
+                    id: "github".to_string(),
+                    enabled: true,
+                    transport: "streamableHttp".to_string(),
+                    command: None,
+                    args: Vec::new(),
+                    env: Vec::new(),
+                    cwd: None,
+                    url: Some("https://example.com/mcp".to_string()),
+                    bearer_token_env_var: None,
+                    headers: Vec::new(),
+                },
+            ],
+        };
+        let states = mcp_settings_to_builtin_states(&input, &PureConfig::default_config());
+        let servers = mcp_settings_to_servers(input).unwrap();
+
+        assert!(!servers.contains_key("zhipu_search"));
+        assert!(servers.contains_key("github"));
+        assert_eq!(states["zhipu_search"].enabled, true);
     }
 
     #[test]

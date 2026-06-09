@@ -91,6 +91,7 @@ export function McpSettings({ servers, onSaveMcpSettings }: McpSettingsProps) {
   }
 
   async function deleteServer(server: DraftServer) {
+    if (isLockedServer(server)) return;
     const nextDrafts = drafts.filter((draft) => draft.id !== server.id);
     if (editingId === server.id) {
       setEditingId(nextDrafts[0]?.id ?? null);
@@ -99,6 +100,7 @@ export function McpSettings({ servers, onSaveMcpSettings }: McpSettingsProps) {
   }
 
   async function saveEditing() {
+    if (editingServer && isLockedServer(editingServer)) return;
     await save(drafts);
   }
 
@@ -136,6 +138,8 @@ export function McpSettings({ servers, onSaveMcpSettings }: McpSettingsProps) {
             filteredDrafts.map((server) => {
               const active = server.id === editingId;
               const TransportIcon = server.transport === "stdio" ? Terminal : Globe2;
+              const locked = isLockedServer(server);
+              const statusKind = serverStatusKind(server);
               return (
                 <article
                   className={`mcp-row${active ? " active" : ""}`}
@@ -154,9 +158,16 @@ export function McpSettings({ servers, onSaveMcpSettings }: McpSettingsProps) {
                       <small>{endpointSummary(server) || t("settings.mcp.noEndpoint")}</small>
                     </span>
                   </button>
-                  <span className={`mcp-status${server.enabled ? " enabled" : ""}`}>
-                    {server.enabled ? t("settings.mcp.enabled") : t("settings.mcp.disabled")}
-                  </span>
+                  <div className="mcp-row-meta">
+                    <span className={`mcp-status ${statusKind}`}>
+                      {t(`settings.mcp.status.${statusKind}`)}
+                    </span>
+                    {server.sourceKind === "builtIn" ? (
+                      <span className="mcp-source">
+                        {t("settings.mcp.builtInSource")}
+                      </span>
+                    ) : null}
+                  </div>
                   <div className="mcp-row-actions">
                     <button
                       type="button"
@@ -177,7 +188,7 @@ export function McpSettings({ servers, onSaveMcpSettings }: McpSettingsProps) {
                       type="button"
                       title={t("actions.delete")}
                       onClick={() => void deleteServer(server)}
-                      disabled={saving}
+                      disabled={saving || locked}
                     >
                       <Trash2 size={16} />
                     </button>
@@ -201,16 +212,27 @@ export function McpSettings({ servers, onSaveMcpSettings }: McpSettingsProps) {
                 <h3>{editingServer.id || t("settings.mcp.newServer")}</h3>
                 <p>{t("settings.mcp.editorSubtitle")}</p>
               </div>
-              <button type="submit" disabled={saving}>
+              <button type="submit" disabled={saving || isLockedServer(editingServer)}>
                 <Save size={16} />
                 {saving ? t("actions.saving") : t("actions.save")}
               </button>
             </div>
 
+            {editingServer.sourceKind === "builtIn" ? (
+              <div className="mcp-built-in-note">
+                <strong>{t("settings.mcp.builtInSource")}</strong>
+                <span>
+                  {editingServer.sourceDetail ?? t("settings.mcp.builtInDetail")}
+                </span>
+                {editingServer.statusMessage ? <small>{editingServer.statusMessage}</small> : null}
+              </div>
+            ) : null}
+
             <label className="settings-field">
               <span>{t("settings.mcp.serverId")}</span>
               <input
                 value={editingServer.id}
+                disabled={isLockedServer(editingServer)}
                 onChange={(event) => {
                   const previousId = editingServer.id;
                   const nextId = event.target.value;
@@ -235,6 +257,7 @@ export function McpSettings({ servers, onSaveMcpSettings }: McpSettingsProps) {
                     className={active ? "active" : ""}
                     role="radio"
                     aria-checked={active}
+                    disabled={isLockedServer(editingServer)}
                     onClick={() => updateEditing((server) => ({ ...server, transport }))}
                   >
                     <Icon size={16} />
@@ -245,9 +268,17 @@ export function McpSettings({ servers, onSaveMcpSettings }: McpSettingsProps) {
             </div>
 
             {editingServer.transport === "stdio" ? (
-              <StdioFields server={editingServer} updateServer={updateEditing} />
+              <StdioFields
+                server={editingServer}
+                updateServer={updateEditing}
+                locked={isLockedServer(editingServer)}
+              />
             ) : (
-              <HttpFields server={editingServer} updateServer={updateEditing} />
+              <HttpFields
+                server={editingServer}
+                updateServer={updateEditing}
+                locked={isLockedServer(editingServer)}
+              />
             )}
           </form>
         ) : null}
@@ -259,9 +290,11 @@ export function McpSettings({ servers, onSaveMcpSettings }: McpSettingsProps) {
 function StdioFields({
   server,
   updateServer,
+  locked,
 }: {
   server: DraftServer;
   updateServer: (updater: (server: DraftServer) => DraftServer) => void;
+  locked: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -270,6 +303,7 @@ function StdioFields({
         <span>{t("settings.mcp.command")}</span>
         <input
           value={server.command ?? ""}
+          disabled={locked}
           onChange={(event) => updateServer((current) => ({ ...current, command: event.target.value }))}
           placeholder="npx"
         />
@@ -278,12 +312,14 @@ function StdioFields({
         label={t("settings.mcp.args")}
         values={server.args}
         placeholder="-y"
+        locked={locked}
         onChange={(args) => updateServer((current) => ({ ...current, args }))}
       />
       <label className="settings-field">
         <span>{t("settings.mcp.cwd")}</span>
         <input
           value={server.cwd ?? ""}
+          disabled={locked}
           onChange={(event) => updateServer((current) => ({ ...current, cwd: event.target.value }))}
           placeholder="D:/workspace"
         />
@@ -291,6 +327,7 @@ function StdioFields({
       <KeyValueEditor
         label={t("settings.mcp.env")}
         values={server.env}
+        locked={locked}
         onChange={(env) => updateServer((current) => ({ ...current, env }))}
       />
     </>
@@ -300,9 +337,11 @@ function StdioFields({
 function HttpFields({
   server,
   updateServer,
+  locked,
 }: {
   server: DraftServer;
   updateServer: (updater: (server: DraftServer) => DraftServer) => void;
+  locked: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -311,6 +350,7 @@ function HttpFields({
         <span>{t("settings.mcp.url")}</span>
         <input
           value={server.url ?? ""}
+          disabled={locked}
           onChange={(event) => updateServer((current) => ({ ...current, url: event.target.value }))}
           placeholder="https://example.com/mcp"
         />
@@ -319,6 +359,7 @@ function HttpFields({
         <span>{t("settings.mcp.bearerTokenEnvVar")}</span>
         <input
           value={server.bearerTokenEnvVar ?? ""}
+          disabled={locked}
           onChange={(event) =>
             updateServer((current) => ({ ...current, bearerTokenEnvVar: event.target.value }))
           }
@@ -328,6 +369,7 @@ function HttpFields({
       <KeyValueEditor
         label={t("settings.mcp.headers")}
         values={server.headers}
+        locked={locked}
         onChange={(headers) => updateServer((current) => ({ ...current, headers }))}
       />
     </>
@@ -338,11 +380,13 @@ function StringListEditor({
   label,
   values,
   placeholder,
+  locked,
   onChange,
 }: {
   label: string;
   values: string[];
   placeholder: string;
+  locked: boolean;
   onChange: (values: string[]) => void;
 }) {
   const { t } = useTranslation();
@@ -351,10 +395,11 @@ function StringListEditor({
     <div className="mcp-field-group">
       <span>{label}</span>
       {rows.map((value, index) => (
-        <div className="mcp-inline-row" key={`${index}-${value}`}>
+        <div className="mcp-inline-row" key={index}>
           <input
             value={value}
             placeholder={placeholder}
+            disabled={locked}
             onChange={(event) => {
               const next = [...rows];
               next[index] = event.target.value;
@@ -364,13 +409,19 @@ function StringListEditor({
           <button
             type="button"
             title={t("actions.delete")}
+            disabled={locked}
             onClick={() => onChange(rows.filter((_, rowIndex) => rowIndex !== index))}
           >
             <X size={16} />
           </button>
         </div>
       ))}
-      <button type="button" className="mcp-add-row" onClick={() => onChange([...values, ""])}>
+      <button
+        type="button"
+        className="mcp-add-row"
+        disabled={locked}
+        onClick={() => onChange([...values, ""])}
+      >
         <Plus size={16} />
         {t("settings.mcp.addRow")}
       </button>
@@ -381,10 +432,12 @@ function StringListEditor({
 function KeyValueEditor({
   label,
   values,
+  locked,
   onChange,
 }: {
   label: string;
   values: KeyValuePair[];
+  locked: boolean;
   onChange: (values: KeyValuePair[]) => void;
 }) {
   const { t } = useTranslation();
@@ -393,10 +446,11 @@ function KeyValueEditor({
     <div className="mcp-field-group">
       <span>{label}</span>
       {rows.map((entry, index) => (
-        <div className="mcp-key-value-row" key={`${index}-${entry.key}`}>
+        <div className="mcp-key-value-row" key={index}>
           <input
             value={entry.key}
             placeholder={t("settings.mcp.key")}
+            disabled={locked}
             onChange={(event) => {
               const next = rows.map((row) => ({ ...row }));
               next[index].key = event.target.value;
@@ -406,6 +460,7 @@ function KeyValueEditor({
           <input
             value={entry.value}
             placeholder={t("settings.mcp.value")}
+            disabled={locked}
             onChange={(event) => {
               const next = rows.map((row) => ({ ...row }));
               next[index].value = event.target.value;
@@ -415,13 +470,19 @@ function KeyValueEditor({
           <button
             type="button"
             title={t("actions.delete")}
+            disabled={locked}
             onClick={() => onChange(rows.filter((_, rowIndex) => rowIndex !== index))}
           >
             <X size={16} />
           </button>
         </div>
       ))}
-      <button type="button" className="mcp-add-row" onClick={() => onChange([...values, { key: "", value: "" }])}>
+      <button
+        type="button"
+        className="mcp-add-row"
+        disabled={locked}
+        onClick={() => onChange([...values, { key: "", value: "" }])}
+      >
         <Plus size={16} />
         {t("settings.mcp.addRow")}
       </button>
@@ -441,6 +502,12 @@ function serverInput(server: McpServerRecord): DraftServer {
     url: server.url ?? "",
     bearerTokenEnvVar: server.bearerTokenEnvVar ?? "",
     headers: server.headers.map((entry) => ({ ...entry })),
+    sourceKind: server.sourceKind,
+    sourceLabel: server.sourceLabel,
+    sourceDetail: server.sourceDetail,
+    statusKind: server.statusKind,
+    statusMessage: server.statusMessage,
+    mutationPolicy: server.mutationPolicy,
   };
 }
 
@@ -459,6 +526,12 @@ function normalizeServerInput(server: DraftServer): McpServerInput {
     headers: server.headers
       .map((entry) => ({ key: entry.key.trim(), value: entry.value }))
       .filter((entry) => entry.key || entry.value.trim()),
+    sourceKind: server.sourceKind,
+    sourceLabel: server.sourceLabel,
+    sourceDetail: server.sourceDetail,
+    statusKind: server.statusKind,
+    statusMessage: server.statusMessage,
+    mutationPolicy: server.mutationPolicy,
   };
 }
 
@@ -474,6 +547,11 @@ function searchableServerText(server: DraftServer) {
     server.command ?? "",
     server.url ?? "",
     server.bearerTokenEnvVar ?? "",
+    server.sourceKind ?? "",
+    server.sourceLabel ?? "",
+    server.sourceDetail ?? "",
+    server.statusKind ?? "",
+    server.statusMessage ?? "",
     ...server.args,
     ...server.env.flatMap((entry) => [entry.key, entry.value]),
     ...server.headers.flatMap((entry) => [entry.key, entry.value]),
@@ -484,6 +562,14 @@ function searchableServerText(server: DraftServer) {
 
 function endpointSummary(server: DraftServer) {
   return server.transport === "stdio" ? server.command ?? "" : server.url ?? "";
+}
+
+function isLockedServer(server: DraftServer) {
+  return server.sourceKind === "builtIn" || server.mutationPolicy === "lockedIdentity";
+}
+
+function serverStatusKind(server: DraftServer) {
+  return server.statusKind ?? (server.enabled ? "enabled" : "disabled");
 }
 
 function uniqueServerId(servers: DraftServer[]) {

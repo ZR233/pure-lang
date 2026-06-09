@@ -27,7 +27,9 @@ Timeline 的工具 item id 使用可展示、可去重的运行时 id：优先�
 4. 对批准的工具执行本地实现；对禁用、未知或拒绝的工具直接生成工具结果。
 5. 在统一收尾阶段写入唯一终态事件。
 
-MCP tools 由已启用的 MCP server 动态注册，工具名固定为 `mcp__{server_id}__{tool_name}`。启用 MCP server 表示用户显式信任该 server，因此 MCP tools 在 Auto Mode 和 Plan Mode 中直接暴露并执行，不再触发额外审批或 reviewer 审批。MCP tool 的注册、执行和错误仍复用同一生命周期与 tool result 规则。
+MCP tools 由已启用的 effective MCP server 动态注册，工具名固定为 `mcp__{server_id}__{tool_name}`。effective MCP server 包含用户配置的 `[mcp_servers]` 和运行时合成的内置 server。启用 MCP server 表示用户显式信任该 server，因此 MCP tools 在 Auto Mode 和 Plan Mode 中直接暴露并执行，不再触发额外审批或 reviewer 审批。MCP tool 的注册、执行和错误仍复用同一生命周期与 tool result 规则。
+
+内置 Zhipu Coding Plan MCP server 复用 Zhipu provider 的 `bearer_token`。缺少 token 时内置 server 不参与注册，不应导致普通 turn 或 subagent 启动失败；检测到 token 时主会话和 subagent runner 都必须通过同一个 effective MCP 注册入口注册这些 tools。HTTP 内置 server 在 transport 层直接发送 bearer token；stdio Vision server 在启动进程时注入 `Z_AI_API_KEY` 和 `Z_AI_MODE=ZHIPU`。
 
 终态事件只允许出现一次。`completed` 表示工具成功执行，`failed` 表示工具实现或注册失败，`denied` 表示模式、策略或审批拒绝，`interrupted` 和 `budgetLimited` 表示 turn 控制层中断或预算限制。`approved` 可作为执行前的非终态状态展示，但不能替代最终 `completed` 或 `failed`。
 

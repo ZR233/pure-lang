@@ -391,11 +391,13 @@ export function saveConfig(toml: string) {
 
 export function saveProviderSettings(input: ProviderSettingsInput) {
   if (!isTauriRuntime()) {
+    const nextProviders = input.providers.map(makeProvider);
     previewConfig = {
       ...previewConfig,
       toml: renderPreviewToml(input, previewConfig.mcpServers.map(mcpServerInput)),
-      providers: input.providers.map(makeProvider),
+      providers: nextProviders,
       roles: input.roles.map((r) => makeRole(r, previewConfig.roles)),
+      mcpServers: refreshPreviewBuiltinMcpServers(previewConfig.mcpServers, nextProviders),
       configExists: true,
     };
     return Promise.resolve(clone(previewConfig));
@@ -424,21 +426,51 @@ export function saveMcpSettings(input: McpSettingsInput) {
         effort: role.effort,
       })),
     };
+    const nextMcpServers = refreshPreviewBuiltinMcpServers(
+      input.servers.map((server) => ({
+        ...server,
+        endpoint: server.transport === "stdio" ? server.command ?? "" : server.url ?? "",
+        sourceKind: server.sourceKind ?? "user",
+        sourceLabel: server.sourceLabel ?? "User",
+        sourceDetail: server.sourceDetail ?? null,
+        statusKind: server.statusKind ?? (server.enabled ? "enabled" : "disabled"),
+        statusMessage: server.statusMessage ?? null,
+        mutationPolicy: server.mutationPolicy ?? "userEditable",
+      })),
+      previewConfig.providers,
+    );
     previewConfig = {
       ...previewConfig,
       toml: renderPreviewToml(providerInput, input.servers),
-      mcpServers: input.servers.map((server) => ({
-        ...server,
-        endpoint: server.transport === "stdio" ? server.command ?? "" : server.url ?? "",
-      })),
+      mcpServers: nextMcpServers,
       configExists: true,
     };
-    previewSessionRuntime.activeMcpServers = input.servers
-      .filter((server) => server.enabled)
+    previewSessionRuntime.activeMcpServers = nextMcpServers
+      .filter((server) => server.enabled && server.statusKind !== "missingCredential")
       .map((server) => server.id);
     return Promise.resolve(clone(previewConfig));
   }
   return invoke<ConfigPayload>("save_mcp_settings", { input });
+}
+
+function refreshPreviewBuiltinMcpServers(
+  servers: ConfigPayload["mcpServers"],
+  providers: ConfigPayload["providers"],
+): ConfigPayload["mcpServers"] {
+  const hasZhipuToken = providers.some(
+    (provider) => provider.providerKind === "zhipu" && provider.bearerToken.trim(),
+  );
+  return servers.map((server) => {
+    if (server.sourceKind !== "builtIn") return server;
+    return {
+      ...server,
+      enabled: hasZhipuToken,
+      statusKind: hasZhipuToken ? "enabled" : "missingCredential",
+      statusMessage: hasZhipuToken
+        ? "Using the configured Zhipu provider token"
+        : "Configure a Zhipu provider token to enable this server",
+    };
+  });
 }
 
 export function savePermissionMode(mode: PermissionMode) {
@@ -465,6 +497,12 @@ function mcpServerInput(server: ConfigPayload["mcpServers"][number]): McpServerI
     url: server.url ?? null,
     bearerTokenEnvVar: server.bearerTokenEnvVar ?? null,
     headers: server.headers.map((entry) => ({ ...entry })),
+    sourceKind: server.sourceKind,
+    sourceLabel: server.sourceLabel,
+    sourceDetail: server.sourceDetail,
+    statusKind: server.statusKind,
+    statusMessage: server.statusMessage,
+    mutationPolicy: server.mutationPolicy,
   };
 }
 

@@ -251,11 +251,12 @@ impl FirstRunConfigDraft {
             effort: ReasoningEffort::new(default_effort),
         };
 
-        let config = PureConfig {
+        let mut config = PureConfig {
             schema_version: CONFIG_SCHEMA_VERSION,
             runtime: Default::default(),
             skills: Default::default(),
             mcp_servers: Default::default(),
+            builtin_mcp_servers: Default::default(),
             roles: RoleConfigs {
                 explorer: role.clone(),
                 planner: role.clone(),
@@ -264,6 +265,7 @@ impl FirstRunConfigDraft {
             },
             providers,
         };
+        crate::config::normalize_builtin_mcp_server_states(&mut config);
         config.validate()?;
         Ok(config)
     }

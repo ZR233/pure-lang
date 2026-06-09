@@ -294,10 +294,17 @@ const zhCN = {
       addRow: "添加一行",
       enabled: "启用",
       disabled: "停用",
+      builtInSource: "内置",
+      builtInDetail: "Zhipu Coding Plan",
       toggle: "启用/停用",
       empty: "暂无 MCP server",
       noMatches: "没有匹配的 MCP server",
       noEndpoint: "未配置 endpoint",
+      status: {
+        enabled: "已开启",
+        disabled: "已关闭",
+        missingCredential: "缺少 Key",
+      },
       transportOptions: {
         stdio: "stdio",
         streamableHttp: "HTTP",

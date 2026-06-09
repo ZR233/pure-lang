@@ -1,6 +1,7 @@
 import type { McpServerInput, ProviderSettingsInput } from "../types";
 
 export function renderPreviewToml(input: ProviderSettingsInput, mcpServers: McpServerInput[] = []) {
+  const userMcpServers = mcpServers.filter((server) => server.sourceKind !== "builtIn");
   return [
     "schema_version = 3",
     "",
@@ -9,7 +10,7 @@ export function renderPreviewToml(input: ProviderSettingsInput, mcpServers: McpS
     'active_skills = ["rust", "git", "doc"]',
     'active_mcp_servers = ["github", "filesystem"]',
     "",
-    ...mcpServers.flatMap((server) => mcpServerToml(server)),
+    ...userMcpServers.flatMap((server) => mcpServerToml(server)),
     ...input.roles.flatMap((role) => [
       `[roles.${role.key}]`,
       `provider = "${role.provider}"`,

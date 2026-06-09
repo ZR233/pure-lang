@@ -20,8 +20,9 @@ use crate::dto::{
 use crate::events::drain_events;
 use crate::mappers::{
     agent_dtos, agent_event_dtos, config_dto, discovered_skills_dto, load_session_runtime_dto,
-    mcp_settings_to_servers, plan_lifecycle_events_to_states, project_dtos,
-    provider_settings_to_edit, session_dtos, timeline_events_to_items, turn_result_status_label,
+    mcp_settings_to_builtin_states, mcp_settings_to_servers, plan_lifecycle_events_to_states,
+    project_dtos, provider_settings_to_edit, session_dtos, timeline_events_to_items,
+    turn_result_status_label,
 };
 use crate::state::{AppState, CommandError, CommandResult};
 use crate::user_input::{cancel_session_user_inputs, resolve_user_input, user_input_callback};
@@ -629,7 +630,8 @@ pub fn load_config(state: State<'_, AppState>) -> CommandResult<ConfigDto> {
 
 #[tauri::command]
 pub fn save_config(toml: String, state: State<'_, AppState>) -> CommandResult<ConfigDto> {
-    let config = PureConfig::from_toml(&toml)?;
+    let mut config = PureConfig::from_toml(&toml)?;
+    config.runtime.active_mcp_servers = pl_core::active_mcp_server_names(&config);
     state.studio.config_store().save(&config)?;
     config_dto(state.studio.config_store())
 }
@@ -641,7 +643,8 @@ pub fn save_provider_settings(
 ) -> CommandResult<ConfigDto> {
     let current = state.studio.config_store().load_or_default()?;
     let edit = provider_settings_to_edit(input, &current)?;
-    let config = edit.to_config(&current)?;
+    let mut config = edit.to_config(&current)?;
+    config.runtime.active_mcp_servers = pl_core::active_mcp_server_names(&config);
     state.studio.config_store().save(&config)?;
     config_dto(state.studio.config_store())
 }
@@ -660,8 +663,10 @@ pub fn save_mcp_settings(
     state: State<'_, AppState>,
 ) -> CommandResult<ConfigDto> {
     let mut config = state.studio.config_store().load_or_default()?;
+    config.builtin_mcp_servers = mcp_settings_to_builtin_states(&input, &config);
     config.mcp_servers = mcp_settings_to_servers(input)?;
-    config.runtime.active_mcp_servers = pl_core::active_mcp_server_names(&config.mcp_servers);
+    pl_core::normalize_builtin_mcp_server_states(&mut config);
+    config.runtime.active_mcp_servers = pl_core::active_mcp_server_names(&config);
     config.validate()?;
     state.studio.config_store().save(&config)?;
     config_dto(state.studio.config_store())
