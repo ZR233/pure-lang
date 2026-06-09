@@ -565,7 +565,8 @@ mod tests {
                 TraceEventKind::TimelineItemStarted { .. }
                 | TraceEventKind::TimelineItemDelta { .. }
                 | TraceEventKind::TimelineItemCompleted { .. }
-                | TraceEventKind::TimelineItemFailed { .. } => None,
+                | TraceEventKind::TimelineItemFailed { .. }
+                | TraceEventKind::PlanLifecycleChanged { .. } => None,
             });
         assert_eq!(
             completed_plan.map(|item| item.content.as_str()),
@@ -667,7 +668,9 @@ mod tests {
                 | TraceEventKind::TimelineItemCompleted { item } => item.item_id.as_str(),
                 TraceEventKind::TimelineItemDelta { event } => event.item_id.as_str(),
                 TraceEventKind::TimelineItemFailed { item, .. } => item.item_id.as_str(),
+                TraceEventKind::PlanLifecycleChanged { .. } => "",
             })
+            .filter(|item_id| !item_id.is_empty())
             .collect::<Vec<_>>();
         assert_eq!(
             item_ids,

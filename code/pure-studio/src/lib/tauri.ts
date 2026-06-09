@@ -5,6 +5,7 @@ import type {
   ConfigPayload,
   DiscoveredSkillsPayload,
   PermissionMode,
+  PlanLifecycleResponse,
   ProjectSelectionPayload,
   ProviderSettingsInput,
   RunPromptResponse,
@@ -284,6 +285,7 @@ export function runPrompt(sessionId: string, prompt: string) {
             },
           },
         ],
+        planStates: [],
         timelineNextSequence: previewTimelineItems.length + 11,
         turnStatus: interrupted ? "aborted" as const : "completed" as const,
         turnAbortReason: interrupted ? "interrupted" : null,
@@ -293,6 +295,47 @@ export function runPrompt(sessionId: string, prompt: string) {
     });
   }
   return invoke<RunPromptResponse>("run_prompt", { sessionId, prompt });
+}
+
+export function implementPlan(sessionId: string, planId: string, content: string) {
+  if (!isTauriRuntime()) {
+    return runPrompt(sessionId, `PLEASE IMPLEMENT THIS PLAN:\n\n${content}`).then((payload) =>
+      clone({
+        ...payload,
+        planStates: [
+          ...(payload.planStates ?? []),
+          {
+            planId,
+            state: "implemented" as const,
+            turnId: null,
+            reason: null,
+            updatedAt: Math.floor(Date.now() / 1000),
+          },
+        ],
+      }),
+    );
+  }
+  return invoke<RunPromptResponse>("implement_plan", { sessionId, planId, content });
+}
+
+export function dismissPlan(sessionId: string, planId: string, reason: string) {
+  if (!isTauriRuntime()) {
+    const response: PlanLifecycleResponse = {
+      sessionId,
+      planStates: [
+        {
+          planId,
+          state: "dismissed",
+          turnId: null,
+          reason,
+          updatedAt: Math.floor(Date.now() / 1000),
+        },
+      ],
+      timelineNextSequence: previewTimelineItems.length + 1,
+    };
+    return Promise.resolve(clone(response));
+  }
+  return invoke<PlanLifecycleResponse>("dismiss_plan", { sessionId, planId, reason });
 }
 
 export function stopPrompt(sessionId: string) {
@@ -393,6 +436,7 @@ export function loadSessionTimeline(
       clone({
         sessionId,
         items: previewTimelineItems,
+        planStates: [],
         nextSequence: previewTimelineItems.length,
       }),
     );

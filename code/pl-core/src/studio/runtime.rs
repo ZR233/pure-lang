@@ -221,7 +221,8 @@ fn tool_call_count(timeline_events: &[TraceEvent]) -> u32 {
             TraceEventKind::TimelineItemStarted { item } => item.kind == TimelineItemKind::Tool,
             TraceEventKind::TimelineItemDelta { .. }
             | TraceEventKind::TimelineItemCompleted { .. }
-            | TraceEventKind::TimelineItemFailed { .. } => false,
+            | TraceEventKind::TimelineItemFailed { .. }
+            | TraceEventKind::PlanLifecycleChanged { .. } => false,
         })
         .count() as u32
 }

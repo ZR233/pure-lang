@@ -23,6 +23,7 @@ import type {
   AgentStatus,
   CompileMode,
   PermissionMode,
+  PlanLifecycleState,
   ProviderRecord,
   RoleRecord,
   SessionRecord,
@@ -71,11 +72,11 @@ type ConversationPanelProps = {
   onSavePermissionMode: (mode: PermissionMode) => void;
   onSetPrompt: (value: string) => void;
   onSetSessionMode: (mode: CompileMode) => void;
-  onImplementPlan: (plan: string) => void;
+  onImplementPlan: (planId: string, plan: string) => void;
+  onDiscussPlan: (planId: string, content: string) => void;
   onSendPrompt: () => void;
-  onSendPromptContent: (content: string) => void;
   onSetPlanActionMode: (mode: PlanActionMode) => void;
-  onDismissPlanAction: () => void;
+  onDismissPlanAction: (planId: string) => void;
   onStopPrompt: () => void;
   onAnswerUserInput: (requestId: string, response: UserInputResponse) => void;
 };
@@ -314,6 +315,26 @@ function turnStatusLabel(status: TimelineItem["status"], t: TFunction): string {
   }
 }
 
+function planStateLabel(
+  state: PlanLifecycleState | "pending",
+  t: TFunction,
+): string {
+  switch (state) {
+    case "accepted":
+      return t("planState.accepted");
+    case "implementing":
+      return t("planState.implementing");
+    case "implemented":
+      return t("planState.implemented");
+    case "implementationFailed":
+      return t("planState.implementationFailed");
+    case "dismissed":
+      return t("planState.dismissed");
+    case "pending":
+      return t("planState.pending");
+  }
+}
+
 function parseToolArguments(argumentsText: string | null | undefined): Record<string, unknown> | null {
   if (!argumentsText?.trim()) return null;
   try {
@@ -499,11 +520,12 @@ function PlanEntry({
   entry: Extract<TimelineEntry, { kind: "plan" }>;
   t: TFunction;
 }) {
+  const state = entry.planState?.state ?? "pending";
   return (
-    <EntryShell className={`timeline-entry-plan status-${entry.item.status}`} icon={<FileText size={14} />}>
+    <EntryShell className={`timeline-entry-plan status-${state}`} icon={<FileText size={14} />}>
       <div className="timeline-entry-head">
         <strong>{t("timeline.plan")}</strong>
-        <span className={`timeline-badge status-${entry.item.status}`}>{turnStatusLabel(entry.item.status, t)}</span>
+        <span className={`timeline-badge status-${state}`}>{planStateLabel(state, t)}</span>
       </div>
       <div className="timeline-message-content">
         <MarkdownContent content={entry.content} />
@@ -850,17 +872,17 @@ function PlanConfirmComposer({
   action,
   stopping,
   onImplementPlan,
-  onSendPromptContent,
+  onDiscussPlan,
   onSetMode,
   onCancel,
   t,
 }: {
   action: PlanActionState;
   stopping: boolean;
-  onImplementPlan: (plan: string) => void;
-  onSendPromptContent: (content: string) => void;
+  onImplementPlan: (planId: string, plan: string) => void;
+  onDiscussPlan: (planId: string, content: string) => void;
   onSetMode: (mode: PlanActionMode) => void;
-  onCancel: () => void;
+  onCancel: (planId: string) => void;
   t: TFunction;
 }) {
   const [message, setMessage] = useState("");
@@ -884,8 +906,7 @@ function PlanConfirmComposer({
     if (stopping) return;
     const content = message.trim();
     if (!content) return;
-    onCancel();
-    onSendPromptContent(content);
+    onDiscussPlan(action.planId, content);
   }
 
   function submitSelected() {
@@ -895,8 +916,7 @@ function PlanConfirmComposer({
       return;
     }
     if (!action.content.trim()) return;
-    onCancel();
-    onImplementPlan(action.content);
+    onImplementPlan(action.planId, action.content);
   }
 
   function submitOnShortcut(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -910,7 +930,7 @@ function PlanConfirmComposer({
     if (event.key === "Escape") {
       event.preventDefault();
       if (!stopping) {
-        onCancel();
+        onCancel(action.planId);
       }
       return;
     }
@@ -988,7 +1008,12 @@ function PlanConfirmComposer({
           {discussing ? <><kbd>⌘</kbd> + <kbd>Enter</kbd></> : null}
         </span>
         <div className="plan-choice-toolbar-actions">
-          <button type="button" className="plan-choice-ignore" onClick={onCancel} disabled={stopping}>
+          <button
+            type="button"
+            className="plan-choice-ignore"
+            onClick={() => onCancel(action.planId)}
+            disabled={stopping}
+          >
             <span>{t("planConfirm.ignore")}</span>
             <kbd>ESC</kbd>
           </button>
@@ -1029,7 +1054,7 @@ export function ConversationPanel({
   onSetSessionMode,
   onImplementPlan,
   onSendPrompt,
-  onSendPromptContent,
+  onDiscussPlan,
   onSetPlanActionMode,
   onDismissPlanAction,
   onStopPrompt,
@@ -1099,7 +1124,7 @@ export function ConversationPanel({
               action={activePlanAction}
               stopping={stopping}
               onImplementPlan={onImplementPlan}
-              onSendPromptContent={onSendPromptContent}
+              onDiscussPlan={onDiscussPlan}
               onSetMode={onSetPlanActionMode}
               onCancel={onDismissPlanAction}
               t={t}

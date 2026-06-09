@@ -10,6 +10,8 @@ import {
   bootstrapStudio,
   createSession,
   denyTool,
+  dismissPlan,
+  implementPlan,
   loadConfig,
   loadSessionTimeline,
   openProject,
@@ -134,7 +136,7 @@ export function useStudioApp() {
 
   const timelineEntries = useMemo(() => {
     return selectTimelineEntries(state);
-  }, [state.timelineItems, state.timelineOrder]);
+  }, [state.timelineItems, state.timelineOrder, state.planStates]);
 
   useEffect(() => {
     bootstrapStudio()
@@ -151,7 +153,7 @@ export function useStudioApp() {
 
   useEffect(() => {
     if (!state.selectedSessionId) {
-      dispatch({ type: "timelineLoaded", sessionId: null, items: [], nextSequence: 0 });
+      dispatch({ type: "timelineLoaded", sessionId: null, items: [], planStates: [], nextSequence: 0 });
       return;
     }
     const sessionId = state.selectedSessionId;
@@ -234,6 +236,7 @@ export function useStudioApp() {
           type: "timelineLoaded",
           sessionId: payload.sessionId,
           items: payload.items,
+          planStates: payload.planStates ?? [],
           nextSequence: payload.nextSequence,
         }),
       )
@@ -364,22 +367,73 @@ export function useStudioApp() {
     await submitPrompt(sessionId, trimmed);
   }
 
-  async function onImplementPlan(plan: string) {
+  async function onImplementPlan(planId: string, plan: string) {
     const content = plan.trim();
     const sessionId = state.selectedSessionId;
-    if (!content || !sessionId || state.isBusy) {
+    if (!planId || !content || !sessionId || state.isBusy) {
       return;
     }
+    const prompt = `PLEASE IMPLEMENT THIS PLAN:\n\n${content}`;
+    dispatch({
+      type: "promptSubmitted",
+      status: t("status.running"),
+      startedAt: Date.now(),
+      prompt,
+    });
     try {
-      const modePayload = await setSessionMode(sessionId, "auto");
-      dispatch({ type: "sessionModeUpdated", payload: modePayload, status: t("status.modeUpdated") });
-      await submitPrompt(sessionId, `PLEASE IMPLEMENT THIS PLAN:\n\n${content}`);
+      const payload = await implementPlan(sessionId, planId, content);
+      const turnError = payload.turnError ?? payload.turnAbortReason ?? t("subagent.providerError");
+      const status =
+        payload.turnStatus === "errored"
+          ? t("status.runFailed", { error: turnError })
+          : payload.turnAbortReason === "interrupted"
+            ? t("status.interrupted")
+            : t("status.done");
+      dispatch({ type: "runPromptLoaded", payload, status });
     } catch (error) {
       dispatch({
         type: "runPromptFailed",
         sessionId,
         status: t("status.runFailed", { error: errorText(error) }),
       });
+    }
+  }
+
+  async function dismissCurrentPlan(planId: string, reason: string): Promise<boolean> {
+    const sessionId = state.selectedSessionId;
+    if (!planId || !sessionId || state.isBusy) {
+      return false;
+    }
+    try {
+      const payload = await dismissPlan(sessionId, planId, reason);
+      dispatch({
+        type: "planLifecycleLoaded",
+        sessionId: payload.sessionId,
+        planStates: payload.planStates,
+        timelineNextSequence: payload.timelineNextSequence,
+        status: t("status.ready"),
+      });
+      dispatch({ type: "dismissPlanAction", planId });
+      return true;
+    } catch (error) {
+      dispatch({
+        type: "runPromptFailed",
+        sessionId,
+        status: t("status.runFailed", { error: errorText(error) }),
+      });
+      return false;
+    }
+  }
+
+  async function onDiscussPlan(planId: string, content: string) {
+    const trimmed = content.trim();
+    const sessionId = state.selectedSessionId;
+    if (!trimmed || !sessionId || state.isBusy) {
+      return;
+    }
+    const dismissed = await dismissCurrentPlan(planId, "discuss");
+    if (dismissed) {
+      await submitPrompt(sessionId, trimmed);
     }
   }
 
@@ -593,7 +647,8 @@ export function useStudioApp() {
     onSendPromptContent,
     onImplementPlan,
     onSetPlanActionMode: (mode: "choice" | "discuss") => dispatch({ type: "setPlanActionMode", mode }),
-    onDismissPlanAction: () => dispatch({ type: "dismissPlanAction" }),
+    onDiscussPlan,
+    onDismissPlanAction: (planId: string) => void dismissCurrentPlan(planId, "dismissed"),
     onStopPrompt,
     openSettings,
     onSaveConfig,

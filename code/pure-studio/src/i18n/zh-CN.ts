@@ -242,6 +242,15 @@ const zhCN = {
     discussPlaceholder: "输入想继续讨论或调整计划的内容...",
   },
 
+  planState: {
+    pending: "待确认",
+    accepted: "已采纳",
+    implementing: "实施中",
+    implemented: "已实施",
+    implementationFailed: "实施失败",
+    dismissed: "已忽略",
+  },
+
   settings: {
     title: "设置",
     defaultConfigDraft: "默认配置草稿",

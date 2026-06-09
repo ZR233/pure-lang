@@ -242,6 +242,15 @@ const en = {
     discussPlaceholder: "Type what you want to discuss or change about the plan...",
   },
 
+  planState: {
+    pending: "Pending",
+    accepted: "Accepted",
+    implementing: "Implementing",
+    implemented: "Implemented",
+    implementationFailed: "Implementation failed",
+    dismissed: "Dismissed",
+  },
+
   settings: {
     title: "Settings",
     defaultConfigDraft: "Default config draft",

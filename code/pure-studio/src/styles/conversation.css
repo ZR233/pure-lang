@@ -505,7 +505,9 @@
 .timeline-badge.status-completed,
 .timeline-badge.status-result_ready,
 .timeline-badge.status-approved,
-.timeline-badge.status-succeeded {
+.timeline-badge.status-succeeded,
+.timeline-badge.status-accepted,
+.timeline-badge.status-implemented {
   color: #059669;
   background: #ecfdf5;
 }
@@ -523,16 +525,23 @@
 .timeline-badge.status-running,
 .timeline-badge.status-streaming,
 .timeline-badge.status-awaitingToolApproval,
-.timeline-badge.status-awaitingApproval {
+.timeline-badge.status-awaitingApproval,
+.timeline-badge.status-pending,
+.timeline-badge.status-implementing {
   color: #2563eb;
   background: #eff6ff;
 }
 .timeline-badge.status-denied,
 .timeline-badge.status-failed,
 .timeline-badge.status-errored,
-.timeline-badge.status-budgetLimited {
+.timeline-badge.status-budgetLimited,
+.timeline-badge.status-implementationFailed {
   color: #dc2626;
   background: #fef2f2;
+}
+.timeline-badge.status-dismissed {
+  color: #64748b;
+  background: #f1f5f9;
 }
 
 /* Tool call cards */

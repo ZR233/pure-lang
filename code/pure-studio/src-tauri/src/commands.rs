@@ -2,26 +2,37 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use pl_core::{
-    CompileMode, PermissionMode, PureConfig, TimelineEventRecord, TurnOptions, UserInputResponse,
+    CompileMode, PermissionMode, PureConfig, StudioPromptOutcome, StudioRuntime,
+    TimelineEventRecord, TurnOptions, TurnResultStatus, UserInputResponse,
 };
-use pl_protocol::{TraceEvent, TraceEventKind};
+use pl_protocol::{
+    PlanLifecycleEvent, PlanLifecycleState, TimelineItemKind, TraceEvent, TraceEventKind,
+};
 use tauri::{AppHandle, Emitter, State};
 use tokio_util::sync::CancellationToken;
 
 use crate::approvals::{approval_callback, deny_session_approvals, resolve_tool_approval};
 use crate::dto::{
-    BootstrapDto, ConfigDto, DiscoveredSkillsDto, ProjectSelectionDto, PromptFailedPayload,
-    ProviderSettingsInput, RunPromptResponse, SessionSelectionDto, SessionTimelineDto,
-    StopPromptResponse,
+    BootstrapDto, ConfigDto, DiscoveredSkillsDto, PlanLifecycleResponse, ProjectSelectionDto,
+    PromptFailedPayload, ProviderSettingsInput, RunPromptResponse, SessionSelectionDto,
+    SessionTimelineDto, StopPromptResponse,
 };
 use crate::events::drain_events;
 use crate::mappers::{
     agent_dtos, agent_event_dtos, config_dto, discovered_skills_dto, load_session_runtime_dto,
-    project_dtos, provider_settings_to_edit, session_dtos, timeline_events_to_items,
-    turn_result_status_label,
+    plan_lifecycle_events_to_states, project_dtos, provider_settings_to_edit, session_dtos,
+    timeline_events_to_items, turn_result_status_label,
 };
 use crate::state::{AppState, CommandError, CommandResult};
 use crate::user_input::{cancel_session_user_inputs, resolve_user_input, user_input_callback};
+
+const IMPLEMENT_PLAN_PROMPT_PREFIX: &str = "PLEASE IMPLEMENT THIS PLAN:";
+
+struct PlanLifecycleChange {
+    state: PlanLifecycleState,
+    turn_id: Option<String>,
+    reason: Option<String>,
+}
 
 #[tauri::command]
 pub async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<BootstrapDto> {
@@ -165,6 +176,65 @@ pub async fn run_prompt(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> CommandResult<RunPromptResponse> {
+    run_prompt_inner(session_id, prompt, app, &state, None).await
+}
+
+#[tauri::command]
+pub async fn implement_plan(
+    session_id: String,
+    plan_id: String,
+    content: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> CommandResult<RunPromptResponse> {
+    let plan_id = plan_id.trim().to_string();
+    if plan_id.is_empty() {
+        return Err(CommandError::from_display("plan id is empty"));
+    }
+    let content = content.trim().to_string();
+    if content.is_empty() {
+        return Err(CommandError::from_display("plan content is empty"));
+    }
+    let prompt = format!("{IMPLEMENT_PLAN_PROMPT_PREFIX}\n\n{content}");
+    run_prompt_inner(session_id, prompt, app, &state, Some(plan_id)).await
+}
+
+#[tauri::command]
+pub async fn dismiss_plan(
+    session_id: String,
+    plan_id: String,
+    reason: Option<String>,
+    state: State<'_, AppState>,
+) -> CommandResult<PlanLifecycleResponse> {
+    let plan_id = plan_id.trim().to_string();
+    if plan_id.is_empty() {
+        return Err(CommandError::from_display("plan id is empty"));
+    }
+    let reason = reason
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "dismissed".to_string());
+    append_plan_lifecycle_events(
+        &state.studio,
+        &session_id,
+        &plan_id,
+        vec![PlanLifecycleChange {
+            state: PlanLifecycleState::Dismissed,
+            turn_id: None,
+            reason: Some(reason),
+        }],
+    )
+    .await?;
+    plan_lifecycle_response(&state.studio, &session_id).await
+}
+
+async fn run_prompt_inner(
+    session_id: String,
+    prompt: String,
+    app: AppHandle,
+    state: &AppState,
+    lifecycle_plan_id: Option<String>,
+) -> CommandResult<RunPromptResponse> {
     if prompt.trim().is_empty() {
         return Err(CommandError::from_display("prompt is empty"));
     }
@@ -178,6 +248,39 @@ pub async fn run_prompt(
             ));
         }
         active_turns.insert(session_id.clone(), cancellation_token.clone());
+    }
+
+    if let Some(plan_id) = &lifecycle_plan_id {
+        let setup_result = async {
+            state
+                .studio
+                .store()
+                .set_session_mode(&session_id, CompileMode::Auto)
+                .await?;
+            append_plan_lifecycle_events(
+                &state.studio,
+                &session_id,
+                plan_id,
+                vec![
+                    PlanLifecycleChange {
+                        state: PlanLifecycleState::Accepted,
+                        turn_id: None,
+                        reason: None,
+                    },
+                    PlanLifecycleChange {
+                        state: PlanLifecycleState::Implementing,
+                        turn_id: None,
+                        reason: None,
+                    },
+                ],
+            )
+            .await
+        }
+        .await;
+        if let Err(error) = setup_result {
+            state.active_turns.lock().await.remove(&session_id);
+            return Err(error);
+        }
     }
 
     let (event_tx, event_rx) = tokio::sync::broadcast::channel(256);
@@ -211,42 +314,56 @@ pub async fn run_prompt(
 
     match result {
         Ok(outcome) => {
-            let session = state
-                .studio
-                .store()
-                .read_session(&session_id)
-                .await?
-                .context("selected session not found")?;
-            let sessions = state
-                .studio
-                .store()
-                .list_sessions(&session.project_id)
+            if let Some(plan_id) = &lifecycle_plan_id {
+                let turn_id = first_turn_id(&outcome.timeline_events);
+                let (lifecycle_state, reason) = match outcome.result.status {
+                    TurnResultStatus::Completed => (PlanLifecycleState::Implemented, None),
+                    TurnResultStatus::Aborted => (
+                        PlanLifecycleState::ImplementationFailed,
+                        outcome
+                            .result
+                            .abort_reason
+                            .map(|reason| reason.as_str().to_string())
+                            .or_else(|| Some("turn aborted".to_string())),
+                    ),
+                    TurnResultStatus::Errored => (
+                        PlanLifecycleState::ImplementationFailed,
+                        outcome
+                            .result
+                            .error
+                            .clone()
+                            .or_else(|| Some("turn errored".to_string())),
+                    ),
+                };
+                append_plan_lifecycle_events(
+                    &state.studio,
+                    &session_id,
+                    plan_id,
+                    vec![PlanLifecycleChange {
+                        state: lifecycle_state,
+                        turn_id,
+                        reason,
+                    }],
+                )
                 .await?;
-            let response = RunPromptResponse {
-                session_id: session_id.clone(),
-                sessions: session_dtos(sessions),
-                agent_events: agent_event_dtos(
-                    state.studio.store().list_agent_events(&session_id).await?,
-                ),
-                agents: agent_dtos(state.studio.store().list_agents(&session_id).await?),
-                session_runtime: load_session_runtime_dto(&state.studio, &session_id).await?,
-                timeline_items: timeline_events_to_items(&outcome.timeline_events),
-                timeline_next_sequence: state
-                    .studio
-                    .store()
-                    .next_timeline_sequence(&session_id)
-                    .await?,
-                turn_status: turn_result_status_label(outcome.result.status).to_string(),
-                turn_abort_reason: outcome
-                    .result
-                    .abort_reason
-                    .map(|reason| reason.as_str().to_string()),
-                turn_error: outcome.result.error.clone(),
-            };
-            Ok(response)
+            }
+            run_prompt_response(state, &session_id, outcome).await
         }
         Err(error) => {
             let message = error.to_string();
+            if let Some(plan_id) = &lifecycle_plan_id {
+                append_plan_lifecycle_events(
+                    &state.studio,
+                    &session_id,
+                    plan_id,
+                    vec![PlanLifecycleChange {
+                        state: PlanLifecycleState::ImplementationFailed,
+                        turn_id: None,
+                        reason: Some(message.clone()),
+                    }],
+                )
+                .await?;
+            }
             let _ = app.emit(
                 "studio-prompt-failed",
                 PromptFailedPayload {
@@ -310,8 +427,129 @@ pub async fn load_session_timeline(
     Ok(SessionTimelineDto {
         session_id,
         items: timeline_events_to_items(&timeline_events),
+        plan_states: plan_lifecycle_events_to_states(&timeline_events),
         next_sequence,
     })
+}
+
+async fn run_prompt_response(
+    state: &AppState,
+    session_id: &str,
+    outcome: StudioPromptOutcome,
+) -> CommandResult<RunPromptResponse> {
+    let session = state
+        .studio
+        .store()
+        .read_session(session_id)
+        .await?
+        .context("selected session not found")?;
+    let sessions = state
+        .studio
+        .store()
+        .list_sessions(&session.project_id)
+        .await?;
+    Ok(RunPromptResponse {
+        session_id: session_id.to_string(),
+        sessions: session_dtos(sessions),
+        agent_events: agent_event_dtos(state.studio.store().list_agent_events(session_id).await?),
+        agents: agent_dtos(state.studio.store().list_agents(session_id).await?),
+        session_runtime: load_session_runtime_dto(&state.studio, session_id).await?,
+        timeline_items: timeline_events_to_items(&outcome.timeline_events),
+        plan_states: load_plan_states(&state.studio, session_id).await?,
+        timeline_next_sequence: state
+            .studio
+            .store()
+            .next_timeline_sequence(session_id)
+            .await?,
+        turn_status: turn_result_status_label(outcome.result.status).to_string(),
+        turn_abort_reason: outcome
+            .result
+            .abort_reason
+            .map(|reason| reason.as_str().to_string()),
+        turn_error: outcome.result.error.clone(),
+    })
+}
+
+async fn plan_lifecycle_response(
+    studio: &StudioRuntime,
+    session_id: &str,
+) -> CommandResult<PlanLifecycleResponse> {
+    Ok(PlanLifecycleResponse {
+        session_id: session_id.to_string(),
+        plan_states: load_plan_states(studio, session_id).await?,
+        timeline_next_sequence: studio.store().next_timeline_sequence(session_id).await?,
+    })
+}
+
+async fn load_plan_states(
+    studio: &StudioRuntime,
+    session_id: &str,
+) -> CommandResult<Vec<crate::dto::PlanStateDto>> {
+    let records = studio
+        .store()
+        .load_timeline_events(session_id, None, None)
+        .await?;
+    let timeline_events = timeline_records_to_trace_events(&records)?;
+    Ok(plan_lifecycle_events_to_states(&timeline_events))
+}
+
+async fn append_plan_lifecycle_events(
+    studio: &StudioRuntime,
+    session_id: &str,
+    plan_id: &str,
+    changes: Vec<PlanLifecycleChange>,
+) -> CommandResult<()> {
+    if changes.is_empty() {
+        return Ok(());
+    }
+    let mut sequence = studio.store().next_timeline_sequence(session_id).await?;
+    let now = unix_seconds();
+    let events = changes
+        .into_iter()
+        .map(|change| {
+            let event = TraceEvent {
+                session_id: session_id.to_string(),
+                sequence,
+                timestamp: now,
+                kind: TraceEventKind::PlanLifecycleChanged {
+                    event: PlanLifecycleEvent {
+                        plan_id: plan_id.to_string(),
+                        state: change.state,
+                        turn_id: change.turn_id,
+                        reason: change.reason,
+                        updated_at: now,
+                    },
+                },
+            };
+            sequence += 1;
+            event
+        })
+        .collect::<Vec<_>>();
+    studio.store().append_timeline_events(&events).await?;
+    Ok(())
+}
+
+fn first_turn_id(events: &[TraceEvent]) -> Option<String> {
+    events.iter().find_map(|trace| match &trace.kind {
+        TraceEventKind::TimelineItemStarted { item }
+        | TraceEventKind::TimelineItemCompleted { item }
+        | TraceEventKind::TimelineItemFailed { item, .. }
+            if item.kind == TimelineItemKind::Turn =>
+        {
+            Some(item.turn_id.clone())
+        }
+        TraceEventKind::TimelineItemDelta { event } if event.kind == TimelineItemKind::Turn => {
+            Some(event.turn_id.clone())
+        }
+        _ => None,
+    })
+}
+
+fn unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 fn timeline_records_to_trace_events(

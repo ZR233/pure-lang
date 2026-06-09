@@ -45,11 +45,11 @@ export function App() {
         onSavePermissionMode={(mode) => void studio.onSavePermissionMode(mode)}
         onSetPrompt={(value) => studio.dispatch({ type: "setPrompt", prompt: value })}
         onSetSessionMode={(mode) => void studio.onSetSessionMode(mode)}
-        onImplementPlan={(plan) => void studio.onImplementPlan(plan)}
+        onImplementPlan={(planId, plan) => void studio.onImplementPlan(planId, plan)}
+        onDiscussPlan={(planId, content) => void studio.onDiscussPlan(planId, content)}
         onSendPrompt={() => void studio.onSendPrompt()}
-        onSendPromptContent={(content) => void studio.onSendPromptContent(content)}
         onSetPlanActionMode={(mode) => studio.onSetPlanActionMode(mode)}
-        onDismissPlanAction={() => studio.onDismissPlanAction()}
+        onDismissPlanAction={(planId) => studio.onDismissPlanAction(planId)}
         onStopPrompt={() => void studio.onStopPrompt()}
         onAnswerUserInput={(requestId, response) => void studio.onAnswerUserInput(requestId, response)}
       />

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use pl_core::{
     ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProjectRecord, ProviderConfig,
@@ -10,8 +10,8 @@ use pl_core::{
 use pl_protocol::{Message, MessageContent, MessageRole};
 
 use crate::dto::{
-    AgentDto, AgentEventDto, ConfigDto, DiscoveredSkillsDto, ModelDto, ProjectDto, ProviderDto,
-    ProviderInput, ProviderSettingsInput, ProviderTemplateDto, RoleDto, RoleInput,
+    AgentDto, AgentEventDto, ConfigDto, DiscoveredSkillsDto, ModelDto, PlanStateDto, ProjectDto,
+    ProviderDto, ProviderInput, ProviderSettingsInput, ProviderTemplateDto, RoleDto, RoleInput,
     RuntimeCostAmountDto, RuntimeUsageDto, SessionDto, SessionRuntimeDto, SkillDto,
 };
 use crate::state::{CommandError, CommandResult};
@@ -499,11 +499,40 @@ pub fn timeline_events_to_items(events: &[TraceEvent]) -> Vec<pl_protocol::Timel
                     }
                 }
             }
+            TraceEventKind::PlanLifecycleChanged { .. } => {}
         }
     }
     let mut items = items.into_values().collect::<Vec<_>>();
     items.sort_by_key(|item| item.sequence);
     items
+}
+
+pub fn plan_lifecycle_events_to_states(events: &[TraceEvent]) -> Vec<PlanStateDto> {
+    let mut latest: HashMap<String, (u64, PlanStateDto)> = HashMap::new();
+    for trace in events {
+        let TraceEventKind::PlanLifecycleChanged { event } = &trace.kind else {
+            continue;
+        };
+        let dto = PlanStateDto {
+            plan_id: event.plan_id.clone(),
+            state: event.state.as_str().to_string(),
+            turn_id: event.turn_id.clone(),
+            reason: event.reason.clone(),
+            updated_at: event.updated_at,
+        };
+        match latest.get(&event.plan_id) {
+            Some((sequence, _)) if *sequence > trace.sequence => {}
+            _ => {
+                latest.insert(event.plan_id.clone(), (trace.sequence, dto));
+            }
+        }
+    }
+    let mut states = latest
+        .into_values()
+        .map(|(_, state)| state)
+        .collect::<Vec<_>>();
+    states.sort_by(|left, right| left.plan_id.cmp(&right.plan_id));
+    states
 }
 
 fn upsert_timeline_item(
@@ -612,9 +641,9 @@ mod tests {
         SessionRuntimeRecord, StudioAgentSnapshotRecord,
     };
     use pl_protocol::{
-        AgentStatus, RuntimeCostAmount, TimelineDelta, TimelineItem, TimelineItemDeltaEvent,
-        TimelineItemKind, TimelineItemStatus, TimelineTextRole, TimelineToolItem, TraceEvent,
-        TraceEventKind,
+        AgentStatus, PlanLifecycleEvent, PlanLifecycleState, RuntimeCostAmount, TimelineDelta,
+        TimelineItem, TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus,
+        TimelineTextRole, TimelineToolItem, TraceEvent, TraceEventKind,
     };
     use pretty_assertions::assert_eq;
 
@@ -902,6 +931,68 @@ mod tests {
         assert_eq!(items[0].sequence, 1);
         assert_eq!(items[0].content, "hello world");
         assert_eq!(items[0].status, TimelineItemStatus::Completed);
+    }
+
+    #[test]
+    fn timeline_events_to_items_ignores_plan_lifecycle_events() {
+        let events = vec![TraceEvent {
+            session_id: "session-1".to_string(),
+            sequence: 1,
+            timestamp: 10,
+            kind: TraceEventKind::PlanLifecycleChanged {
+                event: PlanLifecycleEvent {
+                    plan_id: "turn-1-plan".to_string(),
+                    state: PlanLifecycleState::Dismissed,
+                    turn_id: None,
+                    reason: Some("dismissed".to_string()),
+                    updated_at: 10,
+                },
+            },
+        }];
+
+        assert!(timeline_events_to_items(&events).is_empty());
+    }
+
+    #[test]
+    fn plan_lifecycle_events_to_states_keeps_latest_per_plan() {
+        let events = vec![
+            TraceEvent {
+                session_id: "session-1".to_string(),
+                sequence: 1,
+                timestamp: 10,
+                kind: TraceEventKind::PlanLifecycleChanged {
+                    event: PlanLifecycleEvent {
+                        plan_id: "turn-1-plan".to_string(),
+                        state: PlanLifecycleState::Accepted,
+                        turn_id: None,
+                        reason: None,
+                        updated_at: 10,
+                    },
+                },
+            },
+            TraceEvent {
+                session_id: "session-1".to_string(),
+                sequence: 2,
+                timestamp: 11,
+                kind: TraceEventKind::PlanLifecycleChanged {
+                    event: PlanLifecycleEvent {
+                        plan_id: "turn-1-plan".to_string(),
+                        state: PlanLifecycleState::ImplementationFailed,
+                        turn_id: Some("turn-2".to_string()),
+                        reason: Some("provider error".to_string()),
+                        updated_at: 11,
+                    },
+                },
+            },
+        ];
+
+        let states = plan_lifecycle_events_to_states(&events);
+
+        assert_eq!(states.len(), 1);
+        assert_eq!(states[0].plan_id, "turn-1-plan");
+        assert_eq!(states[0].state, "implementationFailed");
+        assert_eq!(states[0].turn_id.as_deref(), Some("turn-2"));
+        assert_eq!(states[0].reason.as_deref(), Some("provider error"));
     }
 
     #[test]
