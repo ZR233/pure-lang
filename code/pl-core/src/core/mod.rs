@@ -58,6 +58,7 @@ pub struct PureCore {
     provider: SharedModelProvider,
     reasoning_effort: Option<ReasoningEffort>,
     config: Option<PureConfig>,
+    mcp_runtime: Option<crate::mcp::McpRuntimeRegistry>,
     workspace_root: Option<PathBuf>,
     workspace_instructions: Option<String>,
     active_subagent: Option<SubagentContext>,
@@ -71,6 +72,7 @@ impl PureCore {
             provider,
             reasoning_effort: None,
             config: None,
+            mcp_runtime: None,
             workspace_root: None,
             workspace_instructions: None,
             active_subagent: None,
@@ -87,6 +89,7 @@ impl PureCore {
             provider,
             reasoning_effort: Some(reasoning_effort),
             config: None,
+            mcp_runtime: None,
             workspace_root: None,
             workspace_instructions: None,
             active_subagent: None,
@@ -110,6 +113,7 @@ impl PureCore {
             provider,
             reasoning_effort: Some(resolved.role_config.effort),
             config: Some(config.clone()),
+            mcp_runtime: None,
             workspace_root: None,
             workspace_instructions: None,
             active_subagent: None,
@@ -125,6 +129,11 @@ impl PureCore {
 
     pub(crate) fn with_agent_control(mut self, agent_control: crate::AgentControl) -> Self {
         self.agent_control = agent_control;
+        self
+    }
+
+    pub fn with_mcp_runtime(mut self, registry: crate::mcp::McpRuntimeRegistry) -> Self {
+        self.mcp_runtime = Some(registry);
         self
     }
 
@@ -169,6 +178,7 @@ impl PureCore {
             self.provider.clone(),
             self.reasoning_effort.clone(),
             self.config.clone(),
+            self.mcp_runtime.clone(),
             workspace_instructions.clone(),
         ));
         self.register_tool(WaitAgentTool);
@@ -178,18 +188,22 @@ impl PureCore {
             self.provider.clone(),
             self.reasoning_effort.clone(),
             self.config.clone(),
+            self.mcp_runtime.clone(),
             workspace_instructions.clone(),
         ));
         self.register_tool(CloseAgentTool);
         self.register_tool(AskUserTool);
     }
 
-    pub async fn register_configured_mcp_tools(&mut self) -> Result<()> {
-        let Some(config) = self.config.as_ref() else {
+    pub async fn register_available_mcp_tools(&mut self) -> Result<()> {
+        let Some(registry) = self.mcp_runtime.clone() else {
             return Ok(());
         };
-        let servers = crate::config::effective_mcp_servers(config);
-        crate::mcp::register_configured_mcp_tools(self, &servers).await
+        registry.register_available_tools(self).await
+    }
+
+    pub async fn register_configured_mcp_tools(&mut self) -> Result<()> {
+        self.register_available_mcp_tools().await
     }
 
     pub(crate) fn register_skill_tools(
