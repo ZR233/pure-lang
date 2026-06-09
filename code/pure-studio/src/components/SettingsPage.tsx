@@ -6,6 +6,7 @@ import type {
   ProviderRecord,
   ProviderSettingsSaveSnapshot,
   ProviderTemplateRecord,
+  ProviderUsageRecord,
   McpServerInput,
   McpServerRecord,
   PermissionMode,
@@ -22,6 +23,9 @@ type SettingsPageProps = {
   providers: ProviderRecord[];
   mcpServers: McpServerRecord[];
   providerTemplates: ProviderTemplateRecord[];
+  providerUsages: ProviderUsageRecord[];
+  providerUsagesLoading: boolean;
+  providerUsageError: string | null;
   roles: RoleRecord[];
   selectedProjectId: string | null;
   selectedProviderId: string | null;
@@ -35,6 +39,7 @@ type SettingsPageProps = {
   onSaveProviderSettings: (snapshot?: ProviderSettingsSaveSnapshot) => Promise<boolean>;
   onSavePermissionMode: (mode: PermissionMode) => Promise<void>;
   onSaveMcpSettings: (servers: McpServerInput[]) => Promise<boolean>;
+  onRefreshProviderUsages: () => void;
 };
 
 const SETTINGS_TABS: SettingsTab[] = ["providers", "skills", "roles", "mcp", "security", "general"];
@@ -44,6 +49,9 @@ export function SettingsPage({
   providers,
   mcpServers,
   providerTemplates,
+  providerUsages,
+  providerUsagesLoading,
+  providerUsageError,
   roles,
   selectedProjectId,
   selectedProviderId,
@@ -55,6 +63,7 @@ export function SettingsPage({
   onSaveProviderSettings,
   onSavePermissionMode,
   onSaveMcpSettings,
+  onRefreshProviderUsages,
   setRoles,
   setProviderSearch,
 }: SettingsPageProps) {
@@ -88,10 +97,14 @@ export function SettingsPage({
         <ProviderSettings
           providers={providers}
           templates={providerTemplates}
+          providerUsages={providerUsages}
+          providerUsagesLoading={providerUsagesLoading}
+          providerUsageError={providerUsageError}
           selectedProviderId={selectedProviderId}
           providerSearch={providerSearch}
           setProviderSearch={setProviderSearch}
           onSaveProviderSettings={onSaveProviderSettings}
+          onRefreshProviderUsages={onRefreshProviderUsages}
         />
       ) : activeSettingsTab === "roles" ? (
         <RoleSettings

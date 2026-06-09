@@ -6,6 +6,7 @@ mod proposed_plan;
 mod protocol;
 mod provider;
 mod provider_info;
+mod provider_usage;
 mod request;
 mod stream;
 
@@ -22,6 +23,11 @@ pub use provider::{
 };
 pub use provider_info::{
     ApplyPatchToolType, ProviderInfo, ProviderKind, ToolWirePolicy, ZHIPU_CODING_PLAN_BASE_URL,
+};
+pub use provider_usage::{
+    DeepSeekBalanceInfo, DeepSeekBalanceUsage, ZhipuCodingPlanUsage, ZhipuQuotaLimit,
+    ZhipuQuotaWindow, ZhipuToolUsageDetail, query_deepseek_balance, query_zhipu_coding_plan_usage,
+    zhipu_limit_by_window,
 };
 pub use request::{
     CompletionRequest, CompletionResponse, CompletionTimelineContext, FinishReason,

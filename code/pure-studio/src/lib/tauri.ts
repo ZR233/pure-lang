@@ -10,6 +10,7 @@ import type {
   PlanLifecycleResponse,
   ProjectSelectionPayload,
   ProviderSettingsInput,
+  ProviderUsagesPayload,
   RunPromptResponse,
   SessionSelectionPayload,
   SessionTimeline,
@@ -379,6 +380,118 @@ export function loadConfig() {
     return Promise.resolve(clone(previewConfig));
   }
   return invoke<ConfigPayload>("load_config");
+}
+
+export function loadProviderUsages() {
+  if (!isTauriRuntime()) {
+    const now = Math.floor(Date.now() / 1000);
+    return Promise.resolve<ProviderUsagesPayload>({
+      usages: previewConfig.providers.map((provider) => {
+        if (provider.templateKind !== "deepseek" && provider.templateKind !== "zhipu-coding-plan") {
+          return {
+            providerId: provider.id,
+            updatedAt: now,
+            status: "unsupported",
+            usageKind: "unsupported",
+            message: null,
+            balance: null,
+            codingPlan: null,
+          };
+        }
+        if (!provider.hasBearerToken && !provider.bearerToken.trim()) {
+          return {
+            providerId: provider.id,
+            updatedAt: now,
+            status: "missingCredential",
+            usageKind: "unknown",
+            message: "provider API key is not configured",
+            balance: null,
+            codingPlan: null,
+          };
+        }
+        if (provider.templateKind === "deepseek") {
+          return {
+            providerId: provider.id,
+            updatedAt: now,
+            status: "ready",
+            usageKind: "deepseekBalance",
+            message: null,
+            balance: {
+              isAvailable: true,
+              balances: [
+                {
+                  currency: "CNY",
+                  totalBalance: "88.00",
+                  grantedBalance: "8.00",
+                  toppedUpBalance: "80.00",
+                },
+              ],
+            },
+            codingPlan: null,
+          };
+        }
+        if (provider.templateKind === "zhipu-coding-plan") {
+          return {
+            providerId: provider.id,
+            updatedAt: now,
+            status: "ready",
+            usageKind: "zhipuCodingPlan",
+            message: null,
+            balance: null,
+            codingPlan: {
+              level: "pro",
+              limits: [
+                {
+                  window: "fiveHour",
+                  label: "5h",
+                  percentage: 38,
+                  currentValue: 38,
+                  total: 100,
+                  remaining: 62,
+                  nextResetAt: now + 7200,
+                  usageDetails: [],
+                },
+                {
+                  window: "weekly",
+                  label: "7d",
+                  percentage: 52,
+                  currentValue: 520,
+                  total: 1000,
+                  remaining: 480,
+                  nextResetAt: now + 3600 * 24 * 3,
+                  usageDetails: [],
+                },
+                {
+                  window: "mcpMonthly",
+                  label: "MCP",
+                  percentage: 12,
+                  currentValue: 120,
+                  total: 1000,
+                  remaining: 880,
+                  nextResetAt: null,
+                  usageDetails: [
+                    { name: "Web Search", currentValue: 72, total: 1000, percentage: 7.2 },
+                    { name: "Web Reader", currentValue: 40, total: 1000, percentage: 4 },
+                    { name: "ZRead", currentValue: 8, total: 1000, percentage: 0.8 },
+                  ],
+                },
+              ],
+            },
+          };
+        }
+        return {
+          providerId: provider.id,
+          updatedAt: now,
+          status: "unsupported",
+          usageKind: "unsupported",
+          message: null,
+          balance: null,
+          codingPlan: null,
+        };
+      }),
+    });
+  }
+  return invoke<ProviderUsagesPayload>("load_provider_usages");
 }
 
 export function saveConfig(toml: string) {

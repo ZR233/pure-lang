@@ -83,6 +83,53 @@ export type ProviderRecord = {
   customModels: ModelRecord[];
 };
 
+export type ProviderUsageStatus = "ready" | "unsupported" | "missingCredential" | "failed";
+
+export type ProviderUsageRecord = {
+  providerId: string;
+  updatedAt: number;
+  status: ProviderUsageStatus;
+  usageKind: "deepseekBalance" | "zhipuCodingPlan" | "unsupported" | "unknown";
+  message?: string | null;
+  balance?: DeepSeekBalanceUsage | null;
+  codingPlan?: ZhipuCodingPlanUsage | null;
+};
+
+export type DeepSeekBalanceUsage = {
+  isAvailable: boolean;
+  balances: DeepSeekBalanceInfo[];
+};
+
+export type DeepSeekBalanceInfo = {
+  currency: string;
+  totalBalance: string;
+  grantedBalance: string;
+  toppedUpBalance: string;
+};
+
+export type ZhipuCodingPlanUsage = {
+  level?: string | null;
+  limits: ZhipuQuotaLimit[];
+};
+
+export type ZhipuQuotaLimit = {
+  window: "fiveHour" | "weekly" | "mcpMonthly" | "other";
+  label: string;
+  percentage: number;
+  currentValue?: number | null;
+  total?: number | null;
+  remaining?: number | null;
+  nextResetAt?: number | null;
+  usageDetails: ZhipuToolUsageDetail[];
+};
+
+export type ZhipuToolUsageDetail = {
+  name: string;
+  currentValue?: number | null;
+  total?: number | null;
+  percentage?: number | null;
+};
+
 export type ProviderKind = "deepseek" | "openai" | "zhipu" | "zhipu-coding-plan";
 
 export type RoleKey = "explorer" | "planner" | "executor" | "reviewer";
@@ -323,6 +370,10 @@ export type ConfigPayload = {
   templates: ProviderTemplateRecord[];
   mcpServers: McpServerRecord[];
   configExists: boolean;
+};
+
+export type ProviderUsagesPayload = {
+  usages: ProviderUsageRecord[];
 };
 
 export type ProviderSettingsInput = {

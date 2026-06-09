@@ -4,18 +4,21 @@ use pl_core::{
     BuiltinMcpServerState, ConfigStore, McpAvailabilityKind, McpAvailabilitySnapshot,
     McpServerConfig, McpServerStatusKind, McpServerTransport, ModelCapabilityConfig, ModelConfig,
     ModelRole, ProjectRecord, ProviderConfig, ProviderEdit, ProviderKind, ProviderModelEdit,
-    ProviderTemplateKind, PureConfig, RoleEdit, SessionRecord, SessionRuntimeRecord, SkillCatalog,
-    SkillMetadata, SkillSourceKind, StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord,
-    StudioRuntime, TraceEvent, TraceEventKind, TurnResultStatus, builtin_mcp_server_ids,
+    ProviderTemplateKind, ProviderUsageData, ProviderUsageRecord, ProviderUsageState, PureConfig,
+    RoleEdit, SessionRecord, SessionRuntimeRecord, SkillCatalog, SkillMetadata, SkillSourceKind,
+    StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord, StudioRuntime, TraceEvent,
+    TraceEventKind, TurnResultStatus, ZhipuQuotaWindow, builtin_mcp_server_ids,
     effective_mcp_servers, infer_provider_template_kind,
 };
 use pl_protocol::{Message, MessageContent, MessageRole};
 
 use crate::dto::{
-    AgentDto, AgentEventDto, ConfigDto, DiscoveredSkillsDto, KeyValueDto, McpHealthUpdateDto,
-    McpServerDto, McpSettingsInput, ModelDto, PlanStateDto, ProjectDto, ProviderDto, ProviderInput,
-    ProviderSettingsInput, ProviderTemplateDto, RoleDto, RoleInput, RuntimeCostAmountDto,
-    RuntimeUsageDto, SessionDto, SessionRuntimeDto, SkillDto,
+    AgentDto, AgentEventDto, ConfigDto, DeepSeekBalanceDto, DeepSeekBalanceInfoDto,
+    DiscoveredSkillsDto, KeyValueDto, McpHealthUpdateDto, McpServerDto, McpSettingsInput, ModelDto,
+    PlanStateDto, ProjectDto, ProviderDto, ProviderInput, ProviderSettingsInput,
+    ProviderTemplateDto, ProviderUsageDto, ProviderUsagesDto, RoleDto, RoleInput,
+    RuntimeCostAmountDto, RuntimeUsageDto, SessionDto, SessionRuntimeDto, SkillDto,
+    ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
 };
 use crate::state::{CommandError, CommandResult};
 
@@ -314,6 +317,113 @@ pub fn provider_dto(provider_key: &str, provider: &ProviderConfig) -> ProviderDt
         models,
         default_models: default_models.iter().map(model_dto).collect(),
         custom_models,
+    }
+}
+
+pub fn provider_usages_dto(records: Vec<ProviderUsageRecord>) -> ProviderUsagesDto {
+    ProviderUsagesDto {
+        usages: records.into_iter().map(provider_usage_dto).collect(),
+    }
+}
+
+fn provider_usage_dto(record: ProviderUsageRecord) -> ProviderUsageDto {
+    match record.state {
+        ProviderUsageState::Unsupported => ProviderUsageDto {
+            provider_id: record.provider_id,
+            updated_at: record.updated_at,
+            status: "unsupported".to_string(),
+            usage_kind: "unsupported".to_string(),
+            message: None,
+            balance: None,
+            coding_plan: None,
+        },
+        ProviderUsageState::MissingCredential => ProviderUsageDto {
+            provider_id: record.provider_id,
+            updated_at: record.updated_at,
+            status: "missingCredential".to_string(),
+            usage_kind: "unknown".to_string(),
+            message: Some("provider API key is not configured".to_string()),
+            balance: None,
+            coding_plan: None,
+        },
+        ProviderUsageState::Failed(message) => ProviderUsageDto {
+            provider_id: record.provider_id,
+            updated_at: record.updated_at,
+            status: "failed".to_string(),
+            usage_kind: "unknown".to_string(),
+            message: Some(message),
+            balance: None,
+            coding_plan: None,
+        },
+        ProviderUsageState::Ready(ProviderUsageData::DeepSeekBalance(balance)) => {
+            ProviderUsageDto {
+                provider_id: record.provider_id,
+                updated_at: record.updated_at,
+                status: "ready".to_string(),
+                usage_kind: "deepseekBalance".to_string(),
+                message: None,
+                balance: Some(DeepSeekBalanceDto {
+                    is_available: balance.is_available,
+                    balances: balance
+                        .balances
+                        .into_iter()
+                        .map(|item| DeepSeekBalanceInfoDto {
+                            currency: item.currency,
+                            total_balance: item.total_balance,
+                            granted_balance: item.granted_balance,
+                            topped_up_balance: item.topped_up_balance,
+                        })
+                        .collect(),
+                }),
+                coding_plan: None,
+            }
+        }
+        ProviderUsageState::Ready(ProviderUsageData::ZhipuCodingPlan(usage)) => ProviderUsageDto {
+            provider_id: record.provider_id,
+            updated_at: record.updated_at,
+            status: "ready".to_string(),
+            usage_kind: "zhipuCodingPlan".to_string(),
+            message: None,
+            balance: None,
+            coding_plan: Some(ZhipuCodingPlanUsageDto {
+                level: usage.level,
+                limits: usage
+                    .limits
+                    .into_iter()
+                    .map(|limit| {
+                        let (window, label) = zhipu_window_labels(&limit.window);
+                        ZhipuQuotaLimitDto {
+                            window: window.to_string(),
+                            label: label.to_string(),
+                            percentage: limit.percentage,
+                            current_value: limit.current_value,
+                            total: limit.total,
+                            remaining: limit.remaining,
+                            next_reset_at: limit.next_reset_at,
+                            usage_details: limit
+                                .usage_details
+                                .into_iter()
+                                .map(|detail| ZhipuToolUsageDetailDto {
+                                    name: detail.name,
+                                    current_value: detail.current_value,
+                                    total: detail.total,
+                                    percentage: detail.percentage,
+                                })
+                                .collect(),
+                        }
+                    })
+                    .collect(),
+            }),
+        },
+    }
+}
+
+fn zhipu_window_labels(window: &ZhipuQuotaWindow) -> (&'static str, &str) {
+    match window {
+        ZhipuQuotaWindow::FiveHour => ("fiveHour", "5h"),
+        ZhipuQuotaWindow::Weekly => ("weekly", "7d"),
+        ZhipuQuotaWindow::McpMonthly => ("mcpMonthly", "MCP"),
+        ZhipuQuotaWindow::Other(label) => ("other", label.as_str()),
     }
 }
 
@@ -834,7 +944,8 @@ mod tests {
     use std::path::PathBuf;
 
     use pl_core::{
-        ConfigPaths, ConfigStore, McpServerConfig, PermissionMode, PureConfig,
+        ConfigPaths, ConfigStore, DeepSeekBalanceInfo, DeepSeekBalanceUsage, McpServerConfig,
+        PermissionMode, ProviderUsageData, ProviderUsageRecord, ProviderUsageState, PureConfig,
         RuntimeUsageSnapshot, SessionRuntimeRecord, StudioAgentSnapshotRecord,
     };
     use pl_protocol::{
@@ -918,6 +1029,32 @@ mod tests {
                 .map(|model| model.slug.as_str())
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn provider_usage_dto_does_not_expose_tokens() {
+        let dto = provider_usages_dto(vec![ProviderUsageRecord {
+            provider_id: "deepseek".to_string(),
+            updated_at: 10,
+            state: ProviderUsageState::Ready(ProviderUsageData::DeepSeekBalance(
+                DeepSeekBalanceUsage {
+                    is_available: true,
+                    balances: vec![DeepSeekBalanceInfo {
+                        currency: "CNY".to_string(),
+                        total_balance: "8.00".to_string(),
+                        granted_balance: "1.00".to_string(),
+                        topped_up_balance: "7.00".to_string(),
+                    }],
+                },
+            )),
+        }]);
+
+        let json = serde_json::to_string(&dto).unwrap();
+
+        assert!(!json.contains("bearer"));
+        assert!(!json.contains("token"));
+        assert!(json.contains("deepseekBalance"));
+        assert!(json.contains("8.00"));
     }
 
     #[test]
