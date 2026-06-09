@@ -19,10 +19,10 @@ use crate::dto::{
 };
 use crate::events::drain_events;
 use crate::mappers::{
-    agent_dtos, agent_event_dtos, config_dto, discovered_skills_dto, load_session_runtime_dto,
-    mcp_settings_to_builtin_states, mcp_settings_to_servers, plan_lifecycle_events_to_states,
-    project_dtos, provider_settings_to_edit, session_dtos, timeline_events_to_items,
-    turn_result_status_label,
+    agent_dtos, agent_event_dtos, config_dto_for_studio, discovered_skills_dto,
+    load_session_runtime_dto, mcp_settings_to_builtin_states, mcp_settings_to_servers,
+    plan_lifecycle_events_to_states, project_dtos, provider_settings_to_edit, session_dtos,
+    timeline_events_to_items, turn_result_status_label,
 };
 use crate::state::{AppState, CommandError, CommandResult};
 use crate::user_input::{cancel_session_user_inputs, resolve_user_input, user_input_callback};
@@ -72,7 +72,7 @@ pub async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Boots
         agent_events: agent_event_dtos(agent_events),
         agents: agent_dtos(agents),
         session_runtime,
-        config: config_dto(state.studio.config_store())?,
+        config: config_dto_for_studio(&state.studio).await?,
     })
 }
 
@@ -624,20 +624,21 @@ pub async fn answer_user_input(
 }
 
 #[tauri::command]
-pub fn load_config(state: State<'_, AppState>) -> CommandResult<ConfigDto> {
-    config_dto(state.studio.config_store())
+pub async fn load_config(state: State<'_, AppState>) -> CommandResult<ConfigDto> {
+    config_dto_for_studio(&state.studio).await
 }
 
 #[tauri::command]
-pub fn save_config(toml: String, state: State<'_, AppState>) -> CommandResult<ConfigDto> {
+pub async fn save_config(toml: String, state: State<'_, AppState>) -> CommandResult<ConfigDto> {
     let mut config = PureConfig::from_toml(&toml)?;
     config.runtime.active_mcp_servers = pl_core::active_mcp_server_names(&config);
     state.studio.config_store().save(&config)?;
-    config_dto(state.studio.config_store())
+    state.studio.reconcile_mcp_runtime().await?;
+    config_dto_for_studio(&state.studio).await
 }
 
 #[tauri::command]
-pub fn save_provider_settings(
+pub async fn save_provider_settings(
     input: ProviderSettingsInput,
     state: State<'_, AppState>,
 ) -> CommandResult<ConfigDto> {
@@ -646,19 +647,23 @@ pub fn save_provider_settings(
     let mut config = edit.to_config(&current)?;
     config.runtime.active_mcp_servers = pl_core::active_mcp_server_names(&config);
     state.studio.config_store().save(&config)?;
-    config_dto(state.studio.config_store())
+    state.studio.reconcile_mcp_runtime().await?;
+    config_dto_for_studio(&state.studio).await
 }
 
 #[tauri::command]
-pub fn save_permission_mode(mode: String, state: State<'_, AppState>) -> CommandResult<ConfigDto> {
+pub async fn save_permission_mode(
+    mode: String,
+    state: State<'_, AppState>,
+) -> CommandResult<ConfigDto> {
     let mut config = state.studio.config_store().load_or_default()?;
     config.runtime.permission_mode = PermissionMode::from_label(&mode);
     state.studio.config_store().save(&config)?;
-    config_dto(state.studio.config_store())
+    config_dto_for_studio(&state.studio).await
 }
 
 #[tauri::command]
-pub fn save_mcp_settings(
+pub async fn save_mcp_settings(
     input: McpSettingsInput,
     state: State<'_, AppState>,
 ) -> CommandResult<ConfigDto> {
@@ -669,7 +674,8 @@ pub fn save_mcp_settings(
     config.runtime.active_mcp_servers = pl_core::active_mcp_server_names(&config);
     config.validate()?;
     state.studio.config_store().save(&config)?;
-    config_dto(state.studio.config_store())
+    state.studio.reconcile_mcp_runtime().await?;
+    config_dto_for_studio(&state.studio).await
 }
 
 #[tauri::command]

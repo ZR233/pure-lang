@@ -300,8 +300,18 @@ const en = {
       empty: "No MCP servers",
       noMatches: "No matching MCP servers",
       noEndpoint: "No endpoint configured",
+      availabilityTitle: "Availability",
+      toolCount: "{{count}} tools",
+      lastCheckedAt: "Checked {{time}}",
       status: {
         enabled: "Enabled",
+        disabled: "Disabled",
+        missingCredential: "Missing key",
+      },
+      availability: {
+        checking: "Checking",
+        available: "Available",
+        unavailable: "Unavailable",
         disabled: "Disabled",
         missingCredential: "Missing key",
       },

@@ -23,10 +23,15 @@ fn main() {
         user_inputs: Arc::new(Mutex::new(HashMap::new())),
         active_turns: Arc::new(Mutex::new(HashMap::new())),
     };
+    let setup_state = state.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(state)
+        .setup(move |app| {
+            events::start_mcp_health_tasks(app.handle().clone(), setup_state.clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::bootstrap_studio,
             commands::open_project,

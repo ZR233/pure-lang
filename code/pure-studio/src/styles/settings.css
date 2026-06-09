@@ -375,6 +375,25 @@
   background: #eef2f6;
 }
 
+.mcp-status.checking {
+  color: #0f5d86;
+  background: #e2f3fb;
+}
+
+.mcp-status.available {
+  color: #075f46;
+  background: #dff8ee;
+}
+
+.mcp-status.unavailable {
+  color: #8f2626;
+  background: #ffe1df;
+}
+
+.mcp-status.availability {
+  min-width: 68px;
+}
+
 .mcp-row-meta {
   display: flex;
   flex-wrap: wrap;
@@ -434,7 +453,8 @@
   font-size: 12px;
 }
 
-.mcp-built-in-note {
+.mcp-built-in-note,
+.mcp-health-note {
   display: grid;
   gap: 4px;
   padding: 10px;
@@ -445,11 +465,13 @@
   font-size: 12px;
 }
 
-.mcp-built-in-note strong {
+.mcp-built-in-note strong,
+.mcp-health-note strong {
   color: #19314f;
 }
 
-.mcp-built-in-note small {
+.mcp-built-in-note small,
+.mcp-health-note small {
   color: #607186;
 }
 

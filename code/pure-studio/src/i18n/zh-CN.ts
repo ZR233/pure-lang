@@ -300,9 +300,19 @@ const zhCN = {
       empty: "暂无 MCP server",
       noMatches: "没有匹配的 MCP server",
       noEndpoint: "未配置 endpoint",
+      availabilityTitle: "实际可用性",
+      toolCount: "{{count}} 个工具",
+      lastCheckedAt: "{{time}} 检查",
       status: {
         enabled: "已开启",
         disabled: "已关闭",
+        missingCredential: "缺少 Key",
+      },
+      availability: {
+        checking: "检查中",
+        available: "可用",
+        unavailable: "不可用",
+        disabled: "未启用",
         missingCredential: "缺少 Key",
       },
       transportOptions: {

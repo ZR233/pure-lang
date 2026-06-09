@@ -165,9 +165,12 @@ impl StudioRuntime {
         if !workspace_instructions.trim().is_empty() {
             request = request.with_workspace_instructions(workspace_instructions.clone());
         }
+        self.mcp_runtime
+            .reconcile(crate::config::effective_mcp_servers(&config))
+            .await;
 
-        let mut core =
-            PureCore::from_config(&config, ModelRole::Planner)?.with_mcp_runtime(self.mcp_runtime.clone());
+        let mut core = PureCore::from_config(&config, ModelRole::Planner)?
+            .with_mcp_runtime(self.mcp_runtime.clone());
         core.register_default_tools(workspace_root.clone(), Some(workspace_instructions.clone()));
         core.register_available_mcp_tools().await?;
         if options.tool_approval_callback.is_none()

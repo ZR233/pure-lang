@@ -136,6 +136,12 @@ export type McpTransport = "stdio" | "streamableHttp";
 export type McpServerSourceKind = "user" | "builtIn";
 export type McpServerStatusKind = "enabled" | "disabled" | "missingCredential";
 export type McpServerMutationPolicy = "userEditable" | "lockedIdentity";
+export type McpAvailabilityKind =
+  | "checking"
+  | "available"
+  | "unavailable"
+  | "disabled"
+  | "missingCredential";
 
 export type KeyValuePair = {
   key: string;
@@ -160,6 +166,10 @@ export type McpServerRecord = {
   statusKind: McpServerStatusKind;
   statusMessage?: string | null;
   mutationPolicy: McpServerMutationPolicy;
+  availabilityKind: McpAvailabilityKind;
+  availabilityMessage?: string | null;
+  lastCheckedAt?: number | null;
+  toolCount?: number | null;
 };
 
 export type RuntimeCostAmount = {
@@ -329,6 +339,11 @@ export type ProviderSettingsSaveSnapshot = {
 
 export type McpSettingsInput = {
   servers: McpServerInput[];
+};
+
+export type McpHealthUpdatedPayload = {
+  mcpServers: McpServerRecord[];
+  activeMcpServers: string[];
 };
 
 export type McpServerInput = {

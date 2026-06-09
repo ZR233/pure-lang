@@ -11,6 +11,7 @@ import { hidesToolResult, isQuietFileTool } from "../src/lib/tool-display";
 import { previewTemplates } from "../src/lib/templates";
 import type {
   ConfigPayload,
+  McpServerRecord,
   ProviderRecord,
   PlanState,
   RoleRecord,
@@ -63,6 +64,33 @@ const runtime: SessionRuntime = {
   activeMcpServers: [],
   updatedAt: 1,
 };
+
+function mcpServer(overrides: Partial<McpServerRecord> = {}): McpServerRecord {
+  return {
+    id: "github",
+    enabled: true,
+    transport: "streamableHttp",
+    command: null,
+    args: [],
+    env: [],
+    cwd: null,
+    url: "https://example.com/mcp",
+    bearerTokenEnvVar: "GITHUB_MCP_TOKEN",
+    headers: [],
+    endpoint: "https://example.com/mcp",
+    sourceKind: "user",
+    sourceLabel: "User",
+    sourceDetail: null,
+    statusKind: "enabled",
+    statusMessage: null,
+    mutationPolicy: "userEditable",
+    availabilityKind: "checking",
+    availabilityMessage: "MCP health check has not completed",
+    lastCheckedAt: null,
+    toolCount: null,
+    ...overrides,
+  };
+}
 
 function textItem(itemId: string, sequence: number, content: string): TimelineItem {
   return {
@@ -1169,27 +1197,7 @@ function configLoadedUpdatesPermissionMode() {
     payload: {
       ...config,
       permissionMode: "auto-review",
-      mcpServers: [
-        {
-          id: "github",
-          enabled: true,
-          transport: "streamableHttp",
-          command: null,
-          args: [],
-          env: [],
-          cwd: null,
-          url: "https://example.com/mcp",
-          bearerTokenEnvVar: "GITHUB_MCP_TOKEN",
-          headers: [],
-          endpoint: "https://example.com/mcp",
-          sourceKind: "user",
-          sourceLabel: "User",
-          sourceDetail: null,
-          statusKind: "enabled",
-          statusMessage: null,
-          mutationPolicy: "userEditable",
-        },
-      ],
+      mcpServers: [mcpServer()],
     },
     status: "saved",
   });
@@ -1197,6 +1205,36 @@ function configLoadedUpdatesPermissionMode() {
   assertEqual(state.permissionMode, "auto-review");
   assertDeepEqual(state.mcpServers.map((server) => server.id), ["github"]);
   assertEqual(state.status, "saved");
+}
+
+function mcpHealthUpdatedRefreshesMcpServersAndRuntime() {
+  const state = {
+    ...selectedState(),
+    mcpServers: [mcpServer({ availabilityKind: "checking" })],
+    sessionRuntime: {
+      ...runtime,
+      activeMcpServers: [],
+    },
+  };
+
+  const updated = studioReducer(state, {
+    type: "mcpHealthUpdated",
+    payload: {
+      mcpServers: [
+        mcpServer({
+          availabilityKind: "available",
+          availabilityMessage: "Available with 3 tools",
+          lastCheckedAt: 123,
+          toolCount: 3,
+        }),
+      ],
+      activeMcpServers: ["github"],
+    },
+  });
+
+  assertEqual(updated.mcpServers[0]?.availabilityKind, "available");
+  assertEqual(updated.mcpServers[0]?.toolCount, 3);
+  assertDeepEqual(updated.sessionRuntime?.activeMcpServers, ["github"]);
 }
 
 function applyPatchCountsFilesFromResultSummary() {
@@ -1678,6 +1716,7 @@ toolsFromDifferentTurnsDoNotMerge();
 toolGroupStatusUsesPriority();
 sessionModeUpdateKeepsTimelineAndUpdatesSessions();
 configLoadedUpdatesPermissionMode();
+mcpHealthUpdatedRefreshesMcpServersAndRuntime();
 applyPatchCountsFilesFromResultSummary();
 successfulSkillViewImmediatelyUpdatesActiveSkills();
 repeatedSkillViewDoesNotDuplicateActiveSkills();

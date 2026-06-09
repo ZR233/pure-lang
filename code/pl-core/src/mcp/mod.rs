@@ -85,8 +85,7 @@ pub struct McpRuntimeRegistry {
 
 impl fmt::Debug for McpRuntimeRegistry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("McpRuntimeRegistry")
-            .finish_non_exhaustive()
+        f.debug_struct("McpRuntimeRegistry").finish_non_exhaustive()
     }
 }
 
@@ -198,11 +197,8 @@ impl McpRuntimeRegistry {
                 let fingerprint = server_fingerprint(&server);
                 match server.status_kind {
                     McpServerStatusKind::Enabled => {
-                        let should_probe = should_probe_server(
-                            state.servers.get(&server_id),
-                            fingerprint,
-                            policy,
-                        );
+                        let should_probe =
+                            should_probe_server(state.servers.get(&server_id), fingerprint, policy);
                         if should_probe {
                             state.servers.insert(
                                 server_id.clone(),
@@ -210,11 +206,10 @@ impl McpRuntimeRegistry {
                             );
                             probes.push((server_id, server, fingerprint));
                             changed = true;
-                        } else if !state.servers.contains_key(&server_id) {
-                            state.servers.insert(
-                                server_id,
-                                McpRuntimeServerState::checking(fingerprint),
-                            );
+                        } else if let std::collections::btree_map::Entry::Vacant(entry) =
+                            state.servers.entry(server_id)
+                        {
+                            entry.insert(McpRuntimeServerState::checking(fingerprint));
                             changed = true;
                         }
                     }
@@ -287,15 +282,16 @@ impl McpRuntimeRegistry {
                 success.client,
                 success.tools,
             ),
-            Ok(Err(error)) => McpRuntimeServerState::unavailable(
-                fingerprint,
-                checked_at,
-                error.to_string(),
-            ),
+            Ok(Err(error)) => {
+                McpRuntimeServerState::unavailable(fingerprint, checked_at, error.to_string())
+            }
             Err(_) => McpRuntimeServerState::unavailable(
                 fingerprint,
                 checked_at,
-                format!("MCP health check timed out after {} seconds", PROBE_TIMEOUT.as_secs()),
+                format!(
+                    "MCP health check timed out after {} seconds",
+                    PROBE_TIMEOUT.as_secs()
+                ),
             ),
         };
         let mut state = self.state.lock().await;
@@ -314,12 +310,16 @@ impl McpRuntimeRegistry {
 
     pub(crate) async fn mark_unavailable(&self, server_id: &str, error: String) {
         let mut state = self.state.lock().await;
-        let Some(current) = state.servers.get(server_id) else {
+        let Some(fingerprint) = state
+            .servers
+            .get(server_id)
+            .map(|current| current.fingerprint)
+        else {
             return;
         };
         state.servers.insert(
             server_id.to_string(),
-            McpRuntimeServerState::unavailable(current.fingerprint, unix_seconds(), error),
+            McpRuntimeServerState::unavailable(fingerprint, unix_seconds(), error),
         );
         drop(state);
         self.emit_update();
@@ -490,7 +490,17 @@ impl Tool for McpToolAdapter {
                     return Err(error);
                 }
             };
-            let result: McpCallToolResult = serde_json::from_value(value)?;
+            let result: McpCallToolResult = match serde_json::from_value(value) {
+                Ok(result) => result,
+                Err(error) => {
+                    if let Some(registry) = &self.registry {
+                        registry
+                            .mark_unavailable(&self.server_id, error.to_string())
+                            .await;
+                    }
+                    return Err(error.into());
+                }
+            };
             if result.is_error {
                 return Err(PureError::ToolExecutionFailed {
                     tool: self.exposed_name.clone(),
@@ -1064,6 +1074,34 @@ fn unix_seconds() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{PureConfig, effective_mcp_servers};
+    use pretty_assertions::assert_eq;
+
+    #[derive(Debug)]
+    struct FakeMcpClient {
+        fail_requests: bool,
+    }
+
+    impl McpClient for FakeMcpClient {
+        fn request<'a>(&'a self, _method: &'a str, _params: Value) -> BoxFuture<'a, Result<Value>> {
+            Box::pin(async move {
+                if self.fail_requests {
+                    return Err(PureError::ToolExecutionFailed {
+                        tool: "mcp".to_string(),
+                        error: "transport failed".to_string(),
+                    });
+                }
+                Ok(serde_json::json!({
+                    "content": [{"type": "text", "text": "ok"}],
+                    "isError": false
+                }))
+            })
+        }
+
+        fn notify<'a>(&'a self, _method: &'a str, _params: Value) -> BoxFuture<'a, Result<()>> {
+            Box::pin(async { Ok(()) })
+        }
+    }
 
     #[test]
     fn exposed_tool_name_prefixes_server_and_tool() {
@@ -1104,5 +1142,127 @@ mod tests {
                 .unwrap();
 
         assert_eq!(client.bearer_token.as_deref(), Some("coding-plan-key"));
+    }
+
+    #[tokio::test]
+    async fn registry_marks_disabled_and_missing_credential_without_probe() {
+        let mut config = PureConfig::default();
+        config.mcp_servers.insert(
+            "draft".to_string(),
+            McpServerConfig {
+                enabled: false,
+                ..Default::default()
+            },
+        );
+        let registry = McpRuntimeRegistry::new();
+
+        registry.reconcile(effective_mcp_servers(&config)).await;
+        let snapshots = registry.snapshots().await;
+
+        assert_eq!(
+            snapshots["draft"].availability_kind,
+            McpAvailabilityKind::Disabled
+        );
+        assert_eq!(
+            snapshots["zhipu_search"].availability_kind,
+            McpAvailabilityKind::MissingCredential
+        );
+        assert!(registry.available_server_names().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn registry_registers_only_available_tools() {
+        let registry = McpRuntimeRegistry::new();
+        registry.state.lock().await.servers.insert(
+            "github".to_string(),
+            McpRuntimeServerState::available(
+                1,
+                123,
+                Arc::new(FakeMcpClient {
+                    fail_requests: false,
+                }),
+                vec![McpToolDefinition {
+                    name: "search_issues".to_string(),
+                    description: Some("Search issues".to_string()),
+                    input_schema: default_input_schema(),
+                }],
+            ),
+        );
+        registry
+            .state
+            .lock()
+            .await
+            .servers
+            .insert("draft".to_string(), McpRuntimeServerState::disabled(1));
+        let mut core = crate::PureCore::default_provider().unwrap();
+
+        registry.register_available_tools(&mut core).await.unwrap();
+
+        assert!(core.has_tool("mcp__github__search_issues"));
+        assert!(!core.has_tool("mcp__draft__anything"));
+    }
+
+    #[tokio::test]
+    async fn tool_transport_failure_marks_server_unavailable() {
+        let registry = McpRuntimeRegistry::new();
+        registry.state.lock().await.servers.insert(
+            "github".to_string(),
+            McpRuntimeServerState::available(
+                1,
+                123,
+                Arc::new(FakeMcpClient {
+                    fail_requests: false,
+                }),
+                Vec::new(),
+            ),
+        );
+        let adapter = McpToolAdapter::new(
+            "github",
+            McpToolDefinition {
+                name: "search_issues".to_string(),
+                description: Some("Search issues".to_string()),
+                input_schema: default_input_schema(),
+            },
+            Arc::new(FakeMcpClient {
+                fail_requests: true,
+            }),
+            Some(registry.clone()),
+        )
+        .unwrap();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(1);
+        let context = ToolContext {
+            event_tx,
+            options: crate::turn::TurnOptions::default(),
+            workspace_access: crate::tool::WorkspaceAccess::WorkspaceOnly,
+            mode: crate::turn::CompileMode::Auto,
+            workspace_root: std::env::temp_dir(),
+            workspace_instructions: None,
+            active_subagent: None,
+            agent_control: crate::AgentControl::default(),
+            parent_session: Arc::new(crate::CoreSession::new()),
+        };
+
+        let error = adapter
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({}),
+                    session_id: "session".to_string(),
+                    tool_id: "tool".to_string(),
+                },
+                context,
+            )
+            .await
+            .unwrap_err();
+        let snapshots = registry.snapshots().await;
+
+        assert!(error.to_string().contains("transport failed"));
+        assert_eq!(
+            snapshots["github"].availability_kind,
+            McpAvailabilityKind::Unavailable
+        );
+        assert_eq!(
+            registry.available_server_names().await,
+            Vec::<String>::new()
+        );
     }
 }

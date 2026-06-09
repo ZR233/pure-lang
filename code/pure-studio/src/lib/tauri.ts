@@ -392,14 +392,18 @@ export function saveConfig(toml: string) {
 export function saveProviderSettings(input: ProviderSettingsInput) {
   if (!isTauriRuntime()) {
     const nextProviders = input.providers.map(makeProvider);
+    const nextMcpServers = refreshPreviewBuiltinMcpServers(previewConfig.mcpServers, nextProviders);
     previewConfig = {
       ...previewConfig,
       toml: renderPreviewToml(input, previewConfig.mcpServers.map(mcpServerInput)),
       providers: nextProviders,
       roles: input.roles.map((r) => makeRole(r, previewConfig.roles)),
-      mcpServers: refreshPreviewBuiltinMcpServers(previewConfig.mcpServers, nextProviders),
+      mcpServers: nextMcpServers,
       configExists: true,
     };
+    previewSessionRuntime.activeMcpServers = nextMcpServers
+      .filter((server) => server.availabilityKind === "available")
+      .map((server) => server.id);
     return Promise.resolve(clone(previewConfig));
   }
   return invoke<ConfigPayload>("save_provider_settings", { input });
@@ -436,6 +440,10 @@ export function saveMcpSettings(input: McpSettingsInput) {
         statusKind: server.statusKind ?? (server.enabled ? "enabled" : "disabled"),
         statusMessage: server.statusMessage ?? null,
         mutationPolicy: server.mutationPolicy ?? "userEditable",
+        availabilityKind: server.enabled ? "available" : "disabled",
+        availabilityMessage: server.enabled ? "Preview server is available" : "MCP server is disabled",
+        lastCheckedAt: server.enabled ? Math.floor(Date.now() / 1000) : null,
+        toolCount: null,
       })),
       previewConfig.providers,
     );
@@ -446,7 +454,7 @@ export function saveMcpSettings(input: McpSettingsInput) {
       configExists: true,
     };
     previewSessionRuntime.activeMcpServers = nextMcpServers
-      .filter((server) => server.enabled && server.statusKind !== "missingCredential")
+      .filter((server) => server.availabilityKind === "available")
       .map((server) => server.id);
     return Promise.resolve(clone(previewConfig));
   }
@@ -476,6 +484,12 @@ function refreshPreviewBuiltinMcpServers(
           ? "Using the configured Zhipu Coding Plan provider token"
           : "Using the configured Zhipu provider token"
         : "Configure a Zhipu Coding Plan or Zhipu provider token to enable this server",
+      availabilityKind: hasZhipuToken ? "available" : "missingCredential",
+      availabilityMessage: hasZhipuToken
+        ? "Preview server is available"
+        : "Configure a Zhipu Coding Plan or Zhipu provider token to enable this server",
+      lastCheckedAt: hasZhipuToken ? Math.floor(Date.now() / 1000) : null,
+      toolCount: hasZhipuToken ? server.toolCount ?? null : null,
     };
   });
 }
