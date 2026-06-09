@@ -20,7 +20,9 @@ pub use provider::{
     DeepSeekProvider, ModelProvider, OpenAiProvider, ProviderRuntime, SharedModelProvider,
     ZhipuProvider, create_provider, create_provider_with_models,
 };
-pub use provider_info::{ApplyPatchToolType, ProviderInfo, ProviderKind, ToolWirePolicy};
+pub use provider_info::{
+    ApplyPatchToolType, ProviderInfo, ProviderKind, ToolWirePolicy, ZHIPU_CODING_PLAN_BASE_URL,
+};
 pub use request::{
     CompletionRequest, CompletionResponse, CompletionTimelineContext, FinishReason,
     ReasoningConfig, ReasoningSummary, TokenUsage, ToolCall, ToolCallKind, ToolCallPayload,

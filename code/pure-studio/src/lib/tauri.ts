@@ -457,9 +457,14 @@ function refreshPreviewBuiltinMcpServers(
   servers: ConfigPayload["mcpServers"],
   providers: ConfigPayload["providers"],
 ): ConfigPayload["mcpServers"] {
-  const hasZhipuToken = providers.some(
-    (provider) => provider.providerKind === "zhipu" && provider.bearerToken.trim(),
+  const hasZhipuCodingPlanToken = providers.some(
+    (provider) => provider.templateKind === "zhipu-coding-plan" && provider.bearerToken.trim(),
   );
+  const hasZhipuToken =
+    hasZhipuCodingPlanToken ||
+    providers.some(
+    (provider) => provider.providerKind === "zhipu" && provider.bearerToken.trim(),
+    );
   return servers.map((server) => {
     if (server.sourceKind !== "builtIn") return server;
     return {
@@ -467,8 +472,10 @@ function refreshPreviewBuiltinMcpServers(
       enabled: hasZhipuToken,
       statusKind: hasZhipuToken ? "enabled" : "missingCredential",
       statusMessage: hasZhipuToken
-        ? "Using the configured Zhipu provider token"
-        : "Configure a Zhipu provider token to enable this server",
+        ? hasZhipuCodingPlanToken
+          ? "Using the configured Zhipu Coding Plan provider token"
+          : "Using the configured Zhipu provider token"
+        : "Configure a Zhipu Coding Plan or Zhipu provider token to enable this server",
     };
   });
 }

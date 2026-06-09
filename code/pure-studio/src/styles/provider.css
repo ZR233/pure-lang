@@ -143,6 +143,12 @@
   background: #f2f6ff;
 }
 
+.provider-badge.provider-zhipu-coding-plan {
+  border-color: #b8e0d2;
+  color: #10624f;
+  background: #effaf6;
+}
+
 .provider-title-block {
   display: grid;
   gap: 5px;

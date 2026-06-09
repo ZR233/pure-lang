@@ -3,7 +3,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pl_model::{ProviderInfo, default_models, zhipu_default_model_slugs};
+use pl_model::{
+    ProviderInfo, ZHIPU_CODING_PLAN_BASE_URL, default_models, zhipu_default_model_slugs,
+};
 
 use super::role::{ModelRole, ReasoningEffort};
 use super::runtime::SkillsConfig;
@@ -11,7 +13,7 @@ use super::store::{ConfigPaths, ConfigStore};
 use super::{
     BuiltinMcpServerState, CONFIG_SCHEMA_VERSION, DEFAULT_MODEL, McpServerConfig,
     McpServerStatusKind, McpServerTransport, PureConfig, active_mcp_server_names,
-    effective_mcp_servers,
+    effective_mcp_servers, zhipu_coding_plan_token,
 };
 use crate::turn::PermissionMode;
 
@@ -274,6 +276,48 @@ fn effective_mcp_servers_enable_builtin_servers_with_zhipu_token() {
             "zhipu_vision".to_string(),
             "zhipu_zread".to_string()
         ]
+    );
+}
+
+#[test]
+fn builtin_mcp_servers_prefer_zhipu_coding_plan_token() {
+    let mut config = PureConfig::default_config();
+    let slugs = zhipu_default_model_slugs();
+    let models = default_models()
+        .into_iter()
+        .filter(|model| slugs.contains(&model.slug.as_str()))
+        .map(super::ModelConfig::from_model_info)
+        .collect::<Vec<_>>();
+    let mut zhipu = ProviderInfo::zhipu(None);
+    zhipu.bearer_token = Some("normal-zhipu-key".to_string());
+    let mut coding_plan = ProviderInfo::zhipu_coding_plan(None);
+    coding_plan.bearer_token = Some("coding-plan-key".to_string());
+    config.providers.insert(
+        "zhipu".to_string(),
+        super::ProviderConfig::from_provider_info(zhipu, models.clone()),
+    );
+    config.providers.insert(
+        "coding-plan".to_string(),
+        super::ProviderConfig::from_provider_info(coding_plan, models),
+    );
+
+    let servers = effective_mcp_servers(&config);
+
+    assert_eq!(
+        zhipu_coding_plan_token(&config).as_deref(),
+        Some("coding-plan-key")
+    );
+    assert_eq!(
+        servers["zhipu_search"].bearer_token.as_deref(),
+        Some("coding-plan-key")
+    );
+    assert_eq!(
+        servers["zhipu_vision"].config.env.get("Z_AI_API_KEY"),
+        Some(&"coding-plan-key".to_string())
+    );
+    assert_eq!(
+        config.providers["coding-plan"].base_url,
+        ZHIPU_CODING_PLAN_BASE_URL
     );
 }
 

@@ -1485,7 +1485,7 @@ function liveFailedTimelineItemKeepsErrorMessage() {
   );
 }
 
-function template(kind: "deepseek" | "openai" | "zhipu") {
+function template(kind: "deepseek" | "openai" | "zhipu" | "zhipu-coding-plan") {
   const item = previewTemplates.find((candidate) => candidate.id === kind);
   if (!item) {
     throw new Error(`Missing ${kind} template`);
@@ -1547,6 +1547,28 @@ function providerDraftTemplateSwitchSupportsZhipu() {
   );
 }
 
+function providerDraftTemplateSwitchSupportsZhipuCodingPlan() {
+  const deepseek = template("deepseek");
+  const zhipu = template("zhipu");
+  const codingPlan = template("zhipu-coding-plan");
+  const draft = createProviderFromTemplate(deepseek, "deepseek");
+  const switched = applyProviderTemplate(draft, codingPlan, {
+    id: "zhipu-coding-plan",
+    name: codingPlan.name,
+  });
+
+  assertEqual(switched.id, "zhipu-coding-plan");
+  assertEqual(switched.name, "Zhipu Coding Plan");
+  assertEqual(switched.templateKind, "zhipu-coding-plan");
+  assertEqual(switched.baseUrl, "https://open.bigmodel.cn/api/coding/paas/v4");
+  assertEqual(switched.providerKind, "zhipu");
+  assertEqual(switched.defaultModel, "glm-5.1");
+  assertDeepEqual(
+    switched.defaultModels.map((model) => model.slug),
+    zhipu.defaultModels.map((model) => model.slug),
+  );
+}
+
 function zhipuProviderDraftUsesUniqueKey() {
   const zhipu = template("zhipu");
   const existing = [
@@ -1559,6 +1581,21 @@ function zhipuProviderDraftUsesUniqueKey() {
   assertEqual(nextId, "zhipu-3");
   assertEqual(draft.id, "zhipu-3");
   assertEqual(draft.templateKind, "zhipu");
+  assertEqual(draft.defaultModel, "glm-5.1");
+}
+
+function zhipuCodingPlanProviderDraftUsesUniqueKey() {
+  const codingPlan = template("zhipu-coding-plan");
+  const existing = [
+    createProviderFromTemplate(codingPlan, "zhipu-coding-plan"),
+    createProviderFromTemplate(codingPlan, "zhipu-coding-plan-2"),
+  ];
+  const nextId = suggestProviderId(existing, codingPlan.id);
+  const draft = createProviderFromTemplate(codingPlan, nextId);
+
+  assertEqual(nextId, "zhipu-coding-plan-3");
+  assertEqual(draft.id, "zhipu-coding-plan-3");
+  assertEqual(draft.templateKind, "zhipu-coding-plan");
   assertEqual(draft.defaultModel, "glm-5.1");
 }
 
@@ -1655,6 +1692,8 @@ liveFailedTimelineItemKeepsErrorMessage();
 providerDraftUsesSingleAddEntryAndUniqueKey();
 providerDraftTemplateSwitchUpdatesTemplateFields();
 providerDraftTemplateSwitchSupportsZhipu();
+providerDraftTemplateSwitchSupportsZhipuCodingPlan();
 zhipuProviderDraftUsesUniqueKey();
+zhipuCodingPlanProviderDraftUsesUniqueKey();
 editingProviderDraftDoesNotMutateProviderList();
 roleChangeProducesCompleteNormalizedSnapshot();

@@ -831,6 +831,38 @@ mod tests {
     }
 
     #[test]
+    fn provider_template_dtos_include_zhipu_coding_plan() {
+        let templates = provider_template_dtos().unwrap();
+        let zhipu = templates
+            .iter()
+            .find(|template| template.id == "zhipu")
+            .unwrap();
+        let coding_plan = templates
+            .iter()
+            .find(|template| template.id == "zhipu-coding-plan")
+            .unwrap();
+
+        assert_eq!(coding_plan.name, "Zhipu Coding Plan");
+        assert_eq!(
+            coding_plan.base_url,
+            "https://open.bigmodel.cn/api/coding/paas/v4"
+        );
+        assert_eq!(coding_plan.provider_kind, "zhipu");
+        assert_eq!(
+            coding_plan
+                .default_models
+                .iter()
+                .map(|model| model.slug.as_str())
+                .collect::<Vec<_>>(),
+            zhipu
+                .default_models
+                .iter()
+                .map(|model| model.slug.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn mcp_settings_to_servers_ignores_builtin_servers_from_client_payload() {
         let input = McpSettingsInput {
             servers: vec![

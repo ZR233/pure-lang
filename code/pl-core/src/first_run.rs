@@ -19,11 +19,17 @@ pub enum ProviderTemplateKind {
     DeepSeek,
     OpenAi,
     Zhipu,
+    ZhipuCodingPlan,
 }
 
 impl ProviderTemplateKind {
-    pub fn all() -> [Self; 3] {
-        [Self::DeepSeek, Self::OpenAi, Self::Zhipu]
+    pub fn all() -> [Self; 4] {
+        [
+            Self::DeepSeek,
+            Self::OpenAi,
+            Self::Zhipu,
+            Self::ZhipuCodingPlan,
+        ]
     }
 
     pub fn from_key(key: &str) -> Option<Self> {
@@ -31,6 +37,7 @@ impl ProviderTemplateKind {
             "deepseek" => Some(Self::DeepSeek),
             "openai" => Some(Self::OpenAi),
             "zhipu" => Some(Self::Zhipu),
+            "zhipu-coding-plan" | "zhipu_coding_plan" => Some(Self::ZhipuCodingPlan),
             _ => None,
         }
     }
@@ -40,6 +47,7 @@ impl ProviderTemplateKind {
             Self::DeepSeek => "deepseek",
             Self::OpenAi => "openai",
             Self::Zhipu => "zhipu",
+            Self::ZhipuCodingPlan => "zhipu-coding-plan",
         }
     }
 
@@ -48,6 +56,7 @@ impl ProviderTemplateKind {
             Self::DeepSeek => "deepseek",
             Self::OpenAi => "openai",
             Self::Zhipu => "zhipu",
+            Self::ZhipuCodingPlan => "zhipu-coding-plan",
         }
     }
 
@@ -56,6 +65,7 @@ impl ProviderTemplateKind {
             Self::DeepSeek => "DeepSeek",
             Self::OpenAi => "OpenAI",
             Self::Zhipu => "Zhipu",
+            Self::ZhipuCodingPlan => "Zhipu Coding Plan",
         }
     }
 
@@ -64,6 +74,7 @@ impl ProviderTemplateKind {
             Self::DeepSeek => ProviderInfo::deepseek(None),
             Self::OpenAi => ProviderInfo::openai(None),
             Self::Zhipu => ProviderInfo::zhipu(None),
+            Self::ZhipuCodingPlan => ProviderInfo::zhipu_coding_plan(None),
         }
     }
 
@@ -88,7 +99,7 @@ impl ProviderTemplateKind {
         match self {
             Self::DeepSeek => deepseek_default_model_slugs(),
             Self::OpenAi => openai_default_model_slugs(),
-            Self::Zhipu => zhipu_default_model_slugs(),
+            Self::Zhipu | Self::ZhipuCodingPlan => zhipu_default_model_slugs(),
         }
     }
 
@@ -440,6 +451,41 @@ mod tests {
     }
 
     #[test]
+    fn zhipu_coding_plan_draft_reuses_zhipu_models_with_coding_endpoint() {
+        let mut draft = FirstRunConfigDraft {
+            default_provider: "zhipu-coding-plan".to_string(),
+            providers: vec![FirstRunProviderDraft::from_template(
+                "zhipu-coding-plan",
+                ProviderTemplateKind::ZhipuCodingPlan,
+            )],
+        };
+        draft.providers[0].bearer_token = "sk-coding-plan".to_string();
+
+        let config = draft.to_config().unwrap();
+        let zhipu_slugs = ProviderTemplateKind::Zhipu.default_model_slugs();
+        let coding_plan_slugs = config.providers["zhipu-coding-plan"]
+            .models
+            .iter()
+            .map(|model| model.slug.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            config.role_config(ModelRole::Planner).provider,
+            "zhipu-coding-plan"
+        );
+        assert_eq!(config.role_config(ModelRole::Planner).model, "glm-5.1");
+        assert_eq!(
+            config.providers["zhipu-coding-plan"].base_url,
+            "https://open.bigmodel.cn/api/coding/paas/v4"
+        );
+        assert_eq!(
+            config.providers["zhipu-coding-plan"].provider_kind,
+            pl_model::ProviderKind::Zhipu
+        );
+        assert_eq!(coding_plan_slugs, zhipu_slugs.to_vec());
+    }
+
+    #[test]
     fn repeated_provider_kind_gets_unique_suggested_key() {
         let mut draft = FirstRunConfigDraft::new_default();
         draft.add_provider(ProviderTemplateKind::DeepSeek);
@@ -447,6 +493,8 @@ mod tests {
         draft.add_provider(ProviderTemplateKind::OpenAi);
         draft.add_provider(ProviderTemplateKind::Zhipu);
         draft.add_provider(ProviderTemplateKind::Zhipu);
+        draft.add_provider(ProviderTemplateKind::ZhipuCodingPlan);
+        draft.add_provider(ProviderTemplateKind::ZhipuCodingPlan);
 
         let keys = draft
             .providers
@@ -462,7 +510,9 @@ mod tests {
                 "openai",
                 "openai-2",
                 "zhipu",
-                "zhipu-2"
+                "zhipu-2",
+                "zhipu-coding-plan",
+                "zhipu-coding-plan-2"
             ]
         );
     }

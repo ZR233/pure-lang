@@ -136,7 +136,7 @@ export const previewMcpServers: McpServerRecord[] = [
     sourceLabel: "Built-in",
     sourceDetail: "Zhipu Coding Plan",
     statusKind: "missingCredential",
-    statusMessage: "Configure a Zhipu provider token to enable this server",
+    statusMessage: "Configure a Zhipu Coding Plan or Zhipu provider token to enable this server",
     mutationPolicy: "lockedIdentity",
   },
   {
@@ -155,7 +155,7 @@ export const previewMcpServers: McpServerRecord[] = [
     sourceLabel: "Built-in",
     sourceDetail: "Zhipu Coding Plan",
     statusKind: "missingCredential",
-    statusMessage: "Configure a Zhipu provider token to enable this server",
+    statusMessage: "Configure a Zhipu Coding Plan or Zhipu provider token to enable this server",
     mutationPolicy: "lockedIdentity",
   },
   {
@@ -174,7 +174,7 @@ export const previewMcpServers: McpServerRecord[] = [
     sourceLabel: "Built-in",
     sourceDetail: "Zhipu Coding Plan",
     statusKind: "missingCredential",
-    statusMessage: "Configure a Zhipu provider token to enable this server",
+    statusMessage: "Configure a Zhipu Coding Plan or Zhipu provider token to enable this server",
     mutationPolicy: "lockedIdentity",
   },
   {
@@ -195,7 +195,7 @@ export const previewMcpServers: McpServerRecord[] = [
     sourceLabel: "Built-in",
     sourceDetail: "Zhipu Coding Plan",
     statusKind: "missingCredential",
-    statusMessage: "Configure a Zhipu provider token to enable this server",
+    statusMessage: "Configure a Zhipu Coding Plan or Zhipu provider token to enable this server",
     mutationPolicy: "lockedIdentity",
   },
 ];
