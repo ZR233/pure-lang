@@ -1,3 +1,4 @@
+mod mcp;
 mod provider;
 mod role;
 mod runtime;
@@ -11,6 +12,9 @@ use std::collections::BTreeMap;
 use pl_protocol::{PureError, Result};
 use serde::{Deserialize, Serialize};
 
+pub use mcp::{
+    McpServerConfig, McpServerTransport, active_mcp_server_names, validate_mcp_identifier,
+};
 pub use provider::{ModelCapabilityConfig, ModelConfig, ProviderConfig, TruncationPolicyConfig};
 pub use role::{ModelRole, ReasoningEffort, ResolvedRoleConfig, RoleConfig, RoleConfigs};
 pub use runtime::{RuntimeConfig, SkillsConfig, SystemSkillsConfig};
@@ -31,6 +35,8 @@ pub struct PureConfig {
     pub runtime: RuntimeConfig,
     #[serde(default, skip_serializing_if = "SkillsConfig::is_default")]
     pub skills: SkillsConfig,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub mcp_servers: BTreeMap<String, McpServerConfig>,
     pub roles: RoleConfigs,
     pub providers: BTreeMap<String, ProviderConfig>,
 }
@@ -42,6 +48,8 @@ struct PureConfigToml {
     pub runtime: RuntimeConfig,
     #[serde(default)]
     pub skills: SkillsConfig,
+    #[serde(default)]
+    pub mcp_servers: BTreeMap<String, McpServerConfig>,
     #[serde(default)]
     pub roles: Option<role::RoleConfigsToml>,
     pub providers: BTreeMap<String, ProviderConfig>,
@@ -64,6 +72,7 @@ impl PureConfig {
             schema_version: CONFIG_SCHEMA_VERSION,
             runtime: RuntimeConfig::default(),
             skills: SkillsConfig::default(),
+            mcp_servers: BTreeMap::new(),
             roles: RoleConfigs {
                 explorer: role.clone(),
                 planner: role.clone(),
@@ -91,6 +100,7 @@ impl PureConfig {
         }
 
         crate::skill::validate_skills_config(&self.skills)?;
+        mcp::validate_mcp_servers(&self.mcp_servers)?;
 
         Ok(())
     }
@@ -171,6 +181,7 @@ impl PureConfig {
             schema_version: raw.schema_version,
             runtime: raw.runtime,
             skills: raw.skills,
+            mcp_servers: raw.mcp_servers,
             roles,
             providers: raw.providers,
         };

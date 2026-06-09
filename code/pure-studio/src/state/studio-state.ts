@@ -4,6 +4,7 @@ import type {
   AgentTimelineEvent,
   BootstrapPayload,
   ConfigPayload,
+  McpServerRecord,
   PermissionMode,
   PlanState,
   ProjectRecord,
@@ -35,7 +36,7 @@ import {
   type TimelineStateSlice,
 } from "./timeline-state";
 
-export type SettingsTab = "providers" | "skills" | "roles" | "security" | "general";
+export type SettingsTab = "providers" | "skills" | "roles" | "mcp" | "security" | "general";
 export type PlanActionMode = "choice" | "discuss";
 
 export type PlanActionState = {
@@ -55,6 +56,7 @@ export type StudioState = TimelineStateSlice & {
   projects: ProjectRecord[];
   sessions: SessionRecord[];
   providers: ProviderRecord[];
+  mcpServers: McpServerRecord[];
   roles: RoleRecord[];
   providerTemplates: ProviderTemplateRecord[];
   selectedProjectId: string | null;
@@ -138,6 +140,7 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   projects: [],
   sessions: [],
   providers: [],
+  mcpServers: [],
   roles: [],
   providerTemplates: [],
   selectedProjectId: null,
@@ -838,6 +841,7 @@ function configFields(selectedProviderId: string | null, payload: ConfigPayload)
       : payload.providers[0]?.id ?? null;
   return {
     providers: payload.providers,
+    mcpServers: payload.mcpServers ?? [],
     roles: payload.roles,
     providerTemplates: payload.templates,
     configToml: payload.toml,

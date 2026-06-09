@@ -26,6 +26,12 @@ pub(crate) fn decide_tool_permission(
         };
     }
 
+    if crate::mcp::is_mcp_tool_name(&request.name) {
+        return PermissionDecision::Approved {
+            workspace_access: WorkspaceAccess::ExternalAllowed,
+        };
+    }
+
     if request.name == "write_stdin" {
         return PermissionDecision::Approved {
             workspace_access: requested_access,
@@ -220,6 +226,26 @@ mod tests {
             ),
             PermissionDecision::NeedsUserApproval {
                 workspace_access: WorkspaceAccess::WorkspaceOnly
+            }
+        );
+    }
+
+    #[test]
+    fn mcp_tool_is_trusted_without_extra_approval() {
+        let manual = TurnOptions {
+            tool_approval_policy: ToolApprovalPolicy::Manual,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            decide_tool_permission(
+                &manual,
+                CompileMode::Plan,
+                &request("mcp__github__search_issues"),
+                WorkspaceAccess::ExternalAllowed,
+            ),
+            PermissionDecision::Approved {
+                workspace_access: WorkspaceAccess::ExternalAllowed
             }
         );
     }

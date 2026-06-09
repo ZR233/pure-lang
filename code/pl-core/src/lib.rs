@@ -8,6 +8,7 @@ pub mod domain;
 mod first_run;
 pub mod infrastructure;
 pub mod interfaces;
+mod mcp;
 mod permission;
 mod provider_error;
 mod runtime_usage;
@@ -24,9 +25,10 @@ pub use agent::{
     AgentStatus, AgentStatusUpdate, AgentWaitOutcome, MessageDeliveryMode,
 };
 pub use config::{
-    ConfigPaths, ConfigStore, ModelCapabilityConfig, ModelConfig, ModelRole, ProviderConfig,
-    PureConfig, ReasoningEffort, ResolvedRoleConfig, RoleConfig, RoleConfigs, RuntimeConfig,
-    SkillsConfig, SystemSkillsConfig, TruncationPolicyConfig,
+    ConfigPaths, ConfigStore, McpServerConfig, McpServerTransport, ModelCapabilityConfig,
+    ModelConfig, ModelRole, ProviderConfig, PureConfig, ReasoningEffort, ResolvedRoleConfig,
+    RoleConfig, RoleConfigs, RuntimeConfig, SkillsConfig, SystemSkillsConfig,
+    TruncationPolicyConfig, active_mcp_server_names,
 };
 pub use config_editor::{
     ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit, infer_provider_template_kind,

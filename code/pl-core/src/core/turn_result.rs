@@ -29,6 +29,9 @@ pub(super) fn should_request_parallel_tool_calls(
 }
 
 pub(super) fn tool_allowed_in_mode(mode: CompileMode, name: &str) -> bool {
+    if crate::mcp::is_mcp_tool_name(name) {
+        return true;
+    }
     match mode {
         CompileMode::Auto => true,
         CompileMode::Plan => matches!(

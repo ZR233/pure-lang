@@ -255,6 +255,7 @@ impl FirstRunConfigDraft {
             schema_version: CONFIG_SCHEMA_VERSION,
             runtime: Default::default(),
             skills: Default::default(),
+            mcp_servers: Default::default(),
             roles: RoleConfigs {
                 explorer: role.clone(),
                 planner: role.clone(),

@@ -76,6 +76,10 @@ pub(crate) async fn run_agent_turn(config: AgentRunConfig) {
         config.workspace_root.clone(),
         config.workspace_instructions.clone(),
     );
+    if let Err(error) = core.register_configured_mcp_tools().await {
+        mark_agent_failed(&config, error.to_string()).await;
+        return;
+    }
 
     let mut session = config
         .agent_control

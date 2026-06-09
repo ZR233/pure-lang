@@ -137,7 +137,31 @@ pub struct ConfigDto {
     pub providers: Vec<ProviderDto>,
     pub roles: Vec<RoleDto>,
     pub templates: Vec<ProviderTemplateDto>,
+    pub mcp_servers: Vec<McpServerDto>,
     pub config_exists: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerDto {
+    pub id: String,
+    pub enabled: bool,
+    pub transport: String,
+    pub command: Option<String>,
+    pub args: Vec<String>,
+    pub env: Vec<KeyValueDto>,
+    pub cwd: Option<String>,
+    pub url: Option<String>,
+    pub bearer_token_env_var: Option<String>,
+    pub headers: Vec<KeyValueDto>,
+    pub endpoint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyValueDto {
+    pub key: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -263,6 +287,27 @@ pub struct SessionSelectionDto {
     pub agent_events: Vec<AgentEventDto>,
     pub agents: Vec<AgentDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpSettingsInput {
+    pub servers: Vec<McpServerInput>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerInput {
+    pub id: String,
+    pub enabled: bool,
+    pub transport: String,
+    pub command: Option<String>,
+    pub args: Vec<String>,
+    pub env: Vec<KeyValueDto>,
+    pub cwd: Option<String>,
+    pub url: Option<String>,
+    pub bearer_token_env_var: Option<String>,
+    pub headers: Vec<KeyValueDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]

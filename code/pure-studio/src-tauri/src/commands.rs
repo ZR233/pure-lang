@@ -13,15 +13,15 @@ use tokio_util::sync::CancellationToken;
 
 use crate::approvals::{approval_callback, deny_session_approvals, resolve_tool_approval};
 use crate::dto::{
-    BootstrapDto, ConfigDto, DiscoveredSkillsDto, PlanLifecycleResponse, ProjectSelectionDto,
-    PromptFailedPayload, ProviderSettingsInput, RunPromptResponse, SessionSelectionDto,
-    SessionTimelineDto, StopPromptResponse,
+    BootstrapDto, ConfigDto, DiscoveredSkillsDto, McpSettingsInput, PlanLifecycleResponse,
+    ProjectSelectionDto, PromptFailedPayload, ProviderSettingsInput, RunPromptResponse,
+    SessionSelectionDto, SessionTimelineDto, StopPromptResponse,
 };
 use crate::events::drain_events;
 use crate::mappers::{
     agent_dtos, agent_event_dtos, config_dto, discovered_skills_dto, load_session_runtime_dto,
-    plan_lifecycle_events_to_states, project_dtos, provider_settings_to_edit, session_dtos,
-    timeline_events_to_items, turn_result_status_label,
+    mcp_settings_to_servers, plan_lifecycle_events_to_states, project_dtos,
+    provider_settings_to_edit, session_dtos, timeline_events_to_items, turn_result_status_label,
 };
 use crate::state::{AppState, CommandError, CommandResult};
 use crate::user_input::{cancel_session_user_inputs, resolve_user_input, user_input_callback};
@@ -650,6 +650,19 @@ pub fn save_provider_settings(
 pub fn save_permission_mode(mode: String, state: State<'_, AppState>) -> CommandResult<ConfigDto> {
     let mut config = state.studio.config_store().load_or_default()?;
     config.runtime.permission_mode = PermissionMode::from_label(&mode);
+    state.studio.config_store().save(&config)?;
+    config_dto(state.studio.config_store())
+}
+
+#[tauri::command]
+pub fn save_mcp_settings(
+    input: McpSettingsInput,
+    state: State<'_, AppState>,
+) -> CommandResult<ConfigDto> {
+    let mut config = state.studio.config_store().load_or_default()?;
+    config.mcp_servers = mcp_settings_to_servers(input)?;
+    config.runtime.active_mcp_servers = pl_core::active_mcp_server_names(&config.mcp_servers);
+    config.validate()?;
     state.studio.config_store().save(&config)?;
     config_dto(state.studio.config_store())
 }

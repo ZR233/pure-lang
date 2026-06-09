@@ -16,6 +16,7 @@ import {
   loadSessionTimeline,
   openProject,
   runPrompt,
+  saveMcpSettings,
   saveConfig,
   savePermissionMode,
   saveProviderSettings,
@@ -37,6 +38,7 @@ import type {
   AgentEvent,
   AgentEventPayload,
   CompileMode,
+  McpServerInput,
   PermissionMode,
   PromptFailed,
   ProviderRecord,
@@ -598,6 +600,23 @@ export function useStudioApp() {
     }
   }
 
+  async function onSaveMcpSettings(servers: McpServerInput[]): Promise<boolean> {
+    try {
+      dispatch({
+        type: "configLoaded",
+        payload: await saveMcpSettings({ servers }),
+        status: t("status.mcpSettingsSaved"),
+      });
+      return true;
+    } catch (error) {
+      dispatch({
+        type: "bootstrapFailed",
+        status: t("status.mcpSettingsInvalid", { error: errorText(error) }),
+      });
+      return false;
+    }
+  }
+
   async function onApprove(approvalId: string) {
     await approveTool(approvalId);
   }
@@ -654,6 +673,7 @@ export function useStudioApp() {
     onSaveConfig,
     onSaveProviderSettings,
     onSavePermissionMode,
+    onSaveMcpSettings,
     onReloadConfig,
     onApprove,
     onDeny,

@@ -133,6 +133,10 @@ impl PureCore {
         self.tools.register(tool);
     }
 
+    pub(crate) fn has_tool(&self, name: &str) -> bool {
+        self.tools.get(name).is_some()
+    }
+
     /// 注册默认工具集合。
     ///
     /// 当前包含 shell、异步 agent 协作工具和 workspace 文件工具。调用方应通过 `TurnOptions` 控制审批策略。
@@ -178,6 +182,14 @@ impl PureCore {
         ));
         self.register_tool(CloseAgentTool);
         self.register_tool(AskUserTool);
+    }
+
+    pub async fn register_configured_mcp_tools(&mut self) -> Result<()> {
+        let Some(config) = self.config.as_ref() else {
+            return Ok(());
+        };
+        let servers = config.mcp_servers.clone();
+        crate::mcp::register_configured_mcp_tools(self, &servers).await
     }
 
     pub(crate) fn register_skill_tools(
@@ -482,6 +494,7 @@ mod tests {
         assert!(tool_allowed_in_mode(plan, "followup_task"));
         assert!(tool_allowed_in_mode(plan, "request_user_input"));
         assert!(tool_allowed_in_mode(plan, "bash"));
+        assert!(tool_allowed_in_mode(plan, "mcp__github__search_issues"));
         assert!(!tool_allowed_in_mode(plan, "subagent"));
         assert!(!tool_allowed_in_mode(plan, "write_file"));
         assert!(!tool_allowed_in_mode(plan, "apply_patch"));

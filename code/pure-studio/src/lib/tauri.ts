@@ -4,6 +4,8 @@ import type {
   CompileMode,
   ConfigPayload,
   DiscoveredSkillsPayload,
+  McpSettingsInput,
+  McpServerInput,
   PermissionMode,
   PlanLifecycleResponse,
   ProjectSelectionPayload,
@@ -391,7 +393,7 @@ export function saveProviderSettings(input: ProviderSettingsInput) {
   if (!isTauriRuntime()) {
     previewConfig = {
       ...previewConfig,
-      toml: renderPreviewToml(input),
+      toml: renderPreviewToml(input, previewConfig.mcpServers.map(mcpServerInput)),
       providers: input.providers.map(makeProvider),
       roles: input.roles.map((r) => makeRole(r, previewConfig.roles)),
       configExists: true,
@@ -399,6 +401,44 @@ export function saveProviderSettings(input: ProviderSettingsInput) {
     return Promise.resolve(clone(previewConfig));
   }
   return invoke<ConfigPayload>("save_provider_settings", { input });
+}
+
+export function saveMcpSettings(input: McpSettingsInput) {
+  if (!isTauriRuntime()) {
+    const providerInput = {
+      defaultProviderId: previewConfig.providers[0]?.id ?? null,
+      providers: previewConfig.providers.map((provider) => ({
+        id: provider.id,
+        templateKind: provider.templateKind,
+        name: provider.name,
+        baseUrl: provider.baseUrl,
+        bearerToken: provider.bearerToken,
+        defaultModel: provider.defaultModel,
+        providerKind: provider.providerKind,
+        customModels: provider.customModels,
+      })),
+      roles: previewConfig.roles.map((role) => ({
+        key: role.key,
+        provider: role.provider,
+        model: role.model,
+        effort: role.effort,
+      })),
+    };
+    previewConfig = {
+      ...previewConfig,
+      toml: renderPreviewToml(providerInput, input.servers),
+      mcpServers: input.servers.map((server) => ({
+        ...server,
+        endpoint: server.transport === "stdio" ? server.command ?? "" : server.url ?? "",
+      })),
+      configExists: true,
+    };
+    previewSessionRuntime.activeMcpServers = input.servers
+      .filter((server) => server.enabled)
+      .map((server) => server.id);
+    return Promise.resolve(clone(previewConfig));
+  }
+  return invoke<ConfigPayload>("save_mcp_settings", { input });
 }
 
 export function savePermissionMode(mode: PermissionMode) {
@@ -411,6 +451,21 @@ export function savePermissionMode(mode: PermissionMode) {
     return Promise.resolve(clone(previewConfig));
   }
   return invoke<ConfigPayload>("save_permission_mode", { mode });
+}
+
+function mcpServerInput(server: ConfigPayload["mcpServers"][number]): McpServerInput {
+  return {
+    id: server.id,
+    enabled: server.enabled,
+    transport: server.transport,
+    command: server.command ?? null,
+    args: [...server.args],
+    env: server.env.map((entry) => ({ ...entry })),
+    cwd: server.cwd ?? null,
+    url: server.url ?? null,
+    bearerTokenEnvVar: server.bearerTokenEnvVar ?? null,
+    headers: server.headers.map((entry) => ({ ...entry })),
+  };
 }
 
 export function listDiscoveredSkills(projectId: string) {

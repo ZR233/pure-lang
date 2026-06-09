@@ -106,7 +106,7 @@ turn 展示语义固定：
 
 组件通过 selectors 读取，不直接拼装跨域状态。
 
-状态栏固定渲染在聊天底部。聊天顶部标题栏只展示当前会话标题，不展示项目完整路径，避免长路径撑宽主聊天列。左侧展示高频控制：`Auto / Plan` 模式、模型、推理强度和权限模式；右侧展示只读状态：上下文使用量、按货币分组的费用估算、能力数量和 agent latest snapshot。权限模式来自当前配置：请求批准、替我审批或完全访问。Skills 数量和列表表示当前会话已经成功 `skill_view`、内容进入上下文的 skills，不是配置声明，也不是可 discover 的全部 skills。运行中收到成功的 `skill_view` completed event 后，前端必须立即把该 skill 合并到当前会话 `activeSkills`；`RunPromptResponse.sessionRuntime` 仍作为 turn 完成后的最终校准。设置页的 Skills 标签页则展示当前项目按 discovery 规则发现的只读 skills 列表，并显示每项 scope；该列表不代表当前会话已激活。运行中收到 `AgentRuntimeUpdated` 后必须即时用后端聚合快照更新 `sessionRuntime` 和对应 agent 的 `runtimeUsage`，不能等 `RunPromptResponse` 返回后才刷新。设置页作为全屏 overlay 打开时必须覆盖聊天状态栏与其 popover，状态栏不得浮到设置页之上。
+状态栏固定渲染在聊天底部。聊天顶部标题栏只展示当前会话标题，不展示项目完整路径，避免长路径撑宽主聊天列。左侧展示高频控制：`Auto / Plan` 模式、模型、推理强度和权限模式；右侧展示只读状态：上下文使用量、按货币分组的费用估算、能力数量和 agent latest snapshot。权限模式来自当前配置：请求批准、替我审批或完全访问。Skills 数量和列表表示当前会话已经成功 `skill_view`、内容进入上下文的 skills，不是配置声明，也不是可 discover 的全部 skills。MCP 数量和列表来自当前配置中已启用的 `[mcp_servers]`，表示该会话会向模型暴露的 MCP server。运行中收到成功的 `skill_view` completed event 后，前端必须立即把该 skill 合并到当前会话 `activeSkills`；`RunPromptResponse.sessionRuntime` 仍作为 turn 完成后的最终校准。设置页的 Skills 标签页则展示当前项目按 discovery 规则发现的只读 skills 列表，并显示每项 scope；该列表不代表当前会话已激活。运行中收到 `AgentRuntimeUpdated` 后必须即时用后端聚合快照更新 `sessionRuntime` 和对应 agent 的 `runtimeUsage`，不能等 `RunPromptResponse` 返回后才刷新。设置页作为全屏 overlay 打开时必须覆盖聊天状态栏与其 popover，状态栏不得浮到设置页之上。
 
 状态栏在窄窗口下保留左侧高频控制，并把右侧只读状态按优先级收入“更多”菜单；更多入口固定跟随左侧控制组显示，避免右侧只读状态挤压时入口也被裁剪。由于桌面布局含左侧项目/会话栏，响应式必须优先按聊天 footer 自身宽度判断，并保留整窗宽度兜底：聊天 footer 约 `1040px` 以下收起能力和子代理，footer 约 `760px` 以下额外收起费用，footer 约 `520px` 以下额外收起上下文。整窗兜底在 `1320px` 以下直接收起费用、能力和子代理，避免不支持 container query 的 WebView2 环境按整窗宽度误判聊天列空间。更多菜单直接展示被收起状态的摘要和详情，不依赖悬浮 popover，必须支持点击、键盘聚焦、外部点击和 `Escape` 关闭，且不得被状态栏横向滚动容器或窗口边界裁剪。
 
@@ -121,6 +121,8 @@ turn 展示语义固定：
 运行中如果收到 `request_user_input` 的 pending 请求，聊天底部普通输入框必须被 `AskUserComposer` 替换。该 UI 逐个展示结构化问题，用户可以在问题之间前进和返回；只有最终点击提交时才通过 Tauri command 一次性回答当前 request 并恢复普通 composer。每个问题支持选项和必要的自由输入，选项选择不会立即提交。ask-user 期间用户不能发送新的普通 prompt，但停止按钮仍可中断当前 turn。
 
 设置页 Security 标签页提供会话级权限模式选择。`request-approval` 在 workspace 内直接执行，访问 workspace 外时使用现有 ApprovalOverlay 弹出用户审批；`auto-review` 在 workspace 内直接执行，访问 workspace 外时由 reviewer 模型自动审批，前端不弹用户审批卡片，只通过工具结果展示已批准或已拒绝的事实；`full-access` 明确展示为会放宽 workspace 外文件路径和 shell cwd 边界并直接放行的模式。
+
+设置页 MCP 标签页提供结构化 server 配置。列表展示 server id、启用状态、传输方式和主要 endpoint；新增和编辑使用本地草稿，保存成功后即时写入 `~/.pure/config.toml` 并刷新配置 payload。stdio 表单提供 command、args、env 和可选 cwd；Streamable HTTP 表单提供 url、bearer token 环境变量和 headers。启用的 MCP server 被视为用户信任对象，其 tools 在 Auto 和 Plan Mode 中直接暴露，不额外触发审批弹窗。
 
 工具调用展示遵循 `design/13-tool-calling-runtime.md` 的生命周期语义。工具 entry 和工具组详情必须展示工具名称、状态和关键路径或命令摘要；静默文件工具的成功结果可以隐藏，但 failed、denied、interrupted、budgetLimited 等异常状态必须展示 result/error 详情。前端只做展示派生，不改变 raw `TimelineItem` 的状态或结果内容。实时状态文案必须以 `TimelineItem.status` 为准；`TimelineItemCompleted` 和 `TimelineItemFailed` 只承载最终终态，不能被用来表示 `approved` 这类执行前中间态。
 
