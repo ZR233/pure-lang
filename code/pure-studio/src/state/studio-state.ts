@@ -5,6 +5,7 @@ import type {
   BootstrapPayload,
   ConfigPayload,
   PermissionMode,
+  PlanState,
   ProjectRecord,
   ProjectSelectionPayload,
   ProviderRecord,
@@ -70,6 +71,7 @@ export type StudioState = TimelineStateSlice & {
   approvals: ToolApprovalRequest[];
   pendingUserInput: UserInputRequest | null;
   planAction: PlanActionState | null;
+  planStates: Map<string, PlanState>;
   dismissedPlanId: string | null;
   settingsOpen: boolean;
   activeSettingsTab: SettingsTab;
@@ -83,7 +85,13 @@ export type StudioState = TimelineStateSlice & {
 export type StudioAction =
   | { type: "bootstrapLoaded"; payload: BootstrapPayload; status: string }
   | { type: "bootstrapFailed"; status: string }
-  | { type: "timelineLoaded"; sessionId: string | null; items: TimelineItem[]; nextSequence: number }
+  | {
+      type: "timelineLoaded";
+      sessionId: string | null;
+      items: TimelineItem[];
+      planStates?: PlanState[];
+      nextSequence: number;
+    }
   | { type: "timelineLoadFailed"; sessionId: string | null; status: string }
   | { type: "projectSelectionLoaded"; payload: ProjectSelectionPayload; status: string }
   | { type: "sessionSelectionLoaded"; payload: SessionSelectionPayload; status: string }
@@ -105,7 +113,14 @@ export type StudioAction =
   | { type: "userInputRequested"; payload: UserInputRequest; status: string }
   | { type: "userInputResolved"; payload: UserInputResolved; status: string }
   | { type: "setPlanActionMode"; mode: PlanActionMode }
-  | { type: "dismissPlanAction" }
+  | { type: "dismissPlanAction"; planId?: string | null }
+  | {
+      type: "planLifecycleLoaded";
+      sessionId: string;
+      planStates: PlanState[];
+      timelineNextSequence: number;
+      status?: string;
+    }
   | { type: "stopRequested"; status: string }
   | { type: "stopFallback"; status: string }
   | {
@@ -140,6 +155,7 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   approvals: [],
   pendingUserInput: null,
   planAction: null,
+  planStates: new Map(),
   dismissedPlanId: null,
   settingsOpen: false,
   activeSettingsTab: "providers",
@@ -167,13 +183,17 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         status: action.status,
         turnPhase: "idle",
         planAction: null,
+        planStates: new Map(),
         dismissedPlanId: null,
       };
     case "bootstrapFailed":
       return { ...state, status: action.status };
     case "timelineLoaded":
       if (action.sessionId !== state.selectedSessionId) return state;
-      return mergeTimelineSnapshot(state, action.sessionId, action.items ?? [], action.nextSequence);
+      return clearHandledPlanAction({
+        ...mergeTimelineSnapshot(state, action.sessionId, action.items ?? [], action.nextSequence),
+        planStates: mergePlanStates(state.planStates, action.planStates ?? []),
+      });
     case "timelineLoadFailed":
       if (action.sessionId !== state.selectedSessionId) return state;
       return { ...state, status: action.status };
@@ -191,6 +211,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         approvals: [],
         pendingUserInput: null,
         planAction: null,
+        planStates: new Map(),
         dismissedPlanId: null,
         status: action.status,
         turnPhase: "idle",
@@ -209,6 +230,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         approvals: [],
         pendingUserInput: null,
         planAction: null,
+        planStates: new Map(),
         dismissedPlanId: null,
         status: action.status,
         turnPhase: "idle",
@@ -237,12 +259,15 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
           .map((item) => item.itemId),
       );
       return setPendingPlanAction({
-        ...mergeRunPromptTimeline(
+        ...clearHandledPlanAction({
+          ...mergeRunPromptTimeline(
           removeOptimisticTimelineItems(state),
           action.payload.sessionId,
           action.payload.timelineItems ?? [],
           action.payload.timelineNextSequence,
-        ),
+          ),
+          planStates: mergePlanStates(state.planStates, action.payload.planStates ?? []),
+        }),
         selectedSessionId: action.payload.sessionId,
         sessions: action.payload.sessions,
         agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
@@ -341,9 +366,19 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
     case "dismissPlanAction":
       return {
         ...state,
-        dismissedPlanId: state.planAction?.planId ?? state.dismissedPlanId,
+        dismissedPlanId: action.planId ?? state.planAction?.planId ?? state.dismissedPlanId,
         planAction: null,
       };
+    case "planLifecycleLoaded":
+      if (action.sessionId !== state.selectedSessionId) {
+        return state;
+      }
+      return clearHandledPlanAction({
+        ...state,
+        planStates: mergePlanStates(state.planStates, action.planStates ?? []),
+        timelineNextSequence: Math.max(state.timelineNextSequence, action.timelineNextSequence),
+        status: action.status ?? state.status,
+      });
     case "stopRequested":
       return { ...state, turnPhase: "stopping", status: action.status };
     case "stopFallback":
@@ -405,6 +440,9 @@ function setPendingPlanAction(
   if (plan.planId === state.dismissedPlanId) {
     return state.planAction ? { ...state, planAction: null } : state;
   }
+  if (state.planStates.has(plan.planId)) {
+    return state.planAction ? { ...state, planAction: null } : state;
+  }
   const currentPlanAction = state.planAction;
   const samePlanStillPending = currentPlanAction?.planId === plan.planId;
   const mode = samePlanStillPending ? currentPlanAction.mode : "choice";
@@ -421,6 +459,30 @@ function setPendingPlanAction(
     return state;
   }
   return { ...state, planAction: nextPlanAction };
+}
+
+function mergePlanStates(
+  current: Map<string, PlanState>,
+  incoming: PlanState[],
+): Map<string, PlanState> {
+  if (!incoming.length) {
+    return current;
+  }
+  const next = new Map(current);
+  for (const planState of incoming) {
+    if (!planState?.planId) {
+      continue;
+    }
+    next.set(planState.planId, planState);
+  }
+  return next;
+}
+
+function clearHandledPlanAction<T extends StudioState>(state: T): T {
+  if (!state.planAction || !state.planStates.has(state.planAction.planId)) {
+    return state;
+  }
+  return { ...state, planAction: null };
 }
 
 function latestEligiblePlanCandidate(

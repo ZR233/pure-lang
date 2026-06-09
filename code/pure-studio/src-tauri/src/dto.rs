@@ -267,6 +267,24 @@ pub struct SessionSelectionDto {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PlanStateDto {
+    pub plan_id: String,
+    pub state: String,
+    pub turn_id: Option<String>,
+    pub reason: Option<String>,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanLifecycleResponse {
+    pub session_id: String,
+    pub plan_states: Vec<PlanStateDto>,
+    pub timeline_next_sequence: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RunPromptResponse {
     pub session_id: String,
     pub sessions: Vec<SessionDto>,
@@ -274,6 +292,7 @@ pub struct RunPromptResponse {
     pub agents: Vec<AgentDto>,
     pub session_runtime: SessionRuntimeDto,
     pub timeline_items: Vec<TimelineItem>,
+    pub plan_states: Vec<PlanStateDto>,
     pub timeline_next_sequence: u64,
     pub turn_status: String,
     pub turn_abort_reason: Option<String>,
@@ -292,6 +311,7 @@ pub struct StopPromptResponse {
 pub struct SessionTimelineDto {
     pub session_id: String,
     pub items: Vec<TimelineItem>,
+    pub plan_states: Vec<PlanStateDto>,
     pub next_sequence: u64,
 }
 

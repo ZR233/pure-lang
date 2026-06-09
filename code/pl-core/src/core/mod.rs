@@ -365,7 +365,8 @@ mod tests {
                     item.kind == pl_protocol::TimelineItemKind::Tool
                 }
                 TraceEventKind::TimelineItemStarted { .. }
-                | TraceEventKind::TimelineItemDelta { .. } => false,
+                | TraceEventKind::TimelineItemDelta { .. }
+                | TraceEventKind::PlanLifecycleChanged { .. } => false,
             })
             .count()
     }
@@ -913,7 +914,8 @@ mod tests {
                 TraceEventKind::TimelineItemCompleted { item } => Some(item),
                 TraceEventKind::TimelineItemStarted { .. }
                 | TraceEventKind::TimelineItemDelta { .. }
-                | TraceEventKind::TimelineItemFailed { .. } => None,
+                | TraceEventKind::TimelineItemFailed { .. }
+                | TraceEventKind::PlanLifecycleChanged { .. } => None,
             })
             .expect("terminal tool item");
         assert_eq!(

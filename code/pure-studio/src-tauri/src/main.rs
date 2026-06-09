@@ -35,6 +35,8 @@ fn main() {
             commands::select_session,
             commands::set_session_mode,
             commands::run_prompt,
+            commands::implement_plan,
+            commands::dismiss_plan,
             commands::stop_prompt,
             commands::load_session_timeline,
             commands::approve_tool,

@@ -1,4 +1,4 @@
-import type { TimelineItem } from "../types";
+import type { PlanState, TimelineItem } from "../types";
 import type { StudioState } from "./studio-state";
 
 export type ToolGroupSummaryKind =
@@ -20,7 +20,7 @@ export type TimelineEntry =
       role: "user" | "assistant";
       content: string;
     }
-  | { kind: "plan"; key: string; content: string; item: TimelineItem }
+  | { kind: "plan"; key: string; content: string; item: TimelineItem; planState?: PlanState }
   | {
       kind: "thought";
       key: string;
@@ -151,6 +151,7 @@ export function selectTimelineEntries(state: StudioState): TimelineEntry[] {
           key: `plan-${item.itemId}`,
           content: item.content,
           item,
+          planState: state.planStates.get(item.itemId),
         });
         break;
       case "thinking": {

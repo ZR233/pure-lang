@@ -241,7 +241,29 @@ export type TimelineItem = {
 export type SessionTimeline = {
   sessionId: string;
   items: TimelineItem[];
+  planStates?: PlanState[];
   nextSequence: number;
+};
+
+export type PlanLifecycleState =
+  | "accepted"
+  | "implementing"
+  | "implemented"
+  | "implementationFailed"
+  | "dismissed";
+
+export type PlanState = {
+  planId: string;
+  state: PlanLifecycleState;
+  turnId?: string | null;
+  reason?: string | null;
+  updatedAt: number;
+};
+
+export type PlanLifecycleResponse = {
+  sessionId: string;
+  planStates: PlanState[];
+  timelineNextSequence: number;
 };
 
 export type ProviderTemplateRecord = {
@@ -328,6 +350,7 @@ export type RunPromptResponse = {
   agents: AgentDto[];
   sessionRuntime: SessionRuntime;
   timelineItems: TimelineItem[];
+  planStates?: PlanState[];
   timelineNextSequence: number;
   turnStatus: TurnStatus;
   turnAbortReason?: string | null;

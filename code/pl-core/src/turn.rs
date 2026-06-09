@@ -139,8 +139,8 @@ impl BudgetTracker {
 /// `Auto` 允许模型生成更主动的编译步骤和子任务。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum CompileMode {
-    #[default]
     Plan,
+    #[default]
     Auto,
 }
 
@@ -460,6 +460,11 @@ mod tests {
         assert_eq!(CompileMode::from_label("auto"), CompileMode::Auto);
         assert_eq!(CompileMode::from_label("manual"), CompileMode::Auto);
         assert_eq!(CompileMode::from_label(""), CompileMode::Auto);
+    }
+
+    #[test]
+    fn compile_mode_default_is_auto() {
+        assert_eq!(CompileMode::default(), CompileMode::Auto);
     }
 
     #[test]

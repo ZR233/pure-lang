@@ -378,6 +378,40 @@ pub enum TimelineDelta {
     Plan { delta: String },
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PlanLifecycleState {
+    Accepted,
+    Implementing,
+    Implemented,
+    ImplementationFailed,
+    Dismissed,
+}
+
+impl PlanLifecycleState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Implementing => "implementing",
+            Self::Implemented => "implemented",
+            Self::ImplementationFailed => "implementationFailed",
+            Self::Dismissed => "dismissed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanLifecycleEvent {
+    pub plan_id: String,
+    pub state: PlanLifecycleState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TimelineItemDeltaEvent {
@@ -583,6 +617,7 @@ pub enum TraceEventKind {
     TimelineItemDelta { event: TimelineItemDeltaEvent },
     TimelineItemCompleted { item: TimelineItem },
     TimelineItemFailed { item: TimelineItem, error: String },
+    PlanLifecycleChanged { event: PlanLifecycleEvent },
 }
 
 #[cfg(test)]
@@ -1049,6 +1084,43 @@ mod tests {
                 "delta": {
                     "type": "plan",
                     "delta": "\n- step"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_plan_lifecycle_trace_event_as_camel_case() {
+        let event = TraceEvent {
+            session_id: "sess-1".to_string(),
+            sequence: 3,
+            timestamp: 1_779_688_802,
+            kind: TraceEventKind::PlanLifecycleChanged {
+                event: PlanLifecycleEvent {
+                    plan_id: "turn-1-plan".to_string(),
+                    state: PlanLifecycleState::ImplementationFailed,
+                    turn_id: Some("turn-2".to_string()),
+                    reason: Some("provider error".to_string()),
+                    updated_at: 1_779_688_802,
+                },
+            },
+        };
+
+        assert_eq!(
+            serde_json::to_value(event).unwrap(),
+            serde_json::json!({
+                "sessionId": "sess-1",
+                "sequence": 3,
+                "timestamp": 1779688802,
+                "kind": {
+                    "type": "planLifecycleChanged",
+                    "event": {
+                        "planId": "turn-1-plan",
+                        "state": "implementationFailed",
+                        "turnId": "turn-2",
+                        "reason": "provider error",
+                        "updatedAt": 1779688802
+                    }
                 }
             })
         );

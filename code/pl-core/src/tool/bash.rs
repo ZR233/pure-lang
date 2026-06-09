@@ -660,7 +660,7 @@ mod tests {
                     arguments: serde_json::json!({
                         "processId": process_id,
                         "chars": "hello\n",
-                        "yieldTimeMs": 1000,
+                        "yieldTimeMs": 3000,
                     }),
                     session_id: "stdin-session".to_string(),
                     tool_id: "stdin-write".to_string(),

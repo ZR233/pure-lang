@@ -176,6 +176,7 @@ pub fn trace_event_kind_label(kind: &pl_protocol::TraceEventKind) -> &'static st
         pl_protocol::TraceEventKind::TimelineItemDelta { .. } => "TimelineItemDelta",
         pl_protocol::TraceEventKind::TimelineItemCompleted { .. } => "TimelineItemCompleted",
         pl_protocol::TraceEventKind::TimelineItemFailed { .. } => "TimelineItemFailed",
+        pl_protocol::TraceEventKind::PlanLifecycleChanged { .. } => "PlanLifecycleChanged",
     }
 }
 

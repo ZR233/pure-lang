@@ -12,6 +12,7 @@ import { previewTemplates } from "../src/lib/templates";
 import type {
   ConfigPayload,
   ProviderRecord,
+  PlanState,
   RoleRecord,
   RunPromptResponse,
   SessionRuntime,
@@ -216,6 +217,16 @@ function responseWithSequence(
   return {
     ...response(timelineItems),
     timelineNextSequence,
+  };
+}
+
+function planState(planId: string, state: PlanState["state"]): PlanState {
+  return {
+    planId,
+    state,
+    turnId: null,
+    reason: null,
+    updatedAt: 20,
   };
 }
 
@@ -742,6 +753,58 @@ function runPromptLoadedProposedPlanTextCreatesPendingPlanAction() {
     content: "# 修复雨滴效果\n\n## 摘要\n- 调整 canvas 雨滴。",
     mode: "choice",
   });
+}
+
+function runPromptLoadedPlanStateSuppressesPendingPlanAction() {
+  const state = studioReducer(selectedState(), {
+    type: "runPromptLoaded",
+    payload: {
+      ...response([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
+      planStates: [planState("turn-1-plan", "accepted")],
+    },
+    status: "done",
+  });
+
+  assertEqual(state.planAction, null);
+  assertEqual(state.planStates.get("turn-1-plan")?.state, "accepted");
+}
+
+function planLifecycleLoadedClearsExistingPlanAction() {
+  const withPlan = studioReducer(selectedState(), {
+    type: "runPromptLoaded",
+    payload: response([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
+    status: "done",
+  });
+  const dismissed = studioReducer(withPlan, {
+    type: "planLifecycleLoaded",
+    sessionId: "session-1",
+    planStates: [planState("turn-1-plan", "dismissed")],
+    timelineNextSequence: 12,
+    status: "ready",
+  });
+
+  assertEqual(dismissed.planAction, null);
+  assertEqual(dismissed.planStates.get("turn-1-plan")?.state, "dismissed");
+  assertEqual(dismissed.timelineNextSequence, 12);
+}
+
+function timelineLoadedPlanStateAnnotatesPlanWithoutOpeningComposer() {
+  const state = studioReducer(selectedState(), {
+    type: "timelineLoaded",
+    sessionId: "session-1",
+    items: [planItem("turn-1-plan", "turn-1", 10, "1. Inspect")],
+    planStates: [planState("turn-1-plan", "dismissed")],
+    nextSequence: 13,
+  });
+  const entries = selectTimelineEntries(state);
+  const plan = entries.find((entry) => entry.kind === "plan");
+
+  assertEqual(state.planAction, null);
+  assertEqual(plan?.kind, "plan");
+  if (plan?.kind !== "plan") {
+    throw new Error("expected plan entry");
+  }
+  assertEqual(plan.planState?.state, "dismissed");
 }
 
 function dismissPlanActionPreventsSamePlanFromReopening() {
@@ -1534,6 +1597,9 @@ livePlanDeltaCreatesPlanEntry();
 runPromptLoadedPlanCreatesPendingPlanAction();
 runPromptLoadedStreamingPlanCreatesPendingPlanAction();
 runPromptLoadedProposedPlanTextCreatesPendingPlanAction();
+runPromptLoadedPlanStateSuppressesPendingPlanAction();
+planLifecycleLoadedClearsExistingPlanAction();
+timelineLoadedPlanStateAnnotatesPlanWithoutOpeningComposer();
 dismissPlanActionPreventsSamePlanFromReopening();
 setPlanActionModeUpdatesPendingPlanAction();
 historicalTimelineLoadDoesNotCreatePlanAction();

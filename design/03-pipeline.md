@@ -39,8 +39,8 @@ React action
 - `PermissionMode::RequestApproval` 为默认且主路径；旧 `ToolApprovalPolicy` 仅作为兼容构造
 - 手动审批接口保留在系统能力中，但不作为默认流程；`request-approval` 模式只在工具请求 workspace 外访问时弹出用户审批，workspace 内读写直接放行
 - `auto-review` 模式使用 reviewer 角色模型审批 workspace 外访问。reviewer 只返回批准或拒绝，不执行工具；解析失败、provider 失败或非明确批准均按拒绝处理
-- `full-access` 放宽 Pure 文件工具和 `bash.workingDirectory` 的 workspace 边界，但仍只执行已注册工具，不提供 OS 沙箱或系统级提权
-- Studio 中的 Plan Mode 会保留 `bash` 探索能力，但 bash 必须走手动审批；明确写入类工具不会暴露给模型，也不能执行模型幻觉出的写入工具调用
+- `full-access` 放宽 Pure 文件工具和 `bash.workingDirectory` 的 workspace 边界，并在策略层直接放行 Plan Mode 中已暴露的 `bash`；该模式仍只执行已注册工具，不提供 OS 沙箱或系统级提权
+- Studio 中的 Plan Mode 会保留 `bash` 探索能力；`request-approval` 与 `auto-review` 下 bash 必须走手动审批，`full-access` 下直接放行。明确写入类工具不会暴露给模型，也不能执行模型幻觉出的写入工具调用
 - 用户显式要求 `subagent`/子代理分工时，核心提示必须将异步 agent 调度作为强约束；普通 shell 或文件探索不能替代子代理调度
 - 显式子代理分工允许最多两轮只读定位；若仍未创建 agent，后续推理只暴露 `spawn_agent` 并保持 `auto` tool choice，避免触发不支持 required tool choice 的 provider 限制
 - 多 agent 协作只通过 `spawn_agent`、`wait_agent`、`list_agents`、`send_message`、`followup_task`、`close_agent` 组成，不提供同步等待到最终摘要的 `subagent` 入口
@@ -48,6 +48,7 @@ React action
 - agent 运行时状态对齐 Codex：`queued | running | waiting | completed | errored | interrupted | shutdown | notFound`
 - `budgetLimited` 不是 agent 状态，而是 turn abort reason；子 agent 预算耗尽时状态为 `interrupted`，并携带 `reason`、`budgetLimitKind` 和 `budgetUsage`
 - `interrupted` 是可恢复的非终局状态；`completed | errored | shutdown | notFound` 是终局状态
+- `send_message` / `followup_task` 不能重新激活终局 agent；`interrupted` agent 可以通过 followup 恢复为 `queued`
 - 父 agent 因中断、错误、预算限制或关闭而停止时，必须级联关闭仍在运行的子树，避免后台子 agent 残留为 `running`
 
 ## 3.3 核心 turn 编排
@@ -98,6 +99,7 @@ Agent 协作 timeline 与状态分层：
 
 - 消息和 trace 采用事务批量写入，避免逐条写放大
 - session 的 `mode` 表示下一轮默认协作模式，由 Studio 模式切换命令持久化；运行时按 session 当前 `mode` 构造 `TurnRequest`
+- Plan Mode 生成的计划有独立生命周期事件：`accepted | implementing | implemented | implementationFailed | dismissed`。这些事件作为 `TraceEventKind::PlanLifecycleChanged` 追加到 `timeline_events`，不单独建表；前端按 `planId` 折叠最新状态
 - 如果 turn 内发生上下文压缩，`CoreSession` revision 会变化，Studio 以事务重写当前 session 的消息历史并追加本轮 trace；未发生压缩时继续使用追加写入
 - timeline 读取以 `sequence` 为单调游标
 - agent tree、agent events、agent messages 与 turn snapshot 分表持久化；`agents` 为 latest snapshot，`agent_events` 为 append-only event log

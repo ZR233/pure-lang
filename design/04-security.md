@@ -16,7 +16,7 @@ Pure v1 的权限模式是本地策略层，不是 OS 沙箱、网络沙箱或�
 - `auto-review`：workspace 内行为同 `request-approval`；工具请求访问 workspace 外路径或 workspace 外 cwd 时交给 reviewer 模型审批。reviewer 只返回是否批准，不执行工具。
 - `full-access`：所有已注册工具在策略层直接放行；文件工具可解析 workspace 外路径，`bash.workingDirectory` 可指向 workspace 外已存在目录。
 
-Plan Mode 的工具白名单优先于权限模式。即使当前权限模式是 `full-access`，Plan Mode 仍不能执行写入类工具；Plan Mode 中的 `bash` 仍走手动审批。
+Plan Mode 的工具白名单优先于权限模式。即使当前权限模式是 `full-access`，Plan Mode 仍不能执行写入类工具；Plan Mode 中的 `bash` 在 `request-approval` 和 `auto-review` 下走手动审批，在 `full-access` 下由策略层直接放行。
 
 ## 4.2 分层边界
 

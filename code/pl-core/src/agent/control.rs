@@ -377,6 +377,21 @@ impl AgentControl {
                 error: "tasks cannot be assigned to the root agent".to_string(),
             });
         }
+        if entry.record.status.is_final() {
+            let tool = if mode == MessageDeliveryMode::TriggerTurn {
+                "followup_task"
+            } else {
+                "send_message"
+            };
+            return Err(PureError::ToolExecutionFailed {
+                tool: tool.to_string(),
+                error: format!(
+                    "target agent {} is already {}",
+                    entry.record.path,
+                    entry.record.status.as_str()
+                ),
+            });
+        }
         entry.mailbox.push_back(AgentMailboxMessage {
             sender_path: current_path.to_string(),
             message,
@@ -575,6 +590,72 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn append_message_rejects_final_agent_statuses() {
+        let control = AgentControl::default();
+        let handle = control
+            .spawn_agent(AgentSpawnInput {
+                task_name: "worker".to_string(),
+                message: "inspect".to_string(),
+                role: "explorer".to_string(),
+                parent_path: None,
+            })
+            .await
+            .unwrap();
+        control
+            .update_status(&handle.id, AgentStatus::Completed, None, None)
+            .await
+            .unwrap();
+
+        let error = control
+            .append_message(
+                AgentPath::ROOT,
+                "worker",
+                "follow up".to_string(),
+                MessageDeliveryMode::TriggerTurn,
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("followup_task"));
+        assert!(error.contains("already completed"));
+        assert_eq!(
+            control.record(&handle.id).await.unwrap().status,
+            AgentStatus::Completed
+        );
+    }
+
+    #[tokio::test]
+    async fn followup_task_recovers_interrupted_agent() {
+        let control = AgentControl::default();
+        let handle = control
+            .spawn_agent(AgentSpawnInput {
+                task_name: "worker".to_string(),
+                message: "inspect".to_string(),
+                role: "explorer".to_string(),
+                parent_path: None,
+            })
+            .await
+            .unwrap();
+        control
+            .update_status(&handle.id, AgentStatus::Interrupted, None, None)
+            .await
+            .unwrap();
+
+        let record = control
+            .append_message(
+                AgentPath::ROOT,
+                "worker",
+                "resume".to_string(),
+                MessageDeliveryMode::TriggerTurn,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(record.status, AgentStatus::Queued);
     }
 
     #[tokio::test]
