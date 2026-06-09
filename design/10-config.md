@@ -208,6 +208,8 @@ Anthropic 只在 `pl-model` 的 protocol 层保留占位，未实现 provider ru
 
 Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-flash` 为缓存命中输入 0.02 元、缓存未命中输入 1 元、输出 2 元；`deepseek-v4-pro` 为缓存命中输入 0.025 元、缓存未命中输入 3 元、输出 6 元。`input_price_per_mtok` 表示缓存未命中输入价，`cache_read_price_per_mtok` 表示缓存命中输入价。
 
+Bundled OpenAI/GPT 模型参数以本地 Codex 仓库 `codex-rs/models-manager/models.json` 的修改为准，不按公开 API 文档臆造价格、最大输出或上下文窗口。当前 OpenAI 模板顺序为 `gpt-5.5`、`gpt-5.4`、`gpt-5.4-mini`、`gpt-5.3-codex`、`gpt-5.2`。Pure 当前 `ModelInfo` 不持久化 Codex 的 `default_reasoning_level` 字段，因此 OpenAI 模型的 `reasoning_efforts` 首项表示 Codex 默认 reasoning level，后续项表示其他支持档位。
+
 配置里的模型会覆盖或补充 bundled model。角色引用的 model 必须存在于对应 provider 的 `models` 中。
 
 ## 10.6 运行态声明
@@ -336,7 +338,7 @@ Provider 标签页必须提供结构化编辑能力：
 - Provider 列表页只提供一个“添加供应商”入口；点击后进入 Provider 编辑页。
 - 新增 Provider 默认使用模板列表第一项，自动生成唯一 provider key；编辑页通过供应商类型下拉切换 DeepSeek / OpenAI / Zhipu / Zhipu Coding Plan 等模板。
 - 编辑 provider key、显示名、base URL、API key 和默认模型。
-- 以 provider 卡片作为主要信息载体，展示 provider key、provider kind、base URL、状态、默认模型、模型数量和更新时间等摘要信息。
+- 以 provider 卡片作为主要信息载体，展示 provider key、provider kind、状态、默认模型、模型数量和额度状态等摘要信息；base URL 只在编辑页展示。
 - Provider 列表页不直接编辑字段；点击卡片编辑按钮进入 provider 编辑页。
 - Provider 编辑页使用本地草稿，提供保存和取消按钮；保存成功后即时写入配置并返回列表，取消或返回列表不修改当前配置。
 - Provider 卡片必须提供删除按钮；删除和默认 provider 选择都即时写入配置，列表页不使用独立右侧详情面板。
