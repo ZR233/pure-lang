@@ -357,13 +357,6 @@ fn role_effort(provider: &ProviderConfig, model_slug: &str) -> Result<String> {
                 "default model is missing from provider: {model_slug}"
             ))
         })?;
-    if model
-        .reasoning_efforts
-        .iter()
-        .any(|effort| effort == DEFAULT_ROLE_EFFORT)
-    {
-        return Ok(DEFAULT_ROLE_EFFORT.to_string());
-    }
     model.reasoning_efforts.first().cloned().ok_or_else(|| {
         PureError::ConfigError(format!(
             "default model {model_slug} must define reasoning_efforts"
@@ -417,6 +410,10 @@ mod tests {
 
         assert_eq!(config.role_config(ModelRole::Planner).provider, "openai");
         assert_eq!(config.role_config(ModelRole::Planner).model, "gpt-5.5");
+        assert_eq!(
+            config.role_config(ModelRole::Planner).effort.as_str(),
+            "medium"
+        );
         assert_eq!(
             config.providers["openai"].bearer_token.as_deref(),
             Some("sk-openai")
@@ -530,6 +527,7 @@ mod tests {
         for role in ModelRole::all() {
             assert_eq!(config.role_config(role).provider, "openai");
             assert_eq!(config.role_config(role).model, "gpt-5.5");
+            assert_eq!(config.role_config(role).effort.as_str(), "medium");
         }
     }
 

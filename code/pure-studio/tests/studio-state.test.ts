@@ -1626,6 +1626,26 @@ function providerDraftTemplateSwitchUpdatesTemplateFields() {
   );
 }
 
+function openAiTemplateUsesCodexModelMetadata() {
+  const openai = template("openai");
+  const gpt55 = openai.defaultModels.find((model) => model.slug === "gpt-5.5");
+  const gpt54 = openai.defaultModels.find((model) => model.slug === "gpt-5.4");
+  const gpt52 = openai.defaultModels.find((model) => model.slug === "gpt-5.2");
+
+  assertDeepEqual(
+    openai.defaultModels.map((model) => model.slug),
+    ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"],
+  );
+  assertEqual(gpt55?.contextWindow, 272_000);
+  assertEqual(gpt55?.maxContextWindow, 272_000);
+  assertEqual(gpt55?.maxOutputTokens, null);
+  assertEqual(gpt55?.currency ?? null, null);
+  assertDeepEqual(gpt55?.reasoningEfforts, ["medium", "low", "high", "xhigh"]);
+  assertEqual(gpt54?.maxContextWindow, 1_000_000);
+  assertEqual(gpt52?.truncationMode, "bytes");
+  assertEqual(gpt52?.maxOutputTokens, null);
+}
+
 function providerDraftTemplateSwitchSupportsZhipu() {
   const deepseek = template("deepseek");
   const zhipu = template("zhipu");
@@ -1751,7 +1771,7 @@ function selectedContextWindowFollowsPlannerModel() {
 
   assertEqual(
     selectedContextWindow([deepseekProvider, openaiProvider], roles, runtime),
-    400_000,
+    272_000,
   );
 }
 
@@ -1812,6 +1832,7 @@ abnormalTurnTraceIsKeptWithContent();
 liveFailedTimelineItemKeepsErrorMessage();
 providerDraftUsesSingleAddEntryAndUniqueKey();
 providerDraftTemplateSwitchUpdatesTemplateFields();
+openAiTemplateUsesCodexModelMetadata();
 providerDraftTemplateSwitchSupportsZhipu();
 providerDraftTemplateSwitchSupportsZhipuCodingPlan();
 zhipuProviderDraftUsesUniqueKey();
