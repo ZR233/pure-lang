@@ -1,6 +1,7 @@
 import { initialStudioState, studioReducer } from "../src/state/studio-state";
 import { selectTimelineEntries } from "../src/state/selectors";
 import { normalizeRolesForProviders } from "../src/components/RoleSettings";
+import { selectedContextWindow } from "../src/components/SessionStatusBar";
 import {
   applyProviderTemplate,
   cloneProvider,
@@ -1735,6 +1736,25 @@ function roleChangeProducesCompleteNormalizedSnapshot() {
   assertEqual(normalized.find((role) => role.key === "explorer")?.provider, "deepseek");
 }
 
+function selectedContextWindowFollowsPlannerModel() {
+  const deepseekProvider = createProviderFromTemplate(template("deepseek"), "deepseek");
+  const openaiProvider = createProviderFromTemplate(template("openai"), "openai");
+  const roles: RoleRecord[] = [
+    {
+      key: "planner",
+      displayName: "Planner",
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      effort: "medium",
+    },
+  ];
+
+  assertEqual(
+    selectedContextWindow([deepseekProvider, openaiProvider], roles, runtime),
+    400_000,
+  );
+}
+
 staleTimelineLoadKeepsNewTurnItems();
 freshTimelineLoadMayReplaceSnapshot();
 staleTimelineLoadDoesNotOverwriteLiveDelta();
@@ -1798,3 +1818,4 @@ zhipuProviderDraftUsesUniqueKey();
 zhipuCodingPlanProviderDraftUsesUniqueKey();
 editingProviderDraftDoesNotMutateProviderList();
 roleChangeProducesCompleteNormalizedSnapshot();
+selectedContextWindowFollowsPlannerModel();

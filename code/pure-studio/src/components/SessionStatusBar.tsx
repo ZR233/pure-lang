@@ -144,9 +144,9 @@ function formatRuntimeCost(usage: RuntimeUsage | null | undefined, fallback: str
   return formatCostAmounts(usage.estimatedCosts, usage.hasUnpricedUsage, fallback, unpriced);
 }
 
-function contextPercent(usage: RuntimeUsage | null): number {
-  if (!usage?.contextWindow) return 0;
-  return Math.min(100, (usage.latestContextTokens / usage.contextWindow) * 100);
+function contextPercent(latestContextTokens: number | null | undefined, contextWindow: number | null): number {
+  if (!contextWindow) return 0;
+  return Math.min(100, ((latestContextTokens ?? 0) / contextWindow) * 100);
 }
 
 function formatElapsed(startedAt: number | null, now: number): string | null {
@@ -170,6 +170,20 @@ function findModelInProviders(
     if (model) return { provider, model };
   }
   return null;
+}
+
+export function selectedContextWindow(
+  providers: ProviderRecord[],
+  roles: RoleRecord[],
+  runtime: SessionRuntime | null,
+): number | null {
+  const plannerRole = findPlannerRole(roles);
+  const currentModelSlug = plannerRole?.model ?? runtime?.usage.model ?? "";
+  const currentModelInfo = currentModelSlug ? findModelInProviders(providers, currentModelSlug) : null;
+  return currentModelInfo?.model.contextWindow
+    ?? currentModelInfo?.model.maxContextWindow
+    ?? runtime?.usage.contextWindow
+    ?? null;
 }
 
 function agentStatusKeys(status: AgentStatus): string {
@@ -1144,9 +1158,10 @@ export function SessionStatusBar({
 }: SessionStatusBarProps) {
   const { t } = useTranslation();
   const usage = runtime?.usage ?? null;
-  const contextLabel = `${formatTokenCount(usage?.latestContextTokens)} / ${formatTokenCount(usage?.contextWindow)}`;
+  const currentContextWindow = selectedContextWindow(providers, roles, runtime);
+  const contextLabel = `${formatTokenCount(usage?.latestContextTokens)} / ${formatTokenCount(currentContextWindow)}`;
   const costLabel = formatCost(runtime, t("statusBar.costNotConfigured"), t("statusBar.costUnpriced"));
-  const contextWidth = `${contextPercent(usage)}%`;
+  const contextWidth = `${contextPercent(usage?.latestContextTokens, currentContextWindow)}%`;
   const skills = runtime?.activeSkills ?? [];
   const mcpServers = runtime?.activeMcpServers ?? [];
   const capabilityCount = skills.length;
