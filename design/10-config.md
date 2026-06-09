@@ -230,7 +230,9 @@ Pure v1 的权限模式是本地策略层，不是 OS 沙箱。`request-approval
 
 ## 10.7 MCP 配置
 
-MCP server 配置保存在顶层 `[mcp_servers.<server_id>]` 表，参考 Codex 的 MCP 配置形态。`server_id` 必须非空，且只能包含 ASCII 字母、数字、`_` 和 `-`，因为它会参与模型可见工具名。
+MCP server 配置保存在顶层 `[mcp_servers.<server_id>]` 表，参考 Codex 的 MCP 配置形态。`server_id` 必须非空，且只能包含 ASCII 字母、数字、`_` 和 `-`，因为它会参与模型可见工具名。Pure 还会在运行时合成一组内置 MCP server；内置 server 不写入 `[mcp_servers]`，但会出现在 Studio MCP 设置页和状态栏中。用户配置不得占用内置保留 id。
+
+内置 MCP 的 UI toggle 状态可保存在独立的 `[builtin_mcp_servers.<server_id>]` 状态表中；该表不描述 transport 或 endpoint，也不允许新增 server。检测到 Zhipu token 时，Zhipu Coding Plan 内置 server 的状态会在加载或保存时自动恢复为启用。
 
 每个 MCP server 必须配置：
 
@@ -251,6 +253,15 @@ MCP server 配置保存在顶层 `[mcp_servers.<server_id>]` 表，参考 Codex 
 - `headers`
 
 Pure 在普通对话、Auto Mode 和 Plan Mode 中都会向模型暴露已启用 MCP server 的 tools。启用 MCP server 表示用户显式信任该 server；MCP tool 调用不再触发额外审批弹窗。由于 MCP tool 不声明可靠的本地读写能力，Pure 不把 MCP 原始协议类型写入 `pl-protocol`，只通过现有 tool timeline 和 tool result 字符串表达执行状态。
+
+内置 Zhipu Coding Plan MCP server 固定为：
+
+- `zhipu_search`：Streamable HTTP，`https://open.bigmodel.cn/api/mcp/web_search_prime/mcp`
+- `zhipu_reader`：Streamable HTTP，`https://open.bigmodel.cn/api/mcp/web_reader/mcp`
+- `zhipu_zread`：Streamable HTTP，`https://open.bigmodel.cn/api/mcp/zread/mcp`
+- `zhipu_vision`：stdio，`npx -y @z_ai/mcp-server`
+
+这些内置 server 复用 Zhipu provider 的 `bearer_token` 作为 Coding Plan key。缺少 Zhipu token 时内置 server 的状态为缺少凭据且不会注册 tools；检测到 Zhipu token 时四个内置 server 自动恢复为启用。HTTP 内置 server 运行时直接发送 bearer token；Vision server 运行时注入 `Z_AI_API_KEY=<token>` 和 `Z_AI_MODE=ZHIPU`。
 
 模型可见的 MCP tool 名称固定为：
 
@@ -307,11 +318,11 @@ mcp__{server_id}__{tool_name}
 - provider 默认模型和自定义模型。
 - 四个模型角色到 provider/model/effort 的路由。
 - Security 标签页选择权限模式：请求批准、替我审批、完全访问。选择后即时写入 `[runtime].permission_mode`。
-- MCP 标签页管理 `[mcp_servers]`，包括 server id、启用状态、stdio/Streamable HTTP 传输方式、命令参数、环境变量、HTTP URL 和 token 环境变量。
+- MCP 标签页管理用户 `[mcp_servers]`，包括 server id、启用状态、stdio/Streamable HTTP 传输方式、命令参数、环境变量、HTTP URL 和 token 环境变量；同时展示不可删除的内置 Zhipu Coding Plan MCP server。
 
 每次设置项写入前必须执行 `PureConfig::validate()`；失败时只在 UI 中展示错误，不写入磁盘。
 
-MCP 标签页使用结构化表单，不展示 raw TOML。新增和编辑 server 使用本地草稿；保存成功后即时写入 `~/.pure/config.toml` 并刷新设置页状态。删除 server 和启用切换同样即时写入。设置页状态栏展示的 MCP 数量和列表来自当前配置中 `enabled = true` 的 server。
+MCP 标签页使用结构化表单，不展示 raw TOML。新增和编辑用户 server 使用本地草稿；保存成功后即时写入 `~/.pure/config.toml` 并刷新设置页状态。删除 server 和启用切换同样即时写入。内置 Zhipu Coding Plan MCP server 不可删除，不允许编辑 server id、transport、endpoint 或运行时注入字段；界面只允许切换状态，并显示“内置 / Zhipu Coding Plan”和缺少 key/已启用等状态。设置页状态栏展示的 MCP 数量和列表来自 effective MCP server 中实际启用的 server。
 
 设置页 UI 按 React 页面模块拆分，顶层 App 负责页面路由和共享状态，具体页面放在 `src/pages`，可复用组件放在 `src/components`，Tauri 命令封装放在 `src/lib`。Provider 标签页优先从 `PureConfig.providers` 派生 provider 卡片列表，不引入新的配置存储。
 

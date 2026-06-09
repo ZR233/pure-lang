@@ -25,10 +25,12 @@ pub use agent::{
     AgentStatus, AgentStatusUpdate, AgentWaitOutcome, MessageDeliveryMode,
 };
 pub use config::{
-    ConfigPaths, ConfigStore, McpServerConfig, McpServerTransport, ModelCapabilityConfig,
-    ModelConfig, ModelRole, ProviderConfig, PureConfig, ReasoningEffort, ResolvedRoleConfig,
-    RoleConfig, RoleConfigs, RuntimeConfig, SkillsConfig, SystemSkillsConfig,
-    TruncationPolicyConfig, active_mcp_server_names,
+    BuiltinMcpServerState, ConfigPaths, ConfigStore, EffectiveMcpServerConfig, McpServerConfig,
+    McpServerMutationPolicy, McpServerSourceKind, McpServerStatusKind, McpServerTransport,
+    ModelCapabilityConfig, ModelConfig, ModelRole, ProviderConfig, PureConfig, ReasoningEffort,
+    ResolvedRoleConfig, RoleConfig, RoleConfigs, RuntimeConfig, SkillsConfig, SystemSkillsConfig,
+    TruncationPolicyConfig, active_mcp_server_names, builtin_mcp_server_ids, effective_mcp_servers,
+    normalize_builtin_mcp_server_states, zhipu_coding_plan_token,
 };
 pub use config_editor::{
     ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit, infer_provider_template_kind,

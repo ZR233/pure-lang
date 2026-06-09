@@ -350,7 +350,7 @@
 }
 
 .mcp-status {
-  min-width: 68px;
+  min-width: 72px;
   padding: 4px 8px;
   border-radius: 999px;
   color: #6b7280;
@@ -363,6 +363,33 @@
 .mcp-status.enabled {
   color: #075f46;
   background: #dff8ee;
+}
+
+.mcp-status.missingCredential {
+  color: #8a5200;
+  background: #fff0c2;
+}
+
+.mcp-status.disabled {
+  color: #596574;
+  background: #eef2f6;
+}
+
+.mcp-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.mcp-source {
+  min-height: 21px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: #214b9b;
+  background: #e3edff;
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .mcp-row-actions {
@@ -405,6 +432,25 @@
   margin: 0;
   color: #708094;
   font-size: 12px;
+}
+
+.mcp-built-in-note {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid #d7e4f5;
+  border-radius: 8px;
+  color: #234264;
+  background: #f3f7fd;
+  font-size: 12px;
+}
+
+.mcp-built-in-note strong {
+  color: #19314f;
+}
+
+.mcp-built-in-note small {
+  color: #607186;
 }
 
 .settings-field,

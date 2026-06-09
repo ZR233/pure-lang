@@ -133,6 +133,9 @@ export type DiscoveredSkillsPayload = {
 };
 
 export type McpTransport = "stdio" | "streamableHttp";
+export type McpServerSourceKind = "user" | "builtIn";
+export type McpServerStatusKind = "enabled" | "disabled" | "missingCredential";
+export type McpServerMutationPolicy = "userEditable" | "lockedIdentity";
 
 export type KeyValuePair = {
   key: string;
@@ -151,6 +154,12 @@ export type McpServerRecord = {
   bearerTokenEnvVar?: string | null;
   headers: KeyValuePair[];
   endpoint: string;
+  sourceKind: McpServerSourceKind;
+  sourceLabel: string;
+  sourceDetail?: string | null;
+  statusKind: McpServerStatusKind;
+  statusMessage?: string | null;
+  mutationPolicy: McpServerMutationPolicy;
 };
 
 export type RuntimeCostAmount = {
@@ -333,6 +342,12 @@ export type McpServerInput = {
   url?: string | null;
   bearerTokenEnvVar?: string | null;
   headers: KeyValuePair[];
+  sourceKind?: McpServerSourceKind;
+  sourceLabel?: string;
+  sourceDetail?: string | null;
+  statusKind?: McpServerStatusKind;
+  statusMessage?: string | null;
+  mutationPolicy?: McpServerMutationPolicy;
 };
 
 export type ProviderInput = {

@@ -13,7 +13,10 @@ use pl_protocol::{PureError, Result};
 use serde::{Deserialize, Serialize};
 
 pub use mcp::{
-    McpServerConfig, McpServerTransport, active_mcp_server_names, validate_mcp_identifier,
+    BuiltinMcpServerState, EffectiveMcpServerConfig, McpServerConfig, McpServerMutationPolicy,
+    McpServerSourceKind, McpServerStatusKind, McpServerTransport, active_mcp_server_names,
+    builtin_mcp_server_ids, effective_mcp_servers, normalize_builtin_mcp_server_states,
+    validate_mcp_identifier, zhipu_coding_plan_token,
 };
 pub use provider::{ModelCapabilityConfig, ModelConfig, ProviderConfig, TruncationPolicyConfig};
 pub use role::{ModelRole, ReasoningEffort, ResolvedRoleConfig, RoleConfig, RoleConfigs};
@@ -37,6 +40,11 @@ pub struct PureConfig {
     pub skills: SkillsConfig,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub mcp_servers: BTreeMap<String, McpServerConfig>,
+    #[serde(
+        default,
+        skip_serializing_if = "mcp::builtin_mcp_server_states_are_default"
+    )]
+    pub builtin_mcp_servers: BTreeMap<String, BuiltinMcpServerState>,
     pub roles: RoleConfigs,
     pub providers: BTreeMap<String, ProviderConfig>,
 }
@@ -50,6 +58,8 @@ struct PureConfigToml {
     pub skills: SkillsConfig,
     #[serde(default)]
     pub mcp_servers: BTreeMap<String, McpServerConfig>,
+    #[serde(default)]
+    pub builtin_mcp_servers: BTreeMap<String, BuiltinMcpServerState>,
     #[serde(default)]
     pub roles: Option<role::RoleConfigsToml>,
     pub providers: BTreeMap<String, ProviderConfig>,
@@ -73,6 +83,7 @@ impl PureConfig {
             runtime: RuntimeConfig::default(),
             skills: SkillsConfig::default(),
             mcp_servers: BTreeMap::new(),
+            builtin_mcp_servers: BTreeMap::new(),
             roles: RoleConfigs {
                 explorer: role.clone(),
                 planner: role.clone(),
@@ -101,6 +112,7 @@ impl PureConfig {
 
         crate::skill::validate_skills_config(&self.skills)?;
         mcp::validate_mcp_servers(&self.mcp_servers)?;
+        mcp::validate_builtin_mcp_server_states(&self.builtin_mcp_servers)?;
 
         Ok(())
     }
@@ -177,14 +189,16 @@ impl PureConfig {
             Some(roles) => roles.into_role_configs(&raw.providers)?,
             None => RoleConfigs::from_default_role(role::default_role_config(&raw.providers)?),
         };
-        let config = Self {
+        let mut config = Self {
             schema_version: raw.schema_version,
             runtime: raw.runtime,
             skills: raw.skills,
             mcp_servers: raw.mcp_servers,
+            builtin_mcp_servers: raw.builtin_mcp_servers,
             roles,
             providers: raw.providers,
         };
+        mcp::normalize_builtin_mcp_server_states(&mut config);
         config.validate()?;
         Ok(config)
     }

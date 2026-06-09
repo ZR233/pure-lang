@@ -188,7 +188,7 @@ impl PureCore {
         let Some(config) = self.config.as_ref() else {
             return Ok(());
         };
-        let servers = config.mcp_servers.clone();
+        let servers = crate::config::effective_mcp_servers(config);
         crate::mcp::register_configured_mcp_tools(self, &servers).await
     }
 

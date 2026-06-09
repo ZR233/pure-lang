@@ -137,14 +137,16 @@ impl ProviderSettingsEdit {
         } else {
             role_edits_to_configs(&self.roles, &providers)?
         };
-        let config = PureConfig {
+        let mut config = PureConfig {
             schema_version: CONFIG_SCHEMA_VERSION,
             runtime: current.runtime.clone(),
             skills: current.skills.clone(),
             mcp_servers: current.mcp_servers.clone(),
+            builtin_mcp_servers: current.builtin_mcp_servers.clone(),
             roles,
             providers,
         };
+        crate::config::normalize_builtin_mcp_server_states(&mut config);
         config.validate()?;
         Ok(config)
     }

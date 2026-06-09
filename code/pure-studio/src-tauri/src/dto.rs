@@ -155,6 +155,12 @@ pub struct McpServerDto {
     pub bearer_token_env_var: Option<String>,
     pub headers: Vec<KeyValueDto>,
     pub endpoint: String,
+    pub source_kind: String,
+    pub source_label: String,
+    pub source_detail: Option<String>,
+    pub status_kind: String,
+    pub status_message: Option<String>,
+    pub mutation_policy: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

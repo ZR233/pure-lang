@@ -294,10 +294,17 @@ const en = {
       addRow: "Add row",
       enabled: "Enabled",
       disabled: "Disabled",
+      builtInSource: "Built-in",
+      builtInDetail: "Zhipu Coding Plan",
       toggle: "Enable/disable",
       empty: "No MCP servers",
       noMatches: "No matching MCP servers",
       noEndpoint: "No endpoint configured",
+      status: {
+        enabled: "Enabled",
+        disabled: "Disabled",
+        missingCredential: "Missing key",
+      },
       transportOptions: {
         stdio: "stdio",
         streamableHttp: "HTTP",

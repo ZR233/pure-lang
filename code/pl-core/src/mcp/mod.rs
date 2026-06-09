@@ -16,7 +16,8 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{Mutex, oneshot};
 
 use crate::config::{
-    McpServerConfig, McpServerTransport, active_mcp_server_names, validate_mcp_identifier,
+    EffectiveMcpServerConfig, McpServerConfig, McpServerStatusKind, McpServerTransport,
+    validate_mcp_identifier,
 };
 use crate::tool::{OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput};
 
@@ -105,15 +106,17 @@ impl Tool for McpToolAdapter {
 
 pub(crate) async fn register_configured_mcp_tools(
     core: &mut crate::PureCore,
-    servers: &BTreeMap<String, McpServerConfig>,
+    servers: &BTreeMap<String, EffectiveMcpServerConfig>,
 ) -> Result<()> {
-    for server_id in active_mcp_server_names(servers) {
-        let server = &servers[&server_id];
-        let client = connect_server(&server_id, server).await?;
+    for (server_id, server) in servers
+        .iter()
+        .filter(|(_, server)| server.status_kind == McpServerStatusKind::Enabled)
+    {
+        let client = connect_server(server_id, server).await?;
         initialize_client(&client).await?;
         let tools = list_tools(&client).await?;
         for definition in tools {
-            let adapter = McpToolAdapter::new(&server_id, definition, client.clone())?;
+            let adapter = McpToolAdapter::new(server_id, definition, client.clone())?;
             if core.has_tool(adapter.name()) {
                 return Err(PureError::ConfigError(format!(
                     "mcp tool '{}' conflicts with an existing tool",
@@ -136,14 +139,18 @@ fn exposed_tool_name(server_id: &str, tool_name: &str) -> Result<String> {
     Ok(format!("{MCP_TOOL_PREFIX}{server_id}__{tool_name}"))
 }
 
-async fn connect_server(server_id: &str, server: &McpServerConfig) -> Result<Arc<dyn McpClient>> {
-    match server.transport {
+async fn connect_server(
+    server_id: &str,
+    server: &EffectiveMcpServerConfig,
+) -> Result<Arc<dyn McpClient>> {
+    match server.config.transport {
         McpServerTransport::Stdio => {
-            let client = StdioMcpClient::spawn(server_id, server).await?;
+            let client = StdioMcpClient::spawn(server_id, &server.config).await?;
             Ok(Arc::new(client))
         }
         McpServerTransport::StreamableHttp => {
-            let client = HttpMcpClient::new(server_id, server)?;
+            let client =
+                HttpMcpClient::new(server_id, &server.config, server.bearer_token.clone())?;
             Ok(Arc::new(client))
         }
     }
@@ -348,16 +355,23 @@ impl fmt::Debug for HttpMcpClient {
 }
 
 impl HttpMcpClient {
-    fn new(server_id: &str, server: &McpServerConfig) -> Result<Self> {
-        let bearer_token = match server.bearer_token_env_var.as_deref() {
-            Some(env_var) if !env_var.trim().is_empty() => Some(std::env::var(env_var).map_err(
-                |error| {
-                    PureError::ConfigError(format!(
-                        "mcp server '{server_id}' bearer token env var '{env_var}' is unavailable: {error}"
-                    ))
-                },
-            )?),
-            Some(_) | None => None,
+    fn new(
+        server_id: &str,
+        server: &McpServerConfig,
+        bearer_token_override: Option<String>,
+    ) -> Result<Self> {
+        let bearer_token = match bearer_token_override {
+            Some(token) => Some(token),
+            None => match server.bearer_token_env_var.as_deref() {
+                Some(env_var) if !env_var.trim().is_empty() => Some(std::env::var(env_var).map_err(
+                    |error| {
+                        PureError::ConfigError(format!(
+                            "mcp server '{server_id}' bearer token env var '{env_var}' is unavailable: {error}"
+                        ))
+                    },
+                )?),
+                Some(_) | None => None,
+            },
         };
         Ok(Self {
             server_id: server_id.to_string(),
@@ -618,5 +632,21 @@ mod tests {
         ];
 
         assert_eq!(format_mcp_content(&content), "hello\n{\"ok\":true}");
+    }
+
+    #[test]
+    fn http_client_uses_bearer_token_override() {
+        let server = McpServerConfig {
+            transport: McpServerTransport::StreamableHttp,
+            url: Some("https://example.com/mcp".to_string()),
+            bearer_token_env_var: Some("IGNORED_ENV_VAR".to_string()),
+            ..Default::default()
+        };
+
+        let client =
+            HttpMcpClient::new("zhipu_search", &server, Some("coding-plan-key".to_string()))
+                .unwrap();
+
+        assert_eq!(client.bearer_token.as_deref(), Some("coding-plan-key"));
     }
 }

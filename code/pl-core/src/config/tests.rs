@@ -3,12 +3,15 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use pl_model::{ProviderInfo, default_models, zhipu_default_model_slugs};
+
 use super::role::{ModelRole, ReasoningEffort};
 use super::runtime::SkillsConfig;
 use super::store::{ConfigPaths, ConfigStore};
 use super::{
-    CONFIG_SCHEMA_VERSION, DEFAULT_MODEL, McpServerConfig, McpServerTransport, PureConfig,
-    active_mcp_server_names,
+    BuiltinMcpServerState, CONFIG_SCHEMA_VERSION, DEFAULT_MODEL, McpServerConfig,
+    McpServerStatusKind, McpServerTransport, PureConfig, active_mcp_server_names,
+    effective_mcp_servers,
 };
 use crate::turn::PermissionMode;
 
@@ -122,7 +125,7 @@ fn toml_round_trip_preserves_roles_models_and_token() {
         vec!["github".to_string()]
     );
     assert_eq!(
-        active_mcp_server_names(&parsed.mcp_servers),
+        active_mcp_server_names(&parsed),
         vec!["filesystem".to_string(), "github".to_string()]
     );
     assert_eq!(
@@ -201,7 +204,126 @@ fn disabled_mcp_server_can_keep_incomplete_draft() {
     );
 
     config.validate().unwrap();
-    assert!(active_mcp_server_names(&config.mcp_servers).is_empty());
+    assert!(active_mcp_server_names(&config).is_empty());
+}
+
+#[test]
+fn default_config_does_not_serialize_builtin_mcp_servers() {
+    let toml = PureConfig::default_config().to_toml_pretty().unwrap();
+
+    assert!(!toml.contains("builtin_mcp_servers"));
+    assert!(!toml.contains("zhipu_search"));
+}
+
+#[test]
+fn effective_mcp_servers_include_builtin_servers_without_token_as_missing_credential() {
+    let config = PureConfig::default_config();
+
+    let servers = effective_mcp_servers(&config);
+
+    assert_eq!(
+        servers["zhipu_search"].status_kind,
+        McpServerStatusKind::MissingCredential
+    );
+    assert_eq!(
+        servers["zhipu_vision"].status_kind,
+        McpServerStatusKind::MissingCredential
+    );
+    assert!(active_mcp_server_names(&config).is_empty());
+}
+
+#[test]
+fn effective_mcp_servers_enable_builtin_servers_with_zhipu_token() {
+    let mut config = PureConfig::default_config();
+    let mut info = ProviderInfo::zhipu(None);
+    info.bearer_token = Some("zhipu-coding-plan-key".to_string());
+    let slugs = zhipu_default_model_slugs();
+    let models = default_models()
+        .into_iter()
+        .filter(|model| slugs.contains(&model.slug.as_str()))
+        .map(super::ModelConfig::from_model_info)
+        .collect();
+    config.providers.insert(
+        "zhipu".to_string(),
+        super::ProviderConfig::from_provider_info(info, models),
+    );
+
+    let servers = effective_mcp_servers(&config);
+
+    assert_eq!(
+        servers["zhipu_search"].status_kind,
+        McpServerStatusKind::Enabled
+    );
+    assert_eq!(
+        servers["zhipu_search"].bearer_token.as_deref(),
+        Some("zhipu-coding-plan-key")
+    );
+    assert_eq!(
+        servers["zhipu_vision"].config.env.get("Z_AI_API_KEY"),
+        Some(&"zhipu-coding-plan-key".to_string())
+    );
+    assert_eq!(
+        servers["zhipu_vision"].config.env.get("Z_AI_MODE"),
+        Some(&"ZHIPU".to_string())
+    );
+    assert_eq!(
+        active_mcp_server_names(&config),
+        vec![
+            "zhipu_reader".to_string(),
+            "zhipu_search".to_string(),
+            "zhipu_vision".to_string(),
+            "zhipu_zread".to_string()
+        ]
+    );
+}
+
+#[test]
+fn zhipu_token_restores_builtin_mcp_state_on_load() {
+    let mut config = PureConfig::default_config();
+    let mut info = ProviderInfo::zhipu(None);
+    info.bearer_token = Some("zhipu-coding-plan-key".to_string());
+    let slugs = zhipu_default_model_slugs();
+    let models = default_models()
+        .into_iter()
+        .filter(|model| slugs.contains(&model.slug.as_str()))
+        .map(super::ModelConfig::from_model_info)
+        .collect();
+    config.providers.insert(
+        "zhipu".to_string(),
+        super::ProviderConfig::from_provider_info(info, models),
+    );
+    config.builtin_mcp_servers.insert(
+        "zhipu_search".to_string(),
+        BuiltinMcpServerState { enabled: false },
+    );
+
+    let parsed = PureConfig::from_toml(&config.to_toml_pretty().unwrap()).unwrap();
+
+    assert_eq!(
+        parsed.builtin_mcp_servers["zhipu_search"],
+        BuiltinMcpServerState { enabled: true }
+    );
+    assert_eq!(
+        parsed.builtin_mcp_servers["zhipu_reader"],
+        BuiltinMcpServerState { enabled: true }
+    );
+}
+
+#[test]
+fn mcp_config_rejects_builtin_reserved_id() {
+    let mut config = PureConfig::default_config();
+    config.mcp_servers.insert(
+        "zhipu_search".to_string(),
+        McpServerConfig {
+            transport: McpServerTransport::StreamableHttp,
+            url: Some("https://example.com/mcp".to_string()),
+            ..Default::default()
+        },
+    );
+
+    let error = config.validate().unwrap_err().to_string();
+
+    assert!(error.contains("reserved"));
 }
 
 #[test]
