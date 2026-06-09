@@ -124,7 +124,9 @@ turn 展示语义固定：
 
 设置页 MCP 标签页提供结构化 server 配置。列表展示 server id、启用状态、来源、传输方式和主要 endpoint；新增和编辑用户 server 使用本地草稿，保存成功后即时写入 `~/.pure/config.toml` 并刷新配置 payload。stdio 表单提供 command、args、env 和可选 cwd；Streamable HTTP 表单提供 url、bearer token 环境变量和 headers。启用的 MCP server 被视为用户信任对象，其 tools 在 Auto 和 Plan Mode 中直接暴露，不额外触发审批弹窗。
 
-MCP 标签页必须同时展示后端合成的内置 Zhipu Coding Plan MCP server。内置项显示“内置 / Zhipu Coding Plan”来源和状态；缺少 Zhipu provider token 时显示缺少 Key 且不开启，检测到 token 后自动恢复启用。内置项不可删除，server id、transport、endpoint、headers、env 等身份字段只读；保留启用切换按钮，但后端保存后仍以 Zhipu token 自动恢复开启策略为准。保存 provider key 后返回的 `ConfigPayload` 必须立即刷新 MCP 状态，无需用户再保存 MCP 标签页。
+MCP 标签页必须同时展示后端合成的内置 Zhipu Coding Plan MCP server。内置项显示“内置 / Zhipu Coding Plan”来源和状态；缺少 Zhipu Coding Plan 或 Zhipu provider token 时显示缺少 Key 且不开启，检测到 token 后自动恢复启用。内置项不可删除，server id、transport、endpoint、headers、env 等身份字段只读；保留启用切换按钮，但后端保存后仍以 token 自动恢复开启策略为准。保存 provider API key 后返回的 `ConfigPayload` 必须立即刷新 MCP 状态，无需用户再保存 MCP 标签页。
+
+Provider 标签页必须包含 Zhipu Coding Plan 模板。该模板在 UI 中作为独立供应商入口展示，但保存到配置时仍使用 `provider_kind = "zhipu"`，默认 base URL 为 `https://open.bigmodel.cn/api/coding/paas/v4`，默认模型列表与现有 Zhipu 模板完全一致。内置 Zhipu Coding Plan MCP server 的凭据优先使用该模板保存的 `bearer_token`，保存后返回的 `ConfigPayload` 必须立即反映 MCP 状态变化。
 
 工具调用展示遵循 `design/13-tool-calling-runtime.md` 的生命周期语义。工具 entry 和工具组详情必须展示工具名称、状态和关键路径或命令摘要；静默文件工具的成功结果可以隐藏，但 failed、denied、interrupted、budgetLimited 等异常状态必须展示 result/error 详情。前端只做展示派生，不改变 raw `TimelineItem` 的状态或结果内容。实时状态文案必须以 `TimelineItem.status` 为准；`TimelineItemCompleted` 和 `TimelineItemFailed` 只承载最终终态，不能被用来表示 `approved` 这类执行前中间态。
 

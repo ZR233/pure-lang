@@ -176,6 +176,8 @@ truncation_policy = { mode = "tokens", limit = 10000 }
 - `deep_seek`
 - `zhipu`
 
+Zhipu Coding Plan 是 provider 模板，不是新的 `provider_kind`。它持久化为 `provider_kind = "zhipu"`，默认 `base_url = "https://open.bigmodel.cn/api/coding/paas/v4"`，默认模型为 `glm-5.1`，并复用 Zhipu Chat Completions runtime。
+
 Anthropic 只在 `pl-model` 的 protocol 层保留占位，未实现 provider runtime 前不能写入配置。
 
 模型配置必须能完整表达运行时 `ModelInfo` 的可持久化字段：
@@ -232,7 +234,7 @@ Pure v1 的权限模式是本地策略层，不是 OS 沙箱。`request-approval
 
 MCP server 配置保存在顶层 `[mcp_servers.<server_id>]` 表，参考 Codex 的 MCP 配置形态。`server_id` 必须非空，且只能包含 ASCII 字母、数字、`_` 和 `-`，因为它会参与模型可见工具名。Pure 还会在运行时合成一组内置 MCP server；内置 server 不写入 `[mcp_servers]`，但会出现在 Studio MCP 设置页和状态栏中。用户配置不得占用内置保留 id。
 
-内置 MCP 的 UI toggle 状态可保存在独立的 `[builtin_mcp_servers.<server_id>]` 状态表中；该表不描述 transport 或 endpoint，也不允许新增 server。检测到 Zhipu token 时，Zhipu Coding Plan 内置 server 的状态会在加载或保存时自动恢复为启用。
+内置 MCP 的 UI toggle 状态可保存在独立的 `[builtin_mcp_servers.<server_id>]` 状态表中；该表不描述 transport 或 endpoint，也不允许新增 server。检测到 Zhipu Coding Plan 或 Zhipu token 时，Zhipu Coding Plan 内置 server 的状态会在加载或保存时自动恢复为启用。
 
 每个 MCP server 必须配置：
 
@@ -261,7 +263,7 @@ Pure 在普通对话、Auto Mode 和 Plan Mode 中都会向模型暴露已启用
 - `zhipu_zread`：Streamable HTTP，`https://open.bigmodel.cn/api/mcp/zread/mcp`
 - `zhipu_vision`：stdio，`npx -y @z_ai/mcp-server`
 
-这些内置 server 复用 Zhipu provider 的 `bearer_token` 作为 Coding Plan key。缺少 Zhipu token 时内置 server 的状态为缺少凭据且不会注册 tools；检测到 Zhipu token 时四个内置 server 自动恢复为启用。HTTP 内置 server 运行时直接发送 bearer token；Vision server 运行时注入 `Z_AI_API_KEY=<token>` 和 `Z_AI_MODE=ZHIPU`。
+这些内置 server 优先复用 Zhipu Coding Plan provider 的 `bearer_token` 作为 Coding Plan key；若不存在 Coding Plan provider，则兼容回退到普通 Zhipu provider 的 `bearer_token`。缺少可用 token 时内置 server 的状态为缺少凭据且不会注册 tools；检测到 token 时四个内置 server 自动恢复为启用。HTTP 内置 server 运行时直接发送 bearer token；Vision server 运行时注入 `Z_AI_API_KEY=<token>` 和 `Z_AI_MODE=ZHIPU`。
 
 模型可见的 MCP tool 名称固定为：
 
@@ -292,11 +294,11 @@ mcp__{server_id}__{tool_name}
 
 配置构造和校验的纯逻辑属于 `pl-core`。`pure-studio` 设置页可以使用默认配置草稿，并支持：
 
-- 默认选中 DeepSeek provider，也可切换为 OpenAI 或 Zhipu provider。
+- 默认选中 DeepSeek provider，也可切换为 OpenAI、Zhipu 或 Zhipu Coding Plan provider。
 - 至少配置一个 provider。
 - 可继续添加多个 provider 实例，允许同类 provider 重复，例如 `deepseek`、`deepseek-2`、`openai`、`openai-work`。
 - 每个 provider key 必须唯一。
-- DeepSeek 模板来自 `ProviderInfo::deepseek(None)`，OpenAI 模板来自 `ProviderInfo::openai(None)`，智谱模板来自 `ProviderInfo::zhipu(None)`。
+- DeepSeek 模板来自 `ProviderInfo::deepseek(None)`，OpenAI 模板来自 `ProviderInfo::openai(None)`，智谱模板来自 `ProviderInfo::zhipu(None)`，Zhipu Coding Plan 模板来自 `ProviderInfo::zhipu_coding_plan(None)`。
 - 每个 provider 的模型列表包含模板默认模型，并可追加用户自定义模型。
 - 用户选择一个默认 provider；四个模型角色默认都指向该 provider 的默认模型和默认 effort。
 
@@ -313,7 +315,7 @@ mcp__{server_id}__{tool_name}
 
 `pure-studio` 设置页复用 `pl-core` 的配置类型和校验逻辑，首版覆盖：
 
-- DeepSeek / OpenAI / Zhipu provider。
+- DeepSeek / OpenAI / Zhipu / Zhipu Coding Plan provider。
 - API key、base URL、provider key 和显示名。
 - provider 默认模型和自定义模型。
 - 四个模型角色到 provider/model/effort 的路由。
@@ -329,7 +331,7 @@ MCP 标签页使用结构化表单，不展示 raw TOML。新增和编辑用户 
 Provider 标签页必须提供结构化编辑能力：
 
 - Provider 列表页只提供一个“添加供应商”入口；点击后进入 Provider 编辑页。
-- 新增 Provider 默认使用模板列表第一项，自动生成唯一 provider key；编辑页通过供应商类型下拉切换 DeepSeek / OpenAI / Zhipu 等模板。
+- 新增 Provider 默认使用模板列表第一项，自动生成唯一 provider key；编辑页通过供应商类型下拉切换 DeepSeek / OpenAI / Zhipu / Zhipu Coding Plan 等模板。
 - 编辑 provider key、显示名、base URL、API key 和默认模型。
 - 以 provider 卡片作为主要信息载体，展示 provider key、provider kind、base URL、状态、默认模型、模型数量和更新时间等摘要信息。
 - Provider 列表页不直接编辑字段；点击卡片编辑按钮进入 provider 编辑页。

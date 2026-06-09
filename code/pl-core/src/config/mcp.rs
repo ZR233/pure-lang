@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use pl_model::ProviderKind;
+use pl_model::{ProviderKind, ZHIPU_CODING_PLAN_BASE_URL};
 use pl_protocol::{PureError, Result};
 use serde::{Deserialize, Serialize};
 
@@ -307,12 +307,14 @@ pub fn effective_mcp_servers(
                 source_detail: Some("Zhipu Coding Plan".to_string()),
                 status_kind,
                 status_message: match status_kind {
-                    McpServerStatusKind::Enabled => {
-                        Some("Using the configured Zhipu provider token".to_string())
-                    }
-                    McpServerStatusKind::MissingCredential => {
-                        Some("Configure a Zhipu provider token to enable this server".to_string())
-                    }
+                    McpServerStatusKind::Enabled => Some(
+                        "Using the configured Zhipu Coding Plan or Zhipu provider token"
+                            .to_string(),
+                    ),
+                    McpServerStatusKind::MissingCredential => Some(
+                        "Configure a Zhipu Coding Plan or Zhipu provider token to enable this server"
+                            .to_string(),
+                    ),
                     McpServerStatusKind::Disabled => None,
                 },
                 mutation_policy: McpServerMutationPolicy::LockedIdentity,
@@ -345,14 +347,40 @@ pub fn normalize_builtin_mcp_server_states(config: &mut super::PureConfig) {
 }
 
 pub fn zhipu_coding_plan_token(config: &super::PureConfig) -> Option<String> {
-    config.providers.iter().find_map(|(_, provider)| {
-        (provider.provider_kind == ProviderKind::Zhipu)
-            .then_some(provider.bearer_token.as_deref())
-            .flatten()
-            .map(str::trim)
-            .filter(|token| !token.is_empty())
-            .map(ToOwned::to_owned)
-    })
+    config
+        .providers
+        .iter()
+        .find_map(|(provider_key, provider)| {
+            is_zhipu_coding_plan_provider(provider_key, provider)
+                .then(|| provider_token(provider))
+                .flatten()
+        })
+        .or_else(|| {
+            config.providers.iter().find_map(|(_, provider)| {
+                (provider.provider_kind == ProviderKind::Zhipu)
+                    .then(|| provider_token(provider))
+                    .flatten()
+            })
+        })
+}
+
+fn is_zhipu_coding_plan_provider(provider_key: &str, provider: &super::ProviderConfig) -> bool {
+    provider.provider_kind == ProviderKind::Zhipu
+        && (provider_key == "zhipu-coding-plan"
+            || normalized_base_url(&provider.base_url) == ZHIPU_CODING_PLAN_BASE_URL)
+}
+
+fn provider_token(provider: &super::ProviderConfig) -> Option<String> {
+    provider
+        .bearer_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn normalized_base_url(value: &str) -> &str {
+    value.trim().trim_end_matches('/')
 }
 
 pub fn validate_mcp_identifier(value: &str, label: &str) -> Result<()> {

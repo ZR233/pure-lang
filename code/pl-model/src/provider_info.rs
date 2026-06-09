@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use serde::Deserialize;
 use serde::Serialize;
 
+pub const ZHIPU_CODING_PLAN_BASE_URL: &str = "https://open.bigmodel.cn/api/coding/paas/v4";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderInfo {
     pub provider_kind: ProviderKind,
@@ -85,6 +87,19 @@ impl ProviderInfo {
         }
     }
 
+    pub fn zhipu_coding_plan(base_url: Option<String>) -> Self {
+        Self {
+            provider_kind: ProviderKind::Zhipu,
+            name: "Zhipu Coding Plan".into(),
+            base_url: base_url.unwrap_or_else(|| ZHIPU_CODING_PLAN_BASE_URL.into()),
+            default_model: "glm-5.1".into(),
+            bearer_token: None,
+            http_headers: None,
+            tool_wire_policy: ToolWirePolicy::FunctionFallback,
+            apply_patch_tool_type: None,
+        }
+    }
+
     pub fn uses_native_custom_tools(&self) -> bool {
         matches!(self.tool_wire_policy, ToolWirePolicy::NativeCustomTools)
     }
@@ -124,5 +139,16 @@ mod tests {
         assert_eq!(info.provider_kind, ProviderKind::Zhipu);
         assert_eq!(info.base_url, "https://open.bigmodel.cn/api/paas/v4");
         assert_eq!(info.default_model, "glm-5.1");
+    }
+
+    #[test]
+    fn zhipu_coding_plan_uses_zhipu_runtime_with_coding_endpoint() {
+        let info = ProviderInfo::zhipu_coding_plan(None);
+
+        assert_eq!(info.provider_kind, ProviderKind::Zhipu);
+        assert_eq!(info.name, "Zhipu Coding Plan");
+        assert_eq!(info.base_url, ZHIPU_CODING_PLAN_BASE_URL);
+        assert_eq!(info.default_model, "glm-5.1");
+        assert_eq!(info.tool_wire_policy, ToolWirePolicy::FunctionFallback);
     }
 }

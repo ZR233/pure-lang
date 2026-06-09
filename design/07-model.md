@@ -51,6 +51,8 @@ provider 适配实现可以依赖 `async-openai`、`reqwest` 和 `serde`。这�
 
 每个 provider 拥有自己的 profile：默认 base URL、默认模型、模型目录、tool wire policy、reasoning/thinking policy 和协议 endpoint policy。模型目录只包含该 provider 的 bundled/configured 模型，不从全局模型列表兜底生成 provider 列表。
 
+Zhipu Coding Plan 是 Zhipu profile 的配置模板，默认使用 `https://open.bigmodel.cn/api/coding/paas/v4`，模型列表与现有 Zhipu 模板完全一致；它不新增 `ProviderRuntime` 变体，也不改变 `ProviderKind::Zhipu` 的协议边界。
+
 ## 7.4 Protocol API
 
 `pl-model` 当前支持：
@@ -60,7 +62,7 @@ provider 适配实现可以依赖 `async-openai`、`reqwest` 和 `serde`。这�
 
 不同 protocol API 的差异保持在 `pl-model` 内部，核心层只看到 `CompletionRequest`、`CompletionResponse` 和事件流。
 
-OpenAI、DeepSeek 和 Zhipu 都复用 `protocol::openai`。OpenAI 默认使用 Responses endpoint；DeepSeek 和 Zhipu 使用 Chat Completions endpoint。DeepSeek/Zhipu 的 `reasoning_effort`、`thinking`、`clear_thinking`、`reasoning_content` 等私有扩展由 provider profile 通过强类型 options 注入 OpenAI protocol，不作为独立 wire variant 存在。
+OpenAI、DeepSeek 和 Zhipu 都复用 `protocol::openai`。OpenAI 默认使用 Responses endpoint；DeepSeek 和 Zhipu 使用 Chat Completions endpoint。Zhipu Coding Plan 作为 Zhipu 模板同样使用 Chat Completions endpoint。DeepSeek/Zhipu 的 `reasoning_effort`、`thinking`、`clear_thinking`、`reasoning_content` 等私有扩展由 provider profile 通过强类型 options 注入 OpenAI protocol，不作为独立 wire variant 存在。
 
 请求体不再由散落的 `serde_json::json!` 直接拼接，而是先转换为 `pl-model` 内部强类型 request，再由 serde 序列化。动态 JSON 只允许出现在 JSON Schema、工具参数、provider 返回的任意 JSON 参数和协议扩展 escape hatch。
 

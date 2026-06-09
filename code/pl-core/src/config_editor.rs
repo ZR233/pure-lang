@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-use pl_model::{ModelInfo, ProviderKind};
+use pl_model::{ModelInfo, ProviderKind, ZHIPU_CODING_PLAN_BASE_URL};
 use pl_protocol::{PureError, Result};
 
 use crate::config::{
@@ -47,12 +47,26 @@ pub fn infer_provider_template_kind(
     provider_key: &str,
     provider: &ProviderConfig,
 ) -> ProviderTemplateKind {
-    let _ = provider_key;
     match provider.provider_kind {
         ProviderKind::OpenAi => ProviderTemplateKind::OpenAi,
         ProviderKind::DeepSeek => ProviderTemplateKind::DeepSeek,
-        ProviderKind::Zhipu => ProviderTemplateKind::Zhipu,
+        ProviderKind::Zhipu => {
+            if is_zhipu_coding_plan_provider(provider_key, provider) {
+                ProviderTemplateKind::ZhipuCodingPlan
+            } else {
+                ProviderTemplateKind::Zhipu
+            }
+        }
     }
+}
+
+fn is_zhipu_coding_plan_provider(provider_key: &str, provider: &ProviderConfig) -> bool {
+    ProviderTemplateKind::from_key(provider_key) == Some(ProviderTemplateKind::ZhipuCodingPlan)
+        || normalized_base_url(&provider.base_url) == ZHIPU_CODING_PLAN_BASE_URL
+}
+
+fn normalized_base_url(value: &str) -> &str {
+    value.trim().trim_end_matches('/')
 }
 
 impl ProviderModelEdit {
@@ -415,6 +429,18 @@ mod tests {
         }
     }
 
+    fn zhipu_coding_plan_edit() -> ProviderEdit {
+        ProviderEdit {
+            key: "zhipu-coding-plan".to_string(),
+            kind: ProviderTemplateKind::ZhipuCodingPlan,
+            name: "Zhipu Coding Plan".to_string(),
+            base_url: Some(ZHIPU_CODING_PLAN_BASE_URL.to_string()),
+            bearer_token: None,
+            default_model: "glm-5.1".to_string(),
+            custom_models: Vec::new(),
+        }
+    }
+
     #[test]
     fn provider_edit_appends_custom_models_after_template_defaults() {
         let mut edit = openai_edit();
@@ -517,6 +543,43 @@ mod tests {
         let kind = infer_provider_template_kind("glm-team", &provider);
 
         assert_eq!(kind, ProviderTemplateKind::Zhipu);
+    }
+
+    #[test]
+    fn zhipu_coding_plan_edit_uses_zhipu_kind_and_models() {
+        let current = PureConfig::default_config();
+
+        let config = ProviderSettingsEdit {
+            default_provider: Some("zhipu-coding-plan".to_string()),
+            providers: vec![zhipu_coding_plan_edit()],
+            roles: Vec::new(),
+        }
+        .to_config(&current)
+        .unwrap();
+
+        let coding_plan = &config.providers["zhipu-coding-plan"];
+        let zhipu_slugs = ProviderTemplateKind::Zhipu.default_model_slugs();
+        let coding_plan_slugs = coding_plan
+            .models
+            .iter()
+            .map(|model| model.slug.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(coding_plan.provider_kind, ProviderKind::Zhipu);
+        assert_eq!(coding_plan.base_url, ZHIPU_CODING_PLAN_BASE_URL);
+        assert_eq!(coding_plan.default_model, "glm-5.1");
+        assert_eq!(coding_plan_slugs, zhipu_slugs.to_vec());
+    }
+
+    #[test]
+    fn zhipu_coding_plan_template_inference_uses_base_url() {
+        let provider = zhipu_coding_plan_edit()
+            .to_provider_config()
+            .expect("coding plan config");
+
+        let kind = infer_provider_template_kind("glm-team", &provider);
+
+        assert_eq!(kind, ProviderTemplateKind::ZhipuCodingPlan);
     }
 
     #[test]

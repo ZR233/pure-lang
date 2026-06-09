@@ -174,4 +174,12 @@ export const previewTemplates: ProviderTemplateRecord[] = [
     providerKind: "zhipu",
     defaultModels: zhipuDefaultModels,
   },
+  {
+    id: "zhipu-coding-plan",
+    name: "Zhipu Coding Plan",
+    baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
+    defaultModel: "glm-5.1",
+    providerKind: "zhipu",
+    defaultModels: zhipuDefaultModels,
+  },
 ];
