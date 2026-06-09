@@ -1,14 +1,18 @@
 import {
+  AlertCircle,
+  Activity,
   CheckCircle2,
   Cpu,
-  Link2,
   Pencil,
   Plus,
+  RefreshCw,
   Search,
   Server,
   Trash2,
+  Wallet,
 } from "lucide-react";
-import { useState, type Dispatch, type SetStateAction } from "react";
+import type { TFunction } from "i18next";
+import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   ModelRecord,
@@ -16,6 +20,8 @@ import type {
   ProviderRecord,
   ProviderSettingsSaveSnapshot,
   ProviderTemplateRecord,
+  ProviderUsageRecord,
+  ZhipuQuotaLimit,
 } from "../types";
 import {
   applyProviderTemplate,
@@ -31,10 +37,14 @@ import { ProviderEditPage } from "./ProviderEditPage";
 type ProviderSettingsProps = {
   providers: ProviderRecord[];
   templates: ProviderTemplateRecord[];
+  providerUsages: ProviderUsageRecord[];
+  providerUsagesLoading: boolean;
+  providerUsageError: string | null;
   selectedProviderId: string | null;
   providerSearch: string;
   setProviderSearch: Dispatch<SetStateAction<string>>;
   onSaveProviderSettings: (snapshot: ProviderSettingsSaveSnapshot) => Promise<boolean>;
+  onRefreshProviderUsages: () => void;
 };
 
 type ProviderDraft = {
@@ -48,23 +58,35 @@ type ProviderDraft = {
 export function ProviderSettings({
   providers,
   templates,
+  providerUsages,
+  providerUsagesLoading,
+  providerUsageError,
   selectedProviderId,
   providerSearch,
   setProviderSearch,
   onSaveProviderSettings,
+  onRefreshProviderUsages,
 }: ProviderSettingsProps) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState<ProviderDraft | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const providerUsageById = useMemo(
+    () => new Map(providerUsages.map((usage) => [usage.providerId, usage])),
+    [providerUsages],
+  );
   const filteredProviders = providers.filter((provider) => {
     const query = providerSearch.trim().toLowerCase();
     if (!query) {
       return true;
     }
+    const modelText = allModels(provider)
+      .map((model) => `${model.slug} ${model.displayName}`)
+      .join(" ")
+      .toLowerCase();
     return (
       provider.name.toLowerCase().includes(query) ||
       provider.id.toLowerCase().includes(query) ||
-      provider.baseUrl.toLowerCase().includes(query)
+      modelText.includes(query)
     );
   });
   const selectedProvider =
@@ -263,6 +285,15 @@ export function ProviderSettings({
                 />
               </label>
               <div className="provider-add-actions">
+                <button
+                  className="provider-refresh-button"
+                  disabled={providerUsagesLoading}
+                  onClick={onRefreshProviderUsages}
+                  title={t("provider.refreshUsageTooltip")}
+                >
+                  <RefreshCw size={16} className={providerUsagesLoading ? "spin" : undefined} />
+                  {t("provider.refreshUsage")}
+                </button>
                 <button disabled={isSaving || templates.length === 0} onClick={startAddProvider}>
                   <Plus size={16} />
                   {t("provider.addProvider")}
@@ -272,6 +303,12 @@ export function ProviderSettings({
           </div>
 
           <div className="provider-card-list">
+            {providerUsageError ? (
+              <div className="provider-usage-banner">
+                <AlertCircle size={16} />
+                <span>{providerUsageError}</span>
+              </div>
+            ) : null}
             {filteredProviders.length === 0 ? (
               <div className="provider-empty-state">
                 <Server size={28} />
@@ -288,6 +325,7 @@ export function ProviderSettings({
                   t("provider.notSelected");
                 const previewModels = models.slice(0, 4);
                 const remainingModels = Math.max(0, models.length - previewModels.length);
+                const usage = providerUsageById.get(provider.id);
 
                 return (
                   <article
@@ -352,12 +390,18 @@ export function ProviderSettings({
                         <small>{t("model.title")}</small>
                         <strong>{t("provider.models", { count: provider.modelCount })}</strong>
                       </span>
-                      <span className="wide">
-                        <Link2 size={14} />
-                        <small>{t("provider.baseUrl")}</small>
-                        <strong>{provider.baseUrl || t("provider.defaultBaseUrl")}</strong>
+                      <span className={`provider-usage-meta ${providerUsageStatusClass(usage, providerUsagesLoading)}`}>
+                        <Wallet size={14} />
+                        <small>{t("provider.usage")}</small>
+                        <strong>{providerUsageSummary(provider, usage, providerUsagesLoading, t)}</strong>
                       </span>
                     </div>
+
+                    <ProviderUsagePanel
+                      usage={usage}
+                      loading={providerUsagesLoading}
+                      t={t}
+                    />
 
                     <div className="provider-model-strip">
                       <span className="model-count-pill">
@@ -386,4 +430,306 @@ export function ProviderSettings({
       )}
     </div>
   );
+}
+
+type ProviderUsagePanelProps = {
+  usage: ProviderUsageRecord | undefined;
+  loading: boolean;
+  t: TFunction;
+};
+
+function ProviderUsagePanel({ usage, loading, t }: ProviderUsagePanelProps) {
+  if (loading && !usage) {
+    return (
+      <div className="provider-usage-panel checking">
+        <Activity size={16} />
+        <span>{t("provider.usageChecking")}</span>
+      </div>
+    );
+  }
+
+  if (!usage) {
+    return (
+      <div className="provider-usage-panel muted">
+        <Activity size={16} />
+        <span>{t("provider.usageNotLoaded")}</span>
+      </div>
+    );
+  }
+
+  switch (usage.status) {
+    case "unsupported":
+      return (
+        <div className="provider-usage-panel muted">
+          <Activity size={16} />
+          <span>{t("provider.usageUnsupported")}</span>
+        </div>
+      );
+    case "missingCredential":
+      return (
+        <div className="provider-usage-panel warning">
+          <AlertCircle size={16} />
+          <span>{t("provider.usageMissingCredential")}</span>
+        </div>
+      );
+    case "failed":
+      return (
+        <div className="provider-usage-panel danger">
+          <AlertCircle size={16} />
+          <span>{usage.message || t("provider.usageFailed")}</span>
+        </div>
+      );
+    case "ready":
+      if (usage.usageKind === "deepseekBalance" && usage.balance) {
+        return <DeepSeekUsagePanel usage={usage} loading={loading} t={t} />;
+      }
+      if (usage.usageKind === "zhipuCodingPlan" && usage.codingPlan) {
+        return <ZhipuUsagePanel usage={usage} loading={loading} t={t} />;
+      }
+      return (
+        <div className="provider-usage-panel muted">
+          <Activity size={16} />
+          <span>{t("provider.usageUnavailable")}</span>
+        </div>
+      );
+  }
+}
+
+function DeepSeekUsagePanel({
+  usage,
+  loading,
+  t,
+}: {
+  usage: ProviderUsageRecord;
+  loading: boolean;
+  t: TFunction;
+}) {
+  const balance = usage.balance;
+  const primary = balance ? primaryBalance(balance.balances) : null;
+  return (
+    <div className={`provider-usage-panel deepseek-detail ${loading ? "refreshing" : ""}`}>
+      <div className="provider-balance-main">
+        <span className={balance?.isAvailable ? "usage-eyebrow ready" : "usage-eyebrow warning"}>
+          <Wallet size={14} />
+          {balance?.isAvailable ? t("provider.balanceAvailable") : t("provider.balanceUnavailable")}
+        </span>
+        <strong>{primary ? formatMoney(primary.totalBalance, primary.currency) : t("provider.usageUnavailable")}</strong>
+      </div>
+      <div className="provider-balance-grid">
+        {(balance?.balances ?? []).map((item) => (
+          <span key={item.currency}>
+            <small>{item.currency}</small>
+            <strong>{formatMoney(item.totalBalance, item.currency)}</strong>
+            <em>
+              {t("provider.balanceGranted")}: {item.grantedBalance || "0"} ·{" "}
+              {t("provider.balanceToppedUp")}: {item.toppedUpBalance || "0"}
+            </em>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ZhipuUsagePanel({
+  usage,
+  loading,
+  t,
+}: {
+  usage: ProviderUsageRecord;
+  loading: boolean;
+  t: TFunction;
+}) {
+  const codingPlan = usage.codingPlan;
+  const fiveHour = findLimit(codingPlan?.limits ?? [], "fiveHour");
+  const weekly = findLimit(codingPlan?.limits ?? [], "weekly");
+  const mcp = findLimit(codingPlan?.limits ?? [], "mcpMonthly");
+  const quotaRows = [
+    [t("provider.quotaFiveHour"), fiveHour] as const,
+    [t("provider.quotaWeekly"), weekly] as const,
+    [t("provider.quotaMcp"), mcp] as const,
+  ].filter((item): item is readonly [string, ZhipuQuotaLimit] => Boolean(item[1]));
+
+  return (
+    <div className={`provider-usage-panel zhipu-detail ${loading ? "refreshing" : ""}`}>
+      <div className="provider-quota-grid">
+        {quotaRows.length > 0 ? (
+          quotaRows.map(([label, limit]) => <QuotaRow key={limit.window} label={label} limit={limit} t={t} />)
+        ) : (
+          <div className="provider-usage-panel muted compact">
+            <Activity size={16} />
+            <span>{t("provider.usageUnavailable")}</span>
+          </div>
+        )}
+      </div>
+      {mcp?.usageDetails.length ? (
+        <div className="provider-tool-usage">
+          {mcp.usageDetails.map((detail) => (
+            <span key={detail.name}>
+              <small>{detail.name}</small>
+              <strong>{formatToolUsage(detail)}</strong>
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function QuotaRow({
+  label,
+  limit,
+  t,
+}: {
+  label: string;
+  limit: ZhipuQuotaLimit;
+  t: TFunction;
+}) {
+  const remainingPercent = quotaRemainingPercent(limit);
+  const resetText = formatResetAt(limit.nextResetAt);
+  return (
+    <div className="provider-quota-row">
+      <div className="provider-quota-head">
+        <strong>{label}</strong>
+        <span>{t("provider.remainingPercent", { percent: formatPercent(remainingPercent) })}</span>
+      </div>
+      <div className="provider-quota-track">
+        <span style={{ width: `${remainingPercent}%` }} />
+      </div>
+      <div className="provider-quota-foot">
+        <span>{quotaAmountText(limit)}</span>
+        {resetText ? <span>{t("provider.resetAt", { time: resetText })}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function providerUsageSummary(
+  provider: ProviderRecord,
+  usage: ProviderUsageRecord | undefined,
+  loading: boolean,
+  t: TFunction,
+) {
+  if (loading && !usage) {
+    return t("provider.usageChecking");
+  }
+  if (!usage) {
+    return t("provider.usageNotLoaded");
+  }
+  switch (usage.status) {
+    case "unsupported":
+      return t("provider.usageUnsupported");
+    case "missingCredential":
+      return t("provider.usageMissingCredentialShort");
+    case "failed":
+      return t("provider.usageFailed");
+    case "ready":
+      if (usage.usageKind === "deepseekBalance" && usage.balance) {
+        const primary = primaryBalance(usage.balance.balances);
+        return primary ? formatMoney(primary.totalBalance, primary.currency) : t("provider.usageUnavailable");
+      }
+      if (provider.templateKind === "zhipu-coding-plan" && usage.codingPlan) {
+        const fiveHour = findLimit(usage.codingPlan.limits, "fiveHour");
+        const weekly = findLimit(usage.codingPlan.limits, "weekly");
+        if (fiveHour && weekly) {
+          return `${t("provider.quotaFiveHour")} ${formatPercent(quotaRemainingPercent(fiveHour))} · ${t(
+            "provider.quotaWeekly",
+          )} ${formatPercent(quotaRemainingPercent(weekly))}`;
+        }
+      }
+      return t("provider.usageUnavailable");
+  }
+}
+
+function providerUsageStatusClass(usage: ProviderUsageRecord | undefined, loading: boolean) {
+  if (loading && !usage) {
+    return "checking";
+  }
+  if (!usage) {
+    return "muted";
+  }
+  switch (usage.status) {
+    case "ready":
+      return "ready";
+    case "failed":
+      return "danger";
+    case "missingCredential":
+      return "warning";
+    case "unsupported":
+      return "muted";
+  }
+}
+
+function findLimit(limits: ZhipuQuotaLimit[], window: ZhipuQuotaLimit["window"]) {
+  return limits.find((limit) => limit.window === window);
+}
+
+function primaryBalance(balances: { currency: string; totalBalance: string }[]) {
+  return balances.find((item) => item.currency.toUpperCase() === "CNY") ?? balances[0] ?? null;
+}
+
+function quotaRemainingPercent(limit: ZhipuQuotaLimit) {
+  if (typeof limit.remaining === "number" && typeof limit.total === "number" && limit.total > 0) {
+    return clampPercent((limit.remaining / limit.total) * 100);
+  }
+  return clampPercent(100 - limit.percentage);
+}
+
+function quotaAmountText(limit: ZhipuQuotaLimit) {
+  if (typeof limit.remaining === "number" && typeof limit.total === "number") {
+    return `${formatNumber(limit.remaining)} / ${formatNumber(limit.total)}`;
+  }
+  if (typeof limit.remaining === "number") {
+    return formatNumber(limit.remaining);
+  }
+  if (typeof limit.currentValue === "number" && typeof limit.total === "number") {
+    return `${formatNumber(Math.max(0, limit.total - limit.currentValue))} / ${formatNumber(limit.total)}`;
+  }
+  return `${formatPercent(quotaRemainingPercent(limit))}`;
+}
+
+function formatToolUsage(detail: {
+  currentValue?: number | null;
+  total?: number | null;
+  percentage?: number | null;
+}) {
+  if (typeof detail.currentValue === "number" && typeof detail.total === "number") {
+    const remaining = Math.max(0, detail.total - detail.currentValue);
+    return `${formatNumber(remaining)} / ${formatNumber(detail.total)}`;
+  }
+  if (typeof detail.percentage === "number") {
+    return formatPercent(clampPercent(100 - detail.percentage));
+  }
+  return "--";
+}
+
+function formatMoney(amount: string, currency: string) {
+  return `${currency} ${amount}`;
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value);
+}
+
+function formatPercent(value: number) {
+  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value)}%`;
+}
+
+function formatResetAt(value: number | null | undefined) {
+  if (!value) {
+    return null;
+  }
+  return new Date(value * 1000).toLocaleString(undefined, {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function clampPercent(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(100, value));
 }

@@ -11,6 +11,7 @@ import type {
   ProjectRecord,
   ProjectSelectionPayload,
   ProviderRecord,
+  ProviderUsageRecord,
   ProviderTemplateRecord,
   RoleRecord,
   RunPromptResponse,
@@ -57,6 +58,9 @@ export type StudioState = TimelineStateSlice & {
   projects: ProjectRecord[];
   sessions: SessionRecord[];
   providers: ProviderRecord[];
+  providerUsages: ProviderUsageRecord[];
+  providerUsagesLoading: boolean;
+  providerUsageError: string | null;
   mcpServers: McpServerRecord[];
   roles: RoleRecord[];
   providerTemplates: ProviderTemplateRecord[];
@@ -108,6 +112,9 @@ export type StudioAction =
   | { type: "setSelectedProviderId"; providerId: string | null }
   | { type: "setRoles"; roles: RoleRecord[] }
   | { type: "setProviders"; providers: ProviderRecord[] }
+  | { type: "providerUsagesLoading" }
+  | { type: "providerUsagesLoaded"; usages: ProviderUsageRecord[] }
+  | { type: "providerUsagesFailed"; error: string }
   | { type: "setConfigToml"; toml: string }
   | { type: "setSettingsOpen"; value: boolean; tab?: SettingsTab }
   | { type: "configLoaded"; payload: ConfigPayload; status?: string }
@@ -142,6 +149,9 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   projects: [],
   sessions: [],
   providers: [],
+  providerUsages: [],
+  providerUsagesLoading: false,
+  providerUsageError: null,
   mcpServers: [],
   roles: [],
   providerTemplates: [],
@@ -312,6 +322,21 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, roles: action.roles };
     case "setProviders":
       return { ...state, providers: action.providers };
+    case "providerUsagesLoading":
+      return { ...state, providerUsagesLoading: true, providerUsageError: null };
+    case "providerUsagesLoaded":
+      return {
+        ...state,
+        providerUsages: mergeProviderUsages(state.providerUsages, action.usages),
+        providerUsagesLoading: false,
+        providerUsageError: null,
+      };
+    case "providerUsagesFailed":
+      return {
+        ...state,
+        providerUsagesLoading: false,
+        providerUsageError: action.error,
+      };
     case "setConfigToml":
       return { ...state, configToml: action.toml };
     case "setSettingsOpen":
@@ -877,6 +902,17 @@ function mergeMcpServers(
       ...server,
     };
   });
+}
+
+function mergeProviderUsages(
+  current: ProviderUsageRecord[],
+  incoming: ProviderUsageRecord[],
+): ProviderUsageRecord[] {
+  const byId = new Map(current.map((usage) => [usage.providerId, usage]));
+  for (const usage of incoming) {
+    byId.set(usage.providerId, usage);
+  }
+  return [...byId.values()];
 }
 
 function phaseForTimelineItem(item: TimelineItem, current: TurnPhase): TurnPhase {

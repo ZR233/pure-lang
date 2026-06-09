@@ -13,6 +13,7 @@ import type {
   ConfigPayload,
   McpServerRecord,
   ProviderRecord,
+  ProviderUsageRecord,
   PlanState,
   RoleRecord,
   RunPromptResponse,
@@ -1207,6 +1208,66 @@ function configLoadedUpdatesPermissionMode() {
   assertEqual(state.status, "saved");
 }
 
+function providerUsagesLoadedDoesNotReplaceConfigState() {
+  const deepseekProvider = createProviderFromTemplate(template("deepseek"), "deepseek");
+  const roles: RoleRecord[] = [
+    {
+      key: "planner",
+      displayName: "Planner",
+      provider: "deepseek",
+      model: deepseekProvider.defaultModel,
+      effort: "medium",
+    },
+  ];
+  const state = {
+    ...selectedState(),
+    providers: [deepseekProvider],
+    roles,
+    providerTemplates: previewTemplates,
+    selectedProviderId: "deepseek",
+    configToml: "before",
+  };
+  const usage: ProviderUsageRecord = {
+    providerId: "deepseek",
+    updatedAt: 10,
+    status: "ready",
+    usageKind: "deepseekBalance",
+    message: null,
+    balance: {
+      isAvailable: true,
+      balances: [
+        {
+          currency: "CNY",
+          totalBalance: "8.00",
+          grantedBalance: "3.00",
+          toppedUpBalance: "5.00",
+        },
+      ],
+    },
+    codingPlan: null,
+  };
+
+  const updated = studioReducer(state, {
+    type: "providerUsagesLoaded",
+    usages: [usage],
+  });
+
+  assertDeepEqual(updated.providers, state.providers);
+  assertDeepEqual(updated.roles, roles);
+  assertDeepEqual(updated.providerTemplates, previewTemplates);
+  assertEqual(updated.selectedProviderId, "deepseek");
+  assertEqual(updated.configToml, "before");
+  assertEqual(updated.providerUsages[0]?.providerId, "deepseek");
+
+  const refreshed = studioReducer(updated, {
+    type: "providerUsagesLoaded",
+    usages: [{ ...usage, updatedAt: 20 }],
+  });
+
+  assertEqual(refreshed.providerUsages.length, 1);
+  assertEqual(refreshed.providerUsages[0]?.updatedAt, 20);
+}
+
 function mcpHealthUpdatedRefreshesMcpServersAndRuntime() {
   const state = {
     ...selectedState(),
@@ -1716,6 +1777,7 @@ toolsFromDifferentTurnsDoNotMerge();
 toolGroupStatusUsesPriority();
 sessionModeUpdateKeepsTimelineAndUpdatesSessions();
 configLoadedUpdatesPermissionMode();
+providerUsagesLoadedDoesNotReplaceConfigState();
 mcpHealthUpdatedRefreshesMcpServersAndRuntime();
 applyPatchCountsFilesFromResultSummary();
 successfulSkillViewImmediatelyUpdatesActiveSkills();

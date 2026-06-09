@@ -108,6 +108,8 @@ turn 展示语义固定：
 
 状态栏固定渲染在聊天底部。聊天顶部标题栏只展示当前会话标题，不展示项目完整路径，避免长路径撑宽主聊天列。左侧展示高频控制：`Auto / Plan` 模式、模型、推理强度和权限模式；右侧展示只读状态：上下文使用量、按货币分组的费用估算、能力数量和 agent latest snapshot。权限模式来自当前配置：请求批准、替我审批或完全访问。Skills 数量和列表表示当前会话已经成功 `skill_view`、内容进入上下文的 skills，不是配置声明，也不是可 discover 的全部 skills。MCP 数量和列表来自后端 MCP runtime registry 当前 `available` server，表示当前会话会向模型暴露的 MCP server。运行中收到成功的 `skill_view` completed event 后，前端必须立即把该 skill 合并到当前会话 `activeSkills`；`RunPromptResponse.sessionRuntime` 仍作为 turn 完成后的最终校准。设置页的 Skills 标签页则展示当前项目按 discovery 规则发现的只读 skills 列表，并显示每项 scope；该列表不代表当前会话已激活。运行中收到 `AgentRuntimeUpdated` 或 `studio-mcp-health-updated` 后必须即时更新 `sessionRuntime`、MCP health 和对应 agent 的 `runtimeUsage`，不能等 `RunPromptResponse` 返回后才刷新。设置页作为全屏 overlay 打开时必须覆盖聊天状态栏与其 popover，状态栏不得浮到设置页之上。
 
+Provider 设置页的供应商卡片以可扫读的运维状态为主：头部展示供应商名称、key、健康状态和默认路由；卡片信息区展示默认模型、模型数量和额度/余额状态，不展示 base URL。DeepSeek 卡片展示后端查询到的账户余额和币种明细；Zhipu Coding Plan 卡片展示 5 小时、7 天和 MCP 工具额度进度，并在有明细时展示网络搜索、Web Reader、ZRead 等工具用量。普通 Zhipu 和 OpenAI 卡片展示“暂不支持额度查询”的稳定占位，保持列表对齐。额度查询由 Tauri 后端读取当前配置和 API key 后完成，前端只接收脱敏结果；打开 Provider 设置页时刷新一次，用户也可以手动刷新，不能自动定时轮询。
+
 状态栏在窄窗口下保留左侧高频控制，并把右侧只读状态按优先级收入“更多”菜单；更多入口固定跟随左侧控制组显示，避免右侧只读状态挤压时入口也被裁剪。由于桌面布局含左侧项目/会话栏，响应式必须优先按聊天 footer 自身宽度判断，并保留整窗宽度兜底：聊天 footer 约 `1040px` 以下收起能力和子代理，footer 约 `760px` 以下额外收起费用，footer 约 `520px` 以下额外收起上下文。整窗兜底在 `1320px` 以下直接收起费用、能力和子代理，避免不支持 container query 的 WebView2 环境按整窗宽度误判聊天列空间。更多菜单直接展示被收起状态的摘要和详情，不依赖悬浮 popover，必须支持点击、键盘聚焦、外部点击和 `Escape` 关闭，且不得被状态栏横向滚动容器或窗口边界裁剪。
 
 聊天输入区提供 `Auto / Plan` 模式切换，当前值来自选中 session 的 `mode` 并通过后端命令持久化。新会话默认 `auto`。Plan 卡片展示计划正文和轻量状态徽标，不提供“实现计划”按钮。最新计划生成完成后，底部普通输入框自动替换为计划确认 composer。确认 composer 必须展示计划摘要，并提供三个动作：
