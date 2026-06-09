@@ -106,7 +106,7 @@ turn 展示语义固定：
 
 组件通过 selectors 读取，不直接拼装跨域状态。
 
-状态栏固定渲染在聊天底部。聊天顶部标题栏只展示当前会话标题，不展示项目完整路径，避免长路径撑宽主聊天列。左侧展示高频控制：`Auto / Plan` 模式、模型、推理强度和权限模式；右侧展示只读状态：上下文使用量、按货币分组的费用估算、能力数量和 agent latest snapshot。权限模式来自当前配置：请求批准、替我审批或完全访问。Skills 数量和列表表示当前会话已经成功 `skill_view`、内容进入上下文的 skills，不是配置声明，也不是可 discover 的全部 skills。MCP 数量和列表来自当前配置中已启用的 `[mcp_servers]`，表示该会话会向模型暴露的 MCP server。运行中收到成功的 `skill_view` completed event 后，前端必须立即把该 skill 合并到当前会话 `activeSkills`；`RunPromptResponse.sessionRuntime` 仍作为 turn 完成后的最终校准。设置页的 Skills 标签页则展示当前项目按 discovery 规则发现的只读 skills 列表，并显示每项 scope；该列表不代表当前会话已激活。运行中收到 `AgentRuntimeUpdated` 后必须即时用后端聚合快照更新 `sessionRuntime` 和对应 agent 的 `runtimeUsage`，不能等 `RunPromptResponse` 返回后才刷新。设置页作为全屏 overlay 打开时必须覆盖聊天状态栏与其 popover，状态栏不得浮到设置页之上。
+状态栏固定渲染在聊天底部。聊天顶部标题栏只展示当前会话标题，不展示项目完整路径，避免长路径撑宽主聊天列。左侧展示高频控制：`Auto / Plan` 模式、模型、推理强度和权限模式；右侧展示只读状态：上下文使用量、按货币分组的费用估算、能力数量和 agent latest snapshot。权限模式来自当前配置：请求批准、替我审批或完全访问。Skills 数量和列表表示当前会话已经成功 `skill_view`、内容进入上下文的 skills，不是配置声明，也不是可 discover 的全部 skills。MCP 数量和列表来自后端 MCP runtime registry 当前 `available` server，表示当前会话会向模型暴露的 MCP server。运行中收到成功的 `skill_view` completed event 后，前端必须立即把该 skill 合并到当前会话 `activeSkills`；`RunPromptResponse.sessionRuntime` 仍作为 turn 完成后的最终校准。设置页的 Skills 标签页则展示当前项目按 discovery 规则发现的只读 skills 列表，并显示每项 scope；该列表不代表当前会话已激活。运行中收到 `AgentRuntimeUpdated` 或 `studio-mcp-health-updated` 后必须即时更新 `sessionRuntime`、MCP health 和对应 agent 的 `runtimeUsage`，不能等 `RunPromptResponse` 返回后才刷新。设置页作为全屏 overlay 打开时必须覆盖聊天状态栏与其 popover，状态栏不得浮到设置页之上。
 
 状态栏在窄窗口下保留左侧高频控制，并把右侧只读状态按优先级收入“更多”菜单；更多入口固定跟随左侧控制组显示，避免右侧只读状态挤压时入口也被裁剪。由于桌面布局含左侧项目/会话栏，响应式必须优先按聊天 footer 自身宽度判断，并保留整窗宽度兜底：聊天 footer 约 `1040px` 以下收起能力和子代理，footer 约 `760px` 以下额外收起费用，footer 约 `520px` 以下额外收起上下文。整窗兜底在 `1320px` 以下直接收起费用、能力和子代理，避免不支持 container query 的 WebView2 环境按整窗宽度误判聊天列空间。更多菜单直接展示被收起状态的摘要和详情，不依赖悬浮 popover，必须支持点击、键盘聚焦、外部点击和 `Escape` 关闭，且不得被状态栏横向滚动容器或窗口边界裁剪。
 
@@ -122,9 +122,9 @@ turn 展示语义固定：
 
 设置页 Security 标签页提供会话级权限模式选择。`request-approval` 在 workspace 内直接执行，访问 workspace 外时使用现有 ApprovalOverlay 弹出用户审批；`auto-review` 在 workspace 内直接执行，访问 workspace 外时由 reviewer 模型自动审批，前端不弹用户审批卡片，只通过工具结果展示已批准或已拒绝的事实；`full-access` 明确展示为会放宽 workspace 外文件路径和 shell cwd 边界并直接放行的模式。
 
-设置页 MCP 标签页提供结构化 server 配置。列表展示 server id、启用状态、来源、传输方式和主要 endpoint；新增和编辑用户 server 使用本地草稿，保存成功后即时写入 `~/.pure/config.toml` 并刷新配置 payload。stdio 表单提供 command、args、env 和可选 cwd；Streamable HTTP 表单提供 url、bearer token 环境变量和 headers。启用的 MCP server 被视为用户信任对象，其 tools 在 Auto 和 Plan Mode 中直接暴露，不额外触发审批弹窗。
+设置页 MCP 标签页提供结构化 server 配置。列表展示 server id、用户启用状态、实际可用性、来源、传输方式和主要 endpoint；新增和编辑用户 server 使用本地草稿，保存成功后即时写入 `~/.pure/config.toml`、刷新配置 payload 并触发后台健康检查。stdio 表单提供 command、args、env 和可选 cwd；Streamable HTTP 表单提供 url、bearer token 环境变量和 headers。启用且实际可用的 MCP server 被视为用户信任对象，其 tools 在 Auto 和 Plan Mode 中直接暴露，不额外触发审批弹窗。
 
-MCP 标签页必须同时展示后端合成的内置 Zhipu Coding Plan MCP server。内置项显示“内置 / Zhipu Coding Plan”来源和状态；缺少 Zhipu Coding Plan 或 Zhipu provider token 时显示缺少 Key 且不开启，检测到 token 后自动恢复启用。内置项不可删除，server id、transport、endpoint、headers、env 等身份字段只读；保留启用切换按钮，但后端保存后仍以 token 自动恢复开启策略为准。保存 provider API key 后返回的 `ConfigPayload` 必须立即刷新 MCP 状态，无需用户再保存 MCP 标签页。
+MCP 标签页必须同时展示后端合成的内置 Zhipu Coding Plan MCP server。内置项显示“内置 / Zhipu Coding Plan”来源、配置状态和实际可用性；缺少 Zhipu Coding Plan 或 Zhipu provider token 时显示缺少 Key 且不开启，检测到 token 后自动恢复启用并进入后台探测。内置项不可删除，server id、transport、endpoint、headers、env 等身份字段只读；保留启用切换按钮，但后端保存后仍以 token 自动恢复开启策略为准。保存 provider API key 后返回的 `ConfigPayload` 必须立即刷新 MCP 配置状态并触发 health update，无需用户再保存 MCP 标签页。
 
 Provider 标签页必须包含 Zhipu Coding Plan 模板。该模板在 UI 中作为独立供应商入口展示，但保存到配置时仍使用 `provider_kind = "zhipu"`，默认 base URL 为 `https://open.bigmodel.cn/api/coding/paas/v4`，默认模型列表与现有 Zhipu 模板完全一致。内置 Zhipu Coding Plan MCP server 的凭据优先使用该模板保存的 `bearer_token`，保存后返回的 `ConfigPayload` 必须立即反映 MCP 状态变化。
 

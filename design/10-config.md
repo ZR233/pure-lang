@@ -226,7 +226,7 @@ Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-
 
 Pure v1 的权限模式是本地策略层，不是 OS 沙箱。`request-approval` 和 `auto-review` 都直接允许 workspace 内读写；工具请求 workspace 外路径或 workspace 外 cwd 时分别走用户审批或 reviewer 审批。`full-access` 会放宽 Pure 文件工具和 `bash.workingDirectory` 的 workspace 边界并直接放行。
 
-`active_skills` 仅声明旧版 GUI 状态栏展示所需的 Skill 名称，不作为真实 skills 启停来源。`active_mcp_servers` 是兼容旧配置和旧状态栏的字段，真实 MCP server 启停来源改为 `[mcp_servers.<id>].enabled`。缺失 `[runtime]` 或字段时按空列表处理；缺失 `permission_mode` 时按 `request-approval` 处理。旧配置里的 `workspace-write` 兼容读取为 `request-approval`，新配置不再输出该值。
+`active_skills` 仅声明旧版 GUI 状态栏展示所需的 Skill 名称，不作为真实 skills 启停来源。`active_mcp_servers` 是兼容旧配置和旧状态栏的字段，MCP server 的用户启用意图来源为 `[mcp_servers.<id>].enabled`；真实可用性由进程内 MCP runtime registry 后台探测，不写入 TOML。缺失 `[runtime]` 或字段时按空列表处理；缺失 `permission_mode` 时按 `request-approval` 处理。旧配置里的 `workspace-write` 兼容读取为 `request-approval`，新配置不再输出该值。
 
 真实 skills 能力由 `[skills]` 配置和项目目录驱动。`active_skills` 不作为启停来源，不影响模型可见的 skills 列表，也不作为当前会话状态栏 Skills 的来源。Studio 当前会话的 `activeSkills` 由该会话中成功执行过的 `skill_view` 工具结果派生，表示 skill 内容已经进入上下文。
 
@@ -254,7 +254,7 @@ MCP server 配置保存在顶层 `[mcp_servers.<server_id>]` 表，参考 Codex 
 - `bearer_token_env_var`（可选）
 - `headers`
 
-Pure 在普通对话、Auto Mode 和 Plan Mode 中都会向模型暴露已启用 MCP server 的 tools。启用 MCP server 表示用户显式信任该 server；MCP tool 调用不再触发额外审批弹窗。由于 MCP tool 不声明可靠的本地读写能力，Pure 不把 MCP 原始协议类型写入 `pl-protocol`，只通过现有 tool timeline 和 tool result 字符串表达执行状态。
+Pure 启动后会在后台并行探测配置意图为启用且凭据完整的 MCP server，流程为连接、`initialize`、`initialized` 和 `tools/list`。探测结果只保存在进程内 registry，状态包括 `checking`、`available`、`unavailable`、`disabled` 和 `missingCredential`；失败或超时不会修改配置，也不会阻塞普通对话。普通对话、Auto Mode 和 Plan Mode 只向模型暴露当前 registry 中 `available` MCP server 的 tools；启用 MCP server 表示用户显式信任该 server，MCP tool 调用不再触发额外审批弹窗。由于 MCP tool 不声明可靠的本地读写能力，Pure 不把 MCP 原始协议类型写入 `pl-protocol`，只通过现有 tool timeline 和 tool result 字符串表达执行状态。
 
 内置 Zhipu Coding Plan MCP server 固定为：
 
@@ -263,7 +263,7 @@ Pure 在普通对话、Auto Mode 和 Plan Mode 中都会向模型暴露已启用
 - `zhipu_zread`：Streamable HTTP，`https://open.bigmodel.cn/api/mcp/zread/mcp`
 - `zhipu_vision`：stdio，`npx -y @z_ai/mcp-server`
 
-这些内置 server 优先复用 Zhipu Coding Plan provider 的 `bearer_token` 作为 Coding Plan key；若不存在 Coding Plan provider，则兼容回退到普通 Zhipu provider 的 `bearer_token`。缺少可用 token 时内置 server 的状态为缺少凭据且不会注册 tools；检测到 token 时四个内置 server 自动恢复为启用。HTTP 内置 server 运行时直接发送 bearer token；Vision server 运行时注入 `Z_AI_API_KEY=<token>` 和 `Z_AI_MODE=ZHIPU`。
+这些内置 server 优先复用 Zhipu Coding Plan provider 的 `bearer_token` 作为 Coding Plan key；若不存在 Coding Plan provider，则兼容回退到普通 Zhipu provider 的 `bearer_token`。缺少可用 token 时内置 server 的配置状态为缺少凭据且不会进入健康探测；检测到 token 时四个内置 server 自动恢复为启用并进入后台探测。HTTP 内置 server 运行时直接发送 bearer token；Vision server 运行时注入 `Z_AI_API_KEY=<token>` 和 `Z_AI_MODE=ZHIPU`。
 
 模型可见的 MCP tool 名称固定为：
 
@@ -324,7 +324,7 @@ mcp__{server_id}__{tool_name}
 
 每次设置项写入前必须执行 `PureConfig::validate()`；失败时只在 UI 中展示错误，不写入磁盘。
 
-MCP 标签页使用结构化表单，不展示 raw TOML。新增和编辑用户 server 使用本地草稿；保存成功后即时写入 `~/.pure/config.toml` 并刷新设置页状态。删除 server 和启用切换同样即时写入。内置 Zhipu Coding Plan MCP server 不可删除，不允许编辑 server id、transport、endpoint 或运行时注入字段；界面只允许切换状态，并显示“内置 / Zhipu Coding Plan”和缺少 key/已启用等状态。设置页状态栏展示的 MCP 数量和列表来自 effective MCP server 中实际启用的 server。
+MCP 标签页使用结构化表单，不展示 raw TOML。新增和编辑用户 server 使用本地草稿；保存成功后即时写入 `~/.pure/config.toml`、触发后台 MCP registry reconcile 并刷新设置页状态。删除 server 和启用切换同样即时写入。内置 Zhipu Coding Plan MCP server 不可删除，不允许编辑 server id、transport、endpoint 或运行时注入字段；界面同时显示配置状态和实际可用性。设置页状态栏展示的 MCP 数量和列表来自 MCP registry 中当前 `available` 的 server。
 
 设置页 UI 按 React 页面模块拆分，顶层 App 负责页面路由和共享状态，具体页面放在 `src/pages`，可复用组件放在 `src/components`，Tauri 命令封装放在 `src/lib`。Provider 标签页优先从 `PureConfig.providers` 派生 provider 卡片列表，不引入新的配置存储。
 

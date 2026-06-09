@@ -58,6 +58,12 @@ pub(crate) async fn run_agent_turn(config: AgentRunConfig) {
     };
     let mut core = match core_result {
         Ok(core) => core
+            .with_mcp_runtime(
+                config
+                    .mcp_runtime
+                    .clone()
+                    .unwrap_or_else(crate::mcp::McpRuntimeRegistry::new),
+            )
             .with_agent_control(config.agent_control.clone())
             .with_subagent_context(SubagentContext {
                 id: config.agent_id.clone(),

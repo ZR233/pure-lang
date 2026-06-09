@@ -24,12 +24,14 @@ impl SpawnAgentTool {
         provider: pl_model::SharedModelProvider,
         reasoning_effort: Option<crate::config::ReasoningEffort>,
         config: Option<crate::config::PureConfig>,
+        mcp_runtime: Option<crate::mcp::McpRuntimeRegistry>,
         workspace_instructions: Option<String>,
     ) -> Self {
         Self {
             provider,
             reasoning_effort,
             config,
+            mcp_runtime,
             workspace_instructions,
         }
     }
@@ -40,12 +42,14 @@ impl FollowupTaskTool {
         provider: pl_model::SharedModelProvider,
         reasoning_effort: Option<crate::config::ReasoningEffort>,
         config: Option<crate::config::PureConfig>,
+        mcp_runtime: Option<crate::mcp::McpRuntimeRegistry>,
         workspace_instructions: Option<String>,
     ) -> Self {
         Self {
             provider,
             reasoning_effort,
             config,
+            mcp_runtime,
             workspace_instructions,
         }
     }
@@ -196,6 +200,7 @@ impl Tool for SpawnAgentTool {
                 provider: self.provider.clone(),
                 reasoning_effort: self.reasoning_effort.clone(),
                 config: self.config.clone(),
+                mcp_runtime: self.mcp_runtime.clone(),
                 workspace_instructions: context
                     .workspace_instructions
                     .clone()
@@ -430,6 +435,7 @@ impl Tool for FollowupTaskTool {
                     provider: self.provider.clone(),
                     reasoning_effort: self.reasoning_effort.clone(),
                     config: self.config.clone(),
+                    mcp_runtime: self.mcp_runtime.clone(),
                     workspace_instructions: context
                         .workspace_instructions
                         .clone()

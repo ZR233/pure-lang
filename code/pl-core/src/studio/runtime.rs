@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use pl_protocol::{AgentEventSender, TimelineItemKind, TraceEvent, TraceEventKind};
 
 use crate::config::{ConfigStore, ModelRole};
+use crate::mcp::McpRuntimeRegistry;
 use crate::skill::SkillCatalog;
 use crate::studio::StudioStore;
 use crate::studio::mappers::default_session_runtime_record;
@@ -35,6 +36,7 @@ const SELF_LEARNING_REVIEW_PROMPT: &str = r#"你是 Pure-Lang 项目 skills 自�
 pub struct StudioRuntime {
     store: StudioStore,
     config_store: ConfigStore,
+    mcp_runtime: McpRuntimeRegistry,
 }
 
 impl StudioRuntime {
@@ -42,6 +44,7 @@ impl StudioRuntime {
         Ok(Self {
             store: StudioStore::default_app().await?,
             config_store: ConfigStore::default_app()?,
+            mcp_runtime: McpRuntimeRegistry::new(),
         })
     }
 
@@ -49,6 +52,7 @@ impl StudioRuntime {
         Self {
             store,
             config_store,
+            mcp_runtime: McpRuntimeRegistry::new(),
         }
     }
 
@@ -58,6 +62,26 @@ impl StudioRuntime {
 
     pub fn config_store(&self) -> &ConfigStore {
         &self.config_store
+    }
+
+    pub fn mcp_runtime(&self) -> &McpRuntimeRegistry {
+        &self.mcp_runtime
+    }
+
+    pub async fn reconcile_mcp_runtime(&self) -> Result<()> {
+        let config = self.config_store.load_or_default()?;
+        self.mcp_runtime
+            .reconcile(crate::config::effective_mcp_servers(&config))
+            .await;
+        Ok(())
+    }
+
+    pub async fn recheck_mcp_runtime(&self) -> Result<()> {
+        let config = self.config_store.load_or_default()?;
+        self.mcp_runtime
+            .recheck(crate::config::effective_mcp_servers(&config))
+            .await;
+        Ok(())
     }
 
     pub async fn open_project(&self, path: impl AsRef<Path>) -> Result<ProjectRecord> {
@@ -142,9 +166,10 @@ impl StudioRuntime {
             request = request.with_workspace_instructions(workspace_instructions.clone());
         }
 
-        let mut core = PureCore::from_config(&config, ModelRole::Planner)?;
+        let mut core =
+            PureCore::from_config(&config, ModelRole::Planner)?.with_mcp_runtime(self.mcp_runtime.clone());
         core.register_default_tools(workspace_root.clone(), Some(workspace_instructions.clone()));
-        core.register_configured_mcp_tools().await?;
+        core.register_available_mcp_tools().await?;
         if options.tool_approval_callback.is_none()
             && (options.requires_user_approval_callback() || mode == CompileMode::Plan)
         {

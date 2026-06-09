@@ -1,11 +1,12 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::Future;
 use pl_protocol::{PureError, Result};
@@ -13,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{Mutex, broadcast, oneshot};
 
 use crate::config::{
     EffectiveMcpServerConfig, McpServerConfig, McpServerStatusKind, McpServerTransport,
@@ -24,6 +25,7 @@ use crate::tool::{OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput};
 const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 const MCP_TOOL_PREFIX: &str = "mcp__";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -36,13 +38,402 @@ trait McpClient: fmt::Debug + Send + Sync {
     fn notify<'a>(&'a self, method: &'a str, params: Value) -> BoxFuture<'a, Result<()>>;
 }
 
+/// MCP server 的运行时可用状态。
+///
+/// 该状态只存在于进程内 registry，用来区分用户启用意图和当前真实可调用能力。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpAvailabilityKind {
+    Checking,
+    Available,
+    Unavailable,
+    Disabled,
+    MissingCredential,
+}
+
+impl McpAvailabilityKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            McpAvailabilityKind::Checking => "checking",
+            McpAvailabilityKind::Available => "available",
+            McpAvailabilityKind::Unavailable => "unavailable",
+            McpAvailabilityKind::Disabled => "disabled",
+            McpAvailabilityKind::MissingCredential => "missingCredential",
+        }
+    }
+}
+
+/// Studio 展示用的 MCP availability 快照。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpAvailabilitySnapshot {
+    pub server_id: String,
+    pub availability_kind: McpAvailabilityKind,
+    pub availability_message: Option<String>,
+    pub last_checked_at: Option<i64>,
+    pub tool_count: Option<usize>,
+}
+
+/// MCP runtime registry。
+///
+/// Registry 在后台探测配置启用且凭据完整的 MCP server，并缓存已初始化 client 与
+/// `tools/list` 结果。对话与 subagent runner 只从这里读取当前 `available` tools，
+/// 不在发送路径同步连接远端 MCP server。
+#[derive(Clone)]
+pub struct McpRuntimeRegistry {
+    state: Arc<Mutex<McpRuntimeRegistryState>>,
+    updates: broadcast::Sender<()>,
+}
+
+impl fmt::Debug for McpRuntimeRegistry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("McpRuntimeRegistry")
+            .finish_non_exhaustive()
+    }
+}
+
+impl Default for McpRuntimeRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl McpRuntimeRegistry {
+    pub fn new() -> Self {
+        let (updates, _) = broadcast::channel(64);
+        Self {
+            state: Arc::new(Mutex::new(McpRuntimeRegistryState::default())),
+            updates,
+        }
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<()> {
+        self.updates.subscribe()
+    }
+
+    pub async fn reconcile(&self, servers: BTreeMap<String, EffectiveMcpServerConfig>) {
+        self.reconcile_with_policy(servers, ProbePolicy::ChangedOrUnavailable)
+            .await;
+    }
+
+    pub async fn recheck(&self, servers: BTreeMap<String, EffectiveMcpServerConfig>) {
+        self.reconcile_with_policy(servers, ProbePolicy::Force)
+            .await;
+    }
+
+    pub async fn snapshots(&self) -> BTreeMap<String, McpAvailabilitySnapshot> {
+        self.state
+            .lock()
+            .await
+            .servers
+            .iter()
+            .map(|(server_id, state)| {
+                (
+                    server_id.clone(),
+                    McpAvailabilitySnapshot {
+                        server_id: server_id.clone(),
+                        availability_kind: state.availability_kind,
+                        availability_message: state.availability_message.clone(),
+                        last_checked_at: state.last_checked_at,
+                        tool_count: match state.availability_kind {
+                            McpAvailabilityKind::Available => Some(state.tools.len()),
+                            McpAvailabilityKind::Checking
+                            | McpAvailabilityKind::Unavailable
+                            | McpAvailabilityKind::Disabled
+                            | McpAvailabilityKind::MissingCredential => None,
+                        },
+                    },
+                )
+            })
+            .collect()
+    }
+
+    pub async fn available_server_names(&self) -> Vec<String> {
+        self.state
+            .lock()
+            .await
+            .servers
+            .iter()
+            .filter(|(_, state)| state.availability_kind == McpAvailabilityKind::Available)
+            .map(|(server_id, _)| server_id.clone())
+            .collect()
+    }
+
+    pub async fn register_available_tools(&self, core: &mut crate::PureCore) -> Result<()> {
+        for available in self.available_servers().await {
+            for definition in available.tools {
+                let adapter = McpToolAdapter::new(
+                    &available.server_id,
+                    definition,
+                    available.client.clone(),
+                    Some(self.clone()),
+                )?;
+                if core.has_tool(adapter.name()) {
+                    return Err(PureError::ConfigError(format!(
+                        "mcp tool '{}' conflicts with an existing tool",
+                        adapter.name()
+                    )));
+                }
+                core.register_tool(adapter);
+            }
+        }
+        Ok(())
+    }
+
+    async fn reconcile_with_policy(
+        &self,
+        servers: BTreeMap<String, EffectiveMcpServerConfig>,
+        policy: ProbePolicy,
+    ) {
+        let server_ids = servers.keys().cloned().collect::<BTreeSet<_>>();
+        let mut probes = Vec::new();
+        let mut changed = false;
+        {
+            let mut state = self.state.lock().await;
+            let before_len = state.servers.len();
+            state
+                .servers
+                .retain(|server_id, _| server_ids.contains(server_id));
+            changed |= before_len != state.servers.len();
+
+            for (server_id, server) in servers {
+                let fingerprint = server_fingerprint(&server);
+                match server.status_kind {
+                    McpServerStatusKind::Enabled => {
+                        let should_probe = should_probe_server(
+                            state.servers.get(&server_id),
+                            fingerprint,
+                            policy,
+                        );
+                        if should_probe {
+                            state.servers.insert(
+                                server_id.clone(),
+                                McpRuntimeServerState::checking(fingerprint),
+                            );
+                            probes.push((server_id, server, fingerprint));
+                            changed = true;
+                        } else if !state.servers.contains_key(&server_id) {
+                            state.servers.insert(
+                                server_id,
+                                McpRuntimeServerState::checking(fingerprint),
+                            );
+                            changed = true;
+                        }
+                    }
+                    McpServerStatusKind::Disabled => {
+                        changed |= insert_terminal_state(
+                            &mut state,
+                            server_id,
+                            McpRuntimeServerState::disabled(fingerprint),
+                        );
+                    }
+                    McpServerStatusKind::MissingCredential => {
+                        changed |= insert_terminal_state(
+                            &mut state,
+                            server_id,
+                            McpRuntimeServerState::missing_credential(
+                                fingerprint,
+                                server.status_message,
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        if changed {
+            self.emit_update();
+        }
+        for (server_id, server, fingerprint) in probes {
+            let registry = self.clone();
+            tokio::spawn(async move {
+                let checked_at = unix_seconds();
+                let result =
+                    tokio::time::timeout(PROBE_TIMEOUT, probe_server(&server_id, &server)).await;
+                registry
+                    .store_probe_result(server_id, fingerprint, checked_at, result)
+                    .await;
+            });
+        }
+    }
+
+    async fn available_servers(&self) -> Vec<McpAvailableServer> {
+        self.state
+            .lock()
+            .await
+            .servers
+            .iter()
+            .filter_map(|(server_id, state)| {
+                if state.availability_kind != McpAvailabilityKind::Available {
+                    return None;
+                }
+                Some(McpAvailableServer {
+                    server_id: server_id.clone(),
+                    client: state.client.as_ref()?.clone(),
+                    tools: state.tools.clone(),
+                })
+            })
+            .collect()
+    }
+
+    async fn store_probe_result(
+        &self,
+        server_id: String,
+        fingerprint: u64,
+        checked_at: i64,
+        result: std::result::Result<Result<McpProbeSuccess>, tokio::time::error::Elapsed>,
+    ) {
+        let next = match result {
+            Ok(Ok(success)) => McpRuntimeServerState::available(
+                fingerprint,
+                checked_at,
+                success.client,
+                success.tools,
+            ),
+            Ok(Err(error)) => McpRuntimeServerState::unavailable(
+                fingerprint,
+                checked_at,
+                error.to_string(),
+            ),
+            Err(_) => McpRuntimeServerState::unavailable(
+                fingerprint,
+                checked_at,
+                format!("MCP health check timed out after {} seconds", PROBE_TIMEOUT.as_secs()),
+            ),
+        };
+        let mut state = self.state.lock().await;
+        let Some(current) = state.servers.get(&server_id) else {
+            return;
+        };
+        if current.fingerprint != fingerprint
+            || current.availability_kind != McpAvailabilityKind::Checking
+        {
+            return;
+        }
+        state.servers.insert(server_id, next);
+        drop(state);
+        self.emit_update();
+    }
+
+    pub(crate) async fn mark_unavailable(&self, server_id: &str, error: String) {
+        let mut state = self.state.lock().await;
+        let Some(current) = state.servers.get(server_id) else {
+            return;
+        };
+        state.servers.insert(
+            server_id.to_string(),
+            McpRuntimeServerState::unavailable(current.fingerprint, unix_seconds(), error),
+        );
+        drop(state);
+        self.emit_update();
+    }
+
+    fn emit_update(&self) {
+        let _ = self.updates.send(());
+    }
+}
+
+#[derive(Debug, Default)]
+struct McpRuntimeRegistryState {
+    servers: BTreeMap<String, McpRuntimeServerState>,
+}
+
+#[derive(Debug, Clone)]
+struct McpRuntimeServerState {
+    fingerprint: u64,
+    availability_kind: McpAvailabilityKind,
+    availability_message: Option<String>,
+    last_checked_at: Option<i64>,
+    client: Option<Arc<dyn McpClient>>,
+    tools: Vec<McpToolDefinition>,
+}
+
+impl McpRuntimeServerState {
+    fn checking(fingerprint: u64) -> Self {
+        Self {
+            fingerprint,
+            availability_kind: McpAvailabilityKind::Checking,
+            availability_message: Some("MCP health check is running".to_string()),
+            last_checked_at: None,
+            client: None,
+            tools: Vec::new(),
+        }
+    }
+
+    fn available(
+        fingerprint: u64,
+        checked_at: i64,
+        client: Arc<dyn McpClient>,
+        tools: Vec<McpToolDefinition>,
+    ) -> Self {
+        let tool_count = tools.len();
+        Self {
+            fingerprint,
+            availability_kind: McpAvailabilityKind::Available,
+            availability_message: Some(format!("Available with {tool_count} tools")),
+            last_checked_at: Some(checked_at),
+            client: Some(client),
+            tools,
+        }
+    }
+
+    fn unavailable(fingerprint: u64, checked_at: i64, error: String) -> Self {
+        Self {
+            fingerprint,
+            availability_kind: McpAvailabilityKind::Unavailable,
+            availability_message: Some(error),
+            last_checked_at: Some(checked_at),
+            client: None,
+            tools: Vec::new(),
+        }
+    }
+
+    fn disabled(fingerprint: u64) -> Self {
+        Self {
+            fingerprint,
+            availability_kind: McpAvailabilityKind::Disabled,
+            availability_message: Some("MCP server is disabled in configuration".to_string()),
+            last_checked_at: None,
+            client: None,
+            tools: Vec::new(),
+        }
+    }
+
+    fn missing_credential(fingerprint: u64, message: Option<String>) -> Self {
+        Self {
+            fingerprint,
+            availability_kind: McpAvailabilityKind::MissingCredential,
+            availability_message: message,
+            last_checked_at: None,
+            client: None,
+            tools: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ProbePolicy {
+    ChangedOrUnavailable,
+    Force,
+}
+
+struct McpAvailableServer {
+    server_id: String,
+    client: Arc<dyn McpClient>,
+    tools: Vec<McpToolDefinition>,
+}
+
+struct McpProbeSuccess {
+    client: Arc<dyn McpClient>,
+    tools: Vec<McpToolDefinition>,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct McpToolAdapter {
+    server_id: String,
     exposed_name: String,
     raw_name: String,
     description: String,
     input_schema: Value,
     client: Arc<dyn McpClient>,
+    registry: Option<McpRuntimeRegistry>,
 }
 
 impl McpToolAdapter {
@@ -50,14 +441,17 @@ impl McpToolAdapter {
         server_id: &str,
         definition: McpToolDefinition,
         client: Arc<dyn McpClient>,
+        registry: Option<McpRuntimeRegistry>,
     ) -> Result<Self> {
         let exposed_name = exposed_tool_name(server_id, &definition.name)?;
         Ok(Self {
+            server_id: server_id.to_string(),
             exposed_name,
             raw_name: definition.name,
             description: definition.description.unwrap_or_default(),
             input_schema: definition.input_schema,
             client,
+            registry,
         })
     }
 }
@@ -85,7 +479,17 @@ impl Tool for McpToolAdapter {
                 "name": self.raw_name,
                 "arguments": input.arguments,
             });
-            let value = self.client.request("tools/call", params).await?;
+            let value = match self.client.request("tools/call", params).await {
+                Ok(value) => value,
+                Err(error) => {
+                    if let Some(registry) = &self.registry {
+                        registry
+                            .mark_unavailable(&self.server_id, error.to_string())
+                            .await;
+                    }
+                    return Err(error);
+                }
+            };
             let result: McpCallToolResult = serde_json::from_value(value)?;
             if result.is_error {
                 return Err(PureError::ToolExecutionFailed {
@@ -104,29 +508,73 @@ impl Tool for McpToolAdapter {
     }
 }
 
-pub(crate) async fn register_configured_mcp_tools(
-    core: &mut crate::PureCore,
-    servers: &BTreeMap<String, EffectiveMcpServerConfig>,
-) -> Result<()> {
-    for (server_id, server) in servers
-        .iter()
-        .filter(|(_, server)| server.status_kind == McpServerStatusKind::Enabled)
-    {
-        let client = connect_server(server_id, server).await?;
-        initialize_client(&client).await?;
-        let tools = list_tools(&client).await?;
-        for definition in tools {
-            let adapter = McpToolAdapter::new(server_id, definition, client.clone())?;
-            if core.has_tool(adapter.name()) {
-                return Err(PureError::ConfigError(format!(
-                    "mcp tool '{}' conflicts with an existing tool",
-                    adapter.name()
-                )));
-            }
-            core.register_tool(adapter);
+async fn probe_server(
+    server_id: &str,
+    server: &EffectiveMcpServerConfig,
+) -> Result<McpProbeSuccess> {
+    let client = connect_server(server_id, server).await?;
+    initialize_client(&client).await?;
+    let tools = list_tools(&client).await?;
+    validate_tool_definitions(server_id, &tools)?;
+    Ok(McpProbeSuccess { client, tools })
+}
+
+fn validate_tool_definitions(server_id: &str, tools: &[McpToolDefinition]) -> Result<()> {
+    let mut exposed_names = BTreeSet::new();
+    for definition in tools {
+        let exposed_name = exposed_tool_name(server_id, &definition.name)?;
+        if !exposed_names.insert(exposed_name.clone()) {
+            return Err(PureError::ConfigError(format!(
+                "mcp server '{server_id}' exposes duplicate tool '{exposed_name}'"
+            )));
         }
     }
     Ok(())
+}
+
+fn should_probe_server(
+    current: Option<&McpRuntimeServerState>,
+    fingerprint: u64,
+    policy: ProbePolicy,
+) -> bool {
+    let Some(current) = current else {
+        return true;
+    };
+    if current.fingerprint != fingerprint {
+        return true;
+    }
+    if current.availability_kind == McpAvailabilityKind::Checking {
+        return false;
+    }
+    match policy {
+        ProbePolicy::Force => true,
+        ProbePolicy::ChangedOrUnavailable => {
+            current.availability_kind != McpAvailabilityKind::Available
+        }
+    }
+}
+
+fn insert_terminal_state(
+    state: &mut McpRuntimeRegistryState,
+    server_id: String,
+    next: McpRuntimeServerState,
+) -> bool {
+    let changed = state.servers.get(&server_id).is_none_or(|current| {
+        current.fingerprint != next.fingerprint
+            || current.availability_kind != next.availability_kind
+            || current.availability_message != next.availability_message
+    });
+    state.servers.insert(server_id, next);
+    changed
+}
+
+fn server_fingerprint(server: &EffectiveMcpServerConfig) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    server.config.hash(&mut hasher);
+    server.status_kind.as_str().hash(&mut hasher);
+    server.source_kind.as_str().hash(&mut hasher);
+    server.bearer_token.hash(&mut hasher);
+    hasher.finish()
 }
 
 pub(crate) fn is_mcp_tool_name(name: &str) -> bool {
@@ -213,6 +661,7 @@ impl StdioMcpClient {
     async fn spawn(server_id: &str, server: &McpServerConfig) -> Result<Self> {
         let command = server.command.as_deref().unwrap_or_default();
         let mut process = Command::new(command);
+        process.kill_on_drop(true);
         process.args(&server.args);
         process.stdin(Stdio::piped());
         process.stdout(Stdio::piped());
@@ -603,6 +1052,13 @@ fn default_input_schema() -> Value {
     map.insert("type".to_string(), Value::String("object".to_string()));
     map.insert("properties".to_string(), Value::Object(Map::new()));
     Value::Object(map)
+}
+
+fn unix_seconds() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 #[cfg(test)]
