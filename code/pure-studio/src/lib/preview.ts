@@ -100,6 +100,10 @@ export const previewMcpServers: McpServerRecord[] = [
     statusKind: "enabled",
     statusMessage: null,
     mutationPolicy: "userEditable",
+    availabilityKind: "available",
+    availabilityMessage: "Available with 8 tools",
+    lastCheckedAt: 1779688800,
+    toolCount: 8,
   },
   {
     id: "github",
@@ -119,6 +123,10 @@ export const previewMcpServers: McpServerRecord[] = [
     statusKind: "enabled",
     statusMessage: null,
     mutationPolicy: "userEditable",
+    availabilityKind: "available",
+    availabilityMessage: "Available with 5 tools",
+    lastCheckedAt: 1779688800,
+    toolCount: 5,
   },
   {
     id: "zhipu_search",
@@ -138,6 +146,10 @@ export const previewMcpServers: McpServerRecord[] = [
     statusKind: "missingCredential",
     statusMessage: "Configure a Zhipu Coding Plan or Zhipu provider token to enable this server",
     mutationPolicy: "lockedIdentity",
+    availabilityKind: "missingCredential",
+    availabilityMessage: "Configure a Zhipu Coding Plan or Zhipu provider token to enable this server",
+    lastCheckedAt: null,
+    toolCount: null,
   },
   {
     id: "zhipu_reader",
@@ -157,6 +169,10 @@ export const previewMcpServers: McpServerRecord[] = [
     statusKind: "missingCredential",
     statusMessage: "Configure a Zhipu Coding Plan or Zhipu provider token to enable this server",
     mutationPolicy: "lockedIdentity",
+    availabilityKind: "missingCredential",
+    availabilityMessage: "Configure a Zhipu Coding Plan or Zhipu provider token to enable this server",
+    lastCheckedAt: null,
+    toolCount: null,
   },
   {
     id: "zhipu_zread",
@@ -176,6 +192,10 @@ export const previewMcpServers: McpServerRecord[] = [
     statusKind: "missingCredential",
     statusMessage: "Configure a Zhipu Coding Plan or Zhipu provider token to enable this server",
     mutationPolicy: "lockedIdentity",
+    availabilityKind: "missingCredential",
+    availabilityMessage: "Configure a Zhipu Coding Plan or Zhipu provider token to enable this server",
+    lastCheckedAt: null,
+    toolCount: null,
   },
   {
     id: "zhipu_vision",
@@ -197,6 +217,10 @@ export const previewMcpServers: McpServerRecord[] = [
     statusKind: "missingCredential",
     statusMessage: "Configure a Zhipu Coding Plan or Zhipu provider token to enable this server",
     mutationPolicy: "lockedIdentity",
+    availabilityKind: "missingCredential",
+    availabilityMessage: "Configure a Zhipu Coding Plan or Zhipu provider token to enable this server",
+    lastCheckedAt: null,
+    toolCount: null,
   },
 ];
 

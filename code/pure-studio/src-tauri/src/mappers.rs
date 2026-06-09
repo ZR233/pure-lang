@@ -1,33 +1,57 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use pl_core::{
-    BuiltinMcpServerState, ConfigStore, McpServerConfig, McpServerTransport, ModelCapabilityConfig,
-    ModelConfig, ModelRole, ProjectRecord, ProviderConfig, ProviderEdit, ProviderKind,
-    ProviderModelEdit, ProviderTemplateKind, PureConfig, RoleEdit, SessionRecord,
-    SessionRuntimeRecord, SkillCatalog, SkillMetadata, SkillSourceKind, StudioAgentSnapshotRecord,
-    StudioAgentTimelineEventRecord, StudioRuntime, TraceEvent, TraceEventKind, TurnResultStatus,
-    active_mcp_server_names, builtin_mcp_server_ids, effective_mcp_servers,
-    infer_provider_template_kind,
+    BuiltinMcpServerState, ConfigStore, McpAvailabilityKind, McpAvailabilitySnapshot,
+    McpServerConfig, McpServerStatusKind, McpServerTransport, ModelCapabilityConfig, ModelConfig,
+    ModelRole, ProjectRecord, ProviderConfig, ProviderEdit, ProviderKind, ProviderModelEdit,
+    ProviderTemplateKind, PureConfig, RoleEdit, SessionRecord, SessionRuntimeRecord, SkillCatalog,
+    SkillMetadata, SkillSourceKind, StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord,
+    StudioRuntime, TraceEvent, TraceEventKind, TurnResultStatus, builtin_mcp_server_ids,
+    effective_mcp_servers, infer_provider_template_kind,
 };
 use pl_protocol::{Message, MessageContent, MessageRole};
 
 use crate::dto::{
-    AgentDto, AgentEventDto, ConfigDto, DiscoveredSkillsDto, KeyValueDto, McpServerDto,
-    McpSettingsInput, ModelDto, PlanStateDto, ProjectDto, ProviderDto, ProviderInput,
+    AgentDto, AgentEventDto, ConfigDto, DiscoveredSkillsDto, KeyValueDto, McpHealthUpdateDto,
+    McpServerDto, McpSettingsInput, ModelDto, PlanStateDto, ProjectDto, ProviderDto, ProviderInput,
     ProviderSettingsInput, ProviderTemplateDto, RoleDto, RoleInput, RuntimeCostAmountDto,
     RuntimeUsageDto, SessionDto, SessionRuntimeDto, SkillDto,
 };
 use crate::state::{CommandError, CommandResult};
 
+#[cfg(test)]
 pub fn config_dto(store: &ConfigStore) -> CommandResult<ConfigDto> {
     let config = store.load_or_default()?;
+    config_dto_from_config(store, &config, &BTreeMap::new())
+}
+
+pub async fn config_dto_for_studio(studio: &StudioRuntime) -> CommandResult<ConfigDto> {
+    let config = studio.config_store().load_or_default()?;
+    let availability = studio.mcp_runtime().snapshots().await;
+    config_dto_from_config(studio.config_store(), &config, &availability)
+}
+
+pub async fn mcp_health_update_dto(studio: &StudioRuntime) -> CommandResult<McpHealthUpdateDto> {
+    let config = studio.config_store().load_or_default()?;
+    let availability = studio.mcp_runtime().snapshots().await;
+    Ok(McpHealthUpdateDto {
+        mcp_servers: mcp_server_dtos_with_availability(&config, &availability),
+        active_mcp_servers: studio.mcp_runtime().available_server_names().await,
+    })
+}
+
+fn config_dto_from_config(
+    store: &ConfigStore,
+    config: &PureConfig,
+    availability: &BTreeMap<String, McpAvailabilitySnapshot>,
+) -> CommandResult<ConfigDto> {
     Ok(ConfigDto {
         toml: config.to_toml_pretty()?,
         permission_mode: config.runtime.permission_mode.label().to_string(),
-        providers: provider_dtos(&config),
-        roles: role_dtos(&config),
+        providers: provider_dtos(config),
+        roles: role_dtos(config),
         templates: provider_template_dtos()?,
-        mcp_servers: mcp_server_dtos(&config),
+        mcp_servers: mcp_server_dtos_with_availability(config, availability),
         config_exists: store.config_exists(),
     })
 }
@@ -64,20 +88,19 @@ pub async fn load_session_runtime_dto(
     studio: &StudioRuntime,
     session_id: &str,
 ) -> CommandResult<SessionRuntimeDto> {
-    let config = studio.config_store().load_or_default()?;
     let record = studio.session_runtime(session_id).await?;
     let messages = studio.store().load_messages(session_id).await?;
     Ok(session_runtime_dto(
         record,
-        &config,
         active_skill_names_from_messages(&messages),
+        studio.mcp_runtime().available_server_names().await,
     ))
 }
 
 pub fn session_runtime_dto(
     record: SessionRuntimeRecord,
-    config: &PureConfig,
     active_skills: Vec<String>,
+    active_mcp_servers: Vec<String>,
 ) -> SessionRuntimeDto {
     let usage = runtime_usage_dto(pl_core::RuntimeUsageSnapshot {
         model: record.model,
@@ -96,33 +119,68 @@ pub fn session_runtime_dto(
         updated_at: usage.updated_at,
         usage,
         active_skills,
-        active_mcp_servers: active_mcp_server_names(config),
+        active_mcp_servers,
     }
 }
 
-pub fn mcp_server_dtos(config: &PureConfig) -> Vec<McpServerDto> {
+pub fn mcp_server_dtos_with_availability(
+    config: &PureConfig,
+    availability: &BTreeMap<String, McpAvailabilitySnapshot>,
+) -> Vec<McpServerDto> {
     effective_mcp_servers(config)
         .into_values()
-        .map(|server| McpServerDto {
-            id: server.id,
-            enabled: server.config.enabled,
-            transport: server.config.transport.as_str().to_string(),
-            command: server.config.command.clone(),
-            args: server.config.args.clone(),
-            env: key_value_dtos(&server.config.env),
-            cwd: server.config.cwd.clone(),
-            url: server.config.url.clone(),
-            bearer_token_env_var: server.config.bearer_token_env_var.clone(),
-            headers: key_value_dtos(&server.config.headers),
-            endpoint: server.config.endpoint_summary(),
-            source_kind: server.source_kind.as_str().to_string(),
-            source_label: server.source_label,
-            source_detail: server.source_detail,
-            status_kind: server.status_kind.as_str().to_string(),
-            status_message: server.status_message,
-            mutation_policy: server.mutation_policy.as_str().to_string(),
+        .map(|server| {
+            let snapshot = availability.get(&server.id);
+            let fallback =
+                availability_fallback(&server.status_kind, server.status_message.clone());
+            McpServerDto {
+                id: server.id,
+                enabled: server.config.enabled,
+                transport: server.config.transport.as_str().to_string(),
+                command: server.config.command.clone(),
+                args: server.config.args.clone(),
+                env: key_value_dtos(&server.config.env),
+                cwd: server.config.cwd.clone(),
+                url: server.config.url.clone(),
+                bearer_token_env_var: server.config.bearer_token_env_var.clone(),
+                headers: key_value_dtos(&server.config.headers),
+                endpoint: server.config.endpoint_summary(),
+                source_kind: server.source_kind.as_str().to_string(),
+                source_label: server.source_label,
+                source_detail: server.source_detail,
+                status_kind: server.status_kind.as_str().to_string(),
+                status_message: server.status_message,
+                mutation_policy: server.mutation_policy.as_str().to_string(),
+                availability_kind: snapshot
+                    .map(|snapshot| snapshot.availability_kind.as_str().to_string())
+                    .unwrap_or_else(|| fallback.0.as_str().to_string()),
+                availability_message: snapshot
+                    .and_then(|snapshot| snapshot.availability_message.clone())
+                    .or(fallback.1),
+                last_checked_at: snapshot.and_then(|snapshot| snapshot.last_checked_at),
+                tool_count: snapshot.and_then(|snapshot| snapshot.tool_count),
+            }
         })
         .collect()
+}
+
+fn availability_fallback(
+    status_kind: &McpServerStatusKind,
+    status_message: Option<String>,
+) -> (McpAvailabilityKind, Option<String>) {
+    match status_kind {
+        McpServerStatusKind::Enabled => (
+            McpAvailabilityKind::Checking,
+            Some("MCP health check has not completed".to_string()),
+        ),
+        McpServerStatusKind::Disabled => (
+            McpAvailabilityKind::Disabled,
+            Some("MCP server is disabled in configuration".to_string()),
+        ),
+        McpServerStatusKind::MissingCredential => {
+            (McpAvailabilityKind::MissingCredential, status_message)
+        }
+    }
 }
 
 fn key_value_dtos(values: &BTreeMap<String, String>) -> Vec<KeyValueDto> {
@@ -776,7 +834,7 @@ mod tests {
     use std::path::PathBuf;
 
     use pl_core::{
-        ConfigPaths, ConfigStore, McpServerConfig, McpServerTransport, PermissionMode, PureConfig,
+        ConfigPaths, ConfigStore, McpServerConfig, PermissionMode, PureConfig,
         RuntimeUsageSnapshot, SessionRuntimeRecord, StudioAgentSnapshotRecord,
     };
     use pl_protocol::{
@@ -937,16 +995,6 @@ mod tests {
 
     #[test]
     fn session_runtime_dto_exposes_nested_runtime_usage_and_costs() {
-        let mut config = PureConfig::default();
-        config.runtime.active_mcp_servers = vec!["filesystem".to_string()];
-        config.mcp_servers.insert(
-            "github".to_string(),
-            McpServerConfig {
-                transport: McpServerTransport::StreamableHttp,
-                url: Some("https://example.com/mcp".to_string()),
-                ..Default::default()
-            },
-        );
         let dto = session_runtime_dto(
             SessionRuntimeRecord {
                 session_id: "session-1".to_string(),
@@ -972,8 +1020,8 @@ mod tests {
                 has_unpriced_usage: true,
                 updated_at: 99,
             },
-            &config,
             vec!["skill-creator".to_string()],
+            vec!["github".to_string()],
         );
 
         assert_eq!(dto.session_id, "session-1");

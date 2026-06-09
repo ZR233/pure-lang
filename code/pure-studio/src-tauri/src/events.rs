@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use pl_core::{StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord, StudioRuntime};
 use pl_protocol::AgentEvent;
@@ -7,9 +7,54 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::dto::AgentEventPayload;
-use crate::mappers::{agent_dto, agent_event_dto, load_session_runtime_dto};
+use crate::mappers::{agent_dto, agent_event_dto, load_session_runtime_dto, mcp_health_update_dto};
+use crate::state::AppState;
 
 static EVENT_COUNTER: AtomicU64 = AtomicU64::new(0);
+const MCP_PERIODIC_RECHECK: Duration = Duration::from_secs(300);
+
+pub fn start_mcp_health_tasks(app: AppHandle, state: AppState) {
+    let initial_state = state.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = initial_state.studio.reconcile_mcp_runtime().await {
+            eprintln!("[pure-studio] initial MCP health check failed to start: {error}");
+        }
+    });
+
+    let event_app = app.clone();
+    let event_state = state.clone();
+    let mut updates = event_state.studio.mcp_runtime().subscribe();
+    tauri::async_runtime::spawn(async move {
+        while let Ok(()) | Err(RecvError::Lagged(_)) = updates.recv().await {
+            emit_mcp_health_update(&event_app, &event_state.studio).await;
+        }
+    });
+
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(MCP_PERIODIC_RECHECK);
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            if let Err(error) = state.studio.recheck_mcp_runtime().await {
+                eprintln!("[pure-studio] periodic MCP health check failed to start: {error}");
+            }
+        }
+    });
+}
+
+async fn emit_mcp_health_update(app: &AppHandle, studio: &StudioRuntime) {
+    match mcp_health_update_dto(studio).await {
+        Ok(payload) => {
+            let _ = app.emit("studio-mcp-health-updated", payload);
+        }
+        Err(error) => {
+            eprintln!(
+                "[pure-studio] failed to build MCP health update: {}",
+                error.message
+            );
+        }
+    }
+}
 
 pub async fn drain_events(
     session_id: String,

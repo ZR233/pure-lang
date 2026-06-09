@@ -161,6 +161,17 @@ pub struct McpServerDto {
     pub status_kind: String,
     pub status_message: Option<String>,
     pub mutation_policy: String,
+    pub availability_kind: String,
+    pub availability_message: Option<String>,
+    pub last_checked_at: Option<i64>,
+    pub tool_count: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpHealthUpdateDto {
+    pub mcp_servers: Vec<McpServerDto>,
+    pub active_mcp_servers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -12,14 +12,23 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { KeyValuePair, McpServerInput, McpServerRecord, McpTransport } from "../types";
+import type {
+  KeyValuePair,
+  McpAvailabilityKind,
+  McpServerInput,
+  McpServerRecord,
+  McpTransport,
+} from "../types";
 
 type McpSettingsProps = {
   servers: McpServerRecord[];
   onSaveMcpSettings: (servers: McpServerInput[]) => Promise<boolean>;
 };
 
-type DraftServer = McpServerInput;
+type DraftServer = McpServerInput & Pick<
+  McpServerRecord,
+  "availabilityKind" | "availabilityMessage" | "lastCheckedAt" | "toolCount"
+>;
 
 const transports: McpTransport[] = ["stdio", "streamableHttp"];
 
@@ -78,6 +87,10 @@ export function McpSettings({ servers, onSaveMcpSettings }: McpSettingsProps) {
       url: null,
       bearerTokenEnvVar: null,
       headers: [],
+      availabilityKind: "checking",
+      availabilityMessage: null,
+      lastCheckedAt: null,
+      toolCount: null,
     };
     setDrafts((current) => [...current, nextServer]);
     setEditingId(id);
@@ -140,6 +153,7 @@ export function McpSettings({ servers, onSaveMcpSettings }: McpSettingsProps) {
               const TransportIcon = server.transport === "stdio" ? Terminal : Globe2;
               const locked = isLockedServer(server);
               const statusKind = serverStatusKind(server);
+              const availabilityKind = serverAvailabilityKind(server);
               return (
                 <article
                   className={`mcp-row${active ? " active" : ""}`}
@@ -161,6 +175,9 @@ export function McpSettings({ servers, onSaveMcpSettings }: McpSettingsProps) {
                   <div className="mcp-row-meta">
                     <span className={`mcp-status ${statusKind}`}>
                       {t(`settings.mcp.status.${statusKind}`)}
+                    </span>
+                    <span className={`mcp-status availability ${availabilityKind}`}>
+                      {t(`settings.mcp.availability.${availabilityKind}`)}
                     </span>
                     {server.sourceKind === "builtIn" ? (
                       <span className="mcp-source">
@@ -227,6 +244,24 @@ export function McpSettings({ servers, onSaveMcpSettings }: McpSettingsProps) {
                 {editingServer.statusMessage ? <small>{editingServer.statusMessage}</small> : null}
               </div>
             ) : null}
+
+            <div className="mcp-health-note">
+              <strong>{t("settings.mcp.availabilityTitle")}</strong>
+              <span>
+                {t(`settings.mcp.availability.${serverAvailabilityKind(editingServer)}`)}
+                {editingServer.toolCount != null
+                  ? ` · ${t("settings.mcp.toolCount", { count: editingServer.toolCount })}`
+                  : ""}
+                {editingServer.lastCheckedAt
+                  ? ` · ${t("settings.mcp.lastCheckedAt", {
+                      time: formatCheckedAt(editingServer.lastCheckedAt),
+                    })}`
+                  : ""}
+              </span>
+              {editingServer.availabilityMessage ? (
+                <small>{editingServer.availabilityMessage}</small>
+              ) : null}
+            </div>
 
             <label className="settings-field">
               <span>{t("settings.mcp.serverId")}</span>
@@ -508,13 +543,18 @@ function serverInput(server: McpServerRecord): DraftServer {
     statusKind: server.statusKind,
     statusMessage: server.statusMessage,
     mutationPolicy: server.mutationPolicy,
+    availabilityKind: server.availabilityKind,
+    availabilityMessage: server.availabilityMessage,
+    lastCheckedAt: server.lastCheckedAt,
+    toolCount: server.toolCount,
   };
 }
 
 function normalizeServerInput(server: DraftServer): McpServerInput {
   return {
-    ...server,
     id: server.id.trim(),
+    enabled: server.enabled,
+    transport: server.transport,
     command: optionalText(server.command),
     args: server.args.map((arg) => arg.trim()).filter(Boolean),
     env: server.env
@@ -552,6 +592,10 @@ function searchableServerText(server: DraftServer) {
     server.sourceDetail ?? "",
     server.statusKind ?? "",
     server.statusMessage ?? "",
+    server.availabilityKind ?? "",
+    server.availabilityMessage ?? "",
+    server.lastCheckedAt?.toString() ?? "",
+    server.toolCount?.toString() ?? "",
     ...server.args,
     ...server.env.flatMap((entry) => [entry.key, entry.value]),
     ...server.headers.flatMap((entry) => [entry.key, entry.value]),
@@ -570,6 +614,14 @@ function isLockedServer(server: DraftServer) {
 
 function serverStatusKind(server: DraftServer) {
   return server.statusKind ?? (server.enabled ? "enabled" : "disabled");
+}
+
+function serverAvailabilityKind(server: DraftServer): McpAvailabilityKind {
+  return server.availabilityKind ?? (server.enabled ? "checking" : "disabled");
+}
+
+function formatCheckedAt(value: number) {
+  return new Date(value * 1000).toLocaleString();
 }
 
 function uniqueServerId(servers: DraftServer[]) {

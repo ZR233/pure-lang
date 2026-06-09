@@ -38,6 +38,7 @@ import type {
   AgentEvent,
   AgentEventPayload,
   CompileMode,
+  McpHealthUpdatedPayload,
   McpServerInput,
   PermissionMode,
   PromptFailed,
@@ -183,6 +184,12 @@ export function useStudioApp() {
           agent: payload.agent,
           sessionRuntime: payload.sessionRuntime,
           statusText: statusTextForEvent(payload.event, t),
+        });
+      }),
+      listen<McpHealthUpdatedPayload>("studio-mcp-health-updated", ({ payload }) => {
+        dispatch({
+          type: "mcpHealthUpdated",
+          payload,
         });
       }),
       listen<ToolApprovalRequest>("studio-tool-approval-requested", ({ payload }) => {

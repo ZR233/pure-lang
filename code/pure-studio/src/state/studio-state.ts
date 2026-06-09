@@ -4,6 +4,7 @@ import type {
   AgentTimelineEvent,
   BootstrapPayload,
   ConfigPayload,
+  McpHealthUpdatedPayload,
   McpServerRecord,
   PermissionMode,
   PlanState,
@@ -110,6 +111,7 @@ export type StudioAction =
   | { type: "setConfigToml"; toml: string }
   | { type: "setSettingsOpen"; value: boolean; tab?: SettingsTab }
   | { type: "configLoaded"; payload: ConfigPayload; status?: string }
+  | { type: "mcpHealthUpdated"; payload: McpHealthUpdatedPayload }
   | { type: "enqueueApproval"; payload: ToolApprovalRequest; status: string }
   | { type: "resolveApproval"; payload: ToolApprovalResolved; status: string }
   | { type: "userInputRequested"; payload: UserInputRequest; status: string }
@@ -323,6 +325,17 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         ...state,
         ...configFields(state.selectedProviderId, action.payload),
         status: action.status ?? state.status,
+      };
+    case "mcpHealthUpdated":
+      return {
+        ...state,
+        mcpServers: mergeMcpServers(state.mcpServers, action.payload.mcpServers),
+        sessionRuntime: state.sessionRuntime
+          ? {
+              ...state.sessionRuntime,
+              activeMcpServers: action.payload.activeMcpServers,
+            }
+          : state.sessionRuntime,
       };
     case "enqueueApproval":
       if (action.payload.sessionId !== state.selectedSessionId) {
@@ -849,6 +862,21 @@ function configFields(selectedProviderId: string | null, payload: ConfigPayload)
     configExists: payload.configExists,
     selectedProviderId: nextProviderId,
   };
+}
+
+function mergeMcpServers(
+  current: McpServerRecord[],
+  incoming: McpServerRecord[],
+): McpServerRecord[] {
+  if (incoming.length === 0) return current;
+  const byId = new Map(current.map((server) => [server.id, server]));
+  return incoming.map((server) => {
+    const existing = byId.get(server.id);
+    return {
+      ...existing,
+      ...server,
+    };
+  });
 }
 
 function phaseForTimelineItem(item: TimelineItem, current: TurnPhase): TurnPhase {
