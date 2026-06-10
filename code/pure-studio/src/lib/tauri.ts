@@ -154,6 +154,31 @@ export function createSession(projectId: string, title?: string) {
   });
 }
 
+export function deleteSession(sessionId: string, selectedSessionId?: string | null) {
+  if (!isTauriRuntime()) {
+    const sessions = previewSessions.filter((session) => session.id !== sessionId);
+    const nextSelectedSessionId =
+      selectedSessionId && selectedSessionId !== sessionId && sessions.some((session) => session.id === selectedSessionId)
+        ? selectedSessionId
+        : sessions[0]?.id ?? null;
+    return Promise.resolve(
+      clone({
+        projectId: previewProjects[0]?.id ?? "preview-project",
+        projects: previewProjects,
+        sessions,
+        selectedSessionId: nextSelectedSessionId,
+        agentEvents: nextSelectedSessionId ? previewAgentEvents : [],
+        agents: nextSelectedSessionId ? previewAgents : [],
+        sessionRuntime: nextSelectedSessionId ? previewSessionRuntime : null,
+      }),
+    );
+  }
+  return invoke<ProjectSelectionPayload>("delete_session", {
+    sessionId,
+    selectedSessionId: selectedSessionId ?? null,
+  });
+}
+
 export function selectSession(sessionId: string) {
   if (!isTauriRuntime()) {
     return Promise.resolve(

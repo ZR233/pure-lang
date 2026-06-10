@@ -9,6 +9,7 @@ import {
   answerUserInput,
   bootstrapStudio,
   createSession,
+  deleteSession,
   denyTool,
   dismissPlan,
   implementPlan,
@@ -362,6 +363,26 @@ export function useStudioApp() {
     }
   }
 
+  async function onDeleteSession(sessionId: string) {
+    if (state.isBusy) {
+      return;
+    }
+    const session = state.sessions.find((candidate) => candidate.id === sessionId);
+    const title = session?.title ?? t("common.sessionFallbackTitle");
+    if (!window.confirm(t("sessions.confirmDelete", { title }))) {
+      return;
+    }
+    try {
+      const payload = await deleteSession(sessionId, state.selectedSessionId);
+      dispatch({ type: "projectSelectionLoaded", payload, status: t("status.sessionDeleted") });
+    } catch (error) {
+      dispatch({
+        type: "bootstrapFailed",
+        status: t("status.deleteSessionFailed", { error: errorText(error) }),
+      });
+    }
+  }
+
   async function onSetSessionMode(mode: CompileMode) {
     const sessionId = state.selectedSessionId;
     if (!sessionId || state.isBusy) {
@@ -698,6 +719,7 @@ export function useStudioApp() {
     onSelectProject,
     onNewSession,
     onSelectSession,
+    onDeleteSession,
     onSetSessionMode,
     onSendPrompt,
     onSendPromptContent,

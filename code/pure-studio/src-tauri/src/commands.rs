@@ -121,6 +121,51 @@ pub async fn create_session(
 }
 
 #[tauri::command]
+pub async fn delete_session(
+    session_id: String,
+    selected_session_id: Option<String>,
+    state: State<'_, AppState>,
+) -> CommandResult<ProjectSelectionDto> {
+    if state.active_turns.lock().await.contains_key(&session_id) {
+        return Err(CommandError {
+            message: "session has an active turn".to_string(),
+        });
+    }
+    let archived = state
+        .studio
+        .store()
+        .archive_session(&session_id)
+        .await?
+        .context("selected session not found")?;
+    let project_id = archived.project_id;
+    let sessions = state.studio.store().list_sessions(&project_id).await?;
+    let selected_session_id = selected_session_id
+        .filter(|id| id != &session_id && sessions.iter().any(|session| session.id == *id))
+        .or_else(|| sessions.first().map(|session| session.id.clone()));
+    let agent_events = match &selected_session_id {
+        Some(session_id) => state.studio.store().list_agent_events(session_id).await?,
+        None => Vec::new(),
+    };
+    let agents = match &selected_session_id {
+        Some(session_id) => state.studio.store().list_agents(session_id).await?,
+        None => Vec::new(),
+    };
+    let session_runtime = match selected_session_id.as_deref() {
+        Some(session_id) => Some(load_session_runtime_dto(&state.studio, session_id).await?),
+        None => None,
+    };
+    Ok(ProjectSelectionDto {
+        project_id,
+        projects: project_dtos(state.studio.store().list_projects().await?),
+        sessions: session_dtos(sessions),
+        selected_session_id,
+        agent_events: agent_event_dtos(agent_events),
+        agents: agent_dtos(agents),
+        session_runtime,
+    })
+}
+
+#[tauri::command]
 pub async fn select_session(
     session_id: String,
     state: State<'_, AppState>,

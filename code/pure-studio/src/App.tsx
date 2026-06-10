@@ -24,8 +24,10 @@ export function App() {
           onSelectProject={(id) => void studio.onSelectProject(id)}
           onNewSession={() => void studio.onNewSession()}
           onSelectSession={(id) => void studio.onSelectSession(id)}
+          onDeleteSession={(id) => void studio.onDeleteSession(id)}
           onOpenSettings={() => void studio.openSettings()}
           chooseFolder={() => void studio.chooseFolder()}
+          sessionActionsDisabled={state.isBusy}
         />
       </div>
 

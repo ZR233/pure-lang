@@ -1212,6 +1212,35 @@ function sessionModeUpdateKeepsTimelineAndUpdatesSessions() {
   assertEqual(updated.timelineItems.get("turn-1-plan")?.content, "1. Inspect");
 }
 
+function projectSelectionLoadedAfterSessionDeleteClearsSelectedSession() {
+  const liveItem = textItem("turn-1-text", 10, "hello");
+  const liveState = studioReducer(selectedState(), {
+    type: "timelineLoaded",
+    sessionId: "session-1",
+    items: [liveItem],
+    nextSequence: 11,
+  });
+  const updated = studioReducer(liveState, {
+    type: "projectSelectionLoaded",
+    status: "deleted",
+    payload: {
+      projectId: "project-1",
+      projects: [],
+      sessions: [],
+      selectedSessionId: null,
+      agentEvents: [],
+      agents: [],
+      sessionRuntime: null,
+    },
+  });
+
+  assertEqual(updated.selectedSessionId, null);
+  assertDeepEqual(updated.sessions, []);
+  assertDeepEqual(updated.timelineOrder, []);
+  assertEqual(updated.sessionRuntime, null);
+  assertEqual(updated.status, "deleted");
+}
+
 function configLoadedUpdatesPermissionMode() {
   const state = studioReducer(selectedState(), {
     type: "configLoaded",
@@ -1868,6 +1897,7 @@ sessionSelectionClearsPlanActionState();
 toolsFromDifferentTurnsDoNotMerge();
 toolGroupStatusUsesPriority();
 sessionModeUpdateKeepsTimelineAndUpdatesSessions();
+projectSelectionLoadedAfterSessionDeleteClearsSelectedSession();
 configLoadedUpdatesPermissionMode();
 providerUsagesLoadedDoesNotReplaceConfigState();
 mcpHealthUpdatedRefreshesMcpServersAndRuntime();

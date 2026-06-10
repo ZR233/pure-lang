@@ -72,6 +72,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn archive_session_hides_it_from_session_list() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/alpha").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Build app", CompileMode::Auto)
+            .await
+            .unwrap();
+        let message = Message {
+            role: MessageRole::User,
+            content: MessageContent::Text("hello".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        };
+
+        store.append_message(&session.id, &message).await.unwrap();
+        let archived = store.archive_session(&session.id).await.unwrap().unwrap();
+        let sessions = store.list_sessions(&project.id).await.unwrap();
+        let restored = store.load_messages(&session.id).await.unwrap();
+
+        assert_eq!(archived.id, session.id);
+        assert_eq!(sessions, Vec::<SessionRecord>::new());
+        assert_eq!(restored, vec![message]);
+    }
+
+    #[tokio::test]
     async fn replace_session_messages_rewrites_history() {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project("C:/work/alpha").await.unwrap();

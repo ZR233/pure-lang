@@ -39,6 +39,7 @@ fn main() {
             commands::open_project,
             commands::select_project,
             commands::create_session,
+            commands::delete_session,
             commands::select_session,
             commands::set_session_mode,
             commands::run_prompt,

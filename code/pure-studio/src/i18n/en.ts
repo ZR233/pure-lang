@@ -50,6 +50,8 @@ const en = {
     addProjectFailed: "Add project failed: {{error}}",
     selectProjectFailed: "Select project failed: {{error}}",
     newSessionFailed: "New session failed: {{error}}",
+    sessionDeleted: "Session deleted",
+    deleteSessionFailed: "Delete session failed: {{error}}",
     selectSessionFailed: "Select session failed: {{error}}",
     runFailed: "Run failed: {{error}}",
     stopFailed: "Stop failed: {{error}}",
@@ -441,6 +443,12 @@ const en = {
     chooseFolder: "Choose folder",
     newSession: "New session",
     newSessionTitle: "New session",
+    sessionFallbackTitle: "Current session",
+  },
+
+  sessions: {
+    delete: "Delete session",
+    confirmDelete: "Delete session \"{{title}}\"?",
   },
 };
 

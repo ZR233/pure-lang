@@ -1,4 +1,4 @@
-import { FolderOpen, Plus, Settings } from "lucide-react";
+import { FolderOpen, Plus, Settings, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ProjectRecord, SessionRecord } from "../types";
 import { initials } from "../lib/utils";
@@ -16,8 +16,10 @@ type ProjectRailProps = {
   onSelectProject: (id: string) => void;
   onNewSession: () => void;
   onSelectSession: (id: string) => void;
+  onDeleteSession: (id: string) => void;
   onOpenSettings: () => void;
   chooseFolder: () => void;
+  sessionActionsDisabled?: boolean;
 };
 
 export function ProjectRail({
@@ -28,8 +30,10 @@ export function ProjectRail({
   onSelectProject,
   onNewSession,
   onSelectSession,
+  onDeleteSession,
   onOpenSettings,
   chooseFolder,
+  sessionActionsDisabled = false,
 }: ProjectRailProps) {
   const { t } = useTranslation();
 
@@ -81,18 +85,39 @@ export function ProjectRail({
         </div>
         <ScrollArea className="flex-1">
           <div className="flex flex-col gap-px pr-3">
-            {sessions.map((session) => (
-              <Button
-                key={session.id}
-                variant="ghost"
-                className={`w-full justify-start gap-2 px-2 py-1.5 h-auto rounded-lg ${session.id === selectedSessionId ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent"}`}
-                onClick={() => onSelectSession(session.id)}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${session.id === selectedSessionId ? "bg-primary" : "bg-sidebar-muted-foreground/60"}`} />
-                <span className="flex-1 min-w-0 truncate font-medium">{session.title}</span>
-                <span className="text-[10px] text-sidebar-muted-foreground flex-shrink-0">{session.updatedAt}</span>
-              </Button>
-            ))}
+            {sessions.map((session) => {
+              const selected = session.id === selectedSessionId;
+              return (
+                <div
+                  key={session.id}
+                  className={`group flex w-full items-center rounded-lg ${selected ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent"}`}
+                >
+                  <button
+                    type="button"
+                    className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left"
+                    onClick={() => onSelectSession(session.id)}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${selected ? "bg-primary" : "bg-sidebar-muted-foreground/60"}`} />
+                    <span className="flex-1 min-w-0 truncate font-medium">{session.title}</span>
+                    <span className="text-[10px] text-sidebar-muted-foreground flex-shrink-0">{session.updatedAt}</span>
+                  </button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={`mr-1 h-7 w-7 shrink-0 rounded-md text-sidebar-muted-foreground transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-30 ${selected ? "opacity-100" : "opacity-0"}`}
+                    disabled={sessionActionsDisabled}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onDeleteSession(session.id);
+                    }}
+                    title={t("sessions.delete")}
+                    aria-label={t("sessions.delete")}
+                  >
+                    <Trash2 size={13} />
+                  </Button>
+                </div>
+              );
+            })}
           </div>
         </ScrollArea>
       </section>
