@@ -48,6 +48,8 @@ pl-model provider
 
 `TextDelta`、`ThinkingDelta`、`ToolCallDelta`、`ToolCallComplete` 不再是 Studio 的协议或兼容入口。
 
+模型 provider 流的成功边界由 `StreamEvent::Completed` 明确表示。protocol mapper 可以把 provider 私有终止 chunk 转换为该事件；如果底层 SSE parse、transport 或 EOF 在 completed 之前发生，`pl-model` 必须返回错误，并由 turn 层发出 failed turn、`Error` 和 `Done`，不得把局部内容当作成功消息落库。completed 之后的 usage、文本、思考和工具调用 snapshot 才能进入最终 `CompletionResponse`。
+
 Plan Mode 下模型输出的 `<proposed_plan>...</proposed_plan>` 块由 `pl-model::stream` accumulator 提取为 `plan` item。计划正文复用 `TimelineItem.content`，增量使用 `TimelineDelta::Plan`；同一块内容不得同时出现在普通 assistant `text` item 中。计划块之外的普通文本仍按 assistant `text` item 流式输出。
 
 计划的采纳与实施状态不改变 `plan` item 本身，而是通过 `TraceEventKind::PlanLifecycleChanged` 追加到同一 session 的 `timeline_events`。事件包含 `planId`、`state`、可选 `turnId`、可选 `reason` 和 `updatedAt`；Studio 从历史 timeline 与运行完成响应中按 `planId` 折叠 latest plan state。
@@ -93,6 +95,8 @@ root agent 的 provider `429` 错误码是当前轮的终止错误，不进入�
 
 聚合完成前不得把缺少工具名的参数片段当作新的工具调用执行。只有在 `output_item.done` 缺失时，才允许用已聚合的 delta 兜底生成工具调用；该兜底调用仍必须带有前面片段提供的真实工具名和稳定 `toolCallId`。
 
+如果 provider 在 completed 前结束但仍留下未完成 tool accumulator，聚合层只能在工具名和 `id` 或 `call_id` 都稳定时生成兜底 `ToolCall`。缺少工具名时返回 provider/protocol 错误，避免 `pl-core` 收到空工具名并误执行。工具调用进入 `pl-core` 后，started、approved 或 running 状态的 timeline item 在 turn 中断时必须写入唯一 `interrupted` 终态；已经 completed、failed 或 denied 的 item 不得被后续取消路径覆盖。
+
 如果 provider 把工具调用以正文形式返回，例如 DSML/tool-call 标记或完整 JSON `tool_calls` 块，`pl-core` 不得把它作为 assistant 最终消息流给主 chat。该情况属于模型未产出可执行工具调用，turn 应以 `failed` 收尾并触发 `Error` + `Done`。检测必须只针对明显的协议/JSON tool-call 形状，不能因为普通摘要、源码解释或文档内容提到 `tool_calls`、`name`、`subagent` 等词而误判。
 
 显式子代理分工的强制调度只适用于 root turn。子代理任务文本中可能包含 `subagent.rs`、`agent` 生命周期或“每个模块”等普通分析目标，这些内容不能触发子代理递归创建约束。
@@ -108,6 +112,8 @@ root agent 的 provider `429` 错误码是当前轮的终止错误，不进入�
 - 写文件、patch、delete、move、shell 等可能产生副作用的工具默认不并行。
 - 只读文件、搜索、stat、list、spawn/wait/list agent 等工具可以按风险显式 opt-in。
 - 工具结果写回 `CoreSession` 必须保持模型发出工具调用的顺序。
+
+工具运行时把 unknown tool、权限拒绝、参数错误和本地执行失败都归为模型可恢复 tool result；内部 invariant、join failure 和历史协议污染归为 fatal tool error，当前 turn 使用 `TurnAbortReason::ToolError` 收尾。并行调度可以按完成顺序收集执行结果，但写回 session history 和 provider 下一轮输入时必须恢复模型发出顺序。
 
 ## 8.7 Usage 与状态栏
 

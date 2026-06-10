@@ -612,24 +612,30 @@ mod tests {
         assert_eq!(value["status"], "running", "{value}");
         let process_id = value["processId"].as_str().unwrap().to_string();
 
-        let completed = stdin
-            .execute(
-                ToolInput {
-                    arguments: serde_json::json!({
-                        "processId": process_id,
-                        "chars": "",
-                        "yieldTimeMs": 3000,
-                    }),
-                    session_id: "long-session".to_string(),
-                    tool_id: "poll-tool".to_string(),
-                },
-                test_context(),
-            )
-            .await
-            .unwrap();
-        let value: serde_json::Value = serde_json::from_str(&completed.description).unwrap();
+        let mut value = serde_json::Value::Null;
+        for _ in 0..5 {
+            let completed = stdin
+                .execute(
+                    ToolInput {
+                        arguments: serde_json::json!({
+                            "processId": process_id,
+                            "chars": "",
+                            "yieldTimeMs": 1500,
+                        }),
+                        session_id: "long-session".to_string(),
+                        tool_id: "poll-tool".to_string(),
+                    },
+                    test_context(),
+                )
+                .await
+                .unwrap();
+            value = serde_json::from_str(&completed.description).unwrap();
+            if value["status"] == "completed" {
+                break;
+            }
+        }
 
-        assert_eq!(value["status"], "completed");
+        assert_eq!(value["status"], "completed", "{value}");
         assert!(value["stdout"].as_str().unwrap().contains("done"));
     }
 

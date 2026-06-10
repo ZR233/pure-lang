@@ -5,9 +5,9 @@ use crate::tool::{Tool, ToolContext, ToolInput};
 use crate::turn::TurnOptions;
 use pretty_assertions::assert_eq;
 
-use super::ApplyPatchTool;
 use super::read::ReadFileTool;
 use super::write::WriteFileTool;
+use super::{ApplyPatchTool, CopyPathTool, DeletePathTool, MovePathTool};
 
 fn unique_temp_dir(name: &str) -> PathBuf {
     let id = std::time::SystemTime::now()
@@ -115,6 +115,182 @@ async fn write_file_waits_for_workspace_write_lock() {
         "after\n"
     );
     let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn delete_path_modes_are_explicit() {
+    let root = unique_temp_dir("delete-mode");
+    tokio::fs::create_dir_all(root.join("empty")).await.unwrap();
+    tokio::fs::create_dir_all(root.join("tree/nested"))
+        .await
+        .unwrap();
+    tokio::fs::write(root.join("file.txt"), "file")
+        .await
+        .unwrap();
+    tokio::fs::write(root.join("tree/nested/file.txt"), "file")
+        .await
+        .unwrap();
+    let tool = DeletePathTool;
+
+    tool.execute(
+        input(serde_json::json!({ "path": "file.txt", "mode": "file" })),
+        context(&root).await,
+    )
+    .await
+    .unwrap();
+    tool.execute(
+        input(serde_json::json!({ "path": "empty", "mode": "emptyDirectory" })),
+        context(&root).await,
+    )
+    .await
+    .unwrap();
+    tool.execute(
+        input(serde_json::json!({ "path": "tree", "mode": "recursiveDirectory" })),
+        context(&root).await,
+    )
+    .await
+    .unwrap();
+
+    assert!(!tokio::fs::try_exists(root.join("file.txt")).await.unwrap());
+    assert!(!tokio::fs::try_exists(root.join("empty")).await.unwrap());
+    assert!(!tokio::fs::try_exists(root.join("tree")).await.unwrap());
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn delete_path_legacy_recursive_still_works() {
+    let root = unique_temp_dir("delete-legacy-recursive");
+    tokio::fs::create_dir_all(root.join("tree/nested"))
+        .await
+        .unwrap();
+    tokio::fs::write(root.join("tree/nested/file.txt"), "file")
+        .await
+        .unwrap();
+    let tool = DeletePathTool;
+
+    tool.execute(
+        input(serde_json::json!({ "path": "tree", "recursive": true })),
+        context(&root).await,
+    )
+    .await
+    .unwrap();
+
+    assert!(!tokio::fs::try_exists(root.join("tree")).await.unwrap());
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn copy_and_move_collision_modes_are_explicit() {
+    let root = unique_temp_dir("collision-mode");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    tokio::fs::write(root.join("source.txt"), "new")
+        .await
+        .unwrap();
+    tokio::fs::write(root.join("target.txt"), "old")
+        .await
+        .unwrap();
+    let copy = CopyPathTool;
+    let move_tool = MovePathTool;
+
+    let fail = copy
+        .execute(
+            input(serde_json::json!({
+                "from": "source.txt",
+                "to": "target.txt",
+                "collision": "failIfExists"
+            })),
+            context(&root).await,
+        )
+        .await;
+    assert!(fail.is_err());
+
+    copy.execute(
+        input(serde_json::json!({
+            "from": "source.txt",
+            "to": "target.txt",
+            "collision": "overwrite"
+        })),
+        context(&root).await,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        tokio::fs::read_to_string(root.join("target.txt"))
+            .await
+            .unwrap(),
+        "new"
+    );
+
+    tokio::fs::write(root.join("move-source.txt"), "moved")
+        .await
+        .unwrap();
+    tokio::fs::write(root.join("move-target.txt"), "old")
+        .await
+        .unwrap();
+    move_tool
+        .execute(
+            input(serde_json::json!({
+                "from": "move-source.txt",
+                "to": "move-target.txt",
+                "collision": "overwrite"
+            })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::fs::read_to_string(root.join("move-target.txt"))
+            .await
+            .unwrap(),
+        "moved"
+    );
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn copy_path_legacy_overwrite_still_works() {
+    let root = unique_temp_dir("copy-legacy-overwrite");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    tokio::fs::write(root.join("source.txt"), "new")
+        .await
+        .unwrap();
+    tokio::fs::write(root.join("target.txt"), "old")
+        .await
+        .unwrap();
+    let copy = CopyPathTool;
+
+    copy.execute(
+        input(serde_json::json!({
+            "from": "source.txt",
+            "to": "target.txt",
+            "overwrite": true
+        })),
+        context(&root).await,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        tokio::fs::read_to_string(root.join("target.txt"))
+            .await
+            .unwrap(),
+        "new"
+    );
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[test]
+fn file_tool_schemas_do_not_expose_legacy_bool_fields() {
+    let delete_schema = DeletePathTool.input_schema();
+    let copy_schema = CopyPathTool.input_schema();
+    let move_schema = MovePathTool.input_schema();
+
+    assert!(delete_schema["properties"].get("mode").is_some());
+    assert!(delete_schema["properties"].get("recursive").is_none());
+    assert!(copy_schema["properties"].get("collision").is_some());
+    assert!(copy_schema["properties"].get("overwrite").is_none());
+    assert!(move_schema["properties"].get("collision").is_some());
+    assert!(move_schema["properties"].get("overwrite").is_none());
 }
 
 #[tokio::test]

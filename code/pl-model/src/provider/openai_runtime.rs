@@ -87,7 +87,7 @@ impl OpenAiTransportProvider {
                 && model_info.capabilities.supports_freeform_tools();
             let timeline = request.timeline.clone();
             let request = request.provider_compatible(supports_custom_tools);
-            let body = protocol.build_request(&request);
+            let body = protocol.build_request(&request)?;
             let config = PureOpenAiConfig::new(api_base, token, info.http_headers.as_ref())?;
             let client = Client::build(http_client, config);
             let stream: StreamResponse<sse::SseStreamEvent> = match body {
@@ -271,6 +271,21 @@ mod tests {
     use crate::request::{CompletionRequest, CompletionTimelineContext, ToolCallPayload};
     use crate::stream::StreamCompletionAccumulator;
     use pl_protocol::TraceEventKind;
+
+    fn apply_completed(
+        accumulator: &mut StreamCompletionAccumulator,
+        event_tx: &pl_protocol::AgentEventSender,
+    ) {
+        accumulator
+            .apply(
+                StreamEvent::Completed {
+                    response_id: None,
+                    usage: None,
+                },
+                event_tx,
+            )
+            .unwrap();
+    }
 
     #[derive(Debug)]
     struct CapturedHttpRequest {
@@ -493,7 +508,8 @@ mod tests {
             )
             .unwrap();
 
-        let response = accumulator.finish(&event_tx);
+        apply_completed(&mut accumulator, &event_tx);
+        let response = accumulator.finish(&event_tx).unwrap();
 
         assert_eq!(response.content.as_deref(), Some("9.11 更大。"));
         assert_eq!(response.raw_content.as_deref(), Some("9.11 更大。"));
@@ -546,7 +562,8 @@ mod tests {
                 .unwrap();
         }
 
-        let response = accumulator.finish(&event_tx);
+        apply_completed(&mut accumulator, &event_tx);
+        let response = accumulator.finish(&event_tx).unwrap();
 
         assert_eq!(response.content.as_deref(), Some("Intro\n\nOutro"));
         assert_eq!(
@@ -606,7 +623,8 @@ mod tests {
             )
             .unwrap();
 
-        let response = accumulator.finish(&event_tx);
+        apply_completed(&mut accumulator, &event_tx);
+        let response = accumulator.finish(&event_tx).unwrap();
 
         assert_eq!(response.tool_calls.len(), 1);
         assert_eq!(response.tool_calls[0].id, "call_1");
@@ -616,6 +634,62 @@ mod tests {
                 assert_eq!(arguments, &serde_json::json!({"path": "Cargo.toml"}));
             }
             other => panic!("unexpected payload: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stream_accumulator_requires_completed_event() {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let mut accumulator = StreamCompletionAccumulator::new(None);
+
+        accumulator
+            .apply(
+                StreamEvent::OutputTextDelta {
+                    item_id: None,
+                    delta: "partial".to_string(),
+                },
+                &event_tx,
+            )
+            .unwrap();
+
+        let error = accumulator.finish(&event_tx).unwrap_err();
+
+        match error {
+            PureError::LlmError(message) => {
+                assert_eq!(message, "provider stream ended before completion");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stream_accumulator_rejects_tool_delta_without_name() {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let mut accumulator = StreamCompletionAccumulator::new(None);
+
+        accumulator
+            .apply(
+                StreamEvent::ToolCallDelta {
+                    stream_id: Some("chat_tool_call:0".to_string()),
+                    item_id: "call_1".to_string(),
+                    call_id: None,
+                    name: None,
+                    payload_delta: ToolCallDeltaPayload::FunctionArguments(
+                        "{\"path\":\"Cargo.toml\"}".to_string(),
+                    ),
+                },
+                &event_tx,
+            )
+            .unwrap();
+        apply_completed(&mut accumulator, &event_tx);
+
+        let error = accumulator.finish(&event_tx).unwrap_err();
+
+        match error {
+            PureError::LlmError(message) => {
+                assert_eq!(message, "provider emitted tool call without name");
+            }
+            other => panic!("unexpected error: {other:?}"),
         }
     }
 
@@ -657,7 +731,8 @@ mod tests {
             )
             .unwrap();
 
-        let response = accumulator.finish(&event_tx);
+        apply_completed(&mut accumulator, &event_tx);
+        let response = accumulator.finish(&event_tx).unwrap();
 
         assert_eq!(response.tool_calls[0].id, "call_0");
         let item_ids = response
@@ -721,7 +796,8 @@ mod tests {
             )
             .unwrap();
 
-        let response = accumulator.finish(&event_tx);
+        apply_completed(&mut accumulator, &event_tx);
+        let response = accumulator.finish(&event_tx).unwrap();
 
         assert_eq!(response.tool_calls.len(), 1);
         assert_eq!(response.tool_calls[0].id, "ctc_1");

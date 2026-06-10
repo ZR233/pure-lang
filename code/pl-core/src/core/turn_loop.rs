@@ -18,13 +18,15 @@ use super::SUBAGENT_DISPATCH_CONSTRAINT;
 use super::SUBAGENT_FORCE_DISPATCH_INSTRUCTION;
 use super::permission::cancellation_reason;
 use super::tool_dispatch::{
-    ToolExecutionContext, execute_tool_calls, tool_results_include_recoverable_subagent_capacity,
+    ToolExecutionContext, ToolExecutionError, execute_tool_calls,
+    tool_results_include_recoverable_subagent_capacity,
 };
 use super::turn_result::{
-    budget_limited_turn_result, default_workspace_root, failed_turn_result, format_instructions,
-    interrupted_turn_result, is_cancelled, looks_like_unexecuted_tool_call_text,
-    prompt_requires_subagent_dispatch, provider_error_severity, should_request_parallel_tool_calls,
-    tool_allowed_in_mode, unix_seconds,
+    budget_limited_turn_result, default_workspace_root, failed_turn_result,
+    failed_turn_result_with_abort_reason, format_instructions, interrupted_turn_result,
+    is_cancelled, looks_like_unexecuted_tool_call_text, prompt_requires_subagent_dispatch,
+    provider_error_severity, should_request_parallel_tool_calls, tool_allowed_in_mode,
+    unix_seconds,
 };
 
 pub(super) async fn run_turn_with_trace(
@@ -404,7 +406,7 @@ pub(super) async fn run_turn_with_trace(
             provider_prompt_tokens_for_compaction = Some(response_prompt_tokens);
         }
 
-        let tool_results = execute_tool_calls(
+        let tool_results = match execute_tool_calls(
             &tool_calls,
             &mut budget_tracker,
             recorder,
@@ -420,7 +422,27 @@ pub(super) async fn run_turn_with_trace(
                 parent_session: Arc::new(CoreSession::from_messages(messages.clone())),
             },
         )
-        .await;
+        .await
+        {
+            Ok(tool_results) => tool_results,
+            Err(ToolExecutionError::Fatal(error))
+            | Err(ToolExecutionError::RespondToModel(error)) => {
+                session.truncate_messages(safe_message_count);
+                return Ok(failed_turn_result_with_abort_reason(
+                    recorder,
+                    &session_id,
+                    request.mode,
+                    last_content,
+                    last_reasoning_content,
+                    last_model,
+                    total_usage,
+                    safe_message_count,
+                    error,
+                    ErrorSeverity::Recoverable,
+                    crate::turn::TurnAbortReason::ToolError,
+                ));
+            }
+        };
         if tool_results_include_recoverable_subagent_capacity(&tool_results) {
             subagent_dispatch_recovered = true;
         }

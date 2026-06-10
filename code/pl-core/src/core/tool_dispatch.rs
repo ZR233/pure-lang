@@ -1,9 +1,11 @@
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
-use pl_model::ToolCallKind;
-use pl_protocol::TimelineItemStatus;
+use futures::stream::{FuturesUnordered, StreamExt};
+use pl_model::ToolCallPayload;
+use pl_protocol::{PureError, TimelineItemStatus, ToolCallKind};
 use tokio::sync::RwLock;
 
 use crate::permission::{PermissionDecision, decide_tool_permission};
@@ -34,7 +36,38 @@ pub(super) struct ToolExecutionRecord {
 pub(super) struct ScheduledToolExecution<'a> {
     pub(super) tool_call: pl_model::ToolCall,
     pub(super) item: pl_protocol::TimelineItem,
-    pub(super) future: BoxFuture<'a, ToolExecutionRecord>,
+    pub(super) future: BoxFuture<'a, Result<ToolExecutionRecord, ToolExecutionError>>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ToolInvocation {
+    pub(super) name: String,
+    pub(super) runtime_tool_call_id: String,
+    pub(super) provider_item_id: String,
+    pub(super) call_id: Option<String>,
+    pub(super) payload: ToolPayload,
+    pub(super) context: ToolContext,
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum ToolPayload {
+    Function(serde_json::Value),
+    Custom(String),
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ToolOutputEnvelope {
+    pub(super) model_visible_text: String,
+    pub(super) timeline_text: String,
+    pub(super) full_output_file: Option<PathBuf>,
+    pub(super) exit_code: Option<i32>,
+    pub(super) timed_out: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum ToolExecutionError {
+    RespondToModel(String),
+    Fatal(String),
 }
 
 pub(super) struct ToolExecutionContext<'a> {
@@ -54,13 +87,18 @@ pub(super) async fn execute_tool_calls(
     budget_tracker: &mut BudgetTracker,
     recorder: &mut crate::trace::TraceRecorder,
     context: ToolExecutionContext<'_>,
-) -> Vec<ToolExecutionRecord> {
+) -> Result<Vec<ToolExecutionRecord>, ToolExecutionError> {
     let mut scheduled = Vec::new();
     let runtime_lock = Arc::new(RwLock::new(()));
 
     for tool_call in tool_calls {
         if is_cancelled(context.options) {
             break;
+        }
+        if tool_call.name.is_empty() {
+            return Err(ToolExecutionError::Fatal(
+                "tool call missing tool name".to_string(),
+            ));
         }
         let tool_call_id = tool_call
             .call_id
@@ -90,7 +128,7 @@ pub(super) async fn execute_tool_calls(
                 item,
                 future: Box::pin(ready_tool_execution_record(
                     tool_call.clone(),
-                    message,
+                    ToolExecutionError::RespondToModel(message),
                     TimelineItemStatus::Denied,
                     None,
                     false,
@@ -110,7 +148,7 @@ pub(super) async fn execute_tool_calls(
                 item,
                 future: Box::pin(ready_tool_execution_record(
                     tool_call.clone(),
-                    format!("Unknown tool: {}", tool_call.name),
+                    ToolExecutionError::RespondToModel(format!("Unknown tool: {}", tool_call.name)),
                     TimelineItemStatus::Failed,
                     None,
                     false,
@@ -175,7 +213,18 @@ pub(super) async fn execute_tool_calls(
             PermissionDecision::Denied { reason } => ToolApprovalDecision::Denied { reason },
         };
         if is_cancelled(context.options) {
-            return Vec::new();
+            scheduled.push(ScheduledToolExecution {
+                tool_call: tool_call.clone(),
+                item,
+                future: Box::pin(ready_tool_execution_record(
+                    tool_call.clone(),
+                    ToolExecutionError::RespondToModel("Tool execution interrupted".to_string()),
+                    TimelineItemStatus::Interrupted,
+                    None,
+                    false,
+                )),
+            });
+            break;
         }
 
         match decision {
@@ -184,14 +233,22 @@ pub(super) async fn execute_tool_calls(
                 tool_context.workspace_access = execution_workspace_access;
                 item.status = TimelineItemStatus::Approved;
                 item.updated_at = unix_seconds();
+                let invocation =
+                    ToolInvocation::from_tool_call(tool_call, tool_call_id.clone(), tool_context);
+                let _runtime_identity = (
+                    invocation.provider_item_id.as_str(),
+                    invocation.call_id.as_deref(),
+                );
+                let _display_arguments = invocation.payload.arguments_for_display();
                 let tool_input = ToolInput {
-                    arguments: tool_call.arguments_for_tool(),
+                    arguments: invocation.payload.arguments_for_tool(),
                     session_id: context.session_id.to_string(),
-                    tool_id: tool_call_id.clone(),
+                    tool_id: invocation.runtime_tool_call_id.clone(),
                 };
                 let lock = runtime_lock.clone();
-                let tool_name = tool_call.name.clone();
+                let tool_name = invocation.name.clone();
                 let tool_call_for_task = tool_call.clone();
+                let tool_context = invocation.context;
                 scheduled.push(ScheduledToolExecution {
                     tool_call: tool_call.clone(),
                     item,
@@ -216,7 +273,9 @@ pub(super) async fn execute_tool_calls(
                     item,
                     future: Box::pin(ready_tool_execution_record(
                         tool_call.clone(),
-                        format!("Tool execution denied: {reason}"),
+                        ToolExecutionError::RespondToModel(format!(
+                            "Tool execution denied: {reason}"
+                        )),
                         TimelineItemStatus::Denied,
                         None,
                         false,
@@ -226,30 +285,7 @@ pub(super) async fn execute_tool_calls(
         }
     }
 
-    let mut records = Vec::new();
-    let futures = scheduled
-        .into_iter()
-        .map(|scheduled| async move {
-            let record = scheduled.future.await;
-            (scheduled.tool_call, scheduled.item, record)
-        })
-        .collect::<Vec<_>>();
-    for (_tool_call, mut item, record) in futures::future::join_all(futures).await {
-        item.status = record.status;
-        item.updated_at = unix_seconds();
-        if let Some(tool) = &mut item.tool {
-            tool.result = Some(record.display_result.clone());
-            tool.exit_code = record.exit_code;
-            tool.timed_out = record.timed_out;
-        }
-        if item.status == TimelineItemStatus::Failed {
-            recorder.fail_item(item, record.display_result.clone());
-        } else {
-            recorder.complete_item(item);
-        }
-        records.push(record);
-    }
-    records
+    collect_scheduled_tools(scheduled, recorder, context.options).await
 }
 
 pub(super) fn namespaced_tool_timeline_item_id(turn_id: &str, tool_call_id: &str) -> String {
@@ -259,59 +295,250 @@ pub(super) fn namespaced_tool_timeline_item_id(turn_id: &str, tool_call_id: &str
     format!("{turn_id}-{tool_call_id}")
 }
 
+impl ToolInvocation {
+    fn from_tool_call(
+        tool_call: &pl_model::ToolCall,
+        runtime_tool_call_id: String,
+        context: ToolContext,
+    ) -> Self {
+        Self {
+            name: tool_call.name.clone(),
+            runtime_tool_call_id,
+            provider_item_id: tool_call.id.clone(),
+            call_id: tool_call.call_id.clone(),
+            payload: ToolPayload::from_tool_call_payload(&tool_call.payload),
+            context,
+        }
+    }
+}
+
+impl ToolPayload {
+    fn from_tool_call_payload(payload: &ToolCallPayload) -> Self {
+        match payload {
+            ToolCallPayload::Function { arguments } => Self::Function(arguments.clone()),
+            ToolCallPayload::Custom { input } => Self::Custom(input.clone()),
+        }
+    }
+
+    fn arguments_for_tool(&self) -> serde_json::Value {
+        match self {
+            Self::Function(arguments) => arguments.clone(),
+            Self::Custom(input) => serde_json::json!({
+                "input": input,
+                "patch": input,
+            }),
+        }
+    }
+
+    fn arguments_for_display(&self) -> serde_json::Value {
+        match self {
+            Self::Function(arguments) => arguments.clone(),
+            Self::Custom(input) => serde_json::json!({ "input": input }),
+        }
+    }
+}
+
+async fn collect_scheduled_tools(
+    scheduled: Vec<ScheduledToolExecution<'_>>,
+    recorder: &mut crate::trace::TraceRecorder,
+    options: &TurnOptions,
+) -> Result<Vec<ToolExecutionRecord>, ToolExecutionError> {
+    let mut pending = BTreeMap::new();
+    let mut futures = FuturesUnordered::new();
+    let scheduled_count = scheduled.len();
+
+    for (index, scheduled) in scheduled.into_iter().enumerate() {
+        pending.insert(index, (scheduled.tool_call.clone(), scheduled.item.clone()));
+        futures.push(async move {
+            let record = scheduled.future.await;
+            (index, scheduled.tool_call, scheduled.item, record)
+        });
+    }
+
+    let mut ordered_records = std::iter::repeat_with(|| None)
+        .take(scheduled_count)
+        .collect::<Vec<Option<ToolExecutionRecord>>>();
+
+    loop {
+        if futures.is_empty() {
+            break;
+        }
+        let next = match &options.cancellation_token {
+            Some(token) => {
+                tokio::select! {
+                    next = futures.next() => next,
+                    _ = token.cancelled() => {
+                        for (index, (tool_call, item)) in pending {
+                            let record = interrupted_tool_execution_record(tool_call);
+                            finalize_tool_item(recorder, item, &record);
+                            ordered_records[index] = Some(record);
+                        }
+                        return Ok(ordered_records.into_iter().flatten().collect());
+                    }
+                }
+            }
+            None => futures.next().await,
+        };
+
+        let Some((index, tool_call, item, record)) = next else {
+            break;
+        };
+        pending.remove(&index);
+        let record = match record {
+            Ok(record) => record,
+            Err(ToolExecutionError::RespondToModel(message)) => {
+                respond_to_model_tool_execution_record(tool_call, message)
+            }
+            Err(ToolExecutionError::Fatal(message)) => {
+                return Err(ToolExecutionError::Fatal(message));
+            }
+        };
+        finalize_tool_item(recorder, item, &record);
+        ordered_records[index] = Some(record);
+    }
+
+    Ok(ordered_records.into_iter().flatten().collect())
+}
+
+fn finalize_tool_item(
+    recorder: &mut crate::trace::TraceRecorder,
+    mut item: pl_protocol::TimelineItem,
+    record: &ToolExecutionRecord,
+) {
+    item.status = record.status;
+    item.updated_at = unix_seconds();
+    if let Some(tool) = &mut item.tool {
+        tool.result = Some(record.display_result.clone());
+        tool.exit_code = record.exit_code;
+        tool.timed_out = record.timed_out;
+    }
+    match item.status {
+        TimelineItemStatus::Failed
+        | TimelineItemStatus::Denied
+        | TimelineItemStatus::Interrupted
+        | TimelineItemStatus::BudgetLimited => {
+            recorder.fail_item(item, record.display_result.clone());
+        }
+        TimelineItemStatus::Started
+        | TimelineItemStatus::Streaming
+        | TimelineItemStatus::AwaitingApproval
+        | TimelineItemStatus::Approved
+        | TimelineItemStatus::Running
+        | TimelineItemStatus::Completed => recorder.complete_item(item),
+    }
+}
+
 async fn ready_tool_execution_record(
     tool_call: pl_model::ToolCall,
-    result: String,
+    error: ToolExecutionError,
     status: TimelineItemStatus,
     exit_code: Option<i32>,
     timed_out: bool,
-) -> ToolExecutionRecord {
-    ToolExecutionRecord {
-        id: tool_call.id.clone(),
-        call_id: tool_call.call_id.clone(),
-        name: tool_call.name.clone(),
-        kind: tool_call.kind(),
-        arguments: serde_json::to_string(&tool_call.arguments_for_display()).unwrap_or_default(),
-        display_result: result.clone(),
-        result,
-        status,
-        exit_code,
-        timed_out,
+) -> Result<ToolExecutionRecord, ToolExecutionError> {
+    match error {
+        ToolExecutionError::RespondToModel(message) => Ok(tool_execution_record_from_envelope(
+            tool_call.clone(),
+            tool_call.name.clone(),
+            ToolOutputEnvelope {
+                model_visible_text: message.clone(),
+                timeline_text: message,
+                full_output_file: None,
+                exit_code,
+                timed_out,
+            },
+            status,
+        )),
+        ToolExecutionError::Fatal(message) => Err(ToolExecutionError::Fatal(message)),
     }
 }
 
 fn tool_execution_record(
     tool_call: pl_model::ToolCall,
     tool_name: String,
-    result: std::result::Result<ToolOutput, pl_protocol::PureError>,
-) -> ToolExecutionRecord {
-    let (result, status, exit_code, timed_out) = match result {
+    result: std::result::Result<ToolOutput, PureError>,
+) -> Result<ToolExecutionRecord, ToolExecutionError> {
+    let (envelope, status) = match result {
         Ok(output) => (
-            output.description,
+            ToolOutputEnvelope {
+                model_visible_text: output.description.clone(),
+                timeline_text: output.description,
+                full_output_file: (!output.output_file.as_os_str().is_empty())
+                    .then_some(output.output_file),
+                exit_code: output.exit_code,
+                timed_out: output.timed_out,
+            },
             TimelineItemStatus::Completed,
-            output.exit_code,
-            output.timed_out,
         ),
-        Err(error) => (
-            format!("Tool execution error: {error}"),
-            TimelineItemStatus::Failed,
-            None,
-            false,
-        ),
+        Err(error) => {
+            return Err(ToolExecutionError::RespondToModel(format!(
+                "Tool execution error: {error}"
+            )));
+        }
     };
-    let display_result = display_result_for_tool(&tool_call, &tool_name, &result, status);
+    Ok(tool_execution_record_from_envelope(
+        tool_call, tool_name, envelope, status,
+    ))
+}
+
+fn tool_execution_record_from_envelope(
+    tool_call: pl_model::ToolCall,
+    tool_name: String,
+    envelope: ToolOutputEnvelope,
+    status: TimelineItemStatus,
+) -> ToolExecutionRecord {
+    let ToolOutputEnvelope {
+        model_visible_text,
+        timeline_text,
+        full_output_file: _full_output_file,
+        exit_code,
+        timed_out,
+    } = envelope;
+    let display_result = display_result_for_tool(&tool_call, &tool_name, &timeline_text, status);
     ToolExecutionRecord {
         id: tool_call.id.clone(),
         call_id: tool_call.call_id.clone(),
         name: tool_name,
         kind: tool_call.kind(),
         arguments: serde_json::to_string(&tool_call.arguments_for_display()).unwrap_or_default(),
-        result,
+        result: model_visible_text,
         display_result,
         status,
         exit_code,
         timed_out,
     }
+}
+
+fn interrupted_tool_execution_record(tool_call: pl_model::ToolCall) -> ToolExecutionRecord {
+    tool_execution_record_from_envelope(
+        tool_call.clone(),
+        tool_call.name.clone(),
+        ToolOutputEnvelope {
+            model_visible_text: "Tool execution interrupted".to_string(),
+            timeline_text: "Tool execution interrupted".to_string(),
+            full_output_file: None,
+            exit_code: None,
+            timed_out: false,
+        },
+        TimelineItemStatus::Interrupted,
+    )
+}
+
+fn respond_to_model_tool_execution_record(
+    tool_call: pl_model::ToolCall,
+    message: String,
+) -> ToolExecutionRecord {
+    tool_execution_record_from_envelope(
+        tool_call.clone(),
+        tool_call.name.clone(),
+        ToolOutputEnvelope {
+            model_visible_text: message.clone(),
+            timeline_text: message,
+            full_output_file: None,
+            exit_code: None,
+            timed_out: false,
+        },
+        TimelineItemStatus::Failed,
+    )
 }
 
 fn display_result_for_tool(

@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
-use pl_model::{ToolCall, ToolCallKind};
-use pl_protocol::{Message, MessageContent, MessageRole};
+use pl_model::ToolCall;
+use pl_protocol::{
+    Message, MessageContent, MessageRole, ToolCallHistoryMetadata, ToolCallKind, ToolResultMetadata,
+};
 
 /// 核心编译会话。
 ///
@@ -71,7 +73,7 @@ impl CoreSession {
         let mut metadata = HashMap::new();
         let json = serde_json::to_string(&tool_calls)
             .expect("ToolCall serialization should be infallible");
-        metadata.insert("tool_calls".to_string(), json);
+        ToolCallHistoryMetadata::new(json).insert_into(&mut metadata);
         self.messages.push(Message {
             role: MessageRole::Assistant,
             content: MessageContent::Text(content.unwrap_or_default()),
@@ -91,16 +93,14 @@ impl CoreSession {
         tool_arguments: String,
     ) {
         let mut metadata = HashMap::new();
-        if let Some(call_id) = tool_call_call_id {
-            metadata.insert("tool_call_call_id".to_string(), call_id);
-        }
-        metadata.insert("tool_call_id".to_string(), tool_call_id);
-        metadata.insert("tool_name".to_string(), tool_name);
-        metadata.insert(
-            "tool_call_kind".to_string(),
-            tool_call_kind.as_str().to_string(),
-        );
-        metadata.insert("tool_call_arguments".to_string(), tool_arguments);
+        ToolResultMetadata::new(
+            tool_call_id,
+            tool_call_call_id,
+            tool_name,
+            tool_call_kind,
+            tool_arguments,
+        )
+        .insert_into(&mut metadata);
         self.messages.push(Message {
             role: MessageRole::Tool,
             content: MessageContent::Text(result),

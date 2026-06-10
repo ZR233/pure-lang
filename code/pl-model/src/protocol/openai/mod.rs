@@ -1,13 +1,16 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
-use pl_protocol::{MessageContent, MessageRole, Result};
+use pl_protocol::{
+    Message, MessageContent, MessageRole, PureError, Result, TOOL_CALLS_METADATA_KEY,
+    ToolCallHistoryMetadata, ToolCallKind, ToolMetadataCompatibility, ToolResultMetadata,
+};
 use serde::Serialize;
 
 #[cfg(test)]
 use crate::request::CompletionResponse;
 use crate::request::{
-    CompletionRequest, ReasoningConfig, ReasoningSummary, ToolCall, ToolCallKind, ToolCallPayload,
-    ToolFormat, ToolSchema,
+    CompletionRequest, ReasoningConfig, ReasoningSummary, ToolCall, ToolCallPayload, ToolFormat,
+    ToolSchema,
 };
 
 #[cfg(test)]
@@ -46,21 +49,25 @@ impl OpenAiProtocol {
         }
     }
 
-    pub(crate) fn build_request(&self, request: &CompletionRequest) -> OpenAiRequestBody {
+    pub(crate) fn build_request(&self, request: &CompletionRequest) -> Result<OpenAiRequestBody> {
+        validate_tool_history(&request.messages, self.endpoint)?;
         match self.endpoint {
-            OpenAiEndpoint::Responses => {
-                OpenAiRequestBody::Responses(ResponsesRequestBody::from_request(request))
-            }
-            OpenAiEndpoint::ChatCompletions => {
-                OpenAiRequestBody::Chat(ChatRequestBody::from_request(request, self.chat_reasoning))
-            }
+            OpenAiEndpoint::Responses => Ok(OpenAiRequestBody::Responses(
+                ResponsesRequestBody::from_request(request)?,
+            )),
+            OpenAiEndpoint::ChatCompletions => Ok(OpenAiRequestBody::Chat(
+                ChatRequestBody::from_request(request, self.chat_reasoning)?,
+            )),
         }
     }
 
     #[cfg(test)]
     fn build_request_body(&self, request: &CompletionRequest) -> serde_json::Value {
-        serde_json::to_value(self.build_request(request))
-            .expect("typed provider request should serialize")
+        serde_json::to_value(
+            self.build_request(request)
+                .expect("typed provider request should build"),
+        )
+        .expect("typed provider request should serialize")
     }
 
     #[cfg(test)]
@@ -111,7 +118,7 @@ pub(crate) struct ResponsesRequestBody {
 }
 
 impl ResponsesRequestBody {
-    fn from_request(request: &CompletionRequest) -> Self {
+    fn from_request(request: &CompletionRequest) -> Result<Self> {
         let mut input = Vec::new();
 
         if let Some(instructions) = &request.instructions {
@@ -125,7 +132,7 @@ impl ResponsesRequestBody {
 
         for msg in &request.messages {
             match msg.role {
-                MessageRole::Assistant if msg.metadata.contains_key("tool_calls") => {
+                MessageRole::Assistant if msg.metadata.contains_key(TOOL_CALLS_METADATA_KEY) => {
                     let text = message_content_text(&msg.content);
                     if !text.is_empty() {
                         input.push(ResponsesInputItem::message(
@@ -133,7 +140,7 @@ impl ResponsesRequestBody {
                             vec![ResponsesContent::OutputText { text }],
                         ));
                     }
-                    if let Some(tool_calls) = parse_tool_calls_from_metadata(&msg.metadata) {
+                    if let Some(tool_calls) = parse_tool_calls_from_metadata(&msg.metadata)? {
                         input.extend(
                             tool_calls
                                 .into_iter()
@@ -142,21 +149,25 @@ impl ResponsesRequestBody {
                     }
                 }
                 MessageRole::Tool => {
-                    let call_id = msg
-                        .metadata
-                        .get("tool_call_call_id")
-                        .or_else(|| msg.metadata.get("tool_call_id"))
-                        .cloned()
-                        .unwrap_or_default();
+                    let metadata = ToolResultMetadata::from_metadata(
+                        &msg.metadata,
+                        ToolMetadataCompatibility::LegacyMissingKindAsFunction,
+                    )
+                    .map_err(protocol_error)?;
+                    let call_id = metadata
+                        .tool_call_call_id
+                        .clone()
+                        .unwrap_or_else(|| metadata.tool_call_id.clone());
                     let output = message_content_text(&msg.content);
-                    match tool_result_kind(&msg.metadata) {
+                    match metadata.tool_call_kind {
                         ToolCallKind::Function => {
                             input.push(ResponsesInputItem::FunctionCallOutput { call_id, output });
                         }
                         ToolCallKind::Custom => {
                             input.push(ResponsesInputItem::CustomToolCallOutput {
                                 call_id,
-                                name: msg.metadata.get("tool_name").cloned(),
+                                name: (!metadata.tool_name.is_empty())
+                                    .then_some(metadata.tool_name),
                                 output,
                             });
                         }
@@ -181,7 +192,7 @@ impl ResponsesRequestBody {
                 .collect()
         });
 
-        Self {
+        Ok(Self {
             model: request.model.clone(),
             input,
             stream: true,
@@ -194,7 +205,7 @@ impl ResponsesRequestBody {
                 .reasoning
                 .as_ref()
                 .map(ResponsesReasoning::from_config),
-        }
+        })
     }
 }
 
@@ -394,7 +405,10 @@ pub(crate) struct ChatRequestBody {
 }
 
 impl ChatRequestBody {
-    fn from_request(request: &CompletionRequest, reasoning_style: ChatReasoningStyle) -> Self {
+    fn from_request(
+        request: &CompletionRequest,
+        reasoning_style: ChatReasoningStyle,
+    ) -> Result<Self> {
         let mut messages = Vec::new();
 
         if let Some(instructions) = &request.instructions {
@@ -405,12 +419,12 @@ impl ChatRequestBody {
 
         for msg in &request.messages {
             match msg.role {
-                MessageRole::Assistant if msg.metadata.contains_key("tool_calls") => {
+                MessageRole::Assistant if msg.metadata.contains_key(TOOL_CALLS_METADATA_KEY) => {
                     let text = message_content_text(&msg.content);
                     messages.push(ChatMessage::Assistant {
                         content: (!text.is_empty()).then_some(text),
                         reasoning_content: msg.reasoning_content.clone(),
-                        tool_calls: parse_tool_calls_from_metadata(&msg.metadata).map(|calls| {
+                        tool_calls: parse_tool_calls_from_metadata(&msg.metadata)?.map(|calls| {
                             calls
                                 .into_iter()
                                 .map(ChatMessageToolCall::from_tool_call)
@@ -419,12 +433,13 @@ impl ChatRequestBody {
                     });
                 }
                 MessageRole::Tool => {
+                    let metadata = ToolResultMetadata::from_metadata(
+                        &msg.metadata,
+                        ToolMetadataCompatibility::LegacyMissingKindAsFunction,
+                    )
+                    .map_err(protocol_error)?;
                     messages.push(ChatMessage::Tool {
-                        tool_call_id: msg
-                            .metadata
-                            .get("tool_call_id")
-                            .cloned()
-                            .unwrap_or_default(),
+                        tool_call_id: metadata.tool_call_id,
                         content: message_content_text(&msg.content),
                     });
                 }
@@ -468,7 +483,7 @@ impl ChatRequestBody {
             }
         };
 
-        Self {
+        Ok(Self {
             model: request.model.clone(),
             messages,
             stream: true,
@@ -478,7 +493,7 @@ impl ChatRequestBody {
             max_tokens: request.max_tokens,
             reasoning_effort,
             thinking,
-        }
+        })
     }
 }
 
@@ -627,18 +642,101 @@ fn message_content_text(content: &MessageContent) -> String {
 }
 
 /// 从 metadata 中解析 tool_calls（由 CoreSession::push_assistant_tool_calls 写入）。
-fn parse_tool_calls_from_metadata(metadata: &HashMap<String, String>) -> Option<Vec<ToolCall>> {
-    metadata
-        .get("tool_calls")
-        .and_then(|json| serde_json::from_str(json).ok())
+fn parse_tool_calls_from_metadata(
+    metadata: &HashMap<String, String>,
+) -> Result<Option<Vec<ToolCall>>> {
+    ToolCallHistoryMetadata::from_metadata(metadata)
+        .map(|metadata| {
+            serde_json::from_str(&metadata.tool_calls_json).map_err(|error| {
+                protocol_error(format!("invalid assistant tool_calls metadata: {error}"))
+            })
+        })
+        .transpose()
 }
 
-fn tool_result_kind(metadata: &HashMap<String, String>) -> ToolCallKind {
-    match metadata.get("tool_call_kind").map(String::as_str) {
-        Some("custom") => ToolCallKind::Custom,
-        Some("function") | None => ToolCallKind::Function,
-        Some(_) => ToolCallKind::Function,
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExpectedToolOutput {
+    tool_call_id: String,
+    call_id: Option<String>,
+    tool_call_kind: ToolCallKind,
+}
+
+fn validate_tool_history(messages: &[Message], endpoint: OpenAiEndpoint) -> Result<()> {
+    let mut expected_outputs = VecDeque::new();
+
+    for message in messages {
+        match message.role {
+            MessageRole::Assistant if message.metadata.contains_key(TOOL_CALLS_METADATA_KEY) => {
+                let tool_calls = parse_tool_calls_from_metadata(&message.metadata)?
+                    .ok_or_else(|| protocol_error("assistant tool_calls metadata missing"))?;
+                for tool_call in tool_calls {
+                    if tool_call.id.is_empty() {
+                        return Err(protocol_error("assistant tool call has empty id"));
+                    }
+                    if tool_call.call_id.as_ref().is_some_and(String::is_empty) {
+                        return Err(protocol_error("assistant tool call has empty call_id"));
+                    }
+                    if endpoint == OpenAiEndpoint::Responses && tool_call.call_id.is_none() {
+                        return Err(protocol_error(format!(
+                            "assistant tool call {} missing call_id for Responses history replay",
+                            tool_call.id
+                        )));
+                    }
+                    let tool_call_kind = tool_call.kind();
+                    expected_outputs.push_back(ExpectedToolOutput {
+                        tool_call_id: tool_call.id,
+                        call_id: tool_call.call_id,
+                        tool_call_kind,
+                    });
+                }
+            }
+            MessageRole::Tool => {
+                let metadata = ToolResultMetadata::from_metadata(
+                    &message.metadata,
+                    ToolMetadataCompatibility::LegacyMissingKindAsFunction,
+                )
+                .map_err(protocol_error)?;
+                let expected = expected_outputs.pop_front().ok_or_else(|| {
+                    protocol_error("tool result has no preceding assistant tool call")
+                })?;
+                if metadata.tool_call_id != expected.tool_call_id {
+                    return Err(protocol_error(format!(
+                        "tool result id {} does not match assistant tool call id {}",
+                        metadata.tool_call_id, expected.tool_call_id
+                    )));
+                }
+                if endpoint == OpenAiEndpoint::Responses
+                    && metadata.tool_call_call_id.as_deref() != expected.call_id.as_deref()
+                {
+                    return Err(protocol_error(format!(
+                        "tool result call_id {:?} does not match assistant tool call call_id {:?}",
+                        metadata.tool_call_call_id, expected.call_id
+                    )));
+                }
+                if metadata.tool_call_kind != expected.tool_call_kind {
+                    return Err(protocol_error(format!(
+                        "tool result kind {} does not match assistant tool call kind {}",
+                        metadata.tool_call_kind.as_str(),
+                        expected.tool_call_kind.as_str()
+                    )));
+                }
+            }
+            MessageRole::System | MessageRole::User | MessageRole::Assistant => {}
+        }
     }
+
+    if let Some(expected) = expected_outputs.front() {
+        return Err(protocol_error(format!(
+            "assistant tool call {} is missing tool output",
+            expected.tool_call_id
+        )));
+    }
+
+    Ok(())
+}
+
+fn protocol_error(message: impl Into<String>) -> PureError {
+    PureError::LlmError(format!("OpenAI request protocol error: {}", message.into()))
 }
 
 #[cfg(test)]
@@ -1068,7 +1166,8 @@ mod tests {
     #[test]
     fn responses_history_replays_custom_tool_call_and_output() {
         let mut tool_metadata = HashMap::new();
-        tool_metadata.insert("tool_call_id".to_string(), "call_1".to_string());
+        tool_metadata.insert("tool_call_id".to_string(), "ctc_1".to_string());
+        tool_metadata.insert("tool_call_call_id".to_string(), "call_1".to_string());
         tool_metadata.insert("tool_call_kind".to_string(), "custom".to_string());
         tool_metadata.insert("tool_name".to_string(), "apply_patch".to_string());
         let request = request_with_tool_history(tool_metadata);
@@ -1125,6 +1224,148 @@ mod tests {
             responses_body["input"][1]["call_id"],
             serde_json::json!("call_1")
         );
+        assert_eq!(
+            chat_body["messages"][1]["tool_call_id"],
+            serde_json::json!("fc_1")
+        );
+    }
+
+    #[test]
+    fn unknown_tool_call_kind_fails_request_build() {
+        let mut tool_metadata = HashMap::new();
+        tool_metadata.insert("tool_call_id".to_string(), "fc_1".to_string());
+        tool_metadata.insert("tool_call_kind".to_string(), "mystery".to_string());
+        tool_metadata.insert("tool_name".to_string(), "read_file".to_string());
+        let request = request_with_function_tool_history(tool_metadata);
+
+        let error = OpenAiProtocol::responses()
+            .build_request(&request)
+            .unwrap_err();
+
+        match error {
+            PureError::LlmError(message) => {
+                assert!(message.contains("unknown tool_call_kind: mystery"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn missing_tool_output_fails_request_build() {
+        let calls = vec![ToolCall::function(
+            "fc_1",
+            "read_file",
+            serde_json::json!({ "path": "Cargo.toml" }),
+            Some("call_1".to_string()),
+        )];
+        let mut assistant_metadata = HashMap::new();
+        assistant_metadata.insert(
+            "tool_calls".to_string(),
+            serde_json::to_string(&calls).unwrap(),
+        );
+        let request = CompletionRequest {
+            model: "gpt-5.5".to_string(),
+            instructions: None,
+            messages: vec![Message {
+                role: MessageRole::Assistant,
+                content: MessageContent::Text(String::new()),
+                reasoning_content: None,
+                metadata: assistant_metadata,
+            }],
+            tools: Vec::new(),
+            tool_choice: "auto".to_string(),
+            parallel_tool_calls: false,
+            temperature: None,
+            max_tokens: None,
+            reasoning: None,
+            stream: true,
+            timeline: None,
+        };
+
+        let error = OpenAiProtocol::responses()
+            .build_request(&request)
+            .unwrap_err();
+
+        match error {
+            PureError::LlmError(message) => {
+                assert!(message.contains("assistant tool call fc_1 is missing tool output"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn legacy_function_tool_result_without_kind_replays_as_function() {
+        let mut tool_metadata = HashMap::new();
+        tool_metadata.insert("tool_call_id".to_string(), "fc_1".to_string());
+        tool_metadata.insert("tool_call_call_id".to_string(), "call_1".to_string());
+        tool_metadata.insert("tool_name".to_string(), "read_file".to_string());
+        let request = request_with_function_tool_history(tool_metadata);
+
+        let body = OpenAiProtocol::responses().build_request_body(&request);
+
+        assert_eq!(
+            body["input"][1]["type"],
+            serde_json::json!("function_call_output")
+        );
+    }
+
+    #[test]
+    fn responses_history_requires_call_id_but_chat_uses_tool_call_id() {
+        let calls = vec![ToolCall::function(
+            "fc_1",
+            "read_file",
+            serde_json::json!({ "path": "Cargo.toml" }),
+            None,
+        )];
+        let mut assistant_metadata = HashMap::new();
+        assistant_metadata.insert(
+            "tool_calls".to_string(),
+            serde_json::to_string(&calls).unwrap(),
+        );
+        let mut tool_metadata = HashMap::new();
+        tool_metadata.insert("tool_call_id".to_string(), "fc_1".to_string());
+        tool_metadata.insert("tool_call_kind".to_string(), "function".to_string());
+        tool_metadata.insert("tool_name".to_string(), "read_file".to_string());
+        let request = CompletionRequest {
+            model: "gpt-5.5".to_string(),
+            instructions: None,
+            messages: vec![
+                Message {
+                    role: MessageRole::Assistant,
+                    content: MessageContent::Text(String::new()),
+                    reasoning_content: None,
+                    metadata: assistant_metadata,
+                },
+                Message {
+                    role: MessageRole::Tool,
+                    content: MessageContent::Text("ok".to_string()),
+                    reasoning_content: None,
+                    metadata: tool_metadata,
+                },
+            ],
+            tools: Vec::new(),
+            tool_choice: "auto".to_string(),
+            parallel_tool_calls: false,
+            temperature: None,
+            max_tokens: None,
+            reasoning: None,
+            stream: true,
+            timeline: None,
+        };
+
+        let responses_error = OpenAiProtocol::responses()
+            .build_request(&request)
+            .unwrap_err();
+        let chat_body =
+            OpenAiProtocol::chat(ChatReasoningStyle::Plain).build_request_body(&request);
+
+        match responses_error {
+            PureError::LlmError(message) => {
+                assert!(message.contains("missing call_id for Responses history replay"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
         assert_eq!(
             chat_body["messages"][1]["tool_call_id"],
             serde_json::json!("fc_1")

@@ -17,6 +17,7 @@ pub use default_models::{
 };
 pub use manager::{DefaultModelsManager, ModelsManager};
 pub use model_info::{InputModality, ModelInfo, TruncationMode, TruncationPolicy};
+pub use pl_protocol::ToolCallKind;
 pub use provider::{
     DeepSeekProvider, ModelProvider, OpenAiProvider, ProviderRuntime, SharedModelProvider,
     ZhipuProvider, create_provider, create_provider_with_models,
@@ -31,6 +32,6 @@ pub use provider_usage::{
 };
 pub use request::{
     CompletionRequest, CompletionResponse, CompletionTimelineContext, FinishReason,
-    ReasoningConfig, ReasoningSummary, TokenUsage, ToolCall, ToolCallKind, ToolCallPayload,
-    ToolFormat, ToolSchema,
+    ReasoningConfig, ReasoningSummary, TokenUsage, ToolCall, ToolCallPayload, ToolFormat,
+    ToolSchema,
 };

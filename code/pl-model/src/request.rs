@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use pl_protocol::{Message, TraceEvent};
+use pl_protocol::{Message, ToolCallKind, TraceEvent};
 
 const APPLY_PATCH_FUNCTION_FALLBACK_DESCRIPTION: &str = "Complete Codex-style apply_patch text beginning with *** Begin Patch and ending with *** End Patch. Each file operation must use one of these hunk headers: *** Add File: <path>, *** Delete File: <path>, or *** Update File: <path>. Do not use ---/+++ unified diff, *** File: metadata, or natural-language edit instructions such as Insert after. If a previous patch failed, read the target file again and retry with a smaller patch based on current content; do not repeat the same failed patch. Minimal update example:\n*** Begin Patch\n*** Update File: notes.txt\n@@\n-old line\n+new line\n*** End Patch";
 
@@ -131,22 +131,6 @@ impl ToolCall {
                 serde_json::to_string(arguments).unwrap_or_default()
             }
             ToolCallPayload::Custom { input } => input.clone(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolCallKind {
-    Function,
-    Custom,
-}
-
-impl ToolCallKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Function => "function",
-            Self::Custom => "custom",
         }
     }
 }
