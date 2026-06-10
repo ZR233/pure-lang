@@ -12,11 +12,13 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{Mutex, oneshot};
 
 use crate::framing::{encode_message, read_message};
+use crate::process::{configure_background_command, terminate_process_tree};
 use crate::types::{LspDiagnostic, LspPosition, LspRange, LspResult, LspRuntimeError};
 use crate::uri::{file_uri_to_path, normalize_separators};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+const SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_FILE_SIZE_BYTES: u64 = 10_000_000;
 
 type PendingResponseSender = oneshot::Sender<LspResult<Value>>;
@@ -256,11 +258,19 @@ impl LspClient {
             .await;
             let _ = notify_raw(&self.stdin, "exit", Value::Null).await;
         }
+        self.stdin.lock().await.take();
         if let Some(mut child) = self.child.lock().await.take() {
-            let _ = child.kill().await;
+            let pid = child.id();
+            if tokio::time::timeout(SHUTDOWN_WAIT_TIMEOUT, child.wait())
+                .await
+                .is_err()
+            {
+                terminate_process_tree(pid).await;
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+            }
         }
         self.opened_files.lock().await.clear();
-        self.stdin.lock().await.take();
         self.pending.lock().await.clear();
     }
 
@@ -280,7 +290,7 @@ impl LspClient {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .current_dir(&self.definition.workspace_root);
-        hide_windows_console(&mut command);
+        configure_background_command(&mut command);
         let mut child = command.spawn().map_err(|error| {
             LspRuntimeError::Unavailable(format!(
                 "failed to start {}: {error}",
@@ -607,17 +617,6 @@ fn unix_seconds() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
-}
-
-fn hide_windows_console(command: &mut Command) {
-    #[cfg(windows)]
-    {
-        command.creation_flags(0x08000000);
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = command;
-    }
 }
 
 #[cfg(test)]

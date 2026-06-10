@@ -75,6 +75,11 @@ impl StudioRuntime {
         &self.lsp_runtime
     }
 
+    pub async fn shutdown(&self) {
+        self.mcp_runtime.shutdown().await;
+        self.lsp_runtime.shutdown().await;
+    }
+
     pub async fn reconcile_mcp_runtime(&self) -> Result<()> {
         let config = self.config_store.load_or_default()?;
         self.mcp_runtime

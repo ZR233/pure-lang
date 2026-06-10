@@ -11,6 +11,8 @@ platforms: ["windows", "linux", "macos"]
 
 ## 前置确认
 
+0. **搜索现有实现**：在提案前，先搜索代码库确认同名 tool 是否已存在。在 `pl-core/src/tool/` 目录和 `register_default_tools()` 中搜索工具名。避免为本已实现的工具重复提案。
+
 1. **确定工具名**：snake_case，全局唯一（`ToolRegistry::register()` 同名断言防止重复）。
 2. **确定输入 schema**：参数通过 `serde_json::Value` 传递；结构化输入类型放在工具文件内。
 3. **确定是否支持并行调用**：`supports_parallel_tool_calls()` 默认 `false`。
@@ -182,7 +184,7 @@ if matches!(request.name, "my_new_tool" | "ask_user") {
 
 ## 现有工具参考
 
-所有 21 个内置工具按模块分组，可供参考：
+所有 23 个内置工具按模块分组，可供参考：
 
 | 模块 | 工具 | 特点 |
 |------|------|------|
@@ -192,7 +194,9 @@ if matches!(request.name, "my_new_tool" | "ask_user") {
 | **bash.rs** | `bash` | 异步进程执行，截断策略，后台命令支持 |
 | **skill.rs** | `skills_list`, `skill_view`, `skill_manage` | 技能目录访问，严格输入解析 |
 | **multi_agent/tools.rs** | `spawn_agent`, `wait_agent`, `list_agents`, `send_message`, `followup_task`, `close_agent` | 子代理树管理，429 恢复，生命周期事件转发 |
-| **ask_user** (待实现) | `ask_user` | 回调等待用户输入，纯信息收集 |
+| **command/mod.rs** | `bash`, `write_stdin` | Shell 执行 + 后台进程 stdin 写入，共享 `CommandProcessManager` |
+| **ask_user.rs** | `request_user_input` | 回调等待用户输入（结构化问题/选项/自由文本），纯信息收集 |
+| **lsp.rs** | `lsp_query` | LSP 代码智能查询（定义跳转、引用查找），依赖 `pl-lsp` crate |
 
 ## 测试模式
 

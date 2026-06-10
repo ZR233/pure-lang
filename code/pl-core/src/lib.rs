@@ -10,6 +10,7 @@ pub mod infrastructure;
 pub mod interfaces;
 mod mcp;
 mod permission;
+mod process;
 mod provider_error;
 mod provider_usage;
 mod runtime_usage;

@@ -16,12 +16,13 @@ pure-studio               Tauri 2 桌面应用
   ▼
 pl-core                   核心编译引擎
   │                       turn/session 编排、配置管理、工具审批、
-  │                       Studio SQLite 持久化、技能系统
+  │                       MCP 动态工具集成、Studio SQLite 持久化、技能系统
   ├────► pl-model         LLM Provider 适配层
   │                       OpenAI 兼容 wire API、SSE 流式、模型元数据
-  ▼
-pl-protocol               公共协议层
-                          Message、AgentEvent、PureError 等跨 crate 共享类型
+  ├────► pl-lsp           LSP 客户端
+  │                       rust-analyzer 支持、代码智能查询
+  └────► pl-protocol      公共协议层
+                          Agent 事件、消息、权限、错误类型
 ```
 
 ### Workspace Crate
@@ -30,6 +31,7 @@ pl-protocol               公共协议层
 |-------|------|------|
 | `pl-protocol` | `code/pl-protocol/` | 跨 crate 协议类型：消息、事件、错误、权限 |
 | `pl-model` | `code/pl-model/` | LLM provider 抽象与适配：OpenAI 兼容 API、SSE 流式、模型元数据管理 |
+| `pl-lsp` | `code/pl-lsp/` | LSP 客户端：rust-analyzer 支持、代码智能查询 |
 | `pl-core` | `code/pl-core/` | 核心编译引擎：端口-适配器架构，含 `application`、`domain`、`infrastructure`、`interfaces` 四层 |
 | `pure-studio` | `code/pure-studio/` | Tauri 2 桌面应用：React 前端 + Rust Tauri 桥接 |
 
@@ -37,6 +39,7 @@ pl-protocol               公共协议层
 
 ```
 pl-protocol  ←  pl-model  ←  pl-core  ←  pure-studio
+                pl-lsp     ←  pl-core
 （底层）                                    （顶层）
 ```
 
@@ -74,25 +77,34 @@ pure-lang/
 ├── code/
 │   ├── pl-protocol/          # 公共协议层
 │   ├── pl-model/             # LLM provider 适配
+│   ├── pl-lsp/               # LSP 客户端（rust-analyzer 支持）
 │   ├── pl-core/              # 核心编译引擎
-│   │   ├── src/application/    # Use case 编排
+│   │   ├── src/agent/          # 子代理系统
+│   │   ├── src/config/         # 配置系统（provider、role、MCP、runtime）
+│   │   ├── src/core/           # 核心引擎（turn loop、tool dispatch、权限）
 │   │   ├── src/domain/         # 领域模型
 │   │   ├── src/infrastructure/ # 基础设施适配器（SQLite、文件系统）
 │   │   ├── src/interfaces/     # 端口定义
-│   │   ├── src/agent/          # 子代理系统
-│   │   ├── src/tool/           # 工具系统（Bash、Subagent、文件操作）
-│   │   ├── src/studio/         # Studio 运行时
-│   │   ├── src/skill/          # 技能系统
-│   │   └── migrations/         # SeaORM SQLite 迁移
+│   │   ├── src/mcp/            # MCP 动态工具运行时
+│   │   ├── src/tool/           # 工具系统
+│   │   │   ├── command/          # Shell 进程管理（bash + write_stdin）
+│   │   │   ├── file/             # 文件操作（read、write、apply_patch）
+│   │   │   ├── multi_agent/      # 子代理编排工具
+│   │   │   ├── ask_user.rs       # 向用户提问
+│   │   │   ├── lsp.rs            # LSP 查询
+│   │   │   └── skill.rs          # 技能系统工具
+│   │   ├── src/skill/           # 技能目录与扫描
+│   │   ├── src/studio/          # Studio 运行时（SQLite、审批）
+│   │   └── migrations/          # SeaORM SQLite 迁移
 │   └── pure-studio/          # Tauri 2 桌面应用
 │       ├── src-tauri/          # Rust 后端（命令桥接、事件、审批）
 │       └── src/                # React + TypeScript 前端
-├── design/                   # 架构设计文档（13 份）
+├── design/                   # 架构设计文档（14 份）
 │   ├── 01-overview.md
 │   ├── 02-crates.md
 │   ├── 03-pipeline.md
 │   ├── ...
-│   └── 13-skills.md
+│   └── 13-tool-calling-runtime.md
 ├── .claude/skills/           # 项目技能（Codex 协作规则）
 ├── .cargo/config.toml        # Cargo 配置
 ├── CLAUDE.md                 # 项目规范
@@ -114,6 +126,7 @@ pure-lang/
 | UI 图标 | lucide-react |
 | 国际化 | i18next + react-i18next |
 | LLM 集成 | OpenAI 兼容 API（async-openai + SSE 流式） |
+| LSP 客户端 | lsp-types + 自研 JSON-RPC framing（rust-analyzer 支持） |
 | 流式解析 | async-openai stream |
 
 ## 核心概念
@@ -122,12 +135,30 @@ pure-lang/
 |------|------|
 | **Turn** | 单轮编译请求，包含消息、工具调用、模型交互的完整生命周期 |
 | **Session** | 多轮会话管理，维护消息历史和上下文 |
-| **Tool** | 可执行工具（Bash、Subagent、文件操作等），通过 `ToolRegistry` 注册 |
+| **Tool** | 可执行工具（Shell、文件操作、Subagent、LSP 查询、用户提问等），通过 `ToolRegistry` 注册；支持 MCP 动态工具扩展 |
+| **MCP** | Model Context Protocol 集成，运行时发现和调用外部 MCP 服务器提供的工具 |
+| **LSP** | Language Server Protocol 客户端，支持代码智能查询（定义跳转、引用查找等） |
 | **Agent** | 子代理系统，支持分层任务分解与编排 |
 | **Skill** | 项目技能系统，定义 Codex 协作规则和可复用流程 |
 | **Studio** | Pure Studio 桌面运行时，管理项目、会话和配置 |
 | **Provider** | LLM Provider 抽象（OpenAI、DeepSeek、智谱等） |
 | **CompileMode** | 编译模式（auto / plan / compact） |
+
+### 内置工具
+
+共 23 个内置工具 + MCP 动态工具，按分类如下：
+
+| 分类 | 工具 |
+|------|------|
+| Shell | `bash`, `write_stdin` |
+| 文件读取 | `read_file`, `list_files`, `search_files`, `stat_path` |
+| 文件写入 | `write_file`, `create_directory`, `delete_path`, `copy_path`, `move_path` |
+| 补丁 | `apply_patch` |
+| 代码智能 | `lsp_query` |
+| 子代理 | `spawn_agent`, `wait_agent`, `list_agents`, `send_message`, `followup_task`, `close_agent` |
+| 用户交互 | `request_user_input` |
+| 技能 | `skills_list`, `skill_view`, `skill_manage` |
+| MCP | 动态注册（`mcp__<server>__<tool>`） |
 
 ## 开发
 
@@ -189,6 +220,7 @@ npm run tauri:build     # 生产构建
 | [11-studio-ui.md](./design/11-studio-ui.md) | Studio UI 设计 |
 | [12-plan-b-implementation-spec.md](./design/12-plan-b-implementation-spec.md) | 方案乙实现规约 |
 | [13-skills.md](./design/13-skills.md) | 技能系统设计 |
+| [13-tool-calling-runtime.md](./design/13-tool-calling-runtime.md) | 工具调用运行时 |
 
 ## 项目规范
 

@@ -20,6 +20,7 @@ use crate::config::{
     EffectiveMcpServerConfig, McpServerConfig, McpServerStatusKind, McpServerTransport,
     validate_mcp_identifier,
 };
+use crate::process::{configure_background_command, terminate_process_tree};
 use crate::tool::{OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput};
 
 const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
@@ -36,6 +37,7 @@ type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 trait McpClient: fmt::Debug + Send + Sync {
     fn request<'a>(&'a self, method: &'a str, params: Value) -> BoxFuture<'a, Result<Value>>;
     fn notify<'a>(&'a self, method: &'a str, params: Value) -> BoxFuture<'a, Result<()>>;
+    fn shutdown<'a>(&'a self) -> BoxFuture<'a, ()>;
 }
 
 /// MCP server 的运行时可用状态。
@@ -185,12 +187,17 @@ impl McpRuntimeRegistry {
         let server_ids = servers.keys().cloned().collect::<BTreeSet<_>>();
         let mut probes = Vec::new();
         let mut changed = false;
+        let mut shutdown_clients = Vec::new();
         {
             let mut state = self.state.lock().await;
             let before_len = state.servers.len();
-            state
-                .servers
-                .retain(|server_id, _| server_ids.contains(server_id));
+            state.servers.retain(|server_id, server| {
+                let keep = server_ids.contains(server_id);
+                if !keep && let Some(client) = server.client.take() {
+                    shutdown_clients.push(client);
+                }
+                keep
+            });
             changed |= before_len != state.servers.len();
 
             for (server_id, server) in servers {
@@ -200,10 +207,13 @@ impl McpRuntimeRegistry {
                         let should_probe =
                             should_probe_server(state.servers.get(&server_id), fingerprint, policy);
                         if should_probe {
-                            state.servers.insert(
+                            if let Some(mut previous) = state.servers.insert(
                                 server_id.clone(),
                                 McpRuntimeServerState::checking(fingerprint),
-                            );
+                            ) && let Some(client) = previous.client.take()
+                            {
+                                shutdown_clients.push(client);
+                            }
                             probes.push((server_id, server, fingerprint));
                             changed = true;
                         } else if let std::collections::btree_map::Entry::Vacant(entry) =
@@ -218,6 +228,7 @@ impl McpRuntimeRegistry {
                             &mut state,
                             server_id,
                             McpRuntimeServerState::disabled(fingerprint),
+                            &mut shutdown_clients,
                         );
                     }
                     McpServerStatusKind::MissingCredential => {
@@ -228,10 +239,14 @@ impl McpRuntimeRegistry {
                                 fingerprint,
                                 server.status_message,
                             ),
+                            &mut shutdown_clients,
                         );
                     }
                 }
             }
+        }
+        for client in shutdown_clients {
+            client.shutdown().await;
         }
         if changed {
             self.emit_update();
@@ -309,19 +324,43 @@ impl McpRuntimeRegistry {
     }
 
     pub(crate) async fn mark_unavailable(&self, server_id: &str, error: String) {
-        let mut state = self.state.lock().await;
-        let Some(fingerprint) = state
-            .servers
-            .get(server_id)
-            .map(|current| current.fingerprint)
-        else {
-            return;
+        let shutdown_client = {
+            let mut state = self.state.lock().await;
+            let Some(fingerprint) = state
+                .servers
+                .get(server_id)
+                .map(|current| current.fingerprint)
+            else {
+                return;
+            };
+            state
+                .servers
+                .insert(
+                    server_id.to_string(),
+                    McpRuntimeServerState::unavailable(fingerprint, unix_seconds(), error),
+                )
+                .and_then(|mut state| state.client.take())
         };
-        state.servers.insert(
-            server_id.to_string(),
-            McpRuntimeServerState::unavailable(fingerprint, unix_seconds(), error),
-        );
-        drop(state);
+        if let Some(client) = shutdown_client {
+            client.shutdown().await;
+        }
+        self.emit_update();
+    }
+
+    pub async fn shutdown(&self) {
+        let clients = {
+            let mut state = self.state.lock().await;
+            let clients = state
+                .servers
+                .values_mut()
+                .filter_map(|server| server.client.take())
+                .collect::<Vec<_>>();
+            state.servers.clear();
+            clients
+        };
+        for client in clients {
+            client.shutdown().await;
+        }
         self.emit_update();
     }
 
@@ -568,13 +607,18 @@ fn insert_terminal_state(
     state: &mut McpRuntimeRegistryState,
     server_id: String,
     next: McpRuntimeServerState,
+    shutdown_clients: &mut Vec<Arc<dyn McpClient>>,
 ) -> bool {
     let changed = state.servers.get(&server_id).is_none_or(|current| {
         current.fingerprint != next.fingerprint
             || current.availability_kind != next.availability_kind
             || current.availability_message != next.availability_message
     });
-    state.servers.insert(server_id, next);
+    if let Some(mut previous) = state.servers.insert(server_id, next)
+        && let Some(client) = previous.client.take()
+    {
+        shutdown_clients.push(client);
+    }
     changed
 }
 
@@ -653,8 +697,8 @@ async fn list_tools(client: &Arc<dyn McpClient>) -> Result<Vec<McpToolDefinition
 
 struct StdioMcpClient {
     server_id: String,
-    stdin: Mutex<ChildStdin>,
-    _child: Mutex<Child>,
+    stdin: Mutex<Option<ChildStdin>>,
+    child: Mutex<Option<Child>>,
     pending: Arc<Mutex<BTreeMap<u64, oneshot::Sender<Result<Value>>>>>,
     next_id: AtomicU64,
 }
@@ -671,7 +715,7 @@ impl StdioMcpClient {
     async fn spawn(server_id: &str, server: &McpServerConfig) -> Result<Self> {
         let command = server.command.as_deref().unwrap_or_default();
         let mut process = Command::new(command);
-        process.kill_on_drop(true);
+        configure_background_command(&mut process);
         process.args(&server.args);
         process.stdin(Stdio::piped());
         process.stdout(Stdio::piped());
@@ -709,8 +753,8 @@ impl StdioMcpClient {
         ));
         Ok(Self {
             server_id: server_id.to_string(),
-            stdin: Mutex::new(stdin),
-            _child: Mutex::new(child),
+            stdin: Mutex::new(Some(stdin)),
+            child: Mutex::new(Some(child)),
             pending,
             next_id: AtomicU64::new(1),
         })
@@ -729,11 +773,19 @@ impl McpClient for StdioMcpClient {
                 method,
                 params,
             };
-            let mut stdin = self.stdin.lock().await;
-            if let Err(error) = write_stdio_message(&mut stdin, &request).await {
+            let mut stdin_guard = self.stdin.lock().await;
+            let Some(stdin) = stdin_guard.as_mut() else {
+                self.pending.lock().await.remove(&id);
+                return Err(PureError::ToolExecutionFailed {
+                    tool: self.server_id.clone(),
+                    error: "MCP stdio client is shut down".to_string(),
+                });
+            };
+            if let Err(error) = write_stdio_message(stdin, &request).await {
                 self.pending.lock().await.remove(&id);
                 return Err(error);
             }
+            drop(stdin_guard);
             match tokio::time::timeout(REQUEST_TIMEOUT, rx).await {
                 Ok(Ok(result)) => result,
                 Ok(Err(_)) => Err(PureError::ToolExecutionFailed {
@@ -759,8 +811,42 @@ impl McpClient for StdioMcpClient {
                 method,
                 params,
             };
-            let mut stdin = self.stdin.lock().await;
-            write_stdio_message(&mut stdin, &request).await
+            let mut stdin_guard = self.stdin.lock().await;
+            let Some(stdin) = stdin_guard.as_mut() else {
+                return Err(PureError::ToolExecutionFailed {
+                    tool: self.server_id.clone(),
+                    error: "MCP stdio client is shut down".to_string(),
+                });
+            };
+            write_stdio_message(stdin, &request).await
+        })
+    }
+
+    fn shutdown<'a>(&'a self) -> BoxFuture<'a, ()> {
+        Box::pin(async move {
+            self.stdin.lock().await.take();
+            {
+                let mut pending = self.pending.lock().await;
+                let pending = std::mem::take(&mut *pending);
+                for (_, sender) in pending {
+                    let _ = sender.send(Err(PureError::ToolExecutionFailed {
+                        tool: self.server_id.clone(),
+                        error: "MCP stdio client shut down".to_string(),
+                    }));
+                }
+            }
+            let Some(mut child) = self.child.lock().await.take() else {
+                return;
+            };
+            let pid = child.id();
+            if tokio::time::timeout(Duration::from_millis(500), child.wait())
+                .await
+                .is_err()
+            {
+                terminate_process_tree(pid).await;
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+            }
         })
     }
 }
@@ -947,6 +1033,10 @@ impl McpClient for HttpMcpClient {
             }
         })
     }
+
+    fn shutdown<'a>(&'a self) -> BoxFuture<'a, ()> {
+        Box::pin(async {})
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -1073,6 +1163,9 @@ fn unix_seconds() -> i64 {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
     use crate::config::{PureConfig, effective_mcp_servers};
     use pretty_assertions::assert_eq;
@@ -1080,6 +1173,7 @@ mod tests {
     #[derive(Debug)]
     struct FakeMcpClient {
         fail_requests: bool,
+        shutdown_count: Option<Arc<AtomicUsize>>,
     }
 
     impl McpClient for FakeMcpClient {
@@ -1101,6 +1195,21 @@ mod tests {
         fn notify<'a>(&'a self, _method: &'a str, _params: Value) -> BoxFuture<'a, Result<()>> {
             Box::pin(async { Ok(()) })
         }
+
+        fn shutdown<'a>(&'a self) -> BoxFuture<'a, ()> {
+            Box::pin(async move {
+                if let Some(count) = &self.shutdown_count {
+                    count.fetch_add(1, Ordering::SeqCst);
+                }
+            })
+        }
+    }
+
+    fn fake_client(fail_requests: bool) -> Arc<FakeMcpClient> {
+        Arc::new(FakeMcpClient {
+            fail_requests,
+            shutdown_count: None,
+        })
     }
 
     #[test]
@@ -1178,9 +1287,7 @@ mod tests {
             McpRuntimeServerState::available(
                 1,
                 123,
-                Arc::new(FakeMcpClient {
-                    fail_requests: false,
-                }),
+                fake_client(false),
                 vec![McpToolDefinition {
                     name: "search_issues".to_string(),
                     description: Some("Search issues".to_string()),
@@ -1203,8 +1310,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tool_transport_failure_marks_server_unavailable() {
+    async fn registry_shutdown_closes_available_clients() {
         let registry = McpRuntimeRegistry::new();
+        let shutdown_count = Arc::new(AtomicUsize::new(0));
         registry.state.lock().await.servers.insert(
             "github".to_string(),
             McpRuntimeServerState::available(
@@ -1212,9 +1320,59 @@ mod tests {
                 123,
                 Arc::new(FakeMcpClient {
                     fail_requests: false,
+                    shutdown_count: Some(shutdown_count.clone()),
                 }),
                 Vec::new(),
             ),
+        );
+
+        registry.shutdown().await;
+
+        assert_eq!(shutdown_count.load(Ordering::SeqCst), 1);
+        assert!(registry.snapshots().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reconcile_disabled_server_closes_previous_client() {
+        let registry = McpRuntimeRegistry::new();
+        let shutdown_count = Arc::new(AtomicUsize::new(0));
+        registry.state.lock().await.servers.insert(
+            "github".to_string(),
+            McpRuntimeServerState::available(
+                1,
+                123,
+                Arc::new(FakeMcpClient {
+                    fail_requests: false,
+                    shutdown_count: Some(shutdown_count.clone()),
+                }),
+                Vec::new(),
+            ),
+        );
+        let mut config = PureConfig::default();
+        config.mcp_servers.insert(
+            "github".to_string(),
+            McpServerConfig {
+                enabled: false,
+                ..Default::default()
+            },
+        );
+
+        registry.reconcile(effective_mcp_servers(&config)).await;
+        let snapshots = registry.snapshots().await;
+
+        assert_eq!(shutdown_count.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            snapshots["github"].availability_kind,
+            McpAvailabilityKind::Disabled
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_transport_failure_marks_server_unavailable() {
+        let registry = McpRuntimeRegistry::new();
+        registry.state.lock().await.servers.insert(
+            "github".to_string(),
+            McpRuntimeServerState::available(1, 123, fake_client(false), Vec::new()),
         );
         let adapter = McpToolAdapter::new(
             "github",
@@ -1223,9 +1381,7 @@ mod tests {
                 description: Some("Search issues".to_string()),
                 input_schema: default_input_schema(),
             },
-            Arc::new(FakeMcpClient {
-                fail_requests: true,
-            }),
+            fake_client(true),
             Some(registry.clone()),
         )
         .unwrap();

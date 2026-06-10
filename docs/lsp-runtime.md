@@ -9,6 +9,7 @@ v1 只内置 `rust-analyzer`：
 - 项目工作区存在 `Cargo.toml` 时启用 Rust LSP 探测。
 - 使用 `rust-analyzer` 命令和 stdio transport。
 - 不自动安装缺失命令；缺失时记录不可用状态并给 UI/工具返回可读提示。
+- Windows 下探测和启动语言服务器必须作为后台子进程静默运行，不显示额外终端窗口。
 
 ## 架构边界
 
@@ -18,6 +19,7 @@ v1 只内置 `rust-analyzer`：
 - 维护语言服务器进程、request id、pending response、notification handler。
 - 维护 server 快照、打开文档版本、diagnostics 缓存。
 - 提供 `LspRuntimeRegistry` 给 `pl-core` 和 Studio 复用。
+- 关闭 runtime 时先走 LSP `shutdown` / `exit`，再显式等待子进程退出；超时后按进程树强制终止，Drop 只作为兜底清理。
 
 `pl-core` 负责把 LSP 能力接入 agent：
 
