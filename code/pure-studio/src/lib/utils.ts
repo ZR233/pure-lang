@@ -1,4 +1,10 @@
+import { type ClassValue, clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
 import type { ProviderRecord } from "../types";
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
 
 export function initials(name: string) {
   return name
@@ -31,7 +37,9 @@ export function allModels(provider: ProviderRecord) {
 }
 
 export function providerStatusClass(provider: ProviderRecord) {
-  return provider.status.toLowerCase().includes("healthy") ? "ready" : "needs-setup";
+  return provider.status.toLowerCase().includes("healthy")
+    ? "text-emerald-600"
+    : "text-amber-600";
 }
 
 const STATUS_KEY_MAP: Record<string, string> = {

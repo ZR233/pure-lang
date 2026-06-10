@@ -12,6 +12,11 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import type {
   KeyValuePair,
   McpAvailabilityKind,
@@ -118,34 +123,37 @@ export function McpSettings({ servers, onSaveMcpSettings }: McpSettingsProps) {
   }
 
   return (
-    <section className="mcp-settings">
-      <div className="skills-console-head">
+    <section className="space-y-4">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h2>{t("settings.mcp.title")}</h2>
-          <p>{t("settings.mcp.description")}</p>
+          <h2 className="text-lg font-semibold text-foreground">{t("settings.mcp.title")}</h2>
+          <p className="text-sm text-muted-foreground">{t("settings.mcp.description")}</p>
         </div>
-        <div className="skills-console-tools">
-          <label className="search-box">
-            <Search size={16} />
-            <input
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              className="pl-9"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder={t("settings.mcp.searchPlaceholder")}
             />
-          </label>
-          <button type="button" onClick={addServer}>
-            <Plus size={16} />
+          </div>
+          <Button variant="outline" size="sm" type="button" onClick={addServer}>
+            <Plus size={16} className="mr-1" />
             {t("settings.mcp.addServer")}
-          </button>
+          </Button>
         </div>
       </div>
 
-      <div className="mcp-layout">
-        <div className="mcp-list">
+      <div className="grid grid-cols-[1fr_1fr] gap-4">
+        <div className="space-y-2">
           {filteredDrafts.length === 0 ? (
-            <div className="skills-empty-state">
-              <Server size={28} />
-              <strong>{search.trim() ? t("settings.mcp.noMatches") : t("settings.mcp.empty")}</strong>
+            <div className="flex flex-col items-center gap-2 py-16 text-center">
+              <Server size={28} className="text-muted-foreground" />
+              <strong className="text-sm text-muted-foreground">
+                {search.trim() ? t("settings.mcp.noMatches") : t("settings.mcp.empty")}
+              </strong>
             </div>
           ) : (
             filteredDrafts.map((server) => {
@@ -155,62 +163,73 @@ export function McpSettings({ servers, onSaveMcpSettings }: McpSettingsProps) {
               const statusKind = serverStatusKind(server);
               const availabilityKind = serverAvailabilityKind(server);
               return (
-                <article
-                  className={`mcp-row${active ? " active" : ""}`}
+                <Card
                   key={server.id}
+                  className={`p-3 transition-colors cursor-pointer ${
+                    active ? "border-primary/50" : "hover:border-primary/30"
+                  }`}
+                  onClick={() => setEditingId(server.id)}
                 >
-                  <button
-                    type="button"
-                    className="mcp-row-main"
-                    onClick={() => setEditingId(server.id)}
-                  >
-                    <span className="mcp-row-icon">
-                      <TransportIcon size={18} />
-                    </span>
-                    <span>
-                      <strong>{server.id}</strong>
-                      <small>{endpointSummary(server) || t("settings.mcp.noEndpoint")}</small>
-                    </span>
-                  </button>
-                  <div className="mcp-row-meta">
-                    <span className={`mcp-status ${statusKind}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <TransportIcon size={18} className="shrink-0 text-muted-foreground" />
+                      <div className="min-w-0">
+                        <strong className="text-sm text-foreground block truncate">{server.id}</strong>
+                        <small className="text-xs text-muted-foreground block truncate">
+                          {endpointSummary(server) || t("settings.mcp.noEndpoint")}
+                        </small>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 mt-2">
+                    <Badge variant={statusKind === "disabled" ? "secondary" : "default"}>
                       {t(`settings.mcp.status.${statusKind}`)}
-                    </span>
-                    <span className={`mcp-status availability ${availabilityKind}`}>
+                    </Badge>
+                    <Badge variant="outline">
                       {t(`settings.mcp.availability.${availabilityKind}`)}
-                    </span>
+                    </Badge>
                     {server.sourceKind === "builtIn" ? (
-                      <span className="mcp-source">
-                        {t("settings.mcp.builtInSource")}
-                      </span>
+                      <Badge variant="secondary">{t("settings.mcp.builtInSource")}</Badge>
                     ) : null}
                   </div>
-                  <div className="mcp-row-actions">
-                    <button
-                      type="button"
+                  <div className="flex items-center gap-1 mt-2">
+                    <Button
+                      variant="ghost"
+                      size="icon"
                       title={t("settings.mcp.toggle")}
-                      onClick={() => void toggleServer(server)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void toggleServer(server);
+                      }}
                       disabled={saving}
                     >
                       <Power size={16} />
-                    </button>
-                    <button
-                      type="button"
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
                       title={t("actions.edit")}
-                      onClick={() => setEditingId(server.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingId(server.id);
+                      }}
                     >
                       <Pencil size={16} />
-                    </button>
-                    <button
-                      type="button"
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
                       title={t("actions.delete")}
-                      onClick={() => void deleteServer(server)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void deleteServer(server);
+                      }}
                       disabled={saving || locked}
                     >
                       <Trash2 size={16} />
-                    </button>
+                    </Button>
                   </div>
-                </article>
+                </Card>
               );
             })
           )}
@@ -218,36 +237,40 @@ export function McpSettings({ servers, onSaveMcpSettings }: McpSettingsProps) {
 
         {editingServer ? (
           <form
-            className="mcp-editor"
+            className="space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
               void saveEditing();
             }}
           >
-            <div className="mcp-editor-head">
+            <div className="flex items-start justify-between gap-4">
               <div>
-                <h3>{editingServer.id || t("settings.mcp.newServer")}</h3>
-                <p>{t("settings.mcp.editorSubtitle")}</p>
+                <h3 className="text-base font-semibold text-foreground">
+                  {editingServer.id || t("settings.mcp.newServer")}
+                </h3>
+                <p className="text-sm text-muted-foreground">{t("settings.mcp.editorSubtitle")}</p>
               </div>
-              <button type="submit" disabled={saving || isLockedServer(editingServer)}>
-                <Save size={16} />
+              <Button type="submit" disabled={saving || isLockedServer(editingServer)}>
+                <Save size={16} className="mr-1" />
                 {saving ? t("actions.saving") : t("actions.save")}
-              </button>
+              </Button>
             </div>
 
             {editingServer.sourceKind === "builtIn" ? (
-              <div className="mcp-built-in-note">
-                <strong>{t("settings.mcp.builtInSource")}</strong>
-                <span>
+              <div className="rounded-lg border border-border bg-muted/50 p-3 space-y-1">
+                <strong className="text-xs">{t("settings.mcp.builtInSource")}</strong>
+                <span className="block text-xs text-muted-foreground">
                   {editingServer.sourceDetail ?? t("settings.mcp.builtInDetail")}
                 </span>
-                {editingServer.statusMessage ? <small>{editingServer.statusMessage}</small> : null}
+                {editingServer.statusMessage ? (
+                  <small className="block text-xs text-muted-foreground">{editingServer.statusMessage}</small>
+                ) : null}
               </div>
             ) : null}
 
-            <div className="mcp-health-note">
-              <strong>{t("settings.mcp.availabilityTitle")}</strong>
-              <span>
+            <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1">
+              <strong className="text-xs">{t("settings.mcp.availabilityTitle")}</strong>
+              <span className="block text-xs text-muted-foreground">
                 {t(`settings.mcp.availability.${serverAvailabilityKind(editingServer)}`)}
                 {editingServer.toolCount != null
                   ? ` · ${t("settings.mcp.toolCount", { count: editingServer.toolCount })}`
@@ -259,13 +282,13 @@ export function McpSettings({ servers, onSaveMcpSettings }: McpSettingsProps) {
                   : ""}
               </span>
               {editingServer.availabilityMessage ? (
-                <small>{editingServer.availabilityMessage}</small>
+                <small className="block text-xs text-muted-foreground">{editingServer.availabilityMessage}</small>
               ) : null}
             </div>
 
-            <label className="settings-field">
-              <span>{t("settings.mcp.serverId")}</span>
-              <input
+            <div className="space-y-2">
+              <Label>{t("settings.mcp.serverId")}</Label>
+              <Input
                 value={editingServer.id}
                 disabled={isLockedServer(editingServer)}
                 onChange={(event) => {
@@ -279,9 +302,9 @@ export function McpSettings({ servers, onSaveMcpSettings }: McpSettingsProps) {
                   setEditingId(nextId);
                 }}
               />
-            </label>
+            </div>
 
-            <div className="mcp-segmented" role="radiogroup" aria-label={t("settings.mcp.transport")}>
+            <div className="flex rounded-lg border border-border p-1" role="radiogroup" aria-label={t("settings.mcp.transport")}>
               {transports.map((transport) => {
                 const active = editingServer.transport === transport;
                 const Icon = transport === "stdio" ? Terminal : Globe2;
@@ -289,7 +312,11 @@ export function McpSettings({ servers, onSaveMcpSettings }: McpSettingsProps) {
                   <button
                     type="button"
                     key={transport}
-                    className={active ? "active" : ""}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition-colors ${
+                      active
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
                     role="radio"
                     aria-checked={active}
                     disabled={isLockedServer(editingServer)}
@@ -333,16 +360,16 @@ function StdioFields({
 }) {
   const { t } = useTranslation();
   return (
-    <>
-      <label className="settings-field">
-        <span>{t("settings.mcp.command")}</span>
-        <input
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label>{t("settings.mcp.command")}</Label>
+        <Input
           value={server.command ?? ""}
           disabled={locked}
           onChange={(event) => updateServer((current) => ({ ...current, command: event.target.value }))}
           placeholder="npx"
         />
-      </label>
+      </div>
       <StringListEditor
         label={t("settings.mcp.args")}
         values={server.args}
@@ -350,22 +377,22 @@ function StdioFields({
         locked={locked}
         onChange={(args) => updateServer((current) => ({ ...current, args }))}
       />
-      <label className="settings-field">
-        <span>{t("settings.mcp.cwd")}</span>
-        <input
+      <div className="space-y-2">
+        <Label>{t("settings.mcp.cwd")}</Label>
+        <Input
           value={server.cwd ?? ""}
           disabled={locked}
           onChange={(event) => updateServer((current) => ({ ...current, cwd: event.target.value }))}
           placeholder="D:/workspace"
         />
-      </label>
+      </div>
       <KeyValueEditor
         label={t("settings.mcp.env")}
         values={server.env}
         locked={locked}
         onChange={(env) => updateServer((current) => ({ ...current, env }))}
       />
-    </>
+    </div>
   );
 }
 
@@ -380,19 +407,19 @@ function HttpFields({
 }) {
   const { t } = useTranslation();
   return (
-    <>
-      <label className="settings-field">
-        <span>{t("settings.mcp.url")}</span>
-        <input
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label>{t("settings.mcp.url")}</Label>
+        <Input
           value={server.url ?? ""}
           disabled={locked}
           onChange={(event) => updateServer((current) => ({ ...current, url: event.target.value }))}
           placeholder="https://example.com/mcp"
         />
-      </label>
-      <label className="settings-field">
-        <span>{t("settings.mcp.bearerTokenEnvVar")}</span>
-        <input
+      </div>
+      <div className="space-y-2">
+        <Label>{t("settings.mcp.bearerTokenEnvVar")}</Label>
+        <Input
           value={server.bearerTokenEnvVar ?? ""}
           disabled={locked}
           onChange={(event) =>
@@ -400,14 +427,14 @@ function HttpFields({
           }
           placeholder="MCP_API_TOKEN"
         />
-      </label>
+      </div>
       <KeyValueEditor
         label={t("settings.mcp.headers")}
         values={server.headers}
         locked={locked}
         onChange={(headers) => updateServer((current) => ({ ...current, headers }))}
       />
-    </>
+    </div>
   );
 }
 
@@ -427,11 +454,11 @@ function StringListEditor({
   const { t } = useTranslation();
   const rows = values.length ? values : [""];
   return (
-    <div className="mcp-field-group">
-      <span>{label}</span>
+    <div className="space-y-2">
+      <Label>{label}</Label>
       {rows.map((value, index) => (
-        <div className="mcp-inline-row" key={index}>
-          <input
+        <div className="flex items-center gap-2" key={index}>
+          <Input
             value={value}
             placeholder={placeholder}
             disabled={locked}
@@ -441,25 +468,28 @@ function StringListEditor({
               onChange(next);
             }}
           />
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             title={t("actions.delete")}
             disabled={locked}
             onClick={() => onChange(rows.filter((_, rowIndex) => rowIndex !== index))}
           >
             <X size={16} />
-          </button>
+          </Button>
         </div>
       ))}
-      <button
+      <Button
         type="button"
-        className="mcp-add-row"
+        variant="outline"
+        size="sm"
         disabled={locked}
         onClick={() => onChange([...values, ""])}
       >
-        <Plus size={16} />
+        <Plus size={16} className="mr-1" />
         {t("settings.mcp.addRow")}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -478,11 +508,11 @@ function KeyValueEditor({
   const { t } = useTranslation();
   const rows = values.length ? values : [{ key: "", value: "" }];
   return (
-    <div className="mcp-field-group">
-      <span>{label}</span>
+    <div className="space-y-2">
+      <Label>{label}</Label>
       {rows.map((entry, index) => (
-        <div className="mcp-key-value-row" key={index}>
-          <input
+        <div className="flex items-center gap-2" key={index}>
+          <Input
             value={entry.key}
             placeholder={t("settings.mcp.key")}
             disabled={locked}
@@ -492,7 +522,7 @@ function KeyValueEditor({
               onChange(next);
             }}
           />
-          <input
+          <Input
             value={entry.value}
             placeholder={t("settings.mcp.value")}
             disabled={locked}
@@ -502,25 +532,28 @@ function KeyValueEditor({
               onChange(next);
             }}
           />
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             title={t("actions.delete")}
             disabled={locked}
             onClick={() => onChange(rows.filter((_, rowIndex) => rowIndex !== index))}
           >
             <X size={16} />
-          </button>
+          </Button>
         </div>
       ))}
-      <button
+      <Button
         type="button"
-        className="mcp-add-row"
+        variant="outline"
+        size="sm"
         disabled={locked}
         onClick={() => onChange([...values, { key: "", value: "" }])}
       >
-        <Plus size={16} />
+        <Plus size={16} className="mr-1" />
         {t("settings.mcp.addRow")}
-      </button>
+      </Button>
     </div>
   );
 }

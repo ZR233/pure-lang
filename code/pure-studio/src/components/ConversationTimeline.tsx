@@ -1,4 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { Button } from "@/components/ui/button";
 import { ChevronDown } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -200,39 +201,40 @@ export function ConversationTimeline({
   const virtualItems = virtualizer.getVirtualItems();
 
   return (
-    <div className="message-stream" ref={scrollRef}>
+    <div className="relative flex-1 min-h-0 overflow-x-hidden overflow-y-auto px-8 py-5" ref={scrollRef}>
       {entries.length === 0 ? (
-        emptyState
+        <div className="flex-1 flex items-center justify-center">
+          {emptyState}
+        </div>
       ) : (
-        <div className="conversation-timeline">
-          <div className="timeline-virtual-spacer" style={{ height: `${virtualizer.getTotalSize()}px` }}>
-            {virtualItems.map((virtualItem) => {
-              const entry = entries[virtualItem.index];
-              if (!entry) return null;
-              return (
-                <div
-                  key={virtualItem.key}
-                  className="timeline-virtual-row"
-                  data-index={virtualItem.index}
-                  ref={virtualizer.measureElement}
-                  style={{ transform: `translateY(${virtualItem.start}px)` }}
-                >
-                  {renderEntry(entry)}
-                </div>
-              );
-            })}
-          </div>
+        <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
+          {virtualItems.map((virtualItem) => {
+            const entry = entries[virtualItem.index];
+            if (!entry) return null;
+            return (
+              <div
+                key={virtualItem.key}
+                data-index={virtualItem.index}
+                ref={virtualizer.measureElement}
+                className="absolute top-0 left-0 w-full"
+                style={{ transform: `translateY(${virtualItem.start}px)` }}
+              >
+                {renderEntry(entry)}
+              </div>
+            );
+          })}
         </div>
       )}
       {showScrollButton && (
-        <button
-          className="scroll-to-bottom"
+        <Button
+          variant="outline"
+          size="icon"
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 h-8 w-8 rounded-full shadow-md"
           onClick={scrollToBottom}
           title={scrollToBottomLabel}
-          aria-label={scrollToBottomLabel}
         >
-          <ChevronDown size={18} />
-        </button>
+          <ChevronDown size={16} />
+        </Button>
       )}
     </div>
   );

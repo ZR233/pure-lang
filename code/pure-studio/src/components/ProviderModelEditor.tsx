@@ -1,5 +1,8 @@
 import { Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import type { ModelRecord, ProviderRecord } from "../types";
 
 type ProviderModelEditorProps = {
@@ -60,45 +63,45 @@ function formatPrice(model: ModelRecord, t: (key: string) => string) {
 
 function ModelParameterGrid({ model, t }: { model: ModelRecord; t: (key: string) => string }) {
   return (
-    <div className="model-parameter-grid">
-      <span>
-        <small>{t("model.context")}</small>
-        <strong>{formatTokens(model.contextWindow ?? model.maxContextWindow, t)}</strong>
-      </span>
-      <span>
-        <small>{t("model.maxOutput")}</small>
-        <strong>{formatTokens(model.maxOutputTokens, t)}</strong>
-      </span>
-      <span>
-        <small>{t("model.autoCompact")}</small>
-        <strong>{formatTokens(model.autoCompactTokenLimit, t)}</strong>
-      </span>
-      <span>
-        <small>{t("model.temperature")}</small>
-        <strong>{model.defaultTemperature ?? notConfigured(t)}</strong>
-      </span>
-      <span>
-        <small>{t("model.efforts")}</small>
-        <strong>{modelEffortsText(model) || notConfigured(t)}</strong>
-      </span>
-      <span>
-        <small>{t("model.truncation")}</small>
-        <strong>
+    <div className="grid grid-cols-4 gap-2 mt-2 text-xs">
+      <div>
+        <small className="text-muted-foreground">{t("model.context")}</small>
+        <p className="font-medium text-foreground">{formatTokens(model.contextWindow ?? model.maxContextWindow, t)}</p>
+      </div>
+      <div>
+        <small className="text-muted-foreground">{t("model.maxOutput")}</small>
+        <p className="font-medium text-foreground">{formatTokens(model.maxOutputTokens, t)}</p>
+      </div>
+      <div>
+        <small className="text-muted-foreground">{t("model.autoCompact")}</small>
+        <p className="font-medium text-foreground">{formatTokens(model.autoCompactTokenLimit, t)}</p>
+      </div>
+      <div>
+        <small className="text-muted-foreground">{t("model.temperature")}</small>
+        <p className="font-medium text-foreground">{model.defaultTemperature ?? notConfigured(t)}</p>
+      </div>
+      <div>
+        <small className="text-muted-foreground">{t("model.efforts")}</small>
+        <p className="font-medium text-foreground">{modelEffortsText(model) || notConfigured(t)}</p>
+      </div>
+      <div>
+        <small className="text-muted-foreground">{t("model.truncation")}</small>
+        <p className="font-medium text-foreground">
           {model.truncationMode ?? "tokens"} / {formatTokens(model.truncationLimit, t)}
-        </strong>
-      </span>
-      <span className="wide">
-        <small>{t("model.pricing")}</small>
-        <strong>{formatPrice(model, t)}</strong>
-      </span>
-      <span className="wide">
-        <small>{t("model.capabilities")}</small>
-        <strong>{formatList(model.capabilities, t)}</strong>
-      </span>
-      <span className="wide">
-        <small>{t("model.input")}</small>
-        <strong>{formatList(model.inputModalities, t)}</strong>
-      </span>
+        </p>
+      </div>
+      <div className="col-span-2">
+        <small className="text-muted-foreground">{t("model.pricing")}</small>
+        <p className="font-medium text-foreground">{formatPrice(model, t)}</p>
+      </div>
+      <div className="col-span-2">
+        <small className="text-muted-foreground">{t("model.capabilities")}</small>
+        <p className="font-medium text-foreground">{formatList(model.capabilities, t)}</p>
+      </div>
+      <div className="col-span-2">
+        <small className="text-muted-foreground">{t("model.input")}</small>
+        <p className="font-medium text-foreground">{formatList(model.inputModalities, t)}</p>
+      </div>
     </div>
   );
 }
@@ -112,55 +115,57 @@ export function ProviderModelEditor({
 }: ProviderModelEditorProps) {
   const { t } = useTranslation();
   return (
-    <div className="inline-model-editor">
-      <div className="inline-model-heading">
+    <div className="space-y-4 mt-4">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h3>{t("model.title")}</h3>
-          <p>{t("model.defaultModelDesc")}</p>
+          <h3 className="text-base font-semibold text-foreground">{t("model.title")}</h3>
+          <p className="text-sm text-muted-foreground">{t("model.defaultModelDesc")}</p>
         </div>
-        <button disabled={disabled} onClick={onAddCustomModel}>
-          <Plus size={16} />
+        <Button variant="outline" size="sm" disabled={disabled} onClick={onAddCustomModel}>
+          <Plus size={16} className="mr-1" />
           {t("model.customModelButton")}
-        </button>
+        </Button>
       </div>
 
-      <div className="model-section-title">{t("model.defaultModels")}</div>
-      <div className="model-list">
+      <div className="text-sm font-medium text-muted-foreground">{t("model.defaultModels")}</div>
+      <div className="grid gap-3">
         {provider.defaultModels.map((model) => (
-          <div className="model-row readonly detailed" key={model.slug}>
-            <div className="model-row-title">
-              <strong>{model.displayName}</strong>
-              <span>{model.slug}</span>
+          <Card className="p-3" key={model.slug}>
+            <div className="flex items-center gap-2">
+              <strong className="text-sm text-foreground">{model.displayName}</strong>
+              <span className="text-xs text-muted-foreground">{model.slug}</span>
             </div>
-            {model.description ? <p>{model.description}</p> : null}
+            {model.description ? <p className="text-xs text-muted-foreground mt-1">{model.description}</p> : null}
             <ModelParameterGrid model={model} t={t} />
-          </div>
+          </Card>
         ))}
       </div>
 
-      <div className="model-section-title">{t("model.customModels")}</div>
-      <div className="custom-model-list">
+      <div className="text-sm font-medium text-muted-foreground">{t("model.customModels")}</div>
+      <div className="grid gap-3">
         {provider.customModels.length === 0 ? (
-          <p className="muted">{t("model.noCustomModels")}</p>
+          <p className="text-sm text-muted-foreground">{t("model.noCustomModels")}</p>
         ) : (
           provider.customModels.map((model, index) => (
-            <div className="custom-model-row detailed" key={`${model.slug}-${index}`}>
-              <div className="custom-model-fields">
-                <input
+            <Card className="p-3" key={`${model.slug}-${index}`}>
+              <div className="flex items-center gap-2">
+                <Input
                   disabled={disabled}
                   value={model.slug}
                   onChange={(event) => onUpdateCustomModel(index, { slug: event.target.value })}
                   placeholder={t("model.slugPlaceholder")}
+                  className="flex-1"
                 />
-                <input
+                <Input
                   disabled={disabled}
                   value={model.displayName}
                   onChange={(event) =>
                     onUpdateCustomModel(index, { displayName: event.target.value })
                   }
                   placeholder={t("model.displayNamePlaceholder")}
+                  className="flex-1"
                 />
-                <input
+                <Input
                   disabled={disabled}
                   value={modelEffortsText(model)}
                   onChange={(event) =>
@@ -169,18 +174,20 @@ export function ProviderModelEditor({
                     })
                   }
                   placeholder={t("model.effortsPlaceholder")}
+                  className="flex-1"
                 />
-                <button
-                  className="icon-button"
+                <Button
+                  variant="ghost"
+                  size="icon"
                   disabled={disabled}
                   onClick={() => onRemoveCustomModel(index)}
                   title={t("model.deleteTooltip")}
                 >
                   <Trash2 size={16} />
-                </button>
+                </Button>
               </div>
               <ModelParameterGrid model={model} t={t} />
-            </div>
+            </Card>
           ))
         )}
       </div>

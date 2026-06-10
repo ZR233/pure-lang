@@ -1,9 +1,12 @@
 import { AlertTriangle, BookOpen, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { listDiscoveredSkills } from "../lib/tauri";
 import { errorText } from "../lib/utils";
-import type { DiscoveredSkillsPayload, SkillRecord, SkillScope } from "../types";
+import type { DiscoveredSkillsPayload, SkillRecord } from "../types";
 
 type SkillsSettingsProps = {
   selectedProjectId: string | null;
@@ -20,10 +23,6 @@ function searchableSkillText(skill: SkillRecord) {
   ]
     .join(" ")
     .toLowerCase();
-}
-
-function scopeClass(scope: SkillScope) {
-  return `skill-scope skill-scope-${scope}`;
 }
 
 export function SkillsSettings({ selectedProjectId }: SkillsSettingsProps) {
@@ -75,84 +74,96 @@ export function SkillsSettings({ selectedProjectId }: SkillsSettingsProps) {
   }, [payload?.skills, search]);
 
   return (
-    <section className="skills-settings">
-      <div className="skills-console-head">
+    <section className="space-y-4">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h2>{t("skills.title")}</h2>
-          <p>{t("skills.subtitle")}</p>
+          <h2 className="text-lg font-semibold text-foreground">{t("skills.title")}</h2>
+          <p className="text-sm text-muted-foreground">{t("skills.subtitle")}</p>
         </div>
-        <div className="skills-console-tools">
-          <label className="search-box">
-            <Search size={16} />
-            <input
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              className="pl-9"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder={t("skills.searchPlaceholder")}
             />
-          </label>
-          <button
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setReloadKey((current) => current + 1)}
             disabled={!selectedProjectId || loading}
           >
-            <RefreshCw size={16} />
+            <RefreshCw size={16} className="mr-1" />
             {t("actions.reload")}
-          </button>
+          </Button>
         </div>
       </div>
 
-      <div className="skills-meta-row">
+      <div className="flex items-center gap-3 text-sm text-muted-foreground">
         <span>{t("skills.count", { count: payload?.skills.length ?? 0 })}</span>
-        {payload?.projectDir ? <code>{payload.projectDir}</code> : null}
+        {payload?.projectDir ? <code className="text-xs">{payload.projectDir}</code> : null}
       </div>
 
       {payload?.warnings.length ? (
-        <div className="skills-warning">
-          <AlertTriangle size={16} />
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 p-3 text-sm text-muted-foreground">
+          <AlertTriangle size={16} className="shrink-0 text-amber-500" />
           <span>{payload.warnings.slice(0, 3).join(" · ")}</span>
         </div>
       ) : null}
 
       {!selectedProjectId ? (
-        <div className="skills-empty-state">
-          <BookOpen size={28} />
-          <strong>{t("skills.noProject")}</strong>
+        <div className="flex flex-col items-center gap-2 py-16 text-center">
+          <BookOpen size={28} className="text-muted-foreground" />
+          <strong className="text-sm text-muted-foreground">{t("skills.noProject")}</strong>
         </div>
       ) : loading ? (
-        <div className="skills-empty-state">
-          <BookOpen size={28} />
-          <strong>{t("skills.loading")}</strong>
+        <div className="flex flex-col items-center gap-2 py-16 text-center">
+          <BookOpen size={28} className="text-muted-foreground" />
+          <strong className="text-sm text-muted-foreground">{t("skills.loading")}</strong>
         </div>
       ) : error ? (
-        <div className="skills-empty-state error">
-          <AlertTriangle size={28} />
-          <strong>{t("skills.loadFailed")}</strong>
-          <span>{error}</span>
+        <div className="flex flex-col items-center gap-2 py-16 text-center">
+          <AlertTriangle size={28} className="text-destructive" />
+          <strong className="text-sm text-destructive">{t("skills.loadFailed")}</strong>
+          <span className="text-sm text-muted-foreground">{error}</span>
         </div>
       ) : filteredSkills.length === 0 ? (
-        <div className="skills-empty-state">
-          <BookOpen size={28} />
-          <strong>{search.trim() ? t("skills.noMatches") : t("skills.empty")}</strong>
+        <div className="flex flex-col items-center gap-2 py-16 text-center">
+          <BookOpen size={28} className="text-muted-foreground" />
+          <strong className="text-sm text-muted-foreground">
+            {search.trim() ? t("skills.noMatches") : t("skills.empty")}
+          </strong>
         </div>
       ) : (
-        <div className="skills-list">
+        <div className="grid gap-2">
           {filteredSkills.map((skill) => (
-            <article className="skill-row" key={`${skill.scope}-${skill.name}-${skill.path}`}>
-              <div className="skill-row-main">
-                <div>
-                  <strong>{skill.name}</strong>
-                  <p>{skill.description}</p>
+            <article
+              className="p-3 rounded-lg border border-border hover:bg-muted/30 transition-colors"
+              key={`${skill.scope}-${skill.name}-${skill.path}`}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <strong className="text-sm text-foreground">{skill.name}</strong>
+                  <p className="text-xs text-muted-foreground mt-0.5">{skill.description}</p>
                 </div>
-                <span className={scopeClass(skill.scope)}>{t(`skills.scope.${skill.scope}`)}</span>
+                <Badge variant="secondary" className="shrink-0">
+                  {t(`skills.scope.${skill.scope}`)}
+                </Badge>
               </div>
-              <div className="skill-row-tags">
-                <span>{skill.category ?? t("skills.uncategorized")}</span>
-                <span>
+              <div className="flex items-center gap-2 mt-2">
+                <Badge variant="outline" className="text-xs">
+                  {skill.category ?? t("skills.uncategorized")}
+                </Badge>
+                <Badge variant="outline" className="text-xs">
                   {skill.platforms.length > 0
                     ? skill.platforms.join(", ")
                     : t("skills.allPlatforms")}
-                </span>
+                </Badge>
               </div>
-              <code>{skill.path}</code>
+              <code className="mt-2 block text-xs text-muted-foreground">{skill.path}</code>
             </article>
           ))}
         </div>

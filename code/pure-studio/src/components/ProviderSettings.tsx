@@ -1,7 +1,6 @@
 import {
   AlertCircle,
   Activity,
-  CheckCircle2,
   Cpu,
   Pencil,
   Plus,
@@ -14,6 +13,11 @@ import {
 import type { TFunction } from "i18next";
 import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import type {
   ModelRecord,
   ProviderKind,
@@ -31,7 +35,7 @@ import {
   replaceProvider,
   suggestProviderId,
 } from "../lib/provider-settings";
-import { allModels, initials, providerStatusClass, translateStatus } from "../lib/utils";
+import { allModels, initials, translateStatus } from "../lib/utils";
 import { ProviderEditPage } from "./ProviderEditPage";
 
 type ProviderSettingsProps = {
@@ -89,9 +93,6 @@ export function ProviderSettings({
       modelText.includes(query)
     );
   });
-  const selectedProvider =
-    providers.find((provider) => provider.id === selectedProviderId) ?? providers[0] ?? null;
-
   async function saveSnapshot(snapshot: ProviderSettingsSaveSnapshot) {
     if (isSaving) {
       return false;
@@ -253,7 +254,7 @@ export function ProviderSettings({
   }
 
   return (
-    <div className="provider-settings">
+    <div>
       {draft ? (
         <ProviderEditPage
           mode={draft.mode}
@@ -269,159 +270,178 @@ export function ProviderSettings({
           onRemoveCustomModel={removeCustomModel}
         />
       ) : (
-        <section className="provider-directory">
-          <div className="provider-console-head">
+        <section className="space-y-4">
+          <div className="flex items-start justify-between gap-4">
             <div>
-              <h2>{t("settings.providerRoute")}</h2>
-              <p>{t("settings.providerRouteDesc")}</p>
+              <h2 className="text-lg font-semibold text-foreground">{t("settings.providerRoute")}</h2>
+              <p className="text-sm text-muted-foreground">{t("settings.providerRouteDesc")}</p>
             </div>
-            <div className="provider-console-tools">
-              <label className="search-box">
-                <Search size={16} />
-                <input
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  className="pl-9"
                   value={providerSearch}
                   onChange={(event) => setProviderSearch(event.target.value)}
                   placeholder={t("provider.searchPlaceholder")}
                 />
-              </label>
-              <div className="provider-add-actions">
-                <button
-                  className="provider-refresh-button"
+              </div>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
                   disabled={providerUsagesLoading}
                   onClick={onRefreshProviderUsages}
                   title={t("provider.refreshUsageTooltip")}
                 >
-                  <RefreshCw size={16} className={providerUsagesLoading ? "spin" : undefined} />
-                  {t("provider.refreshUsage")}
-                </button>
-                <button disabled={isSaving || templates.length === 0} onClick={startAddProvider}>
-                  <Plus size={16} />
+                  <RefreshCw size={16} className={providerUsagesLoading ? "animate-spin" : ""} />
+                </Button>
+                <Button variant="outline" size="sm" onClick={startAddProvider}>
+                  <Plus size={16} className="mr-1" />
                   {t("provider.addProvider")}
-                </button>
+                </Button>
               </div>
             </div>
           </div>
 
-          <div className="provider-card-list">
-            {providerUsageError ? (
-              <div className="provider-usage-banner">
-                <AlertCircle size={16} />
-                <span>{providerUsageError}</span>
-              </div>
-            ) : null}
+          {providerUsageError ? (
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 p-3 text-sm text-destructive">
+              <AlertCircle size={16} />
+              <span>{providerUsageError}</span>
+            </div>
+          ) : null}
+
+          <div className="grid gap-4">
             {filteredProviders.length === 0 ? (
-              <div className="provider-empty-state">
-                <Server size={28} />
-                <strong>{t("provider.noMatchingProviders")}</strong>
-                <span>{t("provider.clearSearchHint")}</span>
-              </div>
+              <p className="text-sm text-muted-foreground text-center py-8">
+                {providerSearch.trim()
+                  ? t("provider.noMatches")
+                  : t("provider.noProviders")}
+              </p>
             ) : (
               filteredProviders.map((provider) => {
-                const isActive = provider.id === selectedProvider?.id;
-                const models = allModels(provider);
-                const defaultModel =
-                  models.find((model) => model.slug === provider.defaultModel)?.displayName ||
-                  provider.defaultModel ||
-                  t("provider.notSelected");
-                const previewModels = models.slice(0, 4);
-                const remainingModels = Math.max(0, models.length - previewModels.length);
                 const usage = providerUsageById.get(provider.id);
+                const defaultModel = allModels(provider).find(
+                  (model) => model.slug === provider.defaultModel,
+                );
+                const previewModels = allModels(provider).slice(0, 4);
+                const remainingModels = Math.max(0, allModels(provider).length - 4);
+                const initialsText = initials(provider.name || provider.id);
+                const status = provider.status;
 
                 return (
-                  <article
+                  <Card
                     key={provider.id}
-                    className={`provider-card ${isActive ? "active" : ""}`}
+                    className={`hover:border-primary/30 transition-colors cursor-pointer ${
+                      provider.id === selectedProviderId ? "border-primary/50" : ""
+                    }`}
+                    onClick={() => void selectProvider(provider.id)}
                   >
-                    <div className="provider-card-shell">
-                      <button
-                        className="provider-card-select"
-                        disabled={isSaving}
-                        onClick={() => void selectProvider(provider.id)}
-                      >
-                        <span className={`provider-badge provider-${provider.templateKind}`}>
-                          {initials(provider.name) || "P"}
-                        </span>
-                        <span className="provider-title-block">
-                          <span className="provider-title-line">
-                            <strong>{provider.name || provider.id}</strong>
-                            <span className={`provider-state ${providerStatusClass(provider)}`}>
-                              <CheckCircle2 size={14} />
-                              {translateStatus(provider.status, t)}
-                            </span>
-                            {isActive ? (
-                              <span className="default-route">{t("provider.defaultRoute")}</span>
-                            ) : null}
-                          </span>
-                          <span className="provider-card-key">
-                            <Server size={14} />
-                            <span>{provider.id}</span>
-                          </span>
-                        </span>
-                      </button>
+                    <div className="p-4 space-y-3">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-muted-foreground">
+                            {initialsText}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <strong className="text-sm text-foreground truncate">
+                                {provider.name || provider.id}
+                              </strong>
+                              <Badge
+                                variant={status === "healthy" ? "default" : "secondary"}
+                                className="shrink-0"
+                              >
+                                {translateStatus(status, t)}
+                              </Badge>
+                            </div>
+                            <span className="text-xs text-muted-foreground">{provider.id}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            disabled={isSaving}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startEditProvider(provider);
+                            }}
+                            title={t("provider.editTooltip")}
+                          >
+                            <Pencil size={16} />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            disabled={isSaving || providers.length <= 1}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void removeProvider(provider.id);
+                            }}
+                            title={t("provider.deleteTooltip")}
+                          >
+                            <Trash2 size={16} />
+                          </Button>
+                        </div>
+                      </div>
 
-                      <div className="provider-card-actions">
-                        <button
-                          className="icon-button provider-icon-action"
-                          disabled={isSaving}
-                          onClick={() => startEditProvider(provider)}
-                          title={t("provider.editTooltip")}
-                        >
-                          <Pencil size={16} />
-                        </button>
-                        <button
-                          className="icon-button provider-icon-action danger"
-                          disabled={isSaving || providers.length <= 1}
-                          onClick={() => void removeProvider(provider.id)}
-                          title={t("provider.deleteTooltip")}
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                      <div className="flex items-center gap-6 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1">
+                          <Cpu size={14} />
+                          <small>{t("provider.defaultModel")}</small>
+                          <strong className="text-foreground">
+                            {defaultModel?.displayName ?? provider.defaultModel}
+                          </strong>
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Server size={14} />
+                          <small>{t("model.title")}</small>
+                          <strong className="text-foreground">
+                            {t("provider.models", { count: provider.modelCount })}
+                          </strong>
+                        </span>
+                        <span className={`flex items-center gap-1 ${providerUsageStatusClass(usage, providerUsagesLoading)}`}>
+                          <Wallet size={14} />
+                          <small>{t("provider.usage")}</small>
+                          <strong className="text-foreground">
+                            {providerUsageSummary(provider, usage, providerUsagesLoading, t)}
+                          </strong>
+                        </span>
+                      </div>
+
+                      <ProviderUsagePanel
+                        usage={usage}
+                        loading={providerUsagesLoading}
+                        t={t}
+                      />
+
+                      <Separator />
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 text-xs font-medium">
+                          {t("provider.models", { count: provider.modelCount })}
+                        </span>
+                        {previewModels.map((model) => (
+                          <span
+                            key={model.slug}
+                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
+                              model.slug === provider.defaultModel
+                                ? "border-primary/50 bg-primary/5 text-primary"
+                                : "border-border text-muted-foreground"
+                            }`}
+                          >
+                            {model.displayName || model.slug}
+                          </span>
+                        ))}
+                        {remainingModels > 0 ? (
+                          <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                            +{remainingModels}
+                          </span>
+                        ) : null}
                       </div>
                     </div>
-
-                    <div className="provider-card-meta">
-                      <span>
-                        <Cpu size={14} />
-                        <small>{t("provider.defaultModel")}</small>
-                        <strong>{defaultModel}</strong>
-                      </span>
-                      <span>
-                        <Server size={14} />
-                        <small>{t("model.title")}</small>
-                        <strong>{t("provider.models", { count: provider.modelCount })}</strong>
-                      </span>
-                      <span className={`provider-usage-meta ${providerUsageStatusClass(usage, providerUsagesLoading)}`}>
-                        <Wallet size={14} />
-                        <small>{t("provider.usage")}</small>
-                        <strong>{providerUsageSummary(provider, usage, providerUsagesLoading, t)}</strong>
-                      </span>
-                    </div>
-
-                    <ProviderUsagePanel
-                      usage={usage}
-                      loading={providerUsagesLoading}
-                      t={t}
-                    />
-
-                    <div className="provider-model-strip">
-                      <span className="model-count-pill">
-                        {t("provider.models", { count: provider.modelCount })}
-                      </span>
-                      {previewModels.map((model) => (
-                        <span
-                          key={model.slug}
-                          className={
-                            model.slug === provider.defaultModel ? "model-chip active" : "model-chip"
-                          }
-                        >
-                          {model.displayName || model.slug}
-                        </span>
-                      ))}
-                      {remainingModels > 0 ? (
-                        <span className="model-chip muted-chip">+{remainingModels}</span>
-                      ) : null}
-                    </div>
-                  </article>
+                  </Card>
                 );
               })
             )}
@@ -441,7 +461,7 @@ type ProviderUsagePanelProps = {
 function ProviderUsagePanel({ usage, loading, t }: ProviderUsagePanelProps) {
   if (loading && !usage) {
     return (
-      <div className="provider-usage-panel checking">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Activity size={16} />
         <span>{t("provider.usageChecking")}</span>
       </div>
@@ -450,7 +470,7 @@ function ProviderUsagePanel({ usage, loading, t }: ProviderUsagePanelProps) {
 
   if (!usage) {
     return (
-      <div className="provider-usage-panel muted">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Activity size={16} />
         <span>{t("provider.usageNotLoaded")}</span>
       </div>
@@ -460,21 +480,21 @@ function ProviderUsagePanel({ usage, loading, t }: ProviderUsagePanelProps) {
   switch (usage.status) {
     case "unsupported":
       return (
-        <div className="provider-usage-panel muted">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Activity size={16} />
           <span>{t("provider.usageUnsupported")}</span>
         </div>
       );
     case "missingCredential":
       return (
-        <div className="provider-usage-panel warning">
+        <div className="flex items-center gap-2 text-xs text-amber-600">
           <AlertCircle size={16} />
           <span>{t("provider.usageMissingCredential")}</span>
         </div>
       );
     case "failed":
       return (
-        <div className="provider-usage-panel danger">
+        <div className="flex items-center gap-2 text-xs text-destructive">
           <AlertCircle size={16} />
           <span>{usage.message || t("provider.usageFailed")}</span>
         </div>
@@ -487,7 +507,7 @@ function ProviderUsagePanel({ usage, loading, t }: ProviderUsagePanelProps) {
         return <ZhipuUsagePanel usage={usage} loading={loading} t={t} />;
       }
       return (
-        <div className="provider-usage-panel muted">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Activity size={16} />
           <span>{t("provider.usageUnavailable")}</span>
         </div>
@@ -507,24 +527,24 @@ function DeepSeekUsagePanel({
   const balance = usage.balance;
   const primary = balance ? primaryBalance(balance.balances) : null;
   return (
-    <div className={`provider-usage-panel deepseek-detail ${loading ? "refreshing" : ""}`}>
-      <div className="provider-balance-main">
-        <span className={balance?.isAvailable ? "usage-eyebrow ready" : "usage-eyebrow warning"}>
+    <div className={`rounded-lg bg-muted/50 p-3 space-y-2 ${loading ? "opacity-60" : ""}`}>
+      <div className="flex items-center justify-between">
+        <span className={`flex items-center gap-1 text-xs ${balance?.isAvailable ? "text-green-600" : "text-amber-600"}`}>
           <Wallet size={14} />
           {balance?.isAvailable ? t("provider.balanceAvailable") : t("provider.balanceUnavailable")}
         </span>
-        <strong>{primary ? formatMoney(primary.totalBalance, primary.currency) : t("provider.usageUnavailable")}</strong>
+        <strong className="text-sm">{primary ? formatMoney(primary.totalBalance, primary.currency) : t("provider.usageUnavailable")}</strong>
       </div>
-      <div className="provider-balance-grid">
+      <div className="grid gap-2">
         {(balance?.balances ?? []).map((item) => (
-          <span key={item.currency}>
-            <small>{item.currency}</small>
-            <strong>{formatMoney(item.totalBalance, item.currency)}</strong>
-            <em>
+          <div key={item.currency} className="text-xs">
+            <span className="text-muted-foreground">{item.currency}</span>
+            <strong className="ml-2">{formatMoney(item.totalBalance, item.currency)}</strong>
+            <em className="block text-muted-foreground">
               {t("provider.balanceGranted")}: {item.grantedBalance || "0"} ·{" "}
               {t("provider.balanceToppedUp")}: {item.toppedUpBalance || "0"}
             </em>
-          </span>
+          </div>
         ))}
       </div>
     </div>
@@ -551,23 +571,25 @@ function ZhipuUsagePanel({
   ].filter((item): item is readonly [string, ZhipuQuotaLimit] => Boolean(item[1]));
 
   return (
-    <div className={`provider-usage-panel zhipu-detail ${loading ? "refreshing" : ""}`}>
-      <div className="provider-quota-grid">
-        {quotaRows.length > 0 ? (
-          quotaRows.map(([label, limit]) => <QuotaRow key={limit.window} label={label} limit={limit} t={t} />)
-        ) : (
-          <div className="provider-usage-panel muted compact">
-            <Activity size={16} />
-            <span>{t("provider.usageUnavailable")}</span>
-          </div>
-        )}
-      </div>
+    <div className={`rounded-lg bg-muted/50 p-3 space-y-2 ${loading ? "opacity-60" : ""}`}>
+      {quotaRows.length > 0 ? (
+        <div className="grid gap-3">
+          {quotaRows.map(([label, limit]) => (
+            <QuotaRow key={limit.window} label={label} limit={limit} t={t} />
+          ))}
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Activity size={16} />
+          <span>{t("provider.usageUnavailable")}</span>
+        </div>
+      )}
       {mcp?.usageDetails.length ? (
-        <div className="provider-tool-usage">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
           {mcp.usageDetails.map((detail) => (
             <span key={detail.name}>
-              <small>{detail.name}</small>
-              <strong>{formatToolUsage(detail)}</strong>
+              <small className="text-muted-foreground">{detail.name}</small>
+              <strong className="ml-1">{formatToolUsage(detail)}</strong>
             </span>
           ))}
         </div>
@@ -588,15 +610,20 @@ function QuotaRow({
   const remainingPercent = quotaRemainingPercent(limit);
   const resetText = formatResetAt(limit.nextResetAt);
   return (
-    <div className="provider-quota-row">
-      <div className="provider-quota-head">
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-xs">
         <strong>{label}</strong>
-        <span>{t("provider.remainingPercent", { percent: formatPercent(remainingPercent) })}</span>
+        <span className="text-muted-foreground">
+          {t("provider.remainingPercent", { percent: formatPercent(remainingPercent) })}
+        </span>
       </div>
-      <div className="provider-quota-track">
-        <span style={{ width: `${remainingPercent}%` }} />
+      <div className="h-1.5 rounded-full bg-muted">
+        <span
+          className="block h-full rounded-full bg-primary/60 transition-all"
+          style={{ width: `${remainingPercent}%` }}
+        />
       </div>
-      <div className="provider-quota-foot">
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>{quotaAmountText(limit)}</span>
         {resetText ? <span>{t("provider.resetAt", { time: resetText })}</span> : null}
       </div>
