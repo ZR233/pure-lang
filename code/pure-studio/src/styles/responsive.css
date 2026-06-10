@@ -73,7 +73,7 @@
 
 @media (max-width: 1200px) {
   .provider-card-meta {
-    grid-template-columns: minmax(170px, 1fr) minmax(120px, 0.55fr) minmax(220px, 1.2fr);
+    grid-template-columns: minmax(170px, 1fr) minmax(120px, 0.55fr) minmax(180px, 1fr);
   }
   .provider-console-head {
     grid-template-columns: minmax(0, 1fr);
@@ -133,8 +133,11 @@
   .provider-card-meta {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .provider-card-meta > span.wide {
+  .provider-usage-meta {
     grid-column: 1 / -1;
+  }
+  .provider-quota-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
   .provider-form-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -244,11 +247,22 @@
   .provider-card-meta {
     grid-template-columns: minmax(0, 1fr);
   }
-  .provider-card-meta > span.wide {
+  .provider-usage-meta {
     grid-column: auto;
+  }
+  .provider-quota-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .provider-balance-main,
+  .provider-quota-head,
+  .provider-quota-foot {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
   }
   .provider-add-actions {
     width: 100%;
+    flex-wrap: wrap;
   }
   .provider-add-actions button {
     flex: 1;

@@ -14,15 +14,15 @@ use tokio_util::sync::CancellationToken;
 use crate::approvals::{approval_callback, deny_session_approvals, resolve_tool_approval};
 use crate::dto::{
     BootstrapDto, ConfigDto, DiscoveredSkillsDto, McpSettingsInput, PlanLifecycleResponse,
-    ProjectSelectionDto, PromptFailedPayload, ProviderSettingsInput, RunPromptResponse,
-    SessionSelectionDto, SessionTimelineDto, StopPromptResponse,
+    ProjectSelectionDto, PromptFailedPayload, ProviderSettingsInput, ProviderUsagesDto,
+    RunPromptResponse, SessionSelectionDto, SessionTimelineDto, StopPromptResponse,
 };
 use crate::events::drain_events;
 use crate::mappers::{
     agent_dtos, agent_event_dtos, config_dto_for_studio, discovered_skills_dto,
     load_session_runtime_dto, mcp_settings_to_builtin_states, mcp_settings_to_servers,
-    plan_lifecycle_events_to_states, project_dtos, provider_settings_to_edit, session_dtos,
-    timeline_events_to_items, turn_result_status_label,
+    plan_lifecycle_events_to_states, project_dtos, provider_settings_to_edit, provider_usages_dto,
+    session_dtos, timeline_events_to_items, turn_result_status_label,
 };
 use crate::state::{AppState, CommandError, CommandResult};
 use crate::user_input::{cancel_session_user_inputs, resolve_user_input, user_input_callback};
@@ -626,6 +626,11 @@ pub async fn answer_user_input(
 #[tauri::command]
 pub async fn load_config(state: State<'_, AppState>) -> CommandResult<ConfigDto> {
     config_dto_for_studio(&state.studio).await
+}
+
+#[tauri::command]
+pub async fn load_provider_usages(state: State<'_, AppState>) -> CommandResult<ProviderUsagesDto> {
+    Ok(provider_usages_dto(state.studio.provider_usages().await?))
 }
 
 #[tauri::command]

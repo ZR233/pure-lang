@@ -13,6 +13,7 @@ import {
   dismissPlan,
   implementPlan,
   loadConfig,
+  loadProviderUsages,
   loadSessionTimeline,
   openProject,
   runPrompt,
@@ -141,6 +142,18 @@ export function useStudioApp() {
     return selectTimelineEntries(state);
   }, [state.timelineItems, state.timelineOrder, state.planStates]);
 
+  const providerUsageAutoRefreshKey = useMemo(() => {
+    if (!state.settingsOpen || state.activeSettingsTab !== "providers") {
+      return "";
+    }
+    return state.providers
+      .map(
+        (provider) =>
+          `${provider.id}:${provider.templateKind}:${provider.hasBearerToken ?? provider.bearerToken.length > 0}`,
+      )
+      .join("|");
+  }, [state.settingsOpen, state.activeSettingsTab, state.providers]);
+
   useEffect(() => {
     bootstrapStudio()
       .then((payload) => {
@@ -162,6 +175,13 @@ export function useStudioApp() {
     const sessionId = state.selectedSessionId;
     reloadTimeline(sessionId);
   }, [state.selectedSessionId, t]);
+
+  useEffect(() => {
+    if (!providerUsageAutoRefreshKey) {
+      return;
+    }
+    void refreshProviderUsages();
+  }, [providerUsageAutoRefreshKey]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -624,6 +644,16 @@ export function useStudioApp() {
     }
   }
 
+  async function refreshProviderUsages() {
+    dispatch({ type: "providerUsagesLoading" });
+    try {
+      const payload = await loadProviderUsages();
+      dispatch({ type: "providerUsagesLoaded", usages: payload.usages });
+    } catch (error) {
+      dispatch({ type: "providerUsagesFailed", error: errorText(error) });
+    }
+  }
+
   async function onApprove(approvalId: string) {
     await approveTool(approvalId);
   }
@@ -681,6 +711,7 @@ export function useStudioApp() {
     onSaveProviderSettings,
     onSavePermissionMode,
     onSaveMcpSettings,
+    refreshProviderUsages,
     onReloadConfig,
     onApprove,
     onDeny,
