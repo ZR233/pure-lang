@@ -72,7 +72,7 @@ export function SettingsPage({
   const { t } = useTranslation();
 
   return (
-    <div className="fixed inset-0 z-100 grid grid-rows-[auto_auto_1fr] bg-background">
+    <div className="fixed inset-0 z-[100] grid grid-rows-[auto_auto_1fr] bg-background">
       <header className="flex items-center justify-between gap-4 px-6 py-4 border-b border-border bg-card">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={onClose}>

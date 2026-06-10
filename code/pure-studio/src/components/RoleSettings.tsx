@@ -130,7 +130,7 @@ export function RoleSettings({ roles, providers, setRoles, onSaveRoles }: RoleSe
         <p className="text-sm text-muted-foreground">{t("settings.roleRouteDesc")}</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3.5 content-start">
+      <div className="grid content-start gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(280px,1fr))]">
         {normalizedRoles.map((role) => {
           const provider = providers.find((item) => item.id === role.provider) ?? providers[0];
           const models = provider ? allModels(provider) : [];
@@ -141,11 +141,13 @@ export function RoleSettings({ roles, providers, setRoles, onSaveRoles }: RoleSe
           return (
             <Card className="grid gap-4 p-4" key={role.key}>
               <div className="flex items-start justify-between gap-2">
-                <div>
+                <div className="min-w-0">
                   <h3 className="text-sm font-semibold text-foreground">{t(roleI18n.label)}</h3>
                   <p className="text-xs text-muted-foreground">{t(roleI18n.hint)}</p>
                 </div>
-                <span className="text-xs text-muted-foreground">{role.key}</span>
+                <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                  {role.key}
+                </span>
               </div>
 
               <div className="grid gap-3">
@@ -155,7 +157,7 @@ export function RoleSettings({ roles, providers, setRoles, onSaveRoles }: RoleSe
                     value={role.provider}
                     onValueChange={(value) => changeProvider(role, value)}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger className="h-10">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -173,7 +175,7 @@ export function RoleSettings({ roles, providers, setRoles, onSaveRoles }: RoleSe
                     value={role.model}
                     onValueChange={(value) => changeModel(role, value)}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger className="h-10">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -191,7 +193,7 @@ export function RoleSettings({ roles, providers, setRoles, onSaveRoles }: RoleSe
                     value={role.effort}
                     onValueChange={(value) => changeEffort(role, value)}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger className="h-10">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
