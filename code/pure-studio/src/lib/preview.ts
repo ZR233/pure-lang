@@ -224,6 +224,45 @@ export const previewMcpServers: McpServerRecord[] = [
   },
 ];
 
+const previewAssistantMarkdown = `✅ **Markdown 渲染检查完成**
+
+| 检查项 | 状态 |
+|--------|------|
+| TypeScript 类型检查 | ✅ 通过 |
+| Vite 生产构建 | ✅ 通过 |
+| CSS 输出 | ✅ 24.32 kB |
+| JS 输出 | ✅ 605.40 kB |
+
+### 变更摘要
+
+- 新增 \`MarkdownContent.tsx\`，统一渲染回答、计划和子代理摘要。
+- 表格会在窄窗口中横向滚动，不会撑破 timeline。
+- 链接只允许 [安全协议](https://example.com/pure-studio-markdown)。
+
+\`\`\`tsx
+<MarkdownContent content={message.content} />
+\`\`\``;
+
+const previewPlanMarkdown = `## Markdown 支持计划
+
+1. 使用 \`marked.lexer\` 解析 GFM token。
+2. 将 table / code / link 渲染为 React DOM。
+3. 给预览和测试补齐覆盖。`;
+
+const previewAgentTaskMarkdown = `审查 Markdown 渲染链路：
+
+- 消息正文
+- Plan 卡片
+- Subagent summary`;
+
+const previewAgentSummaryMarkdown = `**检查结论：** 表格和代码块可渲染。
+
+| 路径 | 结果 |
+|------|------|
+| assistant | ✅ |
+| plan | ✅ |
+| subagent | ✅ |`;
+
 export const previewAgents: AgentDto[] = [
   {
     id: "agent-preview-executor",
@@ -231,9 +270,9 @@ export const previewAgents: AgentDto[] = [
     path: "/root/preview_executor",
     parentPath: null,
     role: "executor",
-    task: "检查当前工作区变更并报告可能的下一步。",
+    task: previewAgentTaskMarkdown,
     status: "completed",
-    summary: "工作区检查已完成；设置和路由代码可以验证。",
+    summary: previewAgentSummaryMarkdown,
     depth: 1,
     error: null,
     runtimeUsage: {
@@ -259,7 +298,7 @@ export const previewAgents: AgentDto[] = [
     role: "reviewer",
     task: "最终确认前审查嵌套工具输出。",
     status: "waiting",
-    summary: "正在等待嵌套 bash 审批。",
+    summary: "**等待中：** 正在等待嵌套 `bash` 审批。",
     depth: 2,
     error: null,
     runtimeUsage: null,
@@ -327,9 +366,9 @@ export const previewAgentEvents: AgentTimelineEvent[] = [
         path: "/root/preview_executor",
         parentPath: null,
         role: "executor",
-        task: "检查当前工作区变更并报告可能的下一步。",
+        task: previewAgentTaskMarkdown,
         status: "completed",
-        summary: "工作区检查已完成；设置和路由代码可以验证。",
+        summary: previewAgentSummaryMarkdown,
         depth: 1,
         error: null,
         reason: null,
@@ -392,13 +431,24 @@ export const previewTimelineItems: TimelineItem[] = [
     createdAt: 1779688800,
     updatedAt: 1779688800,
     role: "assistant",
-    content: "我先定位状态栏和对话面板的布局代码，然后把状态栏元素收拢到右侧。",
+    content: previewAssistantMarkdown,
+    thinkingChunks: [],
+  },
+  {
+    turnId: "preview-turn-1",
+    itemId: "preview-plan-1",
+    sequence: 3,
+    kind: "plan",
+    status: "completed",
+    createdAt: 1779688801,
+    updatedAt: 1779688801,
+    content: previewPlanMarkdown,
     thinkingChunks: [],
   },
   {
     turnId: "preview-turn-1",
     itemId: "preview-tool-1",
-    sequence: 3,
+    sequence: 4,
     kind: "tool",
     status: "completed",
     createdAt: 1779688802,
@@ -418,8 +468,31 @@ export const previewTimelineItems: TimelineItem[] = [
   },
   {
     turnId: "preview-turn-1",
+    itemId: "preview-agent-1",
+    sequence: 5,
+    kind: "agent",
+    status: "completed",
+    createdAt: 1779688804,
+    updatedAt: 1779688804,
+    content: "",
+    thinkingChunks: [],
+    agent: {
+      id: "agent-preview-executor",
+      path: "/root/preview_executor",
+      parentPath: null,
+      role: "executor",
+      task: previewAgentTaskMarkdown,
+      status: "completed",
+      summary: previewAgentSummaryMarkdown,
+      depth: 1,
+      error: null,
+      reason: null,
+    },
+  },
+  {
+    turnId: "preview-turn-1",
     itemId: "preview-turn-1-turn",
-    sequence: 4,
+    sequence: 6,
     kind: "turn",
     status: "completed",
     createdAt: 1779688860,

@@ -88,6 +88,16 @@ const activeAgentStatuses = new Set<AgentStatus>([
   "queued",
 ]);
 
+const liveAgentTurnPhases = new Set<TurnPhase>([
+  "running",
+  "thinking",
+  "tool",
+  "subagent",
+  "approval",
+  "userInput",
+  "stopping",
+]);
+
 /* ===== Helpers ===== */
 
 function formatTokenCount(value?: number | null): string {
@@ -892,6 +902,7 @@ export function SessionStatusBar({
   currentMode,
   isBusy,
   selectedSession,
+  turnPhase,
   permissionMode,
   agents,
 }: SessionStatusBarProps) {
@@ -904,7 +915,10 @@ export function SessionStatusBar({
   const skills = runtime?.activeSkills ?? [];
   const mcpServers = runtime?.activeMcpServers ?? [];
   const capabilityCount = skills.length;
-  const visibleAgents = agents.filter((agent) => activeAgentStatuses.has(agent.status));
+  const shouldShowAgents = isBusy && liveAgentTurnPhases.has(turnPhase);
+  const visibleAgents = shouldShowAgents
+    ? agents.filter((agent) => activeAgentStatuses.has(agent.status))
+    : [];
   const activeAgentCount = visibleAgents.length;
   const statusReadouts = {
     usage,

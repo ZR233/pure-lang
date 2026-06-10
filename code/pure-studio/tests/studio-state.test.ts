@@ -1,7 +1,10 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server.browser";
 import { initialStudioState, studioReducer } from "../src/state/studio-state";
 import { selectTimelineEntries } from "../src/state/selectors";
 import { normalizeRolesForProviders } from "../src/components/RoleSettings";
 import { selectedContextWindow } from "../src/components/SessionStatusBar";
+import { MarkdownContent } from "../src/components/MarkdownContent";
 import {
   applyProviderTemplate,
   cloneProvider,
@@ -37,6 +40,22 @@ function assertDeepEqual<T>(actual: T, expected: T) {
   if (actualJson !== expectedJson) {
     throw new Error(`Expected ${actualJson} to equal ${expectedJson}`);
   }
+}
+
+function assertIncludes(value: string, expected: string) {
+  if (!value.includes(expected)) {
+    throw new Error(`Expected ${JSON.stringify(value)} to include ${JSON.stringify(expected)}`);
+  }
+}
+
+function assertNotIncludes(value: string, expected: string) {
+  if (value.includes(expected)) {
+    throw new Error(`Expected ${JSON.stringify(value)} not to include ${JSON.stringify(expected)}`);
+  }
+}
+
+function renderMarkdown(content: string): string {
+  return renderToStaticMarkup(createElement(MarkdownContent, { content }));
 }
 
 const config: ConfigPayload = {
@@ -1775,6 +1794,39 @@ function selectedContextWindowFollowsPlannerModel() {
   );
 }
 
+function markdownRendersGfmTable() {
+  const html = renderMarkdown("| 检查项 | 状态 |\n|--------|------|\n| TypeScript | ✅ 通过 |");
+
+  assertIncludes(html, "<table>");
+  assertIncludes(html, "<th>检查项</th>");
+  assertIncludes(html, "<td>TypeScript</td>");
+}
+
+function markdownRendersCodeBlocksAndInlineCode() {
+  const html = renderMarkdown("使用 `MarkdownContent`。\n\n```ts\nconst ok = true;\n```");
+
+  assertIncludes(html, "<code>MarkdownContent</code>");
+  assertIncludes(html, "<pre><code class=\"language-ts\">const ok = true;</code></pre>");
+}
+
+function markdownAllowsOnlySafeLinks() {
+  const html = renderMarkdown("[安全](https://example.com) [危险](javascript:alert(1))");
+
+  assertIncludes(html, "href=\"https://example.com\"");
+  assertNotIncludes(html, "href=\"javascript:alert(1)\"");
+}
+
+function markdownEscapesHtmlTokens() {
+  const html = renderMarkdown("<script>alert(1)</script>");
+
+  assertIncludes(html, "&lt;script&gt;alert(1)&lt;/script&gt;");
+  assertNotIncludes(html, "<script>");
+}
+
+markdownRendersGfmTable();
+markdownRendersCodeBlocksAndInlineCode();
+markdownAllowsOnlySafeLinks();
+markdownEscapesHtmlTokens();
 staleTimelineLoadKeepsNewTurnItems();
 freshTimelineLoadMayReplaceSnapshot();
 staleTimelineLoadDoesNotOverwriteLiveDelta();

@@ -44,6 +44,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { SessionStatusBar } from "./SessionStatusBar";
 import { ConversationTimeline } from "./ConversationTimeline";
+import { MarkdownContent } from "./MarkdownContent";
 
 const agentStatusKeys: Record<AgentStatus, string> = {
   queued: "subagent.queued",
@@ -91,165 +92,6 @@ function compact(value: string, max = 220): string {
     return text;
   }
   return `${text.slice(0, max)}...`;
-}
-
-function linkHref(href: string): string | null {
-  const value = href.trim();
-  if (
-    value.startsWith("http://") ||
-    value.startsWith("https://") ||
-    value.startsWith("mailto:") ||
-    value.startsWith("#")
-  ) {
-    return value;
-  }
-  return null;
-}
-
-function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g;
-  let cursor = 0;
-  let index = 0;
-  for (const match of text.matchAll(pattern)) {
-    const token = match[0];
-    const start = match.index ?? 0;
-    if (start > cursor) {
-      nodes.push(text.slice(cursor, start));
-    }
-    const key = `${keyPrefix}-inline-${index}`;
-    if (token.startsWith("`")) {
-      nodes.push(<code key={key}>{token.slice(1, -1)}</code>);
-    } else if (token.startsWith("**")) {
-      nodes.push(<strong key={key}>{renderInlineMarkdown(token.slice(2, -2), key)}</strong>);
-    } else if (token.startsWith("*")) {
-      nodes.push(<em key={key}>{renderInlineMarkdown(token.slice(1, -1), key)}</em>);
-    } else {
-      const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-      const href = linkHref(link?.[2] ?? "");
-      nodes.push(
-        href ? (
-          <a key={key} href={href} target="_blank" rel="noreferrer">
-            {renderInlineMarkdown(link?.[1] ?? "", key)}
-          </a>
-        ) : (
-          token
-        ),
-      );
-    }
-    cursor = start + token.length;
-    index++;
-  }
-  if (cursor < text.length) {
-    nodes.push(text.slice(cursor));
-  }
-  return nodes;
-}
-
-function flushParagraph(blocks: ReactNode[], paragraph: string[], keyPrefix: string) {
-  if (paragraph.length === 0) {
-    return;
-  }
-  const text = paragraph.join("\n").trim();
-  if (text) {
-    blocks.push(<p key={`${keyPrefix}-p-${blocks.length}`}>{renderInlineMarkdown(text, `${keyPrefix}-p-${blocks.length}`)}</p>);
-  }
-  paragraph.length = 0;
-}
-
-function MarkdownContent({ content }: { content: string }) {
-  const blocks: ReactNode[] = [];
-  const paragraph: string[] = [];
-  const lines = content.replace(/\r\n/g, "\n").split("\n");
-  for (let index = 0; index < lines.length; index++) {
-    const line = lines[index];
-    if (line.match(/^```(\w+)?\s*$/)) {
-      flushParagraph(blocks, paragraph, "md");
-      const code: string[] = [];
-      index++;
-      while (index < lines.length && !lines[index].startsWith("```")) {
-        code.push(lines[index]);
-        index++;
-      }
-      blocks.push(
-        <pre key={`md-code-${blocks.length}`} className="bg-muted rounded-md p-3 text-xs overflow-x-auto my-1">
-          <code>{code.join("\n")}</code>
-        </pre>,
-      );
-      continue;
-    }
-    if (!line.trim()) {
-      flushParagraph(blocks, paragraph, "md");
-      continue;
-    }
-    const heading = line.match(/^(#{1,3})\s+(.+)$/);
-    if (heading) {
-      flushParagraph(blocks, paragraph, "md");
-      const level = heading[1].length;
-      const children = renderInlineMarkdown(heading[2], `md-h-${blocks.length}`);
-      blocks.push(
-        level === 1 ? (
-          <h2 key={`md-h-${blocks.length}`}>{children}</h2>
-        ) : level === 2 ? (
-          <h3 key={`md-h-${blocks.length}`}>{children}</h3>
-        ) : (
-          <h4 key={`md-h-${blocks.length}`}>{children}</h4>
-        ),
-      );
-      continue;
-    }
-    const quote = line.match(/^>\s?(.+)$/);
-    if (quote) {
-      flushParagraph(blocks, paragraph, "md");
-      blocks.push(
-        <blockquote key={`md-quote-${blocks.length}`}>
-          {renderInlineMarkdown(quote[1], `md-quote-${blocks.length}`)}
-        </blockquote>,
-      );
-      continue;
-    }
-    const bullet = line.match(/^\s*[-*]\s+(.+)$/);
-    if (bullet) {
-      flushParagraph(blocks, paragraph, "md");
-      const items = [bullet[1]];
-      while (index + 1 < lines.length) {
-        const next = lines[index + 1].match(/^\s*[-*]\s+(.+)$/);
-        if (!next) break;
-        items.push(next[1]);
-        index++;
-      }
-      blocks.push(
-        <ul key={`md-ul-${blocks.length}`}>
-          {items.map((item, itemIndex) => (
-            <li key={itemIndex}>{renderInlineMarkdown(item, `md-ul-${blocks.length}-${itemIndex}`)}</li>
-          ))}
-        </ul>,
-      );
-      continue;
-    }
-    const ordered = line.match(/^\s*\d+\.\s+(.+)$/);
-    if (ordered) {
-      flushParagraph(blocks, paragraph, "md");
-      const items = [ordered[1]];
-      while (index + 1 < lines.length) {
-        const next = lines[index + 1].match(/^\s*\d+\.\s+(.+)$/);
-        if (!next) break;
-        items.push(next[1]);
-        index++;
-      }
-      blocks.push(
-        <ol key={`md-ol-${blocks.length}`}>
-          {items.map((item, itemIndex) => (
-            <li key={itemIndex}>{renderInlineMarkdown(item, `md-ol-${blocks.length}-${itemIndex}`)}</li>
-          ))}
-        </ol>,
-      );
-      continue;
-    }
-    paragraph.push(line);
-  }
-  flushParagraph(blocks, paragraph, "md");
-  return <div className="space-y-1">{blocks}</div>;
 }
 
 function thoughtLabel(content: string, t: TFunction): string {
@@ -672,8 +514,8 @@ function AgentEntry({
             <span>{prompt ? t("subagent.prompt") : t("subagent.noSummaryYet")}</span>
             <ChevronDown size={14} className="group-open:rotate-180 transition-transform" />
           </summary>
-          {prompt ? <p className="text-xs mt-1">{prompt}</p> : null}
-          {summary ? <p className="text-xs mt-1 text-muted-foreground">{summary}</p> : null}
+          {prompt ? <MarkdownContent content={prompt} className="mt-1 text-xs" /> : null}
+          {summary ? <MarkdownContent content={summary} className="mt-1 text-xs text-muted-foreground" /> : null}
         </details>
       ) : null}
     </EntryShell>
