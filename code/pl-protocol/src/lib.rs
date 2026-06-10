@@ -6,12 +6,12 @@ mod permission;
 pub use error::{PureError, Result};
 pub use event::{
     AgentEvent, AgentEventReceiver, AgentEventSender, AgentRuntimeDelta, AgentStatus,
-    BudgetLimitKind, BudgetUsage, ErrorSeverity, OutputStream, PipelineStage, PlanLifecycleEvent,
-    PlanLifecycleState, RuntimeCostAmount, RuntimeUsageSnapshot, TimelineAgentItem, TimelineDelta,
-    TimelineInferenceItem, TimelineItem, TimelineItemDeltaEvent, TimelineItemKind,
-    TimelineItemStatus, TimelineTextRole, TimelineThinkingChunk, TimelineToolItem,
-    TokenUsageSnapshot, TraceEvent, TraceEventKind, UserInputAnswer, UserInputRequest,
-    UserInputResponse, UserQuestion, UserQuestionOption,
+    BudgetLimitKind, BudgetUsage, EnabledToolsEvent, ErrorSeverity, OutputStream, PipelineStage,
+    PlanLifecycleEvent, PlanLifecycleState, RuntimeCostAmount, RuntimeUsageSnapshot,
+    TimelineAgentItem, TimelineDelta, TimelineInferenceItem, TimelineItem, TimelineItemDeltaEvent,
+    TimelineItemKind, TimelineItemStatus, TimelineTextRole, TimelineThinkingChunk,
+    TimelineToolItem, TokenUsageSnapshot, TraceEvent, TraceEventKind, UserInputAnswer,
+    UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
 };
 pub use message::{
     ContentPart, ContentPartType, Message, MessageContent, MessageRole,

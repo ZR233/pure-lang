@@ -248,6 +248,12 @@ pub struct LspServerDto {
     pub availability_message: Option<String>,
     pub last_checked_at: Option<i64>,
     pub diagnostic_count: usize,
+    pub activity_kind: String,
+    pub activity_title: Option<String>,
+    pub activity_message: Option<String>,
+    pub activity_percentage: Option<u32>,
+    pub last_error: Option<String>,
+    pub last_error_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]

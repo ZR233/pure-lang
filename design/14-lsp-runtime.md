@@ -45,8 +45,13 @@ LSP server 快照包含：
 - `availabilityMessage`：缺失命令、无 Rust 工作区、启动失败等说明。
 - `extensions` / `languageIds`：路由和展示用。
 - `diagnosticCount`：当前缓存诊断数量。
+- `activityKind`：`idle`、`busy`、`indexing`，表示语言服务器当前是否有前台工作。
+- `activityTitle` / `activityMessage` / `activityPercentage`：来自 LSP `window/workDoneProgress/create` 和 `$/progress` 的当前工作摘要，用于状态栏展示 `索引中` 等状态。
+- `lastError` / `lastErrorAt`：最近一次 LSP server error 或语言服务器 stderr warn/error 行，仅用于诊断展示，不写入 timeline。
 
 active LSP 只包括 `available` server。`missingCommand`、`unavailable`、`disabled` 仍可在 UI 中展示提示，但不计入 active 数。
+
+状态栏能力弹层中的 LSP 列表展示所有 snapshot。不可用状态优先于运行状态；available server 若存在 `indexing` 或 `busy` activity，则显示对应活动状态，否则显示就绪和诊断数量。
 
 ## 工具能力
 
@@ -70,6 +75,10 @@ active LSP 只包括 `available` server。`missingCommand`、`unavailable`、`di
 ## 文件同步
 
 查询前，runtime 会读取目标文件并发送 `textDocument/didOpen` 或 `textDocument/didChange`。文件写入、patch、copy、move、delete 成功后，`pl-core` 会把受影响路径通知 runtime；runtime 只同步已打开且受支持的文件。
+
+`rust-analyzer` 初始化时固定使用 client-side file watcher 配置，并声明支持 `workspace/didChangeWatchedFiles` 动态注册。runtime 不让 `rust-analyzer` 自行启动服务端文件监听；当 agent 写入、移动或删除文件时，已启动的 LSP client 会收到对应 watched-files 通知，同时对已打开且受支持的源码文件继续发送 text document 同步。
+
+Windows 下 `std::fs::canonicalize` 可能返回 `\\?\` 或 `\\?\UNC\` verbatim path；runtime 生成 LSP file URI 前必须转回普通 drive/UNC 路径，避免向语言服务器发送包含 `%3F` 的无效 URI。
 
 `rust-analyzer` 可能在索引期间返回 `ContentModified` 错误 `-32801`，runtime 对该错误做最多 3 次指数退避重试。
 

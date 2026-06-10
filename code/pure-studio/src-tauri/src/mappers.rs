@@ -152,6 +152,12 @@ pub fn lsp_server_dto(snapshot: LspServerSnapshot) -> LspServerDto {
         availability_message: snapshot.availability_message,
         last_checked_at: snapshot.last_checked_at,
         diagnostic_count: snapshot.diagnostic_count,
+        activity_kind: snapshot.activity_kind.as_str().to_string(),
+        activity_title: snapshot.activity_title,
+        activity_message: snapshot.activity_message,
+        activity_percentage: snapshot.activity_percentage,
+        last_error: snapshot.last_error,
+        last_error_at: snapshot.last_error_at,
     }
 }
 
@@ -735,7 +741,8 @@ pub fn timeline_events_to_items(events: &[TraceEvent]) -> Vec<pl_protocol::Timel
                     }
                 }
             }
-            TraceEventKind::PlanLifecycleChanged { .. } => {}
+            TraceEventKind::PlanLifecycleChanged { .. }
+            | TraceEventKind::EnabledToolsRecorded { .. } => {}
         }
     }
     let mut items = items.into_values().collect::<Vec<_>>();
@@ -973,13 +980,14 @@ mod tests {
     use std::path::PathBuf;
 
     use pl_core::{
-        ConfigPaths, ConfigStore, DeepSeekBalanceInfo, DeepSeekBalanceUsage, McpServerConfig,
-        PermissionMode, ProviderUsageData, ProviderUsageRecord, ProviderUsageState, PureConfig,
-        RuntimeUsageSnapshot, SessionRuntimeRecord, StudioAgentSnapshotRecord,
+        ConfigPaths, ConfigStore, DeepSeekBalanceInfo, DeepSeekBalanceUsage, LspActivityKind,
+        LspAvailabilityKind, LspServerSnapshot, McpServerConfig, PermissionMode, ProviderUsageData,
+        ProviderUsageRecord, ProviderUsageState, PureConfig, RuntimeUsageSnapshot,
+        SessionRuntimeRecord, StudioAgentSnapshotRecord,
     };
     use pl_protocol::{
-        AgentStatus, PlanLifecycleEvent, PlanLifecycleState, RuntimeCostAmount, TimelineDelta,
-        TimelineItem, TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus,
+        AgentStatus, EnabledToolsEvent, PlanLifecycleEvent, PlanLifecycleState, RuntimeCostAmount,
+        TimelineDelta, TimelineItem, TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus,
         TimelineTextRole, TimelineToolItem, TraceEvent, TraceEventKind,
     };
     use pretty_assertions::assert_eq;
@@ -1211,6 +1219,36 @@ mod tests {
     }
 
     #[test]
+    fn lsp_server_dto_exposes_activity_and_last_error() {
+        let dto = lsp_server_dto(LspServerSnapshot {
+            id: "rust-analyzer".to_string(),
+            display_name: "rust-analyzer".to_string(),
+            extensions: vec![".rs".to_string()],
+            language_ids: vec!["rust".to_string()],
+            availability_kind: LspAvailabilityKind::Available,
+            availability_message: Some("Available".to_string()),
+            last_checked_at: Some(123),
+            diagnostic_count: 2,
+            activity_kind: LspActivityKind::Indexing,
+            activity_title: Some("Roots Scanned".to_string()),
+            activity_message: Some("166/408".to_string()),
+            activity_percentage: Some(40),
+            last_error: Some("LSP server error -32603: url is not a file".to_string()),
+            last_error_at: Some(456),
+        });
+
+        assert_eq!(dto.activity_kind, "indexing");
+        assert_eq!(dto.activity_title, Some("Roots Scanned".to_string()));
+        assert_eq!(dto.activity_message, Some("166/408".to_string()));
+        assert_eq!(dto.activity_percentage, Some(40));
+        assert_eq!(
+            dto.last_error,
+            Some("LSP server error -32603: url is not a file".to_string())
+        );
+        assert_eq!(dto.last_error_at, Some(456));
+    }
+
+    #[test]
     fn active_skill_names_from_messages_extracts_successful_skill_view_results() {
         let messages = vec![
             tool_result_message(
@@ -1389,21 +1427,35 @@ mod tests {
     }
 
     #[test]
-    fn timeline_events_to_items_ignores_plan_lifecycle_events() {
-        let events = vec![TraceEvent {
-            session_id: "session-1".to_string(),
-            sequence: 1,
-            timestamp: 10,
-            kind: TraceEventKind::PlanLifecycleChanged {
-                event: PlanLifecycleEvent {
-                    plan_id: "turn-1-plan".to_string(),
-                    state: PlanLifecycleState::Dismissed,
-                    turn_id: None,
-                    reason: Some("dismissed".to_string()),
-                    updated_at: 10,
+    fn timeline_events_to_items_ignores_internal_trace_events() {
+        let events = vec![
+            TraceEvent {
+                session_id: "session-1".to_string(),
+                sequence: 1,
+                timestamp: 10,
+                kind: TraceEventKind::PlanLifecycleChanged {
+                    event: PlanLifecycleEvent {
+                        plan_id: "turn-1-plan".to_string(),
+                        state: PlanLifecycleState::Dismissed,
+                        turn_id: None,
+                        reason: Some("dismissed".to_string()),
+                        updated_at: 10,
+                    },
                 },
             },
-        }];
+            TraceEvent {
+                session_id: "session-1".to_string(),
+                sequence: 2,
+                timestamp: 10,
+                kind: TraceEventKind::EnabledToolsRecorded {
+                    event: EnabledToolsEvent {
+                        turn_id: "turn-1".to_string(),
+                        mode: "auto".to_string(),
+                        tools: vec!["read_file".to_string()],
+                    },
+                },
+            },
+        ];
 
         assert!(timeline_events_to_items(&events).is_empty());
     }

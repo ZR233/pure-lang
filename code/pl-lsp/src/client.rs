@@ -1,11 +1,16 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::Duration;
 
-use lsp_types::{DiagnosticSeverity, NumberOrString, PublishDiagnosticsParams};
+use lsp_types::{
+    DiagnosticSeverity, DidChangeWatchedFilesParams, FileChangeType, FileEvent, NumberOrString,
+    ProgressParams, ProgressParamsValue, ProgressToken, PublishDiagnosticsParams, Uri,
+    WorkDoneProgress, WorkDoneProgressCreateParams,
+};
 use serde_json::Value;
 use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
@@ -13,13 +18,16 @@ use tokio::sync::{Mutex, oneshot};
 
 use crate::framing::{encode_message, read_message};
 use crate::process::{configure_background_command, terminate_process_tree};
-use crate::types::{LspDiagnostic, LspPosition, LspRange, LspResult, LspRuntimeError};
+use crate::types::{
+    LspActivityKind, LspDiagnostic, LspPosition, LspRange, LspResult, LspRuntimeError,
+};
 use crate::uri::{file_uri_to_path, normalize_separators};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_FILE_SIZE_BYTES: u64 = 10_000_000;
+const RUST_ANALYZER_ID: &str = "rust-analyzer";
 
 type PendingResponseSender = oneshot::Sender<LspResult<Value>>;
 type PendingRequests = Arc<Mutex<HashMap<i64, PendingResponseSender>>>;
@@ -119,6 +127,7 @@ pub(crate) struct LspClient {
     initialized: AtomicBool,
     start_lock: Mutex<()>,
     diagnostics: DiagnosticSink,
+    status: Arc<Mutex<LspClientStatus>>,
 }
 
 impl std::fmt::Debug for LspClient {
@@ -137,6 +146,128 @@ struct OpenDocument {
     version: i32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LspClientRuntimeStatus {
+    pub activity_kind: LspActivityKind,
+    pub activity_title: Option<String>,
+    pub activity_message: Option<String>,
+    pub activity_percentage: Option<u32>,
+    pub last_error: Option<String>,
+    pub last_error_at: Option<i64>,
+}
+
+impl Default for LspClientRuntimeStatus {
+    fn default() -> Self {
+        Self {
+            activity_kind: LspActivityKind::Idle,
+            activity_title: None,
+            activity_message: None,
+            activity_percentage: None,
+            last_error: None,
+            last_error_at: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct LspProgressEntry {
+    activity_kind: LspActivityKind,
+    title: String,
+    message: Option<String>,
+    percentage: Option<u32>,
+    sequence: u64,
+}
+
+#[derive(Debug, Default)]
+struct LspClientStatus {
+    registered_progress_tokens: HashSet<ProgressToken>,
+    progress: HashMap<ProgressToken, LspProgressEntry>,
+    next_progress_sequence: u64,
+    last_error: Option<String>,
+    last_error_at: Option<i64>,
+}
+
+impl LspClientStatus {
+    fn register_progress_token(&mut self, token: ProgressToken) -> bool {
+        self.registered_progress_tokens.insert(token)
+    }
+
+    fn apply_progress(&mut self, params: ProgressParams) -> bool {
+        if !self.registered_progress_tokens.contains(&params.token) {
+            return false;
+        }
+        match params.value {
+            ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(progress)) => {
+                self.next_progress_sequence += 1;
+                let activity_kind =
+                    activity_kind_for_progress(&progress.title, progress.message.as_deref());
+                self.progress.insert(
+                    params.token,
+                    LspProgressEntry {
+                        activity_kind,
+                        title: progress.title,
+                        message: progress.message,
+                        percentage: progress.percentage,
+                        sequence: self.next_progress_sequence,
+                    },
+                );
+                true
+            }
+            ProgressParamsValue::WorkDone(WorkDoneProgress::Report(progress)) => {
+                let Some(entry) = self.progress.get_mut(&params.token) else {
+                    return false;
+                };
+                self.next_progress_sequence += 1;
+                entry.sequence = self.next_progress_sequence;
+                if let Some(message) = progress.message {
+                    entry.message = Some(message);
+                }
+                if let Some(percentage) = progress.percentage {
+                    entry.percentage = Some(percentage);
+                }
+                entry.activity_kind =
+                    activity_kind_for_progress(&entry.title, entry.message.as_deref());
+                true
+            }
+            ProgressParamsValue::WorkDone(WorkDoneProgress::End(_)) => {
+                self.registered_progress_tokens.remove(&params.token);
+                self.progress.remove(&params.token).is_some()
+            }
+        }
+    }
+
+    fn clear_progress(&mut self) -> bool {
+        let changed = !self.registered_progress_tokens.is_empty() || !self.progress.is_empty();
+        self.registered_progress_tokens.clear();
+        self.progress.clear();
+        changed
+    }
+
+    fn record_error(&mut self, message: String) -> bool {
+        self.last_error = Some(message);
+        self.last_error_at = Some(unix_seconds());
+        true
+    }
+
+    fn runtime_status(&self) -> LspClientRuntimeStatus {
+        let Some(entry) = self.progress.values().max_by_key(|entry| entry.sequence) else {
+            return LspClientRuntimeStatus {
+                last_error: self.last_error.clone(),
+                last_error_at: self.last_error_at,
+                ..LspClientRuntimeStatus::default()
+            };
+        };
+        LspClientRuntimeStatus {
+            activity_kind: entry.activity_kind,
+            activity_title: Some(entry.title.clone()),
+            activity_message: entry.message.clone(),
+            activity_percentage: entry.percentage,
+            last_error: self.last_error.clone(),
+            last_error_at: self.last_error_at,
+        }
+    }
+}
+
 impl LspClient {
     pub fn new(definition: LspServerDefinition, diagnostics: DiagnosticSink) -> Self {
         Self {
@@ -149,12 +280,13 @@ impl LspClient {
             initialized: AtomicBool::new(false),
             start_lock: Mutex::new(()),
             diagnostics,
+            status: Arc::new(Mutex::new(LspClientStatus::default())),
         }
     }
 
     pub async fn request(&self, method: &str, params: Value) -> LspResult<Value> {
         self.ensure_started().await?;
-        request_raw(
+        let result = request_raw(
             &self.stdin,
             &self.pending,
             &self.next_id,
@@ -162,7 +294,13 @@ impl LspClient {
             params,
             REQUEST_TIMEOUT,
         )
-        .await
+        .await;
+        if let Err(error) = &result
+            && !is_content_modified_error(error)
+        {
+            self.record_last_error(error.to_string()).await;
+        }
+        result
     }
 
     pub async fn notify(&self, method: &str, params: Value) -> LspResult<()> {
@@ -245,6 +383,16 @@ impl LspClient {
         Ok(())
     }
 
+    pub async fn notify_watched_file_changed(&self, path: &Path) -> LspResult<()> {
+        self.notify_watched_file_event(path, FileChangeType::CHANGED)
+            .await
+    }
+
+    pub async fn notify_watched_file_deleted(&self, path: &Path) -> LspResult<()> {
+        self.notify_watched_file_event(path, FileChangeType::DELETED)
+            .await
+    }
+
     pub async fn shutdown(&self) {
         if self.initialized.swap(false, Ordering::Relaxed) {
             let _ = request_raw(
@@ -272,6 +420,23 @@ impl LspClient {
         }
         self.opened_files.lock().await.clear();
         self.pending.lock().await.clear();
+        self.clear_progress().await;
+    }
+
+    pub async fn runtime_status(&self) -> LspClientRuntimeStatus {
+        self.status.lock().await.runtime_status()
+    }
+
+    async fn notify_watched_file_event(&self, path: &Path, typ: FileChangeType) -> LspResult<()> {
+        if !self.initialized.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        notify_raw(
+            &self.stdin,
+            "workspace/didChangeWatchedFiles",
+            watched_file_event_params(path, typ)?,
+        )
+        .await
     }
 
     async fn ensure_started(&self) -> LspResult<()> {
@@ -307,6 +472,8 @@ impl LspClient {
         self.stdin.lock().await.replace(stdin);
         self.spawn_reader(stdout);
         if let Some(stderr) = stderr {
+            let status = self.status.clone();
+            let updates = self.diagnostics.updates.clone();
             tokio::spawn(async move {
                 let mut reader = BufReader::new(stderr);
                 loop {
@@ -316,6 +483,11 @@ impl LspClient {
                         Ok(_) => {
                             let line = line.trim();
                             if !line.is_empty() {
+                                if is_error_stderr_line(line)
+                                    && record_last_error_status(&status, line.to_string()).await
+                                {
+                                    let _ = updates.send(());
+                                }
                                 eprintln!("[pl-lsp] {line}");
                             }
                         }
@@ -335,6 +507,7 @@ impl LspClient {
         )
         .await;
         if let Err(error) = initialize {
+            self.record_last_error(error.to_string()).await;
             self.shutdown().await;
             return Err(error);
         }
@@ -347,6 +520,8 @@ impl LspClient {
         let pending = self.pending.clone();
         let stdin = self.stdin.clone();
         let diagnostics = self.diagnostics.clone();
+        let status = self.status.clone();
+        let updates = self.diagnostics.updates.clone();
         let server_id = self.definition.id.clone();
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout);
@@ -368,7 +543,23 @@ impl LspClient {
                 };
                 if let Some(method) = value.get("method").and_then(Value::as_str) {
                     if let Some(id) = response_id(&value) {
-                        let _ = respond_to_server_request(&stdin, id, method).await;
+                        let _ = respond_to_server_request(
+                            &stdin,
+                            id,
+                            method,
+                            value.get("params"),
+                            &server_id,
+                            &status,
+                            &updates,
+                        )
+                        .await;
+                    } else if method == "$/progress"
+                        && let Some(params) = value.get("params")
+                        && let Ok(params) = serde_json::from_value::<ProgressParams>(params.clone())
+                    {
+                        if apply_progress_status(&status, params).await {
+                            let _ = updates.send(());
+                        }
                     } else if method == "textDocument/publishDiagnostics"
                         && let Some(params) = value.get("params")
                         && let Ok(params) =
@@ -380,10 +571,19 @@ impl LspClient {
                 }
                 if let Some(id) = response_id(&value) {
                     let result = response_result(value);
+                    if let Err(error) = &result
+                        && !is_content_modified_error(error)
+                        && record_last_error_status(&status, error.to_string()).await
+                    {
+                        let _ = updates.send(());
+                    }
                     if let Some(sender) = pending.lock().await.remove(&id) {
                         let _ = sender.send(result);
                     }
                 }
+            }
+            if clear_progress_status(&status).await {
+                let _ = updates.send(());
             }
             fail_pending(
                 &pending,
@@ -391,6 +591,18 @@ impl LspClient {
             )
             .await;
         });
+    }
+
+    async fn record_last_error(&self, message: String) {
+        if record_last_error_status(&self.status, message).await {
+            let _ = self.diagnostics.updates.send(());
+        }
+    }
+
+    async fn clear_progress(&self) {
+        if clear_progress_status(&self.status).await {
+            let _ = self.diagnostics.updates.send(());
+        }
     }
 }
 
@@ -462,9 +674,23 @@ async fn respond_to_server_request(
     stdin: &Arc<Mutex<Option<ChildStdin>>>,
     id: i64,
     method: &str,
+    params: Option<&Value>,
+    server_id: &str,
+    status: &Arc<Mutex<LspClientStatus>>,
+    updates: &tokio::sync::broadcast::Sender<()>,
 ) -> LspResult<()> {
     let result = match method {
-        "workspace/configuration" => serde_json::json!([]),
+        "workspace/configuration" => workspace_configuration_response(params, server_id),
+        "window/workDoneProgress/create" => {
+            if let Some(params) = params
+                && let Ok(params) =
+                    serde_json::from_value::<WorkDoneProgressCreateParams>(params.clone())
+                && register_progress_token_status(status, params.token).await
+            {
+                let _ = updates.send(());
+            }
+            Value::Null
+        }
         "client/registerCapability" | "client/unregisterCapability" => Value::Null,
         _ => Value::Null,
     };
@@ -477,6 +703,28 @@ async fn respond_to_server_request(
         }),
     )
     .await
+}
+
+async fn register_progress_token_status(
+    status: &Arc<Mutex<LspClientStatus>>,
+    token: ProgressToken,
+) -> bool {
+    status.lock().await.register_progress_token(token)
+}
+
+async fn apply_progress_status(
+    status: &Arc<Mutex<LspClientStatus>>,
+    params: ProgressParams,
+) -> bool {
+    status.lock().await.apply_progress(params)
+}
+
+async fn clear_progress_status(status: &Arc<Mutex<LspClientStatus>>) -> bool {
+    status.lock().await.clear_progress()
+}
+
+async fn record_last_error_status(status: &Arc<Mutex<LspClientStatus>>, message: String) -> bool {
+    status.lock().await.record_error(message)
 }
 
 fn initialize_params(definition: &LspServerDefinition) -> Value {
@@ -495,8 +743,14 @@ fn initialize_params(definition: &LspServerDefinition) -> Value {
             "name": workspace_name,
         }],
         "capabilities": {
+            "window": {
+                "workDoneProgress": true,
+            },
             "workspace": {
-                "configuration": false,
+                "configuration": true,
+                "didChangeWatchedFiles": {
+                    "dynamicRegistration": true,
+                },
                 "workspaceFolders": false,
             },
             "textDocument": {
@@ -536,7 +790,87 @@ fn initialize_params(definition: &LspServerDefinition) -> Value {
                 "positionEncodings": ["utf-16"],
             },
         },
+        "initializationOptions": initialization_options(definition),
     })
+}
+
+fn initialization_options(definition: &LspServerDefinition) -> Value {
+    if definition.id == RUST_ANALYZER_ID {
+        rust_analyzer_settings()
+    } else {
+        Value::Null
+    }
+}
+
+fn workspace_configuration_response(params: Option<&Value>, server_id: &str) -> Value {
+    let Some(items) = params
+        .and_then(|params| params.get("items"))
+        .and_then(Value::as_array)
+    else {
+        return serde_json::json!([]);
+    };
+    Value::Array(
+        items
+            .iter()
+            .map(|item| {
+                let section = item.get("section").and_then(Value::as_str);
+                configuration_value_for_section(server_id, section)
+            })
+            .collect(),
+    )
+}
+
+fn configuration_value_for_section(server_id: &str, section: Option<&str>) -> Value {
+    if server_id != RUST_ANALYZER_ID {
+        return Value::Null;
+    }
+    match section {
+        Some("rust-analyzer") | None => rust_analyzer_settings(),
+        Some("rust-analyzer.files") => serde_json::json!({ "watcher": "client" }),
+        Some("rust-analyzer.files.watcher") => serde_json::json!("client"),
+        Some(_) => Value::Null,
+    }
+}
+
+fn rust_analyzer_settings() -> Value {
+    serde_json::json!({
+        "files": {
+            "watcher": "client",
+        },
+    })
+}
+
+fn activity_kind_for_progress(title: &str, message: Option<&str>) -> LspActivityKind {
+    let text = format!("{} {}", title, message.unwrap_or_default()).to_ascii_lowercase();
+    if text.contains("index")
+        || text.contains("fetching")
+        || text.contains("crategraph")
+        || text.contains("crate graph")
+        || text.contains("roots scanned")
+        || text.contains("cargo metadata")
+        || text.contains("compile-time-deps")
+        || text.contains("discovering sysroot")
+        || text.contains("querying project metadata")
+    {
+        LspActivityKind::Indexing
+    } else {
+        LspActivityKind::Busy
+    }
+}
+
+fn is_error_stderr_line(line: &str) -> bool {
+    let line = line.to_ascii_lowercase();
+    line.contains("warn") || line.contains("error")
+}
+
+fn watched_file_event_params(path: &Path, typ: FileChangeType) -> LspResult<Value> {
+    let uri = Uri::from_str(&crate::uri::path_to_file_uri(path)).map_err(|error| {
+        LspRuntimeError::InvalidQuery(format!("invalid file URI for {}: {error}", path.display()))
+    })?;
+    let params = DidChangeWatchedFilesParams {
+        changes: vec![FileEvent::new(uri, typ)],
+    };
+    Ok(serde_json::to_value(params)?)
 }
 
 fn response_id(value: &Value) -> Option<i64> {
@@ -627,6 +961,145 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn initialize_params_configures_rust_analyzer_client_watcher() {
+        let params = initialize_params(&test_definition(RUST_ANALYZER_ID));
+
+        assert_eq!(
+            params["capabilities"]["window"]["workDoneProgress"],
+            serde_json::json!(true)
+        );
+        assert_eq!(
+            params["capabilities"]["workspace"]["configuration"],
+            serde_json::json!(true)
+        );
+        assert_eq!(
+            params["capabilities"]["workspace"]["didChangeWatchedFiles"]["dynamicRegistration"],
+            serde_json::json!(true)
+        );
+        assert_eq!(
+            params["initializationOptions"],
+            serde_json::json!({ "files": { "watcher": "client" } })
+        );
+    }
+
+    #[test]
+    fn client_status_tracks_registered_indexing_progress() {
+        let mut status = LspClientStatus::default();
+        let token = ProgressToken::String("rustAnalyzer/Roots Scanned".to_string());
+
+        assert!(status.register_progress_token(token.clone()));
+        assert!(status.apply_progress(ProgressParams {
+            token: token.clone(),
+            value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
+                lsp_types::WorkDoneProgressBegin {
+                    title: "Roots Scanned".to_string(),
+                    message: Some("0/408".to_string()),
+                    percentage: Some(0),
+                    cancellable: Some(false),
+                },
+            )),
+        }));
+        assert!(status.apply_progress(ProgressParams {
+            token: token.clone(),
+            value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
+                lsp_types::WorkDoneProgressReport {
+                    message: Some("166/408".to_string()),
+                    percentage: Some(40),
+                    cancellable: Some(false),
+                },
+            )),
+        }));
+
+        let runtime = status.runtime_status();
+
+        assert_eq!(runtime.activity_kind, LspActivityKind::Indexing);
+        assert_eq!(runtime.activity_title, Some("Roots Scanned".to_string()));
+        assert_eq!(runtime.activity_message, Some("166/408".to_string()));
+        assert_eq!(runtime.activity_percentage, Some(40));
+
+        assert!(status.apply_progress(ProgressParams {
+            token,
+            value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
+                lsp_types::WorkDoneProgressEnd::default(),
+            )),
+        }));
+        assert_eq!(status.runtime_status().activity_kind, LspActivityKind::Idle);
+    }
+
+    #[test]
+    fn client_status_ignores_unregistered_progress() {
+        let mut status = LspClientStatus::default();
+
+        let changed = status.apply_progress(ProgressParams {
+            token: ProgressToken::String("unknown".to_string()),
+            value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
+                lsp_types::WorkDoneProgressBegin {
+                    title: "Indexing".to_string(),
+                    message: None,
+                    percentage: None,
+                    cancellable: None,
+                },
+            )),
+        });
+
+        assert!(!changed);
+        assert_eq!(status.runtime_status().activity_kind, LspActivityKind::Idle);
+    }
+
+    #[test]
+    fn client_status_records_last_error() {
+        let mut status = LspClientStatus::default();
+
+        assert!(status.record_error("LSP server error -32603: url is not a file".to_string()));
+
+        let runtime = status.runtime_status();
+        assert_eq!(
+            runtime.last_error,
+            Some("LSP server error -32603: url is not a file".to_string())
+        );
+        assert!(runtime.last_error_at.is_some());
+    }
+
+    #[test]
+    fn workspace_configuration_returns_rust_analyzer_watcher_settings() {
+        let params = serde_json::json!({
+            "items": [
+                { "section": "rust-analyzer" },
+                { "section": "rust-analyzer.files" },
+                { "section": "rust-analyzer.files.watcher" },
+                { "section": "rust-analyzer.cargo" }
+            ]
+        });
+
+        let result = workspace_configuration_response(Some(&params), RUST_ANALYZER_ID);
+
+        assert_eq!(
+            result,
+            serde_json::json!([
+                { "files": { "watcher": "client" } },
+                { "watcher": "client" },
+                "client",
+                null
+            ])
+        );
+    }
+
+    #[test]
+    fn watched_file_event_params_uses_lsp_file_change_type() {
+        let path = std::env::current_dir().unwrap().join("src/lib.rs");
+
+        let params = watched_file_event_params(&path, FileChangeType::CHANGED).unwrap();
+
+        assert_eq!(params["changes"][0]["type"], serde_json::json!(2));
+        assert!(
+            params["changes"][0]["uri"]
+                .as_str()
+                .unwrap()
+                .ends_with("/src/lib.rs")
+        );
+    }
+
     #[tokio::test]
     async fn retries_content_modified_errors() {
         let attempts = AtomicUsize::new(0);
@@ -645,5 +1118,17 @@ mod tests {
 
         assert_eq!(attempts.load(Ordering::SeqCst), 3);
         assert_eq!(result, serde_json::json!({"ok": true}));
+    }
+
+    fn test_definition(id: &str) -> LspServerDefinition {
+        LspServerDefinition {
+            id: id.to_string(),
+            display_name: id.to_string(),
+            command: id.to_string(),
+            args: Vec::new(),
+            extensions: vec![".rs".to_string()],
+            language_ids: vec!["rust".to_string()],
+            workspace_root: std::env::current_dir().unwrap(),
+        }
     }
 }

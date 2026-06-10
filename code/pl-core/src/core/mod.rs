@@ -376,7 +376,7 @@ use turn_result::{
 mod tests {
     use super::*;
     use crate::tool::{Tool, ToolInput, ToolOutput};
-    use crate::turn::{PermissionMode, ToolApprovalPolicy};
+    use crate::turn::{CompileMode, PermissionMode, ToolApprovalPolicy};
     use crate::{ConfigStore, ModelRole};
     use pl_model::ToolCall;
     use pl_protocol::{TimelineTextRole, TraceEventKind};
@@ -409,9 +409,44 @@ mod tests {
                 }
                 TraceEventKind::TimelineItemStarted { .. }
                 | TraceEventKind::TimelineItemDelta { .. }
-                | TraceEventKind::PlanLifecycleChanged { .. } => false,
+                | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. } => false,
             })
             .count()
+    }
+
+    fn record_enabled_tools_for_core(
+        core: &PureCore,
+        session_id: &str,
+        turn_id: &str,
+        mode: CompileMode,
+    ) -> Vec<TraceEvent> {
+        let tool_schemas = core
+            .tools
+            .schemas()
+            .into_iter()
+            .filter(|schema| tool_allowed_in_mode(mode, schema.name()))
+            .collect::<Vec<_>>();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let mut recorder = TraceRecorder::new(session_id.to_string(), event_tx, 0);
+
+        super::turn_loop::record_enabled_tools(&mut recorder, turn_id, mode, &tool_schemas);
+
+        recorder.drain()
+    }
+
+    fn enabled_tools_event(events: &[TraceEvent]) -> &pl_protocol::EnabledToolsEvent {
+        events
+            .iter()
+            .find_map(|event| match &event.kind {
+                TraceEventKind::EnabledToolsRecorded { event } => Some(event),
+                TraceEventKind::TimelineItemStarted { .. }
+                | TraceEventKind::TimelineItemDelta { .. }
+                | TraceEventKind::TimelineItemCompleted { .. }
+                | TraceEventKind::TimelineItemFailed { .. }
+                | TraceEventKind::PlanLifecycleChanged { .. } => None,
+            })
+            .expect("enabled tools event")
     }
 
     #[derive(Debug)]
@@ -1012,7 +1047,8 @@ mod tests {
                 TraceEventKind::TimelineItemFailed { item, .. } => Some(item),
                 TraceEventKind::TimelineItemStarted { .. }
                 | TraceEventKind::TimelineItemDelta { .. }
-                | TraceEventKind::PlanLifecycleChanged { .. } => None,
+                | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. } => None,
             })
             .expect("terminal tool item");
         assert_eq!(
@@ -1120,7 +1156,8 @@ mod tests {
                 TraceEventKind::TimelineItemStarted { .. }
                 | TraceEventKind::TimelineItemDelta { .. }
                 | TraceEventKind::TimelineItemCompleted { .. }
-                | TraceEventKind::PlanLifecycleChanged { .. } => None,
+                | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. } => None,
             })
             .expect("interrupted tool item");
         assert_eq!(terminal.status, TimelineItemStatus::Interrupted);
@@ -1219,5 +1256,61 @@ mod tests {
         core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()));
 
         assert!(core.tools.get("lsp_query").is_some());
+    }
+
+    #[test]
+    fn enabled_tools_snapshot_records_mode_filtered_tools() {
+        let mut core = PureCore::default_provider().unwrap();
+        core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()));
+
+        let events = record_enabled_tools_for_core(&core, "session-1", "turn-1", CompileMode::Plan);
+        let event = enabled_tools_event(&events);
+
+        assert_eq!(event.turn_id, "turn-1");
+        assert_eq!(event.mode, "plan");
+        assert!(event.tools.contains(&"bash".to_string()));
+        assert!(event.tools.contains(&"read_file".to_string()));
+        assert!(!event.tools.contains(&"write_file".to_string()));
+        assert!(!event.tools.contains(&"apply_patch".to_string()));
+    }
+
+    #[test]
+    fn enabled_tools_snapshot_includes_lsp_query_when_runtime_is_shared() {
+        let mut core = PureCore::default_provider()
+            .unwrap()
+            .with_lsp_runtime(pl_lsp::LspRuntimeRegistry::new());
+        core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()));
+
+        let events = record_enabled_tools_for_core(&core, "session-1", "turn-1", CompileMode::Auto);
+        let event = enabled_tools_event(&events);
+
+        assert!(event.tools.contains(&"lsp_query".to_string()));
+    }
+
+    #[tokio::test]
+    async fn enabled_tools_snapshot_persists_to_sqlite_timeline() {
+        let mut core = PureCore::default_provider().unwrap();
+        core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()));
+        let store = crate::StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project(std::env::temp_dir()).await.unwrap();
+        let session = store
+            .create_session(&project.id, "Tool log", CompileMode::Auto)
+            .await
+            .unwrap();
+        let events = record_enabled_tools_for_core(&core, &session.id, "turn-1", CompileMode::Auto);
+
+        store.append_timeline_events(&events).await.unwrap();
+        let records = store
+            .load_timeline_events(&session.id, None, None)
+            .await
+            .unwrap();
+        let kind: TraceEventKind = serde_json::from_str(&records[0].payload_json).unwrap();
+
+        assert_eq!(records[0].kind, "EnabledToolsRecorded");
+        let TraceEventKind::EnabledToolsRecorded { event } = kind else {
+            panic!("expected enabled tools event");
+        };
+        assert_eq!(event.turn_id, "turn-1");
+        assert!(event.tools.contains(&"read_file".to_string()));
     }
 }

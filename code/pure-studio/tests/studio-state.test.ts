@@ -1224,6 +1224,12 @@ function lspServer(overrides: Partial<LspServerRecord> = {}): LspServerRecord {
     availabilityMessage: "LSP health check has not completed",
     lastCheckedAt: null,
     diagnosticCount: 0,
+    activityKind: "idle",
+    activityTitle: null,
+    activityMessage: null,
+    activityPercentage: null,
+    lastError: null,
+    lastErrorAt: null,
     ...overrides,
   };
 }
@@ -1382,6 +1388,12 @@ function lspHealthUpdatedRefreshesLspServersAndRuntime() {
           availabilityMessage: "Available",
           lastCheckedAt: 123,
           diagnosticCount: 2,
+          activityKind: "indexing",
+          activityTitle: "Roots Scanned",
+          activityMessage: "166/408",
+          activityPercentage: 40,
+          lastError: "previous error",
+          lastErrorAt: 456,
         }),
       ],
       activeLspServers: ["rust-analyzer"],
@@ -1390,6 +1402,9 @@ function lspHealthUpdatedRefreshesLspServersAndRuntime() {
 
   assertEqual(updated.lspServers[0]?.availabilityKind, "available");
   assertEqual(updated.lspServers[0]?.diagnosticCount, 2);
+  assertEqual(updated.lspServers[0]?.activityKind, "indexing");
+  assertEqual(updated.lspServers[0]?.activityMessage, "166/408");
+  assertEqual(updated.lspServers[0]?.lastError, "previous error");
   assertDeepEqual(updated.sessionRuntime?.activeLspServers, ["rust-analyzer"]);
 }
 

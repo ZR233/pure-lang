@@ -42,6 +42,24 @@ impl LspAvailabilityKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LspActivityKind {
+    Idle,
+    Busy,
+    Indexing,
+}
+
+impl LspActivityKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Busy => "busy",
+            Self::Indexing => "indexing",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LspServerSnapshot {
@@ -53,6 +71,12 @@ pub struct LspServerSnapshot {
     pub availability_message: Option<String>,
     pub last_checked_at: Option<i64>,
     pub diagnostic_count: usize,
+    pub activity_kind: LspActivityKind,
+    pub activity_title: Option<String>,
+    pub activity_message: Option<String>,
+    pub activity_percentage: Option<u32>,
+    pub last_error: Option<String>,
+    pub last_error_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

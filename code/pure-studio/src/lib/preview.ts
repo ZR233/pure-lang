@@ -236,6 +236,12 @@ export const previewLspServers: LspServerRecord[] = [
     availabilityMessage: "Available",
     lastCheckedAt: 1779688800,
     diagnosticCount: 0,
+    activityKind: "idle",
+    activityTitle: null,
+    activityMessage: null,
+    activityPercentage: null,
+    lastError: null,
+    lastErrorAt: null,
   },
 ];
 

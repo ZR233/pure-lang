@@ -8,6 +8,7 @@ import {
   Circle,
   Cpu,
   DollarSign,
+  LoaderCircle,
   MoreVertical,
   ShieldCheck,
   Users,
@@ -232,6 +233,93 @@ function StatusListContent({ title, items }: { title: string; items: string[] })
             {item}
           </span>
         ))
+      )}
+    </>
+  );
+}
+
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+function lspStatusLabel(server: LspServerRecord, t: Translate): string {
+  if (server.availabilityKind !== "available") {
+    const map: Record<LspServerRecord["availabilityKind"], string> = {
+      checking: "statusBar.lspChecking",
+      available: "statusBar.lspReady",
+      unavailable: "statusBar.lspUnavailable",
+      missingCommand: "statusBar.lspMissingCommand",
+      disabled: "statusBar.lspDisabled",
+    };
+    return t(map[server.availabilityKind]);
+  }
+  if (server.activityKind === "indexing") return t("statusBar.lspIndexing");
+  if (server.activityKind === "busy") return t("statusBar.lspBusy");
+  return t("statusBar.lspReady");
+}
+
+function lspStatusDotClass(server: LspServerRecord): string {
+  if (server.availabilityKind === "available") {
+    if (server.activityKind === "indexing") return "text-primary";
+    if (server.activityKind === "busy") return "text-amber-500";
+    return "text-emerald-600";
+  }
+  if (server.availabilityKind === "checking") return "text-amber-500";
+  if (server.availabilityKind === "missingCommand" || server.availabilityKind === "unavailable") {
+    return "text-red-500";
+  }
+  return "text-muted-foreground";
+}
+
+function lspDetailText(server: LspServerRecord): string | null {
+  if (server.availabilityKind !== "available") {
+    return server.availabilityMessage ?? null;
+  }
+  if (server.activityKind !== "idle") {
+    const message = server.activityMessage ?? server.activityTitle ?? null;
+    if (server.activityPercentage == null) return message;
+    return message ? `${server.activityPercentage}% ${message}` : `${server.activityPercentage}%`;
+  }
+  return server.lastError ?? null;
+}
+
+function LspListContent({ title, servers }: { title: string; servers: LspServerRecord[] }) {
+  const { t } = useTranslation();
+
+  return (
+    <>
+      <strong className="text-xs font-medium">{title}</strong>
+      {servers.length === 0 ? (
+        <span className="text-xs text-muted-foreground">{t("statusBar.notConfigured")}</span>
+      ) : (
+        servers.map((server) => {
+          const active = server.availabilityKind === "available" && server.activityKind !== "idle";
+          const detail = lspDetailText(server);
+          const detailIsError = server.availabilityKind === "available" && server.activityKind === "idle" && !!server.lastError;
+          return (
+            <div key={server.id} className="flex items-center gap-2 py-1.5 text-xs">
+              {active ? (
+                <LoaderCircle size={12} className={cn("shrink-0 animate-spin", lspStatusDotClass(server))} />
+              ) : (
+                <Circle size={8} className={cn("fill-current shrink-0", lspStatusDotClass(server))} />
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-medium truncate">{server.displayName}</span>
+                  <Badge variant="outline" className="h-5 text-[10px] shrink-0">
+                    {lspStatusLabel(server, t)}
+                  </Badge>
+                </div>
+                {detail ? (
+                  <div className={cn("truncate", detailIsError ? "text-red-500" : "text-muted-foreground")}>
+                    {detail}
+                  </div>
+                ) : null}
+              </div>
+              <span className="text-[10px] text-muted-foreground shrink-0">
+                {t("statusBar.lspDiagnosticsCount", { count: server.diagnosticCount })}
+              </span>
+            </div>
+          );
+        })
       )}
     </>
   );
@@ -695,7 +783,7 @@ type StatusReadoutsProps = {
   costLabel: string;
   skills: string[];
   mcpServers: string[];
-  lspServers: string[];
+  lspServers: LspServerRecord[];
   capabilityCount: number;
   agents: AgentDto[];
   activeAgentCount: number;
@@ -757,10 +845,10 @@ function StatusReadoutPopovers({
             <span>{capabilityCount}</span>
           </Button>
         </PopoverTrigger>
-        <PopoverContent side="top" className="w-64 space-y-3">
+        <PopoverContent side="top" className="w-80 space-y-3">
           <ListPopover title={t("statusBar.skills")} items={skills} />
           <ListPopover title={t("statusBar.mcpServers")} items={mcpServers} />
-          <ListPopover title={t("statusBar.lspServers")} items={lspServers} />
+          <LspListContent title={t("statusBar.lspServers")} servers={lspServers} />
         </PopoverContent>
       </Popover>
 
@@ -862,7 +950,7 @@ function MoreStatusMenu({
             <StatusListContent title={t("statusBar.mcpServers")} items={mcpServers} />
           </div>
           <div>
-            <StatusListContent title={t("statusBar.lspServers")} items={lspServers} />
+            <LspListContent title={t("statusBar.lspServers")} servers={lspServers} />
           </div>
         </div>
       </StatusMoreSection>
@@ -925,12 +1013,7 @@ export function SessionStatusBar({
   const skills = runtime?.activeSkills ?? [];
   const mcpServers = runtime?.activeMcpServers ?? [];
   const activeLspServers = runtime?.activeLspServers ?? [];
-  const lspServers = [
-    ...activeLspServers,
-    ...lspServerSnapshots
-      .filter((server) => server.availabilityKind !== "available")
-      .map((server) => `${server.displayName}: ${server.availabilityMessage ?? server.availabilityKind}`),
-  ];
+  const lspServers = lspServerSnapshots;
   const capabilityCount = skills.length + mcpServers.length + activeLspServers.length;
   const shouldShowAgents = isBusy && liveAgentTurnPhases.has(turnPhase);
   const visibleAgents = shouldShowAgents
