@@ -48,6 +48,7 @@ fn main() {
             commands::deny_tool,
             commands::answer_user_input,
             commands::load_config,
+            commands::load_provider_usages,
             commands::save_config,
             commands::save_provider_settings,
             commands::save_permission_mode,

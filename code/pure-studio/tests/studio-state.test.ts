@@ -1,6 +1,7 @@
 import { initialStudioState, studioReducer } from "../src/state/studio-state";
 import { selectTimelineEntries } from "../src/state/selectors";
 import { normalizeRolesForProviders } from "../src/components/RoleSettings";
+import { selectedContextWindow } from "../src/components/SessionStatusBar";
 import {
   applyProviderTemplate,
   cloneProvider,
@@ -13,6 +14,7 @@ import type {
   ConfigPayload,
   McpServerRecord,
   ProviderRecord,
+  ProviderUsageRecord,
   PlanState,
   RoleRecord,
   RunPromptResponse,
@@ -1207,6 +1209,66 @@ function configLoadedUpdatesPermissionMode() {
   assertEqual(state.status, "saved");
 }
 
+function providerUsagesLoadedDoesNotReplaceConfigState() {
+  const deepseekProvider = createProviderFromTemplate(template("deepseek"), "deepseek");
+  const roles: RoleRecord[] = [
+    {
+      key: "planner",
+      displayName: "Planner",
+      provider: "deepseek",
+      model: deepseekProvider.defaultModel,
+      effort: "medium",
+    },
+  ];
+  const state = {
+    ...selectedState(),
+    providers: [deepseekProvider],
+    roles,
+    providerTemplates: previewTemplates,
+    selectedProviderId: "deepseek",
+    configToml: "before",
+  };
+  const usage: ProviderUsageRecord = {
+    providerId: "deepseek",
+    updatedAt: 10,
+    status: "ready",
+    usageKind: "deepseekBalance",
+    message: null,
+    balance: {
+      isAvailable: true,
+      balances: [
+        {
+          currency: "CNY",
+          totalBalance: "8.00",
+          grantedBalance: "3.00",
+          toppedUpBalance: "5.00",
+        },
+      ],
+    },
+    codingPlan: null,
+  };
+
+  const updated = studioReducer(state, {
+    type: "providerUsagesLoaded",
+    usages: [usage],
+  });
+
+  assertDeepEqual(updated.providers, state.providers);
+  assertDeepEqual(updated.roles, roles);
+  assertDeepEqual(updated.providerTemplates, previewTemplates);
+  assertEqual(updated.selectedProviderId, "deepseek");
+  assertEqual(updated.configToml, "before");
+  assertEqual(updated.providerUsages[0]?.providerId, "deepseek");
+
+  const refreshed = studioReducer(updated, {
+    type: "providerUsagesLoaded",
+    usages: [{ ...usage, updatedAt: 20 }],
+  });
+
+  assertEqual(refreshed.providerUsages.length, 1);
+  assertEqual(refreshed.providerUsages[0]?.updatedAt, 20);
+}
+
 function mcpHealthUpdatedRefreshesMcpServersAndRuntime() {
   const state = {
     ...selectedState(),
@@ -1564,6 +1626,26 @@ function providerDraftTemplateSwitchUpdatesTemplateFields() {
   );
 }
 
+function openAiTemplateUsesCodexModelMetadata() {
+  const openai = template("openai");
+  const gpt55 = openai.defaultModels.find((model) => model.slug === "gpt-5.5");
+  const gpt54 = openai.defaultModels.find((model) => model.slug === "gpt-5.4");
+  const gpt52 = openai.defaultModels.find((model) => model.slug === "gpt-5.2");
+
+  assertDeepEqual(
+    openai.defaultModels.map((model) => model.slug),
+    ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"],
+  );
+  assertEqual(gpt55?.contextWindow, 272_000);
+  assertEqual(gpt55?.maxContextWindow, 272_000);
+  assertEqual(gpt55?.maxOutputTokens, null);
+  assertEqual(gpt55?.currency ?? null, null);
+  assertDeepEqual(gpt55?.reasoningEfforts, ["medium", "low", "high", "xhigh"]);
+  assertEqual(gpt54?.maxContextWindow, 1_000_000);
+  assertEqual(gpt52?.truncationMode, "bytes");
+  assertEqual(gpt52?.maxOutputTokens, null);
+}
+
 function providerDraftTemplateSwitchSupportsZhipu() {
   const deepseek = template("deepseek");
   const zhipu = template("zhipu");
@@ -1674,6 +1756,25 @@ function roleChangeProducesCompleteNormalizedSnapshot() {
   assertEqual(normalized.find((role) => role.key === "explorer")?.provider, "deepseek");
 }
 
+function selectedContextWindowFollowsPlannerModel() {
+  const deepseekProvider = createProviderFromTemplate(template("deepseek"), "deepseek");
+  const openaiProvider = createProviderFromTemplate(template("openai"), "openai");
+  const roles: RoleRecord[] = [
+    {
+      key: "planner",
+      displayName: "Planner",
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      effort: "medium",
+    },
+  ];
+
+  assertEqual(
+    selectedContextWindow([deepseekProvider, openaiProvider], roles, runtime),
+    272_000,
+  );
+}
+
 staleTimelineLoadKeepsNewTurnItems();
 freshTimelineLoadMayReplaceSnapshot();
 staleTimelineLoadDoesNotOverwriteLiveDelta();
@@ -1716,6 +1817,7 @@ toolsFromDifferentTurnsDoNotMerge();
 toolGroupStatusUsesPriority();
 sessionModeUpdateKeepsTimelineAndUpdatesSessions();
 configLoadedUpdatesPermissionMode();
+providerUsagesLoadedDoesNotReplaceConfigState();
 mcpHealthUpdatedRefreshesMcpServersAndRuntime();
 applyPatchCountsFilesFromResultSummary();
 successfulSkillViewImmediatelyUpdatesActiveSkills();
@@ -1730,9 +1832,11 @@ abnormalTurnTraceIsKeptWithContent();
 liveFailedTimelineItemKeepsErrorMessage();
 providerDraftUsesSingleAddEntryAndUniqueKey();
 providerDraftTemplateSwitchUpdatesTemplateFields();
+openAiTemplateUsesCodexModelMetadata();
 providerDraftTemplateSwitchSupportsZhipu();
 providerDraftTemplateSwitchSupportsZhipuCodingPlan();
 zhipuProviderDraftUsesUniqueKey();
 zhipuCodingPlanProviderDraftUsesUniqueKey();
 editingProviderDraftDoesNotMutateProviderList();
 roleChangeProducesCompleteNormalizedSnapshot();
+selectedContextWindowFollowsPlannerModel();

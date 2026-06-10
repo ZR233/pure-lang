@@ -11,6 +11,7 @@ pub mod interfaces;
 mod mcp;
 mod permission;
 mod provider_error;
+mod provider_usage;
 mod runtime_usage;
 mod session;
 mod skill;
@@ -43,13 +44,19 @@ pub use interfaces::{
     ConfigRepository, EventSink, RuntimeEventEmitter, SessionRepository, TurnSnapshotRepository,
 };
 pub use mcp::{McpAvailabilityKind, McpAvailabilitySnapshot, McpRuntimeRegistry};
-pub use pl_model::{InputModality, ProviderKind, ToolWirePolicy, TruncationMode};
+pub use pl_model::{
+    DeepSeekBalanceInfo, DeepSeekBalanceUsage, InputModality, ProviderKind, ToolWirePolicy,
+    TruncationMode, ZhipuCodingPlanUsage, ZhipuQuotaLimit, ZhipuQuotaWindow, ZhipuToolUsageDetail,
+};
 pub use pl_protocol::{
     AgentEvent, AgentEventReceiver, AgentEventSender, AgentRuntimeDelta, BudgetLimitKind,
     BudgetUsage, ContentPart, ContentPartType, ErrorSeverity, Message, MessageContent, MessageRole,
     OutputStream, PermissionLevel, PipelineStage, PureError, Result, RuntimeCostAmount,
     RuntimeUsageSnapshot, TokenUsageSnapshot, TraceEvent, TraceEventKind, UserInputAnswer,
     UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
+};
+pub use provider_usage::{
+    ProviderUsageData, ProviderUsageRecord, ProviderUsageState, provider_usage_records,
 };
 pub use session::CoreSession;
 pub use skill::{SkillCatalog, SkillMetadata, SkillSourceKind};

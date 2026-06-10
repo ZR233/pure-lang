@@ -2,7 +2,13 @@ use crate::capabilities::ModelCapabilities;
 use crate::model_info::{InputModality, ModelInfo, TruncationMode, TruncationPolicy};
 
 const DEEPSEEK_DEFAULT_MODEL_SLUGS: &[&str] = &["deepseek-v4-flash", "deepseek-v4-pro"];
-const OPENAI_DEFAULT_MODEL_SLUGS: &[&str] = &["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"];
+const OPENAI_DEFAULT_MODEL_SLUGS: &[&str] = &[
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.3-codex",
+    "gpt-5.2",
+];
 const ZHIPU_GLM_DEFAULT_MODEL_SLUGS: &[&str] = &[
     "glm-5.1",
     "glm-5",
@@ -11,7 +17,7 @@ const ZHIPU_GLM_DEFAULT_MODEL_SLUGS: &[&str] = &[
     "glm-4.7-flashx",
     "glm-4.7-flash",
 ];
-const OPENAI_REASONING_EFFORTS: &[&str] = &["none", "low", "medium", "high", "xhigh"];
+const OPENAI_REASONING_EFFORTS: &[&str] = &["medium", "low", "high", "xhigh"];
 const DEEPSEEK_REASONING_EFFORTS: &[&str] = &["high", "max"];
 const ZHIPU_REASONING_EFFORTS: &[&str] = &["enabled", "none"];
 
@@ -52,26 +58,42 @@ pub fn default_models() -> Vec<ModelInfo> {
         openai_model(
             "gpt-5.5",
             "GPT-5.5",
-            "Frontier model for complex reasoning, coding, and professional work.",
-            1_050_000,
+            "Frontier model for complex coding, research, and real-world work.",
+            272_000,
+            272_000,
+            TruncationMode::Tokens,
         ),
         openai_model(
             "gpt-5.4",
-            "GPT-5.4",
-            "Affordable frontier model for coding and professional work.",
-            1_050_000,
+            "gpt-5.4",
+            "Strong model for everyday coding.",
+            272_000,
+            1_000_000,
+            TruncationMode::Tokens,
         ),
         openai_model(
             "gpt-5.4-mini",
-            "GPT-5.4 Mini",
-            "Efficient GPT-5.4-class model for coding, computer use, and subagents.",
-            400_000,
+            "GPT-5.4-Mini",
+            "Small, fast, and cost-efficient model for simpler coding tasks.",
+            272_000,
+            272_000,
+            TruncationMode::Tokens,
         ),
         openai_model(
-            "gpt-5.4-nano",
-            "GPT-5.4 Nano",
-            "Lowest-cost GPT-5.4-class model for simple high-volume tasks.",
-            400_000,
+            "gpt-5.3-codex",
+            "gpt-5.3-codex",
+            "Coding-optimized model.",
+            272_000,
+            272_000,
+            TruncationMode::Tokens,
+        ),
+        openai_model(
+            "gpt-5.2",
+            "gpt-5.2",
+            "Optimized for professional work and long-running agents.",
+            272_000,
+            272_000,
+            TruncationMode::Bytes,
         ),
         zhipu_text_model(
             "glm-5.1",
@@ -214,16 +236,18 @@ fn openai_model(
     display_name: &str,
     description: &str,
     context_window: u64,
+    max_context_window: u64,
+    truncation_mode: TruncationMode,
 ) -> ModelInfo {
     ModelInfo {
         slug: slug.to_string(),
         display_name: display_name.to_string(),
         description: Some(description.to_string()),
         context_window: Some(context_window),
-        max_context_window: Some(context_window),
+        max_context_window: Some(max_context_window),
         auto_compact_token_limit: None,
         default_temperature: None,
-        max_output_tokens: Some(128_000),
+        max_output_tokens: None,
         currency: None,
         input_price_per_mtok: None,
         output_price_per_mtok: None,
@@ -243,7 +267,7 @@ fn openai_model(
             | ModelCapabilities::FREEFORM_TOOLS,
         input_modalities: vec![InputModality::Text, InputModality::Image],
         truncation_policy: TruncationPolicy {
-            mode: TruncationMode::Tokens,
+            mode: truncation_mode,
             limit: 10_000,
         },
         base_instructions: String::new(),
@@ -383,18 +407,52 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_models_include_gpt_55_reasoning_efforts() {
+    fn openai_default_models_match_codex_metadata() {
         let models = default_models();
 
-        assert!(!models.is_empty());
-        let model = models.iter().find(|model| model.slug == "gpt-5.5").unwrap();
-
-        assert!(
-            model
-                .reasoning_efforts
+        let openai_models = openai_default_model_slugs()
+            .iter()
+            .map(|slug| models.iter().find(|model| model.slug == *slug).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            openai_models
                 .iter()
-                .any(|effort| effort == "xhigh")
+                .map(|model| model.slug.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "gpt-5.5",
+                "gpt-5.4",
+                "gpt-5.4-mini",
+                "gpt-5.3-codex",
+                "gpt-5.2"
+            ]
         );
+
+        let gpt_55 = openai_models[0];
+        assert_eq!(gpt_55.display_name, "GPT-5.5");
+        assert_eq!(gpt_55.context_window, Some(272_000));
+        assert_eq!(gpt_55.max_context_window, Some(272_000));
+        assert_eq!(gpt_55.max_output_tokens, None);
+        assert_eq!(
+            gpt_55.reasoning_efforts,
+            vec!["medium", "low", "high", "xhigh"]
+        );
+        assert_eq!(gpt_55.truncation_policy.mode, TruncationMode::Tokens);
+        assert!(gpt_55.capabilities.contains(ModelCapabilities::WEB_SEARCH));
+        assert!(
+            gpt_55
+                .capabilities
+                .contains(ModelCapabilities::FREEFORM_TOOLS)
+        );
+
+        let gpt_54 = openai_models[1];
+        assert_eq!(gpt_54.display_name, "gpt-5.4");
+        assert_eq!(gpt_54.context_window, Some(272_000));
+        assert_eq!(gpt_54.max_context_window, Some(1_000_000));
+
+        let gpt_52 = openai_models[4];
+        assert_eq!(gpt_52.truncation_policy.mode, TruncationMode::Bytes);
+        assert!(!models.iter().any(|model| model.slug == "gpt-5.4-nano"));
     }
 
     #[test]

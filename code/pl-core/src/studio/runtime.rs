@@ -124,6 +124,11 @@ impl StudioRuntime {
         Ok(default_session_runtime_record(session_id, model))
     }
 
+    pub async fn provider_usages(&self) -> Result<Vec<crate::ProviderUsageRecord>> {
+        let config = self.config_store.load_or_default()?;
+        Ok(crate::provider_usage_records(&config).await)
+    }
+
     pub async fn discovered_skills(&self, project_id: &str) -> Result<SkillCatalog> {
         let project = self
             .store

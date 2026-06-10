@@ -66,6 +66,9 @@ export function App() {
           providers={state.providers}
           mcpServers={state.mcpServers}
           providerTemplates={state.providerTemplates}
+          providerUsages={state.providerUsages}
+          providerUsagesLoading={state.providerUsagesLoading}
+          providerUsageError={state.providerUsageError}
           roles={state.roles}
           selectedProjectId={state.selectedProjectId}
           selectedProviderId={state.selectedProviderId}
@@ -79,6 +82,7 @@ export function App() {
           onSaveProviderSettings={(snapshot) => studio.onSaveProviderSettings(snapshot)}
           onSavePermissionMode={(mode) => studio.onSavePermissionMode(mode)}
           onSaveMcpSettings={(servers) => studio.onSaveMcpSettings(servers)}
+          onRefreshProviderUsages={() => void studio.refreshProviderUsages()}
         />
       ) : null}
     </main>
