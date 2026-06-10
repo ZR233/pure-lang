@@ -22,7 +22,7 @@ impl Tool for LspQueryTool {
     }
 
     fn description(&self) -> &str {
-        "Query active Language Server Protocol servers for code intelligence. Supports Rust via rust-analyzer."
+        "Query active Language Server Protocol servers for semantic code intelligence. Prefer this over text search for supported languages when resolving definitions, references, hover/type or signature information, implementations, symbols, call hierarchy, or diagnostics. Supports Rust via rust-analyzer."
     }
 
     fn input_schema(&self) -> serde_json::Value {
