@@ -217,6 +217,8 @@ export type LspAvailabilityKind =
   | "missingCommand"
   | "disabled";
 
+export type LspActivityKind = "idle" | "busy" | "indexing";
+
 export type KeyValuePair = {
   key: string;
   value: string;
@@ -255,6 +257,12 @@ export type LspServerRecord = {
   availabilityMessage?: string | null;
   lastCheckedAt?: number | null;
   diagnosticCount: number;
+  activityKind: LspActivityKind;
+  activityTitle?: string | null;
+  activityMessage?: string | null;
+  activityPercentage?: number | null;
+  lastError?: string | null;
+  lastErrorAt?: number | null;
 };
 
 export type RuntimeCostAmount = {

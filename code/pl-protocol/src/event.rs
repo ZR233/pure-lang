@@ -605,6 +605,18 @@ pub struct TraceEvent {
     pub kind: TraceEventKind,
 }
 
+/// Snapshot of tool names enabled for a single turn.
+///
+/// This is stored in the SQLite timeline for diagnostics and is not shown as a
+/// user-facing timeline item.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EnabledToolsEvent {
+    pub turn_id: String,
+    pub mode: String,
+    pub tools: Vec<String>,
+}
+
 /// Item-first trace events for turn, inference, text, thinking, tool and agent lifecycle.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(
@@ -618,6 +630,7 @@ pub enum TraceEventKind {
     TimelineItemCompleted { item: TimelineItem },
     TimelineItemFailed { item: TimelineItem, error: String },
     PlanLifecycleChanged { event: PlanLifecycleEvent },
+    EnabledToolsRecorded { event: EnabledToolsEvent },
 }
 
 #[cfg(test)]
@@ -644,6 +657,31 @@ mod tests {
                     "name": "bash",
                     "arguments": "{\"command\":\"echo hi\"}",
                     "workingDirectory": "C:/project"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_enabled_tools_trace_event_as_camel_case() {
+        let event = TraceEventKind::EnabledToolsRecorded {
+            event: EnabledToolsEvent {
+                turn_id: "turn-1".to_string(),
+                mode: "auto".to_string(),
+                tools: vec!["bash".to_string(), "lsp_query".to_string()],
+            },
+        };
+
+        let json = serde_json::to_value(event).unwrap();
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "enabledToolsRecorded",
+                "event": {
+                    "turnId": "turn-1",
+                    "mode": "auto",
+                    "tools": ["bash", "lsp_query"]
                 }
             })
         );

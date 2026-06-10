@@ -8,10 +8,15 @@ pub(crate) fn path_to_file_uri(path: &Path) -> String {
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(path)
     };
-    let path = absolute.to_string_lossy().replace('\\', "/");
     if cfg!(windows) {
-        format!("file:///{}", encode_path(&path))
+        let path = normalize_windows_verbatim_path(&absolute.to_string_lossy()).replace('\\', "/");
+        if let Some(unc_path) = path.strip_prefix("//") {
+            format!("file://{}", encode_path(unc_path))
+        } else {
+            format!("file:///{}", encode_path(&path))
+        }
     } else {
+        let path = absolute.to_string_lossy().replace('\\', "/");
         format!("file://{}", encode_path(&path))
     }
 }
@@ -20,6 +25,8 @@ pub(crate) fn file_uri_to_path(uri: &str) -> PathBuf {
     let mut value = uri.strip_prefix("file://").unwrap_or(uri).to_string();
     if cfg!(windows) && value.starts_with('/') && value.as_bytes().get(2) == Some(&b':') {
         value.remove(0);
+    } else if cfg!(windows) && !value.starts_with('/') && !value.is_empty() {
+        value = format!("//{value}");
     }
     PathBuf::from(decode_path(&value))
 }
@@ -49,6 +56,16 @@ fn encode_path(path: &str) -> String {
         }
     }
     output
+}
+
+fn normalize_windows_verbatim_path(path: &str) -> String {
+    if let Some(path) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{path}")
+    } else if let Some(path) = path.strip_prefix(r"\\?\") {
+        path.to_string()
+    } else {
+        path.to_string()
+    }
 }
 
 fn decode_path(path: &str) -> String {
@@ -97,5 +114,28 @@ mod tests {
         let uri = path_to_file_uri(Path::new("/tmp/pure lang/lib.rs"));
 
         assert!(uri.contains("pure%20lang"));
+    }
+
+    #[test]
+    fn strips_windows_verbatim_drive_prefix_before_file_uri_encoding() {
+        let normalized = normalize_windows_verbatim_path(r"\\?\C:\work\pure lang\src\lib.rs");
+
+        assert_eq!(normalized, r"C:\work\pure lang\src\lib.rs");
+        if cfg!(windows) {
+            let uri = path_to_file_uri(Path::new(r"\\?\C:\work\pure lang\src\lib.rs"));
+            assert_eq!(uri, "file:///C:/work/pure%20lang/src/lib.rs");
+        }
+    }
+
+    #[test]
+    fn strips_windows_verbatim_unc_prefix_before_file_uri_encoding() {
+        let normalized =
+            normalize_windows_verbatim_path(r"\\?\UNC\server\share\pure lang\src\lib.rs");
+
+        assert_eq!(normalized, r"\\server\share\pure lang\src\lib.rs");
+        if cfg!(windows) {
+            let uri = path_to_file_uri(Path::new(r"\\?\UNC\server\share\pure lang\src\lib.rs"));
+            assert_eq!(uri, "file://server/share/pure%20lang/src/lib.rs");
+        }
     }
 }

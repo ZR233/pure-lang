@@ -598,7 +598,8 @@ fn first_turn_id(events: &[TraceEvent]) -> Option<String> {
         | TraceEventKind::TimelineItemCompleted { .. }
         | TraceEventKind::TimelineItemFailed { .. }
         | TraceEventKind::TimelineItemDelta { .. }
-        | TraceEventKind::PlanLifecycleChanged { .. } => None,
+        | TraceEventKind::PlanLifecycleChanged { .. }
+        | TraceEventKind::EnabledToolsRecorded { .. } => None,
     })
 }
 

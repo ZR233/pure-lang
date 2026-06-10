@@ -1,5 +1,8 @@
 use pl_model::{CompletionRequest, ModelProvider, ReasoningConfig, ReasoningSummary};
-use pl_protocol::{AgentEvent, ErrorSeverity, Result, TimelineItemStatus, TokenUsageSnapshot};
+use pl_protocol::{
+    AgentEvent, EnabledToolsEvent, ErrorSeverity, Result, TimelineItemStatus, TokenUsageSnapshot,
+    TraceEventKind,
+};
 use std::sync::Arc;
 
 use crate::context_compaction::{
@@ -59,6 +62,7 @@ pub(super) async fn run_turn_with_trace(
     let mut budget_limit: Option<BudgetLimit> = None;
 
     let session_id = super::generate_session_id();
+    record_enabled_tools(recorder, &session_id, request.mode, &tool_schemas);
     let turn_item = recorder.turn_item(&session_id, TimelineItemStatus::Running);
     recorder.start_item(turn_item.clone());
     let requires_subagent_dispatch =
@@ -537,4 +541,24 @@ pub(super) async fn run_turn_with_trace(
         budget_usage: None,
         timeline_events: recorder.drain(),
     })
+}
+
+pub(super) fn record_enabled_tools(
+    recorder: &mut TraceRecorder,
+    turn_id: &str,
+    mode: CompileMode,
+    tool_schemas: &[pl_model::ToolSchema],
+) {
+    let tools = tool_schemas
+        .iter()
+        .map(pl_model::ToolSchema::name)
+        .map(ToOwned::to_owned)
+        .collect();
+    recorder.record_trace_only(TraceEventKind::EnabledToolsRecorded {
+        event: EnabledToolsEvent {
+            turn_id: turn_id.to_string(),
+            mode: mode.label().to_string(),
+            tools,
+        },
+    });
 }

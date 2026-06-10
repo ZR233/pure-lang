@@ -46,8 +46,8 @@ pub use interfaces::{
 };
 pub use mcp::{McpAvailabilityKind, McpAvailabilitySnapshot, McpRuntimeRegistry};
 pub use pl_lsp::{
-    LspAvailabilityKind, LspDiagnostic, LspPosition, LspQuery, LspQueryOperation, LspQueryResult,
-    LspRange, LspRuntimeRegistry, LspServerSnapshot,
+    LspActivityKind, LspAvailabilityKind, LspDiagnostic, LspPosition, LspQuery, LspQueryOperation,
+    LspQueryResult, LspRange, LspRuntimeRegistry, LspServerSnapshot,
 };
 pub use pl_model::{
     DeepSeekBalanceInfo, DeepSeekBalanceUsage, InputModality, ProviderKind, ToolWirePolicy,
@@ -55,10 +55,10 @@ pub use pl_model::{
 };
 pub use pl_protocol::{
     AgentEvent, AgentEventReceiver, AgentEventSender, AgentRuntimeDelta, BudgetLimitKind,
-    BudgetUsage, ContentPart, ContentPartType, ErrorSeverity, Message, MessageContent, MessageRole,
-    OutputStream, PermissionLevel, PipelineStage, PureError, Result, RuntimeCostAmount,
-    RuntimeUsageSnapshot, TokenUsageSnapshot, TraceEvent, TraceEventKind, UserInputAnswer,
-    UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
+    BudgetUsage, ContentPart, ContentPartType, EnabledToolsEvent, ErrorSeverity, Message,
+    MessageContent, MessageRole, OutputStream, PermissionLevel, PipelineStage, PureError, Result,
+    RuntimeCostAmount, RuntimeUsageSnapshot, TokenUsageSnapshot, TraceEvent, TraceEventKind,
+    UserInputAnswer, UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
 };
 pub use provider_usage::{
     ProviderUsageData, ProviderUsageRecord, ProviderUsageState, provider_usage_records,

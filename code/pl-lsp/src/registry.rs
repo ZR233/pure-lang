@@ -15,8 +15,8 @@ use crate::client::{
 use crate::formatting::{format_diagnostics, format_lsp_result};
 use crate::process::{configure_background_command, terminate_process_tree};
 use crate::types::{
-    LspAvailabilityKind, LspDiagnostic, LspQuery, LspQueryOperation, LspQueryResult, LspResult,
-    LspRuntimeError, LspServerSnapshot,
+    LspActivityKind, LspAvailabilityKind, LspDiagnostic, LspQuery, LspQueryOperation,
+    LspQueryResult, LspResult, LspRuntimeError, LspServerSnapshot,
 };
 use crate::uri::path_to_file_uri;
 
@@ -77,15 +77,33 @@ impl LspRuntimeRegistry {
         let diagnostics = self.diagnostics.lock().await;
         let diagnostic_counts = diagnostic_counts(&diagnostics);
         drop(diagnostics);
-        self.state
+        let snapshots = self
+            .state
             .lock()
             .await
             .servers
             .values()
             .map(|server| {
-                server.snapshot(*diagnostic_counts.get(&server.definition.id).unwrap_or(&0))
+                (
+                    server.snapshot(*diagnostic_counts.get(&server.definition.id).unwrap_or(&0)),
+                    server.client.clone(),
+                )
             })
-            .collect()
+            .collect::<Vec<_>>();
+        let mut output = Vec::with_capacity(snapshots.len());
+        for (mut snapshot, client) in snapshots {
+            if let Some(client) = client {
+                let status = client.runtime_status().await;
+                snapshot.activity_kind = status.activity_kind;
+                snapshot.activity_title = status.activity_title;
+                snapshot.activity_message = status.activity_message;
+                snapshot.activity_percentage = status.activity_percentage;
+                snapshot.last_error = status.last_error;
+                snapshot.last_error_at = status.last_error_at;
+            }
+            output.push(snapshot);
+        }
+        output
     }
 
     pub async fn query(&self, query: LspQuery) -> LspResult<LspQueryResult> {
@@ -110,6 +128,9 @@ impl LspRuntimeRegistry {
 
     pub async fn notify_file_changed(&self, path: impl AsRef<Path>) {
         let path = path.as_ref();
+        for client in self.open_clients().await {
+            let _ = client.notify_watched_file_changed(path).await;
+        }
         let Some(client) = self.open_client_for_path(path).await else {
             return;
         };
@@ -123,8 +144,12 @@ impl LspRuntimeRegistry {
     }
 
     pub async fn notify_file_deleted(&self, path: impl AsRef<Path>) {
-        if let Some(client) = self.open_client_for_path(path.as_ref()).await {
-            let _ = client.close_file(path.as_ref()).await;
+        let path = path.as_ref();
+        for client in self.open_clients().await {
+            let _ = client.notify_watched_file_deleted(path).await;
+        }
+        if let Some(client) = self.open_client_for_path(path).await {
+            let _ = client.close_file(path).await;
         }
     }
 
@@ -292,6 +317,16 @@ impl LspRuntimeRegistry {
             .and_then(|server| server.client.clone())
     }
 
+    async fn open_clients(&self) -> Vec<Arc<LspClient>> {
+        self.state
+            .lock()
+            .await
+            .servers
+            .values()
+            .filter_map(|server| server.client.clone())
+            .collect()
+    }
+
     async fn query_diagnostics(&self, query: LspQuery) -> LspQueryResult {
         let max_results = query.max_results.unwrap_or(100);
         let mut diagnostics = self.all_diagnostics().await;
@@ -378,6 +413,12 @@ impl LspRuntimeServerState {
             availability_message: self.availability_message.clone(),
             last_checked_at: self.last_checked_at,
             diagnostic_count,
+            activity_kind: LspActivityKind::Idle,
+            activity_title: None,
+            activity_message: None,
+            activity_percentage: None,
+            last_error: None,
+            last_error_at: None,
         }
     }
 }

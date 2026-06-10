@@ -151,7 +151,8 @@ fn tool_diagnostics(events: &[TraceEvent]) -> String {
                 }
             }
             TraceEventKind::TimelineItemDelta { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. } => {}
+            | TraceEventKind::PlanLifecycleChanged { .. }
+            | TraceEventKind::EnabledToolsRecorded { .. } => {}
         }
     }
     if output.is_empty() {
@@ -169,9 +170,9 @@ fn saw_apply_patch(events: &[TraceEvent]) -> bool {
             .tool
             .as_ref()
             .is_some_and(|tool| tool.name == "apply_patch"),
-        TraceEventKind::TimelineItemDelta { .. } | TraceEventKind::PlanLifecycleChanged { .. } => {
-            false
-        }
+        TraceEventKind::TimelineItemDelta { .. }
+        | TraceEventKind::PlanLifecycleChanged { .. }
+        | TraceEventKind::EnabledToolsRecorded { .. } => false,
     })
 }
 
