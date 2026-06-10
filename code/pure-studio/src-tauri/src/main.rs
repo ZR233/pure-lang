@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use pl_core::StudioRuntime;
 use tokio::sync::Mutex;
@@ -26,8 +27,9 @@ fn main() {
         active_turns: Arc::new(Mutex::new(HashMap::new())),
     };
     let setup_state = state.clone();
+    let shutdown_state = state.clone();
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(state)
         .setup(move |app| {
@@ -59,6 +61,14 @@ fn main() {
             commands::save_mcp_settings,
             commands::list_discovered_skills,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Pure Studio");
+        .build(tauri::generate_context!())
+        .expect("error while building Pure Studio");
+    app.run(move |_app_handle, event| {
+        if let tauri::RunEvent::ExitRequested { .. } = event {
+            let studio = shutdown_state.studio.clone();
+            tauri::async_runtime::block_on(async move {
+                let _ = tokio::time::timeout(Duration::from_secs(3), studio.shutdown()).await;
+            });
+        }
+    });
 }

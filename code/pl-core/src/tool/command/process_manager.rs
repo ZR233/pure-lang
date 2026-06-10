@@ -11,6 +11,9 @@ use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
 use super::head_tail_buffer::HeadTailBuffer;
+use crate::process::{
+    configure_background_command, terminate_process_tree, terminate_process_tree_sync,
+};
 use crate::tool::truncation::{OutputTruncation, TruncatedOutput, TruncationStrategy};
 
 const DEFAULT_MAX_PROCESSES: usize = 16;
@@ -102,7 +105,7 @@ impl Drop for CommandProcessManager {
             return;
         };
         for entry in state.entries.values() {
-            terminate_process(entry.os_pid);
+            terminate_process_tree_sync(entry.os_pid);
         }
     }
 }
@@ -134,6 +137,7 @@ impl CommandProcessManager {
         command.stdin(Stdio::piped());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
+        configure_background_command(&mut command);
 
         let (process_id, entry, stdout, stderr) = {
             let mut manager_state = self.state.lock().await;
@@ -174,7 +178,12 @@ impl CommandProcessManager {
             manager_state
                 .entries
                 .insert(process_id.clone(), entry.clone());
-            spawn_wait_task(entry.clone(), child);
+            spawn_lifecycle_task(
+                entry.clone(),
+                child,
+                request.timeout,
+                request.cancellation_token.clone(),
+            );
             (process_id, entry, stdout, stderr)
         };
 
@@ -184,11 +193,6 @@ impl CommandProcessManager {
         if let Some(stderr) = stderr {
             tokio::spawn(read_stderr(entry.clone(), stderr));
         }
-        spawn_timeout_task(entry.clone(), request.timeout);
-        if let Some(token) = request.cancellation_token {
-            spawn_cancellation_task(entry.clone(), token);
-        }
-
         self.snapshot_after_wait(
             &process_id,
             request.yield_time,
@@ -331,9 +335,31 @@ async fn wait_for_process_activity(entry: &CommandProcessEntry, yield_time: Dura
     }
 }
 
-fn spawn_wait_task(entry: Arc<CommandProcessEntry>, mut child: tokio::process::Child) {
+fn spawn_lifecycle_task(
+    entry: Arc<CommandProcessEntry>,
+    mut child: tokio::process::Child,
+    timeout: Duration,
+    cancellation_token: Option<CancellationToken>,
+) {
     tokio::spawn(async move {
-        let wait_result = child.wait().await;
+        let outcome = wait_for_lifecycle_outcome(&mut child, timeout, cancellation_token).await;
+        let wait_result = match outcome {
+            LifecycleOutcome::Exited(result) => result,
+            LifecycleOutcome::TimedOut => {
+                mark_timed_out(&entry).await;
+                close_stdin(&entry).await;
+                terminate_process_tree(child.id()).await;
+                let _ = child.start_kill();
+                child.wait().await
+            }
+            LifecycleOutcome::Interrupted => {
+                mark_interrupted(&entry).await;
+                close_stdin(&entry).await;
+                terminate_process_tree(child.id()).await;
+                let _ = child.start_kill();
+                child.wait().await
+            }
+        };
         {
             let mut stdin = entry.stdin.lock().await;
             stdin.take();
@@ -354,56 +380,52 @@ fn spawn_wait_task(entry: Arc<CommandProcessEntry>, mut child: tokio::process::C
     });
 }
 
-fn spawn_timeout_task(entry: Arc<CommandProcessEntry>, timeout: Duration) {
-    tokio::spawn(async move {
-        tokio::time::sleep(timeout).await;
-        let should_kill = {
-            let mut state = entry.state.lock().await;
-            let should_kill = matches!(state.lifecycle, CommandProcessLifecycle::Running)
-                && !state.timed_out
-                && !state.interrupted;
-            if should_kill {
-                state.timed_out = true;
-            }
-            should_kill
-        };
-        if should_kill {
-            {
-                let mut stdin = entry.stdin.lock().await;
-                stdin.take();
-            }
-            terminate_process(entry.os_pid);
-            entry.notify.notify_waiters();
-        }
-    });
+enum LifecycleOutcome {
+    Exited(std::io::Result<std::process::ExitStatus>),
+    TimedOut,
+    Interrupted,
 }
 
-fn spawn_cancellation_task(entry: Arc<CommandProcessEntry>, token: CancellationToken) {
-    tokio::spawn(async move {
-        token.cancelled().await;
-        mark_interrupted_and_kill(&entry).await;
-    });
-}
-
-async fn mark_interrupted_and_kill(entry: &CommandProcessEntry) {
-    let should_kill = {
-        let mut state = entry.state.lock().await;
-        let should_kill = matches!(state.lifecycle, CommandProcessLifecycle::Running)
-            && !state.timed_out
-            && !state.interrupted;
-        if should_kill {
-            state.interrupted = true;
+async fn wait_for_lifecycle_outcome(
+    child: &mut tokio::process::Child,
+    timeout: Duration,
+    cancellation_token: Option<CancellationToken>,
+) -> LifecycleOutcome {
+    if let Some(token) = cancellation_token {
+        tokio::select! {
+            result = child.wait() => LifecycleOutcome::Exited(result),
+            _ = tokio::time::sleep(timeout) => LifecycleOutcome::TimedOut,
+            _ = token.cancelled() => LifecycleOutcome::Interrupted,
         }
-        should_kill
-    };
-    if should_kill {
-        {
-            let mut stdin = entry.stdin.lock().await;
-            stdin.take();
+    } else {
+        tokio::select! {
+            result = child.wait() => LifecycleOutcome::Exited(result),
+            _ = tokio::time::sleep(timeout) => LifecycleOutcome::TimedOut,
         }
-        terminate_process(entry.os_pid);
-        entry.notify.notify_waiters();
     }
+}
+
+async fn mark_timed_out(entry: &CommandProcessEntry) {
+    let mut state = entry.state.lock().await;
+    if matches!(state.lifecycle, CommandProcessLifecycle::Running) && !state.interrupted {
+        state.timed_out = true;
+    }
+    drop(state);
+    entry.notify.notify_waiters();
+}
+
+async fn mark_interrupted(entry: &CommandProcessEntry) {
+    let mut state = entry.state.lock().await;
+    if matches!(state.lifecycle, CommandProcessLifecycle::Running) && !state.timed_out {
+        state.interrupted = true;
+    }
+    drop(state);
+    entry.notify.notify_waiters();
+}
+
+async fn close_stdin(entry: &CommandProcessEntry) {
+    let mut stdin = entry.stdin.lock().await;
+    stdin.take();
 }
 
 async fn read_stdout(entry: Arc<CommandProcessEntry>, stdout: ChildStdout) {
@@ -514,27 +536,6 @@ fn shell_command(command: &str) -> Command {
         let mut shell = Command::new("sh");
         shell.args(["-c", command]);
         shell
-    }
-}
-
-fn terminate_process(child_id: Option<u32>) {
-    let Some(id) = child_id else { return };
-    let result = if cfg!(unix) {
-        std::process::Command::new("kill")
-            .arg("-9")
-            .arg(id.to_string())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-    } else {
-        std::process::Command::new("taskkill")
-            .args(["/F", "/T", "/PID", &id.to_string()])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-    };
-    if let Ok(mut child) = result {
-        let _ = child.wait();
     }
 }
 

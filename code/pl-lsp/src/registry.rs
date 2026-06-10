@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::Value;
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::sync::{Mutex, broadcast};
 
@@ -12,6 +13,7 @@ use crate::client::{
     DiagnosticSink, LspClient, LspServerDefinition, with_content_modified_retries,
 };
 use crate::formatting::{format_diagnostics, format_lsp_result};
+use crate::process::{configure_background_command, terminate_process_tree};
 use crate::types::{
     LspAvailabilityKind, LspDiagnostic, LspQuery, LspQueryOperation, LspQueryResult, LspResult,
     LspRuntimeError, LspServerSnapshot,
@@ -124,6 +126,25 @@ impl LspRuntimeRegistry {
         if let Some(client) = self.open_client_for_path(path.as_ref()).await {
             let _ = client.close_file(path.as_ref()).await;
         }
+    }
+
+    pub async fn shutdown(&self) {
+        let clients = {
+            let mut state = self.state.lock().await;
+            state.workspace_root = None;
+            let clients = state
+                .servers
+                .values_mut()
+                .filter_map(|server| server.client.take())
+                .collect::<Vec<_>>();
+            state.servers.clear();
+            clients
+        };
+        self.diagnostics.lock().await.clear();
+        for client in clients {
+            client.shutdown().await;
+        }
+        self.emit_update();
     }
 
     async fn reconcile_workspace_with_command(&self, workspace_root: &Path, command: &str) {
@@ -484,38 +505,63 @@ enum ProbeError {
 }
 
 async fn probe_command(command: &str) -> Result<String, ProbeError> {
-    let child = Command::new(command)
+    let mut command_process = Command::new(command);
+    command_process
         .arg("--version")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                ProbeError::MissingCommand
-            } else {
-                ProbeError::Failed(error.to_string())
-            }
-        })?;
-    let output = tokio::time::timeout(PROBE_TIMEOUT, child.wait_with_output())
-        .await
-        .map_err(|_| ProbeError::Failed("rust-analyzer --version timed out".to_string()))?
-        .map_err(|error| ProbeError::Failed(error.to_string()))?;
-    if output.status.success() {
-        let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        .stderr(Stdio::piped());
+    configure_background_command(&mut command_process);
+    let mut child = command_process.spawn().map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            ProbeError::MissingCommand
+        } else {
+            ProbeError::Failed(error.to_string())
+        }
+    })?;
+    let pid = child.id();
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let stdout_task = tokio::spawn(read_child_output(stdout));
+    let stderr_task = tokio::spawn(read_child_output(stderr));
+    let status = match tokio::time::timeout(PROBE_TIMEOUT, child.wait()).await {
+        Ok(Ok(status)) => status,
+        Ok(Err(error)) => return Err(ProbeError::Failed(error.to_string())),
+        Err(_) => {
+            terminate_process_tree(pid).await;
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            return Err(ProbeError::Failed(
+                "rust-analyzer --version timed out".to_string(),
+            ));
+        }
+    };
+    let stdout = stdout_task.await.unwrap_or_default();
+    let stderr = stderr_task.await.unwrap_or_default();
+    if status.success() {
+        let version = String::from_utf8_lossy(&stdout).trim().to_string();
         Ok(if version.is_empty() {
             "rust-analyzer is available".to_string()
         } else {
             version
         })
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stderr = String::from_utf8_lossy(&stderr).trim().to_string();
         Err(ProbeError::Failed(if stderr.is_empty() {
-            format!("rust-analyzer exited with {}", output.status)
+            format!("rust-analyzer exited with {status}")
         } else {
             stderr
         }))
     }
+}
+
+async fn read_child_output(stream: Option<impl tokio::io::AsyncRead + Unpin>) -> Vec<u8> {
+    let Some(mut stream) = stream else {
+        return Vec::new();
+    };
+    let mut output = Vec::new();
+    let _ = stream.read_to_end(&mut output).await;
+    output
 }
 
 fn diagnostic_counts(diagnostics: &HashMap<String, Vec<LspDiagnostic>>) -> BTreeMap<String, usize> {

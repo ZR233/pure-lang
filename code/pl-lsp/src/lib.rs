@@ -1,6 +1,7 @@
 mod client;
 mod formatting;
 mod framing;
+mod process;
 mod registry;
 mod types;
 mod uri;
