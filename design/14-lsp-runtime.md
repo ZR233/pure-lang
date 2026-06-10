@@ -1,4 +1,4 @@
-# Pure Studio LSP Runtime 设计
+# 14 - LSP Runtime 设计
 
 ## 目标
 
@@ -64,6 +64,8 @@ active LSP 只包括 `available` server。`missingCommand`、`unavailable`、`di
 - `diagnostics`
 
 位置类输入使用 1-based `line` / `character`，内部转换为 LSP 0-based UTF-16 position。输出为结构化 JSON 文本，包含 `success`、`operation`、`serverId`、`result`、`resultCount`、`fileCount`。
+
+当 `lsp_query` 可用且 active LSP 支持目标文件时，agent 应优先用它处理代码语义查询，包括定义跳转、引用查找、hover 类型/签名/文档、实现跳转、符号查询、调用层级和 diagnostics。纯文本匹配、文件名/配置搜索、非支持语言、LSP 未激活或 LSP 返回不可用错误时，回退到文件工具、`search_files` 或 `bash`/`rg`。
 
 ## 文件同步
 
