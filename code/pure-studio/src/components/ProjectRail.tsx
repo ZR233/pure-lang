@@ -1,7 +1,9 @@
-import { FolderOpen, MessageSquare, Plus, Settings } from "lucide-react";
+import { FolderOpen, Plus, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ProjectRecord, SessionRecord } from "../types";
 import { initials } from "../lib/utils";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 type ProjectRailProps = {
   projects: ProjectRecord[];
@@ -23,7 +25,6 @@ export function ProjectRail({
   sessions,
   selectedProjectId,
   selectedSessionId,
-  onAddProject,
   onSelectProject,
   onNewSession,
   onSelectSession,
@@ -33,65 +34,67 @@ export function ProjectRail({
   const { t } = useTranslation();
 
   return (
-    <aside className="project-rail">
-      <div className="rail-header">
-        <div className="brand">
-          <div className="brand-mark">P</div>
-          <span className="brand-name">Pure Studio</span>
+    <aside className="flex flex-col w-60 shrink-0 h-screen bg-sidebar-background text-sidebar-foreground border-r border-sidebar-border overflow-hidden max-[480px]:hidden">
+      <div className="flex items-center justify-between px-3.5 pt-3.5 pb-2.5 border-b border-sidebar-border">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7.5 h-7.5 rounded-lg bg-primary text-primary-foreground grid place-items-center font-extrabold text-sm">P</div>
+          <span className="text-sm font-bold text-sidebar-foreground tracking-tight">Pure Studio</span>
         </div>
-        <button className="rail-icon-btn" onClick={onOpenSettings} title={t("nav.settings")}>
+        <Button variant="ghost" size="icon" className="text-sidebar-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent h-7.5 w-7.5 rounded-md" onClick={onOpenSettings} title={t("nav.settings")}>
           <Settings size={16} />
-        </button>
+        </Button>
       </div>
 
-      <button
-        className="new-session-btn"
-        disabled={!selectedProjectId}
-        onClick={onNewSession}
-      >
+      <Button variant="outline" className="mx-2.5 mt-2.5 w-[calc(100%-20px)] gap-1.5" disabled={!selectedProjectId} onClick={onNewSession}>
         <Plus size={16} />
         {t("common.newSession")}
-      </button>
+      </Button>
 
-      <section className="rail-section" style={{ flex: "0 0 auto", maxHeight: 180 }}>
-        <div className="section-label">
+      <section className="flex flex-col gap-0.5 px-2.5 py-1" style={{ flex: "0 0 auto", maxHeight: 180 }}>
+        <div className="text-xs font-semibold uppercase tracking-wider text-sidebar-muted-foreground flex items-center justify-between px-3 py-2">
           {t("nav.projects")}
-          <button className="section-label-btn" onClick={chooseFolder} title={t("common.chooseFolder")}>
+          <Button variant="ghost" size="icon" className="h-5.5 w-5.5 rounded text-sidebar-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent" onClick={chooseFolder} title={t("common.chooseFolder")}>
             <FolderOpen size={12} />
-          </button>
+          </Button>
         </div>
-        <div className="project-list">
+        <div className="flex flex-col gap-px overflow-y-auto min-h-0">
           {projects.map((project) => (
-            <button
+            <Button
               key={project.id}
-              className={`project-row ${project.id === selectedProjectId ? "active" : ""}`}
+              variant="ghost"
+              className={`w-full justify-start gap-2.5 px-2 py-1.5 h-auto text-left rounded-lg ${project.id === selectedProjectId ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent"}`}
               onClick={() => onSelectProject(project.id)}
             >
-              <span className="project-avatar">{initials(project.name) || "P"}</span>
-              <div className="project-row-text">
-                <strong>{project.name}</strong>
-                <small>{project.path}</small>
+              <span className="w-7 h-7 rounded-lg bg-primary/10 text-primary grid place-items-center font-bold text-xs flex-shrink-0">{initials(project.name) || "P"}</span>
+              <div className="min-w-0 flex-1">
+                <strong className="block truncate text-sm font-medium text-sidebar-foreground">{project.name}</strong>
+                <small className="block truncate text-[10px] text-sidebar-muted-foreground">{project.path}</small>
               </div>
-            </button>
+            </Button>
           ))}
         </div>
       </section>
 
-      <section className="rail-section sessions-section">
-        <div className="section-label">{t("nav.sessions")}</div>
-        <div className="session-list">
-          {sessions.map((session) => (
-            <button
-              key={session.id}
-              className={`session-row ${session.id === selectedSessionId ? "active" : ""}`}
-              onClick={() => onSelectSession(session.id)}
-            >
-              <span className="session-dot" />
-              <span className="session-title">{session.title}</span>
-              <span className="session-time">{session.updatedAt}</span>
-            </button>
-          ))}
+      <section className="flex flex-col gap-0.5 px-2.5 py-1 flex-1 min-h-0 overflow-hidden">
+        <div className="text-xs font-semibold uppercase tracking-wider text-sidebar-muted-foreground px-3 py-2">
+          {t("nav.sessions")}
         </div>
+        <ScrollArea className="flex-1">
+          <div className="flex flex-col gap-px pr-3">
+            {sessions.map((session) => (
+              <Button
+                key={session.id}
+                variant="ghost"
+                className={`w-full justify-start gap-2 px-2 py-1.5 h-auto rounded-lg ${session.id === selectedSessionId ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent"}`}
+                onClick={() => onSelectSession(session.id)}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${session.id === selectedSessionId ? "bg-primary" : "bg-sidebar-muted-foreground/60"}`} />
+                <span className="flex-1 min-w-0 truncate font-medium">{session.title}</span>
+                <span className="text-[10px] text-sidebar-muted-foreground flex-shrink-0">{session.updatedAt}</span>
+              </Button>
+            ))}
+          </div>
+        </ScrollArea>
       </section>
     </aside>
   );

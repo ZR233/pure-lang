@@ -1,5 +1,14 @@
 import type { Dispatch, SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
+import { Card } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { ModelRecord, ProviderRecord, RoleKey, RoleRecord } from "../types";
 import { allModels } from "../lib/utils";
 
@@ -115,15 +124,13 @@ export function RoleSettings({ roles, providers, setRoles, onSaveRoles }: RoleSe
   }
 
   return (
-    <section className="role-settings">
-      <div className="role-settings-head">
-        <div>
-          <h2>{t("settings.roleRoute")}</h2>
-          <p>{t("settings.roleRouteDesc")}</p>
-        </div>
+    <section className="space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold text-foreground">{t("settings.roleRoute")}</h2>
+        <p className="text-sm text-muted-foreground">{t("settings.roleRouteDesc")}</p>
       </div>
 
-      <div className="role-card-list">
+      <div className="grid grid-cols-2 gap-3.5 content-start">
         {normalizedRoles.map((role) => {
           const provider = providers.find((item) => item.id === role.provider) ?? providers[0];
           const models = provider ? allModels(provider) : [];
@@ -132,57 +139,72 @@ export function RoleSettings({ roles, providers, setRoles, onSaveRoles }: RoleSe
           const roleI18n = ROLE_I18N_KEYS[role.key];
 
           return (
-            <article className="role-card" key={role.key}>
-              <div className="role-card-title">
+            <Card className="grid gap-4 p-4" key={role.key}>
+              <div className="flex items-start justify-between gap-2">
                 <div>
-                  <h3>{t(roleI18n.label)}</h3>
-                  <p>{t(roleI18n.hint)}</p>
+                  <h3 className="text-sm font-semibold text-foreground">{t(roleI18n.label)}</h3>
+                  <p className="text-xs text-muted-foreground">{t(roleI18n.hint)}</p>
                 </div>
-                <span>{role.key}</span>
+                <span className="text-xs text-muted-foreground">{role.key}</span>
               </div>
 
-              <div className="role-form-grid">
-                <label>
-                  <span>{t("roleRoute.provider")}</span>
-                  <select
+              <div className="grid gap-3">
+                <div className="space-y-1.5">
+                  <Label>{t("roleRoute.provider")}</Label>
+                  <Select
                     value={role.provider}
-                    onChange={(event) => changeProvider(role, event.target.value)}
+                    onValueChange={(value) => changeProvider(role, value)}
                   >
-                    {providers.map((providerOption) => (
-                      <option key={providerOption.id} value={providerOption.id}>
-                        {providerOption.name || providerOption.id} ({providerOption.id})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <span>{t("roleRoute.model")}</span>
-                  <select
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {providers.map((providerOption) => (
+                        <SelectItem key={providerOption.id} value={providerOption.id}>
+                          {providerOption.name || providerOption.id} ({providerOption.id})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>{t("roleRoute.model")}</Label>
+                  <Select
                     value={role.model}
-                    onChange={(event) => changeModel(role, event.target.value)}
+                    onValueChange={(value) => changeModel(role, value)}
                   >
-                    {models.map((model) => (
-                      <option key={model.slug} value={model.slug}>
-                        {model.displayName || model.slug}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <span>{t("roleRoute.effort")}</span>
-                  <select
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {models.map((model) => (
+                        <SelectItem key={model.slug} value={model.slug}>
+                          {model.displayName || model.slug}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>{t("roleRoute.effort")}</Label>
+                  <Select
                     value={role.effort}
-                    onChange={(event) => changeEffort(role, event.target.value)}
+                    onValueChange={(value) => changeEffort(role, value)}
                   >
-                    {efforts.map((effort) => (
-                      <option key={effort} value={effort}>
-                        {effort}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {efforts.map((effort) => (
+                        <SelectItem key={effort} value={effort}>
+                          {effort}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-            </article>
+            </Card>
           );
         })}
       </div>

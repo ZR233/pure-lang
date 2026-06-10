@@ -38,6 +38,10 @@ import type {
 import type { TimelineEntry, ToolGroupSummaryPart } from "../state/selectors";
 import type { PlanActionMode, PlanActionState } from "../state/studio-state";
 import { hidesToolResult, isQuietFileTool } from "../lib/tool-display";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
 import { SessionStatusBar } from "./SessionStatusBar";
 import { ConversationTimeline } from "./ConversationTimeline";
 
@@ -168,7 +172,7 @@ function MarkdownContent({ content }: { content: string }) {
         index++;
       }
       blocks.push(
-        <pre key={`md-code-${blocks.length}`} className="markdown-code">
+        <pre key={`md-code-${blocks.length}`} className="bg-muted rounded-md p-3 text-xs overflow-x-auto my-1">
           <code>{code.join("\n")}</code>
         </pre>,
       );
@@ -245,7 +249,7 @@ function MarkdownContent({ content }: { content: string }) {
     paragraph.push(line);
   }
   flushParagraph(blocks, paragraph, "md");
-  return <div className="markdown-content">{blocks}</div>;
+  return <div className="space-y-1">{blocks}</div>;
 }
 
 function thoughtLabel(content: string, t: TFunction): string {
@@ -397,21 +401,21 @@ function ToolDetails({
   const hasResult = Boolean(result?.trim()) && !hideResult;
   if (!hasArguments && !hasResult) return null;
   return (
-    <details className="timeline-details">
-      <summary>
+    <details className="text-xs text-muted-foreground mt-1 group">
+      <summary className="flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors">
         <span>{t("toolCall.details")}</span>
-        <ChevronDown size={14} />
+        <ChevronDown size={14} className="group-open:rotate-180 transition-transform" />
       </summary>
       {hasArguments ? (
         <>
-          <div className="timeline-detail-label">{t("toolCall.arguments")}</div>
-          <pre className="timeline-code">{argumentsText}</pre>
+          <div className="text-xs font-medium text-muted-foreground mt-2 mb-1">{t("toolCall.arguments")}</div>
+          <pre className="bg-muted rounded-md p-2 mt-1 text-xs overflow-x-auto">{argumentsText}</pre>
         </>
       ) : null}
       {hasResult ? (
         <>
-          <div className="timeline-detail-label">{t("toolCall.result")}</div>
-          <pre className="timeline-code">{result}</pre>
+          <div className="text-xs font-medium text-muted-foreground mt-2 mb-1">{t("toolCall.result")}</div>
+          <pre className="bg-muted rounded-md p-2 mt-1 text-xs overflow-x-auto">{result}</pre>
         </>
       ) : null}
     </details>
@@ -428,25 +432,37 @@ function EntryShell({
   children: ReactNode;
 }) {
   return (
-    <article className={`timeline-entry ${className}`}>
-      <span className="timeline-node" aria-hidden="true">
+    <article className={`flex gap-2.5 px-4 py-3 max-w-3xl mx-auto w-full ${className}`}>
+      <span className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0" aria-hidden="true">
         {icon}
       </span>
-      <div className="timeline-entry-card">{children}</div>
+      <div className="flex-1 min-w-0">{children}</div>
     </article>
   );
 }
 
 function MessageEntry({ entry }: { entry: Extract<TimelineEntry, { kind: "message" }> }) {
-  const roleIcon = entry.role === "user" ? <UserRound size={14} /> : <span className="timeline-avatar-letter">P</span>;
-  return (
-    <EntryShell className={`timeline-entry-message role-${entry.role}`} icon={roleIcon}>
-      {entry.role === "user" ? null : (
-        <div className="timeline-entry-head">
-          <strong>{entry.role.toUpperCase()}</strong>
+  const roleIcon = entry.role === "user" ? <UserRound size={14} /> : <span className="text-xs font-bold text-primary">P</span>;
+  if (entry.role === "user") {
+    return (
+      <div className="flex gap-2.5 px-4 py-3 max-w-3xl mx-auto w-full">
+        <span className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0" aria-hidden="true">
+          {roleIcon}
+        </span>
+        <div className="bg-muted rounded-2xl rounded-tl-sm px-4 py-2.5 max-w-[80%]">
+          <div className="text-sm whitespace-pre-wrap break-words">
+            <MarkdownContent content={entry.content} />
+          </div>
         </div>
-      )}
-      <div className="timeline-message-content">
+      </div>
+    );
+  }
+  return (
+    <EntryShell className="" icon={roleIcon}>
+      <div className="flex items-center gap-2 mb-1">
+        <strong className="text-xs text-muted-foreground">{entry.role.toUpperCase()}</strong>
+      </div>
+      <div className="text-sm whitespace-pre-wrap break-words">
         <MarkdownContent content={entry.content} />
       </div>
     </EntryShell>
@@ -456,27 +472,37 @@ function MessageEntry({ entry }: { entry: Extract<TimelineEntry, { kind: "messag
 function ThoughtEntry({ entry, t }: { entry: Extract<TimelineEntry, { kind: "thought" }>; t: TFunction }) {
   const active = isActiveStatus(entry.status);
   return (
-    <EntryShell className={`timeline-entry-thought status-${entry.status}${active ? " is-active" : ""}`} icon={<Brain size={14} />}>
-      <details className="timeline-thought">
-        <summary>
-          <span className="timeline-thought-label">
+    <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/30 rounded-md px-3 py-1.5 max-w-3xl mx-auto my-1">
+      {active ? <Loader2 size={14} className="animate-spin shrink-0" /> : <Brain size={14} className="shrink-0" />}
+      <details className="flex-1 min-w-0 group">
+        <summary className="flex items-center gap-1 cursor-pointer list-none">
+          <span className="flex-1 min-w-0">
             {active ? t("timeline.thinkingActive") : thoughtDurationLabel(entry.durationSeconds, t)}
           </span>
-          {active ? <span className="timeline-thinking-dots" aria-hidden="true"><i /><i /><i /></span> : null}
-          {!active && entry.content.trim() ? <span className="timeline-thought-preview">{thoughtLabel(entry.content, t)}</span> : null}
-          <ChevronDown size={14} />
+          {active ? (
+            <span className="inline-flex gap-0.5" aria-hidden="true">
+              <span className="w-1 h-1 rounded-full bg-current animate-bounce [animation-delay:-0.3s]" />
+              <span className="w-1 h-1 rounded-full bg-current animate-bounce [animation-delay:-0.15s]" />
+              <span className="w-1 h-1 rounded-full bg-current animate-bounce" />
+            </span>
+          ) : null}
+          {!active && entry.content.trim() ? (
+            <span className="text-xs truncate max-w-[200px] text-muted-foreground/70 ml-2">
+              {thoughtLabel(entry.content, t)}
+            </span>
+          ) : null}
+          <ChevronDown size={12} className="shrink-0 group-open:rotate-180 transition-transform" />
         </summary>
-        <pre>{entry.content}</pre>
+        <pre className="text-xs mt-2 whitespace-pre-wrap">{entry.content}</pre>
       </details>
-    </EntryShell>
+    </div>
   );
 }
 
 function StatusEntry({ entry, t }: { entry: Extract<TimelineEntry, { kind: "status" }>; t: TFunction }) {
   return (
-    <EntryShell className={`timeline-entry-status status-${entry.status}`} icon={<Loader2 size={14} />}>
-      <div className="timeline-status-row">
-        <span className="timeline-status-pulse" aria-hidden="true" />
+    <EntryShell className="" icon={<Loader2 size={14} className="animate-spin" />}>
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <span>{entry.content === "waitingForModel" ? t("timeline.waitingForModel") : entry.content}</span>
       </div>
     </EntryShell>
@@ -490,18 +516,18 @@ function ToolEntry({ item, t }: { item: Extract<TimelineEntry, { kind: "tool" }>
   const pathSummary = toolPathSummary(name, argumentsText);
   const hideResult = hidesToolResult(name, item.status);
   return (
-    <EntryShell className={`timeline-entry-tool status-${item.status}`} icon={<Wrench size={14} />}>
-      <div className="timeline-entry-head">
-        <strong>{name}</strong>
+    <EntryShell className="" icon={<Wrench size={14} />}>
+      <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
+        <Badge variant="outline" className="text-xs font-mono">{name}</Badge>
         {pathSummary ? (
-          <code className="timeline-inline-code" title={pathSummary}>
+          <code className="bg-muted rounded px-1 py-0.5 text-xs font-mono truncate max-w-[200px]" title={pathSummary}>
             {pathSummary}
           </code>
         ) : null}
-        <span className={`timeline-badge status-${item.status}`}>{toolStatusLabel(item.status, t)}</span>
+        <Badge variant="secondary" className="text-xs">{toolStatusLabel(item.status, t)}</Badge>
       </div>
       {!pathSummary && !isQuietFileTool(name) && argumentsText ? (
-        <p className="timeline-result">{compact(argumentsText, 160)}</p>
+        <p className="text-xs text-muted-foreground mt-0.5">{compact(argumentsText, 160)}</p>
       ) : null}
       <ToolDetails
         argumentsText={isQuietFileTool(name) ? null : argumentsText}
@@ -522,15 +548,22 @@ function PlanEntry({
 }) {
   const state = entry.planState?.state ?? "pending";
   return (
-    <EntryShell className={`timeline-entry-plan status-${state}`} icon={<FileText size={14} />}>
-      <div className="timeline-entry-head">
-        <strong>{t("timeline.plan")}</strong>
-        <span className={`timeline-badge status-${state}`}>{planStateLabel(state, t)}</span>
+    <div className="flex gap-2.5 px-4 py-3 max-w-3xl mx-auto w-full">
+      <span className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0" aria-hidden="true">
+        <FileText size={14} />
+      </span>
+      <div className="flex-1 min-w-0">
+        <Card className="w-full">
+          <CardHeader className="flex flex-row items-center gap-2 p-3">
+            <CardTitle className="text-sm">{t("timeline.plan")}</CardTitle>
+            <Badge variant="secondary">{planStateLabel(state, t)}</Badge>
+          </CardHeader>
+          <CardContent className="p-3 pt-0">
+            <MarkdownContent content={entry.content} />
+          </CardContent>
+        </Card>
       </div>
-      <div className="timeline-message-content">
-        <MarkdownContent content={entry.content} />
-      </div>
-    </EntryShell>
+    </div>
   );
 }
 
@@ -542,24 +575,24 @@ function ToolGroupEntry({
   t: TFunction;
 }) {
   return (
-    <EntryShell className={`timeline-entry-tool-group status-${entry.status}`} icon={<Wrench size={14} />}>
-      <div className="timeline-entry-head">
-        <strong>{t("toolGroup.title")}</strong>
-        <div className="timeline-tool-group-summary">
+    <EntryShell className="" icon={<Wrench size={14} />}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <strong className="text-sm">{t("toolGroup.title")}</strong>
+        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
           {entry.summaryParts.map((part) => (
-            <span key={part.kind} className={`timeline-tool-chip kind-${part.kind}`}>
+            <Badge key={part.kind} variant="secondary" className="text-xs">
               {toolGroupPartLabel(part, t)}
-            </span>
+            </Badge>
           ))}
         </div>
-        <span className={`timeline-badge status-${entry.status}`}>{toolStatusLabel(entry.status, t)}</span>
+        <Badge variant="outline" className="text-xs">{toolStatusLabel(entry.status, t)}</Badge>
       </div>
-      <details className="timeline-details timeline-tool-group-details">
-        <summary>
+      <details className="text-xs text-muted-foreground mt-1 group">
+        <summary className="flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors">
           <span>{t("toolGroup.details", { count: entry.items.length })}</span>
-          <ChevronDown size={14} />
+          <ChevronDown size={14} className="group-open:rotate-180 transition-transform" />
         </summary>
-        <div className="timeline-tool-group-list">
+        <div className="space-y-0.5 mt-1">
           {entry.items.map((item) => (
             <ToolGroupDetailRow key={item.itemId} item={item} t={t} />
           ))}
@@ -581,18 +614,18 @@ function ToolGroupDetailRow({ item, t }: { item: TimelineItem; t: TFunction }) {
   const pathSummary = toolPathSummary(name, argumentsText);
   const hideResult = hidesToolResult(name, item.status);
   return (
-    <div className="timeline-tool-group-row">
-      <div className="timeline-tool-group-row-head">
-        <strong>{name}</strong>
+    <div className="py-1">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
+        <strong className="text-xs font-medium">{name}</strong>
         {pathSummary ? (
-          <code className="timeline-inline-code" title={pathSummary}>
+          <code className="bg-muted rounded px-1 py-0.5 text-xs font-mono truncate max-w-[200px]" title={pathSummary}>
             {pathSummary}
           </code>
         ) : null}
-        <span className={`timeline-badge status-${item.status}`}>{toolStatusLabel(item.status, t)}</span>
+        <Badge variant="outline" className="text-xs">{toolStatusLabel(item.status, t)}</Badge>
       </div>
       {!pathSummary && !isQuietFileTool(name) && argumentsText ? (
-        <p className="timeline-result">{compact(argumentsText, 140)}</p>
+        <p className="text-xs text-muted-foreground mt-0.5">{compact(argumentsText, 140)}</p>
       ) : null}
       <ToolDetails
         argumentsText={isQuietFileTool(name) ? null : argumentsText}
@@ -618,26 +651,29 @@ function AgentEntry({
   const summary = failureDetail ?? agent?.summary ?? "";
   const path = agent?.path ?? null;
   return (
-    <EntryShell className={`timeline-entry-subagent status-${status ?? item.status}`} icon={<Activity size={14} />}>
-      <div className="timeline-entry-head">
-        <strong>{t("subagent.title")}</strong>
-        {path ? <code className="timeline-inline-code">{path}</code> : null}
+    <EntryShell className="" icon={<Activity size={14} />}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <strong className="text-sm">{t("subagent.title")}</strong>
+        {path ? <code className="bg-muted rounded px-1 py-0.5 text-xs font-mono">{path}</code> : null}
         {status ? (
-          <span className={`timeline-badge status-${status}`}>{t(agentStatusKeys[status])}</span>
+          <Badge variant="outline" className="text-xs flex items-center gap-1">
+            <span className={`w-1.5 h-1.5 rounded-full ${status === "running" ? "bg-green-500" : status === "errored" ? "bg-destructive" : "bg-muted-foreground"}`} />
+            {t(agentStatusKeys[status])}
+          </Badge>
         ) : null}
       </div>
-      <div className="timeline-entry-meta">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
         {agent?.parentPath ? <span>{t("subagent.parent")} {agent.parentPath}</span> : null}
         <span>{new Date(item.updatedAt * 1000).toLocaleTimeString()}</span>
       </div>
       {prompt || summary ? (
-        <details className="timeline-details">
-          <summary>
+        <details className="text-xs text-muted-foreground mt-1 group">
+          <summary className="flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors">
             <span>{prompt ? t("subagent.prompt") : t("subagent.noSummaryYet")}</span>
-            <ChevronDown size={14} />
+            <ChevronDown size={14} className="group-open:rotate-180 transition-transform" />
           </summary>
-          {prompt ? <p className="timeline-task">{prompt}</p> : null}
-          {summary ? <p className="timeline-result">{summary}</p> : null}
+          {prompt ? <p className="text-xs mt-1">{prompt}</p> : null}
+          {summary ? <p className="text-xs mt-1 text-muted-foreground">{summary}</p> : null}
         </details>
       ) : null}
     </EntryShell>
@@ -676,11 +712,12 @@ function agentFailureDetail(
 function TraceEntry({ item, t }: { item: TimelineItem; t: TFunction }) {
   const content = item.content.trim();
   return (
-    <EntryShell className={`timeline-entry-trace status-${item.status ?? "started"}`} icon={<Circle size={14} />}>
-      <div className="timeline-entry-head">
-        <strong>{t("timeline.notice")} {turnStatusLabel(item.status, t)}</strong>
+    <EntryShell className="" icon={<Circle size={14} />}>
+      <div className="flex items-center gap-2">
+        <strong className="text-sm">{t("timeline.notice")}</strong>
+        <Badge variant="outline" className="text-xs">{turnStatusLabel(item.status, t)}</Badge>
       </div>
-      {content ? <p className="timeline-result">{compact(content, 260)}</p> : null}
+      {content ? <p className="text-xs text-muted-foreground mt-0.5">{compact(content, 260)}</p> : null}
     </EntryShell>
   );
 }
@@ -778,25 +815,26 @@ function AskUserComposer({
   const showFreeText = options.length === 0 || currentQuestion.isOther;
 
   return (
-    <div className="composer-box ask-user-composer">
-      <div className="ask-user-heading">
-        <UserRound size={16} />
-        <span>{t("askUser.awaiting")}</span>
-        <small>{progressLabel}</small>
+    <div className="border-t border-border">
+      <div className="flex items-center gap-2 px-4 pt-3 pb-2">
+        <UserRound size={16} className="shrink-0" />
+        <span className="text-sm font-medium">{t("askUser.awaiting")}</span>
+        <span className="text-xs text-muted-foreground">{progressLabel}</span>
       </div>
-      <div className="ask-user-question-list">
-        <section className="ask-user-question" key={currentQuestion.id}>
-          <div className="ask-user-question-copy">
-            <strong>{currentQuestion.header}</strong>
-            <p>{currentQuestion.question}</p>
+      <div className="px-4 py-2">
+        <section className="space-y-2" key={currentQuestion.id}>
+          <div className="space-y-1">
+            <strong className="text-sm">{currentQuestion.header}</strong>
+            <p className="text-sm text-muted-foreground">{currentQuestion.question}</p>
           </div>
           {options.length > 0 ? (
-            <div className="ask-user-options">
+            <div className="flex flex-col gap-1">
               {options.map((option) => (
-                <button
+                <Button
                   type="button"
                   key={`${currentQuestion.id}-${option.label}`}
-                  className={entry.selected === option.label ? "selected" : ""}
+                  variant={entry.selected === option.label ? "default" : "outline"}
+                  className="w-full text-left h-auto py-2 justify-start"
                   onClick={() =>
                     updateDraft(currentQuestion.id, {
                       selected: entry.selected === option.label ? null : option.label,
@@ -804,8 +842,8 @@ function AskUserComposer({
                   }
                 >
                   <span>{option.label}</span>
-                  <small>{option.description}</small>
-                </button>
+                  <span className="text-xs text-muted-foreground ml-2 font-normal">{option.description}</span>
+                </Button>
               ))}
             </div>
           ) : null}
@@ -818,6 +856,7 @@ function AskUserComposer({
                 onKeyDown={submitOnShortcut}
                 placeholder={t("askUser.secretPlaceholder")}
                 aria-label={currentQuestion.question}
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
               />
             ) : (
               <textarea
@@ -830,26 +869,32 @@ function AskUserComposer({
                     : t("askUser.answerPlaceholder")
                 }
                 aria-label={currentQuestion.question}
+                className="flex min-h-[60px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
               />
             )
           ) : null}
         </section>
       </div>
-      <div className="composer-toolbar ask-user-toolbar">
-        <span className="shortcut-hint">
-          <kbd>⌘</kbd> + <kbd>Enter</kbd>
+      <div className="flex items-center justify-between px-4 pb-3">
+        <span className="text-xs text-muted-foreground">
+          <kbd className="px-1 py-0.5 rounded border border-border bg-muted text-[10px] font-mono">⌘</kbd>
+          {" + "}
+          <kbd className="px-1 py-0.5 rounded border border-border bg-muted text-[10px] font-mono">Enter</kbd>
         </span>
-        <div className="ask-user-toolbar-actions">
-          <button
+        <div className="flex items-center gap-2">
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={() => setCurrentIndex((value) => Math.max(0, value - 1))}
             disabled={stopping || isFirst}
           >
             <ArrowLeft size={14} />
             <span>{t("actions.back")}</span>
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            size="sm"
             onClick={() => {
               if (isLast) {
                 submit();
@@ -861,7 +906,7 @@ function AskUserComposer({
           >
             {isLast ? <Send size={14} /> : <ArrowRight size={14} />}
             <span>{isLast ? t("askUser.submit") : t("askUser.next")}</span>
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -963,69 +1008,80 @@ function PlanConfirmComposer({
   return (
     <div
       ref={composerRef}
-      className={`composer-box plan-confirm-composer${discussing ? " discussing" : ""}`}
+      className="border-t border-border"
       onKeyDown={handleComposerKeyDown}
       tabIndex={-1}
     >
-      <div className="plan-choice-title">{t("planConfirm.promptTitle")}</div>
-      <div className="plan-choice-list" role="radiogroup" aria-label={t("planConfirm.promptTitle")}>
-        <button
+      <div className="text-sm font-semibold px-4 pt-3">{t("planConfirm.promptTitle")}</div>
+      <div className="flex flex-col gap-1 px-4 py-2" role="radiogroup" aria-label={t("planConfirm.promptTitle")}>
+        <Button
           type="button"
-          className={`plan-choice-row${discussing ? "" : " selected"}`}
+          variant={!discussing ? "default" : "outline"}
+          size="sm"
           role="radio"
           aria-checked={!discussing}
           onClick={() => onSetMode("choice")}
           disabled={stopping}
+          className="w-full text-left justify-start"
         >
-          <span className="plan-choice-index">1.</span>
-          <span className="plan-choice-copy">{t("planConfirm.implementChoice")}</span>
-        </button>
-        <button
+          <span className="text-xs text-muted-foreground w-4 shrink-0">1.</span>
+          <span className="text-sm">{t("planConfirm.implementChoice")}</span>
+        </Button>
+        <Button
           type="button"
-          className={`plan-choice-row${discussing ? " selected" : ""}`}
+          variant={discussing ? "default" : "outline"}
+          size="sm"
           role="radio"
           aria-checked={discussing}
           onClick={() => onSetMode("discuss")}
           disabled={stopping}
+          className="w-full text-left justify-start"
         >
-          <span className="plan-choice-index">2.</span>
-          <span className="plan-choice-copy">{t("planConfirm.adjustChoice")}</span>
-        </button>
+          <span className="text-xs text-muted-foreground w-4 shrink-0">2.</span>
+          <span className="text-sm">{t("planConfirm.adjustChoice")}</span>
+        </Button>
       </div>
       {discussing ? (
         <textarea
           ref={textareaRef}
-          className="plan-choice-textarea"
           value={message}
           onChange={(event) => setMessage(event.target.value)}
           onKeyDown={submitOnShortcut}
           placeholder={t("planConfirm.discussPlaceholder")}
           aria-label={t("planConfirm.discussPlaceholder")}
+          className="mx-4 mb-2 flex min-h-[60px] rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         />
       ) : null}
-      <div className="composer-toolbar plan-choice-toolbar">
-        <span className="shortcut-hint">
-          {discussing ? <><kbd>⌘</kbd> + <kbd>Enter</kbd></> : null}
+      <div className="flex items-center justify-between px-4 pb-3">
+        <span className="text-xs text-muted-foreground">
+          {discussing ? (
+            <>
+              <kbd className="px-1 py-0.5 rounded border border-border bg-muted text-[10px] font-mono">⌘</kbd>
+              {" + "}
+              <kbd className="px-1 py-0.5 rounded border border-border bg-muted text-[10px] font-mono">Enter</kbd>
+            </>
+          ) : null}
         </span>
-        <div className="plan-choice-toolbar-actions">
-          <button
+        <div className="flex items-center gap-2">
+          <Button
             type="button"
-            className="plan-choice-ignore"
+            variant="ghost"
+            size="sm"
             onClick={() => onCancel(action.planId)}
             disabled={stopping}
           >
             <span>{t("planConfirm.ignore")}</span>
-            <kbd>ESC</kbd>
-          </button>
-          <button
+            <kbd className="px-1 py-0.5 rounded border border-border bg-muted text-[10px] font-mono ml-1">ESC</kbd>
+          </Button>
+          <Button
             type="button"
-            className="plan-choice-submit"
+            size="sm"
             onClick={submitSelected}
             disabled={stopping || (discussing ? !message.trim() : !action.content.trim())}
           >
             <span>{t("planConfirm.submit")}</span>
             <CornerDownLeft size={13} />
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -1064,7 +1120,6 @@ export function ConversationPanel({
   const stopping = turnPhase === "stopping";
   const currentMode: CompileMode = selectedSession?.mode === "plan" ? "plan" : "auto";
   const activePlanAction = isBusy ? null : planAction;
-  const composerHasInlineActions = Boolean(pendingUserInput || activePlanAction);
 
   function renderTimelineEntry(entry: TimelineEntry) {
     if (entry.kind === "message") {
@@ -1090,9 +1145,11 @@ export function ConversationPanel({
   }
 
   return (
-    <section className="conversation" data-status={status}>
-      <header className="conversation-header">
-        <h1>{selectedSession?.title ?? t("conversation.defaultTitle")}</h1>
+    <section className="flex flex-1 min-w-0 flex-col h-screen bg-card overflow-hidden" data-status={status}>
+      <header className="flex items-center gap-2 px-8 h-11 border-b border-border shrink-0">
+        <h1 className="min-w-0 m-0 text-sm font-semibold truncate">
+          {selectedSession?.title ?? t("conversation.defaultTitle")}
+        </h1>
       </header>
 
       <ConversationTimeline
@@ -1102,63 +1159,61 @@ export function ConversationPanel({
         scrollToBottomLabel={t("toolCall.scrollToBottom")}
         renderEntry={renderTimelineEntry}
         emptyState={
-          <div className="empty-state">
+          <div className="flex flex-col items-center justify-center gap-2 text-muted-foreground py-12">
             <Terminal size={34} />
-            <h2>{t("conversation.emptyTitle")}</h2>
-            <p>{t("conversation.emptyDescription")}</p>
+            <h2 className="text-lg font-semibold">{t("conversation.emptyTitle")}</h2>
+            <p className="text-sm">{t("conversation.emptyDescription")}</p>
           </div>
         }
       />
 
-      <footer className="conversation-footer">
-        <div className={`composer${composerHasInlineActions ? " composer-inline-action" : ""}`}>
-          {pendingUserInput ? (
-            <AskUserComposer
-              request={pendingUserInput}
-              stopping={stopping}
-              onAnswer={onAnswerUserInput}
-              t={t}
-            />
-          ) : activePlanAction ? (
-            <PlanConfirmComposer
-              action={activePlanAction}
-              stopping={stopping}
-              onImplementPlan={onImplementPlan}
-              onDiscussPlan={onDiscussPlan}
-              onSetMode={onSetPlanActionMode}
-              onCancel={onDismissPlanAction}
-              t={t}
-            />
-          ) : (
-            <div className="composer-box">
-              <textarea
+      <footer className="border-t border-border">
+        {pendingUserInput ? (
+          <AskUserComposer
+            request={pendingUserInput}
+            stopping={stopping}
+            onAnswer={onAnswerUserInput}
+            t={t}
+          />
+        ) : activePlanAction ? (
+          <PlanConfirmComposer
+            action={activePlanAction}
+            stopping={stopping}
+            onImplementPlan={onImplementPlan}
+            onDiscussPlan={onDiscussPlan}
+            onSetMode={onSetPlanActionMode}
+            onCancel={onDismissPlanAction}
+            t={t}
+          />
+        ) : (
+          <div className="px-4 py-3">
+            <div className="relative max-w-3xl mx-auto">
+              <Textarea
                 value={prompt}
-                disabled={!selectedSession || isBusy}
-                onChange={(event) => onSetPrompt(event.target.value)}
+                onChange={(e) => onSetPrompt(e.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                    event.preventDefault();
                     onSendPrompt();
                   }
                 }}
                 placeholder={selectedSession ? t("conversation.askPlaceholder") : t("conversation.noSessionPlaceholder")}
-                aria-label={t("conversation.askPlaceholder")}
+                disabled={!selectedSession || isBusy}
+                className="resize-none pr-12 min-h-[48px] max-h-[200px] rounded-xl px-4 py-3 bg-background"
+                rows={1}
               />
-              <div className="composer-toolbar">
-                <span className="shortcut-hint"><kbd>⌘</kbd> + <kbd>Enter</kbd></span>
-                <span />
-              </div>
+              <Button
+                size="icon"
+                className="absolute right-2.5 bottom-2.5 h-8 w-8 rounded-lg shadow-sm"
+                variant={isBusy ? "destructive" : "default"}
+                disabled={isBusy ? stopping : !prompt.trim() || !selectedSession}
+                onClick={isBusy ? onStopPrompt : onSendPrompt}
+              >
+                {isBusy ? <Square size={16} /> : <Send size={16} />}
+              </Button>
             </div>
-          )}
-          {composerHasInlineActions ? null : (
-            <button
-              className={`send-button${isBusy ? " stop-button" : ""}`}
-              disabled={isBusy ? stopping : !prompt.trim() || !selectedSession}
-              onClick={isBusy ? onStopPrompt : onSendPrompt}
-            >
-              {isBusy ? <Square size={18} /> : <Send size={18} />}
-            </button>
-          )}
-        </div>
+          </div>
+        )}
 
         <SessionStatusBar
           runtime={sessionRuntime}

@@ -23,20 +23,24 @@ export function SecuritySettings({
   const { t } = useTranslation();
 
   return (
-    <section className="settings-panel security-settings">
-      <div className="settings-section-heading">
-        <h2>{t("settings.security.title")}</h2>
-        <p>{t("settings.security.description")}</p>
+    <section className="space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold text-foreground">{t("settings.security.title")}</h2>
+        <p className="text-sm text-muted-foreground">{t("settings.security.description")}</p>
       </div>
 
-      <div className="permission-mode-grid" role="radiogroup" aria-label={t("settings.security.title")}>
+      <div className="grid grid-cols-3 gap-3" role="radiogroup" aria-label={t("settings.security.title")}>
         {permissionOptions.map(({ mode, icon: Icon }) => {
           const active = mode === permissionMode;
           return (
             <button
               key={mode}
               type="button"
-              className={`permission-mode-option${active ? " active" : ""}`}
+              className={`flex items-start gap-3 p-4 rounded-lg border transition-colors text-left ${
+                active
+                  ? "border-primary bg-primary/5 text-foreground"
+                  : "border-border hover:border-primary/30 text-foreground"
+              }`}
               role="radio"
               aria-checked={active}
               onClick={() => {
@@ -45,12 +49,12 @@ export function SecuritySettings({
                 }
               }}
             >
-              <span className="permission-mode-icon">
-                <Icon size={18} />
+              <span className="mt-0.5">
+                <Icon size={18} className="text-muted-foreground" />
               </span>
-              <span>
-                <strong>{t(`permissionMode.${mode}`)}</strong>
-                <small>{t(`settings.security.modeDesc.${mode}`)}</small>
+              <span className="grid gap-1">
+                <strong className="text-sm font-medium">{t(`permissionMode.${mode}`)}</strong>
+                <small className="text-xs text-muted-foreground">{t(`settings.security.modeDesc.${mode}`)}</small>
               </span>
             </button>
           );

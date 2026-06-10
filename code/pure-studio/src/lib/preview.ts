@@ -10,7 +10,7 @@ import type {
   SkillRecord,
   TimelineItem,
 } from "../types";
-import { makeProvider, makeRole } from "./provider-mapper";
+import { makeProvider } from "./provider-mapper";
 import { previewTemplates } from "./templates";
 
 export { previewTemplates };

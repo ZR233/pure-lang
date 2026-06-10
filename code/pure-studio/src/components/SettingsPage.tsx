@@ -12,6 +12,8 @@ import type {
   PermissionMode,
   RoleRecord,
 } from "../types";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { McpSettings } from "./McpSettings";
 import { ProviderSettings } from "./ProviderSettings";
 import { RoleSettings } from "./RoleSettings";
@@ -61,73 +63,81 @@ export function SettingsPage({
   onClose,
   onSetActiveTab,
   onSaveProviderSettings,
+  setRoles,
+  setProviderSearch,
   onSavePermissionMode,
   onSaveMcpSettings,
   onRefreshProviderUsages,
-  setRoles,
-  setProviderSearch,
 }: SettingsPageProps) {
   const { t } = useTranslation();
 
   return (
-    <section className="settings-page">
-      <header className="settings-header">
-        <button className="back-button" onClick={onClose}>
-          <ArrowLeft size={18} />
-        </button>
-        <div>
-          <h1>{t("settings.title")}</h1>
-          <p>{configExists ? "~/.pure/config.toml" : t("settings.defaultConfigDraft")}</p>
+    <div className="fixed inset-0 z-100 grid grid-rows-[auto_auto_1fr] bg-background">
+      <header className="flex items-center justify-between gap-4 px-6 py-4 border-b border-border bg-card">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="icon" onClick={onClose}>
+            <ArrowLeft size={18} />
+          </Button>
+          <div>
+            <h1 className="text-lg font-semibold text-foreground">{t("settings.title")}</h1>
+            <p className="text-sm text-muted-foreground">
+              {configExists ? "~/.pure/config.toml" : t("settings.defaultConfigDraft")}
+            </p>
+          </div>
         </div>
       </header>
 
-      <nav className="settings-tabs">
-        {SETTINGS_TABS.map((tab) => (
-          <button
-            key={tab}
-            className={tab === activeSettingsTab ? "active" : ""}
-            onClick={() => onSetActiveTab(tab)}
-          >
-            {t(`settings.tabs.${tab}`)}
-          </button>
-        ))}
-      </nav>
+      <Tabs
+        value={activeSettingsTab}
+        onValueChange={(value) => onSetActiveTab(value as SettingsTab)}
+        className="w-[min(760px,calc(100vw-52px))] mx-6 mt-3.5"
+      >
+        <TabsList className="w-full justify-start">
+          {SETTINGS_TABS.map((tab) => (
+            <TabsTrigger key={tab} value={tab}>
+              {t(`settings.tabs.${tab}`)}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
-      {activeSettingsTab === "providers" ? (
-        <ProviderSettings
-          providers={providers}
-          templates={providerTemplates}
-          providerUsages={providerUsages}
-          providerUsagesLoading={providerUsagesLoading}
-          providerUsageError={providerUsageError}
-          selectedProviderId={selectedProviderId}
-          providerSearch={providerSearch}
-          setProviderSearch={setProviderSearch}
-          onSaveProviderSettings={onSaveProviderSettings}
-          onRefreshProviderUsages={onRefreshProviderUsages}
-        />
-      ) : activeSettingsTab === "roles" ? (
-        <RoleSettings
-          providers={providers}
-          roles={roles}
-          setRoles={setRoles}
-          onSaveRoles={(nextRoles) => onSaveProviderSettings({ roles: nextRoles })}
-        />
-      ) : activeSettingsTab === "skills" ? (
-        <SkillsSettings selectedProjectId={selectedProjectId} />
-      ) : activeSettingsTab === "mcp" ? (
-        <McpSettings servers={mcpServers} onSaveMcpSettings={onSaveMcpSettings} />
-      ) : activeSettingsTab === "security" ? (
-        <SecuritySettings
-          permissionMode={permissionMode}
-          onSavePermissionMode={onSavePermissionMode}
-        />
-      ) : (
-        <div className="settings-placeholder">
-          <h2>{t("settings.comingSoon")}</h2>
-          <p>{t("settings.comingSoonDesc")}</p>
-        </div>
-      )}
-    </section>
+      <div className="overflow-auto px-6 py-4">
+        {activeSettingsTab === "providers" ? (
+          <ProviderSettings
+            providers={providers}
+            templates={providerTemplates}
+            providerUsages={providerUsages}
+            providerUsagesLoading={providerUsagesLoading}
+            providerUsageError={providerUsageError}
+            selectedProviderId={selectedProviderId}
+            providerSearch={providerSearch}
+            setProviderSearch={setProviderSearch}
+            onSaveProviderSettings={onSaveProviderSettings}
+            onRefreshProviderUsages={onRefreshProviderUsages}
+          />
+        ) : activeSettingsTab === "roles" ? (
+          <RoleSettings
+            providers={providers}
+            roles={roles}
+            setRoles={setRoles}
+            onSaveRoles={(nextRoles) => onSaveProviderSettings({ roles: nextRoles })}
+          />
+        ) : activeSettingsTab === "skills" ? (
+          <SkillsSettings selectedProjectId={selectedProjectId} />
+        ) : activeSettingsTab === "mcp" ? (
+          <McpSettings servers={mcpServers} onSaveMcpSettings={onSaveMcpSettings} />
+        ) : activeSettingsTab === "security" ? (
+          <SecuritySettings
+            permissionMode={permissionMode}
+            onSavePermissionMode={onSavePermissionMode}
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+            <h2 className="text-lg font-semibold text-foreground">{t("settings.comingSoon")}</h2>
+            <p className="text-sm text-muted-foreground">{t("settings.comingSoonDesc")}</p>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

@@ -8,17 +8,12 @@ import {
   Circle,
   Cpu,
   DollarSign,
-  Loader2,
   MoreVertical,
-  Send,
-  Settings,
   ShieldCheck,
-  Smile,
   Users,
 } from "lucide-react";
-import type { CSSProperties, Dispatch, ReactNode, SetStateAction } from "react";
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   CompileMode,
@@ -26,7 +21,6 @@ import type {
   AgentDto,
   AgentStatus,
   PermissionMode,
-  ProjectRecord,
   ProviderRecord,
   RoleRecord,
   RuntimeCostAmount,
@@ -36,6 +30,34 @@ import type {
   TurnPhase,
 } from "../types";
 import { allModels } from "../lib/utils";
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+} from "@/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
 
 type SessionStatusBarProps = {
   runtime: SessionRuntime | null;
@@ -52,27 +74,6 @@ type SessionStatusBarProps = {
   turnStartedAt: number | null;
   permissionMode: PermissionMode;
   agents: AgentDto[];
-};
-
-type DropdownPosition = CSSProperties & {
-  "--dropdown-max-height"?: string;
-};
-
-const turnPhaseKeys: Record<TurnPhase, string> = {
-  idle: "turnPhase.idle",
-  running: "turnPhase.running",
-  thinking: "turnPhase.thinking",
-  tool: "turnPhase.tool",
-  subagent: "turnPhase.subagent",
-  approval: "turnPhase.approval",
-  userInput: "turnPhase.userInput",
-  stopping: "turnPhase.stopping",
-  completed: "turnPhase.completed",
-  aborted: "turnPhase.interrupted",
-  interrupted: "turnPhase.interrupted",
-  budgetLimited: "turnPhase.budgetLimited",
-  errored: "turnPhase.failed",
-  failed: "turnPhase.failed",
 };
 
 const permissionModes: PermissionMode[] = [
@@ -149,14 +150,6 @@ function contextPercent(latestContextTokens: number | null | undefined, contextW
   return Math.min(100, ((latestContextTokens ?? 0) / contextWindow) * 100);
 }
 
-function formatElapsed(startedAt: number | null, now: number): string | null {
-  if (!startedAt) return null;
-  const seconds = Math.max(0, Math.floor((now - startedAt) / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ${seconds % 60}s`;
-}
-
 function findPlannerRole(roles: RoleRecord[]): RoleRecord | null {
   return roles.find((r) => r.key === "planner") ?? null;
 }
@@ -200,41 +193,11 @@ function agentStatusKeys(status: AgentStatus): string {
   return map[status];
 }
 
-function StatusPopover({
-  children,
-  priority,
-  trigger,
-}: {
-  children: ReactNode;
-  priority?: string;
-  trigger: ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div
-      className={`status-popover-wrap${open ? " open" : ""}`}
-      data-priority={priority}
-      tabIndex={0}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-      onFocusCapture={() => setOpen(true)}
-      onBlurCapture={(event) => {
-        const nextFocus = event.relatedTarget;
-        if (!(nextFocus instanceof Node) || !event.currentTarget.contains(nextFocus)) {
-          setOpen(false);
-        }
-      }}
-    >
-      {trigger}
-      <div className={`status-popover${open ? " open" : ""}`}>{children}</div>
-    </div>
-  );
-}
+/* ===== Display helpers ===== */
 
 function ListPopover({ title, items }: { title: string; items: string[] }) {
   return (
-    <div className="status-list-popover">
+    <div className="space-y-1">
       <StatusListContent title={title} items={items} />
     </div>
   );
@@ -245,13 +208,15 @@ function StatusListContent({ title, items }: { title: string; items: string[] })
 
   return (
     <>
-      <strong>{title}</strong>
+      <strong className="text-xs font-medium">{title}</strong>
       {items.length === 0 ? (
-        <span className="status-empty">{t("statusBar.notConfigured")}</span>
+        <span className="text-xs text-muted-foreground">{t("statusBar.notConfigured")}</span>
       ) : (
         items.map((item) => (
-          <span key={item} className="status-list-row">
-            <span className="status-list-icon">{item.slice(0, 1).toUpperCase()}</span>
+          <span key={item} className="flex items-center gap-1.5 text-xs">
+            <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-muted text-[10px] font-medium">
+              {item.slice(0, 1).toUpperCase()}
+            </span>
             {item}
           </span>
         ))
@@ -265,16 +230,16 @@ function UsageMetricRows({ usage }: { usage: RuntimeUsage | null }) {
 
   return (
     <>
-      <span>
+      <span className="flex justify-between text-xs">
         {t("statusBar.cacheHit")} <strong>{formatPercent(usage?.cacheHitRate)}</strong>
       </span>
-      <span>
+      <span className="flex justify-between text-xs">
         {t("statusBar.input")} <strong>{formatTokenCount(usage?.promptTokens)}</strong>
       </span>
-      <span>
+      <span className="flex justify-between text-xs">
         {t("statusBar.output")} <strong>{formatTokenCount(usage?.completionTokens)}</strong>
       </span>
-      <span>
+      <span className="flex justify-between text-xs">
         {t("statusBar.cacheRead")}{" "}
         <strong>{formatTokenCount(usage?.cachedPromptTokens)}</strong>
       </span>
@@ -286,11 +251,9 @@ function UsagePopoverContent({ usage }: { usage: RuntimeUsage | null }) {
   const { t } = useTranslation();
 
   return (
-    <div className="status-usage-popover">
+    <div className="space-y-2">
+      <strong className="text-xs">{t("statusBar.context")}</strong>
       <UsageMetricRows usage={usage} />
-      <hr />
-      <CostRows usage={usage} />
-      <small>{t("statusBar.costHint")}</small>
     </div>
   );
 }
@@ -302,7 +265,7 @@ function CostRows({ usage }: { usage: RuntimeUsage | null }) {
 
   if (rows.length === 0) {
     return (
-      <span>
+      <span className="text-xs">
         {t("statusBar.cost")}{" "}
         <strong>{hasUnpricedUsage ? t("statusBar.costUnpriced") : t("statusBar.costNotConfigured")}</strong>
       </span>
@@ -312,12 +275,12 @@ function CostRows({ usage }: { usage: RuntimeUsage | null }) {
   return (
     <>
       {rows.map((cost) => (
-        <span className="status-cost-row" key={cost.currency}>
+        <span className="flex justify-between text-xs" key={cost.currency}>
           {cost.currency} <strong>{formatCostNumber(cost.amount)}</strong>
         </span>
       ))}
       {hasUnpricedUsage ? (
-        <span className="status-cost-row status-cost-unpriced">
+        <span className="flex justify-between text-xs text-muted-foreground">
           {t("statusBar.cost")} <strong>{t("statusBar.costUnpriced")}</strong>
         </span>
       ) : null}
@@ -375,22 +338,34 @@ function SubagentRows({ agents }: { agents: AgentDto[] }) {
   const unpriced = t("statusBar.costUnpriced");
 
   if (items.length === 0) {
-    return <span className="status-empty">{t("statusBar.noSubagents")}</span>;
+    return <span className="text-xs text-muted-foreground">{t("statusBar.noSubagents")}</span>;
   }
 
   return (
     <>
       {items.map((activity) => (
-        <div key={activity.id} className={`status-subagent-row status-${activity.status}`}>
-          <span className="status-subagent-dot" aria-hidden="true" />
-          <div>
-            <span className="status-subagent-role">{activity.role}</span>
-            <p>{agentPopoverDetail(activity, t)}</p>
+        <div key={activity.id} className="flex items-center gap-2 px-3 py-2 border-b last:border-0 text-xs">
+          <Circle size={8} className={cn(
+            "fill-current shrink-0",
+            activity.status === "running" && "text-primary",
+            activity.status === "waiting" && "text-amber-500",
+            activity.status === "queued" && "text-muted-foreground",
+            activity.status === "completed" && "text-emerald-600",
+            activity.status === "errored" && "text-red-500",
+            activity.status === "interrupted" && "text-orange-500",
+            activity.status === "shutdown" && "text-muted-foreground",
+            activity.status === "notFound" && "text-muted-foreground",
+          )} />
+          <div className="flex-1 min-w-0">
+            <div className="font-medium truncate">{activity.role}</div>
+            <div className="text-muted-foreground truncate">{agentPopoverDetail(activity, t)}</div>
           </div>
-          <span className="status-subagent-cost">
+          <span className="text-muted-foreground shrink-0">
             {formatRuntimeCost(activity.runtimeUsage, fallback, unpriced)}
           </span>
-          <span className="status-subagent-badge">{t(agentStatusKeys(activity.status))}</span>
+          <Badge variant="outline" className="text-[10px] shrink-0">
+            {t(agentStatusKeys(activity.status))}
+          </Badge>
         </div>
       ))}
     </>
@@ -401,148 +376,20 @@ function AgentPopover({ agents, count }: { agents: AgentDto[]; count: number }) 
   const { t } = useTranslation();
 
   return (
-    <StatusPopover
-      priority="4"
-      trigger={
-        <button className="status-readonly status-readonly-trigger" type="button">
-          <Users size={12} />
-          {count}
-        </button>
-      }
-    >
-      <div className="status-subagent-popover">
-        <strong>{t("statusBar.subagents")}</strong>
-        <SubagentRows agents={agents} />
-      </div>
-    </StatusPopover>
-  );
-}
-
-/* ===== Dropdown primitive ===== */
-
-function Dropdown({
-  trigger,
-  children,
-  className,
-  wrapClassName,
-  buttonClassName,
-  dropdownClassName,
-  align = "left",
-  hideChevron = false,
-  ariaLabel,
-  ariaHaspopup = "menu",
-  menuRole,
-}: {
-  trigger: ReactNode;
-  children: ReactNode;
-  className?: string;
-  wrapClassName?: string;
-  buttonClassName?: string;
-  dropdownClassName?: string;
-  align?: "left" | "right";
-  hideChevron?: boolean;
-  ariaLabel?: string;
-  ariaHaspopup?: "menu" | "dialog";
-  menuRole?: "menu" | "dialog";
-}) {
-  const [open, setOpen] = useState(false);
-  const [dropdownStyle, setDropdownStyle] = useState<DropdownPosition | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  function getDropdownStyle(): DropdownPosition | null {
-    const button = buttonRef.current;
-    if (!button) return null;
-    const rect = button.getBoundingClientRect();
-    const dropdownWidth = Math.min(280, window.innerWidth - 24);
-    const left = align === "right"
-      ? Math.max(12, Math.min(rect.right - dropdownWidth, window.innerWidth - dropdownWidth - 12))
-      : Math.max(12, Math.min(rect.left, window.innerWidth - dropdownWidth - 12));
-    const bottom = Math.max(12, window.innerHeight - rect.top + 6);
-    const maxHeight = Math.max(140, Math.min(360, rect.top - 18));
-    return {
-      bottom: `${bottom}px`,
-      left: `${left}px`,
-      position: "fixed",
-      right: "auto",
-      top: "auto",
-      width: `${dropdownWidth}px`,
-      "--dropdown-max-height": `${maxHeight}px`,
-    };
-  }
-
-  useEffect(() => {
-    if (!open) return;
-    function updatePosition() {
-      setDropdownStyle(getDropdownStyle());
-    }
-    function handleClick(event: MouseEvent) {
-      const target = event.target as Node;
-      if (ref.current?.contains(target) || dropdownRef.current?.contains(target)) {
-        return;
-      }
-      setOpen(false);
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setOpen(false);
-      }
-    }
-    updatePosition();
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("resize", updatePosition);
-    window.addEventListener("scroll", updatePosition, true);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("resize", updatePosition);
-      window.removeEventListener("scroll", updatePosition, true);
-    };
-  }, [open]);
-
-  const dropdown = (
-    <div
-      ref={dropdownRef}
-      className={`status-dropdown${align === "right" ? " right" : ""}${dropdownClassName ? ` ${dropdownClassName}` : ""} ${open ? "open" : ""}`}
-      role={menuRole}
-      style={dropdownStyle ?? undefined}
-      onClick={(event) => {
-        const target = event.target;
-        const button = target instanceof Element ? target.closest("button") : null;
-        if (button instanceof HTMLButtonElement && !button.disabled) {
-          setOpen(false);
-        }
-      }}
-    >
-      {children}
-    </div>
-  );
-
-  return (
-    <div
-      ref={ref}
-      className={`status-dropdown-wrap${open ? " open" : ""}${align === "right" ? " align-right" : ""}${wrapClassName ? ` ${wrapClassName}` : ""}`}
-      style={{ position: "relative", display: "inline-flex" }}
-    >
-      <button
-        ref={buttonRef}
-        className={buttonClassName ?? `status-chip selectable ${className ?? ""}`}
-        style={buttonClassName ? undefined : { display: "inline-flex", alignItems: "center", gap: 4 }}
-        type="button"
-        aria-label={ariaLabel}
-        aria-haspopup={ariaHaspopup}
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {trigger}
-        {hideChevron ? null : <ChevronDown size={12} />}
-      </button>
-      {open && dropdownStyle && typeof document !== "undefined"
-        ? createPortal(dropdown, document.body)
-        : null}
-    </div>
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs text-muted-foreground">
+          <Users size={14} />
+          <span>{count}</span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent side="top" className="w-80 p-0" align="end">
+        <div className="px-3 py-2 font-medium text-xs border-b">{t("statusBar.subagents")}</div>
+        <ScrollArea className="max-h-64">
+          <SubagentRows agents={agents} />
+        </ScrollArea>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -562,43 +409,43 @@ function ModeSelector({
   const { t } = useTranslation();
 
   const modeIcon = currentMode === "auto"
-    ? <Bot size={13} />
-    : <Brain size={13} />;
+    ? <Bot size={14} />
+    : <Brain size={14} />;
 
   const modeLabel = currentMode === "auto" ? t("conversation.autoMode") : t("conversation.planMode");
 
   return (
-    <Dropdown
-      className="status-chip mode-chip selectable"
-      trigger={<>{modeIcon} {modeLabel}</>}
-    >
-      <button
-        className={`status-dropdown-item ${currentMode === "auto" ? "active" : ""}`}
-        onClick={() => {
-          onSetSessionMode("auto");
-        }}
-        disabled={isBusy || !selectedSession}
-      >
-        <Bot size={16} />
-        <span>
-          <strong>{t("conversation.autoMode")}</strong>
-          <small>自动执行，直接生成代码</small>
-        </span>
-      </button>
-      <button
-        className={`status-dropdown-item ${currentMode === "plan" ? "active" : ""}`}
-        onClick={() => {
-          onSetSessionMode("plan");
-        }}
-        disabled={isBusy || !selectedSession}
-      >
-        <Brain size={16} />
-        <span>
-          <strong>{t("conversation.planMode")}</strong>
-          <small>先规划方案，确认后执行</small>
-        </span>
-      </button>
-    </Dropdown>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs">
+          {modeIcon}
+          <span className="truncate max-w-[100px]">{modeLabel}</span>
+          <ChevronDown size={12} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuItem
+          onSelect={() => onSetSessionMode("auto")}
+          disabled={isBusy || !selectedSession}
+        >
+          <Bot size={16} className="mr-2" />
+          <div>
+            <div className="font-medium">{t("conversation.autoMode")}</div>
+            <div className="text-xs text-muted-foreground">自动执行，直接生成代码</div>
+          </div>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => onSetSessionMode("plan")}
+          disabled={isBusy || !selectedSession}
+        >
+          <Brain size={16} className="mr-2" />
+          <div>
+            <div className="font-medium">{t("conversation.planMode")}</div>
+            <div className="text-xs text-muted-foreground">先规划方案，确认后执行</div>
+          </div>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -619,63 +466,12 @@ function ModelSelector({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [dropdownStyle, setDropdownStyle] = useState<DropdownPosition | null>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const plannerRole = findPlannerRole(roles);
   const currentModelSlug = plannerRole?.model ?? runtime?.usage.model ?? "";
   const currentModelInfo = findModelInProviders(providers, currentModelSlug);
   const currentEffort = plannerRole?.effort ?? "";
   const currentEfforts = currentModelInfo?.model.reasoningEfforts ?? [];
-
-  function getDropdownStyle(): DropdownPosition | null {
-    const button = buttonRef.current;
-    if (!button) return null;
-    const rect = button.getBoundingClientRect();
-    const dropdownWidth = Math.min(340, window.innerWidth - 24);
-    const left = Math.max(12, Math.min(rect.left, window.innerWidth - dropdownWidth - 12));
-    const maxHeight = Math.max(160, Math.min(360, rect.top - 18));
-    return {
-      bottom: `${Math.max(12, window.innerHeight - rect.top + 6)}px`,
-      left: `${left}px`,
-      position: "fixed",
-      right: "auto",
-      top: "auto",
-      width: `${dropdownWidth}px`,
-      "--dropdown-max-height": `${maxHeight}px`,
-    };
-  }
-
-  useEffect(() => {
-    if (!open) return;
-    function updatePosition() {
-      setDropdownStyle(getDropdownStyle());
-    }
-    function handleClickOutside(event: MouseEvent) {
-      const target = event.target as Node;
-      if (wrapRef.current?.contains(target) || dropdownRef.current?.contains(target)) {
-        return;
-      }
-      setOpen(false);
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setOpen(false);
-      }
-    }
-    updatePosition();
-    document.addEventListener("mousedown", handleClickOutside);
-    document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("resize", updatePosition);
-    window.addEventListener("scroll", updatePosition, true);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("resize", updatePosition);
-      window.removeEventListener("scroll", updatePosition, true);
-    };
-  }, [open]);
 
   function handleSelectModel(providerId: string, modelSlug: string) {
     if (!plannerRole) return;
@@ -696,16 +492,6 @@ function ModelSelector({
     setOpen(false);
   }
 
-  function handleSelectEffort(effort: string) {
-    if (!plannerRole) return;
-    const newRoles = roles.map((r) =>
-      r.key === "planner" ? { ...r, effort } : r,
-    );
-    setRoles(newRoles);
-    onSaveProviderSettings(newRoles);
-    setOpen(false);
-  }
-
   const grouped: { provider: ProviderRecord; models: ModelRecord[] }[] = [];
   for (const provider of providers) {
     const models = allModels(provider);
@@ -714,71 +500,86 @@ function ModelSelector({
     }
   }
 
-  const dropdown = (
-    <div ref={dropdownRef} className="model-selector-dropdown" style={dropdownStyle ?? undefined}>
-      <div className="model-selector-list">
-        {grouped.map((group) => (
-          <div className="model-selector-group" key={group.provider.id}>
-            <div className="model-selector-provider-label">
-              {group.provider.name || group.provider.id}
-            </div>
-            {group.models.map((model) => (
-              <div
-                key={model.slug}
-                className={`model-selector-option${model.slug === currentModelSlug ? " active" : ""}`}
-                role="button"
-                tabIndex={0}
-                onClick={() => handleSelectModel(group.provider.id, model.slug)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    handleSelectModel(group.provider.id, model.slug);
-                  }
-                }}
-              >
-                <span className="model-selector-name">{model.displayName || model.slug}</span>
-                {model.slug === currentModelSlug && currentEfforts.length > 0 ? (
-                  <div className="model-selector-efforts" onClick={(e) => e.stopPropagation()}>
-                    {currentEfforts.map((effort) => (
-                      <button
-                        key={effort}
-                        className={`model-selector-effort${effort === currentEffort ? " active" : ""}`}
-                        onClick={() => handleSelectEffort(effort)}
-                      >
-                        {effort}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+  const filtered = grouped
+    .map((g) => ({
+      ...g,
+      models: searchQuery
+        ? g.models.filter((m) =>
+            (m.displayName ?? m.slug).toLowerCase().includes(searchQuery.toLowerCase()),
+          )
+        : g.models,
+    }))
+    .filter((g) => g.models.length > 0);
 
   return (
-    <div className={`model-selector-wrap${open ? " open" : ""}`} ref={wrapRef}>
-      <button
-        ref={buttonRef}
-        className="status-chip selectable model-chip"
-        type="button"
-        onClick={() => {
-          if (!open) {
-            setDropdownStyle(getDropdownStyle());
-          }
-          setOpen((v) => !v);
-        }}
-      >
-        <Cpu size={13} />
-        {currentModelInfo?.model.displayName ?? currentModelSlug ?? t("statusBar.noModel")}
-        <ChevronDown size={12} />
-      </button>
-      {open && dropdownStyle && typeof document !== "undefined"
-        ? createPortal(dropdown, document.body)
-        : null}
-    </div>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs">
+          <Cpu size={14} />
+          <span className="truncate max-w-[100px]">
+            {currentModelInfo?.model.displayName ?? currentModelSlug ?? t("statusBar.noModel")}
+          </span>
+          <ChevronDown size={12} />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-0" align="start">
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder={t("statusBar.searchModels") ?? "搜索模型..."}
+            value={searchQuery}
+            onValueChange={setSearchQuery}
+          />
+          <CommandList>
+            <CommandEmpty>{t("statusBar.noModel")}</CommandEmpty>
+            {filtered.map((group) => (
+              <CommandGroup key={group.provider.id} heading={group.provider.name || group.provider.id}>
+                {group.models.map((model) => (
+                  <CommandItem
+                    key={model.slug}
+                    onSelect={() => handleSelectModel(group.provider.id, model.slug)}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <span className={cn(
+                        "text-sm",
+                        model.slug === currentModelSlug && "font-medium",
+                      )}>
+                        {model.displayName || model.slug}
+                      </span>
+                      {model.slug === currentModelSlug && currentEfforts.length > 0 && (
+                        <div className="flex gap-1 mt-1" onClick={(e) => e.stopPropagation()}>
+                          {currentEfforts.map((effort) => (
+                            <button
+                              key={effort}
+                              className={cn(
+                                "text-[10px] px-1.5 py-0.5 rounded border",
+                                effort === currentEffort
+                                  ? "border-primary bg-primary/10 text-primary"
+                                  : "border-border text-muted-foreground",
+                              )}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (!plannerRole) return;
+                                const newRoles = roles.map((r) =>
+                                  r.key === "planner" ? { ...r, effort } : r,
+                                );
+                                setRoles(newRoles);
+                                onSaveProviderSettings(newRoles);
+                              }}
+                            >
+                              {effort}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ))}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -817,21 +618,26 @@ function EffortSelector({
   }
 
   return (
-    <Dropdown
-      className="status-chip effort-chip selectable"
-      trigger={<><Clock size={13} /> {currentEffort || t("roleRoute.effort")}</>}
-    >
-      <div className="status-dropdown-title">{t("roleRoute.effort")}</div>
-      {efforts.map((effort) => (
-        <button
-          key={effort}
-          className={`status-dropdown-item ${effort === currentEffort ? "active" : ""}`}
-          onClick={() => handleSelectEffort(effort)}
-        >
-          <strong>{effort}</strong>
-        </button>
-      ))}
-    </Dropdown>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs">
+          <Clock size={14} />
+          <span className="truncate max-w-[100px]">{currentEffort || t("roleRoute.effort")}</span>
+          <ChevronDown size={12} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-40">
+        <DropdownMenuLabel className="text-xs text-muted-foreground">{t("roleRoute.effort")}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuRadioGroup value={currentEffort} onValueChange={handleSelectEffort}>
+          {efforts.map((effort) => (
+            <DropdownMenuRadioItem key={effort} value={effort}>
+              {effort}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -847,28 +653,26 @@ function PermissionSelector({
   const { t } = useTranslation();
 
   return (
-    <Dropdown
-      className="status-chip permission-chip selectable"
-      trigger={
-        <>
-          <ShieldCheck size={13} />
-          {t(`permissionMode.${permissionMode}`)}
-        </>
-      }
-    >
-      <div className="status-dropdown-title">{t("statusBar.permissionMode")}</div>
-      {permissionModes.map((mode) => (
-        <button
-          key={mode}
-          className={`status-dropdown-item ${mode === permissionMode ? "active" : ""}`}
-          onClick={() => {
-            if (mode !== permissionMode) onSavePermissionMode(mode);
-          }}
-        >
-          <strong>{t(`permissionMode.${mode}`)}</strong>
-        </button>
-      ))}
-    </Dropdown>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs">
+          <ShieldCheck size={14} />
+          <span className="truncate max-w-[100px]">{t(`permissionMode.${permissionMode}`)}</span>
+          <ChevronDown size={12} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-48">
+        <DropdownMenuLabel className="text-xs text-muted-foreground">{t("statusBar.permissionMode")}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuRadioGroup value={permissionMode} onValueChange={(value) => onSavePermissionMode(value as PermissionMode)}>
+          {permissionModes.map((mode) => (
+            <DropdownMenuRadioItem key={mode} value={mode}>
+              <strong>{t(`permissionMode.${mode}`)}</strong>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -883,6 +687,8 @@ type StatusReadoutsProps = {
   agents: AgentDto[];
   activeAgentCount: number;
 };
+
+/* ===== Status Readout Popovers ===== */
 
 function StatusReadoutPopovers({
   usage,
@@ -899,56 +705,56 @@ function StatusReadoutPopovers({
 
   return (
     <>
-      <StatusPopover
-        priority="1"
-        trigger={
-          <button className="status-readonly status-readonly-trigger" type="button">
-            <div className="context-meter-inline">
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1">
               <span>{contextLabel}</span>
-              <span className="context-meter-bar">
-                <span className="context-meter-fill" style={{ width: contextWidth }} />
+              <span className="w-12 h-1.5 bg-muted rounded-full overflow-hidden inline-block">
+                <span className="block h-full bg-primary rounded-full" style={{ width: contextWidth }} />
               </span>
             </div>
-          </button>
-        }
-      >
-        <UsagePopoverContent usage={usage} />
-      </StatusPopover>
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent side="top" className="w-64">
+          <UsagePopoverContent usage={usage} />
+        </PopoverContent>
+      </Popover>
 
-      <StatusPopover
-        priority="2"
-        trigger={
-          <button className="status-readonly status-readonly-trigger" type="button">
-            <DollarSign size={12} />
-            {costLabel}
-          </button>
-        }
-      >
-        <div className="status-usage-popover">
-          <CostRows usage={usage} />
-          <small>{t("statusBar.costHint")}</small>
-        </div>
-      </StatusPopover>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs text-muted-foreground">
+            <DollarSign size={14} />
+            <span>{costLabel}</span>
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent side="top" className="w-64">
+          <div className="space-y-2">
+            <CostRows usage={usage} />
+            <small className="text-xs text-muted-foreground block">{t("statusBar.costHint")}</small>
+          </div>
+        </PopoverContent>
+      </Popover>
 
-      <StatusPopover
-        priority="3"
-        trigger={
-          <button className="status-readonly status-readonly-trigger" type="button">
-            <Boxes size={12} />
-            {capabilityCount}
-          </button>
-        }
-      >
-        <div className="status-extensions-popover">
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs text-muted-foreground">
+            <Boxes size={14} />
+            <span>{capabilityCount}</span>
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent side="top" className="w-64 space-y-3">
           <ListPopover title={t("statusBar.skills")} items={skills} />
           <ListPopover title={t("statusBar.mcpServers")} items={mcpServers} />
-        </div>
-      </StatusPopover>
+        </PopoverContent>
+      </Popover>
 
       <AgentPopover agents={agents} count={activeAgentCount} />
     </>
   );
 }
+
+/* ===== More Status Menu ===== */
 
 function StatusMoreSection({
   priority,
@@ -964,17 +770,17 @@ function StatusMoreSection({
   children: ReactNode;
 }) {
   return (
-    <section className="status-more-section" data-priority={priority} aria-label={label}>
-      <div className="status-more-section-head">
-        <span className="status-more-section-icon" aria-hidden="true">
+    <section className="px-3 py-2" data-priority={priority} aria-label={label}>
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-muted-foreground" aria-hidden="true">
           {icon}
         </span>
-        <div className="status-more-section-copy">
-          <span>{label}</span>
-          <strong>{summary}</strong>
+        <div className="flex-1 min-w-0">
+          <span className="text-xs text-muted-foreground">{label}</span>
+          <div className="text-sm font-medium">{summary}</div>
         </div>
       </div>
-      <div className="status-more-section-body">{children}</div>
+      <div className="space-y-1">{children}</div>
     </section>
   );
 }
@@ -991,88 +797,28 @@ function MoreStatusMenu({
   activeAgentCount,
 }: StatusReadoutsProps) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
 
-  function getMenuStyle(): CSSProperties | null {
-    const button = buttonRef.current;
-    if (!button) return null;
-    const rect = button.getBoundingClientRect();
-    const menuWidth = Math.min(360, window.innerWidth - 24);
-    const maxLeft = Math.max(12, window.innerWidth - menuWidth - 12);
-    const left = Math.min(Math.max(12, rect.right - menuWidth), maxLeft);
-    return {
-      bottom: `${Math.max(12, window.innerHeight - rect.top + 6)}px`,
-      left: `${left}px`,
-      position: "fixed",
-      right: "auto",
-      top: "auto",
-    };
-  }
-
-  useEffect(() => {
-    if (!open) return;
-
-    function updatePosition() {
-      setMenuStyle(getMenuStyle());
-    }
-    function handleClick(event: MouseEvent) {
-      const target = event.target as Node;
-      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) {
-        return;
-      }
-      setOpen(false);
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setOpen(false);
-        buttonRef.current?.focus();
-      }
-    }
-
-    updatePosition();
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("resize", updatePosition);
-    window.addEventListener("scroll", updatePosition, true);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("resize", updatePosition);
-      window.removeEventListener("scroll", updatePosition, true);
-    };
-  }, [open]);
-
-  const menu = (
-    <div
-      ref={menuRef}
-      className="status-dropdown more-dropdown status-more-menu status-more-menu-fixed open"
-      role="dialog"
-      aria-label={t("statusBar.more")}
-      style={menuStyle ?? undefined}
-    >
+  const menuContent = (
+    <>
       <StatusMoreSection
         priority="1"
         icon={<Activity size={14} />}
         label={t("statusBar.context")}
         summary={
-          <span className="status-more-context-summary">
+          <span className="flex items-center gap-2">
             {contextLabel}
-            <span className="context-meter-bar">
-              <span className="context-meter-fill" style={{ width: contextWidth }} />
+            <span className="w-16 h-1.5 bg-muted rounded-full overflow-hidden inline-block">
+              <span className="block h-full bg-primary rounded-full" style={{ width: contextWidth }} />
             </span>
           </span>
         }
       >
-        <div className="status-more-metrics">
-          <UsageMetricRows usage={usage} />
-        </div>
-        <div className="status-more-cost-lines">
-          <CostRows usage={usage} />
-        </div>
+        <UsageMetricRows usage={usage} />
+        <Separator className="my-1" />
+        <CostRows usage={usage} />
       </StatusMoreSection>
+
+      <Separator />
 
       <StatusMoreSection
         priority="2"
@@ -1080,11 +826,11 @@ function MoreStatusMenu({
         label={t("statusBar.cost")}
         summary={costLabel}
       >
-        <div className="status-more-cost-lines">
-          <CostRows usage={usage} />
-        </div>
-        <small>{t("statusBar.costHint")}</small>
+        <CostRows usage={usage} />
+        <small className="text-xs text-muted-foreground block mt-1">{t("statusBar.costHint")}</small>
       </StatusMoreSection>
+
+      <Separator />
 
       <StatusMoreSection
         priority="3"
@@ -1092,15 +838,17 @@ function MoreStatusMenu({
         label={t("statusBar.capabilities")}
         summary={capabilityCount}
       >
-        <div className="status-more-lists">
-          <div className="status-more-list-block">
+        <div className="space-y-2">
+          <div>
             <StatusListContent title={t("statusBar.skills")} items={skills} />
           </div>
-          <div className="status-more-list-block">
+          <div>
             <StatusListContent title={t("statusBar.mcpServers")} items={mcpServers} />
           </div>
         </div>
       </StatusMoreSection>
+
+      <Separator />
 
       <StatusMoreSection
         priority="4"
@@ -1108,33 +856,26 @@ function MoreStatusMenu({
         label={t("statusBar.subagents")}
         summary={activeAgentCount}
       >
-        <div className="status-more-subagents">
-          <SubagentRows agents={agents} />
-        </div>
+        <SubagentRows agents={agents} />
       </StatusMoreSection>
-    </div>
+    </>
   );
 
   return (
-    <>
-      <button
-        ref={buttonRef}
-        className="status-more-btn"
-        type="button"
-        aria-label={t("statusBar.more")}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => {
-          if (!open) {
-            setMenuStyle(getMenuStyle());
-          }
-          setOpen((value) => !value);
-        }}
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
+          <MoreVertical size={16} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        side="top"
+        className="w-80 max-h-[70vh] overflow-y-auto"
       >
-        <MoreVertical size={16} aria-hidden="true" />
-      </button>
-      {open && menuStyle && typeof document !== "undefined" ? createPortal(menu, document.body) : null}
-    </>
+        {menuContent}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -1151,8 +892,6 @@ export function SessionStatusBar({
   currentMode,
   isBusy,
   selectedSession,
-  turnPhase,
-  turnStartedAt,
   permissionMode,
   agents,
 }: SessionStatusBarProps) {
@@ -1181,46 +920,43 @@ export function SessionStatusBar({
   };
 
   return (
-    <div className="bottom-status-bar">
+    <div className="flex items-center justify-between gap-2 px-3 h-10 border-t border-border bg-card">
       {/* Left: Interactive/selectable */}
-      <div className="bottom-status-left">
-        <div className="bottom-status-controls">
-          <ModeSelector
-            currentMode={currentMode}
-            onSetSessionMode={onSetSessionMode}
-            isBusy={isBusy}
-            selectedSession={selectedSession}
-          />
+      <div className="flex items-center gap-1 min-w-0 overflow-x-auto">
+        <ModeSelector
+          currentMode={currentMode}
+          onSetSessionMode={onSetSessionMode}
+          isBusy={isBusy}
+          selectedSession={selectedSession}
+        />
 
-          <ModelSelector
-            runtime={runtime}
-            providers={providers}
-            roles={roles}
-            setRoles={setRoles}
-            onSaveProviderSettings={onSaveProviderSettings}
-          />
+        <ModelSelector
+          runtime={runtime}
+          providers={providers}
+          roles={roles}
+          setRoles={setRoles}
+          onSaveProviderSettings={onSaveProviderSettings}
+        />
 
-          <EffortSelector
-            providers={providers}
-            roles={roles}
-            setRoles={setRoles}
-            onSaveProviderSettings={onSaveProviderSettings}
-          />
+        <EffortSelector
+          providers={providers}
+          roles={roles}
+          setRoles={setRoles}
+          onSaveProviderSettings={onSaveProviderSettings}
+        />
 
-          <PermissionSelector
-            permissionMode={permissionMode}
-            onSavePermissionMode={onSavePermissionMode}
-          />
-        </div>
+        <PermissionSelector
+          permissionMode={permissionMode}
+          onSavePermissionMode={onSavePermissionMode}
+        />
 
         <MoreStatusMenu {...statusReadouts} />
       </div>
 
       {/* Right: Read-only status */}
-      <div className="bottom-status-right">
+      <div className="flex items-center gap-1 shrink-0">
         <StatusReadoutPopovers {...statusReadouts} />
       </div>
-
     </div>
   );
 }
