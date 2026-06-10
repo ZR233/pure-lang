@@ -432,7 +432,7 @@ function EntryShell({
   children: ReactNode;
 }) {
   return (
-    <article className={`flex gap-2.5 px-4 py-3 max-w-3xl mx-auto w-full ${className}`}>
+    <article className={`flex w-full gap-2.5 px-4 py-3 ${className}`}>
       <span className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0" aria-hidden="true">
         {icon}
       </span>
@@ -445,7 +445,7 @@ function MessageEntry({ entry }: { entry: Extract<TimelineEntry, { kind: "messag
   const roleIcon = entry.role === "user" ? <UserRound size={14} /> : <span className="text-xs font-bold text-primary">P</span>;
   if (entry.role === "user") {
     return (
-      <div className="flex gap-2.5 px-4 py-3 max-w-3xl mx-auto w-full">
+      <div className="flex w-full gap-2.5 px-4 py-3">
         <span className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0" aria-hidden="true">
           {roleIcon}
         </span>
@@ -472,7 +472,7 @@ function MessageEntry({ entry }: { entry: Extract<TimelineEntry, { kind: "messag
 function ThoughtEntry({ entry, t }: { entry: Extract<TimelineEntry, { kind: "thought" }>; t: TFunction }) {
   const active = isActiveStatus(entry.status);
   return (
-    <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/30 rounded-md px-3 py-1.5 max-w-3xl mx-auto my-1">
+    <div className="flex w-full items-center gap-2 text-sm text-muted-foreground bg-muted/30 rounded-md px-3 py-1.5 my-1">
       {active ? <Loader2 size={14} className="animate-spin shrink-0" /> : <Brain size={14} className="shrink-0" />}
       <details className="flex-1 min-w-0 group">
         <summary className="flex items-center gap-1 cursor-pointer list-none">
@@ -548,7 +548,7 @@ function PlanEntry({
 }) {
   const state = entry.planState?.state ?? "pending";
   return (
-    <div className="flex gap-2.5 px-4 py-3 max-w-3xl mx-auto w-full">
+    <div className="flex w-full gap-2.5 px-4 py-3">
       <span className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0" aria-hidden="true">
         <FileText size={14} />
       </span>
@@ -1187,7 +1187,7 @@ export function ConversationPanel({
           />
         ) : (
           <div className="px-4 py-3">
-            <div className="relative max-w-3xl mx-auto">
+            <div className="relative w-full">
               <Textarea
                 value={prompt}
                 onChange={(e) => onSetPrompt(e.target.value)}
