@@ -210,6 +210,12 @@ export type McpAvailabilityKind =
   | "unavailable"
   | "disabled"
   | "missingCredential";
+export type LspAvailabilityKind =
+  | "checking"
+  | "available"
+  | "unavailable"
+  | "missingCommand"
+  | "disabled";
 
 export type KeyValuePair = {
   key: string;
@@ -240,6 +246,17 @@ export type McpServerRecord = {
   toolCount?: number | null;
 };
 
+export type LspServerRecord = {
+  id: string;
+  displayName: string;
+  extensions: string[];
+  languageIds: string[];
+  availabilityKind: LspAvailabilityKind;
+  availabilityMessage?: string | null;
+  lastCheckedAt?: number | null;
+  diagnosticCount: number;
+};
+
 export type RuntimeCostAmount = {
   currency: string;
   amount: number;
@@ -264,6 +281,7 @@ export type SessionRuntime = {
   usage: RuntimeUsage;
   activeSkills: string[];
   activeMcpServers: string[];
+  activeLspServers: string[];
   updatedAt: number;
 };
 
@@ -418,6 +436,11 @@ export type McpHealthUpdatedPayload = {
   activeMcpServers: string[];
 };
 
+export type LspHealthUpdatedPayload = {
+  lspServers: LspServerRecord[];
+  activeLspServers: string[];
+};
+
 export type McpServerInput = {
   id: string;
   enabled: boolean;
@@ -463,6 +486,7 @@ export type BootstrapPayload = {
   agentEvents: AgentTimelineEvent[];
   agents: AgentDto[];
   sessionRuntime?: SessionRuntime | null;
+  lspHealth?: LspHealthUpdatedPayload | null;
   config: ConfigPayload;
 };
 
@@ -474,6 +498,7 @@ export type ProjectSelectionPayload = {
   agentEvents: AgentTimelineEvent[];
   agents: AgentDto[];
   sessionRuntime?: SessionRuntime | null;
+  lspHealth?: LspHealthUpdatedPayload | null;
 };
 
 export type SessionSelectionPayload = {

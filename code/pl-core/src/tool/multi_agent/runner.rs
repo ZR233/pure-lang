@@ -57,17 +57,23 @@ pub(crate) async fn run_agent_turn(config: AgentRunConfig) {
         }),
     };
     let mut core = match core_result {
-        Ok(core) => core
-            .with_mcp_runtime(config.mcp_runtime.clone().unwrap_or_default())
-            .with_agent_control(config.agent_control.clone())
-            .with_subagent_context(SubagentContext {
-                id: config.agent_id.clone(),
-                parent_id: record.parent_path.clone(),
-                agent_path: Some(config.agent_path.clone()),
-                role: config.role.clone(),
-                task: compact_text(&config.message),
-                depth: record.depth,
-            }),
+        Ok(core) => {
+            let mut core = core
+                .with_mcp_runtime(config.mcp_runtime.clone().unwrap_or_default())
+                .with_agent_control(config.agent_control.clone())
+                .with_subagent_context(SubagentContext {
+                    id: config.agent_id.clone(),
+                    parent_id: record.parent_path.clone(),
+                    agent_path: Some(config.agent_path.clone()),
+                    role: config.role.clone(),
+                    task: compact_text(&config.message),
+                    depth: record.depth,
+                });
+            if let Some(lsp_runtime) = config.lsp_runtime.clone() {
+                core = core.with_lsp_runtime(lsp_runtime);
+            }
+            core
+        }
         Err(error) => {
             mark_agent_failed(&config, error.to_string()).await;
             return;

@@ -83,6 +83,7 @@ impl Tool for WriteFileTool {
                         .await?;
                 }
             }
+            sync_lsp_changed(&context, &path).await;
             Ok(text_output(format!(
                 "Wrote {}",
                 paths.display_relative(&path)
@@ -179,6 +180,7 @@ impl Tool for DeletePathTool {
                     tokio::fs::remove_dir_all(&path).await?;
                 }
             }
+            sync_lsp_deleted(&context, &path).await;
             Ok(text_output(format!(
                 "Deleted {}",
                 paths.display_relative(&path)
@@ -222,6 +224,7 @@ impl Tool for CopyPathTool {
                 tokio::fs::create_dir_all(parent).await?;
             }
             tokio::fs::copy(&from, &to).await?;
+            sync_lsp_changed(&context, &to).await;
             Ok(text_output(format!(
                 "Copied {} to {}",
                 paths.display_relative(&from),
@@ -267,11 +270,25 @@ impl Tool for MovePathTool {
                 tokio::fs::create_dir_all(parent).await?;
             }
             tokio::fs::rename(&from, &to).await?;
+            sync_lsp_deleted(&context, &from).await;
+            sync_lsp_changed(&context, &to).await;
             Ok(text_output(format!(
                 "Moved {} to {}",
                 paths.display_relative(&from),
                 paths.display_relative(&to)
             )))
         })
+    }
+}
+
+async fn sync_lsp_changed(context: &ToolContext, path: &std::path::Path) {
+    if let Some(registry) = &context.lsp_runtime {
+        registry.notify_file_changed(path).await;
+    }
+}
+
+async fn sync_lsp_deleted(context: &ToolContext, path: &std::path::Path) {
+    if let Some(registry) = &context.lsp_runtime {
+        registry.notify_file_deleted(path).await;
     }
 }

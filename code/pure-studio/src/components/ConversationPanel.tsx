@@ -22,6 +22,7 @@ import type {
   AgentDto,
   AgentStatus,
   CompileMode,
+  LspServerRecord,
   PermissionMode,
   PlanLifecycleState,
   ProviderRecord,
@@ -63,6 +64,7 @@ type ConversationPanelProps = {
   entries: TimelineEntry[];
   agents: AgentDto[];
   sessionRuntime: SessionRuntime | null;
+  lspServers: LspServerRecord[];
   pendingUserInput: UserInputRequest | null;
   planAction: PlanActionState | null;
   prompt: string;
@@ -936,6 +938,7 @@ export function ConversationPanel({
   entries,
   agents,
   sessionRuntime,
+  lspServers,
   pendingUserInput,
   planAction,
   prompt,
@@ -1059,6 +1062,7 @@ export function ConversationPanel({
 
         <SessionStatusBar
           runtime={sessionRuntime}
+          lspServers={lspServers}
           providers={providers}
           roles={roles}
           setRoles={setRoles}

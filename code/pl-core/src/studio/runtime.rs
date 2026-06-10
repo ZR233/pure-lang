@@ -37,6 +37,7 @@ pub struct StudioRuntime {
     store: StudioStore,
     config_store: ConfigStore,
     mcp_runtime: McpRuntimeRegistry,
+    lsp_runtime: pl_lsp::LspRuntimeRegistry,
 }
 
 impl StudioRuntime {
@@ -45,6 +46,7 @@ impl StudioRuntime {
             store: StudioStore::default_app().await?,
             config_store: ConfigStore::default_app()?,
             mcp_runtime: McpRuntimeRegistry::new(),
+            lsp_runtime: pl_lsp::LspRuntimeRegistry::new(),
         })
     }
 
@@ -53,6 +55,7 @@ impl StudioRuntime {
             store,
             config_store,
             mcp_runtime: McpRuntimeRegistry::new(),
+            lsp_runtime: pl_lsp::LspRuntimeRegistry::new(),
         }
     }
 
@@ -68,6 +71,10 @@ impl StudioRuntime {
         &self.mcp_runtime
     }
 
+    pub fn lsp_runtime(&self) -> &pl_lsp::LspRuntimeRegistry {
+        &self.lsp_runtime
+    }
+
     pub async fn reconcile_mcp_runtime(&self) -> Result<()> {
         let config = self.config_store.load_or_default()?;
         self.mcp_runtime
@@ -81,6 +88,17 @@ impl StudioRuntime {
         self.mcp_runtime
             .recheck(crate::config::effective_mcp_servers(&config))
             .await;
+        Ok(())
+    }
+
+    pub async fn reconcile_lsp_runtime_for_project(&self, project_id: &str) -> Result<()> {
+        let project = self
+            .store
+            .read_project(project_id)
+            .await?
+            .context("selected project not found")?;
+        let workspace_root = resolve_workspace_root(Path::new(&project.path))?;
+        self.lsp_runtime.reconcile_workspace(workspace_root).await;
         Ok(())
     }
 
@@ -173,9 +191,11 @@ impl StudioRuntime {
         self.mcp_runtime
             .reconcile(crate::config::effective_mcp_servers(&config))
             .await;
+        self.lsp_runtime.reconcile_workspace(&workspace_root).await;
 
         let mut core = PureCore::from_config(&config, ModelRole::Planner)?
-            .with_mcp_runtime(self.mcp_runtime.clone());
+            .with_mcp_runtime(self.mcp_runtime.clone())
+            .with_lsp_runtime(self.lsp_runtime.clone());
         core.register_default_tools(workspace_root.clone(), Some(workspace_instructions.clone()));
         core.register_available_mcp_tools().await?;
         if options.tool_approval_callback.is_none()

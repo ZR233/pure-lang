@@ -25,6 +25,7 @@ import {
   previewAgentEvents,
   previewTimelineItems,
   previewSkills,
+  previewLspServers,
 } from "./preview";
 import { makeProvider, makeRole } from "./provider-mapper";
 import { renderPreviewToml } from "./toml-renderer";
@@ -67,6 +68,10 @@ export function bootstrapStudio() {
         agentEvents: previewAgentEvents,
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
+        lspHealth: {
+          lspServers: previewLspServers,
+          activeLspServers: previewSessionRuntime.activeLspServers,
+        },
         config: previewConfig,
       }),
     );
@@ -92,6 +97,10 @@ export function openProject(path: string) {
         agentEvents: previewAgentEvents,
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
+        lspHealth: {
+          lspServers: previewLspServers,
+          activeLspServers: previewSessionRuntime.activeLspServers,
+        },
       }),
     );
   }
@@ -109,6 +118,10 @@ export function selectProject(projectId: string) {
         agentEvents: previewAgentEvents,
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
+        lspHealth: {
+          lspServers: previewLspServers,
+          activeLspServers: previewSessionRuntime.activeLspServers,
+        },
       }),
     );
   }
@@ -170,6 +183,10 @@ export function deleteSession(sessionId: string, selectedSessionId?: string | nu
         agentEvents: nextSelectedSessionId ? previewAgentEvents : [],
         agents: nextSelectedSessionId ? previewAgents : [],
         sessionRuntime: nextSelectedSessionId ? previewSessionRuntime : null,
+        lspHealth: {
+          lspServers: previewLspServers,
+          activeLspServers: previewSessionRuntime.activeLspServers,
+        },
       }),
     );
   }

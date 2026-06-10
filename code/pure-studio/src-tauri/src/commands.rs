@@ -20,9 +20,10 @@ use crate::dto::{
 use crate::events::drain_events;
 use crate::mappers::{
     agent_dtos, agent_event_dtos, config_dto_for_studio, discovered_skills_dto,
-    load_session_runtime_dto, mcp_settings_to_builtin_states, mcp_settings_to_servers,
-    plan_lifecycle_events_to_states, project_dtos, provider_settings_to_edit, provider_usages_dto,
-    session_dtos, timeline_events_to_items, turn_result_status_label,
+    load_session_runtime_dto, lsp_health_update_dto, mcp_settings_to_builtin_states,
+    mcp_settings_to_servers, plan_lifecycle_events_to_states, project_dtos,
+    provider_settings_to_edit, provider_usages_dto, session_dtos, timeline_events_to_items,
+    turn_result_status_label,
 };
 use crate::state::{AppState, CommandError, CommandResult};
 use crate::user_input::{cancel_session_user_inputs, resolve_user_input, user_input_callback};
@@ -52,6 +53,10 @@ pub async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Boots
 
     if let Some(project) = projects.first() {
         selected_project_id = Some(project.id.clone());
+        state
+            .studio
+            .reconcile_lsp_runtime_for_project(&project.id)
+            .await?;
         sessions = state.studio.ensure_project_sessions(&project.id).await?;
         if let Some(session) = sessions.first() {
             selected_session_id = Some(session.id.clone());
@@ -72,6 +77,7 @@ pub async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Boots
         agent_events: agent_event_dtos(agent_events),
         agents: agent_dtos(agents),
         session_runtime,
+        lsp_health: lsp_health_update_dto(&state.studio).await?,
         config: config_dto_for_studio(&state.studio).await?,
     })
 }
@@ -162,6 +168,7 @@ pub async fn delete_session(
         agent_events: agent_event_dtos(agent_events),
         agents: agent_dtos(agents),
         session_runtime,
+        lsp_health: lsp_health_update_dto(&state.studio).await?,
     })
 }
 
@@ -750,6 +757,10 @@ async fn select_project_data(
         .store()
         .mark_project_opened(&project_id)
         .await?;
+    state
+        .studio
+        .reconcile_lsp_runtime_for_project(&project_id)
+        .await?;
     let sessions = state.studio.ensure_project_sessions(&project_id).await?;
     let selected_session_id = sessions.first().map(|session| session.id.clone());
     let agent_events = match &selected_session_id {
@@ -772,6 +783,7 @@ async fn select_project_data(
         agent_events: agent_event_dtos(agent_events),
         agents: agent_dtos(agents),
         session_runtime,
+        lsp_health: lsp_health_update_dto(&state.studio).await?,
     })
 }
 

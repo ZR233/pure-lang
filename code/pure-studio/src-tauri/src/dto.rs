@@ -237,6 +237,26 @@ pub struct McpHealthUpdateDto {
     pub active_mcp_servers: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LspServerDto {
+    pub id: String,
+    pub display_name: String,
+    pub extensions: Vec<String>,
+    pub language_ids: Vec<String>,
+    pub availability_kind: String,
+    pub availability_message: Option<String>,
+    pub last_checked_at: Option<i64>,
+    pub diagnostic_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LspHealthUpdateDto {
+    pub lsp_servers: Vec<LspServerDto>,
+    pub active_lsp_servers: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyValueDto {
@@ -270,6 +290,7 @@ pub struct SessionRuntimeDto {
     pub usage: RuntimeUsageDto,
     pub active_skills: Vec<String>,
     pub active_mcp_servers: Vec<String>,
+    pub active_lsp_servers: Vec<String>,
     pub updated_at: i64,
 }
 
@@ -344,6 +365,7 @@ pub struct BootstrapDto {
     pub agent_events: Vec<AgentEventDto>,
     pub agents: Vec<AgentDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
+    pub lsp_health: LspHealthUpdateDto,
     pub config: ConfigDto,
 }
 
@@ -357,6 +379,7 @@ pub struct ProjectSelectionDto {
     pub agent_events: Vec<AgentEventDto>,
     pub agents: Vec<AgentDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
+    pub lsp_health: LspHealthUpdateDto,
 }
 
 #[derive(Debug, Clone, Serialize)]

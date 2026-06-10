@@ -61,6 +61,7 @@ pub(super) fn requested_paths_for_tool(name: &str, arguments: &serde_json::Value
         "read_file" | "write_file" | "stat_path" | "create_directory" | "delete_path" => {
             argument_path(arguments, "path").into_iter().collect()
         }
+        "lsp_query" => argument_path(arguments, "filePath").into_iter().collect(),
         "list_files" | "search_files" => argument_path(arguments, "path")
             .into_iter()
             .filter(|path| !path.trim().is_empty())
@@ -159,6 +160,7 @@ pub(super) fn permission_risk_summary(tool_name: &str) -> &'static str {
         "copy_path" => "filesystem write; copies files or directories",
         "move_path" => "filesystem write; moves or renames paths",
         "apply_patch" => "batch filesystem edit",
+        "lsp_query" => "read-only LSP code intelligence query",
         "skill_manage" => "project skill write or management",
         _ => "read-only or coordination tool",
     }

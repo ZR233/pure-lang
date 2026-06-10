@@ -44,6 +44,7 @@ pub(super) fn tool_allowed_in_mode(mode: CompileMode, name: &str) -> bool {
                 | "list_files"
                 | "search_files"
                 | "stat_path"
+                | "lsp_query"
                 | "skills_list"
                 | "skill_view"
                 | "spawn_agent"

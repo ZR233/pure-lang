@@ -15,6 +15,7 @@ import { hidesToolResult, isQuietFileTool } from "../src/lib/tool-display";
 import { previewTemplates } from "../src/lib/templates";
 import type {
   ConfigPayload,
+  LspServerRecord,
   McpServerRecord,
   ProviderRecord,
   ProviderUsageRecord,
@@ -83,6 +84,7 @@ const runtime: SessionRuntime = {
   },
   activeSkills: [],
   activeMcpServers: [],
+  activeLspServers: [],
   updatedAt: 1,
 };
 
@@ -1212,6 +1214,20 @@ function sessionModeUpdateKeepsTimelineAndUpdatesSessions() {
   assertEqual(updated.timelineItems.get("turn-1-plan")?.content, "1. Inspect");
 }
 
+function lspServer(overrides: Partial<LspServerRecord> = {}): LspServerRecord {
+  return {
+    id: "rust-analyzer",
+    displayName: "rust-analyzer",
+    extensions: [".rs"],
+    languageIds: ["rust"],
+    availabilityKind: "checking",
+    availabilityMessage: "LSP health check has not completed",
+    lastCheckedAt: null,
+    diagnosticCount: 0,
+    ...overrides,
+  };
+}
+
 function projectSelectionLoadedAfterSessionDeleteClearsSelectedSession() {
   const liveItem = textItem("turn-1-text", 10, "hello");
   const liveState = studioReducer(selectedState(), {
@@ -1345,6 +1361,36 @@ function mcpHealthUpdatedRefreshesMcpServersAndRuntime() {
   assertEqual(updated.mcpServers[0]?.availabilityKind, "available");
   assertEqual(updated.mcpServers[0]?.toolCount, 3);
   assertDeepEqual(updated.sessionRuntime?.activeMcpServers, ["github"]);
+}
+
+function lspHealthUpdatedRefreshesLspServersAndRuntime() {
+  const state = {
+    ...selectedState(),
+    lspServers: [lspServer({ availabilityKind: "checking" })],
+    sessionRuntime: {
+      ...runtime,
+      activeLspServers: [],
+    },
+  };
+
+  const updated = studioReducer(state, {
+    type: "lspHealthUpdated",
+    payload: {
+      lspServers: [
+        lspServer({
+          availabilityKind: "available",
+          availabilityMessage: "Available",
+          lastCheckedAt: 123,
+          diagnosticCount: 2,
+        }),
+      ],
+      activeLspServers: ["rust-analyzer"],
+    },
+  });
+
+  assertEqual(updated.lspServers[0]?.availabilityKind, "available");
+  assertEqual(updated.lspServers[0]?.diagnosticCount, 2);
+  assertDeepEqual(updated.sessionRuntime?.activeLspServers, ["rust-analyzer"]);
 }
 
 function applyPatchCountsFilesFromResultSummary() {
@@ -1901,6 +1947,7 @@ projectSelectionLoadedAfterSessionDeleteClearsSelectedSession();
 configLoadedUpdatesPermissionMode();
 providerUsagesLoadedDoesNotReplaceConfigState();
 mcpHealthUpdatedRefreshesMcpServersAndRuntime();
+lspHealthUpdatedRefreshesLspServersAndRuntime();
 applyPatchCountsFilesFromResultSummary();
 successfulSkillViewImmediatelyUpdatesActiveSkills();
 repeatedSkillViewDoesNotDuplicateActiveSkills();

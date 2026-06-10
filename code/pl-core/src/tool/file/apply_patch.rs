@@ -62,6 +62,30 @@ impl PatchOutcome {
         output
     }
 
+    pub fn changed_paths(&self) -> Vec<PathBuf> {
+        self.committed
+            .iter()
+            .filter_map(|change| match change {
+                CommittedChange::Add { path, .. } | CommittedChange::Update { path, .. } => {
+                    Some(path.clone())
+                }
+                CommittedChange::Move { target, .. } => Some(target.clone()),
+                CommittedChange::Delete { .. } => None,
+            })
+            .collect()
+    }
+
+    pub fn deleted_paths(&self) -> Vec<PathBuf> {
+        self.committed
+            .iter()
+            .filter_map(|change| match change {
+                CommittedChange::Delete { path, .. } => Some(path.clone()),
+                CommittedChange::Move { source, .. } => Some(source.clone()),
+                CommittedChange::Add { .. } | CommittedChange::Update { .. } => None,
+            })
+            .collect()
+    }
+
     fn failure_suffix(&self, paths: &WorkspacePaths) -> String {
         if self.committed.is_empty() {
             let mut output = "\nNo files were modified before failure.".to_string();

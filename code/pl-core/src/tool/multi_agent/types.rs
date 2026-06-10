@@ -17,6 +17,7 @@ pub struct SpawnAgentTool {
     pub reasoning_effort: Option<ReasoningEffort>,
     pub config: Option<PureConfig>,
     pub mcp_runtime: Option<crate::mcp::McpRuntimeRegistry>,
+    pub lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     pub workspace_instructions: Option<String>,
 }
 
@@ -35,6 +36,7 @@ pub struct FollowupTaskTool {
     pub reasoning_effort: Option<ReasoningEffort>,
     pub config: Option<PureConfig>,
     pub mcp_runtime: Option<crate::mcp::McpRuntimeRegistry>,
+    pub lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     pub workspace_instructions: Option<String>,
 }
 
@@ -136,6 +138,7 @@ pub(crate) struct AgentRunConfig {
     pub reasoning_effort: Option<ReasoningEffort>,
     pub config: Option<PureConfig>,
     pub mcp_runtime: Option<crate::mcp::McpRuntimeRegistry>,
+    pub lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     pub workspace_instructions: Option<String>,
     pub workspace_root: PathBuf,
     pub options: crate::TurnOptions,

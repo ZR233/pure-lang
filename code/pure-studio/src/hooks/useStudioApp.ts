@@ -40,6 +40,7 @@ import type {
   AgentEvent,
   AgentEventPayload,
   CompileMode,
+  LspHealthUpdatedPayload,
   McpHealthUpdatedPayload,
   McpServerInput,
   PermissionMode,
@@ -210,6 +211,12 @@ export function useStudioApp() {
       listen<McpHealthUpdatedPayload>("studio-mcp-health-updated", ({ payload }) => {
         dispatch({
           type: "mcpHealthUpdated",
+          payload,
+        });
+      }),
+      listen<LspHealthUpdatedPayload>("studio-lsp-health-updated", ({ payload }) => {
+        dispatch({
+          type: "lspHealthUpdated",
           payload,
         });
       }),
