@@ -50,6 +50,8 @@ const zhCN = {
     addProjectFailed: "添加项目失败：{{error}}",
     selectProjectFailed: "选择项目失败：{{error}}",
     newSessionFailed: "新建会话失败：{{error}}",
+    sessionDeleted: "会话已删除",
+    deleteSessionFailed: "删除会话失败：{{error}}",
     selectSessionFailed: "选择会话失败：{{error}}",
     runFailed: "运行失败：{{error}}",
     stopFailed: "停止失败：{{error}}",
@@ -441,6 +443,12 @@ const zhCN = {
     chooseFolder: "选择文件夹",
     newSession: "新建会话",
     newSessionTitle: "新建会话",
+    sessionFallbackTitle: "当前会话",
+  },
+
+  sessions: {
+    delete: "删除会话",
+    confirmDelete: "确定删除会话“{{title}}”吗？",
   },
 };
 

@@ -261,6 +261,23 @@ impl StudioStore {
         Ok(())
     }
 
+    pub async fn archive_session(&self, session_id: &str) -> Result<Option<SessionRecord>> {
+        use entities::session;
+        let Some(existing) = session::Entity::find_by_id(session_id.to_string())
+            .one(&self.db)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let archived = session_record(existing.clone());
+        let now = unix_seconds();
+        let mut active: session::ActiveModel = existing.into();
+        active.archived = Set(1);
+        active.updated_at = Set(now);
+        active.update(&self.db).await?;
+        Ok(Some(archived))
+    }
+
     pub async fn set_session_mode(&self, session_id: &str, mode: CompileMode) -> Result<()> {
         use entities::session;
         if let Some(existing) = session::Entity::find_by_id(session_id.to_string())
