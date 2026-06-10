@@ -2,6 +2,7 @@ mod ask_user;
 mod bash;
 mod command;
 mod file;
+mod lsp;
 mod multi_agent;
 mod recoverable;
 mod skill;
@@ -28,6 +29,7 @@ pub use file::{
     ApplyPatchTool, CopyPathTool, CreateDirectoryTool, DeletePathTool, ListFilesTool, MovePathTool,
     ReadFileTool, SearchFilesTool, StatPathTool, WriteFileTool,
 };
+pub use lsp::LspQueryTool;
 pub use multi_agent::{
     CloseAgentTool, FollowupTaskTool, ListAgentsTool, SendMessageTool, SpawnAgentTool,
     WaitAgentTool,
@@ -77,6 +79,7 @@ pub struct ToolContext {
     pub workspace_instructions: Option<String>,
     pub active_subagent: Option<SubagentContext>,
     pub agent_control: AgentControl,
+    pub lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     pub parent_session: Arc<crate::session::CoreSession>,
 }
 
@@ -112,6 +115,7 @@ impl fmt::Debug for ToolContext {
             .field("permission_mode", &self.options.permission_mode)
             .field("workspace_access", &self.workspace_access)
             .field("active_subagent", &self.active_subagent)
+            .field("lsp_runtime", &self.lsp_runtime.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -328,6 +332,7 @@ mod tests {
             workspace_instructions: None,
             active_subagent: None,
             agent_control: AgentControl::default(),
+            lsp_runtime: None,
             parent_session: Arc::new(crate::session::CoreSession::new()),
         };
         let first_guard = context.workspace_write_lock().await;

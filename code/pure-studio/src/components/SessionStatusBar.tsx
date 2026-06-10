@@ -17,6 +17,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   CompileMode,
+  LspServerRecord,
   ModelRecord,
   AgentDto,
   AgentStatus,
@@ -61,6 +62,7 @@ import { Separator } from "@/components/ui/separator";
 
 type SessionStatusBarProps = {
   runtime: SessionRuntime | null;
+  lspServers: LspServerRecord[];
   providers: ProviderRecord[];
   roles: RoleRecord[];
   setRoles: Dispatch<SetStateAction<RoleRecord[]>>;
@@ -693,6 +695,7 @@ type StatusReadoutsProps = {
   costLabel: string;
   skills: string[];
   mcpServers: string[];
+  lspServers: string[];
   capabilityCount: number;
   agents: AgentDto[];
   activeAgentCount: number;
@@ -707,6 +710,7 @@ function StatusReadoutPopovers({
   costLabel,
   skills,
   mcpServers,
+  lspServers,
   capabilityCount,
   agents,
   activeAgentCount,
@@ -756,6 +760,7 @@ function StatusReadoutPopovers({
         <PopoverContent side="top" className="w-64 space-y-3">
           <ListPopover title={t("statusBar.skills")} items={skills} />
           <ListPopover title={t("statusBar.mcpServers")} items={mcpServers} />
+          <ListPopover title={t("statusBar.lspServers")} items={lspServers} />
         </PopoverContent>
       </Popover>
 
@@ -802,6 +807,7 @@ function MoreStatusMenu({
   costLabel,
   skills,
   mcpServers,
+  lspServers,
   capabilityCount,
   agents,
   activeAgentCount,
@@ -855,6 +861,9 @@ function MoreStatusMenu({
           <div>
             <StatusListContent title={t("statusBar.mcpServers")} items={mcpServers} />
           </div>
+          <div>
+            <StatusListContent title={t("statusBar.lspServers")} items={lspServers} />
+          </div>
         </div>
       </StatusMoreSection>
 
@@ -893,6 +902,7 @@ function MoreStatusMenu({
 
 export function SessionStatusBar({
   runtime,
+  lspServers: lspServerSnapshots,
   providers,
   roles,
   setRoles,
@@ -914,7 +924,14 @@ export function SessionStatusBar({
   const contextWidth = `${contextPercent(usage?.latestContextTokens, currentContextWindow)}%`;
   const skills = runtime?.activeSkills ?? [];
   const mcpServers = runtime?.activeMcpServers ?? [];
-  const capabilityCount = skills.length;
+  const activeLspServers = runtime?.activeLspServers ?? [];
+  const lspServers = [
+    ...activeLspServers,
+    ...lspServerSnapshots
+      .filter((server) => server.availabilityKind !== "available")
+      .map((server) => `${server.displayName}: ${server.availabilityMessage ?? server.availabilityKind}`),
+  ];
+  const capabilityCount = skills.length + mcpServers.length + activeLspServers.length;
   const shouldShowAgents = isBusy && liveAgentTurnPhases.has(turnPhase);
   const visibleAgents = shouldShowAgents
     ? agents.filter((agent) => activeAgentStatuses.has(agent.status))
@@ -927,6 +944,7 @@ export function SessionStatusBar({
     costLabel,
     skills,
     mcpServers,
+    lspServers,
     capabilityCount,
     agents: visibleAgents,
     activeAgentCount,

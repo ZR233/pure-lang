@@ -4,6 +4,8 @@ import type {
   AgentTimelineEvent,
   BootstrapPayload,
   ConfigPayload,
+  LspHealthUpdatedPayload,
+  LspServerRecord,
   McpHealthUpdatedPayload,
   McpServerRecord,
   PermissionMode,
@@ -62,6 +64,7 @@ export type StudioState = TimelineStateSlice & {
   providerUsagesLoading: boolean;
   providerUsageError: string | null;
   mcpServers: McpServerRecord[];
+  lspServers: LspServerRecord[];
   roles: RoleRecord[];
   providerTemplates: ProviderTemplateRecord[];
   selectedProjectId: string | null;
@@ -119,6 +122,7 @@ export type StudioAction =
   | { type: "setSettingsOpen"; value: boolean; tab?: SettingsTab }
   | { type: "configLoaded"; payload: ConfigPayload; status?: string }
   | { type: "mcpHealthUpdated"; payload: McpHealthUpdatedPayload }
+  | { type: "lspHealthUpdated"; payload: LspHealthUpdatedPayload }
   | { type: "enqueueApproval"; payload: ToolApprovalRequest; status: string }
   | { type: "resolveApproval"; payload: ToolApprovalResolved; status: string }
   | { type: "userInputRequested"; payload: UserInputRequest; status: string }
@@ -153,6 +157,7 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   providerUsagesLoading: false,
   providerUsageError: null,
   mcpServers: [],
+  lspServers: [],
   roles: [],
   providerTemplates: [],
   selectedProjectId: null,
@@ -193,6 +198,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
         agents: mergeAgents([], action.payload.agents ?? []),
         sessionRuntime: action.payload.sessionRuntime ?? null,
+        lspServers: action.payload.lspHealth?.lspServers ?? state.lspServers,
         ...emptyTimelineState(),
         ...configFields(state.selectedProviderId, action.payload.config),
         status: action.status,
@@ -222,6 +228,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
         agents: mergeAgents([], action.payload.agents ?? []),
         sessionRuntime: action.payload.sessionRuntime ?? null,
+        lspServers: action.payload.lspHealth?.lspServers ?? state.lspServers,
         ...emptyTimelineState(),
         approvals: [],
         pendingUserInput: null,
@@ -359,6 +366,17 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
           ? {
               ...state.sessionRuntime,
               activeMcpServers: action.payload.activeMcpServers,
+            }
+          : state.sessionRuntime,
+      };
+    case "lspHealthUpdated":
+      return {
+        ...state,
+        lspServers: action.payload.lspServers,
+        sessionRuntime: state.sessionRuntime
+          ? {
+              ...state.sessionRuntime,
+              activeLspServers: action.payload.activeLspServers,
             }
           : state.sessionRuntime,
       };

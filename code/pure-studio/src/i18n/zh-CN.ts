@@ -220,6 +220,7 @@ const zhCN = {
     more: "更多",
     skills: "Skills",
     mcpServers: "MCP",
+    lspServers: "LSP",
   },
 
   approval: {

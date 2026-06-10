@@ -171,6 +171,7 @@ pub(super) async fn execute_tool_calls(
             workspace_instructions: context.workspace_instructions.clone(),
             active_subagent: context.active_subagent.clone(),
             agent_control: context.agent_control.clone(),
+            lsp_runtime: context.core.lsp_runtime.clone(),
             parent_session: context.parent_session.clone(),
         };
         let approval_request = approval_request(tool_call, &tool_context);

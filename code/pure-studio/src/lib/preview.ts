@@ -2,6 +2,7 @@ import type {
   ConfigPayload,
   AgentDto,
   AgentTimelineEvent,
+  LspServerRecord,
   McpServerRecord,
   ProjectRecord,
   RoleRecord,
@@ -51,6 +52,7 @@ export const previewSessionRuntime: SessionRuntime = {
   },
   activeSkills: ["rust", "git", "doc"],
   activeMcpServers: ["github", "filesystem"],
+  activeLspServers: ["rust-analyzer"],
   updatedAt: 1779688800,
 };
 
@@ -221,6 +223,19 @@ export const previewMcpServers: McpServerRecord[] = [
     availabilityMessage: "Configure a Zhipu Coding Plan or Zhipu provider token to enable this server",
     lastCheckedAt: null,
     toolCount: null,
+  },
+];
+
+export const previewLspServers: LspServerRecord[] = [
+  {
+    id: "rust-analyzer",
+    displayName: "rust-analyzer",
+    extensions: [".rs"],
+    languageIds: ["rust"],
+    availabilityKind: "available",
+    availabilityMessage: "Available",
+    lastCheckedAt: 1779688800,
+    diagnosticCount: 0,
   },
 ];
 

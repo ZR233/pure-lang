@@ -7,7 +7,10 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::dto::AgentEventPayload;
-use crate::mappers::{agent_dto, agent_event_dto, load_session_runtime_dto, mcp_health_update_dto};
+use crate::mappers::{
+    agent_dto, agent_event_dto, load_session_runtime_dto, lsp_health_update_dto,
+    mcp_health_update_dto,
+};
 use crate::state::AppState;
 
 static EVENT_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -42,6 +45,17 @@ pub fn start_mcp_health_tasks(app: AppHandle, state: AppState) {
     });
 }
 
+pub fn start_lsp_health_tasks(app: AppHandle, state: AppState) {
+    let event_app = app.clone();
+    let event_state = state.clone();
+    let mut updates = event_state.studio.lsp_runtime().subscribe();
+    tauri::async_runtime::spawn(async move {
+        while let Ok(()) | Err(RecvError::Lagged(_)) = updates.recv().await {
+            emit_lsp_health_update(&event_app, &event_state.studio).await;
+        }
+    });
+}
+
 async fn emit_mcp_health_update(app: &AppHandle, studio: &StudioRuntime) {
     match mcp_health_update_dto(studio).await {
         Ok(payload) => {
@@ -50,6 +64,20 @@ async fn emit_mcp_health_update(app: &AppHandle, studio: &StudioRuntime) {
         Err(error) => {
             eprintln!(
                 "[pure-studio] failed to build MCP health update: {}",
+                error.message
+            );
+        }
+    }
+}
+
+pub async fn emit_lsp_health_update(app: &AppHandle, studio: &StudioRuntime) {
+    match lsp_health_update_dto(studio).await {
+        Ok(payload) => {
+            let _ = app.emit("studio-lsp-health-updated", payload);
+        }
+        Err(error) => {
+            eprintln!(
+                "[pure-studio] failed to build LSP health update: {}",
                 error.message
             );
         }

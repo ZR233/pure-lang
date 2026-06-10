@@ -32,6 +32,7 @@ fn main() {
         .manage(state)
         .setup(move |app| {
             events::start_mcp_health_tasks(app.handle().clone(), setup_state.clone());
+            events::start_lsp_health_tasks(app.handle().clone(), setup_state.clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

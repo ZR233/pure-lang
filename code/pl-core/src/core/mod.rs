@@ -16,9 +16,10 @@ use crate::session::CoreSession;
 use crate::tool::WorkspaceAccess;
 use crate::tool::{
     ApplyPatchTool, AskUserTool, CloseAgentTool, CopyPathTool, CreateDirectoryTool, DeletePathTool,
-    FollowupTaskTool, ListAgentsTool, ListFilesTool, MovePathTool, ReadFileTool, SearchFilesTool,
-    SendMessageTool, SkillManageTool, SkillViewTool, SkillsListTool, SpawnAgentTool, StatPathTool,
-    SubagentContext, ToolContext, ToolRegistry, WaitAgentTool, WriteFileTool, command_tool_pair,
+    FollowupTaskTool, ListAgentsTool, ListFilesTool, LspQueryTool, MovePathTool, ReadFileTool,
+    SearchFilesTool, SendMessageTool, SkillManageTool, SkillViewTool, SkillsListTool,
+    SpawnAgentTool, StatPathTool, SubagentContext, ToolContext, ToolRegistry, WaitAgentTool,
+    WriteFileTool, command_tool_pair,
 };
 use crate::trace::TraceRecorder;
 #[cfg(test)]
@@ -59,6 +60,7 @@ pub struct PureCore {
     reasoning_effort: Option<ReasoningEffort>,
     config: Option<PureConfig>,
     mcp_runtime: Option<crate::mcp::McpRuntimeRegistry>,
+    lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     workspace_root: Option<PathBuf>,
     workspace_instructions: Option<String>,
     active_subagent: Option<SubagentContext>,
@@ -73,6 +75,7 @@ impl PureCore {
             reasoning_effort: None,
             config: None,
             mcp_runtime: None,
+            lsp_runtime: None,
             workspace_root: None,
             workspace_instructions: None,
             active_subagent: None,
@@ -90,6 +93,7 @@ impl PureCore {
             reasoning_effort: Some(reasoning_effort),
             config: None,
             mcp_runtime: None,
+            lsp_runtime: None,
             workspace_root: None,
             workspace_instructions: None,
             active_subagent: None,
@@ -114,6 +118,7 @@ impl PureCore {
             reasoning_effort: Some(resolved.role_config.effort),
             config: Some(config.clone()),
             mcp_runtime: None,
+            lsp_runtime: None,
             workspace_root: None,
             workspace_instructions: None,
             active_subagent: None,
@@ -134,6 +139,11 @@ impl PureCore {
 
     pub fn with_mcp_runtime(mut self, registry: crate::mcp::McpRuntimeRegistry) -> Self {
         self.mcp_runtime = Some(registry);
+        self
+    }
+
+    pub fn with_lsp_runtime(mut self, registry: pl_lsp::LspRuntimeRegistry) -> Self {
+        self.lsp_runtime = Some(registry);
         self
     }
 
@@ -174,11 +184,15 @@ impl PureCore {
         self.register_tool(CopyPathTool);
         self.register_tool(MovePathTool);
         self.register_tool(ApplyPatchTool);
+        if let Some(registry) = self.lsp_runtime.clone() {
+            self.register_tool(LspQueryTool::new(registry));
+        }
         self.register_tool(SpawnAgentTool::new(
             self.provider.clone(),
             self.reasoning_effort.clone(),
             self.config.clone(),
             self.mcp_runtime.clone(),
+            self.lsp_runtime.clone(),
             workspace_instructions.clone(),
         ));
         self.register_tool(WaitAgentTool);
@@ -189,6 +203,7 @@ impl PureCore {
             self.reasoning_effort.clone(),
             self.config.clone(),
             self.mcp_runtime.clone(),
+            self.lsp_runtime.clone(),
             workspace_instructions.clone(),
         ));
         self.register_tool(CloseAgentTool);
@@ -377,6 +392,7 @@ mod tests {
             workspace_instructions: None,
             active_subagent: None,
             agent_control: crate::AgentControl::default(),
+            lsp_runtime: None,
             parent_session: std::sync::Arc::new(CoreSession::new()),
         }
     }
@@ -557,6 +573,7 @@ mod tests {
         assert!(tool_allowed_in_mode(plan, "followup_task"));
         assert!(tool_allowed_in_mode(plan, "request_user_input"));
         assert!(tool_allowed_in_mode(plan, "bash"));
+        assert!(tool_allowed_in_mode(plan, "lsp_query"));
         assert!(tool_allowed_in_mode(plan, "mcp__github__search_issues"));
         assert!(!tool_allowed_in_mode(plan, "subagent"));
         assert!(!tool_allowed_in_mode(plan, "write_file"));
@@ -1190,5 +1207,17 @@ mod tests {
         assert!(core.tools.get("subagent").is_none());
         assert!(core.tools.get("read_file").is_some());
         assert!(core.tools.get("apply_patch").is_some());
+        assert!(core.tools.get("lsp_query").is_none());
+    }
+
+    #[test]
+    fn default_tools_register_lsp_query_when_runtime_is_shared() {
+        let mut core = PureCore::default_provider()
+            .unwrap()
+            .with_lsp_runtime(pl_lsp::LspRuntimeRegistry::new());
+
+        core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()));
+
+        assert!(core.tools.get("lsp_query").is_some());
     }
 }

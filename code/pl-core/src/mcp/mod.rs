@@ -1239,6 +1239,7 @@ mod tests {
             workspace_instructions: None,
             active_subagent: None,
             agent_control: crate::AgentControl::default(),
+            lsp_runtime: None,
             parent_session: Arc::new(crate::CoreSession::new()),
         };
 

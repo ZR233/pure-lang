@@ -25,6 +25,7 @@ impl SpawnAgentTool {
         reasoning_effort: Option<crate::config::ReasoningEffort>,
         config: Option<crate::config::PureConfig>,
         mcp_runtime: Option<crate::mcp::McpRuntimeRegistry>,
+        lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
         workspace_instructions: Option<String>,
     ) -> Self {
         Self {
@@ -32,6 +33,7 @@ impl SpawnAgentTool {
             reasoning_effort,
             config,
             mcp_runtime,
+            lsp_runtime,
             workspace_instructions,
         }
     }
@@ -43,6 +45,7 @@ impl FollowupTaskTool {
         reasoning_effort: Option<crate::config::ReasoningEffort>,
         config: Option<crate::config::PureConfig>,
         mcp_runtime: Option<crate::mcp::McpRuntimeRegistry>,
+        lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
         workspace_instructions: Option<String>,
     ) -> Self {
         Self {
@@ -50,6 +53,7 @@ impl FollowupTaskTool {
             reasoning_effort,
             config,
             mcp_runtime,
+            lsp_runtime,
             workspace_instructions,
         }
     }
@@ -201,6 +205,7 @@ impl Tool for SpawnAgentTool {
                 reasoning_effort: self.reasoning_effort.clone(),
                 config: self.config.clone(),
                 mcp_runtime: self.mcp_runtime.clone(),
+                lsp_runtime: self.lsp_runtime.clone(),
                 workspace_instructions: context
                     .workspace_instructions
                     .clone()
@@ -436,6 +441,7 @@ impl Tool for FollowupTaskTool {
                     reasoning_effort: self.reasoning_effort.clone(),
                     config: self.config.clone(),
                     mcp_runtime: self.mcp_runtime.clone(),
+                    lsp_runtime: self.lsp_runtime.clone(),
                     workspace_instructions: context
                         .workspace_instructions
                         .clone()

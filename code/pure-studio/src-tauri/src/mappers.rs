@@ -1,23 +1,23 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use pl_core::{
-    BuiltinMcpServerState, ConfigStore, McpAvailabilityKind, McpAvailabilitySnapshot,
-    McpServerConfig, McpServerStatusKind, McpServerTransport, ModelCapabilityConfig, ModelConfig,
-    ModelRole, ProjectRecord, ProviderConfig, ProviderEdit, ProviderKind, ProviderModelEdit,
-    ProviderTemplateKind, ProviderUsageData, ProviderUsageRecord, ProviderUsageState, PureConfig,
-    RoleEdit, SessionRecord, SessionRuntimeRecord, SkillCatalog, SkillMetadata, SkillSourceKind,
-    StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord, StudioRuntime, TraceEvent,
-    TraceEventKind, TurnResultStatus, ZhipuQuotaWindow, builtin_mcp_server_ids,
-    effective_mcp_servers, infer_provider_template_kind,
+    BuiltinMcpServerState, ConfigStore, LspServerSnapshot, McpAvailabilityKind,
+    McpAvailabilitySnapshot, McpServerConfig, McpServerStatusKind, McpServerTransport,
+    ModelCapabilityConfig, ModelConfig, ModelRole, ProjectRecord, ProviderConfig, ProviderEdit,
+    ProviderKind, ProviderModelEdit, ProviderTemplateKind, ProviderUsageData, ProviderUsageRecord,
+    ProviderUsageState, PureConfig, RoleEdit, SessionRecord, SessionRuntimeRecord, SkillCatalog,
+    SkillMetadata, SkillSourceKind, StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord,
+    StudioRuntime, TraceEvent, TraceEventKind, TurnResultStatus, ZhipuQuotaWindow,
+    builtin_mcp_server_ids, effective_mcp_servers, infer_provider_template_kind,
 };
 use pl_protocol::{Message, MessageContent, MessageRole};
 
 use crate::dto::{
     AgentDto, AgentEventDto, ConfigDto, DeepSeekBalanceDto, DeepSeekBalanceInfoDto,
-    DiscoveredSkillsDto, KeyValueDto, McpHealthUpdateDto, McpServerDto, McpSettingsInput, ModelDto,
-    PlanStateDto, ProjectDto, ProviderDto, ProviderInput, ProviderSettingsInput,
-    ProviderTemplateDto, ProviderUsageDto, ProviderUsagesDto, RoleDto, RoleInput,
-    RuntimeCostAmountDto, RuntimeUsageDto, SessionDto, SessionRuntimeDto, SkillDto,
+    DiscoveredSkillsDto, KeyValueDto, LspHealthUpdateDto, LspServerDto, McpHealthUpdateDto,
+    McpServerDto, McpSettingsInput, ModelDto, PlanStateDto, ProjectDto, ProviderDto, ProviderInput,
+    ProviderSettingsInput, ProviderTemplateDto, ProviderUsageDto, ProviderUsagesDto, RoleDto,
+    RoleInput, RuntimeCostAmountDto, RuntimeUsageDto, SessionDto, SessionRuntimeDto, SkillDto,
     ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
 };
 use crate::state::{CommandError, CommandResult};
@@ -40,6 +40,19 @@ pub async fn mcp_health_update_dto(studio: &StudioRuntime) -> CommandResult<McpH
     Ok(McpHealthUpdateDto {
         mcp_servers: mcp_server_dtos_with_availability(&config, &availability),
         active_mcp_servers: studio.mcp_runtime().available_server_names().await,
+    })
+}
+
+pub async fn lsp_health_update_dto(studio: &StudioRuntime) -> CommandResult<LspHealthUpdateDto> {
+    Ok(LspHealthUpdateDto {
+        lsp_servers: studio
+            .lsp_runtime()
+            .snapshots()
+            .await
+            .into_iter()
+            .map(lsp_server_dto)
+            .collect(),
+        active_lsp_servers: studio.lsp_runtime().active_server_names().await,
     })
 }
 
@@ -97,6 +110,7 @@ pub async fn load_session_runtime_dto(
         record,
         active_skill_names_from_messages(&messages),
         studio.mcp_runtime().available_server_names().await,
+        studio.lsp_runtime().active_server_names().await,
     ))
 }
 
@@ -104,6 +118,7 @@ pub fn session_runtime_dto(
     record: SessionRuntimeRecord,
     active_skills: Vec<String>,
     active_mcp_servers: Vec<String>,
+    active_lsp_servers: Vec<String>,
 ) -> SessionRuntimeDto {
     let usage = runtime_usage_dto(pl_core::RuntimeUsageSnapshot {
         model: record.model,
@@ -123,6 +138,20 @@ pub fn session_runtime_dto(
         usage,
         active_skills,
         active_mcp_servers,
+        active_lsp_servers,
+    }
+}
+
+pub fn lsp_server_dto(snapshot: LspServerSnapshot) -> LspServerDto {
+    LspServerDto {
+        id: snapshot.id,
+        display_name: snapshot.display_name,
+        extensions: snapshot.extensions,
+        language_ids: snapshot.language_ids,
+        availability_kind: snapshot.availability_kind.as_str().to_string(),
+        availability_message: snapshot.availability_message,
+        last_checked_at: snapshot.last_checked_at,
+        diagnostic_count: snapshot.diagnostic_count,
     }
 }
 
@@ -1131,7 +1160,7 @@ mod tests {
     }
 
     #[test]
-    fn session_runtime_dto_exposes_nested_runtime_usage_and_costs() {
+    fn session_runtime_dto_exposes_lsp_servers_runtime_usage_and_costs() {
         let dto = session_runtime_dto(
             SessionRuntimeRecord {
                 session_id: "session-1".to_string(),
@@ -1159,12 +1188,14 @@ mod tests {
             },
             vec!["skill-creator".to_string()],
             vec!["github".to_string()],
+            vec!["rust-analyzer".to_string()],
         );
 
         assert_eq!(dto.session_id, "session-1");
         assert_eq!(dto.updated_at, 99);
         assert_eq!(dto.active_skills, vec!["skill-creator"]);
         assert_eq!(dto.active_mcp_servers, vec!["github"]);
+        assert_eq!(dto.active_lsp_servers, vec!["rust-analyzer"]);
         assert_eq!(dto.usage.model, "model-a");
         assert_eq!(dto.usage.context_window, Some(1_000_000));
         assert_eq!(dto.usage.cache_hit_rate, Some(0.25));

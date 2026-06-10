@@ -1,0 +1,101 @@
+use std::path::{Path, PathBuf};
+
+pub(crate) fn path_to_file_uri(path: &Path) -> String {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    };
+    let path = absolute.to_string_lossy().replace('\\', "/");
+    if cfg!(windows) {
+        format!("file:///{}", encode_path(&path))
+    } else {
+        format!("file://{}", encode_path(&path))
+    }
+}
+
+pub(crate) fn file_uri_to_path(uri: &str) -> PathBuf {
+    let mut value = uri.strip_prefix("file://").unwrap_or(uri).to_string();
+    if cfg!(windows) && value.starts_with('/') && value.as_bytes().get(2) == Some(&b':') {
+        value.remove(0);
+    }
+    PathBuf::from(decode_path(&value))
+}
+
+pub(crate) fn uri_display_path(uri: &str, workspace_root: Option<&Path>) -> String {
+    let path = file_uri_to_path(uri);
+    if let Some(root) = workspace_root
+        && let Ok(relative) = path.strip_prefix(root)
+    {
+        return normalize_separators(relative);
+    }
+    normalize_separators(&path)
+}
+
+pub(crate) fn normalize_separators(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn encode_path(path: &str) -> String {
+    let mut output = String::with_capacity(path.len());
+    for byte in path.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b':' | b'-' | b'_' | b'.' | b'~' => {
+                output.push(byte as char)
+            }
+            _ => output.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    output
+}
+
+fn decode_path(path: &str) -> String {
+    let mut output = Vec::with_capacity(path.len());
+    let bytes = path.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%'
+            && index + 2 < bytes.len()
+            && let Ok(hex) = std::str::from_utf8(&bytes[index + 1..index + 3])
+            && let Ok(value) = u8::from_str_radix(hex, 16)
+        {
+            output.push(value);
+            index += 3;
+            continue;
+        }
+        output.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8(output).unwrap_or_else(|_| path.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[test]
+    fn windows_drive_file_uri_round_trips() {
+        let path = PathBuf::from(r"C:\work\pure lang\src\lib.rs");
+        let uri = if cfg!(windows) {
+            path_to_file_uri(&path)
+        } else {
+            "file:///C:/work/pure%20lang/src/lib.rs".to_string()
+        };
+
+        assert_eq!(
+            file_uri_to_path(&uri),
+            PathBuf::from("C:/work/pure lang/src/lib.rs")
+        );
+    }
+
+    #[test]
+    fn encodes_spaces_in_file_uri() {
+        let uri = path_to_file_uri(Path::new("/tmp/pure lang/lib.rs"));
+
+        assert!(uri.contains("pure%20lang"));
+    }
+}

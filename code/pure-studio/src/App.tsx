@@ -38,6 +38,7 @@ export function App() {
           entries={studio.timelineEntries}
           agents={state.agents}
           sessionRuntime={state.sessionRuntime}
+          lspServers={state.lspServers}
           pendingUserInput={state.pendingUserInput}
           planAction={studio.planAction}
           prompt={state.prompt}

@@ -2,6 +2,7 @@
 members = [
     "code/pl-protocol",
     "code/pl-model",
+    "code/pl-lsp",
     "code/pl-core",
     "code/pure-studio/src-tauri",
 ]
@@ -26,6 +27,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 bitflags = { version = "2", features = ["serde"] }
 reqwest = { version = "0.13", features = ["json", "stream"] }
+lsp-types = "0.97.0"
 async-openai = { version = "0.40.3", default-features = false, features = [
     "rustls",
     "responses",
@@ -45,5 +47,6 @@ sea-orm = { version = "1.1.20", default-features = false, features = [
 ] }
 
 pl-protocol = { path = "code/pl-protocol" }
+pl-lsp = { path = "code/pl-lsp" }
 pl-core = { path = "code/pl-core" }
 pl-model = { path = "code/pl-model" }

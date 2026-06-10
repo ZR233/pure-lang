@@ -220,6 +220,7 @@ const en = {
     more: "More",
     skills: "Skills",
     mcpServers: "MCP",
+    lspServers: "LSP",
   },
 
   approval: {

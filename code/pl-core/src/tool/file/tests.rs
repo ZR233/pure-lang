@@ -29,6 +29,7 @@ async fn context(root: &Path) -> ToolContext {
         workspace_instructions: None,
         active_subagent: None,
         agent_control: crate::AgentControl::default(),
+        lsp_runtime: None,
         parent_session: std::sync::Arc::new(crate::CoreSession::new()),
     }
 }

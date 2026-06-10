@@ -69,6 +69,14 @@ impl Tool for ApplyPatchTool {
             let paths = helpers::workspace(&context).await?;
             let outcome = apply_patch(&patch, &paths).await?;
             let summary = outcome.summary(&paths);
+            if let Some(registry) = &context.lsp_runtime {
+                for path in outcome.deleted_paths() {
+                    registry.notify_file_deleted(path).await;
+                }
+                for path in outcome.changed_paths() {
+                    registry.notify_file_changed(path).await;
+                }
+            }
             Ok(helpers::text_output(summary))
         })
     }

@@ -44,6 +44,10 @@ pub use interfaces::{
     ConfigRepository, EventSink, RuntimeEventEmitter, SessionRepository, TurnSnapshotRepository,
 };
 pub use mcp::{McpAvailabilityKind, McpAvailabilitySnapshot, McpRuntimeRegistry};
+pub use pl_lsp::{
+    LspAvailabilityKind, LspDiagnostic, LspPosition, LspQuery, LspQueryOperation, LspQueryResult,
+    LspRange, LspRuntimeRegistry, LspServerSnapshot,
+};
 pub use pl_model::{
     DeepSeekBalanceInfo, DeepSeekBalanceUsage, InputModality, ProviderKind, ToolWirePolicy,
     TruncationMode, ZhipuCodingPlanUsage, ZhipuQuotaLimit, ZhipuQuotaWindow, ZhipuToolUsageDetail,
@@ -67,8 +71,9 @@ pub use studio::{
     ToolApprovalRecord,
 };
 pub use tool::{
-    AskUserTool, BashInput, BashTool, OutputTruncation, SubagentContext, Tool, ToolContext,
-    ToolInput, ToolOutput, ToolRegistry, TruncatedOutput, TruncationStrategy, WriteStdinTool,
+    AskUserTool, BashInput, BashTool, LspQueryTool, OutputTruncation, SubagentContext, Tool,
+    ToolContext, ToolInput, ToolOutput, ToolRegistry, TruncatedOutput, TruncationStrategy,
+    WriteStdinTool,
 };
 pub use trace::TraceRecorder;
 pub use turn::{

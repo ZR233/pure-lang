@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 pl-protocol = { workspace = true }
 pl-model = { workspace = true }
+pl-lsp = { workspace = true }
 anyhow = { workspace = true }
 sea-orm = { workspace = true }
 serde = { workspace = true }
