@@ -1,5 +1,6 @@
 # Build artifacts
 /target
+/dist
 /code/pure-studio/node_modules
 /code/pure-studio/dist
 /code/pure-studio/.tmp-tests
