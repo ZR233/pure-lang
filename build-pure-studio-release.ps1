@@ -52,6 +52,18 @@ function Get-NpmCommand {
     return "npm"
 }
 
+function Invoke-CheckedCommand {
+    param(
+        [string]$Command,
+        [string[]]$Arguments
+    )
+
+    & $Command @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Command failed with exit code $LASTEXITCODE"
+    }
+}
+
 if (-not (Test-Path $StudioDir)) {
     throw "Pure Studio directory not found: $StudioDir"
 }
@@ -63,27 +75,32 @@ Assert-CommandAvailable "cargo" "Install Rust stable, reopen PowerShell, then ru
 
 $NpmCommand = Get-NpmCommand
 
-if (-not $SkipFrontendBuild) {
-    Push-Location $StudioDir
-    try {
-        if (-not $SkipNpmInstall) {
-            if (Test-Path "package-lock.json") {
-                & $NpmCommand ci
-            } else {
-                & $NpmCommand install
-            }
-        }
-
-        & $NpmCommand run build
-    } finally {
-        Pop-Location
-    }
-}
-
-Push-Location $RepoRoot
+Push-Location $StudioDir
+$SkipFrontendConfigPath = $null
 try {
-    cargo build -p pure-studio --release
+    if (-not $SkipNpmInstall) {
+        if (Test-Path "package-lock.json") {
+            Invoke-CheckedCommand $NpmCommand @("ci")
+        } else {
+            Invoke-CheckedCommand $NpmCommand @("install")
+        }
+    }
+
+    $tauriArgs = @("run", "tauri:build", "--", "--no-bundle")
+    if ($SkipFrontendBuild) {
+        if (-not (Test-Path (Join-Path $StudioDir "dist\index.html"))) {
+            throw "Frontend dist not found. Remove -SkipFrontendBuild or run npm run build first."
+        }
+        $SkipFrontendConfigPath = [IO.Path]::ChangeExtension([IO.Path]::GetTempFileName(), ".json")
+        Set-Content -LiteralPath $SkipFrontendConfigPath -Value '{"build":{"beforeBuildCommand":null}}' -Encoding UTF8
+        $tauriArgs += @("--config", $SkipFrontendConfigPath)
+    }
+
+    Invoke-CheckedCommand $NpmCommand $tauriArgs
 } finally {
+    if ($SkipFrontendConfigPath -and (Test-Path $SkipFrontendConfigPath)) {
+        Remove-Item -LiteralPath $SkipFrontendConfigPath -Force
+    }
     Pop-Location
 }
 
@@ -92,8 +109,13 @@ if (-not (Test-Path $BinaryPath)) {
 }
 
 New-Item -Path $OutputDir -ItemType Directory -Force | Out-Null
-Copy-Item -Path $BinaryPath -Destination (Join-Path $OutputDir $BinaryName) -Force
+$OutputBinaryPath = Join-Path $OutputDir $BinaryName
+try {
+    Copy-Item -Path $BinaryPath -Destination $OutputBinaryPath -Force
+} catch {
+    throw "Failed to copy release binary to $OutputBinaryPath. Close any running Pure Studio window using that exe, then run this script again. Original error: $($_.Exception.Message)"
+}
 
 Write-Host "Pure Studio release build complete."
 Write-Host "Binary: $BinaryPath"
-Write-Host "Copied to: $(Join-Path $OutputDir $BinaryName)"
+Write-Host "Copied to: $OutputBinaryPath"
