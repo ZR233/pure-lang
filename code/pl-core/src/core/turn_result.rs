@@ -4,7 +4,9 @@ use pl_model::ModelCapabilities;
 use pl_protocol::{AgentEvent, BudgetLimitKind, BudgetUsage, ErrorSeverity, TimelineItemStatus};
 
 use crate::trace::TraceRecorder;
-use crate::turn::{CompileMode, ToolExecutionMode, TurnOptions, TurnResult, TurnResultStatus};
+use crate::turn::{
+    CompileMode, ToolExecutionMode, TurnAbortReason, TurnOptions, TurnResult, TurnResultStatus,
+};
 
 pub(super) fn provider_error_severity(
     active_subagent: Option<&crate::tool::SubagentContext>,
@@ -124,10 +126,39 @@ pub(super) fn failed_turn_result(
     content: String,
     reasoning_content: Option<String>,
     model: String,
+    usage: pl_model::TokenUsage,
+    session_message_count: usize,
+    error: String,
+    severity: ErrorSeverity,
+) -> TurnResult {
+    failed_turn_result_with_abort_reason(
+        recorder,
+        turn_id,
+        mode,
+        content,
+        reasoning_content,
+        model,
+        usage,
+        session_message_count,
+        error,
+        severity,
+        TurnAbortReason::ProviderError,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn failed_turn_result_with_abort_reason(
+    recorder: &mut TraceRecorder,
+    turn_id: &str,
+    mode: CompileMode,
+    content: String,
+    reasoning_content: Option<String>,
+    model: String,
     mut usage: pl_model::TokenUsage,
     session_message_count: usize,
     error: String,
     severity: ErrorSeverity,
+    abort_reason: TurnAbortReason,
 ) -> TurnResult {
     usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
     recorder.ensure_assistant_text_item(turn_id, &content);
@@ -148,7 +179,7 @@ pub(super) fn failed_turn_result(
         mode,
         session_message_count,
         status: TurnResultStatus::Errored,
-        abort_reason: Some(crate::turn::TurnAbortReason::ProviderError),
+        abort_reason: Some(abort_reason),
         error: Some(error),
         budget_limit_kind: None,
         budget_usage: None,

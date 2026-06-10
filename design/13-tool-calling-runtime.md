@@ -14,8 +14,18 @@ Core 会话中的 tool result metadata 同时保存两个字段：
 
 - `tool_call_id`：写入 `ToolCall.id`，供 Chat Completions tool message 使用。
 - `tool_call_call_id`：写入 `ToolCall.call_id`，供 Responses output item 使用。
+- `tool_call_kind`：写入 `function` 或 `custom`，供下一轮请求按原始工具种类回放。
+- `tool_name` / `tool_call_arguments`：写入工具名和原始参数，供历史校验、调试和兼容旧会话读取。
 
-Timeline 的工具 item id 使用可展示、可去重的运行时 id：优先取 `ToolCall.call_id`，否则取 `ToolCall.id`，再按 turn 做命名空间隔离。Timeline item 的 `tool.provider_item_id` 保存 `ToolCall.id`，`tool.call_id` 保存 `ToolCall.call_id`。
+这些 metadata 必须通过 typed helper 写入和读取，不允许在 `pl-core`、`pl-model` 之间散落字符串 key。新增会话消息缺少 `tool_call_kind`、`tool_call_id` 或 Responses `call_id` 时，provider request 构造应返回协议错误；只有历史兼容路径可以把缺少 `tool_call_kind` 的旧 tool result 当作 function 读取。unknown `tool_call_kind` 一律是协议错误，不能静默回退到 function。
+
+Timeline 的工具 item id 使用可展示、可去重的运行时 id：优先取 `ToolCall.call_id`，否则取 `ToolCall.id`，再按 turn 做命名空间隔离。Timeline wire 字段保持兼容：`TimelineItem.itemId` 和 `TimelineToolItem.toolCallId` 表示 runtime 展示 id；provider item id 使用 `TimelineToolItem.providerItemId`；Responses call id 使用 `TimelineToolItem.callId`。Timeline item 的 `tool.provider_item_id` 保存 `ToolCall.id`，`tool.call_id` 保存 `ToolCall.call_id`。
+
+## 模型流完成语义
+
+`pl-model` 只有在收到 provider-independent `StreamEvent::Completed` 后，才能把一次模型调用视为成功。SSE parse error、transport error 或 EOF-before-completed 都必须返回稳定 `PureError`，并让 turn 失败，不能把已累计的局部内容当作成功 assistant 响应写入历史。
+
+Chat Completions provider 如果没有 Responses 风格的 completed event，protocol mapper 必须在终止 chunk 合成 `StreamEvent::Completed`。聚合层允许在缺少显式 tool complete event 时兜底完成已聚合工具调用，但该工具调用必须已经有稳定工具名，以及 `id` 或 `call_id`。缺少工具名的残留 tool accumulator 表示 provider/protocol 可恢复错误，不得执行空工具名。
 
 ## 生命周期
 
@@ -32,6 +42,17 @@ MCP tools 由进程内 MCP runtime registry 的当前可用快照注册，工具
 内置 Zhipu Coding Plan MCP server 优先复用 Zhipu Coding Plan provider 的 `bearer_token`，并兼容回退到普通 Zhipu provider 的 `bearer_token`。缺少 token 时内置 server 处于 `missingCredential`，不参与后台探测，也不应导致普通 turn 或 subagent 启动失败；检测到 token 后进入后台探测流程，只有探测成功的 server 会被主会话和 subagent runner 注册。HTTP 内置 server 在 transport 层直接发送 bearer token；stdio Vision server 在启动进程时注入 `Z_AI_API_KEY` 和 `Z_AI_MODE=ZHIPU`。
 
 终态事件只允许出现一次。`completed` 表示工具成功执行，`failed` 表示工具实现或注册失败，`denied` 表示模式、策略或审批拒绝，`interrupted` 和 `budgetLimited` 表示 turn 控制层中断或预算限制。`approved` 可作为执行前的非终态状态展示，但不能替代最终 `completed` 或 `failed`。
+
+## 运行时错误分类
+
+工具调度层使用轻量 runtime envelope 统一执行结果：
+
+- `ToolInvocation` 保存工具名、runtime item id、provider item id、Responses call id、payload 和执行上下文。
+- `ToolPayload` 区分 `Function(serde_json::Value)` 和 `Custom(String)`，避免 custom/freeform 工具被 JSON function 回放吞掉。
+- `ToolOutputEnvelope` 区分模型可见文本、timeline 展示文本、完整输出文件、退出码和 timeout 标记。
+- `ToolExecutionError::RespondToModel` 表示模型可恢复错误，必须写 tool result；`ToolExecutionError::Fatal` 表示内部 invariant、join failure 或历史污染，当前 turn 以 `ToolError` 失败。
+
+`Tool` trait 为了支持运行时注册表和 MCP 动态工具，暂时保留 dyn-compatible `BoxFuture` 返回值。这是 trait object 边界的例外，不引入 `#[async_trait]`，也不扩散到新增业务 trait。
 
 ## 结果回传
 
@@ -60,6 +81,8 @@ MCP tools 由进程内 MCP runtime registry 的当前可用快照注册，工具
 `wait_agent` 和 `list_agents` 默认只回传紧凑 agent 摘要，避免把完整 agent snapshot 反复写入模型上下文。调用方显式传入 `includeDetails: true` 时，工具结果可包含完整 `AgentRecord`，用于诊断；普通协作流程应优先依赖精简摘要和最终子代理总结。`spawn_agent.forkTurns` 的历史继承只复制过滤后的父会话消息，不复制工具结果、工具调用 metadata、reasoning 内容或运行时调度提示。
 
 MCP tool 成功结果写回紧凑字符串。文本内容按 MCP content 顺序合并；JSON 或非文本内容序列化为紧凑 JSON。MCP `isError` 或 transport/protocol 错误按本地执行错误处理，使用 `Tool execution error: {error}` 前缀写回模型上下文，同时在 Studio timeline 中展示失败原因。transport/protocol 错误还会把对应 server 的 availability 标记为 `unavailable`，后续 turn 不再暴露该 server 的 tools，直到后台周期重检或保存配置后的 reconcile 恢复。
+
+文件修改工具不向 schema 暴露语义模糊的 bool 参数。`delete_path` 使用 `mode: "file" | "emptyDirectory" | "recursiveDirectory"`；`copy_path` 和 `move_path` 使用 `collision: "failIfExists" | "overwrite"`。运行时仅为旧历史或人工输入兼容读取旧 `recursive` / `overwrite` 字段，新请求和工具描述不得继续暴露这些 bool 字段。
 
 ## Studio 展示
 

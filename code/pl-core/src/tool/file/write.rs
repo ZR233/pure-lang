@@ -4,8 +4,8 @@ use tokio::io::AsyncWriteExt;
 
 use super::helpers::{ensure_overwrite, parse_input, text_output, tool_error, workspace};
 use super::input::{
-    CopyMoveInput, DeletePathInput, PathInput, WriteFileInput, WriteMode, copy_move_schema,
-    path_schema,
+    CopyMoveInput, DeleteMode, DeletePathInput, PathCollision, PathInput, WriteFileInput,
+    WriteMode, copy_move_schema, path_schema,
 };
 use crate::tool::{BoxFuture, Tool, ToolContext, ToolInput, ToolOutput};
 
@@ -130,7 +130,7 @@ impl Tool for DeletePathTool {
     }
 
     fn description(&self) -> &str {
-        "Delete a file or, when recursive is true, a directory inside the workspace."
+        "Delete a workspace file, empty directory, or recursive directory using an explicit mode."
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -138,9 +138,12 @@ impl Tool for DeletePathTool {
             "type": "object",
             "properties": {
                 "path": { "type": "string" },
-                "recursive": { "type": "boolean" }
+                "mode": {
+                    "type": "string",
+                    "enum": ["file", "emptyDirectory", "recursiveDirectory"]
+                }
             },
-            "required": ["path"],
+            "required": ["path", "mode"],
             "additionalProperties": false
         })
     }
@@ -157,17 +160,24 @@ impl Tool for DeletePathTool {
             let path = paths.resolve_existing(&input.path).await?;
             paths.reject_symlink_write(&path).await?;
             let metadata = tokio::fs::metadata(&path).await?;
-            if metadata.is_dir() {
-                if input.recursive.unwrap_or(false) {
-                    tokio::fs::remove_dir_all(&path).await?;
-                } else {
+            match (metadata.is_dir(), input.delete_mode()) {
+                (false, DeleteMode::File) => tokio::fs::remove_file(&path).await?,
+                (false, DeleteMode::EmptyDirectory | DeleteMode::RecursiveDirectory) => {
                     return Err(tool_error(
                         self.name(),
-                        "directory delete requires recursive true",
+                        "delete mode requires a directory but path is a file",
                     ));
                 }
-            } else {
-                tokio::fs::remove_file(&path).await?;
+                (true, DeleteMode::File) => {
+                    return Err(tool_error(
+                        self.name(),
+                        "delete mode file cannot delete a directory",
+                    ));
+                }
+                (true, DeleteMode::EmptyDirectory) => tokio::fs::remove_dir(&path).await?,
+                (true, DeleteMode::RecursiveDirectory) => {
+                    tokio::fs::remove_dir_all(&path).await?;
+                }
             }
             Ok(text_output(format!(
                 "Deleted {}",
@@ -202,7 +212,12 @@ impl Tool for CopyPathTool {
             let from = paths.resolve_existing(&input.from).await?;
             let to = paths.resolve_for_write(&input.to).await?;
             paths.reject_symlink_write(&to).await?;
-            ensure_overwrite(&to, input.overwrite.unwrap_or(false), self.name()).await?;
+            ensure_overwrite(
+                &to,
+                input.collision() == PathCollision::Overwrite,
+                self.name(),
+            )
+            .await?;
             if let Some(parent) = to.parent() {
                 tokio::fs::create_dir_all(parent).await?;
             }
@@ -242,7 +257,12 @@ impl Tool for MovePathTool {
             let to = paths.resolve_for_write(&input.to).await?;
             paths.reject_symlink_write(&from).await?;
             paths.reject_symlink_write(&to).await?;
-            ensure_overwrite(&to, input.overwrite.unwrap_or(false), self.name()).await?;
+            ensure_overwrite(
+                &to,
+                input.collision() == PathCollision::Overwrite,
+                self.name(),
+            )
+            .await?;
             if let Some(parent) = to.parent() {
                 tokio::fs::create_dir_all(parent).await?;
             }

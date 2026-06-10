@@ -7,7 +7,6 @@ use pl_protocol::{
     TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus, TimelineTextRole,
     TimelineThinkingChunk, TimelineToolItem, TraceEvent, TraceEventKind,
 };
-use tracing::warn;
 
 use crate::proposed_plan::{ProposedPlanParser, ProposedPlanSegment};
 use crate::protocol::openai::OpenAiProtocol;
@@ -29,8 +28,7 @@ pub(crate) async fn process_provider_stream(
         let sse_event = match event {
             Ok(e) => e,
             Err(e) => {
-                warn!("SSE parse error: {e}");
-                break;
+                return Err(PureError::LlmError(format!("provider stream error: {e}")));
             }
         };
 
@@ -42,7 +40,7 @@ pub(crate) async fn process_provider_stream(
         accumulator.apply(stream_event, event_tx)?;
     }
 
-    Ok(accumulator.finish(event_tx))
+    accumulator.finish(event_tx)
 }
 
 pub(crate) struct StreamCompletionAccumulator {
@@ -52,6 +50,7 @@ pub(crate) struct StreamCompletionAccumulator {
     tool_calls: Vec<ToolCall>,
     tool_call_accumulators: HashMap<String, ToolCallAccumulator>,
     final_usage: Option<TokenUsage>,
+    completed: bool,
     timeline: Option<TimelineState>,
     text_item_id: Option<String>,
     thinking_item_id: Option<String>,
@@ -68,6 +67,7 @@ impl StreamCompletionAccumulator {
             tool_calls: Vec::new(),
             tool_call_accumulators: HashMap::new(),
             final_usage: None,
+            completed: false,
             timeline: timeline.map(TimelineState::new),
             text_item_id: None,
             thinking_item_id: None,
@@ -124,6 +124,7 @@ impl StreamCompletionAccumulator {
                         .entry(key.clone())
                         .or_insert_with(|| ToolCallAccumulator {
                             id: initial_id,
+                            has_stable_id: !item_id.is_empty(),
                             call_id: initial_call_id,
                             name: String::new(),
                             payload: ToolCallPayloadAccumulator::FunctionArguments(String::new()),
@@ -162,6 +163,18 @@ impl StreamCompletionAccumulator {
                                 .and_then(ToolCallAccumulator::function_arguments)
                         })
                         .unwrap_or_default();
+                    if name.is_empty() {
+                        return Err(PureError::LlmError(
+                            "provider emitted tool call without name".to_string(),
+                        ));
+                    }
+                    if id.as_deref().is_none_or(str::is_empty)
+                        && call_id.as_deref().is_none_or(str::is_empty)
+                    {
+                        return Err(PureError::LlmError(
+                            "provider emitted tool call without stable id".to_string(),
+                        ));
+                    }
                     let id = id.unwrap_or_default();
                     let call = ToolCall::function(
                         id,
@@ -195,6 +208,18 @@ impl StreamCompletionAccumulator {
                     let input = value_string(&value, "input")
                         .or_else(|| acc.as_ref().and_then(ToolCallAccumulator::custom_input))
                         .unwrap_or_default();
+                    if name.is_empty() {
+                        return Err(PureError::LlmError(
+                            "provider emitted tool call without name".to_string(),
+                        ));
+                    }
+                    if id.as_deref().is_none_or(str::is_empty)
+                        && call_id.as_deref().is_none_or(str::is_empty)
+                    {
+                        return Err(PureError::LlmError(
+                            "provider emitted tool call without stable id".to_string(),
+                        ));
+                    }
                     let id = id.unwrap_or_default();
                     let call = ToolCall::custom(id, name, input, call_id);
                     self.complete_tool_item(&call, event_tx);
@@ -205,6 +230,7 @@ impl StreamCompletionAccumulator {
 
             StreamEvent::Completed { usage, response_id } => {
                 self.final_usage = usage;
+                self.completed = true;
                 let _ = response_id;
             }
 
@@ -243,7 +269,12 @@ impl StreamCompletionAccumulator {
         fallback_key.and_then(|key| self.tool_call_accumulators.remove(&key))
     }
 
-    pub(crate) fn finish(mut self, event_tx: &AgentEventSender) -> CompletionResponse {
+    pub(crate) fn finish(mut self, event_tx: &AgentEventSender) -> Result<CompletionResponse> {
+        if !self.completed {
+            return Err(PureError::LlmError(
+                "provider stream ended before completion".to_string(),
+            ));
+        }
         if let Some(parser) = self.plan_parser.as_mut() {
             let segments = parser.finish().segments;
             self.apply_proposed_plan_segments(None, segments, event_tx);
@@ -252,7 +283,7 @@ impl StreamCompletionAccumulator {
         let remaining_accumulators = std::mem::take(&mut self.tool_call_accumulators);
         for (_, acc) in remaining_accumulators {
             if !self.tool_calls.iter().any(|tc| tc.id == acc.id) {
-                let call = acc.into_tool_call();
+                let call = acc.into_tool_call()?;
                 self.complete_tool_item_without_broadcast(&call);
                 self.tool_calls.push(call);
             }
@@ -297,7 +328,7 @@ impl StreamCompletionAccumulator {
             .map(TimelineState::next_sequence)
             .unwrap_or(0);
 
-        CompletionResponse {
+        Ok(CompletionResponse {
             content,
             raw_content,
             reasoning_content,
@@ -307,7 +338,7 @@ impl StreamCompletionAccumulator {
             usage: self.final_usage.unwrap_or_default(),
             finish_reason,
             model: String::new(),
-        }
+        })
     }
 
     fn record_text_delta(
@@ -432,6 +463,7 @@ impl StreamCompletionAccumulator {
 
 struct ToolCallAccumulator {
     id: String,
+    has_stable_id: bool,
     call_id: Option<String>,
     name: String,
     payload: ToolCallPayloadAccumulator,
@@ -447,6 +479,7 @@ impl ToolCallAccumulator {
     ) {
         if !item_id.is_empty() && (self.id.is_empty() || self.id == key) {
             self.id = item_id.to_string();
+            self.has_stable_id = true;
         }
         if self.call_id.is_none()
             && let Some(call_id) = call_id.filter(|call_id| !call_id.is_empty())
@@ -506,16 +539,26 @@ impl ToolCallAccumulator {
         }
     }
 
-    fn into_tool_call(self) -> ToolCall {
+    fn into_tool_call(self) -> Result<ToolCall> {
+        if self.name.is_empty() {
+            return Err(PureError::LlmError(
+                "provider emitted tool call without name".to_string(),
+            ));
+        }
+        if !self.has_stable_id && self.call_id.as_ref().is_none_or(String::is_empty) {
+            return Err(PureError::LlmError(
+                "provider emitted tool call without stable id".to_string(),
+            ));
+        }
         match self.payload {
-            ToolCallPayloadAccumulator::FunctionArguments(arguments) => ToolCall::function(
+            ToolCallPayloadAccumulator::FunctionArguments(arguments) => Ok(ToolCall::function(
                 self.id,
                 self.name,
                 serde_json::from_str(&arguments).unwrap_or(serde_json::Value::String(arguments)),
                 self.call_id,
-            ),
+            )),
             ToolCallPayloadAccumulator::CustomInput(input) => {
-                ToolCall::custom(self.id, self.name, input, self.call_id)
+                Ok(ToolCall::custom(self.id, self.name, input, self.call_id))
             }
         }
     }

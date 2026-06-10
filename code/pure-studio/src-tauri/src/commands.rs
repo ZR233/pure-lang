@@ -542,7 +542,11 @@ fn first_turn_id(events: &[TraceEvent]) -> Option<String> {
         TraceEventKind::TimelineItemDelta { event } if event.kind == TimelineItemKind::Turn => {
             Some(event.turn_id.clone())
         }
-        _ => None,
+        TraceEventKind::TimelineItemStarted { .. }
+        | TraceEventKind::TimelineItemCompleted { .. }
+        | TraceEventKind::TimelineItemFailed { .. }
+        | TraceEventKind::TimelineItemDelta { .. }
+        | TraceEventKind::PlanLifecycleChanged { .. } => None,
     })
 }
 

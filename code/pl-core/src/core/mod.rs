@@ -6,7 +6,7 @@ use pl_model::{
     SharedModelProvider, create_provider, create_provider_with_models,
 };
 #[cfg(test)]
-use pl_protocol::{AgentEvent, ErrorSeverity, TimelineItemStatus, TraceEvent};
+use pl_protocol::{AgentEvent, ErrorSeverity, PureError, TimelineItemStatus, TraceEvent};
 use pl_protocol::{AgentEventSender, Message, MessageContent, MessageRole, Result};
 
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
@@ -360,6 +360,7 @@ use turn_result::{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tool::{Tool, ToolInput, ToolOutput};
     use crate::turn::{PermissionMode, ToolApprovalPolicy};
     use crate::{ConfigStore, ModelRole};
     use pl_model::ToolCall;
@@ -395,6 +396,54 @@ mod tests {
                 | TraceEventKind::PlanLifecycleChanged { .. } => false,
             })
             .count()
+    }
+
+    #[derive(Debug)]
+    struct SleepingTool;
+
+    impl Tool for SleepingTool {
+        fn name(&self) -> &str {
+            "sleeping_tool"
+        }
+
+        fn description(&self) -> &str {
+            "Sleeps until the turn is cancelled"
+        }
+
+        fn input_schema(&self) -> serde_json::Value {
+            serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            })
+        }
+
+        fn supports_parallel_tool_calls(&self) -> bool {
+            true
+        }
+
+        fn execute<'a>(
+            &'a self,
+            _input: ToolInput,
+            _context: ToolContext,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+                    + Send
+                    + 'a,
+            >,
+        > {
+            Box::pin(async {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                Ok(ToolOutput {
+                    description: "done".to_string(),
+                    truncated: crate::tool::OutputTruncation::empty(),
+                    output_file: PathBuf::new(),
+                    exit_code: None,
+                    timed_out: false,
+                })
+            })
+        }
     }
 
     #[test]
@@ -769,7 +818,8 @@ mod tests {
                 parent_session: std::sync::Arc::new(CoreSession::new()),
             },
         )
-        .await;
+        .await
+        .unwrap();
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].status, TimelineItemStatus::Denied);
@@ -829,7 +879,8 @@ mod tests {
                 parent_session: std::sync::Arc::new(CoreSession::new()),
             },
         )
-        .await;
+        .await
+        .unwrap();
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].status, TimelineItemStatus::Completed);
@@ -883,7 +934,8 @@ mod tests {
                 parent_session: std::sync::Arc::new(CoreSession::new()),
             },
         )
-        .await;
+        .await
+        .unwrap();
         let events = recorder.drain();
 
         assert_eq!(records.len(), 1);
@@ -924,7 +976,8 @@ mod tests {
                 parent_session: std::sync::Arc::new(CoreSession::new()),
             },
         )
-        .await;
+        .await
+        .unwrap();
         let events = recorder.drain();
 
         assert_eq!(records.len(), 1);
@@ -939,9 +992,9 @@ mod tests {
             .iter()
             .find_map(|event| match &event.kind {
                 TraceEventKind::TimelineItemCompleted { item } => Some(item),
+                TraceEventKind::TimelineItemFailed { item, .. } => Some(item),
                 TraceEventKind::TimelineItemStarted { .. }
                 | TraceEventKind::TimelineItemDelta { .. }
-                | TraceEventKind::TimelineItemFailed { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. } => None,
             })
             .expect("terminal tool item");
@@ -984,7 +1037,8 @@ mod tests {
                 parent_session: std::sync::Arc::new(CoreSession::new()),
             },
         )
-        .await;
+        .await
+        .unwrap();
         let events = recorder.drain();
 
         assert_eq!(records.len(), 1);
@@ -995,6 +1049,64 @@ mod tests {
                 .contains("Tool execution denied: tool execution denied by policy")
         );
         assert_eq!(terminal_tool_event_count(&events), 1);
+    }
+
+    #[tokio::test]
+    async fn cancelling_running_tool_records_interrupted_terminal_event() {
+        let mut core = PureCore::default_provider().unwrap();
+        core.register_tool(SleepingTool);
+        let tool_call = ToolCall::function(
+            "provider-item-1",
+            "sleeping_tool",
+            serde_json::json!({}),
+            Some("call-1".to_string()),
+        );
+        let token = tokio_util::sync::CancellationToken::new();
+        let options = TurnOptions::default().with_cancellation(token.clone());
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+        let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+        let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+        let cancel_task = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            token.cancel();
+        });
+
+        let records = execute_tool_calls(
+            &[tool_call],
+            &mut budget,
+            &mut recorder,
+            ToolExecutionContext {
+                core: &core,
+                options: &options,
+                mode: crate::turn::CompileMode::Auto,
+                session_id: "turn-1",
+                workspace_root: &std::env::temp_dir(),
+                workspace_instructions: None,
+                active_subagent: None,
+                agent_control: crate::AgentControl::default(),
+                parent_session: std::sync::Arc::new(CoreSession::new()),
+            },
+        )
+        .await
+        .unwrap();
+        cancel_task.await.unwrap();
+        let events = recorder.drain();
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].status, TimelineItemStatus::Interrupted);
+        assert_eq!(records[0].result, "Tool execution interrupted");
+        assert_eq!(terminal_tool_event_count(&events), 1);
+        let terminal = events
+            .iter()
+            .find_map(|event| match &event.kind {
+                TraceEventKind::TimelineItemFailed { item, .. } => Some(item),
+                TraceEventKind::TimelineItemStarted { .. }
+                | TraceEventKind::TimelineItemDelta { .. }
+                | TraceEventKind::TimelineItemCompleted { .. }
+                | TraceEventKind::PlanLifecycleChanged { .. } => None,
+            })
+            .expect("interrupted tool item");
+        assert_eq!(terminal.status, TimelineItemStatus::Interrupted);
     }
 
     #[tokio::test]

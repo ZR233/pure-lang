@@ -53,6 +53,27 @@ export type AgentDto = {
   updatedAt: number;
 };
 
+export type AgentStateChangedEvent = {
+  id: string;
+  path: string;
+  parentPath?: string | null;
+  role: string;
+  task: string;
+  status: AgentStatus;
+  summary?: string | null;
+  depth: number;
+  error?: string | null;
+  reason?: string | null;
+  budgetLimitKind?: string | null;
+  budgetUsage?: {
+    modelSteps: number;
+    toolCalls: number;
+    waitCalls: number;
+    elapsedMs: number;
+  } | null;
+  updatedAt: number;
+};
+
 export type AgentTimelineEvent = {
   eventId: string;
   sessionId: string;
@@ -505,7 +526,7 @@ export type AgentEvent =
       };
     }
   | { userInputAnswered: { requestId: string } }
-  | { agentStateChanged: AgentDto }
+  | { agentStateChanged: AgentStateChangedEvent }
   | { agentRuntimeUpdated: { delta: AgentRuntimeDelta } }
   | { turnInterrupted: { reason: string } }
   | {

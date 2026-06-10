@@ -213,7 +213,28 @@ pub fn agent_snapshot_record(
             runtime_usage: None,
             updated_at: *updated_at,
         }),
-        _ => None,
+        AgentEvent::TimelineItemStarted { .. }
+        | AgentEvent::TimelineItemDelta { .. }
+        | AgentEvent::TimelineItemCompleted { .. }
+        | AgentEvent::TimelineItemFailed { .. }
+        | AgentEvent::ToolApprovalRequested { .. }
+        | AgentEvent::ToolApprovalGranted { .. }
+        | AgentEvent::ToolApprovalDenied { .. }
+        | AgentEvent::UserInputRequested { .. }
+        | AgentEvent::UserInputAnswered { .. }
+        | AgentEvent::AgentRuntimeUpdated { .. }
+        | AgentEvent::CollabAgentSpawnBegin { .. }
+        | AgentEvent::CollabAgentSpawnEnd { .. }
+        | AgentEvent::CollabAgentInteractionBegin { .. }
+        | AgentEvent::CollabAgentInteractionEnd { .. }
+        | AgentEvent::CollabWaitingBegin { .. }
+        | AgentEvent::CollabWaitingEnd { .. }
+        | AgentEvent::CollabCloseBegin { .. }
+        | AgentEvent::CollabCloseEnd { .. }
+        | AgentEvent::TurnInterrupted { .. }
+        | AgentEvent::TurnBudgetLimited { .. }
+        | AgentEvent::Done
+        | AgentEvent::Error { .. } => None,
     }
 }
 
