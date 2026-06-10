@@ -904,9 +904,8 @@ export function SessionStatusBar({
   const skills = runtime?.activeSkills ?? [];
   const mcpServers = runtime?.activeMcpServers ?? [];
   const capabilityCount = skills.length;
-  const activeAgentCount = agents.filter(
-    (a) => a.status === "running" || a.status === "waiting" || a.status === "queued",
-  ).length;
+  const visibleAgents = agents.filter((agent) => activeAgentStatuses.has(agent.status));
+  const activeAgentCount = visibleAgents.length;
   const statusReadouts = {
     usage,
     contextLabel,
@@ -915,7 +914,7 @@ export function SessionStatusBar({
     skills,
     mcpServers,
     capabilityCount,
-    agents,
+    agents: visibleAgents,
     activeAgentCount,
   };
 
