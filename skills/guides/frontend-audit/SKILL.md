@@ -86,6 +86,57 @@ Before any component library migration:
 - **Tauri event pattern**: Backend pushes via `listen("session_runtime")`, `listen("timeline_delta")`, `listen("tool_approval")`, `listen("user_input_request")`
 - **Tauri invoke commands**: `run_prompt`, `stop_prompt`, `implement_plan`, `approve_tool`, `answer_user_input`, etc.
 
+## Constrained-Width List Item Layout Patterns
+
+Pure Studio 侧边栏 (`w-60`, 240px) 中的会话/项目列表项容易因内容过多而布局异常。排查此类问题时检查以下典型原因：
+
+### 1. 原始数值类型直接渲染
+
+**典型症状**：标题显示不全，列表项右侧出现长串数字。
+
+**原因**：`SessionRecord.updatedAt` 是 Unix 秒 `number`（如 `1779688800`），直接 `{session.updatedAt}` 渲染为 10 位数字，抢占标题空间。
+
+**修复方案**：
+- 如果时间信息在列表项中非必需（侧边栏已有排序），直接移除渲染
+- 如果必须显示，格式化为短文本（如 `"3分钟前"`, `"2h"`），不要显示原始时间戳
+
+### 2. Hover 动作按钮的布局稳定性
+
+**典型症状**：鼠标移入/移出列表项时，标题宽度跳动，文字重新换行。
+
+**原因**：hover 时显示的删除/操作按钮使用 `opacity-0/100` 切换可见性。虽然 `opacity: 0` 元素仍占布局空间，但在 Tailwind 某些组合（如同时使用 `transition-opacity` + `group-hover` + 动态 class 拼接）下可能触发浏览器重排。
+
+**修复方案**：改用 `invisible`/`visible`（CSS `visibility`），确保按钮始终占据固定尺寸空间：
+
+```tsx
+// ❌ 可能引起跳动
+className={`opacity-0 group-hover:opacity-100 ${selected ? "opacity-100" : "opacity-0"}`}
+
+// ✅ 固定占位不跳动
+className={`invisible group-hover:visible ${selected ? "" : "invisible"}`}
+```
+
+按钮保持固定尺寸（如 `w-7 h-7 shrink-0`），不要用 `w-auto` 或未显式设置宽度的方式。
+
+### 3. `truncate` 生效条件
+
+**典型症状**：明明加了 `truncate` class，标题仍然溢出换行。
+
+**原因**：Tailwind 的 `truncate` 等价于 `overflow: hidden; text-overflow: ellipsis; white-space: nowrap;`。在 flex 容器中，还需要 `min-w-0`（覆盖 flex 默认的 `min-width: auto`）才能正确截断。
+
+**确保截断的模式**：
+```tsx
+// flex 容器
+<div className="flex items-center">
+  {/* 标题：flex-1 占满剩余空间，min-w-0 允许收缩截断 */}
+  <span className="flex-1 min-w-0 truncate">{title}</span>
+  {/* 其他固定宽度的 flex-shrink-0 元素 */}
+  <Button className="w-7 h-7 shrink-0" />
+</div>
+```
+
+如果同一行有多个 `flex-shrink-0` 子元素（如时间标签+图标+按钮），确保它们都被标记为 `flex-shrink-0`，且标题是唯一 `flex-1` 的项。
+
 ## Error Recovery
 
 - If `apply_patch` fails during migration: read the current file with `read_file`, then submit a smaller patch
