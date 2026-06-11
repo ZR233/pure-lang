@@ -362,7 +362,7 @@ impl ResponsesReasoning {
             effort: reasoning.effort.clone(),
             summary: reasoning
                 .summary
-                .map(ResponsesReasoningSummary::from_summary),
+                .and_then(ResponsesReasoningSummary::from_summary),
         }
     }
 }
@@ -371,16 +371,13 @@ impl ResponsesReasoning {
 #[serde(rename_all = "lowercase")]
 enum ResponsesReasoningSummary {
     Auto,
-    Enabled,
-    Disabled,
 }
 
 impl ResponsesReasoningSummary {
-    fn from_summary(summary: ReasoningSummary) -> Self {
+    fn from_summary(summary: ReasoningSummary) -> Option<Self> {
         match summary {
-            ReasoningSummary::Auto => Self::Auto,
-            ReasoningSummary::Enabled => Self::Enabled,
-            ReasoningSummary::Disabled => Self::Disabled,
+            ReasoningSummary::Auto | ReasoningSummary::Enabled => Some(Self::Auto),
+            ReasoningSummary::Disabled => None,
         }
     }
 }
@@ -927,6 +924,26 @@ mod tests {
             body["reasoning"]["effort"],
             serde_json::json!("custom-effort")
         );
+    }
+
+    #[test]
+    fn responses_body_maps_enabled_reasoning_summary_to_auto() {
+        let mut request = request_with_effort("medium");
+        request.reasoning.as_mut().unwrap().summary = Some(ReasoningSummary::Enabled);
+
+        let body = OpenAiProtocol::responses().build_request_body(&request);
+
+        assert_eq!(body["reasoning"]["summary"], serde_json::json!("auto"));
+    }
+
+    #[test]
+    fn responses_body_omits_disabled_reasoning_summary() {
+        let mut request = request_with_effort("medium");
+        request.reasoning.as_mut().unwrap().summary = Some(ReasoningSummary::Disabled);
+
+        let body = OpenAiProtocol::responses().build_request_body(&request);
+
+        assert!(body["reasoning"].get("summary").is_none());
     }
 
     #[test]
