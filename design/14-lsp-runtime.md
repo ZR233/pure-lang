@@ -8,7 +8,7 @@ v1 只内置 `rust-analyzer`：
 
 - 项目工作区存在 `Cargo.toml` 时启用 Rust LSP 探测。
 - 使用 `rust-analyzer` 命令和 stdio transport。
-- 不自动安装缺失命令；缺失时记录不可用状态并给 UI/工具返回可读提示。
+- 默认不安装任意语言服务器；缺失时记录不可用状态并给 UI/工具返回可读提示。`rust-analyzer` 作为内置 Rust LSP 例外：当 PATH 上存在 rustup，且探测明确返回 rustup 的 `Unknown binary 'rust-analyzer'` 缺失组件错误时，runtime 自动运行 `rustup component add rust-analyzer`，成功后重试探测；rustup 不可用、安装失败或其他启动失败仍只记录不可用状态。
 - Windows 下探测和启动语言服务器必须作为后台子进程静默运行，不显示额外终端窗口。
 
 ## 架构边界
