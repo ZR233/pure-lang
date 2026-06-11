@@ -50,6 +50,7 @@ import type {
   ProviderRecord,
   ProviderSettingsSaveSnapshot,
   RoleRecord,
+  SessionSelectionPayload,
   TimelineItem,
   ToolApprovalRequest,
   ToolApprovalResolved,
@@ -258,6 +259,13 @@ export function useStudioApp() {
           status: payload.message,
         });
       }),
+      listen<SessionSelectionPayload>("studio-session-mode-updated", ({ payload }) => {
+        dispatch({
+          type: "sessionModeUpdated",
+          payload,
+          status: t("status.modeUpdated"),
+        });
+      }),
     ];
 
     return () => {
@@ -434,6 +442,7 @@ export function useStudioApp() {
       return;
     }
     const prompt = `PLEASE IMPLEMENT THIS PLAN:\n\n${content}`;
+    dispatch({ type: "optimisticSessionMode", sessionId, mode: "auto" });
     dispatch({
       type: "promptSubmitted",
       status: t("status.running"),

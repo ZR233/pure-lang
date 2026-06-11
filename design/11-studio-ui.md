@@ -114,11 +114,11 @@ Provider 设置页的供应商卡片以可扫读的运维状态为主：头部�
 
 聊天输入区提供 `Auto / Plan` 模式切换，当前值来自选中 session 的 `mode` 并通过后端命令持久化。新会话默认 `auto`。Plan 卡片展示计划正文和轻量状态徽标，不提供“实现计划”按钮。最新计划生成完成后，底部普通输入框自动替换为计划确认 composer。确认 composer 必须展示计划摘要，并提供三个动作：
 
-- `实现计划`：调用 `implement_plan(sessionId, planId, content)`，后端记录 `accepted`、切回 `auto`、记录 `implementing`、提交 `PLEASE IMPLEMENT THIS PLAN:\n\n{plan}`，完成后记录 `implemented` 或 `implementationFailed`。
+- `实现计划`：调用 `implement_plan(sessionId, planId, content)`，后端记录 `accepted`、切回 `auto`、记录 `implementing`、提交 `PLEASE IMPLEMENT THIS PLAN:\n\n{plan}`，完成后记录 `implemented` 或 `implementationFailed`。前端点击后必须立即把当前 session 的本地 `mode` 乐观更新为 `auto`，后端也必须在实施 turn 开始前返回或广播包含最新 session 列表的 mode 更新；因此即使实施 turn 长时间运行、失败或被中断，状态栏也不能继续显示 Plan。
 - `继续讨论`：先调用 `dismiss_plan(sessionId, planId, "discuss")` 关闭当前计划确认，再把用户输入作为普通 prompt 发送，用于继续追问或修改计划，不自动切换到 `auto`。
 - `取消`：调用 `dismiss_plan(sessionId, planId, "dismissed")`，关闭确认 composer，恢复普通输入框，不提交任何内容。
 
-计划确认是前端 reducer 的独立 `planAction` 状态，而不是计划卡片组件的局部状态。当前运行轮完成后，后端协议级 plan item 或 assistant 文本中的 `<proposed_plan>...</proposed_plan>` 都可以创建 `planAction`；历史 timeline 加载不得自动弹出旧计划。实时流式 delta 阶段不得提前弹出确认 composer。`planStates` 按 `planId` 记录后端生命周期 latest state；已有 `accepted`、`implementing`、`implemented`、`implementationFailed` 或 `dismissed` 状态的计划不得重新弹出确认 composer。切换项目或会话时清空本地 `planAction`，但后端返回的 `planStates` 继续作为历史事实展示。
+计划确认是前端 reducer 的独立 `planAction` 状态，而不是计划卡片组件的局部状态。当前运行轮完成后，后端协议级 plan item 或 assistant 文本中的 `<proposed_plan>...</proposed_plan>` 都可以创建 `planAction`；确认候选应以当前完成 turn 的 `turnId` 为边界，从已经合并到 reducer 的 timeline 中选择最新未处理计划，避免实时事件、lag 后补加载或 `RunPromptResponse.timelineItems` 不完整时漏弹确认。历史 timeline 加载不得自动弹出旧计划。实时流式 delta 阶段不得提前弹出确认 composer。`planStates` 按 `planId` 记录后端生命周期 latest state；已有 `accepted`、`implementing`、`implemented`、`implementationFailed` 或 `dismissed` 状态的计划不得重新弹出确认 composer。切换项目或会话时清空本地 `planAction`，但后端返回的 `planStates` 继续作为历史事实展示。
 
 运行中如果收到 `request_user_input` 的 pending 请求，聊天底部普通输入框必须被 `AskUserComposer` 替换。该 UI 逐个展示结构化问题，用户可以在问题之间前进和返回；只有最终点击提交时才通过 Tauri command 一次性回答当前 request 并恢复普通 composer。每个问题支持选项和必要的自由输入，选项选择不会立即提交。ask-user 期间用户不能发送新的普通 prompt，但停止按钮仍可中断当前 turn。
 

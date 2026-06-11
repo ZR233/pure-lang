@@ -928,6 +928,69 @@ function laterRunWithoutPlanDoesNotReopenHistoricalPlan() {
   assertEqual(completed.planAction, null);
 }
 
+function runPromptLoadedCanOpenLivePlanByCurrentRunSequence() {
+  const submitted = studioReducer(selectedState(), {
+    type: "promptSubmitted",
+    status: "running",
+    startedAt: 100,
+    prompt: "make a plan",
+  });
+  const livePlan = studioReducer(submitted, {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemCompleted: { sequence: 12, item: planItem("turn-2-plan", "turn-2", 12, "1. Inspect") } },
+    statusText: "running",
+  });
+  const completed = studioReducer(livePlan, {
+    type: "runPromptLoaded",
+    payload: responseWithSequence([], 13),
+    status: "done",
+  });
+
+  assertDeepEqual(completed.planAction, {
+    planId: "turn-2-plan",
+    content: "1. Inspect",
+    mode: "choice",
+  });
+}
+
+function optimisticSessionModeSwitchesSelectedSessionOnly() {
+  const planState = studioReducer(selectedState(), {
+    type: "sessionModeUpdated",
+    status: "mode updated",
+    payload: {
+      sessionId: "session-1",
+      sessions: [
+        {
+          id: "session-1",
+          projectId: "project-1",
+          title: "Session",
+          mode: "plan",
+          updatedAt: 3,
+        },
+      ],
+      agentEvents: [],
+      agents: [],
+      sessionRuntime: runtime,
+    },
+  });
+  const state = studioReducer(planState, {
+    type: "optimisticSessionMode",
+    sessionId: "session-1",
+    mode: "auto",
+  });
+
+  assertEqual(state.sessions[0]?.mode, "auto");
+
+  const ignored = studioReducer(state, {
+    type: "optimisticSessionMode",
+    sessionId: "session-2",
+    mode: "plan",
+  });
+
+  assertEqual(ignored.sessions[0]?.mode, "auto");
+}
+
 function promptSubmittedCreatesOptimisticTimelineFeedback() {
   const state = studioReducer(selectedState(), {
     type: "promptSubmitted",
@@ -1952,6 +2015,8 @@ dismissPlanActionPreventsSamePlanFromReopening();
 setPlanActionModeUpdatesPendingPlanAction();
 historicalTimelineLoadDoesNotCreatePlanAction();
 laterRunWithoutPlanDoesNotReopenHistoricalPlan();
+runPromptLoadedCanOpenLivePlanByCurrentRunSequence();
+optimisticSessionModeSwitchesSelectedSessionOnly();
 promptSubmittedCreatesOptimisticTimelineFeedback();
 modelTimelineEventClearsWaitingFeedback();
 userTimelineEventKeepsWaitingFeedback();

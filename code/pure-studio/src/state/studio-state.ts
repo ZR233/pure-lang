@@ -4,6 +4,7 @@ import type {
   AgentTimelineEvent,
   BootstrapPayload,
   ConfigPayload,
+  CompileMode,
   InstructionsRecord,
   LspHealthUpdatedPayload,
   LspServerRecord,
@@ -64,6 +65,12 @@ type PlanActionCandidate = {
   content: string;
 };
 
+type PlanActionScope = {
+  itemIds?: Set<string>;
+  turnIds?: Set<string>;
+  minSequence?: number | null;
+};
+
 export type StudioState = TimelineStateSlice & {
   projects: ProjectRecord[];
   sessions: SessionRecord[];
@@ -92,6 +99,7 @@ export type StudioState = TimelineStateSlice & {
   planAction: PlanActionState | null;
   planStates: Map<string, PlanState>;
   dismissedPlanId: string | null;
+  currentRunTimelineBaseSequence: number | null;
   settingsOpen: boolean;
   activeSettingsTab: SettingsTab;
   providerSearch: string;
@@ -120,6 +128,7 @@ export type StudioAction =
   | { type: "setBusy"; value: boolean }
   | { type: "setPrompt"; prompt: string }
   | { type: "setManualPath"; path: string }
+  | { type: "optimisticSessionMode"; sessionId: string; mode: CompileMode }
   | { type: "setProviderSearch"; search: string }
   | { type: "setSelectedProviderId"; providerId: string | null }
   | { type: "setRoles"; roles: RoleRecord[] }
@@ -193,6 +202,7 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   planAction: null,
   planStates: new Map(),
   dismissedPlanId: null,
+  currentRunTimelineBaseSequence: null,
   settingsOpen: false,
   activeSettingsTab: "providers",
   providerSearch: "",
@@ -222,6 +232,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         planAction: null,
         planStates: new Map(),
         dismissedPlanId: null,
+        currentRunTimelineBaseSequence: null,
       };
     case "bootstrapFailed":
       return { ...state, status: action.status };
@@ -251,6 +262,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         planAction: null,
         planStates: new Map(),
         dismissedPlanId: null,
+        currentRunTimelineBaseSequence: null,
         status: action.status,
         turnPhase: "idle",
         turnStartedAt: null,
@@ -270,6 +282,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         planAction: null,
         planStates: new Map(),
         dismissedPlanId: null,
+        currentRunTimelineBaseSequence: null,
         status: action.status,
         turnPhase: "idle",
         turnStartedAt: null,
@@ -292,10 +305,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       if (action.payload.sessionId !== state.selectedSessionId) {
         return state;
       }
-      const currentTimelineItemIds = new Set(
-        (action.payload.timelineItems ?? [])
-          .map((item) => item.itemId),
-      );
+      const scope = currentRunPlanScope(state, action.payload.timelineItems ?? []);
       return setPendingPlanAction({
         ...clearHandledPlanAction({
           ...mergeRunPromptTimeline(
@@ -316,7 +326,8 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         status: action.status,
         isBusy: false,
         pendingUserInput: null,
-      }, currentTimelineItemIds, "currentRunPlan");
+        currentRunTimelineBaseSequence: null,
+      }, scope, "currentRunPlan");
     }
     case "runPromptFailed":
       if (action.sessionId && action.sessionId !== state.selectedSessionId) {
@@ -330,6 +341,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         isBusy: false,
         pendingUserInput: null,
         planAction: null,
+        currentRunTimelineBaseSequence: null,
       };
     case "setBusy":
       return { ...state, isBusy: action.value };
@@ -337,6 +349,16 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, prompt: action.prompt };
     case "setManualPath":
       return { ...state, manualPath: action.path };
+    case "optimisticSessionMode":
+      if (action.sessionId !== state.selectedSessionId) {
+        return state;
+      }
+      return {
+        ...state,
+        sessions: state.sessions.map((session) =>
+          session.id === action.sessionId ? { ...session, mode: action.mode } : session,
+        ),
+      };
     case "setProviderSearch":
       return { ...state, providerSearch: action.search };
     case "setSelectedProviderId":
@@ -465,8 +487,10 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         isBusy: false,
         pendingUserInput: null,
         planAction: null,
+        currentRunTimelineBaseSequence: null,
       };
     case "promptSubmitted":
+      const currentRunTimelineBaseSequence = state.timelineNextSequence;
       return {
         ...appendOptimisticPrompt(removeOptimisticTimelineItems(state), action.prompt, action.startedAt),
         prompt: "",
@@ -474,6 +498,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         status: action.status,
         turnPhase: "running",
         turnStartedAt: action.startedAt,
+        currentRunTimelineBaseSequence,
         pendingUserInput: null,
         planAction: null,
       };
@@ -505,10 +530,10 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
 
 function setPendingPlanAction(
   state: StudioState,
-  eligiblePlanIds: Set<string>,
+  scope: PlanActionScope,
   eligibility: PlanActionEligibility,
 ): StudioState {
-  const plan = latestEligiblePlanCandidate(state, eligiblePlanIds, eligibility);
+  const plan = latestEligiblePlanCandidate(state, scope, eligibility);
   if (!plan) {
     return state;
   }
@@ -534,6 +559,20 @@ function setPendingPlanAction(
     return state;
   }
   return { ...state, planAction: nextPlanAction };
+}
+
+function currentRunPlanScope(state: StudioState, currentRunItems: TimelineItem[]): PlanActionScope {
+  const itemIds = new Set(currentRunItems.map((item) => item.itemId));
+  const turnIds = new Set(
+    currentRunItems
+      .map((item) => item.turnId)
+      .filter((turnId): turnId is string => Boolean(turnId)),
+  );
+  return {
+    itemIds,
+    turnIds,
+    minSequence: state.currentRunTimelineBaseSequence,
+  };
 }
 
 function mergePlanStates(
@@ -562,16 +601,25 @@ function clearHandledPlanAction<T extends StudioState>(state: T): T {
 
 function latestEligiblePlanCandidate(
   state: StudioState,
-  eligiblePlanIds: Set<string>,
+  scope: PlanActionScope,
   eligibility: PlanActionEligibility,
 ): PlanActionCandidate | null {
+  const eligiblePlanIds = scope.itemIds ?? new Set<string>();
+  const eligibleTurnIds = scope.turnIds ?? new Set<string>();
   for (let index = state.timelineOrder.length - 1; index >= 0; index--) {
     const itemId = state.timelineOrder[index];
-    if (!itemId || !eligiblePlanIds.has(itemId)) {
+    if (!itemId) {
       continue;
     }
     const item = state.timelineItems.get(itemId);
     if (!item?.content.trim()) {
+      continue;
+    }
+    const itemIsEligible =
+      eligiblePlanIds.has(itemId) ||
+      eligibleTurnIds.has(item.turnId) ||
+      scope.minSequence != null && item.sequence >= scope.minSequence;
+    if (!itemIsEligible) {
       continue;
     }
     if (item.kind === "plan" && (eligibility === "currentRunPlan" || item.status === "completed")) {
@@ -795,7 +843,7 @@ function reduceAgentEvent(
       ...nextState,
       status: statusText,
       turnPhase: phaseForTimelineItem(completed, state.turnPhase),
-    }, new Set([completed.itemId]), "completedPlan");
+    }, { itemIds: new Set([completed.itemId]) }, "completedPlan");
   }
   if ("timelineItemFailed" in event) {
     return {
