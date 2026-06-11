@@ -1,61 +1,27 @@
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use pl_protocol::PureError;
 
+use crate::tool::ToolPathPolicy;
+
 #[derive(Debug, Clone)]
 pub struct WorkspacePaths {
-    root_canonical: PathBuf,
-    allow_workspace_escape: bool,
+    policy: ToolPathPolicy,
 }
 
 impl WorkspacePaths {
     pub async fn new(root: PathBuf, allow_workspace_escape: bool) -> Result<Self, PureError> {
-        let root_canonical = tokio::fs::canonicalize(&root).await.map_err(|error| {
-            PureError::ToolExecutionFailed {
-                tool: "file".to_string(),
-                error: format!("failed to resolve workspace root: {error}"),
-            }
-        })?;
         Ok(Self {
-            root_canonical,
-            allow_workspace_escape,
+            policy: ToolPathPolicy::new(root, allow_workspace_escape, "file")?,
         })
     }
 
     pub async fn resolve_existing(&self, path: &str) -> Result<PathBuf, PureError> {
-        if !self.allow_workspace_escape {
-            self.reject_parent_components(path)?;
-        }
-        let candidate = self.candidate(path);
-        let canonical = tokio::fs::canonicalize(&candidate)
-            .await
-            .map_err(|error| self.error(format!("failed to resolve path '{path}': {error}")))?;
-        if !self.allow_workspace_escape {
-            self.ensure_inside_workspace(&canonical, path)?;
-        }
-        Ok(canonical)
+        self.policy.resolve_existing(path)
     }
 
     pub async fn resolve_for_write(&self, path: &str) -> Result<PathBuf, PureError> {
-        if !self.allow_workspace_escape {
-            self.reject_parent_components(path)?;
-        }
-        let candidate = self.candidate(path);
-        let mut ancestor = candidate
-            .parent()
-            .ok_or_else(|| self.error(format!("path '{path}' has no parent directory")))?
-            .to_path_buf();
-        while !tokio::fs::try_exists(&ancestor).await.map_err(|error| {
-            self.error(format!(
-                "failed to inspect parent for path '{path}': {error}"
-            ))
-        })? {
-            if !ancestor.pop() {
-                return Err(self.error(format!("path '{path}' has no existing parent")));
-            }
-        }
-        self.resolve_existing_path(&ancestor, path).await?;
-        Ok(candidate)
+        self.policy.resolve_for_write(path)
     }
 
     pub async fn reject_symlink_write(&self, path: &Path) -> Result<(), PureError> {
@@ -73,61 +39,7 @@ impl WorkspacePaths {
     }
 
     pub fn display_relative(&self, path: &Path) -> String {
-        path.strip_prefix(&self.root_canonical)
-            .unwrap_or(path)
-            .display()
-            .to_string()
-    }
-
-    fn candidate(&self, path: &str) -> PathBuf {
-        let path = PathBuf::from(path);
-        if path.is_absolute() {
-            path
-        } else {
-            self.root_canonical.join(path)
-        }
-    }
-
-    async fn resolve_existing_path(
-        &self,
-        path: &Path,
-        original: &str,
-    ) -> Result<PathBuf, PureError> {
-        let canonical = tokio::fs::canonicalize(path).await.map_err(|error| {
-            self.error(format!(
-                "failed to resolve parent for path '{original}': {error}"
-            ))
-        })?;
-        if !self.allow_workspace_escape {
-            self.ensure_inside_workspace(&canonical, original)?;
-        }
-        Ok(canonical)
-    }
-
-    fn reject_parent_components(&self, path: &str) -> Result<(), PureError> {
-        let path = Path::new(path);
-        if path.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::Prefix(_) | Component::RootDir
-            ) && !path.is_absolute()
-        }) {
-            return Err(self.error(format!("path '{}' escapes the workspace", path.display())));
-        }
-        if path
-            .components()
-            .any(|component| matches!(component, Component::ParentDir))
-        {
-            return Err(self.error(format!("path '{}' escapes the workspace", path.display())));
-        }
-        Ok(())
-    }
-
-    fn ensure_inside_workspace(&self, path: &Path, original: &str) -> Result<(), PureError> {
-        if path.starts_with(&self.root_canonical) {
-            return Ok(());
-        }
-        Err(self.error(format!("path '{original}' is outside the workspace")))
+        self.policy.display_relative(path)
     }
 
     fn error(&self, error: String) -> PureError {
@@ -222,5 +134,23 @@ mod tests {
         );
         let _ = tokio::fs::remove_dir_all(workspace).await;
         let _ = tokio::fs::remove_dir_all(outside).await;
+    }
+
+    #[tokio::test]
+    async fn relative_write_target_is_resolved_from_workspace() {
+        let workspace = unique_temp_dir("relative-write");
+        tokio::fs::create_dir_all(&workspace).await.unwrap();
+        let paths = WorkspacePaths::new(workspace.clone(), false).await.unwrap();
+
+        let resolved = paths.resolve_for_write("src/new.rs").await.unwrap();
+
+        assert_eq!(
+            resolved,
+            tokio::fs::canonicalize(&workspace)
+                .await
+                .unwrap()
+                .join("src/new.rs")
+        );
+        let _ = tokio::fs::remove_dir_all(workspace).await;
     }
 }

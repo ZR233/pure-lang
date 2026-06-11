@@ -1,9 +1,11 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use pl_lsp::{LanguageToolInfo, LspQuery, LspRuntimeRegistry};
 use pl_protocol::PureError;
 
-use super::{BoxFuture, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput};
+use super::{
+    BoxFuture, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput, ToolPathPolicy,
+};
 
 #[derive(Debug, Clone)]
 pub struct LspQueryTool {
@@ -125,50 +127,19 @@ fn resolve_query_path(
     let Some(path) = query.file_path.take() else {
         return Ok(query);
     };
-    let candidate = if path.is_absolute() {
-        path
-    } else {
-        context.workspace_root.join(path)
-    };
+    let policy = ToolPathPolicy::new(
+        context.workspace_root.clone(),
+        context.allows_workspace_escape(),
+        tool_name,
+    )?;
+    let original = path.display().to_string();
     let resolved = if query.operation.requires_file() {
-        std::fs::canonicalize(&candidate).map_err(|error| PureError::ToolExecutionFailed {
-            tool: tool_name.to_string(),
-            error: format!(
-                "failed to resolve filePath '{}': {error}",
-                candidate.display()
-            ),
-        })?
+        policy.resolve_existing_path(&path, &original)?
     } else {
-        canonicalize_existing_or_parent(&candidate)
+        policy.resolve_existing_or_parent_path(&path, &original)?
     };
-    let workspace_root = std::fs::canonicalize(&context.workspace_root)
-        .unwrap_or_else(|_| context.workspace_root.clone());
-    if !resolved.starts_with(&workspace_root) && !context.allows_workspace_escape() {
-        return Err(PureError::ToolExecutionFailed {
-            tool: tool_name.to_string(),
-            error: format!("filePath must be inside workspace: {}", candidate.display()),
-        });
-    }
     query.file_path = Some(resolved);
     Ok(query)
-}
-
-fn canonicalize_existing_or_parent(candidate: &Path) -> PathBuf {
-    let mut current = candidate.to_path_buf();
-    loop {
-        if current.exists()
-            && let Ok(canonical) = std::fs::canonicalize(&current)
-        {
-            return canonical;
-        }
-        let Some(parent) = current.parent() else {
-            return candidate.to_path_buf();
-        };
-        if parent == current {
-            return candidate.to_path_buf();
-        }
-        current = parent.to_path_buf();
-    }
 }
 
 /// 按语言生成的 LSP 查询工具。
@@ -452,5 +423,37 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn resolve_query_path_uses_workspace_root_for_relative_file_path() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("pure-lsp-relative-{unique}"));
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        let file = src.join("lib.rs");
+        std::fs::write(&file, "fn main() {}\n").unwrap();
+
+        let query = LspQuery {
+            operation: LspQueryOperation::Hover,
+            file_path: Some(PathBuf::from("src/lib.rs")),
+            line: Some(1),
+            character: Some(1),
+            query: None,
+            max_results: None,
+            language_id: None,
+        };
+        let context = test_context(root.clone(), crate::tool::WorkspaceAccess::WorkspaceOnly);
+
+        let resolved = resolve_query_path(query, &context, "lsp_query").unwrap();
+
+        assert_eq!(
+            resolved.file_path,
+            Some(std::fs::canonicalize(&file).unwrap())
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }

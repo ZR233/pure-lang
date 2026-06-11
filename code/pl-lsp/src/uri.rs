@@ -1,13 +1,12 @@
 use std::path::{Path, PathBuf};
 
 pub(crate) fn path_to_file_uri(path: &Path) -> String {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(path)
-    };
+    debug_assert!(
+        path.is_absolute(),
+        "LSP file URI paths must already be absolute: {}",
+        path.display()
+    );
+    let absolute = path.to_path_buf();
     if cfg!(windows) {
         let path = normalize_windows_verbatim_path(&absolute.to_string_lossy()).replace('\\', "/");
         if let Some(unc_path) = path.strip_prefix("//") {
@@ -111,7 +110,7 @@ mod tests {
 
     #[test]
     fn encodes_spaces_in_file_uri() {
-        let uri = path_to_file_uri(Path::new("/tmp/pure lang/lib.rs"));
+        let uri = path_to_file_uri(&std::env::temp_dir().join("pure lang/lib.rs"));
 
         assert!(uri.contains("pure%20lang"));
     }
