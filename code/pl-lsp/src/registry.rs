@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,6 +23,7 @@ use crate::uri::path_to_file_uri;
 const RUST_ANALYZER_ID: &str = "rust-analyzer";
 const RUST_ANALYZER_COMMAND: &str = "rust-analyzer";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+const RUSTUP_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Clone)]
 pub struct LspRuntimeRegistry {
@@ -205,7 +206,7 @@ impl LspRuntimeRegistry {
                 None,
             )
         } else {
-            match probe_command(command).await {
+            match probe_rust_analyzer(command).await {
                 Ok(version) => LspRuntimeServerState::new(
                     definition,
                     LspAvailabilityKind::Available,
@@ -215,7 +216,13 @@ impl LspRuntimeRegistry {
                 Err(ProbeError::MissingCommand) => LspRuntimeServerState::new(
                     definition,
                     LspAvailabilityKind::MissingCommand,
-                    Some("rust-analyzer command not found".to_string()),
+                    Some(missing_rust_analyzer_message()),
+                    Some(unix_seconds()),
+                ),
+                Err(ProbeError::MissingRustupComponent) => LspRuntimeServerState::new(
+                    definition,
+                    LspAvailabilityKind::MissingCommand,
+                    Some(missing_rust_analyzer_message()),
                     Some(unix_seconds()),
                 ),
                 Err(ProbeError::Failed(message)) => LspRuntimeServerState::new(
@@ -542,13 +549,111 @@ fn rust_analyzer_definition(workspace_root: &Path, command: &str) -> LspServerDe
 #[derive(Debug, Clone)]
 enum ProbeError {
     MissingCommand,
+    MissingRustupComponent,
     Failed(String),
 }
 
+async fn probe_rust_analyzer(command: &str) -> Result<String, ProbeError> {
+    if !is_builtin_rust_analyzer_command(command) {
+        return probe_command(command).await;
+    }
+    match probe_command(command).await {
+        Ok(version) => Ok(version),
+        Err(ProbeError::MissingCommand) => {
+            if !rustup_is_available().await {
+                return Err(ProbeError::MissingCommand);
+            }
+            install_rust_analyzer_component().await?;
+            probe_command(command).await
+        }
+        Err(ProbeError::MissingRustupComponent) => {
+            if !rustup_is_available().await {
+                return Err(ProbeError::Failed(
+                    "rust-analyzer component is missing, but rustup was not found on PATH"
+                        .to_string(),
+                ));
+            }
+            install_rust_analyzer_component().await?;
+            probe_command(command).await
+        }
+        Err(error) => Err(error),
+    }
+}
+
 async fn probe_command(command: &str) -> Result<String, ProbeError> {
+    let output = run_command_capture(
+        command,
+        &["--version"],
+        PROBE_TIMEOUT,
+        "rust-analyzer --version timed out",
+    )
+    .await?;
+    if output.status.success() {
+        let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Ok(if version.is_empty() {
+            "rust-analyzer is available".to_string()
+        } else {
+            version
+        });
+    }
+    let message = command_failure_message(output.status, &output.stdout, &output.stderr);
+    if is_rustup_missing_component_error(&message) {
+        return Err(ProbeError::MissingRustupComponent);
+    }
+    Err(ProbeError::Failed(message))
+}
+
+async fn rustup_is_available() -> bool {
+    run_command_capture(
+        "rustup",
+        &["--version"],
+        PROBE_TIMEOUT,
+        "rustup --version timed out",
+    )
+    .await
+    .map(|output| output.status.success())
+    .unwrap_or(false)
+}
+
+async fn install_rust_analyzer_component() -> Result<(), ProbeError> {
+    let output = run_command_capture(
+        "rustup",
+        &["component", "add", "rust-analyzer"],
+        RUSTUP_TIMEOUT,
+        "rustup component add rust-analyzer timed out",
+    )
+    .await
+    .map_err(|error| match error {
+        ProbeError::MissingCommand => ProbeError::Failed(
+            "rust-analyzer component is missing, but rustup was not found on PATH".to_string(),
+        ),
+        other => other,
+    })?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(ProbeError::Failed(format!(
+            "failed to install rust-analyzer component with `rustup component add rust-analyzer`: {}",
+            command_failure_message(output.status, &output.stdout, &output.stderr)
+        )))
+    }
+}
+
+struct CapturedCommandOutput {
+    status: ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+async fn run_command_capture(
+    command: &str,
+    args: &[&str],
+    timeout: Duration,
+    timeout_message: &str,
+) -> Result<CapturedCommandOutput, ProbeError> {
     let mut command_process = Command::new(command);
     command_process
-        .arg("--version")
+        .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -565,35 +670,55 @@ async fn probe_command(command: &str) -> Result<String, ProbeError> {
     let stderr = child.stderr.take();
     let stdout_task = tokio::spawn(read_child_output(stdout));
     let stderr_task = tokio::spawn(read_child_output(stderr));
-    let status = match tokio::time::timeout(PROBE_TIMEOUT, child.wait()).await {
+    let status = match tokio::time::timeout(timeout, child.wait()).await {
         Ok(Ok(status)) => status,
         Ok(Err(error)) => return Err(ProbeError::Failed(error.to_string())),
         Err(_) => {
             terminate_process_tree(pid).await;
             let _ = child.start_kill();
             let _ = child.wait().await;
-            return Err(ProbeError::Failed(
-                "rust-analyzer --version timed out".to_string(),
-            ));
+            return Err(ProbeError::Failed(timeout_message.to_string()));
         }
     };
     let stdout = stdout_task.await.unwrap_or_default();
     let stderr = stderr_task.await.unwrap_or_default();
-    if status.success() {
-        let version = String::from_utf8_lossy(&stdout).trim().to_string();
-        Ok(if version.is_empty() {
-            "rust-analyzer is available".to_string()
-        } else {
-            version
-        })
+    Ok(CapturedCommandOutput {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+fn command_failure_message(status: ExitStatus, stdout: &[u8], stderr: &[u8]) -> String {
+    let stderr = String::from_utf8_lossy(stderr).trim().to_string();
+    if !stderr.is_empty() {
+        stderr
     } else {
-        let stderr = String::from_utf8_lossy(&stderr).trim().to_string();
-        Err(ProbeError::Failed(if stderr.is_empty() {
-            format!("rust-analyzer exited with {status}")
+        let stdout = String::from_utf8_lossy(stdout).trim().to_string();
+        if stdout.is_empty() {
+            format!("command exited with {status}")
         } else {
-            stderr
-        }))
+            stdout
+        }
     }
+}
+
+fn missing_rust_analyzer_message() -> String {
+    "rust-analyzer command not found; if you use rustup, ensure it is on PATH so Pure Studio can run `rustup component add rust-analyzer` automatically".to_string()
+}
+
+fn is_builtin_rust_analyzer_command(command: &str) -> bool {
+    let path = Path::new(command);
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(|stem| stem.eq_ignore_ascii_case(RUST_ANALYZER_COMMAND))
+        .unwrap_or_else(|| command.eq_ignore_ascii_case(RUST_ANALYZER_COMMAND))
+}
+
+fn is_rustup_missing_component_error(stderr: &str) -> bool {
+    let stderr = stderr.to_ascii_lowercase();
+    stderr.contains("unknown binary")
+        && (stderr.contains("rust-analyzer") || stderr.contains("rust_analyzer"))
 }
 
 async fn read_child_output(stream: Option<impl tokio::io::AsyncRead + Unpin>) -> Vec<u8> {
@@ -661,6 +786,59 @@ mod tests {
             LspAvailabilityKind::MissingCommand
         );
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn rustup_unknown_binary_is_missing_component() {
+        assert!(is_rustup_missing_component_error(
+            "error: Unknown binary 'rust-analyzer.exe' in official toolchain 'stable-x86_64-pc-windows-msvc'."
+        ));
+        assert!(!is_rustup_missing_component_error(
+            "error: Unknown binary 'cargo-miri.exe' in official toolchain"
+        ));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires rust-analyzer component and starts the language server"]
+    async fn live_rust_analyzer_document_symbol_query() {
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .to_path_buf();
+        let registry = LspRuntimeRegistry::new();
+
+        registry.reconcile_workspace(&workspace_root).await;
+        let snapshots = registry.snapshots().await;
+
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(
+            snapshots[0].availability_kind,
+            LspAvailabilityKind::Available,
+            "{}",
+            snapshots[0].availability_message.as_deref().unwrap_or("")
+        );
+
+        let result = registry
+            .query(LspQuery {
+                operation: LspQueryOperation::DocumentSymbol,
+                file_path: Some(workspace_root.join("code/pl-lsp/src/registry.rs")),
+                line: None,
+                character: None,
+                query: None,
+                max_results: None,
+            })
+            .await
+            .expect("document symbol query");
+
+        assert!(result.success);
+        assert_eq!(result.server_id.as_deref(), Some(RUST_ANALYZER_ID));
+        assert!(
+            result.result.contains("LspRuntimeRegistry"),
+            "{}",
+            result.result
+        );
+        registry.shutdown().await;
     }
 
     #[test]
