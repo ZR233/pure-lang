@@ -536,6 +536,31 @@ mod tests {
     }
 
     #[test]
+    fn built_in_base_requires_doc_first_and_final_review() {
+        let dir = temp_dir("built-in-base-doc-flow");
+        fs::create_dir_all(&dir).unwrap();
+
+        let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
+            config: None,
+            model: &ModelInfo::fallback("test-model"),
+            mode: CompileMode::Auto,
+            workspace_root: &dir,
+            current_dir: &dir,
+            workspace_instructions: None,
+            subagent_constraint: None,
+        })
+        .unwrap();
+
+        assert_eq!(
+            snapshot.base.source.kind,
+            InstructionSourceKind::BuiltInBase
+        );
+        assert!(snapshot.base.content.contains("再开始写代码"));
+        assert!(snapshot.base.content.contains("整体回看计划"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn force_dispatch_is_added_to_clone_only() {
         let snapshot = InstructionSnapshot {
             base: InstructionBlock {
