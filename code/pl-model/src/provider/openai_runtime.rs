@@ -244,17 +244,53 @@ impl Config for PureOpenAiConfig {
 
 fn openai_error_to_pure(error: OpenAIError) -> PureError {
     match error {
-        OpenAIError::ApiError(api_error) => PureError::LlmError(format!("API error {api_error}")),
-        OpenAIError::Reqwest(error) => PureError::HttpError(error.to_string()),
-        OpenAIError::JSONDeserialize(error, content) => {
-            PureError::HttpError(format!("{error}: {content}"))
+        OpenAIError::ApiError(api_error) => {
+            PureError::LlmError(redact_secret_like_values(&format!("API error {api_error}")))
         }
-        OpenAIError::StreamError(error) => PureError::HttpError(error.to_string()),
+        OpenAIError::Reqwest(error) => {
+            PureError::HttpError(redact_secret_like_values(&error.to_string()))
+        }
+        OpenAIError::JSONDeserialize(error, content) => {
+            PureError::HttpError(redact_secret_like_values(&format!("{error}: {content}")))
+        }
+        OpenAIError::StreamError(error) => {
+            PureError::HttpError(redact_secret_like_values(&error.to_string()))
+        }
         OpenAIError::InvalidArgument(message) => PureError::ConfigError(message),
         OpenAIError::FileSaveError(message) | OpenAIError::FileReadError(message) => {
             PureError::Io(std::io::Error::other(message))
         }
     }
+}
+
+fn redact_secret_like_values(input: &str) -> String {
+    input
+        .split_whitespace()
+        .map(redact_secret_like_token)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn redact_secret_like_token(token: &str) -> String {
+    let trimmed = token.trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '.' | ',' | ';' | ':' | ')' | '(' | '"' | '\'' | '[' | ']' | '{' | '}'
+        )
+    });
+    if !looks_like_secret_token(trimmed) {
+        return token.to_string();
+    }
+    token.replacen(trimmed, "[REDACTED_API_KEY]", 1)
+}
+
+fn looks_like_secret_token(token: &str) -> bool {
+    let lower = token.to_ascii_lowercase();
+    (lower.starts_with("sk-") || lower.starts_with("sk_"))
+        && token.len() >= 12
+        && token
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '*' | '.'))
 }
 
 #[cfg(test)]
@@ -829,5 +865,15 @@ mod tests {
             provider.model_info("deepseek-v4-flash").display_name,
             "Custom DeepSeek"
         );
+    }
+
+    #[test]
+    fn redacts_openai_api_keys_from_error_text() {
+        let input = "Incorrect API key provided: sk-abc123*******************************************************xyz.";
+
+        let redacted = redact_secret_like_values(input);
+
+        assert_eq!(redacted, "Incorrect API key provided: [REDACTED_API_KEY].");
+        assert!(!redacted.contains("sk-abc123"));
     }
 }
