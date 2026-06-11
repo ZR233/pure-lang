@@ -15,6 +15,7 @@ pub struct ProviderModelEdit {
     pub slug: String,
     pub display_name: String,
     pub reasoning_efforts: Vec<String>,
+    pub base_instructions: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +76,7 @@ impl ProviderModelEdit {
         let mut model = ModelConfig::from_model_info(ModelInfo::fallback(&slug));
         model.display_name = non_empty_trimmed(&self.display_name, "model display_name")?;
         model.reasoning_efforts = normalized_efforts(&self.reasoning_efforts);
+        model.base_instructions = self.base_instructions.trim().to_string();
         Ok(model)
     }
 }
@@ -154,6 +156,7 @@ impl ProviderSettingsEdit {
         let mut config = PureConfig {
             schema_version: CONFIG_SCHEMA_VERSION,
             runtime: current.runtime.clone(),
+            instructions: current.instructions.clone(),
             skills: current.skills.clone(),
             mcp_servers: current.mcp_servers.clone(),
             builtin_mcp_servers: current.builtin_mcp_servers.clone(),
@@ -448,6 +451,7 @@ mod tests {
             slug: "gpt-custom".to_string(),
             display_name: "GPT Custom".to_string(),
             reasoning_efforts: vec!["high".to_string()],
+            base_instructions: String::new(),
         });
         let current = PureConfig::default_config();
 
@@ -475,6 +479,33 @@ mod tests {
                 "gpt-custom"
             ]
         );
+    }
+
+    #[test]
+    fn provider_edit_preserves_custom_model_base_instructions() {
+        let mut edit = openai_edit();
+        edit.custom_models.push(ProviderModelEdit {
+            slug: "gpt-custom".to_string(),
+            display_name: "GPT Custom".to_string(),
+            reasoning_efforts: vec!["high".to_string()],
+            base_instructions: "custom base".to_string(),
+        });
+        let current = PureConfig::default_config();
+
+        let config = ProviderSettingsEdit {
+            default_provider: Some("openai".to_string()),
+            providers: vec![edit],
+            roles: Vec::new(),
+        }
+        .to_config(&current)
+        .unwrap();
+
+        let custom = config.providers["openai"]
+            .models
+            .iter()
+            .find(|model| model.slug == "gpt-custom")
+            .unwrap();
+        assert_eq!(custom.base_instructions, "custom base");
     }
 
     #[test]
@@ -622,6 +653,7 @@ mod tests {
             slug: "gpt-5.5".to_string(),
             display_name: "Duplicate".to_string(),
             reasoning_efforts: vec!["high".to_string()],
+            base_instructions: String::new(),
         });
         let current = PureConfig::default_config();
 

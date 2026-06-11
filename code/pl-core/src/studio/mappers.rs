@@ -20,12 +20,17 @@ pub fn project_record(model: entities::project::Model) -> ProjectRecord {
 }
 
 pub fn session_record(model: entities::session::Model) -> SessionRecord {
+    let instruction_snapshot = model
+        .instruction_snapshot_json
+        .as_deref()
+        .and_then(|json| serde_json::from_str(json).ok());
     SessionRecord {
         id: model.id,
         project_id: model.project_id,
         title: model.title,
         mode: model.mode,
         updated_at: model.updated_at,
+        instruction_snapshot,
     }
 }
 

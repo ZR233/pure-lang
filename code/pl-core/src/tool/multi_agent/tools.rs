@@ -210,6 +210,7 @@ impl Tool for SpawnAgentTool {
                     .workspace_instructions
                     .clone()
                     .or_else(|| self.workspace_instructions.clone()),
+                instruction_snapshot: context.instruction_snapshot.clone(),
                 workspace_root: context.workspace_root.clone(),
                 options,
                 agent_control: context.agent_control.clone(),
@@ -446,6 +447,7 @@ impl Tool for FollowupTaskTool {
                         .workspace_instructions
                         .clone()
                         .or_else(|| self.workspace_instructions.clone()),
+                    instruction_snapshot: context.instruction_snapshot.clone(),
                     workspace_root: context.workspace_root.clone(),
                     options: child_agent_options(&context.options),
                     agent_control: context.agent_control.clone(),

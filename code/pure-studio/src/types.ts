@@ -181,6 +181,7 @@ export type ModelRecord = {
   inputModalities?: string[];
   truncationMode?: string;
   truncationLimit?: number;
+  baseInstructions?: string;
 };
 
 export type SkillScope = "project" | "user" | "system" | "external";
@@ -412,11 +413,20 @@ export type ProviderTemplateRecord = {
 export type ConfigPayload = {
   toml: string;
   permissionMode: PermissionMode;
+  instructions: InstructionsRecord;
   providers: ProviderRecord[];
   roles: RoleRecord[];
   templates: ProviderTemplateRecord[];
   mcpServers: McpServerRecord[];
   configExists: boolean;
+};
+
+export type InstructionsRecord = {
+  baseOverride: string;
+  developer: string;
+  user: string;
+  projectDocMaxBytes: number;
+  projectDocFallbackFilenames: string[];
 };
 
 export type ProviderUsagesPayload = {
@@ -428,6 +438,8 @@ export type ProviderSettingsInput = {
   providers: ProviderInput[];
   roles: RoleInput[];
 };
+
+export type InstructionsInput = InstructionsRecord;
 
 export type ProviderSettingsSaveSnapshot = {
   selectedProviderId?: string | null;

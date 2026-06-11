@@ -20,6 +20,7 @@ import {
   runPrompt,
   saveMcpSettings,
   saveConfig,
+  saveInstructionsSettings,
   savePermissionMode,
   saveProviderSettings,
   selectProject,
@@ -43,6 +44,7 @@ import type {
   LspHealthUpdatedPayload,
   McpHealthUpdatedPayload,
   McpServerInput,
+  InstructionsInput,
   PermissionMode,
   PromptFailed,
   ProviderRecord,
@@ -65,11 +67,12 @@ function providerInput(provider: ProviderRecord) {
     bearerToken: provider.bearerToken,
     defaultModel: provider.defaultModel,
     providerKind: provider.providerKind,
-    customModels: provider.customModels.map((model) => ({
-      slug: model.slug,
-      displayName: model.displayName,
-      reasoningEfforts: [...model.reasoningEfforts],
-    })),
+      customModels: provider.customModels.map((model) => ({
+        slug: model.slug,
+        displayName: model.displayName,
+        reasoningEfforts: [...model.reasoningEfforts],
+        baseInstructions: model.baseInstructions ?? "",
+      })),
   };
 }
 
@@ -672,6 +675,23 @@ export function useStudioApp() {
     }
   }
 
+  async function onSaveInstructionsSettings(input: InstructionsInput): Promise<boolean> {
+    try {
+      dispatch({
+        type: "configLoaded",
+        payload: await saveInstructionsSettings(input),
+        status: t("status.instructionsSettingsSaved"),
+      });
+      return true;
+    } catch (error) {
+      dispatch({
+        type: "bootstrapFailed",
+        status: t("status.instructionsSettingsInvalid", { error: errorText(error) }),
+      });
+      return false;
+    }
+  }
+
   async function refreshProviderUsages() {
     dispatch({ type: "providerUsagesLoading" });
     try {
@@ -738,6 +758,7 @@ export function useStudioApp() {
     openSettings,
     onSaveConfig,
     onSaveProviderSettings,
+    onSaveInstructionsSettings,
     onSavePermissionMode,
     onSaveMcpSettings,
     refreshProviderUsages,

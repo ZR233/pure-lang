@@ -62,6 +62,13 @@ function renderMarkdown(content: string): string {
 const config: ConfigPayload = {
   toml: "",
   permissionMode: "request-approval",
+  instructions: {
+    baseOverride: "",
+    developer: "",
+    user: "",
+    projectDocMaxBytes: 65536,
+    projectDocFallbackFilenames: [],
+  },
   providers: [],
   roles: [],
   templates: [],

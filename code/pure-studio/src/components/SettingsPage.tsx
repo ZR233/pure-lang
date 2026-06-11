@@ -7,6 +7,8 @@ import type {
   ProviderSettingsSaveSnapshot,
   ProviderTemplateRecord,
   ProviderUsageRecord,
+  InstructionsInput,
+  InstructionsRecord,
   McpServerInput,
   McpServerRecord,
   PermissionMode,
@@ -16,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { McpSettings } from "./McpSettings";
 import { ProviderSettings } from "./ProviderSettings";
+import { InstructionsSettings } from "./InstructionsSettings";
 import { RoleSettings } from "./RoleSettings";
 import { SecuritySettings } from "./SecuritySettings";
 import { SkillsSettings } from "./SkillsSettings";
@@ -29,6 +32,7 @@ type SettingsPageProps = {
   providerUsagesLoading: boolean;
   providerUsageError: string | null;
   roles: RoleRecord[];
+  instructions: InstructionsRecord;
   selectedProjectId: string | null;
   selectedProviderId: string | null;
   providerSearch: string;
@@ -39,12 +43,13 @@ type SettingsPageProps = {
   onClose: () => void;
   onSetActiveTab: (tab: SettingsTab) => void;
   onSaveProviderSettings: (snapshot?: ProviderSettingsSaveSnapshot) => Promise<boolean>;
+  onSaveInstructionsSettings: (input: InstructionsInput) => Promise<boolean>;
   onSavePermissionMode: (mode: PermissionMode) => Promise<void>;
   onSaveMcpSettings: (servers: McpServerInput[]) => Promise<boolean>;
   onRefreshProviderUsages: () => void;
 };
 
-const SETTINGS_TABS: SettingsTab[] = ["providers", "skills", "roles", "mcp", "security", "general"];
+const SETTINGS_TABS: SettingsTab[] = ["providers", "instructions", "skills", "roles", "mcp", "security", "general"];
 
 export function SettingsPage({
   activeSettingsTab,
@@ -55,6 +60,7 @@ export function SettingsPage({
   providerUsagesLoading,
   providerUsageError,
   roles,
+  instructions,
   selectedProjectId,
   selectedProviderId,
   providerSearch,
@@ -63,6 +69,7 @@ export function SettingsPage({
   onClose,
   onSetActiveTab,
   onSaveProviderSettings,
+  onSaveInstructionsSettings,
   setRoles,
   setProviderSearch,
   onSavePermissionMode,
@@ -124,6 +131,11 @@ export function SettingsPage({
           />
         ) : activeSettingsTab === "skills" ? (
           <SkillsSettings selectedProjectId={selectedProjectId} />
+        ) : activeSettingsTab === "instructions" ? (
+          <InstructionsSettings
+            instructions={instructions}
+            onSaveInstructionsSettings={onSaveInstructionsSettings}
+          />
         ) : activeSettingsTab === "mcp" ? (
           <McpSettings servers={mcpServers} onSaveMcpSettings={onSaveMcpSettings} />
         ) : activeSettingsTab === "security" ? (

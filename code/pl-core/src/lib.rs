@@ -7,6 +7,7 @@ mod core;
 pub mod domain;
 mod first_run;
 pub mod infrastructure;
+mod instruction;
 pub mod interfaces;
 mod mcp;
 mod permission;
@@ -27,10 +28,11 @@ pub use agent::{
     AgentStatus, AgentStatusUpdate, AgentWaitOutcome, MessageDeliveryMode,
 };
 pub use config::{
-    BuiltinMcpServerState, ConfigPaths, ConfigStore, EffectiveMcpServerConfig, McpServerConfig,
-    McpServerMutationPolicy, McpServerSourceKind, McpServerStatusKind, McpServerTransport,
-    ModelCapabilityConfig, ModelConfig, ModelRole, ProviderConfig, PureConfig, ReasoningEffort,
-    ResolvedRoleConfig, RoleConfig, RoleConfigs, RuntimeConfig, SkillsConfig, SystemSkillsConfig,
+    BuiltinMcpServerState, ConfigPaths, ConfigStore, DEFAULT_PROJECT_DOC_MAX_BYTES,
+    EffectiveMcpServerConfig, InstructionsConfig, McpServerConfig, McpServerMutationPolicy,
+    McpServerSourceKind, McpServerStatusKind, McpServerTransport, ModelCapabilityConfig,
+    ModelConfig, ModelRole, ProviderConfig, PureConfig, ReasoningEffort, ResolvedRoleConfig,
+    RoleConfig, RoleConfigs, RuntimeConfig, SkillsConfig, SystemSkillsConfig,
     TruncationPolicyConfig, active_mcp_server_names, builtin_mcp_server_ids, effective_mcp_servers,
     normalize_builtin_mcp_server_states, zhipu_coding_plan_token,
 };
@@ -40,6 +42,10 @@ pub use config_editor::{
 pub use core::PureCore;
 pub use first_run::{
     FirstRunConfigDraft, FirstRunModelDraft, FirstRunProviderDraft, ProviderTemplateKind,
+};
+pub use instruction::{
+    InstructionAssembler, InstructionAssemblyRequest, InstructionBlock, InstructionBundle,
+    InstructionSnapshot, InstructionSource, InstructionSourceKind,
 };
 pub use interfaces::{
     ConfigRepository, EventSink, RuntimeEventEmitter, SessionRepository, TurnSnapshotRepository,

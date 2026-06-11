@@ -604,6 +604,13 @@ base_url = "https://api.openai.com/v1"
 default_model = "gpt-5.5"
 `,
     permissionMode: "request-approval",
+    instructions: {
+      baseOverride: "",
+      developer: "",
+      user: "",
+      projectDocMaxBytes: 65536,
+      projectDocFallbackFilenames: [],
+    },
     providers: [
       {
         ...makeProvider({

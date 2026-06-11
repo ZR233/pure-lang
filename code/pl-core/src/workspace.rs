@@ -1,6 +1,33 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use pl_protocol::{PureError, Result};
+
+use crate::config::DEFAULT_PROJECT_DOC_MAX_BYTES;
+
+const DEFAULT_PROJECT_DOC_FILENAMES: &[&str] = &["AGENTS.override.md", "AGENTS.md", "Agents.md"];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceInstructionDocument {
+    pub path: PathBuf,
+    pub content: String,
+    pub bytes: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceInstructions {
+    pub documents: Vec<WorkspaceInstructionDocument>,
+}
+
+impl WorkspaceInstructions {
+    pub fn content(&self) -> String {
+        self.documents
+            .iter()
+            .map(|document| document.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+}
 
 /// 解析 Studio 运行时的有效工作区根目录。
 ///
@@ -32,29 +59,119 @@ pub fn resolve_workspace_root(project_dir: &Path) -> Result<PathBuf> {
 
 /// 读取工作区项目记忆。
 ///
-/// 优先读取工作区根目录下的 `AGENTS.md`，兼容读取旧命名 `Agents.md`。
-/// 当目录存在但文件缺失时返回空字符串；当目录不存在或读取失败时返回配置错误。
+/// 兼容旧调用：只读取工作区根目录这一层，并使用默认候选文件和字节上限。
 pub fn load_workspace_instructions(workspace_dir: &Path) -> Result<String> {
+    Ok(load_workspace_instruction_documents(
+        workspace_dir,
+        workspace_dir,
+        DEFAULT_PROJECT_DOC_MAX_BYTES,
+        &[],
+    )?
+    .content())
+}
+
+/// 按 Codex 风格从 workspace root 到 current dir 链式读取项目记忆。
+///
+/// 每一层目录按候选文件优先级选择一个文档：`AGENTS.override.md`、
+/// `AGENTS.md`、`Agents.md`，再尝试配置提供的 fallback 文件名。
+/// 内容按总字节上限截断，并保留实际注入的 source path。
+pub fn load_workspace_instruction_documents(
+    workspace_dir: &Path,
+    current_dir: &Path,
+    max_bytes: usize,
+    fallback_filenames: &[String],
+) -> Result<WorkspaceInstructions> {
     if !workspace_dir.is_dir() {
         return Err(PureError::ConfigError(format!(
             "workspace directory not found: {}",
             workspace_dir.display()
         )));
     }
+    if max_bytes == 0 {
+        return Ok(WorkspaceInstructions {
+            documents: Vec::new(),
+        });
+    }
 
-    for file_name in ["AGENTS.md", "Agents.md"] {
-        let agents_file = workspace_dir.join(file_name);
-        match std::fs::read_to_string(&agents_file) {
-            Ok(content) => return Ok(content),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => {
-                return Err(PureError::ConfigError(format!(
-                    "failed to read workspace instructions: {e}"
-                )));
-            }
+    let workspace_root = std::fs::canonicalize(workspace_dir).map_err(|error| {
+        PureError::ConfigError(format!(
+            "workspace directory not found: {} ({error})",
+            workspace_dir.display()
+        ))
+    })?;
+    let current = std::fs::canonicalize(current_dir).unwrap_or_else(|_| workspace_root.clone());
+    let current = if current.starts_with(&workspace_root) && current.is_dir() {
+        current
+    } else {
+        workspace_root.clone()
+    };
+
+    let candidates = candidate_filenames(fallback_filenames);
+    let mut remaining = max_bytes;
+    let mut documents = Vec::new();
+    for directory in root_to_current_dirs(&workspace_root, &current) {
+        let Some(path) = first_existing_instruction_file(&directory, &candidates) else {
+            continue;
+        };
+        let bytes = std::fs::read(&path).map_err(|error| {
+            PureError::ConfigError(format!(
+                "failed to read workspace instructions {}: {error}",
+                path.display()
+            ))
+        })?;
+        let take = bytes.len().min(remaining);
+        if take == 0 {
+            break;
+        }
+        let content = String::from_utf8_lossy(&bytes[..take]).to_string();
+        documents.push(WorkspaceInstructionDocument {
+            path,
+            content,
+            bytes: take,
+        });
+        remaining -= take;
+        if remaining == 0 {
+            break;
         }
     }
-    Ok(String::new())
+    Ok(WorkspaceInstructions { documents })
+}
+
+fn candidate_filenames(fallback_filenames: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    DEFAULT_PROJECT_DOC_FILENAMES
+        .iter()
+        .map(|name| (*name).to_string())
+        .chain(
+            fallback_filenames
+                .iter()
+                .map(|name| name.trim())
+                .filter(|name| !name.is_empty())
+                .map(ToOwned::to_owned),
+        )
+        .filter(|name| seen.insert(name.clone()))
+        .collect()
+}
+
+fn root_to_current_dirs(root: &Path, current: &Path) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let mut cursor = Some(current);
+    while let Some(directory) = cursor {
+        dirs.push(directory.to_path_buf());
+        if directory == root {
+            break;
+        }
+        cursor = directory.parent();
+    }
+    dirs.reverse();
+    dirs
+}
+
+fn first_existing_instruction_file(directory: &Path, candidates: &[String]) -> Option<PathBuf> {
+    candidates
+        .iter()
+        .map(|file_name| directory.join(file_name))
+        .find(|path| path.is_file())
 }
 
 #[cfg(test)]
@@ -106,15 +223,90 @@ mod tests {
     }
 
     #[test]
-    fn reads_uppercase_agents_md_first() {
+    fn reads_override_before_agents_md() {
         let dir = temp_dir("with-uppercase-agents");
         fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("AGENTS.override.md"), "# Override").unwrap();
         fs::write(dir.join("AGENTS.md"), "# Upper").unwrap();
 
         let result = load_workspace_instructions(&dir).unwrap();
 
-        assert_eq!(result, "# Upper");
+        assert_eq!(result, "# Override");
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn reads_root_to_current_dir_chain() {
+        let dir = temp_dir("chain");
+        let child = dir.join("code").join("crate");
+        fs::create_dir_all(&child).unwrap();
+        fs::write(dir.join("AGENTS.md"), "# Root").unwrap();
+        fs::write(child.join("AGENTS.md"), "# Crate").unwrap();
+
+        let result = load_workspace_instruction_documents(&dir, &child, 4096, &[]).unwrap();
+
+        assert_eq!(result.content(), "# Root\n\n# Crate");
+        assert_eq!(
+            result
+                .documents
+                .iter()
+                .map(|document| document.path.file_name().unwrap().to_string_lossy())
+                .collect::<Vec<_>>(),
+            vec!["AGENTS.md", "AGENTS.md"]
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn uses_fallback_filenames_after_defaults() {
+        let dir = temp_dir("fallback");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("PURE.md"), "# Pure").unwrap();
+
+        let result =
+            load_workspace_instruction_documents(&dir, &dir, 4096, &["PURE.md".to_string()])
+                .unwrap();
+
+        assert_eq!(result.content(), "# Pure");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn truncates_by_total_byte_limit_and_records_sources() {
+        let dir = temp_dir("truncate");
+        let child = dir.join("crate");
+        fs::create_dir_all(&child).unwrap();
+        fs::write(dir.join("AGENTS.md"), "abcdef").unwrap();
+        fs::write(child.join("AGENTS.md"), "ghijkl").unwrap();
+
+        let result = load_workspace_instruction_documents(&dir, &child, 8, &[]).unwrap();
+
+        assert_eq!(result.content(), "abcdef\n\ngh");
+        assert_eq!(
+            result
+                .documents
+                .iter()
+                .map(|document| document.bytes)
+                .collect::<Vec<_>>(),
+            vec![6, 2]
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn falls_back_to_root_when_current_dir_is_outside_workspace() {
+        let dir = temp_dir("outside");
+        let outside = temp_dir("outside-other");
+        fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(dir.join("AGENTS.md"), "# Root").unwrap();
+        fs::write(outside.join("AGENTS.md"), "# Outside").unwrap();
+
+        let result = load_workspace_instruction_documents(&dir, &outside, 4096, &[]).unwrap();
+
+        assert_eq!(result.content(), "# Root");
+        fs::remove_dir_all(dir).unwrap();
+        fs::remove_dir_all(outside).unwrap();
     }
 
     #[test]

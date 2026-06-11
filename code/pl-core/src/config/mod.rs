@@ -1,3 +1,4 @@
+mod instruction;
 mod mcp;
 mod provider;
 mod role;
@@ -12,6 +13,7 @@ use std::collections::BTreeMap;
 use pl_protocol::{PureError, Result};
 use serde::{Deserialize, Serialize};
 
+pub use instruction::{DEFAULT_PROJECT_DOC_MAX_BYTES, InstructionsConfig};
 pub use mcp::{
     BuiltinMcpServerState, EffectiveMcpServerConfig, McpServerConfig, McpServerMutationPolicy,
     McpServerSourceKind, McpServerStatusKind, McpServerTransport, active_mcp_server_names,
@@ -36,6 +38,8 @@ pub struct PureConfig {
     pub schema_version: u32,
     #[serde(default, skip_serializing_if = "RuntimeConfig::is_empty")]
     pub runtime: RuntimeConfig,
+    #[serde(default, skip_serializing_if = "InstructionsConfig::is_default")]
+    pub instructions: InstructionsConfig,
     #[serde(default, skip_serializing_if = "SkillsConfig::is_default")]
     pub skills: SkillsConfig,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -54,6 +58,8 @@ struct PureConfigToml {
     pub schema_version: u32,
     #[serde(default)]
     pub runtime: RuntimeConfig,
+    #[serde(default)]
+    pub instructions: InstructionsConfig,
     #[serde(default)]
     pub skills: SkillsConfig,
     #[serde(default)]
@@ -81,6 +87,7 @@ impl PureConfig {
         Self {
             schema_version: CONFIG_SCHEMA_VERSION,
             runtime: RuntimeConfig::default(),
+            instructions: InstructionsConfig::default(),
             skills: SkillsConfig::default(),
             mcp_servers: BTreeMap::new(),
             builtin_mcp_servers: BTreeMap::new(),
@@ -192,6 +199,7 @@ impl PureConfig {
         let mut config = Self {
             schema_version: raw.schema_version,
             runtime: raw.runtime,
+            instructions: raw.instructions,
             skills: raw.skills,
             mcp_servers: raw.mcp_servers,
             builtin_mcp_servers: raw.builtin_mcp_servers,

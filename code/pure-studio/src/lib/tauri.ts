@@ -4,6 +4,7 @@ import type {
   CompileMode,
   ConfigPayload,
   DiscoveredSkillsPayload,
+  InstructionsInput,
   McpSettingsInput,
   McpServerInput,
   PermissionMode,
@@ -550,7 +551,11 @@ export function saveProviderSettings(input: ProviderSettingsInput) {
     const nextMcpServers = refreshPreviewBuiltinMcpServers(previewConfig.mcpServers, nextProviders);
     previewConfig = {
       ...previewConfig,
-      toml: renderPreviewToml(input, previewConfig.mcpServers.map(mcpServerInput)),
+      toml: renderPreviewToml(
+        input,
+        previewConfig.mcpServers.map(mcpServerInput),
+        previewConfig.instructions,
+      ),
       providers: nextProviders,
       roles: input.roles.map((r) => makeRole(r, previewConfig.roles)),
       mcpServers: nextMcpServers,
@@ -562,6 +567,42 @@ export function saveProviderSettings(input: ProviderSettingsInput) {
     return Promise.resolve(clone(previewConfig));
   }
   return invoke<ConfigPayload>("save_provider_settings", { input });
+}
+
+export function saveInstructionsSettings(input: InstructionsInput) {
+  if (!isTauriRuntime()) {
+    const providerInput = {
+      defaultProviderId: previewConfig.providers[0]?.id ?? null,
+      providers: previewConfig.providers.map((provider) => ({
+        id: provider.id,
+        templateKind: provider.templateKind,
+        name: provider.name,
+        baseUrl: provider.baseUrl,
+        bearerToken: provider.bearerToken,
+        defaultModel: provider.defaultModel,
+        providerKind: provider.providerKind,
+        customModels: provider.customModels,
+      })),
+      roles: previewConfig.roles.map((role) => ({
+        key: role.key,
+        provider: role.provider,
+        model: role.model,
+        effort: role.effort,
+      })),
+    };
+    previewConfig = {
+      ...previewConfig,
+      instructions: input,
+      toml: renderPreviewToml(
+        providerInput,
+        previewConfig.mcpServers.map(mcpServerInput),
+        input,
+      ),
+      configExists: true,
+    };
+    return Promise.resolve(clone(previewConfig));
+  }
+  return invoke<ConfigPayload>("save_instructions_settings", { input });
 }
 
 export function saveMcpSettings(input: McpSettingsInput) {
@@ -604,7 +645,7 @@ export function saveMcpSettings(input: McpSettingsInput) {
     );
     previewConfig = {
       ...previewConfig,
-      toml: renderPreviewToml(providerInput, input.servers),
+      toml: renderPreviewToml(providerInput, input.servers, previewConfig.instructions),
       mcpServers: nextMcpServers,
       configExists: true,
     };

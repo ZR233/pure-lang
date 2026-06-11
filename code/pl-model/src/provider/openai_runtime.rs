@@ -583,7 +583,8 @@ mod tests {
                 | TraceEventKind::TimelineItemDelta { .. }
                 | TraceEventKind::TimelineItemCompleted { .. }
                 | TraceEventKind::TimelineItemFailed { .. }
-                | TraceEventKind::PlanLifecycleChanged { .. } => None,
+                | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. } => None,
             });
         assert_eq!(
             completed_plan.map(|item| item.content.as_str()),
@@ -743,7 +744,8 @@ mod tests {
                 | TraceEventKind::TimelineItemCompleted { item } => item.item_id.as_str(),
                 TraceEventKind::TimelineItemDelta { event } => event.item_id.as_str(),
                 TraceEventKind::TimelineItemFailed { item, .. } => item.item_id.as_str(),
-                TraceEventKind::PlanLifecycleChanged { .. } => "",
+                TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. } => "",
             })
             .filter(|item_id| !item_id.is_empty())
             .collect::<Vec<_>>();

@@ -19,6 +19,7 @@ pub struct SessionRecord {
     pub title: String,
     pub mode: String,
     pub updated_at: i64,
+    pub instruction_snapshot: Option<crate::InstructionSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

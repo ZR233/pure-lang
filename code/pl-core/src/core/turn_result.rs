@@ -248,27 +248,6 @@ pub(super) fn default_workspace_root() -> PathBuf {
     std::env::current_dir().unwrap_or_default()
 }
 
-pub(super) fn format_instructions(
-    base: &str,
-    skills: Option<&str>,
-    workspace: Option<&str>,
-) -> String {
-    let mut instructions = base.to_string();
-    if let Some(content) = skills
-        && !content.trim().is_empty()
-    {
-        instructions.push_str("\n\n");
-        instructions.push_str(content);
-    }
-    if let Some(content) = workspace
-        && !content.trim().is_empty()
-    {
-        instructions.push_str("\n\n# 项目记忆\n");
-        instructions.push_str(content);
-    }
-    instructions
-}
-
 pub(super) fn prompt_requires_subagent_dispatch(prompt: &str) -> bool {
     let lower = prompt.to_ascii_lowercase();
     let lower_without_file_mentions = lower

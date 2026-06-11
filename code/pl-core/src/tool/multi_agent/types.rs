@@ -140,6 +140,7 @@ pub(crate) struct AgentRunConfig {
     pub mcp_runtime: Option<crate::mcp::McpRuntimeRegistry>,
     pub lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     pub workspace_instructions: Option<String>,
+    pub instruction_snapshot: Option<crate::instruction::InstructionSnapshot>,
     pub workspace_root: PathBuf,
     pub options: crate::TurnOptions,
     pub agent_control: crate::AgentControl,

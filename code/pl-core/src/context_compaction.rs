@@ -30,6 +30,7 @@ pub(crate) struct ContextCompactionRequest<'a> {
     pub provider: &'a SharedModelProvider,
     pub model: &'a str,
     pub request_instructions: &'a str,
+    pub request_messages: &'a [Message],
     pub trigger: CompactionTrigger,
     pub event_tx: AgentEventSender,
 }
@@ -45,8 +46,11 @@ pub(crate) async fn maybe_compact_session(
     if !has_compactable_history(session.messages()) {
         return Ok(CompactionOutcome::Skipped);
     }
-    let estimated_tokens =
-        estimate_request_tokens(request.request_instructions, session.messages());
+    let estimated_tokens = estimate_request_tokens(
+        request.request_instructions,
+        request.request_messages,
+        session.messages(),
+    );
     let should_compact = match request.trigger {
         CompactionTrigger::EstimatedTokens => estimated_tokens >= limit,
         CompactionTrigger::ProviderPromptTokens(prompt_tokens) => {
@@ -212,8 +216,17 @@ fn is_compaction_summary(message: &Message) -> bool {
         .is_some_and(|value| value == SUMMARY_METADATA_VALUE)
 }
 
-fn estimate_request_tokens(instructions: &str, messages: &[Message]) -> u64 {
-    estimate_text_tokens(instructions) + messages.iter().map(estimate_message_tokens).sum::<u64>()
+fn estimate_request_tokens(
+    instructions: &str,
+    request_messages: &[Message],
+    session_messages: &[Message],
+) -> u64 {
+    estimate_text_tokens(instructions)
+        + request_messages
+            .iter()
+            .chain(session_messages)
+            .map(estimate_message_tokens)
+            .sum::<u64>()
 }
 
 fn estimate_message_tokens(message: &Message) -> u64 {
