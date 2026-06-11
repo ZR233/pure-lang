@@ -13,6 +13,7 @@ pub mod project {
         pub created_at: i64,
         pub updated_at: i64,
         pub last_opened_at: Option<i64>,
+        pub closed: i32,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -41,6 +41,7 @@ fn main() {
             commands::bootstrap_studio,
             commands::open_project,
             commands::select_project,
+            commands::archive_project,
             commands::create_session,
             commands::delete_session,
             commands::select_session,

@@ -7,6 +7,7 @@ import { normalizeRolesForProviders } from "../components/RoleSettings";
 import {
   approveTool,
   answerUserInput,
+  archiveProject,
   bootstrapStudio,
   createSession,
   deleteSession,
@@ -354,6 +355,21 @@ export function useStudioApp() {
     }
   }
 
+  async function onArchiveProject(projectId: string) {
+    if (state.isBusy) {
+      return;
+    }
+    try {
+      const payload = await archiveProject(projectId, state.selectedProjectId);
+      dispatch({ type: "projectSelectionLoaded", payload, status: t("status.projectArchived") });
+    } catch (error) {
+      dispatch({
+        type: "bootstrapFailed",
+        status: t("status.archiveProjectFailed", { error: errorText(error) }),
+      });
+    }
+  }
+
   async function onNewSession() {
     if (!state.selectedProjectId) {
       return;
@@ -370,6 +386,9 @@ export function useStudioApp() {
   }
 
   async function onSelectSession(sessionId: string) {
+    if (sessionId === state.selectedSessionId) {
+      return;
+    }
     try {
       const payload = await selectSession(sessionId);
       dispatch({ type: "sessionSelectionLoaded", payload, status: t("status.sessionLoaded") });
@@ -753,6 +772,7 @@ export function useStudioApp() {
     addProject,
     chooseFolder,
     onSelectProject,
+    onArchiveProject,
     onNewSession,
     onSelectSession,
     onDeleteSession,

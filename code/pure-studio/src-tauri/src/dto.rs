@@ -402,7 +402,7 @@ pub struct BootstrapDto {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSelectionDto {
-    pub project_id: String,
+    pub selected_project_id: Option<String>,
     pub projects: Vec<ProjectDto>,
     pub sessions: Vec<SessionDto>,
     pub selected_session_id: Option<String>,

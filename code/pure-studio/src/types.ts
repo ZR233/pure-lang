@@ -511,7 +511,8 @@ export type BootstrapPayload = {
 };
 
 export type ProjectSelectionPayload = {
-  projectId: string;
+  projectId?: string | null;
+  selectedProjectId?: string | null;
   projects: ProjectRecord[];
   sessions: SessionRecord[];
   selectedSessionId?: string | null;

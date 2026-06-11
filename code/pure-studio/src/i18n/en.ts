@@ -24,6 +24,8 @@ const en = {
     cancel: "Cancel",
     edit: "Edit",
     delete: "Delete",
+    archive: "Archive",
+    close: "Close",
     implementPlan: "Implement plan",
   },
 
@@ -51,6 +53,8 @@ const en = {
     bootstrapFailed: "Bootstrap failed: {{error}}",
     addProjectFailed: "Add project failed: {{error}}",
     selectProjectFailed: "Select project failed: {{error}}",
+    projectArchived: "Project archived",
+    archiveProjectFailed: "Archive project failed: {{error}}",
     newSessionFailed: "New session failed: {{error}}",
     sessionDeleted: "Session deleted",
     deleteSessionFailed: "Delete session failed: {{error}}",

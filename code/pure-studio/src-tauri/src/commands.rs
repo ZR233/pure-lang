@@ -41,6 +41,7 @@ struct PlanLifecycleChange {
 pub async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<BootstrapDto> {
     let mut projects = state.studio.list_projects().await?;
     if projects.is_empty()
+        && !state.studio.store().has_projects().await?
         && let Ok(cwd) = std::env::current_dir()
     {
         projects.push(state.studio.open_project(cwd).await?);
@@ -108,6 +109,48 @@ pub async fn select_project(
 }
 
 #[tauri::command]
+pub async fn archive_project(
+    project_id: String,
+    selected_project_id: Option<String>,
+    state: State<'_, AppState>,
+) -> CommandResult<ProjectSelectionDto> {
+    let active_session_ids = state
+        .active_turns
+        .lock()
+        .await
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    for session_id in active_session_ids {
+        if let Some(session) = state.studio.store().read_session(&session_id).await?
+            && session.project_id == project_id
+        {
+            return Err(CommandError {
+                message: "project has an active turn".to_string(),
+            });
+        }
+    }
+    state
+        .studio
+        .store()
+        .archive_project(&project_id)
+        .await?
+        .context("selected project not found")?;
+    let projects = state.studio.list_projects().await?;
+    let next_project_id = selected_project_id
+        .filter(|id| id != &project_id && projects.iter().any(|project| project.id == *id))
+        .or_else(|| projects.first().map(|project| project.id.clone()));
+    if let Some(next_project_id) = next_project_id {
+        state
+            .studio
+            .reconcile_lsp_runtime_for_project(&next_project_id)
+            .await?;
+        return project_selection_data(&state, Some(next_project_id)).await;
+    }
+    project_selection_data(&state, None).await
+}
+
+#[tauri::command]
 pub async fn create_session(
     project_id: String,
     title: Option<String>,
@@ -162,7 +205,7 @@ pub async fn delete_session(
         None => None,
     };
     Ok(ProjectSelectionDto {
-        project_id,
+        selected_project_id: Some(project_id),
         projects: project_dtos(state.studio.store().list_projects().await?),
         sessions: session_dtos(sessions),
         selected_session_id,
@@ -780,7 +823,17 @@ async fn select_project_data(
         .studio
         .reconcile_lsp_runtime_for_project(&project_id)
         .await?;
-    let sessions = state.studio.ensure_project_sessions(&project_id).await?;
+    project_selection_data(state, Some(project_id)).await
+}
+
+async fn project_selection_data(
+    state: &State<'_, AppState>,
+    project_id: Option<String>,
+) -> CommandResult<ProjectSelectionDto> {
+    let sessions = match &project_id {
+        Some(project_id) => state.studio.ensure_project_sessions(project_id).await?,
+        None => Vec::new(),
+    };
     let selected_session_id = sessions.first().map(|session| session.id.clone());
     let agent_events = match &selected_session_id {
         Some(session_id) => state.studio.store().list_agent_events(session_id).await?,
@@ -795,7 +848,7 @@ async fn select_project_data(
         None => None,
     };
     Ok(ProjectSelectionDto {
-        project_id,
+        selected_project_id: project_id,
         projects: project_dtos(state.studio.list_projects().await?),
         sessions: session_dtos(sessions),
         selected_session_id,

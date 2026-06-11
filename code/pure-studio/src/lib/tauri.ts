@@ -91,7 +91,7 @@ export function openProject(path: string) {
     };
     return Promise.resolve(
       clone({
-        projectId: project.id,
+        selectedProjectId: project.id,
         projects: [project, ...previewProjects],
         sessions: previewSessions,
         selectedSessionId: previewSessions[0]?.id ?? null,
@@ -112,7 +112,7 @@ export function selectProject(projectId: string) {
   if (!isTauriRuntime()) {
     return Promise.resolve(
       clone({
-        projectId,
+        selectedProjectId: projectId,
         projects: previewProjects,
         sessions: previewSessions,
         selectedSessionId: previewSessions[0]?.id ?? null,
@@ -127,6 +127,32 @@ export function selectProject(projectId: string) {
     );
   }
   return invoke<ProjectSelectionPayload>("select_project", { projectId });
+}
+
+export function archiveProject(projectId: string, selectedProjectId?: string | null) {
+  if (!isTauriRuntime()) {
+    const projects = previewProjects.filter((project) => project.id !== projectId);
+    const nextSelectedProjectId =
+      selectedProjectId && selectedProjectId !== projectId && projects.some((project) => project.id === selectedProjectId)
+        ? selectedProjectId
+        : projects[0]?.id ?? null;
+    return Promise.resolve(
+      clone({
+        selectedProjectId: nextSelectedProjectId,
+        projects,
+        sessions: nextSelectedProjectId ? previewSessions : [],
+        selectedSessionId: nextSelectedProjectId ? previewSessions[0]?.id ?? null : null,
+        agentEvents: nextSelectedProjectId ? previewAgentEvents : [],
+        agents: nextSelectedProjectId ? previewAgents : [],
+        sessionRuntime: nextSelectedProjectId ? previewSessionRuntime : null,
+        lspHealth: {
+          lspServers: previewLspServers,
+          activeLspServers: nextSelectedProjectId ? previewSessionRuntime.activeLspServers : [],
+        },
+      }),
+    );
+  }
+  return invoke<ProjectSelectionPayload>("archive_project", { projectId, selectedProjectId: selectedProjectId ?? null });
 }
 
 export function createSession(projectId: string, title?: string) {

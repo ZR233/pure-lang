@@ -22,6 +22,7 @@ export function App() {
           }
           onAddProject={(path) => void studio.addProject(path)}
           onSelectProject={(id) => void studio.onSelectProject(id)}
+          onArchiveProject={(id) => void studio.onArchiveProject(id)}
           onNewSession={() => void studio.onNewSession()}
           onSelectSession={(id) => void studio.onSelectSession(id)}
           onDeleteSession={(id) => void studio.onDeleteSession(id)}

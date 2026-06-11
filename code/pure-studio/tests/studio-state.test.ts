@@ -1213,6 +1213,36 @@ function sessionSelectionClearsPlanActionState() {
   assertEqual(switched.dismissedPlanId, null);
 }
 
+function selectingCurrentSessionKeepsTimelineState() {
+  const loaded = studioReducer(selectedState(), {
+    type: "timelineLoaded",
+    sessionId: "session-1",
+    items: [textItem("turn-1-text", 10, "hello")],
+    nextSequence: 11,
+  });
+  const withPlan = studioReducer(loaded, {
+    type: "runPromptLoaded",
+    payload: response([planItem("turn-1-plan", "turn-1", 12, "1. Inspect")]),
+    status: "done",
+  });
+  const selectedAgain = studioReducer(withPlan, {
+    type: "sessionSelectionLoaded",
+    status: "loaded",
+    payload: {
+      sessionId: "session-1",
+      sessions: withPlan.sessions,
+      agentEvents: [],
+      agents: [],
+      sessionRuntime: runtime,
+    },
+  });
+
+  assertDeepEqual(selectedAgain.timelineOrder, withPlan.timelineOrder);
+  assertEqual(selectedAgain.timelineItems.get("turn-1-plan")?.content, "1. Inspect");
+  assertDeepEqual(selectedAgain.planAction, withPlan.planAction);
+  assertEqual(selectedAgain.timelineNextSequence, withPlan.timelineNextSequence);
+}
+
 function toolsFromDifferentTurnsDoNotMerge() {
   const entries = entriesForTimeline([
     toolItem("turn-1-read", "turn-1", 1, "read_file", { path: "a.ts" }),
@@ -1334,6 +1364,35 @@ function projectSelectionLoadedAfterSessionDeleteClearsSelectedSession() {
   assertDeepEqual(updated.timelineOrder, []);
   assertEqual(updated.sessionRuntime, null);
   assertEqual(updated.status, "deleted");
+}
+
+function projectSelectionLoadedCanClearSelectedProject() {
+  const liveState = studioReducer(selectedState(), {
+    type: "timelineLoaded",
+    sessionId: "session-1",
+    items: [textItem("turn-1-text", 10, "hello")],
+    nextSequence: 11,
+  });
+  const updated = studioReducer(liveState, {
+    type: "projectSelectionLoaded",
+    status: "archived",
+    payload: {
+      selectedProjectId: null,
+      projects: [],
+      sessions: [],
+      selectedSessionId: null,
+      agentEvents: [],
+      agents: [],
+      sessionRuntime: null,
+    },
+  });
+
+  assertEqual(updated.selectedProjectId, null);
+  assertEqual(updated.selectedSessionId, null);
+  assertDeepEqual(updated.projects, []);
+  assertDeepEqual(updated.sessions, []);
+  assertDeepEqual(updated.timelineOrder, []);
+  assertEqual(updated.sessionRuntime, null);
 }
 
 function configLoadedUpdatesPermissionMode() {
@@ -2030,10 +2089,12 @@ thinkingEntriesExposeStreamingStatusAndDuration();
 completedThinkingEntryUsesDuration();
 liveCompletedPlanCreatesPendingPlanAction();
 sessionSelectionClearsPlanActionState();
+selectingCurrentSessionKeepsTimelineState();
 toolsFromDifferentTurnsDoNotMerge();
 toolGroupStatusUsesPriority();
 sessionModeUpdateKeepsTimelineAndUpdatesSessions();
 projectSelectionLoadedAfterSessionDeleteClearsSelectedSession();
+projectSelectionLoadedCanClearSelectedProject();
 configLoadedUpdatesPermissionMode();
 providerUsagesLoadedDoesNotReplaceConfigState();
 mcpHealthUpdatedRefreshesMcpServersAndRuntime();
