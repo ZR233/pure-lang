@@ -992,6 +992,7 @@ function optimisticSessionModeSwitchesSelectedSessionOnly() {
 }
 
 function promptSubmittedCreatesOptimisticTimelineFeedback() {
+  const before = selectedState();
   const state = studioReducer(selectedState(), {
     type: "promptSubmitted",
     status: "running",
@@ -1011,6 +1012,7 @@ function promptSubmittedCreatesOptimisticTimelineFeedback() {
   assertEqual(status.status, "running");
   assertEqual(status.content, "waitingForModel");
   assertDeepEqual(state.timelineOrder, ["optimistic-user-1234", "optimistic-waiting-1234"]);
+  assertEqual(state.timelineNextSequence, before.timelineNextSequence);
   assertEqual(state.prompt, "");
   assertEqual(state.isBusy, true);
 }
@@ -1042,7 +1044,7 @@ function userTimelineEventKeepsWaitingFeedback() {
     startedAt: 1234,
     prompt: "Build the thing",
   });
-  const realUser = textItem("turn-1-user", 1, "Build the thing");
+  const realUser = textItem("turn-1-user", submitted.timelineNextSequence, "Build the thing");
   realUser.role = "user";
   const updated = studioReducer(submitted, {
     type: "agentEvent",
@@ -1062,6 +1064,7 @@ function userTimelineEventKeepsWaitingFeedback() {
   assertEqual(status.content, "waitingForModel");
   assertEqual(updated.timelineItems.has("optimistic-user-1234"), false);
   assertEqual(updated.timelineItems.has("optimistic-waiting-1234"), true);
+  assertDeepEqual(updated.timelineOrder, ["turn-1-user", "optimistic-waiting-1234"]);
 }
 
 function inferenceStartKeepsWaitingFeedback() {

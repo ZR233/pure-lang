@@ -71,6 +71,8 @@ React action
 
 `run_turn_with_trace` 在每次模型请求前用 `InstructionAssembler` 解析当前提示词快照。base/system 写入 `CompletionRequest.instructions`；developer 块作为临时 system 消息置于历史消息之前；user context 块作为临时 user 消息置于 developer 块之后、真实历史之前。临时前置消息只用于本次 provider request，不写入 `CoreSession`，因此压缩和持久化只处理真实对话历史。
 
+`run_turn_with_trace` 接收新 turn 后，必须先把真实用户输入写入 `CoreSession`，并记录为该 turn 的第一个可见 timeline item；随后才能记录 enabled tools、turn running、inference、工具和模型输出等内部运行事件。timeline 的 `sequence` 是后端权威游标，前端 optimistic 提示不得改变该游标。
+
 `run_turn_with_trace` 在每次模型请求前执行自动上下文压缩检查。压缩阈值来自当前模型的 `autoCompactTokenLimit`，未配置时使用有效上下文窗口的 90%；模型没有上下文窗口信息时不触发自动压缩。压缩估算包含 base/system、developer、user context 和真实消息历史。压缩由 `pl-core` 本地摘要完成：用当前模型和固定 compact prompt 生成 handoff summary，再用一条带 metadata 的用户摘要消息加最近真实用户消息替换原始历史。工具调用、工具结果和 assistant 中间过程不以原始片段保留，避免压缩后出现破碎的 tool-call 配对。
 
 子代理没有独立的压缩实现。`spawn_agent` 和 `followup_task` 创建的 child session 复用同一个 `PureCore` turn pipeline，因此每个子代理独立维护自己的压缩历史；父会话不会替子代理压缩，也不会因为子代理压缩而改写父历史。
