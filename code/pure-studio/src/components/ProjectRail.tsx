@@ -1,4 +1,4 @@
-import { FolderOpen, Plus, Settings, Trash2 } from "lucide-react";
+import { FolderOpen, Plus, Settings, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ProjectRecord, SessionRecord } from "../types";
 import { initials } from "../lib/utils";
@@ -14,6 +14,7 @@ type ProjectRailProps = {
   onSetManualPath: (value: string) => void;
   onAddProject: (path: string) => void;
   onSelectProject: (id: string) => void;
+  onArchiveProject: (id: string) => void;
   onNewSession: () => void;
   onSelectSession: (id: string) => void;
   onDeleteSession: (id: string) => void;
@@ -28,6 +29,7 @@ export function ProjectRail({
   selectedProjectId,
   selectedSessionId,
   onSelectProject,
+  onArchiveProject,
   onNewSession,
   onSelectSession,
   onDeleteSession,
@@ -65,19 +67,38 @@ export function ProjectRail({
           {projects.map((project) => {
             const selected = project.id === selectedProjectId;
             return (
-              <button
+              <div
                 key={project.id}
-                type="button"
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-left text-sm ${selected ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent"}`}
-                onClick={() => onSelectProject(project.id)}
+                className={`group grid w-full grid-cols-[minmax(0,1fr)_2rem] items-center rounded-lg ${selected ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent"}`}
               >
-                <span
-                  className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${selected ? "bg-primary text-primary-foreground" : "bg-sidebar-accent text-sidebar-muted-foreground"}`}
+                <button
+                  type="button"
+                  className="flex min-w-0 items-center gap-2 px-3 py-1.5 text-left text-sm"
+                  onClick={() => onSelectProject(project.id)}
+                  title={project.path}
                 >
-                  {initials(project.name)}
-                </span>
-                <span className="flex-1 min-w-0 truncate font-medium">{project.name}</span>
-              </button>
+                  <span
+                    className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${selected ? "bg-primary text-primary-foreground" : "bg-sidebar-accent text-sidebar-muted-foreground"}`}
+                  >
+                    {initials(project.name)}
+                  </span>
+                  <span className="flex-1 min-w-0 truncate font-medium">{project.name}</span>
+                </button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={`h-7 w-8 shrink-0 rounded-md text-sidebar-muted-foreground hover:text-sidebar-foreground focus-visible:visible group-hover:visible disabled:opacity-30 ${selected ? "" : "invisible"}`}
+                  disabled={sessionActionsDisabled}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onArchiveProject(project.id);
+                  }}
+                  title={t("actions.archive")}
+                  aria-label={t("actions.archive")}
+                >
+                  <X size={13} />
+                </Button>
+              </div>
             );
           })}
         </div>

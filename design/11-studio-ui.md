@@ -43,6 +43,7 @@ reducer 分域：
 - 用户与 assistant 正文按 Markdown 渲染，支持标题、列表、引用、代码块、行内代码、强调和链接
 - 自动跟随最新内容以“用户是否停留在底部”为准；高频 timeline 刷新时仍应在 layout 阶段滚动到最新，用户手动上滚后暂停跟随
 - 同一 session 内继续对话不会触发 `selectedSessionId` 变化；当前轮 `RunPromptResponse.timelineItems` 与实时 `TimelineItem*` 事件必须直接合并进本地 timeline
+- 重复选择当前 session 必须视为 no-op，不能清空本地 timeline、agent snapshot、runtime 或 plan 状态；只有切换到不同 session、新建 session 或切换项目时，才可以重置当前会话本地视图并等待对应 timeline snapshot 加载
 - 异步 `loadSessionTimeline` 只能替换不晚于本地状态的快照；如果加载结果落后于本地已收到的当前轮 item，只能作为历史补齐合并，不能覆盖当前 timeline
 - Tauri 实时事件通道如果发生 broadcast lag，不能静默忽略。事件转发层必须向前端发出当前 session 的 timeline stale 信号；前端收到后立即重新加载该 session 的 timeline，并继续用 `mergeTimelineSnapshot` 的本地新鲜度规则保护已收到的 live item。
 - 自动跟随只取决于用户是否停留在底部，不取决于 `isBusy`；命令完成时 `isBusy` 已变为 false，但 `RunPromptResponse.timelineItems` 仍可能追加最终内容
@@ -59,6 +60,8 @@ reducer 分域：
 `timelineOrder` 只在 item 首次出现时按 `sequence` 插入；后续 delta/completed/failed 不改变展示位置。组件不得再把 `messages`、运行中 tool map、agent events 和 trace items 临时拼接成主 timeline。工具聚合与普通 trace 过滤只能作为 `timelineEntries` 派生显示层逻辑，不能写回 reducer 状态或后端 DTO。
 
 同一组 `TraceEvent` 在 Tauri snapshot fold 和前端 live reducer 中必须收敛到相同 `TimelineItem`。fold 规则需要能处理 start/delta/completed 的轻微乱序：delta 先到时可以创建最小 item，后续 start/completed 必须补全 `tool/agent/inference/usage` 等结构化字段，不能丢弃已累积的 content、thinking chunks、tool arguments 或 tool result。
+
+左侧 project 列表的每个项目行右侧提供 `X` 归档按钮。归档 project 不删除磁盘目录，也不修改项目文件；它只归档 Studio 中的 project 记录，并清理该 project 下的 sessions、messages、timeline、agent、runtime 和审批历史。用户重新打开同一路径时复用原 project 记录，但历史会话已经清空，应按新项目入口创建默认会话。归档当前 project 时切换到下一个未归档 project；没有剩余 project 时进入无项目状态。
 
 主聊天 timeline 的滚动容器由独立渲染适配层负责。该适配层输入 `TimelineEntry[]`，输出现有 message、plan、thought、tool、tool group、agent 和 trace entry 组件；它必须保持稳定 key、支持可变高度内容重测量，并维持“在底部才自动跟随”的规则。用户上滚阅读历史时，实时 delta 只能显示跳到最新入口，不能抢占滚动位置。
 

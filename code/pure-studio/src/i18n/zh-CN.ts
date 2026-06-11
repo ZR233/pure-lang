@@ -24,6 +24,8 @@ const zhCN = {
     cancel: "取消",
     edit: "编辑",
     delete: "删除",
+    archive: "归档",
+    close: "关闭",
     implementPlan: "实现计划",
   },
 
@@ -51,6 +53,8 @@ const zhCN = {
     bootstrapFailed: "启动失败：{{error}}",
     addProjectFailed: "添加项目失败：{{error}}",
     selectProjectFailed: "选择项目失败：{{error}}",
+    projectArchived: "项目已归档",
+    archiveProjectFailed: "归档项目失败：{{error}}",
     newSessionFailed: "新建会话失败：{{error}}",
     sessionDeleted: "会话已删除",
     deleteSessionFailed: "删除会话失败：{{error}}",

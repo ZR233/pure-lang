@@ -5,8 +5,9 @@ use std::time::Duration;
 use anyhow::Result;
 use pl_protocol::{AgentRuntimeDelta, Message, RuntimeUsageSnapshot};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, Database, DatabaseConnection,
-    EntityTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait, Database,
+    DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Statement,
+    TransactionTrait,
 };
 
 use crate::runtime_usage::{
@@ -83,6 +84,7 @@ impl StudioStore {
             active.name = Set(name);
             active.updated_at = Set(now);
             active.last_opened_at = Set(Some(now));
+            active.closed = Set(0);
             let model = active.update(&self.db).await?;
             return Ok(project_record(model));
         }
@@ -94,6 +96,7 @@ impl StudioStore {
             created_at: Set(now),
             updated_at: Set(now),
             last_opened_at: Set(Some(now)),
+            closed: Set(0),
         }
         .insert(&self.db)
         .await?;
@@ -103,12 +106,18 @@ impl StudioStore {
     pub async fn list_projects(&self) -> Result<Vec<ProjectRecord>> {
         use entities::project;
         let projects = project::Entity::find()
+            .filter(project::Column::Closed.eq(0))
             .order_by_desc(project::Column::LastOpenedAt)
             .order_by_desc(project::Column::UpdatedAt)
             .order_by_desc(project::Column::Id)
             .all(&self.db)
             .await?;
         Ok(projects.into_iter().map(project_record).collect())
+    }
+
+    pub async fn has_projects(&self) -> Result<bool> {
+        use entities::project;
+        Ok(project::Entity::find().one(&self.db).await?.is_some())
     }
 
     pub async fn mark_project_opened(&self, project_id: &str) -> Result<()> {
@@ -121,9 +130,96 @@ impl StudioStore {
             let mut active: project::ActiveModel = project.into();
             active.updated_at = Set(now);
             active.last_opened_at = Set(Some(now));
+            active.closed = Set(0);
             active.update(&self.db).await?;
         }
         Ok(())
+    }
+
+    pub async fn archive_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {
+        use entities::{
+            agent, agent_event, agent_runtime_event, agent_runtime_snapshot, message, project,
+            session, session_runtime_snapshot, timeline_event, tool_approval,
+        };
+        let Some(project) = project::Entity::find_by_id(project_id.to_string())
+            .one(&self.db)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let tx = self.db.begin().await?;
+        let session_ids = session::Entity::find()
+            .filter(session::Column::ProjectId.eq(project_id.to_string()))
+            .all(&tx)
+            .await?
+            .into_iter()
+            .map(|session| session.id)
+            .collect::<Vec<_>>();
+
+        for session_id in &session_ids {
+            let session_id = session_id.to_string();
+            timeline_event::Entity::delete_many()
+                .filter(timeline_event::Column::SessionId.eq(session_id.clone()))
+                .exec(&tx)
+                .await?;
+            tx.execute(Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Sqlite,
+                "DELETE FROM trace_events WHERE session_id = ?",
+                [session_id.clone().into()],
+            ))
+            .await?;
+            message::Entity::delete_many()
+                .filter(message::Column::SessionId.eq(session_id.clone()))
+                .exec(&tx)
+                .await?;
+            tool_approval::Entity::delete_many()
+                .filter(tool_approval::Column::SessionId.eq(session_id.clone()))
+                .exec(&tx)
+                .await?;
+            agent::Entity::delete_many()
+                .filter(agent::Column::SessionId.eq(session_id.clone()))
+                .exec(&tx)
+                .await?;
+            agent_event::Entity::delete_many()
+                .filter(agent_event::Column::SessionId.eq(session_id.clone()))
+                .exec(&tx)
+                .await?;
+            agent_runtime_event::Entity::delete_many()
+                .filter(agent_runtime_event::Column::SessionId.eq(session_id.clone()))
+                .exec(&tx)
+                .await?;
+            agent_runtime_snapshot::Entity::delete_many()
+                .filter(agent_runtime_snapshot::Column::SessionId.eq(session_id.clone()))
+                .exec(&tx)
+                .await?;
+            session_runtime_snapshot::Entity::delete_many()
+                .filter(session_runtime_snapshot::Column::SessionId.eq(session_id))
+                .exec(&tx)
+                .await?;
+        }
+        for legacy_table in ["agent_messages", "agent_turns"] {
+            tx.execute(Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Sqlite,
+                format!(
+                    "DELETE FROM {legacy_table} WHERE session_id IN (
+                        SELECT id FROM sessions WHERE project_id = ?
+                    )"
+                ),
+                [project_id.to_string().into()],
+            ))
+            .await?;
+        }
+        session::Entity::delete_many()
+            .filter(session::Column::ProjectId.eq(project_id.to_string()))
+            .exec(&tx)
+            .await?;
+
+        let mut active: project::ActiveModel = project.into();
+        active.updated_at = Set(unix_seconds());
+        active.closed = Set(1);
+        let model = active.update(&tx).await?;
+        tx.commit().await?;
+        Ok(Some(project_record(model)))
     }
 
     pub async fn create_session(

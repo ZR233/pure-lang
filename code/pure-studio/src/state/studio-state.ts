@@ -246,10 +246,11 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       if (action.sessionId !== state.selectedSessionId) return state;
       return { ...state, status: action.status };
     case "projectSelectionLoaded":
+      const selectedProjectId = action.payload.selectedProjectId ?? action.payload.projectId ?? null;
       return {
         ...state,
         projects: action.payload.projects,
-        selectedProjectId: action.payload.projectId,
+        selectedProjectId,
         sessions: action.payload.sessions,
         selectedSessionId: action.payload.selectedSessionId ?? null,
         agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
@@ -269,6 +270,19 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         isBusy: false,
       };
     case "sessionSelectionLoaded":
+      if (action.payload.sessionId === state.selectedSessionId) {
+        return {
+          ...state,
+          sessions: action.payload.sessions.length > 0 ? action.payload.sessions : state.sessions,
+          agentTimelineEvents: mergeAgentTimelineEvents(
+            state.agentTimelineEvents,
+            action.payload.agentEvents ?? [],
+          ),
+          agents: mergeAgents(state.agents, action.payload.agents ?? []),
+          sessionRuntime: action.payload.sessionRuntime ?? state.sessionRuntime,
+          status: action.status,
+        };
+      }
       return {
         ...state,
         sessions: action.payload.sessions.length > 0 ? action.payload.sessions : state.sessions,
