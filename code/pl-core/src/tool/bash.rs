@@ -8,7 +8,7 @@ use super::command::{
     CommandOutputSnapshot, CommandProcessManager, CommandStartRequest, CommandWriteRequest,
 };
 use super::truncation::{OutputTruncation, TruncationStrategy};
-use super::{Tool, ToolContext, ToolInput, ToolOutput};
+use super::{Tool, ToolContext, ToolInput, ToolOutput, ToolPathPolicy};
 
 const TOOL_OUTPUT_DIR: &str = "target/pure";
 const OUTPUT_LOG_FILE: &str = "output.log";
@@ -118,39 +118,19 @@ impl BashTool {
         })
     }
 
-    fn tool_error(&self, msg: impl std::fmt::Display) -> PureError {
-        PureError::ToolExecutionFailed {
-            tool: self.name().to_string(),
-            error: msg.to_string(),
-        }
-    }
-
     fn resolve_working_directory(
         &self,
         working_directory: Option<&Path>,
         allow_workspace_escape: bool,
     ) -> Result<PathBuf, PureError> {
-        let workspace_root = std::fs::canonicalize(&self.workspace_root).map_err(|error| {
-            self.tool_error(format!("failed to resolve workspace root: {error}"))
-        })?;
-        let candidate = match working_directory {
-            Some(dir) if dir.is_absolute() => dir.to_path_buf(),
-            Some(dir) => workspace_root.join(dir),
-            None => workspace_root.clone(),
-        };
-        let canonical = std::fs::canonicalize(&candidate).map_err(|error| {
-            self.tool_error(format!(
-                "failed to resolve working directory '{}': {error}",
-                candidate.display()
-            ))
-        })?;
-        if allow_workspace_escape || canonical.starts_with(&workspace_root) {
-            Ok(canonical)
-        } else {
-            Err(self.tool_error(format!(
-                "working directory '{}' is outside the workspace",
-                candidate.display()
-            )))
+        let policy = ToolPathPolicy::new(
+            self.workspace_root.clone(),
+            allow_workspace_escape,
+            self.name(),
+        )?;
+        match working_directory {
+            Some(dir) => policy.resolve_existing_directory(dir, &dir.display().to_string()),
+            None => Ok(policy.root().to_path_buf()),
         }
     }
 
@@ -525,6 +505,32 @@ mod tests {
             .await;
 
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn relative_working_directory_resolves_from_workspace_root() {
+        let tool = test_tool();
+        tokio::fs::create_dir_all(tool.workspace_root.join("subdir"))
+            .await
+            .unwrap();
+        let output = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({
+                        "command": "echo marker > cwd-check.txt",
+                        "workingDirectory": "subdir",
+                    }),
+                    session_id: "cwd-session".to_string(),
+                    tool_id: "relative-cwd".to_string(),
+                },
+                test_context(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(output.exit_code, Some(0));
+        assert!(tool.workspace_root.join("subdir/cwd-check.txt").exists());
+        let _ = tokio::fs::remove_dir_all(&tool.workspace_root).await;
     }
 
     #[tokio::test]

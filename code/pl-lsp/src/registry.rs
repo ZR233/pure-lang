@@ -1032,7 +1032,7 @@ mod tests {
     fn position_query_uses_one_based_input() {
         let query = LspQuery {
             operation: LspQueryOperation::Hover,
-            file_path: Some(PathBuf::from("src/lib.rs")),
+            file_path: Some(std::env::temp_dir().join("pure-lsp-position/src/lib.rs")),
             line: Some(7),
             character: Some(3),
             query: None,

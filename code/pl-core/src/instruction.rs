@@ -10,6 +10,13 @@ use crate::turn::CompileMode;
 use crate::workspace::load_workspace_instruction_documents;
 
 const DEFAULT_BASE_INSTRUCTIONS: &str = include_str!("prompts/system.md");
+const PLATFORM_COMMON_INSTRUCTIONS: &str = include_str!("prompts/platform/common.md");
+#[cfg(windows)]
+const PLATFORM_SPECIFIC_INSTRUCTIONS: &str = include_str!("prompts/platform/windows.md");
+#[cfg(unix)]
+const PLATFORM_SPECIFIC_INSTRUCTIONS: &str = include_str!("prompts/platform/unix.md");
+#[cfg(not(any(windows, unix)))]
+const PLATFORM_SPECIFIC_INSTRUCTIONS: &str = "";
 
 #[derive(Debug, Clone)]
 pub struct InstructionAssemblyRequest<'a> {
@@ -61,6 +68,7 @@ pub enum InstructionSourceKind {
     ModelBase,
     ConfigBaseOverride,
     Mode,
+    Platform,
     ConfigDeveloper,
     Skills,
     SubagentConstraint,
@@ -87,6 +95,10 @@ impl InstructionAssembler {
                 format!("compile mode: {}", request.mode.label()),
             ),
             request.mode.instructions(),
+        );
+        snapshot.push_developer(
+            InstructionSource::new(InstructionSourceKind::Platform, platform_label()),
+            &platform_instructions(),
         );
         if let Some(config) = config_instructions {
             snapshot.push_developer(
@@ -235,6 +247,31 @@ fn base_block(config: Option<&InstructionsConfig>, model: &ModelInfo) -> Instruc
     }
 }
 
+fn platform_label() -> &'static str {
+    #[cfg(windows)]
+    {
+        "platform: windows"
+    }
+    #[cfg(unix)]
+    {
+        "platform: unix"
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        "platform"
+    }
+}
+
+fn platform_instructions() -> String {
+    format!(
+        "{}\n\n{}",
+        PLATFORM_COMMON_INSTRUCTIONS.trim(),
+        PLATFORM_SPECIFIC_INSTRUCTIONS.trim()
+    )
+    .trim()
+    .to_string()
+}
+
 fn add_project_documents(
     snapshot: &mut InstructionSnapshot,
     workspace_root: &Path,
@@ -342,6 +379,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 InstructionSourceKind::Mode,
+                InstructionSourceKind::Platform,
                 InstructionSourceKind::ConfigDeveloper,
                 InstructionSourceKind::Skills,
                 InstructionSourceKind::SubagentConstraint
@@ -358,6 +396,66 @@ mod tests {
                 InstructionSourceKind::ProjectDoc
             ]
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn platform_block_is_after_mode_and_before_config_developer() {
+        let dir = temp_dir("platform-order");
+        fs::create_dir_all(&dir).unwrap();
+        let mut config = PureConfig::default();
+        config.instructions.developer = "config dev".to_string();
+
+        let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
+            config: Some(&config),
+            model: &ModelInfo::fallback("test-model"),
+            mode: CompileMode::Auto,
+            workspace_root: &dir,
+            current_dir: &dir,
+            workspace_instructions: None,
+            subagent_constraint: None,
+        })
+        .unwrap();
+
+        assert_eq!(
+            snapshot.developer[0].source.kind,
+            InstructionSourceKind::Mode
+        );
+        assert_eq!(
+            snapshot.developer[1].source.kind,
+            InstructionSourceKind::Platform
+        );
+        assert_eq!(
+            snapshot.developer[2].source.kind,
+            InstructionSourceKind::ConfigDeveloper
+        );
+        assert!(snapshot.developer[1].content.contains("workspace root"));
+        if cfg!(windows) {
+            assert_eq!(snapshot.developer[1].source.label, "platform: windows");
+            assert!(
+                snapshot.developer[1]
+                    .content
+                    .contains("Current platform: windows.")
+            );
+            assert!(
+                !snapshot.developer[1]
+                    .content
+                    .contains("Current platform: unix.")
+            );
+        }
+        if cfg!(unix) {
+            assert_eq!(snapshot.developer[1].source.label, "platform: unix");
+            assert!(
+                snapshot.developer[1]
+                    .content
+                    .contains("Current platform: unix.")
+            );
+            assert!(
+                !snapshot.developer[1]
+                    .content
+                    .contains("Current platform: windows.")
+            );
+        }
         fs::remove_dir_all(dir).unwrap();
     }
 

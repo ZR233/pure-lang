@@ -26,6 +26,7 @@ v1 只内置 `rust-analyzer`：
 - `StudioRuntime` 持有共享 `LspRuntimeRegistry`，项目打开/选择时 reconcile 当前 workspace。
 - `PureCore` 通过 `with_lsp_runtime` 接收共享 registry。
 - LSP 查询工具按语言拆分为独立工具（如 `lsp_query_rust`），父 agent 和 subagent 共用同一 runtime。工具列表在每轮创建 `PureCore` 并注册默认工具时，根据当前可用语言同步；对应 LSP 服务器不可用时不会暴露给 LLM。
+- `lsp_query_*` 的 `filePath` 在 `pl-core` 中复用工具统一路径策略解析：相对路径按 `workspaceRoot` 解释，workspace-only 模式拒绝越界，交给 `pl-lsp` 前必须已经是规范化绝对路径。
 - 文件写入、patch、move/delete 成功后通知 LSP runtime 同步已打开文档。
 
 `pure-studio` 只负责展示和事件订阅：
@@ -82,10 +83,10 @@ active LSP 只包括 `available` server。`missingCommand`、`unavailable`、`di
 
 `rust-analyzer` 初始化时固定使用 client-side file watcher 配置，并声明支持 `workspace/didChangeWatchedFiles` 动态注册。runtime 不让 `rust-analyzer` 自行启动服务端文件监听；当 agent 写入、移动或删除文件时，已启动的 LSP client 会收到对应 watched-files 通知，同时对已打开且受支持的源码文件继续发送 text document 同步。
 
-Windows 下 `std::fs::canonicalize` 可能返回 `\\?\` 或 `\\?\UNC\` verbatim path；runtime 生成 LSP file URI 前必须转回普通 drive/UNC 路径，避免向语言服务器发送包含 `%3F` 的无效 URI。
+`pl-lsp` 只接受已解析的绝对路径来生成 LSP file URI，不依赖 `std::env::current_dir()` 兜底。Windows 下 `std::fs::canonicalize` 可能返回 `\\?\` 或 `\\?\UNC\` verbatim path；runtime 生成 LSP file URI 前必须转回普通 drive/UNC 路径，避免向语言服务器发送包含 `%3F` 的无效 URI。
 
 `rust-analyzer` 可能在索引期间返回 `ContentModified` 错误 `-32801`，runtime 对该错误做最多 3 次指数退避重试。
 
 ## 非目标
 
-v1 不实现 Claude Code 的插件市场 LSP 配置、LSP 推荐 UI、终端 Ink 展示、IDE 虚拟 URI、MCP 诊断基线或自动安装语言服务器。
+v1 不实现 Claude Code 的插件市场 LSP 配置、LSP 推荐 UI、终端 Ink 展示、IDE 虚拟 URI 或 MCP 诊断基线；除内置 `rust-analyzer` 的 rustup component 自愈外，不自动安装任意语言服务器。

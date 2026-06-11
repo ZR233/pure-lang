@@ -33,9 +33,12 @@ Chat Completions provider 如果没有 Responses 风格的 completed event，pro
 
 1. 检查当前模式是否允许该工具。
 2. 查找工具注册表。
-3. 计算权限策略，必要时请求用户审批或 reviewer 审批。
-4. 对批准的工具执行本地实现；对禁用、未知或拒绝的工具直接生成工具结果。
-5. 在统一收尾阶段写入唯一终态事件。
+3. 对声明路径语义的工具输入执行统一路径解析和访问分类。
+4. 计算权限策略，必要时请求用户审批或 reviewer 审批。
+5. 对批准的工具执行本地实现；对禁用、未知或拒绝的工具直接生成工具结果。
+6. 在统一收尾阶段写入唯一终态事件。
+
+路径类工具不要求模型提供绝对路径。运行时把相对路径按 `workspaceRoot` 解析，规范化为绝对路径后再进入权限判断和实际执行；文件工具、`apply_patch`、`bash.workingDirectory`、`lsp_query_*` 的 `filePath` 和权限 precheck 必须复用同一个 resolver，避免审批看到 workspace 内而执行时解析到 workspace 外。`WorkspaceOnly` 模式拒绝 `..`、Windows drive-relative、越界绝对路径、越界 UNC / verbatim 路径和符号链接越界；`full-access` 允许 workspace 外路径，但仍要求目标或最近存在父目录可解析。
 
 MCP tools 由进程内 MCP runtime registry 的当前可用快照注册，工具名固定为 `mcp__{server_id}__{tool_name}`。effective MCP server 包含用户配置的 `[mcp_servers]` 和运行时合成的内置 server；`enabled` 只表示用户启用意图，不表示本轮一定可调用。Studio 启动、保存 provider 或 MCP 配置后，后台对配置启用且凭据完整的 server 执行 connect、initialize、initialized、tools/list 探测，并把结果记录为内存 availability。普通 turn 和 subagent runner 不等待探测完成，只加载当前 `available` server 的缓存 tools；`checking`、`unavailable`、`disabled`、`missingCredential` 都不会在本轮暴露给模型。启用 MCP server 表示用户显式信任该 server，因此已可用 MCP tools 在 Auto Mode 和 Plan Mode 中直接暴露并执行，不再触发额外审批或 reviewer 审批。MCP tool 的注册、执行和错误仍复用同一生命周期与 tool result 规则。
 

@@ -1,10 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use pl_protocol::{AgentEvent, AgentEventSender};
 
 #[cfg(test)]
 use crate::permission::{PermissionDecision, decide_tool_permission};
-use crate::tool::{ToolContext, WorkspaceAccess};
+use crate::tool::{PathAccess, ToolContext, ToolPathPolicy, WorkspaceAccess};
 use crate::turn::{ToolApprovalDecision, ToolApprovalRequest, TurnOptions};
 
 pub(super) fn approval_request(
@@ -41,12 +41,12 @@ pub(super) fn requested_workspace_access(
 ) -> WorkspaceAccess {
     let arguments = tool_call.arguments_for_tool();
     let paths = requested_paths_for_tool(&tool_call.name, &arguments);
-    let Some(root) = canonical_workspace_root(workspace_root) else {
+    let Ok(policy) = ToolPathPolicy::new(workspace_root.to_path_buf(), false, "permission") else {
         return WorkspaceAccess::ExternalAllowed;
     };
     if paths
         .iter()
-        .any(|path| path_requires_external_access(path, &root))
+        .any(|path| path_requires_external_access(path, &policy))
     {
         WorkspaceAccess::ExternalAllowed
     } else {
@@ -108,46 +108,8 @@ pub(super) fn paths_from_patch_text(patch: &str) -> Vec<String> {
     paths
 }
 
-pub(super) fn canonical_workspace_root(workspace_root: &Path) -> Option<PathBuf> {
-    std::fs::canonicalize(workspace_root).ok()
-}
-
-pub(super) fn path_requires_external_access(path: &str, workspace_root: &Path) -> bool {
-    let path = Path::new(path.trim());
-    if path.as_os_str().is_empty() {
-        return false;
-    }
-    if path
-        .components()
-        .any(|component| matches!(component, std::path::Component::ParentDir))
-    {
-        return true;
-    }
-    let candidate = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        workspace_root.join(path)
-    };
-    let resolved = canonicalize_existing_or_parent(&candidate);
-    !resolved.starts_with(workspace_root)
-}
-
-pub(super) fn canonicalize_existing_or_parent(candidate: &Path) -> PathBuf {
-    let mut current = candidate.to_path_buf();
-    loop {
-        if current.exists()
-            && let Ok(canonical) = std::fs::canonicalize(&current)
-        {
-            return canonical;
-        }
-        let Some(parent) = current.parent() else {
-            return candidate.to_path_buf();
-        };
-        if parent == current {
-            return candidate.to_path_buf();
-        }
-        current = parent.to_path_buf();
-    }
+pub(super) fn path_requires_external_access(path: &str, policy: &ToolPathPolicy) -> bool {
+    policy.access_for_input(path) == PathAccess::External
 }
 
 pub(super) fn permission_risk_summary(tool_name: &str) -> &'static str {
@@ -222,4 +184,89 @@ pub(super) async fn request_user_approval(
 
 pub(super) fn cancellation_reason() -> String {
     "interrupted by user".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_model::ToolCall;
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "pure-permission-{prefix}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn relative_file_path_requests_workspace_only_access() {
+        let root = unique_temp_dir("relative");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let tool_call = ToolCall::function(
+            "call-1",
+            "read_file",
+            serde_json::json!({ "path": "src/lib.rs" }),
+            None,
+        );
+
+        let access = requested_workspace_access(&tool_call, &root);
+
+        assert_eq!(access, WorkspaceAccess::WorkspaceOnly);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn external_absolute_path_requests_external_access() {
+        let root = unique_temp_dir("root");
+        let outside = unique_temp_dir("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let tool_call = ToolCall::function(
+            "call-1",
+            "read_file",
+            serde_json::json!({ "path": outside.join("secret.txt") }),
+            None,
+        );
+
+        let access = requested_workspace_access(&tool_call, &root);
+
+        assert_eq!(access, WorkspaceAccess::ExternalAllowed);
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn parent_segment_requests_external_access() {
+        let root = unique_temp_dir("parent");
+        std::fs::create_dir_all(&root).unwrap();
+        let tool_call = ToolCall::function(
+            "call-1",
+            "bash",
+            serde_json::json!({ "command": "pwd", "workingDirectory": ".." }),
+            None,
+        );
+
+        let access = requested_workspace_access(&tool_call, &root);
+
+        assert_eq!(access, WorkspaceAccess::ExternalAllowed);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn custom_apply_patch_paths_are_classified() {
+        let root = unique_temp_dir("patch");
+        std::fs::create_dir_all(&root).unwrap();
+        let patch = "*** Begin Patch\n*** Add File: src/new.rs\n+fn main() {}\n*** End Patch";
+        let tool_call = ToolCall::custom("call-1", "apply_patch", patch, None);
+
+        let access = requested_workspace_access(&tool_call, &root);
+
+        assert_eq!(access, WorkspaceAccess::WorkspaceOnly);
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

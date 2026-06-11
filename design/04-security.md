@@ -34,12 +34,15 @@ Plan Mode 的工具白名单优先于权限模式。即使当前权限模式是 
 
 文件工具默认遵守工作区边界：
 
+- 工具输入可以是 workspace-relative 路径或绝对路径；相对路径按 `workspace_root` 解析，不依赖进程 cwd
+- 执行前统一解析为规范化绝对路径，并复用同一解析结果做审批预判和实际执行
 - 解析后路径必须位于 `workspace_root` 内
+- `WorkspaceOnly` 拒绝 `..`、Windows drive-relative 路径、越界绝对路径、越界 UNC / verbatim 路径和符号链接越界
 - 二进制读取返回明确错误
 - `apply_patch` 直接改文件，不经 shell 转发
 - 符号链接目标不可确认或越界时拒绝
 
-当用户显式选择 `full-access` 时，Pure 放宽文件工具和 `bash.workingDirectory` 的 workspace 边界：绝对路径和 `..` 可以解析到 workspace 外。该模式仍只影响 Pure 工具的本地策略，不代表系统级完全隔离或提权。
+当用户显式选择 `full-access` 时，Pure 放宽文件工具和 `bash.workingDirectory` 的 workspace 边界：绝对路径和 `..` 可以解析到 workspace 外。该模式仍要求目标自身或其最近存在父目录可解析，只影响 Pure 工具的本地策略，不代表系统级完全隔离或提权。
 
 ## 4.4 凭据暴露面
 
