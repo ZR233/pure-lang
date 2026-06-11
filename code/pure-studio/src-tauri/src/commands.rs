@@ -201,26 +201,7 @@ pub async fn set_session_mode(
         .store()
         .set_session_mode(&session_id, compile_mode)
         .await?;
-    let session = state
-        .studio
-        .store()
-        .read_session(&session_id)
-        .await?
-        .context("selected session not found")?;
-    let sessions = state
-        .studio
-        .store()
-        .list_sessions(&session.project_id)
-        .await?;
-    let agent_events = state.studio.store().list_agent_events(&session_id).await?;
-    let agents = state.studio.store().list_agents(&session_id).await?;
-    Ok(SessionSelectionDto {
-        session_runtime: Some(load_session_runtime_dto(&state.studio, &session_id).await?),
-        session_id,
-        sessions: session_dtos(sessions),
-        agent_events: agent_event_dtos(agent_events),
-        agents: agent_dtos(agents),
-    })
+    session_selection_response(&state.studio, &session_id).await
 }
 
 #[tauri::command]
@@ -328,7 +309,10 @@ async fn run_prompt_inner(
                     },
                 ],
             )
-            .await
+            .await?;
+            let payload = session_selection_response(&state.studio, &session_id).await?;
+            let _ = app.emit("studio-session-mode-updated", payload);
+            Ok(())
         }
         .await;
         if let Err(error) = setup_result {
@@ -532,6 +516,27 @@ async fn plan_lifecycle_response(
         session_id: session_id.to_string(),
         plan_states: load_plan_states(studio, session_id).await?,
         timeline_next_sequence: studio.store().next_timeline_sequence(session_id).await?,
+    })
+}
+
+async fn session_selection_response(
+    studio: &StudioRuntime,
+    session_id: &str,
+) -> CommandResult<SessionSelectionDto> {
+    let session = studio
+        .store()
+        .read_session(session_id)
+        .await?
+        .context("selected session not found")?;
+    let sessions = studio.store().list_sessions(&session.project_id).await?;
+    let agent_events = studio.store().list_agent_events(session_id).await?;
+    let agents = studio.store().list_agents(session_id).await?;
+    Ok(SessionSelectionDto {
+        session_runtime: Some(load_session_runtime_dto(studio, session_id).await?),
+        session_id: session_id.to_string(),
+        sessions: session_dtos(sessions),
+        agent_events: agent_event_dtos(agent_events),
+        agents: agent_dtos(agents),
     })
 }
 
