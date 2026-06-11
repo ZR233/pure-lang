@@ -265,6 +265,7 @@ impl FirstRunConfigDraft {
         let mut config = PureConfig {
             schema_version: CONFIG_SCHEMA_VERSION,
             runtime: Default::default(),
+            instructions: Default::default(),
             skills: Default::default(),
             mcp_servers: Default::default(),
             builtin_mcp_servers: Default::default(),

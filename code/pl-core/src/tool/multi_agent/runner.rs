@@ -98,6 +98,9 @@ pub(crate) async fn run_agent_turn(config: AgentRunConfig) {
     if let Some(instructions) = config.workspace_instructions.clone() {
         request = request.with_workspace_instructions(instructions);
     }
+    if let Some(snapshot) = config.instruction_snapshot.clone() {
+        request = request.with_instruction_snapshot(snapshot);
+    }
     let (agent_event_tx, agent_event_rx) = tokio::sync::broadcast::channel(256);
     let forward_task = tokio::spawn(super::events::forward_agent_lifecycle_events(
         agent_event_rx,

@@ -19,6 +19,7 @@ function zhipuTextModel(
     inputModalities: ["text"],
     truncationMode: "tokens",
     truncationLimit: 10_000,
+    baseInstructions: "",
   };
 }
 
@@ -51,6 +52,7 @@ function openAiModel(
     inputModalities: ["text", "image"],
     truncationMode,
     truncationLimit: 10_000,
+    baseInstructions: "",
   };
 }
 
@@ -123,6 +125,7 @@ export const previewTemplates: ProviderTemplateRecord[] = [
         inputModalities: ["text"],
         truncationMode: "tokens",
         truncationLimit: 10_000,
+        baseInstructions: "",
       },
       {
         slug: "deepseek-v4-pro",
@@ -140,6 +143,7 @@ export const previewTemplates: ProviderTemplateRecord[] = [
         inputModalities: ["text"],
         truncationMode: "tokens",
         truncationLimit: 10_000,
+        baseInstructions: "",
       },
     ],
   },

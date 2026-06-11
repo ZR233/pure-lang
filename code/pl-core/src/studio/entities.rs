@@ -35,6 +35,7 @@ pub mod session {
         pub created_at: i64,
         pub updated_at: i64,
         pub archived: i32,
+        pub instruction_snapshot_json: Option<String>,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

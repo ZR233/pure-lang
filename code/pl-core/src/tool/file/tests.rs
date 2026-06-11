@@ -27,6 +27,7 @@ async fn context(root: &Path) -> ToolContext {
         mode: crate::turn::CompileMode::Auto,
         workspace_root: root.to_path_buf(),
         workspace_instructions: None,
+        instruction_snapshot: None,
         active_subagent: None,
         agent_control: crate::AgentControl::default(),
         lsp_runtime: None,

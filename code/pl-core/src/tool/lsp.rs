@@ -186,6 +186,7 @@ mod tests {
             mode: CompileMode::Auto,
             workspace_root,
             workspace_instructions: None,
+            instruction_snapshot: None,
             active_subagent: None,
             agent_control: AgentControl::default(),
             lsp_runtime: None,

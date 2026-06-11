@@ -777,6 +777,58 @@ mod tests {
         }
     }
 
+    #[test]
+    fn instructions_precede_temporary_prelude_messages() {
+        let request = CompletionRequest {
+            model: "gpt-5.5".to_string(),
+            instructions: Some("base".to_string()),
+            messages: vec![
+                text_message(MessageRole::System, "developer"),
+                text_message(MessageRole::User, "user context"),
+                text_message(MessageRole::User, "real prompt"),
+            ],
+            tools: Vec::new(),
+            tool_choice: "auto".to_string(),
+            parallel_tool_calls: false,
+            temperature: None,
+            max_tokens: None,
+            reasoning: None,
+            stream: true,
+            timeline: None,
+        };
+
+        let responses_body = OpenAiProtocol::responses().build_request_body(&request);
+        let chat_body =
+            OpenAiProtocol::chat(ChatReasoningStyle::Plain).build_request_body(&request);
+
+        assert_eq!(
+            responses_body["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item["role"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["system", "system", "user", "user"],
+        );
+        assert_eq!(
+            responses_body["input"][0]["content"][0]["text"],
+            serde_json::json!("base"),
+        );
+        assert_eq!(
+            chat_body["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item["role"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["system", "system", "user", "user"],
+        );
+        assert_eq!(
+            chat_body["messages"][0]["content"],
+            serde_json::json!("base"),
+        );
+    }
+
     fn request_with_tool_history(tool_metadata: HashMap<String, String>) -> CompletionRequest {
         let calls = vec![ToolCall::custom(
             "ctc_1",

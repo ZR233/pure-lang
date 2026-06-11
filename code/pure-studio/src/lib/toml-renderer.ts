@@ -1,6 +1,10 @@
-import type { McpServerInput, ProviderSettingsInput } from "../types";
+import type { InstructionsInput, McpServerInput, ProviderSettingsInput } from "../types";
 
-export function renderPreviewToml(input: ProviderSettingsInput, mcpServers: McpServerInput[] = []) {
+export function renderPreviewToml(
+  input: ProviderSettingsInput,
+  mcpServers: McpServerInput[] = [],
+  instructions?: InstructionsInput,
+) {
   const userMcpServers = mcpServers.filter((server) => server.sourceKind !== "builtIn");
   return [
     "schema_version = 3",
@@ -10,6 +14,7 @@ export function renderPreviewToml(input: ProviderSettingsInput, mcpServers: McpS
     'active_skills = ["rust", "git", "doc"]',
     'active_mcp_servers = ["github", "filesystem"]',
     "",
+    ...instructionsToml(instructions),
     ...userMcpServers.flatMap((server) => mcpServerToml(server)),
     ...input.roles.flatMap((role) => [
       `[roles.${role.key}]`,
@@ -28,6 +33,27 @@ export function renderPreviewToml(input: ProviderSettingsInput, mcpServers: McpS
       "",
     ]),
   ].join("\n");
+}
+
+function instructionsToml(instructions?: InstructionsInput) {
+  if (!instructions) return [];
+  const lines = ["[instructions]"];
+  if (instructions.baseOverride.trim()) {
+    lines.push(`base_override = ${tomlString(instructions.baseOverride)}`);
+  }
+  if (instructions.developer.trim()) {
+    lines.push(`developer = ${tomlString(instructions.developer)}`);
+  }
+  if (instructions.user.trim()) {
+    lines.push(`user = ${tomlString(instructions.user)}`);
+  }
+  lines.push(`project_doc_max_bytes = ${instructions.projectDocMaxBytes}`);
+  if (instructions.projectDocFallbackFilenames.length > 0) {
+    lines.push(
+      `project_doc_fallback_filenames = [${instructions.projectDocFallbackFilenames.map(tomlString).join(", ")}]`,
+    );
+  }
+  return [...lines, ""];
 }
 
 function mcpServerToml(server: McpServerInput) {

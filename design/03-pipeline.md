@@ -29,9 +29,11 @@ React action
 
 `compileMode` 是会话级协作模式。`auto` 是默认执行模式，允许模型在审批策略约束内主动修改工作区；`plan` 是 Codex 风格规划模式，允许读取、搜索、运行经审批的探索命令和调度探索型子代理，但最终交付物应是一段可执行计划，而不是直接修改文件。Plan Mode 的最终计划使用 `<proposed_plan>...</proposed_plan>` 包裹，由 streaming 层提取为独立 timeline item；普通 assistant 正文不显示这些标签。
 
-`workspaceRoot` 是运行期有效工作区，而不是简单等于 UI 当前选中的目录。Studio 读取 project path 后先解析到规范化目录；如果该目录位于 Git 仓库中，则提升到最近的 Git 仓库根。这样用户从子 crate 或桌面壳层进入项目时，工具仍能访问完整仓库上下文。工作区记忆优先读取 `AGENTS.md`，兼容读取 `Agents.md`。
+`workspaceRoot` 是运行期有效工作区，而不是简单等于 UI 当前选中的目录。Studio 读取 project path 后先解析到规范化目录；如果该目录位于 Git 仓库中，则提升到最近的 Git 仓库根。这样用户从子 crate 或桌面壳层进入项目时，工具仍能访问完整仓库上下文。工作区记忆按 Codex 风格从 Git 根到当前工作目录读取层级文档，候选文件优先级为 `AGENTS.override.md`、`AGENTS.md`、`Agents.md`，并受配置的总字节预算限制。
 
-当启用 skills 时，运行时从 `<workspaceRoot>/skills/`、`~/.pure/skills/`、`~/.pure/skills/.system/` 和配置外部目录发现 skills，并在核心提示中注入简短索引。项目 skills 优先于用户、系统和外部只读 skills；自学习写入始终落到 `<workspaceRoot>/skills/`。
+提示词在核心层按三层组装：`base/system`、`developer`、`user context`。`base/system` 是模型请求的顶层系统提示词；`developer` 承载 Auto/Plan 模式、skills 索引和运行约束；`user context` 承载用户配置的上下文偏好和 AGENTS 项目记忆。这些临时前置内容参与模型请求和 token 估算，但不写入普通会话消息历史。
+
+当启用 skills 时，运行时从 `<workspaceRoot>/skills/`、`~/.pure/skills/`、`~/.pure/skills/.system/` 和配置外部目录发现 skills，并在 developer 层注入简短索引。项目 skills 优先于用户、系统和外部只读 skills；自学习写入始终落到 `<workspaceRoot>/skills/`。
 
 策略约束：
 
@@ -56,17 +58,20 @@ React action
 `StudioRuntime` 只做 use case 编排：
 
 1. 读取 session/project/config
-2. 构造 `TurnRequest` 与 `TurnOptions`
-3. 组装 `PureCore`（含工具注册）
-4. 执行 `run_turn_with_trace`
-5. 事务化批量落库：message + trace + runtime snapshot
-6. 输出命令响应 DTO 与 timeline DTO
+2. 解析或创建 session 级提示词快照
+3. 构造 `TurnRequest` 与 `TurnOptions`
+4. 组装 `PureCore`（含工具注册）
+5. 执行 `run_turn_with_trace`
+6. 事务化批量落库：message + trace + runtime snapshot
+7. 输出命令响应 DTO 与 timeline DTO
 
-`run_turn_with_trace` 在每次模型请求前执行自动上下文压缩检查。压缩阈值来自当前模型的 `autoCompactTokenLimit`，未配置时使用有效上下文窗口的 90%；模型没有上下文窗口信息时不触发自动压缩。压缩由 `pl-core` 本地摘要完成：用当前模型和固定 compact prompt 生成 handoff summary，再用一条带 metadata 的用户摘要消息加最近真实用户消息替换原始历史。工具调用、工具结果和 assistant 中间过程不以原始片段保留，避免压缩后出现破碎的 tool-call 配对。
+`run_turn_with_trace` 在每次模型请求前用 `InstructionAssembler` 解析当前提示词快照。base/system 写入 `CompletionRequest.instructions`；developer 块作为临时 system 消息置于历史消息之前；user context 块作为临时 user 消息置于 developer 块之后、真实历史之前。临时前置消息只用于本次 provider request，不写入 `CoreSession`，因此压缩和持久化只处理真实对话历史。
+
+`run_turn_with_trace` 在每次模型请求前执行自动上下文压缩检查。压缩阈值来自当前模型的 `autoCompactTokenLimit`，未配置时使用有效上下文窗口的 90%；模型没有上下文窗口信息时不触发自动压缩。压缩估算包含 base/system、developer、user context 和真实消息历史。压缩由 `pl-core` 本地摘要完成：用当前模型和固定 compact prompt 生成 handoff summary，再用一条带 metadata 的用户摘要消息加最近真实用户消息替换原始历史。工具调用、工具结果和 assistant 中间过程不以原始片段保留，避免压缩后出现破碎的 tool-call 配对。
 
 子代理没有独立的压缩实现。`spawn_agent` 和 `followup_task` 创建的 child session 复用同一个 `PureCore` turn pipeline，因此每个子代理独立维护自己的压缩历史；父会话不会替子代理压缩，也不会因为子代理压缩而改写父历史。
 
-子代理同样继承父 turn 的 `compileMode`。父会话处于 Plan Mode 时，child session 也以 Plan Mode 运行，并复用同一套工具边界和 proposed-plan 输出约定；父会话处于 Auto Mode 时，child session 按 Auto Mode 执行。
+子代理同样继承父 turn 的 `compileMode` 和 resolved instruction snapshot。父会话处于 Plan Mode 时，child session 也以 Plan Mode 运行，并复用同一套工具边界和 proposed-plan 输出约定；父会话处于 Auto Mode 时，child session 按 Auto Mode 执行。
 
 子代理同样继承父 turn 的用户交互回调。`request_user_input` 在 root 或 child agent 中被调用时，核心层广播 `UserInputRequested`，Studio 用底部回答 UI 替换普通输入框并把回答发送回原工具调用；回答完成后广播 `UserInputAnswered`。该交互只解除当前工具等待，不触发新 turn，也不进入 agent timeline。
 
@@ -99,6 +104,7 @@ Agent 协作 timeline 与状态分层：
 
 - 消息和 trace 采用事务批量写入，避免逐条写放大
 - session 的 `mode` 表示下一轮默认协作模式，由 Studio 模式切换命令持久化；运行时按 session 当前 `mode` 构造 `TurnRequest`
+- session 的 `instruction_snapshot_json` 保存首轮解析出的 base/developer/user context。已有 session 缺少快照时，在下一轮运行前按当前配置补建。后续配置、模型默认提示词或 AGENTS 文件变化不 retroactively 改写既有 session；新 session 才使用新配置。
 - Plan Mode 生成的计划有独立生命周期事件：`accepted | implementing | implemented | implementationFailed | dismissed`。这些事件作为 `TraceEventKind::PlanLifecycleChanged` 追加到 `timeline_events`，不单独建表；前端按 `planId` 折叠最新状态
 - 如果 turn 内发生上下文压缩，`CoreSession` revision 会变化，Studio 以事务重写当前 session 的消息历史并追加本轮 trace；未发生压缩时继续使用追加写入
 - timeline 读取以 `sequence` 为单调游标

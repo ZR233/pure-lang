@@ -7,6 +7,8 @@ use pl_protocol::{BudgetLimitKind, BudgetUsage, TraceEvent, UserInputRequest, Us
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
+use crate::instruction::InstructionSnapshot;
+
 /// Agent 树结构限制常量。
 pub const AGENT_MAX_COUNT: usize = 16;
 pub const AGENT_MAX_DEPTH: u32 = 3;
@@ -174,6 +176,7 @@ pub struct TurnRequest {
     pub prompt: String,
     pub mode: CompileMode,
     pub workspace_instructions: Option<String>,
+    pub instruction_snapshot: Option<InstructionSnapshot>,
     pub budget: TurnBudget,
 }
 
@@ -183,12 +186,18 @@ impl TurnRequest {
             prompt: prompt.into(),
             mode,
             workspace_instructions: None,
+            instruction_snapshot: None,
             budget: TurnBudget::root_default(),
         }
     }
 
     pub fn with_workspace_instructions(mut self, instructions: String) -> Self {
         self.workspace_instructions = Some(instructions);
+        self
+    }
+
+    pub fn with_instruction_snapshot(mut self, snapshot: InstructionSnapshot) -> Self {
+        self.instruction_snapshot = Some(snapshot);
         self
     }
 

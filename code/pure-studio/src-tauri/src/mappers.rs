@@ -14,11 +14,12 @@ use pl_protocol::{Message, MessageContent, MessageRole};
 
 use crate::dto::{
     AgentDto, AgentEventDto, ConfigDto, DeepSeekBalanceDto, DeepSeekBalanceInfoDto,
-    DiscoveredSkillsDto, KeyValueDto, LspHealthUpdateDto, LspServerDto, McpHealthUpdateDto,
-    McpServerDto, McpSettingsInput, ModelDto, PlanStateDto, ProjectDto, ProviderDto, ProviderInput,
-    ProviderSettingsInput, ProviderTemplateDto, ProviderUsageDto, ProviderUsagesDto, RoleDto,
-    RoleInput, RuntimeCostAmountDto, RuntimeUsageDto, SessionDto, SessionRuntimeDto, SkillDto,
-    ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
+    DiscoveredSkillsDto, InstructionsDto, InstructionsInput, KeyValueDto, LspHealthUpdateDto,
+    LspServerDto, McpHealthUpdateDto, McpServerDto, McpSettingsInput, ModelDto, PlanStateDto,
+    ProjectDto, ProviderDto, ProviderInput, ProviderSettingsInput, ProviderTemplateDto,
+    ProviderUsageDto, ProviderUsagesDto, RoleDto, RoleInput, RuntimeCostAmountDto, RuntimeUsageDto,
+    SessionDto, SessionRuntimeDto, SkillDto, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto,
+    ZhipuToolUsageDetailDto,
 };
 use crate::state::{CommandError, CommandResult};
 
@@ -64,12 +65,23 @@ fn config_dto_from_config(
     Ok(ConfigDto {
         toml: config.to_toml_pretty()?,
         permission_mode: config.runtime.permission_mode.label().to_string(),
+        instructions: instructions_dto(config),
         providers: provider_dtos(config),
         roles: role_dtos(config),
         templates: provider_template_dtos()?,
         mcp_servers: mcp_server_dtos_with_availability(config, availability),
         config_exists: store.config_exists(),
     })
+}
+
+pub fn instructions_dto(config: &PureConfig) -> InstructionsDto {
+    InstructionsDto {
+        base_override: config.instructions.base_override.clone(),
+        developer: config.instructions.developer.clone(),
+        user: config.instructions.user.clone(),
+        project_doc_max_bytes: config.instructions.project_doc_max_bytes,
+        project_doc_fallback_filenames: config.instructions.project_doc_fallback_filenames.clone(),
+    }
 }
 
 pub fn discovered_skills_dto(catalog: SkillCatalog) -> DiscoveredSkillsDto {
@@ -517,6 +529,7 @@ pub fn model_dto(model: &ModelConfig) -> ModelDto {
             .collect(),
         truncation_mode: format!("{:?}", model.truncation_policy.mode).to_ascii_lowercase(),
         truncation_limit: model.truncation_policy.limit,
+        base_instructions: model.base_instructions.clone(),
     }
 }
 
@@ -556,9 +569,25 @@ pub fn provider_edit(
                 slug: model.slug,
                 display_name: model.display_name,
                 reasoning_efforts: model.reasoning_efforts,
+                base_instructions: model.base_instructions,
             })
             .collect(),
     })
+}
+
+pub fn instructions_config(input: InstructionsInput) -> pl_core::InstructionsConfig {
+    pl_core::InstructionsConfig {
+        base_override: input.base_override.trim().to_string(),
+        developer: input.developer.trim().to_string(),
+        user: input.user.trim().to_string(),
+        project_doc_max_bytes: input.project_doc_max_bytes,
+        project_doc_fallback_filenames: input
+            .project_doc_fallback_filenames
+            .into_iter()
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty())
+            .collect(),
+    }
 }
 
 fn provider_kind_name(kind: ProviderKind) -> &'static str {

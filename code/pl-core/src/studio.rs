@@ -26,6 +26,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use crate::CompileMode;
+    use crate::{InstructionBlock, InstructionSnapshot, InstructionSource, InstructionSourceKind};
 
     use super::*;
 
@@ -144,6 +145,55 @@ mod tests {
         let updated = store.read_session(&session.id).await.unwrap().unwrap();
 
         assert_eq!(updated.mode, "plan");
+    }
+
+    #[tokio::test]
+    async fn instruction_snapshot_round_trips_with_session() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/alpha").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Build app", CompileMode::Auto)
+            .await
+            .unwrap();
+        let snapshot = InstructionSnapshot {
+            base: InstructionBlock {
+                source: InstructionSource {
+                    kind: InstructionSourceKind::BuiltInBase,
+                    label: "base".to_string(),
+                    path: None,
+                },
+                content: "base".to_string(),
+            },
+            developer: vec![InstructionBlock {
+                source: InstructionSource {
+                    kind: InstructionSourceKind::Mode,
+                    label: "mode".to_string(),
+                    path: None,
+                },
+                content: "developer".to_string(),
+            }],
+            user: vec![InstructionBlock {
+                source: InstructionSource {
+                    kind: InstructionSourceKind::ProjectDoc,
+                    label: "AGENTS.md".to_string(),
+                    path: Some("C:/work/alpha/AGENTS.md".to_string()),
+                },
+                content: "project".to_string(),
+            }],
+        };
+
+        assert_eq!(session.instruction_snapshot, None);
+        let saved = store
+            .save_instruction_snapshot(&session.id, &snapshot)
+            .await
+            .unwrap()
+            .unwrap();
+        let read = store.read_session(&session.id).await.unwrap().unwrap();
+        let listed = store.list_sessions(&project.id).await.unwrap();
+
+        assert_eq!(saved.instruction_snapshot, Some(snapshot.clone()));
+        assert_eq!(read.instruction_snapshot, Some(snapshot.clone()));
+        assert_eq!(listed[0].instruction_snapshot, Some(snapshot));
     }
 
     #[tokio::test]

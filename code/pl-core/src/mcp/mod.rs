@@ -1393,6 +1393,7 @@ mod tests {
             mode: crate::turn::CompileMode::Auto,
             workspace_root: std::env::temp_dir(),
             workspace_instructions: None,
+            instruction_snapshot: None,
             active_subagent: None,
             agent_control: crate::AgentControl::default(),
             lsp_runtime: None,

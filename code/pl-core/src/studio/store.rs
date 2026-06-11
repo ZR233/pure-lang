@@ -29,7 +29,7 @@ use crate::studio::store_support::{
     configure_sqlite, insert_message_with_tx, non_empty_title, run_migrations,
     touch_session_with_tx,
 };
-use crate::{CompileMode, CoreSession, TraceEvent, TurnResult};
+use crate::{CompileMode, CoreSession, InstructionSnapshot, TraceEvent, TurnResult};
 #[derive(Clone)]
 pub struct StudioStore {
     db: DatabaseConnection,
@@ -142,6 +142,7 @@ impl StudioStore {
             created_at: Set(now),
             updated_at: Set(now),
             archived: Set(0),
+            instruction_snapshot_json: Set(None),
         }
         .insert(&self.db)
         .await?;
@@ -291,6 +292,26 @@ impl StudioStore {
             active.update(&self.db).await?;
         }
         Ok(())
+    }
+
+    pub async fn save_instruction_snapshot(
+        &self,
+        session_id: &str,
+        snapshot: &InstructionSnapshot,
+    ) -> Result<Option<SessionRecord>> {
+        use entities::session;
+        let Some(existing) = session::Entity::find_by_id(session_id.to_string())
+            .one(&self.db)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let now = unix_seconds();
+        let mut active: session::ActiveModel = existing.into();
+        active.instruction_snapshot_json = Set(Some(serde_json::to_string(snapshot)?));
+        active.updated_at = Set(now);
+        let model = active.update(&self.db).await?;
+        Ok(Some(session_record(model)))
     }
 
     pub async fn record_tool_approval(&self, record: ToolApprovalRecord) -> Result<()> {

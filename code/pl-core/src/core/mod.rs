@@ -368,8 +368,8 @@ use tool_dispatch::{
 };
 #[cfg(test)]
 use turn_result::{
-    failed_turn_result, format_instructions, looks_like_unexecuted_tool_call_text,
-    prompt_requires_subagent_dispatch, provider_error_severity, tool_allowed_in_mode,
+    failed_turn_result, looks_like_unexecuted_tool_call_text, prompt_requires_subagent_dispatch,
+    provider_error_severity, tool_allowed_in_mode,
 };
 
 #[cfg(test)]
@@ -390,6 +390,7 @@ mod tests {
             mode: crate::turn::CompileMode::Auto,
             workspace_root: std::env::temp_dir(),
             workspace_instructions: None,
+            instruction_snapshot: None,
             active_subagent: None,
             agent_control: crate::AgentControl::default(),
             lsp_runtime: None,
@@ -506,33 +507,6 @@ mod tests {
 
         assert_eq!(core.provider.default_model(), "deepseek-v4-flash");
         assert_eq!(core.reasoning_effort.unwrap().as_str(), "high");
-    }
-
-    #[test]
-    fn format_instructions_without_workspace() {
-        assert_eq!(format_instructions("base", None, None), "base");
-    }
-
-    #[test]
-    fn format_instructions_with_workspace() {
-        assert_eq!(
-            format_instructions("base", None, Some("project rules")),
-            "base\n\n# 项目记忆\nproject rules"
-        );
-    }
-
-    #[test]
-    fn format_instructions_injects_skills_before_workspace() {
-        assert_eq!(
-            format_instructions("base", Some("# Skills\n- rust"), Some("project rules")),
-            "base\n\n# Skills\n- rust\n\n# 项目记忆\nproject rules"
-        );
-    }
-
-    #[test]
-    fn format_instructions_ignores_empty_workspace() {
-        assert_eq!(format_instructions("base", None, Some("")), "base");
-        assert_eq!(format_instructions("base", None, Some("   ")), "base");
     }
 
     #[test]
@@ -865,6 +839,7 @@ mod tests {
                 session_id: "turn-1",
                 workspace_root: &workspace_root,
                 workspace_instructions: None,
+                instruction_snapshot: None,
                 active_subagent: None,
                 agent_control: crate::AgentControl::default(),
                 parent_session: std::sync::Arc::new(CoreSession::new()),
@@ -926,6 +901,7 @@ mod tests {
                 session_id: "turn-1",
                 workspace_root: &workspace_root,
                 workspace_instructions: None,
+                instruction_snapshot: None,
                 active_subagent: None,
                 agent_control: crate::AgentControl::default(),
                 parent_session: std::sync::Arc::new(CoreSession::new()),
@@ -981,6 +957,7 @@ mod tests {
                 session_id: "turn-1",
                 workspace_root: &std::env::temp_dir(),
                 workspace_instructions: None,
+                instruction_snapshot: None,
                 active_subagent: None,
                 agent_control: crate::AgentControl::default(),
                 parent_session: std::sync::Arc::new(CoreSession::new()),
@@ -1023,6 +1000,7 @@ mod tests {
                 session_id: "turn-1",
                 workspace_root: &std::env::temp_dir(),
                 workspace_instructions: None,
+                instruction_snapshot: None,
                 active_subagent: None,
                 agent_control: crate::AgentControl::default(),
                 parent_session: std::sync::Arc::new(CoreSession::new()),
@@ -1085,6 +1063,7 @@ mod tests {
                 session_id: "turn-1",
                 workspace_root: &std::env::temp_dir(),
                 workspace_instructions: None,
+                instruction_snapshot: None,
                 active_subagent: None,
                 agent_control: crate::AgentControl::default(),
                 parent_session: std::sync::Arc::new(CoreSession::new()),
@@ -1135,6 +1114,7 @@ mod tests {
                 session_id: "turn-1",
                 workspace_root: &std::env::temp_dir(),
                 workspace_instructions: None,
+                instruction_snapshot: None,
                 active_subagent: None,
                 agent_control: crate::AgentControl::default(),
                 parent_session: std::sync::Arc::new(CoreSession::new()),

@@ -93,6 +93,7 @@ export function App() {
           providerUsagesLoading={state.providerUsagesLoading}
           providerUsageError={state.providerUsageError}
           roles={state.roles}
+          instructions={state.instructions}
           selectedProjectId={state.selectedProjectId}
           selectedProviderId={state.selectedProviderId}
           providerSearch={state.providerSearch}
@@ -108,6 +109,9 @@ export function App() {
           }
           onSaveProviderSettings={(snapshot) =>
             studio.onSaveProviderSettings(snapshot)
+          }
+          onSaveInstructionsSettings={(input) =>
+            studio.onSaveInstructionsSettings(input)
           }
           onSavePermissionMode={(mode) => studio.onSavePermissionMode(mode)}
           onSaveMcpSettings={(servers) => studio.onSaveMcpSettings(servers)}

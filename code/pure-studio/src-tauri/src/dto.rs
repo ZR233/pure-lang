@@ -190,6 +190,7 @@ pub struct ModelDto {
     pub input_modalities: Vec<String>,
     pub truncation_mode: String,
     pub truncation_limit: u64,
+    pub base_instructions: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -197,11 +198,22 @@ pub struct ModelDto {
 pub struct ConfigDto {
     pub toml: String,
     pub permission_mode: String,
+    pub instructions: InstructionsDto,
     pub providers: Vec<ProviderDto>,
     pub roles: Vec<RoleDto>,
     pub templates: Vec<ProviderTemplateDto>,
     pub mcp_servers: Vec<McpServerDto>,
     pub config_exists: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstructionsDto {
+    pub base_override: String,
+    pub developer: String,
+    pub user: String,
+    pub project_doc_max_bytes: usize,
+    pub project_doc_fallback_filenames: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -334,6 +346,16 @@ pub struct ProviderSettingsInput {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct InstructionsInput {
+    pub base_override: String,
+    pub developer: String,
+    pub user: String,
+    pub project_doc_max_bytes: usize,
+    pub project_doc_fallback_filenames: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProviderInput {
     pub id: String,
     pub template_kind: String,
@@ -350,6 +372,8 @@ pub struct ModelInput {
     pub slug: String,
     pub display_name: String,
     pub reasoning_efforts: Vec<String>,
+    #[serde(default)]
+    pub base_instructions: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

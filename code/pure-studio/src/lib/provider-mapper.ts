@@ -20,6 +20,7 @@ export function cloneModel(model: ModelRecord): ModelRecord {
     inputModalities: [...(model.inputModalities ?? [])],
     truncationMode: model.truncationMode,
     truncationLimit: model.truncationLimit,
+    baseInstructions: model.baseInstructions ?? "",
   };
 }
 

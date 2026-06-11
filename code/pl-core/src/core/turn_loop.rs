@@ -8,6 +8,7 @@ use std::sync::Arc;
 use crate::context_compaction::{
     CompactionOutcome, ContextCompactionRequest, maybe_compact_session,
 };
+use crate::instruction::{InstructionAssembler, InstructionAssemblyRequest};
 use crate::runtime_usage::{agent_runtime_delta, identity_for_subagent, token_usage_snapshot};
 use crate::session::CoreSession;
 use crate::trace::TraceRecorder;
@@ -26,8 +27,8 @@ use super::tool_dispatch::{
 };
 use super::turn_result::{
     budget_limited_turn_result, default_workspace_root, failed_turn_result,
-    failed_turn_result_with_abort_reason, format_instructions, interrupted_turn_result,
-    is_cancelled, looks_like_unexecuted_tool_call_text, prompt_requires_subagent_dispatch,
+    failed_turn_result_with_abort_reason, interrupted_turn_result, is_cancelled,
+    looks_like_unexecuted_tool_call_text, prompt_requires_subagent_dispatch,
     provider_error_severity, should_request_parallel_tool_calls, tool_allowed_in_mode,
     unix_seconds,
 };
@@ -84,23 +85,26 @@ pub(super) async fn run_turn_with_trace(
     let mut safe_message_count = session.len();
     let mut session_message_count = safe_message_count;
 
-    let skills_instructions = core.config.as_ref().and_then(|config| {
-        match crate::skill::build_skills_prompt(&workspace_root, &config.skills) {
-            Ok(instructions) => instructions,
-            Err(error) => {
-                eprintln!("[pl-core] failed to load skills prompt: {error}");
-                None
-            }
-        }
-    });
-    let mut instructions = format_instructions(
-        request.mode.instructions(),
-        skills_instructions.as_deref(),
-        request.workspace_instructions.as_deref(),
-    );
-    if requires_subagent_dispatch {
-        instructions.push_str(SUBAGENT_DISPATCH_CONSTRAINT);
-    }
+    let model_info = provider.model_info(&model);
+    let instruction_snapshot = match request.instruction_snapshot.clone() {
+        Some(snapshot) => snapshot,
+        None => InstructionAssembler::assemble(InstructionAssemblyRequest {
+            config: core.config.as_ref(),
+            model: &model_info,
+            mode: request.mode,
+            workspace_root: &workspace_root,
+            current_dir: &workspace_root,
+            workspace_instructions: request.workspace_instructions.as_deref(),
+            subagent_constraint: None,
+        })?,
+    };
+    let turn_instruction_snapshot = if requires_subagent_dispatch {
+        instruction_snapshot
+            .clone()
+            .with_subagent_constraint(SUBAGENT_DISPATCH_CONSTRAINT)
+    } else {
+        instruction_snapshot.clone()
+    };
     let reasoning = reasoning_effort.as_ref().map(|effort| ReasoningConfig {
         effort: Some(effort.as_str().to_string()),
         summary: Some(if effort.is_none() {
@@ -110,7 +114,6 @@ pub(super) async fn run_turn_with_trace(
         }),
     });
 
-    let mut messages;
     let mut provider_prompt_tokens_for_compaction = None;
     let mut last_compacted_state = None;
     let mut iteration = 0_u32;
@@ -150,11 +153,14 @@ pub(super) async fn run_turn_with_trace(
         } else {
             tool_schemas.clone()
         };
-        let iteration_instructions = if must_dispatch_agent_now {
-            format!("{instructions}\n\n{SUBAGENT_FORCE_DISPATCH_INSTRUCTION}")
+        let iteration_snapshot = if must_dispatch_agent_now {
+            turn_instruction_snapshot
+                .clone()
+                .with_subagent_force(SUBAGENT_FORCE_DISPATCH_INSTRUCTION)
         } else {
-            instructions.clone()
+            turn_instruction_snapshot.clone()
         };
+        let instruction_bundle = iteration_snapshot.to_bundle();
 
         let compaction_trigger = provider_prompt_tokens_for_compaction.take().map_or(
             crate::context_compaction::CompactionTrigger::EstimatedTokens,
@@ -169,7 +175,8 @@ pub(super) async fn run_turn_with_trace(
                 ContextCompactionRequest {
                     provider: &provider,
                     model: &model,
-                    request_instructions: &iteration_instructions,
+                    request_instructions: &instruction_bundle.instructions,
+                    request_messages: &instruction_bundle.prelude_messages,
                     trigger: compaction_trigger,
                     event_tx: recorder.sender().clone(),
                 },
@@ -214,12 +221,14 @@ pub(super) async fn run_turn_with_trace(
                 }
             }
         }
-        messages = session.messages().to_vec();
         if let Err(limit) = budget_tracker.check_wall_clock() {
             budget_limit = Some(limit);
             break;
         }
         budget_tracker.record_model_step();
+        let history_messages = session.messages().to_vec();
+        let mut messages = instruction_bundle.prelude_messages.clone();
+        messages.extend(history_messages.clone());
 
         let inference_id = format!("{session_id}-inf-{iteration}");
         let mut inference_item = recorder.inference_item(&session_id, &inference_id, &model);
@@ -229,7 +238,7 @@ pub(super) async fn run_turn_with_trace(
 
         let completion_request = CompletionRequest {
             model: model.clone(),
-            instructions: Some(iteration_instructions),
+            instructions: Some(instruction_bundle.instructions.clone()),
             messages: messages.clone(),
             tools: iteration_tools,
             tool_choice: "auto".to_string(),
@@ -423,7 +432,8 @@ pub(super) async fn run_turn_with_trace(
                 workspace_instructions: workspace_instructions.clone(),
                 active_subagent: active_subagent.clone(),
                 agent_control: agent_control.clone(),
-                parent_session: Arc::new(CoreSession::from_messages(messages.clone())),
+                instruction_snapshot: Some(instruction_snapshot.clone()),
+                parent_session: Arc::new(CoreSession::from_messages(history_messages)),
             },
         )
         .await

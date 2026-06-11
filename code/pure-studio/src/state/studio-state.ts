@@ -4,6 +4,7 @@ import type {
   AgentTimelineEvent,
   BootstrapPayload,
   ConfigPayload,
+  InstructionsRecord,
   LspHealthUpdatedPayload,
   LspServerRecord,
   McpHealthUpdatedPayload,
@@ -40,7 +41,14 @@ import {
   type TimelineStateSlice,
 } from "./timeline-state";
 
-export type SettingsTab = "providers" | "skills" | "roles" | "mcp" | "security" | "general";
+export type SettingsTab =
+  | "providers"
+  | "instructions"
+  | "skills"
+  | "roles"
+  | "mcp"
+  | "security"
+  | "general";
 export type PlanActionMode = "choice" | "discuss";
 
 export type PlanActionState = {
@@ -67,6 +75,7 @@ export type StudioState = TimelineStateSlice & {
   lspServers: LspServerRecord[];
   roles: RoleRecord[];
   providerTemplates: ProviderTemplateRecord[];
+  instructions: InstructionsRecord;
   selectedProjectId: string | null;
   selectedSessionId: string | null;
   manualPath: string;
@@ -160,6 +169,13 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   lspServers: [],
   roles: [],
   providerTemplates: [],
+  instructions: {
+    baseOverride: "",
+    developer: "",
+    user: "",
+    projectDocMaxBytes: 65536,
+    projectDocFallbackFilenames: [],
+  },
   selectedProjectId: null,
   selectedSessionId: null,
   manualPath: "",
@@ -899,6 +915,7 @@ function configFields(selectedProviderId: string | null, payload: ConfigPayload)
     providers: payload.providers,
     mcpServers: payload.mcpServers ?? [],
     roles: payload.roles,
+    instructions: payload.instructions,
     providerTemplates: payload.templates,
     configToml: payload.toml,
     permissionMode: payload.permissionMode,

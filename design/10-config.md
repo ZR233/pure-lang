@@ -34,6 +34,7 @@ SQLite 只保存 Studio 状态，例如项目、会话、消息、工具审批�
 - 解析和保存 `~/.pure/config.toml`。
 - 校验角色到 provider/model/effort 的路由。
 - 将配置转换为运行时 `ProviderInfo` 和模型列表。
+- 定义提示词配置，并在运行时生成 session 级 instruction snapshot。
 
 `pl-model` 只消费已经解析好的 provider 和模型信息，不负责文件 IO 或路径定位。
 
@@ -71,6 +72,13 @@ schema_version = 3
 permission_mode = "request-approval"
 active_skills = ["rust", "git", "doc"]
 active_mcp_servers = ["github", "filesystem"]
+
+[instructions]
+base_override = ""
+developer = ""
+user = ""
+project_doc_max_bytes = 65536
+project_doc_fallback_filenames = []
 
 [mcp_servers.filesystem]
 enabled = true
@@ -212,7 +220,19 @@ Bundled OpenAI/GPT 模型参数以本地 Codex 仓库 `codex-rs/models-manager/m
 
 配置里的模型会覆盖或补充 bundled model。角色引用的 model 必须存在于对应 provider 的 `models` 中。
 
-## 10.6 运行态声明
+## 10.6 提示词配置
+
+`[instructions]` 保存 Codex 风格提示词分层的用户可配置部分。缺失整个表或字段时使用默认值。
+
+- `base_override`：完整替换当前模型的 `base_instructions`。仅用于需要完全接管系统提示词的高级场景；普通长期偏好不应写在这里。
+- `developer`：追加到 developer 层，适合本地运行约束、协作偏好和稳定行为规则。
+- `user`：追加到 user context 层，适合用户背景、项目上下文和非强制偏好。
+- `project_doc_max_bytes`：AGENTS 项目文档总读取上限，默认 `65536`，设为 `0` 表示禁用项目文档注入。
+- `project_doc_fallback_filenames`：除 `AGENTS.override.md`、`AGENTS.md`、`Agents.md` 外额外尝试的项目文档文件名。
+
+运行时会在 session 首轮保存 `instruction_snapshot_json`：base/system、developer blocks、user context blocks 以及 AGENTS source paths 都固定在该快照中。已有 session 后续不会因为配置或项目文档变化自动改变提示词；新 session 才使用新配置。
+
+## 10.7 运行态声明
 
 `[runtime]` 保存本地 Studio 运行态展示所需的可选声明。字段：
 
@@ -232,7 +252,7 @@ Pure v1 的权限模式是本地策略层，不是 OS 沙箱。`request-approval
 
 真实 skills 能力由 `[skills]` 配置和项目目录驱动。`active_skills` 不作为启停来源，不影响模型可见的 skills 列表，也不作为当前会话状态栏 Skills 的来源。Studio 当前会话的 `activeSkills` 由该会话中成功执行过的 `skill_view` 工具结果派生，表示 skill 内容已经进入上下文。
 
-## 10.7 MCP 配置
+## 10.8 MCP 配置
 
 MCP server 配置保存在顶层 `[mcp_servers.<server_id>]` 表，参考 Codex 的 MCP 配置形态。`server_id` 必须非空，且只能包含 ASCII 字母、数字、`_` 和 `-`，因为它会参与模型可见工具名。Pure 还会在运行时合成一组内置 MCP server；内置 server 不写入 `[mcp_servers]`，但会出现在 Studio MCP 设置页和状态栏中。用户配置不得占用内置保留 id。
 
@@ -275,7 +295,7 @@ mcp__{server_id}__{tool_name}
 
 该命名避免远端 tool 与本地工具或其他 server tool 冲突。若 server id、远端 tool name 或合成后的工具名不满足 provider function name 约束，注册阶段必须返回清晰配置/运行时错误。
 
-## 10.8 Skills 配置
+## 10.9 Skills 配置
 
 `[skills]` 控制本地 skills 系统：
 
@@ -292,7 +312,7 @@ mcp__{server_id}__{tool_name}
 
 系统 skills 来自编译进 `pl-core` 的内置资源，并同步缓存到 `~/.pure/skills/.system/`。该目录由 Pure 管理，用户需要覆盖系统 skill 时应在项目 `skills/` 目录创建同名 skill。
 
-## 10.9 配置草稿
+## 10.10 配置草稿
 
 配置构造和校验的纯逻辑属于 `pl-core`。`pure-studio` 设置页可以使用默认配置草稿，并支持：
 
@@ -313,7 +333,7 @@ mcp__{server_id}__{tool_name}
 - 同一 provider 下模型 slug 不重复。
 - 角色引用的默认模型必须声明至少一个 `reasoning_efforts`，用于生成角色 `effort`。
 
-## 10.10 pure-studio 设置页
+## 10.11 pure-studio 设置页
 
 `pure-studio` 设置页复用 `pl-core` 的配置类型和校验逻辑，首版覆盖：
 
@@ -322,6 +342,7 @@ mcp__{server_id}__{tool_name}
 - provider 默认模型和自定义模型。
 - 四个模型角色到 provider/model/effort 的路由。
 - Security 标签页选择权限模式：请求批准、替我审批、完全访问。选择后即时写入 `[runtime].permission_mode`。
+- Instructions 标签页编辑 `[instructions]` 的 base override、developer、user 和项目文档预算；保存前由 `pl-core` 校验并即时写入配置。
 - MCP 标签页管理用户 `[mcp_servers]`，包括 server id、启用状态、stdio/Streamable HTTP 传输方式、命令参数、环境变量、HTTP URL 和 token 环境变量；同时展示不可删除的内置 Zhipu Coding Plan MCP server。
 - Provider 列表卡片展示供应商身份、默认模型、模型数量和只读额度状态，不把 base URL 作为主卡片信息。base URL 仍保留在编辑页和 TOML 配置中。
 - Provider 额度查询由后端执行，前端只消费脱敏 DTO。DeepSeek provider 查询账户余额；Zhipu Coding Plan provider 查询 5 小时、7 天和 MCP 工具额度；普通 Zhipu provider 不查询 Coding Plan 额度。
@@ -366,7 +387,7 @@ Vite 预览只用于布局和视觉对照，最终应用行为仍以 Tauri 运�
 
 聊天界面使用双栏布局：左侧项目/会话栏和主聊天区，不再展示右侧工具历史面板。主聊天区底部状态栏左侧展示 `Auto / Plan` 模式、当前模型、推理强度、权限模式和更多入口，右侧展示上下文使用量、按货币分组的费用估算、Skill/MCP 数量和子代理数量；Skill/MCP 默认只显示数量，悬浮或键盘聚焦时展示完整列表。由于左侧栏会占用窗口宽度，状态栏响应式优先按聊天 footer 自身宽度判断，并保留整窗宽度兜底：footer 约 `1040px` 以下能力和子代理进入更多菜单，footer 约 `760px` 以下费用也进入更多菜单，footer 约 `520px` 以下上下文也进入更多菜单。整窗 `1320px` 以下直接把费用、能力和子代理收入更多菜单，用于不支持 container query 的 WebView2 兜底。更多菜单直接展示被收起状态的摘要和详情，并且不得被状态栏滚动容器或窗口边界裁剪。子代理列表展示每个 agent 的运行费用摘要。
 
-## 10.11 凭据策略
+## 10.12 凭据策略
 
 配置允许持久化明文 `bearer_token`，但这会把 API token 直接写入 `~/.pure/config.toml`。当前运行时只使用配置中保存的 `bearer_token` 作为 provider API key。
 

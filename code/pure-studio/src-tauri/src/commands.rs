@@ -13,17 +13,18 @@ use tokio_util::sync::CancellationToken;
 
 use crate::approvals::{approval_callback, deny_session_approvals, resolve_tool_approval};
 use crate::dto::{
-    BootstrapDto, ConfigDto, DiscoveredSkillsDto, McpSettingsInput, PlanLifecycleResponse,
-    ProjectSelectionDto, PromptFailedPayload, ProviderSettingsInput, ProviderUsagesDto,
-    RunPromptResponse, SessionSelectionDto, SessionTimelineDto, StopPromptResponse,
+    BootstrapDto, ConfigDto, DiscoveredSkillsDto, InstructionsInput, McpSettingsInput,
+    PlanLifecycleResponse, ProjectSelectionDto, PromptFailedPayload, ProviderSettingsInput,
+    ProviderUsagesDto, RunPromptResponse, SessionSelectionDto, SessionTimelineDto,
+    StopPromptResponse,
 };
 use crate::events::drain_events;
 use crate::mappers::{
     agent_dtos, agent_event_dtos, config_dto_for_studio, discovered_skills_dto,
-    load_session_runtime_dto, lsp_health_update_dto, mcp_settings_to_builtin_states,
-    mcp_settings_to_servers, plan_lifecycle_events_to_states, project_dtos,
-    provider_settings_to_edit, provider_usages_dto, session_dtos, timeline_events_to_items,
-    turn_result_status_label,
+    instructions_config, load_session_runtime_dto, lsp_health_update_dto,
+    mcp_settings_to_builtin_states, mcp_settings_to_servers, plan_lifecycle_events_to_states,
+    project_dtos, provider_settings_to_edit, provider_usages_dto, session_dtos,
+    timeline_events_to_items, turn_result_status_label,
 };
 use crate::state::{AppState, CommandError, CommandResult};
 use crate::user_input::{cancel_session_user_inputs, resolve_user_input, user_input_callback};
@@ -710,6 +711,18 @@ pub async fn save_provider_settings(
     config.runtime.active_mcp_servers = pl_core::active_mcp_server_names(&config);
     state.studio.config_store().save(&config)?;
     state.studio.reconcile_mcp_runtime().await?;
+    config_dto_for_studio(&state.studio).await
+}
+
+#[tauri::command]
+pub async fn save_instructions_settings(
+    input: InstructionsInput,
+    state: State<'_, AppState>,
+) -> CommandResult<ConfigDto> {
+    let mut config = state.studio.config_store().load_or_default()?;
+    config.instructions = instructions_config(input);
+    config.validate()?;
+    state.studio.config_store().save(&config)?;
     config_dto_for_studio(&state.studio).await
 }
 

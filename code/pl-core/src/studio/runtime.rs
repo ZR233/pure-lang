@@ -12,9 +12,9 @@ use crate::studio::records::{
     ProjectRecord, SessionRecord, SessionRuntimeRecord, StudioPromptOutcome,
 };
 use crate::{
-    CompileMode, CoreSession, PureCore, ToolApprovalCallback, TraceRecorder, TurnBudget,
-    TurnOptions, TurnRequest, TurnResultStatus, load_workspace_instructions,
-    resolve_workspace_root,
+    CompileMode, CoreSession, InstructionAssembler, InstructionAssemblyRequest,
+    InstructionSnapshot, PureCore, ToolApprovalCallback, TraceRecorder, TurnBudget, TurnOptions,
+    TurnRequest, TurnResultStatus, load_workspace_instructions, resolve_workspace_root,
 };
 
 const SELF_LEARNING_REVIEW_PROMPT: &str = r#"你是 Pure-Lang 项目 skills 自学习 reviewer。
@@ -193,6 +193,17 @@ impl StudioRuntime {
         if !workspace_instructions.trim().is_empty() {
             request = request.with_workspace_instructions(workspace_instructions.clone());
         }
+        let instruction_snapshot = self
+            .resolve_instruction_snapshot(
+                session_id,
+                session_record.instruction_snapshot.as_ref(),
+                &config,
+                &workspace_root,
+                Path::new(&project.path),
+                mode,
+            )
+            .await?;
+        request = request.with_instruction_snapshot(instruction_snapshot);
         self.mcp_runtime
             .reconcile(crate::config::effective_mcp_servers(&config))
             .await;
@@ -259,6 +270,43 @@ impl StudioRuntime {
             messages,
             timeline_events,
         })
+    }
+
+    async fn resolve_instruction_snapshot(
+        &self,
+        session_id: &str,
+        existing: Option<&InstructionSnapshot>,
+        config: &crate::config::PureConfig,
+        workspace_root: &Path,
+        project_path: &Path,
+        mode: CompileMode,
+    ) -> Result<InstructionSnapshot> {
+        if let Some(snapshot) = existing {
+            return Ok(snapshot.clone());
+        }
+        let resolved = config.resolve_role(ModelRole::Planner)?;
+        let model = resolved
+            .models
+            .iter()
+            .find(|model| model.slug == resolved.role_config.model)
+            .cloned()
+            .unwrap_or_else(|| pl_model::ModelInfo::fallback(&resolved.role_config.model));
+        let current_dir =
+            std::fs::canonicalize(project_path).unwrap_or_else(|_| workspace_root.to_path_buf());
+        let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
+            config: Some(config),
+            model: &model,
+            mode,
+            workspace_root,
+            current_dir: &current_dir,
+            workspace_instructions: None,
+            subagent_constraint: None,
+        })?;
+        self.store
+            .save_instruction_snapshot(session_id, &snapshot)
+            .await?
+            .context("selected session disappeared while saving instruction snapshot")?;
+        Ok(snapshot)
     }
 }
 
