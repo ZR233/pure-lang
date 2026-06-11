@@ -680,7 +680,6 @@ function appendOptimisticPrompt(state: StudioState, prompt: string, startedAt: n
     ...state,
     timelineItems,
     timelineOrder: [...state.timelineOrder, userItem.itemId, waitingItem.itemId],
-    timelineNextSequence: nextSequence + 2,
   };
 }
 

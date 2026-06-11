@@ -23,7 +23,9 @@ timeline item 类型固定为：
 
 每个 item 必须携带 `turnId`、`itemId`、`sequence`、`createdAt`、`updatedAt` 和 `status`。`sequence` 是会话内单调递增的 timeline event 顺序号；item 的展示顺序以首次创建时的 `sequence` 为准；后续 delta 和 completed/failed 事件只 upsert 同一个 item，并且不得改变该 item 的首次展示顺序。
 
-历史加载和运行完成响应必须暴露 `nextSequence`/`timelineNextSequence` 作为事件游标。前端只能用该事件游标判断 snapshot 新旧，不能用 item 列表里的最大 `sequence` 代替游标。旧 snapshot 只能补齐缺失 item，不能覆盖已经通过实时事件或更新响应接收的新 turn 内容。
+每个 turn 被接收后，用户输入必须作为该 turn 的第一个可见 timeline item 记录和广播。enabled tools、`turn`、`inference` 等内部诊断或运行态 item 不得在 sequence 上排到用户输入之前，避免前端等待状态、内部状态或历史回放出现在用户问题上方。
+
+历史加载和运行完成响应必须暴露 `nextSequence`/`timelineNextSequence` 作为事件游标。前端只能用该事件游标判断 snapshot 新旧，不能用 item 列表里的最大 `sequence` 代替游标。旧 snapshot 只能补齐缺失 item，不能覆盖已经通过实时事件或更新响应接收的新 turn 内容。该游标只由后端持久化 timeline 推进；前端 optimistic item 可以使用临时本地顺序参与展示，但不得预占或推进 `timelineNextSequence`。
 
 ## 8.2 数据流
 

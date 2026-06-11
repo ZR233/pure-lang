@@ -63,9 +63,6 @@ pub(super) async fn run_turn_with_trace(
     let mut budget_limit: Option<BudgetLimit> = None;
 
     let session_id = super::generate_session_id();
-    record_enabled_tools(recorder, &session_id, request.mode, &tool_schemas);
-    let turn_item = recorder.turn_item(&session_id, TimelineItemStatus::Running);
-    recorder.start_item(turn_item.clone());
     let requires_subagent_dispatch =
         active_subagent.is_none() && prompt_requires_subagent_dispatch(&request.prompt);
     let initial_agent_count = if requires_subagent_dispatch {
@@ -76,6 +73,9 @@ pub(super) async fn run_turn_with_trace(
     let mut subagent_dispatch_recovered = false;
     recorder.user_text_item(&session_id, request.prompt.clone());
     session.push_user_prompt(request.prompt);
+    record_enabled_tools(recorder, &session_id, request.mode, &tool_schemas);
+    let turn_item = recorder.turn_item(&session_id, TimelineItemStatus::Running);
+    recorder.start_item(turn_item.clone());
     let model = provider.default_model().to_string();
 
     let mut last_content = String::new();

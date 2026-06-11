@@ -378,8 +378,10 @@ mod tests {
     use crate::turn::{CompileMode, PermissionMode, ToolApprovalPolicy};
     use crate::{ConfigStore, ModelRole};
     use pl_model::ToolCall;
-    use pl_protocol::{TimelineTextRole, TraceEventKind};
+    use pl_protocol::{TimelineItemKind, TimelineTextRole, TraceEventKind};
     use pretty_assertions::assert_eq;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     fn test_tool_context(event_tx: AgentEventSender) -> ToolContext {
         ToolContext {
@@ -413,6 +415,64 @@ mod tests {
                 | TraceEventKind::EnabledToolsRecorded { .. } => false,
             })
             .count()
+    }
+
+    async fn serve_sse_once(sse_body: String) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = Vec::new();
+            let mut temp = [0_u8; 1024];
+            let (header_end, content_length) = loop {
+                let n = socket.read(&mut temp).await.unwrap();
+                assert_ne!(n, 0);
+                buffer.extend_from_slice(&temp[..n]);
+                if let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n")
+                {
+                    let headers = String::from_utf8_lossy(&buffer[..header_end]);
+                    let content_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().ok())?
+                        })
+                        .unwrap_or(0);
+                    break (header_end, content_length);
+                }
+            };
+
+            while buffer.len() < header_end + 4 + content_length {
+                let n = socket.read(&mut temp).await.unwrap();
+                assert_ne!(n, 0);
+                buffer.extend_from_slice(&temp[..n]);
+            }
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                sse_body.len(),
+                sse_body
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+            socket.shutdown().await.unwrap();
+        });
+
+        (format!("http://{addr}"), handle)
+    }
+
+    fn timeline_started_kinds(events: &[TraceEvent]) -> Vec<TimelineItemKind> {
+        events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                TraceEventKind::TimelineItemStarted { item } => Some(item.kind),
+                TraceEventKind::TimelineItemDelta { .. }
+                | TraceEventKind::TimelineItemCompleted { .. }
+                | TraceEventKind::TimelineItemFailed { .. }
+                | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. } => None,
+            })
+            .collect()
     }
 
     fn record_enabled_tools_for_core(
@@ -1278,6 +1338,68 @@ mod tests {
 
         // 空注册表没有可用语言，不应出现任何 LSP 工具。
         assert!(event.tools.iter().all(|t| !t.starts_with("lsp_query_")));
+    }
+
+    #[tokio::test]
+    async fn run_turn_records_user_timeline_before_internal_items() {
+        let sse_body = concat!(
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+            "data: [DONE]\n\n"
+        )
+        .to_string();
+        let (base_url, handle) = serve_sse_once(sse_body).await;
+        let mut provider = ProviderInfo::openai(Some(base_url));
+        provider.bearer_token = Some("test-token".to_string());
+        provider.default_model = "local-responses".to_string();
+        let core = PureCore::from_provider_info(provider).unwrap();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
+        let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+        let mut session = CoreSession::new();
+
+        let result = core
+            .run_turn_with_trace(
+                &mut session,
+                TurnRequest {
+                    prompt: "Build the thing".to_string(),
+                    mode: CompileMode::Auto,
+                    budget: crate::turn::TurnBudget::new(60_000),
+                    instruction_snapshot: None,
+                    workspace_instructions: None,
+                },
+                &mut recorder,
+                TurnOptions::default(),
+            )
+            .await
+            .unwrap();
+        handle.await.unwrap();
+
+        assert_eq!(result.status, TurnResultStatus::Completed);
+        let events = &result.timeline_events;
+        let started_kinds = timeline_started_kinds(&events);
+        assert_eq!(started_kinds[0], TimelineItemKind::Text);
+        assert_eq!(started_kinds[1], TimelineItemKind::Turn);
+        assert_eq!(started_kinds[2], TimelineItemKind::Inference);
+
+        let user_item = events
+            .iter()
+            .find_map(|event| match &event.kind {
+                TraceEventKind::TimelineItemStarted { item }
+                    if item.kind == TimelineItemKind::Text
+                        && item.role == Some(TimelineTextRole::User) =>
+                {
+                    Some(item)
+                }
+                TraceEventKind::TimelineItemStarted { .. }
+                | TraceEventKind::TimelineItemDelta { .. }
+                | TraceEventKind::TimelineItemCompleted { .. }
+                | TraceEventKind::TimelineItemFailed { .. }
+                | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. } => None,
+            })
+            .expect("user timeline item");
+        assert_eq!(user_item.sequence, 0);
+        assert_eq!(user_item.content, "Build the thing");
     }
 
     #[tokio::test]
