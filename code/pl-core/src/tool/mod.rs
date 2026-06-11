@@ -29,7 +29,7 @@ pub use file::{
     ApplyPatchTool, CopyPathTool, CreateDirectoryTool, DeletePathTool, ListFilesTool, MovePathTool,
     ReadFileTool, SearchFilesTool, StatPathTool, WriteFileTool,
 };
-pub use lsp::LspQueryTool;
+pub use lsp::{LspLanguageTool, LspQueryTool, lsp_tool_for_language};
 pub use multi_agent::{
     CloseAgentTool, FollowupTaskTool, ListAgentsTool, SendMessageTool, SpawnAgentTool,
     WaitAgentTool,
@@ -209,6 +209,56 @@ impl ToolRegistry {
     pub fn is_empty(&self) -> bool {
         self.tools.is_empty()
     }
+
+    /// 移除指定名称的工具（用于动态卸载）。
+    pub fn unregister(&mut self, name: &str) -> bool {
+        let len_before = self.tools.len();
+        self.tools.retain(|tool| tool.name() != name);
+        self.tools.len() != len_before
+    }
+
+    /// 注册当前可用的语言 LSP 工具。
+    ///
+    /// 遍历 `available_languages()` 返回的语言列表，为每个语言注册一个
+    /// `LspLanguageTool`。同时移除之前注册但已不再可用的语言工具。
+    pub async fn register_lsp_languages(
+        &mut self,
+        registry: &pl_lsp::LspRuntimeRegistry,
+    ) -> Vec<String> {
+        let available = registry.available_languages().await;
+        self.sync_lsp_language_tools(registry, available)
+    }
+
+    fn sync_lsp_language_tools(
+        &mut self,
+        registry: &pl_lsp::LspRuntimeRegistry,
+        available: Vec<pl_lsp::LanguageToolInfo>,
+    ) -> Vec<String> {
+        let tool_names: Vec<String> = available
+            .iter()
+            .map(|info| format!("lsp_query_{}", info.language_id))
+            .collect();
+        self.tools.retain(|tool| {
+            let name = tool.name();
+            if name.starts_with("lsp_query_") {
+                tool_names.iter().any(|tn| tn == name)
+            } else {
+                true
+            }
+        });
+        let mut registered = Vec::new();
+        for info in &available {
+            let tool_name = format!("lsp_query_{}", info.language_id);
+            if self.get(&tool_name).is_none() {
+                self.tools
+                    .push(lsp_tool_for_language(info, registry.clone()));
+            }
+            if !registered.contains(&info.language_id) {
+                registered.push(info.language_id.clone());
+            }
+        }
+        registered
+    }
 }
 
 /// 通用工具输入。
@@ -311,6 +361,52 @@ mod tests {
 
         let debug = format!("{reg:?}");
         assert!(debug.contains("echo"));
+    }
+
+    #[test]
+    fn registry_unregister_removes_named_tool() {
+        let mut reg = ToolRegistry::new();
+        reg.register(EchoTool);
+
+        assert!(reg.unregister("echo"));
+        assert!(!reg.unregister("echo"));
+        assert!(reg.get("echo").is_none());
+    }
+
+    #[test]
+    fn registry_sync_lsp_language_tools_registers_and_removes_languages() {
+        let mut reg = ToolRegistry::new();
+        reg.register(EchoTool);
+        let registry = pl_lsp::LspRuntimeRegistry::new();
+        let rust = pl_lsp::LanguageToolInfo {
+            language_id: "rust".to_string(),
+            server_id: "rust-analyzer".to_string(),
+            display_name: "rust-analyzer".to_string(),
+            extensions: vec![".rs".to_string()],
+        };
+
+        let registered = reg.sync_lsp_language_tools(&registry, vec![rust]);
+
+        assert_eq!(registered, vec!["rust".to_string()]);
+        assert!(reg.get("echo").is_some());
+        assert!(reg.get("lsp_query_rust").is_some());
+
+        let rust = pl_lsp::LanguageToolInfo {
+            language_id: "rust".to_string(),
+            server_id: "rust-analyzer".to_string(),
+            display_name: "rust-analyzer".to_string(),
+            extensions: vec![".rs".to_string()],
+        };
+        let registered = reg.sync_lsp_language_tools(&registry, vec![rust]);
+
+        assert_eq!(registered, vec!["rust".to_string()]);
+        assert!(reg.get("lsp_query_rust").is_some());
+
+        let registered = reg.sync_lsp_language_tools(&registry, Vec::new());
+
+        assert!(registered.is_empty());
+        assert!(reg.get("echo").is_some());
+        assert!(reg.get("lsp_query_rust").is_none());
     }
 
     #[tokio::test]

@@ -25,7 +25,7 @@ v1 只内置 `rust-analyzer`：
 
 - `StudioRuntime` 持有共享 `LspRuntimeRegistry`，项目打开/选择时 reconcile 当前 workspace。
 - `PureCore` 通过 `with_lsp_runtime` 接收共享 registry。
-- `lsp_query` 是只读工具，父 agent 和 subagent 共用同一 runtime。
+- LSP 查询工具按语言拆分为独立工具（如 `lsp_query_rust`），父 agent 和 subagent 共用同一 runtime。工具列表在每轮创建 `PureCore` 并注册默认工具时，根据当前可用语言同步；对应 LSP 服务器不可用时不会暴露给 LLM。
 - 文件写入、patch、move/delete 成功后通知 LSP runtime 同步已打开文档。
 
 `pure-studio` 只负责展示和事件订阅：
@@ -55,7 +55,11 @@ active LSP 只包括 `available` server。`missingCommand`、`unavailable`、`di
 
 ## 工具能力
 
-`lsp_query` 支持：
+每种可用的 LSP 语言会自动注册为独立的工具，命名为 `lsp_query_{language_id}`（如 `lsp_query_rust`）。工具名直接告诉 LLM 当前可用的语言；不可用时工具不会出现在会话中。
+
+语言工具执行时会把内部 `languageId` 注入到 `LspQuery`，`pl-lsp` 优先按该语言 ID 路由到可用服务器；没有语言 ID 的兼容查询才回退到文件扩展名或默认 active server 路由。
+
+每个语言工具支持：
 
 - `goToDefinition`
 - `findReferences`
@@ -70,7 +74,7 @@ active LSP 只包括 `available` server。`missingCommand`、`unavailable`、`di
 
 位置类输入使用 1-based `line` / `character`，内部转换为 LSP 0-based UTF-16 position。输出为结构化 JSON 文本，包含 `success`、`operation`、`serverId`、`result`、`resultCount`、`fileCount`。
 
-当 `lsp_query` 可用且 active LSP 支持目标文件时，agent 应优先用它处理代码语义查询，包括定义跳转、引用查找、hover 类型/签名/文档、实现跳转、符号查询、调用层级和 diagnostics。纯文本匹配、文件名/配置搜索、非支持语言、LSP 未激活或 LSP 返回不可用错误时，回退到文件工具、`search_files` 或 `bash`/`rg`。
+当 `lsp_query_rust`（或其他语言对应的 LSP 工具）可用且 active LSP 支持目标文件时，agent 应优先用它处理代码语义查询，包括定义跳转、引用查找、hover 类型/签名/文档、实现跳转、符号查询、调用层级和 diagnostics。纯文本匹配、文件名/配置搜索、非支持语言、LSP 未激活或 LSP 返回不可用错误时，回退到文件工具、`search_files` 或 `bash`/`rg`。
 
 ## 文件同步
 

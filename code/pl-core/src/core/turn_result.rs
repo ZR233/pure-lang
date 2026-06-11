@@ -36,25 +36,26 @@ pub(super) fn tool_allowed_in_mode(mode: CompileMode, name: &str) -> bool {
     }
     match mode {
         CompileMode::Auto => true,
-        CompileMode::Plan => matches!(
-            name,
-            "bash"
-                | "write_stdin"
-                | "read_file"
-                | "list_files"
-                | "search_files"
-                | "stat_path"
-                | "lsp_query"
-                | "skills_list"
-                | "skill_view"
-                | "spawn_agent"
-                | "wait_agent"
-                | "list_agents"
-                | "send_message"
-                | "followup_task"
-                | "close_agent"
-                | "request_user_input"
-        ),
+        CompileMode::Plan => {
+            matches!(
+                name,
+                "bash"
+                    | "write_stdin"
+                    | "read_file"
+                    | "list_files"
+                    | "search_files"
+                    | "stat_path"
+                    | "skills_list"
+                    | "skill_view"
+                    | "spawn_agent"
+                    | "wait_agent"
+                    | "list_agents"
+                    | "send_message"
+                    | "followup_task"
+                    | "close_agent"
+                    | "request_user_input"
+            ) || name.starts_with("lsp_query_")
+        }
     }
 }
 

@@ -8,6 +8,6 @@ mod uri;
 
 pub use registry::LspRuntimeRegistry;
 pub use types::{
-    LspActivityKind, LspAvailabilityKind, LspDiagnostic, LspPosition, LspQuery, LspQueryOperation,
-    LspQueryResult, LspRange, LspResult, LspRuntimeError, LspServerSnapshot,
+    LanguageToolInfo, LspActivityKind, LspAvailabilityKind, LspDiagnostic, LspPosition, LspQuery,
+    LspQueryOperation, LspQueryResult, LspRange, LspResult, LspRuntimeError, LspServerSnapshot,
 };

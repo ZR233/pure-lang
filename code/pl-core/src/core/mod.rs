@@ -16,10 +16,9 @@ use crate::session::CoreSession;
 use crate::tool::WorkspaceAccess;
 use crate::tool::{
     ApplyPatchTool, AskUserTool, CloseAgentTool, CopyPathTool, CreateDirectoryTool, DeletePathTool,
-    FollowupTaskTool, ListAgentsTool, ListFilesTool, LspQueryTool, MovePathTool, ReadFileTool,
-    SearchFilesTool, SendMessageTool, SkillManageTool, SkillViewTool, SkillsListTool,
-    SpawnAgentTool, StatPathTool, SubagentContext, ToolContext, ToolRegistry, WaitAgentTool,
-    WriteFileTool, command_tool_pair,
+    FollowupTaskTool, ListAgentsTool, ListFilesTool, MovePathTool, ReadFileTool, SearchFilesTool,
+    SendMessageTool, SkillManageTool, SkillViewTool, SkillsListTool, SpawnAgentTool, StatPathTool,
+    SubagentContext, ToolContext, ToolRegistry, WaitAgentTool, WriteFileTool, command_tool_pair,
 };
 use crate::trace::TraceRecorder;
 #[cfg(test)]
@@ -159,7 +158,7 @@ impl PureCore {
     /// 注册默认工具集合。
     ///
     /// 当前包含 shell、异步 agent 协作工具和 workspace 文件工具。调用方应通过 `TurnOptions` 控制审批策略。
-    pub fn register_default_tools(
+    pub async fn register_default_tools(
         &mut self,
         workspace_root: impl Into<std::path::PathBuf>,
         workspace_instructions: Option<String>,
@@ -185,7 +184,7 @@ impl PureCore {
         self.register_tool(MovePathTool);
         self.register_tool(ApplyPatchTool);
         if let Some(registry) = self.lsp_runtime.clone() {
-            self.register_tool(LspQueryTool::new(registry));
+            self.tools.register_lsp_languages(&registry).await;
         }
         self.register_tool(SpawnAgentTool::new(
             self.provider.clone(),
@@ -582,7 +581,7 @@ mod tests {
         assert!(tool_allowed_in_mode(plan, "followup_task"));
         assert!(tool_allowed_in_mode(plan, "request_user_input"));
         assert!(tool_allowed_in_mode(plan, "bash"));
-        assert!(tool_allowed_in_mode(plan, "lsp_query"));
+        assert!(tool_allowed_in_mode(plan, "lsp_query_rust"));
         assert!(tool_allowed_in_mode(plan, "mcp__github__search_issues"));
         assert!(!tool_allowed_in_mode(plan, "subagent"));
         assert!(!tool_allowed_in_mode(plan, "write_file"));
@@ -1209,11 +1208,12 @@ mod tests {
         assert_eq!(request.parent_agent_id.as_deref(), Some("subagent-1"));
     }
 
-    #[test]
-    fn default_tools_register_bash_and_agent_tools() {
+    #[tokio::test]
+    async fn default_tools_register_bash_and_agent_tools() {
         let mut core = PureCore::default_provider().unwrap();
 
-        core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()));
+        core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
+            .await;
 
         assert!(core.tools.get("bash").is_some());
         assert!(core.tools.get("write_stdin").is_some());
@@ -1227,21 +1227,31 @@ mod tests {
         assert!(core.tools.get("lsp_query").is_none());
     }
 
-    #[test]
-    fn default_tools_register_lsp_query_when_runtime_is_shared() {
+    #[tokio::test]
+    async fn default_tools_register_lsp_query_when_runtime_is_shared() {
+        let registry = pl_lsp::LspRuntimeRegistry::new();
         let mut core = PureCore::default_provider()
             .unwrap()
-            .with_lsp_runtime(pl_lsp::LspRuntimeRegistry::new());
+            .with_lsp_runtime(registry.clone());
 
-        core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()));
+        core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
+            .await;
 
-        assert!(core.tools.get("lsp_query").is_some());
+        // 空注册表没有可用语言，不应注册任何 LSP 工具。
+        assert!(core.tools.get("lsp_query_rust").is_none());
+        assert!(
+            core.tools
+                .names()
+                .iter()
+                .all(|name| !name.starts_with("lsp_query_"))
+        );
     }
 
-    #[test]
-    fn enabled_tools_snapshot_records_mode_filtered_tools() {
+    #[tokio::test]
+    async fn enabled_tools_snapshot_records_mode_filtered_tools() {
         let mut core = PureCore::default_provider().unwrap();
-        core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()));
+        core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
+            .await;
 
         let events = record_enabled_tools_for_core(&core, "session-1", "turn-1", CompileMode::Plan);
         let event = enabled_tools_event(&events);
@@ -1254,23 +1264,27 @@ mod tests {
         assert!(!event.tools.contains(&"apply_patch".to_string()));
     }
 
-    #[test]
-    fn enabled_tools_snapshot_includes_lsp_query_when_runtime_is_shared() {
+    #[tokio::test]
+    async fn enabled_tools_snapshot_includes_lsp_query_when_runtime_is_shared() {
+        let registry = pl_lsp::LspRuntimeRegistry::new();
         let mut core = PureCore::default_provider()
             .unwrap()
-            .with_lsp_runtime(pl_lsp::LspRuntimeRegistry::new());
-        core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()));
+            .with_lsp_runtime(registry);
+        core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
+            .await;
 
         let events = record_enabled_tools_for_core(&core, "session-1", "turn-1", CompileMode::Auto);
         let event = enabled_tools_event(&events);
 
-        assert!(event.tools.contains(&"lsp_query".to_string()));
+        // 空注册表没有可用语言，不应出现任何 LSP 工具。
+        assert!(event.tools.iter().all(|t| !t.starts_with("lsp_query_")));
     }
 
     #[tokio::test]
     async fn enabled_tools_snapshot_persists_to_sqlite_timeline() {
         let mut core = PureCore::default_provider().unwrap();
-        core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()));
+        core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
+            .await;
         let store = crate::StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project(std::env::temp_dir()).await.unwrap();
         let session = store
