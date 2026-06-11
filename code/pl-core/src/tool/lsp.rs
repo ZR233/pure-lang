@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use pl_lsp::{LspQuery, LspRuntimeRegistry};
+use pl_lsp::{LanguageToolInfo, LspQuery, LspRuntimeRegistry};
 use pl_protocol::PureError;
 
 use super::{BoxFuture, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput};
@@ -26,51 +26,7 @@ impl Tool for LspQueryTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "operation": {
-                    "type": "string",
-                    "enum": [
-                        "goToDefinition",
-                        "findReferences",
-                        "hover",
-                        "documentSymbol",
-                        "workspaceSymbol",
-                        "goToImplementation",
-                        "prepareCallHierarchy",
-                        "incomingCalls",
-                        "outgoingCalls",
-                        "diagnostics"
-                    ]
-                },
-                "filePath": {
-                    "type": "string",
-                    "description": "Workspace-relative or absolute path to the source file. Required for file and position operations."
-                },
-                "line": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "1-based line number for position operations."
-                },
-                "character": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "1-based UTF-16 character offset for position operations."
-                },
-                "query": {
-                    "type": "string",
-                    "description": "Workspace symbol query string."
-                },
-                "maxResults": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Maximum diagnostics to return."
-                }
-            },
-            "required": ["operation"],
-            "additionalProperties": false
-        })
+        lsp_query_input_schema()
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
@@ -89,7 +45,7 @@ impl Tool for LspQueryTool {
                     error: format!("invalid LSP query input: {error}"),
                 }
             })?;
-            let query = resolve_query_path(query, &context)?;
+            let query = resolve_query_path(query, &context, self.name())?;
             let result = self.registry.query(query).await.map_err(|error| {
                 PureError::ToolExecutionFailed {
                     tool: self.name().to_string(),
@@ -113,7 +69,59 @@ impl Tool for LspQueryTool {
     }
 }
 
-fn resolve_query_path(mut query: LspQuery, context: &ToolContext) -> Result<LspQuery, PureError> {
+fn lsp_query_input_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "operation": {
+                "type": "string",
+                "enum": [
+                    "goToDefinition",
+                    "findReferences",
+                    "hover",
+                    "documentSymbol",
+                    "workspaceSymbol",
+                    "goToImplementation",
+                    "prepareCallHierarchy",
+                    "incomingCalls",
+                    "outgoingCalls",
+                    "diagnostics"
+                ]
+            },
+            "filePath": {
+                "type": "string",
+                "description": "Workspace-relative or absolute path to the source file. Required for file and position operations."
+            },
+            "line": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "1-based line number for position operations."
+            },
+            "character": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "1-based UTF-16 character offset for position operations."
+            },
+            "query": {
+                "type": "string",
+                "description": "Workspace symbol query string."
+            },
+            "maxResults": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Maximum diagnostics to return."
+            }
+        },
+        "required": ["operation"],
+        "additionalProperties": false
+    })
+}
+
+fn resolve_query_path(
+    mut query: LspQuery,
+    context: &ToolContext,
+    tool_name: &str,
+) -> Result<LspQuery, PureError> {
     let Some(path) = query.file_path.take() else {
         return Ok(query);
     };
@@ -124,7 +132,7 @@ fn resolve_query_path(mut query: LspQuery, context: &ToolContext) -> Result<LspQ
     };
     let resolved = if query.operation.requires_file() {
         std::fs::canonicalize(&candidate).map_err(|error| PureError::ToolExecutionFailed {
-            tool: "lsp_query".to_string(),
+            tool: tool_name.to_string(),
             error: format!(
                 "failed to resolve filePath '{}': {error}",
                 candidate.display()
@@ -137,7 +145,7 @@ fn resolve_query_path(mut query: LspQuery, context: &ToolContext) -> Result<LspQ
         .unwrap_or_else(|_| context.workspace_root.clone());
     if !resolved.starts_with(&workspace_root) && !context.allows_workspace_escape() {
         return Err(PureError::ToolExecutionFailed {
-            tool: "lsp_query".to_string(),
+            tool: tool_name.to_string(),
             error: format!("filePath must be inside workspace: {}", candidate.display()),
         });
     }
@@ -160,6 +168,125 @@ fn canonicalize_existing_or_parent(candidate: &Path) -> PathBuf {
             return candidate.to_path_buf();
         }
         current = parent.to_path_buf();
+    }
+}
+
+/// 按语言生成的 LSP 查询工具。
+///
+/// 每个实例对应一种可用的 LSP 语言，工具名为 `lsp_query_{language_id}`。
+/// 执行时自动注入 `language_id` 到 `LspQuery` 以精确路由到目标语言服务器。
+#[derive(Debug, Clone)]
+pub struct LspLanguageTool {
+    registry: LspRuntimeRegistry,
+    language_id: String,
+    name: String,
+    description: String,
+}
+
+impl LspLanguageTool {
+    pub fn new(info: &LanguageToolInfo, registry: LspRuntimeRegistry) -> Self {
+        let name = format!("lsp_query_{}", info.language_id);
+        let language_name = language_display_name(&info.language_id);
+        let extensions = if info.extensions.is_empty() {
+            "none declared".to_string()
+        } else {
+            info.extensions.join(", ")
+        };
+        let description = format!(
+            "Query {server} for {language} semantic code intelligence. Prefer this over text search when resolving definitions, references, hover/type or signature information, implementations, symbols, call hierarchy, or diagnostics. Powered by {server_id}. Supported file extensions: {extensions}.",
+            server = info.display_name,
+            language = language_name,
+            server_id = info.server_id,
+        );
+        Self {
+            registry,
+            language_id: info.language_id.clone(),
+            name,
+            description,
+        }
+    }
+}
+
+/// 为特定语言生成 LSP 查询工具。
+pub fn lsp_tool_for_language(
+    info: &LanguageToolInfo,
+    registry: LspRuntimeRegistry,
+) -> Box<dyn Tool> {
+    Box::new(LspLanguageTool::new(info, registry))
+}
+
+impl Tool for LspLanguageTool {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn description(&self) -> &str {
+        &self.description
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        lsp_query_input_schema()
+    }
+
+    fn supports_parallel_tool_calls(&self) -> bool {
+        true
+    }
+
+    fn execute<'a>(
+        &'a self,
+        input: ToolInput,
+        context: ToolContext,
+    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        Box::pin(async move {
+            let mut query: LspQuery = serde_json::from_value(input.arguments).map_err(|error| {
+                PureError::ToolExecutionFailed {
+                    tool: self.name().to_string(),
+                    error: format!("invalid LSP query input: {error}"),
+                }
+            })?;
+            query.language_id = Some(self.language_id.clone());
+            let query = resolve_query_path(query, &context, self.name())?;
+            let result = self.registry.query(query).await.map_err(|error| {
+                PureError::ToolExecutionFailed {
+                    tool: self.name().to_string(),
+                    error: error.to_string(),
+                }
+            })?;
+            let description = serde_json::to_string_pretty(&result).map_err(|error| {
+                PureError::ToolExecutionFailed {
+                    tool: self.name().to_string(),
+                    error: format!("failed to serialize LSP result: {error}"),
+                }
+            })?;
+            Ok(ToolOutput {
+                description,
+                truncated: OutputTruncation::empty(),
+                output_file: PathBuf::new(),
+                exit_code: Some(0),
+                timed_out: false,
+            })
+        })
+    }
+}
+
+fn language_display_name(language_id: &str) -> String {
+    match language_id {
+        "rust" => "Rust".to_string(),
+        "typescript" => "TypeScript".to_string(),
+        "javascript" => "JavaScript".to_string(),
+        "python" => "Python".to_string(),
+        "go" => "Go".to_string(),
+        other => {
+            let mut chars = other.chars();
+            let Some(first) = chars.next() else {
+                return "unknown".to_string();
+            };
+            format!(
+                "{}{}",
+                first.to_uppercase().collect::<String>(),
+                chars.as_str()
+            )
+        }
     }
 }
 
@@ -217,6 +344,85 @@ mod tests {
     }
 
     #[test]
+    fn lsp_language_tool_name_and_description_are_per_instance() {
+        let registry = LspRuntimeRegistry::new();
+        let rust = LanguageToolInfo {
+            language_id: "rust".to_string(),
+            server_id: "rust-analyzer".to_string(),
+            display_name: "rust-analyzer".to_string(),
+            extensions: vec![".rs".to_string()],
+        };
+        let typescript = LanguageToolInfo {
+            language_id: "typescript".to_string(),
+            server_id: "typescript-language-server".to_string(),
+            display_name: "TypeScript language server".to_string(),
+            extensions: vec![".ts".to_string(), ".tsx".to_string()],
+        };
+
+        let rust_tool = LspLanguageTool::new(&rust, registry.clone());
+        let typescript_tool = LspLanguageTool::new(&typescript, registry);
+
+        assert_eq!(rust_tool.name(), "lsp_query_rust");
+        assert_eq!(typescript_tool.name(), "lsp_query_typescript");
+        assert!(rust_tool.description().contains("rust-analyzer"));
+        assert!(rust_tool.description().contains("Rust"));
+        assert!(rust_tool.description().contains(".rs"));
+        assert!(typescript_tool.description().contains("TypeScript"));
+        assert!(typescript_tool.description().contains(".tsx"));
+    }
+
+    #[test]
+    fn lsp_language_tool_schema_exposes_supported_operations() {
+        let info = LanguageToolInfo {
+            language_id: "rust".to_string(),
+            server_id: "rust-analyzer".to_string(),
+            display_name: "rust-analyzer".to_string(),
+            extensions: vec![".rs".to_string()],
+        };
+        let tool = LspLanguageTool::new(&info, LspRuntimeRegistry::new());
+        let schema = tool.input_schema();
+
+        assert_eq!(schema["required"], serde_json::json!(["operation"]));
+        assert!(
+            schema["properties"]["operation"]["enum"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("diagnostics"))
+        );
+        assert_eq!(schema["additionalProperties"], serde_json::json!(false));
+    }
+
+    #[tokio::test]
+    async fn lsp_language_tool_execute_injects_language_id() {
+        let info = LanguageToolInfo {
+            language_id: "rust".to_string(),
+            server_id: "rust-analyzer".to_string(),
+            display_name: "rust-analyzer".to_string(),
+            extensions: vec![".rs".to_string()],
+        };
+        let tool = LspLanguageTool::new(&info, LspRuntimeRegistry::new());
+        let context = test_context(
+            std::env::temp_dir(),
+            crate::tool::WorkspaceAccess::WorkspaceOnly,
+        );
+        let input = ToolInput {
+            arguments: serde_json::json!({"operation": "diagnostics"}),
+            session_id: "session-1".to_string(),
+            tool_id: "tool-1".to_string(),
+        };
+
+        let error = tool.execute(input, context).await.unwrap_err();
+
+        match error {
+            PureError::ToolExecutionFailed { tool, error } => {
+                assert_eq!(tool, "lsp_query_rust");
+                assert!(error.contains("No LSP server configured for language: rust"));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
     fn resolve_query_path_rejects_workspace_escape() {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -236,10 +442,11 @@ mod tests {
             character: Some(1),
             query: None,
             max_results: None,
+            language_id: None,
         };
         let context = test_context(root.clone(), crate::tool::WorkspaceAccess::WorkspaceOnly);
 
-        let result = resolve_query_path(query, &context);
+        let result = resolve_query_path(query, &context, "lsp_query");
 
         assert!(result.is_err());
 

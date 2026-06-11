@@ -15,8 +15,8 @@ use crate::client::{
 use crate::formatting::{format_diagnostics, format_lsp_result};
 use crate::process::{configure_background_command, terminate_process_tree};
 use crate::types::{
-    LspActivityKind, LspAvailabilityKind, LspDiagnostic, LspQuery, LspQueryOperation,
-    LspQueryResult, LspResult, LspRuntimeError, LspServerSnapshot,
+    LanguageToolInfo, LspActivityKind, LspAvailabilityKind, LspDiagnostic, LspQuery,
+    LspQueryOperation, LspQueryResult, LspResult, LspRuntimeError, LspServerSnapshot,
 };
 use crate::uri::path_to_file_uri;
 
@@ -74,6 +74,29 @@ impl LspRuntimeRegistry {
             .collect()
     }
 
+    /// 返回当前 Available 状态的所有语言工具信息。
+    ///
+    /// 每种已注册且可用的 LSP 服务器会按其 `language_ids` 逐一展开，
+    /// 便于 `pl-core` 为每个语言生成独立的查询工具。
+    pub async fn available_languages(&self) -> Vec<LanguageToolInfo> {
+        let state = self.state.lock().await;
+        let mut result = Vec::new();
+        for server in state.servers.values() {
+            if server.availability_kind != LspAvailabilityKind::Available {
+                continue;
+            }
+            for language_id in &server.definition.language_ids {
+                result.push(LanguageToolInfo {
+                    language_id: language_id.clone(),
+                    server_id: server.definition.id.clone(),
+                    display_name: server.definition.display_name.clone(),
+                    extensions: extensions_for_language(&server.definition, language_id),
+                });
+            }
+        }
+        result
+    }
+
     pub async fn snapshots(&self) -> Vec<LspServerSnapshot> {
         let diagnostics = self.diagnostics.lock().await;
         let diagnostic_counts = diagnostic_counts(&diagnostics);
@@ -109,7 +132,7 @@ impl LspRuntimeRegistry {
 
     pub async fn query(&self, query: LspQuery) -> LspResult<LspQueryResult> {
         if query.operation == LspQueryOperation::Diagnostics {
-            return Ok(self.query_diagnostics(query).await);
+            return self.query_diagnostics(query).await;
         }
         let (server_id, definition, client) = self.client_for_query(&query).await?;
         if let Some(path) = query.file_path.as_deref() {
@@ -276,6 +299,16 @@ impl LspRuntimeRegistry {
     }
 
     async fn server_id_for_query(&self, query: &LspQuery) -> LspResult<String> {
+        if let Some(language_id) = query.language_id.as_deref() {
+            return self
+                .server_id_for_language(language_id)
+                .await
+                .ok_or_else(|| {
+                    LspRuntimeError::Unavailable(format!(
+                        "No LSP server configured for language: {language_id}"
+                    ))
+                });
+        }
         if query.operation.requires_file() {
             let path = query
                 .file_path
@@ -294,6 +327,22 @@ impl LspRuntimeRegistry {
                 .next()
                 .ok_or_else(|| LspRuntimeError::Unavailable("No active LSP servers".to_string()))
         }
+    }
+
+    async fn server_id_for_language(&self, language_id: &str) -> Option<String> {
+        self.state
+            .lock()
+            .await
+            .servers
+            .iter()
+            .find(|(_, server)| {
+                server
+                    .definition
+                    .language_ids
+                    .iter()
+                    .any(|item| item == language_id)
+            })
+            .map(|(server_id, _)| server_id.clone())
     }
 
     async fn server_id_for_path(&self, path: &Path) -> Option<String> {
@@ -334,9 +383,17 @@ impl LspRuntimeRegistry {
             .collect()
     }
 
-    async fn query_diagnostics(&self, query: LspQuery) -> LspQueryResult {
+    async fn query_diagnostics(&self, query: LspQuery) -> LspResult<LspQueryResult> {
         let max_results = query.max_results.unwrap_or(100);
         let mut diagnostics = self.all_diagnostics().await;
+        let server_id = if query.language_id.is_some() {
+            Some(self.server_id_for_query(&query).await?)
+        } else {
+            None
+        };
+        if let Some(server_id) = server_id.as_deref() {
+            diagnostics.retain(|diagnostic| diagnostic.server_id == server_id);
+        }
         if let Some(path) = query.file_path.as_deref() {
             let display = path
                 .file_name()
@@ -348,14 +405,14 @@ impl LspRuntimeRegistry {
             });
         }
         let formatted = format_diagnostics(&diagnostics, max_results);
-        LspQueryResult {
+        Ok(LspQueryResult {
             success: true,
             operation: LspQueryOperation::Diagnostics,
-            server_id: None,
+            server_id,
             result: formatted.text,
             result_count: formatted.result_count,
             file_count: formatted.file_count,
-        }
+        })
     }
 
     async fn all_diagnostics(&self) -> Vec<LspDiagnostic> {
@@ -543,6 +600,26 @@ fn rust_analyzer_definition(workspace_root: &Path, command: &str) -> LspServerDe
         extensions: vec![".rs".to_string()],
         language_ids: vec!["rust".to_string()],
         workspace_root: workspace_root.to_path_buf(),
+    }
+}
+
+fn extensions_for_language(definition: &LspServerDefinition, language_id: &str) -> Vec<String> {
+    if definition.language_ids.len() == definition.extensions.len() {
+        definition
+            .language_ids
+            .iter()
+            .zip(definition.extensions.iter())
+            .filter(|(candidate, _)| candidate.as_str() == language_id)
+            .map(|(_, extension)| extension.clone())
+            .collect()
+    } else if definition
+        .language_ids
+        .iter()
+        .any(|candidate| candidate == language_id)
+    {
+        definition.extensions.clone()
+    } else {
+        Vec::new()
     }
 }
 
@@ -764,6 +841,21 @@ mod tests {
         std::env::temp_dir().join(format!("pure-lsp-{name}-{stamp}"))
     }
 
+    async fn register_available_rust(registry: &LspRuntimeRegistry, workspace_root: &Path) {
+        let definition = rust_analyzer_definition(workspace_root, RUST_ANALYZER_COMMAND);
+        let mut state = registry.state.lock().await;
+        state.workspace_root = Some(workspace_root.to_path_buf());
+        state.servers.insert(
+            RUST_ANALYZER_ID.to_string(),
+            LspRuntimeServerState::new(
+                definition,
+                LspAvailabilityKind::Available,
+                Some("rust-analyzer test".to_string()),
+                Some(1),
+            ),
+        );
+    }
+
     #[tokio::test]
     async fn missing_rust_analyzer_command_records_snapshot() {
         let dir = temp_dir("missing-command");
@@ -827,6 +919,7 @@ mod tests {
                 character: None,
                 query: None,
                 max_results: None,
+                language_id: None,
             })
             .await
             .expect("document symbol query");
@@ -841,6 +934,100 @@ mod tests {
         registry.shutdown().await;
     }
 
+    #[tokio::test]
+    async fn available_languages_returns_empty_when_no_servers() {
+        let registry = LspRuntimeRegistry::new();
+        let languages = registry.available_languages().await;
+        assert!(languages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn available_languages_returns_empty_when_server_not_available() {
+        let dir = temp_dir("available-languages");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname='x'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        let registry = LspRuntimeRegistry::new();
+        registry
+            .reconcile_workspace_with_command(&dir, "definitely-not-rust-analyzer-pure-test")
+            .await;
+
+        let languages = registry.available_languages().await;
+        assert!(languages.is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn available_languages_returns_available_server_languages() {
+        let dir = temp_dir("available-languages-rust");
+        fs::create_dir_all(&dir).unwrap();
+        let registry = LspRuntimeRegistry::new();
+        register_available_rust(&registry, &dir).await;
+
+        let languages = registry.available_languages().await;
+
+        assert_eq!(
+            languages,
+            vec![LanguageToolInfo {
+                language_id: "rust".to_string(),
+                server_id: RUST_ANALYZER_ID.to_string(),
+                display_name: "rust-analyzer".to_string(),
+                extensions: vec![".rs".to_string()],
+            }]
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn server_id_for_query_prefers_language_id() {
+        let dir = temp_dir("language-route");
+        fs::create_dir_all(&dir).unwrap();
+        let registry = LspRuntimeRegistry::new();
+        register_available_rust(&registry, &dir).await;
+        let query = LspQuery {
+            operation: LspQueryOperation::WorkspaceSymbol,
+            file_path: None,
+            line: None,
+            character: None,
+            query: Some("LspRuntimeRegistry".to_string()),
+            max_results: None,
+            language_id: Some("rust".to_string()),
+        };
+
+        let server_id = registry.server_id_for_query(&query).await.unwrap();
+
+        assert_eq!(server_id, RUST_ANALYZER_ID);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn diagnostics_query_with_language_id_reports_target_server() {
+        let dir = temp_dir("diagnostics-language-route");
+        fs::create_dir_all(&dir).unwrap();
+        let registry = LspRuntimeRegistry::new();
+        register_available_rust(&registry, &dir).await;
+
+        let result = registry
+            .query(LspQuery {
+                operation: LspQueryOperation::Diagnostics,
+                file_path: None,
+                line: None,
+                character: None,
+                query: None,
+                max_results: None,
+                language_id: Some("rust".to_string()),
+            })
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.server_id.as_deref(), Some(RUST_ANALYZER_ID));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn position_query_uses_one_based_input() {
         let query = LspQuery {
@@ -850,6 +1037,7 @@ mod tests {
             character: Some(3),
             query: None,
             max_results: None,
+            language_id: None,
         };
 
         let (_, params) = method_and_params(&query).unwrap();

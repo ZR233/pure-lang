@@ -4,7 +4,7 @@
 - `bash`：启动 shell 命令并获取截断输出。参数：`command`（必需），`workingDirectory`（可选），`timeoutSeconds`（可选，默认 60），`yieldTimeMs`（可选，默认 10000），`maxOutputChars`（可选）。如果结果为 `running`，不要重复执行同一命令，改用 `write_stdin` 携带返回的 `processId` 继续等待或发送输入；需要完整输出时读取结果里的 `outputFile`。
 - `write_stdin`：观察或写入由 `bash` 启动的后台命令。参数：`processId`（必需），`chars`（可选，空值表示只等待/轮询），`yieldTimeMs`（可选），`maxOutputChars`（可选）。
 - 文件工具：`read_file`、`write_file`、`list_files`、`search_files`、`stat_path`、`create_directory`、`delete_path`、`copy_path`、`move_path` 和 `apply_patch`。所有路径限制在 workspace 内；修改工具需要审批。编辑已有文本文件时必须实际调用 `apply_patch`，不要把 patch 当作正文输出；优先用 `apply_patch` 做精确文本编辑。
-- `lsp_query`：当工具可用且目标语言有 active LSP 支持时，优先用于代码语义查询。适用场景包括定义跳转、引用查找、hover 类型/签名/文档、实现跳转、文件/workspace 符号、调用层级和 diagnostics。纯文本匹配、文件名/配置搜索、非支持语言、LSP 未激活或返回不可用错误时，回退到文件工具、`search_files` 或 `bash`/`rg`。如果只有符号名而没有文件位置，可先用 `search_files`/`read_file` 定位候选，再用 `lsp_query` 做语义确认。
+- `lsp_query_*`（如 `lsp_query_rust`）：当对应语言工具可用且目标语言有 active LSP 支持时，优先用于代码语义查询。适用场景包括定义跳转、引用查找、hover 类型/签名/文档、实现跳转、文件/workspace 符号、调用层级和 diagnostics。纯文本匹配、文件名/配置搜索、非支持语言、LSP 未激活或返回不可用错误时，回退到文件工具、`search_files` 或 `bash`/`rg`。如果只有符号名而没有文件位置，可先用 `search_files`/`read_file` 定位候选，再用对应语言的 `lsp_query_*` 做语义确认。
 
 `apply_patch` 使用 Codex 风格 patch，不接受 `---/+++` unified diff。更新文件的最小格式示例：
 

@@ -79,7 +79,7 @@ fn approval_options(requested_tools: Arc<Mutex<Vec<String>>>) -> TurnOptions {
     }))
 }
 
-fn configured_core(api_key: String, workspace: &Path) -> PureCore {
+async fn configured_core(api_key: String, workspace: &Path) -> PureCore {
     let mut config = PureConfig::default_config();
     config.skills.enabled = false;
     config.skills.auto_learn = false;
@@ -90,7 +90,7 @@ fn configured_core(api_key: String, workspace: &Path) -> PureCore {
         .bearer_token = Some(api_key);
 
     let mut core = PureCore::from_config(&config, ModelRole::Planner).unwrap();
-    core.register_default_tools(workspace, None);
+    core.register_default_tools(workspace, None).await;
     core
 }
 
@@ -198,7 +198,7 @@ async fn live_deepseek_applies_patch_with_prompt() {
         .await
         .unwrap();
 
-    let core = configured_core(api_key, workspace.path());
+    let core = configured_core(api_key, workspace.path()).await;
     let requested_tools = Arc::new(Mutex::new(Vec::new()));
     let mut session = CoreSession::new();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(256);

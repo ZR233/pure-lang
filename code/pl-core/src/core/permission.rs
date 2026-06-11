@@ -55,6 +55,9 @@ pub(super) fn requested_workspace_access(
 }
 
 pub(super) fn requested_paths_for_tool(name: &str, arguments: &serde_json::Value) -> Vec<String> {
+    if name.starts_with("lsp_query_") {
+        return argument_path(arguments, "filePath").into_iter().collect();
+    }
     match name {
         "bash" => get_working_directory(arguments).into_iter().collect(),
         "write_stdin" => Vec::new(),
@@ -150,6 +153,9 @@ pub(super) fn canonicalize_existing_or_parent(candidate: &Path) -> PathBuf {
 pub(super) fn permission_risk_summary(tool_name: &str) -> &'static str {
     if crate::mcp::is_mcp_tool_name(tool_name) {
         return "trusted MCP server tool";
+    }
+    if tool_name.starts_with("lsp_query_") {
+        return "read-only LSP code intelligence query";
     }
     match tool_name {
         "bash" => "shell command; may execute arbitrary process actions",

@@ -78,9 +78,9 @@ pub use studio::{
     ToolApprovalRecord,
 };
 pub use tool::{
-    AskUserTool, BashInput, BashTool, LspQueryTool, OutputTruncation, SubagentContext, Tool,
-    ToolContext, ToolInput, ToolOutput, ToolRegistry, TruncatedOutput, TruncationStrategy,
-    WriteStdinTool,
+    AskUserTool, BashInput, BashTool, LspLanguageTool, LspQueryTool, OutputTruncation,
+    SubagentContext, Tool, ToolContext, ToolInput, ToolOutput, ToolRegistry, TruncatedOutput,
+    TruncationStrategy, WriteStdinTool, lsp_tool_for_language,
 };
 pub use trace::TraceRecorder;
 pub use turn::{

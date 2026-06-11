@@ -165,6 +165,9 @@ pub struct LspQuery {
     pub character: Option<u32>,
     pub query: Option<String>,
     pub max_results: Option<usize>,
+    /// 显式指定目标语言 ID，优先于文件扩展名路由。
+    #[serde(default)]
+    pub language_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -189,4 +192,21 @@ impl LspQueryResult {
             file_count: None,
         }
     }
+}
+
+/// 描述一个可注册为工具的语言 LSP 信息。
+///
+/// 每个 `LanguageToolInfo` 对应一个当前处于 `Available` 状态的 LSP 服务器所支持的某一种语言。
+/// `pl-core` 使用此信息为每个语言生成独立的 LSP 查询工具（如 `lsp_query_rust`）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LanguageToolInfo {
+    /// LSP 语言标识符，如 "rust"、"typescript"。
+    pub language_id: String,
+    /// LSP 服务器标识，如 "rust-analyzer"。
+    pub server_id: String,
+    /// 显示名称，如 "rust-analyzer"。
+    pub display_name: String,
+    /// 该语言关联的文件扩展名，如 [".rs"]。
+    pub extensions: Vec<String>,
 }
