@@ -1403,7 +1403,7 @@ mod tests {
 
         assert_eq!(result.status, TurnResultStatus::Completed);
         let events = &result.timeline_events;
-        let started_kinds = timeline_started_kinds(&events);
+        let started_kinds = timeline_started_kinds(events);
         assert_eq!(started_kinds[0], TimelineItemKind::Text);
         assert_eq!(started_kinds[1], TimelineItemKind::Turn);
         assert_eq!(started_kinds[2], TimelineItemKind::Inference);
