@@ -877,6 +877,24 @@ function timelineLoadedPlanStateAnnotatesPlanWithoutOpeningComposer() {
   assertEqual(plan.planState?.state, "dismissed");
 }
 
+function timelineLoadedNewPlanStatesAnnotatePlan() {
+  for (const state of ["pendingConfirmation", "continuedPlanning", "cancelled"] as const) {
+    const reduced = studioReducer(selectedState(), {
+      type: "timelineLoaded",
+      sessionId: "session-1",
+      items: [planItem("turn-1-plan", "turn-1", 10, "1. Inspect")],
+      planStates: [planState("turn-1-plan", state)],
+      nextSequence: 13,
+    });
+    const plan = selectTimelineEntries(reduced).find((entry) => entry.kind === "plan");
+
+    if (plan?.kind !== "plan") {
+      throw new Error("expected plan entry");
+    }
+    assertEqual(plan.planState?.state, state);
+  }
+}
+
 function historicalTimelineLoadDoesNotCreatePlanAction() {
   const state = studioReducer(selectedState(), {
     type: "timelineLoaded",
@@ -929,6 +947,34 @@ function runPromptLoadedKeepsLiveInteractionByCurrentRun() {
 
   assertEqual(completed.activeInteractionId, interaction.interactionId);
   assertDeepEqual(completed.interactions.get(interaction.interactionId), interaction);
+}
+
+function freshContextRunSwitchesToReturnedSession() {
+  const planningSession = selectedState();
+  const resolving = studioReducer(planningSession, { type: "setBusy", value: true });
+  const freshRun = response([textItem("turn-2-text", 20, "implemented")]);
+  freshRun.sessionId = "session-2";
+  freshRun.sessionRuntime = { ...runtime, sessionId: "session-2" };
+  freshRun.sessions = [
+    ...planningSession.sessions,
+    {
+      id: "session-2",
+      projectId: "project-1",
+      title: "Implementation",
+      mode: "auto",
+      updatedAt: 3,
+    },
+  ];
+
+  const completed = studioReducer(resolving, {
+    type: "runPromptLoaded",
+    payload: freshRun,
+    status: "done",
+  });
+
+  assertEqual(completed.selectedSessionId, "session-2");
+  assertEqual(completed.timelineItems.get("turn-2-text")?.content, "implemented");
+  assertEqual(completed.isBusy, false);
 }
 
 function optimisticSessionModeSwitchesSelectedSessionOnly() {
@@ -2049,9 +2095,11 @@ runPromptLoadedUsesBackendPlanConfirmationInteraction();
 runPromptLoadedWithoutInteractionDoesNotInferPlanConfirmation();
 planLifecycleLoadedKeepsInteractionStateSeparate();
 timelineLoadedPlanStateAnnotatesPlanWithoutOpeningComposer();
+timelineLoadedNewPlanStatesAnnotatePlan();
 historicalTimelineLoadDoesNotCreatePlanAction();
 laterRunWithoutPlanDoesNotReopenHistoricalPlan();
 runPromptLoadedKeepsLiveInteractionByCurrentRun();
+freshContextRunSwitchesToReturnedSession();
 optimisticSessionModeSwitchesSelectedSessionOnly();
 promptSubmittedCreatesOptimisticTimelineFeedback();
 modelTimelineEventClearsWaitingFeedback();

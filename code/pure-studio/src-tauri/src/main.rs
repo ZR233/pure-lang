@@ -1,6 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -21,8 +20,7 @@ fn main() {
         .expect("failed to initialize Pure Studio runtime");
     let state = AppState {
         studio,
-        interactions: Arc::new(Mutex::new(HashMap::new())),
-        active_turns: Arc::new(Mutex::new(HashMap::new())),
+        active_turns: Arc::new(Mutex::new(std::collections::HashMap::new())),
     };
     let setup_state = state.clone();
     let shutdown_state = state.clone();

@@ -6,6 +6,7 @@ use pl_protocol::{AgentEventSender, TimelineItemKind, TraceEvent, TraceEventKind
 use crate::config::{ConfigStore, ModelRole};
 use crate::mcp::McpRuntimeRegistry;
 use crate::skill::SkillCatalog;
+use crate::studio::InteractionRuntime;
 use crate::studio::StudioStore;
 use crate::studio::mappers::default_session_runtime_record;
 use crate::studio::records::{
@@ -38,12 +39,15 @@ pub struct StudioRuntime {
     config_store: ConfigStore,
     mcp_runtime: McpRuntimeRegistry,
     lsp_runtime: pl_lsp::LspRuntimeRegistry,
+    interactions: InteractionRuntime,
 }
 
 impl StudioRuntime {
     pub async fn default_app() -> Result<Self> {
+        let store = StudioStore::default_app().await?;
         Ok(Self {
-            store: StudioStore::default_app().await?,
+            interactions: InteractionRuntime::new(store.clone()),
+            store,
             config_store: ConfigStore::default_app()?,
             mcp_runtime: McpRuntimeRegistry::new(),
             lsp_runtime: pl_lsp::LspRuntimeRegistry::new(),
@@ -52,6 +56,7 @@ impl StudioRuntime {
 
     pub fn new(store: StudioStore, config_store: ConfigStore) -> Self {
         Self {
+            interactions: InteractionRuntime::new(store.clone()),
             store,
             config_store,
             mcp_runtime: McpRuntimeRegistry::new(),
@@ -61,6 +66,10 @@ impl StudioRuntime {
 
     pub fn store(&self) -> &StudioStore {
         &self.store
+    }
+
+    pub fn interactions(&self) -> &InteractionRuntime {
+        &self.interactions
     }
 
     pub fn config_store(&self) -> &ConfigStore {
@@ -282,9 +291,6 @@ impl StudioRuntime {
         project_path: &Path,
         mode: CompileMode,
     ) -> Result<InstructionSnapshot> {
-        if let Some(snapshot) = existing {
-            return Ok(snapshot.clone());
-        }
         let resolved = config.resolve_role(ModelRole::Planner)?;
         let model = resolved
             .models
@@ -294,6 +300,17 @@ impl StudioRuntime {
             .unwrap_or_else(|| pl_model::ModelInfo::fallback(&resolved.role_config.model));
         let current_dir =
             std::fs::canonicalize(project_path).unwrap_or_else(|_| workspace_root.to_path_buf());
+        if let Some(snapshot) = existing {
+            return Ok(snapshot.with_turn_overlay(InstructionAssemblyRequest {
+                config: Some(config),
+                model: &model,
+                mode,
+                workspace_root,
+                current_dir: &current_dir,
+                workspace_instructions: None,
+                subagent_constraint: None,
+            })?);
+        }
         let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
             config: Some(config),
             model: &model,

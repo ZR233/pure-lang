@@ -46,10 +46,7 @@ const zhCN = {
     mcpSettingsSaved: "MCP 设置已保存",
     permissionModeSaved: "权限模式已保存",
     modeUpdated: "模式已更新",
-    toolApproved: "工具已批准",
-    toolDenied: "工具已拒绝",
     userInputRequired: "等待你的回答",
-    userInputAnswered: "回答已发送",
     bootstrapFailed: "启动失败：{{error}}",
     addProjectFailed: "添加项目失败：{{error}}",
     selectProjectFailed: "选择项目失败：{{error}}",
@@ -257,8 +254,9 @@ const zhCN = {
     title: "确认计划",
     promptTitle: "实施此计划?",
     hint: "选择下一步",
-    implementChoice: "是，实施此计划",
-    adjustChoice: "否，请告知 Codex 如何调整",
+    implementChoice: "在当前上下文实施",
+    implementFreshChoice: "在新上下文实施",
+    adjustChoice: "继续规划或调整",
     ignore: "忽略",
     submit: "提交",
     continueDiscussion: "继续讨论",
@@ -267,11 +265,14 @@ const zhCN = {
 
   planState: {
     pending: "待确认",
+    pendingConfirmation: "待确认",
     accepted: "已采纳",
     implementing: "实施中",
     implemented: "已实施",
     implementationFailed: "实施失败",
+    continuedPlanning: "继续规划",
     dismissed: "已忽略",
+    cancelled: "已取消",
   },
 
   settings: {

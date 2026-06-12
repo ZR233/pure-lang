@@ -84,7 +84,7 @@ Before any component library migration:
 - **i18n**: All text uses `useTranslation()` from `react-i18next`
 - **No CSS-in-JS**: All styling is external CSS files with `className` — no styled-components or inline styles (except virtual scroll `transform` and Dropdown dynamic positioning)
 - **Tauri event pattern**: Backend pushes via `listen("session_runtime")`, `listen("timeline_delta")`, `listen("tool_approval")`, `listen("user_input_request")`
-- **Tauri invoke commands**: `run_prompt`, `stop_prompt`, `implement_plan`, `approve_tool`, `answer_user_input`, etc.
+- **Tauri invoke commands**: `run_prompt`, `stop_prompt`, `resolve_interaction`, etc.
 
 ## Constrained-Width List Item Layout Patterns
 

@@ -103,6 +103,8 @@ pub(crate) enum ChatReasoningStyle {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct ResponsesRequestBody {
     model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    instructions: Option<String>,
     input: Vec<ResponsesInputItem>,
     stream: bool,
     tool_choice: String,
@@ -120,15 +122,6 @@ pub(crate) struct ResponsesRequestBody {
 impl ResponsesRequestBody {
     fn from_request(request: &CompletionRequest) -> Result<Self> {
         let mut input = Vec::new();
-
-        if let Some(instructions) = &request.instructions {
-            input.push(ResponsesInputItem::message(
-                ResponsesRole::System,
-                vec![ResponsesContent::InputText {
-                    text: instructions.clone(),
-                }],
-            ));
-        }
 
         for msg in &request.messages {
             match msg.role {
@@ -194,6 +187,7 @@ impl ResponsesRequestBody {
 
         Ok(Self {
             model: request.model.clone(),
+            instructions: request.instructions.clone(),
             input,
             stream: true,
             tool_choice: request.tool_choice.clone(),
@@ -217,7 +211,8 @@ enum ResponsesInputItem {
         content: Vec<ResponsesContent>,
     },
     FunctionCall {
-        id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
         name: String,
         arguments: String,
         call_id: String,
@@ -227,7 +222,8 @@ enum ResponsesInputItem {
         output: String,
     },
     CustomToolCall {
-        id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
         name: String,
         input: String,
         call_id: String,
@@ -247,13 +243,13 @@ impl ResponsesInputItem {
     fn from_tool_call(tool_call: ToolCall) -> Self {
         match tool_call.payload {
             ToolCallPayload::Function { arguments } => Self::FunctionCall {
-                id: tool_call.id.clone(),
+                id: None,
                 name: tool_call.name,
                 arguments: serde_json::to_string(&arguments).unwrap_or_default(),
                 call_id: tool_call.call_id.unwrap_or(tool_call.id),
             },
             ToolCallPayload::Custom { input } => Self::CustomToolCall {
-                id: tool_call.id.clone(),
+                id: None,
                 name: tool_call.name,
                 input,
                 call_id: tool_call.call_id.unwrap_or(tool_call.id),
@@ -775,7 +771,7 @@ mod tests {
     }
 
     #[test]
-    fn instructions_precede_temporary_prelude_messages() {
+    fn responses_use_top_level_instructions_and_chat_prepends_system_message() {
         let request = CompletionRequest {
             model: "gpt-5.5".to_string(),
             instructions: Some("base".to_string()),
@@ -798,6 +794,7 @@ mod tests {
         let chat_body =
             OpenAiProtocol::chat(ChatReasoningStyle::Plain).build_request_body(&request);
 
+        assert_eq!(responses_body["instructions"], serde_json::json!("base"),);
         assert_eq!(
             responses_body["input"]
                 .as_array()
@@ -805,11 +802,7 @@ mod tests {
                 .iter()
                 .map(|item| item["role"].as_str().unwrap())
                 .collect::<Vec<_>>(),
-            vec!["system", "system", "user", "user"],
-        );
-        assert_eq!(
-            responses_body["input"][0]["content"][0]["text"],
-            serde_json::json!("base"),
+            vec!["system", "user", "user"],
         );
         assert_eq!(
             chat_body["messages"]
@@ -1247,6 +1240,8 @@ mod tests {
             body["input"][0]["type"],
             serde_json::json!("custom_tool_call")
         );
+        assert!(body["input"][0]["id"].is_null());
+        assert_eq!(body["input"][0]["call_id"], serde_json::json!("call_1"));
         assert_eq!(
             body["input"][1]["type"],
             serde_json::json!("custom_tool_call_output")
@@ -1270,6 +1265,7 @@ mod tests {
             responses_body["input"][1]["call_id"],
             serde_json::json!("call_1")
         );
+        assert!(responses_body["input"][0]["id"].is_null());
         assert_eq!(
             chat_body["messages"][1]["tool_call_id"],
             serde_json::json!("ctc_1")
@@ -1293,6 +1289,7 @@ mod tests {
             responses_body["input"][1]["call_id"],
             serde_json::json!("call_1")
         );
+        assert!(responses_body["input"][0]["id"].is_null());
         assert_eq!(
             chat_body["messages"][1]["tool_call_id"],
             serde_json::json!("fc_1")

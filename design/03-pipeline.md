@@ -27,11 +27,11 @@ React action
 - `turnOptions.permissionMode`：默认固定 `request-approval`
 - `prompt`、`sessionId`、`workspaceRoot` 等进入 application service
 
-`compileMode` 是会话级协作模式。`auto` 是默认执行模式，允许模型在审批策略约束内主动修改工作区；`plan` 是 Codex 风格规划模式，允许读取、搜索、运行经审批的探索命令和调度探索型子代理，但最终交付物应是一段可执行计划，而不是直接修改文件。Plan Mode 的最终计划使用 `<proposed_plan>...</proposed_plan>` 包裹，由 streaming 层提取为独立 timeline item；普通 assistant 正文不显示这些标签。
+`compileMode` 是会话级协作模式，不是模型角色路由。Studio 根聊天 turn 始终使用 `planner` 角色模型；`auto` 表示执行型协作模式，允许模型在审批策略约束内主动修改工作区；`plan` 是 Codex 风格规划模式，允许读取、搜索、运行经审批的探索命令和调度探索型子代理，但最终交付物应是一段可执行计划，而不是直接修改文件。Plan Mode 的最终计划使用 `<proposed_plan>...</proposed_plan>` 包裹，由 streaming 层提取为独立 timeline item；普通 assistant 正文不显示这些标签。
 
 `workspaceRoot` 是运行期有效工作区，而不是简单等于 UI 当前选中的目录。Studio 读取 project path 后先解析到规范化目录；如果该目录位于 Git 仓库中，则提升到最近的 Git 仓库根。这样用户从子 crate 或桌面壳层进入项目时，工具仍能访问完整仓库上下文。工作区记忆按 Codex 风格从 Git 根到当前工作目录读取层级文档，候选文件优先级为 `AGENTS.override.md`、`AGENTS.md`、`Agents.md`，并受配置的总字节预算限制。
 
-提示词在核心层按三层组装：`base/system`、`developer`、`user context`。`base/system` 是模型请求的顶层系统提示词，承载跨 Auto/Plan 共用的身份、工作原则、通用工具协作、子代理调度约定和文档同步工作流；`developer` 承载 Auto/Plan 模式差异、平台工具规则、skills 索引和运行约束；`user context` 承载用户配置的上下文偏好和 AGENTS 项目记忆。这些临时前置内容参与模型请求和 token 估算，但不写入普通会话消息历史。
+提示词在核心层按三层组装：`base/system`、`developer`、`user context`。`base/system` 是模型请求的顶层系统提示词，承载跨 Auto/Plan 共用的身份、工作原则、通用工具协作、子代理调度约定和文档同步工作流；`developer` 承载 Auto/Plan 模式差异、平台工具规则、skills 索引和运行约束；`user context` 承载用户配置的上下文偏好和 AGENTS 项目记忆。这些临时前置内容参与模型请求和 token 估算，但不写入普通会话消息历史。session snapshot 只冻结稳定上下文；Auto/Plan mode overlay 是 per-turn 注入，Plan session 后续切到 Auto 实施计划时不得继续携带 Plan-only developer 约束。
 
 系统提示词必须把文档同步作为代码修改前后的稳定约束：涉及架构、接口、行为或项目约定的变更，代理应先阅读相关设计文档和项目记忆，确认计划后先更新 `design/` 下对应文档，再开始实现；实现完成后需要整体回看计划、文档、代码和测试结果，确认交付内容仍与文档和计划一致。若实现过程中发现现有文档与可行方案冲突，应暂停并让用户在遵循现有文档、采纳新方案并同步文档、继续补充需求之间选择。
 
@@ -51,6 +51,7 @@ React action
 - 显式子代理分工允许最多两轮只读定位；若仍未创建 agent，后续推理只暴露 `spawn_agent` 并保持 `auto` tool choice，避免触发不支持 required tool choice 的 provider 限制
 - 多 agent 协作只通过 `spawn_agent`、`wait_agent`、`list_agents`、`send_message`、`followup_task`、`close_agent` 组成，不提供同步等待到最终摘要的 `subagent` 入口
 - `request_user_input` 是 Codex 风格的阻塞交互工具，root agent 与 subagent 都可用；工具通过统一 `Interaction` 域创建 `userInput` 请求，等待前端 resolution 后把答案作为工具结果返回，不作为普通用户聊天消息写入历史
+- `planner` 是所有 Studio 根聊天 turn 的唯一模型角色，包括 Auto、Plan 和 Plan 实施；`executor` 只用于 planner 通过子代理工具创建或继续的 child agent turn
 - agent 运行时状态对齐 Codex：`queued | running | waiting | completed | errored | interrupted | shutdown | notFound`
 - `budgetLimited` 不是 agent 状态，而是 turn abort reason；子 agent 预算耗尽时状态为 `interrupted`，并携带 `reason`、`budgetLimitKind` 和 `budgetUsage`
 - `interrupted` 是可恢复的非终局状态；`completed | errored | shutdown | notFound` 是终局状态
@@ -77,7 +78,7 @@ React action
 
 子代理没有独立的压缩实现。`spawn_agent` 和 `followup_task` 创建的 child session 复用同一个 `PureCore` turn pipeline，因此每个子代理独立维护自己的压缩历史；父会话不会替子代理压缩，也不会因为子代理压缩而改写父历史。
 
-子代理同样继承父 turn 的 `compileMode` 和 resolved instruction snapshot。父会话处于 Plan Mode 时，child session 也以 Plan Mode 运行，并复用同一套工具边界和 proposed-plan 输出约定；父会话处于 Auto Mode 时，child session 按 Auto Mode 执行。
+子代理继承父 turn 的 `compileMode` 和稳定 instruction context，但不继承 root 的模型角色。child agent 的模型角色由 `agentType` 决定，默认 executor；只有子代理路径可以使用 executor 角色。child turn 同样按当前 mode 注入 Auto/Plan overlay，并复用同一套工具边界和 proposed-plan 输出约定。
 
 子代理同样继承父 turn 的交互运行时。`request_user_input`、工具审批和计划确认统一表达为 `InteractionKind::{userInput, toolApproval, planConfirmation}`。每个 interaction 都带 `sessionId`、`turnId`、可选 `itemId/toolId/agentPath`，由 `InteractionRuntime` 创建、持久化、广播并等待 resolution。Studio 只渲染当前最高优先级 pending interaction；回答或审批只解除对应等待，不触发新 turn，也不写入普通聊天消息。
 
@@ -110,9 +111,9 @@ Agent 协作 timeline 与状态分层：
 
 - 消息和 trace 采用事务批量写入，避免逐条写放大
 - session 的 `mode` 表示下一轮默认协作模式，由 Studio 模式切换命令持久化；运行时按 session 当前 `mode` 构造 `TurnRequest`
-- session 的 `instruction_snapshot_json` 保存首轮解析出的 base/developer/user context。已有 session 缺少快照时，在下一轮运行前按当前配置补建。后续配置、模型默认提示词或 AGENTS 文件变化不 retroactively 改写既有 session；新 session 才使用新配置。
-- Plan Mode 生成的计划有独立生命周期事件：`accepted | implementing | implemented | implementationFailed | dismissed`。这些事件作为 `TraceEventKind::PlanLifecycleChanged` 追加到 `timeline_events`；前端按 `planId` 折叠最新状态。计划实施确认不是前端从 timeline 自行推断的临时状态，而是后端在当前 live Plan turn 终态后创建的 `planConfirmation` interaction
-- `interactions` 表保存所有 pending/resolved/cancelled/expired 交互。`TraceEventKind::InteractionChanged` 是历史与实时恢复的统一事实，旧 `studio-user-input-*` 和 `studio-tool-approval-*` sideband 事件不再作为协议入口
+- session 的 `instruction_snapshot_json` 保存首轮解析出的稳定 base/user/project context 和非 mode-specific developer context。已有 session 缺少快照时，在下一轮运行前按当前配置补建。后续配置、模型默认提示词或 AGENTS 文件变化不 retroactively 改写既有 session；新 session 才使用新配置。Auto/Plan mode overlay 每个 turn 重新注入，不能被 snapshot 永久冻结。
+- Plan Mode 生成的计划有独立生命周期事件：`pendingConfirmation | accepted | implementing | implemented | implementationFailed | continuedPlanning | dismissed | cancelled`。这些事件作为 `TraceEventKind::PlanLifecycleChanged` 追加到 `timeline_events`；前端按 `planId` 折叠最新状态。计划实施确认不是前端从 timeline 自行推断的临时状态，而是后端在当前 live Plan turn 终态后创建的 `planConfirmation` interaction。`implementSameContext` 切到 Auto 并只提交 `Implement the plan.`；`implementFreshContext` 新建 Auto session，把 plan markdown 作为 fresh handoff prompt 的唯一意图来源。两条实施路径的 root turn 都继续使用 planner 角色。
+- `interactions` 表保存所有 pending/resolved/cancelled/expired 交互，是刷新与 session 切换恢复 pending UI 的事实来源。`InteractionChanged` 只作为实时通知事件广播当前 interaction 最新状态，不依赖 timeline sequence；旧 `studio-user-input-*` 和 `studio-tool-approval-*` sideband 事件不再作为协议入口
 - 如果 turn 内发生上下文压缩，`CoreSession` revision 会变化，Studio 以事务重写当前 session 的消息历史并追加本轮 trace；未发生压缩时继续使用追加写入
 - timeline 读取以 `sequence` 为单调游标
 - agent tree、agent events、agent messages 与 turn snapshot 分表持久化；`agents` 为 latest snapshot，`agent_events` 为 append-only event log

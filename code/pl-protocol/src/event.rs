@@ -68,30 +68,6 @@ pub enum AgentEvent {
         item: TimelineItem,
         error: String,
     },
-    ToolApprovalRequested {
-        id: String,
-        name: String,
-        arguments: String,
-        #[serde(rename = "workingDirectory")]
-        working_directory: Option<String>,
-    },
-    ToolApprovalGranted {
-        id: String,
-        name: String,
-    },
-    ToolApprovalDenied {
-        id: String,
-        name: String,
-        reason: String,
-    },
-    UserInputRequested {
-        request_id: String,
-        tool_id: String,
-        questions: Vec<UserQuestion>,
-    },
-    UserInputAnswered {
-        request_id: String,
-    },
     InteractionChanged {
         event: InteractionChangedEvent,
     },
@@ -386,21 +362,27 @@ pub enum TimelineDelta {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum PlanLifecycleState {
+    PendingConfirmation,
     Accepted,
     Implementing,
     Implemented,
     ImplementationFailed,
+    ContinuedPlanning,
     Dismissed,
+    Cancelled,
 }
 
 impl PlanLifecycleState {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::PendingConfirmation => "pendingConfirmation",
             Self::Accepted => "accepted",
             Self::Implementing => "implementing",
             Self::Implemented => "implemented",
             Self::ImplementationFailed => "implementationFailed",
+            Self::ContinuedPlanning => "continuedPlanning",
             Self::Dismissed => "dismissed",
+            Self::Cancelled => "cancelled",
         }
     }
 }
@@ -642,31 +624,11 @@ pub enum TraceEventKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        InteractionKind, InteractionPayload, InteractionRequest, InteractionScope,
+        InteractionStatus,
+    };
     use pretty_assertions::assert_eq;
-
-    #[test]
-    fn serializes_tool_approval_requested_as_camel_case() {
-        let event = AgentEvent::ToolApprovalRequested {
-            id: "call-1".to_string(),
-            name: "bash".to_string(),
-            arguments: "{\"command\":\"echo hi\"}".to_string(),
-            working_directory: Some("C:/project".to_string()),
-        };
-
-        let json = serde_json::to_value(event).unwrap();
-
-        assert_eq!(
-            json,
-            serde_json::json!({
-                "toolApprovalRequested": {
-                    "id": "call-1",
-                    "name": "bash",
-                    "arguments": "{\"command\":\"echo hi\"}",
-                    "workingDirectory": "C:/project"
-                }
-            })
-        );
-    }
 
     #[test]
     fn serializes_enabled_tools_trace_event_as_camel_case() {
@@ -694,56 +656,32 @@ mod tests {
     }
 
     #[test]
-    fn serializes_tool_approval_decision_events_as_camel_case() {
-        let granted = serde_json::to_value(AgentEvent::ToolApprovalGranted {
-            id: "call-1".to_string(),
-            name: "bash".to_string(),
-        })
-        .unwrap();
-        let denied = serde_json::to_value(AgentEvent::ToolApprovalDenied {
-            id: "call-2".to_string(),
-            name: "subagent".to_string(),
-            reason: "not now".to_string(),
-        })
-        .unwrap();
-
-        assert_eq!(
-            granted,
-            serde_json::json!({
-                "toolApprovalGranted": {
-                    "id": "call-1",
-                    "name": "bash"
-                }
-            })
-        );
-        assert_eq!(
-            denied,
-            serde_json::json!({
-                "toolApprovalDenied": {
-                    "id": "call-2",
-                    "name": "subagent",
-                    "reason": "not now"
-                }
-            })
-        );
-    }
-
-    #[test]
-    fn serializes_user_input_requested_as_camel_case() {
-        let event = AgentEvent::UserInputRequested {
-            request_id: "ask-1".to_string(),
-            tool_id: "call-1".to_string(),
-            questions: vec![UserQuestion {
-                id: "choice".to_string(),
-                header: "Mode".to_string(),
-                question: "Which mode?".to_string(),
-                is_other: true,
-                is_secret: false,
-                options: Some(vec![UserQuestionOption {
-                    label: "Fast".to_string(),
-                    description: "Use the fast path.".to_string(),
-                }]),
-            }],
+    fn serializes_interaction_changed_as_camel_case() {
+        let event = AgentEvent::InteractionChanged {
+            event: InteractionChangedEvent {
+                interaction: InteractionRequest {
+                    interaction_id: "call-1".to_string(),
+                    kind: InteractionKind::ToolApproval,
+                    status: InteractionStatus::Pending,
+                    scope: InteractionScope {
+                        session_id: "session-1".to_string(),
+                        turn_id: "turn-1".to_string(),
+                        item_id: Some("call-1".to_string()),
+                        tool_id: Some("call-1".to_string()),
+                        agent_path: None,
+                    },
+                    payload: InteractionPayload::ToolApproval {
+                        name: "bash".to_string(),
+                        arguments: serde_json::json!({"command": "echo hi"}),
+                        working_directory: Some("C:/project".to_string()),
+                        parent_agent_id: None,
+                    },
+                    created_at: 1_779_688_800,
+                    updated_at: 1_779_688_800,
+                    resolved_at: None,
+                    resolution: None,
+                },
+            },
         };
 
         let json = serde_json::to_value(event).unwrap();
@@ -751,20 +689,28 @@ mod tests {
         assert_eq!(
             json,
             serde_json::json!({
-                "userInputRequested": {
-                    "requestId": "ask-1",
-                    "toolId": "call-1",
-                    "questions": [{
-                        "id": "choice",
-                        "header": "Mode",
-                        "question": "Which mode?",
-                        "isOther": true,
-                        "isSecret": false,
-                        "options": [{
-                            "label": "Fast",
-                            "description": "Use the fast path."
-                        }]
-                    }]
+                "interactionChanged": {
+                    "event": {
+                        "interaction": {
+                            "interactionId": "call-1",
+                            "kind": "toolApproval",
+                            "status": "pending",
+                            "scope": {
+                                "sessionId": "session-1",
+                                "turnId": "turn-1",
+                                "itemId": "call-1",
+                                "toolId": "call-1"
+                            },
+                            "payload": {
+                                "type": "toolApproval",
+                                "name": "bash",
+                                "arguments": {"command": "echo hi"},
+                                "workingDirectory": "C:/project"
+                            },
+                            "createdAt": 1779688800,
+                            "updatedAt": 1779688800
+                        }
+                    }
                 }
             })
         );

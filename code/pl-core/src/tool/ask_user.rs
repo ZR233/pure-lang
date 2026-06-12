@@ -2,9 +2,9 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use pl_protocol::{
-    AgentEvent, InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,
-    InteractionResolution, InteractionScope, InteractionStatus, PureError, UserInputRequest,
-    UserInputResponse, UserQuestion,
+    InteractionKind, InteractionPayload, InteractionRequest, InteractionResolution,
+    InteractionScope, InteractionStatus, PureError, UserInputRequest, UserInputResponse,
+    UserQuestion,
 };
 use serde::Deserialize;
 
@@ -102,71 +102,29 @@ impl Tool for AskUserTool {
                 tool_id: input.tool_id,
                 questions: args.questions,
             };
-            if let Some(callback) = context.options.interaction_callback.clone() {
-                let interaction = user_input_interaction(&input.session_id, &request, &context);
-                let _ = context.event_tx.send(AgentEvent::InteractionChanged {
-                    event: InteractionChangedEvent {
-                        interaction: interaction.clone(),
-                    },
-                });
-                let resolution = match context.options.cancellation_token.clone() {
-                    Some(token) => {
-                        tokio::select! {
-                            resolution = callback(interaction.clone()) => resolution,
-                            _ = token.cancelled() => InteractionResolution::UserInput {
-                                answers: Default::default(),
-                            },
-                        }
-                    }
-                    None => callback(interaction.clone()).await,
-                };
-                let response = match resolution {
-                    InteractionResolution::UserInput { answers } => UserInputResponse { answers },
-                    InteractionResolution::ToolApproval { .. }
-                    | InteractionResolution::PlanConfirmation { .. } => {
-                        UserInputResponse::default()
-                    }
-                };
-                let _ = context.event_tx.send(AgentEvent::UserInputAnswered {
-                    request_id: request.request_id,
-                });
-                let description = serde_json::to_string(&response).map_err(|error| {
-                    PureError::ToolExecutionFailed {
-                        tool: self.name().to_string(),
-                        error: format!("failed to serialize response: {error}"),
-                    }
-                })?;
-                return Ok(ToolOutput {
-                    description,
-                    truncated: OutputTruncation::empty(),
-                    output_file: PathBuf::new(),
-                    exit_code: None,
-                    timed_out: false,
-                });
-            }
-            let _ = context.event_tx.send(AgentEvent::UserInputRequested {
-                request_id: request.request_id.clone(),
-                tool_id: request.tool_id.clone(),
-                questions: request.questions.clone(),
-            });
-            let Some(callback) = context.options.user_input_callback.clone() else {
+            let Some(callback) = context.options.interaction_callback.clone() else {
                 return Err(PureError::ToolExecutionFailed {
                     tool: self.name().to_string(),
-                    error: "user input callback is not configured".to_string(),
+                    error: "interaction runtime is not configured".to_string(),
                 });
             };
-            let response = match context.options.cancellation_token.clone() {
+            let interaction = user_input_interaction(&input.session_id, &request, &context);
+            let resolution = match context.options.cancellation_token.clone() {
                 Some(token) => {
                     tokio::select! {
-                        response = callback(request.clone()) => response,
-                        _ = token.cancelled() => UserInputResponse::default(),
+                        resolution = callback(interaction.clone()) => resolution,
+                        _ = token.cancelled() => InteractionResolution::UserInput {
+                            answers: Default::default(),
+                        },
                     }
                 }
-                None => callback(request.clone()).await,
+                None => callback(interaction.clone()).await,
             };
-            let _ = context.event_tx.send(AgentEvent::UserInputAnswered {
-                request_id: request.request_id,
-            });
+            let response = match resolution {
+                InteractionResolution::UserInput { answers } => UserInputResponse { answers },
+                InteractionResolution::ToolApproval { .. }
+                | InteractionResolution::PlanConfirmation { .. } => UserInputResponse::default(),
+            };
             let description = serde_json::to_string(&response).map_err(|error| {
                 PureError::ToolExecutionFailed {
                     tool: self.name().to_string(),
@@ -310,61 +268,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn request_user_input_returns_answers_from_callback() {
-        let seen_request = Arc::new(Mutex::new(None));
-        let seen_request_for_callback = seen_request.clone();
-        let callback: crate::UserInputCallback = Arc::new(move |request| {
-            let seen_request = seen_request_for_callback.clone();
-            Box::pin(async move {
-                *seen_request.lock().unwrap() = Some(request);
-                UserInputResponse {
-                    answers: HashMap::from([(
-                        "mode".to_string(),
-                        UserInputAnswer {
-                            answers: vec!["Fast".to_string()],
-                        },
-                    )]),
-                }
-            })
-        });
-        let output = AskUserTool
-            .execute(
-                tool_input(),
-                context(TurnOptions::default().with_user_input_callback(callback)),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            serde_json::from_str::<UserInputResponse>(&output.description).unwrap(),
-            UserInputResponse {
-                answers: HashMap::from([(
-                    "mode".to_string(),
-                    UserInputAnswer {
-                        answers: vec!["Fast".to_string()],
-                    },
-                )]),
-            }
-        );
-        let request = seen_request.lock().unwrap().clone().unwrap();
-        assert_eq!(request.request_id, "session-1-call-1");
-        assert_eq!(
-            request.questions,
-            vec![UserQuestion {
-                id: "mode".to_string(),
-                header: "Mode".to_string(),
-                question: "Which mode?".to_string(),
-                is_other: false,
-                is_secret: false,
-                options: Some(vec![UserQuestionOption {
-                    label: "Fast".to_string(),
-                    description: "Use the fast path.".to_string(),
-                }]),
-            }]
-        );
-    }
-
-    #[tokio::test]
     async fn request_user_input_returns_answers_from_interaction_callback() {
         let seen_interaction = Arc::new(Mutex::new(None));
         let seen_interaction_for_callback = seen_interaction.clone();
@@ -435,10 +338,12 @@ mod tests {
 
     #[tokio::test]
     async fn request_user_input_returns_empty_answers_when_cancelled() {
-        let callback: crate::UserInputCallback = Arc::new(|_request| {
+        let callback: crate::InteractionCallback = Arc::new(|_interaction| {
             Box::pin(async {
                 std::future::pending::<()>().await;
-                UserInputResponse::default()
+                InteractionResolution::UserInput {
+                    answers: Default::default(),
+                }
             })
         });
         let token = CancellationToken::new();
@@ -448,7 +353,7 @@ mod tests {
                 tool_input(),
                 context(
                     TurnOptions::default()
-                        .with_user_input_callback(callback)
+                        .with_interaction_callback(callback)
                         .with_cancellation(token),
                 ),
             )

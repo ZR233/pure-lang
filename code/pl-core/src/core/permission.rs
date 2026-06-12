@@ -1,9 +1,8 @@
 use std::path::Path;
 
 use pl_protocol::{
-    AgentEvent, AgentEventSender, InteractionChangedEvent, InteractionKind, InteractionPayload,
-    InteractionRequest, InteractionResolution, InteractionScope, InteractionStatus,
-    ToolApprovalResolution,
+    InteractionKind, InteractionPayload, InteractionRequest, InteractionResolution,
+    InteractionScope, InteractionStatus, ToolApprovalResolution,
 };
 
 #[cfg(test)]
@@ -144,13 +143,12 @@ pub(super) fn permission_risk_summary(tool_name: &str) -> &'static str {
 pub(super) async fn approve_tool_call(
     options: &TurnOptions,
     request: &ToolApprovalRequest,
-    event_tx: AgentEventSender,
     context: &ToolContext,
 ) -> ToolApprovalDecision {
     match decide_tool_permission(options, context.mode, request, context.workspace_access) {
         PermissionDecision::Approved { .. } => ToolApprovalDecision::Approved,
         PermissionDecision::NeedsUserApproval { .. } => {
-            request_user_approval(options, request, event_tx, "").await
+            request_user_approval(options, request, "").await
         }
         PermissionDecision::NeedsAiReview { .. } => ToolApprovalDecision::Denied {
             reason: "AI reviewer approval requires the core execution path".to_string(),
@@ -162,62 +160,36 @@ pub(super) async fn approve_tool_call(
 pub(super) async fn request_user_approval(
     options: &TurnOptions,
     request: &ToolApprovalRequest,
-    event_tx: AgentEventSender,
     turn_id: &str,
 ) -> ToolApprovalDecision {
-    if let Some(callback) = &options.interaction_callback {
-        let interaction = tool_approval_interaction(request, turn_id);
-        let _ = event_tx.send(AgentEvent::InteractionChanged {
-            event: InteractionChangedEvent {
-                interaction: interaction.clone(),
-            },
-        });
-        let resolution = match &options.cancellation_token {
-            Some(token) => {
-                tokio::select! {
-                    resolution = callback(interaction.clone()) => resolution,
-                    _ = token.cancelled() => InteractionResolution::ToolApproval {
-                        decision: ToolApprovalResolution::Denied,
-                        reason: Some(cancellation_reason()),
-                    },
-                }
-            }
-            None => callback(interaction.clone()).await,
+    let Some(callback) = &options.interaction_callback else {
+        return ToolApprovalDecision::Denied {
+            reason: "manual approval required but no interaction runtime is configured".to_string(),
         };
-        return match resolution {
-            InteractionResolution::ToolApproval { decision, reason } => match decision {
-                ToolApprovalResolution::Approved => ToolApprovalDecision::Approved,
-                ToolApprovalResolution::Denied => ToolApprovalDecision::Denied {
-                    reason: reason.unwrap_or_else(|| "denied by user".to_string()),
+    };
+    let interaction = tool_approval_interaction(request, turn_id);
+    let resolution = match &options.cancellation_token {
+        Some(token) => {
+            tokio::select! {
+                resolution = callback(interaction.clone()) => resolution,
+                _ = token.cancelled() => InteractionResolution::ToolApproval {
+                    decision: ToolApprovalResolution::Denied,
+                    reason: Some(cancellation_reason()),
                 },
-            },
-            InteractionResolution::UserInput { .. }
-            | InteractionResolution::PlanConfirmation { .. } => ToolApprovalDecision::Denied {
-                reason: "interaction resolved with an incompatible payload".to_string(),
-            },
-        };
-    }
-
-    let _ = event_tx.send(AgentEvent::ToolApprovalRequested {
-        id: request.id.clone(),
-        name: request.name.clone(),
-        arguments: serde_json::to_string(&request.arguments).unwrap_or_default(),
-        working_directory: request.working_directory.clone(),
-    });
-    match &options.tool_approval_callback {
-        Some(callback) => match &options.cancellation_token {
-            Some(token) => {
-                tokio::select! {
-                    decision = callback(request.clone()) => decision,
-                    _ = token.cancelled() => ToolApprovalDecision::Denied {
-                        reason: cancellation_reason(),
-                    },
-                }
             }
-            None => callback(request.clone()).await,
+        }
+        None => callback(interaction.clone()).await,
+    };
+    match resolution {
+        InteractionResolution::ToolApproval { decision, reason } => match decision {
+            ToolApprovalResolution::Approved => ToolApprovalDecision::Approved,
+            ToolApprovalResolution::Denied => ToolApprovalDecision::Denied {
+                reason: reason.unwrap_or_else(|| "denied by user".to_string()),
+            },
         },
-        None => ToolApprovalDecision::Denied {
-            reason: "manual approval required but no approver is configured".to_string(),
+        InteractionResolution::UserInput { .. }
+        | InteractionResolution::PlanConfirmation { .. } => ToolApprovalDecision::Denied {
+            reason: "interaction resolved with an incompatible payload".to_string(),
         },
     }
 }

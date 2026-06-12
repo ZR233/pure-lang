@@ -306,17 +306,26 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         status: action.status,
       };
     case "runPromptLoaded": {
-      if (action.payload.sessionId !== state.selectedSessionId) {
+      const switchingSession = action.payload.sessionId !== state.selectedSessionId;
+      if (switchingSession && !state.isBusy) {
         return state;
       }
+      const timelineBase = switchingSession
+        ? {
+            ...state,
+            ...emptyTimelineState(),
+            planStates: new Map<string, PlanState>(),
+            interactions: new Map<string, InteractionRequest>(),
+          }
+        : removeOptimisticTimelineItems(state);
       return {
         ...mergeRunPromptTimeline(
-          removeOptimisticTimelineItems(state),
+          timelineBase,
           action.payload.sessionId,
           action.payload.timelineItems ?? [],
           action.payload.timelineNextSequence,
         ),
-        planStates: mergePlanStates(state.planStates, action.payload.planStates ?? []),
+        planStates: mergePlanStates(timelineBase.planStates, action.payload.planStates ?? []),
         selectedSessionId: action.payload.sessionId,
         sessions: action.payload.sessions,
         agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
@@ -327,7 +336,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         status: action.status,
         isBusy: false,
         ...interactionState(
-          state.interactions,
+          timelineBase.interactions,
           action.payload.interactions ?? [],
           action.payload.sessionId,
           false,
@@ -789,16 +798,6 @@ function reduceAgentEvent(
   }
   if ("turnBudgetLimited" in event) {
     return { ...state, status: statusText, turnPhase: "budgetLimited" };
-  }
-  if ("userInputRequested" in event) {
-    return { ...state, status: statusText, turnPhase: "userInput" };
-  }
-  if ("userInputAnswered" in event) {
-    return {
-      ...state,
-      status: statusText,
-      turnPhase: state.turnPhase === "stopping" ? "stopping" : "tool",
-    };
   }
   if ("interactionChanged" in event) {
     return reduceInteractionChanged(

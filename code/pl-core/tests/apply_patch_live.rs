@@ -4,10 +4,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pl_core::{
-    CompileMode, CoreSession, ModelRole, PureConfig, PureCore, ToolApprovalDecision,
-    ToolApprovalRequest, TraceEvent, TurnBudget, TurnOptions, TurnRequest, TurnResultStatus,
+    CompileMode, CoreSession, ModelRole, PureConfig, PureCore, TraceEvent, TurnBudget, TurnOptions,
+    TurnRequest, TurnResultStatus,
 };
-use pl_protocol::{TimelineItemStatus, TraceEventKind};
+use pl_protocol::{
+    InteractionPayload, InteractionResolution, TimelineItemStatus, ToolApprovalResolution,
+    TraceEventKind,
+};
 use pretty_assertions::assert_eq;
 
 const DEEPSEEK_LIVE_ENV_KEY: &str = "API_KEY_DEEPSEEK";
@@ -59,20 +62,30 @@ fn allowed_tool(name: &str) -> bool {
 }
 
 fn approval_options(requested_tools: Arc<Mutex<Vec<String>>>) -> TurnOptions {
-    TurnOptions::manual(Arc::new(move |request: ToolApprovalRequest| {
+    TurnOptions::default().with_interaction_callback(Arc::new(move |interaction| {
         let requested_tools = requested_tools.clone();
         Box::pin(async move {
+            let InteractionPayload::ToolApproval { name, .. } = interaction.payload else {
+                return InteractionResolution::ToolApproval {
+                    decision: ToolApprovalResolution::Denied,
+                    reason: Some("unexpected interaction payload".to_string()),
+                };
+            };
             {
                 requested_tools
                     .lock()
                     .expect("requested tool log poisoned")
-                    .push(request.name.clone());
+                    .push(name.clone());
             }
-            if allowed_tool(&request.name) {
-                ToolApprovalDecision::Approved
+            if allowed_tool(&name) {
+                InteractionResolution::ToolApproval {
+                    decision: ToolApprovalResolution::Approved,
+                    reason: None,
+                }
             } else {
-                ToolApprovalDecision::Denied {
-                    reason: format!("forbidden tool in live apply_patch test: {}", request.name),
+                InteractionResolution::ToolApproval {
+                    decision: ToolApprovalResolution::Denied,
+                    reason: Some(format!("forbidden tool in live apply_patch test: {name}")),
                 }
             }
         })

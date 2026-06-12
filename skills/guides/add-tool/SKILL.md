@@ -271,4 +271,4 @@ pub async fn register_lsp_languages(&mut self, registry: &LspRuntimeRegistry) ->
 - 写工具必须在执行前调用 `context.workspace_write_lock().await` 获取互斥锁。
 - `ToolContext` 的字段：`event_tx`、`options`、`workspace_access`、`mode`、`workspace_root`、`workspace_instructions`、`active_subagent`、`agent_control`。
 - `ToolOutput` 的 `description` 字段是返回给 LLM 的文本内容（会被截断），`output_file` 路径为 `target/pure/{session_id}/{tool_id}/output.log`。
-- 发送 `AgentEvent::ToolApprovalRequested / Granted / Denied` 时，工具本身不处理审批，由 `tool_dispatch.rs` 统一调度。
+- 工具本身不处理审批，也不发送旧的审批事件；`tool_dispatch.rs` 统一调度权限判断，需要用户确认时通过 `InteractionRuntime` 创建 `toolApproval` interaction。

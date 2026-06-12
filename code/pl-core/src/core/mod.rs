@@ -378,7 +378,10 @@ mod tests {
     use crate::turn::{CompileMode, PermissionMode, ToolApprovalPolicy};
     use crate::{ConfigStore, ModelRole};
     use pl_model::ToolCall;
-    use pl_protocol::{TimelineItemKind, TimelineTextRole, TraceEventKind};
+    use pl_protocol::{
+        InteractionPayload, InteractionResolution, TimelineItemKind, TimelineTextRole,
+        ToolApprovalResolution, TraceEventKind,
+    };
     use pretty_assertions::assert_eq;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -768,17 +771,30 @@ mod tests {
 
         assert_eq!(options.tool_approval_policy, ToolApprovalPolicy::AutoAllow);
         assert_eq!(options.permission_mode, PermissionMode::RequestApproval);
-        assert!(options.tool_approval_callback.is_none());
+        assert!(options.interaction_callback.is_none());
     }
 
     #[tokio::test]
-    async fn manual_tool_approval_can_approve() {
-        let options = TurnOptions::manual(std::sync::Arc::new(|request| {
-            Box::pin(async move {
-                assert_eq!(request.name, "bash");
-                ToolApprovalDecision::Approved
-            })
-        }));
+    async fn manual_tool_approval_can_approve_through_interaction() {
+        let seen_interaction = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let seen_interaction_for_callback = seen_interaction.clone();
+        let options = TurnOptions::new(ToolApprovalPolicy::Manual).with_interaction_callback(
+            std::sync::Arc::new(move |interaction| {
+                let seen_interaction = seen_interaction_for_callback.clone();
+                Box::pin(async move {
+                    assert_eq!(interaction.kind, pl_protocol::InteractionKind::ToolApproval);
+                    match &interaction.payload {
+                        InteractionPayload::ToolApproval { name, .. } => assert_eq!(name, "bash"),
+                        other => panic!("unexpected payload: {other:?}"),
+                    }
+                    *seen_interaction.lock().unwrap() = Some(interaction);
+                    InteractionResolution::ToolApproval {
+                        decision: ToolApprovalResolution::Approved,
+                        reason: None,
+                    }
+                })
+            }),
+        );
         let request = ToolApprovalRequest {
             id: "call-1".to_string(),
             name: "bash".to_string(),
@@ -789,18 +805,13 @@ mod tests {
         let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
         let context = test_tool_context(event_tx.clone());
 
-        let decision = approve_tool_call(&options, &request, event_tx, &context).await;
-        let event = event_rx.recv().await.unwrap();
+        let decision = approve_tool_call(&options, &request, &context).await;
 
         assert_eq!(decision, ToolApprovalDecision::Approved);
-        assert!(matches!(
-            event,
-            AgentEvent::ToolApprovalRequested {
-                id,
-                name,
-                ..
-            } if id == "call-1" && name == "bash"
-        ));
+        assert!(event_rx.try_recv().is_err());
+        let interaction = seen_interaction.lock().unwrap().clone().unwrap();
+        assert_eq!(interaction.interaction_id, "call-1");
+        assert_eq!(interaction.status, pl_protocol::InteractionStatus::Pending);
     }
 
     #[tokio::test]
@@ -817,22 +828,16 @@ mod tests {
         let mut context = test_tool_context(event_tx.clone());
         context.mode = crate::turn::CompileMode::Plan;
 
-        let decision = approve_tool_call(&options, &request, event_tx, &context).await;
+        let decision = approve_tool_call(&options, &request, &context).await;
 
         assert_eq!(
             decision,
             ToolApprovalDecision::Denied {
-                reason: "manual approval required but no approver is configured".to_string()
+                reason: "manual approval required but no interaction runtime is configured"
+                    .to_string()
             }
         );
-        assert!(matches!(
-            event_rx.try_recv().unwrap(),
-            AgentEvent::ToolApprovalRequested {
-                id,
-                name,
-                ..
-            } if id == "call-1" && name == "bash"
-        ));
+        assert!(event_rx.try_recv().is_err());
     }
 
     #[tokio::test]
@@ -849,7 +854,7 @@ mod tests {
         let mut context = test_tool_context(event_tx.clone());
         context.mode = crate::turn::CompileMode::Plan;
 
-        let decision = approve_tool_call(&options, &request, event_tx, &context).await;
+        let decision = approve_tool_call(&options, &request, &context).await;
 
         assert_eq!(decision, ToolApprovalDecision::Approved);
         assert!(event_rx.try_recv().is_err());
@@ -869,7 +874,7 @@ mod tests {
         let mut context = test_tool_context(event_tx.clone());
         context.mode = crate::turn::CompileMode::Plan;
 
-        let decision = approve_tool_call(&options, &request, event_tx, &context).await;
+        let decision = approve_tool_call(&options, &request, &context).await;
 
         assert_eq!(decision, ToolApprovalDecision::Approved);
         assert!(event_rx.try_recv().is_err());
@@ -939,15 +944,26 @@ mod tests {
             serde_json::json!({"path": outside_file.to_string_lossy()}),
             None,
         );
-        let options = TurnOptions {
-            tool_approval_callback: Some(std::sync::Arc::new(|request| {
+        let seen_interaction = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let seen_interaction_for_callback = seen_interaction.clone();
+        let options = TurnOptions::default().with_interaction_callback(std::sync::Arc::new(
+            move |interaction| {
+                let seen_interaction = seen_interaction_for_callback.clone();
                 Box::pin(async move {
-                    assert_eq!(request.name, "read_file");
-                    ToolApprovalDecision::Approved
+                    match &interaction.payload {
+                        InteractionPayload::ToolApproval { name, .. } => {
+                            assert_eq!(name, "read_file")
+                        }
+                        other => panic!("unexpected payload: {other:?}"),
+                    }
+                    *seen_interaction.lock().unwrap() = Some(interaction);
+                    InteractionResolution::ToolApproval {
+                        decision: ToolApprovalResolution::Approved,
+                        reason: None,
+                    }
                 })
-            })),
-            ..Default::default()
-        };
+            },
+        ));
         let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
         let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
         let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
@@ -979,10 +995,8 @@ mod tests {
             event_rx.try_recv().unwrap(),
             AgentEvent::TimelineItemStarted { .. }
         ));
-        assert!(matches!(
-            event_rx.try_recv().unwrap(),
-            AgentEvent::ToolApprovalRequested { name, .. } if name == "read_file"
-        ));
+        assert!(seen_interaction.lock().unwrap().is_some());
+        while event_rx.try_recv().is_ok() {}
         let events = recorder.drain();
         assert_eq!(terminal_tool_event_count(&events), 1);
         assert!(!events.iter().any(|event| matches!(
@@ -1220,7 +1234,7 @@ mod tests {
         let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
         let context = test_tool_context(event_tx.clone());
 
-        let decision = approve_tool_call(&options, &request, event_tx, &context).await;
+        let decision = approve_tool_call(&options, &request, &context).await;
 
         assert_eq!(
             decision,

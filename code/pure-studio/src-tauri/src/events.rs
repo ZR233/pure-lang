@@ -150,11 +150,6 @@ pub async fn drain_events(
                         | AgentEvent::TimelineItemDelta { .. }
                         | AgentEvent::TimelineItemCompleted { .. }
                         | AgentEvent::TimelineItemFailed { .. }
-                        | AgentEvent::ToolApprovalRequested { .. }
-                        | AgentEvent::ToolApprovalGranted { .. }
-                        | AgentEvent::ToolApprovalDenied { .. }
-                        | AgentEvent::UserInputRequested { .. }
-                        | AgentEvent::UserInputAnswered { .. }
                         | AgentEvent::InteractionChanged { .. }
                         | AgentEvent::AgentRuntimeUpdated { .. }
                         | AgentEvent::TurnInterrupted { .. }
@@ -246,11 +241,6 @@ pub fn agent_snapshot_record(
         | AgentEvent::TimelineItemDelta { .. }
         | AgentEvent::TimelineItemCompleted { .. }
         | AgentEvent::TimelineItemFailed { .. }
-        | AgentEvent::ToolApprovalRequested { .. }
-        | AgentEvent::ToolApprovalGranted { .. }
-        | AgentEvent::ToolApprovalDenied { .. }
-        | AgentEvent::UserInputRequested { .. }
-        | AgentEvent::UserInputAnswered { .. }
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::CollabAgentSpawnBegin { .. }
@@ -350,11 +340,6 @@ pub fn agent_timeline_event_record(
         | AgentEvent::TimelineItemDelta { .. }
         | AgentEvent::TimelineItemCompleted { .. }
         | AgentEvent::TimelineItemFailed { .. }
-        | AgentEvent::ToolApprovalRequested { .. }
-        | AgentEvent::ToolApprovalGranted { .. }
-        | AgentEvent::ToolApprovalDenied { .. }
-        | AgentEvent::UserInputRequested { .. }
-        | AgentEvent::UserInputAnswered { .. }
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::TurnInterrupted { .. }

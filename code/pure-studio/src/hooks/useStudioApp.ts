@@ -92,10 +92,15 @@ function statusTextForEvent(
     return t("status.running");
   }
   if ("timelineItemFailed" in event) return t("status.error", { message: event.timelineItemFailed.error });
-  if ("toolApprovalGranted" in event) return t("status.approved", { name: event.toolApprovalGranted.name });
-  if ("toolApprovalDenied" in event) return t("status.denied", { name: event.toolApprovalDenied.name });
-  if ("userInputRequested" in event) return t("status.userInputRequired");
-  if ("userInputAnswered" in event) return t("status.userInputAnswered");
+  if ("interactionChanged" in event) {
+    return statusTextForInteraction(
+      {
+        sessionId: "",
+        event: event.interactionChanged.event,
+      },
+      t,
+    );
+  }
   if ("agentRuntimeUpdated" in event) return t("status.running");
   if ("error" in event) return t("status.error", { message: event.error.message });
   return t("status.running");
@@ -453,18 +458,18 @@ export function useStudioApp() {
     if (!interaction || !sessionId) {
       return;
     }
-    if (resolution.type === "planConfirmation" && resolution.decision === "implement") {
-      const content =
-        resolution.content?.trim() ||
-        (interaction.payload.type === "planConfirmation" ? interaction.payload.content.trim() : "");
-      const prompt = `PLEASE IMPLEMENT THIS PLAN:\n\n${content}`;
-      dispatch({ type: "optimisticSessionMode", sessionId, mode: "auto" });
-      dispatch({
-        type: "promptSubmitted",
-        status: t("status.running"),
-        startedAt: Date.now(),
-        prompt,
-      });
+    if (resolution.type === "planConfirmation") {
+      if (resolution.decision === "implementSameContext") {
+        dispatch({ type: "optimisticSessionMode", sessionId, mode: "auto" });
+        dispatch({
+          type: "promptSubmitted",
+          status: t("status.running"),
+          startedAt: Date.now(),
+          prompt: "Implement the plan.",
+        });
+      } else if (resolution.decision === "implementFreshContext") {
+        dispatch({ type: "setBusy", value: true });
+      }
     }
     try {
       const payload = await resolveInteraction(interactionId, resolution);
@@ -504,16 +509,25 @@ export function useStudioApp() {
     }
   }
 
-  async function onImplementPlan(interactionId: string, plan: string) {
-    const content = plan.trim();
+  async function onImplementPlan(interactionId: string) {
     const sessionId = state.selectedSessionId;
-    if (!interactionId || !content || !sessionId || state.isBusy) {
+    if (!interactionId || !sessionId || state.isBusy) {
       return;
     }
     await onResolveInteraction(interactionId, {
       type: "planConfirmation",
-      decision: "implement",
-      content,
+      decision: "implementSameContext",
+    });
+  }
+
+  async function onImplementPlanFresh(interactionId: string) {
+    const sessionId = state.selectedSessionId;
+    if (!interactionId || !sessionId || state.isBusy) {
+      return;
+    }
+    await onResolveInteraction(interactionId, {
+      type: "planConfirmation",
+      decision: "implementFreshContext",
     });
   }
 
@@ -524,9 +538,9 @@ export function useStudioApp() {
     }
     await onResolveInteraction(interactionId, {
       type: "planConfirmation",
-      decision: "discuss",
+      decision: "continuePlanning",
       content: trimmed,
-      reason: "discuss",
+      reason: "continue planning",
     });
     const sessionId = state.selectedSessionId;
     if (sessionId) {
@@ -763,6 +777,7 @@ export function useStudioApp() {
     onSendPromptContent,
     onResolveInteraction,
     onImplementPlan,
+    onImplementPlanFresh,
     onDiscussPlan,
     onDismissPlanAction: (interactionId: string) =>
       void onResolveInteraction(interactionId, {
