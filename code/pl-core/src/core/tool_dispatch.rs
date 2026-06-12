@@ -190,13 +190,9 @@ pub(super) async fn execute_tool_calls(
                 ToolApprovalDecision::Approved
             }
             PermissionDecision::NeedsUserApproval { workspace_access } => {
-                let decision = request_user_approval(
-                    context.options,
-                    &approval_request,
-                    recorder.sender().clone(),
-                    context.session_id,
-                )
-                .await;
+                let decision =
+                    request_user_approval(context.options, &approval_request, context.session_id)
+                        .await;
                 if matches!(decision, ToolApprovalDecision::Approved) {
                     execution_workspace_access = workspace_access;
                 }

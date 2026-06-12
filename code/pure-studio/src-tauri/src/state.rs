@@ -1,25 +1,18 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use pl_core::{InteractionResolution, StudioRuntime};
+use pl_core::StudioRuntime;
 use pl_protocol::PureError;
 use serde::Serialize;
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-pub type InteractionWaiters = Arc<Mutex<HashMap<String, InteractionWaiter>>>;
-pub type ActiveTurns = Arc<Mutex<HashMap<String, CancellationToken>>>;
+pub type ActiveTurns = Arc<Mutex<std::collections::HashMap<String, CancellationToken>>>;
 pub type CommandResult<T> = std::result::Result<T, CommandError>;
 
 #[derive(Clone)]
 pub struct AppState {
     pub studio: StudioRuntime,
-    pub interactions: InteractionWaiters,
     pub active_turns: ActiveTurns,
-}
-
-pub struct InteractionWaiter {
-    pub sender: oneshot::Sender<InteractionResolution>,
 }
 
 #[derive(Debug, Serialize)]

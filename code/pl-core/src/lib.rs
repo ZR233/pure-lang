@@ -76,9 +76,10 @@ pub use session::CoreSession;
 pub use skill::{SkillCatalog, SkillMetadata, SkillSourceKind};
 pub use studio::{
     AgentSnapshotRecord as StudioAgentSnapshotRecord,
-    AgentTimelineEventRecord as StudioAgentTimelineEventRecord, ProjectRecord, SessionRecord,
+    AgentTimelineEventRecord as StudioAgentTimelineEventRecord, InteractionEmitter,
+    InteractionEmitterFuture, InteractionRuntime, ProjectRecord, SessionRecord,
     SessionRuntimeRecord, StudioPromptOutcome, StudioRuntime, StudioStore, TimelineEventRecord,
-    ToolApprovalRecord,
+    resolution_matches_kind,
 };
 pub use tool::{
     AskUserTool, BashInput, BashTool, LspLanguageTool, LspQueryTool, OutputTruncation,
@@ -89,8 +90,7 @@ pub use trace::TraceRecorder;
 pub use turn::{
     AGENT_MAX_COUNT, AGENT_MAX_DEPTH, AgentBudget, BudgetPolicy, CompileMode,
     DEFAULT_WALL_CLOCK_MS, InteractionCallback, InteractionFuture, PermissionMode,
-    ToolApprovalCallback, ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest,
-    ToolExecutionMode, TurnAbortReason, TurnBudget, TurnOptions, TurnRequest, TurnResult,
-    TurnResultStatus, UserInputCallback,
+    ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest, ToolExecutionMode,
+    TurnAbortReason, TurnBudget, TurnOptions, TurnRequest, TurnResult, TurnResultStatus,
 };
 pub use workspace::{load_workspace_instructions, resolve_workspace_root};

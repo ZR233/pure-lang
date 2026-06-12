@@ -46,10 +46,7 @@ const en = {
     mcpSettingsSaved: "MCP settings saved",
     permissionModeSaved: "Permission mode saved",
     modeUpdated: "Mode updated",
-    toolApproved: "Tool approved",
-    toolDenied: "Tool denied",
     userInputRequired: "Waiting for your answer",
-    userInputAnswered: "Answer sent",
     bootstrapFailed: "Bootstrap failed: {{error}}",
     addProjectFailed: "Add project failed: {{error}}",
     selectProjectFailed: "Select project failed: {{error}}",
@@ -257,8 +254,9 @@ const en = {
     title: "Confirm plan",
     promptTitle: "Implement this plan?",
     hint: "Choose what happens next",
-    implementChoice: "Yes, implement this plan",
-    adjustChoice: "No, tell Codex how to adjust",
+    implementChoice: "Implement in this context",
+    implementFreshChoice: "Implement in a fresh context",
+    adjustChoice: "Continue planning or adjust",
     ignore: "Ignore",
     submit: "Submit",
     continueDiscussion: "Continue discussion",
@@ -267,11 +265,14 @@ const en = {
 
   planState: {
     pending: "Pending",
+    pendingConfirmation: "Pending confirmation",
     accepted: "Accepted",
     implementing: "Implementing",
     implemented: "Implemented",
     implementationFailed: "Implementation failed",
+    continuedPlanning: "Continued planning",
     dismissed: "Dismissed",
+    cancelled: "Cancelled",
   },
 
   settings: {

@@ -54,14 +54,14 @@ pl-model provider
 
 Plan Mode 下模型输出的 `<proposed_plan>...</proposed_plan>` 块由 `pl-model::stream` accumulator 提取为 `plan` item。计划正文复用 `TimelineItem.content`，增量使用 `TimelineDelta::Plan`；同一块内容不得同时出现在普通 assistant `text` item 中。计划块之外的普通文本仍按 assistant `text` item 流式输出。
 
-计划的采纳与实施状态不改变 `plan` item 本身，而是通过 `TraceEventKind::PlanLifecycleChanged` 追加到同一 session 的 `timeline_events`。事件包含 `planId`、`state`、可选 `turnId`、可选 `reason` 和 `updatedAt`；Studio 从历史 timeline 与运行完成响应中按 `planId` 折叠 latest plan state。Plan turn 完成后需要用户确认实施时，后端创建 `InteractionKind::PlanConfirmation`，前端不再从历史 timeline 自行恢复旧确认 composer。
+计划的采纳与实施状态不改变 `plan` item 本身，而是通过 `TraceEventKind::PlanLifecycleChanged` 追加到同一 session 的 `timeline_events`。事件包含 `planId`、`state`、可选 `turnId`、可选 `reason` 和 `updatedAt`；Studio 从历史 timeline 与运行完成响应中按 `planId` 折叠 latest plan state。Plan turn 完成后需要用户确认实施时，后端创建 `InteractionKind::PlanConfirmation`，前端不再从历史 timeline 自行恢复旧确认 composer。确认 resolution 固定为 `implementSameContext | implementFreshContext | continuePlanning | dismiss`，其中 same-context 只提交 `Implement the plan.`，fresh-context 才把 plan markdown 放入新 session 的 handoff prompt。
 
 Studio 前端的实时事件、`load_session_timeline` 历史 snapshot 和 `run_prompt` 完成响应必须进入同一个 timeline reducer：
 
 - `load_session_timeline` 是可替换 snapshot，但只有当 `nextSequence` 不落后于当前游标时才能覆盖已有 snapshot。
 - 如果 `nextSequence` 落后于当前游标，则该 snapshot 只用于补齐当前状态中不存在的 item。
 - `run_prompt` 完成响应是当前 turn 的最终校准，只 upsert 返回的 items 并推进 `timelineNextSequence`，不得清空非 optimistic item。
-- `run_prompt`、`resolve_interaction` 产生的 plan lifecycle 与 interaction changed 事件必须与 timeline item 使用同一个 `timelineNextSequence` 游标规则，避免刷新后重复弹出已处理计划。
+- `run_prompt`、`resolve_interaction` 产生的 plan lifecycle 事件必须与 timeline item 使用同一个 `timelineNextSequence` 游标规则，避免刷新后重复弹出已处理计划。interaction 状态不使用 timeline 游标恢复；前端通过 `InteractionChanged` 实时更新，并在 `bootstrap`、`select_session`、`load_session_timeline` 和 run 完成响应中从 `interactions` 表加载 pending snapshot。
 - `Done` 只表示 turn 状态完成，不携带 timeline 内容；最终正文必须通过 `text` item 表达。
 - Plan Mode 的最终可执行计划必须通过 `plan` item 表达；如果模型只输出计划块而没有普通正文，不应生成空 assistant `text` item。
 
@@ -77,7 +77,7 @@ Studio 渲染可以在 selector 派生出展示项后使用虚拟滚动优化大
 
 事件类型属于协议层，不应包含 provider 私有结构，也不应绑定具体前端。工具审批事件只承载通用工具名、参数和审批结果，不包含 Tauri、React 或桌面端私有状态。
 
-`InteractionChanged` 是审批、用户输入和计划确认的唯一一等交互事件。事件携带 `InteractionRequest`，包括 `kind`、`status`、`scope` 和类型化 payload。`userInput` 的 resolved 事件不回传 secret 答案明文到普通 timeline 展示；答案只通过 interaction resolution 返回给等待中的工具。旧 `UserInputRequested` / `UserInputAnswered` 与 `ToolApprovalRequested` 等事件只作为兼容内部状态提示，不再驱动 Studio UI。
+`InteractionChanged` 是审批、用户输入和计划确认的唯一实时交互事件。事件携带 `InteractionRequest`，包括 `kind`、`status`、`scope` 和类型化 payload；持久恢复以 `interactions` 表为准。`userInput` 的 resolved 事件不回传 secret 答案明文到普通 timeline 展示；答案只通过 interaction resolution 返回给等待中的工具。旧 `UserInputRequested` / `UserInputAnswered` 与 `ToolApprovalRequested` 等事件不是 Studio 协议入口，不再由核心层发出。
 
 子代理内部事件不直接转发完整文本流、思考流、工具调用流或工具输出。`pl-core` 将子代理生命周期压缩为 `agent` timeline item 和 `AgentStateChanged` snapshot，状态固定为 `queued`、`running`、`waiting`、`completed`、`errored`、`interrupted`、`shutdown`、`notFound`。`pure-studio` 持久化这些状态事件，并在聊天界面只渲染路径、状态、摘要和最终错误文本，避免把子代理内部执行细节混入父会话 timeline。
 

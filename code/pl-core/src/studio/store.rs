@@ -24,7 +24,7 @@ use crate::studio::mappers::{
 use crate::studio::paths::{prepare_database_switch, project_name, sqlite_url};
 use crate::studio::records::{
     AgentSnapshotRecord, AgentTimelineEventRecord, ProjectRecord, SessionRecord,
-    SessionRuntimeRecord, TimelineEventRecord, ToolApprovalRecord,
+    SessionRuntimeRecord, TimelineEventRecord,
 };
 use crate::studio::store_support::{
     configure_sqlite, insert_message_with_tx, non_empty_title, run_migrations,
@@ -421,24 +421,6 @@ impl StudioStore {
         active.updated_at = Set(now);
         let model = active.update(&self.db).await?;
         Ok(Some(session_record(model)))
-    }
-
-    pub async fn record_tool_approval(&self, record: ToolApprovalRecord) -> Result<()> {
-        use entities::tool_approval;
-        tool_approval::ActiveModel {
-            id: Set(new_id("approval")),
-            session_id: Set(record.session_id),
-            tool_call_id: Set(record.tool_call_id),
-            tool_name: Set(record.tool_name),
-            arguments_json: Set(record.arguments_json),
-            working_directory: Set(record.working_directory),
-            decision: Set(record.decision),
-            reason: Set(record.reason),
-            created_at: Set(unix_seconds()),
-        }
-        .insert(&self.db)
-        .await?;
-        Ok(())
     }
 
     pub async fn upsert_interaction(&self, interaction: &InteractionRequest) -> Result<()> {

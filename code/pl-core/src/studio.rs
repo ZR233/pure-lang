@@ -1,5 +1,6 @@
 pub mod entities;
 mod ids;
+mod interaction_runtime;
 mod mappers;
 mod paths;
 mod records;
@@ -7,9 +8,12 @@ mod runtime;
 mod store;
 mod store_support;
 
+pub use interaction_runtime::{
+    InteractionEmitter, InteractionEmitterFuture, InteractionRuntime, resolution_matches_kind,
+};
 pub use records::{
     AgentSnapshotRecord, AgentTimelineEventRecord, ProjectRecord, SessionRecord,
-    SessionRuntimeRecord, StudioPromptOutcome, TimelineEventRecord, ToolApprovalRecord,
+    SessionRuntimeRecord, StudioPromptOutcome, TimelineEventRecord,
 };
 pub use runtime::StudioRuntime;
 pub use store::StudioStore;
@@ -314,29 +318,6 @@ mod tests {
         assert_eq!(saved.instruction_snapshot, Some(snapshot.clone()));
         assert_eq!(read.instruction_snapshot, Some(snapshot.clone()));
         assert_eq!(listed[0].instruction_snapshot, Some(snapshot));
-    }
-
-    #[tokio::test]
-    async fn records_tool_approval() {
-        let store = StudioStore::open_memory().await.unwrap();
-        let project = store.upsert_project("C:/work/alpha").await.unwrap();
-        let session = store
-            .create_session(&project.id, "Build app", CompileMode::Auto)
-            .await
-            .unwrap();
-
-        store
-            .record_tool_approval(ToolApprovalRecord {
-                session_id: session.id,
-                tool_call_id: "call-1".to_string(),
-                tool_name: "bash".to_string(),
-                arguments_json: "{}".to_string(),
-                working_directory: None,
-                decision: "approved".to_string(),
-                reason: None,
-            })
-            .await
-            .unwrap();
     }
 
     #[tokio::test]

@@ -37,8 +37,6 @@ pub(super) async fn forward_agent_lifecycle_events(
                 | AgentEvent::CollabWaitingEnd { .. }
                 | AgentEvent::CollabCloseBegin { .. }
                 | AgentEvent::CollabCloseEnd { .. }
-                | AgentEvent::UserInputRequested { .. }
-                | AgentEvent::UserInputAnswered { .. }
                 | AgentEvent::InteractionChanged { .. }),
             ) => {
                 let _ = parent_event_tx.send(event);
@@ -49,9 +47,6 @@ pub(super) async fn forward_agent_lifecycle_events(
                 | AgentEvent::TimelineItemDelta { .. }
                 | AgentEvent::TimelineItemCompleted { .. }
                 | AgentEvent::TimelineItemFailed { .. }
-                | AgentEvent::ToolApprovalRequested { .. }
-                | AgentEvent::ToolApprovalGranted { .. }
-                | AgentEvent::ToolApprovalDenied { .. }
                 | AgentEvent::TurnInterrupted { .. }
                 | AgentEvent::TurnBudgetLimited { .. }
                 | AgentEvent::Error { .. },

@@ -1,5 +1,4 @@
-use pl_protocol::AgentStatus;
-use pl_protocol::UserInputResponse;
+use pl_protocol::{AgentStatus, InteractionResolution};
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
@@ -208,12 +207,17 @@ fn fork_turns_last_n_keeps_recent_user_turns() {
 }
 
 #[test]
-fn child_agent_options_inherit_user_input_callback() {
-    let callback: crate::UserInputCallback =
-        Arc::new(|_request| Box::pin(async { UserInputResponse::default() }));
-    let parent = crate::TurnOptions::default().with_user_input_callback(callback);
+fn child_agent_options_inherit_interaction_callback() {
+    let callback: crate::InteractionCallback = Arc::new(|_interaction| {
+        Box::pin(async {
+            InteractionResolution::UserInput {
+                answers: Default::default(),
+            }
+        })
+    });
+    let parent = crate::TurnOptions::default().with_interaction_callback(callback);
 
     let child = child_agent_options(&parent);
 
-    assert!(child.user_input_callback.is_some());
+    assert!(child.interaction_callback.is_some());
 }

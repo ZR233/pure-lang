@@ -153,6 +153,22 @@ impl InstructionAssembler {
 }
 
 impl InstructionSnapshot {
+    pub fn with_turn_overlay(
+        &self,
+        request: InstructionAssemblyRequest<'_>,
+    ) -> Result<InstructionSnapshot> {
+        let overlay = InstructionAssembler::assemble(request)?;
+        let mut snapshot = self.without_turn_overlay();
+        snapshot.developer.splice(
+            0..0,
+            overlay
+                .developer
+                .into_iter()
+                .filter(|block| block.source.kind.is_turn_overlay()),
+        );
+        Ok(snapshot)
+    }
+
     pub fn to_bundle(&self) -> InstructionBundle {
         let mut prelude_messages = Vec::new();
         if !self.developer.is_empty() {
@@ -195,12 +211,38 @@ impl InstructionSnapshot {
         self
     }
 
+    fn without_turn_overlay(&self) -> Self {
+        Self {
+            base: self.base.clone(),
+            developer: self
+                .developer
+                .iter()
+                .filter(|block| !block.source.kind.is_turn_overlay())
+                .cloned()
+                .collect(),
+            user: self.user.clone(),
+        }
+    }
+
     fn push_developer(&mut self, source: InstructionSource, content: &str) {
         push_non_empty(&mut self.developer, source, content);
     }
 
     fn push_user(&mut self, source: InstructionSource, content: &str) {
         push_non_empty(&mut self.user, source, content);
+    }
+}
+
+impl InstructionSourceKind {
+    fn is_turn_overlay(self) -> bool {
+        matches!(
+            self,
+            Self::Mode
+                | Self::Platform
+                | Self::Skills
+                | Self::SubagentConstraint
+                | Self::SubagentForce
+        )
     }
 }
 

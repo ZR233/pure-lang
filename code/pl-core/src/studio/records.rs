@@ -22,17 +22,6 @@ pub struct SessionRecord {
     pub instruction_snapshot: Option<crate::InstructionSnapshot>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolApprovalRecord {
-    pub session_id: String,
-    pub tool_call_id: String,
-    pub tool_name: String,
-    pub arguments_json: String,
-    pub working_directory: Option<String>,
-    pub decision: String,
-    pub reason: Option<String>,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentSnapshotRecord {
     pub id: String,

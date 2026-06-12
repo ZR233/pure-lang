@@ -20,7 +20,7 @@ Windows 下对应：
 ~/.pure/studio/studio_2.sqlite
 ```
 
-SQLite 只保存 Studio 状态，例如项目、会话、消息、工具审批、agent 状态事件和应用设置，并由 `pl-core` 通过 SeaORM 纯异步访问。provider/model/role 配置仍只由 `~/.pure/config.toml` 表达。
+SQLite 只保存 Studio 状态，例如项目、会话、消息、统一 interaction、agent 状态事件和应用设置，并由 `pl-core` 通过 SeaORM 纯异步访问。provider/model/role 配置仍只由 `~/.pure/config.toml` 表达。
 
 普通对话运行时读取配置；当配置文件不存在时，`pure-studio` 设置页展示默认配置草稿。写入配置必须由用户在具体设置操作中显式触发，例如 provider 编辑页保存、删除 provider、选择默认 provider 或调整角色路由。若已存在的配置文件无法解析或无法通过当前 schema 校验，运行时会先把原文件备份为 `config.invalid.backup.<unix>.toml`，再写入当前 schema 的默认配置；这属于重置恢复，不做旧字段迁移。
 
@@ -45,11 +45,11 @@ SQLite 只保存 Studio 状态，例如项目、会话、消息、工具审批�
 | TOML key | 中文角色 | 用途 |
 | --- | --- | --- |
 | `explorer` | 探索者 | 代码、文档和上下文探索 |
-| `planner` | 计划者 | 默认对话和计划生成 |
-| `executor` | 执行者 | 后续执行型任务 |
+| `planner` | 计划者 | 所有 Studio 根聊天、计划生成和计划实施 |
+| `executor` | 执行者 | planner 调用的子代理执行任务 |
 | `reviewer` | 审查者 | 代码审查和结果检查 |
 
-普通桌面对话默认使用 `planner` 角色。
+普通桌面对话始终使用 `planner` 角色。`compileMode = auto | plan` 只切换协作指令和工具边界，不切换根聊天模型角色。`executor` 角色只能由子代理运行时使用；用户直接在 chat 输入“执行计划”或点击计划确认实施，仍是 planner 角色发起的 root turn。
 
 每个角色必须配置：
 
@@ -385,7 +385,7 @@ Vite 预览只用于布局和视觉对照，最终应用行为仍以 Tauri 运�
 
 聊天界面应展示 agent 活动面板，信息来自 Studio SQLite 中的 `agent_events` 和当前实时事件流。面板只展示路径、角色、状态、任务摘要、最终摘要或错误，不展示子代理完整推理流。
 
-Studio 交互状态统一保存在 SQLite `interactions` 表。工具审批、`request_user_input` 和 Plan 实施确认都通过该表与 `InteractionChanged` 事件恢复；旧 `tool_approvals` 只作为废弃历史表保留，不再作为 UI pending 状态来源。
+Studio 交互状态统一保存在 SQLite `interactions` 表。工具审批、`request_user_input` 和 Plan 实施确认都通过该表与 `InteractionChanged` 事件恢复；旧 `tool_approvals` 不再作为读写路径或 UI pending 状态来源。破坏性 schema 版本不迁移旧 pending 审批、询问或计划确认。
 
 聊天界面使用双栏布局：左侧项目/会话栏和主聊天区，不再展示右侧工具历史面板。主聊天区底部状态栏左侧展示 `Auto / Plan` 模式、当前模型、推理强度、权限模式和更多入口，右侧展示上下文使用量、按货币分组的费用估算、Skill/MCP 数量和子代理数量；Skill/MCP 默认只显示数量，悬浮或键盘聚焦时展示完整列表。由于左侧栏会占用窗口宽度，状态栏响应式优先按聊天 footer 自身宽度判断，并保留整窗宽度兜底：footer 约 `1040px` 以下能力和子代理进入更多菜单，footer 约 `760px` 以下费用也进入更多菜单，footer 约 `520px` 以下上下文也进入更多菜单。整窗 `1320px` 以下直接把费用、能力和子代理收入更多菜单，用于不支持 container query 的 WebView2 兜底。更多菜单直接展示被收起状态的摘要和详情，并且不得被状态栏滚动容器或窗口边界裁剪。子代理列表展示每个 agent 的运行费用摘要。
 

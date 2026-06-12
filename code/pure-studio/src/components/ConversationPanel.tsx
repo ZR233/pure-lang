@@ -78,7 +78,8 @@ type ConversationPanelProps = {
   onSavePermissionMode: (mode: PermissionMode) => void;
   onSetPrompt: (value: string) => void;
   onSetSessionMode: (mode: CompileMode) => void;
-  onImplementPlan: (planId: string, plan: string) => void;
+  onImplementPlan: (interactionId: string) => void;
+  onImplementPlanFresh: (interactionId: string) => void;
   onDiscussPlan: (planId: string, content: string) => void;
   onSendPrompt: () => void;
   onDismissPlanAction: (planId: string) => void;
@@ -168,14 +169,20 @@ function planStateLabel(
   switch (state) {
     case "accepted":
       return t("planState.accepted");
+    case "pendingConfirmation":
+      return t("planState.pendingConfirmation");
     case "implementing":
       return t("planState.implementing");
     case "implemented":
       return t("planState.implemented");
     case "implementationFailed":
       return t("planState.implementationFailed");
+    case "continuedPlanning":
+      return t("planState.continuedPlanning");
     case "dismissed":
       return t("planState.dismissed");
+    case "cancelled":
+      return t("planState.cancelled");
     case "pending":
       return t("planState.pending");
   }
@@ -759,30 +766,30 @@ function AskUserComposer({
 
 function PlanConfirmComposer({
   interactionId,
-  content,
   stopping,
   onImplementPlan,
+  onImplementPlanFresh,
   onDiscussPlan,
   onCancel,
   t,
 }: {
   interactionId: string;
-  content: string;
   stopping: boolean;
-  onImplementPlan: (interactionId: string, plan: string) => void;
+  onImplementPlan: (interactionId: string) => void;
+  onImplementPlanFresh: (interactionId: string) => void;
   onDiscussPlan: (interactionId: string, content: string) => void;
   onCancel: (interactionId: string) => void;
   t: TFunction;
 }) {
   const [message, setMessage] = useState("");
-  const [mode, setMode] = useState<"choice" | "discuss">("choice");
+  const [mode, setMode] = useState<"same" | "fresh" | "discuss">("same");
   const composerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const discussing = mode === "discuss";
 
   useEffect(() => {
     setMessage("");
-    setMode("choice");
+    setMode("same");
   }, [interactionId]);
 
   useEffect(() => {
@@ -806,8 +813,11 @@ function PlanConfirmComposer({
       submitDiscussion();
       return;
     }
-    if (!content.trim()) return;
-    onImplementPlan(interactionId, content);
+    if (mode === "fresh") {
+      onImplementPlanFresh(interactionId);
+      return;
+    }
+    onImplementPlan(interactionId);
   }
 
   function submitOnShortcut(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -837,10 +847,15 @@ function PlanConfirmComposer({
 
     if (event.key === "1") {
       event.preventDefault();
-      setMode("choice");
+      setMode("same");
       return;
     }
     if (event.key === "2") {
+      event.preventDefault();
+      setMode("fresh");
+      return;
+    }
+    if (event.key === "3") {
       event.preventDefault();
       setMode("discuss");
       return;
@@ -862,16 +877,29 @@ function PlanConfirmComposer({
       <div className="flex flex-col gap-1 px-4 py-2" role="radiogroup" aria-label={t("planConfirm.promptTitle")}>
         <Button
           type="button"
-          variant={!discussing ? "default" : "outline"}
+          variant={mode === "same" ? "default" : "outline"}
           size="sm"
           role="radio"
-          aria-checked={!discussing}
-          onClick={() => setMode("choice")}
+          aria-checked={mode === "same"}
+          onClick={() => setMode("same")}
           disabled={stopping}
           className="w-full text-left justify-start"
         >
           <span className="text-xs text-muted-foreground w-4 shrink-0">1.</span>
           <span className="text-sm">{t("planConfirm.implementChoice")}</span>
+        </Button>
+        <Button
+          type="button"
+          variant={mode === "fresh" ? "default" : "outline"}
+          size="sm"
+          role="radio"
+          aria-checked={mode === "fresh"}
+          onClick={() => setMode("fresh")}
+          disabled={stopping}
+          className="w-full text-left justify-start"
+        >
+          <span className="text-xs text-muted-foreground w-4 shrink-0">2.</span>
+          <span className="text-sm">{t("planConfirm.implementFreshChoice")}</span>
         </Button>
         <Button
           type="button"
@@ -883,7 +911,7 @@ function PlanConfirmComposer({
           disabled={stopping}
           className="w-full text-left justify-start"
         >
-          <span className="text-xs text-muted-foreground w-4 shrink-0">2.</span>
+          <span className="text-xs text-muted-foreground w-4 shrink-0">3.</span>
           <span className="text-sm">{t("planConfirm.adjustChoice")}</span>
         </Button>
       </div>
@@ -923,7 +951,7 @@ function PlanConfirmComposer({
             type="button"
             size="sm"
             onClick={submitSelected}
-            disabled={stopping || (discussing ? !message.trim() : !content.trim())}
+            disabled={stopping || (discussing && !message.trim())}
           >
             <span>{t("planConfirm.submit")}</span>
             <CornerDownLeft size={13} />
@@ -1025,6 +1053,7 @@ export function ConversationPanel({
   onSetPrompt,
   onSetSessionMode,
   onImplementPlan,
+  onImplementPlanFresh,
   onSendPrompt,
   onDiscussPlan,
   onDismissPlanAction,
@@ -1105,9 +1134,9 @@ export function ConversationPanel({
         ) : activeInteraction?.payload.type === "planConfirmation" ? (
           <PlanConfirmComposer
             interactionId={activeInteraction.interactionId}
-            content={activeInteraction.payload.content}
             stopping={stopping}
             onImplementPlan={onImplementPlan}
+            onImplementPlanFresh={onImplementPlanFresh}
             onDiscussPlan={onDiscussPlan}
             onCancel={onDismissPlanAction}
             t={t}

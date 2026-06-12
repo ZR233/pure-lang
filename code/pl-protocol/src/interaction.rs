@@ -61,6 +61,7 @@ pub enum InteractionPayload {
     UserInput {
         questions: Vec<UserQuestion>,
     },
+    #[serde(rename_all = "camelCase")]
     ToolApproval {
         name: String,
         arguments: serde_json::Value,
@@ -69,6 +70,7 @@ pub enum InteractionPayload {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_agent_id: Option<String>,
     },
+    #[serde(rename_all = "camelCase")]
     PlanConfirmation {
         plan_id: String,
         content: String,
@@ -121,8 +123,9 @@ pub enum ToolApprovalResolution {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum PlanConfirmationResolution {
-    Implement,
-    Discuss,
+    ImplementSameContext,
+    ImplementFreshContext,
+    ContinuePlanning,
     Dismiss,
 }
 

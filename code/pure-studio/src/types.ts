@@ -382,11 +382,14 @@ export type SessionTimeline = {
 };
 
 export type PlanLifecycleState =
+  | "pendingConfirmation"
   | "accepted"
   | "implementing"
   | "implemented"
   | "implementationFailed"
-  | "dismissed";
+  | "continuedPlanning"
+  | "dismissed"
+  | "cancelled";
 
 export type PlanState = {
   planId: string;
@@ -425,7 +428,11 @@ export type InteractionPayload =
   | { type: "planConfirmation"; planId: string; content: string };
 
 export type ToolApprovalResolution = "approved" | "denied";
-export type PlanConfirmationResolution = "implement" | "discuss" | "dismiss";
+export type PlanConfirmationResolution =
+  | "implementSameContext"
+  | "implementFreshContext"
+  | "continuePlanning"
+  | "dismiss";
 
 export type InteractionResolution =
   | { type: "userInput"; answers: Record<string, UserInputAnswer> }
@@ -626,24 +633,6 @@ export type AgentEvent =
   | { timelineItemDelta: { event: TimelineItemDeltaEvent } }
   | { timelineItemCompleted: { sequence: number; item: TimelineItem } }
   | { timelineItemFailed: { sequence: number; item: TimelineItem; error: string } }
-  | {
-      toolApprovalRequested: {
-        id: string;
-        name: string;
-        arguments: string;
-        workingDirectory?: string | null;
-      };
-    }
-  | { toolApprovalGranted: { id: string; name: string } }
-  | { toolApprovalDenied: { id: string; name: string; reason: string } }
-  | {
-      userInputRequested: {
-        requestId: string;
-        toolId: string;
-        questions: UserQuestion[];
-      };
-    }
-  | { userInputAnswered: { requestId: string } }
   | { interactionChanged: { event: InteractionChangedEvent } }
   | { agentStateChanged: AgentStateChangedEvent }
   | { agentRuntimeUpdated: { delta: AgentRuntimeDelta } }
