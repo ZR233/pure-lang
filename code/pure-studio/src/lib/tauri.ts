@@ -15,8 +15,11 @@ import type {
   ProviderUsagesPayload,
   ResolveInteractionResponse,
   RunPromptResponse,
+  SessionStatePayload,
   SessionSelectionPayload,
   SessionTimeline,
+  StudioEventsPayload,
+  SubmitPromptResponse,
 } from "../types";
 import {
   createPreviewConfig,
@@ -267,29 +270,31 @@ export function setSessionMode(sessionId: string, mode: CompileMode) {
 }
 
 export function runPrompt(sessionId: string, prompt: string) {
-  if (!isTauriRuntime()) {
-    previewInterruptedSessions.delete(sessionId);
-    return new Promise<RunPromptResponse>((resolve) => {
-      window.setTimeout(() => {
-        const interrupted = previewInterruptedSessions.delete(sessionId);
-        const now = Math.floor(Date.now() / 1000);
-        const latestAgent = {
-          id: "agent-preview-latest",
-          sessionId,
-          path: "/root/preview_latest",
-          parentPath: null,
-          role: "executor",
-          task: prompt,
-          status: interrupted ? "interrupted" as const : "completed" as const,
-          summary: interrupted ? "预览运行已停止。" : "预览运行已完成。",
-          depth: 1,
-          error: null,
-          reason: interrupted ? "interrupted" : null,
-          budgetLimitKind: null,
-          budgetUsage: null,
-          updatedAt: now,
-        };
-        resolve(clone({
+  if (isTauriRuntime()) {
+    return Promise.reject(new Error("run_prompt has been replaced by submit_prompt"));
+  }
+  previewInterruptedSessions.delete(sessionId);
+  return new Promise<RunPromptResponse>((resolve) => {
+    window.setTimeout(() => {
+      const interrupted = previewInterruptedSessions.delete(sessionId);
+      const now = Math.floor(Date.now() / 1000);
+      const latestAgent = {
+        id: "agent-preview-latest",
+        sessionId,
+        path: "/root/preview_latest",
+        parentPath: null,
+        role: "executor",
+        task: prompt,
+        status: interrupted ? "interrupted" as const : "completed" as const,
+        summary: interrupted ? "预览运行已停止。" : "预览运行已完成。",
+        depth: 1,
+        error: null,
+        reason: interrupted ? "interrupted" : null,
+        budgetLimitKind: null,
+        budgetUsage: null,
+        updatedAt: now,
+      };
+      resolve(clone({
         sessionId,
         sessions: previewSessions,
         agentEvents: [
@@ -370,11 +375,23 @@ export function runPrompt(sessionId: string, prompt: string) {
         turnStatus: interrupted ? "aborted" as const : "completed" as const,
         turnAbortReason: interrupted ? "interrupted" : null,
         turnError: null,
-        }));
-      }, 900);
-    });
+      }));
+    }, 900);
+  });
+}
+
+export function submitPromptCommand(sessionId: string, prompt: string) {
+  if (!isTauriRuntime()) {
+    previewInterruptedSessions.delete(sessionId);
+    return Promise.resolve<SubmitPromptResponse>(
+      clone({
+        sessionId,
+        turnId: `preview-turn-${Date.now()}`,
+        cursor: previewTimelineItems.length,
+      }),
+    );
   }
-  return invoke<RunPromptResponse>("run_prompt", { sessionId, prompt });
+  return invoke<SubmitPromptResponse>("submit_prompt", { sessionId, prompt });
 }
 
 export function resolveInteraction(interactionId: string, resolution: InteractionResolution) {
@@ -397,7 +414,6 @@ export function resolveInteraction(interactionId: string, resolution: Interactio
           resolvedAt: Math.floor(Date.now() / 1000),
           resolution,
         },
-        run: null,
         planLifecycle: null,
       }),
     );
@@ -757,4 +773,51 @@ export function loadSessionTimeline(
     afterSequence: afterSequence ?? null,
     limit: limit ?? null,
   });
+}
+
+export function loadStudioEvents(
+  sessionId: string,
+  afterSequence?: number,
+  limit?: number,
+) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve<StudioEventsPayload>(
+      clone({
+        sessionId,
+        events: [],
+        nextSequence: afterSequence ?? 0,
+      }),
+    );
+  }
+  return invoke<StudioEventsPayload>("load_studio_events", {
+    sessionId,
+    afterSequence: afterSequence ?? null,
+    limit: limit ?? null,
+  });
+}
+
+export function loadSessionState(sessionId: string) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve<SessionStatePayload>(
+      clone({
+        sessionId,
+        session: previewSessions.find((session) => session.id === sessionId) ?? previewSessions[0],
+        sessions: previewSessions,
+        agentEvents: previewAgentEvents,
+        agents: previewAgents,
+        sessionRuntime: previewSessionRuntime,
+        interactions: [],
+        timeline: {
+          sessionId,
+          items: previewTimelineItems,
+          planStates: [],
+          interactions: [],
+          nextSequence: previewTimelineItems.length,
+        },
+        events: [],
+        eventNextSequence: 0,
+      }),
+    );
+  }
+  return invoke<SessionStatePayload>("load_session_state", { sessionId });
 }

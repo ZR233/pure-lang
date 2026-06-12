@@ -24,6 +24,7 @@ import type {
   RoleRecord,
   RunPromptResponse,
   SessionRuntime,
+  StudioEventEnvelope,
   TimelineItem,
   TimelineItemDeltaEvent,
   ToolCallStatus2,
@@ -366,6 +367,22 @@ function selectedState() {
       config,
     },
   });
+}
+
+function studioEvent(
+  kind: StudioEventEnvelope["kind"],
+  overrides: Partial<StudioEventEnvelope> = {},
+): StudioEventEnvelope {
+  return {
+    eventId: `event-${Math.random()}`,
+    projectId: "project-1",
+    sessionId: "session-1",
+    turnId: "turn-1",
+    sequence: 1,
+    createdAt: 1,
+    kind,
+    ...overrides,
+  };
 }
 
 function entriesForTimeline(items: TimelineItem[]) {
@@ -1051,6 +1068,116 @@ function sessionHandoffStartedSwitchesBeforeLiveEvents() {
   assertEqual(handoff.isBusy, true);
   assertEqual(handoff.turnPhase, "running");
   assertEqual(started.timelineItems.has("turn-2-text"), true);
+}
+
+function studioTurnEventShowsWaitingState() {
+  const state = studioReducer(selectedState(), {
+    type: "studioEvent",
+    envelope: studioEvent({
+      type: "turnChanged",
+      turn: {
+        turnId: "turn-1",
+        sessionId: "session-1",
+        status: "waitingForModel",
+        reason: null,
+        updatedAt: 10,
+      },
+    }),
+    status: "waiting",
+  });
+
+  assertEqual(state.isBusy, true);
+  assertEqual(state.turnPhase, "running");
+  assertEqual(state.status, "waiting");
+}
+
+function studioTimelineEventClearsWaitingAndStreamsContent() {
+  const submitted = studioReducer(selectedState(), {
+    type: "promptSubmitted",
+    prompt: "Build",
+    status: "running",
+    startedAt: 1234,
+  });
+  const liveItem = {
+    ...textItem("turn-1-text", 20, ""),
+    status: "streaming" as const,
+  };
+  const started = studioReducer(submitted, {
+    type: "studioEvent",
+    envelope: studioEvent({
+      type: "timelineChanged",
+      change: { type: "started", item: liveItem },
+    }),
+    status: "running",
+  });
+  const delta = studioReducer(started, {
+    type: "studioEvent",
+    envelope: studioEvent({
+      type: "timelineChanged",
+      change: {
+        type: "delta",
+        event: {
+          turnId: "turn-1",
+          itemId: "turn-1-text",
+          sequence: 21,
+          kind: "text",
+          status: "streaming",
+          createdAt: 20,
+          updatedAt: 21,
+          delta: { type: "text", delta: "live" },
+        },
+      },
+    }),
+    status: "running",
+  });
+
+  assertEqual(delta.timelineItems.has("optimistic-waiting-1234"), false);
+  assertEqual(delta.timelineItems.get("turn-1-text")?.content, "live");
+  assertEqual(delta.timelineNextSequence, 22);
+}
+
+function studioHandoffEventSwitchesToTargetSession() {
+  const state = studioReducer(selectedState(), {
+    type: "studioEvent",
+    envelope: studioEvent(
+      {
+        type: "sessionHandoffChanged",
+        handoff: {
+          originSessionId: "session-1",
+          targetSessionId: "session-2",
+          kind: "planImplementation",
+          status: "running",
+          planId: "turn-1-plan",
+          updatedAt: 20,
+        },
+      },
+      { sessionId: "session-2" },
+    ),
+    status: "running",
+  });
+
+  assertEqual(state.selectedSessionId, "session-2");
+  assertEqual(state.isBusy, true);
+  assertEqual(state.turnPhase, "running");
+  assertDeepEqual(state.sessions.map((session) => session.id), ["session-2"]);
+}
+
+function studioSessionRuntimeEventUpdatesActiveSkills() {
+  const updatedRuntime = {
+    ...runtime,
+    activeSkills: ["skill-creator"],
+    updatedAt: 20,
+  };
+  const state = studioReducer(selectedState(), {
+    type: "studioEvent",
+    envelope: studioEvent({
+      type: "sessionRuntimeChanged",
+      runtime: { payload: updatedRuntime },
+    }),
+    status: "running",
+  });
+
+  assertDeepEqual(state.sessionRuntime?.activeSkills, ["skill-creator"]);
 }
 
 function liveEventsForTargetAreIgnoredBeforeHandoffStarted() {
@@ -2102,6 +2229,10 @@ runPromptLoadedKeepsLiveInteractionByCurrentRun();
 freshContextRunSwitchesToReturnedSession();
 planImplementationSubmittedShowsWaitingWithoutSwitchingSession();
 sessionHandoffStartedSwitchesBeforeLiveEvents();
+studioTurnEventShowsWaitingState();
+studioTimelineEventClearsWaitingAndStreamsContent();
+studioHandoffEventSwitchesToTargetSession();
+studioSessionRuntimeEventUpdatesActiveSkills();
 liveEventsForTargetAreIgnoredBeforeHandoffStarted();
 runPromptLoadedDedupesReturnedSessions();
 sessionModeUpdateNoLongerSwitchesForFreshContextRun();

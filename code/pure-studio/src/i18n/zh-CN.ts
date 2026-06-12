@@ -35,6 +35,7 @@ const zhCN = {
     running: "运行中",
     done: "完成",
     thinking: "思考中...",
+    waitingForModel: "正在等待模型响应...",
     stopping: "正在停止",
     interrupted: "已中断",
     projectLoaded: "项目已加载",

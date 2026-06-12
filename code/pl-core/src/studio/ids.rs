@@ -16,6 +16,10 @@ pub fn new_timeline_event_id() -> String {
     new_id("timeline")
 }
 
+pub fn new_studio_event_id() -> String {
+    new_id("studio-event")
+}
+
 pub fn unix_seconds() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

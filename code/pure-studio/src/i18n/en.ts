@@ -35,6 +35,7 @@ const en = {
     running: "Running",
     done: "Done",
     thinking: "Thinking...",
+    waitingForModel: "Waiting for the model...",
     stopping: "Stopping",
     interrupted: "Interrupted",
     projectLoaded: "Project loaded",

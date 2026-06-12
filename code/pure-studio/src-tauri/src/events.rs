@@ -1,19 +1,19 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
-use pl_core::{StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord, StudioRuntime};
-use pl_protocol::AgentEvent;
+use pl_core::StudioRuntime;
+use pl_protocol::{
+    AgentEvent, StudioAgentSnapshot, StudioEventEnvelope, StudioEventKind, StudioLspHealth,
+    StudioMcpHealth, StudioSessionRuntime,
+};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::broadcast::error::RecvError;
 
-use crate::dto::AgentEventPayload;
 use crate::mappers::{
     agent_dto, agent_event_dto, load_session_runtime_dto, lsp_health_update_dto,
     mcp_health_update_dto,
 };
 use crate::state::AppState;
 
-static EVENT_COUNTER: AtomicU64 = AtomicU64::new(0);
 const MCP_PERIODIC_RECHECK: Duration = Duration::from_secs(300);
 
 pub fn start_mcp_health_tasks(app: AppHandle, state: AppState) {
@@ -56,10 +56,24 @@ pub fn start_lsp_health_tasks(app: AppHandle, state: AppState) {
     });
 }
 
-async fn emit_mcp_health_update(app: &AppHandle, studio: &StudioRuntime) {
+async fn emit_mcp_health_update(_app: &AppHandle, studio: &StudioRuntime) {
     match mcp_health_update_dto(studio).await {
         Ok(payload) => {
-            let _ = app.emit("studio-mcp-health-updated", payload);
+            let Ok(payload) = serde_json::to_value(payload) else {
+                eprintln!("[pure-studio] failed to serialize MCP health update");
+                return;
+            };
+            let _ = studio
+                .events()
+                .emit(
+                    None,
+                    None,
+                    None,
+                    StudioEventKind::McpHealthChanged {
+                        health: StudioMcpHealth { payload },
+                    },
+                )
+                .await;
         }
         Err(error) => {
             eprintln!(
@@ -70,10 +84,24 @@ async fn emit_mcp_health_update(app: &AppHandle, studio: &StudioRuntime) {
     }
 }
 
-pub async fn emit_lsp_health_update(app: &AppHandle, studio: &StudioRuntime) {
+pub async fn emit_lsp_health_update(_app: &AppHandle, studio: &StudioRuntime) {
     match lsp_health_update_dto(studio).await {
         Ok(payload) => {
-            let _ = app.emit("studio-lsp-health-updated", payload);
+            let Ok(payload) = serde_json::to_value(payload) else {
+                eprintln!("[pure-studio] failed to serialize LSP health update");
+                return;
+            };
+            let _ = studio
+                .events()
+                .emit(
+                    None,
+                    None,
+                    None,
+                    StudioEventKind::LspHealthChanged {
+                        health: StudioLspHealth { payload },
+                    },
+                )
+                .await;
         }
         Err(error) => {
             eprintln!(
@@ -84,125 +112,114 @@ pub async fn emit_lsp_health_update(app: &AppHandle, studio: &StudioRuntime) {
     }
 }
 
+pub fn start_studio_runtime_event_bridge(app: AppHandle, state: AppState) {
+    let mut rx = state.studio.events().subscribe();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(event) => emit_studio_runtime_event(&app, event),
+                Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
+fn emit_studio_runtime_event(app: &AppHandle, event: StudioEventEnvelope) {
+    let _ = app.emit("studio-runtime-event", event);
+}
+
 pub async fn drain_events(
     session_id: String,
     mut event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
-    app: AppHandle,
+    _app: AppHandle,
     studio: StudioRuntime,
 ) {
     loop {
         match event_rx.recv().await {
             Ok(event) => {
-                let agent = if let Some(record) = agent_snapshot_record(&session_id, &event) {
-                    let _ = studio.store().upsert_agent_snapshot(record.clone()).await;
-                    Some(agent_dto(record))
-                } else {
-                    None
-                };
-                let runtime_updated = if let AgentEvent::AgentRuntimeUpdated { delta } = &event {
-                    studio
-                        .store()
-                        .record_agent_runtime_delta(&session_id, delta)
-                        .await
-                        .unwrap_or(false)
-                } else {
-                    false
-                };
-                let skill_updated = if let AgentEvent::SkillActivated { activation } = &event {
-                    studio
-                        .store()
-                        .upsert_session_skill(&session_id, activation)
-                        .await
-                        .is_ok()
-                } else {
-                    false
-                };
-                let session_runtime = if runtime_updated || skill_updated {
-                    load_session_runtime_dto(&studio, &session_id).await.ok()
-                } else {
-                    None
-                };
-                let agent = if agent.is_none()
-                    && let AgentEvent::AgentRuntimeUpdated { delta } = &event
-                    && delta.agent_id != "agent-root"
-                {
-                    studio
-                        .store()
-                        .list_agents(&session_id)
-                        .await
-                        .ok()
-                        .and_then(|agents| {
-                            agents
-                                .into_iter()
-                                .find(|agent| agent.id == delta.agent_id)
-                                .map(agent_dto)
-                        })
-                } else {
-                    agent
-                };
-                let timeline_event = if let Ok(sequence) =
-                    studio.store().next_agent_event_sequence(&session_id).await
-                {
-                    if let Some(record) = agent_timeline_event_record(&session_id, sequence, &event)
-                    {
-                        let _ = studio.store().record_agent_event(record.clone()).await;
-                        Some(agent_event_dto(record))
+                let emitted = studio
+                    .events()
+                    .emit_agent_event(&session_id, event.clone())
+                    .await
+                    .ok()
+                    .flatten();
+                let agent = agent_for_event(&studio, &session_id, &event).await;
+                let timeline_event = if matches!(
+                    emitted.as_ref().map(|envelope| &envelope.kind),
+                    Some(StudioEventKind::AgentTimelineChanged { .. })
+                ) {
+                    let event_id = emitted.as_ref().map(|envelope| envelope.event_id.clone());
+                    if let Some(event_id) = event_id {
+                        studio
+                            .store()
+                            .read_agent_event(&event_id)
+                            .await
+                            .ok()
+                            .flatten()
+                            .map(agent_event_dto)
                     } else {
                         None
                     }
                 } else {
                     None
                 };
-                let event_for_timeline = if matches!(
+                let session_runtime = if matches!(
                     event,
-                    AgentEvent::TimelineItemStarted { .. }
-                        | AgentEvent::TimelineItemDelta { .. }
-                        | AgentEvent::TimelineItemCompleted { .. }
-                        | AgentEvent::TimelineItemFailed { .. }
-                        | AgentEvent::InteractionChanged { .. }
-                        | AgentEvent::AgentRuntimeUpdated { .. }
-                        | AgentEvent::SkillActivated { .. }
-                        | AgentEvent::TurnInterrupted { .. }
-                        | AgentEvent::TurnBudgetLimited { .. }
-                        | AgentEvent::Done
-                        | AgentEvent::Error { .. }
+                    AgentEvent::AgentRuntimeUpdated { .. } | AgentEvent::SkillActivated { .. }
                 ) {
-                    Some(event)
+                    load_session_runtime_dto(&studio, &session_id).await.ok()
                 } else {
                     None
                 };
-                if event_for_timeline.is_some()
-                    || timeline_event.is_some()
-                    || agent.is_some()
-                    || session_runtime.is_some()
+                if let Some(agent) = &agent
+                    && let Ok(payload) = serde_json::to_value(agent)
                 {
-                    let _ = app.emit(
-                        "studio-agent-event",
-                        AgentEventPayload {
-                            session_id: session_id.clone(),
-                            timeline_stale: None,
-                            lagged_events: None,
-                            event: event_for_timeline,
-                            timeline_event,
-                            agent,
-                            session_runtime,
-                        },
-                    );
+                    let _ = studio
+                        .events()
+                        .emit(
+                            None,
+                            Some(session_id.clone()),
+                            None,
+                            StudioEventKind::AgentChanged {
+                                agent: StudioAgentSnapshot { payload },
+                            },
+                        )
+                        .await;
+                }
+                if let Some(timeline_event) = &timeline_event
+                    && let Ok(payload) = serde_json::to_value(timeline_event)
+                {
+                    let _ = studio
+                        .events()
+                        .emit(
+                            None,
+                            Some(session_id.clone()),
+                            None,
+                            StudioEventKind::AgentTimelineChanged {
+                                event: pl_protocol::StudioAgentTimelineEvent { payload },
+                            },
+                        )
+                        .await;
+                }
+                if let Some(session_runtime) = &session_runtime
+                    && let Ok(payload) = serde_json::to_value(session_runtime)
+                {
+                    let _ = studio
+                        .events()
+                        .emit(
+                            None,
+                            Some(session_id.clone()),
+                            None,
+                            StudioEventKind::SessionRuntimeChanged {
+                                runtime: StudioSessionRuntime { payload },
+                            },
+                        )
+                        .await;
                 }
             }
             Err(RecvError::Lagged(skipped)) => {
-                let _ = app.emit(
-                    "studio-agent-event",
-                    AgentEventPayload {
-                        session_id: session_id.clone(),
-                        timeline_stale: Some(true),
-                        lagged_events: Some(skipped),
-                        event: None,
-                        timeline_event: None,
-                        agent: None,
-                        session_runtime: None,
-                    },
-                );
+                let _ = studio.events().emit_stale(&session_id, skipped).await;
             }
             Err(RecvError::Closed) => {
                 break;
@@ -211,42 +228,34 @@ pub async fn drain_events(
     }
 }
 
-pub fn agent_snapshot_record(
+async fn agent_for_event(
+    studio: &StudioRuntime,
     session_id: &str,
     event: &AgentEvent,
-) -> Option<StudioAgentSnapshotRecord> {
+) -> Option<crate::dto::AgentDto> {
     match event {
-        AgentEvent::AgentStateChanged {
-            id,
-            path,
-            parent_path,
-            role,
-            task,
-            status,
-            summary,
-            depth,
-            error,
-            reason,
-            budget_limit_kind,
-            budget_usage,
-            updated_at,
-        } => Some(StudioAgentSnapshotRecord {
-            id: id.clone(),
-            session_id: session_id.to_string(),
-            path: path.clone(),
-            parent_path: parent_path.clone(),
-            role: role.clone(),
-            task: task.clone(),
-            status: *status,
-            summary: summary.clone(),
-            depth: *depth as i32,
-            error: error.clone(),
-            reason: reason.clone(),
-            budget_limit_kind: *budget_limit_kind,
-            budget_usage: *budget_usage,
-            runtime_usage: None,
-            updated_at: *updated_at,
-        }),
+        AgentEvent::AgentStateChanged { id, .. } => studio
+            .store()
+            .list_agents(session_id)
+            .await
+            .ok()
+            .and_then(|agents| {
+                agents
+                    .into_iter()
+                    .find(|agent| agent.id == *id)
+                    .map(agent_dto)
+            }),
+        AgentEvent::AgentRuntimeUpdated { delta } if delta.agent_id != "agent-root" => studio
+            .store()
+            .list_agents(session_id)
+            .await
+            .ok()
+            .and_then(|agents| {
+                agents
+                    .into_iter()
+                    .find(|agent| agent.id == delta.agent_id)
+                    .map(agent_dto)
+            }),
         AgentEvent::TimelineItemStarted { .. }
         | AgentEvent::TimelineItemDelta { .. }
         | AgentEvent::TimelineItemCompleted { .. }
@@ -267,124 +276,4 @@ pub fn agent_snapshot_record(
         | AgentEvent::Done
         | AgentEvent::Error { .. } => None,
     }
-}
-
-pub fn agent_timeline_event_record(
-    session_id: &str,
-    sequence: i64,
-    event: &AgentEvent,
-) -> Option<StudioAgentTimelineEventRecord> {
-    let (kind, agent_id, path, parent_path) = match event {
-        AgentEvent::AgentStateChanged {
-            id,
-            path,
-            parent_path,
-            ..
-        } => (
-            "agentStatus".to_string(),
-            Some(id.clone()),
-            Some(path.clone()),
-            parent_path.clone(),
-        ),
-        AgentEvent::CollabAgentSpawnBegin { sender_path, .. } => (
-            "spawnBegin".to_string(),
-            None,
-            Some(sender_path.clone()),
-            None,
-        ),
-        AgentEvent::CollabAgentSpawnEnd { agent_id, path, .. } => {
-            ("spawnEnd".to_string(), agent_id.clone(), path.clone(), None)
-        }
-        AgentEvent::CollabAgentInteractionBegin {
-            receiver_path,
-            sender_path,
-            ..
-        } => (
-            "interactionBegin".to_string(),
-            None,
-            Some(receiver_path.clone()),
-            Some(sender_path.clone()),
-        ),
-        AgentEvent::CollabAgentInteractionEnd {
-            receiver_path,
-            sender_path,
-            ..
-        } => (
-            "interactionEnd".to_string(),
-            None,
-            Some(receiver_path.clone()),
-            Some(sender_path.clone()),
-        ),
-        AgentEvent::CollabWaitingBegin { sender_path, .. } => (
-            "waitingBegin".to_string(),
-            None,
-            Some(sender_path.clone()),
-            None,
-        ),
-        AgentEvent::CollabWaitingEnd { sender_path, .. } => (
-            "waitingEnd".to_string(),
-            None,
-            Some(sender_path.clone()),
-            None,
-        ),
-        AgentEvent::CollabCloseBegin {
-            receiver_path,
-            sender_path,
-            ..
-        } => (
-            "closeBegin".to_string(),
-            None,
-            Some(receiver_path.clone()),
-            Some(sender_path.clone()),
-        ),
-        AgentEvent::CollabCloseEnd {
-            receiver_path,
-            sender_path,
-            ..
-        } => (
-            "closeEnd".to_string(),
-            None,
-            Some(receiver_path.clone()),
-            Some(sender_path.clone()),
-        ),
-        AgentEvent::TimelineItemStarted { .. }
-        | AgentEvent::TimelineItemDelta { .. }
-        | AgentEvent::TimelineItemCompleted { .. }
-        | AgentEvent::TimelineItemFailed { .. }
-        | AgentEvent::InteractionChanged { .. }
-        | AgentEvent::AgentRuntimeUpdated { .. }
-        | AgentEvent::SkillActivated { .. }
-        | AgentEvent::TurnInterrupted { .. }
-        | AgentEvent::TurnBudgetLimited { .. }
-        | AgentEvent::Done
-        | AgentEvent::Error { .. } => return None,
-    };
-    let payload_json = serde_json::to_string(event).ok()?;
-    Some(StudioAgentTimelineEventRecord {
-        event_id: new_event_id("agent-event"),
-        session_id: session_id.to_string(),
-        sequence,
-        kind,
-        agent_id,
-        path,
-        parent_path,
-        payload_json,
-        created_at: unix_seconds(),
-    })
-}
-
-fn unix_seconds() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
-}
-
-pub fn new_event_id(prefix: &str) -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_micros();
-    let seq = EVENT_COUNTER.fetch_add(1, Ordering::Relaxed);
-    format!("{prefix}-{now:x}-{seq:x}")
 }

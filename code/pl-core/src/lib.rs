@@ -66,6 +66,7 @@ pub use pl_protocol::{
     InteractionResolution, InteractionScope, InteractionStatus, Message, MessageContent,
     MessageRole, OutputStream, PermissionLevel, PipelineStage, PlanConfirmationResolution,
     PureError, Result, RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation,
+    StudioEventEnvelope, StudioEventKind, StudioTimelineChange, StudioTurn, StudioTurnStatus,
     TokenUsageSnapshot, ToolApprovalResolution, TraceEvent, TraceEventKind, UserInputAnswer,
     UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
 };
@@ -79,8 +80,8 @@ pub use studio::{
     AgentTimelineEventRecord as StudioAgentTimelineEventRecord, InteractionEmitter,
     InteractionEmitterFuture, InteractionRuntime, PlanImplementationHandoffStart, ProjectRecord,
     SessionHandoffKind, SessionHandoffRecord, SessionHandoffStatus, SessionRecord,
-    SessionRuntimeRecord, SessionSkillRecord, SessionVisibility, StudioPromptOutcome,
-    StudioRuntime, StudioStore, TimelineEventRecord, resolution_matches_kind,
+    SessionRuntimeRecord, SessionSkillRecord, SessionVisibility, StudioEventRuntime,
+    StudioPromptOutcome, StudioRuntime, StudioStore, TimelineEventRecord, resolution_matches_kind,
 };
 pub use tool::{
     AskUserTool, BashInput, BashTool, LspLanguageTool, LspQueryTool, OutputTruncation,

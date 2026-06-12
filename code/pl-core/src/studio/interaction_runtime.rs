@@ -186,6 +186,7 @@ fn cancelled_resolution(kind: &InteractionKind, reason: &str) -> InteractionReso
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::time::Duration;
 
     use pl_protocol::{
         InteractionPayload, InteractionScope, ToolApprovalResolution, UserInputAnswer,
@@ -221,12 +222,12 @@ mod tests {
         events: &Arc<Mutex<Vec<InteractionRequest>>>,
         expected: usize,
     ) -> usize {
-        for _ in 0..20 {
+        for _ in 0..100 {
             let count = events.lock().await.len();
             if count >= expected {
                 return count;
             }
-            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
         }
         events.lock().await.len()
     }

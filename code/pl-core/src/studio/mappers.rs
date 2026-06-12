@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use pl_protocol::{
     AgentStatus, InteractionPayload, InteractionRequest, InteractionResolution, InteractionScope,
     InteractionStatus, Message, MessageContent, MessageRole, RuntimeCostAmount,
-    RuntimeUsageSnapshot,
+    RuntimeUsageSnapshot, StudioEventEnvelope, StudioTurnStatus,
 };
 
 use crate::studio::entities;
@@ -10,7 +10,8 @@ use crate::studio::ids::unix_seconds;
 use crate::studio::records::{
     AgentSnapshotRecord, AgentTimelineEventRecord, ProjectRecord, SessionHandoffKind,
     SessionHandoffRecord, SessionHandoffStatus, SessionRecord, SessionRuntimeRecord,
-    SessionSkillRecord, SessionVisibility, TimelineEventRecord,
+    SessionSkillRecord, SessionVisibility, StudioEventRecord, StudioTurnRecord,
+    TimelineEventRecord,
 };
 
 pub fn project_record(model: entities::project::Model) -> ProjectRecord {
@@ -174,6 +175,53 @@ pub fn timeline_event_record(model: entities::timeline_event::Model) -> Timeline
         created_at: model.created_at,
         kind: model.kind,
         payload_json: model.payload_json,
+    }
+}
+
+pub fn studio_event_record(model: entities::studio_event::Model) -> StudioEventRecord {
+    StudioEventRecord {
+        id: model.id,
+        project_id: model.project_id,
+        session_id: model.session_id,
+        turn_id: model.turn_id,
+        sequence: model.sequence,
+        created_at: model.created_at,
+        kind: model.kind,
+        payload_json: model.payload_json,
+    }
+}
+
+pub fn studio_event_envelope(record: StudioEventRecord) -> Result<StudioEventEnvelope> {
+    let envelope = serde_json::from_str::<StudioEventEnvelope>(&record.payload_json)
+        .with_context(|| format!("failed to parse studio event {}", record.id))?;
+    Ok(envelope)
+}
+
+pub fn studio_turn_record(model: entities::turn::Model) -> StudioTurnRecord {
+    StudioTurnRecord {
+        id: model.id,
+        session_id: model.session_id,
+        status: studio_turn_status_from_label(&model.status),
+        reason: model.reason,
+        created_at: model.created_at,
+        updated_at: model.updated_at,
+        completed_at: model.completed_at,
+    }
+}
+
+pub fn studio_turn_status_from_label(label: &str) -> StudioTurnStatus {
+    match label {
+        "queued" => StudioTurnStatus::Queued,
+        "contextLoading" => StudioTurnStatus::ContextLoading,
+        "waitingForModel" => StudioTurnStatus::WaitingForModel,
+        "streaming" => StudioTurnStatus::Streaming,
+        "waitingForInteraction" => StudioTurnStatus::WaitingForInteraction,
+        "runningTool" => StudioTurnStatus::RunningTool,
+        "persisting" => StudioTurnStatus::Persisting,
+        "completed" => StudioTurnStatus::Completed,
+        "failed" => StudioTurnStatus::Failed,
+        "cancelled" => StudioTurnStatus::Cancelled,
+        _ => StudioTurnStatus::Failed,
     }
 }
 

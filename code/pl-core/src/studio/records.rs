@@ -1,5 +1,6 @@
 use pl_protocol::{
-    AgentStatus, BudgetLimitKind, BudgetUsage, Message, RuntimeUsageSnapshot, TraceEvent,
+    AgentStatus, BudgetLimitKind, BudgetUsage, Message, RuntimeUsageSnapshot, StudioTurnStatus,
+    TraceEvent,
 };
 
 use crate::TurnResult;
@@ -138,6 +139,29 @@ pub struct TimelineEventRecord {
     pub created_at: i64,
     pub kind: String,
     pub payload_json: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StudioEventRecord {
+    pub id: String,
+    pub project_id: Option<String>,
+    pub session_id: Option<String>,
+    pub turn_id: Option<String>,
+    pub sequence: i64,
+    pub created_at: i64,
+    pub kind: String,
+    pub payload_json: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StudioTurnRecord {
+    pub id: String,
+    pub session_id: String,
+    pub status: StudioTurnStatus,
+    pub reason: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub completed_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

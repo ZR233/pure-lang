@@ -6,12 +6,12 @@ use pl_protocol::{AgentEventSender, TimelineItemKind, TraceEvent, TraceEventKind
 use crate::config::{ConfigStore, ModelRole};
 use crate::mcp::McpRuntimeRegistry;
 use crate::skill::SkillCatalog;
-use crate::studio::InteractionRuntime;
 use crate::studio::StudioStore;
 use crate::studio::mappers::default_session_runtime_record;
 use crate::studio::records::{
     ProjectRecord, SessionRecord, SessionRuntimeRecord, StudioPromptOutcome,
 };
+use crate::studio::{InteractionRuntime, StudioEventRuntime};
 use crate::{
     CompileMode, CoreSession, InstructionAssembler, InstructionAssemblyRequest,
     InstructionSnapshot, InteractionCallback, PureCore, TraceRecorder, TurnBudget, TurnOptions,
@@ -40,23 +40,31 @@ pub struct StudioRuntime {
     mcp_runtime: McpRuntimeRegistry,
     lsp_runtime: pl_lsp::LspRuntimeRegistry,
     interactions: InteractionRuntime,
+    events: StudioEventRuntime,
 }
 
 impl StudioRuntime {
     pub async fn default_app() -> Result<Self> {
         let store = StudioStore::default_app().await?;
-        Ok(Self {
+        let runtime = Self {
             interactions: InteractionRuntime::new(store.clone()),
+            events: StudioEventRuntime::new(store.clone()),
             store,
             config_store: ConfigStore::default_app()?,
             mcp_runtime: McpRuntimeRegistry::new(),
             lsp_runtime: pl_lsp::LspRuntimeRegistry::new(),
-        })
+        };
+        let _ = runtime
+            .store
+            .cancel_unfinished_turns("application restarted")
+            .await?;
+        Ok(runtime)
     }
 
     pub fn new(store: StudioStore, config_store: ConfigStore) -> Self {
         Self {
             interactions: InteractionRuntime::new(store.clone()),
+            events: StudioEventRuntime::new(store.clone()),
             store,
             config_store,
             mcp_runtime: McpRuntimeRegistry::new(),
@@ -70,6 +78,10 @@ impl StudioRuntime {
 
     pub fn interactions(&self) -> &InteractionRuntime {
         &self.interactions
+    }
+
+    pub fn events(&self) -> &StudioEventRuntime {
+        &self.events
     }
 
     pub fn config_store(&self) -> &ConfigStore {

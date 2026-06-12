@@ -29,6 +29,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(state)
         .setup(move |app| {
+            events::start_studio_runtime_event_bridge(app.handle().clone(), setup_state.clone());
             events::start_mcp_health_tasks(app.handle().clone(), setup_state.clone());
             events::start_lsp_health_tasks(app.handle().clone(), setup_state.clone());
             Ok(())
@@ -42,10 +43,12 @@ fn main() {
             commands::delete_session,
             commands::select_session,
             commands::set_session_mode,
-            commands::run_prompt,
+            commands::submit_prompt,
             commands::resolve_interaction,
             commands::stop_prompt,
             commands::load_session_timeline,
+            commands::load_studio_events,
+            commands::load_session_state,
             commands::load_config,
             commands::load_provider_usages,
             commands::save_config,

@@ -1,4 +1,5 @@
 pub mod entities;
+mod event_runtime;
 mod ids;
 mod interaction_runtime;
 mod mappers;
@@ -8,6 +9,7 @@ mod runtime;
 mod store;
 mod store_support;
 
+pub use event_runtime::StudioEventRuntime;
 pub use interaction_runtime::{
     InteractionEmitter, InteractionEmitterFuture, InteractionRuntime, resolution_matches_kind,
 };
