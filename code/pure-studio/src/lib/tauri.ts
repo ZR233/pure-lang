@@ -347,7 +347,7 @@ export function runPrompt(sessionId: string, prompt: string) {
             status: "completed" as const,
             createdAt: now,
             updatedAt: now,
-            role: "user" as const,
+            textChannel: "user" as const,
             content: prompt,
             thinkingChunks: [],
           },

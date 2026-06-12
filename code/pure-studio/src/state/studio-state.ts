@@ -938,7 +938,7 @@ function appendOptimisticPrompt(state: StudioState, prompt: string, startedAt: n
     status: "completed",
     createdAt,
     updatedAt: createdAt,
-    role: "user",
+    textChannel: "user",
     content,
     thinkingChunks: [],
   };
@@ -950,7 +950,7 @@ function appendOptimisticPrompt(state: StudioState, prompt: string, startedAt: n
     status: "running",
     createdAt,
     updatedAt: createdAt,
-    role: null,
+    textChannel: null,
     content: "waitingForModel",
     thinkingChunks: [],
   };
@@ -975,7 +975,7 @@ function appendOptimisticWaiting(state: StudioState, startedAt: number): StudioS
     status: "running",
     createdAt,
     updatedAt: createdAt,
-    role: null,
+    textChannel: null,
     content: "waitingForModel",
     thinkingChunks: [],
   };
@@ -1007,7 +1007,7 @@ function shouldClearOptimisticUserTimeline(event: AgentEvent | null | undefined)
     return false;
   }
   const item = timelineEventItem(event);
-  return item?.kind === "text" && item.role === "user";
+  return item?.kind === "text" && item.textChannel === "user";
 }
 
 function shouldClearOptimisticWaitingTimeline(event: AgentEvent | null | undefined): boolean {
@@ -1019,7 +1019,7 @@ function shouldClearOptimisticWaitingTimeline(event: AgentEvent | null | undefin
   }
   if ("timelineItemDelta" in event && isRecord(event.timelineItemDelta)) {
     const timelineEvent = event.timelineItemDelta.event as TimelineItemDeltaEvent | undefined;
-    return timelineEvent ? isModelVisibleTimelineKind(timelineEvent.kind) : false;
+    return timelineEvent ? isModelVisibleTimelineDelta(timelineEvent) : false;
   }
   const item = timelineEventItem(event);
   if (!item) {
@@ -1046,9 +1046,19 @@ function timelineEventItem(event: Record<string, unknown>): TimelineItem | null 
 
 function isModelVisibleTimelineItem(item: TimelineItem): boolean {
   if (item.kind === "text") {
-    return item.role === "assistant";
+    return item.textChannel === "commentary" || item.textChannel === "final";
   }
   return isModelVisibleTimelineKind(item.kind) || item.kind === "inference" && item.status === "completed";
+}
+
+function isModelVisibleTimelineDelta(event: TimelineItemDeltaEvent): boolean {
+  if (event.kind === "text") {
+    return (
+      event.delta.type === "text" &&
+      (event.delta.textChannel === "commentary" || event.delta.textChannel === "final")
+    );
+  }
+  return isModelVisibleTimelineKind(event.kind);
 }
 
 function isModelVisibleTimelineKind(kind: TimelineItem["kind"]): boolean {

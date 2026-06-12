@@ -379,7 +379,7 @@ mod tests {
     use crate::{ConfigStore, ModelRole};
     use pl_model::ToolCall;
     use pl_protocol::{
-        InteractionPayload, InteractionResolution, TimelineItemKind, TimelineTextRole,
+        InteractionPayload, InteractionResolution, TimelineItemKind, TimelineTextChannel,
         ToolApprovalResolution, TraceEventKind,
     };
     use pretty_assertions::assert_eq;
@@ -747,14 +747,14 @@ mod tests {
             event_rx.try_recv().unwrap(),
             AgentEvent::TimelineItemStarted { item }
                 if item.item_id == "turn-1-assistant"
-                    && item.role == Some(TimelineTextRole::Assistant)
+                    && item.text_channel == Some(TimelineTextChannel::Final)
                     && item.content == "partial summary"
         ));
         assert!(matches!(
             event_rx.try_recv().unwrap(),
             AgentEvent::TimelineItemCompleted { item, .. }
                 if item.item_id == "turn-1-assistant"
-                    && item.role == Some(TimelineTextRole::Assistant)
+                    && item.text_channel == Some(TimelineTextChannel::Final)
                     && item.content == "partial summary"
         ));
         assert!(matches!(
@@ -1370,7 +1370,7 @@ mod tests {
     #[tokio::test]
     async fn run_turn_records_user_timeline_before_internal_items() {
         let sse_body = concat!(
-            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"<final>ok</final>\"}\n\n",
             "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
             "data: [DONE]\n\n"
         )
@@ -1413,7 +1413,7 @@ mod tests {
             .find_map(|event| match &event.kind {
                 TraceEventKind::TimelineItemStarted { item }
                     if item.kind == TimelineItemKind::Text
-                        && item.role == Some(TimelineTextRole::User) =>
+                        && item.text_channel == Some(TimelineTextChannel::User) =>
                 {
                     Some(item)
                 }
@@ -1429,6 +1429,51 @@ mod tests {
             .expect("user timeline item");
         assert_eq!(user_item.sequence, 0);
         assert_eq!(user_item.content, "Build the thing");
+    }
+
+    #[tokio::test]
+    async fn run_turn_persists_only_final_text_to_session_history() {
+        let sse_body = concat!(
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"<commentary>正在检查。</commentary>\"}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"<final>Done</final>\"}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+            "data: [DONE]\n\n"
+        )
+        .to_string();
+        let (base_url, handle) = serve_sse_once(sse_body).await;
+        let mut provider = ProviderInfo::openai(Some(base_url));
+        provider.bearer_token = Some("test-token".to_string());
+        provider.default_model = "local-responses".to_string();
+        let core = PureCore::from_provider_info(provider).unwrap();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
+        let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+        let mut session = CoreSession::new();
+
+        let result = core
+            .run_turn_with_trace(
+                &mut session,
+                TurnRequest {
+                    prompt: "Build the thing".to_string(),
+                    mode: CompileMode::Auto,
+                    budget: crate::turn::TurnBudget::new(60_000),
+                    instruction_snapshot: None,
+                    workspace_instructions: None,
+                },
+                &mut recorder,
+                TurnOptions::default(),
+            )
+            .await
+            .unwrap();
+        handle.await.unwrap();
+
+        assert_eq!(result.status, TurnResultStatus::Completed);
+        assert_eq!(result.content, "Done");
+        assert_eq!(session.messages().len(), 2);
+        assert_eq!(session.messages()[1].role, MessageRole::Assistant);
+        assert_eq!(
+            session.messages()[1].content,
+            MessageContent::Text("Done".to_string())
+        );
     }
 
     #[tokio::test]

@@ -39,7 +39,10 @@ fn live_api_key() -> Option<String> {
 fn deepseek_request(messages: Vec<Message>) -> CompletionRequest {
     CompletionRequest {
         model: ProviderInfo::deepseek(None).default_model,
-        instructions: Some("请用简短中文回答。".to_string()),
+        instructions: Some(
+            "请用简短中文回答。所有可见答案必须放在 <final>...</final> 中，不要输出标签之外的普通正文。"
+                .to_string(),
+        ),
         messages,
         tools: Vec::new(),
         tool_choice: "auto".to_string(),

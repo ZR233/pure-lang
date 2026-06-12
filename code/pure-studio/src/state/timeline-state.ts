@@ -250,6 +250,9 @@ function applyTimelineDelta<T extends TimelineStateSlice>(
   const delta = event.delta;
   switch (delta.type) {
     case "text":
+      item.textChannel = delta.textChannel;
+      item.content += delta.delta;
+      break;
     case "plan":
       item.content += delta.delta;
       break;
@@ -287,7 +290,7 @@ function blankTimelineItem(event: TimelineItemDeltaEvent): TimelineItem {
     status: event.status,
     createdAt: event.createdAt,
     updatedAt: event.updatedAt,
-    role: null,
+    textChannel: event.delta.type === "text" ? event.delta.textChannel : null,
     content: "",
     thinkingChunks: [],
     tool: null,

@@ -23,6 +23,14 @@ timeline item 类型固定为：
 
 每个 item 必须携带 `turnId`、`itemId`、`sequence`、`createdAt`、`updatedAt` 和 `status`。`sequence` 是会话内单调递增的 timeline event 顺序号；item 的展示顺序以首次创建时的 `sequence` 为准；后续 delta 和 completed/failed 事件只 upsert 同一个 item，并且不得改变该 item 的首次展示顺序。
 
+`text` item 必须携带 `textChannel`，固定为：
+
+- `user`：真实用户输入。
+- `commentary`：Codex 风格可见进展更新，只用于 UI 展示，不写入最终 assistant 消息历史。
+- `final`：最终 assistant 正文，会写入会话历史并作为本轮最终答复。
+
+`TimelineDelta::Text` 同样携带 `textChannel`，保证 delta 先于 start 到达时前端也能创建正确通道的 text item。旧的 `role` 字段不再作为 Studio 协议语义入口。
+
 每个 turn 被接收后，用户输入必须作为该 turn 的第一个可见 timeline item 记录和广播。enabled tools、`turn`、`inference` 等内部诊断或运行态 item 不得在 sequence 上排到用户输入之前，避免前端等待状态、内部状态或历史回放出现在用户问题上方。
 
 历史加载必须暴露 `nextSequence`/`timelineNextSequence` 作为 timeline projection 游标；Studio runtime 事件另有 `StudioEventEnvelope.sequence` 作为补拉 cursor。前端只能用后端游标判断 snapshot 新旧，不能用 item 列表里的最大 `sequence` 代替游标。旧 snapshot 只能补齐缺失 item，不能覆盖已经通过实时事件接收的新 turn 内容。前端 optimistic item 可以使用临时本地顺序参与展示，但不得预占或推进后端 cursor。
@@ -55,6 +63,8 @@ pl-model provider
 
 Plan Mode 下模型输出的 `<proposed_plan>...</proposed_plan>` 块由 `pl-model::stream` accumulator 提取为 `plan` item。计划正文复用 `TimelineItem.content`，增量使用 `TimelineDelta::Plan`；同一块内容不得同时出现在普通 assistant `text` item 中。计划块之外的普通文本仍按 assistant `text` item 流式输出。
 
+Auto 与 Plan Mode 下模型可见输出必须使用显式标签：`<commentary>...</commentary>` 表示中间进展，`<final>...</final>` 表示最终正文；Plan Mode 的最终计划继续使用 `<proposed_plan>...</proposed_plan>`。`pl-model::stream` accumulator 负责跨 chunk 解析这些标签，标签本身不得进入 timeline。未标记的普通输出不再作为成功 assistant 正文兜底，避免把 provider 未遵守协议的内容误存为最终答案。
+
 计划的采纳与实施状态不改变 `plan` item 本身，而是通过 `TraceEventKind::PlanLifecycleChanged` 追加到计划来源 session 的 `timeline_events`。事件包含 `planId`、`state`、可选 `turnId`、可选 `reason` 和 `updatedAt`；Studio 从历史 timeline 与 `StudioEventKind::PlanLifecycleChanged` 中按 `planId` 折叠 latest plan state。Plan turn 完成后需要用户确认实施时，后端创建 `InteractionKind::PlanConfirmation`，前端不再从历史 timeline 自行恢复旧确认 composer。确认 resolution 固定为 `implementFreshContext | continuePlanning | dismiss`；`continuePlanning` 的 `content` 是确认 composer 同次提交的用户补充内容，resolution 成功后由前端立即作为普通 prompt 发送；实施时后端创建显式 session handoff，新 Auto session 承载 fresh context 和 handoff prompt，来源 session 保持可恢复但不再作为活跃 session 列表项展示。后端必须在实施 turn 启动前广播 `sessionHandoffChanged`，使 Studio 先切到目标 session 并接收后续实时 `studio-runtime-event`，不得等后台 run 完成才展示实施过程。
 
 Studio 前端的实时事件、`load_session_timeline` 历史 snapshot 和 `load_studio_events` 补拉结果必须进入同一个 timeline reducer：
@@ -64,7 +74,7 @@ Studio 前端的实时事件、`load_session_timeline` 历史 snapshot 和 `load
 - `submit_prompt` 与触发实施的 `resolve_interaction` 不返回最终 timeline；它们只返回提交成功、目标 `sessionId/turnId/cursor`。
 - Plan lifecycle 与 interaction 状态均通过 `StudioEvent` 实时更新，并在 `bootstrap`、`select_session`、`load_session_state` 和 `load_studio_events` 中恢复。
 - `SkillActivated` 是 skill runtime fact 的实时通知与可追踪记录。它不渲染成普通 timeline item；Studio 收到后从后端 runtime snapshot 更新 `activeSkills`，历史恢复以结构化 session skill 表为准，而不是解析 `skill_view` 的 tool result 文本。
-- `Done` 只表示 turn 状态完成，不携带 timeline 内容；最终正文必须通过 `text` item 表达。
+- `Done` 只表示 turn 状态完成，不携带 timeline 内容；最终正文必须通过 `textChannel=final` 的 `text` item 表达。
 - Plan Mode 的最终可执行计划必须通过 `plan` item 表达；如果模型只输出计划块而没有普通正文，不应生成空 assistant `text` item。
 
 Studio 渲染可以在 selector 派生出展示项后使用虚拟滚动优化大 timeline，但虚拟滚动层不得改变 item-first 协议语义、事件游标或 reducer 合并规则。动态高度、流式 delta 和自动跟随底部属于前端渲染适配层职责；协议层仍只表达 timeline item 与 delta。

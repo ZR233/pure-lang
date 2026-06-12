@@ -4,11 +4,11 @@ use async_openai::types::stream::StreamResponse;
 use futures::StreamExt;
 use pl_protocol::{
     AgentEvent, AgentEventSender, PureError, Result, TimelineDelta, TimelineItem,
-    TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus, TimelineTextRole,
+    TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus, TimelineTextChannel,
     TimelineThinkingChunk, TimelineToolItem, TraceEvent, TraceEventKind,
 };
 
-use crate::proposed_plan::{ProposedPlanParser, ProposedPlanSegment};
+use crate::proposed_plan::{VisibleTextParser, VisibleTextSegment};
 use crate::protocol::openai::OpenAiProtocol;
 use crate::protocol::openai::sse::{self, StreamEvent, ToolCallDeltaPayload};
 use crate::request::{
@@ -52,9 +52,12 @@ pub(crate) struct StreamCompletionAccumulator {
     final_usage: Option<TokenUsage>,
     completed: bool,
     timeline: Option<TimelineState>,
-    text_item_id: Option<String>,
+    commentary_item_id: Option<String>,
+    final_item_id: Option<String>,
     thinking_item_id: Option<String>,
-    plan_parser: Option<ProposedPlanParser>,
+    text_parser: VisibleTextParser,
+    saw_tagged_content: bool,
+    untagged_content: String,
 }
 
 impl StreamCompletionAccumulator {
@@ -69,9 +72,12 @@ impl StreamCompletionAccumulator {
             final_usage: None,
             completed: false,
             timeline: timeline.map(TimelineState::new),
-            text_item_id: None,
+            commentary_item_id: None,
+            final_item_id: None,
             thinking_item_id: None,
-            plan_parser: plan_mode.then(ProposedPlanParser::new),
+            text_parser: VisibleTextParser::new(plan_mode),
+            saw_tagged_content: false,
+            untagged_content: String::new(),
         }
     }
 
@@ -83,13 +89,8 @@ impl StreamCompletionAccumulator {
         match stream_event {
             StreamEvent::OutputTextDelta { item_id, delta } => {
                 self.raw_content_parts.push(delta.clone());
-                if let Some(parser) = self.plan_parser.as_mut() {
-                    let segments = parser.push_str(&delta).segments;
-                    self.apply_proposed_plan_segments(item_id, segments, event_tx);
-                } else {
-                    self.content_parts.push(delta.clone());
-                    self.record_text_delta(item_id, delta, event_tx, TimelineTextRole::Assistant);
-                }
+                let segments = self.text_parser.push_str(&delta).segments;
+                self.apply_visible_text_segments(item_id, segments, event_tx);
             }
 
             StreamEvent::ThinkingDelta {
@@ -275,9 +276,12 @@ impl StreamCompletionAccumulator {
                 "provider stream ended before completion".to_string(),
             ));
         }
-        if let Some(parser) = self.plan_parser.as_mut() {
-            let segments = parser.finish().segments;
-            self.apply_proposed_plan_segments(None, segments, event_tx);
+        let segments = self.text_parser.finish().segments;
+        self.apply_visible_text_segments(None, segments, event_tx);
+        if self.timeline.is_some() && !self.untagged_content.trim().is_empty() {
+            return Err(PureError::LlmError(
+                "provider emitted untagged assistant text; expected <commentary>, <final>, or <proposed_plan>".to_string(),
+            ));
         }
         // 合并累积的工具调用（如果有 delta 但没有 output_item.done）
         let remaining_accumulators = std::mem::take(&mut self.tool_call_accumulators);
@@ -346,60 +350,79 @@ impl StreamCompletionAccumulator {
         item_id: Option<String>,
         delta: String,
         event_tx: &AgentEventSender,
-        role: TimelineTextRole,
+        text_channel: TimelineTextChannel,
     ) {
         let Some(timeline) = self.timeline.as_mut() else {
             return;
         };
+        let saved_item_id = match text_channel {
+            TimelineTextChannel::User => None,
+            TimelineTextChannel::Commentary => self.commentary_item_id.clone(),
+            TimelineTextChannel::Final => self.final_item_id.clone(),
+        };
         let item_id = item_id
             .filter(|value| !value.is_empty())
-            .or_else(|| self.text_item_id.clone())
-            .unwrap_or_else(|| timeline.item_id("text"));
-        self.text_item_id = Some(item_id.clone());
-        for event in timeline.append_text_delta(&item_id, role, delta) {
+            .or(saved_item_id)
+            .unwrap_or_else(|| timeline.item_id(text_channel.as_str()));
+        match text_channel {
+            TimelineTextChannel::User => {}
+            TimelineTextChannel::Commentary => self.commentary_item_id = Some(item_id.clone()),
+            TimelineTextChannel::Final => self.final_item_id = Some(item_id.clone()),
+        }
+        for event in timeline.append_text_delta(&item_id, text_channel, delta) {
             let _ = event_tx.send(event);
         }
     }
 
-    fn apply_proposed_plan_segments(
+    fn apply_visible_text_segments(
         &mut self,
         item_id: Option<String>,
-        segments: Vec<ProposedPlanSegment>,
+        segments: Vec<VisibleTextSegment>,
         event_tx: &AgentEventSender,
     ) {
         for segment in segments {
             match segment {
-                ProposedPlanSegment::Normal(text) => {
+                VisibleTextSegment::Untagged(text) => {
                     if text.is_empty() {
                         continue;
                     }
+                    self.untagged_content.push_str(&text);
+                    if self.timeline.is_none() {
+                        self.content_parts.push(text);
+                    }
+                }
+                VisibleTextSegment::Commentary(text) => {
+                    if text.is_empty() {
+                        continue;
+                    }
+                    self.saw_tagged_content = true;
+                    self.record_text_delta(
+                        item_id.clone(),
+                        text,
+                        event_tx,
+                        TimelineTextChannel::Commentary,
+                    );
+                }
+                VisibleTextSegment::Final(text) => {
+                    if text.is_empty() {
+                        continue;
+                    }
+                    self.saw_tagged_content = true;
                     self.content_parts.push(text.clone());
                     self.record_text_delta(
                         item_id.clone(),
                         text,
                         event_tx,
-                        TimelineTextRole::Assistant,
+                        TimelineTextChannel::Final,
                     );
                 }
-                ProposedPlanSegment::ProposedPlanStart => {
-                    self.record_plan_start(event_tx);
-                }
-                ProposedPlanSegment::ProposedPlanDelta(delta) => {
+                VisibleTextSegment::ProposedPlan(delta) => {
                     if !delta.is_empty() {
+                        self.saw_tagged_content = true;
                         self.record_plan_delta(delta, event_tx);
                     }
                 }
-                ProposedPlanSegment::ProposedPlanEnd => {}
             }
-        }
-    }
-
-    fn record_plan_start(&mut self, event_tx: &AgentEventSender) {
-        let Some(timeline) = self.timeline.as_mut() else {
-            return;
-        };
-        for event in timeline.append_plan_start() {
-            let _ = event_tx.send(event);
         }
     }
 
@@ -631,7 +654,7 @@ impl TimelineState {
     fn append_text_delta(
         &mut self,
         item_id: &str,
-        role: TimelineTextRole,
+        text_channel: TimelineTextChannel,
         delta: String,
     ) -> Vec<AgentEvent> {
         let now = unix_seconds();
@@ -646,7 +669,7 @@ impl TimelineState {
                 status: TimelineItemStatus::Streaming,
                 created_at: now,
                 updated_at: now,
-                role: Some(role),
+                text_channel: Some(text_channel),
                 content: String::new(),
                 thinking_chunks: Vec::new(),
                 tool: None,
@@ -674,7 +697,10 @@ impl TimelineState {
             status: TimelineItemStatus::Streaming,
             created_at: now,
             updated_at: now,
-            delta: TimelineDelta::Text { delta },
+            delta: TimelineDelta::Text {
+                text_channel,
+                delta,
+            },
         };
         self.record(
             TraceEventKind::TimelineItemDelta {
@@ -700,7 +726,7 @@ impl TimelineState {
             status: TimelineItemStatus::Streaming,
             created_at: now,
             updated_at: now,
-            role: None,
+            text_channel: None,
             content: String::new(),
             thinking_chunks: Vec::new(),
             tool: None,
@@ -763,7 +789,7 @@ impl TimelineState {
                 status: TimelineItemStatus::Streaming,
                 created_at: now,
                 updated_at: now,
-                role: None,
+                text_channel: None,
                 content: String::new(),
                 thinking_chunks: Vec::new(),
                 tool: None,
@@ -834,7 +860,7 @@ impl TimelineState {
                 status: TimelineItemStatus::Streaming,
                 created_at: now,
                 updated_at: now,
-                role: None,
+                text_channel: None,
                 content: String::new(),
                 thinking_chunks: Vec::new(),
                 tool: Some(TimelineToolItem {
@@ -973,7 +999,7 @@ impl TimelineState {
                 status,
                 created_at: now,
                 updated_at: now,
-                role: None,
+                text_channel: None,
                 content: String::new(),
                 thinking_chunks: Vec::new(),
                 tool: Some(tool_item.clone()),

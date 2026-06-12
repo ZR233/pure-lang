@@ -344,6 +344,8 @@ export type UsageSnapshot = {
   totalTokens: number;
 };
 
+export type TimelineTextChannel = "user" | "commentary" | "final";
+
 export type TimelineItem = {
   turnId: string;
   itemId: string;
@@ -352,7 +354,7 @@ export type TimelineItem = {
   status: ToolCallStatus2;
   createdAt: number;
   updatedAt: number;
-  role?: "user" | "assistant" | null;
+  textChannel?: TimelineTextChannel | null;
   content: string;
   thinkingChunks: { chunkIndex: number; content: string }[];
   tool?: {
@@ -681,7 +683,7 @@ export type TimelineItemDeltaEvent = {
   createdAt: number;
   updatedAt: number;
   delta:
-    | { type: "text"; delta: string }
+    | { type: "text"; textChannel: TimelineTextChannel; delta: string }
     | { type: "thinking"; chunkIndex: number; delta: string }
     | { type: "toolArguments"; delta: string }
     | { type: "toolResult"; delta: string }

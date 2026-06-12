@@ -244,6 +244,8 @@ function estimateEntrySize(entry: TimelineEntry | undefined): number {
   switch (entry?.kind) {
     case "message":
       return entry.role === "user" ? 96 : 140;
+    case "commentary":
+      return 72;
     case "plan":
       return 220;
     case "thought":

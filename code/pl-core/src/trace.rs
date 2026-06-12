@@ -1,6 +1,6 @@
 use pl_protocol::{
     AgentEvent, AgentEventSender, TimelineAgentItem, TimelineDelta, TimelineInferenceItem,
-    TimelineItem, TimelineItemKind, TimelineItemStatus, TimelineTextRole, TimelineToolItem,
+    TimelineItem, TimelineItemKind, TimelineItemStatus, TimelineTextChannel, TimelineToolItem,
     TokenUsageSnapshot, TraceEvent, TraceEventKind,
 };
 
@@ -129,7 +129,7 @@ impl TraceRecorder {
             turn_id,
             format!("{turn_id}-user"),
             self.sequence,
-            TimelineTextRole::User,
+            TimelineTextChannel::User,
             content,
             TimelineItemStatus::Completed,
             timestamp,
@@ -147,7 +147,7 @@ impl TraceRecorder {
             turn_id,
             format!("{turn_id}-assistant"),
             self.sequence,
-            TimelineTextRole::Assistant,
+            TimelineTextChannel::Final,
             content.to_string(),
             TimelineItemStatus::Completed,
             timestamp,
@@ -166,7 +166,7 @@ impl TraceRecorder {
             status,
             created_at: timestamp,
             updated_at: timestamp,
-            role: None,
+            text_channel: None,
             content: String::new(),
             thinking_chunks: Vec::new(),
             tool: None,
@@ -191,7 +191,7 @@ impl TraceRecorder {
             status: TimelineItemStatus::Running,
             created_at: timestamp,
             updated_at: timestamp,
-            role: None,
+            text_channel: None,
             content: String::new(),
             thinking_chunks: Vec::new(),
             tool: None,
@@ -229,7 +229,7 @@ impl TraceRecorder {
             status: TimelineItemStatus::Started,
             created_at: timestamp,
             updated_at: timestamp,
-            role: None,
+            text_channel: None,
             content: String::new(),
             thinking_chunks: Vec::new(),
             tool: Some(TimelineToolItem {
@@ -266,7 +266,7 @@ impl TraceRecorder {
             status,
             created_at: timestamp,
             updated_at: timestamp,
-            role: None,
+            text_channel: None,
             content: String::new(),
             thinking_chunks: Vec::new(),
             tool: None,
@@ -327,13 +327,19 @@ impl TraceRecorder {
             | TraceEventKind::TimelineItemFailed { item, .. } => {
                 item.turn_id == turn_id
                     && item.kind == TimelineItemKind::Text
-                    && item.role == Some(TimelineTextRole::Assistant)
+                    && item.text_channel == Some(TimelineTextChannel::Final)
                     && !item.content.trim().is_empty()
             }
             TraceEventKind::TimelineItemDelta { event } => {
                 event.turn_id == turn_id
                     && event.kind == TimelineItemKind::Text
-                    && matches!(&event.delta, TimelineDelta::Text { delta } if !delta.trim().is_empty())
+                    && matches!(
+                        &event.delta,
+                        TimelineDelta::Text {
+                            text_channel: TimelineTextChannel::Final,
+                            delta,
+                        } if !delta.trim().is_empty()
+                    )
             }
             TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
@@ -426,7 +432,11 @@ mod tests {
                 | TraceEventKind::TimelineItemCompleted { item }
                     if item.kind == TimelineItemKind::Text =>
                 {
-                    Some((item.item_id.as_str(), item.content.as_str(), item.role))
+                    Some((
+                        item.item_id.as_str(),
+                        item.content.as_str(),
+                        item.text_channel,
+                    ))
                 }
                 _ => None,
             })
@@ -438,12 +448,12 @@ mod tests {
                 (
                     "t1-assistant",
                     "final answer",
-                    Some(TimelineTextRole::Assistant)
+                    Some(TimelineTextChannel::Final)
                 ),
                 (
                     "t1-assistant",
                     "final answer",
-                    Some(TimelineTextRole::Assistant)
+                    Some(TimelineTextChannel::Final)
                 ),
             ],
         );

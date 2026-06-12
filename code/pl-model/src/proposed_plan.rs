@@ -1,111 +1,149 @@
-const OPEN_TAG: &str = "<proposed_plan>";
-const CLOSE_TAG: &str = "</proposed_plan>";
+const COMMENTARY_OPEN_TAG: &str = "<commentary>";
+const COMMENTARY_CLOSE_TAG: &str = "</commentary>";
+const FINAL_OPEN_TAG: &str = "<final>";
+const FINAL_CLOSE_TAG: &str = "</final>";
+const PLAN_OPEN_TAG: &str = "<proposed_plan>";
+const PLAN_CLOSE_TAG: &str = "</proposed_plan>";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProposedPlanSegment {
-    Normal(String),
-    ProposedPlanStart,
-    ProposedPlanDelta(String),
-    ProposedPlanEnd,
+pub enum VisibleTextSegment {
+    Untagged(String),
+    Commentary(String),
+    Final(String),
+    ProposedPlan(String),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ProposedPlanChunk {
-    pub segments: Vec<ProposedPlanSegment>,
+pub struct VisibleTextChunk {
+    pub segments: Vec<VisibleTextSegment>,
 }
 
-/// Parser for `<proposed_plan>` blocks emitted in Plan Mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActiveTag {
+    Commentary,
+    Final,
+    ProposedPlan,
+}
+
+impl ActiveTag {
+    fn close_tag(self) -> &'static str {
+        match self {
+            Self::Commentary => COMMENTARY_CLOSE_TAG,
+            Self::Final => FINAL_CLOSE_TAG,
+            Self::ProposedPlan => PLAN_CLOSE_TAG,
+        }
+    }
+
+    fn segment(self, text: String) -> VisibleTextSegment {
+        match self {
+            Self::Commentary => VisibleTextSegment::Commentary(text),
+            Self::Final => VisibleTextSegment::Final(text),
+            Self::ProposedPlan => VisibleTextSegment::ProposedPlan(text),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct OpenTag {
+    tag: ActiveTag,
+    text: &'static str,
+}
+
+/// Parser for Codex-style visible output tags emitted by the model.
 ///
-/// The parser accepts arbitrary stream chunk boundaries and removes plan
-/// blocks from normal assistant text while preserving the extracted plan text.
-#[derive(Debug, Default)]
-pub struct ProposedPlanParser {
-    inside_plan: bool,
+/// The parser accepts arbitrary stream chunk boundaries and removes channel
+/// tags from visible timeline text. Untagged text is reported separately so
+/// Studio turns can reject provider output that does not follow the channel
+/// protocol.
+#[derive(Debug)]
+pub struct VisibleTextParser {
+    allow_plan: bool,
+    active_tag: Option<ActiveTag>,
     pending: String,
 }
 
-impl ProposedPlanParser {
-    pub fn new() -> Self {
-        Self::default()
+impl VisibleTextParser {
+    pub fn new(allow_plan: bool) -> Self {
+        Self {
+            allow_plan,
+            active_tag: None,
+            pending: String::new(),
+        }
     }
 
-    pub fn push_str(&mut self, chunk: &str) -> ProposedPlanChunk {
+    pub fn push_str(&mut self, chunk: &str) -> VisibleTextChunk {
         self.pending.push_str(chunk);
         self.drain_pending(false)
     }
 
-    pub fn finish(&mut self) -> ProposedPlanChunk {
+    pub fn finish(&mut self) -> VisibleTextChunk {
         self.drain_pending(true)
     }
 
-    fn drain_pending(&mut self, finish: bool) -> ProposedPlanChunk {
+    fn drain_pending(&mut self, finish: bool) -> VisibleTextChunk {
         let mut segments = Vec::new();
         loop {
-            if self.inside_plan {
-                match self.pending.find(CLOSE_TAG) {
+            if let Some(active_tag) = self.active_tag {
+                let close_tag = active_tag.close_tag();
+                match self.pending.find(close_tag) {
                     Some(index) => {
                         if index > 0 {
-                            segments.push(ProposedPlanSegment::ProposedPlanDelta(
-                                self.pending[..index].to_string(),
-                            ));
+                            segments.push(active_tag.segment(self.pending[..index].to_string()));
                         }
-                        self.pending.drain(..index + CLOSE_TAG.len());
-                        self.inside_plan = false;
-                        segments.push(ProposedPlanSegment::ProposedPlanEnd);
+                        self.pending.drain(..index + close_tag.len());
+                        self.active_tag = None;
                     }
                     None => {
                         let keep = if finish {
                             0
                         } else {
-                            suffix_prefix_len(&self.pending, CLOSE_TAG)
+                            suffix_prefix_len(&self.pending, close_tag)
                         };
                         let emit_len = self.pending.len().saturating_sub(keep);
                         if emit_len > 0 {
-                            segments.push(ProposedPlanSegment::ProposedPlanDelta(
-                                self.pending[..emit_len].to_string(),
-                            ));
+                            segments.push(active_tag.segment(self.pending[..emit_len].to_string()));
                             self.pending.drain(..emit_len);
                         }
                         if finish {
                             if !self.pending.is_empty() {
-                                segments.push(ProposedPlanSegment::ProposedPlanDelta(
-                                    self.pending.clone(),
-                                ));
+                                segments.push(active_tag.segment(self.pending.clone()));
                                 self.pending.clear();
                             }
-                            self.inside_plan = false;
-                            segments.push(ProposedPlanSegment::ProposedPlanEnd);
+                            self.active_tag = None;
                         }
                         break;
                     }
                 }
             } else {
-                match self.pending.find(OPEN_TAG) {
-                    Some(index) => {
+                let open_tags = self.open_tags();
+                match earliest_open_tag(&self.pending, &open_tags) {
+                    Some((index, open_tag)) => {
                         if index > 0 {
-                            segments.push(ProposedPlanSegment::Normal(
+                            segments.push(VisibleTextSegment::Untagged(
                                 self.pending[..index].to_string(),
                             ));
                         }
-                        self.pending.drain(..index + OPEN_TAG.len());
-                        self.inside_plan = true;
-                        segments.push(ProposedPlanSegment::ProposedPlanStart);
+                        self.pending.drain(..index + open_tag.text.len());
+                        self.active_tag = Some(open_tag.tag);
                     }
                     None => {
                         let keep = if finish {
                             0
                         } else {
-                            suffix_prefix_len(&self.pending, OPEN_TAG)
+                            max_suffix_prefix_len(
+                                &self.pending,
+                                open_tags.iter().map(|tag| tag.text),
+                            )
                         };
                         let emit_len = self.pending.len().saturating_sub(keep);
                         if emit_len > 0 {
-                            segments.push(ProposedPlanSegment::Normal(
+                            segments.push(VisibleTextSegment::Untagged(
                                 self.pending[..emit_len].to_string(),
                             ));
                             self.pending.drain(..emit_len);
                         }
                         if finish && !self.pending.is_empty() {
-                            segments.push(ProposedPlanSegment::Normal(self.pending.clone()));
+                            segments.push(VisibleTextSegment::Untagged(self.pending.clone()));
                             self.pending.clear();
                         }
                         break;
@@ -113,8 +151,42 @@ impl ProposedPlanParser {
                 }
             }
         }
-        ProposedPlanChunk { segments }
+        VisibleTextChunk { segments }
     }
+
+    fn open_tags(&self) -> Vec<OpenTag> {
+        let mut tags = vec![
+            OpenTag {
+                tag: ActiveTag::Commentary,
+                text: COMMENTARY_OPEN_TAG,
+            },
+            OpenTag {
+                tag: ActiveTag::Final,
+                text: FINAL_OPEN_TAG,
+            },
+        ];
+        if self.allow_plan {
+            tags.push(OpenTag {
+                tag: ActiveTag::ProposedPlan,
+                text: PLAN_OPEN_TAG,
+            });
+        }
+        tags
+    }
+}
+
+fn earliest_open_tag(text: &str, open_tags: &[OpenTag]) -> Option<(usize, OpenTag)> {
+    open_tags
+        .iter()
+        .filter_map(|tag| text.find(tag.text).map(|index| (index, *tag)))
+        .min_by_key(|(index, _)| *index)
+}
+
+fn max_suffix_prefix_len<'a>(text: &str, patterns: impl Iterator<Item = &'a str>) -> usize {
+    patterns
+        .map(|pattern| suffix_prefix_len(text, pattern))
+        .max()
+        .unwrap_or(0)
 }
 
 fn suffix_prefix_len(text: &str, pattern: &str) -> usize {
@@ -131,11 +203,11 @@ fn suffix_prefix_len(text: &str, pattern: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProposedPlanParser, ProposedPlanSegment};
+    use super::{VisibleTextParser, VisibleTextSegment};
     use pretty_assertions::assert_eq;
 
-    fn collect(chunks: &[&str]) -> Vec<ProposedPlanSegment> {
-        let mut parser = ProposedPlanParser::new();
+    fn collect(chunks: &[&str], allow_plan: bool) -> Vec<VisibleTextSegment> {
+        let mut parser = VisibleTextParser::new(allow_plan);
         let mut segments = Vec::new();
         for chunk in chunks {
             segments.extend(parser.push_str(chunk).segments);
@@ -145,42 +217,58 @@ mod tests {
     }
 
     #[test]
+    fn extracts_channels_split_across_chunks() {
+        assert_eq!(
+            collect(
+                &[
+                    "<comm",
+                    "entary>checking",
+                    "</commentary><fi",
+                    "nal>done</final>"
+                ],
+                false,
+            ),
+            vec![
+                VisibleTextSegment::Commentary("checking".to_string()),
+                VisibleTextSegment::Final("done".to_string()),
+            ]
+        );
+    }
+
+    #[test]
     fn extracts_plan_split_across_chunks() {
         assert_eq!(
-            collect(&[
-                "before\n<prop",
-                "osed_plan>\n- step\n",
-                "</proposed_plan>\nafter"
-            ]),
+            collect(
+                &[
+                    "before\n<prop",
+                    "osed_plan>\n- step\n",
+                    "</proposed_plan>\nafter"
+                ],
+                true,
+            ),
             vec![
-                ProposedPlanSegment::Normal("before\n".to_string()),
-                ProposedPlanSegment::ProposedPlanStart,
-                ProposedPlanSegment::ProposedPlanDelta("\n- step\n".to_string()),
-                ProposedPlanSegment::ProposedPlanEnd,
-                ProposedPlanSegment::Normal("\nafter".to_string()),
+                VisibleTextSegment::Untagged("before\n".to_string()),
+                VisibleTextSegment::ProposedPlan("\n- step\n".to_string()),
+                VisibleTextSegment::Untagged("\nafter".to_string()),
             ]
         );
     }
 
     #[test]
-    fn closes_unterminated_plan_block_on_finish() {
+    fn closes_unterminated_final_on_finish() {
         assert_eq!(
-            collect(&["<proposed_plan>\n- step\n"]),
-            vec![
-                ProposedPlanSegment::ProposedPlanStart,
-                ProposedPlanSegment::ProposedPlanDelta("\n- step\n".to_string()),
-                ProposedPlanSegment::ProposedPlanEnd,
-            ]
+            collect(&["<final>done"], false),
+            vec![VisibleTextSegment::Final("done".to_string())]
         );
     }
 
     #[test]
-    fn preserves_normal_text_without_tags() {
+    fn preserves_untagged_text_without_tags() {
         assert_eq!(
-            collect(&["hello ", "world"]),
+            collect(&["hello ", "world"], false),
             vec![
-                ProposedPlanSegment::Normal("hello ".to_string()),
-                ProposedPlanSegment::Normal("world".to_string()),
+                VisibleTextSegment::Untagged("hello ".to_string()),
+                VisibleTextSegment::Untagged("world".to_string()),
             ]
         );
     }

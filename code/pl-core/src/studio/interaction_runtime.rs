@@ -208,12 +208,12 @@ mod tests {
     }
 
     async fn wait_pending(store: &StudioStore, session_id: &str) -> Vec<InteractionRequest> {
-        for _ in 0..20 {
+        for _ in 0..100 {
             let pending = store.list_pending_interactions(session_id).await.unwrap();
             if !pending.is_empty() {
                 return pending;
             }
-            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
         }
         store.list_pending_interactions(session_id).await.unwrap()
     }

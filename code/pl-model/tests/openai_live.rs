@@ -38,8 +38,11 @@ fn user_message(content: &str) -> Message {
 fn openai_request(model: String) -> CompletionRequest {
     CompletionRequest {
         model,
-        instructions: Some("Answer briefly.".to_string()),
-        messages: vec![user_message("Reply with exactly: ok")],
+        instructions: Some(
+            "Answer briefly. Put all visible answer text inside <final>...</final>; do not write plain text outside tags."
+                .to_string(),
+        ),
+        messages: vec![user_message("Reply with exactly: <final>ok</final>")],
         tools: Vec::new(),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: false,

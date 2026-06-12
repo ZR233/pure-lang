@@ -432,7 +432,7 @@ mod tests {
                     status: TimelineItemStatus::Running,
                     created_at: 1,
                     updated_at: 1,
-                    role: None,
+                    text_channel: None,
                     content: String::new(),
                     thinking_chunks: Vec::new(),
                     tool: None,

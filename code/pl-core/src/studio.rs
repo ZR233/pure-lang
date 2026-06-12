@@ -31,7 +31,7 @@ mod tests {
         AgentRuntimeDelta, AgentStatus, InteractionKind, InteractionPayload, InteractionRequest,
         InteractionResolution, InteractionScope, InteractionStatus, Message, MessageContent,
         MessageRole, PlanConfirmationResolution, PlanLifecycleState, RuntimeCostAmount,
-        SkillActivation, TimelineItem, TimelineItemStatus, TimelineTextRole, TokenUsageSnapshot,
+        SkillActivation, TimelineItem, TimelineItemStatus, TimelineTextChannel, TokenUsageSnapshot,
         TraceEvent, TraceEventKind,
     };
     use pretty_assertions::assert_eq;
@@ -82,7 +82,7 @@ mod tests {
                         "turn-1",
                         "item-1",
                         0,
-                        TimelineTextRole::User,
+                        TimelineTextChannel::User,
                         "hello",
                         TimelineItemStatus::Completed,
                         1,
