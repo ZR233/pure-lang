@@ -50,6 +50,7 @@ pub(super) fn recoverable_subagent_tool_output(task: &str, error: &str) -> ToolO
         output_file: PathBuf::new(),
         exit_code: None,
         timed_out: false,
+        runtime_events: Vec::new(),
     }
 }
 

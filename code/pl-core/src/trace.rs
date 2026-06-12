@@ -337,6 +337,7 @@ impl TraceRecorder {
             }
             TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
+            | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => false,
         })
     }

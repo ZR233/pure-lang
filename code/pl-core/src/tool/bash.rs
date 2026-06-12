@@ -346,6 +346,7 @@ fn tool_output_from_snapshot(
         output_file: snapshot.output_file,
         exit_code: snapshot.exit_code,
         timed_out: snapshot.timed_out,
+        runtime_events: Vec::new(),
     })
 }
 

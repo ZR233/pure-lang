@@ -194,6 +194,32 @@ pub mod interaction {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
+pub mod session_skill {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "session_skills")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub session_id: String,
+        pub skill_name: String,
+        pub skill_name_key: String,
+        pub source: String,
+        pub path: String,
+        pub first_turn_id: String,
+        pub last_turn_id: String,
+        pub last_tool_call_id: String,
+        pub activated_at: i64,
+        pub updated_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 pub mod session_runtime_snapshot {
     use super::*;
 

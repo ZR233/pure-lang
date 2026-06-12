@@ -81,6 +81,19 @@ pub struct SessionRuntimeRecord {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionSkillRecord {
+    pub session_id: String,
+    pub skill_name: String,
+    pub source: String,
+    pub path: String,
+    pub first_turn_id: String,
+    pub last_turn_id: String,
+    pub last_tool_call_id: String,
+    pub activated_at: i64,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Clone)]
 pub struct StudioPromptOutcome {
     pub result: TurnResult,

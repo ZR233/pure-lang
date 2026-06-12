@@ -250,7 +250,7 @@ Pure v1 的权限模式是本地策略层，不是 OS 沙箱。`request-approval
 
 `active_skills` 仅声明旧版 GUI 状态栏展示所需的 Skill 名称，不作为真实 skills 启停来源。`active_mcp_servers` 是兼容旧配置和旧状态栏的字段，MCP server 的用户启用意图来源为 `[mcp_servers.<id>].enabled`；真实可用性由进程内 MCP runtime registry 后台探测，不写入 TOML。缺失 `[runtime]` 或字段时按空列表处理；缺失 `permission_mode` 时按 `request-approval` 处理。旧配置里的 `workspace-write` 兼容读取为 `request-approval`，新配置不再输出该值。
 
-真实 skills 能力由 `[skills]` 配置和项目目录驱动。`active_skills` 不作为启停来源，不影响模型可见的 skills 列表，也不作为当前会话状态栏 Skills 的来源。Studio 当前会话的 `activeSkills` 由该会话中成功执行过的 `skill_view` 工具结果派生，表示 skill 内容已经进入上下文。
+真实 skills 能力由 `[skills]` 配置和项目目录驱动。`active_skills` 不作为启停来源，不影响模型可见的 skills 列表，也不作为当前会话状态栏 Skills 的来源。Studio 当前会话的 `activeSkills` 由后端持久化的会话级 skill activation 记录派生；只有成功执行过 `skill_view`、且后端写入 `SkillActivated` 的 skill 才计入。
 
 ## 10.8 MCP 配置
 

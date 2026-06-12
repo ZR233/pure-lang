@@ -54,7 +54,7 @@ pl-model provider
 
 Plan Mode 下模型输出的 `<proposed_plan>...</proposed_plan>` 块由 `pl-model::stream` accumulator 提取为 `plan` item。计划正文复用 `TimelineItem.content`，增量使用 `TimelineDelta::Plan`；同一块内容不得同时出现在普通 assistant `text` item 中。计划块之外的普通文本仍按 assistant `text` item 流式输出。
 
-计划的采纳与实施状态不改变 `plan` item 本身，而是通过 `TraceEventKind::PlanLifecycleChanged` 追加到同一 session 的 `timeline_events`。事件包含 `planId`、`state`、可选 `turnId`、可选 `reason` 和 `updatedAt`；Studio 从历史 timeline 与运行完成响应中按 `planId` 折叠 latest plan state。Plan turn 完成后需要用户确认实施时，后端创建 `InteractionKind::PlanConfirmation`，前端不再从历史 timeline 自行恢复旧确认 composer。确认 resolution 固定为 `implementSameContext | implementFreshContext | continuePlanning | dismiss`，其中 same-context 只提交 `Implement the plan.`，fresh-context 才把 plan markdown 放入新 session 的 handoff prompt。
+计划的采纳与实施状态不改变 `plan` item 本身，而是通过 `TraceEventKind::PlanLifecycleChanged` 追加到同一 session 的 `timeline_events`。事件包含 `planId`、`state`、可选 `turnId`、可选 `reason` 和 `updatedAt`；Studio 从历史 timeline 与运行完成响应中按 `planId` 折叠 latest plan state。Plan turn 完成后需要用户确认实施时，后端创建 `InteractionKind::PlanConfirmation`，前端不再从历史 timeline 自行恢复旧确认 composer。确认 resolution 固定为 `implementFreshContext | continuePlanning | dismiss`，实施时新建 Auto session，并把 plan markdown 放入新 session 的 handoff prompt。
 
 Studio 前端的实时事件、`load_session_timeline` 历史 snapshot 和 `run_prompt` 完成响应必须进入同一个 timeline reducer：
 
@@ -62,6 +62,7 @@ Studio 前端的实时事件、`load_session_timeline` 历史 snapshot 和 `run_
 - 如果 `nextSequence` 落后于当前游标，则该 snapshot 只用于补齐当前状态中不存在的 item。
 - `run_prompt` 完成响应是当前 turn 的最终校准，只 upsert 返回的 items 并推进 `timelineNextSequence`，不得清空非 optimistic item。
 - `run_prompt`、`resolve_interaction` 产生的 plan lifecycle 事件必须与 timeline item 使用同一个 `timelineNextSequence` 游标规则，避免刷新后重复弹出已处理计划。interaction 状态不使用 timeline 游标恢复；前端通过 `InteractionChanged` 实时更新，并在 `bootstrap`、`select_session`、`load_session_timeline` 和 run 完成响应中从 `interactions` 表加载 pending snapshot。
+- `SkillActivated` 是 skill runtime fact 的实时通知与可追踪记录。它不渲染成普通 timeline item；Studio 收到后从后端 runtime snapshot 更新 `activeSkills`，历史恢复以结构化 session skill 表为准，而不是解析 `skill_view` 的 tool result 文本。
 - `Done` 只表示 turn 状态完成，不携带 timeline 内容；最终正文必须通过 `text` item 表达。
 - Plan Mode 的最终可执行计划必须通过 `plan` item 表达；如果模型只输出计划块而没有普通正文，不应生成空 assistant `text` item。
 

@@ -9,7 +9,7 @@ use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::records::{
     AgentSnapshotRecord, AgentTimelineEventRecord, ProjectRecord, SessionRecord,
-    SessionRuntimeRecord, TimelineEventRecord,
+    SessionRuntimeRecord, SessionSkillRecord, TimelineEventRecord,
 };
 
 pub fn project_record(model: entities::project::Model) -> ProjectRecord {
@@ -201,6 +201,20 @@ pub fn session_runtime_record(
     }
 }
 
+pub fn session_skill_record(model: entities::session_skill::Model) -> SessionSkillRecord {
+    SessionSkillRecord {
+        session_id: model.session_id,
+        skill_name: model.skill_name,
+        source: model.source,
+        path: model.path,
+        first_turn_id: model.first_turn_id,
+        last_turn_id: model.last_turn_id,
+        last_tool_call_id: model.last_tool_call_id,
+        activated_at: model.activated_at,
+        updated_at: model.updated_at,
+    }
+}
+
 pub fn default_session_runtime_record(
     session_id: &str,
     model: Option<&pl_model::ModelInfo>,
@@ -232,6 +246,7 @@ pub fn trace_event_kind_label(kind: &pl_protocol::TraceEventKind) -> &'static st
         pl_protocol::TraceEventKind::TimelineItemFailed { .. } => "TimelineItemFailed",
         pl_protocol::TraceEventKind::PlanLifecycleChanged { .. } => "PlanLifecycleChanged",
         pl_protocol::TraceEventKind::InteractionChanged { .. } => "InteractionChanged",
+        pl_protocol::TraceEventKind::SkillActivated { .. } => "SkillActivated",
         pl_protocol::TraceEventKind::EnabledToolsRecorded { .. } => "EnabledToolsRecorded",
     }
 }

@@ -37,7 +37,8 @@ pub(super) async fn forward_agent_lifecycle_events(
                 | AgentEvent::CollabWaitingEnd { .. }
                 | AgentEvent::CollabCloseBegin { .. }
                 | AgentEvent::CollabCloseEnd { .. }
-                | AgentEvent::InteractionChanged { .. }),
+                | AgentEvent::InteractionChanged { .. }
+                | AgentEvent::SkillActivated { .. }),
             ) => {
                 let _ = parent_event_tx.send(event);
             }

@@ -13,7 +13,7 @@ pub use interaction_runtime::{
 };
 pub use records::{
     AgentSnapshotRecord, AgentTimelineEventRecord, ProjectRecord, SessionRecord,
-    SessionRuntimeRecord, StudioPromptOutcome, TimelineEventRecord,
+    SessionRuntimeRecord, SessionSkillRecord, StudioPromptOutcome, TimelineEventRecord,
 };
 pub use runtime::StudioRuntime;
 pub use store::StudioStore;
@@ -25,8 +25,8 @@ mod tests {
 
     use pl_protocol::{
         AgentRuntimeDelta, AgentStatus, Message, MessageContent, MessageRole, RuntimeCostAmount,
-        TimelineItem, TimelineItemStatus, TimelineTextRole, TokenUsageSnapshot, TraceEvent,
-        TraceEventKind,
+        SkillActivation, TimelineItem, TimelineItemStatus, TimelineTextRole, TokenUsageSnapshot,
+        TraceEvent, TraceEventKind,
     };
     use pretty_assertions::assert_eq;
 
@@ -153,6 +153,7 @@ mod tests {
         let agents = store.list_agents(&session.id).await.unwrap();
         let agent_events = store.list_agent_events(&session.id).await.unwrap();
         let runtime = store.load_session_runtime(&session.id).await.unwrap();
+        let skills = store.list_session_skills(&session.id).await.unwrap();
         let reopened = store.upsert_project("C:/work/alpha").await.unwrap();
         let visible_projects = store.list_projects().await.unwrap();
         let reopened_sessions = store.list_sessions(&project.id).await.unwrap();
@@ -165,9 +166,71 @@ mod tests {
         assert_eq!(agents, Vec::<AgentSnapshotRecord>::new());
         assert_eq!(agent_events, Vec::<AgentTimelineEventRecord>::new());
         assert_eq!(runtime, None);
+        assert_eq!(skills, Vec::<SessionSkillRecord>::new());
         assert_eq!(reopened.id, project.id);
         assert_eq!(visible_projects[0].id, project.id);
         assert_eq!(reopened_sessions, Vec::<SessionRecord>::new());
+    }
+
+    #[tokio::test]
+    async fn session_skills_persist_from_skill_activation_trace_events_and_dedupe() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/alpha").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Skills", CompileMode::Auto)
+            .await
+            .unwrap();
+        let first = SkillActivation {
+            name: "skill-creator".to_string(),
+            source: "user".to_string(),
+            path: "C:/skills/skill-creator".to_string(),
+            turn_id: "turn-1".to_string(),
+            tool_call_id: "call-1".to_string(),
+            activated_at: 10,
+        };
+        let repeated = SkillActivation {
+            name: "Skill-Creator".to_string(),
+            source: "user".to_string(),
+            path: "C:/skills/skill-creator".to_string(),
+            turn_id: "turn-2".to_string(),
+            tool_call_id: "call-2".to_string(),
+            activated_at: 20,
+        };
+
+        store
+            .append_turn_records(
+                &session.id,
+                &[
+                    TraceEvent {
+                        session_id: session.id.clone(),
+                        sequence: 0,
+                        timestamp: 10,
+                        kind: TraceEventKind::SkillActivated { activation: first },
+                    },
+                    TraceEvent {
+                        session_id: session.id.clone(),
+                        sequence: 1,
+                        timestamp: 20,
+                        kind: TraceEventKind::SkillActivated {
+                            activation: repeated,
+                        },
+                    },
+                ],
+                &[],
+            )
+            .await
+            .unwrap();
+
+        let skills = store.list_session_skills(&session.id).await.unwrap();
+        let names = store.list_session_skill_names(&session.id).await.unwrap();
+
+        assert_eq!(names, vec!["Skill-Creator".to_string()]);
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].first_turn_id, "turn-1");
+        assert_eq!(skills[0].last_turn_id, "turn-2");
+        assert_eq!(skills[0].last_tool_call_id, "call-2");
+        assert_eq!(skills[0].activated_at, 10);
+        assert_eq!(skills[0].updated_at, 20);
     }
 
     #[tokio::test]

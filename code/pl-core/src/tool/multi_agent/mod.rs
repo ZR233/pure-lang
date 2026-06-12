@@ -182,6 +182,7 @@ fn json_output(value: impl Serialize) -> Result<ToolOutput, PureError> {
         output_file: std::path::PathBuf::new(),
         exit_code: None,
         timed_out: false,
+        runtime_events: Vec::new(),
     })
 }
 

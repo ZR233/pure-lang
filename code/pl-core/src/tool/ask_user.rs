@@ -137,6 +137,7 @@ impl Tool for AskUserTool {
                 output_file: PathBuf::new(),
                 exit_code: None,
                 timed_out: false,
+                runtime_events: Vec::new(),
             })
         })
     }

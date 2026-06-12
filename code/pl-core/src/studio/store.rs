@@ -3,7 +3,10 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::Result;
-use pl_protocol::{AgentRuntimeDelta, InteractionRequest, Message, RuntimeUsageSnapshot};
+use pl_protocol::{
+    AgentRuntimeDelta, InteractionRequest, Message, RuntimeUsageSnapshot, SkillActivation,
+    TraceEventKind,
+};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait, Database,
     DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Statement,
@@ -19,12 +22,13 @@ use crate::studio::ids::{new_id, new_timeline_event_id, unix_seconds};
 use crate::studio::mappers::{
     agent_runtime_snapshot_record, agent_snapshot_record, agent_timeline_event_record,
     costs_to_json, interaction_record, message_to_row_parts, project_record, row_to_message,
-    session_record, session_runtime_record, timeline_event_record, trace_event_kind_label,
+    session_record, session_runtime_record, session_skill_record, timeline_event_record,
+    trace_event_kind_label,
 };
 use crate::studio::paths::{prepare_database_switch, project_name, sqlite_url};
 use crate::studio::records::{
     AgentSnapshotRecord, AgentTimelineEventRecord, ProjectRecord, SessionRecord,
-    SessionRuntimeRecord, TimelineEventRecord,
+    SessionRuntimeRecord, SessionSkillRecord, TimelineEventRecord,
 };
 use crate::studio::store_support::{
     configure_sqlite, insert_message_with_tx, non_empty_title, run_migrations,
@@ -139,7 +143,8 @@ impl StudioStore {
     pub async fn archive_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {
         use entities::{
             agent, agent_event, agent_runtime_event, agent_runtime_snapshot, interaction, message,
-            project, session, session_runtime_snapshot, timeline_event, tool_approval,
+            project, session, session_runtime_snapshot, session_skill, timeline_event,
+            tool_approval,
         };
         let Some(project) = project::Entity::find_by_id(project_id.to_string())
             .one(&self.db)
@@ -178,6 +183,10 @@ impl StudioStore {
                 .await?;
             interaction::Entity::delete_many()
                 .filter(interaction::Column::SessionId.eq(session_id.clone()))
+                .exec(&tx)
+                .await?;
+            session_skill::Entity::delete_many()
+                .filter(session_skill::Column::SessionId.eq(session_id.clone()))
                 .exec(&tx)
                 .await?;
             agent::Entity::delete_many()
@@ -667,6 +676,7 @@ impl StudioStore {
         let tx = self.db.begin().await?;
         if !timeline_events.is_empty() {
             insert_timeline_events_with_tx(&tx, timeline_events).await?;
+            upsert_session_skill_events_with_tx(&tx, timeline_events).await?;
         }
         if !messages.is_empty() {
             let now = unix_seconds();
@@ -688,10 +698,42 @@ impl StudioStore {
         let tx = self.db.begin().await?;
         if !timeline_events.is_empty() {
             insert_timeline_events_with_tx(&tx, timeline_events).await?;
+            upsert_session_skill_events_with_tx(&tx, timeline_events).await?;
         }
         replace_session_messages_with_tx(&tx, session_id, messages).await?;
         tx.commit().await?;
         Ok(())
+    }
+
+    pub async fn upsert_session_skill(
+        &self,
+        session_id: &str,
+        activation: &SkillActivation,
+    ) -> Result<()> {
+        let tx = self.db.begin().await?;
+        upsert_session_skill_with_tx(&tx, session_id, activation).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn list_session_skills(&self, session_id: &str) -> Result<Vec<SessionSkillRecord>> {
+        use entities::session_skill;
+        let rows = session_skill::Entity::find()
+            .filter(session_skill::Column::SessionId.eq(session_id.to_string()))
+            .order_by_desc(session_skill::Column::UpdatedAt)
+            .order_by_asc(session_skill::Column::SkillNameKey)
+            .all(&self.db)
+            .await?;
+        Ok(rows.into_iter().map(session_skill_record).collect())
+    }
+
+    pub async fn list_session_skill_names(&self, session_id: &str) -> Result<Vec<String>> {
+        Ok(self
+            .list_session_skills(session_id)
+            .await?
+            .into_iter()
+            .map(|skill| skill.skill_name)
+            .collect())
     }
 
     pub async fn load_timeline_events(
@@ -1010,6 +1052,64 @@ async fn insert_timeline_events_with_tx(
         .collect();
     timeline_event::Entity::insert_many(models).exec(tx).await?;
     Ok(())
+}
+
+async fn upsert_session_skill_events_with_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    timeline_events: &[TraceEvent],
+) -> Result<()> {
+    for event in timeline_events {
+        if let TraceEventKind::SkillActivated { activation } = &event.kind {
+            upsert_session_skill_with_tx(tx, &event.session_id, activation).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn upsert_session_skill_with_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    session_id: &str,
+    activation: &SkillActivation,
+) -> Result<()> {
+    use entities::session_skill;
+    let skill_name_key = activation.name.to_ascii_lowercase();
+    let id = session_skill_id(session_id, &activation.name);
+    let existing = session_skill::Entity::find()
+        .filter(session_skill::Column::SessionId.eq(session_id.to_string()))
+        .filter(session_skill::Column::SkillNameKey.eq(skill_name_key.clone()))
+        .one(tx)
+        .await?;
+    if let Some(row) = existing {
+        let mut active: session_skill::ActiveModel = row.into();
+        active.skill_name = Set(activation.name.clone());
+        active.source = Set(activation.source.clone());
+        active.path = Set(activation.path.clone());
+        active.last_turn_id = Set(activation.turn_id.clone());
+        active.last_tool_call_id = Set(activation.tool_call_id.clone());
+        active.updated_at = Set(activation.activated_at);
+        active.update(tx).await?;
+    } else {
+        session_skill::ActiveModel {
+            id: Set(id),
+            session_id: Set(session_id.to_string()),
+            skill_name: Set(activation.name.clone()),
+            skill_name_key: Set(skill_name_key),
+            source: Set(activation.source.clone()),
+            path: Set(activation.path.clone()),
+            first_turn_id: Set(activation.turn_id.clone()),
+            last_turn_id: Set(activation.turn_id.clone()),
+            last_tool_call_id: Set(activation.tool_call_id.clone()),
+            activated_at: Set(activation.activated_at),
+            updated_at: Set(activation.activated_at),
+        }
+        .insert(tx)
+        .await?;
+    }
+    Ok(())
+}
+
+fn session_skill_id(session_id: &str, skill_name: &str) -> String {
+    format!("{session_id}:{}", skill_name.to_ascii_lowercase())
 }
 
 async fn replace_session_messages_with_tx(

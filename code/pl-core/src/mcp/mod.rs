@@ -552,6 +552,7 @@ impl Tool for McpToolAdapter {
                 output_file: PathBuf::new(),
                 exit_code: None,
                 timed_out: false,
+                runtime_events: Vec::new(),
             })
         })
     }

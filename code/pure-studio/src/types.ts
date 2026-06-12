@@ -429,7 +429,6 @@ export type InteractionPayload =
 
 export type ToolApprovalResolution = "approved" | "denied";
 export type PlanConfirmationResolution =
-  | "implementSameContext"
   | "implementFreshContext"
   | "continuePlanning"
   | "dismiss";
@@ -636,6 +635,7 @@ export type AgentEvent =
   | { interactionChanged: { event: InteractionChangedEvent } }
   | { agentStateChanged: AgentStateChangedEvent }
   | { agentRuntimeUpdated: { delta: AgentRuntimeDelta } }
+  | { skillActivated: { activation: SkillActivation } }
   | { turnInterrupted: { reason: string } }
   | {
       turnBudgetLimited: {
@@ -680,6 +680,15 @@ export type AgentRuntimeDelta = {
   estimatedCosts: RuntimeCostAmount[];
   hasUnpricedUsage: boolean;
   updatedAt: number;
+};
+
+export type SkillActivation = {
+  name: string;
+  source: string;
+  path: string;
+  turnId: string;
+  toolCallId: string;
+  activatedAt: number;
 };
 
 export type AgentEventPayload = {

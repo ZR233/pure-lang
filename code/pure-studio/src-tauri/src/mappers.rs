@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 use pl_core::{
     BuiltinMcpServerState, ConfigStore, LspServerSnapshot, McpAvailabilityKind,
@@ -10,7 +10,6 @@ use pl_core::{
     StudioRuntime, TraceEvent, TraceEventKind, TurnResultStatus, ZhipuQuotaWindow,
     builtin_mcp_server_ids, effective_mcp_servers, infer_provider_template_kind,
 };
-use pl_protocol::{Message, MessageContent, MessageRole};
 
 use crate::dto::{
     AgentDto, AgentEventDto, ConfigDto, DeepSeekBalanceDto, DeepSeekBalanceInfoDto,
@@ -117,10 +116,10 @@ pub async fn load_session_runtime_dto(
     session_id: &str,
 ) -> CommandResult<SessionRuntimeDto> {
     let record = studio.session_runtime(session_id).await?;
-    let messages = studio.store().load_messages(session_id).await?;
+    let active_skills = studio.store().list_session_skill_names(session_id).await?;
     Ok(session_runtime_dto(
         record,
-        active_skill_names_from_messages(&messages),
+        active_skills,
         studio.mcp_runtime().available_server_names().await,
         studio.lsp_runtime().active_server_names().await,
     ))
@@ -241,41 +240,6 @@ fn key_value_dtos(values: &BTreeMap<String, String>) -> Vec<KeyValueDto> {
             value: value.clone(),
         })
         .collect()
-}
-
-fn active_skill_names_from_messages(messages: &[Message]) -> Vec<String> {
-    let mut skills = Vec::new();
-    let mut seen = HashSet::new();
-    for message in messages {
-        if message.role != MessageRole::Tool {
-            continue;
-        }
-        if message.metadata.get("tool_name").map(String::as_str) != Some("skill_view") {
-            continue;
-        }
-        let MessageContent::Text(content) = &message.content else {
-            continue;
-        };
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(content) else {
-            continue;
-        };
-        if value.get("success").and_then(serde_json::Value::as_bool) != Some(true) {
-            continue;
-        }
-        let Some(name) = value
-            .get("skill")
-            .and_then(|skill| skill.get("name"))
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-        else {
-            continue;
-        };
-        if seen.insert(name.to_ascii_lowercase()) {
-            skills.push(name.to_string());
-        }
-    }
-    skills
 }
 
 pub fn runtime_usage_dto(usage: pl_core::RuntimeUsageSnapshot) -> RuntimeUsageDto {
@@ -772,6 +736,7 @@ pub fn timeline_events_to_items(events: &[TraceEvent]) -> Vec<pl_protocol::Timel
             }
             TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
+            | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => {}
         }
     }
@@ -1006,7 +971,6 @@ fn optional_non_empty(value: Option<String>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::path::PathBuf;
 
     use pl_core::{
@@ -1276,79 +1240,6 @@ mod tests {
             Some("LSP server error -32603: url is not a file".to_string())
         );
         assert_eq!(dto.last_error_at, Some(456));
-    }
-
-    #[test]
-    fn active_skill_names_from_messages_extracts_successful_skill_view_results() {
-        let messages = vec![
-            tool_result_message(
-                "skill_view",
-                r#"{
-                    "success": true,
-                    "skill": {"name": "skill-creator"},
-                    "filePath": "SKILL.md",
-                    "content": "body"
-                }"#,
-            ),
-            tool_result_message(
-                "skill_view",
-                r#"{
-                    "success": true,
-                    "skill": {"name": "subagent-workflow"},
-                    "filePath": "references/example.md",
-                    "content": "reference"
-                }"#,
-            ),
-        ];
-
-        let skills = active_skill_names_from_messages(&messages);
-
-        assert_eq!(skills, vec!["skill-creator", "subagent-workflow"]);
-    }
-
-    #[test]
-    fn active_skill_names_from_messages_dedupes_and_ignores_non_active_results() {
-        let messages = vec![
-            tool_result_message(
-                "skill_view",
-                r#"{"success":true,"skill":{"name":"skill-creator"},"content":"body"}"#,
-            ),
-            tool_result_message(
-                "skill_view",
-                r#"{"success":true,"skill":{"name":"Skill-Creator"},"content":"body again"}"#,
-            ),
-            tool_result_message("skills_list", r#"{"success":true,"skills":[]}"#),
-            tool_result_message(
-                "skill_view",
-                r#"{"success":false,"skill":{"name":"failed-skill"}}"#,
-            ),
-            tool_result_message("skill_view", "not json"),
-            assistant_message("plain answer"),
-        ];
-
-        let skills = active_skill_names_from_messages(&messages);
-
-        assert_eq!(skills, vec!["skill-creator"]);
-    }
-
-    fn tool_result_message(tool_name: &str, content: &str) -> Message {
-        let mut metadata = HashMap::new();
-        metadata.insert("tool_name".to_string(), tool_name.to_string());
-        Message {
-            role: MessageRole::Tool,
-            content: MessageContent::Text(content.to_string()),
-            reasoning_content: None,
-            metadata,
-        }
-    }
-
-    fn assistant_message(content: &str) -> Message {
-        Message {
-            role: MessageRole::Assistant,
-            content: MessageContent::Text(content.to_string()),
-            reasoning_content: None,
-            metadata: HashMap::new(),
-        }
     }
 
     #[test]

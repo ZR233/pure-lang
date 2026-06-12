@@ -349,6 +349,7 @@ fn tool_call_count(timeline_events: &[TraceEvent]) -> u32 {
             | TraceEventKind::TimelineItemFailed { .. }
             | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
+            | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => false,
         })
         .count() as u32

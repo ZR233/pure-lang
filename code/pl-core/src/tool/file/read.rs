@@ -90,6 +90,7 @@ impl Tool for ReadFileTool {
                 output_file: PathBuf::new(),
                 exit_code: Some(0),
                 timed_out: false,
+                runtime_events: Vec::new(),
             })
         })
     }
