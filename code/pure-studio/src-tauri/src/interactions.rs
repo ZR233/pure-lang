@@ -3,9 +3,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use pl_core::{InteractionEmitter, InteractionRequest, StudioRuntime};
 use pl_protocol::InteractionChangedEvent;
-use tauri::{AppHandle, Emitter};
-
-use crate::dto::InteractionChangedPayload;
+use tauri::AppHandle;
 
 pub fn interaction_emitter(
     studio: StudioRuntime,
@@ -23,8 +21,8 @@ pub fn interaction_emitter(
 }
 
 pub async fn emit_interaction_changed(
-    _studio: &StudioRuntime,
-    app: &AppHandle,
+    studio: &StudioRuntime,
+    _app: &AppHandle,
     fallback_session_id: &str,
     interaction: &InteractionRequest,
 ) -> Result<()> {
@@ -33,12 +31,12 @@ pub async fn emit_interaction_changed(
     } else {
         interaction.scope.session_id.clone()
     };
-    let payload = InteractionChangedPayload {
-        session_id: session_id.clone(),
-        event: InteractionChangedEvent {
-            interaction: interaction.clone(),
-        },
+    let event = InteractionChangedEvent {
+        interaction: interaction.clone(),
     };
-    let _ = app.emit("studio-interaction-changed", payload);
+    let _ = studio
+        .events()
+        .emit_interaction(&session_id, event.clone())
+        .await;
     Ok(())
 }

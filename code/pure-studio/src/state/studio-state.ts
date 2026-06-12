@@ -21,6 +21,9 @@ import type {
   SessionRecord,
   SessionRuntime,
   SessionSelectionPayload,
+  StudioEventEnvelope,
+  StudioTimelineChange,
+  StudioTurnStatus,
   TimelineItem,
   TimelineItemDeltaEvent,
   TurnPhase,
@@ -119,6 +122,7 @@ export type StudioAction =
   | { type: "mcpHealthUpdated"; payload: McpHealthUpdatedPayload }
   | { type: "lspHealthUpdated"; payload: LspHealthUpdatedPayload }
   | { type: "interactionChanged"; payload: InteractionChangedPayload; status?: string }
+  | { type: "studioEvent"; envelope: StudioEventEnvelope; status?: string }
   | {
       type: "planLifecycleLoaded";
       sessionId: string;
@@ -432,29 +436,13 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         status: action.status ?? state.status,
       };
     case "mcpHealthUpdated":
-      return {
-        ...state,
-        mcpServers: mergeMcpServers(state.mcpServers, action.payload.mcpServers),
-        sessionRuntime: state.sessionRuntime
-          ? {
-              ...state.sessionRuntime,
-              activeMcpServers: action.payload.activeMcpServers,
-            }
-          : state.sessionRuntime,
-      };
+      return reduceMcpHealthChanged(state, action.payload);
     case "lspHealthUpdated":
-      return {
-        ...state,
-        lspServers: action.payload.lspServers,
-        sessionRuntime: state.sessionRuntime
-          ? {
-              ...state.sessionRuntime,
-              activeLspServers: action.payload.activeLspServers,
-            }
-          : state.sessionRuntime,
-      };
+      return reduceLspHealthChanged(state, action.payload);
     case "interactionChanged":
       return reduceInteractionChanged(state, action.payload, action.status);
+    case "studioEvent":
+      return reduceStudioEvent(state, action.envelope, action.status);
     case "planLifecycleLoaded":
       if (action.sessionId !== state.selectedSessionId) {
         return state;
@@ -560,6 +548,269 @@ function reduceInteractionChanged(
     status: status ?? state.status,
     turnPhase: phaseForInteraction(interaction, state.turnPhase),
   };
+}
+
+function reduceStudioEvent(
+  state: StudioState,
+  envelope: StudioEventEnvelope,
+  status?: string,
+): StudioState {
+  const eventSessionId = envelope.sessionId ?? null;
+  const kind = envelope.kind;
+  if (kind.type === "sessionListChanged") {
+    return {
+      ...state,
+      sessions: sessionList(kind.sessions),
+      status: status ?? state.status,
+    };
+  }
+  if (kind.type === "sessionHandoffChanged") {
+    return reduceSessionHandoffEvent(state, kind.handoff, status);
+  }
+  if (eventSessionId && eventSessionId !== state.selectedSessionId) {
+    return state;
+  }
+  switch (kind.type) {
+    case "turnChanged":
+      return reduceTurnChanged(state, kind.turn.status, kind.turn.reason, status);
+    case "timelineChanged":
+      return reduceTimelineChanged(state, kind.change, status);
+    case "interactionChanged":
+      return reduceInteractionChanged(
+        state,
+        {
+          sessionId: eventSessionId ?? kind.event.interaction.scope.sessionId,
+          event: kind.event,
+        },
+        status,
+      );
+    case "agentChanged":
+      return reduceStructuredAgentPayload(state, kind.agent.payload, status);
+    case "agentTimelineChanged":
+      return reduceStructuredAgentPayload(state, kind.event.payload, status);
+    case "sessionRuntimeChanged":
+      return reduceStructuredRuntimePayload(state, kind.runtime.payload, status);
+    case "skillActivated":
+      return reduceSkillActivated(state, kind.activation.name, status);
+    case "planLifecycleChanged":
+      return {
+        ...state,
+        planStates: mergePlanStates(state.planStates, [
+          {
+            planId: kind.event.planId,
+            state: kind.event.state,
+            turnId: kind.event.turnId ?? null,
+            reason: kind.event.reason ?? null,
+            updatedAt: kind.event.updatedAt,
+          },
+        ]),
+        status: status ?? state.status,
+      };
+    case "mcpHealthChanged":
+      return reduceMcpHealthChanged(state, kind.health.payload);
+    case "lspHealthChanged":
+      return reduceLspHealthChanged(state, kind.health.payload);
+    case "stale":
+      return {
+        ...state,
+        status: status ?? state.status,
+      };
+  }
+}
+
+function reduceSessionHandoffEvent(
+  state: StudioState,
+  handoff: Extract<StudioEventEnvelope["kind"], { type: "sessionHandoffChanged" }>["handoff"],
+  status?: string,
+): StudioState {
+  if (state.selectedSessionId !== handoff.originSessionId && state.selectedSessionId !== handoff.targetSessionId) {
+    return state;
+  }
+  const now = Date.now();
+  const sessions = state.sessions
+    .map((session) =>
+      session.id === handoff.originSessionId
+        ? { ...session, visibility: "handoffOrigin" as const, updatedAt: handoff.updatedAt }
+        : session,
+    )
+    .filter((session) => session.visibility === "active" || session.id === handoff.targetSessionId);
+  const targetExists = sessions.some((session) => session.id === handoff.targetSessionId);
+  const nextSessions = targetExists
+    ? sessions
+    : sessionList([
+        {
+          id: handoff.targetSessionId,
+          projectId: state.selectedProjectId ?? "",
+          title: "实施计划",
+          mode: "auto",
+          updatedAt: handoff.updatedAt,
+          visibility: "active",
+        },
+        ...sessions,
+      ]);
+  const switched = state.selectedSessionId !== handoff.targetSessionId;
+  const nextState: StudioState = {
+    ...state,
+    sessions: sessionList(nextSessions),
+    selectedSessionId: handoff.targetSessionId,
+    agentTimelineEvents: switched ? [] : state.agentTimelineEvents,
+    agents: switched ? [] : state.agents,
+    sessionRuntime: switched ? null : state.sessionRuntime,
+    ...(switched ? emptyTimelineState() : {}),
+    ...interactionState(
+      switched ? new Map() : state.interactions,
+      [],
+      handoff.targetSessionId,
+      handoff.status === "running" || handoff.status === "pending",
+    ),
+    planStates: switched ? new Map<string, PlanState>() : state.planStates,
+    dismissedPlanId: switched ? null : state.dismissedPlanId,
+    currentRunTimelineBaseSequence: switched ? 0 : state.currentRunTimelineBaseSequence,
+    isBusy: handoff.status === "running" || handoff.status === "pending" || state.isBusy,
+    turnPhase: handoff.status === "failed" ? "failed" : handoff.status === "cancelled" ? "interrupted" : "running",
+    turnStartedAt: state.turnStartedAt ?? now,
+    status: status ?? state.status,
+  };
+  return switched ? appendOptimisticWaiting(nextState, now) : nextState;
+}
+
+function reduceTurnChanged(
+  state: StudioState,
+  status: StudioTurnStatus,
+  reason: string | null | undefined,
+  statusText?: string,
+): StudioState {
+  const turnPhase = phaseForStudioTurnStatus(status);
+  const terminal = isTerminalStudioTurnStatus(status);
+  const base = terminal ? removeOptimisticWaitingTimelineItems(state) : state;
+  return {
+    ...base,
+    isBusy: terminal ? false : true,
+    turnPhase,
+    turnStartedAt: terminal ? null : state.turnStartedAt ?? Date.now(),
+    status: reason ? reason : statusText ?? state.status,
+    activeInteractionId: selectActiveInteractionId(
+      base.interactions,
+      base.selectedSessionId,
+      terminal ? false : true,
+    ),
+    currentRunTimelineBaseSequence: terminal ? null : state.currentRunTimelineBaseSequence,
+  };
+}
+
+function reduceTimelineChanged(
+  state: StudioState,
+  change: StudioTimelineChange,
+  status?: string,
+): StudioState {
+  const event = agentEventFromTimelineChange(change);
+  const base = applyOptimisticTimelineCleanup(state, event);
+  return reduceAgentEvent(base, event, status ?? state.status);
+}
+
+function reduceStructuredAgentPayload(
+  state: StudioState,
+  payload: unknown,
+  status?: string,
+): StudioState {
+  if (!isRecord(payload)) {
+    return { ...state, status: status ?? state.status };
+  }
+  if (isAgentDto(payload)) {
+    return {
+      ...state,
+      agents: mergeAgents(state.agents, [payload]),
+      status: status ?? state.status,
+    };
+  }
+  if (isAgentTimelineEvent(payload)) {
+    return {
+      ...state,
+      agentTimelineEvents: mergeAgentTimelineEvents(state.agentTimelineEvents, [payload]),
+      status: status ?? state.status,
+    };
+  }
+  if ("agentStateChanged" in payload) {
+    return reduceAgentEvent(state, payload as AgentEvent, status ?? state.status);
+  }
+  if ("agentRuntimeUpdated" in payload) {
+    return reduceAgentEvent(state, payload as AgentEvent, status ?? state.status);
+  }
+  return { ...state, status: status ?? state.status };
+}
+
+function reduceStructuredRuntimePayload(
+  state: StudioState,
+  payload: unknown,
+  status?: string,
+): StudioState {
+  if (isSessionRuntime(payload)) {
+    return {
+      ...state,
+      sessionRuntime: payload,
+      status: status ?? state.status,
+    };
+  }
+  return reduceStructuredAgentPayload(state, payload, status);
+}
+
+function reduceSkillActivated(state: StudioState, name: string, status?: string): StudioState {
+  if (!state.sessionRuntime || state.sessionRuntime.activeSkills.includes(name)) {
+    return { ...state, status: status ?? state.status };
+  }
+  return {
+    ...state,
+    sessionRuntime: {
+      ...state.sessionRuntime,
+      activeSkills: [...state.sessionRuntime.activeSkills, name],
+    },
+    status: status ?? state.status,
+  };
+}
+
+function reduceMcpHealthChanged(state: StudioState, payload: McpHealthUpdatedPayload): StudioState {
+  return {
+    ...state,
+    mcpServers: mergeMcpServers(state.mcpServers, payload.mcpServers),
+    sessionRuntime: state.sessionRuntime
+      ? {
+          ...state.sessionRuntime,
+          activeMcpServers: payload.activeMcpServers,
+        }
+      : state.sessionRuntime,
+  };
+}
+
+function reduceLspHealthChanged(state: StudioState, payload: LspHealthUpdatedPayload): StudioState {
+  return {
+    ...state,
+    lspServers: payload.lspServers,
+    sessionRuntime: state.sessionRuntime
+      ? {
+          ...state.sessionRuntime,
+          activeLspServers: payload.activeLspServers,
+        }
+      : state.sessionRuntime,
+  };
+}
+
+function agentEventFromTimelineChange(change: StudioTimelineChange): AgentEvent {
+  switch (change.type) {
+    case "started":
+      return { timelineItemStarted: { item: change.item } };
+    case "delta":
+      return { timelineItemDelta: { event: change.event } };
+    case "completed":
+      return { timelineItemCompleted: { sequence: change.sequence, item: change.item } };
+    case "failed":
+      return {
+        timelineItemFailed: {
+          sequence: change.sequence,
+          item: change.item,
+          error: change.error,
+        },
+      };
+  }
 }
 
 function clearSessionInteractions(
@@ -1028,4 +1279,82 @@ export function phaseForTurnStatus(status: TurnStatus): TurnPhase {
     case "aborted":
       return "interrupted";
   }
+}
+
+function phaseForStudioTurnStatus(status: StudioTurnStatus): TurnPhase {
+  switch (status) {
+    case "queued":
+    case "contextLoading":
+    case "waitingForModel":
+    case "streaming":
+    case "persisting":
+      return "running";
+    case "waitingForInteraction":
+      return "userInput";
+    case "runningTool":
+      return "tool";
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "interrupted";
+  }
+}
+
+function isTerminalStudioTurnStatus(status: StudioTurnStatus): boolean {
+  switch (status) {
+    case "completed":
+    case "failed":
+    case "cancelled":
+      return true;
+    case "queued":
+    case "contextLoading":
+    case "waitingForModel":
+    case "streaming":
+    case "waitingForInteraction":
+    case "runningTool":
+    case "persisting":
+      return false;
+  }
+}
+
+function isSessionRuntime(value: unknown): value is SessionRuntime {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.sessionId === "string" &&
+    Array.isArray(value.activeSkills) &&
+    Array.isArray(value.activeMcpServers) &&
+    Array.isArray(value.activeLspServers) &&
+    isRecord(value.usage)
+  );
+}
+
+function isAgentDto(value: unknown): value is AgentDto {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.id === "string" &&
+    typeof value.sessionId === "string" &&
+    typeof value.path === "string" &&
+    typeof value.role === "string" &&
+    typeof value.task === "string" &&
+    typeof value.status === "string" &&
+    typeof value.depth === "number"
+  );
+}
+
+function isAgentTimelineEvent(value: unknown): value is AgentTimelineEvent {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.eventId === "string" &&
+    typeof value.sessionId === "string" &&
+    typeof value.sequence === "number" &&
+    typeof value.kind === "string"
+  );
 }

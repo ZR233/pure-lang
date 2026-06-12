@@ -167,6 +167,51 @@ pub mod timeline_event {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
+pub mod studio_event {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "studio_events")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub project_id: Option<String>,
+        pub session_id: Option<String>,
+        pub turn_id: Option<String>,
+        pub sequence: i64,
+        pub created_at: i64,
+        pub kind: String,
+        pub payload_json: String,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod turn {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "turns")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub session_id: String,
+        pub status: String,
+        pub reason: Option<String>,
+        pub created_at: i64,
+        pub updated_at: i64,
+        pub completed_at: Option<i64>,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 pub mod interaction {
     use super::*;
 

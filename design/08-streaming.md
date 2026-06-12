@@ -2,7 +2,7 @@
 
 ## 8.1 统一 Timeline 层
 
-`AgentEvent` 定义在 `pl-protocol`，是系统统一输出通道。Studio 主界面只消费 item-first timeline 事件，不再消费旧的文本、思考或工具 delta。
+`AgentEvent` 定义在 `pl-protocol`，是核心 turn 与 provider/tool 之间的内部输出通道。Studio 对外只消费 `StudioEventEnvelope`，其中 timeline 变化以 `StudioEventKind::TimelineChanged` 包装 item-first timeline 事件；旧的文本、思考或工具 delta 不是 Studio 协议入口。
 
 实时 timeline 协议固定为：
 
@@ -25,7 +25,7 @@ timeline item 类型固定为：
 
 每个 turn 被接收后，用户输入必须作为该 turn 的第一个可见 timeline item 记录和广播。enabled tools、`turn`、`inference` 等内部诊断或运行态 item 不得在 sequence 上排到用户输入之前，避免前端等待状态、内部状态或历史回放出现在用户问题上方。
 
-历史加载和运行完成响应必须暴露 `nextSequence`/`timelineNextSequence` 作为事件游标。前端只能用该事件游标判断 snapshot 新旧，不能用 item 列表里的最大 `sequence` 代替游标。旧 snapshot 只能补齐缺失 item，不能覆盖已经通过实时事件或更新响应接收的新 turn 内容。该游标只由后端持久化 timeline 推进；前端 optimistic item 可以使用临时本地顺序参与展示，但不得预占或推进 `timelineNextSequence`。
+历史加载必须暴露 `nextSequence`/`timelineNextSequence` 作为 timeline projection 游标；Studio runtime 事件另有 `StudioEventEnvelope.sequence` 作为补拉 cursor。前端只能用后端游标判断 snapshot 新旧，不能用 item 列表里的最大 `sequence` 代替游标。旧 snapshot 只能补齐缺失 item，不能覆盖已经通过实时事件接收的新 turn 内容。前端 optimistic item 可以使用临时本地顺序参与展示，但不得预占或推进后端 cursor。
 
 ## 8.2 数据流
 
@@ -34,19 +34,20 @@ pl-model provider
   → async-openai stream
   → protocol stream event mapper
   → provider-independent stream accumulator
-  → AgentEventSender
-  → pl-core TimelineRecorder 汇总 TurnResult
-  → pure-studio 实时 upsert
+  → AgentEventSender / TraceRecorder
+  → StudioEventRuntime 持久化 studio_events + projection
+  → Tauri studio-runtime-event
+  → studioEventReducer
 ```
 
-`pure-studio` 订阅同一 `AgentEventReceiver`，并通过 Tauri event 把事件转换为 React reducer action：
+`pure-studio` 不直接订阅 `AgentEventReceiver`。Tauri bridge 只转发已经持久化的 `StudioEventEnvelope`；前端 reducer 按事件 kind 更新当前或后台 session view：
 
-- `TimelineItemStarted` 插入 item 并记录首次顺序。
-- `TimelineItemDelta` 按 `itemId` 追加文本、思考 chunk 或工具参数。
-- `TimelineItemCompleted` 用最终 snapshot 覆盖同一 item。
-- `TimelineItemFailed` 标记同一 item 失败并保留错误。
-- `AgentStateChanged` 展示 agent 路径、状态、角色、任务摘要、最终摘要或错误。
-- `Error` 渲染为可恢复或致命错误提示。
+- `timelineChanged` 插入、delta、完成或失败同一个 item，并记录首次顺序。
+- `turnChanged` 更新 queued、contextLoading、waitingForModel、streaming、runningTool、waitingForInteraction、persisting、completed、failed、cancelled。
+- `interactionChanged` 更新 footer 交互状态。
+- `agentChanged` / `agentTimelineChanged` 分别更新 latest snapshot 与 append-only 协作事件。
+- `sessionRuntimeChanged`、`skillActivated`、`mcpHealthChanged`、`lspHealthChanged` 即时更新状态栏。
+- `sessionHandoffChanged` 与 `sessionListChanged` 驱动 Plan 实施会话切换和列表可见性。
 
 `TextDelta`、`ThinkingDelta`、`ToolCallDelta`、`ToolCallComplete` 不再是 Studio 的协议或兼容入口。
 
@@ -54,14 +55,14 @@ pl-model provider
 
 Plan Mode 下模型输出的 `<proposed_plan>...</proposed_plan>` 块由 `pl-model::stream` accumulator 提取为 `plan` item。计划正文复用 `TimelineItem.content`，增量使用 `TimelineDelta::Plan`；同一块内容不得同时出现在普通 assistant `text` item 中。计划块之外的普通文本仍按 assistant `text` item 流式输出。
 
-计划的采纳与实施状态不改变 `plan` item 本身，而是通过 `TraceEventKind::PlanLifecycleChanged` 追加到计划来源 session 的 `timeline_events`。事件包含 `planId`、`state`、可选 `turnId`、可选 `reason` 和 `updatedAt`；Studio 从历史 timeline 与运行完成响应中按 `planId` 折叠 latest plan state。Plan turn 完成后需要用户确认实施时，后端创建 `InteractionKind::PlanConfirmation`，前端不再从历史 timeline 自行恢复旧确认 composer。确认 resolution 固定为 `implementFreshContext | continuePlanning | dismiss`；`continuePlanning` 的 `content` 是确认 composer 同次提交的用户补充内容，resolution 成功后由前端立即作为普通 prompt 发送；实施时后端创建显式 session handoff，新 Auto session 承载 fresh context 和 handoff prompt，来源 session 保持可恢复但不再作为活跃 session 列表项展示。后端必须在实施 turn 启动前广播 handoff started snapshot，使 Studio 先切到目标 session 并接收后续实时 `studio-agent-event`，不得等最终 `RunPromptResponse` 才展示实施过程。
+计划的采纳与实施状态不改变 `plan` item 本身，而是通过 `TraceEventKind::PlanLifecycleChanged` 追加到计划来源 session 的 `timeline_events`。事件包含 `planId`、`state`、可选 `turnId`、可选 `reason` 和 `updatedAt`；Studio 从历史 timeline 与 `StudioEventKind::PlanLifecycleChanged` 中按 `planId` 折叠 latest plan state。Plan turn 完成后需要用户确认实施时，后端创建 `InteractionKind::PlanConfirmation`，前端不再从历史 timeline 自行恢复旧确认 composer。确认 resolution 固定为 `implementFreshContext | continuePlanning | dismiss`；`continuePlanning` 的 `content` 是确认 composer 同次提交的用户补充内容，resolution 成功后由前端立即作为普通 prompt 发送；实施时后端创建显式 session handoff，新 Auto session 承载 fresh context 和 handoff prompt，来源 session 保持可恢复但不再作为活跃 session 列表项展示。后端必须在实施 turn 启动前广播 `sessionHandoffChanged`，使 Studio 先切到目标 session 并接收后续实时 `studio-runtime-event`，不得等后台 run 完成才展示实施过程。
 
-Studio 前端的实时事件、`load_session_timeline` 历史 snapshot 和 `run_prompt` 完成响应必须进入同一个 timeline reducer：
+Studio 前端的实时事件、`load_session_timeline` 历史 snapshot 和 `load_studio_events` 补拉结果必须进入同一个 timeline reducer：
 
 - `load_session_timeline` 是可替换 snapshot，但只有当 `nextSequence` 不落后于当前游标时才能覆盖已有 snapshot。
 - 如果 `nextSequence` 落后于当前游标，则该 snapshot 只用于补齐当前状态中不存在的 item。
-- `run_prompt` 完成响应是当前 turn 的最终校准，只 upsert 返回的 items 并推进 `timelineNextSequence`，不得清空非 optimistic item。
-- `run_prompt`、`resolve_interaction` 产生的 plan lifecycle 事件必须与 timeline item 使用同一个 `timelineNextSequence` 游标规则，避免刷新后重复弹出已处理计划。interaction 状态不使用 timeline 游标恢复；前端通过 `InteractionChanged` 实时更新，并在 `bootstrap`、`select_session`、`load_session_timeline` 和 run 完成响应中从 `interactions` 表加载 pending snapshot。
+- `submit_prompt` 与触发实施的 `resolve_interaction` 不返回最终 timeline；它们只返回提交成功、目标 `sessionId/turnId/cursor`。
+- Plan lifecycle 与 interaction 状态均通过 `StudioEvent` 实时更新，并在 `bootstrap`、`select_session`、`load_session_state` 和 `load_studio_events` 中恢复。
 - `SkillActivated` 是 skill runtime fact 的实时通知与可追踪记录。它不渲染成普通 timeline item；Studio 收到后从后端 runtime snapshot 更新 `activeSkills`，历史恢复以结构化 session skill 表为准，而不是解析 `skill_view` 的 tool result 文本。
 - `Done` 只表示 turn 状态完成，不携带 timeline 内容；最终正文必须通过 `text` item 表达。
 - Plan Mode 的最终可执行计划必须通过 `plan` item 表达；如果模型只输出计划块而没有普通正文，不应生成空 assistant `text` item。
@@ -70,15 +71,15 @@ Studio 渲染可以在 selector 派生出展示项后使用虚拟滚动优化大
 
 ## 8.3 背压与容量
 
-事件通道使用 `tokio::sync::broadcast`。默认容量由调用方创建，目前建议为 `256`。
+内部事件通道可以继续使用 `tokio::sync::broadcast`，但 Studio 对外语义是持久事件流。默认容量由调用方创建，目前建议为 `256`。
 
-高频 delta 允许通过 broadcast 丢失实时帧，但 turn 最终的 timeline event 集合必须随消息一起批量落库。`TimelineItemCompleted` 携带最终 snapshot，历史加载不依赖实时 delta 是否完整到达前端。只要 turn 最终有 assistant 正文，最终 timeline 集合中必须存在 completed assistant `text` item；不能只把正文写到 `turn` trace item。
+高频 delta 可以在 broadcast 层 lag，但不能静默丢失 Studio 状态：每个 `StudioEvent` 必须先写入 `studio_events` 和 projection，再广播。前端发现 sequence 缺口或收到 stale 事件时调用 `load_studio_events(sessionId, afterSequence, limit)` 补齐。`TimelineItemCompleted` 携带最终 snapshot，历史加载不依赖实时 delta 是否完整到达前端。只要 turn 最终有 assistant 正文，最终 timeline 集合中必须存在 completed assistant `text` item；不能只把正文写到 `turn` trace item。
 
 ## 8.4 事件边界
 
 事件类型属于协议层，不应包含 provider 私有结构，也不应绑定具体前端。工具审批事件只承载通用工具名、参数和审批结果，不包含 Tauri、React 或桌面端私有状态。
 
-`InteractionChanged` 是审批、用户输入和计划确认的唯一实时交互事件。事件携带 `InteractionRequest`，包括 `kind`、`status`、`scope` 和类型化 payload；持久恢复以 `interactions` 表为准。`userInput` 的 resolved 事件不回传 secret 答案明文到普通 timeline 展示；答案只通过 interaction resolution 返回给等待中的工具。旧 `UserInputRequested` / `UserInputAnswered` 与 `ToolApprovalRequested` 等事件不是 Studio 协议入口，不再由核心层发出。
+`StudioEventKind::InteractionChanged` 是审批、用户输入和计划确认的唯一实时交互事件。事件携带 `InteractionRequest`，包括 `kind`、`status`、`scope` 和类型化 payload；持久恢复以 `interactions` 表为准。`userInput` 的 resolved 事件不回传 secret 答案明文到普通 timeline 展示；答案只通过 interaction resolution 返回给等待中的工具。旧 `UserInputRequested` / `UserInputAnswered`、`ToolApprovalRequested`、`studio-interaction-changed` 等 sideband 不是 Studio 协议入口。
 
 子代理内部事件不直接转发完整文本流、思考流、工具调用流或工具输出。`pl-core` 将子代理生命周期压缩为 `agent` timeline item 和 `AgentStateChanged` snapshot，状态固定为 `queued`、`running`、`waiting`、`completed`、`errored`、`interrupted`、`shutdown`、`notFound`。`pure-studio` 持久化这些状态事件，并在聊天界面只渲染路径、状态、摘要和最终错误文本，避免把子代理内部执行细节混入父会话 timeline。
 
@@ -129,6 +130,6 @@ root agent 和 subagent 使用同一套 runtime usage 数据模型。每次模�
 - `estimatedCosts` 按货币分组，只保存能由本地模型价格完整估算的费用。
 - `hasUnpricedUsage` 表示存在 token 使用但缺少 currency 或价格字段，UI 不应把它并入任意币种。
 
-Studio 状态栏必须在运行中即时反映上下文和费用。前端消费后端聚合后的运行态快照，并以 `RunPromptResponse.sessionRuntime` 作为完成后的最终校准。前端不得同时按 inference item 和 turn item 重复累计费用。
+Studio 状态栏必须在运行中即时反映上下文和费用。前端消费 `StudioEventKind::SessionRuntimeChanged` 中后端聚合后的运行态快照；刷新或切换 session 时用 `load_session_state` / `select_session` 的 `sessionRuntime` 恢复。前端不得同时按 inference item 和 turn item 重复累计费用。
 
 费用为本地估算值，使用配置中的每百万 token 单价。不同货币不做汇率转换，也不合并为单一数字。React 状态栏消费通用 runtime snapshot，不直接解析 provider 私有 usage 字段。

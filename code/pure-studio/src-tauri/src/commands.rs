@@ -8,16 +8,17 @@ use pl_core::{
 use pl_protocol::{
     InteractionKind, InteractionPayload, InteractionRequest, InteractionResolution,
     InteractionScope, InteractionStatus, PlanConfirmationResolution, PlanLifecycleEvent,
-    PlanLifecycleState, TimelineItem, TimelineItemKind, TraceEvent, TraceEventKind,
+    PlanLifecycleState, StudioTurnStatus, TimelineItem, TimelineItemKind, TraceEvent,
+    TraceEventKind,
 };
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 use tokio_util::sync::CancellationToken;
 
 use crate::dto::{
     BootstrapDto, ConfigDto, DiscoveredSkillsDto, InstructionsInput, McpSettingsInput,
-    PlanLifecycleResponse, ProjectSelectionDto, PromptFailedPayload, ProviderSettingsInput,
-    ProviderUsagesDto, ResolveInteractionResponse, RunPromptResponse, SessionSelectionDto,
-    SessionTimelineDto, StopPromptResponse,
+    PlanLifecycleResponse, ProjectSelectionDto, ProviderSettingsInput, ProviderUsagesDto,
+    ResolveInteractionResponse, RunPromptResponse, SessionSelectionDto, SessionStateDto,
+    SessionTimelineDto, StopPromptResponse, StudioEventsDto, SubmitPromptResponse,
 };
 use crate::events::drain_events;
 use crate::interactions::interaction_emitter;
@@ -299,13 +300,13 @@ pub async fn set_session_mode(
 }
 
 #[tauri::command]
-pub async fn run_prompt(
+pub async fn submit_prompt(
     session_id: String,
     prompt: String,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> CommandResult<RunPromptResponse> {
-    run_prompt_inner(session_id, prompt, app, &state, None).await
+) -> CommandResult<SubmitPromptResponse> {
+    submit_prompt_background(session_id, prompt, app, &state, None).await
 }
 
 #[tauri::command]
@@ -338,7 +339,6 @@ pub async fn resolve_interaction(
             let InteractionPayload::PlanConfirmation { plan_id, .. } = &current.payload else {
                 unreachable!("plan confirmation resolution was validated before resolving");
             };
-            let mut run = None;
             let (resolved, plan_lifecycle) = match decision {
                 PlanConfirmationResolution::ImplementFreshContext => {
                     let resolution = InteractionResolution::PlanConfirmation {
@@ -357,33 +357,19 @@ pub async fn resolve_interaction(
                         if content.is_empty() {
                             return Err(CommandError::from_display("plan content is empty"));
                         }
-                        let payload =
-                            session_selection_response(&state.studio, &handoff.target_session.id)
-                                .await?;
-                        let _ = app.emit("studio-session-handoff-started", payload);
+                        let _ = state.studio.events().emit_handoff(&handoff.handoff).await?;
                         let prompt = format!("{IMPLEMENT_PLAN_FRESH_CONTEXT_PREFIX}\n\n{content}");
-                        run = Some(
-                            run_prompt_inner(
-                                handoff.target_session.id.clone(),
-                                prompt,
-                                app,
-                                &state,
-                                Some(PlanImplementationLifecycle {
-                                    origin_session_id: handoff.origin_session.id.clone(),
-                                    plan_id: handoff.plan_id.clone(),
-                                }),
-                            )
-                            .await?,
-                        );
-                    } else {
-                        run = Some(
-                            empty_run_prompt_response(
-                                &state,
-                                &handoff.target_session.id,
-                                "completed",
-                            )
-                            .await?,
-                        );
+                        let _ = submit_prompt_background(
+                            handoff.target_session.id.clone(),
+                            prompt,
+                            app,
+                            &state,
+                            Some(PlanImplementationLifecycle {
+                                origin_session_id: handoff.origin_session.id.clone(),
+                                plan_id: handoff.plan_id.clone(),
+                            }),
+                        )
+                        .await?;
                     }
                     let plan_lifecycle = Some(
                         plan_lifecycle_response(&state.studio, &handoff.origin_session.id).await?,
@@ -395,7 +381,6 @@ pub async fn resolve_interaction(
                         return Ok(ResolveInteractionResponse {
                             session_id,
                             interaction: current,
-                            run: None,
                             plan_lifecycle: None,
                         });
                     }
@@ -436,7 +421,6 @@ pub async fn resolve_interaction(
                         return Ok(ResolveInteractionResponse {
                             session_id,
                             interaction: current,
-                            run: None,
                             plan_lifecycle: None,
                         });
                     }
@@ -475,7 +459,6 @@ pub async fn resolve_interaction(
             Ok(ResolveInteractionResponse {
                 session_id,
                 interaction: resolved,
-                run,
                 plan_lifecycle,
             })
         }
@@ -484,7 +467,6 @@ pub async fn resolve_interaction(
                 return Ok(ResolveInteractionResponse {
                     session_id,
                     interaction: current,
-                    run: None,
                     plan_lifecycle: None,
                 });
             }
@@ -496,7 +478,6 @@ pub async fn resolve_interaction(
             Ok(ResolveInteractionResponse {
                 session_id,
                 interaction: resolved,
-                run: None,
                 plan_lifecycle: None,
             })
         }
@@ -636,16 +617,99 @@ async fn run_prompt_inner(
                     )
                     .await?;
             }
-            let _ = app.emit(
-                "studio-prompt-failed",
-                PromptFailedPayload {
-                    session_id: Some(session_id),
-                    message: message.clone(),
-                },
-            );
             Err(CommandError { message })
         }
     }
+}
+
+async fn submit_prompt_background(
+    session_id: String,
+    prompt: String,
+    app: AppHandle,
+    state: &AppState,
+    lifecycle: Option<PlanImplementationLifecycle>,
+) -> CommandResult<SubmitPromptResponse> {
+    if prompt.trim().is_empty() {
+        return Err(CommandError::from_display("prompt is empty"));
+    }
+    if state.active_turns.lock().await.contains_key(&session_id) {
+        return Err(CommandError::from_display(
+            "session already has an active turn",
+        ));
+    }
+    let turn_id = format!("turn-{}", uuid_like_suffix());
+    state
+        .studio
+        .events()
+        .emit_turn(&session_id, &turn_id, StudioTurnStatus::Queued, None)
+        .await?;
+    state
+        .studio
+        .events()
+        .emit_turn(
+            &session_id,
+            &turn_id,
+            StudioTurnStatus::ContextLoading,
+            None,
+        )
+        .await?;
+    let cursor = state
+        .studio
+        .store()
+        .next_studio_event_sequence(&session_id)
+        .await? as u64;
+    let run_state = state.clone();
+    let run_session_id = session_id.clone();
+    let run_turn_id = turn_id.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = run_state
+            .studio
+            .events()
+            .emit_turn(
+                &run_session_id,
+                &run_turn_id,
+                StudioTurnStatus::WaitingForModel,
+                None,
+            )
+            .await;
+        let result =
+            run_prompt_inner(run_session_id.clone(), prompt, app, &run_state, lifecycle).await;
+        match result {
+            Ok(response) => {
+                let status = match response.turn_status.as_str() {
+                    "completed" => StudioTurnStatus::Completed,
+                    "aborted" if response.turn_abort_reason.as_deref() == Some("interrupted") => {
+                        StudioTurnStatus::Cancelled
+                    }
+                    "aborted" | "errored" => StudioTurnStatus::Failed,
+                    _ => StudioTurnStatus::Completed,
+                };
+                let reason = response.turn_error.or(response.turn_abort_reason);
+                let _ = run_state
+                    .studio
+                    .events()
+                    .emit_turn(&run_session_id, &run_turn_id, status, reason)
+                    .await;
+            }
+            Err(error) => {
+                let _ = run_state
+                    .studio
+                    .events()
+                    .emit_turn(
+                        &run_session_id,
+                        &run_turn_id,
+                        StudioTurnStatus::Failed,
+                        Some(error.message),
+                    )
+                    .await;
+            }
+        }
+    });
+    Ok(SubmitPromptResponse {
+        session_id,
+        turn_id,
+        cursor,
+    })
 }
 
 #[tauri::command]
@@ -683,6 +747,15 @@ pub async fn load_session_timeline(
     limit: Option<i64>,
     state: State<'_, AppState>,
 ) -> CommandResult<SessionTimelineDto> {
+    load_session_timeline_inner(&state, session_id, after_sequence, limit).await
+}
+
+async fn load_session_timeline_inner(
+    state: &AppState,
+    session_id: String,
+    after_sequence: Option<i64>,
+    limit: Option<i64>,
+) -> CommandResult<SessionTimelineDto> {
     let records = state
         .studio
         .store()
@@ -704,6 +777,79 @@ pub async fn load_session_timeline(
             .list_pending_interactions(&session_id)
             .await?,
         next_sequence,
+    })
+}
+
+#[tauri::command]
+pub async fn load_studio_events(
+    session_id: String,
+    after_sequence: Option<i64>,
+    limit: Option<i64>,
+    state: State<'_, AppState>,
+) -> CommandResult<StudioEventsDto> {
+    let events = state
+        .studio
+        .store()
+        .load_studio_events(&session_id, after_sequence, limit)
+        .await?;
+    let next_sequence = state
+        .studio
+        .store()
+        .next_studio_event_sequence(&session_id)
+        .await? as u64;
+    Ok(StudioEventsDto {
+        session_id,
+        events,
+        next_sequence,
+    })
+}
+
+#[tauri::command]
+pub async fn load_session_state(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> CommandResult<SessionStateDto> {
+    let session = state
+        .studio
+        .store()
+        .read_session(&session_id)
+        .await?
+        .context("selected session not found")?;
+    let timeline = load_session_timeline_inner(&state, session_id.clone(), None, None).await?;
+    let events = state
+        .studio
+        .store()
+        .load_studio_events(&session_id, None, None)
+        .await?;
+    let event_next_sequence = state
+        .studio
+        .store()
+        .next_studio_event_sequence(&session_id)
+        .await? as u64;
+    Ok(SessionStateDto {
+        session_id: session_id.clone(),
+        session: session_dtos(vec![session.clone()])
+            .into_iter()
+            .next()
+            .context("selected session not found")?,
+        sessions: session_dtos(
+            state
+                .studio
+                .store()
+                .list_sessions(&session.project_id)
+                .await?,
+        ),
+        agent_events: agent_event_dtos(state.studio.store().list_agent_events(&session_id).await?),
+        agents: agent_dtos(state.studio.store().list_agents(&session_id).await?),
+        session_runtime: load_session_runtime_dto(&state.studio, &session_id).await?,
+        interactions: state
+            .studio
+            .store()
+            .list_pending_interactions(&session_id)
+            .await?,
+        timeline,
+        events,
+        event_next_sequence,
     })
 }
 
@@ -747,46 +893,6 @@ async fn run_prompt_response(
             .abort_reason
             .map(|reason| reason.as_str().to_string()),
         turn_error: outcome.result.error.clone(),
-    })
-}
-
-async fn empty_run_prompt_response(
-    state: &AppState,
-    session_id: &str,
-    turn_status: &str,
-) -> CommandResult<RunPromptResponse> {
-    let session = state
-        .studio
-        .store()
-        .read_session(session_id)
-        .await?
-        .context("selected session not found")?;
-    let sessions = state
-        .studio
-        .store()
-        .list_sessions(&session.project_id)
-        .await?;
-    Ok(RunPromptResponse {
-        session_id: session_id.to_string(),
-        sessions: session_dtos(sessions),
-        agent_events: agent_event_dtos(state.studio.store().list_agent_events(session_id).await?),
-        agents: agent_dtos(state.studio.store().list_agents(session_id).await?),
-        session_runtime: load_session_runtime_dto(&state.studio, session_id).await?,
-        timeline_items: Vec::new(),
-        plan_states: load_plan_states(&state.studio, session_id).await?,
-        interactions: state
-            .studio
-            .store()
-            .list_pending_interactions(session_id)
-            .await?,
-        timeline_next_sequence: state
-            .studio
-            .store()
-            .next_timeline_sequence(session_id)
-            .await?,
-        turn_status: turn_status.to_string(),
-        turn_abort_reason: None,
-        turn_error: None,
     })
 }
 
@@ -981,6 +1087,14 @@ fn unix_seconds() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+fn uuid_like_suffix() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros()
+        .to_string()
 }
 
 fn timeline_records_to_trace_events(

@@ -6,14 +6,16 @@
 
 ```text
 React action
-  -> Tauri commands
+  -> Tauri submit command
   -> pl-core application service (StudioRuntime)
+  -> StudioEventRuntime
   -> interfaces ports
   -> infrastructure adapters (sqlite/config/fs/event/tool)
   -> PureCore turn pipeline
   -> AgentEvent / TraceEvent
-  -> Tauri event
-  -> reducer action
+  -> StudioEventRuntime projection + append-only studio_events
+  -> Tauri studio-runtime-event
+  -> studioEventReducer
   -> UI rendering
 ```
 
@@ -60,15 +62,17 @@ React action
 
 ## 3.3 核心 turn 编排
 
-`StudioRuntime` 只做 use case 编排：
+`StudioRuntime` 只做 use case 编排；Studio UI 状态不由命令完成响应驱动，而由 `StudioEventRuntime` 持久事件流驱动：
 
 1. 读取 session/project/config
 2. 解析或创建 session 级提示词快照
 3. 构造 `TurnRequest` 与 `TurnOptions`
 4. 组装 `PureCore`（含工具注册）
 5. 执行 `run_turn_with_trace`
-6. 事务化批量落库：message + trace + runtime snapshot
-7. 输出命令响应 DTO 与 timeline DTO
+6. 运行中每个 `AgentEvent` / `TraceEvent` 先进入 `StudioEventRuntime`，写入 projection 表和 append-only `studio_events`，再广播给 Studio
+7. turn 收尾只负责消息、最终 runtime snapshot 与生命周期终态校准；不得要求前端等待最终响应才能看到过程
+
+前端提交普通 prompt 或 Plan 实施时调用 `submit_prompt`。该命令只创建 turn、注册 cancellation token、写入 `turnChanged(queued/contextLoading/waitingForModel)`，随后在后台执行 run，并立即返回 `{ sessionId, turnId, cursor }`。实现计划的 `resolve_interaction` 若触发 fresh context handoff，也只返回 handoff/turn 提交结果；目标 session 切换和后续步骤展示由 `sessionHandoffChanged` 与目标 session 的 `turnChanged/timelineChanged` 事件驱动。
 
 `run_turn_with_trace` 在每次模型请求前用 `InstructionAssembler` 解析当前提示词快照。base/system 写入 `CompletionRequest.instructions`；developer 块作为临时 system 消息置于历史消息之前；user context 块作为临时 user 消息置于 developer 块之后、真实历史之前。临时前置消息只用于本次 provider request，不写入 `CoreSession`，因此压缩和持久化只处理真实对话历史。
 
@@ -110,10 +114,13 @@ Agent 协作 timeline 与状态分层：
 持久化原则：
 
 - 消息和 trace 采用事务批量写入，避免逐条写放大
+- `studio_events` 是 Studio UI 的唯一实时事实流。每个事件带 `sessionId`、会话内单调 `sequence`、`createdAt` 和类型化 `kind`；前端通过 cursor 补拉缺失事件，而不是依赖命令最终响应补状态
+- `turns` 表保存当前与历史 turn 状态：`queued | contextLoading | waitingForModel | streaming | waitingForInteraction | runningTool | persisting | completed | failed | cancelled`。启动时所有非终态 turn 必须收敛为 `cancelled`
+- `timeline_events`、`agent_events`、`interactions`、`session_skills`、`session_handoffs` 是 `StudioEventRuntime` 的 projection 表。除一次性迁移和启动恢复外，运行期不得由 Tauri sideband 或前端推断直接写入
 - session 的 `mode` 表示下一轮默认协作模式，由 Studio 模式切换命令持久化；运行时按 session 当前 `mode` 构造 `TurnRequest`
 - session 的 `instruction_snapshot_json` 保存首轮解析出的稳定 base/user/project context 和非 mode-specific developer context。已有 session 缺少快照时，在下一轮运行前按当前配置补建。后续配置、模型默认提示词或 AGENTS 文件变化不 retroactively 改写既有 session；新 session 才使用新配置。Auto/Plan mode overlay 每个 turn 重新注入，不能被 snapshot 永久冻结。
-- Plan Mode 生成的计划有独立生命周期事件：`pendingConfirmation | accepted | implementing | implemented | implementationFailed | continuedPlanning | dismissed | cancelled`。这些事件作为 `TraceEventKind::PlanLifecycleChanged` 追加到来源 session 的 `timeline_events`；前端按 `planId` 折叠最新状态。计划实施确认不是前端从 timeline 自行推断的临时状态，而是后端在当前 live Plan turn 终态后创建的 `planConfirmation` interaction。确认实施只支持 fresh context：`implementFreshContext` 创建显式 session handoff，新 Auto session 把 plan markdown 作为 handoff prompt 的唯一意图来源，来源 session 保持可恢复但从活跃列表隐藏；root turn 继续使用 planner 角色。
-- `interactions` 表保存所有 pending/resolved/cancelled/expired 交互，是刷新与 session 切换恢复 pending UI 的事实来源。`InteractionChanged` 只作为实时通知事件广播当前 interaction 最新状态，不依赖 timeline sequence；旧 `studio-user-input-*` 和 `studio-tool-approval-*` sideband 事件不再作为协议入口
+- Plan Mode 生成的计划有独立生命周期事件：`pendingConfirmation | accepted | implementing | implemented | implementationFailed | continuedPlanning | dismissed | cancelled`。这些事件由 `StudioEventKind::PlanLifecycleChanged` 广播，并投影到来源 session 的 `timeline_events`；前端按 `planId` 折叠最新状态。计划实施确认不是前端从 timeline 自行推断的临时状态，而是后端在当前 live Plan turn 终态后创建的 `planConfirmation` interaction。确认实施只支持 fresh context：`implementFreshContext` 创建显式 session handoff，新 Auto session 把 plan markdown 作为 handoff prompt 的唯一意图来源，来源 session 保持可恢复但从活跃列表隐藏；root turn 继续使用 planner 角色。
+- `interactions` 表保存所有 pending/resolved/cancelled/expired 交互，是刷新与 session 切换恢复 pending UI 的事实来源。`InteractionChanged` 通过 `StudioEventKind::InteractionChanged` 广播当前 interaction 最新状态；旧 `studio-user-input-*`、`studio-tool-approval-*`、`studio-interaction-changed` sideband 事件不再作为 Studio 协议入口
 - `skill_view` 成功激活 skill 时，后端写入结构化 `SkillActivated` 事件并 upsert 会话级 skill runtime fact。Studio 当前会话的 `activeSkills` 只从 `session_skills` 等结构化持久层读取，不能再从 tool result JSON 文本反解析。
 - 如果 turn 内发生上下文压缩，`CoreSession` revision 会变化，Studio 以事务重写当前 session 的消息历史并追加本轮 trace；未发生压缩时继续使用追加写入
 - timeline 读取以 `sequence` 为单调游标
@@ -121,10 +128,12 @@ Agent 协作 timeline 与状态分层：
 
 ## 3.4 事件管线
 
-`drain_events` 使用显式分支处理广播通道状态：
+`studio-runtime-event` 是 Studio 唯一实时事件通道。Tauri bridge 只把 `StudioEventEnvelope` 转发给前端；事件的持久化、projection 更新和 cursor 分配都在 `StudioEventRuntime` 内完成。
 
-- `Ok(event)`：正常转发
-- `Err(Lagged(n))`：记录丢帧指标并继续 drain，不退出
+`drain_events` 使用显式分支处理内部 broadcast 通道状态：
+
+- `Ok(event)`：交给 `StudioEventRuntime` 持久化并广播 `studio-runtime-event`
+- `Err(Lagged(n))`：广播 `StudioEventKind::Stale { laggedEvents: n }`，前端按 cursor 调用 `load_studio_events`
 - `Err(Closed)`：结束循环
 
 这保证高频 delta 下 UI 不会因为 lagged 直接断流。
@@ -151,7 +160,9 @@ turn 生命周期持久化语义固定：
 - `bootstrapResponse`
 - `projectSelectionResponse`
 - `sessionSelectionResponse`
-- `runPromptResponse`
+- `submitPromptResponse`
 - `sessionTimelineResponse`
+- `studioEventsResponse`
+- `sessionStateResponse`
 
-前端 reducer 只消费 action 输入类型，不再由事件监听器直接拼装复杂 UI 状态。
+前端 reducer 只消费 action 输入类型，不再由事件监听器直接拼装复杂 UI 状态。运行中状态以 `StudioEventEnvelope` 为准，命令响应只表示提交是否成功。

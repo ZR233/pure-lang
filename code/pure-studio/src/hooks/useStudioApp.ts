@@ -11,9 +11,9 @@ import {
   deleteSession,
   loadConfig,
   loadProviderUsages,
+  loadStudioEvents,
   loadSessionTimeline,
   openProject,
-  runPrompt,
   saveMcpSettings,
   saveConfig,
   saveInstructionsSettings,
@@ -25,6 +25,8 @@ import {
   isTauriRuntime,
   resolveInteraction,
   stopPrompt,
+  submitPromptCommand,
+  runPrompt,
 } from "../lib/tauri";
 import { errorText } from "../lib/utils";
 import {
@@ -36,20 +38,18 @@ import {
 import { initialStudioState, studioReducer } from "../state/studio-state";
 import type {
   AgentEvent,
-  AgentEventPayload,
   CompileMode,
-  LspHealthUpdatedPayload,
-  McpHealthUpdatedPayload,
   McpServerInput,
   InstructionsInput,
   InteractionChangedPayload,
   InteractionResolution,
   PermissionMode,
-  PromptFailed,
   ProviderRecord,
   ProviderSettingsSaveSnapshot,
   RoleRecord,
-  SessionSelectionPayload,
+  StudioEventEnvelope,
+  StudioTimelineChange,
+  StudioTurnStatus,
   TimelineItem,
 } from "../types";
 
@@ -154,6 +154,89 @@ function statusTextForInteraction(
   }
 }
 
+function statusTextForStudioEvent(
+  envelope: StudioEventEnvelope,
+  t: (key: string, args?: Record<string, unknown>) => string,
+) {
+  const kind = envelope.kind;
+  switch (kind.type) {
+    case "turnChanged":
+      return statusTextForStudioTurn(kind.turn.status, kind.turn.reason, t);
+    case "timelineChanged":
+      return statusTextForEvent(agentEventFromStudioTimelineChange(kind.change), t);
+    case "interactionChanged":
+      return statusTextForInteraction(
+        {
+          sessionId: envelope.sessionId ?? kind.event.interaction.scope.sessionId,
+          event: kind.event,
+        },
+        t,
+      );
+    case "agentChanged":
+    case "agentTimelineChanged":
+    case "sessionRuntimeChanged":
+    case "skillActivated":
+    case "planLifecycleChanged":
+    case "sessionHandoffChanged":
+      return t("status.running");
+    case "sessionListChanged":
+    case "mcpHealthChanged":
+    case "lspHealthChanged":
+      return t("status.ready");
+    case "stale":
+      return t("status.running");
+  }
+}
+
+function statusTextForStudioTurn(
+  status: StudioTurnStatus,
+  reason: string | null | undefined,
+  t: (key: string, args?: Record<string, unknown>) => string,
+) {
+  if (reason && (status === "failed" || status === "cancelled")) {
+    return status === "failed" ? t("status.runFailed", { error: reason }) : t("status.interrupted");
+  }
+  switch (status) {
+    case "queued":
+    case "contextLoading":
+    case "waitingForModel":
+      return t("status.waitingForModel");
+    case "streaming":
+      return t("status.running");
+    case "waitingForInteraction":
+      return t("status.userInputRequired");
+    case "runningTool":
+      return t("turnPhase.tool");
+    case "persisting":
+      return t("status.running");
+    case "completed":
+      return t("status.done");
+    case "failed":
+      return t("status.runFailed", { error: reason ?? "unknown" });
+    case "cancelled":
+      return t("status.interrupted");
+  }
+}
+
+function agentEventFromStudioTimelineChange(change: StudioTimelineChange): AgentEvent {
+  switch (change.type) {
+    case "started":
+      return { timelineItemStarted: { item: change.item } };
+    case "delta":
+      return { timelineItemDelta: { event: change.event } };
+    case "completed":
+      return { timelineItemCompleted: { sequence: change.sequence, item: change.item } };
+    case "failed":
+      return {
+        timelineItemFailed: {
+          sequence: change.sequence,
+          item: change.item,
+          error: change.error,
+        },
+      };
+  }
+}
+
 export function useStudioApp() {
   const { t } = useTranslation();
   const [state, dispatch] = useReducer(studioReducer, initialStudioState(t("status.starting")));
@@ -215,62 +298,16 @@ export function useStudioApp() {
     }
 
     const unlisteners = [
-      listen<AgentEventPayload>("studio-agent-event", ({ payload }) => {
-        if (payload.timelineStale) {
-          void reloadTimeline(payload.sessionId);
-          if (!payload.event && !payload.timelineEvent && !payload.agent && !payload.sessionRuntime) {
-            return;
-          }
+      listen<StudioEventEnvelope>("studio-runtime-event", ({ payload }) => {
+        if (payload.kind.type === "stale" && payload.sessionId) {
+          const afterSequence = Math.max(0, payload.sequence - payload.kind.laggedEvents - 1);
+          void reloadStudioEvents(payload.sessionId, afterSequence);
+          return;
         }
         dispatch({
-          type: "agentEvent",
-          sessionId: payload.sessionId,
-          event: payload.event,
-          timelineEvent: payload.timelineEvent,
-          agent: payload.agent,
-          sessionRuntime: payload.sessionRuntime,
-          statusText: statusTextForEvent(payload.event, t),
-        });
-      }),
-      listen<McpHealthUpdatedPayload>("studio-mcp-health-updated", ({ payload }) => {
-        dispatch({
-          type: "mcpHealthUpdated",
-          payload,
-        });
-      }),
-      listen<LspHealthUpdatedPayload>("studio-lsp-health-updated", ({ payload }) => {
-        dispatch({
-          type: "lspHealthUpdated",
-          payload,
-        });
-      }),
-      listen<InteractionChangedPayload>("studio-interaction-changed", ({ payload }) => {
-        dispatch({
-          type: "interactionChanged",
-          payload,
-          status: statusTextForInteraction(payload, t),
-        });
-      }),
-      listen<PromptFailed>("studio-prompt-failed", ({ payload }) => {
-        dispatch({
-          type: "runPromptFailed",
-          sessionId: payload.sessionId,
-          status: payload.message,
-        });
-      }),
-      listen<SessionSelectionPayload>("studio-session-mode-updated", ({ payload }) => {
-        dispatch({
-          type: "sessionModeUpdated",
-          payload,
-          status: t("status.modeUpdated"),
-        });
-      }),
-      listen<SessionSelectionPayload>("studio-session-handoff-started", ({ payload }) => {
-        dispatch({
-          type: "sessionHandoffStarted",
-          payload,
-          status: t("status.running"),
-          startedAt: Date.now(),
+          type: "studioEvent",
+          envelope: payload,
+          status: statusTextForStudioEvent(payload, t),
         });
       }),
     ];
@@ -296,6 +333,26 @@ export function useStudioApp() {
           nextSequence: payload.nextSequence,
         }),
       )
+      .catch((error) => {
+        dispatch({
+          type: "timelineLoadFailed",
+          sessionId,
+          status: t("status.timelineLoadFailed", { error: errorText(error) }),
+        });
+      });
+  }
+
+  function reloadStudioEvents(sessionId: string, afterSequence?: number) {
+    return loadStudioEvents(sessionId, afterSequence)
+      .then((payload) => {
+        for (const envelope of payload.events) {
+          dispatch({
+            type: "studioEvent",
+            envelope,
+            status: statusTextForStudioEvent(envelope, t),
+          });
+        }
+      })
       .catch((error) => {
         dispatch({
           type: "timelineLoadFailed",
@@ -496,16 +553,6 @@ export function useStudioApp() {
           status: t("status.ready"),
         });
       }
-      if (payload.run) {
-        const turnError = payload.run.turnError ?? payload.run.turnAbortReason ?? t("subagent.providerError");
-        const status =
-          payload.run.turnStatus === "errored"
-            ? t("status.runFailed", { error: turnError })
-            : payload.run.turnAbortReason === "interrupted"
-              ? t("status.interrupted")
-              : t("status.done");
-        dispatch({ type: "runPromptLoaded", payload: payload.run, status });
-      }
       return true;
     } catch (error) {
       dispatch({
@@ -558,19 +605,23 @@ export function useStudioApp() {
       prompt: content,
     });
     try {
-      const payload = await runPrompt(sessionId, content);
-      const turnError = payload.turnError ?? payload.turnAbortReason ?? t("subagent.providerError");
-      const status =
-        payload.turnStatus === "errored"
-          ? t("status.runFailed", { error: turnError })
-          : payload.turnAbortReason === "interrupted"
-            ? t("status.interrupted")
-            : t("status.done");
-      dispatch({
-        type: "runPromptLoaded",
-        payload,
-        status,
-      });
+      if (isTauriRuntime()) {
+        await submitPromptCommand(sessionId, content);
+      } else {
+        const payload = await runPrompt(sessionId, content);
+        const turnError = payload.turnError ?? payload.turnAbortReason ?? t("subagent.providerError");
+        const status =
+          payload.turnStatus === "errored"
+            ? t("status.runFailed", { error: turnError })
+            : payload.turnAbortReason === "interrupted"
+              ? t("status.interrupted")
+              : t("status.done");
+        dispatch({
+          type: "runPromptLoaded",
+          payload,
+          status,
+        });
+      }
     } catch (error) {
       dispatch({
         type: "runPromptFailed",

@@ -1,4 +1,4 @@
-use pl_protocol::{AgentEvent, InteractionChangedEvent, InteractionRequest, TimelineItem};
+use pl_protocol::{InteractionRequest, StudioEventEnvelope, TimelineItem};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize)]
@@ -484,6 +484,14 @@ pub struct RunPromptResponse {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SubmitPromptResponse {
+    pub session_id: String,
+    pub turn_id: String,
+    pub cursor: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StopPromptResponse {
     pub session_id: String,
     pub stopped: bool,
@@ -501,27 +509,25 @@ pub struct SessionTimelineDto {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentEventPayload {
+pub struct StudioEventsDto {
     pub session_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timeline_stale: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub lagged_events: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub event: Option<AgentEvent>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timeline_event: Option<AgentEventDto>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent: Option<AgentDto>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_runtime: Option<SessionRuntimeDto>,
+    pub events: Vec<StudioEventEnvelope>,
+    pub next_sequence: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct InteractionChangedPayload {
+pub struct SessionStateDto {
     pub session_id: String,
-    pub event: InteractionChangedEvent,
+    pub session: SessionDto,
+    pub sessions: Vec<SessionDto>,
+    pub agent_events: Vec<AgentEventDto>,
+    pub agents: Vec<AgentDto>,
+    pub session_runtime: SessionRuntimeDto,
+    pub interactions: Vec<InteractionRequest>,
+    pub timeline: SessionTimelineDto,
+    pub events: Vec<StudioEventEnvelope>,
+    pub event_next_sequence: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -529,13 +535,5 @@ pub struct InteractionChangedPayload {
 pub struct ResolveInteractionResponse {
     pub session_id: String,
     pub interaction: InteractionRequest,
-    pub run: Option<RunPromptResponse>,
     pub plan_lifecycle: Option<PlanLifecycleResponse>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PromptFailedPayload {
-    pub session_id: Option<String>,
-    pub message: String,
 }

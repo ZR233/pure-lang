@@ -309,6 +309,18 @@ export type ToolCallStatus2 =
 
 export type TurnStatus = "started" | "completed" | "aborted" | "errored";
 
+export type StudioTurnStatus =
+  | "queued"
+  | "contextLoading"
+  | "waitingForModel"
+  | "streaming"
+  | "waitingForInteraction"
+  | "runningTool"
+  | "persisting"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
 export type TurnPhase =
   | "idle"
   | "running"
@@ -406,6 +418,14 @@ export type PlanLifecycleResponse = {
   timelineNextSequence: number;
 };
 
+export type PlanLifecycleEvent = {
+  planId: string;
+  state: PlanLifecycleState;
+  turnId?: string | null;
+  reason?: string | null;
+  updatedAt: number;
+};
+
 export type InteractionKind = "userInput" | "toolApproval" | "planConfirmation";
 export type InteractionStatus = "pending" | "resolved" | "cancelled" | "expired";
 
@@ -472,7 +492,6 @@ export type InteractionChangedPayload = {
 export type ResolveInteractionResponse = {
   sessionId: string;
   interaction: InteractionRequest;
-  run?: RunPromptResponse | null;
   planLifecycle?: PlanLifecycleResponse | null;
 };
 
@@ -683,6 +702,80 @@ export type AgentRuntimeDelta = {
   updatedAt: number;
 };
 
+export type StudioTurn = {
+  turnId: string;
+  sessionId: string;
+  status: StudioTurnStatus;
+  reason?: string | null;
+  updatedAt: number;
+};
+
+export type StudioTimelineChange =
+  | { type: "started"; item: TimelineItem }
+  | { type: "delta"; event: TimelineItemDeltaEvent }
+  | { type: "completed"; sequence: number; item: TimelineItem }
+  | { type: "failed"; sequence: number; item: TimelineItem; error: string };
+
+export type StudioEventKind =
+  | { type: "turnChanged"; turn: StudioTurn }
+  | { type: "timelineChanged"; change: StudioTimelineChange }
+  | { type: "interactionChanged"; event: InteractionChangedEvent }
+  | { type: "agentChanged"; agent: { payload: AgentDto | AgentEvent } }
+  | { type: "agentTimelineChanged"; event: { payload: AgentTimelineEvent | AgentEvent } }
+  | { type: "sessionRuntimeChanged"; runtime: { payload: SessionRuntime | AgentEvent } }
+  | { type: "skillActivated"; activation: SkillActivation }
+  | { type: "planLifecycleChanged"; event: PlanLifecycleEvent }
+  | {
+      type: "sessionHandoffChanged";
+      handoff: {
+        originSessionId: string;
+        targetSessionId: string;
+        kind: string;
+        status: string;
+        planId?: string | null;
+        updatedAt: number;
+      };
+    }
+  | { type: "sessionListChanged"; sessions: SessionRecord[] }
+  | { type: "mcpHealthChanged"; health: { payload: McpHealthUpdatedPayload } }
+  | { type: "lspHealthChanged"; health: { payload: LspHealthUpdatedPayload } }
+  | { type: "stale"; laggedEvents: number };
+
+export type StudioEventEnvelope = {
+  eventId: string;
+  projectId?: string | null;
+  sessionId?: string | null;
+  turnId?: string | null;
+  sequence: number;
+  createdAt: number;
+  kind: StudioEventKind;
+};
+
+export type SubmitPromptResponse = {
+  sessionId: string;
+  turnId: string;
+  cursor: number;
+};
+
+export type StudioEventsPayload = {
+  sessionId: string;
+  events: StudioEventEnvelope[];
+  nextSequence: number;
+};
+
+export type SessionStatePayload = {
+  sessionId: string;
+  session: SessionRecord;
+  sessions: SessionRecord[];
+  agentEvents: AgentTimelineEvent[];
+  agents: AgentDto[];
+  sessionRuntime: SessionRuntime;
+  interactions: InteractionRequest[];
+  timeline: SessionTimeline;
+  events: StudioEventEnvelope[];
+  eventNextSequence: number;
+};
+
 export type SkillActivation = {
   name: string;
   source: string;
@@ -690,16 +783,6 @@ export type SkillActivation = {
   turnId: string;
   toolCallId: string;
   activatedAt: number;
-};
-
-export type AgentEventPayload = {
-  sessionId: string;
-  timelineStale?: boolean | null;
-  laggedEvents?: number | null;
-  event?: AgentEvent | null;
-  timelineEvent?: AgentTimelineEvent | null;
-  agent?: AgentDto | null;
-  sessionRuntime?: SessionRuntime | null;
 };
 
 export type UserQuestionOption = {
@@ -724,7 +807,3 @@ export type UserInputResponse = {
   answers: Record<string, UserInputAnswer>;
 };
 
-export type PromptFailed = {
-  sessionId?: string | null;
-  message: string;
-};

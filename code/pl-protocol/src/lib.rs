@@ -3,6 +3,7 @@ mod event;
 mod interaction;
 mod message;
 mod permission;
+mod studio_event;
 
 pub use error::{PureError, Result};
 pub use event::{
@@ -26,3 +27,8 @@ pub use message::{
     ToolCallHistoryMetadata, ToolCallKind, ToolMetadataCompatibility, ToolResultMetadata,
 };
 pub use permission::PermissionLevel;
+pub use studio_event::{
+    StudioAgentSnapshot, StudioAgentTimelineEvent, StudioEventEnvelope, StudioEventKind,
+    StudioLspHealth, StudioMcpHealth, StudioSessionHandoff, StudioSessionRuntime,
+    StudioSessionSummary, StudioTimelineChange, StudioTurn, StudioTurnStatus,
+};
