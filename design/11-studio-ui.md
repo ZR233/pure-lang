@@ -116,7 +116,7 @@ Provider 设置页的供应商卡片以可扫读的运维状态为主：头部�
 
 聊天输入区提供 `Auto / Plan` 模式切换，当前值来自选中 session 的 `mode` 并通过后端命令持久化。新会话默认 `auto`。Plan 卡片展示计划正文和轻量状态徽标，不提供“实现计划”按钮。最新计划生成完成后，后端创建 `planConfirmation` interaction，底部普通输入框自动替换为计划确认 composer。确认 composer 必须默认展示可直接输入的继续讨论文本框，并提供三个动作：
 
-- `清空上下文并实现`：通过 `resolve_interaction(interactionId, { type: "planConfirmation", decision: "implementFreshContext" })` 解析当前 interaction。后端创建显式 session handoff：新 Auto session 使用 Codex 风格 handoff prompt 加 plan markdown 作为 fresh context 的唯一意图来源；原计划 session 保持可恢复，但从活跃 session 列表隐藏，避免实施开始后同时出现计划 session 与实施 session。
+- `清空上下文并实现`：通过 `resolve_interaction(interactionId, { type: "planConfirmation", decision: "implementFreshContext" })` 解析当前 interaction。后端创建显式 session handoff：新 Auto session 使用 Codex 风格 handoff prompt 加 plan markdown 作为 fresh context 的唯一意图来源；原计划 session 保持可恢复，但从活跃 session 列表隐藏，避免实施开始后同时出现计划 session 与实施 session。实施 handoff 创建成功后，前端必须先切到目标 session 并保持 running/waiting 状态，随后实时展示目标 session 的 timeline、agent 和工具步骤；不能停留在来源 session 等最终结果一次性替换。
 - `继续讨论`：用户可直接在确认 composer 的输入框写入追问或调整内容；一次提交先通过同一命令解析为 `decision: "continuePlanning"` 且携带 `content`，后端记录 `continuedPlanning`，随后前端立即把同一 `content` 作为普通 prompt 发送，用于继续追问或修改计划，不自动切换到 `auto`。如果 resolution 失败，不发送 prompt。
 - `取消`：解析为 `decision: "dismiss"`，后端记录 `dismissed(reason=dismissed)`，关闭确认 composer，恢复普通输入框，不提交任何内容。
 

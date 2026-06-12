@@ -1012,6 +1012,62 @@ function planImplementationSubmittedShowsWaitingWithoutSwitchingSession() {
   assertEqual(entries[0]?.kind, "status");
 }
 
+function sessionHandoffStartedSwitchesBeforeLiveEvents() {
+  const planningSession = selectedState();
+  const liveItem = {
+    ...textItem("turn-2-text", 20, ""),
+    status: "streaming" as const,
+  };
+  const handoff = studioReducer(planningSession, {
+    type: "sessionHandoffStarted",
+    status: "running",
+    startedAt: 3333,
+    payload: {
+      sessionId: "session-2",
+      sessions: [
+        {
+          id: "session-2",
+          projectId: "project-1",
+          title: "Implementation",
+          mode: "auto",
+          updatedAt: 3,
+          visibility: "active",
+        },
+      ],
+      agentEvents: [],
+      agents: [],
+      sessionRuntime: { ...runtime, sessionId: "session-2" },
+      interactions: [],
+    },
+  });
+  const started = studioReducer(handoff, {
+    type: "agentEvent",
+    sessionId: "session-2",
+    event: { timelineItemStarted: { item: liveItem } },
+    statusText: "running",
+  });
+
+  assertEqual(handoff.selectedSessionId, "session-2");
+  assertEqual(handoff.isBusy, true);
+  assertEqual(handoff.turnPhase, "running");
+  assertEqual(started.timelineItems.has("turn-2-text"), true);
+}
+
+function liveEventsForTargetAreIgnoredBeforeHandoffStarted() {
+  const liveItem = {
+    ...textItem("turn-2-text", 20, ""),
+    status: "streaming" as const,
+  };
+  const ignored = studioReducer(selectedState(), {
+    type: "agentEvent",
+    sessionId: "session-2",
+    event: { timelineItemStarted: { item: liveItem } },
+    statusText: "running",
+  });
+
+  assertEqual(ignored.timelineItems.has("turn-2-text"), false);
+}
+
 function runPromptLoadedDedupesReturnedSessions() {
   const submitted = studioReducer(selectedState(), {
     type: "promptSubmitted",
@@ -2045,6 +2101,8 @@ laterRunWithoutPlanDoesNotReopenHistoricalPlan();
 runPromptLoadedKeepsLiveInteractionByCurrentRun();
 freshContextRunSwitchesToReturnedSession();
 planImplementationSubmittedShowsWaitingWithoutSwitchingSession();
+sessionHandoffStartedSwitchesBeforeLiveEvents();
+liveEventsForTargetAreIgnoredBeforeHandoffStarted();
 runPromptLoadedDedupesReturnedSessions();
 sessionModeUpdateNoLongerSwitchesForFreshContextRun();
 promptSubmittedCreatesOptimisticTimelineFeedback();

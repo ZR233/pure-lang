@@ -357,6 +357,10 @@ pub async fn resolve_interaction(
                         if content.is_empty() {
                             return Err(CommandError::from_display("plan content is empty"));
                         }
+                        let payload =
+                            session_selection_response(&state.studio, &handoff.target_session.id)
+                                .await?;
+                        let _ = app.emit("studio-session-handoff-started", payload);
                         let prompt = format!("{IMPLEMENT_PLAN_FRESH_CONTEXT_PREFIX}\n\n{content}");
                         run = Some(
                             run_prompt_inner(

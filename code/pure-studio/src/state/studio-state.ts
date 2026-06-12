@@ -99,6 +99,7 @@ export type StudioAction =
   | { type: "timelineLoadFailed"; sessionId: string | null; status: string }
   | { type: "projectSelectionLoaded"; payload: ProjectSelectionPayload; status: string }
   | { type: "sessionSelectionLoaded"; payload: SessionSelectionPayload; status: string }
+  | { type: "sessionHandoffStarted"; payload: SessionSelectionPayload; status: string; startedAt: number }
   | { type: "sessionModeUpdated"; payload: SessionSelectionPayload; status: string }
   | { type: "runPromptLoaded"; payload: RunPromptResponse; status: string }
   | { type: "runPromptFailed"; sessionId?: string | null; status: string }
@@ -291,6 +292,26 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         turnStartedAt: null,
         isBusy: false,
       };
+    case "sessionHandoffStarted": {
+      const handoffState = {
+        ...state,
+        sessions: sessionListOrPrevious(action.payload.sessions, state.sessions),
+        selectedSessionId: action.payload.sessionId,
+        agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
+        agents: mergeAgents([], action.payload.agents ?? []),
+        sessionRuntime: action.payload.sessionRuntime ?? null,
+        ...emptyTimelineState(),
+        ...interactionState(new Map(), action.payload.interactions ?? [], action.payload.sessionId, true),
+        planStates: new Map<string, PlanState>(),
+        dismissedPlanId: null,
+        currentRunTimelineBaseSequence: 0,
+        status: action.status,
+        turnPhase: "running" as TurnPhase,
+        turnStartedAt: action.startedAt,
+        isBusy: true,
+      };
+      return appendOptimisticWaiting(handoffState, action.startedAt);
+    }
     case "sessionModeUpdated":
       if (action.payload.sessionId !== state.selectedSessionId) {
         return state;
