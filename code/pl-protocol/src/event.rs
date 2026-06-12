@@ -4,6 +4,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use tokio::sync::broadcast;
 
+use crate::InteractionChangedEvent;
+
 pub type AgentEventSender = broadcast::Sender<AgentEvent>;
 pub type AgentEventReceiver = broadcast::Receiver<AgentEvent>;
 
@@ -89,6 +91,9 @@ pub enum AgentEvent {
     },
     UserInputAnswered {
         request_id: String,
+    },
+    InteractionChanged {
+        event: InteractionChangedEvent,
     },
     AgentStateChanged {
         id: String,
@@ -630,6 +635,7 @@ pub enum TraceEventKind {
     TimelineItemCompleted { item: TimelineItem },
     TimelineItemFailed { item: TimelineItem, error: String },
     PlanLifecycleChanged { event: PlanLifecycleEvent },
+    InteractionChanged { event: InteractionChangedEvent },
     EnabledToolsRecorded { event: EnabledToolsEvent },
 }
 

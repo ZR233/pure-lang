@@ -3,22 +3,27 @@ use std::path::PathBuf;
 use anyhow::Context;
 use pl_core::{
     CompileMode, PermissionMode, PureConfig, StudioPromptOutcome, StudioRuntime,
-    TimelineEventRecord, TurnOptions, TurnResultStatus, UserInputResponse,
+    TimelineEventRecord, TurnOptions, TurnResultStatus,
 };
 use pl_protocol::{
-    PlanLifecycleEvent, PlanLifecycleState, TimelineItemKind, TraceEvent, TraceEventKind,
+    InteractionKind, InteractionPayload, InteractionRequest, InteractionResolution,
+    InteractionScope, InteractionStatus, PlanConfirmationResolution, PlanLifecycleEvent,
+    PlanLifecycleState, TimelineItem, TimelineItemKind, TraceEvent, TraceEventKind,
 };
 use tauri::{AppHandle, Emitter, State};
 use tokio_util::sync::CancellationToken;
 
-use crate::approvals::{approval_callback, deny_session_approvals, resolve_tool_approval};
 use crate::dto::{
     BootstrapDto, ConfigDto, DiscoveredSkillsDto, InstructionsInput, McpSettingsInput,
     PlanLifecycleResponse, ProjectSelectionDto, PromptFailedPayload, ProviderSettingsInput,
-    ProviderUsagesDto, RunPromptResponse, SessionSelectionDto, SessionTimelineDto,
-    StopPromptResponse,
+    ProviderUsagesDto, ResolveInteractionResponse, RunPromptResponse, SessionSelectionDto,
+    SessionTimelineDto, StopPromptResponse,
 };
 use crate::events::drain_events;
+use crate::interactions::{
+    cancel_session_interactions, interaction_callback, persist_and_emit, resolution_matches_kind,
+    resolve_interaction_waiter,
+};
 use crate::mappers::{
     agent_dtos, agent_event_dtos, config_dto_for_studio, discovered_skills_dto,
     instructions_config, load_session_runtime_dto, lsp_health_update_dto,
@@ -27,7 +32,6 @@ use crate::mappers::{
     timeline_events_to_items, turn_result_status_label,
 };
 use crate::state::{AppState, CommandError, CommandResult};
-use crate::user_input::{cancel_session_user_inputs, resolve_user_input, user_input_callback};
 
 const IMPLEMENT_PLAN_PROMPT_PREFIX: &str = "PLEASE IMPLEMENT THIS PLAN:";
 
@@ -52,6 +56,7 @@ pub async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Boots
     let mut selected_session_id = None;
     let mut agent_events = Vec::new();
     let mut agents = Vec::new();
+    let mut interactions = Vec::new();
 
     if let Some(project) = projects.first() {
         selected_project_id = Some(project.id.clone());
@@ -64,6 +69,11 @@ pub async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Boots
             selected_session_id = Some(session.id.clone());
             agent_events = state.studio.store().list_agent_events(&session.id).await?;
             agents = state.studio.store().list_agents(&session.id).await?;
+            interactions = state
+                .studio
+                .store()
+                .list_pending_interactions(&session.id)
+                .await?;
         }
     }
     let session_runtime = match selected_session_id.as_deref() {
@@ -79,6 +89,7 @@ pub async fn bootstrap_studio(state: State<'_, AppState>) -> CommandResult<Boots
         agent_events: agent_event_dtos(agent_events),
         agents: agent_dtos(agents),
         session_runtime,
+        interactions,
         lsp_health: lsp_health_update_dto(&state.studio).await?,
         config: config_dto_for_studio(&state.studio).await?,
     })
@@ -112,6 +123,7 @@ pub async fn select_project(
 pub async fn archive_project(
     project_id: String,
     selected_project_id: Option<String>,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> CommandResult<ProjectSelectionDto> {
     let active_session_ids = state
@@ -129,6 +141,21 @@ pub async fn archive_project(
                 message: "project has an active turn".to_string(),
             });
         }
+    }
+    for session_id in state
+        .studio
+        .store()
+        .list_project_session_ids(&project_id)
+        .await?
+    {
+        cancel_session_interactions(
+            &state.studio,
+            &app,
+            state.interactions.clone(),
+            &session_id,
+            "project archived",
+        )
+        .await;
     }
     state
         .studio
@@ -167,6 +194,7 @@ pub async fn create_session(
         agent_events: Vec::new(),
         agents: Vec::new(),
         session_runtime: Some(load_session_runtime_dto(&state.studio, &session.id).await?),
+        interactions: Vec::new(),
     })
 }
 
@@ -174,6 +202,7 @@ pub async fn create_session(
 pub async fn delete_session(
     session_id: String,
     selected_session_id: Option<String>,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> CommandResult<ProjectSelectionDto> {
     if state.active_turns.lock().await.contains_key(&session_id) {
@@ -181,6 +210,14 @@ pub async fn delete_session(
             message: "session has an active turn".to_string(),
         });
     }
+    cancel_session_interactions(
+        &state.studio,
+        &app,
+        state.interactions.clone(),
+        &session_id,
+        "session archived",
+    )
+    .await;
     let archived = state
         .studio
         .store()
@@ -200,6 +237,16 @@ pub async fn delete_session(
         Some(session_id) => state.studio.store().list_agents(session_id).await?,
         None => Vec::new(),
     };
+    let interactions = match &selected_session_id {
+        Some(session_id) => {
+            state
+                .studio
+                .store()
+                .list_pending_interactions(session_id)
+                .await?
+        }
+        None => Vec::new(),
+    };
     let session_runtime = match selected_session_id.as_deref() {
         Some(session_id) => Some(load_session_runtime_dto(&state.studio, session_id).await?),
         None => None,
@@ -212,6 +259,7 @@ pub async fn delete_session(
         agent_events: agent_event_dtos(agent_events),
         agents: agent_dtos(agents),
         session_runtime,
+        interactions,
         lsp_health: lsp_health_update_dto(&state.studio).await?,
     })
 }
@@ -225,6 +273,11 @@ pub async fn select_session(
     let agents = state.studio.store().list_agents(&session_id).await?;
     Ok(SessionSelectionDto {
         session_runtime: Some(load_session_runtime_dto(&state.studio, &session_id).await?),
+        interactions: state
+            .studio
+            .store()
+            .list_pending_interactions(&session_id)
+            .await?,
         session_id,
         sessions: Vec::new(),
         agent_events: agent_event_dtos(agent_events),
@@ -258,52 +311,112 @@ pub async fn run_prompt(
 }
 
 #[tauri::command]
-pub async fn implement_plan(
-    session_id: String,
-    plan_id: String,
-    content: String,
+pub async fn resolve_interaction(
+    interaction_id: String,
+    resolution: InteractionResolution,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> CommandResult<RunPromptResponse> {
-    let plan_id = plan_id.trim().to_string();
-    if plan_id.is_empty() {
-        return Err(CommandError::from_display("plan id is empty"));
+) -> CommandResult<ResolveInteractionResponse> {
+    let current = state
+        .studio
+        .store()
+        .read_interaction(&interaction_id)
+        .await?
+        .context("interaction not found")?;
+    let session_id = current.scope.session_id.clone();
+    if !resolution_matches_kind(&current.kind, &resolution) {
+        return Err(CommandError::from_display(
+            "interaction resolution kind does not match interaction",
+        ));
     }
-    let content = content.trim().to_string();
-    if content.is_empty() {
-        return Err(CommandError::from_display("plan content is empty"));
+    if current.status != InteractionStatus::Pending {
+        return Ok(ResolveInteractionResponse {
+            session_id,
+            interaction: current,
+            run: None,
+            plan_lifecycle: None,
+        });
     }
-    let prompt = format!("{IMPLEMENT_PLAN_PROMPT_PREFIX}\n\n{content}");
-    run_prompt_inner(session_id, prompt, app, &state, Some(plan_id)).await
-}
-
-#[tauri::command]
-pub async fn dismiss_plan(
-    session_id: String,
-    plan_id: String,
-    reason: Option<String>,
-    state: State<'_, AppState>,
-) -> CommandResult<PlanLifecycleResponse> {
-    let plan_id = plan_id.trim().to_string();
-    if plan_id.is_empty() {
-        return Err(CommandError::from_display("plan id is empty"));
-    }
-    let reason = reason
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "dismissed".to_string());
-    append_plan_lifecycle_events(
+    let resolved = resolve_interaction_waiter(
         &state.studio,
-        &session_id,
-        &plan_id,
-        vec![PlanLifecycleChange {
-            state: PlanLifecycleState::Dismissed,
-            turn_id: None,
-            reason: Some(reason),
-        }],
+        &app,
+        state.interactions.clone(),
+        &interaction_id,
+        resolution.clone(),
     )
     .await?;
-    plan_lifecycle_response(&state.studio, &session_id).await
+
+    let mut run = None;
+    let mut plan_lifecycle = None;
+    if let InteractionResolution::PlanConfirmation {
+        decision,
+        content,
+        reason,
+    } = resolution
+    {
+        let InteractionPayload::PlanConfirmation {
+            plan_id,
+            content: stored_content,
+        } = current.payload
+        else {
+            unreachable!("plan confirmation resolution was validated before resolving");
+        };
+        match decision {
+            PlanConfirmationResolution::Implement => {
+                let content = content.unwrap_or(stored_content).trim().to_string();
+                if content.is_empty() {
+                    return Err(CommandError::from_display("plan content is empty"));
+                }
+                let prompt = format!("{IMPLEMENT_PLAN_PROMPT_PREFIX}\n\n{content}");
+                run = Some(
+                    run_prompt_inner(session_id.clone(), prompt, app, &state, Some(plan_id))
+                        .await?,
+                );
+            }
+            PlanConfirmationResolution::Discuss => {
+                let reason = reason
+                    .or(content)
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or_else(|| "discuss requested".to_string());
+                append_plan_lifecycle_events(
+                    &state.studio,
+                    &session_id,
+                    &plan_id,
+                    vec![PlanLifecycleChange {
+                        state: PlanLifecycleState::Dismissed,
+                        turn_id: None,
+                        reason: Some(reason),
+                    }],
+                )
+                .await?;
+                plan_lifecycle = Some(plan_lifecycle_response(&state.studio, &session_id).await?);
+            }
+            PlanConfirmationResolution::Dismiss => {
+                let reason = reason
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or_else(|| "dismissed".to_string());
+                append_plan_lifecycle_events(
+                    &state.studio,
+                    &session_id,
+                    &plan_id,
+                    vec![PlanLifecycleChange {
+                        state: PlanLifecycleState::Dismissed,
+                        turn_id: None,
+                        reason: Some(reason),
+                    }],
+                )
+                .await?;
+                plan_lifecycle = Some(plan_lifecycle_response(&state.studio, &session_id).await?);
+            }
+        }
+    }
+
+    Ok(ResolveInteractionResponse {
+        session_id,
+        interaction: resolved,
+        run,
+        plan_lifecycle,
+    })
 }
 
 async fn run_prompt_inner(
@@ -371,27 +484,36 @@ async fn run_prompt_inner(
         app.clone(),
         state.studio.clone(),
     ));
-    let approval_callback =
-        approval_callback(state.approvals.clone(), app.clone(), session_id.clone());
-    let user_input_callback =
-        user_input_callback(state.user_inputs.clone(), app.clone(), session_id.clone());
+    let interaction_callback = interaction_callback(
+        state.interactions.clone(),
+        app.clone(),
+        state.studio.clone(),
+        session_id.clone(),
+    );
     let options = TurnOptions::default()
         .with_cancellation(cancellation_token.clone())
-        .with_user_input_callback(user_input_callback);
+        .with_interaction_callback(interaction_callback.clone());
     let result = state
         .studio
         .run_prompt(
             &session_id,
             prompt,
             event_tx.clone(),
-            approval_callback,
+            interaction_callback,
             options,
         )
         .await;
     drop(event_tx);
     let _ = event_task.await;
     state.active_turns.lock().await.remove(&session_id);
-    cancel_session_user_inputs(&session_id, &app, state.user_inputs.clone()).await;
+    cancel_session_interactions(
+        &state.studio,
+        &app,
+        state.interactions.clone(),
+        &session_id,
+        "turn completed",
+    )
+    .await;
 
     match result {
         Ok(outcome) => {
@@ -427,6 +549,8 @@ async fn run_prompt_inner(
                     }],
                 )
                 .await?;
+            } else {
+                maybe_create_plan_confirmation(&state.studio, &app, &session_id, &outcome).await?;
             }
             run_prompt_response(state, &session_id, outcome).await
         }
@@ -472,14 +596,14 @@ pub async fn stop_prompt(
     };
 
     token.cancel();
-    deny_session_approvals(
+    cancel_session_interactions(
+        &state.studio,
+        &app,
+        state.interactions.clone(),
         &session_id,
         "interrupted by user",
-        &app,
-        state.approvals.clone(),
     )
     .await;
-    cancel_session_user_inputs(&session_id, &app, state.user_inputs.clone()).await;
 
     Ok(StopPromptResponse {
         session_id,
@@ -506,9 +630,14 @@ pub async fn load_session_timeline(
         .await?;
     let timeline_events = timeline_records_to_trace_events(&records)?;
     Ok(SessionTimelineDto {
-        session_id,
+        session_id: session_id.clone(),
         items: timeline_events_to_items(&timeline_events),
         plan_states: plan_lifecycle_events_to_states(&timeline_events),
+        interactions: state
+            .studio
+            .store()
+            .list_pending_interactions(&session_id)
+            .await?,
         next_sequence,
     })
 }
@@ -537,6 +666,11 @@ async fn run_prompt_response(
         session_runtime: load_session_runtime_dto(&state.studio, session_id).await?,
         timeline_items: timeline_events_to_items(&outcome.timeline_events),
         plan_states: load_plan_states(&state.studio, session_id).await?,
+        interactions: state
+            .studio
+            .store()
+            .list_pending_interactions(session_id)
+            .await?,
         timeline_next_sequence: state
             .studio
             .store()
@@ -580,6 +714,7 @@ async fn session_selection_response(
         sessions: session_dtos(sessions),
         agent_events: agent_event_dtos(agent_events),
         agents: agent_dtos(agents),
+        interactions: studio.store().list_pending_interactions(session_id).await?,
     })
 }
 
@@ -631,6 +766,72 @@ async fn append_plan_lifecycle_events(
     Ok(())
 }
 
+async fn maybe_create_plan_confirmation(
+    studio: &StudioRuntime,
+    app: &AppHandle,
+    session_id: &str,
+    outcome: &StudioPromptOutcome,
+) -> CommandResult<()> {
+    if outcome.result.mode != CompileMode::Plan
+        || !matches!(outcome.result.status, TurnResultStatus::Completed)
+    {
+        return Ok(());
+    }
+    let Some(plan) = latest_completed_plan(&outcome.timeline_events) else {
+        return Ok(());
+    };
+    if plan.content.trim().is_empty() {
+        return Ok(());
+    }
+    let interaction_id = format!("plan-confirmation-{}", plan.item_id);
+    if studio
+        .store()
+        .read_interaction(&interaction_id)
+        .await?
+        .is_some()
+    {
+        return Ok(());
+    }
+    let now = unix_seconds();
+    let interaction = InteractionRequest {
+        interaction_id,
+        kind: InteractionKind::PlanConfirmation,
+        status: InteractionStatus::Pending,
+        scope: InteractionScope {
+            session_id: session_id.to_string(),
+            turn_id: plan.turn_id,
+            item_id: Some(plan.item_id.clone()),
+            tool_id: None,
+            agent_path: None,
+        },
+        payload: InteractionPayload::PlanConfirmation {
+            plan_id: plan.item_id,
+            content: plan.content,
+        },
+        created_at: now,
+        updated_at: now,
+        resolved_at: None,
+        resolution: None,
+    };
+    persist_and_emit(studio, app, &interaction).await?;
+    Ok(())
+}
+
+fn latest_completed_plan(events: &[TraceEvent]) -> Option<TimelineItem> {
+    events.iter().rev().find_map(|trace| match &trace.kind {
+        TraceEventKind::TimelineItemCompleted { item } if item.kind == TimelineItemKind::Plan => {
+            Some(item.clone())
+        }
+        TraceEventKind::TimelineItemStarted { .. }
+        | TraceEventKind::TimelineItemDelta { .. }
+        | TraceEventKind::TimelineItemCompleted { .. }
+        | TraceEventKind::TimelineItemFailed { .. }
+        | TraceEventKind::PlanLifecycleChanged { .. }
+        | TraceEventKind::InteractionChanged { .. }
+        | TraceEventKind::EnabledToolsRecorded { .. } => None,
+    })
+}
+
 fn first_turn_id(events: &[TraceEvent]) -> Option<String> {
     events.iter().find_map(|trace| match &trace.kind {
         TraceEventKind::TimelineItemStarted { item }
@@ -648,6 +849,7 @@ fn first_turn_id(events: &[TraceEvent]) -> Option<String> {
         | TraceEventKind::TimelineItemFailed { .. }
         | TraceEventKind::TimelineItemDelta { .. }
         | TraceEventKind::PlanLifecycleChanged { .. }
+        | TraceEventKind::InteractionChanged { .. }
         | TraceEventKind::EnabledToolsRecorded { .. } => None,
     })
 }
@@ -680,53 +882,6 @@ fn timeline_records_to_trace_events(
             })
         })
         .collect()
-}
-
-#[tauri::command]
-pub async fn approve_tool(
-    approval_id: String,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> CommandResult<()> {
-    resolve_tool_approval(
-        approval_id,
-        pl_core::ToolApprovalDecision::Approved,
-        app,
-        state.approvals.clone(),
-    )
-    .await;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn deny_tool(
-    approval_id: String,
-    reason: Option<String>,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> CommandResult<()> {
-    let reason = reason
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "denied by user".to_string());
-    resolve_tool_approval(
-        approval_id,
-        pl_core::ToolApprovalDecision::Denied { reason },
-        app,
-        state.approvals.clone(),
-    )
-    .await;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn answer_user_input(
-    request_id: String,
-    response: UserInputResponse,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> CommandResult<()> {
-    resolve_user_input(request_id, response, app, state.user_inputs.clone()).await;
-    Ok(())
 }
 
 #[tauri::command]
@@ -847,6 +1002,16 @@ async fn project_selection_data(
         Some(session_id) => Some(load_session_runtime_dto(&state.studio, session_id).await?),
         None => None,
     };
+    let interactions = match selected_session_id.as_deref() {
+        Some(session_id) => {
+            state
+                .studio
+                .store()
+                .list_pending_interactions(session_id)
+                .await?
+        }
+        None => Vec::new(),
+    };
     Ok(ProjectSelectionDto {
         selected_project_id: project_id,
         projects: project_dtos(state.studio.list_projects().await?),
@@ -855,6 +1020,7 @@ async fn project_selection_data(
         agent_events: agent_event_dtos(agent_events),
         agents: agent_dtos(agents),
         session_runtime,
+        interactions,
         lsp_health: lsp_health_update_dto(&state.studio).await?,
     })
 }

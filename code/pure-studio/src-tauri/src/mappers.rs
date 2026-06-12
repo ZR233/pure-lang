@@ -771,6 +771,7 @@ pub fn timeline_events_to_items(events: &[TraceEvent]) -> Vec<pl_protocol::Timel
                 }
             }
             TraceEventKind::PlanLifecycleChanged { .. }
+            | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => {}
         }
     }

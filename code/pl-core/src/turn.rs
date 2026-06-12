@@ -212,6 +212,10 @@ pub type ToolApprovalCallback =
     Arc<dyn Fn(ToolApprovalRequest) -> ToolApprovalFuture + Send + Sync>;
 pub type UserInputFuture = Pin<Box<dyn Future<Output = UserInputResponse> + Send>>;
 pub type UserInputCallback = Arc<dyn Fn(UserInputRequest) -> UserInputFuture + Send + Sync>;
+pub type InteractionFuture =
+    Pin<Box<dyn Future<Output = pl_protocol::InteractionResolution> + Send>>;
+pub type InteractionCallback =
+    Arc<dyn Fn(pl_protocol::InteractionRequest) -> InteractionFuture + Send + Sync>;
 
 /// 会话级权限模式。
 ///
@@ -304,6 +308,7 @@ pub struct TurnOptions {
     pub permission_mode: PermissionMode,
     pub tool_approval_callback: Option<ToolApprovalCallback>,
     pub user_input_callback: Option<UserInputCallback>,
+    pub interaction_callback: Option<InteractionCallback>,
     pub cancellation_token: Option<CancellationToken>,
     pub tool_execution_mode: ToolExecutionMode,
 }
@@ -319,6 +324,7 @@ impl TurnOptions {
             },
             tool_approval_callback: None,
             user_input_callback: None,
+            interaction_callback: None,
             cancellation_token: None,
             tool_execution_mode: ToolExecutionMode::ModelDefault,
         }
@@ -330,6 +336,7 @@ impl TurnOptions {
             permission_mode: PermissionMode::RequestApproval,
             tool_approval_callback: Some(callback),
             user_input_callback: None,
+            interaction_callback: None,
             cancellation_token: None,
             tool_execution_mode: ToolExecutionMode::ModelDefault,
         }
@@ -351,6 +358,11 @@ impl TurnOptions {
 
     pub fn with_user_input_callback(mut self, callback: UserInputCallback) -> Self {
         self.user_input_callback = Some(callback);
+        self
+    }
+
+    pub fn with_interaction_callback(mut self, callback: InteractionCallback) -> Self {
+        self.interaction_callback = Some(callback);
         self
     }
 
@@ -383,6 +395,10 @@ impl std::fmt::Debug for TurnOptions {
             .field(
                 "user_input_callback",
                 &self.user_input_callback.as_ref().map(|_| "<callback>"),
+            )
+            .field(
+                "interaction_callback",
+                &self.interaction_callback.as_ref().map(|_| "<callback>"),
             )
             .field(
                 "cancellation_token",

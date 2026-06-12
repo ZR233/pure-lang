@@ -26,10 +26,8 @@ import type {
   TimelineItemDeltaEvent,
   TurnPhase,
   TurnStatus,
-  ToolApprovalRequest,
-  ToolApprovalResolved,
-  UserInputRequest,
-  UserInputResolved,
+  InteractionChangedPayload,
+  InteractionRequest,
 } from "../types";
 import {
   applyLiveTimelineEvent,
@@ -50,26 +48,6 @@ export type SettingsTab =
   | "mcp"
   | "security"
   | "general";
-export type PlanActionMode = "choice" | "discuss";
-
-export type PlanActionState = {
-  planId: string;
-  content: string;
-  mode: PlanActionMode;
-};
-
-type PlanActionEligibility = "completedPlan" | "currentRunPlan";
-
-type PlanActionCandidate = {
-  planId: string;
-  content: string;
-};
-
-type PlanActionScope = {
-  itemIds?: Set<string>;
-  turnIds?: Set<string>;
-  minSequence?: number | null;
-};
 
 export type StudioState = TimelineStateSlice & {
   projects: ProjectRecord[];
@@ -94,9 +72,8 @@ export type StudioState = TimelineStateSlice & {
   agents: AgentDto[];
   agentTimelineEvents: AgentTimelineEvent[];
   sessionRuntime: SessionRuntime | null;
-  approvals: ToolApprovalRequest[];
-  pendingUserInput: UserInputRequest | null;
-  planAction: PlanActionState | null;
+  interactions: Map<string, InteractionRequest>;
+  activeInteractionId: string | null;
   planStates: Map<string, PlanState>;
   dismissedPlanId: string | null;
   currentRunTimelineBaseSequence: number | null;
@@ -117,6 +94,7 @@ export type StudioAction =
       sessionId: string | null;
       items: TimelineItem[];
       planStates?: PlanState[];
+      interactions?: InteractionRequest[];
       nextSequence: number;
     }
   | { type: "timelineLoadFailed"; sessionId: string | null; status: string }
@@ -141,12 +119,7 @@ export type StudioAction =
   | { type: "configLoaded"; payload: ConfigPayload; status?: string }
   | { type: "mcpHealthUpdated"; payload: McpHealthUpdatedPayload }
   | { type: "lspHealthUpdated"; payload: LspHealthUpdatedPayload }
-  | { type: "enqueueApproval"; payload: ToolApprovalRequest; status: string }
-  | { type: "resolveApproval"; payload: ToolApprovalResolved; status: string }
-  | { type: "userInputRequested"; payload: UserInputRequest; status: string }
-  | { type: "userInputResolved"; payload: UserInputResolved; status: string }
-  | { type: "setPlanActionMode"; mode: PlanActionMode }
-  | { type: "dismissPlanAction"; planId?: string | null }
+  | { type: "interactionChanged"; payload: InteractionChangedPayload; status?: string }
   | {
       type: "planLifecycleLoaded";
       sessionId: string;
@@ -197,9 +170,8 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   agentTimelineEvents: [],
   ...emptyTimelineState(),
   sessionRuntime: null,
-  approvals: [],
-  pendingUserInput: null,
-  planAction: null,
+  interactions: new Map(),
+  activeInteractionId: null,
   planStates: new Map(),
   dismissedPlanId: null,
   currentRunTimelineBaseSequence: null,
@@ -229,7 +201,12 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         ...configFields(state.selectedProviderId, action.payload.config),
         status: action.status,
         turnPhase: "idle",
-        planAction: null,
+        ...interactionState(
+          new Map(),
+          action.payload.interactions ?? [],
+          action.payload.selectedSessionId ?? null,
+          false,
+        ),
         planStates: new Map(),
         dismissedPlanId: null,
         currentRunTimelineBaseSequence: null,
@@ -238,10 +215,16 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, status: action.status };
     case "timelineLoaded":
       if (action.sessionId !== state.selectedSessionId) return state;
-      return clearHandledPlanAction({
+      return {
         ...mergeTimelineSnapshot(state, action.sessionId, action.items ?? [], action.nextSequence),
         planStates: mergePlanStates(state.planStates, action.planStates ?? []),
-      });
+        ...interactionState(
+          state.interactions,
+          action.interactions ?? [],
+          state.selectedSessionId,
+          state.isBusy,
+        ),
+      };
     case "timelineLoadFailed":
       if (action.sessionId !== state.selectedSessionId) return state;
       return { ...state, status: action.status };
@@ -258,9 +241,12 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         sessionRuntime: action.payload.sessionRuntime ?? null,
         lspServers: action.payload.lspHealth?.lspServers ?? state.lspServers,
         ...emptyTimelineState(),
-        approvals: [],
-        pendingUserInput: null,
-        planAction: null,
+        ...interactionState(
+          new Map(),
+          action.payload.interactions ?? [],
+          action.payload.selectedSessionId ?? null,
+          false,
+        ),
         planStates: new Map(),
         dismissedPlanId: null,
         currentRunTimelineBaseSequence: null,
@@ -280,6 +266,12 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
           ),
           agents: mergeAgents(state.agents, action.payload.agents ?? []),
           sessionRuntime: action.payload.sessionRuntime ?? state.sessionRuntime,
+          ...interactionState(
+            state.interactions,
+            action.payload.interactions ?? [],
+            state.selectedSessionId,
+            state.isBusy,
+          ),
           status: action.status,
         };
       }
@@ -291,9 +283,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         agents: mergeAgents([], action.payload.agents ?? []),
         sessionRuntime: action.payload.sessionRuntime ?? null,
         ...emptyTimelineState(),
-        approvals: [],
-        pendingUserInput: null,
-        planAction: null,
+        ...interactionState(new Map(), action.payload.interactions ?? [], action.payload.sessionId, false),
         planStates: new Map(),
         dismissedPlanId: null,
         currentRunTimelineBaseSequence: null,
@@ -319,17 +309,14 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       if (action.payload.sessionId !== state.selectedSessionId) {
         return state;
       }
-      const scope = currentRunPlanScope(state, action.payload.timelineItems ?? []);
-      return setPendingPlanAction({
-        ...clearHandledPlanAction({
-          ...mergeRunPromptTimeline(
+      return {
+        ...mergeRunPromptTimeline(
           removeOptimisticTimelineItems(state),
           action.payload.sessionId,
           action.payload.timelineItems ?? [],
           action.payload.timelineNextSequence,
-          ),
-          planStates: mergePlanStates(state.planStates, action.payload.planStates ?? []),
-        }),
+        ),
+        planStates: mergePlanStates(state.planStates, action.payload.planStates ?? []),
         selectedSessionId: action.payload.sessionId,
         sessions: action.payload.sessions,
         agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
@@ -339,9 +326,14 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         turnStartedAt: null,
         status: action.status,
         isBusy: false,
-        pendingUserInput: null,
+        ...interactionState(
+          state.interactions,
+          action.payload.interactions ?? [],
+          action.payload.sessionId,
+          false,
+        ),
         currentRunTimelineBaseSequence: null,
-      }, scope, "currentRunPlan");
+      };
     }
     case "runPromptFailed":
       if (action.sessionId && action.sessionId !== state.selectedSessionId) {
@@ -353,12 +345,19 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         turnPhase: "failed",
         turnStartedAt: null,
         isBusy: false,
-        pendingUserInput: null,
-        planAction: null,
+        ...clearSessionInteractions(state.interactions, state.selectedSessionId),
         currentRunTimelineBaseSequence: null,
       };
     case "setBusy":
-      return { ...state, isBusy: action.value };
+      return {
+        ...state,
+        isBusy: action.value,
+        activeInteractionId: selectActiveInteractionId(
+          state.interactions,
+          state.selectedSessionId,
+          action.value,
+        ),
+      };
     case "setPrompt":
       return { ...state, prompt: action.prompt };
     case "setManualPath":
@@ -432,64 +431,18 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
             }
           : state.sessionRuntime,
       };
-    case "enqueueApproval":
-      if (action.payload.sessionId !== state.selectedSessionId) {
-        return state;
-      }
-      return {
-        ...state,
-        approvals: [action.payload, ...state.approvals],
-        status: action.status,
-        turnPhase: "approval",
-      };
-    case "resolveApproval":
-      return {
-        ...state,
-        approvals: state.approvals.filter((approval) => approval.approvalId !== action.payload.approvalId),
-        status: action.status,
-        turnPhase: state.turnPhase === "stopping" ? "stopping" : "tool",
-      };
-    case "userInputRequested":
-      if (action.payload.sessionId !== state.selectedSessionId) {
-        return state;
-      }
-      return {
-        ...state,
-        pendingUserInput: action.payload,
-        planAction: null,
-        status: action.status,
-        turnPhase: "userInput",
-      };
-    case "userInputResolved":
-      if (state.pendingUserInput?.requestId !== action.payload.requestId) {
-        return state;
-      }
-      return {
-        ...state,
-        pendingUserInput: null,
-        status: action.status,
-        turnPhase: state.turnPhase === "stopping" ? "stopping" : "tool",
-      };
-    case "setPlanActionMode":
-      return state.planAction
-        ? { ...state, planAction: { ...state.planAction, mode: action.mode } }
-        : state;
-    case "dismissPlanAction":
-      return {
-        ...state,
-        dismissedPlanId: action.planId ?? state.planAction?.planId ?? state.dismissedPlanId,
-        planAction: null,
-      };
+    case "interactionChanged":
+      return reduceInteractionChanged(state, action.payload, action.status);
     case "planLifecycleLoaded":
       if (action.sessionId !== state.selectedSessionId) {
         return state;
       }
-      return clearHandledPlanAction({
+      return {
         ...state,
         planStates: mergePlanStates(state.planStates, action.planStates ?? []),
         timelineNextSequence: Math.max(state.timelineNextSequence, action.timelineNextSequence),
         status: action.status ?? state.status,
-      });
+      };
     case "stopRequested":
       return { ...state, turnPhase: "stopping", status: action.status };
     case "stopFallback":
@@ -499,8 +452,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         turnPhase: "interrupted",
         turnStartedAt: null,
         isBusy: false,
-        pendingUserInput: null,
-        planAction: null,
+        ...clearSessionInteractions(state.interactions, state.selectedSessionId),
         currentRunTimelineBaseSequence: null,
       };
     case "promptSubmitted":
@@ -513,8 +465,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         turnPhase: "running",
         turnStartedAt: action.startedAt,
         currentRunTimelineBaseSequence,
-        pendingUserInput: null,
-        planAction: null,
+        ...clearSessionInteractions(state.interactions, state.selectedSessionId),
       };
     case "agentEvent":
       if (action.sessionId !== state.selectedSessionId) {
@@ -542,51 +493,117 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
   }
 }
 
-function setPendingPlanAction(
-  state: StudioState,
-  scope: PlanActionScope,
-  eligibility: PlanActionEligibility,
-): StudioState {
-  const plan = latestEligiblePlanCandidate(state, scope, eligibility);
-  if (!plan) {
-    return state;
+function interactionState(
+  current: Map<string, InteractionRequest>,
+  incoming: InteractionRequest[],
+  selectedSessionId: string | null,
+  isBusy = false,
+): Pick<StudioState, "interactions" | "activeInteractionId"> {
+  const interactions = new Map(current);
+  for (const interaction of incoming) {
+    if (!interaction?.interactionId) {
+      continue;
+    }
+    interactions.set(interaction.interactionId, interaction);
   }
-  if (plan.planId === state.dismissedPlanId) {
-    return state.planAction ? { ...state, planAction: null } : state;
-  }
-  if (state.planStates.has(plan.planId)) {
-    return state.planAction ? { ...state, planAction: null } : state;
-  }
-  const currentPlanAction = state.planAction;
-  const samePlanStillPending = currentPlanAction?.planId === plan.planId;
-  const mode = samePlanStillPending ? currentPlanAction.mode : "choice";
-  const nextPlanAction = {
-    planId: plan.planId,
-    content: plan.content,
-    mode,
+  return {
+    interactions,
+    activeInteractionId: selectActiveInteractionId(interactions, selectedSessionId, isBusy),
   };
-  if (
-    state.planAction?.planId === nextPlanAction.planId &&
-    state.planAction.content === nextPlanAction.content &&
-    state.planAction.mode === nextPlanAction.mode
-  ) {
-    return state;
-  }
-  return { ...state, planAction: nextPlanAction };
 }
 
-function currentRunPlanScope(state: StudioState, currentRunItems: TimelineItem[]): PlanActionScope {
-  const itemIds = new Set(currentRunItems.map((item) => item.itemId));
-  const turnIds = new Set(
-    currentRunItems
-      .map((item) => item.turnId)
-      .filter((turnId): turnId is string => Boolean(turnId)),
-  );
+function reduceInteractionChanged(
+  state: StudioState,
+  payload: InteractionChangedPayload,
+  status?: string,
+): StudioState {
+  const interaction = payload.event.interaction;
+  if (interaction.scope.sessionId !== state.selectedSessionId) {
+    return state;
+  }
+  const interactions = new Map(state.interactions);
+  interactions.set(interaction.interactionId, interaction);
   return {
-    itemIds,
-    turnIds,
-    minSequence: state.currentRunTimelineBaseSequence,
+    ...state,
+    interactions,
+    activeInteractionId: selectActiveInteractionId(interactions, state.selectedSessionId, state.isBusy),
+    status: status ?? state.status,
+    turnPhase: phaseForInteraction(interaction, state.turnPhase),
   };
+}
+
+function clearSessionInteractions(
+  current: Map<string, InteractionRequest>,
+  selectedSessionId: string | null,
+): Pick<StudioState, "interactions" | "activeInteractionId"> {
+  if (!selectedSessionId) {
+    return { interactions: current, activeInteractionId: null };
+  }
+  const interactions = new Map(current);
+  for (const [id, interaction] of interactions) {
+    if (interaction.scope.sessionId === selectedSessionId && interaction.status === "pending") {
+      interactions.delete(id);
+    }
+  }
+  return {
+    interactions,
+    activeInteractionId: selectActiveInteractionId(interactions, selectedSessionId, false),
+  };
+}
+
+export function selectActiveInteractionId(
+  interactions: Map<string, InteractionRequest>,
+  selectedSessionId: string | null,
+  isBusy: boolean,
+): string | null {
+  if (!selectedSessionId) {
+    return null;
+  }
+  const pending = [...interactions.values()].filter(
+    (interaction) =>
+      interaction.scope.sessionId === selectedSessionId &&
+      interaction.status === "pending" &&
+      (!isBusy || interaction.kind !== "planConfirmation"),
+  );
+  pending.sort((left, right) => {
+    const priorityDelta = interactionPriority(right) - interactionPriority(left);
+    if (priorityDelta !== 0) {
+      return priorityDelta;
+    }
+    if (right.updatedAt !== left.updatedAt) {
+      return right.updatedAt - left.updatedAt;
+    }
+    return right.interactionId.localeCompare(left.interactionId);
+  });
+  return pending[0]?.interactionId ?? null;
+}
+
+function interactionPriority(interaction: InteractionRequest): number {
+  switch (interaction.kind) {
+    case "toolApproval":
+      return 3;
+    case "userInput":
+      return 2;
+    case "planConfirmation":
+      return 1;
+  }
+}
+
+function phaseForInteraction(interaction: InteractionRequest, current: TurnPhase): TurnPhase {
+  if (interaction.status !== "pending") {
+    if (interaction.kind === "planConfirmation") {
+      return current === "stopping" ? "stopping" : "idle";
+    }
+    return current === "stopping" ? "stopping" : "tool";
+  }
+  switch (interaction.kind) {
+    case "toolApproval":
+      return "approval";
+    case "userInput":
+      return "userInput";
+    case "planConfirmation":
+      return current;
+  }
 }
 
 function mergePlanStates(
@@ -604,55 +621,6 @@ function mergePlanStates(
     next.set(planState.planId, planState);
   }
   return next;
-}
-
-function clearHandledPlanAction<T extends StudioState>(state: T): T {
-  if (!state.planAction || !state.planStates.has(state.planAction.planId)) {
-    return state;
-  }
-  return { ...state, planAction: null };
-}
-
-function latestEligiblePlanCandidate(
-  state: StudioState,
-  scope: PlanActionScope,
-  eligibility: PlanActionEligibility,
-): PlanActionCandidate | null {
-  const eligiblePlanIds = scope.itemIds ?? new Set<string>();
-  const eligibleTurnIds = scope.turnIds ?? new Set<string>();
-  for (let index = state.timelineOrder.length - 1; index >= 0; index--) {
-    const itemId = state.timelineOrder[index];
-    if (!itemId) {
-      continue;
-    }
-    const item = state.timelineItems.get(itemId);
-    if (!item?.content.trim()) {
-      continue;
-    }
-    const itemIsEligible =
-      eligiblePlanIds.has(itemId) ||
-      eligibleTurnIds.has(item.turnId) ||
-      scope.minSequence != null && item.sequence >= scope.minSequence;
-    if (!itemIsEligible) {
-      continue;
-    }
-    if (item.kind === "plan" && (eligibility === "currentRunPlan" || item.status === "completed")) {
-      return { planId: item.itemId, content: item.content };
-    }
-    if (eligibility === "currentRunPlan" && item.kind === "text" && item.role === "assistant") {
-      const proposedPlan = extractProposedPlanContent(item.content);
-      if (proposedPlan) {
-        return { planId: item.itemId, content: proposedPlan };
-      }
-    }
-  }
-  return null;
-}
-
-function extractProposedPlanContent(content: string): string | null {
-  const match = content.match(/<proposed_plan>\s*([\s\S]*?)\s*<\/proposed_plan>/i);
-  const plan = match?.[1]?.trim();
-  return plan || null;
 }
 
 function appendOptimisticPrompt(state: StudioState, prompt: string, startedAt: number): StudioState {
@@ -832,6 +800,16 @@ function reduceAgentEvent(
       turnPhase: state.turnPhase === "stopping" ? "stopping" : "tool",
     };
   }
+  if ("interactionChanged" in event) {
+    return reduceInteractionChanged(
+      state,
+      {
+        sessionId: state.selectedSessionId ?? "",
+        event: event.interactionChanged.event,
+      },
+      statusText,
+    );
+  }
   if ("timelineItemStarted" in event) {
     const timelineState = applyLiveTimelineEvent(state, state.selectedSessionId ?? "", event);
     return {
@@ -850,13 +828,12 @@ function reduceAgentEvent(
     };
   }
   if ("timelineItemCompleted" in event) {
-    const nextState = applyLiveTimelineEvent(state, state.selectedSessionId ?? "", event);
     const completed = event.timelineItemCompleted.item;
-    return setPendingPlanAction({
-      ...nextState,
+    return {
+      ...applyLiveTimelineEvent(state, state.selectedSessionId ?? "", event),
       status: statusText,
       turnPhase: phaseForTimelineItem(completed, state.turnPhase),
-    }, { itemIds: new Set([completed.itemId]) }, "completedPlan");
+    };
   }
   if ("timelineItemFailed" in event) {
     return {

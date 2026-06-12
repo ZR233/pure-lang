@@ -152,6 +152,7 @@ fn tool_diagnostics(events: &[TraceEvent]) -> String {
             }
             TraceEventKind::TimelineItemDelta { .. }
             | TraceEventKind::PlanLifecycleChanged { .. }
+            | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => {}
         }
     }
@@ -172,6 +173,7 @@ fn saw_apply_patch(events: &[TraceEvent]) -> bool {
             .is_some_and(|tool| tool.name == "apply_patch"),
         TraceEventKind::TimelineItemDelta { .. }
         | TraceEventKind::PlanLifecycleChanged { .. }
+        | TraceEventKind::InteractionChanged { .. }
         | TraceEventKind::EnabledToolsRecorded { .. } => false,
     })
 }

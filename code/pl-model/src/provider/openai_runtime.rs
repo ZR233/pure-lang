@@ -620,6 +620,7 @@ mod tests {
                 | TraceEventKind::TimelineItemCompleted { .. }
                 | TraceEventKind::TimelineItemFailed { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::EnabledToolsRecorded { .. } => None,
             });
         assert_eq!(
@@ -781,6 +782,7 @@ mod tests {
                 TraceEventKind::TimelineItemDelta { event } => event.item_id.as_str(),
                 TraceEventKind::TimelineItemFailed { item, .. } => item.item_id.as_str(),
                 TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::EnabledToolsRecorded { .. } => "",
             })
             .filter(|item_id| !item_id.is_empty())

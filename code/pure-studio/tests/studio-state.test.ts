@@ -20,13 +20,13 @@ import type {
   ProviderRecord,
   ProviderUsageRecord,
   PlanState,
+  InteractionRequest,
   RoleRecord,
   RunPromptResponse,
   SessionRuntime,
   TimelineItem,
   TimelineItemDeltaEvent,
   ToolCallStatus2,
-  UserInputRequest,
 } from "../src/types";
 
 function assertEqual<T>(actual: T, expected: T) {
@@ -152,6 +152,56 @@ function planItem(itemId: string, turnId: string, sequence: number, content: str
   };
 }
 
+function userInputInteraction(interactionId = "call-ask"): InteractionRequest {
+  return {
+    interactionId,
+    kind: "userInput",
+    status: "pending",
+    scope: {
+      sessionId: "session-1",
+      turnId: "turn-1",
+      itemId: interactionId,
+      toolId: interactionId,
+    },
+    payload: {
+      type: "userInput",
+      questions: [
+        {
+          id: "mode",
+          header: "Mode",
+          question: "Which mode?",
+          options: [{ label: "Fast", description: "Use the fast path." }],
+        },
+      ],
+    },
+    createdAt: 10,
+    updatedAt: 10,
+  };
+}
+
+function planConfirmationInteraction(
+  planId = "turn-1-plan",
+  content = "1. Inspect",
+): InteractionRequest {
+  return {
+    interactionId: `plan-confirmation-${planId}`,
+    kind: "planConfirmation",
+    status: "pending",
+    scope: {
+      sessionId: "session-1",
+      turnId: "turn-1",
+      itemId: planId,
+    },
+    payload: {
+      type: "planConfirmation",
+      planId,
+      content,
+    },
+    createdAt: 10,
+    updatedAt: 10,
+  };
+}
+
 function thinkingItem(itemId: string, turnId: string, sequence: number, content: string): TimelineItem {
   return {
     turnId,
@@ -262,6 +312,7 @@ function response(timelineItems: TimelineItem[]): RunPromptResponse {
     agents: [],
     sessionRuntime: runtime,
     timelineItems,
+    interactions: [],
     timelineNextSequence,
     turnStatus: "completed",
     turnAbortReason: null,
@@ -308,6 +359,7 @@ function selectedState() {
       selectedSessionId: "session-1",
       agentEvents: [],
       agents: [],
+      interactions: [],
       sessionRuntime: runtime,
       config,
     },
@@ -523,50 +575,49 @@ function runPromptLoadedErroredKeepsFailedStatusText() {
 }
 
 function userInputRequestStoresPendingComposerState() {
-  const request: UserInputRequest = {
-    requestId: "call-ask",
-    sessionId: "session-1",
-    toolId: "call-ask",
-    questions: [
-      {
-        id: "mode",
-        header: "Mode",
-        question: "Which mode?",
-        options: [{ label: "Fast", description: "Use the fast path." }],
-      },
-    ],
-  };
-
+  const interaction = userInputInteraction();
   const state = studioReducer(selectedState(), {
-    type: "userInputRequested",
-    payload: request,
+    type: "interactionChanged",
+    payload: {
+      sessionId: "session-1",
+      event: { interaction },
+    },
     status: "waiting",
   });
 
   assertEqual(state.turnPhase, "userInput");
-  assertDeepEqual(state.pendingUserInput, request);
+  assertEqual(state.activeInteractionId, interaction.interactionId);
+  assertDeepEqual(state.interactions.get(interaction.interactionId), interaction);
 }
 
 function userInputResolvedClearsPendingComposerState() {
-  const request: UserInputRequest = {
-    requestId: "call-ask",
-    sessionId: "session-1",
-    toolId: "call-ask",
-    questions: [{ id: "notes", header: "Notes", question: "Anything else?" }],
-  };
+  const pendingInteraction = userInputInteraction();
   const pending = studioReducer(selectedState(), {
-    type: "userInputRequested",
-    payload: request,
+    type: "interactionChanged",
+    payload: {
+      sessionId: "session-1",
+      event: { interaction: pendingInteraction },
+    },
     status: "waiting",
   });
+  const resolvedInteraction: InteractionRequest = {
+    ...pendingInteraction,
+    status: "resolved",
+    resolvedAt: 11,
+    updatedAt: 11,
+    resolution: { type: "userInput", answers: {} },
+  };
 
   const resolved = studioReducer(pending, {
-    type: "userInputResolved",
-    payload: { requestId: "call-ask" },
+    type: "interactionChanged",
+    payload: {
+      sessionId: "session-1",
+      event: { interaction: resolvedInteraction },
+    },
     status: "answered",
   });
 
-  assertEqual(resolved.pendingUserInput, null);
+  assertEqual(resolved.activeInteractionId, null);
   assertEqual(resolved.turnPhase, "tool");
 }
 
@@ -759,80 +810,40 @@ function livePlanDeltaCreatesPlanEntry() {
   }
   assertEqual(plan.content, "1. Inspect\n");
   assertEqual(liveDelta.timelineItems.get("turn-1-plan")?.content, "1. Inspect\n");
-  assertEqual(liveDelta.planAction, null);
+  assertEqual(liveDelta.activeInteractionId, null);
 }
 
-function runPromptLoadedPlanCreatesPendingPlanAction() {
-  const state = studioReducer(selectedState(), {
-    type: "runPromptLoaded",
-    payload: response([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
-    status: "done",
-  });
-
-  assertDeepEqual(state.planAction, {
-    planId: "turn-1-plan",
-    content: "1. Inspect",
-    mode: "choice",
-  });
-}
-
-function runPromptLoadedStreamingPlanCreatesPendingPlanAction() {
-  const streamingPlan = {
-    ...planItem("turn-1-plan", "turn-1", 10, "1. Inspect"),
-    status: "streaming" as const,
-  };
-  const state = studioReducer(selectedState(), {
-    type: "runPromptLoaded",
-    payload: response([streamingPlan]),
-    status: "done",
-  });
-
-  assertDeepEqual(state.planAction, {
-    planId: "turn-1-plan",
-    content: "1. Inspect",
-    mode: "choice",
-  });
-}
-
-function runPromptLoadedProposedPlanTextCreatesPendingPlanAction() {
-  const state = studioReducer(selectedState(), {
-    type: "runPromptLoaded",
-    payload: response([
-      textItem(
-        "turn-1-text",
-        10,
-        "好的，计划如下：\n\n<proposed_plan>\n# 修复雨滴效果\n\n## 摘要\n- 调整 canvas 雨滴。\n</proposed_plan>",
-      ),
-    ]),
-    status: "done",
-  });
-
-  assertDeepEqual(state.planAction, {
-    planId: "turn-1-text",
-    content: "# 修复雨滴效果\n\n## 摘要\n- 调整 canvas 雨滴。",
-    mode: "choice",
-  });
-}
-
-function runPromptLoadedPlanStateSuppressesPendingPlanAction() {
+function runPromptLoadedUsesBackendPlanConfirmationInteraction() {
+  const interaction = planConfirmationInteraction();
   const state = studioReducer(selectedState(), {
     type: "runPromptLoaded",
     payload: {
       ...response([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
-      planStates: [planState("turn-1-plan", "accepted")],
+      interactions: [interaction],
     },
     status: "done",
   });
 
-  assertEqual(state.planAction, null);
-  assertEqual(state.planStates.get("turn-1-plan")?.state, "accepted");
+  assertEqual(state.activeInteractionId, interaction.interactionId);
+  assertDeepEqual(state.interactions.get(interaction.interactionId), interaction);
 }
 
-function planLifecycleLoadedClearsExistingPlanAction() {
-  const withPlan = studioReducer(selectedState(), {
+function runPromptLoadedWithoutInteractionDoesNotInferPlanConfirmation() {
+  const state = studioReducer(selectedState(), {
     type: "runPromptLoaded",
     payload: response([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
     status: "done",
+  });
+
+  assertEqual(state.activeInteractionId, null);
+}
+
+function planLifecycleLoadedKeepsInteractionStateSeparate() {
+  const interaction = planConfirmationInteraction();
+  const withPlan = studioReducer(selectedState(), {
+    type: "interactionChanged",
+    payload: { sessionId: "session-1", event: { interaction } },
+    status: "ready",
   });
   const dismissed = studioReducer(withPlan, {
     type: "planLifecycleLoaded",
@@ -842,7 +853,7 @@ function planLifecycleLoadedClearsExistingPlanAction() {
     status: "ready",
   });
 
-  assertEqual(dismissed.planAction, null);
+  assertEqual(dismissed.activeInteractionId, interaction.interactionId);
   assertEqual(dismissed.planStates.get("turn-1-plan")?.state, "dismissed");
   assertEqual(dismissed.timelineNextSequence, 12);
 }
@@ -858,41 +869,12 @@ function timelineLoadedPlanStateAnnotatesPlanWithoutOpeningComposer() {
   const entries = selectTimelineEntries(state);
   const plan = entries.find((entry) => entry.kind === "plan");
 
-  assertEqual(state.planAction, null);
+  assertEqual(state.activeInteractionId, null);
   assertEqual(plan?.kind, "plan");
   if (plan?.kind !== "plan") {
     throw new Error("expected plan entry");
   }
   assertEqual(plan.planState?.state, "dismissed");
-}
-
-function dismissPlanActionPreventsSamePlanFromReopening() {
-  const withPlan = studioReducer(selectedState(), {
-    type: "runPromptLoaded",
-    payload: response([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
-    status: "done",
-  });
-  const dismissed = studioReducer(withPlan, { type: "dismissPlanAction" });
-  const reloaded = studioReducer(dismissed, {
-    type: "runPromptLoaded",
-    payload: response([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
-    status: "done",
-  });
-
-  assertEqual(dismissed.planAction, null);
-  assertEqual(dismissed.dismissedPlanId, "turn-1-plan");
-  assertEqual(reloaded.planAction, null);
-}
-
-function setPlanActionModeUpdatesPendingPlanAction() {
-  const withPlan = studioReducer(selectedState(), {
-    type: "runPromptLoaded",
-    payload: response([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
-    status: "done",
-  });
-  const discussing = studioReducer(withPlan, { type: "setPlanActionMode", mode: "discuss" });
-
-  assertEqual(discussing.planAction?.mode, "discuss");
 }
 
 function historicalTimelineLoadDoesNotCreatePlanAction() {
@@ -903,7 +885,7 @@ function historicalTimelineLoadDoesNotCreatePlanAction() {
     nextSequence: 11,
   });
 
-  assertEqual(state.planAction, null);
+  assertEqual(state.activeInteractionId, null);
 }
 
 function laterRunWithoutPlanDoesNotReopenHistoricalPlan() {
@@ -925,33 +907,28 @@ function laterRunWithoutPlanDoesNotReopenHistoricalPlan() {
     status: "done",
   });
 
-  assertEqual(completed.planAction, null);
+  assertEqual(completed.activeInteractionId, null);
 }
 
-function runPromptLoadedCanOpenLivePlanByCurrentRunSequence() {
+function runPromptLoadedKeepsLiveInteractionByCurrentRun() {
   const submitted = studioReducer(selectedState(), {
     type: "promptSubmitted",
     status: "running",
     startedAt: 100,
     prompt: "make a plan",
   });
-  const livePlan = studioReducer(submitted, {
-    type: "agentEvent",
-    sessionId: "session-1",
-    event: { timelineItemCompleted: { sequence: 12, item: planItem("turn-2-plan", "turn-2", 12, "1. Inspect") } },
-    statusText: "running",
-  });
-  const completed = studioReducer(livePlan, {
+  const interaction = planConfirmationInteraction("turn-2-plan", "1. Inspect");
+  const completed = studioReducer(submitted, {
     type: "runPromptLoaded",
-    payload: responseWithSequence([], 13),
+    payload: {
+      ...responseWithSequence([], 13),
+      interactions: [interaction],
+    },
     status: "done",
   });
 
-  assertDeepEqual(completed.planAction, {
-    planId: "turn-2-plan",
-    content: "1. Inspect",
-    mode: "choice",
-  });
+  assertEqual(completed.activeInteractionId, interaction.interactionId);
+  assertDeepEqual(completed.interactions.get(interaction.interactionId), interaction);
 }
 
 function optimisticSessionModeSwitchesSelectedSessionOnly() {
@@ -1166,7 +1143,7 @@ function completedThinkingEntryUsesDuration() {
   assertEqual(thought.durationSeconds, 125);
 }
 
-function liveCompletedPlanCreatesPendingPlanAction() {
+function liveCompletedPlanDoesNotCreatePlanInteraction() {
   const item = planItem("turn-1-plan", "turn-1", 10, "1. Inspect");
   const state = studioReducer(selectedState(), {
     type: "agentEvent",
@@ -1175,21 +1152,17 @@ function liveCompletedPlanCreatesPendingPlanAction() {
     statusText: "running",
   });
 
-  assertDeepEqual(state.planAction, {
-    planId: "turn-1-plan",
-    content: "1. Inspect",
-    mode: "choice",
-  });
+  assertEqual(state.activeInteractionId, null);
 }
 
-function sessionSelectionClearsPlanActionState() {
+function sessionSelectionClearsInteractionState() {
+  const interaction = planConfirmationInteraction();
   const withPlan = studioReducer(selectedState(), {
-    type: "runPromptLoaded",
-    payload: response([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
+    type: "interactionChanged",
+    payload: { sessionId: "session-1", event: { interaction } },
     status: "done",
   });
-  const dismissed = studioReducer(withPlan, { type: "dismissPlanAction" });
-  const switched = studioReducer(dismissed, {
+  const switched = studioReducer(withPlan, {
     type: "sessionSelectionLoaded",
     status: "loaded",
     payload: {
@@ -1205,12 +1178,13 @@ function sessionSelectionClearsPlanActionState() {
       ],
       agentEvents: [],
       agents: [],
+      interactions: [],
       sessionRuntime: runtime,
     },
   });
 
-  assertEqual(switched.planAction, null);
-  assertEqual(switched.dismissedPlanId, null);
+  assertEqual(switched.activeInteractionId, null);
+  assertEqual(switched.interactions.size, 0);
 }
 
 function selectingCurrentSessionKeepsTimelineState() {
@@ -1222,7 +1196,10 @@ function selectingCurrentSessionKeepsTimelineState() {
   });
   const withPlan = studioReducer(loaded, {
     type: "runPromptLoaded",
-    payload: response([planItem("turn-1-plan", "turn-1", 12, "1. Inspect")]),
+    payload: {
+      ...response([planItem("turn-1-plan", "turn-1", 12, "1. Inspect")]),
+      interactions: [planConfirmationInteraction()],
+    },
     status: "done",
   });
   const selectedAgain = studioReducer(withPlan, {
@@ -1233,13 +1210,14 @@ function selectingCurrentSessionKeepsTimelineState() {
       sessions: withPlan.sessions,
       agentEvents: [],
       agents: [],
+      interactions: [planConfirmationInteraction()],
       sessionRuntime: runtime,
     },
   });
 
   assertDeepEqual(selectedAgain.timelineOrder, withPlan.timelineOrder);
   assertEqual(selectedAgain.timelineItems.get("turn-1-plan")?.content, "1. Inspect");
-  assertDeepEqual(selectedAgain.planAction, withPlan.planAction);
+  assertEqual(selectedAgain.activeInteractionId, withPlan.activeInteractionId);
   assertEqual(selectedAgain.timelineNextSequence, withPlan.timelineNextSequence);
 }
 
@@ -2067,17 +2045,13 @@ thinkingFromDifferentTurnsDoesNotMerge();
 assistantTextBreaksToolGroup();
 planEntryBreaksToolGroupAndRendersAsPlan();
 livePlanDeltaCreatesPlanEntry();
-runPromptLoadedPlanCreatesPendingPlanAction();
-runPromptLoadedStreamingPlanCreatesPendingPlanAction();
-runPromptLoadedProposedPlanTextCreatesPendingPlanAction();
-runPromptLoadedPlanStateSuppressesPendingPlanAction();
-planLifecycleLoadedClearsExistingPlanAction();
+runPromptLoadedUsesBackendPlanConfirmationInteraction();
+runPromptLoadedWithoutInteractionDoesNotInferPlanConfirmation();
+planLifecycleLoadedKeepsInteractionStateSeparate();
 timelineLoadedPlanStateAnnotatesPlanWithoutOpeningComposer();
-dismissPlanActionPreventsSamePlanFromReopening();
-setPlanActionModeUpdatesPendingPlanAction();
 historicalTimelineLoadDoesNotCreatePlanAction();
 laterRunWithoutPlanDoesNotReopenHistoricalPlan();
-runPromptLoadedCanOpenLivePlanByCurrentRunSequence();
+runPromptLoadedKeepsLiveInteractionByCurrentRun();
 optimisticSessionModeSwitchesSelectedSessionOnly();
 promptSubmittedCreatesOptimisticTimelineFeedback();
 modelTimelineEventClearsWaitingFeedback();
@@ -2087,8 +2061,8 @@ runPromptLoadedClearsOptimisticTimelineFeedback();
 runPromptFailedClearsWaitingFeedback();
 thinkingEntriesExposeStreamingStatusAndDuration();
 completedThinkingEntryUsesDuration();
-liveCompletedPlanCreatesPendingPlanAction();
-sessionSelectionClearsPlanActionState();
+liveCompletedPlanDoesNotCreatePlanInteraction();
+sessionSelectionClearsInteractionState();
 selectingCurrentSessionKeepsTimelineState();
 toolsFromDifferentTurnsDoNotMerge();
 toolGroupStatusUsesPriority();

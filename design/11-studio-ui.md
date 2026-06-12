@@ -115,17 +115,17 @@ Provider 设置页的供应商卡片以可扫读的运维状态为主：头部�
 
 状态栏在窄窗口下保留左侧高频控制，并把右侧只读状态按优先级收入“更多”菜单；更多入口固定跟随左侧控制组显示，避免右侧只读状态挤压时入口也被裁剪。由于桌面布局含左侧项目/会话栏，响应式必须优先按聊天 footer 自身宽度判断，并保留整窗宽度兜底：聊天 footer 约 `1040px` 以下收起能力和子代理，footer 约 `760px` 以下额外收起费用，footer 约 `520px` 以下额外收起上下文。整窗兜底在 `1320px` 以下直接收起费用、能力和子代理，避免不支持 container query 的 WebView2 环境按整窗宽度误判聊天列空间。更多菜单直接展示被收起状态的摘要和详情，不依赖悬浮 popover，必须支持点击、键盘聚焦、外部点击和 `Escape` 关闭，且不得被状态栏横向滚动容器或窗口边界裁剪。
 
-聊天输入区提供 `Auto / Plan` 模式切换，当前值来自选中 session 的 `mode` 并通过后端命令持久化。新会话默认 `auto`。Plan 卡片展示计划正文和轻量状态徽标，不提供“实现计划”按钮。最新计划生成完成后，底部普通输入框自动替换为计划确认 composer。确认 composer 必须展示计划摘要，并提供三个动作：
+聊天输入区提供 `Auto / Plan` 模式切换，当前值来自选中 session 的 `mode` 并通过后端命令持久化。新会话默认 `auto`。Plan 卡片展示计划正文和轻量状态徽标，不提供“实现计划”按钮。最新计划生成完成后，后端创建 `planConfirmation` interaction，底部普通输入框自动替换为计划确认 composer。确认 composer 必须展示计划摘要，并提供三个动作：
 
-- `实现计划`：调用 `implement_plan(sessionId, planId, content)`，后端记录 `accepted`、切回 `auto`、记录 `implementing`、提交 `PLEASE IMPLEMENT THIS PLAN:\n\n{plan}`，完成后记录 `implemented` 或 `implementationFailed`。前端点击后必须立即把当前 session 的本地 `mode` 乐观更新为 `auto`，后端也必须在实施 turn 开始前返回或广播包含最新 session 列表的 mode 更新；因此即使实施 turn 长时间运行、失败或被中断，状态栏也不能继续显示 Plan。
-- `继续讨论`：先调用 `dismiss_plan(sessionId, planId, "discuss")` 关闭当前计划确认，再把用户输入作为普通 prompt 发送，用于继续追问或修改计划，不自动切换到 `auto`。
-- `取消`：调用 `dismiss_plan(sessionId, planId, "dismissed")`，关闭确认 composer，恢复普通输入框，不提交任何内容。
+- `实现计划`：通过 `resolve_interaction(interactionId, { type: "planConfirmation", decision: "implement" })` 解析当前 interaction。后端记录 `accepted`、切回 `auto`、记录 `implementing`、提交 `PLEASE IMPLEMENT THIS PLAN:\n\n{plan}`，完成后记录 `implemented` 或 `implementationFailed`。前端点击后必须立即把当前 session 的本地 `mode` 乐观更新为 `auto`。
+- `继续讨论`：通过同一命令解析为 `decision: "discuss"`，后端记录 `dismissed(reason=discuss)` 并由前端把用户输入作为普通 prompt 发送，用于继续追问或修改计划，不自动切换到 `auto`。
+- `取消`：解析为 `decision: "dismiss"`，后端记录 `dismissed(reason=dismissed)`，关闭确认 composer，恢复普通输入框，不提交任何内容。
 
-计划确认是前端 reducer 的独立 `planAction` 状态，而不是计划卡片组件的局部状态。当前运行轮完成后，后端协议级 plan item 或 assistant 文本中的 `<proposed_plan>...</proposed_plan>` 都可以创建 `planAction`；确认候选应以当前完成 turn 的 `turnId` 为边界，从已经合并到 reducer 的 timeline 中选择最新未处理计划，避免实时事件、lag 后补加载或 `RunPromptResponse.timelineItems` 不完整时漏弹确认。历史 timeline 加载不得自动弹出旧计划。实时流式 delta 阶段不得提前弹出确认 composer。`planStates` 按 `planId` 记录后端生命周期 latest state；已有 `accepted`、`implementing`、`implemented`、`implementationFailed` 或 `dismissed` 状态的计划不得重新弹出确认 composer。切换项目或会话时清空本地 `planAction`，但后端返回的 `planStates` 继续作为历史事实展示。
+计划确认是 `InteractionKind::PlanConfirmation`，不是计划卡片组件的局部状态，也不是前端 reducer 从 timeline 推断的临时 `planAction`。当前 live Plan turn 完成后，后端从本轮最新未处理 `plan` item 创建 pending interaction；历史 timeline 加载不得自动弹出旧计划。`planStates` 按 `planId` 记录后端生命周期 latest state；已有 `accepted`、`implementing`、`implemented`、`implementationFailed` 或 `dismissed` 状态的计划不得重新创建确认 interaction。
 
-运行中如果收到 `request_user_input` 的 pending 请求，聊天底部普通输入框必须被 `AskUserComposer` 替换。该 UI 逐个展示结构化问题，用户可以在问题之间前进和返回；只有最终点击提交时才通过 Tauri command 一次性回答当前 request 并恢复普通 composer。每个问题支持选项和必要的自由输入，选项选择不会立即提交。ask-user 期间用户不能发送新的普通 prompt，但停止按钮仍可中断当前 turn。
+运行中如果收到 `userInput` pending interaction，聊天底部普通输入框必须被 `AskUserComposer` 替换。该 UI 逐个展示结构化问题，用户可以在问题之间前进和返回；只有最终点击提交时才通过 `resolve_interaction` 一次性回答当前 interaction 并恢复普通 composer。每个问题支持选项和必要的自由输入，选项选择不会立即提交。ask-user 期间用户不能发送新的普通 prompt，但停止按钮仍可中断当前 turn。
 
-设置页 Security 标签页提供会话级权限模式选择。`request-approval` 在 workspace 内直接执行，访问 workspace 外时使用现有 ApprovalOverlay 弹出用户审批；`auto-review` 在 workspace 内直接执行，访问 workspace 外时由 reviewer 模型自动审批，前端不弹用户审批卡片，只通过工具结果展示已批准或已拒绝的事实；`full-access` 明确展示为会放宽 workspace 外文件路径和 shell cwd 边界并直接放行的模式。
+设置页 Security 标签页提供会话级权限模式选择。`request-approval` 在 workspace 内直接执行，访问 workspace 外时创建 `toolApproval` interaction；`auto-review` 在 workspace 内直接执行，访问 workspace 外时由 reviewer 模型自动审批，前端不弹用户审批卡片，只通过工具结果展示已批准或已拒绝的事实；`full-access` 明确展示为会放宽 workspace 外文件路径和 shell cwd 边界并直接放行的模式。聊天底部只渲染一个最高优先级 interaction，优先级固定为 `toolApproval > userInput > planConfirmation`。
 
 设置页 MCP 标签页提供结构化 server 配置。列表展示 server id、用户启用状态、实际可用性、来源、传输方式和主要 endpoint；新增和编辑用户 server 使用本地草稿，保存成功后即时写入 `~/.pure/config.toml`、刷新配置 payload 并触发后台健康检查。stdio 表单提供 command、args、env 和可选 cwd；Streamable HTTP 表单提供 url、bearer token 环境变量和 headers。启用且实际可用的 MCP server 被视为用户信任对象，其 tools 在 Auto 和 Plan Mode 中直接暴露，不额外触发审批弹窗。
 

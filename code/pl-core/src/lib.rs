@@ -61,10 +61,13 @@ pub use pl_model::{
 };
 pub use pl_protocol::{
     AgentEvent, AgentEventReceiver, AgentEventSender, AgentRuntimeDelta, BudgetLimitKind,
-    BudgetUsage, ContentPart, ContentPartType, EnabledToolsEvent, ErrorSeverity, Message,
-    MessageContent, MessageRole, OutputStream, PermissionLevel, PipelineStage, PureError, Result,
-    RuntimeCostAmount, RuntimeUsageSnapshot, TokenUsageSnapshot, TraceEvent, TraceEventKind,
-    UserInputAnswer, UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
+    BudgetUsage, ContentPart, ContentPartType, EnabledToolsEvent, ErrorSeverity,
+    InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,
+    InteractionResolution, InteractionScope, InteractionStatus, Message, MessageContent,
+    MessageRole, OutputStream, PermissionLevel, PipelineStage, PlanConfirmationResolution,
+    PureError, Result, RuntimeCostAmount, RuntimeUsageSnapshot, TokenUsageSnapshot,
+    ToolApprovalResolution, TraceEvent, TraceEventKind, UserInputAnswer, UserInputRequest,
+    UserInputResponse, UserQuestion, UserQuestionOption,
 };
 pub use provider_usage::{
     ProviderUsageData, ProviderUsageRecord, ProviderUsageState, provider_usage_records,
@@ -85,8 +88,9 @@ pub use tool::{
 pub use trace::TraceRecorder;
 pub use turn::{
     AGENT_MAX_COUNT, AGENT_MAX_DEPTH, AgentBudget, BudgetPolicy, CompileMode,
-    DEFAULT_WALL_CLOCK_MS, PermissionMode, ToolApprovalCallback, ToolApprovalDecision,
-    ToolApprovalPolicy, ToolApprovalRequest, ToolExecutionMode, TurnAbortReason, TurnBudget,
-    TurnOptions, TurnRequest, TurnResult, TurnResultStatus, UserInputCallback,
+    DEFAULT_WALL_CLOCK_MS, InteractionCallback, InteractionFuture, PermissionMode,
+    ToolApprovalCallback, ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest,
+    ToolExecutionMode, TurnAbortReason, TurnBudget, TurnOptions, TurnRequest, TurnResult,
+    TurnResultStatus, UserInputCallback,
 };
 pub use workspace::{load_workspace_instructions, resolve_workspace_root};

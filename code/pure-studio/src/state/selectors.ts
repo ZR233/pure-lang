@@ -1,4 +1,4 @@
-import type { PlanState, TimelineItem } from "../types";
+import type { InteractionRequest, PlanState, TimelineItem } from "../types";
 import type { StudioState } from "./studio-state";
 
 export type ToolGroupSummaryKind =
@@ -60,8 +60,10 @@ export function selectSelectedSession(state: StudioState) {
   return state.sessions.find((session) => session.id === state.selectedSessionId) ?? null;
 }
 
-export function selectPlanAction(state: StudioState) {
-  return state.planAction;
+export function selectActiveInteraction(state: StudioState): InteractionRequest | null {
+  return state.activeInteractionId
+    ? state.interactions.get(state.activeInteractionId) ?? null
+    : null;
 }
 
 export function selectTimelineEntries(state: StudioState): TimelineEntry[] {

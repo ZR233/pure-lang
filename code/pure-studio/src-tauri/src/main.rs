@@ -7,13 +7,12 @@ use std::time::Duration;
 use pl_core::StudioRuntime;
 use tokio::sync::Mutex;
 
-mod approvals;
 mod commands;
 mod dto;
 mod events;
+mod interactions;
 mod mappers;
 mod state;
-mod user_input;
 
 use state::AppState;
 
@@ -22,8 +21,7 @@ fn main() {
         .expect("failed to initialize Pure Studio runtime");
     let state = AppState {
         studio,
-        approvals: Arc::new(Mutex::new(HashMap::new())),
-        user_inputs: Arc::new(Mutex::new(HashMap::new())),
+        interactions: Arc::new(Mutex::new(HashMap::new())),
         active_turns: Arc::new(Mutex::new(HashMap::new())),
     };
     let setup_state = state.clone();
@@ -47,13 +45,9 @@ fn main() {
             commands::select_session,
             commands::set_session_mode,
             commands::run_prompt,
-            commands::implement_plan,
-            commands::dismiss_plan,
+            commands::resolve_interaction,
             commands::stop_prompt,
             commands::load_session_timeline,
-            commands::approve_tool,
-            commands::deny_tool,
-            commands::answer_user_input,
             commands::load_config,
             commands::load_provider_usages,
             commands::save_config,

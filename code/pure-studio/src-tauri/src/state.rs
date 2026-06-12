@@ -1,33 +1,25 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use pl_core::StudioRuntime;
+use pl_core::{InteractionResolution, StudioRuntime};
 use pl_protocol::PureError;
 use serde::Serialize;
 use tokio::sync::{Mutex, oneshot};
 use tokio_util::sync::CancellationToken;
 
-pub type ApprovalWaiters = Arc<Mutex<HashMap<String, ApprovalWaiter>>>;
-pub type UserInputWaiters = Arc<Mutex<HashMap<String, UserInputWaiter>>>;
+pub type InteractionWaiters = Arc<Mutex<HashMap<String, InteractionWaiter>>>;
 pub type ActiveTurns = Arc<Mutex<HashMap<String, CancellationToken>>>;
 pub type CommandResult<T> = std::result::Result<T, CommandError>;
 
 #[derive(Clone)]
 pub struct AppState {
     pub studio: StudioRuntime,
-    pub approvals: ApprovalWaiters,
-    pub user_inputs: UserInputWaiters,
+    pub interactions: InteractionWaiters,
     pub active_turns: ActiveTurns,
 }
 
-pub struct ApprovalWaiter {
-    pub session_id: String,
-    pub sender: oneshot::Sender<pl_core::ToolApprovalDecision>,
-}
-
-pub struct UserInputWaiter {
-    pub session_id: String,
-    pub sender: oneshot::Sender<pl_core::UserInputResponse>,
+pub struct InteractionWaiter {
+    pub sender: oneshot::Sender<InteractionResolution>,
 }
 
 #[derive(Debug, Serialize)]

@@ -1,7 +1,11 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use pl_protocol::{AgentEvent, PureError, UserInputRequest, UserInputResponse, UserQuestion};
+use pl_protocol::{
+    AgentEvent, InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,
+    InteractionResolution, InteractionScope, InteractionStatus, PureError, UserInputRequest,
+    UserInputResponse, UserQuestion,
+};
 use serde::Deserialize;
 
 use super::truncation::OutputTruncation;
@@ -98,6 +102,48 @@ impl Tool for AskUserTool {
                 tool_id: input.tool_id,
                 questions: args.questions,
             };
+            if let Some(callback) = context.options.interaction_callback.clone() {
+                let interaction = user_input_interaction(&input.session_id, &request, &context);
+                let _ = context.event_tx.send(AgentEvent::InteractionChanged {
+                    event: InteractionChangedEvent {
+                        interaction: interaction.clone(),
+                    },
+                });
+                let resolution = match context.options.cancellation_token.clone() {
+                    Some(token) => {
+                        tokio::select! {
+                            resolution = callback(interaction.clone()) => resolution,
+                            _ = token.cancelled() => InteractionResolution::UserInput {
+                                answers: Default::default(),
+                            },
+                        }
+                    }
+                    None => callback(interaction.clone()).await,
+                };
+                let response = match resolution {
+                    InteractionResolution::UserInput { answers } => UserInputResponse { answers },
+                    InteractionResolution::ToolApproval { .. }
+                    | InteractionResolution::PlanConfirmation { .. } => {
+                        UserInputResponse::default()
+                    }
+                };
+                let _ = context.event_tx.send(AgentEvent::UserInputAnswered {
+                    request_id: request.request_id,
+                });
+                let description = serde_json::to_string(&response).map_err(|error| {
+                    PureError::ToolExecutionFailed {
+                        tool: self.name().to_string(),
+                        error: format!("failed to serialize response: {error}"),
+                    }
+                })?;
+                return Ok(ToolOutput {
+                    description,
+                    truncated: OutputTruncation::empty(),
+                    output_file: PathBuf::new(),
+                    exit_code: None,
+                    timed_out: false,
+                });
+            }
             let _ = context.event_tx.send(AgentEvent::UserInputRequested {
                 request_id: request.request_id.clone(),
                 tool_id: request.tool_id.clone(),
@@ -176,6 +222,43 @@ fn namespaced_request_id(session_id: &str, tool_id: &str) -> String {
     } else {
         format!("{session_id}-{tool_id}")
     }
+}
+
+fn user_input_interaction(
+    turn_id: &str,
+    request: &UserInputRequest,
+    context: &ToolContext,
+) -> InteractionRequest {
+    let now = unix_seconds();
+    InteractionRequest {
+        interaction_id: request.request_id.clone(),
+        kind: InteractionKind::UserInput,
+        status: InteractionStatus::Pending,
+        scope: InteractionScope {
+            session_id: String::new(),
+            turn_id: turn_id.to_string(),
+            item_id: Some(request.tool_id.clone()),
+            tool_id: Some(request.tool_id.clone()),
+            agent_path: context
+                .active_subagent
+                .as_ref()
+                .and_then(|subagent| subagent.agent_path.clone()),
+        },
+        payload: InteractionPayload::UserInput {
+            questions: request.questions.clone(),
+        },
+        created_at: now,
+        updated_at: now,
+        resolved_at: None,
+        resolution: None,
+    }
+}
+
+fn unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 #[cfg(test)]
@@ -278,6 +361,75 @@ mod tests {
                     description: "Use the fast path.".to_string(),
                 }]),
             }]
+        );
+    }
+
+    #[tokio::test]
+    async fn request_user_input_returns_answers_from_interaction_callback() {
+        let seen_interaction = Arc::new(Mutex::new(None));
+        let seen_interaction_for_callback = seen_interaction.clone();
+        let callback: crate::InteractionCallback = Arc::new(move |interaction| {
+            let seen_interaction = seen_interaction_for_callback.clone();
+            Box::pin(async move {
+                *seen_interaction.lock().unwrap() = Some(interaction);
+                InteractionResolution::UserInput {
+                    answers: HashMap::from([(
+                        "mode".to_string(),
+                        UserInputAnswer {
+                            answers: vec!["Fast".to_string()],
+                        },
+                    )]),
+                }
+            })
+        });
+        let output = AskUserTool
+            .execute(
+                tool_input(),
+                context(TurnOptions::default().with_interaction_callback(callback)),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            serde_json::from_str::<UserInputResponse>(&output.description).unwrap(),
+            UserInputResponse {
+                answers: HashMap::from([(
+                    "mode".to_string(),
+                    UserInputAnswer {
+                        answers: vec!["Fast".to_string()],
+                    },
+                )]),
+            }
+        );
+        let interaction = seen_interaction.lock().unwrap().clone().unwrap();
+        assert_eq!(interaction.interaction_id, "session-1-call-1");
+        assert_eq!(interaction.kind, InteractionKind::UserInput);
+        assert_eq!(interaction.status, InteractionStatus::Pending);
+        assert_eq!(
+            interaction.scope,
+            InteractionScope {
+                session_id: String::new(),
+                turn_id: "session-1".to_string(),
+                item_id: Some("call-1".to_string()),
+                tool_id: Some("call-1".to_string()),
+                agent_path: None,
+            }
+        );
+        assert_eq!(
+            interaction.payload,
+            InteractionPayload::UserInput {
+                questions: vec![UserQuestion {
+                    id: "mode".to_string(),
+                    header: "Mode".to_string(),
+                    question: "Which mode?".to_string(),
+                    is_other: false,
+                    is_secret: false,
+                    options: Some(vec![UserQuestionOption {
+                        label: "Fast".to_string(),
+                        description: "Use the fast path.".to_string(),
+                    }]),
+                }],
+            }
         );
     }
 

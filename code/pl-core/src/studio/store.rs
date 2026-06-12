@@ -3,7 +3,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::Result;
-use pl_protocol::{AgentRuntimeDelta, Message, RuntimeUsageSnapshot};
+use pl_protocol::{AgentRuntimeDelta, InteractionRequest, Message, RuntimeUsageSnapshot};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait, Database,
     DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Statement,
@@ -18,8 +18,8 @@ use crate::studio::entities;
 use crate::studio::ids::{new_id, new_timeline_event_id, unix_seconds};
 use crate::studio::mappers::{
     agent_runtime_snapshot_record, agent_snapshot_record, agent_timeline_event_record,
-    costs_to_json, message_to_row_parts, project_record, row_to_message, session_record,
-    session_runtime_record, timeline_event_record, trace_event_kind_label,
+    costs_to_json, interaction_record, message_to_row_parts, project_record, row_to_message,
+    session_record, session_runtime_record, timeline_event_record, trace_event_kind_label,
 };
 use crate::studio::paths::{prepare_database_switch, project_name, sqlite_url};
 use crate::studio::records::{
@@ -138,8 +138,8 @@ impl StudioStore {
 
     pub async fn archive_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {
         use entities::{
-            agent, agent_event, agent_runtime_event, agent_runtime_snapshot, message, project,
-            session, session_runtime_snapshot, timeline_event, tool_approval,
+            agent, agent_event, agent_runtime_event, agent_runtime_snapshot, interaction, message,
+            project, session, session_runtime_snapshot, timeline_event, tool_approval,
         };
         let Some(project) = project::Entity::find_by_id(project_id.to_string())
             .one(&self.db)
@@ -174,6 +174,10 @@ impl StudioStore {
                 .await?;
             tool_approval::Entity::delete_many()
                 .filter(tool_approval::Column::SessionId.eq(session_id.clone()))
+                .exec(&tx)
+                .await?;
+            interaction::Entity::delete_many()
+                .filter(interaction::Column::SessionId.eq(session_id.clone()))
                 .exec(&tx)
                 .await?;
             agent::Entity::delete_many()
@@ -255,6 +259,15 @@ impl StudioStore {
             .all(&self.db)
             .await?;
         Ok(sessions.into_iter().map(session_record).collect())
+    }
+
+    pub async fn list_project_session_ids(&self, project_id: &str) -> Result<Vec<String>> {
+        use entities::session;
+        let sessions = session::Entity::find()
+            .filter(session::Column::ProjectId.eq(project_id.to_string()))
+            .all(&self.db)
+            .await?;
+        Ok(sessions.into_iter().map(|session| session.id).collect())
     }
 
     pub async fn read_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {
@@ -426,6 +439,82 @@ impl StudioStore {
         .insert(&self.db)
         .await?;
         Ok(())
+    }
+
+    pub async fn upsert_interaction(&self, interaction: &InteractionRequest) -> Result<()> {
+        use entities::interaction;
+        let payload_json = serde_json::to_string(&interaction.payload)?;
+        let resolution_json = interaction
+            .resolution
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
+        if let Some(existing) = interaction::Entity::find_by_id(interaction.interaction_id.clone())
+            .one(&self.db)
+            .await?
+        {
+            let mut active: interaction::ActiveModel = existing.into();
+            active.session_id = Set(interaction.scope.session_id.clone());
+            active.turn_id = Set(interaction.scope.turn_id.clone());
+            active.item_id = Set(interaction.scope.item_id.clone());
+            active.tool_id = Set(interaction.scope.tool_id.clone());
+            active.agent_path = Set(interaction.scope.agent_path.clone());
+            active.kind = Set(interaction.kind.as_str().to_string());
+            active.status = Set(interaction.status.as_str().to_string());
+            active.payload_json = Set(payload_json);
+            active.resolution_json = Set(resolution_json);
+            active.updated_at = Set(interaction.updated_at);
+            active.resolved_at = Set(interaction.resolved_at);
+            active.update(&self.db).await?;
+        } else {
+            interaction::ActiveModel {
+                id: Set(interaction.interaction_id.clone()),
+                session_id: Set(interaction.scope.session_id.clone()),
+                turn_id: Set(interaction.scope.turn_id.clone()),
+                item_id: Set(interaction.scope.item_id.clone()),
+                tool_id: Set(interaction.scope.tool_id.clone()),
+                agent_path: Set(interaction.scope.agent_path.clone()),
+                kind: Set(interaction.kind.as_str().to_string()),
+                status: Set(interaction.status.as_str().to_string()),
+                payload_json: Set(payload_json),
+                resolution_json: Set(resolution_json),
+                created_at: Set(interaction.created_at),
+                updated_at: Set(interaction.updated_at),
+                resolved_at: Set(interaction.resolved_at),
+            }
+            .insert(&self.db)
+            .await?;
+        }
+        Ok(())
+    }
+
+    pub async fn read_interaction(
+        &self,
+        interaction_id: &str,
+    ) -> Result<Option<InteractionRequest>> {
+        use entities::interaction;
+        interaction::Entity::find_by_id(interaction_id.to_string())
+            .one(&self.db)
+            .await?
+            .map(interaction_record)
+            .transpose()
+    }
+
+    pub async fn list_pending_interactions(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<InteractionRequest>> {
+        use entities::interaction;
+        interaction::Entity::find()
+            .filter(interaction::Column::SessionId.eq(session_id.to_string()))
+            .filter(interaction::Column::Status.eq("pending"))
+            .order_by_desc(interaction::Column::UpdatedAt)
+            .order_by_desc(interaction::Column::Id)
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(interaction_record)
+            .collect()
     }
 
     pub async fn upsert_agent_snapshot(&self, record: AgentSnapshotRecord) -> Result<()> {

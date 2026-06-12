@@ -20,6 +20,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/0009_agent_runtime_usage.sql"),
     include_str!("../../migrations/0010_instruction_snapshot.sql"),
     include_str!("../../migrations/0011_project_closed.sql"),
+    include_str!("../../migrations/0012_interactions.sql"),
 ];
 
 pub(super) async fn insert_message_with_tx(

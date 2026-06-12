@@ -8,14 +8,15 @@ import type {
   McpSettingsInput,
   McpServerInput,
   PermissionMode,
+  InteractionResolution,
   PlanLifecycleResponse,
   ProjectSelectionPayload,
   ProviderSettingsInput,
   ProviderUsagesPayload,
+  ResolveInteractionResponse,
   RunPromptResponse,
   SessionSelectionPayload,
   SessionTimeline,
-  UserInputResponse,
 } from "../types";
 import {
   createPreviewConfig,
@@ -69,6 +70,7 @@ export function bootstrapStudio() {
         agentEvents: previewAgentEvents,
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
+        interactions: [],
         lspHealth: {
           lspServers: previewLspServers,
           activeLspServers: previewSessionRuntime.activeLspServers,
@@ -98,6 +100,7 @@ export function openProject(path: string) {
         agentEvents: previewAgentEvents,
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
+        interactions: [],
         lspHealth: {
           lspServers: previewLspServers,
           activeLspServers: previewSessionRuntime.activeLspServers,
@@ -210,6 +213,7 @@ export function deleteSession(sessionId: string, selectedSessionId?: string | nu
         agentEvents: nextSelectedSessionId ? previewAgentEvents : [],
         agents: nextSelectedSessionId ? previewAgents : [],
         sessionRuntime: nextSelectedSessionId ? previewSessionRuntime : null,
+        interactions: [],
         lspHealth: {
           lspServers: previewLspServers,
           activeLspServers: previewSessionRuntime.activeLspServers,
@@ -232,6 +236,7 @@ export function selectSession(sessionId: string) {
         agentEvents: previewAgentEvents,
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
+        interactions: [],
       }),
     );
   }
@@ -253,6 +258,7 @@ export function setSessionMode(sessionId: string, mode: CompileMode) {
         agentEvents: previewAgentEvents,
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
+        interactions: [],
       }),
     );
   }
@@ -358,6 +364,7 @@ export function runPrompt(sessionId: string, prompt: string) {
           },
         ],
         planStates: [],
+        interactions: [],
         timelineNextSequence: previewTimelineItems.length + 11,
         turnStatus: interrupted ? "aborted" as const : "completed" as const,
         turnAbortReason: interrupted ? "interrupted" : null,
@@ -369,45 +376,32 @@ export function runPrompt(sessionId: string, prompt: string) {
   return invoke<RunPromptResponse>("run_prompt", { sessionId, prompt });
 }
 
-export function implementPlan(sessionId: string, planId: string, content: string) {
+export function resolveInteraction(interactionId: string, resolution: InteractionResolution) {
   if (!isTauriRuntime()) {
-    return runPrompt(sessionId, `PLEASE IMPLEMENT THIS PLAN:\n\n${content}`).then((payload) =>
+    return Promise.resolve<ResolveInteractionResponse>(
       clone({
-        ...payload,
-        planStates: [
-          ...(payload.planStates ?? []),
-          {
-            planId,
-            state: "implemented" as const,
-            turnId: null,
-            reason: null,
-            updatedAt: Math.floor(Date.now() / 1000),
-          },
-        ],
+        sessionId: "preview-session",
+        interaction: {
+          interactionId,
+          kind: resolution.type === "planConfirmation" ? "planConfirmation" : resolution.type,
+          status: "resolved",
+          scope: { sessionId: "preview-session", turnId: "preview-turn" },
+          payload: resolution.type === "planConfirmation"
+            ? { type: "planConfirmation", planId: interactionId, content: resolution.content ?? "" }
+            : resolution.type === "toolApproval"
+              ? { type: "toolApproval", name: "tool", arguments: {} }
+              : { type: "userInput", questions: [] },
+          createdAt: Math.floor(Date.now() / 1000),
+          updatedAt: Math.floor(Date.now() / 1000),
+          resolvedAt: Math.floor(Date.now() / 1000),
+          resolution,
+        },
+        run: null,
+        planLifecycle: null,
       }),
     );
   }
-  return invoke<RunPromptResponse>("implement_plan", { sessionId, planId, content });
-}
-
-export function dismissPlan(sessionId: string, planId: string, reason: string) {
-  if (!isTauriRuntime()) {
-    const response: PlanLifecycleResponse = {
-      sessionId,
-      planStates: [
-        {
-          planId,
-          state: "dismissed",
-          turnId: null,
-          reason,
-          updatedAt: Math.floor(Date.now() / 1000),
-        },
-      ],
-      timelineNextSequence: previewTimelineItems.length + 1,
-    };
-    return Promise.resolve(clone(response));
-  }
-  return invoke<PlanLifecycleResponse>("dismiss_plan", { sessionId, planId, reason });
+  return invoke<ResolveInteractionResponse>("resolve_interaction", { interactionId, resolution });
 }
 
 export function stopPrompt(sessionId: string) {
@@ -421,27 +415,6 @@ export function stopPrompt(sessionId: string) {
     );
   }
   return invoke<{ sessionId: string; stopped: boolean }>("stop_prompt", { sessionId });
-}
-
-export function approveTool(approvalId: string) {
-  if (!isTauriRuntime()) {
-    return Promise.resolve(void approvalId);
-  }
-  return invoke<void>("approve_tool", { approvalId });
-}
-
-export function denyTool(approvalId: string, reason?: string) {
-  if (!isTauriRuntime()) {
-    return Promise.resolve(void approvalId);
-  }
-  return invoke<void>("deny_tool", { approvalId, reason: reason ?? null });
-}
-
-export function answerUserInput(requestId: string, response: UserInputResponse) {
-  if (!isTauriRuntime()) {
-    return Promise.resolve(void requestId);
-  }
-  return invoke<void>("answer_user_input", { requestId, response });
 }
 
 export function loadConfig() {
@@ -773,6 +746,7 @@ export function loadSessionTimeline(
         sessionId,
         items: previewTimelineItems,
         planStates: [],
+        interactions: [],
         nextSequence: previewTimelineItems.length,
       }),
     );

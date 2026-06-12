@@ -194,6 +194,7 @@ pub(super) async fn execute_tool_calls(
                     context.options,
                     &approval_request,
                     recorder.sender().clone(),
+                    context.session_id,
                 )
                 .await;
                 if matches!(decision, ToolApprovalDecision::Approved) {

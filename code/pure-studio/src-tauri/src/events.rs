@@ -155,6 +155,7 @@ pub async fn drain_events(
                         | AgentEvent::ToolApprovalDenied { .. }
                         | AgentEvent::UserInputRequested { .. }
                         | AgentEvent::UserInputAnswered { .. }
+                        | AgentEvent::InteractionChanged { .. }
                         | AgentEvent::AgentRuntimeUpdated { .. }
                         | AgentEvent::TurnInterrupted { .. }
                         | AgentEvent::TurnBudgetLimited { .. }
@@ -250,6 +251,7 @@ pub fn agent_snapshot_record(
         | AgentEvent::ToolApprovalDenied { .. }
         | AgentEvent::UserInputRequested { .. }
         | AgentEvent::UserInputAnswered { .. }
+        | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::CollabAgentSpawnBegin { .. }
         | AgentEvent::CollabAgentSpawnEnd { .. }
@@ -353,6 +355,7 @@ pub fn agent_timeline_event_record(
         | AgentEvent::ToolApprovalDenied { .. }
         | AgentEvent::UserInputRequested { .. }
         | AgentEvent::UserInputAnswered { .. }
+        | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
