@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "tsc -p tsconfig.test.json --noEmit && esbuild tests/studio-state.test.ts --bundle --platform=node --format=esm --outfile=.tmp-tests/studio-state.test.mjs && node .tmp-tests/studio-state.test.mjs",
+    "test": "tsc -p tsconfig.test.json --noEmit && esbuild ./tests/studio-state.test.ts --bundle --platform=node --format=esm --outfile=.tmp-tests/studio-state.test.mjs && node .tmp-tests/studio-state.test.mjs",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
   },

@@ -685,7 +685,15 @@ pub fn timeline_events_to_items(events: &[TraceEvent]) -> Vec<pl_protocol::Timel
                         status: event.status,
                         created_at: event.created_at,
                         updated_at: event.updated_at,
-                        role: None,
+                        text_channel: match &event.delta {
+                            pl_protocol::TimelineDelta::Text { text_channel, .. } => {
+                                Some(*text_channel)
+                            }
+                            pl_protocol::TimelineDelta::Plan { .. }
+                            | pl_protocol::TimelineDelta::Thinking { .. }
+                            | pl_protocol::TimelineDelta::ToolArguments { .. }
+                            | pl_protocol::TimelineDelta::ToolResult { .. } => None,
+                        },
                         content: String::new(),
                         thinking_chunks: Vec::new(),
                         tool: None,
@@ -697,7 +705,11 @@ pub fn timeline_events_to_items(events: &[TraceEvent]) -> Vec<pl_protocol::Timel
                 entry.status = event.status;
                 entry.updated_at = event.updated_at;
                 match &event.delta {
-                    pl_protocol::TimelineDelta::Text { delta } => {
+                    pl_protocol::TimelineDelta::Text {
+                        text_channel,
+                        delta,
+                    } => {
+                        entry.text_channel = Some(*text_channel);
                         entry.content.push_str(delta);
                     }
                     pl_protocol::TimelineDelta::Plan { delta } => {
@@ -983,7 +995,7 @@ mod tests {
     use pl_protocol::{
         AgentStatus, EnabledToolsEvent, PlanLifecycleEvent, PlanLifecycleState, RuntimeCostAmount,
         TimelineDelta, TimelineItem, TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus,
-        TimelineTextRole, TimelineToolItem, TraceEvent, TraceEventKind,
+        TimelineTextChannel, TimelineToolItem, TraceEvent, TraceEventKind,
     };
     use pretty_assertions::assert_eq;
 
@@ -1291,7 +1303,7 @@ mod tests {
             "turn-1",
             "turn-1-assistant",
             1,
-            TimelineTextRole::Assistant,
+            TimelineTextChannel::Final,
             "",
             TimelineItemStatus::Streaming,
             10,
@@ -1300,7 +1312,7 @@ mod tests {
             "turn-1",
             "turn-1-assistant",
             3,
-            TimelineTextRole::Assistant,
+            TimelineTextChannel::Final,
             "hello world",
             TimelineItemStatus::Completed,
             12,
@@ -1326,6 +1338,7 @@ mod tests {
                         created_at: 10,
                         updated_at: 11,
                         delta: TimelineDelta::Text {
+                            text_channel: TimelineTextChannel::Final,
                             delta: "hello".to_string(),
                         },
                     },
@@ -1434,7 +1447,7 @@ mod tests {
             status: TimelineItemStatus::Streaming,
             created_at: 9,
             updated_at: 9,
-            role: None,
+            text_channel: None,
             content: String::new(),
             thinking_chunks: Vec::new(),
             tool: Some(TimelineToolItem {
@@ -1513,7 +1526,7 @@ mod tests {
             status: TimelineItemStatus::Completed,
             created_at: 11,
             updated_at: 11,
-            role: None,
+            text_channel: None,
             content: String::new(),
             thinking_chunks: Vec::new(),
             tool: Some(TimelineToolItem {
@@ -1581,7 +1594,7 @@ mod tests {
             status: TimelineItemStatus::Failed,
             created_at: 10,
             updated_at: 10,
-            role: None,
+            text_channel: None,
             content: String::new(),
             thinking_chunks: Vec::new(),
             tool: None,

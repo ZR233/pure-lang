@@ -31,6 +31,7 @@ reducer 分域：
 约束：
 
 - 空 assistant 不渲染
+- `text` item 以 `textChannel` 决定展示语义：`user` 渲染为用户气泡，`commentary` 渲染为轻量进展行，`final` 渲染为普通 assistant 回复。前端不再使用旧 `role` 字段判断文本语义。
 - `plan` item 渲染为独立计划卡片，正文按 Markdown 展示，不与普通 assistant 消息混排
 - 主 timeline 以用户与 assistant 正文为主；工具调用使用紧凑行密度，连续 tool items 可在 selector 中聚合为派生展示项，例如 `Read 3 files · Edit 1 file`，但原始 `timelineItems`、`timelineOrder` 和 reducer 仍保持 item-first append-only 语义
 - 工具聚合只属于 selector 展示层：同一 turn 内的 `thinking` 和隐藏 `inference` 不结束当前工具组；assistant `text`、`agent`、`turn` trace 或跨 turn 的 tool item 才开启新的工具展示段。`thinking` 内容仍作为 thought entry 渲染。
@@ -43,6 +44,7 @@ reducer 分域：
 - 同一个 agent 的 spawn、wait、message、close、final status 必须保留为多条 timeline 事件，不能按 agent id 覆盖成一条
 - `AgentStateChanged` 只更新 latest snapshot，不直接作为 timeline 数据源
 - 用户与 assistant 正文按 Markdown 渲染，支持标题、列表、引用、代码块、行内代码、强调和链接
+- commentary 也是可见文本，但视觉权重低于 final：用于“我先检查配置”“现在修复类型链”等阶段更新，可流式追加，不应和最终 assistant 回复合并。
 - 自动跟随最新内容以“用户是否停留在底部”为准；高频 timeline 刷新时仍应在 layout 阶段滚动到最新，用户手动上滚后暂停跟随
 - 同一 session 内继续对话不会触发 `selectedSessionId` 变化；当前轮 `StudioEventKind::TimelineChanged` 与补拉事件必须直接合并进本地 timeline
 - 重复选择当前 session 必须视为 no-op，不能清空本地 timeline、agent snapshot、runtime 或 plan 状态；只有切换到不同 session、新建 session 或切换项目时，才可以重置当前会话本地视图并等待对应 timeline snapshot 加载

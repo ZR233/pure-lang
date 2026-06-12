@@ -11,7 +11,7 @@ pub use event::{
     BudgetLimitKind, BudgetUsage, EnabledToolsEvent, ErrorSeverity, OutputStream, PipelineStage,
     PlanLifecycleEvent, PlanLifecycleState, RuntimeCostAmount, RuntimeUsageSnapshot,
     SkillActivation, TimelineAgentItem, TimelineDelta, TimelineInferenceItem, TimelineItem,
-    TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus, TimelineTextRole,
+    TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus, TimelineTextChannel,
     TimelineThinkingChunk, TimelineToolItem, TokenUsageSnapshot, TraceEvent, TraceEventKind,
     UserInputAnswer, UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
 };

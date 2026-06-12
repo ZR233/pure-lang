@@ -350,7 +350,6 @@ pub(super) async fn run_turn_with_trace(
         });
 
         let content = response.content.unwrap_or_default();
-        let raw_content = response.raw_content.unwrap_or_else(|| content.clone());
         let reasoning_content = response.reasoning_content.clone();
         let tool_calls = response.tool_calls;
 
@@ -392,7 +391,7 @@ pub(super) async fn run_turn_with_trace(
                     ));
                 }
             }
-            session.push_assistant_response(raw_content, reasoning_content.clone());
+            session.push_assistant_response(content.clone(), reasoning_content.clone());
             last_content = content;
             last_reasoning_content = reasoning_content;
             session_message_count = session.messages().len();
@@ -401,10 +400,10 @@ pub(super) async fn run_turn_with_trace(
         }
 
         session.push_assistant_tool_calls(
-            if raw_content.is_empty() {
+            if content.is_empty() {
                 None
             } else {
-                Some(raw_content)
+                Some(content.clone())
             },
             tool_calls.clone(),
             reasoning_content.clone(),

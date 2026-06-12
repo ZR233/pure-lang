@@ -127,7 +127,7 @@ status: verified-by-live-apply-patch-test
 +status: verified-by-live-apply-patch-test
 *** End Patch
 
-工具成功后，用一句中文简短说明已完成。"#
+工具成功后，只输出 `<final>已完成修改。</final>`，不要输出标签之外的普通正文。"#
         .to_string()
 }
 

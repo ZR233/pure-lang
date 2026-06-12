@@ -123,7 +123,12 @@ function mcpServer(overrides: Partial<McpServerRecord> = {}): McpServerRecord {
   };
 }
 
-function textItem(itemId: string, sequence: number, content: string): TimelineItem {
+function textItem(
+  itemId: string,
+  sequence: number,
+  content: string,
+  textChannel: TimelineItem["textChannel"] = "final",
+): TimelineItem {
   return {
     turnId: itemId.split("-").slice(0, 2).join("-") || "turn",
     itemId,
@@ -132,7 +137,7 @@ function textItem(itemId: string, sequence: number, content: string): TimelineIt
     status: "completed",
     createdAt: sequence,
     updatedAt: sequence,
-    role: "assistant",
+    textChannel,
     content,
     thinkingChunks: [],
   };
@@ -147,7 +152,7 @@ function planItem(itemId: string, turnId: string, sequence: number, content: str
     status: "completed",
     createdAt: sequence,
     updatedAt: sequence,
-    role: null,
+    textChannel: null,
     content,
     thinkingChunks: [],
   };
@@ -212,7 +217,7 @@ function thinkingItem(itemId: string, turnId: string, sequence: number, content:
     status: "completed",
     createdAt: sequence,
     updatedAt: sequence,
-    role: null,
+    textChannel: null,
     content: "",
     thinkingChunks: [{ chunkIndex: 0, content }],
   };
@@ -235,7 +240,7 @@ function toolItem(
     status,
     createdAt: sequence,
     updatedAt: sequence,
-    role: null,
+    textChannel: null,
     content: "",
     thinkingChunks: [],
     tool: {
@@ -264,7 +269,7 @@ function turnItem(
     status,
     createdAt: sequence,
     updatedAt: sequence,
-    role: null,
+    textChannel: null,
     content,
     thinkingChunks: [],
   };
@@ -279,7 +284,7 @@ function inferenceItem(itemId: string, turnId: string, sequence: number): Timeli
     status: "completed",
     createdAt: sequence,
     updatedAt: sequence,
-    role: null,
+    textChannel: null,
     content: "",
     thinkingChunks: [],
     inference: {
@@ -452,7 +457,7 @@ function staleTimelineLoadDoesNotOverwriteLiveDelta() {
     status: "streaming",
     createdAt: 10,
     updatedAt: 11,
-    delta: { type: "text", delta: "new" },
+    delta: { type: "text", textChannel: "final", delta: "new" },
   };
   const completed = textItem("turn-2-text", 12, "new");
   const liveStarted = studioReducer(selectedState(), {
@@ -553,6 +558,36 @@ function toolResultDeltaBeforeStartIsPreserved() {
   assertEqual(tool?.name, "read_file");
   assertEqual(tool?.arguments, "{\"path\":\"a.ts\"}");
   assertEqual(tool?.result, "partial result");
+}
+
+function textDeltaBeforeStartPreservesCommentaryChannel() {
+  const delta: TimelineItemDeltaEvent = {
+    turnId: "turn-1",
+    itemId: "turn-1-commentary",
+    sequence: 10,
+    kind: "text",
+    status: "streaming",
+    createdAt: 10,
+    updatedAt: 10,
+    delta: { type: "text", textChannel: "commentary", delta: "正在检查 CI 配置。" },
+  };
+  const withDelta = studioReducer(selectedState(), {
+    type: "agentEvent",
+    sessionId: "session-1",
+    event: { timelineItemDelta: { event: delta } },
+    statusText: "running",
+  });
+  const item = withDelta.timelineItems.get("turn-1-commentary");
+  const entries = selectTimelineEntries(withDelta);
+
+  assertEqual(item?.textChannel, "commentary");
+  assertEqual(item?.content, "正在检查 CI 配置。");
+  assertDeepEqual(entries.map((entry) => entry.kind), ["commentary"]);
+  const commentary = entries[0];
+  if (commentary?.kind !== "commentary") {
+    throw new Error("Expected commentary entry");
+  }
+  assertEqual(commentary.content, "正在检查 CI 配置。");
 }
 
 function runPromptLoadedWithEmptyItemsDoesNotDeleteLiveContent() {
@@ -1124,7 +1159,7 @@ function studioTimelineEventClearsWaitingAndStreamsContent() {
           status: "streaming",
           createdAt: 20,
           updatedAt: 21,
-          delta: { type: "text", delta: "live" },
+          delta: { type: "text", textChannel: "final", delta: "live" },
         },
       },
     }),
@@ -1297,8 +1332,12 @@ function userTimelineEventKeepsWaitingFeedback() {
     startedAt: 1234,
     prompt: "Build the thing",
   });
-  const realUser = textItem("turn-1-user", submitted.timelineNextSequence, "Build the thing");
-  realUser.role = "user";
+  const realUser = textItem(
+    "turn-1-user",
+    submitted.timelineNextSequence,
+    "Build the thing",
+    "user",
+  );
   const updated = studioReducer(submitted, {
     type: "agentEvent",
     sessionId: "session-1",
@@ -1335,7 +1374,7 @@ function inferenceStartKeepsWaitingFeedback() {
     status: "running",
     createdAt: 2,
     updatedAt: 2,
-    role: null,
+    textChannel: null,
     content: "",
     thinkingChunks: [],
     inference: {
@@ -2205,6 +2244,7 @@ freshTimelineLoadMayReplaceSnapshot();
 staleTimelineLoadDoesNotOverwriteLiveDelta();
 toolArgumentDeltaBeforeStartIsPreserved();
 toolResultDeltaBeforeStartIsPreserved();
+textDeltaBeforeStartPreservesCommentaryChannel();
 runPromptLoadedWithEmptyItemsDoesNotDeleteLiveContent();
 runPromptLoadedErroredKeepsFailedStatusText();
 userInputRequestStoresPendingComposerState();

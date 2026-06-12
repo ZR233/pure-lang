@@ -234,9 +234,20 @@ impl TimelineItemStatus {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum TimelineTextRole {
+pub enum TimelineTextChannel {
     User,
-    Assistant,
+    Commentary,
+    Final,
+}
+
+impl TimelineTextChannel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Commentary => "commentary",
+            Self::Final => "final",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -304,7 +315,7 @@ pub struct TimelineItem {
     pub created_at: i64,
     pub updated_at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub role: Option<TimelineTextRole>,
+    pub text_channel: Option<TimelineTextChannel>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub content: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -324,7 +335,7 @@ impl TimelineItem {
         turn_id: impl Into<String>,
         item_id: impl Into<String>,
         sequence: u64,
-        role: TimelineTextRole,
+        text_channel: TimelineTextChannel,
         content: impl Into<String>,
         status: TimelineItemStatus,
         timestamp: i64,
@@ -337,7 +348,7 @@ impl TimelineItem {
             status,
             created_at: timestamp,
             updated_at: timestamp,
-            role: Some(role),
+            text_channel: Some(text_channel),
             content: content.into(),
             thinking_chunks: Vec::new(),
             tool: None,
@@ -355,11 +366,23 @@ impl TimelineItem {
     tag = "type"
 )]
 pub enum TimelineDelta {
-    Text { delta: String },
-    Thinking { chunk_index: u32, delta: String },
-    ToolArguments { delta: String },
-    ToolResult { delta: String },
-    Plan { delta: String },
+    Text {
+        text_channel: TimelineTextChannel,
+        delta: String,
+    },
+    Thinking {
+        chunk_index: u32,
+        delta: String,
+    },
+    ToolArguments {
+        delta: String,
+    },
+    ToolResult {
+        delta: String,
+    },
+    Plan {
+        delta: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -780,7 +803,7 @@ mod tests {
             "turn-1",
             "item-1",
             0,
-            TimelineTextRole::Assistant,
+            TimelineTextChannel::Final,
             "hello",
             TimelineItemStatus::Completed,
             1_779_688_800,
@@ -816,7 +839,7 @@ mod tests {
                         "status": "completed",
                         "createdAt": 1779688800,
                         "updatedAt": 1779688800,
-                        "role": "assistant",
+                        "textChannel": "final",
                         "content": "hello"
                     }
                 }
@@ -1091,7 +1114,7 @@ mod tests {
             status: TimelineItemStatus::Streaming,
             created_at: 1_779_688_800,
             updated_at: 1_779_688_800,
-            role: None,
+            text_channel: None,
             content: "# Plan".to_string(),
             thinking_chunks: Vec::new(),
             tool: None,

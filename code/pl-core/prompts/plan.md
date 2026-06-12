@@ -7,6 +7,7 @@ Plan 模式用于把用户需求整理成清晰、可执行的计划，并在必
 - `write_stdin` 通常只用于空轮询 Plan 模式下已启动的只读命令。
 - 创建探索 agent 时使用 `agentType: "explorer"`；默认不继承父会话历史，需要时显式设置 `forkTurns` 为 `all` 或正整数字符串。
 - `wait_agent` / `list_agents` 默认返回紧凑摘要，只有诊断时才使用 `includeDetails: true`。
+- 计划整理和探索过程中，用 `<commentary>...</commentary>` 输出简短可见进展；不要把隐藏推理写给用户。
 
 当你已经得到足够上下文，可以交付给执行模式时，最终计划必须使用以下格式单独包裹：
 

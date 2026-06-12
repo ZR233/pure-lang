@@ -317,6 +317,20 @@ function MessageEntry({ entry }: { entry: Extract<TimelineEntry, { kind: "messag
   );
 }
 
+function CommentaryEntry({ entry }: { entry: Extract<TimelineEntry, { kind: "commentary" }> }) {
+  const active = isActiveStatus(entry.status);
+  return (
+    <div className="flex w-full items-start gap-2 px-4 py-2 text-sm text-muted-foreground">
+      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted">
+        {active ? <Loader2 size={13} className="animate-spin" /> : <Activity size={13} />}
+      </span>
+      <div className="min-w-0 max-w-[80%] rounded-md bg-muted/40 px-3 py-1.5 leading-6">
+        <MarkdownContent content={entry.content} />
+      </div>
+    </div>
+  );
+}
+
 function ThoughtEntry({ entry, t }: { entry: Extract<TimelineEntry, { kind: "thought" }>; t: TFunction }) {
   const active = isActiveStatus(entry.status);
   return (
@@ -1011,6 +1025,9 @@ export function ConversationPanel({
   function renderTimelineEntry(entry: TimelineEntry) {
     if (entry.kind === "message") {
       return <MessageEntry entry={entry} />;
+    }
+    if (entry.kind === "commentary") {
+      return <CommentaryEntry entry={entry} />;
     }
     if (entry.kind === "plan") {
       return <PlanEntry entry={entry} t={t} />;

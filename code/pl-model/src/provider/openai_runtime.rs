@@ -420,7 +420,7 @@ mod tests {
     #[tokio::test]
     async fn stream_complete_uses_chat_endpoint_without_auth_when_token_missing() {
         let sse_body = concat!(
-            "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"<final>ok</final>\"},\"finish_reason\":null}]}\n\n",
             "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\n",
             "data: [DONE]\n\n"
         )
@@ -463,7 +463,7 @@ mod tests {
     #[tokio::test]
     async fn stream_complete_sends_responses_bearer_and_custom_headers() {
         let sse_body = concat!(
-            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"<final>ok</final>\"}\n\n",
             "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
             "data: [DONE]\n\n"
         )
@@ -538,7 +538,7 @@ mod tests {
             .apply(
                 StreamEvent::OutputTextDelta {
                     item_id: None,
-                    delta: "9.11 更大。".to_string(),
+                    delta: "<final>9.11 更大。</final>".to_string(),
                 },
                 &event_tx,
             )
@@ -548,7 +548,10 @@ mod tests {
         let response = accumulator.finish(&event_tx).unwrap();
 
         assert_eq!(response.content.as_deref(), Some("9.11 更大。"));
-        assert_eq!(response.raw_content.as_deref(), Some("9.11 更大。"));
+        assert_eq!(
+            response.raw_content.as_deref(),
+            Some("<final>9.11 更大。</final>")
+        );
         assert_eq!(
             response.reasoning_content.as_deref(),
             Some("先比较整数位。")
@@ -572,20 +575,20 @@ mod tests {
     }
 
     #[test]
-    fn stream_accumulator_extracts_proposed_plan_item() {
-        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+    fn stream_accumulator_streams_commentary_without_content() {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
         let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTimelineContext {
             session_id: "session-1".to_string(),
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
             starting_sequence: 0,
-            plan_mode: true,
+            plan_mode: false,
         }));
 
         for delta in [
-            "Intro\n<prop",
-            "osed_plan>\n- step\n",
-            "</proposed_plan>\nOutro",
+            "<comm",
+            "entary>检查配置。</commentary>",
+            "<final>完成。</final>",
         ] {
             accumulator
                 .apply(
@@ -601,10 +604,89 @@ mod tests {
         apply_completed(&mut accumulator, &event_tx);
         let response = accumulator.finish(&event_tx).unwrap();
 
-        assert_eq!(response.content.as_deref(), Some("Intro\n\nOutro"));
+        assert_eq!(response.content.as_deref(), Some("完成。"));
+        assert!(response.timeline_events.iter().any(|event| matches!(
+            &event.kind,
+            TraceEventKind::TimelineItemCompleted { item }
+                if item.text_channel == Some(pl_protocol::TimelineTextChannel::Commentary)
+                    && item.content == "检查配置。"
+        )));
+        assert!(response.timeline_events.iter().any(|event| matches!(
+            &event.kind,
+            TraceEventKind::TimelineItemCompleted { item }
+                if item.text_channel == Some(pl_protocol::TimelineTextChannel::Final)
+                    && item.content == "完成。"
+        )));
+    }
+
+    #[test]
+    fn stream_accumulator_rejects_untagged_timeline_text() {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTimelineContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "inf-1".to_string(),
+            starting_sequence: 0,
+            plan_mode: false,
+        }));
+
+        accumulator
+            .apply(
+                StreamEvent::OutputTextDelta {
+                    item_id: None,
+                    delta: "plain text".to_string(),
+                },
+                &event_tx,
+            )
+            .unwrap();
+        apply_completed(&mut accumulator, &event_tx);
+
+        let error = accumulator.finish(&event_tx).unwrap_err();
+
+        match error {
+            PureError::LlmError(message) => {
+                assert!(message.contains("untagged assistant text"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stream_accumulator_extracts_proposed_plan_item() {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTimelineContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "inf-1".to_string(),
+            starting_sequence: 0,
+            plan_mode: true,
+        }));
+
+        for delta in [
+            "<commentary>Intro</commentary>\n<prop",
+            "osed_plan>\n- step\n",
+            "</proposed_plan>\n<final>Outro</final>",
+        ] {
+            accumulator
+                .apply(
+                    StreamEvent::OutputTextDelta {
+                        item_id: None,
+                        delta: delta.to_string(),
+                    },
+                    &event_tx,
+                )
+                .unwrap();
+        }
+
+        apply_completed(&mut accumulator, &event_tx);
+        let response = accumulator.finish(&event_tx).unwrap();
+
+        assert_eq!(response.content.as_deref(), Some("Outro"));
         assert_eq!(
             response.raw_content.as_deref(),
-            Some("Intro\n<proposed_plan>\n- step\n</proposed_plan>\nOutro")
+            Some(
+                "<commentary>Intro</commentary>\n<proposed_plan>\n- step\n</proposed_plan>\n<final>Outro</final>"
+            )
         );
         let completed_plan = response
             .timeline_events
