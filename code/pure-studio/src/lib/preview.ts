@@ -32,6 +32,7 @@ export const previewSessions: SessionRecord[] = [
     title: "分析项目架构",
     mode: "auto",
     updatedAt: 1779688800,
+    visibility: "active",
   },
 ];
 

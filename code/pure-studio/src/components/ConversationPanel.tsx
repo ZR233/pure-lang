@@ -78,8 +78,8 @@ type ConversationPanelProps = {
   onSavePermissionMode: (mode: PermissionMode) => void;
   onSetPrompt: (value: string) => void;
   onSetSessionMode: (mode: CompileMode) => void;
-  onImplementPlanFresh: (interactionId: string) => void;
-  onDiscussPlan: (planId: string, content: string) => void;
+  onImplementPlanFresh: (interactionId: string) => Promise<boolean> | boolean;
+  onDiscussPlan: (planId: string, content: string) => Promise<boolean> | boolean;
   onSendPrompt: () => void;
   onDismissPlanAction: (planId: string) => void;
   onStopPrompt: () => void;
@@ -773,47 +773,42 @@ function PlanConfirmComposer({
 }: {
   interactionId: string;
   stopping: boolean;
-  onImplementPlanFresh: (interactionId: string) => void;
-  onDiscussPlan: (interactionId: string, content: string) => void;
+  onImplementPlanFresh: (interactionId: string) => Promise<boolean> | boolean;
+  onDiscussPlan: (interactionId: string, content: string) => Promise<boolean> | boolean;
   onCancel: (interactionId: string) => void;
   t: TFunction;
 }) {
   const [message, setMessage] = useState("");
-  const [mode, setMode] = useState<"fresh" | "discuss">("fresh");
+  const [submittingAction, setSubmittingAction] = useState<"fresh" | "discuss" | null>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const discussing = mode === "discuss";
+  const submitting = submittingAction !== null;
 
   useEffect(() => {
     setMessage("");
-    setMode("fresh");
+    setSubmittingAction(null);
   }, [interactionId]);
 
   useEffect(() => {
-    if (discussing) {
-      textareaRef.current?.focus();
-    } else {
-      composerRef.current?.focus();
-    }
-  }, [interactionId, discussing]);
+    textareaRef.current?.focus();
+  }, [interactionId]);
 
   function submitDiscussion() {
-    if (stopping) return;
+    if (stopping || submitting) return;
     const content = message.trim();
     if (!content) return;
-    onDiscussPlan(interactionId, content);
+    setSubmittingAction("discuss");
+    Promise.resolve(onDiscussPlan(interactionId, content)).finally(() => {
+      setSubmittingAction(null);
+    });
   }
 
-  function submitSelected() {
-    if (stopping) return;
-    if (discussing) {
-      submitDiscussion();
-      return;
-    }
-    if (mode === "fresh") {
-      onImplementPlanFresh(interactionId);
-      return;
-    }
+  function submitFreshImplementation() {
+    if (stopping || submitting) return;
+    setSubmittingAction("fresh");
+    Promise.resolve(onImplementPlanFresh(interactionId)).finally(() => {
+      setSubmittingAction(null);
+    });
   }
 
   function submitOnShortcut(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -826,7 +821,7 @@ function PlanConfirmComposer({
   function handleComposerKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
-      if (!stopping) {
+      if (!stopping && !submitting) {
         onCancel(interactionId);
       }
       return;
@@ -841,19 +836,9 @@ function PlanConfirmComposer({
       return;
     }
 
-    if (event.key === "1") {
-      event.preventDefault();
-      setMode("fresh");
-      return;
-    }
-    if (event.key === "2") {
-      event.preventDefault();
-      setMode("discuss");
-      return;
-    }
     if (event.key === "Enter") {
       event.preventDefault();
-      submitSelected();
+      submitDiscussion();
     }
   }
 
@@ -865,35 +850,7 @@ function PlanConfirmComposer({
       tabIndex={-1}
     >
       <div className="text-sm font-semibold px-4 pt-3">{t("planConfirm.promptTitle")}</div>
-      <div className="flex flex-col gap-1 px-4 py-2" role="radiogroup" aria-label={t("planConfirm.promptTitle")}>
-        <Button
-          type="button"
-          variant={mode === "fresh" ? "default" : "outline"}
-          size="sm"
-          role="radio"
-          aria-checked={mode === "fresh"}
-          onClick={() => setMode("fresh")}
-          disabled={stopping}
-          className="w-full text-left justify-start"
-        >
-          <span className="text-xs text-muted-foreground w-4 shrink-0">1.</span>
-          <span className="text-sm">{t("planConfirm.implementFreshChoice")}</span>
-        </Button>
-        <Button
-          type="button"
-          variant={discussing ? "default" : "outline"}
-          size="sm"
-          role="radio"
-          aria-checked={discussing}
-          onClick={() => setMode("discuss")}
-          disabled={stopping}
-          className="w-full text-left justify-start"
-        >
-          <span className="text-xs text-muted-foreground w-4 shrink-0">2.</span>
-          <span className="text-sm">{t("planConfirm.adjustChoice")}</span>
-        </Button>
-      </div>
-      {discussing ? (
+      <div className="px-4 py-2">
         <textarea
           ref={textareaRef}
           value={message}
@@ -901,26 +858,35 @@ function PlanConfirmComposer({
           onKeyDown={submitOnShortcut}
           placeholder={t("planConfirm.discussPlaceholder")}
           aria-label={t("planConfirm.discussPlaceholder")}
-          className="mx-4 mb-2 flex min-h-[60px] rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={stopping || submitting}
+          className="flex min-h-[72px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         />
-      ) : null}
+      </div>
       <div className="flex items-center justify-between px-4 pb-3">
-        <span className="text-xs text-muted-foreground">
-          {discussing ? (
-            <>
-              <kbd className="px-1 py-0.5 rounded border border-border bg-muted text-[10px] font-mono">⌘</kbd>
-              {" + "}
-              <kbd className="px-1 py-0.5 rounded border border-border bg-muted text-[10px] font-mono">Enter</kbd>
-            </>
-          ) : null}
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+          <kbd className="px-1 py-0.5 rounded border border-border bg-muted text-[10px] font-mono">Ctrl</kbd>
+          <span>/</span>
+          <kbd className="px-1 py-0.5 rounded border border-border bg-muted text-[10px] font-mono">⌘</kbd>
+          <span>+</span>
+          <kbd className="px-1 py-0.5 rounded border border-border bg-muted text-[10px] font-mono">Enter</kbd>
         </span>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={submitFreshImplementation}
+            disabled={stopping || submitting}
+          >
+            {submittingAction === "fresh" ? <Loader2 size={13} className="animate-spin" /> : null}
+            <span>{t("planConfirm.implementFreshChoice")}</span>
+          </Button>
           <Button
             type="button"
             variant="ghost"
             size="sm"
             onClick={() => onCancel(interactionId)}
-            disabled={stopping}
+            disabled={stopping || submitting}
           >
             <span>{t("planConfirm.ignore")}</span>
             <kbd className="px-1 py-0.5 rounded border border-border bg-muted text-[10px] font-mono ml-1">ESC</kbd>
@@ -928,10 +894,11 @@ function PlanConfirmComposer({
           <Button
             type="button"
             size="sm"
-            onClick={submitSelected}
-            disabled={stopping || (discussing && !message.trim())}
+            onClick={submitDiscussion}
+            disabled={stopping || submitting || !message.trim()}
           >
-            <span>{t("planConfirm.submit")}</span>
+            {submittingAction === "discuss" ? <Loader2 size={13} className="animate-spin" /> : null}
+            <span>{t("planConfirm.continueDiscussion")}</span>
             <CornerDownLeft size={13} />
           </Button>
         </div>

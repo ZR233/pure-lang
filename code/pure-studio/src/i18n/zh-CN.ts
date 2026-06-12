@@ -252,7 +252,7 @@ const zhCN = {
 
   planConfirm: {
     title: "确认计划",
-    promptTitle: "实施此计划?",
+    promptTitle: "确认或继续调整计划",
     hint: "选择下一步",
     implementFreshChoice: "清理上下文并实施",
     adjustChoice: "继续规划或调整",

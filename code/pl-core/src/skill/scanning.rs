@@ -22,18 +22,60 @@ pub fn list_support_files(skill_dir: &Path) -> Result<Vec<SkillFile>> {
     Ok(files)
 }
 
-pub fn read_skill_file(skill: &SkillMetadata, file_path: Option<&str>) -> Result<String> {
-    let path = match file_path {
-        Some(file_path) => {
+pub struct SkillFileRead {
+    pub file_path: String,
+    pub is_main: bool,
+    pub content: String,
+}
+
+pub fn read_skill_file(skill: &SkillMetadata, file_path: Option<&str>) -> Result<SkillFileRead> {
+    let target = skill_file_selection(file_path);
+    let path = match target {
+        SkillFileSelection::Support(file_path) => {
             let relative = support_file_path(file_path)?;
             skill.path.join(relative)
         }
-        None => skill.path.join(SKILL_FILE_NAME),
+        SkillFileSelection::Main => skill.path.join(SKILL_FILE_NAME),
     };
-    fs::read_to_string(&path).map_err(|error| PureError::ToolExecutionFailed {
+    let content = fs::read_to_string(&path).map_err(|error| PureError::ToolExecutionFailed {
         tool: "skill_view".to_string(),
         error: format!("failed to read skill file {}: {error}", path.display()),
+    })?;
+    Ok(SkillFileRead {
+        file_path: target.display_path().to_string(),
+        is_main: target == SkillFileSelection::Main,
+        content,
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SkillFileSelection<'a> {
+    Main,
+    Support(&'a str),
+}
+
+impl<'a> SkillFileSelection<'a> {
+    fn display_path(self) -> &'a str {
+        match self {
+            Self::Main => SKILL_FILE_NAME,
+            Self::Support(path) => path,
+        }
+    }
+}
+
+fn skill_file_selection(file_path: Option<&str>) -> SkillFileSelection<'_> {
+    let Some(trimmed) = file_path.map(str::trim).filter(|path| !path.is_empty()) else {
+        return SkillFileSelection::Main;
+    };
+    let normalized = trimmed.replace('\\', "/");
+    let normalized = normalized.trim_start_matches("./");
+    if normalized.is_empty()
+        || normalized == "."
+        || normalized.eq_ignore_ascii_case(SKILL_FILE_NAME)
+    {
+        return SkillFileSelection::Main;
+    }
+    SkillFileSelection::Support(trimmed)
 }
 
 pub fn validate_skill_document(

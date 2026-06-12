@@ -252,7 +252,7 @@ const en = {
 
   planConfirm: {
     title: "Confirm plan",
-    promptTitle: "Implement this plan?",
+    promptTitle: "Confirm or keep refining the plan",
     hint: "Choose what happens next",
     implementFreshChoice: "Clear context and implement",
     adjustChoice: "Continue planning or adjust",

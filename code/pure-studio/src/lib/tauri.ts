@@ -166,6 +166,7 @@ export function createSession(projectId: string, title?: string) {
       title: title ?? "New session",
       mode: "auto",
       updatedAt: Math.floor(Date.now() / 1000),
+      visibility: "active" as const,
     };
     return Promise.resolve(
       clone({

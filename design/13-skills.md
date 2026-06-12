@@ -62,7 +62,7 @@ platforms: ["windows", "linux", "macos"]
 默认工具集中新增：
 
 - `skills_list(category?)`：列出启用 skill 的简短索引。
-- `skill_view(name, filePath?)`：读取完整 `SKILL.md` 或支持文件，并记录使用统计。
+- `skill_view(name, filePath?)`：读取完整 `SKILL.md` 或支持文件，并记录使用统计。省略 `filePath`、传空字符串、`.` 或 `SKILL.md` 都表示读取主文档；只有真正的支持文件路径才必须位于 `references/`、`templates/`、`scripts/` 或 `assets/` 下。
 - `skill_manage(action, ...)`：管理项目目录中的 skill。
 
 `skill_manage` 支持 `create`、`patch`、`edit`、`delete`、`writeFile`、`removeFile`。所有写入都只作用于 `<workspace_root>/<project_dir>/`。写入动作进入现有工具审批流程。

@@ -18,6 +18,7 @@ export type SessionRecord = {
   title: string;
   mode: string;
   updatedAt: number;
+  visibility: "active" | "handoffOrigin" | "archived";
 };
 
 export type AgentStatus =

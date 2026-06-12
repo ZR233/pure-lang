@@ -18,6 +18,7 @@ pub struct SessionDto {
     pub title: String,
     pub mode: String,
     pub updated_at: i64,
+    pub visibility: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

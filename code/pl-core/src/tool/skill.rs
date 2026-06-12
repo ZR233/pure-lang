@@ -191,10 +191,10 @@ impl Tool for SkillViewTool {
             let skill = catalog.find(&input.name).ok_or_else(|| {
                 tool_error(self.name(), format!("skill not found: {}", input.name))
             })?;
-            let content = read_skill_file(skill, input.file_path.as_deref())
+            let read = read_skill_file(skill, input.file_path.as_deref())
                 .map_err(|error| tool_error(self.name(), error))?;
             bump_project_view(skill).map_err(|error| tool_error(self.name(), error))?;
-            let support_files = if input.file_path.is_none() {
+            let support_files = if read.is_main {
                 list_support_files(&skill.path).map_err(|error| tool_error(self.name(), error))?
             } else {
                 Vec::new()
@@ -204,9 +204,9 @@ impl Tool for SkillViewTool {
                 json!({
                 "success": true,
                 "skill": skill,
-                "filePath": input.file_path.unwrap_or_else(|| "SKILL.md".to_string()),
+                "filePath": read.file_path,
                 "supportFiles": support_files,
-                "content": content,
+                "content": read.content,
                 }),
                 vec![ToolRuntimeEvent::SkillActivated { activation }],
             )
@@ -743,6 +743,35 @@ mod tests {
 
         assert_eq!(activation.name, "local-flow");
         assert_eq!(activation.source, "project");
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[tokio::test]
+    async fn skill_view_main_file_alias_reads_skill_and_lists_support_files() {
+        let workspace = temp_dir("view-main-alias");
+        write_project_skill(&workspace, "local-flow");
+        let tool = SkillViewTool::new(SkillsConfig {
+            project_dir: "skills".to_string(),
+            ..SkillsConfig::default()
+        });
+
+        let output = tool
+            .execute(
+                ToolInput {
+                    arguments: json!({"name": "local-flow", "filePath": "SKILL.md"}),
+                    session_id: "turn-1".to_string(),
+                    tool_id: "call-1".to_string(),
+                },
+                tool_context(workspace.clone()),
+            )
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+
+        assert_eq!(activation_from_output(&output).name, "local-flow");
+        assert_eq!(value["filePath"], "SKILL.md");
+        assert_eq!(value["supportFiles"][0]["path"], "references/example.md");
+        assert!(value["content"].as_str().unwrap().contains("# local-flow"));
         fs::remove_dir_all(workspace).unwrap();
     }
 

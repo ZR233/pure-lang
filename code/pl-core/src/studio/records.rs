@@ -19,7 +19,83 @@ pub struct SessionRecord {
     pub title: String,
     pub mode: String,
     pub updated_at: i64,
+    pub visibility: SessionVisibility,
     pub instruction_snapshot: Option<crate::InstructionSnapshot>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionVisibility {
+    Active,
+    HandoffOrigin,
+    Archived,
+}
+
+impl SessionVisibility {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::HandoffOrigin => "handoffOrigin",
+            Self::Archived => "archived",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionHandoffKind {
+    PlanImplementation,
+}
+
+impl SessionHandoffKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PlanImplementation => "planImplementation",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionHandoffStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+impl SessionHandoffStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionHandoffRecord {
+    pub id: String,
+    pub project_id: String,
+    pub origin_session_id: String,
+    pub target_session_id: String,
+    pub kind: SessionHandoffKind,
+    pub plan_id: String,
+    pub status: SessionHandoffStatus,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanImplementationHandoffStart {
+    pub origin_session: SessionRecord,
+    pub target_session: SessionRecord,
+    pub handoff: SessionHandoffRecord,
+    pub interaction: pl_protocol::InteractionRequest,
+    pub plan_id: String,
+    pub plan_content: String,
+    pub should_start_run: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
