@@ -166,6 +166,34 @@ pub mod timeline_event {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
+pub mod interaction {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "interactions")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub session_id: String,
+        pub turn_id: String,
+        pub item_id: Option<String>,
+        pub tool_id: Option<String>,
+        pub agent_path: Option<String>,
+        pub kind: String,
+        pub status: String,
+        pub payload_json: String,
+        pub resolution_json: Option<String>,
+        pub created_at: i64,
+        pub updated_at: i64,
+        pub resolved_at: Option<i64>,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 pub mod session_runtime_snapshot {
     use super::*;
 

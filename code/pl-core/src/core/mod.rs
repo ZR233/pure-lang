@@ -412,6 +412,7 @@ mod tests {
                 TraceEventKind::TimelineItemStarted { .. }
                 | TraceEventKind::TimelineItemDelta { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::EnabledToolsRecorded { .. } => false,
             })
             .count()
@@ -470,6 +471,7 @@ mod tests {
                 | TraceEventKind::TimelineItemCompleted { .. }
                 | TraceEventKind::TimelineItemFailed { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::EnabledToolsRecorded { .. } => None,
             })
             .collect()
@@ -504,7 +506,8 @@ mod tests {
                 | TraceEventKind::TimelineItemDelta { .. }
                 | TraceEventKind::TimelineItemCompleted { .. }
                 | TraceEventKind::TimelineItemFailed { .. }
-                | TraceEventKind::PlanLifecycleChanged { .. } => None,
+                | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::InteractionChanged { .. } => None,
             })
             .expect("enabled tools event")
     }
@@ -1085,6 +1088,7 @@ mod tests {
                 TraceEventKind::TimelineItemStarted { .. }
                 | TraceEventKind::TimelineItemDelta { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::EnabledToolsRecorded { .. } => None,
             })
             .expect("terminal tool item");
@@ -1196,6 +1200,7 @@ mod tests {
                 | TraceEventKind::TimelineItemDelta { .. }
                 | TraceEventKind::TimelineItemCompleted { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::EnabledToolsRecorded { .. } => None,
             })
             .expect("interrupted tool item");
@@ -1395,6 +1400,7 @@ mod tests {
                 | TraceEventKind::TimelineItemCompleted { .. }
                 | TraceEventKind::TimelineItemFailed { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::EnabledToolsRecorded { .. } => None,
             })
             .expect("user timeline item");

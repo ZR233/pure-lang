@@ -1,6 +1,8 @@
 use anyhow::{Context, Result, bail};
 use pl_protocol::{
-    AgentStatus, Message, MessageContent, MessageRole, RuntimeCostAmount, RuntimeUsageSnapshot,
+    AgentStatus, InteractionPayload, InteractionRequest, InteractionResolution, InteractionScope,
+    InteractionStatus, Message, MessageContent, MessageRole, RuntimeCostAmount,
+    RuntimeUsageSnapshot,
 };
 
 use crate::studio::entities;
@@ -132,6 +134,53 @@ pub fn timeline_event_record(model: entities::timeline_event::Model) -> Timeline
     }
 }
 
+pub fn interaction_record(model: entities::interaction::Model) -> Result<InteractionRequest> {
+    let payload = serde_json::from_str::<InteractionPayload>(&model.payload_json)
+        .with_context(|| format!("failed to parse interaction payload: {}", model.id))?;
+    let resolution = model
+        .resolution_json
+        .as_deref()
+        .map(serde_json::from_str::<InteractionResolution>)
+        .transpose()
+        .with_context(|| format!("failed to parse interaction resolution: {}", model.id))?;
+    Ok(InteractionRequest {
+        interaction_id: model.id,
+        kind: interaction_kind_from_label(&model.kind)?,
+        status: interaction_status_from_label(&model.status)?,
+        scope: InteractionScope {
+            session_id: model.session_id,
+            turn_id: model.turn_id,
+            item_id: model.item_id,
+            tool_id: model.tool_id,
+            agent_path: model.agent_path,
+        },
+        payload,
+        created_at: model.created_at,
+        updated_at: model.updated_at,
+        resolved_at: model.resolved_at,
+        resolution,
+    })
+}
+
+fn interaction_kind_from_label(label: &str) -> Result<pl_protocol::InteractionKind> {
+    match label {
+        "userInput" => Ok(pl_protocol::InteractionKind::UserInput),
+        "toolApproval" => Ok(pl_protocol::InteractionKind::ToolApproval),
+        "planConfirmation" => Ok(pl_protocol::InteractionKind::PlanConfirmation),
+        other => bail!("unsupported interaction kind in studio db: {other}"),
+    }
+}
+
+fn interaction_status_from_label(label: &str) -> Result<InteractionStatus> {
+    match label {
+        "pending" => Ok(InteractionStatus::Pending),
+        "resolved" => Ok(InteractionStatus::Resolved),
+        "cancelled" => Ok(InteractionStatus::Cancelled),
+        "expired" => Ok(InteractionStatus::Expired),
+        other => bail!("unsupported interaction status in studio db: {other}"),
+    }
+}
+
 pub fn session_runtime_record(
     model: entities::session_runtime_snapshot::Model,
 ) -> SessionRuntimeRecord {
@@ -182,6 +231,7 @@ pub fn trace_event_kind_label(kind: &pl_protocol::TraceEventKind) -> &'static st
         pl_protocol::TraceEventKind::TimelineItemCompleted { .. } => "TimelineItemCompleted",
         pl_protocol::TraceEventKind::TimelineItemFailed { .. } => "TimelineItemFailed",
         pl_protocol::TraceEventKind::PlanLifecycleChanged { .. } => "PlanLifecycleChanged",
+        pl_protocol::TraceEventKind::InteractionChanged { .. } => "InteractionChanged",
         pl_protocol::TraceEventKind::EnabledToolsRecorded { .. } => "EnabledToolsRecorded",
     }
 }

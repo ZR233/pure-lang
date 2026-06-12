@@ -5,15 +5,10 @@ import { useEffect, useMemo, useReducer, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { normalizeRolesForProviders } from "../components/RoleSettings";
 import {
-  approveTool,
-  answerUserInput,
   archiveProject,
   bootstrapStudio,
   createSession,
   deleteSession,
-  denyTool,
-  dismissPlan,
-  implementPlan,
   loadConfig,
   loadProviderUsages,
   loadSessionTimeline,
@@ -28,13 +23,14 @@ import {
   selectSession,
   setSessionMode,
   isTauriRuntime,
+  resolveInteraction,
   stopPrompt,
 } from "../lib/tauri";
 import { errorText } from "../lib/utils";
 import {
   selectSelectedProject,
   selectSelectedSession,
-  selectPlanAction,
+  selectActiveInteraction,
   selectTimelineEntries,
 } from "../state/selectors";
 import { initialStudioState, studioReducer } from "../state/studio-state";
@@ -46,6 +42,8 @@ import type {
   McpHealthUpdatedPayload,
   McpServerInput,
   InstructionsInput,
+  InteractionChangedPayload,
+  InteractionResolution,
   PermissionMode,
   PromptFailed,
   ProviderRecord,
@@ -53,11 +51,6 @@ import type {
   RoleRecord,
   SessionSelectionPayload,
   TimelineItem,
-  ToolApprovalRequest,
-  ToolApprovalResolved,
-  UserInputRequest,
-  UserInputResolved,
-  UserInputResponse,
 } from "../types";
 
 function providerInput(provider: ProviderRecord) {
@@ -135,6 +128,26 @@ function statusTextForToolItem(
   }
 }
 
+function statusTextForInteraction(
+  payload: InteractionChangedPayload,
+  t: (key: string, args?: Record<string, unknown>) => string,
+) {
+  const interaction = payload.event.interaction;
+  if (interaction.status !== "pending") {
+    return t("status.ready");
+  }
+  switch (interaction.kind) {
+    case "toolApproval":
+      return interaction.payload.type === "toolApproval"
+        ? t("status.approvalRequired", { name: interaction.payload.name })
+        : t("status.approvalRequired", { name: "tool" });
+    case "userInput":
+      return t("status.userInputRequired");
+    case "planConfirmation":
+      return t("planConfirm.promptTitle");
+  }
+}
+
 export function useStudioApp() {
   const { t } = useTranslation();
   const [state, dispatch] = useReducer(studioReducer, initialStudioState(t("status.starting")));
@@ -143,7 +156,7 @@ export function useStudioApp() {
 
   const selectedProject = selectSelectedProject(state);
   const selectedSession = selectSelectedSession(state);
-  const planAction = selectPlanAction(state);
+  const activeInteraction = selectActiveInteraction(state);
 
   const timelineEntries = useMemo(() => {
     return selectTimelineEntries(state);
@@ -225,32 +238,11 @@ export function useStudioApp() {
           payload,
         });
       }),
-      listen<ToolApprovalRequest>("studio-tool-approval-requested", ({ payload }) => {
+      listen<InteractionChangedPayload>("studio-interaction-changed", ({ payload }) => {
         dispatch({
-          type: "enqueueApproval",
+          type: "interactionChanged",
           payload,
-          status: t("status.approvalRequired", { name: payload.name }),
-        });
-      }),
-      listen<ToolApprovalResolved>("studio-tool-approval-resolved", ({ payload }) => {
-        dispatch({
-          type: "resolveApproval",
-          payload,
-          status: payload.decision === "approved" ? t("status.toolApproved") : t("status.toolDenied"),
-        });
-      }),
-      listen<UserInputRequest>("studio-user-input-requested", ({ payload }) => {
-        dispatch({
-          type: "userInputRequested",
-          payload,
-          status: t("status.userInputRequired"),
-        });
-      }),
-      listen<UserInputResolved>("studio-user-input-resolved", ({ payload }) => {
-        dispatch({
-          type: "userInputResolved",
-          payload,
-          status: t("status.userInputAnswered"),
+          status: statusTextForInteraction(payload, t),
         });
       }),
       listen<PromptFailed>("studio-prompt-failed", ({ payload }) => {
@@ -286,6 +278,7 @@ export function useStudioApp() {
           sessionId: payload.sessionId,
           items: payload.items,
           planStates: payload.planStates ?? [],
+          interactions: payload.interactions ?? [],
           nextSequence: payload.nextSequence,
         }),
       )
@@ -454,73 +447,89 @@ export function useStudioApp() {
     await submitPrompt(sessionId, trimmed);
   }
 
-  async function onImplementPlan(planId: string, plan: string) {
-    const content = plan.trim();
+  async function onResolveInteraction(interactionId: string, resolution: InteractionResolution) {
+    const interaction = state.interactions.get(interactionId);
     const sessionId = state.selectedSessionId;
-    if (!planId || !content || !sessionId || state.isBusy) {
+    if (!interaction || !sessionId) {
       return;
     }
-    const prompt = `PLEASE IMPLEMENT THIS PLAN:\n\n${content}`;
-    dispatch({ type: "optimisticSessionMode", sessionId, mode: "auto" });
-    dispatch({
-      type: "promptSubmitted",
-      status: t("status.running"),
-      startedAt: Date.now(),
-      prompt,
-    });
-    try {
-      const payload = await implementPlan(sessionId, planId, content);
-      const turnError = payload.turnError ?? payload.turnAbortReason ?? t("subagent.providerError");
-      const status =
-        payload.turnStatus === "errored"
-          ? t("status.runFailed", { error: turnError })
-          : payload.turnAbortReason === "interrupted"
-            ? t("status.interrupted")
-            : t("status.done");
-      dispatch({ type: "runPromptLoaded", payload, status });
-    } catch (error) {
+    if (resolution.type === "planConfirmation" && resolution.decision === "implement") {
+      const content =
+        resolution.content?.trim() ||
+        (interaction.payload.type === "planConfirmation" ? interaction.payload.content.trim() : "");
+      const prompt = `PLEASE IMPLEMENT THIS PLAN:\n\n${content}`;
+      dispatch({ type: "optimisticSessionMode", sessionId, mode: "auto" });
       dispatch({
-        type: "runPromptFailed",
-        sessionId,
-        status: t("status.runFailed", { error: errorText(error) }),
+        type: "promptSubmitted",
+        status: t("status.running"),
+        startedAt: Date.now(),
+        prompt,
       });
     }
-  }
-
-  async function dismissCurrentPlan(planId: string, reason: string): Promise<boolean> {
-    const sessionId = state.selectedSessionId;
-    if (!planId || !sessionId || state.isBusy) {
-      return false;
-    }
     try {
-      const payload = await dismissPlan(sessionId, planId, reason);
+      const payload = await resolveInteraction(interactionId, resolution);
       dispatch({
-        type: "planLifecycleLoaded",
-        sessionId: payload.sessionId,
-        planStates: payload.planStates,
-        timelineNextSequence: payload.timelineNextSequence,
+        type: "interactionChanged",
+        payload: {
+          sessionId: payload.sessionId,
+          event: { interaction: payload.interaction },
+        },
         status: t("status.ready"),
       });
-      dispatch({ type: "dismissPlanAction", planId });
-      return true;
+      if (payload.planLifecycle) {
+        dispatch({
+          type: "planLifecycleLoaded",
+          sessionId: payload.planLifecycle.sessionId,
+          planStates: payload.planLifecycle.planStates,
+          timelineNextSequence: payload.planLifecycle.timelineNextSequence,
+          status: t("status.ready"),
+        });
+      }
+      if (payload.run) {
+        const turnError = payload.run.turnError ?? payload.run.turnAbortReason ?? t("subagent.providerError");
+        const status =
+          payload.run.turnStatus === "errored"
+            ? t("status.runFailed", { error: turnError })
+            : payload.run.turnAbortReason === "interrupted"
+              ? t("status.interrupted")
+              : t("status.done");
+        dispatch({ type: "runPromptLoaded", payload: payload.run, status });
+      }
     } catch (error) {
       dispatch({
         type: "runPromptFailed",
         sessionId,
         status: t("status.runFailed", { error: errorText(error) }),
       });
-      return false;
     }
   }
 
-  async function onDiscussPlan(planId: string, content: string) {
-    const trimmed = content.trim();
+  async function onImplementPlan(interactionId: string, plan: string) {
+    const content = plan.trim();
     const sessionId = state.selectedSessionId;
-    if (!trimmed || !sessionId || state.isBusy) {
+    if (!interactionId || !content || !sessionId || state.isBusy) {
       return;
     }
-    const dismissed = await dismissCurrentPlan(planId, "discuss");
-    if (dismissed) {
+    await onResolveInteraction(interactionId, {
+      type: "planConfirmation",
+      decision: "implement",
+      content,
+    });
+  }
+
+  async function onDiscussPlan(interactionId: string, content: string) {
+    const trimmed = content.trim();
+    if (!trimmed || state.isBusy) {
+      return;
+    }
+    await onResolveInteraction(interactionId, {
+      type: "planConfirmation",
+      decision: "discuss",
+      content: trimmed,
+      reason: "discuss",
+    });
+    const sessionId = state.selectedSessionId;
+    if (sessionId) {
       await submitPrompt(sessionId, trimmed);
     }
   }
@@ -730,39 +739,12 @@ export function useStudioApp() {
     }
   }
 
-  async function onApprove(approvalId: string) {
-    await approveTool(approvalId);
-  }
-
-  async function onDeny(approvalId: string) {
-    await denyTool(approvalId, "denied by user");
-  }
-
-  async function onAnswerUserInput(requestId: string, response: UserInputResponse) {
-    try {
-      await answerUserInput(requestId, response);
-      if (!isTauriRuntime()) {
-        dispatch({
-          type: "userInputResolved",
-          payload: { requestId },
-          status: t("status.userInputAnswered"),
-        });
-      }
-    } catch (error) {
-      dispatch({
-        type: "runPromptFailed",
-        sessionId: state.selectedSessionId,
-        status: t("status.runFailed", { error: errorText(error) }),
-      });
-    }
-  }
-
   return {
     state,
     timelineEntries,
     selectedProject,
     selectedSession,
-    planAction,
+    activeInteraction,
     setRolesState,
     setProvidersState,
     setSelectedProviderIdState,
@@ -779,10 +761,15 @@ export function useStudioApp() {
     onSetSessionMode,
     onSendPrompt,
     onSendPromptContent,
+    onResolveInteraction,
     onImplementPlan,
-    onSetPlanActionMode: (mode: "choice" | "discuss") => dispatch({ type: "setPlanActionMode", mode }),
     onDiscussPlan,
-    onDismissPlanAction: (planId: string) => void dismissCurrentPlan(planId, "dismissed"),
+    onDismissPlanAction: (interactionId: string) =>
+      void onResolveInteraction(interactionId, {
+        type: "planConfirmation",
+        decision: "dismiss",
+        reason: "dismissed",
+      }),
     onStopPrompt,
     openSettings,
     onSaveConfig,
@@ -792,8 +779,5 @@ export function useStudioApp() {
     onSaveMcpSettings,
     refreshProviderUsages,
     onReloadConfig,
-    onApprove,
-    onDeny,
-    onAnswerUserInput,
   };
 }

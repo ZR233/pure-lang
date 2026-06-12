@@ -13,7 +13,7 @@ use crate::studio::records::{
 };
 use crate::{
     CompileMode, CoreSession, InstructionAssembler, InstructionAssemblyRequest,
-    InstructionSnapshot, PureCore, ToolApprovalCallback, TraceRecorder, TurnBudget, TurnOptions,
+    InstructionSnapshot, InteractionCallback, PureCore, TraceRecorder, TurnBudget, TurnOptions,
     TurnRequest, TurnResultStatus, load_workspace_instructions, resolve_workspace_root,
 };
 
@@ -168,7 +168,7 @@ impl StudioRuntime {
         session_id: &str,
         prompt: String,
         event_tx: AgentEventSender,
-        approval_callback: ToolApprovalCallback,
+        interaction_callback: InteractionCallback,
         mut options: TurnOptions,
     ) -> Result<StudioPromptOutcome> {
         let session_record = self
@@ -215,10 +215,10 @@ impl StudioRuntime {
         core.register_default_tools(workspace_root.clone(), Some(workspace_instructions.clone()))
             .await;
         core.register_available_mcp_tools().await?;
-        if options.tool_approval_callback.is_none()
+        if options.interaction_callback.is_none()
             && (options.requires_user_approval_callback() || mode == CompileMode::Plan)
         {
-            options.tool_approval_callback = Some(approval_callback.clone());
+            options.interaction_callback = Some(interaction_callback.clone());
         }
         let starting_sequence = self.store.next_timeline_sequence(session_id).await?;
         let mut recorder = TraceRecorder::new(session_id.to_string(), event_tx, starting_sequence);
@@ -331,6 +331,7 @@ fn tool_call_count(timeline_events: &[TraceEvent]) -> u32 {
             | TraceEventKind::TimelineItemCompleted { .. }
             | TraceEventKind::TimelineItemFailed { .. }
             | TraceEventKind::PlanLifecycleChanged { .. }
+            | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => false,
         })
         .count() as u32

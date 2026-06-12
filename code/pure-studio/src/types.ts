@@ -377,6 +377,7 @@ export type SessionTimeline = {
   sessionId: string;
   items: TimelineItem[];
   planStates?: PlanState[];
+  interactions?: InteractionRequest[];
   nextSequence: number;
 };
 
@@ -399,6 +400,73 @@ export type PlanLifecycleResponse = {
   sessionId: string;
   planStates: PlanState[];
   timelineNextSequence: number;
+};
+
+export type InteractionKind = "userInput" | "toolApproval" | "planConfirmation";
+export type InteractionStatus = "pending" | "resolved" | "cancelled" | "expired";
+
+export type InteractionScope = {
+  sessionId: string;
+  turnId: string;
+  itemId?: string | null;
+  toolId?: string | null;
+  agentPath?: string | null;
+};
+
+export type InteractionPayload =
+  | { type: "userInput"; questions: UserQuestion[] }
+  | {
+      type: "toolApproval";
+      name: string;
+      arguments: unknown;
+      workingDirectory?: string | null;
+      parentAgentId?: string | null;
+    }
+  | { type: "planConfirmation"; planId: string; content: string };
+
+export type ToolApprovalResolution = "approved" | "denied";
+export type PlanConfirmationResolution = "implement" | "discuss" | "dismiss";
+
+export type InteractionResolution =
+  | { type: "userInput"; answers: Record<string, UserInputAnswer> }
+  | {
+      type: "toolApproval";
+      decision: ToolApprovalResolution;
+      reason?: string | null;
+    }
+  | {
+      type: "planConfirmation";
+      decision: PlanConfirmationResolution;
+      content?: string | null;
+      reason?: string | null;
+    };
+
+export type InteractionRequest = {
+  interactionId: string;
+  kind: InteractionKind;
+  status: InteractionStatus;
+  scope: InteractionScope;
+  payload: InteractionPayload;
+  createdAt: number;
+  updatedAt: number;
+  resolvedAt?: number | null;
+  resolution?: InteractionResolution | null;
+};
+
+export type InteractionChangedEvent = {
+  interaction: InteractionRequest;
+};
+
+export type InteractionChangedPayload = {
+  sessionId: string;
+  event: InteractionChangedEvent;
+};
+
+export type ResolveInteractionResponse = {
+  sessionId: string;
+  interaction: InteractionRequest;
+  run?: RunPromptResponse | null;
+  planLifecycle?: PlanLifecycleResponse | null;
 };
 
 export type ProviderTemplateRecord = {
@@ -506,6 +574,7 @@ export type BootstrapPayload = {
   agentEvents: AgentTimelineEvent[];
   agents: AgentDto[];
   sessionRuntime?: SessionRuntime | null;
+  interactions?: InteractionRequest[];
   lspHealth?: LspHealthUpdatedPayload | null;
   config: ConfigPayload;
 };
@@ -519,6 +588,7 @@ export type ProjectSelectionPayload = {
   agentEvents: AgentTimelineEvent[];
   agents: AgentDto[];
   sessionRuntime?: SessionRuntime | null;
+  interactions?: InteractionRequest[];
   lspHealth?: LspHealthUpdatedPayload | null;
 };
 
@@ -528,6 +598,7 @@ export type SessionSelectionPayload = {
   agentEvents: AgentTimelineEvent[];
   agents: AgentDto[];
   sessionRuntime?: SessionRuntime | null;
+  interactions?: InteractionRequest[];
 };
 
 export type RunPromptResponse = {
@@ -538,6 +609,7 @@ export type RunPromptResponse = {
   sessionRuntime: SessionRuntime;
   timelineItems: TimelineItem[];
   planStates?: PlanState[];
+  interactions?: InteractionRequest[];
   timelineNextSequence: number;
   turnStatus: TurnStatus;
   turnAbortReason?: string | null;
@@ -572,6 +644,7 @@ export type AgentEvent =
       };
     }
   | { userInputAnswered: { requestId: string } }
+  | { interactionChanged: { event: InteractionChangedEvent } }
   | { agentStateChanged: AgentStateChangedEvent }
   | { agentRuntimeUpdated: { delta: AgentRuntimeDelta } }
   | { turnInterrupted: { reason: string } }
@@ -630,21 +703,6 @@ export type AgentEventPayload = {
   sessionRuntime?: SessionRuntime | null;
 };
 
-export type ToolApprovalRequest = {
-  approvalId: string;
-  sessionId: string;
-  name: string;
-  arguments: unknown;
-  workingDirectory?: string | null;
-  parentAgentId?: string | null;
-};
-
-export type ToolApprovalResolved = {
-  approvalId: string;
-  decision: "approved" | "denied";
-  reason?: string | null;
-};
-
 export type UserQuestionOption = {
   label: string;
   description: string;
@@ -665,17 +723,6 @@ export type UserInputAnswer = {
 
 export type UserInputResponse = {
   answers: Record<string, UserInputAnswer>;
-};
-
-export type UserInputRequest = {
-  requestId: string;
-  sessionId: string;
-  toolId: string;
-  questions: UserQuestion[];
-};
-
-export type UserInputResolved = {
-  requestId: string;
 };
 
 export type PromptFailed = {

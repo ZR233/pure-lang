@@ -1,4 +1,4 @@
-use pl_protocol::{AgentEvent, TimelineItem, UserQuestion};
+use pl_protocol::{AgentEvent, InteractionChangedEvent, InteractionRequest, TimelineItem};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize)]
@@ -395,6 +395,7 @@ pub struct BootstrapDto {
     pub agent_events: Vec<AgentEventDto>,
     pub agents: Vec<AgentDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
+    pub interactions: Vec<InteractionRequest>,
     pub lsp_health: LspHealthUpdateDto,
     pub config: ConfigDto,
 }
@@ -409,6 +410,7 @@ pub struct ProjectSelectionDto {
     pub agent_events: Vec<AgentEventDto>,
     pub agents: Vec<AgentDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
+    pub interactions: Vec<InteractionRequest>,
     pub lsp_health: LspHealthUpdateDto,
 }
 
@@ -420,6 +422,7 @@ pub struct SessionSelectionDto {
     pub agent_events: Vec<AgentEventDto>,
     pub agents: Vec<AgentDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
+    pub interactions: Vec<InteractionRequest>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -471,6 +474,7 @@ pub struct RunPromptResponse {
     pub session_runtime: SessionRuntimeDto,
     pub timeline_items: Vec<TimelineItem>,
     pub plan_states: Vec<PlanStateDto>,
+    pub interactions: Vec<InteractionRequest>,
     pub timeline_next_sequence: u64,
     pub turn_status: String,
     pub turn_abort_reason: Option<String>,
@@ -490,6 +494,7 @@ pub struct SessionTimelineDto {
     pub session_id: String,
     pub items: Vec<TimelineItem>,
     pub plan_states: Vec<PlanStateDto>,
+    pub interactions: Vec<InteractionRequest>,
     pub next_sequence: u64,
 }
 
@@ -513,36 +518,18 @@ pub struct AgentEventPayload {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ToolApprovalRequestPayload {
-    pub approval_id: String,
+pub struct InteractionChangedPayload {
     pub session_id: String,
-    pub name: String,
-    pub arguments: serde_json::Value,
-    pub working_directory: Option<String>,
-    pub parent_agent_id: Option<String>,
+    pub event: InteractionChangedEvent,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ToolApprovalResolvedPayload {
-    pub approval_id: String,
-    pub decision: String,
-    pub reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UserInputRequestPayload {
-    pub request_id: String,
+pub struct ResolveInteractionResponse {
     pub session_id: String,
-    pub tool_id: String,
-    pub questions: Vec<UserQuestion>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UserInputResolvedPayload {
-    pub request_id: String,
+    pub interaction: InteractionRequest,
+    pub run: Option<RunPromptResponse>,
+    pub plan_lifecycle: Option<PlanLifecycleResponse>,
 }
 
 #[derive(Debug, Clone, Serialize)]

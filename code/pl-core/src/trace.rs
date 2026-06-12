@@ -336,6 +336,7 @@ impl TraceRecorder {
                     && matches!(&event.delta, TimelineDelta::Text { delta } if !delta.trim().is_empty())
             }
             TraceEventKind::PlanLifecycleChanged { .. }
+            | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => false,
         })
     }

@@ -1,4 +1,3 @@
-import { ApprovalOverlay } from "./components/ApprovalOverlay";
 import { ConversationPanel } from "./components/ConversationPanel";
 import { ProjectRail } from "./components/ProjectRail";
 import { SettingsPage } from "./components/SettingsPage";
@@ -40,8 +39,7 @@ export function App() {
           agents={state.agents}
           sessionRuntime={state.sessionRuntime}
           lspServers={state.lspServers}
-          pendingUserInput={state.pendingUserInput}
-          planAction={studio.planAction}
+          activeInteraction={studio.activeInteraction}
           prompt={state.prompt}
           status={state.status}
           turnPhase={state.turnPhase}
@@ -67,22 +65,13 @@ export function App() {
             void studio.onDiscussPlan(planId, content)
           }
           onSendPrompt={() => void studio.onSendPrompt()}
-          onSetPlanActionMode={(mode) => void studio.onSetPlanActionMode(mode)}
           onDismissPlanAction={(planId) =>
             void studio.onDismissPlanAction(planId)
           }
           onStopPrompt={() => void studio.onStopPrompt()}
-          onAnswerUserInput={(requestId, response) =>
-            void studio.onAnswerUserInput(requestId, response)
-          }
+          onResolveInteraction={studio.onResolveInteraction}
         />
       </div>
-
-      <ApprovalOverlay
-        approvals={state.approvals}
-        onApprove={(id) => void studio.onApprove(id)}
-        onDeny={(id) => void studio.onDeny(id)}
-      />
 
       {state.settingsOpen ? (
         <SettingsPage

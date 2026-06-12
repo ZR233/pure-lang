@@ -1,11 +1,17 @@
 use std::path::Path;
 
-use pl_protocol::{AgentEvent, AgentEventSender};
+use pl_protocol::{
+    AgentEvent, AgentEventSender, InteractionChangedEvent, InteractionKind, InteractionPayload,
+    InteractionRequest, InteractionResolution, InteractionScope, InteractionStatus,
+    ToolApprovalResolution,
+};
 
 #[cfg(test)]
 use crate::permission::{PermissionDecision, decide_tool_permission};
 use crate::tool::{PathAccess, ToolContext, ToolPathPolicy, WorkspaceAccess};
 use crate::turn::{ToolApprovalDecision, ToolApprovalRequest, TurnOptions};
+
+use super::turn_result::unix_seconds;
 
 pub(super) fn approval_request(
     tool_call: &pl_model::ToolCall,
@@ -144,7 +150,7 @@ pub(super) async fn approve_tool_call(
     match decide_tool_permission(options, context.mode, request, context.workspace_access) {
         PermissionDecision::Approved { .. } => ToolApprovalDecision::Approved,
         PermissionDecision::NeedsUserApproval { .. } => {
-            request_user_approval(options, request, event_tx).await
+            request_user_approval(options, request, event_tx, "").await
         }
         PermissionDecision::NeedsAiReview { .. } => ToolApprovalDecision::Denied {
             reason: "AI reviewer approval requires the core execution path".to_string(),
@@ -157,7 +163,41 @@ pub(super) async fn request_user_approval(
     options: &TurnOptions,
     request: &ToolApprovalRequest,
     event_tx: AgentEventSender,
+    turn_id: &str,
 ) -> ToolApprovalDecision {
+    if let Some(callback) = &options.interaction_callback {
+        let interaction = tool_approval_interaction(request, turn_id);
+        let _ = event_tx.send(AgentEvent::InteractionChanged {
+            event: InteractionChangedEvent {
+                interaction: interaction.clone(),
+            },
+        });
+        let resolution = match &options.cancellation_token {
+            Some(token) => {
+                tokio::select! {
+                    resolution = callback(interaction.clone()) => resolution,
+                    _ = token.cancelled() => InteractionResolution::ToolApproval {
+                        decision: ToolApprovalResolution::Denied,
+                        reason: Some(cancellation_reason()),
+                    },
+                }
+            }
+            None => callback(interaction.clone()).await,
+        };
+        return match resolution {
+            InteractionResolution::ToolApproval { decision, reason } => match decision {
+                ToolApprovalResolution::Approved => ToolApprovalDecision::Approved,
+                ToolApprovalResolution::Denied => ToolApprovalDecision::Denied {
+                    reason: reason.unwrap_or_else(|| "denied by user".to_string()),
+                },
+            },
+            InteractionResolution::UserInput { .. }
+            | InteractionResolution::PlanConfirmation { .. } => ToolApprovalDecision::Denied {
+                reason: "interaction resolved with an incompatible payload".to_string(),
+            },
+        };
+    }
+
     let _ = event_tx.send(AgentEvent::ToolApprovalRequested {
         id: request.id.clone(),
         name: request.name.clone(),
@@ -184,6 +224,32 @@ pub(super) async fn request_user_approval(
 
 pub(super) fn cancellation_reason() -> String {
     "interrupted by user".to_string()
+}
+
+fn tool_approval_interaction(request: &ToolApprovalRequest, turn_id: &str) -> InteractionRequest {
+    let now = unix_seconds();
+    InteractionRequest {
+        interaction_id: request.id.clone(),
+        kind: InteractionKind::ToolApproval,
+        status: InteractionStatus::Pending,
+        scope: InteractionScope {
+            session_id: String::new(),
+            turn_id: turn_id.to_string(),
+            item_id: Some(request.id.clone()),
+            tool_id: Some(request.id.clone()),
+            agent_path: request.parent_agent_id.clone(),
+        },
+        payload: InteractionPayload::ToolApproval {
+            name: request.name.clone(),
+            arguments: request.arguments.clone(),
+            working_directory: request.working_directory.clone(),
+            parent_agent_id: request.parent_agent_id.clone(),
+        },
+        created_at: now,
+        updated_at: now,
+        resolved_at: None,
+        resolution: None,
+    }
 }
 
 #[cfg(test)]

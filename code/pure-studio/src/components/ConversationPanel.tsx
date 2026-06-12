@@ -24,6 +24,8 @@ import type {
   CompileMode,
   LspServerRecord,
   PermissionMode,
+  InteractionRequest,
+  InteractionResolution,
   PlanLifecycleState,
   ProviderRecord,
   RoleRecord,
@@ -32,12 +34,10 @@ import type {
   TimelineItem,
   TurnPhase,
   ToolCallStatus2,
-  UserInputRequest,
   UserInputResponse,
   UserQuestion,
 } from "../types";
 import type { TimelineEntry, ToolGroupSummaryPart } from "../state/selectors";
-import type { PlanActionMode, PlanActionState } from "../state/studio-state";
 import { hidesToolResult, isQuietFileTool } from "../lib/tool-display";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -65,8 +65,7 @@ type ConversationPanelProps = {
   agents: AgentDto[];
   sessionRuntime: SessionRuntime | null;
   lspServers: LspServerRecord[];
-  pendingUserInput: UserInputRequest | null;
-  planAction: PlanActionState | null;
+  activeInteraction: InteractionRequest | null;
   prompt: string;
   status: string;
   turnPhase: TurnPhase;
@@ -82,10 +81,9 @@ type ConversationPanelProps = {
   onImplementPlan: (planId: string, plan: string) => void;
   onDiscussPlan: (planId: string, content: string) => void;
   onSendPrompt: () => void;
-  onSetPlanActionMode: (mode: PlanActionMode) => void;
   onDismissPlanAction: (planId: string) => void;
   onStopPrompt: () => void;
-  onAnswerUserInput: (requestId: string, response: UserInputResponse) => void;
+  onResolveInteraction: (interactionId: string, resolution: InteractionResolution) => void;
 };
 
 function compact(value: string, max = 220): string {
@@ -585,20 +583,22 @@ function initialAskDraft(questions: UserQuestion[]): AskDraft {
 }
 
 function AskUserComposer({
-  request,
+  interactionId,
+  questions,
   stopping,
   onAnswer,
   t,
 }: {
-  request: UserInputRequest;
+  interactionId: string;
+  questions: UserQuestion[];
   stopping: boolean;
-  onAnswer: (requestId: string, response: UserInputResponse) => void;
+  onAnswer: (interactionId: string, response: UserInputResponse) => void;
   t: TFunction;
 }) {
-  const [draft, setDraft] = useState<AskDraft>(() => initialAskDraft(request.questions));
+  const [draft, setDraft] = useState<AskDraft>(() => initialAskDraft(questions));
   const [currentIndex, setCurrentIndex] = useState(0);
-  const questionCount = request.questions.length;
-  const currentQuestion = request.questions[currentIndex] ?? request.questions[0];
+  const questionCount = questions.length;
+  const currentQuestion = questions[currentIndex] ?? questions[0];
   const isFirst = currentIndex === 0;
   const isLast = currentIndex >= questionCount - 1;
   const progressLabel = useMemo(
@@ -607,9 +607,9 @@ function AskUserComposer({
   );
 
   useEffect(() => {
-    setDraft(initialAskDraft(request.questions));
+    setDraft(initialAskDraft(questions));
     setCurrentIndex(0);
-  }, [request.requestId, request.questions]);
+  }, [interactionId, questions]);
 
   function updateDraft(id: string, update: Partial<AskDraftEntry>) {
     setDraft((current) => ({
@@ -624,7 +624,7 @@ function AskUserComposer({
 
   function submit() {
     const answers: UserInputResponse["answers"] = {};
-    for (const question of request.questions) {
+    for (const question of questions) {
       const entry = draft[question.id] ?? { selected: null, text: "" };
       const values: string[] = [];
       if (entry.selected) {
@@ -636,7 +636,7 @@ function AskUserComposer({
       }
       answers[question.id] = { answers: values };
     }
-    onAnswer(request.requestId, { answers });
+    onAnswer(interactionId, { answers });
   }
 
   function submitOnShortcut(event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
@@ -758,30 +758,32 @@ function AskUserComposer({
 }
 
 function PlanConfirmComposer({
-  action,
+  interactionId,
+  content,
   stopping,
   onImplementPlan,
   onDiscussPlan,
-  onSetMode,
   onCancel,
   t,
 }: {
-  action: PlanActionState;
+  interactionId: string;
+  content: string;
   stopping: boolean;
-  onImplementPlan: (planId: string, plan: string) => void;
-  onDiscussPlan: (planId: string, content: string) => void;
-  onSetMode: (mode: PlanActionMode) => void;
-  onCancel: (planId: string) => void;
+  onImplementPlan: (interactionId: string, plan: string) => void;
+  onDiscussPlan: (interactionId: string, content: string) => void;
+  onCancel: (interactionId: string) => void;
   t: TFunction;
 }) {
   const [message, setMessage] = useState("");
+  const [mode, setMode] = useState<"choice" | "discuss">("choice");
   const composerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const discussing = action.mode === "discuss";
+  const discussing = mode === "discuss";
 
   useEffect(() => {
     setMessage("");
-  }, [action.planId, action.mode]);
+    setMode("choice");
+  }, [interactionId]);
 
   useEffect(() => {
     if (discussing) {
@@ -789,13 +791,13 @@ function PlanConfirmComposer({
     } else {
       composerRef.current?.focus();
     }
-  }, [action.planId, discussing]);
+  }, [interactionId, discussing]);
 
   function submitDiscussion() {
     if (stopping) return;
     const content = message.trim();
     if (!content) return;
-    onDiscussPlan(action.planId, content);
+    onDiscussPlan(interactionId, content);
   }
 
   function submitSelected() {
@@ -804,8 +806,8 @@ function PlanConfirmComposer({
       submitDiscussion();
       return;
     }
-    if (!action.content.trim()) return;
-    onImplementPlan(action.planId, action.content);
+    if (!content.trim()) return;
+    onImplementPlan(interactionId, content);
   }
 
   function submitOnShortcut(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -819,7 +821,7 @@ function PlanConfirmComposer({
     if (event.key === "Escape") {
       event.preventDefault();
       if (!stopping) {
-        onCancel(action.planId);
+        onCancel(interactionId);
       }
       return;
     }
@@ -835,12 +837,12 @@ function PlanConfirmComposer({
 
     if (event.key === "1") {
       event.preventDefault();
-      onSetMode("choice");
+      setMode("choice");
       return;
     }
     if (event.key === "2") {
       event.preventDefault();
-      onSetMode("discuss");
+      setMode("discuss");
       return;
     }
     if (event.key === "Enter") {
@@ -864,7 +866,7 @@ function PlanConfirmComposer({
           size="sm"
           role="radio"
           aria-checked={!discussing}
-          onClick={() => onSetMode("choice")}
+          onClick={() => setMode("choice")}
           disabled={stopping}
           className="w-full text-left justify-start"
         >
@@ -877,7 +879,7 @@ function PlanConfirmComposer({
           size="sm"
           role="radio"
           aria-checked={discussing}
-          onClick={() => onSetMode("discuss")}
+          onClick={() => setMode("discuss")}
           disabled={stopping}
           className="w-full text-left justify-start"
         >
@@ -911,7 +913,7 @@ function PlanConfirmComposer({
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => onCancel(action.planId)}
+            onClick={() => onCancel(interactionId)}
             disabled={stopping}
           >
             <span>{t("planConfirm.ignore")}</span>
@@ -921,13 +923,83 @@ function PlanConfirmComposer({
             type="button"
             size="sm"
             onClick={submitSelected}
-            disabled={stopping || (discussing ? !message.trim() : !action.content.trim())}
+            disabled={stopping || (discussing ? !message.trim() : !content.trim())}
           >
             <span>{t("planConfirm.submit")}</span>
             <CornerDownLeft size={13} />
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ToolApprovalComposer({
+  interaction,
+  stopping,
+  onResolve,
+  t,
+}: {
+  interaction: InteractionRequest;
+  stopping: boolean;
+  onResolve: (interactionId: string, resolution: InteractionResolution) => void;
+  t: TFunction;
+}) {
+  if (interaction.payload.type !== "toolApproval") {
+    return null;
+  }
+  const args =
+    typeof interaction.payload.arguments === "string"
+      ? interaction.payload.arguments
+      : JSON.stringify(interaction.payload.arguments, null, 2);
+  return (
+    <div className="border-t border-border px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <Wrench size={15} />
+            <span className="truncate">{interaction.payload.name}</span>
+          </div>
+          {interaction.payload.workingDirectory ? (
+            <p className="text-xs text-muted-foreground truncate">{interaction.payload.workingDirectory}</p>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            disabled={stopping}
+            onClick={() =>
+              onResolve(interaction.interactionId, {
+                type: "toolApproval",
+                decision: "denied",
+                reason: "denied by user",
+              })
+            }
+          >
+            {t("actions.deny")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            disabled={stopping}
+            onClick={() =>
+              onResolve(interaction.interactionId, {
+                type: "toolApproval",
+                decision: "approved",
+              })
+            }
+          >
+            {t("actions.approve")}
+          </Button>
+        </div>
+      </div>
+      {args ? (
+        <pre className="mt-2 max-h-24 overflow-auto rounded-md border border-border bg-muted/40 p-2 text-xs">
+          {args}
+        </pre>
+      ) : null}
     </div>
   );
 }
@@ -939,8 +1011,7 @@ export function ConversationPanel({
   agents,
   sessionRuntime,
   lspServers,
-  pendingUserInput,
-  planAction,
+  activeInteraction,
   prompt,
   status,
   turnPhase,
@@ -956,15 +1027,13 @@ export function ConversationPanel({
   onImplementPlan,
   onSendPrompt,
   onDiscussPlan,
-  onSetPlanActionMode,
   onDismissPlanAction,
   onStopPrompt,
-  onAnswerUserInput,
+  onResolveInteraction,
 }: ConversationPanelProps) {
   const { t } = useTranslation();
   const stopping = turnPhase === "stopping";
   const currentMode: CompileMode = selectedSession?.mode === "plan" ? "plan" : "auto";
-  const activePlanAction = isBusy ? null : planAction;
 
   function renderTimelineEntry(entry: TimelineEntry) {
     if (entry.kind === "message") {
@@ -1013,20 +1082,33 @@ export function ConversationPanel({
       />
 
       <footer className="border-t border-border">
-        {pendingUserInput ? (
+        {activeInteraction?.payload.type === "userInput" ? (
           <AskUserComposer
-            request={pendingUserInput}
+            interactionId={activeInteraction.interactionId}
+            questions={activeInteraction.payload.questions}
             stopping={stopping}
-            onAnswer={onAnswerUserInput}
+            onAnswer={(interactionId, response) =>
+              onResolveInteraction(interactionId, {
+                type: "userInput",
+                answers: response.answers,
+              })
+            }
             t={t}
           />
-        ) : activePlanAction ? (
+        ) : activeInteraction?.payload.type === "toolApproval" ? (
+          <ToolApprovalComposer
+            interaction={activeInteraction}
+            stopping={stopping}
+            onResolve={onResolveInteraction}
+            t={t}
+          />
+        ) : activeInteraction?.payload.type === "planConfirmation" ? (
           <PlanConfirmComposer
-            action={activePlanAction}
+            interactionId={activeInteraction.interactionId}
+            content={activeInteraction.payload.content}
             stopping={stopping}
             onImplementPlan={onImplementPlan}
             onDiscussPlan={onDiscussPlan}
-            onSetMode={onSetPlanActionMode}
             onCancel={onDismissPlanAction}
             t={t}
           />

@@ -1,5 +1,6 @@
 mod error;
 mod event;
+mod interaction;
 mod message;
 mod permission;
 
@@ -12,6 +13,11 @@ pub use event::{
     TimelineItemKind, TimelineItemStatus, TimelineTextRole, TimelineThinkingChunk,
     TimelineToolItem, TokenUsageSnapshot, TraceEvent, TraceEventKind, UserInputAnswer,
     UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
+};
+pub use interaction::{
+    InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,
+    InteractionResolution, InteractionScope, InteractionStatus, PlanConfirmationResolution,
+    ToolApprovalResolution,
 };
 pub use message::{
     ContentPart, ContentPartType, Message, MessageContent, MessageRole,
