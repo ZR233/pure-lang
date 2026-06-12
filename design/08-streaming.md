@@ -54,7 +54,7 @@ pl-model provider
 
 Plan Mode 下模型输出的 `<proposed_plan>...</proposed_plan>` 块由 `pl-model::stream` accumulator 提取为 `plan` item。计划正文复用 `TimelineItem.content`，增量使用 `TimelineDelta::Plan`；同一块内容不得同时出现在普通 assistant `text` item 中。计划块之外的普通文本仍按 assistant `text` item 流式输出。
 
-计划的采纳与实施状态不改变 `plan` item 本身，而是通过 `TraceEventKind::PlanLifecycleChanged` 追加到计划来源 session 的 `timeline_events`。事件包含 `planId`、`state`、可选 `turnId`、可选 `reason` 和 `updatedAt`；Studio 从历史 timeline 与运行完成响应中按 `planId` 折叠 latest plan state。Plan turn 完成后需要用户确认实施时，后端创建 `InteractionKind::PlanConfirmation`，前端不再从历史 timeline 自行恢复旧确认 composer。确认 resolution 固定为 `implementFreshContext | continuePlanning | dismiss`；`continuePlanning` 的 `content` 是确认 composer 同次提交的用户补充内容，resolution 成功后由前端立即作为普通 prompt 发送；实施时后端创建显式 session handoff，新 Auto session 承载 fresh context 和 handoff prompt，来源 session 保持可恢复但不再作为活跃 session 列表项展示。
+计划的采纳与实施状态不改变 `plan` item 本身，而是通过 `TraceEventKind::PlanLifecycleChanged` 追加到计划来源 session 的 `timeline_events`。事件包含 `planId`、`state`、可选 `turnId`、可选 `reason` 和 `updatedAt`；Studio 从历史 timeline 与运行完成响应中按 `planId` 折叠 latest plan state。Plan turn 完成后需要用户确认实施时，后端创建 `InteractionKind::PlanConfirmation`，前端不再从历史 timeline 自行恢复旧确认 composer。确认 resolution 固定为 `implementFreshContext | continuePlanning | dismiss`；`continuePlanning` 的 `content` 是确认 composer 同次提交的用户补充内容，resolution 成功后由前端立即作为普通 prompt 发送；实施时后端创建显式 session handoff，新 Auto session 承载 fresh context 和 handoff prompt，来源 session 保持可恢复但不再作为活跃 session 列表项展示。后端必须在实施 turn 启动前广播 handoff started snapshot，使 Studio 先切到目标 session 并接收后续实时 `studio-agent-event`，不得等最终 `RunPromptResponse` 才展示实施过程。
 
 Studio 前端的实时事件、`load_session_timeline` 历史 snapshot 和 `run_prompt` 完成响应必须进入同一个 timeline reducer：
 

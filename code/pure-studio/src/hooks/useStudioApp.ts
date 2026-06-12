@@ -265,6 +265,14 @@ export function useStudioApp() {
           status: t("status.modeUpdated"),
         });
       }),
+      listen<SessionSelectionPayload>("studio-session-handoff-started", ({ payload }) => {
+        dispatch({
+          type: "sessionHandoffStarted",
+          payload,
+          status: t("status.running"),
+          startedAt: Date.now(),
+        });
+      }),
     ];
 
     return () => {
