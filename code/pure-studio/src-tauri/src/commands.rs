@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use pl_core::{
-    CompileMode, PermissionMode, PureConfig, StudioPromptOutcome, StudioRuntime,
-    TimelineEventRecord, TurnOptions, TurnResultStatus, resolution_matches_kind,
+    CompileMode, PermissionMode, PureConfig, SessionHandoffStatus, StudioPromptOutcome,
+    StudioRuntime, TimelineEventRecord, TurnOptions, TurnResultStatus, resolution_matches_kind,
 };
 use pl_protocol::{
     InteractionKind, InteractionPayload, InteractionRequest, InteractionResolution,
@@ -39,7 +39,7 @@ struct PlanLifecycleChange {
 }
 
 struct PlanImplementationLifecycle {
-    session_id: String,
+    origin_session_id: String,
     plan_id: String,
 }
 
@@ -327,112 +327,176 @@ pub async fn resolve_interaction(
             "interaction resolution kind does not match interaction",
         ));
     }
-    if current.status != InteractionStatus::Pending {
-        return Ok(ResolveInteractionResponse {
-            session_id,
-            interaction: current,
-            run: None,
-            plan_lifecycle: None,
-        });
-    }
     let emitter = interaction_emitter(state.studio.clone(), app.clone(), session_id.clone());
-    let resolved = state
-        .studio
-        .interactions()
-        .resolve(&interaction_id, resolution.clone(), emitter)
-        .await?;
 
-    let mut run = None;
-    let mut plan_lifecycle = None;
-    if let InteractionResolution::PlanConfirmation {
-        decision,
-        content,
-        reason,
-    } = resolution
-    {
-        let InteractionPayload::PlanConfirmation {
-            plan_id,
-            content: stored_content,
-        } = current.payload
-        else {
-            unreachable!("plan confirmation resolution was validated before resolving");
-        };
-        match decision {
-            PlanConfirmationResolution::ImplementFreshContext => {
-                let content = content.unwrap_or(stored_content).trim().to_string();
-                if content.is_empty() {
-                    return Err(CommandError::from_display("plan content is empty"));
+    match resolution {
+        InteractionResolution::PlanConfirmation {
+            decision,
+            content,
+            reason,
+        } => {
+            let InteractionPayload::PlanConfirmation { plan_id, .. } = &current.payload else {
+                unreachable!("plan confirmation resolution was validated before resolving");
+            };
+            let mut run = None;
+            let (resolved, plan_lifecycle) = match decision {
+                PlanConfirmationResolution::ImplementFreshContext => {
+                    let resolution = InteractionResolution::PlanConfirmation {
+                        decision: PlanConfirmationResolution::ImplementFreshContext,
+                        content,
+                        reason,
+                    };
+                    let handoff = state
+                        .studio
+                        .store()
+                        .start_plan_implementation_handoff(&interaction_id, resolution)
+                        .await?;
+                    let _ = emitter(handoff.interaction.clone()).await;
+                    if handoff.should_start_run {
+                        let content = handoff.plan_content.trim().to_string();
+                        if content.is_empty() {
+                            return Err(CommandError::from_display("plan content is empty"));
+                        }
+                        let prompt = format!("{IMPLEMENT_PLAN_FRESH_CONTEXT_PREFIX}\n\n{content}");
+                        run = Some(
+                            run_prompt_inner(
+                                handoff.target_session.id.clone(),
+                                prompt,
+                                app,
+                                &state,
+                                Some(PlanImplementationLifecycle {
+                                    origin_session_id: handoff.origin_session.id.clone(),
+                                    plan_id: handoff.plan_id.clone(),
+                                }),
+                            )
+                            .await?,
+                        );
+                    } else {
+                        run = Some(
+                            empty_run_prompt_response(
+                                &state,
+                                &handoff.target_session.id,
+                                "completed",
+                            )
+                            .await?,
+                        );
+                    }
+                    let plan_lifecycle = Some(
+                        plan_lifecycle_response(&state.studio, &handoff.origin_session.id).await?,
+                    );
+                    (handoff.interaction, plan_lifecycle)
                 }
-                let session = state
-                    .studio
-                    .store()
-                    .read_session(&session_id)
-                    .await?
-                    .context("selected session not found")?;
-                let fresh_session = state
-                    .studio
-                    .create_session(&session.project_id, "实施计划")
-                    .await?;
-                let prompt = format!("{IMPLEMENT_PLAN_FRESH_CONTEXT_PREFIX}\n\n{content}");
-                run = Some(
-                    run_prompt_inner(
-                        fresh_session.id.clone(),
-                        prompt,
-                        app,
-                        &state,
-                        Some(PlanImplementationLifecycle {
-                            session_id: session_id.clone(),
-                            plan_id: plan_id.clone(),
-                        }),
+                PlanConfirmationResolution::ContinuePlanning => {
+                    if current.status != InteractionStatus::Pending {
+                        return Ok(ResolveInteractionResponse {
+                            session_id,
+                            interaction: current,
+                            run: None,
+                            plan_lifecycle: None,
+                        });
+                    }
+                    let resolved = state
+                        .studio
+                        .interactions()
+                        .resolve(
+                            &interaction_id,
+                            InteractionResolution::PlanConfirmation {
+                                decision: PlanConfirmationResolution::ContinuePlanning,
+                                content: content.clone(),
+                                reason: reason.clone(),
+                            },
+                            emitter,
+                        )
+                        .await?;
+                    let reason = reason
+                        .or(content)
+                        .filter(|value| !value.trim().is_empty())
+                        .unwrap_or_else(|| "continue planning".to_string());
+                    append_plan_lifecycle_events(
+                        &state.studio,
+                        &session_id,
+                        plan_id,
+                        vec![PlanLifecycleChange {
+                            state: PlanLifecycleState::ContinuedPlanning,
+                            turn_id: None,
+                            reason: Some(reason),
+                        }],
                     )
-                    .await?,
-                );
-                plan_lifecycle = Some(plan_lifecycle_response(&state.studio, &session_id).await?);
+                    .await?;
+                    let plan_lifecycle =
+                        Some(plan_lifecycle_response(&state.studio, &session_id).await?);
+                    (resolved, plan_lifecycle)
+                }
+                PlanConfirmationResolution::Dismiss => {
+                    if current.status != InteractionStatus::Pending {
+                        return Ok(ResolveInteractionResponse {
+                            session_id,
+                            interaction: current,
+                            run: None,
+                            plan_lifecycle: None,
+                        });
+                    }
+                    let resolved = state
+                        .studio
+                        .interactions()
+                        .resolve(
+                            &interaction_id,
+                            InteractionResolution::PlanConfirmation {
+                                decision: PlanConfirmationResolution::Dismiss,
+                                content,
+                                reason: reason.clone(),
+                            },
+                            emitter,
+                        )
+                        .await?;
+                    let reason = reason
+                        .filter(|value| !value.trim().is_empty())
+                        .unwrap_or_else(|| "dismissed".to_string());
+                    append_plan_lifecycle_events(
+                        &state.studio,
+                        &session_id,
+                        plan_id,
+                        vec![PlanLifecycleChange {
+                            state: PlanLifecycleState::Dismissed,
+                            turn_id: None,
+                            reason: Some(reason),
+                        }],
+                    )
+                    .await?;
+                    let plan_lifecycle =
+                        Some(plan_lifecycle_response(&state.studio, &session_id).await?);
+                    (resolved, plan_lifecycle)
+                }
+            };
+            Ok(ResolveInteractionResponse {
+                session_id,
+                interaction: resolved,
+                run,
+                plan_lifecycle,
+            })
+        }
+        other_resolution => {
+            if current.status != InteractionStatus::Pending {
+                return Ok(ResolveInteractionResponse {
+                    session_id,
+                    interaction: current,
+                    run: None,
+                    plan_lifecycle: None,
+                });
             }
-            PlanConfirmationResolution::ContinuePlanning => {
-                let reason = reason
-                    .or(content)
-                    .filter(|value| !value.trim().is_empty())
-                    .unwrap_or_else(|| "continue planning".to_string());
-                append_plan_lifecycle_events(
-                    &state.studio,
-                    &session_id,
-                    &plan_id,
-                    vec![PlanLifecycleChange {
-                        state: PlanLifecycleState::ContinuedPlanning,
-                        turn_id: None,
-                        reason: Some(reason),
-                    }],
-                )
+            let resolved = state
+                .studio
+                .interactions()
+                .resolve(&interaction_id, other_resolution, emitter)
                 .await?;
-                plan_lifecycle = Some(plan_lifecycle_response(&state.studio, &session_id).await?);
-            }
-            PlanConfirmationResolution::Dismiss => {
-                let reason = reason
-                    .filter(|value| !value.trim().is_empty())
-                    .unwrap_or_else(|| "dismissed".to_string());
-                append_plan_lifecycle_events(
-                    &state.studio,
-                    &session_id,
-                    &plan_id,
-                    vec![PlanLifecycleChange {
-                        state: PlanLifecycleState::Dismissed,
-                        turn_id: None,
-                        reason: Some(reason),
-                    }],
-                )
-                .await?;
-                plan_lifecycle = Some(plan_lifecycle_response(&state.studio, &session_id).await?);
-            }
+            Ok(ResolveInteractionResponse {
+                session_id,
+                interaction: resolved,
+                run: None,
+                plan_lifecycle: None,
+            })
         }
     }
-
-    Ok(ResolveInteractionResponse {
-        session_id,
-        interaction: resolved,
-        run,
-        plan_lifecycle,
-    })
 }
 
 async fn run_prompt_inner(
@@ -455,42 +519,6 @@ async fn run_prompt_inner(
             ));
         }
         active_turns.insert(session_id.clone(), cancellation_token.clone());
-    }
-
-    if let Some(lifecycle) = &lifecycle {
-        let setup_result = async {
-            state
-                .studio
-                .store()
-                .set_session_mode(&session_id, CompileMode::Auto)
-                .await?;
-            append_plan_lifecycle_events(
-                &state.studio,
-                &lifecycle.session_id,
-                &lifecycle.plan_id,
-                vec![
-                    PlanLifecycleChange {
-                        state: PlanLifecycleState::Accepted,
-                        turn_id: None,
-                        reason: None,
-                    },
-                    PlanLifecycleChange {
-                        state: PlanLifecycleState::Implementing,
-                        turn_id: None,
-                        reason: None,
-                    },
-                ],
-            )
-            .await?;
-            let payload = session_selection_response(&state.studio, &session_id).await?;
-            let _ = app.emit("studio-session-mode-updated", payload);
-            Ok(())
-        }
-        .await;
-        if let Err(error) = setup_result {
-            state.active_turns.lock().await.remove(&session_id);
-            return Err(error);
-        }
     }
 
     let (event_tx, event_rx) = tokio::sync::broadcast::channel(256);
@@ -552,7 +580,7 @@ async fn run_prompt_inner(
                 };
                 append_plan_lifecycle_events(
                     &state.studio,
-                    &lifecycle.session_id,
+                    &lifecycle.origin_session_id,
                     &lifecycle.plan_id,
                     vec![PlanLifecycleChange {
                         state: lifecycle_state,
@@ -561,6 +589,20 @@ async fn run_prompt_inner(
                     }],
                 )
                 .await?;
+                let handoff_status = match outcome.result.status {
+                    TurnResultStatus::Completed => SessionHandoffStatus::Completed,
+                    TurnResultStatus::Aborted => SessionHandoffStatus::Cancelled,
+                    TurnResultStatus::Errored => SessionHandoffStatus::Failed,
+                };
+                state
+                    .studio
+                    .store()
+                    .set_plan_implementation_handoff_status(
+                        &lifecycle.origin_session_id,
+                        &lifecycle.plan_id,
+                        handoff_status,
+                    )
+                    .await?;
             } else {
                 maybe_create_plan_confirmation(&state.studio, &app, &session_id, &outcome).await?;
             }
@@ -571,7 +613,7 @@ async fn run_prompt_inner(
             if let Some(lifecycle) = &lifecycle {
                 append_plan_lifecycle_events(
                     &state.studio,
-                    &lifecycle.session_id,
+                    &lifecycle.origin_session_id,
                     &lifecycle.plan_id,
                     vec![PlanLifecycleChange {
                         state: PlanLifecycleState::ImplementationFailed,
@@ -580,6 +622,15 @@ async fn run_prompt_inner(
                     }],
                 )
                 .await?;
+                state
+                    .studio
+                    .store()
+                    .set_plan_implementation_handoff_status(
+                        &lifecycle.origin_session_id,
+                        &lifecycle.plan_id,
+                        SessionHandoffStatus::Failed,
+                    )
+                    .await?;
             }
             let _ = app.emit(
                 "studio-prompt-failed",
@@ -692,6 +743,46 @@ async fn run_prompt_response(
             .abort_reason
             .map(|reason| reason.as_str().to_string()),
         turn_error: outcome.result.error.clone(),
+    })
+}
+
+async fn empty_run_prompt_response(
+    state: &AppState,
+    session_id: &str,
+    turn_status: &str,
+) -> CommandResult<RunPromptResponse> {
+    let session = state
+        .studio
+        .store()
+        .read_session(session_id)
+        .await?
+        .context("selected session not found")?;
+    let sessions = state
+        .studio
+        .store()
+        .list_sessions(&session.project_id)
+        .await?;
+    Ok(RunPromptResponse {
+        session_id: session_id.to_string(),
+        sessions: session_dtos(sessions),
+        agent_events: agent_event_dtos(state.studio.store().list_agent_events(session_id).await?),
+        agents: agent_dtos(state.studio.store().list_agents(session_id).await?),
+        session_runtime: load_session_runtime_dto(&state.studio, session_id).await?,
+        timeline_items: Vec::new(),
+        plan_states: load_plan_states(&state.studio, session_id).await?,
+        interactions: state
+            .studio
+            .store()
+            .list_pending_interactions(session_id)
+            .await?,
+        timeline_next_sequence: state
+            .studio
+            .store()
+            .next_timeline_sequence(session_id)
+            .await?,
+        turn_status: turn_status.to_string(),
+        turn_abort_reason: None,
+        turn_error: None,
     })
 }
 

@@ -453,21 +453,21 @@ export function useStudioApp() {
     await submitPrompt(sessionId, trimmed);
   }
 
-  async function onResolveInteraction(interactionId: string, resolution: InteractionResolution) {
+  async function onResolveInteraction(
+    interactionId: string,
+    resolution: InteractionResolution,
+  ): Promise<boolean> {
     const interaction = state.interactions.get(interactionId);
     const sessionId = state.selectedSessionId;
     if (!interaction || !sessionId) {
-      return;
+      return false;
     }
-    if (resolution.type === "planConfirmation") {
-      if (resolution.decision === "implementFreshContext") {
-        dispatch({
-          type: "freshContextRunSubmitted",
-          originSessionId: sessionId,
-          status: t("status.running"),
-          startedAt: Date.now(),
-        });
-      }
+    if (resolution.type === "planConfirmation" && resolution.decision === "implementFreshContext") {
+      dispatch({
+        type: "planImplementationSubmitted",
+        status: t("status.running"),
+        startedAt: Date.now(),
+      });
     }
     try {
       const payload = await resolveInteraction(interactionId, resolution);
@@ -498,41 +498,48 @@ export function useStudioApp() {
               : t("status.done");
         dispatch({ type: "runPromptLoaded", payload: payload.run, status });
       }
+      return true;
     } catch (error) {
       dispatch({
         type: "runPromptFailed",
         sessionId,
         status: t("status.runFailed", { error: errorText(error) }),
       });
+      return false;
     }
   }
 
-  async function onImplementPlanFresh(interactionId: string) {
+  async function onImplementPlanFresh(interactionId: string): Promise<boolean> {
     const sessionId = state.selectedSessionId;
     if (!interactionId || !sessionId || state.isBusy) {
-      return;
+      return false;
     }
-    await onResolveInteraction(interactionId, {
+    return onResolveInteraction(interactionId, {
       type: "planConfirmation",
       decision: "implementFreshContext",
     });
   }
 
-  async function onDiscussPlan(interactionId: string, content: string) {
+  async function onDiscussPlan(interactionId: string, content: string): Promise<boolean> {
     const trimmed = content.trim();
     if (!trimmed || state.isBusy) {
-      return;
+      return false;
     }
-    await onResolveInteraction(interactionId, {
+    const resolved = await onResolveInteraction(interactionId, {
       type: "planConfirmation",
       decision: "continuePlanning",
       content: trimmed,
       reason: "continue planning",
     });
+    if (!resolved) {
+      return false;
+    }
     const sessionId = state.selectedSessionId;
     if (sessionId) {
       await submitPrompt(sessionId, trimmed);
+      return true;
     }
+    return false;
   }
 
   async function submitPrompt(sessionId: string, content: string) {

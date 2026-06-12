@@ -306,6 +306,7 @@ function response(timelineItems: TimelineItem[]): RunPromptResponse {
         title: "Session",
         mode: "auto",
         updatedAt: 2,
+        visibility: "active",
       },
     ],
     agentEvents: [],
@@ -354,6 +355,7 @@ function selectedState() {
           title: "Session",
           mode: "auto",
           updatedAt: 1,
+          visibility: "active",
         },
       ],
       selectedSessionId: "session-1",
@@ -951,23 +953,36 @@ function runPromptLoadedKeepsLiveInteractionByCurrentRun() {
 
 function freshContextRunSwitchesToReturnedSession() {
   const planningSession = selectedState();
-  const resolving = studioReducer(planningSession, {
-    type: "freshContextRunSubmitted",
-    originSessionId: "session-1",
+  const submitted = studioReducer(planningSession, {
+    type: "planImplementationSubmitted",
     status: "running",
     startedAt: 2222,
+  });
+  const resolving = studioReducer(submitted, {
+    type: "interactionChanged",
+    payload: {
+      sessionId: "session-1",
+      event: {
+        interaction: {
+          ...planConfirmationInteraction(),
+          status: "resolved",
+          resolvedAt: 2,
+        },
+      },
+    },
+    status: "ready",
   });
   const freshRun = response([textItem("turn-2-text", 20, "implemented")]);
   freshRun.sessionId = "session-2";
   freshRun.sessionRuntime = { ...runtime, sessionId: "session-2" };
   freshRun.sessions = [
-    ...planningSession.sessions,
     {
       id: "session-2",
       projectId: "project-1",
       title: "Implementation",
       mode: "auto",
       updatedAt: 3,
+      visibility: "active",
     },
   ];
 
@@ -980,18 +995,45 @@ function freshContextRunSwitchesToReturnedSession() {
   assertEqual(completed.selectedSessionId, "session-2");
   assertEqual(completed.timelineItems.get("turn-2-text")?.content, "implemented");
   assertEqual(completed.isBusy, false);
+  assertDeepEqual(completed.sessions.map((session) => session.id), ["session-2"]);
 }
 
-function freshContextRunSessionUpdateShowsWaitingState() {
-  const planningSession = selectedState();
-  const resolving = studioReducer(planningSession, {
-    type: "freshContextRunSubmitted",
-    originSessionId: "session-1",
+function planImplementationSubmittedShowsWaitingWithoutSwitchingSession() {
+  const submitted = studioReducer(selectedState(), {
+    type: "planImplementationSubmitted",
     status: "running",
     startedAt: 2222,
   });
+  const entries = selectTimelineEntries(submitted);
 
-  const switched = studioReducer(resolving, {
+  assertEqual(submitted.selectedSessionId, "session-1");
+  assertEqual(submitted.isBusy, true);
+  assertEqual(submitted.turnPhase, "running");
+  assertEqual(entries[0]?.kind, "status");
+}
+
+function runPromptLoadedDedupesReturnedSessions() {
+  const submitted = studioReducer(selectedState(), {
+    type: "promptSubmitted",
+    status: "running",
+    startedAt: 100,
+    prompt: "implement",
+  });
+  const run = response([textItem("turn-2-text", 20, "implemented")]);
+  run.sessions = [run.sessions[0]!, { ...run.sessions[0]!, title: "Duplicate" }];
+
+  const completed = studioReducer(submitted, {
+    type: "runPromptLoaded",
+    payload: run,
+    status: "done",
+  });
+
+  assertDeepEqual(completed.sessions.map((session) => session.title), ["Session"]);
+}
+
+function sessionModeUpdateNoLongerSwitchesForFreshContextRun() {
+  const planningSession = selectedState();
+  const switched = studioReducer(planningSession, {
     type: "sessionModeUpdated",
     status: "mode updated",
     payload: {
@@ -1004,6 +1046,7 @@ function freshContextRunSessionUpdateShowsWaitingState() {
           title: "Implementation",
           mode: "auto",
           updatedAt: 3,
+          visibility: "active",
         },
       ],
       agentEvents: [],
@@ -1013,18 +1056,9 @@ function freshContextRunSessionUpdateShowsWaitingState() {
     },
   });
 
-  const entries = selectTimelineEntries(switched);
-
-  assertEqual(switched.selectedSessionId, "session-2");
-  assertEqual(switched.isBusy, true);
-  assertEqual(switched.turnPhase, "running");
-  assertEqual(switched.turnStartedAt, 2222);
-  assertDeepEqual(entries.map((entry) => entry.kind), ["status"]);
-  const status = entries[0];
-  if (status?.kind !== "status") {
-    throw new Error("Expected fresh-context waiting status entry");
-  }
-  assertEqual(status.content, "waitingForModel");
+  assertEqual(switched.selectedSessionId, "session-1");
+  assertEqual(switched.isBusy, false);
+  assertEqual(switched.turnPhase, "idle");
 }
 
 function promptSubmittedCreatesOptimisticTimelineFeedback() {
@@ -1233,6 +1267,7 @@ function sessionSelectionClearsInteractionState() {
           title: "Session 2",
           mode: "auto",
           updatedAt: 3,
+          visibility: "active",
         },
       ],
       agentEvents: [],
@@ -1341,6 +1376,7 @@ function sessionModeUpdateKeepsTimelineAndUpdatesSessions() {
           title: "Session",
           mode: "plan",
           updatedAt: 3,
+          visibility: "active",
         },
       ],
       agentEvents: [],
@@ -2008,7 +2044,9 @@ historicalTimelineLoadDoesNotCreatePlanAction();
 laterRunWithoutPlanDoesNotReopenHistoricalPlan();
 runPromptLoadedKeepsLiveInteractionByCurrentRun();
 freshContextRunSwitchesToReturnedSession();
-freshContextRunSessionUpdateShowsWaitingState();
+planImplementationSubmittedShowsWaitingWithoutSwitchingSession();
+runPromptLoadedDedupesReturnedSessions();
+sessionModeUpdateNoLongerSwitchesForFreshContextRun();
 promptSubmittedCreatesOptimisticTimelineFeedback();
 modelTimelineEventClearsWaitingFeedback();
 userTimelineEventKeepsWaitingFeedback();

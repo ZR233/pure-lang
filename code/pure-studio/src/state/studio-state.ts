@@ -76,7 +76,6 @@ export type StudioState = TimelineStateSlice & {
   planStates: Map<string, PlanState>;
   dismissedPlanId: string | null;
   currentRunTimelineBaseSequence: number | null;
-  pendingFreshContextRun: { originSessionId: string; startedAt: number } | null;
   settingsOpen: boolean;
   activeSettingsTab: SettingsTab;
   providerSearch: string;
@@ -128,7 +127,7 @@ export type StudioAction =
     }
   | { type: "stopRequested"; status: string }
   | { type: "stopFallback"; status: string }
-  | { type: "freshContextRunSubmitted"; originSessionId: string; status: string; startedAt: number }
+  | { type: "planImplementationSubmitted"; status: string; startedAt: number }
   | {
       type: "agentEvent";
       sessionId: string;
@@ -175,7 +174,6 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   planStates: new Map(),
   dismissedPlanId: null,
   currentRunTimelineBaseSequence: null,
-  pendingFreshContextRun: null,
   settingsOpen: false,
   activeSettingsTab: "providers",
   providerSearch: "",
@@ -192,7 +190,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         ...state,
         projects: action.payload.projects,
         selectedProjectId: action.payload.selectedProjectId ?? null,
-        sessions: action.payload.sessions,
+        sessions: sessionList(action.payload.sessions),
         selectedSessionId: action.payload.selectedSessionId ?? null,
         agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
         agents: mergeAgents([], action.payload.agents ?? []),
@@ -211,7 +209,6 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         planStates: new Map(),
         dismissedPlanId: null,
         currentRunTimelineBaseSequence: null,
-        pendingFreshContextRun: null,
       };
     case "bootstrapFailed":
       return { ...state, status: action.status };
@@ -236,7 +233,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         ...state,
         projects: action.payload.projects,
         selectedProjectId,
-        sessions: action.payload.sessions,
+        sessions: sessionList(action.payload.sessions),
         selectedSessionId: action.payload.selectedSessionId ?? null,
         agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
         agents: mergeAgents([], action.payload.agents ?? []),
@@ -252,7 +249,6 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         planStates: new Map(),
         dismissedPlanId: null,
         currentRunTimelineBaseSequence: null,
-        pendingFreshContextRun: null,
         status: action.status,
         turnPhase: "idle",
         turnStartedAt: null,
@@ -262,7 +258,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       if (action.payload.sessionId === state.selectedSessionId) {
         return {
           ...state,
-          sessions: action.payload.sessions.length > 0 ? action.payload.sessions : state.sessions,
+          sessions: sessionListOrPrevious(action.payload.sessions, state.sessions),
           agentTimelineEvents: mergeAgentTimelineEvents(
             state.agentTimelineEvents,
             action.payload.agentEvents ?? [],
@@ -280,7 +276,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       }
       return {
         ...state,
-        sessions: action.payload.sessions.length > 0 ? action.payload.sessions : state.sessions,
+        sessions: sessionListOrPrevious(action.payload.sessions, state.sessions),
         selectedSessionId: action.payload.sessionId,
         agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
         agents: mergeAgents([], action.payload.agents ?? []),
@@ -290,44 +286,18 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         planStates: new Map(),
         dismissedPlanId: null,
         currentRunTimelineBaseSequence: null,
-        pendingFreshContextRun: null,
         status: action.status,
         turnPhase: "idle",
         turnStartedAt: null,
         isBusy: false,
       };
     case "sessionModeUpdated":
-      if (
-        state.pendingFreshContextRun &&
-        state.isBusy &&
-        action.payload.sessionId !== state.selectedSessionId
-      ) {
-        const freshState = {
-          ...state,
-          sessions: action.payload.sessions.length > 0 ? action.payload.sessions : state.sessions,
-          selectedSessionId: action.payload.sessionId,
-          agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
-          agents: mergeAgents([], action.payload.agents ?? []),
-          sessionRuntime: action.payload.sessionRuntime ?? null,
-          ...emptyTimelineState(),
-          ...interactionState(new Map(), action.payload.interactions ?? [], action.payload.sessionId, true),
-          planStates: new Map<string, PlanState>(),
-          dismissedPlanId: null,
-          currentRunTimelineBaseSequence: 0,
-          status: state.status,
-          turnPhase: "running" as TurnPhase,
-          turnStartedAt: state.pendingFreshContextRun.startedAt,
-          isBusy: true,
-          pendingFreshContextRun: null,
-        };
-        return appendOptimisticWaiting(freshState, state.pendingFreshContextRun.startedAt);
-      }
       if (action.payload.sessionId !== state.selectedSessionId) {
         return state;
       }
       return {
         ...state,
-        sessions: action.payload.sessions.length > 0 ? action.payload.sessions : state.sessions,
+        sessions: sessionListOrPrevious(action.payload.sessions, state.sessions),
         selectedSessionId: action.payload.sessionId,
         agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
         agents: mergeAgents([], action.payload.agents ?? []),
@@ -336,7 +306,10 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       };
     case "runPromptLoaded": {
       const switchingSession = action.payload.sessionId !== state.selectedSessionId;
-      if (switchingSession && !state.isBusy) {
+      const responseContainsSelectedSession = action.payload.sessions.some(
+        (session) => session.id === action.payload.sessionId,
+      );
+      if (switchingSession && !state.isBusy && !responseContainsSelectedSession) {
         return state;
       }
       const timelineBase = switchingSession
@@ -356,7 +329,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         ),
         planStates: mergePlanStates(timelineBase.planStates, action.payload.planStates ?? []),
         selectedSessionId: action.payload.sessionId,
-        sessions: action.payload.sessions,
+        sessions: sessionList(action.payload.sessions),
         agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
         agents: mergeAgents([], action.payload.agents ?? []),
         sessionRuntime: action.payload.sessionRuntime,
@@ -371,7 +344,6 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
           false,
         ),
         currentRunTimelineBaseSequence: null,
-        pendingFreshContextRun: null,
       };
     }
     case "runPromptFailed":
@@ -386,7 +358,6 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         isBusy: false,
         ...clearSessionInteractions(state.interactions, state.selectedSessionId),
         currentRunTimelineBaseSequence: null,
-        pendingFreshContextRun: null,
       };
     case "setBusy":
       return {
@@ -484,24 +455,19 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         isBusy: false,
         ...clearSessionInteractions(state.interactions, state.selectedSessionId),
         currentRunTimelineBaseSequence: null,
-        pendingFreshContextRun: null,
       };
-    case "freshContextRunSubmitted":
-      if (action.originSessionId !== state.selectedSessionId) {
-        return state;
-      }
-      return appendOptimisticWaiting({
-        ...state,
-        isBusy: true,
-        status: action.status,
-        turnPhase: "running",
-        turnStartedAt: action.startedAt,
-        pendingFreshContextRun: {
-          originSessionId: action.originSessionId,
-          startedAt: action.startedAt,
+    case "planImplementationSubmitted":
+      return appendOptimisticWaiting(
+        {
+          ...state,
+          isBusy: true,
+          status: action.status,
+          turnPhase: "running",
+          turnStartedAt: action.startedAt,
+          ...clearSessionInteractions(state.interactions, state.selectedSessionId),
         },
-        ...clearSessionInteractions(state.interactions, state.selectedSessionId),
-      }, action.startedAt);
+        action.startedAt,
+      );
     case "promptSubmitted":
       const currentRunTimelineBaseSequence = state.timelineNextSequence;
       return {
@@ -512,7 +478,6 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         turnPhase: "running",
         turnStartedAt: action.startedAt,
         currentRunTimelineBaseSequence,
-        pendingFreshContextRun: null,
         ...clearSessionInteractions(state.interactions, state.selectedSessionId),
       };
     case "agentEvent":
@@ -665,6 +630,24 @@ function mergePlanStates(
     next.set(planState.planId, planState);
   }
   return next;
+}
+
+function sessionList(sessions: SessionRecord[]): SessionRecord[] {
+  const byId = new Map<string, SessionRecord>();
+  for (const session of sessions) {
+    if (!session?.id || byId.has(session.id)) {
+      continue;
+    }
+    byId.set(session.id, session);
+  }
+  return [...byId.values()];
+}
+
+function sessionListOrPrevious(
+  sessions: SessionRecord[],
+  previous: SessionRecord[],
+): SessionRecord[] {
+  return sessions.length > 0 ? sessionList(sessions) : previous;
 }
 
 function appendOptimisticPrompt(state: StudioState, prompt: string, startedAt: number): StudioState {

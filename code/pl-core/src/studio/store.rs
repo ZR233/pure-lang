@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use pl_protocol::{
-    AgentRuntimeDelta, InteractionRequest, Message, RuntimeUsageSnapshot, SkillActivation,
+    AgentRuntimeDelta, InteractionKind, InteractionPayload, InteractionRequest,
+    InteractionResolution, InteractionStatus, Message, PlanConfirmationResolution,
+    PlanLifecycleEvent, PlanLifecycleState, RuntimeUsageSnapshot, SkillActivation, TraceEvent,
     TraceEventKind,
 };
 use sea_orm::{
@@ -12,6 +15,7 @@ use sea_orm::{
     DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Statement,
     TransactionTrait,
 };
+use tokio::sync::Mutex;
 
 use crate::runtime_usage::{
     ROOT_AGENT_ID, ROOT_AGENT_PATH, ROOT_AGENT_ROLE, aggregate_runtime_usage, cost_for_usage,
@@ -22,22 +26,24 @@ use crate::studio::ids::{new_id, new_timeline_event_id, unix_seconds};
 use crate::studio::mappers::{
     agent_runtime_snapshot_record, agent_snapshot_record, agent_timeline_event_record,
     costs_to_json, interaction_record, message_to_row_parts, project_record, row_to_message,
-    session_record, session_runtime_record, session_skill_record, timeline_event_record,
-    trace_event_kind_label,
+    session_handoff_record, session_record, session_runtime_record, session_skill_record,
+    timeline_event_record, trace_event_kind_label,
 };
 use crate::studio::paths::{prepare_database_switch, project_name, sqlite_url};
 use crate::studio::records::{
-    AgentSnapshotRecord, AgentTimelineEventRecord, ProjectRecord, SessionRecord,
-    SessionRuntimeRecord, SessionSkillRecord, TimelineEventRecord,
+    AgentSnapshotRecord, AgentTimelineEventRecord, PlanImplementationHandoffStart, ProjectRecord,
+    SessionHandoffKind, SessionHandoffStatus, SessionRecord, SessionRuntimeRecord,
+    SessionSkillRecord, SessionVisibility, TimelineEventRecord,
 };
 use crate::studio::store_support::{
     configure_sqlite, insert_message_with_tx, non_empty_title, run_migrations,
     touch_session_with_tx,
 };
-use crate::{CompileMode, CoreSession, InstructionSnapshot, TraceEvent, TurnResult};
+use crate::{CompileMode, CoreSession, InstructionSnapshot, TurnResult};
 #[derive(Clone)]
 pub struct StudioStore {
     db: DatabaseConnection,
+    handoff_lock: Arc<Mutex<()>>,
 }
 
 impl StudioStore {
@@ -70,7 +76,10 @@ impl StudioStore {
         let db = Database::connect(options).await?;
         configure_sqlite(&db).await?;
         run_migrations(&db).await?;
-        Ok(Self { db })
+        Ok(Self {
+            db,
+            handoff_lock: Arc::new(Mutex::new(())),
+        })
     }
 
     pub async fn upsert_project(&self, path: impl AsRef<Path>) -> Result<ProjectRecord> {
@@ -143,8 +152,8 @@ impl StudioStore {
     pub async fn archive_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {
         use entities::{
             agent, agent_event, agent_runtime_event, agent_runtime_snapshot, interaction, message,
-            project, session, session_runtime_snapshot, session_skill, timeline_event,
-            tool_approval,
+            project, session, session_handoff, session_runtime_snapshot, session_skill,
+            timeline_event, tool_approval,
         };
         let Some(project) = project::Entity::find_by_id(project_id.to_string())
             .one(&self.db)
@@ -210,6 +219,10 @@ impl StudioStore {
                 .exec(&tx)
                 .await?;
         }
+        session_handoff::Entity::delete_many()
+            .filter(session_handoff::Column::ProjectId.eq(project_id.to_string()))
+            .exec(&tx)
+            .await?;
         for legacy_table in ["agent_messages", "agent_turns"] {
             tx.execute(Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Sqlite,
@@ -251,6 +264,7 @@ impl StudioStore {
             created_at: Set(now),
             updated_at: Set(now),
             archived: Set(0),
+            visibility: Set(SessionVisibility::Active.as_str().to_string()),
             instruction_snapshot_json: Set(None),
         }
         .insert(&self.db)
@@ -263,6 +277,7 @@ impl StudioStore {
         let sessions = session::Entity::find()
             .filter(session::Column::ProjectId.eq(project_id.to_string()))
             .filter(session::Column::Archived.eq(0))
+            .filter(session::Column::Visibility.eq(SessionVisibility::Active.as_str()))
             .order_by_desc(session::Column::UpdatedAt)
             .order_by_desc(session::Column::Id)
             .all(&self.db)
@@ -392,9 +407,56 @@ impl StudioStore {
         let now = unix_seconds();
         let mut active: session::ActiveModel = existing.into();
         active.archived = Set(1);
+        active.visibility = Set(SessionVisibility::Archived.as_str().to_string());
         active.updated_at = Set(now);
         active.update(&self.db).await?;
         Ok(Some(archived))
+    }
+
+    pub async fn start_plan_implementation_handoff(
+        &self,
+        interaction_id: &str,
+        resolution: InteractionResolution,
+    ) -> Result<PlanImplementationHandoffStart> {
+        let _guard = self.handoff_lock.lock().await;
+        let tx = self.db.begin().await?;
+        let result =
+            start_plan_implementation_handoff_with_tx(&tx, interaction_id, resolution).await;
+        match result {
+            Ok(start) => {
+                tx.commit().await?;
+                Ok(start)
+            }
+            Err(error) => {
+                tx.rollback().await?;
+                Err(error)
+            }
+        }
+    }
+
+    pub async fn set_plan_implementation_handoff_status(
+        &self,
+        origin_session_id: &str,
+        plan_id: &str,
+        status: SessionHandoffStatus,
+    ) -> Result<()> {
+        use entities::session_handoff;
+        let Some(existing) = session_handoff::Entity::find()
+            .filter(session_handoff::Column::OriginSessionId.eq(origin_session_id.to_string()))
+            .filter(session_handoff::Column::PlanId.eq(plan_id.to_string()))
+            .filter(
+                session_handoff::Column::Kind.eq(SessionHandoffKind::PlanImplementation.as_str()),
+            )
+            .one(&self.db)
+            .await?
+        else {
+            return Ok(());
+        };
+        let mut active: session_handoff::ActiveModel = existing.into();
+        active.status = Set(status.as_str().to_string());
+        active.updated_at = Set(unix_seconds());
+        active.update(&self.db).await?;
+        Ok(())
     }
 
     pub async fn set_session_mode(&self, session_id: &str, mode: CompileMode) -> Result<()> {
@@ -1026,6 +1088,196 @@ impl StudioStore {
 
 fn runtime_snapshot_id(session_id: &str, agent_id: &str) -> String {
     format!("{session_id}:{agent_id}")
+}
+
+async fn start_plan_implementation_handoff_with_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    interaction_id: &str,
+    resolution: InteractionResolution,
+) -> Result<PlanImplementationHandoffStart> {
+    use entities::{interaction, session, session_handoff};
+    let InteractionResolution::PlanConfirmation { decision, .. } = &resolution else {
+        bail!("plan implementation handoff requires plan confirmation resolution");
+    };
+    if *decision != PlanConfirmationResolution::ImplementFreshContext {
+        bail!("plan implementation handoff requires implementFreshContext decision");
+    }
+
+    let now = unix_seconds();
+    let Some(interaction_row) = interaction::Entity::find_by_id(interaction_id.to_string())
+        .one(tx)
+        .await?
+    else {
+        bail!("interaction not found");
+    };
+    let current_interaction = interaction_record(interaction_row.clone())?;
+    if current_interaction.kind != InteractionKind::PlanConfirmation {
+        bail!("interaction resolution kind mismatch");
+    }
+    let InteractionPayload::PlanConfirmation {
+        plan_id,
+        content: stored_content,
+    } = current_interaction.payload.clone()
+    else {
+        bail!("interaction payload mismatch");
+    };
+
+    let Some(origin_session_row) =
+        session::Entity::find_by_id(current_interaction.scope.session_id.clone())
+            .one(tx)
+            .await?
+    else {
+        bail!("origin session not found");
+    };
+    let origin_session_before = session_record(origin_session_row.clone());
+
+    if let Some(existing_handoff) = session_handoff::Entity::find()
+        .filter(session_handoff::Column::OriginSessionId.eq(origin_session_before.id.clone()))
+        .filter(session_handoff::Column::PlanId.eq(plan_id.clone()))
+        .filter(session_handoff::Column::Kind.eq(SessionHandoffKind::PlanImplementation.as_str()))
+        .one(tx)
+        .await?
+    {
+        let Some(target_row) =
+            session::Entity::find_by_id(existing_handoff.target_session_id.clone())
+                .one(tx)
+                .await?
+        else {
+            bail!("plan implementation target session not found");
+        };
+        let interaction = if current_interaction.status == InteractionStatus::Pending {
+            resolve_interaction_row_with_tx(tx, interaction_row, resolution, now).await?
+        } else {
+            current_interaction
+        };
+        return Ok(PlanImplementationHandoffStart {
+            origin_session: origin_session_before,
+            target_session: session_record(target_row),
+            handoff: session_handoff_record(existing_handoff),
+            interaction,
+            plan_id,
+            plan_content: stored_content,
+            should_start_run: false,
+        });
+    }
+
+    if current_interaction.status != InteractionStatus::Pending {
+        bail!("plan confirmation is already resolved and has no implementation handoff");
+    }
+
+    let resolved_interaction =
+        resolve_interaction_row_with_tx(tx, interaction_row, resolution.clone(), now).await?;
+    let target_session_row = session::ActiveModel {
+        id: Set(new_id("session")),
+        project_id: Set(origin_session_before.project_id.clone()),
+        title: Set(non_empty_title("实施计划")),
+        mode: Set(CompileMode::Auto.label().to_string()),
+        created_at: Set(now),
+        updated_at: Set(now),
+        archived: Set(0),
+        visibility: Set(SessionVisibility::Active.as_str().to_string()),
+        instruction_snapshot_json: Set(None),
+    }
+    .insert(tx)
+    .await?;
+
+    let mut origin_active: session::ActiveModel = origin_session_row.into();
+    origin_active.visibility = Set(SessionVisibility::HandoffOrigin.as_str().to_string());
+    origin_active.updated_at = Set(now);
+    origin_active.update(tx).await?;
+
+    let handoff_row = session_handoff::ActiveModel {
+        id: Set(new_id("handoff")),
+        project_id: Set(origin_session_before.project_id.clone()),
+        origin_session_id: Set(origin_session_before.id.clone()),
+        target_session_id: Set(target_session_row.id.clone()),
+        kind: Set(SessionHandoffKind::PlanImplementation.as_str().to_string()),
+        plan_id: Set(plan_id.clone()),
+        status: Set(SessionHandoffStatus::Running.as_str().to_string()),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(tx)
+    .await?;
+
+    insert_timeline_events_with_tx(
+        tx,
+        &plan_lifecycle_trace_events_with_tx(
+            tx,
+            &origin_session_before.id,
+            &plan_id,
+            now,
+            vec![
+                PlanLifecycleState::Accepted,
+                PlanLifecycleState::Implementing,
+            ],
+        )
+        .await?,
+    )
+    .await?;
+
+    Ok(PlanImplementationHandoffStart {
+        origin_session: origin_session_before,
+        target_session: session_record(target_session_row),
+        handoff: session_handoff_record(handoff_row),
+        interaction: resolved_interaction,
+        plan_id,
+        plan_content: stored_content,
+        should_start_run: true,
+    })
+}
+
+async fn resolve_interaction_row_with_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    interaction_row: entities::interaction::Model,
+    resolution: InteractionResolution,
+    now: i64,
+) -> Result<InteractionRequest> {
+    let mut active: entities::interaction::ActiveModel = interaction_row.into();
+    active.status = Set(InteractionStatus::Resolved.as_str().to_string());
+    active.resolution_json = Set(Some(serde_json::to_string(&resolution)?));
+    active.updated_at = Set(now);
+    active.resolved_at = Set(Some(now));
+    let updated = active.update(tx).await?;
+    interaction_record(updated)
+}
+
+async fn plan_lifecycle_trace_events_with_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    session_id: &str,
+    plan_id: &str,
+    now: i64,
+    states: Vec<PlanLifecycleState>,
+) -> Result<Vec<TraceEvent>> {
+    use entities::timeline_event;
+    let max_seq: Option<i64> = timeline_event::Entity::find()
+        .filter(timeline_event::Column::SessionId.eq(session_id.to_string()))
+        .order_by_desc(timeline_event::Column::Sequence)
+        .one(tx)
+        .await?
+        .map(|row| row.sequence);
+    let mut sequence = max_seq.map(|value| (value + 1) as u64).unwrap_or(0);
+    Ok(states
+        .into_iter()
+        .map(|state| {
+            let event = TraceEvent {
+                session_id: session_id.to_string(),
+                sequence,
+                timestamp: now,
+                kind: TraceEventKind::PlanLifecycleChanged {
+                    event: PlanLifecycleEvent {
+                        plan_id: plan_id.to_string(),
+                        state,
+                        turn_id: None,
+                        reason: None,
+                        updated_at: now,
+                    },
+                },
+            };
+            sequence += 1;
+            event
+        })
+        .collect())
 }
 
 async fn insert_timeline_events_with_tx(

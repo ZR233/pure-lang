@@ -77,9 +77,10 @@ pub use skill::{SkillCatalog, SkillMetadata, SkillSourceKind};
 pub use studio::{
     AgentSnapshotRecord as StudioAgentSnapshotRecord,
     AgentTimelineEventRecord as StudioAgentTimelineEventRecord, InteractionEmitter,
-    InteractionEmitterFuture, InteractionRuntime, ProjectRecord, SessionRecord,
-    SessionRuntimeRecord, SessionSkillRecord, StudioPromptOutcome, StudioRuntime, StudioStore,
-    TimelineEventRecord, resolution_matches_kind,
+    InteractionEmitterFuture, InteractionRuntime, PlanImplementationHandoffStart, ProjectRecord,
+    SessionHandoffKind, SessionHandoffRecord, SessionHandoffStatus, SessionRecord,
+    SessionRuntimeRecord, SessionSkillRecord, SessionVisibility, StudioPromptOutcome,
+    StudioRuntime, StudioStore, TimelineEventRecord, resolution_matches_kind,
 };
 pub use tool::{
     AskUserTool, BashInput, BashTool, LspLanguageTool, LspQueryTool, OutputTruncation,
