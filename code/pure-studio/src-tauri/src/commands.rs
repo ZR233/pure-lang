@@ -30,7 +30,6 @@ use crate::mappers::{
 };
 use crate::state::{AppState, CommandError, CommandResult};
 
-const IMPLEMENT_PLAN_PROMPT: &str = "Implement the plan.";
 const IMPLEMENT_PLAN_FRESH_CONTEXT_PREFIX: &str = "A previous agent produced the plan below to accomplish the user's task. Implement the plan in a fresh context. Treat the plan as the source of user intent, re-read files as needed, and carry the work through implementation and verification.";
 
 struct PlanLifecycleChange {
@@ -359,25 +358,6 @@ pub async fn resolve_interaction(
             unreachable!("plan confirmation resolution was validated before resolving");
         };
         match decision {
-            PlanConfirmationResolution::ImplementSameContext => {
-                if stored_content.trim().is_empty() {
-                    return Err(CommandError::from_display("plan content is empty"));
-                }
-                run = Some(
-                    run_prompt_inner(
-                        session_id.clone(),
-                        IMPLEMENT_PLAN_PROMPT.to_string(),
-                        app,
-                        &state,
-                        Some(PlanImplementationLifecycle {
-                            session_id: session_id.clone(),
-                            plan_id: plan_id.clone(),
-                        }),
-                    )
-                    .await?,
-                );
-                plan_lifecycle = Some(plan_lifecycle_response(&state.studio, &session_id).await?);
-            }
             PlanConfirmationResolution::ImplementFreshContext => {
                 let content = content.unwrap_or(stored_content).trim().to_string();
                 if content.is_empty() {
@@ -873,6 +853,7 @@ fn latest_completed_plan(events: &[TraceEvent]) -> Option<TimelineItem> {
         | TraceEventKind::TimelineItemFailed { .. }
         | TraceEventKind::PlanLifecycleChanged { .. }
         | TraceEventKind::InteractionChanged { .. }
+        | TraceEventKind::SkillActivated { .. }
         | TraceEventKind::EnabledToolsRecorded { .. } => None,
     })
 }
@@ -895,6 +876,7 @@ fn first_turn_id(events: &[TraceEvent]) -> Option<String> {
         | TraceEventKind::TimelineItemDelta { .. }
         | TraceEventKind::PlanLifecycleChanged { .. }
         | TraceEventKind::InteractionChanged { .. }
+        | TraceEventKind::SkillActivated { .. }
         | TraceEventKind::EnabledToolsRecorded { .. } => None,
     })
 }

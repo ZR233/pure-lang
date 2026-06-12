@@ -157,12 +157,8 @@ impl ResponsesRequestBody {
                             input.push(ResponsesInputItem::FunctionCallOutput { call_id, output });
                         }
                         ToolCallKind::Custom => {
-                            input.push(ResponsesInputItem::CustomToolCallOutput {
-                                call_id,
-                                name: (!metadata.tool_name.is_empty())
-                                    .then_some(metadata.tool_name),
-                                output,
-                            });
+                            input
+                                .push(ResponsesInputItem::CustomToolCallOutput { call_id, output });
                         }
                     }
                 }
@@ -230,7 +226,6 @@ enum ResponsesInputItem {
     },
     CustomToolCallOutput {
         call_id: String,
-        name: Option<String>,
         output: String,
     },
 }
@@ -1245,6 +1240,12 @@ mod tests {
         assert_eq!(
             body["input"][1]["type"],
             serde_json::json!("custom_tool_call_output")
+        );
+        assert!(
+            !body["input"][1]
+                .as_object()
+                .expect("custom tool output should serialize as object")
+                .contains_key("name")
         );
     }
 

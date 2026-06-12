@@ -416,6 +416,7 @@ mod tests {
                 | TraceEventKind::TimelineItemDelta { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
                 | TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. }
                 | TraceEventKind::EnabledToolsRecorded { .. } => false,
             })
             .count()
@@ -475,6 +476,7 @@ mod tests {
                 | TraceEventKind::TimelineItemFailed { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
                 | TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. }
                 | TraceEventKind::EnabledToolsRecorded { .. } => None,
             })
             .collect()
@@ -510,7 +512,8 @@ mod tests {
                 | TraceEventKind::TimelineItemCompleted { .. }
                 | TraceEventKind::TimelineItemFailed { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
-                | TraceEventKind::InteractionChanged { .. } => None,
+                | TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. } => None,
             })
             .expect("enabled tools event")
     }
@@ -558,6 +561,7 @@ mod tests {
                     output_file: PathBuf::new(),
                     exit_code: None,
                     timed_out: false,
+                    runtime_events: Vec::new(),
                 })
             })
         }
@@ -612,6 +616,7 @@ mod tests {
                 status: TimelineItemStatus::Completed,
                 exit_code: None,
                 timed_out: false,
+                runtime_events: Vec::new(),
             },
             ToolExecutionRecord {
                 id: "item-2".to_string(),
@@ -624,6 +629,7 @@ mod tests {
                 status: TimelineItemStatus::Completed,
                 exit_code: None,
                 timed_out: false,
+                runtime_events: Vec::new(),
             },
         ];
 
@@ -1103,6 +1109,7 @@ mod tests {
                 | TraceEventKind::TimelineItemDelta { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
                 | TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. }
                 | TraceEventKind::EnabledToolsRecorded { .. } => None,
             })
             .expect("terminal tool item");
@@ -1215,6 +1222,7 @@ mod tests {
                 | TraceEventKind::TimelineItemCompleted { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
                 | TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. }
                 | TraceEventKind::EnabledToolsRecorded { .. } => None,
             })
             .expect("interrupted tool item");
@@ -1415,6 +1423,7 @@ mod tests {
                 | TraceEventKind::TimelineItemFailed { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
                 | TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. }
                 | TraceEventKind::EnabledToolsRecorded { .. } => None,
             })
             .expect("user timeline item");

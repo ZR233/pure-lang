@@ -58,9 +58,6 @@ export function App() {
             studio.dispatch({ type: "setPrompt", prompt: value })
           }
           onSetSessionMode={(mode) => void studio.onSetSessionMode(mode)}
-          onImplementPlan={(interactionId) =>
-            void studio.onImplementPlan(interactionId)
-          }
           onImplementPlanFresh={(interactionId) =>
             void studio.onImplementPlanFresh(interactionId)
           }

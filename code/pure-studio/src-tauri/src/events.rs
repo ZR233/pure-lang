@@ -108,7 +108,16 @@ pub async fn drain_events(
                 } else {
                     false
                 };
-                let session_runtime = if runtime_updated {
+                let skill_updated = if let AgentEvent::SkillActivated { activation } = &event {
+                    studio
+                        .store()
+                        .upsert_session_skill(&session_id, activation)
+                        .await
+                        .is_ok()
+                } else {
+                    false
+                };
+                let session_runtime = if runtime_updated || skill_updated {
                     load_session_runtime_dto(&studio, &session_id).await.ok()
                 } else {
                     None
@@ -152,6 +161,7 @@ pub async fn drain_events(
                         | AgentEvent::TimelineItemFailed { .. }
                         | AgentEvent::InteractionChanged { .. }
                         | AgentEvent::AgentRuntimeUpdated { .. }
+                        | AgentEvent::SkillActivated { .. }
                         | AgentEvent::TurnInterrupted { .. }
                         | AgentEvent::TurnBudgetLimited { .. }
                         | AgentEvent::Done
@@ -243,6 +253,7 @@ pub fn agent_snapshot_record(
         | AgentEvent::TimelineItemFailed { .. }
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
+        | AgentEvent::SkillActivated { .. }
         | AgentEvent::CollabAgentSpawnBegin { .. }
         | AgentEvent::CollabAgentSpawnEnd { .. }
         | AgentEvent::CollabAgentInteractionBegin { .. }
@@ -342,6 +353,7 @@ pub fn agent_timeline_event_record(
         | AgentEvent::TimelineItemFailed { .. }
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
+        | AgentEvent::SkillActivated { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::Done

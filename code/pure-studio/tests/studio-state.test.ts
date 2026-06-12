@@ -951,7 +951,12 @@ function runPromptLoadedKeepsLiveInteractionByCurrentRun() {
 
 function freshContextRunSwitchesToReturnedSession() {
   const planningSession = selectedState();
-  const resolving = studioReducer(planningSession, { type: "setBusy", value: true });
+  const resolving = studioReducer(planningSession, {
+    type: "freshContextRunSubmitted",
+    originSessionId: "session-1",
+    status: "running",
+    startedAt: 2222,
+  });
   const freshRun = response([textItem("turn-2-text", 20, "implemented")]);
   freshRun.sessionId = "session-2";
   freshRun.sessionRuntime = { ...runtime, sessionId: "session-2" };
@@ -977,41 +982,49 @@ function freshContextRunSwitchesToReturnedSession() {
   assertEqual(completed.isBusy, false);
 }
 
-function optimisticSessionModeSwitchesSelectedSessionOnly() {
-  const planState = studioReducer(selectedState(), {
+function freshContextRunSessionUpdateShowsWaitingState() {
+  const planningSession = selectedState();
+  const resolving = studioReducer(planningSession, {
+    type: "freshContextRunSubmitted",
+    originSessionId: "session-1",
+    status: "running",
+    startedAt: 2222,
+  });
+
+  const switched = studioReducer(resolving, {
     type: "sessionModeUpdated",
     status: "mode updated",
     payload: {
-      sessionId: "session-1",
+      sessionId: "session-2",
       sessions: [
+        ...planningSession.sessions,
         {
-          id: "session-1",
+          id: "session-2",
           projectId: "project-1",
-          title: "Session",
-          mode: "plan",
+          title: "Implementation",
+          mode: "auto",
           updatedAt: 3,
         },
       ],
       agentEvents: [],
       agents: [],
-      sessionRuntime: runtime,
+      sessionRuntime: { ...runtime, sessionId: "session-2" },
+      interactions: [],
     },
   });
-  const state = studioReducer(planState, {
-    type: "optimisticSessionMode",
-    sessionId: "session-1",
-    mode: "auto",
-  });
 
-  assertEqual(state.sessions[0]?.mode, "auto");
+  const entries = selectTimelineEntries(switched);
 
-  const ignored = studioReducer(state, {
-    type: "optimisticSessionMode",
-    sessionId: "session-2",
-    mode: "plan",
-  });
-
-  assertEqual(ignored.sessions[0]?.mode, "auto");
+  assertEqual(switched.selectedSessionId, "session-2");
+  assertEqual(switched.isBusy, true);
+  assertEqual(switched.turnPhase, "running");
+  assertEqual(switched.turnStartedAt, 2222);
+  assertDeepEqual(entries.map((entry) => entry.kind), ["status"]);
+  const status = entries[0];
+  if (status?.kind !== "status") {
+    throw new Error("Expected fresh-context waiting status entry");
+  }
+  assertEqual(status.content, "waitingForModel");
 }
 
 function promptSubmittedCreatesOptimisticTimelineFeedback() {
@@ -1584,111 +1597,25 @@ function applyPatchCountsFilesFromResultSummary() {
   assertDeepEqual(group.summaryParts, [{ kind: "editFiles", count: 3 }]);
 }
 
-function successfulSkillViewImmediatelyUpdatesActiveSkills() {
-  const state = studioReducer(selectedState(), {
-    type: "agentEvent",
-    sessionId: "session-1",
-    event: {
-      timelineItemCompleted: {
-        sequence: 10,
-        item: toolItem(
-          "turn-1-skill",
-          "turn-1",
-          10,
-          "skill_view",
-          { name: "skill-creator" },
-          "completed",
-          JSON.stringify({
-            success: true,
-            skill: { name: "skill-creator" },
-            content: "body",
-          }),
-        ),
-      },
-    },
-    statusText: "running",
-  });
-
-  assertDeepEqual(state.sessionRuntime?.activeSkills, ["skill-creator"]);
-}
-
-function repeatedSkillViewDoesNotDuplicateActiveSkills() {
-  const existing = studioReducer(selectedState(), {
-    type: "agentEvent",
-    sessionId: "session-1",
-    event: {
-      timelineItemCompleted: {
-        sequence: 10,
-        item: toolItem(
-          "turn-1-skill-a",
-          "turn-1",
-          10,
-          "skill_view",
-          { name: "skill-creator" },
-          "completed",
-          JSON.stringify({
-            success: true,
-            skill: { name: "skill-creator" },
-            content: "body",
-          }),
-        ),
-      },
-    },
-    statusText: "running",
-  });
-
-  const repeated = studioReducer(existing, {
-    type: "agentEvent",
-    sessionId: "session-1",
-    event: {
-      timelineItemCompleted: {
-        sequence: 11,
-        item: toolItem(
-          "turn-1-skill-b",
-          "turn-1",
-          11,
-          "skill_view",
-          { name: "Skill-Creator" },
-          "completed",
-          JSON.stringify({
-            success: true,
-            skill: { name: "Skill-Creator" },
-            content: "body again",
-          }),
-        ),
-      },
-    },
-    statusText: "running",
-  });
-
-  assertDeepEqual(repeated.sessionRuntime?.activeSkills, ["skill-creator"]);
-}
-
-function skillViewAppliesAfterRuntimeSnapshot() {
+function skillActivationEventUsesSessionRuntimePayload() {
   const state = studioReducer(selectedState(), {
     type: "agentEvent",
     sessionId: "session-1",
     sessionRuntime: {
       ...runtime,
-      activeSkills: ["openai-docs"],
+      activeSkills: ["openai-docs", "skill-creator"],
       updatedAt: 2,
     },
     event: {
-      timelineItemCompleted: {
-        sequence: 10,
-        item: toolItem(
-          "turn-1-skill",
-          "turn-1",
-          10,
-          "skill_view",
-          { name: "skill-creator" },
-          "completed",
-          JSON.stringify({
-            success: true,
-            skill: { name: "skill-creator" },
-            content: "body",
-          }),
-        ),
+      skillActivated: {
+        activation: {
+          name: "skill-creator",
+          source: "user",
+          path: "C:/skills/skill-creator",
+          turnId: "turn-1",
+          toolCallId: "call-1",
+          activatedAt: 10,
+        },
       },
     },
     statusText: "running",
@@ -1697,56 +1624,10 @@ function skillViewAppliesAfterRuntimeSnapshot() {
   assertDeepEqual(state.sessionRuntime?.activeSkills, ["openai-docs", "skill-creator"]);
 }
 
-function invalidSkillViewResultsDoNotUpdateActiveSkills() {
-  const cases = [
-    toolItem(
-      "turn-1-skill-failed",
-      "turn-1",
-      10,
-      "skill_view",
-      { name: "failed-skill" },
-      "completed",
-      JSON.stringify({
-        success: false,
-        skill: { name: "failed-skill" },
-      }),
-    ),
-    toolItem(
-      "turn-1-skill-invalid-json",
-      "turn-1",
-      11,
-      "skill_view",
-      { name: "bad-json" },
-      "completed",
-      "not json",
-    ),
-    toolItem(
-      "turn-1-skills-list",
-      "turn-1",
-      12,
-      "skills_list",
-      {},
-      "completed",
-      JSON.stringify({ success: true, skills: [] }),
-    ),
-  ];
-  let state = selectedState();
-  for (const item of cases) {
-    state = studioReducer(state, {
-      type: "agentEvent",
-      sessionId: "session-1",
-      event: { timelineItemCompleted: { sequence: item.sequence, item } },
-      statusText: "running",
-    });
-  }
-
-  assertDeepEqual(state.sessionRuntime?.activeSkills, []);
-}
-
-function skillViewFromOtherSessionDoesNotUpdateActiveSkills() {
+function skillViewToolResultJsonNoLongerUpdatesActiveSkills() {
   const state = studioReducer(selectedState(), {
     type: "agentEvent",
-    sessionId: "session-2",
+    sessionId: "session-1",
     event: {
       timelineItemCompleted: {
         sequence: 10,
@@ -1763,6 +1644,33 @@ function skillViewFromOtherSessionDoesNotUpdateActiveSkills() {
             content: "body",
           }),
         ),
+      },
+    },
+    statusText: "running",
+  });
+
+  assertDeepEqual(state.sessionRuntime?.activeSkills, []);
+}
+
+function skillActivationFromOtherSessionDoesNotUpdateActiveSkills() {
+  const state = studioReducer(selectedState(), {
+    type: "agentEvent",
+    sessionId: "session-2",
+    sessionRuntime: {
+      ...runtime,
+      activeSkills: ["skill-creator"],
+      updatedAt: 2,
+    },
+    event: {
+      skillActivated: {
+        activation: {
+          name: "skill-creator",
+          source: "user",
+          path: "C:/skills/skill-creator",
+          turnId: "turn-1",
+          toolCallId: "call-1",
+          activatedAt: 10,
+        },
       },
     },
     statusText: "running",
@@ -2100,7 +2008,7 @@ historicalTimelineLoadDoesNotCreatePlanAction();
 laterRunWithoutPlanDoesNotReopenHistoricalPlan();
 runPromptLoadedKeepsLiveInteractionByCurrentRun();
 freshContextRunSwitchesToReturnedSession();
-optimisticSessionModeSwitchesSelectedSessionOnly();
+freshContextRunSessionUpdateShowsWaitingState();
 promptSubmittedCreatesOptimisticTimelineFeedback();
 modelTimelineEventClearsWaitingFeedback();
 userTimelineEventKeepsWaitingFeedback();
@@ -2122,11 +2030,9 @@ providerUsagesLoadedDoesNotReplaceConfigState();
 mcpHealthUpdatedRefreshesMcpServersAndRuntime();
 lspHealthUpdatedRefreshesLspServersAndRuntime();
 applyPatchCountsFilesFromResultSummary();
-successfulSkillViewImmediatelyUpdatesActiveSkills();
-repeatedSkillViewDoesNotDuplicateActiveSkills();
-skillViewAppliesAfterRuntimeSnapshot();
-invalidSkillViewResultsDoNotUpdateActiveSkills();
-skillViewFromOtherSessionDoesNotUpdateActiveSkills();
+skillActivationEventUsesSessionRuntimePayload();
+skillViewToolResultJsonNoLongerUpdatesActiveSkills();
+skillActivationFromOtherSessionDoesNotUpdateActiveSkills();
 unknownToolsUseFallbackAndKeepDetails();
 quietFileToolFailureKeepsResultVisible();
 inferenceAndNormalTurnTraceAreHidden();

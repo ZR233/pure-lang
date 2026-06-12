@@ -5,14 +5,14 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use futures::stream::{FuturesUnordered, StreamExt};
 use pl_model::ToolCallPayload;
-use pl_protocol::{PureError, TimelineItemStatus, ToolCallKind};
+use pl_protocol::{AgentEvent, PureError, TimelineItemStatus, ToolCallKind, TraceEventKind};
 use tokio::sync::RwLock;
 
 use crate::permission::{PermissionDecision, decide_tool_permission};
 use crate::session::CoreSession;
 use crate::tool::{
     RECOVERABLE_SUBAGENT_429_MARKER, SubagentContext, ToolContext, ToolInput, ToolOutput,
-    WorkspaceAccess,
+    ToolRuntimeEvent, WorkspaceAccess,
 };
 use crate::turn::{BudgetTracker, ToolApprovalDecision, ToolExecutionMode, TurnOptions};
 
@@ -31,6 +31,7 @@ pub(super) struct ToolExecutionRecord {
     pub(super) status: TimelineItemStatus,
     pub(super) exit_code: Option<i32>,
     pub(super) timed_out: bool,
+    pub(super) runtime_events: Vec<ToolRuntimeEvent>,
 }
 
 pub(super) struct ScheduledToolExecution<'a> {
@@ -62,6 +63,7 @@ pub(super) struct ToolOutputEnvelope {
     pub(super) full_output_file: Option<PathBuf>,
     pub(super) exit_code: Option<i32>,
     pub(super) timed_out: bool,
+    pub(super) runtime_events: Vec<ToolRuntimeEvent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -412,7 +414,8 @@ fn finalize_tool_item(
         tool.exit_code = record.exit_code;
         tool.timed_out = record.timed_out;
     }
-    match item.status {
+    let status = item.status;
+    match status {
         TimelineItemStatus::Failed
         | TimelineItemStatus::Denied
         | TimelineItemStatus::Interrupted
@@ -425,6 +428,20 @@ fn finalize_tool_item(
         | TimelineItemStatus::Approved
         | TimelineItemStatus::Running
         | TimelineItemStatus::Completed => recorder.complete_item(item),
+    }
+    if status == TimelineItemStatus::Completed {
+        for event in &record.runtime_events {
+            match event {
+                ToolRuntimeEvent::SkillActivated { activation } => {
+                    recorder.record_trace_only(TraceEventKind::SkillActivated {
+                        activation: activation.clone(),
+                    });
+                    recorder.broadcast(AgentEvent::SkillActivated {
+                        activation: activation.clone(),
+                    });
+                }
+            }
+        }
     }
 }
 
@@ -445,6 +462,7 @@ async fn ready_tool_execution_record(
                 full_output_file: None,
                 exit_code,
                 timed_out,
+                runtime_events: Vec::new(),
             },
             status,
         )),
@@ -466,6 +484,7 @@ fn tool_execution_record(
                     .then_some(output.output_file),
                 exit_code: output.exit_code,
                 timed_out: output.timed_out,
+                runtime_events: output.runtime_events,
             },
             TimelineItemStatus::Completed,
         ),
@@ -492,6 +511,7 @@ fn tool_execution_record_from_envelope(
         full_output_file: _full_output_file,
         exit_code,
         timed_out,
+        runtime_events,
     } = envelope;
     let display_result = display_result_for_tool(&tool_call, &tool_name, &timeline_text, status);
     ToolExecutionRecord {
@@ -505,6 +525,7 @@ fn tool_execution_record_from_envelope(
         status,
         exit_code,
         timed_out,
+        runtime_events,
     }
 }
 
@@ -518,6 +539,7 @@ fn interrupted_tool_execution_record(tool_call: pl_model::ToolCall) -> ToolExecu
             full_output_file: None,
             exit_code: None,
             timed_out: false,
+            runtime_events: Vec::new(),
         },
         TimelineItemStatus::Interrupted,
     )
@@ -536,6 +558,7 @@ fn respond_to_model_tool_execution_record(
             full_output_file: None,
             exit_code: None,
             timed_out: false,
+            runtime_events: Vec::new(),
         },
         TimelineItemStatus::Failed,
     )

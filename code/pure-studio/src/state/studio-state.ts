@@ -4,7 +4,6 @@ import type {
   AgentTimelineEvent,
   BootstrapPayload,
   ConfigPayload,
-  CompileMode,
   InstructionsRecord,
   LspHealthUpdatedPayload,
   LspServerRecord,
@@ -77,6 +76,7 @@ export type StudioState = TimelineStateSlice & {
   planStates: Map<string, PlanState>;
   dismissedPlanId: string | null;
   currentRunTimelineBaseSequence: number | null;
+  pendingFreshContextRun: { originSessionId: string; startedAt: number } | null;
   settingsOpen: boolean;
   activeSettingsTab: SettingsTab;
   providerSearch: string;
@@ -106,7 +106,6 @@ export type StudioAction =
   | { type: "setBusy"; value: boolean }
   | { type: "setPrompt"; prompt: string }
   | { type: "setManualPath"; path: string }
-  | { type: "optimisticSessionMode"; sessionId: string; mode: CompileMode }
   | { type: "setProviderSearch"; search: string }
   | { type: "setSelectedProviderId"; providerId: string | null }
   | { type: "setRoles"; roles: RoleRecord[] }
@@ -129,6 +128,7 @@ export type StudioAction =
     }
   | { type: "stopRequested"; status: string }
   | { type: "stopFallback"; status: string }
+  | { type: "freshContextRunSubmitted"; originSessionId: string; status: string; startedAt: number }
   | {
       type: "agentEvent";
       sessionId: string;
@@ -175,6 +175,7 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   planStates: new Map(),
   dismissedPlanId: null,
   currentRunTimelineBaseSequence: null,
+  pendingFreshContextRun: null,
   settingsOpen: false,
   activeSettingsTab: "providers",
   providerSearch: "",
@@ -210,6 +211,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         planStates: new Map(),
         dismissedPlanId: null,
         currentRunTimelineBaseSequence: null,
+        pendingFreshContextRun: null,
       };
     case "bootstrapFailed":
       return { ...state, status: action.status };
@@ -250,6 +252,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         planStates: new Map(),
         dismissedPlanId: null,
         currentRunTimelineBaseSequence: null,
+        pendingFreshContextRun: null,
         status: action.status,
         turnPhase: "idle",
         turnStartedAt: null,
@@ -287,12 +290,38 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         planStates: new Map(),
         dismissedPlanId: null,
         currentRunTimelineBaseSequence: null,
+        pendingFreshContextRun: null,
         status: action.status,
         turnPhase: "idle",
         turnStartedAt: null,
         isBusy: false,
       };
     case "sessionModeUpdated":
+      if (
+        state.pendingFreshContextRun &&
+        state.isBusy &&
+        action.payload.sessionId !== state.selectedSessionId
+      ) {
+        const freshState = {
+          ...state,
+          sessions: action.payload.sessions.length > 0 ? action.payload.sessions : state.sessions,
+          selectedSessionId: action.payload.sessionId,
+          agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
+          agents: mergeAgents([], action.payload.agents ?? []),
+          sessionRuntime: action.payload.sessionRuntime ?? null,
+          ...emptyTimelineState(),
+          ...interactionState(new Map(), action.payload.interactions ?? [], action.payload.sessionId, true),
+          planStates: new Map<string, PlanState>(),
+          dismissedPlanId: null,
+          currentRunTimelineBaseSequence: 0,
+          status: state.status,
+          turnPhase: "running" as TurnPhase,
+          turnStartedAt: state.pendingFreshContextRun.startedAt,
+          isBusy: true,
+          pendingFreshContextRun: null,
+        };
+        return appendOptimisticWaiting(freshState, state.pendingFreshContextRun.startedAt);
+      }
       if (action.payload.sessionId !== state.selectedSessionId) {
         return state;
       }
@@ -342,6 +371,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
           false,
         ),
         currentRunTimelineBaseSequence: null,
+        pendingFreshContextRun: null,
       };
     }
     case "runPromptFailed":
@@ -356,6 +386,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         isBusy: false,
         ...clearSessionInteractions(state.interactions, state.selectedSessionId),
         currentRunTimelineBaseSequence: null,
+        pendingFreshContextRun: null,
       };
     case "setBusy":
       return {
@@ -371,16 +402,6 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, prompt: action.prompt };
     case "setManualPath":
       return { ...state, manualPath: action.path };
-    case "optimisticSessionMode":
-      if (action.sessionId !== state.selectedSessionId) {
-        return state;
-      }
-      return {
-        ...state,
-        sessions: state.sessions.map((session) =>
-          session.id === action.sessionId ? { ...session, mode: action.mode } : session,
-        ),
-      };
     case "setProviderSearch":
       return { ...state, providerSearch: action.search };
     case "setSelectedProviderId":
@@ -463,7 +484,24 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         isBusy: false,
         ...clearSessionInteractions(state.interactions, state.selectedSessionId),
         currentRunTimelineBaseSequence: null,
+        pendingFreshContextRun: null,
       };
+    case "freshContextRunSubmitted":
+      if (action.originSessionId !== state.selectedSessionId) {
+        return state;
+      }
+      return appendOptimisticWaiting({
+        ...state,
+        isBusy: true,
+        status: action.status,
+        turnPhase: "running",
+        turnStartedAt: action.startedAt,
+        pendingFreshContextRun: {
+          originSessionId: action.originSessionId,
+          startedAt: action.startedAt,
+        },
+        ...clearSessionInteractions(state.interactions, state.selectedSessionId),
+      }, action.startedAt);
     case "promptSubmitted":
       const currentRunTimelineBaseSequence = state.timelineNextSequence;
       return {
@@ -474,6 +512,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         turnPhase: "running",
         turnStartedAt: action.startedAt,
         currentRunTimelineBaseSequence,
+        pendingFreshContextRun: null,
         ...clearSessionInteractions(state.interactions, state.selectedSessionId),
       };
     case "agentEvent":
@@ -481,10 +520,6 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         return state;
       }
       const eventBase = applyOptimisticTimelineCleanup(state, action.event);
-      const nextRuntime = mergeLiveSkillIntoRuntime(
-        action.sessionRuntime ?? eventBase.sessionRuntime,
-        action.event,
-      );
       return reduceAgentEvent(
         {
           ...eventBase,
@@ -492,7 +527,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
             ? mergeAgentTimelineEvents(eventBase.agentTimelineEvents, [action.timelineEvent])
             : eventBase.agentTimelineEvents,
           agents: action.agent ? mergeAgents(eventBase.agents, [action.agent]) : eventBase.agents,
-          sessionRuntime: nextRuntime,
+          sessionRuntime: action.sessionRuntime ?? eventBase.sessionRuntime,
         },
         action.event,
         action.statusText,
@@ -674,6 +709,30 @@ function appendOptimisticPrompt(state: StudioState, prompt: string, startedAt: n
   };
 }
 
+function appendOptimisticWaiting(state: StudioState, startedAt: number): StudioState {
+  const createdAt = Math.floor(startedAt / 1000);
+  const turnId = `optimistic-turn-${startedAt}`;
+  const waitingItem: TimelineItem = {
+    turnId,
+    itemId: `optimistic-waiting-${startedAt}`,
+    sequence: state.timelineNextSequence,
+    kind: "turn",
+    status: "running",
+    createdAt,
+    updatedAt: createdAt,
+    role: null,
+    content: "waitingForModel",
+    thinkingChunks: [],
+  };
+  const timelineItems = new Map(state.timelineItems);
+  timelineItems.set(waitingItem.itemId, waitingItem);
+  return {
+    ...state,
+    timelineItems,
+    timelineOrder: [...state.timelineOrder, waitingItem.itemId],
+  };
+}
+
 function applyOptimisticTimelineCleanup(
   state: StudioState,
   event: AgentEvent | null | undefined,
@@ -850,60 +909,6 @@ function reduceAgentEvent(
     return { ...state, status: statusText, turnPhase: "failed" };
   }
   return { ...state, status: statusText };
-}
-
-function mergeLiveSkillIntoRuntime(
-  runtime: SessionRuntime | null,
-  event: AgentEvent | null | undefined,
-): SessionRuntime | null {
-  if (!runtime || !isRecord(event) || !("timelineItemCompleted" in event)) {
-    return runtime;
-  }
-  const completed = event.timelineItemCompleted;
-  if (!isRecord(completed)) {
-    return runtime;
-  }
-  const skillName = skillNameFromCompletedItem(completed.item as TimelineItem);
-  if (!skillName) {
-    return runtime;
-  }
-  const activeSkills: string[] = [];
-  const seen = new Set<string>();
-  for (const name of [...runtime.activeSkills, skillName]) {
-    const key = name.toLowerCase();
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    activeSkills.push(name);
-  }
-  if (
-    activeSkills.length === runtime.activeSkills.length &&
-    activeSkills.every((name, index) => name === runtime.activeSkills[index])
-  ) {
-    return runtime;
-  }
-  return {
-    ...runtime,
-    activeSkills,
-  };
-}
-
-function skillNameFromCompletedItem(item: TimelineItem): string | null {
-  if (item.kind !== "tool" || item.tool?.name !== "skill_view" || !item.tool.result) {
-    return null;
-  }
-  let value: unknown;
-  try {
-    value = JSON.parse(item.tool.result);
-  } catch {
-    return null;
-  }
-  if (!isRecord(value) || value.success !== true || !isRecord(value.skill)) {
-    return null;
-  }
-  const name = value.skill.name;
-  return typeof name === "string" && name.trim() ? name.trim() : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

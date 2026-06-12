@@ -94,6 +94,9 @@ pub enum AgentEvent {
     AgentRuntimeUpdated {
         delta: AgentRuntimeDelta,
     },
+    SkillActivated {
+        activation: SkillActivation,
+    },
     CollabAgentSpawnBegin {
         call_id: String,
         started_at: i64,
@@ -604,6 +607,21 @@ pub struct EnabledToolsEvent {
     pub tools: Vec<String>,
 }
 
+/// Successful skill activation fact for a session.
+///
+/// Emitted when `skill_view` successfully reads a skill document or support
+/// file and that content has entered the model-visible context.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillActivation {
+    pub name: String,
+    pub source: String,
+    pub path: String,
+    pub turn_id: String,
+    pub tool_call_id: String,
+    pub activated_at: i64,
+}
+
 /// Item-first trace events for turn, inference, text, thinking, tool and agent lifecycle.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(
@@ -618,6 +636,7 @@ pub enum TraceEventKind {
     TimelineItemFailed { item: TimelineItem, error: String },
     PlanLifecycleChanged { event: PlanLifecycleEvent },
     InteractionChanged { event: InteractionChangedEvent },
+    SkillActivated { activation: SkillActivation },
     EnabledToolsRecorded { event: EnabledToolsEvent },
 }
 
@@ -910,6 +929,51 @@ mod tests {
                         "hasUnpricedUsage": false,
                         "updatedAt": 1779688800
                     }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_skill_activation_events_as_camel_case() {
+        let activation = SkillActivation {
+            name: "rust-flow".to_string(),
+            source: "project".to_string(),
+            path: "skills/rust-flow".to_string(),
+            turn_id: "turn-1".to_string(),
+            tool_call_id: "turn-1-call-1".to_string(),
+            activated_at: 1_779_688_800,
+        };
+
+        assert_eq!(
+            serde_json::to_value(AgentEvent::SkillActivated {
+                activation: activation.clone()
+            })
+            .unwrap(),
+            serde_json::json!({
+                "skillActivated": {
+                    "activation": {
+                        "name": "rust-flow",
+                        "source": "project",
+                        "path": "skills/rust-flow",
+                        "turnId": "turn-1",
+                        "toolCallId": "turn-1-call-1",
+                        "activatedAt": 1779688800
+                    }
+                }
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(TraceEventKind::SkillActivated { activation }).unwrap(),
+            serde_json::json!({
+                "type": "skillActivated",
+                "activation": {
+                    "name": "rust-flow",
+                    "source": "project",
+                    "path": "skills/rust-flow",
+                    "turnId": "turn-1",
+                    "toolCallId": "turn-1-call-1",
+                    "activatedAt": 1779688800
                 }
             })
         );

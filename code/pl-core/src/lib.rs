@@ -65,9 +65,9 @@ pub use pl_protocol::{
     InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,
     InteractionResolution, InteractionScope, InteractionStatus, Message, MessageContent,
     MessageRole, OutputStream, PermissionLevel, PipelineStage, PlanConfirmationResolution,
-    PureError, Result, RuntimeCostAmount, RuntimeUsageSnapshot, TokenUsageSnapshot,
-    ToolApprovalResolution, TraceEvent, TraceEventKind, UserInputAnswer, UserInputRequest,
-    UserInputResponse, UserQuestion, UserQuestionOption,
+    PureError, Result, RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation,
+    TokenUsageSnapshot, ToolApprovalResolution, TraceEvent, TraceEventKind, UserInputAnswer,
+    UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
 };
 pub use provider_usage::{
     ProviderUsageData, ProviderUsageRecord, ProviderUsageState, provider_usage_records,
@@ -78,13 +78,13 @@ pub use studio::{
     AgentSnapshotRecord as StudioAgentSnapshotRecord,
     AgentTimelineEventRecord as StudioAgentTimelineEventRecord, InteractionEmitter,
     InteractionEmitterFuture, InteractionRuntime, ProjectRecord, SessionRecord,
-    SessionRuntimeRecord, StudioPromptOutcome, StudioRuntime, StudioStore, TimelineEventRecord,
-    resolution_matches_kind,
+    SessionRuntimeRecord, SessionSkillRecord, StudioPromptOutcome, StudioRuntime, StudioStore,
+    TimelineEventRecord, resolution_matches_kind,
 };
 pub use tool::{
     AskUserTool, BashInput, BashTool, LspLanguageTool, LspQueryTool, OutputTruncation,
-    SubagentContext, Tool, ToolContext, ToolInput, ToolOutput, ToolRegistry, TruncatedOutput,
-    TruncationStrategy, WriteStdinTool, lsp_tool_for_language,
+    SubagentContext, Tool, ToolContext, ToolInput, ToolOutput, ToolRegistry, ToolRuntimeEvent,
+    TruncatedOutput, TruncationStrategy, WriteStdinTool, lsp_tool_for_language,
 };
 pub use trace::TraceRecorder;
 pub use turn::{

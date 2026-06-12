@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use pl_protocol::PureError;
+use pl_protocol::{PureError, SkillActivation};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -13,7 +13,7 @@ use crate::skill::{
 };
 
 use super::truncation::{OutputTruncation, TruncatedOutput};
-use super::{Tool, ToolContext, ToolInput, ToolOutput};
+use super::{Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeEvent};
 
 #[derive(Debug, Clone)]
 pub struct SkillsListTool {
@@ -183,6 +183,8 @@ impl Tool for SkillViewTool {
         context: ToolContext,
     ) -> super::BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
+            let turn_id = input.session_id.clone();
+            let tool_id = input.tool_id.clone();
             let input: SkillViewInput = parse_input(input.arguments, self.name())?;
             let catalog = SkillCatalog::discover(&context.workspace_root, &self.config)
                 .map_err(|error| tool_error(self.name(), error))?;
@@ -197,13 +199,17 @@ impl Tool for SkillViewTool {
             } else {
                 Vec::new()
             };
-            json_output(json!({
+            let activation = skill_activation(skill, &turn_id, &tool_id);
+            json_output_with_events(
+                json!({
                 "success": true,
                 "skill": skill,
                 "filePath": input.file_path.unwrap_or_else(|| "SKILL.md".to_string()),
                 "supportFiles": support_files,
                 "content": content,
-            }))
+                }),
+                vec![ToolRuntimeEvent::SkillActivated { activation }],
+            )
         })
     }
 }
@@ -517,6 +523,13 @@ fn required(value: Option<String>, tool: &str, field: &str) -> Result<String, Pu
 }
 
 fn json_output(value: serde_json::Value) -> Result<ToolOutput, PureError> {
+    json_output_with_events(value, Vec::new())
+}
+
+fn json_output_with_events(
+    value: serde_json::Value,
+    runtime_events: Vec<ToolRuntimeEvent>,
+) -> Result<ToolOutput, PureError> {
     let description = serde_json::to_string_pretty(&value)?;
     let stdout = TruncatedOutput {
         original_length: description.len(),
@@ -532,7 +545,35 @@ fn json_output(value: serde_json::Value) -> Result<ToolOutput, PureError> {
         output_file: PathBuf::new(),
         exit_code: Some(0),
         timed_out: false,
+        runtime_events,
     })
+}
+
+fn skill_activation(skill: &SkillMetadata, turn_id: &str, tool_call_id: &str) -> SkillActivation {
+    SkillActivation {
+        name: skill.name.clone(),
+        source: skill_source_label(skill.source).to_string(),
+        path: skill.path.to_string_lossy().to_string(),
+        turn_id: turn_id.to_string(),
+        tool_call_id: tool_call_id.to_string(),
+        activated_at: unix_seconds(),
+    }
+}
+
+fn skill_source_label(source: SkillSourceKind) -> &'static str {
+    match source {
+        SkillSourceKind::Project => "project",
+        SkillSourceKind::User => "user",
+        SkillSourceKind::System => "system",
+        SkillSourceKind::External => "external",
+    }
+}
+
+fn unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 fn tool_error(tool: &str, error: impl std::fmt::Display) -> PureError {
@@ -544,9 +585,12 @@ fn tool_error(tool: &str, error: impl std::fmt::Display) -> PureError {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
+    use crate::session::CoreSession;
+    use crate::turn::{CompileMode, TurnOptions};
 
     fn temp_dir(name: &str) -> PathBuf {
         let stamp = SystemTime::now()
@@ -558,6 +602,42 @@ mod tests {
 
     fn skill_content(name: &str, description: &str) -> String {
         format!("---\nname: {name}\ndescription: {description}\n---\n# {name}\n")
+    }
+
+    fn tool_context(workspace_root: PathBuf) -> ToolContext {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        ToolContext {
+            event_tx,
+            options: TurnOptions::default(),
+            workspace_access: super::super::WorkspaceAccess::WorkspaceOnly,
+            mode: CompileMode::Auto,
+            workspace_root,
+            workspace_instructions: None,
+            instruction_snapshot: None,
+            active_subagent: None,
+            agent_control: crate::AgentControl::default(),
+            lsp_runtime: None,
+            parent_session: Arc::new(CoreSession::new()),
+        }
+    }
+
+    fn write_project_skill(workspace: &Path, name: &str) {
+        let skill_dir = workspace.join("skills").join(name);
+        fs::create_dir_all(skill_dir.join("references")).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            skill_content(name, "Project skill"),
+        )
+        .unwrap();
+        fs::write(skill_dir.join("references/example.md"), "support").unwrap();
+    }
+
+    fn activation_from_output(output: &ToolOutput) -> &SkillActivation {
+        let Some(ToolRuntimeEvent::SkillActivated { activation }) = output.runtime_events.first()
+        else {
+            panic!("expected skill activation")
+        };
+        activation
     }
 
     #[test]
@@ -607,5 +687,86 @@ mod tests {
             .to_string();
 
         assert!(error.contains("read-only system"));
+    }
+
+    #[tokio::test]
+    async fn skill_view_success_emits_skill_activation() {
+        let workspace = temp_dir("view-activation");
+        write_project_skill(&workspace, "local-flow");
+        let tool = SkillViewTool::new(SkillsConfig {
+            project_dir: "skills".to_string(),
+            ..SkillsConfig::default()
+        });
+
+        let output = tool
+            .execute(
+                ToolInput {
+                    arguments: json!({"name": "local-flow"}),
+                    session_id: "turn-1".to_string(),
+                    tool_id: "call-1".to_string(),
+                },
+                tool_context(workspace.clone()),
+            )
+            .await
+            .unwrap();
+        let activation = activation_from_output(&output);
+
+        assert_eq!(activation.name, "local-flow");
+        assert_eq!(activation.source, "project");
+        assert_eq!(activation.turn_id, "turn-1");
+        assert_eq!(activation.tool_call_id, "call-1");
+        assert!(activation.path.ends_with("local-flow"));
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[tokio::test]
+    async fn skill_view_support_file_success_activates_parent_skill() {
+        let workspace = temp_dir("view-support-activation");
+        write_project_skill(&workspace, "local-flow");
+        let tool = SkillViewTool::new(SkillsConfig {
+            project_dir: "skills".to_string(),
+            ..SkillsConfig::default()
+        });
+
+        let output = tool
+            .execute(
+                ToolInput {
+                    arguments: json!({"name": "local-flow", "filePath": "references/example.md"}),
+                    session_id: "turn-1".to_string(),
+                    tool_id: "call-1".to_string(),
+                },
+                tool_context(workspace.clone()),
+            )
+            .await
+            .unwrap();
+        let activation = activation_from_output(&output);
+
+        assert_eq!(activation.name, "local-flow");
+        assert_eq!(activation.source, "project");
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[tokio::test]
+    async fn skill_view_failure_does_not_emit_activation() {
+        let workspace = temp_dir("view-failure");
+        let tool = SkillViewTool::new(SkillsConfig {
+            project_dir: "skills".to_string(),
+            ..SkillsConfig::default()
+        });
+
+        let error = tool
+            .execute(
+                ToolInput {
+                    arguments: json!({"name": "missing"}),
+                    session_id: "turn-1".to_string(),
+                    tool_id: "call-1".to_string(),
+                },
+                tool_context(workspace.clone()),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("skill not found"));
+        let _ = fs::remove_dir_all(workspace);
     }
 }

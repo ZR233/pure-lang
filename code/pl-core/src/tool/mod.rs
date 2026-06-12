@@ -16,7 +16,7 @@ use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 
 use pl_model::ToolSchema;
-use pl_protocol::{AgentEventSender, PureError};
+use pl_protocol::{AgentEventSender, PureError, SkillActivation};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
@@ -281,6 +281,14 @@ pub struct ToolOutput {
     pub output_file: PathBuf,
     pub exit_code: Option<i32>,
     pub timed_out: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_events: Vec<ToolRuntimeEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum ToolRuntimeEvent {
+    SkillActivated { activation: SkillActivation },
 }
 
 #[cfg(test)]
@@ -323,6 +331,7 @@ mod tests {
                     output_file: PathBuf::new(),
                     exit_code: None,
                     timed_out: false,
+                    runtime_events: Vec::new(),
                 })
             })
         }

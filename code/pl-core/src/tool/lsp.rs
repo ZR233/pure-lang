@@ -66,6 +66,7 @@ impl Tool for LspQueryTool {
                 output_file: PathBuf::new(),
                 exit_code: Some(0),
                 timed_out: false,
+                runtime_events: Vec::new(),
             })
         })
     }
@@ -235,6 +236,7 @@ impl Tool for LspLanguageTool {
                 output_file: PathBuf::new(),
                 exit_code: Some(0),
                 timed_out: false,
+                runtime_events: Vec::new(),
             })
         })
     }

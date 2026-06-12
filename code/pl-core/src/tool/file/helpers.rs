@@ -31,6 +31,7 @@ pub(super) fn text_output(description: String) -> ToolOutput {
         output_file: PathBuf::new(),
         exit_code: Some(0),
         timed_out: false,
+        runtime_events: Vec::new(),
     }
 }
 

@@ -102,6 +102,7 @@ function statusTextForEvent(
     );
   }
   if ("agentRuntimeUpdated" in event) return t("status.running");
+  if ("skillActivated" in event) return t("status.running");
   if ("error" in event) return t("status.error", { message: event.error.message });
   return t("status.running");
 }
@@ -459,16 +460,13 @@ export function useStudioApp() {
       return;
     }
     if (resolution.type === "planConfirmation") {
-      if (resolution.decision === "implementSameContext") {
-        dispatch({ type: "optimisticSessionMode", sessionId, mode: "auto" });
+      if (resolution.decision === "implementFreshContext") {
         dispatch({
-          type: "promptSubmitted",
+          type: "freshContextRunSubmitted",
+          originSessionId: sessionId,
           status: t("status.running"),
           startedAt: Date.now(),
-          prompt: "Implement the plan.",
         });
-      } else if (resolution.decision === "implementFreshContext") {
-        dispatch({ type: "setBusy", value: true });
       }
     }
     try {
@@ -507,17 +505,6 @@ export function useStudioApp() {
         status: t("status.runFailed", { error: errorText(error) }),
       });
     }
-  }
-
-  async function onImplementPlan(interactionId: string) {
-    const sessionId = state.selectedSessionId;
-    if (!interactionId || !sessionId || state.isBusy) {
-      return;
-    }
-    await onResolveInteraction(interactionId, {
-      type: "planConfirmation",
-      decision: "implementSameContext",
-    });
   }
 
   async function onImplementPlanFresh(interactionId: string) {
@@ -776,7 +763,6 @@ export function useStudioApp() {
     onSendPrompt,
     onSendPromptContent,
     onResolveInteraction,
-    onImplementPlan,
     onImplementPlanFresh,
     onDiscussPlan,
     onDismissPlanAction: (interactionId: string) =>

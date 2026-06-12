@@ -78,7 +78,6 @@ type ConversationPanelProps = {
   onSavePermissionMode: (mode: PermissionMode) => void;
   onSetPrompt: (value: string) => void;
   onSetSessionMode: (mode: CompileMode) => void;
-  onImplementPlan: (interactionId: string) => void;
   onImplementPlanFresh: (interactionId: string) => void;
   onDiscussPlan: (planId: string, content: string) => void;
   onSendPrompt: () => void;
@@ -767,7 +766,6 @@ function AskUserComposer({
 function PlanConfirmComposer({
   interactionId,
   stopping,
-  onImplementPlan,
   onImplementPlanFresh,
   onDiscussPlan,
   onCancel,
@@ -775,21 +773,20 @@ function PlanConfirmComposer({
 }: {
   interactionId: string;
   stopping: boolean;
-  onImplementPlan: (interactionId: string) => void;
   onImplementPlanFresh: (interactionId: string) => void;
   onDiscussPlan: (interactionId: string, content: string) => void;
   onCancel: (interactionId: string) => void;
   t: TFunction;
 }) {
   const [message, setMessage] = useState("");
-  const [mode, setMode] = useState<"same" | "fresh" | "discuss">("same");
+  const [mode, setMode] = useState<"fresh" | "discuss">("fresh");
   const composerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const discussing = mode === "discuss";
 
   useEffect(() => {
     setMessage("");
-    setMode("same");
+    setMode("fresh");
   }, [interactionId]);
 
   useEffect(() => {
@@ -817,7 +814,6 @@ function PlanConfirmComposer({
       onImplementPlanFresh(interactionId);
       return;
     }
-    onImplementPlan(interactionId);
   }
 
   function submitOnShortcut(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -847,15 +843,10 @@ function PlanConfirmComposer({
 
     if (event.key === "1") {
       event.preventDefault();
-      setMode("same");
-      return;
-    }
-    if (event.key === "2") {
-      event.preventDefault();
       setMode("fresh");
       return;
     }
-    if (event.key === "3") {
+    if (event.key === "2") {
       event.preventDefault();
       setMode("discuss");
       return;
@@ -877,19 +868,6 @@ function PlanConfirmComposer({
       <div className="flex flex-col gap-1 px-4 py-2" role="radiogroup" aria-label={t("planConfirm.promptTitle")}>
         <Button
           type="button"
-          variant={mode === "same" ? "default" : "outline"}
-          size="sm"
-          role="radio"
-          aria-checked={mode === "same"}
-          onClick={() => setMode("same")}
-          disabled={stopping}
-          className="w-full text-left justify-start"
-        >
-          <span className="text-xs text-muted-foreground w-4 shrink-0">1.</span>
-          <span className="text-sm">{t("planConfirm.implementChoice")}</span>
-        </Button>
-        <Button
-          type="button"
           variant={mode === "fresh" ? "default" : "outline"}
           size="sm"
           role="radio"
@@ -898,7 +876,7 @@ function PlanConfirmComposer({
           disabled={stopping}
           className="w-full text-left justify-start"
         >
-          <span className="text-xs text-muted-foreground w-4 shrink-0">2.</span>
+          <span className="text-xs text-muted-foreground w-4 shrink-0">1.</span>
           <span className="text-sm">{t("planConfirm.implementFreshChoice")}</span>
         </Button>
         <Button
@@ -911,7 +889,7 @@ function PlanConfirmComposer({
           disabled={stopping}
           className="w-full text-left justify-start"
         >
-          <span className="text-xs text-muted-foreground w-4 shrink-0">3.</span>
+          <span className="text-xs text-muted-foreground w-4 shrink-0">2.</span>
           <span className="text-sm">{t("planConfirm.adjustChoice")}</span>
         </Button>
       </div>
@@ -1052,7 +1030,6 @@ export function ConversationPanel({
   onSavePermissionMode,
   onSetPrompt,
   onSetSessionMode,
-  onImplementPlan,
   onImplementPlanFresh,
   onSendPrompt,
   onDiscussPlan,
@@ -1135,7 +1112,6 @@ export function ConversationPanel({
           <PlanConfirmComposer
             interactionId={activeInteraction.interactionId}
             stopping={stopping}
-            onImplementPlan={onImplementPlan}
             onImplementPlanFresh={onImplementPlanFresh}
             onDiscussPlan={onDiscussPlan}
             onCancel={onDismissPlanAction}
