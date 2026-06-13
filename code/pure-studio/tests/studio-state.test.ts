@@ -2157,11 +2157,10 @@ function openAiTemplateUsesCodexModelMetadata() {
   const openai = template("openai");
   const gpt55 = openai.defaultModels.find((model) => model.slug === "gpt-5.5");
   const gpt54 = openai.defaultModels.find((model) => model.slug === "gpt-5.4");
-  const gpt52 = openai.defaultModels.find((model) => model.slug === "gpt-5.2");
 
   assertDeepEqual(
     openai.defaultModels.map((model) => model.slug),
-    ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"],
+    ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
   );
   assertEqual(gpt55?.contextWindow, 272_000);
   assertEqual(gpt55?.maxContextWindow, 272_000);
@@ -2169,8 +2168,6 @@ function openAiTemplateUsesCodexModelMetadata() {
   assertEqual(gpt55?.currency ?? null, null);
   assertDeepEqual(gpt55?.reasoningEfforts, ["medium", "low", "high", "xhigh"]);
   assertEqual(gpt54?.maxContextWindow, 1_000_000);
-  assertEqual(gpt52?.truncationMode, "bytes");
-  assertEqual(gpt52?.maxOutputTokens, null);
 }
 
 function providerDraftTemplateSwitchSupportsZhipu() {
@@ -2187,10 +2184,10 @@ function providerDraftTemplateSwitchSupportsZhipu() {
   assertEqual(switched.templateKind, "zhipu");
   assertEqual(switched.baseUrl, "https://open.bigmodel.cn/api/paas/v4");
   assertEqual(switched.providerKind, "zhipu");
-  assertEqual(switched.defaultModel, "glm-5.1");
+  assertEqual(switched.defaultModel, "glm-5.2");
   assertDeepEqual(
     switched.defaultModels.map((model) => model.slug),
-    ["glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.7-flashx", "glm-4.7-flash"],
+    ["glm-5.2", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.7-flashx", "glm-4.7-flash"],
   );
 }
 
@@ -2209,7 +2206,7 @@ function providerDraftTemplateSwitchSupportsZhipuCodingPlan() {
   assertEqual(switched.templateKind, "zhipu-coding-plan");
   assertEqual(switched.baseUrl, "https://open.bigmodel.cn/api/coding/paas/v4");
   assertEqual(switched.providerKind, "zhipu");
-  assertEqual(switched.defaultModel, "glm-5.1");
+  assertEqual(switched.defaultModel, "glm-5.2");
   assertDeepEqual(
     switched.defaultModels.map((model) => model.slug),
     zhipu.defaultModels.map((model) => model.slug),
@@ -2228,7 +2225,7 @@ function zhipuProviderDraftUsesUniqueKey() {
   assertEqual(nextId, "zhipu-3");
   assertEqual(draft.id, "zhipu-3");
   assertEqual(draft.templateKind, "zhipu");
-  assertEqual(draft.defaultModel, "glm-5.1");
+  assertEqual(draft.defaultModel, "glm-5.2");
 }
 
 function zhipuCodingPlanProviderDraftUsesUniqueKey() {
@@ -2243,7 +2240,7 @@ function zhipuCodingPlanProviderDraftUsesUniqueKey() {
   assertEqual(nextId, "zhipu-coding-plan-3");
   assertEqual(draft.id, "zhipu-coding-plan-3");
   assertEqual(draft.templateKind, "zhipu-coding-plan");
-  assertEqual(draft.defaultModel, "glm-5.1");
+  assertEqual(draft.defaultModel, "glm-5.2");
 }
 
 function editingProviderDraftDoesNotMutateProviderList() {
