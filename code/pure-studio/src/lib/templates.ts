@@ -83,10 +83,10 @@ function openAiModel(
 
 const zhipuDefaultModels = [
   zhipuTextModel(
-    "glm-5.1",
-    "GLM-5.1",
+    "glm-5.2",
+    "GLM-5.2",
     "Zhipu latest flagship model with stronger coding and long-horizon agent work.",
-    200_000,
+    1_000_000,
     128_000,
   ),
   zhipuTextModel(
@@ -201,29 +201,13 @@ export const previewTemplates: ProviderTemplateRecord[] = [
         272_000,
         "tokens",
       ),
-      openAiModel(
-        "gpt-5.3-codex",
-        "gpt-5.3-codex",
-        "Coding-optimized model.",
-        272_000,
-        272_000,
-        "tokens",
-      ),
-      openAiModel(
-        "gpt-5.2",
-        "gpt-5.2",
-        "Optimized for professional work and long-running agents.",
-        272_000,
-        272_000,
-        "bytes",
-      ),
     ],
   },
   {
     id: "zhipu",
     name: "Zhipu",
     baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-    defaultModel: "glm-5.1",
+    defaultModel: "glm-5.2",
     providerKind: "zhipu",
     defaultModels: zhipuDefaultModels,
   },
@@ -231,7 +215,7 @@ export const previewTemplates: ProviderTemplateRecord[] = [
     id: "zhipu-coding-plan",
     name: "Zhipu Coding Plan",
     baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
-    defaultModel: "glm-5.1",
+    defaultModel: "glm-5.2",
     providerKind: "zhipu",
     defaultModels: zhipuDefaultModels,
   },

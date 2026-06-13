@@ -5,15 +5,9 @@ use crate::capabilities::{
 use crate::model_info::{ModelInfo, ModelRequestProfile, TruncationMode, TruncationPolicy};
 
 const DEEPSEEK_DEFAULT_MODEL_SLUGS: &[&str] = &["deepseek-v4-flash", "deepseek-v4-pro"];
-const OPENAI_DEFAULT_MODEL_SLUGS: &[&str] = &[
-    "gpt-5.5",
-    "gpt-5.4",
-    "gpt-5.4-mini",
-    "gpt-5.3-codex",
-    "gpt-5.2",
-];
+const OPENAI_DEFAULT_MODEL_SLUGS: &[&str] = &["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"];
 const ZHIPU_GLM_DEFAULT_MODEL_SLUGS: &[&str] = &[
-    "glm-5.1",
+    "glm-5.2",
     "glm-5",
     "glm-5-turbo",
     "glm-4.7",
@@ -82,27 +76,11 @@ pub fn default_models() -> Vec<ModelInfo> {
             272_000,
             TruncationMode::Tokens,
         ),
-        openai_model(
-            "gpt-5.3-codex",
-            "gpt-5.3-codex",
-            "Coding-optimized model.",
-            272_000,
-            272_000,
-            TruncationMode::Tokens,
-        ),
-        openai_model(
-            "gpt-5.2",
-            "gpt-5.2",
-            "Optimized for professional work and long-running agents.",
-            272_000,
-            272_000,
-            TruncationMode::Bytes,
-        ),
         zhipu_text_model(
-            "glm-5.1",
-            "GLM-5.1",
+            "glm-5.2",
+            "GLM-5.2",
             "Zhipu latest flagship model with stronger coding and long-horizon agent work.",
-            200_000,
+            1_000_000,
             128_000,
         ),
         zhipu_text_model(
@@ -464,13 +442,7 @@ mod tests {
                 .iter()
                 .map(|model| model.slug.as_str())
                 .collect::<Vec<_>>(),
-            vec![
-                "gpt-5.5",
-                "gpt-5.4",
-                "gpt-5.4-mini",
-                "gpt-5.3-codex",
-                "gpt-5.2"
-            ]
+            vec!["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]
         );
 
         let gpt_55 = openai_models[0];
@@ -491,9 +463,9 @@ mod tests {
         assert_eq!(gpt_54.context_window, Some(272_000));
         assert_eq!(gpt_54.max_context_window, Some(1_000_000));
 
-        let gpt_52 = openai_models[4];
-        assert_eq!(gpt_52.truncation_policy.mode, TruncationMode::Bytes);
         assert!(!models.iter().any(|model| model.slug == "gpt-5.4-nano"));
+        assert!(!models.iter().any(|model| model.slug == "gpt-5.3-codex"));
+        assert!(!models.iter().any(|model| model.slug == "gpt-5.2"));
     }
 
     #[test]
@@ -548,7 +520,7 @@ mod tests {
         let models = default_models();
 
         for slug in [
-            "glm-5.1",
+            "glm-5.2",
             "glm-5",
             "glm-5-turbo",
             "glm-4.7",
@@ -581,10 +553,10 @@ mod tests {
             );
         }
 
-        let glm_51 = models.iter().find(|model| model.slug == "glm-5.1").unwrap();
-        assert_eq!(glm_51.display_name, "GLM-5.1");
-        assert_eq!(glm_51.context_window, Some(200_000));
-        assert_eq!(glm_51.max_output_tokens, Some(128_000));
+        let glm_52 = models.iter().find(|model| model.slug == "glm-5.2").unwrap();
+        assert_eq!(glm_52.display_name, "GLM-5.2");
+        assert_eq!(glm_52.context_window, Some(1_000_000));
+        assert_eq!(glm_52.max_output_tokens, Some(128_000));
 
         let glm_5v = models
             .iter()
@@ -606,7 +578,7 @@ mod tests {
         assert_eq!(
             zhipu_default_model_slugs(),
             [
-                "glm-5.1",
+                "glm-5.2",
                 "glm-5",
                 "glm-5-turbo",
                 "glm-4.7",

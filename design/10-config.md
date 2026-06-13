@@ -182,7 +182,7 @@ truncation_policy = { mode = "tokens", limit = 10000 }
 - `deep_seek`
 - `zhipu`
 
-Zhipu Coding Plan 是 provider 模板，不是新的 `provider_kind`。它持久化为 `provider_kind = "zhipu"`，默认 `base_url = "https://open.bigmodel.cn/api/coding/paas/v4"`，默认模型为 `glm-5.1`，并复用 Zhipu Chat Completions runtime。
+Zhipu Coding Plan 是 provider 模板，不是新的 `provider_kind`。它持久化为 `provider_kind = "zhipu"`，默认 `base_url = "https://open.bigmodel.cn/api/coding/paas/v4"`，默认模型为 `glm-5.2`，并复用 Zhipu Chat Completions runtime。
 
 Anthropic 只在 `pl-model` 的 protocol 层保留占位，未实现 provider runtime 前不能写入配置。
 
@@ -216,7 +216,7 @@ Anthropic 只在 `pl-model` 的 protocol 层保留占位，未实现 provider ru
 
 Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-flash` 为缓存命中输入 0.02 元、缓存未命中输入 1 元、输出 2 元；`deepseek-v4-pro` 为缓存命中输入 0.025 元、缓存未命中输入 3 元、输出 6 元。`input_price_per_mtok` 表示缓存未命中输入价，`cache_read_price_per_mtok` 表示缓存命中输入价。
 
-Bundled OpenAI/GPT 模型参数以本地 Codex 仓库 `codex-rs/models-manager/models.json` 的修改为准，不按公开 API 文档臆造价格、最大输出或上下文窗口。当前 OpenAI 模板顺序为 `gpt-5.5`、`gpt-5.4`、`gpt-5.4-mini`、`gpt-5.3-codex`、`gpt-5.2`。Pure 当前 `ModelInfo` 不持久化 Codex 的 `default_reasoning_level` 字段，因此 OpenAI 模型的 `reasoning_efforts` 首项表示 Codex 默认 reasoning level，后续项表示其他支持档位。
+Bundled OpenAI/GPT 模型参数以本地 Codex 仓库 `codex-rs/models-manager/models.json` 的修改为准，不按公开 API 文档臆造价格、最大输出或上下文窗口。当前 OpenAI 模板顺序为 `gpt-5.5`、`gpt-5.4`、`gpt-5.4-mini`。Pure 当前 `ModelInfo` 不持久化 Codex 的 `default_reasoning_level` 字段，因此 OpenAI 模型的 `reasoning_efforts` 首项表示 Codex 默认 reasoning level，后续项表示其他支持档位。
 
 配置里的模型会覆盖或补充 bundled model。角色引用的 model 必须存在于对应 provider 的 `models` 中。
 

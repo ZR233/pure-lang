@@ -79,7 +79,7 @@ impl ProviderInfo {
             provider_kind: ProviderKind::Zhipu,
             name: "Zhipu".into(),
             base_url: base_url.unwrap_or_else(|| "https://open.bigmodel.cn/api/paas/v4".into()),
-            default_model: "glm-5.1".into(),
+            default_model: "glm-5.2".into(),
             bearer_token: None,
             http_headers: None,
             tool_wire_policy: ToolWirePolicy::FunctionFallback,
@@ -92,7 +92,7 @@ impl ProviderInfo {
             provider_kind: ProviderKind::Zhipu,
             name: "Zhipu Coding Plan".into(),
             base_url: base_url.unwrap_or_else(|| ZHIPU_CODING_PLAN_BASE_URL.into()),
-            default_model: "glm-5.1".into(),
+            default_model: "glm-5.2".into(),
             bearer_token: None,
             http_headers: None,
             tool_wire_policy: ToolWirePolicy::FunctionFallback,
@@ -138,7 +138,7 @@ mod tests {
 
         assert_eq!(info.provider_kind, ProviderKind::Zhipu);
         assert_eq!(info.base_url, "https://open.bigmodel.cn/api/paas/v4");
-        assert_eq!(info.default_model, "glm-5.1");
+        assert_eq!(info.default_model, "glm-5.2");
     }
 
     #[test]
@@ -148,7 +148,7 @@ mod tests {
         assert_eq!(info.provider_kind, ProviderKind::Zhipu);
         assert_eq!(info.name, "Zhipu Coding Plan");
         assert_eq!(info.base_url, ZHIPU_CODING_PLAN_BASE_URL);
-        assert_eq!(info.default_model, "glm-5.1");
+        assert_eq!(info.default_model, "glm-5.2");
         assert_eq!(info.tool_wire_policy, ToolWirePolicy::FunctionFallback);
     }
 }

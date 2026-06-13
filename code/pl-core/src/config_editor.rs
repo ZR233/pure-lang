@@ -427,7 +427,7 @@ mod tests {
             name: "Zhipu".to_string(),
             base_url: Some("https://open.bigmodel.cn/api/paas/v4".to_string()),
             bearer_token: None,
-            default_model: "glm-5.1".to_string(),
+            default_model: "glm-5.2".to_string(),
             custom_models: Vec::new(),
         }
     }
@@ -439,7 +439,7 @@ mod tests {
             name: "Zhipu Coding Plan".to_string(),
             base_url: Some(ZHIPU_CODING_PLAN_BASE_URL.to_string()),
             bearer_token: None,
-            default_model: "glm-5.1".to_string(),
+            default_model: "glm-5.2".to_string(),
             custom_models: Vec::new(),
         }
     }
@@ -470,14 +470,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             slugs,
-            vec![
-                "gpt-5.5",
-                "gpt-5.4",
-                "gpt-5.4-mini",
-                "gpt-5.3-codex",
-                "gpt-5.2",
-                "gpt-custom"
-            ]
+            vec!["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-custom"]
         );
     }
 
@@ -558,7 +551,7 @@ mod tests {
             config.providers["zhipu"].base_url,
             "https://open.bigmodel.cn/api/paas/v4"
         );
-        assert_eq!(config.providers["zhipu"].default_model, "glm-5.1");
+        assert_eq!(config.providers["zhipu"].default_model, "glm-5.2");
         assert_eq!(config.providers["zhipu"].provider_kind, ProviderKind::Zhipu);
         assert!(
             config.providers["zhipu"]
@@ -599,7 +592,7 @@ mod tests {
 
         assert_eq!(coding_plan.provider_kind, ProviderKind::Zhipu);
         assert_eq!(coding_plan.base_url, ZHIPU_CODING_PLAN_BASE_URL);
-        assert_eq!(coding_plan.default_model, "glm-5.1");
+        assert_eq!(coding_plan.default_model, "glm-5.2");
         assert_eq!(coding_plan_slugs, zhipu_slugs.to_vec());
     }
 

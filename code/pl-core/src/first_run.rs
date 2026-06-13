@@ -422,7 +422,7 @@ mod tests {
     }
 
     #[test]
-    fn zhipu_draft_uses_glm_51_and_provider_endpoint() {
+    fn zhipu_draft_uses_glm_52_and_provider_endpoint() {
         let mut draft = FirstRunConfigDraft {
             default_provider: "zhipu".to_string(),
             providers: vec![FirstRunProviderDraft::from_template(
@@ -435,7 +435,7 @@ mod tests {
         let config = draft.to_config().unwrap();
 
         assert_eq!(config.role_config(ModelRole::Planner).provider, "zhipu");
-        assert_eq!(config.role_config(ModelRole::Planner).model, "glm-5.1");
+        assert_eq!(config.role_config(ModelRole::Planner).model, "glm-5.2");
         assert_eq!(
             config.providers["zhipu"].base_url,
             "https://open.bigmodel.cn/api/paas/v4"
@@ -471,7 +471,7 @@ mod tests {
             config.role_config(ModelRole::Planner).provider,
             "zhipu-coding-plan"
         );
-        assert_eq!(config.role_config(ModelRole::Planner).model, "glm-5.1");
+        assert_eq!(config.role_config(ModelRole::Planner).model, "glm-5.2");
         assert_eq!(
             config.providers["zhipu-coding-plan"].base_url,
             "https://open.bigmodel.cn/api/coding/paas/v4"
