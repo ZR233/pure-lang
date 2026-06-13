@@ -1,7 +1,10 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use pl_protocol::{Message, ToolCallKind, TraceEvent};
+use crate::{ModelCapabilities, ModelModality};
+use pl_protocol::{
+    ContentPart, ImageSource, Message, MessageContent, PureError, ToolCallKind, TraceEvent,
+};
 
 const APPLY_PATCH_FUNCTION_FALLBACK_DESCRIPTION: &str = "Complete Codex-style apply_patch text beginning with *** Begin Patch and ending with *** End Patch. Each file operation must use one of these hunk headers: *** Add File: <path>, *** Delete File: <path>, or *** Update File: <path>. Do not use ---/+++ unified diff, *** File: metadata, or natural-language edit instructions such as Insert after. If a previous patch failed, read the target file again and retry with a smaller patch based on current content; do not repeat the same failed patch. Minimal update example:\n*** Begin Patch\n*** Update File: notes.txt\n@@\n-old line\n+new line\n*** End Patch";
 
@@ -199,6 +202,10 @@ impl ToolSchema {
         }
     }
 
+    pub fn is_custom(&self) -> bool {
+        matches!(self, Self::Custom { .. })
+    }
+
     pub fn provider_compatible(self, supports_custom_tools: bool) -> Self {
         if supports_custom_tools {
             return self;
@@ -257,6 +264,102 @@ impl CompletionRequest {
             .collect();
         self
     }
+
+    pub fn validate_against(&self, capabilities: &ModelCapabilities) -> pl_protocol::Result<()> {
+        let requirements = RequestRequirements::from_messages(&self.messages)?;
+        if requirements.text && !capabilities.supports_input_modality(ModelModality::Text) {
+            return Err(PureError::ConfigError(format!(
+                "model {} does not support text input",
+                self.model
+            )));
+        }
+        if requirements.image && !capabilities.supports_input_modality(ModelModality::Image) {
+            return Err(PureError::ConfigError(format!(
+                "model {} does not support image input",
+                self.model
+            )));
+        }
+        if self.temperature.is_some() && !capabilities.supports_temperature() {
+            return Err(PureError::ConfigError(format!(
+                "model {} does not support temperature",
+                self.model
+            )));
+        }
+        if self
+            .reasoning
+            .as_ref()
+            .is_some_and(ReasoningConfig::is_enabled)
+            && !capabilities.supports_reasoning()
+        {
+            return Err(PureError::ConfigError(format!(
+                "model {} does not support reasoning",
+                self.model
+            )));
+        }
+        if !self.tools.is_empty() && !capabilities.supports_function_calling() {
+            return Err(PureError::ConfigError(format!(
+                "model {} does not support function calling",
+                self.model
+            )));
+        }
+        if self.parallel_tool_calls && !capabilities.supports_parallel_tool_calls() {
+            return Err(PureError::ConfigError(format!(
+                "model {} does not support parallel tool calls",
+                self.model
+            )));
+        }
+        if self.tools.iter().any(ToolSchema::is_custom)
+            && (!capabilities.supports_custom_tools() || !capabilities.supports_freeform_tools())
+        {
+            return Err(PureError::ConfigError(format!(
+                "model {} does not support custom/freeform tools",
+                self.model
+            )));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+struct RequestRequirements {
+    text: bool,
+    image: bool,
+}
+
+impl RequestRequirements {
+    fn from_messages(messages: &[Message]) -> pl_protocol::Result<Self> {
+        let mut requirements = Self::default();
+        for message in messages {
+            match &message.content {
+                MessageContent::Text(text) => {
+                    if !text.is_empty() {
+                        requirements.text = true;
+                    }
+                }
+                MessageContent::MultiPart(parts) => {
+                    for part in parts {
+                        match part {
+                            ContentPart::Text { text } => {
+                                if !text.is_empty() {
+                                    requirements.text = true;
+                                }
+                            }
+                            ContentPart::Image { source, .. } => {
+                                requirements.image = true;
+                                if matches!(source, ImageSource::Attachment { .. }) {
+                                    return Err(PureError::ConfigError(
+                                        "image attachments must be materialized before model request"
+                                            .to_string(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(requirements)
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -282,10 +385,127 @@ pub struct ReasoningConfig {
     pub summary: Option<ReasoningSummary>,
 }
 
+impl ReasoningConfig {
+    pub fn is_enabled(&self) -> bool {
+        !matches!(
+            self.effort.as_deref(),
+            None | Some("") | Some("none") | Some("disabled")
+        ) || !matches!(self.summary, None | Some(ReasoningSummary::Disabled))
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ReasoningSummary {
     Auto,
     Enabled,
     Disabled,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use pl_protocol::{ContentPart, ImageSource, Message, MessageContent, MessageRole};
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::{ModelCapabilities, ModelModality, ToolCapabilities};
+
+    fn base_request(content: MessageContent) -> CompletionRequest {
+        CompletionRequest {
+            model: "model".to_string(),
+            instructions: None,
+            messages: vec![Message {
+                role: MessageRole::User,
+                content,
+                reasoning_content: None,
+                metadata: HashMap::new(),
+            }],
+            tools: Vec::new(),
+            tool_choice: "auto".to_string(),
+            parallel_tool_calls: false,
+            temperature: None,
+            max_tokens: None,
+            reasoning: None,
+            stream: true,
+            timeline: None,
+        }
+    }
+
+    fn text_capabilities() -> ModelCapabilities {
+        ModelCapabilities {
+            streaming: true,
+            temperature: false,
+            reasoning: false,
+            web_search: false,
+            input: vec![ModelModality::Text],
+            output: vec![ModelModality::Text],
+            tools: ToolCapabilities::default(),
+            interleaved: None,
+        }
+    }
+
+    #[test]
+    fn validation_rejects_image_when_model_is_text_only() {
+        let request = base_request(MessageContent::MultiPart(vec![ContentPart::Image {
+            source: ImageSource::InlineBase64 {
+                data: "aGVsbG8=".to_string(),
+            },
+            media_type: "image/png".to_string(),
+            filename: None,
+        }]));
+
+        let error = request.validate_against(&text_capabilities()).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "configuration error: model model does not support image input"
+        );
+    }
+
+    #[test]
+    fn validation_rejects_unmaterialized_attachment() {
+        let request = base_request(MessageContent::MultiPart(vec![ContentPart::Image {
+            source: ImageSource::Attachment {
+                attachment_id: "attachment-1".to_string(),
+            },
+            media_type: "image/png".to_string(),
+            filename: None,
+        }]));
+
+        let error = request.validate_against(&text_capabilities()).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "configuration error: image attachments must be materialized before model request"
+        );
+    }
+
+    #[test]
+    fn validation_allows_disabled_reasoning_for_text_model() {
+        let mut request = base_request(MessageContent::Text("hello".to_string()));
+        request.reasoning = Some(ReasoningConfig {
+            effort: Some("none".to_string()),
+            summary: Some(ReasoningSummary::Disabled),
+        });
+
+        request.validate_against(&text_capabilities()).unwrap();
+    }
+
+    #[test]
+    fn validation_rejects_enabled_reasoning_for_text_model() {
+        let mut request = base_request(MessageContent::Text("hello".to_string()));
+        request.reasoning = Some(ReasoningConfig {
+            effort: Some("high".to_string()),
+            summary: Some(ReasoningSummary::Enabled),
+        });
+
+        let error = request.validate_against(&text_capabilities()).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "configuration error: model model does not support reasoning"
+        );
+    }
 }

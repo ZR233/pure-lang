@@ -382,6 +382,7 @@ function blankTimelineItem(event: TimelineItemDeltaEvent): TimelineItem {
     updatedAt: event.updatedAt,
     textChannel: event.delta.type === "text" ? event.delta.textChannel : null,
     content: "",
+    attachments: [],
     thinkingChunks: [],
     tool: null,
     agent: null,
@@ -394,6 +395,7 @@ function normalizeTimelineItem(item: TimelineItem): TimelineItem {
   return {
     ...item,
     content: item.content ?? "",
+    attachments: (item.attachments ?? []).map((attachment) => ({ ...attachment })),
     thinkingChunks: (item.thinkingChunks ?? []).map((chunk) => ({ ...chunk })),
     tool: item.tool ? { ...item.tool } : null,
     agent: item.agent ? { ...item.agent } : null,

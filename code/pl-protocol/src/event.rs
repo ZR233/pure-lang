@@ -306,6 +306,22 @@ pub struct TimelineInferenceItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct TimelineAttachment {
+    pub id: String,
+    pub media_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+    pub byte_size: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct TimelineItem {
     pub turn_id: String,
     pub item_id: String,
@@ -318,6 +334,8 @@ pub struct TimelineItem {
     pub text_channel: Option<TimelineTextChannel>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub content: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<TimelineAttachment>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub thinking_chunks: Vec<TimelineThinkingChunk>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -350,6 +368,7 @@ impl TimelineItem {
             updated_at: timestamp,
             text_channel: Some(text_channel),
             content: content.into(),
+            attachments: Vec::new(),
             thinking_chunks: Vec::new(),
             tool: None,
             agent: None,
@@ -1116,6 +1135,7 @@ mod tests {
             updated_at: 1_779_688_800,
             text_channel: None,
             content: "# Plan".to_string(),
+            attachments: Vec::new(),
             thinking_chunks: Vec::new(),
             tool: None,
             agent: None,

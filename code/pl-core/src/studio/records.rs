@@ -141,6 +141,31 @@ pub struct TimelineEventRecord {
     pub payload_json: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachmentRecord {
+    pub id: String,
+    pub session_id: String,
+    pub message_id: Option<String>,
+    pub media_type: String,
+    pub filename: Option<String>,
+    pub storage_path: String,
+    pub byte_size: u64,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MaterializedAttachment {
+    pub attachment_id: String,
+    pub media_type: String,
+    pub filename: Option<String>,
+    pub data: String,
+    pub byte_size: u64,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct StudioEventRecord {
     pub id: String,

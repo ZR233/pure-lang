@@ -494,6 +494,31 @@ fn old_schema_toml_is_rejected_without_migration() {
 }
 
 #[test]
+fn legacy_model_capability_array_is_rejected() {
+    let toml = r#"
+schema_version = 3
+
+[providers.deepseek]
+provider_kind = "deep_seek"
+name = "DeepSeek"
+base_url = "https://api.deepseek.com"
+default_model = "deepseek-v4-flash"
+
+[[providers.deepseek.models]]
+slug = "deepseek-v4-flash"
+display_name = "DeepSeek V4 Flash"
+reasoning_efforts = ["high"]
+capabilities = ["streaming"]
+input_modalities = ["text"]
+truncation_policy = { mode = "tokens", limit = 10000 }
+"#;
+
+    let error = PureConfig::from_toml(toml).unwrap_err().to_string();
+
+    assert!(error.contains("invalid type"));
+}
+
+#[test]
 fn invalid_existing_config_is_backed_up_and_replaced_with_default() {
     let home = temp_home("old-schema");
     let store = ConfigStore::new(ConfigPaths::from_home(&home));

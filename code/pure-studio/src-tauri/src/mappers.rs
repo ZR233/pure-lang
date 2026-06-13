@@ -3,22 +3,24 @@ use std::collections::{BTreeMap, HashMap};
 use pl_core::{
     BuiltinMcpServerState, ConfigStore, LspServerSnapshot, McpAvailabilityKind,
     McpAvailabilitySnapshot, McpServerConfig, McpServerStatusKind, McpServerTransport,
-    ModelCapabilityConfig, ModelConfig, ModelRole, ProjectRecord, ProviderConfig, ProviderEdit,
-    ProviderKind, ProviderModelEdit, ProviderTemplateKind, ProviderUsageData, ProviderUsageRecord,
-    ProviderUsageState, PureConfig, RoleEdit, SessionRecord, SessionRuntimeRecord, SkillCatalog,
-    SkillMetadata, SkillSourceKind, StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord,
-    StudioRuntime, TraceEvent, TraceEventKind, TurnResultStatus, ZhipuQuotaWindow,
-    builtin_mcp_server_ids, effective_mcp_servers, infer_provider_template_kind,
+    ModelCapabilities, ModelConfig, ModelModality, ModelRole, ProjectRecord, ProviderConfig,
+    ProviderEdit, ProviderKind, ProviderModelEdit, ProviderTemplateKind, ProviderUsageData,
+    ProviderUsageRecord, ProviderUsageState, PureConfig, ReasoningInterleavedField, RoleEdit,
+    SessionRecord, SessionRuntimeRecord, SkillCatalog, SkillMetadata, SkillSourceKind,
+    StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord, StudioRuntime, ToolCapabilities,
+    TraceEvent, TraceEventKind, TurnResultStatus, ZhipuQuotaWindow, builtin_mcp_server_ids,
+    effective_mcp_servers, infer_provider_template_kind,
 };
 
 use crate::dto::{
-    AgentDto, AgentEventDto, ConfigDto, DeepSeekBalanceDto, DeepSeekBalanceInfoDto,
+    AgentDto, AgentEventDto, AttachmentDto, ConfigDto, DeepSeekBalanceDto, DeepSeekBalanceInfoDto,
     DiscoveredSkillsDto, InstructionsDto, InstructionsInput, KeyValueDto, LspHealthUpdateDto,
-    LspServerDto, McpHealthUpdateDto, McpServerDto, McpSettingsInput, ModelDto, PlanStateDto,
-    ProjectDto, ProviderDto, ProviderInput, ProviderSettingsInput, ProviderTemplateDto,
-    ProviderUsageDto, ProviderUsagesDto, RoleDto, RoleInput, RuntimeCostAmountDto, RuntimeUsageDto,
-    SessionDto, SessionRuntimeDto, SkillDto, TimelineEventDto, ZhipuCodingPlanUsageDto,
-    ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
+    LspServerDto, McpHealthUpdateDto, McpServerDto, McpSettingsInput, ModelCapabilitiesDto,
+    ModelDto, PlanStateDto, ProjectDto, ProviderDto, ProviderInput, ProviderSettingsInput,
+    ProviderTemplateDto, ProviderUsageDto, ProviderUsagesDto, ReasoningInterleavedDto, RoleDto,
+    RoleInput, RuntimeCostAmountDto, RuntimeUsageDto, SessionDto, SessionRuntimeDto, SkillDto,
+    TimelineEventDto, ToolCapabilitiesDto, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto,
+    ZhipuToolUsageDetailDto,
 };
 use crate::state::{CommandError, CommandResult};
 
@@ -480,33 +482,79 @@ pub fn model_dto(model: &ModelConfig) -> ModelDto {
         output_price_per_mtok: model.output_price_per_mtok,
         cache_read_price_per_mtok: model.cache_read_price_per_mtok,
         reasoning_efforts: model.reasoning_efforts.clone(),
-        capabilities: model
-            .capabilities
-            .iter()
-            .map(capability_name)
-            .map(str::to_string)
-            .collect(),
-        input_modalities: model
-            .input_modalities
-            .iter()
-            .map(|modality| format!("{modality:?}").to_ascii_lowercase())
-            .collect(),
+        capabilities: model_capabilities_dto(&model.capabilities),
         truncation_mode: format!("{:?}", model.truncation_policy.mode).to_ascii_lowercase(),
         truncation_limit: model.truncation_policy.limit,
         base_instructions: model.base_instructions.clone(),
     }
 }
 
-pub fn capability_name(capability: &ModelCapabilityConfig) -> &'static str {
-    match capability {
-        ModelCapabilityConfig::Streaming => "streaming",
-        ModelCapabilityConfig::FunctionCalling => "function_calling",
-        ModelCapabilityConfig::Vision => "vision",
-        ModelCapabilityConfig::ParallelToolCalls => "parallel_tool_calls",
-        ModelCapabilityConfig::Reasoning => "reasoning",
-        ModelCapabilityConfig::WebSearch => "web_search",
-        ModelCapabilityConfig::CustomTools => "custom_tools",
-        ModelCapabilityConfig::FreeformTools => "freeform_tools",
+pub fn model_capabilities_dto(capabilities: &ModelCapabilities) -> ModelCapabilitiesDto {
+    ModelCapabilitiesDto {
+        streaming: capabilities.streaming,
+        temperature: capabilities.temperature,
+        reasoning: capabilities.reasoning,
+        web_search: capabilities.web_search,
+        input: capabilities
+            .input
+            .iter()
+            .map(model_modality_name)
+            .map(str::to_string)
+            .collect(),
+        output: capabilities
+            .output
+            .iter()
+            .map(model_modality_name)
+            .map(str::to_string)
+            .collect(),
+        tools: tool_capabilities_dto(&capabilities.tools),
+        interleaved: capabilities
+            .interleaved
+            .as_ref()
+            .map(|interleaved| ReasoningInterleavedDto {
+                field: reasoning_interleaved_field_name(interleaved.field).to_string(),
+            }),
+    }
+}
+
+fn tool_capabilities_dto(capabilities: &ToolCapabilities) -> ToolCapabilitiesDto {
+    ToolCapabilitiesDto {
+        function_calling: capabilities.function_calling,
+        parallel_tool_calls: capabilities.parallel_tool_calls,
+        custom_tools: capabilities.custom_tools,
+        freeform_tools: capabilities.freeform_tools,
+    }
+}
+
+fn model_modality_name(modality: &ModelModality) -> &'static str {
+    match modality {
+        ModelModality::Text => "text",
+        ModelModality::Image => "image",
+        ModelModality::Audio => "audio",
+        ModelModality::Video => "video",
+        ModelModality::Pdf => "pdf",
+    }
+}
+
+fn reasoning_interleaved_field_name(field: ReasoningInterleavedField) -> &'static str {
+    match field {
+        ReasoningInterleavedField::Reasoning => "reasoning",
+        ReasoningInterleavedField::ReasoningContent => "reasoning_content",
+        ReasoningInterleavedField::ReasoningDetails => "reasoning_details",
+    }
+}
+
+pub fn attachment_dto(record: pl_core::AttachmentRecord, data_url: String) -> AttachmentDto {
+    AttachmentDto {
+        id: record.id,
+        session_id: record.session_id,
+        media_type: record.media_type,
+        filename: record.filename,
+        byte_size: record.byte_size,
+        width: record.width,
+        height: record.height,
+        created_at: record.created_at,
+        data_url,
     }
 }
 
@@ -697,6 +745,7 @@ pub fn timeline_events_to_items(events: &[TraceEvent]) -> Vec<pl_protocol::Timel
                         },
                         content: String::new(),
                         thinking_chunks: Vec::new(),
+                        attachments: Vec::new(),
                         tool: None,
                         agent: None,
                         inference: None,
@@ -1458,6 +1507,7 @@ mod tests {
             text_channel: None,
             content: String::new(),
             thinking_chunks: Vec::new(),
+            attachments: Vec::new(),
             tool: Some(TimelineToolItem {
                 tool_call_id: "turn-1-call-1".to_string(),
                 call_id: Some("call-1".to_string()),
@@ -1537,6 +1587,7 @@ mod tests {
             text_channel: None,
             content: String::new(),
             thinking_chunks: Vec::new(),
+            attachments: Vec::new(),
             tool: Some(TimelineToolItem {
                 tool_call_id: "turn-1-call-1".to_string(),
                 call_id: Some("call-1".to_string()),
@@ -1605,6 +1656,7 @@ mod tests {
             text_channel: None,
             content: String::new(),
             thinking_chunks: Vec::new(),
+            attachments: Vec::new(),
             tool: None,
             agent: None,
             inference: None,

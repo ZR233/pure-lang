@@ -34,7 +34,20 @@ pl-core
 
 provider 适配实现可以依赖 `async-openai`、`reqwest` 和 `serde`。这些依赖只用于 `pl-model` 内部 transport、typed protocol request 和 typed stream event 解析，不向 `pl-core` 暴露。
 
-## 7.3 Provider 抽象
+## 7.3 模型能力
+
+`ModelInfo` 的能力声明使用结构化能力矩阵，不再使用 bitflag 或旧的 `input_modalities` 列表作为主协议。配置和运行时只接受新的 `capabilities` 对象：
+
+- 基础能力：`streaming`、`temperature`、`reasoning`、`web_search`。
+- 输入/输出模态：`input`、`output`，取值为 `text`、`image`、`audio`、`video`、`pdf`。
+- 工具能力：`function_calling`、`parallel_tool_calls`、`custom_tools`、`freeform_tools`。
+- 推理交错字段：`interleaved.field`，当前支持 `reasoning`、`reasoning_content`、`reasoning_details`。
+
+`pl-core` 只读取这些 provider 无关能力来做本地校验和 UI 展示：图片输入必须要求模型声明 `input = ["image"]`，工具调用必须匹配工具能力，推理请求必须匹配 `reasoning = true`。provider 私有差异不扩散到 `pl-core`。
+
+模型级 provider override 使用 `ModelRequestProfile` 表达，包括 `api_model`、`headers`、`body` 和 `options`。这些字段只由 `pl-model` 的 provider adapter 消费，用于 DeepSeek/Zhipu 的 `reasoning_content`、GLM `thinking.clear_thinking` 或 OpenAI-compatible 供应商的私有请求扩展；核心编排层不得读取或拼接这些私有字段。
+
+## 7.4 Provider 抽象
 
 `ModelProvider` 封装 provider 特定逻辑：
 
@@ -55,7 +68,7 @@ provider 适配实现可以依赖 `async-openai`、`reqwest` 和 `serde`。这�
 
 Zhipu Coding Plan 是 Zhipu profile 的配置模板，默认使用 `https://open.bigmodel.cn/api/coding/paas/v4`，模型列表与现有 Zhipu 模板完全一致；它不新增 `ProviderRuntime` 变体，也不改变 `ProviderKind::Zhipu` 的协议边界。
 
-## 7.4 Protocol API
+## 7.5 Protocol API
 
 `pl-model` 当前支持：
 
@@ -74,10 +87,21 @@ provider transport 层把第三方 API 错误统一转换为 `PureError` 时必�
 
 `CompletionRequest.stream` 不改变 `stream_complete` 的 wire 行为；`stream_complete` 始终发起流式请求。该字段只保留为统一请求类型的一部分。
 
-## 7.5 自定义模型
+## 7.6 多模态消息
+
+`MessageContent` 支持一等 multipart 内容。文本使用 `ContentPart::Text`，图片使用 `ContentPart::Image`。图片 source 分为：
+
+- `Attachment { attachment_id }`：Studio 或核心持久化消息中的稳定引用。
+- `InlineBase64 { data }`：模型请求前由 `pl-core` materialize 后传给 `pl-model` 的临时内容。
+
+`pl-model` 不读取 Studio 存储，也不解析附件路径。进入 provider adapter 前，`CompletionRequest` 中的图片必须已经 materialize 为 `InlineBase64`；如果 adapter 收到未 materialize 的附件引用，应返回本地协议错误。
+
+OpenAI Responses 使用 `input_text` 与 `input_image` data URL；OpenAI Chat、DeepSeek、Zhipu/GLM 使用 content array 的 `text` 与 `image_url`。DeepSeek 或未声明视觉输入的模型在本地拒绝图片请求。
+
+## 7.7 自定义模型
 
 `pl-core` 从 `~/.pure/config.toml` 读取完整模型配置后，将 provider 配置和模型列表传给 `pl-model`。
 
-配置模型会覆盖或补充 bundled model；`used_fallback` 仍是运行时状态，不从 TOML 读取。
+配置模型会覆盖或补充 bundled model；`used_fallback` 仍是运行时状态，不从 TOML 读取。旧配置里的 `capabilities = [...]` 和 `input_modalities = [...]` 不再兼容；读取失败时要求用户按新的能力矩阵重写配置或让 Studio 重新生成配置。
 
 模型信息中的 `base_instructions` 是模型级基础提示词来源，进入 `pl-core` 的 instruction assembler；配置中的 `[instructions].base_override` 可以完整替换它。模型信息中的 `context_window`、`max_context_window` 和 `auto_compact_token_limit` 只描述模型能力与默认阈值。上下文压缩的触发判断、摘要 prompt、历史替换和持久化都在 `pl-core` 完成，`pl-model` 不维护压缩状态。

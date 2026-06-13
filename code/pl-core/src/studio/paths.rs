@@ -38,6 +38,13 @@ pub fn default_db_path() -> Result<PathBuf> {
         .join(STUDIO_DB_FILE_NAME))
 }
 
+pub fn default_attachments_dir() -> Result<PathBuf> {
+    Ok(user_home_dir()?
+        .join(CONFIG_DIR_NAME)
+        .join(STUDIO_DIR_NAME)
+        .join("attachments"))
+}
+
 fn legacy_db_path() -> Result<PathBuf> {
     Ok(user_home_dir()?
         .join(CONFIG_DIR_NAME)

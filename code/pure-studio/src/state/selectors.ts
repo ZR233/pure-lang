@@ -19,6 +19,7 @@ export type TimelineEntry =
       key: string;
       role: "user" | "assistant";
       content: string;
+      attachments?: TimelineItem["attachments"];
     }
   | {
       kind: "commentary";
@@ -144,13 +145,14 @@ export function selectTimelineEntries(state: StudioState): TimelineEntry[] {
     switch (item.kind) {
       case "text":
         closeDisplaySegment();
-        if (!item.content.trim()) break;
+        if (!item.content.trim() && !(item.attachments?.length)) break;
         if (item.textChannel === "user" || item.textChannel === "final") {
           entries.push({
             kind: "message",
             key: `text-${item.itemId}`,
             role: item.textChannel === "user" ? "user" : "assistant",
             content: item.content,
+            attachments: item.attachments,
           });
           break;
         }

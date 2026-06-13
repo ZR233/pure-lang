@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import type { ModelRecord, ProviderRecord } from "../types";
+import type { ModelCapabilities, ModelRecord, ProviderRecord } from "../types";
 
 type ProviderModelEditorProps = {
   provider: ProviderRecord;
@@ -47,6 +47,20 @@ function trimNumber(value: number) {
 
 function formatList(values: string[] | undefined, t: (key: string) => string) {
   return values && values.length > 0 ? values.join(", ") : notConfigured(t);
+}
+
+function capabilityList(capabilities: ModelCapabilities): string[] {
+  const values = [
+    capabilities.streaming ? "streaming" : null,
+    capabilities.temperature ? "temperature" : null,
+    capabilities.reasoning ? "reasoning" : null,
+    capabilities.webSearch ? "web_search" : null,
+    capabilities.tools.functionCalling ? "function_calling" : null,
+    capabilities.tools.parallelToolCalls ? "parallel_tool_calls" : null,
+    capabilities.tools.customTools ? "custom_tools" : null,
+    capabilities.tools.freeformTools ? "freeform_tools" : null,
+  ];
+  return values.filter((value): value is string => Boolean(value));
 }
 
 function formatPrice(model: ModelRecord, t: (key: string) => string) {
@@ -96,11 +110,11 @@ function ModelParameterGrid({ model, t }: { model: ModelRecord; t: (key: string)
       </div>
       <div className="col-span-2">
         <small className="text-muted-foreground">{t("model.capabilities")}</small>
-        <p className="font-medium text-foreground">{formatList(model.capabilities, t)}</p>
+        <p className="font-medium text-foreground">{formatList(capabilityList(model.capabilities), t)}</p>
       </div>
       <div className="col-span-2">
         <small className="text-muted-foreground">{t("model.input")}</small>
-        <p className="font-medium text-foreground">{formatList(model.inputModalities, t)}</p>
+        <p className="font-medium text-foreground">{formatList(model.capabilities.input, t)}</p>
       </div>
     </div>
   );

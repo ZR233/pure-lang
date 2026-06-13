@@ -178,11 +178,40 @@ export type ModelRecord = {
   outputPricePerMTok?: number | null;
   cacheReadPricePerMTok?: number | null;
   reasoningEfforts: string[];
-  capabilities?: string[];
-  inputModalities?: string[];
+  capabilities: ModelCapabilities;
   truncationMode?: string;
   truncationLimit?: number;
   baseInstructions?: string;
+};
+
+export type ModelModality = "text" | "image" | "audio" | "video" | "pdf";
+
+export type ModelCapabilities = {
+  streaming: boolean;
+  temperature: boolean;
+  reasoning: boolean;
+  webSearch: boolean;
+  input: ModelModality[];
+  output: ModelModality[];
+  tools: {
+    functionCalling: boolean;
+    parallelToolCalls: boolean;
+    customTools: boolean;
+    freeformTools: boolean;
+  };
+  interleaved?: { field: "reasoning" | "reasoning_content" | "reasoning_details" } | null;
+};
+
+export type AttachmentRecord = {
+  id: string;
+  sessionId: string;
+  mediaType: string;
+  filename?: string | null;
+  byteSize: number;
+  width?: number | null;
+  height?: number | null;
+  createdAt: number;
+  dataUrl: string;
 };
 
 export type SkillScope = "project" | "user" | "system" | "external";
@@ -346,6 +375,16 @@ export type UsageSnapshot = {
 
 export type TimelineTextChannel = "user" | "commentary" | "final";
 
+export type TimelineAttachment = {
+  id: string;
+  mediaType: string;
+  filename?: string | null;
+  width?: number | null;
+  height?: number | null;
+  byteSize: number;
+  dataUrl?: string | null;
+};
+
 export type TimelineItem = {
   turnId: string;
   itemId: string;
@@ -356,6 +395,7 @@ export type TimelineItem = {
   updatedAt: number;
   textChannel?: TimelineTextChannel | null;
   content: string;
+  attachments?: TimelineAttachment[];
   thinkingChunks: { chunkIndex: number; content: string }[];
   tool?: {
     toolCallId: string;
@@ -584,7 +624,14 @@ export type ProviderInput = {
   bearerToken: string;
   defaultModel: string;
   providerKind: string;
-  customModels: ModelRecord[];
+  customModels: ProviderModelInput[];
+};
+
+export type ProviderModelInput = {
+  slug: string;
+  displayName: string;
+  reasoningEfforts: string[];
+  baseInstructions?: string;
 };
 
 export type RoleInput = {

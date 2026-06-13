@@ -14,12 +14,12 @@ pub use interaction_runtime::{
     InteractionEmitter, InteractionEmitterFuture, InteractionRuntime, resolution_matches_kind,
 };
 pub use records::{
-    AgentSnapshotRecord, AgentTimelineEventRecord, PlanImplementationHandoffStart, ProjectRecord,
-    SessionHandoffKind, SessionHandoffRecord, SessionHandoffStatus, SessionRecord,
-    SessionRuntimeRecord, SessionSkillRecord, SessionVisibility, StudioPromptOutcome,
-    TimelineEventRecord,
+    AgentSnapshotRecord, AgentTimelineEventRecord, AttachmentRecord, MaterializedAttachment,
+    PlanImplementationHandoffStart, ProjectRecord, SessionHandoffKind, SessionHandoffRecord,
+    SessionHandoffStatus, SessionRecord, SessionRuntimeRecord, SessionSkillRecord,
+    SessionVisibility, StudioPromptOutcome, TimelineEventRecord,
 };
-pub use runtime::StudioRuntime;
+pub use runtime::{RunPromptRequest, StudioRuntime};
 pub use store::StudioStore;
 
 #[cfg(test)]
@@ -28,11 +28,11 @@ mod tests {
     use std::time::Duration;
 
     use pl_protocol::{
-        AgentRuntimeDelta, AgentStatus, InteractionKind, InteractionPayload, InteractionRequest,
-        InteractionResolution, InteractionScope, InteractionStatus, Message, MessageContent,
-        MessageRole, PlanConfirmationResolution, PlanLifecycleState, RuntimeCostAmount,
-        SkillActivation, TimelineItem, TimelineItemStatus, TimelineTextChannel, TokenUsageSnapshot,
-        TraceEvent, TraceEventKind,
+        AgentRuntimeDelta, AgentStatus, ContentPart, ImageSource, InteractionKind,
+        InteractionPayload, InteractionRequest, InteractionResolution, InteractionScope,
+        InteractionStatus, Message, MessageContent, MessageRole, PlanConfirmationResolution,
+        PlanLifecycleState, RuntimeCostAmount, SkillActivation, TimelineItem, TimelineItemStatus,
+        TimelineTextChannel, TokenUsageSnapshot, TraceEvent, TraceEventKind,
     };
     use pretty_assertions::assert_eq;
 
@@ -263,6 +263,40 @@ mod tests {
             MessageContent::Text(text) => assert_eq!(text, "hello"),
             MessageContent::MultiPart(_) => panic!("expected text message"),
         }
+    }
+
+    #[tokio::test]
+    async fn message_storage_round_trips_image_attachment_parts() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/alpha").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Vision", CompileMode::Auto)
+            .await
+            .unwrap();
+        let message = Message {
+            role: MessageRole::User,
+            content: MessageContent::MultiPart(vec![
+                ContentPart::Text {
+                    text: "what is this?".to_string(),
+                },
+                ContentPart::Image {
+                    source: ImageSource::Attachment {
+                        attachment_id: "attachment-1".to_string(),
+                    },
+                    media_type: "image/png".to_string(),
+                    filename: Some("image.png".to_string()),
+                },
+            ]),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        };
+
+        store.append_message(&session.id, &message).await.unwrap();
+
+        assert_eq!(
+            store.load_messages(&session.id).await.unwrap(),
+            vec![message]
+        );
     }
 
     #[tokio::test]

@@ -1,7 +1,7 @@
 use pl_model::{CompletionRequest, ModelProvider, ReasoningConfig, ReasoningSummary};
 use pl_protocol::{
-    AgentEvent, EnabledToolsEvent, ErrorSeverity, Result, TimelineItemStatus, TokenUsageSnapshot,
-    TraceEventKind,
+    AgentEvent, ContentPart, EnabledToolsEvent, ErrorSeverity, ImageSource, Message,
+    MessageContent, Result, TimelineItemStatus, TokenUsageSnapshot, TraceEventKind,
 };
 use std::sync::Arc;
 
@@ -71,8 +71,12 @@ pub(super) async fn run_turn_with_trace(
         None
     };
     let mut subagent_dispatch_recovered = false;
-    recorder.user_text_item(&session_id, request.prompt.clone());
-    session.push_user_prompt(request.prompt);
+    recorder.user_text_item_with_attachments(
+        &session_id,
+        request.prompt.clone(),
+        request.timeline_attachments.clone(),
+    );
+    session.push_user_content(request.user_content.clone());
     record_enabled_tools(recorder, &session_id, request.mode, &tool_schemas);
     let turn_item = recorder.turn_item(&session_id, TimelineItemStatus::Running);
     recorder.start_item(turn_item.clone());
@@ -226,7 +230,8 @@ pub(super) async fn run_turn_with_trace(
             break;
         }
         budget_tracker.record_model_step();
-        let history_messages = session.messages().to_vec();
+        let history_messages =
+            materialize_messages(session.messages(), &request.materialized_attachments)?;
         let mut messages = instruction_bundle.prelude_messages.clone();
         messages.extend(history_messages.clone());
 
@@ -570,4 +575,62 @@ pub(super) fn record_enabled_tools(
             tools,
         },
     });
+}
+
+fn materialize_messages(
+    messages: &[Message],
+    attachments: &[crate::studio::MaterializedAttachment],
+) -> Result<Vec<Message>> {
+    messages
+        .iter()
+        .map(|message| {
+            let mut message = message.clone();
+            message.content = materialize_content(&message.content, attachments)?;
+            Ok(message)
+        })
+        .collect()
+}
+
+fn materialize_content(
+    content: &MessageContent,
+    attachments: &[crate::studio::MaterializedAttachment],
+) -> Result<MessageContent> {
+    match content {
+        MessageContent::Text(text) => Ok(MessageContent::Text(text.clone())),
+        MessageContent::MultiPart(parts) => parts
+            .iter()
+            .map(|part| match part {
+                ContentPart::Text { text } => Ok(ContentPart::Text { text: text.clone() }),
+                ContentPart::Image {
+                    source,
+                    media_type,
+                    filename,
+                } => {
+                    let ImageSource::Attachment { attachment_id } = source else {
+                        return Ok(part.clone());
+                    };
+                    let attachment = attachments
+                        .iter()
+                        .find(|attachment| attachment.attachment_id == *attachment_id)
+                        .ok_or_else(|| {
+                            pl_protocol::PureError::ConfigError(format!(
+                                "attachment {attachment_id} was not materialized"
+                            ))
+                        })?;
+                    Ok(ContentPart::Image {
+                        source: ImageSource::InlineBase64 {
+                            data: attachment.data.clone(),
+                        },
+                        media_type: if media_type.is_empty() {
+                            attachment.media_type.clone()
+                        } else {
+                            media_type.clone()
+                        },
+                        filename: filename.clone().or_else(|| attachment.filename.clone()),
+                    })
+                }
+            })
+            .collect::<Result<Vec<_>>>()
+            .map(MessageContent::MultiPart),
+    }
 }

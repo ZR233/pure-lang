@@ -188,11 +188,52 @@ pub struct ModelDto {
     #[serde(rename = "cacheReadPricePerMTok")]
     pub cache_read_price_per_mtok: Option<f64>,
     pub reasoning_efforts: Vec<String>,
-    pub capabilities: Vec<String>,
-    pub input_modalities: Vec<String>,
+    pub capabilities: ModelCapabilitiesDto,
     pub truncation_mode: String,
     pub truncation_limit: u64,
     pub base_instructions: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelCapabilitiesDto {
+    pub streaming: bool,
+    pub temperature: bool,
+    pub reasoning: bool,
+    pub web_search: bool,
+    pub input: Vec<String>,
+    pub output: Vec<String>,
+    pub tools: ToolCapabilitiesDto,
+    pub interleaved: Option<ReasoningInterleavedDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCapabilitiesDto {
+    pub function_calling: bool,
+    pub parallel_tool_calls: bool,
+    pub custom_tools: bool,
+    pub freeform_tools: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReasoningInterleavedDto {
+    pub field: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentDto {
+    pub id: String,
+    pub session_id: String,
+    pub media_type: String,
+    pub filename: Option<String>,
+    pub byte_size: u64,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub created_at: i64,
+    pub data_url: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

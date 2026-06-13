@@ -1,4 +1,4 @@
-import type { ModelRecord, ProviderInput, ProviderRecord, RoleInput, RoleRecord } from "../types";
+import type { ModelCapabilities, ModelRecord, ProviderInput, ProviderRecord, RoleInput, RoleRecord } from "../types";
 import { previewTemplates } from "./templates";
 
 export function cloneModel(model: ModelRecord): ModelRecord {
@@ -16,18 +16,57 @@ export function cloneModel(model: ModelRecord): ModelRecord {
     outputPricePerMTok: model.outputPricePerMTok ?? null,
     cacheReadPricePerMTok: model.cacheReadPricePerMTok ?? null,
     reasoningEfforts: [...model.reasoningEfforts],
-    capabilities: [...(model.capabilities ?? [])],
-    inputModalities: [...(model.inputModalities ?? [])],
+    capabilities: cloneCapabilities(model.capabilities),
     truncationMode: model.truncationMode,
     truncationLimit: model.truncationLimit,
     baseInstructions: model.baseInstructions ?? "",
   };
 }
 
+export function defaultTextCapabilities(): ModelCapabilities {
+  return {
+    streaming: true,
+    temperature: false,
+    reasoning: true,
+    webSearch: false,
+    input: ["text"],
+    output: ["text"],
+    tools: {
+      functionCalling: true,
+      parallelToolCalls: true,
+      customTools: false,
+      freeformTools: false,
+    },
+    interleaved: { field: "reasoning_content" },
+  };
+}
+
+function cloneCapabilities(capabilities: ModelCapabilities | undefined): ModelCapabilities {
+  const source = capabilities ?? defaultTextCapabilities();
+  return {
+    streaming: source.streaming,
+    temperature: source.temperature,
+    reasoning: source.reasoning,
+    webSearch: source.webSearch,
+    input: [...source.input],
+    output: [...source.output],
+    tools: { ...source.tools },
+    interleaved: source.interleaved ? { ...source.interleaved } : null,
+  };
+}
+
 export function makeProvider(input: ProviderInput): ProviderRecord {
   const template = previewTemplates.find((item) => item.id === input.templateKind);
   const defaultModels = template?.defaultModels.map(cloneModel) ?? [];
-  const customModels = input.customModels.map(cloneModel);
+  const customModels = input.customModels.map((model) =>
+    cloneModel({
+      slug: model.slug,
+      displayName: model.displayName,
+      reasoningEfforts: [...model.reasoningEfforts],
+      capabilities: defaultTextCapabilities(),
+      baseInstructions: model.baseInstructions ?? "",
+    }),
+  );
   const models = [...defaultModels, ...customModels];
   const defaultModel = models.some((model) => model.slug === input.defaultModel)
     ? input.defaultModel

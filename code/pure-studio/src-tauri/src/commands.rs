@@ -2,8 +2,9 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use pl_core::{
-    CompileMode, PermissionMode, PureConfig, SessionHandoffStatus, StudioPromptOutcome,
-    StudioRuntime, TimelineEventRecord, TurnOptions, TurnResultStatus, resolution_matches_kind,
+    CompileMode, PermissionMode, PureConfig, RunPromptRequest, SessionHandoffStatus,
+    StudioPromptOutcome, StudioRuntime, TimelineEventRecord, TurnOptions, TurnResultStatus,
+    resolution_matches_kind,
 };
 use pl_protocol::{
     InteractionKind, InteractionPayload, InteractionRequest, InteractionResolution,
@@ -15,15 +16,15 @@ use tauri::{AppHandle, State};
 use tokio_util::sync::CancellationToken;
 
 use crate::dto::{
-    BootstrapDto, ConfigDto, DiscoveredSkillsDto, InstructionsInput, McpSettingsInput,
-    PlanLifecycleResponse, ProjectSelectionDto, ProviderSettingsInput, ProviderUsagesDto,
-    ResolveInteractionResponse, RunPromptResponse, SessionSelectionDto, SessionStateDto,
-    SessionTimelineDto, StopPromptResponse, StudioEventsDto, SubmitPromptResponse,
+    AttachmentDto, BootstrapDto, ConfigDto, DiscoveredSkillsDto, InstructionsInput,
+    McpSettingsInput, PlanLifecycleResponse, ProjectSelectionDto, ProviderSettingsInput,
+    ProviderUsagesDto, ResolveInteractionResponse, RunPromptResponse, SessionSelectionDto,
+    SessionStateDto, SessionTimelineDto, StopPromptResponse, StudioEventsDto, SubmitPromptResponse,
 };
 use crate::events::drain_events;
 use crate::interactions::interaction_emitter;
 use crate::mappers::{
-    agent_dtos, agent_event_dtos, config_dto_for_studio, discovered_skills_dto,
+    agent_dtos, agent_event_dtos, attachment_dto, config_dto_for_studio, discovered_skills_dto,
     instructions_config, load_session_runtime_dto, lsp_health_update_dto,
     mcp_settings_to_builtin_states, mcp_settings_to_servers, plan_lifecycle_events_to_states,
     project_dtos, provider_settings_to_edit, provider_usages_dto, session_dtos,
@@ -303,10 +304,43 @@ pub async fn set_session_mode(
 pub async fn submit_prompt(
     session_id: String,
     prompt: String,
+    attachment_ids: Option<Vec<String>>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> CommandResult<SubmitPromptResponse> {
-    submit_prompt_background(session_id, prompt, app, &state, None).await
+    submit_prompt_background(
+        session_id,
+        prompt,
+        attachment_ids.unwrap_or_default(),
+        app,
+        &state,
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn create_prompt_attachment(
+    session_id: String,
+    data_url: String,
+    filename: Option<String>,
+    state: State<'_, AppState>,
+) -> CommandResult<AttachmentDto> {
+    let record = state
+        .studio
+        .store()
+        .create_image_attachment(&session_id, &data_url, filename)
+        .await?;
+    let materialized = state
+        .studio
+        .store()
+        .materialize_attachments(&session_id, std::slice::from_ref(&record.id))
+        .await?;
+    let data_url = materialized
+        .first()
+        .map(|attachment| format!("data:{};base64,{}", attachment.media_type, attachment.data))
+        .unwrap_or_default();
+    Ok(attachment_dto(record, data_url))
 }
 
 #[tauri::command]
@@ -362,6 +396,7 @@ pub async fn resolve_interaction(
                         let _ = submit_prompt_background(
                             handoff.target_session.id.clone(),
                             prompt,
+                            Vec::new(),
                             app,
                             &state,
                             Some(PlanImplementationLifecycle {
@@ -487,11 +522,12 @@ pub async fn resolve_interaction(
 async fn run_prompt_inner(
     session_id: String,
     prompt: String,
+    attachment_ids: Vec<String>,
     app: AppHandle,
     state: &AppState,
     lifecycle: Option<PlanImplementationLifecycle>,
 ) -> CommandResult<RunPromptResponse> {
-    if prompt.trim().is_empty() {
+    if prompt.trim().is_empty() && attachment_ids.is_empty() {
         return Err(CommandError::from_display("prompt is empty"));
     }
 
@@ -523,14 +559,15 @@ async fn run_prompt_inner(
         .with_interaction_callback(interaction_callback.clone());
     let result = state
         .studio
-        .run_prompt(
-            &session_id,
+        .run_prompt(RunPromptRequest {
+            session_id: session_id.clone(),
             prompt,
-            event_tx.clone(),
+            attachment_ids,
+            event_tx: event_tx.clone(),
             interaction_callback,
-            emitter.clone(),
+            interaction_emitter: emitter.clone(),
             options,
-        )
+        })
         .await;
     drop(event_tx);
     let _ = event_task.await;
@@ -626,11 +663,12 @@ async fn run_prompt_inner(
 async fn submit_prompt_background(
     session_id: String,
     prompt: String,
+    attachment_ids: Vec<String>,
     app: AppHandle,
     state: &AppState,
     lifecycle: Option<PlanImplementationLifecycle>,
 ) -> CommandResult<SubmitPromptResponse> {
-    if prompt.trim().is_empty() {
+    if prompt.trim().is_empty() && attachment_ids.is_empty() {
         return Err(CommandError::from_display("prompt is empty"));
     }
     if state.active_turns.lock().await.contains_key(&session_id) {
@@ -673,8 +711,15 @@ async fn submit_prompt_background(
                 None,
             )
             .await;
-        let result =
-            run_prompt_inner(run_session_id.clone(), prompt, app, &run_state, lifecycle).await;
+        let result = run_prompt_inner(
+            run_session_id.clone(),
+            prompt,
+            attachment_ids,
+            app,
+            &run_state,
+            lifecycle,
+        )
+        .await;
         match result {
             Ok(response) => {
                 let status = match response.turn_status.as_str() {

@@ -76,19 +76,33 @@ impl OpenAiTransportProvider {
         let http_client = self.http_client.clone();
         let api_base = self.resolve_base_url();
         let protocol = self.protocol;
+        let capabilities = self.capabilities;
         let info = self.info.clone();
         let model_info = self.model_info(&request.model);
         async move {
             let bearer = info.bearer_token.clone();
             let token = get_auth_token(bearer).await?;
 
+            let effective_capabilities = model_info
+                .capabilities
+                .clone()
+                .with_provider_capabilities(capabilities, info.uses_native_custom_tools());
             let supports_custom_tools = info.uses_native_custom_tools()
-                && model_info.capabilities.supports_custom_tools()
-                && model_info.capabilities.supports_freeform_tools();
+                && effective_capabilities.supports_custom_tools()
+                && effective_capabilities.supports_freeform_tools();
             let timeline = request.timeline.clone();
-            let request = request.provider_compatible(supports_custom_tools);
+            let mut request = request.provider_compatible(supports_custom_tools);
+            request.validate_against(&effective_capabilities)?;
+            if let Some(api_model) = &model_info.request_profile.api_model {
+                request.model = api_model.clone();
+            }
             let body = protocol.build_request(&request)?;
-            let config = PureOpenAiConfig::new(api_base, token, info.http_headers.as_ref())?;
+            let config = PureOpenAiConfig::new(
+                api_base,
+                token,
+                info.http_headers.as_ref(),
+                &model_info.request_profile.headers,
+            )?;
             let client = Client::build(http_client, config);
             let stream: StreamResponse<sse::SseStreamEvent> = match body {
                 OpenAiRequestBody::Responses(body) => client
@@ -120,31 +134,9 @@ impl OpenAiTransportProvider {
     }
 
     pub(crate) fn effective_model_capabilities(&self, model: &str) -> ModelCapabilities {
-        let mut capabilities = self.model_info(model).capabilities;
-        if !self
+        self.model_info(model)
             .capabilities
-            .contains(ProviderCapabilities::PARALLEL_TOOL_CALLS)
-        {
-            capabilities.remove(ModelCapabilities::PARALLEL_TOOL_CALLS);
-        }
-        if !self
-            .capabilities
-            .contains(ProviderCapabilities::FUNCTION_CALLING)
-        {
-            capabilities.remove(
-                ModelCapabilities::FUNCTION_CALLING
-                    | ModelCapabilities::CUSTOM_TOOLS
-                    | ModelCapabilities::FREEFORM_TOOLS,
-            );
-        }
-        if !self.capabilities.contains(ProviderCapabilities::VISION) {
-            capabilities.remove(ModelCapabilities::VISION);
-        }
-        if !self.info.uses_native_custom_tools() {
-            capabilities
-                .remove(ModelCapabilities::CUSTOM_TOOLS | ModelCapabilities::FREEFORM_TOOLS);
-        }
-        capabilities
+            .with_provider_capabilities(self.capabilities, self.info.uses_native_custom_tools())
     }
 
     pub(crate) fn default_model(&self) -> &str {
@@ -188,16 +180,16 @@ impl PureOpenAiConfig {
         api_base: String,
         bearer_token: Option<String>,
         http_headers: Option<&HashMap<String, String>>,
+        model_headers: &HashMap<String, String>,
     ) -> Result<Self> {
         let mut custom_headers = HeaderMap::new();
         if let Some(headers) = http_headers {
             for (key, value) in headers {
-                let name = HeaderName::from_bytes(key.as_bytes())
-                    .map_err(|e| PureError::HttpError(e.to_string()))?;
-                let value = HeaderValue::from_str(value)
-                    .map_err(|e| PureError::HttpError(e.to_string()))?;
-                custom_headers.insert(name, value);
+                insert_header(&mut custom_headers, key, value)?;
             }
+        }
+        for (key, value) in model_headers {
+            insert_header(&mut custom_headers, key, value)?;
         }
 
         Ok(Self {
@@ -207,6 +199,15 @@ impl PureOpenAiConfig {
             custom_headers,
         })
     }
+}
+
+fn insert_header(headers: &mut HeaderMap, key: &str, value: &str) -> Result<()> {
+    let name = HeaderName::from_bytes(key.as_bytes())
+        .map_err(|error| PureError::HttpError(error.to_string()))?;
+    let value =
+        HeaderValue::from_str(value).map_err(|error| PureError::HttpError(error.to_string()))?;
+    headers.insert(name, value);
+    Ok(())
 }
 
 impl Config for PureOpenAiConfig {

@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use pl_model::TokenUsage;
-use pl_protocol::{BudgetLimitKind, BudgetUsage, TraceEvent};
+use pl_protocol::{BudgetLimitKind, BudgetUsage, MessageContent, TimelineAttachment, TraceEvent};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
@@ -174,21 +174,46 @@ impl CompileMode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnRequest {
     pub prompt: String,
+    pub user_content: MessageContent,
     pub mode: CompileMode,
     pub workspace_instructions: Option<String>,
     pub instruction_snapshot: Option<InstructionSnapshot>,
     pub budget: TurnBudget,
+    pub materialized_attachments: Vec<crate::studio::MaterializedAttachment>,
+    pub timeline_attachments: Vec<TimelineAttachment>,
 }
 
 impl TurnRequest {
     pub fn new(prompt: impl Into<String>, mode: CompileMode) -> Self {
+        let prompt = prompt.into();
         Self {
-            prompt: prompt.into(),
+            user_content: MessageContent::Text(prompt.clone()),
+            prompt,
             mode,
             workspace_instructions: None,
             instruction_snapshot: None,
             budget: TurnBudget::root_default(),
+            materialized_attachments: Vec::new(),
+            timeline_attachments: Vec::new(),
         }
+    }
+
+    pub fn with_user_content(mut self, content: MessageContent) -> Self {
+        self.user_content = content;
+        self
+    }
+
+    pub fn with_materialized_attachments(
+        mut self,
+        attachments: Vec<crate::studio::MaterializedAttachment>,
+    ) -> Self {
+        self.materialized_attachments = attachments;
+        self
+    }
+
+    pub fn with_timeline_attachments(mut self, attachments: Vec<TimelineAttachment>) -> Self {
+        self.timeline_attachments = attachments;
+        self
     }
 
     pub fn with_workspace_instructions(mut self, instructions: String) -> Self {

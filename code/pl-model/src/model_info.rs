@@ -1,5 +1,9 @@
+use std::collections::HashMap;
+
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::Map;
+use serde_json::Value;
 
 use crate::capabilities::ModelCapabilities;
 
@@ -23,7 +27,8 @@ pub struct ModelInfo {
     pub reasoning_efforts: Vec<String>,
 
     pub capabilities: ModelCapabilities,
-    pub input_modalities: Vec<InputModality>,
+    #[serde(default)]
+    pub request_profile: ModelRequestProfile,
 
     pub truncation_policy: TruncationPolicy,
 
@@ -33,12 +38,16 @@ pub struct ModelInfo {
     pub used_fallback: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum InputModality {
-    Text,
-    Image,
-    Audio,
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ModelRequestProfile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_model: Option<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub headers: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub body: Map<String, Value>,
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub options: Map<String, Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,8 +92,8 @@ impl ModelInfo {
             output_price_per_mtok: None,
             cache_read_price_per_mtok: None,
             reasoning_efforts: Vec::new(),
-            capabilities: ModelCapabilities::STREAMING | ModelCapabilities::FUNCTION_CALLING,
-            input_modalities: vec![InputModality::Text],
+            capabilities: ModelCapabilities::text_only(),
+            request_profile: ModelRequestProfile::default(),
             truncation_policy: TruncationPolicy {
                 mode: TruncationMode::Bytes,
                 limit: 10_000,

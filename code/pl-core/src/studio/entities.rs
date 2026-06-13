@@ -68,6 +68,31 @@ pub mod message {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
+pub mod attachment {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "attachments")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub session_id: String,
+        pub message_id: Option<String>,
+        pub media_type: String,
+        pub filename: Option<String>,
+        pub storage_path: String,
+        pub byte_size: i64,
+        pub width: Option<i64>,
+        pub height: Option<i64>,
+        pub created_at: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 pub mod tool_approval {
     use super::*;
 

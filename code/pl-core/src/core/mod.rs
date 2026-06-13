@@ -1480,13 +1480,8 @@ mod tests {
         let result = core
             .run_turn_with_trace(
                 &mut session,
-                TurnRequest {
-                    prompt: "Build the thing".to_string(),
-                    mode: CompileMode::Auto,
-                    budget: crate::turn::TurnBudget::new(60_000),
-                    instruction_snapshot: None,
-                    workspace_instructions: None,
-                },
+                TurnRequest::new("Build the thing".to_string(), CompileMode::Auto)
+                    .with_budget(crate::turn::TurnBudget::new(60_000)),
                 &mut recorder,
                 TurnOptions::default(),
             )
@@ -1545,13 +1540,8 @@ mod tests {
         let result = core
             .run_turn_with_trace(
                 &mut session,
-                TurnRequest {
-                    prompt: "Build the thing".to_string(),
-                    mode: CompileMode::Auto,
-                    budget: crate::turn::TurnBudget::new(60_000),
-                    instruction_snapshot: None,
-                    workspace_instructions: None,
-                },
+                TurnRequest::new("Build the thing".to_string(), CompileMode::Auto)
+                    .with_budget(crate::turn::TurnBudget::new(60_000)),
                 &mut recorder,
                 TurnOptions::default(),
             )

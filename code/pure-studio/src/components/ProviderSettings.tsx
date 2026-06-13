@@ -35,6 +35,7 @@ import {
   replaceProvider,
   suggestProviderId,
 } from "../lib/provider-settings";
+import { defaultTextCapabilities } from "../lib/provider-mapper";
 import { allModels, initials, translateStatus } from "../lib/utils";
 import { ProviderEditPage } from "./ProviderEditPage";
 
@@ -185,6 +186,8 @@ export function ProviderSettings({
             slug,
             displayName: t("model.defaultCustomModelName"),
             reasoningEfforts: ["high"],
+            capabilities: defaultTextCapabilities(),
+            baseInstructions: "",
           },
         ],
         defaultModel: provider.defaultModel || slug,

@@ -33,6 +33,7 @@ reducer 分域：
 - 空 assistant 不渲染
 - `text` item 以 `textChannel` 决定展示语义：`user` 渲染为用户气泡，`commentary` 渲染为轻量进展行，`final` 渲染为普通 assistant 回复。前端不再使用旧 `role` 字段判断文本语义。
 - `plan` item 渲染为独立计划卡片，正文按 Markdown 展示，不与普通 assistant 消息混排
+- 用户 `text` item 可以携带图片附件元数据；用户气泡必须展示缩略图、文件名或尺寸，并允许只有图片没有文本的消息进入 timeline。
 - 主 timeline 以用户与 assistant 正文为主；工具调用使用紧凑行密度，连续 tool items 可在 selector 中聚合为派生展示项，例如 `Read 3 files · Edit 1 file`，但原始 `timelineItems`、`timelineOrder` 和 reducer 仍保持 item-first append-only 语义
 - 工具聚合只属于 selector 展示层：同一 turn 内的 `thinking` 和隐藏 `inference` 不结束当前工具组；assistant `text`、`agent`、`turn` trace 或跨 turn 的 tool item 才开启新的工具展示段。`thinking` 内容仍作为 thought entry 渲染。
 - 同一 turn 内连续模型 step 产生的多个 `thinking` item 必须在 selector 中合并为一个 thought entry；tool item 和隐藏 `inference` 对 thought 聚合透明，避免工具循环后在主 timeline 连续出现多张思考卡片。
@@ -116,7 +117,7 @@ Markdown 阅读样式属于 timeline 展示层：assistant 正文和 plan 卡片
 - `SessionStateResponse`
 - `StudioEventsResponse`
 
-旧字段别名、旧 payload 解析逻辑、旧 text/thinking/tool delta reducer 分支在方案乙中删除。`SubmitPromptResponse` 只表示后台 turn 已提交，包含 `sessionId`、`turnId` 和当前 cursor；不得携带最终 timeline 结果。`SessionTimelineResponse.events` 返回 `TimelineEventDto[]`，其 `payload` 与 `TraceEventKind` 的 camelCase serde 形状一致；`TimelineItem` 只作为前端折叠后的 view model。
+`submit_prompt` 接收 `attachmentIds`，当附件非空时允许 `prompt` 为空。图片附件先通过独立上传命令写入 Studio app data，再以附件 id 引用；前端不得把 base64 图片直接塞进 prompt 文本。旧字段别名、旧 payload 解析逻辑、旧 text/thinking/tool delta reducer 分支在方案乙中删除。`SubmitPromptResponse` 只表示后台 turn 已提交，包含 `sessionId`、`turnId` 和当前 cursor；不得携带最终 timeline 结果。`SessionTimelineResponse.events` 返回 `TimelineEventDto[]`，其 `payload` 与 `TraceEventKind` 的 camelCase serde 形状一致；`TimelineItem` 只作为前端折叠后的 view model。
 
 ## 5. 选择器与派生数据
 
@@ -140,6 +141,8 @@ Provider 设置页的供应商卡片以可扫读的运维状态为主：头部�
 状态栏在窄窗口下保留左侧高频控制，并把右侧只读状态按优先级收入“更多”菜单；更多入口固定跟随左侧控制组显示，避免右侧只读状态挤压时入口也被裁剪。由于桌面布局含左侧项目/会话栏，响应式必须优先按聊天 footer 自身宽度判断，并保留整窗宽度兜底：聊天 footer 约 `1040px` 以下收起能力和子代理，footer 约 `760px` 以下额外收起费用，footer 约 `520px` 以下额外收起上下文。整窗兜底在 `1320px` 以下直接收起费用、能力和子代理，避免不支持 container query 的 WebView2 环境按整窗宽度误判聊天列空间。更多菜单直接展示被收起状态的摘要和详情，不依赖悬浮 popover，必须支持点击、键盘聚焦、外部点击和 `Escape` 关闭，且不得被状态栏横向滚动容器或窗口边界裁剪。
 
 聊天输入区提供 `Auto / Plan` 模式切换，当前值来自选中 session 的 `mode` 并通过后端命令持久化。新会话默认 `auto`。Plan 卡片展示计划正文和轻量状态徽标，不提供“实现计划”按钮。最新计划生成完成后，后端创建 `planConfirmation` interaction，底部普通输入框自动替换为计划确认 composer。确认 composer 必须默认展示可直接输入的继续讨论文本框，并提供三个动作：
+
+普通 composer 支持粘贴、拖放和文件选择上传 `png`、`jpeg`、`webp` 图片。上传入口由当前模型 `capabilities.input` 是否包含 `image` 决定；没有视觉能力时隐藏或禁用图片入口，并在已有图片草稿提交前给出本地错误。图片草稿展示缩略图、文件名和删除按钮；发送成功后清空草稿。图片上传由 Tauri 后端完成格式校验、尺寸/大小归一化和 app data 持久化，前端只保存返回的附件 id 与预览数据。
 
 - `清空上下文并实现`：通过 `resolve_interaction(interactionId, { type: "planConfirmation", decision: "implementFreshContext" })` 解析当前 interaction。后端创建显式 session handoff：新 Auto session 使用 Codex 风格 handoff prompt 加 plan markdown 作为 fresh context 的唯一意图来源；原计划 session 保持可恢复，但从活跃 session 列表隐藏，避免实施开始后同时出现计划 session 与实施 session。实施 handoff 创建成功后，前端通过 `sessionHandoffChanged` 切到目标 session，并通过目标 session 的 `turnChanged/timelineChanged/agentChanged` 实时展示步骤；不能停留在来源 session 等最终结果一次性替换。
 - `继续讨论`：用户可直接在确认 composer 的输入框写入追问或调整内容；一次提交先通过同一命令解析为 `decision: "continuePlanning"` 且携带 `content`，后端记录 `continuedPlanning`，随后前端立即把同一 `content` 作为普通 prompt 发送，用于继续追问或修改计划，不自动切换到 `auto`。如果 resolution 失败，不发送 prompt。
