@@ -13,7 +13,6 @@ use super::tool_stream::{ToolCallAccumulatorSnapshot, timeline_tool_item_id};
 pub(crate) struct TimelineProjection {
     session_id: String,
     turn_id: String,
-    inference_id: String,
     sequence: u64,
     started: HashMap<String, TimelineItem>,
     events: Vec<TraceEvent>,
@@ -24,7 +23,6 @@ impl TimelineProjection {
         Self {
             session_id: context.session_id,
             turn_id: context.turn_id,
-            inference_id: context.inference_id,
             sequence: context.starting_sequence,
             started: HashMap::new(),
             events: Vec::new(),
@@ -39,15 +37,10 @@ impl TimelineProjection {
         self.sequence
     }
 
-    pub(crate) fn item_id(&self, prefix: &str) -> String {
-        format!("{}-{prefix}", self.inference_id)
-    }
-
-    pub(crate) fn append_text_delta(
+    pub(crate) fn start_text(
         &mut self,
         item_id: &str,
         text_channel: TimelineTextChannel,
-        delta: String,
     ) -> Vec<AgentEvent> {
         let now = unix_seconds();
         let item_id = self.namespaced_item_id(item_id);
@@ -77,6 +70,18 @@ impl TimelineProjection {
             events.push(AgentEvent::TimelineItemStarted { item: item.clone() });
             self.started.insert(item_id.clone(), item);
         }
+        events
+    }
+
+    pub(crate) fn append_text_delta(
+        &mut self,
+        item_id: &str,
+        text_channel: TimelineTextChannel,
+        delta: String,
+    ) -> Vec<AgentEvent> {
+        let now = unix_seconds();
+        let mut events = self.start_text(item_id, text_channel);
+        let item_id = self.namespaced_item_id(item_id);
         if let Some(item) = self.started.get_mut(&item_id) {
             item.status = TimelineItemStatus::Streaming;
             item.updated_at = now;
@@ -105,10 +110,49 @@ impl TimelineProjection {
         events
     }
 
-    pub(crate) fn append_plan_delta(&mut self, delta: String) -> Vec<AgentEvent> {
+    pub(crate) fn complete_text(
+        &mut self,
+        item_id: &str,
+        text_channel: TimelineTextChannel,
+    ) -> Vec<AgentEvent> {
+        self.complete_item(item_id, TimelineItemKind::Text, Some(text_channel))
+    }
+
+    pub(crate) fn start_plan(&mut self, item_id: &str) -> Vec<AgentEvent> {
         let now = unix_seconds();
-        let mut events = self.append_plan_start();
-        let item_id = self.plan_item_id();
+        let item_id = self.plan_item_id(item_id);
+        if self.started.contains_key(&item_id) {
+            return Vec::new();
+        }
+        let item = TimelineItem {
+            turn_id: self.turn_id.clone(),
+            item_id: item_id.clone(),
+            sequence: self.sequence,
+            kind: TimelineItemKind::Plan,
+            status: TimelineItemStatus::Streaming,
+            created_at: now,
+            updated_at: now,
+            text_channel: None,
+            content: String::new(),
+            attachments: Vec::new(),
+            thinking_chunks: Vec::new(),
+            tool: None,
+            agent: None,
+            inference: None,
+            usage: None,
+        };
+        self.record(
+            TraceEventKind::TimelineItemStarted { item: item.clone() },
+            now,
+        );
+        self.started.insert(item_id, item.clone());
+        vec![AgentEvent::TimelineItemStarted { item }]
+    }
+
+    pub(crate) fn append_plan_delta(&mut self, item_id: &str, delta: String) -> Vec<AgentEvent> {
+        let now = unix_seconds();
+        let mut events = self.start_plan(item_id);
+        let item_id = self.plan_item_id(item_id);
         if let Some(item) = self.started.get_mut(&item_id) {
             item.status = TimelineItemStatus::Streaming;
             item.updated_at = now;
@@ -134,12 +178,12 @@ impl TimelineProjection {
         events
     }
 
-    pub(crate) fn append_thinking_delta(
-        &mut self,
-        item_id: &str,
-        chunk_index: u32,
-        delta: String,
-    ) -> Vec<AgentEvent> {
+    pub(crate) fn complete_plan(&mut self, item_id: &str) -> Vec<AgentEvent> {
+        let item_id = self.plan_item_id(item_id);
+        self.complete_item_by_resolved_id(&item_id, TimelineItemKind::Plan, None)
+    }
+
+    pub(crate) fn start_thinking(&mut self, item_id: &str) -> Vec<AgentEvent> {
         let now = unix_seconds();
         let item_id = self.namespaced_item_id(item_id);
         let mut events = Vec::new();
@@ -166,8 +210,20 @@ impl TimelineProjection {
                 now,
             );
             events.push(AgentEvent::TimelineItemStarted { item: item.clone() });
-            self.started.insert(item_id.clone(), item);
+            self.started.insert(item_id, item);
         }
+        events
+    }
+
+    pub(crate) fn append_thinking_delta(
+        &mut self,
+        item_id: &str,
+        chunk_index: u32,
+        delta: String,
+    ) -> Vec<AgentEvent> {
+        let now = unix_seconds();
+        let mut events = self.start_thinking(item_id);
+        let item_id = self.namespaced_item_id(item_id);
         if let Some(item) = self.started.get_mut(&item_id) {
             item.status = TimelineItemStatus::Streaming;
             item.updated_at = now;
@@ -204,6 +260,55 @@ impl TimelineProjection {
         events
     }
 
+    pub(crate) fn complete_thinking(&mut self, item_id: &str) -> Vec<AgentEvent> {
+        self.complete_item(item_id, TimelineItemKind::Thinking, None)
+    }
+
+    pub(crate) fn start_tool(&mut self, snapshot: &ToolCallAccumulatorSnapshot) -> Vec<AgentEvent> {
+        let now = unix_seconds();
+        let item_id = self.namespaced_item_id(&timeline_tool_item_id(
+            snapshot.call_id.as_ref(),
+            &snapshot.id,
+        ));
+        if self.started.contains_key(&item_id) {
+            return Vec::new();
+        }
+        let item = TimelineItem {
+            turn_id: self.turn_id.clone(),
+            item_id: item_id.clone(),
+            sequence: self.sequence,
+            kind: TimelineItemKind::Tool,
+            status: TimelineItemStatus::Streaming,
+            created_at: now,
+            updated_at: now,
+            text_channel: None,
+            content: String::new(),
+            attachments: Vec::new(),
+            thinking_chunks: Vec::new(),
+            tool: Some(TimelineToolItem {
+                tool_call_id: item_id.clone(),
+                call_id: snapshot.call_id.clone(),
+                provider_item_id: (!snapshot.id.is_empty()).then(|| snapshot.id.clone()),
+                name: snapshot.name.clone(),
+                arguments: snapshot.arguments.clone(),
+                result: None,
+                exit_code: None,
+                timed_out: false,
+                working_directory: None,
+                denial_reason: None,
+            }),
+            agent: None,
+            inference: None,
+            usage: None,
+        };
+        self.record(
+            TraceEventKind::TimelineItemStarted { item: item.clone() },
+            now,
+        );
+        self.started.insert(item_id, item.clone());
+        vec![AgentEvent::TimelineItemStarted { item }]
+    }
+
     pub(crate) fn append_tool_arguments_delta(
         &mut self,
         snapshot: &ToolCallAccumulatorSnapshot,
@@ -214,43 +319,7 @@ impl TimelineProjection {
             snapshot.call_id.as_ref(),
             &snapshot.id,
         ));
-        let mut events = Vec::new();
-        if !self.started.contains_key(&item_id) {
-            let item = TimelineItem {
-                turn_id: self.turn_id.clone(),
-                item_id: item_id.clone(),
-                sequence: self.sequence,
-                kind: TimelineItemKind::Tool,
-                status: TimelineItemStatus::Streaming,
-                created_at: now,
-                updated_at: now,
-                text_channel: None,
-                content: String::new(),
-                attachments: Vec::new(),
-                thinking_chunks: Vec::new(),
-                tool: Some(TimelineToolItem {
-                    tool_call_id: item_id.clone(),
-                    call_id: snapshot.call_id.clone(),
-                    provider_item_id: (!snapshot.id.is_empty()).then(|| snapshot.id.clone()),
-                    name: snapshot.name.clone(),
-                    arguments: String::new(),
-                    result: None,
-                    exit_code: None,
-                    timed_out: false,
-                    working_directory: None,
-                    denial_reason: None,
-                }),
-                agent: None,
-                inference: None,
-                usage: None,
-            };
-            self.record(
-                TraceEventKind::TimelineItemStarted { item: item.clone() },
-                now,
-            );
-            events.push(AgentEvent::TimelineItemStarted { item: item.clone() });
-            self.started.insert(item_id.clone(), item);
-        }
+        let mut events = self.start_tool(snapshot);
         if let Some(item) = self.started.get_mut(&item_id) {
             item.status = TimelineItemStatus::Streaming;
             item.updated_at = now;
@@ -331,39 +400,9 @@ impl TimelineProjection {
         }
     }
 
-    fn append_plan_start(&mut self) -> Vec<AgentEvent> {
-        let now = unix_seconds();
-        let item_id = self.plan_item_id();
-        if self.started.contains_key(&item_id) {
-            return Vec::new();
-        }
-        let item = TimelineItem {
-            turn_id: self.turn_id.clone(),
-            item_id: item_id.clone(),
-            sequence: self.sequence,
-            kind: TimelineItemKind::Plan,
-            status: TimelineItemStatus::Streaming,
-            created_at: now,
-            updated_at: now,
-            text_channel: None,
-            content: String::new(),
-            attachments: Vec::new(),
-            thinking_chunks: Vec::new(),
-            tool: None,
-            agent: None,
-            inference: None,
-            usage: None,
-        };
-        self.record(
-            TraceEventKind::TimelineItemStarted { item: item.clone() },
-            now,
-        );
-        self.started.insert(item_id, item.clone());
-        vec![AgentEvent::TimelineItemStarted { item }]
-    }
-
-    fn plan_item_id(&self) -> String {
-        format!("{}-plan", self.turn_id)
+    fn plan_item_id(&self, item_id: &str) -> String {
+        let item_id = if item_id.is_empty() { "plan" } else { item_id };
+        self.namespaced_item_id(item_id)
     }
 
     fn namespaced_item_id(&self, item_id: &str) -> String {
@@ -371,6 +410,42 @@ impl TimelineProjection {
             return item_id.to_string();
         }
         format!("{}-{item_id}", self.turn_id)
+    }
+
+    fn complete_item(
+        &mut self,
+        item_id: &str,
+        kind: TimelineItemKind,
+        text_channel: Option<TimelineTextChannel>,
+    ) -> Vec<AgentEvent> {
+        let item_id = self.namespaced_item_id(item_id);
+        self.complete_item_by_resolved_id(&item_id, kind, text_channel)
+    }
+
+    fn complete_item_by_resolved_id(
+        &mut self,
+        item_id: &str,
+        kind: TimelineItemKind,
+        text_channel: Option<TimelineTextChannel>,
+    ) -> Vec<AgentEvent> {
+        let Some(item) = self.started.get_mut(item_id) else {
+            return Vec::new();
+        };
+        if item.kind != kind
+            || item.text_channel != text_channel
+            || item.status == TimelineItemStatus::Completed
+        {
+            return Vec::new();
+        }
+        item.status = TimelineItemStatus::Completed;
+        item.updated_at = unix_seconds();
+        let item = item.clone();
+        let sequence = self.sequence;
+        self.record(
+            TraceEventKind::TimelineItemCompleted { item: item.clone() },
+            item.updated_at,
+        );
+        vec![AgentEvent::TimelineItemCompleted { sequence, item }]
     }
 
     fn record(&mut self, kind: TraceEventKind, timestamp: i64) {
