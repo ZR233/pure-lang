@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use pl_model::{
-    ApplyPatchToolType, InputModality, ModelCapabilities, ModelInfo, ProviderInfo, ProviderKind,
-    ToolWirePolicy, TruncationMode, TruncationPolicy, deepseek_default_model_slugs, default_models,
+    ApplyPatchToolType, ModelCapabilities, ModelInfo, ModelRequestProfile, ProviderInfo,
+    ProviderKind, ToolWirePolicy, TruncationMode, TruncationPolicy, deepseek_default_model_slugs,
+    default_models,
 };
 use pl_protocol::{PureError, Result};
 use serde::{Deserialize, Serialize};
@@ -51,26 +52,12 @@ pub struct ModelConfig {
     pub cache_read_price_per_mtok: Option<f64>,
     #[serde(default)]
     pub reasoning_efforts: Vec<String>,
+    pub capabilities: ModelCapabilities,
     #[serde(default)]
-    pub capabilities: Vec<ModelCapabilityConfig>,
-    #[serde(default)]
-    pub input_modalities: Vec<InputModality>,
+    pub request_profile: ModelRequestProfile,
     pub truncation_policy: TruncationPolicyConfig,
     #[serde(default)]
     pub base_instructions: String,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ModelCapabilityConfig {
-    Streaming,
-    FunctionCalling,
-    Vision,
-    ParallelToolCalls,
-    Reasoning,
-    WebSearch,
-    CustomTools,
-    FreeformTools,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -169,8 +156,8 @@ impl ModelConfig {
             output_price_per_mtok: model.output_price_per_mtok,
             cache_read_price_per_mtok: model.cache_read_price_per_mtok,
             reasoning_efforts: model.reasoning_efforts,
-            capabilities: ModelCapabilityConfig::from_capabilities(model.capabilities),
-            input_modalities: model.input_modalities,
+            capabilities: model.capabilities,
+            request_profile: model.request_profile,
             truncation_policy: TruncationPolicyConfig::from_policy(model.truncation_policy),
             base_instructions: model.base_instructions,
         }
@@ -191,51 +178,12 @@ impl ModelConfig {
             output_price_per_mtok: self.output_price_per_mtok,
             cache_read_price_per_mtok: self.cache_read_price_per_mtok,
             reasoning_efforts: self.reasoning_efforts,
-            capabilities: ModelCapabilityConfig::to_capabilities(&self.capabilities),
-            input_modalities: self.input_modalities,
+            capabilities: self.capabilities,
+            request_profile: self.request_profile,
             truncation_policy: self.truncation_policy.into_policy(),
             base_instructions: self.base_instructions,
             used_fallback: false,
         }
-    }
-}
-
-impl ModelCapabilityConfig {
-    fn from_capabilities(capabilities: ModelCapabilities) -> Vec<Self> {
-        [
-            (ModelCapabilities::STREAMING, Self::Streaming),
-            (ModelCapabilities::FUNCTION_CALLING, Self::FunctionCalling),
-            (ModelCapabilities::VISION, Self::Vision),
-            (
-                ModelCapabilities::PARALLEL_TOOL_CALLS,
-                Self::ParallelToolCalls,
-            ),
-            (ModelCapabilities::REASONING, Self::Reasoning),
-            (ModelCapabilities::WEB_SEARCH, Self::WebSearch),
-            (ModelCapabilities::CUSTOM_TOOLS, Self::CustomTools),
-            (ModelCapabilities::FREEFORM_TOOLS, Self::FreeformTools),
-        ]
-        .into_iter()
-        .filter_map(|(flag, config)| capabilities.contains(flag).then_some(config))
-        .collect()
-    }
-
-    fn to_capabilities(configs: &[Self]) -> ModelCapabilities {
-        configs
-            .iter()
-            .fold(ModelCapabilities::empty(), |capabilities, config| {
-                capabilities
-                    | match config {
-                        Self::Streaming => ModelCapabilities::STREAMING,
-                        Self::FunctionCalling => ModelCapabilities::FUNCTION_CALLING,
-                        Self::Vision => ModelCapabilities::VISION,
-                        Self::ParallelToolCalls => ModelCapabilities::PARALLEL_TOOL_CALLS,
-                        Self::Reasoning => ModelCapabilities::REASONING,
-                        Self::WebSearch => ModelCapabilities::WEB_SEARCH,
-                        Self::CustomTools => ModelCapabilities::CUSTOM_TOOLS,
-                        Self::FreeformTools => ModelCapabilities::FREEFORM_TOOLS,
-                    }
-            })
     }
 }
 

@@ -10,13 +10,16 @@ mod provider_usage;
 mod request;
 mod stream;
 
-pub use capabilities::{ModelCapabilities, ProviderCapabilities};
+pub use capabilities::{
+    ModelCapabilities, ModelModality, ProviderCapabilities, ReasoningInterleaved,
+    ReasoningInterleavedField, ToolCapabilities,
+};
 pub use default_models::{
     deepseek_default_model_slugs, default_models, openai_default_model_slugs,
     zhipu_default_model_slugs,
 };
 pub use manager::{DefaultModelsManager, ModelsManager};
-pub use model_info::{InputModality, ModelInfo, TruncationMode, TruncationPolicy};
+pub use model_info::{ModelInfo, ModelRequestProfile, TruncationMode, TruncationPolicy};
 pub use pl_protocol::ToolCallKind;
 pub use provider::{
     DeepSeekProvider, ModelProvider, OpenAiProvider, ProviderRuntime, SharedModelProvider,

@@ -1,17 +1,17 @@
 use anyhow::{Context, Result, bail};
 use pl_protocol::{
-    AgentStatus, InteractionPayload, InteractionRequest, InteractionResolution, InteractionScope,
-    InteractionStatus, Message, MessageContent, MessageRole, RuntimeCostAmount,
+    AgentStatus, ContentPart, InteractionPayload, InteractionRequest, InteractionResolution,
+    InteractionScope, InteractionStatus, Message, MessageContent, MessageRole, RuntimeCostAmount,
     RuntimeUsageSnapshot, StudioEventEnvelope, StudioTurnStatus,
 };
 
 use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::records::{
-    AgentSnapshotRecord, AgentTimelineEventRecord, ProjectRecord, SessionHandoffKind,
-    SessionHandoffRecord, SessionHandoffStatus, SessionRecord, SessionRuntimeRecord,
-    SessionSkillRecord, SessionVisibility, StudioEventRecord, StudioTurnRecord,
-    TimelineEventRecord,
+    AgentSnapshotRecord, AgentTimelineEventRecord, AttachmentRecord, ProjectRecord,
+    SessionHandoffKind, SessionHandoffRecord, SessionHandoffStatus, SessionRecord,
+    SessionRuntimeRecord, SessionSkillRecord, SessionVisibility, StudioEventRecord,
+    StudioTurnRecord, TimelineEventRecord,
 };
 
 pub fn project_record(model: entities::project::Model) -> ProjectRecord {
@@ -175,6 +175,21 @@ pub fn timeline_event_record(model: entities::timeline_event::Model) -> Timeline
         created_at: model.created_at,
         kind: model.kind,
         payload_json: model.payload_json,
+    }
+}
+
+pub fn attachment_record(model: entities::attachment::Model) -> AttachmentRecord {
+    AttachmentRecord {
+        id: model.id,
+        session_id: model.session_id,
+        message_id: model.message_id,
+        media_type: model.media_type,
+        filename: model.filename,
+        storage_path: model.storage_path,
+        byte_size: model.byte_size.max(0) as u64,
+        width: model.width.and_then(|value| u32::try_from(value).ok()),
+        height: model.height.and_then(|value| u32::try_from(value).ok()),
+        created_at: model.created_at,
     }
 }
 
@@ -364,7 +379,7 @@ pub fn row_to_message(row: entities::message::Model) -> Result<Message> {
         .with_context(|| format!("failed to parse message metadata: {}", row.id))?;
     Ok(Message {
         role,
-        content: MessageContent::Text(row.content),
+        content: row_content_to_message_content(&row.content),
         reasoning_content: row.reasoning_content,
         metadata,
     })
@@ -382,4 +397,10 @@ pub fn message_to_row_parts(message: &Message) -> Result<(String, String)> {
         MessageContent::MultiPart(parts) => serde_json::to_string(parts)?,
     };
     Ok((role.to_string(), content))
+}
+
+fn row_content_to_message_content(content: &str) -> MessageContent {
+    serde_json::from_str::<Vec<ContentPart>>(content)
+        .map(MessageContent::MultiPart)
+        .unwrap_or_else(|_| MessageContent::Text(content.to_string()))
 }

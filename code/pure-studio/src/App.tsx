@@ -60,7 +60,8 @@ export function App() {
           onSetSessionMode={(mode) => void studio.onSetSessionMode(mode)}
           onImplementPlanFresh={studio.onImplementPlanFresh}
           onDiscussPlan={studio.onDiscussPlan}
-          onSendPrompt={() => void studio.onSendPrompt()}
+          onCreatePromptAttachment={studio.onCreatePromptAttachment}
+          onSendPrompt={(attachments) => void studio.onSendPrompt(attachments)}
           onDismissPlanAction={(planId) =>
             void studio.onDismissPlanAction(planId)
           }

@@ -1,4 +1,40 @@
-import type { ProviderTemplateRecord } from "../types";
+import type { ModelCapabilities, ProviderTemplateRecord } from "../types";
+
+function textCapabilities(): ModelCapabilities {
+  return {
+    streaming: true,
+    temperature: false,
+    reasoning: true,
+    webSearch: false,
+    input: ["text"],
+    output: ["text"],
+    tools: {
+      functionCalling: true,
+      parallelToolCalls: true,
+      customTools: false,
+      freeformTools: false,
+    },
+    interleaved: { field: "reasoning_content" },
+  };
+}
+
+function openAiCapabilities(): ModelCapabilities {
+  return {
+    streaming: true,
+    temperature: false,
+    reasoning: true,
+    webSearch: true,
+    input: ["text", "image"],
+    output: ["text"],
+    tools: {
+      functionCalling: true,
+      parallelToolCalls: true,
+      customTools: true,
+      freeformTools: true,
+    },
+    interleaved: null,
+  };
+}
 
 function zhipuTextModel(
   slug: string,
@@ -15,8 +51,7 @@ function zhipuTextModel(
     maxContextWindow: contextWindow,
     maxOutputTokens,
     reasoningEfforts: ["enabled", "none"],
-    capabilities: ["streaming", "function_calling", "parallel_tool_calls", "reasoning"],
-    inputModalities: ["text"],
+    capabilities: textCapabilities(),
     truncationMode: "tokens",
     truncationLimit: 10_000,
     baseInstructions: "",
@@ -39,17 +74,7 @@ function openAiModel(
     maxContextWindow,
     maxOutputTokens: null,
     reasoningEfforts: ["medium", "low", "high", "xhigh"],
-    capabilities: [
-      "streaming",
-      "function_calling",
-      "vision",
-      "parallel_tool_calls",
-      "reasoning",
-      "web_search",
-      "custom_tools",
-      "freeform_tools",
-    ],
-    inputModalities: ["text", "image"],
+    capabilities: openAiCapabilities(),
     truncationMode,
     truncationLimit: 10_000,
     baseInstructions: "",
@@ -121,8 +146,7 @@ export const previewTemplates: ProviderTemplateRecord[] = [
         outputPricePerMTok: 2,
         cacheReadPricePerMTok: 0.02,
         reasoningEfforts: ["high", "max"],
-        capabilities: ["streaming", "function_calling", "parallel_tool_calls", "reasoning"],
-        inputModalities: ["text"],
+        capabilities: textCapabilities(),
         truncationMode: "tokens",
         truncationLimit: 10_000,
         baseInstructions: "",
@@ -139,8 +163,7 @@ export const previewTemplates: ProviderTemplateRecord[] = [
         outputPricePerMTok: 6,
         cacheReadPricePerMTok: 0.025,
         reasoningEfforts: ["high", "max"],
-        capabilities: ["streaming", "function_calling", "parallel_tool_calls", "reasoning"],
-        inputModalities: ["text"],
+        capabilities: textCapabilities(),
         truncationMode: "tokens",
         truncationLimit: 10_000,
         baseInstructions: "",

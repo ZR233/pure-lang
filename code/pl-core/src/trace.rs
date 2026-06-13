@@ -124,8 +124,17 @@ impl TraceRecorder {
     }
 
     pub fn user_text_item(&mut self, turn_id: &str, content: String) {
+        self.user_text_item_with_attachments(turn_id, content, Vec::new());
+    }
+
+    pub fn user_text_item_with_attachments(
+        &mut self,
+        turn_id: &str,
+        content: String,
+        attachments: Vec<pl_protocol::TimelineAttachment>,
+    ) {
         let timestamp = unix_seconds();
-        let item = TimelineItem::text(
+        let mut item = TimelineItem::text(
             turn_id,
             format!("{turn_id}-user"),
             self.sequence,
@@ -134,6 +143,7 @@ impl TraceRecorder {
             TimelineItemStatus::Completed,
             timestamp,
         );
+        item.attachments = attachments;
         self.record_and_broadcast_item_start(item.clone());
         self.complete_item(item);
     }
@@ -168,6 +178,7 @@ impl TraceRecorder {
             updated_at: timestamp,
             text_channel: None,
             content: String::new(),
+            attachments: Vec::new(),
             thinking_chunks: Vec::new(),
             tool: None,
             agent: None,
@@ -193,6 +204,7 @@ impl TraceRecorder {
             updated_at: timestamp,
             text_channel: None,
             content: String::new(),
+            attachments: Vec::new(),
             thinking_chunks: Vec::new(),
             tool: None,
             agent: None,
@@ -231,6 +243,7 @@ impl TraceRecorder {
             updated_at: timestamp,
             text_channel: None,
             content: String::new(),
+            attachments: Vec::new(),
             thinking_chunks: Vec::new(),
             tool: Some(TimelineToolItem {
                 tool_call_id: tool_call_id.to_string(),
@@ -291,6 +304,7 @@ impl TraceRecorder {
             updated_at: timestamp,
             text_channel: None,
             content: String::new(),
+            attachments: Vec::new(),
             thinking_chunks: Vec::new(),
             tool: None,
             agent: Some(agent),

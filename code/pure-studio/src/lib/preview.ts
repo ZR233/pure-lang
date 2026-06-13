@@ -618,8 +618,7 @@ input_price_per_mtok = 1.0
 output_price_per_mtok = 2.0
 cache_read_price_per_mtok = 0.02
 reasoning_efforts = ["high", "max"]
-capabilities = ["streaming", "function_calling", "parallel_tool_calls", "reasoning"]
-input_modalities = ["text"]
+capabilities = { streaming = true, temperature = false, reasoning = true, web_search = false, input = ["text"], output = ["text"], tools = { function_calling = true, parallel_tool_calls = true, custom_tools = false, freeform_tools = false }, interleaved = { field = "reasoning_content" } }
 truncation_policy = { mode = "tokens", limit = 10000 }
 
 [providers.openai]

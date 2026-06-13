@@ -44,9 +44,13 @@ impl CoreSession {
     }
 
     pub fn push_user_prompt(&mut self, prompt: String) {
+        self.push_user_content(MessageContent::Text(prompt));
+    }
+
+    pub fn push_user_content(&mut self, content: MessageContent) {
         self.messages.push(Message {
             role: MessageRole::User,
-            content: MessageContent::Text(prompt),
+            content,
             reasoning_content: None,
             metadata: HashMap::new(),
         });

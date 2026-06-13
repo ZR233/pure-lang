@@ -44,6 +44,7 @@ fn main() {
             commands::select_session,
             commands::set_session_mode,
             commands::submit_prompt,
+            commands::create_prompt_attachment,
             commands::resolve_interaction,
             commands::stop_prompt,
             commands::load_session_timeline,

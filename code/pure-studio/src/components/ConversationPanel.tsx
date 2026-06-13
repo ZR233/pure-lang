@@ -7,7 +7,9 @@ import {
   Circle,
   CornerDownLeft,
   FileText,
+  ImagePlus,
   Loader2,
+  X,
   Send,
   Square,
   Terminal,
@@ -21,6 +23,7 @@ import { useTranslation } from "react-i18next";
 import type {
   AgentDto,
   AgentStatus,
+  AttachmentRecord,
   CompileMode,
   LspServerRecord,
   PermissionMode,
@@ -80,7 +83,8 @@ type ConversationPanelProps = {
   onSetSessionMode: (mode: CompileMode) => void;
   onImplementPlanFresh: (interactionId: string) => Promise<boolean> | boolean;
   onDiscussPlan: (planId: string, content: string) => Promise<boolean> | boolean;
-  onSendPrompt: () => void;
+  onCreatePromptAttachment: (file: File) => Promise<AttachmentRecord | null>;
+  onSendPrompt: (attachments?: AttachmentRecord[]) => void;
   onDismissPlanAction: (planId: string) => void;
   onStopPrompt: () => void;
   onResolveInteraction: (interactionId: string, resolution: InteractionResolution) => void;
@@ -101,6 +105,16 @@ function thoughtLabel(content: string, t: TFunction): string {
 
 function isActiveStatus(status: TimelineItem["status"]): boolean {
   return status === "started" || status === "streaming" || status === "running";
+}
+
+function supportsImageInput(providers: ProviderRecord[], roles: RoleRecord[]): boolean {
+  const planner = roles.find((role) => role.key === "planner") ?? roles[0];
+  if (!planner) {
+    return false;
+  }
+  const provider = providers.find((item) => item.id === planner.provider);
+  const model = provider?.models.find((item) => item.slug === planner.model);
+  return model?.capabilities.input.includes("image") ?? false;
 }
 
 function thoughtDurationLabel(seconds: number, t: TFunction): string {
@@ -291,6 +305,7 @@ function EntryShell({
 
 function MessageEntry({ entry }: { entry: Extract<TimelineEntry, { kind: "message" }> }) {
   const roleIcon = entry.role === "user" ? <UserRound size={14} /> : <span className="text-xs font-bold text-primary">P</span>;
+  const attachments = entry.attachments ?? [];
   if (entry.role === "user") {
     return (
       <div className="flex w-full gap-2.5 px-4 py-3">
@@ -298,9 +313,26 @@ function MessageEntry({ entry }: { entry: Extract<TimelineEntry, { kind: "messag
           {roleIcon}
         </span>
         <div className="bg-muted rounded-2xl rounded-tl-sm px-4 py-2.5 max-w-[80%]">
-          <div className="text-sm whitespace-pre-wrap break-words">
-            <MarkdownContent content={entry.content} />
-          </div>
+          {attachments.length > 0 ? (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {attachments.map((attachment) => (
+                <div key={attachment.id} className="h-24 w-24 overflow-hidden rounded-md border border-border bg-background">
+                  {attachment.dataUrl ? (
+                    <img src={attachment.dataUrl} alt={attachment.filename ?? "attachment"} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="grid h-full w-full place-items-center px-2 text-center text-xs text-muted-foreground">
+                      {attachment.filename ?? attachment.mediaType}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {entry.content.trim() ? (
+            <div className="text-sm whitespace-pre-wrap break-words">
+              <MarkdownContent content={entry.content} />
+            </div>
+          ) : null}
         </div>
       </div>
     );
@@ -1012,6 +1044,7 @@ export function ConversationPanel({
   onSetPrompt,
   onSetSessionMode,
   onImplementPlanFresh,
+  onCreatePromptAttachment,
   onSendPrompt,
   onDiscussPlan,
   onDismissPlanAction,
@@ -1021,6 +1054,47 @@ export function ConversationPanel({
   const { t } = useTranslation();
   const stopping = turnPhase === "stopping";
   const currentMode: CompileMode = selectedSession?.mode === "plan" ? "plan" : "auto";
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [attachments, setAttachments] = useState<AttachmentRecord[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const canAttachImages = supportsImageInput(providers, roles);
+
+  async function addFiles(files: FileList | File[]) {
+    const images = Array.from(files).filter((file) =>
+      ["image/png", "image/jpeg", "image/webp"].includes(file.type),
+    );
+    if (images.length === 0) {
+      setAttachmentError("Only PNG, JPEG, and WebP images are supported.");
+      return;
+    }
+    if (!canAttachImages) {
+      setAttachmentError("The selected model does not support image input.");
+      return;
+    }
+    setAttachmentError(null);
+    setUploadingAttachment(true);
+    try {
+      const uploaded: AttachmentRecord[] = [];
+      for (const file of images) {
+        const attachment = await onCreatePromptAttachment(file);
+        if (attachment) {
+          uploaded.push(attachment);
+        }
+      }
+      setAttachments((current) => [...current, ...uploaded]);
+    } catch (error) {
+      setAttachmentError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setUploadingAttachment(false);
+    }
+  }
+
+  function sendPromptWithAttachments() {
+    onSendPrompt(attachments);
+    setAttachments([]);
+    setAttachmentError(null);
+  }
 
   function renderTimelineEntry(entry: TimelineEntry) {
     if (entry.kind === "message") {
@@ -1104,26 +1178,82 @@ export function ConversationPanel({
         ) : (
           <div className="px-4 py-3">
             <div className="relative w-full">
+              {attachments.length > 0 ? (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {attachments.map((attachment) => (
+                    <div key={attachment.id} className="group relative h-14 w-14 overflow-hidden rounded-md border border-border bg-muted">
+                      <img src={attachment.dataUrl} alt={attachment.filename ?? "attachment"} className="h-full w-full object-cover" />
+                      <button
+                        type="button"
+                        className="absolute right-1 top-1 grid h-5 w-5 place-items-center rounded-full bg-background/90 text-foreground opacity-0 shadow group-hover:opacity-100"
+                        onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))}
+                        aria-label="Remove attachment"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {attachmentError ? <p className="mb-2 text-xs text-destructive">{attachmentError}</p> : null}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                multiple
+                onChange={(event) => {
+                  const files = event.currentTarget.files;
+                  if (files) {
+                    void addFiles(files);
+                  }
+                  event.currentTarget.value = "";
+                }}
+              />
               <Textarea
                 value={prompt}
                 onChange={(e) => onSetPrompt(e.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
                     event.preventDefault();
-                    onSendPrompt();
+                    sendPromptWithAttachments();
                   }
                 }}
+                onPaste={(event) => {
+                  const files = Array.from(event.clipboardData.files);
+                  if (files.length > 0) {
+                    event.preventDefault();
+                    void addFiles(files);
+                  }
+                }}
+                onDrop={(event) => {
+                  if (event.dataTransfer.files.length > 0) {
+                    event.preventDefault();
+                    void addFiles(event.dataTransfer.files);
+                  }
+                }}
+                onDragOver={(event) => event.preventDefault()}
                 placeholder={selectedSession ? t("conversation.askPlaceholder") : t("conversation.noSessionPlaceholder")}
                 disabled={!selectedSession || isBusy}
-                className="resize-none pr-12 min-h-[48px] max-h-[200px] rounded-xl px-4 py-3 bg-background"
+                className="resize-none pl-12 pr-12 min-h-[48px] max-h-[200px] rounded-xl px-4 py-3 bg-background"
                 rows={1}
               />
+              <Button
+                type="button"
+                size="icon"
+                className="absolute left-2.5 bottom-2.5 h-8 w-8 rounded-lg shadow-sm"
+                variant="ghost"
+                disabled={!selectedSession || isBusy || uploadingAttachment || !canAttachImages}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {uploadingAttachment ? <Loader2 size={16} className="animate-spin" /> : <ImagePlus size={16} />}
+              </Button>
               <Button
                 size="icon"
                 className="absolute right-2.5 bottom-2.5 h-8 w-8 rounded-lg shadow-sm"
                 variant={isBusy ? "destructive" : "default"}
-                disabled={isBusy ? stopping : !prompt.trim() || !selectedSession}
-                onClick={isBusy ? onStopPrompt : onSendPrompt}
+                disabled={isBusy ? stopping : (!prompt.trim() && attachments.length === 0) || !selectedSession}
+                onClick={isBusy ? onStopPrompt : sendPromptWithAttachments}
               >
                 {isBusy ? <Square size={16} /> : <Send size={16} />}
               </Button>

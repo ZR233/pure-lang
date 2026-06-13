@@ -2,9 +2,9 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use pl_protocol::{
-    AgentEventSender, InteractionKind, InteractionPayload, InteractionRequest, InteractionScope,
-    InteractionStatus, PlanLifecycleEvent, PlanLifecycleState, TimelineItem, TimelineItemKind,
-    TraceEvent, TraceEventKind,
+    AgentEventSender, ContentPart, ImageSource, InteractionKind, InteractionPayload,
+    InteractionRequest, InteractionScope, InteractionStatus, MessageContent, PlanLifecycleEvent,
+    PlanLifecycleState, TimelineItem, TimelineItemKind, TraceEvent, TraceEventKind,
 };
 
 use crate::config::{ConfigStore, ModelRole};
@@ -37,6 +37,16 @@ const SELF_LEARNING_REVIEW_PROMPT: &str = r#"你是 Pure-Lang 项目 skills 自�
 - 不要修改系统内置 skill；如需覆盖或沉淀项目经验，创建/更新项目级 skill。
 - 如果没有值得沉淀的内容，直接简短说明无需更新，不要调用工具。
 "#;
+
+pub struct RunPromptRequest {
+    pub session_id: String,
+    pub prompt: String,
+    pub attachment_ids: Vec<String>,
+    pub event_tx: AgentEventSender,
+    pub interaction_callback: InteractionCallback,
+    pub interaction_emitter: InteractionEmitter,
+    pub options: TurnOptions,
+}
 
 #[derive(Clone)]
 pub struct StudioRuntime {
@@ -189,15 +199,17 @@ impl StudioRuntime {
         Ok(SkillCatalog::discover(&workspace_root, &config.skills)?)
     }
 
-    pub async fn run_prompt(
-        &self,
-        session_id: &str,
-        prompt: String,
-        event_tx: AgentEventSender,
-        interaction_callback: InteractionCallback,
-        interaction_emitter: InteractionEmitter,
-        mut options: TurnOptions,
-    ) -> Result<StudioPromptOutcome> {
+    pub async fn run_prompt(&self, request: RunPromptRequest) -> Result<StudioPromptOutcome> {
+        let RunPromptRequest {
+            session_id,
+            prompt,
+            attachment_ids,
+            event_tx,
+            interaction_callback,
+            interaction_emitter,
+            mut options,
+        } = request;
+        let session_id = session_id.as_str();
         let session_record = self
             .store
             .read_session(session_id)
@@ -216,7 +228,47 @@ impl StudioRuntime {
         let previous_len = session.len();
         let mode = CompileMode::from_label(&session_record.mode);
         options = options.with_permission_mode(config.runtime.permission_mode);
-        let mut request = TurnRequest::new(prompt.clone(), mode);
+        let selected_attachments = self
+            .store
+            .load_attachments(session_id, &attachment_ids)
+            .await?;
+        let selected_materialized = self
+            .store
+            .materialize_attachments(session_id, &attachment_ids)
+            .await?;
+        let timeline_attachments = selected_attachments
+            .iter()
+            .map(|record| {
+                let mut attachment = crate::studio::store::timeline_attachment(record);
+                attachment.data_url = selected_materialized
+                    .iter()
+                    .find(|materialized| materialized.attachment_id == record.id)
+                    .map(|materialized| {
+                        format!(
+                            "data:{};base64,{}",
+                            materialized.media_type, materialized.data
+                        )
+                    });
+                attachment
+            })
+            .collect::<Vec<_>>();
+        let mut materialized_attachments = self
+            .store
+            .materialize_session_attachments(session_id)
+            .await?;
+        for attachment in selected_materialized {
+            if !materialized_attachments
+                .iter()
+                .any(|existing| existing.attachment_id == attachment.attachment_id)
+            {
+                materialized_attachments.push(attachment);
+            }
+        }
+        let user_content = prompt_content(&prompt, &selected_attachments);
+        let mut request = TurnRequest::new(prompt.clone(), mode)
+            .with_user_content(user_content)
+            .with_materialized_attachments(materialized_attachments)
+            .with_timeline_attachments(timeline_attachments);
         if !workspace_instructions.trim().is_empty() {
             request = request.with_workspace_instructions(workspace_instructions.clone());
         }
@@ -432,6 +484,26 @@ fn completed_plan_item(events: &[TraceEvent]) -> Option<TimelineItem> {
     })
 }
 
+fn prompt_content(prompt: &str, attachments: &[crate::studio::AttachmentRecord]) -> MessageContent {
+    if attachments.is_empty() {
+        return MessageContent::Text(prompt.to_string());
+    }
+    let mut parts = Vec::new();
+    if !prompt.is_empty() {
+        parts.push(ContentPart::Text {
+            text: prompt.to_string(),
+        });
+    }
+    parts.extend(attachments.iter().map(|attachment| ContentPart::Image {
+        source: ImageSource::Attachment {
+            attachment_id: attachment.id.clone(),
+        },
+        media_type: attachment.media_type.clone(),
+        filename: attachment.filename.clone(),
+    }));
+    MessageContent::MultiPart(parts)
+}
+
 fn plan_confirmation_id(plan_id: &str) -> String {
     format!("plan-confirmation-{plan_id}")
 }
@@ -612,6 +684,7 @@ mod tests {
                     updated_at: 1,
                     text_channel: None,
                     content: String::new(),
+                    attachments: Vec::new(),
                     thinking_chunks: Vec::new(),
                     tool: None,
                     agent: None,
@@ -659,14 +732,15 @@ mod tests {
             .callback(session.id.clone(), interaction_emitter.clone());
 
         let outcome = runtime
-            .run_prompt(
-                &session.id,
-                "make a plan".to_string(),
+            .run_prompt(RunPromptRequest {
+                session_id: session.id.clone(),
+                prompt: "make a plan".to_string(),
+                attachment_ids: Vec::new(),
                 event_tx,
                 interaction_callback,
                 interaction_emitter,
-                TurnOptions::default(),
-            )
+                options: TurnOptions::default(),
+            })
             .await
             .unwrap();
         handle.await.unwrap();

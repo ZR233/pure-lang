@@ -1,5 +1,8 @@
-use crate::capabilities::ModelCapabilities;
-use crate::model_info::{InputModality, ModelInfo, TruncationMode, TruncationPolicy};
+use crate::capabilities::{
+    ModelCapabilities, ModelModality, ReasoningInterleaved, ReasoningInterleavedField,
+    ToolCapabilities,
+};
+use crate::model_info::{ModelInfo, ModelRequestProfile, TruncationMode, TruncationPolicy};
 
 const DEEPSEEK_DEFAULT_MODEL_SLUGS: &[&str] = &["deepseek-v4-flash", "deepseek-v4-pro"];
 const OPENAI_DEFAULT_MODEL_SLUGS: &[&str] = &[
@@ -257,15 +260,8 @@ fn openai_model(
             .copied()
             .map(String::from)
             .collect(),
-        capabilities: ModelCapabilities::STREAMING
-            | ModelCapabilities::FUNCTION_CALLING
-            | ModelCapabilities::VISION
-            | ModelCapabilities::PARALLEL_TOOL_CALLS
-            | ModelCapabilities::REASONING
-            | ModelCapabilities::WEB_SEARCH
-            | ModelCapabilities::CUSTOM_TOOLS
-            | ModelCapabilities::FREEFORM_TOOLS,
-        input_modalities: vec![InputModality::Text, InputModality::Image],
+        capabilities: openai_capabilities(),
+        request_profile: ModelRequestProfile::default(),
         truncation_policy: TruncationPolicy {
             mode: truncation_mode,
             limit: 10_000,
@@ -305,11 +301,8 @@ fn deepseek_model(
             .copied()
             .map(String::from)
             .collect(),
-        capabilities: ModelCapabilities::STREAMING
-            | ModelCapabilities::FUNCTION_CALLING
-            | ModelCapabilities::PARALLEL_TOOL_CALLS
-            | ModelCapabilities::REASONING,
-        input_modalities: vec![InputModality::Text],
+        capabilities: deepseek_capabilities(),
+        request_profile: ModelRequestProfile::default(),
         truncation_policy: TruncationPolicy {
             mode: TruncationMode::Tokens,
             limit: 10_000,
@@ -332,11 +325,7 @@ fn zhipu_text_model(
         description,
         context_window,
         max_output_tokens,
-        vec![InputModality::Text],
-        ModelCapabilities::STREAMING
-            | ModelCapabilities::FUNCTION_CALLING
-            | ModelCapabilities::PARALLEL_TOOL_CALLS
-            | ModelCapabilities::REASONING,
+        zhipu_capabilities(false),
     )
 }
 
@@ -353,12 +342,7 @@ fn zhipu_vision_model(
         description,
         context_window,
         max_output_tokens,
-        vec![InputModality::Text, InputModality::Image],
-        ModelCapabilities::STREAMING
-            | ModelCapabilities::FUNCTION_CALLING
-            | ModelCapabilities::VISION
-            | ModelCapabilities::PARALLEL_TOOL_CALLS
-            | ModelCapabilities::REASONING,
+        zhipu_capabilities(true),
     )
 }
 
@@ -368,7 +352,6 @@ fn zhipu_model(
     description: &str,
     context_window: u64,
     max_output_tokens: u64,
-    input_modalities: Vec<InputModality>,
     capabilities: ModelCapabilities,
 ) -> ModelInfo {
     ModelInfo {
@@ -390,13 +373,75 @@ fn zhipu_model(
             .map(String::from)
             .collect(),
         capabilities,
-        input_modalities,
+        request_profile: ModelRequestProfile::default(),
         truncation_policy: TruncationPolicy {
             mode: TruncationMode::Tokens,
             limit: 10_000,
         },
         base_instructions: String::new(),
         used_fallback: false,
+    }
+}
+
+fn openai_capabilities() -> ModelCapabilities {
+    ModelCapabilities {
+        streaming: true,
+        temperature: false,
+        reasoning: true,
+        web_search: true,
+        input: vec![ModelModality::Text, ModelModality::Image],
+        output: vec![ModelModality::Text],
+        tools: ToolCapabilities {
+            function_calling: true,
+            parallel_tool_calls: true,
+            custom_tools: true,
+            freeform_tools: true,
+        },
+        interleaved: None,
+    }
+}
+
+fn deepseek_capabilities() -> ModelCapabilities {
+    ModelCapabilities {
+        streaming: true,
+        temperature: false,
+        reasoning: true,
+        web_search: false,
+        input: vec![ModelModality::Text],
+        output: vec![ModelModality::Text],
+        tools: ToolCapabilities {
+            function_calling: true,
+            parallel_tool_calls: true,
+            custom_tools: false,
+            freeform_tools: false,
+        },
+        interleaved: Some(ReasoningInterleaved {
+            field: ReasoningInterleavedField::ReasoningContent,
+        }),
+    }
+}
+
+fn zhipu_capabilities(vision: bool) -> ModelCapabilities {
+    let mut input = vec![ModelModality::Text];
+    if vision {
+        input.push(ModelModality::Image);
+    }
+    ModelCapabilities {
+        streaming: true,
+        temperature: false,
+        reasoning: true,
+        web_search: false,
+        input,
+        output: vec![ModelModality::Text],
+        tools: ToolCapabilities {
+            function_calling: true,
+            parallel_tool_calls: true,
+            custom_tools: false,
+            freeform_tools: false,
+        },
+        interleaved: Some(ReasoningInterleaved {
+            field: ReasoningInterleavedField::ReasoningContent,
+        }),
     }
 }
 
@@ -438,12 +483,8 @@ mod tests {
             vec!["medium", "low", "high", "xhigh"]
         );
         assert_eq!(gpt_55.truncation_policy.mode, TruncationMode::Tokens);
-        assert!(gpt_55.capabilities.contains(ModelCapabilities::WEB_SEARCH));
-        assert!(
-            gpt_55
-                .capabilities
-                .contains(ModelCapabilities::FREEFORM_TOOLS)
-        );
+        assert!(gpt_55.capabilities.web_search);
+        assert!(gpt_55.capabilities.tools.freeform_tools);
 
         let gpt_54 = openai_models[1];
         assert_eq!(gpt_54.display_name, "gpt-5.4");
@@ -550,10 +591,14 @@ mod tests {
             .find(|model| model.slug == "glm-5v-turbo")
             .unwrap();
         assert_eq!(
-            glm_5v.input_modalities,
-            vec![InputModality::Text, InputModality::Image]
+            glm_5v.capabilities.input,
+            vec![ModelModality::Text, ModelModality::Image]
         );
-        assert!(glm_5v.capabilities.contains(ModelCapabilities::VISION));
+        assert!(
+            glm_5v
+                .capabilities
+                .supports_input_modality(ModelModality::Image)
+        );
     }
 
     #[test]

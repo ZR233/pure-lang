@@ -25,6 +25,7 @@ import type {
   StudioTimelineChange,
   StudioTurnStatus,
   TimelineItem,
+  TimelineAttachment,
   TimelineItemDeltaEvent,
   TurnPhase,
   TurnStatus,
@@ -144,7 +145,7 @@ export type StudioAction =
       sessionRuntime?: SessionRuntime | null;
       statusText: string;
     }
-  | { type: "promptSubmitted"; status: string; startedAt: number; prompt: string };
+  | { type: "promptSubmitted"; status: string; startedAt: number; prompt: string; attachments?: TimelineAttachment[] };
 
 export const initialStudioState = (startingStatus: string): StudioState => ({
   projects: [],
@@ -482,7 +483,12 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
     case "promptSubmitted":
       const currentRunTimelineBaseSequence = state.timelineNextSequence;
       return {
-        ...appendOptimisticPrompt(removeOptimisticTimelineItems(state), action.prompt, action.startedAt),
+        ...appendOptimisticPrompt(
+          removeOptimisticTimelineItems(state),
+          action.prompt,
+          action.startedAt,
+          action.attachments ?? [],
+        ),
         prompt: "",
         isBusy: true,
         status: action.status,
@@ -926,9 +932,14 @@ function sessionListOrPrevious(
   return sessions.length > 0 ? sessionList(sessions) : previous;
 }
 
-function appendOptimisticPrompt(state: StudioState, prompt: string, startedAt: number): StudioState {
+function appendOptimisticPrompt(
+  state: StudioState,
+  prompt: string,
+  startedAt: number,
+  attachments: TimelineAttachment[] = [],
+): StudioState {
   const content = prompt.trim();
-  if (!content) {
+  if (!content && attachments.length === 0) {
     return state;
   }
   const createdAt = Math.floor(startedAt / 1000);
@@ -944,6 +955,7 @@ function appendOptimisticPrompt(state: StudioState, prompt: string, startedAt: n
     updatedAt: createdAt,
     textChannel: "user",
     content,
+    attachments,
     thinkingChunks: [],
   };
   const waitingItem: TimelineItem = {

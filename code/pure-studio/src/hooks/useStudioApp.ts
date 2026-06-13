@@ -27,6 +27,7 @@ import {
   stopPrompt,
   submitPromptCommand,
   runPrompt,
+  createPromptAttachment,
 } from "../lib/tauri";
 import { errorText } from "../lib/utils";
 import {
@@ -38,6 +39,7 @@ import {
 import { initialStudioState, studioReducer } from "../state/studio-state";
 import type {
   AgentEvent,
+  AttachmentRecord,
   CompileMode,
   McpServerInput,
   InstructionsInput,
@@ -50,6 +52,7 @@ import type {
   StudioEventEnvelope,
   StudioTimelineChange,
   StudioTurnStatus,
+  TimelineAttachment,
   TimelineItem,
 } from "../types";
 
@@ -68,6 +71,27 @@ function providerInput(provider: ProviderRecord) {
         reasoningEfforts: [...model.reasoningEfforts],
         baseInstructions: model.baseInstructions ?? "",
       })),
+  };
+}
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error ?? new Error("failed to read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function timelineAttachmentFromRecord(record: AttachmentRecord): TimelineAttachment {
+  return {
+    id: record.id,
+    mediaType: record.mediaType,
+    filename: record.filename,
+    width: record.width,
+    height: record.height,
+    byteSize: record.byteSize,
+    dataUrl: record.dataUrl,
   };
 }
 
@@ -500,13 +524,22 @@ export function useStudioApp() {
     }
   }
 
-  async function onSendPrompt() {
+  async function onCreatePromptAttachment(file: File): Promise<AttachmentRecord | null> {
+    const sessionId = state.selectedSessionId;
+    if (!sessionId) {
+      return null;
+    }
+    const dataUrl = await fileToDataUrl(file);
+    return createPromptAttachment(sessionId, dataUrl, file.name);
+  }
+
+  async function onSendPrompt(attachments: AttachmentRecord[] = []) {
     const content = state.prompt.trim();
     const sessionId = state.selectedSessionId;
-    if (!content || !sessionId || state.isBusy) {
+    if ((!content && attachments.length === 0) || !sessionId || state.isBusy) {
       return;
     }
-    await submitPrompt(sessionId, content);
+    await submitPrompt(sessionId, content, attachments);
   }
 
   async function onSendPromptContent(content: string) {
@@ -591,22 +624,24 @@ export function useStudioApp() {
     }
     const sessionId = state.selectedSessionId;
     if (sessionId) {
-      await submitPrompt(sessionId, trimmed);
+      await submitPrompt(sessionId, trimmed, []);
       return true;
     }
     return false;
   }
 
-  async function submitPrompt(sessionId: string, content: string) {
+  async function submitPrompt(sessionId: string, content: string, attachments: AttachmentRecord[] = []) {
+    const timelineAttachments = attachments.map(timelineAttachmentFromRecord);
     dispatch({
       type: "promptSubmitted",
       status: t("status.running"),
       startedAt: Date.now(),
       prompt: content,
+      attachments: timelineAttachments,
     });
     try {
       if (isTauriRuntime()) {
-        await submitPromptCommand(sessionId, content);
+        await submitPromptCommand(sessionId, content, attachments.map((attachment) => attachment.id));
       } else {
         const payload = await runPrompt(sessionId, content);
         const turnError = payload.turnError ?? payload.turnAbortReason ?? t("subagent.providerError");
@@ -826,6 +861,7 @@ export function useStudioApp() {
     onSelectSession,
     onDeleteSession,
     onSetSessionMode,
+    onCreatePromptAttachment,
     onSendPrompt,
     onSendPromptContent,
     onResolveInteraction,

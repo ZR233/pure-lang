@@ -1,8 +1,8 @@
 use anyhow::Result;
-use pl_protocol::Message;
+use pl_protocol::{ContentPart, ImageSource, Message, MessageContent};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ConnectionTrait, DatabaseBackend, DatabaseConnection,
-    DatabaseTransaction, EntityTrait, Statement,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseBackend,
+    DatabaseConnection, DatabaseTransaction, EntityTrait, QueryFilter, Statement,
 };
 
 use crate::studio::entities;
@@ -24,6 +24,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/0013_session_skills.sql"),
     include_str!("../../migrations/0014_session_handoffs.sql"),
     include_str!("../../migrations/0015_studio_events.sql"),
+    include_str!("../../migrations/0016_attachments.sql"),
 ];
 
 pub(super) async fn insert_message_with_tx(
@@ -35,8 +36,9 @@ pub(super) async fn insert_message_with_tx(
     use entities::message as message_entity;
     let (role, content) = message_to_row_parts(message)?;
     let metadata_json = serde_json::to_string(&message.metadata)?;
+    let message_id = new_id("message");
     message_entity::ActiveModel {
-        id: Set(new_id("message")),
+        id: Set(message_id.clone()),
         session_id: Set(session_id.to_string()),
         role: Set(role),
         content: Set(content),
@@ -46,7 +48,45 @@ pub(super) async fn insert_message_with_tx(
     }
     .insert(tx)
     .await?;
+    bind_message_attachments_with_tx(tx, session_id, &message_id, message).await?;
     Ok(())
+}
+
+pub(super) async fn bind_message_attachments_with_tx(
+    tx: &DatabaseTransaction,
+    session_id: &str,
+    message_id: &str,
+    message: &Message,
+) -> Result<()> {
+    use entities::attachment;
+    for attachment_id in attachment_ids(message) {
+        if let Some(existing) = attachment::Entity::find_by_id(attachment_id.clone())
+            .filter(attachment::Column::SessionId.eq(session_id.to_string()))
+            .one(tx)
+            .await?
+        {
+            let mut active: attachment::ActiveModel = existing.into();
+            active.message_id = Set(Some(message_id.to_string()));
+            active.update(tx).await?;
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn attachment_ids(message: &Message) -> Vec<String> {
+    match &message.content {
+        MessageContent::Text(_) => Vec::new(),
+        MessageContent::MultiPart(parts) => parts
+            .iter()
+            .filter_map(|part| match part {
+                ContentPart::Image {
+                    source: ImageSource::Attachment { attachment_id },
+                    ..
+                } => Some(attachment_id.clone()),
+                ContentPart::Text { .. } | ContentPart::Image { .. } => None,
+            })
+            .collect(),
+    }
 }
 
 pub(super) async fn touch_session_with_tx(

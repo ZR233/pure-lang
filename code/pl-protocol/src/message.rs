@@ -38,17 +38,24 @@ pub enum MessageContent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ContentPart {
-    pub part_type: ContentPartType,
-    pub text: String,
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ContentPart {
+    Text {
+        text: String,
+    },
+    Image {
+        source: ImageSource,
+        media_type: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        filename: Option<String>,
+    },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ContentPartType {
-    Text,
-    Image,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ImageSource {
+    Attachment { attachment_id: String },
+    InlineBase64 { data: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

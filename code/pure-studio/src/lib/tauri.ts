@@ -1,6 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import type {
   BootstrapPayload,
+  AttachmentRecord,
   CompileMode,
   ConfigPayload,
   DiscoveredSkillsPayload,
@@ -383,7 +384,28 @@ export function runPrompt(sessionId: string, prompt: string) {
   });
 }
 
-export function submitPromptCommand(sessionId: string, prompt: string) {
+export function createPromptAttachment(sessionId: string, dataUrl: string, filename?: string | null) {
+  if (!isTauriRuntime()) {
+    return Promise.resolve<AttachmentRecord>({
+      id: `preview-attachment-${Date.now()}`,
+      sessionId,
+      mediaType: dataUrl.slice(5, dataUrl.indexOf(";base64")) || "image/png",
+      filename: filename ?? null,
+      byteSize: dataUrl.length,
+      width: null,
+      height: null,
+      createdAt: Math.floor(Date.now() / 1000),
+      dataUrl,
+    });
+  }
+  return invoke<AttachmentRecord>("create_prompt_attachment", {
+    sessionId,
+    dataUrl,
+    filename: filename ?? null,
+  });
+}
+
+export function submitPromptCommand(sessionId: string, prompt: string, attachmentIds: string[] = []) {
   if (!isTauriRuntime()) {
     previewInterruptedSessions.delete(sessionId);
     return Promise.resolve<SubmitPromptResponse>(
@@ -394,7 +416,7 @@ export function submitPromptCommand(sessionId: string, prompt: string) {
       }),
     );
   }
-  return invoke<SubmitPromptResponse>("submit_prompt", { sessionId, prompt });
+  return invoke<SubmitPromptResponse>("submit_prompt", { sessionId, prompt, attachmentIds });
 }
 
 export function resolveInteraction(interactionId: string, resolution: InteractionResolution) {

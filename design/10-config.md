@@ -146,8 +146,7 @@ input_price_per_mtok = 1.0
 output_price_per_mtok = 2.0
 cache_read_price_per_mtok = 0.02
 reasoning_efforts = ["high", "max"]
-capabilities = ["streaming", "function_calling", "parallel_tool_calls", "reasoning"]
-input_modalities = ["text"]
+capabilities = { streaming = true, temperature = false, reasoning = true, web_search = false, input = ["text"], output = ["text"], tools = { function_calling = true, parallel_tool_calls = true, custom_tools = false, freeform_tools = false }, interleaved = { field = "reasoning_content" } }
 base_instructions = ""
 truncation_policy = { mode = "tokens", limit = 10000 }
 
@@ -163,8 +162,7 @@ input_price_per_mtok = 3.0
 output_price_per_mtok = 6.0
 cache_read_price_per_mtok = 0.025
 reasoning_efforts = ["high", "max"]
-capabilities = ["streaming", "function_calling", "parallel_tool_calls", "reasoning"]
-input_modalities = ["text"]
+capabilities = { streaming = true, temperature = false, reasoning = true, web_search = false, input = ["text"], output = ["text"], tools = { function_calling = true, parallel_tool_calls = true, custom_tools = false, freeform_tools = false }, interleaved = { field = "reasoning_content" } }
 base_instructions = ""
 truncation_policy = { mode = "tokens", limit = 10000 }
 ```
@@ -204,11 +202,13 @@ Anthropic 只在 `pl-model` 的 protocol 层保留占位，未实现 provider ru
 - `cache_read_price_per_mtok`
 - `reasoning_efforts`
 - `capabilities`
-- `input_modalities`
+- `request_profile`
 - `truncation_policy`
 - `base_instructions`
 
 `used_fallback` 是运行时状态，不写入 TOML。
+
+`capabilities` 是破坏性 schema v3 的结构化能力矩阵，不再兼容旧数组字段。旧的 `capabilities = [...]` 或 `input_modalities = [...]` 会导致配置校验失败，并由 Studio 备份旧文件后生成新 schema 配置。视觉模型必须显式声明 `input = ["text", "image"]`；非视觉模型即使 provider wire API 接受图片字段，也会在本地被拒绝。
 
 价格字段为可选字段，用于本地 UI 估算费用。`currency` 只作为展示单位，系统不做汇率转换；三个 `*_price_per_mtok` 字段均表示每百万 token 单价。缺失任一参与计算的价格或缺失 `currency` 时，本次 token 仍进入上下文和用量统计，但费用标记为未计价。
 

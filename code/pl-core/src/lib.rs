@@ -30,10 +30,10 @@ pub use agent::{
 pub use config::{
     BuiltinMcpServerState, ConfigPaths, ConfigStore, DEFAULT_PROJECT_DOC_MAX_BYTES,
     EffectiveMcpServerConfig, InstructionsConfig, McpServerConfig, McpServerMutationPolicy,
-    McpServerSourceKind, McpServerStatusKind, McpServerTransport, ModelCapabilityConfig,
-    ModelConfig, ModelRole, ProviderConfig, PureConfig, ReasoningEffort, ResolvedRoleConfig,
-    RoleConfig, RoleConfigs, RuntimeConfig, SkillsConfig, SystemSkillsConfig,
-    TruncationPolicyConfig, active_mcp_server_names, builtin_mcp_server_ids, effective_mcp_servers,
+    McpServerSourceKind, McpServerStatusKind, McpServerTransport, ModelConfig, ModelRole,
+    ProviderConfig, PureConfig, ReasoningEffort, ResolvedRoleConfig, RoleConfig, RoleConfigs,
+    RuntimeConfig, SkillsConfig, SystemSkillsConfig, TruncationPolicyConfig,
+    active_mcp_server_names, builtin_mcp_server_ids, effective_mcp_servers,
     normalize_builtin_mcp_server_states, zhipu_coding_plan_token,
 };
 pub use config_editor::{
@@ -56,12 +56,14 @@ pub use pl_lsp::{
     LspQueryResult, LspRange, LspRuntimeRegistry, LspServerSnapshot,
 };
 pub use pl_model::{
-    DeepSeekBalanceInfo, DeepSeekBalanceUsage, InputModality, ProviderKind, ToolWirePolicy,
-    TruncationMode, ZhipuCodingPlanUsage, ZhipuQuotaLimit, ZhipuQuotaWindow, ZhipuToolUsageDetail,
+    DeepSeekBalanceInfo, DeepSeekBalanceUsage, ModelCapabilities, ModelModality,
+    ModelRequestProfile, ProviderKind, ReasoningInterleaved, ReasoningInterleavedField,
+    ToolCapabilities, ToolWirePolicy, TruncationMode, ZhipuCodingPlanUsage, ZhipuQuotaLimit,
+    ZhipuQuotaWindow, ZhipuToolUsageDetail,
 };
 pub use pl_protocol::{
     AgentEvent, AgentEventReceiver, AgentEventSender, AgentRuntimeDelta, BudgetLimitKind,
-    BudgetUsage, ContentPart, ContentPartType, EnabledToolsEvent, ErrorSeverity,
+    BudgetUsage, ContentPart, EnabledToolsEvent, ErrorSeverity, ImageSource,
     InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,
     InteractionResolution, InteractionScope, InteractionStatus, Message, MessageContent,
     MessageRole, OutputStream, PermissionLevel, PipelineStage, PlanConfirmationResolution,
@@ -77,11 +79,12 @@ pub use session::CoreSession;
 pub use skill::{SkillCatalog, SkillMetadata, SkillSourceKind};
 pub use studio::{
     AgentSnapshotRecord as StudioAgentSnapshotRecord,
-    AgentTimelineEventRecord as StudioAgentTimelineEventRecord, InteractionEmitter,
-    InteractionEmitterFuture, InteractionRuntime, PlanImplementationHandoffStart, ProjectRecord,
-    SessionHandoffKind, SessionHandoffRecord, SessionHandoffStatus, SessionRecord,
-    SessionRuntimeRecord, SessionSkillRecord, SessionVisibility, StudioEventRuntime,
-    StudioPromptOutcome, StudioRuntime, StudioStore, TimelineEventRecord, resolution_matches_kind,
+    AgentTimelineEventRecord as StudioAgentTimelineEventRecord, AttachmentRecord,
+    InteractionEmitter, InteractionEmitterFuture, InteractionRuntime, MaterializedAttachment,
+    PlanImplementationHandoffStart, ProjectRecord, RunPromptRequest, SessionHandoffKind,
+    SessionHandoffRecord, SessionHandoffStatus, SessionRecord, SessionRuntimeRecord,
+    SessionSkillRecord, SessionVisibility, StudioEventRuntime, StudioPromptOutcome, StudioRuntime,
+    StudioStore, TimelineEventRecord, resolution_matches_kind,
 };
 pub use tool::{
     AskUserTool, BashInput, BashTool, LspLanguageTool, LspQueryTool, OutputTruncation,

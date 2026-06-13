@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use pl_model::{
     CompletionRequest, ModelProvider, ReasoningConfig, SharedModelProvider, TokenUsage,
 };
-use pl_protocol::{AgentEventSender, Message, MessageContent, MessageRole, PureError, Result};
+use pl_protocol::{
+    AgentEventSender, ContentPart, Message, MessageContent, MessageRole, PureError, Result,
+};
 
 use crate::session::CoreSession;
 
@@ -234,7 +236,10 @@ fn estimate_message_tokens(message: &Message) -> u64 {
         MessageContent::Text(text) => estimate_text_tokens(text),
         MessageContent::MultiPart(parts) => parts
             .iter()
-            .map(|part| estimate_text_tokens(&part.text))
+            .map(|part| match part {
+                ContentPart::Text { text } => estimate_text_tokens(text),
+                ContentPart::Image { .. } => 0,
+            })
             .sum(),
     }
 }

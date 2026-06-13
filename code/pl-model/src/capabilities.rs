@@ -1,87 +1,149 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-bitflags::bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct ModelCapabilities: u32 {
-        const STREAMING             = 0b00000001;
-        const FUNCTION_CALLING      = 0b00000010;
-        const VISION                = 0b00000100;
-        const PARALLEL_TOOL_CALLS   = 0b00001000;
-        const REASONING             = 0b00010000;
-        const WEB_SEARCH            = 0b00100000;
-        const CUSTOM_TOOLS          = 0b01000000;
-        const FREEFORM_TOOLS        = 0b10000000;
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelCapabilities {
+    #[serde(default)]
+    pub streaming: bool,
+    #[serde(default)]
+    pub temperature: bool,
+    #[serde(default)]
+    pub reasoning: bool,
+    #[serde(default)]
+    pub web_search: bool,
+    #[serde(default)]
+    pub input: Vec<ModelModality>,
+    #[serde(default)]
+    pub output: Vec<ModelModality>,
+    #[serde(default)]
+    pub tools: ToolCapabilities,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interleaved: Option<ReasoningInterleaved>,
 }
 
-impl Serialize for ModelCapabilities {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let flags: Vec<&str> = [
-            (Self::STREAMING, "STREAMING"),
-            (Self::FUNCTION_CALLING, "FUNCTION_CALLING"),
-            (Self::VISION, "VISION"),
-            (Self::PARALLEL_TOOL_CALLS, "PARALLEL_TOOL_CALLS"),
-            (Self::REASONING, "REASONING"),
-            (Self::WEB_SEARCH, "WEB_SEARCH"),
-            (Self::CUSTOM_TOOLS, "CUSTOM_TOOLS"),
-            (Self::FREEFORM_TOOLS, "FREEFORM_TOOLS"),
-        ]
-        .iter()
-        .filter(|(flag, _)| self.contains(*flag))
-        .map(|(_, name)| *name)
-        .collect();
-        flags.serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for ModelCapabilities {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let flags: Vec<String> = Vec::deserialize(deserializer)?;
-        let mut caps = Self::empty();
-        for flag in &flags {
-            match flag.as_str() {
-                "STREAMING" => caps |= Self::STREAMING,
-                "FUNCTION_CALLING" => caps |= Self::FUNCTION_CALLING,
-                "VISION" => caps |= Self::VISION,
-                "PARALLEL_TOOL_CALLS" => caps |= Self::PARALLEL_TOOL_CALLS,
-                "REASONING" => caps |= Self::REASONING,
-                "WEB_SEARCH" => caps |= Self::WEB_SEARCH,
-                "CUSTOM_TOOLS" => caps |= Self::CUSTOM_TOOLS,
-                "FREEFORM_TOOLS" => caps |= Self::FREEFORM_TOOLS,
-                _ => {}
-            }
-        }
-        Ok(caps)
+impl Default for ModelCapabilities {
+    fn default() -> Self {
+        Self::text_only()
     }
 }
 
 impl ModelCapabilities {
-    pub fn supports_streaming(self) -> bool {
-        self.contains(Self::STREAMING)
+    pub fn text_only() -> Self {
+        Self {
+            streaming: true,
+            temperature: true,
+            reasoning: false,
+            web_search: false,
+            input: vec![ModelModality::Text],
+            output: vec![ModelModality::Text],
+            tools: ToolCapabilities {
+                function_calling: true,
+                parallel_tool_calls: false,
+                custom_tools: false,
+                freeform_tools: false,
+            },
+            interleaved: None,
+        }
     }
 
-    pub fn supports_function_calling(self) -> bool {
-        self.contains(Self::FUNCTION_CALLING)
+    pub fn supports_streaming(&self) -> bool {
+        self.streaming
     }
 
-    pub fn supports_parallel_tool_calls(self) -> bool {
-        self.contains(Self::PARALLEL_TOOL_CALLS)
+    pub fn supports_temperature(&self) -> bool {
+        self.temperature
     }
 
-    pub fn supports_custom_tools(self) -> bool {
-        self.contains(Self::CUSTOM_TOOLS)
+    pub fn supports_reasoning(&self) -> bool {
+        self.reasoning
     }
 
-    pub fn supports_freeform_tools(self) -> bool {
-        self.contains(Self::FREEFORM_TOOLS)
+    pub fn supports_web_search(&self) -> bool {
+        self.web_search
     }
+
+    pub fn supports_function_calling(&self) -> bool {
+        self.tools.function_calling
+    }
+
+    pub fn supports_parallel_tool_calls(&self) -> bool {
+        self.tools.parallel_tool_calls
+    }
+
+    pub fn supports_custom_tools(&self) -> bool {
+        self.tools.custom_tools
+    }
+
+    pub fn supports_freeform_tools(&self) -> bool {
+        self.tools.freeform_tools
+    }
+
+    pub fn supports_input_modality(&self, modality: ModelModality) -> bool {
+        self.input.contains(&modality)
+    }
+
+    pub fn supports_output_modality(&self, modality: ModelModality) -> bool {
+        self.output.contains(&modality)
+    }
+
+    pub fn with_provider_capabilities(
+        mut self,
+        provider: ProviderCapabilities,
+        native_custom_tools: bool,
+    ) -> Self {
+        if !provider.supports_parallel_tool_calls() {
+            self.tools.parallel_tool_calls = false;
+        }
+        if !provider.supports_function_calling() {
+            self.tools = ToolCapabilities::default();
+        }
+        if !provider.supports_vision() {
+            self.input
+                .retain(|modality| *modality != ModelModality::Image);
+            self.output
+                .retain(|modality| *modality != ModelModality::Image);
+        }
+        if !native_custom_tools {
+            self.tools.custom_tools = false;
+            self.tools.freeform_tools = false;
+        }
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelModality {
+    Text,
+    Image,
+    Audio,
+    Video,
+    Pdf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ToolCapabilities {
+    #[serde(default)]
+    pub function_calling: bool,
+    #[serde(default)]
+    pub parallel_tool_calls: bool,
+    #[serde(default)]
+    pub custom_tools: bool,
+    #[serde(default)]
+    pub freeform_tools: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReasoningInterleaved {
+    pub field: ReasoningInterleavedField,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningInterleavedField {
+    Reasoning,
+    ReasoningContent,
+    ReasoningDetails,
 }
 
 bitflags::bitflags! {
@@ -95,7 +157,19 @@ bitflags::bitflags! {
 }
 
 impl ProviderCapabilities {
+    pub fn supports_streaming(self) -> bool {
+        self.contains(Self::STREAMING)
+    }
+
+    pub fn supports_function_calling(self) -> bool {
+        self.contains(Self::FUNCTION_CALLING)
+    }
+
     pub fn supports_parallel_tool_calls(self) -> bool {
         self.contains(Self::PARALLEL_TOOL_CALLS)
+    }
+
+    pub fn supports_vision(self) -> bool {
+        self.contains(Self::VISION)
     }
 }

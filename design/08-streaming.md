@@ -31,7 +31,9 @@ timeline item 类型固定为：
 
 `TimelineDelta::Text` 同样携带 `textChannel`，保证 delta 先于 start 到达时前端也能创建正确通道的 text item。旧的 `role` 字段不再作为 Studio 协议语义入口。
 
-每个 turn 被接收后，用户输入必须作为该 turn 的第一个可见 timeline item 记录和广播。enabled tools、`turn`、`inference` 等内部诊断或运行态 item 不得在 sequence 上排到用户输入之前，避免前端等待状态、内部状态或历史回放出现在用户问题上方。
+用户 `text` item 可以携带 `attachments` 元数据，当前只用于图片输入缩略图展示。timeline 的持久语义只依赖附件 id、文件名、媒体类型、尺寸和大小；GUI 事件可以携带派生的 `dataUrl` 预览值用于即时缩略图。模型可见的 base64 图片内容由 `pl-core` 在请求前按附件 id materialize，不写入消息正文。
+
+每个 turn 被接收后，用户输入必须作为该 turn 的第一个可见 timeline item 记录和广播。纯图片输入也必须产生用户 `text` item，content 可以为空但 attachments 不得为空。enabled tools、`turn`、`inference` 等内部诊断或运行态 item 不得在 sequence 上排到用户输入之前，避免前端等待状态、内部状态或历史回放出现在用户问题上方。
 
 历史加载必须暴露 `nextSequence`/`timelineNextSequence` 作为 timeline projection 游标；Studio runtime 事件另有 `StudioEventEnvelope.sequence` 作为补拉 cursor。Tauri 的历史 timeline DTO 返回 append-only `TimelineEventDto[]`，而不是后端预折叠的 `TimelineItem[]`。前端只能用后端游标判断 snapshot 新旧，不能用 item 列表里的最大 `sequence` 代替游标。旧 snapshot 只能补齐当前状态中不存在或尚未应用的事件，不能覆盖已经通过实时事件接收的新 turn 内容。前端 optimistic item 可以使用临时本地顺序参与展示，但不得预占或推进后端 cursor。
 

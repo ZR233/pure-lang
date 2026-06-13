@@ -20,7 +20,7 @@ pub use mcp::{
     builtin_mcp_server_ids, effective_mcp_servers, normalize_builtin_mcp_server_states,
     validate_mcp_identifier, zhipu_coding_plan_token,
 };
-pub use provider::{ModelCapabilityConfig, ModelConfig, ProviderConfig, TruncationPolicyConfig};
+pub use provider::{ModelConfig, ProviderConfig, TruncationPolicyConfig};
 pub use role::{ModelRole, ReasoningEffort, ResolvedRoleConfig, RoleConfig, RoleConfigs};
 pub use runtime::{RuntimeConfig, SkillsConfig, SystemSkillsConfig};
 pub use store::{ConfigPaths, ConfigStore};

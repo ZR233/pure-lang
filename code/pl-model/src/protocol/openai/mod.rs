@@ -1,8 +1,9 @@
 use std::collections::{HashMap, VecDeque};
 
 use pl_protocol::{
-    Message, MessageContent, MessageRole, PureError, Result, TOOL_CALLS_METADATA_KEY,
-    ToolCallHistoryMetadata, ToolCallKind, ToolMetadataCompatibility, ToolResultMetadata,
+    ContentPart, ImageSource, Message, MessageContent, MessageRole, PureError, Result,
+    TOOL_CALLS_METADATA_KEY, ToolCallHistoryMetadata, ToolCallKind, ToolMetadataCompatibility,
+    ToolResultMetadata,
 };
 use serde::Serialize;
 
@@ -165,9 +166,7 @@ impl ResponsesRequestBody {
                 MessageRole::System | MessageRole::User | MessageRole::Assistant => {
                     input.push(ResponsesInputItem::message(
                         ResponsesRole::from_message_role(msg.role),
-                        vec![ResponsesContent::InputText {
-                            text: message_content_text(&msg.content),
-                        }],
+                        responses_content_for_message(&msg.content, msg.role)?,
                     ));
                 }
             }
@@ -277,6 +276,7 @@ impl ResponsesRole {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ResponsesContent {
     InputText { text: String },
+    InputImage { image_url: String },
     OutputText { text: String },
 }
 
@@ -435,7 +435,7 @@ impl ChatRequestBody {
                     content: message_content_text(&msg.content),
                 }),
                 MessageRole::User => messages.push(ChatMessage::User {
-                    content: message_content_text(&msg.content),
+                    content: chat_content_for_user(&msg.content)?,
                 }),
                 MessageRole::Assistant => messages.push(ChatMessage::Assistant {
                     content: Some(message_content_text(&msg.content)),
@@ -492,7 +492,7 @@ enum ChatMessage {
         content: String,
     },
     User {
-        content: String,
+        content: ChatMessageContent,
     },
     Assistant {
         content: Option<String>,
@@ -505,6 +505,25 @@ enum ChatMessage {
         tool_call_id: String,
         content: String,
     },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+enum ChatMessageContent {
+    Text(String),
+    Parts(Vec<ChatContentPart>),
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ChatContentPart {
+    Text { text: String },
+    ImageUrl { image_url: ChatImageUrl },
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ChatImageUrl {
+    url: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -623,9 +642,92 @@ fn message_content_text(content: &MessageContent) -> String {
         MessageContent::Text(text) => text.clone(),
         MessageContent::MultiPart(parts) => parts
             .iter()
-            .map(|part| part.text.as_str())
+            .filter_map(|part| match part {
+                ContentPart::Text { text } => Some(text.as_str()),
+                ContentPart::Image { .. } => None,
+            })
             .collect::<Vec<_>>()
             .join("\n"),
+    }
+}
+
+fn responses_content_for_message(
+    content: &MessageContent,
+    role: MessageRole,
+) -> Result<Vec<ResponsesContent>> {
+    match content {
+        MessageContent::Text(text) => {
+            let part = match role {
+                MessageRole::Assistant => ResponsesContent::OutputText { text: text.clone() },
+                MessageRole::System | MessageRole::User | MessageRole::Tool => {
+                    ResponsesContent::InputText { text: text.clone() }
+                }
+            };
+            Ok(vec![part])
+        }
+        MessageContent::MultiPart(parts) => {
+            let mut content = Vec::new();
+            for part in parts {
+                match part {
+                    ContentPart::Text { text } => {
+                        if role == MessageRole::Assistant {
+                            content.push(ResponsesContent::OutputText { text: text.clone() });
+                        } else {
+                            content.push(ResponsesContent::InputText { text: text.clone() });
+                        }
+                    }
+                    ContentPart::Image {
+                        source, media_type, ..
+                    } => {
+                        content.push(ResponsesContent::InputImage {
+                            image_url: data_url(source, media_type)?,
+                        });
+                    }
+                }
+            }
+            Ok(content)
+        }
+    }
+}
+
+fn chat_content_for_user(content: &MessageContent) -> Result<ChatMessageContent> {
+    match content {
+        MessageContent::Text(text) => Ok(ChatMessageContent::Text(text.clone())),
+        MessageContent::MultiPart(parts) => {
+            let mut has_image = false;
+            let mut chat_parts = Vec::new();
+            for part in parts {
+                match part {
+                    ContentPart::Text { text } => {
+                        chat_parts.push(ChatContentPart::Text { text: text.clone() });
+                    }
+                    ContentPart::Image {
+                        source, media_type, ..
+                    } => {
+                        has_image = true;
+                        chat_parts.push(ChatContentPart::ImageUrl {
+                            image_url: ChatImageUrl {
+                                url: data_url(source, media_type)?,
+                            },
+                        });
+                    }
+                }
+            }
+            if has_image {
+                Ok(ChatMessageContent::Parts(chat_parts))
+            } else {
+                Ok(ChatMessageContent::Text(message_content_text(content)))
+            }
+        }
+    }
+}
+
+fn data_url(source: &ImageSource, media_type: &str) -> Result<String> {
+    match source {
+        ImageSource::InlineBase64 { data } => Ok(format!("data:{media_type};base64,{data}")),
+        ImageSource::Attachment { attachment_id } => Err(protocol_error(format!(
+            "image attachment {attachment_id} was not materialized before model request"
+        ))),
     }
 }
 
@@ -731,7 +833,7 @@ fn protocol_error(message: impl Into<String>) -> PureError {
 mod tests {
     use std::collections::HashMap;
 
-    use pl_protocol::{Message, MessageContent, MessageRole};
+    use pl_protocol::{ContentPart, ImageSource, Message, MessageContent, MessageRole};
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -741,6 +843,26 @@ mod tests {
         Message {
             role,
             content: MessageContent::Text(content.to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        }
+    }
+
+    fn image_message() -> Message {
+        Message {
+            role: MessageRole::User,
+            content: MessageContent::MultiPart(vec![
+                ContentPart::Text {
+                    text: "describe".to_string(),
+                },
+                ContentPart::Image {
+                    source: ImageSource::InlineBase64 {
+                        data: "aGVsbG8=".to_string(),
+                    },
+                    media_type: "image/png".to_string(),
+                    filename: Some("sample.png".to_string()),
+                },
+            ]),
             reasoning_content: None,
             metadata: HashMap::new(),
         }
@@ -811,6 +933,59 @@ mod tests {
         assert_eq!(
             chat_body["messages"][0]["content"],
             serde_json::json!("base"),
+        );
+    }
+
+    #[test]
+    fn responses_maps_image_parts_to_input_image() {
+        let request = CompletionRequest {
+            model: "gpt-5.5".to_string(),
+            instructions: None,
+            messages: vec![image_message()],
+            tools: Vec::new(),
+            tool_choice: "auto".to_string(),
+            parallel_tool_calls: false,
+            temperature: None,
+            max_tokens: None,
+            reasoning: None,
+            stream: true,
+            timeline: None,
+        };
+
+        let body = OpenAiProtocol::responses().build_request_body(&request);
+
+        assert_eq!(body["input"][0]["content"][0]["type"], "input_text");
+        assert_eq!(body["input"][0]["content"][0]["text"], "describe");
+        assert_eq!(body["input"][0]["content"][1]["type"], "input_image");
+        assert_eq!(
+            body["input"][0]["content"][1]["image_url"],
+            "data:image/png;base64,aGVsbG8="
+        );
+    }
+
+    #[test]
+    fn chat_maps_image_parts_to_content_array() {
+        let request = CompletionRequest {
+            model: "glm-5v".to_string(),
+            instructions: None,
+            messages: vec![image_message()],
+            tools: Vec::new(),
+            tool_choice: "auto".to_string(),
+            parallel_tool_calls: false,
+            temperature: None,
+            max_tokens: None,
+            reasoning: None,
+            stream: true,
+            timeline: None,
+        };
+
+        let body = OpenAiProtocol::chat(ChatReasoningStyle::Zhipu).build_request_body(&request);
+
+        assert_eq!(body["messages"][0]["content"][0]["type"], "text");
+        assert_eq!(body["messages"][0]["content"][1]["type"], "image_url");
+        assert_eq!(
+            body["messages"][0]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,aGVsbG8="
         );
     }
 
