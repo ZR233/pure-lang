@@ -16,17 +16,17 @@ reducer 分域：
 
 所有 Tauri 事件只负责 `dispatch(action)`。运行中事件只监听 `studio-runtime-event`，旧 `studio-agent-event`、`studio-interaction-changed`、`studio-session-mode-updated`、`studio-session-handoff-started`、`studio-prompt-failed`、MCP/LSP health sideband 不再作为 UI 状态入口。
 
-状态按 session 归一化保存：`sessionsById`、`sessionOrder`、`selectedSessionId`、`sessionViews[sessionId]`。每个 session view 独立保存 `cursor`、`stale`、`turn`、`timelineItems`、`timelineOrder`、`agentTimelineEvents`、`agents`、`sessionRuntime`、`interactions` 和 `planStates`。非当前 session 的事件不得丢弃；它们更新后台 session 的 badge、turn 状态和 cursor，只有当前 session 事件才更新可见 timeline、footer 和状态栏。
+状态按 session 归一化保存：`sessionsById`、`sessionOrder`、`selectedSessionId`、`sessionViews[sessionId]`。每个 session view 独立保存 `cursor`、`stale`、`turn`、`timelineEvents`、`timelineItems`、`timelineOrder`、`agentTimelineEvents`、`agents`、`sessionRuntime`、`interactions` 和 `planStates`。非当前 session 的事件不得丢弃；它们更新后台 session 的 badge、turn 状态和 cursor，只有当前 session 事件才更新可见 timeline、footer 和状态栏。
 
 ## 2. Timeline 视图
 
-主区保持单线 timeline 语义，数据来源统一为 item-first timeline：
+主区保持单线 timeline 语义，数据来源统一为 append-only timeline event log：
 
-- 持久化 `timelineItems`
-- 运行中 `TimelineItemStarted`
-- 运行中 `TimelineItemDelta`
-- 运行中 `TimelineItemCompleted`
-- 运行中 `TimelineItemFailed`
+- 历史 `TimelineEventDto`
+- 运行中 `StudioTimelineChange::Started`
+- 运行中 `StudioTimelineChange::Delta`
+- 运行中 `StudioTimelineChange::Completed`
+- 运行中 `StudioTimelineChange::Failed`
 
 约束：
 
@@ -58,12 +58,14 @@ reducer 分域：
 
 前端 reducer 的 timeline 状态固定为：
 
+- `timelineEvents: Map<sequence, TimelineEventRecord>`
 - `timelineItems: Map<itemId, TimelineItem>`
 - `timelineOrder: string[]`
+- `timelineNextSequence: number`
 
-`timelineOrder` 只在 item 首次出现时按 `sequence` 插入；后续 delta/completed/failed 不改变展示位置。组件不得再把 `messages`、运行中 tool map、agent events 和 trace items 临时拼接成主 timeline。工具聚合与普通 trace 过滤只能作为 `timelineEntries` 派生显示层逻辑，不能写回 reducer 状态或后端 DTO。
+`timelineItems` 是前端从 `timelineEvents` 重放得到的 view model，不作为 Tauri command 的输入 DTO。`timelineOrder` 按每个 item 已知的最早 timeline `sequence` 稳定排序；delta 先到再收到 start/completed 时可以用更早的 item sequence 修正顺序，但不得覆盖已经累积的内容。组件不得再把 `messages`、运行中 tool map、agent events 和 trace items 临时拼接成主 timeline。工具聚合与普通 trace 过滤只能作为 `timelineEntries` 派生显示层逻辑，不能写回 reducer 状态或后端 DTO。
 
-同一组 `TraceEvent` 在 Tauri snapshot fold 和前端 live reducer 中必须收敛到相同 `TimelineItem`。fold 规则需要能处理 start/delta/completed 的轻微乱序：delta 先到时可以创建最小 item，后续 start/completed 必须补全 `tool/agent/inference/usage` 等结构化字段，不能丢弃已累积的 content、thinking chunks、tool arguments 或 tool result。
+同一组 `TimelineEventDto` 在历史加载、实时事件和补拉事件中必须由同一个前端 reducer 重放，并收敛到相同 `TimelineItem`。fold 规则需要能处理 start/delta/completed 的轻微乱序：delta 先到时可以创建最小 item，后续 start/completed 必须补全 `tool/agent/inference/usage` 等结构化字段，不能丢弃已累积的 content、thinking chunks、tool arguments 或 tool result。
 
 左侧 project 列表的每个项目行右侧提供 `X` 归档按钮。归档 project 不删除磁盘目录，也不修改项目文件；它只归档 Studio 中的 project 记录，并清理该 project 下的 sessions、messages、timeline、agent、runtime 和审批历史。用户重新打开同一路径时复用原 project 记录，但历史会话已经清空，应按新项目入口创建默认会话。归档当前 project 时切换到下一个未归档 project；没有剩余 project 时进入无项目状态。
 
@@ -114,7 +116,7 @@ Markdown 阅读样式属于 timeline 展示层：assistant 正文和 plan 卡片
 - `SessionStateResponse`
 - `StudioEventsResponse`
 
-旧字段别名、旧 payload 解析逻辑、旧 text/thinking/tool delta reducer 分支在方案乙中删除。`SubmitPromptResponse` 只表示后台 turn 已提交，包含 `sessionId`、`turnId` 和当前 cursor；不得携带最终 timeline 结果。`SessionTimelineResponse.items` 与 `StudioEventKind::TimelineChanged` 使用同一个 `TimelineItem` 结构。
+旧字段别名、旧 payload 解析逻辑、旧 text/thinking/tool delta reducer 分支在方案乙中删除。`SubmitPromptResponse` 只表示后台 turn 已提交，包含 `sessionId`、`turnId` 和当前 cursor；不得携带最终 timeline 结果。`SessionTimelineResponse.events` 返回 `TimelineEventDto[]`，其 `payload` 与 `TraceEventKind` 的 camelCase serde 形状一致；`TimelineItem` 只作为前端折叠后的 view model。
 
 ## 5. 选择器与派生数据
 

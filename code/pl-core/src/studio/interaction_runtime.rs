@@ -114,6 +114,37 @@ impl InteractionRuntime {
         Ok(())
     }
 
+    pub async fn cancel_transient_interactions(
+        &self,
+        session_id: &str,
+        reason: &str,
+        emitter: InteractionEmitter,
+    ) -> Result<()> {
+        let pending = self.store.list_pending_interactions(session_id).await?;
+        for mut interaction in pending {
+            if interaction.kind == InteractionKind::PlanConfirmation {
+                continue;
+            }
+            let resolution = cancelled_resolution(&interaction.kind, reason);
+            let now = unix_seconds();
+            interaction.status = InteractionStatus::Cancelled;
+            interaction.updated_at = now;
+            interaction.resolved_at = Some(now);
+            interaction.resolution = Some(resolution.clone());
+            self.persist_and_emit(interaction.clone(), emitter.clone())
+                .await?;
+            if let Some(waiter) = self
+                .waiters
+                .lock()
+                .await
+                .remove(&interaction.interaction_id)
+            {
+                let _ = waiter.sender.send(resolution);
+            }
+        }
+        Ok(())
+    }
+
     async fn ask(
         &self,
         session_id: String,
@@ -361,6 +392,43 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(wait_event_count(&events, 2).await, 2);
+    }
+
+    #[tokio::test]
+    async fn cancel_transient_interactions_preserves_plan_confirmation() {
+        let (store, session_id) = store_with_session().await;
+        let runtime = InteractionRuntime::new(store.clone());
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut user_input = user_input_interaction("ask-1");
+        user_input.scope.session_id = session_id.clone();
+        let mut plan = user_input_interaction("plan-1");
+        plan.kind = InteractionKind::PlanConfirmation;
+        plan.scope.session_id = session_id.clone();
+        plan.payload = InteractionPayload::PlanConfirmation {
+            plan_id: "turn-1-plan".to_string(),
+            content: "1. Inspect\n2. Implement".to_string(),
+        };
+
+        runtime
+            .create(user_input.clone(), emitter(events.clone()))
+            .await
+            .unwrap();
+        runtime
+            .create(plan.clone(), emitter(events.clone()))
+            .await
+            .unwrap();
+        runtime
+            .cancel_transient_interactions(&session_id, "turn completed", emitter(events.clone()))
+            .await
+            .unwrap();
+
+        let ask = store.read_interaction("ask-1").await.unwrap().unwrap();
+        let stored_plan = store.read_interaction("plan-1").await.unwrap().unwrap();
+        let pending = store.list_pending_interactions(&session_id).await.unwrap();
+
+        assert_eq!(ask.status, InteractionStatus::Cancelled);
+        assert_eq!(stored_plan.status, InteractionStatus::Pending);
+        assert_eq!(pending, vec![stored_plan]);
     }
 
     #[tokio::test]

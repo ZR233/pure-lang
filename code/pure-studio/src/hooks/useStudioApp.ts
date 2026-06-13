@@ -278,7 +278,7 @@ export function useStudioApp() {
 
   useEffect(() => {
     if (!state.selectedSessionId) {
-      dispatch({ type: "timelineLoaded", sessionId: null, items: [], planStates: [], nextSequence: 0 });
+      dispatch({ type: "timelineLoaded", sessionId: null, events: [], planStates: [], nextSequence: 0 });
       return;
     }
     const sessionId = state.selectedSessionId;
@@ -327,7 +327,7 @@ export function useStudioApp() {
         dispatch({
           type: "timelineLoaded",
           sessionId: payload.sessionId,
-          items: payload.items,
+          events: payload.events,
           planStates: payload.planStates ?? [],
           interactions: payload.interactions ?? [],
           nextSequence: payload.nextSequence,

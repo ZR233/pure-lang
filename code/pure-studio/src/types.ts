@@ -390,7 +390,7 @@ export type TimelineItem = {
 
 export type SessionTimeline = {
   sessionId: string;
-  items: TimelineItem[];
+  events: TimelineEventRecord[];
   planStates?: PlanState[];
   interactions?: InteractionRequest[];
   nextSequence: number;
@@ -635,7 +635,7 @@ export type RunPromptResponse = {
   agentEvents: AgentTimelineEvent[];
   agents: AgentDto[];
   sessionRuntime: SessionRuntime;
-  timelineItems: TimelineItem[];
+  timelineEvents: TimelineEventRecord[];
   planStates?: PlanState[];
   interactions?: InteractionRequest[];
   timelineNextSequence: number;
@@ -688,6 +688,28 @@ export type TimelineItemDeltaEvent = {
     | { type: "toolArguments"; delta: string }
     | { type: "toolResult"; delta: string }
     | { type: "plan"; delta: string };
+};
+
+export type TimelineTracePayload =
+  | { type: "timelineItemStarted"; item: TimelineItem }
+  | { type: "timelineItemDelta"; event: TimelineItemDeltaEvent }
+  | { type: "timelineItemCompleted"; item: TimelineItem }
+  | { type: "timelineItemFailed"; item: TimelineItem; error: string }
+  | { type: "planLifecycleChanged"; event: PlanLifecycleEvent }
+  | { type: "interactionChanged"; event: InteractionChangedEvent }
+  | { type: "skillActivated"; activation: SkillActivation }
+  | {
+      type: "enabledToolsRecorded";
+      event: { turnId: string; mode: string; tools: string[] };
+    };
+
+export type TimelineEventRecord = {
+  id: string;
+  sessionId: string;
+  sequence: number;
+  createdAt: number;
+  kind: string;
+  payload: TimelineTracePayload;
 };
 
 export type AgentRuntimeDelta = {

@@ -313,13 +313,7 @@ mod tests {
         event_tx: &pl_protocol::AgentEventSender,
     ) {
         accumulator
-            .apply(
-                StreamEvent::Completed {
-                    response_id: None,
-                    usage: None,
-                },
-                event_tx,
-            )
+            .apply(StreamEvent::Completed { response_id: None }, event_tx)
             .unwrap();
     }
 
@@ -526,7 +520,7 @@ mod tests {
 
         accumulator
             .apply(
-                StreamEvent::ThinkingDelta {
+                StreamEvent::ReasoningDelta {
                     item_id: None,
                     chunk_index: 0,
                     delta: "先比较整数位。".to_string(),
@@ -536,8 +530,9 @@ mod tests {
             .unwrap();
         accumulator
             .apply(
-                StreamEvent::OutputTextDelta {
+                StreamEvent::TextDelta {
                     item_id: None,
+                    channel: None,
                     delta: "<final>9.11 更大。</final>".to_string(),
                 },
                 &event_tx,
@@ -592,8 +587,9 @@ mod tests {
         ] {
             accumulator
                 .apply(
-                    StreamEvent::OutputTextDelta {
+                    StreamEvent::TextDelta {
                         item_id: None,
+                        channel: None,
                         delta: delta.to_string(),
                     },
                     &event_tx,
@@ -620,7 +616,7 @@ mod tests {
     }
 
     #[test]
-    fn stream_accumulator_rejects_untagged_timeline_text() {
+    fn stream_accumulator_treats_untagged_timeline_text_as_final() {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
         let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTimelineContext {
             session_id: "session-1".to_string(),
@@ -632,8 +628,9 @@ mod tests {
 
         accumulator
             .apply(
-                StreamEvent::OutputTextDelta {
+                StreamEvent::TextDelta {
                     item_id: None,
+                    channel: None,
                     delta: "plain text".to_string(),
                 },
                 &event_tx,
@@ -641,14 +638,15 @@ mod tests {
             .unwrap();
         apply_completed(&mut accumulator, &event_tx);
 
-        let error = accumulator.finish(&event_tx).unwrap_err();
+        let response = accumulator.finish(&event_tx).unwrap();
 
-        match error {
-            PureError::LlmError(message) => {
-                assert!(message.contains("untagged assistant text"));
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
+        assert_eq!(response.content.as_deref(), Some("plain text"));
+        assert!(response.timeline_events.iter().any(|event| matches!(
+            &event.kind,
+            TraceEventKind::TimelineItemCompleted { item }
+                if item.text_channel == Some(pl_protocol::TimelineTextChannel::Final)
+                    && item.content == "plain text"
+        )));
     }
 
     #[test]
@@ -669,8 +667,9 @@ mod tests {
         ] {
             accumulator
                 .apply(
-                    StreamEvent::OutputTextDelta {
+                    StreamEvent::TextDelta {
                         item_id: None,
+                        channel: None,
                         delta: delta.to_string(),
                     },
                     &event_tx,
@@ -719,7 +718,7 @@ mod tests {
 
         accumulator
             .apply(
-                StreamEvent::ToolCallDelta {
+                StreamEvent::ToolInputDelta {
                     stream_id: Some("chat_tool_call:0".to_string()),
                     item_id: "call_1".to_string(),
                     call_id: None,
@@ -731,7 +730,7 @@ mod tests {
             .unwrap();
         accumulator
             .apply(
-                StreamEvent::ToolCallDelta {
+                StreamEvent::ToolInputDelta {
                     stream_id: Some("chat_tool_call:0".to_string()),
                     item_id: String::new(),
                     call_id: None,
@@ -765,8 +764,9 @@ mod tests {
 
         accumulator
             .apply(
-                StreamEvent::OutputTextDelta {
+                StreamEvent::TextDelta {
                     item_id: None,
+                    channel: None,
                     delta: "partial".to_string(),
                 },
                 &event_tx,
@@ -790,7 +790,7 @@ mod tests {
 
         accumulator
             .apply(
-                StreamEvent::ToolCallDelta {
+                StreamEvent::ToolInputDelta {
                     stream_id: Some("chat_tool_call:0".to_string()),
                     item_id: "call_1".to_string(),
                     call_id: None,
@@ -802,9 +802,9 @@ mod tests {
                 &event_tx,
             )
             .unwrap();
-        apply_completed(&mut accumulator, &event_tx);
-
-        let error = accumulator.finish(&event_tx).unwrap_err();
+        let error = accumulator
+            .apply(StreamEvent::Completed { response_id: None }, &event_tx)
+            .unwrap_err();
 
         match error {
             PureError::LlmError(message) => {
@@ -827,7 +827,7 @@ mod tests {
 
         accumulator
             .apply(
-                StreamEvent::ToolCallDelta {
+                StreamEvent::ToolInputDelta {
                     stream_id: None,
                     item_id: "call_0".to_string(),
                     call_id: Some("call_0".to_string()),
@@ -841,13 +841,15 @@ mod tests {
             .unwrap();
         accumulator
             .apply(
-                StreamEvent::OutputItemDone(serde_json::json!({
-                    "type": "function_call",
-                    "id": "call_0",
-                    "call_id": "call_0",
-                    "name": "bash",
-                    "arguments": "{\"command\":\"pwd\"}"
-                })),
+                StreamEvent::ToolCallReady {
+                    stream_id: None,
+                    item_id: "call_0".to_string(),
+                    call_id: Some("call_0".to_string()),
+                    name: Some("bash".to_string()),
+                    payload: Some(ToolCallDeltaPayload::FunctionArguments(
+                        "{\"command\":\"pwd\"}".to_string(),
+                    )),
+                },
                 &event_tx,
             )
             .unwrap();
@@ -871,10 +873,7 @@ mod tests {
             })
             .filter(|item_id| !item_id.is_empty())
             .collect::<Vec<_>>();
-        assert_eq!(
-            item_ids,
-            vec!["turn-1-call_0", "turn-1-call_0", "turn-1-call_0"]
-        );
+        assert_eq!(item_ids, vec!["turn-1-call_0", "turn-1-call_0"]);
     }
 
     #[test]
@@ -884,7 +883,7 @@ mod tests {
 
         accumulator
             .apply(
-                StreamEvent::ToolCallDelta {
+                StreamEvent::ToolInputDelta {
                     stream_id: None,
                     item_id: "ctc_1".to_string(),
                     call_id: Some("call_1".to_string()),
@@ -896,7 +895,7 @@ mod tests {
             .unwrap();
         accumulator
             .apply(
-                StreamEvent::ToolCallDelta {
+                StreamEvent::ToolInputDelta {
                     stream_id: None,
                     item_id: "ctc_1".to_string(),
                     call_id: Some("call_1".to_string()),
@@ -910,12 +909,15 @@ mod tests {
             .unwrap();
         accumulator
             .apply(
-                StreamEvent::OutputItemDone(serde_json::json!({
-                    "type": "custom_tool_call",
-                    "id": "ctc_1",
-                    "call_id": "call_1",
-                    "input": "*** Begin Patch\n*** End Patch"
-                })),
+                StreamEvent::ToolCallReady {
+                    stream_id: None,
+                    item_id: "ctc_1".to_string(),
+                    call_id: Some("call_1".to_string()),
+                    name: None,
+                    payload: Some(ToolCallDeltaPayload::CustomInput(
+                        "*** Begin Patch\n*** End Patch".to_string(),
+                    )),
+                },
                 &event_tx,
             )
             .unwrap();

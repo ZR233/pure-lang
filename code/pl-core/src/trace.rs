@@ -250,6 +250,29 @@ impl TraceRecorder {
         }
     }
 
+    pub fn latest_timeline_item(&self, item_id: &str) -> Option<TimelineItem> {
+        self.events
+            .iter()
+            .rev()
+            .find_map(|event| match &event.kind {
+                TraceEventKind::TimelineItemStarted { item }
+                | TraceEventKind::TimelineItemCompleted { item }
+                | TraceEventKind::TimelineItemFailed { item, .. }
+                    if item.item_id == item_id =>
+                {
+                    Some(item.clone())
+                }
+                TraceEventKind::TimelineItemDelta { .. }
+                | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. }
+                | TraceEventKind::TimelineItemStarted { .. }
+                | TraceEventKind::TimelineItemCompleted { .. }
+                | TraceEventKind::TimelineItemFailed { .. } => None,
+            })
+    }
+
     pub fn agent_item(
         &mut self,
         turn_id: &str,

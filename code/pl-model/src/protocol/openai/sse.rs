@@ -1,6 +1,7 @@
 use serde::Deserialize;
 
 use crate::request::TokenUsage;
+use crate::stream::event::{ModelStreamEvent, ToolInputDeltaPayload};
 
 /// SSE 流事件原始结构（从 JSON 解析）
 #[derive(Debug, Clone, Deserialize)]
@@ -71,79 +72,43 @@ pub struct ChatTokenUsage {
     pub prompt_cache_hit_tokens: Option<u64>,
 }
 
-/// 解析后的结构化流事件
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub enum StreamEvent {
-    Created,
+pub(crate) type StreamEvent = ModelStreamEvent;
+pub(crate) type ToolCallDeltaPayload = ToolInputDeltaPayload;
 
-    OutputTextDelta {
-        item_id: Option<String>,
-        delta: String,
-    },
-
-    ThinkingDelta {
-        item_id: Option<String>,
-        chunk_index: u32,
-        delta: String,
-    },
-
-    ToolCallDelta {
-        stream_id: Option<String>,
-        item_id: String,
-        call_id: Option<String>,
-        name: Option<String>,
-        payload_delta: ToolCallDeltaPayload,
-    },
-
-    OutputItemDone(serde_json::Value),
-
-    Completed {
-        response_id: Option<String>,
-        usage: Option<TokenUsage>,
-    },
-
-    Failed {
-        code: Option<String>,
-        message: String,
-    },
-}
-
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub enum ToolCallDeltaPayload {
-    FunctionArguments(String),
-    CustomInput(String),
-}
-
-impl ToolCallDeltaPayload {
-    pub fn text(&self) -> &str {
-        match self {
-            Self::FunctionArguments(delta) | Self::CustomInput(delta) => delta,
-        }
+/// 将原始 SSE 事件解析为 canonical stream event。
+pub fn process_sse_events(event: &SseStreamEvent) -> Vec<StreamEvent> {
+    match process_sse_event(event) {
+        Some(StreamEventBatch::Single(event)) => vec![event],
+        Some(StreamEventBatch::Many(events)) => events,
+        None => Vec::new(),
     }
 }
 
-/// 将原始 SSE 事件解析为结构化事件
-pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
+enum StreamEventBatch {
+    Single(StreamEvent),
+    Many(Vec<StreamEvent>),
+}
+
+fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
     if let Some(choice) = event.choices.as_ref().and_then(|choices| choices.first()) {
         if let Some(delta) = &choice.delta.reasoning_content
             && !delta.is_empty()
         {
-            return Some(StreamEvent::ThinkingDelta {
+            return Some(StreamEventBatch::Single(StreamEvent::ReasoningDelta {
                 item_id: None,
                 chunk_index: 0,
                 delta: delta.clone(),
-            });
+            }));
         }
 
         if let Some(content) = &choice.delta.content
             && !content.is_empty()
         {
-            return Some(StreamEvent::OutputTextDelta {
+            return Some(StreamEventBatch::Single(StreamEvent::TextDelta {
                 item_id: None,
+                channel: None,
                 delta: content.clone(),
-            });
+            }));
         }
 
         if let Some(tool_call) = choice
@@ -156,7 +121,7 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
             let stream_id = Some(format!("chat_tool_call:{index}"));
             let item_id = tool_call.id.clone().unwrap_or_default();
             if let Some(custom) = &tool_call.custom {
-                return Some(StreamEvent::ToolCallDelta {
+                return Some(StreamEventBatch::Single(StreamEvent::ToolInputDelta {
                     stream_id,
                     item_id,
                     call_id: None,
@@ -164,10 +129,10 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
                     payload_delta: ToolCallDeltaPayload::CustomInput(
                         custom.input.clone().unwrap_or_default(),
                     ),
-                });
+                }));
             }
             if let Some(function) = &tool_call.function {
-                return Some(StreamEvent::ToolCallDelta {
+                return Some(StreamEventBatch::Single(StreamEvent::ToolInputDelta {
                     stream_id,
                     item_id,
                     call_id: None,
@@ -175,7 +140,7 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
                     payload_delta: ToolCallDeltaPayload::FunctionArguments(
                         function.arguments.clone().unwrap_or_default(),
                     ),
-                });
+                }));
             }
         }
 
@@ -198,65 +163,84 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
                     })
                     .unwrap_or(0),
             });
-            return Some(StreamEvent::Completed {
-                response_id: None,
-                usage,
-            });
+            let mut events = Vec::new();
+            if let Some(usage) = usage {
+                events.push(StreamEvent::Usage(usage));
+            }
+            events.push(StreamEvent::Completed { response_id: None });
+            return Some(StreamEventBatch::Many(events));
         }
     }
 
     match event.kind.as_str() {
-        "response.created" => Some(StreamEvent::Created),
+        "response.created" => Some(StreamEventBatch::Single(StreamEvent::StepStarted {
+            response_id: event
+                .response
+                .as_ref()
+                .and_then(|r| r.get("id")?.as_str().map(String::from)),
+        })),
 
-        "response.output_text.delta" => {
-            event.delta.as_ref().map(|d| StreamEvent::OutputTextDelta {
+        "response.output_text.delta" => event.delta.as_ref().map(|d| {
+            StreamEventBatch::Single(StreamEvent::TextDelta {
                 item_id: event.item_id.clone(),
+                channel: None,
                 delta: d.clone(),
             })
-        }
+        }),
 
         "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
-            event.delta.as_ref().map(|d| StreamEvent::ThinkingDelta {
-                item_id: event.item_id.clone(),
-                chunk_index: event
-                    .summary_index
-                    .or(event.content_index)
-                    .unwrap_or(0)
-                    .max(0) as u32,
-                delta: d.clone(),
+            event.delta.as_ref().map(|d| {
+                StreamEventBatch::Single(StreamEvent::ReasoningDelta {
+                    item_id: event.item_id.clone(),
+                    chunk_index: event
+                        .summary_index
+                        .or(event.content_index)
+                        .unwrap_or(0)
+                        .max(0) as u32,
+                    delta: d.clone(),
+                })
             })
         }
 
-        "response.function_call_arguments.delta" => Some(StreamEvent::ToolCallDelta {
-            stream_id: None,
-            item_id: event.item_id.clone().unwrap_or_default(),
-            call_id: event.call_id.clone(),
-            name: None,
-            payload_delta: ToolCallDeltaPayload::FunctionArguments(
-                event.delta.clone().unwrap_or_default(),
-            ),
-        }),
+        "response.function_call_arguments.delta" => {
+            Some(StreamEventBatch::Single(StreamEvent::ToolInputDelta {
+                stream_id: None,
+                item_id: event.item_id.clone().unwrap_or_default(),
+                call_id: event.call_id.clone(),
+                name: None,
+                payload_delta: ToolCallDeltaPayload::FunctionArguments(
+                    event.delta.clone().unwrap_or_default(),
+                ),
+            }))
+        }
 
-        "response.custom_tool_call_input.delta" => Some(StreamEvent::ToolCallDelta {
-            stream_id: None,
-            item_id: event
-                .item_id
-                .clone()
-                .or_else(|| event.call_id.clone())
-                .unwrap_or_default(),
-            call_id: event.call_id.clone(),
-            name: None,
-            payload_delta: ToolCallDeltaPayload::CustomInput(
-                event.delta.clone().unwrap_or_default(),
-            ),
-        }),
+        "response.custom_tool_call_input.delta" => {
+            Some(StreamEventBatch::Single(StreamEvent::ToolInputDelta {
+                stream_id: None,
+                item_id: event
+                    .item_id
+                    .clone()
+                    .or_else(|| event.call_id.clone())
+                    .unwrap_or_default(),
+                call_id: event.call_id.clone(),
+                name: None,
+                payload_delta: ToolCallDeltaPayload::CustomInput(
+                    event.delta.clone().unwrap_or_default(),
+                ),
+            }))
+        }
 
-        "response.output_item.added" => event.item.as_ref().and_then(output_item_tool_delta),
+        "response.output_item.added" => event
+            .item
+            .as_ref()
+            .and_then(output_item_tool_delta)
+            .map(StreamEventBatch::Single),
 
         "response.output_item.done" => event
             .item
             .as_ref()
-            .map(|v| StreamEvent::OutputItemDone(v.clone())),
+            .and_then(output_item_tool_ready)
+            .map(StreamEventBatch::Single),
 
         "response.completed" => {
             let usage = event.response.as_ref().and_then(|r| {
@@ -277,16 +261,20 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
                     })
                 })
             });
-            Some(StreamEvent::Completed {
+            let mut events = Vec::new();
+            if let Some(usage) = usage {
+                events.push(StreamEvent::Usage(usage));
+            }
+            events.push(StreamEvent::Completed {
                 response_id: event
                     .response
                     .as_ref()
                     .and_then(|r| r.get("id")?.as_str().map(String::from)),
-                usage,
-            })
+            });
+            Some(StreamEventBatch::Many(events))
         }
 
-        "response.failed" => Some(StreamEvent::Failed {
+        "response.failed" => Some(StreamEventBatch::Single(StreamEvent::Failed {
             code: event
                 .response
                 .as_ref()
@@ -296,12 +284,12 @@ pub fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEvent> {
                 .as_ref()
                 .and_then(|r| r.get("error")?.get("message")?.as_str().map(String::from))
                 .unwrap_or_else(|| "response failed".into()),
-        }),
+        })),
 
-        "response.incomplete" => Some(StreamEvent::Failed {
+        "response.incomplete" => Some(StreamEventBatch::Single(StreamEvent::Failed {
             code: None,
             message: "response incomplete".into(),
-        }),
+        })),
 
         _ => None,
     }
@@ -330,14 +318,14 @@ fn output_item_tool_delta(item: &serde_json::Value) -> Option<StreamEvent> {
     let name = item.get("name").and_then(|v| v.as_str()).map(String::from);
 
     match kind {
-        "function_call" => Some(StreamEvent::ToolCallDelta {
+        "function_call" => Some(StreamEvent::ToolInputDelta {
             stream_id: None,
             item_id,
             call_id,
             name,
             payload_delta: ToolCallDeltaPayload::FunctionArguments(String::new()),
         }),
-        "custom_tool_call" => Some(StreamEvent::ToolCallDelta {
+        "custom_tool_call" => Some(StreamEvent::ToolInputDelta {
             stream_id: None,
             item_id,
             call_id,
@@ -348,11 +336,64 @@ fn output_item_tool_delta(item: &serde_json::Value) -> Option<StreamEvent> {
     }
 }
 
+fn output_item_tool_ready(item: &serde_json::Value) -> Option<StreamEvent> {
+    let kind = item.get("type")?.as_str()?;
+    let item_id = item
+        .get("id")
+        .and_then(|value| value.as_str())
+        .or_else(|| item.get("call_id").and_then(|value| value.as_str()))
+        .unwrap_or_default()
+        .to_string();
+    let call_id = item
+        .get("call_id")
+        .and_then(|value| value.as_str())
+        .map(String::from);
+    let name = item
+        .get("name")
+        .and_then(|value| value.as_str())
+        .map(String::from);
+    match kind {
+        "function_call" => Some(StreamEvent::ToolCallReady {
+            stream_id: None,
+            item_id,
+            call_id,
+            name,
+            payload: Some(ToolCallDeltaPayload::FunctionArguments(
+                value_string(item, "arguments").unwrap_or_default(),
+            )),
+        }),
+        "custom_tool_call" => Some(StreamEvent::ToolCallReady {
+            stream_id: None,
+            item_id,
+            call_id,
+            name,
+            payload: Some(ToolCallDeltaPayload::CustomInput(
+                value_string(item, "input").unwrap_or_default(),
+            )),
+        }),
+        _ => None,
+    }
+}
+
+fn value_string(value: &serde_json::Value, field: &str) -> Option<String> {
+    value
+        .get(field)
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+
+    fn single_event(event: &SseStreamEvent) -> Option<StreamEvent> {
+        let events = process_sse_events(event);
+        assert!(events.len() <= 1, "expected at most one event: {events:?}");
+        events.into_iter().next()
+    }
 
     fn chat_event(delta: serde_json::Value) -> SseStreamEvent {
         serde_json::from_value(serde_json::json!({
@@ -370,8 +411,8 @@ mod tests {
             "reasoning_content": "先比较整数位。"
         }));
 
-        match process_sse_event(&event) {
-            Some(StreamEvent::ThinkingDelta { delta, .. }) => {
+        match single_event(&event) {
+            Some(StreamEvent::ReasoningDelta { delta, .. }) => {
                 assert_eq!(delta, "先比较整数位。");
             }
             other => panic!("unexpected event: {other:?}"),
@@ -384,8 +425,8 @@ mod tests {
             "content": "9.11 更大。"
         }));
 
-        match process_sse_event(&event) {
-            Some(StreamEvent::OutputTextDelta { delta, .. }) => {
+        match single_event(&event) {
+            Some(StreamEvent::TextDelta { delta, .. }) => {
                 assert_eq!(delta, "9.11 更大。");
             }
             other => panic!("unexpected event: {other:?}"),
@@ -410,10 +451,11 @@ mod tests {
         }))
         .unwrap();
 
-        match process_sse_event(&event) {
-            Some(StreamEvent::Completed {
-                usage: Some(usage), ..
-            }) => {
+        match process_sse_events(&event).as_slice() {
+            [
+                StreamEvent::Usage(usage),
+                StreamEvent::Completed { response_id: None },
+            ] => {
                 assert_eq!(usage.cached_prompt_tokens, 35);
             }
             other => panic!("unexpected event: {other:?}"),
@@ -430,8 +472,8 @@ mod tests {
         }))
         .unwrap();
 
-        match process_sse_event(&event) {
-            Some(StreamEvent::ToolCallDelta {
+        match single_event(&event) {
+            Some(StreamEvent::ToolInputDelta {
                 item_id,
                 call_id,
                 payload_delta: ToolCallDeltaPayload::CustomInput(delta),
@@ -459,8 +501,8 @@ mod tests {
             }]
         }));
 
-        match process_sse_event(&event) {
-            Some(StreamEvent::ToolCallDelta {
+        match single_event(&event) {
+            Some(StreamEvent::ToolInputDelta {
                 stream_id,
                 item_id,
                 name,
@@ -487,8 +529,8 @@ mod tests {
             }]
         }));
 
-        match process_sse_event(&event) {
-            Some(StreamEvent::ToolCallDelta {
+        match single_event(&event) {
+            Some(StreamEvent::ToolInputDelta {
                 stream_id,
                 item_id,
                 name,
@@ -517,8 +559,8 @@ mod tests {
         }))
         .unwrap();
 
-        match process_sse_event(&event) {
-            Some(StreamEvent::ToolCallDelta {
+        match single_event(&event) {
+            Some(StreamEvent::ToolInputDelta {
                 item_id,
                 call_id,
                 name,

@@ -108,15 +108,27 @@ pub(super) async fn execute_tool_calls(
             .clone()
             .unwrap_or_else(|| tool_call.id.clone());
         let timeline_item_id = namespaced_tool_timeline_item_id(context.session_id, &tool_call_id);
-        let mut item = recorder.tool_item(
-            context.session_id,
-            &timeline_item_id,
-            tool_call.name.clone(),
-            tool_call.payload_text(),
-            tool_call.call_id.clone(),
-            Some(tool_call.id.clone()),
-        );
-        recorder.start_item(item.clone());
+        let mut item = recorder
+            .latest_timeline_item(&timeline_item_id)
+            .unwrap_or_else(|| {
+                let item = recorder.tool_item(
+                    context.session_id,
+                    &timeline_item_id,
+                    tool_call.name.clone(),
+                    tool_call.payload_text(),
+                    tool_call.call_id.clone(),
+                    Some(tool_call.id.clone()),
+                );
+                recorder.start_item(item.clone());
+                item
+            });
+        if let Some(tool) = &mut item.tool {
+            tool.tool_call_id = timeline_item_id.clone();
+            tool.call_id = tool_call.call_id.clone();
+            tool.provider_item_id = Some(tool_call.id.clone());
+            tool.name = tool_call.name.clone();
+            tool.arguments = tool_call.payload_text();
+        }
         budget_tracker.record_tool_call(&tool_call.name);
 
         if !tool_allowed_in_mode(context.mode, &tool_call.name) {
@@ -233,7 +245,7 @@ pub(super) async fn execute_tool_calls(
             ToolApprovalDecision::Approved => {
                 let mut tool_context = tool_context;
                 tool_context.workspace_access = execution_workspace_access;
-                item.status = TimelineItemStatus::Approved;
+                item.status = TimelineItemStatus::Running;
                 item.updated_at = unix_seconds();
                 let invocation =
                     ToolInvocation::from_tool_call(tool_call, tool_call_id.clone(), tool_context);

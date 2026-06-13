@@ -33,7 +33,7 @@ timeline item 类型固定为：
 
 每个 turn 被接收后，用户输入必须作为该 turn 的第一个可见 timeline item 记录和广播。enabled tools、`turn`、`inference` 等内部诊断或运行态 item 不得在 sequence 上排到用户输入之前，避免前端等待状态、内部状态或历史回放出现在用户问题上方。
 
-历史加载必须暴露 `nextSequence`/`timelineNextSequence` 作为 timeline projection 游标；Studio runtime 事件另有 `StudioEventEnvelope.sequence` 作为补拉 cursor。前端只能用后端游标判断 snapshot 新旧，不能用 item 列表里的最大 `sequence` 代替游标。旧 snapshot 只能补齐缺失 item，不能覆盖已经通过实时事件接收的新 turn 内容。前端 optimistic item 可以使用临时本地顺序参与展示，但不得预占或推进后端 cursor。
+历史加载必须暴露 `nextSequence`/`timelineNextSequence` 作为 timeline projection 游标；Studio runtime 事件另有 `StudioEventEnvelope.sequence` 作为补拉 cursor。Tauri 的历史 timeline DTO 返回 append-only `TimelineEventDto[]`，而不是后端预折叠的 `TimelineItem[]`。前端只能用后端游标判断 snapshot 新旧，不能用 item 列表里的最大 `sequence` 代替游标。旧 snapshot 只能补齐当前状态中不存在或尚未应用的事件，不能覆盖已经通过实时事件接收的新 turn 内容。前端 optimistic item 可以使用临时本地顺序参与展示，但不得预占或推进后端 cursor。
 
 ## 8.2 数据流
 
@@ -59,18 +59,19 @@ pl-model provider
 
 `TextDelta`、`ThinkingDelta`、`ToolCallDelta`、`ToolCallComplete` 不再是 Studio 的协议或兼容入口。
 
-模型 provider 流的成功边界由 `StreamEvent::Completed` 明确表示。protocol mapper 可以把 provider 私有终止 chunk 转换为该事件；如果底层 SSE parse、transport 或 EOF 在 completed 之前发生，`pl-model` 必须返回错误，并由 turn 层发出 failed turn、`Error` 和 `Done`，不得把局部内容当作成功消息落库。completed 之后的 usage、文本、思考和工具调用 snapshot 才能进入最终 `CompletionResponse`。
+模型 provider 流的成功边界由 canonical `ModelStreamEvent::Completed` 明确表示。protocol mapper 可以把 provider 私有终止 chunk 转换为该事件；如果底层 SSE parse、transport 或 EOF 在 completed 之前发生，`pl-model` 必须返回错误，并由 turn 层发出 failed turn、`Error` 和 `Done`，不得把局部内容当作成功消息落库。completed 之后的 usage、文本、思考和工具调用 snapshot 才能进入最终 `CompletionResponse`。
 
 Plan Mode 下模型输出的 `<proposed_plan>...</proposed_plan>` 块由 `pl-model::stream` accumulator 提取为 `plan` item。计划正文复用 `TimelineItem.content`，增量使用 `TimelineDelta::Plan`；同一块内容不得同时出现在普通 assistant `text` item 中。计划块之外的普通文本仍按 assistant `text` item 流式输出。
 
-Auto 与 Plan Mode 下模型可见输出必须使用显式标签：`<commentary>...</commentary>` 表示中间进展，`<final>...</final>` 表示最终正文；Plan Mode 的最终计划继续使用 `<proposed_plan>...</proposed_plan>`。`pl-model::stream` accumulator 负责跨 chunk 解析这些标签，标签本身不得进入 timeline。未标记的普通输出不再作为成功 assistant 正文兜底，避免把 provider 未遵守协议的内容误存为最终答案。
+Auto 与 Plan Mode 下模型可见输出优先使用显式标签：`<commentary>...</commentary>` 表示中间进展，`<final>...</final>` 表示最终正文；Plan Mode 的最终计划继续使用 `<proposed_plan>...</proposed_plan>`。`pl-model::stream` accumulator 负责跨 chunk 解析这些标签，标签本身不得进入 timeline。未标记的普通输出默认进入 `final` 文本通道并写入 assistant 正文，不能导致 turn 失败；Plan Mode 下未标记文本也不伪造 `plan` item。
 
 计划的采纳与实施状态不改变 `plan` item 本身，而是通过 `TraceEventKind::PlanLifecycleChanged` 追加到计划来源 session 的 `timeline_events`。事件包含 `planId`、`state`、可选 `turnId`、可选 `reason` 和 `updatedAt`；Studio 从历史 timeline 与 `StudioEventKind::PlanLifecycleChanged` 中按 `planId` 折叠 latest plan state。Plan turn 完成后需要用户确认实施时，后端创建 `InteractionKind::PlanConfirmation`，前端不再从历史 timeline 自行恢复旧确认 composer。确认 resolution 固定为 `implementFreshContext | continuePlanning | dismiss`；`continuePlanning` 的 `content` 是确认 composer 同次提交的用户补充内容，resolution 成功后由前端立即作为普通 prompt 发送；实施时后端创建显式 session handoff，新 Auto session 承载 fresh context 和 handoff prompt，来源 session 保持可恢复但不再作为活跃 session 列表项展示。后端必须在实施 turn 启动前广播 `sessionHandoffChanged`，使 Studio 先切到目标 session 并接收后续实时 `studio-runtime-event`，不得等后台 run 完成才展示实施过程。
 
-Studio 前端的实时事件、`load_session_timeline` 历史 snapshot 和 `load_studio_events` 补拉结果必须进入同一个 timeline reducer：
+Studio 前端的实时事件、`load_session_timeline` 历史 snapshot 和 `load_studio_events` 补拉结果必须进入同一个 timeline event reducer：
 
-- `load_session_timeline` 是可替换 snapshot，但只有当 `nextSequence` 不落后于当前游标时才能覆盖已有 snapshot。
-- 如果 `nextSequence` 落后于当前游标，则该 snapshot 只用于补齐当前状态中不存在的 item。
+- `load_session_timeline` 返回完整 timeline event log；只有当 `nextSequence` 不落后于当前游标时才能重放替换当前 timeline 状态。
+- 如果 `nextSequence` 落后于当前游标，则该 snapshot 只用于补齐当前状态中未应用的 event，不能覆盖 live delta 已折叠出的 item 内容。
+- `TimelineItem` 是前端 selector/view model 的折叠结果，不作为 Tauri command 的主输入 DTO。
 - `submit_prompt` 与触发实施的 `resolve_interaction` 不返回最终 timeline；它们只返回提交成功、目标 `sessionId/turnId/cursor`。
 - Plan lifecycle 与 interaction 状态均通过 `StudioEvent` 实时更新，并在 `bootstrap`、`select_session`、`load_session_state` 和 `load_studio_events` 中恢复。
 - `SkillActivated` 是 skill runtime fact 的实时通知与可追踪记录。它不渲染成普通 timeline item；Studio 收到后从后端 runtime snapshot 更新 `activeSkills`，历史恢复以结构化 session skill 表为准，而不是解析 `skill_view` 的 tool result 文本。
@@ -103,7 +104,7 @@ root agent 的 provider `429` 错误码是当前轮的终止错误，不进入�
 
 ## 8.5 流式工具调用聚合与 ID
 
-`pl-model` 负责把 provider 的工具调用 delta 聚合为完整的 `ToolCall` 后再交给 `pl-core` 执行。protocol 层先把 OpenAI Responses 或 Chat Completions SSE 映射为 provider 无关的 stream event，`stream` 层只消费该归一化事件，不解析 OpenAI 原始 JSON。Chat Completions 流式响应中的后续参数片段可能只带 `index`，不再重复 `id` 或 `name`；Responses API 的 custom/freeform 输入 delta 也可能只带 `item_id` / `call_id`。因此聚合层必须使用稳定的流式序号或 item/call id 合并片段，并保留最早出现的 provider id、工具名和调用种类。
+`pl-model` 负责把 provider 的工具调用 delta 聚合为完整的 `ToolCall` 后再交给 `pl-core` 执行。protocol 层先把 OpenAI Responses 或 Chat Completions SSE 映射为 provider 无关的 `ModelStreamEvent`，`stream` 层只消费该归一化事件，不解析 OpenAI 原始 JSON。Chat Completions 流式响应中的后续参数片段可能只带 `index`，不再重复 `id` 或 `name`；Responses API 的 custom/freeform 输入 delta 也可能只带 `item_id` / `call_id`。因此聚合层必须使用稳定的流式序号或 item/call id 合并片段，并保留最早出现的 provider id、工具名和调用种类。
 
 工具 timeline item 的 `itemId` 使用 `toolCallId`。当 provider 提供 `call_id` 时，`toolCallId` 优先使用该值；provider 的原始 item id 只作为聚合辅助信息保留在内部。工具参数流、审批、执行和结果都 upsert 到同一个 tool item。
 

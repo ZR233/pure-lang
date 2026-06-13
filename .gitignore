@@ -24,3 +24,4 @@ Thumbs.db
 /.pure
 /code/pure-studio/src-tauri/target
 .usage.json
+.playwright-mcp

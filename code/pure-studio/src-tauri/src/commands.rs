@@ -27,7 +27,7 @@ use crate::mappers::{
     instructions_config, load_session_runtime_dto, lsp_health_update_dto,
     mcp_settings_to_builtin_states, mcp_settings_to_servers, plan_lifecycle_events_to_states,
     project_dtos, provider_settings_to_edit, provider_usages_dto, session_dtos,
-    timeline_events_to_items, turn_result_status_label,
+    timeline_event_dtos, turn_result_status_label,
 };
 use crate::state::{AppState, CommandError, CommandResult};
 
@@ -528,6 +528,7 @@ async fn run_prompt_inner(
             prompt,
             event_tx.clone(),
             interaction_callback,
+            emitter.clone(),
             options,
         )
         .await;
@@ -537,7 +538,7 @@ async fn run_prompt_inner(
     state
         .studio
         .interactions()
-        .cancel_session(&session_id, "turn completed", emitter)
+        .cancel_transient_interactions(&session_id, "turn completed", emitter)
         .await?;
 
     match result {
@@ -769,7 +770,7 @@ async fn load_session_timeline_inner(
     let timeline_events = timeline_records_to_trace_events(&records)?;
     Ok(SessionTimelineDto {
         session_id: session_id.clone(),
-        items: timeline_events_to_items(&timeline_events),
+        events: timeline_event_dtos(records),
         plan_states: plan_lifecycle_events_to_states(&timeline_events),
         interactions: state
             .studio
@@ -869,13 +870,18 @@ async fn run_prompt_response(
         .store()
         .list_sessions(&session.project_id)
         .await?;
+    let timeline_records = state
+        .studio
+        .store()
+        .load_timeline_events(session_id, None, None)
+        .await?;
     Ok(RunPromptResponse {
         session_id: session_id.to_string(),
         sessions: session_dtos(sessions),
         agent_events: agent_event_dtos(state.studio.store().list_agent_events(session_id).await?),
         agents: agent_dtos(state.studio.store().list_agents(session_id).await?),
         session_runtime: load_session_runtime_dto(&state.studio, session_id).await?,
-        timeline_items: timeline_events_to_items(&outcome.timeline_events),
+        timeline_events: timeline_event_dtos(timeline_records),
         plan_states: load_plan_states(&state.studio, session_id).await?,
         interactions: state
             .studio

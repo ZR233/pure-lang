@@ -11,7 +11,9 @@
 
 - `provider`：一等供应商运行时，当前只包含 OpenAI、DeepSeek 和 Zhipu。
 - `protocol`：API 协议编解码，当前实现 OpenAI Responses / Chat Completions，Anthropic 仅保留占位。
-- `stream`：provider 无关的流式事件聚合、工具调用合并、plan 提取和 timeline 投影。
+- `stream`：provider 无关的 canonical stream event、工具调用合并、plan 提取和 timeline 投影。
+
+`protocol` 只负责把 provider 私有 SSE chunk 映射为 `stream` 的 canonical event。OpenAI Responses、OpenAI Chat、DeepSeek 和 Zhipu/GLM 兼容接口在进入 accumulator 前必须统一为文本、思考、工具参数、工具完成、usage 和完成/失败事件。核心层和 Studio timeline 不解析 provider 原始 JSON。
 
 ## 7.2 依赖
 
@@ -60,9 +62,9 @@ Zhipu Coding Plan 是 Zhipu profile 的配置模板，默认使用 `https://open
 - Responses API
 - Chat Completions API
 
-不同 protocol API 的差异保持在 `pl-model` 内部，核心层只看到 `CompletionRequest`、`CompletionResponse` 和事件流。
+不同 protocol API 的差异保持在 `pl-model` 内部，核心层只看到 `CompletionRequest`、`CompletionResponse` 和 provider 无关的 timeline 事件流。
 
-OpenAI、DeepSeek 和 Zhipu 都复用 `protocol::openai`。OpenAI 默认使用 Responses endpoint；DeepSeek 和 Zhipu 使用 Chat Completions endpoint。Zhipu Coding Plan 作为 Zhipu 模板同样使用 Chat Completions endpoint。OpenAI Responses 的 `reasoning.summary` 按 Codex wire 语义发送：`Auto` 和兼容层的 `Enabled` 都发送 `auto`，`Disabled` 不发送 summary 字段。DeepSeek/Zhipu 的 `reasoning_effort`、`thinking`、`clear_thinking`、`reasoning_content` 等私有扩展由 provider profile 通过强类型 options 注入 OpenAI protocol，不作为独立 wire variant 存在。
+OpenAI、DeepSeek 和 Zhipu 都复用 `protocol::openai`。OpenAI 默认使用 Responses endpoint；DeepSeek 和 Zhipu 使用 Chat Completions endpoint。Zhipu Coding Plan 作为 Zhipu 模板同样使用 Chat Completions endpoint。OpenAI Responses 的 `reasoning.summary` 按 Codex wire 语义发送：`Auto` 和兼容层的 `Enabled` 都发送 `auto`，`Disabled` 不发送 summary 字段。DeepSeek/Zhipu 的 `reasoning_effort`、`thinking`、`clear_thinking`、`reasoning_content` 等私有扩展由 provider profile 通过强类型 options 注入 OpenAI protocol，不作为独立 wire variant 存在。模型返回的 `reasoning_content` 进入 canonical reasoning event；历史回放时仍通过 assistant message 的 `reasoning_content` 字段写回 Chat Completions。
 
 provider transport 层把第三方 API 错误统一转换为 `PureError` 时必须先脱敏。错误文本中不得包含 bearer token、API key 或形如 `sk-...` 的密钥片段；鉴权失败、配额不足、模型不存在等服务端错误可以保留 status、错误类型、code 和可读原因，但密钥值必须替换为稳定占位。
 

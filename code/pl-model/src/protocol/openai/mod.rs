@@ -78,11 +78,11 @@ impl OpenAiProtocol {
         }
     }
 
-    pub(crate) fn parse_stream_event(
+    pub(crate) fn parse_stream_events(
         &self,
         event: &sse::SseStreamEvent,
-    ) -> Result<Option<sse::StreamEvent>> {
-        Ok(sse::process_sse_event(event))
+    ) -> Result<Vec<sse::StreamEvent>> {
+        Ok(sse::process_sse_events(event))
     }
 }
 

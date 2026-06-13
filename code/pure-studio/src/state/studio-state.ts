@@ -30,8 +30,10 @@ import type {
   TurnStatus,
   InteractionChangedPayload,
   InteractionRequest,
+  TimelineEventRecord,
 } from "../types";
 import {
+  applyTimelineRecords,
   applyLiveTimelineEvent,
   emptyTimelineState,
   mergeRunPromptTimeline,
@@ -94,7 +96,7 @@ export type StudioAction =
   | {
       type: "timelineLoaded";
       sessionId: string | null;
-      items: TimelineItem[];
+      events: TimelineEventRecord[];
       planStates?: PlanState[];
       interactions?: InteractionRequest[];
       nextSequence: number;
@@ -220,7 +222,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
     case "timelineLoaded":
       if (action.sessionId !== state.selectedSessionId) return state;
       return {
-        ...mergeTimelineSnapshot(state, action.sessionId, action.items ?? [], action.nextSequence),
+        ...mergeTimelineSnapshot(state, action.sessionId, action.events ?? [], action.nextSequence),
         planStates: mergePlanStates(state.planStates, action.planStates ?? []),
         ...interactionState(
           state.interactions,
@@ -349,7 +351,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         ...mergeRunPromptTimeline(
           timelineBase,
           action.payload.sessionId,
-          action.payload.timelineItems ?? [],
+          action.payload.timelineEvents ?? [],
           action.payload.timelineNextSequence,
         ),
         planStates: mergePlanStates(timelineBase.planStates, action.payload.planStates ?? []),
@@ -705,7 +707,9 @@ function reduceTimelineChanged(
 ): StudioState {
   const event = agentEventFromTimelineChange(change);
   const base = applyOptimisticTimelineCleanup(state, event);
-  return reduceAgentEvent(base, event, status ?? state.status);
+  const timelineRecord = timelineRecordFromStudioTimelineChange(state.selectedSessionId, change);
+  const timelineState = timelineRecord ? applyTimelineRecords(base, [timelineRecord]) : base;
+  return reduceAgentEventWithoutTimeline(timelineState, event, status ?? state.status);
 }
 
 function reduceStructuredAgentPayload(
@@ -1174,6 +1178,139 @@ function reduceAgentEvent(
     return { ...state, status: statusText, turnPhase: "failed" };
   }
   return { ...state, status: statusText };
+}
+
+function reduceAgentEventWithoutTimeline(
+  state: StudioState,
+  event: AgentEvent | null | undefined,
+  statusText: string,
+): StudioState {
+  if (!event) {
+    return {
+      ...state,
+      status: statusText,
+      turnPhase: state.turnPhase === "idle" ? "subagent" : state.turnPhase,
+    };
+  }
+  if (event === "done") {
+    return {
+      ...state,
+      status: statusText,
+      turnPhase:
+        state.turnPhase === "interrupted" ||
+        state.turnPhase === "failed" ||
+        state.turnPhase === "budgetLimited"
+          ? state.turnPhase
+          : "completed",
+      turnStartedAt: null,
+    };
+  }
+  if ("turnInterrupted" in event) {
+    return { ...state, status: statusText, turnPhase: "interrupted" };
+  }
+  if ("turnBudgetLimited" in event) {
+    return { ...state, status: statusText, turnPhase: "budgetLimited" };
+  }
+  if ("interactionChanged" in event) {
+    return reduceInteractionChanged(
+      state,
+      {
+        sessionId: state.selectedSessionId ?? "",
+        event: event.interactionChanged.event,
+      },
+      statusText,
+    );
+  }
+  if ("timelineItemStarted" in event) {
+    return {
+      ...state,
+      status: statusText,
+      turnPhase: phaseForTimelineItem(event.timelineItemStarted.item, state.turnPhase),
+      turnStartedAt: state.turnStartedAt ?? Date.now(),
+    };
+  }
+  if ("timelineItemDelta" in event) {
+    return {
+      ...state,
+      status: statusText,
+      turnPhase: phaseForTimelineDelta(event.timelineItemDelta.event, state.turnPhase),
+    };
+  }
+  if ("timelineItemCompleted" in event) {
+    const completed = event.timelineItemCompleted.item;
+    return {
+      ...state,
+      status: statusText,
+      turnPhase: phaseForTimelineItem(completed, state.turnPhase),
+    };
+  }
+  if ("timelineItemFailed" in event) {
+    return {
+      ...state,
+      status: statusText,
+      turnPhase:
+        event.timelineItemFailed.item.status === "budgetLimited"
+          ? "budgetLimited"
+          : event.timelineItemFailed.item.status === "interrupted"
+            ? "interrupted"
+            : "failed",
+    };
+  }
+  if ("error" in event) {
+    return { ...state, status: statusText, turnPhase: "failed" };
+  }
+  return { ...state, status: statusText };
+}
+
+function timelineRecordFromStudioTimelineChange(
+  sessionId: string | null,
+  change: StudioTimelineChange,
+): TimelineEventRecord | null {
+  if (!sessionId) {
+    return null;
+  }
+  switch (change.type) {
+    case "started":
+      return {
+        id: `live-${sessionId}-${change.item.sequence}`,
+        sessionId,
+        sequence: change.item.sequence,
+        createdAt: change.item.createdAt,
+        kind: "TimelineItemStarted",
+        payload: { type: "timelineItemStarted", item: change.item },
+      };
+    case "delta":
+      return {
+        id: `live-${sessionId}-${change.event.sequence}`,
+        sessionId,
+        sequence: change.event.sequence,
+        createdAt: change.event.createdAt,
+        kind: "TimelineItemDelta",
+        payload: { type: "timelineItemDelta", event: change.event },
+      };
+    case "completed":
+      return {
+        id: `live-${sessionId}-${change.sequence}`,
+        sessionId,
+        sequence: change.sequence,
+        createdAt: change.item.updatedAt,
+        kind: "TimelineItemCompleted",
+        payload: { type: "timelineItemCompleted", item: change.item },
+      };
+    case "failed":
+      return {
+        id: `live-${sessionId}-${change.sequence}`,
+        sessionId,
+        sequence: change.sequence,
+        createdAt: change.item.updatedAt,
+        kind: "TimelineItemFailed",
+        payload: {
+          type: "timelineItemFailed",
+          item: change.item,
+          error: change.error,
+        },
+      };
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
