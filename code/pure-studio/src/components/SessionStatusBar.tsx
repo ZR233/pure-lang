@@ -1,5 +1,4 @@
 import {
-  Activity,
   Boxes,
   Brain,
   Bot,
@@ -9,11 +8,10 @@ import {
   Cpu,
   DollarSign,
   LoaderCircle,
-  MoreVertical,
   ShieldCheck,
   Users,
 } from "lucide-react";
-import type { Dispatch, ReactNode, SetStateAction } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
@@ -59,7 +57,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 
 type SessionStatusBarProps = {
   runtime: SessionRuntime | null;
@@ -531,7 +528,7 @@ function ModeSelector({
           <Bot size={16} className="mr-2" />
           <div>
             <div className="font-medium">{t("conversation.autoMode")}</div>
-            <div className="text-xs text-muted-foreground">自动执行，直接生成代码</div>
+            <div className="text-xs text-muted-foreground">{t("conversation.autoModeDescription")}</div>
           </div>
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -541,7 +538,7 @@ function ModeSelector({
           <Brain size={16} className="mr-2" />
           <div>
             <div className="font-medium">{t("conversation.planMode")}</div>
-            <div className="text-xs text-muted-foreground">先规划方案，确认后执行</div>
+            <div className="text-xs text-muted-foreground">{t("conversation.planModeDescription")}</div>
           </div>
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -625,7 +622,7 @@ function ModelSelector({
       <PopoverContent className="w-72 p-0" align="start">
         <Command shouldFilter={false}>
           <CommandInput
-            placeholder={t("statusBar.searchModels") ?? "搜索模型..."}
+            placeholder={t("statusBar.searchModels")}
             value={searchQuery}
             onValueChange={setSearchQuery}
           />
@@ -857,135 +854,6 @@ function StatusReadoutPopovers({
   );
 }
 
-/* ===== More Status Menu ===== */
-
-function StatusMoreSection({
-  priority,
-  icon,
-  label,
-  summary,
-  children,
-}: {
-  priority: string;
-  icon: ReactNode;
-  label: string;
-  summary: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="px-3 py-2" data-priority={priority} aria-label={label}>
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-muted-foreground" aria-hidden="true">
-          {icon}
-        </span>
-        <div className="flex-1 min-w-0">
-          <span className="text-xs text-muted-foreground">{label}</span>
-          <div className="text-sm font-medium">{summary}</div>
-        </div>
-      </div>
-      <div className="space-y-1">{children}</div>
-    </section>
-  );
-}
-
-function MoreStatusMenu({
-  usage,
-  contextLabel,
-  contextWidth,
-  costLabel,
-  skills,
-  mcpServers,
-  lspServers,
-  capabilityCount,
-  agents,
-  activeAgentCount,
-}: StatusReadoutsProps) {
-  const { t } = useTranslation();
-
-  const menuContent = (
-    <>
-      <StatusMoreSection
-        priority="1"
-        icon={<Activity size={14} />}
-        label={t("statusBar.context")}
-        summary={
-          <span className="flex items-center gap-2">
-            {contextLabel}
-            <span className="w-16 h-1.5 bg-muted rounded-full overflow-hidden inline-block">
-              <span className="block h-full bg-primary rounded-full" style={{ width: contextWidth }} />
-            </span>
-          </span>
-        }
-      >
-        <UsageMetricRows usage={usage} />
-        <Separator className="my-1" />
-        <CostRows usage={usage} />
-      </StatusMoreSection>
-
-      <Separator />
-
-      <StatusMoreSection
-        priority="2"
-        icon={<DollarSign size={14} />}
-        label={t("statusBar.cost")}
-        summary={costLabel}
-      >
-        <CostRows usage={usage} />
-        <small className="text-xs text-muted-foreground block mt-1">{t("statusBar.costHint")}</small>
-      </StatusMoreSection>
-
-      <Separator />
-
-      <StatusMoreSection
-        priority="3"
-        icon={<Boxes size={14} />}
-        label={t("statusBar.capabilities")}
-        summary={capabilityCount}
-      >
-        <div className="space-y-2">
-          <div>
-            <StatusListContent title={t("statusBar.skills")} items={skills} />
-          </div>
-          <div>
-            <StatusListContent title={t("statusBar.mcpServers")} items={mcpServers} />
-          </div>
-          <div>
-            <LspListContent title={t("statusBar.lspServers")} servers={lspServers} />
-          </div>
-        </div>
-      </StatusMoreSection>
-
-      <Separator />
-
-      <StatusMoreSection
-        priority="4"
-        icon={<Users size={14} />}
-        label={t("statusBar.subagents")}
-        summary={activeAgentCount}
-      >
-        <SubagentRows agents={agents} />
-      </StatusMoreSection>
-    </>
-  );
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
-          <MoreVertical size={16} />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="end"
-        side="top"
-        className="w-80 max-h-[70vh] overflow-y-auto"
-      >
-        {menuContent}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 /* ===== Main: SessionStatusBar ===== */
 
 export function SessionStatusBar({
@@ -1063,8 +931,6 @@ export function SessionStatusBar({
           permissionMode={permissionMode}
           onSavePermissionMode={onSavePermissionMode}
         />
-
-        <MoreStatusMenu {...statusReadouts} />
       </div>
 
       {/* Right: Read-only status */}

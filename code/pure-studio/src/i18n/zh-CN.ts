@@ -188,6 +188,8 @@ const zhCN = {
     modeLabel: "协作模式",
     autoMode: "Auto",
     planMode: "Plan",
+    autoModeDescription: "自动执行，直接生成代码",
+    planModeDescription: "先规划方案，确认后执行",
   },
 
   context: {
@@ -206,6 +208,7 @@ const zhCN = {
     label: "会话状态栏",
     model: "模型",
     noModel: "未选择模型",
+    searchModels: "搜索模型...",
     session: "会话",
     context: "上下文",
     cacheHit: "缓存命中",
