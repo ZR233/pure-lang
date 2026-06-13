@@ -3,10 +3,11 @@ use futures::StreamExt;
 use pl_protocol::{AgentEventSender, PureError, Result, TimelineTextChannel};
 
 pub(crate) mod event;
+mod lifecycle;
+mod tagged_output;
 mod timeline_projection;
 mod tool_stream;
 
-use crate::proposed_plan::{VisibleTextParser, VisibleTextSegment};
 use crate::protocol::openai::OpenAiProtocol;
 use crate::protocol::openai::sse;
 use crate::request::{
@@ -14,6 +15,8 @@ use crate::request::{
 };
 
 use event::ModelStreamEvent;
+use lifecycle::StreamLifecycle;
+use tagged_output::TaggedVisibleOutputAdapter;
 use timeline_projection::TimelineProjection;
 use tool_stream::ToolStream;
 
@@ -47,13 +50,11 @@ pub(crate) struct StreamCompletionAccumulator {
     reasoning_parts: Vec<String>,
     tool_calls: Vec<ToolCall>,
     tool_stream: ToolStream,
+    lifecycle: StreamLifecycle,
+    tagged_output: TaggedVisibleOutputAdapter,
     final_usage: Option<TokenUsage>,
     completed: bool,
     timeline: Option<TimelineProjection>,
-    commentary_item_id: Option<String>,
-    final_item_id: Option<String>,
-    thinking_item_id: Option<String>,
-    text_parser: VisibleTextParser,
 }
 
 impl StreamCompletionAccumulator {
@@ -65,13 +66,11 @@ impl StreamCompletionAccumulator {
             reasoning_parts: Vec::new(),
             tool_calls: Vec::new(),
             tool_stream: ToolStream::new(),
+            lifecycle: StreamLifecycle::new(),
+            tagged_output: TaggedVisibleOutputAdapter::new(plan_mode),
             final_usage: None,
             completed: false,
             timeline: timeline.map(TimelineProjection::new),
-            commentary_item_id: None,
-            final_item_id: None,
-            thinking_item_id: None,
-            text_parser: VisibleTextParser::new(plan_mode),
         }
     }
 
@@ -80,36 +79,82 @@ impl StreamCompletionAccumulator {
         stream_event: ModelStreamEvent,
         event_tx: &AgentEventSender,
     ) -> Result<()> {
+        if let ModelStreamEvent::TextDelta { delta, .. } = &stream_event {
+            self.raw_content_parts.push(delta.clone());
+        }
+        for stream_event in self.tagged_output.adapt(stream_event) {
+            for stream_event in self.lifecycle.normalize(stream_event) {
+                self.apply_normalized(stream_event, event_tx)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn apply_normalized(
+        &mut self,
+        stream_event: ModelStreamEvent,
+        event_tx: &AgentEventSender,
+    ) -> Result<()> {
         match stream_event {
-            ModelStreamEvent::TextDelta {
-                item_id,
-                channel,
-                delta,
-            } => {
-                self.raw_content_parts.push(delta.clone());
-                if let Some(channel) = channel {
-                    match channel {
-                        TimelineTextChannel::User => {}
-                        TimelineTextChannel::Commentary => {
-                            self.record_text_delta(item_id, delta, event_tx, channel);
-                        }
-                        TimelineTextChannel::Final => {
-                            self.content_parts.push(delta.clone());
-                            self.record_text_delta(item_id, delta, event_tx, channel);
-                        }
-                    }
-                } else {
-                    let segments = self.text_parser.push_str(&delta).segments;
-                    self.apply_visible_text_segments(item_id, segments, event_tx);
+            ModelStreamEvent::TextStarted { id, channel } => {
+                self.record_text_started(&id, channel, event_tx);
+            }
+            ModelStreamEvent::TextDelta { id, channel, delta } => {
+                if channel == TimelineTextChannel::Final {
+                    self.content_parts.push(delta.clone());
                 }
+                self.record_text_delta(&id, delta, event_tx, channel);
+            }
+            ModelStreamEvent::TextCompleted { id, channel } => {
+                self.record_text_completed(&id, channel, event_tx);
+            }
+            ModelStreamEvent::ReasoningStarted {
+                id,
+                provider_metadata,
+            } => {
+                let _ = provider_metadata;
+                self.record_thinking_started(&id, event_tx);
             }
             ModelStreamEvent::ReasoningDelta {
-                item_id,
+                id,
                 chunk_index,
                 delta,
             } => {
                 self.reasoning_parts.push(delta.clone());
-                self.record_thinking_delta(item_id, chunk_index, delta, event_tx);
+                self.record_thinking_delta(&id, chunk_index, delta, event_tx);
+            }
+            ModelStreamEvent::ReasoningCompleted {
+                id,
+                provider_metadata,
+            } => {
+                let _ = provider_metadata;
+                self.record_thinking_completed(&id, event_tx);
+            }
+            ModelStreamEvent::PlanStarted { id } => {
+                self.record_plan_started(&id, event_tx);
+            }
+            ModelStreamEvent::PlanDelta { id, delta } => {
+                self.record_plan_delta(&id, delta, event_tx);
+            }
+            ModelStreamEvent::PlanCompleted { id } => {
+                self.record_plan_completed(&id, event_tx);
+            }
+            ModelStreamEvent::ToolInputStarted {
+                stream_id,
+                item_id,
+                call_id,
+                name,
+                payload_kind,
+            } => {
+                let snapshot = self.tool_stream.start_input(
+                    stream_id.as_ref(),
+                    item_id,
+                    call_id.as_ref(),
+                    name,
+                    lifecycle::tool_start_payload(payload_kind),
+                );
+                self.record_tool_started(&snapshot.tool, event_tx);
             }
             ModelStreamEvent::ToolInputDelta {
                 stream_id,
@@ -126,6 +171,21 @@ impl StreamCompletionAccumulator {
                     payload_delta,
                 );
                 self.record_tool_delta(&snapshot.tool, snapshot.delta, event_tx);
+            }
+            ModelStreamEvent::ToolInputCompleted {
+                stream_id,
+                item_id,
+                call_id,
+                name,
+                payload,
+            } => {
+                self.tool_stream.complete_input(
+                    stream_id.as_ref(),
+                    call_id.as_ref(),
+                    &item_id,
+                    name,
+                    payload,
+                );
             }
             ModelStreamEvent::ToolCallReady {
                 stream_id,
@@ -174,9 +234,6 @@ impl StreamCompletionAccumulator {
                 "provider stream ended before completion".to_string(),
             ));
         }
-
-        let segments = self.text_parser.finish().segments;
-        self.apply_visible_text_segments(None, segments, event_tx);
 
         for call in self.tool_stream.finish_all(&self.tool_calls)? {
             self.update_tool_trace_only(&call);
@@ -232,61 +289,23 @@ impl StreamCompletionAccumulator {
         })
     }
 
-    fn apply_visible_text_segments(
+    fn record_text_started(
         &mut self,
-        item_id: Option<String>,
-        segments: Vec<VisibleTextSegment>,
+        item_id: &str,
+        text_channel: TimelineTextChannel,
         event_tx: &AgentEventSender,
     ) {
-        for segment in segments {
-            match segment {
-                VisibleTextSegment::Untagged(text) => {
-                    if text.trim().is_empty() {
-                        continue;
-                    }
-                    self.content_parts.push(text.clone());
-                    self.record_text_delta(
-                        item_id.clone(),
-                        text,
-                        event_tx,
-                        TimelineTextChannel::Final,
-                    );
-                }
-                VisibleTextSegment::Final(text) => {
-                    if text.is_empty() {
-                        continue;
-                    }
-                    self.content_parts.push(text.clone());
-                    self.record_text_delta(
-                        item_id.clone(),
-                        text,
-                        event_tx,
-                        TimelineTextChannel::Final,
-                    );
-                }
-                VisibleTextSegment::Commentary(text) => {
-                    if text.is_empty() {
-                        continue;
-                    }
-                    self.record_text_delta(
-                        item_id.clone(),
-                        text,
-                        event_tx,
-                        TimelineTextChannel::Commentary,
-                    );
-                }
-                VisibleTextSegment::ProposedPlan(delta) => {
-                    if !delta.is_empty() {
-                        self.record_plan_delta(delta, event_tx);
-                    }
-                }
-            }
+        let Some(timeline) = self.timeline.as_mut() else {
+            return;
+        };
+        for event in timeline.start_text(item_id, text_channel) {
+            let _ = event_tx.send(event);
         }
     }
 
     fn record_text_delta(
         &mut self,
-        item_id: Option<String>,
+        item_id: &str,
         delta: String,
         event_tx: &AgentEventSender,
         text_channel: TimelineTextChannel,
@@ -294,37 +313,64 @@ impl StreamCompletionAccumulator {
         let Some(timeline) = self.timeline.as_mut() else {
             return;
         };
-        let saved_item_id = match text_channel {
-            TimelineTextChannel::User => None,
-            TimelineTextChannel::Commentary => self.commentary_item_id.clone(),
-            TimelineTextChannel::Final => self.final_item_id.clone(),
-        };
-        let item_id = item_id
-            .filter(|value| !value.is_empty())
-            .or(saved_item_id)
-            .unwrap_or_else(|| timeline.item_id(text_channel.as_str()));
-        match text_channel {
-            TimelineTextChannel::User => {}
-            TimelineTextChannel::Commentary => self.commentary_item_id = Some(item_id.clone()),
-            TimelineTextChannel::Final => self.final_item_id = Some(item_id.clone()),
-        }
-        for event in timeline.append_text_delta(&item_id, text_channel, delta) {
+        for event in timeline.append_text_delta(item_id, text_channel, delta) {
             let _ = event_tx.send(event);
         }
     }
 
-    fn record_plan_delta(&mut self, delta: String, event_tx: &AgentEventSender) {
+    fn record_text_completed(
+        &mut self,
+        item_id: &str,
+        text_channel: TimelineTextChannel,
+        event_tx: &AgentEventSender,
+    ) {
         let Some(timeline) = self.timeline.as_mut() else {
             return;
         };
-        for event in timeline.append_plan_delta(delta) {
+        for event in timeline.complete_text(item_id, text_channel) {
+            let _ = event_tx.send(event);
+        }
+    }
+
+    fn record_plan_started(&mut self, item_id: &str, event_tx: &AgentEventSender) {
+        let Some(timeline) = self.timeline.as_mut() else {
+            return;
+        };
+        for event in timeline.start_plan(item_id) {
+            let _ = event_tx.send(event);
+        }
+    }
+
+    fn record_plan_delta(&mut self, item_id: &str, delta: String, event_tx: &AgentEventSender) {
+        let Some(timeline) = self.timeline.as_mut() else {
+            return;
+        };
+        for event in timeline.append_plan_delta(item_id, delta) {
+            let _ = event_tx.send(event);
+        }
+    }
+
+    fn record_plan_completed(&mut self, item_id: &str, event_tx: &AgentEventSender) {
+        let Some(timeline) = self.timeline.as_mut() else {
+            return;
+        };
+        for event in timeline.complete_plan(item_id) {
+            let _ = event_tx.send(event);
+        }
+    }
+
+    fn record_thinking_started(&mut self, item_id: &str, event_tx: &AgentEventSender) {
+        let Some(timeline) = self.timeline.as_mut() else {
+            return;
+        };
+        for event in timeline.start_thinking(item_id) {
             let _ = event_tx.send(event);
         }
     }
 
     fn record_thinking_delta(
         &mut self,
-        item_id: Option<String>,
+        item_id: &str,
         chunk_index: u32,
         delta: String,
         event_tx: &AgentEventSender,
@@ -332,12 +378,16 @@ impl StreamCompletionAccumulator {
         let Some(timeline) = self.timeline.as_mut() else {
             return;
         };
-        let item_id = item_id
-            .filter(|value| !value.is_empty())
-            .or_else(|| self.thinking_item_id.clone())
-            .unwrap_or_else(|| timeline.item_id("thinking"));
-        self.thinking_item_id = Some(item_id.clone());
-        for event in timeline.append_thinking_delta(&item_id, chunk_index, delta) {
+        for event in timeline.append_thinking_delta(item_id, chunk_index, delta) {
+            let _ = event_tx.send(event);
+        }
+    }
+
+    fn record_thinking_completed(&mut self, item_id: &str, event_tx: &AgentEventSender) {
+        let Some(timeline) = self.timeline.as_mut() else {
+            return;
+        };
+        for event in timeline.complete_thinking(item_id) {
             let _ = event_tx.send(event);
         }
     }
@@ -352,6 +402,19 @@ impl StreamCompletionAccumulator {
             return;
         };
         for event in timeline.append_tool_arguments_delta(snapshot, delta) {
+            let _ = event_tx.send(event);
+        }
+    }
+
+    fn record_tool_started(
+        &mut self,
+        snapshot: &tool_stream::ToolCallAccumulatorSnapshot,
+        event_tx: &AgentEventSender,
+    ) {
+        let Some(timeline) = self.timeline.as_mut() else {
+            return;
+        };
+        for event in timeline.start_tool(snapshot) {
             let _ = event_tx.send(event);
         }
     }

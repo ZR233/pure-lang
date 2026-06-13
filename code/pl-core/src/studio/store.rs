@@ -48,6 +48,9 @@ use crate::studio::store_support::{
     touch_session_with_tx,
 };
 use crate::{CompileMode, CoreSession, InstructionSnapshot, TurnResult};
+
+const TIMELINE_EVENT_INSERT_CHUNK_SIZE: usize = 100;
+
 #[derive(Clone)]
 pub struct StudioStore {
     db: DatabaseConnection,
@@ -76,7 +79,7 @@ impl StudioStore {
     async fn open_url(url: &str) -> Result<Self> {
         let mut options = ConnectOptions::new(url.to_string());
         options
-            .max_connections(5)
+            .max_connections(1)
             .min_connections(1)
             .connect_timeout(Duration::from_secs(8))
             .acquire_timeout(Duration::from_secs(8))
@@ -938,32 +941,14 @@ impl StudioStore {
             return Ok(());
         }
         use entities::timeline_event;
-        let models: Vec<timeline_event::ActiveModel> = events
-            .iter()
-            .map(|event| {
-                let payload = serde_json::to_string(&event.kind).unwrap_or_default();
-                timeline_event::ActiveModel {
-                    id: Set(new_timeline_event_id()),
-                    session_id: Set(event.session_id.clone()),
-                    sequence: Set(event.sequence as i64),
-                    created_at: Set(event.timestamp),
-                    kind: Set(trace_event_kind_label(&event.kind).to_string()),
-                    payload_json: Set(payload),
-                }
-            })
-            .collect();
-        timeline_event::Entity::insert_many(models)
-            .on_empty_do_nothing()
-            .on_conflict(
-                sea_orm::sea_query::OnConflict::columns([
-                    timeline_event::Column::SessionId,
-                    timeline_event::Column::Sequence,
-                ])
-                .do_nothing()
-                .to_owned(),
-            )
-            .exec(&self.db)
-            .await?;
+        for chunk in events.chunks(TIMELINE_EVENT_INSERT_CHUNK_SIZE) {
+            let models = timeline_event_models(chunk);
+            timeline_event::Entity::insert_many(models)
+                .on_empty_do_nothing()
+                .on_conflict(timeline_event_sequence_conflict())
+                .exec(&self.db)
+                .await?;
+        }
         Ok(())
     }
 
@@ -1388,11 +1373,23 @@ async fn insert_timeline_events_with_tx(
         return Ok(());
     }
     use entities::timeline_event;
-    let models: Vec<timeline_event::ActiveModel> = timeline_events
+    for chunk in timeline_events.chunks(TIMELINE_EVENT_INSERT_CHUNK_SIZE) {
+        let models = timeline_event_models(chunk);
+        timeline_event::Entity::insert_many(models)
+            .on_empty_do_nothing()
+            .on_conflict(timeline_event_sequence_conflict())
+            .exec(tx)
+            .await?;
+    }
+    Ok(())
+}
+
+fn timeline_event_models(events: &[TraceEvent]) -> Vec<entities::timeline_event::ActiveModel> {
+    events
         .iter()
         .map(|event| {
             let payload = serde_json::to_string(&event.kind).unwrap_or_default();
-            timeline_event::ActiveModel {
+            entities::timeline_event::ActiveModel {
                 id: Set(new_timeline_event_id()),
                 session_id: Set(event.session_id.clone()),
                 sequence: Set(event.sequence as i64),
@@ -1401,20 +1398,17 @@ async fn insert_timeline_events_with_tx(
                 payload_json: Set(payload),
             }
         })
-        .collect();
-    timeline_event::Entity::insert_many(models)
-        .on_empty_do_nothing()
-        .on_conflict(
-            sea_orm::sea_query::OnConflict::columns([
-                timeline_event::Column::SessionId,
-                timeline_event::Column::Sequence,
-            ])
-            .do_nothing()
-            .to_owned(),
-        )
-        .exec(tx)
-        .await?;
-    Ok(())
+        .collect()
+}
+
+fn timeline_event_sequence_conflict() -> sea_orm::sea_query::OnConflict {
+    use entities::timeline_event;
+    sea_orm::sea_query::OnConflict::columns([
+        timeline_event::Column::SessionId,
+        timeline_event::Column::Sequence,
+    ])
+    .do_nothing()
+    .to_owned()
 }
 
 async fn next_studio_event_sequence_with_tx(

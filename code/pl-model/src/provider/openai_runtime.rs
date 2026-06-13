@@ -522,7 +522,7 @@ mod tests {
         accumulator
             .apply(
                 StreamEvent::ReasoningDelta {
-                    item_id: None,
+                    id: "thinking".to_string(),
                     chunk_index: 0,
                     delta: "先比较整数位。".to_string(),
                 },
@@ -532,8 +532,8 @@ mod tests {
         accumulator
             .apply(
                 StreamEvent::TextDelta {
-                    item_id: None,
-                    channel: None,
+                    id: "final".to_string(),
+                    channel: pl_protocol::TimelineTextChannel::Final,
                     delta: "<final>9.11 更大。</final>".to_string(),
                 },
                 &event_tx,
@@ -589,8 +589,8 @@ mod tests {
             accumulator
                 .apply(
                     StreamEvent::TextDelta {
-                        item_id: None,
-                        channel: None,
+                        id: "final".to_string(),
+                        channel: pl_protocol::TimelineTextChannel::Final,
                         delta: delta.to_string(),
                     },
                     &event_tx,
@@ -612,7 +612,101 @@ mod tests {
             &event.kind,
             TraceEventKind::TimelineItemCompleted { item }
                 if item.text_channel == Some(pl_protocol::TimelineTextChannel::Final)
+            && item.content == "完成。"
+        )));
+    }
+
+    #[test]
+    fn stream_accumulator_extracts_visible_tags_from_reasoning_content() {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTimelineContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "inf-1".to_string(),
+            starting_sequence: 0,
+            plan_mode: true,
+        }));
+
+        for delta in [
+            "<commentary>正在分析日志。</commentary><prop",
+            "osed_plan>\n- 修复 GLM 流\n</proposed_plan><final>完成。</final>",
+        ] {
+            accumulator
+                .apply(
+                    StreamEvent::ReasoningDelta {
+                        id: "thinking".to_string(),
+                        chunk_index: 0,
+                        delta: delta.to_string(),
+                    },
+                    &event_tx,
+                )
+                .unwrap();
+        }
+
+        apply_completed(&mut accumulator, &event_tx);
+        let response = accumulator.finish(&event_tx).unwrap();
+
+        assert_eq!(response.content.as_deref(), Some("完成。"));
+        assert_eq!(
+            response.reasoning_content.as_deref(),
+            Some(
+                "<commentary>正在分析日志。</commentary><proposed_plan>\n- 修复 GLM 流\n</proposed_plan><final>完成。</final>"
+            )
+        );
+        assert!(response.timeline_events.iter().any(|event| matches!(
+            &event.kind,
+            TraceEventKind::TimelineItemCompleted { item }
+                if item.text_channel == Some(pl_protocol::TimelineTextChannel::Commentary)
+                    && item.content == "正在分析日志。"
+        )));
+        assert!(response.timeline_events.iter().any(|event| matches!(
+            &event.kind,
+            TraceEventKind::TimelineItemCompleted { item }
+                if item.kind == TimelineItemKind::Plan && item.content == "\n- 修复 GLM 流\n"
+        )));
+        assert!(response.timeline_events.iter().any(|event| matches!(
+            &event.kind,
+            TraceEventKind::TimelineItemCompleted { item }
+                if item.text_channel == Some(pl_protocol::TimelineTextChannel::Final)
                     && item.content == "完成。"
+        )));
+    }
+
+    #[test]
+    fn stream_accumulator_keeps_untagged_reasoning_hidden() {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTimelineContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "inf-1".to_string(),
+            starting_sequence: 0,
+            plan_mode: true,
+        }));
+
+        accumulator
+            .apply(
+                StreamEvent::ReasoningDelta {
+                    id: "thinking".to_string(),
+                    chunk_index: 0,
+                    delta: "先比较整数位。".to_string(),
+                },
+                &event_tx,
+            )
+            .unwrap();
+
+        apply_completed(&mut accumulator, &event_tx);
+        let response = accumulator.finish(&event_tx).unwrap();
+
+        assert_eq!(response.content, None);
+        assert_eq!(
+            response.reasoning_content.as_deref(),
+            Some("先比较整数位。")
+        );
+        assert!(!response.timeline_events.iter().any(|event| matches!(
+            &event.kind,
+            TraceEventKind::TimelineItemCompleted { item }
+                if item.kind == TimelineItemKind::Text
+                    || item.kind == TimelineItemKind::Plan
         )));
     }
 
@@ -630,8 +724,8 @@ mod tests {
         accumulator
             .apply(
                 StreamEvent::TextDelta {
-                    item_id: None,
-                    channel: None,
+                    id: "final".to_string(),
+                    channel: pl_protocol::TimelineTextChannel::Final,
                     delta: "plain text".to_string(),
                 },
                 &event_tx,
@@ -669,8 +763,8 @@ mod tests {
             accumulator
                 .apply(
                     StreamEvent::TextDelta {
-                        item_id: None,
-                        channel: None,
+                        id: "final".to_string(),
+                        channel: pl_protocol::TimelineTextChannel::Final,
                         delta: delta.to_string(),
                     },
                     &event_tx,
@@ -766,8 +860,8 @@ mod tests {
         accumulator
             .apply(
                 StreamEvent::TextDelta {
-                    item_id: None,
-                    channel: None,
+                    id: "final".to_string(),
+                    channel: pl_protocol::TimelineTextChannel::Final,
                     delta: "partial".to_string(),
                 },
                 &event_tx,

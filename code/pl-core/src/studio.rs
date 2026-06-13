@@ -31,8 +31,9 @@ mod tests {
         AgentRuntimeDelta, AgentStatus, ContentPart, ImageSource, InteractionKind,
         InteractionPayload, InteractionRequest, InteractionResolution, InteractionScope,
         InteractionStatus, Message, MessageContent, MessageRole, PlanConfirmationResolution,
-        PlanLifecycleState, RuntimeCostAmount, SkillActivation, TimelineItem, TimelineItemStatus,
-        TimelineTextChannel, TokenUsageSnapshot, TraceEvent, TraceEventKind,
+        PlanLifecycleState, RuntimeCostAmount, SkillActivation, TimelineDelta, TimelineItem,
+        TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus, TimelineTextChannel,
+        TokenUsageSnapshot, TraceEvent, TraceEventKind,
     };
     use pretty_assertions::assert_eq;
 
@@ -429,6 +430,46 @@ mod tests {
 
         assert_eq!(restored.len(), 1);
         assert_eq!(restored[0], second);
+    }
+
+    #[tokio::test]
+    async fn append_timeline_events_handles_large_stream_batches() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/alpha").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Long stream", CompileMode::Auto)
+            .await
+            .unwrap();
+        let events = (0..300)
+            .map(|sequence| TraceEvent {
+                session_id: session.id.clone(),
+                sequence,
+                timestamp: 1,
+                kind: TraceEventKind::TimelineItemDelta {
+                    event: TimelineItemDeltaEvent {
+                        turn_id: "turn-1".to_string(),
+                        item_id: "turn-1-thinking".to_string(),
+                        sequence,
+                        kind: TimelineItemKind::Thinking,
+                        status: TimelineItemStatus::Streaming,
+                        created_at: 1,
+                        updated_at: 1,
+                        delta: TimelineDelta::Thinking {
+                            chunk_index: sequence as u32,
+                            delta: "x".to_string(),
+                        },
+                    },
+                },
+            })
+            .collect::<Vec<_>>();
+
+        store.append_timeline_events(&events).await.unwrap();
+        let restored = store
+            .load_timeline_events(&session.id, None, None)
+            .await
+            .unwrap();
+
+        assert_eq!(restored.len(), events.len());
     }
 
     #[tokio::test]
