@@ -28,7 +28,10 @@ import {
   previewSessionRuntime,
   previewAgents,
   previewAgentEvents,
+  previewTimelineEvents,
   previewTimelineItems,
+  previewTimelineEventRecords,
+  nextTimelineSequenceForItems,
   previewSkills,
   previewLspServers,
 } from "./preview";
@@ -337,7 +340,7 @@ export function runPrompt(sessionId: string, prompt: string) {
             totalTokens: previewSessionRuntime.usage.totalTokens + 1460,
           },
         },
-        timelineItems: [
+        timelineEvents: previewTimelineEventRecords(sessionId, [
           ...previewTimelineItems,
           {
             turnId: "preview-turn-latest",
@@ -368,7 +371,7 @@ export function runPrompt(sessionId: string, prompt: string) {
               totalTokens: 1460,
             },
           },
-        ],
+        ]),
         planStates: [],
         interactions: [],
         timelineNextSequence: previewTimelineItems.length + 11,
@@ -761,10 +764,10 @@ export function loadSessionTimeline(
     return Promise.resolve(
       clone({
         sessionId,
-        items: previewTimelineItems,
+        events: previewTimelineEvents,
         planStates: [],
         interactions: [],
-        nextSequence: previewTimelineItems.length,
+        nextSequence: nextTimelineSequenceForItems(previewTimelineItems),
       }),
     );
   }
@@ -809,10 +812,10 @@ export function loadSessionState(sessionId: string) {
         interactions: [],
         timeline: {
           sessionId,
-          items: previewTimelineItems,
+          events: previewTimelineEvents,
           planStates: [],
           interactions: [],
-          nextSequence: previewTimelineItems.length,
+          nextSequence: nextTimelineSequenceForItems(previewTimelineItems),
         },
         events: [],
         eventNextSequence: 0,

@@ -674,6 +674,99 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn tool_execution_reuses_streamed_timeline_item() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let workspace_root = std::env::temp_dir().join(format!("pure-tool-reuse-{unique}"));
+        tokio::fs::create_dir_all(&workspace_root).await.unwrap();
+        tokio::fs::write(workspace_root.join("note.txt"), "provider item reuse")
+            .await
+            .unwrap();
+        let mut core = PureCore::default_provider().unwrap();
+        core.register_tool(ReadFileTool::new());
+        let tool_call = ToolCall::function(
+            "provider-item-1",
+            "read_file",
+            serde_json::json!({"path": "note.txt"}),
+            Some("call-1".to_string()),
+        );
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+        let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+        let streamed_item = recorder.tool_item(
+            "turn-1",
+            "turn-1-call-1",
+            "read_file".to_string(),
+            "{\"path\":\"note.txt\"}".to_string(),
+            Some("call-1".to_string()),
+            Some("provider-item-1".to_string()),
+        );
+        recorder.start_item(streamed_item);
+        let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+
+        let records = execute_tool_calls(
+            &[tool_call],
+            &mut budget,
+            &mut recorder,
+            ToolExecutionContext {
+                core: &core,
+                options: &TurnOptions::default(),
+                mode: crate::turn::CompileMode::Auto,
+                session_id: "turn-1",
+                workspace_root: &workspace_root,
+                workspace_instructions: None,
+                instruction_snapshot: None,
+                active_subagent: None,
+                agent_control: crate::AgentControl::default(),
+                parent_session: std::sync::Arc::new(CoreSession::new()),
+            },
+        )
+        .await
+        .unwrap();
+        let events = recorder.drain();
+        let started_tool_items = events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    &event.kind,
+                    TraceEventKind::TimelineItemStarted { item }
+                        if item.kind == TimelineItemKind::Tool && item.item_id == "turn-1-call-1"
+                )
+            })
+            .count();
+        let terminal_tool = events
+            .iter()
+            .find_map(|event| match &event.kind {
+                TraceEventKind::TimelineItemCompleted { item }
+                    if item.kind == TimelineItemKind::Tool && item.item_id == "turn-1-call-1" =>
+                {
+                    Some(item)
+                }
+                TraceEventKind::TimelineItemStarted { .. }
+                | TraceEventKind::TimelineItemDelta { .. }
+                | TraceEventKind::TimelineItemCompleted { .. }
+                | TraceEventKind::TimelineItemFailed { .. }
+                | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. } => None,
+            })
+            .expect("completed tool item");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].status, TimelineItemStatus::Completed);
+        assert_eq!(started_tool_items, 1);
+        assert_eq!(terminal_tool.status, TimelineItemStatus::Completed);
+        let tool = terminal_tool.tool.as_ref().expect("tool timeline metadata");
+        assert_eq!(tool.call_id.as_deref(), Some("call-1"));
+        assert_eq!(tool.provider_item_id.as_deref(), Some("provider-item-1"));
+        assert_eq!(tool.arguments, "{\"path\":\"note.txt\"}");
+        assert_eq!(tool.result.as_deref(), Some("provider item reuse"));
+        let _ = tokio::fs::remove_dir_all(workspace_root).await;
+    }
+
     #[test]
     fn root_provider_429_is_transient_but_subagent_provider_429_stays_recoverable() {
         assert!(matches!(

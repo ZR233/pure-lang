@@ -1,4 +1,5 @@
-use pl_protocol::{InteractionRequest, StudioEventEnvelope, TimelineItem};
+use pl_core::TimelineEventRecord;
+use pl_protocol::{InteractionRequest, StudioEventEnvelope};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize)]
@@ -467,13 +468,37 @@ pub struct PlanLifecycleResponse {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TimelineEventDto {
+    pub id: String,
+    pub session_id: String,
+    pub sequence: i64,
+    pub created_at: i64,
+    pub kind: String,
+    pub payload: serde_json::Value,
+}
+
+impl From<TimelineEventRecord> for TimelineEventDto {
+    fn from(record: TimelineEventRecord) -> Self {
+        Self {
+            id: record.id,
+            session_id: record.session_id,
+            sequence: record.sequence,
+            created_at: record.created_at,
+            kind: record.kind,
+            payload: serde_json::from_str(&record.payload_json).unwrap_or(serde_json::Value::Null),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RunPromptResponse {
     pub session_id: String,
     pub sessions: Vec<SessionDto>,
     pub agent_events: Vec<AgentEventDto>,
     pub agents: Vec<AgentDto>,
     pub session_runtime: SessionRuntimeDto,
-    pub timeline_items: Vec<TimelineItem>,
+    pub timeline_events: Vec<TimelineEventDto>,
     pub plan_states: Vec<PlanStateDto>,
     pub interactions: Vec<InteractionRequest>,
     pub timeline_next_sequence: u64,
@@ -501,7 +526,7 @@ pub struct StopPromptResponse {
 #[serde(rename_all = "camelCase")]
 pub struct SessionTimelineDto {
     pub session_id: String,
-    pub items: Vec<TimelineItem>,
+    pub events: Vec<TimelineEventDto>,
     pub plan_states: Vec<PlanStateDto>,
     pub interactions: Vec<InteractionRequest>,
     pub next_sequence: u64,

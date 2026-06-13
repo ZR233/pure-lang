@@ -1613,9 +1613,16 @@ async fn apply_studio_event_projection_with_tx(
         }
         StudioEventKind::PlanLifecycleChanged { event } => {
             if let Some(session_id) = envelope.session_id.as_deref() {
+                use entities::timeline_event;
+                let max_seq: Option<i64> = timeline_event::Entity::find()
+                    .filter(timeline_event::Column::SessionId.eq(session_id.to_string()))
+                    .order_by_desc(timeline_event::Column::Sequence)
+                    .one(tx)
+                    .await?
+                    .map(|row| row.sequence);
                 let trace = TraceEvent {
                     session_id: session_id.to_string(),
-                    sequence: envelope.sequence,
+                    sequence: max_seq.map(|value| (value + 1) as u64).unwrap_or(0),
                     timestamp: envelope.created_at,
                     kind: TraceEventKind::PlanLifecycleChanged {
                         event: event.clone(),

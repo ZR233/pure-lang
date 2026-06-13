@@ -1,17 +1,22 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use pl_protocol::{AgentEventSender, TimelineItemKind, TraceEvent, TraceEventKind};
+use pl_protocol::{
+    AgentEventSender, InteractionKind, InteractionPayload, InteractionRequest, InteractionScope,
+    InteractionStatus, PlanLifecycleEvent, PlanLifecycleState, TimelineItem, TimelineItemKind,
+    TraceEvent, TraceEventKind,
+};
 
 use crate::config::{ConfigStore, ModelRole};
 use crate::mcp::McpRuntimeRegistry;
 use crate::skill::SkillCatalog;
 use crate::studio::StudioStore;
+use crate::studio::ids::unix_seconds;
 use crate::studio::mappers::default_session_runtime_record;
 use crate::studio::records::{
     ProjectRecord, SessionRecord, SessionRuntimeRecord, StudioPromptOutcome,
 };
-use crate::studio::{InteractionRuntime, StudioEventRuntime};
+use crate::studio::{InteractionEmitter, InteractionRuntime, StudioEventRuntime};
 use crate::{
     CompileMode, CoreSession, InstructionAssembler, InstructionAssemblyRequest,
     InstructionSnapshot, InteractionCallback, PureCore, TraceRecorder, TurnBudget, TurnOptions,
@@ -190,6 +195,7 @@ impl StudioRuntime {
         prompt: String,
         event_tx: AgentEventSender,
         interaction_callback: InteractionCallback,
+        interaction_emitter: InteractionEmitter,
         mut options: TurnOptions,
     ) -> Result<StudioPromptOutcome> {
         let session_record = self
@@ -257,6 +263,13 @@ impl StudioRuntime {
                 .append_turn_records(session_id, &timeline_events, new_messages)
                 .await?;
         }
+        if matches!(mode, CompileMode::Plan)
+            && matches!(result.status, TurnResultStatus::Completed)
+            && let Some(plan) = completed_plan_item(&timeline_events)
+        {
+            self.create_plan_confirmation(session_id, &plan, interaction_emitter)
+                .await?;
+        }
         let resolved = config.resolve_role(ModelRole::Planner)?;
         let model = resolved
             .models
@@ -292,6 +305,67 @@ impl StudioRuntime {
             messages,
             timeline_events,
         })
+    }
+
+    async fn create_plan_confirmation(
+        &self,
+        session_id: &str,
+        plan: &TimelineItem,
+        interaction_emitter: InteractionEmitter,
+    ) -> Result<()> {
+        if plan.content.trim().is_empty() {
+            return Ok(());
+        }
+        if self
+            .store
+            .read_interaction(&plan_confirmation_id(&plan.item_id))
+            .await?
+            .is_some()
+        {
+            return Ok(());
+        }
+
+        let now = unix_seconds();
+        let lifecycle = PlanLifecycleEvent {
+            plan_id: plan.item_id.clone(),
+            state: PlanLifecycleState::PendingConfirmation,
+            turn_id: Some(plan.turn_id.clone()),
+            reason: None,
+            updated_at: now,
+        };
+        self.events
+            .emit(
+                None,
+                Some(session_id.to_string()),
+                Some(plan.turn_id.clone()),
+                pl_protocol::StudioEventKind::PlanLifecycleChanged { event: lifecycle },
+            )
+            .await?;
+
+        let interaction = InteractionRequest {
+            interaction_id: plan_confirmation_id(&plan.item_id),
+            kind: InteractionKind::PlanConfirmation,
+            status: InteractionStatus::Pending,
+            scope: InteractionScope {
+                session_id: session_id.to_string(),
+                turn_id: plan.turn_id.clone(),
+                item_id: Some(plan.item_id.clone()),
+                tool_id: None,
+                agent_path: None,
+            },
+            payload: InteractionPayload::PlanConfirmation {
+                plan_id: plan.item_id.clone(),
+                content: plan.content.clone(),
+            },
+            created_at: now,
+            updated_at: now,
+            resolved_at: None,
+            resolution: None,
+        };
+        self.interactions
+            .create(interaction, interaction_emitter)
+            .await?;
+        Ok(())
     }
 
     async fn resolve_instruction_snapshot(
@@ -338,6 +412,28 @@ impl StudioRuntime {
             .context("selected session disappeared while saving instruction snapshot")?;
         Ok(snapshot)
     }
+}
+
+fn completed_plan_item(events: &[TraceEvent]) -> Option<TimelineItem> {
+    events.iter().rev().find_map(|event| match &event.kind {
+        TraceEventKind::TimelineItemCompleted { item }
+            if item.kind == TimelineItemKind::Plan && !item.content.trim().is_empty() =>
+        {
+            Some(item.clone())
+        }
+        TraceEventKind::TimelineItemStarted { .. }
+        | TraceEventKind::TimelineItemDelta { .. }
+        | TraceEventKind::TimelineItemCompleted { .. }
+        | TraceEventKind::TimelineItemFailed { .. }
+        | TraceEventKind::PlanLifecycleChanged { .. }
+        | TraceEventKind::InteractionChanged { .. }
+        | TraceEventKind::SkillActivated { .. }
+        | TraceEventKind::EnabledToolsRecorded { .. } => None,
+    })
+}
+
+fn plan_confirmation_id(plan_id: &str) -> String {
+    format!("plan-confirmation-{plan_id}")
 }
 
 fn should_start_self_learning(
@@ -412,10 +508,92 @@ fn session_title_from_prompt(prompt: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use pl_protocol::{TimelineItem, TimelineItemStatus};
+    use pl_model::{ModelInfo, ProviderInfo};
+    use pl_protocol::{
+        AgentEvent, InteractionRequest, TimelineItem, TimelineItemStatus, TimelineTextChannel,
+    };
     use pretty_assertions::assert_eq;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    use tokio::sync::Mutex;
 
     use super::*;
+    use crate::config::{ModelConfig, ProviderConfig, RoleConfig, RoleConfigs};
+
+    async fn serve_sse_once(sse_body: String) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = Vec::new();
+            let mut temp = [0_u8; 1024];
+            let (header_end, content_length) = loop {
+                let n = socket.read(&mut temp).await.unwrap();
+                assert_ne!(n, 0);
+                buffer.extend_from_slice(&temp[..n]);
+                if let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n")
+                {
+                    let headers = String::from_utf8_lossy(&buffer[..header_end]);
+                    let content_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().ok())?
+                        })
+                        .unwrap_or(0);
+                    break (header_end, content_length);
+                }
+            };
+
+            while buffer.len() < header_end + 4 + content_length {
+                let n = socket.read(&mut temp).await.unwrap();
+                assert_ne!(n, 0);
+                buffer.extend_from_slice(&temp[..n]);
+            }
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                sse_body.len(),
+                sse_body
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+            socket.shutdown().await.unwrap();
+        });
+
+        (format!("http://{addr}"), handle)
+    }
+
+    fn test_config(base_url: String) -> crate::config::PureConfig {
+        let mut model = ModelInfo::fallback("local-responses");
+        model.reasoning_efforts = vec!["none".to_string()];
+        let model = ModelConfig::from_model_info(model);
+        let mut info = ProviderInfo::openai(Some(base_url));
+        info.default_model = "local-responses".to_string();
+        let provider = ProviderConfig::from_provider_info(info, vec![model]);
+        let role = RoleConfig {
+            provider: "local".to_string(),
+            model: "local-responses".to_string(),
+            effort: crate::config::ReasoningEffort::new("none"),
+        };
+        crate::config::PureConfig {
+            roles: RoleConfigs::from_default_role(role),
+            providers: std::collections::BTreeMap::from([("local".to_string(), provider)]),
+            ..crate::config::PureConfig::default_config()
+        }
+    }
+
+    fn emitter(
+        events: std::sync::Arc<Mutex<Vec<InteractionRequest>>>,
+    ) -> crate::studio::InteractionEmitter {
+        std::sync::Arc::new(move |interaction| {
+            let events = events.clone();
+            Box::pin(async move {
+                events.lock().await.push(interaction);
+                Ok(())
+            })
+        })
+    }
 
     #[test]
     fn counts_started_tool_items_for_self_learning_threshold() {
@@ -444,5 +622,118 @@ mod tests {
         };
 
         assert_eq!(tool_call_count(&[event]), 1);
+    }
+
+    #[tokio::test]
+    async fn plan_turn_creates_pending_confirmation_interaction() {
+        let sse_body = concat!(
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"<proposed_plan>\"}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"1. Inspect\\\\n2. Implement\"}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"</proposed_plan><final>Ready</final>\"}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+            "data: [DONE]\n\n"
+        )
+        .to_string();
+        let (base_url, handle) = serve_sse_once(sse_body).await;
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let home = std::env::temp_dir().join(format!("pure-runtime-home-{unique}"));
+        let workspace = std::env::temp_dir().join(format!("pure-runtime-workspace-{unique}"));
+        tokio::fs::create_dir_all(&workspace).await.unwrap();
+        let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+        config_store.save(&test_config(base_url)).unwrap();
+        let store = StudioStore::open_memory().await.unwrap();
+        let runtime = StudioRuntime::new(store.clone(), config_store);
+        let project = runtime.open_project(&workspace).await.unwrap();
+        let session = store
+            .create_session(&project.id, "Plan test", CompileMode::Plan)
+            .await
+            .unwrap();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel::<AgentEvent>(32);
+        let interaction_events = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let interaction_emitter = emitter(interaction_events.clone());
+        let interaction_callback = runtime
+            .interactions()
+            .callback(session.id.clone(), interaction_emitter.clone());
+
+        let outcome = runtime
+            .run_prompt(
+                &session.id,
+                "make a plan".to_string(),
+                event_tx,
+                interaction_callback,
+                interaction_emitter,
+                TurnOptions::default(),
+            )
+            .await
+            .unwrap();
+        handle.await.unwrap();
+
+        assert_eq!(outcome.result.status, TurnResultStatus::Completed);
+        assert_eq!(outcome.result.content, "Ready");
+        let plan_item = outcome
+            .timeline_events
+            .iter()
+            .find_map(|event| match &event.kind {
+                TraceEventKind::TimelineItemCompleted { item }
+                    if item.kind == TimelineItemKind::Plan =>
+                {
+                    Some(item)
+                }
+                TraceEventKind::TimelineItemStarted { .. }
+                | TraceEventKind::TimelineItemDelta { .. }
+                | TraceEventKind::TimelineItemCompleted { .. }
+                | TraceEventKind::TimelineItemFailed { .. }
+                | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. } => None,
+            })
+            .expect("completed plan item");
+        assert_eq!(plan_item.content, "1. Inspect\\n2. Implement");
+        assert!(outcome.timeline_events.iter().any(|event| matches!(
+            &event.kind,
+            TraceEventKind::TimelineItemCompleted { item }
+                if item.text_channel == Some(TimelineTextChannel::Final)
+                    && item.content == "Ready"
+        )));
+
+        let interaction = store
+            .read_interaction(&plan_confirmation_id(&plan_item.item_id))
+            .await
+            .unwrap()
+            .expect("plan confirmation interaction");
+        assert_eq!(interaction.kind, InteractionKind::PlanConfirmation);
+        assert_eq!(interaction.status, InteractionStatus::Pending);
+        assert_eq!(
+            interaction.scope.item_id.as_deref(),
+            Some(plan_item.item_id.as_str())
+        );
+        assert_eq!(
+            interaction.payload,
+            InteractionPayload::PlanConfirmation {
+                plan_id: plan_item.item_id.clone(),
+                content: plan_item.content.clone(),
+            }
+        );
+        let timeline = store
+            .load_timeline_events(&session.id, None, None)
+            .await
+            .unwrap();
+        assert!(timeline.iter().any(|record| {
+            serde_json::from_str::<TraceEventKind>(&record.payload_json).is_ok_and(|kind| {
+                matches!(
+                    kind,
+                    TraceEventKind::PlanLifecycleChanged { event }
+                        if event.plan_id == plan_item.item_id
+                            && event.state == PlanLifecycleState::PendingConfirmation
+                )
+            })
+        }));
+        assert_eq!(interaction_events.lock().await.len(), 1);
+        let _ = tokio::fs::remove_dir_all(home).await;
+        let _ = tokio::fs::remove_dir_all(workspace).await;
     }
 }

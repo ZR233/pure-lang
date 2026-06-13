@@ -9,6 +9,7 @@ import type {
   SessionRecord,
   SessionRuntime,
   SkillRecord,
+  TimelineEventRecord,
   TimelineItem,
 } from "../types";
 import { makeProvider } from "./provider-mapper";
@@ -529,6 +530,29 @@ export const previewTimelineItems: TimelineItem[] = [
     },
   },
 ];
+
+export function previewTimelineEventRecords(
+  sessionId: string,
+  items: TimelineItem[],
+): TimelineEventRecord[] {
+  return items.map((item) => ({
+    id: `preview-timeline-event-${item.sequence}-${item.itemId}`,
+    sessionId,
+    sequence: item.sequence,
+    createdAt: item.updatedAt,
+    kind: "TimelineItemCompleted",
+    payload: { type: "timelineItemCompleted", item },
+  }));
+}
+
+export function nextTimelineSequenceForItems(items: TimelineItem[]): number {
+  return items.reduce((next, item) => Math.max(next, item.sequence + 1), 0);
+}
+
+export const previewTimelineEvents = previewTimelineEventRecords(
+  previewSessions[0]?.id ?? "preview-session",
+  previewTimelineItems,
+);
 
 export const previewRoles: RoleRecord[] = [
   { key: "explorer", displayName: "Explorer", provider: "deepseek", model: "deepseek-v4-flash", effort: "high" },

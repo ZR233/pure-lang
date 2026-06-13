@@ -17,8 +17,8 @@ use crate::dto::{
     LspServerDto, McpHealthUpdateDto, McpServerDto, McpSettingsInput, ModelDto, PlanStateDto,
     ProjectDto, ProviderDto, ProviderInput, ProviderSettingsInput, ProviderTemplateDto,
     ProviderUsageDto, ProviderUsagesDto, RoleDto, RoleInput, RuntimeCostAmountDto, RuntimeUsageDto,
-    SessionDto, SessionRuntimeDto, SkillDto, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto,
-    ZhipuToolUsageDetailDto,
+    SessionDto, SessionRuntimeDto, SkillDto, TimelineEventDto, ZhipuCodingPlanUsageDto,
+    ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
 };
 use crate::state::{CommandError, CommandResult};
 
@@ -660,6 +660,7 @@ pub fn turn_result_status_label(status: TurnResultStatus) -> &'static str {
     }
 }
 
+#[cfg(test)]
 pub fn timeline_events_to_items(events: &[TraceEvent]) -> Vec<pl_protocol::TimelineItem> {
     let mut items = std::collections::HashMap::new();
     for event in events {
@@ -758,6 +759,10 @@ pub fn timeline_events_to_items(events: &[TraceEvent]) -> Vec<pl_protocol::Timel
     items
 }
 
+pub fn timeline_event_dtos(records: Vec<pl_core::TimelineEventRecord>) -> Vec<TimelineEventDto> {
+    records.into_iter().map(TimelineEventDto::from).collect()
+}
+
 pub fn plan_lifecycle_events_to_states(events: &[TraceEvent]) -> Vec<PlanStateDto> {
     let mut latest: HashMap<String, (u64, PlanStateDto)> = HashMap::new();
     for trace in events {
@@ -786,6 +791,7 @@ pub fn plan_lifecycle_events_to_states(events: &[TraceEvent]) -> Vec<PlanStateDt
     states
 }
 
+#[cfg(test)]
 fn upsert_timeline_item(
     items: &mut std::collections::HashMap<String, pl_protocol::TimelineItem>,
     item: &pl_protocol::TimelineItem,
@@ -808,6 +814,7 @@ fn upsert_timeline_item(
     items.insert(item.item_id.clone(), next);
 }
 
+#[cfg(test)]
 fn blank_timeline_tool_item(item_id: &str) -> pl_protocol::TimelineToolItem {
     pl_protocol::TimelineToolItem {
         tool_call_id: item_id.to_string(),
@@ -823,6 +830,7 @@ fn blank_timeline_tool_item(item_id: &str) -> pl_protocol::TimelineToolItem {
     }
 }
 
+#[cfg(test)]
 fn merge_timeline_tool_item(
     existing: Option<pl_protocol::TimelineToolItem>,
     incoming: Option<pl_protocol::TimelineToolItem>,

@@ -25,6 +25,7 @@ import type {
   RunPromptResponse,
   SessionRuntime,
   StudioEventEnvelope,
+  TimelineEventRecord,
   TimelineItem,
   TimelineItemDeltaEvent,
   ToolCallStatus2,
@@ -300,9 +301,26 @@ function inferenceItem(itemId: string, turnId: string, sequence: number): Timeli
   };
 }
 
+function timelineRecordsForItems(
+  timelineItems: TimelineItem[],
+  sessionId = "session-1",
+): TimelineEventRecord[] {
+  return timelineItems.map((item) => ({
+    id: `event-${item.sequence}-${item.itemId}`,
+    sessionId,
+    sequence: item.sequence,
+    createdAt: item.updatedAt,
+    kind: "TimelineItemCompleted",
+    payload: { type: "timelineItemCompleted", item },
+  }));
+}
+
+function timelineNextSequenceForItems(timelineItems: TimelineItem[]): number {
+  return timelineItems.reduce((max, item) => Math.max(max, item.sequence), -1) + 1;
+}
+
 function response(timelineItems: TimelineItem[]): RunPromptResponse {
-  const timelineNextSequence =
-    timelineItems.reduce((max, item) => Math.max(max, item.sequence), -1) + 1;
+  const timelineNextSequence = timelineNextSequenceForItems(timelineItems);
   return {
     sessionId: "session-1",
     sessions: [
@@ -318,7 +336,7 @@ function response(timelineItems: TimelineItem[]): RunPromptResponse {
     agentEvents: [],
     agents: [],
     sessionRuntime: runtime,
-    timelineItems,
+    timelineEvents: timelineRecordsForItems(timelineItems),
     interactions: [],
     timelineNextSequence,
     turnStatus: "completed",
@@ -394,8 +412,8 @@ function entriesForTimeline(items: TimelineItem[]) {
   const loaded = studioReducer(selectedState(), {
     type: "timelineLoaded",
     sessionId: "session-1",
-    items,
-    nextSequence: items.reduce((max, item) => Math.max(max, item.sequence), -1) + 1,
+    events: timelineRecordsForItems(items),
+    nextSequence: timelineNextSequenceForItems(items),
   });
   return selectTimelineEntries(loaded);
 }
@@ -412,7 +430,7 @@ function staleTimelineLoadKeepsNewTurnItems() {
   const afterStaleLoad = studioReducer(withNewTurn, {
     type: "timelineLoaded",
     sessionId: "session-1",
-    items: [oldItem],
+    events: timelineRecordsForItems([oldItem]),
     nextSequence: 2,
   });
 
@@ -427,14 +445,14 @@ function freshTimelineLoadMayReplaceSnapshot() {
   const loaded = studioReducer(selectedState(), {
     type: "timelineLoaded",
     sessionId: "session-1",
-    items: [firstItem],
+    events: timelineRecordsForItems([firstItem]),
     nextSequence: 2,
   });
 
   const refreshed = studioReducer(loaded, {
     type: "timelineLoaded",
     sessionId: "session-1",
-    items: [replacement],
+    events: timelineRecordsForItems([replacement]),
     nextSequence: 3,
   });
 
@@ -482,7 +500,7 @@ function staleTimelineLoadDoesNotOverwriteLiveDelta() {
   const afterStaleLoad = studioReducer(liveCompleted, {
     type: "timelineLoaded",
     sessionId: "session-1",
-    items: [oldItem],
+    events: timelineRecordsForItems([oldItem]),
     nextSequence: 2,
   });
 
@@ -701,6 +719,84 @@ function completedSnapshotKeepsFirstItemSequence() {
   assertEqual(liveCompleted.timelineNextSequence, 13);
 }
 
+function realtimeAndHistoricalTimelineEventsConverge() {
+  const started = {
+    ...textItem("turn-2-text", 10, ""),
+    status: "streaming" as const,
+  };
+  const delta: TimelineItemDeltaEvent = {
+    turnId: "turn-2",
+    itemId: "turn-2-text",
+    sequence: 11,
+    kind: "text",
+    status: "streaming",
+    createdAt: 10,
+    updatedAt: 11,
+    delta: { type: "text", textChannel: "final", delta: "hel" },
+  };
+  const completed = textItem("turn-2-text", 12, "hello");
+  const live = studioReducer(
+    studioReducer(
+      studioReducer(selectedState(), {
+        type: "agentEvent",
+        sessionId: "session-1",
+        event: { timelineItemStarted: { item: started } },
+        statusText: "running",
+      }),
+      {
+        type: "agentEvent",
+        sessionId: "session-1",
+        event: { timelineItemDelta: { event: delta } },
+        statusText: "running",
+      },
+    ),
+    {
+      type: "agentEvent",
+      sessionId: "session-1",
+      event: { timelineItemCompleted: { sequence: 12, item: completed } },
+      statusText: "done",
+    },
+  );
+  const historical = studioReducer(selectedState(), {
+    type: "timelineLoaded",
+    sessionId: "session-1",
+    events: [
+      {
+        id: "event-10",
+        sessionId: "session-1",
+        sequence: 10,
+        createdAt: 10,
+        kind: "TimelineItemStarted",
+        payload: { type: "timelineItemStarted", item: started },
+      },
+      {
+        id: "event-11",
+        sessionId: "session-1",
+        sequence: 11,
+        createdAt: 11,
+        kind: "TimelineItemDelta",
+        payload: { type: "timelineItemDelta", event: delta },
+      },
+      {
+        id: "event-12",
+        sessionId: "session-1",
+        sequence: 12,
+        createdAt: 12,
+        kind: "TimelineItemCompleted",
+        payload: { type: "timelineItemCompleted", item: completed },
+      },
+    ],
+    nextSequence: 13,
+  });
+
+  assertDeepEqual(historical.timelineOrder, live.timelineOrder);
+  assertDeepEqual(
+    historical.timelineItems.get("turn-2-text"),
+    live.timelineItems.get("turn-2-text"),
+  );
+  assertEqual(historical.timelineNextSequence, live.timelineNextSequence);
+}
+
 function consecutiveToolsCollapseIntoToolGroup() {
   const entries = entriesForTimeline([
     toolItem("turn-1-read-a", "turn-1", 1, "read_file", { path: "a.ts" }),
@@ -916,7 +1012,7 @@ function timelineLoadedPlanStateAnnotatesPlanWithoutOpeningComposer() {
   const state = studioReducer(selectedState(), {
     type: "timelineLoaded",
     sessionId: "session-1",
-    items: [planItem("turn-1-plan", "turn-1", 10, "1. Inspect")],
+    events: timelineRecordsForItems([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
     planStates: [planState("turn-1-plan", "dismissed")],
     nextSequence: 13,
   });
@@ -936,7 +1032,7 @@ function timelineLoadedNewPlanStatesAnnotatePlan() {
     const reduced = studioReducer(selectedState(), {
       type: "timelineLoaded",
       sessionId: "session-1",
-      items: [planItem("turn-1-plan", "turn-1", 10, "1. Inspect")],
+      events: timelineRecordsForItems([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
       planStates: [planState("turn-1-plan", state)],
       nextSequence: 13,
     });
@@ -953,7 +1049,7 @@ function historicalTimelineLoadDoesNotCreatePlanAction() {
   const state = studioReducer(selectedState(), {
     type: "timelineLoaded",
     sessionId: "session-1",
-    items: [planItem("turn-1-plan", "turn-1", 10, "1. Inspect")],
+    events: timelineRecordsForItems([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
     nextSequence: 11,
   });
 
@@ -964,7 +1060,7 @@ function laterRunWithoutPlanDoesNotReopenHistoricalPlan() {
   const withHistory = studioReducer(selectedState(), {
     type: "timelineLoaded",
     sessionId: "session-1",
-    items: [planItem("turn-1-plan", "turn-1", 10, "1. Inspect")],
+    events: timelineRecordsForItems([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
     nextSequence: 11,
   });
   const submitted = studioReducer(withHistory, {
@@ -1507,7 +1603,7 @@ function selectingCurrentSessionKeepsTimelineState() {
   const loaded = studioReducer(selectedState(), {
     type: "timelineLoaded",
     sessionId: "session-1",
-    items: [textItem("turn-1-text", 10, "hello")],
+    events: timelineRecordsForItems([textItem("turn-1-text", 10, "hello")]),
     nextSequence: 11,
   });
   const withPlan = studioReducer(loaded, {
@@ -1637,7 +1733,7 @@ function projectSelectionLoadedAfterSessionDeleteClearsSelectedSession() {
   const liveState = studioReducer(selectedState(), {
     type: "timelineLoaded",
     sessionId: "session-1",
-    items: [liveItem],
+    events: timelineRecordsForItems([liveItem]),
     nextSequence: 11,
   });
   const updated = studioReducer(liveState, {
@@ -1665,7 +1761,7 @@ function projectSelectionLoadedCanClearSelectedProject() {
   const liveState = studioReducer(selectedState(), {
     type: "timelineLoaded",
     sessionId: "session-1",
-    items: [textItem("turn-1-text", 10, "hello")],
+    events: timelineRecordsForItems([textItem("turn-1-text", 10, "hello")]),
     nextSequence: 11,
   });
   const updated = studioReducer(liveState, {
@@ -2250,6 +2346,7 @@ runPromptLoadedErroredKeepsFailedStatusText();
 userInputRequestStoresPendingComposerState();
 userInputResolvedClearsPendingComposerState();
 completedSnapshotKeepsFirstItemSequence();
+realtimeAndHistoricalTimelineEventsConverge();
 consecutiveToolsCollapseIntoToolGroup();
 thinkingDoesNotBreakToolGroup();
 inferenceDoesNotBreakToolGroup();
