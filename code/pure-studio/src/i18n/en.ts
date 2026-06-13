@@ -188,6 +188,8 @@ const en = {
     modeLabel: "Collaboration mode",
     autoMode: "Auto",
     planMode: "Plan",
+    autoModeDescription: "Auto-execute and generate code directly",
+    planModeDescription: "Plan first, then execute after confirmation",
   },
 
   context: {
@@ -206,6 +208,7 @@ const en = {
     label: "Session status bar",
     model: "Model",
     noModel: "No model",
+    searchModels: "Search models...",
     session: "Session",
     context: "Context",
     cacheHit: "Cache hit",
