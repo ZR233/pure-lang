@@ -123,9 +123,9 @@ pub(super) fn default_role_config(
                 provider.default_model
             ))
         })?;
-    let effort = model.reasoning_efforts.first().cloned().ok_or_else(|| {
+    let effort = model.default_effort().ok_or_else(|| {
         PureError::ConfigError(format!(
-            "default model {} must define reasoning_efforts",
+            "default model {} must define effort parameter",
             provider.default_model
         ))
     })?;

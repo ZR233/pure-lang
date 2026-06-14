@@ -34,6 +34,9 @@ pub(super) fn tool_allowed_in_mode(mode: CompileMode, name: &str) -> bool {
     if crate::mcp::is_mcp_tool_name(name) {
         return true;
     }
+    if name == "plan_exit" {
+        return mode == CompileMode::Plan;
+    }
     match mode {
         CompileMode::Auto => true,
         CompileMode::Plan => {
@@ -54,6 +57,7 @@ pub(super) fn tool_allowed_in_mode(mode: CompileMode, name: &str) -> bool {
                     | "followup_task"
                     | "close_agent"
                     | "request_user_input"
+                    | "plan_exit"
             ) || name.starts_with("lsp_query_")
         }
     }

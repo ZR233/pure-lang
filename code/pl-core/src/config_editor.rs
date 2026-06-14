@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-use pl_model::{ModelInfo, ProviderKind, ZHIPU_CODING_PLAN_BASE_URL};
+use pl_model::{ModelInfo, ModelParameter, ProviderKind, ZHIPU_CODING_PLAN_BASE_URL};
 use pl_protocol::{PureError, Result};
 
 use crate::config::{
-    CONFIG_SCHEMA_VERSION, ModelConfig, ModelRole, ProviderConfig, PureConfig, ReasoningEffort,
-    RoleConfig, RoleConfigs,
+    CONFIG_SCHEMA_VERSION, ModelRole, ProviderConfig, PureConfig, ReasoningEffort, RoleConfig,
+    RoleConfigs,
 };
 use crate::first_run::ProviderTemplateKind;
 
@@ -71,11 +71,19 @@ fn normalized_base_url(value: &str) -> &str {
 }
 
 impl ProviderModelEdit {
-    fn to_model_config(&self) -> Result<ModelConfig> {
+    fn to_model_info(&self) -> Result<ModelInfo> {
         let slug = non_empty_trimmed(&self.slug, "model slug")?;
-        let mut model = ModelConfig::from_model_info(ModelInfo::fallback(&slug));
+        let mut model = ModelInfo::fallback(&slug);
         model.display_name = non_empty_trimmed(&self.display_name, "model display_name")?;
-        model.reasoning_efforts = normalized_efforts(&self.reasoning_efforts);
+        let efforts = normalized_efforts(&self.reasoning_efforts);
+        if !efforts.is_empty() {
+            model.parameters = vec![ModelParameter {
+                name: "effort".to_string(),
+                label: None,
+                candidates: efforts,
+                wire: BTreeMap::new(),
+            }];
+        }
         model.base_instructions = self.base_instructions.trim().to_string();
         Ok(model)
     }
@@ -100,7 +108,7 @@ impl ProviderEdit {
         models.extend(
             self.custom_models
                 .iter()
-                .map(ProviderModelEdit::to_model_config)
+                .map(ProviderModelEdit::to_model_info)
                 .collect::<Result<Vec<_>>>()?,
         );
         validate_models(&provider_key, &info.default_model, &models)?;
@@ -229,11 +237,11 @@ fn role_edit_to_config(
         })?;
     let effort = edit.effort.trim();
     let effort = if effort.is_empty() {
-        model.reasoning_efforts.first().cloned().ok_or_else(|| {
+        model.default_effort().ok_or_else(|| {
             PureError::ConfigError(format!("role {} model must define effort", role.key()))
         })?
     } else if model
-        .reasoning_efforts
+        .supported_efforts()
         .iter()
         .any(|candidate| candidate == effort)
     {
@@ -265,17 +273,17 @@ fn reconciled_role(
             .find(|model| model.slug == role.model)
     {
         if model
-            .reasoning_efforts
+            .supported_efforts()
             .iter()
             .any(|effort| effort == role.effort.as_str())
         {
             return Ok(role.clone());
         }
-        if let Some(effort) = model.reasoning_efforts.first() {
+        if let Some(effort) = model.default_effort() {
             return Ok(RoleConfig {
                 provider: role.provider.clone(),
                 model: role.model.clone(),
-                effort: ReasoningEffort::new(effort.clone()),
+                effort: ReasoningEffort::new(effort),
             });
         }
     }
@@ -302,9 +310,9 @@ fn role_for_provider_default(
                 provider.default_model
             ))
         })?;
-    let effort = model.reasoning_efforts.first().cloned().ok_or_else(|| {
+    let effort = model.default_effort().ok_or_else(|| {
         PureError::ConfigError(format!(
-            "default model {} must define reasoning_efforts",
+            "default model {} must define effort parameter",
             provider.default_model
         ))
     })?;
@@ -344,7 +352,7 @@ fn validate_provider_key(key: &str) -> Result<String> {
     Ok(key)
 }
 
-fn validate_models(provider_key: &str, default_model: &str, models: &[ModelConfig]) -> Result<()> {
+fn validate_models(provider_key: &str, default_model: &str, models: &[ModelInfo]) -> Result<()> {
     let mut slugs = BTreeSet::new();
     for model in models {
         if model.slug.trim().is_empty() {
@@ -368,9 +376,9 @@ fn validate_models(provider_key: &str, default_model: &str, models: &[ModelConfi
                 "provider {provider_key} default_model is not in models: {default_model}"
             ))
         })?;
-    if model.reasoning_efforts.is_empty() {
+    if model.default_effort().is_none() {
         return Err(PureError::ConfigError(format!(
-            "provider {provider_key} default model {default_model} must define reasoning_efforts"
+            "provider {provider_key} default model {default_model} must define effort parameter"
         )));
     }
     Ok(())

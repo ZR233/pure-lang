@@ -30,11 +30,10 @@ pub use agent::{
 pub use config::{
     BuiltinMcpServerState, ConfigPaths, ConfigStore, DEFAULT_PROJECT_DOC_MAX_BYTES,
     EffectiveMcpServerConfig, InstructionsConfig, McpServerConfig, McpServerMutationPolicy,
-    McpServerSourceKind, McpServerStatusKind, McpServerTransport, ModelConfig, ModelRole,
-    ProviderConfig, PureConfig, ReasoningEffort, ResolvedRoleConfig, RoleConfig, RoleConfigs,
-    RuntimeConfig, SkillsConfig, SystemSkillsConfig, TruncationPolicyConfig,
-    active_mcp_server_names, builtin_mcp_server_ids, effective_mcp_servers,
-    normalize_builtin_mcp_server_states, zhipu_coding_plan_token,
+    McpServerSourceKind, McpServerStatusKind, McpServerTransport, ModelRole, ProviderConfig,
+    PureConfig, ReasoningEffort, ResolvedRoleConfig, RoleConfig, RoleConfigs, RuntimeConfig,
+    SkillsConfig, SystemSkillsConfig, active_mcp_server_names, builtin_mcp_server_ids,
+    effective_mcp_servers, normalize_builtin_mcp_server_states, zhipu_coding_plan_token,
 };
 pub use config_editor::{
     ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit, infer_provider_template_kind,
@@ -56,10 +55,10 @@ pub use pl_lsp::{
     LspQueryResult, LspRange, LspRuntimeRegistry, LspServerSnapshot,
 };
 pub use pl_model::{
-    DeepSeekBalanceInfo, DeepSeekBalanceUsage, ModelCapabilities, ModelModality,
-    ModelRequestProfile, ProviderKind, ReasoningInterleaved, ReasoningInterleavedField,
-    ToolCapabilities, ToolWirePolicy, TruncationMode, ZhipuCodingPlanUsage, ZhipuQuotaLimit,
-    ZhipuQuotaWindow, ZhipuToolUsageDetail,
+    DeepSeekBalanceInfo, DeepSeekBalanceUsage, ModelCapabilities, ModelInfo, ModelModality,
+    ModelParameter, ModelRequestProfile, ProviderKind, ReasoningInterleaved,
+    ReasoningInterleavedField, ToolCapabilities, ToolWirePolicy, TruncationMode,
+    ZhipuCodingPlanUsage, ZhipuQuotaLimit, ZhipuQuotaWindow, ZhipuToolUsageDetail,
 };
 pub use pl_protocol::{
     AgentEvent, AgentEventReceiver, AgentEventSender, AgentRuntimeDelta, BudgetLimitKind,
@@ -88,8 +87,8 @@ pub use studio::{
 };
 pub use tool::{
     AskUserTool, BashInput, BashTool, LspLanguageTool, LspQueryTool, OutputTruncation,
-    SubagentContext, Tool, ToolContext, ToolInput, ToolOutput, ToolRegistry, ToolRuntimeEvent,
-    TruncatedOutput, TruncationStrategy, WriteStdinTool, lsp_tool_for_language,
+    PlanExitTool, SubagentContext, Tool, ToolContext, ToolInput, ToolOutput, ToolRegistry,
+    ToolRuntimeEvent, TruncatedOutput, TruncationStrategy, WriteStdinTool, lsp_tool_for_language,
 };
 pub use trace::TraceRecorder;
 pub use turn::{

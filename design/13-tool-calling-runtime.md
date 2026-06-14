@@ -46,6 +46,8 @@ MCP tools 由进程内 MCP runtime registry 的当前可用快照注册，工具
 
 每个 turn 开始时，运行时会把经过当前模式过滤后实际暴露给模型的工具名快照写入 SQLite `timeline_events`，作为内部 trace 事件保存。该记录只包含 turn id、模式和工具名列表，用于诊断工具可见性，不进入模型上下文，也不作为 Studio 可见 timeline item 展示。
 
+`plan_exit` 是 Plan Mode 专用的内置协调工具，schema 只包含 `content: string`。它表示“计划已完成，请 Studio 发起确认交互”，不是普通执行工具：运行时只在 Plan Mode 暴露它，Auto Mode 不暴露；工具执行成功后返回紧凑状态文本，不在工具内部等待用户、不切换模式、不写计划文件。`pl-core` 在工具成功后从原始参数读取 `content`，生成或补齐当前 turn 的 `plan` timeline item。Plan turn 完成后，Studio runtime 继续复用既有 `PlanConfirmation` pending interaction 和 fresh-context handoff 流程。兼容的 `<proposed_plan>` 流式块仍可生成 plan item，但同一 turn 内 `plan_exit.content` 是确认计划的优先来源。
+
 后台 stdio 子进程（MCP server、`bash` 命令、LSP server）由运行时显式持有生命周期。正常路径必须通过 async shutdown / terminate 请求关闭 stdin、终止进程树并等待退出；Drop 只能做 best-effort 兜底。Windows GUI 进程中启动这些后台子进程和兜底终止命令时不得显示额外终端窗口。
 
 终态事件只允许出现一次。`completed` 表示工具成功执行，`failed` 表示工具实现或注册失败，`denied` 表示模式、策略或审批拒绝，`interrupted` 和 `budgetLimited` 表示 turn 控制层中断或预算限制。`approved` 可作为执行前的非终态状态展示，但不能替代最终 `completed` 或 `failed`。

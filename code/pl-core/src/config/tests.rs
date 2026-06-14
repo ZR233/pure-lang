@@ -243,7 +243,6 @@ fn effective_mcp_servers_enable_builtin_servers_with_zhipu_token() {
     let models = default_models()
         .into_iter()
         .filter(|model| slugs.contains(&model.slug.as_str()))
-        .map(super::ModelConfig::from_model_info)
         .collect();
     config.providers.insert(
         "zhipu".to_string(),
@@ -286,7 +285,6 @@ fn builtin_mcp_servers_prefer_zhipu_coding_plan_token() {
     let models = default_models()
         .into_iter()
         .filter(|model| slugs.contains(&model.slug.as_str()))
-        .map(super::ModelConfig::from_model_info)
         .collect::<Vec<_>>();
     let mut zhipu = ProviderInfo::zhipu(None);
     zhipu.bearer_token = Some("normal-zhipu-key".to_string());
@@ -330,7 +328,6 @@ fn zhipu_token_restores_builtin_mcp_state_on_load() {
     let models = default_models()
         .into_iter()
         .filter(|model| slugs.contains(&model.slug.as_str()))
-        .map(super::ModelConfig::from_model_info)
         .collect();
     config.providers.insert(
         "zhipu".to_string(),
@@ -439,7 +436,7 @@ fn complete_roles_do_not_require_default_model_effort_for_fallback() {
         }
     }
     config.providers.get_mut("deepseek").unwrap().models[0]
-        .reasoning_efforts
+        .parameters
         .clear();
 
     let parsed = PureConfig::from_toml(&config.to_toml_pretty().unwrap()).unwrap();

@@ -63,9 +63,11 @@ pl-model provider
 
 模型 provider 流的成功边界由 canonical `ModelStreamEvent::Completed` 明确表示。protocol mapper 可以把 provider 私有终止 chunk 转换为该事件；如果底层 SSE parse、transport 或 EOF 在 completed 之前发生，`pl-model` 必须返回错误，并由 turn 层发出 failed turn、`Error` 和 `Done`，不得把局部内容当作成功消息落库。completed 之后的 usage、文本、思考和工具调用 snapshot 才能进入最终 `CompletionResponse`。
 
-Plan Mode 下模型输出的 `<proposed_plan>...</proposed_plan>` 块由 `pl-model::stream` accumulator 提取为 `plan` item。计划正文复用 `TimelineItem.content`，增量使用 `TimelineDelta::Plan`；同一块内容不得同时出现在普通 assistant `text` item 中。计划块之外的普通文本仍按 assistant `text` item 流式输出。
+Plan Mode 下计划确认的主触发源是 `plan_exit` 工具。模型完成可执行计划后调用 `plan_exit({ content })`，`pl-core` 使用工具参数中的 Markdown 计划补齐或覆盖同一 turn 的 `plan` item，并在 turn 完成后创建 `PlanConfirmation` interaction。`plan_exit` 只提交计划，不在工具内部等待用户选择，也不写入 opencode 风格计划文件。
 
-Auto 与 Plan Mode 下模型可见输出优先使用显式标签：`<commentary>...</commentary>` 表示中间进展，`<final>...</final>` 表示最终正文；Plan Mode 的最终计划继续使用 `<proposed_plan>...</proposed_plan>`。`pl-model::stream` accumulator 负责跨 chunk 解析这些标签，标签本身不得进入 timeline。未标记的普通输出默认进入 `final` 文本通道并写入 assistant 正文，不能导致 turn 失败；Plan Mode 下未标记文本也不伪造 `plan` item。
+模型输出的 `<proposed_plan>...</proposed_plan>` 块仍由 `pl-model::stream` accumulator 提取为 `plan` item，用于流式展示和旧会话兼容。计划正文复用 `TimelineItem.content`，增量使用 `TimelineDelta::Plan`；同一块内容不得同时出现在普通 assistant `text` item 中。计划块之外的普通文本仍按 assistant `text` item 流式输出。如果同一 turn 同时出现 `<proposed_plan>` 和成功的 `plan_exit`，以 `plan_exit.content` 作为最终确认计划。
+
+Auto 与 Plan Mode 下模型可见输出优先使用显式标签：`<commentary>...</commentary>` 表示中间进展，`<final>...</final>` 表示最终正文；Plan Mode 的最终计划优先通过 `plan_exit` 提交，`<proposed_plan>...</proposed_plan>` 只作为流式展示和兼容入口。`pl-model::stream` accumulator 负责跨 chunk 解析这些标签，标签本身不得进入 timeline。未标记的普通输出默认进入 `final` 文本通道并写入 assistant 正文，不能导致 turn 失败；Plan Mode 下未标记文本也不伪造 `plan` item。
 
 部分 OpenAI-compatible Chat provider 会把带可见标签的输出放入 `reasoning_content`。accumulator 必须保留这部分原始内容作为 thinking/reasoning，同时只把其中显式 `<commentary>`、`<final>`、`<proposed_plan>` 标签段投影到可见 timeline；无标签 `reasoning_content` 不得变成 assistant 正文或 plan。
 
@@ -80,7 +82,7 @@ Studio 前端的实时事件、`load_session_timeline` 历史 snapshot 和 `load
 - Plan lifecycle 与 interaction 状态均通过 `StudioEvent` 实时更新，并在 `bootstrap`、`select_session`、`load_session_state` 和 `load_studio_events` 中恢复。
 - `SkillActivated` 是 skill runtime fact 的实时通知与可追踪记录。它不渲染成普通 timeline item；Studio 收到后从后端 runtime snapshot 更新 `activeSkills`，历史恢复以结构化 session skill 表为准，而不是解析 `skill_view` 的 tool result 文本。
 - `Done` 只表示 turn 状态完成，不携带 timeline 内容；最终正文必须通过 `textChannel=final` 的 `text` item 表达。
-- Plan Mode 的最终可执行计划必须通过 `plan` item 表达；如果模型只输出计划块而没有普通正文，不应生成空 assistant `text` item。
+- Plan Mode 的最终可执行计划必须通过 `plan` item 表达；该 item 可以来自 `plan_exit.content` 或兼容的 `<proposed_plan>` 流式块。如果模型只提交计划而没有普通正文，不应生成空 assistant `text` item。
 
 Studio 渲染可以在 selector 派生出展示项后使用虚拟滚动优化大 timeline，但虚拟滚动层不得改变 item-first 协议语义、事件游标或 reducer 合并规则。动态高度、流式 delta 和自动跟随底部属于前端渲染适配层职责；协议层仍只表达 timeline item 与 delta。
 
@@ -112,7 +114,7 @@ root agent 的 provider `429` 错误码是当前轮的终止错误，不进入�
 
 `ModelStreamEvent` 的 assistant content 语义与 opencode 的 part/lifecycle 模型对齐：`text`、`reasoning`、`plan` 和 `tool` 都有独立 start/delta/complete 生命周期。`pl-model::stream::lifecycle` 负责为缺失 start 的 delta 补 start，并在 step finish 前补齐仍打开的 text、reasoning 和 plan block。`TimelineProjection` 只按 lifecycle 写 item-first timeline，不再从普通文本或 thinking 内容推断 plan。
 
-Plan 是协议级 block。provider 或 prompt 兼容层可以继续识别 `<proposed_plan>`，但必须先转换为 `PlanStarted/PlanDelta/PlanCompleted` 后再进入 accumulator；`<commentary>` 与 `<final>` 同理转换为带 `TimelineTextChannel` 的 text lifecycle。未标签普通 text 默认进入 `final` text block；未标签 reasoning 永远只进入 thinking block，不能生成 assistant 正文或 plan。部分 OpenAI-compatible Chat provider 会把带可见标签的输出放入 `reasoning_content`，该兼容转换只允许提取显式标签段，同时保留完整 reasoning 原文作为 thinking。
+Plan 是协议级 block。provider 或 prompt 兼容层可以继续识别 `<proposed_plan>`，但必须先转换为 `PlanStarted/PlanDelta/PlanCompleted` 后再进入 accumulator；`pl-core` 也可以从 Plan Mode 中成功执行的 `plan_exit.content` 生成同一个 `plan` item。`<commentary>` 与 `<final>` 同理转换为带 `TimelineTextChannel` 的 text lifecycle。未标签普通 text 默认进入 `final` text block；未标签 reasoning 永远只进入 thinking block，不能生成 assistant 正文或 plan。部分 OpenAI-compatible Chat provider 会把带可见标签的输出放入 `reasoning_content`，该兼容转换只允许提取显式标签段，同时保留完整 reasoning 原文作为 thinking。
 
 工具 timeline item 的 `itemId` 使用 `toolCallId`。当 provider 提供 `call_id` 时，`toolCallId` 优先使用该值；provider 的原始 item id 只作为聚合辅助信息保留在内部。工具参数流、审批、执行和结果都 upsert 到同一个 tool item。
 

@@ -20,14 +20,14 @@ pub use mcp::{
     builtin_mcp_server_ids, effective_mcp_servers, normalize_builtin_mcp_server_states,
     validate_mcp_identifier, zhipu_coding_plan_token,
 };
-pub use provider::{ModelConfig, ProviderConfig, TruncationPolicyConfig};
+pub use provider::ProviderConfig;
 pub use role::{ModelRole, ReasoningEffort, ResolvedRoleConfig, RoleConfig, RoleConfigs};
 pub use runtime::{RuntimeConfig, SkillsConfig, SystemSkillsConfig};
 pub use store::{ConfigPaths, ConfigStore};
 
 pub const CONFIG_DIR_NAME: &str = ".pure";
 pub const CONFIG_FILE_NAME: &str = "config.toml";
-pub const CONFIG_SCHEMA_VERSION: u32 = 3;
+pub const CONFIG_SCHEMA_VERSION: u32 = 4;
 
 const DEFAULT_PROVIDER_KEY: &str = "deepseek";
 pub(super) const DEFAULT_MODEL: &str = "deepseek-v4-flash";
@@ -151,7 +151,7 @@ impl PureConfig {
             })?;
 
         if !model
-            .reasoning_efforts
+            .supported_efforts()
             .iter()
             .any(|effort| effort == role_config.effort.as_str())
         {
@@ -169,12 +169,7 @@ impl PureConfig {
             role_config: role_config.clone(),
             provider_key: role_config.provider.clone(),
             provider_info: provider.to_provider_info(&role_config.model),
-            models: provider
-                .models
-                .iter()
-                .cloned()
-                .map(ModelConfig::into_model_info)
-                .collect(),
+            models: provider.models.clone(),
         })
     }
 
