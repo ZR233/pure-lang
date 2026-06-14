@@ -333,8 +333,16 @@ function applyTimelineDelta<T extends TimelineStateSlice>(
   event: TimelineItemDeltaEvent,
   eventSequence: number,
 ): T {
-  const existing = state.timelineItems.get(event.itemId) ?? blankTimelineItem(event);
-  const item = normalizeTimelineItem(existing);
+  const existing = state.timelineItems.get(event.itemId);
+  // 单调校验：丢弃乱序/重复 delta，防止 broadcast Lagged 后跨 turn 串台与乱序累积。
+  if (
+    existing?.lastDeltaSequence !== undefined &&
+    eventSequence <= existing.lastDeltaSequence
+  ) {
+    return state;
+  }
+  const item = normalizeTimelineItem(existing ?? blankTimelineItem(event));
+  item.lastDeltaSequence = eventSequence;
   item.status = event.status;
   item.updatedAt = event.updatedAt;
   const delta = event.delta;

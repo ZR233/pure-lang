@@ -964,7 +964,9 @@ impl StudioStore {
 
         let tx = self.db.begin().await?;
         if !timeline_events.is_empty() {
-            insert_timeline_events_with_tx(&tx, timeline_events).await?;
+            // timeline 表由实时 emit 单源写入（apply_studio_event_projection 用 DB 全局
+            // envelope.sequence），turn 结束不再重复写 timeline 表（消除双写与 sequence 双空间）。
+            // 这里仅提取 skill 激活事件更新 skill 表（幂等）。
             upsert_session_skill_events_with_tx(&tx, timeline_events).await?;
         }
         if !messages.is_empty() {
@@ -986,7 +988,7 @@ impl StudioStore {
     ) -> Result<()> {
         let tx = self.db.begin().await?;
         if !timeline_events.is_empty() {
-            insert_timeline_events_with_tx(&tx, timeline_events).await?;
+            // 同 append_turn_records：timeline 表由实时 emit 单源写入，这里只更新 skill 表。
             upsert_session_skill_events_with_tx(&tx, timeline_events).await?;
         }
         replace_session_messages_with_tx(&tx, session_id, messages).await?;
@@ -1789,32 +1791,34 @@ fn timeline_change_trace_event(
     change: &pl_protocol::StudioTimelineChange,
 ) -> Option<TraceEvent> {
     let session_id = envelope.session_id.clone()?;
-    let (sequence, kind) = match change {
-        pl_protocol::StudioTimelineChange::Started { item } => (
-            item.sequence,
-            TraceEventKind::TimelineItemStarted { item: item.clone() },
-        ),
-        pl_protocol::StudioTimelineChange::Delta { event } => (
-            event.sequence,
-            TraceEventKind::TimelineItemDelta {
-                event: event.clone(),
-            },
-        ),
-        pl_protocol::StudioTimelineChange::Completed { sequence, item } => (
-            *sequence,
-            TraceEventKind::TimelineItemCompleted { item: item.clone() },
-        ),
-        pl_protocol::StudioTimelineChange::Failed {
-            sequence,
-            item,
-            error,
-        } => (
-            *sequence,
+    // sequence 统一用 DB 全局 envelope.sequence（单一权威），回填到 item/event，
+    // 使 UI 的 dedup key（record.sequence，来自 item/event.sequence）跨 turn 单调，
+    // 消除 pl-model projection sequence 与 DB sequence 的双空间错配。
+    let sequence = envelope.sequence;
+    let kind = match change {
+        pl_protocol::StudioTimelineChange::Started { item } => {
+            let mut item = item.clone();
+            item.sequence = sequence;
+            TraceEventKind::TimelineItemStarted { item }
+        }
+        pl_protocol::StudioTimelineChange::Delta { event } => {
+            let mut event = event.clone();
+            event.sequence = sequence;
+            TraceEventKind::TimelineItemDelta { event }
+        }
+        pl_protocol::StudioTimelineChange::Completed { item, .. } => {
+            let mut item = item.clone();
+            item.sequence = sequence;
+            TraceEventKind::TimelineItemCompleted { item }
+        }
+        pl_protocol::StudioTimelineChange::Failed { item, error, .. } => {
+            let mut item = item.clone();
+            item.sequence = sequence;
             TraceEventKind::TimelineItemFailed {
-                item: item.clone(),
+                item,
                 error: error.clone(),
-            },
-        ),
+            }
+        }
     };
     Some(TraceEvent {
         session_id,

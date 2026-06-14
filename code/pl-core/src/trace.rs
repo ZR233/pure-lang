@@ -58,11 +58,15 @@ impl TraceRecorder {
         self.events.push(event);
     }
 
-    pub fn record_event(&mut self, event: TraceEvent) {
+    pub fn record_event(&mut self, mut event: TraceEvent) {
         if self.disabled {
             return;
         }
-        self.sequence = self.sequence.max(event.sequence + 1);
+        // recorder 是 sequence 的唯一分配者：强制覆盖 event 自带的 sequence（pl-model
+        // projection 每 turn 从 0，不再可信），保证 recorder.events 跨 turn 全局单调。
+        event.sequence = self.sequence;
+        event.session_id = self.session_id.clone();
+        self.sequence += 1;
         self.events.push(event);
     }
 

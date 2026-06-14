@@ -23,7 +23,7 @@ impl TimelineProjection {
         Self {
             session_id: context.session_id,
             turn_id: context.turn_id,
-            sequence: context.starting_sequence,
+            sequence: 0,
             started: HashMap::new(),
             events: Vec::new(),
         }

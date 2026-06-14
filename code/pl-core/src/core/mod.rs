@@ -34,8 +34,8 @@ mod turn_loop;
 mod turn_result;
 
 pub(crate) use turn_result::compact_text;
-/// 生成唯一的会话 ID（毫秒时间戳 + 序列号）。
-fn generate_session_id() -> String {
+/// 生成唯一的 turn ID（毫秒时间戳 + 序列号），用于隔离每个 turn 的 timeline item_id。
+fn generate_turn_id() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let ts = std::time::SystemTime::now()
