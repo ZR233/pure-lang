@@ -25,9 +25,22 @@ impl WorkspacePaths {
     }
 
     pub async fn reject_symlink_write(&self, path: &Path) -> Result<(), PureError> {
+        self.reject_symlink(path, "write").await
+    }
+
+    /// 拒绝通过符号链接读取（在 canonicalize 前检查 candidate，对齐 codex）。
+    ///
+    /// 接受相对路径（工具输入的 `path`），须在 `resolve_existing` 之前调用，
+    /// 否则符号链接会被 canonicalize 解析到 target 而漏检。
+    pub async fn reject_symlink_read(&self, path: &str) -> Result<(), PureError> {
+        let candidate = self.policy.candidate(Path::new(path));
+        self.reject_symlink(&candidate, "read").await
+    }
+
+    async fn reject_symlink(&self, path: &Path, refusing_verb: &str) -> Result<(), PureError> {
         match tokio::fs::symlink_metadata(path).await {
             Ok(metadata) if metadata.file_type().is_symlink() => Err(self.error(format!(
-                "refusing to write through symbolic link '{}'",
+                "refusing to {refusing_verb} through symbolic link '{}'",
                 path.display()
             ))),
             Ok(_) => Ok(()),

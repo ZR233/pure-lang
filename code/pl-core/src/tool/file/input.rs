@@ -4,8 +4,10 @@ use serde::Deserialize;
 #[serde(rename_all = "camelCase")]
 pub(super) struct ReadFileInput {
     pub path: String,
-    pub offset: Option<usize>,
-    pub limit: Option<usize>,
+    /// 1-based 起始行号，默认 1（第 1 行）。
+    pub line_offset: Option<usize>,
+    /// 最多读取的行数；`None` 表示读到文件末尾。
+    pub max_lines: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
