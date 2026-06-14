@@ -542,7 +542,7 @@ async fn run_prompt_inner(
         active_turns.insert(session_id.clone(), cancellation_token.clone());
     }
 
-    let (event_tx, event_rx) = tokio::sync::broadcast::channel(256);
+    let (event_tx, event_rx) = tokio::sync::broadcast::channel(4096);
     let event_task = tauri::async_runtime::spawn(drain_events(
         session_id.clone(),
         event_rx,

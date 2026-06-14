@@ -57,7 +57,6 @@ fn openai_request(model: String) -> CompletionRequest {
             session_id: "openai-live-session".to_string(),
             turn_id: "openai-live-turn".to_string(),
             inference_id: "openai-live-inference".to_string(),
-            starting_sequence: 0,
             plan_mode: false,
         }),
     }

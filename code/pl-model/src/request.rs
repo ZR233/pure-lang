@@ -60,7 +60,6 @@ pub struct CompletionTimelineContext {
     pub session_id: String,
     pub turn_id: String,
     pub inference_id: String,
-    pub starting_sequence: u64,
     pub plan_mode: bool,
 }
 

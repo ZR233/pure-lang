@@ -62,7 +62,7 @@ pub(super) async fn run_turn_with_trace(
     let mut budget_tracker = BudgetTracker::new(request.budget);
     let mut budget_limit: Option<BudgetLimit> = None;
 
-    let session_id = super::generate_session_id();
+    let turn_id = super::generate_turn_id();
     let requires_subagent_dispatch =
         active_subagent.is_none() && prompt_requires_subagent_dispatch(&request.prompt);
     let initial_agent_count = if requires_subagent_dispatch {
@@ -72,13 +72,13 @@ pub(super) async fn run_turn_with_trace(
     };
     let mut subagent_dispatch_recovered = false;
     recorder.user_text_item_with_attachments(
-        &session_id,
+        &turn_id,
         request.prompt.clone(),
         request.timeline_attachments.clone(),
     );
     session.push_user_content(request.user_content.clone());
-    record_enabled_tools(recorder, &session_id, request.mode, &tool_schemas);
-    let turn_item = recorder.turn_item(&session_id, TimelineItemStatus::Running);
+    record_enabled_tools(recorder, &turn_id, request.mode, &tool_schemas);
+    let turn_item = recorder.turn_item(&turn_id, TimelineItemStatus::Running);
     recorder.start_item(turn_item.clone());
     let model = provider.default_model().to_string();
 
@@ -133,7 +133,7 @@ pub(super) async fn run_turn_with_trace(
             session.truncate_messages(safe_message_count);
             return Ok(interrupted_turn_result(
                 recorder,
-                &session_id,
+                &turn_id,
                 request.mode,
                 last_content,
                 last_reasoning_content,
@@ -199,7 +199,7 @@ pub(super) async fn run_turn_with_trace(
                     let model_info = provider.model_info(&model);
                     recorder.broadcast(AgentEvent::AgentRuntimeUpdated {
                         delta: agent_runtime_delta(
-                            format!("{session_id}-compact-{iteration}"),
+                            format!("{turn_id}-compact-{iteration}"),
                             identity_for_subagent(active_subagent.as_ref()),
                             &model_info,
                             usage_snapshot,
@@ -212,7 +212,7 @@ pub(super) async fn run_turn_with_trace(
                     let severity = provider_error_severity(active_subagent.as_ref(), &error);
                     return Ok(failed_turn_result(
                         recorder,
-                        &session_id,
+                        &turn_id,
                         request.mode,
                         last_content,
                         last_reasoning_content,
@@ -235,8 +235,8 @@ pub(super) async fn run_turn_with_trace(
         let mut messages = instruction_bundle.prelude_messages.clone();
         messages.extend(history_messages.clone());
 
-        let inference_id = format!("{session_id}-inf-{iteration}");
-        let mut inference_item = recorder.inference_item(&session_id, &inference_id, &model);
+        let inference_id = format!("{turn_id}-inf-{iteration}");
+        let mut inference_item = recorder.inference_item(&turn_id, &inference_id, &model);
         recorder.start_item(inference_item.clone());
         let model_capabilities = provider.effective_model_capabilities(&model);
         let parallel_tool_calls = should_request_parallel_tool_calls(model_capabilities, &options);
@@ -254,9 +254,8 @@ pub(super) async fn run_turn_with_trace(
             stream: true,
             timeline: Some(pl_model::CompletionTimelineContext {
                 session_id: recorder.session_id().to_string(),
-                turn_id: session_id.clone(),
+                turn_id: turn_id.clone(),
                 inference_id: inference_id.clone(),
-                starting_sequence: recorder.current_sequence(),
                 plan_mode: matches!(request.mode, CompileMode::Plan),
             }),
         };
@@ -269,7 +268,7 @@ pub(super) async fn run_turn_with_trace(
                         session.truncate_messages(safe_message_count);
                         return Ok(interrupted_turn_result(
                             recorder,
-                            &session_id,
+                            &turn_id,
                             request.mode,
                             last_content,
                             last_reasoning_content,
@@ -293,7 +292,7 @@ pub(super) async fn run_turn_with_trace(
                 session.truncate_messages(safe_message_count);
                 return Ok(interrupted_turn_result(
                     recorder,
-                    &session_id,
+                    &turn_id,
                     request.mode,
                     last_content,
                     last_reasoning_content,
@@ -308,7 +307,7 @@ pub(super) async fn run_turn_with_trace(
                 let severity = provider_error_severity(active_subagent.as_ref(), &error);
                 return Ok(failed_turn_result(
                     recorder,
-                    &session_id,
+                    &turn_id,
                     request.mode,
                     last_content,
                     last_reasoning_content,
@@ -368,7 +367,7 @@ pub(super) async fn run_turn_with_trace(
             if looks_like_unexecuted_tool_call_text(&content) {
                 return Ok(failed_turn_result(
                     recorder,
-                    &session_id,
+                    &turn_id,
                     request.mode,
                     last_content,
                     last_reasoning_content,
@@ -384,7 +383,7 @@ pub(super) async fn run_turn_with_trace(
                 if current_count <= initial_count && !subagent_dispatch_recovered {
                     return Ok(failed_turn_result(
                         recorder,
-                        &session_id,
+                        &turn_id,
                         request.mode,
                         last_content,
                         last_reasoning_content,
@@ -431,7 +430,7 @@ pub(super) async fn run_turn_with_trace(
                 core,
                 options: &options,
                 mode: request.mode,
-                session_id: &session_id,
+                session_id: &turn_id,
                 workspace_root: &workspace_root,
                 workspace_instructions: workspace_instructions.clone(),
                 active_subagent: active_subagent.clone(),
@@ -448,7 +447,7 @@ pub(super) async fn run_turn_with_trace(
                 session.truncate_messages(safe_message_count);
                 return Ok(failed_turn_result_with_abort_reason(
                     recorder,
-                    &session_id,
+                    &turn_id,
                     request.mode,
                     last_content,
                     last_reasoning_content,
@@ -465,13 +464,13 @@ pub(super) async fn run_turn_with_trace(
             subagent_dispatch_recovered = true;
         }
         if request.mode == CompileMode::Plan {
-            record_plan_exit_items(recorder, &session_id, &tool_results);
+            record_plan_exit_items(recorder, &turn_id, &tool_results);
         }
         if is_cancelled(&options) {
             session.truncate_messages(safe_message_count);
             return Ok(interrupted_turn_result(
                 recorder,
-                &session_id,
+                &turn_id,
                 request.mode,
                 last_content,
                 last_reasoning_content,
@@ -505,7 +504,7 @@ pub(super) async fn run_turn_with_trace(
         session.truncate_messages(safe_message_count);
         return Ok(interrupted_turn_result(
             recorder,
-            &session_id,
+            &turn_id,
             request.mode,
             last_content,
             last_reasoning_content,
@@ -519,7 +518,7 @@ pub(super) async fn run_turn_with_trace(
     if let Some(limit) = budget_limit {
         return Ok(budget_limited_turn_result(
             recorder,
-            &session_id,
+            &turn_id,
             request.mode,
             last_content,
             last_reasoning_content,
@@ -532,8 +531,8 @@ pub(super) async fn run_turn_with_trace(
         ));
     }
 
-    recorder.ensure_assistant_text_item(&session_id, &last_content);
-    let mut completed_turn_item = recorder.turn_item(&session_id, TimelineItemStatus::Completed);
+    recorder.ensure_assistant_text_item(&turn_id, &last_content);
+    let mut completed_turn_item = recorder.turn_item(&turn_id, TimelineItemStatus::Completed);
     completed_turn_item.content = last_content.clone();
     completed_turn_item.usage = Some(TokenUsageSnapshot {
         prompt_tokens: total_usage.prompt_tokens,

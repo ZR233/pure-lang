@@ -389,6 +389,11 @@ export type TimelineItem = {
   turnId: string;
   itemId: string;
   sequence: number;
+  /**
+   * 该 item 最后一次收到的 delta 事件 sequence，用于丢弃乱序/重复 delta，
+   * 防止 broadcast Lagged 后跨 turn 串台与乱序累积。
+   */
+  lastDeltaSequence?: number;
   kind: "text" | "thinking" | "tool" | "agent" | "turn" | "inference" | "plan";
   status: ToolCallStatus2;
   createdAt: number;

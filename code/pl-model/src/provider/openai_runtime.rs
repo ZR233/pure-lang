@@ -607,7 +607,6 @@ mod tests {
             session_id: "session-1".to_string(),
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
-            starting_sequence: 0,
             plan_mode: false,
         }));
 
@@ -669,7 +668,6 @@ mod tests {
             session_id: "session-1".to_string(),
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
-            starting_sequence: 0,
             plan_mode: false,
         }));
 
@@ -715,7 +713,6 @@ mod tests {
             session_id: "session-1".to_string(),
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
-            starting_sequence: 0,
             plan_mode: true,
         }));
 
@@ -771,7 +768,6 @@ mod tests {
             session_id: "session-1".to_string(),
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
-            starting_sequence: 0,
             plan_mode: true,
         }));
 
@@ -809,7 +805,6 @@ mod tests {
             session_id: "session-1".to_string(),
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
-            starting_sequence: 0,
             plan_mode: false,
         }));
 
@@ -843,7 +838,6 @@ mod tests {
             session_id: "session-1".to_string(),
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
-            starting_sequence: 0,
             plan_mode: true,
         }));
 
@@ -1008,7 +1002,6 @@ mod tests {
             session_id: "session-1".to_string(),
             turn_id: "turn-1".to_string(),
             inference_id: "turn-1-inf-0".to_string(),
-            starting_sequence: 0,
             plan_mode: false,
         }));
 
