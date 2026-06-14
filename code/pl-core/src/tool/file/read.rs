@@ -29,13 +29,17 @@ impl ReadFileTool {
     }
 }
 
+/// 单次读取的最大文件字节数（对齐 codex：512MB）。
+const MAX_READ_FILE_BYTES: u64 = 512 * 1024 * 1024;
+
 impl Tool for ReadFileTool {
     fn name(&self) -> &str {
         "read_file"
     }
 
     fn description(&self) -> &str {
-        "Read a UTF-8 text file inside the workspace. Supports optional line offset and limit."
+        "Read a UTF-8 text file inside the workspace. Returns the raw file contents for a \
+         1-based line range (`lineOffset`, `maxLines`) without line-number prefixes."
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -43,8 +47,8 @@ impl Tool for ReadFileTool {
             "type": "object",
             "properties": {
                 "path": { "type": "string" },
-                "offset": { "type": "integer", "minimum": 0 },
-                "limit": { "type": "integer", "minimum": 1 }
+                "lineOffset": { "type": "integer", "minimum": 1 },
+                "maxLines": { "type": "integer", "minimum": 1 }
             },
             "required": ["path"],
             "additionalProperties": false
@@ -62,24 +66,56 @@ impl Tool for ReadFileTool {
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
             let input: ReadFileInput = parse_input(input.arguments, self.name())?;
+            let line_offset = input.line_offset.unwrap_or(1);
+            if line_offset == 0 {
+                return Err(super::helpers::tool_error(
+                    self.name(),
+                    "lineOffset must be >= 1",
+                ));
+            }
+            if let Some(max_lines) = input.max_lines
+                && max_lines == 0
+            {
+                return Err(super::helpers::tool_error(
+                    self.name(),
+                    "maxLines must be >= 1",
+                ));
+            }
+
             let paths = workspace(&context).await?;
+            paths.reject_symlink_read(&input.path).await?;
             let path = paths.resolve_existing(&input.path).await?;
+            let metadata = tokio::fs::metadata(&path).await?;
+            if !metadata.is_file() {
+                return Err(super::helpers::tool_error(
+                    self.name(),
+                    format!("'{}' is not a regular file", input.path),
+                ));
+            }
+            if metadata.len() > MAX_READ_FILE_BYTES {
+                return Err(super::helpers::tool_error(
+                    self.name(),
+                    format!(
+                        "'{}' is too large to read ({} bytes; limit is {} bytes)",
+                        input.path,
+                        metadata.len(),
+                        MAX_READ_FILE_BYTES
+                    ),
+                ));
+            }
             let content = tokio::fs::read_to_string(&path).await.map_err(|error| {
                 super::helpers::tool_error(self.name(), format!("failed to read file: {error}"))
             })?;
-            let offset = input.offset.unwrap_or(0);
-            let lines: Vec<&str> = content.lines().collect();
-            let selected = lines
-                .iter()
-                .skip(offset)
-                .take(input.limit.unwrap_or(usize::MAX))
-                .copied()
-                .collect::<Vec<_>>()
-                .join("\n");
-            let truncated = self.truncation.truncate(&selected);
+            let start_byte = line_start_byte_offset(&content, line_offset)
+                .map_err(|error| super::helpers::tool_error(self.name(), error))?;
+            let end_byte = line_end_byte_offset(&content, start_byte, input.max_lines);
+            let selected = &content[start_byte..end_byte];
+            let truncated = self.truncation.truncate(selected);
             let mut description = truncated.content.clone();
             if truncated.was_truncated {
-                description.push_str("\n\nOutput was truncated; read a smaller range to continue.");
+                description.push_str(
+                    "\n\nOutput was truncated; pass a smaller maxLines or a larger line_offset range to continue.",
+                );
             }
             Ok(ToolOutput {
                 description,
@@ -94,6 +130,47 @@ impl Tool for ReadFileTool {
             })
         })
     }
+}
+
+/// 1-based 行号 → 起始字节偏移。
+///
+/// `line_offset == 1` 返回 0。`line_offset` 超出文件行数时报错；文件以换行结尾时，
+/// `line_offset == 行数 + 1` 返回 `content.len()`（空切片），与 codex 一致。
+fn line_start_byte_offset(content: &str, line_offset: usize) -> Result<usize, String> {
+    if line_offset <= 1 {
+        return Ok(0);
+    }
+    let mut current_line = 1;
+    for (idx, ch) in content.char_indices() {
+        if ch == '\n' {
+            current_line += 1;
+            if current_line == line_offset {
+                return Ok(idx + 1);
+            }
+        }
+    }
+    Err(format!(
+        "line_offset {line_offset} exceeds file length ({current_line} lines)"
+    ))
+}
+
+/// 从 `start_byte` 起最多 `max_lines` 行的结束字节偏移。
+///
+/// `max_lines == None` 时返回 `content.len()`（读到文件末尾）。
+fn line_end_byte_offset(content: &str, start_byte: usize, max_lines: Option<usize>) -> usize {
+    let Some(max_lines) = max_lines else {
+        return content.len();
+    };
+    let mut lines_seen = 1;
+    for (relative_idx, ch) in content[start_byte..].char_indices() {
+        if ch == '\n' {
+            if lines_seen == max_lines {
+                return start_byte + relative_idx + 1;
+            }
+            lines_seen += 1;
+        }
+    }
+    content.len()
 }
 
 impl Tool for ListFilesTool {

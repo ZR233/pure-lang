@@ -153,7 +153,7 @@ impl ToolPathPolicy {
         Ok(())
     }
 
-    fn candidate(&self, path: &Path) -> PathBuf {
+    pub(crate) fn candidate(&self, path: &Path) -> PathBuf {
         if path.is_absolute() {
             path.to_path_buf()
         } else {
