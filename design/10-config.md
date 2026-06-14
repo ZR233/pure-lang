@@ -57,16 +57,16 @@ SQLite 只保存 Studio 状态，例如项目、会话、消息、统一 interac
 - `model`
 - `effort`
 
-`effort` 使用字符串枚举，首版校验 against 对应模型的 `reasoning_efforts`。
+`effort` 使用字符串，校验 against 对应模型 `parameters` 中 `name = "effort"` 参数的候选值（即 `supported_efforts()`）。
 
-为了兼容旧配置，读取 TOML 时允许缺失某个 `[roles.<key>]` 块。缺失角色按默认模型补齐：按配置 key 顺序取首个 provider，并使用该 provider 的 `default_model` 和该模型的第一个 `reasoning_efforts`。如果角色块存在但引用了不存在的 provider、model 或 effort，配置仍视为无效并返回错误。
+为了兼容旧配置，读取 TOML 时允许缺失某个 `[roles.<key>]` 块。缺失角色按默认模型补齐：按配置 key 顺序取首个 provider，并使用该 provider 的 `default_model` 和该模型的默认 effort（`default_effort()`，即 effort 参数候选值的首项）。如果角色块存在但引用了不存在的 provider、model 或 effort，配置仍视为无效并返回错误。
 
 ## 10.4 TOML 示例
 
 本地 TOML 使用 `snake_case`，不同于 API wire 格式。
 
 ```toml
-schema_version = 3
+schema_version = 4
 
 [runtime]
 permission_mode = "request-approval"
@@ -145,10 +145,20 @@ currency = "CNY"
 input_price_per_mtok = 1.0
 output_price_per_mtok = 2.0
 cache_read_price_per_mtok = 0.02
-reasoning_efforts = ["high", "max"]
 capabilities = { streaming = true, temperature = false, reasoning = true, web_search = false, input = ["text"], output = ["text"], tools = { function_calling = true, parallel_tool_calls = true, custom_tools = false, freeform_tools = false }, interleaved = { field = "reasoning_content" } }
+request_profile = { body = { thinking = { type = "enabled" } } }
 base_instructions = ""
 truncation_policy = { mode = "tokens", limit = 10000 }
+
+[[providers.deepseek.models.parameters]]
+name = "effort"
+candidates = ["high", "max"]
+
+[providers.deepseek.models.parameters.wire.high]
+set = [{ path = "reasoning_effort", value = "high" }]
+
+[providers.deepseek.models.parameters.wire.max]
+set = [{ path = "reasoning_effort", value = "max" }]
 
 [[providers.deepseek.models]]
 slug = "deepseek-v4-pro"
@@ -161,15 +171,25 @@ currency = "CNY"
 input_price_per_mtok = 3.0
 output_price_per_mtok = 6.0
 cache_read_price_per_mtok = 0.025
-reasoning_efforts = ["high", "max"]
 capabilities = { streaming = true, temperature = false, reasoning = true, web_search = false, input = ["text"], output = ["text"], tools = { function_calling = true, parallel_tool_calls = true, custom_tools = false, freeform_tools = false }, interleaved = { field = "reasoning_content" } }
+request_profile = { body = { thinking = { type = "enabled" } } }
 base_instructions = ""
 truncation_policy = { mode = "tokens", limit = 10000 }
+
+[[providers.deepseek.models.parameters]]
+name = "effort"
+candidates = ["high", "max"]
+
+[providers.deepseek.models.parameters.wire.high]
+set = [{ path = "reasoning_effort", value = "high" }]
+
+[providers.deepseek.models.parameters.wire.max]
+set = [{ path = "reasoning_effort", value = "max" }]
 ```
 
 ## 10.5 Provider 和 Model
 
-`providers` 可保存多个 provider。当前 schema v3 是破坏性配置版本，不自动兼容 schema v2 的 `wire_api`、`env_key`、`auth_command`、`env_http_headers`、request retry 或 stream idle 字段。App 读取到旧 schema 或无法解析的配置时，会备份原文件并重置为默认 schema v3 配置，而不是尝试迁移。
+`providers` 可保存多个 provider。schema v4 是破坏性配置版本，不自动兼容 schema v3 的 `reasoning_efforts` 字段（已改为 `parameters` 块，见 07-model.md 7.8），也不兼容更早 schema 的 `wire_api`、`env_key`、`auth_command`、`env_http_headers`、request retry 或 stream idle 字段。App 读取到旧 schema 或无法解析的配置时，会备份原文件并重置为默认 schema v4 配置，而不是尝试迁移。
 
 每个 provider 持久化：
 
@@ -200,7 +220,7 @@ Anthropic 只在 `pl-model` 的 protocol 层保留占位，未实现 provider ru
 - `input_price_per_mtok`
 - `output_price_per_mtok`
 - `cache_read_price_per_mtok`
-- `reasoning_efforts`
+- `parameters`
 - `capabilities`
 - `request_profile`
 - `truncation_policy`
@@ -208,7 +228,7 @@ Anthropic 只在 `pl-model` 的 protocol 层保留占位，未实现 provider ru
 
 `used_fallback` 是运行时状态，不写入 TOML。
 
-`capabilities` 是破坏性 schema v3 的结构化能力矩阵，不再兼容旧数组字段。旧的 `capabilities = [...]` 或 `input_modalities = [...]` 会导致配置校验失败，并由 Studio 备份旧文件后生成新 schema 配置。视觉模型必须显式声明 `input = ["text", "image"]`；非视觉模型即使 provider wire API 接受图片字段，也会在本地被拒绝。
+`capabilities` 是结构化能力矩阵（schema v3 引入，v4 保留）。旧的 `capabilities = [...]` 或 `input_modalities = [...]` 会导致配置校验失败，并由 Studio 备份旧文件后生成新 schema 配置。视觉模型必须显式声明 `input = ["text", "image"]`；非视觉模型即使 provider wire API 接受图片字段，也会在本地被拒绝。
 
 价格字段为可选字段，用于本地 UI 估算费用。`currency` 只作为展示单位，系统不做汇率转换；三个 `*_price_per_mtok` 字段均表示每百万 token 单价。缺失任一参与计算的价格或缺失 `currency` 时，本次 token 仍进入上下文和用量统计，但费用标记为未计价。
 
@@ -216,9 +236,11 @@ Anthropic 只在 `pl-model` 的 protocol 层保留占位，未实现 provider ru
 
 Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-flash` 为缓存命中输入 0.02 元、缓存未命中输入 1 元、输出 2 元；`deepseek-v4-pro` 为缓存命中输入 0.025 元、缓存未命中输入 3 元、输出 6 元。`input_price_per_mtok` 表示缓存未命中输入价，`cache_read_price_per_mtok` 表示缓存命中输入价。
 
-Bundled OpenAI/GPT 模型参数以本地 Codex 仓库 `codex-rs/models-manager/models.json` 的修改为准，不按公开 API 文档臆造价格、最大输出或上下文窗口。当前 OpenAI 模板顺序为 `gpt-5.5`、`gpt-5.4`、`gpt-5.4-mini`。Pure 当前 `ModelInfo` 不持久化 Codex 的 `default_reasoning_level` 字段，因此 OpenAI 模型的 `reasoning_efforts` 首项表示 Codex 默认 reasoning level，后续项表示其他支持档位。
+Bundled OpenAI/GPT 模型参数以本地 Codex 仓库 `codex-rs/models-manager/models.json` 的修改为准，不按公开 API 文档臆造价格、最大输出或上下文窗口。当前 OpenAI 模板顺序为 `gpt-5.5`、`gpt-5.4`、`gpt-5.4-mini`。Pure 当前 `ModelInfo` 不持久化 Codex 的 `default_reasoning_level` 字段，因此 OpenAI 模型 effort 参数候选值的首项表示 Codex 默认 reasoning level，后续项表示其他支持档位；选中值通过 wire 写入 Responses 的 `reasoning.effort`。
 
-配置里的模型会覆盖或补充 bundled model。角色引用的 model 必须存在于对应 provider 的 `models` 中。
+Bundled Zhipu 模型 effort 候选值默认为 `enabled` / `none`，直接映射到 Chat 的 `thinking.type`；`glm-5.2` 例外，候选值为 `high` / `max` / `none`，wire 层 `high` / `max` 同时写入 `reasoning_effort` 并设置 `thinking.type = enabled`，`none` 设置 `thinking.type = disabled` 并移除 `reasoning_effort`。
+
+配置里的模型按字段级合并覆盖 bundled model：用户只需写差异字段，缺失字段从 bundled 默认值继承（Option 字段未提供即继承，`parameters` / `capabilities` / `truncation_policy` 为空或默认时也继承 bundled）。角色引用的 model 必须存在于对应 provider 的 `models` 中。
 
 ## 10.6 提示词配置
 
@@ -331,7 +353,7 @@ mcp__{server_id}__{tool_name}
 - API key 非空。
 - provider 的 default model 必须存在于该 provider 模型列表中。
 - 同一 provider 下模型 slug 不重复。
-- 角色引用的默认模型必须声明至少一个 `reasoning_efforts`，用于生成角色 `effort`。
+- 角色引用的默认模型必须声明 `name = "effort"` 参数且至少一个候选值，用于生成角色 `effort`。
 
 ## 10.11 pure-studio 设置页
 
@@ -366,9 +388,9 @@ Provider 标签页必须提供结构化编辑能力：
 - Provider 标签页不展示 raw TOML 配置编辑器，确保列表和编辑页占据主要工作区。
 - 展示 provider 模板自带的默认模型列表。
 - 允许追加用户自定义模型，保存时由 `pl-core` 将模板默认模型排在前面，再追加用户自定义模型。
-- 模型列表应展示关键参数，例如上下文窗口、最大输出 token、自动压缩阈值、temperature、reasoning efforts、capabilities、输入模态和截断策略。
+- 模型列表应展示关键参数，例如上下文窗口、最大输出 token、自动压缩阈值、temperature、effort 候选值（`supported_efforts()`）、capabilities、输入模态和截断策略。
 - provider kind 决定运行时 endpoint policy：OpenAI 默认使用 Responses；DeepSeek 和 Zhipu 使用 OpenAI Chat Completions protocol。运行时由 `pl-model` 内部 typed protocol 层转换为 async-openai 请求，用户配置中的 base URL 不自动追加或改写版本路径，只去除末尾多余 `/` 后与对应 API path 拼接。
-- Zhipu 请求固定使用流式 `chat/completions`；模型 `reasoning_efforts` 使用 `enabled` / `none` 表达 thinking 开关，不发送 wire-level `reasoning_effort`。thinking 按官方请求体 `thinking.type = enabled/disabled` 控制，开启时设置 `clear_thinking = false` 并保留/回传历史 `reasoning_content`。
+- Zhipu 请求固定使用流式 `chat/completions`；effort 由模型 `parameters` 声明驱动（见 07-model.md 7.8）。默认模型 effort 候选值为 `enabled` / `none`，直接映射到 `thinking.type`，不发送 wire-level `reasoning_effort`。`glm-5.2` 候选值为 `high` / `max` / `none`，其中 `high` / `max` 会作为 `reasoning_effort` 透传给 API 并设置 `thinking.type = enabled` 与 `clear_thinking = false`，`none` 设置 `thinking.type = disabled` 并移除 `reasoning_effort`。历史回放仍通过 assistant message 的 `reasoning_content` 字段保留。
 - 写入前由 `pl-core` 构造 `PureConfig` 并执行 `PureConfig::validate()`；校验失败时只在 UI 中展示错误，不写入磁盘。
 
 Roles 标签页必须展示固定四个角色：探索者、计划者、执行者、审查者。每个角色提供 provider、model 和 effort 下拉选择。provider 改变时，model 默认切换为该 provider 的 `default_model`；model 改变时，effort 默认切换为该模型的第一个可用 effort。角色路由下拉变更后即时提交完整 roles 快照，`pl-core` 统一校验后写入 `~/.pure/config.toml`。
@@ -393,6 +415,6 @@ Studio 交互状态统一保存在 SQLite `interactions` 表。工具审批、`r
 
 配置允许持久化明文 `bearer_token`，但这会把 API token 直接写入 `~/.pure/config.toml`。当前运行时只使用配置中保存的 `bearer_token` 作为 provider API key。
 
-schema v3 不再保留 `env_key`、`auth_command` 或 `env_http_headers` 字段。`pure-studio` 设置页按用户确认会把输入的 API key 明文写入对应 provider 的 `bearer_token`。后续版本可以增加系统凭据库模式，但当前运行时不从环境变量读取 provider key。
+schema v4 不再保留 `env_key`、`auth_command` 或 `env_http_headers` 字段。`pure-studio` 设置页按用户确认会把输入的 API key 明文写入对应 provider 的 `bearer_token`。后续版本可以增加系统凭据库模式，但当前运行时不从环境变量读取 provider key。
 
 MCP stdio server 的 `env` 会按配置原样传给子进程，可能包含明文凭据。Streamable HTTP 的 `bearer_token_env_var` 只保存环境变量名，运行时从 Pure 进程环境读取对应 token 并构造 Authorization header。

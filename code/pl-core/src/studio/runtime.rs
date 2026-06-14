@@ -590,47 +590,54 @@ mod tests {
     use tokio::sync::Mutex;
 
     use super::*;
-    use crate::config::{ModelConfig, ProviderConfig, RoleConfig, RoleConfigs};
+    use crate::config::{ProviderConfig, RoleConfig, RoleConfigs};
 
     async fn serve_sse_once(sse_body: String) -> (String, tokio::task::JoinHandle<()>) {
+        serve_sse_sequence(vec![sse_body]).await
+    }
+
+    async fn serve_sse_sequence(sse_bodies: Vec<String>) -> (String, tokio::task::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let handle = tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut buffer = Vec::new();
-            let mut temp = [0_u8; 1024];
-            let (header_end, content_length) = loop {
-                let n = socket.read(&mut temp).await.unwrap();
-                assert_ne!(n, 0);
-                buffer.extend_from_slice(&temp[..n]);
-                if let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n")
-                {
-                    let headers = String::from_utf8_lossy(&buffer[..header_end]);
-                    let content_length = headers
-                        .lines()
-                        .find_map(|line| {
-                            let (name, value) = line.split_once(':')?;
-                            name.eq_ignore_ascii_case("content-length")
-                                .then(|| value.trim().parse::<usize>().ok())?
-                        })
-                        .unwrap_or(0);
-                    break (header_end, content_length);
+            for sse_body in sse_bodies {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut buffer = Vec::new();
+                let mut temp = [0_u8; 1024];
+                let (header_end, content_length) = loop {
+                    let n = socket.read(&mut temp).await.unwrap();
+                    assert_ne!(n, 0);
+                    buffer.extend_from_slice(&temp[..n]);
+                    if let Some(header_end) =
+                        buffer.windows(4).position(|window| window == b"\r\n\r\n")
+                    {
+                        let headers = String::from_utf8_lossy(&buffer[..header_end]);
+                        let content_length = headers
+                            .lines()
+                            .find_map(|line| {
+                                let (name, value) = line.split_once(':')?;
+                                name.eq_ignore_ascii_case("content-length")
+                                    .then(|| value.trim().parse::<usize>().ok())?
+                            })
+                            .unwrap_or(0);
+                        break (header_end, content_length);
+                    }
+                };
+
+                while buffer.len() < header_end + 4 + content_length {
+                    let n = socket.read(&mut temp).await.unwrap();
+                    assert_ne!(n, 0);
+                    buffer.extend_from_slice(&temp[..n]);
                 }
-            };
 
-            while buffer.len() < header_end + 4 + content_length {
-                let n = socket.read(&mut temp).await.unwrap();
-                assert_ne!(n, 0);
-                buffer.extend_from_slice(&temp[..n]);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    sse_body.len(),
+                    sse_body
+                );
+                socket.write_all(response.as_bytes()).await.unwrap();
+                socket.shutdown().await.unwrap();
             }
-
-            let response = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-                sse_body.len(),
-                sse_body
-            );
-            socket.write_all(response.as_bytes()).await.unwrap();
-            socket.shutdown().await.unwrap();
         });
 
         (format!("http://{addr}"), handle)
@@ -638,8 +645,12 @@ mod tests {
 
     fn test_config(base_url: String) -> crate::config::PureConfig {
         let mut model = ModelInfo::fallback("local-responses");
-        model.reasoning_efforts = vec!["none".to_string()];
-        let model = ModelConfig::from_model_info(model);
+        model.parameters = vec![crate::ModelParameter {
+            name: "effort".to_string(),
+            label: None,
+            candidates: vec!["none".to_string()],
+            wire: std::collections::BTreeMap::new(),
+        }];
         let mut info = ProviderInfo::openai(Some(base_url));
         info.default_model = "local-responses".to_string();
         let provider = ProviderConfig::from_provider_info(info, vec![model]);
@@ -790,6 +801,117 @@ mod tests {
             InteractionPayload::PlanConfirmation {
                 plan_id: plan_item.item_id.clone(),
                 content: plan_item.content.clone(),
+            }
+        );
+        let timeline = store
+            .load_timeline_events(&session.id, None, None)
+            .await
+            .unwrap();
+        assert!(timeline.iter().any(|record| {
+            serde_json::from_str::<TraceEventKind>(&record.payload_json).is_ok_and(|kind| {
+                matches!(
+                    kind,
+                    TraceEventKind::PlanLifecycleChanged { event }
+                        if event.plan_id == plan_item.item_id
+                            && event.state == PlanLifecycleState::PendingConfirmation
+                )
+            })
+        }));
+        assert_eq!(interaction_events.lock().await.len(), 1);
+        let _ = tokio::fs::remove_dir_all(home).await;
+        let _ = tokio::fs::remove_dir_all(workspace).await;
+    }
+
+    #[tokio::test]
+    async fn plan_exit_tool_creates_pending_confirmation_interaction() {
+        let tool_sse = concat!(
+            "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"plan_exit\"}}\n\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"call_id\":\"call_1\",\"delta\":\"{\\\"content\\\":\\\"# Plan\\\\n\\\\n- Inspect\\\\n- Implement\\\"}\"}\n\n",
+            "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"plan_exit\",\"arguments\":\"{\\\"content\\\":\\\"# Plan\\\\n\\\\n- Inspect\\\\n- Implement\\\"}\"}}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+            "data: [DONE]\n\n"
+        )
+        .to_string();
+        let final_sse = concat!(
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_2\",\"delta\":\"<final>Plan submitted.</final>\"}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_2\",\"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}}}\n\n",
+            "data: [DONE]\n\n"
+        )
+        .to_string();
+        let (base_url, handle) = serve_sse_sequence(vec![tool_sse, final_sse]).await;
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let home = std::env::temp_dir().join(format!("pure-runtime-home-{unique}"));
+        let workspace = std::env::temp_dir().join(format!("pure-runtime-workspace-{unique}"));
+        tokio::fs::create_dir_all(&workspace).await.unwrap();
+        let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+        config_store.save(&test_config(base_url)).unwrap();
+        let store = StudioStore::open_memory().await.unwrap();
+        let runtime = StudioRuntime::new(store.clone(), config_store);
+        let project = runtime.open_project(&workspace).await.unwrap();
+        let session = store
+            .create_session(&project.id, "Plan exit test", CompileMode::Plan)
+            .await
+            .unwrap();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel::<AgentEvent>(32);
+        let interaction_events = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let interaction_emitter = emitter(interaction_events.clone());
+        let interaction_callback = runtime
+            .interactions()
+            .callback(session.id.clone(), interaction_emitter.clone());
+
+        let outcome = runtime
+            .run_prompt(RunPromptRequest {
+                session_id: session.id.clone(),
+                prompt: "make a plan".to_string(),
+                attachment_ids: Vec::new(),
+                event_tx,
+                interaction_callback,
+                interaction_emitter,
+                options: TurnOptions::default(),
+            })
+            .await
+            .unwrap();
+        handle.await.unwrap();
+
+        assert_eq!(outcome.result.status, TurnResultStatus::Completed);
+        assert_eq!(outcome.result.content, "Plan submitted.");
+        let plan_item = outcome
+            .timeline_events
+            .iter()
+            .rev()
+            .find_map(|event| match &event.kind {
+                TraceEventKind::TimelineItemCompleted { item }
+                    if item.kind == TimelineItemKind::Plan =>
+                {
+                    Some(item)
+                }
+                TraceEventKind::TimelineItemStarted { .. }
+                | TraceEventKind::TimelineItemDelta { .. }
+                | TraceEventKind::TimelineItemCompleted { .. }
+                | TraceEventKind::TimelineItemFailed { .. }
+                | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. } => None,
+            })
+            .expect("completed plan item");
+        assert_eq!(plan_item.content, "# Plan\n\n- Inspect\n- Implement");
+
+        let interaction = store
+            .read_interaction(&plan_confirmation_id(&plan_item.item_id))
+            .await
+            .unwrap()
+            .expect("plan confirmation interaction");
+        assert_eq!(interaction.kind, InteractionKind::PlanConfirmation);
+        assert_eq!(interaction.status, InteractionStatus::Pending);
+        assert_eq!(
+            interaction.payload,
+            InteractionPayload::PlanConfirmation {
+                plan_id: plan_item.item_id.clone(),
+                content: "# Plan\n\n- Inspect\n- Implement".to_string(),
             }
         );
         let timeline = store

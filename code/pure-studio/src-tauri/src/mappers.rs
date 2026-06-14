@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use pl_core::{
     BuiltinMcpServerState, ConfigStore, LspServerSnapshot, McpAvailabilityKind,
     McpAvailabilitySnapshot, McpServerConfig, McpServerStatusKind, McpServerTransport,
-    ModelCapabilities, ModelConfig, ModelModality, ModelRole, ProjectRecord, ProviderConfig,
+    ModelCapabilities, ModelInfo, ModelModality, ModelRole, ProjectRecord, ProviderConfig,
     ProviderEdit, ProviderKind, ProviderModelEdit, ProviderTemplateKind, ProviderUsageData,
     ProviderUsageRecord, ProviderUsageState, PureConfig, ReasoningInterleavedField, RoleEdit,
     SessionRecord, SessionRuntimeRecord, SkillCatalog, SkillMetadata, SkillSourceKind,
@@ -467,7 +467,7 @@ pub fn provider_status(provider: &ProviderConfig) -> &'static str {
     }
 }
 
-pub fn model_dto(model: &ModelConfig) -> ModelDto {
+pub fn model_dto(model: &ModelInfo) -> ModelDto {
     ModelDto {
         slug: model.slug.clone(),
         display_name: model.display_name.clone(),
@@ -481,7 +481,7 @@ pub fn model_dto(model: &ModelConfig) -> ModelDto {
         input_price_per_mtok: model.input_price_per_mtok,
         output_price_per_mtok: model.output_price_per_mtok,
         cache_read_price_per_mtok: model.cache_read_price_per_mtok,
-        reasoning_efforts: model.reasoning_efforts.clone(),
+        reasoning_efforts: model.supported_efforts(),
         capabilities: model_capabilities_dto(&model.capabilities),
         truncation_mode: format!("{:?}", model.truncation_policy.mode).to_ascii_lowercase(),
         truncation_limit: model.truncation_policy.limit,

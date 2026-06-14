@@ -564,7 +564,7 @@ export const previewRoles: RoleRecord[] = [
 export function createPreviewConfig(): ConfigPayload {
   const roles = previewRoles;
   return {
-    toml: `schema_version = 3
+    toml: `schema_version = 4
 
 [runtime]
 permission_mode = "request-approval"
@@ -617,7 +617,6 @@ currency = "CNY"
 input_price_per_mtok = 1.0
 output_price_per_mtok = 2.0
 cache_read_price_per_mtok = 0.02
-reasoning_efforts = ["high", "max"]
 capabilities = { streaming = true, temperature = false, reasoning = true, web_search = false, input = ["text"], output = ["text"], tools = { function_calling = true, parallel_tool_calls = true, custom_tools = false, freeform_tools = false }, interleaved = { field = "reasoning_content" } }
 truncation_policy = { mode = "tokens", limit = 10000 }
 

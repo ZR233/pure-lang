@@ -6,7 +6,10 @@ use pl_protocol::{
     ToolResultMetadata,
 };
 use serde::Serialize;
+use serde_json::Map;
+use serde_json::Value;
 
+use crate::model_info::ModelInfo;
 #[cfg(test)]
 use crate::request::CompletionResponse;
 use crate::request::{
@@ -32,40 +35,55 @@ pub(crate) enum OpenAiEndpoint {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct OpenAiProtocol {
     endpoint: OpenAiEndpoint,
-    chat_reasoning: ChatReasoningStyle,
 }
 
 impl OpenAiProtocol {
     pub(crate) fn responses() -> Self {
         Self {
             endpoint: OpenAiEndpoint::Responses,
-            chat_reasoning: ChatReasoningStyle::Plain,
         }
     }
 
-    pub(crate) fn chat(chat_reasoning: ChatReasoningStyle) -> Self {
+    pub(crate) fn chat() -> Self {
         Self {
             endpoint: OpenAiEndpoint::ChatCompletions,
-            chat_reasoning,
         }
     }
 
-    pub(crate) fn build_request(&self, request: &CompletionRequest) -> Result<OpenAiRequestBody> {
+    pub(crate) fn build_request(
+        &self,
+        request: &CompletionRequest,
+        model: &ModelInfo,
+    ) -> Result<OpenAiRequestBody> {
         validate_tool_history(&request.messages, self.endpoint)?;
         match self.endpoint {
-            OpenAiEndpoint::Responses => Ok(OpenAiRequestBody::Responses(
-                ResponsesRequestBody::from_request(request)?,
-            )),
-            OpenAiEndpoint::ChatCompletions => Ok(OpenAiRequestBody::Chat(
-                ChatRequestBody::from_request(request, self.chat_reasoning)?,
-            )),
+            OpenAiEndpoint::Responses => {
+                let mut body = to_object_map(&ResponsesRequestBody::from_request(request)?)?;
+                finalize_body(&mut body, model, &request.reasoning);
+                Ok(OpenAiRequestBody::Responses(body))
+            }
+            OpenAiEndpoint::ChatCompletions => {
+                let mut body = to_object_map(&ChatRequestBody::from_request(request)?)?;
+                finalize_body(&mut body, model, &request.reasoning);
+                Ok(OpenAiRequestBody::Chat(body))
+            }
         }
     }
 
     #[cfg(test)]
     fn build_request_body(&self, request: &CompletionRequest) -> serde_json::Value {
+        let fallback = ModelInfo::fallback(&request.model);
+        self.build_request_body_with_model(request, &fallback)
+    }
+
+    #[cfg(test)]
+    fn build_request_body_with_model(
+        &self,
+        request: &CompletionRequest,
+        model: &ModelInfo,
+    ) -> serde_json::Value {
         serde_json::to_value(
-            self.build_request(request)
+            self.build_request(request, model)
                 .expect("typed provider request should build"),
         )
         .expect("typed provider request should serialize")
@@ -90,15 +108,8 @@ impl OpenAiProtocol {
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub(crate) enum OpenAiRequestBody {
-    Responses(ResponsesRequestBody),
-    Chat(ChatRequestBody),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ChatReasoningStyle {
-    Plain,
-    DeepSeek,
-    Zhipu,
+    Responses(Map<String, Value>),
+    Chat(Map<String, Value>),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -342,15 +353,12 @@ impl ToolFormatBody {
 #[derive(Debug, Clone, Serialize)]
 struct ResponsesReasoning {
     #[serde(skip_serializing_if = "Option::is_none")]
-    effort: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     summary: Option<ResponsesReasoningSummary>,
 }
 
 impl ResponsesReasoning {
     fn from_config(reasoning: &ReasoningConfig) -> Self {
         Self {
-            effort: reasoning.effort.clone(),
             summary: reasoning
                 .summary
                 .and_then(ResponsesReasoningSummary::from_summary),
@@ -386,17 +394,10 @@ pub(crate) struct ChatRequestBody {
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reasoning_effort: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    thinking: Option<ChatThinking>,
 }
 
 impl ChatRequestBody {
-    fn from_request(
-        request: &CompletionRequest,
-        reasoning_style: ChatReasoningStyle,
-    ) -> Result<Self> {
+    fn from_request(request: &CompletionRequest) -> Result<Self> {
         let mut messages = Vec::new();
 
         if let Some(instructions) = &request.instructions {
@@ -449,28 +450,6 @@ impl ChatRequestBody {
             .then(|| request.tools.iter().map(ChatTool::from_schema).collect());
         let tool_choice = tools.as_ref().map(|_| request.tool_choice.clone());
 
-        let (reasoning_effort, thinking) = match (reasoning_style, request.reasoning.as_ref()) {
-            (ChatReasoningStyle::Plain, _) | (_, None) => (None, None),
-            (ChatReasoningStyle::DeepSeek, Some(reasoning)) => (
-                reasoning.effort.clone(),
-                Some(ChatThinking {
-                    kind: chat_thinking_type(reasoning).to_string(),
-                    clear_thinking: None,
-                }),
-            ),
-            (ChatReasoningStyle::Zhipu, Some(reasoning)) => {
-                let kind = chat_thinking_type(reasoning).to_string();
-                let clear_thinking = (kind == "enabled").then_some(false);
-                (
-                    None,
-                    Some(ChatThinking {
-                        kind,
-                        clear_thinking,
-                    }),
-                )
-            }
-        };
-
         Ok(Self {
             model: request.model.clone(),
             messages,
@@ -479,8 +458,6 @@ impl ChatRequestBody {
             tool_choice,
             temperature: request.temperature,
             max_tokens: request.max_tokens,
-            reasoning_effort,
-            thinking,
         })
     }
 }
@@ -622,18 +599,60 @@ struct ChatToolCustom {
     format: ToolFormatBody,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct ChatThinking {
-    #[serde(rename = "type")]
-    kind: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    clear_thinking: Option<bool>,
+/// 把强类型请求序列化为 JSON 对象 Map，供 base body 与 parameter wire 注入。
+fn to_object_map<T: Serialize>(value: &T) -> Result<Map<String, Value>> {
+    let serialized = serde_json::to_value(value)?;
+    match serialized {
+        Value::Object(map) => Ok(map),
+        _ => Err(protocol_error(
+            "typed request body must serialize to a JSON object",
+        )),
+    }
 }
 
-fn chat_thinking_type(reasoning: &ReasoningConfig) -> &'static str {
-    match reasoning.summary {
-        Some(ReasoningSummary::Disabled) => "disabled",
-        Some(ReasoningSummary::Auto) | Some(ReasoningSummary::Enabled) | None => "enabled",
+/// 注入 base body 后应用 parameter wire，完成请求体动态字段组装。
+fn finalize_body(
+    body: &mut Map<String, Value>,
+    model: &ModelInfo,
+    reasoning: &Option<ReasoningConfig>,
+) {
+    merge_base_body(body, &model.request_profile.body);
+    apply_parameters(body, model, reasoning);
+}
+
+/// 深合并 base body 到请求体：对象字段递归合并，其余字段覆盖。
+fn merge_base_body(target: &mut Map<String, Value>, source: &Map<String, Value>) {
+    for (key, value) in source {
+        match (target.get_mut(key), value) {
+            (Some(Value::Object(target_inner)), Value::Object(source_inner)) => {
+                merge_base_body(target_inner, source_inner);
+            }
+            _ => {
+                target.insert(key.clone(), value.clone());
+            }
+        }
+    }
+}
+
+/// 遍历模型声明的可调参数，对用户选中的值应用 wire 写入请求体。
+fn apply_parameters(
+    body: &mut Map<String, Value>,
+    model: &ModelInfo,
+    reasoning: &Option<ReasoningConfig>,
+) {
+    for parameter in &model.parameters {
+        let selected = if parameter.name == "effort" {
+            reasoning
+                .as_ref()
+                .and_then(|config| config.effort.as_deref())
+        } else {
+            None
+        };
+        if let Some(value) = selected
+            && let Some(wire) = parameter.wire_for(value)
+        {
+            wire.apply_to(body);
+        }
     }
 }
 
@@ -908,8 +927,7 @@ mod tests {
         };
 
         let responses_body = OpenAiProtocol::responses().build_request_body(&request);
-        let chat_body =
-            OpenAiProtocol::chat(ChatReasoningStyle::Plain).build_request_body(&request);
+        let chat_body = OpenAiProtocol::chat().build_request_body(&request);
 
         assert_eq!(responses_body["instructions"], serde_json::json!("base"),);
         assert_eq!(
@@ -979,7 +997,7 @@ mod tests {
             timeline: None,
         };
 
-        let body = OpenAiProtocol::chat(ChatReasoningStyle::Zhipu).build_request_body(&request);
+        let body = OpenAiProtocol::chat().build_request_body(&request);
 
         assert_eq!(body["messages"][0]["content"][0]["type"], "text");
         assert_eq!(body["messages"][0]["content"][1]["type"], "image_url");
@@ -1071,76 +1089,67 @@ mod tests {
         }
     }
 
-    #[test]
-    fn responses_body_writes_xhigh_reasoning_effort() {
-        let body = OpenAiProtocol::responses().build_request_body(&request_with_effort("xhigh"));
-
-        assert_eq!(body["reasoning"]["effort"], serde_json::json!("xhigh"));
+    fn bundled_model(slug: &str) -> ModelInfo {
+        crate::default_models::default_models()
+            .into_iter()
+            .find(|model| model.slug == slug)
+            .unwrap_or_else(|| panic!("test bundled model not found: {slug}"))
     }
 
     #[test]
-    fn responses_body_accepts_custom_reasoning_effort() {
-        let body =
-            OpenAiProtocol::responses().build_request_body(&request_with_effort("custom-effort"));
+    fn responses_body_writes_effort_via_parameter_wire() {
+        let model = bundled_model("gpt-5.5");
+        let body = OpenAiProtocol::responses()
+            .build_request_body_with_model(&request_with_effort("high"), &model);
 
-        assert_eq!(
-            body["reasoning"]["effort"],
-            serde_json::json!("custom-effort")
-        );
+        assert_eq!(body["reasoning"]["effort"], serde_json::json!("high"));
     }
 
     #[test]
     fn responses_body_maps_enabled_reasoning_summary_to_auto() {
+        let model = bundled_model("gpt-5.5");
         let mut request = request_with_effort("medium");
         request.reasoning.as_mut().unwrap().summary = Some(ReasoningSummary::Enabled);
 
-        let body = OpenAiProtocol::responses().build_request_body(&request);
+        let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
 
         assert_eq!(body["reasoning"]["summary"], serde_json::json!("auto"));
     }
 
     #[test]
     fn responses_body_omits_disabled_reasoning_summary() {
+        let model = bundled_model("gpt-5.5");
         let mut request = request_with_effort("medium");
         request.reasoning.as_mut().unwrap().summary = Some(ReasoningSummary::Disabled);
 
-        let body = OpenAiProtocol::responses().build_request_body(&request);
+        let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
 
         assert!(body["reasoning"].get("summary").is_none());
     }
 
     #[test]
-    fn generic_chat_body_omits_provider_specific_reasoning_fields() {
-        let body = OpenAiProtocol::chat(ChatReasoningStyle::Plain)
-            .build_request_body(&request_with_effort("max"));
+    fn chat_body_without_effort_parameter_omits_reasoning_fields() {
+        let body = OpenAiProtocol::chat().build_request_body(&request_with_effort("max"));
 
         assert!(body.get("reasoning_effort").is_none());
         assert!(body.get("thinking").is_none());
     }
 
     #[test]
-    fn deepseek_chat_body_writes_thinking_mode() {
-        let body = OpenAiProtocol::chat(ChatReasoningStyle::DeepSeek)
-            .build_request_body(&request_with_effort("max"));
+    fn deepseek_chat_body_writes_effort_and_base_body_thinking() {
+        let model = bundled_model("deepseek-v4-flash");
+        let body = OpenAiProtocol::chat()
+            .build_request_body_with_model(&request_with_effort("max"), &model);
 
         assert_eq!(body["reasoning_effort"], serde_json::json!("max"));
         assert_eq!(body["thinking"]["type"], serde_json::json!("enabled"));
     }
 
     #[test]
-    fn deepseek_chat_body_writes_disabled_thinking_mode() {
-        let mut request = request_with_effort("high");
-        request.reasoning.as_mut().unwrap().summary = Some(ReasoningSummary::Disabled);
-
-        let body = OpenAiProtocol::chat(ChatReasoningStyle::DeepSeek).build_request_body(&request);
-
-        assert_eq!(body["thinking"]["type"], serde_json::json!("disabled"));
-    }
-
-    #[test]
-    fn zhipu_chat_body_writes_official_thinking_mode() {
-        let body = OpenAiProtocol::chat(ChatReasoningStyle::Zhipu)
-            .build_request_body(&request_with_effort("enabled"));
+    fn zhipu_plain_chat_body_maps_effort_to_thinking_type() {
+        let model = bundled_model("glm-5");
+        let body = OpenAiProtocol::chat()
+            .build_request_body_with_model(&request_with_effort("enabled"), &model);
 
         assert!(body.get("reasoning_effort").is_none());
         assert_eq!(body["thinking"]["type"], serde_json::json!("enabled"));
@@ -1148,11 +1157,23 @@ mod tests {
     }
 
     #[test]
-    fn zhipu_chat_body_writes_disabled_thinking_mode() {
-        let mut request = request_with_effort("none");
-        request.reasoning.as_mut().unwrap().summary = Some(ReasoningSummary::Disabled);
+    fn glm52_chat_body_links_reasoning_effort_and_thinking() {
+        let model = bundled_model("glm-5.2");
+        for effort in ["high", "max"] {
+            let body = OpenAiProtocol::chat()
+                .build_request_body_with_model(&request_with_effort(effort), &model);
 
-        let body = OpenAiProtocol::chat(ChatReasoningStyle::Zhipu).build_request_body(&request);
+            assert_eq!(body["reasoning_effort"], serde_json::json!(effort));
+            assert_eq!(body["thinking"]["type"], serde_json::json!("enabled"));
+            assert_eq!(body["thinking"]["clear_thinking"], serde_json::json!(false));
+        }
+    }
+
+    #[test]
+    fn glm52_chat_body_none_disables_thinking_and_removes_reasoning_effort() {
+        let model = bundled_model("glm-5.2");
+        let body = OpenAiProtocol::chat()
+            .build_request_body_with_model(&request_with_effort("none"), &model);
 
         assert!(body.get("reasoning_effort").is_none());
         assert_eq!(body["thinking"]["type"], serde_json::json!("disabled"));
@@ -1169,7 +1190,7 @@ mod tests {
             metadata: HashMap::new(),
         }];
 
-        let body = OpenAiProtocol::chat(ChatReasoningStyle::Plain).build_request_body(&request);
+        let body = OpenAiProtocol::chat().build_request_body(&request);
 
         assert_eq!(
             body["messages"][0]["reasoning_content"],
@@ -1179,7 +1200,7 @@ mod tests {
 
     #[test]
     fn chat_parse_response_reads_reasoning_content() {
-        let response = OpenAiProtocol::chat(ChatReasoningStyle::Plain)
+        let response = OpenAiProtocol::chat()
             .parse_response(serde_json::json!({
                 "model": "deepseek-v4-flash",
                 "choices": [{
@@ -1207,7 +1228,7 @@ mod tests {
 
     #[test]
     fn chat_parse_response_reads_cached_prompt_tokens() {
-        let response = OpenAiProtocol::chat(ChatReasoningStyle::Plain)
+        let response = OpenAiProtocol::chat()
             .parse_response(serde_json::json!({
                 "model": "deepseek-v4-flash",
                 "choices": [{
@@ -1288,7 +1309,7 @@ mod tests {
             "start: patch",
         )];
 
-        let body = OpenAiProtocol::chat(ChatReasoningStyle::Plain).build_request_body(&request);
+        let body = OpenAiProtocol::chat().build_request_body(&request);
 
         assert_eq!(body["tools"][0]["type"], serde_json::json!("custom"));
         assert_eq!(
@@ -1308,7 +1329,7 @@ mod tests {
         )];
 
         let request = request.provider_compatible(false);
-        let body = OpenAiProtocol::chat(ChatReasoningStyle::Plain).build_request_body(&request);
+        let body = OpenAiProtocol::chat().build_request_body(&request);
 
         assert_eq!(body["tools"][0]["type"], serde_json::json!("function"));
         assert_eq!(
@@ -1363,7 +1384,7 @@ mod tests {
 
     #[test]
     fn chat_parse_response_reads_custom_tool_call() {
-        let response = OpenAiProtocol::chat(ChatReasoningStyle::Plain)
+        let response = OpenAiProtocol::chat()
             .parse_response(serde_json::json!({
                 "model": "gpt-5.5",
                 "choices": [{
@@ -1434,8 +1455,7 @@ mod tests {
         let request = request_with_tool_history(tool_metadata);
 
         let responses_body = OpenAiProtocol::responses().build_request_body(&request);
-        let chat_body =
-            OpenAiProtocol::chat(ChatReasoningStyle::Plain).build_request_body(&request);
+        let chat_body = OpenAiProtocol::chat().build_request_body(&request);
 
         assert_eq!(
             responses_body["input"][1]["call_id"],
@@ -1458,8 +1478,7 @@ mod tests {
         let request = request_with_function_tool_history(tool_metadata);
 
         let responses_body = OpenAiProtocol::responses().build_request_body(&request);
-        let chat_body =
-            OpenAiProtocol::chat(ChatReasoningStyle::Plain).build_request_body(&request);
+        let chat_body = OpenAiProtocol::chat().build_request_body(&request);
 
         assert_eq!(
             responses_body["input"][1]["call_id"],
@@ -1481,7 +1500,7 @@ mod tests {
         let request = request_with_function_tool_history(tool_metadata);
 
         let error = OpenAiProtocol::responses()
-            .build_request(&request)
+            .build_request(&request, &ModelInfo::fallback(&request.model))
             .unwrap_err();
 
         match error {
@@ -1525,7 +1544,7 @@ mod tests {
         };
 
         let error = OpenAiProtocol::responses()
-            .build_request(&request)
+            .build_request(&request, &ModelInfo::fallback(&request.model))
             .unwrap_err();
 
         match error {
@@ -1597,10 +1616,9 @@ mod tests {
         };
 
         let responses_error = OpenAiProtocol::responses()
-            .build_request(&request)
+            .build_request(&request, &ModelInfo::fallback(&request.model))
             .unwrap_err();
-        let chat_body =
-            OpenAiProtocol::chat(ChatReasoningStyle::Plain).build_request_body(&request);
+        let chat_body = OpenAiProtocol::chat().build_request_body(&request);
 
         match responses_error {
             PureError::LlmError(message) => {

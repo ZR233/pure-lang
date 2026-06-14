@@ -16,9 +16,10 @@ use crate::session::CoreSession;
 use crate::tool::WorkspaceAccess;
 use crate::tool::{
     ApplyPatchTool, AskUserTool, CloseAgentTool, CopyPathTool, CreateDirectoryTool, DeletePathTool,
-    FollowupTaskTool, ListAgentsTool, ListFilesTool, MovePathTool, ReadFileTool, SearchFilesTool,
-    SendMessageTool, SkillManageTool, SkillViewTool, SkillsListTool, SpawnAgentTool, StatPathTool,
-    SubagentContext, ToolContext, ToolRegistry, WaitAgentTool, WriteFileTool, command_tool_pair,
+    FollowupTaskTool, ListAgentsTool, ListFilesTool, MovePathTool, PlanExitTool, ReadFileTool,
+    SearchFilesTool, SendMessageTool, SkillManageTool, SkillViewTool, SkillsListTool,
+    SpawnAgentTool, StatPathTool, SubagentContext, ToolContext, ToolRegistry, WaitAgentTool,
+    WriteFileTool, command_tool_pair,
 };
 use crate::trace::TraceRecorder;
 #[cfg(test)]
@@ -207,6 +208,7 @@ impl PureCore {
         ));
         self.register_tool(CloseAgentTool);
         self.register_tool(AskUserTool);
+        self.register_tool(PlanExitTool);
     }
 
     pub async fn register_available_mcp_tools(&mut self) -> Result<()> {
@@ -1401,6 +1403,7 @@ mod tests {
         assert!(core.tools.get("wait_agent").is_some());
         assert!(core.tools.get("list_agents").is_some());
         assert!(core.tools.get("request_user_input").is_some());
+        assert!(core.tools.get("plan_exit").is_some());
         assert!(core.tools.get("subagent").is_none());
         assert!(core.tools.get("read_file").is_some());
         assert!(core.tools.get("apply_patch").is_some());
@@ -1440,6 +1443,7 @@ mod tests {
         assert_eq!(event.mode, "plan");
         assert!(event.tools.contains(&"bash".to_string()));
         assert!(event.tools.contains(&"read_file".to_string()));
+        assert!(event.tools.contains(&"plan_exit".to_string()));
         assert!(!event.tools.contains(&"write_file".to_string()));
         assert!(!event.tools.contains(&"apply_patch".to_string()));
     }
@@ -1458,6 +1462,7 @@ mod tests {
 
         // 空注册表没有可用语言，不应出现任何 LSP 工具。
         assert!(event.tools.iter().all(|t| !t.starts_with("lsp_query_")));
+        assert!(!event.tools.contains(&"plan_exit".to_string()));
     }
 
     #[tokio::test]

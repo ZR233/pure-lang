@@ -1,5 +1,5 @@
 use crate::model_info::ModelInfo;
-use crate::provider::{ModelProvider, SharedModelProvider};
+use crate::provider::SharedModelProvider;
 use crate::provider_info::ProviderInfo;
 use pl_protocol::Result;
 

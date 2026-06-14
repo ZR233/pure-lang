@@ -1,0 +1,150 @@
+use std::path::PathBuf;
+
+use pl_protocol::PureError;
+use serde::Deserialize;
+
+use super::truncation::OutputTruncation;
+use super::{BoxFuture, Tool, ToolContext, ToolInput, ToolOutput};
+
+#[derive(Debug, Default)]
+pub struct PlanExitTool;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlanExitInput {
+    content: String,
+}
+
+impl Tool for PlanExitTool {
+    fn name(&self) -> &str {
+        "plan_exit"
+    }
+
+    fn description(&self) -> &str {
+        "Submit the final Plan Mode Markdown plan for user confirmation. \
+         Use only after the plan is complete; this tool does not execute the plan."
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "The complete final plan in Markdown."
+                }
+            },
+            "required": ["content"],
+            "additionalProperties": false
+        })
+    }
+
+    fn execute<'a>(
+        &'a self,
+        input: ToolInput,
+        context: ToolContext,
+    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        Box::pin(async move {
+            if context.mode != crate::turn::CompileMode::Plan {
+                return Err(PureError::ToolExecutionFailed {
+                    tool: self.name().to_string(),
+                    error: "plan_exit is only available in Plan mode".to_string(),
+                });
+            }
+
+            let args: PlanExitInput = serde_json::from_value(input.arguments).map_err(|error| {
+                PureError::ToolExecutionFailed {
+                    tool: self.name().to_string(),
+                    error: format!("invalid input: {error}"),
+                }
+            })?;
+            if args.content.trim().is_empty() {
+                return Err(PureError::ToolExecutionFailed {
+                    tool: self.name().to_string(),
+                    error: "content must not be empty".to_string(),
+                });
+            }
+
+            let description = serde_json::json!({
+                "status": "submitted",
+                "message": "Plan submitted for user confirmation. Return a brief final acknowledgement and stop."
+            })
+            .to_string();
+            Ok(ToolOutput {
+                description,
+                truncated: OutputTruncation::empty(),
+                output_file: PathBuf::new(),
+                exit_code: None,
+                timed_out: false,
+                runtime_events: Vec::new(),
+            })
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::tool::WorkspaceAccess;
+    use crate::{AgentControl, CompileMode, CoreSession, TurnOptions};
+
+    fn context(mode: CompileMode) -> ToolContext {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        ToolContext {
+            event_tx,
+            options: TurnOptions::default(),
+            workspace_access: WorkspaceAccess::WorkspaceOnly,
+            mode,
+            workspace_root: std::env::temp_dir(),
+            workspace_instructions: None,
+            instruction_snapshot: None,
+            active_subagent: None,
+            agent_control: AgentControl::default(),
+            lsp_runtime: None,
+            parent_session: Arc::new(CoreSession::new()),
+        }
+    }
+
+    fn input(content: &str) -> ToolInput {
+        ToolInput {
+            arguments: serde_json::json!({ "content": content }),
+            session_id: "session-1".to_string(),
+            tool_id: "call-1".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn submits_completed_plan() {
+        let output = PlanExitTool
+            .execute(input("# Plan\n\n- Do it"), context(CompileMode::Plan))
+            .await
+            .unwrap();
+
+        let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+        assert_eq!(value["status"], "submitted");
+    }
+
+    #[tokio::test]
+    async fn rejects_auto_mode() {
+        let error = PlanExitTool
+            .execute(input("# Plan"), context(CompileMode::Auto))
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("Plan mode"));
+    }
+
+    #[tokio::test]
+    async fn rejects_empty_content() {
+        let error = PlanExitTool
+            .execute(input("  "), context(CompileMode::Plan))
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("content must not be empty"));
+    }
+}

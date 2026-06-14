@@ -5,6 +5,7 @@ mod file;
 mod lsp;
 mod multi_agent;
 mod path_policy;
+mod plan;
 mod recoverable;
 mod skill;
 mod truncation;
@@ -36,6 +37,7 @@ pub use multi_agent::{
     WaitAgentTool,
 };
 pub(crate) use path_policy::{PathAccess, ToolPathPolicy};
+pub use plan::PlanExitTool;
 pub(crate) use recoverable::RECOVERABLE_SUBAGENT_429_MARKER;
 pub use skill::{SkillManageTool, SkillViewTool, SkillsListTool};
 pub use truncation::{OutputTruncation, TruncatedOutput, TruncationStrategy};

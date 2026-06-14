@@ -464,6 +464,9 @@ pub(super) async fn run_turn_with_trace(
         if tool_results_include_recoverable_subagent_capacity(&tool_results) {
             subagent_dispatch_recovered = true;
         }
+        if request.mode == CompileMode::Plan {
+            record_plan_exit_items(recorder, &session_id, &tool_results);
+        }
         if is_cancelled(&options) {
             session.truncate_messages(safe_message_count);
             return Ok(interrupted_turn_result(
@@ -575,6 +578,32 @@ pub(super) fn record_enabled_tools(
             tools,
         },
     });
+}
+
+fn record_plan_exit_items(
+    recorder: &mut TraceRecorder,
+    turn_id: &str,
+    tool_results: &[super::tool_dispatch::ToolExecutionRecord],
+) {
+    for tool_result in tool_results {
+        if tool_result.name != "plan_exit" || tool_result.status != TimelineItemStatus::Completed {
+            continue;
+        }
+        if let Some(content) = plan_exit_content(&tool_result.arguments) {
+            let item_id = format!("{turn_id}-plan");
+            recorder.complete_plan_item(turn_id, &item_id, content);
+        }
+    }
+}
+
+fn plan_exit_content(arguments: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(arguments).ok()?;
+    let content = value.get("content")?.as_str()?.trim();
+    if content.is_empty() {
+        None
+    } else {
+        Some(content.to_string())
+    }
 }
 
 fn materialize_messages(

@@ -45,7 +45,7 @@ provider 适配实现可以依赖 `async-openai`、`reqwest` 和 `serde`。这�
 
 `pl-core` 只读取这些 provider 无关能力来做本地校验和 UI 展示：图片输入必须要求模型声明 `input = ["image"]`，工具调用必须匹配工具能力，推理请求必须匹配 `reasoning = true`。provider 私有差异不扩散到 `pl-core`。
 
-模型级 provider override 使用 `ModelRequestProfile` 表达，包括 `api_model`、`headers`、`body` 和 `options`。这些字段只由 `pl-model` 的 provider adapter 消费，用于 DeepSeek/Zhipu 的 `reasoning_content`、GLM `thinking.clear_thinking` 或 OpenAI-compatible 供应商的私有请求扩展；核心编排层不得读取或拼接这些私有字段。
+模型级 provider override 使用 `ModelRequestProfile` 表达，包括 `api_model`、`headers`、`body` 和 `options`。`body` 作为 base body 注入请求体（如 DeepSeek 固定的 `thinking.type = enabled`）；其余可变字段（如 effort 透传的 `reasoning_effort`、GLM `thinking.clear_thinking`）由 `ModelInfo.parameters` 声明驱动（见 7.8）。这些字段只由 `pl-model` 的 provider adapter 消费；核心编排层不得读取或拼接这些私有字段。
 
 ## 7.4 Provider 抽象
 
@@ -62,9 +62,9 @@ provider 适配实现可以依赖 `async-openai`、`reqwest` 和 `serde`。这�
 
 异步 trait 方法使用原生 RPITIT，并显式声明 `Send` bound。
 
-`SharedModelProvider` 是 `Arc<ProviderRuntime>`。`ProviderRuntime` 是穷尽枚举分发，当前变体为 OpenAI、DeepSeek 和 Zhipu；不使用 `dyn ModelProvider`，也不引入 `async_trait`。
+`SharedModelProvider` 是 `Arc<OpenAiProvider>`。三个供应商（OpenAI、DeepSeek、Zhipu）共享同一个 OpenAI 兼容 transport，差异仅在 endpoint 选择、bundled 模型目录和 `ProviderCapabilities`，由 `ProviderKind` 在构造时一次决定；不使用 `dyn ModelProvider`，也不引入 `async_trait`，不再为每供应商单独定义 struct 或穷尽枚举分发。未来若引入协议真正不同的供应商（如 Anthropic），再新增独立 provider struct 与分发枚举。
 
-每个 provider 拥有自己的 profile：默认 base URL、默认模型、模型目录、tool wire policy、reasoning/thinking policy 和协议 endpoint policy。模型目录只包含该 provider 的 bundled/configured 模型，不从全局模型列表兜底生成 provider 列表。
+每个 provider 拥有自己的 profile：默认 base URL、默认模型、模型目录、tool wire policy 和协议 endpoint policy。reasoning/thinking/effort 的 wire 规则不再由 provider struct 携带，而是由模型 `parameters` 声明驱动（见 7.8），provider 层与协议层都不再包含任何 reasoning policy 硬编码。模型目录只包含该 provider 的 bundled/configured 模型，不从全局模型列表兜底生成 provider 列表。
 
 Zhipu Coding Plan 是 Zhipu profile 的配置模板，默认使用 `https://open.bigmodel.cn/api/coding/paas/v4`，模型列表与现有 Zhipu 模板完全一致；它不新增 `ProviderRuntime` 变体，也不改变 `ProviderKind::Zhipu` 的协议边界。
 
@@ -77,7 +77,11 @@ Zhipu Coding Plan 是 Zhipu profile 的配置模板，默认使用 `https://open
 
 不同 protocol API 的差异保持在 `pl-model` 内部，核心层只看到 `CompletionRequest`、`CompletionResponse` 和 provider 无关的 timeline 事件流。
 
-OpenAI、DeepSeek 和 Zhipu 都复用 `protocol::openai`。OpenAI 默认使用 Responses endpoint；DeepSeek 和 Zhipu 使用 Chat Completions endpoint。Zhipu Coding Plan 作为 Zhipu 模板同样使用 Chat Completions endpoint。OpenAI Responses 的 `reasoning.summary` 按 Codex wire 语义发送：`Auto` 和兼容层的 `Enabled` 都发送 `auto`，`Disabled` 不发送 summary 字段。DeepSeek/Zhipu 的 `reasoning_effort`、`thinking`、`clear_thinking`、`reasoning_content` 等私有扩展由 provider profile 通过强类型 options 注入 OpenAI protocol，不作为独立 wire variant 存在。模型返回的 `reasoning_content` 进入 canonical reasoning event；历史回放时仍通过 assistant message 的 `reasoning_content` 字段写回 Chat Completions。
+OpenAI、DeepSeek 和 Zhipu 都复用 `protocol::openai`。OpenAI 默认使用 Responses endpoint；DeepSeek 和 Zhipu 使用 Chat Completions endpoint。Zhipu Coding Plan 作为 Zhipu 模板同样使用 Chat Completions endpoint。
+
+effort 等可调参数的 wire 写入由通用透传机制驱动，协议层不再为每供应商硬编码 reasoning/thinking 映射。`build_request` 接收当前 `ModelInfo`，先序列化强类型核心字段（model、messages、stream、tools 等）为 JSON 对象，再依次注入：base body（`ModelRequestProfile.body`，如 DeepSeek 固定的 `thinking.type = enabled`），以及 parameter wire（用户选中的候选值按模型 `parameters` 声明写入或移除字段，见 7.8）。覆盖优先级为 parameter wire > base body > 协议默认字段。
+
+OpenAI Responses 的 `reasoning.summary` 仍按 Codex wire 语义发送（`Auto` 和兼容层的 `Enabled` 都发送 `auto`，`Disabled` 不发送 summary 字段），由 `ReasoningConfig.summary` 独立驱动，不进入 parameter wire。模型返回的 `reasoning_content` 进入 canonical reasoning event；历史回放时仍通过 assistant message 的 `reasoning_content` 字段写回 Chat Completions。
 
 provider transport 层把第三方 API 错误统一转换为 `PureError` 时必须先脱敏。错误文本中不得包含 bearer token、API key 或形如 `sk-...` 的密钥片段；鉴权失败、配额不足、模型不存在等服务端错误可以保留 status、错误类型、code 和可读原因，但密钥值必须替换为稳定占位。
 
@@ -105,3 +109,95 @@ OpenAI Responses 使用 `input_text` 与 `input_image` data URL；OpenAI Chat、
 配置模型会覆盖或补充 bundled model；`used_fallback` 仍是运行时状态，不从 TOML 读取。旧配置里的 `capabilities = [...]` 和 `input_modalities = [...]` 不再兼容；读取失败时要求用户按新的能力矩阵重写配置或让 Studio 重新生成配置。
 
 模型信息中的 `base_instructions` 是模型级基础提示词来源，进入 `pl-core` 的 instruction assembler；配置中的 `[instructions].base_override` 可以完整替换它。模型信息中的 `context_window`、`max_context_window` 和 `auto_compact_token_limit` 只描述模型能力与默认阈值。上下文压缩的触发判断、摘要 prompt、历史替换和持久化都在 `pl-core` 完成，`pl-model` 不维护压缩状态。
+
+## 7.8 模型可调参数
+
+effort（推理强度）不再是固定的全局枚举，而是「模型声明的可调参数」。该机制是通用的——effort 是首个应用，类型设计可容纳未来 thinking、verbosity 等参数。各供应商自由定义候选值域，并由模型自身声明选中值如何写入 API 请求体，协议层据此通用透传，不包含任何供应商特定代码。
+
+`ModelInfo` 的 `reasoning_efforts: Vec<String>` 字段被替换为：
+
+- `parameters: Vec<ModelParameter>`：模型声明的可调参数列表。
+
+核心类型签名（wire 使用 `camelCase`，Rust 侧 `snake_case`）：
+
+```rust
+pub struct ModelParameter {
+    pub name: String,                          // 参数键，effort 的 name = "effort"
+    pub label: Option<String>,                 // 面向用户的显示名，缺失回退 name
+    pub candidates: Vec<String>,               // 候选值域，首项为默认值
+    pub wire: BTreeMap<String, ParameterWire>, // 每个候选值 → 写入规则
+}
+
+pub struct ParameterWire {
+    pub set: Vec<WireAssignment>,   // 设置字段（dot 路径）
+    pub remove: Vec<String>,        // 移除字段（dot 路径）
+}
+
+pub struct WireAssignment {
+    pub path: String,   // 嵌套路径，如 "reasoning.effort"、"thinking.type"
+    pub value: String,  // 透传的字符串值
+}
+
+impl ParameterWire {
+    pub fn apply_to(&self, body: &mut serde_json::Map<String, Value>);
+}
+```
+
+`wire` 用 `BTreeMap<String, ParameterWire>` 而非动态 `Map<String, Value>`，避免运行时反序列化并保持 TOML 友好。`apply_to` 按 dot 路径逐层写入或移除嵌套 JSON 对象字段；移除不存在的字段静默忽略。
+
+四个供应商的 effort 声明形态：
+
+| 供应商 | candidates | wire.set（选中值 → 字段） | wire.remove |
+| --- | --- | --- | --- |
+| OpenAI | `medium` / `low` / `high` / `xhigh` | `reasoning.effort` = 值 | — |
+| DeepSeek | `high` / `max` | `reasoning_effort` = 值（`thinking.type = enabled` 作为 base body） | — |
+| Zhipu 普通 | `enabled` / `none` | `thinking.type` = 值 | — |
+| GLM-5.2 | `high` / `max` / `none` | `high`/`max`：`reasoning_effort` + `thinking.type = enabled` + `thinking.clear_thinking = false`；`none`：`thinking.type = disabled` | `none` 移除 `reasoning_effort` |
+
+GLM-5.2 的「一个选择联动多个字段」和「none 时移除字段」由 wire 的多条 `set` 与 `remove` 完整表达，无需协议层特判。
+
+`ModelInfo` 提供 helper 避免调用点手动遍历参数列表，复用于配置校验、默认角色补齐和 GUI 渲染：
+
+- `effort_parameter() -> Option<&ModelParameter>`
+- `supported_efforts() -> Vec<String>`
+- `default_effort() -> Option<String>`
+
+## 7.9 模型家族预设
+
+同供应商的模型共享大量元数据（capabilities、truncation_policy、effort 参数声明、base body）。`default_models` 不再为每个模型独立构造完整 `ModelInfo`，而是用 `ModelFamily` 预设封装共享部分，具体模型仅以差异字段实例化。
+
+类型签名：
+
+```rust
+pub struct ModelFamily {
+    pub id: &'static str,
+    pub capabilities: ModelCapabilities,
+    pub truncation_mode: TruncationMode,
+    pub truncation_limit: u64,
+    pub parameters: Vec<ModelParameter>,
+    pub request_profile: ModelRequestProfile,
+    pub base_instructions: String,
+}
+
+impl ModelFamily {
+    pub fn instantiate(
+        &self,
+        slug: &str,
+        display_name: &str,
+        description: &str,
+        context_window: u64,
+        max_context_window: u64,
+        max_output_tokens: Option<u64>,
+        pricing: ModelPricing,
+    ) -> ModelInfo;
+}
+
+pub struct ModelPricing {
+    pub currency: Option<String>,
+    pub input_per_mtok: Option<f64>,
+    pub output_per_mtok: Option<f64>,
+    pub cache_read_per_mtok: Option<f64>,
+}
+```
+
+`pl-model` 内置四个预设：`openai_family`、`deepseek_family`、`zhipu_text_family`、`zhipu_vision_family`。原 `openai_capabilities` / `deepseek_capabilities` / `zhipu_capabilities` 三个能力构造函数的能力矩阵直接编入对应 family，消除重复。`zhipu_text_family` 与 `zhipu_vision_family` 的差异仅在 capabilities 的输入模态（是否含 `image`）和 effort 候选值域。

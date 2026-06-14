@@ -10,15 +10,19 @@ use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue};
 use secrecy::SecretString;
 
 use crate::capabilities::{ModelCapabilities, ProviderCapabilities};
-use crate::model_info::ModelInfo;
+use crate::default_models::{
+    deepseek_default_model_slugs, default_models, openai_default_model_slugs,
+    zhipu_default_model_slugs,
+};
+use crate::model_info::{ModelInfo, TruncationPolicy};
 use crate::protocol::openai::sse;
 use crate::protocol::openai::{OpenAiProtocol, OpenAiRequestBody};
-use crate::provider_info::ProviderInfo;
+use crate::provider_info::{ProviderInfo, ProviderKind};
 use crate::request::{CompletionRequest, CompletionResponse};
 use crate::stream::process_provider_stream;
 
 #[derive(Debug)]
-pub(crate) struct OpenAiTransportProvider {
+pub struct OpenAiProvider {
     info: ProviderInfo,
     http_client: reqwest::Client,
     protocol: OpenAiProtocol,
@@ -26,27 +30,23 @@ pub(crate) struct OpenAiTransportProvider {
     bundled_models: Vec<ModelInfo>,
 }
 
-impl OpenAiTransportProvider {
-    pub(crate) fn new(
-        info: ProviderInfo,
-        bundled_models: Vec<ModelInfo>,
-        configured_models: Vec<ModelInfo>,
-        protocol: OpenAiProtocol,
-        capabilities: ProviderCapabilities,
-    ) -> Result<Self> {
+impl OpenAiProvider {
+    pub(crate) fn new(info: ProviderInfo, configured_models: Vec<ModelInfo>) -> Result<Self> {
+        let (bundled_slugs, protocol, capabilities) = provider_profile(info.provider_kind);
         let http_client = reqwest::Client::builder()
             .timeout(Duration::from_secs(300))
             .build()
             .map_err(|e| PureError::HttpError(e.to_string()))?;
 
-        let bundled_models = merge_models(bundled_models, configured_models);
+        let bundled = bundled_models(bundled_slugs);
+        let merged = merge_models(bundled, configured_models);
 
         Ok(Self {
             info,
             http_client,
             protocol,
             capabilities,
-            bundled_models,
+            bundled_models: merged,
         })
     }
 
@@ -96,7 +96,7 @@ impl OpenAiTransportProvider {
             if let Some(api_model) = &model_info.request_profile.api_model {
                 request.model = api_model.clone();
             }
-            let body = protocol.build_request(&request)?;
+            let body = protocol.build_request(&request, &model_info)?;
             let config = PureOpenAiConfig::new(
                 api_base,
                 token,
@@ -153,11 +153,109 @@ fn merge_models(
             .iter_mut()
             .find(|existing| existing.slug == model.slug)
         {
-            Some(existing) => *existing = model,
+            Some(existing) => {
+                let bundled = std::mem::replace(existing, ModelInfo::fallback(""));
+                *existing = merge_model_fields(bundled, model);
+            }
             None => bundled_models.push(model),
         }
     }
     bundled_models
+}
+
+/// 字段级合并：configured 的非空字段覆盖 bundled，空/默认字段继承 bundled。
+fn merge_model_fields(bundled: ModelInfo, configured: ModelInfo) -> ModelInfo {
+    ModelInfo {
+        slug: configured.slug,
+        display_name: if configured.display_name.is_empty() {
+            bundled.display_name
+        } else {
+            configured.display_name
+        },
+        description: configured.description.or(bundled.description),
+        context_window: configured.context_window.or(bundled.context_window),
+        max_context_window: configured.max_context_window.or(bundled.max_context_window),
+        auto_compact_token_limit: configured
+            .auto_compact_token_limit
+            .or(bundled.auto_compact_token_limit),
+        default_temperature: configured
+            .default_temperature
+            .or(bundled.default_temperature),
+        max_output_tokens: configured.max_output_tokens.or(bundled.max_output_tokens),
+        currency: configured.currency.or(bundled.currency),
+        input_price_per_mtok: configured
+            .input_price_per_mtok
+            .or(bundled.input_price_per_mtok),
+        output_price_per_mtok: configured
+            .output_price_per_mtok
+            .or(bundled.output_price_per_mtok),
+        cache_read_price_per_mtok: configured
+            .cache_read_price_per_mtok
+            .or(bundled.cache_read_price_per_mtok),
+        parameters: if configured.parameters.is_empty() {
+            bundled.parameters
+        } else {
+            configured.parameters
+        },
+        capabilities: if configured.capabilities == ModelCapabilities::default() {
+            bundled.capabilities
+        } else {
+            configured.capabilities
+        },
+        request_profile: if configured.request_profile.is_empty() {
+            bundled.request_profile
+        } else {
+            configured.request_profile
+        },
+        truncation_policy: if configured.truncation_policy == TruncationPolicy::default() {
+            bundled.truncation_policy
+        } else {
+            configured.truncation_policy
+        },
+        base_instructions: if configured.base_instructions.is_empty() {
+            bundled.base_instructions
+        } else {
+            configured.base_instructions
+        },
+        used_fallback: bundled.used_fallback,
+    }
+}
+
+/// 按 provider kind 选择 bundled 模型 slug 列表、协议 endpoint 和能力位。
+fn provider_profile(
+    kind: ProviderKind,
+) -> (
+    &'static [&'static str],
+    OpenAiProtocol,
+    ProviderCapabilities,
+) {
+    match kind {
+        ProviderKind::OpenAi => (
+            openai_default_model_slugs(),
+            OpenAiProtocol::responses(),
+            ProviderCapabilities::all(),
+        ),
+        ProviderKind::DeepSeek => (
+            deepseek_default_model_slugs(),
+            OpenAiProtocol::chat(),
+            ProviderCapabilities::STREAMING
+                | ProviderCapabilities::FUNCTION_CALLING
+                | ProviderCapabilities::PARALLEL_TOOL_CALLS,
+        ),
+        ProviderKind::Zhipu => (
+            zhipu_default_model_slugs(),
+            OpenAiProtocol::chat(),
+            ProviderCapabilities::all(),
+        ),
+    }
+}
+
+/// 按 slug 过滤 bundled 默认模型。
+fn bundled_models(slugs: &[&str]) -> Vec<ModelInfo> {
+    default_models()
+        .into_iter()
+        .filter(|model| slugs.contains(&model.slug.as_str()))
+        .collect()
 }
 
 async fn get_auth_token(bearer: Option<String>) -> Result<Option<String>> {
@@ -423,7 +521,7 @@ mod tests {
         let (base_url, handle) = serve_sse_once(sse_body).await;
         let mut model = ModelInfo::fallback("local-chat");
         model.context_window = Some(128_000);
-        let provider = OpenAiTransportProvider::new(
+        let provider = OpenAiProvider::new(
             ProviderInfo {
                 provider_kind: crate::provider_info::ProviderKind::DeepSeek,
                 name: "Local Chat".to_string(),
@@ -435,9 +533,6 @@ mod tests {
                 apply_patch_tool_type: None,
             },
             vec![model],
-            Vec::new(),
-            OpenAiProtocol::chat(crate::protocol::openai::ChatReasoningStyle::DeepSeek),
-            ProviderCapabilities::STREAMING | ProviderCapabilities::FUNCTION_CALLING,
         )
         .unwrap();
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
@@ -466,7 +561,7 @@ mod tests {
         let (base_url, handle) = serve_sse_once(sse_body).await;
         let mut model = ModelInfo::fallback("local-responses");
         model.context_window = Some(128_000);
-        let provider = OpenAiTransportProvider::new(
+        let provider = OpenAiProvider::new(
             ProviderInfo {
                 provider_kind: crate::provider_info::ProviderKind::OpenAi,
                 name: "Local Responses".to_string(),
@@ -481,9 +576,6 @@ mod tests {
                 apply_patch_tool_type: Some(crate::provider_info::ApplyPatchToolType::Freeform),
             },
             vec![model],
-            Vec::new(),
-            OpenAiProtocol::responses(),
-            ProviderCapabilities::all(),
         )
         .unwrap();
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
@@ -1035,14 +1127,7 @@ mod tests {
     fn configured_models_override_bundled_models() {
         let mut model = ModelInfo::fallback("deepseek-v4-flash");
         model.display_name = "Custom DeepSeek".to_string();
-        let provider = OpenAiTransportProvider::new(
-            ProviderInfo::deepseek(None),
-            vec![ModelInfo::fallback("deepseek-v4-flash")],
-            vec![model],
-            OpenAiProtocol::chat(crate::protocol::openai::ChatReasoningStyle::DeepSeek),
-            ProviderCapabilities::STREAMING | ProviderCapabilities::FUNCTION_CALLING,
-        )
-        .unwrap();
+        let provider = OpenAiProvider::new(ProviderInfo::deepseek(None), vec![model]).unwrap();
 
         assert_eq!(
             provider.model_info("deepseek-v4-flash").display_name,

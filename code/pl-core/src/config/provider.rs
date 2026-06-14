@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 
 use pl_model::{
-    ApplyPatchToolType, ModelCapabilities, ModelInfo, ModelRequestProfile, ProviderInfo,
-    ProviderKind, ToolWirePolicy, TruncationMode, TruncationPolicy, deepseek_default_model_slugs,
-    default_models,
+    ApplyPatchToolType, ModelInfo, ProviderInfo, ProviderKind, ToolWirePolicy,
+    deepseek_default_model_slugs, default_models,
 };
 use pl_protocol::{PureError, Result};
 use serde::{Deserialize, Serialize};
@@ -23,47 +22,7 @@ pub struct ProviderConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apply_patch_tool_type: Option<ApplyPatchToolType>,
     #[serde(default)]
-    pub models: Vec<ModelConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ModelConfig {
-    pub slug: String,
-    pub display_name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_window: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_context_window: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auto_compact_token_limit: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_temperature: Option<f32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_output_tokens: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub currency: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input_price_per_mtok: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_price_per_mtok: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cache_read_price_per_mtok: Option<f64>,
-    #[serde(default)]
-    pub reasoning_efforts: Vec<String>,
-    pub capabilities: ModelCapabilities,
-    #[serde(default)]
-    pub request_profile: ModelRequestProfile,
-    pub truncation_policy: TruncationPolicyConfig,
-    #[serde(default)]
-    pub base_instructions: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TruncationPolicyConfig {
-    pub mode: TruncationMode,
-    pub limit: u64,
+    pub models: Vec<ModelInfo>,
 }
 
 impl ProviderConfig {
@@ -73,12 +32,11 @@ impl ProviderConfig {
         let models = default_models()
             .into_iter()
             .filter(|model| slugs.contains(&model.slug.as_str()))
-            .map(ModelConfig::from_model_info)
             .collect();
         Self::from_provider_info(info, models)
     }
 
-    pub fn from_provider_info(info: ProviderInfo, models: Vec<ModelConfig>) -> Self {
+    pub fn from_provider_info(info: ProviderInfo, models: Vec<ModelInfo>) -> Self {
         Self {
             provider_kind: info.provider_kind,
             name: info.name,
@@ -137,68 +95,5 @@ impl ProviderConfig {
             )));
         }
         Ok(())
-    }
-}
-
-impl ModelConfig {
-    pub fn from_model_info(model: ModelInfo) -> Self {
-        Self {
-            slug: model.slug,
-            display_name: model.display_name,
-            description: model.description,
-            context_window: model.context_window,
-            max_context_window: model.max_context_window,
-            auto_compact_token_limit: model.auto_compact_token_limit,
-            default_temperature: model.default_temperature,
-            max_output_tokens: model.max_output_tokens,
-            currency: model.currency,
-            input_price_per_mtok: model.input_price_per_mtok,
-            output_price_per_mtok: model.output_price_per_mtok,
-            cache_read_price_per_mtok: model.cache_read_price_per_mtok,
-            reasoning_efforts: model.reasoning_efforts,
-            capabilities: model.capabilities,
-            request_profile: model.request_profile,
-            truncation_policy: TruncationPolicyConfig::from_policy(model.truncation_policy),
-            base_instructions: model.base_instructions,
-        }
-    }
-
-    pub fn into_model_info(self) -> ModelInfo {
-        ModelInfo {
-            slug: self.slug,
-            display_name: self.display_name,
-            description: self.description,
-            context_window: self.context_window,
-            max_context_window: self.max_context_window,
-            auto_compact_token_limit: self.auto_compact_token_limit,
-            default_temperature: self.default_temperature,
-            max_output_tokens: self.max_output_tokens,
-            currency: self.currency,
-            input_price_per_mtok: self.input_price_per_mtok,
-            output_price_per_mtok: self.output_price_per_mtok,
-            cache_read_price_per_mtok: self.cache_read_price_per_mtok,
-            reasoning_efforts: self.reasoning_efforts,
-            capabilities: self.capabilities,
-            request_profile: self.request_profile,
-            truncation_policy: self.truncation_policy.into_policy(),
-            base_instructions: self.base_instructions,
-            used_fallback: false,
-        }
-    }
-}
-
-impl TruncationPolicyConfig {
-    fn from_policy(policy: TruncationPolicy) -> Self {
-        Self {
-            mode: policy.mode,
-            limit: policy.limit,
-        }
-    }
-
-    pub(super) fn into_policy(self) -> TruncationPolicy {
-        TruncationPolicy {
-            mode: self.mode,
-            limit: self.limit,
-        }
     }
 }

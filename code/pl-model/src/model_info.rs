@@ -6,8 +6,9 @@ use serde_json::Map;
 use serde_json::Value;
 
 use crate::capabilities::ModelCapabilities;
+use crate::parameter::ModelParameter;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelInfo {
     pub slug: String,
     pub display_name: String,
@@ -23,15 +24,18 @@ pub struct ModelInfo {
     pub input_price_per_mtok: Option<f64>,
     pub output_price_per_mtok: Option<f64>,
     pub cache_read_price_per_mtok: Option<f64>,
-    #[serde(default)]
-    pub reasoning_efforts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parameters: Vec<ModelParameter>,
 
+    #[serde(default)]
     pub capabilities: ModelCapabilities,
     #[serde(default)]
     pub request_profile: ModelRequestProfile,
 
+    #[serde(default)]
     pub truncation_policy: TruncationPolicy,
 
+    #[serde(default)]
     pub base_instructions: String,
 
     #[serde(skip)]
@@ -50,10 +54,29 @@ pub struct ModelRequestProfile {
     pub options: Map<String, Value>,
 }
 
+impl ModelRequestProfile {
+    /// 所有字段均未设置时返回 true（用于字段级合并判断「用户未提供」）。
+    pub fn is_empty(&self) -> bool {
+        self.api_model.is_none()
+            && self.headers.is_empty()
+            && self.body.is_empty()
+            && self.options.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TruncationPolicy {
     pub mode: TruncationMode,
     pub limit: u64,
+}
+
+impl Default for TruncationPolicy {
+    fn default() -> Self {
+        Self {
+            mode: TruncationMode::Bytes,
+            limit: 10_000,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,7 +114,7 @@ impl ModelInfo {
             input_price_per_mtok: None,
             output_price_per_mtok: None,
             cache_read_price_per_mtok: None,
-            reasoning_efforts: Vec::new(),
+            parameters: Vec::new(),
             capabilities: ModelCapabilities::text_only(),
             request_profile: ModelRequestProfile::default(),
             truncation_policy: TruncationPolicy {
@@ -101,5 +124,26 @@ impl ModelInfo {
             base_instructions: String::new(),
             used_fallback: true,
         }
+    }
+
+    /// 返回名为 "effort" 的参数声明，若模型未声明则返回 None。
+    pub fn effort_parameter(&self) -> Option<&ModelParameter> {
+        self.parameters
+            .iter()
+            .find(|parameter| parameter.name == "effort")
+    }
+
+    /// 返回 effort 参数的候选值字符串列表（GUI 下拉渲染用）。
+    /// 若模型未声明 effort 参数，返回空 Vec。
+    pub fn supported_efforts(&self) -> Vec<String> {
+        self.effort_parameter()
+            .map(|parameter| parameter.candidates.clone())
+            .unwrap_or_default()
+    }
+
+    /// 返回 effort 的默认值（候选值首项），若模型未声明 effort 返回 None。
+    pub fn default_effort(&self) -> Option<String> {
+        self.effort_parameter()
+            .and_then(|parameter| parameter.candidates.first().cloned())
     }
 }

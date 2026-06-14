@@ -2,14 +2,13 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 use pl_model::{
-    ModelInfo, ProviderInfo, deepseek_default_model_slugs, default_models,
+    ModelInfo, ModelParameter, ProviderInfo, deepseek_default_model_slugs, default_models,
     openai_default_model_slugs, zhipu_default_model_slugs,
 };
 use pl_protocol::{PureError, Result};
 
 use crate::config::{
-    CONFIG_SCHEMA_VERSION, ModelConfig, ProviderConfig, PureConfig, ReasoningEffort, RoleConfig,
-    RoleConfigs,
+    CONFIG_SCHEMA_VERSION, ProviderConfig, PureConfig, ReasoningEffort, RoleConfig, RoleConfigs,
 };
 
 const DEFAULT_ROLE_EFFORT: &str = "high";
@@ -78,7 +77,7 @@ impl ProviderTemplateKind {
         }
     }
 
-    pub fn default_models(self) -> Result<Vec<ModelConfig>> {
+    pub fn default_models(self) -> Result<Vec<ModelInfo>> {
         let bundled_models = default_models();
         self.default_model_slugs()
             .iter()
@@ -87,7 +86,6 @@ impl ProviderTemplateKind {
                     .iter()
                     .find(|model| model.slug == *slug)
                     .cloned()
-                    .map(ModelConfig::from_model_info)
                     .ok_or_else(|| {
                         PureError::ConfigError(format!("default model template is missing: {slug}"))
                     })
@@ -113,19 +111,29 @@ impl ProviderTemplateKind {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FirstRunModelDraft {
-    pub config: ModelConfig,
+    pub config: ModelInfo,
 }
 
 impl FirstRunModelDraft {
-    pub fn from_model_config(config: ModelConfig) -> Self {
+    pub fn from_model_info(config: ModelInfo) -> Self {
         Self { config }
     }
 
     pub fn fallback(slug: impl Into<String>) -> Self {
         let slug = slug.into();
-        let mut model = ModelConfig::from_model_info(ModelInfo::fallback(&slug));
-        model.reasoning_efforts = vec![DEFAULT_ROLE_EFFORT.to_string()];
+        let mut model = ModelInfo::fallback(&slug);
+        model.parameters = vec![fallback_effort_parameter()];
         Self { config: model }
+    }
+}
+
+/// 占位模型的 effort 参数声明：单一候选值，无 wire（不真正发请求）。
+fn fallback_effort_parameter() -> ModelParameter {
+    ModelParameter {
+        name: "effort".to_string(),
+        label: None,
+        candidates: vec![DEFAULT_ROLE_EFFORT.to_string()],
+        wire: BTreeMap::new(),
     }
 }
 
@@ -154,7 +162,7 @@ impl FirstRunProviderDraft {
         }
     }
 
-    pub fn all_models(&self) -> Result<Vec<ModelConfig>> {
+    pub fn all_models(&self) -> Result<Vec<ModelInfo>> {
         let mut models = self.kind.default_models()?;
         models.extend(self.models.iter().map(|model| model.config.clone()));
         Ok(models)
@@ -316,7 +324,7 @@ fn validate_provider_key(key: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_models(provider_key: &str, default_model: &str, models: &[ModelConfig]) -> Result<()> {
+fn validate_models(provider_key: &str, default_model: &str, models: &[ModelInfo]) -> Result<()> {
     let mut slugs = BTreeSet::new();
     for model in models {
         if model.slug.trim().is_empty() {
@@ -340,9 +348,9 @@ fn validate_models(provider_key: &str, default_model: &str, models: &[ModelConfi
                 "provider {provider_key} default_model is not in models: {default_model}"
             ))
         })?;
-    if model.reasoning_efforts.is_empty() {
+    if model.default_effort().is_none() {
         return Err(PureError::ConfigError(format!(
-            "provider {provider_key} default model {default_model} must define reasoning_efforts"
+            "provider {provider_key} default model {default_model} must define effort parameter"
         )));
     }
     Ok(())
@@ -358,9 +366,9 @@ fn role_effort(provider: &ProviderConfig, model_slug: &str) -> Result<String> {
                 "default model is missing from provider: {model_slug}"
             ))
         })?;
-    model.reasoning_efforts.first().cloned().ok_or_else(|| {
+    model.default_effort().ok_or_else(|| {
         PureError::ConfigError(format!(
-            "default model {model_slug} must define reasoning_efforts"
+            "default model {model_slug} must define effort parameter"
         ))
     })
 }
@@ -572,12 +580,12 @@ mod tests {
         let mut draft = FirstRunConfigDraft::new_default();
         draft.providers[0].bearer_token = "sk-deepseek".to_string();
         let mut model = FirstRunModelDraft::fallback("custom-model");
-        model.config.reasoning_efforts.clear();
+        model.config.parameters.clear();
         draft.providers[0].default_model = "custom-model".to_string();
         draft.providers[0].models.push(model);
 
         let error = draft.to_config().unwrap_err().to_string();
 
-        assert!(error.contains("must define reasoning_efforts"));
+        assert!(error.contains("must define effort parameter"));
     }
 }

@@ -1,7 +1,9 @@
 mod capabilities;
 mod default_models;
 mod manager;
+mod model_family;
 mod model_info;
+mod parameter;
 mod proposed_plan;
 mod protocol;
 mod provider;
@@ -19,11 +21,13 @@ pub use default_models::{
     zhipu_default_model_slugs,
 };
 pub use manager::{DefaultModelsManager, ModelsManager};
+pub use model_family::{ModelFamily, ModelPricing};
 pub use model_info::{ModelInfo, ModelRequestProfile, TruncationMode, TruncationPolicy};
+pub use parameter::{ModelParameter, ParameterWire, WireAssignment};
 pub use pl_protocol::ToolCallKind;
 pub use provider::{
-    DeepSeekProvider, ModelProvider, OpenAiProvider, ProviderRuntime, SharedModelProvider,
-    ZhipuProvider, create_provider, create_provider_with_models,
+    ModelProvider, OpenAiProvider, SharedModelProvider, create_provider,
+    create_provider_with_models,
 };
 pub use provider_info::{
     ApplyPatchToolType, ProviderInfo, ProviderKind, ToolWirePolicy, ZHIPU_CODING_PLAN_BASE_URL,

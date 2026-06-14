@@ -187,6 +187,41 @@ impl TraceRecorder {
         }
     }
 
+    pub fn complete_plan_item(&mut self, turn_id: &str, item_id: &str, content: String) {
+        if content.trim().is_empty() {
+            return;
+        }
+        let timestamp = unix_seconds();
+        let mut item = if let Some(item) = self.latest_timeline_item(item_id) {
+            item
+        } else {
+            let item = TimelineItem {
+                turn_id: turn_id.to_string(),
+                item_id: item_id.to_string(),
+                sequence: self.sequence,
+                kind: TimelineItemKind::Plan,
+                status: TimelineItemStatus::Started,
+                created_at: timestamp,
+                updated_at: timestamp,
+                text_channel: None,
+                content: String::new(),
+                attachments: Vec::new(),
+                thinking_chunks: Vec::new(),
+                tool: None,
+                agent: None,
+                inference: None,
+                usage: None,
+            };
+            self.start_item(item.clone());
+            item
+        };
+        item.kind = TimelineItemKind::Plan;
+        item.status = TimelineItemStatus::Completed;
+        item.content = content;
+        item.updated_at = timestamp;
+        self.complete_item(item);
+    }
+
     pub fn inference_item(
         &mut self,
         turn_id: &str,
