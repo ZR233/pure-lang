@@ -11,8 +11,8 @@ use pl_protocol::{
     AgentEvent, AgentRuntimeDelta, InteractionKind, InteractionPayload, InteractionRequest,
     InteractionResolution, InteractionStatus, Message, PlanConfirmationResolution,
     PlanLifecycleEvent, PlanLifecycleState, RuntimeUsageSnapshot, SkillActivation,
-    StudioEventEnvelope, StudioEventKind, StudioTurnStatus, TimelineAttachment, TraceEvent,
-    TraceEventKind,
+    StudioAttachment, StudioEventEnvelope, StudioEventKind, StudioMessage, StudioPart,
+    StudioTurnStatus, TimelineAttachment, TraceEvent, TraceEventKind,
 };
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait, Database,
@@ -31,8 +31,10 @@ use crate::studio::mappers::{
     agent_runtime_snapshot_record, agent_snapshot_record, agent_timeline_event_record,
     attachment_record, costs_to_json, interaction_record, message_to_row_parts, project_record,
     row_to_message, session_handoff_record, session_record, session_runtime_record,
-    session_skill_record, studio_event_envelope, studio_event_record, studio_turn_record,
-    timeline_event_record, trace_event_kind_label,
+    session_skill_record, studio_event_envelope, studio_event_record, studio_message_record,
+    studio_message_role_label, studio_message_status_label, studio_part_record,
+    studio_part_status_label, studio_part_type_label, studio_text_channel_label,
+    studio_turn_record, timeline_event_record, trace_event_kind_label,
 };
 use crate::studio::paths::{
     default_attachments_dir, prepare_database_switch, project_name, sqlite_url,
@@ -40,8 +42,8 @@ use crate::studio::paths::{
 use crate::studio::records::{
     AgentSnapshotRecord, AgentTimelineEventRecord, AttachmentRecord, MaterializedAttachment,
     PlanImplementationHandoffStart, ProjectRecord, SessionHandoffKind, SessionHandoffStatus,
-    SessionRecord, SessionRuntimeRecord, SessionSkillRecord, SessionVisibility, StudioTurnRecord,
-    TimelineEventRecord,
+    SessionRecord, SessionRuntimeRecord, SessionSkillRecord, SessionVisibility,
+    StudioMessageRecord, StudioPartRecord, StudioTurnRecord, TimelineEventRecord,
 };
 use crate::studio::store_support::{
     configure_sqlite, insert_message_with_tx, non_empty_title, run_migrations,
@@ -821,6 +823,9 @@ impl StudioStore {
         &self,
         mut envelope: StudioEventEnvelope,
     ) -> Result<StudioEventEnvelope> {
+        if matches!(envelope.kind, StudioEventKind::MessagePartDelta { .. }) {
+            bail!("messagePartDelta is live-only and must not be persisted");
+        }
         let tx = self.db.begin().await?;
         if let Some(session_id) = envelope.session_id.as_deref() {
             let next_sequence = next_studio_event_sequence_with_tx(&tx, session_id).await?;
@@ -852,10 +857,33 @@ impl StudioStore {
         }
         let mut envelopes = Vec::new();
         for row in query.all(&self.db).await? {
-            let envelope = studio_event_envelope(studio_event_record(row))?;
-            envelopes.push(canonicalize_studio_event_with_connection(&self.db, envelope).await?);
+            envelopes.push(studio_event_envelope(studio_event_record(row))?);
         }
         Ok(envelopes)
+    }
+
+    pub async fn load_studio_messages(&self, session_id: &str) -> Result<Vec<StudioMessageRecord>> {
+        use entities::studio_message;
+        let rows = studio_message::Entity::find()
+            .filter(studio_message::Column::SessionId.eq(session_id.to_string()))
+            .order_by_asc(studio_message::Column::CreatedAt)
+            .order_by_asc(studio_message::Column::Sequence)
+            .order_by_asc(studio_message::Column::Id)
+            .all(&self.db)
+            .await?;
+        rows.into_iter().map(studio_message_record).collect()
+    }
+
+    pub async fn load_message_parts(&self, session_id: &str) -> Result<Vec<StudioPartRecord>> {
+        use entities::message_part;
+        let rows = message_part::Entity::find()
+            .filter(message_part::Column::SessionId.eq(session_id.to_string()))
+            .order_by_asc(message_part::Column::PartOrder)
+            .order_by_asc(message_part::Column::Sequence)
+            .order_by_asc(message_part::Column::Id)
+            .all(&self.db)
+            .await?;
+        rows.into_iter().map(studio_part_record).collect()
     }
 
     pub async fn create_turn(
@@ -1341,25 +1369,6 @@ fn plan_lifecycle_events(
         .collect()
 }
 
-async fn insert_timeline_events_with_tx(
-    tx: &sea_orm::DatabaseTransaction,
-    timeline_events: &[TraceEvent],
-) -> Result<()> {
-    if timeline_events.is_empty() {
-        return Ok(());
-    }
-    use entities::timeline_event;
-    for chunk in timeline_events.chunks(TIMELINE_EVENT_INSERT_CHUNK_SIZE) {
-        let models = timeline_event_models(chunk);
-        timeline_event::Entity::insert_many(models)
-            .on_empty_do_nothing()
-            .on_conflict(timeline_event_sequence_conflict())
-            .exec(tx)
-            .await?;
-    }
-    Ok(())
-}
-
 fn timeline_event_models(events: &[TraceEvent]) -> Vec<entities::timeline_event::ActiveModel> {
     events
         .iter()
@@ -1429,79 +1438,26 @@ async fn canonicalize_studio_event_with_connection<C>(
 where
     C: ConnectionTrait,
 {
-    if let StudioEventKind::TimelineChanged { change } = &mut envelope.kind
-        && let Some(session_id) = envelope.session_id.as_deref()
-    {
-        canonicalize_timeline_change_with_connection(conn, session_id, envelope.sequence, change)
-            .await?;
+    if let StudioEventKind::MessagePartUpdated { part } = &mut envelope.kind {
+        let existing_order =
+            existing_message_part_order_with_connection(conn, &part.part_id).await?;
+        part.order = existing_order.unwrap_or(envelope.sequence);
     }
     Ok(envelope)
 }
 
-async fn canonicalize_timeline_change_with_connection<C>(
+async fn existing_message_part_order_with_connection<C>(
     conn: &C,
-    session_id: &str,
-    event_sequence: u64,
-    change: &mut Box<pl_protocol::StudioTimelineChange>,
-) -> Result<()>
-where
-    C: ConnectionTrait,
-{
-    let item_id = match change.as_ref() {
-        pl_protocol::StudioTimelineChange::Started { item }
-        | pl_protocol::StudioTimelineChange::Completed { item }
-        | pl_protocol::StudioTimelineChange::Failed { item, .. } => item.item_id.as_str(),
-        pl_protocol::StudioTimelineChange::Delta { event } => event.item_id.as_str(),
-    };
-    let started_sequence =
-        existing_timeline_item_started_sequence_with_connection(conn, session_id, item_id)
-            .await?
-            .unwrap_or(event_sequence);
-    match change.as_mut() {
-        pl_protocol::StudioTimelineChange::Started { item }
-        | pl_protocol::StudioTimelineChange::Completed { item }
-        | pl_protocol::StudioTimelineChange::Failed { item, .. } => {
-            item.started_sequence = started_sequence;
-        }
-        pl_protocol::StudioTimelineChange::Delta { event } => {
-            event.started_sequence = started_sequence;
-        }
-    }
-    Ok(())
-}
-
-async fn existing_timeline_item_started_sequence_with_connection<C>(
-    conn: &C,
-    session_id: &str,
-    item_id: &str,
+    part_id: &str,
 ) -> Result<Option<u64>>
 where
     C: ConnectionTrait,
 {
-    use entities::timeline_event;
-    let rows = timeline_event::Entity::find()
-        .filter(timeline_event::Column::SessionId.eq(session_id.to_string()))
-        .order_by_asc(timeline_event::Column::Sequence)
-        .all(conn)
-        .await?;
-    for row in rows {
-        let trace = serde_json::from_str::<TraceEventKind>(&row.payload_json)
-            .with_context(|| format!("failed to parse timeline event {}", row.id))?;
-        let matches_item = match trace {
-            TraceEventKind::TimelineItemStarted { item }
-            | TraceEventKind::TimelineItemCompleted { item }
-            | TraceEventKind::TimelineItemFailed { item, .. } => item.item_id == item_id,
-            TraceEventKind::TimelineItemDelta { event } => event.item_id == item_id,
-            TraceEventKind::PlanLifecycleChanged { .. }
-            | TraceEventKind::InteractionChanged { .. }
-            | TraceEventKind::SkillActivated { .. }
-            | TraceEventKind::EnabledToolsRecorded { .. } => false,
-        };
-        if matches_item {
-            return Ok(Some(row.sequence as u64));
-        }
-    }
-    Ok(None)
+    use entities::message_part;
+    Ok(message_part::Entity::find_by_id(part_id.to_string())
+        .one(conn)
+        .await?
+        .map(|row| row.part_order as u64))
 }
 
 async fn upsert_agent_snapshot_with_tx(
@@ -1575,6 +1531,164 @@ async fn insert_agent_event_with_tx(
     .insert(tx)
     .await?;
     Ok(())
+}
+
+async fn upsert_studio_message_with_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    message: &StudioMessage,
+    sequence: i64,
+) -> Result<()> {
+    use entities::studio_message;
+    let metadata_json = serde_json::to_string(&message.metadata)?;
+    if let Some(existing) = studio_message::Entity::find_by_id(message.message_id.clone())
+        .one(tx)
+        .await?
+    {
+        if existing.sequence > sequence {
+            return Ok(());
+        }
+        let mut active: studio_message::ActiveModel = existing.into();
+        active.session_id = Set(message.session_id.clone());
+        active.turn_id = Set(message.turn_id.clone());
+        active.role = Set(studio_message_role_label(message.role).to_string());
+        active.status = Set(studio_message_status_label(message.status).to_string());
+        active.created_at = Set(message.created_at);
+        active.updated_at = Set(message.updated_at);
+        active.completed_at = Set(message.completed_at);
+        active.error = Set(message.error.clone());
+        active.metadata_json = Set(metadata_json);
+        active.sequence = Set(sequence);
+        active.update(tx).await?;
+    } else {
+        studio_message::ActiveModel {
+            id: Set(message.message_id.clone()),
+            session_id: Set(message.session_id.clone()),
+            turn_id: Set(message.turn_id.clone()),
+            role: Set(studio_message_role_label(message.role).to_string()),
+            status: Set(studio_message_status_label(message.status).to_string()),
+            created_at: Set(message.created_at),
+            updated_at: Set(message.updated_at),
+            completed_at: Set(message.completed_at),
+            error: Set(message.error.clone()),
+            metadata_json: Set(metadata_json),
+            sequence: Set(sequence),
+        }
+        .insert(tx)
+        .await?;
+    }
+    Ok(())
+}
+
+async fn delete_studio_message_with_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    message_id: &str,
+) -> Result<()> {
+    use entities::{message_part, studio_message};
+    message_part::Entity::delete_many()
+        .filter(message_part::Column::MessageId.eq(message_id.to_string()))
+        .exec(tx)
+        .await?;
+    studio_message::Entity::delete_by_id(message_id.to_string())
+        .exec(tx)
+        .await?;
+    Ok(())
+}
+
+async fn upsert_message_part_with_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    part: &StudioPart,
+    sequence: i64,
+) -> Result<()> {
+    use entities::message_part;
+    let attachments_json = serde_json::to_string(&part.attachments)?;
+    let tool_json = optional_json_string(&part.tool)?;
+    let agent_json = optional_json_string(&part.agent)?;
+    let inference_json = optional_json_string(&part.inference)?;
+    let plan_json = optional_json_string(&part.plan)?;
+    let file_json = optional_json_string(&part.file)?;
+    let usage_json = optional_json_string(&part.usage)?;
+    if let Some(existing) = message_part::Entity::find_by_id(part.part_id.clone())
+        .one(tx)
+        .await?
+    {
+        if existing.sequence > sequence {
+            return Ok(());
+        }
+        let mut active: message_part::ActiveModel = existing.into();
+        active.message_id = Set(part.message_id.clone());
+        active.session_id = Set(part.session_id.clone());
+        active.turn_id = Set(part.turn_id.clone());
+        active.part_type = Set(studio_part_type_label(part.part_type).to_string());
+        active.part_order = Set(part.order as i64);
+        active.status = Set(studio_part_status_label(part.status).to_string());
+        active.created_at = Set(part.created_at);
+        active.updated_at = Set(part.updated_at);
+        active.completed_at = Set(part.completed_at);
+        active.error = Set(part.error.clone());
+        active.text_channel = Set(part
+            .text_channel
+            .map(studio_text_channel_label)
+            .map(str::to_string));
+        active.text = Set(part.text.clone());
+        active.attachments_json = Set(attachments_json);
+        active.tool_json = Set(tool_json);
+        active.agent_json = Set(agent_json);
+        active.inference_json = Set(inference_json);
+        active.plan_json = Set(plan_json);
+        active.file_json = Set(file_json);
+        active.usage_json = Set(usage_json);
+        active.synthetic = Set(i32::from(part.synthetic));
+        active.ignored = Set(i32::from(part.ignored));
+        active.sequence = Set(sequence);
+        active.update(tx).await?;
+    } else {
+        message_part::ActiveModel {
+            id: Set(part.part_id.clone()),
+            message_id: Set(part.message_id.clone()),
+            session_id: Set(part.session_id.clone()),
+            turn_id: Set(part.turn_id.clone()),
+            part_type: Set(studio_part_type_label(part.part_type).to_string()),
+            part_order: Set(part.order as i64),
+            status: Set(studio_part_status_label(part.status).to_string()),
+            created_at: Set(part.created_at),
+            updated_at: Set(part.updated_at),
+            completed_at: Set(part.completed_at),
+            error: Set(part.error.clone()),
+            text_channel: Set(part
+                .text_channel
+                .map(studio_text_channel_label)
+                .map(str::to_string)),
+            text: Set(part.text.clone()),
+            attachments_json: Set(attachments_json),
+            tool_json: Set(tool_json),
+            agent_json: Set(agent_json),
+            inference_json: Set(inference_json),
+            plan_json: Set(plan_json),
+            file_json: Set(file_json),
+            usage_json: Set(usage_json),
+            synthetic: Set(i32::from(part.synthetic)),
+            ignored: Set(i32::from(part.ignored)),
+            sequence: Set(sequence),
+        }
+        .insert(tx)
+        .await?;
+    }
+    Ok(())
+}
+
+async fn delete_message_part_with_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    part_id: &str,
+) -> Result<()> {
+    use entities::message_part;
+    message_part::Entity::delete_by_id(part_id.to_string())
+        .exec(tx)
+        .await?;
+    Ok(())
+}
+
+fn optional_json_string<T: serde::Serialize>(value: &Option<T>) -> Result<Option<String>> {
+    Ok(value.as_ref().map(serde_json::to_string).transpose()?)
 }
 
 async fn record_agent_runtime_delta_with_tx(
@@ -1744,27 +1858,24 @@ async fn apply_studio_event_projection_with_tx(
     envelope: &StudioEventEnvelope,
 ) -> Result<()> {
     match &envelope.kind {
-        StudioEventKind::TimelineChanged { change } => {
-            if let Some(trace) = timeline_change_trace_event(envelope, change) {
-                insert_timeline_events_with_tx(tx, &[trace]).await?;
-            }
+        StudioEventKind::MessageUpdated { message } => {
+            upsert_studio_message_with_tx(tx, message, envelope.sequence as i64).await?;
+        }
+        StudioEventKind::MessageRemoved { message_id } => {
+            delete_studio_message_with_tx(tx, message_id).await?;
+        }
+        StudioEventKind::MessagePartUpdated { part } => {
+            upsert_message_part_with_tx(tx, part, envelope.sequence as i64).await?;
+        }
+        StudioEventKind::MessagePartRemoved { part_id, .. } => {
+            delete_message_part_with_tx(tx, part_id).await?;
+        }
+        StudioEventKind::MessagePartDelta { .. } => {
+            bail!("messagePartDelta is live-only and must not be projected");
         }
         StudioEventKind::SkillActivated { activation } => {
             if let Some(session_id) = envelope.session_id.as_deref() {
                 upsert_session_skill_with_tx(tx, session_id, activation).await?;
-            }
-        }
-        StudioEventKind::PlanLifecycleChanged { event } => {
-            if let Some(session_id) = envelope.session_id.as_deref() {
-                let trace = TraceEvent {
-                    session_id: session_id.to_string(),
-                    sequence: envelope.sequence,
-                    timestamp: envelope.created_at,
-                    kind: TraceEventKind::PlanLifecycleChanged {
-                        event: event.clone(),
-                    },
-                };
-                insert_timeline_events_with_tx(tx, &[trace]).await?;
             }
         }
         StudioEventKind::AgentChanged { agent } => {
@@ -1825,6 +1936,7 @@ async fn apply_studio_event_projection_with_tx(
             }
         }
         StudioEventKind::InteractionChanged { .. }
+        | StudioEventKind::PlanLifecycleChanged { .. }
         | StudioEventKind::TurnChanged { .. }
         | StudioEventKind::SessionHandoffChanged { .. }
         | StudioEventKind::SessionListChanged { .. }
@@ -1833,37 +1945,6 @@ async fn apply_studio_event_projection_with_tx(
         | StudioEventKind::Stale { .. } => {}
     }
     Ok(())
-}
-
-fn timeline_change_trace_event(
-    envelope: &StudioEventEnvelope,
-    change: &pl_protocol::StudioTimelineChange,
-) -> Option<TraceEvent> {
-    let session_id = envelope.session_id.clone()?;
-    let sequence = envelope.sequence;
-    let kind = match change {
-        pl_protocol::StudioTimelineChange::Started { item } => {
-            TraceEventKind::TimelineItemStarted { item: item.clone() }
-        }
-        pl_protocol::StudioTimelineChange::Delta { event } => TraceEventKind::TimelineItemDelta {
-            event: event.clone(),
-        },
-        pl_protocol::StudioTimelineChange::Completed { item } => {
-            TraceEventKind::TimelineItemCompleted { item: item.clone() }
-        }
-        pl_protocol::StudioTimelineChange::Failed { item, error } => {
-            TraceEventKind::TimelineItemFailed {
-                item: item.clone(),
-                error: error.clone(),
-            }
-        }
-    };
-    Some(TraceEvent {
-        session_id,
-        sequence,
-        timestamp: envelope.created_at,
-        kind,
-    })
 }
 
 fn agent_timeline_event_record_from_payload(
@@ -1959,7 +2040,11 @@ fn agent_timeline_event_record_from_payload(
 fn studio_event_kind_label(kind: &StudioEventKind) -> &'static str {
     match kind {
         StudioEventKind::TurnChanged { .. } => "TurnChanged",
-        StudioEventKind::TimelineChanged { .. } => "TimelineChanged",
+        StudioEventKind::MessageUpdated { .. } => "MessageUpdated",
+        StudioEventKind::MessageRemoved { .. } => "MessageRemoved",
+        StudioEventKind::MessagePartUpdated { .. } => "MessagePartUpdated",
+        StudioEventKind::MessagePartRemoved { .. } => "MessagePartRemoved",
+        StudioEventKind::MessagePartDelta { .. } => "MessagePartDelta",
         StudioEventKind::InteractionChanged { .. } => "InteractionChanged",
         StudioEventKind::AgentChanged { .. } => "AgentChanged",
         StudioEventKind::AgentTimelineChanged { .. } => "AgentTimelineChanged",
@@ -2199,12 +2284,25 @@ pub(crate) fn timeline_attachment(record: &AttachmentRecord) -> TimelineAttachme
     }
 }
 
+pub fn studio_attachment(record: &AttachmentRecord) -> StudioAttachment {
+    StudioAttachment {
+        id: record.id.clone(),
+        media_type: record.media_type.clone(),
+        filename: record.filename.clone(),
+        width: record.width,
+        height: record.height,
+        byte_size: record.byte_size,
+        data_url: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use pl_protocol::{
-        StudioEventEnvelope, StudioEventKind, StudioTimelineChange, TimelineDelta, TimelineItem,
-        TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus, TimelineTextChannel,
+        StudioEventEnvelope, StudioEventKind, StudioMessage, StudioMessageRole,
+        StudioMessageStatus, StudioPart, StudioPartDelta, StudioPartDeltaField, StudioPartStatus,
+        StudioPartType, StudioTextChannel,
     };
     use pretty_assertions::assert_eq;
 
@@ -2230,24 +2328,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn load_studio_events_canonicalizes_legacy_timeline_sequence_payload() {
-        use sea_orm::{ActiveModelTrait, EntityTrait};
-
+    async fn message_part_snapshot_projection_preserves_first_order() {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project("C:/work/alpha").await.unwrap();
         let session = store
-            .create_session(&project.id, "Timeline", CompileMode::Auto)
+            .create_session(&project.id, "Conversation", CompileMode::Auto)
             .await
             .unwrap();
-        let item = TimelineItem::text(
-            "turn-1",
-            "turn-1-text",
-            0,
-            TimelineTextChannel::Final,
-            "",
-            TimelineItemStatus::Streaming,
-            10,
-        );
+        let message = StudioMessage {
+            message_id: "turn-1-assistant".to_string(),
+            session_id: session.id.clone(),
+            turn_id: "turn-1".to_string(),
+            role: StudioMessageRole::Assistant,
+            status: StudioMessageStatus::Streaming,
+            created_at: 10,
+            updated_at: 10,
+            completed_at: None,
+            error: None,
+            metadata: serde_json::json!({}),
+        };
         store
             .append_studio_event(StudioEventEnvelope {
                 event_id: "studio-event-1".to_string(),
@@ -2256,78 +2355,119 @@ mod tests {
                 turn_id: Some("turn-1".to_string()),
                 sequence: 0,
                 created_at: 10,
-                kind: StudioEventKind::TimelineChanged {
-                    change: Box::new(StudioTimelineChange::Started { item }),
+                kind: StudioEventKind::MessageUpdated {
+                    message: Box::new(message),
                 },
             })
             .await
             .unwrap();
-        let changed = store
+        let part = StudioPart {
+            part_id: "turn-1-final".to_string(),
+            message_id: "turn-1-assistant".to_string(),
+            session_id: session.id.clone(),
+            turn_id: "turn-1".to_string(),
+            part_type: StudioPartType::Text,
+            order: 999,
+            status: StudioPartStatus::Streaming,
+            created_at: 10,
+            updated_at: 10,
+            completed_at: None,
+            error: None,
+            text_channel: Some(StudioTextChannel::Final),
+            text: String::new(),
+            attachments: Vec::new(),
+            tool: None,
+            agent: None,
+            inference: None,
+            plan: None,
+            file: None,
+            usage: None,
+            synthetic: false,
+            ignored: false,
+        };
+        let first_part = store
             .append_studio_event(StudioEventEnvelope {
                 event_id: "studio-event-2".to_string(),
+                project_id: Some(project.id.clone()),
+                session_id: Some(session.id.clone()),
+                turn_id: Some("turn-1".to_string()),
+                sequence: 0,
+                created_at: 10,
+                kind: StudioEventKind::MessagePartUpdated {
+                    part: Box::new(part.clone()),
+                },
+            })
+            .await
+            .unwrap();
+        let mut completed_part = part;
+        completed_part.order = 777;
+        completed_part.status = StudioPartStatus::Completed;
+        completed_part.text = "hello".to_string();
+        completed_part.updated_at = 11;
+        completed_part.completed_at = Some(11);
+        let second_part = store
+            .append_studio_event(StudioEventEnvelope {
+                event_id: "studio-event-3".to_string(),
                 project_id: Some(project.id),
                 session_id: Some(session.id.clone()),
                 turn_id: Some("turn-1".to_string()),
                 sequence: 0,
                 created_at: 11,
-                kind: StudioEventKind::TimelineChanged {
-                    change: Box::new(StudioTimelineChange::Delta {
-                        event: TimelineItemDeltaEvent {
-                            turn_id: "turn-1".to_string(),
-                            item_id: "turn-1-text".to_string(),
-                            started_sequence: 0,
-                            kind: TimelineItemKind::Text,
-                            status: TimelineItemStatus::Streaming,
-                            created_at: 10,
-                            updated_at: 11,
-                            delta: TimelineDelta::Text {
-                                text_channel: TimelineTextChannel::Final,
-                                delta: "hello".to_string(),
-                            },
-                        },
-                    }),
+                kind: StudioEventKind::MessagePartUpdated {
+                    part: Box::new(completed_part),
                 },
             })
             .await
             .unwrap();
 
-        let mut legacy_envelope = changed.clone();
-        let StudioEventKind::TimelineChanged { change } = &mut legacy_envelope.kind else {
-            panic!("expected timeline delta");
+        let StudioEventKind::MessagePartUpdated { part } = first_part.kind else {
+            panic!("expected first part snapshot");
         };
-        let StudioTimelineChange::Delta { event } = change.as_mut() else {
-            panic!("expected delta change");
+        assert_eq!(part.order, 1);
+        let StudioEventKind::MessagePartUpdated { part } = second_part.kind else {
+            panic!("expected second part snapshot");
         };
-        event.started_sequence = 999;
-        let mut legacy_payload = serde_json::to_value(&legacy_envelope).unwrap();
-        let event_json = &mut legacy_payload["kind"]["change"]["event"];
-        event_json["sequence"] = serde_json::json!(999);
-        event_json
-            .as_object_mut()
-            .unwrap()
-            .remove("startedSequence");
-        let mut row: entities::studio_event::ActiveModel =
-            entities::studio_event::Entity::find_by_id("studio-event-2".to_string())
-                .one(&store.db)
-                .await
-                .unwrap()
-                .unwrap()
-                .into();
-        row.payload_json = Set(serde_json::to_string(&legacy_payload).unwrap());
-        row.update(&store.db).await.unwrap();
+        assert_eq!(part.order, 1);
 
-        let loaded = store
-            .load_studio_events(&session.id, Some(0), None)
+        let parts = store.load_message_parts(&session.id).await.unwrap();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].part.order, 1);
+        assert_eq!(parts[0].part.text, "hello");
+        assert_eq!(parts[0].sequence, 2);
+    }
+
+    #[tokio::test]
+    async fn message_part_delta_is_not_durable() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/beta").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Live", CompileMode::Auto)
             .await
             .unwrap();
-
-        let StudioEventKind::TimelineChanged { change } = &loaded[0].kind else {
-            panic!("expected timeline delta");
-        };
-        let StudioTimelineChange::Delta { event } = change.as_ref() else {
-            panic!("expected delta change");
-        };
-        assert_eq!(loaded[0].sequence, 1);
-        assert_eq!(event.started_sequence, 0);
+        let err = store
+            .append_studio_event(StudioEventEnvelope {
+                event_id: "studio-event-live".to_string(),
+                project_id: Some(project.id),
+                session_id: Some(session.id),
+                turn_id: Some("turn-1".to_string()),
+                sequence: 0,
+                created_at: 10,
+                kind: StudioEventKind::MessagePartDelta {
+                    delta: StudioPartDelta {
+                        session_id: "session-1".to_string(),
+                        message_id: "message-1".to_string(),
+                        part_id: "part-1".to_string(),
+                        field: StudioPartDeltaField::Text,
+                        delta: "live".to_string(),
+                        chunk_index: None,
+                    },
+                },
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("messagePartDelta is live-only and must not be persisted")
+        );
     }
 }

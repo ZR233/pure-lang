@@ -433,14 +433,6 @@ export type TimelineItem = {
   usage?: UsageSnapshot | null;
 };
 
-export type SessionTimeline = {
-  sessionId: string;
-  events: TimelineEventRecord[];
-  planStates?: PlanState[];
-  interactions?: InteractionRequest[];
-  nextSequence: number;
-};
-
 export type PlanLifecycleState =
   | "pendingConfirmation"
   | "accepted"
@@ -462,7 +454,7 @@ export type PlanState = {
 export type PlanLifecycleResponse = {
   sessionId: string;
   planStates: PlanState[];
-  timelineNextSequence: number;
+  eventNextSequence: number;
 };
 
 export type PlanLifecycleEvent = {
@@ -681,87 +673,9 @@ export type SessionSelectionPayload = {
   interactions?: InteractionRequest[];
 };
 
-export type RunPromptResponse = {
-  sessionId: string;
-  sessions: SessionRecord[];
-  agentEvents: AgentTimelineEvent[];
-  agents: AgentDto[];
-  sessionRuntime: SessionRuntime;
-  timelineEvents: TimelineEventRecord[];
-  planStates?: PlanState[];
-  interactions?: InteractionRequest[];
-  timelineNextSequence: number;
-  turnStatus: TurnStatus;
-  turnAbortReason?: string | null;
-  turnError?: string | null;
-};
-
 export type StopPromptResponse = {
   sessionId: string;
   stopped: boolean;
-};
-
-export type AgentEvent =
-  | { timelineItemStarted: { item: TimelineItem } }
-  | { timelineItemDelta: { event: TimelineItemDeltaEvent } }
-  | { timelineItemCompleted: { item: TimelineItem } }
-  | { timelineItemFailed: { item: TimelineItem; error: string } }
-  | { interactionChanged: { event: InteractionChangedEvent } }
-  | { agentStateChanged: AgentStateChangedEvent }
-  | { agentRuntimeUpdated: { delta: AgentRuntimeDelta } }
-  | { skillActivated: { activation: SkillActivation } }
-  | { turnInterrupted: { reason: string } }
-  | {
-      turnBudgetLimited: {
-        reason: string;
-        limitKind: string;
-        usage: {
-          modelSteps: number;
-          toolCalls: number;
-          waitCalls: number;
-          elapsedMs: number;
-        };
-      };
-    }
-  | "done"
-  | { error: { message: string; severity: string } };
-
-export type TimelineItemDeltaEvent = {
-  turnId: string;
-  itemId: string;
-  startedSequence: number;
-  kind: TimelineItem["kind"];
-  status: TimelineItem["status"];
-  createdAt: number;
-  updatedAt: number;
-  delta:
-    | { type: "text"; textChannel: TimelineTextChannel; delta: string }
-    | { type: "thinking"; chunkIndex: number; delta: string }
-    | { type: "toolArguments"; delta: string }
-    | { type: "toolResult"; delta: string }
-    | { type: "plan"; delta: string };
-};
-
-export type TimelineTracePayload =
-  | { type: "timelineItemStarted"; item: TimelineItem }
-  | { type: "timelineItemDelta"; event: TimelineItemDeltaEvent }
-  | { type: "timelineItemCompleted"; item: TimelineItem }
-  | { type: "timelineItemFailed"; item: TimelineItem; error: string }
-  | { type: "planLifecycleChanged"; event: PlanLifecycleEvent }
-  | { type: "interactionChanged"; event: InteractionChangedEvent }
-  | { type: "skillActivated"; activation: SkillActivation }
-  | {
-      type: "enabledToolsRecorded";
-      event: { turnId: string; mode: string; tools: string[] };
-    };
-
-export type TimelineEventRecord = {
-  id: string;
-  sessionId: string;
-  sequence: number;
-  createdAt: number;
-  kind: string;
-  payload: TimelineTracePayload;
 };
 
 export type AgentRuntimeDelta = {
@@ -786,19 +700,85 @@ export type StudioTurn = {
   updatedAt: number;
 };
 
-export type StudioTimelineChange =
-  | { type: "started"; item: TimelineItem }
-  | { type: "delta"; event: TimelineItemDeltaEvent }
-  | { type: "completed"; item: TimelineItem }
-  | { type: "failed"; item: TimelineItem; error: string };
+export type StudioMessage = {
+  messageId: string;
+  sessionId: string;
+  turnId: string;
+  role: "user" | "assistant" | "system";
+  status: "queued" | "streaming" | "completed" | "failed" | "cancelled";
+  createdAt: number;
+  updatedAt: number;
+  completedAt?: number | null;
+  error?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type StudioPartType =
+  | "text"
+  | "reasoning"
+  | "tool"
+  | "agent"
+  | "turn"
+  | "inference"
+  | "plan"
+  | "file";
+
+export type StudioPartStatus = ToolCallStatus2;
+
+export type StudioAttachment = TimelineAttachment;
+
+export type StudioPart = {
+  partId: string;
+  messageId: string;
+  sessionId: string;
+  turnId: string;
+  partType: StudioPartType;
+  order: number;
+  status: StudioPartStatus;
+  createdAt: number;
+  updatedAt: number;
+  completedAt?: number | null;
+  error?: string | null;
+  textChannel?: TimelineTextChannel | null;
+  text: string;
+  attachments?: StudioAttachment[];
+  tool?: TimelineItem["tool"];
+  agent?: TimelineItem["agent"];
+  inference?: TimelineItem["inference"];
+  plan?: { content: string } | null;
+  file?: { path: string; mediaType?: string | null } | null;
+  usage?: UsageSnapshot | null;
+  synthetic?: boolean;
+  ignored?: boolean;
+};
+
+export type StudioPartDeltaField =
+  | "text"
+  | "reasoningText"
+  | "planContent"
+  | "tool.arguments"
+  | "tool.result";
+
+export type StudioPartDelta = {
+  sessionId: string;
+  messageId: string;
+  partId: string;
+  field: StudioPartDeltaField;
+  delta: string;
+  chunkIndex?: number | null;
+};
 
 export type StudioEventKind =
   | { type: "turnChanged"; turn: StudioTurn }
-  | { type: "timelineChanged"; change: StudioTimelineChange }
+  | { type: "messageUpdated"; message: StudioMessage }
+  | { type: "messageRemoved"; messageId: string }
+  | { type: "messagePartUpdated"; part: StudioPart }
+  | { type: "messagePartRemoved"; messageId: string; partId: string }
+  | { type: "messagePartDelta"; delta: StudioPartDelta }
   | { type: "interactionChanged"; event: InteractionChangedEvent }
-  | { type: "agentChanged"; agent: { payload: AgentDto | AgentEvent } }
-  | { type: "agentTimelineChanged"; event: { payload: AgentTimelineEvent | AgentEvent } }
-  | { type: "sessionRuntimeChanged"; runtime: { payload: SessionRuntime | AgentEvent } }
+  | { type: "agentChanged"; agent: { payload: AgentDto } }
+  | { type: "agentTimelineChanged"; event: { payload: AgentTimelineEvent } }
+  | { type: "sessionRuntimeChanged"; runtime: { payload: SessionRuntime } }
   | { type: "skillActivated"; activation: SkillActivation }
   | { type: "planLifecycleChanged"; event: PlanLifecycleEvent }
   | {
@@ -847,7 +827,6 @@ export type SessionStatePayload = {
   agents: AgentDto[];
   sessionRuntime: SessionRuntime;
   interactions: InteractionRequest[];
-  timeline: SessionTimeline;
   events: StudioEventEnvelope[];
   eventNextSequence: number;
 };

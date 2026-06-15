@@ -20,7 +20,7 @@ pub use records::{
     SessionVisibility, StudioPromptOutcome, TimelineEventRecord,
 };
 pub use runtime::{RunPromptRequest, StudioRuntime};
-pub use store::StudioStore;
+pub use store::{StudioStore, studio_attachment};
 
 #[cfg(test)]
 mod tests {
@@ -32,9 +32,10 @@ mod tests {
         InteractionPayload, InteractionRequest, InteractionResolution, InteractionScope,
         InteractionStatus, Message, MessageContent, MessageRole, PlanConfirmationResolution,
         PlanLifecycleState, RuntimeCostAmount, SkillActivation, StudioEventEnvelope,
-        StudioEventKind, StudioTimelineChange, TimelineDelta, TimelineItem, TimelineItemDeltaEvent,
-        TimelineItemKind, TimelineItemStatus, TimelineTextChannel, TokenUsageSnapshot, TraceEvent,
-        TraceEventKind,
+        StudioEventKind, StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart,
+        StudioPartStatus, StudioPartType, StudioTextChannel, TimelineDelta, TimelineItem,
+        TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus, TimelineTextChannel,
+        TokenUsageSnapshot, TraceEvent, TraceEventKind,
     };
     use pretty_assertions::assert_eq;
 
@@ -181,23 +182,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn append_studio_event_canonicalizes_timeline_payload_before_storage() {
+    async fn append_studio_event_projects_message_part_snapshots() {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project("C:/work/alpha").await.unwrap();
         let session = store
-            .create_session(&project.id, "Timeline", CompileMode::Auto)
+            .create_session(&project.id, "Conversation", CompileMode::Auto)
             .await
             .unwrap();
-        let item = TimelineItem::text(
-            "turn-1",
-            "turn-1-text",
-            0,
-            TimelineTextChannel::Final,
-            "",
-            TimelineItemStatus::Streaming,
-            10,
-        );
-        let started = store
+        let message = StudioMessage {
+            message_id: "turn-1:assistant".to_string(),
+            session_id: session.id.clone(),
+            turn_id: "turn-1".to_string(),
+            role: StudioMessageRole::Assistant,
+            status: StudioMessageStatus::Streaming,
+            created_at: 10,
+            updated_at: 10,
+            completed_at: None,
+            error: None,
+            metadata: serde_json::json!({}),
+        };
+        let message_event = store
             .append_studio_event(StudioEventEnvelope {
                 event_id: "studio-event-1".to_string(),
                 project_id: Some(project.id.clone()),
@@ -205,82 +209,78 @@ mod tests {
                 turn_id: Some("turn-1".to_string()),
                 sequence: 0,
                 created_at: 10,
-                kind: StudioEventKind::TimelineChanged {
-                    change: Box::new(StudioTimelineChange::Started { item: item.clone() }),
+                kind: StudioEventKind::MessageUpdated {
+                    message: Box::new(message),
                 },
             })
             .await
             .unwrap();
-        let delta = TimelineItemDeltaEvent {
+        let part = StudioPart {
+            part_id: "turn-1:assistant-final".to_string(),
+            message_id: "turn-1:assistant".to_string(),
+            session_id: session.id.clone(),
             turn_id: "turn-1".to_string(),
-            item_id: "turn-1-text".to_string(),
-            started_sequence: 999,
-            kind: TimelineItemKind::Text,
-            status: TimelineItemStatus::Streaming,
+            part_type: StudioPartType::Text,
+            order: 999,
+            status: StudioPartStatus::Completed,
             created_at: 10,
             updated_at: 11,
-            delta: TimelineDelta::Text {
-                text_channel: TimelineTextChannel::Final,
-                delta: "hello".to_string(),
-            },
+            completed_at: Some(11),
+            error: None,
+            text_channel: Some(StudioTextChannel::Final),
+            text: "hello".to_string(),
+            attachments: Vec::new(),
+            tool: None,
+            agent: None,
+            inference: None,
+            plan: None,
+            file: None,
+            usage: None,
+            synthetic: false,
+            ignored: false,
         };
-        let changed = store
+        let part_event = store
             .append_studio_event(StudioEventEnvelope {
                 event_id: "studio-event-2".to_string(),
-                project_id: Some(project.id.clone()),
+                project_id: Some(project.id),
                 session_id: Some(session.id.clone()),
                 turn_id: Some("turn-1".to_string()),
                 sequence: 0,
                 created_at: 11,
-                kind: StudioEventKind::TimelineChanged {
-                    change: Box::new(StudioTimelineChange::Delta { event: delta }),
+                kind: StudioEventKind::MessagePartUpdated {
+                    part: Box::new(part),
                 },
             })
             .await
             .unwrap();
 
-        let StudioEventKind::TimelineChanged { change } = &started.kind else {
-            panic!("expected timeline start");
+        let StudioEventKind::MessageUpdated { message } = &message_event.kind else {
+            panic!("expected message snapshot");
         };
-        let StudioTimelineChange::Started { item } = change.as_ref() else {
-            panic!("expected started change");
+        assert_eq!(message_event.sequence, 0);
+        assert_eq!(message.message_id, "turn-1:assistant");
+        let StudioEventKind::MessagePartUpdated { part } = &part_event.kind else {
+            panic!("expected part snapshot");
         };
-        assert_eq!(started.sequence, 0);
-        assert_eq!(item.started_sequence, 0);
-
-        let StudioEventKind::TimelineChanged { change } = &changed.kind else {
-            panic!("expected timeline delta");
-        };
-        let StudioTimelineChange::Delta { event } = change.as_ref() else {
-            panic!("expected delta change");
-        };
-        assert_eq!(changed.sequence, 1);
-        assert_eq!(event.started_sequence, 0);
+        assert_eq!(part_event.sequence, 1);
+        assert_eq!(part.order, 1);
 
         let stored_events = store
             .load_studio_events(&session.id, None, None)
             .await
             .unwrap();
-        let StudioEventKind::TimelineChanged { change } = &stored_events[1].kind else {
-            panic!("expected stored timeline delta");
-        };
-        let StudioTimelineChange::Delta { event } = change.as_ref() else {
-            panic!("expected stored delta change");
+        let StudioEventKind::MessagePartUpdated { part } = &stored_events[1].kind else {
+            panic!("expected stored part snapshot");
         };
         assert_eq!(stored_events[1].sequence, 1);
-        assert_eq!(event.started_sequence, 0);
+        assert_eq!(part.order, 1);
+        assert_eq!(part.text, "hello");
 
-        let timeline = store
-            .load_timeline_events(&session.id, None, None)
-            .await
-            .unwrap();
-        assert_eq!(
-            timeline
-                .iter()
-                .map(|event| event.sequence)
-                .collect::<Vec<_>>(),
-            vec![0, 1]
-        );
+        let messages = store.load_studio_messages(&session.id).await.unwrap();
+        let parts = store.load_message_parts(&session.id).await.unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].part.order, 1);
     }
 
     #[tokio::test]

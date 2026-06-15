@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server.browser";
 import { initialStudioState, studioReducer } from "../src/state/studio-state";
+import { timelineItemsFromConversation } from "../src/state/timeline-state";
 import { selectTimelineEntries } from "../src/state/selectors";
 import { normalizeRolesForProviders } from "../src/components/RoleSettings";
 import { selectedContextWindow } from "../src/components/SessionStatusBar";
@@ -22,12 +23,12 @@ import type {
   PlanState,
   InteractionRequest,
   RoleRecord,
-  RunPromptResponse,
   SessionRuntime,
   StudioEventEnvelope,
-  TimelineEventRecord,
   TimelineItem,
-  TimelineItemDeltaEvent,
+  StudioMessage,
+  StudioPart,
+  StudioPartDelta,
   ToolCallStatus2,
 } from "../src/types";
 
@@ -301,58 +302,8 @@ function inferenceItem(itemId: string, turnId: string, sequence: number): Timeli
   };
 }
 
-function timelineRecordsForItems(
-  timelineItems: TimelineItem[],
-  sessionId = "session-1",
-): TimelineEventRecord[] {
-  return timelineItems.map((item) => ({
-    id: `event-${item.startedSequence}-${item.itemId}`,
-    sessionId,
-    sequence: item.startedSequence,
-    createdAt: item.updatedAt,
-    kind: "TimelineItemCompleted",
-    payload: { type: "timelineItemCompleted", item },
-  }));
-}
-
-function timelineNextSequenceForItems(timelineItems: TimelineItem[]): number {
+function nextSequenceForItems(timelineItems: TimelineItem[]): number {
   return timelineItems.reduce((max, item) => Math.max(max, item.startedSequence), -1) + 1;
-}
-
-function response(timelineItems: TimelineItem[]): RunPromptResponse {
-  const timelineNextSequence = timelineNextSequenceForItems(timelineItems);
-  return {
-    sessionId: "session-1",
-    sessions: [
-      {
-        id: "session-1",
-        projectId: "project-1",
-        title: "Session",
-        mode: "auto",
-        updatedAt: 2,
-        visibility: "active",
-      },
-    ],
-    agentEvents: [],
-    agents: [],
-    sessionRuntime: runtime,
-    timelineEvents: timelineRecordsForItems(timelineItems),
-    interactions: [],
-    timelineNextSequence,
-    turnStatus: "completed",
-    turnAbortReason: null,
-    turnError: null,
-  };
-}
-
-function responseWithSequence(
-  timelineItems: TimelineItem[],
-  timelineNextSequence: number,
-): RunPromptResponse {
-  return {
-    ...response(timelineItems),
-    timelineNextSequence,
-  };
 }
 
 function planState(planId: string, state: PlanState["state"]): PlanState {
@@ -392,6 +343,17 @@ function selectedState() {
   });
 }
 
+type TestState = ReturnType<typeof selectedState>;
+type TestTimelineItemDelta = {
+  itemId: string;
+  field: "content" | "planContent" | "thinkingChunk" | "toolArguments" | "toolResult";
+  delta: string;
+  chunkIndex?: number;
+};
+type TestConversationChange =
+  | { type: "itemUpdated"; message: StudioMessage; part: StudioPart }
+  | { type: "itemDelta"; delta: StudioPartDelta };
+
 function studioEvent(
   kind: StudioEventEnvelope["kind"],
   overrides: Partial<StudioEventEnvelope> = {},
@@ -408,15 +370,110 @@ function studioEvent(
   };
 }
 
-function studioTimelineEvent(
-  change: Extract<StudioEventEnvelope["kind"], { type: "timelineChanged" }>["change"],
+function messageForItem(item: TimelineItem, role: StudioMessage["role"] = "assistant"): StudioMessage {
+  const messageId = role === "user" ? `${item.turnId}:user` : `${item.turnId}:assistant`;
+  return {
+    messageId,
+    sessionId: "session-1",
+    turnId: item.turnId,
+    role,
+    status: item.status === "failed"
+      ? "failed"
+      : item.status === "streaming" || item.status === "started" || item.status === "running"
+        ? "streaming"
+        : "completed",
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    completedAt: item.status === "completed" ? item.updatedAt : null,
+    error: item.status === "failed" ? item.content : null,
+    metadata: {},
+  };
+}
+
+function partForItem(item: TimelineItem): StudioPart {
+  return {
+    partId: item.itemId,
+    messageId: messageForItem(item).messageId,
+    sessionId: "session-1",
+    turnId: item.turnId,
+    partType: item.kind === "thinking" ? "reasoning" : item.kind,
+    order: item.startedSequence,
+    status: item.status,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    completedAt: item.status === "completed" ? item.updatedAt : null,
+    error: item.status === "failed" ? item.content : null,
+    textChannel: item.textChannel,
+    text: item.kind === "thinking"
+      ? item.thinkingChunks.map((chunk) => chunk.content).join("")
+      : item.content,
+    attachments: item.attachments ?? [],
+    tool: item.tool,
+    agent: item.agent,
+    inference: item.inference,
+    plan: item.kind === "plan" ? { content: item.content } : null,
+    file: null,
+    usage: item.usage ?? null,
+    synthetic: false,
+    ignored: false,
+  };
+}
+
+function eventsForItems(items: TimelineItem[], sessionId = "session-1"): StudioEventEnvelope[] {
+  return items.flatMap((item) => {
+    const message = { ...messageForItem(item), sessionId };
+    const part = { ...partForItem(item), sessionId, messageId: message.messageId };
+    return [
+      studioEvent(
+        { type: "messageUpdated", message },
+        { eventId: `event-${item.startedSequence}-message-${message.messageId}`, sessionId, sequence: item.startedSequence, createdAt: item.createdAt },
+      ),
+      studioEvent(
+        { type: "messagePartUpdated", part },
+        { eventId: `event-${item.startedSequence}-part-${part.partId}`, sessionId, sequence: item.startedSequence, createdAt: item.updatedAt },
+      ),
+    ];
+  });
+}
+
+function loadSessionItems(
+  state: TestState,
+  items: TimelineItem[],
+  nextSequence = nextSequenceForItems(items),
+  planStates?: PlanState[],
+  interactions?: InteractionRequest[],
+) {
+  return studioReducer(state, {
+    type: "sessionStateLoaded",
+    sessionId: "session-1",
+    events: eventsForItems(items),
+    nextSequence,
+    planStates,
+    interactions,
+  });
+}
+
+function timelineItems(state: TestState): Map<string, TimelineItem> {
+  return new Map(timelineItemsFromConversation(state).map((item) => [item.itemId, item]));
+}
+
+function timelineItem(state: TestState, itemId: string): TimelineItem | undefined {
+  return timelineItems(state).get(itemId);
+}
+
+function timelineOrder(state: TestState): string[] {
+  return timelineItemsFromConversation(state).map((item) => item.itemId);
+}
+
+function studioPartEvent(
+  part: StudioPart,
   sequence: number,
   overrides: Partial<StudioEventEnvelope> = {},
 ): StudioEventEnvelope {
   return studioEvent(
     {
-      type: "timelineChanged",
-      change,
+      type: "messagePartUpdated",
+      part,
     },
     {
       eventId: `event-${sequence}`,
@@ -427,12 +484,85 @@ function studioTimelineEvent(
   );
 }
 
+function itemUpdated(item: TimelineItem): TestConversationChange {
+  return { type: "itemUpdated", message: messageForItem(item), part: partForItem(item) };
+}
+
+function itemDelta(delta: TestTimelineItemDelta): TestConversationChange {
+  const field: StudioPartDelta["field"] =
+    delta.field === "content"
+      ? "text"
+      : delta.field === "thinkingChunk"
+        ? "reasoningText"
+        : delta.field === "toolArguments"
+          ? "tool.arguments"
+          : delta.field === "toolResult"
+            ? "tool.result"
+            : "planContent";
+  const studioDelta = partDelta(delta.itemId, field, delta.delta);
+  return {
+    type: "itemDelta",
+    delta: {
+      ...studioDelta,
+      chunkIndex: delta.chunkIndex ?? studioDelta.chunkIndex ?? null,
+    },
+  };
+}
+
+function studioTimelineEvent(
+  change: TestConversationChange,
+  sequence: number,
+  overrides: Partial<StudioEventEnvelope> = {},
+): StudioEventEnvelope {
+  return change.type === "itemUpdated"
+    ? studioPartEvent(change.part, sequence, overrides)
+    : studioPartDeltaEvent(change.delta, sequence, overrides);
+}
+
+function studioItemEvents(
+  item: TimelineItem,
+  sequence: number,
+  overrides: Partial<StudioEventEnvelope> = {},
+): StudioEventEnvelope[] {
+  const message = messageForItem(item);
+  const part = partForItem(item);
+  return [
+    studioEvent(
+      { type: "messageUpdated", message },
+      { eventId: `event-${sequence}-message`, sequence, createdAt: sequence, ...overrides },
+    ),
+    studioPartEvent(part, sequence, overrides),
+  ];
+}
+
+function reduceStudioEvents(state: TestState, events: StudioEventEnvelope[], status = "running") {
+  return events.reduce(
+    (next, envelope) => studioReducer(next, { type: "studioEvent", envelope, status }),
+    state,
+  );
+}
+
 function applyStudioTimelineChange(
-  state: ReturnType<typeof selectedState>,
-  change: Extract<StudioEventEnvelope["kind"], { type: "timelineChanged" }>["change"],
+  state: TestState,
+  change: TestConversationChange,
   sequence: number,
   status = "running",
 ) {
+  if (change.type === "itemUpdated") {
+    const withMessage = studioReducer(state, {
+      type: "studioEvent",
+      envelope: studioEvent(
+        { type: "messageUpdated", message: change.message },
+        { eventId: `event-${sequence}-message`, sequence, createdAt: sequence },
+      ),
+      status,
+    });
+    return studioReducer(withMessage, {
+      type: "studioEvent",
+      envelope: studioPartEvent(change.part, sequence),
+      status,
+    });
+  }
   return studioReducer(state, {
     type: "studioEvent",
     envelope: studioTimelineEvent(change, sequence),
@@ -440,57 +570,140 @@ function applyStudioTimelineChange(
   });
 }
 
-function entriesForTimeline(items: TimelineItem[]) {
-  const loaded = studioReducer(selectedState(), {
-    type: "timelineLoaded",
-    sessionId: "session-1",
-    events: timelineRecordsForItems(items),
-    nextSequence: timelineNextSequenceForItems(items),
+function studioPartDeltaEvent(
+  delta: StudioPartDelta,
+  sequence: number,
+  overrides: Partial<StudioEventEnvelope> = {},
+): StudioEventEnvelope {
+  return studioEvent(
+    {
+      type: "messagePartDelta",
+      delta,
+    },
+    {
+      eventId: `event-${sequence}`,
+      sequence,
+      createdAt: sequence,
+      ...overrides,
+    },
+  );
+}
+
+function applyStudioPartEvent(
+  state: ReturnType<typeof selectedState>,
+  part: StudioPart,
+  sequence: number,
+  status = "running",
+) {
+  return studioReducer(state, {
+    type: "studioEvent",
+    envelope: studioPartEvent(part, sequence),
+    status,
   });
+}
+
+function applyStudioItemUpdate(
+  state: ReturnType<typeof selectedState>,
+  item: TimelineItem,
+  sequence: number,
+  status = "running",
+) {
+  return applyStudioPartEvent(state, partForItem(item), sequence, status);
+}
+
+function partDelta(itemId: string, field: StudioPartDelta["field"], delta: string): StudioPartDelta {
+  const turnId = itemId.split("-").slice(0, 2).join("-") || "turn";
+  return {
+    sessionId: "session-1",
+    messageId: `${turnId}:assistant`,
+    partId: itemId,
+    field,
+    delta,
+    chunkIndex: field === "reasoningText" ? 0 : null,
+  };
+}
+
+function applyStudioPartDelta(
+  state: ReturnType<typeof selectedState>,
+  delta: StudioPartDelta,
+  sequence: number,
+  status = "running",
+) {
+  return studioReducer(state, {
+    type: "studioEvent",
+    envelope: studioPartDeltaEvent(delta, sequence),
+    status,
+  });
+}
+
+function completeTurn(
+  state: TestState,
+  sequence: number,
+  status = "done",
+  sessionId = "session-1",
+  turnId = "turn-1",
+) {
+  return studioReducer(state, {
+    type: "studioEvent",
+    envelope: studioEvent(
+      {
+        type: "turnChanged",
+        turn: {
+          turnId,
+          sessionId,
+          status: "completed",
+          reason: null,
+          updatedAt: sequence,
+        },
+      },
+      { sessionId, turnId, sequence, createdAt: sequence },
+    ),
+    status,
+  });
+}
+
+function entriesForTimeline(items: TimelineItem[]) {
+  const loaded = loadSessionItems(selectedState(), items);
   return selectTimelineEntries(loaded);
 }
 
 function staleTimelineLoadKeepsNewTurnItems() {
   const oldItem = textItem("turn-1-text", 1, "old");
   const newItem = textItem("turn-2-text", 10, "new");
-  const withNewTurn = studioReducer(selectedState(), {
-    type: "runPromptLoaded",
-    payload: response([newItem]),
-    status: "done",
-  });
+  const withNewTurn = applyStudioTimelineChange(selectedState(), itemUpdated(newItem), 10, "done");
 
   const afterStaleLoad = studioReducer(withNewTurn, {
-    type: "timelineLoaded",
+    type: "sessionStateLoaded",
     sessionId: "session-1",
-    events: timelineRecordsForItems([oldItem]),
+    events: eventsForItems([oldItem]),
     nextSequence: 2,
   });
 
-  assertDeepEqual(afterStaleLoad.timelineOrder, ["turn-1-text", "turn-2-text"]);
-  assertEqual(afterStaleLoad.timelineItems.get("turn-2-text")?.content, "new");
-  assertEqual(afterStaleLoad.timelineNextSequence, 11);
+  assertDeepEqual(timelineOrder(afterStaleLoad), ["turn-2-text"]);
+  assertEqual(timelineItem(afterStaleLoad, "turn-2-text")?.content, "new");
+  assertEqual(afterStaleLoad.eventNextSequence, 11);
 }
 
 function freshTimelineLoadMayReplaceSnapshot() {
   const firstItem = textItem("turn-1-text", 1, "first");
   const replacement = textItem("turn-1-text", 2, "replacement");
   const loaded = studioReducer(selectedState(), {
-    type: "timelineLoaded",
+    type: "sessionStateLoaded",
     sessionId: "session-1",
-    events: timelineRecordsForItems([firstItem]),
+    events: eventsForItems([firstItem]),
     nextSequence: 2,
   });
 
   const refreshed = studioReducer(loaded, {
-    type: "timelineLoaded",
+    type: "sessionStateLoaded",
     sessionId: "session-1",
-    events: timelineRecordsForItems([replacement]),
+    events: eventsForItems([replacement]),
     nextSequence: 3,
   });
 
-  assertDeepEqual(refreshed.timelineOrder, ["turn-1-text"]);
-  assertEqual(refreshed.timelineItems.get("turn-1-text")?.content, "replacement");
-  assertEqual(refreshed.timelineNextSequence, 3);
+  assertDeepEqual(timelineOrder(refreshed), ["turn-1-text"]);
+  assertEqual(timelineItem(refreshed, "turn-1-text")?.content, "replacement");
+  assertEqual(refreshed.eventNextSequence, 3);
 }
 
 function staleTimelineLoadDoesNotOverwriteLiveDelta() {
@@ -499,94 +712,110 @@ function staleTimelineLoadDoesNotOverwriteLiveDelta() {
     ...textItem("turn-2-text", 10, ""),
     status: "streaming" as const,
   };
-  const delta: TimelineItemDeltaEvent = {
-    turnId: "turn-2",
+  const delta: TestTimelineItemDelta = {
     itemId: "turn-2-text",
-    startedSequence: 11,
-    kind: "text",
-    status: "streaming",
-    createdAt: 10,
-    updatedAt: 11,
-    delta: { type: "text", textChannel: "final", delta: "new" },
+    field: "content",
+    delta: "new",
   };
-  const completed = textItem("turn-2-text", 12, "new");
-  const liveStarted = applyStudioTimelineChange(selectedState(), { type: "started", item: started }, 10);
-  const liveDelta = applyStudioTimelineChange(liveStarted, { type: "delta", event: delta }, 11);
-  const liveCompleted = applyStudioTimelineChange(liveDelta, { type: "completed", item: completed }, 12, "done");
+  const completed = {
+    ...textItem("turn-2-text", 10, "new"),
+    updatedAt: 12,
+  };
+  const liveStarted = applyStudioTimelineChange(selectedState(), itemUpdated(started), 10);
+  const liveDelta = applyStudioTimelineChange(liveStarted, itemDelta(delta), 11);
+  const liveCompleted = applyStudioTimelineChange(liveDelta, itemUpdated(completed), 12, "done");
 
   const afterStaleLoad = studioReducer(liveCompleted, {
-    type: "timelineLoaded",
+    type: "sessionStateLoaded",
     sessionId: "session-1",
-    events: timelineRecordsForItems([oldItem]),
+    events: eventsForItems([oldItem]),
     nextSequence: 2,
   });
 
-  assertDeepEqual(afterStaleLoad.timelineOrder, ["turn-1-text", "turn-2-text"]);
-  assertEqual(afterStaleLoad.timelineItems.get("turn-2-text")?.content, "new");
-  assertEqual(afterStaleLoad.timelineNextSequence, 13);
+  assertDeepEqual(timelineOrder(afterStaleLoad), ["turn-2-text"]);
+  assertEqual(timelineItem(afterStaleLoad, "turn-2-text")?.content, "new");
+  assertEqual(afterStaleLoad.eventNextSequence, 13);
 }
 
-function toolArgumentDeltaBeforeStartIsPreserved() {
-  const delta: TimelineItemDeltaEvent = {
-    turnId: "turn-1",
+function toolArgumentDeltaRequiresSnapshot() {
+  const delta: TestTimelineItemDelta = {
     itemId: "turn-1-call-1",
-    startedSequence: 10,
-    kind: "tool",
-    status: "streaming",
-    createdAt: 10,
-    updatedAt: 10,
-    delta: { type: "toolArguments", delta: "{\"path\":\"a.ts\"" },
+    field: "toolArguments",
+    delta: "{\"path\":\"a.ts\"",
   };
   const started = toolItem("turn-1-call-1", "turn-1", 9, "read_file", "");
   started.status = "streaming";
-  const completed = toolItem("turn-1-call-1", "turn-1", 11, "read_file", "");
-  const withDelta = applyStudioTimelineChange(selectedState(), { type: "delta", event: delta }, 10);
-  const withStart = applyStudioTimelineChange(withDelta, { type: "started", item: started }, 9);
-  const withCompleted = applyStudioTimelineChange(withStart, { type: "completed", item: completed }, 11, "done");
+  const orphan = applyStudioTimelineChange(selectedState(), itemDelta(delta), 10);
+  const withStart = applyStudioTimelineChange(orphan, itemUpdated(started), 9);
+  const withDelta = applyStudioTimelineChange(withStart, itemDelta(delta), 10);
+  const completed = toolItem("turn-1-call-1", "turn-1", 9, "read_file", "{\"path\":\"a.ts\"");
+  completed.updatedAt = 11;
+  const withCompleted = applyStudioTimelineChange(withDelta, itemUpdated(completed), 11, "done");
 
-  const tool = withCompleted.timelineItems.get("turn-1-call-1")?.tool;
+  assertEqual(timelineItems(orphan).has("turn-1-call-1"), false);
+  const liveGroup = selectTimelineEntries(withDelta)[0];
+  if (liveGroup?.kind !== "toolGroup") {
+    throw new Error(`Expected toolGroup entry, got ${liveGroup?.kind}`);
+  }
+  assertEqual(liveGroup.items[0]?.tool?.arguments, "{\"path\":\"a.ts\"");
+  const tool = timelineItem(withCompleted, "turn-1-call-1")?.tool;
   assertEqual(tool?.name, "read_file");
   assertEqual(tool?.arguments, "{\"path\":\"a.ts\"");
 }
 
-function toolResultDeltaBeforeStartIsPreserved() {
-  const delta: TimelineItemDeltaEvent = {
-    turnId: "turn-1",
+function toolResultDeltaRequiresSnapshot() {
+  const delta: TestTimelineItemDelta = {
     itemId: "turn-1-call-1",
-    startedSequence: 10,
-    kind: "tool",
-    status: "streaming",
-    createdAt: 10,
-    updatedAt: 10,
-    delta: { type: "toolResult", delta: "partial result" },
+    field: "toolResult",
+    delta: "partial result",
   };
-  const completed = toolItem("turn-1-call-1", "turn-1", 11, "read_file", { path: "a.ts" });
-  const withDelta = applyStudioTimelineChange(selectedState(), { type: "delta", event: delta }, 10);
-  const withCompleted = applyStudioTimelineChange(withDelta, { type: "completed", item: completed }, 11, "done");
+  const started = toolItem("turn-1-call-1", "turn-1", 9, "read_file", { path: "a.ts" }, "running");
+  const orphan = applyStudioTimelineChange(selectedState(), itemDelta(delta), 10);
+  const withStart = applyStudioTimelineChange(orphan, itemUpdated(started), 9);
+  const withDelta = applyStudioTimelineChange(withStart, itemDelta(delta), 10);
+  const completed = toolItem(
+    "turn-1-call-1",
+    "turn-1",
+    9,
+    "read_file",
+    { path: "a.ts" },
+    "completed",
+    "partial result",
+  );
+  completed.updatedAt = 11;
+  const withCompleted = applyStudioTimelineChange(withDelta, itemUpdated(completed), 11, "done");
 
-  const tool = withCompleted.timelineItems.get("turn-1-call-1")?.tool;
+  assertEqual(timelineItems(orphan).has("turn-1-call-1"), false);
+  const liveGroup = selectTimelineEntries(withDelta)[0];
+  if (liveGroup?.kind !== "toolGroup") {
+    throw new Error(`Expected toolGroup entry, got ${liveGroup?.kind}`);
+  }
+  assertEqual(liveGroup.items[0]?.tool?.result, "partial result");
+  const tool = timelineItem(withCompleted, "turn-1-call-1")?.tool;
   assertEqual(tool?.name, "read_file");
   assertEqual(tool?.arguments, "{\"path\":\"a.ts\"}");
   assertEqual(tool?.result, "partial result");
 }
 
-function textDeltaBeforeStartPreservesCommentaryChannel() {
-  const delta: TimelineItemDeltaEvent = {
-    turnId: "turn-1",
+function textDeltaRequiresSnapshotForCommentaryChannel() {
+  const delta: TestTimelineItemDelta = {
     itemId: "turn-1-commentary",
-    startedSequence: 10,
-    kind: "text",
-    status: "streaming",
-    createdAt: 10,
-    updatedAt: 10,
-    delta: { type: "text", textChannel: "commentary", delta: "正在检查 CI 配置。" },
+    field: "content",
+    delta: "正在检查 CI 配置。",
   };
-  const withDelta = applyStudioTimelineChange(selectedState(), { type: "delta", event: delta }, 10);
-  const item = withDelta.timelineItems.get("turn-1-commentary");
+  const started = {
+    ...textItem("turn-1-commentary", 10, "", "commentary"),
+    status: "streaming" as const,
+  };
+  const orphan = applyStudioTimelineChange(selectedState(), itemDelta(delta), 9);
+  const withStart = applyStudioTimelineChange(orphan, itemUpdated(started), 10);
+  const withDelta = applyStudioTimelineChange(withStart, itemDelta(delta), 11);
+  const item = timelineItem(withDelta, "turn-1-commentary");
   const entries = selectTimelineEntries(withDelta);
 
+  assertEqual(timelineItems(orphan).has("turn-1-commentary"), false);
   assertEqual(item?.textChannel, "commentary");
-  assertEqual(item?.content, "正在检查 CI 配置。");
+  assertEqual(item?.content, "");
   assertDeepEqual(entries.map((entry) => entry.kind), ["commentary"]);
   const commentary = entries[0];
   if (commentary?.kind !== "commentary") {
@@ -595,32 +824,21 @@ function textDeltaBeforeStartPreservesCommentaryChannel() {
   assertEqual(commentary.content, "正在检查 CI 配置。");
 }
 
-function runPromptLoadedWithEmptyItemsDoesNotDeleteLiveContent() {
+function turnCompletedWithNoPartsDoesNotDeleteLiveContent() {
   const liveItem = textItem("turn-2-text", 10, "live");
-  const liveState = applyStudioTimelineChange(selectedState(), { type: "completed", item: liveItem }, 10, "done");
+  const liveState = applyStudioTimelineChange(selectedState(), itemUpdated(liveItem), 10, "done");
 
-  const completed = studioReducer(liveState, {
-    type: "runPromptLoaded",
-    payload: responseWithSequence([], 20),
-    status: "done",
-  });
+  const completed = completeTurn(liveState, 20);
 
-  assertDeepEqual(completed.timelineOrder, ["turn-2-text"]);
-  assertEqual(completed.timelineItems.get("turn-2-text")?.content, "live");
-  assertEqual(completed.timelineNextSequence, 20);
+  assertDeepEqual(timelineOrder(completed), ["turn-2-text"]);
+  assertEqual(timelineItem(completed, "turn-2-text")?.content, "live");
+  assertEqual(completed.eventNextSequence, 21);
 }
 
-function runPromptLoadedErroredKeepsFailedStatusText() {
-  const failedResponse: RunPromptResponse = {
-    ...response([turnItem("turn-1-turn", "turn-1", 3, "failed", "provider error")]),
-    turnStatus: "errored",
-    turnAbortReason: "providerError",
-    turnError: "provider error",
-  };
-
+function runPromptFailedKeepsFailedStatusText() {
   const state = studioReducer(selectedState(), {
-    type: "runPromptLoaded",
-    payload: failedResponse,
+    type: "runPromptFailed",
+    sessionId: "session-1",
     status: "运行失败：provider error",
   });
 
@@ -680,15 +898,53 @@ function completedSnapshotKeepsFirstItemSequence() {
     ...textItem("turn-2-text", 10, ""),
     status: "streaming" as const,
   };
-  const completed = textItem("turn-2-text", 12, "final");
-  const liveStarted = applyStudioTimelineChange(selectedState(), { type: "started", item: started }, 10);
+  const completed = {
+    ...textItem("turn-2-text", 10, "final"),
+    updatedAt: 12,
+  };
+  const liveStarted = applyStudioTimelineChange(selectedState(), itemUpdated(started), 10);
 
-  const liveCompleted = applyStudioTimelineChange(liveStarted, { type: "completed", item: completed }, 12, "done");
+  const liveCompleted = applyStudioTimelineChange(liveStarted, itemUpdated(completed), 12, "done");
 
-  assertDeepEqual(liveCompleted.timelineOrder, ["turn-2-text"]);
-  assertEqual(liveCompleted.timelineItems.get("turn-2-text")?.startedSequence, 10);
-  assertEqual(liveCompleted.timelineItems.get("turn-2-text")?.content, "final");
-  assertEqual(liveCompleted.timelineNextSequence, 13);
+  assertDeepEqual(timelineOrder(liveCompleted), ["turn-2-text"]);
+  assertEqual(timelineItem(liveCompleted, "turn-2-text")?.startedSequence, 10);
+  assertEqual(timelineItem(liveCompleted, "turn-2-text")?.content, "final");
+  assertEqual(liveCompleted.eventNextSequence, 13);
+}
+
+function terminalSnapshotClearsLiveDeltaOverlay() {
+  const started = {
+    ...textItem("turn-2-text", 10, ""),
+    status: "streaming" as const,
+  };
+  const liveDelta = applyStudioTimelineChange(
+    applyStudioTimelineChange(selectedState(), itemUpdated(started), 10),
+    itemDelta({
+      itemId: "turn-2-text",
+      field: "content",
+      delta: "partial",
+    }),
+    11,
+  );
+  const liveMessage = selectTimelineEntries(liveDelta).find(
+    (entry) => entry.kind === "message" && entry.content === "partial",
+  );
+  const completed = applyStudioTimelineChange(
+    liveDelta,
+    itemUpdated({
+      ...textItem("turn-2-text", 10, "final"),
+      updatedAt: 12,
+    }),
+    12,
+    "done",
+  );
+  const finalEntries = selectTimelineEntries(completed);
+
+  assertEqual(liveMessage?.kind === "message" ? liveMessage.content : "", "partial");
+  assertEqual(completed.partDeltaAccum.has("turn-2-text"), false);
+  assertEqual(timelineItem(completed, "turn-2-text")?.content, "final");
+  assertDeepEqual(finalEntries.map((entry) => entry.kind), ["message"]);
+  assertEqual(finalEntries[0]?.kind === "message" ? finalEntries[0].content : "", "final");
 }
 
 function realtimeAndHistoricalTimelineEventsConverge() {
@@ -696,65 +952,38 @@ function realtimeAndHistoricalTimelineEventsConverge() {
     ...textItem("turn-2-text", 10, ""),
     status: "streaming" as const,
   };
-  const delta: TimelineItemDeltaEvent = {
-    turnId: "turn-2",
+  const delta: TestTimelineItemDelta = {
     itemId: "turn-2-text",
-    startedSequence: 11,
-    kind: "text",
-    status: "streaming",
-    createdAt: 10,
-    updatedAt: 11,
-    delta: { type: "text", textChannel: "final", delta: "hel" },
+    field: "content",
+    delta: "hel",
   };
-  const completed = textItem("turn-2-text", 12, "hello");
+  const completed = {
+    ...textItem("turn-2-text", 10, "hello"),
+    updatedAt: 12,
+  };
   const live = applyStudioTimelineChange(
     applyStudioTimelineChange(
-      applyStudioTimelineChange(selectedState(), { type: "started", item: started }, 10),
-      { type: "delta", event: delta },
+      applyStudioTimelineChange(selectedState(), itemUpdated(started), 10),
+      itemDelta(delta),
       11,
     ),
-    { type: "completed", item: completed },
+    itemUpdated(completed),
     12,
     "done",
   );
   const historical = studioReducer(selectedState(), {
-    type: "timelineLoaded",
+    type: "sessionStateLoaded",
     sessionId: "session-1",
-    events: [
-      {
-        id: "event-10",
-        sessionId: "session-1",
-        sequence: 10,
-        createdAt: 10,
-        kind: "TimelineItemStarted",
-        payload: { type: "timelineItemStarted", item: started },
-      },
-      {
-        id: "event-11",
-        sessionId: "session-1",
-        sequence: 11,
-        createdAt: 11,
-        kind: "TimelineItemDelta",
-        payload: { type: "timelineItemDelta", event: delta },
-      },
-      {
-        id: "event-12",
-        sessionId: "session-1",
-        sequence: 12,
-        createdAt: 12,
-        kind: "TimelineItemCompleted",
-        payload: { type: "timelineItemCompleted", item: completed },
-      },
-    ],
+    events: eventsForItems([started, completed]),
     nextSequence: 13,
   });
 
-  assertDeepEqual(historical.timelineOrder, live.timelineOrder);
+  assertDeepEqual(timelineOrder(historical), timelineOrder(live));
   assertDeepEqual(
-    historical.timelineItems.get("turn-2-text"),
-    live.timelineItems.get("turn-2-text"),
+    timelineItem(historical, "turn-2-text"),
+    timelineItem(live, "turn-2-text"),
   );
-  assertEqual(historical.timelineNextSequence, live.timelineNextSequence);
+  assertEqual(historical.eventNextSequence, live.eventNextSequence);
 }
 
 function consecutiveToolsCollapseIntoToolGroup() {
@@ -889,18 +1118,13 @@ function livePlanDeltaCreatesPlanEntry() {
     ...planItem("turn-1-plan", "turn-1", 10, ""),
     status: "streaming" as const,
   };
-  const delta: TimelineItemDeltaEvent = {
-    turnId: "turn-1",
+  const delta: TestTimelineItemDelta = {
     itemId: "turn-1-plan",
-    startedSequence: 11,
-    kind: "plan",
-    status: "streaming",
-    createdAt: 10,
-    updatedAt: 11,
-    delta: { type: "plan", delta: "1. Inspect\n" },
+    field: "planContent",
+    delta: "1. Inspect\n",
   };
-  const liveStarted = applyStudioTimelineChange(selectedState(), { type: "started", item: started }, 10);
-  const liveDelta = applyStudioTimelineChange(liveStarted, { type: "delta", event: delta }, 11);
+  const liveStarted = applyStudioTimelineChange(selectedState(), itemUpdated(started), 10);
+  const liveDelta = applyStudioTimelineChange(liveStarted, itemDelta(delta), 11);
   const entries = selectTimelineEntries(liveDelta);
 
   assertDeepEqual(entries.map((entry) => entry.kind), ["plan"]);
@@ -909,18 +1133,15 @@ function livePlanDeltaCreatesPlanEntry() {
     throw new Error(`Expected plan entry, got ${plan?.kind}`);
   }
   assertEqual(plan.content, "1. Inspect\n");
-  assertEqual(liveDelta.timelineItems.get("turn-1-plan")?.content, "1. Inspect\n");
+  assertEqual(timelineItem(liveDelta, "turn-1-plan")?.content, "");
   assertEqual(liveDelta.activeInteractionId, null);
 }
 
-function runPromptLoadedUsesBackendPlanConfirmationInteraction() {
+function interactionEventStoresPlanConfirmation() {
   const interaction = planConfirmationInteraction();
   const state = studioReducer(selectedState(), {
-    type: "runPromptLoaded",
-    payload: {
-      ...response([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
-      interactions: [interaction],
-    },
+    type: "interactionChanged",
+    payload: { sessionId: "session-1", event: { interaction } },
     status: "done",
   });
 
@@ -928,12 +1149,12 @@ function runPromptLoadedUsesBackendPlanConfirmationInteraction() {
   assertDeepEqual(state.interactions.get(interaction.interactionId), interaction);
 }
 
-function runPromptLoadedWithoutInteractionDoesNotInferPlanConfirmation() {
-  const state = studioReducer(selectedState(), {
-    type: "runPromptLoaded",
-    payload: response([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
-    status: "done",
-  });
+function messagePartUpdatedWithoutInteractionDoesNotInferPlanConfirmation() {
+  const state = loadSessionItems(
+    selectedState(),
+    [planItem("turn-1-plan", "turn-1", 10, "1. Inspect")],
+    11,
+  );
 
   assertEqual(state.activeInteractionId, null);
 }
@@ -949,20 +1170,20 @@ function planLifecycleLoadedKeepsInteractionStateSeparate() {
     type: "planLifecycleLoaded",
     sessionId: "session-1",
     planStates: [planState("turn-1-plan", "dismissed")],
-    timelineNextSequence: 12,
+    eventNextSequence: 12,
     status: "ready",
   });
 
   assertEqual(dismissed.activeInteractionId, interaction.interactionId);
   assertEqual(dismissed.planStates.get("turn-1-plan")?.state, "dismissed");
-  assertEqual(dismissed.timelineNextSequence, 12);
+  assertEqual(dismissed.eventNextSequence, 12);
 }
 
-function timelineLoadedPlanStateAnnotatesPlanWithoutOpeningComposer() {
+function sessionStateLoadedPlanStateAnnotatesPlanWithoutOpeningComposer() {
   const state = studioReducer(selectedState(), {
-    type: "timelineLoaded",
+    type: "sessionStateLoaded",
     sessionId: "session-1",
-    events: timelineRecordsForItems([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
+    events: eventsForItems([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
     planStates: [planState("turn-1-plan", "dismissed")],
     nextSequence: 13,
   });
@@ -977,12 +1198,12 @@ function timelineLoadedPlanStateAnnotatesPlanWithoutOpeningComposer() {
   assertEqual(plan.planState?.state, "dismissed");
 }
 
-function timelineLoadedNewPlanStatesAnnotatePlan() {
+function sessionStateLoadedNewPlanStatesAnnotatePlan() {
   for (const state of ["pendingConfirmation", "continuedPlanning", "cancelled"] as const) {
     const reduced = studioReducer(selectedState(), {
-      type: "timelineLoaded",
+      type: "sessionStateLoaded",
       sessionId: "session-1",
-      events: timelineRecordsForItems([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
+      events: eventsForItems([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
       planStates: [planState("turn-1-plan", state)],
       nextSequence: 13,
     });
@@ -997,9 +1218,9 @@ function timelineLoadedNewPlanStatesAnnotatePlan() {
 
 function historicalTimelineLoadDoesNotCreatePlanAction() {
   const state = studioReducer(selectedState(), {
-    type: "timelineLoaded",
+    type: "sessionStateLoaded",
     sessionId: "session-1",
-    events: timelineRecordsForItems([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
+    events: eventsForItems([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
     nextSequence: 11,
   });
 
@@ -1008,9 +1229,9 @@ function historicalTimelineLoadDoesNotCreatePlanAction() {
 
 function laterRunWithoutPlanDoesNotReopenHistoricalPlan() {
   const withHistory = studioReducer(selectedState(), {
-    type: "timelineLoaded",
+    type: "sessionStateLoaded",
     sessionId: "session-1",
-    events: timelineRecordsForItems([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
+    events: eventsForItems([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
     nextSequence: 11,
   });
   const submitted = studioReducer(withHistory, {
@@ -1019,29 +1240,26 @@ function laterRunWithoutPlanDoesNotReopenHistoricalPlan() {
     startedAt: 100,
     prompt: "continue",
   });
-  const completed = studioReducer(submitted, {
-    type: "runPromptLoaded",
-    payload: response([textItem("turn-2-text", 20, "continue")]),
-    status: "done",
-  });
+  const completed = completeTurn(
+    applyStudioTimelineChange(submitted, itemUpdated(textItem("turn-2-text", 20, "continue")), 20),
+    21,
+  );
 
   assertEqual(completed.activeInteractionId, null);
 }
 
-function runPromptLoadedKeepsLiveInteractionByCurrentRun() {
+function interactionEventKeepsLiveInteractionByCurrentRun() {
   const submitted = studioReducer(selectedState(), {
     type: "promptSubmitted",
     status: "running",
     startedAt: 100,
     prompt: "make a plan",
   });
-  const interaction = planConfirmationInteraction("turn-2-plan", "1. Inspect");
-  const completed = studioReducer(submitted, {
-    type: "runPromptLoaded",
-    payload: {
-      ...responseWithSequence([], 13),
-      interactions: [interaction],
-    },
+  const turnCompleted = completeTurn(submitted, 12);
+  const interaction = planConfirmationInteraction("turn-1-plan", "1. Inspect");
+  const completed = studioReducer(turnCompleted, {
+    type: "interactionChanged",
+    payload: { sessionId: "session-1", event: { interaction } },
     status: "done",
   });
 
@@ -1070,28 +1288,41 @@ function freshContextRunSwitchesToReturnedSession() {
     },
     status: "ready",
   });
-  const freshRun = response([textItem("turn-2-text", 20, "implemented")]);
-  freshRun.sessionId = "session-2";
-  freshRun.sessionRuntime = { ...runtime, sessionId: "session-2" };
-  freshRun.sessions = [
-    {
-      id: "session-2",
-      projectId: "project-1",
-      title: "Implementation",
-      mode: "auto",
-      updatedAt: 3,
-      visibility: "active",
+  const handoff = studioReducer(resolving, {
+    type: "sessionHandoffStarted",
+    status: "running",
+    startedAt: 3333,
+    payload: {
+      sessionId: "session-2",
+      sessions: [
+        {
+          id: "session-2",
+          projectId: "project-1",
+          title: "Implementation",
+          mode: "auto",
+          updatedAt: 3,
+          visibility: "active",
+        },
+      ],
+      agentEvents: [],
+      agents: [],
+      sessionRuntime: { ...runtime, sessionId: "session-2" },
+      interactions: [],
     },
-  ];
-
-  const completed = studioReducer(resolving, {
-    type: "runPromptLoaded",
-    payload: freshRun,
-    status: "done",
   });
+  const withImplementation = reduceStudioEvents(
+    handoff,
+    studioItemEvents(
+      { ...textItem("turn-2-text", 20, "implemented"), turnId: "turn-2" },
+      20,
+      { sessionId: "session-2", turnId: "turn-2" },
+    ),
+    "running",
+  );
+  const completed = completeTurn(withImplementation, 21, "done", "session-2", "turn-2");
 
   assertEqual(completed.selectedSessionId, "session-2");
-  assertEqual(completed.timelineItems.get("turn-2-text")?.content, "implemented");
+  assertEqual(timelineItem(completed, "turn-2-text")?.content, "implemented");
   assertEqual(completed.isBusy, false);
   assertDeepEqual(completed.sessions.map((session) => session.id), ["session-2"]);
 }
@@ -1138,16 +1369,16 @@ function sessionHandoffStartedSwitchesBeforeLiveEvents() {
       interactions: [],
     },
   });
-  const started = studioReducer(handoff, {
-    type: "studioEvent",
-    envelope: studioTimelineEvent({ type: "started", item: liveItem }, 20, { sessionId: "session-2" }),
-    status: "running",
-  });
+  const started = reduceStudioEvents(
+    handoff,
+    studioItemEvents(liveItem, 20, { sessionId: "session-2" }),
+    "running",
+  );
 
   assertEqual(handoff.selectedSessionId, "session-2");
   assertEqual(handoff.isBusy, true);
   assertEqual(handoff.turnPhase, "running");
-  assertEqual(started.timelineItems.has("turn-2-text"), true);
+  assertEqual(timelineItems(started).has("turn-2-text"), true);
 }
 
 function studioTurnEventShowsWaitingState() {
@@ -1182,38 +1413,26 @@ function studioTimelineEventClearsWaitingAndStreamsContent() {
     ...textItem("turn-1-text", 20, ""),
     status: "streaming" as const,
   };
-  const started = studioReducer(submitted, {
-    type: "studioEvent",
-    envelope: studioEvent({
-      type: "timelineChanged",
-      change: { type: "started", item: liveItem },
-    }, { sequence: 20 }),
-    status: "running",
-  });
+  const started = applyStudioTimelineChange(submitted, itemUpdated(liveItem), 20);
   const delta = studioReducer(started, {
     type: "studioEvent",
-    envelope: studioEvent({
-      type: "timelineChanged",
-      change: {
-        type: "delta",
-        event: {
-          turnId: "turn-1",
-          itemId: "turn-1-text",
-          startedSequence: 21,
-          kind: "text",
-          status: "streaming",
-          createdAt: 20,
-          updatedAt: 21,
-          delta: { type: "text", textChannel: "final", delta: "live" },
-        },
-      },
-    }, { sequence: 21 }),
+    envelope: studioTimelineEvent(
+      itemDelta({
+        itemId: "turn-1-text",
+        field: "content",
+        delta: "live",
+      }),
+      21,
+    ),
     status: "running",
   });
 
-  assertEqual(delta.timelineItems.has("optimistic-waiting-1234"), false);
-  assertEqual(delta.timelineItems.get("turn-1-text")?.content, "live");
-  assertEqual(delta.timelineNextSequence, 22);
+  assertEqual(timelineItems(delta).has("optimistic-waiting-1234"), false);
+  assertEqual(timelineItem(delta, "turn-1-text")?.content, "");
+  const entries = selectTimelineEntries(delta);
+  const message = entries.find((entry) => entry.kind === "message" && entry.content === "live");
+  assertEqual(message?.kind === "message" ? message.content : "", "live");
+  assertEqual(delta.eventNextSequence, 21);
 }
 
 function studioTimelineEventUsesEnvelopeSequenceForCursor() {
@@ -1221,46 +1440,28 @@ function studioTimelineEventUsesEnvelopeSequenceForCursor() {
     ...textItem("turn-1-text", 0, ""),
     status: "streaming" as const,
   };
-  const started = studioReducer(selectedState(), {
-    type: "studioEvent",
-    envelope: studioEvent(
-      {
-        type: "timelineChanged",
-        change: { type: "started", item },
-      },
-      { sequence: 30 },
-    ),
-    status: "running",
-  });
+  const started = applyStudioTimelineChange(selectedState(), itemUpdated(item), 30);
   const delta = studioReducer(started, {
     type: "studioEvent",
-    envelope: studioEvent(
-      {
-        type: "timelineChanged",
-        change: {
-          type: "delta",
-          event: {
-            turnId: "turn-1",
-            itemId: "turn-1-text",
-            startedSequence: 0,
-            kind: "text",
-            status: "streaming",
-            createdAt: 30,
-            updatedAt: 31,
-            delta: { type: "text", textChannel: "final", delta: "canonical" },
-          },
-        },
-      },
+    envelope: studioTimelineEvent(
+      itemDelta({
+        itemId: "turn-1-text",
+        field: "content",
+        delta: "canonical",
+      }),
+      31,
       { eventId: "event-31", sequence: 31 },
     ),
     status: "running",
   });
 
-  assertEqual(delta.timelineItems.get("turn-1-text")?.content, "canonical");
-  assertEqual(delta.timelineItems.get("turn-1-text")?.startedSequence, 0);
-  assertEqual(delta.timelineNextSequence, 32);
-  assertEqual(delta.timelineEvents.has(30), true);
-  assertEqual(delta.timelineEvents.has(31), true);
+  assertEqual(timelineItem(delta, "turn-1-text")?.content, "");
+  const entries = selectTimelineEntries(delta);
+  const message = entries.find((entry) => entry.kind === "message");
+  assertEqual(message?.kind === "message" ? message.content : "", "canonical");
+  assertEqual(timelineItem(delta, "turn-1-text")?.startedSequence, 0);
+  assertEqual(delta.eventNextSequence, 31);
+  assertEqual(delta.partDeltaAccum.has("turn-1-text"), true);
 }
 
 function studioHandoffEventSwitchesToTargetSession() {
@@ -1313,28 +1514,42 @@ function liveEventsForTargetAreIgnoredBeforeHandoffStarted() {
     status: "streaming" as const,
   };
   const ignored = studioReducer(selectedState(), {
-    type: "agentEvent",
-    sessionId: "session-2",
-    event: { timelineItemStarted: { item: liveItem } },
-    statusText: "running",
+    type: "studioEvent",
+    envelope: studioTimelineEvent(itemUpdated(liveItem), 20, { sessionId: "session-2" }),
+    status: "running",
   });
 
-  assertEqual(ignored.timelineItems.has("turn-2-text"), false);
+  assertEqual(timelineItems(ignored).has("turn-2-text"), false);
 }
 
-function runPromptLoadedDedupesReturnedSessions() {
-  const submitted = studioReducer(selectedState(), {
-    type: "promptSubmitted",
-    status: "running",
-    startedAt: 100,
-    prompt: "implement",
-  });
-  const run = response([textItem("turn-2-text", 20, "implemented")]);
-  run.sessions = [run.sessions[0]!, { ...run.sessions[0]!, title: "Duplicate" }];
-
-  const completed = studioReducer(submitted, {
-    type: "runPromptLoaded",
-    payload: run,
+function sessionSelectionDedupesReturnedSessions() {
+  const completed = studioReducer(selectedState(), {
+    type: "sessionSelectionLoaded",
+    payload: {
+      sessionId: "session-1",
+      sessions: [
+        {
+          id: "session-1",
+          projectId: "project-1",
+          title: "Session",
+          mode: "auto",
+          updatedAt: 2,
+          visibility: "active",
+        },
+        {
+          id: "session-1",
+          projectId: "project-1",
+          title: "Duplicate",
+          mode: "auto",
+          updatedAt: 1,
+          visibility: "active",
+        },
+      ],
+      agentEvents: [],
+      agents: [],
+      sessionRuntime: runtime,
+      interactions: [],
+    },
     status: "done",
   });
 
@@ -1391,8 +1606,8 @@ function promptSubmittedCreatesOptimisticTimelineFeedback() {
   assertEqual(message.content, "Build the thing");
   assertEqual(status.status, "running");
   assertEqual(status.content, "waitingForModel");
-  assertDeepEqual(state.timelineOrder, ["optimistic-user-1234", "optimistic-waiting-1234"]);
-  assertEqual(state.timelineNextSequence, before.timelineNextSequence);
+  assertDeepEqual(timelineOrder(state), ["optimistic-user-1234", "optimistic-waiting-1234"]);
+  assertEqual(state.eventNextSequence, before.eventNextSequence);
   assertEqual(state.prompt, "");
   assertEqual(state.isBusy, true);
 }
@@ -1405,11 +1620,11 @@ function modelTimelineEventClearsWaitingFeedback() {
     prompt: "Build the thing",
   });
   const realItem = textItem("turn-1-text", 10, "Working");
-  const updated = applyStudioTimelineChange(submitted, { type: "started", item: realItem }, 10);
+  const updated = applyStudioTimelineChange(submitted, itemUpdated(realItem), 10);
 
-  assertDeepEqual(updated.timelineOrder, ["optimistic-user-1234", "turn-1-text"]);
-  assertEqual(updated.timelineItems.has("optimistic-user-1234"), true);
-  assertEqual(updated.timelineItems.has("optimistic-waiting-1234"), false);
+  assertDeepEqual(timelineOrder(updated), ["optimistic-user-1234", "turn-1-text"]);
+  assertEqual(timelineItems(updated).has("optimistic-user-1234"), true);
+  assertEqual(timelineItems(updated).has("optimistic-waiting-1234"), false);
 }
 
 function userTimelineEventKeepsWaitingFeedback() {
@@ -1421,11 +1636,11 @@ function userTimelineEventKeepsWaitingFeedback() {
   });
   const realUser = textItem(
     "turn-1-user",
-    submitted.timelineNextSequence,
+    submitted.eventNextSequence,
     "Build the thing",
     "user",
   );
-  const updated = applyStudioTimelineChange(submitted, { type: "started", item: realUser }, realUser.startedSequence);
+  const updated = applyStudioTimelineChange(submitted, itemUpdated(realUser), realUser.startedSequence);
   const entries = selectTimelineEntries(updated);
 
   assertDeepEqual(entries.map((entry) => entry.kind), ["message", "status"]);
@@ -1436,9 +1651,9 @@ function userTimelineEventKeepsWaitingFeedback() {
   }
   assertEqual(message.content, "Build the thing");
   assertEqual(status.content, "waitingForModel");
-  assertEqual(updated.timelineItems.has("optimistic-user-1234"), false);
-  assertEqual(updated.timelineItems.has("optimistic-waiting-1234"), true);
-  assertDeepEqual(updated.timelineOrder, ["turn-1-user", "optimistic-waiting-1234"]);
+  assertEqual(timelineItems(updated).has("optimistic-user-1234"), false);
+  assertEqual(timelineItems(updated).has("optimistic-waiting-1234"), true);
+  assertDeepEqual(timelineOrder(updated), ["turn-1-user", "optimistic-waiting-1234"]);
 }
 
 function inferenceStartKeepsWaitingFeedback() {
@@ -1464,27 +1679,28 @@ function inferenceStartKeepsWaitingFeedback() {
       model: "model-a",
     },
   };
-  const updated = applyStudioTimelineChange(submitted, { type: "started", item: inference }, 2);
+  const updated = applyStudioTimelineChange(submitted, itemUpdated(inference), 2);
 
-  assertEqual(updated.timelineItems.has("optimistic-waiting-1234"), true);
+  assertEqual(timelineItems(updated).has("optimistic-waiting-1234"), true);
 }
 
-function runPromptLoadedClearsOptimisticTimelineFeedback() {
+function assistantSnapshotClearsOptimisticWaitingFeedback() {
   const submitted = studioReducer(selectedState(), {
     type: "promptSubmitted",
     status: "running",
     startedAt: 1234,
     prompt: "Build the thing",
   });
-  const loaded = studioReducer(submitted, {
-    type: "runPromptLoaded",
-    payload: response([textItem("turn-1-text", 10, "Done")]),
-    status: "done",
-  });
+  const loaded = applyStudioTimelineChange(
+    submitted,
+    itemUpdated(textItem("turn-1-text", 10, "Done")),
+    10,
+    "done",
+  );
 
-  assertDeepEqual(loaded.timelineOrder, ["turn-1-text"]);
-  assertEqual(loaded.timelineItems.has("optimistic-user-1234"), false);
-  assertEqual(loaded.timelineItems.has("optimistic-waiting-1234"), false);
+  assertDeepEqual(timelineOrder(loaded), ["optimistic-user-1234", "turn-1-text"]);
+  assertEqual(timelineItems(loaded).has("optimistic-user-1234"), true);
+  assertEqual(timelineItems(loaded).has("optimistic-waiting-1234"), false);
 }
 
 function runPromptFailedClearsWaitingFeedback() {
@@ -1502,8 +1718,8 @@ function runPromptFailedClearsWaitingFeedback() {
   const entries = selectTimelineEntries(failed);
 
   assertDeepEqual(entries.map((entry) => entry.kind), ["message"]);
-  assertEqual(failed.timelineItems.has("optimistic-user-1234"), true);
-  assertEqual(failed.timelineItems.has("optimistic-waiting-1234"), false);
+  assertEqual(timelineItems(failed).has("optimistic-user-1234"), true);
+  assertEqual(timelineItems(failed).has("optimistic-waiting-1234"), false);
 }
 
 function thinkingEntriesExposeStreamingStatusAndDuration() {
@@ -1537,7 +1753,7 @@ function completedThinkingEntryUsesDuration() {
 
 function liveCompletedPlanDoesNotCreatePlanInteraction() {
   const item = planItem("turn-1-plan", "turn-1", 10, "1. Inspect");
-  const state = applyStudioTimelineChange(selectedState(), { type: "completed", item }, 10);
+  const state = applyStudioTimelineChange(selectedState(), itemUpdated(item), 10);
 
   assertEqual(state.activeInteractionId, null);
 }
@@ -1576,26 +1792,23 @@ function sessionSelectionClearsInteractionState() {
 }
 
 function selectingCurrentSessionKeepsTimelineState() {
-  const loaded = studioReducer(selectedState(), {
-    type: "timelineLoaded",
-    sessionId: "session-1",
-    events: timelineRecordsForItems([textItem("turn-1-text", 10, "hello")]),
-    nextSequence: 11,
-  });
+  const loaded = loadSessionItems(selectedState(), [textItem("turn-1-text", 10, "hello")], 11);
   const withPlan = studioReducer(loaded, {
-    type: "runPromptLoaded",
-    payload: {
-      ...response([planItem("turn-1-plan", "turn-1", 12, "1. Inspect")]),
-      interactions: [planConfirmationInteraction()],
-    },
+    type: "studioEvent",
+    envelope: studioTimelineEvent(itemUpdated(planItem("turn-1-plan", "turn-1", 12, "1. Inspect")), 12),
     status: "done",
   });
-  const selectedAgain = studioReducer(withPlan, {
+  const withInteraction = studioReducer(withPlan, {
+    type: "interactionChanged",
+    payload: { sessionId: "session-1", event: { interaction: planConfirmationInteraction() } },
+    status: "done",
+  });
+  const selectedAgain = studioReducer(withInteraction, {
     type: "sessionSelectionLoaded",
     status: "loaded",
     payload: {
       sessionId: "session-1",
-      sessions: withPlan.sessions,
+      sessions: withInteraction.sessions,
       agentEvents: [],
       agents: [],
       interactions: [planConfirmationInteraction()],
@@ -1603,10 +1816,10 @@ function selectingCurrentSessionKeepsTimelineState() {
     },
   });
 
-  assertDeepEqual(selectedAgain.timelineOrder, withPlan.timelineOrder);
-  assertEqual(selectedAgain.timelineItems.get("turn-1-plan")?.content, "1. Inspect");
-  assertEqual(selectedAgain.activeInteractionId, withPlan.activeInteractionId);
-  assertEqual(selectedAgain.timelineNextSequence, withPlan.timelineNextSequence);
+  assertDeepEqual(timelineOrder(selectedAgain), timelineOrder(withInteraction));
+  assertEqual(timelineItem(selectedAgain, "turn-1-plan")?.content, "1. Inspect");
+  assertEqual(selectedAgain.activeInteractionId, withInteraction.activeInteractionId);
+  assertEqual(selectedAgain.eventNextSequence, withInteraction.eventNextSequence);
 }
 
 function toolsFromDifferentTurnsDoNotMerge() {
@@ -1651,7 +1864,7 @@ function toolGroupStatusUsesPriority() {
 
 function sessionModeUpdateKeepsTimelineAndUpdatesSessions() {
   const liveItem = planItem("turn-1-plan", "turn-1", 10, "1. Inspect");
-  const liveState = applyStudioTimelineChange(selectedState(), { type: "completed", item: liveItem }, 10);
+  const liveState = applyStudioTimelineChange(selectedState(), itemUpdated(liveItem), 10);
 
   const updated = studioReducer(liveState, {
     type: "sessionModeUpdated",
@@ -1675,8 +1888,8 @@ function sessionModeUpdateKeepsTimelineAndUpdatesSessions() {
   });
 
   assertEqual(updated.sessions[0]?.mode, "plan");
-  assertDeepEqual(updated.timelineOrder, ["turn-1-plan"]);
-  assertEqual(updated.timelineItems.get("turn-1-plan")?.content, "1. Inspect");
+  assertDeepEqual(timelineOrder(updated), ["turn-1-plan"]);
+  assertEqual(timelineItem(updated, "turn-1-plan")?.content, "1. Inspect");
 }
 
 function lspServer(overrides: Partial<LspServerRecord> = {}): LspServerRecord {
@@ -1702,9 +1915,9 @@ function lspServer(overrides: Partial<LspServerRecord> = {}): LspServerRecord {
 function projectSelectionLoadedAfterSessionDeleteClearsSelectedSession() {
   const liveItem = textItem("turn-1-text", 10, "hello");
   const liveState = studioReducer(selectedState(), {
-    type: "timelineLoaded",
+    type: "sessionStateLoaded",
     sessionId: "session-1",
-    events: timelineRecordsForItems([liveItem]),
+    events: eventsForItems([liveItem]),
     nextSequence: 11,
   });
   const updated = studioReducer(liveState, {
@@ -1723,16 +1936,16 @@ function projectSelectionLoadedAfterSessionDeleteClearsSelectedSession() {
 
   assertEqual(updated.selectedSessionId, null);
   assertDeepEqual(updated.sessions, []);
-  assertDeepEqual(updated.timelineOrder, []);
+  assertDeepEqual(timelineOrder(updated), []);
   assertEqual(updated.sessionRuntime, null);
   assertEqual(updated.status, "deleted");
 }
 
 function projectSelectionLoadedCanClearSelectedProject() {
   const liveState = studioReducer(selectedState(), {
-    type: "timelineLoaded",
+    type: "sessionStateLoaded",
     sessionId: "session-1",
-    events: timelineRecordsForItems([textItem("turn-1-text", 10, "hello")]),
+    events: eventsForItems([textItem("turn-1-text", 10, "hello")]),
     nextSequence: 11,
   });
   const updated = studioReducer(liveState, {
@@ -1753,7 +1966,7 @@ function projectSelectionLoadedCanClearSelectedProject() {
   assertEqual(updated.selectedSessionId, null);
   assertDeepEqual(updated.projects, []);
   assertDeepEqual(updated.sessions, []);
-  assertDeepEqual(updated.timelineOrder, []);
+  assertDeepEqual(timelineOrder(updated), []);
   assertEqual(updated.sessionRuntime, null);
 }
 
@@ -1924,53 +2137,41 @@ function applyPatchCountsFilesFromResultSummary() {
 
 function skillActivationEventUsesSessionRuntimePayload() {
   const state = studioReducer(selectedState(), {
-    type: "agentEvent",
-    sessionId: "session-1",
-    sessionRuntime: {
-      ...runtime,
-      activeSkills: ["openai-docs", "skill-creator"],
-      updatedAt: 2,
-    },
-    event: {
-      skillActivated: {
-        activation: {
-          name: "skill-creator",
-          source: "user",
-          path: "C:/skills/skill-creator",
-          turnId: "turn-1",
-          toolCallId: "call-1",
-          activatedAt: 10,
+    type: "studioEvent",
+    envelope: studioEvent({
+      type: "sessionRuntimeChanged",
+      runtime: {
+        payload: {
+          ...runtime,
+          activeSkills: ["openai-docs", "skill-creator"],
+          updatedAt: 2,
         },
       },
-    },
-    statusText: "running",
+    }),
+    status: "running",
   });
 
   assertDeepEqual(state.sessionRuntime?.activeSkills, ["openai-docs", "skill-creator"]);
 }
 
 function skillViewToolResultJsonNoLongerUpdatesActiveSkills() {
+  const skillTool = toolItem(
+    "turn-1-skill",
+    "turn-1",
+    10,
+    "skill_view",
+    { name: "skill-creator" },
+    "completed",
+    JSON.stringify({
+      success: true,
+      skill: { name: "skill-creator" },
+      content: "body",
+    }),
+  );
   const state = studioReducer(selectedState(), {
-    type: "agentEvent",
-    sessionId: "session-1",
-    event: {
-      timelineItemCompleted: {
-        item: toolItem(
-          "turn-1-skill",
-          "turn-1",
-          10,
-          "skill_view",
-          { name: "skill-creator" },
-          "completed",
-          JSON.stringify({
-            success: true,
-            skill: { name: "skill-creator" },
-            content: "body",
-          }),
-        ),
-      },
-    },
-    statusText: "running",
+    type: "studioEvent",
+    envelope: studioTimelineEvent(itemUpdated(skillTool), 10),
+    status: "running",
   });
 
   assertDeepEqual(state.sessionRuntime?.activeSkills, []);
@@ -1978,26 +2179,22 @@ function skillViewToolResultJsonNoLongerUpdatesActiveSkills() {
 
 function skillActivationFromOtherSessionDoesNotUpdateActiveSkills() {
   const state = studioReducer(selectedState(), {
-    type: "agentEvent",
-    sessionId: "session-2",
-    sessionRuntime: {
-      ...runtime,
-      activeSkills: ["skill-creator"],
-      updatedAt: 2,
-    },
-    event: {
-      skillActivated: {
-        activation: {
-          name: "skill-creator",
-          source: "user",
-          path: "C:/skills/skill-creator",
-          turnId: "turn-1",
-          toolCallId: "call-1",
-          activatedAt: 10,
+    type: "studioEvent",
+    envelope: studioEvent(
+      {
+        type: "sessionRuntimeChanged",
+        runtime: {
+          payload: {
+            ...runtime,
+            sessionId: "session-2",
+            activeSkills: ["skill-creator"],
+            updatedAt: 2,
+          },
         },
       },
-    },
-    statusText: "running",
+      { sessionId: "session-2" },
+    ),
+    status: "running",
   });
 
   assertDeepEqual(state.sessionRuntime?.activeSkills, []);
@@ -2059,20 +2256,23 @@ function abnormalTurnTraceIsKeptWithContent() {
 }
 
 function liveFailedTimelineItemKeepsErrorMessage() {
+  const item = turnItem(
+    "turn-1-turn",
+    "turn-1",
+    10,
+    "failed",
+    "LLM provider error: missing API key",
+  );
   const state = applyStudioTimelineChange(
     selectedState(),
-    {
-      type: "failed",
-      item: turnItem("turn-1-turn", "turn-1", 10, "failed"),
-      error: "LLM provider error: missing API key",
-    },
+    itemUpdated(item),
     10,
     "error",
   );
 
   const entries = selectTimelineEntries(state);
 
-  assertEqual(state.timelineItems.get("turn-1-turn")?.content, "LLM provider error: missing API key");
+  assertEqual(timelineItem(state, "turn-1-turn")?.content, "LLM provider error: missing API key");
   assertDeepEqual(entries.map((entry) => entry.kind), ["trace"]);
   assertEqual(
     entries[0]?.kind === "trace" ? entries[0].item.content : "",
@@ -2303,14 +2503,15 @@ markdownEscapesHtmlTokens();
 staleTimelineLoadKeepsNewTurnItems();
 freshTimelineLoadMayReplaceSnapshot();
 staleTimelineLoadDoesNotOverwriteLiveDelta();
-toolArgumentDeltaBeforeStartIsPreserved();
-toolResultDeltaBeforeStartIsPreserved();
-textDeltaBeforeStartPreservesCommentaryChannel();
-runPromptLoadedWithEmptyItemsDoesNotDeleteLiveContent();
-runPromptLoadedErroredKeepsFailedStatusText();
+toolArgumentDeltaRequiresSnapshot();
+toolResultDeltaRequiresSnapshot();
+textDeltaRequiresSnapshotForCommentaryChannel();
+turnCompletedWithNoPartsDoesNotDeleteLiveContent();
+runPromptFailedKeepsFailedStatusText();
 userInputRequestStoresPendingComposerState();
 userInputResolvedClearsPendingComposerState();
 completedSnapshotKeepsFirstItemSequence();
+terminalSnapshotClearsLiveDeltaOverlay();
 realtimeAndHistoricalTimelineEventsConverge();
 consecutiveToolsCollapseIntoToolGroup();
 thinkingDoesNotBreakToolGroup();
@@ -2320,14 +2521,14 @@ thinkingFromDifferentTurnsDoesNotMerge();
 assistantTextBreaksToolGroup();
 planEntryBreaksToolGroupAndRendersAsPlan();
 livePlanDeltaCreatesPlanEntry();
-runPromptLoadedUsesBackendPlanConfirmationInteraction();
-runPromptLoadedWithoutInteractionDoesNotInferPlanConfirmation();
+interactionEventStoresPlanConfirmation();
+messagePartUpdatedWithoutInteractionDoesNotInferPlanConfirmation();
 planLifecycleLoadedKeepsInteractionStateSeparate();
-timelineLoadedPlanStateAnnotatesPlanWithoutOpeningComposer();
-timelineLoadedNewPlanStatesAnnotatePlan();
+sessionStateLoadedPlanStateAnnotatesPlanWithoutOpeningComposer();
+sessionStateLoadedNewPlanStatesAnnotatePlan();
 historicalTimelineLoadDoesNotCreatePlanAction();
 laterRunWithoutPlanDoesNotReopenHistoricalPlan();
-runPromptLoadedKeepsLiveInteractionByCurrentRun();
+interactionEventKeepsLiveInteractionByCurrentRun();
 freshContextRunSwitchesToReturnedSession();
 planImplementationSubmittedShowsWaitingWithoutSwitchingSession();
 sessionHandoffStartedSwitchesBeforeLiveEvents();
@@ -2337,13 +2538,13 @@ studioTimelineEventUsesEnvelopeSequenceForCursor();
 studioHandoffEventSwitchesToTargetSession();
 studioSessionRuntimeEventUpdatesActiveSkills();
 liveEventsForTargetAreIgnoredBeforeHandoffStarted();
-runPromptLoadedDedupesReturnedSessions();
+sessionSelectionDedupesReturnedSessions();
 sessionModeUpdateNoLongerSwitchesForFreshContextRun();
 promptSubmittedCreatesOptimisticTimelineFeedback();
 modelTimelineEventClearsWaitingFeedback();
 userTimelineEventKeepsWaitingFeedback();
 inferenceStartKeepsWaitingFeedback();
-runPromptLoadedClearsOptimisticTimelineFeedback();
+assistantSnapshotClearsOptimisticWaitingFeedback();
 runPromptFailedClearsWaitingFeedback();
 thinkingEntriesExposeStreamingStatusAndDuration();
 completedThinkingEntryUsesDuration();
@@ -2378,3 +2579,7 @@ zhipuCodingPlanProviderDraftUsesUniqueKey();
 editingProviderDraftDoesNotMutateProviderList();
 roleChangeProducesCompleteNormalizedSnapshot();
 selectedContextWindowFollowsPlannerModel();
+
+
+
+

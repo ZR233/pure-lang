@@ -192,6 +192,70 @@ pub mod timeline_event {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
+pub mod studio_message {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "studio_messages")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub session_id: String,
+        pub turn_id: String,
+        pub role: String,
+        pub status: String,
+        pub created_at: i64,
+        pub updated_at: i64,
+        pub completed_at: Option<i64>,
+        pub error: Option<String>,
+        pub metadata_json: String,
+        pub sequence: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod message_part {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[sea_orm(table_name = "message_parts")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub message_id: String,
+        pub session_id: String,
+        pub turn_id: String,
+        pub part_type: String,
+        pub part_order: i64,
+        pub status: String,
+        pub created_at: i64,
+        pub updated_at: i64,
+        pub completed_at: Option<i64>,
+        pub error: Option<String>,
+        pub text_channel: Option<String>,
+        pub text: String,
+        pub attachments_json: String,
+        pub tool_json: Option<String>,
+        pub agent_json: Option<String>,
+        pub inference_json: Option<String>,
+        pub plan_json: Option<String>,
+        pub file_json: Option<String>,
+        pub usage_json: Option<String>,
+        pub synthetic: i32,
+        pub ignored: i32,
+        pub sequence: i64,
+    }
+
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 pub mod studio_event {
     use super::*;
 

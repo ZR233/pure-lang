@@ -1,395 +1,444 @@
 import type {
-  TimelineEventRecord,
+  StudioEventEnvelope,
+  StudioMessage,
+  StudioPart,
+  StudioPartDelta,
+  StudioPartDeltaField,
   TimelineItem,
-  TimelineItemDeltaEvent,
-  TimelineTracePayload,
 } from "../types";
 
-export type TimelineStateSlice = {
-  timelineEvents: Map<number, TimelineEventRecord>;
-  timelineItems: Map<string, TimelineItem>;
-  timelineOrder: string[];
-  timelineNextSequence: number;
+export type ConversationStateSlice = {
+  messages: Map<string, StudioMessage>;
+  partsByMessage: Map<string, StudioPart[]>;
+  partDeltaAccum: Map<string, StudioPartDeltaAccum>;
+  messageSequences: Map<string, number>;
+  partSequences: Map<string, number>;
+  eventNextSequence: number;
+};
+
+export type TimelineStateSlice = ConversationStateSlice;
+
+export type StudioPartDeltaAccum = {
+  text: string;
+  reasoningText: string;
+  planContent: string;
+  toolArguments: string;
+  toolResult: string;
+  thinkingChunks: Map<number, string>;
 };
 
 export function emptyTimelineState(): TimelineStateSlice {
   return {
-    timelineEvents: new Map(),
-    timelineItems: new Map(),
-    timelineOrder: [],
-    timelineNextSequence: 0,
+    messages: new Map(),
+    partsByMessage: new Map(),
+    partDeltaAccum: new Map(),
+    messageSequences: new Map(),
+    partSequences: new Map(),
+    eventNextSequence: 0,
   };
 }
 
-export function resetTimeline<T extends TimelineStateSlice>(
+export function applyStudioEvent<T extends TimelineStateSlice>(
   state: T,
-  _sessionId: string | null,
-  events: TimelineEventRecord[],
-  nextSequence: number,
+  envelope: StudioEventEnvelope,
 ): T {
-  return replayTimelineEvents({
-    ...state,
-    ...emptyTimelineState(),
-    timelineNextSequence: nextSequence,
-  }, events, nextSequence);
+  switch (envelope.kind.type) {
+    case "messageUpdated":
+      return upsertMessage(state, envelope.kind.message, envelope.sequence);
+    case "messageRemoved":
+      return removeMessage(state, envelope.kind.messageId, envelope.sequence);
+    case "messagePartUpdated":
+      return upsertPart(state, envelope.kind.part, envelope.sequence);
+    case "messagePartRemoved":
+      return removePart(state, envelope.kind.messageId, envelope.kind.partId, envelope.sequence);
+    case "messagePartDelta":
+      return applyPartDelta(state, envelope.kind.delta);
+    case "turnChanged":
+    case "interactionChanged":
+    case "agentChanged":
+    case "agentTimelineChanged":
+    case "sessionRuntimeChanged":
+    case "skillActivated":
+    case "planLifecycleChanged":
+    case "sessionHandoffChanged":
+    case "sessionListChanged":
+    case "mcpHealthChanged":
+    case "lspHealthChanged":
+    case "stale":
+      return advanceCursor(state, envelope);
+  }
 }
 
-export function mergeTimelineSnapshot<T extends TimelineStateSlice>(
+export function applyStudioEvents<T extends TimelineStateSlice>(
   state: T,
-  _sessionId: string | null,
-  events: TimelineEventRecord[],
-  nextSequence: number,
+  events: StudioEventEnvelope[],
+  nextSequence?: number,
 ): T {
-  if (nextSequence < state.timelineNextSequence) {
-    return applyTimelineEvents(state, events, nextSequence);
+  let next = state;
+  for (const event of events ?? []) {
+    next = applyStudioEvent(next, event);
   }
-  return resetTimeline(state, _sessionId, events, nextSequence);
+  return nextSequence === undefined
+    ? next
+    : { ...next, eventNextSequence: Math.max(next.eventNextSequence, nextSequence) };
 }
 
-export function mergeRunPromptTimeline<T extends TimelineStateSlice>(
+export function resetConversation<T extends TimelineStateSlice>(
   state: T,
-  _sessionId: string,
-  events: TimelineEventRecord[],
-  timelineNextSequence: number,
+  events: StudioEventEnvelope[],
+  nextSequence: number,
 ): T {
-  if (!events.length) {
-    return {
-      ...state,
-      timelineNextSequence: Math.max(state.timelineNextSequence, timelineNextSequence),
-    };
-  }
-  return applyTimelineEvents(state, events, timelineNextSequence);
+  return applyStudioEvents({ ...state, ...emptyTimelineState() }, events, nextSequence);
 }
 
 export function removeOptimisticTimelineItems<T extends TimelineStateSlice>(state: T): T {
-  return removeOptimisticTimelineItemsMatching(state, (itemId) => itemId.startsWith("optimistic-"));
+  return removeOptimisticPartsMatching(state, (partId) => partId.startsWith("optimistic-"));
 }
 
 export function removeOptimisticUserTimelineItems<T extends TimelineStateSlice>(state: T): T {
-  return removeOptimisticTimelineItemsMatching(state, (itemId) => itemId.startsWith("optimistic-user-"));
+  return removeOptimisticPartsMatching(state, (partId) => partId.startsWith("optimistic-user-"));
 }
 
 export function removeOptimisticWaitingTimelineItems<T extends TimelineStateSlice>(state: T): T {
-  return removeOptimisticTimelineItemsMatching(state, (itemId) => itemId.startsWith("optimistic-waiting-"));
+  return removeOptimisticPartsMatching(state, (partId) => partId.startsWith("optimistic-waiting-"));
 }
 
-function removeOptimisticTimelineItemsMatching<T extends TimelineStateSlice>(
+export function addOptimisticPart<T extends TimelineStateSlice>(
   state: T,
-  shouldRemove: (itemId: string) => boolean,
+  message: StudioMessage,
+  part: StudioPart,
 ): T {
-  const timelineItems = new Map(state.timelineItems);
-  for (const itemId of state.timelineOrder) {
-    if (shouldRemove(itemId)) {
-      timelineItems.delete(itemId);
-    }
-  }
-  return {
-    ...state,
-    timelineItems,
-    timelineOrder: state.timelineOrder.filter((itemId) => !shouldRemove(itemId)),
-  };
+  const withMessage = upsertMessage(state, message, undefined);
+  return upsertPart(withMessage, part, undefined);
 }
 
-export function applyTimelineRecords<T extends TimelineStateSlice>(
-  state: T,
-  events: TimelineEventRecord[],
-  timelineNextSequence?: number,
-): T {
-  return applyTimelineEvents(state, events, timelineNextSequence);
-}
-
-function replayTimelineEvents<T extends TimelineStateSlice>(
-  state: T,
-  events: TimelineEventRecord[],
-  timelineNextSequence: number,
-): T {
-  let next = state;
-  for (const event of events ?? []) {
-    next = applyTimelineEventRecord(next, event);
-  }
-  return {
-    ...next,
-    timelineNextSequence: Math.max(next.timelineNextSequence, timelineNextSequence),
-  };
-}
-
-function applyTimelineEvents<T extends TimelineStateSlice>(
-  state: T,
-  events: TimelineEventRecord[],
-  timelineNextSequence: number | undefined,
-): T {
-  let next = state;
-  for (const event of events ?? []) {
-    next = applyTimelineEventRecord(next, event);
-  }
-  return {
-    ...next,
-    timelineNextSequence:
-      timelineNextSequence === undefined
-        ? next.timelineNextSequence
-        : Math.max(next.timelineNextSequence, timelineNextSequence),
-  };
-}
-
-function applyTimelineEventRecord<T extends TimelineStateSlice>(
-  state: T,
-  record: TimelineEventRecord,
-): T {
-  if (!record || typeof record.sequence !== "number") {
-    return state;
-  }
-  if (state.timelineEvents.has(record.sequence)) {
-    return state;
-  }
-  const timelineEvents = new Map(state.timelineEvents);
-  timelineEvents.set(record.sequence, record);
-  return applyTracePayload({ ...state, timelineEvents }, {
-    sequence: record.sequence,
-    createdAt: record.createdAt,
-    payload: record.payload,
-  });
-}
-
-function applyTracePayload<T extends TimelineStateSlice>(
-  state: T,
-  record: {
-    sequence: number;
-    createdAt: number;
-    payload: TimelineTracePayload;
-  },
-): T {
-  switch (record.payload.type) {
-    case "timelineItemStarted":
-      return upsertTimelineItem(state, record.payload.item, record.sequence, "started");
-    case "timelineItemDelta":
-      return applyTimelineDelta(state, record.payload.event, record.sequence);
-    case "timelineItemCompleted":
-      return upsertTimelineItem(state, record.payload.item, record.sequence, "terminal");
-    case "timelineItemFailed": {
-      const item = {
-        ...record.payload.item,
-        content:
-          record.payload.item.content?.trim() ||
-          record.payload.error ||
-          record.payload.item.content,
-      };
-      return upsertTimelineItem(state, item, record.sequence, "terminal");
-    }
-    case "planLifecycleChanged":
-    case "interactionChanged":
-    case "skillActivated":
-    case "enabledToolsRecorded":
-      return {
-        ...state,
-        timelineNextSequence: Math.max(state.timelineNextSequence, record.sequence + 1),
-      };
-  }
-}
-
-type TimelineItemMergeMode = "started" | "delta" | "terminal";
-
-function upsertTimelineItem<T extends TimelineStateSlice>(
-  state: T,
+export function timelineItemWithDelta(
   item: TimelineItem,
-  eventSequence?: number,
-  mergeMode: TimelineItemMergeMode = "terminal",
-): T {
-  if (!item?.itemId) {
-    return state;
-  }
-  const timelineItems = new Map(state.timelineItems);
-  const existing = timelineItems.get(item.itemId);
-  timelineItems.set(item.itemId, mergeTimelineItem(existing, item, mergeMode));
-  const timelineOrder = (existing ? [...state.timelineOrder] : [...state.timelineOrder, item.itemId])
-    .sort((left, right) => compareTimelineItemOrder(left, right, timelineItems));
-  return {
-    ...state,
-    timelineItems,
-    timelineOrder,
-    timelineNextSequence:
-      eventSequence === undefined
-        ? state.timelineNextSequence
-        : Math.max(state.timelineNextSequence, eventSequence + 1),
-  };
-}
-
-function compareTimelineItemOrder(
-  left: string,
-  right: string,
-  timelineItems: Map<string, TimelineItem>,
-): number {
-  const leftItem = timelineItems.get(left);
-  const rightItem = timelineItems.get(right);
-  const order = (leftItem?.startedSequence ?? 0) - (rightItem?.startedSequence ?? 0);
-  if (order !== 0) {
-    return order;
-  }
-  const leftWaiting = left.startsWith("optimistic-waiting-");
-  const rightWaiting = right.startsWith("optimistic-waiting-");
-  if (leftWaiting !== rightWaiting) {
-    return leftWaiting ? 1 : -1;
-  }
-  return left.localeCompare(right);
-}
-
-function mergeTimelineItem(
-  existing: TimelineItem | undefined,
-  item: TimelineItem,
-  mergeMode: TimelineItemMergeMode,
+  accum: StudioPartDeltaAccum | undefined,
 ): TimelineItem {
-  const incoming = normalizeTimelineItem(item);
-  if (!existing) {
-    return incoming;
+  if (!accum) return normalizeTimelineItem(item);
+  const next = normalizeTimelineItem(item);
+  next.content += accum.text + accum.planContent + accum.reasoningText;
+  if (accum.thinkingChunks.size > 0) {
+    for (const [chunkIndex, delta] of accum.thinkingChunks) {
+      const chunk = next.thinkingChunks.find((part) => part.chunkIndex === chunkIndex);
+      if (chunk) {
+        chunk.content += delta;
+      } else {
+        next.thinkingChunks.push({ chunkIndex, content: delta });
+      }
+    }
+    next.thinkingChunks.sort((left, right) => left.chunkIndex - right.chunkIndex);
   }
-  const current = normalizeTimelineItem(existing);
-  if (mergeMode === "delta") {
-    return {
-      ...incoming,
-      startedSequence: Math.min(current.startedSequence, incoming.startedSequence),
-      createdAt: Math.min(current.createdAt, incoming.createdAt),
-    };
+  if (accum.toolArguments || accum.toolResult) {
+    next.tool = next.tool ?? blankTimelineToolItem(next.itemId);
+    next.tool.arguments += accum.toolArguments;
+    next.tool.result = `${next.tool.result ?? ""}${accum.toolResult}` || next.tool.result;
   }
-  if (mergeMode === "started") {
-    return {
-      ...current,
-      ...incoming,
-      status: current.status,
-      updatedAt: Math.max(current.updatedAt, incoming.updatedAt),
-      content: mergeTimelineContent(current.content, incoming.content, mergeMode),
-      thinkingChunks:
-        current.thinkingChunks.length > 0 ? current.thinkingChunks : incoming.thinkingChunks,
-      tool: mergeTimelineTool(current.tool, incoming.tool),
-      agent: current.agent ?? incoming.agent ?? null,
-      inference: current.inference ?? incoming.inference ?? null,
-      usage: current.usage ?? incoming.usage ?? null,
-      startedSequence: Math.min(current.startedSequence, incoming.startedSequence),
-      createdAt: Math.min(current.createdAt, incoming.createdAt),
-    };
-  }
-  return {
-    ...current,
-    ...incoming,
-    content: mergeTimelineContent(current.content, incoming.content, mergeMode),
-    thinkingChunks:
-      incoming.thinkingChunks.length > 0 ? incoming.thinkingChunks : current.thinkingChunks,
-    tool: mergeTimelineTool(current.tool, incoming.tool),
-    agent: incoming.agent ?? current.agent ?? null,
-    inference: incoming.inference ?? current.inference ?? null,
-    usage: incoming.usage ?? current.usage ?? null,
-    startedSequence: Math.min(current.startedSequence, incoming.startedSequence),
-    createdAt: Math.min(current.createdAt, incoming.createdAt),
-  };
+  return next;
 }
 
-function mergeTimelineContent(
-  current: string,
-  incoming: string,
-  mergeMode: TimelineItemMergeMode,
-): string {
-  switch (mergeMode) {
-    case "started":
-      return current || incoming || "";
-    case "delta":
-      return incoming;
-    case "terminal":
-      return incoming || current || "";
+export function timelineItemsFromConversation(state: TimelineStateSlice): TimelineItem[] {
+  const items: TimelineItem[] = [];
+  const messages = [...state.messages.values()].sort(compareMessages);
+  for (const message of messages) {
+    const parts = (state.partsByMessage.get(message.messageId) ?? [])
+      .slice()
+      .sort(compareParts);
+    for (const part of parts) {
+      if (part.ignored) continue;
+      items.push(partToTimelineItem(part));
+    }
   }
+  return items;
 }
 
-function mergeTimelineTool(
-  current: TimelineItem["tool"] | null | undefined,
-  incoming: TimelineItem["tool"] | null | undefined,
-): TimelineItem["tool"] | null {
-  if (!current && !incoming) {
-    return null;
-  }
-  if (!current) {
-    return incoming ? { ...incoming } : null;
-  }
-  if (!incoming) {
-    return { ...current };
-  }
-  return {
-    ...current,
-    ...incoming,
-    name: incoming.name || current.name,
-    arguments: incoming.arguments || current.arguments || "",
-    result: incoming.result ?? current.result ?? null,
-    exitCode: incoming.exitCode ?? current.exitCode ?? null,
-    timedOut: incoming.timedOut || current.timedOut || false,
-    workingDirectory: incoming.workingDirectory ?? current.workingDirectory ?? null,
-    denialReason: incoming.denialReason ?? current.denialReason ?? null,
-  };
-}
-
-function applyTimelineDelta<T extends TimelineStateSlice>(
+function upsertMessage<T extends TimelineStateSlice>(
   state: T,
-  event: TimelineItemDeltaEvent,
-  eventSequence: number,
+  message: StudioMessage,
+  sequence: number | undefined,
 ): T {
-  const existing = state.timelineItems.get(event.itemId);
-  // 单调校验：丢弃乱序/重复 delta，防止 broadcast Lagged 后跨 turn 串台与乱序累积。
-  if (
-    existing?.lastDeltaSequence !== undefined &&
-    eventSequence <= existing.lastDeltaSequence
-  ) {
+  const messages = new Map(state.messages);
+  const existing = messages.get(message.messageId);
+  if (sequence !== undefined && existing && existingSequenceIsNewer(state, message.messageId, sequence)) {
+    return advanceSequence(state, sequence);
+  }
+  messages.set(message.messageId, normalizeMessage(message));
+  const messageSequences = new Map(state.messageSequences);
+  if (sequence !== undefined) {
+    messageSequences.set(message.messageId, sequence);
+  }
+  return {
+    ...state,
+    messages,
+    messageSequences,
+    eventNextSequence: advanceSequenceValue(state.eventNextSequence, sequence),
+  };
+}
+
+function removeMessage<T extends TimelineStateSlice>(
+  state: T,
+  messageId: string,
+  sequence: number | undefined,
+): T {
+  const messages = new Map(state.messages);
+  messages.delete(messageId);
+  const messageSequences = new Map(state.messageSequences);
+  messageSequences.delete(messageId);
+  const partsByMessage = new Map(state.partsByMessage);
+  const partDeltaAccum = new Map(state.partDeltaAccum);
+  const partSequences = new Map(state.partSequences);
+  for (const part of partsByMessage.get(messageId) ?? []) {
+    partDeltaAccum.delete(part.partId);
+    partSequences.delete(part.partId);
+  }
+  partsByMessage.delete(messageId);
+  return {
+    ...state,
+    messages,
+    messageSequences,
+    partsByMessage,
+    partDeltaAccum,
+    partSequences,
+    eventNextSequence: advanceSequenceValue(state.eventNextSequence, sequence),
+  };
+}
+
+function upsertPart<T extends TimelineStateSlice>(
+  state: T,
+  part: StudioPart,
+  sequence: number | undefined,
+): T {
+  const existingSequence = state.partSequences.get(part.partId);
+  if (sequence !== undefined && existingSequence !== undefined && existingSequence > sequence) {
+    return advanceSequence(state, sequence);
+  }
+  const partsByMessage = new Map(state.partsByMessage);
+  const existingParts = partsByMessage.get(part.messageId) ?? [];
+  const normalized = normalizePart(part);
+  const nextParts = existingParts.some((existing) => existing.partId === part.partId)
+    ? existingParts.map((existing) => existing.partId === part.partId ? normalized : existing)
+    : [...existingParts, normalized];
+  nextParts.sort(compareParts);
+  partsByMessage.set(part.messageId, nextParts);
+  const partDeltaAccum = new Map(state.partDeltaAccum);
+  partDeltaAccum.delete(part.partId);
+  const partSequences = new Map(state.partSequences);
+  if (sequence !== undefined) {
+    partSequences.set(part.partId, sequence);
+  }
+  return {
+    ...state,
+    partsByMessage,
+    partDeltaAccum,
+    partSequences,
+    eventNextSequence: advanceSequenceValue(state.eventNextSequence, sequence),
+  };
+}
+
+function removePart<T extends TimelineStateSlice>(
+  state: T,
+  messageId: string,
+  partId: string,
+  sequence: number | undefined,
+): T {
+  const partsByMessage = new Map(state.partsByMessage);
+  partsByMessage.set(
+    messageId,
+    (partsByMessage.get(messageId) ?? []).filter((part) => part.partId !== partId),
+  );
+  const partDeltaAccum = new Map(state.partDeltaAccum);
+  partDeltaAccum.delete(partId);
+  const partSequences = new Map(state.partSequences);
+  partSequences.delete(partId);
+  return {
+    ...state,
+    partsByMessage,
+    partDeltaAccum,
+    partSequences,
+    eventNextSequence: advanceSequenceValue(state.eventNextSequence, sequence),
+  };
+}
+
+function applyPartDelta<T extends TimelineStateSlice>(
+  state: T,
+  delta: StudioPartDelta,
+): T {
+  if (!hasPart(state, delta.messageId, delta.partId)) {
     return state;
   }
-  const item = normalizeTimelineItem(existing ?? blankTimelineItem(event));
-  item.lastDeltaSequence = eventSequence;
-  item.status = event.status;
-  item.updatedAt = event.updatedAt;
-  const delta = event.delta;
-  switch (delta.type) {
-    case "text":
-      item.textChannel = delta.textChannel;
-      item.content += delta.delta;
-      break;
-    case "plan":
-      item.content += delta.delta;
-      break;
-    case "thinking": {
-      const chunk = item.thinkingChunks.find((part) => part.chunkIndex === delta.chunkIndex);
-      if (chunk) {
-        chunk.content += delta.delta;
-      } else {
-        item.thinkingChunks.push({
-          chunkIndex: delta.chunkIndex,
-          content: delta.delta,
-        });
-      }
-      item.thinkingChunks.sort((left, right) => left.chunkIndex - right.chunkIndex);
-      break;
-    }
-    case "toolArguments":
-      item.tool = item.tool ?? blankTimelineToolItem(item.itemId);
-      item.tool.arguments += delta.delta;
-      break;
-    case "toolResult":
-      item.tool = item.tool ?? blankTimelineToolItem(item.itemId);
-      item.tool.result = `${item.tool.result ?? ""}${delta.delta}`;
-      break;
-  }
-  return upsertTimelineItem(state, item, eventSequence, "delta");
+  const partDeltaAccum = new Map(state.partDeltaAccum);
+  const accum = cloneDeltaAccum(partDeltaAccum.get(delta.partId) ?? emptyDeltaAccum());
+  appendDelta(accum, delta.field, delta.delta, delta.chunkIndex ?? 0);
+  partDeltaAccum.set(delta.partId, accum);
+  return { ...state, partDeltaAccum };
 }
 
-function blankTimelineItem(event: TimelineItemDeltaEvent): TimelineItem {
+function removeOptimisticPartsMatching<T extends TimelineStateSlice>(
+  state: T,
+  shouldRemove: (partId: string) => boolean,
+): T {
+  const partsByMessage = new Map<string, StudioPart[]>();
+  const partDeltaAccum = new Map(state.partDeltaAccum);
+  const messageSequences = new Map(state.messageSequences);
+  const partSequences = new Map(state.partSequences);
+  const messages = new Map(state.messages);
+  for (const [messageId, parts] of state.partsByMessage) {
+    const nextParts = parts.filter((part) => {
+      const remove = shouldRemove(part.partId);
+      if (remove) {
+        partDeltaAccum.delete(part.partId);
+        partSequences.delete(part.partId);
+      }
+      return !remove;
+    });
+    if (nextParts.length > 0) {
+      partsByMessage.set(messageId, nextParts);
+    } else if (messageId.startsWith("optimistic-")) {
+      messages.delete(messageId);
+      messageSequences.delete(messageId);
+    }
+  }
+  return { ...state, messages, messageSequences, partsByMessage, partDeltaAccum, partSequences };
+}
+
+function hasPart(state: TimelineStateSlice, messageId: string, partId: string): boolean {
+  return (state.partsByMessage.get(messageId) ?? []).some((part) => part.partId === partId);
+}
+
+function advanceCursor<T extends TimelineStateSlice>(state: T, envelope: StudioEventEnvelope): T {
+  return envelope.kind.type === "messagePartDelta"
+    ? state
+    : advanceSequence(state, envelope.sequence);
+}
+
+function advanceSequence<T extends TimelineStateSlice>(state: T, sequence: number | undefined): T {
+  return { ...state, eventNextSequence: advanceSequenceValue(state.eventNextSequence, sequence) };
+}
+
+function advanceSequenceValue(current: number, sequence: number | undefined): number {
+  return sequence === undefined ? current : Math.max(current, sequence + 1);
+}
+
+function existingSequenceIsNewer(
+  state: TimelineStateSlice,
+  messageId: string,
+  sequence: number,
+): boolean {
+  const existingSequence = state.messageSequences.get(messageId);
+  return existingSequence !== undefined && existingSequence > sequence;
+}
+
+function emptyDeltaAccum(): StudioPartDeltaAccum {
   return {
-    turnId: event.turnId,
-    itemId: event.itemId,
-    startedSequence: event.startedSequence,
-    kind: event.kind,
-    status: event.status,
-    createdAt: event.createdAt,
-    updatedAt: event.updatedAt,
-    textChannel: event.delta.type === "text" ? event.delta.textChannel : null,
-    content: "",
-    attachments: [],
-    thinkingChunks: [],
-    tool: null,
-    agent: null,
-    inference: null,
-    usage: null,
+    text: "",
+    reasoningText: "",
+    planContent: "",
+    toolArguments: "",
+    toolResult: "",
+    thinkingChunks: new Map(),
+  };
+}
+
+function cloneDeltaAccum(accum: StudioPartDeltaAccum): StudioPartDeltaAccum {
+  return {
+    text: accum.text,
+    reasoningText: accum.reasoningText,
+    planContent: accum.planContent,
+    toolArguments: accum.toolArguments,
+    toolResult: accum.toolResult,
+    thinkingChunks: new Map(accum.thinkingChunks),
+  };
+}
+
+function appendDelta(
+  accum: StudioPartDeltaAccum,
+  field: StudioPartDeltaField,
+  delta: string,
+  chunkIndex: number,
+) {
+  switch (field) {
+    case "text":
+      accum.text += delta;
+      break;
+    case "reasoningText":
+      accum.reasoningText += delta;
+      accum.thinkingChunks.set(chunkIndex, `${accum.thinkingChunks.get(chunkIndex) ?? ""}${delta}`);
+      break;
+    case "planContent":
+      accum.planContent += delta;
+      break;
+    case "tool.arguments":
+      accum.toolArguments += delta;
+      break;
+    case "tool.result":
+      accum.toolResult += delta;
+      break;
+  }
+}
+
+function partToTimelineItem(part: StudioPart): TimelineItem {
+  const kind = timelineKind(part);
+  const content = partContent(part);
+  return {
+    turnId: part.turnId,
+    itemId: part.partId,
+    startedSequence: part.order,
+    kind,
+    status: part.status,
+    createdAt: part.createdAt,
+    updatedAt: part.updatedAt,
+    textChannel: part.textChannel ?? null,
+    content,
+    attachments: part.attachments ?? [],
+    thinkingChunks: kind === "thinking" && content ? [{ chunkIndex: 0, content }] : [],
+    tool: part.tool ?? null,
+    agent: part.agent ?? null,
+    inference: part.inference ?? null,
+    usage: part.usage ?? null,
+  };
+}
+
+function timelineKind(part: StudioPart): TimelineItem["kind"] {
+  switch (part.partType) {
+    case "reasoning":
+      return "thinking";
+    case "text":
+    case "tool":
+    case "agent":
+    case "turn":
+    case "inference":
+    case "plan":
+      return part.partType;
+    case "file":
+      return "turn";
+  }
+}
+
+function partContent(part: StudioPart): string {
+  if (part.partType === "plan") {
+    return part.plan?.content ?? part.text ?? "";
+  }
+  return part.text ?? "";
+}
+
+function normalizeMessage(message: StudioMessage): StudioMessage {
+  return { ...message, metadata: message.metadata ?? {} };
+}
+
+function normalizePart(part: StudioPart): StudioPart {
+  return {
+    ...part,
+    text: part.text ?? "",
+    attachments: (part.attachments ?? []).map((attachment) => ({ ...attachment })),
+    tool: part.tool ? { ...part.tool } : null,
+    agent: part.agent ? { ...part.agent } : null,
+    inference: part.inference ? { ...part.inference } : null,
+    plan: part.plan ? { ...part.plan } : null,
+    file: part.file ? { ...part.file } : null,
+    usage: part.usage ? { ...part.usage } : null,
+    synthetic: part.synthetic ?? false,
+    ignored: part.ignored ?? false,
   };
 }
 
@@ -406,6 +455,16 @@ function normalizeTimelineItem(item: TimelineItem): TimelineItem {
   };
 }
 
+function compareMessages(left: StudioMessage, right: StudioMessage): number {
+  if (left.createdAt !== right.createdAt) return left.createdAt - right.createdAt;
+  return left.messageId.localeCompare(right.messageId);
+}
+
+function compareParts(left: StudioPart, right: StudioPart): number {
+  if (left.order !== right.order) return left.order - right.order;
+  return left.partId.localeCompare(right.partId);
+}
+
 function blankTimelineToolItem(itemId: string): NonNullable<TimelineItem["tool"]> {
   return {
     toolCallId: itemId,
@@ -418,4 +477,3 @@ function blankTimelineToolItem(itemId: string): NonNullable<TimelineItem["tool"]
     denialReason: null,
   };
 }
-

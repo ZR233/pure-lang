@@ -1,4 +1,3 @@
-use pl_core::TimelineEventRecord;
 use pl_protocol::{InteractionRequest, StudioEventEnvelope};
 use serde::{Deserialize, Serialize};
 
@@ -504,48 +503,7 @@ pub struct PlanStateDto {
 pub struct PlanLifecycleResponse {
     pub session_id: String,
     pub plan_states: Vec<PlanStateDto>,
-    pub timeline_next_sequence: u64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TimelineEventDto {
-    pub id: String,
-    pub session_id: String,
-    pub sequence: i64,
-    pub created_at: i64,
-    pub kind: String,
-    pub payload: serde_json::Value,
-}
-
-impl From<TimelineEventRecord> for TimelineEventDto {
-    fn from(record: TimelineEventRecord) -> Self {
-        Self {
-            id: record.id,
-            session_id: record.session_id,
-            sequence: record.sequence,
-            created_at: record.created_at,
-            kind: record.kind,
-            payload: serde_json::from_str(&record.payload_json).unwrap_or(serde_json::Value::Null),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RunPromptResponse {
-    pub session_id: String,
-    pub sessions: Vec<SessionDto>,
-    pub agent_events: Vec<AgentEventDto>,
-    pub agents: Vec<AgentDto>,
-    pub session_runtime: SessionRuntimeDto,
-    pub timeline_events: Vec<TimelineEventDto>,
-    pub plan_states: Vec<PlanStateDto>,
-    pub interactions: Vec<InteractionRequest>,
-    pub timeline_next_sequence: u64,
-    pub turn_status: String,
-    pub turn_abort_reason: Option<String>,
-    pub turn_error: Option<String>,
+    pub event_next_sequence: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -561,16 +519,6 @@ pub struct SubmitPromptResponse {
 pub struct StopPromptResponse {
     pub session_id: String,
     pub stopped: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionTimelineDto {
-    pub session_id: String,
-    pub events: Vec<TimelineEventDto>,
-    pub plan_states: Vec<PlanStateDto>,
-    pub interactions: Vec<InteractionRequest>,
-    pub next_sequence: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -591,7 +539,6 @@ pub struct SessionStateDto {
     pub agents: Vec<AgentDto>,
     pub session_runtime: SessionRuntimeDto,
     pub interactions: Vec<InteractionRequest>,
-    pub timeline: SessionTimelineDto,
     pub events: Vec<StudioEventEnvelope>,
     pub event_next_sequence: u64,
 }

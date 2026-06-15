@@ -1,6 +1,6 @@
 use pl_protocol::{
-    AgentStatus, BudgetLimitKind, BudgetUsage, Message, RuntimeUsageSnapshot, StudioTurnStatus,
-    TraceEvent,
+    AgentStatus, BudgetLimitKind, BudgetUsage, Message, RuntimeUsageSnapshot, StudioMessage,
+    StudioPart, StudioTurnStatus, TraceEvent,
 };
 
 use crate::TurnResult;
@@ -188,6 +188,18 @@ pub struct StudioTurnRecord {
     pub created_at: i64,
     pub updated_at: i64,
     pub completed_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StudioMessageRecord {
+    pub message: StudioMessage,
+    pub sequence: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StudioPartRecord {
+    pub part: StudioPart,
+    pub sequence: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
