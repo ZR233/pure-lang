@@ -1,32 +1,32 @@
 use async_openai::types::stream::StreamResponse;
 use futures::StreamExt;
-use pl_protocol::{AgentEventSender, PureError, Result, TimelineTextChannel};
+use pl_protocol::{AgentEventSender, PureError, Result, TraceTextChannel};
 
 pub(crate) mod event;
 mod lifecycle;
 mod tagged_output;
-mod timeline_projection;
 mod tool_stream;
+mod trace_projection;
 
 use crate::protocol::openai::OpenAiProtocol;
 use crate::protocol::openai::sse;
 use crate::request::{
-    CompletionResponse, CompletionTimelineContext, FinishReason, TokenUsage, ToolCall,
+    CompletionResponse, CompletionTraceContext, FinishReason, TokenUsage, ToolCall,
 };
 
 use event::ModelStreamEvent;
 use lifecycle::StreamLifecycle;
 use tagged_output::TaggedVisibleOutputAdapter;
-use timeline_projection::TimelineProjection;
 use tool_stream::ToolStream;
+use trace_projection::TraceProjection;
 
 pub(crate) async fn process_provider_stream(
     stream: StreamResponse<sse::SseStreamEvent>,
     event_tx: &AgentEventSender,
     protocol: &OpenAiProtocol,
-    timeline: Option<CompletionTimelineContext>,
+    trace: Option<CompletionTraceContext>,
 ) -> Result<CompletionResponse> {
-    let mut accumulator = StreamCompletionAccumulator::new(timeline);
+    let mut accumulator = StreamCompletionAccumulator::new(trace);
     let mut stream = std::pin::pin!(stream);
 
     while let Some(event) = stream.next().await {
@@ -54,12 +54,12 @@ pub(crate) struct StreamCompletionAccumulator {
     tagged_output: TaggedVisibleOutputAdapter,
     final_usage: Option<TokenUsage>,
     completed: bool,
-    timeline: Option<TimelineProjection>,
+    trace: Option<TraceProjection>,
 }
 
 impl StreamCompletionAccumulator {
-    pub(crate) fn new(timeline: Option<CompletionTimelineContext>) -> Self {
-        let plan_mode = timeline.as_ref().is_some_and(|context| context.plan_mode);
+    pub(crate) fn new(trace: Option<CompletionTraceContext>) -> Self {
+        let plan_mode = trace.as_ref().is_some_and(|context| context.plan_mode);
         Self {
             content_parts: Vec::new(),
             raw_content_parts: Vec::new(),
@@ -70,7 +70,7 @@ impl StreamCompletionAccumulator {
             tagged_output: TaggedVisibleOutputAdapter::new(plan_mode),
             final_usage: None,
             completed: false,
-            timeline: timeline.map(TimelineProjection::new),
+            trace: trace.map(TraceProjection::new),
         }
     }
 
@@ -101,7 +101,7 @@ impl StreamCompletionAccumulator {
                 self.record_text_started(&id, channel, event_tx);
             }
             ModelStreamEvent::TextDelta { id, channel, delta } => {
-                if channel == TimelineTextChannel::Final {
+                if channel == TraceTextChannel::Final {
                     self.content_parts.push(delta.clone());
                 }
                 self.record_text_delta(&id, delta, event_tx, channel);
@@ -239,8 +239,8 @@ impl StreamCompletionAccumulator {
             self.update_tool_trace_only(&call);
             self.tool_calls.push(call);
         }
-        if let Some(timeline) = self.timeline.as_mut() {
-            for event in timeline.complete_streaming_items() {
+        if let Some(trace) = self.trace.as_mut() {
+            for event in trace.complete_streaming_items() {
                 let _ = event_tx.send(event);
             }
         }
@@ -265,15 +265,15 @@ impl StreamCompletionAccumulator {
         } else {
             FinishReason::ToolCalls
         };
-        let timeline_events = self
-            .timeline
+        let trace_events = self
+            .trace
             .as_ref()
-            .map(TimelineProjection::events)
+            .map(TraceProjection::events)
             .unwrap_or_default();
         let next_sequence = self
-            .timeline
+            .trace
             .as_ref()
-            .map(TimelineProjection::next_sequence)
+            .map(TraceProjection::next_sequence)
             .unwrap_or_default();
 
         Ok(CompletionResponse {
@@ -281,7 +281,7 @@ impl StreamCompletionAccumulator {
             raw_content,
             reasoning_content,
             tool_calls: self.tool_calls,
-            timeline_events,
+            trace_events,
             next_sequence,
             usage: self.final_usage.unwrap_or_default(),
             finish_reason,
@@ -292,13 +292,13 @@ impl StreamCompletionAccumulator {
     fn record_text_started(
         &mut self,
         item_id: &str,
-        text_channel: TimelineTextChannel,
+        text_channel: TraceTextChannel,
         event_tx: &AgentEventSender,
     ) {
-        let Some(timeline) = self.timeline.as_mut() else {
+        let Some(trace) = self.trace.as_mut() else {
             return;
         };
-        for event in timeline.start_text(item_id, text_channel) {
+        for event in trace.start_text(item_id, text_channel) {
             let _ = event_tx.send(event);
         }
     }
@@ -308,12 +308,12 @@ impl StreamCompletionAccumulator {
         item_id: &str,
         delta: String,
         event_tx: &AgentEventSender,
-        text_channel: TimelineTextChannel,
+        text_channel: TraceTextChannel,
     ) {
-        let Some(timeline) = self.timeline.as_mut() else {
+        let Some(trace) = self.trace.as_mut() else {
             return;
         };
-        for event in timeline.append_text_delta(item_id, text_channel, delta) {
+        for event in trace.append_text_delta(item_id, text_channel, delta) {
             let _ = event_tx.send(event);
         }
     }
@@ -321,49 +321,49 @@ impl StreamCompletionAccumulator {
     fn record_text_completed(
         &mut self,
         item_id: &str,
-        text_channel: TimelineTextChannel,
+        text_channel: TraceTextChannel,
         event_tx: &AgentEventSender,
     ) {
-        let Some(timeline) = self.timeline.as_mut() else {
+        let Some(trace) = self.trace.as_mut() else {
             return;
         };
-        for event in timeline.complete_text(item_id, text_channel) {
+        for event in trace.complete_text(item_id, text_channel) {
             let _ = event_tx.send(event);
         }
     }
 
     fn record_plan_started(&mut self, item_id: &str, event_tx: &AgentEventSender) {
-        let Some(timeline) = self.timeline.as_mut() else {
+        let Some(trace) = self.trace.as_mut() else {
             return;
         };
-        for event in timeline.start_plan(item_id) {
+        for event in trace.start_plan(item_id) {
             let _ = event_tx.send(event);
         }
     }
 
     fn record_plan_delta(&mut self, item_id: &str, delta: String, event_tx: &AgentEventSender) {
-        let Some(timeline) = self.timeline.as_mut() else {
+        let Some(trace) = self.trace.as_mut() else {
             return;
         };
-        for event in timeline.append_plan_delta(item_id, delta) {
+        for event in trace.append_plan_delta(item_id, delta) {
             let _ = event_tx.send(event);
         }
     }
 
     fn record_plan_completed(&mut self, item_id: &str, event_tx: &AgentEventSender) {
-        let Some(timeline) = self.timeline.as_mut() else {
+        let Some(trace) = self.trace.as_mut() else {
             return;
         };
-        for event in timeline.complete_plan(item_id) {
+        for event in trace.complete_plan(item_id) {
             let _ = event_tx.send(event);
         }
     }
 
     fn record_thinking_started(&mut self, item_id: &str, event_tx: &AgentEventSender) {
-        let Some(timeline) = self.timeline.as_mut() else {
+        let Some(trace) = self.trace.as_mut() else {
             return;
         };
-        for event in timeline.start_thinking(item_id) {
+        for event in trace.start_thinking(item_id) {
             let _ = event_tx.send(event);
         }
     }
@@ -375,19 +375,19 @@ impl StreamCompletionAccumulator {
         delta: String,
         event_tx: &AgentEventSender,
     ) {
-        let Some(timeline) = self.timeline.as_mut() else {
+        let Some(trace) = self.trace.as_mut() else {
             return;
         };
-        for event in timeline.append_thinking_delta(item_id, chunk_index, delta) {
+        for event in trace.append_thinking_delta(item_id, chunk_index, delta) {
             let _ = event_tx.send(event);
         }
     }
 
     fn record_thinking_completed(&mut self, item_id: &str, event_tx: &AgentEventSender) {
-        let Some(timeline) = self.timeline.as_mut() else {
+        let Some(trace) = self.trace.as_mut() else {
             return;
         };
-        for event in timeline.complete_thinking(item_id) {
+        for event in trace.complete_thinking(item_id) {
             let _ = event_tx.send(event);
         }
     }
@@ -398,10 +398,10 @@ impl StreamCompletionAccumulator {
         delta: String,
         event_tx: &AgentEventSender,
     ) {
-        let Some(timeline) = self.timeline.as_mut() else {
+        let Some(trace) = self.trace.as_mut() else {
             return;
         };
-        for event in timeline.append_tool_arguments_delta(snapshot, delta) {
+        for event in trace.append_tool_arguments_delta(snapshot, delta) {
             let _ = event_tx.send(event);
         }
     }
@@ -411,17 +411,17 @@ impl StreamCompletionAccumulator {
         snapshot: &tool_stream::ToolCallAccumulatorSnapshot,
         event_tx: &AgentEventSender,
     ) {
-        let Some(timeline) = self.timeline.as_mut() else {
+        let Some(trace) = self.trace.as_mut() else {
             return;
         };
-        for event in timeline.start_tool(snapshot) {
+        for event in trace.start_tool(snapshot) {
             let _ = event_tx.send(event);
         }
     }
 
     fn update_tool_trace_only(&mut self, call: &ToolCall) {
-        if let Some(timeline) = self.timeline.as_mut() {
-            timeline.update_tool_trace_only(call);
+        if let Some(trace) = self.trace.as_mut() {
+            trace.update_tool_trace_only(call);
         }
     }
 }

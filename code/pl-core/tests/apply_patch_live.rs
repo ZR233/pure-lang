@@ -8,8 +8,8 @@ use pl_core::{
     TurnRequest, TurnResultStatus,
 };
 use pl_protocol::{
-    InteractionPayload, InteractionResolution, TimelineItemStatus, ToolApprovalResolution,
-    TraceEventKind,
+    InteractionPayload, InteractionResolution, ToolApprovalResolution, TraceEventKind,
+    TracePartStatus,
 };
 use pretty_assertions::assert_eq;
 
@@ -135,8 +135,8 @@ fn tool_diagnostics(events: &[TraceEvent]) -> String {
     let mut output = String::new();
     for event in events {
         match &event.kind {
-            TraceEventKind::TimelineItemStarted { item }
-            | TraceEventKind::TimelineItemCompleted { item } => {
+            TraceEventKind::TracePartStarted { item }
+            | TraceEventKind::TracePartCompleted { item } => {
                 if let Some(tool) = &item.tool {
                     let _ = writeln!(
                         output,
@@ -149,7 +149,7 @@ fn tool_diagnostics(events: &[TraceEvent]) -> String {
                     );
                 }
             }
-            TraceEventKind::TimelineItemFailed { item, error } => {
+            TraceEventKind::TracePartFailed { item, error } => {
                 if let Some(tool) = &item.tool {
                     let _ = writeln!(
                         output,
@@ -163,7 +163,7 @@ fn tool_diagnostics(events: &[TraceEvent]) -> String {
                     );
                 }
             }
-            TraceEventKind::TimelineItemDelta { .. }
+            TraceEventKind::TracePartDelta { .. }
             | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
@@ -171,7 +171,7 @@ fn tool_diagnostics(events: &[TraceEvent]) -> String {
         }
     }
     if output.is_empty() {
-        "no tool timeline events recorded".to_string()
+        "no tool trace events recorded".to_string()
     } else {
         output
     }
@@ -179,13 +179,13 @@ fn tool_diagnostics(events: &[TraceEvent]) -> String {
 
 fn saw_apply_patch(events: &[TraceEvent]) -> bool {
     events.iter().any(|event| match &event.kind {
-        TraceEventKind::TimelineItemStarted { item }
-        | TraceEventKind::TimelineItemCompleted { item }
-        | TraceEventKind::TimelineItemFailed { item, .. } => item
+        TraceEventKind::TracePartStarted { item }
+        | TraceEventKind::TracePartCompleted { item }
+        | TraceEventKind::TracePartFailed { item, .. } => item
             .tool
             .as_ref()
             .is_some_and(|tool| tool.name == "apply_patch"),
-        TraceEventKind::TimelineItemDelta { .. }
+        TraceEventKind::TracePartDelta { .. }
         | TraceEventKind::PlanLifecycleChanged { .. }
         | TraceEventKind::InteractionChanged { .. }
         | TraceEventKind::SkillActivated { .. }
@@ -197,7 +197,7 @@ fn failed_apply_patch(events: &[TraceEvent]) -> bool {
     events.iter().any(|event| {
         matches!(
             &event.kind,
-            TraceEventKind::TimelineItemFailed { item, .. }
+            TraceEventKind::TracePartFailed { item, .. }
                 if item.tool.as_ref().is_some_and(|tool| tool.name == "apply_patch")
         )
     })
@@ -232,7 +232,7 @@ async fn live_deepseek_applies_patch_with_prompt() {
         .await
         .unwrap();
 
-    let diagnostics = tool_diagnostics(&result.timeline_events);
+    let diagnostics = tool_diagnostics(&result.trace_events);
     assert_eq!(
         result.status,
         TurnResultStatus::Completed,
@@ -257,20 +257,20 @@ async fn live_deepseek_applies_patch_with_prompt() {
         diagnostics
     );
     assert!(
-        saw_apply_patch(&result.timeline_events),
+        saw_apply_patch(&result.trace_events),
         "model did not call apply_patch\n{}",
         diagnostics
     );
     assert!(
-        !failed_apply_patch(&result.timeline_events),
+        !failed_apply_patch(&result.trace_events),
         "apply_patch failed\n{}",
         diagnostics
     );
     assert!(
-        result.timeline_events.iter().any(|event| matches!(
+        result.trace_events.iter().any(|event| matches!(
             &event.kind,
-            TraceEventKind::TimelineItemCompleted { item }
-                if item.status == TimelineItemStatus::Completed
+            TraceEventKind::TracePartCompleted { item }
+                if item.status == TracePartStatus::Completed
                     && item.tool.as_ref().is_some_and(|tool| tool.name == "apply_patch")
         )),
         "apply_patch did not complete successfully\n{}",

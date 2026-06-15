@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use pl_protocol::TimelineTextChannel;
+use pl_protocol::TraceTextChannel;
 
 use super::event::{ModelStreamEvent, ToolInputDeltaPayload, ToolInputPayloadKind};
 
@@ -296,12 +296,12 @@ impl StreamLifecycle {
     }
 }
 
-fn parse_channel(channel: &str) -> TimelineTextChannel {
+fn parse_channel(channel: &str) -> TraceTextChannel {
     match channel {
-        "commentary" => TimelineTextChannel::Commentary,
-        "final" => TimelineTextChannel::Final,
-        "user" => TimelineTextChannel::User,
-        _ => TimelineTextChannel::Final,
+        "commentary" => TraceTextChannel::Commentary,
+        "final" => TraceTextChannel::Final,
+        "user" => TraceTextChannel::User,
+        _ => TraceTextChannel::Final,
     }
 }
 

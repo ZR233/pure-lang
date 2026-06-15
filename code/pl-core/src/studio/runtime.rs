@@ -6,7 +6,7 @@ use pl_protocol::StudioEventKind;
 use pl_protocol::{
     AgentEventSender, ContentPart, ImageSource, InteractionKind, InteractionPayload,
     InteractionRequest, InteractionScope, InteractionStatus, MessageContent, PlanLifecycleEvent,
-    PlanLifecycleState, TimelineItem, TimelineItemKind, TraceEvent, TraceEventKind,
+    PlanLifecycleState, TraceEvent, TraceEventKind, TracePart, TracePartKind,
 };
 
 use crate::config::{ConfigStore, ModelRole};
@@ -240,10 +240,10 @@ impl StudioRuntime {
             .store
             .materialize_attachments(session_id, &attachment_ids)
             .await?;
-        let timeline_attachments = selected_attachments
+        let trace_attachments = selected_attachments
             .iter()
             .map(|record| {
-                let mut attachment = crate::studio::store::timeline_attachment(record);
+                let mut attachment = crate::studio::store::trace_attachment(record);
                 attachment.data_url = selected_materialized
                     .iter()
                     .find(|materialized| materialized.attachment_id == record.id)
@@ -273,7 +273,7 @@ impl StudioRuntime {
             .with_turn_id(turn_id)
             .with_user_content(user_content)
             .with_materialized_attachments(materialized_attachments)
-            .with_timeline_attachments(timeline_attachments);
+            .with_trace_attachments(trace_attachments);
         if !workspace_instructions.trim().is_empty() {
             request = request.with_workspace_instructions(workspace_instructions.clone());
         }
@@ -308,20 +308,20 @@ impl StudioRuntime {
         let result = core
             .run_turn_with_trace(&mut session, request, &mut recorder, options)
             .await?;
-        let timeline_events = result.timeline_events.clone();
+        let trace_events = result.trace_events.clone();
         if session.revision() != previous_revision {
             self.store
-                .replace_turn_records(session_id, &timeline_events, session.messages())
+                .replace_turn_records(session_id, &trace_events, session.messages())
                 .await?;
         } else {
             let new_messages = &session.messages()[previous_len..];
             self.store
-                .append_turn_records(session_id, &timeline_events, new_messages)
+                .append_turn_records(session_id, &trace_events, new_messages)
                 .await?;
         }
         if matches!(mode, CompileMode::Plan)
             && matches!(result.status, TurnResultStatus::Completed)
-            && let Some(plan) = completed_plan_item(&timeline_events)
+            && let Some(plan) = completed_plan_item(&trace_events)
         {
             self.create_plan_confirmation(session_id, &plan, interaction_emitter)
                 .await?;
@@ -341,7 +341,7 @@ impl StudioRuntime {
         self.store
             .upsert_session_runtime(session_id, &result, model)
             .await?;
-        if should_start_self_learning(&config, &result.status, &timeline_events) {
+        if should_start_self_learning(&config, &result.status, &trace_events) {
             let review_messages = session.messages().to_vec();
             spawn_self_learning_review(
                 config.clone(),
@@ -359,14 +359,14 @@ impl StudioRuntime {
         Ok(StudioPromptOutcome {
             result,
             messages,
-            timeline_events,
+            trace_events,
         })
     }
 
     async fn create_plan_confirmation(
         &self,
         session_id: &str,
-        plan: &TimelineItem,
+        plan: &TracePart,
         interaction_emitter: InteractionEmitter,
     ) -> Result<()> {
         if plan.content.trim().is_empty() {
@@ -470,17 +470,17 @@ impl StudioRuntime {
     }
 }
 
-fn completed_plan_item(events: &[TraceEvent]) -> Option<TimelineItem> {
+fn completed_plan_item(events: &[TraceEvent]) -> Option<TracePart> {
     events.iter().rev().find_map(|event| match &event.kind {
-        TraceEventKind::TimelineItemCompleted { item }
-            if item.kind == TimelineItemKind::Plan && !item.content.trim().is_empty() =>
+        TraceEventKind::TracePartCompleted { item }
+            if item.kind == TracePartKind::Plan && !item.content.trim().is_empty() =>
         {
             Some(item.clone())
         }
-        TraceEventKind::TimelineItemStarted { .. }
-        | TraceEventKind::TimelineItemDelta { .. }
-        | TraceEventKind::TimelineItemCompleted { .. }
-        | TraceEventKind::TimelineItemFailed { .. }
+        TraceEventKind::TracePartStarted { .. }
+        | TraceEventKind::TracePartDelta { .. }
+        | TraceEventKind::TracePartCompleted { .. }
+        | TraceEventKind::TracePartFailed { .. }
         | TraceEventKind::PlanLifecycleChanged { .. }
         | TraceEventKind::InteractionChanged { .. }
         | TraceEventKind::SkillActivated { .. }
@@ -515,22 +515,22 @@ fn plan_confirmation_id(plan_id: &str) -> String {
 fn should_start_self_learning(
     config: &crate::config::PureConfig,
     status: &TurnResultStatus,
-    timeline_events: &[TraceEvent],
+    trace_events: &[TraceEvent],
 ) -> bool {
     config.skills.enabled
         && config.skills.auto_learn
         && matches!(status, TurnResultStatus::Completed)
-        && tool_call_count(timeline_events) >= config.skills.auto_learn_min_tool_calls
+        && tool_call_count(trace_events) >= config.skills.auto_learn_min_tool_calls
 }
 
-fn tool_call_count(timeline_events: &[TraceEvent]) -> u32 {
-    timeline_events
+fn tool_call_count(trace_events: &[TraceEvent]) -> u32 {
+    trace_events
         .iter()
         .filter(|event| match &event.kind {
-            TraceEventKind::TimelineItemStarted { item } => item.kind == TimelineItemKind::Tool,
-            TraceEventKind::TimelineItemDelta { .. }
-            | TraceEventKind::TimelineItemCompleted { .. }
-            | TraceEventKind::TimelineItemFailed { .. }
+            TraceEventKind::TracePartStarted { item } => item.kind == TracePartKind::Tool,
+            TraceEventKind::TracePartDelta { .. }
+            | TraceEventKind::TracePartCompleted { .. }
+            | TraceEventKind::TracePartFailed { .. }
             | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
@@ -586,7 +586,7 @@ fn session_title_from_prompt(prompt: &str) -> String {
 mod tests {
     use pl_model::{ModelInfo, ProviderInfo};
     use pl_protocol::{
-        AgentEvent, InteractionRequest, TimelineItem, TimelineItemStatus, TimelineTextChannel,
+        AgentEvent, InteractionRequest, TracePart, TracePartStatus, TraceTextChannel,
     };
     use pretty_assertions::assert_eq;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -688,13 +688,13 @@ mod tests {
             session_id: "session".to_string(),
             sequence: 1,
             timestamp: 1,
-            kind: TraceEventKind::TimelineItemStarted {
-                item: TimelineItem {
+            kind: TraceEventKind::TracePartStarted {
+                item: TracePart {
                     turn_id: "turn".to_string(),
                     item_id: "tool".to_string(),
                     started_sequence: 1,
-                    kind: TimelineItemKind::Tool,
-                    status: TimelineItemStatus::Running,
+                    kind: TracePartKind::Tool,
+                    status: TracePartStatus::Running,
                     created_at: 1,
                     updated_at: 1,
                     text_channel: None,
@@ -764,18 +764,16 @@ mod tests {
         assert_eq!(outcome.result.status, TurnResultStatus::Completed);
         assert_eq!(outcome.result.content, "Ready");
         let plan_item = outcome
-            .timeline_events
+            .trace_events
             .iter()
             .find_map(|event| match &event.kind {
-                TraceEventKind::TimelineItemCompleted { item }
-                    if item.kind == TimelineItemKind::Plan =>
-                {
+                TraceEventKind::TracePartCompleted { item } if item.kind == TracePartKind::Plan => {
                     Some(item)
                 }
-                TraceEventKind::TimelineItemStarted { .. }
-                | TraceEventKind::TimelineItemDelta { .. }
-                | TraceEventKind::TimelineItemCompleted { .. }
-                | TraceEventKind::TimelineItemFailed { .. }
+                TraceEventKind::TracePartStarted { .. }
+                | TraceEventKind::TracePartDelta { .. }
+                | TraceEventKind::TracePartCompleted { .. }
+                | TraceEventKind::TracePartFailed { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
                 | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::SkillActivated { .. }
@@ -783,10 +781,10 @@ mod tests {
             })
             .expect("completed plan item");
         assert_eq!(plan_item.content, "1. Inspect\\n2. Implement");
-        assert!(outcome.timeline_events.iter().any(|event| matches!(
+        assert!(outcome.trace_events.iter().any(|event| matches!(
             &event.kind,
-            TraceEventKind::TimelineItemCompleted { item }
-                if item.text_channel == Some(TimelineTextChannel::Final)
+            TraceEventKind::TracePartCompleted { item }
+                if item.text_channel == Some(TraceTextChannel::Final)
                     && item.content == "Ready"
         )));
 
@@ -883,19 +881,17 @@ mod tests {
         assert_eq!(outcome.result.status, TurnResultStatus::Completed);
         assert_eq!(outcome.result.content, "Plan submitted.");
         let plan_item = outcome
-            .timeline_events
+            .trace_events
             .iter()
             .rev()
             .find_map(|event| match &event.kind {
-                TraceEventKind::TimelineItemCompleted { item }
-                    if item.kind == TimelineItemKind::Plan =>
-                {
+                TraceEventKind::TracePartCompleted { item } if item.kind == TracePartKind::Plan => {
                     Some(item)
                 }
-                TraceEventKind::TimelineItemStarted { .. }
-                | TraceEventKind::TimelineItemDelta { .. }
-                | TraceEventKind::TimelineItemCompleted { .. }
-                | TraceEventKind::TimelineItemFailed { .. }
+                TraceEventKind::TracePartStarted { .. }
+                | TraceEventKind::TracePartDelta { .. }
+                | TraceEventKind::TracePartCompleted { .. }
+                | TraceEventKind::TracePartFailed { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
                 | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::SkillActivated { .. }

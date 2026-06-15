@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 use crate::request::TokenUsage;
 use crate::stream::event::{ModelStreamEvent, ToolInputDeltaPayload, ToolInputPayloadKind};
-use pl_protocol::TimelineTextChannel;
+use pl_protocol::TraceTextChannel;
 
 /// SSE 流事件原始结构（从 JSON 解析）
 #[derive(Debug, Clone, Deserialize)]
@@ -111,7 +111,7 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
         {
             events.push(StreamEvent::TextDelta {
                 id: DEFAULT_TEXT_ID.to_string(),
-                channel: TimelineTextChannel::Final,
+                channel: TraceTextChannel::Final,
                 delta: content.clone(),
             });
         }
@@ -191,7 +191,7 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
                     .item_id
                     .clone()
                     .unwrap_or_else(|| DEFAULT_TEXT_ID.to_string()),
-                channel: TimelineTextChannel::Final,
+                channel: TraceTextChannel::Final,
                 delta: d.clone(),
             })
         }),

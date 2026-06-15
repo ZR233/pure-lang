@@ -27,7 +27,7 @@ pub struct CompletionRequest {
     #[serde(default = "default_true")]
     pub stream: bool,
     #[serde(skip)]
-    pub timeline: Option<CompletionTimelineContext>,
+    pub trace: Option<CompletionTraceContext>,
 }
 
 fn default_tool_choice() -> String {
@@ -47,7 +47,7 @@ pub struct CompletionResponse {
     #[serde(default)]
     pub tool_calls: Vec<ToolCall>,
     #[serde(default)]
-    pub timeline_events: Vec<TraceEvent>,
+    pub trace_events: Vec<TraceEvent>,
     #[serde(default)]
     pub next_sequence: u64,
     pub usage: TokenUsage,
@@ -56,7 +56,7 @@ pub struct CompletionResponse {
 }
 
 #[derive(Debug, Clone)]
-pub struct CompletionTimelineContext {
+pub struct CompletionTraceContext {
     pub session_id: String,
     pub turn_id: String,
     pub inference_id: String,
@@ -428,7 +428,7 @@ mod tests {
             max_tokens: None,
             reasoning: None,
             stream: true,
-            timeline: None,
+            trace: None,
         }
     }
 

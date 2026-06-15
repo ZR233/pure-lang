@@ -2,7 +2,7 @@
 
 ## 8.1 统一 Message/Part 层
 
-`AgentEvent` 定义在 `pl-protocol`，是核心 turn 与 provider/tool 之间的内部输出通道。Studio 对外只消费 `StudioEventEnvelope`，其中对话变化以 opencode 式 `StudioMessage` / `StudioPart` 表达；`TimelineItem` 只允许作为 core 内部 trace 或迁移输入，不是 Studio wire 事实源。
+`AgentEvent` 定义在 `pl-protocol`，是核心 turn 与 provider/tool 之间的内部输出通道。Studio 对外只消费 `StudioEventEnvelope`，其中对话变化以 opencode 式 `StudioMessage` / `StudioPart` 表达；core 内部诊断事件统一命名为 `TracePart`。`TracePart` 只能作为 core/provider 内部诊断输入，不得作为 Studio wire、Tauri DTO 或前端事实源。
 
 实时对话协议固定为：
 
@@ -127,7 +127,7 @@ root agent 的 provider `429` 错误码是当前轮的终止错误，不进入�
 
 `ModelStreamEvent` 的 assistant content 语义与 opencode 的 part/lifecycle 模型对齐：`text`、`reasoning`、`plan` 和 `tool` 都有独立 start/delta/complete 生命周期。`pl-model::stream::lifecycle` 负责为缺失 start 的 delta 补 start，并在 step finish 前补齐仍打开的 text、reasoning 和 plan block。进入 Studio 前必须转为 `StudioMessage` / `StudioPart` snapshot 或 live delta，不再从普通文本或 thinking 内容推断 plan。
 
-Plan 是协议级 block。provider 或 prompt 兼容层可以继续识别 `<proposed_plan>`，但必须先转换为 `PlanStarted/PlanDelta/PlanCompleted` 后再进入 accumulator；`pl-core` 也可以从 Plan Mode 中成功执行的 `plan_exit.content` 生成同一个 `plan` item。`<commentary>` 与 `<final>` 同理转换为带 `TimelineTextChannel` 的 text lifecycle。未标签普通 text 默认进入 `final` text block；未标签 reasoning 永远只进入 thinking block，不能生成 assistant 正文或 plan。部分 OpenAI-compatible Chat provider 会把带可见标签的输出放入 `reasoning_content`，该兼容转换只允许提取显式标签段，同时保留完整 reasoning 原文作为 thinking。
+Plan 是协议级 block。provider 或 prompt 兼容层可以继续识别 `<proposed_plan>`，但必须先转换为 `PlanStarted/PlanDelta/PlanCompleted` 后再进入 accumulator；`pl-core` 也可以从 Plan Mode 中成功执行的 `plan_exit.content` 生成同一个 `plan` part。`<commentary>` 与 `<final>` 同理转换为带 `TraceTextChannel` 的 text lifecycle。未标签普通 text 默认进入 `final` text block；未标签 reasoning 永远只进入 thinking block，不能生成 assistant 正文或 plan。部分 OpenAI-compatible Chat provider 会把带可见标签的输出放入 `reasoning_content`，该兼容转换只允许提取显式标签段，同时保留完整 reasoning 原文作为 thinking。
 
 工具 part 的 `partId` 使用 `toolCallId`。当 provider 提供 `call_id` 时，`toolCallId` 优先使用该值；provider 的原始 item id 只作为聚合辅助信息保留在内部。工具参数流、审批、执行和结果都 upsert 到同一个 tool part。
 

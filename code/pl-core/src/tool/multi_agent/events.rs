@@ -44,10 +44,10 @@ pub(super) async fn forward_agent_lifecycle_events(
             }
             Ok(AgentEvent::Done) => break,
             Ok(
-                AgentEvent::TimelineItemStarted { .. }
-                | AgentEvent::TimelineItemDelta { .. }
-                | AgentEvent::TimelineItemCompleted { .. }
-                | AgentEvent::TimelineItemFailed { .. }
+                AgentEvent::TracePartStarted { .. }
+                | AgentEvent::TracePartDelta { .. }
+                | AgentEvent::TracePartCompleted { .. }
+                | AgentEvent::TracePartFailed { .. }
                 | AgentEvent::TurnInterrupted { .. }
                 | AgentEvent::TurnBudgetLimited { .. }
                 | AgentEvent::Error { .. },

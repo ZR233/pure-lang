@@ -5,9 +5,8 @@ use pl_protocol::{
     StudioEventKind, StudioInferencePart, StudioMessage, StudioMessageRole, StudioMessageStatus,
     StudioPart, StudioPartDelta, StudioPartDeltaField, StudioPartStatus, StudioPartType,
     StudioPlanPart, StudioSessionHandoff, StudioTextChannel, StudioToolPart, StudioTurn,
-    StudioTurnStatus, TimelineAgentItem, TimelineDelta, TimelineInferenceItem, TimelineItem,
-    TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus, TimelineTextChannel,
-    TimelineToolItem,
+    StudioTurnStatus, TraceAgentPart, TraceDelta, TraceInferencePart, TracePart,
+    TracePartDeltaEvent, TracePartKind, TracePartStatus, TraceTextChannel, TraceToolPart,
 };
 use tokio::sync::broadcast;
 
@@ -157,13 +156,13 @@ impl StudioEventRuntime {
         event: AgentEvent,
     ) -> Result<Option<StudioEventEnvelope>> {
         let kind = match event {
-            AgentEvent::TimelineItemStarted { item } => {
+            AgentEvent::TracePartStarted { item } => {
                 return self
-                    .emit_timeline_item_snapshot(session_id, item)
+                    .emit_trace_part_snapshot(session_id, item)
                     .await
                     .map(Some);
             }
-            AgentEvent::TimelineItemDelta { event } => {
+            AgentEvent::TracePartDelta { event } => {
                 let turn_id = event.turn_id.clone();
                 let delta = studio_part_delta(session_id, event);
                 return self
@@ -176,19 +175,19 @@ impl StudioEventRuntime {
                     .await
                     .map(Some);
             }
-            AgentEvent::TimelineItemCompleted { item } => {
+            AgentEvent::TracePartCompleted { item } => {
                 return self
-                    .emit_timeline_item_snapshot(session_id, item)
+                    .emit_trace_part_snapshot(session_id, item)
                     .await
                     .map(Some);
             }
-            AgentEvent::TimelineItemFailed { item, error } => {
+            AgentEvent::TracePartFailed { item, error } => {
                 let mut item = item;
                 if item.content.trim().is_empty() {
                     item.content = error;
                 }
                 return self
-                    .emit_timeline_item_snapshot(session_id, item)
+                    .emit_trace_part_snapshot(session_id, item)
                     .await
                     .map(Some);
             }
@@ -297,12 +296,12 @@ impl StudioEventRuntime {
         Ok(())
     }
 
-    async fn emit_timeline_item_snapshot(
+    async fn emit_trace_part_snapshot(
         &self,
         session_id: &str,
-        item: TimelineItem,
+        item: TracePart,
     ) -> Result<StudioEventEnvelope> {
-        let message = studio_message_from_timeline_item(session_id, &item);
+        let message = studio_message_from_trace_part(session_id, &item);
         self.emit(
             None,
             Some(session_id.to_string()),
@@ -312,7 +311,7 @@ impl StudioEventRuntime {
             },
         )
         .await?;
-        let part = studio_part_from_timeline_item(session_id, item);
+        let part = studio_part_from_trace_part(session_id, item);
         self.emit(
             None,
             Some(session_id.to_string()),
@@ -325,38 +324,38 @@ impl StudioEventRuntime {
     }
 }
 
-fn studio_part_delta(session_id: &str, event: TimelineItemDeltaEvent) -> StudioPartDelta {
+fn studio_part_delta(session_id: &str, event: TracePartDeltaEvent) -> StudioPartDelta {
     let field = match &event.delta {
-        TimelineDelta::Text { .. } => StudioPartDeltaField::Text,
-        TimelineDelta::Thinking { .. } => StudioPartDeltaField::ReasoningText,
-        TimelineDelta::ToolArguments { .. } => StudioPartDeltaField::ToolArguments,
-        TimelineDelta::ToolResult { .. } => StudioPartDeltaField::ToolResult,
-        TimelineDelta::Plan { .. } => StudioPartDeltaField::PlanContent,
+        TraceDelta::Text { .. } => StudioPartDeltaField::Text,
+        TraceDelta::Thinking { .. } => StudioPartDeltaField::ReasoningText,
+        TraceDelta::ToolArguments { .. } => StudioPartDeltaField::ToolArguments,
+        TraceDelta::ToolResult { .. } => StudioPartDeltaField::ToolResult,
+        TraceDelta::Plan { .. } => StudioPartDeltaField::PlanContent,
     };
     let chunk_index = match &event.delta {
-        TimelineDelta::Thinking { chunk_index, .. } => Some(*chunk_index),
-        TimelineDelta::Text { .. }
-        | TimelineDelta::ToolArguments { .. }
-        | TimelineDelta::ToolResult { .. }
-        | TimelineDelta::Plan { .. } => None,
+        TraceDelta::Thinking { chunk_index, .. } => Some(*chunk_index),
+        TraceDelta::Text { .. }
+        | TraceDelta::ToolArguments { .. }
+        | TraceDelta::ToolResult { .. }
+        | TraceDelta::Plan { .. } => None,
     };
     StudioPartDelta {
         session_id: session_id.to_string(),
-        message_id: message_id_for_timeline_event(&event),
+        message_id: message_id_for_trace_delta(&event),
         part_id: event.item_id,
         field,
-        delta: timeline_delta_text(event.delta),
+        delta: trace_delta_text(event.delta),
         chunk_index,
     }
 }
 
-fn timeline_delta_text(delta: TimelineDelta) -> String {
+fn trace_delta_text(delta: TraceDelta) -> String {
     match delta {
-        TimelineDelta::Text { delta, .. }
-        | TimelineDelta::Thinking { delta, .. }
-        | TimelineDelta::ToolArguments { delta }
-        | TimelineDelta::ToolResult { delta }
-        | TimelineDelta::Plan { delta } => delta,
+        TraceDelta::Text { delta, .. }
+        | TraceDelta::Thinking { delta, .. }
+        | TraceDelta::ToolArguments { delta }
+        | TraceDelta::ToolResult { delta }
+        | TraceDelta::Plan { delta } => delta,
     }
 }
 
@@ -470,10 +469,10 @@ fn studio_agent_timeline_event(session_id: &str, event: AgentEvent) -> StudioAge
             status,
             error,
         },
-        AgentEvent::TimelineItemStarted { .. }
-        | AgentEvent::TimelineItemDelta { .. }
-        | AgentEvent::TimelineItemCompleted { .. }
-        | AgentEvent::TimelineItemFailed { .. }
+        AgentEvent::TracePartStarted { .. }
+        | AgentEvent::TracePartDelta { .. }
+        | AgentEvent::TracePartCompleted { .. }
+        | AgentEvent::TracePartFailed { .. }
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentStateChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
@@ -482,7 +481,7 @@ fn studio_agent_timeline_event(session_id: &str, event: AgentEvent) -> StudioAge
         | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::Done
         | AgentEvent::Error { .. } => {
-            unreachable!("non agent timeline events are filtered before mapping")
+            unreachable!("non agent trace events are filtered before mapping")
         }
     };
     StudioAgentTimelineEvent {
@@ -494,9 +493,9 @@ fn studio_agent_timeline_event(session_id: &str, event: AgentEvent) -> StudioAge
     }
 }
 
-fn studio_message_from_timeline_item(session_id: &str, item: &TimelineItem) -> StudioMessage {
-    let role = message_role_for_timeline_item(item);
-    let status = message_status_for_timeline_item(item);
+fn studio_message_from_trace_part(session_id: &str, item: &TracePart) -> StudioMessage {
+    let role = message_role_for_trace_part(item);
+    let status = message_status_for_trace_part(item);
     let completed_at = matches!(
         status,
         StudioMessageStatus::Completed
@@ -505,7 +504,7 @@ fn studio_message_from_timeline_item(session_id: &str, item: &TimelineItem) -> S
     )
     .then_some(item.updated_at);
     StudioMessage {
-        message_id: message_id_for_timeline_item(item),
+        message_id: message_id_for_trace_part(item),
         session_id: session_id.to_string(),
         turn_id: item.turn_id.clone(),
         role,
@@ -513,14 +512,14 @@ fn studio_message_from_timeline_item(session_id: &str, item: &TimelineItem) -> S
         created_at: item.created_at,
         updated_at: item.updated_at,
         completed_at,
-        error: error_for_timeline_item(item),
+        error: error_for_trace_part(item),
         metadata: serde_json::json!({}),
     }
 }
 
-fn studio_part_from_timeline_item(session_id: &str, item: TimelineItem) -> StudioPart {
-    let part_type = part_type_for_timeline_kind(item.kind);
-    let status = part_status_for_timeline_status(item.status);
+fn studio_part_from_trace_part(session_id: &str, item: TracePart) -> StudioPart {
+    let part_type = part_type_for_trace_kind(item.kind);
+    let status = part_status_for_trace_status(item.status);
     let completed_at = matches!(
         status,
         StudioPartStatus::Completed
@@ -530,8 +529,8 @@ fn studio_part_from_timeline_item(session_id: &str, item: TimelineItem) -> Studi
     )
     .then_some(item.updated_at);
     let text = part_text(&item);
-    let message_id = message_id_for_timeline_item(&item);
-    let part_id = part_id_for_timeline_item(&item);
+    let message_id = message_id_for_trace_part(&item);
+    let part_id = part_id_for_trace_part(&item);
     let error = error_for_part_status(status, &item.content);
     let tool = item.tool.map(studio_tool_part);
     let agent = item.agent.map(studio_agent_part);
@@ -577,25 +576,25 @@ fn studio_part_from_timeline_item(session_id: &str, item: TimelineItem) -> Studi
     }
 }
 
-fn part_id_for_timeline_item(item: &TimelineItem) -> String {
+fn part_id_for_trace_part(item: &TracePart) -> String {
     match (item.kind, item.text_channel) {
-        (TimelineItemKind::Text, Some(TimelineTextChannel::User)) => {
+        (TracePartKind::Text, Some(TraceTextChannel::User)) => {
             format!("{}:user-text", item.turn_id)
         }
-        (TimelineItemKind::Text, Some(TimelineTextChannel::Commentary))
-        | (TimelineItemKind::Text, Some(TimelineTextChannel::Final))
-        | (TimelineItemKind::Text, None)
-        | (TimelineItemKind::Thinking, _)
-        | (TimelineItemKind::Tool, _)
-        | (TimelineItemKind::Agent, _)
-        | (TimelineItemKind::Turn, _)
-        | (TimelineItemKind::Inference, _)
-        | (TimelineItemKind::Plan, _) => item.item_id.clone(),
+        (TracePartKind::Text, Some(TraceTextChannel::Commentary))
+        | (TracePartKind::Text, Some(TraceTextChannel::Final))
+        | (TracePartKind::Text, None)
+        | (TracePartKind::Thinking, _)
+        | (TracePartKind::Tool, _)
+        | (TracePartKind::Agent, _)
+        | (TracePartKind::Turn, _)
+        | (TracePartKind::Inference, _)
+        | (TracePartKind::Plan, _) => item.item_id.clone(),
     }
 }
 
-fn message_id_for_timeline_item(item: &TimelineItem) -> String {
-    let suffix = match message_role_for_timeline_item(item) {
+fn message_id_for_trace_part(item: &TracePart) -> String {
+    let suffix = match message_role_for_trace_part(item) {
         StudioMessageRole::User => "user",
         StudioMessageRole::Assistant => "assistant",
         StudioMessageRole::System => "system",
@@ -603,119 +602,113 @@ fn message_id_for_timeline_item(item: &TimelineItem) -> String {
     format!("{}:{suffix}", item.turn_id)
 }
 
-fn message_id_for_timeline_event(event: &TimelineItemDeltaEvent) -> String {
+fn message_id_for_trace_delta(event: &TracePartDeltaEvent) -> String {
     let suffix = match event.kind {
-        TimelineItemKind::Text => match &event.delta {
-            TimelineDelta::Text {
-                text_channel: TimelineTextChannel::User,
+        TracePartKind::Text => match &event.delta {
+            TraceDelta::Text {
+                text_channel: TraceTextChannel::User,
                 ..
             } => "user",
-            TimelineDelta::Text {
-                text_channel: TimelineTextChannel::Commentary | TimelineTextChannel::Final,
+            TraceDelta::Text {
+                text_channel: TraceTextChannel::Commentary | TraceTextChannel::Final,
                 ..
             } => "assistant",
-            TimelineDelta::Thinking { .. }
-            | TimelineDelta::ToolArguments { .. }
-            | TimelineDelta::ToolResult { .. }
-            | TimelineDelta::Plan { .. } => "assistant",
+            TraceDelta::Thinking { .. }
+            | TraceDelta::ToolArguments { .. }
+            | TraceDelta::ToolResult { .. }
+            | TraceDelta::Plan { .. } => "assistant",
         },
-        TimelineItemKind::Thinking
-        | TimelineItemKind::Tool
-        | TimelineItemKind::Agent
-        | TimelineItemKind::Turn
-        | TimelineItemKind::Inference
-        | TimelineItemKind::Plan => "assistant",
+        TracePartKind::Thinking
+        | TracePartKind::Tool
+        | TracePartKind::Agent
+        | TracePartKind::Turn
+        | TracePartKind::Inference
+        | TracePartKind::Plan => "assistant",
     };
     format!("{}:{suffix}", event.turn_id)
 }
 
-fn message_role_for_timeline_item(item: &TimelineItem) -> StudioMessageRole {
+fn message_role_for_trace_part(item: &TracePart) -> StudioMessageRole {
     match item.kind {
-        TimelineItemKind::Text => match item.text_channel {
-            Some(TimelineTextChannel::User) => StudioMessageRole::User,
-            Some(TimelineTextChannel::Commentary | TimelineTextChannel::Final) | None => {
+        TracePartKind::Text => match item.text_channel {
+            Some(TraceTextChannel::User) => StudioMessageRole::User,
+            Some(TraceTextChannel::Commentary | TraceTextChannel::Final) | None => {
                 StudioMessageRole::Assistant
             }
         },
-        TimelineItemKind::Thinking
-        | TimelineItemKind::Tool
-        | TimelineItemKind::Agent
-        | TimelineItemKind::Turn
-        | TimelineItemKind::Inference
-        | TimelineItemKind::Plan => StudioMessageRole::Assistant,
+        TracePartKind::Thinking
+        | TracePartKind::Tool
+        | TracePartKind::Agent
+        | TracePartKind::Turn
+        | TracePartKind::Inference
+        | TracePartKind::Plan => StudioMessageRole::Assistant,
     }
 }
 
-fn message_status_for_timeline_item(item: &TimelineItem) -> StudioMessageStatus {
+fn message_status_for_trace_part(item: &TracePart) -> StudioMessageStatus {
     match item.status {
-        TimelineItemStatus::Started
-        | TimelineItemStatus::Streaming
-        | TimelineItemStatus::AwaitingApproval
-        | TimelineItemStatus::Approved
-        | TimelineItemStatus::Running => StudioMessageStatus::Streaming,
-        TimelineItemStatus::Completed | TimelineItemStatus::Denied => {
-            StudioMessageStatus::Completed
-        }
-        TimelineItemStatus::Failed | TimelineItemStatus::BudgetLimited => {
-            StudioMessageStatus::Failed
-        }
-        TimelineItemStatus::Interrupted => StudioMessageStatus::Cancelled,
+        TracePartStatus::Started
+        | TracePartStatus::Streaming
+        | TracePartStatus::AwaitingApproval
+        | TracePartStatus::Approved
+        | TracePartStatus::Running => StudioMessageStatus::Streaming,
+        TracePartStatus::Completed | TracePartStatus::Denied => StudioMessageStatus::Completed,
+        TracePartStatus::Failed | TracePartStatus::BudgetLimited => StudioMessageStatus::Failed,
+        TracePartStatus::Interrupted => StudioMessageStatus::Cancelled,
     }
 }
 
-fn part_type_for_timeline_kind(kind: TimelineItemKind) -> StudioPartType {
+fn part_type_for_trace_kind(kind: TracePartKind) -> StudioPartType {
     match kind {
-        TimelineItemKind::Text => StudioPartType::Text,
-        TimelineItemKind::Thinking => StudioPartType::Reasoning,
-        TimelineItemKind::Tool => StudioPartType::Tool,
-        TimelineItemKind::Agent => StudioPartType::Agent,
-        TimelineItemKind::Turn => StudioPartType::Turn,
-        TimelineItemKind::Inference => StudioPartType::Inference,
-        TimelineItemKind::Plan => StudioPartType::Plan,
+        TracePartKind::Text => StudioPartType::Text,
+        TracePartKind::Thinking => StudioPartType::Reasoning,
+        TracePartKind::Tool => StudioPartType::Tool,
+        TracePartKind::Agent => StudioPartType::Agent,
+        TracePartKind::Turn => StudioPartType::Turn,
+        TracePartKind::Inference => StudioPartType::Inference,
+        TracePartKind::Plan => StudioPartType::Plan,
     }
 }
 
-fn part_status_for_timeline_status(status: TimelineItemStatus) -> StudioPartStatus {
+fn part_status_for_trace_status(status: TracePartStatus) -> StudioPartStatus {
     match status {
-        TimelineItemStatus::Started => StudioPartStatus::Started,
-        TimelineItemStatus::Streaming => StudioPartStatus::Streaming,
-        TimelineItemStatus::AwaitingApproval => StudioPartStatus::AwaitingApproval,
-        TimelineItemStatus::Approved => StudioPartStatus::Approved,
-        TimelineItemStatus::Denied => StudioPartStatus::Denied,
-        TimelineItemStatus::Running => StudioPartStatus::Running,
-        TimelineItemStatus::Completed => StudioPartStatus::Completed,
-        TimelineItemStatus::Failed => StudioPartStatus::Failed,
-        TimelineItemStatus::Interrupted => StudioPartStatus::Interrupted,
-        TimelineItemStatus::BudgetLimited => StudioPartStatus::BudgetLimited,
+        TracePartStatus::Started => StudioPartStatus::Started,
+        TracePartStatus::Streaming => StudioPartStatus::Streaming,
+        TracePartStatus::AwaitingApproval => StudioPartStatus::AwaitingApproval,
+        TracePartStatus::Approved => StudioPartStatus::Approved,
+        TracePartStatus::Denied => StudioPartStatus::Denied,
+        TracePartStatus::Running => StudioPartStatus::Running,
+        TracePartStatus::Completed => StudioPartStatus::Completed,
+        TracePartStatus::Failed => StudioPartStatus::Failed,
+        TracePartStatus::Interrupted => StudioPartStatus::Interrupted,
+        TracePartStatus::BudgetLimited => StudioPartStatus::BudgetLimited,
     }
 }
 
-fn studio_text_channel(channel: TimelineTextChannel) -> StudioTextChannel {
+fn studio_text_channel(channel: TraceTextChannel) -> StudioTextChannel {
     match channel {
-        TimelineTextChannel::User => StudioTextChannel::User,
-        TimelineTextChannel::Commentary => StudioTextChannel::Commentary,
-        TimelineTextChannel::Final => StudioTextChannel::Final,
+        TraceTextChannel::User => StudioTextChannel::User,
+        TraceTextChannel::Commentary => StudioTextChannel::Commentary,
+        TraceTextChannel::Final => StudioTextChannel::Final,
     }
 }
 
-fn part_text(item: &TimelineItem) -> String {
+fn part_text(item: &TracePart) -> String {
     match item.kind {
-        TimelineItemKind::Text | TimelineItemKind::Plan | TimelineItemKind::Turn => {
-            item.content.clone()
-        }
-        TimelineItemKind::Thinking => item
+        TracePartKind::Text | TracePartKind::Plan | TracePartKind::Turn => item.content.clone(),
+        TracePartKind::Thinking => item
             .thinking_chunks
             .iter()
             .map(|chunk| chunk.content.as_str())
             .collect::<Vec<_>>()
             .join(""),
-        TimelineItemKind::Tool | TimelineItemKind::Agent | TimelineItemKind::Inference => {
+        TracePartKind::Tool | TracePartKind::Agent | TracePartKind::Inference => {
             item.content.clone()
         }
     }
 }
 
-fn studio_tool_part(tool: TimelineToolItem) -> StudioToolPart {
+fn studio_tool_part(tool: TraceToolPart) -> StudioToolPart {
     StudioToolPart {
         tool_call_id: tool.tool_call_id,
         call_id: tool.call_id,
@@ -730,7 +723,7 @@ fn studio_tool_part(tool: TimelineToolItem) -> StudioToolPart {
     }
 }
 
-fn studio_agent_part(agent: TimelineAgentItem) -> StudioAgentPart {
+fn studio_agent_part(agent: TraceAgentPart) -> StudioAgentPart {
     StudioAgentPart {
         id: agent.id,
         path: agent.path,
@@ -745,27 +738,25 @@ fn studio_agent_part(agent: TimelineAgentItem) -> StudioAgentPart {
     }
 }
 
-fn studio_inference_part(inference: TimelineInferenceItem) -> StudioInferencePart {
+fn studio_inference_part(inference: TraceInferencePart) -> StudioInferencePart {
     StudioInferencePart {
         inference_id: inference.inference_id,
         model: inference.model,
     }
 }
 
-fn error_for_timeline_item(item: &TimelineItem) -> Option<String> {
+fn error_for_trace_part(item: &TracePart) -> Option<String> {
     match item.status {
-        TimelineItemStatus::Failed
-        | TimelineItemStatus::Interrupted
-        | TimelineItemStatus::BudgetLimited => {
+        TracePartStatus::Failed | TracePartStatus::Interrupted | TracePartStatus::BudgetLimited => {
             (!item.content.trim().is_empty()).then(|| item.content.clone())
         }
-        TimelineItemStatus::Started
-        | TimelineItemStatus::Streaming
-        | TimelineItemStatus::AwaitingApproval
-        | TimelineItemStatus::Approved
-        | TimelineItemStatus::Denied
-        | TimelineItemStatus::Running
-        | TimelineItemStatus::Completed => None,
+        TracePartStatus::Started
+        | TracePartStatus::Streaming
+        | TracePartStatus::AwaitingApproval
+        | TracePartStatus::Approved
+        | TracePartStatus::Denied
+        | TracePartStatus::Running
+        | TracePartStatus::Completed => None,
     }
 }
 

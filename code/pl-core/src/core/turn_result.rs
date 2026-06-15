@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use pl_model::ModelCapabilities;
-use pl_protocol::{AgentEvent, BudgetLimitKind, BudgetUsage, ErrorSeverity, TimelineItemStatus};
+use pl_protocol::{AgentEvent, BudgetLimitKind, BudgetUsage, ErrorSeverity, TracePartStatus};
 
 use crate::trace::TraceRecorder;
 use crate::turn::{
@@ -102,7 +102,7 @@ pub(super) fn interrupted_turn_result(
 ) -> TurnResult {
     usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
     recorder.ensure_assistant_text_item(turn_id, &content);
-    let mut item = recorder.turn_item(turn_id, TimelineItemStatus::Interrupted);
+    let mut item = recorder.turn_item(turn_id, TracePartStatus::Interrupted);
     item.content = content.clone();
     recorder.fail_item(item, reason.clone());
     recorder.broadcast(AgentEvent::TurnInterrupted { reason });
@@ -120,7 +120,7 @@ pub(super) fn interrupted_turn_result(
         error: None,
         budget_limit_kind: None,
         budget_usage: None,
-        timeline_events: recorder.drain(),
+        trace_events: recorder.drain(),
     }
 }
 
@@ -168,7 +168,7 @@ pub(super) fn failed_turn_result_with_abort_reason(
 ) -> TurnResult {
     usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
     recorder.ensure_assistant_text_item(turn_id, &content);
-    let mut item = recorder.turn_item(turn_id, TimelineItemStatus::Failed);
+    let mut item = recorder.turn_item(turn_id, TracePartStatus::Failed);
     item.content = content.clone();
     recorder.fail_item(item, error.clone());
     recorder.broadcast(AgentEvent::Error {
@@ -189,7 +189,7 @@ pub(super) fn failed_turn_result_with_abort_reason(
         error: Some(error),
         budget_limit_kind: None,
         budget_usage: None,
-        timeline_events: recorder.drain(),
+        trace_events: recorder.drain(),
     }
 }
 
@@ -209,7 +209,7 @@ pub(super) fn budget_limited_turn_result(
 ) -> TurnResult {
     usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
     recorder.ensure_assistant_text_item(turn_id, &content);
-    let mut item = recorder.turn_item(turn_id, TimelineItemStatus::BudgetLimited);
+    let mut item = recorder.turn_item(turn_id, TracePartStatus::BudgetLimited);
     item.content = content.clone();
     recorder.fail_item(item, reason.clone());
     recorder.broadcast(AgentEvent::TurnBudgetLimited {
@@ -231,7 +231,7 @@ pub(super) fn budget_limited_turn_result(
         error: None,
         budget_limit_kind: Some(limit_kind),
         budget_usage: Some(budget_usage),
-        timeline_events: recorder.drain(),
+        trace_events: recorder.drain(),
     }
 }
 

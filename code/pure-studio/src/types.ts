@@ -431,9 +431,9 @@ export type UsageSnapshot = {
   totalTokens: number;
 };
 
-export type TimelineTextChannel = "user" | "commentary" | "final";
+export type StudioTextChannel = "user" | "commentary" | "final";
 
-export type TimelineAttachment = {
+export type StudioAttachment = {
   id: string;
   mediaType: string;
   filename?: string | null;
@@ -496,9 +496,9 @@ export type TimelinePartView = {
   status: ToolCallStatus2;
   createdAt: number;
   updatedAt: number;
-  textChannel?: TimelineTextChannel | null;
+  textChannel?: StudioTextChannel | null;
   content: string;
-  attachments?: TimelineAttachment[];
+  attachments?: StudioAttachment[];
   thinkingChunks: { chunkIndex: number; content: string }[];
   tool?: StudioToolPart | null;
   agent?: StudioAgentPart | null;
@@ -798,8 +798,6 @@ export type StudioPartType =
 
 export type StudioPartStatus = ToolCallStatus2;
 
-export type StudioAttachment = TimelineAttachment;
-
 export type StudioPart = {
   partId: string;
   messageId: string;
@@ -812,7 +810,7 @@ export type StudioPart = {
   updatedAt: number;
   completedAt?: number | null;
   error?: string | null;
-  textChannel?: TimelineTextChannel | null;
+  textChannel?: StudioTextChannel | null;
   text: string;
   attachments?: StudioAttachment[];
   tool?: StudioToolPart | null;

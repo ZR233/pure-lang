@@ -902,7 +902,7 @@ mod tests {
                 summary: None,
             }),
             stream: true,
-            timeline: None,
+            trace: None,
         }
     }
 
@@ -923,7 +923,7 @@ mod tests {
             max_tokens: None,
             reasoning: None,
             stream: true,
-            timeline: None,
+            trace: None,
         };
 
         let responses_body = OpenAiProtocol::responses().build_request_body(&request);
@@ -967,7 +967,7 @@ mod tests {
             max_tokens: None,
             reasoning: None,
             stream: true,
-            timeline: None,
+            trace: None,
         };
 
         let body = OpenAiProtocol::responses().build_request_body(&request);
@@ -994,7 +994,7 @@ mod tests {
             max_tokens: None,
             reasoning: None,
             stream: true,
-            timeline: None,
+            trace: None,
         };
 
         let body = OpenAiProtocol::chat().build_request_body(&request);
@@ -1043,7 +1043,7 @@ mod tests {
             max_tokens: None,
             reasoning: None,
             stream: true,
-            timeline: None,
+            trace: None,
         }
     }
 
@@ -1085,7 +1085,7 @@ mod tests {
             max_tokens: None,
             reasoning: None,
             stream: true,
-            timeline: None,
+            trace: None,
         }
     }
 
@@ -1540,7 +1540,7 @@ mod tests {
             max_tokens: None,
             reasoning: None,
             stream: true,
-            timeline: None,
+            trace: None,
         };
 
         let error = OpenAiProtocol::responses()
@@ -1612,7 +1612,7 @@ mod tests {
             max_tokens: None,
             reasoning: None,
             stream: true,
-            timeline: None,
+            trace: None,
         };
 
         let responses_error = OpenAiProtocol::responses()

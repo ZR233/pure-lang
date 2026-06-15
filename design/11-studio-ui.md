@@ -116,7 +116,7 @@ Markdown 阅读样式属于 timeline 展示层：assistant 正文和 plan 卡片
 - `SessionStateResponse`
 - `StudioEventsResponse`
 
-`submit_prompt` 接收 `attachmentIds`，当附件非空时允许 `prompt` 为空。图片附件先通过独立上传命令写入 Studio app data，再以附件 id 引用；前端不得把 base64 图片直接塞进 prompt 文本。旧字段别名、旧 payload 解析逻辑、旧 text/thinking/tool delta reducer 分支在方案乙中删除。`SubmitPromptResponse` 只表示后台 turn 已提交，包含 `sessionId`、`turnId` 和当前 cursor；不得携带最终 timeline 结果。`SessionStateResponse.messages` / `parts` 返回当前 message/part projection record，`SessionStateResponse.events` 只附带非 message/part durable 状态事件；`StudioEventsResponse.events` 返回补拉的 durable `StudioEventEnvelope[]`。`StudioMessage` / `StudioPart` 是前端 reducer 的事实源，timeline 展示只能使用 selector 派生的 `TimelinePartView` / `TimelineEntry`，不得再把旧 `TimelineItem` 命名或 DTO 作为 Studio UI 事实源。
+`submit_prompt` 接收 `attachmentIds`，当附件非空时允许 `prompt` 为空。图片附件先通过独立上传命令写入 Studio app data，再以附件 id 引用；前端不得把 base64 图片直接塞进 prompt 文本。旧字段别名、旧 payload 解析逻辑、旧 text/thinking/tool delta reducer 分支在方案乙中删除。`SubmitPromptResponse` 只表示后台 turn 已提交，包含 `sessionId`、`turnId` 和当前 cursor；不得携带最终 timeline 结果。`SessionStateResponse.messages` / `parts` 返回当前 message/part projection record，`SessionStateResponse.events` 只附带非 message/part durable 状态事件；`StudioEventsResponse.events` 返回补拉的 durable `StudioEventEnvelope[]`。`StudioMessage` / `StudioPart` 是前端 reducer 的事实源，timeline 展示只能使用 selector 派生的 `TimelinePartView` / `TimelineEntry`，不得再把旧 timeline DTO 或内部 `TracePart` 作为 Studio UI 事实源。
 
 ## 5. 选择器与派生数据
 

@@ -1,25 +1,24 @@
 use std::collections::HashMap;
 
 use pl_protocol::{
-    AgentEvent, TimelineDelta, TimelineItem, TimelineItemDeltaEvent, TimelineItemKind,
-    TimelineItemStatus, TimelineTextChannel, TimelineThinkingChunk, TimelineToolItem, TraceEvent,
-    TraceEventKind,
+    AgentEvent, TraceDelta, TraceEvent, TraceEventKind, TracePart, TracePartDeltaEvent,
+    TracePartKind, TracePartStatus, TraceTextChannel, TraceThinkingChunk, TraceToolPart,
 };
 
-use crate::request::{CompletionTimelineContext, ToolCall};
+use crate::request::{CompletionTraceContext, ToolCall};
 
-use super::tool_stream::{ToolCallAccumulatorSnapshot, timeline_tool_item_id};
+use super::tool_stream::{ToolCallAccumulatorSnapshot, trace_tool_part_id};
 
-pub(crate) struct TimelineProjection {
+pub(crate) struct TraceProjection {
     session_id: String,
     turn_id: String,
     sequence: u64,
-    started: HashMap<String, TimelineItem>,
+    started: HashMap<String, TracePart>,
     events: Vec<TraceEvent>,
 }
 
-impl TimelineProjection {
-    pub(crate) fn new(context: CompletionTimelineContext) -> Self {
+impl TraceProjection {
+    pub(crate) fn new(context: CompletionTraceContext) -> Self {
         Self {
             session_id: context.session_id,
             turn_id: context.turn_id,
@@ -40,18 +39,18 @@ impl TimelineProjection {
     pub(crate) fn start_text(
         &mut self,
         item_id: &str,
-        text_channel: TimelineTextChannel,
+        text_channel: TraceTextChannel,
     ) -> Vec<AgentEvent> {
         let now = unix_seconds();
         let item_id = self.namespaced_item_id(item_id);
         let mut events = Vec::new();
         if !self.started.contains_key(&item_id) {
-            let item = TimelineItem {
+            let item = TracePart {
                 turn_id: self.turn_id.clone(),
                 item_id: item_id.clone(),
                 started_sequence: self.sequence,
-                kind: TimelineItemKind::Text,
-                status: TimelineItemStatus::Streaming,
+                kind: TracePartKind::Text,
+                status: TracePartStatus::Streaming,
                 created_at: now,
                 updated_at: now,
                 text_channel: Some(text_channel),
@@ -63,11 +62,8 @@ impl TimelineProjection {
                 inference: None,
                 usage: None,
             };
-            self.record(
-                TraceEventKind::TimelineItemStarted { item: item.clone() },
-                now,
-            );
-            events.push(AgentEvent::TimelineItemStarted { item: item.clone() });
+            self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now);
+            events.push(AgentEvent::TracePartStarted { item: item.clone() });
             self.started.insert(item_id.clone(), item);
         }
         events
@@ -76,46 +72,46 @@ impl TimelineProjection {
     pub(crate) fn append_text_delta(
         &mut self,
         item_id: &str,
-        text_channel: TimelineTextChannel,
+        text_channel: TraceTextChannel,
         delta: String,
     ) -> Vec<AgentEvent> {
         let now = unix_seconds();
         let mut events = self.start_text(item_id, text_channel);
         let item_id = self.namespaced_item_id(item_id);
         if let Some(item) = self.started.get_mut(&item_id) {
-            item.status = TimelineItemStatus::Streaming;
+            item.status = TracePartStatus::Streaming;
             item.updated_at = now;
             item.content.push_str(&delta);
         }
-        let event = TimelineItemDeltaEvent {
+        let event = TracePartDeltaEvent {
             turn_id: self.turn_id.clone(),
             item_id,
             started_sequence: self.sequence,
-            kind: TimelineItemKind::Text,
-            status: TimelineItemStatus::Streaming,
+            kind: TracePartKind::Text,
+            status: TracePartStatus::Streaming,
             created_at: now,
             updated_at: now,
-            delta: TimelineDelta::Text {
+            delta: TraceDelta::Text {
                 text_channel,
                 delta,
             },
         };
         self.record(
-            TraceEventKind::TimelineItemDelta {
+            TraceEventKind::TracePartDelta {
                 event: event.clone(),
             },
             now,
         );
-        events.push(AgentEvent::TimelineItemDelta { event });
+        events.push(AgentEvent::TracePartDelta { event });
         events
     }
 
     pub(crate) fn complete_text(
         &mut self,
         item_id: &str,
-        text_channel: TimelineTextChannel,
+        text_channel: TraceTextChannel,
     ) -> Vec<AgentEvent> {
-        self.complete_item(item_id, TimelineItemKind::Text, Some(text_channel))
+        self.complete_item(item_id, TracePartKind::Text, Some(text_channel))
     }
 
     pub(crate) fn start_plan(&mut self, item_id: &str) -> Vec<AgentEvent> {
@@ -124,12 +120,12 @@ impl TimelineProjection {
         if self.started.contains_key(&item_id) {
             return Vec::new();
         }
-        let item = TimelineItem {
+        let item = TracePart {
             turn_id: self.turn_id.clone(),
             item_id: item_id.clone(),
             started_sequence: self.sequence,
-            kind: TimelineItemKind::Plan,
-            status: TimelineItemStatus::Streaming,
+            kind: TracePartKind::Plan,
+            status: TracePartStatus::Streaming,
             created_at: now,
             updated_at: now,
             text_channel: None,
@@ -141,12 +137,9 @@ impl TimelineProjection {
             inference: None,
             usage: None,
         };
-        self.record(
-            TraceEventKind::TimelineItemStarted { item: item.clone() },
-            now,
-        );
+        self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now);
         self.started.insert(item_id, item.clone());
-        vec![AgentEvent::TimelineItemStarted { item }]
+        vec![AgentEvent::TracePartStarted { item }]
     }
 
     pub(crate) fn append_plan_delta(&mut self, item_id: &str, delta: String) -> Vec<AgentEvent> {
@@ -154,33 +147,33 @@ impl TimelineProjection {
         let mut events = self.start_plan(item_id);
         let item_id = self.plan_item_id(item_id);
         if let Some(item) = self.started.get_mut(&item_id) {
-            item.status = TimelineItemStatus::Streaming;
+            item.status = TracePartStatus::Streaming;
             item.updated_at = now;
             item.content.push_str(&delta);
         }
-        let event = TimelineItemDeltaEvent {
+        let event = TracePartDeltaEvent {
             turn_id: self.turn_id.clone(),
             item_id,
             started_sequence: self.sequence,
-            kind: TimelineItemKind::Plan,
-            status: TimelineItemStatus::Streaming,
+            kind: TracePartKind::Plan,
+            status: TracePartStatus::Streaming,
             created_at: now,
             updated_at: now,
-            delta: TimelineDelta::Plan { delta },
+            delta: TraceDelta::Plan { delta },
         };
         self.record(
-            TraceEventKind::TimelineItemDelta {
+            TraceEventKind::TracePartDelta {
                 event: event.clone(),
             },
             now,
         );
-        events.push(AgentEvent::TimelineItemDelta { event });
+        events.push(AgentEvent::TracePartDelta { event });
         events
     }
 
     pub(crate) fn complete_plan(&mut self, item_id: &str) -> Vec<AgentEvent> {
         let item_id = self.plan_item_id(item_id);
-        self.complete_item_by_resolved_id(&item_id, TimelineItemKind::Plan, None)
+        self.complete_item_by_resolved_id(&item_id, TracePartKind::Plan, None)
     }
 
     pub(crate) fn start_thinking(&mut self, item_id: &str) -> Vec<AgentEvent> {
@@ -188,12 +181,12 @@ impl TimelineProjection {
         let item_id = self.namespaced_item_id(item_id);
         let mut events = Vec::new();
         if !self.started.contains_key(&item_id) {
-            let item = TimelineItem {
+            let item = TracePart {
                 turn_id: self.turn_id.clone(),
                 item_id: item_id.clone(),
                 started_sequence: self.sequence,
-                kind: TimelineItemKind::Thinking,
-                status: TimelineItemStatus::Streaming,
+                kind: TracePartKind::Thinking,
+                status: TracePartStatus::Streaming,
                 created_at: now,
                 updated_at: now,
                 text_channel: None,
@@ -205,11 +198,8 @@ impl TimelineProjection {
                 inference: None,
                 usage: None,
             };
-            self.record(
-                TraceEventKind::TimelineItemStarted { item: item.clone() },
-                now,
-            );
-            events.push(AgentEvent::TimelineItemStarted { item: item.clone() });
+            self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now);
+            events.push(AgentEvent::TracePartStarted { item: item.clone() });
             self.started.insert(item_id, item);
         }
         events
@@ -225,7 +215,7 @@ impl TimelineProjection {
         let mut events = self.start_thinking(item_id);
         let item_id = self.namespaced_item_id(item_id);
         if let Some(item) = self.started.get_mut(&item_id) {
-            item.status = TimelineItemStatus::Streaming;
+            item.status = TracePartStatus::Streaming;
             item.updated_at = now;
             match item
                 .thinking_chunks
@@ -233,59 +223,57 @@ impl TimelineProjection {
                 .find(|chunk| chunk.chunk_index == chunk_index)
             {
                 Some(chunk) => chunk.content.push_str(&delta),
-                None => item.thinking_chunks.push(TimelineThinkingChunk {
+                None => item.thinking_chunks.push(TraceThinkingChunk {
                     chunk_index,
                     content: delta.clone(),
                 }),
             }
             item.thinking_chunks.sort_by_key(|chunk| chunk.chunk_index);
         }
-        let event = TimelineItemDeltaEvent {
+        let event = TracePartDeltaEvent {
             turn_id: self.turn_id.clone(),
             item_id,
             started_sequence: self.sequence,
-            kind: TimelineItemKind::Thinking,
-            status: TimelineItemStatus::Streaming,
+            kind: TracePartKind::Thinking,
+            status: TracePartStatus::Streaming,
             created_at: now,
             updated_at: now,
-            delta: TimelineDelta::Thinking { chunk_index, delta },
+            delta: TraceDelta::Thinking { chunk_index, delta },
         };
         self.record(
-            TraceEventKind::TimelineItemDelta {
+            TraceEventKind::TracePartDelta {
                 event: event.clone(),
             },
             now,
         );
-        events.push(AgentEvent::TimelineItemDelta { event });
+        events.push(AgentEvent::TracePartDelta { event });
         events
     }
 
     pub(crate) fn complete_thinking(&mut self, item_id: &str) -> Vec<AgentEvent> {
-        self.complete_item(item_id, TimelineItemKind::Thinking, None)
+        self.complete_item(item_id, TracePartKind::Thinking, None)
     }
 
     pub(crate) fn start_tool(&mut self, snapshot: &ToolCallAccumulatorSnapshot) -> Vec<AgentEvent> {
         let now = unix_seconds();
-        let item_id = self.namespaced_item_id(&timeline_tool_item_id(
-            snapshot.call_id.as_ref(),
-            &snapshot.id,
-        ));
+        let item_id =
+            self.namespaced_item_id(&trace_tool_part_id(snapshot.call_id.as_ref(), &snapshot.id));
         if self.started.contains_key(&item_id) {
             return Vec::new();
         }
-        let item = TimelineItem {
+        let item = TracePart {
             turn_id: self.turn_id.clone(),
             item_id: item_id.clone(),
             started_sequence: self.sequence,
-            kind: TimelineItemKind::Tool,
-            status: TimelineItemStatus::Streaming,
+            kind: TracePartKind::Tool,
+            status: TracePartStatus::Streaming,
             created_at: now,
             updated_at: now,
             text_channel: None,
             content: String::new(),
             attachments: Vec::new(),
             thinking_chunks: Vec::new(),
-            tool: Some(TimelineToolItem {
+            tool: Some(TraceToolPart {
                 tool_call_id: item_id.clone(),
                 call_id: snapshot.call_id.clone(),
                 provider_item_id: (!snapshot.id.is_empty()).then(|| snapshot.id.clone()),
@@ -301,12 +289,9 @@ impl TimelineProjection {
             inference: None,
             usage: None,
         };
-        self.record(
-            TraceEventKind::TimelineItemStarted { item: item.clone() },
-            now,
-        );
+        self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now);
         self.started.insert(item_id, item.clone());
-        vec![AgentEvent::TimelineItemStarted { item }]
+        vec![AgentEvent::TracePartStarted { item }]
     }
 
     pub(crate) fn append_tool_arguments_delta(
@@ -315,13 +300,11 @@ impl TimelineProjection {
         delta: String,
     ) -> Vec<AgentEvent> {
         let now = unix_seconds();
-        let item_id = self.namespaced_item_id(&timeline_tool_item_id(
-            snapshot.call_id.as_ref(),
-            &snapshot.id,
-        ));
+        let item_id =
+            self.namespaced_item_id(&trace_tool_part_id(snapshot.call_id.as_ref(), &snapshot.id));
         let mut events = self.start_tool(snapshot);
         if let Some(item) = self.started.get_mut(&item_id) {
-            item.status = TimelineItemStatus::Streaming;
+            item.status = TracePartStatus::Streaming;
             item.updated_at = now;
             if let Some(tool) = &mut item.tool {
                 tool.name = snapshot.name.clone();
@@ -330,23 +313,23 @@ impl TimelineProjection {
                 tool.provider_item_id = (!snapshot.id.is_empty()).then(|| snapshot.id.clone());
             }
         }
-        let event = TimelineItemDeltaEvent {
+        let event = TracePartDeltaEvent {
             turn_id: self.turn_id.clone(),
             item_id,
             started_sequence: self.sequence,
-            kind: TimelineItemKind::Tool,
-            status: TimelineItemStatus::Streaming,
+            kind: TracePartKind::Tool,
+            status: TracePartStatus::Streaming,
             created_at: now,
             updated_at: now,
-            delta: TimelineDelta::ToolArguments { delta },
+            delta: TraceDelta::ToolArguments { delta },
         };
         self.record(
-            TraceEventKind::TimelineItemDelta {
+            TraceEventKind::TracePartDelta {
                 event: event.clone(),
             },
             now,
         );
-        events.push(AgentEvent::TimelineItemDelta { event });
+        events.push(AgentEvent::TracePartDelta { event });
         events
     }
 
@@ -357,7 +340,7 @@ impl TimelineProjection {
             .filter(|(_, item)| {
                 matches!(
                     item.kind,
-                    TimelineItemKind::Text | TimelineItemKind::Thinking | TimelineItemKind::Plan
+                    TracePartKind::Text | TracePartKind::Thinking | TracePartKind::Plan
                 )
             })
             .map(|(item_id, _)| item_id.clone())
@@ -367,28 +350,27 @@ impl TimelineProjection {
             let Some(item) = self.started.get_mut(&item_id) else {
                 continue;
             };
-            if item.status == TimelineItemStatus::Completed {
+            if item.status == TracePartStatus::Completed {
                 continue;
             }
-            item.status = TimelineItemStatus::Completed;
+            item.status = TracePartStatus::Completed;
             item.updated_at = unix_seconds();
             let item = item.clone();
             self.record(
-                TraceEventKind::TimelineItemCompleted { item: item.clone() },
+                TraceEventKind::TracePartCompleted { item: item.clone() },
                 item.updated_at,
             );
-            events.push(AgentEvent::TimelineItemCompleted { item });
+            events.push(AgentEvent::TracePartCompleted { item });
         }
         events
     }
 
     pub(crate) fn update_tool_trace_only(&mut self, call: &ToolCall) {
-        let item_id =
-            self.namespaced_item_id(&timeline_tool_item_id(call.call_id.as_ref(), &call.id));
+        let item_id = self.namespaced_item_id(&trace_tool_part_id(call.call_id.as_ref(), &call.id));
         let Some(item) = self.started.get_mut(&item_id) else {
             return;
         };
-        item.status = TimelineItemStatus::Started;
+        item.status = TracePartStatus::Started;
         item.updated_at = unix_seconds();
         if let Some(tool) = &mut item.tool {
             tool.tool_call_id = item_id;
@@ -414,8 +396,8 @@ impl TimelineProjection {
     fn complete_item(
         &mut self,
         item_id: &str,
-        kind: TimelineItemKind,
-        text_channel: Option<TimelineTextChannel>,
+        kind: TracePartKind,
+        text_channel: Option<TraceTextChannel>,
     ) -> Vec<AgentEvent> {
         let item_id = self.namespaced_item_id(item_id);
         self.complete_item_by_resolved_id(&item_id, kind, text_channel)
@@ -424,26 +406,26 @@ impl TimelineProjection {
     fn complete_item_by_resolved_id(
         &mut self,
         item_id: &str,
-        kind: TimelineItemKind,
-        text_channel: Option<TimelineTextChannel>,
+        kind: TracePartKind,
+        text_channel: Option<TraceTextChannel>,
     ) -> Vec<AgentEvent> {
         let Some(item) = self.started.get_mut(item_id) else {
             return Vec::new();
         };
         if item.kind != kind
             || item.text_channel != text_channel
-            || item.status == TimelineItemStatus::Completed
+            || item.status == TracePartStatus::Completed
         {
             return Vec::new();
         }
-        item.status = TimelineItemStatus::Completed;
+        item.status = TracePartStatus::Completed;
         item.updated_at = unix_seconds();
         let item = item.clone();
         self.record(
-            TraceEventKind::TimelineItemCompleted { item: item.clone() },
+            TraceEventKind::TracePartCompleted { item: item.clone() },
             item.updated_at,
         );
-        vec![AgentEvent::TimelineItemCompleted { item }]
+        vec![AgentEvent::TracePartCompleted { item }]
     }
 
     fn record(&mut self, kind: TraceEventKind, timestamp: i64) {

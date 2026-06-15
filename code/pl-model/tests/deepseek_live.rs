@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use pl_model::{
-    CompletionRequest, CompletionTimelineContext, ModelProvider, ProviderInfo, ReasoningConfig,
+    CompletionRequest, CompletionTraceContext, ModelProvider, ProviderInfo, ReasoningConfig,
     ReasoningSummary, create_provider,
 };
 use pl_protocol::{
-    AgentEvent, Message, MessageContent, MessageRole, TimelineDelta, TraceEvent, TraceEventKind,
+    AgentEvent, Message, MessageContent, MessageRole, TraceDelta, TraceEvent, TraceEventKind,
 };
 use tokio::sync::broadcast::error::RecvError;
 
@@ -57,7 +57,7 @@ fn deepseek_request(messages: Vec<Message>, turn_id: &str) -> CompletionRequest 
             summary: Some(ReasoningSummary::Enabled),
         }),
         stream: true,
-        timeline: Some(CompletionTimelineContext {
+        trace: Some(CompletionTraceContext {
             session_id: "live-session".to_string(),
             turn_id: turn_id.to_string(),
             inference_id: format!("{turn_id}-inference"),
@@ -73,7 +73,7 @@ struct TurnOutcome {
     thinking_delta_count: usize,
     #[allow(dead_code)]
     next_sequence: u64,
-    timeline_events: Vec<TraceEvent>,
+    trace_events: Vec<TraceEvent>,
 }
 
 async fn run_turn(api_key: &str, messages: Vec<Message>, turn_id: &str) -> TurnOutcome {
@@ -87,12 +87,12 @@ async fn run_turn(api_key: &str, messages: Vec<Message>, turn_id: &str) -> TurnO
         let mut thinking_delta_count = 0;
         loop {
             match event_rx.recv().await {
-                Ok(AgentEvent::TimelineItemDelta { event }) => match event.delta {
-                    TimelineDelta::Text { .. } => text_delta_count += 1,
-                    TimelineDelta::Thinking { .. } => thinking_delta_count += 1,
-                    TimelineDelta::ToolArguments { .. }
-                    | TimelineDelta::ToolResult { .. }
-                    | TimelineDelta::Plan { .. } => {}
+                Ok(AgentEvent::TracePartDelta { event }) => match event.delta {
+                    TraceDelta::Text { .. } => text_delta_count += 1,
+                    TraceDelta::Thinking { .. } => thinking_delta_count += 1,
+                    TraceDelta::ToolArguments { .. }
+                    | TraceDelta::ToolResult { .. }
+                    | TraceDelta::Plan { .. } => {}
                 },
                 Ok(_) => {}
                 Err(RecvError::Closed) => break,
@@ -113,19 +113,19 @@ async fn run_turn(api_key: &str, messages: Vec<Message>, turn_id: &str) -> TurnO
         text_delta_count,
         thinking_delta_count,
         next_sequence: response.next_sequence,
-        timeline_events: response.timeline_events,
+        trace_events: response.trace_events,
     }
 }
 
-/// 提取 timeline events 涉及的所有 item_id（去重）。
-fn timeline_item_ids(events: &[TraceEvent]) -> Vec<String> {
+/// 提取 trace events 涉及的所有 item_id（去重）。
+fn trace_part_ids(events: &[TraceEvent]) -> Vec<String> {
     let mut ids: Vec<String> = events
         .iter()
         .filter_map(|event| match &event.kind {
-            TraceEventKind::TimelineItemStarted { item }
-            | TraceEventKind::TimelineItemCompleted { item }
-            | TraceEventKind::TimelineItemFailed { item, .. } => Some(item.item_id.clone()),
-            TraceEventKind::TimelineItemDelta { event } => Some(event.item_id.clone()),
+            TraceEventKind::TracePartStarted { item }
+            | TraceEventKind::TracePartCompleted { item }
+            | TraceEventKind::TracePartFailed { item, .. } => Some(item.item_id.clone()),
+            TraceEventKind::TracePartDelta { event } => Some(event.item_id.clone()),
             _ => None,
         })
         .collect();
@@ -134,13 +134,13 @@ fn timeline_item_ids(events: &[TraceEvent]) -> Vec<String> {
     ids
 }
 
-/// 断言 timeline events 的 sequence 严格递增（同 turn 内）。
+/// 断言 trace events 的 sequence 严格递增（同 turn 内）。
 fn assert_sequences_strictly_increasing(events: &[TraceEvent]) {
     let sequences: Vec<u64> = events.iter().map(|event| event.sequence).collect();
     for window in sequences.windows(2) {
         assert!(
             window[0] < window[1],
-            "timeline sequence not strictly increasing: {sequences:?}"
+            "trace sequence not strictly increasing: {sequences:?}"
         );
     }
 }
@@ -160,14 +160,14 @@ async fn deepseek_streams_multi_turn_with_thinking_mode() {
     assert!(!first.reasoning_content.trim().is_empty());
     assert!(first.text_delta_count > 0);
     assert!(first.thinking_delta_count > 0);
-    assert!(!first.timeline_events.is_empty());
+    assert!(!first.trace_events.is_empty());
     // turn-1 的所有 item_id 必须以 "turn-1-" 前缀隔离
-    let first_ids = timeline_item_ids(&first.timeline_events);
+    let first_ids = trace_part_ids(&first.trace_events);
     assert!(
         first_ids.iter().all(|id| id.starts_with("turn-1-")),
         "turn-1 item ids must be turn-scoped: {first_ids:?}"
     );
-    assert_sequences_strictly_increasing(&first.timeline_events);
+    assert_sequences_strictly_increasing(&first.trace_events);
 
     let second_messages = vec![
         first_messages[0].clone(),
@@ -179,9 +179,9 @@ async fn deepseek_streams_multi_turn_with_thinking_mode() {
     assert!(!second.content.trim().is_empty());
     assert!(!second.reasoning_content.trim().is_empty());
     assert!(second.text_delta_count > 0);
-    assert!(!second.timeline_events.is_empty());
+    assert!(!second.trace_events.is_empty());
     // turn-2 的所有 item_id 必须以 "turn-2-" 前缀隔离
-    let second_ids = timeline_item_ids(&second.timeline_events);
+    let second_ids = trace_part_ids(&second.trace_events);
     assert!(
         second_ids.iter().all(|id| id.starts_with("turn-2-")),
         "turn-2 item ids must be turn-scoped: {second_ids:?}"
@@ -191,7 +191,7 @@ async fn deepseek_streams_multi_turn_with_thinking_mode() {
         first_ids.iter().all(|id| !second_ids.contains(id)),
         "cross-turn item ids must not overlap: first={first_ids:?} second={second_ids:?}"
     );
-    assert_sequences_strictly_increasing(&second.timeline_events);
+    assert_sequences_strictly_increasing(&second.trace_events);
     // 注：pl-model projection sequence 每 turn 从 0 独立分配（不跨 turn 衔接）；
     // 跨 turn 的全局单调由 pl-core store 用 DB envelope.sequence 回填保证（Phase 2）。
     // 此处只验证 pl-model 层 turn_id/item_id 隔离 + 单 turn sequence 单调。

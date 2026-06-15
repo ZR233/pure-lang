@@ -6,7 +6,7 @@ use pl_model::{
     SharedModelProvider, create_provider, create_provider_with_models,
 };
 #[cfg(test)]
-use pl_protocol::{AgentEvent, ErrorSeverity, PureError, TimelineItemStatus, TraceEvent};
+use pl_protocol::{AgentEvent, ErrorSeverity, PureError, TraceEvent, TracePartStatus};
 use pl_protocol::{AgentEventSender, Message, MessageContent, MessageRole, Result};
 
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
@@ -34,7 +34,7 @@ mod turn_loop;
 mod turn_result;
 
 pub(crate) use turn_result::compact_text;
-/// 生成唯一的 turn ID（毫秒时间戳 + 序列号），用于隔离每个 turn 的 timeline item_id。
+/// 生成唯一的 turn ID（毫秒时间戳 + 序列号），用于隔离每个 turn 的 trace part id。
 fn generate_turn_id() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -298,7 +298,7 @@ impl PureCore {
             max_tokens: Some(512),
             reasoning,
             stream: false,
-            timeline: None,
+            trace: None,
         };
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(1);
         match provider.stream_complete(completion_request, event_tx).await {
@@ -364,8 +364,8 @@ use permission::{approval_request, approve_tool_call};
 use pl_model::{TokenUsage, ToolCallKind};
 #[cfg(test)]
 use tool_dispatch::{
-    ToolExecutionContext, ToolExecutionRecord, execute_tool_calls,
-    namespaced_tool_timeline_item_id, tool_results_include_recoverable_subagent_capacity,
+    ToolExecutionContext, ToolExecutionRecord, execute_tool_calls, namespaced_tool_trace_part_id,
+    tool_results_include_recoverable_subagent_capacity,
 };
 #[cfg(test)]
 use turn_result::{
@@ -381,8 +381,8 @@ mod tests {
     use crate::{ConfigStore, ModelRole};
     use pl_model::ToolCall;
     use pl_protocol::{
-        InteractionPayload, InteractionResolution, TimelineItemKind, TimelineTextChannel,
-        ToolApprovalResolution, TraceEventKind,
+        InteractionPayload, InteractionResolution, ToolApprovalResolution, TraceEventKind,
+        TracePartKind, TraceTextChannel,
     };
     use pretty_assertions::assert_eq;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -408,14 +408,14 @@ mod tests {
         events
             .iter()
             .filter(|event| match &event.kind {
-                TraceEventKind::TimelineItemCompleted { item } => {
-                    item.kind == pl_protocol::TimelineItemKind::Tool
+                TraceEventKind::TracePartCompleted { item } => {
+                    item.kind == pl_protocol::TracePartKind::Tool
                 }
-                TraceEventKind::TimelineItemFailed { item, .. } => {
-                    item.kind == pl_protocol::TimelineItemKind::Tool
+                TraceEventKind::TracePartFailed { item, .. } => {
+                    item.kind == pl_protocol::TracePartKind::Tool
                 }
-                TraceEventKind::TimelineItemStarted { .. }
-                | TraceEventKind::TimelineItemDelta { .. }
+                TraceEventKind::TracePartStarted { .. }
+                | TraceEventKind::TracePartDelta { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
                 | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::SkillActivated { .. }
@@ -468,14 +468,14 @@ mod tests {
         (format!("http://{addr}"), handle)
     }
 
-    fn timeline_started_kinds(events: &[TraceEvent]) -> Vec<TimelineItemKind> {
+    fn trace_started_kinds(events: &[TraceEvent]) -> Vec<TracePartKind> {
         events
             .iter()
             .filter_map(|event| match &event.kind {
-                TraceEventKind::TimelineItemStarted { item } => Some(item.kind),
-                TraceEventKind::TimelineItemDelta { .. }
-                | TraceEventKind::TimelineItemCompleted { .. }
-                | TraceEventKind::TimelineItemFailed { .. }
+                TraceEventKind::TracePartStarted { item } => Some(item.kind),
+                TraceEventKind::TracePartDelta { .. }
+                | TraceEventKind::TracePartCompleted { .. }
+                | TraceEventKind::TracePartFailed { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
                 | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::SkillActivated { .. }
@@ -509,10 +509,10 @@ mod tests {
             .iter()
             .find_map(|event| match &event.kind {
                 TraceEventKind::EnabledToolsRecorded { event } => Some(event),
-                TraceEventKind::TimelineItemStarted { .. }
-                | TraceEventKind::TimelineItemDelta { .. }
-                | TraceEventKind::TimelineItemCompleted { .. }
-                | TraceEventKind::TimelineItemFailed { .. }
+                TraceEventKind::TracePartStarted { .. }
+                | TraceEventKind::TracePartDelta { .. }
+                | TraceEventKind::TracePartCompleted { .. }
+                | TraceEventKind::TracePartFailed { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
                 | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::SkillActivated { .. } => None,
@@ -615,7 +615,7 @@ mod tests {
                 arguments: "{}".to_string(),
                 result: "recoverableSubagentProvider429: retry locally".to_string(),
                 display_result: "recoverableSubagentProvider429: retry locally".to_string(),
-                status: TimelineItemStatus::Completed,
+                status: TracePartStatus::Completed,
                 exit_code: None,
                 timed_out: false,
                 runtime_events: Vec::new(),
@@ -628,7 +628,7 @@ mod tests {
                 arguments: "{}".to_string(),
                 result: "recoverableSubagentProvider429: unrelated text".to_string(),
                 display_result: "recoverableSubagentProvider429: unrelated text".to_string(),
-                status: TimelineItemStatus::Completed,
+                status: TracePartStatus::Completed,
                 exit_code: None,
                 timed_out: false,
                 runtime_events: Vec::new(),
@@ -665,19 +665,19 @@ mod tests {
     }
 
     #[test]
-    fn tool_timeline_item_ids_are_scoped_to_turn() {
+    fn tool_trace_part_ids_are_scoped_to_turn() {
         assert_eq!(
-            namespaced_tool_timeline_item_id("turn-1", "call_0"),
+            namespaced_tool_trace_part_id("turn-1", "call_0"),
             "turn-1-call_0"
         );
         assert_eq!(
-            namespaced_tool_timeline_item_id("turn-1", "turn-1-call_0"),
+            namespaced_tool_trace_part_id("turn-1", "turn-1-call_0"),
             "turn-1-call_0"
         );
     }
 
     #[tokio::test]
-    async fn tool_execution_reuses_streamed_timeline_item() {
+    async fn tool_execution_reuses_streamed_trace_part() {
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -733,23 +733,23 @@ mod tests {
             .filter(|event| {
                 matches!(
                     &event.kind,
-                    TraceEventKind::TimelineItemStarted { item }
-                        if item.kind == TimelineItemKind::Tool && item.item_id == "turn-1-call-1"
+                    TraceEventKind::TracePartStarted { item }
+                        if item.kind == TracePartKind::Tool && item.item_id == "turn-1-call-1"
                 )
             })
             .count();
         let terminal_tool = events
             .iter()
             .find_map(|event| match &event.kind {
-                TraceEventKind::TimelineItemCompleted { item }
-                    if item.kind == TimelineItemKind::Tool && item.item_id == "turn-1-call-1" =>
+                TraceEventKind::TracePartCompleted { item }
+                    if item.kind == TracePartKind::Tool && item.item_id == "turn-1-call-1" =>
                 {
                     Some(item)
                 }
-                TraceEventKind::TimelineItemStarted { .. }
-                | TraceEventKind::TimelineItemDelta { .. }
-                | TraceEventKind::TimelineItemCompleted { .. }
-                | TraceEventKind::TimelineItemFailed { .. }
+                TraceEventKind::TracePartStarted { .. }
+                | TraceEventKind::TracePartDelta { .. }
+                | TraceEventKind::TracePartCompleted { .. }
+                | TraceEventKind::TracePartFailed { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
                 | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::SkillActivated { .. }
@@ -758,10 +758,10 @@ mod tests {
             .expect("completed tool item");
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].status, TimelineItemStatus::Completed);
+        assert_eq!(records[0].status, TracePartStatus::Completed);
         assert_eq!(started_tool_items, 1);
-        assert_eq!(terminal_tool.status, TimelineItemStatus::Completed);
-        let tool = terminal_tool.tool.as_ref().expect("tool timeline metadata");
+        assert_eq!(terminal_tool.status, TracePartStatus::Completed);
+        let tool = terminal_tool.tool.as_ref().expect("tool trace metadata");
         assert_eq!(tool.call_id.as_deref(), Some("call-1"));
         assert_eq!(tool.provider_item_id.as_deref(), Some("provider-item-1"));
         assert_eq!(tool.arguments, "{\"path\":\"note.txt\"}");
@@ -840,21 +840,21 @@ mod tests {
         assert_eq!(result.error.as_deref(), Some("provider rejected request"));
         assert!(matches!(
             event_rx.try_recv().unwrap(),
-            AgentEvent::TimelineItemStarted { item }
+            AgentEvent::TracePartStarted { item }
                 if item.item_id == "turn-1-assistant"
-                    && item.text_channel == Some(TimelineTextChannel::Final)
+                    && item.text_channel == Some(TraceTextChannel::Final)
                     && item.content == "partial summary"
         ));
         assert!(matches!(
             event_rx.try_recv().unwrap(),
-            AgentEvent::TimelineItemCompleted { item, .. }
+            AgentEvent::TracePartCompleted { item, .. }
                 if item.item_id == "turn-1-assistant"
-                    && item.text_channel == Some(TimelineTextChannel::Final)
+                    && item.text_channel == Some(TraceTextChannel::Final)
                     && item.content == "partial summary"
         ));
         assert!(matches!(
             event_rx.try_recv().unwrap(),
-            AgentEvent::TimelineItemFailed { item, .. } if item.item_id == "turn-1-turn"
+            AgentEvent::TracePartFailed { item, .. } if item.item_id == "turn-1-turn"
         ));
         assert!(matches!(
             event_rx.try_recv().unwrap(),
@@ -1017,7 +1017,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].status, TimelineItemStatus::Denied);
+        assert_eq!(records[0].status, TracePartStatus::Denied);
         assert_eq!(records[0].name, "write_file");
         assert_eq!(records[0].result, "Tool disabled in plan mode: write_file");
     }
@@ -1090,11 +1090,11 @@ mod tests {
         .unwrap();
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].status, TimelineItemStatus::Completed);
+        assert_eq!(records[0].status, TracePartStatus::Completed);
         assert!(records[0].result.contains("external ok"));
         assert!(matches!(
             event_rx.try_recv().unwrap(),
-            AgentEvent::TimelineItemStarted { .. }
+            AgentEvent::TracePartStarted { .. }
         ));
         assert!(seen_interaction.lock().unwrap().is_some());
         while event_rx.try_recv().is_ok() {}
@@ -1102,9 +1102,9 @@ mod tests {
         assert_eq!(terminal_tool_event_count(&events), 1);
         assert!(!events.iter().any(|event| matches!(
             &event.kind,
-            TraceEventKind::TimelineItemCompleted { item }
-                if item.kind == pl_protocol::TimelineItemKind::Tool
-                    && item.status == TimelineItemStatus::Approved
+            TraceEventKind::TracePartCompleted { item }
+                if item.kind == pl_protocol::TracePartKind::Tool
+                    && item.status == TracePartStatus::Approved
         )));
         let _ = tokio::fs::remove_dir_all(workspace_root).await;
         let _ = tokio::fs::remove_dir_all(outside_root).await;
@@ -1145,7 +1145,7 @@ mod tests {
         let events = recorder.drain();
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].status, TimelineItemStatus::Failed);
+        assert_eq!(records[0].status, TracePartStatus::Failed);
         assert_eq!(records[0].id, "provider-item-1");
         assert_eq!(records[0].call_id.as_deref(), Some("call-1"));
         assert!(records[0].result.contains("Unknown tool: missing_tool"));
@@ -1188,7 +1188,7 @@ mod tests {
         let events = recorder.drain();
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].status, TimelineItemStatus::Denied);
+        assert_eq!(records[0].status, TracePartStatus::Denied);
         assert!(
             records[0]
                 .result
@@ -1198,10 +1198,10 @@ mod tests {
         let terminal = events
             .iter()
             .find_map(|event| match &event.kind {
-                TraceEventKind::TimelineItemCompleted { item } => Some(item),
-                TraceEventKind::TimelineItemFailed { item, .. } => Some(item),
-                TraceEventKind::TimelineItemStarted { .. }
-                | TraceEventKind::TimelineItemDelta { .. }
+                TraceEventKind::TracePartCompleted { item } => Some(item),
+                TraceEventKind::TracePartFailed { item, .. } => Some(item),
+                TraceEventKind::TracePartStarted { .. }
+                | TraceEventKind::TracePartDelta { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
                 | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::SkillActivated { .. }
@@ -1253,7 +1253,7 @@ mod tests {
         let events = recorder.drain();
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].status, TimelineItemStatus::Denied);
+        assert_eq!(records[0].status, TracePartStatus::Denied);
         assert!(
             records[0]
                 .result
@@ -1305,23 +1305,23 @@ mod tests {
         let events = recorder.drain();
 
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].status, TimelineItemStatus::Interrupted);
+        assert_eq!(records[0].status, TracePartStatus::Interrupted);
         assert_eq!(records[0].result, "Tool execution interrupted");
         assert_eq!(terminal_tool_event_count(&events), 1);
         let terminal = events
             .iter()
             .find_map(|event| match &event.kind {
-                TraceEventKind::TimelineItemFailed { item, .. } => Some(item),
-                TraceEventKind::TimelineItemStarted { .. }
-                | TraceEventKind::TimelineItemDelta { .. }
-                | TraceEventKind::TimelineItemCompleted { .. }
+                TraceEventKind::TracePartFailed { item, .. } => Some(item),
+                TraceEventKind::TracePartStarted { .. }
+                | TraceEventKind::TracePartDelta { .. }
+                | TraceEventKind::TracePartCompleted { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
                 | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::SkillActivated { .. }
                 | TraceEventKind::EnabledToolsRecorded { .. } => None,
             })
             .expect("interrupted tool item");
-        assert_eq!(terminal.status, TimelineItemStatus::Interrupted);
+        assert_eq!(terminal.status, TracePartStatus::Interrupted);
     }
 
     #[tokio::test]
@@ -1466,7 +1466,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_turn_records_user_timeline_before_internal_items() {
+    async fn run_turn_records_user_trace_part_before_internal_parts() {
         let sse_body = concat!(
             "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"<final>ok</final>\"}\n\n",
             "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
@@ -1495,31 +1495,31 @@ mod tests {
         handle.await.unwrap();
 
         assert_eq!(result.status, TurnResultStatus::Completed);
-        let events = &result.timeline_events;
-        let started_kinds = timeline_started_kinds(events);
-        assert_eq!(started_kinds[0], TimelineItemKind::Text);
-        assert_eq!(started_kinds[1], TimelineItemKind::Turn);
-        assert_eq!(started_kinds[2], TimelineItemKind::Inference);
+        let events = &result.trace_events;
+        let started_kinds = trace_started_kinds(events);
+        assert_eq!(started_kinds[0], TracePartKind::Text);
+        assert_eq!(started_kinds[1], TracePartKind::Turn);
+        assert_eq!(started_kinds[2], TracePartKind::Inference);
 
         let user_item = events
             .iter()
             .find_map(|event| match &event.kind {
-                TraceEventKind::TimelineItemStarted { item }
-                    if item.kind == TimelineItemKind::Text
-                        && item.text_channel == Some(TimelineTextChannel::User) =>
+                TraceEventKind::TracePartStarted { item }
+                    if item.kind == TracePartKind::Text
+                        && item.text_channel == Some(TraceTextChannel::User) =>
                 {
                     Some(item)
                 }
-                TraceEventKind::TimelineItemStarted { .. }
-                | TraceEventKind::TimelineItemDelta { .. }
-                | TraceEventKind::TimelineItemCompleted { .. }
-                | TraceEventKind::TimelineItemFailed { .. }
+                TraceEventKind::TracePartStarted { .. }
+                | TraceEventKind::TracePartDelta { .. }
+                | TraceEventKind::TracePartCompleted { .. }
+                | TraceEventKind::TracePartFailed { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
                 | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::SkillActivated { .. }
                 | TraceEventKind::EnabledToolsRecorded { .. } => None,
             })
-            .expect("user timeline item");
+            .expect("user trace part");
         assert_eq!(user_item.started_sequence, 0);
         assert_eq!(user_item.content, "Build the thing");
     }

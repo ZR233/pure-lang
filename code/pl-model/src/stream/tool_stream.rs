@@ -319,7 +319,7 @@ pub(crate) struct ToolCallAccumulatorSnapshot {
     pub(crate) arguments: String,
 }
 
-pub(crate) fn timeline_tool_item_id(call_id: Option<&String>, id: &str) -> String {
+pub(crate) fn trace_tool_part_id(call_id: Option<&String>, id: &str) -> String {
     call_id
         .filter(|call_id| !call_id.is_empty())
         .cloned()

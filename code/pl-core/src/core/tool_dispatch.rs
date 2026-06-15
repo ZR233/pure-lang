@@ -5,7 +5,7 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use futures::stream::{FuturesUnordered, StreamExt};
 use pl_model::ToolCallPayload;
-use pl_protocol::{AgentEvent, PureError, TimelineItemStatus, ToolCallKind, TraceEventKind};
+use pl_protocol::{AgentEvent, PureError, ToolCallKind, TraceEventKind, TracePartStatus};
 use tokio::sync::RwLock;
 
 use crate::permission::{PermissionDecision, decide_tool_permission};
@@ -28,7 +28,7 @@ pub(super) struct ToolExecutionRecord {
     pub(super) result: String,
     pub(super) display_result: String,
     pub(super) arguments: String,
-    pub(super) status: TimelineItemStatus,
+    pub(super) status: TracePartStatus,
     pub(super) exit_code: Option<i32>,
     pub(super) timed_out: bool,
     pub(super) runtime_events: Vec<ToolRuntimeEvent>,
@@ -36,7 +36,7 @@ pub(super) struct ToolExecutionRecord {
 
 pub(super) struct ScheduledToolExecution<'a> {
     pub(super) tool_call: pl_model::ToolCall,
-    pub(super) item: pl_protocol::TimelineItem,
+    pub(super) item: pl_protocol::TracePart,
     pub(super) future: BoxFuture<'a, Result<ToolExecutionRecord, ToolExecutionError>>,
 }
 
@@ -59,7 +59,7 @@ pub(super) enum ToolPayload {
 #[derive(Debug, Clone)]
 pub(super) struct ToolOutputEnvelope {
     pub(super) model_visible_text: String,
-    pub(super) timeline_text: String,
+    pub(super) display_text: String,
     pub(super) full_output_file: Option<PathBuf>,
     pub(super) exit_code: Option<i32>,
     pub(super) timed_out: bool,
@@ -107,13 +107,13 @@ pub(super) async fn execute_tool_calls(
             .call_id
             .clone()
             .unwrap_or_else(|| tool_call.id.clone());
-        let timeline_item_id = namespaced_tool_timeline_item_id(context.session_id, &tool_call_id);
+        let trace_part_id = namespaced_tool_trace_part_id(context.session_id, &tool_call_id);
         let mut item = recorder
-            .latest_timeline_item(&timeline_item_id)
+            .latest_trace_part(&trace_part_id)
             .unwrap_or_else(|| {
                 let item = recorder.tool_item(
                     context.session_id,
-                    &timeline_item_id,
+                    &trace_part_id,
                     tool_call.name.clone(),
                     tool_call.payload_text(),
                     tool_call.call_id.clone(),
@@ -123,7 +123,7 @@ pub(super) async fn execute_tool_calls(
                 item
             });
         if let Some(tool) = &mut item.tool {
-            tool.tool_call_id = timeline_item_id.clone();
+            tool.tool_call_id = trace_part_id.clone();
             tool.call_id = tool_call.call_id.clone();
             tool.provider_item_id = Some(tool_call.id.clone());
             tool.name = tool_call.name.clone();
@@ -144,7 +144,7 @@ pub(super) async fn execute_tool_calls(
                 future: Box::pin(ready_tool_execution_record(
                     tool_call.clone(),
                     ToolExecutionError::RespondToModel(message),
-                    TimelineItemStatus::Denied,
+                    TracePartStatus::Denied,
                     None,
                     false,
                 )),
@@ -164,7 +164,7 @@ pub(super) async fn execute_tool_calls(
                 future: Box::pin(ready_tool_execution_record(
                     tool_call.clone(),
                     ToolExecutionError::RespondToModel(format!("Unknown tool: {}", tool_call.name)),
-                    TimelineItemStatus::Failed,
+                    TracePartStatus::Failed,
                     None,
                     false,
                 )),
@@ -233,7 +233,7 @@ pub(super) async fn execute_tool_calls(
                 future: Box::pin(ready_tool_execution_record(
                     tool_call.clone(),
                     ToolExecutionError::RespondToModel("Tool execution interrupted".to_string()),
-                    TimelineItemStatus::Interrupted,
+                    TracePartStatus::Interrupted,
                     None,
                     false,
                 )),
@@ -245,7 +245,7 @@ pub(super) async fn execute_tool_calls(
             ToolApprovalDecision::Approved => {
                 let mut tool_context = tool_context;
                 tool_context.workspace_access = execution_workspace_access;
-                item.status = TimelineItemStatus::Running;
+                item.status = TracePartStatus::Running;
                 item.updated_at = unix_seconds();
                 let invocation =
                     ToolInvocation::from_tool_call(tool_call, tool_call_id.clone(), tool_context);
@@ -290,7 +290,7 @@ pub(super) async fn execute_tool_calls(
                         ToolExecutionError::RespondToModel(format!(
                             "Tool execution denied: {reason}"
                         )),
-                        TimelineItemStatus::Denied,
+                        TracePartStatus::Denied,
                         None,
                         false,
                     )),
@@ -302,7 +302,7 @@ pub(super) async fn execute_tool_calls(
     collect_scheduled_tools(scheduled, recorder, context.options).await
 }
 
-pub(super) fn namespaced_tool_timeline_item_id(turn_id: &str, tool_call_id: &str) -> String {
+pub(super) fn namespaced_tool_trace_part_id(turn_id: &str, tool_call_id: &str) -> String {
     if tool_call_id.starts_with(turn_id) {
         return tool_call_id.to_string();
     }
@@ -416,7 +416,7 @@ async fn collect_scheduled_tools(
 
 fn finalize_tool_item(
     recorder: &mut crate::trace::TraceRecorder,
-    mut item: pl_protocol::TimelineItem,
+    mut item: pl_protocol::TracePart,
     record: &ToolExecutionRecord,
 ) {
     item.status = record.status;
@@ -428,20 +428,20 @@ fn finalize_tool_item(
     }
     let status = item.status;
     match status {
-        TimelineItemStatus::Failed
-        | TimelineItemStatus::Denied
-        | TimelineItemStatus::Interrupted
-        | TimelineItemStatus::BudgetLimited => {
+        TracePartStatus::Failed
+        | TracePartStatus::Denied
+        | TracePartStatus::Interrupted
+        | TracePartStatus::BudgetLimited => {
             recorder.fail_item(item, record.display_result.clone());
         }
-        TimelineItemStatus::Started
-        | TimelineItemStatus::Streaming
-        | TimelineItemStatus::AwaitingApproval
-        | TimelineItemStatus::Approved
-        | TimelineItemStatus::Running
-        | TimelineItemStatus::Completed => recorder.complete_item(item),
+        TracePartStatus::Started
+        | TracePartStatus::Streaming
+        | TracePartStatus::AwaitingApproval
+        | TracePartStatus::Approved
+        | TracePartStatus::Running
+        | TracePartStatus::Completed => recorder.complete_item(item),
     }
-    if status == TimelineItemStatus::Completed {
+    if status == TracePartStatus::Completed {
         for event in &record.runtime_events {
             match event {
                 ToolRuntimeEvent::SkillActivated { activation } => {
@@ -460,7 +460,7 @@ fn finalize_tool_item(
 async fn ready_tool_execution_record(
     tool_call: pl_model::ToolCall,
     error: ToolExecutionError,
-    status: TimelineItemStatus,
+    status: TracePartStatus,
     exit_code: Option<i32>,
     timed_out: bool,
 ) -> Result<ToolExecutionRecord, ToolExecutionError> {
@@ -470,7 +470,7 @@ async fn ready_tool_execution_record(
             tool_call.name.clone(),
             ToolOutputEnvelope {
                 model_visible_text: message.clone(),
-                timeline_text: message,
+                display_text: message,
                 full_output_file: None,
                 exit_code,
                 timed_out,
@@ -491,14 +491,14 @@ fn tool_execution_record(
         Ok(output) => (
             ToolOutputEnvelope {
                 model_visible_text: output.description.clone(),
-                timeline_text: output.description,
+                display_text: output.description,
                 full_output_file: (!output.output_file.as_os_str().is_empty())
                     .then_some(output.output_file),
                 exit_code: output.exit_code,
                 timed_out: output.timed_out,
                 runtime_events: output.runtime_events,
             },
-            TimelineItemStatus::Completed,
+            TracePartStatus::Completed,
         ),
         Err(error) => {
             return Err(ToolExecutionError::RespondToModel(format!(
@@ -515,17 +515,17 @@ fn tool_execution_record_from_envelope(
     tool_call: pl_model::ToolCall,
     tool_name: String,
     envelope: ToolOutputEnvelope,
-    status: TimelineItemStatus,
+    status: TracePartStatus,
 ) -> ToolExecutionRecord {
     let ToolOutputEnvelope {
         model_visible_text,
-        timeline_text,
+        display_text,
         full_output_file: _full_output_file,
         exit_code,
         timed_out,
         runtime_events,
     } = envelope;
-    let display_result = display_result_for_tool(&tool_call, &tool_name, &timeline_text, status);
+    let display_result = display_result_for_tool(&tool_call, &tool_name, &display_text, status);
     ToolExecutionRecord {
         id: tool_call.id.clone(),
         call_id: tool_call.call_id.clone(),
@@ -547,13 +547,13 @@ fn interrupted_tool_execution_record(tool_call: pl_model::ToolCall) -> ToolExecu
         tool_call.name.clone(),
         ToolOutputEnvelope {
             model_visible_text: "Tool execution interrupted".to_string(),
-            timeline_text: "Tool execution interrupted".to_string(),
+            display_text: "Tool execution interrupted".to_string(),
             full_output_file: None,
             exit_code: None,
             timed_out: false,
             runtime_events: Vec::new(),
         },
-        TimelineItemStatus::Interrupted,
+        TracePartStatus::Interrupted,
     )
 }
 
@@ -566,13 +566,13 @@ fn respond_to_model_tool_execution_record(
         tool_call.name.clone(),
         ToolOutputEnvelope {
             model_visible_text: message.clone(),
-            timeline_text: message,
+            display_text: message,
             full_output_file: None,
             exit_code: None,
             timed_out: false,
             runtime_events: Vec::new(),
         },
-        TimelineItemStatus::Failed,
+        TracePartStatus::Failed,
     )
 }
 
@@ -580,9 +580,9 @@ fn display_result_for_tool(
     tool_call: &pl_model::ToolCall,
     tool_name: &str,
     result: &str,
-    status: TimelineItemStatus,
+    status: TracePartStatus,
 ) -> String {
-    if tool_name == "request_user_input" && status == TimelineItemStatus::Completed {
+    if tool_name == "request_user_input" && status == TracePartStatus::Completed {
         return redact_user_input_display_result(&tool_call.arguments_for_tool(), result);
     }
     result.to_string()
@@ -632,7 +632,7 @@ pub(super) fn tool_results_include_recoverable_subagent_capacity(
     tool_results: &[ToolExecutionRecord],
 ) -> bool {
     tool_results.iter().any(|tool_result| {
-        tool_result.status == TimelineItemStatus::Completed
+        tool_result.status == TracePartStatus::Completed
             && matches!(
                 tool_result.name.as_str(),
                 "spawn_agent" | "wait_agent" | "list_agents"
@@ -648,7 +648,7 @@ mod tests {
     use super::redact_user_input_display_result;
 
     #[test]
-    fn redacts_secret_user_input_answers_for_timeline_display() {
+    fn redacts_secret_user_input_answers_for_display() {
         let arguments = serde_json::json!({
             "questions": [
                 { "id": "api_key", "header": "Key", "question": "API key?", "isSecret": true },

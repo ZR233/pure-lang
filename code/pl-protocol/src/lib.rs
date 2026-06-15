@@ -10,11 +10,11 @@ pub use event::{
     AgentEvent, AgentEventReceiver, AgentEventSender, AgentRuntimeDelta, AgentStatus,
     BudgetLimitKind, BudgetUsage, EnabledToolsEvent, ErrorSeverity, OutputStream, PipelineStage,
     PlanLifecycleEvent, PlanLifecycleState, RuntimeCostAmount, RuntimeUsageSnapshot,
-    SkillActivation, TimelineAgentItem, TimelineAttachment, TimelineDelta, TimelineInferenceItem,
-    TimelineItem, TimelineItemDelta, TimelineItemDeltaEvent, TimelineItemDeltaField,
-    TimelineItemKind, TimelineItemStatus, TimelineTextChannel, TimelineThinkingChunk,
-    TimelineToolItem, TokenUsageSnapshot, TraceEvent, TraceEventKind, UserInputAnswer,
-    UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
+    SkillActivation, TokenUsageSnapshot, TraceAgentPart, TraceAttachment, TraceDelta, TraceEvent,
+    TraceEventKind, TraceInferencePart, TracePart, TracePartDelta, TracePartDeltaEvent,
+    TracePartDeltaField, TracePartKind, TracePartStatus, TraceTextChannel, TraceThinkingChunk,
+    TraceToolPart, UserInputAnswer, UserInputRequest, UserInputResponse, UserQuestion,
+    UserQuestionOption,
 };
 pub use interaction::{
     InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,

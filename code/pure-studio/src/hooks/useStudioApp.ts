@@ -49,7 +49,7 @@ import type {
   RoleRecord,
   StudioEventEnvelope,
   StudioTurnStatus,
-  TimelineAttachment,
+  StudioAttachment,
   TimelinePartView,
   StudioPart,
   StudioPartDeltaField,
@@ -82,7 +82,7 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
-function timelineAttachmentFromRecord(record: AttachmentRecord): TimelineAttachment {
+function studioAttachmentFromRecord(record: AttachmentRecord): StudioAttachment {
   return {
     id: record.id,
     mediaType: record.mediaType,
@@ -683,13 +683,13 @@ export function useStudioApp() {
   }
 
   async function submitPrompt(sessionId: string, content: string, attachments: AttachmentRecord[] = []) {
-    const timelineAttachments = attachments.map(timelineAttachmentFromRecord);
+    const studioAttachments = attachments.map(studioAttachmentFromRecord);
     dispatch({
       type: "promptSubmitted",
       status: t("status.running"),
       startedAt: Date.now(),
       prompt: content,
-      attachments: timelineAttachments,
+      attachments: studioAttachments,
     });
     try {
       if (isTauriRuntime()) {

@@ -38,7 +38,6 @@ pub use provider_usage::{
     zhipu_limit_by_window,
 };
 pub use request::{
-    CompletionRequest, CompletionResponse, CompletionTimelineContext, FinishReason,
-    ReasoningConfig, ReasoningSummary, TokenUsage, ToolCall, ToolCallPayload, ToolFormat,
-    ToolSchema,
+    CompletionRequest, CompletionResponse, CompletionTraceContext, FinishReason, ReasoningConfig,
+    ReasoningSummary, TokenUsage, ToolCall, ToolCallPayload, ToolFormat, ToolSchema,
 };

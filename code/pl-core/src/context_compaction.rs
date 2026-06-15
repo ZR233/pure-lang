@@ -77,7 +77,7 @@ pub(crate) async fn maybe_compact_session(
             max_tokens,
             reasoning: None::<ReasoningConfig>,
             stream: true,
-            timeline: None,
+            trace: None,
         };
         let response = match request
             .provider
