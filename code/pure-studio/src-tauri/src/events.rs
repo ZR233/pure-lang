@@ -1,15 +1,12 @@
 use std::time::Duration;
 
 use pl_core::StudioRuntime;
-use pl_protocol::{
-    AgentEvent, StudioEventEnvelope, StudioEventKind, StudioLspHealth, StudioMcpHealth,
-};
+use pl_protocol::{AgentEvent, StudioEventEnvelope, StudioEventKind};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::mappers::{
-    agent_dto, agent_event_dto, load_session_runtime_dto, lsp_health_update_dto,
-    mcp_health_update_dto,
+    agent_dto, load_session_runtime_dto, lsp_health_update_dto, mcp_health_update_dto,
 };
 use crate::state::AppState;
 
@@ -57,11 +54,7 @@ pub fn start_lsp_health_tasks(app: AppHandle, state: AppState) {
 
 async fn emit_mcp_health_update(_app: &AppHandle, studio: &StudioRuntime) {
     match mcp_health_update_dto(studio).await {
-        Ok(payload) => {
-            let Ok(payload) = serde_json::to_value(payload) else {
-                eprintln!("[pure-studio] failed to serialize MCP health update");
-                return;
-            };
+        Ok(health) => {
             let _ = studio
                 .events()
                 .emit(
@@ -69,7 +62,7 @@ async fn emit_mcp_health_update(_app: &AppHandle, studio: &StudioRuntime) {
                     None,
                     None,
                     StudioEventKind::McpHealthChanged {
-                        health: StudioMcpHealth { payload },
+                        health: health.into(),
                     },
                 )
                 .await;
@@ -85,11 +78,7 @@ async fn emit_mcp_health_update(_app: &AppHandle, studio: &StudioRuntime) {
 
 pub async fn emit_lsp_health_update(_app: &AppHandle, studio: &StudioRuntime) {
     match lsp_health_update_dto(studio).await {
-        Ok(payload) => {
-            let Ok(payload) = serde_json::to_value(payload) else {
-                eprintln!("[pure-studio] failed to serialize LSP health update");
-                return;
-            };
+        Ok(health) => {
             let _ = studio
                 .events()
                 .emit(
@@ -97,7 +86,7 @@ pub async fn emit_lsp_health_update(_app: &AppHandle, studio: &StudioRuntime) {
                     None,
                     None,
                     StudioEventKind::LspHealthChanged {
-                        health: StudioLspHealth { payload },
+                        health: health.into(),
                     },
                 )
                 .await;
@@ -137,32 +126,13 @@ pub async fn drain_events(
     loop {
         match event_rx.recv().await {
             Ok(event) => {
-                let emitted = studio
+                let _ = studio
                     .events()
                     .emit_agent_event(&session_id, event.clone())
                     .await
                     .ok()
                     .flatten();
                 let agent = agent_for_event(&studio, &session_id, &event).await;
-                let timeline_event = if matches!(
-                    emitted.as_ref().map(|envelope| &envelope.kind),
-                    Some(StudioEventKind::AgentTimelineChanged { .. })
-                ) {
-                    let event_id = emitted.as_ref().map(|envelope| envelope.event_id.clone());
-                    if let Some(event_id) = event_id {
-                        studio
-                            .store()
-                            .read_agent_event(&event_id)
-                            .await
-                            .ok()
-                            .flatten()
-                            .map(agent_event_dto)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
                 let session_runtime = if matches!(
                     event,
                     AgentEvent::AgentRuntimeUpdated { .. } | AgentEvent::SkillActivated { .. }
@@ -180,21 +150,6 @@ pub async fn drain_events(
                             None,
                             StudioEventKind::AgentChanged {
                                 agent: agent.clone().into(),
-                            },
-                        )
-                        .await;
-                }
-                if let Some(timeline_event) = &timeline_event
-                    && let Ok(payload) = serde_json::to_value(timeline_event)
-                {
-                    let _ = studio
-                        .events()
-                        .emit(
-                            None,
-                            Some(session_id.clone()),
-                            None,
-                            StudioEventKind::AgentTimelineChanged {
-                                event: pl_protocol::StudioAgentTimelineEvent { payload },
                             },
                         )
                         .await;

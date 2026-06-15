@@ -9,7 +9,7 @@ import type {
   SessionRecord,
   SessionRuntime,
   SkillRecord,
-  TimelineItem,
+  TimelinePartView,
 } from "../types";
 import { makeProvider } from "./provider-mapper";
 import { previewTemplates } from "./templates";
@@ -420,7 +420,7 @@ export const previewAgentEvents: AgentTimelineEvent[] = [
   },
 ];
 
-export const previewTimelineItems: TimelineItem[] = [
+export const previewTimelinePartViews: TimelinePartView[] = [
   {
     turnId: "preview-turn-1",
     itemId: "preview-user-1",

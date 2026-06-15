@@ -32,7 +32,7 @@ import {
   previewSessionRuntime,
   previewAgents,
   previewAgentEvents,
-  previewTimelineItems,
+  previewTimelinePartViews,
   previewSkills,
   previewLspServers,
 } from "./preview";
@@ -301,7 +301,7 @@ export function submitPromptCommand(sessionId: string, prompt: string, attachmen
       clone({
         sessionId,
         turnId: `preview-turn-${Date.now()}`,
-        cursor: previewTimelineItems.length,
+        cursor: previewTimelinePartViews.length,
       }),
     );
   }
@@ -702,7 +702,7 @@ export function loadSessionState(sessionId: string) {
         messages: previewConversation.messages,
         parts: previewConversation.parts,
         events: [],
-        eventNextSequence: previewTimelineItems.length * 2,
+        eventNextSequence: previewTimelinePartViews.length * 2,
       }),
     );
   }
@@ -712,7 +712,7 @@ export function loadSessionState(sessionId: string) {
 function previewConversationSnapshot(sessionId: string) {
   const messages: StudioMessageProjection[] = [];
   const parts: StudioPartProjection[] = [];
-  for (const [index, item] of previewTimelineItems.entries()) {
+  for (const [index, item] of previewTimelinePartViews.entries()) {
     const messageId = `${item.turnId}:${item.textChannel === "user" ? "user" : "assistant"}`;
     const role = item.textChannel === "user" ? "user" : "assistant";
     const messageSequence = index * 2;

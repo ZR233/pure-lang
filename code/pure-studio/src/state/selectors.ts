@@ -1,6 +1,6 @@
-import type { InteractionRequest, PlanState, TimelineItem } from "../types";
+import type { InteractionRequest, PlanState, TimelinePartView } from "../types";
 import type { StudioState } from "./studio-state";
-import { timelineItemsFromConversation, timelineItemWithDelta } from "./timeline-state";
+import { timelinePartViewsFromConversation, timelinePartViewWithDelta } from "./timeline-state";
 
 export type ToolGroupSummaryKind =
   | "readFiles"
@@ -20,21 +20,21 @@ export type TimelineEntry =
       key: string;
       role: "user" | "assistant";
       content: string;
-      attachments?: TimelineItem["attachments"];
+      attachments?: TimelinePartView["attachments"];
     }
   | {
       kind: "commentary";
       key: string;
       content: string;
-      status: TimelineItem["status"];
-      item: TimelineItem;
+      status: TimelinePartView["status"];
+      item: TimelinePartView;
     }
-  | { kind: "plan"; key: string; content: string; item: TimelineItem; planState?: PlanState }
+  | { kind: "plan"; key: string; content: string; item: TimelinePartView; planState?: PlanState }
   | {
       kind: "thought";
       key: string;
       content: string;
-      status: TimelineItem["status"];
+      status: TimelinePartView["status"];
       startedAt: number;
       updatedAt: number;
       durationSeconds: number;
@@ -42,21 +42,21 @@ export type TimelineEntry =
   | {
       kind: "status";
       key: string;
-      status: TimelineItem["status"];
+      status: TimelinePartView["status"];
       content: string;
-      item: TimelineItem;
+      item: TimelinePartView;
     }
-  | { kind: "tool"; key: string; item: TimelineItem }
+  | { kind: "tool"; key: string; item: TimelinePartView }
   | {
       kind: "toolGroup";
       key: string;
       turnId: string;
-      items: TimelineItem[];
+      items: TimelinePartView[];
       summaryParts: ToolGroupSummaryPart[];
-      status: TimelineItem["status"];
+      status: TimelinePartView["status"];
     }
-  | { kind: "agent"; key: string; item: TimelineItem }
-  | { kind: "trace"; key: string; item: TimelineItem };
+  | { kind: "agent"; key: string; item: TimelinePartView }
+  | { kind: "trace"; key: string; item: TimelinePartView };
 
 type ThoughtEntry = Extract<TimelineEntry, { kind: "thought" }>;
 type ToolGroupEntry = Extract<TimelineEntry, { kind: "toolGroup" }>;
@@ -103,7 +103,7 @@ export function selectTimelineEntries(state: StudioState): TimelineEntry[] {
     }
   };
 
-  const appendThinkingItem = (item: TimelineItem) => {
+  const appendThinkingItem = (item: TimelinePartView) => {
     closeCrossTurnSegment(item.turnId);
     const content = thinkingContent(item);
     if (!content.trim()) return;
@@ -128,7 +128,7 @@ export function selectTimelineEntries(state: StudioState): TimelineEntry[] {
     entries.push(activeThought);
   };
 
-  const appendToolItem = (item: TimelineItem) => {
+  const appendToolItem = (item: TimelinePartView) => {
     closeCrossTurnSegment(item.turnId);
     if (!activeToolGroup || activeToolGroup.turnId !== item.turnId) {
       activeToolGroup = buildToolGroupEntry([item]);
@@ -139,8 +139,8 @@ export function selectTimelineEntries(state: StudioState): TimelineEntry[] {
     refreshToolGroupEntry(activeToolGroup);
   };
 
-  for (const rawItem of timelineItemsFromConversation(state)) {
-    const item = normalizeTimelineItem(timelineItemWithDelta(rawItem, state.partDeltaAccum.get(rawItem.itemId)));
+  for (const rawItem of timelinePartViewsFromConversation(state)) {
+    const item = normalizeTimelinePartView(timelinePartViewWithDelta(rawItem, state.partDeltaAccum.get(rawItem.itemId)));
     if (!item) continue;
     switch (item.kind) {
       case "text":
@@ -211,14 +211,14 @@ export function selectTimelineEntries(state: StudioState): TimelineEntry[] {
   return entries;
 }
 
-function shouldShowStatusEntry(item: TimelineItem): boolean {
+function shouldShowStatusEntry(item: TimelinePartView): boolean {
   return item.itemId.startsWith("optimistic-") && item.status === "running";
 }
 
 function mergeThoughtStatus(
-  current: TimelineItem["status"],
-  next: TimelineItem["status"],
-): TimelineItem["status"] {
+  current: TimelinePartView["status"],
+  next: TimelinePartView["status"],
+): TimelinePartView["status"] {
   return toolStatusPriority(next) > toolStatusPriority(current) ? next : current;
 }
 
@@ -226,7 +226,7 @@ function thoughtDurationSeconds(startedAt: number, updatedAt: number): number {
   return Math.max(0, updatedAt - startedAt);
 }
 
-function thinkingContent(item: TimelineItem): string {
+function thinkingContent(item: TimelinePartView): string {
   return item.thinkingChunks
     .slice()
     .sort((left, right) => left.chunkIndex - right.chunkIndex)
@@ -242,7 +242,7 @@ function appendThoughtContent(current: string, next: string): string {
   return `${left}\n\n${right}`;
 }
 
-function shouldShowTurnTrace(item: TimelineItem): boolean {
+function shouldShowTurnTrace(item: TimelinePartView): boolean {
   switch (item.status) {
     case "failed":
     case "interrupted":
@@ -259,7 +259,7 @@ function shouldShowTurnTrace(item: TimelineItem): boolean {
   }
 }
 
-function buildToolGroupEntry(items: TimelineItem[]): Extract<TimelineEntry, { kind: "toolGroup" }> {
+function buildToolGroupEntry(items: TimelinePartView[]): Extract<TimelineEntry, { kind: "toolGroup" }> {
   const first = items[0];
   const last = items[items.length - 1];
   return {
@@ -280,7 +280,7 @@ function refreshToolGroupEntry(entry: ToolGroupEntry) {
   entry.status = aggregateToolStatus(entry.items);
 }
 
-function summarizeToolGroup(items: TimelineItem[]): ToolGroupSummaryPart[] {
+function summarizeToolGroup(items: TimelinePartView[]): ToolGroupSummaryPart[] {
   const counts: Record<ToolGroupSummaryKind, number> = {
     readFiles: 0,
     editFiles: 0,
@@ -297,13 +297,13 @@ function summarizeToolGroup(items: TimelineItem[]): ToolGroupSummaryPart[] {
     .map((kind) => ({ kind, count: counts[kind] }));
 }
 
-function aggregateToolStatus(items: TimelineItem[]): TimelineItem["status"] {
-  return items.reduce<TimelineItem["status"]>((status, item) => {
+function aggregateToolStatus(items: TimelinePartView[]): TimelinePartView["status"] {
+  return items.reduce<TimelinePartView["status"]>((status, item) => {
     return toolStatusPriority(item.status) > toolStatusPriority(status) ? item.status : status;
   }, "completed");
 }
 
-function toolStatusPriority(status: TimelineItem["status"]): number {
+function toolStatusPriority(status: TimelinePartView["status"]): number {
   switch (status) {
     case "failed":
     case "denied":
@@ -365,7 +365,7 @@ function toolCategory(name: string | null | undefined): ToolGroupSummaryKind {
   return "useTools";
 }
 
-function toolSummaryCount(item: TimelineItem, category: ToolGroupSummaryKind): number {
+function toolSummaryCount(item: TimelinePartView, category: ToolGroupSummaryKind): number {
   if (category === "runCommands" || category === "coordinateAgents" || category === "useTools") {
     return 1;
   }
@@ -450,7 +450,7 @@ function parseToolArguments(argumentsText: string | null | undefined): Record<st
   }
 }
 
-function normalizeTimelineItem(item: TimelineItem): TimelineItem {
+function normalizeTimelinePartView(item: TimelinePartView): TimelinePartView {
   return {
     ...item,
     content: item.content ?? "",

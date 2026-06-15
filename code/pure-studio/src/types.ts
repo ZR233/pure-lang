@@ -87,6 +87,64 @@ export type AgentTimelineEvent = {
   createdAt: number;
 };
 
+export type StudioAgentTimelineEvent = {
+  eventId: string;
+  sessionId: string;
+  sequence: number;
+  createdAt: number;
+  kind: StudioAgentTimelineEventKind;
+};
+
+export type StudioAgentTimelineEventKind =
+  | {
+      type: "spawnBegin";
+      callId: string;
+      senderPath: string;
+      taskName: string;
+      prompt: string;
+      role: string;
+      model?: string | null;
+      reasoningEffort?: string | null;
+    }
+  | {
+      type: "spawnEnd";
+      callId: string;
+      senderPath: string;
+      agentId?: string | null;
+      path?: string | null;
+      role?: string | null;
+      status: AgentStatus;
+      prompt: string;
+      error?: string | null;
+    }
+  | {
+      type: "interactionBegin";
+      callId: string;
+      senderPath: string;
+      receiverPath: string;
+      prompt: string;
+    }
+  | {
+      type: "interactionEnd";
+      callId: string;
+      senderPath: string;
+      receiverPath: string;
+      status: AgentStatus;
+      prompt: string;
+      error?: string | null;
+    }
+  | { type: "waitingBegin"; callId: string; senderPath: string }
+  | { type: "waitingEnd"; callId: string; senderPath: string; timedOut: boolean }
+  | { type: "closeBegin"; callId: string; senderPath: string; receiverPath: string }
+  | {
+      type: "closeEnd";
+      callId: string;
+      senderPath: string;
+      receiverPath: string;
+      status: AgentStatus;
+      error?: string | null;
+    };
+
 export type ProviderRecord = {
   id: string;
   templateKind: ProviderKind;
@@ -425,7 +483,7 @@ export type StudioFilePart = {
   mediaType?: string | null;
 };
 
-export type TimelineItem = {
+export type TimelinePartView = {
   turnId: string;
   itemId: string;
   startedSequence: number;
@@ -792,7 +850,7 @@ export type StudioEventKind =
   | { type: "messagePartDelta"; delta: StudioPartDelta }
   | { type: "interactionChanged"; event: InteractionChangedEvent }
   | { type: "agentChanged"; agent: AgentDto }
-  | { type: "agentTimelineChanged"; event: { payload: AgentTimelineEvent } }
+  | { type: "agentTimelineChanged"; event: StudioAgentTimelineEvent }
   | { type: "sessionRuntimeChanged"; runtime: SessionRuntime }
   | { type: "skillActivated"; activation: SkillActivation }
   | { type: "planLifecycleChanged"; event: PlanLifecycleEvent }
@@ -808,8 +866,8 @@ export type StudioEventKind =
       };
     }
   | { type: "sessionListChanged"; sessions: SessionRecord[] }
-  | { type: "mcpHealthChanged"; health: { payload: McpHealthUpdatedPayload } }
-  | { type: "lspHealthChanged"; health: { payload: LspHealthUpdatedPayload } }
+  | { type: "mcpHealthChanged"; health: McpHealthUpdatedPayload }
+  | { type: "lspHealthChanged"; health: LspHealthUpdatedPayload }
   | { type: "stale"; laggedEvents: number };
 
 export type StudioEventEnvelope = {
