@@ -2,7 +2,7 @@
 
 ## 7.1 职责
 
-`pl-model` 是 LLM provider 与模型协议适配层，负责把核心层的统一请求转为具体 provider 的 API 请求，并把流式结果转换为 `AgentEvent` 和 `CompletionResponse`。
+`pl-model` 是 LLM provider 与模型协议适配层，负责把核心层的统一请求转为具体 provider 的 API 请求，并把流式结果转换为 `pl-trace::AgentEvent` 和 `CompletionResponse`。
 
 `pl-model` 不维护会话，不解析 CLI，也不决定编译阶段。
 `pl-model` 可以消费已经解析好的自定义模型列表，但不读取配置文件。
@@ -25,12 +25,12 @@ pl-model
 pl-core
 ```
 
-`pl-model` 的公共协议边界只依赖 `pl-protocol`，使用其中的：
+`pl-model` 的公共消息和错误边界依赖 `pl-protocol`，内部流式事件边界依赖 `pl-trace`：
 
 - `Message`
-- `AgentEventSender`
 - `PureError`
 - `Result`
+- `pl_trace::AgentEventSender`
 
 provider 适配实现可以依赖 `async-openai`、`reqwest` 和 `serde`。这些依赖只用于 `pl-model` 内部 transport、typed protocol request 和 typed stream event 解析，不向 `pl-core` 暴露。
 

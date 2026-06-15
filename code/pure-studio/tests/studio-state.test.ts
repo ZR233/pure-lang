@@ -1,8 +1,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server.browser";
 import { initialStudioState, studioReducer } from "../src/state/studio-state";
-import { timelinePartViewsFromConversation } from "../src/state/timeline-state";
-import { selectTimelineEntries } from "../src/state/selectors";
+import { conversationPartViewsFromConversation } from "../src/state/conversation-state";
+import { selectConversationEntries } from "../src/state/selectors";
 import { normalizeRolesForProviders } from "../src/components/RoleSettings";
 import { selectedContextWindow } from "../src/components/SessionStatusBar";
 import { MarkdownContent } from "../src/components/MarkdownContent";
@@ -25,7 +25,7 @@ import type {
   RoleRecord,
   SessionRuntime,
   StudioEventEnvelope,
-  TimelinePartView,
+  ConversationPartView,
   StudioMessage,
   StudioPart,
   StudioPartDelta,
@@ -129,8 +129,8 @@ function textItem(
   itemId: string,
   sequence: number,
   content: string,
-  textChannel: TimelinePartView["textChannel"] = "final",
-): TimelinePartView {
+  textChannel: ConversationPartView["textChannel"] = "final",
+): ConversationPartView {
   return {
     turnId: itemId.split("-").slice(0, 2).join("-") || "turn",
     itemId,
@@ -145,7 +145,7 @@ function textItem(
   };
 }
 
-function planItem(itemId: string, turnId: string, sequence: number, content: string): TimelinePartView {
+function planItem(itemId: string, turnId: string, sequence: number, content: string): ConversationPartView {
   return {
     turnId,
     itemId,
@@ -210,7 +210,7 @@ function planConfirmationInteraction(
   };
 }
 
-function thinkingItem(itemId: string, turnId: string, sequence: number, content: string): TimelinePartView {
+function thinkingItem(itemId: string, turnId: string, sequence: number, content: string): ConversationPartView {
   return {
     turnId,
     itemId,
@@ -233,7 +233,7 @@ function toolItem(
   args: Record<string, unknown> | string,
   status: ToolCallStatus2 = "completed",
   result: string | null = null,
-): TimelinePartView {
+): ConversationPartView {
   return {
     turnId,
     itemId,
@@ -262,7 +262,7 @@ function turnItem(
   sequence: number,
   status: ToolCallStatus2,
   content = "",
-): TimelinePartView {
+): ConversationPartView {
   return {
     turnId,
     itemId,
@@ -277,7 +277,7 @@ function turnItem(
   };
 }
 
-function inferenceItem(itemId: string, turnId: string, sequence: number): TimelinePartView {
+function inferenceItem(itemId: string, turnId: string, sequence: number): ConversationPartView {
   return {
     turnId,
     itemId,
@@ -302,8 +302,8 @@ function inferenceItem(itemId: string, turnId: string, sequence: number): Timeli
   };
 }
 
-function nextSequenceForItems(timelinePartViews: TimelinePartView[]): number {
-  return timelinePartViews.reduce((max, item) => Math.max(max, item.startedSequence), -1) + 1;
+function nextSequenceForItems(conversationPartViews: ConversationPartView[]): number {
+  return conversationPartViews.reduce((max, item) => Math.max(max, item.startedSequence), -1) + 1;
 }
 
 function planState(planId: string, state: PlanState["state"]): PlanState {
@@ -370,7 +370,7 @@ function studioEvent(
   };
 }
 
-function messageForItem(item: TimelinePartView, role: StudioMessage["role"] = "assistant"): StudioMessage {
+function messageForItem(item: ConversationPartView, role: StudioMessage["role"] = "assistant"): StudioMessage {
   const messageId = role === "user" ? `${item.turnId}:user` : `${item.turnId}:assistant`;
   return {
     messageId,
@@ -390,7 +390,7 @@ function messageForItem(item: TimelinePartView, role: StudioMessage["role"] = "a
   };
 }
 
-function partForItem(item: TimelinePartView): StudioPart {
+function partForItem(item: ConversationPartView): StudioPart {
   return {
     partId: item.itemId,
     messageId: messageForItem(item).messageId,
@@ -419,7 +419,7 @@ function partForItem(item: TimelinePartView): StudioPart {
   };
 }
 
-function eventsForItems(items: TimelinePartView[], sessionId = "session-1"): StudioEventEnvelope[] {
+function eventsForItems(items: ConversationPartView[], sessionId = "session-1"): StudioEventEnvelope[] {
   return items.flatMap((item) => {
     const message = { ...messageForItem(item), sessionId };
     const part = { ...partForItem(item), sessionId, messageId: message.messageId };
@@ -438,7 +438,7 @@ function eventsForItems(items: TimelinePartView[], sessionId = "session-1"): Stu
 
 function loadSessionItems(
   state: TestState,
-  items: TimelinePartView[],
+  items: ConversationPartView[],
   nextSequence = nextSequenceForItems(items),
   planStates?: PlanState[],
   interactions?: InteractionRequest[],
@@ -463,16 +463,16 @@ function loadSessionItems(
   });
 }
 
-function timelinePartViews(state: TestState): Map<string, TimelinePartView> {
-  return new Map(timelinePartViewsFromConversation(state).map((item) => [item.itemId, item]));
+function conversationPartViews(state: TestState): Map<string, ConversationPartView> {
+  return new Map(conversationPartViewsFromConversation(state).map((item) => [item.itemId, item]));
 }
 
-function timelinePartView(state: TestState, itemId: string): TimelinePartView | undefined {
-  return timelinePartViews(state).get(itemId);
+function conversationPartView(state: TestState, itemId: string): ConversationPartView | undefined {
+  return conversationPartViews(state).get(itemId);
 }
 
 function timelineOrder(state: TestState): string[] {
-  return timelinePartViewsFromConversation(state).map((item) => item.itemId);
+  return conversationPartViewsFromConversation(state).map((item) => item.itemId);
 }
 
 function studioPartEvent(
@@ -494,7 +494,7 @@ function studioPartEvent(
   );
 }
 
-function itemUpdated(item: TimelinePartView): TestConversationChange {
+function itemUpdated(item: ConversationPartView): TestConversationChange {
   return { type: "itemUpdated", message: messageForItem(item), part: partForItem(item) };
 }
 
@@ -530,7 +530,7 @@ function studioTimelineEvent(
 }
 
 function studioItemEvents(
-  item: TimelinePartView,
+  item: ConversationPartView,
   sequence: number,
   overrides: Partial<StudioEventEnvelope> = {},
 ): StudioEventEnvelope[] {
@@ -614,7 +614,7 @@ function applyStudioPartEvent(
 
 function applyStudioItemUpdate(
   state: ReturnType<typeof selectedState>,
-  item: TimelinePartView,
+  item: ConversationPartView,
   sequence: number,
   status = "running",
 ) {
@@ -672,9 +672,9 @@ function completeTurn(
   });
 }
 
-function entriesForTimeline(items: TimelinePartView[]) {
+function entriesForConversation(items: ConversationPartView[]) {
   const loaded = loadSessionItems(selectedState(), items);
-  return selectTimelineEntries(loaded);
+  return selectConversationEntries(loaded);
 }
 
 function sessionStateProjectionSnapshotRestoresTimelineWithoutEvents() {
@@ -691,7 +691,7 @@ function sessionStateProjectionSnapshotRestoresTimelineWithoutEvents() {
   });
 
   assertDeepEqual(timelineOrder(loaded), ["turn-1-text"]);
-  assertEqual(timelinePartView(loaded, "turn-1-text")?.content, "hello from projection");
+  assertEqual(conversationPartView(loaded, "turn-1-text")?.content, "hello from projection");
   assertEqual(loaded.eventNextSequence, 42);
 }
 
@@ -744,8 +744,8 @@ function staleTimelineLoadKeepsNewTurnItems() {
   const afterStaleLoad = loadSessionItems(withNewTurn, [oldItem], 2);
 
   assertDeepEqual(timelineOrder(afterStaleLoad), ["turn-1-text", "turn-2-text"]);
-  assertEqual(timelinePartView(afterStaleLoad, "turn-1-text")?.content, "old");
-  assertEqual(timelinePartView(afterStaleLoad, "turn-2-text")?.content, "new");
+  assertEqual(conversationPartView(afterStaleLoad, "turn-1-text")?.content, "old");
+  assertEqual(conversationPartView(afterStaleLoad, "turn-2-text")?.content, "new");
   assertEqual(afterStaleLoad.eventNextSequence, 11);
 }
 
@@ -757,7 +757,7 @@ function freshTimelineLoadMayReplaceSnapshot() {
   const refreshed = loadSessionItems(loaded, [replacement], 3);
 
   assertDeepEqual(timelineOrder(refreshed), ["turn-1-text"]);
-  assertEqual(timelinePartView(refreshed, "turn-1-text")?.content, "replacement");
+  assertEqual(conversationPartView(refreshed, "turn-1-text")?.content, "replacement");
   assertEqual(refreshed.eventNextSequence, 3);
 }
 
@@ -783,8 +783,8 @@ function staleTimelineLoadDoesNotOverwriteLiveDelta() {
   const afterStaleLoad = loadSessionItems(liveCompleted, [oldItem], 2);
 
   assertDeepEqual(timelineOrder(afterStaleLoad), ["turn-1-text", "turn-2-text"]);
-  assertEqual(timelinePartView(afterStaleLoad, "turn-1-text")?.content, "old");
-  assertEqual(timelinePartView(afterStaleLoad, "turn-2-text")?.content, "new");
+  assertEqual(conversationPartView(afterStaleLoad, "turn-1-text")?.content, "old");
+  assertEqual(conversationPartView(afterStaleLoad, "turn-2-text")?.content, "new");
   assertEqual(afterStaleLoad.eventNextSequence, 13);
 }
 
@@ -843,13 +843,13 @@ function toolArgumentDeltaRequiresSnapshot() {
   completed.updatedAt = 11;
   const withCompleted = applyStudioConversationChange(withDelta, itemUpdated(completed), 11, "done");
 
-  assertEqual(timelinePartViews(orphan).has("turn-1-call-1"), false);
-  const liveGroup = selectTimelineEntries(withDelta)[0];
+  assertEqual(conversationPartViews(orphan).has("turn-1-call-1"), false);
+  const liveGroup = selectConversationEntries(withDelta)[0];
   if (liveGroup?.kind !== "toolGroup") {
     throw new Error(`Expected toolGroup entry, got ${liveGroup?.kind}`);
   }
   assertEqual(liveGroup.items[0]?.tool?.arguments, "{\"path\":\"a.ts\"");
-  const tool = timelinePartView(withCompleted, "turn-1-call-1")?.tool;
+  const tool = conversationPartView(withCompleted, "turn-1-call-1")?.tool;
   assertEqual(tool?.name, "read_file");
   assertEqual(tool?.arguments, "{\"path\":\"a.ts\"");
 }
@@ -876,13 +876,13 @@ function toolResultDeltaRequiresSnapshot() {
   completed.updatedAt = 11;
   const withCompleted = applyStudioConversationChange(withDelta, itemUpdated(completed), 11, "done");
 
-  assertEqual(timelinePartViews(orphan).has("turn-1-call-1"), false);
-  const liveGroup = selectTimelineEntries(withDelta)[0];
+  assertEqual(conversationPartViews(orphan).has("turn-1-call-1"), false);
+  const liveGroup = selectConversationEntries(withDelta)[0];
   if (liveGroup?.kind !== "toolGroup") {
     throw new Error(`Expected toolGroup entry, got ${liveGroup?.kind}`);
   }
   assertEqual(liveGroup.items[0]?.tool?.result, "partial result");
-  const tool = timelinePartView(withCompleted, "turn-1-call-1")?.tool;
+  const tool = conversationPartView(withCompleted, "turn-1-call-1")?.tool;
   assertEqual(tool?.name, "read_file");
   assertEqual(tool?.arguments, "{\"path\":\"a.ts\"}");
   assertEqual(tool?.result, "partial result");
@@ -901,10 +901,10 @@ function textDeltaRequiresSnapshotForCommentaryChannel() {
   const orphan = applyStudioConversationChange(selectedState(), itemDelta(delta), 9);
   const withStart = applyStudioConversationChange(orphan, itemUpdated(started), 10);
   const withDelta = applyStudioConversationChange(withStart, itemDelta(delta), 11);
-  const item = timelinePartView(withDelta, "turn-1-commentary");
-  const entries = selectTimelineEntries(withDelta);
+  const item = conversationPartView(withDelta, "turn-1-commentary");
+  const entries = selectConversationEntries(withDelta);
 
-  assertEqual(timelinePartViews(orphan).has("turn-1-commentary"), false);
+  assertEqual(conversationPartViews(orphan).has("turn-1-commentary"), false);
   assertEqual(item?.textChannel, "commentary");
   assertEqual(item?.content, "");
   assertDeepEqual(entries.map((entry) => entry.kind), ["commentary"]);
@@ -922,7 +922,7 @@ function turnCompletedWithNoPartsDoesNotDeleteLiveContent() {
   const completed = completeTurn(liveState, 20);
 
   assertDeepEqual(timelineOrder(completed), ["turn-2-text"]);
-  assertEqual(timelinePartView(completed, "turn-2-text")?.content, "live");
+  assertEqual(conversationPartView(completed, "turn-2-text")?.content, "live");
   assertEqual(completed.eventNextSequence, 21);
 }
 
@@ -1013,8 +1013,8 @@ function completedSnapshotKeepsFirstItemSequence() {
   const liveCompleted = applyStudioConversationChange(liveStarted, itemUpdated(completed), 12, "done");
 
   assertDeepEqual(timelineOrder(liveCompleted), ["turn-2-text"]);
-  assertEqual(timelinePartView(liveCompleted, "turn-2-text")?.startedSequence, 10);
-  assertEqual(timelinePartView(liveCompleted, "turn-2-text")?.content, "final");
+  assertEqual(conversationPartView(liveCompleted, "turn-2-text")?.startedSequence, 10);
+  assertEqual(conversationPartView(liveCompleted, "turn-2-text")?.content, "final");
   assertEqual(liveCompleted.eventNextSequence, 13);
 }
 
@@ -1032,7 +1032,7 @@ function terminalSnapshotClearsLiveDeltaOverlay() {
     }),
     11,
   );
-  const liveMessage = selectTimelineEntries(liveDelta).find(
+  const liveMessage = selectConversationEntries(liveDelta).find(
     (entry) => entry.kind === "message" && entry.content === "partial",
   );
   const completed = applyStudioConversationChange(
@@ -1044,11 +1044,11 @@ function terminalSnapshotClearsLiveDeltaOverlay() {
     12,
     "done",
   );
-  const finalEntries = selectTimelineEntries(completed);
+  const finalEntries = selectConversationEntries(completed);
 
   assertEqual(liveMessage?.kind === "message" ? liveMessage.content : "", "partial");
   assertEqual(completed.partDeltaAccum.has("turn-2-text"), false);
-  assertEqual(timelinePartView(completed, "turn-2-text")?.content, "final");
+  assertEqual(conversationPartView(completed, "turn-2-text")?.content, "final");
   assertDeepEqual(finalEntries.map((entry) => entry.kind), ["message"]);
   assertEqual(finalEntries[0]?.kind === "message" ? finalEntries[0].content : "", "final");
 }
@@ -1081,14 +1081,14 @@ function realtimeAndHistoricalTimelineEventsConverge() {
 
   assertDeepEqual(timelineOrder(historical), timelineOrder(live));
   assertDeepEqual(
-    timelinePartView(historical, "turn-2-text"),
-    timelinePartView(live, "turn-2-text"),
+    conversationPartView(historical, "turn-2-text"),
+    conversationPartView(live, "turn-2-text"),
   );
   assertEqual(historical.eventNextSequence, live.eventNextSequence);
 }
 
 function consecutiveToolsCollapseIntoToolGroup() {
-  const entries = entriesForTimeline([
+  const entries = entriesForConversation([
     toolItem("turn-1-read-a", "turn-1", 1, "read_file", { path: "a.ts" }),
     toolItem("turn-1-read-many", "turn-1", 2, "search_files", { paths: ["b.ts", "c.ts"] }),
     toolItem("turn-1-edit", "turn-1", 3, "write_file", { path: "d.ts" }),
@@ -1108,7 +1108,7 @@ function consecutiveToolsCollapseIntoToolGroup() {
 }
 
 function thinkingDoesNotBreakToolGroup() {
-  const entries = entriesForTimeline([
+  const entries = entriesForConversation([
     toolItem("turn-1-read-a", "turn-1", 1, "read_file", { path: "a.ts" }),
     thinkingItem("turn-1-thinking", "turn-1", 2, "checking the next file"),
     toolItem("turn-1-read-b", "turn-1", 3, "read_file", { path: "b.ts" }),
@@ -1129,7 +1129,7 @@ function thinkingDoesNotBreakToolGroup() {
 }
 
 function inferenceDoesNotBreakToolGroup() {
-  const entries = entriesForTimeline([
+  const entries = entriesForConversation([
     toolItem("turn-1-read-a", "turn-1", 1, "read_file", { path: "a.ts" }),
     inferenceItem("turn-1-inference", "turn-1", 2),
     toolItem("turn-1-read-b", "turn-1", 3, "read_file", { path: "b.ts" }),
@@ -1145,7 +1145,7 @@ function inferenceDoesNotBreakToolGroup() {
 }
 
 function repeatedThinkingItemsCollapseIntoOneThought() {
-  const entries = entriesForTimeline([
+  const entries = entriesForConversation([
     toolItem("turn-1-read-a", "turn-1", 1, "read_file", { path: "a.ts" }),
     thinkingItem("turn-1-thinking-a", "turn-1", 2, "checking a"),
     toolItem("turn-1-read-b", "turn-1", 3, "read_file", { path: "b.ts" }),
@@ -1169,7 +1169,7 @@ function repeatedThinkingItemsCollapseIntoOneThought() {
 }
 
 function thinkingFromDifferentTurnsDoesNotMerge() {
-  const entries = entriesForTimeline([
+  const entries = entriesForConversation([
     thinkingItem("turn-1-thinking", "turn-1", 1, "first turn"),
     thinkingItem("turn-2-thinking", "turn-2", 2, "second turn"),
   ]);
@@ -1185,7 +1185,7 @@ function thinkingFromDifferentTurnsDoesNotMerge() {
 }
 
 function assistantTextBreaksToolGroup() {
-  const entries = entriesForTimeline([
+  const entries = entriesForConversation([
     toolItem("turn-1-read", "turn-1", 1, "read_file", { path: "a.ts" }),
     textItem("turn-1-text", 2, "agent text"),
     toolItem("turn-1-edit", "turn-1", 3, "write_file", { path: "b.ts" }),
@@ -1200,7 +1200,7 @@ function assistantTextBreaksToolGroup() {
 }
 
 function planEntryBreaksToolGroupAndRendersAsPlan() {
-  const entries = entriesForTimeline([
+  const entries = entriesForConversation([
     toolItem("turn-1-read", "turn-1", 1, "read_file", { path: "a.ts" }),
     planItem("turn-1-plan", "turn-1", 2, "1. Read\n2. Implement"),
     toolItem("turn-1-read-b", "turn-1", 3, "read_file", { path: "b.ts" }),
@@ -1226,7 +1226,7 @@ function livePlanDeltaCreatesPlanEntry() {
   };
   const liveStarted = applyStudioConversationChange(selectedState(), itemUpdated(started), 10);
   const liveDelta = applyStudioConversationChange(liveStarted, itemDelta(delta), 11);
-  const entries = selectTimelineEntries(liveDelta);
+  const entries = selectConversationEntries(liveDelta);
 
   assertDeepEqual(entries.map((entry) => entry.kind), ["plan"]);
   const plan = entries[0];
@@ -1234,7 +1234,7 @@ function livePlanDeltaCreatesPlanEntry() {
     throw new Error(`Expected plan entry, got ${plan?.kind}`);
   }
   assertEqual(plan.content, "1. Inspect\n");
-  assertEqual(timelinePartView(liveDelta, "turn-1-plan")?.content, "");
+  assertEqual(conversationPartView(liveDelta, "turn-1-plan")?.content, "");
   assertEqual(liveDelta.activeInteractionId, null);
 }
 
@@ -1287,7 +1287,7 @@ function sessionStateLoadedPlanStateAnnotatesPlanWithoutOpeningComposer() {
     13,
     [planState("turn-1-plan", "dismissed")],
   );
-  const entries = selectTimelineEntries(state);
+  const entries = selectConversationEntries(state);
   const plan = entries.find((entry) => entry.kind === "plan");
 
   assertEqual(state.activeInteractionId, null);
@@ -1306,7 +1306,7 @@ function sessionStateLoadedNewPlanStatesAnnotatePlan() {
       13,
       [planState("turn-1-plan", state)],
     );
-    const plan = selectTimelineEntries(reduced).find((entry) => entry.kind === "plan");
+    const plan = selectConversationEntries(reduced).find((entry) => entry.kind === "plan");
 
     if (plan?.kind !== "plan") {
       throw new Error("expected plan entry");
@@ -1419,7 +1419,7 @@ function freshContextRunSwitchesToReturnedSession() {
   const completed = completeTurn(withImplementation, 21, "done", "session-2", "turn-2");
 
   assertEqual(completed.selectedSessionId, "session-2");
-  assertEqual(timelinePartView(completed, "turn-2-text")?.content, "implemented");
+  assertEqual(conversationPartView(completed, "turn-2-text")?.content, "implemented");
   assertEqual(completed.isBusy, false);
   assertDeepEqual(completed.sessions.map((session) => session.id), ["session-2"]);
 }
@@ -1430,7 +1430,7 @@ function planImplementationSubmittedShowsWaitingWithoutSwitchingSession() {
     status: "running",
     startedAt: 2222,
   });
-  const entries = selectTimelineEntries(submitted);
+  const entries = selectConversationEntries(submitted);
 
   assertEqual(submitted.selectedSessionId, "session-1");
   assertEqual(submitted.isBusy, true);
@@ -1475,7 +1475,7 @@ function sessionHandoffStartedSwitchesBeforeLiveEvents() {
   assertEqual(handoff.selectedSessionId, "session-2");
   assertEqual(handoff.isBusy, true);
   assertEqual(handoff.turnPhase, "running");
-  assertEqual(timelinePartViews(started).has("turn-2-text"), true);
+  assertEqual(conversationPartViews(started).has("turn-2-text"), true);
 }
 
 function studioTurnEventShowsWaitingState() {
@@ -1524,9 +1524,9 @@ function studioTimelineEventClearsWaitingAndStreamsContent() {
     status: "running",
   });
 
-  assertEqual(timelinePartViews(delta).has("optimistic-waiting-1234"), false);
-  assertEqual(timelinePartView(delta, "turn-1-text")?.content, "");
-  const entries = selectTimelineEntries(delta);
+  assertEqual(conversationPartViews(delta).has("optimistic-waiting-1234"), false);
+  assertEqual(conversationPartView(delta, "turn-1-text")?.content, "");
+  const entries = selectConversationEntries(delta);
   const message = entries.find((entry) => entry.kind === "message" && entry.content === "live");
   assertEqual(message?.kind === "message" ? message.content : "", "live");
   assertEqual(delta.eventNextSequence, 21);
@@ -1552,11 +1552,11 @@ function studioTimelineEventUsesEnvelopeSequenceForCursor() {
     status: "running",
   });
 
-  assertEqual(timelinePartView(delta, "turn-1-text")?.content, "");
-  const entries = selectTimelineEntries(delta);
+  assertEqual(conversationPartView(delta, "turn-1-text")?.content, "");
+  const entries = selectConversationEntries(delta);
   const message = entries.find((entry) => entry.kind === "message");
   assertEqual(message?.kind === "message" ? message.content : "", "canonical");
-  assertEqual(timelinePartView(delta, "turn-1-text")?.startedSequence, 0);
+  assertEqual(conversationPartView(delta, "turn-1-text")?.startedSequence, 0);
   assertEqual(delta.eventNextSequence, 31);
   assertEqual(delta.partDeltaAccum.has("turn-1-text"), true);
 }
@@ -1616,7 +1616,7 @@ function liveEventsForTargetAreIgnoredBeforeHandoffStarted() {
     status: "running",
   });
 
-  assertEqual(timelinePartViews(ignored).has("turn-2-text"), false);
+  assertEqual(conversationPartViews(ignored).has("turn-2-text"), false);
 }
 
 function sessionSelectionDedupesReturnedSessions() {
@@ -1691,7 +1691,7 @@ function promptSubmittedCreatesOptimisticTimelineFeedback() {
     startedAt: 1234,
     prompt: "Build the thing",
   });
-  const entries = selectTimelineEntries(state);
+  const entries = selectConversationEntries(state);
 
   assertDeepEqual(entries.map((entry) => entry.kind), ["message", "status"]);
   const message = entries[0];
@@ -1720,8 +1720,8 @@ function modelTimelineEventClearsWaitingFeedback() {
   const updated = applyStudioConversationChange(submitted, itemUpdated(realItem), 10);
 
   assertDeepEqual(timelineOrder(updated), ["optimistic-user-1234", "turn-1-text"]);
-  assertEqual(timelinePartViews(updated).has("optimistic-user-1234"), true);
-  assertEqual(timelinePartViews(updated).has("optimistic-waiting-1234"), false);
+  assertEqual(conversationPartViews(updated).has("optimistic-user-1234"), true);
+  assertEqual(conversationPartViews(updated).has("optimistic-waiting-1234"), false);
 }
 
 function userTimelineEventKeepsWaitingFeedback() {
@@ -1738,7 +1738,7 @@ function userTimelineEventKeepsWaitingFeedback() {
     "user",
   );
   const updated = applyStudioConversationChange(submitted, itemUpdated(realUser), realUser.startedSequence);
-  const entries = selectTimelineEntries(updated);
+  const entries = selectConversationEntries(updated);
 
   assertDeepEqual(entries.map((entry) => entry.kind), ["message", "status"]);
   const message = entries[0];
@@ -1748,8 +1748,8 @@ function userTimelineEventKeepsWaitingFeedback() {
   }
   assertEqual(message.content, "Build the thing");
   assertEqual(status.content, "waitingForModel");
-  assertEqual(timelinePartViews(updated).has("optimistic-user-1234"), false);
-  assertEqual(timelinePartViews(updated).has("optimistic-waiting-1234"), true);
+  assertEqual(conversationPartViews(updated).has("optimistic-user-1234"), false);
+  assertEqual(conversationPartViews(updated).has("optimistic-waiting-1234"), true);
   assertDeepEqual(timelineOrder(updated), ["turn-1-user", "optimistic-waiting-1234"]);
 }
 
@@ -1760,7 +1760,7 @@ function inferenceStartKeepsWaitingFeedback() {
     startedAt: 1234,
     prompt: "Build the thing",
   });
-  const inference: TimelinePartView = {
+  const inference: ConversationPartView = {
     turnId: "turn-1",
     itemId: "turn-1-inf-0",
     startedSequence: 2,
@@ -1778,7 +1778,7 @@ function inferenceStartKeepsWaitingFeedback() {
   };
   const updated = applyStudioConversationChange(submitted, itemUpdated(inference), 2);
 
-  assertEqual(timelinePartViews(updated).has("optimistic-waiting-1234"), true);
+  assertEqual(conversationPartViews(updated).has("optimistic-waiting-1234"), true);
 }
 
 function assistantSnapshotClearsOptimisticWaitingFeedback() {
@@ -1796,8 +1796,8 @@ function assistantSnapshotClearsOptimisticWaitingFeedback() {
   );
 
   assertDeepEqual(timelineOrder(loaded), ["optimistic-user-1234", "turn-1-text"]);
-  assertEqual(timelinePartViews(loaded).has("optimistic-user-1234"), true);
-  assertEqual(timelinePartViews(loaded).has("optimistic-waiting-1234"), false);
+  assertEqual(conversationPartViews(loaded).has("optimistic-user-1234"), true);
+  assertEqual(conversationPartViews(loaded).has("optimistic-waiting-1234"), false);
 }
 
 function runPromptFailedClearsWaitingFeedback() {
@@ -1812,11 +1812,11 @@ function runPromptFailedClearsWaitingFeedback() {
     sessionId: "session-1",
     status: "failed",
   });
-  const entries = selectTimelineEntries(failed);
+  const entries = selectConversationEntries(failed);
 
   assertDeepEqual(entries.map((entry) => entry.kind), ["message"]);
-  assertEqual(timelinePartViews(failed).has("optimistic-user-1234"), true);
-  assertEqual(timelinePartViews(failed).has("optimistic-waiting-1234"), false);
+  assertEqual(conversationPartViews(failed).has("optimistic-user-1234"), true);
+  assertEqual(conversationPartViews(failed).has("optimistic-waiting-1234"), false);
 }
 
 function thinkingEntriesExposeStreamingStatusAndDuration() {
@@ -1824,7 +1824,7 @@ function thinkingEntriesExposeStreamingStatusAndDuration() {
   item.status = "streaming";
   item.createdAt = 100;
   item.updatedAt = 100;
-  const entries = entriesForTimeline([item]);
+  const entries = entriesForConversation([item]);
   const thought = entries[0];
 
   if (thought?.kind !== "thought") {
@@ -1838,7 +1838,7 @@ function completedThinkingEntryUsesDuration() {
   const item = thinkingItem("turn-1-thinking", "turn-1", 10, "Inspecting context");
   item.createdAt = 10;
   item.updatedAt = 135;
-  const entries = entriesForTimeline([item]);
+  const entries = entriesForConversation([item]);
   const thought = entries[0];
 
   if (thought?.kind !== "thought") {
@@ -1914,13 +1914,13 @@ function selectingCurrentSessionKeepsTimelineState() {
   });
 
   assertDeepEqual(timelineOrder(selectedAgain), timelineOrder(withInteraction));
-  assertEqual(timelinePartView(selectedAgain, "turn-1-plan")?.content, "1. Inspect");
+  assertEqual(conversationPartView(selectedAgain, "turn-1-plan")?.content, "1. Inspect");
   assertEqual(selectedAgain.activeInteractionId, withInteraction.activeInteractionId);
   assertEqual(selectedAgain.eventNextSequence, withInteraction.eventNextSequence);
 }
 
 function toolsFromDifferentTurnsDoNotMerge() {
-  const entries = entriesForTimeline([
+  const entries = entriesForConversation([
     toolItem("turn-1-read", "turn-1", 1, "read_file", { path: "a.ts" }),
     toolItem("turn-2-read", "turn-2", 2, "read_file", { path: "b.ts" }),
   ]);
@@ -1936,7 +1936,7 @@ function toolsFromDifferentTurnsDoNotMerge() {
 }
 
 function toolGroupStatusUsesPriority() {
-  const failedEntries = entriesForTimeline([
+  const failedEntries = entriesForConversation([
     toolItem("turn-1-read", "turn-1", 1, "read_file", { path: "a.ts" }, "completed"),
     toolItem("turn-1-run", "turn-1", 2, "bash", { command: "npm test" }, "running"),
     toolItem("turn-1-approval", "turn-1", 3, "write_file", { path: "b.ts" }, "awaitingApproval"),
@@ -1948,7 +1948,7 @@ function toolGroupStatusUsesPriority() {
   }
   assertEqual(failedGroup.status, "failed");
 
-  const awaitingEntries = entriesForTimeline([
+  const awaitingEntries = entriesForConversation([
     toolItem("turn-2-run", "turn-2", 1, "bash", { command: "npm test" }, "running"),
     toolItem("turn-2-approval", "turn-2", 2, "write_file", { path: "b.ts" }, "awaitingApproval"),
   ]);
@@ -1986,7 +1986,7 @@ function sessionModeUpdateKeepsTimelineAndUpdatesSessions() {
 
   assertEqual(updated.sessions[0]?.mode, "plan");
   assertDeepEqual(timelineOrder(updated), ["turn-1-plan"]);
-  assertEqual(timelinePartView(updated, "turn-1-plan")?.content, "1. Inspect");
+  assertEqual(conversationPartView(updated, "turn-1-plan")?.content, "1. Inspect");
 }
 
 function lspServer(overrides: Partial<LspServerRecord> = {}): LspServerRecord {
@@ -2207,7 +2207,7 @@ function lspHealthUpdatedRefreshesLspServersAndRuntime() {
 }
 
 function applyPatchCountsFilesFromResultSummary() {
-  const entries = entriesForTimeline([
+  const entries = entriesForConversation([
     toolItem(
       "turn-1-patch",
       "turn-1",
@@ -2288,7 +2288,7 @@ function skillActivationFromOtherSessionDoesNotUpdateActiveSkills() {
 }
 
 function unknownToolsUseFallbackAndKeepDetails() {
-  const entries = entriesForTimeline([
+  const entries = entriesForConversation([
     toolItem("turn-1-custom-a", "turn-1", 1, "custom_tool", { value: 1 }),
     toolItem("turn-1-custom-b", "turn-1", 2, "another_tool", { value: 2 }),
   ]);
@@ -2313,7 +2313,7 @@ function quietFileToolFailureKeepsResultVisible() {
 }
 
 function inferenceAndNormalTurnTraceAreHidden() {
-  const entries = entriesForTimeline([
+  const entries = entriesForConversation([
     inferenceItem("turn-1-inference", "turn-1", 1),
     turnItem("turn-1-started", "turn-1", 2, "running"),
     turnItem("turn-1-completed", "turn-1", 3, "completed"),
@@ -2329,7 +2329,7 @@ function inferenceAndNormalTurnTraceAreHidden() {
 }
 
 function abnormalTurnTraceIsKeptWithContent() {
-  const entries = entriesForTimeline([
+  const entries = entriesForConversation([
     turnItem("turn-1-failed", "turn-1", 1, "failed", "provider error"),
     turnItem("turn-2-interrupted", "turn-2", 2, "interrupted", "stopped by user"),
     turnItem("turn-3-budget", "turn-3", 3, "budgetLimited", "budget limit reached"),
@@ -2342,7 +2342,7 @@ function abnormalTurnTraceIsKeptWithContent() {
   );
 }
 
-function liveFailedTimelinePartViewKeepsErrorMessage() {
+function liveFailedConversationPartViewKeepsErrorMessage() {
   const item = turnItem(
     "turn-1-turn",
     "turn-1",
@@ -2357,9 +2357,9 @@ function liveFailedTimelinePartViewKeepsErrorMessage() {
     "error",
   );
 
-  const entries = selectTimelineEntries(state);
+  const entries = selectConversationEntries(state);
 
-  assertEqual(timelinePartView(state, "turn-1-turn")?.content, "LLM provider error: missing API key");
+  assertEqual(conversationPartView(state, "turn-1-turn")?.content, "LLM provider error: missing API key");
   assertDeepEqual(entries.map((entry) => entry.kind), ["trace"]);
   assertEqual(
     entries[0]?.kind === "trace" ? entries[0].item.content : "",
@@ -2659,7 +2659,7 @@ unknownToolsUseFallbackAndKeepDetails();
 quietFileToolFailureKeepsResultVisible();
 inferenceAndNormalTurnTraceAreHidden();
 abnormalTurnTraceIsKeptWithContent();
-liveFailedTimelinePartViewKeepsErrorMessage();
+liveFailedConversationPartViewKeepsErrorMessage();
 providerDraftUsesSingleAddEntryAndUniqueKey();
 providerDraftTemplateSwitchUpdatesTemplateFields();
 openAiTemplateUsesCodexModelMetadata();

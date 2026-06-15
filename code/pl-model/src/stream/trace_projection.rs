@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use pl_protocol::{
+use pl_trace::{
     AgentEvent, TraceDelta, TraceEvent, TraceEventKind, TracePart, TracePartDeltaEvent,
     TracePartKind, TracePartStatus, TraceTextChannel, TraceThinkingChunk, TraceToolPart,
 };

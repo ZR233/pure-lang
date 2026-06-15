@@ -1,7 +1,7 @@
-use pl_protocol::{
-    AgentEvent, AgentEventSender, TokenUsageSnapshot, TraceAgentPart, TraceDelta, TraceEvent,
-    TraceEventKind, TraceInferencePart, TracePart, TracePartKind, TracePartStatus,
-    TraceTextChannel, TraceToolPart,
+use pl_protocol::TokenUsageSnapshot;
+use pl_trace::{
+    AgentEvent, AgentEventSender, TraceAgentPart, TraceDelta, TraceEvent, TraceEventKind,
+    TraceInferencePart, TracePart, TracePartKind, TracePartStatus, TraceTextChannel, TraceToolPart,
 };
 
 /// In-memory trace recorder that captures structured lifecycle events during a turn.
@@ -127,7 +127,7 @@ impl TraceRecorder {
         &mut self,
         turn_id: &str,
         content: String,
-        attachments: Vec<pl_protocol::TraceAttachment>,
+        attachments: Vec<pl_trace::TraceAttachment>,
     ) {
         let timestamp = unix_seconds();
         let mut item = TracePart::text(
@@ -168,7 +168,7 @@ impl TraceRecorder {
             turn_id: turn_id.to_string(),
             item_id: format!("{turn_id}-turn"),
             started_sequence: self.sequence,
-            kind: pl_protocol::TracePartKind::Turn,
+            kind: pl_trace::TracePartKind::Turn,
             status,
             created_at: timestamp,
             updated_at: timestamp,
@@ -224,7 +224,7 @@ impl TraceRecorder {
             turn_id: turn_id.to_string(),
             item_id: inference_id.to_string(),
             started_sequence: self.sequence,
-            kind: pl_protocol::TracePartKind::Inference,
+            kind: pl_trace::TracePartKind::Inference,
             status: TracePartStatus::Running,
             created_at: timestamp,
             updated_at: timestamp,
@@ -263,7 +263,7 @@ impl TraceRecorder {
             turn_id: turn_id.to_string(),
             item_id: tool_call_id.to_string(),
             started_sequence: self.sequence,
-            kind: pl_protocol::TracePartKind::Tool,
+            kind: pl_trace::TracePartKind::Tool,
             status: TracePartStatus::Started,
             created_at: timestamp,
             updated_at: timestamp,
@@ -324,7 +324,7 @@ impl TraceRecorder {
             turn_id: turn_id.to_string(),
             item_id,
             started_sequence: self.sequence,
-            kind: pl_protocol::TracePartKind::Agent,
+            kind: pl_trace::TracePartKind::Agent,
             status,
             created_at: timestamp,
             updated_at: timestamp,

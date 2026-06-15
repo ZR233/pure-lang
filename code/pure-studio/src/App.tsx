@@ -35,7 +35,7 @@ export function App() {
         <ConversationPanel
           selectedSession={studio.selectedSession}
           isBusy={state.isBusy}
-          entries={studio.timelineEntries}
+          entries={studio.conversationEntries}
           agents={state.agents}
           sessionRuntime={state.sessionRuntime}
           lspServers={state.lspServers}

@@ -6,8 +6,11 @@ use pl_model::{
     SharedModelProvider, create_provider, create_provider_with_models,
 };
 #[cfg(test)]
-use pl_protocol::{AgentEvent, ErrorSeverity, PureError, TraceEvent, TracePartStatus};
-use pl_protocol::{AgentEventSender, Message, MessageContent, MessageRole, Result};
+use pl_protocol::{ErrorSeverity, PureError};
+use pl_protocol::{Message, MessageContent, MessageRole, Result};
+use pl_trace::AgentEventSender;
+#[cfg(test)]
+use pl_trace::{AgentEvent, TraceEvent, TracePartStatus};
 
 use crate::config::{ModelRole, PureConfig, ReasoningEffort};
 use crate::permission::parse_reviewer_decision;
@@ -380,10 +383,8 @@ mod tests {
     use crate::turn::{CompileMode, PermissionMode, ToolApprovalPolicy};
     use crate::{ConfigStore, ModelRole};
     use pl_model::ToolCall;
-    use pl_protocol::{
-        InteractionPayload, InteractionResolution, ToolApprovalResolution, TraceEventKind,
-        TracePartKind, TraceTextChannel,
-    };
+    use pl_protocol::{InteractionPayload, InteractionResolution, ToolApprovalResolution};
+    use pl_trace::{TraceEventKind, TracePartKind, TraceTextChannel};
     use pretty_assertions::assert_eq;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -409,10 +410,10 @@ mod tests {
             .iter()
             .filter(|event| match &event.kind {
                 TraceEventKind::TracePartCompleted { item } => {
-                    item.kind == pl_protocol::TracePartKind::Tool
+                    item.kind == pl_trace::TracePartKind::Tool
                 }
                 TraceEventKind::TracePartFailed { item, .. } => {
-                    item.kind == pl_protocol::TracePartKind::Tool
+                    item.kind == pl_trace::TracePartKind::Tool
                 }
                 TraceEventKind::TracePartStarted { .. }
                 | TraceEventKind::TracePartDelta { .. }
@@ -504,7 +505,7 @@ mod tests {
         recorder.drain()
     }
 
-    fn enabled_tools_event(events: &[TraceEvent]) -> &pl_protocol::EnabledToolsEvent {
+    fn enabled_tools_event(events: &[TraceEvent]) -> &pl_trace::EnabledToolsEvent {
         events
             .iter()
             .find_map(|event| match &event.kind {
@@ -1103,7 +1104,7 @@ mod tests {
         assert!(!events.iter().any(|event| matches!(
             &event.kind,
             TraceEventKind::TracePartCompleted { item }
-                if item.kind == pl_protocol::TracePartKind::Tool
+                if item.kind == pl_trace::TracePartKind::Tool
                     && item.status == TracePartStatus::Approved
         )));
         let _ = tokio::fs::remove_dir_all(workspace_root).await;

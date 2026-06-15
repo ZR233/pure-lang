@@ -3,9 +3,8 @@ use std::collections::HashMap;
 use pl_model::{
     CompletionRequest, ModelProvider, ReasoningConfig, SharedModelProvider, TokenUsage,
 };
-use pl_protocol::{
-    AgentEventSender, ContentPart, Message, MessageContent, MessageRole, PureError, Result,
-};
+use pl_protocol::{ContentPart, Message, MessageContent, MessageRole, PureError, Result};
+use pl_trace::AgentEventSender;
 
 use crate::session::CoreSession;
 

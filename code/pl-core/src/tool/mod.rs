@@ -17,7 +17,8 @@ use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 
 use pl_model::ToolSchema;
-use pl_protocol::{AgentEventSender, PureError, SkillActivation};
+use pl_protocol::{PureError, SkillActivation};
+use pl_trace::AgentEventSender;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 

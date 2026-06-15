@@ -4,7 +4,8 @@ use pl_model::{
     CompletionRequest, CompletionResponse, CompletionTraceContext, ModelProvider, ProviderInfo,
     ReasoningConfig, ReasoningSummary, create_provider,
 };
-use pl_protocol::{AgentEvent, Message, MessageContent, MessageRole, TraceDelta};
+use pl_protocol::{Message, MessageContent, MessageRole};
+use pl_trace::{AgentEvent, TraceDelta};
 
 const ZHIPU_LIVE_ENV_KEY: &str = "API_KEY_ZHIPU";
 

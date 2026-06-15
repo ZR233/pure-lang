@@ -10,10 +10,10 @@ use pl_core::{
     StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord, StudioRuntime, ToolCapabilities,
     ZhipuQuotaWindow, builtin_mcp_server_ids, effective_mcp_servers, infer_provider_template_kind,
 };
-use pl_protocol::{StudioEventEnvelope, StudioEventKind};
+use pl_protocol::{StudioAgentTimelineEvent, StudioEventEnvelope, StudioEventKind};
 
 use crate::dto::{
-    AgentDto, AgentEventDto, AttachmentDto, ConfigDto, DeepSeekBalanceDto, DeepSeekBalanceInfoDto,
+    AgentDto, AttachmentDto, ConfigDto, DeepSeekBalanceDto, DeepSeekBalanceInfoDto,
     DiscoveredSkillsDto, InstructionsDto, InstructionsInput, KeyValueDto, LspHealthUpdateDto,
     LspServerDto, McpHealthUpdateDto, McpServerDto, McpSettingsInput, ModelCapabilitiesDto,
     ModelDto, PlanStateDto, ProjectDto, ProviderDto, ProviderInput, ProviderSettingsInput,
@@ -650,22 +650,14 @@ pub fn session_dtos(sessions: Vec<SessionRecord>) -> Vec<SessionDto> {
         .collect()
 }
 
-pub fn agent_event_dtos(events: Vec<StudioAgentTimelineEventRecord>) -> Vec<AgentEventDto> {
-    events.into_iter().map(agent_event_dto).collect()
+pub fn agent_event_dtos(
+    events: Vec<StudioAgentTimelineEventRecord>,
+) -> Vec<StudioAgentTimelineEvent> {
+    events.into_iter().filter_map(agent_event_dto).collect()
 }
 
-pub fn agent_event_dto(event: StudioAgentTimelineEventRecord) -> AgentEventDto {
-    AgentEventDto {
-        event_id: event.event_id,
-        session_id: event.session_id,
-        sequence: event.sequence,
-        kind: event.kind,
-        agent_id: event.agent_id,
-        path: event.path,
-        parent_path: event.parent_path,
-        payload: serde_json::from_str(&event.payload_json).unwrap_or(serde_json::Value::Null),
-        created_at: event.created_at,
-    }
+pub fn agent_event_dto(event: StudioAgentTimelineEventRecord) -> Option<StudioAgentTimelineEvent> {
+    serde_json::from_str(&event.payload_json).ok()
 }
 
 pub fn agent_dtos(agents: Vec<StudioAgentSnapshotRecord>) -> Vec<AgentDto> {

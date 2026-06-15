@@ -2802,6 +2802,7 @@ dependencies = [
  "pl-lsp",
  "pl-model",
  "pl-protocol",
+ "pl-trace",
  "pretty_assertions",
  "reqwest",
  "sea-orm",
@@ -2834,6 +2835,7 @@ dependencies = [
  "bitflags 2.11.1",
  "futures",
  "pl-protocol",
+ "pl-trace",
  "pretty_assertions",
  "reqwest",
  "secrecy",
@@ -2851,6 +2853,16 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "pl-trace"
+version = "0.1.0"
+dependencies = [
+ "pl-protocol",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 

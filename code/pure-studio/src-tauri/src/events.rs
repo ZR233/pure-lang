@@ -1,13 +1,11 @@
 use std::time::Duration;
 
 use pl_core::StudioRuntime;
-use pl_protocol::{AgentEvent, StudioEventEnvelope, StudioEventKind};
+use pl_protocol::{StudioEventEnvelope, StudioEventKind};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::broadcast::error::RecvError;
 
-use crate::mappers::{
-    agent_dto, load_session_runtime_dto, lsp_health_update_dto, mcp_health_update_dto,
-};
+use crate::mappers::{lsp_health_update_dto, mcp_health_update_dto};
 use crate::state::AppState;
 
 const MCP_PERIODIC_RECHECK: Duration = Duration::from_secs(300);
@@ -115,115 +113,4 @@ pub fn start_studio_runtime_event_bridge(app: AppHandle, state: AppState) {
 
 fn emit_studio_runtime_event(app: &AppHandle, event: StudioEventEnvelope) {
     let _ = app.emit("studio-runtime-event", event);
-}
-
-pub async fn drain_events(
-    session_id: String,
-    mut event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
-    _app: AppHandle,
-    studio: StudioRuntime,
-) {
-    loop {
-        match event_rx.recv().await {
-            Ok(event) => {
-                let _ = studio
-                    .events()
-                    .emit_agent_event(&session_id, event.clone())
-                    .await
-                    .ok()
-                    .flatten();
-                let agent = agent_for_event(&studio, &session_id, &event).await;
-                let session_runtime = if matches!(
-                    event,
-                    AgentEvent::AgentRuntimeUpdated { .. } | AgentEvent::SkillActivated { .. }
-                ) {
-                    load_session_runtime_dto(&studio, &session_id).await.ok()
-                } else {
-                    None
-                };
-                if let Some(agent) = &agent {
-                    let _ = studio
-                        .events()
-                        .emit(
-                            None,
-                            Some(session_id.clone()),
-                            None,
-                            StudioEventKind::AgentChanged {
-                                agent: agent.clone().into(),
-                            },
-                        )
-                        .await;
-                }
-                if let Some(session_runtime) = &session_runtime {
-                    let _ = studio
-                        .events()
-                        .emit(
-                            None,
-                            Some(session_id.clone()),
-                            None,
-                            StudioEventKind::SessionRuntimeChanged {
-                                runtime: session_runtime.clone().into(),
-                            },
-                        )
-                        .await;
-                }
-            }
-            Err(RecvError::Lagged(skipped)) => {
-                let _ = studio.events().emit_stale(&session_id, skipped).await;
-            }
-            Err(RecvError::Closed) => {
-                break;
-            }
-        }
-    }
-}
-
-async fn agent_for_event(
-    studio: &StudioRuntime,
-    session_id: &str,
-    event: &AgentEvent,
-) -> Option<crate::dto::AgentDto> {
-    match event {
-        AgentEvent::AgentStateChanged { id, .. } => studio
-            .store()
-            .list_agents(session_id)
-            .await
-            .ok()
-            .and_then(|agents| {
-                agents
-                    .into_iter()
-                    .find(|agent| agent.id == *id)
-                    .map(agent_dto)
-            }),
-        AgentEvent::AgentRuntimeUpdated { delta } if delta.agent_id != "agent-root" => studio
-            .store()
-            .list_agents(session_id)
-            .await
-            .ok()
-            .and_then(|agents| {
-                agents
-                    .into_iter()
-                    .find(|agent| agent.id == delta.agent_id)
-                    .map(agent_dto)
-            }),
-        AgentEvent::TracePartStarted { .. }
-        | AgentEvent::TracePartDelta { .. }
-        | AgentEvent::TracePartCompleted { .. }
-        | AgentEvent::TracePartFailed { .. }
-        | AgentEvent::InteractionChanged { .. }
-        | AgentEvent::AgentRuntimeUpdated { .. }
-        | AgentEvent::SkillActivated { .. }
-        | AgentEvent::CollabAgentSpawnBegin { .. }
-        | AgentEvent::CollabAgentSpawnEnd { .. }
-        | AgentEvent::CollabAgentInteractionBegin { .. }
-        | AgentEvent::CollabAgentInteractionEnd { .. }
-        | AgentEvent::CollabWaitingBegin { .. }
-        | AgentEvent::CollabWaitingEnd { .. }
-        | AgentEvent::CollabCloseBegin { .. }
-        | AgentEvent::CollabCloseEnd { .. }
-        | AgentEvent::TurnInterrupted { .. }
-        | AgentEvent::TurnBudgetLimited { .. }
-        | AgentEvent::Done
-        | AgentEvent::Error { .. } => None,
-    }
 }

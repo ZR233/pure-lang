@@ -1,5 +1,5 @@
 use crate::request::TokenUsage;
-use pl_protocol::TraceTextChannel;
+use pl_trace::TraceTextChannel;
 
 /// Provider-independent streaming event consumed by the model accumulator.
 #[derive(Debug, Clone)]

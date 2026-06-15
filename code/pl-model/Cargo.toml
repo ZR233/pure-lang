@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 pl-protocol = { workspace = true }
+pl-trace = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 bitflags = { workspace = true }

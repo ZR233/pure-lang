@@ -33,8 +33,10 @@ mod tests {
         InteractionStatus, Message, MessageContent, MessageRole, PlanConfirmationResolution,
         PlanLifecycleState, RuntimeCostAmount, SkillActivation, StudioEventEnvelope,
         StudioEventKind, StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart,
-        StudioPartStatus, StudioPartType, StudioTextChannel, TokenUsageSnapshot, TraceEvent,
-        TraceEventKind, TracePart, TracePartKind, TracePartStatus, TraceTextChannel,
+        StudioPartStatus, StudioPartType, StudioTextChannel, TokenUsageSnapshot,
+    };
+    use pl_trace::{
+        TraceEvent, TraceEventKind, TracePart, TracePartKind, TracePartStatus, TraceTextChannel,
     };
     use pretty_assertions::assert_eq;
 
@@ -344,7 +346,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn core_trace_user_snapshot_updates_canonical_user_part() {
+    async fn core_trace_user_snapshot_does_not_duplicate_canonical_user_part() {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project("C:/work/alpha").await.unwrap();
         let session = store
@@ -428,13 +430,14 @@ mod tests {
             inference: None,
             usage: None,
         };
-        runtime
+        let emitted = runtime
             .emit_agent_event(
                 &session.id,
-                pl_protocol::AgentEvent::TracePartCompleted { item: trace_item },
+                pl_trace::AgentEvent::TracePartCompleted { item: trace_item },
             )
             .await
             .unwrap();
+        assert_eq!(emitted, None);
 
         let parts = store.load_message_parts(&session.id).await.unwrap();
         let events = store
@@ -472,10 +475,7 @@ mod tests {
         assert_eq!(parts.len(), 1);
         assert_eq!(parts[0].part.part_id, "turn-1:user-text");
         assert_eq!(parts[0].part.message_id, "turn-1:user");
-        assert_eq!(
-            user_part_events,
-            vec!["turn-1:user-text", "turn-1:user-text"]
-        );
+        assert_eq!(user_part_events, vec!["turn-1:user-text"]);
     }
 
     #[tokio::test]

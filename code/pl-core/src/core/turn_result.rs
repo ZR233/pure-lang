@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 use pl_model::ModelCapabilities;
-use pl_protocol::{AgentEvent, BudgetLimitKind, BudgetUsage, ErrorSeverity, TracePartStatus};
+use pl_protocol::{BudgetLimitKind, BudgetUsage, ErrorSeverity};
+use pl_trace::{AgentEvent, TracePartStatus};
 
 use crate::trace::TraceRecorder;
 use crate::turn::{

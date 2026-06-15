@@ -1,6 +1,7 @@
 use async_openai::types::stream::StreamResponse;
 use futures::StreamExt;
-use pl_protocol::{AgentEventSender, PureError, Result, TraceTextChannel};
+use pl_protocol::{PureError, Result};
+use pl_trace::{AgentEventSender, TraceTextChannel};
 
 pub(crate) mod event;
 mod lifecycle;

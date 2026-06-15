@@ -1,8 +1,8 @@
-use pl_protocol::AgentEvent;
+use pl_trace::AgentEvent;
 
 use crate::agent::AgentRecord;
 
-pub(crate) fn emit_agent_record(event_tx: &pl_protocol::AgentEventSender, record: &AgentRecord) {
+pub(crate) fn emit_agent_record(event_tx: &pl_trace::AgentEventSender, record: &AgentRecord) {
     let _ = event_tx.send(AgentEvent::AgentStateChanged {
         id: record.id.clone(),
         path: record.path.clone(),
@@ -22,7 +22,7 @@ pub(crate) fn emit_agent_record(event_tx: &pl_protocol::AgentEventSender, record
 
 pub(super) async fn forward_agent_lifecycle_events(
     mut event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
-    parent_event_tx: pl_protocol::AgentEventSender,
+    parent_event_tx: pl_trace::AgentEventSender,
 ) {
     loop {
         match event_rx.recv().await {

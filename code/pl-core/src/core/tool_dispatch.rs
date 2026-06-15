@@ -5,7 +5,8 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use futures::stream::{FuturesUnordered, StreamExt};
 use pl_model::ToolCallPayload;
-use pl_protocol::{AgentEvent, PureError, ToolCallKind, TraceEventKind, TracePartStatus};
+use pl_protocol::{PureError, ToolCallKind};
+use pl_trace::{AgentEvent, TraceEventKind, TracePartStatus};
 use tokio::sync::RwLock;
 
 use crate::permission::{PermissionDecision, decide_tool_permission};
@@ -36,7 +37,7 @@ pub(super) struct ToolExecutionRecord {
 
 pub(super) struct ScheduledToolExecution<'a> {
     pub(super) tool_call: pl_model::ToolCall,
-    pub(super) item: pl_protocol::TracePart,
+    pub(super) item: pl_trace::TracePart,
     pub(super) future: BoxFuture<'a, Result<ToolExecutionRecord, ToolExecutionError>>,
 }
 
@@ -416,7 +417,7 @@ async fn collect_scheduled_tools(
 
 fn finalize_tool_item(
     recorder: &mut crate::trace::TraceRecorder,
-    mut item: pl_protocol::TracePart,
+    mut item: pl_trace::TracePart,
     record: &ToolExecutionRecord,
 ) {
     item.status = record.status;

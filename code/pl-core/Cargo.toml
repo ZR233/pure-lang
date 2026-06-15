@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 pl-protocol = { workspace = true }
+pl-trace = { workspace = true }
 pl-model = { workspace = true }
 pl-lsp = { workspace = true }
 anyhow = { workspace = true }

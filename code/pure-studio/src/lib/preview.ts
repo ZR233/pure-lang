@@ -1,7 +1,6 @@
 import type {
   ConfigPayload,
   AgentDto,
-  AgentTimelineEvent,
   LspServerRecord,
   McpServerRecord,
   ProjectRecord,
@@ -9,7 +8,8 @@ import type {
   SessionRecord,
   SessionRuntime,
   SkillRecord,
-  TimelinePartView,
+  ConversationPartView,
+  StudioAgentTimelineEvent,
 } from "../types";
 import { makeProvider } from "./provider-mapper";
 import { previewTemplates } from "./templates";
@@ -328,99 +328,54 @@ export const previewAgents: AgentDto[] = [
   },
 ];
 
-export const previewAgentEvents: AgentTimelineEvent[] = [
+export const previewAgentEvents: StudioAgentTimelineEvent[] = [
   {
     eventId: "preview-agent-event-1",
     sessionId: "preview-session",
     sequence: 1,
-    kind: "spawnBegin",
-    agentId: null,
-    path: "/root/preview_executor",
-    parentPath: null,
-    payload: {
-      collabAgentSpawnBegin: {
-        callId: "preview-spawn-1",
-        startedAt: 1779688798,
-        senderPath: "/root",
-        taskName: "preview_executor",
-        prompt: "检查当前工作区变更并报告可能的下一步。",
-        role: "executor",
-        model: "deepseek-v4-flash",
-        reasoningEffort: "high",
-      },
-    },
     createdAt: 1779688798,
+    kind: {
+      type: "spawnBegin",
+      callId: "preview-spawn-1",
+      senderPath: "/root",
+      taskName: "preview_executor",
+      prompt: "检查当前工作区变更并报告可能的下一步。",
+      role: "executor",
+      model: "deepseek-v4-flash",
+      reasoningEffort: "high",
+    },
   },
   {
     eventId: "preview-agent-event-2",
     sessionId: "preview-session",
     sequence: 2,
-    kind: "spawnEnd",
-    agentId: "agent-preview-executor",
-    path: "/root/preview_executor",
-    parentPath: null,
-    payload: {
-      collabAgentSpawnEnd: {
-        callId: "preview-spawn-1",
-        completedAt: 1779688800,
-        senderPath: "/root",
-        agentId: "agent-preview-executor",
-        path: "/root/preview_executor",
-        role: "executor",
-        status: "running",
-        prompt: "检查当前工作区变更并报告可能的下一步。",
-        error: null,
-      },
-    },
     createdAt: 1779688800,
-  },
-  {
-    eventId: "preview-agent-event-3",
-    sessionId: "preview-session",
-    sequence: 3,
-    kind: "agentStatus",
-    agentId: "agent-preview-executor",
-    path: "/root/preview_executor",
-    parentPath: null,
-    payload: {
-      agentStateChanged: {
-        id: "agent-preview-executor",
-        path: "/root/preview_executor",
-        parentPath: null,
-        role: "executor",
-        task: previewAgentTaskMarkdown,
-        status: "completed",
-        summary: previewAgentSummaryMarkdown,
-        depth: 1,
-        error: null,
-        reason: null,
-        budgetLimitKind: null,
-        budgetUsage: null,
-        updatedAt: 1779688800,
-      },
+    kind: {
+      type: "spawnEnd",
+      callId: "preview-spawn-1",
+      senderPath: "/root",
+      agentId: "agent-preview-executor",
+      path: "/root/preview_executor",
+      role: "executor",
+      status: "running",
+      prompt: "检查当前工作区变更并报告可能的下一步。",
+      error: null,
     },
-    createdAt: 1779688800,
   },
   {
     eventId: "preview-agent-event-4",
     sessionId: "preview-session",
     sequence: 4,
-    kind: "waitingBegin",
-    agentId: "agent-preview-reviewer",
-    path: "/root/preview_executor/reviewer",
-    parentPath: "/root/preview_executor",
-    payload: {
-      collabWaitingBegin: {
-        callId: "preview-wait-1",
-        startedAt: 1779688858,
-        senderPath: "/root/preview_executor",
-      },
-    },
     createdAt: 1779688858,
+    kind: {
+      type: "waitingBegin",
+      callId: "preview-wait-1",
+      senderPath: "/root/preview_executor",
+    },
   },
 ];
 
-export const previewTimelinePartViews: TimelinePartView[] = [
+export const previewConversationPartViews: ConversationPartView[] = [
   {
     turnId: "preview-turn-1",
     itemId: "preview-user-1",

@@ -1,6 +1,5 @@
 import type {
   AgentDto,
-  AgentTimelineEvent,
   BootstrapPayload,
   ConfigPayload,
   InstructionsRecord,
@@ -27,7 +26,7 @@ import type {
   StudioPartProjection,
   StudioPartDeltaField,
   StudioTurnStatus,
-  TimelinePartView,
+  ConversationPartView,
   StudioAttachment,
   TurnPhase,
   TurnStatus,
@@ -37,14 +36,14 @@ import type {
 import {
   addOptimisticPart,
   applyStudioEvent,
-  emptyTimelineState,
+  emptyConversationState,
   mergeConversationSnapshot,
-  removeOptimisticTimelinePartViews,
-  removeOptimisticUserTimelinePartViews,
-  removeOptimisticWaitingTimelinePartViews,
+  removeOptimisticConversationPartViews,
+  removeOptimisticUserConversationPartViews,
+  removeOptimisticWaitingConversationPartViews,
   resetConversationFromSnapshot,
-  type TimelineStateSlice,
-} from "./timeline-state";
+  type ConversationStateSlice,
+} from "./conversation-state";
 
 export type SettingsTab =
   | "providers"
@@ -55,7 +54,7 @@ export type SettingsTab =
   | "security"
   | "general";
 
-export type StudioState = TimelineStateSlice & {
+export type StudioState = ConversationStateSlice & {
   projects: ProjectRecord[];
   sessions: SessionRecord[];
   providers: ProviderRecord[];
@@ -76,7 +75,7 @@ export type StudioState = TimelineStateSlice & {
   turnStartedAt: number | null;
   isBusy: boolean;
   agents: AgentDto[];
-  agentTimelineEvents: AgentTimelineEvent[];
+  agentTimelineEvents: StudioAgentTimelineEvent[];
   sessionRuntime: SessionRuntime | null;
   interactions: Map<string, InteractionRequest>;
   activeInteractionId: string | null;
@@ -93,8 +92,8 @@ export type StudioState = TimelineStateSlice & {
   sessionViews: Map<string, SessionViewState>;
 };
 
-type SessionViewState = TimelineStateSlice & {
-  agentTimelineEvents: AgentTimelineEvent[];
+type SessionViewState = ConversationStateSlice & {
+  agentTimelineEvents: StudioAgentTimelineEvent[];
   agents: AgentDto[];
   sessionRuntime: SessionRuntime | null;
   interactions: Map<string, InteractionRequest>;
@@ -113,7 +112,7 @@ export type StudioAction =
   | {
       type: "sessionStateLoaded";
       sessionId: string | null;
-      agentEvents?: AgentTimelineEvent[];
+      agentEvents?: StudioAgentTimelineEvent[];
       agents?: AgentDto[];
       sessionRuntime?: SessionRuntime | null;
       messages?: StudioMessageProjection[];
@@ -187,7 +186,7 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   isBusy: false,
   agents: [],
   agentTimelineEvents: [],
-  ...emptyTimelineState(),
+  ...emptyConversationState(),
   sessionRuntime: null,
   interactions: new Map(),
   activeInteractionId: null,
@@ -217,7 +216,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         agents: mergeAgents([], action.payload.agents ?? []),
         sessionRuntime: action.payload.sessionRuntime ?? null,
         lspServers: action.payload.lspHealth?.lspServers ?? state.lspServers,
-        ...emptyTimelineState(),
+        ...emptyConversationState(),
         ...configFields(state.selectedProviderId, action.payload.config),
         status: action.status,
         turnPhase: "idle",
@@ -294,7 +293,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         agents: mergeAgents([], action.payload.agents ?? []),
         sessionRuntime: action.payload.sessionRuntime ?? null,
         lspServers: action.payload.lspHealth?.lspServers ?? state.lspServers,
-        ...emptyTimelineState(),
+        ...emptyConversationState(),
         ...interactionState(
           new Map(),
           action.payload.interactions ?? [],
@@ -402,7 +401,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         return state;
       }
       return storeSessionView({
-        ...removeOptimisticWaitingTimelinePartViews(state),
+        ...removeOptimisticWaitingConversationPartViews(state),
         status: action.status,
         turnPhase: "failed",
         turnStartedAt: null,
@@ -512,7 +511,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       const currentRunEventBaseSequence = state.eventNextSequence;
       return storeSessionView({
         ...appendOptimisticPrompt(
-          removeOptimisticTimelinePartViews(state),
+          removeOptimisticConversationPartViews(state),
           action.prompt,
           action.startedAt,
           action.attachments ?? [],
@@ -554,7 +553,7 @@ function sessionViewFromState(state: StudioState): SessionViewState {
 
 function emptySessionView(): SessionViewState {
   return {
-    ...emptyTimelineState(),
+    ...emptyConversationState(),
     agentTimelineEvents: [],
     agents: [],
     sessionRuntime: null,
@@ -847,7 +846,7 @@ function reduceSessionHandoffEvent(
     agentTimelineEvents: switched ? [] : state.agentTimelineEvents,
     agents: switched ? [] : state.agents,
     sessionRuntime: switched ? null : state.sessionRuntime,
-    ...(switched ? emptyTimelineState() : {}),
+    ...(switched ? emptyConversationState() : {}),
     ...interactionState(
       switched ? new Map() : state.interactions,
       [],
@@ -873,7 +872,7 @@ function reduceTurnChanged(
 ): StudioState {
   const turnPhase = phaseForStudioTurnStatus(status);
   const terminal = isTerminalStudioTurnStatus(status);
-  const base = terminal ? removeOptimisticWaitingTimelinePartViews(state) : state;
+  const base = terminal ? removeOptimisticWaitingConversationPartViews(state) : state;
   return {
     ...base,
     isBusy: terminal ? false : true,
@@ -910,7 +909,7 @@ function reduceAgentTimelineChanged(
     ...state,
     agentTimelineEvents: mergeAgentTimelineEvents(
       state.agentTimelineEvents,
-      [agentTimelineRecordFromStudioEvent(event)],
+      [event],
     ),
     status: status ?? state.status,
   };
@@ -1165,10 +1164,10 @@ function applyOptimisticConversationCleanup(
 ): StudioState {
   let next = state;
   if (shouldClearOptimisticUserPart(kind)) {
-    next = removeOptimisticUserTimelinePartViews(next);
+    next = removeOptimisticUserConversationPartViews(next);
   }
   if (shouldClearOptimisticWaitingPart(kind)) {
-    next = removeOptimisticWaitingTimelinePartViews(next);
+    next = removeOptimisticWaitingConversationPartViews(next);
   }
   return next;
 }
@@ -1190,7 +1189,7 @@ function shouldClearOptimisticWaitingPart(kind: StudioEventEnvelope["kind"]): bo
   if (isModelVisiblePart(part)) {
     return true;
   }
-  return part.partType === "turn" && isTerminalTimelineStatus(part.status);
+  return part.partType === "turn" && isTerminalConversationStatus(part.status);
 }
 
 function isModelVisiblePart(part: StudioPart): boolean {
@@ -1226,7 +1225,7 @@ function isModelVisiblePartType(kind: StudioPart["partType"]): boolean {
   }
 }
 
-function isTerminalTimelineStatus(status: TimelinePartView["status"]): boolean {
+function isTerminalConversationStatus(status: ConversationPartView["status"]): boolean {
   switch (status) {
     case "completed":
     case "failed":
@@ -1263,7 +1262,7 @@ function reduceConversationStatus(
       ...state,
       status: statusText,
       turnPhase: phaseForPart(kind.part, state.turnPhase),
-      turnStartedAt: isTerminalTimelineStatus(kind.part.status)
+      turnStartedAt: isTerminalConversationStatus(kind.part.status)
         ? state.turnStartedAt
         : state.turnStartedAt ?? Date.now(),
     };
@@ -1279,9 +1278,9 @@ function reduceConversationStatus(
 }
 
 export function mergeAgentTimelineEvents(
-  current: AgentTimelineEvent[],
-  incoming: AgentTimelineEvent[],
-): AgentTimelineEvent[] {
+  current: StudioAgentTimelineEvent[],
+  incoming: StudioAgentTimelineEvent[],
+): StudioAgentTimelineEvent[] {
   if (incoming.length === 0) return current;
   const byId = new Map(current.map((event) => [event.eventId, event]));
   for (const event of incoming) {
@@ -1291,85 +1290,6 @@ export function mergeAgentTimelineEvents(
     if (left.sequence !== right.sequence) return left.sequence - right.sequence;
     return left.eventId.localeCompare(right.eventId);
   });
-}
-
-function agentTimelineRecordFromStudioEvent(event: StudioAgentTimelineEvent): AgentTimelineEvent {
-  const index = agentTimelineIndex(event);
-  return {
-    eventId: event.eventId,
-    sessionId: event.sessionId,
-    sequence: event.sequence,
-    kind: index.kind,
-    agentId: index.agentId,
-    path: index.path,
-    parentPath: index.parentPath,
-    payload: null,
-    createdAt: event.createdAt,
-  };
-}
-
-function agentTimelineIndex(event: StudioAgentTimelineEvent): Pick<
-  AgentTimelineEvent,
-  "kind" | "agentId" | "path" | "parentPath"
-> {
-  switch (event.kind.type) {
-    case "spawnBegin":
-      return {
-        kind: "spawnBegin",
-        agentId: null,
-        path: event.kind.senderPath,
-        parentPath: null,
-      };
-    case "spawnEnd":
-      return {
-        kind: "spawnEnd",
-        agentId: event.kind.agentId ?? null,
-        path: event.kind.path ?? null,
-        parentPath: null,
-      };
-    case "interactionBegin":
-      return {
-        kind: "interactionBegin",
-        agentId: null,
-        path: event.kind.receiverPath,
-        parentPath: event.kind.senderPath,
-      };
-    case "interactionEnd":
-      return {
-        kind: "interactionEnd",
-        agentId: null,
-        path: event.kind.receiverPath,
-        parentPath: event.kind.senderPath,
-      };
-    case "waitingBegin":
-      return {
-        kind: "waitingBegin",
-        agentId: null,
-        path: event.kind.senderPath,
-        parentPath: null,
-      };
-    case "waitingEnd":
-      return {
-        kind: "waitingEnd",
-        agentId: null,
-        path: event.kind.senderPath,
-        parentPath: null,
-      };
-    case "closeBegin":
-      return {
-        kind: "closeBegin",
-        agentId: null,
-        path: event.kind.receiverPath,
-        parentPath: event.kind.senderPath,
-      };
-    case "closeEnd":
-      return {
-        kind: "closeEnd",
-        agentId: null,
-        path: event.kind.receiverPath,
-        parentPath: event.kind.senderPath,
-      };
-  }
 }
 
 export function mergeAgents(current: AgentDto[], incoming: AgentDto[]): AgentDto[] {

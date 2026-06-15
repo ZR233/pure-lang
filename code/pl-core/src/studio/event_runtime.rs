@@ -1,12 +1,15 @@
 use anyhow::Result;
 use pl_protocol::{
-    AgentEvent, AgentStatus, InteractionChangedEvent, StudioAgentPart, StudioAgentSnapshot,
+    AgentStatus, InteractionChangedEvent, StudioAgentPart, StudioAgentSnapshot,
     StudioAgentTimelineEvent, StudioAgentTimelineEventKind, StudioAttachment, StudioEventEnvelope,
     StudioEventKind, StudioInferencePart, StudioMessage, StudioMessageRole, StudioMessageStatus,
     StudioPart, StudioPartDelta, StudioPartDeltaField, StudioPartStatus, StudioPartType,
     StudioPlanPart, StudioSessionHandoff, StudioTextChannel, StudioToolPart, StudioTurn,
-    StudioTurnStatus, TraceAgentPart, TraceDelta, TraceInferencePart, TracePart,
-    TracePartDeltaEvent, TracePartKind, TracePartStatus, TraceTextChannel, TraceToolPart,
+    StudioTurnStatus,
+};
+use pl_trace::{
+    AgentEvent, TraceAgentPart, TraceDelta, TraceInferencePart, TracePart, TracePartDeltaEvent,
+    TracePartKind, TracePartStatus, TraceTextChannel, TraceToolPart,
 };
 use tokio::sync::broadcast;
 
@@ -157,12 +160,18 @@ impl StudioEventRuntime {
     ) -> Result<Option<StudioEventEnvelope>> {
         let kind = match event {
             AgentEvent::TracePartStarted { item } => {
+                if trace_part_is_user_text(&item) {
+                    return Ok(None);
+                }
                 return self
                     .emit_trace_part_snapshot(session_id, item)
                     .await
                     .map(Some);
             }
             AgentEvent::TracePartDelta { event } => {
+                if trace_part_delta_is_user_text(&event) {
+                    return Ok(None);
+                }
                 let turn_id = event.turn_id.clone();
                 let delta = studio_part_delta(session_id, event);
                 return self
@@ -176,12 +185,18 @@ impl StudioEventRuntime {
                     .map(Some);
             }
             AgentEvent::TracePartCompleted { item } => {
+                if trace_part_is_user_text(&item) {
+                    return Ok(None);
+                }
                 return self
                     .emit_trace_part_snapshot(session_id, item)
                     .await
                     .map(Some);
             }
             AgentEvent::TracePartFailed { item, error } => {
+                if trace_part_is_user_text(&item) {
+                    return Ok(None);
+                }
                 let mut item = item;
                 if item.content.trim().is_empty() {
                     item.content = error;
@@ -322,6 +337,23 @@ impl StudioEventRuntime {
         )
         .await
     }
+}
+
+fn trace_part_is_user_text(item: &TracePart) -> bool {
+    item.kind == TracePartKind::Text && item.text_channel == Some(TraceTextChannel::User)
+}
+
+fn trace_part_delta_is_user_text(event: &TracePartDeltaEvent) -> bool {
+    matches!(
+        (&event.kind, &event.delta),
+        (
+            TracePartKind::Text,
+            TraceDelta::Text {
+                text_channel: TraceTextChannel::User,
+                ..
+            }
+        )
+    )
 }
 
 fn studio_part_delta(session_id: &str, event: TracePartDeltaEvent) -> StudioPartDelta {

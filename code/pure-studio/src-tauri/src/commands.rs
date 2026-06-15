@@ -21,7 +21,6 @@ use crate::dto::{
     StopPromptResponse, StudioEventsDto, StudioMessageProjectionDto, StudioPartProjectionDto,
     SubmitPromptResponse,
 };
-use crate::events::drain_events;
 use crate::interactions::interaction_emitter;
 use crate::mappers::{
     agent_dtos, agent_event_dtos, attachment_dto, config_dto_for_studio, discovered_skills_dto,
@@ -560,13 +559,6 @@ async fn run_prompt_inner(
         active_turns.insert(session_id.clone(), cancellation_token.clone());
     }
 
-    let (event_tx, event_rx) = tokio::sync::broadcast::channel(4096);
-    let event_task = tauri::async_runtime::spawn(drain_events(
-        session_id.clone(),
-        event_rx,
-        app.clone(),
-        state.studio.clone(),
-    ));
     let emitter = interaction_emitter(state.studio.clone(), app.clone(), session_id.clone());
     let interaction_callback = state
         .studio
@@ -582,14 +574,11 @@ async fn run_prompt_inner(
             turn_id: turn_id.clone(),
             prompt,
             attachment_ids,
-            event_tx: event_tx.clone(),
             interaction_callback,
             interaction_emitter: emitter.clone(),
             options,
         })
         .await;
-    drop(event_tx);
-    let _ = event_task.await;
     state.active_turns.lock().await.remove(&session_id);
     state
         .studio

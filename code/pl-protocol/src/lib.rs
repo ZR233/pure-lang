@@ -7,14 +7,10 @@ mod studio_event;
 
 pub use error::{PureError, Result};
 pub use event::{
-    AgentEvent, AgentEventReceiver, AgentEventSender, AgentRuntimeDelta, AgentStatus,
-    BudgetLimitKind, BudgetUsage, EnabledToolsEvent, ErrorSeverity, OutputStream, PipelineStage,
-    PlanLifecycleEvent, PlanLifecycleState, RuntimeCostAmount, RuntimeUsageSnapshot,
-    SkillActivation, TokenUsageSnapshot, TraceAgentPart, TraceAttachment, TraceDelta, TraceEvent,
-    TraceEventKind, TraceInferencePart, TracePart, TracePartDelta, TracePartDeltaEvent,
-    TracePartDeltaField, TracePartKind, TracePartStatus, TraceTextChannel, TraceThinkingChunk,
-    TraceToolPart, UserInputAnswer, UserInputRequest, UserInputResponse, UserQuestion,
-    UserQuestionOption,
+    AgentRuntimeDelta, AgentStatus, BudgetLimitKind, BudgetUsage, ErrorSeverity, OutputStream,
+    PipelineStage, PlanLifecycleEvent, PlanLifecycleState, RuntimeCostAmount, RuntimeUsageSnapshot,
+    SkillActivation, TokenUsageSnapshot, UserInputAnswer, UserInputRequest, UserInputResponse,
+    UserQuestion, UserQuestionOption,
 };
 pub use interaction::{
     InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,

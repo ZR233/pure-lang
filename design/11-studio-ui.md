@@ -41,9 +41,9 @@ reducer 分域：
 - 失败、中断、预算受限等异常 turn trace 可作为低权重 notice 保留在主 timeline，避免关键错误被隐藏
 - 子代理使用行内状态，不做嵌套大卡片
 - 子代理内部 text delta、thinking delta、tool call 和工具输出不进入父会话 timeline；父会话只展示 agent 生命周期状态、最终摘要、最终错误文本和压缩后的 runtime usage
-- agent timeline 与 agent latest snapshot 必须分离；timeline 渲染 append-only `agentEvents`，状态栏渲染 latest `agents`
+- agent timeline 与 agent latest snapshot 必须分离；timeline 渲染 append-only typed `StudioAgentTimelineEvent[]`，状态栏渲染 latest `agents`
 - 同一个 agent 的 spawn、wait、message、close、final status 必须保留为多条 timeline 事件，不能按 agent id 覆盖成一条
-- `AgentStateChanged` 只更新 latest snapshot，不直接作为 timeline 数据源
+- `AgentStateChanged` 只更新 latest snapshot，不直接作为 timeline 数据源；历史 `agentEvents` 与实时 `agentTimelineChanged` 都是 typed `StudioAgentTimelineEvent`，前端不再解析旧 `kind + payload` 记录。
 - 用户与 assistant 正文按 Markdown 渲染，支持标题、列表、引用、代码块、行内代码、强调和链接
 - commentary 也是可见文本，但视觉权重低于 final：用于“我先检查配置”“现在修复类型链”等阶段更新，可流式追加，不应和最终 assistant 回复合并。
 - 自动跟随最新内容以“用户是否停留在底部”为准；高频 timeline 刷新时仍应在 layout 阶段滚动到最新，用户手动上滚后暂停跟随
@@ -55,7 +55,7 @@ reducer 分域：
 - 用户提交 prompt 后，前端 reducer 立即插入仅本地存在的 optimistic 用户 message/part 和 waiting turn part。waiting part 在 selector 中派生为轻量状态行，用于展示“正在等待模型响应”。这些 optimistic part 不持久化、不进入后端 DTO；真实 user text part 到达时只清理 optimistic 用户消息，不能清掉 waiting。waiting 必须持续覆盖 turn start、user text 和 inference start 到首个模型侧可见事件，例如 assistant text、reasoning、plan、tool event、inference completed、terminal `turnChanged(failed/cancelled/completed)`。如果 submit command 自身失败，waiting 应移除或替换为失败状态，不能残留。
 - 用户提交 prompt 属于显式回到底部的动作；即使用户此前停在历史位置，发送后 timeline 也应立即跟随到底部，让 optimistic 消息和等待状态可见。后续 streaming delta 仍遵守“用户在底部才跟随”的规则，用户再次上滚后不抢占滚动位置。
 - reasoning part 在 selector 中派生为 thought entry，并携带 `status`、`startedAt`、`updatedAt` 与 `durationSeconds`。`started/streaming/running` 状态展示思考中动画；`completed` 状态根据 `createdAt/updatedAt` 展示耗时；`failed/interrupted/budgetLimited` 等异常状态展示对应异常语义。多个连续 reasoning part 合并时，耗时取最早 `createdAt` 与最晚 `updatedAt`。
-- timeline 渲染层可以在 `selectTimelineEntries()` 之后使用 headless 虚拟滚动库承载大列表；虚拟化只负责测量、滚动定位和 DOM 数量控制，不消费 raw `StudioPart`，也不承载 tool 聚合、reasoning 合并、trace 过滤或 plan 行为
+- timeline 渲染层可以在 `selectConversationEntries()` 之后使用 headless 虚拟滚动库承载大列表；虚拟化只负责测量、滚动定位和 DOM 数量控制，不消费 raw `StudioPart`，也不承载 tool 聚合、reasoning 合并、trace 过滤或 plan 行为
 
 前端 reducer 的 conversation 状态固定为：
 
@@ -64,13 +64,13 @@ reducer 分域：
 - `partDeltaAccum: Map<partId, StudioPartDeltaAccum>`
 - `eventNextSequence: number`
 
-`messages` 与 `partsByMessage` 是前端 conversation 的事实状态：初始/切换会话来自 `SessionStateResponse.messages/parts` projection record（每条包含 snapshot 与来源 event `sequence`），实时和 stale backfill 来自 `StudioEventEnvelope` 增量更新，不作为 Tauri command 的输入 DTO。message 按创建时间与 durable sequence 排序，part 按 `order` 稳定排序；delta 只能附加到已有 part 的 overlay，snapshot 到达后以 snapshot 为准并清 overlay。组件不得再把运行中 tool map、agent events 和 trace items 临时拼接成主 timeline。工具聚合与普通 trace 过滤只能作为 `timelineEntries` 派生显示层逻辑，不能写回 reducer 状态或后端 DTO。
+`messages` 与 `partsByMessage` 是前端 conversation 的事实状态：初始/切换会话来自 `SessionStateResponse.messages/parts` projection record（每条包含 snapshot 与来源 event `sequence`），实时和 stale backfill 来自 `StudioEventEnvelope` 增量更新，不作为 Tauri command 的输入 DTO。message 按创建时间与 durable sequence 排序，part 按 `order` 稳定排序；delta 只能附加到已有 part 的 overlay，snapshot 到达后以 snapshot 为准并清 overlay。组件不得再把运行中 tool map、agent events 和 trace items 临时拼接成主 timeline。工具聚合与普通 trace 过滤只能作为 `conversationEntries` 派生显示层逻辑，不能写回 reducer 状态或后端 DTO。
 
 初始 projection snapshot、实时事件和补拉事件必须进入同一个前端 conversation reducer，并收敛到相同 message/part projection。fold 规则按 opencode 语义处理：orphan delta 丢弃；snapshot upsert 完整 part 并清除 overlay；旧 snapshot 不得覆盖已应用的新 snapshot。
 
 左侧 project 列表的每个项目行右侧提供 `X` 归档按钮。归档 project 不删除磁盘目录，也不修改项目文件；它只归档 Studio 中的 project 记录，并清理该 project 下的 sessions、messages、timeline、agent、runtime 和审批历史。用户重新打开同一路径时复用原 project 记录，但历史会话已经清空，应按新项目入口创建默认会话。归档当前 project 时切换到下一个未归档 project；没有剩余 project 时进入无项目状态。
 
-主聊天 timeline 的滚动容器由独立渲染适配层负责。该适配层输入 `TimelineEntry[]`，输出现有 message、plan、thought、tool、tool group、agent 和 trace entry 组件；它必须保持稳定 key、支持可变高度内容重测量，并维持“在底部才自动跟随”的规则。用户上滚阅读历史时，实时 delta 只能显示跳到最新入口，不能抢占滚动位置。
+主聊天 timeline 的滚动容器由独立渲染适配层负责。该适配层输入 `ConversationEntry[]`，输出现有 message、plan、thought、tool、tool group、agent 和 trace entry 组件；它必须保持稳定 key、支持可变高度内容重测量，并维持“在底部才自动跟随”的规则。用户上滚阅读历史时，实时 delta 只能显示跳到最新入口，不能抢占滚动位置。
 
 Markdown 阅读样式属于 timeline 展示层：assistant 正文和 plan 卡片正文需要保留舒适内边距、最大阅读宽度、段落间距、列表缩进、引用和代码块层次；用户消息仍保持紧凑气泡，不套用 assistant 的大内边距。移动端和窄窗口下 Markdown 内容必须允许代码块横向滚动，并避免长链接、长路径和行内代码撑破聊天列。
 
@@ -116,13 +116,13 @@ Markdown 阅读样式属于 timeline 展示层：assistant 正文和 plan 卡片
 - `SessionStateResponse`
 - `StudioEventsResponse`
 
-`submit_prompt` 接收 `attachmentIds`，当附件非空时允许 `prompt` 为空。图片附件先通过独立上传命令写入 Studio app data，再以附件 id 引用；前端不得把 base64 图片直接塞进 prompt 文本。旧字段别名、旧 payload 解析逻辑、旧 text/thinking/tool delta reducer 分支在方案乙中删除。`SubmitPromptResponse` 只表示后台 turn 已提交，包含 `sessionId`、`turnId` 和当前 cursor；不得携带最终 timeline 结果。`SessionStateResponse.messages` / `parts` 返回当前 message/part projection record，`SessionStateResponse.events` 只附带非 message/part durable 状态事件；`StudioEventsResponse.events` 返回补拉的 durable `StudioEventEnvelope[]`。`StudioMessage` / `StudioPart` 是前端 reducer 的事实源，timeline 展示只能使用 selector 派生的 `TimelinePartView` / `TimelineEntry`，不得再把旧 timeline DTO 或内部 `TracePart` 作为 Studio UI 事实源。
+`submit_prompt` 接收 `attachmentIds`，当附件非空时允许 `prompt` 为空。图片附件先通过独立上传命令写入 Studio app data，再以附件 id 引用；前端不得把 base64 图片直接塞进 prompt 文本。旧字段别名、旧 payload 解析逻辑、旧 text/thinking/tool delta reducer 分支在方案乙中删除。`SubmitPromptResponse` 只表示后台 turn 已提交，包含 `sessionId`、`turnId` 和当前 cursor；不得携带最终 timeline 结果。`SessionStateResponse.messages` / `parts` 返回当前 message/part projection record，`SessionStateResponse.events` 只附带非 message/part durable 状态事件；`StudioEventsResponse.events` 返回补拉的 durable `StudioEventEnvelope[]`。`StudioMessage` / `StudioPart` 是前端 reducer 的事实源，timeline 展示只能使用 selector 派生的 `ConversationPartView` / `ConversationEntry`，不得再把旧 timeline DTO 或内部 `TracePart` 作为 Studio UI 事实源。
 
 ## 5. 选择器与派生数据
 
 从 reducer state 派生：
 
-- `timelineEntries`
+- `conversationEntries`
 - `selectedProject`
 - `selectedSession`
 - `sessionRuntime`

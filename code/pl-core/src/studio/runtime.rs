@@ -1,13 +1,13 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-#[cfg(test)]
-use pl_protocol::StudioEventKind;
 use pl_protocol::{
-    AgentEventSender, ContentPart, ImageSource, InteractionKind, InteractionPayload,
-    InteractionRequest, InteractionScope, InteractionStatus, MessageContent, PlanLifecycleEvent,
-    PlanLifecycleState, TraceEvent, TraceEventKind, TracePart, TracePartKind,
+    ContentPart, ImageSource, InteractionKind, InteractionPayload, InteractionRequest,
+    InteractionScope, InteractionStatus, MessageContent, PlanLifecycleEvent, PlanLifecycleState,
+    StudioAgentSnapshot, StudioEventKind, StudioRuntimeUsage, StudioSessionRuntime,
 };
+use pl_trace::{AgentEvent, TraceEvent, TraceEventKind, TracePart, TracePartKind};
+use tokio::sync::broadcast::error::RecvError;
 
 use crate::config::{ConfigStore, ModelRole};
 use crate::mcp::McpRuntimeRegistry;
@@ -16,7 +16,7 @@ use crate::studio::StudioStore;
 use crate::studio::ids::unix_seconds;
 use crate::studio::mappers::default_session_runtime_record;
 use crate::studio::records::{
-    ProjectRecord, SessionRecord, SessionRuntimeRecord, StudioPromptOutcome,
+    AgentSnapshotRecord, ProjectRecord, SessionRecord, SessionRuntimeRecord, StudioPromptOutcome,
 };
 use crate::studio::{InteractionEmitter, InteractionRuntime, StudioEventRuntime};
 use crate::{
@@ -45,7 +45,6 @@ pub struct RunPromptRequest {
     pub turn_id: String,
     pub prompt: String,
     pub attachment_ids: Vec<String>,
-    pub event_tx: AgentEventSender,
     pub interaction_callback: InteractionCallback,
     pub interaction_emitter: InteractionEmitter,
     pub options: TurnOptions,
@@ -208,7 +207,6 @@ impl StudioRuntime {
             turn_id,
             prompt,
             attachment_ids,
-            event_tx,
             interaction_callback,
             interaction_emitter,
             mut options,
@@ -304,10 +302,22 @@ impl StudioRuntime {
         {
             options.interaction_callback = Some(interaction_callback.clone());
         }
-        let mut recorder = TraceRecorder::new(session_id.to_string(), event_tx, 0);
+        let (event_tx, event_rx) = tokio::sync::broadcast::channel(4096);
+        let event_runtime = self.clone();
+        let event_session_id = session_id.to_string();
+        let event_task = tokio::spawn(async move {
+            event_runtime
+                .drain_agent_events(event_session_id, event_rx)
+                .await;
+        });
+        let mut recorder = TraceRecorder::new(session_id.to_string(), event_tx.clone(), 0);
         let result = core
             .run_turn_with_trace(&mut session, request, &mut recorder, options)
-            .await?;
+            .await;
+        drop(recorder);
+        drop(event_tx);
+        let _ = event_task.await;
+        let result = result?;
         let trace_events = result.trace_events.clone();
         if session.revision() != previous_revision {
             self.store
@@ -361,6 +371,116 @@ impl StudioRuntime {
             messages,
             trace_events,
         })
+    }
+
+    pub async fn drain_agent_events(
+        &self,
+        session_id: String,
+        mut event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
+    ) {
+        loop {
+            match event_rx.recv().await {
+                Ok(event) => {
+                    let _ = self
+                        .events
+                        .emit_agent_event(&session_id, event.clone())
+                        .await
+                        .ok()
+                        .flatten();
+                    if let Some(agent) = self.agent_snapshot_for_event(&session_id, &event).await {
+                        let _ = self
+                            .events
+                            .emit(
+                                None,
+                                Some(session_id.clone()),
+                                None,
+                                StudioEventKind::AgentChanged { agent },
+                            )
+                            .await;
+                    }
+                    if matches!(
+                        event,
+                        AgentEvent::AgentRuntimeUpdated { .. } | AgentEvent::SkillActivated { .. }
+                    ) && let Ok(runtime) = self.session_runtime_event(&session_id).await
+                    {
+                        let _ = self
+                            .events
+                            .emit(
+                                None,
+                                Some(session_id.clone()),
+                                None,
+                                StudioEventKind::SessionRuntimeChanged { runtime },
+                            )
+                            .await;
+                    }
+                }
+                Err(RecvError::Lagged(skipped)) => {
+                    let _ = self.events.emit_stale(&session_id, skipped).await;
+                }
+                Err(RecvError::Closed) => break,
+            }
+        }
+    }
+
+    async fn agent_snapshot_for_event(
+        &self,
+        session_id: &str,
+        event: &AgentEvent,
+    ) -> Option<StudioAgentSnapshot> {
+        match event {
+            AgentEvent::AgentStateChanged { id, .. } => self
+                .store
+                .list_agents(session_id)
+                .await
+                .ok()
+                .and_then(|agents| {
+                    agents
+                        .into_iter()
+                        .find(|agent| agent.id == *id)
+                        .map(studio_agent_snapshot)
+                }),
+            AgentEvent::AgentRuntimeUpdated { delta } if delta.agent_id != "agent-root" => self
+                .store
+                .list_agents(session_id)
+                .await
+                .ok()
+                .and_then(|agents| {
+                    agents
+                        .into_iter()
+                        .find(|agent| agent.id == delta.agent_id)
+                        .map(studio_agent_snapshot)
+                }),
+            AgentEvent::TracePartStarted { .. }
+            | AgentEvent::TracePartDelta { .. }
+            | AgentEvent::TracePartCompleted { .. }
+            | AgentEvent::TracePartFailed { .. }
+            | AgentEvent::InteractionChanged { .. }
+            | AgentEvent::AgentRuntimeUpdated { .. }
+            | AgentEvent::SkillActivated { .. }
+            | AgentEvent::CollabAgentSpawnBegin { .. }
+            | AgentEvent::CollabAgentSpawnEnd { .. }
+            | AgentEvent::CollabAgentInteractionBegin { .. }
+            | AgentEvent::CollabAgentInteractionEnd { .. }
+            | AgentEvent::CollabWaitingBegin { .. }
+            | AgentEvent::CollabWaitingEnd { .. }
+            | AgentEvent::CollabCloseBegin { .. }
+            | AgentEvent::CollabCloseEnd { .. }
+            | AgentEvent::TurnInterrupted { .. }
+            | AgentEvent::TurnBudgetLimited { .. }
+            | AgentEvent::Done
+            | AgentEvent::Error { .. } => None,
+        }
+    }
+
+    async fn session_runtime_event(&self, session_id: &str) -> Result<StudioSessionRuntime> {
+        let runtime = self.session_runtime(session_id).await?;
+        let active_skills = self.store.list_session_skill_names(session_id).await?;
+        Ok(studio_session_runtime(
+            runtime,
+            active_skills,
+            self.mcp_runtime.available_server_names().await,
+            self.lsp_runtime.active_server_names().await,
+        ))
     }
 
     async fn create_plan_confirmation(
@@ -539,6 +659,74 @@ fn tool_call_count(trace_events: &[TraceEvent]) -> u32 {
         .count() as u32
 }
 
+fn studio_agent_snapshot(agent: AgentSnapshotRecord) -> StudioAgentSnapshot {
+    StudioAgentSnapshot {
+        id: agent.id,
+        session_id: agent.session_id,
+        path: agent.path,
+        parent_path: agent.parent_path,
+        role: agent.role,
+        task: agent.task,
+        status: agent.status,
+        summary: agent.summary,
+        depth: agent.depth.max(0) as u32,
+        error: agent.error,
+        reason: agent.reason,
+        budget_limit_kind: agent.budget_limit_kind,
+        budget_usage: agent.budget_usage,
+        runtime_usage: agent.runtime_usage.map(studio_runtime_usage),
+        updated_at: agent.updated_at,
+    }
+}
+
+fn studio_session_runtime(
+    runtime: SessionRuntimeRecord,
+    active_skills: Vec<String>,
+    active_mcp_servers: Vec<String>,
+    active_lsp_servers: Vec<String>,
+) -> StudioSessionRuntime {
+    StudioSessionRuntime {
+        session_id: runtime.session_id,
+        usage: studio_runtime_usage(pl_protocol::RuntimeUsageSnapshot {
+            model: runtime.model,
+            context_window: runtime.context_window,
+            latest_context_tokens: runtime.latest_context_tokens,
+            prompt_tokens: runtime.prompt_tokens,
+            completion_tokens: runtime.completion_tokens,
+            cached_prompt_tokens: runtime.cached_prompt_tokens,
+            total_tokens: runtime.total_tokens,
+            estimated_costs: runtime.estimated_costs,
+            has_unpriced_usage: runtime.has_unpriced_usage,
+            updated_at: runtime.updated_at,
+        }),
+        active_skills,
+        active_mcp_servers,
+        active_lsp_servers,
+        updated_at: runtime.updated_at,
+    }
+}
+
+fn studio_runtime_usage(usage: pl_protocol::RuntimeUsageSnapshot) -> StudioRuntimeUsage {
+    let cache_hit_rate = if usage.prompt_tokens == 0 {
+        None
+    } else {
+        Some(usage.cached_prompt_tokens as f64 / usage.prompt_tokens as f64)
+    };
+    StudioRuntimeUsage {
+        model: usage.model,
+        context_window: usage.context_window,
+        latest_context_tokens: usage.latest_context_tokens,
+        prompt_tokens: usage.prompt_tokens,
+        completion_tokens: usage.completion_tokens,
+        cached_prompt_tokens: usage.cached_prompt_tokens,
+        total_tokens: usage.total_tokens,
+        cache_hit_rate,
+        estimated_costs: usage.estimated_costs,
+        has_unpriced_usage: usage.has_unpriced_usage,
+        updated_at: usage.updated_at,
+    }
+}
+
 fn spawn_self_learning_review(
     config: crate::config::PureConfig,
     workspace_root: std::path::PathBuf,
@@ -585,9 +773,7 @@ fn session_title_from_prompt(prompt: &str) -> String {
 #[cfg(test)]
 mod tests {
     use pl_model::{ModelInfo, ProviderInfo};
-    use pl_protocol::{
-        AgentEvent, InteractionRequest, TracePart, TracePartStatus, TraceTextChannel,
-    };
+    use pl_trace::{TracePart, TracePartStatus, TraceTextChannel};
     use pretty_assertions::assert_eq;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -739,7 +925,6 @@ mod tests {
             .create_session(&project.id, "Plan test", CompileMode::Plan)
             .await
             .unwrap();
-        let (event_tx, _event_rx) = tokio::sync::broadcast::channel::<AgentEvent>(32);
         let interaction_events = std::sync::Arc::new(Mutex::new(Vec::new()));
         let interaction_emitter = emitter(interaction_events.clone());
         let interaction_callback = runtime
@@ -752,7 +937,6 @@ mod tests {
                 turn_id: "turn-plan-test".to_string(),
                 prompt: "make a plan".to_string(),
                 attachment_ids: Vec::new(),
-                event_tx,
                 interaction_callback,
                 interaction_emitter,
                 options: TurnOptions::default(),
@@ -856,7 +1040,6 @@ mod tests {
             .create_session(&project.id, "Plan exit test", CompileMode::Plan)
             .await
             .unwrap();
-        let (event_tx, _event_rx) = tokio::sync::broadcast::channel::<AgentEvent>(32);
         let interaction_events = std::sync::Arc::new(Mutex::new(Vec::new()));
         let interaction_emitter = emitter(interaction_events.clone());
         let interaction_callback = runtime
@@ -869,7 +1052,6 @@ mod tests {
                 turn_id: "turn-plan-exit-test".to_string(),
                 prompt: "make a plan".to_string(),
                 attachment_ids: Vec::new(),
-                event_tx,
                 interaction_callback,
                 interaction_emitter,
                 options: TurnOptions::default(),

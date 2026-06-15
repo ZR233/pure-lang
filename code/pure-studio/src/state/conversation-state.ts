@@ -6,7 +6,7 @@ import type {
   StudioPartProjection,
   StudioPartDelta,
   StudioPartDeltaField,
-  TimelinePartView,
+  ConversationPartView,
 } from "../types";
 
 export type ConversationStateSlice = {
@@ -18,8 +18,6 @@ export type ConversationStateSlice = {
   eventNextSequence: number;
 };
 
-export type TimelineStateSlice = ConversationStateSlice;
-
 export type StudioPartDeltaAccum = {
   text: string;
   reasoningText: string;
@@ -29,7 +27,7 @@ export type StudioPartDeltaAccum = {
   thinkingChunks: Map<number, string>;
 };
 
-export function emptyTimelineState(): TimelineStateSlice {
+export function emptyConversationState(): ConversationStateSlice {
   return {
     messages: new Map(),
     partsByMessage: new Map(),
@@ -40,7 +38,7 @@ export function emptyTimelineState(): TimelineStateSlice {
   };
 }
 
-export function applyStudioEvent<T extends TimelineStateSlice>(
+export function applyStudioEvent<T extends ConversationStateSlice>(
   state: T,
   envelope: StudioEventEnvelope,
 ): T {
@@ -71,13 +69,13 @@ export function applyStudioEvent<T extends TimelineStateSlice>(
   }
 }
 
-export function resetConversationFromSnapshot<T extends TimelineStateSlice>(
+export function resetConversationFromSnapshot<T extends ConversationStateSlice>(
   state: T,
   messages: StudioMessageProjection[],
   parts: StudioPartProjection[],
   nextSequence: number,
 ): T {
-  let next: T = { ...state, ...emptyTimelineState() };
+  let next: T = { ...state, ...emptyConversationState() };
   for (const record of messages) {
     next = upsertMessage(next, record.message, record.sequence);
   }
@@ -87,7 +85,7 @@ export function resetConversationFromSnapshot<T extends TimelineStateSlice>(
   return { ...next, eventNextSequence: Math.max(next.eventNextSequence, nextSequence) };
 }
 
-export function mergeConversationSnapshot<T extends TimelineStateSlice>(
+export function mergeConversationSnapshot<T extends ConversationStateSlice>(
   state: T,
   messages: StudioMessageProjection[],
   parts: StudioPartProjection[],
@@ -103,19 +101,19 @@ export function mergeConversationSnapshot<T extends TimelineStateSlice>(
   return { ...next, eventNextSequence: Math.max(next.eventNextSequence, nextSequence) };
 }
 
-export function removeOptimisticTimelinePartViews<T extends TimelineStateSlice>(state: T): T {
+export function removeOptimisticConversationPartViews<T extends ConversationStateSlice>(state: T): T {
   return removeOptimisticPartsMatching(state, (partId) => partId.startsWith("optimistic-"));
 }
 
-export function removeOptimisticUserTimelinePartViews<T extends TimelineStateSlice>(state: T): T {
+export function removeOptimisticUserConversationPartViews<T extends ConversationStateSlice>(state: T): T {
   return removeOptimisticPartsMatching(state, (partId) => partId.startsWith("optimistic-user-"));
 }
 
-export function removeOptimisticWaitingTimelinePartViews<T extends TimelineStateSlice>(state: T): T {
+export function removeOptimisticWaitingConversationPartViews<T extends ConversationStateSlice>(state: T): T {
   return removeOptimisticPartsMatching(state, (partId) => partId.startsWith("optimistic-waiting-"));
 }
 
-export function addOptimisticPart<T extends TimelineStateSlice>(
+export function addOptimisticPart<T extends ConversationStateSlice>(
   state: T,
   message: StudioMessage,
   part: StudioPart,
@@ -124,12 +122,12 @@ export function addOptimisticPart<T extends TimelineStateSlice>(
   return upsertPart(withMessage, part, undefined);
 }
 
-export function timelinePartViewWithDelta(
-  item: TimelinePartView,
+export function conversationPartViewWithDelta(
+  item: ConversationPartView,
   accum: StudioPartDeltaAccum | undefined,
-): TimelinePartView {
-  if (!accum) return normalizeTimelinePartView(item);
-  const next = normalizeTimelinePartView(item);
+): ConversationPartView {
+  if (!accum) return normalizeConversationPartView(item);
+  const next = normalizeConversationPartView(item);
   next.content += accum.text + accum.planContent + accum.reasoningText;
   if (accum.thinkingChunks.size > 0) {
     for (const [chunkIndex, delta] of accum.thinkingChunks) {
@@ -143,15 +141,15 @@ export function timelinePartViewWithDelta(
     next.thinkingChunks.sort((left, right) => left.chunkIndex - right.chunkIndex);
   }
   if (accum.toolArguments || accum.toolResult) {
-    next.tool = next.tool ?? blankTimelineToolPartView(next.itemId);
+    next.tool = next.tool ?? blankConversationToolPartView(next.itemId);
     next.tool.arguments += accum.toolArguments;
     next.tool.result = `${next.tool.result ?? ""}${accum.toolResult}` || next.tool.result;
   }
   return next;
 }
 
-export function timelinePartViewsFromConversation(state: TimelineStateSlice): TimelinePartView[] {
-  const items: TimelinePartView[] = [];
+export function conversationPartViewsFromConversation(state: ConversationStateSlice): ConversationPartView[] {
+  const items: ConversationPartView[] = [];
   const messages = [...state.messages.values()].sort(compareMessages);
   for (const message of messages) {
     const parts = (state.partsByMessage.get(message.messageId) ?? [])
@@ -159,13 +157,13 @@ export function timelinePartViewsFromConversation(state: TimelineStateSlice): Ti
       .sort(compareParts);
     for (const part of parts) {
       if (part.ignored) continue;
-      items.push(partToTimelinePartView(part));
+      items.push(partToConversationPartView(part));
     }
   }
   return items;
 }
 
-function upsertMessage<T extends TimelineStateSlice>(
+function upsertMessage<T extends ConversationStateSlice>(
   state: T,
   message: StudioMessage,
   sequence: number | undefined,
@@ -188,7 +186,7 @@ function upsertMessage<T extends TimelineStateSlice>(
   };
 }
 
-function removeMessage<T extends TimelineStateSlice>(
+function removeMessage<T extends ConversationStateSlice>(
   state: T,
   messageId: string,
   sequence: number | undefined,
@@ -216,7 +214,7 @@ function removeMessage<T extends TimelineStateSlice>(
   };
 }
 
-function upsertPart<T extends TimelineStateSlice>(
+function upsertPart<T extends ConversationStateSlice>(
   state: T,
   part: StudioPart,
   sequence: number | undefined,
@@ -248,7 +246,7 @@ function upsertPart<T extends TimelineStateSlice>(
   };
 }
 
-function removePart<T extends TimelineStateSlice>(
+function removePart<T extends ConversationStateSlice>(
   state: T,
   messageId: string,
   partId: string,
@@ -272,7 +270,7 @@ function removePart<T extends TimelineStateSlice>(
   };
 }
 
-function applyPartDelta<T extends TimelineStateSlice>(
+function applyPartDelta<T extends ConversationStateSlice>(
   state: T,
   delta: StudioPartDelta,
 ): T {
@@ -286,7 +284,7 @@ function applyPartDelta<T extends TimelineStateSlice>(
   return { ...state, partDeltaAccum };
 }
 
-function removeOptimisticPartsMatching<T extends TimelineStateSlice>(
+function removeOptimisticPartsMatching<T extends ConversationStateSlice>(
   state: T,
   shouldRemove: (partId: string) => boolean,
 ): T {
@@ -314,17 +312,17 @@ function removeOptimisticPartsMatching<T extends TimelineStateSlice>(
   return { ...state, messages, messageSequences, partsByMessage, partDeltaAccum, partSequences };
 }
 
-function hasPart(state: TimelineStateSlice, messageId: string, partId: string): boolean {
+function hasPart(state: ConversationStateSlice, messageId: string, partId: string): boolean {
   return (state.partsByMessage.get(messageId) ?? []).some((part) => part.partId === partId);
 }
 
-function advanceCursor<T extends TimelineStateSlice>(state: T, envelope: StudioEventEnvelope): T {
+function advanceCursor<T extends ConversationStateSlice>(state: T, envelope: StudioEventEnvelope): T {
   return envelope.kind.type === "messagePartDelta" || envelope.kind.type === "stale"
     ? state
     : advanceSequence(state, envelope.sequence);
 }
 
-function advanceSequence<T extends TimelineStateSlice>(state: T, sequence: number | undefined): T {
+function advanceSequence<T extends ConversationStateSlice>(state: T, sequence: number | undefined): T {
   return { ...state, eventNextSequence: advanceSequenceValue(state.eventNextSequence, sequence) };
 }
 
@@ -333,7 +331,7 @@ function advanceSequenceValue(current: number, sequence: number | undefined): nu
 }
 
 function existingSequenceIsNewer(
-  state: TimelineStateSlice,
+  state: ConversationStateSlice,
   messageId: string,
   sequence: number,
 ): boolean {
@@ -389,8 +387,8 @@ function appendDelta(
   }
 }
 
-function partToTimelinePartView(part: StudioPart): TimelinePartView {
-  const kind = timelineKind(part);
+function partToConversationPartView(part: StudioPart): ConversationPartView {
+  const kind = conversationPartKind(part);
   const content = partContent(part);
   return {
     turnId: part.turnId,
@@ -411,7 +409,7 @@ function partToTimelinePartView(part: StudioPart): TimelinePartView {
   };
 }
 
-function timelineKind(part: StudioPart): TimelinePartView["kind"] {
+function conversationPartKind(part: StudioPart): ConversationPartView["kind"] {
   switch (part.partType) {
     case "reasoning":
       return "thinking";
@@ -454,7 +452,7 @@ function normalizePart(part: StudioPart): StudioPart {
   };
 }
 
-function normalizeTimelinePartView(item: TimelinePartView): TimelinePartView {
+function normalizeConversationPartView(item: ConversationPartView): ConversationPartView {
   return {
     ...item,
     content: item.content ?? "",
@@ -477,7 +475,7 @@ function compareParts(left: StudioPart, right: StudioPart): number {
   return left.partId.localeCompare(right.partId);
 }
 
-function blankTimelineToolPartView(itemId: string): NonNullable<TimelinePartView["tool"]> {
+function blankConversationToolPartView(itemId: string): NonNullable<ConversationPartView["tool"]> {
   return {
     toolCallId: itemId,
     name: "",
