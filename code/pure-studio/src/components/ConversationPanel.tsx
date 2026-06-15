@@ -1235,7 +1235,7 @@ export function ConversationPanel({
                 onDragOver={(event) => event.preventDefault()}
                 placeholder={selectedSession ? t("conversation.askPlaceholder") : t("conversation.noSessionPlaceholder")}
                 disabled={!selectedSession || isBusy}
-                className="resize-none pl-12 pr-12 min-h-[48px] max-h-[200px] rounded-xl px-4 py-3 bg-background"
+                className="resize-none pl-12 pr-12 min-h-[48px] max-h-[200px] rounded-xl py-3 bg-background"
                 rows={1}
               />
               <Button
