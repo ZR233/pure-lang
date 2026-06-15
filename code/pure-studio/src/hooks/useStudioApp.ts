@@ -12,7 +12,7 @@ import {
   loadConfig,
   loadProviderUsages,
   loadStudioEvents,
-  loadSessionTimeline,
+  loadSessionState,
   openProject,
   saveMcpSettings,
   saveConfig,
@@ -26,7 +26,6 @@ import {
   resolveInteraction,
   stopPrompt,
   submitPromptCommand,
-  runPrompt,
   createPromptAttachment,
 } from "../lib/tauri";
 import { errorText } from "../lib/utils";
@@ -38,7 +37,6 @@ import {
 } from "../state/selectors";
 import { initialStudioState, studioReducer } from "../state/studio-state";
 import type {
-  AgentEvent,
   AttachmentRecord,
   CompileMode,
   McpServerInput,
@@ -50,10 +48,11 @@ import type {
   ProviderSettingsSaveSnapshot,
   RoleRecord,
   StudioEventEnvelope,
-  StudioTimelineChange,
   StudioTurnStatus,
   TimelineAttachment,
   TimelineItem,
+  StudioPart,
+  StudioPartDeltaField,
 } from "../types";
 
 function providerInput(provider: ProviderRecord) {
@@ -95,42 +94,6 @@ function timelineAttachmentFromRecord(record: AttachmentRecord): TimelineAttachm
   };
 }
 
-function statusTextForEvent(
-  event: AgentEvent | null | undefined,
-  t: (key: string, args?: Record<string, unknown>) => string,
-) {
-  if (!event) return t("turnPhase.subagent");
-  if (event === "done") return t("status.done");
-  if ("turnInterrupted" in event) return t("status.interrupted");
-  if ("turnBudgetLimited" in event) return t("turnPhase.budgetLimited");
-  if ("timelineItemStarted" in event) return t("status.running");
-  if ("timelineItemDelta" in event) {
-    const itemEvent = event.timelineItemDelta.event;
-    if (itemEvent.kind === "thinking") return t("status.thinking");
-    if (itemEvent.kind === "tool") return t("status.toolInput", { name: "tool" });
-    return t("status.running");
-  }
-  if ("timelineItemCompleted" in event) {
-    const item = event.timelineItemCompleted.item;
-    if (item.kind === "tool") return statusTextForToolItem(item, t);
-    return t("status.running");
-  }
-  if ("timelineItemFailed" in event) return t("status.error", { message: event.timelineItemFailed.error });
-  if ("interactionChanged" in event) {
-    return statusTextForInteraction(
-      {
-        sessionId: "",
-        event: event.interactionChanged.event,
-      },
-      t,
-    );
-  }
-  if ("agentRuntimeUpdated" in event) return t("status.running");
-  if ("skillActivated" in event) return t("status.running");
-  if ("error" in event) return t("status.error", { message: event.error.message });
-  return t("status.running");
-}
-
 function statusTextForToolItem(
   item: TimelineItem,
   t: (key: string, args?: Record<string, unknown>) => string,
@@ -155,6 +118,42 @@ function statusTextForToolItem(
     case "streaming":
     case "running":
       return t("status.toolInput", { name });
+  }
+}
+
+function statusTextForStudioPart(
+  part: StudioPart,
+  t: (key: string, args?: Record<string, unknown>) => string,
+) {
+  if (part.partType === "tool") {
+    return statusTextForToolItem({
+      kind: "tool",
+      status: part.status,
+      tool: part.tool ?? null,
+      content: part.text,
+    } as TimelineItem, t);
+  }
+  if (part.status === "failed") return t("status.error", { message: part.error || part.text || "unknown" });
+  if (part.status === "interrupted") return t("status.interrupted");
+  if (part.status === "budgetLimited") return t("turnPhase.budgetLimited");
+  if (part.partType === "reasoning") return t("status.thinking");
+  if (part.partType === "turn" && part.status === "completed") return t("status.done");
+  return t("status.running");
+}
+
+function statusTextForStudioPartDelta(
+  field: StudioPartDeltaField,
+  t: (key: string, args?: Record<string, unknown>) => string,
+) {
+  switch (field) {
+    case "reasoningText":
+      return t("status.thinking");
+    case "tool.arguments":
+    case "tool.result":
+      return t("status.toolInput", { name: "tool" });
+    case "text":
+    case "planContent":
+      return t("status.running");
   }
 }
 
@@ -186,8 +185,14 @@ function statusTextForStudioEvent(
   switch (kind.type) {
     case "turnChanged":
       return statusTextForStudioTurn(kind.turn.status, kind.turn.reason, t);
-    case "timelineChanged":
-      return statusTextForEvent(agentEventFromStudioTimelineChange(kind.change), t);
+    case "messagePartUpdated":
+      return statusTextForStudioPart(kind.part, t);
+    case "messagePartDelta":
+      return statusTextForStudioPartDelta(kind.delta.field, t);
+    case "messageUpdated":
+    case "messageRemoved":
+    case "messagePartRemoved":
+      return t("status.running");
     case "interactionChanged":
       return statusTextForInteraction(
         {
@@ -242,29 +247,13 @@ function statusTextForStudioTurn(
   }
 }
 
-function agentEventFromStudioTimelineChange(change: StudioTimelineChange): AgentEvent {
-  switch (change.type) {
-    case "started":
-      return { timelineItemStarted: { item: change.item } };
-    case "delta":
-      return { timelineItemDelta: { event: change.event } };
-    case "completed":
-      return { timelineItemCompleted: { item: change.item } };
-    case "failed":
-      return {
-        timelineItemFailed: {
-          item: change.item,
-          error: change.error,
-        },
-      };
-  }
-}
-
 export function useStudioApp() {
   const { t } = useTranslation();
   const [state, dispatch] = useReducer(studioReducer, initialStudioState(t("status.starting")));
   const providerSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const providerSaveVersionRef = useRef(0);
+  const eventBatchRef = useRef<StudioEventEnvelope[]>([]);
+  const eventBatchTimerRef = useRef<number | null>(null);
 
   const selectedProject = selectSelectedProject(state);
   const selectedSession = selectSelectedSession(state);
@@ -272,7 +261,7 @@ export function useStudioApp() {
 
   const timelineEntries = useMemo(() => {
     return selectTimelineEntries(state);
-  }, [state.timelineItems, state.timelineOrder, state.planStates]);
+  }, [state.messages, state.partsByMessage, state.partDeltaAccum, state.planStates]);
 
   const providerUsageAutoRefreshKey = useMemo(() => {
     if (!state.settingsOpen || state.activeSettingsTab !== "providers") {
@@ -301,11 +290,11 @@ export function useStudioApp() {
 
   useEffect(() => {
     if (!state.selectedSessionId) {
-      dispatch({ type: "timelineLoaded", sessionId: null, events: [], planStates: [], nextSequence: 0 });
+      dispatch({ type: "sessionStateLoaded", sessionId: null, events: [], planStates: [], nextSequence: 0 });
       return;
     }
     const sessionId = state.selectedSessionId;
-    reloadTimeline(sessionId);
+    reloadSessionState(sessionId);
   }, [state.selectedSessionId, t]);
 
   useEffect(() => {
@@ -320,6 +309,49 @@ export function useStudioApp() {
       return;
     }
 
+    const dispatchStudioEvent = (envelope: StudioEventEnvelope) => {
+      dispatch({
+        type: "studioEvent",
+        envelope,
+        status: statusTextForStudioEvent(envelope, t),
+      });
+    };
+    const flushStudioEvents = () => {
+      eventBatchTimerRef.current = null;
+      const batch = eventBatchRef.current;
+      eventBatchRef.current = [];
+      const latestSnapshotSequence = new Map<string, number>();
+      for (const envelope of batch) {
+        const kind = envelope.kind;
+        if (kind.type !== "messagePartUpdated") {
+          continue;
+        }
+        const key = `${envelope.sessionId ?? ""}:${kind.part.partId}`;
+        latestSnapshotSequence.set(
+          key,
+          Math.max(latestSnapshotSequence.get(key) ?? -1, envelope.sequence),
+        );
+      }
+      for (const envelope of batch) {
+        const kind = envelope.kind;
+        if (kind.type === "messagePartDelta") {
+          const key = `${envelope.sessionId ?? ""}:${kind.delta.partId}`;
+          const snapshotSequence = latestSnapshotSequence.get(key);
+          if (snapshotSequence !== undefined && envelope.sequence <= snapshotSequence) {
+            continue;
+          }
+        }
+        dispatchStudioEvent(envelope);
+      }
+    };
+    const queueStudioEvent = (envelope: StudioEventEnvelope) => {
+      eventBatchRef.current = [...eventBatchRef.current, envelope];
+      if (eventBatchTimerRef.current !== null) {
+        return;
+      }
+      eventBatchTimerRef.current = window.setTimeout(flushStudioEvents, 16);
+    };
+
     const unlisteners = [
       listen<StudioEventEnvelope>("studio-runtime-event", ({ payload }) => {
         if (payload.kind.type === "stale" && payload.sessionId) {
@@ -327,15 +359,16 @@ export function useStudioApp() {
           void reloadStudioEvents(payload.sessionId, afterSequence);
           return;
         }
-        dispatch({
-          type: "studioEvent",
-          envelope: payload,
-          status: statusTextForStudioEvent(payload, t),
-        });
+        queueStudioEvent(payload);
       }),
     ];
 
     return () => {
+      if (eventBatchTimerRef.current !== null) {
+        window.clearTimeout(eventBatchTimerRef.current);
+        eventBatchTimerRef.current = null;
+      }
+      eventBatchRef.current = [];
       void Promise.all(unlisteners).then((items) => {
         for (const unlisten of items) {
           unlisten();
@@ -344,21 +377,21 @@ export function useStudioApp() {
     };
   }, [t]);
 
-  function reloadTimeline(sessionId: string) {
-    return loadSessionTimeline(sessionId)
+  function reloadSessionState(sessionId: string) {
+    return loadSessionState(sessionId)
       .then((payload) =>
         dispatch({
-          type: "timelineLoaded",
+          type: "sessionStateLoaded",
           sessionId: payload.sessionId,
           events: payload.events,
-          planStates: payload.planStates ?? [],
           interactions: payload.interactions ?? [],
-          nextSequence: payload.nextSequence,
+          nextSequence: payload.eventNextSequence,
+          status: t("status.ready"),
         }),
       )
       .catch((error) => {
         dispatch({
-          type: "timelineLoadFailed",
+          type: "sessionStateLoadFailed",
           sessionId,
           status: t("status.timelineLoadFailed", { error: errorText(error) }),
         });
@@ -378,7 +411,7 @@ export function useStudioApp() {
       })
       .catch((error) => {
         dispatch({
-          type: "timelineLoadFailed",
+          type: "sessionStateLoadFailed",
           sessionId,
           status: t("status.timelineLoadFailed", { error: errorText(error) }),
         });
@@ -581,7 +614,7 @@ export function useStudioApp() {
           type: "planLifecycleLoaded",
           sessionId: payload.planLifecycle.sessionId,
           planStates: payload.planLifecycle.planStates,
-          timelineNextSequence: payload.planLifecycle.timelineNextSequence,
+          eventNextSequence: payload.planLifecycle.eventNextSequence,
           status: t("status.ready"),
         });
       }
@@ -642,19 +675,7 @@ export function useStudioApp() {
       if (isTauriRuntime()) {
         await submitPromptCommand(sessionId, content, attachments.map((attachment) => attachment.id));
       } else {
-        const payload = await runPrompt(sessionId, content);
-        const turnError = payload.turnError ?? payload.turnAbortReason ?? t("subagent.providerError");
-        const status =
-          payload.turnStatus === "errored"
-            ? t("status.runFailed", { error: turnError })
-            : payload.turnAbortReason === "interrupted"
-              ? t("status.interrupted")
-              : t("status.done");
-        dispatch({
-          type: "runPromptLoaded",
-          payload,
-          status,
-        });
+        dispatch({ type: "stopFallback", status: t("status.done") });
       }
     } catch (error) {
       dispatch({

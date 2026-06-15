@@ -16,27 +16,27 @@ reducer 分域：
 
 所有 Tauri 事件只负责 `dispatch(action)`。运行中事件只监听 `studio-runtime-event`，旧 `studio-agent-event`、`studio-interaction-changed`、`studio-session-mode-updated`、`studio-session-handoff-started`、`studio-prompt-failed`、MCP/LSP health sideband 不再作为 UI 状态入口。
 
-状态按 session 归一化保存：`sessionsById`、`sessionOrder`、`selectedSessionId`、`sessionViews[sessionId]`。每个 session view 独立保存 `cursor`、`stale`、`turn`、`timelineEvents`、`timelineItems`、`timelineOrder`、`agentTimelineEvents`、`agents`、`sessionRuntime`、`interactions` 和 `planStates`。非当前 session 的事件不得丢弃；它们更新后台 session 的 badge、turn 状态和 cursor，只有当前 session 事件才更新可见 timeline、footer 和状态栏。
+状态按 session 归一化保存：`sessionsById`、`sessionOrder`、`selectedSessionId`、`sessionViews[sessionId]`。每个 session view 独立保存 `cursor`、`stale`、`turn`、`messages`、`partsByMessage`、`partDeltaAccum`、`agentTimelineEvents`、`agents`、`sessionRuntime`、`interactions` 和 `planStates`。非当前 session 的事件不得丢弃；它们更新后台 session 的 badge、turn 状态和 cursor，只有当前 session 事件才更新可见 timeline、footer 和状态栏。
 
 ## 2. Timeline 视图
 
 主区保持单线 timeline 语义，数据来源统一为 append-only StudioEvent log：
 
 - 历史 `StudioEventEnvelope`
-- 运行中 `StudioTimelineChange::Started`
-- 运行中 `StudioTimelineChange::Delta`
-- 运行中 `StudioTimelineChange::Completed`
-- 运行中 `StudioTimelineChange::Failed`
+- 运行中 `messageUpdated`
+- 运行中 `messagePartUpdated`
+- 运行中 `messagePartDelta`
+- turn、interaction、plan lifecycle 和 runtime 状态事件
 
 约束：
 
 - 空 assistant 不渲染
-- `text` item 以 `textChannel` 决定展示语义：`user` 渲染为用户气泡，`commentary` 渲染为轻量进展行，`final` 渲染为普通 assistant 回复。前端不再使用旧 `role` 字段判断文本语义。
-- `plan` item 渲染为独立计划卡片，正文按 Markdown 展示，不与普通 assistant 消息混排
-- 用户 `text` item 可以携带图片附件元数据；用户气泡必须展示缩略图、文件名或尺寸，并允许只有图片没有文本的消息进入 timeline。
-- 主 timeline 以用户与 assistant 正文为主；工具调用使用紧凑行密度，连续 tool items 可在 selector 中聚合为派生展示项，例如 `Read 3 files · Edit 1 file`，但原始 `timelineItems`、`timelineOrder` 和 reducer 仍保持 item-first append-only 语义
-- 工具聚合只属于 selector 展示层：同一 turn 内的 `thinking` 和隐藏 `inference` 不结束当前工具组；assistant `text`、`agent`、`turn` trace 或跨 turn 的 tool item 才开启新的工具展示段。`thinking` 内容仍作为 thought entry 渲染。
-- 同一 turn 内连续模型 step 产生的多个 `thinking` item 必须在 selector 中合并为一个 thought entry；tool item 和隐藏 `inference` 对 thought 聚合透明，避免工具循环后在主 timeline 连续出现多张思考卡片。
+- `text` part 以 `textChannel` 决定展示语义：`user` 渲染为用户气泡，`commentary` 渲染为轻量进展行，`final` 渲染为普通 assistant 回复。前端不再使用旧 `role` 字段判断文本语义。
+- `plan` part 渲染为独立计划卡片，正文按 Markdown 展示，不与普通 assistant 消息混排。
+- 用户 `text` part 可以携带图片附件元数据；用户气泡必须展示缩略图、文件名或尺寸，并允许只有图片没有文本的消息进入 timeline。
+- 主 timeline 以用户与 assistant 正文为主；工具调用使用紧凑行密度，连续 tool parts 可在 selector 中聚合为派生展示项，例如 `Read 3 files · Edit 1 file`，但原始 `messages`、`partsByMessage` 和 reducer 仍保持 message/part 事实语义。
+- 工具聚合只属于 selector 展示层：同一 turn 内的 reasoning 和隐藏 inference 不结束当前工具组；assistant `text`、`agent`、`turn` trace 或跨 turn 的 tool part 才开启新的工具展示段。reasoning 内容仍作为 thought entry 渲染。
+- 同一 turn 内连续模型 step 产生的多个 reasoning part 必须在 selector 中合并为一个 thought entry；tool part 和隐藏 `inference` 对 thought 聚合透明，避免工具循环后在主 timeline 连续出现多张思考卡片。
 - 模型调用、普通 turn 状态和 token 用量不作为主 timeline 内容展示；usage 和费用归属底部状态栏及其 popover
 - 失败、中断、预算受限等异常 turn trace 可作为低权重 notice 保留在主 timeline，避免关键错误被隐藏
 - 子代理使用行内状态，不做嵌套大卡片
@@ -47,26 +47,26 @@ reducer 分域：
 - 用户与 assistant 正文按 Markdown 渲染，支持标题、列表、引用、代码块、行内代码、强调和链接
 - commentary 也是可见文本，但视觉权重低于 final：用于“我先检查配置”“现在修复类型链”等阶段更新，可流式追加，不应和最终 assistant 回复合并。
 - 自动跟随最新内容以“用户是否停留在底部”为准；高频 timeline 刷新时仍应在 layout 阶段滚动到最新，用户手动上滚后暂停跟随
-- 同一 session 内继续对话不会触发 `selectedSessionId` 变化；当前轮 `StudioEventKind::TimelineChanged` 与补拉事件必须直接合并进本地 timeline
+- 同一 session 内继续对话不会触发 `selectedSessionId` 变化；当前轮 message/part 事件与补拉事件必须直接合并进本地 conversation view
 - 重复选择当前 session 必须视为 no-op，不能清空本地 timeline、agent snapshot、runtime 或 plan 状态；只有切换到不同 session、新建 session 或切换项目时，才可以重置当前会话本地视图并等待对应 timeline snapshot 加载
 - 异步 `loadSessionState` / `loadStudioEvents` 只能按 `StudioEventEnvelope.sequence` 补齐缺失事件；如果加载结果落后于本地已收到的当前轮 event，只能跳过已应用 sequence，不能覆盖当前 timeline
 - Tauri 实时事件通道如果发生 broadcast lag，不能静默忽略。事件转发层必须向前端发出当前 session 的 stale 信号；前端收到后立即按 `StudioEventEnvelope.sequence` 调用 `loadStudioEvents` 补齐缺失事件，并继续用 timeline 本地新鲜度规则保护已收到的 live item。
 - 自动跟随只取决于用户是否停留在底部，不取决于 `isBusy`；submit 命令返回时 run 通常仍在后台执行，最终内容必须继续通过 `studio-runtime-event` 追加
-- 用户提交 prompt 后，前端 reducer 立即插入仅本地存在的 optimistic 用户消息 item 和 waiting turn item。waiting item 在 selector 中派生为轻量状态行，用于展示“正在等待模型响应”。这些 item 不持久化、不进入后端 DTO；真实 user text item 到达时只清理 optimistic 用户消息，不能清掉 waiting。waiting 必须持续覆盖 turn start、user text 和 inference start 到首个模型侧可见事件，例如 assistant text、thinking、plan、tool event、inference completed、terminal `turnChanged(failed/cancelled/completed)`。如果 submit command 自身失败，waiting 应移除或替换为失败状态，不能残留。
+- 用户提交 prompt 后，前端 reducer 立即插入仅本地存在的 optimistic 用户 message/part 和 waiting turn part。waiting part 在 selector 中派生为轻量状态行，用于展示“正在等待模型响应”。这些 optimistic part 不持久化、不进入后端 DTO；真实 user text part 到达时只清理 optimistic 用户消息，不能清掉 waiting。waiting 必须持续覆盖 turn start、user text 和 inference start 到首个模型侧可见事件，例如 assistant text、reasoning、plan、tool event、inference completed、terminal `turnChanged(failed/cancelled/completed)`。如果 submit command 自身失败，waiting 应移除或替换为失败状态，不能残留。
 - 用户提交 prompt 属于显式回到底部的动作；即使用户此前停在历史位置，发送后 timeline 也应立即跟随到底部，让 optimistic 消息和等待状态可见。后续 streaming delta 仍遵守“用户在底部才跟随”的规则，用户再次上滚后不抢占滚动位置。
-- `thinking` item 在 selector 中派生为 thought entry，并携带 `status`、`startedAt`、`updatedAt` 与 `durationSeconds`。`started/streaming/running` 状态展示思考中动画；`completed` 状态根据 `createdAt/updatedAt` 展示耗时；`failed/interrupted/budgetLimited` 等异常状态展示对应异常语义。多个连续 thinking item 合并时，耗时取最早 `createdAt` 与最晚 `updatedAt`。
-- timeline 渲染层可以在 `selectTimelineEntries()` 之后使用 headless 虚拟滚动库承载大列表；虚拟化只负责测量、滚动定位和 DOM 数量控制，不消费 raw `TimelineItem`，也不承载 tool 聚合、thinking 合并、trace 过滤或 plan 行为
+- reasoning part 在 selector 中派生为 thought entry，并携带 `status`、`startedAt`、`updatedAt` 与 `durationSeconds`。`started/streaming/running` 状态展示思考中动画；`completed` 状态根据 `createdAt/updatedAt` 展示耗时；`failed/interrupted/budgetLimited` 等异常状态展示对应异常语义。多个连续 reasoning part 合并时，耗时取最早 `createdAt` 与最晚 `updatedAt`。
+- timeline 渲染层可以在 `selectTimelineEntries()` 之后使用 headless 虚拟滚动库承载大列表；虚拟化只负责测量、滚动定位和 DOM 数量控制，不消费 raw `StudioPart`，也不承载 tool 聚合、reasoning 合并、trace 过滤或 plan 行为
 
-前端 reducer 的 timeline 状态固定为：
+前端 reducer 的 conversation 状态固定为：
 
-- `timelineEvents: Map<sequence, TimelineEventRecord>`，其中 key 必须来自 `StudioEventEnvelope.sequence`
-- `timelineItems: Map<itemId, TimelineItem>`
-- `timelineOrder: string[]`
-- `timelineNextSequence: number`
+- `messages: Map<messageId, StudioMessage>`
+- `partsByMessage: Map<messageId, StudioPart[]>`
+- `partDeltaAccum: Map<partId, StudioPartDeltaAccum>`
+- `eventNextSequence: number`
 
-`timelineItems` 是前端从 `StudioEventEnvelope` 重放得到的 view model，不作为 Tauri command 的输入 DTO。`timelineOrder` 按每个 item 的 `startedSequence` 稳定排序；delta 先到再收到 start/completed 时可以用更早的 `startedSequence` 修正顺序，但不得覆盖已经累积的内容。组件不得再把 `messages`、运行中 tool map、agent events 和 trace items 临时拼接成主 timeline。工具聚合与普通 trace 过滤只能作为 `timelineEntries` 派生显示层逻辑，不能写回 reducer 状态或后端 DTO。
+`messages` 与 `partsByMessage` 是前端从 `StudioEventEnvelope` 重放得到的事实状态，不作为 Tauri command 的输入 DTO。message 按创建时间与 durable sequence 排序，part 按 `order` 稳定排序；delta 只能附加到已有 part 的 overlay，snapshot 到达后以 snapshot 为准并清 overlay。组件不得再把运行中 tool map、agent events 和 trace items 临时拼接成主 timeline。工具聚合与普通 trace 过滤只能作为 `timelineEntries` 派生显示层逻辑，不能写回 reducer 状态或后端 DTO。
 
-同一组 `StudioEventEnvelope` 在历史加载、实时事件和补拉事件中必须由同一个前端 reducer 重放，并收敛到相同 `TimelineItem`。fold 规则需要能处理 start/delta/completed 的轻微乱序：delta 先到时可以创建最小 item，后续 start/completed 必须补全 `tool/agent/inference/usage` 等结构化字段，不能丢弃已累积的 content、thinking chunks、tool arguments 或 tool result。
+同一组 `StudioEventEnvelope` 在历史加载、实时事件和补拉事件中必须由同一个前端 reducer 重放，并收敛到相同 message/part projection。fold 规则按 opencode 语义处理：orphan delta 丢弃；snapshot upsert 完整 part 并清除 overlay；旧 snapshot 不得覆盖已应用的新 snapshot。
 
 左侧 project 列表的每个项目行右侧提供 `X` 归档按钮。归档 project 不删除磁盘目录，也不修改项目文件；它只归档 Studio 中的 project 记录，并清理该 project 下的 sessions、messages、timeline、agent、runtime 和审批历史。用户重新打开同一路径时复用原 project 记录，但历史会话已经清空，应按新项目入口创建默认会话。归档当前 project 时切换到下一个未归档 project；没有剩余 project 时进入无项目状态。
 
@@ -113,11 +113,10 @@ Markdown 阅读样式属于 timeline 展示层：assistant 正文和 plan 卡片
 - `SessionSelectionResponse`
 - `SubmitPromptResponse`
 - `ResolveInteractionResponse`
-- `SessionTimelineResponse`
 - `SessionStateResponse`
 - `StudioEventsResponse`
 
-`submit_prompt` 接收 `attachmentIds`，当附件非空时允许 `prompt` 为空。图片附件先通过独立上传命令写入 Studio app data，再以附件 id 引用；前端不得把 base64 图片直接塞进 prompt 文本。旧字段别名、旧 payload 解析逻辑、旧 text/thinking/tool delta reducer 分支在方案乙中删除。`SubmitPromptResponse` 只表示后台 turn 已提交，包含 `sessionId`、`turnId` 和当前 cursor；不得携带最终 timeline 结果。`SessionStateResponse.events` 与 `StudioEventsResponse.events` 返回 `StudioEventEnvelope[]`；`TimelineItem` 只作为前端折叠后的 view model。
+`submit_prompt` 接收 `attachmentIds`，当附件非空时允许 `prompt` 为空。图片附件先通过独立上传命令写入 Studio app data，再以附件 id 引用；前端不得把 base64 图片直接塞进 prompt 文本。旧字段别名、旧 payload 解析逻辑、旧 text/thinking/tool delta reducer 分支在方案乙中删除。`SubmitPromptResponse` 只表示后台 turn 已提交，包含 `sessionId`、`turnId` 和当前 cursor；不得携带最终 timeline 结果。`SessionStateResponse.events` 与 `StudioEventsResponse.events` 返回 durable `StudioEventEnvelope[]`；`StudioMessage` / `StudioPart` 是前端 reducer 的事实源，timeline entry 只作为 selector view model。
 
 ## 5. 选择器与派生数据
 
@@ -144,7 +143,7 @@ Provider 设置页的供应商卡片以可扫读的运维状态为主：头部�
 
 普通 composer 支持粘贴、拖放和文件选择上传 `png`、`jpeg`、`webp` 图片。上传入口由当前模型 `capabilities.input` 是否包含 `image` 决定；没有视觉能力时隐藏或禁用图片入口，并在已有图片草稿提交前给出本地错误。图片草稿展示缩略图、文件名和删除按钮；发送成功后清空草稿。图片上传由 Tauri 后端完成格式校验、尺寸/大小归一化和 app data 持久化，前端只保存返回的附件 id 与预览数据。
 
-- `清空上下文并实现`：通过 `resolve_interaction(interactionId, { type: "planConfirmation", decision: "implementFreshContext" })` 解析当前 interaction。后端创建显式 session handoff：新 Auto session 使用 Codex 风格 handoff prompt 加 plan markdown 作为 fresh context 的唯一意图来源；原计划 session 保持可恢复，但从活跃 session 列表隐藏，避免实施开始后同时出现计划 session 与实施 session。实施 handoff 创建成功后，前端通过 `sessionHandoffChanged` 切到目标 session，并通过目标 session 的 `turnChanged/timelineChanged/agentChanged` 实时展示步骤；不能停留在来源 session 等最终结果一次性替换。
+- `清空上下文并实现`：通过 `resolve_interaction(interactionId, { type: "planConfirmation", decision: "implementFreshContext" })` 解析当前 interaction。后端创建显式 session handoff：新 Auto session 使用 Codex 风格 handoff prompt 加 plan markdown 作为 fresh context 的唯一意图来源；原计划 session 保持可恢复，但从活跃 session 列表隐藏，避免实施开始后同时出现计划 session 与实施 session。实施 handoff 创建成功后，前端通过 `sessionHandoffChanged` 切到目标 session，并通过目标 session 的 `turnChanged/messageUpdated/messagePartUpdated/messagePartDelta/agentChanged` 实时展示步骤；不能停留在来源 session 等最终结果一次性替换。
 - `继续讨论`：用户可直接在确认 composer 的输入框写入追问或调整内容；一次提交先通过同一命令解析为 `decision: "continuePlanning"` 且携带 `content`，后端记录 `continuedPlanning`，随后前端立即把同一 `content` 作为普通 prompt 发送，用于继续追问或修改计划，不自动切换到 `auto`。如果 resolution 失败，不发送 prompt。
 - `取消`：解析为 `decision: "dismiss"`，后端记录 `dismissed(reason=dismissed)`，关闭确认 composer，恢复普通输入框，不提交任何内容。
 
@@ -160,7 +159,7 @@ MCP 标签页必须同时展示后端合成的内置 Zhipu Coding Plan MCP serve
 
 Provider 标签页必须包含 Zhipu Coding Plan 模板。该模板在 UI 中作为独立供应商入口展示，但保存到配置时仍使用 `provider_kind = "zhipu"`，默认 base URL 为 `https://open.bigmodel.cn/api/coding/paas/v4`，默认模型列表与现有 Zhipu 模板完全一致。内置 Zhipu Coding Plan MCP server 的凭据优先使用该模板保存的 `bearer_token`，保存后返回的 `ConfigPayload` 必须立即反映 MCP 状态变化。
 
-工具调用展示遵循 `design/13-tool-calling-runtime.md` 的生命周期语义。工具 entry 和工具组详情必须展示工具名称、状态和关键路径或命令摘要；静默文件工具的成功结果可以隐藏，但 failed、denied、interrupted、budgetLimited 等异常状态必须展示 result/error 详情。前端只做展示派生，不改变 raw `TimelineItem` 的状态或结果内容。实时状态文案必须以 `TimelineItem.status` 为准；`TimelineItemCompleted` 和 `TimelineItemFailed` 只承载最终终态，不能被用来表示 `approved` 这类执行前中间态。
+工具调用展示遵循 `design/13-tool-calling-runtime.md` 的生命周期语义。工具 entry 和工具组详情必须展示工具名称、状态和关键路径或命令摘要；静默文件工具的成功结果可以隐藏，但 failed、denied、interrupted、budgetLimited 等异常状态必须展示 result/error 详情。前端只做展示派生，不改变 raw `StudioPart` 的状态或结果内容。实时状态文案必须以 tool part 的 `status` 为准；`messagePartUpdated` 是中性 snapshot，不能被命名或处理成 completed 才能表达 `approved` 这类执行前中间态。
 
 agent latest snapshot、agent timeline event、session runtime 和审批状态必须以 `sessionId` 为边界。切换项目、切换会话或新建会话时，前端必须用后端返回的当前会话快照替换当前 session view；运行中收到的实时事件如果属于非当前会话，只更新对应后台 session view，不能污染当前状态栏、子代理 popover 或 timeline。`SessionStateResponse.agents` 是当前会话恢复时的权威快照，不能与旧会话遗留 agents 合并。
 

@@ -15,10 +15,9 @@ import type {
   ProviderSettingsInput,
   ProviderUsagesPayload,
   ResolveInteractionResponse,
-  RunPromptResponse,
   SessionStatePayload,
   SessionSelectionPayload,
-  SessionTimeline,
+  StudioEventEnvelope,
   StudioEventsPayload,
   SubmitPromptResponse,
 } from "../types";
@@ -29,10 +28,7 @@ import {
   previewSessionRuntime,
   previewAgents,
   previewAgentEvents,
-  previewTimelineEvents,
   previewTimelineItems,
-  previewTimelineEventRecords,
-  nextTimelineSequenceForItems,
   previewSkills,
   previewLspServers,
 } from "./preview";
@@ -271,117 +267,6 @@ export function setSessionMode(sessionId: string, mode: CompileMode) {
     );
   }
   return invoke<SessionSelectionPayload>("set_session_mode", { sessionId, mode });
-}
-
-export function runPrompt(sessionId: string, prompt: string) {
-  if (isTauriRuntime()) {
-    return Promise.reject(new Error("run_prompt has been replaced by submit_prompt"));
-  }
-  previewInterruptedSessions.delete(sessionId);
-  return new Promise<RunPromptResponse>((resolve) => {
-    window.setTimeout(() => {
-      const interrupted = previewInterruptedSessions.delete(sessionId);
-      const now = Math.floor(Date.now() / 1000);
-      const latestAgent = {
-        id: "agent-preview-latest",
-        sessionId,
-        path: "/root/preview_latest",
-        parentPath: null,
-        role: "executor",
-        task: prompt,
-        status: interrupted ? "interrupted" as const : "completed" as const,
-        summary: interrupted ? "预览运行已停止。" : "预览运行已完成。",
-        depth: 1,
-        error: null,
-        reason: interrupted ? "interrupted" : null,
-        budgetLimitKind: null,
-        budgetUsage: null,
-        updatedAt: now,
-      };
-      resolve(clone({
-        sessionId,
-        sessions: previewSessions,
-        agentEvents: [
-          ...previewAgentEvents,
-          {
-            eventId: `preview-agent-event-${Date.now()}`,
-            sessionId,
-            sequence: previewAgentEvents.length + 1,
-            kind: "agentStatus",
-            agentId: latestAgent.id,
-            path: latestAgent.path,
-            parentPath: null,
-            payload: {
-              agentStateChanged: {
-                id: latestAgent.id,
-                path: latestAgent.path,
-                parentPath: latestAgent.parentPath,
-                role: latestAgent.role,
-                task: latestAgent.task,
-                status: latestAgent.status,
-                summary: latestAgent.summary,
-                depth: latestAgent.depth,
-                error: latestAgent.error,
-                reason: latestAgent.reason,
-                budgetLimitKind: latestAgent.budgetLimitKind,
-                budgetUsage: latestAgent.budgetUsage,
-                updatedAt: latestAgent.updatedAt,
-              },
-            },
-            createdAt: now,
-          },
-        ],
-        agents: [...previewAgents, latestAgent],
-        sessionRuntime: {
-          ...previewSessionRuntime,
-          usage: {
-            ...previewSessionRuntime.usage,
-            promptTokens: previewSessionRuntime.usage.promptTokens + 1200,
-            completionTokens: previewSessionRuntime.usage.completionTokens + 260,
-            totalTokens: previewSessionRuntime.usage.totalTokens + 1460,
-          },
-        },
-        timelineEvents: previewTimelineEventRecords(sessionId, [
-          ...previewTimelineItems,
-          {
-            turnId: "preview-turn-latest",
-            itemId: `preview-user-${Date.now()}`,
-            startedSequence: previewTimelineItems.length + 8,
-            kind: "text" as const,
-            status: "completed" as const,
-            createdAt: now,
-            updatedAt: now,
-            textChannel: "user" as const,
-            content: prompt,
-            thinkingChunks: [],
-          },
-          {
-            turnId: "preview-turn-latest",
-            itemId: `preview-turn-latest-${Date.now()}`,
-            startedSequence: previewTimelineItems.length + 10,
-            kind: "turn" as const,
-            status: interrupted ? "interrupted" as const : "completed" as const,
-            createdAt: Math.floor(Date.now() / 1000),
-            updatedAt: Math.floor(Date.now() / 1000),
-            content: "",
-            thinkingChunks: [],
-            usage: {
-              promptTokens: 1200,
-              completionTokens: 260,
-              cachedPromptTokens: 0,
-              totalTokens: 1460,
-            },
-          },
-        ]),
-        planStates: [],
-        interactions: [],
-        timelineNextSequence: previewTimelineItems.length + 11,
-        turnStatus: interrupted ? "aborted" as const : "completed" as const,
-        turnAbortReason: interrupted ? "interrupted" : null,
-        turnError: null,
-      }));
-    }, 900);
-  });
 }
 
 export function createPromptAttachment(sessionId: string, dataUrl: string, filename?: string | null) {
@@ -777,29 +662,6 @@ export function listDiscoveredSkills(projectId: string) {
   return invoke<DiscoveredSkillsPayload>("list_discovered_skills", { projectId });
 }
 
-export function loadSessionTimeline(
-  sessionId: string,
-  afterSequence?: number,
-  limit?: number,
-) {
-  if (!isTauriRuntime()) {
-    return Promise.resolve(
-      clone({
-        sessionId,
-        events: previewTimelineEvents,
-        planStates: [],
-        interactions: [],
-        nextSequence: nextTimelineSequenceForItems(previewTimelineItems),
-      }),
-    );
-  }
-  return invoke<SessionTimeline>("load_session_timeline", {
-    sessionId,
-    afterSequence: afterSequence ?? null,
-    limit: limit ?? null,
-  });
-}
-
 export function loadStudioEvents(
   sessionId: string,
   afterSequence?: number,
@@ -832,17 +694,74 @@ export function loadSessionState(sessionId: string) {
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
         interactions: [],
-        timeline: {
-          sessionId,
-          events: previewTimelineEvents,
-          planStates: [],
-          interactions: [],
-          nextSequence: nextTimelineSequenceForItems(previewTimelineItems),
-        },
-        events: [],
-        eventNextSequence: 0,
+        events: previewStudioEvents(sessionId),
+        eventNextSequence: previewTimelineItems.length * 2,
       }),
     );
   }
   return invoke<SessionStatePayload>("load_session_state", { sessionId });
 }
+
+function previewStudioEvents(sessionId: string): StudioEventEnvelope[] {
+  const events: StudioEventEnvelope[] = [];
+  let sequence = 0;
+  for (const item of previewTimelineItems) {
+    const messageId = `${item.turnId}:${item.textChannel === "user" ? "user" : "assistant"}`;
+    const role = item.textChannel === "user" ? "user" : "assistant";
+    events.push({
+      eventId: `preview-message-${sequence}`,
+      sessionId,
+      turnId: item.turnId,
+      sequence: sequence++,
+      createdAt: item.createdAt,
+      kind: {
+        type: "messageUpdated",
+        message: {
+          messageId,
+          sessionId,
+          turnId: item.turnId,
+          role,
+          status: "completed",
+          createdAt: item.createdAt,
+          updatedAt: item.updatedAt,
+          completedAt: item.updatedAt,
+          metadata: {},
+        },
+      },
+    });
+    events.push({
+      eventId: `preview-part-${sequence}`,
+      sessionId,
+      turnId: item.turnId,
+      sequence: sequence++,
+      createdAt: item.createdAt,
+      kind: {
+        type: "messagePartUpdated",
+        part: {
+          partId: item.itemId,
+          messageId,
+          sessionId,
+          turnId: item.turnId,
+          partType: item.kind === "thinking" ? "reasoning" : item.kind,
+          order: item.startedSequence,
+          status: item.status,
+          createdAt: item.createdAt,
+          updatedAt: item.updatedAt,
+          completedAt: item.status === "completed" ? item.updatedAt : null,
+          textChannel: item.textChannel ?? null,
+          text: item.content,
+          attachments: item.attachments ?? [],
+          tool: item.tool ?? null,
+          agent: item.agent ?? null,
+          inference: item.inference ?? null,
+          plan: item.kind === "plan" ? { content: item.content } : null,
+          usage: item.usage ?? null,
+          synthetic: item.kind === "turn" || item.kind === "inference",
+          ignored: false,
+        },
+      },
+    });
+  }
+  return events;
+}
+

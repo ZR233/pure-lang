@@ -11,10 +11,10 @@ pub use event::{
     BudgetLimitKind, BudgetUsage, EnabledToolsEvent, ErrorSeverity, OutputStream, PipelineStage,
     PlanLifecycleEvent, PlanLifecycleState, RuntimeCostAmount, RuntimeUsageSnapshot,
     SkillActivation, TimelineAgentItem, TimelineAttachment, TimelineDelta, TimelineInferenceItem,
-    TimelineItem, TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus,
-    TimelineTextChannel, TimelineThinkingChunk, TimelineToolItem, TokenUsageSnapshot, TraceEvent,
-    TraceEventKind, UserInputAnswer, UserInputRequest, UserInputResponse, UserQuestion,
-    UserQuestionOption,
+    TimelineItem, TimelineItemDelta, TimelineItemDeltaEvent, TimelineItemDeltaField,
+    TimelineItemKind, TimelineItemStatus, TimelineTextChannel, TimelineThinkingChunk,
+    TimelineToolItem, TokenUsageSnapshot, TraceEvent, TraceEventKind, UserInputAnswer,
+    UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
 };
 pub use interaction::{
     InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,
@@ -29,7 +29,10 @@ pub use message::{
 };
 pub use permission::PermissionLevel;
 pub use studio_event::{
-    StudioAgentSnapshot, StudioAgentTimelineEvent, StudioEventEnvelope, StudioEventKind,
-    StudioLspHealth, StudioMcpHealth, StudioSessionHandoff, StudioSessionRuntime,
-    StudioSessionSummary, StudioTimelineChange, StudioTurn, StudioTurnStatus,
+    StudioAgentPart, StudioAgentSnapshot, StudioAgentTimelineEvent, StudioAttachment,
+    StudioEventEnvelope, StudioEventKind, StudioFilePart, StudioInferencePart, StudioLspHealth,
+    StudioMcpHealth, StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart,
+    StudioPartDelta, StudioPartDeltaField, StudioPartStatus, StudioPartType, StudioPlanPart,
+    StudioSessionHandoff, StudioSessionRuntime, StudioSessionSummary, StudioTextChannel,
+    StudioToolPart, StudioTurn, StudioTurnStatus,
 };

@@ -8,10 +8,9 @@ use pl_core::{
     ProviderUsageRecord, ProviderUsageState, PureConfig, ReasoningInterleavedField, RoleEdit,
     SessionRecord, SessionRuntimeRecord, SkillCatalog, SkillMetadata, SkillSourceKind,
     StudioAgentSnapshotRecord, StudioAgentTimelineEventRecord, StudioRuntime, ToolCapabilities,
-    TraceEvent, TraceEventKind, TurnResultStatus, ZhipuQuotaWindow, builtin_mcp_server_ids,
-    effective_mcp_servers, infer_provider_template_kind,
+    ZhipuQuotaWindow, builtin_mcp_server_ids, effective_mcp_servers, infer_provider_template_kind,
 };
-use pl_protocol::{StudioEventEnvelope, StudioEventKind, StudioTimelineChange};
+use pl_protocol::{StudioEventEnvelope, StudioEventKind};
 
 use crate::dto::{
     AgentDto, AgentEventDto, AttachmentDto, ConfigDto, DeepSeekBalanceDto, DeepSeekBalanceInfoDto,
@@ -20,8 +19,7 @@ use crate::dto::{
     ModelDto, PlanStateDto, ProjectDto, ProviderDto, ProviderInput, ProviderSettingsInput,
     ProviderTemplateDto, ProviderUsageDto, ProviderUsagesDto, ReasoningInterleavedDto, RoleDto,
     RoleInput, RuntimeCostAmountDto, RuntimeUsageDto, SessionDto, SessionRuntimeDto, SkillDto,
-    TimelineEventDto, ToolCapabilitiesDto, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto,
-    ZhipuToolUsageDetailDto,
+    ToolCapabilitiesDto, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
 };
 use crate::state::{CommandError, CommandResult};
 
@@ -701,207 +699,10 @@ pub fn agent_dto(agent: StudioAgentSnapshotRecord) -> AgentDto {
     }
 }
 
-pub fn turn_result_status_label(status: TurnResultStatus) -> &'static str {
-    match status {
-        TurnResultStatus::Completed => "completed",
-        TurnResultStatus::Aborted => "aborted",
-        TurnResultStatus::Errored => "errored",
-    }
-}
-
-#[cfg(test)]
-pub fn timeline_events_to_items(events: &[TraceEvent]) -> Vec<pl_protocol::TimelineItem> {
-    let mut items = std::collections::HashMap::new();
-    for event in events {
-        match &event.kind {
-            TraceEventKind::TimelineItemStarted { item } => upsert_timeline_item(&mut items, item),
-            TraceEventKind::TimelineItemCompleted { item } => {
-                upsert_timeline_item(&mut items, item)
-            }
-            TraceEventKind::TimelineItemFailed { item, error } => {
-                let mut failed = item.clone();
-                if failed.content.trim().is_empty() {
-                    failed.content = error.clone();
-                }
-                upsert_timeline_item(&mut items, &failed)
-            }
-            TraceEventKind::TimelineItemDelta { event } => {
-                let entry = items.entry(event.item_id.clone()).or_insert_with(|| {
-                    pl_protocol::TimelineItem {
-                        turn_id: event.turn_id.clone(),
-                        item_id: event.item_id.clone(),
-                        started_sequence: event.started_sequence,
-                        kind: event.kind,
-                        status: event.status,
-                        created_at: event.created_at,
-                        updated_at: event.updated_at,
-                        text_channel: match &event.delta {
-                            pl_protocol::TimelineDelta::Text { text_channel, .. } => {
-                                Some(*text_channel)
-                            }
-                            pl_protocol::TimelineDelta::Plan { .. }
-                            | pl_protocol::TimelineDelta::Thinking { .. }
-                            | pl_protocol::TimelineDelta::ToolArguments { .. }
-                            | pl_protocol::TimelineDelta::ToolResult { .. } => None,
-                        },
-                        content: String::new(),
-                        thinking_chunks: Vec::new(),
-                        attachments: Vec::new(),
-                        tool: None,
-                        agent: None,
-                        inference: None,
-                        usage: None,
-                    }
-                });
-                entry.status = event.status;
-                entry.updated_at = event.updated_at;
-                match &event.delta {
-                    pl_protocol::TimelineDelta::Text {
-                        text_channel,
-                        delta,
-                    } => {
-                        entry.text_channel = Some(*text_channel);
-                        entry.content.push_str(delta);
-                    }
-                    pl_protocol::TimelineDelta::Plan { delta } => {
-                        entry.content.push_str(delta);
-                    }
-                    pl_protocol::TimelineDelta::Thinking { chunk_index, delta } => {
-                        match entry
-                            .thinking_chunks
-                            .iter_mut()
-                            .find(|chunk| chunk.chunk_index == *chunk_index)
-                        {
-                            Some(chunk) => chunk.content.push_str(delta),
-                            None => {
-                                entry
-                                    .thinking_chunks
-                                    .push(pl_protocol::TimelineThinkingChunk {
-                                        chunk_index: *chunk_index,
-                                        content: delta.clone(),
-                                    })
-                            }
-                        }
-                    }
-                    pl_protocol::TimelineDelta::ToolArguments { delta } => {
-                        let tool = entry
-                            .tool
-                            .get_or_insert_with(|| blank_timeline_tool_item(&event.item_id));
-                        tool.arguments.push_str(delta);
-                    }
-                    pl_protocol::TimelineDelta::ToolResult { delta } => {
-                        let tool = entry
-                            .tool
-                            .get_or_insert_with(|| blank_timeline_tool_item(&event.item_id));
-                        let result = tool.result.get_or_insert_with(String::new);
-                        result.push_str(delta);
-                    }
-                }
-            }
-            TraceEventKind::PlanLifecycleChanged { .. }
-            | TraceEventKind::InteractionChanged { .. }
-            | TraceEventKind::SkillActivated { .. }
-            | TraceEventKind::EnabledToolsRecorded { .. } => {}
-        }
-    }
-    let mut items = items.into_values().collect::<Vec<_>>();
-    items.sort_by_key(|item| item.started_sequence);
-    items
-}
-
-pub fn timeline_event_dtos_from_studio_events(
-    events: &[StudioEventEnvelope],
-) -> Vec<TimelineEventDto> {
-    events
-        .iter()
-        .filter_map(timeline_event_dto_from_studio_event)
-        .collect()
-}
-
-pub fn trace_events_from_studio_events(events: &[StudioEventEnvelope]) -> Vec<TraceEvent> {
-    events
-        .iter()
-        .filter_map(trace_event_from_studio_event)
-        .collect()
-}
-
-fn timeline_event_dto_from_studio_event(
-    envelope: &StudioEventEnvelope,
-) -> Option<TimelineEventDto> {
-    let trace = trace_event_from_studio_event(envelope)?;
-    let kind = trace_event_kind_label(&trace.kind).to_string();
-    Some(TimelineEventDto {
-        id: envelope.event_id.clone(),
-        session_id: trace.session_id,
-        sequence: trace.sequence as i64,
-        created_at: trace.timestamp,
-        kind,
-        payload: serde_json::to_value(trace.kind).unwrap_or(serde_json::Value::Null),
-    })
-}
-
-fn trace_event_from_studio_event(envelope: &StudioEventEnvelope) -> Option<TraceEvent> {
-    let session_id = envelope.session_id.clone()?;
-    let kind = match &envelope.kind {
-        StudioEventKind::TimelineChanged { change } => match change.as_ref() {
-            StudioTimelineChange::Started { item } => {
-                TraceEventKind::TimelineItemStarted { item: item.clone() }
-            }
-            StudioTimelineChange::Delta { event } => TraceEventKind::TimelineItemDelta {
-                event: event.clone(),
-            },
-            StudioTimelineChange::Completed { item } => {
-                TraceEventKind::TimelineItemCompleted { item: item.clone() }
-            }
-            StudioTimelineChange::Failed { item, error } => TraceEventKind::TimelineItemFailed {
-                item: item.clone(),
-                error: error.clone(),
-            },
-        },
-        StudioEventKind::PlanLifecycleChanged { event } => TraceEventKind::PlanLifecycleChanged {
-            event: event.clone(),
-        },
-        StudioEventKind::InteractionChanged { event } => TraceEventKind::InteractionChanged {
-            event: (**event).clone(),
-        },
-        StudioEventKind::SkillActivated { activation } => TraceEventKind::SkillActivated {
-            activation: activation.clone(),
-        },
-        StudioEventKind::TurnChanged { .. }
-        | StudioEventKind::AgentChanged { .. }
-        | StudioEventKind::AgentTimelineChanged { .. }
-        | StudioEventKind::SessionRuntimeChanged { .. }
-        | StudioEventKind::SessionHandoffChanged { .. }
-        | StudioEventKind::SessionListChanged { .. }
-        | StudioEventKind::McpHealthChanged { .. }
-        | StudioEventKind::LspHealthChanged { .. }
-        | StudioEventKind::Stale { .. } => return None,
-    };
-    Some(TraceEvent {
-        session_id,
-        sequence: envelope.sequence,
-        timestamp: envelope.created_at,
-        kind,
-    })
-}
-
-fn trace_event_kind_label(kind: &TraceEventKind) -> &'static str {
-    match kind {
-        TraceEventKind::TimelineItemStarted { .. } => "TimelineItemStarted",
-        TraceEventKind::TimelineItemDelta { .. } => "TimelineItemDelta",
-        TraceEventKind::TimelineItemCompleted { .. } => "TimelineItemCompleted",
-        TraceEventKind::TimelineItemFailed { .. } => "TimelineItemFailed",
-        TraceEventKind::PlanLifecycleChanged { .. } => "PlanLifecycleChanged",
-        TraceEventKind::InteractionChanged { .. } => "InteractionChanged",
-        TraceEventKind::SkillActivated { .. } => "SkillActivated",
-        TraceEventKind::EnabledToolsRecorded { .. } => "EnabledToolsRecorded",
-    }
-}
-
-pub fn plan_lifecycle_events_to_states(events: &[TraceEvent]) -> Vec<PlanStateDto> {
+pub fn plan_lifecycle_events_to_states(events: &[StudioEventEnvelope]) -> Vec<PlanStateDto> {
     let mut latest: HashMap<String, (u64, PlanStateDto)> = HashMap::new();
-    for trace in events {
-        let TraceEventKind::PlanLifecycleChanged { event } = &trace.kind else {
+    for envelope in events {
+        let StudioEventKind::PlanLifecycleChanged { event } = &envelope.kind else {
             continue;
         };
         let dto = PlanStateDto {
@@ -912,9 +713,9 @@ pub fn plan_lifecycle_events_to_states(events: &[TraceEvent]) -> Vec<PlanStateDt
             updated_at: event.updated_at,
         };
         match latest.get(&event.plan_id) {
-            Some((sequence, _)) if *sequence > trace.sequence => {}
+            Some((sequence, _)) if *sequence > envelope.sequence => {}
             _ => {
-                latest.insert(event.plan_id.clone(), (trace.sequence, dto));
+                latest.insert(event.plan_id.clone(), (envelope.sequence, dto));
             }
         }
     }
@@ -924,84 +725,6 @@ pub fn plan_lifecycle_events_to_states(events: &[TraceEvent]) -> Vec<PlanStateDt
         .collect::<Vec<_>>();
     states.sort_by(|left, right| left.plan_id.cmp(&right.plan_id));
     states
-}
-
-#[cfg(test)]
-fn upsert_timeline_item(
-    items: &mut std::collections::HashMap<String, pl_protocol::TimelineItem>,
-    item: &pl_protocol::TimelineItem,
-) {
-    let mut next = item.clone();
-    if let Some(existing) = items.get(&item.item_id) {
-        next.started_sequence = existing.started_sequence;
-        next.created_at = existing.created_at;
-        if next.content.is_empty() {
-            next.content = existing.content.clone();
-        }
-        if next.thinking_chunks.is_empty() {
-            next.thinking_chunks = existing.thinking_chunks.clone();
-        }
-        next.tool = merge_timeline_tool_item(existing.tool.clone(), next.tool);
-        next.agent = next.agent.or_else(|| existing.agent.clone());
-        next.inference = next.inference.or_else(|| existing.inference.clone());
-        next.usage = next.usage.or_else(|| existing.usage.clone());
-    }
-    items.insert(item.item_id.clone(), next);
-}
-
-#[cfg(test)]
-fn blank_timeline_tool_item(item_id: &str) -> pl_protocol::TimelineToolItem {
-    pl_protocol::TimelineToolItem {
-        tool_call_id: item_id.to_string(),
-        call_id: None,
-        provider_item_id: None,
-        name: String::new(),
-        arguments: String::new(),
-        result: None,
-        exit_code: None,
-        timed_out: false,
-        working_directory: None,
-        denial_reason: None,
-    }
-}
-
-#[cfg(test)]
-fn merge_timeline_tool_item(
-    existing: Option<pl_protocol::TimelineToolItem>,
-    incoming: Option<pl_protocol::TimelineToolItem>,
-) -> Option<pl_protocol::TimelineToolItem> {
-    match (existing, incoming) {
-        (None, None) => None,
-        (Some(tool), None) | (None, Some(tool)) => Some(tool),
-        (Some(existing), Some(mut incoming)) => {
-            if incoming.name.is_empty() {
-                incoming.name = existing.name;
-            }
-            if incoming.arguments.is_empty() {
-                incoming.arguments = existing.arguments;
-            }
-            if incoming.result.is_none() {
-                incoming.result = existing.result;
-            }
-            if incoming.exit_code.is_none() {
-                incoming.exit_code = existing.exit_code;
-            }
-            incoming.timed_out = incoming.timed_out || existing.timed_out;
-            if incoming.working_directory.is_none() {
-                incoming.working_directory = existing.working_directory;
-            }
-            if incoming.denial_reason.is_none() {
-                incoming.denial_reason = existing.denial_reason;
-            }
-            if incoming.call_id.is_none() {
-                incoming.call_id = existing.call_id;
-            }
-            if incoming.provider_item_id.is_none() {
-                incoming.provider_item_id = existing.provider_item_id;
-            }
-            Some(incoming)
-        }
-    }
 }
 
 pub fn provider_settings_to_edit(
@@ -1136,9 +859,8 @@ mod tests {
         SessionRuntimeRecord, StudioAgentSnapshotRecord,
     };
     use pl_protocol::{
-        AgentStatus, EnabledToolsEvent, PlanLifecycleEvent, PlanLifecycleState, RuntimeCostAmount,
-        TimelineDelta, TimelineItem, TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus,
-        TimelineTextChannel, TimelineToolItem, TraceEvent, TraceEventKind,
+        AgentStatus, PlanLifecycleEvent, PlanLifecycleState, RuntimeCostAmount,
+        StudioEventEnvelope, StudioEventKind,
     };
     use pretty_assertions::assert_eq;
 
@@ -1441,111 +1163,16 @@ mod tests {
     }
 
     #[test]
-    fn timeline_events_to_items_folds_start_delta_and_completed_snapshot() {
-        let started = TimelineItem::text(
-            "turn-1",
-            "turn-1-assistant",
-            1,
-            TimelineTextChannel::Final,
-            "",
-            TimelineItemStatus::Streaming,
-            10,
-        );
-        let completed = TimelineItem::text(
-            "turn-1",
-            "turn-1-assistant",
-            3,
-            TimelineTextChannel::Final,
-            "hello world",
-            TimelineItemStatus::Completed,
-            12,
-        );
-        let events = vec![
-            TraceEvent {
-                session_id: "session-1".to_string(),
-                sequence: 1,
-                timestamp: 10,
-                kind: TraceEventKind::TimelineItemStarted { item: started },
-            },
-            TraceEvent {
-                session_id: "session-1".to_string(),
-                sequence: 2,
-                timestamp: 11,
-                kind: TraceEventKind::TimelineItemDelta {
-                    event: TimelineItemDeltaEvent {
-                        turn_id: "turn-1".to_string(),
-                        item_id: "turn-1-assistant".to_string(),
-                        started_sequence: 1,
-                        kind: TimelineItemKind::Text,
-                        status: TimelineItemStatus::Streaming,
-                        created_at: 10,
-                        updated_at: 11,
-                        delta: TimelineDelta::Text {
-                            text_channel: TimelineTextChannel::Final,
-                            delta: "hello".to_string(),
-                        },
-                    },
-                },
-            },
-            TraceEvent {
-                session_id: "session-1".to_string(),
-                sequence: 3,
-                timestamp: 12,
-                kind: TraceEventKind::TimelineItemCompleted { item: completed },
-            },
-        ];
-
-        let items = timeline_events_to_items(&events);
-
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].item_id, "turn-1-assistant");
-        assert_eq!(items[0].started_sequence, 1);
-        assert_eq!(items[0].content, "hello world");
-        assert_eq!(items[0].status, TimelineItemStatus::Completed);
-    }
-
-    #[test]
-    fn timeline_events_to_items_ignores_internal_trace_events() {
-        let events = vec![
-            TraceEvent {
-                session_id: "session-1".to_string(),
-                sequence: 1,
-                timestamp: 10,
-                kind: TraceEventKind::PlanLifecycleChanged {
-                    event: PlanLifecycleEvent {
-                        plan_id: "turn-1-plan".to_string(),
-                        state: PlanLifecycleState::Dismissed,
-                        turn_id: None,
-                        reason: Some("dismissed".to_string()),
-                        updated_at: 10,
-                    },
-                },
-            },
-            TraceEvent {
-                session_id: "session-1".to_string(),
-                sequence: 2,
-                timestamp: 10,
-                kind: TraceEventKind::EnabledToolsRecorded {
-                    event: EnabledToolsEvent {
-                        turn_id: "turn-1".to_string(),
-                        mode: "auto".to_string(),
-                        tools: vec!["read_file".to_string()],
-                    },
-                },
-            },
-        ];
-
-        assert!(timeline_events_to_items(&events).is_empty());
-    }
-
-    #[test]
     fn plan_lifecycle_events_to_states_keeps_latest_per_plan() {
         let events = vec![
-            TraceEvent {
-                session_id: "session-1".to_string(),
+            StudioEventEnvelope {
+                event_id: "event-1".to_string(),
+                project_id: None,
+                session_id: Some("session-1".to_string()),
+                turn_id: None,
                 sequence: 1,
-                timestamp: 10,
-                kind: TraceEventKind::PlanLifecycleChanged {
+                created_at: 10,
+                kind: StudioEventKind::PlanLifecycleChanged {
                     event: PlanLifecycleEvent {
                         plan_id: "turn-1-plan".to_string(),
                         state: PlanLifecycleState::Accepted,
@@ -1555,11 +1182,14 @@ mod tests {
                     },
                 },
             },
-            TraceEvent {
-                session_id: "session-1".to_string(),
+            StudioEventEnvelope {
+                event_id: "event-2".to_string(),
+                project_id: None,
+                session_id: Some("session-1".to_string()),
+                turn_id: Some("turn-2".to_string()),
                 sequence: 2,
-                timestamp: 11,
-                kind: TraceEventKind::PlanLifecycleChanged {
+                created_at: 11,
+                kind: StudioEventKind::PlanLifecycleChanged {
                     event: PlanLifecycleEvent {
                         plan_id: "turn-1-plan".to_string(),
                         state: PlanLifecycleState::ImplementationFailed,
@@ -1578,191 +1208,5 @@ mod tests {
         assert_eq!(states[0].state, "implementationFailed");
         assert_eq!(states[0].turn_id.as_deref(), Some("turn-2"));
         assert_eq!(states[0].reason.as_deref(), Some("provider error"));
-    }
-
-    #[test]
-    fn timeline_events_to_items_preserves_tool_delta_before_start() {
-        let started = TimelineItem {
-            turn_id: "turn-1".to_string(),
-            item_id: "turn-1-call-1".to_string(),
-            started_sequence: 9,
-            kind: TimelineItemKind::Tool,
-            status: TimelineItemStatus::Streaming,
-            created_at: 9,
-            updated_at: 9,
-            text_channel: None,
-            content: String::new(),
-            thinking_chunks: Vec::new(),
-            attachments: Vec::new(),
-            tool: Some(TimelineToolItem {
-                tool_call_id: "turn-1-call-1".to_string(),
-                call_id: Some("call-1".to_string()),
-                provider_item_id: Some("provider-1".to_string()),
-                name: "read_file".to_string(),
-                arguments: String::new(),
-                result: None,
-                exit_code: None,
-                timed_out: false,
-                working_directory: None,
-                denial_reason: None,
-            }),
-            agent: None,
-            inference: None,
-            usage: None,
-        };
-        let completed = TimelineItem {
-            status: TimelineItemStatus::Completed,
-            updated_at: 11,
-            ..started.clone()
-        };
-        let events = vec![
-            TraceEvent {
-                session_id: "session-1".to_string(),
-                sequence: 10,
-                timestamp: 10,
-                kind: TraceEventKind::TimelineItemDelta {
-                    event: TimelineItemDeltaEvent {
-                        turn_id: "turn-1".to_string(),
-                        item_id: "turn-1-call-1".to_string(),
-                        started_sequence: 10,
-                        kind: TimelineItemKind::Tool,
-                        status: TimelineItemStatus::Streaming,
-                        created_at: 10,
-                        updated_at: 10,
-                        delta: TimelineDelta::ToolArguments {
-                            delta: "{\"path\":\"a.ts\"".to_string(),
-                        },
-                    },
-                },
-            },
-            TraceEvent {
-                session_id: "session-1".to_string(),
-                sequence: 9,
-                timestamp: 9,
-                kind: TraceEventKind::TimelineItemStarted { item: started },
-            },
-            TraceEvent {
-                session_id: "session-1".to_string(),
-                sequence: 11,
-                timestamp: 11,
-                kind: TraceEventKind::TimelineItemCompleted { item: completed },
-            },
-        ];
-
-        let items = timeline_events_to_items(&events);
-
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].started_sequence, 10);
-        let tool = items[0].tool.as_ref().expect("tool item");
-        assert_eq!(tool.name, "read_file");
-        assert_eq!(tool.arguments, "{\"path\":\"a.ts\"");
-        assert_eq!(tool.call_id.as_deref(), Some("call-1"));
-        assert_eq!(tool.provider_item_id.as_deref(), Some("provider-1"));
-    }
-
-    #[test]
-    fn timeline_events_to_items_preserves_tool_result_delta_before_start() {
-        let completed = TimelineItem {
-            turn_id: "turn-1".to_string(),
-            item_id: "turn-1-call-1".to_string(),
-            started_sequence: 11,
-            kind: TimelineItemKind::Tool,
-            status: TimelineItemStatus::Completed,
-            created_at: 11,
-            updated_at: 11,
-            text_channel: None,
-            content: String::new(),
-            thinking_chunks: Vec::new(),
-            attachments: Vec::new(),
-            tool: Some(TimelineToolItem {
-                tool_call_id: "turn-1-call-1".to_string(),
-                call_id: Some("call-1".to_string()),
-                provider_item_id: Some("provider-1".to_string()),
-                name: "read_file".to_string(),
-                arguments: "{\"path\":\"a.ts\"}".to_string(),
-                result: None,
-                exit_code: None,
-                timed_out: false,
-                working_directory: None,
-                denial_reason: None,
-            }),
-            agent: None,
-            inference: None,
-            usage: None,
-        };
-        let events = vec![
-            TraceEvent {
-                session_id: "session-1".to_string(),
-                sequence: 10,
-                timestamp: 10,
-                kind: TraceEventKind::TimelineItemDelta {
-                    event: TimelineItemDeltaEvent {
-                        turn_id: "turn-1".to_string(),
-                        item_id: "turn-1-call-1".to_string(),
-                        started_sequence: 10,
-                        kind: TimelineItemKind::Tool,
-                        status: TimelineItemStatus::Streaming,
-                        created_at: 10,
-                        updated_at: 10,
-                        delta: TimelineDelta::ToolResult {
-                            delta: "partial result".to_string(),
-                        },
-                    },
-                },
-            },
-            TraceEvent {
-                session_id: "session-1".to_string(),
-                sequence: 11,
-                timestamp: 11,
-                kind: TraceEventKind::TimelineItemCompleted { item: completed },
-            },
-        ];
-
-        let items = timeline_events_to_items(&events);
-
-        assert_eq!(items.len(), 1);
-        let tool = items[0].tool.as_ref().expect("tool item");
-        assert_eq!(tool.name, "read_file");
-        assert_eq!(tool.arguments, "{\"path\":\"a.ts\"}");
-        assert_eq!(tool.result.as_deref(), Some("partial result"));
-        assert_eq!(tool.call_id.as_deref(), Some("call-1"));
-        assert_eq!(tool.provider_item_id.as_deref(), Some("provider-1"));
-    }
-
-    #[test]
-    fn timeline_events_to_items_keeps_failed_error_when_content_is_empty() {
-        let failed = TimelineItem {
-            turn_id: "turn-1".to_string(),
-            item_id: "turn-1-turn".to_string(),
-            started_sequence: 1,
-            kind: TimelineItemKind::Turn,
-            status: TimelineItemStatus::Failed,
-            created_at: 10,
-            updated_at: 10,
-            text_channel: None,
-            content: String::new(),
-            thinking_chunks: Vec::new(),
-            attachments: Vec::new(),
-            tool: None,
-            agent: None,
-            inference: None,
-            usage: None,
-        };
-        let events = vec![TraceEvent {
-            session_id: "session-1".to_string(),
-            sequence: 1,
-            timestamp: 10,
-            kind: TraceEventKind::TimelineItemFailed {
-                item: failed,
-                error: "LLM provider error: missing API key".to_string(),
-            },
-        }];
-
-        let items = timeline_events_to_items(&events);
-
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].item_id, "turn-1-turn");
-        assert_eq!(items[0].status, TimelineItemStatus::Failed);
-        assert_eq!(items[0].content, "LLM provider error: missing API key");
     }
 }

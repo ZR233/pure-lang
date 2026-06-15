@@ -1,6 +1,5 @@
 import type {
   AgentDto,
-  AgentEvent,
   AgentTimelineEvent,
   BootstrapPayload,
   ConfigPayload,
@@ -17,30 +16,30 @@ import type {
   ProviderUsageRecord,
   ProviderTemplateRecord,
   RoleRecord,
-  RunPromptResponse,
   SessionRecord,
   SessionRuntime,
   SessionSelectionPayload,
   StudioEventEnvelope,
-  StudioTimelineChange,
+  StudioMessage,
+  StudioPart,
+  StudioPartDeltaField,
   StudioTurnStatus,
   TimelineItem,
   TimelineAttachment,
-  TimelineItemDeltaEvent,
   TurnPhase,
   TurnStatus,
   InteractionChangedPayload,
   InteractionRequest,
-  TimelineEventRecord,
 } from "../types";
 import {
-  applyTimelineRecords,
+  addOptimisticPart,
+  applyStudioEvent,
+  applyStudioEvents,
   emptyTimelineState,
-  mergeRunPromptTimeline,
-  mergeTimelineSnapshot,
   removeOptimisticTimelineItems,
   removeOptimisticUserTimelineItems,
   removeOptimisticWaitingTimelineItems,
+  resetConversation,
   type TimelineStateSlice,
 } from "./timeline-state";
 
@@ -80,7 +79,7 @@ export type StudioState = TimelineStateSlice & {
   activeInteractionId: string | null;
   planStates: Map<string, PlanState>;
   dismissedPlanId: string | null;
-  currentRunTimelineBaseSequence: number | null;
+  currentRunEventBaseSequence: number | null;
   settingsOpen: boolean;
   activeSettingsTab: SettingsTab;
   providerSearch: string;
@@ -99,7 +98,7 @@ type SessionViewState = TimelineStateSlice & {
   activeInteractionId: string | null;
   planStates: Map<string, PlanState>;
   dismissedPlanId: string | null;
-  currentRunTimelineBaseSequence: number | null;
+  currentRunEventBaseSequence: number | null;
   turnPhase: TurnPhase;
   turnStartedAt: number | null;
   isBusy: boolean;
@@ -109,19 +108,19 @@ export type StudioAction =
   | { type: "bootstrapLoaded"; payload: BootstrapPayload; status: string }
   | { type: "bootstrapFailed"; status: string }
   | {
-      type: "timelineLoaded";
+      type: "sessionStateLoaded";
       sessionId: string | null;
-      events: TimelineEventRecord[];
+      events: StudioEventEnvelope[];
       planStates?: PlanState[];
       interactions?: InteractionRequest[];
       nextSequence: number;
+      status?: string;
     }
-  | { type: "timelineLoadFailed"; sessionId: string | null; status: string }
+  | { type: "sessionStateLoadFailed"; sessionId: string | null; status: string }
   | { type: "projectSelectionLoaded"; payload: ProjectSelectionPayload; status: string }
   | { type: "sessionSelectionLoaded"; payload: SessionSelectionPayload; status: string }
   | { type: "sessionHandoffStarted"; payload: SessionSelectionPayload; status: string; startedAt: number }
   | { type: "sessionModeUpdated"; payload: SessionSelectionPayload; status: string }
-  | { type: "runPromptLoaded"; payload: RunPromptResponse; status: string }
   | { type: "runPromptFailed"; sessionId?: string | null; status: string }
   | { type: "setBusy"; value: boolean }
   | { type: "setPrompt"; prompt: string }
@@ -144,21 +143,12 @@ export type StudioAction =
       type: "planLifecycleLoaded";
       sessionId: string;
       planStates: PlanState[];
-      timelineNextSequence: number;
+      eventNextSequence: number;
       status?: string;
     }
   | { type: "stopRequested"; status: string }
   | { type: "stopFallback"; status: string }
   | { type: "planImplementationSubmitted"; status: string; startedAt: number }
-  | {
-      type: "agentEvent";
-      sessionId: string;
-      event?: AgentEvent | null;
-      timelineEvent?: AgentTimelineEvent | null;
-      agent?: AgentDto | null;
-      sessionRuntime?: SessionRuntime | null;
-      statusText: string;
-    }
   | { type: "promptSubmitted"; status: string; startedAt: number; prompt: string; attachments?: TimelineAttachment[] };
 
 export const initialStudioState = (startingStatus: string): StudioState => ({
@@ -195,7 +185,7 @@ export const initialStudioState = (startingStatus: string): StudioState => ({
   activeInteractionId: null,
   planStates: new Map(),
   dismissedPlanId: null,
-  currentRunTimelineBaseSequence: null,
+  currentRunEventBaseSequence: null,
   settingsOpen: false,
   activeSettingsTab: "providers",
   providerSearch: "",
@@ -231,14 +221,17 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         ),
         planStates: new Map(),
         dismissedPlanId: null,
-        currentRunTimelineBaseSequence: null,
+        currentRunEventBaseSequence: null,
       }, action.payload.selectedSessionId ?? null);
     case "bootstrapFailed":
       return { ...state, status: action.status };
-    case "timelineLoaded":
+    case "sessionStateLoaded":
       if (action.sessionId !== state.selectedSessionId) return state;
+      if (action.nextSequence < state.eventNextSequence) {
+        return state;
+      }
       return storeSessionView({
-        ...mergeTimelineSnapshot(state, action.sessionId, action.events ?? [], action.nextSequence),
+        ...resetConversation(state, action.events ?? [], action.nextSequence),
         planStates: mergePlanStates(state.planStates, action.planStates ?? []),
         ...interactionState(
           state.interactions,
@@ -246,8 +239,9 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
           state.selectedSessionId,
           state.isBusy,
         ),
+        status: action.status ?? state.status,
       }, action.sessionId);
-    case "timelineLoadFailed":
+    case "sessionStateLoadFailed":
       if (action.sessionId !== state.selectedSessionId) return state;
       return { ...state, status: action.status };
     case "projectSelectionLoaded":
@@ -271,7 +265,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         ),
         planStates: new Map(),
         dismissedPlanId: null,
-        currentRunTimelineBaseSequence: null,
+        currentRunEventBaseSequence: null,
         status: action.status,
         turnPhase: "idle",
         turnStartedAt: null,
@@ -338,13 +332,13 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
             agents: mergeAgents([], action.payload.agents ?? []),
             sessionRuntime: action.payload.sessionRuntime ?? null,
             ...interactionState(new Map(), action.payload.interactions ?? [], action.payload.sessionId, true),
-            currentRunTimelineBaseSequence: 0,
+            currentRunEventBaseSequence: 0,
             turnPhase: "running" as TurnPhase,
             turnStartedAt: action.startedAt,
             isBusy: true,
           },
         ),
-        currentRunTimelineBaseSequence: 0,
+        currentRunEventBaseSequence: 0,
         status: action.status,
         turnPhase: "running" as TurnPhase,
         turnStartedAt: action.startedAt,
@@ -365,48 +359,6 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         sessionRuntime: action.payload.sessionRuntime ?? state.sessionRuntime,
         status: action.status,
       }, action.payload.sessionId);
-    case "runPromptLoaded": {
-      const switchingSession = action.payload.sessionId !== state.selectedSessionId;
-      const responseContainsSelectedSession = action.payload.sessions.some(
-        (session) => session.id === action.payload.sessionId,
-      );
-      if (switchingSession && !state.isBusy && !responseContainsSelectedSession) {
-        return state;
-      }
-      const timelineBase = switchingSession
-        ? {
-            ...state,
-            ...emptyTimelineState(),
-            planStates: new Map<string, PlanState>(),
-            interactions: new Map<string, InteractionRequest>(),
-          }
-        : removeOptimisticTimelineItems(state);
-      return storeSessionView({
-        ...mergeRunPromptTimeline(
-          timelineBase,
-          action.payload.sessionId,
-          action.payload.timelineEvents ?? [],
-          action.payload.timelineNextSequence,
-        ),
-        planStates: mergePlanStates(timelineBase.planStates, action.payload.planStates ?? []),
-        selectedSessionId: action.payload.sessionId,
-        sessions: sessionList(action.payload.sessions),
-        agentTimelineEvents: mergeAgentTimelineEvents([], action.payload.agentEvents ?? []),
-        agents: mergeAgents([], action.payload.agents ?? []),
-        sessionRuntime: action.payload.sessionRuntime,
-        turnPhase: phaseForTurnStatus(action.payload.turnStatus),
-        turnStartedAt: null,
-        status: action.status,
-        isBusy: false,
-        ...interactionState(
-          timelineBase.interactions,
-          action.payload.interactions ?? [],
-          action.payload.sessionId,
-          false,
-        ),
-        currentRunTimelineBaseSequence: null,
-      }, action.payload.sessionId);
-    }
     case "runPromptFailed":
       if (action.sessionId && action.sessionId !== state.selectedSessionId) {
         return state;
@@ -418,7 +370,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         turnStartedAt: null,
         isBusy: false,
         ...clearSessionInteractions(state.interactions, state.selectedSessionId),
-        currentRunTimelineBaseSequence: null,
+        currentRunEventBaseSequence: null,
       });
     case "setBusy":
       return {
@@ -491,7 +443,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return storeSessionView({
         ...state,
         planStates: mergePlanStates(state.planStates, action.planStates ?? []),
-        timelineNextSequence: Math.max(state.timelineNextSequence, action.timelineNextSequence),
+        eventNextSequence: Math.max(state.eventNextSequence, action.eventNextSequence),
         status: action.status ?? state.status,
       }, action.sessionId);
     case "stopRequested":
@@ -504,7 +456,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         turnStartedAt: null,
         isBusy: false,
         ...clearSessionInteractions(state.interactions, state.selectedSessionId),
-        currentRunTimelineBaseSequence: null,
+        currentRunEventBaseSequence: null,
       });
     case "planImplementationSubmitted":
       return storeSessionView(appendOptimisticWaiting(
@@ -519,7 +471,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         action.startedAt,
       ));
     case "promptSubmitted":
-      const currentRunTimelineBaseSequence = state.timelineNextSequence;
+      const currentRunEventBaseSequence = state.eventNextSequence;
       return storeSessionView({
         ...appendOptimisticPrompt(
           removeOptimisticTimelineItems(state),
@@ -532,26 +484,9 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         status: action.status,
         turnPhase: "running",
         turnStartedAt: action.startedAt,
-        currentRunTimelineBaseSequence,
+        currentRunEventBaseSequence,
         ...clearSessionInteractions(state.interactions, state.selectedSessionId),
       });
-    case "agentEvent":
-      if (action.sessionId !== state.selectedSessionId) {
-        return state;
-      }
-      const eventBase = applyOptimisticTimelineCleanup(state, action.event);
-      return storeSessionView(reduceAgentEvent(
-        {
-          ...eventBase,
-          agentTimelineEvents: action.timelineEvent
-            ? mergeAgentTimelineEvents(eventBase.agentTimelineEvents, [action.timelineEvent])
-            : eventBase.agentTimelineEvents,
-          agents: action.agent ? mergeAgents(eventBase.agents, [action.agent]) : eventBase.agents,
-          sessionRuntime: action.sessionRuntime ?? eventBase.sessionRuntime,
-        },
-        action.event,
-        action.statusText,
-      ));
     default:
       return state;
   }
@@ -559,10 +494,12 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
 
 function sessionViewFromState(state: StudioState): SessionViewState {
   return {
-    timelineEvents: new Map(state.timelineEvents),
-    timelineItems: new Map(state.timelineItems),
-    timelineOrder: [...state.timelineOrder],
-    timelineNextSequence: state.timelineNextSequence,
+    messages: new Map(state.messages),
+    partsByMessage: clonePartsByMessage(state.partsByMessage),
+    partDeltaAccum: new Map(state.partDeltaAccum),
+    messageSequences: new Map(state.messageSequences),
+    partSequences: new Map(state.partSequences),
+    eventNextSequence: state.eventNextSequence,
     agentTimelineEvents: state.agentTimelineEvents,
     agents: state.agents,
     sessionRuntime: state.sessionRuntime,
@@ -570,7 +507,7 @@ function sessionViewFromState(state: StudioState): SessionViewState {
     activeInteractionId: state.activeInteractionId,
     planStates: new Map(state.planStates),
     dismissedPlanId: state.dismissedPlanId,
-    currentRunTimelineBaseSequence: state.currentRunTimelineBaseSequence,
+    currentRunEventBaseSequence: state.currentRunEventBaseSequence,
     turnPhase: state.turnPhase,
     turnStartedAt: state.turnStartedAt,
     isBusy: state.isBusy,
@@ -587,7 +524,7 @@ function emptySessionView(): SessionViewState {
     activeInteractionId: null,
     planStates: new Map(),
     dismissedPlanId: null,
-    currentRunTimelineBaseSequence: null,
+    currentRunEventBaseSequence: null,
     turnPhase: "idle",
     turnStartedAt: null,
     isBusy: false,
@@ -602,10 +539,12 @@ function restoreSessionView<T extends StudioState>(
   const view = state.sessionViews.get(sessionId) ?? fallback;
   return {
     ...state,
-    timelineEvents: new Map(view.timelineEvents),
-    timelineItems: new Map(view.timelineItems),
-    timelineOrder: [...view.timelineOrder],
-    timelineNextSequence: view.timelineNextSequence,
+    messages: new Map(view.messages),
+    partsByMessage: clonePartsByMessage(view.partsByMessage),
+    partDeltaAccum: new Map(view.partDeltaAccum),
+    messageSequences: new Map(view.messageSequences),
+    partSequences: new Map(view.partSequences),
+    eventNextSequence: view.eventNextSequence,
     agentTimelineEvents: view.agentTimelineEvents,
     agents: view.agents,
     sessionRuntime: view.sessionRuntime,
@@ -613,7 +552,7 @@ function restoreSessionView<T extends StudioState>(
     activeInteractionId: selectActiveInteractionId(view.interactions, sessionId, view.isBusy),
     planStates: new Map(view.planStates),
     dismissedPlanId: view.dismissedPlanId,
-    currentRunTimelineBaseSequence: view.currentRunTimelineBaseSequence,
+    currentRunEventBaseSequence: view.currentRunEventBaseSequence,
     turnPhase: view.turnPhase,
     turnStartedAt: view.turnStartedAt,
     isBusy: view.isBusy,
@@ -647,10 +586,12 @@ function viewAsState(state: StudioState, sessionId: string, view: SessionViewSta
   return {
     ...state,
     selectedSessionId: sessionId,
-    timelineEvents: new Map(view.timelineEvents),
-    timelineItems: new Map(view.timelineItems),
-    timelineOrder: [...view.timelineOrder],
-    timelineNextSequence: view.timelineNextSequence,
+    messages: new Map(view.messages),
+    partsByMessage: clonePartsByMessage(view.partsByMessage),
+    partDeltaAccum: new Map(view.partDeltaAccum),
+    messageSequences: new Map(view.messageSequences),
+    partSequences: new Map(view.partSequences),
+    eventNextSequence: view.eventNextSequence,
     agentTimelineEvents: view.agentTimelineEvents,
     agents: view.agents,
     sessionRuntime: view.sessionRuntime,
@@ -658,7 +599,7 @@ function viewAsState(state: StudioState, sessionId: string, view: SessionViewSta
     activeInteractionId: view.activeInteractionId,
     planStates: new Map(view.planStates),
     dismissedPlanId: view.dismissedPlanId,
-    currentRunTimelineBaseSequence: view.currentRunTimelineBaseSequence,
+    currentRunEventBaseSequence: view.currentRunEventBaseSequence,
     turnPhase: view.turnPhase,
     turnStartedAt: view.turnStartedAt,
     isBusy: view.isBusy,
@@ -667,6 +608,17 @@ function viewAsState(state: StudioState, sessionId: string, view: SessionViewSta
 
 function stateAsView(state: StudioState): SessionViewState {
   return sessionViewFromState(state);
+}
+
+function clonePartsByMessage(
+  partsByMessage: Map<string, StudioPart[]>,
+): Map<string, StudioPart[]> {
+  return new Map(
+    [...partsByMessage.entries()].map(([messageId, parts]) => [
+      messageId,
+      parts.map((part) => ({ ...part })),
+    ]),
+  );
 }
 
 function interactionState(
@@ -713,17 +665,21 @@ function reduceStudioEvent(
   envelope: StudioEventEnvelope,
   status?: string,
 ): StudioState {
+  const withEventCursor = (next: StudioState): StudioState =>
+    envelope.kind.type === "messagePartDelta"
+      ? next
+      : { ...next, eventNextSequence: Math.max(next.eventNextSequence, envelope.sequence + 1) };
   const eventSessionId = envelope.sessionId ?? null;
   const kind = envelope.kind;
   if (kind.type === "sessionListChanged") {
-    return {
+    return withEventCursor({
       ...state,
       sessions: sessionList(kind.sessions),
       status: status ?? state.status,
-    };
+    });
   }
   if (kind.type === "sessionHandoffChanged") {
-    return reduceSessionHandoffEvent(state, kind.handoff, status);
+    return withEventCursor(reduceSessionHandoffEvent(state, kind.handoff, status));
   }
   if (eventSessionId && eventSessionId !== state.selectedSessionId) {
     const viewState = viewAsState(
@@ -741,11 +697,16 @@ function reduceStudioEvent(
     );
     return replaceSessionView(state, eventSessionId, stateAsView(reduced));
   }
-  switch (kind.type) {
+  const reduced = (() => {
+    switch (kind.type) {
     case "turnChanged":
       return reduceTurnChanged(state, kind.turn.status, kind.turn.reason, status);
-    case "timelineChanged":
-      return reduceTimelineChanged(state, envelope, kind.change, status);
+    case "messageUpdated":
+    case "messageRemoved":
+    case "messagePartUpdated":
+    case "messagePartRemoved":
+    case "messagePartDelta":
+      return reduceConversationEvent(state, envelope, status);
     case "interactionChanged":
       return reduceInteractionChanged(
         state,
@@ -786,7 +747,9 @@ function reduceStudioEvent(
         ...state,
         status: status ?? state.status,
       };
-  }
+    }
+  })();
+  return withEventCursor(reduced);
 }
 
 function reduceSessionHandoffEvent(
@@ -836,7 +799,7 @@ function reduceSessionHandoffEvent(
     ),
     planStates: switched ? new Map<string, PlanState>() : state.planStates,
     dismissedPlanId: switched ? null : state.dismissedPlanId,
-    currentRunTimelineBaseSequence: switched ? 0 : state.currentRunTimelineBaseSequence,
+    currentRunEventBaseSequence: switched ? 0 : state.currentRunEventBaseSequence,
     isBusy: handoff.status === "running" || handoff.status === "pending" || state.isBusy,
     turnPhase: handoff.status === "failed" ? "failed" : handoff.status === "cancelled" ? "interrupted" : "running",
     turnStartedAt: state.turnStartedAt ?? now,
@@ -865,21 +828,8 @@ function reduceTurnChanged(
       base.selectedSessionId,
       terminal ? false : true,
     ),
-    currentRunTimelineBaseSequence: terminal ? null : state.currentRunTimelineBaseSequence,
+    currentRunEventBaseSequence: terminal ? null : state.currentRunEventBaseSequence,
   };
-}
-
-function reduceTimelineChanged(
-  state: StudioState,
-  envelope: StudioEventEnvelope,
-  change: StudioTimelineChange,
-  status?: string,
-): StudioState {
-  const event = agentEventFromTimelineChange(change);
-  const base = applyOptimisticTimelineCleanup(state, event);
-  const timelineRecord = timelineRecordFromStudioTimelineChange(envelope, change);
-  const timelineState = timelineRecord ? applyTimelineRecords(base, [timelineRecord]) : base;
-  return reduceAgentEventWithoutTimeline(timelineState, event, status ?? state.status);
 }
 
 function reduceStructuredAgentPayload(
@@ -904,12 +854,6 @@ function reduceStructuredAgentPayload(
       status: status ?? state.status,
     };
   }
-  if ("agentStateChanged" in payload) {
-    return reduceAgentEvent(state, payload as AgentEvent, status ?? state.status);
-  }
-  if ("agentRuntimeUpdated" in payload) {
-    return reduceAgentEvent(state, payload as AgentEvent, status ?? state.status);
-  }
   return { ...state, status: status ?? state.status };
 }
 
@@ -925,7 +869,7 @@ function reduceStructuredRuntimePayload(
       status: status ?? state.status,
     };
   }
-  return reduceStructuredAgentPayload(state, payload, status);
+  return { ...state, status: status ?? state.status };
 }
 
 function reduceSkillActivated(state: StudioState, name: string, status?: string): StudioState {
@@ -966,24 +910,6 @@ function reduceLspHealthChanged(state: StudioState, payload: LspHealthUpdatedPay
         }
       : state.sessionRuntime,
   };
-}
-
-function agentEventFromTimelineChange(change: StudioTimelineChange): AgentEvent {
-  switch (change.type) {
-    case "started":
-      return { timelineItemStarted: { item: change.item } };
-    case "delta":
-      return { timelineItemDelta: { event: change.event } };
-    case "completed":
-      return { timelineItemCompleted: { item: change.item } };
-    case "failed":
-      return {
-        timelineItemFailed: {
-          item: change.item,
-          error: change.error,
-        },
-      };
-  }
 }
 
 function clearSessionInteractions(
@@ -1107,149 +1033,139 @@ function appendOptimisticPrompt(
   }
   const createdAt = Math.floor(startedAt / 1000);
   const turnId = `optimistic-turn-${startedAt}`;
-  const nextSequence = state.timelineNextSequence;
-  const userItem: TimelineItem = {
+  const messageId = `optimistic-message-${startedAt}`;
+  const userPart: StudioPart = {
     turnId,
-    itemId: `optimistic-user-${startedAt}`,
-    startedSequence: nextSequence,
-    kind: "text",
+    sessionId: state.selectedSessionId ?? "",
+    messageId,
+    partId: `optimistic-user-${startedAt}`,
+    partType: "text",
+    order: state.eventNextSequence,
     status: "completed",
     createdAt,
     updatedAt: createdAt,
+    completedAt: createdAt,
     textChannel: "user",
-    content,
+    text: content,
     attachments,
-    thinkingChunks: [],
   };
-  const waitingItem: TimelineItem = {
+  const waitingPart: StudioPart = {
     turnId,
-    itemId: `optimistic-waiting-${startedAt}`,
-    startedSequence: nextSequence + 1,
-    kind: "turn",
+    sessionId: state.selectedSessionId ?? "",
+    messageId,
+    partId: `optimistic-waiting-${startedAt}`,
+    partType: "turn",
+    order: state.eventNextSequence + 1,
     status: "running",
     createdAt,
     updatedAt: createdAt,
     textChannel: null,
-    content: "waitingForModel",
-    thinkingChunks: [],
+    text: "waitingForModel",
   };
-  const timelineItems = new Map(state.timelineItems);
-  timelineItems.set(userItem.itemId, userItem);
-  timelineItems.set(waitingItem.itemId, waitingItem);
-  return {
-    ...state,
-    timelineItems,
-    timelineOrder: [...state.timelineOrder, userItem.itemId, waitingItem.itemId],
+  const message: StudioMessage = {
+    messageId,
+    sessionId: state.selectedSessionId ?? "",
+    turnId,
+    role: "user",
+    status: "streaming",
+    createdAt,
+    updatedAt: createdAt,
   };
+  return addOptimisticPart(addOptimisticPart(state, message, userPart), message, waitingPart);
 }
 
 function appendOptimisticWaiting(state: StudioState, startedAt: number): StudioState {
   const createdAt = Math.floor(startedAt / 1000);
   const turnId = `optimistic-turn-${startedAt}`;
-  const waitingItem: TimelineItem = {
+  const messageId = `optimistic-message-${startedAt}`;
+  const waitingPart: StudioPart = {
     turnId,
-    itemId: `optimistic-waiting-${startedAt}`,
-    startedSequence: state.timelineNextSequence,
-    kind: "turn",
+    sessionId: state.selectedSessionId ?? "",
+    messageId,
+    partId: `optimistic-waiting-${startedAt}`,
+    partType: "turn",
+    order: state.eventNextSequence,
     status: "running",
     createdAt,
     updatedAt: createdAt,
     textChannel: null,
-    content: "waitingForModel",
-    thinkingChunks: [],
+    text: "waitingForModel",
   };
-  const timelineItems = new Map(state.timelineItems);
-  timelineItems.set(waitingItem.itemId, waitingItem);
-  return {
-    ...state,
-    timelineItems,
-    timelineOrder: [...state.timelineOrder, waitingItem.itemId],
+  const message: StudioMessage = {
+    messageId,
+    sessionId: state.selectedSessionId ?? "",
+    turnId,
+    role: "assistant",
+    status: "streaming",
+    createdAt,
+    updatedAt: createdAt,
   };
+  return addOptimisticPart(state, message, waitingPart);
 }
 
-function applyOptimisticTimelineCleanup(
+function applyOptimisticConversationCleanup(
   state: StudioState,
-  event: AgentEvent | null | undefined,
+  kind: StudioEventEnvelope["kind"],
 ): StudioState {
   let next = state;
-  if (shouldClearOptimisticUserTimeline(event)) {
+  if (shouldClearOptimisticUserPart(kind)) {
     next = removeOptimisticUserTimelineItems(next);
   }
-  if (shouldClearOptimisticWaitingTimeline(event)) {
+  if (shouldClearOptimisticWaitingPart(kind)) {
     next = removeOptimisticWaitingTimelineItems(next);
   }
   return next;
 }
 
-function shouldClearOptimisticUserTimeline(event: AgentEvent | null | undefined): boolean {
-  if (!isRecord(event)) {
+function shouldClearOptimisticUserPart(kind: StudioEventEnvelope["kind"]): boolean {
+  return kind.type === "messagePartUpdated" &&
+    kind.part.partType === "text" &&
+    kind.part.textChannel === "user";
+}
+
+function shouldClearOptimisticWaitingPart(kind: StudioEventEnvelope["kind"]): boolean {
+  if (kind.type === "messagePartDelta") {
+    return isModelVisibleDeltaField(kind.delta.field);
+  }
+  if (kind.type !== "messagePartUpdated") {
     return false;
   }
-  const item = timelineEventItem(event);
-  return item?.kind === "text" && item.textChannel === "user";
-}
-
-function shouldClearOptimisticWaitingTimeline(event: AgentEvent | null | undefined): boolean {
-  if (event === "done") {
+  const part = kind.part;
+  if (isModelVisiblePart(part)) {
     return true;
   }
-  if (!isRecord(event)) {
-    return false;
-  }
-  if ("timelineItemDelta" in event && isRecord(event.timelineItemDelta)) {
-    const timelineEvent = event.timelineItemDelta.event as TimelineItemDeltaEvent | undefined;
-    return timelineEvent ? isModelVisibleTimelineDelta(timelineEvent) : false;
-  }
-  const item = timelineEventItem(event);
-  if (!item) {
-    return "turnInterrupted" in event || "turnBudgetLimited" in event || "error" in event;
-  }
-  if (isModelVisibleTimelineItem(item)) {
-    return true;
-  }
-  return item.kind === "turn" && isTerminalTimelineStatus(item.status);
+  return part.partType === "turn" && isTerminalTimelineStatus(part.status);
 }
 
-function timelineEventItem(event: Record<string, unknown>): TimelineItem | null {
-  if ("timelineItemStarted" in event && isRecord(event.timelineItemStarted)) {
-    return event.timelineItemStarted.item as TimelineItem;
+function isModelVisiblePart(part: StudioPart): boolean {
+  if (part.partType === "text") {
+    return part.textChannel === "commentary" || part.textChannel === "final";
   }
-  if ("timelineItemCompleted" in event && isRecord(event.timelineItemCompleted)) {
-    return event.timelineItemCompleted.item as TimelineItem;
-  }
-  if ("timelineItemFailed" in event && isRecord(event.timelineItemFailed)) {
-    return event.timelineItemFailed.item as TimelineItem;
-  }
-  return null;
+  return isModelVisiblePartType(part.partType) || part.partType === "inference" && part.status === "completed";
 }
 
-function isModelVisibleTimelineItem(item: TimelineItem): boolean {
-  if (item.kind === "text") {
-    return item.textChannel === "commentary" || item.textChannel === "final";
+function isModelVisibleDeltaField(field: StudioPartDeltaField): boolean {
+  switch (field) {
+    case "text":
+    case "planContent":
+    case "reasoningText":
+    case "tool.arguments":
+    case "tool.result":
+      return true;
   }
-  return isModelVisibleTimelineKind(item.kind) || item.kind === "inference" && item.status === "completed";
 }
 
-function isModelVisibleTimelineDelta(event: TimelineItemDeltaEvent): boolean {
-  if (event.kind === "text") {
-    return (
-      event.delta.type === "text" &&
-      (event.delta.textChannel === "commentary" || event.delta.textChannel === "final")
-    );
-  }
-  return isModelVisibleTimelineKind(event.kind);
-}
-
-function isModelVisibleTimelineKind(kind: TimelineItem["kind"]): boolean {
+function isModelVisiblePartType(kind: StudioPart["partType"]): boolean {
   switch (kind) {
     case "text":
-    case "thinking":
+    case "reasoning":
     case "tool":
     case "agent":
     case "plan":
       return true;
     case "turn":
     case "inference":
+    case "file":
       return false;
   }
 }
@@ -1271,220 +1187,39 @@ function isTerminalTimelineStatus(status: TimelineItem["status"]): boolean {
   }
 }
 
-function reduceAgentEvent(
+function reduceConversationEvent(
   state: StudioState,
-  event: AgentEvent | null | undefined,
-  statusText: string,
-): StudioState {
-  if (!event) {
-    return {
-      ...state,
-      status: statusText,
-      turnPhase: state.turnPhase === "idle" ? "subagent" : state.turnPhase,
-    };
-  }
-  if (event === "done") {
-    return {
-      ...state,
-      status: statusText,
-      turnPhase:
-        state.turnPhase === "interrupted" ||
-        state.turnPhase === "failed" ||
-        state.turnPhase === "budgetLimited"
-          ? state.turnPhase
-          : "completed",
-      turnStartedAt: null,
-    };
-  }
-  if ("turnInterrupted" in event) {
-    return { ...state, status: statusText, turnPhase: "interrupted" };
-  }
-  if ("turnBudgetLimited" in event) {
-    return { ...state, status: statusText, turnPhase: "budgetLimited" };
-  }
-  if ("interactionChanged" in event) {
-    return reduceInteractionChanged(
-      state,
-      {
-        sessionId: state.selectedSessionId ?? "",
-        event: event.interactionChanged.event,
-      },
-      statusText,
-    );
-  }
-  if ("timelineItemStarted" in event) {
-    return {
-      ...state,
-      status: statusText,
-      turnPhase: phaseForTimelineItem(event.timelineItemStarted.item, state.turnPhase),
-      turnStartedAt: state.turnStartedAt ?? Date.now(),
-    };
-  }
-  if ("timelineItemDelta" in event) {
-    return {
-      ...state,
-      status: statusText,
-      turnPhase: phaseForTimelineDelta(event.timelineItemDelta.event, state.turnPhase),
-    };
-  }
-  if ("timelineItemCompleted" in event) {
-    const completed = event.timelineItemCompleted.item;
-    return {
-      ...state,
-      status: statusText,
-      turnPhase: phaseForTimelineItem(completed, state.turnPhase),
-    };
-  }
-  if ("timelineItemFailed" in event) {
-    return {
-      ...state,
-      status: statusText,
-      turnPhase:
-        event.timelineItemFailed.item.status === "budgetLimited"
-          ? "budgetLimited"
-          : event.timelineItemFailed.item.status === "interrupted"
-            ? "interrupted"
-            : "failed",
-    };
-  }
-  if ("error" in event) {
-    return { ...state, status: statusText, turnPhase: "failed" };
-  }
-  return { ...state, status: statusText };
-}
-
-function reduceAgentEventWithoutTimeline(
-  state: StudioState,
-  event: AgentEvent | null | undefined,
-  statusText: string,
-): StudioState {
-  if (!event) {
-    return {
-      ...state,
-      status: statusText,
-      turnPhase: state.turnPhase === "idle" ? "subagent" : state.turnPhase,
-    };
-  }
-  if (event === "done") {
-    return {
-      ...state,
-      status: statusText,
-      turnPhase:
-        state.turnPhase === "interrupted" ||
-        state.turnPhase === "failed" ||
-        state.turnPhase === "budgetLimited"
-          ? state.turnPhase
-          : "completed",
-      turnStartedAt: null,
-    };
-  }
-  if ("turnInterrupted" in event) {
-    return { ...state, status: statusText, turnPhase: "interrupted" };
-  }
-  if ("turnBudgetLimited" in event) {
-    return { ...state, status: statusText, turnPhase: "budgetLimited" };
-  }
-  if ("interactionChanged" in event) {
-    return reduceInteractionChanged(
-      state,
-      {
-        sessionId: state.selectedSessionId ?? "",
-        event: event.interactionChanged.event,
-      },
-      statusText,
-    );
-  }
-  if ("timelineItemStarted" in event) {
-    return {
-      ...state,
-      status: statusText,
-      turnPhase: phaseForTimelineItem(event.timelineItemStarted.item, state.turnPhase),
-      turnStartedAt: state.turnStartedAt ?? Date.now(),
-    };
-  }
-  if ("timelineItemDelta" in event) {
-    return {
-      ...state,
-      status: statusText,
-      turnPhase: phaseForTimelineDelta(event.timelineItemDelta.event, state.turnPhase),
-    };
-  }
-  if ("timelineItemCompleted" in event) {
-    const completed = event.timelineItemCompleted.item;
-    return {
-      ...state,
-      status: statusText,
-      turnPhase: phaseForTimelineItem(completed, state.turnPhase),
-    };
-  }
-  if ("timelineItemFailed" in event) {
-    return {
-      ...state,
-      status: statusText,
-      turnPhase:
-        event.timelineItemFailed.item.status === "budgetLimited"
-          ? "budgetLimited"
-          : event.timelineItemFailed.item.status === "interrupted"
-            ? "interrupted"
-            : "failed",
-    };
-  }
-  if ("error" in event) {
-    return { ...state, status: statusText, turnPhase: "failed" };
-  }
-  return { ...state, status: statusText };
-}
-
-function timelineRecordFromStudioTimelineChange(
   envelope: StudioEventEnvelope,
-  change: StudioTimelineChange,
-): TimelineEventRecord | null {
-  const sessionId = envelope.sessionId ?? null;
-  if (!sessionId) {
-    return null;
+  status?: string,
+): StudioState {
+  const cleaned = applyOptimisticConversationCleanup(state, envelope.kind);
+  const next = applyStudioEvent(cleaned, envelope);
+  return reduceConversationStatus(next, envelope.kind, status ?? state.status);
+}
+
+function reduceConversationStatus(
+  state: StudioState,
+  kind: StudioEventEnvelope["kind"],
+  statusText: string,
+): StudioState {
+  if (kind.type === "messagePartUpdated") {
+    return {
+      ...state,
+      status: statusText,
+      turnPhase: phaseForPart(kind.part, state.turnPhase),
+      turnStartedAt: isTerminalTimelineStatus(kind.part.status)
+        ? state.turnStartedAt
+        : state.turnStartedAt ?? Date.now(),
+    };
   }
-  switch (change.type) {
-    case "started":
-      return {
-        id: envelope.eventId,
-        sessionId,
-        sequence: envelope.sequence,
-        createdAt: envelope.createdAt,
-        kind: "TimelineItemStarted",
-        payload: { type: "timelineItemStarted", item: change.item },
-      };
-    case "delta":
-      return {
-        id: envelope.eventId,
-        sessionId,
-        sequence: envelope.sequence,
-        createdAt: envelope.createdAt,
-        kind: "TimelineItemDelta",
-        payload: { type: "timelineItemDelta", event: change.event },
-      };
-    case "completed":
-      return {
-        id: envelope.eventId,
-        sessionId,
-        sequence: envelope.sequence,
-        createdAt: envelope.createdAt,
-        kind: "TimelineItemCompleted",
-        payload: { type: "timelineItemCompleted", item: change.item },
-      };
-    case "failed":
-      return {
-        id: envelope.eventId,
-        sessionId,
-        sequence: envelope.sequence,
-        createdAt: envelope.createdAt,
-        kind: "TimelineItemFailed",
-        payload: {
-          type: "timelineItemFailed",
-          item: change.item,
-          error: change.error,
-        },
-      };
+  if (kind.type === "messagePartDelta") {
+    return {
+      ...state,
+      status: statusText,
+      turnPhase: phaseForPartDelta(kind.delta.field, state.turnPhase),
+    };
   }
+  return { ...state, status: statusText };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1568,25 +1303,32 @@ function mergeProviderUsages(
   return [...byId.values()];
 }
 
-function phaseForTimelineItem(item: TimelineItem, current: TurnPhase): TurnPhase {
+function phaseForPart(part: StudioPart, current: TurnPhase): TurnPhase {
   if (current === "stopping") return "stopping";
-  if (item.kind === "thinking") return "thinking";
-  if (item.kind === "tool") return "tool";
-  if (item.kind === "agent") return "subagent";
-  if (item.kind === "plan") return current === "idle" ? "running" : current;
-  if (item.status === "failed") return "failed";
-  if (item.status === "interrupted") return "interrupted";
-  if (item.status === "budgetLimited") return "budgetLimited";
-  if (item.kind === "turn" && item.status === "completed") return "completed";
+  if (part.partType === "reasoning") return "thinking";
+  if (part.partType === "tool") return "tool";
+  if (part.partType === "agent") return "subagent";
+  if (part.partType === "plan") return current === "idle" ? "running" : current;
+  if (part.status === "failed") return "failed";
+  if (part.status === "interrupted") return "interrupted";
+  if (part.status === "budgetLimited") return "budgetLimited";
+  if (part.partType === "turn" && part.status === "completed") return "completed";
   return "running";
 }
 
-function phaseForTimelineDelta(event: TimelineItemDeltaEvent, current: TurnPhase): TurnPhase {
+function phaseForPartDelta(field: StudioPartDeltaField, current: TurnPhase): TurnPhase {
   if (current === "stopping") return "stopping";
-  if (event.kind === "thinking") return "thinking";
-  if (event.kind === "tool") return "tool";
-  if (event.kind === "plan") return current === "idle" ? "running" : current;
-  return "running";
+  switch (field) {
+    case "reasoningText":
+      return "thinking";
+    case "tool.arguments":
+    case "tool.result":
+      return "tool";
+    case "planContent":
+      return current === "idle" ? "running" : current;
+    case "text":
+      return "running";
+  }
 }
 
 export function phaseForTurnStatus(status: TurnStatus): TurnPhase {

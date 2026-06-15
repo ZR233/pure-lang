@@ -66,10 +66,13 @@ pub use pl_protocol::{
     InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,
     InteractionResolution, InteractionScope, InteractionStatus, Message, MessageContent,
     MessageRole, OutputStream, PermissionLevel, PipelineStage, PlanConfirmationResolution,
-    PureError, Result, RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation,
-    StudioEventEnvelope, StudioEventKind, StudioTimelineChange, StudioTurn, StudioTurnStatus,
-    TokenUsageSnapshot, ToolApprovalResolution, TraceEvent, TraceEventKind, UserInputAnswer,
-    UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
+    PureError, Result, RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation, StudioAgentPart,
+    StudioAttachment, StudioEventEnvelope, StudioEventKind, StudioFilePart, StudioInferencePart,
+    StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart, StudioPartDelta,
+    StudioPartDeltaField, StudioPartStatus, StudioPartType, StudioPlanPart, StudioTextChannel,
+    StudioToolPart, StudioTurn, StudioTurnStatus, TokenUsageSnapshot, ToolApprovalResolution,
+    TraceEvent, TraceEventKind, UserInputAnswer, UserInputRequest, UserInputResponse, UserQuestion,
+    UserQuestionOption,
 };
 pub use provider_usage::{
     ProviderUsageData, ProviderUsageRecord, ProviderUsageState, provider_usage_records,
@@ -83,7 +86,7 @@ pub use studio::{
     PlanImplementationHandoffStart, ProjectRecord, RunPromptRequest, SessionHandoffKind,
     SessionHandoffRecord, SessionHandoffStatus, SessionRecord, SessionRuntimeRecord,
     SessionSkillRecord, SessionVisibility, StudioEventRuntime, StudioPromptOutcome, StudioRuntime,
-    StudioStore, TimelineEventRecord, resolution_matches_kind,
+    StudioStore, TimelineEventRecord, resolution_matches_kind, studio_attachment,
 };
 pub use tool::{
     AskUserTool, BashInput, BashTool, LspLanguageTool, LspQueryTool, OutputTruncation,

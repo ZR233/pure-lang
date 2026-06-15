@@ -1,8 +1,12 @@
 use anyhow::{Context, Result, bail};
+use serde::de::DeserializeOwned;
+
 use pl_protocol::{
     AgentStatus, ContentPart, InteractionPayload, InteractionRequest, InteractionResolution,
     InteractionScope, InteractionStatus, Message, MessageContent, MessageRole, RuntimeCostAmount,
-    RuntimeUsageSnapshot, StudioEventEnvelope, StudioTurnStatus,
+    RuntimeUsageSnapshot, StudioEventEnvelope, StudioMessage, StudioMessageRole,
+    StudioMessageStatus, StudioPart, StudioPartStatus, StudioPartType, StudioTextChannel,
+    StudioTurnStatus,
 };
 
 use crate::studio::entities;
@@ -11,7 +15,7 @@ use crate::studio::records::{
     AgentSnapshotRecord, AgentTimelineEventRecord, AttachmentRecord, ProjectRecord,
     SessionHandoffKind, SessionHandoffRecord, SessionHandoffStatus, SessionRecord,
     SessionRuntimeRecord, SessionSkillRecord, SessionVisibility, StudioEventRecord,
-    StudioTurnRecord, TimelineEventRecord,
+    StudioMessageRecord, StudioPartRecord, StudioTurnRecord, TimelineEventRecord,
 };
 
 pub fn project_record(model: entities::project::Model) -> ProjectRecord {
@@ -221,6 +225,154 @@ pub fn studio_turn_record(model: entities::turn::Model) -> StudioTurnRecord {
         created_at: model.created_at,
         updated_at: model.updated_at,
         completed_at: model.completed_at,
+    }
+}
+
+pub fn studio_message_record(
+    model: entities::studio_message::Model,
+) -> Result<StudioMessageRecord> {
+    let metadata = serde_json::from_str(&model.metadata_json)
+        .with_context(|| format!("failed to parse studio message metadata: {}", model.id))?;
+    Ok(StudioMessageRecord {
+        sequence: model.sequence,
+        message: StudioMessage {
+            message_id: model.id,
+            session_id: model.session_id,
+            turn_id: model.turn_id,
+            role: studio_message_role_from_label(&model.role)?,
+            status: studio_message_status_from_label(&model.status)?,
+            created_at: model.created_at,
+            updated_at: model.updated_at,
+            completed_at: model.completed_at,
+            error: model.error,
+            metadata,
+        },
+    })
+}
+
+pub fn studio_part_record(model: entities::message_part::Model) -> Result<StudioPartRecord> {
+    let id = model.id.clone();
+    Ok(StudioPartRecord {
+        sequence: model.sequence,
+        part: StudioPart {
+            part_id: model.id,
+            message_id: model.message_id,
+            session_id: model.session_id,
+            turn_id: model.turn_id,
+            part_type: studio_part_type_from_label(&model.part_type)?,
+            order: model.part_order as u64,
+            status: studio_part_status_from_label(&model.status)?,
+            created_at: model.created_at,
+            updated_at: model.updated_at,
+            completed_at: model.completed_at,
+            error: model.error,
+            text_channel: model
+                .text_channel
+                .as_deref()
+                .map(studio_text_channel_from_label)
+                .transpose()?,
+            text: model.text,
+            attachments: json_field(&model.attachments_json, &id, "attachments")?,
+            tool: optional_json_field(model.tool_json.as_deref(), &id, "tool")?,
+            agent: optional_json_field(model.agent_json.as_deref(), &id, "agent")?,
+            inference: optional_json_field(model.inference_json.as_deref(), &id, "inference")?,
+            plan: optional_json_field(model.plan_json.as_deref(), &id, "plan")?,
+            file: optional_json_field(model.file_json.as_deref(), &id, "file")?,
+            usage: optional_json_field(model.usage_json.as_deref(), &id, "usage")?,
+            synthetic: model.synthetic != 0,
+            ignored: model.ignored != 0,
+        },
+    })
+}
+
+fn json_field<T: DeserializeOwned>(json: &str, id: &str, field: &str) -> Result<T> {
+    serde_json::from_str(json).with_context(|| format!("failed to parse {field} json: {id}"))
+}
+
+fn optional_json_field<T: DeserializeOwned>(
+    json: Option<&str>,
+    id: &str,
+    field: &str,
+) -> Result<Option<T>> {
+    json.map(|value| json_field(value, id, field)).transpose()
+}
+
+pub fn studio_message_role_label(role: StudioMessageRole) -> &'static str {
+    role.as_str()
+}
+
+pub fn studio_message_status_label(status: StudioMessageStatus) -> &'static str {
+    status.as_str()
+}
+
+pub fn studio_part_type_label(part_type: StudioPartType) -> &'static str {
+    part_type.as_str()
+}
+
+pub fn studio_part_status_label(status: StudioPartStatus) -> &'static str {
+    status.as_str()
+}
+
+pub fn studio_text_channel_label(channel: StudioTextChannel) -> &'static str {
+    channel.as_str()
+}
+
+fn studio_message_role_from_label(label: &str) -> Result<StudioMessageRole> {
+    match label {
+        "user" => Ok(StudioMessageRole::User),
+        "assistant" => Ok(StudioMessageRole::Assistant),
+        "system" => Ok(StudioMessageRole::System),
+        other => bail!("unsupported studio message role in db: {other}"),
+    }
+}
+
+fn studio_message_status_from_label(label: &str) -> Result<StudioMessageStatus> {
+    match label {
+        "queued" => Ok(StudioMessageStatus::Queued),
+        "streaming" => Ok(StudioMessageStatus::Streaming),
+        "completed" => Ok(StudioMessageStatus::Completed),
+        "failed" => Ok(StudioMessageStatus::Failed),
+        "cancelled" => Ok(StudioMessageStatus::Cancelled),
+        other => bail!("unsupported studio message status in db: {other}"),
+    }
+}
+
+fn studio_part_type_from_label(label: &str) -> Result<StudioPartType> {
+    match label {
+        "text" => Ok(StudioPartType::Text),
+        "reasoning" => Ok(StudioPartType::Reasoning),
+        "tool" => Ok(StudioPartType::Tool),
+        "agent" => Ok(StudioPartType::Agent),
+        "turn" => Ok(StudioPartType::Turn),
+        "inference" => Ok(StudioPartType::Inference),
+        "plan" => Ok(StudioPartType::Plan),
+        "file" => Ok(StudioPartType::File),
+        other => bail!("unsupported studio part type in db: {other}"),
+    }
+}
+
+fn studio_part_status_from_label(label: &str) -> Result<StudioPartStatus> {
+    match label {
+        "started" => Ok(StudioPartStatus::Started),
+        "streaming" => Ok(StudioPartStatus::Streaming),
+        "awaitingApproval" => Ok(StudioPartStatus::AwaitingApproval),
+        "approved" => Ok(StudioPartStatus::Approved),
+        "denied" => Ok(StudioPartStatus::Denied),
+        "running" => Ok(StudioPartStatus::Running),
+        "completed" => Ok(StudioPartStatus::Completed),
+        "failed" => Ok(StudioPartStatus::Failed),
+        "interrupted" => Ok(StudioPartStatus::Interrupted),
+        "budgetLimited" => Ok(StudioPartStatus::BudgetLimited),
+        other => bail!("unsupported studio part status in db: {other}"),
+    }
+}
+
+fn studio_text_channel_from_label(label: &str) -> Result<StudioTextChannel> {
+    match label {
+        "user" => Ok(StudioTextChannel::User),
+        "commentary" => Ok(StudioTextChannel::Commentary),
+        "final" => Ok(StudioTextChannel::Final),
+        other => bail!("unsupported studio text channel in db: {other}"),
     }
 }
 

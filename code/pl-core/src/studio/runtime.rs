@@ -1,6 +1,8 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
+#[cfg(test)]
+use pl_protocol::StudioEventKind;
 use pl_protocol::{
     AgentEventSender, ContentPart, ImageSource, InteractionKind, InteractionPayload,
     InteractionRequest, InteractionScope, InteractionStatus, MessageContent, PlanLifecycleEvent,
@@ -807,19 +809,17 @@ mod tests {
                 content: plan_item.content.clone(),
             }
         );
-        let timeline = store
-            .load_timeline_events(&session.id, None, None)
+        let studio_events = store
+            .load_studio_events(&session.id, None, None)
             .await
             .unwrap();
-        assert!(timeline.iter().any(|record| {
-            serde_json::from_str::<TraceEventKind>(&record.payload_json).is_ok_and(|kind| {
-                matches!(
-                    kind,
-                    TraceEventKind::PlanLifecycleChanged { event }
-                        if event.plan_id == plan_item.item_id
-                            && event.state == PlanLifecycleState::PendingConfirmation
-                )
-            })
+        assert!(studio_events.iter().any(|envelope| {
+            matches!(
+                &envelope.kind,
+                StudioEventKind::PlanLifecycleChanged { event }
+                    if event.plan_id == plan_item.item_id
+                        && event.state == PlanLifecycleState::PendingConfirmation
+            )
         }));
         assert_eq!(interaction_events.lock().await.len(), 1);
         let _ = tokio::fs::remove_dir_all(home).await;
@@ -919,19 +919,17 @@ mod tests {
                 content: "# Plan\n\n- Inspect\n- Implement".to_string(),
             }
         );
-        let timeline = store
-            .load_timeline_events(&session.id, None, None)
+        let studio_events = store
+            .load_studio_events(&session.id, None, None)
             .await
             .unwrap();
-        assert!(timeline.iter().any(|record| {
-            serde_json::from_str::<TraceEventKind>(&record.payload_json).is_ok_and(|kind| {
-                matches!(
-                    kind,
-                    TraceEventKind::PlanLifecycleChanged { event }
-                        if event.plan_id == plan_item.item_id
-                            && event.state == PlanLifecycleState::PendingConfirmation
-                )
-            })
+        assert!(studio_events.iter().any(|envelope| {
+            matches!(
+                &envelope.kind,
+                StudioEventKind::PlanLifecycleChanged { event }
+                    if event.plan_id == plan_item.item_id
+                        && event.state == PlanLifecycleState::PendingConfirmation
+            )
         }));
         assert_eq!(interaction_events.lock().await.len(), 1);
         let _ = tokio::fs::remove_dir_all(home).await;

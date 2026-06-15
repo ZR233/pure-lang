@@ -47,7 +47,6 @@ fn main() {
             commands::create_prompt_attachment,
             commands::resolve_interaction,
             commands::stop_prompt,
-            commands::load_session_timeline,
             commands::load_studio_events,
             commands::load_session_state,
             commands::load_config,

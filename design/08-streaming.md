@@ -1,41 +1,48 @@
-# 08 - Timeline 流式事件
+# 08 - Message/Part 流式事件
 
-## 8.1 统一 Timeline 层
+## 8.1 统一 Message/Part 层
 
-`AgentEvent` 定义在 `pl-protocol`，是核心 turn 与 provider/tool 之间的内部输出通道。Studio 对外只消费 `StudioEventEnvelope`，其中 timeline 变化以 `StudioEventKind::TimelineChanged` 包装 item-first timeline 事件；旧的文本、思考或工具 delta 不是 Studio 协议入口。
+`AgentEvent` 定义在 `pl-protocol`，是核心 turn 与 provider/tool 之间的内部输出通道。Studio 对外只消费 `StudioEventEnvelope`，其中对话变化以 opencode 式 `StudioMessage` / `StudioPart` 表达；`TimelineItem` 只允许作为 core 内部 trace 或迁移输入，不是 Studio wire 事实源。
 
-实时 timeline 协议固定为：
+实时对话协议固定为：
 
-- `TimelineItemStarted`
-- `TimelineItemDelta`
-- `TimelineItemCompleted`
-- `TimelineItemFailed`
+- `messageUpdated`：完整 message snapshot，等价于 opencode 的 `message.updated`，是 message projection 的事实来源。
+- `messagePartUpdated`：完整 part snapshot，等价于 opencode 的 `message.part.updated`，是 part projection、历史恢复和 terminal UI 的事实来源。
+- `messagePartDelta`：live overlay，等价于 opencode 的 `message.part.delta`，只用于中间文本、思考、计划和工具参数/结果的即时展示，不写入 `studio_events`。
 
-timeline item 类型固定为：
+part 类型固定为：
 
 - `text`
-- `thinking`
+- `reasoning`
 - `tool`
 - `agent`
 - `turn`
 - `inference`
 - `plan`
 
-每个 item 必须携带 `turnId`、`itemId`、`startedSequence`、`createdAt`、`updatedAt` 和 `status`。`StudioEventEnvelope.sequence` 是会话内唯一单调递增的事件顺序号；`startedSequence` 只表示该 item 首次进入 timeline 的展示顺序。后续 delta 和 completed/failed 事件只 upsert 同一个 item，并且不得改变该 item 的首次展示顺序。
+每个 message snapshot 必须携带 `messageId`、`sessionId`、`turnId`、`role`、`status`、`createdAt` 和 `updatedAt`。每个 part snapshot 必须携带 `partId`、`messageId`、`sessionId`、`turnId`、`partType`、`order`、`createdAt` 和 `updatedAt`。`StudioEventEnvelope.sequence` 是会话内唯一 durable 事件顺序号；part `order` 只表示同一 message 内展示顺序。后续 snapshot 只 upsert 同一个 part，并且不得改变该 part 的首次展示顺序。delta 不携带第二套 durable 顺序，只表达对某个字段的 live 追加。
 
-`text` item 必须携带 `textChannel`，固定为：
+`text` part 必须携带 `textChannel`，固定为：
 
 - `user`：真实用户输入。
 - `commentary`：Codex 风格可见进展更新，只用于 UI 展示，不写入最终 assistant 消息历史。
 - `final`：最终 assistant 正文，会写入会话历史并作为本轮最终答复。
 
-`TimelineDelta::Text` 同样携带 `textChannel`，保证 delta 先于 start 到达时前端也能创建正确通道的 text item。旧的 `role` 字段不再作为 Studio 协议语义入口。
+`StudioPartDelta` 必须包含 `messageId`、`partId`、`field` 和 `delta`；`field` 固定为 `text`、`tool.arguments`、`tool.result`、`reasoning.text` 或 `plan.content` 等协议字段。delta 只能在前端已有 part snapshot 时应用；孤儿 delta 按 opencode 逻辑丢弃。旧的 `role` 字段不再作为 Studio 协议语义入口。
 
-用户 `text` item 可以携带 `attachments` 元数据，当前只用于图片输入缩略图展示。timeline 的持久语义只依赖附件 id、文件名、媒体类型、尺寸和大小；GUI 事件可以携带派生的 `dataUrl` 预览值用于即时缩略图。模型可见的 base64 图片内容由 `pl-core` 在请求前按附件 id materialize，不写入消息正文。
+用户 `text` part 可以携带 `attachments` 元数据，当前只用于图片输入缩略图展示。part 的持久语义只依赖附件 id、文件名、媒体类型、尺寸和大小；GUI 事件可以携带派生的 `dataUrl` 预览值用于即时缩略图。模型可见的 base64 图片内容由 `pl-core` 在请求前按附件 id materialize，不写入消息正文。
 
-每个 turn 被接收后，用户输入必须作为该 turn 的第一个可见 timeline item 记录和广播。纯图片输入也必须产生用户 `text` item，content 可以为空但 attachments 不得为空。enabled tools、`turn`、`inference` 等内部诊断或运行态 item 不得在 sequence 上排到用户输入之前，避免前端等待状态、内部状态或历史回放出现在用户问题上方。
+每个 turn 被接收后，用户输入必须作为该 turn 的第一个 durable user message + text part 记录和广播。纯图片输入也必须产生用户 `text` part，text 可以为空但 attachments 不得为空。enabled tools、`turn`、`inference` 等内部诊断或运行态 part 不得在 projection 上排到用户输入之前，避免前端等待状态、内部状态或历史回放出现在用户问题上方。
 
-历史、实时和 stale backfill 都必须使用 `StudioEventEnvelope.sequence` 作为唯一 cursor。`timeline_events` 是从 `studio_events` 派生的查询 projection，不再提供第二套 timeline cursor 或第二套 wire 协议。前端只能用 StudioEvent cursor 判断新旧，不能用 item 列表里的最大 `startedSequence` 代替游标。旧 snapshot 只能补齐当前状态中不存在或尚未应用的 event，不能覆盖已经通过实时事件接收的新 turn 内容。前端 optimistic item 可以使用临时本地顺序参与展示，但不得预占或推进后端 cursor。
+历史、实时和 stale backfill 都必须使用 `StudioEventEnvelope.sequence` 作为唯一 durable cursor。`studio_events` 保存 durable snapshot 事件；`studio_messages/message_parts` projection 只能由 `StudioEventRuntime` 从 durable snapshot 事件派生，不提供第二套 timeline cursor 或第二套 wire 协议。前端只能用 StudioEvent cursor 判断新旧，不能用 part 列表里的最大 `order` 代替游标。旧 snapshot 只能补齐当前状态中不存在或尚未应用的 event，不能覆盖已经通过实时事件接收的新 turn 内容。前端 optimistic message/part 可以使用临时本地 order 参与展示，但不得预占或推进后端 cursor。
+
+snapshot 与 live delta 的优先级完全对齐 opencode：
+
+- start、完成、失败、审批等待、工具运行、工具完成等状态变化都发 `messagePartUpdated` 完整 snapshot。
+- 文本、commentary、reasoning、plan、工具参数和工具结果的流式片段发 `messagePartDelta`，只作为 live overlay。
+- 前端按 16ms frame 合批事件；同一 frame 内若同 part 的 snapshot 到达，跳过同 part 尚未应用的旧 delta。
+- snapshot 到达后清除同 part 的 delta overlay，并以 snapshot 内容为准。
+- reload、历史恢复和 stale backfill 只依赖 durable snapshot；丢失 live delta 不影响最终可恢复状态。
 
 ## 8.2 数据流
 
@@ -45,14 +52,16 @@ pl-model provider
   → protocol stream event mapper
   → provider-independent stream accumulator
   → AgentEventSender / TraceRecorder 内部事件
-  → StudioEventRuntime 分配 sequence、规范化 payload、持久化 studio_events + projection
+  → StudioEventRuntime 分配 durable sequence、规范化 payload、持久化 message/part snapshot + projection、广播 snapshot/live delta
   → Tauri studio-runtime-event
   → studioEventReducer
 ```
 
 `pure-studio` 不直接订阅 `AgentEventReceiver`。Tauri bridge 只转发已经持久化的 `StudioEventEnvelope`；前端 reducer 按事件 kind 更新当前或后台 session view：
 
-- `timelineChanged` 插入、delta、完成或失败同一个 item，并记录首次顺序。
+- `messageUpdated` upsert 完整 message snapshot。
+- `messagePartUpdated` upsert 完整 part snapshot，并清空同 part 的 delta overlay。
+- `messagePartDelta` 只在已有 part snapshot 时追加 live overlay；孤儿 delta 丢弃。
 - `turnChanged` 更新 queued、contextLoading、waitingForModel、streaming、runningTool、waitingForInteraction、persisting、completed、failed、cancelled。
 - `interactionChanged` 更新 footer 交互状态。
 - `agentChanged` / `agentTimelineChanged` 分别更新 latest snapshot 与 append-only 协作事件。
@@ -63,34 +72,36 @@ pl-model provider
 
 模型 provider 流的成功边界由 canonical `ModelStreamEvent::Completed` 明确表示。protocol mapper 可以把 provider 私有终止 chunk 转换为该事件；如果底层 SSE parse、transport 或 EOF 在 completed 之前发生，`pl-model` 必须返回错误，并由 turn 层发出 failed turn、`Error` 和 `Done`，不得把局部内容当作成功消息落库。completed 之后的 usage、文本、思考和工具调用 snapshot 才能进入最终 `CompletionResponse`。
 
-Plan Mode 下计划确认的主触发源是 `plan_exit` 工具。模型完成可执行计划后调用 `plan_exit({ content })`，`pl-core` 使用工具参数中的 Markdown 计划补齐或覆盖同一 turn 的 `plan` item，并在 turn 完成后创建 `PlanConfirmation` interaction。`plan_exit` 只提交计划，不在工具内部等待用户选择，也不写入 opencode 风格计划文件。
+Plan Mode 下计划确认的主触发源是 `plan_exit` 工具。模型完成可执行计划后调用 `plan_exit({ content })`，`pl-core` 使用工具参数中的 Markdown 计划补齐或覆盖同一 turn 的 `plan` part，并在 turn 完成后创建 `PlanConfirmation` interaction。`plan_exit` 只提交计划，不在工具内部等待用户选择，也不写入 opencode 风格计划文件。
 
-模型输出的 `<proposed_plan>...</proposed_plan>` 块仍由 `pl-model::stream` accumulator 提取为 `plan` item，用于流式展示和旧会话兼容。计划正文复用 `TimelineItem.content`，增量使用 `TimelineDelta::Plan`；同一块内容不得同时出现在普通 assistant `text` item 中。计划块之外的普通文本仍按 assistant `text` item 流式输出。如果同一 turn 同时出现 `<proposed_plan>` 和成功的 `plan_exit`，以 `plan_exit.content` 作为最终确认计划。
+模型输出的 `<proposed_plan>...</proposed_plan>` 块仍由 `pl-model::stream` accumulator 提取为 `plan` part，用于流式展示和旧会话兼容。计划正文写入 `StudioPart.plan.content`，增量使用 `StudioPartDelta(field=planContent)`；同一块内容不得同时出现在普通 assistant `text` part 中。计划块之外的普通文本仍按 assistant `text` part 流式输出。如果同一 turn 同时出现 `<proposed_plan>` 和成功的 `plan_exit`，以 `plan_exit.content` 作为最终确认计划。
 
-Auto 与 Plan Mode 下模型可见输出优先使用显式标签：`<commentary>...</commentary>` 表示中间进展，`<final>...</final>` 表示最终正文；Plan Mode 的最终计划优先通过 `plan_exit` 提交，`<proposed_plan>...</proposed_plan>` 只作为流式展示和兼容入口。`pl-model::stream` accumulator 负责跨 chunk 解析这些标签，标签本身不得进入 timeline。未标记的普通输出默认进入 `final` 文本通道并写入 assistant 正文，不能导致 turn 失败；Plan Mode 下未标记文本也不伪造 `plan` item。
+Auto 与 Plan Mode 下模型可见输出优先使用显式标签：`<commentary>...</commentary>` 表示中间进展，`<final>...</final>` 表示最终正文；Plan Mode 的最终计划优先通过 `plan_exit` 提交，`<proposed_plan>...</proposed_plan>` 只作为流式展示和兼容入口。`pl-model::stream` accumulator 负责跨 chunk 解析这些标签，标签本身不得进入 timeline。未标记的普通输出默认进入 `final` 文本通道并写入 assistant 正文，不能导致 turn 失败；Plan Mode 下未标记文本也不伪造 `plan` part。
 
 部分 OpenAI-compatible Chat provider 会把带可见标签的输出放入 `reasoning_content`。accumulator 必须保留这部分原始内容作为 thinking/reasoning，同时只把其中显式 `<commentary>`、`<final>`、`<proposed_plan>` 标签段投影到可见 timeline；无标签 `reasoning_content` 不得变成 assistant 正文或 plan。
 
-计划的采纳与实施状态不改变 `plan` item 本身，而是通过 `TraceEventKind::PlanLifecycleChanged` 追加到计划来源 session 的 `timeline_events`。事件包含 `planId`、`state`、可选 `turnId`、可选 `reason` 和 `updatedAt`；Studio 从历史 timeline 与 `StudioEventKind::PlanLifecycleChanged` 中按 `planId` 折叠 latest plan state。Plan turn 完成后需要用户确认实施时，后端创建 `InteractionKind::PlanConfirmation`，前端不再从历史 timeline 自行恢复旧确认 composer。确认 resolution 固定为 `implementFreshContext | continuePlanning | dismiss`；`continuePlanning` 的 `content` 是确认 composer 同次提交的用户补充内容，resolution 成功后由前端立即作为普通 prompt 发送；实施时后端创建显式 session handoff，新 Auto session 承载 fresh context 和 handoff prompt，来源 session 保持可恢复但不再作为活跃 session 列表项展示。后端必须在实施 turn 启动前广播 `sessionHandoffChanged`，使 Studio 先切到目标 session 并接收后续实时 `studio-runtime-event`，不得等后台 run 完成才展示实施过程。
+计划的采纳与实施状态不改变 `plan` part 本身，而是通过 `StudioEventKind::PlanLifecycleChanged` 写入 durable `studio_events` 并广播。事件包含 `planId`、`state`、可选 `turnId`、可选 `reason` 和 `updatedAt`；Studio 从 durable events 中按 `planId` 折叠 latest plan state。Plan turn 完成后需要用户确认实施时，后端创建 `InteractionKind::PlanConfirmation`，前端不再从历史 timeline 自行恢复旧确认 composer。确认 resolution 固定为 `implementFreshContext | continuePlanning | dismiss`；`continuePlanning` 的 `content` 是确认 composer 同次提交的用户补充内容，resolution 成功后由前端立即作为普通 prompt 发送；实施时后端创建显式 session handoff，新 Auto session 承载 fresh context 和 handoff prompt，来源 session 保持可恢复但不再作为活跃 session 列表项展示。后端必须在实施 turn 启动前广播 `sessionHandoffChanged`，使 Studio 先切到目标 session 并接收后续实时 `studio-runtime-event`，不得等后台 run 完成才展示实施过程。
 
 Studio 前端的实时事件、`load_session_state` 初始事件和 `load_studio_events` 补拉结果必须进入同一个 StudioEvent reducer：
 
 - `load_session_state` 返回同源 `StudioEventEnvelope[]` 与 `eventNextSequence`；前端按 sequence 从小到大重放。
 - `load_studio_events(afterSequence)` 返回缺失的 canonical envelope；payload 必须与数据库中保存的 payload 完全一致。
-- `TimelineItem` 是前端 selector/view model 的折叠结果，不作为 Tauri command 的主输入 DTO。
+- `StudioMessage` / `StudioPart` 是前端 reducer 的状态事实源；timeline row 只是 selector/view model 的折叠结果，不作为 Tauri command 的主输入 DTO。
 - `submit_prompt` 与触发实施的 `resolve_interaction` 不返回最终 timeline；它们只返回提交成功、目标 `sessionId/turnId/cursor`。
 - Plan lifecycle 与 interaction 状态均通过 `StudioEvent` 实时更新，并在 `bootstrap`、`select_session`、`load_session_state` 和 `load_studio_events` 中恢复。
-- `SkillActivated` 是 skill runtime fact 的实时通知与可追踪记录。它不渲染成普通 timeline item；Studio 收到后从后端 runtime snapshot 更新 `activeSkills`，历史恢复以结构化 session skill 表为准，而不是解析 `skill_view` 的 tool result 文本。
-- `Done` 只表示 turn 状态完成，不携带 timeline 内容；最终正文必须通过 `textChannel=final` 的 `text` item 表达。
-- Plan Mode 的最终可执行计划必须通过 `plan` item 表达；该 item 可以来自 `plan_exit.content` 或兼容的 `<proposed_plan>` 流式块。如果模型只提交计划而没有普通正文，不应生成空 assistant `text` item。
+- `SkillActivated` 是 skill runtime fact 的实时通知与可追踪记录。它不渲染成普通 timeline row；Studio 收到后从后端 runtime snapshot 更新 `activeSkills`，历史恢复以结构化 session skill 表为准，而不是解析 `skill_view` 的 tool result 文本。
+- `Done` 只表示 turn 状态完成，不携带 timeline 内容；最终正文必须通过 `textChannel=final` 的 `text` part 表达。
+- Plan Mode 的最终可执行计划必须通过 `plan` part 表达；该 part 可以来自 `plan_exit.content` 或兼容的 `<proposed_plan>` 流式块。如果模型只提交计划而没有普通正文，不应生成空 assistant `text` part。
 
-Studio 渲染可以在 selector 派生出展示项后使用虚拟滚动优化大 timeline，但虚拟滚动层不得改变 item-first 协议语义、事件游标或 reducer 合并规则。动态高度、流式 delta 和自动跟随底部属于前端渲染适配层职责；协议层仍只表达 timeline item 与 delta。
+Studio 渲染可以在 selector 派生出展示项后使用虚拟滚动优化大 timeline，但虚拟滚动层不得改变 item-first 协议语义、事件游标或 reducer 合并规则。动态高度、流式 delta overlay 和自动跟随底部属于前端渲染适配层职责；协议层仍只表达 item snapshot 与 live delta。
 
 ## 8.3 背压与容量
 
 内部事件通道可以继续使用 `tokio::sync::broadcast`，但 Studio 对外语义是持久事件流。默认容量由调用方创建，目前建议为 `256`。
 
-高频 delta 可以在 broadcast 层 lag，但不能静默丢失 Studio 状态：每个 `StudioEvent` 必须先写入 `studio_events` 和 projection，再广播同一份 canonical envelope。前端发现 sequence 缺口或收到 stale 事件时调用 `load_studio_events(sessionId, afterSequence, limit)` 补齐。`TimelineItemCompleted` 携带最终 snapshot，历史加载不依赖实时 delta 是否完整到达前端。只要 turn 最终有 assistant 正文，最终 timeline 集合中必须存在 completed assistant `text` item；不能只把正文写到 `turn` trace item。
+高频 delta 可以在 broadcast 层 lag，但不能静默丢失 Studio 状态：每个 durable snapshot 必须先写入 `studio_events` 和 projection，再广播同一份 canonical envelope。live delta 只进入实时 event stream；前端发现 sequence 缺口或收到 stale 事件时调用 `load_studio_events(sessionId, afterSequence, limit)` 补齐 durable snapshot。completed/failed snapshot 携带最终内容，历史加载不依赖实时 delta 是否完整到达前端。只要 turn 最终有 assistant 正文，最终 message/part 集合中必须存在 completed assistant `text` part；不能只把正文写到 `turn` trace item。
+
+实现允许把 live delta 保留为内部诊断记录，但不得写入 `studio_events`。`load_session_state` 和 `load_studio_events` 只返回 durable snapshot 与其他状态事件。
 
 ## 8.4 事件边界
 
@@ -98,7 +109,7 @@ Studio 渲染可以在 selector 派生出展示项后使用虚拟滚动优化大
 
 `StudioEventKind::InteractionChanged` 是审批、用户输入和计划确认的唯一实时交互事件。事件携带 `InteractionRequest`，包括 `kind`、`status`、`scope` 和类型化 payload；持久恢复以 `interactions` 表为准。`userInput` 的 resolved 事件不回传 secret 答案明文到普通 timeline 展示；答案只通过 interaction resolution 返回给等待中的工具。旧 `UserInputRequested` / `UserInputAnswered`、`ToolApprovalRequested`、`studio-interaction-changed` 等 sideband 不是 Studio 协议入口。
 
-子代理内部事件不直接转发完整文本流、思考流、工具调用流或工具输出。`pl-core` 将子代理生命周期压缩为 `agent` timeline item 和 `AgentStateChanged` snapshot，状态固定为 `queued`、`running`、`waiting`、`completed`、`errored`、`interrupted`、`shutdown`、`notFound`。`pure-studio` 持久化这些状态事件，并在聊天界面只渲染路径、状态、摘要和最终错误文本，避免把子代理内部执行细节混入父会话 timeline。
+子代理内部事件不直接转发完整文本流、思考流、工具调用流或工具输出。`pl-core` 将子代理生命周期压缩为 `agent` part 和 `AgentStateChanged` snapshot，状态固定为 `queued`、`running`、`waiting`、`completed`、`errored`、`interrupted`、`shutdown`、`notFound`。`pure-studio` 持久化这些状态事件，并在聊天界面只渲染路径、状态、摘要和最终错误文本，避免把子代理内部执行细节混入父会话 timeline。
 
 失败的子代理必须在 latest snapshot 的 `error` 字段保留可展示的失败文本。`reason` 只作为结构化分类，例如 `providerError`、`toolError`、`budgetLimited` 或 `interrupted`，不能替代 `error`。如果 provider 在子代理已有部分摘要后失败，最终状态仍必须把 provider/tool 错误写入 `error`，否则 UI 无法解释失败原因。
 
@@ -116,11 +127,11 @@ root agent 的 provider `429` 错误码是当前轮的终止错误，不进入�
 
 Plan 是协议级 block。provider 或 prompt 兼容层可以继续识别 `<proposed_plan>`，但必须先转换为 `PlanStarted/PlanDelta/PlanCompleted` 后再进入 accumulator；`pl-core` 也可以从 Plan Mode 中成功执行的 `plan_exit.content` 生成同一个 `plan` item。`<commentary>` 与 `<final>` 同理转换为带 `TimelineTextChannel` 的 text lifecycle。未标签普通 text 默认进入 `final` text block；未标签 reasoning 永远只进入 thinking block，不能生成 assistant 正文或 plan。部分 OpenAI-compatible Chat provider 会把带可见标签的输出放入 `reasoning_content`，该兼容转换只允许提取显式标签段，同时保留完整 reasoning 原文作为 thinking。
 
-工具 timeline item 的 `itemId` 使用 `toolCallId`。当 provider 提供 `call_id` 时，`toolCallId` 优先使用该值；provider 的原始 item id 只作为聚合辅助信息保留在内部。工具参数流、审批、执行和结果都 upsert 到同一个 tool item。
+工具 part 的 `partId` 使用 `toolCallId`。当 provider 提供 `call_id` 时，`toolCallId` 优先使用该值；provider 的原始 item id 只作为聚合辅助信息保留在内部。工具参数流、审批、执行和结果都 upsert 到同一个 tool part。
 
 聚合完成前不得把缺少工具名的参数片段当作新的工具调用执行。只有在 `output_item.done` 缺失时，才允许用已聚合的 delta 兜底生成工具调用；该兜底调用仍必须带有前面片段提供的真实工具名和稳定 `toolCallId`。
 
-如果 provider 在 completed 前结束但仍留下未完成 tool accumulator，聚合层只能在工具名和 `id` 或 `call_id` 都稳定时生成兜底 `ToolCall`。缺少工具名时返回 provider/protocol 错误，避免 `pl-core` 收到空工具名并误执行。工具调用进入 `pl-core` 后，started、approved 或 running 状态的 timeline item 在 turn 中断时必须写入唯一 `interrupted` 终态；已经 completed、failed 或 denied 的 item 不得被后续取消路径覆盖。
+如果 provider 在 completed 前结束但仍留下未完成 tool accumulator，聚合层只能在工具名和 `id` 或 `call_id` 都稳定时生成兜底 `ToolCall`。缺少工具名时返回 provider/protocol 错误，避免 `pl-core` 收到空工具名并误执行。工具调用进入 `pl-core` 后，started、approved 或 running 状态的 tool part 在 turn 中断时必须写入唯一 `interrupted` 终态；已经 completed、failed 或 denied 的 part 不得被后续取消路径覆盖。
 
 如果 provider 把工具调用以正文形式返回，例如 DSML/tool-call 标记或完整 JSON `tool_calls` 块，`pl-core` 不得把它作为 assistant 最终消息流给主 chat。该情况属于模型未产出可执行工具调用，turn 应以 `failed` 收尾并触发 `Error` + `Done`。检测必须只针对明显的协议/JSON tool-call 形状，不能因为普通摘要、源码解释或文档内容提到 `tool_calls`、`name`、`subagent` 等词而误判。
 

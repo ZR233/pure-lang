@@ -457,6 +457,26 @@ pub struct TimelineItemDeltaEvent {
     pub delta: TimelineDelta,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineItemDelta {
+    pub item_id: String,
+    pub field: TimelineItemDeltaField,
+    pub delta: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chunk_index: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TimelineItemDeltaField {
+    Content,
+    PlanContent,
+    ThinkingChunk,
+    ToolArguments,
+    ToolResult,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ErrorSeverity {

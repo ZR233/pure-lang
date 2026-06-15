@@ -7,8 +7,9 @@ use pl_core::{
 };
 use pl_protocol::{
     InteractionPayload, InteractionResolution, InteractionStatus, PlanConfirmationResolution,
-    PlanLifecycleEvent, PlanLifecycleState, StudioEventKind, StudioTurnStatus, TimelineItemKind,
-    TraceEvent, TraceEventKind,
+    PlanLifecycleEvent, PlanLifecycleState, StudioEventKind, StudioMessage, StudioMessageRole,
+    StudioMessageStatus, StudioPart, StudioPartStatus, StudioPartType, StudioTextChannel,
+    StudioTurnStatus,
 };
 use tauri::{AppHandle, State};
 use tokio_util::sync::CancellationToken;
@@ -16,8 +17,8 @@ use tokio_util::sync::CancellationToken;
 use crate::dto::{
     AttachmentDto, BootstrapDto, ConfigDto, DiscoveredSkillsDto, InstructionsInput,
     McpSettingsInput, PlanLifecycleResponse, ProjectSelectionDto, ProviderSettingsInput,
-    ProviderUsagesDto, ResolveInteractionResponse, RunPromptResponse, SessionSelectionDto,
-    SessionStateDto, SessionTimelineDto, StopPromptResponse, StudioEventsDto, SubmitPromptResponse,
+    ProviderUsagesDto, ResolveInteractionResponse, SessionSelectionDto, SessionStateDto,
+    StopPromptResponse, StudioEventsDto, SubmitPromptResponse,
 };
 use crate::events::drain_events;
 use crate::interactions::interaction_emitter;
@@ -26,12 +27,16 @@ use crate::mappers::{
     instructions_config, load_session_runtime_dto, lsp_health_update_dto,
     mcp_settings_to_builtin_states, mcp_settings_to_servers, plan_lifecycle_events_to_states,
     project_dtos, provider_settings_to_edit, provider_usages_dto, session_dtos,
-    timeline_event_dtos_from_studio_events, trace_events_from_studio_events,
-    turn_result_status_label,
 };
 use crate::state::{AppState, CommandError, CommandResult};
 
 const IMPLEMENT_PLAN_FRESH_CONTEXT_PREFIX: &str = "A previous agent produced the plan below to accomplish the user's task. Implement the plan in a fresh context. Treat the plan as the source of user intent, re-read files as needed, and carry the work through implementation and verification.";
+
+struct TurnCompletion {
+    status: TurnResultStatus,
+    abort_reason: Option<String>,
+    error: Option<String>,
+}
 
 struct PlanLifecycleChange {
     state: PlanLifecycleState,
@@ -538,7 +543,7 @@ async fn run_prompt_inner(
     app: AppHandle,
     state: &AppState,
     lifecycle: Option<PlanImplementationLifecycle>,
-) -> CommandResult<RunPromptResponse> {
+) -> CommandResult<TurnCompletion> {
     if prompt.trim().is_empty() && attachment_ids.is_empty() {
         return Err(CommandError::from_display("prompt is empty"));
     }
@@ -573,7 +578,7 @@ async fn run_prompt_inner(
         .studio
         .run_prompt(RunPromptRequest {
             session_id: session_id.clone(),
-            turn_id,
+            turn_id: turn_id.clone(),
             prompt,
             attachment_ids,
             event_tx: event_tx.clone(),
@@ -594,7 +599,6 @@ async fn run_prompt_inner(
     match result {
         Ok(outcome) => {
             if let Some(lifecycle) = &lifecycle {
-                let turn_id = first_turn_id(&outcome.timeline_events);
                 let (lifecycle_state, reason) = match outcome.result.status {
                     TurnResultStatus::Completed => (PlanLifecycleState::Implemented, None),
                     TurnResultStatus::Aborted => (
@@ -620,7 +624,7 @@ async fn run_prompt_inner(
                     &lifecycle.plan_id,
                     vec![PlanLifecycleChange {
                         state: lifecycle_state,
-                        turn_id,
+                        turn_id: Some(turn_id.clone()),
                         reason,
                     }],
                 )
@@ -640,7 +644,7 @@ async fn run_prompt_inner(
                     )
                     .await?;
             }
-            run_prompt_response(state, &session_id, outcome).await
+            Ok(turn_completion(outcome))
         }
         Err(error) => {
             let message = error.to_string();
@@ -703,6 +707,7 @@ async fn submit_prompt_background(
             None,
         )
         .await?;
+    emit_user_prompt_snapshots(&session_id, &turn_id, &prompt, &attachment_ids, state).await?;
     let cursor = state
         .studio
         .store()
@@ -733,16 +738,19 @@ async fn submit_prompt_background(
         )
         .await;
         match result {
-            Ok(response) => {
-                let status = match response.turn_status.as_str() {
-                    "completed" => StudioTurnStatus::Completed,
-                    "aborted" if response.turn_abort_reason.as_deref() == Some("interrupted") => {
+            Ok(completion) => {
+                let status = match completion.status {
+                    TurnResultStatus::Completed => StudioTurnStatus::Completed,
+                    TurnResultStatus::Aborted
+                        if completion.abort_reason.as_deref() == Some("interrupted") =>
+                    {
                         StudioTurnStatus::Cancelled
                     }
-                    "aborted" | "errored" => StudioTurnStatus::Failed,
-                    _ => StudioTurnStatus::Completed,
+                    TurnResultStatus::Aborted | TurnResultStatus::Errored => {
+                        StudioTurnStatus::Failed
+                    }
                 };
-                let reason = response.turn_error.or(response.turn_abort_reason);
+                let reason = completion.error.or(completion.abort_reason);
                 let _ = run_state
                     .studio
                     .events()
@@ -770,6 +778,87 @@ async fn submit_prompt_background(
     })
 }
 
+async fn emit_user_prompt_snapshots(
+    session_id: &str,
+    turn_id: &str,
+    prompt: &str,
+    attachment_ids: &[String],
+    state: &AppState,
+) -> CommandResult<()> {
+    let now = unix_seconds();
+    let message_id = format!("{turn_id}:user");
+    let part_id = format!("{turn_id}:user-text");
+    let attachments = state
+        .studio
+        .store()
+        .load_attachments(session_id, attachment_ids)
+        .await?
+        .iter()
+        .map(pl_core::studio_attachment)
+        .collect::<Vec<_>>();
+    let message = StudioMessage {
+        message_id: message_id.clone(),
+        session_id: session_id.to_string(),
+        turn_id: turn_id.to_string(),
+        role: StudioMessageRole::User,
+        status: StudioMessageStatus::Completed,
+        created_at: now,
+        updated_at: now,
+        completed_at: Some(now),
+        error: None,
+        metadata: serde_json::json!({}),
+    };
+    state
+        .studio
+        .events()
+        .emit(
+            None,
+            Some(session_id.to_string()),
+            Some(turn_id.to_string()),
+            StudioEventKind::MessageUpdated {
+                message: Box::new(message),
+            },
+        )
+        .await?;
+    let part = StudioPart {
+        part_id,
+        message_id,
+        session_id: session_id.to_string(),
+        turn_id: turn_id.to_string(),
+        part_type: StudioPartType::Text,
+        order: 0,
+        status: StudioPartStatus::Completed,
+        created_at: now,
+        updated_at: now,
+        completed_at: Some(now),
+        error: None,
+        text_channel: Some(StudioTextChannel::User),
+        text: prompt.to_string(),
+        attachments,
+        tool: None,
+        agent: None,
+        inference: None,
+        plan: None,
+        file: None,
+        usage: None,
+        synthetic: false,
+        ignored: false,
+    };
+    state
+        .studio
+        .events()
+        .emit(
+            None,
+            Some(session_id.to_string()),
+            Some(turn_id.to_string()),
+            StudioEventKind::MessagePartUpdated {
+                part: Box::new(part),
+            },
+        )
+        .await?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn stop_prompt(
     session_id: String,
@@ -795,46 +884,6 @@ pub async fn stop_prompt(
     Ok(StopPromptResponse {
         session_id,
         stopped: true,
-    })
-}
-
-#[tauri::command]
-pub async fn load_session_timeline(
-    session_id: String,
-    after_sequence: Option<i64>,
-    limit: Option<i64>,
-    state: State<'_, AppState>,
-) -> CommandResult<SessionTimelineDto> {
-    load_session_timeline_inner(&state, session_id, after_sequence, limit).await
-}
-
-async fn load_session_timeline_inner(
-    state: &AppState,
-    session_id: String,
-    after_sequence: Option<i64>,
-    limit: Option<i64>,
-) -> CommandResult<SessionTimelineDto> {
-    let events = state
-        .studio
-        .store()
-        .load_studio_events(&session_id, after_sequence, limit)
-        .await?;
-    let next_sequence = state
-        .studio
-        .store()
-        .next_studio_event_sequence(&session_id)
-        .await? as u64;
-    let timeline_events = trace_events_from_studio_events(&events);
-    Ok(SessionTimelineDto {
-        session_id: session_id.clone(),
-        events: timeline_event_dtos_from_studio_events(&events),
-        plan_states: plan_lifecycle_events_to_states(&timeline_events),
-        interactions: state
-            .studio
-            .store()
-            .list_pending_interactions(&session_id)
-            .await?,
-        next_sequence,
     })
 }
 
@@ -873,7 +922,6 @@ pub async fn load_session_state(
         .read_session(&session_id)
         .await?
         .context("selected session not found")?;
-    let timeline = load_session_timeline_inner(&state, session_id.clone(), None, None).await?;
     let events = state
         .studio
         .store()
@@ -905,58 +953,20 @@ pub async fn load_session_state(
             .store()
             .list_pending_interactions(&session_id)
             .await?,
-        timeline,
         events,
         event_next_sequence,
     })
 }
 
-async fn run_prompt_response(
-    state: &AppState,
-    session_id: &str,
-    outcome: StudioPromptOutcome,
-) -> CommandResult<RunPromptResponse> {
-    let session = state
-        .studio
-        .store()
-        .read_session(session_id)
-        .await?
-        .context("selected session not found")?;
-    let sessions = state
-        .studio
-        .store()
-        .list_sessions(&session.project_id)
-        .await?;
-    let events = state
-        .studio
-        .store()
-        .load_studio_events(session_id, None, None)
-        .await?;
-    Ok(RunPromptResponse {
-        session_id: session_id.to_string(),
-        sessions: session_dtos(sessions),
-        agent_events: agent_event_dtos(state.studio.store().list_agent_events(session_id).await?),
-        agents: agent_dtos(state.studio.store().list_agents(session_id).await?),
-        session_runtime: load_session_runtime_dto(&state.studio, session_id).await?,
-        timeline_events: timeline_event_dtos_from_studio_events(&events),
-        plan_states: plan_lifecycle_events_to_states(&trace_events_from_studio_events(&events)),
-        interactions: state
-            .studio
-            .store()
-            .list_pending_interactions(session_id)
-            .await?,
-        timeline_next_sequence: state
-            .studio
-            .store()
-            .next_studio_event_sequence(session_id)
-            .await? as u64,
-        turn_status: turn_result_status_label(outcome.result.status).to_string(),
-        turn_abort_reason: outcome
+fn turn_completion(outcome: StudioPromptOutcome) -> TurnCompletion {
+    TurnCompletion {
+        status: outcome.result.status,
+        abort_reason: outcome
             .result
             .abort_reason
             .map(|reason| reason.as_str().to_string()),
-        turn_error: outcome.result.error.clone(),
-    })
+        error: outcome.result.error,
+    }
 }
 
 async fn plan_lifecycle_response(
@@ -966,7 +976,7 @@ async fn plan_lifecycle_response(
     Ok(PlanLifecycleResponse {
         session_id: session_id.to_string(),
         plan_states: load_plan_states(studio, session_id).await?,
-        timeline_next_sequence: studio
+        event_next_sequence: studio
             .store()
             .next_studio_event_sequence(session_id)
             .await? as u64,
@@ -1003,8 +1013,7 @@ async fn load_plan_states(
         .store()
         .load_studio_events(session_id, None, None)
         .await?;
-    let timeline_events = trace_events_from_studio_events(&records);
-    Ok(plan_lifecycle_events_to_states(&timeline_events))
+    Ok(plan_lifecycle_events_to_states(&records))
 }
 
 async fn append_plan_lifecycle_events(
@@ -1036,29 +1045,6 @@ async fn append_plan_lifecycle_events(
             .await?;
     }
     Ok(())
-}
-
-fn first_turn_id(events: &[TraceEvent]) -> Option<String> {
-    events.iter().find_map(|trace| match &trace.kind {
-        TraceEventKind::TimelineItemStarted { item }
-        | TraceEventKind::TimelineItemCompleted { item }
-        | TraceEventKind::TimelineItemFailed { item, .. }
-            if item.kind == TimelineItemKind::Turn =>
-        {
-            Some(item.turn_id.clone())
-        }
-        TraceEventKind::TimelineItemDelta { event } if event.kind == TimelineItemKind::Turn => {
-            Some(event.turn_id.clone())
-        }
-        TraceEventKind::TimelineItemStarted { .. }
-        | TraceEventKind::TimelineItemCompleted { .. }
-        | TraceEventKind::TimelineItemFailed { .. }
-        | TraceEventKind::TimelineItemDelta { .. }
-        | TraceEventKind::PlanLifecycleChanged { .. }
-        | TraceEventKind::InteractionChanged { .. }
-        | TraceEventKind::SkillActivated { .. }
-        | TraceEventKind::EnabledToolsRecorded { .. } => None,
-    })
 }
 
 fn unix_seconds() -> i64 {

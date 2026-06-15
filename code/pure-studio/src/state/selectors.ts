@@ -1,5 +1,6 @@
 import type { InteractionRequest, PlanState, TimelineItem } from "../types";
 import type { StudioState } from "./studio-state";
+import { timelineItemsFromConversation, timelineItemWithDelta } from "./timeline-state";
 
 export type ToolGroupSummaryKind =
   | "readFiles"
@@ -138,9 +139,8 @@ export function selectTimelineEntries(state: StudioState): TimelineEntry[] {
     refreshToolGroupEntry(activeToolGroup);
   };
 
-  for (const itemId of state.timelineOrder) {
-    const rawItem = state.timelineItems.get(itemId);
-    const item = rawItem ? normalizeTimelineItem(rawItem) : null;
+  for (const rawItem of timelineItemsFromConversation(state)) {
+    const item = normalizeTimelineItem(timelineItemWithDelta(rawItem, state.partDeltaAccum.get(rawItem.itemId)));
     if (!item) continue;
     switch (item.kind) {
       case "text":
