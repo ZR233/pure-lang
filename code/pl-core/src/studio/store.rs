@@ -13,8 +13,9 @@ use pl_protocol::{
     PlanLifecycleEvent, PlanLifecycleState, RuntimeUsageSnapshot, SkillActivation,
     StudioAgentTimelineEvent, StudioAgentTimelineEventKind, StudioAttachment, StudioEventEnvelope,
     StudioEventKind, StudioMessage, StudioPart, StudioRuntimeUsage, StudioSessionRuntime,
-    StudioTurnStatus, TraceAttachment, TraceEvent, TraceEventKind,
+    StudioTurnStatus,
 };
+use pl_trace::{TraceAttachment, TraceEvent, TraceEventKind};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait, Database,
     DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Statement,
@@ -165,8 +166,8 @@ impl StudioStore {
         use entities::{
             agent, agent_event, agent_runtime_event, agent_runtime_snapshot, attachment,
             interaction, message, message_part, project, session, session_handoff,
-            session_runtime_snapshot, session_skill, studio_event, studio_message, timeline_event,
-            tool_approval, turn,
+            session_runtime_snapshot, session_skill, studio_event, studio_message, tool_approval,
+            turn,
         };
         let Some(project) = project::Entity::find_by_id(project_id.to_string())
             .one(&self.db)
@@ -205,16 +206,6 @@ impl StudioStore {
                 .filter(attachment::Column::SessionId.eq(session_id.clone()))
                 .exec(&tx)
                 .await?;
-            timeline_event::Entity::delete_many()
-                .filter(timeline_event::Column::SessionId.eq(session_id.clone()))
-                .exec(&tx)
-                .await?;
-            tx.execute(Statement::from_sql_and_values(
-                sea_orm::DatabaseBackend::Sqlite,
-                "DELETE FROM timeline_events WHERE session_id = ?",
-                [session_id.clone().into()],
-            ))
-            .await?;
             message::Entity::delete_many()
                 .filter(message::Column::SessionId.eq(session_id.clone()))
                 .exec(&tx)

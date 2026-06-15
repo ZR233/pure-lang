@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 use crate::request::TokenUsage;
 use crate::stream::event::{ModelStreamEvent, ToolInputDeltaPayload, ToolInputPayloadKind};
-use pl_protocol::TraceTextChannel;
+use pl_trace::TraceTextChannel;
 
 /// SSE 流事件原始结构（从 JSON 解析）
 #[derive(Debug, Clone, Deserialize)]

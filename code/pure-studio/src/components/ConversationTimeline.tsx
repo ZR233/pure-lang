@@ -3,17 +3,17 @@ import { Button } from "@/components/ui/button";
 import { ChevronDown } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { TimelineEntry } from "../state/selectors";
+import type { ConversationEntry } from "../state/selectors";
 
 type FollowMode = "following" | "paused";
 
 type ConversationTimelineProps = {
   sessionId: string | null;
-  entries: TimelineEntry[];
+  entries: ConversationEntry[];
   isBusy: boolean;
   emptyState: ReactNode;
   scrollToBottomLabel: string;
-  renderEntry: (entry: TimelineEntry) => ReactNode;
+  renderEntry: (entry: ConversationEntry) => ReactNode;
 };
 
 const SCROLL_THRESHOLD = 40;
@@ -240,7 +240,7 @@ export function ConversationTimeline({
   );
 }
 
-function estimateEntrySize(entry: TimelineEntry | undefined): number {
+function estimateEntrySize(entry: ConversationEntry | undefined): number {
   switch (entry?.kind) {
     case "message":
       return entry.role === "user" ? 96 : 140;

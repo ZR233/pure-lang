@@ -5,7 +5,8 @@ use async_openai::Client;
 use async_openai::config::Config;
 use async_openai::error::OpenAIError;
 use async_openai::types::stream::StreamResponse;
-use pl_protocol::{AgentEventSender, PureError, Result};
+use pl_protocol::{PureError, Result};
+use pl_trace::AgentEventSender;
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue};
 use secrecy::SecretString;
 
@@ -396,7 +397,8 @@ fn looks_like_secret_token(token: &str) -> bool {
 mod tests {
     use std::collections::HashMap;
 
-    use pl_protocol::{AgentEvent, Message, MessageContent, MessageRole, TracePartKind};
+    use pl_protocol::{Message, MessageContent, MessageRole};
+    use pl_trace::{AgentEvent, TracePartKind};
     use pretty_assertions::assert_eq;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -405,11 +407,11 @@ mod tests {
     use crate::protocol::openai::sse::{StreamEvent, ToolCallDeltaPayload};
     use crate::request::{CompletionRequest, CompletionTraceContext, ToolCallPayload};
     use crate::stream::StreamCompletionAccumulator;
-    use pl_protocol::TraceEventKind;
+    use pl_trace::TraceEventKind;
 
     fn apply_completed(
         accumulator: &mut StreamCompletionAccumulator,
-        event_tx: &pl_protocol::AgentEventSender,
+        event_tx: &pl_trace::AgentEventSender,
     ) {
         accumulator
             .apply(StreamEvent::Completed { response_id: None }, event_tx)
@@ -624,7 +626,7 @@ mod tests {
             .apply(
                 StreamEvent::TextDelta {
                     id: "final".to_string(),
-                    channel: pl_protocol::TraceTextChannel::Final,
+                    channel: pl_trace::TraceTextChannel::Final,
                     delta: "<final>9.11 更大。</final>".to_string(),
                 },
                 &event_tx,
@@ -680,7 +682,7 @@ mod tests {
                 .apply(
                     StreamEvent::TextDelta {
                         id: "final".to_string(),
-                        channel: pl_protocol::TraceTextChannel::Final,
+                        channel: pl_trace::TraceTextChannel::Final,
                         delta: delta.to_string(),
                     },
                     &event_tx,
@@ -695,13 +697,13 @@ mod tests {
         assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
             TraceEventKind::TracePartCompleted { item }
-                if item.text_channel == Some(pl_protocol::TraceTextChannel::Commentary)
+                if item.text_channel == Some(pl_trace::TraceTextChannel::Commentary)
                     && item.content == "检查配置。"
         )));
         assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
             TraceEventKind::TracePartCompleted { item }
-                if item.text_channel == Some(pl_protocol::TraceTextChannel::Final)
+                if item.text_channel == Some(pl_trace::TraceTextChannel::Final)
             && item.content == "完成。"
         )));
     }
@@ -745,7 +747,7 @@ mod tests {
         assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
             TraceEventKind::TracePartCompleted { item }
-                if item.text_channel == Some(pl_protocol::TraceTextChannel::Commentary)
+                if item.text_channel == Some(pl_trace::TraceTextChannel::Commentary)
                     && item.content == "正在分析日志。"
         )));
         assert!(response.trace_events.iter().any(|event| matches!(
@@ -756,7 +758,7 @@ mod tests {
         assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
             TraceEventKind::TracePartCompleted { item }
-                if item.text_channel == Some(pl_protocol::TraceTextChannel::Final)
+                if item.text_channel == Some(pl_trace::TraceTextChannel::Final)
                     && item.content == "完成。"
         )));
     }
@@ -812,7 +814,7 @@ mod tests {
             .apply(
                 StreamEvent::TextDelta {
                     id: "final".to_string(),
-                    channel: pl_protocol::TraceTextChannel::Final,
+                    channel: pl_trace::TraceTextChannel::Final,
                     delta: "plain text".to_string(),
                 },
                 &event_tx,
@@ -826,7 +828,7 @@ mod tests {
         assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
             TraceEventKind::TracePartCompleted { item }
-                if item.text_channel == Some(pl_protocol::TraceTextChannel::Final)
+                if item.text_channel == Some(pl_trace::TraceTextChannel::Final)
                     && item.content == "plain text"
         )));
     }
@@ -850,7 +852,7 @@ mod tests {
                 .apply(
                     StreamEvent::TextDelta {
                         id: "final".to_string(),
-                        channel: pl_protocol::TraceTextChannel::Final,
+                        channel: pl_trace::TraceTextChannel::Final,
                         delta: delta.to_string(),
                     },
                     &event_tx,
@@ -945,7 +947,7 @@ mod tests {
             .apply(
                 StreamEvent::TextDelta {
                     id: "final".to_string(),
-                    channel: pl_protocol::TraceTextChannel::Final,
+                    channel: pl_trace::TraceTextChannel::Final,
                     delta: "partial".to_string(),
                 },
                 &event_tx,

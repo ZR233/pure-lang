@@ -4,9 +4,8 @@ use pl_model::{
     CompletionRequest, CompletionTraceContext, ModelProvider, ProviderInfo, ReasoningConfig,
     ReasoningSummary, create_provider,
 };
-use pl_protocol::{
-    AgentEvent, Message, MessageContent, MessageRole, TraceDelta, TraceEvent, TraceEventKind,
-};
+use pl_protocol::{Message, MessageContent, MessageRole};
+use pl_trace::{AgentEvent, TraceDelta, TraceEvent, TraceEventKind};
 use tokio::sync::broadcast::error::RecvError;
 
 const DEEPSEEK_LIVE_ENV_KEY: &str = "API_KEY_DEEPSEEK";

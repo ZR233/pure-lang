@@ -2,7 +2,7 @@
 
 ## 8.1 统一 Message/Part 层
 
-`AgentEvent` 定义在 `pl-protocol`，是核心 turn 与 provider/tool 之间的内部输出通道。Studio 对外只消费 `StudioEventEnvelope`，其中对话变化以 opencode 式 `StudioMessage` / `StudioPart` 表达；core 内部诊断事件统一命名为 `TracePart`。`TracePart` 只能作为 core/provider 内部诊断输入，不得作为 Studio wire、Tauri DTO 或前端事实源。
+`AgentEvent` 与 `TracePart` 定义在内部 `pl-trace` crate，是核心 turn 与 provider/tool 之间的内部输出通道。`pl-protocol` 只承载 Studio wire DTO 与跨 crate 公共状态类型，不再导出 trace part 或 raw agent event。Studio 对外只消费 `StudioEventEnvelope`，其中对话变化以 opencode 式 `StudioMessage` / `StudioPart` 表达；`TracePart` 只能作为 core/provider 内部诊断输入，不得作为 Studio wire、Tauri DTO 或前端事实源。
 
 实时对话协议固定为：
 
@@ -32,7 +32,7 @@ part 类型固定为：
 
 用户 `text` part 可以携带 `attachments` 元数据，当前只用于图片输入缩略图展示。part 的持久语义只依赖附件 id、文件名、媒体类型、尺寸和大小；GUI 事件可以携带派生的 `dataUrl` 预览值用于即时缩略图。模型可见的 base64 图片内容由 `pl-core` 在请求前按附件 id materialize，不写入消息正文。
 
-每个 turn 被接收后，用户输入必须作为该 turn 的第一个 durable user message + text part 记录和广播。用户输入使用固定 identity：message id 为 `{turnId}:user`，part id 为 `{turnId}:user-text`；后续来自 core trace 的用户输入 snapshot 必须规范化到同一 identity，只能覆盖这个 part，不能新增第二个用户 text part。纯图片输入也必须产生用户 `text` part，text 可以为空但 attachments 不得为空。enabled tools、`turn`、`inference` 等内部诊断或运行态 part 不得在 projection 上排到用户输入之前，避免前端等待状态、内部状态或历史回放出现在用户问题上方。
+每个 turn 被接收后，用户输入必须作为该 turn 的第一个 durable user message + text part 记录和广播。用户输入使用固定 identity：message id 为 `{turnId}:user`，part id 为 `{turnId}:user-text`；这是 Studio UI 中用户输入的唯一 durable 来源。后续 core trace 如仍产生用户输入 snapshot，只能作为内部诊断事件，进入 Studio event sink 前必须忽略，不能覆盖或新增用户 text part。纯图片输入也必须产生用户 `text` part，text 可以为空但 attachments 不得为空。enabled tools、`turn`、`inference` 等内部诊断或运行态 part 不得在 projection 上排到用户输入之前，避免前端等待状态、内部状态或历史回放出现在用户问题上方。
 
 历史、实时和 stale backfill 都必须使用 `StudioEventEnvelope.sequence` 作为唯一 durable cursor。`studio_events` 保存 durable snapshot 事件；`studio_messages/message_parts` projection 只能由 `StudioEventRuntime` 从 durable snapshot 事件派生，不提供第二套 timeline cursor 或第二套 wire 协议。`stale` 是 live-only 补拉提示，不写入 `studio_events`，不推进 durable cursor；前端收到后先标记对应 session view，再用当前 cursor 补拉缺失 durable 事件。前端只能用 StudioEvent cursor 判断新旧，不能用 part 列表里的最大 `order` 代替游标。旧 snapshot 只能补齐当前状态中不存在或尚未应用的 event，不能覆盖已经通过实时事件接收的新 turn 内容。前端 optimistic message/part 可以使用临时本地 order 参与展示，但不得预占或推进后端 cursor。
 
@@ -51,13 +51,14 @@ pl-model provider
   → async-openai stream
   → protocol stream event mapper
   → provider-independent stream accumulator
-  → AgentEventSender / TraceRecorder 内部事件
+  → pl-trace AgentEventSender / TraceRecorder 内部事件
+  → pl-core StudioRuntime::drain_agent_events
   → StudioEventRuntime 分配 durable sequence、规范化 payload、持久化 message/part snapshot + projection、广播 snapshot/live delta
   → Tauri studio-runtime-event
   → studioEventReducer
 ```
 
-`pure-studio` 不直接订阅 `AgentEventReceiver`。Tauri bridge 只转发已经持久化的 `StudioEventEnvelope`；前端 reducer 按事件 kind 更新当前或后台 session view：
+`pure-studio` 不直接订阅 `AgentEventReceiver`，也不依赖内部 `pl-trace` crate。raw `AgentEvent` 到 typed Studio event 的映射在 `pl-core` 内完成；Tauri bridge 只转发已经规范化的 `StudioEventEnvelope`。前端 reducer 按事件 kind 更新当前或后台 session view：
 
 - `messageUpdated` upsert 完整 message snapshot。
 - `messagePartUpdated` upsert 完整 part snapshot，并清空同 part 的 delta overlay。
@@ -109,7 +110,7 @@ Studio 渲染可以在 selector 派生出展示项后使用虚拟滚动优化大
 
 `StudioEventKind::InteractionChanged` 是审批、用户输入和计划确认的唯一实时交互事件。事件携带 `InteractionRequest`，包括 `kind`、`status`、`scope` 和类型化 payload；持久恢复以 `interactions` 表为准。`userInput` 的 resolved 事件不回传 secret 答案明文到普通 timeline 展示；答案只通过 interaction resolution 返回给等待中的工具。旧 `UserInputRequested` / `UserInputAnswered`、`ToolApprovalRequested`、`studio-interaction-changed` 等 sideband 不是 Studio 协议入口。
 
-agent 协作 timeline 也遵循 typed Studio 协议：`agentChanged` 更新 latest snapshot，`agentTimelineChanged` 只携带 typed spawn/interaction/wait/close lifecycle event。MCP/LSP health 事件同样携带 typed `StudioMcpHealth` / `StudioLspHealth` snapshot。前端不得反序列化 raw `AgentEvent` 或健康检查 payload；内部 trace 如需保留原始事件，只能作为诊断输入，在进入 Studio wire 前完成映射。
+agent 协作 timeline 也遵循 typed Studio 协议：`agentChanged` 更新 latest snapshot，`agentTimelineChanged` 只携带 typed spawn/interaction/wait/close lifecycle event。`bootstrap`、`select_session` 和 `load_session_state` 的 `agentEvents` 历史快照也直接返回 `StudioAgentTimelineEvent[]`，不得再暴露旧式 `kind + payload` DTO。MCP/LSP health 事件同样携带 typed `StudioMcpHealth` / `StudioLspHealth` snapshot。前端不得反序列化 raw `AgentEvent` 或健康检查 payload；内部 trace 如需保留原始事件，只能作为诊断输入，在进入 Studio wire 前完成映射。
 
 子代理内部事件不直接转发完整文本流、思考流、工具调用流或工具输出。`pl-core` 将子代理生命周期压缩为 `agent` part 和 `AgentStateChanged` snapshot，状态固定为 `queued`、`running`、`waiting`、`completed`、`errored`、`interrupted`、`shutdown`、`notFound`。`pure-studio` 持久化这些状态事件，并在聊天界面只渲染路径、状态、摘要和最终错误文本，避免把子代理内部执行细节混入父会话 timeline。
 

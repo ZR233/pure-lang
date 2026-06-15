@@ -1,7 +1,8 @@
 use pl_protocol::{
     AgentStatus, BudgetLimitKind, BudgetUsage, Message, RuntimeUsageSnapshot, StudioMessage,
-    StudioPart, StudioTurnStatus, TraceEvent,
+    StudioPart, StudioTurnStatus,
 };
+use pl_trace::TraceEvent;
 
 use crate::TurnResult;
 

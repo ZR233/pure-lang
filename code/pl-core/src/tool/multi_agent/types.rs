@@ -144,7 +144,7 @@ pub(crate) struct AgentRunConfig {
     pub workspace_root: PathBuf,
     pub options: crate::TurnOptions,
     pub agent_control: crate::AgentControl,
-    pub event_tx: pl_protocol::AgentEventSender,
+    pub event_tx: pl_trace::AgentEventSender,
     pub agent_id: String,
     pub agent_path: String,
     pub role: String,

@@ -1,4 +1,5 @@
-use pl_protocol::{AgentEvent, AgentStatus, PureError};
+use pl_protocol::{AgentStatus, PureError};
+use pl_trace::AgentEvent;
 
 use super::events::emit_agent_record;
 use super::runner::run_agent_turn;

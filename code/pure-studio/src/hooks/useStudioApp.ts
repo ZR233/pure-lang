@@ -33,7 +33,7 @@ import {
   selectSelectedProject,
   selectSelectedSession,
   selectActiveInteraction,
-  selectTimelineEntries,
+  selectConversationEntries,
 } from "../state/selectors";
 import { initialStudioState, studioReducer } from "../state/studio-state";
 import type {
@@ -50,7 +50,7 @@ import type {
   StudioEventEnvelope,
   StudioTurnStatus,
   StudioAttachment,
-  TimelinePartView,
+  ConversationPartView,
   StudioPart,
   StudioPartDeltaField,
 } from "../types";
@@ -95,7 +95,7 @@ function studioAttachmentFromRecord(record: AttachmentRecord): StudioAttachment 
 }
 
 function statusTextForToolItem(
-  item: TimelinePartView,
+  item: ConversationPartView,
   t: (key: string, args?: Record<string, unknown>) => string,
 ) {
   const name = item.tool?.name || "tool";
@@ -131,7 +131,7 @@ function statusTextForStudioPart(
       status: part.status,
       tool: part.tool ?? null,
       content: part.text,
-    } as TimelinePartView, t);
+    } as ConversationPartView, t);
   }
   if (part.status === "failed") return t("status.error", { message: part.error || part.text || "unknown" });
   if (part.status === "interrupted") return t("status.interrupted");
@@ -259,8 +259,8 @@ export function useStudioApp() {
   const selectedSession = selectSelectedSession(state);
   const activeInteraction = selectActiveInteraction(state);
 
-  const timelineEntries = useMemo(() => {
-    return selectTimelineEntries(state);
+  const conversationEntries = useMemo(() => {
+    return selectConversationEntries(state);
   }, [state.messages, state.partsByMessage, state.partDeltaAccum, state.planStates]);
 
   const providerUsageAutoRefreshKey = useMemo(() => {
@@ -883,7 +883,7 @@ export function useStudioApp() {
 
   return {
     state,
-    timelineEntries,
+    conversationEntries,
     selectedProject,
     selectedSession,
     activeInteraction,

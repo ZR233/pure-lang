@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pl_core::{
-    CompileMode, CoreSession, ModelRole, PureConfig, PureCore, TraceEvent, TraceEventKind,
-    TurnBudget, TurnRequest, TurnResultStatus,
+    CompileMode, CoreSession, ModelRole, PureConfig, PureCore, TurnBudget, TurnRequest,
+    TurnResultStatus,
 };
+use pl_trace::{TraceEvent, TraceEventKind};
 use pretty_assertions::{assert_eq, assert_ne};
 
 const DEEPSEEK_LIVE_ENV_KEY: &str = "API_KEY_DEEPSEEK";
@@ -94,7 +95,7 @@ fn final_text_items(events: &[TraceEvent]) -> Vec<String> {
         .iter()
         .filter_map(|event| match &event.kind {
             TraceEventKind::TracePartStarted { item }
-                if item.kind == pl_protocol::TracePartKind::Text =>
+                if item.kind == pl_trace::TracePartKind::Text =>
             {
                 Some(item.item_id.clone())
             }

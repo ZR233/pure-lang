@@ -4,13 +4,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pl_core::{
-    CompileMode, CoreSession, ModelRole, PureConfig, PureCore, TraceEvent, TurnBudget, TurnOptions,
+    CompileMode, CoreSession, ModelRole, PureConfig, PureCore, TurnBudget, TurnOptions,
     TurnRequest, TurnResultStatus,
 };
-use pl_protocol::{
-    InteractionPayload, InteractionResolution, ToolApprovalResolution, TraceEventKind,
-    TracePartStatus,
-};
+use pl_protocol::{InteractionPayload, InteractionResolution, ToolApprovalResolution};
+use pl_trace::{TraceEvent, TraceEventKind, TracePartStatus};
 use pretty_assertions::assert_eq;
 
 const DEEPSEEK_LIVE_ENV_KEY: &str = "API_KEY_DEEPSEEK";

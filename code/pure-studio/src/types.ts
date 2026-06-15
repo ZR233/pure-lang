@@ -75,18 +75,6 @@ export type AgentStateChangedEvent = {
   updatedAt: number;
 };
 
-export type AgentTimelineEvent = {
-  eventId: string;
-  sessionId: string;
-  sequence: number;
-  kind: string;
-  agentId?: string | null;
-  path?: string | null;
-  parentPath?: string | null;
-  payload: Record<string, unknown> | null;
-  createdAt: number;
-};
-
 export type StudioAgentTimelineEvent = {
   eventId: string;
   sessionId: string;
@@ -483,7 +471,7 @@ export type StudioFilePart = {
   mediaType?: string | null;
 };
 
-export type TimelinePartView = {
+export type ConversationPartView = {
   turnId: string;
   itemId: string;
   startedSequence: number;
@@ -716,7 +704,7 @@ export type BootstrapPayload = {
   selectedProjectId?: string | null;
   sessions: SessionRecord[];
   selectedSessionId?: string | null;
-  agentEvents: AgentTimelineEvent[];
+  agentEvents: StudioAgentTimelineEvent[];
   agents: AgentDto[];
   sessionRuntime?: SessionRuntime | null;
   interactions?: InteractionRequest[];
@@ -730,7 +718,7 @@ export type ProjectSelectionPayload = {
   projects: ProjectRecord[];
   sessions: SessionRecord[];
   selectedSessionId?: string | null;
-  agentEvents: AgentTimelineEvent[];
+  agentEvents: StudioAgentTimelineEvent[];
   agents: AgentDto[];
   sessionRuntime?: SessionRuntime | null;
   interactions?: InteractionRequest[];
@@ -740,7 +728,7 @@ export type ProjectSelectionPayload = {
 export type SessionSelectionPayload = {
   sessionId: string;
   sessions: SessionRecord[];
-  agentEvents: AgentTimelineEvent[];
+  agentEvents: StudioAgentTimelineEvent[];
   agents: AgentDto[];
   sessionRuntime?: SessionRuntime | null;
   interactions?: InteractionRequest[];
@@ -904,7 +892,7 @@ export type SessionStatePayload = {
   sessionId: string;
   session: SessionRecord;
   sessions: SessionRecord[];
-  agentEvents: AgentTimelineEvent[];
+  agentEvents: StudioAgentTimelineEvent[];
   agents: AgentDto[];
   sessionRuntime: SessionRuntime;
   interactions: InteractionRequest[];

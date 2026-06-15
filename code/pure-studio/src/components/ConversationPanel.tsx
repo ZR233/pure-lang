@@ -34,13 +34,13 @@ import type {
   RoleRecord,
   SessionRecord,
   SessionRuntime,
-  TimelinePartView,
+  ConversationPartView,
   TurnPhase,
   ToolCallStatus2,
   UserInputResponse,
   UserQuestion,
 } from "../types";
-import type { TimelineEntry, ToolGroupSummaryPart } from "../state/selectors";
+import type { ConversationEntry, ToolGroupSummaryPart } from "../state/selectors";
 import { hidesToolResult, isQuietFileTool } from "../lib/tool-display";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -64,7 +64,7 @@ const agentStatusKeys: Record<AgentStatus, string> = {
 type ConversationPanelProps = {
   selectedSession: SessionRecord | null;
   isBusy: boolean;
-  entries: TimelineEntry[];
+  entries: ConversationEntry[];
   agents: AgentDto[];
   sessionRuntime: SessionRuntime | null;
   lspServers: LspServerRecord[];
@@ -103,7 +103,7 @@ function thoughtLabel(content: string, t: TFunction): string {
   return firstLine?.toLowerCase().startsWith("thought") ? firstLine : t("timeline.thinking");
 }
 
-function isActiveStatus(status: TimelinePartView["status"]): boolean {
+function isActiveStatus(status: ConversationPartView["status"]): boolean {
   return status === "started" || status === "streaming" || status === "running";
 }
 
@@ -154,7 +154,7 @@ function toolStatusLabel(status: ToolCallStatus2 | null | undefined, t: TFunctio
   }
 }
 
-function turnStatusLabel(status: TimelinePartView["status"], t: TFunction): string {
+function turnStatusLabel(status: ConversationPartView["status"], t: TFunction): string {
   switch (status) {
     case "started":
     case "streaming":
@@ -303,7 +303,7 @@ function EntryShell({
   );
 }
 
-function MessageEntry({ entry }: { entry: Extract<TimelineEntry, { kind: "message" }> }) {
+function MessageEntry({ entry }: { entry: Extract<ConversationEntry, { kind: "message" }> }) {
   const roleIcon = entry.role === "user" ? <UserRound size={14} /> : <span className="text-xs font-bold text-primary">P</span>;
   const attachments = entry.attachments ?? [];
   if (entry.role === "user") {
@@ -349,7 +349,7 @@ function MessageEntry({ entry }: { entry: Extract<TimelineEntry, { kind: "messag
   );
 }
 
-function CommentaryEntry({ entry }: { entry: Extract<TimelineEntry, { kind: "commentary" }> }) {
+function CommentaryEntry({ entry }: { entry: Extract<ConversationEntry, { kind: "commentary" }> }) {
   const active = isActiveStatus(entry.status);
   return (
     <div className="flex w-full items-start gap-2 px-4 py-2 text-sm text-muted-foreground">
@@ -363,7 +363,7 @@ function CommentaryEntry({ entry }: { entry: Extract<TimelineEntry, { kind: "com
   );
 }
 
-function ThoughtEntry({ entry, t }: { entry: Extract<TimelineEntry, { kind: "thought" }>; t: TFunction }) {
+function ThoughtEntry({ entry, t }: { entry: Extract<ConversationEntry, { kind: "thought" }>; t: TFunction }) {
   const active = isActiveStatus(entry.status);
   return (
     <div className="flex w-full items-center gap-2 text-sm text-muted-foreground bg-muted/30 rounded-md px-3 py-1.5 my-1">
@@ -393,7 +393,7 @@ function ThoughtEntry({ entry, t }: { entry: Extract<TimelineEntry, { kind: "tho
   );
 }
 
-function StatusEntry({ entry, t }: { entry: Extract<TimelineEntry, { kind: "status" }>; t: TFunction }) {
+function StatusEntry({ entry, t }: { entry: Extract<ConversationEntry, { kind: "status" }>; t: TFunction }) {
   return (
     <EntryShell className="" icon={<Loader2 size={14} className="animate-spin" />}>
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -403,7 +403,7 @@ function StatusEntry({ entry, t }: { entry: Extract<TimelineEntry, { kind: "stat
   );
 }
 
-function ToolEntry({ item, t }: { item: Extract<TimelineEntry, { kind: "tool" }>["item"]; t: TFunction }) {
+function ToolEntry({ item, t }: { item: Extract<ConversationEntry, { kind: "tool" }>["item"]; t: TFunction }) {
   const tool = item.tool;
   const name = tool?.name || "Tool call";
   const argumentsText = tool?.arguments ?? "";
@@ -437,7 +437,7 @@ function PlanEntry({
   entry,
   t,
 }: {
-  entry: Extract<TimelineEntry, { kind: "plan" }>;
+  entry: Extract<ConversationEntry, { kind: "plan" }>;
   t: TFunction;
 }) {
   const state = entry.planState?.state ?? "pending";
@@ -465,7 +465,7 @@ function ToolGroupEntry({
   entry,
   t,
 }: {
-  entry: Extract<TimelineEntry, { kind: "toolGroup" }>;
+  entry: Extract<ConversationEntry, { kind: "toolGroup" }>;
   t: TFunction;
 }) {
   return (
@@ -501,7 +501,7 @@ function toolGroupPartLabel(part: ToolGroupSummaryPart, t: TFunction): string {
   return t(`toolGroup.${part.kind}${suffix}`, { count: part.count });
 }
 
-function ToolGroupDetailRow({ item, t }: { item: TimelinePartView; t: TFunction }) {
+function ToolGroupDetailRow({ item, t }: { item: ConversationPartView; t: TFunction }) {
   const tool = item.tool;
   const name = tool?.name || "Tool call";
   const argumentsText = tool?.arguments ?? "";
@@ -535,7 +535,7 @@ function AgentEntry({
   item,
   t,
 }: {
-  item: Extract<TimelineEntry, { kind: "agent" }>["item"];
+  item: Extract<ConversationEntry, { kind: "agent" }>["item"];
   t: TFunction;
 }) {
   const agent = item.agent;
@@ -575,7 +575,7 @@ function AgentEntry({
 }
 
 function agentFailureDetail(
-  agent: Extract<TimelineEntry, { kind: "agent" }>["item"]["agent"],
+  agent: Extract<ConversationEntry, { kind: "agent" }>["item"]["agent"],
   t: TFunction,
 ): string | null {
   if (!agent || !["errored", "interrupted", "shutdown", "notFound"].includes(agent.status)) {
@@ -603,7 +603,7 @@ function agentFailureDetail(
   }
 }
 
-function TraceEntry({ item, t }: { item: TimelinePartView; t: TFunction }) {
+function TraceEntry({ item, t }: { item: ConversationPartView; t: TFunction }) {
   const content = item.content.trim();
   return (
     <EntryShell className="" icon={<Circle size={14} />}>
@@ -1096,7 +1096,7 @@ export function ConversationPanel({
     setAttachmentError(null);
   }
 
-  function renderTimelineEntry(entry: TimelineEntry) {
+  function renderConversationEntry(entry: ConversationEntry) {
     if (entry.kind === "message") {
       return <MessageEntry entry={entry} />;
     }
@@ -1135,7 +1135,7 @@ export function ConversationPanel({
         entries={entries}
         isBusy={isBusy}
         scrollToBottomLabel={t("toolCall.scrollToBottom")}
-        renderEntry={renderTimelineEntry}
+        renderEntry={renderConversationEntry}
         emptyState={
           <div className="flex flex-col items-center justify-center gap-2 text-muted-foreground py-12">
             <Terminal size={34} />

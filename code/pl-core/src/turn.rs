@@ -3,7 +3,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use pl_model::TokenUsage;
-use pl_protocol::{BudgetLimitKind, BudgetUsage, MessageContent, TraceAttachment, TraceEvent};
+use pl_protocol::{BudgetLimitKind, BudgetUsage, MessageContent};
+use pl_trace::{TraceAttachment, TraceEvent};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 

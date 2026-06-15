@@ -60,7 +60,7 @@ SQLite：
 4. 不读取旧表
 5. `subagent_events` 被 `agent_events` 替代；新 schema 不再创建旧表，运行期不读写旧表
 6. `trace_events` 不再作为 Studio 对话流读取源；新 schema 使用 `studio_events`、`studio_messages`、`message_parts`、`turns` 和 `interactions` 作为 durable snapshot 与 projection
-7. 旧 `timeline_events` 只作为破坏性迁移清理对象保留；运行期不再提供写入、读取或 cursor API
+7. 旧 `timeline_events` 由破坏性迁移 drop；运行期不再保留 entity、写入、读取或 cursor API
 
 config：
 

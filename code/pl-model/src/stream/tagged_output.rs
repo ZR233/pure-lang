@@ -1,4 +1,4 @@
-use pl_protocol::TraceTextChannel;
+use pl_trace::TraceTextChannel;
 
 use crate::proposed_plan::{VisibleTextParser, VisibleTextSegment};
 

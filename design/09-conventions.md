@@ -11,6 +11,8 @@
 ```text
 pl-protocol
     ↑
+pl-trace
+    ↑
 pl-model
     ↑
 pl-core
@@ -18,7 +20,7 @@ pl-core
 pure-studio
 ```
 
-允许 `pl-core` 同时直接依赖 `pl-protocol` 和 `pl-model`。
+允许 `pl-core` 同时直接依赖 `pl-protocol`、`pl-trace` 和 `pl-model`。
 
 禁止 `pl-model` 依赖 `pl-core`，避免循环依赖。
 
@@ -45,7 +47,7 @@ pub trait ModelProvider: Send + Sync {
 
 模块默认私有。公开 API 通过 crate 根明确 `pub use`。
 
-`pl-core` 可以重导出常用 `pl-protocol` 类型，方便核心层用户使用。
+`pl-core` 可以重导出常用 `pl-protocol` 类型，方便核心层用户使用；raw `pl-trace` 类型只作为内部运行事件边界，不应作为 Studio wire 或前端事实源。
 
 ## 9.6 文档口径
 
@@ -54,6 +56,7 @@ pub trait ModelProvider: Send + Sync {
 - 核心逻辑层：`pl-core`。
 - LLM provider 层：`pl-model`。
 - 公共协议层：`pl-protocol`。
+- 内部 trace 协议层：`pl-trace`。
 
 当前版本不承诺独立沙箱。工具系统必须由明确 `ToolApprovalPolicy` 控制；Studio 当前使用 `AutoAllow`，保留切回 `Manual` 的事件和 UI 能力。
 

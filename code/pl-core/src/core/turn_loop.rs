@@ -1,8 +1,7 @@
 use pl_model::{CompletionRequest, ModelProvider, ReasoningConfig, ReasoningSummary};
-use pl_protocol::{
-    AgentEvent, ContentPart, EnabledToolsEvent, ErrorSeverity, ImageSource, Message,
-    MessageContent, Result, TokenUsageSnapshot, TraceEventKind, TracePartStatus,
-};
+use pl_protocol::TokenUsageSnapshot;
+use pl_protocol::{ContentPart, ErrorSeverity, ImageSource, Message, MessageContent, Result};
+use pl_trace::{AgentEvent, EnabledToolsEvent, TraceEventKind, TracePartStatus};
 use std::sync::Arc;
 
 use crate::context_compaction::{

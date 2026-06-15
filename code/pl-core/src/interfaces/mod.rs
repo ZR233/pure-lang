@@ -1,7 +1,8 @@
 use std::future::Future;
 
 use anyhow::Result;
-use pl_protocol::{AgentEvent, Message};
+use pl_protocol::Message;
+use pl_trace::AgentEvent;
 
 use crate::{
     ConfigStore, CoreSession, ProjectRecord, SessionRecord, SessionRuntimeRecord,

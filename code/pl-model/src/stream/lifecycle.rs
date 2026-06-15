@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use pl_protocol::TraceTextChannel;
+use pl_trace::TraceTextChannel;
 
 use super::event::{ModelStreamEvent, ToolInputDeltaPayload, ToolInputPayloadKind};
 

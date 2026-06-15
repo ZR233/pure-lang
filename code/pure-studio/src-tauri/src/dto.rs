@@ -1,8 +1,8 @@
 use pl_protocol::{
     AgentStatus, BudgetLimitKind, BudgetUsage, InteractionRequest, RuntimeCostAmount,
-    StudioAgentSnapshot, StudioEventEnvelope, StudioKeyValue, StudioLspHealth, StudioLspServer,
-    StudioMcpHealth, StudioMcpServer, StudioMessage, StudioPart, StudioRuntimeUsage,
-    StudioSessionRuntime,
+    StudioAgentSnapshot, StudioAgentTimelineEvent, StudioEventEnvelope, StudioKeyValue,
+    StudioLspHealth, StudioLspServer, StudioMcpHealth, StudioMcpServer, StudioMessage, StudioPart,
+    StudioRuntimeUsage, StudioSessionRuntime,
 };
 use serde::{Deserialize, Serialize};
 
@@ -24,20 +24,6 @@ pub struct SessionDto {
     pub mode: String,
     pub updated_at: i64,
     pub visibility: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentEventDto {
-    pub event_id: String,
-    pub session_id: String,
-    pub sequence: i64,
-    pub kind: String,
-    pub agent_id: Option<String>,
-    pub path: Option<String>,
-    pub parent_path: Option<String>,
-    pub payload: serde_json::Value,
-    pub created_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -619,7 +605,7 @@ pub struct BootstrapDto {
     pub selected_project_id: Option<String>,
     pub sessions: Vec<SessionDto>,
     pub selected_session_id: Option<String>,
-    pub agent_events: Vec<AgentEventDto>,
+    pub agent_events: Vec<StudioAgentTimelineEvent>,
     pub agents: Vec<AgentDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
     pub interactions: Vec<InteractionRequest>,
@@ -634,7 +620,7 @@ pub struct ProjectSelectionDto {
     pub projects: Vec<ProjectDto>,
     pub sessions: Vec<SessionDto>,
     pub selected_session_id: Option<String>,
-    pub agent_events: Vec<AgentEventDto>,
+    pub agent_events: Vec<StudioAgentTimelineEvent>,
     pub agents: Vec<AgentDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
     pub interactions: Vec<InteractionRequest>,
@@ -646,7 +632,7 @@ pub struct ProjectSelectionDto {
 pub struct SessionSelectionDto {
     pub session_id: String,
     pub sessions: Vec<SessionDto>,
-    pub agent_events: Vec<AgentEventDto>,
+    pub agent_events: Vec<StudioAgentTimelineEvent>,
     pub agents: Vec<AgentDto>,
     pub session_runtime: Option<SessionRuntimeDto>,
     pub interactions: Vec<InteractionRequest>,
@@ -734,7 +720,7 @@ pub struct SessionStateDto {
     pub session_id: String,
     pub session: SessionDto,
     pub sessions: Vec<SessionDto>,
-    pub agent_events: Vec<AgentEventDto>,
+    pub agent_events: Vec<StudioAgentTimelineEvent>,
     pub agents: Vec<AgentDto>,
     pub session_runtime: SessionRuntimeDto,
     pub interactions: Vec<InteractionRequest>,

@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "code/pl-protocol",
+    "code/pl-trace",
     "code/pl-model",
     "code/pl-lsp",
     "code/pl-core",
@@ -49,6 +50,7 @@ sea-orm = { version = "1.1.20", default-features = false, features = [
 ] }
 
 pl-protocol = { path = "code/pl-protocol" }
+pl-trace = { path = "code/pl-trace" }
 pl-lsp = { path = "code/pl-lsp" }
 pl-core = { path = "code/pl-core" }
 pl-model = { path = "code/pl-model" }
