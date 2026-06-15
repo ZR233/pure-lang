@@ -50,7 +50,7 @@ import type {
   StudioEventEnvelope,
   StudioTurnStatus,
   TimelineAttachment,
-  TimelineItem,
+  TimelinePartView,
   StudioPart,
   StudioPartDeltaField,
 } from "../types";
@@ -95,7 +95,7 @@ function timelineAttachmentFromRecord(record: AttachmentRecord): TimelineAttachm
 }
 
 function statusTextForToolItem(
-  item: TimelineItem,
+  item: TimelinePartView,
   t: (key: string, args?: Record<string, unknown>) => string,
 ) {
   const name = item.tool?.name || "tool";
@@ -131,7 +131,7 @@ function statusTextForStudioPart(
       status: part.status,
       tool: part.tool ?? null,
       content: part.text,
-    } as TimelineItem, t);
+    } as TimelinePartView, t);
   }
   if (part.status === "failed") return t("status.error", { message: part.error || part.text || "unknown" });
   if (part.status === "interrupted") return t("status.interrupted");

@@ -34,7 +34,7 @@ import type {
   RoleRecord,
   SessionRecord,
   SessionRuntime,
-  TimelineItem,
+  TimelinePartView,
   TurnPhase,
   ToolCallStatus2,
   UserInputResponse,
@@ -103,7 +103,7 @@ function thoughtLabel(content: string, t: TFunction): string {
   return firstLine?.toLowerCase().startsWith("thought") ? firstLine : t("timeline.thinking");
 }
 
-function isActiveStatus(status: TimelineItem["status"]): boolean {
+function isActiveStatus(status: TimelinePartView["status"]): boolean {
   return status === "started" || status === "streaming" || status === "running";
 }
 
@@ -154,7 +154,7 @@ function toolStatusLabel(status: ToolCallStatus2 | null | undefined, t: TFunctio
   }
 }
 
-function turnStatusLabel(status: TimelineItem["status"], t: TFunction): string {
+function turnStatusLabel(status: TimelinePartView["status"], t: TFunction): string {
   switch (status) {
     case "started":
     case "streaming":
@@ -501,7 +501,7 @@ function toolGroupPartLabel(part: ToolGroupSummaryPart, t: TFunction): string {
   return t(`toolGroup.${part.kind}${suffix}`, { count: part.count });
 }
 
-function ToolGroupDetailRow({ item, t }: { item: TimelineItem; t: TFunction }) {
+function ToolGroupDetailRow({ item, t }: { item: TimelinePartView; t: TFunction }) {
   const tool = item.tool;
   const name = tool?.name || "Tool call";
   const argumentsText = tool?.arguments ?? "";
@@ -603,7 +603,7 @@ function agentFailureDetail(
   }
 }
 
-function TraceEntry({ item, t }: { item: TimelineItem; t: TFunction }) {
+function TraceEntry({ item, t }: { item: TimelinePartView; t: TFunction }) {
   const content = item.content.trim();
   return (
     <EntryShell className="" icon={<Circle size={14} />}>

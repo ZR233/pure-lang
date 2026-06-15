@@ -8,12 +8,12 @@ use anyhow::{Context, Result, bail};
 use base64::Engine;
 use image::GenericImageView;
 use pl_protocol::{
-    AgentEvent, AgentRuntimeDelta, InteractionKind, InteractionPayload, InteractionRequest,
+    AgentRuntimeDelta, InteractionKind, InteractionPayload, InteractionRequest,
     InteractionResolution, InteractionStatus, Message, PlanConfirmationResolution,
     PlanLifecycleEvent, PlanLifecycleState, RuntimeUsageSnapshot, SkillActivation,
-    StudioAttachment, StudioEventEnvelope, StudioEventKind, StudioMessage, StudioPart,
-    StudioRuntimeUsage, StudioSessionRuntime, StudioTurnStatus, TimelineAttachment, TraceEvent,
-    TraceEventKind,
+    StudioAgentTimelineEvent, StudioAgentTimelineEventKind, StudioAttachment, StudioEventEnvelope,
+    StudioEventKind, StudioMessage, StudioPart, StudioRuntimeUsage, StudioSessionRuntime,
+    StudioTurnStatus, TimelineAttachment, TraceEvent, TraceEventKind,
 };
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait, Database,
@@ -1392,6 +1392,12 @@ where
             existing_message_part_order_with_connection(conn, &part.part_id).await?;
         part.order = existing_order.unwrap_or(envelope.sequence);
     }
+    if let StudioEventKind::AgentTimelineChanged { event } = &mut envelope.kind {
+        event.event_id = envelope.event_id.clone();
+        event.session_id = envelope.session_id.clone().unwrap_or_default();
+        event.sequence = envelope.sequence;
+        event.created_at = envelope.created_at;
+    }
     Ok(envelope)
 }
 
@@ -1928,8 +1934,7 @@ async fn apply_studio_event_projection_with_tx(
         }
         StudioEventKind::AgentTimelineChanged { event } => {
             if let Some(session_id) = envelope.session_id.as_deref()
-                && let Some(record) =
-                    agent_timeline_event_record_from_payload(session_id, envelope, &event.payload)
+                && let Some(record) = agent_timeline_event_record_from_event(session_id, event)
             {
                 insert_agent_event_with_tx(tx, record).await?;
             }
@@ -1951,93 +1956,83 @@ async fn apply_studio_event_projection_with_tx(
     Ok(())
 }
 
-fn agent_timeline_event_record_from_payload(
+fn agent_timeline_event_record_from_event(
     session_id: &str,
-    envelope: &StudioEventEnvelope,
-    payload: &serde_json::Value,
+    event: &StudioAgentTimelineEvent,
 ) -> Option<AgentTimelineEventRecord> {
-    let event = serde_json::from_value::<AgentEvent>(payload.clone()).ok()?;
-    let (kind, agent_id, path, parent_path) = match event {
-        AgentEvent::AgentStateChanged {
-            id,
-            path,
-            parent_path,
-            ..
-        } => ("agentStatus".to_string(), Some(id), Some(path), parent_path),
-        AgentEvent::CollabAgentSpawnBegin { sender_path, .. } => {
-            ("spawnBegin".to_string(), None, Some(sender_path), None)
+    let (kind, agent_id, path, parent_path) = match &event.kind {
+        StudioAgentTimelineEventKind::SpawnBegin { sender_path, .. } => (
+            "spawnBegin".to_string(),
+            None,
+            Some(sender_path.clone()),
+            None,
+        ),
+        StudioAgentTimelineEventKind::SpawnEnd { agent_id, path, .. } => {
+            ("spawnEnd".to_string(), agent_id.clone(), path.clone(), None)
         }
-        AgentEvent::CollabAgentSpawnEnd { agent_id, path, .. } => {
-            ("spawnEnd".to_string(), agent_id, path, None)
-        }
-        AgentEvent::CollabAgentInteractionBegin {
+        StudioAgentTimelineEventKind::InteractionBegin {
             receiver_path,
             sender_path,
             ..
         } => (
             "interactionBegin".to_string(),
             None,
-            Some(receiver_path),
-            Some(sender_path),
+            Some(receiver_path.clone()),
+            Some(sender_path.clone()),
         ),
-        AgentEvent::CollabAgentInteractionEnd {
+        StudioAgentTimelineEventKind::InteractionEnd {
             receiver_path,
             sender_path,
             ..
         } => (
             "interactionEnd".to_string(),
             None,
-            Some(receiver_path),
-            Some(sender_path),
+            Some(receiver_path.clone()),
+            Some(sender_path.clone()),
         ),
-        AgentEvent::CollabWaitingBegin { sender_path, .. } => {
-            ("waitingBegin".to_string(), None, Some(sender_path), None)
-        }
-        AgentEvent::CollabWaitingEnd { sender_path, .. } => {
-            ("waitingEnd".to_string(), None, Some(sender_path), None)
-        }
-        AgentEvent::CollabCloseBegin {
+        StudioAgentTimelineEventKind::WaitingBegin { sender_path, .. } => (
+            "waitingBegin".to_string(),
+            None,
+            Some(sender_path.clone()),
+            None,
+        ),
+        StudioAgentTimelineEventKind::WaitingEnd { sender_path, .. } => (
+            "waitingEnd".to_string(),
+            None,
+            Some(sender_path.clone()),
+            None,
+        ),
+        StudioAgentTimelineEventKind::CloseBegin {
             receiver_path,
             sender_path,
             ..
         } => (
             "closeBegin".to_string(),
             None,
-            Some(receiver_path),
-            Some(sender_path),
+            Some(receiver_path.clone()),
+            Some(sender_path.clone()),
         ),
-        AgentEvent::CollabCloseEnd {
+        StudioAgentTimelineEventKind::CloseEnd {
             receiver_path,
             sender_path,
             ..
         } => (
             "closeEnd".to_string(),
             None,
-            Some(receiver_path),
-            Some(sender_path),
+            Some(receiver_path.clone()),
+            Some(sender_path.clone()),
         ),
-        AgentEvent::TimelineItemStarted { .. }
-        | AgentEvent::TimelineItemDelta { .. }
-        | AgentEvent::TimelineItemCompleted { .. }
-        | AgentEvent::TimelineItemFailed { .. }
-        | AgentEvent::InteractionChanged { .. }
-        | AgentEvent::AgentRuntimeUpdated { .. }
-        | AgentEvent::SkillActivated { .. }
-        | AgentEvent::TurnInterrupted { .. }
-        | AgentEvent::TurnBudgetLimited { .. }
-        | AgentEvent::Done
-        | AgentEvent::Error { .. } => return None,
     };
     Some(AgentTimelineEventRecord {
-        event_id: envelope.event_id.clone(),
+        event_id: event.event_id.clone(),
         session_id: session_id.to_string(),
-        sequence: envelope.sequence as i64,
+        sequence: event.sequence as i64,
         kind,
         agent_id,
         path,
         parent_path,
-        payload_json: serde_json::to_string(payload).ok()?,
-        created_at: envelope.created_at,
+        payload_json: serde_json::to_string(event).ok()?,
+        created_at: event.created_at,
     })
 }
 

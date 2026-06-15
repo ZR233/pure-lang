@@ -29,10 +29,11 @@ pub use message::{
 };
 pub use permission::PermissionLevel;
 pub use studio_event::{
-    StudioAgentPart, StudioAgentSnapshot, StudioAgentTimelineEvent, StudioAttachment,
-    StudioEventEnvelope, StudioEventKind, StudioFilePart, StudioInferencePart, StudioLspHealth,
-    StudioMcpHealth, StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart,
-    StudioPartDelta, StudioPartDeltaField, StudioPartStatus, StudioPartType, StudioPlanPart,
-    StudioRuntimeUsage, StudioSessionHandoff, StudioSessionRuntime, StudioSessionSummary,
-    StudioTextChannel, StudioToolPart, StudioTurn, StudioTurnStatus,
+    StudioAgentPart, StudioAgentSnapshot, StudioAgentTimelineEvent, StudioAgentTimelineEventKind,
+    StudioAttachment, StudioEventEnvelope, StudioEventKind, StudioFilePart, StudioInferencePart,
+    StudioKeyValue, StudioLspHealth, StudioLspServer, StudioMcpHealth, StudioMcpServer,
+    StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart, StudioPartDelta,
+    StudioPartDeltaField, StudioPartStatus, StudioPartType, StudioPlanPart, StudioRuntimeUsage,
+    StudioSessionHandoff, StudioSessionRuntime, StudioSessionSummary, StudioTextChannel,
+    StudioToolPart, StudioTurn, StudioTurnStatus,
 };

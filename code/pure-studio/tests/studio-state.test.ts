@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server.browser";
 import { initialStudioState, studioReducer } from "../src/state/studio-state";
-import { timelineItemsFromConversation } from "../src/state/timeline-state";
+import { timelinePartViewsFromConversation } from "../src/state/timeline-state";
 import { selectTimelineEntries } from "../src/state/selectors";
 import { normalizeRolesForProviders } from "../src/components/RoleSettings";
 import { selectedContextWindow } from "../src/components/SessionStatusBar";
@@ -25,7 +25,7 @@ import type {
   RoleRecord,
   SessionRuntime,
   StudioEventEnvelope,
-  TimelineItem,
+  TimelinePartView,
   StudioMessage,
   StudioPart,
   StudioPartDelta,
@@ -129,8 +129,8 @@ function textItem(
   itemId: string,
   sequence: number,
   content: string,
-  textChannel: TimelineItem["textChannel"] = "final",
-): TimelineItem {
+  textChannel: TimelinePartView["textChannel"] = "final",
+): TimelinePartView {
   return {
     turnId: itemId.split("-").slice(0, 2).join("-") || "turn",
     itemId,
@@ -145,7 +145,7 @@ function textItem(
   };
 }
 
-function planItem(itemId: string, turnId: string, sequence: number, content: string): TimelineItem {
+function planItem(itemId: string, turnId: string, sequence: number, content: string): TimelinePartView {
   return {
     turnId,
     itemId,
@@ -210,7 +210,7 @@ function planConfirmationInteraction(
   };
 }
 
-function thinkingItem(itemId: string, turnId: string, sequence: number, content: string): TimelineItem {
+function thinkingItem(itemId: string, turnId: string, sequence: number, content: string): TimelinePartView {
   return {
     turnId,
     itemId,
@@ -233,7 +233,7 @@ function toolItem(
   args: Record<string, unknown> | string,
   status: ToolCallStatus2 = "completed",
   result: string | null = null,
-): TimelineItem {
+): TimelinePartView {
   return {
     turnId,
     itemId,
@@ -262,7 +262,7 @@ function turnItem(
   sequence: number,
   status: ToolCallStatus2,
   content = "",
-): TimelineItem {
+): TimelinePartView {
   return {
     turnId,
     itemId,
@@ -277,7 +277,7 @@ function turnItem(
   };
 }
 
-function inferenceItem(itemId: string, turnId: string, sequence: number): TimelineItem {
+function inferenceItem(itemId: string, turnId: string, sequence: number): TimelinePartView {
   return {
     turnId,
     itemId,
@@ -302,8 +302,8 @@ function inferenceItem(itemId: string, turnId: string, sequence: number): Timeli
   };
 }
 
-function nextSequenceForItems(timelineItems: TimelineItem[]): number {
-  return timelineItems.reduce((max, item) => Math.max(max, item.startedSequence), -1) + 1;
+function nextSequenceForItems(timelinePartViews: TimelinePartView[]): number {
+  return timelinePartViews.reduce((max, item) => Math.max(max, item.startedSequence), -1) + 1;
 }
 
 function planState(planId: string, state: PlanState["state"]): PlanState {
@@ -344,7 +344,7 @@ function selectedState() {
 }
 
 type TestState = ReturnType<typeof selectedState>;
-type TestTimelineItemDelta = {
+type TestTimelinePartDelta = {
   itemId: string;
   field: "content" | "planContent" | "thinkingChunk" | "toolArguments" | "toolResult";
   delta: string;
@@ -370,7 +370,7 @@ function studioEvent(
   };
 }
 
-function messageForItem(item: TimelineItem, role: StudioMessage["role"] = "assistant"): StudioMessage {
+function messageForItem(item: TimelinePartView, role: StudioMessage["role"] = "assistant"): StudioMessage {
   const messageId = role === "user" ? `${item.turnId}:user` : `${item.turnId}:assistant`;
   return {
     messageId,
@@ -390,7 +390,7 @@ function messageForItem(item: TimelineItem, role: StudioMessage["role"] = "assis
   };
 }
 
-function partForItem(item: TimelineItem): StudioPart {
+function partForItem(item: TimelinePartView): StudioPart {
   return {
     partId: item.itemId,
     messageId: messageForItem(item).messageId,
@@ -419,7 +419,7 @@ function partForItem(item: TimelineItem): StudioPart {
   };
 }
 
-function eventsForItems(items: TimelineItem[], sessionId = "session-1"): StudioEventEnvelope[] {
+function eventsForItems(items: TimelinePartView[], sessionId = "session-1"): StudioEventEnvelope[] {
   return items.flatMap((item) => {
     const message = { ...messageForItem(item), sessionId };
     const part = { ...partForItem(item), sessionId, messageId: message.messageId };
@@ -438,7 +438,7 @@ function eventsForItems(items: TimelineItem[], sessionId = "session-1"): StudioE
 
 function loadSessionItems(
   state: TestState,
-  items: TimelineItem[],
+  items: TimelinePartView[],
   nextSequence = nextSequenceForItems(items),
   planStates?: PlanState[],
   interactions?: InteractionRequest[],
@@ -463,16 +463,16 @@ function loadSessionItems(
   });
 }
 
-function timelineItems(state: TestState): Map<string, TimelineItem> {
-  return new Map(timelineItemsFromConversation(state).map((item) => [item.itemId, item]));
+function timelinePartViews(state: TestState): Map<string, TimelinePartView> {
+  return new Map(timelinePartViewsFromConversation(state).map((item) => [item.itemId, item]));
 }
 
-function timelineItem(state: TestState, itemId: string): TimelineItem | undefined {
-  return timelineItems(state).get(itemId);
+function timelinePartView(state: TestState, itemId: string): TimelinePartView | undefined {
+  return timelinePartViews(state).get(itemId);
 }
 
 function timelineOrder(state: TestState): string[] {
-  return timelineItemsFromConversation(state).map((item) => item.itemId);
+  return timelinePartViewsFromConversation(state).map((item) => item.itemId);
 }
 
 function studioPartEvent(
@@ -494,11 +494,11 @@ function studioPartEvent(
   );
 }
 
-function itemUpdated(item: TimelineItem): TestConversationChange {
+function itemUpdated(item: TimelinePartView): TestConversationChange {
   return { type: "itemUpdated", message: messageForItem(item), part: partForItem(item) };
 }
 
-function itemDelta(delta: TestTimelineItemDelta): TestConversationChange {
+function itemDelta(delta: TestTimelinePartDelta): TestConversationChange {
   const field: StudioPartDelta["field"] =
     delta.field === "content"
       ? "text"
@@ -530,7 +530,7 @@ function studioTimelineEvent(
 }
 
 function studioItemEvents(
-  item: TimelineItem,
+  item: TimelinePartView,
   sequence: number,
   overrides: Partial<StudioEventEnvelope> = {},
 ): StudioEventEnvelope[] {
@@ -552,7 +552,7 @@ function reduceStudioEvents(state: TestState, events: StudioEventEnvelope[], sta
   );
 }
 
-function applyStudioTimelineChange(
+function applyStudioConversationChange(
   state: TestState,
   change: TestConversationChange,
   sequence: number,
@@ -614,7 +614,7 @@ function applyStudioPartEvent(
 
 function applyStudioItemUpdate(
   state: ReturnType<typeof selectedState>,
-  item: TimelineItem,
+  item: TimelinePartView,
   sequence: number,
   status = "running",
 ) {
@@ -672,7 +672,7 @@ function completeTurn(
   });
 }
 
-function entriesForTimeline(items: TimelineItem[]) {
+function entriesForTimeline(items: TimelinePartView[]) {
   const loaded = loadSessionItems(selectedState(), items);
   return selectTimelineEntries(loaded);
 }
@@ -691,7 +691,7 @@ function sessionStateProjectionSnapshotRestoresTimelineWithoutEvents() {
   });
 
   assertDeepEqual(timelineOrder(loaded), ["turn-1-text"]);
-  assertEqual(timelineItem(loaded, "turn-1-text")?.content, "hello from projection");
+  assertEqual(timelinePartView(loaded, "turn-1-text")?.content, "hello from projection");
   assertEqual(loaded.eventNextSequence, 42);
 }
 
@@ -739,13 +739,13 @@ function sessionStateEventsRestoreDurableStatusSnapshots() {
 function staleTimelineLoadKeepsNewTurnItems() {
   const oldItem = textItem("turn-1-text", 1, "old");
   const newItem = textItem("turn-2-text", 10, "new");
-  const withNewTurn = applyStudioTimelineChange(selectedState(), itemUpdated(newItem), 10, "done");
+  const withNewTurn = applyStudioConversationChange(selectedState(), itemUpdated(newItem), 10, "done");
 
   const afterStaleLoad = loadSessionItems(withNewTurn, [oldItem], 2);
 
   assertDeepEqual(timelineOrder(afterStaleLoad), ["turn-1-text", "turn-2-text"]);
-  assertEqual(timelineItem(afterStaleLoad, "turn-1-text")?.content, "old");
-  assertEqual(timelineItem(afterStaleLoad, "turn-2-text")?.content, "new");
+  assertEqual(timelinePartView(afterStaleLoad, "turn-1-text")?.content, "old");
+  assertEqual(timelinePartView(afterStaleLoad, "turn-2-text")?.content, "new");
   assertEqual(afterStaleLoad.eventNextSequence, 11);
 }
 
@@ -757,7 +757,7 @@ function freshTimelineLoadMayReplaceSnapshot() {
   const refreshed = loadSessionItems(loaded, [replacement], 3);
 
   assertDeepEqual(timelineOrder(refreshed), ["turn-1-text"]);
-  assertEqual(timelineItem(refreshed, "turn-1-text")?.content, "replacement");
+  assertEqual(timelinePartView(refreshed, "turn-1-text")?.content, "replacement");
   assertEqual(refreshed.eventNextSequence, 3);
 }
 
@@ -767,7 +767,7 @@ function staleTimelineLoadDoesNotOverwriteLiveDelta() {
     ...textItem("turn-2-text", 10, ""),
     status: "streaming" as const,
   };
-  const delta: TestTimelineItemDelta = {
+  const delta: TestTimelinePartDelta = {
     itemId: "turn-2-text",
     field: "content",
     delta: "new",
@@ -776,15 +776,15 @@ function staleTimelineLoadDoesNotOverwriteLiveDelta() {
     ...textItem("turn-2-text", 10, "new"),
     updatedAt: 12,
   };
-  const liveStarted = applyStudioTimelineChange(selectedState(), itemUpdated(started), 10);
-  const liveDelta = applyStudioTimelineChange(liveStarted, itemDelta(delta), 11);
-  const liveCompleted = applyStudioTimelineChange(liveDelta, itemUpdated(completed), 12, "done");
+  const liveStarted = applyStudioConversationChange(selectedState(), itemUpdated(started), 10);
+  const liveDelta = applyStudioConversationChange(liveStarted, itemDelta(delta), 11);
+  const liveCompleted = applyStudioConversationChange(liveDelta, itemUpdated(completed), 12, "done");
 
   const afterStaleLoad = loadSessionItems(liveCompleted, [oldItem], 2);
 
   assertDeepEqual(timelineOrder(afterStaleLoad), ["turn-1-text", "turn-2-text"]);
-  assertEqual(timelineItem(afterStaleLoad, "turn-1-text")?.content, "old");
-  assertEqual(timelineItem(afterStaleLoad, "turn-2-text")?.content, "new");
+  assertEqual(timelinePartView(afterStaleLoad, "turn-1-text")?.content, "old");
+  assertEqual(timelinePartView(afterStaleLoad, "turn-2-text")?.content, "new");
   assertEqual(afterStaleLoad.eventNextSequence, 13);
 }
 
@@ -829,41 +829,41 @@ function staleSessionStateDoesNotReplayOldStatusEvents() {
 }
 
 function toolArgumentDeltaRequiresSnapshot() {
-  const delta: TestTimelineItemDelta = {
+  const delta: TestTimelinePartDelta = {
     itemId: "turn-1-call-1",
     field: "toolArguments",
     delta: "{\"path\":\"a.ts\"",
   };
   const started = toolItem("turn-1-call-1", "turn-1", 9, "read_file", "");
   started.status = "streaming";
-  const orphan = applyStudioTimelineChange(selectedState(), itemDelta(delta), 10);
-  const withStart = applyStudioTimelineChange(orphan, itemUpdated(started), 9);
-  const withDelta = applyStudioTimelineChange(withStart, itemDelta(delta), 10);
+  const orphan = applyStudioConversationChange(selectedState(), itemDelta(delta), 10);
+  const withStart = applyStudioConversationChange(orphan, itemUpdated(started), 9);
+  const withDelta = applyStudioConversationChange(withStart, itemDelta(delta), 10);
   const completed = toolItem("turn-1-call-1", "turn-1", 9, "read_file", "{\"path\":\"a.ts\"");
   completed.updatedAt = 11;
-  const withCompleted = applyStudioTimelineChange(withDelta, itemUpdated(completed), 11, "done");
+  const withCompleted = applyStudioConversationChange(withDelta, itemUpdated(completed), 11, "done");
 
-  assertEqual(timelineItems(orphan).has("turn-1-call-1"), false);
+  assertEqual(timelinePartViews(orphan).has("turn-1-call-1"), false);
   const liveGroup = selectTimelineEntries(withDelta)[0];
   if (liveGroup?.kind !== "toolGroup") {
     throw new Error(`Expected toolGroup entry, got ${liveGroup?.kind}`);
   }
   assertEqual(liveGroup.items[0]?.tool?.arguments, "{\"path\":\"a.ts\"");
-  const tool = timelineItem(withCompleted, "turn-1-call-1")?.tool;
+  const tool = timelinePartView(withCompleted, "turn-1-call-1")?.tool;
   assertEqual(tool?.name, "read_file");
   assertEqual(tool?.arguments, "{\"path\":\"a.ts\"");
 }
 
 function toolResultDeltaRequiresSnapshot() {
-  const delta: TestTimelineItemDelta = {
+  const delta: TestTimelinePartDelta = {
     itemId: "turn-1-call-1",
     field: "toolResult",
     delta: "partial result",
   };
   const started = toolItem("turn-1-call-1", "turn-1", 9, "read_file", { path: "a.ts" }, "running");
-  const orphan = applyStudioTimelineChange(selectedState(), itemDelta(delta), 10);
-  const withStart = applyStudioTimelineChange(orphan, itemUpdated(started), 9);
-  const withDelta = applyStudioTimelineChange(withStart, itemDelta(delta), 10);
+  const orphan = applyStudioConversationChange(selectedState(), itemDelta(delta), 10);
+  const withStart = applyStudioConversationChange(orphan, itemUpdated(started), 9);
+  const withDelta = applyStudioConversationChange(withStart, itemDelta(delta), 10);
   const completed = toolItem(
     "turn-1-call-1",
     "turn-1",
@@ -874,22 +874,22 @@ function toolResultDeltaRequiresSnapshot() {
     "partial result",
   );
   completed.updatedAt = 11;
-  const withCompleted = applyStudioTimelineChange(withDelta, itemUpdated(completed), 11, "done");
+  const withCompleted = applyStudioConversationChange(withDelta, itemUpdated(completed), 11, "done");
 
-  assertEqual(timelineItems(orphan).has("turn-1-call-1"), false);
+  assertEqual(timelinePartViews(orphan).has("turn-1-call-1"), false);
   const liveGroup = selectTimelineEntries(withDelta)[0];
   if (liveGroup?.kind !== "toolGroup") {
     throw new Error(`Expected toolGroup entry, got ${liveGroup?.kind}`);
   }
   assertEqual(liveGroup.items[0]?.tool?.result, "partial result");
-  const tool = timelineItem(withCompleted, "turn-1-call-1")?.tool;
+  const tool = timelinePartView(withCompleted, "turn-1-call-1")?.tool;
   assertEqual(tool?.name, "read_file");
   assertEqual(tool?.arguments, "{\"path\":\"a.ts\"}");
   assertEqual(tool?.result, "partial result");
 }
 
 function textDeltaRequiresSnapshotForCommentaryChannel() {
-  const delta: TestTimelineItemDelta = {
+  const delta: TestTimelinePartDelta = {
     itemId: "turn-1-commentary",
     field: "content",
     delta: "正在检查 CI 配置。",
@@ -898,13 +898,13 @@ function textDeltaRequiresSnapshotForCommentaryChannel() {
     ...textItem("turn-1-commentary", 10, "", "commentary"),
     status: "streaming" as const,
   };
-  const orphan = applyStudioTimelineChange(selectedState(), itemDelta(delta), 9);
-  const withStart = applyStudioTimelineChange(orphan, itemUpdated(started), 10);
-  const withDelta = applyStudioTimelineChange(withStart, itemDelta(delta), 11);
-  const item = timelineItem(withDelta, "turn-1-commentary");
+  const orphan = applyStudioConversationChange(selectedState(), itemDelta(delta), 9);
+  const withStart = applyStudioConversationChange(orphan, itemUpdated(started), 10);
+  const withDelta = applyStudioConversationChange(withStart, itemDelta(delta), 11);
+  const item = timelinePartView(withDelta, "turn-1-commentary");
   const entries = selectTimelineEntries(withDelta);
 
-  assertEqual(timelineItems(orphan).has("turn-1-commentary"), false);
+  assertEqual(timelinePartViews(orphan).has("turn-1-commentary"), false);
   assertEqual(item?.textChannel, "commentary");
   assertEqual(item?.content, "");
   assertDeepEqual(entries.map((entry) => entry.kind), ["commentary"]);
@@ -917,12 +917,12 @@ function textDeltaRequiresSnapshotForCommentaryChannel() {
 
 function turnCompletedWithNoPartsDoesNotDeleteLiveContent() {
   const liveItem = textItem("turn-2-text", 10, "live");
-  const liveState = applyStudioTimelineChange(selectedState(), itemUpdated(liveItem), 10, "done");
+  const liveState = applyStudioConversationChange(selectedState(), itemUpdated(liveItem), 10, "done");
 
   const completed = completeTurn(liveState, 20);
 
   assertDeepEqual(timelineOrder(completed), ["turn-2-text"]);
-  assertEqual(timelineItem(completed, "turn-2-text")?.content, "live");
+  assertEqual(timelinePartView(completed, "turn-2-text")?.content, "live");
   assertEqual(completed.eventNextSequence, 21);
 }
 
@@ -1008,13 +1008,13 @@ function completedSnapshotKeepsFirstItemSequence() {
     ...textItem("turn-2-text", 10, "final"),
     updatedAt: 12,
   };
-  const liveStarted = applyStudioTimelineChange(selectedState(), itemUpdated(started), 10);
+  const liveStarted = applyStudioConversationChange(selectedState(), itemUpdated(started), 10);
 
-  const liveCompleted = applyStudioTimelineChange(liveStarted, itemUpdated(completed), 12, "done");
+  const liveCompleted = applyStudioConversationChange(liveStarted, itemUpdated(completed), 12, "done");
 
   assertDeepEqual(timelineOrder(liveCompleted), ["turn-2-text"]);
-  assertEqual(timelineItem(liveCompleted, "turn-2-text")?.startedSequence, 10);
-  assertEqual(timelineItem(liveCompleted, "turn-2-text")?.content, "final");
+  assertEqual(timelinePartView(liveCompleted, "turn-2-text")?.startedSequence, 10);
+  assertEqual(timelinePartView(liveCompleted, "turn-2-text")?.content, "final");
   assertEqual(liveCompleted.eventNextSequence, 13);
 }
 
@@ -1023,8 +1023,8 @@ function terminalSnapshotClearsLiveDeltaOverlay() {
     ...textItem("turn-2-text", 10, ""),
     status: "streaming" as const,
   };
-  const liveDelta = applyStudioTimelineChange(
-    applyStudioTimelineChange(selectedState(), itemUpdated(started), 10),
+  const liveDelta = applyStudioConversationChange(
+    applyStudioConversationChange(selectedState(), itemUpdated(started), 10),
     itemDelta({
       itemId: "turn-2-text",
       field: "content",
@@ -1035,7 +1035,7 @@ function terminalSnapshotClearsLiveDeltaOverlay() {
   const liveMessage = selectTimelineEntries(liveDelta).find(
     (entry) => entry.kind === "message" && entry.content === "partial",
   );
-  const completed = applyStudioTimelineChange(
+  const completed = applyStudioConversationChange(
     liveDelta,
     itemUpdated({
       ...textItem("turn-2-text", 10, "final"),
@@ -1048,7 +1048,7 @@ function terminalSnapshotClearsLiveDeltaOverlay() {
 
   assertEqual(liveMessage?.kind === "message" ? liveMessage.content : "", "partial");
   assertEqual(completed.partDeltaAccum.has("turn-2-text"), false);
-  assertEqual(timelineItem(completed, "turn-2-text")?.content, "final");
+  assertEqual(timelinePartView(completed, "turn-2-text")?.content, "final");
   assertDeepEqual(finalEntries.map((entry) => entry.kind), ["message"]);
   assertEqual(finalEntries[0]?.kind === "message" ? finalEntries[0].content : "", "final");
 }
@@ -1058,7 +1058,7 @@ function realtimeAndHistoricalTimelineEventsConverge() {
     ...textItem("turn-2-text", 10, ""),
     status: "streaming" as const,
   };
-  const delta: TestTimelineItemDelta = {
+  const delta: TestTimelinePartDelta = {
     itemId: "turn-2-text",
     field: "content",
     delta: "hel",
@@ -1067,9 +1067,9 @@ function realtimeAndHistoricalTimelineEventsConverge() {
     ...textItem("turn-2-text", 10, "hello"),
     updatedAt: 12,
   };
-  const live = applyStudioTimelineChange(
-    applyStudioTimelineChange(
-      applyStudioTimelineChange(selectedState(), itemUpdated(started), 10),
+  const live = applyStudioConversationChange(
+    applyStudioConversationChange(
+      applyStudioConversationChange(selectedState(), itemUpdated(started), 10),
       itemDelta(delta),
       11,
     ),
@@ -1081,8 +1081,8 @@ function realtimeAndHistoricalTimelineEventsConverge() {
 
   assertDeepEqual(timelineOrder(historical), timelineOrder(live));
   assertDeepEqual(
-    timelineItem(historical, "turn-2-text"),
-    timelineItem(live, "turn-2-text"),
+    timelinePartView(historical, "turn-2-text"),
+    timelinePartView(live, "turn-2-text"),
   );
   assertEqual(historical.eventNextSequence, live.eventNextSequence);
 }
@@ -1219,13 +1219,13 @@ function livePlanDeltaCreatesPlanEntry() {
     ...planItem("turn-1-plan", "turn-1", 10, ""),
     status: "streaming" as const,
   };
-  const delta: TestTimelineItemDelta = {
+  const delta: TestTimelinePartDelta = {
     itemId: "turn-1-plan",
     field: "planContent",
     delta: "1. Inspect\n",
   };
-  const liveStarted = applyStudioTimelineChange(selectedState(), itemUpdated(started), 10);
-  const liveDelta = applyStudioTimelineChange(liveStarted, itemDelta(delta), 11);
+  const liveStarted = applyStudioConversationChange(selectedState(), itemUpdated(started), 10);
+  const liveDelta = applyStudioConversationChange(liveStarted, itemDelta(delta), 11);
   const entries = selectTimelineEntries(liveDelta);
 
   assertDeepEqual(entries.map((entry) => entry.kind), ["plan"]);
@@ -1234,7 +1234,7 @@ function livePlanDeltaCreatesPlanEntry() {
     throw new Error(`Expected plan entry, got ${plan?.kind}`);
   }
   assertEqual(plan.content, "1. Inspect\n");
-  assertEqual(timelineItem(liveDelta, "turn-1-plan")?.content, "");
+  assertEqual(timelinePartView(liveDelta, "turn-1-plan")?.content, "");
   assertEqual(liveDelta.activeInteractionId, null);
 }
 
@@ -1338,7 +1338,7 @@ function laterRunWithoutPlanDoesNotReopenHistoricalPlan() {
     prompt: "continue",
   });
   const completed = completeTurn(
-    applyStudioTimelineChange(submitted, itemUpdated(textItem("turn-2-text", 20, "continue")), 20),
+    applyStudioConversationChange(submitted, itemUpdated(textItem("turn-2-text", 20, "continue")), 20),
     21,
   );
 
@@ -1419,7 +1419,7 @@ function freshContextRunSwitchesToReturnedSession() {
   const completed = completeTurn(withImplementation, 21, "done", "session-2", "turn-2");
 
   assertEqual(completed.selectedSessionId, "session-2");
-  assertEqual(timelineItem(completed, "turn-2-text")?.content, "implemented");
+  assertEqual(timelinePartView(completed, "turn-2-text")?.content, "implemented");
   assertEqual(completed.isBusy, false);
   assertDeepEqual(completed.sessions.map((session) => session.id), ["session-2"]);
 }
@@ -1475,7 +1475,7 @@ function sessionHandoffStartedSwitchesBeforeLiveEvents() {
   assertEqual(handoff.selectedSessionId, "session-2");
   assertEqual(handoff.isBusy, true);
   assertEqual(handoff.turnPhase, "running");
-  assertEqual(timelineItems(started).has("turn-2-text"), true);
+  assertEqual(timelinePartViews(started).has("turn-2-text"), true);
 }
 
 function studioTurnEventShowsWaitingState() {
@@ -1510,7 +1510,7 @@ function studioTimelineEventClearsWaitingAndStreamsContent() {
     ...textItem("turn-1-text", 20, ""),
     status: "streaming" as const,
   };
-  const started = applyStudioTimelineChange(submitted, itemUpdated(liveItem), 20);
+  const started = applyStudioConversationChange(submitted, itemUpdated(liveItem), 20);
   const delta = studioReducer(started, {
     type: "studioEvent",
     envelope: studioTimelineEvent(
@@ -1524,8 +1524,8 @@ function studioTimelineEventClearsWaitingAndStreamsContent() {
     status: "running",
   });
 
-  assertEqual(timelineItems(delta).has("optimistic-waiting-1234"), false);
-  assertEqual(timelineItem(delta, "turn-1-text")?.content, "");
+  assertEqual(timelinePartViews(delta).has("optimistic-waiting-1234"), false);
+  assertEqual(timelinePartView(delta, "turn-1-text")?.content, "");
   const entries = selectTimelineEntries(delta);
   const message = entries.find((entry) => entry.kind === "message" && entry.content === "live");
   assertEqual(message?.kind === "message" ? message.content : "", "live");
@@ -1537,7 +1537,7 @@ function studioTimelineEventUsesEnvelopeSequenceForCursor() {
     ...textItem("turn-1-text", 0, ""),
     status: "streaming" as const,
   };
-  const started = applyStudioTimelineChange(selectedState(), itemUpdated(item), 30);
+  const started = applyStudioConversationChange(selectedState(), itemUpdated(item), 30);
   const delta = studioReducer(started, {
     type: "studioEvent",
     envelope: studioTimelineEvent(
@@ -1552,11 +1552,11 @@ function studioTimelineEventUsesEnvelopeSequenceForCursor() {
     status: "running",
   });
 
-  assertEqual(timelineItem(delta, "turn-1-text")?.content, "");
+  assertEqual(timelinePartView(delta, "turn-1-text")?.content, "");
   const entries = selectTimelineEntries(delta);
   const message = entries.find((entry) => entry.kind === "message");
   assertEqual(message?.kind === "message" ? message.content : "", "canonical");
-  assertEqual(timelineItem(delta, "turn-1-text")?.startedSequence, 0);
+  assertEqual(timelinePartView(delta, "turn-1-text")?.startedSequence, 0);
   assertEqual(delta.eventNextSequence, 31);
   assertEqual(delta.partDeltaAccum.has("turn-1-text"), true);
 }
@@ -1616,7 +1616,7 @@ function liveEventsForTargetAreIgnoredBeforeHandoffStarted() {
     status: "running",
   });
 
-  assertEqual(timelineItems(ignored).has("turn-2-text"), false);
+  assertEqual(timelinePartViews(ignored).has("turn-2-text"), false);
 }
 
 function sessionSelectionDedupesReturnedSessions() {
@@ -1717,11 +1717,11 @@ function modelTimelineEventClearsWaitingFeedback() {
     prompt: "Build the thing",
   });
   const realItem = textItem("turn-1-text", 10, "Working");
-  const updated = applyStudioTimelineChange(submitted, itemUpdated(realItem), 10);
+  const updated = applyStudioConversationChange(submitted, itemUpdated(realItem), 10);
 
   assertDeepEqual(timelineOrder(updated), ["optimistic-user-1234", "turn-1-text"]);
-  assertEqual(timelineItems(updated).has("optimistic-user-1234"), true);
-  assertEqual(timelineItems(updated).has("optimistic-waiting-1234"), false);
+  assertEqual(timelinePartViews(updated).has("optimistic-user-1234"), true);
+  assertEqual(timelinePartViews(updated).has("optimistic-waiting-1234"), false);
 }
 
 function userTimelineEventKeepsWaitingFeedback() {
@@ -1737,7 +1737,7 @@ function userTimelineEventKeepsWaitingFeedback() {
     "Build the thing",
     "user",
   );
-  const updated = applyStudioTimelineChange(submitted, itemUpdated(realUser), realUser.startedSequence);
+  const updated = applyStudioConversationChange(submitted, itemUpdated(realUser), realUser.startedSequence);
   const entries = selectTimelineEntries(updated);
 
   assertDeepEqual(entries.map((entry) => entry.kind), ["message", "status"]);
@@ -1748,8 +1748,8 @@ function userTimelineEventKeepsWaitingFeedback() {
   }
   assertEqual(message.content, "Build the thing");
   assertEqual(status.content, "waitingForModel");
-  assertEqual(timelineItems(updated).has("optimistic-user-1234"), false);
-  assertEqual(timelineItems(updated).has("optimistic-waiting-1234"), true);
+  assertEqual(timelinePartViews(updated).has("optimistic-user-1234"), false);
+  assertEqual(timelinePartViews(updated).has("optimistic-waiting-1234"), true);
   assertDeepEqual(timelineOrder(updated), ["turn-1-user", "optimistic-waiting-1234"]);
 }
 
@@ -1760,7 +1760,7 @@ function inferenceStartKeepsWaitingFeedback() {
     startedAt: 1234,
     prompt: "Build the thing",
   });
-  const inference: TimelineItem = {
+  const inference: TimelinePartView = {
     turnId: "turn-1",
     itemId: "turn-1-inf-0",
     startedSequence: 2,
@@ -1776,9 +1776,9 @@ function inferenceStartKeepsWaitingFeedback() {
       model: "model-a",
     },
   };
-  const updated = applyStudioTimelineChange(submitted, itemUpdated(inference), 2);
+  const updated = applyStudioConversationChange(submitted, itemUpdated(inference), 2);
 
-  assertEqual(timelineItems(updated).has("optimistic-waiting-1234"), true);
+  assertEqual(timelinePartViews(updated).has("optimistic-waiting-1234"), true);
 }
 
 function assistantSnapshotClearsOptimisticWaitingFeedback() {
@@ -1788,7 +1788,7 @@ function assistantSnapshotClearsOptimisticWaitingFeedback() {
     startedAt: 1234,
     prompt: "Build the thing",
   });
-  const loaded = applyStudioTimelineChange(
+  const loaded = applyStudioConversationChange(
     submitted,
     itemUpdated(textItem("turn-1-text", 10, "Done")),
     10,
@@ -1796,8 +1796,8 @@ function assistantSnapshotClearsOptimisticWaitingFeedback() {
   );
 
   assertDeepEqual(timelineOrder(loaded), ["optimistic-user-1234", "turn-1-text"]);
-  assertEqual(timelineItems(loaded).has("optimistic-user-1234"), true);
-  assertEqual(timelineItems(loaded).has("optimistic-waiting-1234"), false);
+  assertEqual(timelinePartViews(loaded).has("optimistic-user-1234"), true);
+  assertEqual(timelinePartViews(loaded).has("optimistic-waiting-1234"), false);
 }
 
 function runPromptFailedClearsWaitingFeedback() {
@@ -1815,8 +1815,8 @@ function runPromptFailedClearsWaitingFeedback() {
   const entries = selectTimelineEntries(failed);
 
   assertDeepEqual(entries.map((entry) => entry.kind), ["message"]);
-  assertEqual(timelineItems(failed).has("optimistic-user-1234"), true);
-  assertEqual(timelineItems(failed).has("optimistic-waiting-1234"), false);
+  assertEqual(timelinePartViews(failed).has("optimistic-user-1234"), true);
+  assertEqual(timelinePartViews(failed).has("optimistic-waiting-1234"), false);
 }
 
 function thinkingEntriesExposeStreamingStatusAndDuration() {
@@ -1850,7 +1850,7 @@ function completedThinkingEntryUsesDuration() {
 
 function liveCompletedPlanDoesNotCreatePlanInteraction() {
   const item = planItem("turn-1-plan", "turn-1", 10, "1. Inspect");
-  const state = applyStudioTimelineChange(selectedState(), itemUpdated(item), 10);
+  const state = applyStudioConversationChange(selectedState(), itemUpdated(item), 10);
 
   assertEqual(state.activeInteractionId, null);
 }
@@ -1914,7 +1914,7 @@ function selectingCurrentSessionKeepsTimelineState() {
   });
 
   assertDeepEqual(timelineOrder(selectedAgain), timelineOrder(withInteraction));
-  assertEqual(timelineItem(selectedAgain, "turn-1-plan")?.content, "1. Inspect");
+  assertEqual(timelinePartView(selectedAgain, "turn-1-plan")?.content, "1. Inspect");
   assertEqual(selectedAgain.activeInteractionId, withInteraction.activeInteractionId);
   assertEqual(selectedAgain.eventNextSequence, withInteraction.eventNextSequence);
 }
@@ -1961,7 +1961,7 @@ function toolGroupStatusUsesPriority() {
 
 function sessionModeUpdateKeepsTimelineAndUpdatesSessions() {
   const liveItem = planItem("turn-1-plan", "turn-1", 10, "1. Inspect");
-  const liveState = applyStudioTimelineChange(selectedState(), itemUpdated(liveItem), 10);
+  const liveState = applyStudioConversationChange(selectedState(), itemUpdated(liveItem), 10);
 
   const updated = studioReducer(liveState, {
     type: "sessionModeUpdated",
@@ -1986,7 +1986,7 @@ function sessionModeUpdateKeepsTimelineAndUpdatesSessions() {
 
   assertEqual(updated.sessions[0]?.mode, "plan");
   assertDeepEqual(timelineOrder(updated), ["turn-1-plan"]);
-  assertEqual(timelineItem(updated, "turn-1-plan")?.content, "1. Inspect");
+  assertEqual(timelinePartView(updated, "turn-1-plan")?.content, "1. Inspect");
 }
 
 function lspServer(overrides: Partial<LspServerRecord> = {}): LspServerRecord {
@@ -2342,7 +2342,7 @@ function abnormalTurnTraceIsKeptWithContent() {
   );
 }
 
-function liveFailedTimelineItemKeepsErrorMessage() {
+function liveFailedTimelinePartViewKeepsErrorMessage() {
   const item = turnItem(
     "turn-1-turn",
     "turn-1",
@@ -2350,7 +2350,7 @@ function liveFailedTimelineItemKeepsErrorMessage() {
     "failed",
     "LLM provider error: missing API key",
   );
-  const state = applyStudioTimelineChange(
+  const state = applyStudioConversationChange(
     selectedState(),
     itemUpdated(item),
     10,
@@ -2359,7 +2359,7 @@ function liveFailedTimelineItemKeepsErrorMessage() {
 
   const entries = selectTimelineEntries(state);
 
-  assertEqual(timelineItem(state, "turn-1-turn")?.content, "LLM provider error: missing API key");
+  assertEqual(timelinePartView(state, "turn-1-turn")?.content, "LLM provider error: missing API key");
   assertDeepEqual(entries.map((entry) => entry.kind), ["trace"]);
   assertEqual(
     entries[0]?.kind === "trace" ? entries[0].item.content : "",
@@ -2659,7 +2659,7 @@ unknownToolsUseFallbackAndKeepDetails();
 quietFileToolFailureKeepsResultVisible();
 inferenceAndNormalTurnTraceAreHidden();
 abnormalTurnTraceIsKeptWithContent();
-liveFailedTimelineItemKeepsErrorMessage();
+liveFailedTimelinePartViewKeepsErrorMessage();
 providerDraftUsesSingleAddEntryAndUniqueKey();
 providerDraftTemplateSwitchUpdatesTemplateFields();
 openAiTemplateUsesCodexModelMetadata();

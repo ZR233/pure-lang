@@ -6,7 +6,7 @@ import type {
   StudioPartProjection,
   StudioPartDelta,
   StudioPartDeltaField,
-  TimelineItem,
+  TimelinePartView,
 } from "../types";
 
 export type ConversationStateSlice = {
@@ -103,15 +103,15 @@ export function mergeConversationSnapshot<T extends TimelineStateSlice>(
   return { ...next, eventNextSequence: Math.max(next.eventNextSequence, nextSequence) };
 }
 
-export function removeOptimisticTimelineItems<T extends TimelineStateSlice>(state: T): T {
+export function removeOptimisticTimelinePartViews<T extends TimelineStateSlice>(state: T): T {
   return removeOptimisticPartsMatching(state, (partId) => partId.startsWith("optimistic-"));
 }
 
-export function removeOptimisticUserTimelineItems<T extends TimelineStateSlice>(state: T): T {
+export function removeOptimisticUserTimelinePartViews<T extends TimelineStateSlice>(state: T): T {
   return removeOptimisticPartsMatching(state, (partId) => partId.startsWith("optimistic-user-"));
 }
 
-export function removeOptimisticWaitingTimelineItems<T extends TimelineStateSlice>(state: T): T {
+export function removeOptimisticWaitingTimelinePartViews<T extends TimelineStateSlice>(state: T): T {
   return removeOptimisticPartsMatching(state, (partId) => partId.startsWith("optimistic-waiting-"));
 }
 
@@ -124,12 +124,12 @@ export function addOptimisticPart<T extends TimelineStateSlice>(
   return upsertPart(withMessage, part, undefined);
 }
 
-export function timelineItemWithDelta(
-  item: TimelineItem,
+export function timelinePartViewWithDelta(
+  item: TimelinePartView,
   accum: StudioPartDeltaAccum | undefined,
-): TimelineItem {
-  if (!accum) return normalizeTimelineItem(item);
-  const next = normalizeTimelineItem(item);
+): TimelinePartView {
+  if (!accum) return normalizeTimelinePartView(item);
+  const next = normalizeTimelinePartView(item);
   next.content += accum.text + accum.planContent + accum.reasoningText;
   if (accum.thinkingChunks.size > 0) {
     for (const [chunkIndex, delta] of accum.thinkingChunks) {
@@ -143,15 +143,15 @@ export function timelineItemWithDelta(
     next.thinkingChunks.sort((left, right) => left.chunkIndex - right.chunkIndex);
   }
   if (accum.toolArguments || accum.toolResult) {
-    next.tool = next.tool ?? blankTimelineToolItem(next.itemId);
+    next.tool = next.tool ?? blankTimelineToolPartView(next.itemId);
     next.tool.arguments += accum.toolArguments;
     next.tool.result = `${next.tool.result ?? ""}${accum.toolResult}` || next.tool.result;
   }
   return next;
 }
 
-export function timelineItemsFromConversation(state: TimelineStateSlice): TimelineItem[] {
-  const items: TimelineItem[] = [];
+export function timelinePartViewsFromConversation(state: TimelineStateSlice): TimelinePartView[] {
+  const items: TimelinePartView[] = [];
   const messages = [...state.messages.values()].sort(compareMessages);
   for (const message of messages) {
     const parts = (state.partsByMessage.get(message.messageId) ?? [])
@@ -159,7 +159,7 @@ export function timelineItemsFromConversation(state: TimelineStateSlice): Timeli
       .sort(compareParts);
     for (const part of parts) {
       if (part.ignored) continue;
-      items.push(partToTimelineItem(part));
+      items.push(partToTimelinePartView(part));
     }
   }
   return items;
@@ -389,7 +389,7 @@ function appendDelta(
   }
 }
 
-function partToTimelineItem(part: StudioPart): TimelineItem {
+function partToTimelinePartView(part: StudioPart): TimelinePartView {
   const kind = timelineKind(part);
   const content = partContent(part);
   return {
@@ -411,7 +411,7 @@ function partToTimelineItem(part: StudioPart): TimelineItem {
   };
 }
 
-function timelineKind(part: StudioPart): TimelineItem["kind"] {
+function timelineKind(part: StudioPart): TimelinePartView["kind"] {
   switch (part.partType) {
     case "reasoning":
       return "thinking";
@@ -454,7 +454,7 @@ function normalizePart(part: StudioPart): StudioPart {
   };
 }
 
-function normalizeTimelineItem(item: TimelineItem): TimelineItem {
+function normalizeTimelinePartView(item: TimelinePartView): TimelinePartView {
   return {
     ...item,
     content: item.content ?? "",
@@ -477,7 +477,7 @@ function compareParts(left: StudioPart, right: StudioPart): number {
   return left.partId.localeCompare(right.partId);
 }
 
-function blankTimelineToolItem(itemId: string): NonNullable<TimelineItem["tool"]> {
+function blankTimelineToolPartView(itemId: string): NonNullable<TimelinePartView["tool"]> {
   return {
     toolCallId: itemId,
     name: "",

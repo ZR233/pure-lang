@@ -395,7 +395,82 @@ pub struct StudioAgentSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioAgentTimelineEvent {
-    pub payload: serde_json::Value,
+    pub event_id: String,
+    pub session_id: String,
+    pub sequence: u64,
+    pub created_at: i64,
+    pub kind: StudioAgentTimelineEventKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
+pub enum StudioAgentTimelineEventKind {
+    SpawnBegin {
+        call_id: String,
+        sender_path: String,
+        task_name: String,
+        prompt: String,
+        role: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reasoning_effort: Option<String>,
+    },
+    SpawnEnd {
+        call_id: String,
+        sender_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
+        status: AgentStatus,
+        prompt: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    InteractionBegin {
+        call_id: String,
+        sender_path: String,
+        receiver_path: String,
+        prompt: String,
+    },
+    InteractionEnd {
+        call_id: String,
+        sender_path: String,
+        receiver_path: String,
+        status: AgentStatus,
+        prompt: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    WaitingBegin {
+        call_id: String,
+        sender_path: String,
+    },
+    WaitingEnd {
+        call_id: String,
+        sender_path: String,
+        timed_out: bool,
+    },
+    CloseBegin {
+        call_id: String,
+        sender_path: String,
+        receiver_path: String,
+    },
+    CloseEnd {
+        call_id: String,
+        sender_path: String,
+        receiver_path: String,
+        status: AgentStatus,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -458,13 +533,88 @@ pub struct StudioSessionSummary {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioMcpHealth {
-    pub payload: serde_json::Value,
+    pub mcp_servers: Vec<StudioMcpServer>,
+    pub active_mcp_servers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioLspHealth {
-    pub payload: serde_json::Value,
+    pub lsp_servers: Vec<StudioLspServer>,
+    pub active_lsp_servers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioKeyValue {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioMcpServer {
+    pub id: String,
+    pub enabled: bool,
+    pub transport: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: Vec<StudioKeyValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bearer_token_env_var: Option<String>,
+    #[serde(default)]
+    pub headers: Vec<StudioKeyValue>,
+    pub endpoint: String,
+    pub source_kind: String,
+    pub source_label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_detail: Option<String>,
+    pub status_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_message: Option<String>,
+    pub mutation_policy: String,
+    pub availability_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub availability_message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_checked_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioLspServer {
+    pub id: String,
+    pub display_name: String,
+    #[serde(default)]
+    pub extensions: Vec<String>,
+    #[serde(default)]
+    pub language_ids: Vec<String>,
+    pub availability_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub availability_message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_checked_at: Option<i64>,
+    pub diagnostic_count: u64,
+    pub activity_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity_title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity_message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity_percentage: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error_at: Option<i64>,
 }
 
 fn empty_object() -> serde_json::Value {

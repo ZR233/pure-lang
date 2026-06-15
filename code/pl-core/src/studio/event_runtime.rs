@@ -1,12 +1,13 @@
 use anyhow::Result;
 use pl_protocol::{
     AgentEvent, AgentStatus, InteractionChangedEvent, StudioAgentPart, StudioAgentSnapshot,
-    StudioAgentTimelineEvent, StudioAttachment, StudioEventEnvelope, StudioEventKind,
-    StudioInferencePart, StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart,
-    StudioPartDelta, StudioPartDeltaField, StudioPartStatus, StudioPartType, StudioPlanPart,
-    StudioSessionHandoff, StudioTextChannel, StudioToolPart, StudioTurn, StudioTurnStatus,
-    TimelineAgentItem, TimelineDelta, TimelineInferenceItem, TimelineItem, TimelineItemDeltaEvent,
-    TimelineItemKind, TimelineItemStatus, TimelineTextChannel, TimelineToolItem,
+    StudioAgentTimelineEvent, StudioAgentTimelineEventKind, StudioAttachment, StudioEventEnvelope,
+    StudioEventKind, StudioInferencePart, StudioMessage, StudioMessageRole, StudioMessageStatus,
+    StudioPart, StudioPartDelta, StudioPartDeltaField, StudioPartStatus, StudioPartType,
+    StudioPlanPart, StudioSessionHandoff, StudioTextChannel, StudioToolPart, StudioTurn,
+    StudioTurnStatus, TimelineAgentItem, TimelineDelta, TimelineInferenceItem, TimelineItem,
+    TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus, TimelineTextChannel,
+    TimelineToolItem,
 };
 use tokio::sync::broadcast;
 
@@ -248,9 +249,7 @@ impl StudioEventRuntime {
             | AgentEvent::CollabWaitingEnd { .. }
             | AgentEvent::CollabCloseBegin { .. }
             | AgentEvent::CollabCloseEnd { .. } => StudioEventKind::AgentTimelineChanged {
-                event: StudioAgentTimelineEvent {
-                    payload: serde_json::to_value(&event)?,
-                },
+                event: studio_agent_timeline_event(session_id, event),
             },
             AgentEvent::TurnInterrupted { reason } => StudioEventKind::TurnChanged {
                 turn: StudioTurn {
@@ -361,6 +360,140 @@ fn timeline_delta_text(delta: TimelineDelta) -> String {
     }
 }
 
+fn studio_agent_timeline_event(session_id: &str, event: AgentEvent) -> StudioAgentTimelineEvent {
+    let kind = match event {
+        AgentEvent::CollabAgentSpawnBegin {
+            call_id,
+            sender_path,
+            task_name,
+            prompt,
+            role,
+            model,
+            reasoning_effort,
+            ..
+        } => StudioAgentTimelineEventKind::SpawnBegin {
+            call_id,
+            sender_path,
+            task_name,
+            prompt,
+            role,
+            model,
+            reasoning_effort,
+        },
+        AgentEvent::CollabAgentSpawnEnd {
+            call_id,
+            sender_path,
+            agent_id,
+            path,
+            role,
+            status,
+            prompt,
+            error,
+            ..
+        } => StudioAgentTimelineEventKind::SpawnEnd {
+            call_id,
+            sender_path,
+            agent_id,
+            path,
+            role,
+            status,
+            prompt,
+            error,
+        },
+        AgentEvent::CollabAgentInteractionBegin {
+            call_id,
+            sender_path,
+            receiver_path,
+            prompt,
+            ..
+        } => StudioAgentTimelineEventKind::InteractionBegin {
+            call_id,
+            sender_path,
+            receiver_path,
+            prompt,
+        },
+        AgentEvent::CollabAgentInteractionEnd {
+            call_id,
+            sender_path,
+            receiver_path,
+            status,
+            prompt,
+            error,
+            ..
+        } => StudioAgentTimelineEventKind::InteractionEnd {
+            call_id,
+            sender_path,
+            receiver_path,
+            status,
+            prompt,
+            error,
+        },
+        AgentEvent::CollabWaitingBegin {
+            call_id,
+            sender_path,
+            ..
+        } => StudioAgentTimelineEventKind::WaitingBegin {
+            call_id,
+            sender_path,
+        },
+        AgentEvent::CollabWaitingEnd {
+            call_id,
+            sender_path,
+            timed_out,
+            ..
+        } => StudioAgentTimelineEventKind::WaitingEnd {
+            call_id,
+            sender_path,
+            timed_out,
+        },
+        AgentEvent::CollabCloseBegin {
+            call_id,
+            sender_path,
+            receiver_path,
+            ..
+        } => StudioAgentTimelineEventKind::CloseBegin {
+            call_id,
+            sender_path,
+            receiver_path,
+        },
+        AgentEvent::CollabCloseEnd {
+            call_id,
+            sender_path,
+            receiver_path,
+            status,
+            error,
+            ..
+        } => StudioAgentTimelineEventKind::CloseEnd {
+            call_id,
+            sender_path,
+            receiver_path,
+            status,
+            error,
+        },
+        AgentEvent::TimelineItemStarted { .. }
+        | AgentEvent::TimelineItemDelta { .. }
+        | AgentEvent::TimelineItemCompleted { .. }
+        | AgentEvent::TimelineItemFailed { .. }
+        | AgentEvent::InteractionChanged { .. }
+        | AgentEvent::AgentStateChanged { .. }
+        | AgentEvent::AgentRuntimeUpdated { .. }
+        | AgentEvent::SkillActivated { .. }
+        | AgentEvent::TurnInterrupted { .. }
+        | AgentEvent::TurnBudgetLimited { .. }
+        | AgentEvent::Done
+        | AgentEvent::Error { .. } => {
+            unreachable!("non agent timeline events are filtered before mapping")
+        }
+    };
+    StudioAgentTimelineEvent {
+        event_id: String::new(),
+        session_id: session_id.to_string(),
+        sequence: 0,
+        created_at: 0,
+        kind,
+    }
+}
+
 fn studio_message_from_timeline_item(session_id: &str, item: &TimelineItem) -> StudioMessage {
     let role = message_role_for_timeline_item(item);
     let status = message_status_for_timeline_item(item);
@@ -398,6 +531,7 @@ fn studio_part_from_timeline_item(session_id: &str, item: TimelineItem) -> Studi
     .then_some(item.updated_at);
     let text = part_text(&item);
     let message_id = message_id_for_timeline_item(&item);
+    let part_id = part_id_for_timeline_item(&item);
     let error = error_for_part_status(status, &item.content);
     let tool = item.tool.map(studio_tool_part);
     let agent = item.agent.map(studio_agent_part);
@@ -406,7 +540,7 @@ fn studio_part_from_timeline_item(session_id: &str, item: TimelineItem) -> Studi
         content: item.content.clone(),
     });
     StudioPart {
-        part_id: item.item_id,
+        part_id,
         message_id,
         session_id: session_id.to_string(),
         turn_id: item.turn_id,
@@ -440,6 +574,23 @@ fn studio_part_from_timeline_item(session_id: &str, item: TimelineItem) -> Studi
         usage: item.usage,
         synthetic: matches!(part_type, StudioPartType::Turn | StudioPartType::Inference),
         ignored: false,
+    }
+}
+
+fn part_id_for_timeline_item(item: &TimelineItem) -> String {
+    match (item.kind, item.text_channel) {
+        (TimelineItemKind::Text, Some(TimelineTextChannel::User)) => {
+            format!("{}:user-text", item.turn_id)
+        }
+        (TimelineItemKind::Text, Some(TimelineTextChannel::Commentary))
+        | (TimelineItemKind::Text, Some(TimelineTextChannel::Final))
+        | (TimelineItemKind::Text, None)
+        | (TimelineItemKind::Thinking, _)
+        | (TimelineItemKind::Tool, _)
+        | (TimelineItemKind::Agent, _)
+        | (TimelineItemKind::Turn, _)
+        | (TimelineItemKind::Inference, _)
+        | (TimelineItemKind::Plan, _) => item.item_id.clone(),
     }
 }
 

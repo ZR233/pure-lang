@@ -1,6 +1,7 @@
 use pl_protocol::{
     AgentStatus, BudgetLimitKind, BudgetUsage, InteractionRequest, RuntimeCostAmount,
-    StudioAgentSnapshot, StudioEventEnvelope, StudioMessage, StudioPart, StudioRuntimeUsage,
+    StudioAgentSnapshot, StudioEventEnvelope, StudioKeyValue, StudioLspHealth, StudioLspServer,
+    StudioMcpHealth, StudioMcpServer, StudioMessage, StudioPart, StudioRuntimeUsage,
     StudioSessionRuntime,
 };
 use serde::{Deserialize, Serialize};
@@ -456,6 +457,94 @@ impl From<SessionRuntimeDto> for StudioSessionRuntime {
             active_mcp_servers: runtime.active_mcp_servers,
             active_lsp_servers: runtime.active_lsp_servers,
             updated_at: runtime.updated_at,
+        }
+    }
+}
+
+impl From<KeyValueDto> for StudioKeyValue {
+    fn from(value: KeyValueDto) -> Self {
+        Self {
+            key: value.key,
+            value: value.value,
+        }
+    }
+}
+
+impl From<McpServerDto> for StudioMcpServer {
+    fn from(server: McpServerDto) -> Self {
+        Self {
+            id: server.id,
+            enabled: server.enabled,
+            transport: server.transport,
+            command: server.command,
+            args: server.args,
+            env: server.env.into_iter().map(StudioKeyValue::from).collect(),
+            cwd: server.cwd,
+            url: server.url,
+            bearer_token_env_var: server.bearer_token_env_var,
+            headers: server
+                .headers
+                .into_iter()
+                .map(StudioKeyValue::from)
+                .collect(),
+            endpoint: server.endpoint,
+            source_kind: server.source_kind,
+            source_label: server.source_label,
+            source_detail: server.source_detail,
+            status_kind: server.status_kind,
+            status_message: server.status_message,
+            mutation_policy: server.mutation_policy,
+            availability_kind: server.availability_kind,
+            availability_message: server.availability_message,
+            last_checked_at: server.last_checked_at,
+            tool_count: server.tool_count.map(|count| count as u64),
+        }
+    }
+}
+
+impl From<McpHealthUpdateDto> for StudioMcpHealth {
+    fn from(health: McpHealthUpdateDto) -> Self {
+        Self {
+            mcp_servers: health
+                .mcp_servers
+                .into_iter()
+                .map(StudioMcpServer::from)
+                .collect(),
+            active_mcp_servers: health.active_mcp_servers,
+        }
+    }
+}
+
+impl From<LspServerDto> for StudioLspServer {
+    fn from(server: LspServerDto) -> Self {
+        Self {
+            id: server.id,
+            display_name: server.display_name,
+            extensions: server.extensions,
+            language_ids: server.language_ids,
+            availability_kind: server.availability_kind,
+            availability_message: server.availability_message,
+            last_checked_at: server.last_checked_at,
+            diagnostic_count: server.diagnostic_count as u64,
+            activity_kind: server.activity_kind,
+            activity_title: server.activity_title,
+            activity_message: server.activity_message,
+            activity_percentage: server.activity_percentage,
+            last_error: server.last_error,
+            last_error_at: server.last_error_at,
+        }
+    }
+}
+
+impl From<LspHealthUpdateDto> for StudioLspHealth {
+    fn from(health: LspHealthUpdateDto) -> Self {
+        Self {
+            lsp_servers: health
+                .lsp_servers
+                .into_iter()
+                .map(StudioLspServer::from)
+                .collect(),
+            active_lsp_servers: health.active_lsp_servers,
         }
     }
 }

@@ -33,8 +33,8 @@ mod tests {
         InteractionStatus, Message, MessageContent, MessageRole, PlanConfirmationResolution,
         PlanLifecycleState, RuntimeCostAmount, SkillActivation, StudioEventEnvelope,
         StudioEventKind, StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart,
-        StudioPartStatus, StudioPartType, StudioTextChannel, TokenUsageSnapshot, TraceEvent,
-        TraceEventKind,
+        StudioPartStatus, StudioPartType, StudioTextChannel, TimelineItem, TimelineItemKind,
+        TimelineItemStatus, TimelineTextChannel, TokenUsageSnapshot, TraceEvent, TraceEventKind,
     };
     use pretty_assertions::assert_eq;
 
@@ -341,6 +341,141 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert_eq!(parts.len(), 1);
         assert_eq!(parts[0].part.order, 1);
+    }
+
+    #[tokio::test]
+    async fn core_trace_user_snapshot_updates_canonical_user_part() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/alpha").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Conversation", CompileMode::Auto)
+            .await
+            .unwrap();
+        let runtime = StudioEventRuntime::new(store.clone());
+        let message = StudioMessage {
+            message_id: "turn-1:user".to_string(),
+            session_id: session.id.clone(),
+            turn_id: "turn-1".to_string(),
+            role: StudioMessageRole::User,
+            status: StudioMessageStatus::Completed,
+            created_at: 10,
+            updated_at: 10,
+            completed_at: Some(10),
+            error: None,
+            metadata: serde_json::json!({}),
+        };
+        let part = StudioPart {
+            part_id: "turn-1:user-text".to_string(),
+            message_id: "turn-1:user".to_string(),
+            session_id: session.id.clone(),
+            turn_id: "turn-1".to_string(),
+            part_type: StudioPartType::Text,
+            order: 0,
+            status: StudioPartStatus::Completed,
+            created_at: 10,
+            updated_at: 10,
+            completed_at: Some(10),
+            error: None,
+            text_channel: Some(StudioTextChannel::User),
+            text: "hello".to_string(),
+            attachments: Vec::new(),
+            tool: None,
+            agent: None,
+            inference: None,
+            plan: None,
+            file: None,
+            usage: None,
+            synthetic: false,
+            ignored: false,
+        };
+        runtime
+            .emit(
+                Some(project.id.clone()),
+                Some(session.id.clone()),
+                Some("turn-1".to_string()),
+                StudioEventKind::MessageUpdated {
+                    message: Box::new(message),
+                },
+            )
+            .await
+            .unwrap();
+        runtime
+            .emit(
+                Some(project.id),
+                Some(session.id.clone()),
+                Some("turn-1".to_string()),
+                StudioEventKind::MessagePartUpdated {
+                    part: Box::new(part),
+                },
+            )
+            .await
+            .unwrap();
+
+        let trace_item = TimelineItem {
+            turn_id: "turn-1".to_string(),
+            item_id: "turn-1-user".to_string(),
+            started_sequence: 0,
+            kind: TimelineItemKind::Text,
+            status: TimelineItemStatus::Completed,
+            created_at: 11,
+            updated_at: 11,
+            text_channel: Some(TimelineTextChannel::User),
+            content: "hello".to_string(),
+            attachments: Vec::new(),
+            thinking_chunks: Vec::new(),
+            tool: None,
+            agent: None,
+            inference: None,
+            usage: None,
+        };
+        runtime
+            .emit_agent_event(
+                &session.id,
+                pl_protocol::AgentEvent::TimelineItemCompleted { item: trace_item },
+            )
+            .await
+            .unwrap();
+
+        let parts = store.load_message_parts(&session.id).await.unwrap();
+        let events = store
+            .load_studio_events(&session.id, None, None)
+            .await
+            .unwrap();
+        let user_part_events = events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                StudioEventKind::MessagePartUpdated { part }
+                    if part.message_id == "turn-1:user" =>
+                {
+                    Some(part.part_id.as_str())
+                }
+                StudioEventKind::MessageUpdated { .. }
+                | StudioEventKind::MessageRemoved { .. }
+                | StudioEventKind::MessagePartUpdated { .. }
+                | StudioEventKind::MessagePartRemoved { .. }
+                | StudioEventKind::MessagePartDelta { .. }
+                | StudioEventKind::TurnChanged { .. }
+                | StudioEventKind::InteractionChanged { .. }
+                | StudioEventKind::PlanLifecycleChanged { .. }
+                | StudioEventKind::SessionRuntimeChanged { .. }
+                | StudioEventKind::AgentChanged { .. }
+                | StudioEventKind::AgentTimelineChanged { .. }
+                | StudioEventKind::SkillActivated { .. }
+                | StudioEventKind::SessionHandoffChanged { .. }
+                | StudioEventKind::SessionListChanged { .. }
+                | StudioEventKind::McpHealthChanged { .. }
+                | StudioEventKind::LspHealthChanged { .. }
+                | StudioEventKind::Stale { .. } => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].part.part_id, "turn-1:user-text");
+        assert_eq!(parts[0].part.message_id, "turn-1:user");
+        assert_eq!(
+            user_part_events,
+            vec!["turn-1:user-text", "turn-1:user-text"]
+        );
     }
 
     #[tokio::test]

@@ -19,6 +19,7 @@ import type {
   SessionRecord,
   SessionRuntime,
   SessionSelectionPayload,
+  StudioAgentTimelineEvent,
   StudioEventEnvelope,
   StudioMessage,
   StudioMessageProjection,
@@ -26,7 +27,7 @@ import type {
   StudioPartProjection,
   StudioPartDeltaField,
   StudioTurnStatus,
-  TimelineItem,
+  TimelinePartView,
   TimelineAttachment,
   TurnPhase,
   TurnStatus,
@@ -38,9 +39,9 @@ import {
   applyStudioEvent,
   emptyTimelineState,
   mergeConversationSnapshot,
-  removeOptimisticTimelineItems,
-  removeOptimisticUserTimelineItems,
-  removeOptimisticWaitingTimelineItems,
+  removeOptimisticTimelinePartViews,
+  removeOptimisticUserTimelinePartViews,
+  removeOptimisticWaitingTimelinePartViews,
   resetConversationFromSnapshot,
   type TimelineStateSlice,
 } from "./timeline-state";
@@ -401,7 +402,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         return state;
       }
       return storeSessionView({
-        ...removeOptimisticWaitingTimelineItems(state),
+        ...removeOptimisticWaitingTimelinePartViews(state),
         status: action.status,
         turnPhase: "failed",
         turnStartedAt: null,
@@ -511,7 +512,7 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       const currentRunEventBaseSequence = state.eventNextSequence;
       return storeSessionView({
         ...appendOptimisticPrompt(
-          removeOptimisticTimelineItems(state),
+          removeOptimisticTimelinePartViews(state),
           action.prompt,
           action.startedAt,
           action.attachments ?? [],
@@ -775,7 +776,7 @@ function reduceStudioEvent(
     case "agentChanged":
       return reduceAgentChanged(state, kind.agent, status);
     case "agentTimelineChanged":
-      return reduceStructuredAgentPayload(state, kind.event.payload, status);
+      return reduceAgentTimelineChanged(state, kind.event, status);
     case "sessionRuntimeChanged":
       return reduceSessionRuntimeChanged(state, kind.runtime, status);
     case "skillActivated":
@@ -795,9 +796,9 @@ function reduceStudioEvent(
         status: status ?? state.status,
       };
     case "mcpHealthChanged":
-      return reduceMcpHealthChanged(state, kind.health.payload);
+      return reduceMcpHealthChanged(state, kind.health);
     case "lspHealthChanged":
-      return reduceLspHealthChanged(state, kind.health.payload);
+      return reduceLspHealthChanged(state, kind.health);
     case "stale":
       return {
         ...state,
@@ -872,7 +873,7 @@ function reduceTurnChanged(
 ): StudioState {
   const turnPhase = phaseForStudioTurnStatus(status);
   const terminal = isTerminalStudioTurnStatus(status);
-  const base = terminal ? removeOptimisticWaitingTimelineItems(state) : state;
+  const base = terminal ? removeOptimisticWaitingTimelinePartViews(state) : state;
   return {
     ...base,
     isBusy: terminal ? false : true,
@@ -900,29 +901,19 @@ function reduceAgentChanged(
   };
 }
 
-function reduceStructuredAgentPayload(
+function reduceAgentTimelineChanged(
   state: StudioState,
-  payload: unknown,
+  event: StudioAgentTimelineEvent,
   status?: string,
 ): StudioState {
-  if (!isRecord(payload)) {
-    return { ...state, status: status ?? state.status };
-  }
-  if (isAgentDto(payload)) {
-    return {
-      ...state,
-      agents: mergeAgents(state.agents, [payload]),
-      status: status ?? state.status,
-    };
-  }
-  if (isAgentTimelineEvent(payload)) {
-    return {
-      ...state,
-      agentTimelineEvents: mergeAgentTimelineEvents(state.agentTimelineEvents, [payload]),
-      status: status ?? state.status,
-    };
-  }
-  return { ...state, status: status ?? state.status };
+  return {
+    ...state,
+    agentTimelineEvents: mergeAgentTimelineEvents(
+      state.agentTimelineEvents,
+      [agentTimelineRecordFromStudioEvent(event)],
+    ),
+    status: status ?? state.status,
+  };
 }
 
 function reduceSessionRuntimeChanged(
@@ -1174,10 +1165,10 @@ function applyOptimisticConversationCleanup(
 ): StudioState {
   let next = state;
   if (shouldClearOptimisticUserPart(kind)) {
-    next = removeOptimisticUserTimelineItems(next);
+    next = removeOptimisticUserTimelinePartViews(next);
   }
   if (shouldClearOptimisticWaitingPart(kind)) {
-    next = removeOptimisticWaitingTimelineItems(next);
+    next = removeOptimisticWaitingTimelinePartViews(next);
   }
   return next;
 }
@@ -1235,7 +1226,7 @@ function isModelVisiblePartType(kind: StudioPart["partType"]): boolean {
   }
 }
 
-function isTerminalTimelineStatus(status: TimelineItem["status"]): boolean {
+function isTerminalTimelineStatus(status: TimelinePartView["status"]): boolean {
   switch (status) {
     case "completed":
     case "failed":
@@ -1287,10 +1278,6 @@ function reduceConversationStatus(
   return { ...state, status: statusText };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 export function mergeAgentTimelineEvents(
   current: AgentTimelineEvent[],
   incoming: AgentTimelineEvent[],
@@ -1304,6 +1291,85 @@ export function mergeAgentTimelineEvents(
     if (left.sequence !== right.sequence) return left.sequence - right.sequence;
     return left.eventId.localeCompare(right.eventId);
   });
+}
+
+function agentTimelineRecordFromStudioEvent(event: StudioAgentTimelineEvent): AgentTimelineEvent {
+  const index = agentTimelineIndex(event);
+  return {
+    eventId: event.eventId,
+    sessionId: event.sessionId,
+    sequence: event.sequence,
+    kind: index.kind,
+    agentId: index.agentId,
+    path: index.path,
+    parentPath: index.parentPath,
+    payload: null,
+    createdAt: event.createdAt,
+  };
+}
+
+function agentTimelineIndex(event: StudioAgentTimelineEvent): Pick<
+  AgentTimelineEvent,
+  "kind" | "agentId" | "path" | "parentPath"
+> {
+  switch (event.kind.type) {
+    case "spawnBegin":
+      return {
+        kind: "spawnBegin",
+        agentId: null,
+        path: event.kind.senderPath,
+        parentPath: null,
+      };
+    case "spawnEnd":
+      return {
+        kind: "spawnEnd",
+        agentId: event.kind.agentId ?? null,
+        path: event.kind.path ?? null,
+        parentPath: null,
+      };
+    case "interactionBegin":
+      return {
+        kind: "interactionBegin",
+        agentId: null,
+        path: event.kind.receiverPath,
+        parentPath: event.kind.senderPath,
+      };
+    case "interactionEnd":
+      return {
+        kind: "interactionEnd",
+        agentId: null,
+        path: event.kind.receiverPath,
+        parentPath: event.kind.senderPath,
+      };
+    case "waitingBegin":
+      return {
+        kind: "waitingBegin",
+        agentId: null,
+        path: event.kind.senderPath,
+        parentPath: null,
+      };
+    case "waitingEnd":
+      return {
+        kind: "waitingEnd",
+        agentId: null,
+        path: event.kind.senderPath,
+        parentPath: null,
+      };
+    case "closeBegin":
+      return {
+        kind: "closeBegin",
+        agentId: null,
+        path: event.kind.receiverPath,
+        parentPath: event.kind.senderPath,
+      };
+    case "closeEnd":
+      return {
+        kind: "closeEnd",
+        agentId: null,
+        path: event.kind.receiverPath,
+        parentPath: event.kind.senderPath,
+      };
+  }
 }
 
 export function mergeAgents(current: AgentDto[], incoming: AgentDto[]): AgentDto[] {
@@ -1447,29 +1513,3 @@ function isTerminalStudioTurnStatus(status: StudioTurnStatus): boolean {
   }
 }
 
-function isAgentDto(value: unknown): value is AgentDto {
-  if (!isRecord(value)) {
-    return false;
-  }
-  return (
-    typeof value.id === "string" &&
-    typeof value.sessionId === "string" &&
-    typeof value.path === "string" &&
-    typeof value.role === "string" &&
-    typeof value.task === "string" &&
-    typeof value.status === "string" &&
-    typeof value.depth === "number"
-  );
-}
-
-function isAgentTimelineEvent(value: unknown): value is AgentTimelineEvent {
-  if (!isRecord(value)) {
-    return false;
-  }
-  return (
-    typeof value.eventId === "string" &&
-    typeof value.sessionId === "string" &&
-    typeof value.sequence === "number" &&
-    typeof value.kind === "string"
-  );
-}
