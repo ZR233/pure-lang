@@ -10,6 +10,10 @@ const zhCN = {
     sessions: "会话",
   },
 
+  projects: {
+    addPlaceholder: "输入项目路径，回车添加",
+  },
+
   actions: {
     send: "发送",
     stop: "停止",
@@ -121,6 +125,7 @@ const zhCN = {
     parent: "父级",
     waitingToStart: "等待启动。",
     noSummaryYet: "暂无摘要。",
+    prompt: "任务提示词",
     queued: "排队中",
     awaitingApproval: "等待审批",
     running: "运行中",

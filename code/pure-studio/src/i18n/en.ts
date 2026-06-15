@@ -10,6 +10,10 @@ const en = {
     sessions: "Sessions",
   },
 
+  projects: {
+    addPlaceholder: "Enter project path, press Enter to add",
+  },
+
   actions: {
     send: "Send",
     stop: "Stop",
@@ -121,6 +125,7 @@ const en = {
     parent: "Parent",
     waitingToStart: "Waiting to start.",
     noSummaryYet: "No summary yet.",
+    prompt: "Prompt",
     queued: "Queued",
     awaitingApproval: "Awaiting approval",
     running: "Running",

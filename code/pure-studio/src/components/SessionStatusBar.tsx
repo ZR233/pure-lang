@@ -514,7 +514,7 @@ function ModeSelector({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs">
+        <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs shrink-0">
           {modeIcon}
           <span className="truncate max-w-[100px]">{modeLabel}</span>
           <ChevronDown size={12} />
@@ -611,7 +611,7 @@ function ModelSelector({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs">
+        <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs shrink-0">
           <Cpu size={14} />
           <span className="truncate max-w-[100px]">
             {currentModelInfo?.model.displayName ?? currentModelSlug ?? t("statusBar.noModel")}
@@ -717,7 +717,7 @@ function EffortSelector({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs">
+        <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs shrink-0">
           <Clock size={14} />
           <span className="truncate max-w-[100px]">{currentEffort || t("roleRoute.effort")}</span>
           <ChevronDown size={12} />
@@ -752,7 +752,7 @@ function PermissionSelector({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs">
+        <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs shrink-0">
           <ShieldCheck size={14} />
           <span className="truncate max-w-[100px]">{t(`permissionMode.${permissionMode}`)}</span>
           <ChevronDown size={12} />
@@ -904,7 +904,7 @@ export function SessionStatusBar({
   return (
     <div className="flex items-center justify-between gap-2 px-3 h-10 border-t border-border bg-card">
       {/* Left: Interactive/selectable */}
-      <div className="flex items-center gap-1 min-w-0 overflow-x-auto">
+      <div className="flex flex-1 items-center gap-1 min-w-0 overflow-x-auto">
         <ModeSelector
           currentMode={currentMode}
           onSetSessionMode={onSetSessionMode}
