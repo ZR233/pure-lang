@@ -290,7 +290,15 @@ export function useStudioApp() {
 
   useEffect(() => {
     if (!state.selectedSessionId) {
-      dispatch({ type: "sessionStateLoaded", sessionId: null, events: [], planStates: [], nextSequence: 0 });
+      dispatch({
+        type: "sessionStateLoaded",
+        sessionId: null,
+        messages: [],
+        parts: [],
+        events: [],
+        planStates: [],
+        nextSequence: 0,
+      });
       return;
     }
     const sessionId = state.selectedSessionId;
@@ -320,24 +328,30 @@ export function useStudioApp() {
       eventBatchTimerRef.current = null;
       const batch = eventBatchRef.current;
       eventBatchRef.current = [];
-      const latestSnapshotSequence = new Map<string, number>();
+      const latestSnapshotByPart = new Map<string, StudioEventEnvelope>();
       for (const envelope of batch) {
         const kind = envelope.kind;
         if (kind.type !== "messagePartUpdated") {
           continue;
         }
         const key = `${envelope.sessionId ?? ""}:${kind.part.partId}`;
-        latestSnapshotSequence.set(
-          key,
-          Math.max(latestSnapshotSequence.get(key) ?? -1, envelope.sequence),
-        );
+        const existing = latestSnapshotByPart.get(key);
+        if (!existing || existing.sequence <= envelope.sequence) {
+          latestSnapshotByPart.set(key, envelope);
+        }
       }
       for (const envelope of batch) {
         const kind = envelope.kind;
+        if (kind.type === "messagePartUpdated") {
+          const key = `${envelope.sessionId ?? ""}:${kind.part.partId}`;
+          if (latestSnapshotByPart.get(key) !== envelope) {
+            continue;
+          }
+        }
         if (kind.type === "messagePartDelta") {
           const key = `${envelope.sessionId ?? ""}:${kind.delta.partId}`;
-          const snapshotSequence = latestSnapshotSequence.get(key);
-          if (snapshotSequence !== undefined && envelope.sequence <= snapshotSequence) {
+          const snapshot = latestSnapshotByPart.get(key);
+          if (snapshot && envelope.sequence <= snapshot.sequence) {
             continue;
           }
         }
@@ -355,6 +369,7 @@ export function useStudioApp() {
     const unlisteners = [
       listen<StudioEventEnvelope>("studio-runtime-event", ({ payload }) => {
         if (payload.kind.type === "stale" && payload.sessionId) {
+          queueStudioEvent(payload);
           const afterSequence = Math.max(0, payload.sequence - payload.kind.laggedEvents - 1);
           void reloadStudioEvents(payload.sessionId, afterSequence);
           return;
@@ -383,6 +398,11 @@ export function useStudioApp() {
         dispatch({
           type: "sessionStateLoaded",
           sessionId: payload.sessionId,
+          agentEvents: payload.agentEvents,
+          agents: payload.agents,
+          sessionRuntime: payload.sessionRuntime,
+          messages: payload.messages,
+          parts: payload.parts,
           events: payload.events,
           interactions: payload.interactions ?? [],
           nextSequence: payload.eventNextSequence,

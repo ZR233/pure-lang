@@ -86,7 +86,7 @@ pub use studio::{
     PlanImplementationHandoffStart, ProjectRecord, RunPromptRequest, SessionHandoffKind,
     SessionHandoffRecord, SessionHandoffStatus, SessionRecord, SessionRuntimeRecord,
     SessionSkillRecord, SessionVisibility, StudioEventRuntime, StudioPromptOutcome, StudioRuntime,
-    StudioStore, TimelineEventRecord, resolution_matches_kind, studio_attachment,
+    StudioStore, resolution_matches_kind, studio_attachment,
 };
 pub use tool::{
     AskUserTool, BashInput, BashTool, LspLanguageTool, LspQueryTool, OutputTruncation,

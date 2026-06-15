@@ -12,10 +12,6 @@ pub fn new_id(prefix: &str) -> String {
     format!("{prefix}-{now:x}-{seq:x}")
 }
 
-pub fn new_timeline_event_id() -> String {
-    new_id("timeline")
-}
-
 pub fn new_studio_event_id() -> String {
     new_id("studio-event")
 }

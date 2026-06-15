@@ -34,13 +34,13 @@ part 类型固定为：
 
 每个 turn 被接收后，用户输入必须作为该 turn 的第一个 durable user message + text part 记录和广播。纯图片输入也必须产生用户 `text` part，text 可以为空但 attachments 不得为空。enabled tools、`turn`、`inference` 等内部诊断或运行态 part 不得在 projection 上排到用户输入之前，避免前端等待状态、内部状态或历史回放出现在用户问题上方。
 
-历史、实时和 stale backfill 都必须使用 `StudioEventEnvelope.sequence` 作为唯一 durable cursor。`studio_events` 保存 durable snapshot 事件；`studio_messages/message_parts` projection 只能由 `StudioEventRuntime` 从 durable snapshot 事件派生，不提供第二套 timeline cursor 或第二套 wire 协议。前端只能用 StudioEvent cursor 判断新旧，不能用 part 列表里的最大 `order` 代替游标。旧 snapshot 只能补齐当前状态中不存在或尚未应用的 event，不能覆盖已经通过实时事件接收的新 turn 内容。前端 optimistic message/part 可以使用临时本地 order 参与展示，但不得预占或推进后端 cursor。
+历史、实时和 stale backfill 都必须使用 `StudioEventEnvelope.sequence` 作为唯一 durable cursor。`studio_events` 保存 durable snapshot 事件；`studio_messages/message_parts` projection 只能由 `StudioEventRuntime` 从 durable snapshot 事件派生，不提供第二套 timeline cursor 或第二套 wire 协议。`stale` 是 live-only 补拉提示，不写入 `studio_events`，不推进 durable cursor；前端收到后先标记对应 session view，再用当前 cursor 补拉缺失 durable 事件。前端只能用 StudioEvent cursor 判断新旧，不能用 part 列表里的最大 `order` 代替游标。旧 snapshot 只能补齐当前状态中不存在或尚未应用的 event，不能覆盖已经通过实时事件接收的新 turn 内容。前端 optimistic message/part 可以使用临时本地 order 参与展示，但不得预占或推进后端 cursor。
 
 snapshot 与 live delta 的优先级完全对齐 opencode：
 
 - start、完成、失败、审批等待、工具运行、工具完成等状态变化都发 `messagePartUpdated` 完整 snapshot。
 - 文本、commentary、reasoning、plan、工具参数和工具结果的流式片段发 `messagePartDelta`，只作为 live overlay。
-- 前端按 16ms frame 合批事件；同一 frame 内若同 part 的 snapshot 到达，跳过同 part 尚未应用的旧 delta。
+- 前端按 16ms frame 合批事件；同一 frame 内同一个 part 的多个 snapshot 只保留最后一个，若同 part 的 snapshot 到达，跳过同 part 尚未应用的旧 delta。
 - snapshot 到达后清除同 part 的 delta overlay，并以 snapshot 内容为准。
 - reload、历史恢复和 stale backfill 只依赖 durable snapshot；丢失 live delta 不影响最终可恢复状态。
 
@@ -82,9 +82,9 @@ Auto 与 Plan Mode 下模型可见输出优先使用显式标签：`<commentary>
 
 计划的采纳与实施状态不改变 `plan` part 本身，而是通过 `StudioEventKind::PlanLifecycleChanged` 写入 durable `studio_events` 并广播。事件包含 `planId`、`state`、可选 `turnId`、可选 `reason` 和 `updatedAt`；Studio 从 durable events 中按 `planId` 折叠 latest plan state。Plan turn 完成后需要用户确认实施时，后端创建 `InteractionKind::PlanConfirmation`，前端不再从历史 timeline 自行恢复旧确认 composer。确认 resolution 固定为 `implementFreshContext | continuePlanning | dismiss`；`continuePlanning` 的 `content` 是确认 composer 同次提交的用户补充内容，resolution 成功后由前端立即作为普通 prompt 发送；实施时后端创建显式 session handoff，新 Auto session 承载 fresh context 和 handoff prompt，来源 session 保持可恢复但不再作为活跃 session 列表项展示。后端必须在实施 turn 启动前广播 `sessionHandoffChanged`，使 Studio 先切到目标 session 并接收后续实时 `studio-runtime-event`，不得等后台 run 完成才展示实施过程。
 
-Studio 前端的实时事件、`load_session_state` 初始事件和 `load_studio_events` 补拉结果必须进入同一个 StudioEvent reducer：
+Studio 前端的实时事件、`load_session_state` projection snapshot 和 `load_studio_events` 补拉结果必须进入同一个 StudioEvent reducer：
 
-- `load_session_state` 返回同源 `StudioEventEnvelope[]` 与 `eventNextSequence`；前端按 sequence 从小到大重放。
+- `load_session_state` 返回当前 `{ message, sequence }[]`、`{ part, sequence }[]` projection snapshot、非 message/part durable 状态事件与 `eventNextSequence`；前端先用 projection record 初始化 message/part state 和 per-id sequence guard，再用同一个 reducer 应用状态事件。
 - `load_studio_events(afterSequence)` 返回缺失的 canonical envelope；payload 必须与数据库中保存的 payload 完全一致。
 - `StudioMessage` / `StudioPart` 是前端 reducer 的状态事实源；timeline row 只是 selector/view model 的折叠结果，不作为 Tauri command 的主输入 DTO。
 - `submit_prompt` 与触发实施的 `resolve_interaction` 不返回最终 timeline；它们只返回提交成功、目标 `sessionId/turnId/cursor`。
@@ -93,15 +93,15 @@ Studio 前端的实时事件、`load_session_state` 初始事件和 `load_studio
 - `Done` 只表示 turn 状态完成，不携带 timeline 内容；最终正文必须通过 `textChannel=final` 的 `text` part 表达。
 - Plan Mode 的最终可执行计划必须通过 `plan` part 表达；该 part 可以来自 `plan_exit.content` 或兼容的 `<proposed_plan>` 流式块。如果模型只提交计划而没有普通正文，不应生成空 assistant `text` part。
 
-Studio 渲染可以在 selector 派生出展示项后使用虚拟滚动优化大 timeline，但虚拟滚动层不得改变 item-first 协议语义、事件游标或 reducer 合并规则。动态高度、流式 delta overlay 和自动跟随底部属于前端渲染适配层职责；协议层仍只表达 item snapshot 与 live delta。
+Studio 渲染可以在 selector 派生出展示项后使用虚拟滚动优化大 timeline，但虚拟滚动层不得改变 Message/Part 协议语义、事件游标或 reducer 合并规则。动态高度、流式 delta overlay 和自动跟随底部属于前端渲染适配层职责；协议层仍只表达 message/part snapshot 与 live delta。
 
 ## 8.3 背压与容量
 
 内部事件通道可以继续使用 `tokio::sync::broadcast`，但 Studio 对外语义是持久事件流。默认容量由调用方创建，目前建议为 `256`。
 
-高频 delta 可以在 broadcast 层 lag，但不能静默丢失 Studio 状态：每个 durable snapshot 必须先写入 `studio_events` 和 projection，再广播同一份 canonical envelope。live delta 只进入实时 event stream；前端发现 sequence 缺口或收到 stale 事件时调用 `load_studio_events(sessionId, afterSequence, limit)` 补齐 durable snapshot。completed/failed snapshot 携带最终内容，历史加载不依赖实时 delta 是否完整到达前端。只要 turn 最终有 assistant 正文，最终 message/part 集合中必须存在 completed assistant `text` part；不能只把正文写到 `turn` trace item。
+高频 delta 可以在 broadcast 层 lag，但不能静默丢失 Studio 状态：每个 durable snapshot 必须先写入 `studio_events` 和 projection，再广播同一份 canonical envelope。live delta 和 `stale` 只进入实时 event stream；前端发现 sequence 缺口或收到 stale 事件时调用 `load_studio_events(sessionId, afterSequence, limit)` 补齐 durable snapshot。completed/failed snapshot 携带最终内容，历史加载不依赖实时 delta 是否完整到达前端。只要 turn 最终有 assistant 正文，最终 message/part 集合中必须存在 completed assistant `text` part；不能只把正文写到 `turn` trace item。
 
-实现允许把 live delta 保留为内部诊断记录，但不得写入 `studio_events`。`load_session_state` 和 `load_studio_events` 只返回 durable snapshot 与其他状态事件。
+实现允许把 live delta 和 stale 通知保留为内部诊断记录，但不得写入 `studio_events`。`load_session_state` 通过 message/part projection snapshot 恢复终态，并只附带非 message/part durable 状态事件；`load_studio_events` 只返回 durable snapshot 与其他状态事件。
 
 ## 8.4 事件边界
 
@@ -123,7 +123,7 @@ root agent 的 provider `429` 错误码是当前轮的终止错误，不进入�
 
 `pl-model` 负责把 provider 的工具调用 delta 聚合为完整的 `ToolCall` 后再交给 `pl-core` 执行。protocol 层先把 OpenAI Responses 或 Chat Completions SSE 映射为 provider 无关的 content block lifecycle `ModelStreamEvent`，`stream` 层只消费该归一化事件，不解析 OpenAI 原始 JSON。Chat Completions 流式响应中的后续参数片段可能只带 `index`，不再重复 `id` 或 `name`；Responses API 的 custom/freeform 输入 delta 也可能只带 `item_id` / `call_id`。因此聚合层必须使用稳定的流式序号或 item/call id 合并片段，并保留最早出现的 provider id、工具名和调用种类。
 
-`ModelStreamEvent` 的 assistant content 语义与 opencode 的 part/lifecycle 模型对齐：`text`、`reasoning`、`plan` 和 `tool` 都有独立 start/delta/complete 生命周期。`pl-model::stream::lifecycle` 负责为缺失 start 的 delta 补 start，并在 step finish 前补齐仍打开的 text、reasoning 和 plan block。`TimelineProjection` 只按 lifecycle 写 item-first timeline，不再从普通文本或 thinking 内容推断 plan。
+`ModelStreamEvent` 的 assistant content 语义与 opencode 的 part/lifecycle 模型对齐：`text`、`reasoning`、`plan` 和 `tool` 都有独立 start/delta/complete 生命周期。`pl-model::stream::lifecycle` 负责为缺失 start 的 delta 补 start，并在 step finish 前补齐仍打开的 text、reasoning 和 plan block。进入 Studio 前必须转为 `StudioMessage` / `StudioPart` snapshot 或 live delta，不再从普通文本或 thinking 内容推断 plan。
 
 Plan 是协议级 block。provider 或 prompt 兼容层可以继续识别 `<proposed_plan>`，但必须先转换为 `PlanStarted/PlanDelta/PlanCompleted` 后再进入 accumulator；`pl-core` 也可以从 Plan Mode 中成功执行的 `plan_exit.content` 生成同一个 `plan` item。`<commentary>` 与 `<final>` 同理转换为带 `TimelineTextChannel` 的 text lifecycle。未标签普通 text 默认进入 `final` text block；未标签 reasoning 永远只进入 thinking block，不能生成 assistant 正文或 plan。部分 OpenAI-compatible Chat provider 会把带可见标签的输出放入 `reasoning_content`，该兼容转换只允许提取显式标签段，同时保留完整 reasoning 原文作为 thinking。
 

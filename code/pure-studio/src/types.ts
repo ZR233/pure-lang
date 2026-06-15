@@ -385,6 +385,46 @@ export type TimelineAttachment = {
   dataUrl?: string | null;
 };
 
+export type StudioToolPart = {
+  toolCallId: string;
+  callId?: string | null;
+  providerItemId?: string | null;
+  name: string;
+  arguments: string;
+  result?: string | null;
+  exitCode?: number | null;
+  timedOut: boolean;
+  workingDirectory?: string | null;
+  denialReason?: string | null;
+};
+
+export type StudioAgentPart = {
+  id: string;
+  path: string;
+  parentPath?: string | null;
+  role: string;
+  task: string;
+  status: AgentStatus;
+  summary?: string | null;
+  depth: number;
+  error?: string | null;
+  reason?: string | null;
+};
+
+export type StudioInferencePart = {
+  inferenceId: string;
+  model: string;
+};
+
+export type StudioPlanPart = {
+  content: string;
+};
+
+export type StudioFilePart = {
+  path: string;
+  mediaType?: string | null;
+};
+
 export type TimelineItem = {
   turnId: string;
   itemId: string;
@@ -402,34 +442,9 @@ export type TimelineItem = {
   content: string;
   attachments?: TimelineAttachment[];
   thinkingChunks: { chunkIndex: number; content: string }[];
-  tool?: {
-    toolCallId: string;
-    callId?: string | null;
-    providerItemId?: string | null;
-    name: string;
-    arguments: string;
-    result?: string | null;
-    exitCode?: number | null;
-    timedOut: boolean;
-    workingDirectory?: string | null;
-    denialReason?: string | null;
-  } | null;
-  agent?: {
-    id: string;
-    path: string;
-    parentPath?: string | null;
-    role: string;
-    task: string;
-    status: AgentStatus;
-    summary?: string | null;
-    depth: number;
-    error?: string | null;
-    reason?: string | null;
-  } | null;
-  inference?: {
-    inferenceId: string;
-    model: string;
-  } | null;
+  tool?: StudioToolPart | null;
+  agent?: StudioAgentPart | null;
+  inference?: StudioInferencePart | null;
   usage?: UsageSnapshot | null;
 };
 
@@ -742,11 +757,11 @@ export type StudioPart = {
   textChannel?: TimelineTextChannel | null;
   text: string;
   attachments?: StudioAttachment[];
-  tool?: TimelineItem["tool"];
-  agent?: TimelineItem["agent"];
-  inference?: TimelineItem["inference"];
-  plan?: { content: string } | null;
-  file?: { path: string; mediaType?: string | null } | null;
+  tool?: StudioToolPart | null;
+  agent?: StudioAgentPart | null;
+  inference?: StudioInferencePart | null;
+  plan?: StudioPlanPart | null;
+  file?: StudioFilePart | null;
   usage?: UsageSnapshot | null;
   synthetic?: boolean;
   ignored?: boolean;
@@ -776,9 +791,9 @@ export type StudioEventKind =
   | { type: "messagePartRemoved"; messageId: string; partId: string }
   | { type: "messagePartDelta"; delta: StudioPartDelta }
   | { type: "interactionChanged"; event: InteractionChangedEvent }
-  | { type: "agentChanged"; agent: { payload: AgentDto } }
+  | { type: "agentChanged"; agent: AgentDto }
   | { type: "agentTimelineChanged"; event: { payload: AgentTimelineEvent } }
-  | { type: "sessionRuntimeChanged"; runtime: { payload: SessionRuntime } }
+  | { type: "sessionRuntimeChanged"; runtime: SessionRuntime }
   | { type: "skillActivated"; activation: SkillActivation }
   | { type: "planLifecycleChanged"; event: PlanLifecycleEvent }
   | {
@@ -819,6 +834,16 @@ export type StudioEventsPayload = {
   nextSequence: number;
 };
 
+export type StudioMessageProjection = {
+  message: StudioMessage;
+  sequence: number;
+};
+
+export type StudioPartProjection = {
+  part: StudioPart;
+  sequence: number;
+};
+
 export type SessionStatePayload = {
   sessionId: string;
   session: SessionRecord;
@@ -827,6 +852,8 @@ export type SessionStatePayload = {
   agents: AgentDto[];
   sessionRuntime: SessionRuntime;
   interactions: InteractionRequest[];
+  messages: StudioMessageProjection[];
+  parts: StudioPartProjection[];
   events: StudioEventEnvelope[];
   eventNextSequence: number;
 };

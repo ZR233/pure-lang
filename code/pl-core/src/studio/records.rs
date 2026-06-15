@@ -132,16 +132,6 @@ pub struct AgentTimelineEventRecord {
     pub created_at: i64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct TimelineEventRecord {
-    pub id: String,
-    pub session_id: String,
-    pub sequence: i64,
-    pub created_at: i64,
-    pub kind: String,
-    pub payload_json: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachmentRecord {
     pub id: String,

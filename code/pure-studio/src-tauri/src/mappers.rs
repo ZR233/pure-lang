@@ -680,7 +680,7 @@ pub fn agent_dto(agent: StudioAgentSnapshotRecord) -> AgentDto {
         parent_path: agent.parent_path,
         role: agent.role,
         task: agent.task,
-        status: agent.status.as_str().to_string(),
+        status: agent.status,
         summary: agent.summary,
         depth: agent.depth,
         reason: agent.reason,

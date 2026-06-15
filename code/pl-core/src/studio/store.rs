@@ -12,7 +12,8 @@ use pl_protocol::{
     InteractionResolution, InteractionStatus, Message, PlanConfirmationResolution,
     PlanLifecycleEvent, PlanLifecycleState, RuntimeUsageSnapshot, SkillActivation,
     StudioAttachment, StudioEventEnvelope, StudioEventKind, StudioMessage, StudioPart,
-    StudioTurnStatus, TimelineAttachment, TraceEvent, TraceEventKind,
+    StudioRuntimeUsage, StudioSessionRuntime, StudioTurnStatus, TimelineAttachment, TraceEvent,
+    TraceEventKind,
 };
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait, Database,
@@ -26,7 +27,7 @@ use crate::runtime_usage::{
     merge_costs, token_usage_snapshot,
 };
 use crate::studio::entities;
-use crate::studio::ids::{new_id, new_timeline_event_id, unix_seconds};
+use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::mappers::{
     agent_runtime_snapshot_record, agent_snapshot_record, agent_timeline_event_record,
     attachment_record, costs_to_json, interaction_record, message_to_row_parts, project_record,
@@ -34,7 +35,7 @@ use crate::studio::mappers::{
     session_skill_record, studio_event_envelope, studio_event_record, studio_message_record,
     studio_message_role_label, studio_message_status_label, studio_part_record,
     studio_part_status_label, studio_part_type_label, studio_text_channel_label,
-    studio_turn_record, timeline_event_record, trace_event_kind_label,
+    studio_turn_record,
 };
 use crate::studio::paths::{
     default_attachments_dir, prepare_database_switch, project_name, sqlite_url,
@@ -43,15 +44,13 @@ use crate::studio::records::{
     AgentSnapshotRecord, AgentTimelineEventRecord, AttachmentRecord, MaterializedAttachment,
     PlanImplementationHandoffStart, ProjectRecord, SessionHandoffKind, SessionHandoffStatus,
     SessionRecord, SessionRuntimeRecord, SessionSkillRecord, SessionVisibility,
-    StudioMessageRecord, StudioPartRecord, StudioTurnRecord, TimelineEventRecord,
+    StudioMessageRecord, StudioPartRecord, StudioTurnRecord,
 };
 use crate::studio::store_support::{
     configure_sqlite, insert_message_with_tx, non_empty_title, run_migrations,
     touch_session_with_tx,
 };
 use crate::{CompileMode, CoreSession, InstructionSnapshot, TurnResult};
-
-const TIMELINE_EVENT_INSERT_CHUNK_SIZE: usize = 100;
 
 #[derive(Clone)]
 pub struct StudioStore {
@@ -164,9 +163,10 @@ impl StudioStore {
 
     pub async fn archive_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {
         use entities::{
-            agent, agent_event, agent_runtime_event, agent_runtime_snapshot, interaction, message,
-            project, session, session_handoff, session_runtime_snapshot, session_skill,
-            timeline_event, tool_approval,
+            agent, agent_event, agent_runtime_event, agent_runtime_snapshot, attachment,
+            interaction, message, message_part, project, session, session_handoff,
+            session_runtime_snapshot, session_skill, studio_event, studio_message, timeline_event,
+            tool_approval, turn,
         };
         let Some(project) = project::Entity::find_by_id(project_id.to_string())
             .one(&self.db)
@@ -185,6 +185,26 @@ impl StudioStore {
 
         for session_id in &session_ids {
             let session_id = session_id.to_string();
+            studio_event::Entity::delete_many()
+                .filter(studio_event::Column::SessionId.eq(session_id.clone()))
+                .exec(&tx)
+                .await?;
+            message_part::Entity::delete_many()
+                .filter(message_part::Column::SessionId.eq(session_id.clone()))
+                .exec(&tx)
+                .await?;
+            studio_message::Entity::delete_many()
+                .filter(studio_message::Column::SessionId.eq(session_id.clone()))
+                .exec(&tx)
+                .await?;
+            turn::Entity::delete_many()
+                .filter(turn::Column::SessionId.eq(session_id.clone()))
+                .exec(&tx)
+                .await?;
+            attachment::Entity::delete_many()
+                .filter(attachment::Column::SessionId.eq(session_id.clone()))
+                .exec(&tx)
+                .await?;
             timeline_event::Entity::delete_many()
                 .filter(timeline_event::Column::SessionId.eq(session_id.clone()))
                 .exec(&tx)
@@ -826,6 +846,9 @@ impl StudioStore {
         if matches!(envelope.kind, StudioEventKind::MessagePartDelta { .. }) {
             bail!("messagePartDelta is live-only and must not be persisted");
         }
+        if matches!(envelope.kind, StudioEventKind::Stale { .. }) {
+            bail!("stale is live-only and must not be persisted");
+        }
         let tx = self.db.begin().await?;
         if let Some(session_id) = envelope.session_id.as_deref() {
             let next_sequence = next_studio_event_sequence_with_tx(&tx, session_id).await?;
@@ -964,22 +987,6 @@ impl StudioStore {
         Ok(cancelled)
     }
 
-    pub async fn append_timeline_events(&self, events: &[TraceEvent]) -> Result<()> {
-        if events.is_empty() {
-            return Ok(());
-        }
-        use entities::timeline_event;
-        for chunk in events.chunks(TIMELINE_EVENT_INSERT_CHUNK_SIZE) {
-            let models = timeline_event_models(chunk);
-            timeline_event::Entity::insert_many(models)
-                .on_empty_do_nothing()
-                .on_conflict(timeline_event_sequence_conflict())
-                .exec(&self.db)
-                .await?;
-        }
-        Ok(())
-    }
-
     pub async fn append_turn_records(
         &self,
         session_id: &str,
@@ -1053,37 +1060,6 @@ impl StudioStore {
             .into_iter()
             .map(|skill| skill.skill_name)
             .collect())
-    }
-
-    pub async fn load_timeline_events(
-        &self,
-        session_id: &str,
-        after_sequence: Option<i64>,
-        limit: Option<i64>,
-    ) -> Result<Vec<TimelineEventRecord>> {
-        use entities::timeline_event;
-        let mut query = timeline_event::Entity::find()
-            .filter(timeline_event::Column::SessionId.eq(session_id.to_string()));
-        if let Some(after) = after_sequence {
-            query = query.filter(timeline_event::Column::Sequence.gt(after));
-        }
-        query = query.order_by_asc(timeline_event::Column::Sequence);
-        if let Some(limit) = limit {
-            query = query.limit(limit as u64);
-        }
-        let rows = query.all(&self.db).await?;
-        Ok(rows.into_iter().map(timeline_event_record).collect())
-    }
-
-    pub async fn next_timeline_sequence(&self, session_id: &str) -> Result<u64> {
-        use entities::timeline_event;
-        let max_seq: Option<i64> = timeline_event::Entity::find()
-            .filter(timeline_event::Column::SessionId.eq(session_id.to_string()))
-            .order_by_desc(timeline_event::Column::Sequence)
-            .one(&self.db)
-            .await?
-            .map(|row| row.sequence);
-        Ok(max_seq.map(|s| (s + 1) as u64).unwrap_or(0))
     }
 
     pub async fn record_agent_runtime_delta(
@@ -1367,33 +1343,6 @@ fn plan_lifecycle_events(
             updated_at: now,
         })
         .collect()
-}
-
-fn timeline_event_models(events: &[TraceEvent]) -> Vec<entities::timeline_event::ActiveModel> {
-    events
-        .iter()
-        .map(|event| {
-            let payload = serde_json::to_string(&event.kind).unwrap_or_default();
-            entities::timeline_event::ActiveModel {
-                id: Set(new_timeline_event_id()),
-                session_id: Set(event.session_id.clone()),
-                sequence: Set(event.sequence as i64),
-                created_at: Set(event.timestamp),
-                kind: Set(trace_event_kind_label(&event.kind).to_string()),
-                payload_json: Set(payload),
-            }
-        })
-        .collect()
-}
-
-fn timeline_event_sequence_conflict() -> sea_orm::sea_query::OnConflict {
-    use entities::timeline_event;
-    sea_orm::sea_query::OnConflict::columns([
-        timeline_event::Column::SessionId,
-        timeline_event::Column::Sequence,
-    ])
-    .do_nothing()
-    .to_owned()
 }
 
 async fn next_studio_event_sequence_with_tx(
@@ -1691,6 +1640,80 @@ fn optional_json_string<T: serde::Serialize>(value: &Option<T>) -> Result<Option
     Ok(value.as_ref().map(serde_json::to_string).transpose()?)
 }
 
+fn runtime_usage_snapshot(usage: StudioRuntimeUsage) -> RuntimeUsageSnapshot {
+    RuntimeUsageSnapshot {
+        model: usage.model,
+        context_window: usage.context_window,
+        latest_context_tokens: usage.latest_context_tokens,
+        prompt_tokens: usage.prompt_tokens,
+        completion_tokens: usage.completion_tokens,
+        cached_prompt_tokens: usage.cached_prompt_tokens,
+        total_tokens: usage.total_tokens,
+        estimated_costs: usage.estimated_costs,
+        has_unpriced_usage: usage.has_unpriced_usage,
+        updated_at: usage.updated_at,
+    }
+}
+
+async fn upsert_session_runtime_snapshot_with_tx(
+    tx: &sea_orm::DatabaseTransaction,
+    session_id: &str,
+    runtime: &StudioSessionRuntime,
+) -> Result<()> {
+    use entities::session_runtime_snapshot;
+    let usage = runtime_usage_snapshot(runtime.usage.clone());
+    let (currency, estimated_cost) = if usage.estimated_costs.len() == 1 {
+        (
+            Some(usage.estimated_costs[0].currency.clone()),
+            Some(usage.estimated_costs[0].amount),
+        )
+    } else {
+        (None, None)
+    };
+    let costs_json = costs_to_json(&usage.estimated_costs);
+    if let Some(row) = session_runtime_snapshot::Entity::find_by_id(session_id.to_string())
+        .one(tx)
+        .await?
+    {
+        if row.updated_at > usage.updated_at {
+            return Ok(());
+        }
+        let mut active: session_runtime_snapshot::ActiveModel = row.into();
+        active.model = Set(usage.model);
+        active.context_window = Set(usage.context_window.map(|value| value as i64));
+        active.latest_context_tokens = Set(usage.latest_context_tokens as i64);
+        active.prompt_tokens = Set(usage.prompt_tokens as i64);
+        active.completion_tokens = Set(usage.completion_tokens as i64);
+        active.cached_prompt_tokens = Set(usage.cached_prompt_tokens as i64);
+        active.total_tokens = Set(usage.total_tokens as i64);
+        active.currency = Set(currency);
+        active.estimated_cost = Set(estimated_cost);
+        active.estimated_costs_json = Set(costs_json);
+        active.has_unpriced_usage = Set(i32::from(usage.has_unpriced_usage));
+        active.updated_at = Set(usage.updated_at);
+        active.update(tx).await?;
+    } else {
+        session_runtime_snapshot::ActiveModel {
+            session_id: Set(session_id.to_string()),
+            model: Set(usage.model),
+            context_window: Set(usage.context_window.map(|value| value as i64)),
+            latest_context_tokens: Set(usage.latest_context_tokens as i64),
+            prompt_tokens: Set(usage.prompt_tokens as i64),
+            completion_tokens: Set(usage.completion_tokens as i64),
+            cached_prompt_tokens: Set(usage.cached_prompt_tokens as i64),
+            total_tokens: Set(usage.total_tokens as i64),
+            currency: Set(currency),
+            estimated_cost: Set(estimated_cost),
+            estimated_costs_json: Set(costs_json),
+            has_unpriced_usage: Set(i32::from(usage.has_unpriced_usage)),
+            updated_at: Set(usage.updated_at),
+        }
+        .insert(tx)
+        .await?;
+    }
+    Ok(())
+}
+
 async fn record_agent_runtime_delta_with_tx(
     tx: &sea_orm::DatabaseTransaction,
     session_id: &str,
@@ -1879,41 +1902,25 @@ async fn apply_studio_event_projection_with_tx(
             }
         }
         StudioEventKind::AgentChanged { agent } => {
-            if let Some(session_id) = envelope.session_id.as_deref()
-                && let Ok(AgentEvent::AgentStateChanged {
-                    id,
-                    path,
-                    parent_path,
-                    role,
-                    task,
-                    status,
-                    summary,
-                    depth,
-                    error,
-                    reason,
-                    budget_limit_kind,
-                    budget_usage,
-                    updated_at,
-                }) = serde_json::from_value::<AgentEvent>(agent.payload.clone())
-            {
+            if let Some(session_id) = envelope.session_id.as_deref() {
                 upsert_agent_snapshot_with_tx(
                     tx,
                     AgentSnapshotRecord {
-                        id,
+                        id: agent.id.clone(),
                         session_id: session_id.to_string(),
-                        path,
-                        parent_path,
-                        role,
-                        task,
-                        status,
-                        summary,
-                        depth: depth as i32,
-                        error,
-                        reason,
-                        budget_limit_kind,
-                        budget_usage,
-                        runtime_usage: None,
-                        updated_at,
+                        path: agent.path.clone(),
+                        parent_path: agent.parent_path.clone(),
+                        role: agent.role.clone(),
+                        task: agent.task.clone(),
+                        status: agent.status,
+                        summary: agent.summary.clone(),
+                        depth: agent.depth as i32,
+                        error: agent.error.clone(),
+                        reason: agent.reason.clone(),
+                        budget_limit_kind: agent.budget_limit_kind,
+                        budget_usage: agent.budget_usage,
+                        runtime_usage: agent.runtime_usage.clone().map(runtime_usage_snapshot),
+                        updated_at: agent.updated_at,
                     },
                 )
                 .await?;
@@ -1928,11 +1935,8 @@ async fn apply_studio_event_projection_with_tx(
             }
         }
         StudioEventKind::SessionRuntimeChanged { runtime } => {
-            if let Some(session_id) = envelope.session_id.as_deref()
-                && let Ok(AgentEvent::AgentRuntimeUpdated { delta }) =
-                    serde_json::from_value::<AgentEvent>(runtime.payload.clone())
-            {
-                record_agent_runtime_delta_with_tx(tx, session_id, &delta).await?;
+            if let Some(session_id) = envelope.session_id.as_deref() {
+                upsert_session_runtime_snapshot_with_tx(tx, session_id, runtime).await?;
             }
         }
         StudioEventKind::InteractionChanged { .. }
@@ -2468,6 +2472,34 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("messagePartDelta is live-only and must not be persisted")
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_event_is_not_durable() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/beta").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Live", CompileMode::Auto)
+            .await
+            .unwrap();
+
+        let err = store
+            .append_studio_event(StudioEventEnvelope {
+                event_id: "studio-event-stale".to_string(),
+                project_id: Some(project.id),
+                session_id: Some(session.id),
+                turn_id: None,
+                sequence: 0,
+                created_at: 10,
+                kind: StudioEventKind::Stale { lagged_events: 2 },
+            })
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("stale is live-only and must not be persisted")
         );
     }
 }

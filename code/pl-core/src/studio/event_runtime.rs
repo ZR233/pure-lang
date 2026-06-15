@@ -4,10 +4,9 @@ use pl_protocol::{
     StudioAgentTimelineEvent, StudioAttachment, StudioEventEnvelope, StudioEventKind,
     StudioInferencePart, StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart,
     StudioPartDelta, StudioPartDeltaField, StudioPartStatus, StudioPartType, StudioPlanPart,
-    StudioSessionHandoff, StudioSessionRuntime, StudioTextChannel, StudioToolPart, StudioTurn,
-    StudioTurnStatus, TimelineAgentItem, TimelineDelta, TimelineInferenceItem, TimelineItem,
-    TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus, TimelineTextChannel,
-    TimelineToolItem,
+    StudioSessionHandoff, StudioTextChannel, StudioToolPart, StudioTurn, StudioTurnStatus,
+    TimelineAgentItem, TimelineDelta, TimelineInferenceItem, TimelineItem, TimelineItemDeltaEvent,
+    TimelineItemKind, TimelineItemStatus, TimelineTextChannel, TimelineToolItem,
 };
 use tokio::sync::broadcast;
 
@@ -195,11 +194,7 @@ impl StudioEventRuntime {
             AgentEvent::InteractionChanged { event } => {
                 return self.emit_interaction(session_id, event).await.map(Some);
             }
-            AgentEvent::AgentRuntimeUpdated { .. } => StudioEventKind::SessionRuntimeChanged {
-                runtime: StudioSessionRuntime {
-                    payload: serde_json::to_value(event_payload(&event))?,
-                },
-            },
+            AgentEvent::AgentRuntimeUpdated { .. } => return Ok(None),
             AgentEvent::SkillActivated { activation } => {
                 let turn_id = Some(activation.turn_id.clone());
                 return self
@@ -212,9 +207,37 @@ impl StudioEventRuntime {
                     .await
                     .map(Some);
             }
-            AgentEvent::AgentStateChanged { .. } => StudioEventKind::AgentChanged {
+            AgentEvent::AgentStateChanged {
+                id,
+                path,
+                parent_path,
+                role,
+                task,
+                status,
+                summary,
+                depth,
+                error,
+                reason,
+                budget_limit_kind,
+                budget_usage,
+                updated_at,
+            } => StudioEventKind::AgentChanged {
                 agent: StudioAgentSnapshot {
-                    payload: serde_json::to_value(event_payload(&event))?,
+                    id,
+                    session_id: session_id.to_string(),
+                    path,
+                    parent_path,
+                    role,
+                    task,
+                    status,
+                    summary,
+                    depth,
+                    error,
+                    reason,
+                    budget_limit_kind,
+                    budget_usage,
+                    runtime_usage: None,
+                    updated_at,
                 },
             },
             AgentEvent::CollabAgentSpawnBegin { .. }
@@ -226,7 +249,7 @@ impl StudioEventRuntime {
             | AgentEvent::CollabCloseBegin { .. }
             | AgentEvent::CollabCloseEnd { .. } => StudioEventKind::AgentTimelineChanged {
                 event: StudioAgentTimelineEvent {
-                    payload: serde_json::to_value(event_payload(&event))?,
+                    payload: serde_json::to_value(&event)?,
                 },
             },
             AgentEvent::TurnInterrupted { reason } => StudioEventKind::TurnChanged {
@@ -265,7 +288,7 @@ impl StudioEventRuntime {
 
     pub async fn emit_stale(&self, session_id: &str, lagged_events: u64) -> Result<()> {
         let _ = self
-            .emit(
+            .emit_live(
                 None,
                 Some(session_id.to_string()),
                 None,
@@ -610,10 +633,6 @@ fn error_for_part_status(status: StudioPartStatus, content: &str) -> Option<Stri
         | StudioPartStatus::Running
         | StudioPartStatus::Completed => None,
     }
-}
-
-fn event_payload(event: &AgentEvent) -> serde_json::Value {
-    serde_json::to_value(event).unwrap_or(serde_json::Value::Null)
 }
 
 #[allow(dead_code)]

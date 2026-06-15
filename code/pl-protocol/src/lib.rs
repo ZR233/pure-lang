@@ -33,6 +33,6 @@ pub use studio_event::{
     StudioEventEnvelope, StudioEventKind, StudioFilePart, StudioInferencePart, StudioLspHealth,
     StudioMcpHealth, StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart,
     StudioPartDelta, StudioPartDeltaField, StudioPartStatus, StudioPartType, StudioPlanPart,
-    StudioSessionHandoff, StudioSessionRuntime, StudioSessionSummary, StudioTextChannel,
-    StudioToolPart, StudioTurn, StudioTurnStatus,
+    StudioRuntimeUsage, StudioSessionHandoff, StudioSessionRuntime, StudioSessionSummary,
+    StudioTextChannel, StudioToolPart, StudioTurn, StudioTurnStatus,
 };

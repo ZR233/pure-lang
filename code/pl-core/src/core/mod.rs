@@ -1565,29 +1565,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn enabled_tools_snapshot_persists_to_sqlite_timeline() {
+    async fn enabled_tools_snapshot_remains_internal_trace_event() {
         let mut core = PureCore::default_provider().unwrap();
         core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))
             .await;
-        let store = crate::StudioStore::open_memory().await.unwrap();
-        let project = store.upsert_project(std::env::temp_dir()).await.unwrap();
-        let session = store
-            .create_session(&project.id, "Tool log", CompileMode::Auto)
-            .await
-            .unwrap();
-        let events = record_enabled_tools_for_core(&core, &session.id, "turn-1", CompileMode::Auto);
+        let events = record_enabled_tools_for_core(&core, "session-1", "turn-1", CompileMode::Auto);
+        let event = enabled_tools_event(&events);
 
-        store.append_timeline_events(&events).await.unwrap();
-        let records = store
-            .load_timeline_events(&session.id, None, None)
-            .await
-            .unwrap();
-        let kind: TraceEventKind = serde_json::from_str(&records[0].payload_json).unwrap();
-
-        assert_eq!(records[0].kind, "EnabledToolsRecorded");
-        let TraceEventKind::EnabledToolsRecorded { event } = kind else {
-            panic!("expected enabled tools event");
-        };
         assert_eq!(event.turn_id, "turn-1");
         assert!(event.tools.contains(&"read_file".to_string()));
     }

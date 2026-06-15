@@ -140,7 +140,7 @@ Agent 协作 timeline 与状态分层：
 
 这保证高频 delta 下 UI 不会因为 lagged 直接断流。前端按 opencode 的事件批处理方式在 16ms frame 内合并事件：如果同一 part 的 durable snapshot 到达，跳过该 frame 中同 part 尚未应用的旧 live delta，并清除该 part 的 delta overlay。
 
-`messagePartDelta` 只用于 live overlay。即使底层为了诊断保留了 delta 事件，也不得写入 `studio_events`。`load_session_state` 与 `load_studio_events` 只回放 durable snapshot 与状态事件，历史恢复不得依赖 delta。
+`messagePartDelta` 只用于 live overlay。即使底层为了诊断保留了 delta 事件，也不得写入 `studio_events`。`stale` 也是 live-only 补拉提示，不占用 durable sequence，不参与历史重放。`load_session_state` 从 `studio_messages/message_parts` projection record 恢复终态，每条 record 必须携带来源 event sequence 供前端建立新旧 guard，并附带非 message/part durable 状态事件；`load_studio_events` 只回放 durable snapshot 与状态事件，历史恢复不得依赖 delta。旧 `timeline_events` 表只作为迁移清理对象保留，不再提供运行期写入、读取或 cursor API。
 
 `Done`、turn final、agent final 属于 lossless 事件：转发层必须确保它们不会因为普通 delta 的背压被丢弃。
 

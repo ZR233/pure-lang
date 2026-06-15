@@ -253,10 +253,12 @@ type StudioState = {
   };
 };
 
+// 重构前问题示例：当前实现已改为 StudioMessage/StudioPart projection
+// + StudioEvent reducer；不存在独立 session timeline DTO 入口。
 type StudioAction =
   | { type: "BOOTSTRAP_LOADED"; payload: BootstrapPayload }
   | { type: "SESSION_SELECTED"; payload: SessionSelectionDto }
-  | { type: "TIMELINE_LOADED"; payload: SessionTimelineDto }
+  | { type: "TIMELINE_LOADED"; payload: LegacySessionTimelineDto }
   | { type: "AGENT_EVENT_RECEIVED"; payload: AgentEvent }
   | { type: "TOOL_APPROVAL_RESOLVED"; payload: ToolApprovalResolvedPayload }
   | { type: "SETTINGS_TOGGLED"; payload: boolean };

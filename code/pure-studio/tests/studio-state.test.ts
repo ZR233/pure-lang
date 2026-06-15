@@ -443,10 +443,20 @@ function loadSessionItems(
   planStates?: PlanState[],
   interactions?: InteractionRequest[],
 ) {
+  const messages = items.map((item) => ({
+    message: messageForItem(item),
+    sequence: item.startedSequence,
+  }));
+  const parts = items.map((item) => ({
+    part: partForItem(item),
+    sequence: item.startedSequence,
+  }));
   return studioReducer(state, {
     type: "sessionStateLoaded",
     sessionId: "session-1",
-    events: eventsForItems(items),
+    messages,
+    parts,
+    events: [],
     nextSequence,
     planStates,
     interactions,
@@ -667,19 +677,74 @@ function entriesForTimeline(items: TimelineItem[]) {
   return selectTimelineEntries(loaded);
 }
 
+function sessionStateProjectionSnapshotRestoresTimelineWithoutEvents() {
+  const item = textItem("turn-1-text", 10, "hello from projection");
+  const message = messageForItem(item);
+  const part = partForItem(item);
+  const loaded = studioReducer(selectedState(), {
+    type: "sessionStateLoaded",
+    sessionId: "session-1",
+    messages: [{ message, sequence: 40 }],
+    parts: [{ part, sequence: 41 }],
+    events: [],
+    nextSequence: 42,
+  });
+
+  assertDeepEqual(timelineOrder(loaded), ["turn-1-text"]);
+  assertEqual(timelineItem(loaded, "turn-1-text")?.content, "hello from projection");
+  assertEqual(loaded.eventNextSequence, 42);
+}
+
+function sessionStateEventsRestoreDurableStatusSnapshots() {
+  const updatedRuntime = {
+    ...runtime,
+    activeSkills: ["openai-docs"],
+    updatedAt: 20,
+  };
+  const loaded = studioReducer(selectedState(), {
+    type: "sessionStateLoaded",
+    sessionId: "session-1",
+    messages: [],
+    parts: [],
+    events: [
+      studioEvent(
+        {
+          type: "planLifecycleChanged",
+          event: {
+            planId: "turn-1-plan",
+            state: "dismissed",
+            turnId: "turn-1",
+            reason: "done",
+            updatedAt: 20,
+          },
+        },
+        { sequence: 40 },
+      ),
+      studioEvent(
+        {
+          type: "sessionRuntimeChanged",
+          runtime: updatedRuntime,
+        },
+        { sequence: 41 },
+      ),
+    ],
+    nextSequence: 42,
+  });
+
+  assertEqual(loaded.planStates.get("turn-1-plan")?.state, "dismissed");
+  assertDeepEqual(loaded.sessionRuntime?.activeSkills, ["openai-docs"]);
+  assertEqual(loaded.eventNextSequence, 42);
+}
+
 function staleTimelineLoadKeepsNewTurnItems() {
   const oldItem = textItem("turn-1-text", 1, "old");
   const newItem = textItem("turn-2-text", 10, "new");
   const withNewTurn = applyStudioTimelineChange(selectedState(), itemUpdated(newItem), 10, "done");
 
-  const afterStaleLoad = studioReducer(withNewTurn, {
-    type: "sessionStateLoaded",
-    sessionId: "session-1",
-    events: eventsForItems([oldItem]),
-    nextSequence: 2,
-  });
+  const afterStaleLoad = loadSessionItems(withNewTurn, [oldItem], 2);
 
-  assertDeepEqual(timelineOrder(afterStaleLoad), ["turn-2-text"]);
+  assertDeepEqual(timelineOrder(afterStaleLoad), ["turn-1-text", "turn-2-text"]);
+  assertEqual(timelineItem(afterStaleLoad, "turn-1-text")?.content, "old");
   assertEqual(timelineItem(afterStaleLoad, "turn-2-text")?.content, "new");
   assertEqual(afterStaleLoad.eventNextSequence, 11);
 }
@@ -687,19 +752,9 @@ function staleTimelineLoadKeepsNewTurnItems() {
 function freshTimelineLoadMayReplaceSnapshot() {
   const firstItem = textItem("turn-1-text", 1, "first");
   const replacement = textItem("turn-1-text", 2, "replacement");
-  const loaded = studioReducer(selectedState(), {
-    type: "sessionStateLoaded",
-    sessionId: "session-1",
-    events: eventsForItems([firstItem]),
-    nextSequence: 2,
-  });
+  const loaded = loadSessionItems(selectedState(), [firstItem], 2);
 
-  const refreshed = studioReducer(loaded, {
-    type: "sessionStateLoaded",
-    sessionId: "session-1",
-    events: eventsForItems([replacement]),
-    nextSequence: 3,
-  });
+  const refreshed = loadSessionItems(loaded, [replacement], 3);
 
   assertDeepEqual(timelineOrder(refreshed), ["turn-1-text"]);
   assertEqual(timelineItem(refreshed, "turn-1-text")?.content, "replacement");
@@ -725,16 +780,52 @@ function staleTimelineLoadDoesNotOverwriteLiveDelta() {
   const liveDelta = applyStudioTimelineChange(liveStarted, itemDelta(delta), 11);
   const liveCompleted = applyStudioTimelineChange(liveDelta, itemUpdated(completed), 12, "done");
 
-  const afterStaleLoad = studioReducer(liveCompleted, {
-    type: "sessionStateLoaded",
-    sessionId: "session-1",
-    events: eventsForItems([oldItem]),
-    nextSequence: 2,
-  });
+  const afterStaleLoad = loadSessionItems(liveCompleted, [oldItem], 2);
 
-  assertDeepEqual(timelineOrder(afterStaleLoad), ["turn-2-text"]);
+  assertDeepEqual(timelineOrder(afterStaleLoad), ["turn-1-text", "turn-2-text"]);
+  assertEqual(timelineItem(afterStaleLoad, "turn-1-text")?.content, "old");
   assertEqual(timelineItem(afterStaleLoad, "turn-2-text")?.content, "new");
   assertEqual(afterStaleLoad.eventNextSequence, 13);
+}
+
+function staleSessionStateDoesNotReplayOldStatusEvents() {
+  const live = {
+    ...completeTurn(selectedState(), 20),
+    sessionRuntime: {
+      ...runtime,
+      activeSkills: ["new-skill"],
+      updatedAt: 20,
+    },
+    status: "done",
+  };
+  const old = studioReducer(live, {
+    type: "sessionStateLoaded",
+    sessionId: "session-1",
+    sessionRuntime: runtime,
+    messages: [],
+    parts: [],
+    events: [
+      studioEvent(
+        {
+          type: "turnChanged",
+          turn: {
+            turnId: "turn-1",
+            sessionId: "session-1",
+            status: "streaming",
+            reason: null,
+            updatedAt: 1,
+          },
+        },
+        { sequence: 10 },
+      ),
+    ],
+    nextSequence: 11,
+  });
+
+  assertEqual(old.turnPhase, "completed");
+  assertDeepEqual(old.sessionRuntime?.activeSkills, ["new-skill"]);
+  assertEqual(old.status, "done");
+  assertEqual(old.eventNextSequence, 21);
 }
 
 function toolArgumentDeltaRequiresSnapshot() {
@@ -833,6 +924,21 @@ function turnCompletedWithNoPartsDoesNotDeleteLiveContent() {
   assertDeepEqual(timelineOrder(completed), ["turn-2-text"]);
   assertEqual(timelineItem(completed, "turn-2-text")?.content, "live");
   assertEqual(completed.eventNextSequence, 21);
+}
+
+function staleEventDoesNotAdvanceCursor() {
+  const before = selectedState();
+  const state = studioReducer(before, {
+    type: "studioEvent",
+    envelope: studioEvent(
+      { type: "stale", laggedEvents: 5 },
+      { sequence: 50 },
+    ),
+    status: "refreshing",
+  });
+
+  assertEqual(state.eventNextSequence, before.eventNextSequence);
+  assertEqual(state.status, "refreshing");
 }
 
 function runPromptFailedKeepsFailedStatusText() {
@@ -971,12 +1077,7 @@ function realtimeAndHistoricalTimelineEventsConverge() {
     12,
     "done",
   );
-  const historical = studioReducer(selectedState(), {
-    type: "sessionStateLoaded",
-    sessionId: "session-1",
-    events: eventsForItems([started, completed]),
-    nextSequence: 13,
-  });
+  const historical = loadSessionItems(selectedState(), [completed], 13);
 
   assertDeepEqual(timelineOrder(historical), timelineOrder(live));
   assertDeepEqual(
@@ -1180,13 +1281,12 @@ function planLifecycleLoadedKeepsInteractionStateSeparate() {
 }
 
 function sessionStateLoadedPlanStateAnnotatesPlanWithoutOpeningComposer() {
-  const state = studioReducer(selectedState(), {
-    type: "sessionStateLoaded",
-    sessionId: "session-1",
-    events: eventsForItems([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
-    planStates: [planState("turn-1-plan", "dismissed")],
-    nextSequence: 13,
-  });
+  const state = loadSessionItems(
+    selectedState(),
+    [planItem("turn-1-plan", "turn-1", 10, "1. Inspect")],
+    13,
+    [planState("turn-1-plan", "dismissed")],
+  );
   const entries = selectTimelineEntries(state);
   const plan = entries.find((entry) => entry.kind === "plan");
 
@@ -1200,13 +1300,12 @@ function sessionStateLoadedPlanStateAnnotatesPlanWithoutOpeningComposer() {
 
 function sessionStateLoadedNewPlanStatesAnnotatePlan() {
   for (const state of ["pendingConfirmation", "continuedPlanning", "cancelled"] as const) {
-    const reduced = studioReducer(selectedState(), {
-      type: "sessionStateLoaded",
-      sessionId: "session-1",
-      events: eventsForItems([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
-      planStates: [planState("turn-1-plan", state)],
-      nextSequence: 13,
-    });
+    const reduced = loadSessionItems(
+      selectedState(),
+      [planItem("turn-1-plan", "turn-1", 10, "1. Inspect")],
+      13,
+      [planState("turn-1-plan", state)],
+    );
     const plan = selectTimelineEntries(reduced).find((entry) => entry.kind === "plan");
 
     if (plan?.kind !== "plan") {
@@ -1217,23 +1316,21 @@ function sessionStateLoadedNewPlanStatesAnnotatePlan() {
 }
 
 function historicalTimelineLoadDoesNotCreatePlanAction() {
-  const state = studioReducer(selectedState(), {
-    type: "sessionStateLoaded",
-    sessionId: "session-1",
-    events: eventsForItems([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
-    nextSequence: 11,
-  });
+  const state = loadSessionItems(
+    selectedState(),
+    [planItem("turn-1-plan", "turn-1", 10, "1. Inspect")],
+    11,
+  );
 
   assertEqual(state.activeInteractionId, null);
 }
 
 function laterRunWithoutPlanDoesNotReopenHistoricalPlan() {
-  const withHistory = studioReducer(selectedState(), {
-    type: "sessionStateLoaded",
-    sessionId: "session-1",
-    events: eventsForItems([planItem("turn-1-plan", "turn-1", 10, "1. Inspect")]),
-    nextSequence: 11,
-  });
+  const withHistory = loadSessionItems(
+    selectedState(),
+    [planItem("turn-1-plan", "turn-1", 10, "1. Inspect")],
+    11,
+  );
   const submitted = studioReducer(withHistory, {
     type: "promptSubmitted",
     status: "running",
@@ -1500,7 +1597,7 @@ function studioSessionRuntimeEventUpdatesActiveSkills() {
     type: "studioEvent",
     envelope: studioEvent({
       type: "sessionRuntimeChanged",
-      runtime: { payload: updatedRuntime },
+      runtime: updatedRuntime,
     }),
     status: "running",
   });
@@ -1914,12 +2011,7 @@ function lspServer(overrides: Partial<LspServerRecord> = {}): LspServerRecord {
 
 function projectSelectionLoadedAfterSessionDeleteClearsSelectedSession() {
   const liveItem = textItem("turn-1-text", 10, "hello");
-  const liveState = studioReducer(selectedState(), {
-    type: "sessionStateLoaded",
-    sessionId: "session-1",
-    events: eventsForItems([liveItem]),
-    nextSequence: 11,
-  });
+  const liveState = loadSessionItems(selectedState(), [liveItem], 11);
   const updated = studioReducer(liveState, {
     type: "projectSelectionLoaded",
     status: "deleted",
@@ -1942,12 +2034,11 @@ function projectSelectionLoadedAfterSessionDeleteClearsSelectedSession() {
 }
 
 function projectSelectionLoadedCanClearSelectedProject() {
-  const liveState = studioReducer(selectedState(), {
-    type: "sessionStateLoaded",
-    sessionId: "session-1",
-    events: eventsForItems([textItem("turn-1-text", 10, "hello")]),
-    nextSequence: 11,
-  });
+  const liveState = loadSessionItems(
+    selectedState(),
+    [textItem("turn-1-text", 10, "hello")],
+    11,
+  );
   const updated = studioReducer(liveState, {
     type: "projectSelectionLoaded",
     status: "archived",
@@ -2141,11 +2232,9 @@ function skillActivationEventUsesSessionRuntimePayload() {
     envelope: studioEvent({
       type: "sessionRuntimeChanged",
       runtime: {
-        payload: {
-          ...runtime,
-          activeSkills: ["openai-docs", "skill-creator"],
-          updatedAt: 2,
-        },
+        ...runtime,
+        activeSkills: ["openai-docs", "skill-creator"],
+        updatedAt: 2,
       },
     }),
     status: "running",
@@ -2184,12 +2273,10 @@ function skillActivationFromOtherSessionDoesNotUpdateActiveSkills() {
       {
         type: "sessionRuntimeChanged",
         runtime: {
-          payload: {
-            ...runtime,
-            sessionId: "session-2",
-            activeSkills: ["skill-creator"],
-            updatedAt: 2,
-          },
+          ...runtime,
+          sessionId: "session-2",
+          activeSkills: ["skill-creator"],
+          updatedAt: 2,
         },
       },
       { sessionId: "session-2" },
@@ -2501,12 +2588,16 @@ markdownRendersCodeBlocksAndInlineCode();
 markdownAllowsOnlySafeLinks();
 markdownEscapesHtmlTokens();
 staleTimelineLoadKeepsNewTurnItems();
+sessionStateProjectionSnapshotRestoresTimelineWithoutEvents();
+sessionStateEventsRestoreDurableStatusSnapshots();
 freshTimelineLoadMayReplaceSnapshot();
 staleTimelineLoadDoesNotOverwriteLiveDelta();
+staleSessionStateDoesNotReplayOldStatusEvents();
 toolArgumentDeltaRequiresSnapshot();
 toolResultDeltaRequiresSnapshot();
 textDeltaRequiresSnapshotForCommentaryChannel();
 turnCompletedWithNoPartsDoesNotDeleteLiveContent();
+staleEventDoesNotAdvanceCursor();
 runPromptFailedKeepsFailedStatusText();
 userInputRequestStoresPendingComposerState();
 userInputResolvedClearsPendingComposerState();

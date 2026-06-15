@@ -21,7 +21,9 @@ import type {
   SessionSelectionPayload,
   StudioEventEnvelope,
   StudioMessage,
+  StudioMessageProjection,
   StudioPart,
+  StudioPartProjection,
   StudioPartDeltaField,
   StudioTurnStatus,
   TimelineItem,
@@ -34,12 +36,12 @@ import type {
 import {
   addOptimisticPart,
   applyStudioEvent,
-  applyStudioEvents,
   emptyTimelineState,
+  mergeConversationSnapshot,
   removeOptimisticTimelineItems,
   removeOptimisticUserTimelineItems,
   removeOptimisticWaitingTimelineItems,
-  resetConversation,
+  resetConversationFromSnapshot,
   type TimelineStateSlice,
 } from "./timeline-state";
 
@@ -110,6 +112,11 @@ export type StudioAction =
   | {
       type: "sessionStateLoaded";
       sessionId: string | null;
+      agentEvents?: AgentTimelineEvent[];
+      agents?: AgentDto[];
+      sessionRuntime?: SessionRuntime | null;
+      messages?: StudioMessageProjection[];
+      parts?: StudioPartProjection[];
       events: StudioEventEnvelope[];
       planStates?: PlanState[];
       interactions?: InteractionRequest[];
@@ -227,20 +234,50 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, status: action.status };
     case "sessionStateLoaded":
       if (action.sessionId !== state.selectedSessionId) return state;
-      if (action.nextSequence < state.eventNextSequence) {
-        return state;
+      {
+        const staleSessionState = action.nextSequence < state.eventNextSequence;
+        const conversationState = staleSessionState
+          ? mergeConversationSnapshot(
+              state,
+              action.messages ?? [],
+              action.parts ?? [],
+              action.nextSequence,
+            )
+          : resetConversationFromSnapshot(
+              state,
+              action.messages ?? [],
+              action.parts ?? [],
+              action.nextSequence,
+            );
+        const next = reduceSessionStateLoaded(
+          {
+            ...conversationState,
+            agentTimelineEvents: staleSessionState
+              ? mergeAgentTimelineEvents(state.agentTimelineEvents, action.agentEvents ?? [])
+              : action.agentEvents ?? state.agentTimelineEvents,
+            agents: staleSessionState
+              ? mergeAgents(state.agents, action.agents ?? [])
+              : action.agents ?? state.agents,
+            sessionRuntime: staleSessionState
+              ? state.sessionRuntime
+              : action.sessionRuntime ?? state.sessionRuntime,
+            planStates: mergePlanStates(
+              staleSessionState ? state.planStates : new Map(),
+              action.planStates ?? [],
+            ),
+            ...interactionState(
+              staleSessionState ? state.interactions : new Map(),
+              action.interactions ?? [],
+              state.selectedSessionId,
+              state.isBusy,
+            ),
+            status: staleSessionState ? state.status : action.status ?? state.status,
+          },
+          freshSessionStateEvents(action.events ?? [], staleSessionState ? state.eventNextSequence : 0),
+          action.status,
+        );
+        return storeSessionView(next, action.sessionId);
       }
-      return storeSessionView({
-        ...resetConversation(state, action.events ?? [], action.nextSequence),
-        planStates: mergePlanStates(state.planStates, action.planStates ?? []),
-        ...interactionState(
-          state.interactions,
-          action.interactions ?? [],
-          state.selectedSessionId,
-          state.isBusy,
-        ),
-        status: action.status ?? state.status,
-      }, action.sessionId);
     case "sessionStateLoadFailed":
       if (action.sessionId !== state.selectedSessionId) return state;
       return { ...state, status: action.status };
@@ -660,13 +697,32 @@ function reduceInteractionChanged(
   };
 }
 
+function reduceSessionStateLoaded(
+  state: StudioState,
+  events: StudioEventEnvelope[],
+  status?: string,
+): StudioState {
+  let next = state;
+  for (const envelope of events.slice().sort((left, right) => left.sequence - right.sequence)) {
+    next = reduceStudioEvent(next, envelope, status);
+  }
+  return next;
+}
+
+function freshSessionStateEvents(
+  events: StudioEventEnvelope[],
+  currentNextSequence: number,
+): StudioEventEnvelope[] {
+  return events.filter((event) => event.sequence >= currentNextSequence);
+}
+
 function reduceStudioEvent(
   state: StudioState,
   envelope: StudioEventEnvelope,
   status?: string,
 ): StudioState {
   const withEventCursor = (next: StudioState): StudioState =>
-    envelope.kind.type === "messagePartDelta"
+    envelope.kind.type === "messagePartDelta" || envelope.kind.type === "stale"
       ? next
       : { ...next, eventNextSequence: Math.max(next.eventNextSequence, envelope.sequence + 1) };
   const eventSessionId = envelope.sessionId ?? null;
@@ -717,11 +773,11 @@ function reduceStudioEvent(
         status,
       );
     case "agentChanged":
-      return reduceStructuredAgentPayload(state, kind.agent.payload, status);
+      return reduceAgentChanged(state, kind.agent, status);
     case "agentTimelineChanged":
       return reduceStructuredAgentPayload(state, kind.event.payload, status);
     case "sessionRuntimeChanged":
-      return reduceStructuredRuntimePayload(state, kind.runtime.payload, status);
+      return reduceSessionRuntimeChanged(state, kind.runtime, status);
     case "skillActivated":
       return reduceSkillActivated(state, kind.activation.name, status);
     case "planLifecycleChanged":
@@ -832,6 +888,18 @@ function reduceTurnChanged(
   };
 }
 
+function reduceAgentChanged(
+  state: StudioState,
+  agent: AgentDto,
+  status?: string,
+): StudioState {
+  return {
+    ...state,
+    agents: mergeAgents(state.agents, [agent]),
+    status: status ?? state.status,
+  };
+}
+
 function reduceStructuredAgentPayload(
   state: StudioState,
   payload: unknown,
@@ -857,19 +925,16 @@ function reduceStructuredAgentPayload(
   return { ...state, status: status ?? state.status };
 }
 
-function reduceStructuredRuntimePayload(
+function reduceSessionRuntimeChanged(
   state: StudioState,
-  payload: unknown,
+  runtime: SessionRuntime,
   status?: string,
 ): StudioState {
-  if (isSessionRuntime(payload)) {
-    return {
-      ...state,
-      sessionRuntime: payload,
-      status: status ?? state.status,
-    };
-  }
-  return { ...state, status: status ?? state.status };
+  return {
+    ...state,
+    sessionRuntime: runtime,
+    status: status ?? state.status,
+  };
 }
 
 function reduceSkillActivated(state: StudioState, name: string, status?: string): StudioState {
@@ -1380,19 +1445,6 @@ function isTerminalStudioTurnStatus(status: StudioTurnStatus): boolean {
     case "persisting":
       return false;
   }
-}
-
-function isSessionRuntime(value: unknown): value is SessionRuntime {
-  if (!isRecord(value)) {
-    return false;
-  }
-  return (
-    typeof value.sessionId === "string" &&
-    Array.isArray(value.activeSkills) &&
-    Array.isArray(value.activeMcpServers) &&
-    Array.isArray(value.activeLspServers) &&
-    isRecord(value.usage)
-  );
 }
 
 function isAgentDto(value: unknown): value is AgentDto {
