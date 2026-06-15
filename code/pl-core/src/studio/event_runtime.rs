@@ -155,7 +155,7 @@ impl StudioEventRuntime {
                     .await
                     .map(Some);
             }
-            AgentEvent::TimelineItemCompleted { sequence, item } => {
+            AgentEvent::TimelineItemCompleted { item } => {
                 let turn_id = item.turn_id.clone();
                 return self
                     .emit(
@@ -163,17 +163,13 @@ impl StudioEventRuntime {
                         Some(session_id.to_string()),
                         Some(turn_id),
                         StudioEventKind::TimelineChanged {
-                            change: Box::new(StudioTimelineChange::Completed { sequence, item }),
+                            change: Box::new(StudioTimelineChange::Completed { item }),
                         },
                     )
                     .await
                     .map(Some);
             }
-            AgentEvent::TimelineItemFailed {
-                sequence,
-                item,
-                error,
-            } => {
+            AgentEvent::TimelineItemFailed { item, error } => {
                 let turn_id = item.turn_id.clone();
                 return self
                     .emit(
@@ -181,11 +177,7 @@ impl StudioEventRuntime {
                         Some(session_id.to_string()),
                         Some(turn_id),
                         StudioEventKind::TimelineChanged {
-                            change: Box::new(StudioTimelineChange::Failed {
-                                sequence,
-                                item,
-                                error,
-                            }),
+                            change: Box::new(StudioTimelineChange::Failed { item, error }),
                         },
                     )
                     .await

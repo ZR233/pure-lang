@@ -49,7 +49,7 @@ impl TimelineProjection {
             let item = TimelineItem {
                 turn_id: self.turn_id.clone(),
                 item_id: item_id.clone(),
-                sequence: self.sequence,
+                started_sequence: self.sequence,
                 kind: TimelineItemKind::Text,
                 status: TimelineItemStatus::Streaming,
                 created_at: now,
@@ -90,7 +90,7 @@ impl TimelineProjection {
         let event = TimelineItemDeltaEvent {
             turn_id: self.turn_id.clone(),
             item_id,
-            sequence: self.sequence,
+            started_sequence: self.sequence,
             kind: TimelineItemKind::Text,
             status: TimelineItemStatus::Streaming,
             created_at: now,
@@ -127,7 +127,7 @@ impl TimelineProjection {
         let item = TimelineItem {
             turn_id: self.turn_id.clone(),
             item_id: item_id.clone(),
-            sequence: self.sequence,
+            started_sequence: self.sequence,
             kind: TimelineItemKind::Plan,
             status: TimelineItemStatus::Streaming,
             created_at: now,
@@ -161,7 +161,7 @@ impl TimelineProjection {
         let event = TimelineItemDeltaEvent {
             turn_id: self.turn_id.clone(),
             item_id,
-            sequence: self.sequence,
+            started_sequence: self.sequence,
             kind: TimelineItemKind::Plan,
             status: TimelineItemStatus::Streaming,
             created_at: now,
@@ -191,7 +191,7 @@ impl TimelineProjection {
             let item = TimelineItem {
                 turn_id: self.turn_id.clone(),
                 item_id: item_id.clone(),
-                sequence: self.sequence,
+                started_sequence: self.sequence,
                 kind: TimelineItemKind::Thinking,
                 status: TimelineItemStatus::Streaming,
                 created_at: now,
@@ -243,7 +243,7 @@ impl TimelineProjection {
         let event = TimelineItemDeltaEvent {
             turn_id: self.turn_id.clone(),
             item_id,
-            sequence: self.sequence,
+            started_sequence: self.sequence,
             kind: TimelineItemKind::Thinking,
             status: TimelineItemStatus::Streaming,
             created_at: now,
@@ -276,7 +276,7 @@ impl TimelineProjection {
         let item = TimelineItem {
             turn_id: self.turn_id.clone(),
             item_id: item_id.clone(),
-            sequence: self.sequence,
+            started_sequence: self.sequence,
             kind: TimelineItemKind::Tool,
             status: TimelineItemStatus::Streaming,
             created_at: now,
@@ -333,7 +333,7 @@ impl TimelineProjection {
         let event = TimelineItemDeltaEvent {
             turn_id: self.turn_id.clone(),
             item_id,
-            sequence: self.sequence,
+            started_sequence: self.sequence,
             kind: TimelineItemKind::Tool,
             status: TimelineItemStatus::Streaming,
             created_at: now,
@@ -373,12 +373,11 @@ impl TimelineProjection {
             item.status = TimelineItemStatus::Completed;
             item.updated_at = unix_seconds();
             let item = item.clone();
-            let sequence = self.sequence;
             self.record(
                 TraceEventKind::TimelineItemCompleted { item: item.clone() },
                 item.updated_at,
             );
-            events.push(AgentEvent::TimelineItemCompleted { sequence, item });
+            events.push(AgentEvent::TimelineItemCompleted { item });
         }
         events
     }
@@ -440,12 +439,11 @@ impl TimelineProjection {
         item.status = TimelineItemStatus::Completed;
         item.updated_at = unix_seconds();
         let item = item.clone();
-        let sequence = self.sequence;
         self.record(
             TraceEventKind::TimelineItemCompleted { item: item.clone() },
             item.updated_at,
         );
-        vec![AgentEvent::TimelineItemCompleted { sequence, item }]
+        vec![AgentEvent::TimelineItemCompleted { item }]
     }
 
     fn record(&mut self, kind: TraceEventKind, timestamp: i64) {

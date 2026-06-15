@@ -62,7 +62,10 @@ pub(super) async fn run_turn_with_trace(
     let mut budget_tracker = BudgetTracker::new(request.budget);
     let mut budget_limit: Option<BudgetLimit> = None;
 
-    let turn_id = super::generate_turn_id();
+    let turn_id = request
+        .turn_id
+        .clone()
+        .unwrap_or_else(super::generate_turn_id);
     let requires_subagent_dispatch =
         active_subagent.is_none() && prompt_requires_subagent_dispatch(&request.prompt);
     let initial_agent_count = if requires_subagent_dispatch {

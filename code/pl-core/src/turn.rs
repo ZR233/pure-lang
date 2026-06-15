@@ -173,6 +173,7 @@ impl CompileMode {
 /// 单轮核心编译请求。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnRequest {
+    pub turn_id: Option<String>,
     pub prompt: String,
     pub user_content: MessageContent,
     pub mode: CompileMode,
@@ -187,6 +188,7 @@ impl TurnRequest {
     pub fn new(prompt: impl Into<String>, mode: CompileMode) -> Self {
         let prompt = prompt.into();
         Self {
+            turn_id: None,
             user_content: MessageContent::Text(prompt.clone()),
             prompt,
             mode,
@@ -200,6 +202,11 @@ impl TurnRequest {
 
     pub fn with_user_content(mut self, content: MessageContent) -> Self {
         self.user_content = content;
+        self
+    }
+
+    pub fn with_turn_id(mut self, turn_id: impl Into<String>) -> Self {
+        self.turn_id = Some(turn_id.into());
         self
     }
 

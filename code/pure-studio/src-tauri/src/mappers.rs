@@ -11,6 +11,7 @@ use pl_core::{
     TraceEvent, TraceEventKind, TurnResultStatus, ZhipuQuotaWindow, builtin_mcp_server_ids,
     effective_mcp_servers, infer_provider_template_kind,
 };
+use pl_protocol::{StudioEventEnvelope, StudioEventKind, StudioTimelineChange};
 
 use crate::dto::{
     AgentDto, AgentEventDto, AttachmentDto, ConfigDto, DeepSeekBalanceDto, DeepSeekBalanceInfoDto,
@@ -729,7 +730,7 @@ pub fn timeline_events_to_items(events: &[TraceEvent]) -> Vec<pl_protocol::Timel
                     pl_protocol::TimelineItem {
                         turn_id: event.turn_id.clone(),
                         item_id: event.item_id.clone(),
-                        sequence: event.sequence,
+                        started_sequence: event.started_sequence,
                         kind: event.kind,
                         status: event.status,
                         created_at: event.created_at,
@@ -804,12 +805,97 @@ pub fn timeline_events_to_items(events: &[TraceEvent]) -> Vec<pl_protocol::Timel
         }
     }
     let mut items = items.into_values().collect::<Vec<_>>();
-    items.sort_by_key(|item| item.sequence);
+    items.sort_by_key(|item| item.started_sequence);
     items
 }
 
-pub fn timeline_event_dtos(records: Vec<pl_core::TimelineEventRecord>) -> Vec<TimelineEventDto> {
-    records.into_iter().map(TimelineEventDto::from).collect()
+pub fn timeline_event_dtos_from_studio_events(
+    events: &[StudioEventEnvelope],
+) -> Vec<TimelineEventDto> {
+    events
+        .iter()
+        .filter_map(timeline_event_dto_from_studio_event)
+        .collect()
+}
+
+pub fn trace_events_from_studio_events(events: &[StudioEventEnvelope]) -> Vec<TraceEvent> {
+    events
+        .iter()
+        .filter_map(trace_event_from_studio_event)
+        .collect()
+}
+
+fn timeline_event_dto_from_studio_event(
+    envelope: &StudioEventEnvelope,
+) -> Option<TimelineEventDto> {
+    let trace = trace_event_from_studio_event(envelope)?;
+    let kind = trace_event_kind_label(&trace.kind).to_string();
+    Some(TimelineEventDto {
+        id: envelope.event_id.clone(),
+        session_id: trace.session_id,
+        sequence: trace.sequence as i64,
+        created_at: trace.timestamp,
+        kind,
+        payload: serde_json::to_value(trace.kind).unwrap_or(serde_json::Value::Null),
+    })
+}
+
+fn trace_event_from_studio_event(envelope: &StudioEventEnvelope) -> Option<TraceEvent> {
+    let session_id = envelope.session_id.clone()?;
+    let kind = match &envelope.kind {
+        StudioEventKind::TimelineChanged { change } => match change.as_ref() {
+            StudioTimelineChange::Started { item } => {
+                TraceEventKind::TimelineItemStarted { item: item.clone() }
+            }
+            StudioTimelineChange::Delta { event } => TraceEventKind::TimelineItemDelta {
+                event: event.clone(),
+            },
+            StudioTimelineChange::Completed { item } => {
+                TraceEventKind::TimelineItemCompleted { item: item.clone() }
+            }
+            StudioTimelineChange::Failed { item, error } => TraceEventKind::TimelineItemFailed {
+                item: item.clone(),
+                error: error.clone(),
+            },
+        },
+        StudioEventKind::PlanLifecycleChanged { event } => TraceEventKind::PlanLifecycleChanged {
+            event: event.clone(),
+        },
+        StudioEventKind::InteractionChanged { event } => TraceEventKind::InteractionChanged {
+            event: (**event).clone(),
+        },
+        StudioEventKind::SkillActivated { activation } => TraceEventKind::SkillActivated {
+            activation: activation.clone(),
+        },
+        StudioEventKind::TurnChanged { .. }
+        | StudioEventKind::AgentChanged { .. }
+        | StudioEventKind::AgentTimelineChanged { .. }
+        | StudioEventKind::SessionRuntimeChanged { .. }
+        | StudioEventKind::SessionHandoffChanged { .. }
+        | StudioEventKind::SessionListChanged { .. }
+        | StudioEventKind::McpHealthChanged { .. }
+        | StudioEventKind::LspHealthChanged { .. }
+        | StudioEventKind::Stale { .. } => return None,
+    };
+    Some(TraceEvent {
+        session_id,
+        sequence: envelope.sequence,
+        timestamp: envelope.created_at,
+        kind,
+    })
+}
+
+fn trace_event_kind_label(kind: &TraceEventKind) -> &'static str {
+    match kind {
+        TraceEventKind::TimelineItemStarted { .. } => "TimelineItemStarted",
+        TraceEventKind::TimelineItemDelta { .. } => "TimelineItemDelta",
+        TraceEventKind::TimelineItemCompleted { .. } => "TimelineItemCompleted",
+        TraceEventKind::TimelineItemFailed { .. } => "TimelineItemFailed",
+        TraceEventKind::PlanLifecycleChanged { .. } => "PlanLifecycleChanged",
+        TraceEventKind::InteractionChanged { .. } => "InteractionChanged",
+        TraceEventKind::SkillActivated { .. } => "SkillActivated",
+        TraceEventKind::EnabledToolsRecorded { .. } => "EnabledToolsRecorded",
+    }
 }
 
 pub fn plan_lifecycle_events_to_states(events: &[TraceEvent]) -> Vec<PlanStateDto> {
@@ -847,7 +933,7 @@ fn upsert_timeline_item(
 ) {
     let mut next = item.clone();
     if let Some(existing) = items.get(&item.item_id) {
-        next.sequence = existing.sequence;
+        next.started_sequence = existing.started_sequence;
         next.created_at = existing.created_at;
         if next.content.is_empty() {
             next.content = existing.content.clone();
@@ -1389,7 +1475,7 @@ mod tests {
                     event: TimelineItemDeltaEvent {
                         turn_id: "turn-1".to_string(),
                         item_id: "turn-1-assistant".to_string(),
-                        sequence: 2,
+                        started_sequence: 1,
                         kind: TimelineItemKind::Text,
                         status: TimelineItemStatus::Streaming,
                         created_at: 10,
@@ -1413,7 +1499,7 @@ mod tests {
 
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].item_id, "turn-1-assistant");
-        assert_eq!(items[0].sequence, 1);
+        assert_eq!(items[0].started_sequence, 1);
         assert_eq!(items[0].content, "hello world");
         assert_eq!(items[0].status, TimelineItemStatus::Completed);
     }
@@ -1499,7 +1585,7 @@ mod tests {
         let started = TimelineItem {
             turn_id: "turn-1".to_string(),
             item_id: "turn-1-call-1".to_string(),
-            sequence: 9,
+            started_sequence: 9,
             kind: TimelineItemKind::Tool,
             status: TimelineItemStatus::Streaming,
             created_at: 9,
@@ -1538,7 +1624,7 @@ mod tests {
                     event: TimelineItemDeltaEvent {
                         turn_id: "turn-1".to_string(),
                         item_id: "turn-1-call-1".to_string(),
-                        sequence: 10,
+                        started_sequence: 10,
                         kind: TimelineItemKind::Tool,
                         status: TimelineItemStatus::Streaming,
                         created_at: 10,
@@ -1566,7 +1652,7 @@ mod tests {
         let items = timeline_events_to_items(&events);
 
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0].sequence, 10);
+        assert_eq!(items[0].started_sequence, 10);
         let tool = items[0].tool.as_ref().expect("tool item");
         assert_eq!(tool.name, "read_file");
         assert_eq!(tool.arguments, "{\"path\":\"a.ts\"");
@@ -1579,7 +1665,7 @@ mod tests {
         let completed = TimelineItem {
             turn_id: "turn-1".to_string(),
             item_id: "turn-1-call-1".to_string(),
-            sequence: 11,
+            started_sequence: 11,
             kind: TimelineItemKind::Tool,
             status: TimelineItemStatus::Completed,
             created_at: 11,
@@ -1613,7 +1699,7 @@ mod tests {
                     event: TimelineItemDeltaEvent {
                         turn_id: "turn-1".to_string(),
                         item_id: "turn-1-call-1".to_string(),
-                        sequence: 10,
+                        started_sequence: 10,
                         kind: TimelineItemKind::Tool,
                         status: TimelineItemStatus::Streaming,
                         created_at: 10,
@@ -1648,7 +1734,7 @@ mod tests {
         let failed = TimelineItem {
             turn_id: "turn-1".to_string(),
             item_id: "turn-1-turn".to_string(),
-            sequence: 1,
+            started_sequence: 1,
             kind: TimelineItemKind::Turn,
             status: TimelineItemStatus::Failed,
             created_at: 10,

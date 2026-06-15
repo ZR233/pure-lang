@@ -84,21 +84,10 @@ impl StudioTurnStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum StudioTimelineChange {
-    Started {
-        item: TimelineItem,
-    },
-    Delta {
-        event: TimelineItemDeltaEvent,
-    },
-    Completed {
-        sequence: u64,
-        item: TimelineItem,
-    },
-    Failed {
-        sequence: u64,
-        item: TimelineItem,
-        error: String,
-    },
+    Started { item: TimelineItem },
+    Delta { event: TimelineItemDeltaEvent },
+    Completed { item: TimelineItem },
+    Failed { item: TimelineItem, error: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

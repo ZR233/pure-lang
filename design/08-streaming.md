@@ -21,7 +21,7 @@ timeline item 类型固定为：
 - `inference`
 - `plan`
 
-每个 item 必须携带 `turnId`、`itemId`、`sequence`、`createdAt`、`updatedAt` 和 `status`。`sequence` 是会话内单调递增的 timeline event 顺序号；item 的展示顺序以首次创建时的 `sequence` 为准；后续 delta 和 completed/failed 事件只 upsert 同一个 item，并且不得改变该 item 的首次展示顺序。
+每个 item 必须携带 `turnId`、`itemId`、`startedSequence`、`createdAt`、`updatedAt` 和 `status`。`StudioEventEnvelope.sequence` 是会话内唯一单调递增的事件顺序号；`startedSequence` 只表示该 item 首次进入 timeline 的展示顺序。后续 delta 和 completed/failed 事件只 upsert 同一个 item，并且不得改变该 item 的首次展示顺序。
 
 `text` item 必须携带 `textChannel`，固定为：
 
@@ -35,7 +35,7 @@ timeline item 类型固定为：
 
 每个 turn 被接收后，用户输入必须作为该 turn 的第一个可见 timeline item 记录和广播。纯图片输入也必须产生用户 `text` item，content 可以为空但 attachments 不得为空。enabled tools、`turn`、`inference` 等内部诊断或运行态 item 不得在 sequence 上排到用户输入之前，避免前端等待状态、内部状态或历史回放出现在用户问题上方。
 
-历史加载必须暴露 `nextSequence`/`timelineNextSequence` 作为 timeline projection 游标；Studio runtime 事件另有 `StudioEventEnvelope.sequence` 作为补拉 cursor。Tauri 的历史 timeline DTO 返回 append-only `TimelineEventDto[]`，而不是后端预折叠的 `TimelineItem[]`。前端只能用后端游标判断 snapshot 新旧，不能用 item 列表里的最大 `sequence` 代替游标。旧 snapshot 只能补齐当前状态中不存在或尚未应用的事件，不能覆盖已经通过实时事件接收的新 turn 内容。前端 optimistic item 可以使用临时本地顺序参与展示，但不得预占或推进后端 cursor。
+历史、实时和 stale backfill 都必须使用 `StudioEventEnvelope.sequence` 作为唯一 cursor。`timeline_events` 是从 `studio_events` 派生的查询 projection，不再提供第二套 timeline cursor 或第二套 wire 协议。前端只能用 StudioEvent cursor 判断新旧，不能用 item 列表里的最大 `startedSequence` 代替游标。旧 snapshot 只能补齐当前状态中不存在或尚未应用的 event，不能覆盖已经通过实时事件接收的新 turn 内容。前端 optimistic item 可以使用临时本地顺序参与展示，但不得预占或推进后端 cursor。
 
 ## 8.2 数据流
 
@@ -44,8 +44,8 @@ pl-model provider
   → async-openai stream
   → protocol stream event mapper
   → provider-independent stream accumulator
-  → AgentEventSender / TraceRecorder
-  → StudioEventRuntime 持久化 studio_events + projection
+  → AgentEventSender / TraceRecorder 内部事件
+  → StudioEventRuntime 分配 sequence、规范化 payload、持久化 studio_events + projection
   → Tauri studio-runtime-event
   → studioEventReducer
 ```
@@ -73,10 +73,10 @@ Auto 与 Plan Mode 下模型可见输出优先使用显式标签：`<commentary>
 
 计划的采纳与实施状态不改变 `plan` item 本身，而是通过 `TraceEventKind::PlanLifecycleChanged` 追加到计划来源 session 的 `timeline_events`。事件包含 `planId`、`state`、可选 `turnId`、可选 `reason` 和 `updatedAt`；Studio 从历史 timeline 与 `StudioEventKind::PlanLifecycleChanged` 中按 `planId` 折叠 latest plan state。Plan turn 完成后需要用户确认实施时，后端创建 `InteractionKind::PlanConfirmation`，前端不再从历史 timeline 自行恢复旧确认 composer。确认 resolution 固定为 `implementFreshContext | continuePlanning | dismiss`；`continuePlanning` 的 `content` 是确认 composer 同次提交的用户补充内容，resolution 成功后由前端立即作为普通 prompt 发送；实施时后端创建显式 session handoff，新 Auto session 承载 fresh context 和 handoff prompt，来源 session 保持可恢复但不再作为活跃 session 列表项展示。后端必须在实施 turn 启动前广播 `sessionHandoffChanged`，使 Studio 先切到目标 session 并接收后续实时 `studio-runtime-event`，不得等后台 run 完成才展示实施过程。
 
-Studio 前端的实时事件、`load_session_timeline` 历史 snapshot 和 `load_studio_events` 补拉结果必须进入同一个 timeline event reducer：
+Studio 前端的实时事件、`load_session_state` 初始事件和 `load_studio_events` 补拉结果必须进入同一个 StudioEvent reducer：
 
-- `load_session_timeline` 返回完整 timeline event log；只有当 `nextSequence` 不落后于当前游标时才能重放替换当前 timeline 状态。
-- 如果 `nextSequence` 落后于当前游标，则该 snapshot 只用于补齐当前状态中未应用的 event，不能覆盖 live delta 已折叠出的 item 内容。
+- `load_session_state` 返回同源 `StudioEventEnvelope[]` 与 `eventNextSequence`；前端按 sequence 从小到大重放。
+- `load_studio_events(afterSequence)` 返回缺失的 canonical envelope；payload 必须与数据库中保存的 payload 完全一致。
 - `TimelineItem` 是前端 selector/view model 的折叠结果，不作为 Tauri command 的主输入 DTO。
 - `submit_prompt` 与触发实施的 `resolve_interaction` 不返回最终 timeline；它们只返回提交成功、目标 `sessionId/turnId/cursor`。
 - Plan lifecycle 与 interaction 状态均通过 `StudioEvent` 实时更新，并在 `bootstrap`、`select_session`、`load_session_state` 和 `load_studio_events` 中恢复。
@@ -90,7 +90,7 @@ Studio 渲染可以在 selector 派生出展示项后使用虚拟滚动优化大
 
 内部事件通道可以继续使用 `tokio::sync::broadcast`，但 Studio 对外语义是持久事件流。默认容量由调用方创建，目前建议为 `256`。
 
-高频 delta 可以在 broadcast 层 lag，但不能静默丢失 Studio 状态：每个 `StudioEvent` 必须先写入 `studio_events` 和 projection，再广播。前端发现 sequence 缺口或收到 stale 事件时调用 `load_studio_events(sessionId, afterSequence, limit)` 补齐。`TimelineItemCompleted` 携带最终 snapshot，历史加载不依赖实时 delta 是否完整到达前端。只要 turn 最终有 assistant 正文，最终 timeline 集合中必须存在 completed assistant `text` item；不能只把正文写到 `turn` trace item。
+高频 delta 可以在 broadcast 层 lag，但不能静默丢失 Studio 状态：每个 `StudioEvent` 必须先写入 `studio_events` 和 projection，再广播同一份 canonical envelope。前端发现 sequence 缺口或收到 stale 事件时调用 `load_studio_events(sessionId, afterSequence, limit)` 补齐。`TimelineItemCompleted` 携带最终 snapshot，历史加载不依赖实时 delta 是否完整到达前端。只要 turn 最终有 assistant 正文，最终 timeline 集合中必须存在 completed assistant `text` item；不能只把正文写到 `turn` trace item。
 
 ## 8.4 事件边界
 

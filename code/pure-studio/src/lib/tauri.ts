@@ -346,7 +346,7 @@ export function runPrompt(sessionId: string, prompt: string) {
           {
             turnId: "preview-turn-latest",
             itemId: `preview-user-${Date.now()}`,
-            sequence: previewTimelineItems.length + 8,
+            startedSequence: previewTimelineItems.length + 8,
             kind: "text" as const,
             status: "completed" as const,
             createdAt: now,
@@ -358,7 +358,7 @@ export function runPrompt(sessionId: string, prompt: string) {
           {
             turnId: "preview-turn-latest",
             itemId: `preview-turn-latest-${Date.now()}`,
-            sequence: previewTimelineItems.length + 10,
+            startedSequence: previewTimelineItems.length + 10,
             kind: "turn" as const,
             status: interrupted ? "interrupted" as const : "completed" as const,
             createdAt: Math.floor(Date.now() / 1000),

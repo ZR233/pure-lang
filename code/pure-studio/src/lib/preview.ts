@@ -425,7 +425,7 @@ export const previewTimelineItems: TimelineItem[] = [
   {
     turnId: "preview-turn-1",
     itemId: "preview-user-1",
-    sequence: 0,
+    startedSequence: 0,
     kind: "text",
     status: "completed",
     createdAt: 1779688798,
@@ -437,7 +437,7 @@ export const previewTimelineItems: TimelineItem[] = [
   {
     turnId: "preview-turn-1",
     itemId: "preview-thinking-1",
-    sequence: 1,
+    startedSequence: 1,
     kind: "thinking",
     status: "completed",
     createdAt: 1779688799,
@@ -448,7 +448,7 @@ export const previewTimelineItems: TimelineItem[] = [
   {
     turnId: "preview-turn-1",
     itemId: "preview-assistant-1",
-    sequence: 2,
+    startedSequence: 2,
     kind: "text",
     status: "completed",
     createdAt: 1779688800,
@@ -460,7 +460,7 @@ export const previewTimelineItems: TimelineItem[] = [
   {
     turnId: "preview-turn-1",
     itemId: "preview-plan-1",
-    sequence: 3,
+    startedSequence: 3,
     kind: "plan",
     status: "completed",
     createdAt: 1779688801,
@@ -471,7 +471,7 @@ export const previewTimelineItems: TimelineItem[] = [
   {
     turnId: "preview-turn-1",
     itemId: "preview-tool-1",
-    sequence: 4,
+    startedSequence: 4,
     kind: "tool",
     status: "completed",
     createdAt: 1779688802,
@@ -492,7 +492,7 @@ export const previewTimelineItems: TimelineItem[] = [
   {
     turnId: "preview-turn-1",
     itemId: "preview-agent-1",
-    sequence: 5,
+    startedSequence: 5,
     kind: "agent",
     status: "completed",
     createdAt: 1779688804,
@@ -515,7 +515,7 @@ export const previewTimelineItems: TimelineItem[] = [
   {
     turnId: "preview-turn-1",
     itemId: "preview-turn-1-turn",
-    sequence: 6,
+    startedSequence: 6,
     kind: "turn",
     status: "completed",
     createdAt: 1779688860,
@@ -536,9 +536,9 @@ export function previewTimelineEventRecords(
   items: TimelineItem[],
 ): TimelineEventRecord[] {
   return items.map((item) => ({
-    id: `preview-timeline-event-${item.sequence}-${item.itemId}`,
+    id: `preview-timeline-event-${item.startedSequence}-${item.itemId}`,
     sessionId,
-    sequence: item.sequence,
+    sequence: item.startedSequence,
     createdAt: item.updatedAt,
     kind: "TimelineItemCompleted",
     payload: { type: "timelineItemCompleted", item },
@@ -546,7 +546,7 @@ export function previewTimelineEventRecords(
 }
 
 export function nextTimelineSequenceForItems(items: TimelineItem[]): number {
-  return items.reduce((next, item) => Math.max(next, item.sequence + 1), 0);
+  return items.reduce((next, item) => Math.max(next, item.startedSequence + 1), 0);
 }
 
 export const previewTimelineEvents = previewTimelineEventRecords(

@@ -20,9 +20,9 @@ reducer 分域：
 
 ## 2. Timeline 视图
 
-主区保持单线 timeline 语义，数据来源统一为 append-only timeline event log：
+主区保持单线 timeline 语义，数据来源统一为 append-only StudioEvent log：
 
-- 历史 `TimelineEventDto`
+- 历史 `StudioEventEnvelope`
 - 运行中 `StudioTimelineChange::Started`
 - 运行中 `StudioTimelineChange::Delta`
 - 运行中 `StudioTimelineChange::Completed`
@@ -49,7 +49,7 @@ reducer 分域：
 - 自动跟随最新内容以“用户是否停留在底部”为准；高频 timeline 刷新时仍应在 layout 阶段滚动到最新，用户手动上滚后暂停跟随
 - 同一 session 内继续对话不会触发 `selectedSessionId` 变化；当前轮 `StudioEventKind::TimelineChanged` 与补拉事件必须直接合并进本地 timeline
 - 重复选择当前 session 必须视为 no-op，不能清空本地 timeline、agent snapshot、runtime 或 plan 状态；只有切换到不同 session、新建 session 或切换项目时，才可以重置当前会话本地视图并等待对应 timeline snapshot 加载
-- 异步 `loadSessionTimeline` 只能替换不晚于本地状态的快照；如果加载结果落后于本地已收到的当前轮 item，只能作为历史补齐合并，不能覆盖当前 timeline
+- 异步 `loadSessionState` / `loadStudioEvents` 只能按 `StudioEventEnvelope.sequence` 补齐缺失事件；如果加载结果落后于本地已收到的当前轮 event，只能跳过已应用 sequence，不能覆盖当前 timeline
 - Tauri 实时事件通道如果发生 broadcast lag，不能静默忽略。事件转发层必须向前端发出当前 session 的 stale 信号；前端收到后立即按 `StudioEventEnvelope.sequence` 调用 `loadStudioEvents` 补齐缺失事件，并继续用 timeline 本地新鲜度规则保护已收到的 live item。
 - 自动跟随只取决于用户是否停留在底部，不取决于 `isBusy`；submit 命令返回时 run 通常仍在后台执行，最终内容必须继续通过 `studio-runtime-event` 追加
 - 用户提交 prompt 后，前端 reducer 立即插入仅本地存在的 optimistic 用户消息 item 和 waiting turn item。waiting item 在 selector 中派生为轻量状态行，用于展示“正在等待模型响应”。这些 item 不持久化、不进入后端 DTO；真实 user text item 到达时只清理 optimistic 用户消息，不能清掉 waiting。waiting 必须持续覆盖 turn start、user text 和 inference start 到首个模型侧可见事件，例如 assistant text、thinking、plan、tool event、inference completed、terminal `turnChanged(failed/cancelled/completed)`。如果 submit command 自身失败，waiting 应移除或替换为失败状态，不能残留。
@@ -59,14 +59,14 @@ reducer 分域：
 
 前端 reducer 的 timeline 状态固定为：
 
-- `timelineEvents: Map<sequence, TimelineEventRecord>`
+- `timelineEvents: Map<sequence, TimelineEventRecord>`，其中 key 必须来自 `StudioEventEnvelope.sequence`
 - `timelineItems: Map<itemId, TimelineItem>`
 - `timelineOrder: string[]`
 - `timelineNextSequence: number`
 
-`timelineItems` 是前端从 `timelineEvents` 重放得到的 view model，不作为 Tauri command 的输入 DTO。`timelineOrder` 按每个 item 已知的最早 timeline `sequence` 稳定排序；delta 先到再收到 start/completed 时可以用更早的 item sequence 修正顺序，但不得覆盖已经累积的内容。组件不得再把 `messages`、运行中 tool map、agent events 和 trace items 临时拼接成主 timeline。工具聚合与普通 trace 过滤只能作为 `timelineEntries` 派生显示层逻辑，不能写回 reducer 状态或后端 DTO。
+`timelineItems` 是前端从 `StudioEventEnvelope` 重放得到的 view model，不作为 Tauri command 的输入 DTO。`timelineOrder` 按每个 item 的 `startedSequence` 稳定排序；delta 先到再收到 start/completed 时可以用更早的 `startedSequence` 修正顺序，但不得覆盖已经累积的内容。组件不得再把 `messages`、运行中 tool map、agent events 和 trace items 临时拼接成主 timeline。工具聚合与普通 trace 过滤只能作为 `timelineEntries` 派生显示层逻辑，不能写回 reducer 状态或后端 DTO。
 
-同一组 `TimelineEventDto` 在历史加载、实时事件和补拉事件中必须由同一个前端 reducer 重放，并收敛到相同 `TimelineItem`。fold 规则需要能处理 start/delta/completed 的轻微乱序：delta 先到时可以创建最小 item，后续 start/completed 必须补全 `tool/agent/inference/usage` 等结构化字段，不能丢弃已累积的 content、thinking chunks、tool arguments 或 tool result。
+同一组 `StudioEventEnvelope` 在历史加载、实时事件和补拉事件中必须由同一个前端 reducer 重放，并收敛到相同 `TimelineItem`。fold 规则需要能处理 start/delta/completed 的轻微乱序：delta 先到时可以创建最小 item，后续 start/completed 必须补全 `tool/agent/inference/usage` 等结构化字段，不能丢弃已累积的 content、thinking chunks、tool arguments 或 tool result。
 
 左侧 project 列表的每个项目行右侧提供 `X` 归档按钮。归档 project 不删除磁盘目录，也不修改项目文件；它只归档 Studio 中的 project 记录，并清理该 project 下的 sessions、messages、timeline、agent、runtime 和审批历史。用户重新打开同一路径时复用原 project 记录，但历史会话已经清空，应按新项目入口创建默认会话。归档当前 project 时切换到下一个未归档 project；没有剩余 project 时进入无项目状态。
 
@@ -117,7 +117,7 @@ Markdown 阅读样式属于 timeline 展示层：assistant 正文和 plan 卡片
 - `SessionStateResponse`
 - `StudioEventsResponse`
 
-`submit_prompt` 接收 `attachmentIds`，当附件非空时允许 `prompt` 为空。图片附件先通过独立上传命令写入 Studio app data，再以附件 id 引用；前端不得把 base64 图片直接塞进 prompt 文本。旧字段别名、旧 payload 解析逻辑、旧 text/thinking/tool delta reducer 分支在方案乙中删除。`SubmitPromptResponse` 只表示后台 turn 已提交，包含 `sessionId`、`turnId` 和当前 cursor；不得携带最终 timeline 结果。`SessionTimelineResponse.events` 返回 `TimelineEventDto[]`，其 `payload` 与 `TraceEventKind` 的 camelCase serde 形状一致；`TimelineItem` 只作为前端折叠后的 view model。
+`submit_prompt` 接收 `attachmentIds`，当附件非空时允许 `prompt` 为空。图片附件先通过独立上传命令写入 Studio app data，再以附件 id 引用；前端不得把 base64 图片直接塞进 prompt 文本。旧字段别名、旧 payload 解析逻辑、旧 text/thinking/tool delta reducer 分支在方案乙中删除。`SubmitPromptResponse` 只表示后台 turn 已提交，包含 `sessionId`、`turnId` 和当前 cursor；不得携带最终 timeline 结果。`SessionStateResponse.events` 与 `StudioEventsResponse.events` 返回 `StudioEventEnvelope[]`；`TimelineItem` 只作为前端折叠后的 view model。
 
 ## 5. 选择器与派生数据
 
