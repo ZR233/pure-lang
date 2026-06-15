@@ -1,5 +1,5 @@
 use crate::request::TokenUsage;
-use pl_protocol::TimelineTextChannel;
+use pl_protocol::TraceTextChannel;
 
 /// Provider-independent streaming event consumed by the model accumulator.
 #[derive(Debug, Clone)]
@@ -9,16 +9,16 @@ pub(crate) enum ModelStreamEvent {
     },
     TextStarted {
         id: String,
-        channel: TimelineTextChannel,
+        channel: TraceTextChannel,
     },
     TextDelta {
         id: String,
-        channel: TimelineTextChannel,
+        channel: TraceTextChannel,
         delta: String,
     },
     TextCompleted {
         id: String,
-        channel: TimelineTextChannel,
+        channel: TraceTextChannel,
     },
     ReasoningStarted {
         id: String,

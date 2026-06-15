@@ -53,17 +53,17 @@ pub struct UserInputResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum AgentEvent {
-    TimelineItemStarted {
-        item: TimelineItem,
+    TracePartStarted {
+        item: TracePart,
     },
-    TimelineItemDelta {
-        event: TimelineItemDeltaEvent,
+    TracePartDelta {
+        event: TracePartDeltaEvent,
     },
-    TimelineItemCompleted {
-        item: TimelineItem,
+    TracePartCompleted {
+        item: TracePart,
     },
-    TimelineItemFailed {
-        item: TimelineItem,
+    TracePartFailed {
+        item: TracePart,
         error: String,
     },
     InteractionChanged {
@@ -174,7 +174,7 @@ pub enum AgentEvent {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum TimelineItemKind {
+pub enum TracePartKind {
     Text,
     Thinking,
     Tool,
@@ -184,7 +184,7 @@ pub enum TimelineItemKind {
     Plan,
 }
 
-impl TimelineItemKind {
+impl TracePartKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Text => "text",
@@ -200,7 +200,7 @@ impl TimelineItemKind {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum TimelineItemStatus {
+pub enum TracePartStatus {
     Started,
     Streaming,
     AwaitingApproval,
@@ -213,7 +213,7 @@ pub enum TimelineItemStatus {
     BudgetLimited,
 }
 
-impl TimelineItemStatus {
+impl TracePartStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Started => "started",
@@ -232,13 +232,13 @@ impl TimelineItemStatus {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum TimelineTextChannel {
+pub enum TraceTextChannel {
     User,
     Commentary,
     Final,
 }
 
-impl TimelineTextChannel {
+impl TraceTextChannel {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::User => "user",
@@ -250,14 +250,14 @@ impl TimelineTextChannel {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct TimelineThinkingChunk {
+pub struct TraceThinkingChunk {
     pub chunk_index: u32,
     pub content: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct TimelineToolItem {
+pub struct TraceToolPart {
     pub tool_call_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call_id: Option<String>,
@@ -278,7 +278,7 @@ pub struct TimelineToolItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct TimelineAgentItem {
+pub struct TraceAgentPart {
     pub id: String,
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -297,14 +297,14 @@ pub struct TimelineAgentItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct TimelineInferenceItem {
+pub struct TraceInferencePart {
     pub inference_id: String,
     pub model: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct TimelineAttachment {
+pub struct TraceAttachment {
     pub id: String,
     pub media_type: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -320,48 +320,48 @@ pub struct TimelineAttachment {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct TimelineItem {
+pub struct TracePart {
     pub turn_id: String,
     pub item_id: String,
     #[serde(alias = "sequence")]
     pub started_sequence: u64,
-    pub kind: TimelineItemKind,
-    pub status: TimelineItemStatus,
+    pub kind: TracePartKind,
+    pub status: TracePartStatus,
     pub created_at: i64,
     pub updated_at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub text_channel: Option<TimelineTextChannel>,
+    pub text_channel: Option<TraceTextChannel>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub content: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attachments: Vec<TimelineAttachment>,
+    pub attachments: Vec<TraceAttachment>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub thinking_chunks: Vec<TimelineThinkingChunk>,
+    pub thinking_chunks: Vec<TraceThinkingChunk>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool: Option<TimelineToolItem>,
+    pub tool: Option<TraceToolPart>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent: Option<TimelineAgentItem>,
+    pub agent: Option<TraceAgentPart>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub inference: Option<TimelineInferenceItem>,
+    pub inference: Option<TraceInferencePart>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<TokenUsageSnapshot>,
 }
 
-impl TimelineItem {
+impl TracePart {
     pub fn text(
         turn_id: impl Into<String>,
         item_id: impl Into<String>,
         sequence: u64,
-        text_channel: TimelineTextChannel,
+        text_channel: TraceTextChannel,
         content: impl Into<String>,
-        status: TimelineItemStatus,
+        status: TracePartStatus,
         timestamp: i64,
     ) -> Self {
         Self {
             turn_id: turn_id.into(),
             item_id: item_id.into(),
             started_sequence: sequence,
-            kind: TimelineItemKind::Text,
+            kind: TracePartKind::Text,
             status,
             created_at: timestamp,
             updated_at: timestamp,
@@ -383,9 +383,9 @@ impl TimelineItem {
     rename_all_fields = "camelCase",
     tag = "type"
 )]
-pub enum TimelineDelta {
+pub enum TraceDelta {
     Text {
-        text_channel: TimelineTextChannel,
+        text_channel: TraceTextChannel,
         delta: String,
     },
     Thinking {
@@ -445,23 +445,23 @@ pub struct PlanLifecycleEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct TimelineItemDeltaEvent {
+pub struct TracePartDeltaEvent {
     pub turn_id: String,
     pub item_id: String,
     #[serde(alias = "sequence")]
     pub started_sequence: u64,
-    pub kind: TimelineItemKind,
-    pub status: TimelineItemStatus,
+    pub kind: TracePartKind,
+    pub status: TracePartStatus,
     pub created_at: i64,
     pub updated_at: i64,
-    pub delta: TimelineDelta,
+    pub delta: TraceDelta,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct TimelineItemDelta {
+pub struct TracePartDelta {
     pub item_id: String,
-    pub field: TimelineItemDeltaField,
+    pub field: TracePartDeltaField,
     pub delta: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chunk_index: Option<u32>,
@@ -469,7 +469,7 @@ pub struct TimelineItemDelta {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum TimelineItemDeltaField {
+pub enum TracePartDeltaField {
     Content,
     PlanContent,
     ThinkingChunk,
@@ -692,10 +692,10 @@ pub struct SkillActivation {
     tag = "type"
 )]
 pub enum TraceEventKind {
-    TimelineItemStarted { item: TimelineItem },
-    TimelineItemDelta { event: TimelineItemDeltaEvent },
-    TimelineItemCompleted { item: TimelineItem },
-    TimelineItemFailed { item: TimelineItem, error: String },
+    TracePartStarted { item: TracePart },
+    TracePartDelta { event: TracePartDeltaEvent },
+    TracePartCompleted { item: TracePart },
+    TracePartFailed { item: TracePart, error: String },
     PlanLifecycleChanged { event: PlanLifecycleEvent },
     InteractionChanged { event: InteractionChangedEvent },
     SkillActivated { activation: SkillActivation },
@@ -837,26 +837,26 @@ mod tests {
         );
     }
 
-    fn timeline_text_item() -> TimelineItem {
-        TimelineItem::text(
+    fn trace_text_part() -> TracePart {
+        TracePart::text(
             "turn-1",
             "item-1",
             0,
-            TimelineTextChannel::Final,
+            TraceTextChannel::Final,
             "hello",
-            TimelineItemStatus::Completed,
+            TracePartStatus::Completed,
             1_779_688_800,
         )
     }
 
     #[test]
-    fn serializes_timeline_item_started_as_camel_case() {
+    fn serializes_trace_part_started_as_camel_case() {
         let event = TraceEvent {
             session_id: "sess-1".to_string(),
             sequence: 0,
             timestamp: 1_779_688_800,
-            kind: TraceEventKind::TimelineItemStarted {
-                item: timeline_text_item(),
+            kind: TraceEventKind::TracePartStarted {
+                item: trace_text_part(),
             },
         };
 
@@ -869,7 +869,7 @@ mod tests {
                 "sequence": 0,
                 "timestamp": 1779688800,
                 "kind": {
-                    "type": "timelineItemStarted",
+                    "type": "tracePartStarted",
                     "item": {
                         "turnId": "turn-1",
                         "itemId": "item-1",
@@ -1101,17 +1101,17 @@ mod tests {
     }
 
     #[test]
-    fn serializes_timeline_delta_as_camel_case() {
-        let event = AgentEvent::TimelineItemDelta {
-            event: TimelineItemDeltaEvent {
+    fn serializes_trace_delta_as_camel_case() {
+        let event = AgentEvent::TracePartDelta {
+            event: TracePartDeltaEvent {
                 turn_id: "turn-1".to_string(),
                 item_id: "item-1".to_string(),
                 started_sequence: 2,
-                kind: TimelineItemKind::Thinking,
-                status: TimelineItemStatus::Streaming,
+                kind: TracePartKind::Thinking,
+                status: TracePartStatus::Streaming,
                 created_at: 1_779_688_800,
                 updated_at: 1_779_688_801,
-                delta: TimelineDelta::Thinking {
+                delta: TraceDelta::Thinking {
                     chunk_index: 1,
                     delta: "思考".to_string(),
                 },
@@ -1123,7 +1123,7 @@ mod tests {
         assert_eq!(
             json,
             serde_json::json!({
-                "timelineItemDelta": {
+                "tracePartDelta": {
                     "event": {
                         "turnId": "turn-1",
                         "itemId": "item-1",
@@ -1145,12 +1145,12 @@ mod tests {
 
     #[test]
     fn serializes_plan_timeline_item_and_delta_as_camel_case() {
-        let item = TimelineItem {
+        let item = TracePart {
             turn_id: "turn-1".to_string(),
             item_id: "turn-1-plan".to_string(),
             started_sequence: 1,
-            kind: TimelineItemKind::Plan,
-            status: TimelineItemStatus::Streaming,
+            kind: TracePartKind::Plan,
+            status: TracePartStatus::Streaming,
             created_at: 1_779_688_800,
             updated_at: 1_779_688_800,
             text_channel: None,
@@ -1162,15 +1162,15 @@ mod tests {
             inference: None,
             usage: None,
         };
-        let delta = TimelineItemDeltaEvent {
+        let delta = TracePartDeltaEvent {
             turn_id: "turn-1".to_string(),
             item_id: "turn-1-plan".to_string(),
             started_sequence: 2,
-            kind: TimelineItemKind::Plan,
-            status: TimelineItemStatus::Streaming,
+            kind: TracePartKind::Plan,
+            status: TracePartStatus::Streaming,
             created_at: 1_779_688_800,
             updated_at: 1_779_688_801,
-            delta: TimelineDelta::Plan {
+            delta: TraceDelta::Plan {
                 delta: "\n- step".to_string(),
             },
         };
@@ -1208,7 +1208,7 @@ mod tests {
 
     #[test]
     fn deserializes_legacy_timeline_sequence_as_started_sequence() {
-        let item = serde_json::from_value::<TimelineItem>(serde_json::json!({
+        let item = serde_json::from_value::<TracePart>(serde_json::json!({
             "turnId": "turn-1",
             "itemId": "turn-1-plan",
             "sequence": 7,
@@ -1219,7 +1219,7 @@ mod tests {
             "content": "# Plan"
         }))
         .unwrap();
-        let delta = serde_json::from_value::<TimelineItemDeltaEvent>(serde_json::json!({
+        let delta = serde_json::from_value::<TracePartDeltaEvent>(serde_json::json!({
             "turnId": "turn-1",
             "itemId": "turn-1-plan",
             "sequence": 7,

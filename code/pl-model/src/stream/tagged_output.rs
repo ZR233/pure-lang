@@ -1,4 +1,4 @@
-use pl_protocol::TimelineTextChannel;
+use pl_protocol::TraceTextChannel;
 
 use crate::proposed_plan::{VisibleTextParser, VisibleTextSegment};
 
@@ -26,21 +26,21 @@ impl TaggedVisibleOutputAdapter {
     pub(crate) fn adapt(&mut self, event: ModelStreamEvent) -> Vec<ModelStreamEvent> {
         match event {
             ModelStreamEvent::TextStarted { id, channel } => {
-                if channel == TimelineTextChannel::Final {
+                if channel == TraceTextChannel::Final {
                     Vec::new()
                 } else {
                     vec![ModelStreamEvent::TextStarted { id, channel }]
                 }
             }
             ModelStreamEvent::TextDelta { id, channel, delta } => {
-                if channel == TimelineTextChannel::Final {
+                if channel == TraceTextChannel::Final {
                     self.visible_text_delta(delta)
                 } else {
                     vec![ModelStreamEvent::TextDelta { id, channel, delta }]
                 }
             }
             ModelStreamEvent::TextCompleted { id, channel } => {
-                if channel == TimelineTextChannel::Final {
+                if channel == TraceTextChannel::Final {
                     self.flush_visible_text()
                 } else {
                     vec![ModelStreamEvent::TextCompleted { id, channel }]
@@ -136,15 +136,15 @@ impl TaggedVisibleOutputAdapter {
                 if !include_untagged || text.trim().is_empty() {
                     Vec::new()
                 } else {
-                    self.text_delta(self.final_id.clone(), TimelineTextChannel::Final, text)
+                    self.text_delta(self.final_id.clone(), TraceTextChannel::Final, text)
                 }
             }
             VisibleTextSegment::Final(text) => {
-                self.text_delta(self.final_id.clone(), TimelineTextChannel::Final, text)
+                self.text_delta(self.final_id.clone(), TraceTextChannel::Final, text)
             }
             VisibleTextSegment::Commentary(text) => self.text_delta(
                 self.commentary_id.clone(),
-                TimelineTextChannel::Commentary,
+                TraceTextChannel::Commentary,
                 text,
             ),
             VisibleTextSegment::ProposedPlan(delta) => {
@@ -163,7 +163,7 @@ impl TaggedVisibleOutputAdapter {
     fn text_delta(
         &self,
         id: String,
-        channel: TimelineTextChannel,
+        channel: TraceTextChannel,
         delta: String,
     ) -> Vec<ModelStreamEvent> {
         if delta.is_empty() {

@@ -120,7 +120,7 @@ pub(crate) fn responses_parse_response(body: serde_json::Value) -> Result<Comple
         content,
         reasoning_content: None,
         tool_calls,
-        timeline_events: Vec::new(),
+        trace_events: Vec::new(),
         next_sequence: 0,
         usage: body
             .usage
@@ -228,7 +228,7 @@ pub(crate) fn chat_parse_response(body: serde_json::Value) -> Result<CompletionR
         content,
         reasoning_content,
         tool_calls,
-        timeline_events: Vec::new(),
+        trace_events: Vec::new(),
         next_sequence: 0,
         usage: body
             .usage

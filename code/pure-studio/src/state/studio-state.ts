@@ -28,7 +28,7 @@ import type {
   StudioPartDeltaField,
   StudioTurnStatus,
   TimelinePartView,
-  TimelineAttachment,
+  StudioAttachment,
   TurnPhase,
   TurnStatus,
   InteractionChangedPayload,
@@ -157,7 +157,7 @@ export type StudioAction =
   | { type: "stopRequested"; status: string }
   | { type: "stopFallback"; status: string }
   | { type: "planImplementationSubmitted"; status: string; startedAt: number }
-  | { type: "promptSubmitted"; status: string; startedAt: number; prompt: string; attachments?: TimelineAttachment[] };
+  | { type: "promptSubmitted"; status: string; startedAt: number; prompt: string; attachments?: StudioAttachment[] };
 
 export const initialStudioState = (startingStatus: string): StudioState => ({
   projects: [],
@@ -1081,7 +1081,7 @@ function appendOptimisticPrompt(
   state: StudioState,
   prompt: string,
   startedAt: number,
-  attachments: TimelineAttachment[] = [],
+  attachments: StudioAttachment[] = [],
 ): StudioState {
   const content = prompt.trim();
   if (!content && attachments.length === 0) {

@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 
 use pl_model::{
-    CompletionRequest, CompletionResponse, CompletionTimelineContext, ModelProvider, ProviderInfo,
+    CompletionRequest, CompletionResponse, CompletionTraceContext, ModelProvider, ProviderInfo,
     ReasoningConfig, ReasoningSummary, create_provider,
 };
-use pl_protocol::{AgentEvent, Message, MessageContent, MessageRole, TimelineDelta};
+use pl_protocol::{AgentEvent, Message, MessageContent, MessageRole, TraceDelta};
 
 const ZHIPU_LIVE_ENV_KEY: &str = "API_KEY_ZHIPU";
 
 #[derive(Debug, Default)]
-struct TimelineDeltaCounts {
+struct TraceDeltaCounts {
     text: usize,
     thinking: usize,
 }
@@ -48,7 +48,7 @@ fn zhipu_disabled_request() -> CompletionRequest {
             summary: Some(ReasoningSummary::Disabled),
         }),
         stream: true,
-        timeline: None,
+        trace: None,
     }
 }
 
@@ -70,7 +70,7 @@ fn zhipu_thinking_request() -> CompletionRequest {
             summary: Some(ReasoningSummary::Enabled),
         }),
         stream: true,
-        timeline: Some(CompletionTimelineContext {
+        trace: Some(CompletionTraceContext {
             session_id: "zhipu-live-session".to_string(),
             turn_id: "zhipu-live-thinking-turn".to_string(),
             inference_id: "zhipu-live-thinking-inference".to_string(),
@@ -79,23 +79,23 @@ fn zhipu_thinking_request() -> CompletionRequest {
     }
 }
 
-async fn collect_timeline_delta_counts(
+async fn collect_trace_delta_counts(
     mut event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
-) -> TimelineDeltaCounts {
-    let mut counts = TimelineDeltaCounts::default();
+) -> TraceDeltaCounts {
+    let mut counts = TraceDeltaCounts::default();
     loop {
         match event_rx.recv().await {
-            Ok(AgentEvent::TimelineItemDelta { event }) => match event.delta {
-                TimelineDelta::Text { .. } => counts.text += 1,
-                TimelineDelta::Thinking { .. } => counts.thinking += 1,
-                TimelineDelta::ToolArguments { .. }
-                | TimelineDelta::ToolResult { .. }
-                | TimelineDelta::Plan { .. } => {}
+            Ok(AgentEvent::TracePartDelta { event }) => match event.delta {
+                TraceDelta::Text { .. } => counts.text += 1,
+                TraceDelta::Thinking { .. } => counts.thinking += 1,
+                TraceDelta::ToolArguments { .. }
+                | TraceDelta::ToolResult { .. }
+                | TraceDelta::Plan { .. } => {}
             },
             Ok(_) => {}
             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                panic!("live Zhipu timeline event receiver lagged by {skipped} events")
+                panic!("live Zhipu trace event receiver lagged by {skipped} events")
             }
         }
     }
@@ -105,12 +105,12 @@ async fn collect_timeline_delta_counts(
 async fn run_zhipu(
     api_key: String,
     request: CompletionRequest,
-) -> Option<(CompletionResponse, TimelineDeltaCounts)> {
+) -> Option<(CompletionResponse, TraceDeltaCounts)> {
     let mut info = ProviderInfo::zhipu(None);
     info.bearer_token = Some(api_key);
     let provider = create_provider(info).unwrap();
     let (event_tx, event_rx) = tokio::sync::broadcast::channel(4096);
-    let counter = tokio::spawn(collect_timeline_delta_counts(event_rx));
+    let counter = tokio::spawn(collect_trace_delta_counts(event_rx));
 
     let response = match provider.stream_complete(request, event_tx).await {
         Ok(response) => response,

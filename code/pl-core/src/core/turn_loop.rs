@@ -1,7 +1,7 @@
 use pl_model::{CompletionRequest, ModelProvider, ReasoningConfig, ReasoningSummary};
 use pl_protocol::{
     AgentEvent, ContentPart, EnabledToolsEvent, ErrorSeverity, ImageSource, Message,
-    MessageContent, Result, TimelineItemStatus, TokenUsageSnapshot, TraceEventKind,
+    MessageContent, Result, TokenUsageSnapshot, TraceEventKind, TracePartStatus,
 };
 use std::sync::Arc;
 
@@ -77,11 +77,11 @@ pub(super) async fn run_turn_with_trace(
     recorder.user_text_item_with_attachments(
         &turn_id,
         request.prompt.clone(),
-        request.timeline_attachments.clone(),
+        request.trace_attachments.clone(),
     );
     session.push_user_content(request.user_content.clone());
     record_enabled_tools(recorder, &turn_id, request.mode, &tool_schemas);
-    let turn_item = recorder.turn_item(&turn_id, TimelineItemStatus::Running);
+    let turn_item = recorder.turn_item(&turn_id, TracePartStatus::Running);
     recorder.start_item(turn_item.clone());
     let model = provider.default_model().to_string();
 
@@ -255,7 +255,7 @@ pub(super) async fn run_turn_with_trace(
             max_tokens: None,
             reasoning: reasoning.clone(),
             stream: true,
-            timeline: Some(pl_model::CompletionTimelineContext {
+            trace: Some(pl_model::CompletionTraceContext {
                 session_id: recorder.session_id().to_string(),
                 turn_id: turn_id.clone(),
                 inference_id: inference_id.clone(),
@@ -327,7 +327,7 @@ pub(super) async fn run_turn_with_trace(
             break;
         }
 
-        recorder.record_events(response.timeline_events.clone());
+        recorder.record_events(response.trace_events.clone());
         if recorder.current_sequence() < response.next_sequence {
             recorder.advance_sequence(response.next_sequence);
         }
@@ -535,7 +535,7 @@ pub(super) async fn run_turn_with_trace(
     }
 
     recorder.ensure_assistant_text_item(&turn_id, &last_content);
-    let mut completed_turn_item = recorder.turn_item(&turn_id, TimelineItemStatus::Completed);
+    let mut completed_turn_item = recorder.turn_item(&turn_id, TracePartStatus::Completed);
     completed_turn_item.content = last_content.clone();
     completed_turn_item.usage = Some(TokenUsageSnapshot {
         prompt_tokens: total_usage.prompt_tokens,
@@ -558,7 +558,7 @@ pub(super) async fn run_turn_with_trace(
         error: None,
         budget_limit_kind: None,
         budget_usage: None,
-        timeline_events: recorder.drain(),
+        trace_events: recorder.drain(),
     })
 }
 
@@ -588,7 +588,7 @@ fn record_plan_exit_items(
     tool_results: &[super::tool_dispatch::ToolExecutionRecord],
 ) {
     for tool_result in tool_results {
-        if tool_result.name != "plan_exit" || tool_result.status != TimelineItemStatus::Completed {
+        if tool_result.name != "plan_exit" || tool_result.status != TracePartStatus::Completed {
             continue;
         }
         if let Some(content) = plan_exit_content(&tool_result.arguments) {

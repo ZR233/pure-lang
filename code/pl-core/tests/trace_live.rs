@@ -40,7 +40,7 @@ fn live_api_key() -> Option<String> {
     match std::env::var(DEEPSEEK_LIVE_ENV_KEY) {
         Ok(value) if !value.trim().is_empty() => Some(value),
         _ => {
-            eprintln!("{DEEPSEEK_LIVE_ENV_KEY} is not set; skipping live timeline test");
+            eprintln!("{DEEPSEEK_LIVE_ENV_KEY} is not set; skipping live trace test");
             None
         }
     }
@@ -61,29 +61,29 @@ async fn configured_core(api_key: String, workspace: &Path) -> PureCore {
     core
 }
 
-/// 提取 timeline events 涉及的所有 turn_id（去重）。
+/// 提取 trace events 涉及的所有 turn_id（去重）。
 fn turn_ids(events: &[TraceEvent]) -> HashSet<String> {
     events
         .iter()
         .filter_map(|event| match &event.kind {
-            TraceEventKind::TimelineItemStarted { item }
-            | TraceEventKind::TimelineItemCompleted { item }
-            | TraceEventKind::TimelineItemFailed { item, .. } => Some(item.turn_id.clone()),
-            TraceEventKind::TimelineItemDelta { event } => Some(event.turn_id.clone()),
+            TraceEventKind::TracePartStarted { item }
+            | TraceEventKind::TracePartCompleted { item }
+            | TraceEventKind::TracePartFailed { item, .. } => Some(item.turn_id.clone()),
+            TraceEventKind::TracePartDelta { event } => Some(event.turn_id.clone()),
             _ => None,
         })
         .collect()
 }
 
-/// 提取 timeline events 涉及的所有 item_id（去重）。
+/// 提取 trace events 涉及的所有 item_id（去重）。
 fn item_ids(events: &[TraceEvent]) -> HashSet<String> {
     events
         .iter()
         .filter_map(|event| match &event.kind {
-            TraceEventKind::TimelineItemStarted { item }
-            | TraceEventKind::TimelineItemCompleted { item }
-            | TraceEventKind::TimelineItemFailed { item, .. } => Some(item.item_id.clone()),
-            TraceEventKind::TimelineItemDelta { event } => Some(event.item_id.clone()),
+            TraceEventKind::TracePartStarted { item }
+            | TraceEventKind::TracePartCompleted { item }
+            | TraceEventKind::TracePartFailed { item, .. } => Some(item.item_id.clone()),
+            TraceEventKind::TracePartDelta { event } => Some(event.item_id.clone()),
             _ => None,
         })
         .collect()
@@ -93,8 +93,8 @@ fn final_text_items(events: &[TraceEvent]) -> Vec<String> {
     let mut ids: Vec<String> = events
         .iter()
         .filter_map(|event| match &event.kind {
-            TraceEventKind::TimelineItemStarted { item }
-                if item.kind == pl_protocol::TimelineItemKind::Text =>
+            TraceEventKind::TracePartStarted { item }
+                if item.kind == pl_protocol::TracePartKind::Text =>
             {
                 Some(item.item_id.clone())
             }
@@ -107,17 +107,17 @@ fn final_text_items(events: &[TraceEvent]) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn cross_turn_timeline_isolation_live() {
+async fn cross_turn_trace_isolation_live() {
     let Some(api_key) = live_api_key() else {
         return;
     };
 
-    let workspace = TempWorkspace::new("timeline-live");
+    let workspace = TempWorkspace::new("trace-live");
     tokio::fs::create_dir_all(workspace.path()).await.unwrap();
     let core = configured_core(api_key, workspace.path()).await;
     let mut session = CoreSession::new();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(256);
-    let mut recorder = pl_core::TraceRecorder::new("timeline-live".to_string(), event_tx, 0);
+    let mut recorder = pl_core::TraceRecorder::new("trace-live".to_string(), event_tx, 0);
 
     // turn 1：要求模型输出简短中文 final 文本
     let request1 = TurnRequest::new(
@@ -135,9 +135,9 @@ async fn cross_turn_timeline_isolation_live() {
         "turn 1 failed: {:?}",
         result1.error
     );
-    let turn1_turn_ids = turn_ids(&result1.timeline_events);
-    let turn1_item_ids = item_ids(&result1.timeline_events);
-    let turn1_final_items = final_text_items(&result1.timeline_events);
+    let turn1_turn_ids = turn_ids(&result1.trace_events);
+    let turn1_item_ids = item_ids(&result1.trace_events);
+    let turn1_final_items = final_text_items(&result1.trace_events);
     assert_eq!(
         turn1_turn_ids.len(),
         1,
@@ -165,15 +165,15 @@ async fn cross_turn_timeline_isolation_live() {
         "turn 2 failed: {:?}",
         result2.error
     );
-    let turn2_turn_ids = turn_ids(&result2.timeline_events);
-    let turn2_item_ids = item_ids(&result2.timeline_events);
-    let turn2_final_items = final_text_items(&result2.timeline_events);
+    let turn2_turn_ids = turn_ids(&result2.trace_events);
+    let turn2_item_ids = item_ids(&result2.trace_events);
+    let turn2_final_items = final_text_items(&result2.trace_events);
 
     // 跨 turn turn_id 必须不同（防串台的根本隔离）
     let turn2_id = turn2_turn_ids.iter().next().expect("turn 2 has turn_id");
     assert_ne!(
         turn1_id, *turn2_id,
-        "cross-turn turn_id must differ (otherwise timeline items collide)"
+        "cross-turn turn_id must differ (otherwise trace parts collide)"
     );
     // 跨 turn item_id 绝不重叠
     let overlap: Vec<_> = turn1_item_ids.intersection(&turn2_item_ids).collect();

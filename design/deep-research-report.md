@@ -244,7 +244,7 @@ type StudioState = {
   sessions: SessionItem[];
   messages: MessageDto[];
   approvals: ToolApprovalRequest[];
-  timeline: TimelineItem[];
+  timeline: LegacyTimelineItem[];
   runtime: SessionRuntime | null;
   ui: {
     settingsOpen: boolean;

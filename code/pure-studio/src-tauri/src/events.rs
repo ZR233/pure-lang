@@ -206,10 +206,10 @@ async fn agent_for_event(
                     .find(|agent| agent.id == delta.agent_id)
                     .map(agent_dto)
             }),
-        AgentEvent::TimelineItemStarted { .. }
-        | AgentEvent::TimelineItemDelta { .. }
-        | AgentEvent::TimelineItemCompleted { .. }
-        | AgentEvent::TimelineItemFailed { .. }
+        AgentEvent::TracePartStarted { .. }
+        | AgentEvent::TracePartDelta { .. }
+        | AgentEvent::TracePartCompleted { .. }
+        | AgentEvent::TracePartFailed { .. }
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::SkillActivated { .. }

@@ -33,8 +33,8 @@ mod tests {
         InteractionStatus, Message, MessageContent, MessageRole, PlanConfirmationResolution,
         PlanLifecycleState, RuntimeCostAmount, SkillActivation, StudioEventEnvelope,
         StudioEventKind, StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart,
-        StudioPartStatus, StudioPartType, StudioTextChannel, TimelineItem, TimelineItemKind,
-        TimelineItemStatus, TimelineTextChannel, TokenUsageSnapshot, TraceEvent, TraceEventKind,
+        StudioPartStatus, StudioPartType, StudioTextChannel, TokenUsageSnapshot, TraceEvent,
+        TraceEventKind, TracePart, TracePartKind, TracePartStatus, TraceTextChannel,
     };
     use pretty_assertions::assert_eq;
 
@@ -411,15 +411,15 @@ mod tests {
             .await
             .unwrap();
 
-        let trace_item = TimelineItem {
+        let trace_item = TracePart {
             turn_id: "turn-1".to_string(),
             item_id: "turn-1-user".to_string(),
             started_sequence: 0,
-            kind: TimelineItemKind::Text,
-            status: TimelineItemStatus::Completed,
+            kind: TracePartKind::Text,
+            status: TracePartStatus::Completed,
             created_at: 11,
             updated_at: 11,
-            text_channel: Some(TimelineTextChannel::User),
+            text_channel: Some(TraceTextChannel::User),
             content: "hello".to_string(),
             attachments: Vec::new(),
             thinking_chunks: Vec::new(),
@@ -431,7 +431,7 @@ mod tests {
         runtime
             .emit_agent_event(
                 &session.id,
-                pl_protocol::AgentEvent::TimelineItemCompleted { item: trace_item },
+                pl_protocol::AgentEvent::TracePartCompleted { item: trace_item },
             )
             .await
             .unwrap();
@@ -792,7 +792,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn agent_timeline_events_are_append_only_and_agents_are_snapshots() {
+    async fn agent_trace_events_are_append_only_and_agents_are_snapshots() {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project("C:/work/alpha").await.unwrap();
         let session = store

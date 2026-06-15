@@ -12,7 +12,7 @@ React action
   -> interfaces ports
   -> infrastructure adapters (sqlite/config/fs/event/tool)
   -> PureCore turn pipeline
-  -> AgentEvent / TraceEvent
+  -> AgentEvent / TraceEvent / TracePart
   -> StudioEventRuntime canonical message/part snapshot + live part delta
   -> Tauri studio-runtime-event
   -> studioEventReducer
@@ -115,7 +115,7 @@ Agent 协作 timeline 与状态分层：
 
 持久化原则：
 
-- 消息和 trace 采用事务批量写入，避免逐条写放大
+- 消息和内部 `TracePart` 诊断事件采用事务批量写入，避免逐条写放大；旧 `timeline_events` 表只保留为迁移/清理对象，不再作为 Studio UI 事实源
 - `studio_events` 是 Studio UI 的唯一 durable 重放事实流。每个 durable 事件带 `sessionId`、会话内单调 `sequence`、`createdAt` 和类型化 `kind`；前端通过 cursor 补拉缺失事件，而不是依赖命令最终响应补状态。广播 payload 必须与持久化 payload 完全一致，禁止 projection 重写一份、实时广播另一份。高频 `messagePartDelta` 是实时 overlay，不写入 durable log，必须能被后续 `messagePartUpdated` 完全覆盖。
 - `turns` 表保存当前与历史 turn 状态：`queued | contextLoading | waitingForModel | streaming | waitingForInteraction | runningTool | persisting | completed | failed | cancelled`。启动时所有非终态 turn 必须收敛为 `cancelled`
 - `studio_messages`、`message_parts`、`agent_events`、`interactions`、`session_skills`、`session_handoffs` 是 `StudioEventRuntime` 的 projection 表。message/part projection 保存 latest snapshot，live delta 只作为前端 overlay；除一次性迁移和启动恢复外，运行期不得由 Tauri sideband 或前端推断直接写入。Plan lifecycle 也必须先写 `StudioEventKind::PlanLifecycleChanged`，再由 projection 更新查询表。

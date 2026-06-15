@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use pl_model::TokenUsage;
-use pl_protocol::{BudgetLimitKind, BudgetUsage, MessageContent, TimelineAttachment, TraceEvent};
+use pl_protocol::{BudgetLimitKind, BudgetUsage, MessageContent, TraceAttachment, TraceEvent};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
@@ -181,7 +181,7 @@ pub struct TurnRequest {
     pub instruction_snapshot: Option<InstructionSnapshot>,
     pub budget: TurnBudget,
     pub materialized_attachments: Vec<crate::studio::MaterializedAttachment>,
-    pub timeline_attachments: Vec<TimelineAttachment>,
+    pub trace_attachments: Vec<TraceAttachment>,
 }
 
 impl TurnRequest {
@@ -196,7 +196,7 @@ impl TurnRequest {
             instruction_snapshot: None,
             budget: TurnBudget::root_default(),
             materialized_attachments: Vec::new(),
-            timeline_attachments: Vec::new(),
+            trace_attachments: Vec::new(),
         }
     }
 
@@ -218,8 +218,8 @@ impl TurnRequest {
         self
     }
 
-    pub fn with_timeline_attachments(mut self, attachments: Vec<TimelineAttachment>) -> Self {
-        self.timeline_attachments = attachments;
+    pub fn with_trace_attachments(mut self, attachments: Vec<TraceAttachment>) -> Self {
+        self.trace_attachments = attachments;
         self
     }
 
@@ -451,8 +451,8 @@ pub struct TurnResult {
     pub error: Option<String>,
     pub budget_limit_kind: Option<BudgetLimitKind>,
     pub budget_usage: Option<BudgetUsage>,
-    /// Structured timeline events recorded during this turn (if tracing was enabled).
-    pub timeline_events: Vec<TraceEvent>,
+    /// Structured trace events recorded during this turn (if tracing was enabled).
+    pub trace_events: Vec<TraceEvent>,
 }
 
 #[cfg(test)]

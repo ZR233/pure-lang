@@ -13,7 +13,7 @@ use pl_protocol::{
     PlanLifecycleEvent, PlanLifecycleState, RuntimeUsageSnapshot, SkillActivation,
     StudioAgentTimelineEvent, StudioAgentTimelineEventKind, StudioAttachment, StudioEventEnvelope,
     StudioEventKind, StudioMessage, StudioPart, StudioRuntimeUsage, StudioSessionRuntime,
-    StudioTurnStatus, TimelineAttachment, TraceEvent, TraceEventKind,
+    StudioTurnStatus, TraceAttachment, TraceEvent, TraceEventKind,
 };
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait, Database,
@@ -211,7 +211,7 @@ impl StudioStore {
                 .await?;
             tx.execute(Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Sqlite,
-                "DELETE FROM trace_events WHERE session_id = ?",
+                "DELETE FROM timeline_events WHERE session_id = ?",
                 [session_id.clone().into()],
             ))
             .await?;
@@ -990,19 +990,18 @@ impl StudioStore {
     pub async fn append_turn_records(
         &self,
         session_id: &str,
-        timeline_events: &[TraceEvent],
+        trace_events: &[TraceEvent],
         messages: &[Message],
     ) -> Result<()> {
-        if timeline_events.is_empty() && messages.is_empty() {
+        if trace_events.is_empty() && messages.is_empty() {
             return Ok(());
         }
 
         let tx = self.db.begin().await?;
-        if !timeline_events.is_empty() {
-            // timeline 表由实时 emit 单源写入（apply_studio_event_projection 用 DB 全局
-            // envelope.sequence），turn 结束不再重复写 timeline 表（消除双写与 sequence 双空间）。
-            // 这里仅提取 skill 激活事件更新 skill 表（幂等）。
-            upsert_session_skill_events_with_tx(&tx, timeline_events).await?;
+        if !trace_events.is_empty() {
+            // 旧 timeline_events 表不再作为运行期写入目标；turn 收尾只从内部
+            // trace 中提取 skill 激活事件更新 skill 表（幂等）。
+            upsert_session_skill_events_with_tx(&tx, trace_events).await?;
         }
         if !messages.is_empty() {
             let now = unix_seconds();
@@ -1018,13 +1017,13 @@ impl StudioStore {
     pub async fn replace_turn_records(
         &self,
         session_id: &str,
-        timeline_events: &[TraceEvent],
+        trace_events: &[TraceEvent],
         messages: &[Message],
     ) -> Result<()> {
         let tx = self.db.begin().await?;
-        if !timeline_events.is_empty() {
-            // 同 append_turn_records：timeline 表由实时 emit 单源写入，这里只更新 skill 表。
-            upsert_session_skill_events_with_tx(&tx, timeline_events).await?;
+        if !trace_events.is_empty() {
+            // 同 append_turn_records：这里只更新 skill 表。
+            upsert_session_skill_events_with_tx(&tx, trace_events).await?;
         }
         replace_session_messages_with_tx(&tx, session_id, messages).await?;
         tx.commit().await?;
@@ -2067,9 +2066,9 @@ fn is_terminal_turn_status(status: StudioTurnStatus) -> bool {
 
 async fn upsert_session_skill_events_with_tx(
     tx: &sea_orm::DatabaseTransaction,
-    timeline_events: &[TraceEvent],
+    trace_events: &[TraceEvent],
 ) -> Result<()> {
-    for event in timeline_events {
+    for event in trace_events {
         if let TraceEventKind::SkillActivated { activation } = &event.kind {
             upsert_session_skill_with_tx(tx, &event.session_id, activation).await?;
         }
@@ -2271,8 +2270,8 @@ async fn materialize_attachments(
     Ok(materialized)
 }
 
-pub(crate) fn timeline_attachment(record: &AttachmentRecord) -> TimelineAttachment {
-    TimelineAttachment {
+pub(crate) fn trace_attachment(record: &AttachmentRecord) -> TraceAttachment {
+    TraceAttachment {
         id: record.id.clone(),
         media_type: record.media_type.clone(),
         filename: record.filename.clone(),

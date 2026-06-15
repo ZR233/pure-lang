@@ -90,7 +90,7 @@ impl OpenAiProvider {
             let supports_custom_tools = info.uses_native_custom_tools()
                 && effective_capabilities.supports_custom_tools()
                 && effective_capabilities.supports_freeform_tools();
-            let timeline = request.timeline.clone();
+            let trace = request.trace.clone();
             let mut request = request.provider_compatible(supports_custom_tools);
             request.validate_against(&effective_capabilities)?;
             if let Some(api_model) = &model_info.request_profile.api_model {
@@ -117,7 +117,7 @@ impl OpenAiProvider {
                     .map_err(openai_error_to_pure)?,
             };
 
-            process_provider_stream(stream, &event_tx, &protocol, timeline).await
+            process_provider_stream(stream, &event_tx, &protocol, trace).await
         }
     }
 
@@ -396,14 +396,14 @@ fn looks_like_secret_token(token: &str) -> bool {
 mod tests {
     use std::collections::HashMap;
 
-    use pl_protocol::{AgentEvent, Message, MessageContent, MessageRole, TimelineItemKind};
+    use pl_protocol::{AgentEvent, Message, MessageContent, MessageRole, TracePartKind};
     use pretty_assertions::assert_eq;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
     use super::*;
     use crate::protocol::openai::sse::{StreamEvent, ToolCallDeltaPayload};
-    use crate::request::{CompletionRequest, CompletionTimelineContext, ToolCallPayload};
+    use crate::request::{CompletionRequest, CompletionTraceContext, ToolCallPayload};
     use crate::stream::StreamCompletionAccumulator;
     use pl_protocol::TraceEventKind;
 
@@ -506,7 +506,7 @@ mod tests {
             max_tokens: None,
             reasoning: None,
             stream: false,
-            timeline: None,
+            trace: None,
         }
     }
 
@@ -603,7 +603,7 @@ mod tests {
     #[test]
     fn stream_accumulator_returns_content_and_reasoning_content() {
         let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
-        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTimelineContext {
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
             session_id: "session-1".to_string(),
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
@@ -624,7 +624,7 @@ mod tests {
             .apply(
                 StreamEvent::TextDelta {
                     id: "final".to_string(),
-                    channel: pl_protocol::TimelineTextChannel::Final,
+                    channel: pl_protocol::TraceTextChannel::Final,
                     delta: "<final>9.11 更大。</final>".to_string(),
                 },
                 &event_tx,
@@ -645,26 +645,26 @@ mod tests {
         );
         assert!(matches!(
             event_rx.try_recv().unwrap(),
-            AgentEvent::TimelineItemStarted { .. }
+            AgentEvent::TracePartStarted { .. }
         ));
         assert!(matches!(
             event_rx.try_recv().unwrap(),
-            AgentEvent::TimelineItemDelta { .. }
+            AgentEvent::TracePartDelta { .. }
         ));
         assert!(matches!(
             event_rx.try_recv().unwrap(),
-            AgentEvent::TimelineItemStarted { .. }
+            AgentEvent::TracePartStarted { .. }
         ));
         assert!(matches!(
             event_rx.try_recv().unwrap(),
-            AgentEvent::TimelineItemDelta { .. }
+            AgentEvent::TracePartDelta { .. }
         ));
     }
 
     #[test]
     fn stream_accumulator_streams_commentary_without_content() {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTimelineContext {
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
             session_id: "session-1".to_string(),
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
@@ -680,7 +680,7 @@ mod tests {
                 .apply(
                     StreamEvent::TextDelta {
                         id: "final".to_string(),
-                        channel: pl_protocol::TimelineTextChannel::Final,
+                        channel: pl_protocol::TraceTextChannel::Final,
                         delta: delta.to_string(),
                     },
                     &event_tx,
@@ -692,16 +692,16 @@ mod tests {
         let response = accumulator.finish(&event_tx).unwrap();
 
         assert_eq!(response.content.as_deref(), Some("完成。"));
-        assert!(response.timeline_events.iter().any(|event| matches!(
+        assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
-            TraceEventKind::TimelineItemCompleted { item }
-                if item.text_channel == Some(pl_protocol::TimelineTextChannel::Commentary)
+            TraceEventKind::TracePartCompleted { item }
+                if item.text_channel == Some(pl_protocol::TraceTextChannel::Commentary)
                     && item.content == "检查配置。"
         )));
-        assert!(response.timeline_events.iter().any(|event| matches!(
+        assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
-            TraceEventKind::TimelineItemCompleted { item }
-                if item.text_channel == Some(pl_protocol::TimelineTextChannel::Final)
+            TraceEventKind::TracePartCompleted { item }
+                if item.text_channel == Some(pl_protocol::TraceTextChannel::Final)
             && item.content == "完成。"
         )));
     }
@@ -709,7 +709,7 @@ mod tests {
     #[test]
     fn stream_accumulator_extracts_visible_tags_from_reasoning_content() {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
-        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTimelineContext {
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
             session_id: "session-1".to_string(),
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
@@ -742,21 +742,21 @@ mod tests {
                 "<commentary>正在分析日志。</commentary><proposed_plan>\n- 修复 GLM 流\n</proposed_plan><final>完成。</final>"
             )
         );
-        assert!(response.timeline_events.iter().any(|event| matches!(
+        assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
-            TraceEventKind::TimelineItemCompleted { item }
-                if item.text_channel == Some(pl_protocol::TimelineTextChannel::Commentary)
+            TraceEventKind::TracePartCompleted { item }
+                if item.text_channel == Some(pl_protocol::TraceTextChannel::Commentary)
                     && item.content == "正在分析日志。"
         )));
-        assert!(response.timeline_events.iter().any(|event| matches!(
+        assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
-            TraceEventKind::TimelineItemCompleted { item }
-                if item.kind == TimelineItemKind::Plan && item.content == "\n- 修复 GLM 流\n"
+            TraceEventKind::TracePartCompleted { item }
+                if item.kind == TracePartKind::Plan && item.content == "\n- 修复 GLM 流\n"
         )));
-        assert!(response.timeline_events.iter().any(|event| matches!(
+        assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
-            TraceEventKind::TimelineItemCompleted { item }
-                if item.text_channel == Some(pl_protocol::TimelineTextChannel::Final)
+            TraceEventKind::TracePartCompleted { item }
+                if item.text_channel == Some(pl_protocol::TraceTextChannel::Final)
                     && item.content == "完成。"
         )));
     }
@@ -764,7 +764,7 @@ mod tests {
     #[test]
     fn stream_accumulator_keeps_untagged_reasoning_hidden() {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTimelineContext {
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
             session_id: "session-1".to_string(),
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
@@ -790,18 +790,18 @@ mod tests {
             response.reasoning_content.as_deref(),
             Some("先比较整数位。")
         );
-        assert!(!response.timeline_events.iter().any(|event| matches!(
+        assert!(!response.trace_events.iter().any(|event| matches!(
             &event.kind,
-            TraceEventKind::TimelineItemCompleted { item }
-                if item.kind == TimelineItemKind::Text
-                    || item.kind == TimelineItemKind::Plan
+            TraceEventKind::TracePartCompleted { item }
+                if item.kind == TracePartKind::Text
+                    || item.kind == TracePartKind::Plan
         )));
     }
 
     #[test]
-    fn stream_accumulator_treats_untagged_timeline_text_as_final() {
+    fn stream_accumulator_treats_untagged_display_text_as_final() {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTimelineContext {
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
             session_id: "session-1".to_string(),
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
@@ -812,7 +812,7 @@ mod tests {
             .apply(
                 StreamEvent::TextDelta {
                     id: "final".to_string(),
-                    channel: pl_protocol::TimelineTextChannel::Final,
+                    channel: pl_protocol::TraceTextChannel::Final,
                     delta: "plain text".to_string(),
                 },
                 &event_tx,
@@ -823,10 +823,10 @@ mod tests {
         let response = accumulator.finish(&event_tx).unwrap();
 
         assert_eq!(response.content.as_deref(), Some("plain text"));
-        assert!(response.timeline_events.iter().any(|event| matches!(
+        assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
-            TraceEventKind::TimelineItemCompleted { item }
-                if item.text_channel == Some(pl_protocol::TimelineTextChannel::Final)
+            TraceEventKind::TracePartCompleted { item }
+                if item.text_channel == Some(pl_protocol::TraceTextChannel::Final)
                     && item.content == "plain text"
         )));
     }
@@ -834,7 +834,7 @@ mod tests {
     #[test]
     fn stream_accumulator_extracts_proposed_plan_item() {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
-        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTimelineContext {
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
             session_id: "session-1".to_string(),
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
@@ -850,7 +850,7 @@ mod tests {
                 .apply(
                     StreamEvent::TextDelta {
                         id: "final".to_string(),
-                        channel: pl_protocol::TimelineTextChannel::Final,
+                        channel: pl_protocol::TraceTextChannel::Final,
                         delta: delta.to_string(),
                     },
                     &event_tx,
@@ -869,18 +869,16 @@ mod tests {
             )
         );
         let completed_plan = response
-            .timeline_events
+            .trace_events
             .iter()
             .find_map(|event| match &event.kind {
-                TraceEventKind::TimelineItemCompleted { item }
-                    if item.kind == TimelineItemKind::Plan =>
-                {
+                TraceEventKind::TracePartCompleted { item } if item.kind == TracePartKind::Plan => {
                     Some(item)
                 }
-                TraceEventKind::TimelineItemStarted { .. }
-                | TraceEventKind::TimelineItemDelta { .. }
-                | TraceEventKind::TimelineItemCompleted { .. }
-                | TraceEventKind::TimelineItemFailed { .. }
+                TraceEventKind::TracePartStarted { .. }
+                | TraceEventKind::TracePartDelta { .. }
+                | TraceEventKind::TracePartCompleted { .. }
+                | TraceEventKind::TracePartFailed { .. }
                 | TraceEventKind::PlanLifecycleChanged { .. }
                 | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::SkillActivated { .. }
@@ -947,7 +945,7 @@ mod tests {
             .apply(
                 StreamEvent::TextDelta {
                     id: "final".to_string(),
-                    channel: pl_protocol::TimelineTextChannel::Final,
+                    channel: pl_protocol::TraceTextChannel::Final,
                     delta: "partial".to_string(),
                 },
                 &event_tx,
@@ -996,9 +994,9 @@ mod tests {
     }
 
     #[test]
-    fn stream_timeline_item_ids_are_scoped_to_turn() {
+    fn stream_trace_part_ids_are_scoped_to_turn() {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTimelineContext {
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
             session_id: "session-1".to_string(),
             turn_id: "turn-1".to_string(),
             inference_id: "turn-1-inf-0".to_string(),
@@ -1039,13 +1037,13 @@ mod tests {
 
         assert_eq!(response.tool_calls[0].id, "call_0");
         let item_ids = response
-            .timeline_events
+            .trace_events
             .iter()
             .map(|event| match &event.kind {
-                TraceEventKind::TimelineItemStarted { item }
-                | TraceEventKind::TimelineItemCompleted { item } => item.item_id.as_str(),
-                TraceEventKind::TimelineItemDelta { event } => event.item_id.as_str(),
-                TraceEventKind::TimelineItemFailed { item, .. } => item.item_id.as_str(),
+                TraceEventKind::TracePartStarted { item }
+                | TraceEventKind::TracePartCompleted { item } => item.item_id.as_str(),
+                TraceEventKind::TracePartDelta { event } => event.item_id.as_str(),
+                TraceEventKind::TracePartFailed { item, .. } => item.item_id.as_str(),
                 TraceEventKind::PlanLifecycleChanged { .. }
                 | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::SkillActivated { .. }

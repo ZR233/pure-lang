@@ -19,7 +19,7 @@ Core 会话中的 tool result metadata 同时保存两个字段：
 
 这些 metadata 必须通过 typed helper 写入和读取，不允许在 `pl-core`、`pl-model` 之间散落字符串 key。新增会话消息缺少 `tool_call_kind`、`tool_call_id` 或 Responses `call_id` 时，provider request 构造应返回协议错误；只有历史兼容路径可以把缺少 `tool_call_kind` 的旧 tool result 当作 function 读取。unknown `tool_call_kind` 一律是协议错误，不能静默回退到 function。
 
-Studio 工具 part id 使用可展示、可去重的运行时 id：优先取 `ToolCall.call_id`，否则取 `ToolCall.id`，再按 turn 做命名空间隔离。`StudioPart.partId` 和 `StudioToolPart.toolCallId` 表示 runtime 展示 id；provider item id 使用 `StudioToolPart.providerItemId`；Responses call id 使用 `StudioToolPart.callId`。旧 core trace 中的 `TimelineItem` 只允许作为内部诊断输入，经 Studio runtime 转换为 `message.part.updated` / `message.part.delta` 后才能进入 UI。
+Studio 工具 part id 使用可展示、可去重的运行时 id：优先取 `ToolCall.call_id`，否则取 `ToolCall.id`，再按 turn 做命名空间隔离。`StudioPart.partId` 和 `StudioToolPart.toolCallId` 表示 runtime 展示 id；provider item id 使用 `StudioToolPart.providerItemId`；Responses call id 使用 `StudioToolPart.callId`。core trace 中的 `TracePart` 只允许作为内部诊断输入，经 Studio runtime 转换为 `message.part.updated` / `message.part.delta` 后才能进入 UI。
 
 ## 模型流完成语义
 
@@ -44,7 +44,7 @@ MCP tools 由进程内 MCP runtime registry 的当前可用快照注册，工具
 
 内置 Zhipu Coding Plan MCP server 优先复用 Zhipu Coding Plan provider 的 `bearer_token`，并兼容回退到普通 Zhipu provider 的 `bearer_token`。缺少 token 时内置 server 处于 `missingCredential`，不参与后台探测，也不应导致普通 turn 或 subagent 启动失败；检测到 token 后进入后台探测流程，只有探测成功的 server 会被主会话和 subagent runner 注册。HTTP 内置 server 在 transport 层直接发送 bearer token；stdio Vision server 在启动进程时注入 `Z_AI_API_KEY` 和 `Z_AI_MODE=ZHIPU`。
 
-每个 turn 开始时，运行时会把经过当前模式过滤后实际暴露给模型的工具名快照保留为 core 内部 trace，并在需要时通过 typed Studio part snapshot 展示。该记录只包含 turn id、模式和工具名列表，用于诊断工具可见性，不进入模型上下文，也不写入旧 `timeline_events` 运行期表。
+每个 turn 开始时，运行时会把经过当前模式过滤后实际暴露给模型的工具名快照保留为 core 内部 `TracePart`，并在需要时通过 typed Studio part snapshot 展示。该记录只包含 turn id、模式和工具名列表，用于诊断工具可见性，不进入模型上下文，也不写入旧 `timeline_events` 运行期表。
 
 `plan_exit` 是 Plan Mode 专用的内置协调工具，schema 只包含 `content: string`。它表示“计划已完成，请 Studio 发起确认交互”，不是普通执行工具：运行时只在 Plan Mode 暴露它，Auto Mode 不暴露；工具执行成功后返回紧凑状态文本，不在工具内部等待用户、不切换模式、不写计划文件。`pl-core` 在工具成功后从原始参数读取 `content`，生成或补齐当前 turn 的 plan part snapshot。Plan turn 完成后，Studio runtime 继续复用既有 `PlanConfirmation` pending interaction 和 fresh-context handoff 流程。兼容的 `<proposed_plan>` 流式块仍可生成 plan part，但同一 turn 内 `plan_exit.content` 是确认计划的优先来源。
 

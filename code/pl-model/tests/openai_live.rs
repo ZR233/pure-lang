@@ -1,17 +1,17 @@
 use std::collections::HashMap;
 
 use pl_model::{
-    CompletionRequest, CompletionTimelineContext, ModelProvider, ProviderInfo, ReasoningConfig,
+    CompletionRequest, CompletionTraceContext, ModelProvider, ProviderInfo, ReasoningConfig,
     ReasoningSummary, create_provider,
 };
-use pl_protocol::{AgentEvent, Message, MessageContent, MessageRole, TimelineDelta};
+use pl_protocol::{AgentEvent, Message, MessageContent, MessageRole, TraceDelta};
 
 const OPENAI_LIVE_ENV_KEY: &str = "API_KEY_OPENAI";
 const OPENAI_LIVE_BASE_URL_ENV_KEY: &str = "API_BASE_OPENAI";
 const OPENAI_LIVE_MODEL_ENV_KEY: &str = "API_MODEL_OPENAI";
 
 #[derive(Debug, Default)]
-struct TimelineDeltaCounts {
+struct TraceDeltaCounts {
     text: usize,
     thinking: usize,
 }
@@ -53,7 +53,7 @@ fn openai_request(model: String) -> CompletionRequest {
             summary: Some(ReasoningSummary::Enabled),
         }),
         stream: true,
-        timeline: Some(CompletionTimelineContext {
+        trace: Some(CompletionTraceContext {
             session_id: "openai-live-session".to_string(),
             turn_id: "openai-live-turn".to_string(),
             inference_id: "openai-live-inference".to_string(),
@@ -62,23 +62,23 @@ fn openai_request(model: String) -> CompletionRequest {
     }
 }
 
-async fn collect_timeline_delta_counts(
+async fn collect_trace_delta_counts(
     mut event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
-) -> TimelineDeltaCounts {
-    let mut counts = TimelineDeltaCounts::default();
+) -> TraceDeltaCounts {
+    let mut counts = TraceDeltaCounts::default();
     loop {
         match event_rx.recv().await {
-            Ok(AgentEvent::TimelineItemDelta { event }) => match event.delta {
-                TimelineDelta::Text { .. } => counts.text += 1,
-                TimelineDelta::Thinking { .. } => counts.thinking += 1,
-                TimelineDelta::ToolArguments { .. }
-                | TimelineDelta::ToolResult { .. }
-                | TimelineDelta::Plan { .. } => {}
+            Ok(AgentEvent::TracePartDelta { event }) => match event.delta {
+                TraceDelta::Text { .. } => counts.text += 1,
+                TraceDelta::Thinking { .. } => counts.thinking += 1,
+                TraceDelta::ToolArguments { .. }
+                | TraceDelta::ToolResult { .. }
+                | TraceDelta::Plan { .. } => {}
             },
             Ok(_) => {}
             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                panic!("live OpenAI timeline event receiver lagged by {skipped} events")
+                panic!("live OpenAI trace event receiver lagged by {skipped} events")
             }
         }
     }
@@ -102,7 +102,7 @@ async fn openai_responses_smoke() {
         .unwrap_or_else(|| info.default_model.clone());
     let provider = create_provider(info).unwrap();
     let (event_tx, event_rx) = tokio::sync::broadcast::channel(256);
-    let counter = tokio::spawn(collect_timeline_delta_counts(event_rx));
+    let counter = tokio::spawn(collect_trace_delta_counts(event_rx));
 
     let response = match provider
         .stream_complete(openai_request(model), event_tx)

@@ -52,7 +52,7 @@ struct OpenTag {
 /// Parser for Codex-style visible output tags emitted by the model.
 ///
 /// The parser accepts arbitrary stream chunk boundaries and removes channel
-/// tags from visible timeline text. Untagged text is reported separately so
+/// tags from visible visible text. Untagged text is reported separately so
 /// Studio turns can reject provider output that does not follow the channel
 /// protocol.
 #[derive(Debug)]

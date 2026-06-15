@@ -226,5 +226,5 @@ pub struct SessionSkillRecord {
 pub struct StudioPromptOutcome {
     pub result: TurnResult,
     pub messages: Vec<Message>,
-    pub timeline_events: Vec<TraceEvent>,
+    pub trace_events: Vec<TraceEvent>,
 }
