@@ -60,11 +60,9 @@ pub enum AgentEvent {
         event: TimelineItemDeltaEvent,
     },
     TimelineItemCompleted {
-        sequence: u64,
         item: TimelineItem,
     },
     TimelineItemFailed {
-        sequence: u64,
         item: TimelineItem,
         error: String,
     },
@@ -325,7 +323,8 @@ pub struct TimelineAttachment {
 pub struct TimelineItem {
     pub turn_id: String,
     pub item_id: String,
-    pub sequence: u64,
+    #[serde(alias = "sequence")]
+    pub started_sequence: u64,
     pub kind: TimelineItemKind,
     pub status: TimelineItemStatus,
     pub created_at: i64,
@@ -361,7 +360,7 @@ impl TimelineItem {
         Self {
             turn_id: turn_id.into(),
             item_id: item_id.into(),
-            sequence,
+            started_sequence: sequence,
             kind: TimelineItemKind::Text,
             status,
             created_at: timestamp,
@@ -449,7 +448,8 @@ pub struct PlanLifecycleEvent {
 pub struct TimelineItemDeltaEvent {
     pub turn_id: String,
     pub item_id: String,
-    pub sequence: u64,
+    #[serde(alias = "sequence")]
+    pub started_sequence: u64,
     pub kind: TimelineItemKind,
     pub status: TimelineItemStatus,
     pub created_at: i64,
@@ -853,7 +853,7 @@ mod tests {
                     "item": {
                         "turnId": "turn-1",
                         "itemId": "item-1",
-                        "sequence": 0,
+                        "startedSequence": 0,
                         "kind": "text",
                         "status": "completed",
                         "createdAt": 1779688800,
@@ -1086,7 +1086,7 @@ mod tests {
             event: TimelineItemDeltaEvent {
                 turn_id: "turn-1".to_string(),
                 item_id: "item-1".to_string(),
-                sequence: 2,
+                started_sequence: 2,
                 kind: TimelineItemKind::Thinking,
                 status: TimelineItemStatus::Streaming,
                 created_at: 1_779_688_800,
@@ -1107,7 +1107,7 @@ mod tests {
                     "event": {
                         "turnId": "turn-1",
                         "itemId": "item-1",
-                        "sequence": 2,
+                        "startedSequence": 2,
                         "kind": "thinking",
                         "status": "streaming",
                         "createdAt": 1779688800,
@@ -1128,7 +1128,7 @@ mod tests {
         let item = TimelineItem {
             turn_id: "turn-1".to_string(),
             item_id: "turn-1-plan".to_string(),
-            sequence: 1,
+            started_sequence: 1,
             kind: TimelineItemKind::Plan,
             status: TimelineItemStatus::Streaming,
             created_at: 1_779_688_800,
@@ -1145,7 +1145,7 @@ mod tests {
         let delta = TimelineItemDeltaEvent {
             turn_id: "turn-1".to_string(),
             item_id: "turn-1-plan".to_string(),
-            sequence: 2,
+            started_sequence: 2,
             kind: TimelineItemKind::Plan,
             status: TimelineItemStatus::Streaming,
             created_at: 1_779_688_800,
@@ -1160,7 +1160,7 @@ mod tests {
             serde_json::json!({
                 "turnId": "turn-1",
                 "itemId": "turn-1-plan",
-                "sequence": 1,
+                "startedSequence": 1,
                 "kind": "plan",
                 "status": "streaming",
                 "createdAt": 1779688800,
@@ -1173,7 +1173,7 @@ mod tests {
             serde_json::json!({
                 "turnId": "turn-1",
                 "itemId": "turn-1-plan",
-                "sequence": 2,
+                "startedSequence": 2,
                 "kind": "plan",
                 "status": "streaming",
                 "createdAt": 1779688800,
@@ -1183,6 +1183,46 @@ mod tests {
                     "delta": "\n- step"
                 }
             })
+        );
+    }
+
+    #[test]
+    fn deserializes_legacy_timeline_sequence_as_started_sequence() {
+        let item = serde_json::from_value::<TimelineItem>(serde_json::json!({
+            "turnId": "turn-1",
+            "itemId": "turn-1-plan",
+            "sequence": 7,
+            "kind": "plan",
+            "status": "streaming",
+            "createdAt": 1779688800,
+            "updatedAt": 1779688800,
+            "content": "# Plan"
+        }))
+        .unwrap();
+        let delta = serde_json::from_value::<TimelineItemDeltaEvent>(serde_json::json!({
+            "turnId": "turn-1",
+            "itemId": "turn-1-plan",
+            "sequence": 7,
+            "kind": "plan",
+            "status": "streaming",
+            "createdAt": 1779688800,
+            "updatedAt": 1779688801,
+            "delta": {
+                "type": "plan",
+                "delta": "\n- step"
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(item.started_sequence, 7);
+        assert_eq!(delta.started_sequence, 7);
+        assert_eq!(
+            serde_json::to_value(item).unwrap()["startedSequence"],
+            serde_json::json!(7)
+        );
+        assert_eq!(
+            serde_json::to_value(delta).unwrap()["startedSequence"],
+            serde_json::json!(7)
         );
     }
 

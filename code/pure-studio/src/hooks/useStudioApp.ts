@@ -249,11 +249,10 @@ function agentEventFromStudioTimelineChange(change: StudioTimelineChange): Agent
     case "delta":
       return { timelineItemDelta: { event: change.event } };
     case "completed":
-      return { timelineItemCompleted: { sequence: change.sequence, item: change.item } };
+      return { timelineItemCompleted: { item: change.item } };
     case "failed":
       return {
         timelineItemFailed: {
-          sequence: change.sequence,
           item: change.item,
           error: change.error,
         },

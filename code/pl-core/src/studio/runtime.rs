@@ -40,6 +40,7 @@ const SELF_LEARNING_REVIEW_PROMPT: &str = r#"你是 Pure-Lang 项目 skills 自�
 
 pub struct RunPromptRequest {
     pub session_id: String,
+    pub turn_id: String,
     pub prompt: String,
     pub attachment_ids: Vec<String>,
     pub event_tx: AgentEventSender,
@@ -202,6 +203,7 @@ impl StudioRuntime {
     pub async fn run_prompt(&self, request: RunPromptRequest) -> Result<StudioPromptOutcome> {
         let RunPromptRequest {
             session_id,
+            turn_id,
             prompt,
             attachment_ids,
             event_tx,
@@ -266,6 +268,7 @@ impl StudioRuntime {
         }
         let user_content = prompt_content(&prompt, &selected_attachments);
         let mut request = TurnRequest::new(prompt.clone(), mode)
+            .with_turn_id(turn_id)
             .with_user_content(user_content)
             .with_materialized_attachments(materialized_attachments)
             .with_timeline_attachments(timeline_attachments);
@@ -688,7 +691,7 @@ mod tests {
                 item: TimelineItem {
                     turn_id: "turn".to_string(),
                     item_id: "tool".to_string(),
-                    sequence: 1,
+                    started_sequence: 1,
                     kind: TimelineItemKind::Tool,
                     status: TimelineItemStatus::Running,
                     created_at: 1,
@@ -745,6 +748,7 @@ mod tests {
         let outcome = runtime
             .run_prompt(RunPromptRequest {
                 session_id: session.id.clone(),
+                turn_id: "turn-plan-test".to_string(),
                 prompt: "make a plan".to_string(),
                 attachment_ids: Vec::new(),
                 event_tx,
@@ -865,6 +869,7 @@ mod tests {
         let outcome = runtime
             .run_prompt(RunPromptRequest {
                 session_id: session.id.clone(),
+                turn_id: "turn-plan-exit-test".to_string(),
                 prompt: "make a plan".to_string(),
                 attachment_ids: Vec::new(),
                 event_tx,

@@ -3,14 +3,12 @@ use std::path::PathBuf;
 use anyhow::Context;
 use pl_core::{
     CompileMode, PermissionMode, PureConfig, RunPromptRequest, SessionHandoffStatus,
-    StudioPromptOutcome, StudioRuntime, TimelineEventRecord, TurnOptions, TurnResultStatus,
-    resolution_matches_kind,
+    StudioPromptOutcome, StudioRuntime, TurnOptions, TurnResultStatus, resolution_matches_kind,
 };
 use pl_protocol::{
-    InteractionKind, InteractionPayload, InteractionRequest, InteractionResolution,
-    InteractionScope, InteractionStatus, PlanConfirmationResolution, PlanLifecycleEvent,
-    PlanLifecycleState, StudioTurnStatus, TimelineItem, TimelineItemKind, TraceEvent,
-    TraceEventKind,
+    InteractionPayload, InteractionResolution, InteractionStatus, PlanConfirmationResolution,
+    PlanLifecycleEvent, PlanLifecycleState, StudioEventKind, StudioTurnStatus, TimelineItemKind,
+    TraceEvent, TraceEventKind,
 };
 use tauri::{AppHandle, State};
 use tokio_util::sync::CancellationToken;
@@ -28,7 +26,8 @@ use crate::mappers::{
     instructions_config, load_session_runtime_dto, lsp_health_update_dto,
     mcp_settings_to_builtin_states, mcp_settings_to_servers, plan_lifecycle_events_to_states,
     project_dtos, provider_settings_to_edit, provider_usages_dto, session_dtos,
-    timeline_event_dtos, turn_result_status_label,
+    timeline_event_dtos_from_studio_events, trace_events_from_studio_events,
+    turn_result_status_label,
 };
 use crate::state::{AppState, CommandError, CommandResult};
 
@@ -386,6 +385,18 @@ pub async fn resolve_interaction(
                         .start_plan_implementation_handoff(&interaction_id, resolution)
                         .await?;
                     let _ = emitter(handoff.interaction.clone()).await;
+                    for event in handoff.plan_lifecycle_events.clone() {
+                        let _ = state
+                            .studio
+                            .events()
+                            .emit(
+                                None,
+                                Some(handoff.origin_session.id.clone()),
+                                event.turn_id.clone(),
+                                StudioEventKind::PlanLifecycleChanged { event },
+                            )
+                            .await?;
+                    }
                     if handoff.should_start_run {
                         let content = handoff.plan_content.trim().to_string();
                         if content.is_empty() {
@@ -521,6 +532,7 @@ pub async fn resolve_interaction(
 
 async fn run_prompt_inner(
     session_id: String,
+    turn_id: String,
     prompt: String,
     attachment_ids: Vec<String>,
     app: AppHandle,
@@ -561,6 +573,7 @@ async fn run_prompt_inner(
         .studio
         .run_prompt(RunPromptRequest {
             session_id: session_id.clone(),
+            turn_id,
             prompt,
             attachment_ids,
             event_tx: event_tx.clone(),
@@ -626,8 +639,6 @@ async fn run_prompt_inner(
                         handoff_status,
                     )
                     .await?;
-            } else {
-                maybe_create_plan_confirmation(&state.studio, &app, &session_id, &outcome).await?;
             }
             run_prompt_response(state, &session_id, outcome).await
         }
@@ -713,6 +724,7 @@ async fn submit_prompt_background(
             .await;
         let result = run_prompt_inner(
             run_session_id.clone(),
+            run_turn_id.clone(),
             prompt,
             attachment_ids,
             app,
@@ -802,20 +814,20 @@ async fn load_session_timeline_inner(
     after_sequence: Option<i64>,
     limit: Option<i64>,
 ) -> CommandResult<SessionTimelineDto> {
-    let records = state
+    let events = state
         .studio
         .store()
-        .load_timeline_events(&session_id, after_sequence, limit)
+        .load_studio_events(&session_id, after_sequence, limit)
         .await?;
     let next_sequence = state
         .studio
         .store()
-        .next_timeline_sequence(&session_id)
-        .await?;
-    let timeline_events = timeline_records_to_trace_events(&records)?;
+        .next_studio_event_sequence(&session_id)
+        .await? as u64;
+    let timeline_events = trace_events_from_studio_events(&events);
     Ok(SessionTimelineDto {
         session_id: session_id.clone(),
-        events: timeline_event_dtos(records),
+        events: timeline_event_dtos_from_studio_events(&events),
         plan_states: plan_lifecycle_events_to_states(&timeline_events),
         interactions: state
             .studio
@@ -915,10 +927,10 @@ async fn run_prompt_response(
         .store()
         .list_sessions(&session.project_id)
         .await?;
-    let timeline_records = state
+    let events = state
         .studio
         .store()
-        .load_timeline_events(session_id, None, None)
+        .load_studio_events(session_id, None, None)
         .await?;
     Ok(RunPromptResponse {
         session_id: session_id.to_string(),
@@ -926,8 +938,8 @@ async fn run_prompt_response(
         agent_events: agent_event_dtos(state.studio.store().list_agent_events(session_id).await?),
         agents: agent_dtos(state.studio.store().list_agents(session_id).await?),
         session_runtime: load_session_runtime_dto(&state.studio, session_id).await?,
-        timeline_events: timeline_event_dtos(timeline_records),
-        plan_states: load_plan_states(&state.studio, session_id).await?,
+        timeline_events: timeline_event_dtos_from_studio_events(&events),
+        plan_states: plan_lifecycle_events_to_states(&trace_events_from_studio_events(&events)),
         interactions: state
             .studio
             .store()
@@ -936,8 +948,8 @@ async fn run_prompt_response(
         timeline_next_sequence: state
             .studio
             .store()
-            .next_timeline_sequence(session_id)
-            .await?,
+            .next_studio_event_sequence(session_id)
+            .await? as u64,
         turn_status: turn_result_status_label(outcome.result.status).to_string(),
         turn_abort_reason: outcome
             .result
@@ -954,7 +966,10 @@ async fn plan_lifecycle_response(
     Ok(PlanLifecycleResponse {
         session_id: session_id.to_string(),
         plan_states: load_plan_states(studio, session_id).await?,
-        timeline_next_sequence: studio.store().next_timeline_sequence(session_id).await?,
+        timeline_next_sequence: studio
+            .store()
+            .next_studio_event_sequence(session_id)
+            .await? as u64,
     })
 }
 
@@ -986,9 +1001,9 @@ async fn load_plan_states(
 ) -> CommandResult<Vec<crate::dto::PlanStateDto>> {
     let records = studio
         .store()
-        .load_timeline_events(session_id, None, None)
+        .load_studio_events(session_id, None, None)
         .await?;
-    let timeline_events = timeline_records_to_trace_events(&records)?;
+    let timeline_events = trace_events_from_studio_events(&records);
     Ok(plan_lifecycle_events_to_states(&timeline_events))
 }
 
@@ -1001,113 +1016,26 @@ async fn append_plan_lifecycle_events(
     if changes.is_empty() {
         return Ok(());
     }
-    let mut sequence = studio.store().next_timeline_sequence(session_id).await?;
     let now = unix_seconds();
-    let events = changes
-        .into_iter()
-        .map(|change| {
-            let event = TraceEvent {
-                session_id: session_id.to_string(),
-                sequence,
-                timestamp: now,
-                kind: TraceEventKind::PlanLifecycleChanged {
-                    event: PlanLifecycleEvent {
-                        plan_id: plan_id.to_string(),
-                        state: change.state,
-                        turn_id: change.turn_id,
-                        reason: change.reason,
-                        updated_at: now,
-                    },
-                },
-            };
-            sequence += 1;
-            event
-        })
-        .collect::<Vec<_>>();
-    studio.store().append_timeline_events(&events).await?;
+    for change in changes {
+        let event = PlanLifecycleEvent {
+            plan_id: plan_id.to_string(),
+            state: change.state,
+            turn_id: change.turn_id,
+            reason: change.reason,
+            updated_at: now,
+        };
+        let _ = studio
+            .events()
+            .emit(
+                None,
+                Some(session_id.to_string()),
+                event.turn_id.clone(),
+                StudioEventKind::PlanLifecycleChanged { event },
+            )
+            .await?;
+    }
     Ok(())
-}
-
-async fn maybe_create_plan_confirmation(
-    studio: &StudioRuntime,
-    app: &AppHandle,
-    session_id: &str,
-    outcome: &StudioPromptOutcome,
-) -> CommandResult<()> {
-    if outcome.result.mode != CompileMode::Plan
-        || !matches!(outcome.result.status, TurnResultStatus::Completed)
-    {
-        return Ok(());
-    }
-    let Some(plan) = latest_completed_plan(&outcome.timeline_events) else {
-        return Ok(());
-    };
-    if plan.content.trim().is_empty() {
-        return Ok(());
-    }
-    let interaction_id = format!("plan-confirmation-{}", plan.item_id);
-    if studio
-        .store()
-        .read_interaction(&interaction_id)
-        .await?
-        .is_some()
-    {
-        return Ok(());
-    }
-    let now = unix_seconds();
-    let plan_id = plan.item_id.clone();
-    let turn_id = plan.turn_id.clone();
-    let content = plan.content.clone();
-    let interaction = InteractionRequest {
-        interaction_id,
-        kind: InteractionKind::PlanConfirmation,
-        status: InteractionStatus::Pending,
-        scope: InteractionScope {
-            session_id: session_id.to_string(),
-            turn_id: turn_id.clone(),
-            item_id: Some(plan_id.clone()),
-            tool_id: None,
-            agent_path: None,
-        },
-        payload: InteractionPayload::PlanConfirmation {
-            plan_id: plan_id.clone(),
-            content,
-        },
-        created_at: now,
-        updated_at: now,
-        resolved_at: None,
-        resolution: None,
-    };
-    let emitter = interaction_emitter(studio.clone(), app.clone(), session_id.to_string());
-    studio.interactions().create(interaction, emitter).await?;
-    append_plan_lifecycle_events(
-        studio,
-        session_id,
-        &plan_id,
-        vec![PlanLifecycleChange {
-            state: PlanLifecycleState::PendingConfirmation,
-            turn_id: Some(turn_id),
-            reason: None,
-        }],
-    )
-    .await?;
-    Ok(())
-}
-
-fn latest_completed_plan(events: &[TraceEvent]) -> Option<TimelineItem> {
-    events.iter().rev().find_map(|trace| match &trace.kind {
-        TraceEventKind::TimelineItemCompleted { item } if item.kind == TimelineItemKind::Plan => {
-            Some(item.clone())
-        }
-        TraceEventKind::TimelineItemStarted { .. }
-        | TraceEventKind::TimelineItemDelta { .. }
-        | TraceEventKind::TimelineItemCompleted { .. }
-        | TraceEventKind::TimelineItemFailed { .. }
-        | TraceEventKind::PlanLifecycleChanged { .. }
-        | TraceEventKind::InteractionChanged { .. }
-        | TraceEventKind::SkillActivated { .. }
-        | TraceEventKind::EnabledToolsRecorded { .. } => None,
-    })
 }
 
 fn first_turn_id(events: &[TraceEvent]) -> Option<String> {
@@ -1146,29 +1074,6 @@ fn uuid_like_suffix() -> String {
         .unwrap_or_default()
         .as_micros()
         .to_string()
-}
-
-fn timeline_records_to_trace_events(
-    records: &[TimelineEventRecord],
-) -> CommandResult<Vec<TraceEvent>> {
-    records
-        .iter()
-        .map(|record| {
-            let kind: TraceEventKind =
-                serde_json::from_str(&record.payload_json).map_err(|error| {
-                    CommandError::from_display(format!(
-                        "failed to parse timeline event {} for session {} at sequence {}: {error}",
-                        record.id, record.session_id, record.sequence
-                    ))
-                })?;
-            Ok(TraceEvent {
-                session_id: record.session_id.clone(),
-                sequence: record.sequence as u64,
-                timestamp: record.created_at,
-                kind,
-            })
-        })
-        .collect()
 }
 
 #[tauri::command]
@@ -1310,27 +1215,4 @@ async fn project_selection_data(
         interactions,
         lsp_health: lsp_health_update_dto(&state.studio).await?,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn timeline_record_parse_error_reports_session_and_sequence() {
-        let records = vec![TimelineEventRecord {
-            id: "event-1".to_string(),
-            session_id: "session-1".to_string(),
-            sequence: 42,
-            created_at: 10,
-            kind: "TimelineItemStarted".to_string(),
-            payload_json: "{not valid json".to_string(),
-        }];
-
-        let error = timeline_records_to_trace_events(&records).unwrap_err();
-
-        assert!(error.message.contains("event-1"));
-        assert!(error.message.contains("session-1"));
-        assert!(error.message.contains("sequence 42"));
-    }
 }

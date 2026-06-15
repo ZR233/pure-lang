@@ -82,7 +82,7 @@ impl TraceRecorder {
 
     pub fn complete_item(&mut self, item: TimelineItem) {
         if self.disabled {
-            self.broadcast(AgentEvent::TimelineItemCompleted { sequence: 0, item });
+            self.broadcast(AgentEvent::TimelineItemCompleted { item });
             return;
         }
         let sequence = self.sequence;
@@ -95,16 +95,12 @@ impl TraceRecorder {
         };
         self.sequence += 1;
         self.events.push(event);
-        self.broadcast(AgentEvent::TimelineItemCompleted { sequence, item });
+        self.broadcast(AgentEvent::TimelineItemCompleted { item });
     }
 
     pub fn fail_item(&mut self, item: TimelineItem, error: String) {
         if self.disabled {
-            self.broadcast(AgentEvent::TimelineItemFailed {
-                sequence: 0,
-                item,
-                error,
-            });
+            self.broadcast(AgentEvent::TimelineItemFailed { item, error });
             return;
         }
         let sequence = self.sequence;
@@ -120,11 +116,7 @@ impl TraceRecorder {
         };
         self.sequence += 1;
         self.events.push(event);
-        self.broadcast(AgentEvent::TimelineItemFailed {
-            sequence,
-            item,
-            error,
-        });
+        self.broadcast(AgentEvent::TimelineItemFailed { item, error });
     }
 
     pub fn user_text_item(&mut self, turn_id: &str, content: String) {
@@ -175,7 +167,7 @@ impl TraceRecorder {
         TimelineItem {
             turn_id: turn_id.to_string(),
             item_id: format!("{turn_id}-turn"),
-            sequence: self.sequence,
+            started_sequence: self.sequence,
             kind: pl_protocol::TimelineItemKind::Turn,
             status,
             created_at: timestamp,
@@ -202,7 +194,7 @@ impl TraceRecorder {
             let item = TimelineItem {
                 turn_id: turn_id.to_string(),
                 item_id: item_id.to_string(),
-                sequence: self.sequence,
+                started_sequence: self.sequence,
                 kind: TimelineItemKind::Plan,
                 status: TimelineItemStatus::Started,
                 created_at: timestamp,
@@ -236,7 +228,7 @@ impl TraceRecorder {
         TimelineItem {
             turn_id: turn_id.to_string(),
             item_id: inference_id.to_string(),
-            sequence: self.sequence,
+            started_sequence: self.sequence,
             kind: pl_protocol::TimelineItemKind::Inference,
             status: TimelineItemStatus::Running,
             created_at: timestamp,
@@ -275,7 +267,7 @@ impl TraceRecorder {
         TimelineItem {
             turn_id: turn_id.to_string(),
             item_id: tool_call_id.to_string(),
-            sequence: self.sequence,
+            started_sequence: self.sequence,
             kind: pl_protocol::TimelineItemKind::Tool,
             status: TimelineItemStatus::Started,
             created_at: timestamp,
@@ -336,7 +328,7 @@ impl TraceRecorder {
         TimelineItem {
             turn_id: turn_id.to_string(),
             item_id,
-            sequence: self.sequence,
+            started_sequence: self.sequence,
             kind: pl_protocol::TimelineItemKind::Agent,
             status,
             created_at: timestamp,

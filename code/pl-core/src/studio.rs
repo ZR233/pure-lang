@@ -31,9 +31,10 @@ mod tests {
         AgentRuntimeDelta, AgentStatus, ContentPart, ImageSource, InteractionKind,
         InteractionPayload, InteractionRequest, InteractionResolution, InteractionScope,
         InteractionStatus, Message, MessageContent, MessageRole, PlanConfirmationResolution,
-        PlanLifecycleState, RuntimeCostAmount, SkillActivation, TimelineDelta, TimelineItem,
-        TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus, TimelineTextChannel,
-        TokenUsageSnapshot, TraceEvent, TraceEventKind,
+        PlanLifecycleState, RuntimeCostAmount, SkillActivation, StudioEventEnvelope,
+        StudioEventKind, StudioTimelineChange, TimelineDelta, TimelineItem, TimelineItemDeltaEvent,
+        TimelineItemKind, TimelineItemStatus, TimelineTextChannel, TokenUsageSnapshot, TraceEvent,
+        TraceEventKind,
     };
     use pretty_assertions::assert_eq;
 
@@ -177,6 +178,109 @@ mod tests {
         assert_eq!(reopened.id, project.id);
         assert_eq!(visible_projects[0].id, project.id);
         assert_eq!(reopened_sessions, Vec::<SessionRecord>::new());
+    }
+
+    #[tokio::test]
+    async fn append_studio_event_canonicalizes_timeline_payload_before_storage() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/alpha").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Timeline", CompileMode::Auto)
+            .await
+            .unwrap();
+        let item = TimelineItem::text(
+            "turn-1",
+            "turn-1-text",
+            0,
+            TimelineTextChannel::Final,
+            "",
+            TimelineItemStatus::Streaming,
+            10,
+        );
+        let started = store
+            .append_studio_event(StudioEventEnvelope {
+                event_id: "studio-event-1".to_string(),
+                project_id: Some(project.id.clone()),
+                session_id: Some(session.id.clone()),
+                turn_id: Some("turn-1".to_string()),
+                sequence: 0,
+                created_at: 10,
+                kind: StudioEventKind::TimelineChanged {
+                    change: Box::new(StudioTimelineChange::Started { item: item.clone() }),
+                },
+            })
+            .await
+            .unwrap();
+        let delta = TimelineItemDeltaEvent {
+            turn_id: "turn-1".to_string(),
+            item_id: "turn-1-text".to_string(),
+            started_sequence: 999,
+            kind: TimelineItemKind::Text,
+            status: TimelineItemStatus::Streaming,
+            created_at: 10,
+            updated_at: 11,
+            delta: TimelineDelta::Text {
+                text_channel: TimelineTextChannel::Final,
+                delta: "hello".to_string(),
+            },
+        };
+        let changed = store
+            .append_studio_event(StudioEventEnvelope {
+                event_id: "studio-event-2".to_string(),
+                project_id: Some(project.id.clone()),
+                session_id: Some(session.id.clone()),
+                turn_id: Some("turn-1".to_string()),
+                sequence: 0,
+                created_at: 11,
+                kind: StudioEventKind::TimelineChanged {
+                    change: Box::new(StudioTimelineChange::Delta { event: delta }),
+                },
+            })
+            .await
+            .unwrap();
+
+        let StudioEventKind::TimelineChanged { change } = &started.kind else {
+            panic!("expected timeline start");
+        };
+        let StudioTimelineChange::Started { item } = change.as_ref() else {
+            panic!("expected started change");
+        };
+        assert_eq!(started.sequence, 0);
+        assert_eq!(item.started_sequence, 0);
+
+        let StudioEventKind::TimelineChanged { change } = &changed.kind else {
+            panic!("expected timeline delta");
+        };
+        let StudioTimelineChange::Delta { event } = change.as_ref() else {
+            panic!("expected delta change");
+        };
+        assert_eq!(changed.sequence, 1);
+        assert_eq!(event.started_sequence, 0);
+
+        let stored_events = store
+            .load_studio_events(&session.id, None, None)
+            .await
+            .unwrap();
+        let StudioEventKind::TimelineChanged { change } = &stored_events[1].kind else {
+            panic!("expected stored timeline delta");
+        };
+        let StudioTimelineChange::Delta { event } = change.as_ref() else {
+            panic!("expected stored delta change");
+        };
+        assert_eq!(stored_events[1].sequence, 1);
+        assert_eq!(event.started_sequence, 0);
+
+        let timeline = store
+            .load_timeline_events(&session.id, None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            timeline
+                .iter()
+                .map(|event| event.sequence)
+                .collect::<Vec<_>>(),
+            vec![0, 1]
+        );
     }
 
     #[tokio::test]
@@ -382,14 +486,11 @@ mod tests {
         assert_eq!(restored_origin.visibility, SessionVisibility::HandoffOrigin);
         assert_eq!(first.interaction.status, InteractionStatus::Resolved);
         assert_eq!(first.plan_content, "1. Inspect\n2. Implement");
-        assert_eq!(timeline.len(), 2);
-        let states = timeline
-            .into_iter()
-            .map(|event| serde_json::from_str::<TraceEventKind>(&event.payload_json).unwrap())
-            .map(|kind| match kind {
-                TraceEventKind::PlanLifecycleChanged { event } => event.state,
-                other => panic!("expected plan lifecycle event, got {other:?}"),
-            })
+        assert_eq!(timeline, Vec::<TimelineEventRecord>::new());
+        let states = first
+            .plan_lifecycle_events
+            .iter()
+            .map(|event| event.state)
             .collect::<Vec<_>>();
         assert_eq!(
             states,
@@ -398,6 +499,7 @@ mod tests {
                 PlanLifecycleState::Implementing,
             ]
         );
+        assert_eq!(second.plan_lifecycle_events, Vec::new());
     }
 
     #[tokio::test]
@@ -449,7 +551,7 @@ mod tests {
                     event: TimelineItemDeltaEvent {
                         turn_id: "turn-1".to_string(),
                         item_id: "turn-1-thinking".to_string(),
-                        sequence,
+                        started_sequence: sequence,
                         kind: TimelineItemKind::Thinking,
                         status: TimelineItemStatus::Streaming,
                         created_at: 1,

@@ -96,6 +96,7 @@ pub struct PlanImplementationHandoffStart {
     pub interaction: pl_protocol::InteractionRequest,
     pub plan_id: String,
     pub plan_content: String,
+    pub plan_lifecycle_events: Vec<pl_protocol::PlanLifecycleEvent>,
     pub should_start_run: bool,
 }
 

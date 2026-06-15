@@ -1520,7 +1520,7 @@ mod tests {
                 | TraceEventKind::EnabledToolsRecorded { .. } => None,
             })
             .expect("user timeline item");
-        assert_eq!(user_item.sequence, 0);
+        assert_eq!(user_item.started_sequence, 0);
         assert_eq!(user_item.content, "Build the thing");
     }
 

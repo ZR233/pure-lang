@@ -1,5 +1,4 @@
 import type {
-  AgentEvent,
   TimelineEventRecord,
   TimelineItem,
   TimelineItemDeltaEvent,
@@ -42,7 +41,7 @@ export function mergeTimelineSnapshot<T extends TimelineStateSlice>(
   nextSequence: number,
 ): T {
   if (nextSequence < state.timelineNextSequence) {
-    return applyTimelineEvents(state, events, nextSequence, "missingOnly");
+    return applyTimelineEvents(state, events, nextSequence);
   }
   return resetTimeline(state, _sessionId, events, nextSequence);
 }
@@ -53,16 +52,13 @@ export function mergeRunPromptTimeline<T extends TimelineStateSlice>(
   events: TimelineEventRecord[],
   timelineNextSequence: number,
 ): T {
-  return applyTimelineEvents(state, events, timelineNextSequence, "upsert");
-}
-
-export function applyLiveTimelineEvent<T extends TimelineStateSlice>(
-  state: T,
-  sessionId: string,
-  event: AgentEvent,
-): T {
-  const record = timelineRecordFromAgentEvent(sessionId, event);
-  return record ? applyTimelineEventRecord(state, record, "upsert") : state;
+  if (!events.length) {
+    return {
+      ...state,
+      timelineNextSequence: Math.max(state.timelineNextSequence, timelineNextSequence),
+    };
+  }
+  return applyTimelineEvents(state, events, timelineNextSequence);
 }
 
 export function removeOptimisticTimelineItems<T extends TimelineStateSlice>(state: T): T {
@@ -99,7 +95,7 @@ export function applyTimelineRecords<T extends TimelineStateSlice>(
   events: TimelineEventRecord[],
   timelineNextSequence?: number,
 ): T {
-  return applyTimelineEvents(state, events, timelineNextSequence, "upsert");
+  return applyTimelineEvents(state, events, timelineNextSequence);
 }
 
 function replayTimelineEvents<T extends TimelineStateSlice>(
@@ -109,7 +105,7 @@ function replayTimelineEvents<T extends TimelineStateSlice>(
 ): T {
   let next = state;
   for (const event of events ?? []) {
-    next = applyTimelineEventRecord(next, event, "upsert");
+    next = applyTimelineEventRecord(next, event);
   }
   return {
     ...next,
@@ -121,11 +117,10 @@ function applyTimelineEvents<T extends TimelineStateSlice>(
   state: T,
   events: TimelineEventRecord[],
   timelineNextSequence: number | undefined,
-  mode: "upsert" | "missingOnly",
 ): T {
   let next = state;
   for (const event of events ?? []) {
-    next = applyTimelineEventRecord(next, event, mode);
+    next = applyTimelineEventRecord(next, event);
   }
   return {
     ...next,
@@ -139,7 +134,6 @@ function applyTimelineEvents<T extends TimelineStateSlice>(
 function applyTimelineEventRecord<T extends TimelineStateSlice>(
   state: T,
   record: TimelineEventRecord,
-  mode: "upsert" | "missingOnly",
 ): T {
   if (!record || typeof record.sequence !== "number") {
     return state;
@@ -226,7 +220,7 @@ function compareTimelineItemOrder(
 ): number {
   const leftItem = timelineItems.get(left);
   const rightItem = timelineItems.get(right);
-  const order = (leftItem?.sequence ?? 0) - (rightItem?.sequence ?? 0);
+  const order = (leftItem?.startedSequence ?? 0) - (rightItem?.startedSequence ?? 0);
   if (order !== 0) {
     return order;
   }
@@ -251,7 +245,7 @@ function mergeTimelineItem(
   if (mergeMode === "delta") {
     return {
       ...incoming,
-      sequence: Math.min(current.sequence, incoming.sequence),
+      startedSequence: Math.min(current.startedSequence, incoming.startedSequence),
       createdAt: Math.min(current.createdAt, incoming.createdAt),
     };
   }
@@ -268,7 +262,7 @@ function mergeTimelineItem(
       agent: current.agent ?? incoming.agent ?? null,
       inference: current.inference ?? incoming.inference ?? null,
       usage: current.usage ?? incoming.usage ?? null,
-      sequence: Math.min(current.sequence, incoming.sequence),
+      startedSequence: Math.min(current.startedSequence, incoming.startedSequence),
       createdAt: Math.min(current.createdAt, incoming.createdAt),
     };
   }
@@ -282,7 +276,7 @@ function mergeTimelineItem(
     agent: incoming.agent ?? current.agent ?? null,
     inference: incoming.inference ?? current.inference ?? null,
     usage: incoming.usage ?? current.usage ?? null,
-    sequence: Math.min(current.sequence, incoming.sequence),
+    startedSequence: Math.min(current.startedSequence, incoming.startedSequence),
     createdAt: Math.min(current.createdAt, incoming.createdAt),
   };
 }
@@ -383,7 +377,7 @@ function blankTimelineItem(event: TimelineItemDeltaEvent): TimelineItem {
   return {
     turnId: event.turnId,
     itemId: event.itemId,
-    sequence: event.sequence,
+    startedSequence: event.startedSequence,
     kind: event.kind,
     status: event.status,
     createdAt: event.createdAt,
@@ -425,58 +419,3 @@ function blankTimelineToolItem(itemId: string): NonNullable<TimelineItem["tool"]
   };
 }
 
-function timelineRecordFromAgentEvent(
-  sessionId: string,
-  event: AgentEvent,
-): TimelineEventRecord | null {
-  if (!sessionId || event === "done") {
-    return null;
-  }
-  if ("timelineItemStarted" in event) {
-    const item = event.timelineItemStarted.item;
-    return {
-      id: `live-${sessionId}-${item.sequence}`,
-      sessionId,
-      sequence: item.sequence,
-      createdAt: item.createdAt,
-      kind: "TimelineItemStarted",
-      payload: { type: "timelineItemStarted", item },
-    };
-  }
-  if ("timelineItemDelta" in event) {
-    const deltaEvent = event.timelineItemDelta.event;
-    return {
-      id: `live-${sessionId}-${deltaEvent.sequence}`,
-      sessionId,
-      sequence: deltaEvent.sequence,
-      createdAt: deltaEvent.createdAt,
-      kind: "TimelineItemDelta",
-      payload: { type: "timelineItemDelta", event: deltaEvent },
-    };
-  }
-  if ("timelineItemCompleted" in event) {
-    return {
-      id: `live-${sessionId}-${event.timelineItemCompleted.sequence}`,
-      sessionId,
-      sequence: event.timelineItemCompleted.sequence,
-      createdAt: event.timelineItemCompleted.item.updatedAt,
-      kind: "TimelineItemCompleted",
-      payload: { type: "timelineItemCompleted", item: event.timelineItemCompleted.item },
-    };
-  }
-  if ("timelineItemFailed" in event) {
-    return {
-      id: `live-${sessionId}-${event.timelineItemFailed.sequence}`,
-      sessionId,
-      sequence: event.timelineItemFailed.sequence,
-      createdAt: event.timelineItemFailed.item.updatedAt,
-      kind: "TimelineItemFailed",
-      payload: {
-        type: "timelineItemFailed",
-        item: event.timelineItemFailed.item,
-        error: event.timelineItemFailed.error,
-      },
-    };
-  }
-  return null;
-}

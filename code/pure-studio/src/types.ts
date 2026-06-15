@@ -388,7 +388,7 @@ export type TimelineAttachment = {
 export type TimelineItem = {
   turnId: string;
   itemId: string;
-  sequence: number;
+  startedSequence: number;
   /**
    * 该 item 最后一次收到的 delta 事件 sequence，用于丢弃乱序/重复 delta，
    * 防止 broadcast Lagged 后跨 turn 串台与乱序累积。
@@ -704,8 +704,8 @@ export type StopPromptResponse = {
 export type AgentEvent =
   | { timelineItemStarted: { item: TimelineItem } }
   | { timelineItemDelta: { event: TimelineItemDeltaEvent } }
-  | { timelineItemCompleted: { sequence: number; item: TimelineItem } }
-  | { timelineItemFailed: { sequence: number; item: TimelineItem; error: string } }
+  | { timelineItemCompleted: { item: TimelineItem } }
+  | { timelineItemFailed: { item: TimelineItem; error: string } }
   | { interactionChanged: { event: InteractionChangedEvent } }
   | { agentStateChanged: AgentStateChangedEvent }
   | { agentRuntimeUpdated: { delta: AgentRuntimeDelta } }
@@ -729,7 +729,7 @@ export type AgentEvent =
 export type TimelineItemDeltaEvent = {
   turnId: string;
   itemId: string;
-  sequence: number;
+  startedSequence: number;
   kind: TimelineItem["kind"];
   status: TimelineItem["status"];
   createdAt: number;
@@ -789,8 +789,8 @@ export type StudioTurn = {
 export type StudioTimelineChange =
   | { type: "started"; item: TimelineItem }
   | { type: "delta"; event: TimelineItemDeltaEvent }
-  | { type: "completed"; sequence: number; item: TimelineItem }
-  | { type: "failed"; sequence: number; item: TimelineItem; error: string };
+  | { type: "completed"; item: TimelineItem }
+  | { type: "failed"; item: TimelineItem; error: string };
 
 export type StudioEventKind =
   | { type: "turnChanged"; turn: StudioTurn }
