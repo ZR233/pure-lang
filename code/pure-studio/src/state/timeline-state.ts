@@ -2,6 +2,8 @@ import type {
   StudioEventEnvelope,
   StudioMessage,
   StudioPart,
+  StudioMessageProjection,
+  StudioPartProjection,
   StudioPartDelta,
   StudioPartDeltaField,
   TimelineItem,
@@ -69,26 +71,36 @@ export function applyStudioEvent<T extends TimelineStateSlice>(
   }
 }
 
-export function applyStudioEvents<T extends TimelineStateSlice>(
+export function resetConversationFromSnapshot<T extends TimelineStateSlice>(
   state: T,
-  events: StudioEventEnvelope[],
-  nextSequence?: number,
-): T {
-  let next = state;
-  for (const event of events ?? []) {
-    next = applyStudioEvent(next, event);
-  }
-  return nextSequence === undefined
-    ? next
-    : { ...next, eventNextSequence: Math.max(next.eventNextSequence, nextSequence) };
-}
-
-export function resetConversation<T extends TimelineStateSlice>(
-  state: T,
-  events: StudioEventEnvelope[],
+  messages: StudioMessageProjection[],
+  parts: StudioPartProjection[],
   nextSequence: number,
 ): T {
-  return applyStudioEvents({ ...state, ...emptyTimelineState() }, events, nextSequence);
+  let next: T = { ...state, ...emptyTimelineState() };
+  for (const record of messages) {
+    next = upsertMessage(next, record.message, record.sequence);
+  }
+  for (const record of parts) {
+    next = upsertPart(next, record.part, record.sequence);
+  }
+  return { ...next, eventNextSequence: Math.max(next.eventNextSequence, nextSequence) };
+}
+
+export function mergeConversationSnapshot<T extends TimelineStateSlice>(
+  state: T,
+  messages: StudioMessageProjection[],
+  parts: StudioPartProjection[],
+  nextSequence: number,
+): T {
+  let next: T = state;
+  for (const record of messages) {
+    next = upsertMessage(next, record.message, record.sequence);
+  }
+  for (const record of parts) {
+    next = upsertPart(next, record.part, record.sequence);
+  }
+  return { ...next, eventNextSequence: Math.max(next.eventNextSequence, nextSequence) };
 }
 
 export function removeOptimisticTimelineItems<T extends TimelineStateSlice>(state: T): T {
@@ -307,7 +319,7 @@ function hasPart(state: TimelineStateSlice, messageId: string, partId: string): 
 }
 
 function advanceCursor<T extends TimelineStateSlice>(state: T, envelope: StudioEventEnvelope): T {
-  return envelope.kind.type === "messagePartDelta"
+  return envelope.kind.type === "messagePartDelta" || envelope.kind.type === "stale"
     ? state
     : advanceSequence(state, envelope.sequence);
 }

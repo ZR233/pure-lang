@@ -59,8 +59,8 @@ SQLite：
 3. 创建新 schema（v2+agent）
 4. 不读取旧表
 5. `subagent_events` 被 `agent_events` 替代；新 schema 不再创建旧表，运行期不读写旧表
-6. `trace_events` 不再作为 Studio timeline 读取源；新 schema 创建 item-first `timeline_events`
-7. 运行期只读写 `timeline_events`，旧 trace-to-UI mapper 删除
+6. `trace_events` 不再作为 Studio 对话流读取源；新 schema 使用 `studio_events`、`studio_messages`、`message_parts`、`turns` 和 `interactions` 作为 durable snapshot 与 projection
+7. 旧 `timeline_events` 只作为破坏性迁移清理对象保留；运行期不再提供写入、读取或 cursor API
 
 config：
 
@@ -87,7 +87,7 @@ config：
 后端：
 
 1. 高频事件 `Lagged` 不导致 drain 退出
-2. 消息与 timeline events 采用批量事务写
+2. `message.updated`、`message.part.updated`、turn 和 interaction snapshot 采用同一事务写入 `studio_events` 并更新 projection
 3. 新 schema 启动切换可重复执行且有备份
 4. wall-clock 预算耗尽时必须写入 `TurnBudgetLimited`，并保留观测用量
 5. 用户显式要求子代理分工时，核心提示必须要求先用 `spawn_agent` 调度子代理，再由父会话汇总
@@ -95,7 +95,7 @@ config：
 7. agent 运行时状态采用 `queued | running | waiting | completed | errored | interrupted | shutdown | notFound`；预算限制不再作为 agent 状态，而是 turn abort reason
 8. `close_agent` 拒绝 root，并级联 shutdown 目标 agent 的 live descendants；父 agent 因中断、错误或预算限制停止时，也必须关闭残留子树
 9. `wait_agent` 返回 `{ message, timedOut, agents, recoverableFailures }`，其中 `agents` 只包含状态、摘要、错误和预算信息，不向主 chat 泄漏子 agent 内部工具输出
-10. `Done`、turn final、agent final、`TimelineItemCompleted` 作为 lossless 事件处理，不因普通 delta 背压丢失
+10. `Done`、turn final、agent final、terminal `message.part.updated` 作为 lossless snapshot 处理，不因普通 live delta 背压丢失
 11. 工具并行执行时，实际执行可并发，写回模型上下文的 tool result 顺序必须保持模型发出顺序
 
 桥接：

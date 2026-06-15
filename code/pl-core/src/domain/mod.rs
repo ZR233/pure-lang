@@ -1,1 +1,1 @@
-pub use crate::studio::{ProjectRecord, SessionRecord, SessionRuntimeRecord, TimelineEventRecord};
+pub use crate::studio::{ProjectRecord, SessionRecord, SessionRuntimeRecord};

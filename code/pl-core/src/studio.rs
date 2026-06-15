@@ -17,7 +17,7 @@ pub use records::{
     AgentSnapshotRecord, AgentTimelineEventRecord, AttachmentRecord, MaterializedAttachment,
     PlanImplementationHandoffStart, ProjectRecord, SessionHandoffKind, SessionHandoffRecord,
     SessionHandoffStatus, SessionRecord, SessionRuntimeRecord, SessionSkillRecord,
-    SessionVisibility, StudioPromptOutcome, TimelineEventRecord,
+    SessionVisibility, StudioPromptOutcome,
 };
 pub use runtime::{RunPromptRequest, StudioRuntime};
 pub use store::{StudioStore, studio_attachment};
@@ -33,9 +33,8 @@ mod tests {
         InteractionStatus, Message, MessageContent, MessageRole, PlanConfirmationResolution,
         PlanLifecycleState, RuntimeCostAmount, SkillActivation, StudioEventEnvelope,
         StudioEventKind, StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart,
-        StudioPartStatus, StudioPartType, StudioTextChannel, TimelineDelta, TimelineItem,
-        TimelineItemDeltaEvent, TimelineItemKind, TimelineItemStatus, TimelineTextChannel,
-        TokenUsageSnapshot, TraceEvent, TraceEventKind,
+        StudioPartStatus, StudioPartType, StudioTextChannel, TokenUsageSnapshot, TraceEvent,
+        TraceEventKind,
     };
     use pretty_assertions::assert_eq;
 
@@ -76,22 +75,74 @@ mod tests {
         };
         store.append_message(&session.id, &message).await.unwrap();
         store
-            .append_timeline_events(&[TraceEvent {
-                session_id: session.id.clone(),
+            .append_studio_event(StudioEventEnvelope {
+                event_id: "studio-event-1".to_string(),
+                project_id: Some(project.id.clone()),
+                session_id: Some(session.id.clone()),
+                turn_id: Some("turn-1".to_string()),
                 sequence: 0,
-                timestamp: 1,
-                kind: TraceEventKind::TimelineItemStarted {
-                    item: TimelineItem::text(
-                        "turn-1",
-                        "item-1",
-                        0,
-                        TimelineTextChannel::User,
-                        "hello",
-                        TimelineItemStatus::Completed,
-                        1,
-                    ),
+                created_at: 1,
+                kind: StudioEventKind::MessageUpdated {
+                    message: Box::new(StudioMessage {
+                        message_id: "turn-1:user".to_string(),
+                        session_id: session.id.clone(),
+                        turn_id: "turn-1".to_string(),
+                        role: StudioMessageRole::User,
+                        status: StudioMessageStatus::Completed,
+                        created_at: 1,
+                        updated_at: 1,
+                        completed_at: Some(1),
+                        error: None,
+                        metadata: serde_json::json!({}),
+                    }),
                 },
-            }])
+            })
+            .await
+            .unwrap();
+        store
+            .append_studio_event(StudioEventEnvelope {
+                event_id: "studio-event-2".to_string(),
+                project_id: Some(project.id.clone()),
+                session_id: Some(session.id.clone()),
+                turn_id: Some("turn-1".to_string()),
+                sequence: 0,
+                created_at: 1,
+                kind: StudioEventKind::MessagePartUpdated {
+                    part: Box::new(StudioPart {
+                        part_id: "turn-1:user-text".to_string(),
+                        message_id: "turn-1:user".to_string(),
+                        session_id: session.id.clone(),
+                        turn_id: "turn-1".to_string(),
+                        part_type: StudioPartType::Text,
+                        order: 1,
+                        status: StudioPartStatus::Completed,
+                        created_at: 1,
+                        updated_at: 1,
+                        completed_at: Some(1),
+                        error: None,
+                        text_channel: Some(StudioTextChannel::User),
+                        text: "hello".to_string(),
+                        attachments: Vec::new(),
+                        tool: None,
+                        agent: None,
+                        inference: None,
+                        plan: None,
+                        file: None,
+                        usage: None,
+                        synthetic: false,
+                        ignored: false,
+                    }),
+                },
+            })
+            .await
+            .unwrap();
+        store
+            .create_turn(
+                &session.id,
+                "turn-1",
+                pl_protocol::StudioTurnStatus::Queued,
+                1,
+            )
             .await
             .unwrap();
         store
@@ -155,8 +206,14 @@ mod tests {
         let hidden_projects = store.list_projects().await.unwrap();
         let sessions = store.list_sessions(&project.id).await.unwrap();
         let messages = store.load_messages(&session.id).await.unwrap();
-        let timeline = store
-            .load_timeline_events(&session.id, None, None)
+        let studio_events = store
+            .load_studio_events(&session.id, None, None)
+            .await
+            .unwrap();
+        let studio_messages = store.load_studio_messages(&session.id).await.unwrap();
+        let message_parts = store.load_message_parts(&session.id).await.unwrap();
+        let turn = store
+            .set_turn_status("turn-1", pl_protocol::StudioTurnStatus::Completed, None, 2)
             .await
             .unwrap();
         let agents = store.list_agents(&session.id).await.unwrap();
@@ -171,7 +228,10 @@ mod tests {
         assert_eq!(hidden_projects, Vec::<ProjectRecord>::new());
         assert_eq!(sessions, Vec::<SessionRecord>::new());
         assert_eq!(messages, Vec::<Message>::new());
-        assert_eq!(timeline, Vec::<TimelineEventRecord>::new());
+        assert_eq!(studio_events, Vec::<StudioEventEnvelope>::new());
+        assert_eq!(studio_messages, Vec::new());
+        assert_eq!(message_parts, Vec::new());
+        assert_eq!(turn, None);
         assert_eq!(agents, Vec::<AgentSnapshotRecord>::new());
         assert_eq!(agent_events, Vec::<AgentTimelineEventRecord>::new());
         assert_eq!(runtime, None);
@@ -474,10 +534,6 @@ mod tests {
             .unwrap();
         let listed = store.list_sessions(&project.id).await.unwrap();
         let restored_origin = store.read_session(&origin.id).await.unwrap().unwrap();
-        let timeline = store
-            .load_timeline_events(&origin.id, None, None)
-            .await
-            .unwrap();
 
         assert!(first.should_start_run);
         assert!(!second.should_start_run);
@@ -486,7 +542,6 @@ mod tests {
         assert_eq!(restored_origin.visibility, SessionVisibility::HandoffOrigin);
         assert_eq!(first.interaction.status, InteractionStatus::Resolved);
         assert_eq!(first.plan_content, "1. Inspect\n2. Implement");
-        assert_eq!(timeline, Vec::<TimelineEventRecord>::new());
         let states = first
             .plan_lifecycle_events
             .iter()
@@ -532,46 +587,6 @@ mod tests {
 
         assert_eq!(restored.len(), 1);
         assert_eq!(restored[0], second);
-    }
-
-    #[tokio::test]
-    async fn append_timeline_events_handles_large_stream_batches() {
-        let store = StudioStore::open_memory().await.unwrap();
-        let project = store.upsert_project("C:/work/alpha").await.unwrap();
-        let session = store
-            .create_session(&project.id, "Long stream", CompileMode::Auto)
-            .await
-            .unwrap();
-        let events = (0..300)
-            .map(|sequence| TraceEvent {
-                session_id: session.id.clone(),
-                sequence,
-                timestamp: 1,
-                kind: TraceEventKind::TimelineItemDelta {
-                    event: TimelineItemDeltaEvent {
-                        turn_id: "turn-1".to_string(),
-                        item_id: "turn-1-thinking".to_string(),
-                        started_sequence: sequence,
-                        kind: TimelineItemKind::Thinking,
-                        status: TimelineItemStatus::Streaming,
-                        created_at: 1,
-                        updated_at: 1,
-                        delta: TimelineDelta::Thinking {
-                            chunk_index: sequence as u32,
-                            delta: "x".to_string(),
-                        },
-                    },
-                },
-            })
-            .collect::<Vec<_>>();
-
-        store.append_timeline_events(&events).await.unwrap();
-        let restored = store
-            .load_timeline_events(&session.id, None, None)
-            .await
-            .unwrap();
-
-        assert_eq!(restored.len(), events.len());
     }
 
     #[tokio::test]

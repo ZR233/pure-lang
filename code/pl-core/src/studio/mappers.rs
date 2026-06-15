@@ -15,7 +15,7 @@ use crate::studio::records::{
     AgentSnapshotRecord, AgentTimelineEventRecord, AttachmentRecord, ProjectRecord,
     SessionHandoffKind, SessionHandoffRecord, SessionHandoffStatus, SessionRecord,
     SessionRuntimeRecord, SessionSkillRecord, SessionVisibility, StudioEventRecord,
-    StudioMessageRecord, StudioPartRecord, StudioTurnRecord, TimelineEventRecord,
+    StudioMessageRecord, StudioPartRecord, StudioTurnRecord,
 };
 
 pub fn project_record(model: entities::project::Model) -> ProjectRecord {
@@ -168,17 +168,6 @@ pub fn agent_status_from_label(status: &str) -> AgentStatus {
         "shutdown" => AgentStatus::Shutdown,
         "notFound" => AgentStatus::NotFound,
         _ => AgentStatus::Errored,
-    }
-}
-
-pub fn timeline_event_record(model: entities::timeline_event::Model) -> TimelineEventRecord {
-    TimelineEventRecord {
-        id: model.id,
-        session_id: model.session_id,
-        sequence: model.sequence,
-        created_at: model.created_at,
-        kind: model.kind,
-        payload_json: model.payload_json,
     }
 }
 
@@ -493,19 +482,6 @@ pub fn default_session_runtime_record(
         estimated_costs: Vec::new(),
         has_unpriced_usage: false,
         updated_at: unix_seconds(),
-    }
-}
-
-pub fn trace_event_kind_label(kind: &pl_protocol::TraceEventKind) -> &'static str {
-    match kind {
-        pl_protocol::TraceEventKind::TimelineItemStarted { .. } => "TimelineItemStarted",
-        pl_protocol::TraceEventKind::TimelineItemDelta { .. } => "TimelineItemDelta",
-        pl_protocol::TraceEventKind::TimelineItemCompleted { .. } => "TimelineItemCompleted",
-        pl_protocol::TraceEventKind::TimelineItemFailed { .. } => "TimelineItemFailed",
-        pl_protocol::TraceEventKind::PlanLifecycleChanged { .. } => "PlanLifecycleChanged",
-        pl_protocol::TraceEventKind::InteractionChanged { .. } => "InteractionChanged",
-        pl_protocol::TraceEventKind::SkillActivated { .. } => "SkillActivated",
-        pl_protocol::TraceEventKind::EnabledToolsRecorded { .. } => "EnabledToolsRecorded",
     }
 }
 

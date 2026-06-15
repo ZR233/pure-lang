@@ -1,4 +1,8 @@
-use pl_protocol::{InteractionRequest, StudioEventEnvelope};
+use pl_protocol::{
+    AgentStatus, BudgetLimitKind, BudgetUsage, InteractionRequest, RuntimeCostAmount,
+    StudioAgentSnapshot, StudioEventEnvelope, StudioMessage, StudioPart, StudioRuntimeUsage,
+    StudioSessionRuntime,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize)]
@@ -44,7 +48,7 @@ pub struct AgentDto {
     pub parent_path: Option<String>,
     pub role: String,
     pub task: String,
-    pub status: String,
+    pub status: AgentStatus,
     pub summary: Option<String>,
     pub depth: i32,
     pub error: Option<String>,
@@ -377,6 +381,98 @@ pub struct RuntimeCostAmountDto {
     pub amount: f64,
 }
 
+impl From<AgentDto> for StudioAgentSnapshot {
+    fn from(agent: AgentDto) -> Self {
+        Self {
+            id: agent.id,
+            session_id: agent.session_id,
+            path: agent.path,
+            parent_path: agent.parent_path,
+            role: agent.role,
+            task: agent.task,
+            status: agent.status,
+            summary: agent.summary,
+            depth: agent.depth.max(0) as u32,
+            error: agent.error,
+            reason: agent.reason,
+            budget_limit_kind: agent
+                .budget_limit_kind
+                .and_then(budget_limit_kind_from_label),
+            budget_usage: agent.budget_usage.map(BudgetUsage::from),
+            runtime_usage: agent.runtime_usage.map(StudioRuntimeUsage::from),
+            updated_at: agent.updated_at,
+        }
+    }
+}
+
+impl From<BudgetUsageDto> for BudgetUsage {
+    fn from(usage: BudgetUsageDto) -> Self {
+        Self {
+            model_steps: usage.model_steps,
+            tool_calls: usage.tool_calls,
+            wait_calls: usage.wait_calls,
+            elapsed_ms: usage.elapsed_ms,
+        }
+    }
+}
+
+impl From<RuntimeUsageDto> for StudioRuntimeUsage {
+    fn from(usage: RuntimeUsageDto) -> Self {
+        Self {
+            model: usage.model,
+            context_window: usage.context_window,
+            latest_context_tokens: usage.latest_context_tokens,
+            prompt_tokens: usage.prompt_tokens,
+            completion_tokens: usage.completion_tokens,
+            cached_prompt_tokens: usage.cached_prompt_tokens,
+            total_tokens: usage.total_tokens,
+            cache_hit_rate: usage.cache_hit_rate,
+            estimated_costs: usage
+                .estimated_costs
+                .into_iter()
+                .map(RuntimeCostAmount::from)
+                .collect(),
+            has_unpriced_usage: usage.has_unpriced_usage,
+            updated_at: usage.updated_at,
+        }
+    }
+}
+
+impl From<RuntimeCostAmountDto> for RuntimeCostAmount {
+    fn from(cost: RuntimeCostAmountDto) -> Self {
+        Self {
+            currency: cost.currency,
+            amount: cost.amount,
+        }
+    }
+}
+
+impl From<SessionRuntimeDto> for StudioSessionRuntime {
+    fn from(runtime: SessionRuntimeDto) -> Self {
+        Self {
+            session_id: runtime.session_id,
+            usage: runtime.usage.into(),
+            active_skills: runtime.active_skills,
+            active_mcp_servers: runtime.active_mcp_servers,
+            active_lsp_servers: runtime.active_lsp_servers,
+            updated_at: runtime.updated_at,
+        }
+    }
+}
+
+fn budget_limit_kind_from_label(label: String) -> Option<BudgetLimitKind> {
+    match label.as_str() {
+        "modelStep" | "modelSteps" => Some(BudgetLimitKind::ModelStep),
+        "toolCall" | "toolCalls" => Some(BudgetLimitKind::ToolCall),
+        "wait" | "waitCalls" => Some(BudgetLimitKind::Wait),
+        "wallClock" => Some(BudgetLimitKind::WallClock),
+        "agentCount" => Some(BudgetLimitKind::AgentCount),
+        "agentDepth" => Some(BudgetLimitKind::AgentDepth),
+        "finalization" => Some(BudgetLimitKind::Finalization),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderSettingsInput {
@@ -531,6 +627,20 @@ pub struct StudioEventsDto {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct StudioMessageProjectionDto {
+    pub message: StudioMessage,
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioPartProjectionDto {
+    pub part: StudioPart,
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SessionStateDto {
     pub session_id: String,
     pub session: SessionDto,
@@ -539,6 +649,8 @@ pub struct SessionStateDto {
     pub agents: Vec<AgentDto>,
     pub session_runtime: SessionRuntimeDto,
     pub interactions: Vec<InteractionRequest>,
+    pub messages: Vec<StudioMessageProjectionDto>,
+    pub parts: Vec<StudioPartProjectionDto>,
     pub events: Vec<StudioEventEnvelope>,
     pub event_next_sequence: u64,
 }

@@ -304,8 +304,7 @@ impl StudioRuntime {
         {
             options.interaction_callback = Some(interaction_callback.clone());
         }
-        let starting_sequence = self.store.next_timeline_sequence(session_id).await?;
-        let mut recorder = TraceRecorder::new(session_id.to_string(), event_tx, starting_sequence);
+        let mut recorder = TraceRecorder::new(session_id.to_string(), event_tx, 0);
         let result = core
             .run_turn_with_trace(&mut session, request, &mut recorder, options)
             .await?;

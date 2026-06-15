@@ -18,7 +18,8 @@ use crate::dto::{
     AttachmentDto, BootstrapDto, ConfigDto, DiscoveredSkillsDto, InstructionsInput,
     McpSettingsInput, PlanLifecycleResponse, ProjectSelectionDto, ProviderSettingsInput,
     ProviderUsagesDto, ResolveInteractionResponse, SessionSelectionDto, SessionStateDto,
-    StopPromptResponse, StudioEventsDto, SubmitPromptResponse,
+    StopPromptResponse, StudioEventsDto, StudioMessageProjectionDto, StudioPartProjectionDto,
+    SubmitPromptResponse,
 };
 use crate::events::drain_events;
 use crate::interactions::interaction_emitter;
@@ -926,7 +927,42 @@ pub async fn load_session_state(
         .studio
         .store()
         .load_studio_events(&session_id, None, None)
-        .await?;
+        .await?
+        .into_iter()
+        .filter(|envelope| {
+            !matches!(
+                &envelope.kind,
+                StudioEventKind::MessageUpdated { .. }
+                    | StudioEventKind::MessageRemoved { .. }
+                    | StudioEventKind::MessagePartUpdated { .. }
+                    | StudioEventKind::MessagePartRemoved { .. }
+                    | StudioEventKind::MessagePartDelta { .. }
+                    | StudioEventKind::Stale { .. }
+            )
+        })
+        .collect();
+    let messages = state
+        .studio
+        .store()
+        .load_studio_messages(&session_id)
+        .await?
+        .into_iter()
+        .map(|record| StudioMessageProjectionDto {
+            message: record.message,
+            sequence: record.sequence.max(0) as u64,
+        })
+        .collect();
+    let parts = state
+        .studio
+        .store()
+        .load_message_parts(&session_id)
+        .await?
+        .into_iter()
+        .map(|record| StudioPartProjectionDto {
+            part: record.part,
+            sequence: record.sequence.max(0) as u64,
+        })
+        .collect();
     let event_next_sequence = state
         .studio
         .store()
@@ -953,6 +989,8 @@ pub async fn load_session_state(
             .store()
             .list_pending_interactions(&session_id)
             .await?,
+        messages,
+        parts,
         events,
         event_next_sequence,
     })

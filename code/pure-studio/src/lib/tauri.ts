@@ -19,6 +19,10 @@ import type {
   SessionSelectionPayload,
   StudioEventEnvelope,
   StudioEventsPayload,
+  StudioMessage,
+  StudioMessageProjection,
+  StudioPart,
+  StudioPartProjection,
   SubmitPromptResponse,
 } from "../types";
 import {
@@ -685,6 +689,7 @@ export function loadStudioEvents(
 
 export function loadSessionState(sessionId: string) {
   if (!isTauriRuntime()) {
+    const previewConversation = previewConversationSnapshot(sessionId);
     return Promise.resolve<SessionStatePayload>(
       clone({
         sessionId,
@@ -694,7 +699,9 @@ export function loadSessionState(sessionId: string) {
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
         interactions: [],
-        events: previewStudioEvents(sessionId),
+        messages: previewConversation.messages,
+        parts: previewConversation.parts,
+        events: [],
         eventNextSequence: previewTimelineItems.length * 2,
       }),
     );
@@ -702,66 +709,53 @@ export function loadSessionState(sessionId: string) {
   return invoke<SessionStatePayload>("load_session_state", { sessionId });
 }
 
-function previewStudioEvents(sessionId: string): StudioEventEnvelope[] {
-  const events: StudioEventEnvelope[] = [];
-  let sequence = 0;
-  for (const item of previewTimelineItems) {
+function previewConversationSnapshot(sessionId: string) {
+  const messages: StudioMessageProjection[] = [];
+  const parts: StudioPartProjection[] = [];
+  for (const [index, item] of previewTimelineItems.entries()) {
     const messageId = `${item.turnId}:${item.textChannel === "user" ? "user" : "assistant"}`;
     const role = item.textChannel === "user" ? "user" : "assistant";
-    events.push({
-      eventId: `preview-message-${sequence}`,
-      sessionId,
-      turnId: item.turnId,
-      sequence: sequence++,
-      createdAt: item.createdAt,
-      kind: {
-        type: "messageUpdated",
-        message: {
-          messageId,
-          sessionId,
-          turnId: item.turnId,
-          role,
-          status: "completed",
-          createdAt: item.createdAt,
-          updatedAt: item.updatedAt,
-          completedAt: item.updatedAt,
-          metadata: {},
-        },
+    const messageSequence = index * 2;
+    messages.push({
+      sequence: messageSequence,
+      message: {
+        messageId,
+        sessionId,
+        turnId: item.turnId,
+        role,
+        status: "completed",
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+        completedAt: item.updatedAt,
+        metadata: {},
       },
     });
-    events.push({
-      eventId: `preview-part-${sequence}`,
-      sessionId,
-      turnId: item.turnId,
-      sequence: sequence++,
-      createdAt: item.createdAt,
-      kind: {
-        type: "messagePartUpdated",
-        part: {
-          partId: item.itemId,
-          messageId,
-          sessionId,
-          turnId: item.turnId,
-          partType: item.kind === "thinking" ? "reasoning" : item.kind,
-          order: item.startedSequence,
-          status: item.status,
-          createdAt: item.createdAt,
-          updatedAt: item.updatedAt,
-          completedAt: item.status === "completed" ? item.updatedAt : null,
-          textChannel: item.textChannel ?? null,
-          text: item.content,
-          attachments: item.attachments ?? [],
-          tool: item.tool ?? null,
-          agent: item.agent ?? null,
-          inference: item.inference ?? null,
-          plan: item.kind === "plan" ? { content: item.content } : null,
-          usage: item.usage ?? null,
-          synthetic: item.kind === "turn" || item.kind === "inference",
-          ignored: false,
-        },
+    parts.push({
+      sequence: messageSequence + 1,
+      part: {
+        partId: item.itemId,
+        messageId,
+        sessionId,
+        turnId: item.turnId,
+        partType: item.kind === "thinking" ? "reasoning" : item.kind,
+        order: item.startedSequence,
+        status: item.status,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+        completedAt: item.status === "completed" ? item.updatedAt : null,
+        textChannel: item.textChannel ?? null,
+        text: item.content,
+        attachments: item.attachments ?? [],
+        tool: item.tool ?? null,
+        agent: item.agent ?? null,
+        inference: item.inference ?? null,
+        plan: item.kind === "plan" ? { content: item.content } : null,
+        usage: item.usage ?? null,
+        synthetic: item.kind === "turn" || item.kind === "inference",
+        ignored: false,
       },
     });
   }
-  return events;
+  return { messages, parts };
 }
 

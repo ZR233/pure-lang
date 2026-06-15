@@ -2,8 +2,7 @@ use std::time::Duration;
 
 use pl_core::StudioRuntime;
 use pl_protocol::{
-    AgentEvent, StudioAgentSnapshot, StudioEventEnvelope, StudioEventKind, StudioLspHealth,
-    StudioMcpHealth, StudioSessionRuntime,
+    AgentEvent, StudioEventEnvelope, StudioEventKind, StudioLspHealth, StudioMcpHealth,
 };
 use tauri::{AppHandle, Emitter};
 use tokio::sync::broadcast::error::RecvError;
@@ -172,9 +171,7 @@ pub async fn drain_events(
                 } else {
                     None
                 };
-                if let Some(agent) = &agent
-                    && let Ok(payload) = serde_json::to_value(agent)
-                {
+                if let Some(agent) = &agent {
                     let _ = studio
                         .events()
                         .emit(
@@ -182,7 +179,7 @@ pub async fn drain_events(
                             Some(session_id.clone()),
                             None,
                             StudioEventKind::AgentChanged {
-                                agent: StudioAgentSnapshot { payload },
+                                agent: agent.clone().into(),
                             },
                         )
                         .await;
@@ -202,9 +199,7 @@ pub async fn drain_events(
                         )
                         .await;
                 }
-                if let Some(session_runtime) = &session_runtime
-                    && let Ok(payload) = serde_json::to_value(session_runtime)
-                {
+                if let Some(session_runtime) = &session_runtime {
                     let _ = studio
                         .events()
                         .emit(
@@ -212,7 +207,7 @@ pub async fn drain_events(
                             Some(session_id.clone()),
                             None,
                             StudioEventKind::SessionRuntimeChanged {
-                                runtime: StudioSessionRuntime { payload },
+                                runtime: session_runtime.clone().into(),
                             },
                         )
                         .await;

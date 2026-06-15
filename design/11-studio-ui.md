@@ -49,7 +49,7 @@ reducer 分域：
 - 自动跟随最新内容以“用户是否停留在底部”为准；高频 timeline 刷新时仍应在 layout 阶段滚动到最新，用户手动上滚后暂停跟随
 - 同一 session 内继续对话不会触发 `selectedSessionId` 变化；当前轮 message/part 事件与补拉事件必须直接合并进本地 conversation view
 - 重复选择当前 session 必须视为 no-op，不能清空本地 timeline、agent snapshot、runtime 或 plan 状态；只有切换到不同 session、新建 session 或切换项目时，才可以重置当前会话本地视图并等待对应 timeline snapshot 加载
-- 异步 `loadSessionState` / `loadStudioEvents` 只能按 `StudioEventEnvelope.sequence` 补齐缺失事件；如果加载结果落后于本地已收到的当前轮 event，只能跳过已应用 sequence，不能覆盖当前 timeline
+- 异步 `loadSessionState` 用后端 projection snapshot 替换当前会话的 message/part 状态，并以 `eventNextSequence` 设定 cursor；如果加载结果落后于本地已收到的当前轮 event，只能跳过。`loadStudioEvents` 才按 `StudioEventEnvelope.sequence` 补齐缺失事件，不能覆盖已应用的新 snapshot
 - Tauri 实时事件通道如果发生 broadcast lag，不能静默忽略。事件转发层必须向前端发出当前 session 的 stale 信号；前端收到后立即按 `StudioEventEnvelope.sequence` 调用 `loadStudioEvents` 补齐缺失事件，并继续用 timeline 本地新鲜度规则保护已收到的 live item。
 - 自动跟随只取决于用户是否停留在底部，不取决于 `isBusy`；submit 命令返回时 run 通常仍在后台执行，最终内容必须继续通过 `studio-runtime-event` 追加
 - 用户提交 prompt 后，前端 reducer 立即插入仅本地存在的 optimistic 用户 message/part 和 waiting turn part。waiting part 在 selector 中派生为轻量状态行，用于展示“正在等待模型响应”。这些 optimistic part 不持久化、不进入后端 DTO；真实 user text part 到达时只清理 optimistic 用户消息，不能清掉 waiting。waiting 必须持续覆盖 turn start、user text 和 inference start 到首个模型侧可见事件，例如 assistant text、reasoning、plan、tool event、inference completed、terminal `turnChanged(failed/cancelled/completed)`。如果 submit command 自身失败，waiting 应移除或替换为失败状态，不能残留。
@@ -64,9 +64,9 @@ reducer 分域：
 - `partDeltaAccum: Map<partId, StudioPartDeltaAccum>`
 - `eventNextSequence: number`
 
-`messages` 与 `partsByMessage` 是前端从 `StudioEventEnvelope` 重放得到的事实状态，不作为 Tauri command 的输入 DTO。message 按创建时间与 durable sequence 排序，part 按 `order` 稳定排序；delta 只能附加到已有 part 的 overlay，snapshot 到达后以 snapshot 为准并清 overlay。组件不得再把运行中 tool map、agent events 和 trace items 临时拼接成主 timeline。工具聚合与普通 trace 过滤只能作为 `timelineEntries` 派生显示层逻辑，不能写回 reducer 状态或后端 DTO。
+`messages` 与 `partsByMessage` 是前端 conversation 的事实状态：初始/切换会话来自 `SessionStateResponse.messages/parts` projection record（每条包含 snapshot 与来源 event `sequence`），实时和 stale backfill 来自 `StudioEventEnvelope` 增量更新，不作为 Tauri command 的输入 DTO。message 按创建时间与 durable sequence 排序，part 按 `order` 稳定排序；delta 只能附加到已有 part 的 overlay，snapshot 到达后以 snapshot 为准并清 overlay。组件不得再把运行中 tool map、agent events 和 trace items 临时拼接成主 timeline。工具聚合与普通 trace 过滤只能作为 `timelineEntries` 派生显示层逻辑，不能写回 reducer 状态或后端 DTO。
 
-同一组 `StudioEventEnvelope` 在历史加载、实时事件和补拉事件中必须由同一个前端 reducer 重放，并收敛到相同 message/part projection。fold 规则按 opencode 语义处理：orphan delta 丢弃；snapshot upsert 完整 part 并清除 overlay；旧 snapshot 不得覆盖已应用的新 snapshot。
+初始 projection snapshot、实时事件和补拉事件必须进入同一个前端 conversation reducer，并收敛到相同 message/part projection。fold 规则按 opencode 语义处理：orphan delta 丢弃；snapshot upsert 完整 part 并清除 overlay；旧 snapshot 不得覆盖已应用的新 snapshot。
 
 左侧 project 列表的每个项目行右侧提供 `X` 归档按钮。归档 project 不删除磁盘目录，也不修改项目文件；它只归档 Studio 中的 project 记录，并清理该 project 下的 sessions、messages、timeline、agent、runtime 和审批历史。用户重新打开同一路径时复用原 project 记录，但历史会话已经清空，应按新项目入口创建默认会话。归档当前 project 时切换到下一个未归档 project；没有剩余 project 时进入无项目状态。
 
@@ -116,7 +116,7 @@ Markdown 阅读样式属于 timeline 展示层：assistant 正文和 plan 卡片
 - `SessionStateResponse`
 - `StudioEventsResponse`
 
-`submit_prompt` 接收 `attachmentIds`，当附件非空时允许 `prompt` 为空。图片附件先通过独立上传命令写入 Studio app data，再以附件 id 引用；前端不得把 base64 图片直接塞进 prompt 文本。旧字段别名、旧 payload 解析逻辑、旧 text/thinking/tool delta reducer 分支在方案乙中删除。`SubmitPromptResponse` 只表示后台 turn 已提交，包含 `sessionId`、`turnId` 和当前 cursor；不得携带最终 timeline 结果。`SessionStateResponse.events` 与 `StudioEventsResponse.events` 返回 durable `StudioEventEnvelope[]`；`StudioMessage` / `StudioPart` 是前端 reducer 的事实源，timeline entry 只作为 selector view model。
+`submit_prompt` 接收 `attachmentIds`，当附件非空时允许 `prompt` 为空。图片附件先通过独立上传命令写入 Studio app data，再以附件 id 引用；前端不得把 base64 图片直接塞进 prompt 文本。旧字段别名、旧 payload 解析逻辑、旧 text/thinking/tool delta reducer 分支在方案乙中删除。`SubmitPromptResponse` 只表示后台 turn 已提交，包含 `sessionId`、`turnId` 和当前 cursor；不得携带最终 timeline 结果。`SessionStateResponse.messages` / `parts` 返回当前 message/part projection record，`SessionStateResponse.events` 只附带非 message/part durable 状态事件；`StudioEventsResponse.events` 返回补拉的 durable `StudioEventEnvelope[]`。`StudioMessage` / `StudioPart` 是前端 reducer 的事实源，timeline entry 只作为 selector view model。
 
 ## 5. 选择器与派生数据
 
