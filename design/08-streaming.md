@@ -174,6 +174,6 @@ root agent 和 subagent 使用同一套 runtime usage 数据模型。每次模�
 - `estimatedCosts` 按货币分组，只保存能由本地模型价格完整估算的费用。
 - `hasUnpricedUsage` 表示存在 token 使用但缺少 currency 或价格字段，UI 不应把它并入任意币种。
 
-Studio 状态栏必须在运行中即时反映上下文和费用。前端消费 `StudioEventKind::SessionRuntimeChanged` 中后端聚合后的运行态快照；刷新或切换 session 时用 `load_session_state` / `select_session` 的 `sessionRuntime` 恢复。前端不得同时按 inference item 和 turn item 重复累计费用。
+Studio 状态栏必须在运行中即时反映上下文和费用。前端消费 `StudioEventKind::SessionRuntimeChanged` 中后端聚合后的运行态快照；刷新或切换 session 时用 `load_session_state` / `select_session` 的 `sessionRuntime` 恢复。`AgentRuntimeUpdated` 进入 Studio bridge 时必须先写入 agent/session runtime projection，再广播 `SessionRuntimeChanged`；turn 收尾只在本 turn 没有实时 inference runtime snapshot 时，才用最终 usage 补写 legacy root delta，避免同一轮 usage 被实时事件和收尾事件重复累计。前端不得同时按 inference item 和 turn item 重复累计费用。
 
 费用为本地估算值，使用配置中的每百万 token 单价。不同货币不做汇率转换，也不合并为单一数字。Solid 状态栏消费通用 runtime snapshot，不直接解析 provider 私有 usage 字段。

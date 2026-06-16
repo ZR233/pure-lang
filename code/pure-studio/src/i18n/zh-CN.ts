@@ -12,6 +12,11 @@ const zhCN = {
 
   projects: {
     addPlaceholder: "输入项目路径，回车添加",
+    archive: "关闭项目",
+    confirmArchive: "关闭项目“{{name}}”？该项目的会话会从侧栏归档。",
+    empty: "还没有项目",
+    openHint: "先打开一个项目",
+    openTypedPath: "打开输入的路径",
   },
 
   actions: {
@@ -486,8 +491,10 @@ const zhCN = {
   },
 
   sessions: {
-    delete: "删除会话",
-    confirmDelete: "确定删除会话“{{title}}”吗？",
+    close: "关闭会话",
+    delete: "关闭会话",
+    empty: "还没有会话",
+    confirmDelete: "关闭会话“{{title}}”？它会从侧栏归档。",
   },
 };
 

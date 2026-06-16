@@ -36,7 +36,10 @@ import type {
 } from "../types";
 import {
   bootstrapStudio,
+  archiveProject as archiveProjectCommand,
+  chooseProjectDirectory as chooseProjectDirectoryCommand,
   createSession,
+  deleteSession as deleteSessionCommand,
   isTauriRuntime,
   loadProviderUsages,
   loadSessionState,
@@ -302,6 +305,45 @@ export function createStudioStore() {
     setStore(produce((draft) => applyStudioEventBatch(draft, payload.events, draft.selectedSessionId)));
   }
 
+  async function applyProjectSelectionPayload(payload: {
+    selectedProjectId?: string | null;
+    projects: ProjectRecord[];
+    sessions: SessionRecord[];
+    selectedSessionId?: string | null;
+    agentEvents: StudioAgentTimelineEvent[];
+    agents: AgentDto[];
+    sessionRuntime?: SessionRuntime | null;
+    interactions?: InteractionRequest[];
+    mcpHealth?: McpHealthUpdatedPayload | null;
+    lspHealth?: LspHealthUpdatedPayload | null;
+  }, status: string) {
+    const selectedSessionId = payload.selectedSessionId ?? null;
+    setStore(
+      produce((draft) => {
+        draft.projects = payload.projects;
+        draft.sessions = replaceProjectSessions(draft.sessions, payload.selectedProjectId ?? null, payload.sessions);
+        draft.selectedProjectId = payload.selectedProjectId ?? null;
+        draft.selectedSessionId = selectedSessionId;
+        draft.busy = selectedSessionBusy(draft, selectedSessionId);
+        if (selectedSessionId) {
+          draft.agents[selectedSessionId] = payload.agents;
+          draft.agentEvents[selectedSessionId] = payload.agentEvents;
+          draft.sessionRuntime[selectedSessionId] = payload.sessionRuntime ?? null;
+          applyInteractions(draft, payload.interactions ?? [], selectedSessionId);
+        } else {
+          draft.activeInteractionId = null;
+          draft.activeInteractionPhase = null;
+        }
+        applyMcpHealth(draft, payload.mcpHealth ?? null);
+        applyLspHealth(draft, payload.lspHealth ?? null);
+        draft.status = status;
+      }),
+    );
+    if (selectedSessionId) {
+      await reloadSession(selectedSessionId);
+    }
+  }
+
   async function submitPrompt() {
     const sessionId = store.selectedSessionId;
     const prompt = store.prompt.trim();
@@ -398,50 +440,75 @@ export function createStudioStore() {
         }
       },
       async addProject(path: string) {
-        const payload = await openProject(path);
-        setStore(produce((draft) => {
-          draft.projects = payload.projects;
-          draft.sessions = mergeSessions(draft.sessions, payload.sessions);
-          draft.selectedProjectId = payload.selectedProjectId ?? null;
-          draft.selectedSessionId = payload.selectedSessionId ?? null;
-          draft.busy = selectedSessionBusy(draft, draft.selectedSessionId);
-          applyMcpHealth(draft, payload.mcpHealth ?? null);
-          applyLspHealth(draft, payload.lspHealth ?? null);
-        }));
-        if (payload.selectedSessionId) await reloadSession(payload.selectedSessionId);
+        try {
+          const payload = await openProject(path);
+          await applyProjectSelectionPayload(payload, i18n.t("status.projectLoaded"));
+        } catch (error) {
+          setStore("status", i18n.t("status.addProjectFailed", { error: errorText(error) }));
+        }
+      },
+      async chooseProjectDirectory() {
+        try {
+          const path = await chooseProjectDirectoryCommand();
+          if (!path) return;
+          const payload = await openProject(path);
+          await applyProjectSelectionPayload(payload, i18n.t("status.projectLoaded"));
+        } catch (error) {
+          setStore("status", i18n.t("status.addProjectFailed", { error: errorText(error) }));
+        }
       },
       async selectProject(id: string) {
-        const payload = await selectProject(id);
-        setStore(produce((draft) => {
-          draft.projects = payload.projects;
-          draft.sessions = mergeSessions(draft.sessions, payload.sessions);
-          draft.selectedProjectId = payload.selectedProjectId ?? id;
-          draft.selectedSessionId = payload.selectedSessionId ?? null;
-          draft.busy = selectedSessionBusy(draft, draft.selectedSessionId);
-          applyMcpHealth(draft, payload.mcpHealth ?? null);
-          applyLspHealth(draft, payload.lspHealth ?? null);
-        }));
-        if (payload.selectedSessionId) await reloadSession(payload.selectedSessionId);
+        try {
+          const payload = await selectProject(id);
+          await applyProjectSelectionPayload(payload, i18n.t("status.projectLoaded"));
+        } catch (error) {
+          setStore("status", i18n.t("status.selectProjectFailed", { error: errorText(error) }));
+        }
+      },
+      async archiveProject(projectId: string) {
+        if (store.projects.length === 0) return;
+        try {
+          const payload = await archiveProjectCommand(projectId, store.selectedProjectId);
+          await applyProjectSelectionPayload(payload, i18n.t("status.projectArchived"));
+        } catch (error) {
+          setStore("status", i18n.t("status.archiveProjectFailed", { error: errorText(error) }));
+        }
       },
       async createSession() {
         if (!store.selectedProjectId) return;
-        const payload = await createSession(store.selectedProjectId, "新会话");
-        setStore("sessions", (sessions) => mergeSessions(sessions, payload.sessions));
-        setStore("selectedSessionId", payload.sessionId);
-        setStore("busy", selectedSessionBusy(store, payload.sessionId));
-        await reloadSession(payload.sessionId);
+        try {
+          const payload = await createSession(store.selectedProjectId, i18n.t("common.newSessionTitle"));
+          setStore("sessions", (sessions) => mergeSessions(sessions, payload.sessions));
+          setStore("selectedSessionId", payload.sessionId);
+          setStore("busy", selectedSessionBusy(store, payload.sessionId));
+          await reloadSession(payload.sessionId);
+        } catch (error) {
+          setStore("status", i18n.t("status.newSessionFailed", { error: errorText(error) }));
+        }
       },
       async selectSession(id: string) {
         if (id === store.selectedSessionId) return;
-        const payload = await selectSession(id);
-        setStore(produce((draft) => {
-          draft.sessions = mergeSessions(draft.sessions, payload.sessions);
-          draft.selectedSessionId = payload.sessionId;
-          draft.busy = selectedSessionBusy(draft, payload.sessionId);
-          applyMcpHealth(draft, payload.mcpHealth ?? null);
-          applyLspHealth(draft, payload.lspHealth ?? null);
-        }));
-        await reloadSession(payload.sessionId);
+        try {
+          const payload = await selectSession(id);
+          setStore(produce((draft) => {
+            draft.sessions = mergeSessions(draft.sessions, payload.sessions);
+            draft.selectedSessionId = payload.sessionId;
+            draft.busy = selectedSessionBusy(draft, payload.sessionId);
+            applyMcpHealth(draft, payload.mcpHealth ?? null);
+            applyLspHealth(draft, payload.lspHealth ?? null);
+          }));
+          await reloadSession(payload.sessionId);
+        } catch (error) {
+          setStore("status", i18n.t("status.selectSessionFailed", { error: errorText(error) }));
+        }
+      },
+      async deleteSession(sessionId: string) {
+        try {
+          const payload = await deleteSessionCommand(sessionId, store.selectedSessionId);
+          await applyProjectSelectionPayload(payload, i18n.t("status.sessionDeleted"));
+        } catch (error) {
+          setStore("status", i18n.t("status.deleteSessionFailed", { error: errorText(error) }));
+        }
       },
       async setSessionMode(mode: CompileMode) {
         const sessionId = store.selectedSessionId;
@@ -901,6 +968,20 @@ function mergeSessions(existing: SessionRecord[], incoming: SessionRecord[]) {
   for (const session of incoming) {
     const previous = byId.get(session.id);
     byId.set(session.id, previous && previous.updatedAt > session.updatedAt ? previous : session);
+  }
+  return [...byId.values()].sort(compareSessions);
+}
+
+function replaceProjectSessions(existing: SessionRecord[], projectId: string | null, incoming: SessionRecord[]) {
+  if (!projectId) {
+    return [];
+  }
+  const byId = new Map<string, SessionRecord>();
+  for (const session of existing) {
+    if (session.projectId !== projectId) byId.set(session.id, session);
+  }
+  for (const session of incoming) {
+    if (session.projectId === projectId) byId.set(session.id, session);
   }
   return [...byId.values()].sort(compareSessions);
 }

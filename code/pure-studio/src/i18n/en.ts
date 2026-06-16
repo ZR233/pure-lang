@@ -12,6 +12,11 @@ const en = {
 
   projects: {
     addPlaceholder: "Enter project path, press Enter to add",
+    archive: "Close project",
+    confirmArchive: "Close project \"{{name}}\"? Its sessions will be archived from the sidebar.",
+    empty: "No projects yet",
+    openHint: "Open a project first",
+    openTypedPath: "Open typed path",
   },
 
   actions: {
@@ -486,8 +491,10 @@ const en = {
   },
 
   sessions: {
-    delete: "Delete session",
-    confirmDelete: "Delete session \"{{title}}\"?",
+    close: "Close session",
+    delete: "Close session",
+    empty: "No sessions yet",
+    confirmDelete: "Close session \"{{title}}\"? It will be archived from the sidebar.",
   },
 };
 

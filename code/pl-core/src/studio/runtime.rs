@@ -268,7 +268,7 @@ impl StudioRuntime {
         }
         let user_content = prompt_content(&prompt, &selected_attachments);
         let mut request = TurnRequest::new(prompt.clone(), mode)
-            .with_turn_id(turn_id)
+            .with_turn_id(turn_id.clone())
             .with_user_content(user_content)
             .with_materialized_attachments(materialized_attachments)
             .with_trace_attachments(trace_attachments);
@@ -349,7 +349,7 @@ impl StudioRuntime {
             })
             .or_else(|| resolved.models.first());
         self.store
-            .upsert_session_runtime(session_id, &result, model)
+            .upsert_session_runtime_for_turn(session_id, &turn_id, &result, model)
             .await?;
         if should_start_self_learning(&config, &result.status, &trace_events) {
             let review_messages = session.messages().to_vec();
@@ -381,6 +381,12 @@ impl StudioRuntime {
         loop {
             match event_rx.recv().await {
                 Ok(event) => {
+                    if let AgentEvent::AgentRuntimeUpdated { delta } = &event {
+                        let _ = self
+                            .store
+                            .record_agent_runtime_delta(&session_id, delta)
+                            .await;
+                    }
                     let _ = self
                         .events
                         .emit_agent_event(&session_id, event.clone())
