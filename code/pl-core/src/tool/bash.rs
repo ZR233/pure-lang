@@ -401,7 +401,7 @@ mod tests {
 
     fn sleep_then_echo_command() -> &'static str {
         if cfg!(target_os = "windows") {
-            "powershell -NoProfile -EncodedCommand UwB0AGEAcgB0AC0AUwBsAGUAZQBwACAALQBNAGkAbABsAGkAcwBlAGMAbwBuAGQAcwAgADcAMAAwADsAIABXAHIAaQB0AGUALQBPAHUAdABwAHUAdAAgACcAZABvAG4AZQAnAA=="
+            "Start-Sleep -Milliseconds 700; Write-Output 'done'"
         } else {
             "sleep 0.7; echo done"
         }
@@ -409,9 +409,25 @@ mod tests {
 
     fn stdin_echo_command() -> &'static str {
         if cfg!(target_os = "windows") {
-            "powershell -NoProfile -EncodedCommand JABsAGkAbgBlACAAPQAgAFsAQwBvAG4AcwBvAGwAZQBdADoAOgBJAG4ALgBSAGUAYQBkAEwAaQBuAGUAKAApADsAIABXAHIAaQB0AGUALQBPAHUAdABwAHUAdAAgACgAJwBnAG8AdAA6ACcAIAArACAAJABsAGkAbgBlACkA"
+            "$line = [Console]::In.ReadLine(); Write-Output ('got:' + $line)"
         } else {
             "read line; echo got:$line"
+        }
+    }
+
+    fn stderr_command() -> &'static str {
+        if cfg!(target_os = "windows") {
+            "Write-Error 'err'"
+        } else {
+            "echo err >&2"
+        }
+    }
+
+    fn large_output_command() -> &'static str {
+        if cfg!(target_os = "windows") {
+            "for ($i = 0; $i -lt 250; $i++) { Write-Output 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }"
+        } else {
+            "printf '%*s' 5000 '' | tr ' ' a"
         }
     }
 
@@ -435,11 +451,48 @@ mod tests {
     async fn captures_stderr() {
         let tool = test_tool();
         let output = tool
-            .execute(tool_input("echo err >&2", "s2", "t2"), test_context())
+            .execute(tool_input(stderr_command(), "s2", "t2"), test_context())
             .await
             .unwrap();
 
         assert!(output.truncated.stderr.content.contains("err"));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_default_shell_executes_powershell_script() {
+        let tool = test_tool();
+        let output = tool
+            .execute(
+                tool_input(
+                    "if ($PSVersionTable.PSVersion.Major -ge 5) { Write-Output 'powershell-ok' }; (Get-Location).Path",
+                    "ps-session",
+                    "ps-tool",
+                ),
+                test_context(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(output.exit_code, Some(0));
+        assert!(output.truncated.stdout.content.contains("powershell-ok"));
+        assert!(output.truncated.stdout.content.lines().count() >= 2);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_powershell_captures_unicode_stdout() {
+        let tool = test_tool();
+        let output = tool
+            .execute(
+                tool_input("Write-Output '中文输出'", "unicode-session", "unicode-tool"),
+                test_context(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(output.exit_code, Some(0));
+        assert!(output.truncated.stdout.content.contains("中文输出"));
     }
 
     #[tokio::test]
@@ -799,16 +852,11 @@ mod tests {
     #[tokio::test]
     async fn large_output_is_truncated_in_json_and_saved_to_file() {
         let tool = test_tool();
-        let command = if cfg!(target_os = "windows") {
-            "for /L %i in (1,1,250) do @echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        } else {
-            "printf '%*s' 5000 '' | tr ' ' a"
-        };
         let output = tool
             .execute(
                 ToolInput {
                     arguments: serde_json::json!({
-                        "command": command,
+                        "command": large_output_command(),
                         "maxOutputChars": 100,
                     }),
                     session_id: "large-session".to_string(),

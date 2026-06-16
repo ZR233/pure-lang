@@ -8,7 +8,7 @@ export function MarkdownContent(props: { content: string; class?: string; live?:
   return (
     <div class={`markdown-content ${props.class ?? ""}`} data-live={props.live || undefined}>
       <For each={blocks()}>
-        {(block) => <div data-markdown-block={block.mode} innerHTML={html(block.src)} />}
+        {(block) => <div class="markdown-block" data-markdown-block={block.mode} innerHTML={html(block.src)} />}
       </For>
     </div>
   );

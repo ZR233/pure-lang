@@ -5,7 +5,6 @@ import {
   Circle,
   Clock,
   Cpu,
-  DollarSign,
   Loader2,
   ShieldCheck,
   Users,
@@ -54,7 +53,7 @@ export function SessionStatusBar(props: {
   const modelInfo = createMemo(() => findModel(props.providers, plannerRole()?.model ?? usage()?.model ?? ""));
   const contextWindow = createMemo(() => modelInfo()?.contextWindow ?? modelInfo()?.maxContextWindow ?? usage()?.contextWindow ?? null);
   const contextLabel = createMemo(() => `${formatTokenCount(usage()?.latestContextTokens)} / ${formatTokenCount(contextWindow())}`);
-  const contextWidth = createMemo(() => `${contextPercent(usage()?.latestContextTokens, contextWindow())}%`);
+  const contextUsagePercent = createMemo(() => contextPercent(usage()?.latestContextTokens, contextWindow()));
   const costLabel = createMemo(() => formatCost(usage()));
   const visibleAgents = createMemo(() => props.agents.filter((agent) => activeAgentStatuses.has(agent.status)));
   const capabilityCount = createMemo(() =>
@@ -154,8 +153,10 @@ export function SessionStatusBar(props: {
       </div>
 
       <div class="status-readouts">
-        <StatusDetails icon={<Clock size={14} />} label={phaseLabel(visiblePhase(), props.turnStartedAt)}>
+        <StatusDetails icon={<Clock size={14} />} label={phaseSummaryLabel(visiblePhase(), props.turnStartedAt)}>
+          <StatusLine label="Status" value={phaseLabel(visiblePhase(), props.turnStartedAt)} />
           <StatusLine label="Phase" value={visiblePhase()} />
+          <StatusLine label="Elapsed" value={elapsedLabel(visiblePhase(), props.turnStartedAt)} />
           <StatusLine label="Busy" value={props.busy ? "yes" : "no"} />
           <StatusLine label="Blocked" value={waitingPhase() ? "yes" : "no"} />
           <Show when={waitingPhase()}>
@@ -163,18 +164,29 @@ export function SessionStatusBar(props: {
           </Show>
         </StatusDetails>
 
-        <StatusDetails label={contextLabel()}>
-          <div class="context-meter"><span style={{ width: contextWidth() }} /></div>
+        <StatusDetails
+          class="status-context-details"
+          icon={<ContextRing percent={contextUsagePercent()} />}
+        >
+          <div class="context-detail-meter"><span style={{ width: `${contextUsagePercent()}%` }} /></div>
+          <StatusLine label="Used" value={contextLabel()} />
+          <StatusLine label="Window" value={formatTokenCount(contextWindow())} />
+          <StatusLine label="Usage" value={`${contextUsagePercent()}%`} />
           <StatusLine label="Input" value={formatTokenCount(usage()?.promptTokens)} />
           <StatusLine label="Output" value={formatTokenCount(usage()?.completionTokens)} />
           <StatusLine label="Cache read" value={formatTokenCount(usage()?.cachedPromptTokens)} />
           <StatusLine label="Cache hit" value={formatPercent(usage()?.cacheHitRate)} />
         </StatusDetails>
 
-        <StatusDetails icon={<DollarSign size={14} />} label={costLabel()}>
-          <For each={pricedCosts(usage()?.estimatedCosts)}>
-            {(cost) => <StatusLine label={cost.currency} value={formatCostNumber(cost.amount)} />}
-          </For>
+        <StatusDetails class="status-cost-details" label={costLabel()}>
+          <Show
+            when={pricedCosts(usage()?.estimatedCosts).length > 0}
+            fallback={<StatusLine label="Estimated" value={costLabel()} />}
+          >
+            <For each={pricedCosts(usage()?.estimatedCosts)}>
+              {(cost) => <StatusLine label={cost.currency} value={formatCostNumber(cost.amount)} />}
+            </For>
+          </Show>
           <Show when={usage()?.hasUnpricedUsage}>
             <StatusLine label="Unpriced" value="yes" />
           </Show>
@@ -202,15 +214,29 @@ export function SessionStatusBar(props: {
   );
 }
 
-function StatusDetails(props: { icon?: JSX.Element; label: string; children: JSX.Element }) {
+function StatusDetails(props: { icon?: JSX.Element; label?: string; children: JSX.Element; class?: string }) {
   return (
-    <details class="status-details">
-      <summary>
+    <div class={`status-details ${props.class ?? ""}`} tabIndex={0}>
+      <div class="status-summary">
         {props.icon}
-        <span>{props.label}</span>
-      </summary>
+        <Show when={props.label}>
+          {(label) => <span>{label()}</span>}
+        </Show>
+      </div>
       <div class="status-popover">{props.children}</div>
-    </details>
+    </div>
+  );
+}
+
+function ContextRing(props: { percent: number }) {
+  return (
+    <span
+      class="context-ring"
+      style={{ "--context-percent": `${props.percent}%` } as JSX.CSSProperties}
+      aria-label={`Context ${props.percent}%`}
+    >
+      <span>{props.percent}%</span>
+    </span>
   );
 }
 
@@ -332,8 +358,24 @@ function phaseLabel(phase: string | undefined, startedAt: number | null | undefi
   if (!phase || phase === "idle") return "Idle";
   if (isWaitingPhase(phase)) return `Blocked: ${interactionLabel(phase)}`;
   if (!startedAt) return phase;
+  return `${phase} ${elapsedSeconds(startedAt)}s`;
+}
+
+function phaseSummaryLabel(phase: string | undefined, startedAt: number | null | undefined) {
+  if (!phase || phase === "idle") return "Idle";
+  if (isWaitingPhase(phase)) return "Blocked";
+  if (!startedAt) return phase;
+  return `${phase} ${elapsedSeconds(startedAt)}s`;
+}
+
+function elapsedLabel(phase: string | undefined, startedAt: number | null | undefined) {
+  if (!phase || phase === "idle" || !startedAt) return "-";
+  return `${elapsedSeconds(startedAt)}s`;
+}
+
+function elapsedSeconds(startedAt: number) {
   const elapsed = Math.max(0, Math.floor(Date.now() / 1000) - startedAt);
-  return `${phase} ${elapsed}s`;
+  return elapsed;
 }
 
 export type WaitingPhase = "toolApproval" | "userInput" | "planConfirmation";

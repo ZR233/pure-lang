@@ -201,13 +201,20 @@ function QuestionToolPart(props: { part: StudioPart }) {
 
 function AgentPart(props: { part: StudioPart }) {
   const agent = () => props.part.agent;
+  const summary = () => agent()?.summary ?? agent()?.error;
   return (
     <div class="oc-agent">
-      <TerminalSquare size={14} />
-      <span>{agent()?.path ?? "agent"}</span>
-      <span class="oc-muted">{agent()?.status ?? props.part.status}</span>
-      <Show when={(agent()?.summary ?? agent()?.error) || undefined}>
-        <span class="oc-agent-summary">{agent()?.summary ?? agent()?.error}</span>
+      <div class="oc-agent-header">
+        <TerminalSquare size={14} />
+        <span>{agent()?.path ?? "agent"}</span>
+        <span class="oc-muted">{agent()?.status ?? props.part.status}</span>
+      </div>
+      <Show when={summary()}>
+        {(value) => (
+          <div class="oc-agent-summary">
+            <MarkdownContent content={value()} />
+          </div>
+        )}
       </Show>
     </div>
   );

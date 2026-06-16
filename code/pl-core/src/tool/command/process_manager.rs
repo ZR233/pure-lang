@@ -6,11 +6,12 @@ use std::time::{Duration, Instant};
 
 use pl_protocol::PureError;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::process::{ChildStderr, ChildStdin, ChildStdout, Command};
+use tokio::process::{ChildStderr, ChildStdin, ChildStdout};
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
 use super::head_tail_buffer::HeadTailBuffer;
+use super::shell::shell_command;
 use crate::process::{
     configure_background_command, terminate_process_tree, terminate_process_tree_sync,
 };
@@ -525,18 +526,6 @@ async fn append_output_chunk(
             .map_err(|error| format!("failed to finish output chunk: {error}"))?;
     }
     Ok(())
-}
-
-fn shell_command(command: &str) -> Command {
-    if cfg!(target_os = "windows") {
-        let mut shell = Command::new("cmd");
-        shell.args(["/C", command]);
-        shell
-    } else {
-        let mut shell = Command::new("sh");
-        shell.args(["-c", command]);
-        shell
-    }
 }
 
 fn status_for_state(state: &CommandProcessState) -> &'static str {

@@ -109,6 +109,7 @@ pub trait ModelProvider: Debug + Send + Sync {
 - 使用 `pretty_assertions::assert_eq!` 获得更清晰的 diff。
 - 优先比较完整对象，而不是逐字段比较。
 - 避免在测试中修改进程环境变量。
+- 前端测试、浏览器验证或临时 dev server 不要占用 `1420` 端口；该端口保留给用户脚本，避免端口冲突。需要启动 Vite/预览服务时使用其他空闲端口。
 
 ## API 边界
 

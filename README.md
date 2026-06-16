@@ -54,7 +54,7 @@ pl-protocol  ←  pl-model  ←  pl-core  ←  pure-studio
 ### 启动 Pure Studio 桌面应用
 
 ```powershell
-# Windows（一键启动，自动检查依赖）
+# Windows（一键启动，自动检查并同步 npm 依赖）
 ./run-pure-studio.ps1
 
 # 或手动启动
@@ -62,6 +62,8 @@ cd code/pure-studio
 npm install
 npm run tauri:dev
 ```
+
+Windows 启动脚本会检测 `code/pure-studio` 下的 `node_modules`、`package.json`、`package-lock.json` 和已声明的 npm 依赖；依赖缺失或清单更新时会先自动执行 `npm install`，再启动 Tauri dev。
 
 首次启动后，在 Pure Studio 设置页面配置 LLM Provider。配置保存在：
 

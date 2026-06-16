@@ -32,8 +32,7 @@ function heal(text: string) {
 
 export function streamMarkdown(text: string, live: boolean): MarkdownStreamBlock[] {
   if (!live) return [{ raw: text, src: text, mode: "full" }];
-  const src = heal(text);
-  if (hasReferences(text)) return [{ raw: text, src, mode: "live" }];
+  if (hasReferences(text)) return [{ raw: text, src: heal(text), mode: "live" }];
 
   const tokens = marked.lexer(text);
   let tail = -1;
@@ -43,20 +42,31 @@ export function streamMarkdown(text: string, live: boolean): MarkdownStreamBlock
       break;
     }
   }
-  if (tail < 0) return [{ raw: text, src, mode: "live" }];
-
-  const last = tokens[tail];
-  if (!last || last.type !== "code") return [{ raw: text, src, mode: "live" }];
-  const code = last as Tokens.Code;
-  if (!hasOpenFence(code.raw)) return [{ raw: text, src, mode: "live" }];
+  if (tail < 0) return [{ raw: text, src: heal(text), mode: "live" }];
 
   const head = tokens
     .slice(0, tail)
     .map((token) => token.raw)
     .join("");
-  if (!head) return [{ raw: code.raw, src: code.raw, mode: "live" }];
+  const tailRaw = tokens
+    .slice(tail)
+    .map((token) => token.raw)
+    .join("");
+
+  const last = tokens[tail];
+  if (!last) return [{ raw: text, src: heal(text), mode: "live" }];
+
+  let tailSrc = heal(tailRaw);
+  if (last.type === "code") {
+    const code = last as Tokens.Code;
+    if (hasOpenFence(code.raw)) {
+      tailSrc = tailRaw;
+    }
+  }
+
+  if (!head) return [{ raw: tailRaw, src: tailSrc, mode: "live" }];
   return [
-    { raw: head, src: heal(head), mode: "live" },
-    { raw: code.raw, src: code.raw, mode: "live" },
+    { raw: head, src: head, mode: "full" },
+    { raw: tailRaw, src: tailSrc, mode: "live" },
   ];
 }

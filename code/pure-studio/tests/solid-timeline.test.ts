@@ -96,6 +96,9 @@ function emptyStore(): MessageStore {
     providerUsages: [],
     providerUsagesLoading: false,
     providerUsageError: null,
+    providerUsageErrors: {},
+    providerUsageRefreshing: {},
+    providerUsagesLoadedAt: null,
     roles: [],
     instructions: {
       baseOverride: "",
@@ -608,8 +611,20 @@ function liveDeltaCreatesRowsWithoutMutatingSnapshot() {
 function livePlanMarkdownUsesStreamSafeBlocks() {
   const blocks = streamMarkdown("## Plan\n\n```ts\nconst value = 1", true);
   assertEqual(blocks.length, 2);
-  assertEqual(blocks[0]?.mode, "live");
+  assertEqual(blocks[0]?.mode, "full");
   assertEqual(blocks[1]?.src, "```ts\nconst value = 1");
+  assertDeepEqual(streamMarkdown("## Plan\n\n- done\n- typing", true), [
+    {
+      raw: "## Plan\n\n",
+      src: "## Plan\n\n",
+      mode: "full",
+    },
+    {
+      raw: "- done\n- typing",
+      src: "- done\n- typing",
+      mode: "live",
+    },
+  ]);
   assertDeepEqual(streamMarkdown("## Plan\n\n- done", false), [{
     raw: "## Plan\n\n- done",
     src: "## Plan\n\n- done",
