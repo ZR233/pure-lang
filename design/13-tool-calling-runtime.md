@@ -87,6 +87,8 @@ MCP tools 由进程内 MCP runtime registry 的当前可用快照注册，工具
 
 当 `bash` 在 `yieldTimeMs` 内未完成时，result 使用 `running` 状态并带 `processId`。后续模型必须用 `write_stdin` 携带该 `processId` 发送输入或传空 `chars` 轮询，不应重复执行同一条 `bash` 命令。需要完整输出时，模型应使用文件读取工具读取 `outputFile`，不要要求命令工具把大输出完整塞回上下文。`write_stdin` 找不到 live process、进程数量达到上限、stdin 写入失败或后台命令已被终止时，应返回可恢复错误，让模型等待、轮询或解释当前状态。
 
+Windows 上 `bash.command` 的默认宿主 shell 是 PowerShell：运行时先查找 `pwsh.exe`，再查找 `powershell.exe`，都不可用时才使用 `cmd.exe /C`。PowerShell 命令以 `-NoProfile -Command` 执行，并注入 UTF-8 输出设置；这只影响命令字符串的宿主 shell，不改变 `bash` / `write_stdin` 的公开 schema、审批策略或 JSON 结果字段。
+
 `wait_agent` 和 `list_agents` 默认只回传紧凑 agent 摘要，避免把完整 agent snapshot 反复写入模型上下文。调用方显式传入 `includeDetails: true` 时，工具结果可包含完整 `AgentRecord`，用于诊断；普通协作流程应优先依赖精简摘要和最终子代理总结。`spawn_agent.forkTurns` 的历史继承只复制过滤后的父会话消息，不复制工具结果、工具调用 metadata、reasoning 内容或运行时调度提示。
 
 MCP tool 成功结果写回紧凑字符串。文本内容按 MCP content 顺序合并；JSON 或非文本内容序列化为紧凑 JSON。MCP `isError` 或 transport/protocol 错误按本地执行错误处理，使用 `Tool execution error: {error}` 前缀写回模型上下文，同时在 Studio timeline 中展示失败原因。transport/protocol 错误还会把对应 server 的 availability 标记为 `unavailable`，后续 turn 不再暴露该 server 的 tools，直到后台周期重检或保存配置后的 reconcile 恢复。

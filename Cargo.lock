@@ -2812,6 +2812,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml 0.8.2",
+ "which",
 ]
 
 [[package]]
@@ -5408,6 +5409,15 @@ dependencies = [
  "thiserror 2.0.18",
  "windows",
  "windows-core 0.61.2",
+]
+
+[[package]]
+name = "which"
+version = "8.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c789537cf2f7f55be8e6192f92e464174ee55f91af622777f7f1ceb0dbccd03e"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
