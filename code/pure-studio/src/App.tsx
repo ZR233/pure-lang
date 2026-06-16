@@ -130,6 +130,9 @@ export function App() {
           providerUsages={state.providerUsages}
           providerUsagesLoading={state.providerUsagesLoading}
           providerUsageError={state.providerUsageError}
+          providerUsageErrors={state.providerUsageErrors}
+          providerUsageRefreshing={state.providerUsageRefreshing}
+          providerUsagesLoadedAt={state.providerUsagesLoadedAt}
           providerSearch={state.providerSearch}
           selectedProviderId={state.selectedProviderId}
           roles={state.roles}
@@ -143,7 +146,7 @@ export function App() {
           onSetTab={studio.actions.setSettingsTab}
           onSetProviderSearch={studio.actions.setProviderSearch}
           onSetSelectedProviderId={studio.actions.setSelectedProviderId}
-          onRefreshProviderUsages={() => void studio.actions.refreshProviderUsages()}
+          onRefreshProviderUsages={(providerId) => void studio.actions.refreshProviderUsages(providerId)}
           onSaveProviderSettings={studio.actions.saveProviderSettings}
           onSaveInstructionsSettings={studio.actions.saveInstructionsSettings}
           onSaveMcpSettings={studio.actions.saveMcpSettings}

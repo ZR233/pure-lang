@@ -268,6 +268,10 @@ fn effective_mcp_servers_enable_builtin_servers_with_zhipu_token() {
         Some(&"ZHIPU".to_string())
     );
     assert_eq!(
+        servers["zhipu_vision"].config.command.as_deref(),
+        Some(zhipu_vision_command())
+    );
+    assert_eq!(
         active_mcp_server_names(&config),
         vec![
             "zhipu_reader".to_string(),
@@ -276,6 +280,10 @@ fn effective_mcp_servers_enable_builtin_servers_with_zhipu_token() {
             "zhipu_zread".to_string()
         ]
     );
+}
+
+fn zhipu_vision_command() -> &'static str {
+    if cfg!(windows) { "npx.cmd" } else { "npx" }
 }
 
 #[test]

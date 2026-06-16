@@ -1215,6 +1215,222 @@
   min-width: 0;
 }
 
+.provider-usage-panel {
+  display: grid;
+  gap: 7px;
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.provider-usage-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--color-muted-foreground);
+  font-size: 11px;
+}
+
+.provider-usage-head > span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-usage-refresh {
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+}
+
+.provider-usage-message {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px dashed var(--color-border);
+  border-radius: 8px;
+  color: var(--color-muted-foreground);
+  background: color-mix(in srgb, var(--color-muted) 16%, transparent);
+  font-size: 12px;
+}
+
+.provider-usage-message[data-state="failed"],
+.provider-usage-message[data-state="missingCredential"] {
+  border-color: color-mix(in srgb, var(--color-destructive) 32%, var(--color-border));
+  color: var(--color-destructive);
+  background: color-mix(in srgb, var(--color-destructive) 7%, transparent);
+}
+
+.provider-balance-card,
+.provider-quota-card {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-card) 72%, var(--color-secondary));
+}
+
+.provider-balance-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding: 10px;
+}
+
+.provider-balance-card > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.provider-balance-card strong {
+  font-size: 18px;
+}
+
+.provider-balance-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  color: var(--color-muted-foreground);
+  font-size: 12px;
+}
+
+.provider-balance-breakdown span {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: var(--color-secondary);
+}
+
+.provider-balance-list {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--color-muted-foreground);
+  font-size: 11px;
+}
+
+.provider-balance-list span {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.provider-quota-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.provider-quota-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  align-items: stretch;
+}
+
+.provider-quota-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.quota-card-head,
+.quota-card-value {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.usage-card-title,
+.quota-card-head small,
+.quota-card-value span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-card-title {
+  color: var(--color-muted-foreground);
+  font-size: 12px;
+}
+
+.quota-card-head small,
+.quota-card-value span {
+  color: var(--color-muted-foreground);
+  font-size: 11px;
+}
+
+.quota-card-value strong {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.quota-progress {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-muted) 45%, var(--color-background));
+}
+
+.quota-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-primary);
+}
+
+.provider-quota-card[data-window="weekly"] .quota-progress span {
+  background: var(--color-chart-2);
+}
+
+.provider-quota-card[data-window="mcpMonthly"] .quota-progress span {
+  background: var(--color-chart-5);
+}
+
+.quota-tool-details {
+  display: grid;
+  gap: 4px;
+  padding-top: 1px;
+}
+
+.quota-tool-details-head {
+  color: var(--color-muted-foreground);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.quota-tool-details span {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  color: var(--color-muted-foreground);
+  font-size: 11px;
+}
+
+.quota-tool-details span,
+.quota-tool-details small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-level {
+  align-self: start;
+}
+
+.provider-usage-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .settings-chip {
   max-width: 100%;
   min-width: 0;
@@ -1470,6 +1686,16 @@
   }
 
   .settings-card-actions {
+    justify-content: flex-start;
+  }
+
+  .provider-balance-card,
+  .provider-quota-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .provider-balance-breakdown,
+  .provider-usage-footer {
     justify-content: flex-start;
   }
 }

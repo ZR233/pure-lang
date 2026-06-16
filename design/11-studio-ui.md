@@ -79,7 +79,7 @@ Solid `SessionStatusBar` 保留旧 React 状态栏功能：模式切换、planne
 
 Settings 是 Solid store 的配置编辑入口，不恢复 React 兼容层。它必须对齐旧 React 设置页的能力：Providers、Instructions、Skills、Roles、MCP、Security 和 General 页签。配置状态来自 `ConfigPayload` 与现有 Tauri command：`load_provider_usages`、`save_provider_settings`、`save_instructions_settings`、`save_mcp_settings`、`save_permission_mode` 和 `list_discovered_skills`。设置页本地 UI 状态包括 active tab、provider search、selected provider、provider usage loading/error；保存成功后必须用返回的 canonical `ConfigPayload` 更新 providers、roles、templates、instructions、MCP servers、permission mode、config TOML 和 config exists 状态。
 
-Provider 设置支持搜索、刷新用量、选择默认 provider、新增/编辑/删除 provider、切换 provider template、编辑 base URL/API key/default model，以及追加/删除 custom model。Role 设置固定展示 explorer/planner/executor/reviewer 四个角色，并在 provider/model 删除或不可用时规范化到可用 provider/model/effort。MCP 设置支持 stdio 和 streamable HTTP，保留 built-in/locked server metadata，只允许可编辑 server 修改身份；保存前清理空 args/env/headers。Instructions、Security 和 Skills 设置分别编辑提示词配置、权限模式和当前项目 skill discovery，不能绕过 store 直接写 UI-only 状态。
+Provider 设置支持搜索、刷新用量、选择默认 provider、新增/编辑/删除 provider、切换 provider template、编辑 base URL/API key/default model，以及追加/删除 custom model。Provider 卡片必须消费 `load_provider_usages` 的 typed 结果展示查询状态：打开 Providers 页时自动进行一次过期刷新；全局刷新和单卡刷新都走同一 store action，单卡刷新只在该卡展示 busy/retry 状态，保存 provider 配置后要重新刷新用量。DeepSeek 显示余额与赠送/充值拆分，Zhipu Coding Plan 显示 5 小时、周额度和 MCP 额度的剩余进度、重置时间与完整工具明细；缺 key、失败、不支持、未查询、更新时间和重试入口都必须在卡片内可见。Role 设置固定展示 explorer/planner/executor/reviewer 四个角色，并在 provider/model 删除或不可用时规范化到可用 provider/model/effort。MCP 设置支持 stdio 和 streamable HTTP，保留 built-in/locked server metadata，只允许可编辑 server 修改身份；保存前清理空 args/env/headers。Instructions、Security 和 Skills 设置分别编辑提示词配置、权限模式和当前项目 skill discovery，不能绕过 store 直接写 UI-only 状态。
 
 ## 5. 验收目标
 
