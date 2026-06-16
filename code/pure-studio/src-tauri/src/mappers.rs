@@ -646,6 +646,7 @@ pub fn session_dtos(sessions: Vec<SessionRecord>) -> Vec<SessionDto> {
             mode: session.mode,
             updated_at: session.updated_at,
             visibility: session.visibility.as_str().to_string(),
+            parent_session_id: session.parent_session_id,
         })
         .collect()
 }

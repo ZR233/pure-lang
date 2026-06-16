@@ -1,13 +1,13 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 
 use pl_trace::TraceTextChannel;
 
 use super::event::{ModelStreamEvent, ToolInputDeltaPayload, ToolInputPayloadKind};
 
 pub(crate) struct StreamLifecycle {
-    open_text: HashSet<String>,
-    open_reasoning: HashSet<String>,
-    open_plan: HashSet<String>,
+    open_text: BTreeSet<String>,
+    open_reasoning: BTreeSet<String>,
+    open_plan: BTreeSet<String>,
     open_tools: HashMap<String, OpenToolInput>,
 }
 
@@ -21,9 +21,9 @@ struct OpenToolInput {
 impl StreamLifecycle {
     pub(crate) fn new() -> Self {
         Self {
-            open_text: HashSet::new(),
-            open_reasoning: HashSet::new(),
-            open_plan: HashSet::new(),
+            open_text: BTreeSet::new(),
+            open_reasoning: BTreeSet::new(),
+            open_plan: BTreeSet::new(),
             open_tools: HashMap::new(),
         }
     }
@@ -122,19 +122,21 @@ impl StreamLifecycle {
                 name,
                 payload_kind,
             } => {
+                let mut events = self.close_open_content_blocks();
                 self.upsert_tool_input(
                     stream_id.as_ref(),
                     &item_id,
                     call_id.as_ref(),
                     name.as_ref(),
                 );
-                vec![ModelStreamEvent::ToolInputStarted {
+                events.push(ModelStreamEvent::ToolInputStarted {
                     stream_id,
                     item_id,
                     call_id,
                     name,
                     payload_kind,
-                }]
+                });
+                events
             }
             ModelStreamEvent::ToolInputDelta {
                 stream_id,
@@ -152,22 +154,22 @@ impl StreamLifecycle {
                     name.as_ref(),
                 );
                 if is_new {
-                    vec![
-                        ModelStreamEvent::ToolInputStarted {
-                            stream_id: stream_id.clone(),
-                            item_id: item_id.clone(),
-                            call_id: call_id.clone(),
-                            name: name.clone(),
-                            payload_kind: payload_delta.kind(),
-                        },
-                        ModelStreamEvent::ToolInputDelta {
-                            stream_id,
-                            item_id,
-                            call_id,
-                            name,
-                            payload_delta,
-                        },
-                    ]
+                    let mut events = self.close_open_content_blocks();
+                    events.push(ModelStreamEvent::ToolInputStarted {
+                        stream_id: stream_id.clone(),
+                        item_id: item_id.clone(),
+                        call_id: call_id.clone(),
+                        name: name.clone(),
+                        payload_kind: payload_delta.kind(),
+                    });
+                    events.push(ModelStreamEvent::ToolInputDelta {
+                        stream_id,
+                        item_id,
+                        call_id,
+                        name,
+                        payload_delta,
+                    });
+                    events
                 } else {
                     vec![ModelStreamEvent::ToolInputDelta {
                         stream_id,
@@ -201,7 +203,9 @@ impl StreamLifecycle {
                 events
             }
             ModelStreamEvent::StepStarted { response_id } => {
-                vec![ModelStreamEvent::StepStarted { response_id }]
+                let mut events = self.close_open_content_blocks();
+                events.push(ModelStreamEvent::StepStarted { response_id });
+                events
             }
             ModelStreamEvent::ToolCallReady {
                 stream_id,
@@ -210,15 +214,17 @@ impl StreamLifecycle {
                 name,
                 payload,
             } => {
+                let mut events = self.close_open_content_blocks();
                 self.open_tools
                     .remove(&tool_key(stream_id.as_ref(), call_id.as_ref(), &item_id));
-                vec![ModelStreamEvent::ToolCallReady {
+                events.push(ModelStreamEvent::ToolCallReady {
                     stream_id,
                     item_id,
                     call_id,
                     name,
                     payload,
-                }]
+                });
+                events
             }
             ModelStreamEvent::Usage(usage) => vec![ModelStreamEvent::Usage(usage)],
             ModelStreamEvent::Failed { code, message } => {
@@ -230,6 +236,20 @@ impl StreamLifecycle {
     }
 
     fn close_open_blocks(&mut self) -> Vec<ModelStreamEvent> {
+        let mut events = self.close_open_content_blocks();
+        for (_, tool) in std::mem::take(&mut self.open_tools) {
+            events.push(ModelStreamEvent::ToolInputCompleted {
+                stream_id: tool.stream_id,
+                item_id: tool.item_id,
+                call_id: tool.call_id,
+                name: tool.name,
+                payload: None,
+            });
+        }
+        events
+    }
+
+    fn close_open_content_blocks(&mut self) -> Vec<ModelStreamEvent> {
         let mut events = Vec::new();
         for key in std::mem::take(&mut self.open_text) {
             let Some((channel, id)) = key.split_once(':') else {
@@ -248,15 +268,6 @@ impl StreamLifecycle {
         }
         for id in std::mem::take(&mut self.open_plan) {
             events.push(ModelStreamEvent::PlanCompleted { id });
-        }
-        for (_, tool) in std::mem::take(&mut self.open_tools) {
-            events.push(ModelStreamEvent::ToolInputCompleted {
-                stream_id: tool.stream_id,
-                item_id: tool.item_id,
-                call_id: tool.call_id,
-                name: tool.name,
-                payload: None,
-            });
         }
         events
     }

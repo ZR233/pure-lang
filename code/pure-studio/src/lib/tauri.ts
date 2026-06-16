@@ -34,6 +34,7 @@ import {
   previewAgentEvents,
   previewConversationPartViews,
   previewSkills,
+  previewMcpServers,
   previewLspServers,
 } from "./preview";
 import { makeProvider, makeRole } from "./provider-mapper";
@@ -82,6 +83,10 @@ export function bootstrapStudio() {
           lspServers: previewLspServers,
           activeLspServers: previewSessionRuntime.activeLspServers,
         },
+        mcpHealth: {
+          mcpServers: previewMcpServers,
+          activeMcpServers: previewSessionRuntime.activeMcpServers,
+        },
         config: previewConfig,
       }),
     );
@@ -112,6 +117,10 @@ export function openProject(path: string) {
           lspServers: previewLspServers,
           activeLspServers: previewSessionRuntime.activeLspServers,
         },
+        mcpHealth: {
+          mcpServers: previewMcpServers,
+          activeMcpServers: previewSessionRuntime.activeMcpServers,
+        },
       }),
     );
   }
@@ -132,6 +141,10 @@ export function selectProject(projectId: string) {
         lspHealth: {
           lspServers: previewLspServers,
           activeLspServers: previewSessionRuntime.activeLspServers,
+        },
+        mcpHealth: {
+          mcpServers: previewMcpServers,
+          activeMcpServers: previewSessionRuntime.activeMcpServers,
         },
       }),
     );
@@ -158,6 +171,10 @@ export function archiveProject(projectId: string, selectedProjectId?: string | n
         lspHealth: {
           lspServers: previewLspServers,
           activeLspServers: nextSelectedProjectId ? previewSessionRuntime.activeLspServers : [],
+        },
+        mcpHealth: {
+          mcpServers: previewMcpServers,
+          activeMcpServers: nextSelectedProjectId ? previewSessionRuntime.activeMcpServers : [],
         },
       }),
     );
@@ -226,6 +243,10 @@ export function deleteSession(sessionId: string, selectedSessionId?: string | nu
           lspServers: previewLspServers,
           activeLspServers: previewSessionRuntime.activeLspServers,
         },
+        mcpHealth: {
+          mcpServers: previewMcpServers,
+          activeMcpServers: previewSessionRuntime.activeMcpServers,
+        },
       }),
     );
   }
@@ -245,6 +266,14 @@ export function selectSession(sessionId: string) {
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
         interactions: [],
+        lspHealth: {
+          lspServers: previewLspServers,
+          activeLspServers: previewSessionRuntime.activeLspServers,
+        },
+        mcpHealth: {
+          mcpServers: previewMcpServers,
+          activeMcpServers: previewSessionRuntime.activeMcpServers,
+        },
       }),
     );
   }
@@ -267,6 +296,14 @@ export function setSessionMode(sessionId: string, mode: CompileMode) {
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
         interactions: [],
+        lspHealth: {
+          lspServers: previewLspServers,
+          activeLspServers: previewSessionRuntime.activeLspServers,
+        },
+        mcpHealth: {
+          mcpServers: previewMcpServers,
+          activeMcpServers: previewSessionRuntime.activeMcpServers,
+        },
       }),
     );
   }

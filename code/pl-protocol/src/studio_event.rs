@@ -512,6 +512,8 @@ pub struct StudioRuntimeUsage {
 pub struct StudioSessionHandoff {
     pub origin_session_id: String,
     pub target_session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_session: Option<StudioSessionSummary>,
     pub kind: String,
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -528,6 +530,8 @@ pub struct StudioSessionSummary {
     pub mode: String,
     pub updated_at: i64,
     pub visibility: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -22,6 +22,7 @@ pub struct SessionRecord {
     pub mode: String,
     pub updated_at: i64,
     pub visibility: SessionVisibility,
+    pub parent_session_id: Option<String>,
     pub instruction_snapshot: Option<crate::InstructionSnapshot>,
 }
 

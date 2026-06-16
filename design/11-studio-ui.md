@@ -1,179 +1,87 @@
-# Pure Studio Timeline UI（方案乙）
+# Pure Studio Solid UI
 
-## 1. 状态架构
+## 1. 前端框架
 
-前端状态从分散 `useState` 重构为 reducer 状态机。`App.tsx` 仅保留页面编排，不直接写业务状态。
+`code/pure-studio` 使用 Solid/Vite，不保留 React 运行时、React reducer 或 React 组件双栈。入口为 Solid `render`，业务状态使用 Solid store/signal 组合；Tauri 命令仍沿用现有 Rust DTO，前端只在适配层把 wire DTO 归一化为 Studio store。
 
-reducer 分域：
+Timeline 直接对齐 opencode app：使用 `virtua` 虚拟列表，自写 message/part row algebra、stable row key、row cache、bottom spacer、bottom anchoring 和 jump-to-bottom 交互。允许复制 opencode MIT timeline/UI 子集；复制文件必须保留来源说明，并在仓库 notice 中标注。
 
-- `bootstrap`
-- `session`
-- `turn`
-- `interaction`
-- `settings`
-- `timeline`
-- `studioEvent`
+## 2. Conversation Store
 
-所有 Tauri 事件只负责 `dispatch(action)`。运行中事件只监听 `studio-runtime-event`，旧 `studio-agent-event`、`studio-interaction-changed`、`studio-session-mode-updated`、`studio-session-handoff-started`、`studio-prompt-failed`、MCP/LSP health sideband 不再作为 UI 状态入口。
+状态按 session 归一化保存：
 
-状态按 session 归一化保存：`sessionsById`、`sessionOrder`、`selectedSessionId`、`sessionViews[sessionId]`。每个 session view 独立保存 `cursor`、`stale`、`turn`、`messages`、`partsByMessage`、`partDeltaAccum`、`agentTimelineEvents`、`agents`、`sessionRuntime`、`interactions` 和 `planStates`。非当前 session 的事件不得丢弃；它们更新后台 session 的 badge、turn 状态和 cursor，只有当前 session 事件才更新可见 timeline、footer 和状态栏。
+- `messages[sessionId]`
+- `parts[messageId]`
+- `partTextAccumDelta[partId]`
+- `messageSequences[messageId]`
+- `partSequences[partId]`
+- `eventNextSequence[sessionId]`
+- `sessionStatus[sessionId]`
+- `interactions[interactionId]`
+- `planStates[planId]`
+- `agents/sessionRuntime/agentTimelineEvents`
+- `mcpServers/lspServers`
+- `turnPhase/turnStartedAt`
 
-## 2. Timeline 视图
+`messageUpdated` upsert message snapshot；`messagePartUpdated` upsert 完整 part snapshot 并清除该 part 的 live delta；`messagePartDelta` 只允许命中已有 part，orphan delta 直接丢弃。`messagePartDelta` 不推进 durable cursor，也不得覆盖 terminal snapshot。前端记录 part 的 snapshot sequence、delta sequence 和可选 `chunkIndex`，丢弃同 part stale delta、低序 delta 与重复/倒序 chunk。`messageRemoved`、`messagePartRemoved`、session reset 和 projection snapshot 替换必须清理相关 delta accum。
 
-主区保持单线 timeline 语义，数据来源统一为 append-only StudioEvent log：
+历史、实时和 stale backfill 都进入同一个 event reducer。`load_session_state` 用 projection snapshot 初始化 message/part 与 per-id sequence guard；`load_studio_events(afterSequence)` 只回放 durable envelope。前端不得恢复旧 `TimelineItem`、`ConversationEntry` 或 raw `AgentEvent` 入口。
 
-- 历史 `StudioEventEnvelope`
-- 运行中 `messageUpdated`
-- 运行中 `messagePartUpdated`
-- 运行中 `messagePartDelta`
-- turn、interaction、plan lifecycle 和 runtime 状态事件
+状态管理对齐 opencode `global-sync`：Solid store 只保存归一化 entity 表和少量 UI 本地状态，组件不得直接把多个表临时拼成业务状态。选中会话、状态栏、timeline、交互 dock 和会话列表都必须通过 selector/view model 派生：
 
-约束：
+- `selectedSessionView` 从 `selectedSessionId` 读取当前 session、message、part、runtime、agent、interaction、turn phase、busy、MCP/LSP active 列表。
+- `visibleProjectSessions` 对 session list 做按 id 去重、过滤 `visibility=active` 且 `parentSessionId` 为空的 root session，并稳定排序，避免 handoff/archived/child session 或重复 DTO 出现在会话栏。Plan implementation 在当前 session 内运行，不创建 target session；legacy child session 即使存在也只可通过历史入口加载，不能作为侧栏 root 项。
+- `SessionStatusBar` 只消费 `selectedSessionView.runtime/agents/activeMcpServers/activeLspServers`，不得直接读后台 session 的 runtime event。
 
-- 空 assistant 不渲染
-- `text` part 以 `textChannel` 决定展示语义：`user` 渲染为用户气泡，`commentary` 渲染为轻量进展行，`final` 渲染为普通 assistant 回复。前端不再使用旧 `role` 字段判断文本语义。
-- `plan` part 渲染为独立计划卡片，正文按 Markdown 展示，不与普通 assistant 消息混排。
-- 用户 `text` part 可以携带图片附件元数据；用户气泡必须展示缩略图、文件名或尺寸，并允许只有图片没有文本的消息进入 timeline。
-- 主 timeline 以用户与 assistant 正文为主；工具调用使用紧凑行密度，连续 tool parts 可在 selector 中聚合为派生展示项，例如 `Read 3 files · Edit 1 file`，但原始 `messages`、`partsByMessage` 和 reducer 仍保持 message/part 事实语义。
-- 工具聚合只属于 selector 展示层：同一 turn 内的 reasoning 和隐藏 inference 不结束当前工具组；assistant `text`、`agent`、`turn` trace 或跨 turn 的 tool part 才开启新的工具展示段。reasoning 内容仍作为 thought entry 渲染。
-- 同一 turn 内连续模型 step 产生的多个 reasoning part 必须在 selector 中合并为一个 thought entry；tool part 和隐藏 `inference` 对 thought 聚合透明，避免工具循环后在主 timeline 连续出现多张思考卡片。
-- 模型调用、普通 turn 状态和 token 用量不作为主 timeline 内容展示；usage 和费用归属底部状态栏及其 popover
-- 失败、中断、预算受限等异常 turn trace 可作为低权重 notice 保留在主 timeline，避免关键错误被隐藏
-- 子代理使用行内状态，不做嵌套大卡片
-- 子代理内部 text delta、thinking delta、tool call 和工具输出不进入父会话 timeline；父会话只展示 agent 生命周期状态、最终摘要、最终错误文本和压缩后的 runtime usage
-- agent timeline 与 agent latest snapshot 必须分离；timeline 渲染 append-only typed `StudioAgentTimelineEvent[]`，状态栏渲染 latest `agents`
-- 同一个 agent 的 spawn、wait、message、close、final status 必须保留为多条 timeline 事件，不能按 agent id 覆盖成一条
-- `AgentStateChanged` 只更新 latest snapshot，不直接作为 timeline 数据源；历史 `agentEvents` 与实时 `agentTimelineChanged` 都是 typed `StudioAgentTimelineEvent`，前端不再解析旧 `kind + payload` 记录。
-- 用户与 assistant 正文按 Markdown 渲染，支持标题、列表、引用、代码块、行内代码、强调和链接
-- commentary 也是可见文本，但视觉权重低于 final：用于“我先检查配置”“现在修复类型链”等阶段更新，可流式追加，不应和最终 assistant 回复合并。
-- 自动跟随最新内容以“用户是否停留在底部”为准；高频 timeline 刷新时仍应在 layout 阶段滚动到最新，用户手动上滚后暂停跟随
-- 同一 session 内继续对话不会触发 `selectedSessionId` 变化；当前轮 message/part 事件与补拉事件必须直接合并进本地 conversation view
-- 重复选择当前 session 必须视为 no-op，不能清空本地 timeline、agent snapshot、runtime 或 plan 状态；只有切换到不同 session、新建 session 或切换项目时，才可以重置当前会话本地视图并等待对应 timeline snapshot 加载
-- 异步 `loadSessionState` 用后端 projection snapshot 替换当前会话的 message/part 状态，并以 `eventNextSequence` 设定 cursor；如果加载结果落后于本地已收到的当前轮 event，只能跳过。`loadStudioEvents` 才按 `StudioEventEnvelope.sequence` 补齐缺失事件，不能覆盖已应用的新 snapshot
-- Tauri 实时事件通道如果发生 broadcast lag，不能静默忽略。事件转发层必须向前端发出当前 session 的 stale 信号；前端收到后立即按 `StudioEventEnvelope.sequence` 调用 `loadStudioEvents` 补齐缺失事件，并继续用 timeline 本地新鲜度规则保护已收到的 live item。
-- 自动跟随只取决于用户是否停留在底部，不取决于 `isBusy`；submit 命令返回时 run 通常仍在后台执行，最终内容必须继续通过 `studio-runtime-event` 追加
-- 用户提交 prompt 后，前端 reducer 立即插入仅本地存在的 optimistic 用户 message/part 和 waiting turn part。waiting part 在 selector 中派生为轻量状态行，用于展示“正在等待模型响应”。这些 optimistic part 不持久化、不进入后端 DTO；真实 user text part 到达时只清理 optimistic 用户消息，不能清掉 waiting。waiting 必须持续覆盖 turn start、user text 和 inference start 到首个模型侧可见事件，例如 assistant text、reasoning、plan、tool event、inference completed、terminal `turnChanged(failed/cancelled/completed)`。如果 submit command 自身失败，waiting 应移除或替换为失败状态，不能残留。
-- 用户提交 prompt 属于显式回到底部的动作；即使用户此前停在历史位置，发送后 timeline 也应立即跟随到底部，让 optimistic 消息和等待状态可见。后续 streaming delta 仍遵守“用户在底部才跟随”的规则，用户再次上滚后不抢占滚动位置。
-- reasoning part 在 selector 中派生为 thought entry，并携带 `status`、`startedAt`、`updatedAt` 与 `durationSeconds`。`started/streaming/running` 状态展示思考中动画；`completed` 状态根据 `createdAt/updatedAt` 展示耗时；`failed/interrupted/budgetLimited` 等异常状态展示对应异常语义。多个连续 reasoning part 合并时，耗时取最早 `createdAt` 与最晚 `updatedAt`。
-- timeline 渲染层可以在 `selectConversationEntries()` 之后使用 headless 虚拟滚动库承载大列表；虚拟化只负责测量、滚动定位和 DOM 数量控制，不消费 raw `StudioPart`，也不承载 tool 聚合、reasoning 合并、trace 过滤或 plan 行为
+`sessionRuntimeChanged` 只能更新 `sessionRuntime[sessionId]`；MCP/LSP 的全局 health event 更新 server catalog，当前会话实际 active 列表来自 selected session runtime。`agentChanged` 是 latest snapshot merge：如果新 snapshot 未携带 `runtimeUsage`，必须保留同 agent 已有的 runtime usage，避免状态变更覆盖 token/cost 信息。
 
-前端 reducer 的 conversation 状态固定为：
+## 3. Timeline Projection
 
-- `messages: Map<messageId, StudioMessage>`
-- `partsByMessage: Map<messageId, StudioPart[]>`
-- `partDeltaAccum: Map<partId, StudioPartDeltaAccum>`
-- `eventNextSequence: number`
+Timeline row 从 `messages + parts + partTextAccumDelta` 派生，不从 raw event 渲染。row key 只由稳定领域身份组成：
 
-`messages` 与 `partsByMessage` 是前端 conversation 的事实状态：初始/切换会话来自 `SessionStateResponse.messages/parts` projection record（每条包含 snapshot 与来源 event `sequence`），实时和 stale backfill 来自 `StudioEventEnvelope` 增量更新，不作为 Tauri command 的输入 DTO。message 按创建时间与 durable sequence 排序，part 按 `order` 稳定排序；delta 只能附加到已有 part 的 overlay，snapshot 到达后以 snapshot 为准并清 overlay。组件不得再把运行中 tool map、agent events 和 trace items 临时拼接成主 timeline。工具聚合与普通 trace 过滤只能作为 `conversationEntries` 派生显示层逻辑，不能写回 reducer 状态或后端 DTO。
+- `user-message:{messageId}`
+- `assistant-part:{userMessageId}:{groupKey}`
+- `thinking:{userMessageId}`
+- `diff-summary:{userMessageId}`
+- `bottom-spacer`
 
-初始 projection snapshot、实时事件和补拉事件必须进入同一个前端 conversation reducer，并收敛到相同 message/part projection。fold 规则按 opencode 语义处理：orphan delta 丢弃；snapshot upsert 完整 part 并清除 overlay；旧 snapshot 不得覆盖已应用的新 snapshot。
+reasoning part 按 opencode 普通 assistant part 处理，参与 `groupParts`，不再把同 turn 的多个 reasoning part 合并成旧 thought entry。这样新 reasoning 的 `messageId + partId` 不会复用旧 row key，也不会把流式 delta 写回旧思考行。
 
-左侧 project 列表的每个项目行右侧提供 `X` 归档按钮。归档 project 不删除磁盘目录，也不修改项目文件；它只归档 Studio 中的 project 记录，并清理该 project 下的 sessions、messages、timeline、agent、runtime 和审批历史。用户重新打开同一路径时复用原 project 记录，但历史会话已经清空，应按新项目入口创建默认会话。归档当前 project 时切换到下一个未归档 project；没有剩余 project 时进入无项目状态。
+reasoning 正文默认折叠。运行中的 reasoning 只在 header 显示 `Thinking...` 或从首行推导出的 heading，不自动展开正文；用户手动展开后才显示完整 thinking 文本。`showReasoningSummaries` 只能控制是否显示 reasoning summary/row，不能把多个 reasoning part 合并成一个旧 thought row。
 
-主聊天 timeline 的滚动容器由独立渲染适配层负责。该适配层输入 `ConversationEntry[]`，输出现有 message、plan、thought、tool、tool group、agent 和 trace entry 组件；它必须保持稳定 key、支持可变高度内容重测量，并维持“在底部才自动跟随”的规则。用户上滚阅读历史时，实时 delta 只能显示跳到最新入口，不能抢占滚动位置。
+text/reasoning 的显示文本读取 `partTextAccumDelta[partId] ?? part.text`。snapshot 到达后以 snapshot 为准并清 overlay；同一 frame 内同 part 的 snapshot 覆盖旧 delta。若 snapshot coalescing 替换了 start snapshot，同 part 的 pending delta 进入 stale set 并跳过，避免旧思考 chunk 倒灌到 terminal 文本。
 
-Markdown 阅读样式属于 timeline 展示层：assistant 正文和 plan 卡片正文需要保留舒适内边距、最大阅读宽度、段落间距、列表缩进、引用和代码块层次；用户消息仍保持紧凑气泡，不套用 assistant 的大内边距。移动端和窄窗口下 Markdown 内容必须允许代码块横向滚动，并避免长链接、长路径和行内代码撑破聊天列。
+阶段性文本输出使用普通 `text` part，`textChannel=commentary`。start snapshot 创建空 part，delta 追加到 live overlay，terminal snapshot 固化完整文本。即使终态 snapshot 很快到达，前端也必须能在流式期间显示 commentary/final 中间文本；不能把 commentary 合并进 final，也不能把工具后的新文本追加到工具前的 part。
 
-## 3. Turn 生命周期
+plan、commentary 和普通 text 的 live overlay 必须使用 stream-safe Markdown 渲染。运行中 delta 可以是不完整 Markdown，但 UI 仍应显示列表、标题、代码块等结构；terminal snapshot 到达后清 overlay，并以完整 Markdown 重新渲染。
 
-后端 `turns` 表状态固定：
+工具展示使用 opencode `groupParts` 语义：普通 part group key 为 `part:{messageId}:{partId}`，连续 context tool 可聚合为 context group，group key 取首个 part id。工具状态以 part snapshot 的 `status` 为准；展示层不得改写 `StudioPart`。
 
-- `queued`
-- `contextLoading`
-- `waitingForModel`
-- `streaming`
-- `waitingForInteraction`
-- `runningTool`
-- `persisting`
-- `completed`
-- `failed`
-- `cancelled`
+Timeline 虚拟滚动必须监听 opencode 同款 active assistant content version：当前 active assistant message 的完成状态、错误、text/reasoning 展示长度、tool status、tool result/metadata 长度变化都要触发 `virtua.measure()` 和底部锚定。row key 不变但内容增长时，仍要保持底部跟随；切换 session 时写入/读取 row cache，并用 keep-mounted 行避免 active turn 被虚拟列表过早卸载。
 
-前端展示 phase 从当前 session view 的 turn、active interaction 和 timeline 派生：
+## 4. Interaction 与状态栏
 
-- `idle`
-- `running`
-- `thinking`
-- `tool`
-- `agent`
-- `approval`
-- `stopping`
-- `completed`
-- `interrupted`
-- `failed`
+普通 prompt、Plan 确认、tool approval、ask-user、legacy session handoff、agent latest snapshot、agent timeline event 和 runtime usage 都以 `sessionId` 为边界。切换会话时用后端当前 session snapshot 替换当前 view；后台 session 事件只更新对应 view，不污染当前 timeline 或状态栏。Plan 确认的实施动作必须留在当前 session 内，不能改变 `selectedSessionId`。
 
-停止按钮触发真实 interrupt，最终状态必须收敛到 `interrupted` 或 `failed`，不能被延迟完成覆盖。
+聊天底部只渲染一个最高优先级 pending interaction，优先级为 `toolApproval > userInput > planConfirmation`。这个区域采用 opencode dock prompt 语义：pending 的问题与权限请求不写入 timeline view model，timeline 中 pending `request_user_input` / `question` tool part 隐藏，由 dock 显示真实问题、选项和输入控件；完成后的问题 tool part 可以作为普通 assistant tool part 显示“Questions / answered”摘要。普通 prompt 输入不再渲染 Auto/Plan 二级按钮，模式切换只存在于状态栏，避免与状态栏重复。`submit_prompt` 和 `resolve_interaction` 只表示提交成功，不返回最终 timeline；后续展示完全由 `studio-runtime-event` 驱动。`toolApproval` 必须显示工具名、参数、工作目录和 approve/deny；`userInput` 必须显示每个问题、选项、free text/other/secret 输入并提交 `{ [questionId]: { answers } }`，secret 答案不得以明文出现在 timeline；`planConfirmation` 保留 implement fresh、continue planning、dismiss 三动作，并和问题/权限一样使用 dock prompt，而不是从 timeline 自行推断“是否实施计划”。
 
-## 4. 命令契约
+pending interaction 只替换普通 prompt 输入，不得隐藏当前 turn 的停止控制；只要当前 session 的 turn 仍处于非终态，footer 必须保留停止按钮并调用 `stop_prompt(sessionId)`。`busy` 与停止按钮状态必须按 `sessionId` 归属计算，后台 session 的 turn event 不能让当前 session 显示不可用的停止态。
 
-前端仅消费新 DTO：
+Solid `SessionStatusBar` 保留旧 React 状态栏功能：模式切换、planner 模型选择、reasoning effort、权限模式、context/token/cost、active skills、MCP、LSP 和 subagent 活动列表。状态栏所有数据来自 Studio store；`mcpHealthChanged` 与 `lspHealthChanged` 必须更新对应 snapshot，不能在 reducer 中丢弃。
 
-- `BootstrapResponse`
-- `ProjectSelectionResponse`
-- `SessionSelectionResponse`
-- `SubmitPromptResponse`
-- `ResolveInteractionResponse`
-- `SessionStateResponse`
-- `StudioEventsResponse`
+状态栏的 waiting 状态以 active interaction 为一等输入。`busy` 表示 turn 是否仍在运行，`activeInteraction` 表示 UI 是否必须等待用户响应；Plan confirmation 可以在 `busy=false` 时仍阻塞 composer。状态栏 phase 优先级为 `toolApproval -> userInput -> planConfirmation -> turnPhase`。
 
-`submit_prompt` 接收 `attachmentIds`，当附件非空时允许 `prompt` 为空。图片附件先通过独立上传命令写入 Studio app data，再以附件 id 引用；前端不得把 base64 图片直接塞进 prompt 文本。旧字段别名、旧 payload 解析逻辑、旧 text/thinking/tool delta reducer 分支在方案乙中删除。`SubmitPromptResponse` 只表示后台 turn 已提交，包含 `sessionId`、`turnId` 和当前 cursor；不得携带最终 timeline 结果。`SessionStateResponse.messages` / `parts` 返回当前 message/part projection record，`SessionStateResponse.events` 只附带非 message/part durable 状态事件；`StudioEventsResponse.events` 返回补拉的 durable `StudioEventEnvelope[]`。`StudioMessage` / `StudioPart` 是前端 reducer 的事实源，timeline 展示只能使用 selector 派生的 `ConversationPartView` / `ConversationEntry`，不得再把旧 timeline DTO 或内部 `TracePart` 作为 Studio UI 事实源。
+会话列表是独立滚动区域，row 采用 opencode 式单行 flex 布局：图标/状态固定宽度，标题 `min-width:0` 且 `truncate`，列表项 `flex-shrink:0`。Sessions 区域过长时只滚动列表，不挤压 project 区、settings 按钮或相邻 session row。
 
-## 5. 选择器与派生数据
+Settings 是 Solid store 的配置编辑入口，不恢复 React 兼容层。它必须对齐旧 React 设置页的能力：Providers、Instructions、Skills、Roles、MCP、Security 和 General 页签。配置状态来自 `ConfigPayload` 与现有 Tauri command：`load_provider_usages`、`save_provider_settings`、`save_instructions_settings`、`save_mcp_settings`、`save_permission_mode` 和 `list_discovered_skills`。设置页本地 UI 状态包括 active tab、provider search、selected provider、provider usage loading/error；保存成功后必须用返回的 canonical `ConfigPayload` 更新 providers、roles、templates、instructions、MCP servers、permission mode、config TOML 和 config exists 状态。
 
-从 reducer state 派生：
+Provider 设置支持搜索、刷新用量、选择默认 provider、新增/编辑/删除 provider、切换 provider template、编辑 base URL/API key/default model，以及追加/删除 custom model。Role 设置固定展示 explorer/planner/executor/reviewer 四个角色，并在 provider/model 删除或不可用时规范化到可用 provider/model/effort。MCP 设置支持 stdio 和 streamable HTTP，保留 built-in/locked server metadata，只允许可编辑 server 修改身份；保存前清理空 args/env/headers。Instructions、Security 和 Skills 设置分别编辑提示词配置、权限模式和当前项目 skill discovery，不能绕过 store 直接写 UI-only 状态。
 
-- `conversationEntries`
-- `selectedProject`
-- `selectedSession`
-- `sessionRuntime`
-- `activeSubagentCount`
-- `turnElapsedMs`
-- `isBusy`
-- `activeInteraction`
+## 5. 验收目标
 
-组件通过 selectors 读取，不直接拼装跨域状态。
-
-状态栏固定渲染在聊天底部。聊天顶部标题栏只展示当前会话标题，不展示项目完整路径，避免长路径撑宽主聊天列。左侧展示高频控制：`Auto / Plan` 模式、模型、推理强度和权限模式；右侧展示只读状态：上下文使用量、按货币分组的费用估算、能力数量和 agent latest snapshot。权限模式来自当前配置：请求批准、替我审批或完全访问。Skills 数量和列表表示当前会话已经成功 `skill_view`、内容进入上下文的 skills，不是配置声明，也不是可 discover 的全部 skills。MCP 数量和列表来自后端 MCP runtime registry 当前 `available` server，表示当前会话会向模型暴露的 MCP server。运行中收到 `SkillActivated` 后，前端必须通过 `SessionRuntimeChanged` 或 `skillActivated` 事件更新当前会话 `activeSkills`；不得从 `skill_view` 的 tool result 文本反解析 skill 状态。设置页的 Skills 标签页则展示当前项目按 discovery 规则发现的只读 skills 列表，并显示每项 scope；该列表不代表当前会话已激活。运行中收到 `SessionRuntimeChanged`、`McpHealthChanged`、`LspHealthChanged` 或 agent snapshot 事件后必须即时更新 `sessionRuntime`、MCP/LSP health 和对应 agent 的 `runtimeUsage`，不能等后台 run 完成后才刷新。设置页作为全屏 overlay 打开时必须覆盖聊天状态栏与其 popover，状态栏不得浮到设置页之上。
-
-Provider 设置页的供应商卡片以可扫读的运维状态为主：头部展示供应商名称、key、健康状态和默认路由；卡片信息区展示默认模型、模型数量和额度/余额状态，不展示 base URL。DeepSeek 卡片展示后端查询到的账户余额和币种明细；Zhipu Coding Plan 卡片展示 5 小时、7 天和 MCP 工具额度进度，并在有明细时展示网络搜索、Web Reader、ZRead 等工具用量。普通 Zhipu 和 OpenAI 卡片展示“暂不支持额度查询”的稳定占位，保持列表对齐。额度查询由 Tauri 后端读取当前配置和 API key 后完成，前端只接收脱敏结果；打开 Provider 设置页时刷新一次，用户也可以手动刷新，不能自动定时轮询。
-
-状态栏在窄窗口下保留左侧高频控制，并把右侧只读状态按优先级收入“更多”菜单；更多入口固定跟随左侧控制组显示，避免右侧只读状态挤压时入口也被裁剪。由于桌面布局含左侧项目/会话栏，响应式必须优先按聊天 footer 自身宽度判断，并保留整窗宽度兜底：聊天 footer 约 `1040px` 以下收起能力和子代理，footer 约 `760px` 以下额外收起费用，footer 约 `520px` 以下额外收起上下文。整窗兜底在 `1320px` 以下直接收起费用、能力和子代理，避免不支持 container query 的 WebView2 环境按整窗宽度误判聊天列空间。更多菜单直接展示被收起状态的摘要和详情，不依赖悬浮 popover，必须支持点击、键盘聚焦、外部点击和 `Escape` 关闭，且不得被状态栏横向滚动容器或窗口边界裁剪。
-
-聊天输入区提供 `Auto / Plan` 模式切换，当前值来自选中 session 的 `mode` 并通过后端命令持久化。新会话默认 `auto`。Plan 卡片展示计划正文和轻量状态徽标，不提供“实现计划”按钮。最新计划生成完成后，后端创建 `planConfirmation` interaction，底部普通输入框自动替换为计划确认 composer。确认 composer 必须默认展示可直接输入的继续讨论文本框，并提供三个动作：
-
-普通 composer 支持粘贴、拖放和文件选择上传 `png`、`jpeg`、`webp` 图片。上传入口由当前模型 `capabilities.input` 是否包含 `image` 决定；没有视觉能力时隐藏或禁用图片入口，并在已有图片草稿提交前给出本地错误。图片草稿展示缩略图、文件名和删除按钮；发送成功后清空草稿。图片上传由 Tauri 后端完成格式校验、尺寸/大小归一化和 app data 持久化，前端只保存返回的附件 id 与预览数据。
-
-- `清空上下文并实现`：通过 `resolve_interaction(interactionId, { type: "planConfirmation", decision: "implementFreshContext" })` 解析当前 interaction。后端创建显式 session handoff：新 Auto session 使用 Codex 风格 handoff prompt 加 plan markdown 作为 fresh context 的唯一意图来源；原计划 session 保持可恢复，但从活跃 session 列表隐藏，避免实施开始后同时出现计划 session 与实施 session。实施 handoff 创建成功后，前端通过 `sessionHandoffChanged` 切到目标 session，并通过目标 session 的 `turnChanged/messageUpdated/messagePartUpdated/messagePartDelta/agentChanged` 实时展示步骤；不能停留在来源 session 等最终结果一次性替换。
-- `继续讨论`：用户可直接在确认 composer 的输入框写入追问或调整内容；一次提交先通过同一命令解析为 `decision: "continuePlanning"` 且携带 `content`，后端记录 `continuedPlanning`，随后前端立即把同一 `content` 作为普通 prompt 发送，用于继续追问或修改计划，不自动切换到 `auto`。如果 resolution 失败，不发送 prompt。
-- `取消`：解析为 `decision: "dismiss"`，后端记录 `dismissed(reason=dismissed)`，关闭确认 composer，恢复普通输入框，不提交任何内容。
-
-计划确认是 `InteractionKind::PlanConfirmation`，不是计划卡片组件的局部状态，也不是前端 reducer 从 timeline 推断的临时 `planAction`。当前 live Plan turn 完成后，后端从本轮最新未处理 `plan` item 创建 pending interaction；历史 timeline 加载不得自动弹出旧计划。`planStates` 按 `planId` 记录后端生命周期 latest state；已有 `accepted`、`implementing`、`implemented`、`implementationFailed`、`continuedPlanning`、`dismissed` 或 `cancelled` 状态的计划不得重新创建确认 interaction。
-
-运行中如果收到 `userInput` pending interaction，聊天底部普通输入框必须被 `AskUserComposer` 替换。该 UI 逐个展示结构化问题，用户可以在问题之间前进和返回；只有最终点击提交时才通过 `resolve_interaction` 一次性回答当前 interaction 并恢复普通 composer。每个问题支持选项和必要的自由输入，选项选择不会立即提交。ask-user 期间用户不能发送新的普通 prompt，但停止按钮仍可中断当前 turn。
-
-设置页 Security 标签页提供会话级权限模式选择。`request-approval` 在 workspace 内直接执行，访问 workspace 外时创建 `toolApproval` interaction；`auto-review` 在 workspace 内直接执行，访问 workspace 外时由 reviewer 模型自动审批，前端不弹用户审批卡片，只通过工具结果展示已批准或已拒绝的事实；`full-access` 明确展示为会放宽 workspace 外文件路径和 shell cwd 边界并直接放行的模式。聊天底部只渲染一个最高优先级 interaction，优先级固定为 `toolApproval > userInput > planConfirmation`。
-
-设置页 MCP 标签页提供结构化 server 配置。列表展示 server id、用户启用状态、实际可用性、来源、传输方式和主要 endpoint；新增和编辑用户 server 使用本地草稿，保存成功后即时写入 `~/.pure/config.toml`、刷新配置 payload 并触发后台健康检查。stdio 表单提供 command、args、env 和可选 cwd；Streamable HTTP 表单提供 url、bearer token 环境变量和 headers。启用且实际可用的 MCP server 被视为用户信任对象，其 tools 在 Auto 和 Plan Mode 中直接暴露，不额外触发审批弹窗。
-
-MCP 标签页必须同时展示后端合成的内置 Zhipu Coding Plan MCP server。内置项显示“内置 / Zhipu Coding Plan”来源、配置状态和实际可用性；缺少 Zhipu Coding Plan 或 Zhipu provider token 时显示缺少 Key 且不开启，检测到 token 后自动恢复启用并进入后台探测。内置项不可删除，server id、transport、endpoint、headers、env 等身份字段只读；保留启用切换按钮，但后端保存后仍以 token 自动恢复开启策略为准。保存 provider API key 后返回的 `ConfigPayload` 必须立即刷新 MCP 配置状态并触发 health update，无需用户再保存 MCP 标签页。
-
-Provider 标签页必须包含 Zhipu Coding Plan 模板。该模板在 UI 中作为独立供应商入口展示，但保存到配置时仍使用 `provider_kind = "zhipu"`，默认 base URL 为 `https://open.bigmodel.cn/api/coding/paas/v4`，默认模型列表与现有 Zhipu 模板完全一致。内置 Zhipu Coding Plan MCP server 的凭据优先使用该模板保存的 `bearer_token`，保存后返回的 `ConfigPayload` 必须立即反映 MCP 状态变化。
-
-工具调用展示遵循 `design/13-tool-calling-runtime.md` 的生命周期语义。工具 entry 和工具组详情必须展示工具名称、状态和关键路径或命令摘要；静默文件工具的成功结果可以隐藏，但 failed、denied、interrupted、budgetLimited 等异常状态必须展示 result/error 详情。前端只做展示派生，不改变 raw `StudioPart` 的状态或结果内容。实时状态文案必须以 tool part 的 `status` 为准；`messagePartUpdated` 是中性 snapshot，不能被命名或处理成 completed 才能表达 `approved` 这类执行前中间态。
-
-agent latest snapshot、agent timeline event、session runtime 和审批状态必须以 `sessionId` 为边界。切换项目、切换会话或新建会话时，前端必须用后端返回的当前会话快照替换当前 session view；运行中收到的实时事件如果属于非当前会话，只更新对应后台 session view，不能污染当前状态栏、子代理 popover 或 timeline。`SessionStateResponse.agents` 是当前会话恢复时的权威快照，不能与旧会话遗留 agents 合并。
-
-实时 `AgentStateChanged` 若未携带 `runtimeUsage`，前端不得清空同一 agent 已有的费用快照；它只更新状态、摘要、错误和其他 latest snapshot 字段。项目/会话切换、`select_session` 和 `load_session_state` 仍以当前会话后端完整快照替换本地 agent 列表。
-
-子代理 popover 每行展示角色、任务、状态和该 agent 的费用摘要。存在 token 但缺少价格配置时显示未配置，不把未计价 token 混入任意币种。
-
-失败子代理的 `error` 文本必须优先展示在 timeline 和 latest snapshot UI 中；`reason` 仅用于机器可读分类，不应作为用户可见失败说明的唯一来源。
-
-当子代理因 provider `429` 失败时，UI 仍按失败子代理展示该记录和原始错误文本。429 只改变父 agent 的运行语义：父 agent 会收到可恢复工具结果并继续本地完成任务；Studio 不隐藏、不删除该失败记录。
-
-## 6. 验收目标
-
-- `App.tsx` 目标降至壳层，业务状态迁出
-- 事件监听不再直接 `setState`
-- 高频事件下 timeline 无断流和错序
-- 停止行为稳定收尾为 `interrupted`
+- `pure-studio` 构建不依赖 React。
+- `messagePartDelta` 可以实时显示 text/reasoning/tool/plan 中间输出。
+- terminal snapshot 清除 overlay，reload/backfill 与 live terminal UI 收敛。
+- 用户一次输入只出现一条用户消息。
+- 多个 reasoning part 不复用旧 row，不发生“新思考更新到旧信息上”。
+- 真实 UI 回归通过：输入、流式输出、停止、切换 session、Plan 确认和 tool approval 均可用。

@@ -290,6 +290,7 @@ impl StudioStore {
             archived: Set(0),
             visibility: Set(SessionVisibility::Active.as_str().to_string()),
             instruction_snapshot_json: Set(None),
+            parent_session_id: Set(None),
         }
         .insert(&self.db)
         .await?;
@@ -302,6 +303,7 @@ impl StudioStore {
             .filter(session::Column::ProjectId.eq(project_id.to_string()))
             .filter(session::Column::Archived.eq(0))
             .filter(session::Column::Visibility.eq(SessionVisibility::Active.as_str()))
+            .filter(session::Column::ParentSessionId.is_null())
             .order_by_desc(session::Column::UpdatedAt)
             .order_by_desc(session::Column::Id)
             .all(&self.db)
@@ -1259,12 +1261,13 @@ async fn start_plan_implementation_handoff_with_tx(
         archived: Set(0),
         visibility: Set(SessionVisibility::Active.as_str().to_string()),
         instruction_snapshot_json: Set(None),
+        parent_session_id: Set(Some(origin_session_before.id.clone())),
     }
     .insert(tx)
     .await?;
 
     let mut origin_active: session::ActiveModel = origin_session_row.into();
-    origin_active.visibility = Set(SessionVisibility::HandoffOrigin.as_str().to_string());
+    origin_active.visibility = Set(SessionVisibility::Active.as_str().to_string());
     origin_active.updated_at = Set(now);
     origin_active.update(tx).await?;
 

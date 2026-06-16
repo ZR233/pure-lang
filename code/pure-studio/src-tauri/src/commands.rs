@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use pl_core::{
-    CompileMode, PermissionMode, PureConfig, RunPromptRequest, SessionHandoffStatus,
-    StudioPromptOutcome, StudioRuntime, TurnOptions, TurnResultStatus, resolution_matches_kind,
+    CompileMode, PermissionMode, PureConfig, RunPromptRequest, StudioPromptOutcome, StudioRuntime,
+    TurnOptions, TurnResultStatus, resolution_matches_kind,
 };
 use pl_protocol::{
     InteractionPayload, InteractionResolution, InteractionStatus, PlanConfirmationResolution,
@@ -30,7 +30,7 @@ use crate::mappers::{
 };
 use crate::state::{AppState, CommandError, CommandResult};
 
-const IMPLEMENT_PLAN_FRESH_CONTEXT_PREFIX: &str = "A previous agent produced the plan below to accomplish the user's task. Implement the plan in a fresh context. Treat the plan as the source of user intent, re-read files as needed, and carry the work through implementation and verification.";
+const IMPLEMENT_PLAN_CURRENT_SESSION_PREFIX: &str = "A previous agent produced the plan below to accomplish the user's task. Implement the plan in the current session. Treat the plan as the source of user intent, re-read files as needed, and carry the work through implementation and verification.";
 
 struct TurnCompletion {
     status: TurnResultStatus,
@@ -47,6 +47,14 @@ struct PlanLifecycleChange {
 struct PlanImplementationLifecycle {
     origin_session_id: String,
     plan_id: String,
+}
+
+#[derive(Default)]
+struct SubmitPromptBackgroundOptions {
+    lifecycle: Option<PlanImplementationLifecycle>,
+    visible_prompt: Option<String>,
+    synthetic_user_prompt: bool,
+    ignored_user_prompt: bool,
 }
 
 #[tauri::command]
@@ -318,7 +326,7 @@ pub async fn submit_prompt(
         attachment_ids.unwrap_or_default(),
         app,
         &state,
-        None,
+        SubmitPromptBackgroundOptions::default(),
     )
     .await
 }
@@ -379,53 +387,79 @@ pub async fn resolve_interaction(
             };
             let (resolved, plan_lifecycle) = match decision {
                 PlanConfirmationResolution::ImplementFreshContext => {
-                    let resolution = InteractionResolution::PlanConfirmation {
-                        decision: PlanConfirmationResolution::ImplementFreshContext,
-                        content,
-                        reason,
-                    };
-                    let handoff = state
-                        .studio
-                        .store()
-                        .start_plan_implementation_handoff(&interaction_id, resolution)
-                        .await?;
-                    let _ = emitter(handoff.interaction.clone()).await;
-                    for event in handoff.plan_lifecycle_events.clone() {
-                        let _ = state
-                            .studio
-                            .events()
-                            .emit(
-                                None,
-                                Some(handoff.origin_session.id.clone()),
-                                event.turn_id.clone(),
-                                StudioEventKind::PlanLifecycleChanged { event },
-                            )
-                            .await?;
+                    if current.status != InteractionStatus::Pending {
+                        return Ok(ResolveInteractionResponse {
+                            session_id,
+                            interaction: current,
+                            plan_lifecycle: None,
+                        });
                     }
-                    if handoff.should_start_run {
-                        let content = handoff.plan_content.trim().to_string();
-                        if content.is_empty() {
-                            return Err(CommandError::from_display("plan content is empty"));
-                        }
-                        let _ = state.studio.events().emit_handoff(&handoff.handoff).await?;
-                        let prompt = format!("{IMPLEMENT_PLAN_FRESH_CONTEXT_PREFIX}\n\n{content}");
-                        let _ = submit_prompt_background(
-                            handoff.target_session.id.clone(),
-                            prompt,
-                            Vec::new(),
-                            app,
-                            &state,
-                            Some(PlanImplementationLifecycle {
-                                origin_session_id: handoff.origin_session.id.clone(),
-                                plan_id: handoff.plan_id.clone(),
-                            }),
+                    let resolved = state
+                        .studio
+                        .interactions()
+                        .resolve(
+                            &interaction_id,
+                            InteractionResolution::PlanConfirmation {
+                                decision: PlanConfirmationResolution::ImplementFreshContext,
+                                content: content.clone(),
+                                reason: reason.clone(),
+                            },
+                            emitter,
                         )
                         .await?;
+                    let plan_content = content
+                        .filter(|value| !value.trim().is_empty())
+                        .or_else(|| match &current.payload {
+                            InteractionPayload::PlanConfirmation { content, .. } => {
+                                Some(content.clone())
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let plan_content = plan_content.trim().to_string();
+                    if plan_content.is_empty() {
+                        return Err(CommandError::from_display("plan content is empty"));
                     }
-                    let plan_lifecycle = Some(
-                        plan_lifecycle_response(&state.studio, &handoff.origin_session.id).await?,
-                    );
-                    (handoff.interaction, plan_lifecycle)
+                    append_plan_lifecycle_events(
+                        &state.studio,
+                        &session_id,
+                        plan_id,
+                        vec![
+                            PlanLifecycleChange {
+                                state: PlanLifecycleState::Accepted,
+                                turn_id: None,
+                                reason: reason.filter(|value| !value.trim().is_empty()),
+                            },
+                            PlanLifecycleChange {
+                                state: PlanLifecycleState::Implementing,
+                                turn_id: None,
+                                reason: None,
+                            },
+                        ],
+                    )
+                    .await?;
+                    let prompt =
+                        format!("{IMPLEMENT_PLAN_CURRENT_SESSION_PREFIX}\n\n{plan_content}");
+                    let _ = submit_prompt_background(
+                        session_id.clone(),
+                        prompt,
+                        Vec::new(),
+                        app,
+                        &state,
+                        SubmitPromptBackgroundOptions {
+                            lifecycle: Some(PlanImplementationLifecycle {
+                                origin_session_id: session_id.clone(),
+                                plan_id: plan_id.clone(),
+                            }),
+                            visible_prompt: Some("实施计划".to_string()),
+                            synthetic_user_prompt: true,
+                            ignored_user_prompt: true,
+                        },
+                    )
+                    .await?;
+                    let plan_lifecycle =
+                        Some(plan_lifecycle_response(&state.studio, &session_id).await?);
+                    (resolved, plan_lifecycle)
                 }
                 PlanConfirmationResolution::ContinuePlanning => {
                     if current.status != InteractionStatus::Pending {
@@ -619,21 +653,8 @@ async fn run_prompt_inner(
                     }],
                 )
                 .await?;
-                let handoff_status = match outcome.result.status {
-                    TurnResultStatus::Completed => SessionHandoffStatus::Completed,
-                    TurnResultStatus::Aborted => SessionHandoffStatus::Cancelled,
-                    TurnResultStatus::Errored => SessionHandoffStatus::Failed,
-                };
-                state
-                    .studio
-                    .store()
-                    .set_plan_implementation_handoff_status(
-                        &lifecycle.origin_session_id,
-                        &lifecycle.plan_id,
-                        handoff_status,
-                    )
-                    .await?;
             }
+            emit_session_runtime_changed(state, &session_id).await?;
             Ok(turn_completion(outcome))
         }
         Err(error) => {
@@ -650,15 +671,6 @@ async fn run_prompt_inner(
                     }],
                 )
                 .await?;
-                state
-                    .studio
-                    .store()
-                    .set_plan_implementation_handoff_status(
-                        &lifecycle.origin_session_id,
-                        &lifecycle.plan_id,
-                        SessionHandoffStatus::Failed,
-                    )
-                    .await?;
             }
             Err(CommandError { message })
         }
@@ -671,7 +683,7 @@ async fn submit_prompt_background(
     attachment_ids: Vec<String>,
     app: AppHandle,
     state: &AppState,
-    lifecycle: Option<PlanImplementationLifecycle>,
+    options: SubmitPromptBackgroundOptions,
 ) -> CommandResult<SubmitPromptResponse> {
     if prompt.trim().is_empty() && attachment_ids.is_empty() {
         return Err(CommandError::from_display("prompt is empty"));
@@ -697,7 +709,16 @@ async fn submit_prompt_background(
             None,
         )
         .await?;
-    emit_user_prompt_snapshots(&session_id, &turn_id, &prompt, &attachment_ids, state).await?;
+    emit_user_prompt_snapshots(
+        &session_id,
+        &turn_id,
+        options.visible_prompt.as_deref().unwrap_or(&prompt),
+        &attachment_ids,
+        state,
+        options.synthetic_user_prompt,
+        options.ignored_user_prompt,
+    )
+    .await?;
     let cursor = state
         .studio
         .store()
@@ -706,6 +727,7 @@ async fn submit_prompt_background(
     let run_state = state.clone();
     let run_session_id = session_id.clone();
     let run_turn_id = turn_id.clone();
+    let lifecycle = options.lifecycle;
     tauri::async_runtime::spawn(async move {
         let _ = run_state
             .studio
@@ -774,6 +796,8 @@ async fn emit_user_prompt_snapshots(
     prompt: &str,
     attachment_ids: &[String],
     state: &AppState,
+    synthetic: bool,
+    ignored: bool,
 ) -> CommandResult<()> {
     let now = unix_seconds();
     let message_id = format!("{turn_id}:user");
@@ -796,7 +820,14 @@ async fn emit_user_prompt_snapshots(
         updated_at: now,
         completed_at: Some(now),
         error: None,
-        metadata: serde_json::json!({}),
+        metadata: if synthetic || ignored {
+            serde_json::json!({
+                "synthetic": synthetic,
+                "ignored": ignored,
+            })
+        } else {
+            serde_json::json!({})
+        },
     };
     state
         .studio
@@ -831,8 +862,8 @@ async fn emit_user_prompt_snapshots(
         plan: None,
         file: None,
         usage: None,
-        synthetic: false,
-        ignored: false,
+        synthetic,
+        ignored,
     };
     state
         .studio
@@ -843,6 +874,23 @@ async fn emit_user_prompt_snapshots(
             Some(turn_id.to_string()),
             StudioEventKind::MessagePartUpdated {
                 part: Box::new(part),
+            },
+        )
+        .await?;
+    Ok(())
+}
+
+async fn emit_session_runtime_changed(state: &AppState, session_id: &str) -> CommandResult<()> {
+    let runtime = load_session_runtime_dto(&state.studio, session_id).await?;
+    state
+        .studio
+        .events()
+        .emit(
+            None,
+            Some(session_id.to_string()),
+            None,
+            StudioEventKind::SessionRuntimeChanged {
+                runtime: runtime.into(),
             },
         )
         .await?;

@@ -27,6 +27,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../../migrations/0016_attachments.sql"),
     include_str!("../../migrations/0017_message_parts.sql"),
     include_str!("../../migrations/0018_drop_legacy_timeline_events.sql"),
+    include_str!("../../migrations/0019_session_parent_id.sql"),
 ];
 
 pub(super) async fn insert_message_with_tx(

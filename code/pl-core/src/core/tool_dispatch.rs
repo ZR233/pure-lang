@@ -139,6 +139,7 @@ pub(super) async fn execute_tool_calls(
             if let Some(tool) = &mut item.tool {
                 tool.denial_reason = Some(message.clone());
             }
+            emit_tool_snapshot(recorder, &mut item, TracePartStatus::Denied);
             scheduled.push(ScheduledToolExecution {
                 tool_call: tool_call.clone(),
                 item,
@@ -159,6 +160,7 @@ pub(super) async fn execute_tool_calls(
                 "[pl-core] Unknown tool: {:?}, available: {:?}",
                 tool_call.name, available
             );
+            emit_tool_snapshot(recorder, &mut item, TracePartStatus::Failed);
             scheduled.push(ScheduledToolExecution {
                 tool_call: tool_call.clone(),
                 item,
@@ -191,7 +193,8 @@ pub(super) async fn execute_tool_calls(
             lsp_runtime: context.core.lsp_runtime.clone(),
             parent_session: context.parent_session.clone(),
         };
-        let approval_request = approval_request(tool_call, &tool_context);
+        let mut approval_request = approval_request(tool_call, &tool_context);
+        approval_request.id = trace_part_id.clone();
         let requested_access = requested_workspace_access(tool_call, context.workspace_root);
         let mut execution_workspace_access = WorkspaceAccess::WorkspaceOnly;
         let decision = match decide_tool_permission(
@@ -205,15 +208,25 @@ pub(super) async fn execute_tool_calls(
                 ToolApprovalDecision::Approved
             }
             PermissionDecision::NeedsUserApproval { workspace_access } => {
+                emit_tool_snapshot(recorder, &mut item, TracePartStatus::AwaitingApproval);
                 let decision =
                     request_user_approval(context.options, &approval_request, context.session_id)
                         .await;
                 if matches!(decision, ToolApprovalDecision::Approved) {
                     execution_workspace_access = workspace_access;
                 }
+                match &decision {
+                    ToolApprovalDecision::Approved => {}
+                    ToolApprovalDecision::Denied { reason } => {
+                        if let Some(tool) = &mut item.tool {
+                            tool.denial_reason = Some(reason.clone());
+                        }
+                    }
+                }
                 decision
             }
             PermissionDecision::NeedsAiReview { workspace_access } => {
+                emit_tool_snapshot(recorder, &mut item, TracePartStatus::AwaitingApproval);
                 let mut review_context = tool_context.clone();
                 review_context.workspace_access = workspace_access;
                 let decision = context
@@ -223,11 +236,25 @@ pub(super) async fn execute_tool_calls(
                 if matches!(decision, ToolApprovalDecision::Approved) {
                     execution_workspace_access = workspace_access;
                 }
+                match &decision {
+                    ToolApprovalDecision::Approved => {}
+                    ToolApprovalDecision::Denied { reason } => {
+                        if let Some(tool) = &mut item.tool {
+                            tool.denial_reason = Some(reason.clone());
+                        }
+                    }
+                }
                 decision
             }
-            PermissionDecision::Denied { reason } => ToolApprovalDecision::Denied { reason },
+            PermissionDecision::Denied { reason } => {
+                if let Some(tool) = &mut item.tool {
+                    tool.denial_reason = Some(reason.clone());
+                }
+                ToolApprovalDecision::Denied { reason }
+            }
         };
         if is_cancelled(context.options) {
+            emit_tool_snapshot(recorder, &mut item, TracePartStatus::Interrupted);
             scheduled.push(ScheduledToolExecution {
                 tool_call: tool_call.clone(),
                 item,
@@ -246,8 +273,8 @@ pub(super) async fn execute_tool_calls(
             ToolApprovalDecision::Approved => {
                 let mut tool_context = tool_context;
                 tool_context.workspace_access = execution_workspace_access;
-                item.status = TracePartStatus::Running;
-                item.updated_at = unix_seconds();
+                emit_tool_snapshot(recorder, &mut item, TracePartStatus::Approved);
+                emit_tool_snapshot(recorder, &mut item, TracePartStatus::Running);
                 let invocation =
                     ToolInvocation::from_tool_call(tool_call, tool_call_id.clone(), tool_context);
                 let _runtime_identity = (
@@ -283,6 +310,7 @@ pub(super) async fn execute_tool_calls(
                 if let Some(tool) = &mut item.tool {
                     tool.denial_reason = Some(reason.clone());
                 }
+                emit_tool_snapshot(recorder, &mut item, TracePartStatus::Denied);
                 scheduled.push(ScheduledToolExecution {
                     tool_call: tool_call.clone(),
                     item,
@@ -413,6 +441,16 @@ async fn collect_scheduled_tools(
     }
 
     Ok(ordered_records.into_iter().flatten().collect())
+}
+
+fn emit_tool_snapshot(
+    recorder: &mut crate::trace::TraceRecorder,
+    item: &mut pl_trace::TracePart,
+    status: TracePartStatus,
+) {
+    item.status = status;
+    item.updated_at = unix_seconds();
+    recorder.update_item_snapshot(item.clone());
 }
 
 fn finalize_tool_item(
