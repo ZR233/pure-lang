@@ -305,7 +305,7 @@ Pure 启动后会在后台并行探测配置意图为启用且凭据完整的 MC
 - `zhipu_search`：Streamable HTTP，`https://open.bigmodel.cn/api/mcp/web_search_prime/mcp`
 - `zhipu_reader`：Streamable HTTP，`https://open.bigmodel.cn/api/mcp/web_reader/mcp`
 - `zhipu_zread`：Streamable HTTP，`https://open.bigmodel.cn/api/mcp/zread/mcp`
-- `zhipu_vision`：stdio，`npx -y @z_ai/mcp-server`
+- `zhipu_vision`：stdio，`npx -y @z_ai/mcp-server`；Windows 运行时使用 `npx.cmd`，避免 `std::process::Command` 无法解析 npm shim
 
 这些内置 server 优先复用 Zhipu Coding Plan provider 的 `bearer_token` 作为 Coding Plan key；若不存在 Coding Plan provider，则兼容回退到普通 Zhipu provider 的 `bearer_token`。缺少可用 token 时内置 server 的配置状态为缺少凭据且不会进入健康探测；检测到 token 时四个内置 server 自动恢复为启用并进入后台探测。HTTP 内置 server 运行时直接发送 bearer token；Vision server 运行时注入 `Z_AI_API_KEY=<token>` 和 `Z_AI_MODE=ZHIPU`。
 

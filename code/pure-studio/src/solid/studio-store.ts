@@ -78,6 +78,9 @@ export type MessageStore = {
   providerUsages: ProviderUsageRecord[];
   providerUsagesLoading: boolean;
   providerUsageError: string | null;
+  providerUsageErrors: Record<string, string | undefined>;
+  providerUsageRefreshing: Record<string, boolean | undefined>;
+  providerUsagesLoadedAt: number | null;
   roles: RoleRecord[];
   instructions: InstructionsRecord;
   configToml: string;
@@ -125,6 +128,9 @@ export function createStudioStore() {
     providerUsages: [],
     providerUsagesLoading: false,
     providerUsageError: null,
+    providerUsageErrors: {},
+    providerUsageRefreshing: {},
+    providerUsagesLoadedAt: null,
     roles: [],
     instructions: {
       baseOverride: "",
@@ -272,6 +278,7 @@ export function createStudioStore() {
     draft.permissionMode = config.permissionMode;
     draft.mcpServers = config.mcpServers;
     draft.selectedProviderId = normalizeSelectedProviderId(draft.selectedProviderId, config.providers);
+    pruneProviderUsageState(draft, config.providers);
     draft.activeMcpServers = config.mcpServers
       .filter((server) => server.availabilityKind === "available")
       .map((server) => server.id);
@@ -392,6 +399,53 @@ export function createStudioStore() {
     }
   }
 
+  async function refreshProviderUsages(providerId?: string) {
+    const targetProviderId = providerId?.trim() || null;
+    if (targetProviderId) {
+      if (store.providerUsageRefreshing[targetProviderId]) return;
+    } else if (store.providerUsagesLoading) {
+      return;
+    }
+    setStore(produce((draft) => {
+      if (targetProviderId) {
+        draft.providerUsageRefreshing[targetProviderId] = true;
+        delete draft.providerUsageErrors[targetProviderId];
+      } else {
+        draft.providerUsagesLoading = true;
+        draft.providerUsageError = null;
+        for (const provider of draft.providers) {
+          delete draft.providerUsageErrors[provider.id];
+        }
+      }
+    }));
+    try {
+      const payload = await loadProviderUsages();
+      const loadedAt = Math.floor(Date.now() / 1000);
+      setStore(produce((draft) => {
+        draft.providerUsages = mergeProviderUsages(draft.providerUsages, payload.usages);
+        draft.providerUsagesLoading = false;
+        draft.providerUsageError = null;
+        draft.providerUsagesLoadedAt = loadedAt;
+        if (targetProviderId) {
+          draft.providerUsageRefreshing[targetProviderId] = false;
+          delete draft.providerUsageErrors[targetProviderId];
+        }
+      }));
+    } catch (error) {
+      const message = errorText(error);
+      setStore(produce((draft) => {
+        if (targetProviderId) {
+          draft.providerUsageRefreshing[targetProviderId] = false;
+          draft.providerUsageErrors[targetProviderId] = message;
+        } else {
+          draft.providerUsagesLoading = false;
+          draft.providerUsageError = message;
+        }
+        draft.status = i18n.t("status.configLoadFailed", { error: message });
+      }));
+    }
+  }
+
   return {
     store,
     setStore,
@@ -409,9 +463,15 @@ export function createStudioStore() {
           draft.settingsOpen = true;
           if (tab) draft.activeSettingsTab = tab;
         }));
+        if ((tab ?? store.activeSettingsTab) === "providers" && shouldRefreshProviderUsages(store)) {
+          void refreshProviderUsages();
+        }
       },
       setSettingsTab(tab: SettingsTab) {
         setStore("activeSettingsTab", tab);
+        if (tab === "providers" && shouldRefreshProviderUsages(store)) {
+          void refreshProviderUsages();
+        }
       },
       setProviderSearch(value: string) {
         setStore("providerSearch", value);
@@ -419,26 +479,7 @@ export function createStudioStore() {
       setSelectedProviderId(providerId: string | null) {
         setStore("selectedProviderId", normalizeSelectedProviderId(providerId, store.providers));
       },
-      async refreshProviderUsages() {
-        setStore(produce((draft) => {
-          draft.providerUsagesLoading = true;
-          draft.providerUsageError = null;
-        }));
-        try {
-          const payload = await loadProviderUsages();
-          setStore(produce((draft) => {
-            draft.providerUsages = mergeProviderUsages(draft.providerUsages, payload.usages);
-            draft.providerUsagesLoading = false;
-            draft.providerUsageError = null;
-          }));
-        } catch (error) {
-          setStore(produce((draft) => {
-            draft.providerUsagesLoading = false;
-            draft.providerUsageError = errorText(error);
-            draft.status = i18n.t("status.configLoadFailed", { error: errorText(error) });
-          }));
-        }
-      },
+      refreshProviderUsages,
       async addProject(path: string) {
         try {
           const payload = await openProject(path);
@@ -527,6 +568,7 @@ export function createStudioStore() {
             applyConfig(draft, config);
             draft.status = i18n.t("status.providerSettingsSaved");
           }));
+          void refreshProviderUsages();
           return true;
         } catch (error) {
           setStore("status", i18n.t("status.providerSettingsInvalid", { error: errorText(error) }));
@@ -928,6 +970,33 @@ function providerSettingsInput(
 function normalizeSelectedProviderId(providerId: string | null | undefined, providers: ProviderRecord[]) {
   if (providerId && providers.some((provider) => provider.id === providerId)) return providerId;
   return providers[0]?.id ?? null;
+}
+
+function pruneProviderUsageState(draft: MessageStore, providers: ProviderRecord[]) {
+  const providerIds = new Set(providers.map((provider) => provider.id));
+  draft.providerUsages = draft.providerUsages.filter((usage) => providerIds.has(usage.providerId));
+  for (const providerId of Object.keys(draft.providerUsageErrors)) {
+    if (!providerIds.has(providerId)) delete draft.providerUsageErrors[providerId];
+  }
+  for (const providerId of Object.keys(draft.providerUsageRefreshing)) {
+    if (!providerIds.has(providerId)) delete draft.providerUsageRefreshing[providerId];
+  }
+}
+
+function shouldRefreshProviderUsages(store: MessageStore) {
+  if (store.providerUsagesLoading) return false;
+  if (!store.providers.some(providerSupportsUsageQuery)) return false;
+  const loadedProviderIds = new Set(store.providerUsages.map((usage) => usage.providerId));
+  if (store.providers.some((provider) => providerSupportsUsageQuery(provider) && !loadedProviderIds.has(provider.id))) {
+    return true;
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const loadedAt = store.providerUsagesLoadedAt ?? 0;
+  return now - loadedAt > 300;
+}
+
+function providerSupportsUsageQuery(provider: ProviderRecord) {
+  return provider.templateKind === "deepseek" || provider.templateKind === "zhipu-coding-plan";
 }
 
 function mergeProviderUsages(existing: ProviderUsageRecord[], incoming: ProviderUsageRecord[]) {

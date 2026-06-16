@@ -433,7 +433,9 @@ impl BuiltinMcpServerDefinition {
         McpServerConfig {
             enabled: zhipu_token.is_some(),
             transport: self.transport,
-            command: self.command.map(ToOwned::to_owned),
+            command: self
+                .command
+                .map(|command| builtin_stdio_command(self.id, command)),
             args: self.args.iter().map(|arg| (*arg).to_string()).collect(),
             env,
             cwd: None,
@@ -442,6 +444,13 @@ impl BuiltinMcpServerDefinition {
             headers: BTreeMap::new(),
         }
     }
+}
+
+fn builtin_stdio_command(server_id: &str, command: &str) -> String {
+    if cfg!(windows) && server_id == ZHIPU_VISION_MCP_ID && command == "npx" {
+        return "npx.cmd".to_string();
+    }
+    command.to_string()
 }
 
 fn default_true() -> bool {
