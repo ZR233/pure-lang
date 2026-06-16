@@ -1155,6 +1155,19 @@ function visibleProjectSessionsAreDedupedSortedAndActiveOnly() {
   ]);
 }
 
+function visibleProjectSessionsIgnoreClosedProjectAndArchivedRows() {
+  const store = emptyStore();
+  store.selectedProjectId = "project-2";
+  store.sessions = [
+    { ...sessionRecord("old-project", 30), projectId: "project-1" },
+    { ...sessionRecord("archived-current", 40, "archived"), projectId: "project-2" },
+    { ...sessionRecord("child-current", 50, "active", "parent"), projectId: "project-2" },
+    { ...sessionRecord("root-current", 60), projectId: "project-2" },
+  ];
+
+  assertDeepEqual(visibleProjectSessions(store).map((session) => session.id), ["root-current"]);
+}
+
 function handoffTargetSessionIsKeptButDoesNotSwitchSelectedSession() {
   const store = emptyStore();
   store.selectedProjectId = "project-1";
@@ -1358,6 +1371,7 @@ selectedSessionViewOwnsRuntimeHealthAndAgents();
 sessionRuntimeEventDoesNotPolluteSelectedRuntimeHealth();
 agentSnapshotPreservesRuntimeUsageWhenUpdateOmitsIt();
 visibleProjectSessionsAreDedupedSortedAndActiveOnly();
+visibleProjectSessionsIgnoreClosedProjectAndArchivedRows();
 handoffTargetSessionIsKeptButDoesNotSwitchSelectedSession();
 ignoredSyntheticUserAnchorStillShowsAssistantParts();
 statusbarWaitingPhaseUsesActiveInteractionPriority();

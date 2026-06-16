@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
   BootstrapPayload,
   AttachmentRecord,
@@ -65,6 +66,18 @@ export function isTauriRuntime() {
   }
   const tauriGlobal = globalThis as TauriGlobal;
   return Boolean(tauriGlobal.__TAURI_INTERNALS__ || tauriGlobal.__TAURI__ || tauriGlobal.isTauri);
+}
+
+export async function chooseProjectDirectory() {
+  if (!isTauriRuntime()) {
+    return previewProjects[0]?.path ?? null;
+  }
+  const selected = await openDialog({
+    directory: true,
+    multiple: false,
+    title: "Open project folder",
+  });
+  return typeof selected === "string" ? selected : null;
 }
 
 export function bootstrapStudio() {

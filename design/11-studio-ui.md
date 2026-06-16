@@ -73,6 +73,10 @@ Solid `SessionStatusBar` 保留旧 React 状态栏功能：模式切换、planne
 
 会话列表是独立滚动区域，row 采用 opencode 式单行 flex 布局：图标/状态固定宽度，标题 `min-width:0` 且 `truncate`，列表项 `flex-shrink:0`。Sessions 区域过长时只滚动列表，不挤压 project 区、settings 按钮或相邻 session row。
 
+项目和会话管理继续走 Studio store 的 Tauri command 入口，不能在组件里手动拼接状态。打开项目支持两种入口：系统目录选择器和手动路径输入；两者都调用 `open_project(path)`，返回的 `ProjectSelectionPayload` 是新的 project/session/sidebar 快照。选择项目调用 `select_project(projectId)`，归档/关闭项目调用 `archive_project(projectId, selectedProjectId)`；后端会拒绝仍有 active turn 的项目，并在成功后返回下一个可选项目或空项目状态。前端收到项目选择 payload 后必须替换 `projects`、当前项目的 `sessions`、`selectedProjectId`、`selectedSessionId`、agent/runtime/interaction/MCP/LSP health；若没有选中会话，timeline、状态栏和 composer 显示无会话空态。
+
+会话关闭是归档语义，不删除磁盘或非对话配置。Session row 上的关闭按钮调用 `delete_session(sessionId, selectedSessionId)`；后端会拒绝 active turn，会取消该会话 pending interaction，并返回同项目的新 session selection。前端收到 payload 后删除/隐藏归档 session、切换到返回的 `selectedSessionId`，并用 `load_session_state` 恢复新会话 projection；如果项目内没有剩余 session，状态栏与 composer 禁用，用户可以用新建会话按钮创建会话。会话列表只显示 `visibility=active && parentSessionId=null`，legacy handoff child/archived session 不作为 root row 出现。
+
 Settings 是 Solid store 的配置编辑入口，不恢复 React 兼容层。它必须对齐旧 React 设置页的能力：Providers、Instructions、Skills、Roles、MCP、Security 和 General 页签。配置状态来自 `ConfigPayload` 与现有 Tauri command：`load_provider_usages`、`save_provider_settings`、`save_instructions_settings`、`save_mcp_settings`、`save_permission_mode` 和 `list_discovered_skills`。设置页本地 UI 状态包括 active tab、provider search、selected provider、provider usage loading/error；保存成功后必须用返回的 canonical `ConfigPayload` 更新 providers、roles、templates、instructions、MCP servers、permission mode、config TOML 和 config exists 状态。
 
 Provider 设置支持搜索、刷新用量、选择默认 provider、新增/编辑/删除 provider、切换 provider template、编辑 base URL/API key/default model，以及追加/删除 custom model。Role 设置固定展示 explorer/planner/executor/reviewer 四个角色，并在 provider/model 删除或不可用时规范化到可用 provider/model/effort。MCP 设置支持 stdio 和 streamable HTTP，保留 built-in/locked server metadata，只允许可编辑 server 修改身份；保存前清理空 args/env/headers。Instructions、Security 和 Skills 设置分别编辑提示词配置、权限模式和当前项目 skill discovery，不能绕过 store 直接写 UI-only 状态。

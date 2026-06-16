@@ -17,8 +17,8 @@ use pl_protocol::{
 };
 use pl_trace::{TraceAttachment, TraceEvent, TraceEventKind};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait, Database,
-    DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Statement,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, ConnectOptions, ConnectionTrait,
+    Database, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Statement,
     TransactionTrait,
 };
 use tokio::sync::Mutex;
@@ -1094,22 +1094,11 @@ impl StudioStore {
         result: &TurnResult,
         model: Option<&pl_model::ModelInfo>,
     ) -> Result<()> {
-        use entities::agent_runtime_snapshot;
-
-        let has_agent_runtime = agent_runtime_snapshot::Entity::find()
-            .filter(agent_runtime_snapshot::Column::SessionId.eq(session_id.to_string()))
-            .one(&self.db)
-            .await?
-            .is_some();
-        if has_agent_runtime {
+        let usage = token_usage_snapshot(&result.usage);
+        if usage.total_tokens == 0 {
             return self
                 .rebuild_session_runtime_from_agent_snapshots(session_id)
                 .await;
-        }
-
-        let usage = token_usage_snapshot(&result.usage);
-        if usage.total_tokens == 0 {
-            return Ok(());
         }
         let model_name = if result.model.is_empty() {
             model
@@ -1120,7 +1109,7 @@ impl StudioStore {
         };
         let (estimated_costs, has_unpriced_usage) = cost_for_usage(&usage, model);
         let delta = AgentRuntimeDelta {
-            inference_id: new_id("legacy-runtime"),
+            inference_id: format!("legacy-runtime-{}", result.session_message_count),
             agent_id: ROOT_AGENT_ID.to_string(),
             path: ROOT_AGENT_PATH.to_string(),
             parent_path: None,
@@ -1134,6 +1123,44 @@ impl StudioStore {
         };
         self.record_agent_runtime_delta(session_id, &delta).await?;
         Ok(())
+    }
+
+    pub async fn upsert_session_runtime_for_turn(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        result: &TurnResult,
+        model: Option<&pl_model::ModelInfo>,
+    ) -> Result<()> {
+        if self
+            .has_agent_runtime_events_for_turn(session_id, turn_id)
+            .await?
+        {
+            return self
+                .rebuild_session_runtime_from_agent_snapshots(session_id)
+                .await;
+        }
+        self.upsert_session_runtime(session_id, result, model).await
+    }
+
+    pub async fn has_agent_runtime_events_for_turn(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<bool> {
+        use entities::agent_runtime_event;
+        let inference_prefix = format!("{turn_id}-inf-");
+        let compact_prefix = format!("{turn_id}-compact-");
+        Ok(agent_runtime_event::Entity::find()
+            .filter(agent_runtime_event::Column::SessionId.eq(session_id.to_string()))
+            .filter(
+                Condition::any()
+                    .add(agent_runtime_event::Column::InferenceId.starts_with(inference_prefix))
+                    .add(agent_runtime_event::Column::InferenceId.starts_with(compact_prefix)),
+            )
+            .one(&self.db)
+            .await?
+            .is_some())
     }
 
     pub async fn save_setting(&self, key: &str, value: &str) -> Result<()> {
