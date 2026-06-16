@@ -5,5 +5,12 @@
     "module": "ESNext",
     "moduleResolution": "Bundler"
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  "include": [
+    "src/types.ts",
+    "src/i18n/**/*.ts",
+    "src/lib/**/*.ts",
+    "src/solid/**/*.ts",
+    "src/solid/**/*.tsx",
+    "tests/solid-timeline.test.ts"
+  ]
 }

@@ -19,6 +19,7 @@ export type SessionRecord = {
   mode: string;
   updatedAt: number;
   visibility: "active" | "handoffOrigin" | "archived";
+  parentSessionId?: string | null;
 };
 
 export type AgentStatus =
@@ -708,6 +709,7 @@ export type BootstrapPayload = {
   agents: AgentDto[];
   sessionRuntime?: SessionRuntime | null;
   interactions?: InteractionRequest[];
+  mcpHealth?: McpHealthUpdatedPayload | null;
   lspHealth?: LspHealthUpdatedPayload | null;
   config: ConfigPayload;
 };
@@ -722,6 +724,7 @@ export type ProjectSelectionPayload = {
   agents: AgentDto[];
   sessionRuntime?: SessionRuntime | null;
   interactions?: InteractionRequest[];
+  mcpHealth?: McpHealthUpdatedPayload | null;
   lspHealth?: LspHealthUpdatedPayload | null;
 };
 
@@ -732,6 +735,8 @@ export type SessionSelectionPayload = {
   agents: AgentDto[];
   sessionRuntime?: SessionRuntime | null;
   interactions?: InteractionRequest[];
+  mcpHealth?: McpHealthUpdatedPayload | null;
+  lspHealth?: LspHealthUpdatedPayload | null;
 };
 
 export type StopPromptResponse = {
@@ -845,6 +850,7 @@ export type StudioEventKind =
       handoff: {
         originSessionId: string;
         targetSessionId: string;
+        targetSession?: SessionRecord | null;
         kind: string;
         status: string;
         planId?: string | null;

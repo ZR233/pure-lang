@@ -5,7 +5,7 @@
 方案乙将流程明确分成“桥接层 -> 应用层 -> 领域核心 -> 适配器”：
 
 ```text
-React action
+Solid action
   -> Tauri submit command
   -> pl-core application service (StudioRuntime)
   -> StudioConversationSink / StudioEventRuntime
@@ -15,7 +15,7 @@ React action
   -> pl-trace AgentEvent / TraceEvent / TracePart
   -> StudioEventRuntime canonical message/part snapshot + live part delta
   -> Tauri studio-runtime-event
-  -> studioEventReducer
+  -> Solid Studio event store
   -> UI rendering
 ```
 
@@ -72,11 +72,13 @@ React action
 6. 运行中每个可见对话 lifecycle 先进入 `StudioEventRuntime`。用户、assistant、commentary、reasoning、plan 和 tool 均规范化为 opencode 式 `StudioMessage` / `StudioPart`。`messageUpdated` 与 `messagePartUpdated` 是 durable snapshot，由 store 在同一个事务中分配 `StudioEventEnvelope.sequence`、写入 `studio_events` 与 `studio_messages/message_parts` projection，再广播同一份 envelope 给 Studio；`messagePartDelta` 只进入实时通道，是 live overlay，不写入 `studio_events`、不推进 durable cursor。
 7. turn 收尾只负责消息、最终 runtime snapshot 与生命周期终态校准；不得要求前端等待最终响应才能看到过程
 
-前端提交普通 prompt 或 Plan 实施时调用 `submit_prompt`。该命令只创建 turn、注册 cancellation token、写入 `turnChanged(queued/contextLoading/waitingForModel)`、用户 `messageUpdated` 和用户 `messagePartUpdated`，随后在后台执行 run，并立即返回 `{ sessionId, turnId, cursor }`。实现计划的 `resolve_interaction` 若触发 fresh context handoff，也只返回 handoff/turn 提交结果；目标 session 切换和后续步骤展示由 `sessionHandoffChanged` 与目标 session 的 `turnChanged/messageUpdated/messagePartUpdated/messagePartDelta` 事件驱动。
+前端提交普通 prompt 或 Plan 实施时调用同一套后台 turn 提交流程。该命令只创建 turn、注册 cancellation token、写入 `turnChanged(queued/contextLoading/waitingForModel)`、用户 `messageUpdated` 和用户 `messagePartUpdated`，随后在后台执行 run，并立即返回 `{ sessionId, turnId, cursor }`。计划确认选择实施时，`resolve_interaction` 在当前 `sessionId` 内解决 interaction、写入 `accepted/implementing` lifecycle，并启动同会话实施 turn；不得创建或切换 target child session，也不得依赖 `sessionHandoffChanged` 展示实施过程。内部实施 prompt 可以标记为 `synthetic/ignored`，避免 timeline 出现一条巨大的重复用户消息。
 
 `run_turn_with_trace` 在每次模型请求前用 `InstructionAssembler` 解析当前提示词快照。base/system 写入 `CompletionRequest.instructions`；developer 块作为临时 system 消息置于历史消息之前；user context 块作为临时 user 消息置于 developer 块之后、真实历史之前。临时前置消息只用于本次 provider request，不写入 `CoreSession`，因此压缩和持久化只处理真实对话历史。
 
 `run_turn_with_trace` 接收新 turn 后，真实用户输入必须已经通过 `submit_prompt` 生成 durable user message/part，并在 `CoreSession` 中作为模型历史写入；随后才能记录 enabled tools、turn running、inference、工具和模型输出等内部运行事件。每个 turn 的用户输入只能对应一个 canonical user text part：message id 为 `{turnId}:user`，part id 为 `{turnId}:user-text`。若内部 trace 仍产生用户输入 snapshot，进入 Studio 协议前必须忽略，只保留为内部诊断，不能覆盖既有 part 或生成第二条用户消息。`StudioEventEnvelope.sequence` 是后端唯一 durable 游标，part 的 `order` 只用于 message 内展示顺序，前端 optimistic 提示不得改变后端游标。
+
+assistant 的 text、commentary、reasoning 和 plan part identity 不得直接使用 provider 局部 `item_id`。provider id 只在单个 inference 内定位当前打开的 stream block；进入 Studio part 前必须生成包含 `{turnId}`、`{inferenceId}` 和语义段序号的稳定 id，例如 `{inferenceId}-reasoning-1`、`{inferenceId}-text-final-1`。工具调用是语义边界：遇到 tool start/ready 或 step finish 时，当前打开的 text/reasoning/plan 必须先完成并清理 active provider 映射；工具后的模型输出必须创建新的 part，展示顺序排在工具之后。工具 part 使用 runtime tool call id 保持稳定，使 provider tool snapshot 与 core tool execution snapshot 更新同一个 part。
 
 模型输出的 `commentary` 只进入 timeline，用于让用户看到阶段性进展，不写入 `CoreSession`。只有 `final` 输出会作为 assistant response 写入会话历史；带工具调用的中间轮次如果只输出 commentary，也不得把 commentary 当作 assistant tool-call content 写回 provider 历史。
 
@@ -86,7 +88,7 @@ React action
 
 子代理继承父 turn 的 `compileMode` 和稳定 instruction context，但不继承 root 的模型角色。child agent 的模型角色由 `agentType` 决定，默认 executor；只有子代理路径可以使用 executor 角色。child turn 同样按当前 mode 注入 Auto/Plan overlay，并复用同一套工具边界和 proposed-plan 输出约定。
 
-子代理同样继承父 turn 的交互运行时。`request_user_input`、工具审批和计划确认统一表达为 `InteractionKind::{userInput, toolApproval, planConfirmation}`。每个 interaction 都带 `sessionId`、`turnId`、可选 `itemId/toolId/agentPath`，由 `InteractionRuntime` 创建、持久化、广播并等待 resolution。Studio 只渲染当前最高优先级 pending interaction；回答或审批只解除对应等待，不触发新 turn，也不写入普通聊天消息。
+子代理同样继承父 turn 的交互运行时。`request_user_input`、工具审批和计划确认统一表达为 `InteractionKind::{userInput, toolApproval, planConfirmation}`。每个 interaction 都带 `sessionId`、`turnId`、可选 `itemId/toolId/agentPath`，由 `InteractionRuntime` 创建、持久化、广播并等待 resolution。Studio 只渲染当前最高优先级 pending interaction；回答或审批只解除对应等待，不触发新 turn，也不写入普通聊天消息。UI 交互形态对齐 opencode dock prompt：pending question/permission/plan confirmation 在底部 dock 处理，timeline 只渲染 message/part 投影；`request_user_input` 的 completed tool part 可以显示 redacted 问题答案摘要。
 
 主 turn 保存完成后，如果 `[skills].auto_learn = true` 且本轮达到自学习触发条件，`StudioRuntime` 启动后台 reviewer。reviewer 只开放 skills 工具，复盘结果只写项目 skills 目录；失败只记录日志，不改变本轮响应。
 
@@ -119,9 +121,10 @@ Agent 协作 timeline 与状态分层：
 - `studio_events` 是 Studio UI 的唯一 durable 重放事实流。每个 durable 事件带 `sessionId`、会话内单调 `sequence`、`createdAt` 和类型化 `kind`；前端通过 cursor 补拉缺失事件，而不是依赖命令最终响应补状态。广播 payload 必须与持久化 payload 完全一致，禁止 projection 重写一份、实时广播另一份。高频 `messagePartDelta` 是实时 overlay，不写入 durable log，必须能被后续 `messagePartUpdated` 完全覆盖。
 - `turns` 表保存当前与历史 turn 状态：`queued | contextLoading | waitingForModel | streaming | waitingForInteraction | runningTool | persisting | completed | failed | cancelled`。启动时所有非终态 turn 必须收敛为 `cancelled`
 - `studio_messages`、`message_parts`、`agent_events`、`interactions`、`session_skills`、`session_handoffs` 是 `StudioEventRuntime` 的 projection 表。message/part projection 保存 latest snapshot，live delta 只作为前端 overlay；除一次性迁移和启动恢复外，运行期不得由 Tauri sideband 或前端推断直接写入。Plan lifecycle 也必须先写 `StudioEventKind::PlanLifecycleChanged`，再由 projection 更新查询表。
+- `message_parts.part_order` 在 part 首次 durable snapshot 时由 `StudioEventEnvelope.sequence` 固化；后续同 part snapshot 即使携带旧 order，也必须保留既有 order，禁止终态 snapshot 或 backfill 改变首次展示位置。
 - session 的 `mode` 表示下一轮默认协作模式，由 Studio 模式切换命令持久化；运行时按 session 当前 `mode` 构造 `TurnRequest`
 - session 的 `instruction_snapshot_json` 保存首轮解析出的稳定 base/user/project context 和非 mode-specific developer context。已有 session 缺少快照时，在下一轮运行前按当前配置补建。后续配置、模型默认提示词或 AGENTS 文件变化不 retroactively 改写既有 session；新 session 才使用新配置。Auto/Plan mode overlay 每个 turn 重新注入，不能被 snapshot 永久冻结。
-- Plan Mode 生成的计划有独立生命周期事件：`pendingConfirmation | accepted | implementing | implemented | implementationFailed | continuedPlanning | dismissed | cancelled`。这些事件由 `StudioEventKind::PlanLifecycleChanged` 广播，并随 durable `studio_events` 重放；前端按 `planId` 折叠最新状态。计划实施确认不是前端从 timeline 自行推断的临时状态，而是后端在当前 live Plan turn 终态后创建的 `planConfirmation` interaction。确认实施只支持 fresh context：`implementFreshContext` 创建显式 session handoff，新 Auto session 把 plan markdown 作为 handoff prompt 的唯一意图来源，来源 session 保持可恢复但从活跃列表隐藏；root turn 继续使用 planner 角色。
+- Plan Mode 生成的计划有独立生命周期事件：`pendingConfirmation | accepted | implementing | implemented | implementationFailed | continuedPlanning | dismissed | cancelled`。这些事件由 `StudioEventKind::PlanLifecycleChanged` 广播，并随 durable `studio_events` 重放；前端按 `planId` 折叠最新状态。计划实施确认不是前端从 timeline 自行推断的临时状态，而是后端在当前 live Plan turn 终态后创建的 `planConfirmation` interaction。确认实施沿用 wire 枚举名 `implementFreshContext`，但语义是当前 session 内实施：后端把 plan markdown 作为实施 prompt 的唯一意图来源，在同一 `sessionId` 启动新 turn，root turn 继续使用 planner 角色；`session_handoffs` 仅保留为 legacy 数据结构，不再作为 Plan 实施入口。
 - `interactions` 表保存所有 pending/resolved/cancelled/expired 交互，是刷新与 session 切换恢复 pending UI 的事实来源。`InteractionChanged` 通过 `StudioEventKind::InteractionChanged` 广播当前 interaction 最新状态；旧 `studio-user-input-*`、`studio-tool-approval-*`、`studio-interaction-changed` sideband 事件不再作为 Studio 协议入口
 - `skill_view` 成功激活 skill 时，后端写入结构化 `SkillActivated` 事件并 upsert 会话级 skill runtime fact。Studio 当前会话的 `activeSkills` 只从 `session_skills` 等结构化持久层读取，不能再从 tool result JSON 文本反解析。
 - 如果 turn 内发生上下文压缩，`CoreSession` revision 会变化，Studio 以事务重写当前 session 的消息历史并追加本轮 trace；未发生压缩时继续使用追加写入
@@ -138,7 +141,7 @@ Agent 协作 timeline 与状态分层：
 - `Err(Lagged(n))`：广播 `StudioEventKind::Stale { laggedEvents: n }`，前端按 cursor 调用 `load_studio_events`
 - `Err(Closed)`：结束循环
 
-这保证高频 delta 下 UI 不会因为 lagged 直接断流。前端按 opencode 的事件批处理方式在 16ms frame 内合并事件：如果同一 part 的 durable snapshot 到达，跳过该 frame 中同 part 尚未应用的旧 live delta，并清除该 part 的 delta overlay。
+这保证高频 delta 下 UI 不会因为 lagged 直接断流。Tauri broadcast bridge 检测到 lagged 时必须为 active session 发 live-only `stale`，驱动前端用 durable cursor 补拉 snapshot。前端按 opencode 的事件批处理方式在 16ms frame 内合并事件：如果同一 part 的 durable snapshot 到达，跳过该 frame 中同 part 尚未应用的旧 live delta，并清除该 part 的 delta overlay；若 snapshot 被 coalescing 覆盖，也必须把同 part pending delta 标成 stale。terminal snapshot 到达后，低序或等序 live delta 不得再修改该 part；带 `chunkIndex` 的 delta 需要按 part 去重。
 
 `messagePartDelta` 只用于 live overlay。即使底层为了诊断保留了 delta 事件，也不得写入 `studio_events`。`stale` 也是 live-only 补拉提示，不占用 durable sequence，不参与历史重放。`load_session_state` 从 `studio_messages/message_parts` projection record 恢复终态，每条 record 必须携带来源 event sequence 供前端建立新旧 guard，并附带非 message/part durable 状态事件；`load_studio_events` 只回放 durable snapshot 与状态事件，历史恢复不得依赖 delta。旧 `timeline_events` 表由 migration drop，运行期不再提供实体、写入、读取或 cursor API。
 
@@ -168,4 +171,4 @@ turn 生命周期持久化语义固定：
 - `studioEventsResponse`
 - `sessionStateResponse`
 
-前端 reducer 只消费 action 输入类型，不再由事件监听器直接拼装复杂 UI 状态。运行中状态以 `StudioEventEnvelope` 为准，命令响应只表示提交是否成功。
+前端使用 Solid store，并按 opencode app 的 `message + part + event reducer + timeline row projection` 结构组织 UI。`pure-studio` 不再保留 React 运行时或 React reducer 双栈；事件监听器只把 `StudioEventEnvelope` 放入 Solid event reducer。运行中状态以 `StudioEventEnvelope` 为准，命令响应只表示提交是否成功。

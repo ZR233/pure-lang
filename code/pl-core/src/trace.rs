@@ -80,6 +80,10 @@ impl TraceRecorder {
         self.record_and_broadcast_item_start(item);
     }
 
+    pub fn update_item_snapshot(&mut self, item: TracePart) {
+        self.record_and_broadcast_item_start(item);
+    }
+
     pub fn complete_item(&mut self, item: TracePart) {
         if self.disabled {
             self.broadcast(AgentEvent::TracePartCompleted { item });

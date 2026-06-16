@@ -418,6 +418,34 @@ mod tests {
             .unwrap();
     }
 
+    fn trace_part_text(item: &pl_trace::TracePart) -> String {
+        match item.kind {
+            TracePartKind::Text | TracePartKind::Plan | TracePartKind::Turn => item.content.clone(),
+            TracePartKind::Thinking => item
+                .thinking_chunks
+                .iter()
+                .map(|chunk| chunk.content.as_str())
+                .collect::<Vec<_>>()
+                .join(""),
+            TracePartKind::Tool => item
+                .tool
+                .as_ref()
+                .map(|tool| tool.arguments.clone())
+                .unwrap_or_default(),
+            TracePartKind::Agent | TracePartKind::Inference => item.content.clone(),
+        }
+    }
+
+    fn trace_delta_text(delta: &pl_trace::TraceDelta) -> String {
+        match delta {
+            pl_trace::TraceDelta::Text { delta, .. }
+            | pl_trace::TraceDelta::Thinking { delta, .. }
+            | pl_trace::TraceDelta::ToolArguments { delta }
+            | pl_trace::TraceDelta::ToolResult { delta }
+            | pl_trace::TraceDelta::Plan { delta } => delta.clone(),
+        }
+    }
+
     #[derive(Debug)]
     struct CapturedHttpRequest {
         request_line: String,
@@ -939,6 +967,294 @@ mod tests {
     }
 
     #[test]
+    fn stream_accumulator_splits_reasoning_and_text_across_tool_boundary() {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "turn-1-inf-0".to_string(),
+            plan_mode: false,
+        }));
+
+        accumulator
+            .apply(
+                StreamEvent::ReasoningDelta {
+                    id: "thinking".to_string(),
+                    chunk_index: 0,
+                    delta: "before".to_string(),
+                },
+                &event_tx,
+            )
+            .unwrap();
+        accumulator
+            .apply(
+                StreamEvent::TextDelta {
+                    id: "msg_1".to_string(),
+                    channel: pl_trace::TraceTextChannel::Final,
+                    delta: "prelude".to_string(),
+                },
+                &event_tx,
+            )
+            .unwrap();
+        accumulator
+            .apply(
+                StreamEvent::ToolInputStarted {
+                    stream_id: None,
+                    item_id: "call_1".to_string(),
+                    call_id: Some("call_1".to_string()),
+                    name: Some("bash".to_string()),
+                    payload_kind: crate::stream::event::ToolInputPayloadKind::FunctionArguments,
+                },
+                &event_tx,
+            )
+            .unwrap();
+        accumulator
+            .apply(
+                StreamEvent::ToolCallReady {
+                    stream_id: None,
+                    item_id: "call_1".to_string(),
+                    call_id: Some("call_1".to_string()),
+                    name: Some("bash".to_string()),
+                    payload: Some(ToolCallDeltaPayload::FunctionArguments(
+                        "{\"command\":\"pwd\"}".to_string(),
+                    )),
+                },
+                &event_tx,
+            )
+            .unwrap();
+        accumulator
+            .apply(
+                StreamEvent::ReasoningDelta {
+                    id: "thinking".to_string(),
+                    chunk_index: 0,
+                    delta: "after".to_string(),
+                },
+                &event_tx,
+            )
+            .unwrap();
+        accumulator
+            .apply(
+                StreamEvent::TextDelta {
+                    id: "msg_1".to_string(),
+                    channel: pl_trace::TraceTextChannel::Final,
+                    delta: "done".to_string(),
+                },
+                &event_tx,
+            )
+            .unwrap();
+
+        apply_completed(&mut accumulator, &event_tx);
+        let response = accumulator.finish(&event_tx).unwrap();
+        let completed = response
+            .trace_events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                TraceEventKind::TracePartCompleted { item } => {
+                    Some((item.item_id.as_str(), item.kind, item.content.as_str()))
+                }
+                TraceEventKind::TracePartStarted { .. }
+                | TraceEventKind::TracePartDelta { .. }
+                | TraceEventKind::TracePartFailed { .. }
+                | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        let tool_seen = response.trace_events.iter().any(|event| match &event.kind {
+            TraceEventKind::TracePartStarted { item }
+            | TraceEventKind::TracePartCompleted { item }
+            | TraceEventKind::TracePartFailed { item, .. } => {
+                item.item_id == "turn-1-call_1" && item.kind == TracePartKind::Tool
+            }
+            TraceEventKind::TracePartDelta { event } => {
+                event.item_id == "turn-1-call_1" && event.kind == TracePartKind::Tool
+            }
+            TraceEventKind::PlanLifecycleChanged { .. }
+            | TraceEventKind::InteractionChanged { .. }
+            | TraceEventKind::SkillActivated { .. }
+            | TraceEventKind::EnabledToolsRecorded { .. } => false,
+        });
+
+        assert!(completed.contains(&("turn-1-inf-0-reasoning-1", TracePartKind::Thinking, "")));
+        assert!(completed.contains(&("turn-1-inf-0-text-final-1", TracePartKind::Text, "prelude")));
+        assert!(tool_seen);
+        assert!(completed.contains(&("turn-1-inf-0-reasoning-2", TracePartKind::Thinking, "")));
+        assert!(completed.contains(&("turn-1-inf-0-text-final-2", TracePartKind::Text, "done")));
+    }
+
+    #[test]
+    fn stream_accumulator_terminal_snapshots_converge_with_live_deltas() {
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(32);
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "turn-1-inf-0".to_string(),
+            plan_mode: false,
+        }));
+
+        accumulator
+            .apply(
+                StreamEvent::ReasoningDelta {
+                    id: "thinking".to_string(),
+                    chunk_index: 0,
+                    delta: "think".to_string(),
+                },
+                &event_tx,
+            )
+            .unwrap();
+        accumulator
+            .apply(
+                StreamEvent::TextDelta {
+                    id: "msg_1".to_string(),
+                    channel: pl_trace::TraceTextChannel::Final,
+                    delta: "hello".to_string(),
+                },
+                &event_tx,
+            )
+            .unwrap();
+        accumulator
+            .apply(
+                StreamEvent::ToolInputDelta {
+                    stream_id: None,
+                    item_id: "fc_1".to_string(),
+                    call_id: Some("call_1".to_string()),
+                    name: Some("bash".to_string()),
+                    payload_delta: ToolCallDeltaPayload::FunctionArguments(
+                        "{\"command\":\"pwd\"}".to_string(),
+                    ),
+                },
+                &event_tx,
+            )
+            .unwrap();
+        accumulator
+            .apply(
+                StreamEvent::ToolCallReady {
+                    stream_id: None,
+                    item_id: "fc_1".to_string(),
+                    call_id: Some("call_1".to_string()),
+                    name: Some("bash".to_string()),
+                    payload: Some(ToolCallDeltaPayload::FunctionArguments(
+                        "{\"command\":\"pwd\"}".to_string(),
+                    )),
+                },
+                &event_tx,
+            )
+            .unwrap();
+
+        apply_completed(&mut accumulator, &event_tx);
+        let response = accumulator.finish(&event_tx).unwrap();
+        let live_events = std::iter::from_fn(|| event_rx.try_recv().ok()).collect::<Vec<_>>();
+
+        let started = live_events
+            .iter()
+            .filter_map(|event| match event {
+                AgentEvent::TracePartStarted { item } => {
+                    Some((item.item_id.as_str(), item.kind, item.content.as_str()))
+                }
+                AgentEvent::TracePartDelta { .. }
+                | AgentEvent::TracePartCompleted { .. }
+                | AgentEvent::TracePartFailed { .. }
+                | AgentEvent::InteractionChanged { .. }
+                | AgentEvent::AgentRuntimeUpdated { .. }
+                | AgentEvent::AgentStateChanged { .. }
+                | AgentEvent::CollabAgentSpawnBegin { .. }
+                | AgentEvent::CollabAgentSpawnEnd { .. }
+                | AgentEvent::CollabAgentInteractionBegin { .. }
+                | AgentEvent::CollabAgentInteractionEnd { .. }
+                | AgentEvent::CollabWaitingBegin { .. }
+                | AgentEvent::CollabWaitingEnd { .. }
+                | AgentEvent::CollabCloseBegin { .. }
+                | AgentEvent::CollabCloseEnd { .. }
+                | AgentEvent::TurnInterrupted { .. }
+                | AgentEvent::TurnBudgetLimited { .. }
+                | AgentEvent::SkillActivated { .. }
+                | AgentEvent::Done
+                | AgentEvent::Error { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(started.contains(&("turn-1-inf-0-reasoning-1", TracePartKind::Thinking, "")));
+        assert!(started.contains(&("turn-1-inf-0-text-final-1", TracePartKind::Text, "")));
+        assert!(started.contains(&("turn-1-call_1", TracePartKind::Tool, "")));
+
+        let mut live = std::collections::HashMap::new();
+        for event in &live_events {
+            match event {
+                AgentEvent::TracePartStarted { item } | AgentEvent::TracePartCompleted { item } => {
+                    live.insert(item.item_id.clone(), trace_part_text(item));
+                }
+                AgentEvent::TracePartDelta { event } => {
+                    live.entry(event.item_id.clone())
+                        .or_insert_with(String::new)
+                        .push_str(&trace_delta_text(&event.delta));
+                }
+                AgentEvent::TracePartFailed { item, .. } => {
+                    live.insert(item.item_id.clone(), trace_part_text(item));
+                }
+                AgentEvent::InteractionChanged { .. }
+                | AgentEvent::AgentRuntimeUpdated { .. }
+                | AgentEvent::AgentStateChanged { .. }
+                | AgentEvent::CollabAgentSpawnBegin { .. }
+                | AgentEvent::CollabAgentSpawnEnd { .. }
+                | AgentEvent::CollabAgentInteractionBegin { .. }
+                | AgentEvent::CollabAgentInteractionEnd { .. }
+                | AgentEvent::CollabWaitingBegin { .. }
+                | AgentEvent::CollabWaitingEnd { .. }
+                | AgentEvent::CollabCloseBegin { .. }
+                | AgentEvent::CollabCloseEnd { .. }
+                | AgentEvent::TurnInterrupted { .. }
+                | AgentEvent::TurnBudgetLimited { .. }
+                | AgentEvent::SkillActivated { .. }
+                | AgentEvent::Done
+                | AgentEvent::Error { .. } => {}
+            }
+        }
+        let replay = response
+            .trace_events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                TraceEventKind::TracePartCompleted { item }
+                | TraceEventKind::TracePartStarted { item }
+                    if matches!(
+                        item.kind,
+                        TracePartKind::Text | TracePartKind::Thinking | TracePartKind::Plan
+                    ) && item.status == pl_trace::TracePartStatus::Completed =>
+                {
+                    Some((item.item_id.clone(), trace_part_text(item)))
+                }
+                TraceEventKind::TracePartStarted { item }
+                    if item.kind == TracePartKind::Tool
+                        && item.item_id == "turn-1-call_1"
+                        && item
+                            .tool
+                            .as_ref()
+                            .is_some_and(|tool| !tool.arguments.is_empty()) =>
+                {
+                    Some((item.item_id.clone(), trace_part_text(item)))
+                }
+                TraceEventKind::TracePartStarted { .. }
+                | TraceEventKind::TracePartDelta { .. }
+                | TraceEventKind::TracePartCompleted { .. }
+                | TraceEventKind::TracePartFailed { .. }
+                | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. } => None,
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+
+        assert_eq!(
+            live.get("turn-1-inf-0-reasoning-1"),
+            replay.get("turn-1-inf-0-reasoning-1")
+        );
+        assert_eq!(
+            live.get("turn-1-inf-0-text-final-1"),
+            replay.get("turn-1-inf-0-text-final-1")
+        );
+        assert_eq!(live.get("turn-1-call_1"), replay.get("turn-1-call_1"));
+    }
+
+    #[test]
     fn stream_accumulator_requires_completed_event() {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
         let mut accumulator = StreamCompletionAccumulator::new(None);
@@ -1053,7 +1369,10 @@ mod tests {
             })
             .filter(|item_id| !item_id.is_empty())
             .collect::<Vec<_>>();
-        assert_eq!(item_ids, vec!["turn-1-call_0", "turn-1-call_0"]);
+        assert_eq!(
+            item_ids,
+            vec!["turn-1-call_0", "turn-1-call_0", "turn-1-call_0"]
+        );
     }
 
     #[test]

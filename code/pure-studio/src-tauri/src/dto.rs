@@ -24,6 +24,7 @@ pub struct SessionDto {
     pub mode: String,
     pub updated_at: i64,
     pub visibility: String,
+    pub parent_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

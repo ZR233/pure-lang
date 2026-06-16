@@ -202,7 +202,7 @@ impl StreamCompletionAccumulator {
                     name,
                     payload,
                 )? {
-                    self.update_tool_trace_only(&call);
+                    self.update_tool_trace(&call, event_tx);
                     self.tool_calls.push(call);
                 }
             }
@@ -211,7 +211,7 @@ impl StreamCompletionAccumulator {
             }
             ModelStreamEvent::Completed { response_id } => {
                 for call in self.tool_stream.finish_all(&self.tool_calls)? {
-                    self.update_tool_trace_only(&call);
+                    self.update_tool_trace(&call, event_tx);
                     self.tool_calls.push(call);
                 }
                 self.completed = true;
@@ -237,7 +237,7 @@ impl StreamCompletionAccumulator {
         }
 
         for call in self.tool_stream.finish_all(&self.tool_calls)? {
-            self.update_tool_trace_only(&call);
+            self.update_tool_trace(&call, event_tx);
             self.tool_calls.push(call);
         }
         if let Some(trace) = self.trace.as_mut() {
@@ -420,9 +420,11 @@ impl StreamCompletionAccumulator {
         }
     }
 
-    fn update_tool_trace_only(&mut self, call: &ToolCall) {
+    fn update_tool_trace(&mut self, call: &ToolCall, event_tx: &AgentEventSender) {
         if let Some(trace) = self.trace.as_mut() {
-            trace.update_tool_trace_only(call);
+            for event in trace.update_tool_trace(call) {
+                let _ = event_tx.send(event);
+            }
         }
     }
 }

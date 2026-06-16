@@ -625,7 +625,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn plan_implementation_handoff_hides_origin_and_reuses_target() {
+    async fn plan_implementation_handoff_creates_child_and_reuses_target() {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project("C:/work/alpha").await.unwrap();
         let origin = store
@@ -673,8 +673,16 @@ mod tests {
         assert!(first.should_start_run);
         assert!(!second.should_start_run);
         assert_eq!(first.target_session.id, second.target_session.id);
-        assert_eq!(listed, vec![first.target_session.clone()]);
-        assert_eq!(restored_origin.visibility, SessionVisibility::HandoffOrigin);
+        assert_eq!(listed, vec![restored_origin.clone()]);
+        assert_eq!(restored_origin.visibility, SessionVisibility::Active);
+        assert_eq!(
+            first.target_session.parent_session_id,
+            Some(restored_origin.id.clone())
+        );
+        assert_eq!(
+            second.target_session.parent_session_id,
+            Some(restored_origin.id)
+        );
         assert_eq!(first.interaction.status, InteractionStatus::Resolved);
         assert_eq!(first.plan_content, "1. Inspect\n2. Implement");
         let states = first

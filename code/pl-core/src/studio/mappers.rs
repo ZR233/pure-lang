@@ -39,6 +39,7 @@ pub fn session_record(model: entities::session::Model) -> SessionRecord {
         mode: model.mode,
         updated_at: model.updated_at,
         visibility: session_visibility_from_label(&model.visibility),
+        parent_session_id: model.parent_session_id,
         instruction_snapshot,
     }
 }

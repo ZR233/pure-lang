@@ -55,7 +55,7 @@ async fn emit_mcp_health_update(_app: &AppHandle, studio: &StudioRuntime) {
         Ok(health) => {
             let _ = studio
                 .events()
-                .emit(
+                .emit_live(
                     None,
                     None,
                     None,
@@ -79,7 +79,7 @@ pub async fn emit_lsp_health_update(_app: &AppHandle, studio: &StudioRuntime) {
         Ok(health) => {
             let _ = studio
                 .events()
-                .emit(
+                .emit_live(
                     None,
                     None,
                     None,
@@ -104,7 +104,9 @@ pub fn start_studio_runtime_event_bridge(app: AppHandle, state: AppState) {
         loop {
             match rx.recv().await {
                 Ok(event) => emit_studio_runtime_event(&app, event),
-                Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Lagged(skipped)) => {
+                    emit_stale_for_active_sessions(&state, skipped).await;
+                }
                 Err(RecvError::Closed) => break,
             }
         }
@@ -113,4 +115,35 @@ pub fn start_studio_runtime_event_bridge(app: AppHandle, state: AppState) {
 
 fn emit_studio_runtime_event(app: &AppHandle, event: StudioEventEnvelope) {
     let _ = app.emit("studio-runtime-event", event);
+}
+
+async fn emit_stale_for_active_sessions(state: &AppState, lagged_events: u64) {
+    let projects = match state.studio.store().list_projects().await {
+        Ok(projects) => projects,
+        Err(error) => {
+            eprintln!("[pure-studio] failed to list projects after lagged studio events: {error}");
+            return;
+        }
+    };
+    for project in projects {
+        let sessions = match state.studio.store().list_sessions(&project.id).await {
+            Ok(sessions) => sessions,
+            Err(error) => {
+                eprintln!(
+                    "[pure-studio] failed to list project sessions after lagged studio events: {error}"
+                );
+                continue;
+            }
+        };
+        for session in sessions {
+            if let Err(error) = state
+                .studio
+                .events()
+                .emit_stale(&session.id, lagged_events)
+                .await
+            {
+                eprintln!("[pure-studio] failed to emit stale studio event: {error}");
+            }
+        }
+    }
 }

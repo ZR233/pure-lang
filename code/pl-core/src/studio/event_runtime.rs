@@ -4,8 +4,8 @@ use pl_protocol::{
     StudioAgentTimelineEvent, StudioAgentTimelineEventKind, StudioAttachment, StudioEventEnvelope,
     StudioEventKind, StudioInferencePart, StudioMessage, StudioMessageRole, StudioMessageStatus,
     StudioPart, StudioPartDelta, StudioPartDeltaField, StudioPartStatus, StudioPartType,
-    StudioPlanPart, StudioSessionHandoff, StudioTextChannel, StudioToolPart, StudioTurn,
-    StudioTurnStatus,
+    StudioPlanPart, StudioSessionHandoff, StudioSessionSummary, StudioTextChannel, StudioToolPart,
+    StudioTurn, StudioTurnStatus,
 };
 use pl_trace::{
     AgentEvent, TraceAgentPart, TraceDelta, TraceInferencePart, TracePart, TracePartDeltaEvent,
@@ -135,6 +135,11 @@ impl StudioEventRuntime {
         &self,
         handoff: &SessionHandoffRecord,
     ) -> Result<StudioEventEnvelope> {
+        let target_session = self
+            .store
+            .read_session(&handoff.target_session_id)
+            .await?
+            .map(studio_session_summary);
         self.emit(
             Some(handoff.project_id.clone()),
             Some(handoff.target_session_id.clone()),
@@ -143,6 +148,7 @@ impl StudioEventRuntime {
                 handoff: StudioSessionHandoff {
                     origin_session_id: handoff.origin_session_id.clone(),
                     target_session_id: handoff.target_session_id.clone(),
+                    target_session,
                     kind: handoff.kind.as_str().to_string(),
                     status: handoff.status.as_str().to_string(),
                     plan_id: Some(handoff.plan_id.clone()),
@@ -336,6 +342,18 @@ impl StudioEventRuntime {
             },
         )
         .await
+    }
+}
+
+fn studio_session_summary(session: crate::studio::SessionRecord) -> StudioSessionSummary {
+    StudioSessionSummary {
+        id: session.id,
+        project_id: session.project_id,
+        title: session.title,
+        mode: session.mode,
+        updated_at: session.updated_at,
+        visibility: session.visibility.as_str().to_string(),
+        parent_session_id: session.parent_session_id,
     }
 }
 

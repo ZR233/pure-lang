@@ -411,9 +411,17 @@ mod tests {
             .filter(|event| match &event.kind {
                 TraceEventKind::TracePartCompleted { item } => {
                     item.kind == pl_trace::TracePartKind::Tool
+                        && item.status == TracePartStatus::Completed
                 }
                 TraceEventKind::TracePartFailed { item, .. } => {
                     item.kind == pl_trace::TracePartKind::Tool
+                        && matches!(
+                            item.status,
+                            TracePartStatus::Denied
+                                | TracePartStatus::Failed
+                                | TracePartStatus::Interrupted
+                                | TracePartStatus::BudgetLimited
+                        )
                 }
                 TraceEventKind::TracePartStarted { .. }
                 | TraceEventKind::TracePartDelta { .. }
@@ -423,6 +431,29 @@ mod tests {
                 | TraceEventKind::EnabledToolsRecorded { .. } => false,
             })
             .count()
+    }
+
+    fn tool_statuses(events: &[TraceEvent], item_id: &str) -> Vec<TracePartStatus> {
+        events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                TraceEventKind::TracePartStarted { item }
+                | TraceEventKind::TracePartCompleted { item }
+                | TraceEventKind::TracePartFailed { item, .. }
+                    if item.kind == TracePartKind::Tool && item.item_id == item_id =>
+                {
+                    Some(item.status)
+                }
+                TraceEventKind::TracePartDelta { .. }
+                | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. }
+                | TraceEventKind::TracePartStarted { .. }
+                | TraceEventKind::TracePartCompleted { .. }
+                | TraceEventKind::TracePartFailed { .. } => None,
+            })
+            .collect()
     }
 
     async fn serve_sse_once(sse_body: String) -> (String, tokio::task::JoinHandle<()>) {
@@ -729,16 +760,6 @@ mod tests {
         .await
         .unwrap();
         let events = recorder.drain();
-        let started_tool_items = events
-            .iter()
-            .filter(|event| {
-                matches!(
-                    &event.kind,
-                    TraceEventKind::TracePartStarted { item }
-                        if item.kind == TracePartKind::Tool && item.item_id == "turn-1-call-1"
-                )
-            })
-            .count();
         let terminal_tool = events
             .iter()
             .find_map(|event| match &event.kind {
@@ -760,13 +781,21 @@ mod tests {
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].status, TracePartStatus::Completed);
-        assert_eq!(started_tool_items, 1);
         assert_eq!(terminal_tool.status, TracePartStatus::Completed);
         let tool = terminal_tool.tool.as_ref().expect("tool trace metadata");
         assert_eq!(tool.call_id.as_deref(), Some("call-1"));
         assert_eq!(tool.provider_item_id.as_deref(), Some("provider-item-1"));
         assert_eq!(tool.arguments, "{\"path\":\"note.txt\"}");
         assert_eq!(tool.result.as_deref(), Some("provider item reuse"));
+        assert_eq!(
+            tool_statuses(&events, "turn-1-call-1"),
+            vec![
+                TracePartStatus::Started,
+                TracePartStatus::Approved,
+                TracePartStatus::Running,
+                TracePartStatus::Completed,
+            ]
+        );
         let _ = tokio::fs::remove_dir_all(workspace_root).await;
     }
 
@@ -1101,12 +1130,16 @@ mod tests {
         while event_rx.try_recv().is_ok() {}
         let events = recorder.drain();
         assert_eq!(terminal_tool_event_count(&events), 1);
-        assert!(!events.iter().any(|event| matches!(
-            &event.kind,
-            TraceEventKind::TracePartCompleted { item }
-                if item.kind == pl_trace::TracePartKind::Tool
-                    && item.status == TracePartStatus::Approved
-        )));
+        assert_eq!(
+            tool_statuses(&events, "turn-1-call-1"),
+            vec![
+                TracePartStatus::Started,
+                TracePartStatus::AwaitingApproval,
+                TracePartStatus::Approved,
+                TracePartStatus::Running,
+                TracePartStatus::Completed,
+            ]
+        );
         let _ = tokio::fs::remove_dir_all(workspace_root).await;
         let _ = tokio::fs::remove_dir_all(outside_root).await;
     }
@@ -1151,6 +1184,14 @@ mod tests {
         assert_eq!(records[0].call_id.as_deref(), Some("call-1"));
         assert!(records[0].result.contains("Unknown tool: missing_tool"));
         assert_eq!(terminal_tool_event_count(&events), 1);
+        assert_eq!(
+            tool_statuses(&events, "turn-1-call-1"),
+            vec![
+                TracePartStatus::Started,
+                TracePartStatus::Failed,
+                TracePartStatus::Failed,
+            ]
+        );
     }
 
     #[tokio::test]
@@ -1196,6 +1237,14 @@ mod tests {
                 .contains("Tool disabled in plan mode: write_file")
         );
         assert_eq!(terminal_tool_event_count(&events), 1);
+        assert_eq!(
+            tool_statuses(&events, "turn-1-call-1"),
+            vec![
+                TracePartStatus::Started,
+                TracePartStatus::Denied,
+                TracePartStatus::Denied,
+            ]
+        );
         let terminal = events
             .iter()
             .find_map(|event| match &event.kind {
@@ -1261,6 +1310,14 @@ mod tests {
                 .contains("Tool execution denied: tool execution denied by policy")
         );
         assert_eq!(terminal_tool_event_count(&events), 1);
+        assert_eq!(
+            tool_statuses(&events, "turn-1-call-1"),
+            vec![
+                TracePartStatus::Started,
+                TracePartStatus::Denied,
+                TracePartStatus::Denied,
+            ]
+        );
     }
 
     #[tokio::test]
@@ -1309,6 +1366,15 @@ mod tests {
         assert_eq!(records[0].status, TracePartStatus::Interrupted);
         assert_eq!(records[0].result, "Tool execution interrupted");
         assert_eq!(terminal_tool_event_count(&events), 1);
+        assert_eq!(
+            tool_statuses(&events, "turn-1-call-1"),
+            vec![
+                TracePartStatus::Started,
+                TracePartStatus::Approved,
+                TracePartStatus::Running,
+                TracePartStatus::Interrupted,
+            ]
+        );
         let terminal = events
             .iter()
             .find_map(|event| match &event.kind {

@@ -38,6 +38,7 @@ pub mod session {
         pub archived: i32,
         pub visibility: String,
         pub instruction_snapshot_json: Option<String>,
+        pub parent_session_id: Option<String>,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

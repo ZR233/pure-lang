@@ -268,7 +268,7 @@ const previewAssistantMarkdown = `✅ **Markdown 渲染检查完成**
 const previewPlanMarkdown = `## Markdown 支持计划
 
 1. 使用 \`marked.lexer\` 解析 GFM token。
-2. 将 table / code / link 渲染为 React DOM。
+2. 将 table / code / link 渲染为 Studio timeline markdown DOM。
 3. 给预览和测试补齐覆盖。`;
 
 const previewAgentTaskMarkdown = `审查 Markdown 渲染链路：
