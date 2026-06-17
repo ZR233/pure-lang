@@ -72,7 +72,7 @@ export function App() {
             <p>{state.status}</p>
           </div>
           <div class="header-actions">
-            <button type="button" class="icon-button" onClick={() => studio.actions.openSettings()} aria-label="Settings">
+            <button type="button" class="icon-button" onClick={() => studio.actions.openSettings()} aria-label={i18n.t("nav.settings")}>
               <Settings size={16} />
             </button>
           </div>
@@ -84,7 +84,7 @@ export function App() {
           getPart={getPart}
           getPartDelta={(partId) => state.partTextAccumDelta[partId]}
           busy={view().busy}
-          empty="Start a conversation"
+          empty={i18n.t("conversation.emptyTitle")}
         />
         <SessionStatusBar
           runtime={view().runtime}
@@ -331,7 +331,7 @@ function Footer(props: {
               onResolve={props.onResolve}
             />
             <Show when={props.busy}>
-              <button type="button" class="send-button interaction-stop-button" onClick={props.onStop} aria-label="Stop">
+              <button type="button" class="send-button interaction-stop-button" onClick={props.onStop} aria-label={i18n.t("actions.stop")}>
                 <Pause size={15} />
               </button>
             </Show>

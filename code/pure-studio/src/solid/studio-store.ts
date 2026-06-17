@@ -146,7 +146,7 @@ export function createStudioStore() {
     activeSettingsTab: "providers",
     permissionMode: "request-approval",
     prompt: "",
-    status: "Starting",
+    status: i18n.t("status.starting"),
     busy: false,
     sessionBusy: {},
     settingsOpen: false,
@@ -263,7 +263,7 @@ export function createStudioStore() {
           applyLspHealth(draft, payload.lspHealth ?? null);
           applyInteractions(draft, payload.interactions ?? [], sessionId);
         }
-        draft.status = "Ready";
+        draft.status = i18n.t("status.ready");
       }),
     );
   }
@@ -365,7 +365,7 @@ export function createStudioStore() {
         draft.prompt = "";
         draft.busy = true;
         draft.sessionBusy[sessionId] = true;
-        draft.status = "Running";
+        draft.status = i18n.t("status.running");
         upsertMessage(draft, {
           messageId,
           sessionId,
@@ -618,7 +618,7 @@ export function createStudioStore() {
         if (!sessionId) return;
         if (!selectedSessionBusy(store, sessionId)) return;
         setStore(produce((draft) => {
-          draft.status = "Stopping";
+          draft.status = i18n.t("status.stopping");
           draft.busy = true;
           draft.sessionBusy[sessionId] = true;
           draft.turnPhase[sessionId] = "stopping";
@@ -630,7 +630,7 @@ export function createStudioStore() {
               draft.sessionBusy[sessionId] = false;
               if (draft.selectedSessionId === sessionId) {
                 draft.busy = false;
-                draft.status = "Ready";
+                draft.status = i18n.t("status.ready");
                 draft.turnPhase[sessionId] = "idle";
                 draft.turnStartedAt[sessionId] = null;
               }
@@ -1129,19 +1129,19 @@ function statusForTurn(status: string) {
     case "queued":
     case "contextLoading":
     case "waitingForModel":
-      return "Waiting for model";
+      return i18n.t("status.waitingForModel");
     case "streaming":
     case "runningTool":
     case "persisting":
-      return "Running";
+      return i18n.t("status.running");
     case "waitingForInteraction":
-      return "Waiting for input";
+      return i18n.t("status.userInputRequired");
     case "completed":
-      return "Done";
+      return i18n.t("status.done");
     case "failed":
-      return "Failed";
+      return i18n.t("turnPhase.failed");
     case "cancelled":
-      return "Interrupted";
+      return i18n.t("status.interrupted");
     default:
       return status;
   }

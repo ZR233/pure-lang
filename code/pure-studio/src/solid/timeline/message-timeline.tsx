@@ -5,6 +5,7 @@ import { For, Match, Show, Switch, createEffect, createMemo, createSignal, on, o
 import { Virtualizer, type VirtualizerHandle } from "virtua/solid";
 import { ArrowDownToLine, Loader2 } from "lucide-solid";
 import type { StudioMessage, StudioPart } from "../../types";
+import i18n from "../../i18n";
 import { ContextToolGroup, MessagePart, partDefaultOpen } from "./message-part";
 import {
   constructTimelineRows,
@@ -206,12 +207,12 @@ export function MessageTimeline(props: {
   return (
     <div class="oc-timeline-root">
       <div class="oc-jump" data-show={scrollJump() || undefined}>
-        <button type="button" onClick={scrollToBottom} aria-label="Jump to latest">
+        <button type="button" onClick={scrollToBottom} aria-label={i18n.t("toolCall.scrollToBottom")}>
           <ArrowDownToLine size={16} />
         </button>
       </div>
       <div class="oc-scroll" ref={bindRoot} onScroll={onScroll}>
-        <Show when={rows().length > 0} fallback={<div class="oc-empty">{props.empty ?? "No messages yet"}</div>}>
+        <Show when={rows().length > 0} fallback={<div class="oc-empty">{props.empty ?? i18n.t("conversation.emptyTitle")}</div>}>
           <Virtualizer
             data={rows()}
             cache={virtualCache()}
@@ -268,7 +269,7 @@ function TimelineRowView(props: {
         <div class="oc-row">
           <div class="oc-assistant-frame oc-thinking-row">
             <Loader2 size={14} class="spin" />
-            <span>{(props.row as Extract<TimelineRow, { tag: "Thinking" }>).reasoningHeading ?? "Thinking..."}</span>
+            <span>{(props.row as Extract<TimelineRow, { tag: "Thinking" }>).reasoningHeading ?? i18n.t("timeline.thinkingActive")}</span>
           </div>
         </div>
       </Match>

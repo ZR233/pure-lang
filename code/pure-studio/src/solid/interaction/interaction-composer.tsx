@@ -5,6 +5,7 @@ import type {
   InteractionResolution,
   UserQuestion,
 } from "../../types";
+import i18n from "../../i18n";
 import { MarkdownContent } from "../markdown";
 import { DockPrompt } from "./dock-prompt";
 import {
@@ -138,7 +139,7 @@ function UserInputComposer(props: {
         <>
           <div class="dock-title">
             <HelpCircle size={16} />
-            <span>{total()} question{total() === 1 ? "" : "s"}</span>
+            <span>{i18n.t("askUser.questionCount", { count: total() })}</span>
           </div>
           <div class="dock-progress">
             <For each={props.questions}>
@@ -149,7 +150,7 @@ function UserInputComposer(props: {
                   data-answered={answered(question) || undefined}
                   disabled={props.disabled}
                   onClick={() => setTab(index())}
-                  aria-label={`Question ${index() + 1}`}
+                  aria-label={i18n.t("askUser.questionLabel", { index: index() + 1 })}
                 />
               )}
             </For>
@@ -165,14 +166,14 @@ function UserInputComposer(props: {
             <Show when={tab() > 0}>
               <button type="button" class="secondary" disabled={props.disabled} onClick={previous}>
                 <ChevronLeft size={14} />
-                Back
+                {i18n.t("actions.back")}
               </button>
             </Show>
             <button type="button" disabled={props.disabled} onClick={next}>
               <Show when={last()} fallback={<ChevronRight size={14} />}>
                 <Check size={14} />
               </Show>
-              {last() ? (props.state === "responding" ? "Submitting..." : "Submit") : "Next"}
+              {last() ? (props.state === "responding" ? i18n.t("askUser.submitting") : i18n.t("askUser.submit")) : i18n.t("askUser.next")}
             </button>
           </div>
         </>
@@ -182,7 +183,7 @@ function UserInputComposer(props: {
         {(question) => (
           <section class="interaction-question">
             <div class="interaction-question-title">
-              <strong>{question().header || `Question ${tab() + 1}`}</strong>
+              <strong>{question().header || i18n.t("askUser.questionLabel", { index: tab() + 1 })}</strong>
               <span>{question().question}</span>
             </div>
             <Show when={question().options?.length}>
@@ -214,7 +215,7 @@ function UserInputComposer(props: {
                   <textarea
                     value={draft()[question().id]?.freeText ?? ""}
                     disabled={props.disabled}
-                    placeholder="Type your answer..."
+                    placeholder={i18n.t("askUser.answerPlaceholder")}
                     onInput={(event) => setFreeText(question(), event.currentTarget.value)}
                   />
                 }
@@ -223,7 +224,7 @@ function UserInputComposer(props: {
                   type="password"
                   value={draft()[question().id]?.freeText ?? ""}
                   disabled={props.disabled}
-                  placeholder="Secret answer"
+                  placeholder={i18n.t("askUser.secretPlaceholder")}
                   autocomplete="off"
                   onInput={(event) => setFreeText(question(), event.currentTarget.value)}
                 />
@@ -249,10 +250,10 @@ function ToolApprovalComposer(props: {
 }) {
   const [reason, setReason] = createSignal("");
   const details = createMemo(() => [
-    ["Tool", props.name],
-    ["Working directory", props.workingDirectory ?? "-"],
-    ["Parent agent", props.parentAgentId ?? "-"],
-    ["Agent path", props.agentPath ?? "-"],
+    [i18n.t("approval.tool"), props.name],
+    [i18n.t("approval.workingDirectory"), props.workingDirectory ?? i18n.t("common.notAvailable")],
+    [i18n.t("approval.parentAgent"), props.parentAgentId ?? i18n.t("common.notAvailable")],
+    [i18n.t("approval.agentPath"), props.agentPath ?? i18n.t("common.notAvailable")],
   ]);
 
   return (
@@ -261,7 +262,7 @@ function ToolApprovalComposer(props: {
       header={
         <div class="dock-title">
           <ShieldAlert size={16} />
-          <span>Permission required</span>
+          <span>{i18n.t("approval.permissionRequired")}</span>
         </div>
       }
       footer={
@@ -272,11 +273,11 @@ function ToolApprovalComposer(props: {
           <div class="dock-actions">
             <button type="button" class="secondary" disabled={props.disabled} onClick={() => props.onSubmit("denied", reason())}>
               <X size={14} />
-              Deny
+              {i18n.t("actions.deny")}
             </button>
             <button type="button" disabled={props.disabled} onClick={() => props.onSubmit("approved", reason())}>
               <Check size={14} />
-              {props.state === "responding" ? "Approving..." : "Allow"}
+              {props.state === "responding" ? i18n.t("approval.approving") : i18n.t("approval.allow")}
             </button>
           </div>
         </>
@@ -296,7 +297,7 @@ function ToolApprovalComposer(props: {
       <textarea
         value={reason()}
         disabled={props.disabled}
-        placeholder="Reason (optional)"
+        placeholder={i18n.t("approval.reasonPlaceholder")}
         onInput={(event) => setReason(event.currentTarget.value)}
       />
     </DockPrompt>
@@ -319,7 +320,7 @@ function PlanConfirmationComposer(props: {
       header={
         <div class="dock-title">
           <Check size={16} />
-          <span>Implement this plan?</span>
+          <span>{i18n.t("planConfirm.promptTitle")}</span>
         </div>
       }
       footer={
@@ -335,7 +336,7 @@ function PlanConfirmationComposer(props: {
               onClick={() => props.onSubmit("dismiss", "", reason())}
             >
               <X size={14} />
-              Dismiss
+              {i18n.t("planConfirm.ignore")}
             </button>
             <button
               type="button"
@@ -344,7 +345,7 @@ function PlanConfirmationComposer(props: {
               onClick={() => props.onSubmit("continuePlanning", content(), reason())}
             >
               <Pause size={14} />
-              Continue planning
+              {i18n.t("planConfirm.adjustChoice")}
             </button>
             <button
               type="button"
@@ -352,7 +353,7 @@ function PlanConfirmationComposer(props: {
               onClick={() => props.onSubmit("implementFreshContext", "", reason())}
             >
               <Check size={14} />
-              {props.state === "responding" ? "Starting..." : "Implement fresh"}
+              {props.state === "responding" ? i18n.t("planConfirm.starting") : i18n.t("planConfirm.implementFreshChoice")}
             </button>
           </div>
         </>
@@ -366,13 +367,13 @@ function PlanConfirmationComposer(props: {
       <textarea
         value={content()}
         disabled={props.disabled}
-        placeholder="Continue discussing this plan"
+        placeholder={i18n.t("planConfirm.discussPlaceholder")}
         onInput={(event) => setContent(event.currentTarget.value)}
       />
       <textarea
         value={reason()}
         disabled={props.disabled}
-        placeholder="Reason (optional)"
+        placeholder={i18n.t("approval.reasonPlaceholder")}
         onInput={(event) => setReason(event.currentTarget.value)}
       />
     </DockPrompt>
