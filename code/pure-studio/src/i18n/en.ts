@@ -110,6 +110,7 @@ const en = {
     thinkingActive: "Thinking...",
     thoughtDurationSubSecond: "Thought for less than 1 second",
     thoughtDurationSeconds: "Thought for {{seconds}} seconds",
+    thoughtDurationSecondsShort: "Thought for {{seconds}}s",
     thoughtDurationMinutes: "Thought for {{minutes}} min {{seconds}} sec",
   },
 
@@ -186,6 +187,7 @@ const en = {
     useToolsOne: "Use {{count}} tool",
     details: "{{count}} tool calls",
     details_one: "{{count}} tool call",
+    contextItems: "Read {{count}} context items",
   },
 
   conversation: {
@@ -247,10 +249,37 @@ const en = {
       lspMissingCommand: "Missing command",
       lspDisabled: "Disabled",
       lspDiagnosticsCount: "{{count}} diagnostics",
+      sessionMode: "Session mode",
+      plannerModel: "Planner model",
+      status: "Status",
+      phase: "Phase",
+      elapsed: "Elapsed",
+      busy: "Busy",
+      blocked: "Blocked",
+      waitingFor: "Waiting for",
+      used: "Used",
+      window: "Window",
+      usage: "Usage",
+      estimated: "Estimated",
+      unpriced: "Unpriced",
+      noCost: "No cost",
+      blockedPhase: "Blocked: {{phase}}",
+      phaseElapsed: "{{phase}} {{seconds}}s",
+      seconds: "{{seconds}}s",
+      contextPercent: "Context {{percent}}%",
+      mcpActive: "{{status}} active",
     },
 
   approval: {
     title: "Tool Approval",
+    permissionRequired: "Permission required",
+    tool: "Tool",
+    workingDirectory: "Working directory",
+    parentAgent: "Parent agent",
+    agentPath: "Agent path",
+    allow: "Allow",
+    approving: "Approving...",
+    reasonPlaceholder: "Reason (optional)",
   },
 
   askUser: {
@@ -258,7 +287,13 @@ const en = {
     answer: "Answer",
     next: "Next",
     submit: "Submit answers",
+    submitting: "Submitting...",
     progress: "Question {{current}} / {{total}}",
+    questionCount: "{{count}} questions",
+    questionLabel: "Question {{index}}",
+    questions: "Questions",
+    answeredCount: "{{count}} answered",
+    noAnswer: "(no answer)",
     answerPlaceholder: "Type your answer...",
     customPlaceholder: "Add a custom answer...",
     secretPlaceholder: "Enter secret answer",
@@ -274,6 +309,7 @@ const en = {
     submit: "Submit",
     continueDiscussion: "Continue discussion",
     discussPlaceholder: "Type what you want to discuss or change about the plan...",
+    starting: "Starting...",
   },
 
   planState: {
@@ -495,6 +531,10 @@ const en = {
     newSession: "New session",
     newSessionTitle: "New session",
     sessionFallbackTitle: "Current session",
+    yes: "Yes",
+    no: "No",
+    none: "None",
+    notAvailable: "-",
   },
 
   sessions: {

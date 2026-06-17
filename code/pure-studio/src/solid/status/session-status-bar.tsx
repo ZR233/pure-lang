@@ -23,6 +23,7 @@ import type {
   SessionRecord,
   SessionRuntime,
 } from "../../types";
+import i18n from "../../i18n";
 
 const activeAgentStatuses = new Set(["queued", "running", "waiting"]);
 const permissionModes: PermissionMode[] = ["request-approval", "auto-review", "full-access"];
@@ -96,10 +97,10 @@ export function SessionStatusBar(props: {
             value={props.currentMode}
             disabled={props.busy || !props.selectedSession}
             onChange={(event) => props.onSetSessionMode(event.currentTarget.value as CompileMode)}
-            aria-label="Session mode"
+            aria-label={i18n.t("statusBar.sessionMode")}
           >
             <For each={modes}>
-              {(mode) => <option value={mode}>{mode === "auto" ? "Auto" : "Plan"}</option>}
+              {(mode) => <option value={mode}>{mode === "auto" ? i18n.t("conversation.autoMode") : i18n.t("conversation.planMode")}</option>}
             </For>
           </select>
         </label>
@@ -109,7 +110,7 @@ export function SessionStatusBar(props: {
           <select
             value={`${plannerRole()?.provider ?? ""}::${plannerRole()?.model ?? ""}`}
             onChange={(event) => selectModel(event.currentTarget.value)}
-            aria-label="Planner model"
+            aria-label={i18n.t("statusBar.plannerModel")}
           >
             <For each={props.providers}>
               {(provider) => (
@@ -129,7 +130,7 @@ export function SessionStatusBar(props: {
             <select
               value={plannerRole()?.effort ?? efforts()[0] ?? ""}
               onChange={(event) => selectEffort(event.currentTarget.value)}
-              aria-label="Reasoning effort"
+              aria-label={i18n.t("roleRoute.effort")}
             >
               <For each={efforts()}>
                 {(effort) => <option value={effort}>{effort}</option>}
@@ -143,7 +144,7 @@ export function SessionStatusBar(props: {
           <select
             value={props.permissionMode}
             onChange={(event) => props.onSavePermissionMode(event.currentTarget.value as PermissionMode)}
-            aria-label="Permission mode"
+            aria-label={i18n.t("statusBar.permissionMode")}
           >
             <For each={permissionModes}>
               {(mode) => <option value={mode}>{permissionLabel(mode)}</option>}
@@ -154,13 +155,13 @@ export function SessionStatusBar(props: {
 
       <div class="status-readouts">
         <StatusDetails icon={<Clock size={14} />} label={phaseSummaryLabel(visiblePhase(), props.turnStartedAt)}>
-          <StatusLine label="Status" value={phaseLabel(visiblePhase(), props.turnStartedAt)} />
-          <StatusLine label="Phase" value={visiblePhase()} />
-          <StatusLine label="Elapsed" value={elapsedLabel(visiblePhase(), props.turnStartedAt)} />
-          <StatusLine label="Busy" value={props.busy ? "yes" : "no"} />
-          <StatusLine label="Blocked" value={waitingPhase() ? "yes" : "no"} />
+          <StatusLine label={i18n.t("statusBar.status")} value={phaseLabel(visiblePhase(), props.turnStartedAt)} />
+          <StatusLine label={i18n.t("statusBar.phase")} value={phaseName(visiblePhase())} />
+          <StatusLine label={i18n.t("statusBar.elapsed")} value={elapsedLabel(visiblePhase(), props.turnStartedAt)} />
+          <StatusLine label={i18n.t("statusBar.busy")} value={props.busy ? i18n.t("common.yes") : i18n.t("common.no")} />
+          <StatusLine label={i18n.t("statusBar.blocked")} value={waitingPhase() ? i18n.t("common.yes") : i18n.t("common.no")} />
           <Show when={waitingPhase()}>
-            {(phase) => <StatusLine label="Waiting for" value={interactionLabel(phase())} />}
+            {(phase) => <StatusLine label={i18n.t("statusBar.waitingFor")} value={interactionLabel(phase())} />}
           </Show>
         </StatusDetails>
 
@@ -169,43 +170,43 @@ export function SessionStatusBar(props: {
           icon={<ContextRing percent={contextUsagePercent()} />}
         >
           <div class="context-detail-meter"><span style={{ width: `${contextUsagePercent()}%` }} /></div>
-          <StatusLine label="Used" value={contextLabel()} />
-          <StatusLine label="Window" value={formatTokenCount(contextWindow())} />
-          <StatusLine label="Usage" value={`${contextUsagePercent()}%`} />
-          <StatusLine label="Input" value={formatTokenCount(usage()?.promptTokens)} />
-          <StatusLine label="Output" value={formatTokenCount(usage()?.completionTokens)} />
-          <StatusLine label="Cache read" value={formatTokenCount(usage()?.cachedPromptTokens)} />
-          <StatusLine label="Cache hit" value={formatPercent(usage()?.cacheHitRate)} />
+          <StatusLine label={i18n.t("statusBar.used")} value={contextLabel()} />
+          <StatusLine label={i18n.t("statusBar.window")} value={formatTokenCount(contextWindow())} />
+          <StatusLine label={i18n.t("statusBar.usage")} value={`${contextUsagePercent()}%`} />
+          <StatusLine label={i18n.t("statusBar.input")} value={formatTokenCount(usage()?.promptTokens)} />
+          <StatusLine label={i18n.t("statusBar.output")} value={formatTokenCount(usage()?.completionTokens)} />
+          <StatusLine label={i18n.t("statusBar.cacheRead")} value={formatTokenCount(usage()?.cachedPromptTokens)} />
+          <StatusLine label={i18n.t("statusBar.cacheHit")} value={formatPercent(usage()?.cacheHitRate)} />
         </StatusDetails>
 
         <StatusDetails class="status-cost-details" label={costLabel()}>
           <Show
             when={pricedCosts(usage()?.estimatedCosts).length > 0}
-            fallback={<StatusLine label="Estimated" value={costLabel()} />}
+            fallback={<StatusLine label={i18n.t("statusBar.estimated")} value={costLabel()} />}
           >
             <For each={pricedCosts(usage()?.estimatedCosts)}>
               {(cost) => <StatusLine label={cost.currency} value={formatCostNumber(cost.amount)} />}
             </For>
           </Show>
           <Show when={usage()?.hasUnpricedUsage}>
-            <StatusLine label="Unpriced" value="yes" />
+            <StatusLine label={i18n.t("statusBar.unpriced")} value={i18n.t("common.yes")} />
           </Show>
         </StatusDetails>
 
         <StatusDetails icon={<Boxes size={14} />} label={String(capabilityCount())}>
-          <StatusGroup title="Skills" items={props.runtime?.activeSkills ?? []} />
-          <div class="status-list-title">MCP</div>
-          <For each={props.mcpServers} fallback={<span class="status-muted">None</span>}>
+          <StatusGroup title={i18n.t("statusBar.skills")} items={props.runtime?.activeSkills ?? []} />
+          <div class="status-list-title">{i18n.t("statusBar.mcpServers")}</div>
+          <For each={props.mcpServers} fallback={<span class="status-muted">{i18n.t("common.none")}</span>}>
             {(server) => <McpRow server={server} active={props.activeMcpServers.includes(server.id)} />}
           </For>
-          <div class="status-list-title">LSP</div>
-          <For each={props.lspServers} fallback={<span class="status-muted">None</span>}>
+          <div class="status-list-title">{i18n.t("statusBar.lspServers")}</div>
+          <For each={props.lspServers} fallback={<span class="status-muted">{i18n.t("common.none")}</span>}>
             {(server) => <LspRow server={server} active={props.activeLspServers.includes(server.id)} />}
           </For>
         </StatusDetails>
 
         <StatusDetails icon={<Users size={14} />} label={String(visibleAgents().length)}>
-          <For each={visibleAgents()} fallback={<span class="status-muted">No active subagents</span>}>
+          <For each={visibleAgents()} fallback={<span class="status-muted">{i18n.t("statusBar.noSubagents")}</span>}>
             {(agent) => <AgentRow agent={agent} />}
           </For>
         </StatusDetails>
@@ -233,7 +234,7 @@ function ContextRing(props: { percent: number }) {
     <span
       class="context-ring"
       style={{ "--context-percent": `${props.percent}%` } as JSX.CSSProperties}
-      aria-label={`Context ${props.percent}%`}
+      aria-label={i18n.t("statusBar.contextPercent", { percent: props.percent })}
     >
       <span>{props.percent}%</span>
     </span>
@@ -253,7 +254,7 @@ function StatusGroup(props: { title: string; items: string[] }) {
   return (
     <div>
       <div class="status-list-title">{props.title}</div>
-      <Show when={props.items.length > 0} fallback={<span class="status-muted">None</span>}>
+      <Show when={props.items.length > 0} fallback={<span class="status-muted">{i18n.t("common.none")}</span>}>
         <For each={props.items}>
           {(item) => <div class="status-list-item">{item}</div>}
         </For>
@@ -269,7 +270,7 @@ function LspRow(props: { server: LspServerRecord; active: boolean }) {
         <Loader2 size={12} class="spin" />
       </Show>
       <span>{props.server.displayName}</span>
-      <small>{props.server.activityKind === "idle" ? props.server.availabilityKind : props.server.activityKind}</small>
+      <small>{props.server.activityKind === "idle" ? lspAvailabilityLabel(props.server.availabilityKind) : props.server.activityKind}</small>
     </div>
   );
 }
@@ -279,7 +280,7 @@ function McpRow(props: { server: McpServerRecord; active: boolean }) {
     <div class="status-list-item">
       <Circle size={8} class={mcpDotClass(props.server, props.active)} />
       <span>{props.server.id}</span>
-      <small>{props.active ? `${props.server.availabilityKind} active` : props.server.availabilityKind}</small>
+      <small>{props.active ? i18n.t("statusBar.mcpActive", { status: mcpAvailabilityLabel(props.server.availabilityKind) }) : mcpAvailabilityLabel(props.server.availabilityKind)}</small>
     </div>
   );
 }
@@ -318,7 +319,7 @@ function formatTokenCount(value: number | null | undefined) {
 }
 
 function formatPercent(value: number | null | undefined) {
-  if (value === null || value === undefined) return "-";
+  if (value === null || value === undefined) return i18n.t("common.notAvailable");
   return `${Math.round(value * 100)}%`;
 }
 
@@ -333,7 +334,7 @@ function pricedCosts(costs: RuntimeUsage["estimatedCosts"] | undefined) {
 
 function formatCost(usage: RuntimeUsage | null) {
   const costs = pricedCosts(usage?.estimatedCosts);
-  if (costs.length === 0) return usage?.hasUnpricedUsage ? "unpriced" : "no cost";
+  if (costs.length === 0) return usage?.hasUnpricedUsage ? i18n.t("statusBar.costUnpriced") : i18n.t("statusBar.noCost");
   return costs.map((cost) => `${cost.currency} ${formatCostNumber(cost.amount)}`).join(" / ");
 }
 
@@ -344,33 +345,26 @@ function formatCostNumber(value: number) {
 }
 
 function permissionLabel(mode: PermissionMode) {
-  switch (mode) {
-    case "request-approval":
-      return "Request approval";
-    case "auto-review":
-      return "Auto review";
-    case "full-access":
-      return "Full access";
-  }
+  return i18n.t(`permissionMode.${mode}`);
 }
 
 function phaseLabel(phase: string | undefined, startedAt: number | null | undefined) {
-  if (!phase || phase === "idle") return "Idle";
-  if (isWaitingPhase(phase)) return `Blocked: ${interactionLabel(phase)}`;
-  if (!startedAt) return phase;
-  return `${phase} ${elapsedSeconds(startedAt)}s`;
+  if (!phase || phase === "idle") return i18n.t("turnPhase.idle");
+  if (isWaitingPhase(phase)) return i18n.t("statusBar.blockedPhase", { phase: interactionLabel(phase) });
+  if (!startedAt) return phaseName(phase);
+  return i18n.t("statusBar.phaseElapsed", { phase: phaseName(phase), seconds: elapsedSeconds(startedAt) });
 }
 
 function phaseSummaryLabel(phase: string | undefined, startedAt: number | null | undefined) {
-  if (!phase || phase === "idle") return "Idle";
-  if (isWaitingPhase(phase)) return "Blocked";
-  if (!startedAt) return phase;
-  return `${phase} ${elapsedSeconds(startedAt)}s`;
+  if (!phase || phase === "idle") return i18n.t("turnPhase.idle");
+  if (isWaitingPhase(phase)) return i18n.t("statusBar.blocked");
+  if (!startedAt) return phaseName(phase);
+  return i18n.t("statusBar.phaseElapsed", { phase: phaseName(phase), seconds: elapsedSeconds(startedAt) });
 }
 
 function elapsedLabel(phase: string | undefined, startedAt: number | null | undefined) {
-  if (!phase || phase === "idle" || !startedAt) return "-";
-  return `${elapsedSeconds(startedAt)}s`;
+  if (!phase || phase === "idle" || !startedAt) return i18n.t("common.notAvailable");
+  return i18n.t("statusBar.seconds", { seconds: elapsedSeconds(startedAt) });
 }
 
 function elapsedSeconds(startedAt: number) {
@@ -399,12 +393,43 @@ function isWaitingPhase(phase: string): phase is WaitingPhase {
 function interactionLabel(phase: WaitingPhase) {
   switch (phase) {
     case "toolApproval":
-      return "tool approval";
+      return i18n.t("approval.title");
     case "userInput":
-      return "user input";
+      return i18n.t("askUser.awaiting");
     case "planConfirmation":
-      return "plan confirmation";
+      return i18n.t("planConfirm.title");
   }
+}
+
+function phaseName(phase: string | undefined) {
+  if (!phase) return i18n.t("turnPhase.idle");
+  return i18n.exists(`turnPhase.${phase}`) ? i18n.t(`turnPhase.${phase}`) : phase;
+}
+
+function lspAvailabilityLabel(value: string) {
+  const key = lspStatusKey(value);
+  return i18n.exists(`statusBar.${key}`) ? i18n.t(`statusBar.${key}`) : value;
+}
+
+function lspStatusKey(value: string) {
+  switch (value) {
+    case "available":
+      return "lspReady";
+    case "checking":
+      return "lspChecking";
+    case "unavailable":
+      return "lspUnavailable";
+    case "missingCommand":
+      return "lspMissingCommand";
+    case "disabled":
+      return "lspDisabled";
+    default:
+      return value;
+  }
+}
+
+function mcpAvailabilityLabel(value: string) {
+  return i18n.exists(`settings.mcp.availability.${value}`) ? i18n.t(`settings.mcp.availability.${value}`) : value;
 }
 
 function lspDotClass(server: LspServerRecord) {
@@ -420,6 +445,11 @@ function mcpDotClass(server: McpServerRecord, active: boolean) {
 }
 
 function agentStatusLabel(agent: AgentDto) {
+  if (!hasVisibleCost(agent.runtimeUsage ?? null)) return agent.status;
   const cost = formatCost(agent.runtimeUsage ?? null);
-  return cost === "no cost" ? agent.status : `${agent.status} / ${cost}`;
+  return `${agent.status} / ${cost}`;
+}
+
+function hasVisibleCost(usage: RuntimeUsage | null) {
+  return pricedCosts(usage?.estimatedCosts).length > 0 || Boolean(usage?.hasUnpricedUsage);
 }

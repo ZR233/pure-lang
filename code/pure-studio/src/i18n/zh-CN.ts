@@ -110,6 +110,7 @@ const zhCN = {
     thinkingActive: "思考中...",
     thoughtDurationSubSecond: "思考了不到 1 秒",
     thoughtDurationSeconds: "思考了 {{seconds}} 秒",
+    thoughtDurationSecondsShort: "思考 {{seconds}} 秒",
     thoughtDurationMinutes: "思考了 {{minutes}} 分 {{seconds}} 秒",
   },
 
@@ -186,6 +187,7 @@ const zhCN = {
     useToolsOne: "使用 {{count}} 个工具",
     details: "{{count}} 次工具调用",
     details_one: "{{count}} 次工具调用",
+    contextItems: "读取 {{count}} 个上下文项",
   },
 
   conversation: {
@@ -247,10 +249,37 @@ const zhCN = {
       lspMissingCommand: "缺少命令",
       lspDisabled: "未启用",
       lspDiagnosticsCount: "{{count}} 个诊断",
+      sessionMode: "会话模式",
+      plannerModel: "Planner 模型",
+      status: "状态",
+      phase: "阶段",
+      elapsed: "耗时",
+      busy: "忙碌",
+      blocked: "阻塞",
+      waitingFor: "等待",
+      used: "已用",
+      window: "窗口",
+      usage: "用量",
+      estimated: "估算",
+      unpriced: "未计价",
+      noCost: "无费用",
+      blockedPhase: "阻塞：{{phase}}",
+      phaseElapsed: "{{phase}} {{seconds}} 秒",
+      seconds: "{{seconds}} 秒",
+      contextPercent: "上下文 {{percent}}%",
+      mcpActive: "{{status}} active",
     },
 
   approval: {
     title: "工具审批",
+    permissionRequired: "需要权限",
+    tool: "工具",
+    workingDirectory: "工作目录",
+    parentAgent: "父 agent",
+    agentPath: "Agent 路径",
+    allow: "允许",
+    approving: "批准中...",
+    reasonPlaceholder: "原因（可选）",
   },
 
   askUser: {
@@ -258,7 +287,13 @@ const zhCN = {
     answer: "回答",
     next: "下一题",
     submit: "提交回答",
+    submitting: "提交中...",
     progress: "第 {{current}} / {{total}} 题",
+    questionCount: "{{count}} 个问题",
+    questionLabel: "问题 {{index}}",
+    questions: "问题",
+    answeredCount: "已回答 {{count}} 个",
+    noAnswer: "（未回答）",
     answerPlaceholder: "输入你的回答...",
     customPlaceholder: "补充自定义回答...",
     secretPlaceholder: "输入敏感回答",
@@ -274,6 +309,7 @@ const zhCN = {
     submit: "提交",
     continueDiscussion: "继续讨论",
     discussPlaceholder: "输入想继续讨论或调整计划的内容...",
+    starting: "启动中...",
   },
 
   planState: {
@@ -495,6 +531,10 @@ const zhCN = {
     newSession: "新建会话",
     newSessionTitle: "新建会话",
     sessionFallbackTitle: "当前会话",
+    yes: "是",
+    no: "否",
+    none: "无",
+    notAvailable: "-",
   },
 
   sessions: {

@@ -69,6 +69,8 @@ pending interaction 只替换普通 prompt 输入，不得隐藏当前 turn 的�
 
 Solid `SessionStatusBar` 保留旧 React 状态栏功能：模式切换、planner 模型选择、reasoning effort、权限模式、context/token/cost、active skills、MCP、LSP 和 subagent 活动列表。状态栏所有数据来自 Studio store；`mcpHealthChanged` 与 `lspHealthChanged` 必须更新对应 snapshot，不能在 reducer 中丢弃。
 
+状态栏、interaction dock、timeline 工具/计划/提问摘要中的 UI 文案必须走 i18n；模型名称、provider 名称、模型 slug、tool 名称、agent 路径、reasoning effort 等来自配置或运行时的领域值按原始字符串透传展示，不做翻译或本地化映射。这样 zh-CN/en 只负责固定 UI 标签与状态说明，不改变用户配置、provider 返回值或协议枚举的可辨识性。
+
 状态栏的 waiting 状态以 active interaction 为一等输入。`busy` 表示 turn 是否仍在运行，`activeInteraction` 表示 UI 是否必须等待用户响应；Plan confirmation 可以在 `busy=false` 时仍阻塞 composer。状态栏 phase 优先级为 `toolApproval -> userInput -> planConfirmation -> turnPhase`。
 
 会话列表是独立滚动区域，row 采用 opencode 式单行 flex 布局：图标/状态固定宽度，标题 `min-width:0` 且 `truncate`，列表项 `flex-shrink:0`。Sessions 区域过长时只滚动列表，不挤压 project 区、settings 按钮或相邻 session row。

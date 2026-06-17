@@ -4,6 +4,7 @@
 import { ChevronDown, CircleAlert, FileText, Hammer, HelpCircle, Loader2, TerminalSquare } from "lucide-solid";
 import { For, Show, createMemo, createSignal } from "solid-js";
 import type { StudioPart, UserQuestion } from "../../types";
+import i18n from "../../i18n";
 import { MarkdownContent } from "../markdown";
 import { readPartText, readPlanContent, readToolArguments, readToolResult, reasoningHeading } from "./message-part-text";
 import {
@@ -69,7 +70,7 @@ export function ContextToolGroup(props: { parts: StudioPart[] }) {
     <div class="oc-context-group">
       <div class="oc-context-group-header">
         <FileText size={14} />
-        <span>Read {props.parts.length} context item{props.parts.length === 1 ? "" : "s"}</span>
+        <span>{i18n.t("toolGroup.contextItems", { count: props.parts.length })}</span>
       </div>
       <div class="oc-context-group-list">
         <For each={props.parts}>
@@ -90,7 +91,7 @@ function TextPart(props: { part: StudioPart; text: string; live?: boolean }) {
 
 function ReasoningPart(props: { part: StudioPart; text: string; defaultOpen?: boolean }) {
   const active = isActiveStatus(props.part.status);
-  const heading = () => reasoningHeading(props.text) ?? (active ? "Thinking..." : thoughtDuration(props.part));
+  const heading = () => reasoningHeading(props.text) ?? (active ? i18n.t("timeline.thinkingActive") : thoughtDuration(props.part));
   return (
     <details
       class="oc-reasoning"
@@ -120,7 +121,7 @@ function PlanPart(props: { part: StudioPart; deltaText?: string; live?: boolean 
     <div class="oc-plan">
       <div class="oc-plan-header">
         <FileText size={15} />
-        <span>Plan</span>
+        <span>{i18n.t("timeline.plan")}</span>
       </div>
       <MarkdownContent content={content()} live={props.live} />
     </div>
@@ -141,7 +142,7 @@ function ToolPart(props: { part: StudioPart; deltaText?: string; defaultOpen?: b
             <Loader2 size={14} class="spin" />
           </Show>
         </span>
-        <span class="oc-tool-name">{tool()?.name || "tool"}</span>
+        <span class="oc-tool-name">{tool()?.name || i18n.t("toolGroup.title")}</span>
         <span class="oc-tool-summary">{toolPathSummary(props.part)}</span>
         <span class="oc-tool-status">{statusLabel(props.part.status)}</span>
         <ChevronDown size={14} class="oc-chevron" />
@@ -172,8 +173,8 @@ function QuestionToolPart(props: { part: StudioPart }) {
     <div class="oc-tool oc-question-tool" data-open={open() || undefined}>
       <button type="button" class="oc-tool-header" onClick={() => setOpen(!open())}>
         <span class="oc-tool-icon"><HelpCircle size={14} /></span>
-        <span class="oc-tool-name">Questions</span>
-        <span class="oc-tool-summary">{answeredCount()} answered</span>
+        <span class="oc-tool-name">{i18n.t("askUser.questions")}</span>
+        <span class="oc-tool-summary">{i18n.t("askUser.answeredCount", { count: answeredCount() })}</span>
         <span class="oc-tool-status">{statusLabel(props.part.status)}</span>
         <ChevronDown size={14} class="oc-chevron" />
       </button>
@@ -185,7 +186,7 @@ function QuestionToolPart(props: { part: StudioPart }) {
               return (
                 <div class="oc-question-answer-item">
                   <div class="oc-question-text">{question.question}</div>
-                  <div class="oc-answer-text">{answer().join(", ") || "(no answer)"}</div>
+                  <div class="oc-answer-text">{answer().join(", ") || i18n.t("askUser.noAnswer")}</div>
                 </div>
               );
             }}
@@ -206,7 +207,7 @@ function AgentPart(props: { part: StudioPart }) {
     <div class="oc-agent">
       <div class="oc-agent-header">
         <TerminalSquare size={14} />
-        <span>{agent()?.path ?? "agent"}</span>
+        <span>{agent()?.path ?? i18n.t("subagent.title")}</span>
         <span class="oc-muted">{agent()?.status ?? props.part.status}</span>
       </div>
       <Show when={summary()}>
@@ -228,30 +229,30 @@ function statusLabel(status: StudioPart["status"]) {
   switch (status) {
     case "started":
     case "streaming":
-      return "streaming";
+      return i18n.t("toolCall.streaming");
     case "awaitingApproval":
-      return "approval";
+      return i18n.t("toolCall.pendingApproval");
     case "approved":
-      return "approved";
+      return i18n.t("toolCall.approved");
     case "running":
-      return "running";
+      return i18n.t("toolCall.streaming");
     case "completed":
-      return "done";
+      return i18n.t("toolCall.resultReady");
     case "failed":
-      return "failed";
+      return i18n.t("subagent.failed");
     case "denied":
-      return "denied";
+      return i18n.t("toolCall.denied");
     case "interrupted":
-      return "interrupted";
+      return i18n.t("status.interrupted");
     case "budgetLimited":
-      return "budget";
+      return i18n.t("turnPhase.budgetLimited");
   }
 }
 
 function thoughtDuration(part: StudioPart) {
   const seconds = Math.max(0, (part.updatedAt ?? part.createdAt) - part.createdAt);
-  if (seconds <= 0) return "Thought";
-  return `Thought for ${seconds}s`;
+  if (seconds <= 0) return i18n.t("timeline.thinking");
+  return i18n.t("timeline.thoughtDurationSecondsShort", { seconds });
 }
 
 function toolPathSummary(part: StudioPart) {
