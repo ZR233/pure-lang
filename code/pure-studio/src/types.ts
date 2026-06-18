@@ -593,6 +593,7 @@ export type InteractionChangedPayload = {
 export type ResolveInteractionResponse = {
   sessionId: string;
   interaction: InteractionRequest;
+  sessions: SessionRecord[];
   planLifecycle?: PlanLifecycleResponse | null;
 };
 

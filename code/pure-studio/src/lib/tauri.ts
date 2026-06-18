@@ -37,6 +37,7 @@ import {
   previewSkills,
   previewMcpServers,
   previewLspServers,
+  previewInteractions,
 } from "./preview";
 import { makeProvider, makeRole } from "./provider-mapper";
 import { renderPreviewToml } from "./toml-renderer";
@@ -91,7 +92,7 @@ export function bootstrapStudio() {
         agentEvents: previewAgentEvents,
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
-        interactions: [],
+        interactions: previewInteractions,
         lspHealth: {
           lspServers: previewLspServers,
           activeLspServers: previewSessionRuntime.activeLspServers,
@@ -125,7 +126,7 @@ export function openProject(path: string) {
         agentEvents: previewAgentEvents,
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
-        interactions: [],
+        interactions: previewInteractions,
         lspHealth: {
           lspServers: previewLspServers,
           activeLspServers: previewSessionRuntime.activeLspServers,
@@ -251,7 +252,7 @@ export function deleteSession(sessionId: string, selectedSessionId?: string | nu
         agentEvents: nextSelectedSessionId ? previewAgentEvents : [],
         agents: nextSelectedSessionId ? previewAgents : [],
         sessionRuntime: nextSelectedSessionId ? previewSessionRuntime : null,
-        interactions: [],
+        interactions: previewInteractions,
         lspHealth: {
           lspServers: previewLspServers,
           activeLspServers: previewSessionRuntime.activeLspServers,
@@ -278,7 +279,7 @@ export function selectSession(sessionId: string) {
         agentEvents: previewAgentEvents,
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
-        interactions: [],
+        interactions: previewInteractions,
         lspHealth: {
           lspServers: previewLspServers,
           activeLspServers: previewSessionRuntime.activeLspServers,
@@ -308,7 +309,7 @@ export function setSessionMode(sessionId: string, mode: CompileMode) {
         agentEvents: previewAgentEvents,
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
-        interactions: [],
+        interactions: previewInteractions,
         lspHealth: {
           lspServers: previewLspServers,
           activeLspServers: previewSessionRuntime.activeLspServers,
@@ -360,6 +361,14 @@ export function submitPromptCommand(sessionId: string, prompt: string, attachmen
 
 export function resolveInteraction(interactionId: string, resolution: InteractionResolution) {
   if (!isTauriRuntime()) {
+    if (resolution.type === "planConfirmation" && resolution.decision === "implementFreshContext") {
+      previewSessions.forEach((session) => {
+        if (session.id === "preview-session") {
+          session.mode = "auto";
+          session.updatedAt = Math.floor(Date.now() / 1000);
+        }
+      });
+    }
     return Promise.resolve<ResolveInteractionResponse>(
       clone({
         sessionId: "preview-session",
@@ -378,6 +387,9 @@ export function resolveInteraction(interactionId: string, resolution: Interactio
           resolvedAt: Math.floor(Date.now() / 1000),
           resolution,
         },
+        sessions: resolution.type === "planConfirmation" && resolution.decision === "implementFreshContext"
+          ? previewSessions
+          : [],
         planLifecycle: null,
       }),
     );
@@ -748,7 +760,7 @@ export function loadSessionState(sessionId: string) {
         agentEvents: previewAgentEvents,
         agents: previewAgents,
         sessionRuntime: previewSessionRuntime,
-        interactions: [],
+        interactions: previewInteractions,
         messages: previewConversation.messages,
         parts: previewConversation.parts,
         events: [],

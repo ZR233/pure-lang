@@ -8,6 +8,9 @@ const zhCN = {
     settings: "设置",
     projects: "项目",
     sessions: "会话",
+    search: "搜索",
+    plugins: "插件",
+    automation: "自动化",
   },
 
   projects: {
@@ -36,6 +39,7 @@ const zhCN = {
     archive: "归档",
     close: "关闭",
     implementPlan: "实现计划",
+    add: "添加",
   },
 
   status: {
@@ -112,6 +116,8 @@ const zhCN = {
     thoughtDurationSeconds: "思考了 {{seconds}} 秒",
     thoughtDurationSecondsShort: "思考 {{seconds}} 秒",
     thoughtDurationMinutes: "思考了 {{minutes}} 分 {{seconds}} 秒",
+    expandPlan: "展开计划",
+    collapsePlan: "收起计划",
   },
 
   roles: {
@@ -304,11 +310,17 @@ const zhCN = {
     promptTitle: "确认或继续调整计划",
     hint: "选择下一步",
     implementFreshChoice: "清理上下文并实施",
+    implementQuestion: "实施此计划？",
+    implementDescription: "计划正文已在上方，可直接实施，或告诉 Pure 需要如何调整。",
+    implementPlan: "实施计划",
+    yesImplement: "是，实施此计划",
+    noAdjust: "否，请告诉 Pure 如何调整",
     adjustChoice: "继续规划或调整",
     ignore: "忽略",
     submit: "提交",
     continueDiscussion: "继续讨论",
     discussPlaceholder: "输入想继续讨论或调整计划的内容...",
+    adjustPlaceholder: "告诉 Pure 如何调整计划...",
     starting: "启动中...",
   },
 

@@ -108,10 +108,10 @@ type SettingsPanelProps = {
 export function SettingsPanel(props: SettingsPanelProps) {
   const tabLabel = (tab: SettingsTab) => i18n.t(`settings.tabs.${tab}`);
   return (
-    <div class="settings-overlay">
+    <div class="settings-view">
       <div class="settings-page">
         <header class="settings-topbar">
-          <button type="button" class="icon-button" onClick={props.onClose} aria-label={i18n.t("actions.close")}>
+          <button type="button" class="icon-button" onClick={props.onClose} aria-label={i18n.t("actions.back")}>
             <ArrowLeft size={17} />
           </button>
           <div>
@@ -716,19 +716,30 @@ function SecuritySettings(props: {
     { mode: "full-access", icon: Unlock },
   ];
   return (
-    <section class="settings-section">
+    <section class="settings-section security-section">
       <SettingsSectionHeader title={i18n.t("settings.security.title")} description={i18n.t("settings.security.description")} />
-      <div class="settings-role-grid">
-        <For each={options}>
-          {({ mode, icon: Icon }) => (
-            <button type="button" class="settings-card security-card" data-active={props.permissionMode === mode || undefined} onClick={() => {
-              if (props.permissionMode !== mode) void props.onSavePermissionMode(mode);
-            }}>
-              <Icon size={18} />
-              <span><strong>{i18n.t(`permissionMode.${mode}`)}</strong><small>{i18n.t(`settings.security.modeDesc.${mode}`)}</small></span>
-            </button>
-          )}
-        </For>
+      <div class="security-panel">
+        <div class="security-current">
+          <span>{i18n.t("statusBar.permissionMode")}</span>
+          <strong>{i18n.t(`permissionMode.${props.permissionMode}`)}</strong>
+        </div>
+        <div class="security-option-list">
+          <For each={options}>
+            {({ mode, icon: Icon }) => (
+              <button type="button" class="security-option" data-active={props.permissionMode === mode || undefined} onClick={() => {
+                if (props.permissionMode !== mode) void props.onSavePermissionMode(mode);
+              }}>
+                <Icon size={17} />
+                <span><strong>{i18n.t(`permissionMode.${mode}`)}</strong><small>{i18n.t(`settings.security.modeDesc.${mode}`)}</small></span>
+                <span class="security-option-check" aria-hidden="true">
+                  <Show when={props.permissionMode === mode}>
+                    <CheckCircle2 size={15} />
+                  </Show>
+                </span>
+              </button>
+            )}
+          </For>
+        </div>
       </div>
     </section>
   );

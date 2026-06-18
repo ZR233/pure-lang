@@ -736,5 +736,6 @@ pub struct SessionStateDto {
 pub struct ResolveInteractionResponse {
     pub session_id: String,
     pub interaction: InteractionRequest,
+    pub sessions: Vec<SessionDto>,
     pub plan_lifecycle: Option<PlanLifecycleResponse>,
 }

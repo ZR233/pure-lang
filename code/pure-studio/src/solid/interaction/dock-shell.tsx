@@ -1,9 +1,9 @@
 import type { JSX } from "solid-js";
 
-export function DockPrompt(props: {
+export function DockShell(props: {
   kind: "question" | "permission" | "plan";
   header: JSX.Element;
-  footer: JSX.Element;
+  footer?: JSX.Element;
   children: JSX.Element;
   onKeyDown?: JSX.EventHandlerUnion<HTMLDivElement, KeyboardEvent>;
 }) {
