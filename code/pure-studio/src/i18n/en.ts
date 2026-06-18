@@ -8,6 +8,9 @@ const en = {
     settings: "Settings",
     projects: "Projects",
     sessions: "Sessions",
+    search: "Search",
+    plugins: "Plugins",
+    automation: "Automation",
   },
 
   projects: {
@@ -36,6 +39,7 @@ const en = {
     archive: "Archive",
     close: "Close",
     implementPlan: "Implement plan",
+    add: "Add",
   },
 
   status: {
@@ -112,6 +116,8 @@ const en = {
     thoughtDurationSeconds: "Thought for {{seconds}} seconds",
     thoughtDurationSecondsShort: "Thought for {{seconds}}s",
     thoughtDurationMinutes: "Thought for {{minutes}} min {{seconds}} sec",
+    expandPlan: "Expand plan",
+    collapsePlan: "Collapse plan",
   },
 
   roles: {
@@ -304,11 +310,17 @@ const en = {
     promptTitle: "Confirm or keep refining the plan",
     hint: "Choose what happens next",
     implementFreshChoice: "Clear context and implement",
+    implementQuestion: "Implement this plan?",
+    implementDescription: "The plan is shown above. Start implementation now, or tell Pure what should change.",
+    implementPlan: "Implement plan",
+    yesImplement: "Yes, implement this plan",
+    noAdjust: "No, tell Pure what to adjust",
     adjustChoice: "Continue planning or adjust",
     ignore: "Ignore",
     submit: "Submit",
     continueDiscussion: "Continue discussion",
     discussPlaceholder: "Type what you want to discuss or change about the plan...",
+    adjustPlaceholder: "Tell Pure how to adjust the plan...",
     starting: "Starting...",
   },
 

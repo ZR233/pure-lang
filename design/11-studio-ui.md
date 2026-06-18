@@ -67,7 +67,7 @@ Timeline 虚拟滚动必须监听 opencode 同款 active assistant content versi
 
 pending interaction 只替换普通 prompt 输入，不得隐藏当前 turn 的停止控制；只要当前 session 的 turn 仍处于非终态，footer 必须保留停止按钮并调用 `stop_prompt(sessionId)`。`busy` 与停止按钮状态必须按 `sessionId` 归属计算，后台 session 的 turn event 不能让当前 session 显示不可用的停止态。
 
-Solid `SessionStatusBar` 保留旧 React 状态栏功能：模式切换、planner 模型选择、reasoning effort、权限模式、context/token/cost、active skills、MCP、LSP 和 subagent 活动列表。状态栏所有数据来自 Studio store；`mcpHealthChanged` 与 `lspHealthChanged` 必须更新对应 snapshot，不能在 reducer 中丢弃。
+Solid `SessionStatusBar` 保留旧 React 状态栏功能中的模式切换、planner 模型选择、reasoning effort、context/token/cost、active skills、MCP、LSP 和 subagent 活动列表。权限模式不在状态栏重复展示，只在 composer 权限选择器和 Settings/Security 中修改。状态栏所有数据来自 Studio store；`mcpHealthChanged` 与 `lspHealthChanged` 必须更新对应 snapshot，不能在 reducer 中丢弃。
 
 状态栏、interaction dock、timeline 工具/计划/提问摘要中的 UI 文案必须走 i18n；模型名称、provider 名称、模型 slug、tool 名称、agent 路径、reasoning effort 等来自配置或运行时的领域值按原始字符串透传展示，不做翻译或本地化映射。这样 zh-CN/en 只负责固定 UI 标签与状态说明，不改变用户配置、provider 返回值或协议枚举的可辨识性。
 
@@ -81,7 +81,11 @@ Solid `SessionStatusBar` 保留旧 React 状态栏功能：模式切换、planne
 
 Settings 是 Solid store 的配置编辑入口，不恢复 React 兼容层。它必须对齐旧 React 设置页的能力：Providers、Instructions、Skills、Roles、MCP、Security 和 General 页签。配置状态来自 `ConfigPayload` 与现有 Tauri command：`load_provider_usages`、`save_provider_settings`、`save_instructions_settings`、`save_mcp_settings`、`save_permission_mode` 和 `list_discovered_skills`。设置页本地 UI 状态包括 active tab、provider search、selected provider、provider usage loading/error；保存成功后必须用返回的 canonical `ConfigPayload` 更新 providers、roles、templates、instructions、MCP servers、permission mode、config TOML 和 config exists 状态。
 
+Settings 不作为悬浮 modal、popover、fixed overlay 或右侧嵌入页展示。Studio shell 采用页面栈语义：chat 页面和 settings 页面互斥，打开设置时压入 settings 页面并替换整个窗口，包括左侧项目/会话栏；设置页顶部提供返回聊天入口，返回后恢复当前会话的 sidebar、timeline、状态栏和 composer。设置页不得模糊、遮罩或覆盖聊天背景，而是作为独立页面参与导航。
+
 Provider 设置支持搜索、刷新用量、选择默认 provider、新增/编辑/删除 provider、切换 provider template、编辑 base URL/API key/default model，以及追加/删除 custom model。Provider 卡片必须消费 `load_provider_usages` 的 typed 结果展示查询状态：打开 Providers 页时自动进行一次过期刷新；全局刷新和单卡刷新都走同一 store action，单卡刷新只在该卡展示 busy/retry 状态，保存 provider 配置后要重新刷新用量。DeepSeek 显示余额与赠送/充值拆分，Zhipu Coding Plan 显示 5 小时、周额度和 MCP 额度的剩余进度、重置时间与完整工具明细；缺 key、失败、不支持、未查询、更新时间和重试入口都必须在卡片内可见。Role 设置固定展示 explorer/planner/executor/reviewer 四个角色，并在 provider/model 删除或不可用时规范化到可用 provider/model/effort。MCP 设置支持 stdio 和 streamable HTTP，保留 built-in/locked server metadata，只允许可编辑 server 修改身份；保存前清理空 args/env/headers。Instructions、Security 和 Skills 设置分别编辑提示词配置、权限模式和当前项目 skill discovery，不能绕过 store 直接写 UI-only 状态。
+
+Security 页是紧凑的权限配置页，不使用与 provider/MCP 相同的大卡片网格来填充空间。权限模式应作为单个设置组展示：标题、当前状态、三项可选模式和简短说明保持在可扫描的窄宽度内，避免大面积空白。
 
 ## 5. 验收目标
 
@@ -91,3 +95,21 @@ Provider 设置支持搜索、刷新用量、选择默认 provider、新增/编�
 - 用户一次输入只出现一条用户消息。
 - 多个 reasoning part 不复用旧 row，不发生“新思考更新到旧信息上”。
 - 真实 UI 回归通过：输入、流式输出、停止、切换 session、Plan 确认和 tool approval 均可用。
+
+## 6. 视觉与组件约定
+
+聊天页面保持双栏布局：左侧项目/会话栏，右侧主聊天区。设置页面是页面栈中的全窗口页面，不保留聊天侧栏。不得新增常驻右侧环境信息栏；模型、上下文、MCP/LSP 与子代理信息继续由状态栏和弹层承载，权限模式由 composer 中的权限选择器承载。主聊天区采用居中阅读流，timeline 内容宽度由 `--conversation-content-width` 控制，底部 composer/dock 与阅读流对齐。
+
+Pure Studio UI 采用低对比、紧凑、可扫描的桌面工具风格：侧栏背景浅于主内容区，列表项单行截断，当前项目/会话用轻量底色和状态点标识；聊天正文优先可读性，减少装饰性卡片。计划正文在 timeline 中作为计划卡展示，卡片只承载计划内容；计划确认仍属于 footer dock，不从 timeline 自行推断操作。
+
+前端交互组件统一使用 `@ark-ui/solid` 作为唯一 headless 组件库，并在业务语义组件中直接使用 Ark primitives；不再保留 `src/components/ui` 通用 wrapper、Kobalte 兼容层或 native select fallback。普通按钮、列表、卡片和 dock 直接使用语义 HTML 与项目 CSS class 表达。组件拆分按业务领域组织：shell 负责双栏、header、footer 与侧栏，status 负责状态栏 select/readout/popover，interaction 负责不同 pending interaction 的 dock，timeline 负责消息 part 与计划卡。`App.tsx` 只负责 store 初始化、selector、action wiring 与顶层组合。
+
+视觉参考以 `output/design` 中的 Pure Studio chat 状态图为准：默认聊天、流式响应、计划确认、环境弹层、select 菜单与窄屏响应式。实现时必须保持低对比侧栏、居中阅读流、底部同宽状态栏与 dock、计划卡渐隐预览、以及窄屏 icon rail，不得新增常驻右侧环境信息栏。
+
+聊天输入框中的权限模式是可交互设置项，使用 Ark Select 直接绑定 `save_permission_mode`，不得退化为静态提示文字，也不得在状态栏重复放置权限选择。状态栏的上下文、费用、能力、子智能体等 readout 使用 Ark HoverCard 展示详情，鼠标或焦点离开触发器和浮层后必须自动关闭；readout 本身不显示向下箭头。点击选择只保留给模式、模型和 reasoning effort 这些真正的状态栏 select 控件。
+
+Tauri 窗口 resize 时 UI 不应持续触发昂贵测量。Timeline 的贴底逻辑只在新内容、会话切换和少量后续 layout settle 帧内测量，不能长时间逐帧调用虚拟列表 measure 或反复写入 scrollTop。
+
+计划确认 dock 的固定文案语义为“实施此计划？”：主操作是实施计划，次操作是继续调整，忽略动作保持弱化展示。所有固定 UI 文案必须走 i18n；模型名称、provider 名称、tool 名称、agent 路径、reasoning effort 等领域值仍按原始字符串透传。
+
+用户选择“实施此计划”后，当前 session 必须退出 Plan 模式并切回执行用的 Auto 模式，再提交用于实施计划的后台 prompt。前端收到 resolve interaction 响应后要同步 session 列表中的 mode，避免状态栏和会话列表仍显示 plan。

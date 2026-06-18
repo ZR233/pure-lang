@@ -6,7 +6,8 @@ import { For, Show, createMemo, createSignal } from "solid-js";
 import type { StudioPart, UserQuestion } from "../../types";
 import i18n from "../../i18n";
 import { MarkdownContent } from "../markdown";
-import { readPartText, readPlanContent, readToolArguments, readToolResult, reasoningHeading } from "./message-part-text";
+import { readPartText, readToolArguments, readToolResult, reasoningHeading } from "./message-part-text";
+import { PlanCard } from "./plan-card";
 import {
   groupParts,
   isActiveStatus,
@@ -50,7 +51,7 @@ export function MessagePart(props: {
         <ReasoningPart part={props.part} text={text()} defaultOpen={props.defaultOpen} />
       </Show>
       <Show when={props.part.partType === "plan"}>
-        <PlanPart part={props.part} deltaText={props.deltaText} live={live()} />
+        <PlanCard part={props.part} deltaText={props.deltaText} live={live()} />
       </Show>
       <Show when={props.part.partType === "tool"}>
         <ToolPart part={props.part} deltaText={props.deltaText} defaultOpen={props.defaultOpen} />
@@ -112,19 +113,6 @@ function ReasoningPart(props: { part: StudioPart; text: string; defaultOpen?: bo
         <pre>{props.text}</pre>
       </Show>
     </details>
-  );
-}
-
-function PlanPart(props: { part: StudioPart; deltaText?: string; live?: boolean }) {
-  const content = () => readPlanContent(props.deltaText, props.part);
-  return (
-    <div class="oc-plan">
-      <div class="oc-plan-header">
-        <FileText size={15} />
-        <span>{i18n.t("timeline.plan")}</span>
-      </div>
-      <MarkdownContent content={content()} live={props.live} />
-    </div>
   );
 }
 

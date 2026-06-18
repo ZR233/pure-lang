@@ -10,6 +10,7 @@ import type {
   SkillRecord,
   ConversationPartView,
   StudioAgentTimelineEvent,
+  InteractionRequest,
 } from "../types";
 import { makeProvider } from "./provider-mapper";
 import { previewTemplates } from "./templates";
@@ -270,6 +271,26 @@ const previewPlanMarkdown = `## Markdown 支持计划
 1. 使用 \`marked.lexer\` 解析 GFM token。
 2. 将 table / code / link 渲染为 Studio timeline markdown DOM。
 3. 给预览和测试补齐覆盖。`;
+
+export const previewInteractions: InteractionRequest[] = [
+  {
+    interactionId: "preview-plan-confirmation",
+    kind: "planConfirmation",
+    status: "pending",
+    scope: {
+      sessionId: "preview-session",
+      turnId: "preview-turn-1",
+      itemId: "preview-plan-1",
+    },
+    payload: {
+      type: "planConfirmation",
+      planId: "preview-plan-1",
+      content: previewPlanMarkdown,
+    },
+    createdAt: 1779688801,
+    updatedAt: 1779688801,
+  },
+];
 
 const previewAgentTaskMarkdown = `审查 Markdown 渲染链路：
 

@@ -18,6 +18,7 @@ import { MarkdownContent } from "../markdown";
 
 const timelineCacheLimit = 16;
 const timelineFallbackItemSize = 72;
+const bottomAnchorSettleFrames = 6;
 const timelineCache = new Map<string, { keys: readonly string[]; cache: VirtualizerHandle["cache"] }>();
 
 export function MessageTimeline(props: {
@@ -171,11 +172,13 @@ export function MessageTimeline(props: {
   }
 
   function scheduleMeasuredBottomAnchor() {
-    bottomAnchorFrames = 90;
+    bottomAnchorFrames = bottomAnchorSettleFrames;
     if (bottomAnchorFrame !== undefined) return;
     const tick = () => {
       bottomAnchorFrame = undefined;
-      measureTimeline();
+      if (bottomAnchorFrames === bottomAnchorSettleFrames || bottomAnchorFrames === 1) {
+        measureTimeline();
+      }
       if (!anchorMeasuredBottom()) {
         bottomAnchorFrames = 0;
         return;

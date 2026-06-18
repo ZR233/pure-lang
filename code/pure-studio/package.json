@@ -12,7 +12,7 @@
     "tauri:build": "tauri build"
   },
   "dependencies": {
-    "@kobalte/core": "^0.13.11",
+    "@ark-ui/solid": "^5.37.1",
     "@solid-primitives/event-listener": "^2.4.5",
     "@solid-primitives/resize-observer": "^2.1.5",
     "@solid-primitives/timer": "^1.4.4",

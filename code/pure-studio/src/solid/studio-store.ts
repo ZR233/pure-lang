@@ -641,7 +641,23 @@ export function createStudioStore() {
         }
       },
       async resolveInteraction(interactionId: string, resolution: Parameters<typeof resolveInteraction>[1]) {
-        await resolveInteraction(interactionId, resolution);
+        const response = await resolveInteraction(interactionId, resolution);
+        setStore(produce((draft) => {
+          draft.interactions[response.interaction.interactionId] = response.interaction;
+          if (response.sessions.length > 0) {
+            draft.sessions = mergeSessions(draft.sessions, response.sessions);
+          }
+          if (response.planLifecycle) {
+            draft.eventNextSequence[response.sessionId] = Math.max(
+              draft.eventNextSequence[response.sessionId] ?? 0,
+              response.planLifecycle.eventNextSequence,
+            );
+            for (const planState of response.planLifecycle.planStates) {
+              draft.planStates[planState.planId] = planState;
+            }
+          }
+          refreshActiveInteraction(draft, draft.selectedSessionId);
+        }));
       },
     },
   };

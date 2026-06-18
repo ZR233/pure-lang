@@ -385,12 +385,13 @@ pub async fn resolve_interaction(
             let InteractionPayload::PlanConfirmation { plan_id, .. } = &current.payload else {
                 unreachable!("plan confirmation resolution was validated before resolving");
             };
-            let (resolved, plan_lifecycle) = match decision {
+            let (resolved, plan_lifecycle, sessions) = match decision {
                 PlanConfirmationResolution::ImplementFreshContext => {
                     if current.status != InteractionStatus::Pending {
                         return Ok(ResolveInteractionResponse {
                             session_id,
                             interaction: current,
+                            sessions: Vec::new(),
                             plan_lifecycle: None,
                         });
                     }
@@ -420,6 +421,24 @@ pub async fn resolve_interaction(
                     if plan_content.is_empty() {
                         return Err(CommandError::from_display("plan content is empty"));
                     }
+                    state
+                        .studio
+                        .store()
+                        .set_session_mode(&session_id, CompileMode::Auto)
+                        .await?;
+                    let session = state
+                        .studio
+                        .store()
+                        .read_session(&session_id)
+                        .await?
+                        .context("selected session not found")?;
+                    let sessions = session_dtos(
+                        state
+                            .studio
+                            .store()
+                            .list_sessions(&session.project_id)
+                            .await?,
+                    );
                     append_plan_lifecycle_events(
                         &state.studio,
                         &session_id,
@@ -459,13 +478,14 @@ pub async fn resolve_interaction(
                     .await?;
                     let plan_lifecycle =
                         Some(plan_lifecycle_response(&state.studio, &session_id).await?);
-                    (resolved, plan_lifecycle)
+                    (resolved, plan_lifecycle, sessions)
                 }
                 PlanConfirmationResolution::ContinuePlanning => {
                     if current.status != InteractionStatus::Pending {
                         return Ok(ResolveInteractionResponse {
                             session_id,
                             interaction: current,
+                            sessions: Vec::new(),
                             plan_lifecycle: None,
                         });
                     }
@@ -499,13 +519,14 @@ pub async fn resolve_interaction(
                     .await?;
                     let plan_lifecycle =
                         Some(plan_lifecycle_response(&state.studio, &session_id).await?);
-                    (resolved, plan_lifecycle)
+                    (resolved, plan_lifecycle, Vec::new())
                 }
                 PlanConfirmationResolution::Dismiss => {
                     if current.status != InteractionStatus::Pending {
                         return Ok(ResolveInteractionResponse {
                             session_id,
                             interaction: current,
+                            sessions: Vec::new(),
                             plan_lifecycle: None,
                         });
                     }
@@ -538,12 +559,13 @@ pub async fn resolve_interaction(
                     .await?;
                     let plan_lifecycle =
                         Some(plan_lifecycle_response(&state.studio, &session_id).await?);
-                    (resolved, plan_lifecycle)
+                    (resolved, plan_lifecycle, Vec::new())
                 }
             };
             Ok(ResolveInteractionResponse {
                 session_id,
                 interaction: resolved,
+                sessions,
                 plan_lifecycle,
             })
         }
@@ -552,6 +574,7 @@ pub async fn resolve_interaction(
                 return Ok(ResolveInteractionResponse {
                     session_id,
                     interaction: current,
+                    sessions: Vec::new(),
                     plan_lifecycle: None,
                 });
             }
@@ -563,6 +586,7 @@ pub async fn resolve_interaction(
             Ok(ResolveInteractionResponse {
                 session_id,
                 interaction: resolved,
+                sessions: Vec::new(),
                 plan_lifecycle: None,
             })
         }
