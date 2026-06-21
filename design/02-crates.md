@@ -8,7 +8,9 @@
 - `pl-trace`：内部 agent/trace 事件协议
 - `pl-model`：模型 provider 适配
 - `pl-core`：应用编排、领域模型、端口定义、基础设施适配器
-- `pure-studio`：Tauri 桥接与 React UI
+- `pure-studio`：Tauri 桥接与 Solid UI
+- `pl-studio-bridge`：Flutter Rust Bridge v2 桥接 crate
+- `pure-studio-flutter`：Flutter Windows 桌面端
 
 ## 2.2 pl-protocol
 
@@ -36,7 +38,7 @@
 
 ## 2.5 pl-core（端口-适配器）
 
-`pl-core` 调整为四层目录语义：
+`pl-core` 调整为四层目录语义，并继续作为所有桌面端共享的 Studio runtime 所有者：
 
 - `application`：use case 编排（`StudioRuntime`）
 - `domain`：会话、项目、timeline、审批等领域记录类型
@@ -56,10 +58,13 @@
 - trait 异步方法统一使用原生 RPITIT，并显式 `+ Send`
 - `lib.rs` 只做模块声明与 `pub use` 出口
 - `StudioRuntime` 不直接嵌入具体数据库/文件系统细节
+- UI-facing runtime 状态机固定为 `Uninitialized -> Initializing -> Ready -> ShuttingDown -> Stopped/Failed`
+- `active_turns`、`submit_prompt`、`stop_prompt`、`resolve_interaction` 和后台 turn 启动/取消语义属于 `pl-core::studio`，Tauri 和 Flutter 只做调用者
+- `StudioEventRuntime` 保留旧全量订阅，并新增会话订阅和全局订阅；高频 message/part delta 只进入会话流，MCP/LSP health、配置和项目列表等低频变化进入全局流
 
 审批默认策略固定为 `ToolApprovalPolicy::AutoAllow`。手动审批链路保留接口，但不是默认执行路径。
 
-## 2.6 pure-studio（桥接 + UI）
+## 2.6 pure-studio（Tauri 桥接 + Solid UI）
 
 `pure-studio/src-tauri` 采用壳层 main：
 
@@ -72,7 +77,45 @@
 
 前端 `src/App.tsx` 改为页面装配壳层，状态迁移到 reducer。
 
-## 2.7 本地数据版本
+## 2.7 pl-studio-bridge（FRB 桥接）
+
+`pl-studio-bridge` 位于 `code/pure-studio-flutter/rust/`，crate 名称遵循 `pl-` 前缀。它是 Flutter Rust Bridge v2 的 native crate，只负责把 Dart 调用转换成 `pl-core` Studio runtime API。
+
+公开 API 以 Flutter 端需求为边界：
+
+- `initializeRuntime() -> RuntimeSnapshot`
+- `startRuntime() -> RuntimeSnapshot`
+- `shutdownRuntime() -> RuntimeSnapshot`
+- `bootstrapStudio() -> JsonResponse`
+- `openProject(path) -> JsonResponse`
+- `selectProject(projectId) -> JsonResponse`
+- `archiveProject(projectId, selectedProjectId) -> JsonResponse`
+- `createSession(projectId, title) -> JsonResponse`
+- `archiveSession(sessionId, selectedSessionId) -> JsonResponse`
+- `setSessionMode(sessionId, mode) -> JsonResponse`
+- `setModelRole(roleKey, providerId, model, effort, selectedSessionId) -> JsonResponse`
+- `saveRuntimePermissionMode(mode) -> JsonResponse`
+- `saveStudioSettingsDraft(section, draftJson) -> JsonResponse`
+- `submitPrompt(sessionId, prompt, attachmentIds) -> JsonResponse`
+- `stopPrompt(sessionId) -> JsonResponse`
+- `resolveInteraction(interactionId, resolutionJson) -> JsonResponse`
+- `loadSessionState(sessionId) -> JsonResponse`
+- `loadStudioEvents(sessionId, afterSequence, limit) -> JsonResponse`
+- `listDiscoveredSkills(projectId) -> JsonResponse`
+- `subscribeSessionEvents(sessionId) -> Stream<BridgeEventEnvelope>`
+- `subscribeGlobalEvents() -> Stream<BridgeEventEnvelope>`
+
+`openProject` 调用 `pl-core::studio` 的项目打开、LSP reconcile 和 session bootstrap 流程后返回新的 Studio 快照。`selectProject`、`archiveProject`、`createSession`、`archiveSession`、`setSessionMode` 和 `setModelRole` 都返回 Studio 快照或当前 session snapshot，由 Flutter store 原子替换项目、会话、选中项、config view，并对返回的 `selectedSessionId` 再调用 `loadSessionState` 恢复当前会话 projection。`archiveProject` 是归档语义，不删除项目目录或历史会话；关闭当前项目时返回下一个可用项目/会话，没有剩余项目时返回空选中态。`setSessionMode` 只修改 session 的下一轮 `compileMode`；`setModelRole` 修改 `~/.pure/config.toml` 中对应模型角色，状态栏 planner 模型选择固定写 `planner` role，因为 Studio 根聊天 turn 始终使用 planner 角色。`listDiscoveredSkills` 只读取当前项目 workspace、user、system 与 external skill catalog，返回 camelCase JSON 中的 `skills[]`，不改变配置。`saveRuntimePermissionMode` 直接写回 `~/.pure/config.toml` 的 runtime 权限模式；`saveStudioSettingsDraft` 用于 Flutter 首版设置页把尚未映射为完整 typed config command 的编辑内容持久化到 Studio store draft，后续升级为 typed save API 时不得改变已有 draft section 名称。
+
+`BridgeEventEnvelope` 使用稳定字段：`eventId`、`sessionId`、`turnId`、`sequence`、`createdAt`、`kindType`、`payloadJson`。复杂 payload 保持 canonical camelCase JSON 字符串；Dart 层根据 `kindType` 解码为 sealed model。桥接层不得把 `serde_json::Value` 直接暴露为 FRB 类型，也不得复制 Tauri 命令中的业务规则。
+
+## 2.8 pure-studio-flutter（Flutter UI）
+
+`pure-studio-flutter` 位于 `code/pure-studio-flutter/`，首版只承诺 Windows 桌面。UI 使用 Material 3 工具型设计、Riverpod 状态管理和 `go_router` 页面栈。功能覆盖现有 Solid 端：项目/会话侧栏、聊天 timeline、streaming markdown、reasoning/tool/plan part、composer、停止、权限模式、tool approval、user input、plan confirmation、状态栏，以及 Provider/Instructions/Skills/Roles/MCP/Security/General 设置页。
+
+Flutter store 不直接读取 SQLite 或配置文件，只通过 `pl-studio-bridge` 调用 `pl-core`。打开会话时订阅该会话事件流，切换会话时取消旧订阅；全局事件流只承载低频配置、项目和 health 变化。
+
+## 2.9 本地数据版本
 
 方案乙采用破坏性升级，不保留运行期兼容层：
 
@@ -80,7 +123,9 @@
 - `config.toml` 切换到新结构（v2）
 - 启动时检测旧格式：先备份，再重建新结构
 
-## 2.8 Workspace
+本次 Flutter 并行端不做额外 SQLite 或 `~/.pure/config.toml` 破坏性迁移；旧 Tauri/Solid 端在并行阶段必须继续可构建。
+
+## 2.10 Workspace
 
 workspace crate 组成保持不变：
 
@@ -90,8 +135,10 @@ members = [
     "code/pl-protocol",
     "code/pl-trace",
     "code/pl-model",
+    "code/pl-lsp",
     "code/pl-core",
     "code/pure-studio/src-tauri",
+    "code/pure-studio-flutter/rust",
 ]
 resolver = "3"
 ```

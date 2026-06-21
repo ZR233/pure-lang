@@ -17,9 +17,22 @@ Solid action
   -> Tauri studio-runtime-event
   -> Solid Studio event store
   -> UI rendering
+
+Flutter action
+  -> flutter_rust_bridge API (pl-studio-bridge)
+  -> pl-core application service (StudioRuntime)
+  -> StudioConversationSink / StudioEventRuntime
+  -> interfaces ports
+  -> infrastructure adapters (sqlite/config/fs/event/tool)
+  -> PureCore turn pipeline
+  -> pl-trace AgentEvent / TraceEvent / TracePart
+  -> StudioEventRuntime canonical message/part snapshot + live part delta
+  -> FRB Stream<BridgeEventEnvelope>
+  -> Riverpod Studio event reducer
+  -> Material 3 UI rendering
 ```
 
-`main.rs` 不承载流程逻辑，只负责注册。
+`main.rs` 不承载流程逻辑，只负责注册。Flutter bridge crate 也不承载流程逻辑，只把 Dart 调用转发到 `pl-core`，并把 `StudioEventEnvelope` 映射为 `BridgeEventEnvelope`。
 
 ## 3.2 输入与策略
 
@@ -29,7 +42,7 @@ Solid action
 - `turnOptions.permissionMode`：默认固定 `request-approval`
 - `prompt`、`sessionId`、`workspaceRoot` 等进入 application service
 
-`compileMode` 是会话级协作模式，不是模型角色路由。Studio 根聊天 turn 始终使用 `planner` 角色模型；`auto` 表示执行型协作模式，允许模型在审批策略约束内主动修改工作区；`plan` 是 Codex 风格规划模式，允许读取、搜索、运行经审批的探索命令和调度探索型子代理，但最终交付物应是一段可执行计划，而不是直接修改文件。模型可见输出使用 Codex 风格通道标签：`<commentary>...</commentary>` 表示运行中的短进展更新，`<final>...</final>` 表示最终答复；Plan Mode 的最终计划使用 `<proposed_plan>...</proposed_plan>` 包裹，由 streaming 层提取为独立 plan part。普通 assistant 正文不显示这些标签。
+`compileMode` 是会话级协作模式，不是模型角色路由。Studio 根聊天 turn 始终使用 `planner` 角色模型；`auto` 表示执行型协作模式，允许模型在审批策略约束内主动修改工作区；`plan` 是 Codex 风格规划模式，允许读取、搜索、运行经审批的探索命令和调度探索型子代理，但最终交付物应是一段可执行计划，而不是直接修改文件。前端切换 Auto/Plan 调用 `setSessionMode(sessionId, mode)` 持久化 session 默认模式；前端切换根聊天模型调用 `setModelRole(roleKey=planner, providerId, model, effort)` 持久化 planner role，下一轮 turn 按新的 planner role 解析 provider/model。模型可见输出使用 Codex 风格通道标签：`<commentary>...</commentary>` 表示运行中的短进展更新，`<final>...</final>` 表示最终答复；Plan Mode 的最终计划使用 `<proposed_plan>...</proposed_plan>` 包裹，由 streaming 层提取为独立 plan part。普通 assistant 正文不显示这些标签。
 
 `workspaceRoot` 是运行期有效工作区，而不是简单等于 UI 当前选中的目录。Studio 读取 project path 后先解析到规范化目录；如果该目录位于 Git 仓库中，则提升到最近的 Git 仓库根。这样用户从子 crate 或桌面壳层进入项目时，工具仍能访问完整仓库上下文。工作区记忆按 Codex 风格从 Git 根到当前工作目录读取层级文档，候选文件优先级为 `AGENTS.override.md`、`AGENTS.md`、`Agents.md`，并受配置的总字节预算限制。
 
@@ -62,7 +75,17 @@ Solid action
 
 ## 3.3 核心 turn 编排
 
-`StudioRuntime` 只做 use case 编排；Studio UI 状态不由命令完成响应驱动，而由 `StudioEventRuntime` 持久事件流驱动：
+`StudioRuntime` 只做 use case 编排；Studio UI 状态不由命令完成响应驱动，而由 `StudioEventRuntime` 持久事件流驱动。UI-facing runtime 在 `pl-core` 内维护状态机：
+
+```text
+Uninitialized -> Initializing -> Ready -> ShuttingDown -> Stopped
+                         │                         │
+                         └──────────────► Failed ◄──┘
+```
+
+`initializeRuntime()` 完成配置、store、projection 恢复和非终态 turn 收敛；`startRuntime()` 启动后台 health、事件桥接和可取消 turn 执行能力；`shutdownRuntime()` 取消活动 turn、停止后台任务并返回最终 snapshot。所有后台 turn 的 active handle、cancellation token、pending interaction wakeup 和收尾状态都属于 `pl-core::studio`，Tauri 与 Flutter 只通过 runtime API 触发。
+
+核心编排步骤：
 
 1. 读取 session/project/config
 2. 解析或创建 session 级提示词快照
@@ -72,7 +95,7 @@ Solid action
 6. 运行中每个可见对话 lifecycle 先进入 `StudioEventRuntime`。用户、assistant、commentary、reasoning、plan 和 tool 均规范化为 opencode 式 `StudioMessage` / `StudioPart`。`messageUpdated` 与 `messagePartUpdated` 是 durable snapshot，由 store 在同一个事务中分配 `StudioEventEnvelope.sequence`、写入 `studio_events` 与 `studio_messages/message_parts` projection，再广播同一份 envelope 给 Studio；`messagePartDelta` 只进入实时通道，是 live overlay，不写入 `studio_events`、不推进 durable cursor。
 7. turn 收尾只负责消息、最终 runtime snapshot 与生命周期终态校准；不得要求前端等待最终响应才能看到过程
 
-前端提交普通 prompt 或 Plan 实施时调用同一套后台 turn 提交流程。该命令只创建 turn、注册 cancellation token、写入 `turnChanged(queued/contextLoading/waitingForModel)`、用户 `messageUpdated` 和用户 `messagePartUpdated`，随后在后台执行 run，并立即返回 `{ sessionId, turnId, cursor }`。计划确认选择实施时，`resolve_interaction` 在当前 `sessionId` 内解决 interaction、写入 `accepted/implementing` lifecycle，并启动同会话实施 turn；不得创建或切换 target child session，也不得依赖 `sessionHandoffChanged` 展示实施过程。内部实施 prompt 可以标记为 `synthetic/ignored`，避免 timeline 出现一条巨大的重复用户消息。
+前端提交普通 prompt 或 Plan 实施时调用同一套后台 turn 提交流程。Tauri 命令与 Flutter `submitPrompt(sessionId, prompt, attachmentIds)` 都只创建 turn、注册 cancellation token、写入 `turnChanged(queued/contextLoading/waitingForModel)`、用户 `messageUpdated` 和用户 `messagePartUpdated`，随后在后台执行 run，并立即返回 `{ sessionId, turnId, cursor }`。计划确认选择实施时，`resolve_interaction` 在当前 `sessionId` 内解决 interaction、写入 `accepted/implementing` lifecycle，并启动同会话实施 turn；不得创建或切换 target child session，也不得依赖 `sessionHandoffChanged` 展示实施过程。内部实施 prompt 可以标记为 `synthetic/ignored`，避免 timeline 出现一条巨大的重复用户消息。
 
 `run_turn_with_trace` 在每次模型请求前用 `InstructionAssembler` 解析当前提示词快照。base/system 写入 `CompletionRequest.instructions`；developer 块作为临时 system 消息置于历史消息之前；user context 块作为临时 user 消息置于 developer 块之后、真实历史之前。临时前置消息只用于本次 provider request，不写入 `CoreSession`，因此压缩和持久化只处理真实对话历史。
 
@@ -133,7 +156,14 @@ Agent 协作 timeline 与状态分层：
 
 ## 3.4 事件管线
 
-`studio-runtime-event` 是 Studio 唯一实时事件通道。Tauri bridge 只把 `StudioEventEnvelope` 转发给前端；事件的持久化、projection 更新和 cursor 分配都在 `StudioEventRuntime` 内完成。
+`studio-runtime-event` 是 Tauri/Solid 端的兼容实时事件通道。Tauri bridge 只把 `StudioEventEnvelope` 转发给前端；事件的持久化、projection 更新和 cursor 分配都在 `StudioEventRuntime` 内完成。
+
+Flutter/FRB 端使用两类订阅：
+
+- `subscribeSessionEvents(sessionId)`：只转发当前会话的 timeline、turn、interaction、session runtime、agent 与高频 `messagePartDelta`。
+- `subscribeGlobalEvents()`：只转发项目、配置、Provider usage、MCP/LSP health 等低频全局变化。
+
+旧 `StudioEventRuntime::subscribe()` 保留全量流以兼容 Tauri/Solid。新增 `subscribe_session(session_id)` 和 `subscribe_global()` 必须在 `pl-core` 内过滤；Flutter 切换会话时取消旧 session stream，只保留当前打开会话的高频监听。
 
 `StudioRuntime::drain_agent_events` 在 `pl-core` 内使用显式分支处理内部 broadcast 通道状态：
 
@@ -170,5 +200,16 @@ turn 生命周期持久化语义固定：
 - `submitPromptResponse`
 - `studioEventsResponse`
 - `sessionStateResponse`
+- `settingsDraftResponse`
 
 前端使用 Solid store，并按 opencode app 的 `message + part + event reducer + timeline row projection` 结构组织 UI。`pure-studio` 不再保留 React 运行时或 React reducer 双栈；事件监听器只把 `StudioEventEnvelope` 放入 Solid event reducer。运行中状态以 `StudioEventEnvelope` 为准，命令响应只表示提交是否成功。
+
+Flutter/FRB 输出使用同一语义，但桥接层统一包成：
+
+- `RuntimeSnapshot`：runtime 状态、活动会话/turn、更新时间与可展示错误
+- `JsonResponse`：canonical camelCase JSON 字符串，payload 类型由调用 API 决定
+- `BridgeEventEnvelope`：`eventId/sessionId/turnId/sequence/createdAt/kindType/payloadJson`
+
+Dart 层只根据 `kindType` 和 typed routing fields 更新 Riverpod store；不得从命令最终响应推导 timeline 终态。
+
+Flutter 桥接动作按同一 runtime 边界命名：`bootstrapStudio`、`openProject`、`selectProject`、`createSession` 和 `archiveSession` 返回新的 Studio 快照，`setSessionMode` 持久化当前 session 的下一轮协作模式，`setModelRole` 写回 provider/role 配置并返回 canonical config view，`submitPrompt`/`stopPrompt`/`resolveInteraction` 只表示请求已提交，`loadSessionState`/`loadStudioEvents` 用于会话恢复与 stale backfill，`saveRuntimePermissionMode` 写回 runtime config，`saveStudioSettingsDraft` 持久化尚未 typed 化的设置页草稿。

@@ -59,6 +59,11 @@ pl-model provider
   → StudioEventRuntime 分配 durable sequence、规范化 payload、持久化 message/part snapshot + projection、广播 snapshot/live delta
   → Tauri studio-runtime-event
   → Solid Studio event reducer
+
+pl-core StudioEventRuntime
+  → pl-studio-bridge subscribeSessionEvents(sessionId)
+  → FRB Stream<BridgeEventEnvelope>
+  → Flutter Riverpod Studio event reducer
 ```
 
 `pure-studio` 不直接订阅 `AgentEventReceiver`，也不依赖内部 `pl-trace` crate。raw `AgentEvent` 到 typed Studio event 的映射在 `pl-core` 内完成；Tauri bridge 只转发已经规范化的 `StudioEventEnvelope`。前端已迁移为 Solid/Vite，使用 opencode app 风格的 store 与 timeline row projection；event reducer 按事件 kind 更新当前或后台 session view：
@@ -70,9 +75,34 @@ pl-model provider
 - `interactionChanged` 更新 footer 交互状态。
 - `agentChanged` / `agentTimelineChanged` 分别更新 latest snapshot 与 append-only 协作事件。
 - `sessionRuntimeChanged`、`skillActivated`、`mcpHealthChanged`、`lspHealthChanged` 即时更新状态栏。
-- `sessionHandoffChanged` 与 `sessionListChanged` 驱动 Plan 实施会话切换和列表可见性。Plan implementation target 是带 `parentSessionId` 的 child session，不计入 root session 列表。
+- `sessionHandoffChanged` 仅作为 legacy 事件保留；Plan 实施在当前 `sessionId` 内启动新 turn，不再依赖 handoff target child session 展示实施过程。`sessionListChanged` 只驱动 root 会话列表可见性，legacy child/archived session 不计入 root session 列表。
 
 `TextDelta`、`ThinkingDelta`、`ToolCallDelta`、`ToolCallComplete` 不再是 Studio 的协议或兼容入口。
+
+## 8.2.1 Flutter/FRB 订阅边界
+
+Flutter 端不使用 Tauri `studio-runtime-event`。`pl-studio-bridge` 从 `StudioEventRuntime` 创建两类 stream：
+
+- `subscribeSessionEvents(sessionId)`：会话级高频流，包含该会话的 `messageUpdated`、`messagePartUpdated`、`messagePartDelta`、`turnChanged`、`interactionChanged`、`sessionRuntimeChanged`、`agentChanged` 和 `agentTimelineChanged`。
+- `subscribeGlobalEvents()`：全局低频流，包含项目/会话列表变化、配置变化、Provider usage、MCP/LSP health、全局 stale 和 runtime lifecycle 变化。
+
+`messagePartDelta`、reasoning delta、tool 参数/结果 delta、plan/content delta 等高频事件只能进入会话流。Flutter 页面切换会话时必须取消旧会话 stream，再订阅新会话；后台会话只保留 durable projection 与低频列表状态，不继续推送高频 delta。
+
+FRB 事件 envelope 固定为：
+
+```text
+BridgeEventEnvelope {
+  eventId,
+  sessionId,
+  turnId,
+  sequence,
+  createdAt,
+  kindType,
+  payloadJson,
+}
+```
+
+字段命名在 Dart wire 层使用 camelCase。`payloadJson` 是 canonical camelCase JSON 字符串；Dart 通过 `kindType` 路由到 sealed model。桥接层不得暴露 `serde_json::Value`，也不得把 Flutter 专用字段混入 `StudioEventEnvelope`。
 
 模型 provider 流的成功边界由 canonical `ModelStreamEvent::Completed` 明确表示。protocol mapper 可以把 provider 私有终止 chunk 转换为该事件；如果底层 SSE parse、transport 或 EOF 在 completed 之前发生，`pl-model` 必须返回错误，并由 turn 层发出 failed turn、`Error` 和 `Done`，不得把局部内容当作成功消息落库。completed 之后的 usage、文本、思考和工具调用 snapshot 才能进入最终 `CompletionResponse`。
 
@@ -99,7 +129,7 @@ Studio 前端的实时事件、`load_session_state` projection snapshot 和 `loa
 
 Studio 渲染使用 opencode app 同款 timeline 框架语义：`virtua` 虚拟列表、自写 row algebra、stable row key、bottom spacer、row cache、part group 和 delta overlay。虚拟滚动层不得改变 Message/Part 协议语义、事件游标或 reducer 合并规则。动态高度、流式 delta overlay 和自动跟随底部属于前端渲染适配层职责；协议层仍只表达 message/part snapshot 与 live delta。
 
-流式 Markdown 使用 opencode 的 stream-safe 渲染规则。`planContent`、普通 text 和 commentary 的 live overlay 在渲染前必须对未闭合代码块、链接引用和不完整 Markdown 做补全/降级，保证逐字输出期间仍按 Markdown 结构展示；terminal `messagePartUpdated` 到达后清除 overlay，并用完整 snapshot 重新渲染。
+流式 Markdown 使用 opencode 的 stream-safe 渲染规则。`planContent`、普通 text 和 commentary 的 live overlay 在 Flutter timeline 展示层原生直接用 `GptMarkdown` 渲染，以当前 part 累计文本作为输入，不再通过自定义兼容 renderer facade 转发。展示前只允许做轻量 agent repair，未闭合代码块、链接引用和不完整 Markdown 由 renderer 容错展示；Rust/FRB 事件协议仍只表达 message/part snapshot 与 live delta，不承担 Markdown 补全。terminal `messagePartUpdated` 到达后清除 overlay，并用完整 snapshot 重新渲染。
 
 状态栏同样是 Studio store projection 的消费者，不得另起 React 兼容层。Solid store 必须保存当前 session 的 `sessionRuntime`、`turnPhase/turnStartedAt`、`agents`、`mcpServers/activeMcpServers`、`lspServers/activeLspServers`、`providers/roles/permissionMode`，并由 typed Studio event 与 bootstrap/session snapshot 恢复。模型、reasoning effort、模式和权限控制通过现有 Tauri command 更新配置或 session mode；状态栏不得直接推断 timeline 内容来累计 token 或费用。普通 root turn 和 Plan 实施 turn 在写入最新 runtime snapshot 后必须广播 `SessionRuntimeChanged`，避免只有刷新或切换 session 后才看到 context/cost 更新。
 

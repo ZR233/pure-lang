@@ -6,6 +6,7 @@ members = [
     "code/pl-lsp",
     "code/pl-core",
     "code/pure-studio/src-tauri",
+    "code/pure-studio-flutter/rust",
 ]
 resolver = "3"
 

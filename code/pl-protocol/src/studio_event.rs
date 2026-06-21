@@ -21,7 +21,11 @@ pub struct StudioEventEnvelope {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase", tag = "type")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
 pub enum StudioEventKind {
     TurnChanged { turn: StudioTurn },
     MessageUpdated { message: Box<StudioMessage> },
@@ -651,6 +655,17 @@ mod tests {
         assert_eq!(
             serde_json::to_value(StudioPartDeltaField::ToolArguments).unwrap(),
             serde_json::json!("tool.arguments")
+        );
+    }
+
+    #[test]
+    fn studio_event_kind_fields_are_camel_case() {
+        assert_eq!(
+            serde_json::to_value(StudioEventKind::Stale { lagged_events: 2 }).unwrap(),
+            serde_json::json!({
+                "type": "stale",
+                "laggedEvents": 2
+            })
         );
     }
 }
