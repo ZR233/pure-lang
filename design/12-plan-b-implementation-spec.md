@@ -17,19 +17,12 @@
 - `interfaces`：端口 trait
 - `infrastructure`：适配器实现
 
-Tauri 固定结构：
+Flutter/FRB 固定结构：
 
-- `commands/*`
-- `dto/*`
-- `events/*`
-- `approvals/*`
-- `state/*`
-- `main.rs`（壳层）
-
-前端固定结构：
-
-- reducer + actions + selectors
-- `App.tsx` 只做编排与组件装配
+- `pl-studio-bridge` 暴露 typed bridge command 和 event stream
+- Flutter data repository 负责 bridge 调用与 JSON/DTO 适配
+- Riverpod reducer/controller 负责归一化状态、actions 和 selectors
+- `MaterialApp.router` 只做路由、主题和顶层页面装配
 
 ## 3. 端口规范
 
@@ -72,15 +65,15 @@ config：
 ## 5. 安全默认
 
 - 默认审批策略固定 `ToolApprovalPolicy::AutoAllow`
-- Tauri CSP 使用显式最小策略，禁止 `null`
+- Flutter/FRB 桥接层不暴露 raw provider 私有结构
 - token 不在 UI 和日志明文扩散
 
 ## 6. 发布工程化
 
 新增 CI：
 
-- PR 质量门：fmt / clippy / test / web typecheck / web build
-- RC 打包：Linux/macOS/Windows 构建产物
+- PR 质量门：fmt / clippy / test / Flutter analyze / Flutter test
+- RC 打包：Windows Flutter 桌面构建产物
 
 ## 7. 验收口径
 
@@ -100,11 +93,11 @@ config：
 
 桥接：
 
-1. `main.rs` 降为壳层
+1. `pl-studio-bridge` 只暴露 typed command、bootstrap snapshot 和事件 stream
 2. 命令与 DTO 分层明确
 
 前端：
 
 1. reducer 接管业务状态
-2. `App.tsx` 显著收敛
+2. 顶层 app widget 显著收敛
 3. 停止路径稳定 `interrupted` 收尾

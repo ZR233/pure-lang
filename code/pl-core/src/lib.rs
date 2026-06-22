@@ -83,8 +83,12 @@ pub use studio::{
     InteractionEmitter, InteractionEmitterFuture, InteractionRuntime, MaterializedAttachment,
     PlanImplementationHandoffStart, ProjectRecord, RunPromptRequest, SessionHandoffKind,
     SessionHandoffRecord, SessionHandoffStatus, SessionRecord, SessionRuntimeRecord,
-    SessionSkillRecord, SessionVisibility, StudioEventRuntime, StudioPromptOutcome, StudioRuntime,
-    StudioStore, resolution_matches_kind, studio_attachment,
+    SessionSkillRecord, SessionVisibility, StudioActiveTurn, StudioEventFilter, StudioEventRuntime,
+    StudioEventScope, StudioFilteredEventReceiver, StudioPlanImplementationLifecycle,
+    StudioPromptOutcome, StudioResolveInteractionResponse, StudioRuntime, StudioRuntimeSnapshot,
+    StudioRuntimeState, StudioRuntimeStatus, StudioStopPromptResponse, StudioStore,
+    StudioSubmitPromptOptions, StudioSubmitPromptRequest, StudioSubmitPromptResponse,
+    StudioUserPromptPresentation, resolution_matches_kind, studio_attachment,
 };
 pub use tool::{
     AskUserTool, BashInput, BashTool, LspLanguageTool, LspQueryTool, OutputTruncation,

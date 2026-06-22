@@ -68,9 +68,9 @@ platforms: ["windows", "linux", "macos"]
 
 - 在 `infer_provider_template_kind()` 和所有测试 mock/构造中添加新变体的 match 分支。
 
-### 8. `pure-studio/src-tauri/src/mappers.rs` — UI 字符串映射
+### 8. Flutter provider settings mapping
 
-- 在 `provider_kind_name()` 中添加新变体的字符串映射（snake_case）。
+- 确认 `pl-studio-bridge` 返回的 provider/template JSON 与 Flutter Settings 页使用的字符串映射一致。
 
 ### 9. `design/10-config.md` — 文档
 

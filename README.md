@@ -4,25 +4,30 @@
 
 ## 项目概览
 
-Pure-Lang 是一个**自然语言编译器**：接收用户的自然语言需求，将其编译为可执行的计划、代码生成意图和后续动作建议。项目采用模块化单体架构，通过 Tauri 2 桌面应用提供交互界面，核心编译引擎基于 Rust 实现。
+Pure-Lang 是一个**自然语言编译器**：接收用户的自然语言需求，将其编译为可执行的计划、代码生成意图和后续动作建议。项目采用模块化单体架构，核心编译引擎基于 Rust 实现；桌面端以 Windows 优先的 Flutter + flutter_rust_bridge 实现为唯一入口。
 
 > 📖 详细设计文档见 [`design/`](./design/) 目录
 
 ## 架构
 
 ```text
-pure-studio               Tauri 2 桌面应用
-  │                       React UI + Tauri 命令桥接 + 事件推送
-  ▼
-pl-core                   核心编译引擎
+pl-core                   核心编译引擎与 Studio runtime
   │                       turn/session 编排、配置管理、工具审批、
-  │                       MCP 动态工具集成、Studio SQLite 持久化、技能系统
+  │                       MCP 动态工具集成、Studio SQLite 持久化、技能系统、
+  │                       runtime 状态机、会话事件订阅
   ├────► pl-model         LLM Provider 适配层
   │                       OpenAI 兼容 wire API、SSE 流式、模型元数据
   ├────► pl-lsp           LSP 客户端
   │                       rust-analyzer 支持、代码智能查询
-  └────► pl-protocol      公共协议层
-                          Agent 事件、消息、权限、错误类型
+  ├────► pl-protocol      公共协议层
+  │                       Agent 事件、消息、权限、错误类型
+  ▲
+  │
+pl-studio-bridge          Flutter Rust Bridge v2 桥接 crate
+  ▲
+  │
+pure-studio-flutter       Flutter Windows 桌面应用
+                          Material 3 + Riverpod + 会话级事件流
 ```
 
 ### Workspace Crate
@@ -33,14 +38,15 @@ pl-core                   核心编译引擎
 | `pl-model` | `code/pl-model/` | LLM provider 抽象与适配：OpenAI 兼容 API、SSE 流式、模型元数据管理 |
 | `pl-lsp` | `code/pl-lsp/` | LSP 客户端：rust-analyzer 支持、代码智能查询 |
 | `pl-core` | `code/pl-core/` | 核心编译引擎：端口-适配器架构，含 `application`、`domain`、`infrastructure`、`interfaces` 四层 |
-| `pure-studio` | `code/pure-studio/` | Tauri 2 桌面应用：React 前端 + Rust Tauri 桥接 |
+| `pl-studio-bridge` | `code/pure-studio-flutter/rust/` | Flutter Rust Bridge v2 桥接 crate：把 Flutter API 转为 `pl-core` runtime 调用 |
+| `pure-studio-flutter` | `code/pure-studio-flutter/` | Flutter Windows 桌面应用：Material 3、Riverpod、会话级事件订阅 |
 
 ### 依赖规则
 
 ```
-pl-protocol  ←  pl-model  ←  pl-core  ←  pure-studio
+pl-protocol  ←  pl-model  ←  pl-core  ←  pl-studio-bridge  ←  pure-studio-flutter
                 pl-lsp     ←  pl-core
-（底层）                                    （顶层）
+（底层）                                                         （顶层）
 ```
 
 ## 快速开始
@@ -48,22 +54,22 @@ pl-protocol  ←  pl-model  ←  pl-core  ←  pure-studio
 ### 前置条件
 
 - [Rust](https://rustup.rs/)（edition 2024）
-- [Node.js](https://nodejs.org/) LTS
-- Windows / macOS / Linux
+- [Flutter](https://docs.flutter.dev/get-started/install)（Windows 桌面端）
+- Windows
 
 ### 启动 Pure Studio 桌面应用
 
 ```powershell
-# Windows（一键启动，自动检查并同步 npm 依赖）
-./run-pure-studio.ps1
+# Windows（Flutter + flutter_rust_bridge v2）
+./run-pure-studio-flutter.ps1
 
 # 或手动启动
-cd code/pure-studio
-npm install
-npm run tauri:dev
+cd code/pure-studio-flutter
+flutter pub get
+flutter run -d windows
 ```
 
-Windows 启动脚本会检测 `code/pure-studio` 下的 `node_modules`、`package.json`、`package-lock.json` 和已声明的 npm 依赖；依赖缺失或清单更新时会先自动执行 `npm install`，再启动 Tauri dev。
+Flutter 端通过 `pl-studio-bridge` 调用 `pl-core` Studio runtime。每个打开的会话只订阅自己的高频 timeline/turn/interaction 流；MCP/LSP health、配置和项目列表等低频事件走全局流。
 
 首次启动后，在 Pure Studio 设置页面配置 LLM Provider。配置保存在：
 
@@ -98,9 +104,10 @@ pure-lang/
 │   │   ├── src/skill/           # 技能目录与扫描
 │   │   ├── src/studio/          # Studio 运行时（SQLite、审批）
 │   │   └── migrations/          # SeaORM SQLite 迁移
-│   └── pure-studio/          # Tauri 2 桌面应用
-│       ├── src-tauri/          # Rust 后端（命令桥接、事件、审批）
-│       └── src/                # React + TypeScript 前端
+│   └── pure-studio-flutter/  # Flutter Windows 桌面应用
+│       ├── lib/                # Material 3 + Riverpod UI
+│       ├── rust/               # pl-studio-bridge crate
+│       └── windows/            # Flutter Windows runner
 ├── design/                   # 架构设计文档（14 份）
 │   ├── 01-overview.md
 │   ├── 02-crates.md
@@ -111,22 +118,20 @@ pure-lang/
 ├── .cargo/config.toml        # Cargo 配置
 ├── CLAUDE.md                 # 项目规范
 ├── Agents.md                 # Codex 项目记忆
-└── run-pure-studio.ps1       # Windows 启动脚本
+└── run-pure-studio-flutter.ps1 # Windows 启动脚本
 ```
 
 ## 技术栈
 
 | 层级 | 技术 |
 |------|------|
-| 桌面框架 | Tauri 2 |
+| 桌面框架 | Flutter Windows + flutter_rust_bridge v2 |
 | 后端语言 | Rust（edition 2024） |
 | 异步运行时 | tokio |
 | 数据库 | SQLite via SeaORM（SQLx 后端） |
 | 序列化 | serde + serde_json + toml |
-| 前端框架 | React 18 + TypeScript |
-| 构建工具 | Vite |
-| UI 图标 | lucide-react |
-| 国际化 | i18next + react-i18next |
+| Flutter 状态管理 | Riverpod |
+| Flutter 路由 | go_router |
 | LLM 集成 | OpenAI 兼容 API（async-openai + SSE 流式） |
 | LSP 客户端 | lsp-types + 自研 JSON-RPC framing（rust-analyzer 支持） |
 | 流式解析 | async-openai stream |
@@ -177,31 +182,29 @@ cargo clippy -- -D warnings
 cargo test -p pl-protocol
 cargo test -p pl-model
 cargo test -p pl-core
+cargo test -p pl-studio-bridge
 
 # 运行全部测试
 cargo test --workspace
 ```
 
-### 前端
+### Flutter 开发
 
 ```bash
-# 类型检查
-npm --prefix code/pure-studio run typecheck
-
-# 构建
-npm --prefix code/pure-studio run build
-
-# 运行前端测试
-npm --prefix code/pure-studio run test
+cd code/pure-studio-flutter
+flutter_rust_bridge_codegen generate
+flutter analyze
+flutter test
+flutter build windows
 ```
 
-### Tauri 开发
+Markdown/timeline 视觉检查可以使用本地 demo 数据启动，不连接 runtime：
 
-```bash
-cd code/pure-studio
-npm run tauri:dev       # 启动开发模式（热重载）
-npm run tauri:build     # 生产构建
+```powershell
+.\run-pure-studio-flutter.ps1 -Demo
 ```
+
+本仓库要求 Flutter 端使用 `flutter_rust_bridge` v2.12.x；本机 codegen 版本应与 Dart/Rust 依赖保持同一小版本。
 
 ## 设计文档
 

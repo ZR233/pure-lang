@@ -17,34 +17,26 @@ jobs:
           - windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: subosito/flutter-action@v2
         with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: code/pure-studio/package-lock.json
+          channel: stable
+          cache: true
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: npm ci
-        working-directory: code/pure-studio
-        run: npm ci
-      - name: web build
-        working-directory: code/pure-studio
-        run: npm run build
-      - name: rust release build
-        run: cargo build -p pure-studio --release
+      - name: flutter pub get
+        working-directory: code/pure-studio-flutter
+        run: flutter pub get
+      - name: flutter build windows
+        working-directory: code/pure-studio-flutter
+        run: flutter build windows --release
       - name: pack artifact (windows)
         if: runner.os == 'Windows'
         shell: powershell
         run: |
           New-Item -Path dist -ItemType Directory -Force | Out-Null
-          Copy-Item target\release\pure-studio.exe dist\pure-studio.exe
-      - name: pack artifact (unix)
-        if: runner.os != 'Windows'
-        run: |
-          mkdir -p dist
-          cp target/release/pure-studio dist/pure-studio
+          Copy-Item code\pure-studio-flutter\build\windows\x64\runner\Release\* dist -Recurse -Force
       - name: upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pure-studio-${{ matrix.os }}
+          name: pure-studio-flutter-${{ matrix.os }}
           path: dist/*

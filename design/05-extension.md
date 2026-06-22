@@ -23,7 +23,7 @@ OpenAI-compatible 不是一等公共 provider 抽象。新增供应商必须显�
 
 扩展时保持入口层薄：
 
-- UI 输入只在 `pure-studio` 中收集。
+- UI 输入只在 `pure-studio-flutter` 中收集。
 - 进入核心层前转换为明确 enum 或 options struct。
 - 避免把 bool 参数暴露到核心 API。
 
@@ -31,9 +31,9 @@ OpenAI-compatible 不是一等公共 provider 抽象。新增供应商必须显�
 
 ## 5.3 前端扩展
 
-`pure-studio` 是当前前端。后续可以增加 CLI、Web 或 IDE 前端，但都应调用 `pl-core`，并复用 `pl-protocol` 的事件和消息类型。
+`pure-studio-flutter` 是当前桌面前端。后续可以增加 CLI、Web 或 IDE 前端，但都应调用 `pl-core`，并复用 `pl-protocol` 的事件和消息类型。
 
-`pure-studio` 使用 Tauri 2 实现跨平台桌面应用，UI 使用 React、Vite 和 TypeScript。桌面端状态通过 `pl-core::StudioStore` 纯异步写入 SQLite，业务配置仍通过 `pl-core::ConfigStore` 读写 `~/.pure/config.toml`。
+`pure-studio-flutter` 使用 Flutter Windows 桌面应用，UI 使用 Material 3、Riverpod 和 flutter_rust_bridge。桌面端状态通过 `pl-core::StudioStore` 纯异步写入 SQLite，业务配置仍通过 `pl-core::ConfigStore` 读写 `~/.pure/config.toml`。
 
 ## 5.4 执行能力扩展
 

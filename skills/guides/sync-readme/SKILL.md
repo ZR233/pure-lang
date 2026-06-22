@@ -18,9 +18,9 @@ Pure-Lang 的 `README.md` 包含架构图、Crate 表、项目结构树、技术
 - **架构图**（`## 架构` 下方的 `Workspace Crate` 表）
 - **项目结构树**（`### 项目结构` 下的 `code/` 目录）
 
-当前 members：`pl-protocol`、`pl-model`、`pl-lsp`、`pl-core`、`pure-studio/src-tauri`
+当前 members：`pl-protocol`、`pl-trace`、`pl-model`、`pl-lsp`、`pl-core`、`pure-studio-flutter/rust`
 
-注意：`pure-studio/src-tauri` 在 README 中写作 `pure-studio`（反映目录而非 Cargo package 名）。
+注意：`code/pure-studio-flutter/rust` 在 README 中写作 `pl-studio-bridge`。
 
 ### 2. 工具数量 — 与 `register_default_tools()` 对比
 
@@ -49,15 +49,15 @@ Pure-Lang 的 `README.md` 包含架构图、Crate 表、项目结构树、技术
 
 `## 架构` 中的 ASCII 图应反映顶层的 crate 依赖关系：
 
-- `pure-studio → pl-core`（核心依赖）
+- `pl-studio-bridge → pl-core`（核心依赖）
 - `pl-core → pl-model`（provider 抽象）
 - `pl-core → pl-lsp`（LSP 客户端）
 - `pl-core → pl-protocol`（公共协议）
 
-同时在 `### 依赖规则` 中补充两条依赖链：
+同时在 `### 依赖规则` 中补充依赖链：
 
 ```
-pl-protocol  ←  pl-model  ←  pl-core  ←  pure-studio
+pl-protocol  ←  pl-model  ←  pl-core  ←  pl-studio-bridge  ←  pure-studio-flutter
                 pl-lsp     ←  pl-core
 ```
 
