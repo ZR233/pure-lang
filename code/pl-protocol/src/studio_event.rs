@@ -27,23 +27,59 @@ pub struct StudioEventEnvelope {
     tag = "type"
 )]
 pub enum StudioEventKind {
-    TurnChanged { turn: StudioTurn },
-    MessageUpdated { message: Box<StudioMessage> },
-    MessageRemoved { message_id: String },
-    MessagePartUpdated { part: Box<StudioPart> },
-    MessagePartRemoved { message_id: String, part_id: String },
-    MessagePartDelta { delta: StudioPartDelta },
-    InteractionChanged { event: Box<InteractionChangedEvent> },
-    AgentChanged { agent: StudioAgentSnapshot },
-    AgentTimelineChanged { event: StudioAgentTimelineEvent },
-    SessionRuntimeChanged { runtime: StudioSessionRuntime },
-    SkillActivated { activation: SkillActivation },
-    PlanLifecycleChanged { event: PlanLifecycleEvent },
-    SessionHandoffChanged { handoff: StudioSessionHandoff },
-    SessionListChanged { sessions: Vec<StudioSessionSummary> },
-    McpHealthChanged { health: StudioMcpHealth },
-    LspHealthChanged { health: StudioLspHealth },
-    Stale { lagged_events: u64 },
+    TurnChanged {
+        turn: StudioTurn,
+    },
+    MessageUpdated {
+        message: Box<StudioMessage>,
+    },
+    MessageRemoved {
+        message_id: String,
+    },
+    MessagePartUpdated {
+        part: Box<StudioPart>,
+    },
+    MessagePartRemoved {
+        message_id: String,
+        part_id: String,
+    },
+    MessagePartDelta {
+        delta: StudioPartDelta,
+    },
+    InteractionChanged {
+        event: Box<InteractionChangedEvent>,
+    },
+    AgentChanged {
+        agent: StudioAgentSnapshot,
+    },
+    AgentTimelineChanged {
+        event: StudioAgentTimelineEvent,
+    },
+    SessionRuntimeChanged {
+        runtime: StudioSessionRuntime,
+    },
+    SkillActivated {
+        activation: SkillActivation,
+    },
+    PlanLifecycleChanged {
+        event: PlanLifecycleEvent,
+    },
+    SessionHandoffChanged {
+        handoff: StudioSessionHandoff,
+    },
+    SessionListChanged {
+        project_id: String,
+        sessions: Vec<StudioSessionSummary>,
+    },
+    McpHealthChanged {
+        health: StudioMcpHealth,
+    },
+    LspHealthChanged {
+        health: StudioLspHealth,
+    },
+    Stale {
+        lagged_events: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -665,6 +701,18 @@ mod tests {
             serde_json::json!({
                 "type": "stale",
                 "laggedEvents": 2
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(StudioEventKind::SessionListChanged {
+                project_id: "project-1".to_string(),
+                sessions: Vec::new()
+            })
+            .unwrap(),
+            serde_json::json!({
+                "type": "sessionListChanged",
+                "projectId": "project-1",
+                "sessions": []
             })
         );
     }

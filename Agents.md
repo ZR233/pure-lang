@@ -4,8 +4,8 @@
 
 ## Crate 命名
 
-- 所有 crate 名称以 `pl-` 为前缀，例如 `pl-core`、`pl-tool`、`pl-agent`。
-- Slint 桌面二进制 crate 例外，使用 `pure-studio`。
+- 所有 Rust crate 名称以 `pl-` 为前缀，例如 `pl-core`、`pl-model`、`pl-studio-bridge`。
+- Flutter app 使用 Dart package 命名 `pure_studio_flutter`，不作为 Cargo crate 参与命名规则。
 
 ## 异步 Trait
 
@@ -109,7 +109,7 @@ pub trait ModelProvider: Debug + Send + Sync {
 - 使用 `pretty_assertions::assert_eq!` 获得更清晰的 diff。
 - 优先比较完整对象，而不是逐字段比较。
 - 避免在测试中修改进程环境变量。
-- 前端测试、浏览器验证或临时 dev server 不要占用 `1420` 端口；该端口保留给用户脚本，避免端口冲突。需要启动 Vite/预览服务时使用其他空闲端口。
+- 前端测试、浏览器验证或临时 dev server 不要占用 `1420` 端口；该端口保留给用户脚本，避免端口冲突。需要启动预览服务时使用其他空闲端口。
 
 ## API 边界
 

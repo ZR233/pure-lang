@@ -1,10 +1,8 @@
 # Pure Studio UI
 
-本文同时约束现有 `code/pure-studio` Solid/Vite 端与并行新增的 `code/pure-studio-flutter` Flutter 端。Solid 端继续作为功能与协议对照；Flutter 端使用 Material 3 工具型设计、Riverpod 状态管理和 FRB session/global stream，但必须覆盖同一组 Studio 功能。
+本文约束唯一的 `code/pure-studio-flutter` Flutter 桌面端。Flutter 端使用 Material 3 工具型设计、Riverpod 状态管理和 FRB session/global stream，覆盖 Studio 主路径功能。
 
 ## 1. 前端框架
-
-`code/pure-studio` 使用 Solid/Vite，不保留 React 运行时、React reducer 或 React 组件双栈。入口为 Solid `render`，业务状态使用 Solid store/signal 组合；Tauri 命令仍沿用现有 Rust DTO，前端只在适配层把 wire DTO 归一化为 Studio store。
 
 Timeline 直接对齐 opencode app：使用 `virtua` 虚拟列表，自写 message/part row algebra、stable row key、row cache、bottom spacer、bottom anchoring 和 jump-to-bottom 交互。允许复制 opencode MIT timeline/UI 子集；复制文件必须保留来源说明，并在仓库 notice 中标注。
 
@@ -48,7 +46,7 @@ lib/src/shared/
 
 历史、实时和 stale backfill 都进入同一个 event reducer。`load_session_state` 用 projection snapshot 初始化 message/part 与 per-id sequence guard；`load_studio_events(afterSequence)` 只回放 durable envelope。前端不得恢复旧 `TimelineItem`、`ConversationEntry` 或 raw `AgentEvent` 入口。
 
-状态管理对齐 opencode `global-sync`：Solid store 只保存归一化 entity 表和少量 UI 本地状态，组件不得直接把多个表临时拼成业务状态。选中会话、状态栏、timeline、交互 dock 和会话列表都必须通过 selector/view model 派生：
+状态管理对齐 opencode `global-sync`：Flutter Riverpod store 只保存归一化 entity 表和少量 UI 本地状态，组件不得直接把多个表临时拼成业务状态。选中会话、状态栏、timeline、交互 dock 和会话列表都必须通过 selector/view model 派生：
 
 - `selectedSessionView` 从 `selectedSessionId` 读取当前 session、message、part、runtime、agent、interaction、turn phase、busy、MCP/LSP active 列表。
 - `visibleProjectSessions` 对 session list 做按 id 去重、过滤 `visibility=active` 且 `parentSessionId` 为空的 root session，并稳定排序，避免 handoff/archived/child session 或重复 DTO 出现在会话栏。Plan implementation 在当前 session 内运行，不创建 target session；legacy child session 即使存在也只可通过历史入口加载，不能作为侧栏 root 项。
@@ -90,13 +88,17 @@ Flutter 首版 `ListView.builder` 必须实现同一滚动语义。Timeline 以 
 
 普通 prompt、Plan 确认、tool approval、ask-user、legacy session handoff、agent latest snapshot、agent timeline event 和 runtime usage 都以 `sessionId` 为边界。切换会话时用后端当前 session snapshot 替换当前 view；后台 session 事件只更新对应 view，不污染当前 timeline 或状态栏。Plan 确认的实施动作必须留在当前 session 内，不能改变 `selectedSessionId`。
 
-聊天底部只渲染一个最高优先级 pending interaction，优先级为 `toolApproval > userInput > planConfirmation`。这个区域采用 opencode dock prompt 语义：pending 的问题与权限请求不写入 timeline view model，timeline 中 pending `request_user_input` / `question` tool part 隐藏，由 dock 显示真实问题、选项和输入控件；完成后的问题 tool part 可以作为普通 assistant tool part 显示“Questions / answered”摘要。普通 prompt 输入不再渲染 Auto/Plan 二级按钮，模式切换只存在于状态栏，避免与状态栏重复。`submit_prompt` 和 `resolve_interaction` 只表示提交成功，不返回最终 timeline；后续展示完全由 `studio-runtime-event` 驱动。`toolApproval` 必须显示工具名、参数、工作目录和 approve/deny；`userInput` 必须显示每个问题、选项、free text/other/secret 输入并提交 `{ [questionId]: { answers } }`，secret 答案不得以明文出现在 timeline；`planConfirmation` 保留 implement fresh、continue planning、dismiss 三动作，并和问题/权限一样使用 dock prompt，而不是从 timeline 自行推断“是否实施计划”。
+聊天底部只渲染一个最高优先级 pending interaction，优先级为 `toolApproval > userInput > planConfirmation`。这个区域采用 opencode dock prompt 语义：pending 的问题与权限请求不写入 timeline view model，timeline 中 pending `request_user_input` / `question` tool part 隐藏，由 dock 显示真实问题、选项和输入控件；完成后的问题 tool part 可以作为普通 assistant tool part 显示“Questions / answered”摘要。普通 prompt 输入不再渲染 Auto/Plan 二级按钮，模式切换只存在于状态栏，避免与状态栏重复。`submit_prompt` 和 `resolve_interaction` 只表示提交成功，不返回最终 timeline；后续展示完全由 Studio event stream 驱动。`toolApproval` 必须显示工具名、参数、工作目录和 approve/deny；`userInput` 必须显示每个问题、选项、free text/other/secret 输入并提交 `{ [questionId]: { answers } }`，secret 答案不得以明文出现在 timeline；`planConfirmation` 保留 implement fresh、continue planning、dismiss 三动作，并和问题/权限一样使用 dock prompt，而不是从 timeline 自行推断“是否实施计划”。
+
+Flutter 的 `planConfirmation` dock 对齐 Codex 桌面 app 的决策式提示：标题固定为“实施此计划？”，计划正文留在 timeline plan card 中展示，dock 只提供“实施此计划”“告诉 Pure 如何调整”和弱化的忽略动作；实施动作不回传可编辑计划正文，继续调整只回传用户输入的调整内容。Flutter 的 `userInput` dock 对齐 Codex 的分题交互：顶部显示问题数量与进度点，当前只聚焦一个问题，选项使用多选 checkbox row，Other/free text/secret 输入跟随当前问题展示，上一题/下一题/提交按钮保留在 dock footer；提交时为每个问题生成 `{ answers: [...] }`，未回答问题也保留空数组。
 
 pending interaction 只替换普通 prompt 输入，不得隐藏当前 turn 的停止控制；只要当前 session 的 turn 仍处于非终态，footer 必须保留停止按钮并调用 `stop_prompt(sessionId)`。`busy` 与停止按钮状态必须按 `sessionId` 归属计算，后台 session 的 turn event 不能让当前 session 显示不可用的停止态。
 
-Solid `SessionStatusBar` 保留旧 React 状态栏功能中的模式切换、planner 模型选择、reasoning effort、context/token/cost、active skills、MCP、LSP 和 subagent 活动列表。Flutter 状态栏的模式切换调用 `setSessionMode(sessionId, mode)`，planner 模型选择调用 `setModelRole(roleKey=planner, providerId, model, effort)`，不能只更新本地 chip 或 settings draft。权限模式不在状态栏重复展示，只在 composer 权限选择器和 Settings/Security 中修改。状态栏所有数据来自 Studio store；`mcpHealthChanged` 与 `lspHealthChanged` 必须更新对应 snapshot，不能在 reducer 中丢弃。
+Flutter 状态栏保留模式切换、planner 模型选择、reasoning effort、context/token/cost、active skills、MCP、LSP 和 subagent 活动列表。模式切换调用 `setSessionMode(sessionId, mode)`，planner 模型选择调用 `setModelRole(roleKey=planner, providerId, model, effort)`，不能只更新本地 chip 或 settings draft。权限模式不在状态栏重复展示，只在 composer 权限选择器和 Settings/Security 中修改。状态栏所有数据来自 Studio store；`mcpHealthChanged` 与 `lspHealthChanged` 必须更新对应 snapshot，不能在 reducer 中丢弃。
 
 Flutter `SessionStatusBar` 展示同一组信息，并使用 Material 3 的 compact controls、tooltip 和 hover/focus 可达的弹层承载详情。Flutter 状态栏只消费 Riverpod selector，不直接订阅 bridge stream 或解析 raw JSON。
+
+Flutter context readout 对齐 Codex 桌面 app 的圆形用量 ring：状态栏中只显示无数字圆形进度，不直接显示 `contextTokens/contextWindow`；hover/focus 详情中展示上下文数字、百分比、总 token 和模型。费用、active skills、MCP、LSP 与 subagent 活动必须继续作为独立状态 chip/readout 展示，不能合并进 context tooltip 后从状态栏消失。
 
 状态栏、interaction dock、timeline 工具/计划/提问摘要中的 UI 文案必须走 i18n；模型名称、provider 名称、模型 slug、tool 名称、agent 路径、reasoning effort 等来自配置或运行时的领域值按原始字符串透传展示，不做翻译或本地化映射。这样 zh-CN/en 只负责固定 UI 标签与状态说明，不改变用户配置、provider 返回值或协议枚举的可辨识性。
 
@@ -104,13 +106,13 @@ Flutter `SessionStatusBar` 展示同一组信息，并使用 Material 3 的 comp
 
 会话列表是独立滚动区域，row 采用 opencode 式单行 flex 布局：图标/状态固定宽度，标题 `min-width:0` 且 `truncate`，列表项 `flex-shrink:0`。Sessions 区域过长时只滚动列表，不挤压 project 区、settings 按钮或相邻 session row。
 
-项目和会话管理继续走 Studio store/runtime API，不能在组件里手动拼接状态。Tauri/Solid 使用现有 command；Flutter 使用 `pl-studio-bridge.openProject(path)`，该接口在 `pl-core` 内完成 open project、LSP reconcile、session ensure 和 bootstrap，然后返回新的 project/session/sidebar 快照。打开项目支持两种入口：系统目录选择器和手动路径输入。Flutter 选择项目调用 `selectProject(projectId)`，关闭项目调用 `archiveProject(projectId, selectedProjectId)`，新建会话调用 `createSession(projectId, title)`；所有返回 payload 都必须原子替换 `projects`、当前项目的 `sessions`、`selectedProjectId`、`selectedSessionId`、agent/runtime/interaction/MCP/LSP health，并在有 `selectedSessionId` 时立即用 `loadSessionState` 恢复会话历史 projection。若没有选中会话，timeline、状态栏和 composer 显示无会话空态。
+项目和会话管理继续走 Studio store/runtime API，不能在组件里手动拼接状态。Flutter 使用 `pl-studio-bridge.openProject(path)`，该接口在 `pl-core` 内完成 open project、LSP reconcile、session ensure 和 bootstrap，然后返回新的 project/session/sidebar 快照。打开项目支持两种入口：系统目录选择器和手动路径输入。Flutter 选择项目调用 `selectProject(projectId)`，关闭项目调用 `archiveProject(projectId, selectedProjectId)`，新建会话调用 `createSession(projectId, title)`；所有返回 payload 都必须原子替换 `projects`、当前项目的 `sessions`、`selectedProjectId`、`selectedSessionId`、agent/runtime/interaction/MCP/LSP health，并在有 `selectedSessionId` 时立即用 `loadSessionState` 恢复会话历史 projection。若没有选中会话，timeline、状态栏和 composer 显示无会话空态。
 
 项目关闭和会话关闭都是归档语义，不删除磁盘内容、配置或历史会话。Project row 上的关闭按钮调用 `archiveProject(projectId, selectedProjectId)`；关闭当前项目后切换到后端返回的下一个可用项目/会话，关闭最后一个项目后清空当前 selection 并取消 session stream。Session row 上的关闭按钮调用 `archiveSession(sessionId, selectedSessionId)`；后端会拒绝 active turn，会取消该会话 pending interaction，并返回同项目的新 session selection。前端收到 payload 后删除/隐藏归档 session、切换到返回的 `selectedSessionId`，并用 `loadSessionState` 恢复新会话 projection；如果项目内没有剩余 session，状态栏与 composer 禁用，用户可以用新建会话按钮创建会话。会话列表只显示 `visibility=active && parentSessionId=null`，legacy handoff child/archived session 不作为 root row 出现。
 
-Settings 是独立页面栈中的配置编辑入口，不恢复 React 兼容层。它必须对齐旧 React 设置页的能力：Providers、Instructions、Skills、Roles、MCP、Security 和 General 页签。Tauri/Solid 配置状态来自 `ConfigPayload` 与现有 command：`load_provider_usages`、`save_provider_settings`、`save_instructions_settings`、`save_mcp_settings`、`save_permission_mode` 和 `list_discovered_skills`。Flutter 通过 FRB 读取 bootstrap config 与 runtime snapshot；Security 权限模式调用 `saveRuntimePermissionMode(mode)` 直接写回 config，Roles 中的模型角色修改调用 `setModelRole` 直接写回 config。Provider 页必须调用 `saveProviderSettings(settingsJson)` 直接写回 config，payload 对齐 Tauri 的 `ProviderSettingsInput`：`defaultProviderId`、`providers[]`、`roles[]`、provider 的 `id/templateKind/name/baseUrl/bearerToken/defaultModel/providerKind/customModels[]`，以及 model 的 `slug/displayName/reasoningEfforts/baseInstructions`。Skills 页的 Discover 按钮调用 `listDiscoveredSkills(projectId)`，用返回 catalog 刷新当前页的可选 skill 列表；禁用项仍通过 `saveStudioSettingsDraft("skills", draftJson)` 持久化，直到后续 typed skills config command 接管。Instructions/MCP/General 的未完整 typed 化编辑内容调用 `saveStudioSettingsDraft(section, draftJson)` 持久化为 Studio store draft，不允许只停留在 widget 局部变量。后续补齐 typed save command 后，保存成功必须用返回的 canonical config 更新 providers、roles、templates、instructions、MCP servers、permission mode、config TOML 和 config exists 状态。
+Settings 是独立页面栈中的配置编辑入口。它必须覆盖 Providers、Instructions、Skills、Roles、MCP、Security 和 General 页签。Flutter 通过 FRB 读取 bootstrap config 与 runtime snapshot；Security 权限模式调用 `saveRuntimePermissionMode(mode)` 直接写回 config，Roles 中的模型角色修改调用 `setModelRole` 直接写回 config。Provider 页必须调用 `saveProviderSettings(settingsJson)` 直接写回 config，payload 对齐 Studio provider settings wire 格式：`defaultProviderId`、`providers[]`、`roles[]`、provider 的 `id/templateKind/name/baseUrl/bearerToken/defaultModel/providerKind/customModels[]`，以及 model 的 `slug/displayName/reasoningEfforts/baseInstructions`。Skills 页的 Discover 按钮调用 `listDiscoveredSkills(projectId)`，用返回 catalog 刷新当前页的可选 skill 列表；禁用项仍通过 `saveStudioSettingsDraft("skills", draftJson)` 持久化，直到后续 typed skills config command 接管。Instructions/MCP/General 的未完整 typed 化编辑内容调用 `saveStudioSettingsDraft(section, draftJson)` 持久化为 Studio store draft，不允许只停留在 widget 局部变量。后续补齐 typed save command 后，保存成功必须用返回的 canonical config 更新 providers、roles、templates、instructions、MCP servers、permission mode、config TOML 和 config exists 状态。
 
-Flutter Provider 页使用 Tauri/Solid 同款信息架构，但在 Flutter 中采用页面栈式互斥视图：列表页、详情页、新增页和编辑页不得同时显示。列表页提供可搜索 provider 卡片、刷新用量、选择默认 provider 和新增入口；点击详情或编辑进入当前 Provider tab 内的独立页面，顶部提供返回列表和保存/取消操作。新增时从内置模板创建 provider，自动建议不冲突的 id，编辑时支持 provider key、模板类型、显示名、协议类型、base URL、API key、默认模型和自定义模型。Provider 列表必须显示当前默认 provider、credential 状态、模型数量、默认模型、usage 摘要和可用模型 chip；删除 provider 时至少保留一个 provider，并在删除默认 provider 后选择下一个 provider。保存成功后以 bridge 返回的 bootstrap snapshot 归一化刷新 Flutter store，而不是只更新本地 draft。
+Flutter Provider 页采用页面栈式互斥视图：列表页、详情页、新增页和编辑页不得同时显示。列表页提供可搜索 provider 卡片、刷新用量、选择默认 provider 和新增入口；点击详情或编辑进入当前 Provider tab 内的独立页面，顶部提供返回列表和保存/取消操作。新增时从内置模板创建 provider，自动建议不冲突的 id，编辑时支持 provider key、模板类型、显示名、协议类型、base URL、API key、默认模型和自定义模型。Provider 列表必须显示当前默认 provider、credential 状态、模型数量、默认模型、usage 摘要和可用模型 chip；删除 provider 时至少保留一个 provider，并在删除默认 provider 后选择下一个 provider。保存成功后以 bridge 返回的 bootstrap snapshot 归一化刷新 Flutter store，而不是只更新本地 draft。
 
 Settings 不作为悬浮 modal、popover、fixed overlay 或右侧嵌入页展示。Studio shell 采用页面栈语义：chat 页面和 settings 页面互斥，打开设置时压入 settings 页面并替换整个窗口，包括左侧项目/会话栏；设置页顶部提供返回聊天入口，返回后恢复当前会话的 sidebar、timeline、状态栏和 composer。设置页不得模糊、遮罩或覆盖聊天背景，而是作为独立页面参与导航。
 
@@ -120,7 +122,6 @@ Security 页是紧凑的权限配置页，不使用与 provider/MCP 相同的大
 
 ## 5. 验收目标
 
-- `pure-studio` 构建不依赖 React。
 - `pure-studio-flutter` 可在 Windows 上 `flutter analyze`、`flutter test`、`flutter build windows`，并通过 FRB 调用 `pl-core` runtime。
 - `messagePartDelta` 可以实时显示 text/reasoning/tool/plan 中间输出。
 - terminal snapshot 清除 overlay，reload/backfill 与 live terminal UI 收敛。
@@ -140,13 +141,13 @@ Flutter 主聊天界面视觉应靠拢 Codex 桌面版的工作台气质：中�
 
 Flutter shell 的二级视觉层级继续收敛：顶部 header 只展示当前会话标题、项目名和短路径，不放大图标或重复品牌；侧栏底部操作使用低饱和按钮，只有发送按钮保留明显主操作色；session row 用 mode 小图标和轻量选中底色表达状态。Composer 的底部控制行承载权限、附件/后续工具入口和发送/停止，输入区域保持单一视觉焦点，不再把状态栏和输入控件混成一排同等权重按钮。
 
-前端交互组件统一使用 `@ark-ui/solid` 作为唯一 headless 组件库，并在业务语义组件中直接使用 Ark primitives；不再保留 `src/components/ui` 通用 wrapper、Kobalte 兼容层或 native select fallback。普通按钮、列表、卡片和 dock 直接使用语义 HTML 与项目 CSS class 表达。组件拆分按业务领域组织：shell 负责双栏、header、footer 与侧栏，status 负责状态栏 select/readout/popover，interaction 负责不同 pending interaction 的 dock，timeline 负责消息 part 与计划卡。`App.tsx` 只负责 store 初始化、selector、action wiring 与顶层组合。
+Flutter 交互组件优先使用 Material 3 原生控件，按业务领域组织：shell 负责双栏、header、footer 与侧栏，status 负责状态栏 select/readout/popover，interaction 负责不同 pending interaction 的 dock，timeline 负责消息 part 与计划卡。`MaterialApp.router` 只负责路由和顶层主题组合，业务 wiring 由 Riverpod controller 与 feature widget 承担。
 
 视觉参考以 `output/design` 中的 Pure Studio chat 状态图为准：默认聊天、流式响应、计划确认、环境弹层、select 菜单与窄屏响应式。实现时必须保持低对比侧栏、居中阅读流、底部同宽状态栏与 dock、计划卡渐隐预览、以及窄屏 icon rail，不得新增常驻右侧环境信息栏。
 
 聊天输入框中的权限模式是可交互设置项，使用 Ark Select 直接绑定 `save_permission_mode`，不得退化为静态提示文字，也不得在状态栏重复放置权限选择。状态栏的上下文、费用、能力、子智能体等 readout 使用 Ark HoverCard 展示详情，鼠标或焦点离开触发器和浮层后必须自动关闭；readout 本身不显示向下箭头。点击选择只保留给模式、模型和 reasoning effort 这些真正的状态栏 select 控件。
 
-Tauri 窗口 resize 时 UI 不应持续触发昂贵测量。Timeline 的贴底逻辑只在新内容、会话切换和少量后续 layout settle 帧内测量，不能长时间逐帧调用虚拟列表 measure 或反复写入 scrollTop。
+Flutter 窗口 resize 时 UI 不应持续触发昂贵测量。Timeline 的贴底逻辑只在新内容、会话切换和少量后续 layout settle 帧内测量，不能长时间逐帧调用列表 measure 或反复写入 scroll offset。
 
 计划确认 dock 的固定文案语义为“实施此计划？”：主操作是实施计划，次操作是继续调整，忽略动作保持弱化展示。所有固定 UI 文案必须走 i18n；模型名称、provider 名称、tool 名称、agent 路径、reasoning effort 等领域值仍按原始字符串透传。
 

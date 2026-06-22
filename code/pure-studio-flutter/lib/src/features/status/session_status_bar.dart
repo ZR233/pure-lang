@@ -40,12 +40,7 @@ class SessionStatusBar extends ConsumerWidget {
                           _PlannerModelSelector(state: state),
                         if (_plannerEffortsForState(state).isNotEmpty)
                           _ReasoningEffortSelector(state: state),
-                        _StatusChip(
-                          icon: Icons.data_usage,
-                          label:
-                              '${runtime.contextTokens}/${runtime.contextWindow}',
-                          tooltip: 'Context',
-                        ),
+                        _ContextRing(runtime: runtime),
                         if (runtime.costLabel.isNotEmpty)
                           _StatusChip(
                             icon: Icons.receipt_long_outlined,
@@ -432,6 +427,61 @@ class _StatusChip extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ContextRing extends StatelessWidget {
+  const _ContextRing({required this.runtime});
+
+  final SessionRuntimeView runtime;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final progress = runtime.contextWindow <= 0
+        ? 0.0
+        : (runtime.contextTokens / runtime.contextWindow).clamp(0.0, 1.0);
+    final trackColor = colors.onSurfaceVariant.withValues(alpha: 0.22);
+    final progressColor = colors.onSurfaceVariant.withValues(alpha: 0.72);
+    return Tooltip(
+      message: _contextTooltip(runtime),
+      child: Padding(
+        padding: const EdgeInsets.only(left: 2, right: 10),
+        child: SizedBox(
+          width: 16,
+          height: 22,
+          child: Semantics(
+            label: 'Context',
+            child: Center(
+              child: SizedBox.square(
+                dimension: 14,
+                child: CircularProgressIndicator(
+                  value: progress,
+                  strokeWidth: 2.4,
+                  strokeCap: StrokeCap.round,
+                  backgroundColor: trackColor,
+                  color: progressColor,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _contextTooltip(SessionRuntimeView runtime) {
+  final percent = runtime.contextWindow <= 0
+      ? 0
+      : ((runtime.contextTokens / runtime.contextWindow) * 100)
+            .clamp(0, 100)
+            .round();
+  final sections = [
+    'Context: ${runtime.contextTokens}/${runtime.contextWindow} ($percent%)',
+    'Total tokens: ${runtime.totalTokens}',
+    if (runtime.model.isNotEmpty) 'Model: ${runtime.model}',
+  ];
+  return sections.join('\n\n');
 }
 
 class _PhasePill extends StatelessWidget {

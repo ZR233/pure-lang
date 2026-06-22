@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -92,6 +93,49 @@ void main() {
       expect(state.selectedMessages.single.parts.single.text, 'hello');
     },
   );
+
+  test('session list stream updates only the addressed project', () async {
+    final now = DateTime.fromMillisecondsSinceEpoch(1000);
+    final api = _FakeStudioApi(
+      _emptyState().copyWith(
+        sessions: [
+          StudioSession(
+            id: 'session-1',
+            projectId: 'project-1',
+            title: 'Session 1',
+            mode: CompileMode.auto,
+            updatedAt: now,
+          ),
+          StudioSession(
+            id: 'session-2',
+            projectId: 'project-2',
+            title: 'Session 2',
+            mode: CompileMode.plan,
+            updatedAt: now,
+          ),
+        ],
+      ),
+    );
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(studioControllerProvider.future);
+    api.emitGlobal(
+      StudioBridgeEvent(
+        kindType: 'sessionListChanged',
+        payload: {'projectId': 'project-1', 'sessions': <Object?>[]},
+      ),
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    final sessions = container
+        .read(studioControllerProvider)
+        .requireValue
+        .sessions;
+    expect(sessions.map((session) => session.id), ['session-2']);
+  });
 
   test('demo API emits prompt and assistant timeline events', () async {
     final api = DemoStudioApi();
@@ -730,7 +774,21 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final api = _FakeStudioApi(_stateWithPlannerModels());
+    final api = _FakeStudioApi(
+      _stateWithPlannerModels().copyWith(
+        runtime: const SessionRuntimeView(
+          model: 'planner/local',
+          contextTokens: 42,
+          contextWindow: 100,
+          totalTokens: 128,
+          costLabel: 'CNY 0.16',
+          activeSkills: ['flutter-ui'],
+          activeMcpServers: ['dart'],
+          activeLspServers: ['rust-analyzer'],
+          agentCount: 2,
+        ),
+      ),
+    );
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
@@ -742,12 +800,44 @@ void main() {
     expect(find.byTooltip('Session mode'), findsOneWidget);
     expect(find.byTooltip('Planner model'), findsOneWidget);
     expect(find.byTooltip('Reasoning effort'), findsOneWidget);
+    expect(find.bySemanticsLabel('Context'), findsOneWidget);
+    expect(find.text('42/100'), findsNothing);
+    expect(find.text('CNY 0.16'), findsOneWidget);
+    expect(find.text('1 skills · 1 MCP · 1 LSP · 2 agents'), findsOneWidget);
+
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(gesture.removePointer);
+    await gesture.addPointer();
+    await gesture.moveTo(tester.getCenter(find.bySemanticsLabel('Context')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Context: 42/100'), findsOneWidget);
+    await gesture.moveTo(Offset.zero);
+    await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('Session mode'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Plan').last);
     await tester.pumpAndSettle();
     expect(api.sessionModeUpdate, CompileMode.plan);
+    api.emitGlobal(
+      StudioBridgeEvent(
+        kindType: 'sessionListChanged',
+        payload: {
+          'projectId': 'project-1',
+          'sessions': [
+            {
+              'id': 'session-1',
+              'projectId': 'project-1',
+              'title': 'Session',
+              'mode': 'plan',
+              'updatedAt': 1,
+            },
+          ],
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Plan'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Planner model'));
     await tester.pumpAndSettle();
@@ -883,6 +973,207 @@ void main() {
       'answer': {
         'answers': ['use main'],
       },
+    });
+  });
+
+  testWidgets('user input interaction submits paged multi-question answers', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = _emptyState().copyWith(
+      pendingInteractions: const [
+        PendingInteraction(
+          id: 'interaction-questions',
+          sessionId: 'session-1',
+          kind: InteractionKind.userInput,
+          title: 'Need input',
+          body: 'Choose implementation details',
+          payload: {
+            'questions': [
+              {
+                'id': 'scope',
+                'header': 'Scope',
+                'question': 'Pick the areas to update',
+                'options': [
+                  {'label': 'UI', 'description': 'Polish the dock'},
+                  {'label': 'Tests', 'description': 'Add widget coverage'},
+                ],
+              },
+              {
+                'id': 'notes',
+                'header': 'Notes',
+                'question': 'Anything else?',
+                'isOther': true,
+                'options': [
+                  {'label': 'Docs', 'description': 'Update design notes'},
+                ],
+              },
+              {
+                'id': 'secret',
+                'header': 'Secret',
+                'question': 'Secret value?',
+                'isSecret': true,
+              },
+            ],
+          },
+        ),
+      ],
+      turnPhase: TurnPhase.waitingForInteraction,
+    );
+    final api = _FakeStudioApi(state);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: const MaterialApp(home: StudioShell()),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('3 questions'), findsOneWidget);
+    expect(find.text('Question 1 / 3'), findsOneWidget);
+    await tester.tap(find.text('UI'));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.text('Tests'));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.widgetWithText(FilledButton, 'Next'));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('Question 2 / 3'), findsOneWidget);
+    await tester.tap(find.text('Docs'));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.enterText(find.byType(TextField).last, 'also mention risk');
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.widgetWithText(FilledButton, 'Next'));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('Question 3 / 3'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).last, 'secret-value');
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.widgetWithText(FilledButton, 'Submit answers'));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(api.resolvedInteractionId, 'interaction-questions');
+    expect(api.resolvedInteraction?['type'], 'userInput');
+    expect(api.resolvedInteraction?['answers'], {
+      'scope': {
+        'answers': ['UI', 'Tests'],
+      },
+      'notes': {
+        'answers': ['Docs', 'also mention risk'],
+      },
+      'secret': {
+        'answers': ['secret-value'],
+      },
+    });
+  });
+
+  testWidgets('plan confirmation implement keeps plan content in timeline', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = _emptyState().copyWith(
+      sessions: [
+        StudioSession(
+          id: 'session-1',
+          projectId: 'project-1',
+          title: 'Session',
+          mode: CompileMode.plan,
+          updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+        ),
+      ],
+      pendingInteractions: const [
+        PendingInteraction(
+          id: 'interaction-plan',
+          sessionId: 'session-1',
+          kind: InteractionKind.planConfirmation,
+          title: 'Confirm plan',
+          body: '## Plan\n- Implement',
+          payload: {
+            'type': 'planConfirmation',
+            'content': '## Plan\n- Implement',
+          },
+        ),
+      ],
+      turnPhase: TurnPhase.completed,
+    );
+    final api = _FakeStudioApi(state);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: const MaterialApp(home: StudioShell()),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('Implement this plan?'), findsOneWidget);
+    expect(find.text('Yes, implement this plan'), findsOneWidget);
+    expect(find.text('Plan content'), findsNothing);
+    expect(find.text('Plan'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Implement plan'));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(api.resolvedInteractionId, 'interaction-plan');
+    expect(api.resolvedInteraction?['type'], 'planConfirmation');
+    expect(api.resolvedInteraction?['decision'], 'implementFreshContext');
+    expect(api.resolvedInteraction?.containsKey('content'), isFalse);
+    expect(find.text('Auto'), findsOneWidget);
+    expect(find.text('Plan'), findsNothing);
+  });
+
+  testWidgets('plan confirmation adjustment submits only user instruction', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = _emptyState().copyWith(
+      pendingInteractions: const [
+        PendingInteraction(
+          id: 'interaction-plan-adjust',
+          sessionId: 'session-1',
+          kind: InteractionKind.planConfirmation,
+          title: 'Confirm plan',
+          body: '## Plan\n- Implement',
+          payload: {
+            'type': 'planConfirmation',
+            'content': '## Plan\n- Implement',
+          },
+        ),
+      ],
+      turnPhase: TurnPhase.completed,
+    );
+    final api = _FakeStudioApi(state);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: const MaterialApp(home: StudioShell()),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    await tester.tap(find.text('No, tell Pure what to adjust'));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.enterText(find.byType(TextField).last, 'add tests first');
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.widgetWithText(FilledButton, 'Submit'));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(api.resolvedInteractionId, 'interaction-plan-adjust');
+    expect(api.resolvedInteraction, {
+      'type': 'planConfirmation',
+      'decision': 'continuePlanning',
+      'content': 'add tests first',
+      'reason': 'continue planning',
     });
   });
 
@@ -1217,6 +1508,8 @@ class _FakeStudioApi implements StudioApi {
   String? discoverProjectId;
   List<String> discoveredSkills = const [];
   int loadProviderUsagesCount = 0;
+
+  void emitGlobal(StudioBridgeEvent event) => _global.add(event);
 
   void emitSession(StudioBridgeEvent event) => _session.add(event);
 

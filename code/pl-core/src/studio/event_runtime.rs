@@ -173,6 +173,26 @@ impl StudioEventRuntime {
         .await
     }
 
+    pub async fn emit_session_list(&self, project_id: &str) -> Result<StudioEventEnvelope> {
+        let sessions = self
+            .store
+            .list_sessions(project_id)
+            .await?
+            .into_iter()
+            .map(studio_session_summary)
+            .collect();
+        self.emit(
+            Some(project_id.to_string()),
+            None,
+            None,
+            StudioEventKind::SessionListChanged {
+                project_id: project_id.to_string(),
+                sessions,
+            },
+        )
+        .await
+    }
+
     pub async fn emit_agent_event(
         &self,
         session_id: &str,

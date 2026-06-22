@@ -5,8 +5,8 @@ use tokio::sync::broadcast;
 
 /// Studio 事件订阅范围。
 ///
-/// UI 端通过范围控制资源消耗：旧 Tauri/Solid 端使用 `All` 保留兼容全量流；
-/// Flutter 端打开会话时使用 `Session`，全局状态栏和设置页使用 `Global`。
+/// UI 端通过范围控制资源消耗：Flutter 端打开会话时使用 `Session`，
+/// 全局状态栏和设置页使用 `Global`；测试和诊断场景可使用 `All`。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StudioEventScope {
     All,
@@ -149,6 +149,7 @@ mod tests {
             sequence: 0,
             created_at: 1,
             kind: StudioEventKind::SessionListChanged {
+                project_id: "project".to_string(),
                 sessions: Vec::new(),
             },
         }

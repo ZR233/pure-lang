@@ -1134,8 +1134,8 @@ class DemoStudioApi implements StudioApi {
                 title: 'Plan',
                 text:
                     '## Implementation checklist\n\n'
-                    '1. Keep Tauri/Solid as reference.\n'
-                    '2. Add Flutter shell with Riverpod selectors.\n'
+                    '1. Keep the Flutter shell aligned with runtime contracts.\n'
+                    '2. Use Riverpod selectors for derived views.\n'
                     '3. Subscribe only the selected session stream.\n'
                     '4. Verify Markdown in streaming mode.\n\n'
                     '| Area | Status |\n'

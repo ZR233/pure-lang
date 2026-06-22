@@ -218,7 +218,7 @@ struct ResolveInteractionResponse {
 
 /// Provider 用量查询返回体。
 ///
-/// 与 Tauri `ProviderUsagesDto` 保持 camelCase wire 格式，供 Flutter 列表卡片渲染。
+/// 与 Studio provider usage wire 格式保持 camelCase，供 Flutter 列表卡片渲染。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProviderUsagesResponse {

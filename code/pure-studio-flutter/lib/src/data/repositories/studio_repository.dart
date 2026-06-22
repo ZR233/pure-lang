@@ -276,11 +276,22 @@ class StudioController extends AsyncNotifier<StudioState> {
     final shouldContinuePlanning =
         resolution['type'] == 'planConfirmation' &&
         resolution['decision'] == 'continuePlanning';
+    final shouldImplementPlan =
+        resolution['type'] == 'planConfirmation' &&
+        resolution['decision'] == 'implementFreshContext';
     final followUpPrompt = _planFollowUpPrompt(interaction, resolution);
     await _api.resolveInteraction(interaction.id, resolution);
     final latest = state.value ?? current;
     state = AsyncData(
       latest.copyWith(
+        sessions: shouldImplementPlan
+            ? [
+                for (final session in latest.sessions)
+                  session.id == interaction.sessionId
+                      ? session.copyWith(mode: CompileMode.auto)
+                      : session,
+              ]
+            : latest.sessions,
         pendingInteractions: latest.pendingInteractions
             .where((candidate) => candidate.id != interaction.id)
             .toList(),
@@ -408,9 +419,7 @@ class StudioController extends AsyncNotifier<StudioState> {
       'sessionRuntimeChanged' => current.copyWith(
         runtime: sessionRuntimeFromJson(event.payload['runtime']),
       ),
-      'sessionListChanged' => current.copyWith(
-        sessions: studioSessionsFromJson(event.payload['sessions']),
-      ),
+      'sessionListChanged' => _mergeSessionListChanged(current, event),
       'agentChanged' => _applyAgentChanged(current, event.payload['agent']),
       'agentTimelineChanged' => _upsertAgentTimelineEvent(
         current,
@@ -472,6 +481,28 @@ class StudioController extends AsyncNotifier<StudioState> {
       permissionMode: next.permissionMode,
       runtime: next.runtime.model.isEmpty ? current.runtime : next.runtime,
     );
+  }
+
+  StudioState _mergeSessionListChanged(
+    StudioState current,
+    StudioBridgeEvent event,
+  ) {
+    final incoming = studioSessionsFromJson(event.payload['sessions']);
+    final projectId = _emptyToNull(
+      event.payload['projectId']?.toString() ?? '',
+    );
+    if (projectId == null && incoming.isEmpty) {
+      return current.copyWith(sessions: const []);
+    }
+    final Set<String> projectIds = projectId == null
+        ? incoming.map((session) => session.projectId).toSet()
+        : {projectId};
+    final sessions = [
+      for (final session in current.sessions)
+        if (!projectIds.contains(session.projectId)) session,
+      ...incoming,
+    ];
+    return current.copyWith(sessions: sessions);
   }
 
   StudioState _upsertMessage(StudioState current, Object? value) {

@@ -14,7 +14,7 @@ Windows 下对应：
 %USERPROFILE%\.pure\config.toml
 ```
 
-`pure-studio` 的桌面端状态单独保存在：
+`pure-studio-flutter` 的桌面端状态单独保存在：
 
 ```text
 ~/.pure/studio/studio_2.sqlite
@@ -22,9 +22,9 @@ Windows 下对应：
 
 SQLite 只保存 Studio 状态，例如项目、会话、消息、统一 interaction、agent 状态事件和应用设置，并由 `pl-core` 通过 SeaORM 纯异步访问。provider/model/role 配置仍只由 `~/.pure/config.toml` 表达。
 
-普通对话运行时读取配置；当配置文件不存在时，`pure-studio` 设置页展示默认配置草稿。写入配置必须由用户在具体设置操作中显式触发，例如 provider 编辑页保存、删除 provider、选择默认 provider 或调整角色路由。若已存在的配置文件无法解析或无法通过当前 schema 校验，运行时会先把原文件备份为 `config.invalid.backup.<unix>.toml`，再写入当前 schema 的默认配置；这属于重置恢复，不做旧字段迁移。
+普通对话运行时读取配置；当配置文件不存在时，`pure-studio-flutter` 设置页展示默认配置草稿。写入配置必须由用户在具体设置操作中显式触发，例如 provider 编辑页保存、删除 provider、选择默认 provider 或调整角色路由。若已存在的配置文件无法解析或无法通过当前 schema 校验，运行时会先把原文件备份为 `config.invalid.backup.<unix>.toml`，再写入当前 schema 的默认配置；这属于重置恢复，不做旧字段迁移。
 
-`pure-studio` 设置页不提供全局保存按钮；各设置项确认后即时写入 `~/.pure/config.toml`，校验失败时只展示错误并保留当前页面状态。
+`pure-studio-flutter` 设置页不提供全局保存按钮；各设置项确认后即时写入 `~/.pure/config.toml`，校验失败时只展示错误并保留当前页面状态。
 
 ## 10.2 配置职责
 
@@ -336,7 +336,7 @@ mcp__{server_id}__{tool_name}
 
 ## 10.10 配置草稿
 
-配置构造和校验的纯逻辑属于 `pl-core`。`pure-studio` 设置页可以使用默认配置草稿，并支持：
+配置构造和校验的纯逻辑属于 `pl-core`。`pure-studio-flutter` 设置页可以使用默认配置草稿，并支持：
 
 - 默认选中 DeepSeek provider，也可切换为 OpenAI、Zhipu 或 Zhipu Coding Plan provider。
 - 至少配置一个 provider。
@@ -355,9 +355,9 @@ mcp__{server_id}__{tool_name}
 - 同一 provider 下模型 slug 不重复。
 - 角色引用的默认模型必须声明 `name = "effort"` 参数且至少一个候选值，用于生成角色 `effort`。
 
-## 10.11 pure-studio 设置页
+## 10.11 pure-studio-flutter 设置页
 
-`pure-studio` 设置页复用 `pl-core` 的配置类型和校验逻辑，首版覆盖：
+`pure-studio-flutter` 设置页复用 `pl-core` 的配置类型和校验逻辑，首版覆盖：
 
 - DeepSeek / OpenAI / Zhipu / Zhipu Coding Plan provider。
 - API key、base URL、provider key 和显示名。
@@ -374,7 +374,7 @@ mcp__{server_id}__{tool_name}
 
 MCP 标签页使用结构化表单，不展示 raw TOML。新增和编辑用户 server 使用本地草稿；保存成功后即时写入 `~/.pure/config.toml`、触发后台 MCP registry reconcile 并刷新设置页状态。删除 server 和启用切换同样即时写入。内置 Zhipu Coding Plan MCP server 不可删除，不允许编辑 server id、transport、endpoint 或运行时注入字段；界面同时显示配置状态和实际可用性。设置页状态栏展示的 MCP 数量和列表来自 MCP registry 中当前 `available` 的 server。
 
-设置页 UI 按 React 页面模块拆分，顶层 App 负责页面路由和共享状态，具体页面放在 `src/pages`，可复用组件放在 `src/components`，Tauri 命令封装放在 `src/lib`。Provider 标签页优先从 `PureConfig.providers` 派生 provider 卡片列表，不引入新的配置存储。
+设置页 UI 按 Flutter feature/page 模块拆分，顶层 `MaterialApp.router` 负责页面路由，Riverpod controller 负责共享状态，具体页面放在 `lib/src/features/settings`，桥接调用封装在 repository 层。Provider 标签页优先从 `PureConfig.providers` 派生 provider 卡片列表，不引入新的配置存储。
 
 Provider 标签页必须提供结构化编辑能力：
 
@@ -395,15 +395,17 @@ Provider 标签页必须提供结构化编辑能力：
 
 Roles 标签页必须展示固定四个角色：探索者、计划者、执行者、审查者。每个角色提供 provider、model 和 effort 下拉选择。provider 改变时，model 默认切换为该 provider 的 `default_model`；model 改变时，effort 默认切换为该模型的第一个可用 effort。角色路由下拉变更后即时提交完整 roles 快照，`pl-core` 统一校验后写入 `~/.pure/config.toml`。
 
-桌面窗口必须支持自由缩放。`pure-studio` 只声明首选窗口尺寸，不把 UI 绑定到固定宽高；设置页内容跟随窗口尺寸自适应。Provider 标签页在常规桌面宽度使用单栏 provider 卡片列表，卡片内部承载摘要、操作和展开编辑内容；在窄窗口下保持单栏滚动并压缩卡片元信息，避免表格和编辑区域被裁剪。聊天状态栏在窄窗口下保留左侧高频控制，并把右侧只读状态按断点收入更多菜单。
+桌面窗口必须支持自由缩放。`pure-studio-flutter` 只声明首选窗口尺寸，不把 UI 绑定到固定宽高；设置页内容跟随窗口尺寸自适应。Provider 标签页在常规桌面宽度使用单栏 provider 卡片列表，卡片内部承载摘要、操作和展开编辑内容；在窄窗口下保持单栏滚动并压缩卡片元信息，避免表格和编辑区域被裁剪。聊天状态栏在窄窗口下保留左侧高频控制，并把右侧只读状态按断点收入更多菜单。
 
-为了支持设计验证，`pure-studio` 的 React 页面应支持 Vite dev server 中的 fixture 状态预览。Provider 设置页的本地预览入口固定为：
+为了支持设计验证，`pure-studio-flutter` 应通过 widget test 和 Windows 运行态截图验证设置页 fixture 状态。Provider 设置页的本地验证入口固定为：
 
 ```powershell
-npm --prefix code/pure-studio run dev
+cd code/pure-studio-flutter
+flutter test
+flutter run -d windows
 ```
 
-Vite 预览只用于布局和视觉对照，最终应用行为仍以 Tauri 运行结果为准。
+widget test 只用于布局和状态回归，最终应用行为仍以 Flutter Windows 运行结果为准。
 
 聊天界面应展示 agent 活动面板，信息来自 Studio SQLite 中的 `agent_events` 和当前实时事件流。面板只展示路径、角色、状态、任务摘要、最终摘要或错误，不展示子代理完整推理流。
 
@@ -415,6 +417,6 @@ Studio 交互状态统一保存在 SQLite `interactions` 表。工具审批、`r
 
 配置允许持久化明文 `bearer_token`，但这会把 API token 直接写入 `~/.pure/config.toml`。当前运行时只使用配置中保存的 `bearer_token` 作为 provider API key。
 
-schema v4 不再保留 `env_key`、`auth_command` 或 `env_http_headers` 字段。`pure-studio` 设置页按用户确认会把输入的 API key 明文写入对应 provider 的 `bearer_token`。后续版本可以增加系统凭据库模式，但当前运行时不从环境变量读取 provider key。
+schema v4 不再保留 `env_key`、`auth_command` 或 `env_http_headers` 字段。`pure-studio-flutter` 设置页按用户确认会把输入的 API key 明文写入对应 provider 的 `bearer_token`。后续版本可以增加系统凭据库模式，但当前运行时不从环境变量读取 provider key。
 
 MCP stdio server 的 `env` 会按配置原样传给子进程，可能包含明文凭据。Streamable HTTP 的 `bearer_token_env_var` 只保存环境变量名，运行时从 Pure 进程环境读取对应 token 并构造 Authorization header。

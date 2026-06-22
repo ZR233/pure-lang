@@ -4,8 +4,8 @@
 
 ## Crate 命名
 
-- 所有 crate 名称以 `pl-` 为前缀（如 `pl-core`、`pl-tool`、`pl-agent`）
-- Slint 桌面二进制 crate 例外：`pure-studio`
+- 所有 Rust crate 名称以 `pl-` 为前缀（如 `pl-core`、`pl-model`、`pl-studio-bridge`）
+- Flutter app 使用 Dart package 命名 `pure_studio_flutter`，不作为 Cargo crate 参与命名规则。
 
 ## 异步 Trait（禁止 `#[async_trait]`）
 

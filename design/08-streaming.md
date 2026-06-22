@@ -2,7 +2,7 @@
 
 ## 8.1 统一 Message/Part 层
 
-`AgentEvent` 与 `TracePart` 定义在内部 `pl-trace` crate，是核心 turn 与 provider/tool 之间的内部输出通道。`pl-protocol` 只承载 Studio wire DTO 与跨 crate 公共状态类型，不再导出 trace part 或 raw agent event。Studio 对外只消费 `StudioEventEnvelope`，其中对话变化以 opencode 式 `StudioMessage` / `StudioPart` 表达；`TracePart` 只能作为 core/provider 内部诊断输入，不得作为 Studio wire、Tauri DTO 或前端事实源。
+`AgentEvent` 与 `TracePart` 定义在内部 `pl-trace` crate，是核心 turn 与 provider/tool 之间的内部输出通道。`pl-protocol` 只承载 Studio wire DTO 与跨 crate 公共状态类型，不再导出 trace part 或 raw agent event。Studio 对外只消费 `StudioEventEnvelope`，其中对话变化以 opencode 式 `StudioMessage` / `StudioPart` 表达；`TracePart` 只能作为 core/provider 内部诊断输入，不得作为 Studio wire、桥接 DTO 或前端事实源。
 
 实时对话协议固定为：
 
@@ -57,16 +57,12 @@ pl-model provider
   → pl-trace AgentEventSender / TraceRecorder 内部事件
   → pl-core StudioRuntime::drain_agent_events
   → StudioEventRuntime 分配 durable sequence、规范化 payload、持久化 message/part snapshot + projection、广播 snapshot/live delta
-  → Tauri studio-runtime-event
-  → Solid Studio event reducer
-
-pl-core StudioEventRuntime
   → pl-studio-bridge subscribeSessionEvents(sessionId)
   → FRB Stream<BridgeEventEnvelope>
   → Flutter Riverpod Studio event reducer
 ```
 
-`pure-studio` 不直接订阅 `AgentEventReceiver`，也不依赖内部 `pl-trace` crate。raw `AgentEvent` 到 typed Studio event 的映射在 `pl-core` 内完成；Tauri bridge 只转发已经规范化的 `StudioEventEnvelope`。前端已迁移为 Solid/Vite，使用 opencode app 风格的 store 与 timeline row projection；event reducer 按事件 kind 更新当前或后台 session view：
+`pure-studio-flutter` 不直接订阅 `AgentEventReceiver`，也不依赖内部 `pl-trace` crate。raw `AgentEvent` 到 typed Studio event 的映射在 `pl-core` 内完成；`pl-studio-bridge` 只转发已经规范化的 `StudioEventEnvelope`。Flutter 端使用 opencode app 风格的 store 与 timeline row projection；event reducer 按事件 kind 更新当前或后台 session view：
 
 - `messageUpdated` upsert 完整 message snapshot。
 - `messagePartUpdated` upsert 完整 part snapshot，并清空同 part 的 delta overlay。
@@ -75,13 +71,14 @@ pl-core StudioEventRuntime
 - `interactionChanged` 更新 footer 交互状态。
 - `agentChanged` / `agentTimelineChanged` 分别更新 latest snapshot 与 append-only 协作事件。
 - `sessionRuntimeChanged`、`skillActivated`、`mcpHealthChanged`、`lspHealthChanged` 即时更新状态栏。
+- `sessionListChanged` 是会话元状态的事实事件，payload 必须包含 `projectId` 和该项目最新 root `sessions`。创建会话、归档会话、归档项目、切换 session mode、Plan 实施把当前 session 切回 `auto` 等会话列表或会话摘要变化，都必须在持久写入后广播该事件；命令返回值只作为请求确认或冷启动 snapshot，不作为 UI 唯一刷新路径。
 - `sessionHandoffChanged` 仅作为 legacy 事件保留；Plan 实施在当前 `sessionId` 内启动新 turn，不再依赖 handoff target child session 展示实施过程。`sessionListChanged` 只驱动 root 会话列表可见性，legacy child/archived session 不计入 root session 列表。
 
 `TextDelta`、`ThinkingDelta`、`ToolCallDelta`、`ToolCallComplete` 不再是 Studio 的协议或兼容入口。
 
 ## 8.2.1 Flutter/FRB 订阅边界
 
-Flutter 端不使用 Tauri `studio-runtime-event`。`pl-studio-bridge` 从 `StudioEventRuntime` 创建两类 stream：
+Flutter 端通过 `pl-studio-bridge` 从 `StudioEventRuntime` 创建两类 stream：
 
 - `subscribeSessionEvents(sessionId)`：会话级高频流，包含该会话的 `messageUpdated`、`messagePartUpdated`、`messagePartDelta`、`turnChanged`、`interactionChanged`、`sessionRuntimeChanged`、`agentChanged` 和 `agentTimelineChanged`。
 - `subscribeGlobalEvents()`：全局低频流，包含项目/会话列表变化、配置变化、Provider usage、MCP/LSP health、全局 stale 和 runtime lifecycle 变化。
@@ -114,14 +111,15 @@ Auto 与 Plan Mode 下模型可见输出优先使用显式标签：`<commentary>
 
 部分 OpenAI-compatible Chat provider 会把带可见标签的输出放入 `reasoning_content`。accumulator 必须保留这部分原始内容作为 thinking/reasoning，同时只把其中显式 `<commentary>`、`<final>`、`<proposed_plan>` 标签段投影到可见 timeline；无标签 `reasoning_content` 不得变成 assistant 正文或 plan。
 
-计划的采纳与实施状态不改变 `plan` part 本身，而是通过 `StudioEventKind::PlanLifecycleChanged` 写入 durable `studio_events` 并广播。事件包含 `planId`、`state`、可选 `turnId`、可选 `reason` 和 `updatedAt`；Studio 从 durable events 中按 `planId` 折叠 latest plan state。Plan turn 完成后需要用户确认实施时，后端创建 `InteractionKind::PlanConfirmation`，前端不再从历史 timeline 自行恢复旧确认 composer。确认 resolution 固定为 `implementFreshContext | continuePlanning | dismiss`；`continuePlanning` 的 `content` 是确认 composer 同次提交的用户补充内容，resolution 成功后由前端立即作为普通 prompt 发送；`implementFreshContext` 保留 wire 名称但不再创建 fresh session，后端必须在当前 session 内解决 interaction、广播 `accepted/implementing`，并用同一 `sessionId` 启动实施 turn。实施 turn 的实时 `turnChanged/messageUpdated/messagePartUpdated/messagePartDelta/sessionRuntimeChanged` 直接更新当前会话，不能通过 `sessionHandoffChanged` 切换目标会话。
+计划的采纳与实施状态不改变 `plan` part 本身，而是通过 `StudioEventKind::PlanLifecycleChanged` 写入 durable `studio_events` 并广播。事件包含 `planId`、`state`、可选 `turnId`、可选 `reason` 和 `updatedAt`；Studio 从 durable events 中按 `planId` 折叠 latest plan state。Plan turn 完成后需要用户确认实施时，后端创建 `InteractionKind::PlanConfirmation`，前端不再从历史 timeline 自行恢复旧确认 composer。确认 resolution 固定为 `implementFreshContext | continuePlanning | dismiss`；`continuePlanning` 的 `content` 是确认 composer 同次提交的用户补充内容，resolution 成功后由前端立即作为普通 prompt 发送；`implementFreshContext` 保留 wire 名称但不再创建 fresh session，后端必须在当前 session 内解决 interaction、把当前 session mode 持久切换为 `auto`、广播 `accepted/implementing`，并用同一 `sessionId` 启动实施 turn。前端在提交 `implementFreshContext` 后应立即把当前 session mode 乐观投影为 `auto`，避免状态栏在实施 turn 已启动时仍显示 Plan。实施 turn 的实时 `turnChanged/messageUpdated/messagePartUpdated/messagePartDelta/sessionRuntimeChanged` 直接更新当前会话，不能通过 `sessionHandoffChanged` 切换目标会话。
 
 Studio 前端的实时事件、`load_session_state` projection snapshot 和 `load_studio_events` 补拉结果必须进入同一个 StudioEvent reducer：
 
 - `load_session_state` 返回当前 `{ message, sequence }[]`、`{ part, sequence }[]` projection snapshot、非 message/part durable 状态事件与 `eventNextSequence`；前端先用 projection record 初始化 message/part state 和 per-id sequence guard，再用同一个 reducer 应用状态事件。
 - `load_studio_events(afterSequence)` 返回缺失的 canonical envelope；payload 必须与数据库中保存的 payload 完全一致。
-- `StudioMessage` / `StudioPart` 是前端 reducer 的状态事实源；timeline row 只是 selector/view model 的折叠结果，不作为 Tauri command 的主输入 DTO。
+- `StudioMessage` / `StudioPart` 是前端 reducer 的状态事实源；timeline row 只是 selector/view model 的折叠结果，不作为 bridge command 的主输入 DTO。
 - `submit_prompt` 与触发实施的 `resolve_interaction` 不返回最终 timeline；它们只返回提交成功、目标 `sessionId/turnId/cursor`。
+- `set_session_mode`、`create_session`、`archive_session` 和 Plan 实施确认必须通过 `SessionListChanged` 更新前端会话摘要；前端可以做乐观投影，但最终仍以 stream reducer 中的事件为准。
 - Plan lifecycle 与 interaction 状态均通过 `StudioEvent` 实时更新，并在 `bootstrap`、`select_session`、`load_session_state` 和 `load_studio_events` 中恢复。
 - `SkillActivated` 是 skill runtime fact 的实时通知与可追踪记录。它不渲染成普通 timeline row；Studio 收到后从后端 runtime snapshot 更新 `activeSkills`，历史恢复以结构化 session skill 表为准，而不是解析 `skill_view` 的 tool result 文本。
 - `Done` 只表示 turn 状态完成，不携带 timeline 内容；最终正文必须通过 `textChannel=final` 的 `text` part 表达。
@@ -131,7 +129,7 @@ Studio 渲染使用 opencode app 同款 timeline 框架语义：`virtua` 虚拟�
 
 流式 Markdown 使用 opencode 的 stream-safe 渲染规则。`planContent`、普通 text 和 commentary 的 live overlay 在 Flutter timeline 展示层原生直接用 `GptMarkdown` 渲染，以当前 part 累计文本作为输入，不再通过自定义兼容 renderer facade 转发。展示前只允许做轻量 agent repair，未闭合代码块、链接引用和不完整 Markdown 由 renderer 容错展示；Rust/FRB 事件协议仍只表达 message/part snapshot 与 live delta，不承担 Markdown 补全。terminal `messagePartUpdated` 到达后清除 overlay，并用完整 snapshot 重新渲染。
 
-状态栏同样是 Studio store projection 的消费者，不得另起 React 兼容层。Solid store 必须保存当前 session 的 `sessionRuntime`、`turnPhase/turnStartedAt`、`agents`、`mcpServers/activeMcpServers`、`lspServers/activeLspServers`、`providers/roles/permissionMode`，并由 typed Studio event 与 bootstrap/session snapshot 恢复。模型、reasoning effort、模式和权限控制通过现有 Tauri command 更新配置或 session mode；状态栏不得直接推断 timeline 内容来累计 token 或费用。普通 root turn 和 Plan 实施 turn 在写入最新 runtime snapshot 后必须广播 `SessionRuntimeChanged`，避免只有刷新或切换 session 后才看到 context/cost 更新。
+状态栏同样是 Studio store projection 的消费者。Flutter store 必须保存当前 session 的 `sessionRuntime`、`turnPhase/turnStartedAt`、`agents`、`mcpServers/activeMcpServers`、`lspServers/activeLspServers`、`providers/roles/permissionMode`，并由 typed Studio event 与 bootstrap/session snapshot 恢复。模型、reasoning effort、模式和权限控制通过 `pl-studio-bridge` command 更新配置或 session mode；状态栏不得直接推断 timeline 内容来累计 token 或费用。普通 root turn 和 Plan 实施 turn 在写入最新 runtime snapshot 后必须广播 `SessionRuntimeChanged`，避免只有刷新或切换 session 后才看到 context/cost 更新。Flutter 状态栏的 context 展示使用无数字圆形进度条；鼠标悬停进度条时显示具体 context token/window、百分比、总 token 和模型。费用、active skills、MCP、LSP 与 subagent 活动仍作为独立状态项保留。
 
 ## 8.3 背压与容量
 
@@ -139,19 +137,19 @@ Studio 渲染使用 opencode app 同款 timeline 框架语义：`virtua` 虚拟�
 
 高频 delta 可以在 broadcast 层 lag，但不能静默丢失 Studio 状态：每个 durable snapshot 必须先写入 `studio_events` 和 projection，再广播同一份 canonical envelope。live delta 和 `stale` 只进入实时 event stream；前端发现 sequence 缺口或收到 stale 事件时调用 `load_studio_events(sessionId, afterSequence, limit)` 补齐 durable snapshot。completed/failed snapshot 携带最终内容，历史加载不依赖实时 delta 是否完整到达前端。只要 turn 最终有 assistant 正文，最终 message/part 集合中必须存在 completed assistant `text` part；不能只把正文写到 `turn` trace item。
 
-Tauri runtime bridge 检测到底层 broadcast receiver `Lagged` 时，必须为 active session 广播 live-only `stale` 事件。`stale` 不写入 `studio_events`，只驱动前端按当前 durable cursor 补拉缺失 snapshot；补回事件仍进入同一个 reducer。
+Flutter runtime bridge 检测到底层 broadcast receiver `Lagged` 时，必须为 active session 广播 live-only `stale` 事件。`stale` 不写入 `studio_events`，只驱动前端按当前 durable cursor 补拉缺失 snapshot；补回事件仍进入同一个 reducer。
 
 实现允许把 live delta 和 stale 通知保留为内部诊断记录，但不得写入 `studio_events`。`load_session_state` 通过 message/part projection snapshot 恢复终态，并只附带非 message/part durable 状态事件；`load_studio_events` 只返回 durable snapshot 与其他状态事件。
 
 ## 8.4 事件边界
 
-事件类型属于协议层，不应包含 provider 私有结构，也不应绑定具体前端。工具审批事件只承载通用工具名、参数和审批结果，不包含 Tauri、React 或桌面端私有状态。
+事件类型属于协议层，不应包含 provider 私有结构，也不应绑定具体前端。工具审批事件只承载通用工具名、参数和审批结果，不包含桌面端私有状态。
 
 `StudioEventKind::InteractionChanged` 是审批、用户输入和计划确认的唯一实时交互事件。事件携带 `InteractionRequest`，包括 `kind`、`status`、`scope` 和类型化 payload；持久恢复以 `interactions` 表为准。`userInput` 对齐 opencode 的 `question` 工具体验：pending/running 阶段由 dock prompt 负责真实问题输入，timeline 隐藏对应 `request_user_input`/`question` tool part；resolved 后可以从 redacted tool result 渲染问题与答案摘要。`userInput` 的 resolved 事件不回传 secret 答案明文到普通 timeline 展示；答案只通过 interaction resolution 返回给等待中的工具。`planConfirmation` 同样是 dock prompt 交互，不是从 timeline plan part 自行派生的按钮。旧 `UserInputRequested` / `UserInputAnswered`、`ToolApprovalRequested`、`studio-interaction-changed` 等 sideband 不是 Studio 协议入口。
 
 agent 协作 timeline 也遵循 typed Studio 协议：`agentChanged` 更新 latest snapshot，`agentTimelineChanged` 只携带 typed spawn/interaction/wait/close lifecycle event。`bootstrap`、`select_session` 和 `load_session_state` 的 `agentEvents` 历史快照也直接返回 `StudioAgentTimelineEvent[]`，不得再暴露旧式 `kind + payload` DTO。MCP/LSP health 事件同样携带 typed `StudioMcpHealth` / `StudioLspHealth` snapshot。前端不得反序列化 raw `AgentEvent` 或健康检查 payload；内部 trace 如需保留原始事件，只能作为诊断输入，在进入 Studio wire 前完成映射。
 
-子代理内部事件不直接转发完整文本流、思考流、工具调用流或工具输出。`pl-core` 将子代理生命周期压缩为 `agent` part 和 `AgentStateChanged` snapshot，状态固定为 `queued`、`running`、`waiting`、`completed`、`errored`、`interrupted`、`shutdown`、`notFound`。`pure-studio` 持久化这些状态事件，并在聊天界面只渲染路径、状态、摘要和最终错误文本，避免把子代理内部执行细节混入父会话 timeline。
+子代理内部事件不直接转发完整文本流、思考流、工具调用流或工具输出。`pl-core` 将子代理生命周期压缩为 `agent` part 和 `AgentStateChanged` snapshot，状态固定为 `queued`、`running`、`waiting`、`completed`、`errored`、`interrupted`、`shutdown`、`notFound`。Studio 持久化这些状态事件，并在聊天界面只渲染路径、状态、摘要和最终错误文本，避免把子代理内部执行细节混入父会话 timeline。
 
 失败的子代理必须在 latest snapshot 的 `error` 字段保留可展示的失败文本。`reason` 只作为结构化分类，例如 `providerError`、`toolError`、`budgetLimited` 或 `interrupted`，不能替代 `error`。如果 provider 在子代理已有部分摘要后失败，最终状态仍必须把 provider/tool 错误写入 `error`，否则 UI 无法解释失败原因。
 
@@ -206,4 +204,4 @@ root agent 和 subagent 使用同一套 runtime usage 数据模型。每次模�
 
 Studio 状态栏必须在运行中即时反映上下文和费用。前端消费 `StudioEventKind::SessionRuntimeChanged` 中后端聚合后的运行态快照；刷新或切换 session 时用 `load_session_state` / `select_session` 的 `sessionRuntime` 恢复。`AgentRuntimeUpdated` 进入 Studio bridge 时必须先写入 agent/session runtime projection，再广播 `SessionRuntimeChanged`；turn 收尾只在本 turn 没有实时 inference runtime snapshot 时，才用最终 usage 补写 legacy root delta，避免同一轮 usage 被实时事件和收尾事件重复累计。前端不得同时按 inference item 和 turn item 重复累计费用。
 
-费用为本地估算值，使用配置中的每百万 token 单价。不同货币不做汇率转换，也不合并为单一数字。Solid 状态栏消费通用 runtime snapshot，不直接解析 provider 私有 usage 字段。
+费用为本地估算值，使用配置中的每百万 token 单价。不同货币不做汇率转换，也不合并为单一数字。Flutter 状态栏消费通用 runtime snapshot，不直接解析 provider 私有 usage 字段。

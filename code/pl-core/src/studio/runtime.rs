@@ -337,9 +337,12 @@ impl StudioRuntime {
     }
 
     pub async fn create_session(&self, project_id: &str, title: &str) -> Result<SessionRecord> {
-        self.store
+        let session = self
+            .store
             .create_session(project_id, title, CompileMode::Auto)
-            .await
+            .await?;
+        self.events.emit_session_list(project_id).await?;
+        Ok(session)
     }
 
     pub async fn archive_session(&self, session_id: String) -> Result<Option<SessionRecord>> {
@@ -350,7 +353,11 @@ impl StudioRuntime {
         self.interactions
             .cancel_session(&session_id, "session archived", emitter)
             .await?;
-        self.store.archive_session(&session_id).await
+        let archived = self.store.archive_session(&session_id).await?;
+        if let Some(session) = &archived {
+            self.events.emit_session_list(&session.project_id).await?;
+        }
+        Ok(archived)
     }
 
     pub async fn archive_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {
@@ -369,11 +376,20 @@ impl StudioRuntime {
                 .cancel_session(&session_id, "project archived", emitter)
                 .await?;
         }
-        self.store.archive_project(project_id).await
+        let archived = self.store.archive_project(project_id).await?;
+        if archived.is_some() {
+            self.events.emit_session_list(project_id).await?;
+        }
+        Ok(archived)
     }
 
     pub async fn set_session_mode(&self, session_id: &str, mode: CompileMode) -> Result<()> {
-        self.store.set_session_mode(session_id, mode).await
+        self.store.set_session_mode(session_id, mode).await?;
+        let Some(session) = self.store.read_session(session_id).await? else {
+            return Ok(());
+        };
+        self.events.emit_session_list(&session.project_id).await?;
+        Ok(())
     }
 
     pub fn set_model_role(
@@ -745,8 +761,7 @@ impl StudioRuntime {
 
         match decision {
             PlanConfirmationResolution::ImplementFreshContext => {
-                self.store
-                    .set_session_mode(&session_id, CompileMode::Auto)
+                self.set_session_mode(&session_id, CompileMode::Auto)
                     .await?;
                 self.append_plan_lifecycle_event(
                     &session_id,
