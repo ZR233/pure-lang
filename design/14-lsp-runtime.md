@@ -2,7 +2,7 @@
 
 ## 目标
 
-Pure Studio 的 LSP 支持用于给 agent 提供代码语义查询能力，并在 chat 状态栏展示当前项目可用的语言服务器。LSP runtime 只存在于本地进程内，不通过 MCP server 暴露，也不把语言服务器配置持久化到用户配置中。
+Pure Studio 的 LSP 支持用于给 agent 提供代码语义查询能力，并在 Flutter chat 状态栏展示当前项目可用的语言服务器。LSP runtime 只存在于本地进程内，不通过 MCP server 暴露，也不把语言服务器配置持久化到用户配置中。
 
 v1 只内置 `rust-analyzer`：
 
@@ -29,7 +29,7 @@ v1 只内置 `rust-analyzer`：
 - `lsp_query_*` 的 `filePath` 在 `pl-core` 中复用工具统一路径策略解析：相对路径按 `workspaceRoot` 解释，workspace-only 模式拒绝越界，交给 `pl-lsp` 前必须已经是规范化绝对路径。
 - 文件写入、patch、move/delete 成功后通知 LSP runtime 同步已打开文档。
 
-`pure-studio` 只负责展示和事件订阅：
+`pure-studio-flutter` 只负责展示和事件订阅：
 
 - `SessionRuntimeDto.activeLspServers` 表示当前项目 active 的 LSP server 名称。
 - `BootstrapDto` / `ProjectSelectionDto` 携带一次性 LSP health 快照，避免启动或切换项目时错过首个探测事件。

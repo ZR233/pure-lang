@@ -14,7 +14,9 @@ use pl_trace::{
 use tokio::sync::broadcast;
 
 use crate::studio::ids::{new_studio_event_id, unix_seconds};
-use crate::studio::{SessionHandoffRecord, StudioStore};
+use crate::studio::{
+    SessionHandoffRecord, StudioEventFilter, StudioFilteredEventReceiver, StudioStore,
+};
 
 #[derive(Clone)]
 pub struct StudioEventRuntime {
@@ -30,6 +32,18 @@ impl StudioEventRuntime {
 
     pub fn subscribe(&self) -> broadcast::Receiver<StudioEventEnvelope> {
         self.tx.subscribe()
+    }
+
+    pub fn subscribe_filtered(&self, filter: StudioEventFilter) -> StudioFilteredEventReceiver {
+        StudioFilteredEventReceiver::new(self.tx.subscribe(), filter)
+    }
+
+    pub fn subscribe_session(&self, session_id: impl Into<String>) -> StudioFilteredEventReceiver {
+        self.subscribe_filtered(StudioEventFilter::session(session_id))
+    }
+
+    pub fn subscribe_global(&self) -> StudioFilteredEventReceiver {
+        self.subscribe_filtered(StudioEventFilter::global())
     }
 
     pub async fn emit(
@@ -154,6 +168,26 @@ impl StudioEventRuntime {
                     plan_id: Some(handoff.plan_id.clone()),
                     updated_at: handoff.updated_at,
                 },
+            },
+        )
+        .await
+    }
+
+    pub async fn emit_session_list(&self, project_id: &str) -> Result<StudioEventEnvelope> {
+        let sessions = self
+            .store
+            .list_sessions(project_id)
+            .await?
+            .into_iter()
+            .map(studio_session_summary)
+            .collect();
+        self.emit(
+            Some(project_id.to_string()),
+            None,
+            None,
+            StudioEventKind::SessionListChanged {
+                project_id: project_id.to_string(),
+                sessions,
             },
         )
         .await

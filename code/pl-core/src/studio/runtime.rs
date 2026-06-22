@@ -1,29 +1,42 @@
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use pl_protocol::{
-    ContentPart, ImageSource, InteractionKind, InteractionPayload, InteractionRequest,
-    InteractionScope, InteractionStatus, MessageContent, PlanLifecycleEvent, PlanLifecycleState,
-    StudioAgentSnapshot, StudioEventKind, StudioRuntimeUsage, StudioSessionRuntime,
+    ContentPart, ImageSource, InteractionChangedEvent, InteractionKind, InteractionPayload,
+    InteractionRequest, InteractionResolution, InteractionScope, InteractionStatus, MessageContent,
+    PlanConfirmationResolution, PlanLifecycleEvent, PlanLifecycleState, StudioAgentSnapshot,
+    StudioEventKind, StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart,
+    StudioPartStatus, StudioPartType, StudioRuntimeUsage, StudioSessionRuntime, StudioTextChannel,
+    StudioTurnStatus,
 };
 use pl_trace::{AgentEvent, TraceEvent, TraceEventKind, TracePart, TracePartKind};
+use tokio::sync::Mutex;
 use tokio::sync::broadcast::error::RecvError;
+use tokio_util::sync::CancellationToken;
 
-use crate::config::{ConfigStore, ModelRole};
+use crate::config::{ConfigStore, ModelRole, PureConfig, ReasoningEffort, RoleConfig};
 use crate::mcp::McpRuntimeRegistry;
 use crate::skill::SkillCatalog;
 use crate::studio::StudioStore;
-use crate::studio::ids::unix_seconds;
+use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::mappers::default_session_runtime_record;
 use crate::studio::records::{
     AgentSnapshotRecord, ProjectRecord, SessionRecord, SessionRuntimeRecord, StudioPromptOutcome,
 };
-use crate::studio::{InteractionEmitter, InteractionRuntime, StudioEventRuntime};
+use crate::studio::{
+    InteractionEmitter, InteractionRuntime, StudioEventRuntime, StudioRuntimeSnapshot,
+    StudioRuntimeState, StudioRuntimeStatus, resolution_matches_kind,
+};
 use crate::{
     CompileMode, CoreSession, InstructionAssembler, InstructionAssemblyRequest,
-    InstructionSnapshot, InteractionCallback, PureCore, TraceRecorder, TurnBudget, TurnOptions,
-    TurnRequest, TurnResultStatus, load_workspace_instructions, resolve_workspace_root,
+    InstructionSnapshot, InteractionCallback, PureCore, TraceRecorder, TurnAbortReason, TurnBudget,
+    TurnOptions, TurnRequest, TurnResultStatus, load_workspace_instructions,
+    resolve_workspace_root,
 };
+
+const IMPLEMENT_PLAN_CURRENT_SESSION_PREFIX: &str = "A previous agent produced the plan below to accomplish the user's task. Implement the plan in the current session. Treat the plan as the source of user intent, re-read files as needed, and carry the work through implementation and verification.";
 
 const SELF_LEARNING_REVIEW_PROMPT: &str = r#"你是 Pure-Lang 项目 skills 自学习 reviewer。
 
@@ -50,6 +63,95 @@ pub struct RunPromptRequest {
     pub options: TurnOptions,
 }
 
+/// Studio UI 提交 prompt 的请求。
+///
+/// 这是面向桌面端 runtime 的高层 API，会创建 turn、发出用户消息快照，并在后台
+/// 独立运行核心 turn。调用方不需要自己管理 cancellation token。
+pub struct StudioSubmitPromptRequest {
+    pub session_id: String,
+    pub prompt: String,
+    pub attachment_ids: Vec<String>,
+    pub options: StudioSubmitPromptOptions,
+}
+
+/// Studio UI 提交 prompt 的附加选项。
+///
+/// 选项描述用户消息如何进入 timeline，以及是否把 turn 关联到计划实施生命周期。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StudioSubmitPromptOptions {
+    pub user_prompt: StudioUserPromptPresentation,
+    pub lifecycle: Option<StudioPlanImplementationLifecycle>,
+}
+
+/// 用户 prompt 在 Studio timeline 中的展示方式。
+///
+/// 常规用户输入用 `Normal`；runtime 合成的 follow-up 可以选择可见标签，
+/// 或标记为 ignored，避免污染长期会话语义。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum StudioUserPromptPresentation {
+    #[default]
+    Normal,
+    SyntheticVisible {
+        visible_prompt: String,
+    },
+    SyntheticIgnored {
+        visible_prompt: String,
+    },
+}
+
+impl StudioUserPromptPresentation {
+    fn visible_prompt<'a>(&'a self, prompt: &'a str) -> &'a str {
+        match self {
+            Self::Normal => prompt,
+            Self::SyntheticVisible { visible_prompt }
+            | Self::SyntheticIgnored { visible_prompt } => visible_prompt.as_str(),
+        }
+    }
+
+    fn is_synthetic(&self) -> bool {
+        matches!(
+            self,
+            Self::SyntheticVisible { .. } | Self::SyntheticIgnored { .. }
+        )
+    }
+
+    fn is_ignored(&self) -> bool {
+        matches!(self, Self::SyntheticIgnored { .. })
+    }
+}
+
+/// 计划实施 turn 的生命周期关联。
+///
+/// runtime 在实施 turn 完成、失败或中断时，会用此信息补充计划 lifecycle event。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StudioPlanImplementationLifecycle {
+    pub session_id: String,
+    pub plan_id: String,
+}
+
+/// Studio UI 提交 prompt 后立即得到的后台 turn 信息。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StudioSubmitPromptResponse {
+    pub session_id: String,
+    pub turn_id: String,
+    pub cursor: u64,
+}
+
+/// Studio UI 请求停止当前会话 turn 后的结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StudioStopPromptResponse {
+    pub session_id: String,
+    pub stopped: bool,
+}
+
+/// Studio UI resolve interaction 后的核心响应。
+#[derive(Debug, Clone, PartialEq)]
+pub struct StudioResolveInteractionResponse {
+    pub session_id: String,
+    pub interaction: InteractionRequest,
+    pub sessions: Vec<SessionRecord>,
+}
+
 #[derive(Clone)]
 pub struct StudioRuntime {
     store: StudioStore,
@@ -58,6 +160,8 @@ pub struct StudioRuntime {
     lsp_runtime: pl_lsp::LspRuntimeRegistry,
     interactions: InteractionRuntime,
     events: StudioEventRuntime,
+    runtime_state: StudioRuntimeState,
+    active_turns: Arc<Mutex<HashMap<String, CancellationToken>>>,
 }
 
 impl StudioRuntime {
@@ -70,11 +174,10 @@ impl StudioRuntime {
             config_store: ConfigStore::default_app()?,
             mcp_runtime: McpRuntimeRegistry::new(),
             lsp_runtime: pl_lsp::LspRuntimeRegistry::new(),
+            runtime_state: StudioRuntimeState::new(),
+            active_turns: Arc::new(Mutex::new(HashMap::new())),
         };
-        let _ = runtime
-            .store
-            .cancel_unfinished_turns("application restarted")
-            .await?;
+        let _ = runtime.initialize_runtime().await?;
         Ok(runtime)
     }
 
@@ -86,6 +189,8 @@ impl StudioRuntime {
             config_store,
             mcp_runtime: McpRuntimeRegistry::new(),
             lsp_runtime: pl_lsp::LspRuntimeRegistry::new(),
+            runtime_state: StudioRuntimeState::ready(),
+            active_turns: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -113,9 +218,75 @@ impl StudioRuntime {
         &self.lsp_runtime
     }
 
-    pub async fn shutdown(&self) {
+    pub fn runtime_snapshot(&self) -> StudioRuntimeSnapshot {
+        self.runtime_state.snapshot()
+    }
+
+    pub async fn initialize_runtime(&self) -> Result<StudioRuntimeSnapshot> {
+        if matches!(self.runtime_snapshot().status, StudioRuntimeStatus::Ready) {
+            return Ok(self.runtime_snapshot());
+        }
+        let _ = self
+            .runtime_state
+            .transition(StudioRuntimeStatus::Initializing, None)?;
+        match self
+            .store
+            .cancel_unfinished_turns("application restarted")
+            .await
+        {
+            Ok(_) => self
+                .runtime_state
+                .transition(StudioRuntimeStatus::Ready, None),
+            Err(error) => {
+                let message = format!("{error:#}");
+                let _ = self
+                    .runtime_state
+                    .transition(StudioRuntimeStatus::Failed, Some(message));
+                Err(error)
+            }
+        }
+    }
+
+    pub async fn start_runtime(&self) -> Result<StudioRuntimeSnapshot> {
+        if !matches!(self.runtime_snapshot().status, StudioRuntimeStatus::Ready) {
+            let _ = self.initialize_runtime().await?;
+        }
+        if let Err(error) = self.reconcile_mcp_runtime().await {
+            let message = format!("{error:#}");
+            let _ = self
+                .runtime_state
+                .transition(StudioRuntimeStatus::Failed, Some(message));
+            return Err(error);
+        }
+        Ok(self.runtime_snapshot())
+    }
+
+    pub async fn shutdown_runtime(&self) -> Result<StudioRuntimeSnapshot> {
+        let status = self.runtime_snapshot().status;
+        if matches!(
+            status,
+            StudioRuntimeStatus::Stopped | StudioRuntimeStatus::Failed
+        ) {
+            return Ok(self.runtime_snapshot());
+        }
+        let _ = self
+            .runtime_state
+            .transition(StudioRuntimeStatus::ShuttingDown, None)?;
+        {
+            let mut active_turns = self.active_turns.lock().await;
+            for token in active_turns.values() {
+                token.cancel();
+            }
+            active_turns.clear();
+        }
         self.mcp_runtime.shutdown().await;
         self.lsp_runtime.shutdown().await;
+        self.runtime_state
+            .transition(StudioRuntimeStatus::Stopped, None)
+    }
+
+    pub async fn shutdown(&self) {
+        let _ = self.shutdown_runtime().await;
     }
 
     pub async fn reconcile_mcp_runtime(&self) -> Result<()> {
@@ -166,9 +337,125 @@ impl StudioRuntime {
     }
 
     pub async fn create_session(&self, project_id: &str, title: &str) -> Result<SessionRecord> {
-        self.store
+        let session = self
+            .store
             .create_session(project_id, title, CompileMode::Auto)
-            .await
+            .await?;
+        self.events.emit_session_list(project_id).await?;
+        Ok(session)
+    }
+
+    pub async fn archive_session(&self, session_id: String) -> Result<Option<SessionRecord>> {
+        if self.active_turns.lock().await.contains_key(&session_id) {
+            bail!("session has an active turn");
+        }
+        let emitter = self.interaction_emitter(session_id.clone());
+        self.interactions
+            .cancel_session(&session_id, "session archived", emitter)
+            .await?;
+        let archived = self.store.archive_session(&session_id).await?;
+        if let Some(session) = &archived {
+            self.events.emit_session_list(&session.project_id).await?;
+        }
+        Ok(archived)
+    }
+
+    pub async fn archive_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {
+        let session_ids = self.store.list_project_session_ids(project_id).await?;
+        {
+            let active_turns = self.active_turns.lock().await;
+            for session_id in &session_ids {
+                if active_turns.contains_key(session_id) {
+                    bail!("project has an active turn");
+                }
+            }
+        }
+        for session_id in session_ids {
+            let emitter = self.interaction_emitter(session_id.clone());
+            self.interactions
+                .cancel_session(&session_id, "project archived", emitter)
+                .await?;
+        }
+        let archived = self.store.archive_project(project_id).await?;
+        if archived.is_some() {
+            self.events.emit_session_list(project_id).await?;
+        }
+        Ok(archived)
+    }
+
+    pub async fn set_session_mode(&self, session_id: &str, mode: CompileMode) -> Result<()> {
+        self.store.set_session_mode(session_id, mode).await?;
+        let Some(session) = self.store.read_session(session_id).await? else {
+            return Ok(());
+        };
+        self.events.emit_session_list(&session.project_id).await?;
+        Ok(())
+    }
+
+    pub fn set_model_role(
+        &self,
+        role: ModelRole,
+        provider_id: &str,
+        model_slug: &str,
+        effort: Option<&str>,
+    ) -> Result<PureConfig> {
+        let provider_id = provider_id.trim();
+        let model_slug = model_slug.trim();
+        let mut config = self.config_store.load_or_default()?;
+        let resolved_effort = {
+            let provider = config.providers.get(provider_id).with_context(|| {
+                format!(
+                    "role {} references missing provider: {provider_id}",
+                    role.key()
+                )
+            })?;
+            let model = provider
+                .models
+                .iter()
+                .find(|model| model.slug == model_slug)
+                .with_context(|| {
+                    format!(
+                        "role {} references missing model: {provider_id}.{model_slug}",
+                        role.key()
+                    )
+                })?;
+            match effort.map(str::trim).filter(|value| !value.is_empty()) {
+                Some(value) => {
+                    if !model
+                        .supported_efforts()
+                        .iter()
+                        .any(|candidate| candidate == value)
+                    {
+                        bail!(
+                            "role {} uses unsupported effort '{}' for model {provider_id}.{model_slug}",
+                            role.key(),
+                            value
+                        );
+                    }
+                    value.to_string()
+                }
+                None => model.default_effort().with_context(|| {
+                    format!(
+                        "role {} model {provider_id}.{model_slug} must define effort",
+                        role.key()
+                    )
+                })?,
+            }
+        };
+        let next_role = RoleConfig {
+            provider: provider_id.to_string(),
+            model: model_slug.to_string(),
+            effort: ReasoningEffort::new(resolved_effort),
+        };
+        match role {
+            ModelRole::Explorer => config.roles.explorer = next_role,
+            ModelRole::Planner => config.roles.planner = next_role,
+            ModelRole::Executor => config.roles.executor = next_role,
+            ModelRole::Reviewer => config.roles.reviewer = next_role,
+        }
+        config.validate()?;
+        self.config_store.save(&config)?;
+        Ok(config)
     }
 
     pub async fn session_runtime(&self, session_id: &str) -> Result<SessionRuntimeRecord> {
@@ -201,7 +488,512 @@ impl StudioRuntime {
         Ok(SkillCatalog::discover(&workspace_root, &config.skills)?)
     }
 
+    pub async fn submit_prompt(
+        &self,
+        request: StudioSubmitPromptRequest,
+    ) -> Result<StudioSubmitPromptResponse> {
+        let StudioSubmitPromptRequest {
+            session_id,
+            prompt,
+            attachment_ids,
+            options,
+        } = request;
+        if prompt.trim().is_empty() && attachment_ids.is_empty() {
+            bail!("prompt is empty");
+        }
+        let turn_id = new_id("turn");
+        let cancellation_token = CancellationToken::new();
+        {
+            let mut active_turns = self.active_turns.lock().await;
+            if active_turns.contains_key(&session_id) {
+                bail!("session already has an active turn");
+            }
+            active_turns.insert(session_id.clone(), cancellation_token.clone());
+        }
+        let _ = self
+            .runtime_state
+            .mark_active_turn(session_id.clone(), turn_id.clone());
+        let submit_result = async {
+            self.events
+                .emit_turn(&session_id, &turn_id, StudioTurnStatus::Queued, None)
+                .await?;
+            self.events
+                .emit_turn(
+                    &session_id,
+                    &turn_id,
+                    StudioTurnStatus::ContextLoading,
+                    None,
+                )
+                .await?;
+            self.emit_user_prompt_snapshots(
+                &session_id,
+                &turn_id,
+                &prompt,
+                &attachment_ids,
+                &options,
+            )
+            .await?;
+            self.store.next_studio_event_sequence(&session_id).await
+        }
+        .await;
+        let cursor = match submit_result {
+            Ok(cursor) => cursor as u64,
+            Err(error) => {
+                self.active_turns.lock().await.remove(&session_id);
+                let _ = self.runtime_state.clear_active_turn(&session_id);
+                return Err(error);
+            }
+        };
+        let run_runtime = self.clone();
+        let run_session_id = session_id.clone();
+        let run_turn_id = turn_id.clone();
+        tokio::spawn(async move {
+            run_runtime
+                .run_prompt_background(
+                    run_session_id,
+                    run_turn_id,
+                    prompt,
+                    attachment_ids,
+                    cancellation_token,
+                    options.lifecycle,
+                )
+                .await;
+        });
+        Ok(StudioSubmitPromptResponse {
+            session_id,
+            turn_id,
+            cursor,
+        })
+    }
+
+    pub async fn stop_prompt(&self, session_id: String) -> Result<StudioStopPromptResponse> {
+        let token = self.active_turns.lock().await.get(&session_id).cloned();
+        let Some(token) = token else {
+            return Ok(StudioStopPromptResponse {
+                session_id,
+                stopped: false,
+            });
+        };
+        token.cancel();
+        let emitter = self.interaction_emitter(session_id.clone());
+        self.interactions
+            .cancel_session(&session_id, "interrupted by user", emitter)
+            .await?;
+        Ok(StudioStopPromptResponse {
+            session_id,
+            stopped: true,
+        })
+    }
+
+    pub async fn resolve_interaction(
+        &self,
+        interaction_id: String,
+        resolution: InteractionResolution,
+    ) -> Result<StudioResolveInteractionResponse> {
+        let current = self
+            .store
+            .read_interaction(&interaction_id)
+            .await?
+            .context("interaction not found")?;
+        let session_id = current.scope.session_id.clone();
+        if !resolution_matches_kind(&current.kind, &resolution) {
+            bail!("interaction resolution kind does not match interaction");
+        }
+        let emitter = self.interaction_emitter(session_id.clone());
+
+        if current.kind == InteractionKind::PlanConfirmation {
+            return self
+                .resolve_plan_confirmation(interaction_id, current, resolution, emitter)
+                .await;
+        }
+
+        let resolved = self
+            .interactions
+            .resolve(&interaction_id, resolution, emitter)
+            .await?;
+        Ok(StudioResolveInteractionResponse {
+            session_id,
+            interaction: resolved,
+            sessions: Vec::new(),
+        })
+    }
+
     pub async fn run_prompt(&self, request: RunPromptRequest) -> Result<StudioPromptOutcome> {
+        let session_id = request.session_id.clone();
+        let turn_id = request.turn_id.clone();
+        let _ = self
+            .runtime_state
+            .mark_active_turn(session_id.clone(), turn_id);
+        let outcome = self.run_prompt_inner(request).await;
+        let _ = self.runtime_state.clear_active_turn(&session_id);
+        outcome
+    }
+
+    async fn run_prompt_background(
+        &self,
+        session_id: String,
+        turn_id: String,
+        prompt: String,
+        attachment_ids: Vec<String>,
+        cancellation_token: CancellationToken,
+        lifecycle: Option<StudioPlanImplementationLifecycle>,
+    ) {
+        let _ = self
+            .events
+            .emit_turn(
+                &session_id,
+                &turn_id,
+                StudioTurnStatus::WaitingForModel,
+                None,
+            )
+            .await;
+        let emitter = self.interaction_emitter(session_id.clone());
+        let interaction_callback = self
+            .interactions
+            .callback(session_id.clone(), emitter.clone());
+        let options = TurnOptions::default()
+            .with_cancellation(cancellation_token)
+            .with_interaction_callback(interaction_callback.clone());
+        let result = self
+            .run_prompt(RunPromptRequest {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+                prompt,
+                attachment_ids,
+                interaction_callback,
+                interaction_emitter: emitter.clone(),
+                options,
+            })
+            .await;
+        self.active_turns.lock().await.remove(&session_id);
+        let _ = self
+            .interactions
+            .cancel_transient_interactions(&session_id, "turn completed", emitter)
+            .await;
+        match result {
+            Ok(outcome) => {
+                self.emit_turn_completion(&session_id, &turn_id, &outcome)
+                    .await;
+                if let Some(lifecycle) = lifecycle {
+                    let (state, reason) = match outcome.result.status {
+                        TurnResultStatus::Completed => (PlanLifecycleState::Implemented, None),
+                        TurnResultStatus::Aborted => (
+                            PlanLifecycleState::ImplementationFailed,
+                            outcome
+                                .result
+                                .abort_reason
+                                .map(|reason| reason.as_str().to_string())
+                                .or_else(|| Some("turn aborted".to_string())),
+                        ),
+                        TurnResultStatus::Errored => (
+                            PlanLifecycleState::ImplementationFailed,
+                            outcome
+                                .result
+                                .error
+                                .or_else(|| Some("turn errored".to_string())),
+                        ),
+                    };
+                    let _ = self
+                        .append_plan_lifecycle_event(
+                            &lifecycle.session_id,
+                            &lifecycle.plan_id,
+                            state,
+                            Some(turn_id),
+                            reason,
+                        )
+                        .await;
+                }
+            }
+            Err(error) => {
+                let _ = self
+                    .events
+                    .emit_turn(
+                        &session_id,
+                        &turn_id,
+                        StudioTurnStatus::Failed,
+                        Some(format!("{error:#}")),
+                    )
+                    .await;
+            }
+        }
+    }
+
+    async fn resolve_plan_confirmation(
+        &self,
+        interaction_id: String,
+        current: InteractionRequest,
+        resolution: InteractionResolution,
+        emitter: InteractionEmitter,
+    ) -> Result<StudioResolveInteractionResponse> {
+        let session_id = current.scope.session_id.clone();
+        let InteractionPayload::PlanConfirmation { plan_id, content } = &current.payload else {
+            unreachable!("plan confirmation resolution was validated before resolving");
+        };
+        let InteractionResolution::PlanConfirmation {
+            decision,
+            content: resolution_content,
+            reason,
+        } = resolution
+        else {
+            unreachable!("resolution kind was validated before resolving");
+        };
+
+        if current.status != InteractionStatus::Pending {
+            return Ok(StudioResolveInteractionResponse {
+                session_id,
+                interaction: current,
+                sessions: Vec::new(),
+            });
+        }
+
+        let resolved = self
+            .interactions
+            .resolve(
+                &interaction_id,
+                InteractionResolution::PlanConfirmation {
+                    decision: decision.clone(),
+                    content: resolution_content.clone(),
+                    reason: reason.clone(),
+                },
+                emitter,
+            )
+            .await?;
+
+        match decision {
+            PlanConfirmationResolution::ImplementFreshContext => {
+                self.set_session_mode(&session_id, CompileMode::Auto)
+                    .await?;
+                self.append_plan_lifecycle_event(
+                    &session_id,
+                    plan_id,
+                    PlanLifecycleState::Accepted,
+                    None,
+                    reason.filter(|value| !value.trim().is_empty()),
+                )
+                .await?;
+                self.append_plan_lifecycle_event(
+                    &session_id,
+                    plan_id,
+                    PlanLifecycleState::Implementing,
+                    None,
+                    None,
+                )
+                .await?;
+                let plan_content = resolution_content
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or_else(|| content.clone())
+                    .trim()
+                    .to_string();
+                if plan_content.is_empty() {
+                    bail!("plan content is empty");
+                }
+                let prompt = format!("{IMPLEMENT_PLAN_CURRENT_SESSION_PREFIX}\n\n{plan_content}");
+                let _ = self
+                    .submit_prompt(StudioSubmitPromptRequest {
+                        session_id: session_id.clone(),
+                        prompt,
+                        attachment_ids: Vec::new(),
+                        options: StudioSubmitPromptOptions {
+                            user_prompt: StudioUserPromptPresentation::SyntheticIgnored {
+                                visible_prompt: "实施计划".to_string(),
+                            },
+                            lifecycle: Some(StudioPlanImplementationLifecycle {
+                                session_id: session_id.clone(),
+                                plan_id: plan_id.clone(),
+                            }),
+                        },
+                    })
+                    .await?;
+            }
+            PlanConfirmationResolution::ContinuePlanning => {
+                self.append_plan_lifecycle_event(
+                    &session_id,
+                    plan_id,
+                    PlanLifecycleState::ContinuedPlanning,
+                    None,
+                    reason.or(resolution_content),
+                )
+                .await?;
+            }
+            PlanConfirmationResolution::Dismiss => {
+                self.append_plan_lifecycle_event(
+                    &session_id,
+                    plan_id,
+                    PlanLifecycleState::Dismissed,
+                    None,
+                    reason,
+                )
+                .await?;
+            }
+        }
+
+        let sessions = if let Some(session) = self.store.read_session(&session_id).await? {
+            self.store.list_sessions(&session.project_id).await?
+        } else {
+            Vec::new()
+        };
+
+        Ok(StudioResolveInteractionResponse {
+            session_id,
+            interaction: resolved,
+            sessions,
+        })
+    }
+
+    async fn emit_user_prompt_snapshots(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        prompt: &str,
+        attachment_ids: &[String],
+        options: &StudioSubmitPromptOptions,
+    ) -> Result<()> {
+        let now = unix_seconds();
+        let message_id = format!("{turn_id}:user");
+        let part_id = format!("{turn_id}:user-text");
+        let attachments = self
+            .store
+            .load_attachments(session_id, attachment_ids)
+            .await?
+            .iter()
+            .map(crate::studio::studio_attachment)
+            .collect::<Vec<_>>();
+        let message = StudioMessage {
+            message_id: message_id.clone(),
+            session_id: session_id.to_string(),
+            turn_id: turn_id.to_string(),
+            role: StudioMessageRole::User,
+            status: StudioMessageStatus::Completed,
+            created_at: now,
+            updated_at: now,
+            completed_at: Some(now),
+            error: None,
+            metadata: if options.user_prompt.is_synthetic() || options.user_prompt.is_ignored() {
+                serde_json::json!({
+                    "synthetic": options.user_prompt.is_synthetic(),
+                    "ignored": options.user_prompt.is_ignored(),
+                })
+            } else {
+                serde_json::json!({})
+            },
+        };
+        self.events
+            .emit(
+                None,
+                Some(session_id.to_string()),
+                Some(turn_id.to_string()),
+                StudioEventKind::MessageUpdated {
+                    message: Box::new(message),
+                },
+            )
+            .await?;
+        let part = StudioPart {
+            part_id,
+            message_id,
+            session_id: session_id.to_string(),
+            turn_id: turn_id.to_string(),
+            part_type: StudioPartType::Text,
+            order: 0,
+            status: StudioPartStatus::Completed,
+            created_at: now,
+            updated_at: now,
+            completed_at: Some(now),
+            error: None,
+            text_channel: Some(StudioTextChannel::User),
+            text: options.user_prompt.visible_prompt(prompt).to_string(),
+            attachments,
+            tool: None,
+            agent: None,
+            inference: None,
+            plan: None,
+            file: None,
+            usage: None,
+            synthetic: options.user_prompt.is_synthetic(),
+            ignored: options.user_prompt.is_ignored(),
+        };
+        self.events
+            .emit(
+                None,
+                Some(session_id.to_string()),
+                Some(turn_id.to_string()),
+                StudioEventKind::MessagePartUpdated {
+                    part: Box::new(part),
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn emit_turn_completion(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        outcome: &StudioPromptOutcome,
+    ) {
+        let status = match outcome.result.status {
+            TurnResultStatus::Completed => StudioTurnStatus::Completed,
+            TurnResultStatus::Aborted
+                if outcome.result.abort_reason == Some(TurnAbortReason::Interrupted) =>
+            {
+                StudioTurnStatus::Cancelled
+            }
+            TurnResultStatus::Aborted | TurnResultStatus::Errored => StudioTurnStatus::Failed,
+        };
+        let reason = outcome.result.error.clone().or_else(|| {
+            outcome
+                .result
+                .abort_reason
+                .map(|reason| reason.as_str().to_string())
+        });
+        let _ = self
+            .events
+            .emit_turn(session_id, turn_id, status, reason)
+            .await;
+    }
+
+    async fn append_plan_lifecycle_event(
+        &self,
+        session_id: &str,
+        plan_id: &str,
+        state: PlanLifecycleState,
+        turn_id: Option<String>,
+        reason: Option<String>,
+    ) -> Result<()> {
+        self.events
+            .emit(
+                None,
+                Some(session_id.to_string()),
+                turn_id.clone(),
+                StudioEventKind::PlanLifecycleChanged {
+                    event: PlanLifecycleEvent {
+                        plan_id: plan_id.to_string(),
+                        state,
+                        turn_id,
+                        reason,
+                        updated_at: unix_seconds(),
+                    },
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
+    fn interaction_emitter(&self, session_id: String) -> InteractionEmitter {
+        let runtime = self.clone();
+        Arc::new(move |interaction| {
+            let runtime = runtime.clone();
+            let session_id = session_id.clone();
+            Box::pin(async move {
+                runtime
+                    .events
+                    .emit_interaction(&session_id, InteractionChangedEvent { interaction })
+                    .await?;
+                Ok(())
+            })
+        })
+    }
+
+    async fn run_prompt_inner(&self, request: RunPromptRequest) -> Result<StudioPromptOutcome> {
         let RunPromptRequest {
             session_id,
             turn_id,
@@ -800,12 +1592,14 @@ fn session_title_from_prompt(prompt: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use pl_model::{ModelInfo, ProviderInfo};
     use pl_trace::{TracePart, TracePartStatus, TraceTextChannel};
     use pretty_assertions::assert_eq;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
-    use tokio::sync::Mutex;
+    use tokio::sync::{Mutex, oneshot};
 
     use super::*;
     use crate::config::{ProviderConfig, RoleConfig, RoleConfigs};
@@ -861,6 +1655,45 @@ mod tests {
         (format!("http://{addr}"), handle)
     }
 
+    async fn serve_delayed_sse() -> (
+        String,
+        tokio::task::JoinHandle<()>,
+        oneshot::Receiver<()>,
+        oneshot::Sender<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (accepted_tx, accepted_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let handle = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = Vec::new();
+            let mut temp = [0_u8; 1024];
+            loop {
+                let n = socket.read(&mut temp).await.unwrap_or(0);
+                if n == 0 {
+                    return;
+                }
+                buffer.extend_from_slice(&temp[..n]);
+                if buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let _ = accepted_tx.send(());
+            let _ = release_rx.await;
+            let sse_body = "data: [DONE]\n\n";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                sse_body.len(),
+                sse_body
+            );
+            let _ = socket.write_all(response.as_bytes()).await;
+            let _ = socket.shutdown().await;
+        });
+
+        (format!("http://{addr}"), handle, accepted_rx, release_tx)
+    }
+
     fn test_config(base_url: String) -> crate::config::PureConfig {
         let mut model = ModelInfo::fallback("local-responses");
         model.parameters = vec![crate::ModelParameter {
@@ -894,6 +1727,99 @@ mod tests {
                 Ok(())
             })
         })
+    }
+
+    #[tokio::test]
+    async fn set_model_role_persists_planner_model_and_default_effort() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let home = std::env::temp_dir().join(format!("pure-role-runtime-home-{unique}"));
+        let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+        let mut config = test_config("http://127.0.0.1:9".to_string());
+        let mut fast_model = ModelInfo::fallback("local-fast");
+        fast_model.parameters = vec![crate::ModelParameter {
+            name: "effort".to_string(),
+            label: None,
+            candidates: vec!["low".to_string(), "high".to_string()],
+            wire: std::collections::BTreeMap::new(),
+        }];
+        config
+            .providers
+            .get_mut("local")
+            .unwrap()
+            .models
+            .push(fast_model);
+        config_store.save(&config).unwrap();
+        let runtime = StudioRuntime::new(StudioStore::open_memory().await.unwrap(), config_store);
+
+        let next = runtime
+            .set_model_role(ModelRole::Planner, "local", "local-fast", None)
+            .unwrap();
+
+        assert_eq!(next.roles.planner.provider, "local");
+        assert_eq!(next.roles.planner.model, "local-fast");
+        assert_eq!(next.roles.planner.effort.as_str(), "low");
+        let saved = runtime.config_store().load_or_default().unwrap();
+        assert_eq!(saved.roles.planner, next.roles.planner);
+        let _ = tokio::fs::remove_dir_all(home).await;
+    }
+
+    #[tokio::test]
+    async fn ui_submit_and_stop_are_core_runtime_apis() {
+        let (base_url, handle, accepted_rx, release_tx) = serve_delayed_sse().await;
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let home = std::env::temp_dir().join(format!("pure-ui-runtime-home-{unique}"));
+        let workspace = std::env::temp_dir().join(format!("pure-ui-runtime-workspace-{unique}"));
+        tokio::fs::create_dir_all(&workspace).await.unwrap();
+        let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+        config_store.save(&test_config(base_url)).unwrap();
+        let store = StudioStore::open_memory().await.unwrap();
+        let runtime = StudioRuntime::new(store.clone(), config_store);
+        let project = runtime.open_project(&workspace).await.unwrap();
+        let session = store
+            .create_session(&project.id, "UI runtime", CompileMode::Auto)
+            .await
+            .unwrap();
+
+        let submitted = runtime
+            .submit_prompt(StudioSubmitPromptRequest {
+                session_id: session.id.clone(),
+                prompt: "wait until stopped".to_string(),
+                attachment_ids: Vec::new(),
+                options: StudioSubmitPromptOptions::default(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(submitted.session_id, session.id);
+        assert_eq!(runtime.runtime_snapshot().active_turns.len(), 1);
+        tokio::time::timeout(Duration::from_secs(5), accepted_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        let stopped = runtime.stop_prompt(session.id.clone()).await.unwrap();
+
+        assert_eq!(stopped.session_id, session.id);
+        assert!(stopped.stopped);
+        let _ = release_tx.send(());
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if runtime.runtime_snapshot().active_turns.is_empty() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        handle.await.unwrap();
+        let _ = tokio::fs::remove_dir_all(home).await;
+        let _ = tokio::fs::remove_dir_all(workspace).await;
     }
 
     #[test]

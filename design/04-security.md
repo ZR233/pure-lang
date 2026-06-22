@@ -22,7 +22,7 @@ Plan Mode 的工具白名单优先于权限模式。即使当前权限模式是 
 
 安全边界按端口-适配器落位：
 
-- `pure-studio`：输入收集、事件展示、命令调用
+- `pure-studio-flutter`：输入收集、事件展示、命令调用
 - `pl-core/application`：策略编排与约束
 - `pl-core/interfaces`：安全相关端口抽象
 - `pl-core/infrastructure`：文件、数据库、工具执行、事件落盘
@@ -52,15 +52,15 @@ Plan Mode 的工具白名单优先于权限模式。即使当前权限模式是 
 - 日志与事件 payload 不输出 token
 - 错误信息禁止拼接敏感字段
 
-## 4.5 Tauri CSP
+## 4.5 桌面 WebView 边界
 
-方案乙将 Tauri CSP 从 `null` 改为显式最小策略，禁止默认放开。
+Flutter 桌面端的安全边界集中在本地工具策略、配置凭据和 Flutter/FRB 桥接。
 
-最小策略目标：
+桌面 UI 目标：
 
-- `default-src 'self'`
-- 仅放行开发环境 HMR 与本地资源必需源
-- 禁止不必要的远程脚本注入入口
+- 不引入远程脚本执行入口。
+- 只通过 `pl-studio-bridge` 调用本地 runtime。
+- 文件选择、路径访问和工具执行仍由 `pl-core` 策略校验。
 
 ## 4.6 数据切换安全
 

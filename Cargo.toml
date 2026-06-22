@@ -5,7 +5,7 @@ members = [
     "code/pl-model",
     "code/pl-lsp",
     "code/pl-core",
-    "code/pure-studio/src-tauri",
+    "code/pure-studio-flutter/rust",
 ]
 resolver = "3"
 
@@ -41,9 +41,6 @@ async-openai = { version = "0.40.3", default-features = false, features = [
 secrecy = "0.10"
 toml = "0.8"
 pretty_assertions = "1.4.1"
-tauri = "2"
-tauri-build = "2"
-tauri-plugin-dialog = "2"
 sea-orm = { version = "1.1.20", default-features = false, features = [
     "macros",
     "runtime-tokio-rustls",
