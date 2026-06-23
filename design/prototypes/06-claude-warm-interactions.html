@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pure Studio · Claude Warm · 交互 Dock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --font-sans:"Inter","Noto Sans SC",-apple-system,"SF Pro Text","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    --font-serif:"Instrument Serif","Noto Serif SC",Georgia,serif;
+    --font-mono:"JetBrains Mono","SF Mono",Consolas,monospace;
+    --paper:#faf9f7; --paper-2:#f3eeea; --paper-3:#ece5de;
+    --ink:#2b2520; --ink-soft:#6b635a; --ink-faint:#a8a097;
+    --line:#e6ddd6; --line-2:#dcd2c8;
+    --clay:#d97757; --clay-soft:#f8e6dc; --clay-deep:#b85c3e;
+    --sage:#6b8e5a; --sage-soft:#e3ead8;
+    --ochre:#c08a3e; --ochre-soft:#f4e8d2;
+    --rose:#c25563; --rose-soft:#f4dde1;
+    --shadow-1:0 1px 2px rgba(60,48,30,.04),0 4px 12px -8px rgba(120,80,55,.12);
+    --shadow-2:0 1px 2px rgba(60,48,30,.05),0 8px 24px -14px rgba(120,80,55,.2);
+    --shadow-3:0 2px 6px rgba(60,48,30,.06),0 18px 40px -22px rgba(120,80,55,.32);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:var(--font-sans);color:var(--ink);background:#eee9e3;-webkit-font-smoothing:antialiased;line-height:1.55;
+    background-image:radial-gradient(70% 50% at 100% 0%,rgba(217,119,87,.06),transparent 60%);}
+  .stage{padding:44px 36px 70px}
+  .deck-head{max-width:1240px;margin:0 auto 30px;display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
+  .deck-head .tag{display:inline-flex;gap:8px;align-items:center;font-size:12.5px;font-weight:500;color:var(--clay);background:var(--clay-soft);border:1px solid #f0ddd0;padding:5px 12px;border-radius:999px;margin-bottom:10px}
+  .deck-head h1{font-family:var(--font-serif);font-size:34px;letter-spacing:-.02em;margin:0 0 6px;font-weight:400}
+  .deck-head p{margin:0;color:var(--ink-soft);font-size:14px;max-width:580px;line-height:1.6}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:300px}
+  .chips span{font-size:11.5px;font-weight:500;color:var(--ink-soft);background:#fff;border:1px solid var(--line);padding:5px 11px;border-radius:999px}
+
+  .gallery{max-width:1240px;margin:0 auto;display:flex;flex-direction:column;gap:42px}
+  .frame-label{display:flex;align-items:center;gap:12px;margin-bottom:14px;color:var(--ink-soft);font-size:13px;font-weight:500}
+  .frame-label .dot{width:7px;height:7px;border-radius:50%;background:var(--clay)}
+  .frame-label .num{font-family:var(--font-mono);font-size:12px;color:var(--ink-faint);margin-left:auto}
+
+  .win{background:var(--paper);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow-2);overflow:hidden}
+  .win-bar{position:relative;display:flex;align-items:center;gap:14px;height:40px;padding:0 14px;border-bottom:1px solid var(--line);background:var(--paper-2)}
+  .lights{display:flex;gap:8px}
+  .lights i{width:12px;height:12px;border-radius:50%;display:block}
+  .lights i:nth-child(1){background:#d97757}.lights i:nth-child(2){background:#d8a44a}.lights i:nth-child(3){background:#7a9d5e}
+  .win-title{position:absolute;left:0;right:0;top:0;bottom:0;display:flex;align-items:center;justify-content:center;pointer-events:none;font-size:12.5px;font-weight:500;color:var(--ink-soft);font-family:var(--font-serif);font-style:italic}
+  .win-ico{margin-left:auto;display:inline-flex;align-items:center;gap:14px;color:var(--ink-faint);opacity:.85}
+  .win-ico svg{width:15px;height:15px;display:block}
+
+  /* dock stage: timeline collapsed on top, dock at bottom */
+  .dock-stage{height:520px;display:flex;flex-direction:column;background:var(--paper)}
+  .dock-stage .tl-collapsed{flex:1;padding:22px 28px 0;color:var(--ink-faint);font-size:12px;font-style:italic;display:flex;flex-direction:column;gap:8px;overflow:hidden}
+  .dock-stage .tl-collapsed .mini-msg{display:flex;gap:10px;align-items:flex-start;opacity:.5}
+  .dock-stage .tl-collapsed .mini-msg .av{width:22px;height:22px;border-radius:50%;background:var(--paper-3);border:1px solid var(--line);flex:none}
+  .dock-stage .tl-collapsed .mini-msg .ln{height:6px;border-radius:3px;background:var(--line-2);width:70%}
+  .dock-stage .tl-collapsed .mini-msg .ln.s{width:45%}
+
+  .composer-wrap{padding:8px 26px 20px}
+  .dock{max-width:740px;margin:0 auto;border:1px solid var(--line);border-radius:14px;background:#fff;box-shadow:var(--shadow-3);overflow:hidden}
+  .dock-pad{padding:16px 18px}
+
+  .dock-h{display:flex;align-items:center;gap:11px;margin-bottom:13px}
+  .dock-h .sh{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;color:#fff;flex:none}
+  .dock-h .sh.approve{background:var(--clay)}
+  .dock-h .sh.question{background:var(--sage)}
+  .dock-h .sh.plan{background:var(--clay)}
+  .dock-h .sh svg{width:17px;height:17px}
+  .dock-h b{font-family:var(--font-serif);font-size:16px;font-weight:400}
+  .dock-h .sub{font-size:11.5px;color:var(--ink-faint);display:block;margin-top:0}
+  .dock-h .stop{margin-left:auto;width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:var(--paper);color:var(--ink-soft);display:grid;place-items:center;cursor:default}
+  .dock-h .stop svg{width:15px;height:15px}
+
+  .dchips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:11px}
+  .dchip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink-soft);background:var(--paper-2);border:1px solid var(--line);padding:5px 10px;border-radius:8px;font-family:var(--font-mono)}
+  .dchip svg{width:13px;height:13px}
+
+  .tool-arg{font-family:var(--font-mono);font-size:11.5px;color:var(--ink-soft);background:var(--paper-2);border:1px dashed var(--line-2);border-radius:8px;padding:10px 12px;white-space:pre-wrap;line-height:1.6}
+
+  /* checkbox rows */
+  .opt-list{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
+  .opt{display:flex;align-items:flex-start;gap:11px;padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--paper);cursor:default}
+  .opt:hover{border-color:var(--clay)}
+  .opt .cb{width:18px;height:18px;border-radius:5px;border:2px solid var(--line-2);flex:none;margin-top:1px;display:grid;place-items:center;color:#fff;background:#fff}
+  .opt.checked{border-color:var(--clay);background:var(--clay-soft)}
+  .opt.checked .cb{background:var(--clay);border-color:var(--clay)}
+  .opt.checked .cb svg{width:12px;height:12px}
+  .opt .cb svg{width:0;height:0}
+  .opt.checked .cb svg{width:12px}
+  .opt .tx b{font-size:13px;font-weight:500;display:block;color:var(--ink)}
+  .opt .tx s{text-decoration:none;font-size:11.5px;color:var(--ink-faint);display:block;margin-top:2px;line-height:1.5}
+  .opt.radio .cb{border-radius:50%}
+
+  /* free text / other / secret */
+  .field-label{font-size:11.5px;font-weight:600;color:var(--ink-soft);margin-bottom:7px;display:flex;align-items:center;gap:6px}
+  .field-label .secret{font-size:9.5px;color:var(--rose);background:var(--rose-soft);padding:1px 7px;border-radius:999px;font-weight:600;font-family:var(--font-mono)}
+  .field-label .other{font-size:9.5px;color:var(--ink-faint);background:var(--paper-3);padding:1px 7px;border-radius:999px;font-weight:600;font-family:var(--font-mono)}
+  .ftext{width:100%;border:1px solid var(--line);border-radius:9px;background:var(--paper);padding:10px 12px;font-size:13px;color:var(--ink);outline:none;font-family:inherit;line-height:1.55}
+  .ftext.secret{font-family:var(--font-mono);letter-spacing:.15em;color:var(--ink-soft)}
+
+  /* progress dots */
+  .progress{display:flex;align-items:center;gap:6px;margin-left:auto}
+  .progress .pd{width:7px;height:7px;border-radius:50%;background:var(--line-2)}
+  .progress .pd.done{background:var(--sage)}
+  .progress .pd.cur{background:var(--clay);box-shadow:0 0 0 3px var(--clay-soft)}
+  .progress .cnt{font-family:var(--font-mono);font-size:11px;color:var(--ink-faint);margin-left:4px}
+
+  /* dock footer */
+  .dock-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 18px;border-top:1px solid var(--line);background:var(--paper-2)}
+  .dock-foot .hint{font-size:11.5px;color:var(--ink-faint)}
+  .dock-foot .acts{display:flex;gap:8px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:none;cursor:default;font-family:inherit;font-size:12.5px;font-weight:500;border-radius:9px;padding:8px 14px}
+  .btn svg{width:14px;height:14px}
+  .btn.ghost{background:#fff;border:1px solid var(--line);color:var(--ink-soft)}
+  .btn.soft{background:var(--paper-3);color:var(--ink-soft)}
+  .btn.approve{background:var(--clay);color:#fff;box-shadow:0 4px 10px -4px rgba(217,119,87,.5)}
+  .btn.deny{background:#fff;border:1px solid var(--line);color:var(--rose)}
+  .btn.muted{background:transparent;color:var(--ink-faint)}
+
+  /* plan card preview in timeline (above dock) */
+  .plan-preview{max-width:740px;margin:0 auto 0;padding:0 28px}
+  .plan-card-tl{border:1px solid var(--line);border-radius:12px;background:var(--paper-2);overflow:hidden}
+  .plan-card-tl .ph{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line)}
+  .plan-card-tl .ph .ic{width:16px;color:var(--ink-soft);display:grid;place-items:center}
+  .plan-card-tl .ph .ic svg{width:15px;height:15px}
+  .plan-card-tl .ph b{font-size:13px;font-weight:600;flex:1}
+  .plan-card-tl .ph .pill{font-size:10.5px;font-weight:600;padding:2px 9px;border-radius:999px;color:var(--clay);background:var(--clay-soft);font-family:var(--font-mono)}
+  .plan-card-tl .pb{padding:6px 15px 12px}
+  .step{display:flex;gap:11px;align-items:flex-start;font-size:12.5px;color:var(--ink-soft);padding:5px 0;line-height:1.5}
+  .step .n{width:20px;height:20px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:10.5px;font-weight:600;color:#fff;background:var(--clay);font-family:var(--font-serif)}
+  .step b{color:var(--ink);font-weight:600}
+
+  .foot-note{max-width:1240px;margin:48px auto 0;color:var(--ink-faint);font-size:12px;text-align:center;font-family:var(--font-serif);font-style:italic}
+
+  .note-row{display:flex;align-items:center;gap:9px;padding:9px 13px;background:var(--ochre-soft);border:1px solid #e8d9b8;border-radius:9px;font-size:11.5px;color:#7a5a1e;margin-bottom:12px}
+  .note-row svg{width:15px;height:15px;flex:none}
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <div class="deck-head">
+    <div>
+      <span class="tag">● 06 · Claude Warm · 交互 Dock</span>
+      <h1>Interaction Docks</h1>
+      <p>三类 pending interaction 替换普通输入：工具授权、用户输入（分题）、计划确认。停止按钮始终保留。</p>
+    </div>
+    <div class="chips">
+      <span>同优先级互斥</span><span>权限 / 提问 / 计划</span><span>停止按钮常驻</span>
+    </div>
+  </div>
+
+  <div class="gallery">
+
+    <!-- FRAME 1: tool approval -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> 工具授权 Dock · toolApproval（最高优先级） <span class="num">screen 01 / 03</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Pure Studio</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></div></div>
+        <div class="dock-stage">
+          <div class="tl-collapsed">
+            <div style="font-style:italic">… 时间线（折叠） …</div>
+            <div class="mini-msg"><div class="av"></div><div><div class="ln"></div><div class="ln s"></div></div></div>
+            <div class="mini-msg" style="flex-direction:row-reverse"><div class="av"></div><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end"><div class="ln" style="width:55%"></div></div></div>
+            <div class="mini-msg"><div class="av"></div><div><div class="ln"></div></div></div>
+          </div>
+          <div class="composer-wrap"><div class="dock"><div class="dock-pad">
+            <div class="dock-h">
+              <div class="sh approve"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></div>
+              <div><b>需要权限</b><span class="sub">Pure 想运行一个 shell 命令</span></div>
+              <button class="stop" title="Stop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="7" width="10" height="10" rx="2"/></svg></button>
+            </div>
+            <div class="dchips">
+              <span class="dchip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14 7l5 5-5 5M19 12H5"/></svg>run_shell</span>
+              <span class="dchip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>~/pure-lang</span>
+            </div>
+            <div class="tool-arg">cargo test -p pl-parser --no-fail-fast</div>
+            <div class="dock-foot">
+              <span class="hint">命令将在此工作目录运行</span>
+              <div class="acts">
+                <button class="btn deny"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 6l12 12M18 6L6 18"/></svg>拒绝</button>
+                <button class="btn approve"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12l5 5 9-9"/></svg>批准</button>
+              </div>
+            </div>
+          </div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FRAME 2: user input (multi-question) -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> 用户输入 Dock · userInput（分题交互，第 2/3 题，含 secret） <span class="num">screen 02 / 03</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Pure Studio</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></div></div>
+        <div class="dock-stage">
+          <div class="tl-collapsed">
+            <div style="font-style:italic">… 时间线（折叠） …</div>
+            <div class="mini-msg"><div class="av"></div><div><div class="ln"></div><div class="ln s"></div></div></div>
+          </div>
+          <div class="composer-wrap"><div class="dock"><div class="dock-pad">
+            <div class="dock-h">
+              <div class="sh question"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 015 0c0 1.7-2.5 2-2.5 4M12 17h.01"/></svg></div>
+              <div><b>几个问题想确认</b><span class="sub">回答后继续</span></div>
+              <div class="progress">
+                <span class="pd done"></span><span class="pd cur"></span><span class="pd"></span>
+                <span class="cnt">2 / 3</span>
+              </div>
+            </div>
+
+            <div class="field-label">Q2 · 部署目标环境</div>
+            <div class="opt-list">
+              <div class="opt checked"><span class="cb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5 9-9"/></svg></span><div class="tx"><b>生产环境</b><s>正式上线，需要完整验证流程</s></div></div>
+              <div class="opt"><span class="cb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5 9-9"/></svg></span><div class="tx"><b>预发布环境</b><s>上线前最后验证</s></div></div>
+              <div class="opt"><span class="cb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12l5 5 9-9"/></svg></span><div class="tx"><b>仅本地测试</b><s>不对外发布</s></div></div>
+            </div>
+
+            <div class="field-label"><span class="secret">secret</span> 部署用 API token（可选）</div>
+            <input class="ftext secret" value="sk-••••••••••••••••" />
+
+            <div class="dock-foot">
+              <span class="hint">第 1 题已答 · 1 题待答</span>
+              <div class="acts">
+                <button class="btn ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15 18l-6-6 6-6"/></svg>上一题</button>
+                <button class="btn approve">下一题<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 18l6-6-6-6"/></svg></button>
+              </div>
+            </div>
+          </div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FRAME 2b: user input last question submit -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> 用户输入 Dock · 末题提交态（含 Other 自由输入） <span class="num">screen 02b / 03</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Pure Studio</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></div></div>
+        <div class="dock-stage" style="height:460px">
+          <div class="tl-collapsed"><div style="font-style:italic">… 时间线（折叠） …</div></div>
+          <div class="composer-wrap"><div class="dock"><div class="dock-pad">
+            <div class="dock-h">
+              <div class="sh question"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 015 0c0 1.7-2.5 2-2.5 4M12 17h.01"/></svg></div>
+              <div><b>几个问题想确认</b><span class="sub">最后一题</span></div>
+              <div class="progress">
+                <span class="pd done"></span><span class="pd done"></span><span class="pd cur"></span>
+                <span class="cnt">3 / 3</span>
+              </div>
+            </div>
+
+            <div class="field-label"><span class="other">other</span> Q3 · 回滚策略偏好</div>
+            <div class="opt-list">
+              <div class="opt radio checked"><span class="cb"></span><div class="tx"><b>自动回滚</b><s>失败时立即恢复上一版本</s></div></div>
+              <div class="opt radio"><span class="cb"></span><div class="tx"><b>手动确认</b><s>失败后停下等人工决定</s></div></div>
+              <div class="opt radio"><span class="cb"></span><div class="tx"><b>不回滚</b><s>仅记录失败，保留变更</s></div></div>
+            </div>
+            <div class="field-label">其它说明（可选）</div>
+            <input class="ftext" placeholder="补充说明…" />
+
+            <div class="dock-foot">
+              <span class="hint">提交后未答问题保留空数组</span>
+              <div class="acts">
+                <button class="btn ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15 18l-6-6 6-6"/></svg>上一题</button>
+                <button class="btn approve"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12l5 5 9-9"/></svg>提交答案</button>
+              </div>
+            </div>
+          </div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FRAME 3: plan confirmation -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> 计划确认 Dock · planConfirmation（计划正文留在 timeline 卡片） <span class="num">screen 03 / 03</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Pure Studio</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></div></div>
+        <div class="dock-stage" style="height:600px">
+          <div class="tl-collapsed" style="padding-bottom:8px">
+            <div style="font-style:italic">… 时间线（折叠） …</div>
+          </div>
+          <div class="plan-preview" style="padding-top:0">
+            <div class="plan-card-tl">
+              <div class="ph"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 19V5h7l4 4v10z"/></svg></span><b>实施计划 · parser 错误恢复</b><span class="pill">draft</span></div>
+              <div class="pb">
+                <div class="step"><span class="n">1</span><span><b>引入 ParseError 枚举</b>，替换 12 处 panic 为 Result&lt;Node, ParseError&gt;</span></div>
+                <div class="step"><span class="n">2</span><span><b>补同步恢复集合</b>，确保递归下降在错误后能继续重建 AST</span></div>
+                <div class="step"><span class="n">3</span><span><b>新增回归测试</b>，覆盖未闭合分隔符 / 非法 token</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="composer-wrap"><div class="dock"><div class="dock-pad">
+            <div class="note-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>选择「实施此计划」会切回 Auto 模式并提交后台实施 prompt</div>
+            <div class="dock-h">
+              <div class="sh plan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 19V5h7l4 4v10z"/><path d="M9 11l2 2 4-4"/></svg></div>
+              <div><b>实施此计划？</b></div>
+              <button class="stop" title="Stop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="7" width="10" height="10" rx="2"/></svg></button>
+            </div>
+            <div class="dock-foot" style="background:transparent;border-top:none;padding:0">
+              <div class="acts" style="width:100;display:flex;gap:8px">
+                <button class="btn muted" style="margin-right:auto">忽略</button>
+                <button class="btn ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 20h9M16.5 3.5l4 4L7 21l-4 1 1-4z"/></svg>告诉 Pure 如何调整</button>
+                <button class="btn approve"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12l5 5 9-9"/></svg>实施此计划</button>
+              </div>
+            </div>
+          </div></div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  <p class="foot-note">Pure Studio · 06 Claude Warm — 交互 Dock · 三类 pending interaction 互斥 · 停止按钮常驻</p>
+</div>
+</body>
+</html>

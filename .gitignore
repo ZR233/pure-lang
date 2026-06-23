@@ -19,6 +19,9 @@
 .DS_Store
 Thumbs.db
 
+# Brainstorming companion
+/.superpowers
+
 # Environment
 .env
 /.cargo/config.local.toml

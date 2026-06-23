@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pure Studio · Claude Warm · 设置（其余）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --font-sans:"Inter","Noto Sans SC",-apple-system,"SF Pro Text","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    --font-serif:"Instrument Serif","Noto Serif SC",Georgia,serif;
+    --font-mono:"JetBrains Mono","SF Mono",Consolas,monospace;
+    --paper:#faf9f7; --paper-2:#f3eeea; --paper-3:#ece5de;
+    --ink:#2b2520; --ink-soft:#6b635a; --ink-faint:#a8a097;
+    --line:#e6ddd6; --line-2:#dcd2c8;
+    --clay:#d97757; --clay-soft:#f8e6dc; --clay-deep:#b85c3e;
+    --sage:#6b8e5a; --sage-soft:#e3ead8;
+    --ochre:#c08a3e; --ochre-soft:#f4e8d2;
+    --rose:#c25563; --rose-soft:#f4dde1;
+    --shadow-1:0 1px 2px rgba(60,48,30,.04),0 4px 12px -8px rgba(120,80,55,.12);
+    --shadow-2:0 1px 2px rgba(60,48,30,.05),0 8px 24px -14px rgba(120,80,55,.2);
+    --shadow-3:0 2px 6px rgba(60,48,30,.06),0 18px 40px -22px rgba(120,80,55,.32);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:var(--font-sans);color:var(--ink);background:#eee9e3;-webkit-font-smoothing:antialiased;line-height:1.55;
+    background-image:radial-gradient(70% 50% at 100% 0%,rgba(217,119,87,.06),transparent 60%);}
+  .stage{padding:44px 36px 70px}
+  .deck-head{max-width:1240px;margin:0 auto 30px;display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
+  .deck-head .tag{display:inline-flex;gap:8px;align-items:center;font-size:12.5px;font-weight:500;color:var(--clay);background:var(--clay-soft);border:1px solid #f0ddd0;padding:5px 12px;border-radius:999px;margin-bottom:10px}
+  .deck-head h1{font-family:var(--font-serif);font-size:34px;letter-spacing:-.02em;margin:0 0 6px;font-weight:400}
+  .deck-head p{margin:0;color:var(--ink-soft);font-size:14px;max-width:580px;line-height:1.6}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:300px}
+  .chips span{font-size:11.5px;font-weight:500;color:var(--ink-soft);background:#fff;border:1px solid var(--line);padding:5px 11px;border-radius:999px}
+
+  .gallery{max-width:1240px;margin:0 auto;display:flex;flex-direction:column;gap:42px}
+  .frame-label{display:flex;align-items:center;gap:12px;margin-bottom:14px;color:var(--ink-soft);font-size:13px;font-weight:500}
+  .frame-label .dot{width:7px;height:7px;border-radius:50%;background:var(--clay)}
+  .frame-label .num{font-family:var(--font-mono);font-size:12px;color:var(--ink-faint);margin-left:auto}
+
+  .win{background:var(--paper);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow-2);overflow:hidden}
+  .win-bar{position:relative;display:flex;align-items:center;gap:14px;height:40px;padding:0 14px;border-bottom:1px solid var(--line);background:var(--paper-2)}
+  .lights{display:flex;gap:8px}
+  .lights i{width:12px;height:12px;border-radius:50%;display:block}
+  .lights i:nth-child(1){background:#d97757}.lights i:nth-child(2){background:#d8a44a}.lights i:nth-child(3){background:#7a9d5e}
+  .win-title{position:absolute;left:0;right:0;top:0;bottom:0;display:flex;align-items:center;justify-content:center;pointer-events:none;font-size:12.5px;font-weight:500;color:var(--ink-soft);font-family:var(--font-serif);font-style:italic}
+  .win-ico{margin-left:auto;display:inline-flex;align-items:center;gap:14px;color:var(--ink-faint);opacity:.85}
+  .win-ico svg{width:15px;height:15px;display:block}
+
+  .settings{display:grid;grid-template-columns:212px 1fr;height:680px}
+  .setnav{border-right:1px solid var(--line);padding:18px 12px;background:var(--paper-2);display:flex;flex-direction:column}
+  .setnav .back{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink-soft);margin-bottom:10px;padding:7px 10px;border-radius:8px;cursor:default}
+  .setnav .grp{font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);padding:10px 10px 4px}
+  .ntile{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:9px;font-size:13px;color:var(--ink-soft);cursor:default}
+  .ntile svg{width:15px;height:15px;opacity:.85}
+  .ntile.sel{background:var(--paper);color:var(--clay);font-weight:600;box-shadow:inset 0 0 0 1px var(--line-2)}
+
+  .setmain{display:flex;flex-direction:column;overflow:hidden;background:var(--paper)}
+  .sethead{padding:22px 28px 16px;border-bottom:1px solid var(--line)}
+  .sethead h2{margin:0 0 4px;font-family:var(--font-serif);font-size:23px;font-weight:400;letter-spacing:-.01em}
+  .sethead p{margin:0;font-size:12.5px;color:var(--ink-soft)}
+  .sethead .acts{display:flex;gap:8px;margin-top:14px}
+  .setbody{flex:1;overflow:auto;padding:20px 28px}
+
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:none;cursor:default;font-family:inherit;font-size:12.5px;font-weight:500;border-radius:9px;padding:8px 14px}
+  .btn svg{width:14px;height:14px}
+  .btn.ghost{background:#fff;border:1px solid var(--line);color:var(--ink-soft)}
+  .btn.soft{background:var(--paper-2);color:var(--ink-soft);border:1px solid var(--line)}
+  .btn.primary{background:var(--clay);color:#fff;box-shadow:0 4px 10px -4px rgba(217,119,87,.5)}
+
+  /* instructions */
+  .editor{width:100%;min-height:240px;background:#fff;border:1px solid var(--line);border-radius:11px;padding:14px 16px;font-family:inherit;font-size:13.5px;color:var(--ink);outline:none;line-height:1.7;resize:vertical}
+  .editor:focus{border-color:var(--clay);box-shadow:0 0 0 3px var(--clay-soft)}
+  .save-hint{font-size:11.5px;color:var(--ink-faint);margin-top:10px;display:flex;align-items:center;gap:7px}
+  .save-hint .ok{color:var(--sage)}
+
+  /* skills */
+  .skill-list{display:flex;flex-direction:column;gap:8px}
+  .skill{display:flex;align-items:center;gap:13px;padding:12px 15px;background:#fff;border:1px solid var(--line);border-radius:11px}
+  .skill .ic{width:32px;height:32px;border-radius:9px;background:var(--clay-soft);color:var(--clay);display:grid;place-items:center;flex:none}
+  .skill .ic svg{width:17px;height:17px}
+  .skill .nm{font-size:13.5px;font-weight:500}
+  .skill .src{font-size:11px;color:var(--ink-faint);font-family:var(--font-mono);margin-top:1px}
+  .skill .sw{margin-left:auto}
+
+  /* toggle */
+  .sw{width:38px;height:22px;border-radius:999px;background:var(--line-2);position:relative;cursor:default;transition:background .2s;flex:none}
+  .sw::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:var(--shadow-1);transition:left .2s}
+  .sw.on{background:var(--clay)}
+  .sw.on::after{left:19px}
+
+  /* roles */
+  .role-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .role{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px}
+  .role .rh{display:flex;align-items:center;gap:11px;margin-bottom:14px}
+  .role .av{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;color:#fff;flex:none}
+  .role .av svg{width:17px;height:17px}
+  .role .rh b{font-size:14px;font-weight:600;display:block}
+  .role .rh s{text-decoration:none;font-size:11px;color:var(--ink-faint);display:block;margin-top:1px}
+  .role-fields{display:flex;flex-direction:column;gap:10px}
+  .rf{display:flex;flex-direction:column;gap:5px}
+  .rf .lab{font-size:10.5px;font-weight:600;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.06em;font-family:var(--font-mono)}
+  .fselect{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 11px;font-size:12.5px;color:var(--ink);outline:none;font-family:inherit;appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a8a097' stroke-width='2'><path d='M6 9l6 6 6-6'/></svg>");background-repeat:no-repeat;background-position:right 11px center;padding-right:30px}
+  .eff-row{display:flex;gap:5px}
+  .eff-opt{font-size:10.5px;font-family:var(--font-mono);padding:5px 9px;border-radius:6px;border:1px solid var(--line);background:#fff;color:var(--ink-soft);cursor:default}
+  .eff-opt.sel{color:var(--clay);background:var(--clay-soft);border-color:#f0ddd0}
+
+  /* mcp */
+  .mcp-row{display:flex;align-items:center;gap:13px;padding:13px 15px;background:#fff;border:1px solid var(--line);border-radius:11px;margin-bottom:9px}
+  .mcp-row.locked{background:var(--paper-2)}
+  .mcp-row .ic{width:32px;height:32px;border-radius:9px;background:var(--sage-soft);color:var(--sage);display:grid;place-items:center;flex:none}
+  .mcp-row.locked .ic{background:var(--paper-3);color:var(--ink-faint)}
+  .mcp-row .ic svg{width:16px;height:16px}
+  .mcp-row .nm{font-size:13.5px;font-weight:500}
+  .mcp-row .meta{font-size:11px;color:var(--ink-faint);font-family:var(--font-mono);margin-top:1px;display:flex;gap:8px;align-items:center}
+  .mcp-row .badge{font-size:9.5px;font-weight:600;padding:1px 7px;border-radius:999px;font-family:var(--font-mono)}
+  .mcp-row .badge.stdio{color:var(--sage);background:var(--sage-soft)}
+  .mcp-row .badge.http{color:var(--clay);background:var(--clay-soft)}
+  .mcp-row .badge.lock{color:var(--ink-faint);background:var(--paper-3)}
+  .mcp-row .sw{margin-left:auto}
+  .mcp-row .edit{margin-left:8px;color:var(--clay);background:none;border:none;cursor:default;padding:5px;border-radius:6px}
+  .mcp-row .edit svg{width:14px;height:14px}
+
+  /* security */
+  .sec-group{max-width:480px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:6px}
+  .sec-status{padding:13px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+  .sec-status .dot{width:9px;height:9px;border-radius:50%;background:var(--clay)}
+  .sec-status b{font-size:13.5px;font-weight:600}
+  .sec-status s{text-decoration:none;font-size:11.5px;color:var(--ink-faint);margin-left:auto}
+  .sec-opt{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border-bottom:1px solid var(--line);cursor:default}
+  .sec-opt:last-child{border-bottom:none}
+  .sec-opt .radio{width:18px;height:18px;border-radius:50%;border:2px solid var(--line-2);flex:none;margin-top:1px;flex:none}
+  .sec-opt.sel .radio{border-color:var(--clay);background:radial-gradient(circle, var(--clay) 0 5px, transparent 6px)}
+  .sec-opt b{font-size:13px;font-weight:600;display:block}
+  .sec-opt s{text-decoration:none;font-size:11.5px;color:var(--ink-soft);display:block;margin-top:3px;line-height:1.5}
+
+  /* general */
+  .gen-list{max-width:520px;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .gen-row{display:flex;align-items:center;gap:14px;padding:14px 16px;border-bottom:1px solid var(--line)}
+  .gen-row:last-child{border-bottom:none}
+  .gen-row .ic{width:34px;height:34px;border-radius:9px;background:var(--paper-2);color:var(--ink-soft);display:grid;place-items:center;flex:none}
+  .gen-row .ic svg{width:18px;height:18px}
+  .gen-row .tx b{font-size:13.5px;font-weight:500;display:block}
+  .gen-row .tx s{text-decoration:none;font-size:11.5px;color:var(--ink-faint);display:block;margin-top:1px}
+
+  .foot-note{max-width:1240px;margin:48px auto 0;color:var(--ink-faint);font-size:12px;text-align:center;font-family:var(--font-serif);font-style:italic}
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <div class="deck-head">
+    <div>
+      <span class="tag">● 06 · Claude Warm · 设置（其余 6 tab）</span>
+      <h1>Settings</h1>
+      <p>Instructions / Skills / Roles / MCP / Security / General。紧凑设置组，即时保存。</p>
+    </div>
+    <div class="chips">
+      <span>紧凑可扫描</span><span>即时保存</span><span>i18n 标签</span>
+    </div>
+  </div>
+
+  <div class="gallery">
+
+    <!-- FRAME 1: Instructions -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> Instructions（typed instructions · 失焦即保存） <span class="num">screen 01 / 06</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Settings · Instructions</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 18l-6-6 6-6"/></svg></div></div>
+        <div class="settings">
+          <aside class="setnav">
+            <div class="back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15 18l-6-6 6-6"/></svg>返回聊天</div>
+            <div class="grp">Workspace</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M7 18a5 5 0 010-10 6 6 0 0111.5 1.5A4 4 0 0117 18z"/></svg>Providers</div>
+            <div class="ntile sel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Instructions</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 6l8-3 8 3v4c0 5-3.5 8-8 9-4.5-1-8-4-8-9z"/></svg>Skills</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="9" r="4"/><path d="M5 20c0-3 3-5 7-5s7 2 7 5"/></svg>Roles</div>
+            <div class="grp">System</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>Security</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/></svg>General</div>
+          </aside>
+          <section class="setmain">
+            <div class="sethead"><h2>Instructions</h2><p>注入到每个 turn 的系统指令，停止输入后自动保存</p></div>
+            <div class="setbody">
+              <div class="editor"># 项目协作约定
+
+- 使用中文交流和文档编写
+- 提交前运行 `cargo fmt`、`cargo clippy -- -D warnings`、`cargo test`
+- 异步 trait 用原生 RPITIT，禁止 `#[async_trait]`
+- Crate 以 `pl-` 为前缀
+
+## 代码风格
+优先方法引用而非闭包，内联 `format!` 变量。</div>
+              <div class="save-hint"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--sage)"><path d="M5 12l5 5 9-9"/></svg><span class="ok">已保存 · 14:32</span><span style="opacity:.6">· 失焦自动保存到 ~/.pure/config.toml</span></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- FRAME 2: Skills -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> Skills（含 Discover · 工作区/用户/系统来源） <span class="num">screen 02 / 06</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Settings · Skills</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 18l-6-6 6-6"/></svg></div></div>
+        <div class="settings">
+          <aside class="setnav">
+            <div class="back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15 18l-6-6 6-6"/></svg>返回聊天</div>
+            <div class="grp">Workspace</div>
+            <div class="ntile sel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 6l8-3 8 3v4c0 5-3.5 8-8 9-4.5-1-8-4-8-9z"/></svg>Skills</div>
+            <div class="grp">System</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/></svg>General</div>
+          </aside>
+          <section class="setmain">
+            <div class="sethead">
+              <h2>Skills</h2><p>禁用不需要的技能；Discover 从工作区扫描可用技能</p>
+              <div class="acts"><button class="btn soft"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.6L3 8"/><path d="M3 4v4h4"/></svg>Discover</button></div>
+            </div>
+            <div class="setbody">
+              <div class="skill-list">
+                <div class="skill"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 3h6v4l4 2v9a2 2 0 01-2 2H7a2 2 0 01-2-2V9l4-2z"/></svg></div><div><div class="nm">init-project</div><div class="src">.claude/skills · workbench</div></div><div class="sw on"></div></div>
+                <div class="skill"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 3h6v4l4 2v9a2 2 0 01-2 2H7a2 2 0 01-2-2V9l4-2z"/></svg></div><div><div class="nm">slint-ui</div><div class="src">.claude/skills · workbench</div></div><div class="sw on"></div></div>
+                <div class="skill"><div class="ic" style="background:var(--paper-3);color:var(--ink-faint)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 3h6v4l4 2v9a2 2 0 01-2 2H7a2 2 0 01-2-2V9l4-2z"/></svg></div><div><div class="nm" style="color:var(--ink-faint)">legacy-tauri</div><div class="src">~/.pure/skills · user（已禁用）</div></div><div class="sw"></div></div>
+                <div class="skill"><div class="ic" style="background:var(--sage-soft);color:var(--sage)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 3h6v4l4 2v9a2 2 0 01-2 2H7a2 2 0 01-2-2V9l4-2z"/></svg></div><div><div class="nm">brainstorming</div><div class="src">系统技能 · system</div></div><div class="sw on"></div></div>
+              </div>
+              <div style="font-size:11.5px;color:var(--ink-faint);margin-top:16px;font-style:italic">Discover 从当前工作区与配置的用户/系统来源刷新可选技能列表。</div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- FRAME 3: Roles -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> Roles（explorer / planner / executor / reviewer · 下拉即写回） <span class="num">screen 03 / 06</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Settings · Roles</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 18l-6-6 6-6"/></svg></div></div>
+        <div class="settings">
+          <aside class="setnav">
+            <div class="back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15 18l-6-6 6-6"/></svg>返回聊天</div>
+            <div class="grp">Workspace</div>
+            <div class="ntile sel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="9" r="4"/><path d="M5 20c0-3 3-5 7-5s7 2 7 5"/></svg>Roles</div>
+            <div class="grp">System</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/></svg>General</div>
+          </aside>
+          <section class="setmain">
+            <div class="sethead"><h2>Roles</h2><p>四个固定角色 · provider/model/effort 修改即时写回</p></div>
+            <div class="setbody">
+              <div class="role-grid">
+                <div class="role"><div class="rh"><div class="av" style="background:var(--sage)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg></div><div><b>explorer</b><s>探索代码、定位上下文</s></div></div><div class="role-fields"><div class="rf"><span class="lab">Provider</span><select class="fselect"><option>Zhipu Coding Plan</option></select></div><div class="rf"><span class="lab">Model</span><select class="fselect"><option>glm-4-flash</option></select></div></div></div>
+                <div class="role"><div class="rh"><div class="av" style="background:var(--clay)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 19V5h7l4 4v10z"/></svg></div><div><b>planner</b><s>规划、生成实施计划</s></div></div><div class="role-fields"><div class="rf"><span class="lab">Provider</span><select class="fselect"><option>Zhipu Coding Plan</option></select></div><div class="rf"><span class="lab">Model</span><select class="fselect"><option>glm-5.2</option></select></div><div class="rf"><span class="lab">Effort</span><div class="eff-row"><span class="eff-opt sel">high</span><span class="eff-opt">medium</span><span class="eff-opt">low</span></div></div></div></div>
+                <div class="role"><div class="rh"><div class="av" style="background:var(--ochre)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 17l6-6-6-6M12 19h8"/></svg></div><div><b>executor</b><s>执行代码修改、工具调用</s></div></div><div class="role-fields"><div class="rf"><span class="lab">Provider</span><select class="fselect"><option>Zhipu Coding Plan</option></select></div><div class="rf"><span class="lab">Model</span><select class="fselect"><option>glm-5.2</option></select></div><div class="rf"><span class="lab">Effort</span><div class="eff-row"><span class="eff-opt">high</span><span class="eff-opt sel">medium</span><span class="eff-opt">low</span></div></div></div></div>
+                <div class="role"><div class="rh"><div class="av" style="background:var(--rose)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></div><div><b>reviewer</b><s>审查、验证结果</s></div></div><div class="role-fields"><div class="rf"><span class="lab">Provider</span><select class="fselect"><option>DeepSeek</option><option>Zhipu Coding Plan</option></select></div><div class="rf"><span class="lab">Model</span><select class="fselect"><option>deepseek-v4-pro</option></select></div><div class="rf"><span class="lab">Effort</span><div class="eff-row"><span class="eff-opt sel">high</span><span class="eff-opt">medium</span></div></div></div></div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- FRAME 4: MCP -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> MCP（stdio / streamable HTTP · built-in 锁定 · 启用开关即时生效） <span class="num">screen 04 / 06</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Settings · MCP</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 18l-6-6 6-6"/></svg></div></div>
+        <div class="settings">
+          <aside class="setnav">
+            <div class="back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15 18l-6-6 6-6"/></svg>返回聊天</div>
+            <div class="grp">Workspace</div>
+            <div class="ntile sel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="4"/><path d="M4 12h2M18 12h2M12 4v2M12 18v2"/></svg>MCP</div>
+          </aside>
+          <section class="setmain">
+            <div class="sethead">
+              <h2>MCP</h2><p>Model Context Protocol 服务器 · inline 修改即时保存</p>
+              <div class="acts"><button class="btn primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>新增 server</button></div>
+            </div>
+            <div class="setbody">
+              <div class="mcp-row"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 4h16v12H4z"/><path d="M2 20h20"/></svg></div><div><div class="nm">filesystem</div><div class="meta"><span class="badge stdio">stdio</span><span>node fs-server.js</span><span>● running</span></div></div><div class="sw on"></div><button class="edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 20h9M16.5 3.5l4 4L7 21l-4 1 1-4z"/></svg></button></div>
+              <div class="mcp-row"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18"/></svg></div><div><div class="nm">web-search</div><div class="meta"><span class="badge http">streamable HTTP</span><span>https://search.mcp.dev</span><span style="color:var(--ochre)">● 启动失败</span></div></div><div class="sw"></div><button class="edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 20h9M16.5 3.5l4 4L7 21l-4 1 1-4z"/></svg></button></div>
+              <div class="mcp-row locked"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 10V8a6 6 0 0112 0v2"/><rect x="5" y="10" width="14" height="10" rx="2"/></svg></div><div><div class="nm">pure-runtime</div><div class="meta"><span class="badge lock">built-in · locked</span><span>身份不可修改</span></div></div><div class="sw on"></div></div>
+              <div class="mcp-row"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg></div><div><div class="nm">docs-retrieval</div><div class="meta"><span class="badge stdio">stdio</span><span>python docs_mcp.py</span><span style="color:var(--ink-faint)">● 已停止</span></div></div><div class="sw"></div><button class="edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 20h9M16.5 3.5l4 4L7 21l-4 1 1-4z"/></svg></button></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- FRAME 5: Security -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> Security（紧凑设置组 · 三选项权限模式） <span class="num">screen 05 / 06</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Settings · Security</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 18l-6-6 6-6"/></svg></div></div>
+        <div class="settings">
+          <aside class="setnav">
+            <div class="back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15 18l-6-6 6-6"/></svg>返回聊天</div>
+            <div class="grp">Workspace</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M7 18a5 5 0 010-10 6 6 0 0111.5 1.5A4 4 0 0117 18z"/></svg>Providers</div>
+            <div class="grp">System</div>
+            <div class="ntile sel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>Security</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/></svg>General</div>
+          </aside>
+          <section class="setmain">
+            <div class="sethead"><h2>Security</h2><p>工具执行权限模式 · 选择即时生效</p></div>
+            <div class="setbody">
+              <div class="sec-group">
+                <div class="sec-status"><span class="dot"></span><b>当前：请求批准</b><s>Request Approval</s></div>
+                <div class="sec-opt sel"><span class="radio"></span><div><b>请求批准</b><s>每个工具调用前暂停并请求用户批准（默认，最安全）</s></div></div>
+                <div class="sec-opt"><span class="radio"></span><div><b>自动执行 + 审查</b><s>自动运行，结束后审查变更；适合受信任工作流</s></div></div>
+                <div class="sec-opt"><span class="radio"></span><div><b>完全访问</b><s>无审批自动运行所有工具 · 仅在你完全信任时使用</s></div></div>
+              </div>
+              <div style="font-size:11.5px;color:var(--ink-faint);margin-top:16px;line-height:1.6;max-width:480px">权限模式也可在 composer 输入框的权限选择器中临时切换，不在状态栏重复展示。</div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- FRAME 6: General -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> General（UI 偏好 · 即时写入 store） <span class="num">screen 06 / 06</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Settings · General</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 18l-6-6 6-6"/></svg></div></div>
+        <div class="settings">
+          <aside class="setnav">
+            <div class="back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15 18l-6-6 6-6"/></svg>返回聊天</div>
+            <div class="grp">Workspace</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M7 18a5 5 0 010-10 6 6 0 0111.5 1.5A4 4 0 0117 18z"/></svg>Providers</div>
+            <div class="grp">System</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>Security</div>
+            <div class="ntile sel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/></svg>General</div>
+          </aside>
+          <section class="setmain">
+            <div class="sethead"><h2>General</h2><p>界面偏好 · 修改即时写入 Studio store</p></div>
+            <div class="setbody">
+              <div class="gen-list">
+                <div class="gen-row"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg></div><div class="tx"><b>跟随系统主题</b><s>根据系统深浅色自动切换</s></div><div class="sw on"></div></div>
+                <div class="gen-row"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 5v14M5 12l7 7 7-7"/></svg></div><div class="tx"><b>跟随活动 turn</b><s>新内容自动滚动到底部</s></div><div class="sw on"></div></div>
+                <div class="gen-row"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 5h16M4 12h16M4 19h16"/></svg></div><div class="tx"><b>紧凑时间线</b><s>减少消息间距，单屏显示更多</s></div><div class="sw"></div></div>
+              </div>
+              <div style="font-size:11.5px;color:var(--ink-faint);margin-top:16px;line-height:1.6;max-width:520px">配置文件位置：~/.pure/config.toml · Studio 数据：~/.pure/studio/studio_*.sqlite</div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  <p class="foot-note">Pure Studio · 06 Claude Warm — 设置 · 紧凑可扫描 · 即时保存</p>
+</div>
+</body>
+</html>

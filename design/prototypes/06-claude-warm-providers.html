@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pure Studio · Claude Warm · Providers</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --font-sans:"Inter","Noto Sans SC",-apple-system,"SF Pro Text","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    --font-serif:"Instrument Serif","Noto Serif SC",Georgia,serif;
+    --font-mono:"JetBrains Mono","SF Mono",Consolas,monospace;
+    --paper:#faf9f7; --paper-2:#f3eeea; --paper-3:#ece5de;
+    --ink:#2b2520; --ink-soft:#6b635a; --ink-faint:#a8a097;
+    --line:#e6ddd6; --line-2:#dcd2c8;
+    --clay:#d97757; --clay-soft:#f8e6dc; --clay-deep:#b85c3e;
+    --sage:#6b8e5a; --sage-soft:#e3ead8;
+    --ochre:#c08a3e; --ochre-soft:#f4e8d2;
+    --rose:#c25563; --rose-soft:#f4dde1;
+    --shadow-1:0 1px 2px rgba(60,48,30,.04),0 4px 12px -8px rgba(120,80,55,.12);
+    --shadow-2:0 1px 2px rgba(60,48,30,.05),0 8px 24px -14px rgba(120,80,55,.2);
+    --shadow-3:0 2px 6px rgba(60,48,30,.06),0 18px 40px -22px rgba(120,80,55,.32);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:var(--font-sans);color:var(--ink);background:#eee9e3;-webkit-font-smoothing:antialiased;line-height:1.55;
+    background-image:radial-gradient(70% 50% at 100% 0%,rgba(217,119,87,.06),transparent 60%);}
+  .stage{padding:44px 36px 70px}
+  .deck-head{max-width:1240px;margin:0 auto 30px;display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
+  .deck-head .tag{display:inline-flex;gap:8px;align-items:center;font-size:12.5px;font-weight:500;color:var(--clay);background:var(--clay-soft);border:1px solid #f0ddd0;padding:5px 12px;border-radius:999px;margin-bottom:10px}
+  .deck-head h1{font-family:var(--font-serif);font-size:34px;letter-spacing:-.02em;margin:0 0 6px;font-weight:400}
+  .deck-head p{margin:0;color:var(--ink-soft);font-size:14px;max-width:580px;line-height:1.6}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:300px}
+  .chips span{font-size:11.5px;font-weight:500;color:var(--ink-soft);background:#fff;border:1px solid var(--line);padding:5px 11px;border-radius:999px}
+
+  .gallery{max-width:1240px;margin:0 auto;display:flex;flex-direction:column;gap:42px}
+  .frame-label{display:flex;align-items:center;gap:12px;margin-bottom:14px;color:var(--ink-soft);font-size:13px;font-weight:500}
+  .frame-label .dot{width:7px;height:7px;border-radius:50%;background:var(--clay)}
+  .frame-label .num{font-family:var(--font-mono);font-size:12px;color:var(--ink-faint);margin-left:auto}
+
+  .win{background:var(--paper);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow-2);overflow:hidden}
+  .win-bar{position:relative;display:flex;align-items:center;gap:14px;height:40px;padding:0 14px;border-bottom:1px solid var(--line);background:var(--paper-2)}
+  .lights{display:flex;gap:8px}
+  .lights i{width:12px;height:12px;border-radius:50%;display:block}
+  .lights i:nth-child(1){background:#d97757}.lights i:nth-child(2){background:#d8a44a}.lights i:nth-child(3){background:#7a9d5e}
+  .win-title{position:absolute;left:0;right:0;top:0;bottom:0;display:flex;align-items:center;justify-content:center;pointer-events:none;font-size:12.5px;font-weight:500;color:var(--ink-soft);font-family:var(--font-serif);font-style:italic}
+  .win-ico{margin-left:auto;display:inline-flex;align-items:center;gap:14px;color:var(--ink-faint);opacity:.85}
+  .win-ico svg{width:15px;height:15px;display:block}
+
+  /* settings shell */
+  .settings{display:grid;grid-template-columns:212px 1fr;height:740px}
+  .setnav{border-right:1px solid var(--line);padding:18px 12px;background:var(--paper-2);display:flex;flex-direction:column}
+  .setnav .back{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink-soft);margin-bottom:10px;padding:7px 10px;border-radius:8px;cursor:default}
+  .setnav .back:hover{background:var(--paper)}
+  .setnav .back svg{width:15px;height:15px}
+  .setnav .grp{font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);padding:10px 10px 4px}
+  .ntile{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:9px;font-size:13px;color:var(--ink-soft);cursor:default}
+  .ntile svg{width:15px;height:15px;opacity:.85}
+  .ntile.sel{background:var(--paper);color:var(--clay);font-weight:600;box-shadow:inset 0 0 0 1px var(--line-2)}
+
+  .setmain{display:flex;flex-direction:column;overflow:hidden;background:var(--paper)}
+  .sethead{padding:22px 28px 16px;border-bottom:1px solid var(--line);display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
+  .sethead .crumb-back{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-faint);margin-bottom:8px;cursor:default}
+  .sethead .crumb-back svg{width:14px;height:14px}
+  .sethead h2{margin:0 0 4px;font-family:var(--font-serif);font-size:23px;font-weight:400;letter-spacing:-.01em}
+  .sethead p{margin:0;font-size:12.5px;color:var(--ink-soft)}
+  .sethead .acts{display:flex;gap:8px}
+  .setbody{flex:1;overflow:auto;padding:18px 28px}
+
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:none;cursor:default;font-family:inherit;font-size:12.5px;font-weight:500;border-radius:9px;padding:8px 14px}
+  .btn svg{width:14px;height:14px}
+  .btn.ghost{background:#fff;border:1px solid var(--line);color:var(--ink-soft)}
+  .btn.soft{background:var(--paper-2);color:var(--ink-soft);border:1px solid var(--line)}
+  .btn.primary{background:var(--clay);color:#fff;box-shadow:0 4px 10px -4px rgba(217,119,87,.5)}
+
+  .search{display:flex;align-items:center;gap:9px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 13px;max-width:380px;color:var(--ink-faint);font-size:13px;margin-bottom:18px}
+  .search svg{width:15px;height:15px}
+
+  /* provider card */
+  .prov-cards{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .pcard{background:#fff;border:1px solid var(--line);border-radius:12px;padding:17px;box-shadow:var(--shadow-1);position:relative}
+  .pcard.default{border-color:var(--clay);box-shadow:0 0 0 3px var(--clay-soft),var(--shadow-1)}
+  .pcard.busy::after{content:"";position:absolute;inset:0;border-radius:12px;background:rgba(250,249,247,.5)}
+  .pcard-h{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+  .pcard-h .av{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;color:#fff;font-family:var(--font-serif);font-size:16px;font-weight:600}
+  .pcard-h b{font-size:15px;font-weight:600;display:block}
+  .pcard-h s{text-decoration:none;font-size:11.5px;color:var(--ink-faint);display:block;margin-top:1px}
+  .pcard-h .star{margin-left:auto;font-size:10.5px;font-weight:600;color:var(--clay);background:var(--clay-soft);padding:3px 10px;border-radius:999px}
+  .pcard-h .cred{margin-left:auto;font-size:10.5px;font-weight:500;color:var(--sage);background:var(--sage-soft);padding:3px 10px;border-radius:999px;display:inline-flex;align-items:center;gap:5px}
+  .pcard-h .cred.miss{color:var(--rose);background:var(--rose-soft)}
+
+  .quota{background:var(--paper-2);border:1px solid var(--line);border-radius:9px;padding:13px;margin-top:8px}
+  .quota-t{display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-soft);margin-bottom:7px;align-items:baseline}
+  .quota-t b{font-family:var(--font-serif);font-size:18px;color:var(--ink);font-weight:400}
+  .quota-t .pct{font-family:var(--font-mono);font-size:11px;color:var(--ink-faint)}
+  .bar{height:6px;border-radius:999px;background:var(--paper-3);overflow:hidden}
+  .bar i{display:block;height:100%;border-radius:999px;background:var(--clay)}
+  .quota-sub{display:flex;justify-content:space-between;font-size:10.5px;color:var(--ink-faint);margin-top:8px}
+  .quota-sub .ready{color:var(--sage);font-weight:500}
+
+  .mini-pills{display:flex;flex-wrap:wrap;gap:5px;margin-top:13px}
+  .mini-pills .mp{font-size:10.5px;font-family:var(--font-mono);color:var(--ink-soft);background:var(--paper-2);border:1px solid var(--line);padding:3px 8px;border-radius:6px}
+  .mini-pills .mp.default-mp{color:var(--clay);background:var(--clay-soft);border-color:#f0ddd0}
+  .pcard-foot{display:flex;justify-content:flex-end;gap:2px;margin-top:13px}
+  .link{font-size:12px;color:var(--clay);background:none;border:none;cursor:default;font-family:inherit;padding:6px 9px;border-radius:7px;display:inline-flex;align-items:center;gap:5px}
+  .link svg{width:13px;height:13px}
+
+  /* detail quota items */
+  .qrow{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+  .qrow:last-child{border-bottom:none}
+  .qrow .lb{color:var(--ink-soft)}
+  .qrow .lb s{text-decoration:none;display:block;font-size:10.5px;color:var(--ink-faint);margin-top:1px}
+  .qrow .vl{font-weight:600;text-align:right}
+  .qrow .vl .small{display:block;font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);font-weight:400;margin-top:1px}
+
+  /* model list */
+  .mrow{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}
+  .mrow:last-child{border-bottom:none}
+  .mrow .mn{font-size:13px;font-weight:500;flex:1}
+  .mrow .mn s{text-decoration:none;display:block;font-size:10.5px;color:var(--ink-faint);font-family:var(--font-mono);margin-top:1px}
+  .mrow .eff{display:flex;gap:4px}
+  .mrow .eff .ef{font-size:9.5px;font-family:var(--font-mono);color:var(--ink-soft);background:var(--paper-2);border:1px solid var(--line);padding:2px 6px;border-radius:5px}
+
+  /* form */
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 18px;max-width:680px}
+  .form-field{display:flex;flex-direction:column;gap:6px}
+  .form-field.full{grid-column:1/-1}
+  .form-field .lab{font-size:11.5px;font-weight:600;color:var(--ink-soft);display:flex;align-items:center;gap:6px}
+  .form-field .lab .opt{font-size:9.5px;color:var(--ink-faint);font-weight:400}
+  .finput,.fselect{background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:13px;color:var(--ink);outline:none;font-family:inherit}
+  .fselect{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a8a097' stroke-width='2'><path d='M6 9l6 6 6-6'/></svg>");background-repeat:no-repeat;background-position:right 12px center;padding-right:32px}
+  .fmono{font-family:var(--font-mono);font-size:12px}
+  .fsecret{font-family:var(--font-mono);letter-spacing:.1em}
+  .finput:focus,.fselect:focus{border-color:var(--clay);box-shadow:0 0 0 3px var(--clay-soft)}
+  .fhint{font-size:10.5px;color:var(--ink-faint);line-height:1.5}
+  .seg-list{display:flex;gap:8px}
+  .seg-opt{flex:1;border:1px solid var(--line);border-radius:9px;padding:11px 12px;cursor:default;text-align:center}
+  .seg-opt b{font-size:12.5px;font-weight:600;display:block}
+  .seg-opt s{text-decoration:none;font-size:10px;color:var(--ink-faint);display:block;margin-top:2px}
+  .seg-opt.sel{border-color:var(--clay);background:var(--clay-soft);color:var(--clay-deep)}
+  .seg-opt.sel b{color:var(--clay-deep)}
+
+  .custom-model{display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--paper-2);border:1px solid var(--line);border-radius:9px;margin-bottom:8px}
+  .custom-model .mn{font-size:12.5px;font-weight:500;flex:1}
+  .custom-model .rm{color:var(--rose);background:none;border:none;cursor:default;padding:4px;border-radius:6px}
+  .custom-model .rm svg{width:14px;height:14px}
+
+  .foot-note{max-width:1240px;margin:48px auto 0;color:var(--ink-faint);font-size:12px;text-align:center;font-family:var(--font-serif);font-style:italic}
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <div class="deck-head">
+    <div>
+      <span class="tag">● 06 · Claude Warm · 设置 · Providers</span>
+      <h1>Providers</h1>
+      <p>列表 / 详情 / 新增 / 编辑四屏。Zhipu 配额卡含 5h / 周额度 / MCP 进度，DeepSeek 余额拆分。</p>
+    </div>
+    <div class="chips">
+      <span>页面栈互斥</span><span>用量配额卡</span><span>保存/取消草稿</span>
+    </div>
+  </div>
+
+  <div class="gallery">
+
+    <!-- FRAME 1: provider list -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> Providers · 列表（搜索 + 用量配额卡 + 默认标记） <span class="num">screen 01 / 04</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Settings · Providers</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 18l-6-6 6-6"/></svg></div></div>
+        <div class="settings">
+          <aside class="setnav">
+            <div class="back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15 18l-6-6 6-6"/></svg>返回聊天</div>
+            <div class="grp">Workspace</div>
+            <div class="ntile sel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M7 18a5 5 0 010-10 6 6 0 0111.5 1.5A4 4 0 0117 18z"/></svg>Providers</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Instructions</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 6l8-3 8 3v4c0 5-3.5 8-8 9-4.5-1-8-4-8-9z"/></svg>Skills</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="9" r="4"/><path d="M5 20c0-3 3-5 7-5s7 2 7 5"/></svg>Roles</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="4"/><path d="M4 12h2M18 12h2M12 4v2M12 18v2"/></svg>MCP</div>
+            <div class="grp">System</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>Security</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/></svg>General</div>
+          </aside>
+          <section class="setmain">
+            <div class="sethead">
+              <div><h2>Providers</h2><p>模型供应商、凭据、模型清单与用量</p></div>
+              <div class="acts">
+                <button class="btn ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.6L3 8"/><path d="M3 4v4h4"/></svg>刷新用量</button>
+                <button class="btn primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>新增</button>
+              </div>
+            </div>
+            <div class="setbody">
+              <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>搜索供应商…</div>
+              <div class="prov-cards">
+                <!-- Zhipu default -->
+                <div class="pcard default">
+                  <div class="pcard-h"><div class="av" style="background:var(--clay)">智</div><div><b>Zhipu Coding Plan</b><s>open.bigmodel.cn · glm-5.2</s></div><span class="star">★ 默认</span></div>
+                  <div class="quota">
+                    <div class="quota-t"><span>5 小时额度</span><span><b>72%</b> <span class="pct">剩余</span></span></div>
+                    <div class="bar"><i style="width:72%"></i></div>
+                    <div class="quota-t" style="margin-top:12px"><span>周额度</span><span><b>54%</b> <span class="pct">剩余</span></span></div>
+                    <div class="bar"><i style="width:54%"></i></div>
+                    <div class="quota-t" style="margin-top:12px"><span>MCP 额度</span><span><b>89%</b> <span class="pct">剩余</span></span></div>
+                    <div class="bar"><i style="width:89%;background:var(--sage)"></i></div>
+                    <div class="quota-sub"><span>重置 6/22 17:00</span><span class="ready">● ready · 刚刚</span></div>
+                  </div>
+                  <div class="mini-pills"><span class="mp default-mp">glm-5.2</span><span class="mp">glm-5</span><span class="mp">glm-4-flash</span></div>
+                  <div class="pcard-foot"><button class="link">详情</button><button class="link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 20h9M16.5 3.5l4 4L7 21l-4 1 1-4z"/></svg>编辑</button></div>
+                </div>
+                <!-- DeepSeek -->
+                <div class="pcard">
+                  <div class="pcard-h"><div class="av" style="background:var(--sage)">DS</div><div><b>DeepSeek</b><s>api.deepseek.com · v4-pro</s></div><span class="cred">● 已配置</span></div>
+                  <div class="quota">
+                    <div class="quota-t"><span>可用余额</span><span><b>¥48.20</b></span></div>
+                    <div class="bar"><i style="width:64%;background:var(--sage)"></i></div>
+                    <div class="quota-sub"><span>赠送 ¥30 · 充值 ¥45</span><span class="ready">● ready · 2 分钟前</span></div>
+                  </div>
+                  <div class="mini-pills"><span class="mp">deepseek-v4-pro</span><span class="mp">v4-flash</span></div>
+                  <div class="pcard-foot"><button class="link">详情</button><button class="link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 20h9M16.5 3.5l4 4L7 21l-4 1 1-4z"/></svg>编辑</button><button class="link">设为默认</button></div>
+                </div>
+                <!-- missing key -->
+                <div class="pcard">
+                  <div class="pcard-h"><div class="av" style="background:var(--ochre)">OF</div><div><b>OpenAI</b><s>api.openai.com · gpt-4o</s></div><span class="cred miss">● 缺 key</span></div>
+                  <div class="quota" style="opacity:.6">
+                    <div class="quota-t"><span>用量</span><span><b>—</b></span></div>
+                    <div class="quota-sub"><span>未配置凭据</span><span style="color:var(--rose)">● 待配置</span></div>
+                  </div>
+                  <div class="mini-pills"><span class="mp">gpt-4o</span><span class="mp">gpt-4o-mini</span></div>
+                  <div class="pcard-foot"><button class="link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 20h9M16.5 3.5l4 4L7 21l-4 1 1-4z"/></svg>编辑</button></div>
+                </div>
+                <!-- busy refreshing -->
+                <div class="pcard busy">
+                  <div class="pcard-h"><div class="av" style="background:var(--ink-faint)">AQ</div><div><b>Azure OpenAI</b><s>my.azure.com · gpt-4</s></div><span class="cred">● 已配置</span></div>
+                  <div class="quota" style="opacity:.6">
+                    <div class="quota-t"><span>用量</span><span><b style="color:var(--clay)">刷新中…</b></span></div>
+                    <div class="quota-sub"><span>查询中</span><span style="color:var(--clay)">● loading</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- FRAME 2: provider detail -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> Provider · 详情（完整用量明细 + 重置时间 + 工具明细 + 模型清单） <span class="num">screen 02 / 04</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Settings · Zhipu Coding Plan</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18"/></svg></div></div>
+        <div class="settings">
+          <aside class="setnav">
+            <div class="back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15 18l-6-6 6-6"/></svg>返回聊天</div>
+            <div class="grp">Workspace</div>
+            <div class="ntile sel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M7 18a5 5 0 010-10 6 6 0 0111.5 1.5A4 4 0 0117 18z"/></svg>Providers</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 4h14v16H5z"/></svg>Instructions</div>
+            <div class="grp">System</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>Security</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/></svg>General</div>
+          </aside>
+          <section class="setmain">
+            <div class="sethead">
+              <div>
+                <div class="crumb-back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15 18l-6-6 6-6"/></svg>Providers</div>
+                <h2>Zhipu Coding Plan</h2><p>open.bigmodel.cn · glm-5.2 · ★ 默认</p>
+              </div>
+              <div class="acts"><button class="btn ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.6L3 8"/><path d="M3 4v4h4"/></svg>刷新</button><button class="btn primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 20h9M16.5 3.5l4 4L7 21l-4 1 1-4z"/></svg>编辑</button></div>
+            </div>
+            <div class="setbody">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+                <div>
+                  <div style="font-size:11.5px;font-weight:600;color:var(--ink-soft);margin-bottom:10px;text-transform:uppercase;letter-spacing:.06em;font-family:var(--font-mono)">配额明细</div>
+                  <div class="quota" style="margin-top:0">
+                    <div class="quota-t"><span>5 小时额度</span><span><b>72%</b></span></div>
+                    <div class="bar"><i style="width:72%"></i></div>
+                    <div class="quota-sub"><span>重置 6/22 17:00（剩 1h12m）</span><span class="ready">● 可用</span></div>
+                    <div class="quota-t" style="margin-top:14px"><span>周额度</span><span><b>54%</b></span></div>
+                    <div class="bar"><i style="width:54%"></i></div>
+                    <div class="quota-sub"><span>重置 6/28 00:00（剩 4 天）</span><span class="ready">● 可用</span></div>
+                    <div class="quota-t" style="margin-top:14px"><span>MCP 额度</span><span><b>89%</b></span></div>
+                    <div class="bar"><i style="width:89%;background:var(--sage)"></i></div>
+                    <div class="quota-sub"><span>重置 6/22 17:00</span><span class="ready">● 充足</span></div>
+                  </div>
+                </div>
+                <div>
+                  <div style="font-size:11.5px;font-weight:600;color:var(--ink-soft);margin-bottom:10px;text-transform:uppercase;letter-spacing:.06em;font-family:var(--font-mono)">工具用量</div>
+                  <div class="quota" style="margin-top:0;padding:4px 13px">
+                    <div class="qrow"><div class="lb">code_geex-4<b></b><s>代码生成</s></div><div class="vl">12,450<span class="small">已用 / 周额 20k</span></div></div>
+                    <div class="qrow"><div class="lb">web_search<s>联网搜索</s></div><div class="vl">842<span class="small">已用 / 周额 1k</span></div></div>
+                    <div class="qrow"><div class="lb">retrieval<s>知识检索</s></div><div class="vl">3,210<span class="small">已用 / 无限</span></div></div>
+                    <div class="qrow"><div class="lb">mcp_filesystem<s>MCP 调用</s></div><div class="vl">186<span class="small">已用 / MCP 额度</span></div></div>
+                  </div>
+                </div>
+              </div>
+              <div style="margin-top:24px">
+                <div style="font-size:11.5px;font-weight:600;color:var(--ink-soft);margin-bottom:10px;text-transform:uppercase;letter-spacing:.06em;font-family:var(--font-mono)">模型清单</div>
+                <div class="quota" style="padding:4px 16px">
+                  <div class="mrow"><div class="mn">glm-5.2<s>glm-5.2 · 默认</s></div><span class="mini-pills"><span class="mp default-mp">默认</span></span><div class="eff"><span class="ef">high</span><span class="ef">medium</span><span class="ef">low</span></div></div>
+                  <div class="mrow"><div class="mn">glm-5<s>glm-5</s></div><div class="eff"><span class="ef">high</span><span class="ef">medium</span></div></div>
+                  <div class="mrow"><div class="mn">glm-4-flash<s>glm-4-flash · 快速</s></div><div class="eff"><span class="ef">low</span></div></div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- FRAME 3: provider add -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> Provider · 新增（从模板创建 + 建议 id） <span class="num">screen 03 / 04</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Settings · 新增 Provider</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18"/></svg></div></div>
+        <div class="settings">
+          <aside class="setnav">
+            <div class="back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15 18l-6-6 6-6"/></svg>返回聊天</div>
+            <div class="grp">Workspace</div>
+            <div class="ntile sel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M7 18a5 5 0 010-10 6 6 0 0111.5 1.5A4 4 0 0117 18z"/></svg>Providers</div>
+            <div class="grp">System</div>
+            <div class="ntile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>Security</div>
+          </aside>
+          <section class="setmain">
+            <div class="sethead">
+              <div>
+                <div class="crumb-back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15 18l-6-6 6-6"/></svg>Providers</div>
+                <h2>新增 Provider</h2><p>从内置模板创建，自动建议不冲突的 id</p>
+              </div>
+              <div class="acts"><button class="btn ghost">取消</button><button class="btn primary" style="opacity:.55;box-shadow:none">保存（未填完）</button></div>
+            </div>
+            <div class="setbody">
+              <div style="font-size:11.5px;font-weight:600;color:var(--ink-soft);margin-bottom:10px;text-transform:uppercase;letter-spacing:.06em;font-family:var(--font-mono)">选择模板</div>
+              <div class="seg-list" style="margin-bottom:22px">
+                <div class="seg-opt sel"><b>智谱 Zhipu</b><s>open.bigmodel.cn</s></div>
+                <div class="seg-opt"><b>DeepSeek</b><s>api.deepseek.com</s></div>
+                <div class="seg-opt"><b>OpenAI</b><s>api.openai.com</s></div>
+                <div class="seg-opt"><b>自定义</b><s>OpenAI 兼容</s></div>
+              </div>
+
+              <div class="form-grid">
+                <div class="form-field"><span class="lab">Provider ID <span class="opt">· 自动建议</span></span><input class="finput fmono" value="zhipu-2"><span class="fhint">ID 不冲突，可保留建议值</span></div>
+                <div class="form-field"><span class="lab">显示名</span><input class="finput" value="智谱 GLM 备用"></div>
+                <div class="form-field"><span class="lab">协议类型</span><select class="fselect"><option>OpenAI 兼容</option><option>Anthropic 原生</option></select></div>
+                <div class="form-field"><span class="lab">Base URL</span><input class="finput fmono" value="https://open.bigmodel.cn/api/paas/v4"></div>
+                <div class="form-field full"><span class="lab">API Key</span><input class="finput fsecret" placeholder="粘贴你的 API key…"><span class="fhint">仅本地保存到 ~/.pure/config.toml，不上传</span></div>
+                <div class="form-field"><span class="lab">默认模型</span><select class="fselect"><option>glm-5.2</option><option>glm-5</option></select></div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- FRAME 4: provider edit -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> Provider · 编辑（key/模板/base URL/API key/默认模型/自定义模型增删） <span class="num">screen 04 / 04</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Settings · 编辑 Provider</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18"/></svg></div></div>
+        <div class="settings">
+          <aside class="setnav">
+            <div class="back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15 18l-6-6 6-6"/></svg>返回聊天</div>
+            <div class="grp">Workspace</div>
+            <div class="ntile sel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M7 18a5 5 0 010-10 6 6 0 0111.5 1.5A4 4 0 0117 18z"/></svg>Providers</div>
+          </aside>
+          <section class="setmain">
+            <div class="sethead">
+              <div>
+                <div class="crumb-back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15 18l-6-6 6-6"/></svg>Providers</div>
+                <h2>编辑 · Zhipu Coding Plan</h2><p>★ 默认 provider</p>
+              </div>
+              <div class="acts"><button class="btn ghost">取消</button><button class="btn primary">保存</button></div>
+            </div>
+            <div class="setbody">
+              <div class="form-grid">
+                <div class="form-field"><span class="lab">Provider Key</span><input class="finput fmono" value="zhipu"></div>
+                <div class="form-field"><span class="lab">模板类型</span><select class="fselect"><option>智谱 Zhipu</option><option>自定义</option></select></div>
+                <div class="form-field"><span class="lab">显示名</span><input class="finput" value="Zhipu Coding Plan"></div>
+                <div class="form-field"><span class="lab">协议类型</span><select class="fselect"><option>OpenAI 兼容</option></select></div>
+                <div class="form-field full"><span class="lab">Base URL</span><input class="finput fmono" value="https://open.bigmodel.cn/api/paas/v4"></div>
+                <div class="form-field full"><span class="lab">API Key</span><input class="finput fsecret" value="••••••••••••••••••••••••••••••"><span class="fhint">已配置 · 点击修改会重新保存</span></div>
+                <div class="form-field"><span class="lab">默认模型</span><select class="fselect"><option>glm-5.2</option><option>glm-5</option></select></div>
+              </div>
+
+              <div style="margin-top:24px">
+                <div style="font-size:11.5px;font-weight:600;color:var(--ink-soft);margin-bottom:10px;text-transform:uppercase;letter-spacing:.06em;font-family:var(--font-mono);display:flex;align-items:center;justify-content:space-between"><span>自定义模型</span><button class="btn soft" style="padding:5px 11px;font-size:11.5px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 5v14M5 12h14"/></svg>添加</button></div>
+                <div class="custom-model"><span class="mn">glm-5-thinking · 启用 high/medium</span><button class="rm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+                <div class="custom-model"><span class="mn">glm-air · 仅 low</span><button class="rm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  <p class="foot-note">Pure Studio · 06 Claude Warm — Providers · 页面栈互斥 · 保存/取消草稿</p>
+</div>
+</body>
+</html>
