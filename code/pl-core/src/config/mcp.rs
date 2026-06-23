@@ -292,7 +292,13 @@ pub fn effective_mcp_servers(
 
     let zhipu_token = zhipu_coding_plan_token(config);
     for definition in BUILTIN_ZHIPU_MCP_SERVERS {
-        let status_kind = if zhipu_token.is_some() {
+        let builtin_enabled = config
+            .builtin_mcp_servers
+            .get(definition.id)
+            .is_none_or(|state| state.enabled);
+        let status_kind = if !builtin_enabled {
+            McpServerStatusKind::Disabled
+        } else if zhipu_token.is_some() {
             McpServerStatusKind::Enabled
         } else {
             McpServerStatusKind::MissingCredential
@@ -338,10 +344,10 @@ pub fn normalize_builtin_mcp_server_states(config: &mut super::PureConfig) {
         .retain(|server_id, _| is_builtin_mcp_server_id(server_id));
     if zhipu_coding_plan_token(config).is_some() {
         for server_id in builtin_mcp_server_ids() {
-            config.builtin_mcp_servers.insert(
-                (*server_id).to_string(),
-                BuiltinMcpServerState { enabled: true },
-            );
+            config
+                .builtin_mcp_servers
+                .entry((*server_id).to_string())
+                .or_insert(BuiltinMcpServerState { enabled: true });
         }
     }
 }

@@ -442,6 +442,108 @@ class McpServerSettingsView {
   final String status;
 }
 
+class InstructionsSettingsView {
+  const InstructionsSettingsView({
+    this.baseOverride = '',
+    this.developer = '',
+    this.user = '',
+    this.projectDocMaxBytes = 65536,
+    this.projectDocFallbackFilenames = const [],
+  });
+
+  final String baseOverride;
+  final String developer;
+  final String user;
+  final int projectDocMaxBytes;
+  final List<String> projectDocFallbackFilenames;
+
+  InstructionsSettingsView copyWith({
+    String? baseOverride,
+    String? developer,
+    String? user,
+    int? projectDocMaxBytes,
+    List<String>? projectDocFallbackFilenames,
+  }) {
+    return InstructionsSettingsView(
+      baseOverride: baseOverride ?? this.baseOverride,
+      developer: developer ?? this.developer,
+      user: user ?? this.user,
+      projectDocMaxBytes: projectDocMaxBytes ?? this.projectDocMaxBytes,
+      projectDocFallbackFilenames:
+          projectDocFallbackFilenames ?? this.projectDocFallbackFilenames,
+    );
+  }
+}
+
+class SkillsSettingsView {
+  const SkillsSettingsView({
+    this.enabled = true,
+    this.autoLearn = true,
+    this.systemEnabled = true,
+    this.projectDir = 'skills',
+    this.userDir = '~/.pure/skills',
+    this.externalDirs = const [],
+    this.disabled = const [],
+    this.autoLearnMinToolCalls = 5,
+  });
+
+  final bool enabled;
+  final bool autoLearn;
+  final bool systemEnabled;
+  final String projectDir;
+  final String userDir;
+  final List<String> externalDirs;
+  final List<String> disabled;
+  final int autoLearnMinToolCalls;
+
+  SkillsSettingsView copyWith({
+    bool? enabled,
+    bool? autoLearn,
+    bool? systemEnabled,
+    String? projectDir,
+    String? userDir,
+    List<String>? externalDirs,
+    List<String>? disabled,
+    int? autoLearnMinToolCalls,
+  }) {
+    return SkillsSettingsView(
+      enabled: enabled ?? this.enabled,
+      autoLearn: autoLearn ?? this.autoLearn,
+      systemEnabled: systemEnabled ?? this.systemEnabled,
+      projectDir: projectDir ?? this.projectDir,
+      userDir: userDir ?? this.userDir,
+      externalDirs: externalDirs ?? this.externalDirs,
+      disabled: disabled ?? this.disabled,
+      autoLearnMinToolCalls:
+          autoLearnMinToolCalls ?? this.autoLearnMinToolCalls,
+    );
+  }
+}
+
+class GeneralSettingsView {
+  const GeneralSettingsView({
+    this.followSystemTheme = true,
+    this.followActiveTurn = true,
+    this.compactTimeline = false,
+  });
+
+  final bool followSystemTheme;
+  final bool followActiveTurn;
+  final bool compactTimeline;
+
+  GeneralSettingsView copyWith({
+    bool? followSystemTheme,
+    bool? followActiveTurn,
+    bool? compactTimeline,
+  }) {
+    return GeneralSettingsView(
+      followSystemTheme: followSystemTheme ?? this.followSystemTheme,
+      followActiveTurn: followActiveTurn ?? this.followActiveTurn,
+      compactTimeline: compactTimeline ?? this.compactTimeline,
+    );
+  }
+}
+
 class StudioState {
   const StudioState({
     required this.projects,
@@ -451,6 +553,9 @@ class StudioState {
     this.providerUsages = const [],
     required this.roles,
     required this.mcpServers,
+    this.instructions = const InstructionsSettingsView(),
+    this.skills = const SkillsSettingsView(),
+    this.general = const GeneralSettingsView(),
     required this.selectedProjectId,
     required this.selectedSessionId,
     required this.permissionMode,
@@ -468,6 +573,9 @@ class StudioState {
   final List<ProviderUsageView> providerUsages;
   final List<RoleSettingsView> roles;
   final List<McpServerSettingsView> mcpServers;
+  final InstructionsSettingsView instructions;
+  final SkillsSettingsView skills;
+  final GeneralSettingsView general;
   final String? selectedProjectId;
   final String? selectedSessionId;
   final PermissionMode permissionMode;
@@ -527,6 +635,9 @@ class StudioState {
     List<ProviderUsageView>? providerUsages,
     List<RoleSettingsView>? roles,
     List<McpServerSettingsView>? mcpServers,
+    InstructionsSettingsView? instructions,
+    SkillsSettingsView? skills,
+    GeneralSettingsView? general,
     String? selectedProjectId,
     String? selectedSessionId,
     PermissionMode? permissionMode,
@@ -544,6 +655,9 @@ class StudioState {
       providerUsages: providerUsages ?? this.providerUsages,
       roles: roles ?? this.roles,
       mcpServers: mcpServers ?? this.mcpServers,
+      instructions: instructions ?? this.instructions,
+      skills: skills ?? this.skills,
+      general: general ?? this.general,
       selectedProjectId: selectedProjectId ?? this.selectedProjectId,
       selectedSessionId: selectedSessionId ?? this.selectedSessionId,
       permissionMode: permissionMode ?? this.permissionMode,

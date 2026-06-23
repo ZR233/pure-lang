@@ -82,6 +82,26 @@ Future<JsonResponse> saveProviderSettings({required String settingsJson}) =>
       settingsJson: settingsJson,
     );
 
+Future<JsonResponse> saveInstructionsSettings({required String settingsJson}) =>
+    RustLib.instance.api.crateApiStudioSaveInstructionsSettings(
+      settingsJson: settingsJson,
+    );
+
+Future<JsonResponse> saveSkillsSettings({required String settingsJson}) =>
+    RustLib.instance.api.crateApiStudioSaveSkillsSettings(
+      settingsJson: settingsJson,
+    );
+
+Future<JsonResponse> saveMcpSettings({required String settingsJson}) => RustLib
+    .instance
+    .api
+    .crateApiStudioSaveMcpSettings(settingsJson: settingsJson);
+
+Future<JsonResponse> saveGeneralSettings({required String settingsJson}) =>
+    RustLib.instance.api.crateApiStudioSaveGeneralSettings(
+      settingsJson: settingsJson,
+    );
+
 Future<JsonResponse> loadProviderUsages() =>
     RustLib.instance.api.crateApiStudioLoadProviderUsages();
 

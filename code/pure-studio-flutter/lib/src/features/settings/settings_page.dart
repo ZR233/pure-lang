@@ -44,15 +44,19 @@ class SettingsPage extends ConsumerWidget {
           body: TabBarView(
             children: [
               _ProvidersTab(providers: state.providers, roles: state.roles),
-              const _InstructionsTab(),
+              _InstructionsTab(settings: state.instructions),
               _SkillsTab(
-                skills: state.runtime.activeSkills,
+                skills: {
+                  ...state.runtime.activeSkills,
+                  ...state.skills.disabled,
+                }.toList(),
+                settings: state.skills,
                 projectId: state.selectedProjectId,
               ),
               _RolesTab(providers: state.providers, roles: state.roles),
               _McpTab(servers: state.mcpServers),
               _SecurityTab(mode: state.permissionMode),
-              const _GeneralTab(),
+              _GeneralTab(settings: state.general),
             ],
           ),
         ),
@@ -95,6 +99,7 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
   _ProviderDraft? _draft;
   bool _showDetails = false;
   bool _saving = false;
+  String? _draftError;
   final Set<String> _usageLoadingProviderIds = {};
   String? _usageError;
 
@@ -140,6 +145,7 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
             child: _ProviderEditor(
               draft: _draft!,
               saving: _saving,
+              error: _draftError,
               onCancel: () => setState(() => _draft = null),
               onSave: _saveDraft,
               onChangeTemplate: _changeDraftTemplate,
@@ -228,6 +234,7 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
       _selectedProviderId = id;
       _showDetails = false;
       _draft = _ProviderDraft.create(template.createProvider(id));
+      _draftError = null;
     });
   }
 
@@ -236,6 +243,7 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
       _selectedProviderId = provider.id;
       _showDetails = false;
       _draft = _ProviderDraft.edit(provider);
+      _draftError = null;
     });
   }
 
@@ -321,7 +329,10 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
     if (current == null || _saving) {
       return;
     }
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _draftError = null;
+    });
     try {
       final provider = _normalizedProvider(current.provider);
       final providers = current.mode == _ProviderDraftMode.create
@@ -345,6 +356,10 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
         });
       }
       await _refreshUsages(providerId: provider.id);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _draftError = error.toString());
+      }
     } finally {
       if (mounted) {
         setState(() => _saving = false);
@@ -1383,6 +1398,7 @@ class _ProviderEditor extends StatelessWidget {
   const _ProviderEditor({
     required this.draft,
     required this.saving,
+    required this.error,
     required this.onCancel,
     required this.onSave,
     required this.onChangeTemplate,
@@ -1394,6 +1410,7 @@ class _ProviderEditor extends StatelessWidget {
 
   final _ProviderDraft draft;
   final bool saving;
+  final String? error;
   final VoidCallback onCancel;
   final VoidCallback onSave;
   final ValueChanged<String> onChangeTemplate;
@@ -1430,6 +1447,10 @@ class _ProviderEditor extends StatelessWidget {
             ],
           ),
         ),
+        if (error != null) ...[
+          const SizedBox(height: 12),
+          _InlineError(message: error!),
+        ],
         const SizedBox(height: 12),
         _SectionPanel(
           title: 'Connection',
@@ -2261,29 +2282,59 @@ double _clampPercent(double value) {
   return value;
 }
 
-class _InstructionsTab extends StatefulWidget {
-  const _InstructionsTab();
+class _InstructionsTab extends ConsumerStatefulWidget {
+  const _InstructionsTab({required this.settings});
+
+  final InstructionsSettingsView settings;
 
   @override
-  State<_InstructionsTab> createState() => _InstructionsTabState();
+  ConsumerState<_InstructionsTab> createState() => _InstructionsTabState();
 }
 
-class _InstructionsTabState extends State<_InstructionsTab> {
+class _InstructionsTabState extends ConsumerState<_InstructionsTab> {
   late final TextEditingController _baseController;
   late final TextEditingController _developerController;
-  bool _dirty = false;
+  late final TextEditingController _userController;
+  Timer? _saveTimer;
+  bool _saving = false;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _baseController = TextEditingController();
-    _developerController = TextEditingController();
+    _baseController = TextEditingController(text: widget.settings.baseOverride);
+    _developerController = TextEditingController(
+      text: widget.settings.developer,
+    );
+    _userController = TextEditingController(text: widget.settings.user);
+  }
+
+  @override
+  void didUpdateWidget(covariant _InstructionsTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_saving) {
+      return;
+    }
+    if (oldWidget.settings.baseOverride != widget.settings.baseOverride &&
+        _baseController.text != widget.settings.baseOverride) {
+      _baseController.text = widget.settings.baseOverride;
+    }
+    if (oldWidget.settings.developer != widget.settings.developer &&
+        _developerController.text != widget.settings.developer) {
+      _developerController.text = widget.settings.developer;
+    }
+    if (oldWidget.settings.user != widget.settings.user &&
+        _userController.text != widget.settings.user) {
+      _userController.text = widget.settings.user;
+    }
   }
 
   @override
   void dispose() {
+    _saveTimer?.cancel();
     _baseController.dispose();
     _developerController.dispose();
+    _userController.dispose();
     super.dispose();
   }
 
@@ -2298,7 +2349,7 @@ class _InstructionsTabState extends State<_InstructionsTab> {
             labelText: 'Base instructions',
             prefixIcon: Icon(Icons.notes_outlined),
           ),
-          onChanged: (_) => setState(() => _dirty = true),
+          onChanged: (_) => _scheduleSave(),
         ),
         const SizedBox(height: 12),
         TextField(
@@ -2308,43 +2359,71 @@ class _InstructionsTabState extends State<_InstructionsTab> {
             labelText: 'Developer instructions',
             prefixIcon: Icon(Icons.code),
           ),
-          onChanged: (_) => setState(() => _dirty = true),
+          onChanged: (_) => _scheduleSave(),
         ),
         const SizedBox(height: 12),
-        Consumer(
-          builder: (context, ref, child) {
-            return _LocalDraftBar(
-              dirty: _dirty,
-              onReset: () {
-                _baseController.clear();
-                _developerController.clear();
-                setState(() => _dirty = false);
-              },
-              onStage: () {
-                ref
-                    .read(studioControllerProvider.notifier)
-                    .saveSettingsDraft('instructions', {
-                      'base': _baseController.text,
-                      'developer': _developerController.text,
-                    })
-                    .then((_) {
-                      if (mounted) {
-                        setState(() => _dirty = false);
-                      }
-                    });
-              },
-            );
-          },
+        TextField(
+          controller: _userController,
+          maxLines: 8,
+          decoration: const InputDecoration(
+            labelText: 'User context',
+            prefixIcon: Icon(Icons.person_outline),
+          ),
+          onChanged: (_) => _scheduleSave(),
         ),
+        if (_saving || _error != null) ...[
+          const SizedBox(height: 12),
+          if (_saving) const LinearProgressIndicator(),
+          if (_error != null) _InlineError(message: _error!),
+        ],
       ],
     );
+  }
+
+  void _scheduleSave() {
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 650), () {
+      unawaited(_save());
+    });
+  }
+
+  Future<void> _save() async {
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await ref
+          .read(studioControllerProvider.notifier)
+          .saveInstructionsSettings({
+            'baseOverride': _baseController.text,
+            'developer': _developerController.text,
+            'user': _userController.text,
+            'projectDocMaxBytes': widget.settings.projectDocMaxBytes,
+            'projectDocFallbackFilenames':
+                widget.settings.projectDocFallbackFilenames,
+          });
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = error.toString());
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
   }
 }
 
 class _SkillsTab extends ConsumerStatefulWidget {
-  const _SkillsTab({required this.skills, required this.projectId});
+  const _SkillsTab({
+    required this.skills,
+    required this.settings,
+    required this.projectId,
+  });
 
   final List<String> skills;
+  final SkillsSettingsView settings;
   final String? projectId;
 
   @override
@@ -2354,10 +2433,9 @@ class _SkillsTab extends ConsumerStatefulWidget {
 class _SkillsTabState extends ConsumerState<_SkillsTab> {
   String _query = '';
   final Set<String> _discoveredSkills = {};
-  final Set<String> _disabledSkills = {};
-  bool _dirty = false;
   bool _discovering = false;
   String? _discoverError;
+  String? _saveError;
 
   @override
   void initState() {
@@ -2374,6 +2452,7 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
   @override
   Widget build(BuildContext context) {
     final skills = {...widget.skills, ..._discoveredSkills}.toList()..sort();
+    final disabledSkills = widget.settings.disabled.toSet();
     final filteredSkills = skills
         .where((skill) => skill.toLowerCase().contains(_query.toLowerCase()))
         .toList();
@@ -2393,16 +2472,15 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
               FilterChip(
                 avatar: const Icon(Icons.extension_outlined, size: 18),
                 label: Text(skill, overflow: TextOverflow.ellipsis),
-                selected: !_disabledSkills.contains(skill),
+                selected: !disabledSkills.contains(skill),
                 onSelected: (selected) {
-                  setState(() {
-                    _dirty = true;
-                    if (selected) {
-                      _disabledSkills.remove(skill);
-                    } else {
-                      _disabledSkills.add(skill);
-                    }
-                  });
+                  final disabled = {...disabledSkills};
+                  if (selected) {
+                    disabled.remove(skill);
+                  } else {
+                    disabled.add(skill);
+                  }
+                  unawaited(_saveDisabled(disabled));
                 },
               ),
           ],
@@ -2423,47 +2501,48 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
           const SizedBox(height: 12),
           _InlineError(message: _discoverError!),
         ],
+        if (_saveError != null) ...[
+          const SizedBox(height: 12),
+          _InlineError(message: _saveError!),
+        ],
         const SizedBox(height: 16),
-        Row(
-          children: [
-            FilledButton.icon(
-              icon: _discovering
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.travel_explore),
-              label: Text(_discovering ? 'Discovering' : 'Discover'),
-              onPressed: widget.projectId == null || _discovering
-                  ? null
-                  : _discoverSkills,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _LocalDraftBar(
-                dirty: _dirty,
-                onReset: () => setState(() {
-                  _disabledSkills.clear();
-                  _dirty = false;
-                }),
-                onStage: () {
-                  ref
-                      .read(studioControllerProvider.notifier)
-                      .saveSettingsDraft('skills', {
-                        'disabled': _disabledSkills.toList()..sort(),
-                      })
-                      .then((_) {
-                        if (mounted) {
-                          setState(() => _dirty = false);
-                        }
-                      });
-                },
-              ),
-            ),
-          ],
+        Align(
+          alignment: Alignment.centerLeft,
+          child: FilledButton.icon(
+            icon: _discovering
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.travel_explore),
+            label: Text(_discovering ? 'Discovering' : 'Discover'),
+            onPressed: widget.projectId == null || _discovering
+                ? null
+                : _discoverSkills,
+          ),
         ),
       ],
     );
+  }
+
+  Future<void> _saveDisabled(Set<String> disabled) async {
+    try {
+      setState(() => _saveError = null);
+      await ref.read(studioControllerProvider.notifier).saveSkillsSettings({
+        'enabled': widget.settings.enabled,
+        'autoLearn': widget.settings.autoLearn,
+        'systemEnabled': widget.settings.systemEnabled,
+        'projectDir': widget.settings.projectDir,
+        'userDir': widget.settings.userDir,
+        'externalDirs': widget.settings.externalDirs,
+        'disabled': disabled.toList()..sort(),
+        'autoLearnMinToolCalls': widget.settings.autoLearnMinToolCalls,
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() => _saveError = error.toString());
+      }
+    }
   }
 
   Future<void> _discoverSkills() async {
@@ -2491,19 +2570,18 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
   }
 }
 
-class _RolesTab extends StatefulWidget {
+class _RolesTab extends ConsumerStatefulWidget {
   const _RolesTab({required this.providers, required this.roles});
 
   final List<ProviderSettingsView> providers;
   final List<RoleSettingsView> roles;
 
   @override
-  State<_RolesTab> createState() => _RolesTabState();
+  ConsumerState<_RolesTab> createState() => _RolesTabState();
 }
 
-class _RolesTabState extends State<_RolesTab> {
+class _RolesTabState extends ConsumerState<_RolesTab> {
   final Map<String, String> _selectionByRole = {};
-  final Set<String> _dirtyRoles = {};
 
   @override
   Widget build(BuildContext context) {
@@ -2552,26 +2630,20 @@ class _RolesTabState extends State<_RolesTab> {
                         if (value == null) {
                           return;
                         }
-                        setState(() {
-                          _selectionByRole[role] = value;
-                          _dirtyRoles.add(role);
-                        });
+                        setState(() => _selectionByRole[role] = value);
+                        final option = options.firstWhere(
+                          (option) => option.key == value,
+                        );
+                        ref
+                            .read(studioControllerProvider.notifier)
+                            .setModelRole(
+                              roleKey: role,
+                              providerId: option.providerId,
+                              model: option.model,
+                              effort: option.effort,
+                            );
                       },
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Consumer(
-                    builder: (context, ref, child) {
-                      return IconButton(
-                        tooltip: _dirtyRoles.contains(role)
-                            ? 'Apply model'
-                            : 'No local changes',
-                        icon: const Icon(Icons.save_outlined),
-                        onPressed: _dirtyRoles.contains(role)
-                            ? () => _saveRoleDraft(ref, role)
-                            : null,
-                      );
-                    },
                   ),
                 ],
               ),
@@ -2600,25 +2672,6 @@ class _RolesTabState extends State<_RolesTab> {
       return configured;
     }
     return options.isEmpty ? 'default::default' : options.first.key;
-  }
-
-  void _saveRoleDraft(WidgetRef ref, String role) {
-    final option = _roleModelOptions(
-      widget.providers,
-    ).firstWhere((option) => option.key == _selectionByRole[role]);
-    ref
-        .read(studioControllerProvider.notifier)
-        .setModelRole(
-          roleKey: role,
-          providerId: option.providerId,
-          model: option.model,
-          effort: option.effort,
-        )
-        .then((_) {
-          if (mounted) {
-            setState(() => _dirtyRoles.remove(role));
-          }
-        });
   }
 
   List<_RoleModelOption> _roleModelOptions(
@@ -2670,19 +2723,26 @@ class _RoleModelOption {
   String get key => '$providerId::$model';
 }
 
-class _McpTab extends StatefulWidget {
+class _McpTab extends ConsumerStatefulWidget {
   const _McpTab({required this.servers});
 
   final List<McpServerSettingsView> servers;
 
   @override
-  State<_McpTab> createState() => _McpTabState();
+  ConsumerState<_McpTab> createState() => _McpTabState();
 }
 
-class _McpTabState extends State<_McpTab> {
+class _McpTabState extends ConsumerState<_McpTab> {
   final Map<String, bool> _enabledByServer = {};
   final Map<String, String> _endpointByServer = {};
-  final Set<String> _dirtyServers = {};
+  Timer? _saveTimer;
+  String? _error;
+
+  @override
+  void dispose() {
+    _saveTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2699,8 +2759,8 @@ class _McpTabState extends State<_McpTab> {
                     onChanged: (value) {
                       setState(() {
                         _enabledByServer[server.id] = value;
-                        _dirtyServers.add(server.id);
                       });
+                      unawaited(_save());
                     },
                     secondary: const Icon(Icons.hub_outlined),
                     title: Text(server.id),
@@ -2711,45 +2771,44 @@ class _McpTabState extends State<_McpTab> {
                     decoration: const InputDecoration(labelText: 'Endpoint'),
                     onChanged: (value) => setState(() {
                       _endpointByServer[server.id] = value;
-                      _dirtyServers.add(server.id);
+                      _scheduleSave();
                     }),
-                  ),
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Consumer(
-                      builder: (context, ref, child) {
-                        return FilledButton.tonalIcon(
-                          icon: const Icon(Icons.pending_actions_outlined),
-                          label: const Text('Save draft'),
-                          onPressed: _dirtyServers.contains(server.id)
-                              ? () => _saveServerDraft(ref, server)
-                              : null,
-                        );
-                      },
-                    ),
                   ),
                 ],
               ),
             ),
           ),
+        if (_error != null) _InlineError(message: _error!),
       ],
     );
   }
 
-  void _saveServerDraft(WidgetRef ref, McpServerSettingsView server) {
-    ref
-        .read(studioControllerProvider.notifier)
-        .saveSettingsDraft('mcp:${server.id}', {
-          'id': server.id,
-          'enabled': _enabledByServer[server.id] ?? server.enabled,
-          'endpoint': _endpointByServer[server.id] ?? server.endpoint,
-        })
-        .then((_) {
-          if (mounted) {
-            setState(() => _dirtyServers.remove(server.id));
-          }
-        });
+  void _scheduleSave() {
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 650), () {
+      unawaited(_save());
+    });
+  }
+
+  Future<void> _save() async {
+    try {
+      setState(() => _error = null);
+      await ref.read(studioControllerProvider.notifier).saveMcpSettings({
+        'servers': [
+          for (final server in widget.servers)
+            {
+              'id': server.id,
+              'enabled': _enabledByServer[server.id] ?? server.enabled,
+              'transport': server.transport,
+              'endpoint': _endpointByServer[server.id] ?? server.endpoint,
+            },
+        ],
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = error.toString());
+      }
+    }
   }
 }
 
@@ -2802,81 +2861,61 @@ class _SecurityTab extends ConsumerWidget {
   }
 }
 
-class _GeneralTab extends StatefulWidget {
-  const _GeneralTab();
+class _GeneralTab extends ConsumerStatefulWidget {
+  const _GeneralTab({required this.settings});
+
+  final GeneralSettingsView settings;
 
   @override
-  State<_GeneralTab> createState() => _GeneralTabState();
+  ConsumerState<_GeneralTab> createState() => _GeneralTabState();
 }
 
-class _GeneralTabState extends State<_GeneralTab> {
-  bool _followSystemTheme = true;
-  bool _followActiveTurn = true;
-  bool _compactTimeline = false;
-  bool _dirty = false;
+class _GeneralTabState extends ConsumerState<_GeneralTab> {
+  String? _error;
 
   @override
   Widget build(BuildContext context) {
     return _SettingsPane(
       children: [
         SwitchListTile(
-          value: _followSystemTheme,
+          value: widget.settings.followSystemTheme,
           onChanged: (value) =>
-              _setBool(value, (next) => _followSystemTheme = next),
+              _save(widget.settings.copyWith(followSystemTheme: value)),
           secondary: const Icon(Icons.dark_mode_outlined),
           title: const Text('Follow system theme'),
         ),
         SwitchListTile(
-          value: _followActiveTurn,
+          value: widget.settings.followActiveTurn,
           onChanged: (value) =>
-              _setBool(value, (next) => _followActiveTurn = next),
+              _save(widget.settings.copyWith(followActiveTurn: value)),
           secondary: const Icon(Icons.vertical_align_bottom),
           title: const Text('Follow active turn'),
         ),
         SwitchListTile(
-          value: _compactTimeline,
+          value: widget.settings.compactTimeline,
           onChanged: (value) =>
-              _setBool(value, (next) => _compactTimeline = next),
+              _save(widget.settings.copyWith(compactTimeline: value)),
           secondary: const Icon(Icons.view_agenda_outlined),
           title: const Text('Compact timeline'),
         ),
-        const SizedBox(height: 8),
-        Consumer(
-          builder: (context, ref, child) {
-            return _LocalDraftBar(
-              dirty: _dirty,
-              onReset: () => setState(() {
-                _followSystemTheme = true;
-                _followActiveTurn = true;
-                _compactTimeline = false;
-                _dirty = false;
-              }),
-              onStage: () {
-                ref
-                    .read(studioControllerProvider.notifier)
-                    .saveSettingsDraft('general', {
-                      'followSystemTheme': _followSystemTheme,
-                      'followActiveTurn': _followActiveTurn,
-                      'compactTimeline': _compactTimeline,
-                    })
-                    .then((_) {
-                      if (mounted) {
-                        setState(() => _dirty = false);
-                      }
-                    });
-              },
-            );
-          },
-        ),
+        if (_error != null) _InlineError(message: _error!),
       ],
     );
   }
 
-  void _setBool(bool value, ValueChanged<bool> setter) {
-    setState(() {
-      setter(value);
-      _dirty = true;
-    });
+  Future<void> _save(GeneralSettingsView settings) async {
+    try {
+      setState(() => _error = null);
+      await ref.read(studioControllerProvider.notifier).saveGeneralSettings({
+        'followSystemTheme': settings.followSystemTheme,
+        'followActiveTurn': settings.followActiveTurn,
+        'compactTimeline': settings.compactTimeline,
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = error.toString());
+      }
+    }
   }
 }
 
@@ -2895,39 +2934,6 @@ class _ReadonlyField extends StatelessWidget {
         readOnly: true,
         decoration: InputDecoration(labelText: label),
       ),
-    );
-  }
-}
-
-class _LocalDraftBar extends StatelessWidget {
-  const _LocalDraftBar({
-    required this.dirty,
-    required this.onReset,
-    required this.onStage,
-  });
-
-  final bool dirty;
-  final VoidCallback onReset;
-  final VoidCallback onStage;
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      alignment: WrapAlignment.end,
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        OutlinedButton.icon(
-          icon: const Icon(Icons.restart_alt),
-          label: const Text('Reset'),
-          onPressed: dirty ? onReset : null,
-        ),
-        FilledButton.tonalIcon(
-          icon: const Icon(Icons.pending_actions_outlined),
-          label: const Text('Save draft'),
-          onPressed: dirty ? onStage : null,
-        ),
-      ],
     );
   }
 }

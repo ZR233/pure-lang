@@ -6,13 +6,17 @@ param(
     [string]$Configuration,
 
     [Parameter(Mandatory = $true)]
-    [string]$OutputDir
+    [string]$OutputDir,
+
+    [string]$TargetDir
 )
 
 $ErrorActionPreference = "Stop"
 
 $WorkspaceRoot = (Resolve-Path -LiteralPath $WorkspaceRoot).Path
-$TargetDir = Join-Path $WorkspaceRoot "target"
+if ([string]::IsNullOrWhiteSpace($TargetDir)) {
+    $TargetDir = Join-Path $WorkspaceRoot "code\pure-studio-flutter\build\rust-target"
+}
 $env:CARGO_TARGET_DIR = $TargetDir
 
 $CargoArgs = @("build", "-p", "pl-studio-bridge")

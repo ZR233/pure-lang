@@ -239,6 +239,37 @@ class StudioController extends AsyncNotifier<StudioState> {
     state = AsyncData(_mergeConfigState(latest, next));
   }
 
+  Future<void> saveInstructionsSettings(Map<String, Object?> settings) async {
+    await _saveConfigSettings(() => _api.saveInstructionsSettings(settings));
+  }
+
+  Future<void> saveSkillsSettings(Map<String, Object?> settings) async {
+    await _saveConfigSettings(() => _api.saveSkillsSettings(settings));
+  }
+
+  Future<void> saveMcpSettings(Map<String, Object?> settings) async {
+    await _saveConfigSettings(() => _api.saveMcpSettings(settings));
+  }
+
+  Future<void> saveGeneralSettings(Map<String, Object?> settings) async {
+    await _saveConfigSettings(() => _api.saveGeneralSettings(settings));
+  }
+
+  Future<void> _saveConfigSettings(
+    Future<StudioState> Function() request,
+  ) async {
+    final current = state.value;
+    if (current == null) {
+      return;
+    }
+    final next = await request();
+    final latest = state.value;
+    if (latest == null) {
+      return;
+    }
+    state = AsyncData(_mergeConfigState(latest, next));
+  }
+
   Future<void> refreshProviderUsages() async {
     final current = state.value;
     if (current == null) {
@@ -478,6 +509,9 @@ class StudioController extends AsyncNotifier<StudioState> {
       mcpServers: next.mcpServers.isEmpty
           ? current.mcpServers
           : next.mcpServers,
+      instructions: next.instructions,
+      skills: next.skills,
+      general: next.general,
       permissionMode: next.permissionMode,
       runtime: next.runtime.model.isEmpty ? current.runtime : next.runtime,
     );

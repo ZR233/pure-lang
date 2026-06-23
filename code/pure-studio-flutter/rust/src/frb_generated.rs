@@ -484,6 +484,69 @@ fn wire__crate__api__studio__save_provider_settings_impl(
         },
     )
 }
+macro_rules! wire_string_json_response_fn {
+    ($fn_name:ident, $debug_name:literal, $api_fn:ident) => {
+        fn $fn_name(
+            port_: flutter_rust_bridge::for_generated::MessagePort,
+            ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+            rust_vec_len_: i32,
+            data_len_: i32,
+        ) {
+            FLUTTER_RUST_BRIDGE_HANDLER
+                .wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+                    flutter_rust_bridge::for_generated::TaskInfo {
+                        debug_name: $debug_name,
+                        port: Some(port_),
+                        mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+                    },
+                    move || {
+                        let message = unsafe {
+                            flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                                ptr_,
+                                rust_vec_len_,
+                                data_len_,
+                            )
+                        };
+                        let mut deserializer =
+                            flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+                        let api_settings_json = <String>::sse_decode(&mut deserializer);
+                        deserializer.end();
+                        move |context| {
+                            transform_result_sse::<
+                                _,
+                                flutter_rust_bridge::for_generated::anyhow::Error,
+                            >((move || {
+                                let output_ok = crate::api::studio::$api_fn(api_settings_json)?;
+                                Ok(output_ok)
+                            })())
+                        }
+                    },
+                )
+        }
+    };
+}
+
+wire_string_json_response_fn!(
+    wire__crate__api__studio__save_instructions_settings_impl,
+    "save_instructions_settings",
+    save_instructions_settings
+);
+wire_string_json_response_fn!(
+    wire__crate__api__studio__save_skills_settings_impl,
+    "save_skills_settings",
+    save_skills_settings
+);
+wire_string_json_response_fn!(
+    wire__crate__api__studio__save_mcp_settings_impl,
+    "save_mcp_settings",
+    save_mcp_settings
+);
+wire_string_json_response_fn!(
+    wire__crate__api__studio__save_general_settings_impl,
+    "save_general_settings",
+    save_general_settings
+);
+
 fn wire__crate__api__studio__save_runtime_permission_mode_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1129,32 +1192,45 @@ fn pde_ffi_dispatcher_primary_impl(
         12 => {
             wire__crate__api__studio__save_provider_settings_impl(port, ptr, rust_vec_len, data_len)
         }
-        13 => wire__crate__api__studio__save_runtime_permission_mode_impl(
+        13 => wire__crate__api__studio__save_instructions_settings_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        14 => wire__crate__api__studio__save_studio_settings_draft_impl(
+        14 => {
+            wire__crate__api__studio__save_skills_settings_impl(port, ptr, rust_vec_len, data_len)
+        }
+        15 => wire__crate__api__studio__save_mcp_settings_impl(port, ptr, rust_vec_len, data_len),
+        16 => {
+            wire__crate__api__studio__save_general_settings_impl(port, ptr, rust_vec_len, data_len)
+        }
+        17 => wire__crate__api__studio__save_runtime_permission_mode_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        15 => wire__crate__api__studio__select_project_impl(port, ptr, rust_vec_len, data_len),
-        16 => wire__crate__api__studio__set_model_role_impl(port, ptr, rust_vec_len, data_len),
-        17 => wire__crate__api__studio__set_session_mode_impl(port, ptr, rust_vec_len, data_len),
-        18 => wire__crate__api__studio__shutdown_runtime_impl(port, ptr, rust_vec_len, data_len),
-        19 => wire__crate__api__studio__start_runtime_impl(port, ptr, rust_vec_len, data_len),
-        20 => wire__crate__api__studio__stop_prompt_impl(port, ptr, rust_vec_len, data_len),
-        21 => wire__crate__api__studio__submit_prompt_impl(port, ptr, rust_vec_len, data_len),
-        22 => wire__crate__api__studio__subscribe_global_events_impl(
+        18 => wire__crate__api__studio__save_studio_settings_draft_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        23 => wire__crate__api__studio__subscribe_session_events_impl(
+        19 => wire__crate__api__studio__select_project_impl(port, ptr, rust_vec_len, data_len),
+        20 => wire__crate__api__studio__set_model_role_impl(port, ptr, rust_vec_len, data_len),
+        21 => wire__crate__api__studio__set_session_mode_impl(port, ptr, rust_vec_len, data_len),
+        22 => wire__crate__api__studio__shutdown_runtime_impl(port, ptr, rust_vec_len, data_len),
+        23 => wire__crate__api__studio__start_runtime_impl(port, ptr, rust_vec_len, data_len),
+        24 => wire__crate__api__studio__stop_prompt_impl(port, ptr, rust_vec_len, data_len),
+        25 => wire__crate__api__studio__submit_prompt_impl(port, ptr, rust_vec_len, data_len),
+        26 => wire__crate__api__studio__subscribe_global_events_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        27 => wire__crate__api__studio__subscribe_session_events_impl(
             port,
             ptr,
             rust_vec_len,
