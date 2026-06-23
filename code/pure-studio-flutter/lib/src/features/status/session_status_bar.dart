@@ -3,7 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
+import '../../app/theme/studio_tokens.dart';
+import '../../shared/studio_chrome.dart';
 import '../../shared/upward_popup_menu.dart';
+import 'context_usage_ring.dart';
 
 class SessionStatusBar extends ConsumerWidget {
   const SessionStatusBar({required this.state, super.key});
@@ -40,10 +43,9 @@ class SessionStatusBar extends ConsumerWidget {
                           _PlannerModelSelector(state: state),
                         if (_plannerEffortsForState(state).isNotEmpty)
                           _ReasoningEffortSelector(state: state),
-                        _ContextRing(runtime: runtime),
+                        ContextUsageRing(runtime: runtime),
                         if (runtime.costLabel.isNotEmpty)
                           _StatusChip(
-                            icon: Icons.receipt_long_outlined,
                             label: runtime.costLabel,
                             tooltip: 'Cost',
                           ),
@@ -270,8 +272,12 @@ class _ControlChip extends StatelessWidget {
       padding: const EdgeInsets.only(right: 6),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: enabled ? Colors.transparent : colors.surfaceContainerHighest,
-          border: Border.all(color: colors.outlineVariant.withValues(alpha: 0)),
+          color: enabled
+              ? colors.surfaceContainerLowest.withValues(alpha: 0.78)
+              : colors.surfaceContainerHighest,
+          border: Border.all(
+            color: colors.outlineVariant.withValues(alpha: 0.72),
+          ),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Padding(
@@ -374,13 +380,9 @@ List<_PlannerModelOption> _plannerModelOptions(
 }
 
 class _StatusChip extends StatelessWidget {
-  const _StatusChip({
-    required this.icon,
-    required this.label,
-    required this.tooltip,
-  });
+  const _StatusChip({required this.label, required this.tooltip, this.icon});
 
-  final IconData icon;
+  final IconData? icon;
   final String label;
   final String tooltip;
 
@@ -392,10 +394,11 @@ class _StatusChip extends StatelessWidget {
         padding: const EdgeInsets.only(right: 8),
         child: DecoratedBox(
           decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerLowest,
             border: Border.all(
               color: Theme.of(
                 context,
-              ).colorScheme.outlineVariant.withValues(alpha: 0),
+              ).colorScheme.outlineVariant.withValues(alpha: 0.72),
             ),
             borderRadius: BorderRadius.circular(8),
           ),
@@ -404,12 +407,14 @@ class _StatusChip extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  icon,
-                  size: 15,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: 5),
+                if (icon != null) ...[
+                  Icon(
+                    icon,
+                    size: 15,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 5),
+                ],
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 180),
                   child: Text(
@@ -429,61 +434,6 @@ class _StatusChip extends StatelessWidget {
   }
 }
 
-class _ContextRing extends StatelessWidget {
-  const _ContextRing({required this.runtime});
-
-  final SessionRuntimeView runtime;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final progress = runtime.contextWindow <= 0
-        ? 0.0
-        : (runtime.contextTokens / runtime.contextWindow).clamp(0.0, 1.0);
-    final trackColor = colors.onSurfaceVariant.withValues(alpha: 0.22);
-    final progressColor = colors.onSurfaceVariant.withValues(alpha: 0.72);
-    return Tooltip(
-      message: _contextTooltip(runtime),
-      child: Padding(
-        padding: const EdgeInsets.only(left: 2, right: 10),
-        child: SizedBox(
-          width: 16,
-          height: 22,
-          child: Semantics(
-            label: 'Context',
-            child: Center(
-              child: SizedBox.square(
-                dimension: 14,
-                child: CircularProgressIndicator(
-                  value: progress,
-                  strokeWidth: 2.4,
-                  strokeCap: StrokeCap.round,
-                  backgroundColor: trackColor,
-                  color: progressColor,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-String _contextTooltip(SessionRuntimeView runtime) {
-  final percent = runtime.contextWindow <= 0
-      ? 0
-      : ((runtime.contextTokens / runtime.contextWindow) * 100)
-            .clamp(0, 100)
-            .round();
-  final sections = [
-    'Context: ${runtime.contextTokens}/${runtime.contextWindow} ($percent%)',
-    'Total tokens: ${runtime.totalTokens}',
-    if (runtime.model.isNotEmpty) 'Model: ${runtime.model}',
-  ];
-  return sections.join('\n\n');
-}
-
 class _PhasePill extends StatelessWidget {
   const _PhasePill({required this.phase});
 
@@ -491,20 +441,11 @@ class _PhasePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-        child: Text(
-          phase,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ),
+    return StudioPill(
+      label: phase,
+      backgroundColor: StudioColors.claySoft,
+      foregroundColor: StudioColors.clayDeep,
+      borderColor: StudioColors.claySoft,
     );
   }
 }

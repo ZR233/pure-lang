@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/theme/studio_tokens.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
+import '../../shared/studio_chrome.dart';
 import '../../shared/upward_popup_menu.dart';
 import 'interaction_payload.dart';
 import 'plan_confirmation_dock.dart';
@@ -24,7 +26,7 @@ class ComposerDock extends ConsumerWidget {
         child: Align(
           alignment: Alignment.center,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 860),
+            constraints: const BoxConstraints(maxWidth: 760),
             child: interaction == null
                 ? _PromptComposer(state: state)
                 : _InteractionDock(state: state, interaction: interaction),
@@ -78,75 +80,69 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
         widget.state.selectedSessionId != null &&
         widget.state.composerText.trim().isNotEmpty &&
         !widget.state.isBusy;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colors.surface,
-        border: Border.all(color: colors.outlineVariant.withValues(alpha: 0.9)),
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: colors.shadow.withValues(alpha: 0.08),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
+    return StudioPanel(
+      backgroundColor: colors.surfaceContainerLowest,
+      borderColor: colors.outlineVariant.withValues(alpha: 0.86),
+      radius: StudioRadii.lg,
+      shadow: true,
+      padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _controller,
+            minLines: 1,
+            maxLines: 6,
+            decoration: InputDecoration(
+              hintText: 'Ask Pure Studio',
+              hintStyle: TextStyle(color: colors.onSurfaceVariant),
+              isDense: true,
+              filled: false,
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              prefixIcon: Icon(
+                Icons.edit_outlined,
+                color: colors.onSurfaceVariant,
+              ),
+              contentPadding: const EdgeInsets.symmetric(vertical: 8),
+            ),
+            onChanged: ref
+                .read(studioControllerProvider.notifier)
+                .updateComposer,
+            onSubmitted: (_) {
+              if (canSubmit) {
+                ref.read(studioControllerProvider.notifier).submitComposer();
+              }
+            },
+          ),
+          Row(
+            children: [
+              _PermissionSelector(mode: widget.state.permissionMode),
+              const Spacer(),
+              if (widget.state.isBusy)
+                IconButton.filledTonal(
+                  tooltip: 'Stop',
+                  icon: const Icon(Icons.stop),
+                  onPressed: ref.read(studioControllerProvider.notifier).stop,
+                )
+              else
+                IconButton.filled(
+                  tooltip: 'Send',
+                  style: IconButton.styleFrom(
+                    backgroundColor: StudioColors.clay,
+                    foregroundColor: Colors.white,
+                  ),
+                  icon: const Icon(Icons.arrow_upward),
+                  onPressed: canSubmit
+                      ? ref
+                            .read(studioControllerProvider.notifier)
+                            .submitComposer
+                      : null,
+                ),
+            ],
           ),
         ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _controller,
-              minLines: 1,
-              maxLines: 6,
-              decoration: InputDecoration(
-                hintText: 'Ask Pure Studio',
-                hintStyle: TextStyle(color: colors.onSurfaceVariant),
-                isDense: true,
-                filled: false,
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                prefixIcon: Icon(
-                  Icons.edit_outlined,
-                  color: colors.onSurfaceVariant,
-                ),
-                contentPadding: const EdgeInsets.symmetric(vertical: 8),
-              ),
-              onChanged: ref
-                  .read(studioControllerProvider.notifier)
-                  .updateComposer,
-              onSubmitted: (_) {
-                if (canSubmit) {
-                  ref.read(studioControllerProvider.notifier).submitComposer();
-                }
-              },
-            ),
-            Row(
-              children: [
-                _PermissionSelector(mode: widget.state.permissionMode),
-                const Spacer(),
-                if (widget.state.isBusy)
-                  IconButton.filledTonal(
-                    tooltip: 'Stop',
-                    icon: const Icon(Icons.stop),
-                    onPressed: ref.read(studioControllerProvider.notifier).stop,
-                  )
-                else
-                  IconButton.filled(
-                    tooltip: 'Send',
-                    icon: const Icon(Icons.arrow_upward),
-                    onPressed: canSubmit
-                        ? ref
-                              .read(studioControllerProvider.notifier)
-                              .submitComposer
-                        : null,
-                  ),
-              ],
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -188,24 +184,32 @@ class _PermissionSelector extends ConsumerWidget {
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surfaceContainerLow,
-          border: Border.all(
-            color: Theme.of(context).colorScheme.outlineVariant,
-          ),
-          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: context.studioLine),
+          borderRadius: BorderRadius.circular(StudioRadii.sm),
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(_permissionIcon(mode), size: 18),
+              Icon(
+                _permissionIcon(mode),
+                size: 17,
+                color: context.studioInkSoft,
+              ),
               const SizedBox(width: 6),
               Text(
                 _permissionLabel(mode),
-                style: Theme.of(context).textTheme.labelMedium,
+                style: Theme.of(
+                  context,
+                ).textTheme.labelMedium?.copyWith(color: context.studioInkSoft),
               ),
               const SizedBox(width: 4),
-              const Icon(Icons.arrow_drop_down, size: 18),
+              Icon(
+                Icons.keyboard_arrow_down,
+                size: 16,
+                color: context.studioInkSoft,
+              ),
             ],
           ),
         ),
