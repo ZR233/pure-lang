@@ -4,11 +4,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use pl_core::{
-    CompileMode, ModelRole, PermissionMode, ProviderEdit, ProviderModelEdit, ProviderSettingsEdit,
-    ProviderTemplateKind, ProviderUsageData, ProviderUsageState, RoleEdit, SessionRecord,
+    BuiltinMcpServerState, CompileMode, McpServerConfig, McpServerTransport, ModelRole,
+    PermissionMode, ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, ProviderTemplateKind,
+    ProviderUsageData, ProviderUsageState, RoleEdit, SessionRecord,
     StudioResolveInteractionResponse as CoreResolveInteractionResponse, StudioRuntime,
     StudioRuntimeSnapshot as CoreRuntimeSnapshot, StudioSubmitPromptOptions,
-    StudioSubmitPromptRequest, ZhipuQuotaWindow,
+    StudioSubmitPromptRequest, ZhipuQuotaWindow, is_builtin_mcp_server_id,
 };
 use pl_protocol::{
     AgentStatus, BudgetLimitKind, BudgetUsage, InteractionRequest, InteractionResolution,
@@ -82,6 +83,7 @@ struct BootstrapResponse {
     interactions: Vec<InteractionRequest>,
     session_runtime: Option<SessionRuntimeDto>,
     config: serde_json::Value,
+    general_settings: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -328,6 +330,44 @@ struct RoleInput {
     effort: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InstructionsSettingsInput {
+    base_override: String,
+    developer: String,
+    user: String,
+    project_doc_max_bytes: usize,
+    project_doc_fallback_filenames: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillsSettingsInput {
+    enabled: bool,
+    auto_learn: bool,
+    system_enabled: bool,
+    project_dir: String,
+    user_dir: String,
+    external_dirs: Vec<String>,
+    disabled: Vec<String>,
+    auto_learn_min_tool_calls: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct McpSettingsInput {
+    servers: Vec<McpServerInput>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct McpServerInput {
+    id: String,
+    enabled: bool,
+    transport: String,
+    endpoint: String,
+}
+
 pub fn initialize_runtime() -> Result<RuntimeSnapshot> {
     let bridge = bridge()?;
     bridge.block_on(async {
@@ -493,6 +533,118 @@ pub fn save_provider_settings(settings_json: String) -> Result<JsonResponse> {
         let current = bridge.studio.config_store().load_or_default()?;
         let next = provider_settings_edit(input, &current)?.to_config(&current)?;
         bridge.studio.config_store().save(&next)?;
+        json_response(studio_snapshot_inner(bridge, None, None).await?)
+    })
+}
+
+pub fn save_instructions_settings(settings_json: String) -> Result<JsonResponse> {
+    let bridge = bridge()?;
+    bridge.block_on(async {
+        let input: InstructionsSettingsInput =
+            serde_json::from_str(&settings_json).context("invalid instructions settings json")?;
+        let mut config = bridge.studio.config_store().load_or_default()?;
+        config.instructions.base_override = input.base_override.trim().to_string();
+        config.instructions.developer = input.developer.trim().to_string();
+        config.instructions.user = input.user.trim().to_string();
+        config.instructions.project_doc_max_bytes = input.project_doc_max_bytes;
+        config.instructions.project_doc_fallback_filenames = input
+            .project_doc_fallback_filenames
+            .into_iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect();
+        config.validate()?;
+        bridge.studio.config_store().save(&config)?;
+        json_response(studio_snapshot_inner(bridge, None, None).await?)
+    })
+}
+
+pub fn save_skills_settings(settings_json: String) -> Result<JsonResponse> {
+    let bridge = bridge()?;
+    bridge.block_on(async {
+        let input: SkillsSettingsInput =
+            serde_json::from_str(&settings_json).context("invalid skills settings json")?;
+        let mut config = bridge.studio.config_store().load_or_default()?;
+        config.skills.enabled = input.enabled;
+        config.skills.auto_learn = input.auto_learn;
+        config.skills.system.enabled = input.system_enabled;
+        config.skills.project_dir = input.project_dir.trim().to_string();
+        config.skills.user_dir = input.user_dir.trim().to_string();
+        config.skills.external_dirs = input
+            .external_dirs
+            .into_iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect();
+        config.skills.disabled = normalized_string_list(input.disabled);
+        config.skills.auto_learn_min_tool_calls = input.auto_learn_min_tool_calls;
+        config.validate()?;
+        bridge.studio.config_store().save(&config)?;
+        json_response(studio_snapshot_inner(bridge, None, None).await?)
+    })
+}
+
+pub fn save_mcp_settings(settings_json: String) -> Result<JsonResponse> {
+    let bridge = bridge()?;
+    bridge.block_on(async {
+        let input: McpSettingsInput =
+            serde_json::from_str(&settings_json).context("invalid mcp settings json")?;
+        let mut config = bridge.studio.config_store().load_or_default()?;
+        let mut next_servers = config.mcp_servers.clone();
+        let mut next_builtin = config.builtin_mcp_servers.clone();
+        for server in input.servers {
+            let server_id = server.id.trim().to_string();
+            if server_id.is_empty() {
+                continue;
+            }
+            if is_builtin_mcp_server_id(&server_id) {
+                next_builtin.insert(
+                    server_id,
+                    BuiltinMcpServerState {
+                        enabled: server.enabled,
+                    },
+                );
+                continue;
+            }
+            let mut config = next_servers.remove(&server_id).unwrap_or_else(|| {
+                let mut config = McpServerConfig::default();
+                config.transport = mcp_transport_from_label(&server.transport);
+                config
+            });
+            config.enabled = server.enabled;
+            if !server.transport.trim().is_empty() {
+                config.transport = mcp_transport_from_label(&server.transport);
+            }
+            let endpoint = server.endpoint.trim();
+            match config.transport {
+                McpServerTransport::Stdio => {
+                    config.command = (!endpoint.is_empty()).then(|| endpoint.to_string());
+                }
+                McpServerTransport::StreamableHttp => {
+                    config.url = (!endpoint.is_empty()).then(|| endpoint.to_string());
+                }
+            }
+            next_servers.insert(server_id, config);
+        }
+        config.mcp_servers = next_servers;
+        config.builtin_mcp_servers = next_builtin;
+        config.validate()?;
+        bridge.studio.config_store().save(&config)?;
+        json_response(studio_snapshot_inner(bridge, None, None).await?)
+    })
+}
+
+pub fn save_general_settings(settings_json: String) -> Result<JsonResponse> {
+    let bridge = bridge()?;
+    bridge.block_on(async {
+        let draft: serde_json::Value =
+            serde_json::from_str(&settings_json).context("invalid general settings json")?;
+        let normalized = serde_json::to_string(&draft)?;
+        bridge
+            .studio
+            .store()
+            .save_setting("flutterSettings:general", &normalized)
+            .await?;
         json_response(studio_snapshot_inner(bridge, None, None).await?)
     })
 }
@@ -939,6 +1091,13 @@ async fn studio_snapshot_from_projects_inner(
         None => None,
     };
     let config = serde_json::to_value(bridge.studio.config_store().load_or_default()?)?;
+    let general_settings = bridge
+        .studio
+        .store()
+        .load_setting("flutterSettings:general")
+        .await?
+        .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
 
     Ok(BootstrapResponse {
         projects: projects.into_iter().map(project_dto).collect(),
@@ -950,6 +1109,7 @@ async fn studio_snapshot_from_projects_inner(
         interactions,
         session_runtime,
         config,
+        general_settings,
     })
 }
 
@@ -1227,6 +1387,24 @@ fn studio_settings_draft_key(section: &str) -> String {
     format!("flutterSettingsDraft:{section}")
 }
 
+fn normalized_string_list(values: Vec<String>) -> Vec<String> {
+    let mut values = values
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    values.sort();
+    values.dedup();
+    values
+}
+
+fn mcp_transport_from_label(label: &str) -> McpServerTransport {
+    match label.trim() {
+        "streamableHttp" | "streamable_http" | "http" => McpServerTransport::StreamableHttp,
+        _ => McpServerTransport::Stdio,
+    }
+}
+
 fn unix_nanos_hex() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1243,6 +1421,7 @@ fn unix_seconds() -> i64 {
 
 #[cfg(test)]
 mod tests {
+    use pl_core::McpServerTransport;
     use pl_protocol::StudioEventKind;
     use pretty_assertions::assert_eq;
 
@@ -1283,5 +1462,47 @@ mod tests {
     #[test]
     fn list_discovered_skills_api_is_exposed_to_flutter() {
         let _api: fn(String) -> anyhow::Result<JsonResponse> = super::list_discovered_skills;
+    }
+
+    #[test]
+    fn typed_settings_apis_are_exposed_to_flutter() {
+        let _instructions: fn(String) -> anyhow::Result<JsonResponse> =
+            super::save_instructions_settings;
+        let _skills: fn(String) -> anyhow::Result<JsonResponse> = super::save_skills_settings;
+        let _mcp: fn(String) -> anyhow::Result<JsonResponse> = super::save_mcp_settings;
+        let _general: fn(String) -> anyhow::Result<JsonResponse> = super::save_general_settings;
+    }
+
+    #[test]
+    fn mcp_transport_label_accepts_ui_values() {
+        assert_eq!(
+            super::mcp_transport_from_label("streamableHttp"),
+            McpServerTransport::StreamableHttp
+        );
+        assert_eq!(
+            super::mcp_transport_from_label("streamable_http"),
+            McpServerTransport::StreamableHttp
+        );
+        assert_eq!(
+            super::mcp_transport_from_label("http"),
+            McpServerTransport::StreamableHttp
+        );
+        assert_eq!(
+            super::mcp_transport_from_label("stdio"),
+            McpServerTransport::Stdio
+        );
+    }
+
+    #[test]
+    fn normalized_string_list_trims_sorts_and_deduplicates() {
+        assert_eq!(
+            super::normalized_string_list(vec![
+                " beta ".to_string(),
+                String::new(),
+                "alpha".to_string(),
+                "beta".to_string(),
+            ]),
+            vec!["alpha".to_string(), "beta".to_string()]
+        );
     }
 }

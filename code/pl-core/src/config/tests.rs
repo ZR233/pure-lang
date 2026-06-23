@@ -282,6 +282,41 @@ fn effective_mcp_servers_enable_builtin_servers_with_zhipu_token() {
     );
 }
 
+#[test]
+fn effective_mcp_servers_respect_disabled_builtin_state() {
+    let mut config = PureConfig::default_config();
+    let mut info = ProviderInfo::zhipu(None);
+    info.bearer_token = Some("zhipu-coding-plan-key".to_string());
+    let slugs = zhipu_default_model_slugs();
+    let models = default_models()
+        .into_iter()
+        .filter(|model| slugs.contains(&model.slug.as_str()))
+        .collect();
+    config.providers.insert(
+        "zhipu".to_string(),
+        super::ProviderConfig::from_provider_info(info, models),
+    );
+    config.builtin_mcp_servers.insert(
+        "zhipu_search".to_string(),
+        BuiltinMcpServerState { enabled: false },
+    );
+
+    let servers = effective_mcp_servers(&config);
+
+    assert_eq!(
+        servers["zhipu_search"].status_kind,
+        McpServerStatusKind::Disabled
+    );
+    assert_eq!(
+        active_mcp_server_names(&config),
+        vec![
+            "zhipu_reader".to_string(),
+            "zhipu_vision".to_string(),
+            "zhipu_zread".to_string()
+        ]
+    );
+}
+
 fn zhipu_vision_command() -> &'static str {
     if cfg!(windows) { "npx.cmd" } else { "npx" }
 }
@@ -350,7 +385,7 @@ fn zhipu_token_restores_builtin_mcp_state_on_load() {
 
     assert_eq!(
         parsed.builtin_mcp_servers["zhipu_search"],
-        BuiltinMcpServerState { enabled: true }
+        BuiltinMcpServerState { enabled: false }
     );
     assert_eq!(
         parsed.builtin_mcp_servers["zhipu_reader"],

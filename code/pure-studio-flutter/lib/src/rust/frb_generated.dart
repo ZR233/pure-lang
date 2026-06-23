@@ -122,6 +122,22 @@ abstract class RustLibApi extends BaseApi {
     required String settingsJson,
   });
 
+  Future<JsonResponse> crateApiStudioSaveInstructionsSettings({
+    required String settingsJson,
+  });
+
+  Future<JsonResponse> crateApiStudioSaveSkillsSettings({
+    required String settingsJson,
+  });
+
+  Future<JsonResponse> crateApiStudioSaveMcpSettings({
+    required String settingsJson,
+  });
+
+  Future<JsonResponse> crateApiStudioSaveGeneralSettings({
+    required String settingsJson,
+  });
+
   Future<JsonResponse> crateApiStudioSaveRuntimePermissionMode({
     required String mode,
   });
@@ -559,6 +575,138 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<JsonResponse> crateApiStudioSaveInstructionsSettings({
+    required String settingsJson,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(settingsJson, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 13,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_json_response,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiStudioSaveInstructionsSettingsConstMeta,
+        argValues: [settingsJson],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiStudioSaveInstructionsSettingsConstMeta =>
+      const TaskConstMeta(
+        debugName: "save_instructions_settings",
+        argNames: ["settingsJson"],
+      );
+
+  @override
+  Future<JsonResponse> crateApiStudioSaveSkillsSettings({
+    required String settingsJson,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(settingsJson, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 14,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_json_response,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiStudioSaveSkillsSettingsConstMeta,
+        argValues: [settingsJson],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiStudioSaveSkillsSettingsConstMeta =>
+      const TaskConstMeta(
+        debugName: "save_skills_settings",
+        argNames: ["settingsJson"],
+      );
+
+  @override
+  Future<JsonResponse> crateApiStudioSaveMcpSettings({
+    required String settingsJson,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(settingsJson, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 15,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_json_response,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiStudioSaveMcpSettingsConstMeta,
+        argValues: [settingsJson],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiStudioSaveMcpSettingsConstMeta =>
+      const TaskConstMeta(
+        debugName: "save_mcp_settings",
+        argNames: ["settingsJson"],
+      );
+
+  @override
+  Future<JsonResponse> crateApiStudioSaveGeneralSettings({
+    required String settingsJson,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(settingsJson, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 16,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_json_response,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiStudioSaveGeneralSettingsConstMeta,
+        argValues: [settingsJson],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiStudioSaveGeneralSettingsConstMeta =>
+      const TaskConstMeta(
+        debugName: "save_general_settings",
+        argNames: ["settingsJson"],
+      );
+
+  @override
   Future<JsonResponse> crateApiStudioSaveRuntimePermissionMode({
     required String mode,
   }) {
@@ -570,7 +718,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 13,
+            funcId: 17,
             port: port_,
           );
         },
@@ -605,7 +753,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 14,
+            funcId: 18,
             port: port_,
           );
         },
@@ -638,7 +786,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 15,
+            funcId: 19,
             port: port_,
           );
         },
@@ -676,7 +824,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 16,
+            funcId: 20,
             port: port_,
           );
         },
@@ -710,7 +858,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 17,
+            funcId: 21,
             port: port_,
           );
         },
@@ -740,7 +888,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 18,
+            funcId: 22,
             port: port_,
           );
         },
@@ -767,7 +915,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 19,
+            funcId: 23,
             port: port_,
           );
         },
@@ -795,7 +943,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 20,
+            funcId: 24,
             port: port_,
           );
         },
@@ -829,7 +977,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 21,
+            funcId: 25,
             port: port_,
           );
         },
@@ -861,7 +1009,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 22,
+              funcId: 26,
               port: port_,
             );
           },
@@ -899,7 +1047,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 23,
+              funcId: 27,
               port: port_,
             );
           },

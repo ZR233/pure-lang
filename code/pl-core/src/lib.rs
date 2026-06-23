@@ -33,7 +33,8 @@ pub use config::{
     McpServerSourceKind, McpServerStatusKind, McpServerTransport, ModelRole, ProviderConfig,
     PureConfig, ReasoningEffort, ResolvedRoleConfig, RoleConfig, RoleConfigs, RuntimeConfig,
     SkillsConfig, SystemSkillsConfig, active_mcp_server_names, builtin_mcp_server_ids,
-    effective_mcp_servers, normalize_builtin_mcp_server_states, zhipu_coding_plan_token,
+    effective_mcp_servers, is_builtin_mcp_server_id, normalize_builtin_mcp_server_states,
+    zhipu_coding_plan_token,
 };
 pub use config_editor::{
     ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit, infer_provider_template_kind,

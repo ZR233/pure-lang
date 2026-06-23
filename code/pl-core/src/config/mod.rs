@@ -17,8 +17,8 @@ pub use instruction::{DEFAULT_PROJECT_DOC_MAX_BYTES, InstructionsConfig};
 pub use mcp::{
     BuiltinMcpServerState, EffectiveMcpServerConfig, McpServerConfig, McpServerMutationPolicy,
     McpServerSourceKind, McpServerStatusKind, McpServerTransport, active_mcp_server_names,
-    builtin_mcp_server_ids, effective_mcp_servers, normalize_builtin_mcp_server_states,
-    validate_mcp_identifier, zhipu_coding_plan_token,
+    builtin_mcp_server_ids, effective_mcp_servers, is_builtin_mcp_server_id,
+    normalize_builtin_mcp_server_states, validate_mcp_identifier, zhipu_coding_plan_token,
 };
 pub use provider::ProviderConfig;
 pub use role::{ModelRole, ReasoningEffort, ResolvedRoleConfig, RoleConfig, RoleConfigs};

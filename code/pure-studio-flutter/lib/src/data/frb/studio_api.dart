@@ -46,6 +46,10 @@ abstract class StudioApi {
   );
   Future<void> saveRuntimePermissionMode(PermissionMode mode);
   Future<StudioState> saveProviderSettings(Map<String, Object?> settings);
+  Future<StudioState> saveInstructionsSettings(Map<String, Object?> settings);
+  Future<StudioState> saveSkillsSettings(Map<String, Object?> settings);
+  Future<StudioState> saveMcpSettings(Map<String, Object?> settings);
+  Future<StudioState> saveGeneralSettings(Map<String, Object?> settings);
   Future<List<ProviderUsageView>> loadProviderUsages();
   Future<List<String>> listDiscoveredSkills(String projectId);
   Future<void> saveStudioSettingsDraft(
@@ -251,6 +255,52 @@ class FrbStudioApi implements StudioApi {
     return studioStateFromBootstrapJson(
       _decodeJson(
         (await frb.saveProviderSettings(
+          settingsJson: jsonEncode(settings),
+        )).json,
+      ),
+    );
+  }
+
+  @override
+  Future<StudioState> saveInstructionsSettings(
+    Map<String, Object?> settings,
+  ) async {
+    await _ensureReady();
+    return studioStateFromBootstrapJson(
+      _decodeJson(
+        (await frb.saveInstructionsSettings(
+          settingsJson: jsonEncode(settings),
+        )).json,
+      ),
+    );
+  }
+
+  @override
+  Future<StudioState> saveSkillsSettings(Map<String, Object?> settings) async {
+    await _ensureReady();
+    return studioStateFromBootstrapJson(
+      _decodeJson(
+        (await frb.saveSkillsSettings(settingsJson: jsonEncode(settings))).json,
+      ),
+    );
+  }
+
+  @override
+  Future<StudioState> saveMcpSettings(Map<String, Object?> settings) async {
+    await _ensureReady();
+    return studioStateFromBootstrapJson(
+      _decodeJson(
+        (await frb.saveMcpSettings(settingsJson: jsonEncode(settings))).json,
+      ),
+    );
+  }
+
+  @override
+  Future<StudioState> saveGeneralSettings(Map<String, Object?> settings) async {
+    await _ensureReady();
+    return studioStateFromBootstrapJson(
+      _decodeJson(
+        (await frb.saveGeneralSettings(
           settingsJson: jsonEncode(settings),
         )).json,
       ),
@@ -511,6 +561,9 @@ StudioState _stateFromJson(
     providers: _providersFromConfig(config),
     roles: _rolesFromConfig(config),
     mcpServers: _mcpServersFromConfig(config),
+    instructions: _instructionsFromConfig(config),
+    skills: _skillsFromConfig(config),
+    general: _generalFromJson(json['generalSettings']),
     selectedProjectId: selectedProjectId,
     selectedSessionId: selectedSessionId,
     permissionMode: _permissionMode(
@@ -760,6 +813,71 @@ List<RoleSettingsView> _rolesFromConfig(Map<String, Object?> config) {
   ];
 }
 
+InstructionsSettingsView _instructionsFromConfig(Map<String, Object?> config) {
+  final instructions = _map(config['instructions']);
+  return InstructionsSettingsView(
+    baseOverride: _string(
+      _firstValue(instructions, const ['baseOverride', 'base_override']),
+    ),
+    developer: _string(instructions['developer']),
+    user: _string(instructions['user']),
+    projectDocMaxBytes: _int(
+      _firstValue(instructions, const [
+        'projectDocMaxBytes',
+        'project_doc_max_bytes',
+      ]),
+      fallback: 65536,
+    ),
+    projectDocFallbackFilenames: _stringList(
+      _firstValue(instructions, const [
+        'projectDocFallbackFilenames',
+        'project_doc_fallback_filenames',
+      ]),
+    ),
+  );
+}
+
+SkillsSettingsView _skillsFromConfig(Map<String, Object?> config) {
+  final skills = _map(config['skills']);
+  final system = _map(skills['system']);
+  return SkillsSettingsView(
+    enabled: _boolWithDefault(skills['enabled'], true),
+    autoLearn: _boolWithDefault(
+      _firstValue(skills, const ['autoLearn', 'auto_learn']),
+      true,
+    ),
+    systemEnabled: _boolWithDefault(system['enabled'], true),
+    projectDir: _string(
+      _firstValue(skills, const ['projectDir', 'project_dir']),
+      fallback: 'skills',
+    ),
+    userDir: _string(
+      _firstValue(skills, const ['userDir', 'user_dir']),
+      fallback: '~/.pure/skills',
+    ),
+    externalDirs: _stringList(
+      _firstValue(skills, const ['externalDirs', 'external_dirs']),
+    ),
+    disabled: _stringList(skills['disabled']),
+    autoLearnMinToolCalls: _int(
+      _firstValue(skills, const [
+        'autoLearnMinToolCalls',
+        'auto_learn_min_tool_calls',
+      ]),
+      fallback: 5,
+    ),
+  );
+}
+
+GeneralSettingsView _generalFromJson(Object? value) {
+  final json = _map(value);
+  return GeneralSettingsView(
+    followSystemTheme: _boolWithDefault(json['followSystemTheme'], true),
+    followActiveTurn: _boolWithDefault(json['followActiveTurn'], true),
+    compactTimeline: _bool(json['compactTimeline']),
+  );
+}
+
 List<McpServerSettingsView> _mcpServersFromConfig(Map<String, Object?> config) {
   final servers = <McpServerSettingsView>[];
   void addServers(Object? value, {required bool builtin}) {
@@ -771,9 +889,11 @@ List<McpServerSettingsView> _mcpServersFromConfig(Map<String, Object?> config) {
       );
       final command = _string(server['command']);
       final url = _string(server['url'], fallback: _string(server['endpoint']));
-      final enabled =
-          !_bool(server['disabled']) &&
-          _string(server['status'], fallback: 'enabled') != 'disabled';
+      final enabled = builtin
+          ? _boolWithDefault(server['enabled'], true)
+          : !_bool(server['disabled']) &&
+                _boolWithDefault(server['enabled'], true) &&
+                _string(server['status'], fallback: 'enabled') != 'disabled';
       servers.add(
         McpServerSettingsView(
           id: entry.key,
@@ -979,14 +1099,14 @@ String? _nullableString(Object? value) {
   return string.isEmpty ? null : string;
 }
 
-int _int(Object? value) {
+int _int(Object? value, {int fallback = 0}) {
   if (value is int) {
     return value;
   }
   if (value is BigInt) {
     return value.toInt();
   }
-  return int.tryParse(_string(value)) ?? 0;
+  return int.tryParse(_string(value)) ?? fallback;
 }
 
 int? _nullableInt(Object? value) {
@@ -1022,6 +1142,13 @@ bool _bool(Object? value) {
   return _string(value) == 'true';
 }
 
+bool _boolWithDefault(Object? value, bool fallback) {
+  if (value == null) {
+    return fallback;
+  }
+  return _bool(value);
+}
+
 DateTime _dateFromUnix(int seconds) {
   return DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
 }
@@ -1039,6 +1166,9 @@ String _jsonText(Object? value) {
 class DemoStudioApi implements StudioApi {
   List<ProviderSettingsView>? _providers;
   List<RoleSettingsView>? _roles;
+  InstructionsSettingsView _instructions = const InstructionsSettingsView();
+  SkillsSettingsView _skills = const SkillsSettingsView();
+  GeneralSettingsView _general = const GeneralSettingsView();
   PermissionMode _permissionMode = PermissionMode.requestApproval;
   final Set<String> _archivedProjectIds = <String>{};
   final Map<String, Map<String, Object?>> _settingsDrafts = {};
@@ -1260,6 +1390,9 @@ class DemoStudioApi implements StudioApi {
             ),
           ],
       mcpServers: const [],
+      instructions: _instructions,
+      skills: _skills,
+      general: _general,
       pendingInteractions: const [],
     );
     if (_archivedProjectIds.contains(project.id)) {
@@ -1270,6 +1403,9 @@ class DemoStudioApi implements StudioApi {
         providers: state.providers,
         roles: state.roles,
         mcpServers: state.mcpServers,
+        instructions: state.instructions,
+        skills: state.skills,
+        general: state.general,
         selectedProjectId: null,
         selectedSessionId: null,
         permissionMode: state.permissionMode,
@@ -1483,6 +1619,31 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
+  Future<StudioState> saveInstructionsSettings(
+    Map<String, Object?> settings,
+  ) async {
+    _instructions = _instructionsFromSettingsPayload(settings);
+    return bootstrap();
+  }
+
+  @override
+  Future<StudioState> saveSkillsSettings(Map<String, Object?> settings) async {
+    _skills = _skillsFromSettingsPayload(settings);
+    return bootstrap();
+  }
+
+  @override
+  Future<StudioState> saveMcpSettings(Map<String, Object?> settings) async {
+    return bootstrap();
+  }
+
+  @override
+  Future<StudioState> saveGeneralSettings(Map<String, Object?> settings) async {
+    _general = _generalFromJson(settings);
+    return bootstrap();
+  }
+
+  @override
   Future<List<ProviderUsageView>> loadProviderUsages() async {
     final state = await bootstrap();
     return [
@@ -1679,6 +1840,33 @@ List<RoleSettingsView> _rolesFromSettingsPayload(
       effort: _string(role['effort']),
     );
   }).toList();
+}
+
+InstructionsSettingsView _instructionsFromSettingsPayload(
+  Map<String, Object?> settings,
+) {
+  return InstructionsSettingsView(
+    baseOverride: _string(settings['baseOverride']),
+    developer: _string(settings['developer']),
+    user: _string(settings['user']),
+    projectDocMaxBytes: _int(settings['projectDocMaxBytes'], fallback: 65536),
+    projectDocFallbackFilenames: _stringList(
+      settings['projectDocFallbackFilenames'],
+    ),
+  );
+}
+
+SkillsSettingsView _skillsFromSettingsPayload(Map<String, Object?> settings) {
+  return SkillsSettingsView(
+    enabled: _boolWithDefault(settings['enabled'], true),
+    autoLearn: _boolWithDefault(settings['autoLearn'], true),
+    systemEnabled: _boolWithDefault(settings['systemEnabled'], true),
+    projectDir: _string(settings['projectDir'], fallback: 'skills'),
+    userDir: _string(settings['userDir'], fallback: '~/.pure/skills'),
+    externalDirs: _stringList(settings['externalDirs']),
+    disabled: _stringList(settings['disabled']),
+    autoLearnMinToolCalls: _int(settings['autoLearnMinToolCalls'], fallback: 5),
+  );
 }
 
 _ProviderTemplateDefaults _templateFor(String id) {

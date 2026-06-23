@@ -22,9 +22,9 @@ Windows 下对应：
 
 SQLite 只保存 Studio 状态，例如项目、会话、消息、统一 interaction、agent 状态事件和应用设置，并由 `pl-core` 通过 SeaORM 纯异步访问。provider/model/role 配置仍只由 `~/.pure/config.toml` 表达。
 
-普通对话运行时读取配置；当配置文件不存在时，`pure-studio-flutter` 设置页展示默认配置草稿。写入配置必须由用户在具体设置操作中显式触发，例如 provider 编辑页保存、删除 provider、选择默认 provider 或调整角色路由。若已存在的配置文件无法解析或无法通过当前 schema 校验，运行时会先把原文件备份为 `config.invalid.backup.<unix>.toml`，再写入当前 schema 的默认配置；这属于重置恢复，不做旧字段迁移。
+普通对话运行时读取配置；当配置文件不存在时，`pure-studio-flutter` 设置页展示默认配置。设置页不提供全局保存或重载操作，普通设置项在用户修改后即时写入配置，例如删除 provider、选择默认 provider、调整角色路由、切换权限、禁用 skill 或切换 MCP server。独立新增/编辑页面保留本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。若已存在的配置文件无法解析或无法通过当前 schema 校验，运行时会先把原文件备份为 `config.invalid.backup.<unix>.toml`，再写入当前 schema 的默认配置；这属于重置恢复，不做旧字段迁移。
 
-`pure-studio-flutter` 设置页不提供全局保存按钮；各设置项确认后即时写入 `~/.pure/config.toml`，校验失败时只展示错误并保留当前页面状态。
+`pure-studio-flutter` 设置页的 typed 配置保存成功后必须返回 canonical config/bootstrap snapshot，由 Flutter store 合并。校验失败时只展示错误并保留当前页面状态，不覆盖原配置。Instructions 文本作为普通设置组展示时，在输入停止后自动写入 `~/.pure/config.toml`；Provider 新增/编辑等独立页面不自动保存。
 
 ## 10.2 配置职责
 
@@ -278,7 +278,7 @@ Pure v1 的权限模式是本地策略层，不是 OS 沙箱。`request-approval
 
 MCP server 配置保存在顶层 `[mcp_servers.<server_id>]` 表，参考 Codex 的 MCP 配置形态。`server_id` 必须非空，且只能包含 ASCII 字母、数字、`_` 和 `-`，因为它会参与模型可见工具名。Pure 还会在运行时合成一组内置 MCP server；内置 server 不写入 `[mcp_servers]`，但会出现在 Studio MCP 设置页和状态栏中。用户配置不得占用内置保留 id。
 
-内置 MCP 的 UI toggle 状态可保存在独立的 `[builtin_mcp_servers.<server_id>]` 状态表中；该表不描述 transport 或 endpoint，也不允许新增 server。检测到 Zhipu Coding Plan 或 Zhipu token 时，Zhipu Coding Plan 内置 server 的状态会在加载或保存时自动恢复为启用。
+内置 MCP 的 UI toggle 状态可保存在独立的 `[builtin_mcp_servers.<server_id>]` 状态表中；该表不描述 transport 或 endpoint，也不允许新增 server。检测到 Zhipu Coding Plan 或 Zhipu token 时，Zhipu Coding Plan 内置 server 的缺失状态会按默认启用补齐，但不会覆盖用户显式禁用。
 
 每个 MCP server 必须配置：
 
@@ -307,7 +307,7 @@ Pure 启动后会在后台并行探测配置意图为启用且凭据完整的 MC
 - `zhipu_zread`：Streamable HTTP，`https://open.bigmodel.cn/api/mcp/zread/mcp`
 - `zhipu_vision`：stdio，`npx -y @z_ai/mcp-server`；Windows 运行时使用 `npx.cmd`，避免 `std::process::Command` 无法解析 npm shim
 
-这些内置 server 优先复用 Zhipu Coding Plan provider 的 `bearer_token` 作为 Coding Plan key；若不存在 Coding Plan provider，则兼容回退到普通 Zhipu provider 的 `bearer_token`。缺少可用 token 时内置 server 的配置状态为缺少凭据且不会进入健康探测；检测到 token 时四个内置 server 自动恢复为启用并进入后台探测。HTTP 内置 server 运行时直接发送 bearer token；Vision server 运行时注入 `Z_AI_API_KEY=<token>` 和 `Z_AI_MODE=ZHIPU`。
+这些内置 server 优先复用 Zhipu Coding Plan provider 的 `bearer_token` 作为 Coding Plan key；若不存在 Coding Plan provider，则兼容回退到普通 Zhipu provider 的 `bearer_token`。缺少可用 token 时内置 server 的配置状态为缺少凭据且不会进入健康探测；检测到 token 时，未显式配置状态的内置 server 默认启用并进入后台探测，已被用户禁用的内置 server 保持禁用。HTTP 内置 server 运行时直接发送 bearer token；Vision server 运行时注入 `Z_AI_API_KEY=<token>` 和 `Z_AI_MODE=ZHIPU`。
 
 模型可见的 MCP tool 名称固定为：
 

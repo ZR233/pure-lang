@@ -931,6 +931,137 @@ void main() {
     expect(settings['defaultProviderId'], 'deepseek-2');
   });
 
+  testWidgets('provider editor cancel does not save local draft', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_stateWithPlannerModels());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: const MaterialApp(home: SettingsPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Add provider'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Display name'),
+      'Changed Provider',
+    );
+    await tester.pumpAndSettle();
+    expect(api.savedProviderSettings, isNull);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Cancel'));
+    await tester.pumpAndSettle();
+
+    expect(api.savedProviderSettings, isNull);
+    expect(find.text('Search providers'), findsOneWidget);
+  });
+
+  testWidgets(
+    'settings ordinary controls save immediately without draft buttons',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final api = _FakeStudioApi(
+        _stateWithPlannerModels().copyWith(
+          runtime: _stateWithPlannerModels().runtime.copyWith(
+            activeSkills: ['flutter-ui-polish'],
+          ),
+          skills: const SkillsSettingsView(disabled: []),
+          mcpServers: const [
+            McpServerSettingsView(
+              id: 'local',
+              transport: 'stdio',
+              endpoint: 'npx',
+              enabled: true,
+              status: 'enabled',
+            ),
+          ],
+        ),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: const MaterialApp(home: SettingsPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Save draft'), findsNothing);
+
+      await tester.tap(find.text('Roles'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(DropdownButtonFormField<String>).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('DeepSeek Reasoner').last);
+      await tester.pumpAndSettle();
+      expect(api.roleUpdate?.roleKey, 'explorer');
+
+      await tester.tap(find.text('Skills'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('flutter-ui-polish'));
+      await tester.pumpAndSettle();
+      expect(
+        api.savedSkillsSettings?['disabled'],
+        contains('flutter-ui-polish'),
+      );
+
+      await tester.tap(find.text('MCP'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(Switch).first);
+      await tester.pumpAndSettle();
+      final servers = api.savedMcpSettings?['servers'] as List<Object?>?;
+      expect((servers?.single as Map<String, Object?>?)?['enabled'], isFalse);
+
+      await tester.tap(find.text('General'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(SwitchListTile, 'Compact timeline'));
+      await tester.pumpAndSettle();
+      expect(api.savedGeneralSettings?['compactTimeline'], isTrue);
+
+      await tester.tap(find.text('Security'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Full'));
+      await tester.pumpAndSettle();
+      expect(api.savedPermissionMode, PermissionMode.fullAccess);
+    },
+  );
+
+  testWidgets('instructions text saves after debounce', (tester) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_stateWithPlannerModels());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: const MaterialApp(home: SettingsPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Instructions'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'new base');
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(api.savedInstructionsSettings, isNull);
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(api.savedInstructionsSettings?['baseOverride'], 'new base');
+  });
+
   testWidgets('user input interaction accepts freeform fallback answers', (
     tester,
   ) async {
@@ -1503,6 +1634,11 @@ class _FakeStudioApi implements StudioApi {
   CompileMode? sessionModeUpdate;
   _RoleUpdate? roleUpdate;
   Map<String, Object?>? savedProviderSettings;
+  Map<String, Object?>? savedInstructionsSettings;
+  Map<String, Object?>? savedSkillsSettings;
+  Map<String, Object?>? savedMcpSettings;
+  Map<String, Object?>? savedGeneralSettings;
+  PermissionMode? savedPermissionMode;
   String? resolvedInteractionId;
   Map<String, Object?>? resolvedInteraction;
   String? discoverProjectId;
@@ -1628,7 +1764,9 @@ class _FakeStudioApi implements StudioApi {
   ) async {}
 
   @override
-  Future<void> saveRuntimePermissionMode(PermissionMode mode) async {}
+  Future<void> saveRuntimePermissionMode(PermissionMode mode) async {
+    savedPermissionMode = mode;
+  }
 
   @override
   Future<List<String>> listDiscoveredSkills(String projectId) async {
@@ -1647,6 +1785,63 @@ class _FakeStudioApi implements StudioApi {
         for (final value in settings['providers'] as List<Object?>)
           _providerFromSettings(value),
       ],
+    );
+  }
+
+  @override
+  Future<StudioState> saveInstructionsSettings(
+    Map<String, Object?> settings,
+  ) async {
+    jsonEncode(settings);
+    savedInstructionsSettings = settings;
+    return initialState.copyWith(
+      instructions: InstructionsSettingsView(
+        baseOverride: settings['baseOverride'] as String? ?? '',
+        developer: settings['developer'] as String? ?? '',
+        user: settings['user'] as String? ?? '',
+        projectDocMaxBytes: settings['projectDocMaxBytes'] as int? ?? 65536,
+        projectDocFallbackFilenames: [
+          for (final value
+              in settings['projectDocFallbackFilenames'] as List<Object?>? ??
+                  const <Object?>[])
+            value.toString(),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Future<StudioState> saveSkillsSettings(Map<String, Object?> settings) async {
+    jsonEncode(settings);
+    savedSkillsSettings = settings;
+    return initialState.copyWith(
+      skills: initialState.skills.copyWith(
+        disabled: [
+          for (final value
+              in settings['disabled'] as List<Object?>? ?? const <Object?>[])
+            value.toString(),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Future<StudioState> saveMcpSettings(Map<String, Object?> settings) async {
+    jsonEncode(settings);
+    savedMcpSettings = settings;
+    return initialState;
+  }
+
+  @override
+  Future<StudioState> saveGeneralSettings(Map<String, Object?> settings) async {
+    jsonEncode(settings);
+    savedGeneralSettings = settings;
+    return initialState.copyWith(
+      general: GeneralSettingsView(
+        followSystemTheme: settings['followSystemTheme'] as bool? ?? true,
+        followActiveTurn: settings['followActiveTurn'] as bool? ?? true,
+        compactTimeline: settings['compactTimeline'] as bool? ?? false,
+      ),
     );
   }
 
