@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pure Studio · Claude Warm · 工作台</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --font-sans:"Inter","Noto Sans SC",-apple-system,"SF Pro Text","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    --font-serif:"Instrument Serif","Noto Serif SC",Georgia,serif;
+    --font-mono:"JetBrains Mono","SF Mono",Consolas,monospace;
+    /* warm paper — Claude */
+    --paper:#faf9f7;
+    --paper-2:#f3eeea;
+    --paper-3:#ece5de;
+    --ink:#2b2520;
+    --ink-soft:#6b635a;
+    --ink-faint:#a8a097;
+    --line:#e6ddd6;
+    --line-2:#dcd2c8;
+    --clay:#d97757;
+    --clay-soft:#f8e6dc;
+    --clay-deep:#b85c3e;
+    --sage:#6b8e5a;
+    --sage-soft:#e3ead8;
+    --ochre:#c08a3e;
+    --ochre-soft:#f4e8d2;
+    --rose:#c25563;
+    --rose-soft:#f4dde1;
+    --radius:14px;
+    --radius-md:11px;
+    --radius-sm:8px;
+    --shadow-1:0 1px 2px rgba(60,48,30,.04),0 4px 12px -8px rgba(120,80,55,.12);
+    --shadow-2:0 1px 2px rgba(60,48,30,.05),0 8px 24px -14px rgba(120,80,55,.2);
+    --shadow-3:0 2px 6px rgba(60,48,30,.06),0 18px 40px -22px rgba(120,80,55,.32);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:var(--font-sans);color:var(--ink);background:#eee9e3;-webkit-font-smoothing:antialiased;line-height:1.55;
+    background-image:radial-gradient(70% 50% at 100% 0%,rgba(217,119,87,.06),transparent 60%);}
+  .stage{padding:44px 36px 70px}
+  .deck-head{max-width:1240px;margin:0 auto 30px;display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
+  .deck-head .tag{display:inline-flex;gap:8px;align-items:center;font-size:12.5px;font-weight:500;color:var(--clay);
+    background:var(--clay-soft);border:1px solid #f0ddd0;padding:5px 12px;border-radius:999px;margin-bottom:10px}
+  .deck-head h1{font-family:var(--font-serif);font-size:34px;letter-spacing:-.02em;margin:0 0 6px;font-weight:400}
+  .deck-head p{margin:0;color:var(--ink-soft);font-size:14px;max-width:580px;line-height:1.6}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:300px}
+  .chips span{font-size:11.5px;font-weight:500;color:var(--ink-soft);background:#fff;border:1px solid var(--line);padding:5px 11px;border-radius:999px}
+
+  .gallery{max-width:1240px;margin:0 auto;display:flex;flex-direction:column;gap:42px}
+  .frame-label{display:flex;align-items:center;gap:12px;margin-bottom:14px;color:var(--ink-soft);font-size:13px;font-weight:500}
+  .frame-label .dot{width:7px;height:7px;border-radius:50%;background:var(--clay)}
+  .frame-label .num{font-family:var(--font-mono);font-size:12px;color:var(--ink-faint);margin-left:auto}
+
+  /* window */
+  .win{background:var(--paper);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow-2);overflow:hidden}
+  .win-bar{position:relative;display:flex;align-items:center;gap:14px;height:40px;padding:0 14px;border-bottom:1px solid var(--line);background:var(--paper-2)}
+  .lights{display:flex;gap:8px}
+  .lights i{width:12px;height:12px;border-radius:50%;display:block}
+  .lights i:nth-child(1){background:#d97757}.lights i:nth-child(2){background:#d8a44a}.lights i:nth-child(3){background:#7a9d5e}
+  .win-title{position:absolute;left:0;right:0;top:0;bottom:0;display:flex;align-items:center;justify-content:center;pointer-events:none;font-size:12.5px;font-weight:500;color:var(--ink-soft);font-family:var(--font-serif);font-style:italic}
+  .win-ico{margin-left:auto;display:inline-flex;align-items:center;gap:14px;color:var(--ink-faint);opacity:.85}
+  .win-ico svg{width:15px;height:15px;display:block}
+
+  /* shell */
+  .shell{display:grid;grid-template-columns:262px 1fr;height:740px}
+  .sidebar{border-right:1px solid var(--line);padding:18px 14px;display:flex;flex-direction:column;gap:16px;background:var(--paper-2)}
+  .brand{display:flex;align-items:center;gap:11px;padding:2px 6px 4px}
+  .brand .logo{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;color:#fff;background:var(--clay);font-family:var(--font-serif);font-weight:400;font-size:17px}
+  .brand b{font-family:var(--font-serif);font-size:17px;font-weight:400;letter-spacing:-.01em}
+  .sec-label{font-size:10px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);padding:0 8px;font-family:var(--font-mono)}
+
+  .tile{display:flex;align-items:center;gap:11px;padding:8px 10px;border-radius:9px;cursor:default}
+  .tile .ic{width:18px;color:var(--ink-soft);flex:none;display:grid;place-items:center}
+  .tile .ic svg{width:15px;height:15px}
+  .tile .t{min-width:0;flex:1}
+  .tile .t b{display:block;font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tile .t s{text-decoration:none;display:block;font-size:11px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+  .tile.sel{background:var(--paper);box-shadow:inset 0 0 0 1px var(--line-2)}
+  .tile.sel .ic{color:var(--clay)}
+  .tile.sm{padding:6px 10px}
+  .tile.sm .mode{width:5px;height:5px;border-radius:50%;background:var(--clay);margin-right:3px;flex:none}
+  .tile.sm.auto .mode{background:var(--sage)}
+  .tile.sm .t s{display:flex;gap:5px;align-items:center}
+
+  /* archive / close buttons on tiles — shown on hover */
+  .tile{position:relative}
+  .tile .arch{flex:none;width:22px;height:22px;border-radius:6px;border:none;background:transparent;color:var(--ink-faint);display:grid;place-items:center;cursor:default;opacity:0;transition:opacity .15s,background .15s}
+  .tile:hover .arch{opacity:1}
+  .tile .arch:hover{background:var(--paper-3);color:var(--rose)}
+  .tile .arch svg{width:13px;height:13px}
+  .tile.proj .arch{margin-left:4px}
+  /* demote inner when archive visible so row keeps breathing room */
+  .tile .t{padding-right:2px}
+
+  .side-actions{margin-top:auto;display:flex;gap:8px;padding-top:12px;border-top:1px solid var(--line)}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:none;cursor:default;font-family:inherit;font-size:12.5px;font-weight:500;border-radius:9px;padding:8px 12px}
+  .btn svg{width:14px;height:14px}
+  .btn.ghost{flex:1;color:var(--ink-soft);background:var(--paper);border:1px solid var(--line)}
+  .btn.icon{width:34px;padding:0;flex:none}
+  .btn.primary{background:var(--clay);color:#fff;box-shadow:0 4px 10px -4px rgba(217,119,87,.5)}
+  .btn.primary:hover{background:var(--clay-deep)}
+
+  /* main */
+  .main{display:flex;flex-direction:column;min-width:0;background:var(--paper)}
+  .topbar{height:56px;display:flex;align-items:center;gap:14px;padding:0 26px;border-bottom:1px solid var(--line)}
+  .topbar .crumb b{font-family:var(--font-serif);font-size:17px;font-weight:400;display:block}
+  .topbar .crumb s{text-decoration:none;font-size:11.5px;color:var(--ink-faint);display:block;margin-top:0}
+  .topbar .live{margin-left:auto;display:inline-flex;align-items:center;gap:8px;font-size:11.5px;color:var(--clay);background:var(--clay-soft);border:1px solid #f0ddd0;padding:5px 12px;border-radius:999px;font-weight:500}
+  .spinner{width:13px;height:13px;border-radius:50%;border:2px solid #f0ddd0;border-top-color:var(--clay);animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  .stream{flex:1;overflow:hidden;padding:26px 0 8px;position:relative}
+  .stream-inner{max-width:740px;margin:0 auto;padding:0 32px 12px}
+  .msg{display:flex;gap:14px;margin-bottom:26px}
+  .msg.user{flex-direction:row-reverse}
+  .av{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;flex:none;font-family:var(--font-serif);font-size:14px;font-weight:600}
+  .av.ai{background:var(--clay);color:#fff}
+  .av.me{background:var(--paper-3);color:var(--ink-soft);border:1px solid var(--line);font-family:var(--font-sans);font-size:11px}
+  .bubble{max-width:86%;min-width:0}
+  .msg.user .bubble{display:flex;justify-content:flex-end}
+  .b-user{background:var(--paper-2);border:1px solid var(--line);padding:11px 16px;border-radius:14px 14px 4px 14px;font-size:13.5px;color:var(--ink)}
+  .b-ai p{margin:0 0 11px;font-size:14px;color:var(--ink);line-height:1.7}
+  .b-ai p:last-child{margin-bottom:0}
+  .b-ai code.inline{font-family:var(--font-mono);font-size:12px;background:var(--clay-soft);color:var(--clay-deep);padding:1px 6px;border-radius:5px}
+  .b-ai h4{font-family:var(--font-serif);font-size:14px;font-weight:600;margin:6px 0 8px;color:var(--ink)}
+  .b-ai ul{margin:0 0 11px;padding-left:20px}
+  .b-ai li{font-size:14px;line-height:1.7;margin:2px 0}
+
+  .panel{margin-top:12px;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--paper-2)}
+  .panel-h{display:flex;align-items:center;gap:10px;padding:10px 13px;cursor:default}
+  .panel-h .ic{width:16px;color:var(--ink-soft);display:grid;place-items:center}
+  .panel-h .ic svg{width:15px;height:15px}
+  .panel-h b{font-size:12.5px;font-weight:600;flex:1}
+  .panel-h .chev{color:var(--ink-faint);font-size:11px}
+  .pill{font-size:10.5px;font-weight:600;padding:2px 9px;border-radius:999px;font-family:var(--font-mono)}
+  .pill.run{color:var(--clay);background:var(--clay-soft)}
+  .pill.ok{color:var(--sage);background:var(--sage-soft)}
+  .pill.fail{color:var(--rose);background:var(--rose-soft)}
+  .pill.draft{color:var(--ink-soft);background:var(--paper-3)}
+  .panel-b{padding:0 13px 12px}
+  .reason{font-size:13px;color:var(--ink-soft);line-height:1.65;border-left:2px solid var(--clay);padding:3px 0 3px 13px;font-style:italic}
+  .tool-arg{font-family:var(--font-mono);font-size:11.5px;color:var(--ink-soft);background:var(--paper);border:1px dashed var(--line-2);border-radius:7px;padding:8px 10px;margin-top:9px;white-space:pre-wrap}
+
+  .codeblock{margin:10px 0 0;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#fffdfb}
+  .codeblock .lang{display:flex;justify-content:space-between;align-items:center;padding:6px 12px;font-family:var(--font-mono);font-size:11px;color:var(--ink-faint);background:var(--paper-2);border-bottom:1px solid var(--line)}
+  .codeblock .lang .copy{cursor:default;opacity:.6}
+  .codeblock pre{margin:0;padding:12px 14px;font-family:var(--font-mono);font-size:12px;line-height:1.65;color:#3a3328;overflow-x:auto;white-space:pre}
+  .kw{color:#b85c3e}.fn{color:#8a6a1e}.st{color:#4f6b3a}.cm{color:#a8a097;font-style:italic}
+
+  .plan-card{padding:4px 14px 12px}
+  .step{display:flex;gap:11px;align-items:flex-start;font-size:12.5px;color:var(--ink-soft);padding:5px 0;line-height:1.5}
+  .step .n{width:20px;height:20px;border-radius:50%;flex:none;display:grid;place-items:center;font-size:10.5px;font-weight:600;color:#fff;background:var(--clay);font-family:var(--font-serif)}
+  .step b{color:var(--ink);font-weight:600}
+
+  /* streaming caret */
+  .caret{display:inline-block;width:7px;height:15px;background:var(--clay);border-radius:1px;margin-left:2px;vertical-align:-2px;animation:blink 1s steps(2) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  /* jump to latest */
+  .jump-latest{position:absolute;right:40px;bottom:14px;display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:500;color:var(--clay);background:#fff;border:1px solid #f0ddd0;box-shadow:var(--shadow-2);padding:7px 13px;border-radius:999px}
+  .jump-latest svg{width:14px;height:14px}
+  .jump-latest .badge{font-family:var(--font-mono);font-size:10px;background:var(--clay);color:#fff;border-radius:999px;padding:1px 6px;margin-left:2px}
+
+  /* statusbar */
+  .statusbar{display:flex;align-items:center;gap:4px;height:44px;padding:0 26px;border-top:1px solid var(--line);background:var(--paper-2)}
+  .sb-inner{display:flex;align-items:center;gap:8px;max-width:740px;margin:0 auto;width:100%}
+  .sb-chips{flex:1;display:flex;align-items:center;gap:2px;min-width:0;overflow-x:auto;scrollbar-width:none}
+  .sb-chips::-webkit-scrollbar{display:none}
+  .sb-chips .chip,.sb-chips .divx{flex:none}
+  .chip{display:inline-flex;align-items:center;gap:7px;height:28px;font-size:12px;color:var(--ink-soft);padding:0 10px;border-radius:8px;cursor:default;white-space:nowrap}
+  .chip svg{width:13px;height:13px;opacity:.75;flex:none}
+  .chip .car{opacity:.5;font-size:9px;margin-left:1px}
+  .chip:hover{background:var(--paper)}
+  /* context ring chip: no text, keep ring visually centered & same height */
+  .chip.ctx{padding:0 8px}
+  .chip.ctx .ring{margin:0}
+  .divx{width:1px;height:16px;background:var(--line);margin:0 5px;flex:none}
+  .ring{position:relative;width:18px;height:18px;display:grid;place-items:center;overflow:visible;flex:none}
+  .ring svg{width:18px;height:18px;transform:rotate(-90deg);display:block;overflow:visible}
+  .phase{flex:none;height:26px;font-size:11.5px;font-weight:500;color:var(--clay);background:var(--clay-soft);border:1px solid #f0ddd0;padding:0 12px;border-radius:999px;display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+  .phase::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--clay);animation:pulse 1.4s ease infinite}
+  .phase.idle{color:var(--ink-faint);background:var(--paper-3);border-color:var(--line-2)}
+  .phase.idle::before{background:var(--ink-faint);animation:none}
+  @keyframes pulse{50%{opacity:.3}}
+
+  /* composer */
+  .composer-wrap{padding:8px 26px 18px}
+  .composer{max-width:740px;margin:0 auto;border:1px solid var(--line);border-radius:14px;background:#fff;box-shadow:var(--shadow-1);overflow:hidden}
+  .composer .field{display:flex;align-items:flex-start;gap:10px;padding:12px 14px 4px}
+  .composer .field svg{width:16px;height:16px;color:var(--ink-faint);margin-top:5px}
+  .composer textarea{flex:1;border:none;resize:none;background:transparent;font-family:inherit;font-size:13.5px;color:var(--ink);outline:none;line-height:1.55;min-height:22px}
+  .composer .row{display:flex;align-items:center;gap:8px;padding:8px 14px 12px}
+  .perm{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--ink-soft);background:var(--paper-2);border:1px solid var(--line);padding:6px 11px;border-radius:8px}
+  .perm svg{width:14px;height:14px}
+  .send{margin-left:auto;width:32px;height:32px;border-radius:8px;border:none;cursor:default;color:#fff;display:grid;place-items:center;background:var(--clay);box-shadow:0 4px 10px -4px rgba(217,119,87,.5)}
+  .send svg{width:16px;height:16px}
+  .send.stop{background:var(--ink);box-shadow:none}
+  .send.stop svg{width:14px;height:14px}
+  .send:disabled{background:var(--paper-3);color:var(--ink-faint);box-shadow:none;cursor:default}
+
+  /* empty states */
+  .empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:40px}
+  .empty .glow{width:84px;height:84px;border-radius:24px;background:radial-gradient(circle at 35% 30%,#f0c4ad,#d97757);display:grid;place-items:center;color:#fff;font-family:var(--font-serif);font-size:40px;margin-bottom:20px;box-shadow:0 12px 30px -10px rgba(217,119,87,.5)}
+  .empty h2{font-family:var(--font-serif);font-size:28px;font-weight:400;margin:0 0 8px}
+  .empty p{margin:0 0 6px;font-size:14px;color:var(--ink-soft);max-width:440px;line-height:1.6}
+  .empty .hints{display:flex;flex-direction:column;gap:8px;margin-top:22px;width:100%;max-width:460px}
+  .empty .hint{display:flex;align-items:center;gap:11px;padding:12px 16px;background:var(--paper-2);border:1px solid var(--line);border-radius:11px;font-size:13px;color:var(--ink-soft);text-align:left;cursor:default}
+  .empty .hint:hover{border-color:var(--clay);background:var(--clay-soft)}
+  .empty .hint svg{width:17px;height:17px;color:var(--clay);flex:none}
+  .empty .hint b{color:var(--ink);font-weight:500}
+  .empty .hint s{text-decoration:none;font-size:11.5px;color:var(--ink-faint);margin-left:auto}
+
+  /* status detail panel reuse */
+  .detail-grid{padding:26px 30px 30px;display:grid;grid-template-columns:1.1fr 1fr;gap:22px}
+  .detail-grid h3{margin:0 0 2px;font-family:var(--font-serif);font-size:18px;font-weight:400}
+  .detail-grid .sub{font-size:12px;color:var(--ink-faint);margin:0 0 14px}
+  .card{background:var(--paper-2);border:1px solid var(--line);border-radius:11px;padding:18px}
+  .ctx-hero{display:flex;align-items:center;gap:22px}
+  .ctx-ring-big{width:110px;height:110px;position:relative;flex:none}
+  .ctx-ring-big svg{transform:rotate(-90deg)}
+  .ctx-ring-big .pct{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;line-height:1}
+  .ctx-ring-big .pct b{font-family:var(--font-serif);font-size:27px;font-weight:400}
+  .ctx-ring-big .pct small{display:block;font-size:9.5px;font-weight:500;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.1em;margin-top:4px}
+  .ctx-meta{display:flex;flex-direction:column;gap:11px;flex:1}
+  .ctx-meta .r{display:flex;justify-content:space-between;gap:18px;font-size:12.5px}
+  .ctx-meta .r s{text-decoration:none;color:var(--ink-faint)}
+  .ctx-meta .r b{font-weight:600}
+  .bar{height:6px;border-radius:999px;background:var(--paper-3);overflow:hidden}
+  .bar i{display:block;height:100%;border-radius:999px;background:var(--clay)}
+  .cap-list{display:flex;flex-direction:column;gap:9px}
+  .cap{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:9px;background:var(--paper);border:1px solid var(--line)}
+  .cap .ic{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;background:var(--clay-soft);color:var(--clay);flex:none}
+  .cap .ic svg{width:15px;height:15px}
+  .cap b{font-size:13px;font-weight:600;display:block}
+  .cap s{text-decoration:none;font-size:11px;color:var(--ink-faint);display:block}
+  .cap .cnt{margin-left:auto;font-family:var(--font-serif);font-size:18px;font-weight:400;color:var(--ink-soft)}
+  .agent-row{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:9px;background:var(--paper);border:1px solid var(--line);margin-top:9px}
+  .agent-row:first-child{margin-top:0}
+  .agent-row .av{width:26px;height:26px;border-radius:7px;font-size:10px}
+  .agent-row .nm{font-size:13px;font-weight:500}
+  .agent-row .path{font-size:11px;color:var(--ink-faint);font-family:var(--font-mono)}
+  .agent-row .tok{margin-left:auto;font-size:11px;color:var(--ink-soft);font-family:var(--font-mono)}
+
+  .foot-note{max-width:1240px;margin:48px auto 0;color:var(--ink-faint);font-size:12px;text-align:center;font-family:var(--font-serif);font-style:italic}
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <div class="deck-head">
+    <div>
+      <span class="tag">● 06 · Claude Warm · 聊天工作台 + 状态</span>
+      <h1>Workspace &amp; Runtime</h1>
+      <p>暖白纸面 + 赭橙（#d97757）主调。含主工作台四态、状态栏常驻条与运行时详情面板。</p>
+    </div>
+    <div class="chips">
+      <span>奶油暖白</span><span>赭橙点缀</span><span>低对比侧栏</span><span>居中阅读流</span>
+    </div>
+  </div>
+
+  <div class="gallery">
+
+    <!-- FRAME 0: closeup — sidebar archive + status bar -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> 细节特写 · 侧栏归档按钮（hover）+ 状态栏完整 chip <span class="num">screen 00 / 06</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Detail · Sidebar &amp; Status Bar</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18"/></svg></div></div>
+        <div style="padding:30px 34px 28px;background:var(--paper)">
+          <div style="font-family:var(--font-serif);font-size:17px;font-weight:400;margin-bottom:4px">侧栏归档 / 关闭</div>
+          <div style="font-size:12px;color:var(--ink-faint);margin-bottom:16px">项目 row 显示关闭（✕，归档项目）；会话 row 显示归档（🗃，归档会话）。按钮默认隐藏，hover row 时出现，hover 按钮变红。</div>
+          <div style="display:grid;grid-template-columns:300px 1fr;gap:24px;align-items:start">
+
+            <!-- sidebar zoomed -->
+            <div style="background:var(--paper-2);border:1px solid var(--line);border-radius:12px;padding:16px 14px">
+              <div style="font-family:var(--font-mono);font-size:9.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);padding:0 8px 8px">Projects</div>
+              <div class="tile proj sel" style="background:var(--paper)"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg></span><span class="t"><b>pure-lang</b><s>~/Documents/opensource/…</s></span><button class="arch" style="opacity:1;background:var(--paper-3);color:var(--rose)" title="关闭项目（归档）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+              <div class="tile proj" style="margin-top:3px"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg></span><span class="t"><b>web-bench</b><s>~/work/web-bench</s></span><button class="arch" style="opacity:.35" title="关闭项目（归档）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+              <div style="font-family:var(--font-mono);font-size:9.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);padding:14px 8px 8px">Sessions</div>
+              <div class="tile sm sel"><span class="mode"></span><span class="t"><b>重构 parser 错误恢复</b><s>Plan · 14:32</s></span><button class="arch" style="opacity:1;background:var(--paper-3);color:var(--rose)" title="归档会话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7v3a2 2 0 002 2h2l1 1h8l1-1h2a2 2 0 002-2V7M3 7l1-3h16l1 3M3 7h18"/></svg></button></div>
+              <div class="tile sm auto"><span class="mode"></span><span class="t"><b>迁移到 RPITIT trait</b><s>Auto · 13:08</s></span><button class="arch" style="opacity:.35" title="归档会话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7v3a2 2 0 002 2h2l1 1h8l1-1h2a2 2 0 002-2V7M3 7l1-3h16l1 3M3 7h18"/></svg></button></div>
+            </div>
+
+            <!-- status bar zoomed + legend -->
+            <div>
+              <div style="font-family:var(--font-serif);font-size:17px;font-weight:400;margin-bottom:4px">状态栏 · 完整 chip 序列</div>
+              <div style="font-size:12px;color:var(--ink-faint);margin-bottom:16px">从左到右：模式 / planner 模型 / reasoning effort / 上下文 ring / 费用 / 能力（skills·MCP·LSP·agents）/ 阶段。前三个 + context 可点击展开。</div>
+              <div class="statusbar" style="border:1px solid var(--line);border-radius:11px;background:var(--paper-2)"><div class="sb-inner">
+                <div class="sb-chips">
+                <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 19V5h7l4 4v10z"/></svg>Plan<span class="car">▾</span></span>
+                <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="8" width="16" height="11" rx="2"/><path d="M9 8V5h6v3"/></svg>glm-5.2<span class="car">▾</span></span>
+                <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>high<span class="car">▾</span></span>
+                <span class="divx"></span>
+                <span class="chip ctx" title="Context 38%"><span class="ring"><svg width="22" height="22"><circle cx="11" cy="11" r="9" fill="none" stroke="#e6ddd6" stroke-width="2.6"/><circle cx="11" cy="11" r="9" fill="none" stroke="#d97757" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="56.5" stroke-dashoffset="35"/></svg></span></span>
+                <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 3h14v18l-7-3-7 3z"/></svg>¥0.42</span>
+                <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14 4l-8 8 8 8"/></svg>2 skills · 1 MCP · 1 LSP · 2 agents</span>
+                </div>
+                <span class="phase">Planning</span>
+              </div></div>
+
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px;font-size:11.5px;line-height:1.5">
+                <div style="padding:11px 13px;background:var(--paper-2);border:1px solid var(--line);border-radius:9px"><b style="color:var(--clay)">context ring</b> · 无数字圆形进度，hover/focus 弹层显示上下文 token、百分比、总 token、模型。<b>不显示向下箭头</b>。</div>
+                <div style="padding:11px 13px;background:var(--paper-2);border:1px solid var(--line);border-radius:9px"><b style="color:var(--clay)">capability chip</b> · 合并 skills/MCP/LSP/agents 计数，hover 弹层分项列出名称与状态（running/healthy/idle）。</div>
+                <div style="padding:11px 13px;background:var(--paper-2);border:1px solid var(--line);border-radius:9px"><b style="color:var(--clay)">费用 chip</b> · 当前 turn cost，hover 弹层拆分输入/输出 token 与子代理。</div>
+                <div style="padding:11px 13px;background:var(--paper-2);border:1px solid var(--line);border-radius:9px"><b style="color:var(--clay)">阶段 pill</b> · 优先级 toolApproval → userInput → planConfirmation → turnPhase。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FRAME 1: idle -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> 主工作台 · 空闲态（user 气泡 + assistant 正文 + reasoning + tool + plan + code） <span class="num">screen 01 / 06</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Pure Studio</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg></div></div>
+        <div class="shell">
+          <aside class="sidebar">
+            <div class="brand"><div class="logo">P</div><b>Pure Studio</b></div>
+            <div>
+              <div class="sec-label">Projects</div>
+              <div class="tile proj sel"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg></span><span class="t"><b>pure-lang</b><s>~/Documents/opensource/pure-lang</s></span><button class="arch" title="关闭项目（归档）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+              <div class="tile proj"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg></span><span class="t"><b>web-bench</b><s>~/work/web-bench</s></span><button class="arch" title="关闭项目（归档）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+            </div>
+            <div style="flex:1;overflow:hidden">
+              <div class="sec-label">Sessions</div>
+              <div class="tile sm sel"><span class="mode"></span><span class="t"><b>重构 parser 错误恢复</b><s>Plan · 14:32</s></span><button class="arch" title="归档会话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7v3a2 2 0 002 2h2l1 1h8l1-1h2a2 2 0 002-2V7M3 7l1-3h16l1 3M3 7h18"/></svg></button></div>
+              <div class="tile sm auto"><span class="mode"></span><span class="t"><b>迁移到 RPITIT trait</b><s>Auto · 13:08</s></span><button class="arch" title="归档会话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7v3a2 2 0 002 2h2l1 1h8l1-1h2a2 2 0 002-2V7M3 7l1-3h16l1 3M3 7h18"/></svg></button></div>
+              <div class="tile sm auto"><span class="mode"></span><span class="t"><b>补齐 LSP runtime 测试</b><s>Auto · 11:50</s></span><button class="arch" title="归档会话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7v3a2 2 0 002 2h2l1 1h8l1-1h2a2 2 0 002-2V7M3 7l1-3h16l1 3M3 7h18"/></svg></button></div>
+            </div>
+            <div class="side-actions">
+              <button class="btn ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 5v14M5 12h14"/></svg>新建</button>
+              <button class="btn ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>打开</button>
+              <button class="btn icon ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3.5"/><path d="M19.4 13a7.5 7.5 0 000-2l2-1.4-2-3.4-2.3.9a7.5 7.5 0 00-1.7-1L15 3h-4l-.4 2.6a7.5 7.5 0 00-1.7 1l-2.3-.9-2 3.4 2 1.4a7.5 7.5 0 000 2l-2 1.4 2 3.4 2.3-.9a7.5 7.5 0 001.7 1l.4 2.6h4l.4-2.6a7.5 7.5 0 001.7-1l2.3.9 2-3.4z"/></svg></button>
+            </div>
+          </aside>
+
+          <main class="main">
+            <div class="topbar">
+              <div class="crumb"><b>重构 parser 错误恢复</b><s>pure-lang · ~/Documents/opensource/pure-lang</s></div>
+              <div class="phase idle">Idle</div>
+            </div>
+
+            <div class="stream"><div class="stream-inner">
+              <div class="msg user">
+                <div class="av me">我</div>
+                <div class="bubble"><div class="b-user">把 pl-parser 的错误恢复从 panic 改成 Result 返回，并补齐 AST 重建的回归测试。要求保持现有公开 API 不变。</div></div>
+              </div>
+              <div class="msg">
+                <div class="av ai">P</div>
+                <div class="bubble"><div class="b-ai">
+                  <p>我先梳理了 <code class="inline">pl-parser</code> 当前的错误路径，共定位到 <b>12 处 panic 调用点</b>，集中在递归下降的恢复阶段。建议分三步迁移，并保留 <code class="inline">parse()</code> 的公开签名。</p>
+                  <div class="panel">
+                    <div class="panel-h"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M9 9h.01M15 9h.01M9 15c1 1 2 1.5 3 1.5s2-.5 3-1.5"/></svg></span><b>Reasoning</b><span class="pill run">thinking</span><span class="chev">▾</span></div>
+                    <div class="panel-b"><div class="reason">panic 多发生在 expect_token 后的隐式不变量上。若改成 Result，需要在 5 个递归点引入 error-tolerant 的同步集合，否则 AST 重建会丢节点。</div></div>
+                  </div>
+                  <div class="panel">
+                    <div class="panel-h"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 17l6-6-6-6M12 19h8"/></svg></span><b>edit_file</b><span class="pill ok">success</span><span class="chev">▾</span></div>
+                    <div class="panel-b"><div class="tool-arg">timeline_view.dart · +42 −18</div></div>
+                  </div>
+                  <div class="codeblock">
+                    <div class="lang"><span>rust</span><span class="copy">⧉ copy</span></div>
+                    <pre><span class="kw">pub fn</span> <span class="fn">parse</span>(input: &amp;<span class="kw">str</span>) -&gt; Result&lt;Node, ParseError&gt; {
+    <span class="kw">let mut</span> p = Parser::new(input);
+    p.parse_program()<span class="cm"> // 内部用 ? 传播</span>
+}</pre>
+                  </div>
+                  <div class="panel">
+                    <div class="panel-h"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 19V5h7l4 4v10z"/></svg></span><b>实施计划</b><span class="pill draft">draft</span><span class="chev">▾</span></div>
+                    <div class="panel-b plan-card">
+                      <div class="step"><span class="n">1</span><span><b>引入 ParseError 枚举</b>，替换 12 处 panic 为 Result&lt;Node, ParseError&gt;</span></div>
+                      <div class="step"><span class="n">2</span><span><b>补同步恢复集合</b>，确保递归下降在错误后能继续重建 AST</span></div>
+                      <div class="step"><span class="n">3</span><span><b>新增回归测试</b>，覆盖未闭合分隔符 / 非法 token</span></div>
+                    </div>
+                  </div>
+                </div></div>
+              </div>
+            </div></div>
+
+            <div class="statusbar"><div class="sb-inner">
+              <div class="sb-chips">
+              <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 19V5h7l4 4v10z"/></svg>Plan<span class="car">▾</span></span>
+              <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="8" width="16" height="11" rx="2"/><path d="M9 8V5h6v3"/></svg>glm-5.2<span class="car">▾</span></span>
+              <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>high<span class="car">▾</span></span>
+              <span class="divx"></span>
+              <span class="chip ctx" title="Context 38%"><span class="ring"><svg width="22" height="22"><circle cx="11" cy="11" r="9" fill="none" stroke="#e6ddd6" stroke-width="2.6"/><circle cx="11" cy="11" r="9" fill="none" stroke="#d97757" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="56.5" stroke-dashoffset="35"/></svg></span></span>
+              <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 3h14v18l-7-3-7 3z"/></svg>¥0.42</span>
+              <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14 4l-8 8 8 8"/></svg>2 skills · 1 MCP · 1 LSP · 2 agents</span>
+              </div>
+              <span class="phase idle">Idle</span>
+            </div></div>
+
+            <div class="composer-wrap"><div class="composer">
+              <div class="field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg><textarea rows="1" placeholder="Ask Pure Studio…"></textarea></div>
+              <div class="row"><span class="perm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>Request<span style="opacity:.5">▾</span></span><button class="send" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button></div>
+            </div></div>
+          </main>
+        </div>
+      </div>
+    </div>
+
+    <!-- FRAME 2: streaming -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> 主工作台 · 流式响应中（reasoning thinking + 正文逐字 + 跳到最新 + composer 变停止） <span class="num">screen 02 / 06</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Pure Studio</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></div></div>
+        <div class="shell">
+          <aside class="sidebar">
+            <div class="brand"><div class="logo">P</div><b>Pure Studio</b></div>
+            <div>
+              <div class="sec-label">Projects</div>
+              <div class="tile proj sel"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg></span><span class="t"><b>pure-lang</b><s>~/Documents/opensource/pure-lang</s></span><button class="arch" title="关闭项目（归档）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+            </div>
+            <div style="flex:1;overflow:hidden">
+              <div class="sec-label">Sessions</div>
+              <div class="tile sm sel"><span class="mode"></span><span class="t"><b>重构 parser 错误恢复</b><s>Plan · 流式中</s></span><button class="arch" title="归档会话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7v3a2 2 0 002 2h2l1 1h8l1-1h2a2 2 0 002-2V7M3 7l1-3h16l1 3M3 7h18"/></svg></button></div>
+            </div>
+            <div class="side-actions">
+              <button class="btn ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 5v14M5 12h14"/></svg>新建</button>
+              <button class="btn icon ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3.5"/><path d="M19.4 13a7.5 7.5 0 000-2l2-1.4-2-3.4-2.3.9a7.5 7.5 0 00-1.7-1L15 3h-4l-.4 2.6a7.5 7.5 0 00-1.7 1l-2.3-.9-2 3.4 2 1.4a7.5 7.5 0 000 2l-2 1.4 2 3.4 2.3-.9a7.5 7.5 0 001.7 1l.4 2.6h4l.4-2.6a7.5 7.5 0 001.7-1l2.3.9 2-3.4z"/></svg></button>
+            </div>
+          </aside>
+
+          <main class="main">
+            <div class="topbar">
+              <div class="crumb"><b>重构 parser 错误恢复</b><s>pure-lang · ~/Documents/opensource/pure-lang</s></div>
+              <div class="live"><span class="spinner"></span> Planning</div>
+            </div>
+
+            <div class="stream"><div class="stream-inner">
+              <div class="msg user">
+                <div class="av me">我</div>
+                <div class="bubble"><div class="b-user">把 pl-parser 的错误恢复从 panic 改成 Result 返回，并补齐 AST 重建的回归测试。</div></div>
+              </div>
+              <div class="msg">
+                <div class="av ai">P</div>
+                <div class="bubble"><div class="b-ai">
+                  <div class="panel">
+                    <div class="panel-h"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M9 9h.01M15 9h.01M9 15c1 1 2 1.5 3 1.5s2-.5 3-1.5"/></svg></span><b>Reasoning</b><span class="pill run">thinking…</span></div>
+                    <div class="panel-b"><div class="reason">panic 多发生在 expect_token 后的隐式不变量上。若改成 Result，需要在递归点引入同步集合<span class="caret"></span></div></div>
+                  </div>
+                  <p>我先梳理了 <code class="inline">pl-parser</code> 当前的错误路径，定位到 12 处 panic。建议分三步迁移，保留 <code class="inline">parse()</code> 公开签名<span class="caret"></span></p>
+                </div></div>
+              </div>
+            </div></div>
+            <div class="jump-latest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V9M6 15l6 6 6-6"/></svg>跳到最新<span class="badge">3</span></div>
+
+            <div class="statusbar"><div class="sb-inner">
+              <div class="sb-chips">
+              <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 19V5h7l4 4v10z"/></svg>Plan<span class="car">▾</span></span>
+              <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="8" width="16" height="11" rx="2"/><path d="M9 8V5h6v3"/></svg>glm-5.2<span class="car">▾</span></span>
+              <span class="divx"></span>
+              <span class="chip ctx" title="Context 41%"><span class="ring"><svg width="22" height="22"><circle cx="11" cy="11" r="9" fill="none" stroke="#e6ddd6" stroke-width="2.6"/><circle cx="11" cy="11" r="9" fill="none" stroke="#d97757" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="56.5" stroke-dashoffset="33"/></svg></span></span>
+              <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 3h14v18l-7-3-7 3z"/></svg>¥0.18</span>
+              </div>
+              <span class="phase">Planning</span>
+            </div></div>
+
+            <div class="composer-wrap"><div class="composer">
+              <div class="field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg><textarea rows="1" disabled placeholder="Generating…"></textarea></div>
+              <div class="row"><span class="perm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>Request</span><button class="send stop" title="Stop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="7" y="7" width="10" height="10" rx="2"/></svg></button></div>
+            </div></div>
+          </main>
+        </div>
+      </div>
+    </div>
+
+    <!-- FRAME 3: empty session -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> 主工作台 · 空会话（新会话欢迎态） <span class="num">screen 03 / 06</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Pure Studio</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></div></div>
+        <div class="shell">
+          <aside class="sidebar">
+            <div class="brand"><div class="logo">P</div><b>Pure Studio</b></div>
+            <div>
+              <div class="sec-label">Projects</div>
+              <div class="tile proj sel"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg></span><span class="t"><b>pure-lang</b><s>~/Documents/opensource/pure-lang</s></span><button class="arch" title="关闭项目（归档）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+            </div>
+            <div style="flex:1;overflow:hidden">
+              <div class="sec-label">Sessions</div>
+              <div class="tile sm auto"><span class="mode"></span><span class="t"><b>迁移到 RPITIT trait</b><s>Auto · 13:08</s></span><button class="arch" title="归档会话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7v3a2 2 0 002 2h2l1 1h8l1-1h2a2 2 0 002-2V7M3 7l1-3h16l1 3M3 7h18"/></svg></button></div>
+              <div class="tile sm auto"><span class="mode"></span><span class="t"><b>补齐 LSP runtime 测试</b><s>Auto · 11:50</s></span><button class="arch" title="归档会话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7v3a2 2 0 002 2h2l1 1h8l1-1h2a2 2 0 002-2V7M3 7l1-3h16l1 3M3 7h18"/></svg></button></div>
+            </div>
+            <div class="side-actions">
+              <button class="btn ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 5v14M5 12h14"/></svg>新建</button>
+            </div>
+          </aside>
+          <main class="main">
+            <div class="topbar">
+              <div class="crumb"><b>新会话</b><s>pure-lang · ~/Documents/opensource/pure-lang</s></div>
+              <div class="phase idle">Idle</div>
+            </div>
+            <div class="empty">
+              <div class="glow">P</div>
+              <h2>今天想做点什么？</h2>
+              <p>告诉 Pure Studio 你的需求，它会编译成可执行的计划、代码意图和后续动作建议。</p>
+              <div class="hints">
+                <div class="hint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 19V5h7l4 4v10z"/></svg><div><b>规划一个功能</b> — 「帮我设计用户登录模块」<s>切换到 Plan 模式获得更细的步骤</s></div></div>
+                <div class="hint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 17l6-6-6-6M12 19h8"/></svg><div><b>重构现有代码</b> — 「把 parser 错误处理改成 Result」<s>Auto 模式直接执行</s></div></div>
+                <div class="hint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><div><b>排查问题</b> — 「这个测试为什么失败」<s>子代理会并行探索</s></div></div>
+              </div>
+            </div>
+            <div class="statusbar"><div class="sb-inner">
+              <div class="sb-chips">
+              <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 19V5h7l4 4v10z"/></svg>Auto<span class="car">▾</span></span>
+              <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="8" width="16" height="11" rx="2"/><path d="M9 8V5h6v3"/></svg>glm-5.2<span class="car">▾</span></span>
+              <span class="divx"></span>
+              <span class="chip ctx" title="Context 0%"><span class="ring"><svg width="22" height="22"><circle cx="11" cy="11" r="9" fill="none" stroke="#e6ddd6" stroke-width="2.6"/><circle cx="11" cy="11" r="9" fill="none" stroke="#d97757" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="56.5" stroke-dashoffset="56.5"/></svg></span></span>
+              </div>
+              <span class="phase idle">Idle</span>
+            </div></div>
+            <div class="composer-wrap"><div class="composer">
+              <div class="field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg><textarea rows="2" placeholder="描述你的需求… (⌘+Enter 发送)"></textarea></div>
+              <div class="row"><span class="perm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>Request<span style="opacity:.5">▾</span></span><button class="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button></div>
+            </div></div>
+          </main>
+        </div>
+      </div>
+    </div>
+
+    <!-- FRAME 4: no project -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> 主工作台 · 无项目（首次启动 / 关闭全部项目） <span class="num">screen 04 / 06</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Pure Studio</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></div></div>
+        <div class="shell">
+          <aside class="sidebar">
+            <div class="brand"><div class="logo">P</div><b>Pure Studio</b></div>
+            <div>
+              <div class="sec-label">Projects</div>
+              <div style="padding:10px 12px;font-size:12px;color:var(--ink-faint);font-style:italic">还没有打开的项目</div>
+            </div>
+            <div style="flex:1"></div>
+            <div class="side-actions">
+              <button class="btn primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>打开项目</button>
+            </div>
+          </aside>
+          <main class="main">
+            <div class="topbar">
+              <div class="crumb"><b>Pure Studio</b><s>未选择项目</s></div>
+            </div>
+            <div class="empty">
+              <div class="glow">P</div>
+              <h2>打开一个项目开始</h2>
+              <p>Pure Studio 在项目目录下工作。打开一个已有项目，或输入路径手动指定。</p>
+              <div class="hints">
+                <div class="hint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg><div><b>从目录选择器打开</b><s>浏览本地文件夹</s></div></div>
+                <div class="hint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 7h16M4 12h16M4 17h10"/></svg><div><b>输入路径</b> — ~/Documents/opensource/pure-lang<s>手动指定项目根</s></div></div>
+                <div class="hint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M19 9V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2h2M14 21v-6h6M20 21v-6"/></svg><div><b>最近打开</b><s>从历史记录恢复</s></div></div>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    </div>
+
+    <!-- FRAME 5: statusbar detail -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> 状态栏 · 常驻条（含 hover popover 详态） <span class="num">screen 05 / 06</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Status Bar</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18"/></svg></div></div>
+        <div style="padding:30px 30px 20px;background:var(--paper)">
+          <div style="font-family:var(--font-serif);font-size:16px;font-weight:400;margin-bottom:6px">常驻状态条</div>
+          <div style="font-size:12px;color:var(--ink-faint);margin-bottom:18px">模式 / planner 模型 / effort / 上下文 ring / 费用 / 能力 / 阶段。点击展开 popover。</div>
+          <div class="statusbar" style="border:1px solid var(--line);border-radius:11px;background:var(--paper-2)"><div class="sb-inner">
+            <div class="sb-chips">
+            <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 19V5h7l4 4v10z"/></svg>Plan<span class="car">▾</span></span>
+            <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="8" width="16" height="11" rx="2"/><path d="M9 8V5h6v3"/></svg>glm-5.2<span class="car">▾</span></span>
+            <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>high<span class="car">▾</span></span>
+            <span class="divx"></span>
+            <span class="chip ctx" title="Context 38%"><span class="ring"><svg width="22" height="22"><circle cx="11" cy="11" r="9" fill="none" stroke="#e6ddd6" stroke-width="2.6"/><circle cx="11" cy="11" r="9" fill="none" stroke="#d97757" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="56.5" stroke-dashoffset="35"/></svg></span></span>
+            <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 3h14v18l-7-3-7 3z"/></svg>¥0.42</span>
+            <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14 4l-8 8 8 8"/></svg>2 skills · 1 MCP · 1 LSP · 2 agents</span>
+            </div>
+            <span class="phase">Planning</span>
+          </div></div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:24px">
+            <!-- context popover -->
+            <div style="background:#fff;border:1px solid var(--line);border-radius:11px;box-shadow:var(--shadow-3);padding:16px">
+              <div style="display:flex;align-items:center;gap:14px">
+                <div class="ctx-ring-big" style="width:72px;height:72px">
+                  <svg width="72" height="72"><circle cx="36" cy="36" r="30" fill="none" stroke="#e6ddd6" stroke-width="7"/><circle cx="36" cy="36" r="30" fill="none" stroke="#d97757" stroke-width="7" stroke-linecap="round" stroke-dasharray="188" stroke-dashoffset="117"/></svg>
+                  <div class="pct"><b style="font-size:18px">38%</b></div>
+                </div>
+                <div style="font-size:11.5px;line-height:1.7">
+                  <div style="display:flex;justify-content:space-between;gap:14px"><s style="text-decoration:none;color:var(--ink-faint)">Context</s><b style="font-weight:600">48,320 / 128,000</b></div>
+                  <div style="display:flex;justify-content:space-between;gap:14px"><s style="text-decoration:none;color:var(--ink-faint)">Total</s><b style="font-weight:600">62,104</b></div>
+                  <div style="display:flex;justify-content:space-between;gap:14px"><s style="text-decoration:none;color:var(--ink-faint)">Model</s><b style="font-weight:600">glm-5.2</b></div>
+                </div>
+              </div>
+              <div style="font-family:var(--font-mono);font-size:9.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.1em;margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">context popover</div>
+            </div>
+            <!-- cost popover -->
+            <div style="background:#fff;border:1px solid var(--line);border-radius:11px;box-shadow:var(--shadow-3);padding:16px">
+              <div style="font-family:var(--font-mono);font-size:9.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px">本次会话费用</div>
+              <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:14px"><b style="font-family:var(--font-serif);font-size:30px;font-weight:400;color:var(--clay)">¥0.42</b><span style="font-size:12px;color:var(--ink-faint)">3 turns</span></div>
+              <div style="display:flex;flex-direction:column;gap:7px;font-size:11.5px">
+                <div style="display:flex;justify-content:space-between"><span style="color:var(--ink-soft)">输入 token</span><b style="font-weight:600">56,400</b></div>
+                <div style="display:flex;justify-content:space-between"><span style="color:var(--ink-soft)">输出 token</span><b style="font-weight:600">5,704</b></div>
+                <div style="display:flex;justify-content:space-between"><span style="color:var(--ink-soft)">子代理</span><b style="font-weight:600">2 agents</b></div>
+              </div>
+              <div style="font-family:var(--font-mono);font-size:9.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.1em;margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">cost popover</div>
+            </div>
+            <!-- capability popover -->
+            <div style="background:#fff;border:1px solid var(--line);border-radius:11px;box-shadow:var(--shadow-3);padding:16px">
+              <div style="font-family:var(--font-mono);font-size:9.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px">活动能力</div>
+              <div style="display:flex;flex-direction:column;gap:8px;font-size:11.5px">
+                <div style="display:flex;align-items:center;gap:9px"><span style="width:22px;height:22px;border-radius:6px;background:var(--clay-soft);color:var(--clay);display:grid;place-items:center"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 3h6v4l4 2v9a2 2 0 01-2 2H7a2 2 0 01-2-2V9l4-2z"/></svg></span><span><b style="font-weight:600">Skills</b> · init-project, slint</span></div>
+                <div style="display:flex;align-items:center;gap:9px"><span style="width:22px;height:22px;border-radius:6px;background:var(--sage-soft);color:var(--sage);display:grid;place-items:center"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></span><span><b style="font-weight:600">MCP</b> · filesystem (running)</span></div>
+                <div style="display:flex;align-items:center;gap:9px"><span style="width:22px;height:22px;border-radius:6px;background:var(--ochre-soft);color:var(--ochre);display:grid;place-items:center"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 4h16v12H4z"/><path d="M2 20h20"/></svg></span><span><b style="font-weight:600">LSP</b> · rust-analyzer (healthy)</span></div>
+                <div style="display:flex;align-items:center;gap:9px"><span style="width:22px;height:22px;border-radius:6px;background:var(--rose-soft);color:var(--rose);display:grid;place-items:center"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="8" r="3"/><path d="M6 21c0-3 3-5 6-5s6 2 6 5M18 11a3 3 0 100-6"/></svg></span><span><b style="font-weight:600">Subagents</b> · explorer, reviewer</span></div>
+              </div>
+              <div style="font-family:var(--font-mono);font-size:9.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.1em;margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">capability popover</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FRAME 6: runtime detail panel -->
+    <div>
+      <div class="frame-label"><span class="dot"></span> 运行时详情面板（上下文 ring / token / 费用 / 能力 / 子智能体 / turn 阶段） <span class="num">screen 06 / 06</span></div>
+      <div class="win">
+        <div class="win-bar"><div class="lights"><i></i><i></i><i></i></div><div class="win-title">Session Runtime</div><div class="win-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18"/></svg></div></div>
+        <div class="detail-grid">
+          <div>
+            <h3>上下文用量</h3>
+            <p class="sub">当前 turn 已消耗的 token 与窗口占比</p>
+            <div class="card"><div class="ctx-hero">
+              <div class="ctx-ring-big">
+                <svg width="110" height="110"><circle cx="55" cy="55" r="46" fill="none" stroke="#e6ddd6" stroke-width="9"/><circle cx="55" cy="55" r="46" fill="none" stroke="#d97757" stroke-width="9" stroke-linecap="round" stroke-dasharray="289" stroke-dashoffset="179"/></svg>
+                <div class="pct"><b>38%</b><small>ctx window</small></div>
+              </div>
+              <div class="ctx-meta">
+                <div class="r"><s>Context</s><b>48,320 / 128,000</b></div>
+                <div class="bar"><i style="width:38%"></i></div>
+                <div class="r"><s>Total tokens</s><b>62,104</b></div>
+                <div class="r"><s>Model</s><b>glm-5.2</b></div>
+                <div class="r"><s>Effort</s><b>high</b></div>
+                <div class="r"><s>Cost this turn</s><b style="color:var(--clay)">¥0.42</b></div>
+              </div>
+            </div></div>
+            <h3 style="margin-top:22px">活动能力</h3>
+            <p class="sub">Skills / MCP / LSP 当前会话已激活</p>
+            <div class="card"><div class="cap-list">
+              <div class="cap"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 3h6v4l4 2v9a2 2 0 01-2 2H7a2 2 0 01-2-2V9l4-2z"/></svg></span><div><b>Skills</b><s>init-project · slint</s></div><span class="cnt">2</span></div>
+              <div class="cap"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></span><div><b>MCP servers</b><s>filesystem · running</s></div><span class="cnt">1</span></div>
+              <div class="cap"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 4h16v12H4z"/><path d="M2 20h20"/></svg></span><div><b>LSP servers</b><s>rust-analyzer · healthy</s></div><span class="cnt">1</span></div>
+            </div></div>
+          </div>
+          <div>
+            <h3>子智能体</h3>
+            <p class="sub">本 turn 派生的 subagent 及其用量</p>
+            <div class="card">
+              <div class="agent-row"><div class="av ai">P</div><div><div class="nm">explorer</div><div class="path">pl-parser/src/ast</div></div><span class="tok">8.2k tok</span></div>
+              <div class="agent-row"><div class="av ai" style="background:var(--sage)">R</div><div><div class="nm">reviewer</div><div class="path">verifying Result propagation</div></div><span class="tok">3.1k tok</span></div>
+              <div class="agent-row" style="opacity:.55"><div class="av me">P</div><div><div class="nm">executor</div><div class="path">idle · waiting plan</div></div><span class="tok">—</span></div>
+            </div>
+            <h3 style="margin-top:22px">Turn 阶段</h3>
+            <p class="sub">从 turn 启动到当前的阶段流转</p>
+            <div class="card">
+              <div class="step"><span class="n" style="background:var(--ink-faint)">✓</span><span style="color:var(--ink-soft)">Exploring · 已完成代码扫描</span></div>
+              <div class="step"><span class="n">●</span><span><b>Planning</b> · 生成实施计划中</span></div>
+              <div class="step" style="opacity:.5"><span class="n" style="background:#d6cfc6">3</span><span style="color:var(--ink-soft)">Executing · 等待确认</span></div>
+              <div class="step" style="opacity:.5"><span class="n" style="background:#d6cfc6">4</span><span style="color:var(--ink-soft)">Reviewing</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  <p class="foot-note">Pure Studio · 06 Claude Warm — 工作台与运行时 · 暖白纸面 × 赭橙点缀</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pure Studio · Claude Warm · 桌面设计稿</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --font-sans:"Inter","Noto Sans SC",-apple-system,"SF Pro Text","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    --font-serif:"Instrument Serif","Noto Serif SC",Georgia,serif;
+    --font-mono:"JetBrains Mono","SF Mono",Consolas,monospace;
+    --paper:#faf9f7; --paper-2:#f3eeea; --paper-3:#ece5de;
+    --ink:#2b2520; --ink-soft:#6b635a; --ink-faint:#a8a097;
+    --line:#e6ddd6; --line-2:#dcd2c8;
+    --clay:#d97757; --clay-soft:#f8e6dc; --clay-deep:#b85c3e;
+    --sage:#6b8e5a; --sage-soft:#e3ead8;
+    --ochre:#c08a3e; --ochre-soft:#f4e8d2;
+    --rose:#c25563; --rose-soft:#f4dde1;
+    --shadow-1:0 1px 2px rgba(60,48,30,.04),0 4px 12px -8px rgba(120,80,55,.12);
+    --shadow-2:0 1px 2px rgba(60,48,30,.05),0 8px 24px -14px rgba(120,80,55,.2);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:var(--font-sans);color:var(--ink);background:var(--paper);-webkit-font-smoothing:antialiased;line-height:1.55;
+    background-image:radial-gradient(60% 50% at 100% 0%,rgba(217,119,87,.08),transparent 60%),radial-gradient(50% 40% at 0% 100%,rgba(217,119,87,.05),transparent 60%);}
+  .wrap{max-width:1140px;margin:0 auto;padding:56px 32px 80px}
+  .hero{margin-bottom:44px}
+  .eyebrow{font-family:var(--font-mono);font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--clay);margin:0 0 14px}
+  h1{font-family:var(--font-serif);font-size:44px;letter-spacing:-.02em;margin:0 0 14px;font-weight:400;line-height:1.1}
+  h1 em{font-style:italic;color:var(--clay)}
+  .lede{font-size:16px;color:var(--ink-soft);max-width:680px;margin:0;line-height:1.65}
+  .meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:22px}
+  .meta span{font-size:12px;color:var(--ink-soft);background:#fff;border:1px solid var(--line);padding:6px 12px;border-radius:999px;font-weight:500}
+  .meta b{color:var(--ink);font-weight:600}
+
+  .swatch-strip{display:flex;gap:0;height:54px;border-radius:12px;overflow:hidden;border:1px solid var(--line);margin:30px 0 0}
+  .swatch-strip i{flex:1;display:block}
+  .swatch-strip .lab{display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;font-family:var(--font-mono);font-size:9px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.3)}
+
+  .sec{margin-top:44px}
+  .sec-t{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+  .sec-t b{font-family:var(--font-serif);font-size:22px;font-weight:400}
+  .sec-t .n{font-family:var(--font-mono);font-size:11px;color:var(--clay);background:var(--clay-soft);border:1px solid #f0ddd0;padding:3px 10px;border-radius:999px}
+  .sec-t .cnt{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--ink-faint)}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:820px){.grid{grid-template-columns:1fr}.wrap{padding:44px 20px 60px}h1{font-size:34px}}
+
+  .card{position:relative;display:block;text-decoration:none;color:inherit;background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;transition:transform .25s,box-shadow .25s,border-color .25s}
+  .card:hover{transform:translateY(-3px);box-shadow:0 18px 40px -20px rgba(120,80,55,.35);border-color:var(--line-2)}
+  .body-c{padding:20px 22px}
+  .body-c .name{display:flex;align-items:baseline;gap:10px;margin-bottom:7px}
+  .body-c .name h2{margin:0;font-size:19px;font-weight:600;letter-spacing:-.01em}
+  .body-c .name .zh{font-family:var(--font-serif);font-style:italic;color:var(--ink-faint);font-size:14px}
+  .body-c p{margin:0 0 14px;font-size:13px;color:var(--ink-soft);line-height:1.6}
+  .tags{display:flex;gap:6px;flex-wrap:wrap}
+  .tags span{font-size:11px;color:var(--ink-soft);background:var(--paper-2);border:1px solid var(--line);padding:4px 9px;border-radius:999px;font-weight:500}
+  .open{position:absolute;bottom:20px;right:22px;font-family:var(--font-mono);font-size:11px;font-weight:600;color:var(--clay);opacity:0;transition:opacity .2s}
+  .card:hover .open{opacity:1}
+
+  .note{margin-top:40px;padding:22px 24px;background:#fff;border:1px solid var(--line);border-radius:16px;font-size:13.5px;color:var(--ink-soft);line-height:1.7}
+  .note b{color:var(--ink)}
+  .note h3{margin:0 0 8px;font-size:14px;color:var(--ink);font-weight:600}
+  .note ul{margin:8px 0 0;padding-left:20px}
+  .note li{margin:3px 0}
+  .src{margin-top:30px;font-size:12px;color:var(--ink-faint);line-height:1.8}
+  .src code{font-family:var(--font-mono);font-size:11px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <p class="eyebrow">Pure Studio · Claude Warm · 桌面设计稿 · 2026</p>
+    <h1>Claude 暖色 <em>桌面设计稿</em></h1>
+    <p class="lede">在现有 Pure Studio 全部功能基础上重设计：奶油暖白纸面 + 赭橙（#d97757）主调，低对比侧栏、居中阅读流、紧凑可扫描设置。完整覆盖 20 屏（4 个分组文件），共享同一套 design token。</p>
+    <div class="meta">
+      <span><b>20</b> 屏设计稿</span>
+      <span><b>4</b> 个分组文件</span>
+      <span>Design Token 系统</span>
+      <span>覆盖全部功能 + 状态变体</span>
+    </div>
+    <div class="swatch-strip">
+      <i style="background:#faf9f7"></i>
+      <i style="background:#f3eeea"></i>
+      <i style="background:#ece5de"></i>
+      <i style="background:#e6ddd6"></i>
+      <i style="background:#d97757" class="lab">clay</i>
+      <i style="background:#b85c3e"></i>
+      <i style="background:#6b8e5a" class="lab">sage</i>
+      <i style="background:#c08a3e" class="lab">ochre</i>
+      <i style="background:#c25563" class="lab">rose</i>
+      <i style="background:#2b2520" class="lab">ink</i>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t"><span class="n">1</span><b>工作台 + 运行时</b><span class="cnt">7 屏</span></div>
+    <div class="grid">
+      <a class="card" href="06-claude-warm-workspace.html">
+        <div class="body-c">
+          <div class="name"><h2>Workspace &amp; Runtime</h2><span class="zh">聊天工作台 + 状态</span></div>
+          <p>侧栏归档/关闭按钮、主工作台四态（空闲 / 流式 / 空会话 / 无项目）、状态栏常驻条与 hover popover、运行时详情面板（上下文 ring / token / 费用 / 能力 / 子智能体 / turn 阶段）。含侧栏 + 状态栏细节特写。</p>
+          <div class="tags"><span>侧栏归档</span><span>4 状态</span><span>状态栏</span><span>详情面板</span><span>特写</span></div>
+          <span class="open">打开 7 屏 →</span>
+        </div>
+      </a>
+      <a class="card" href="06-claude-warm-interactions.html">
+        <div class="body-c">
+          <div class="name"><h2>Interaction Docks</h2><span class="zh">交互 Dock</span></div>
+          <p>三类 pending interaction 互斥替换普通输入：工具授权、用户输入（分题 + secret + Other）、计划确认。停止按钮常驻，计划正文留在 timeline 卡片。</p>
+          <div class="tags"><span>toolApproval</span><span>userInput</span><span>planConfirmation</span><span>分题交互</span></div>
+          <span class="open">打开 4 屏 →</span>
+        </div>
+      </a>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t"><span class="n">2</span><b>设置页</b><span class="cnt">10 屏</span></div>
+    <div class="grid">
+      <a class="card" href="06-claude-warm-providers.html">
+        <div class="body-c">
+          <div class="name"><h2>Providers</h2><span class="zh">模型供应商</span></div>
+          <p>列表（用量配额卡：Zhipu 5h/周/MCP 进度、DeepSeek 余额拆分、缺 key / 刷新中态）、详情（配额明细 + 工具用量 + 模型清单）、新增（模板选择 + 建议 id）、编辑（自定义模型增删）。</p>
+          <div class="tags"><span>配额卡</span><span>页面栈互斥</span><span>保存/取消</span></div>
+          <span class="open">打开 4 屏 →</span>
+        </div>
+      </a>
+      <a class="card" href="06-claude-warm-settings.html">
+        <div class="body-c">
+          <div class="name"><h2>Settings · 其余</h2><span class="zh">6 个 tab</span></div>
+          <p>Instructions（失焦保存）、Skills（Discover）、Roles（四角色下拉即写回）、MCP（stdio/HTTP + built-in 锁定）、Security（紧凑三选项）、General（UI 偏好开关）。</p>
+          <div class="tags"><span>Instructions</span><span>Skills</span><span>Roles</span><span>MCP</span><span>Security</span><span>General</span></div>
+          <span class="open">打开 6 屏 →</span>
+        </div>
+      </a>
+    </div>
+  </div>
+
+  <div class="note">
+    <h3>设计原则</h3>
+    <b>暖白纸面 · 赭橙点缀 · 低对比侧栏 · 居中阅读流</b>。20 屏共享同一套 design token（Claude 风格暖色），覆盖现有 Pure Studio 全部功能与状态变体，作为后续 Flutter 端重构的视觉权威依据。
+    <ul>
+      <li>色板：paper 暖白系 + clay 赭橙主色 + sage/ochre/rose 语义色</li>
+      <li>字体：Instrument Serif 标题 / Inter 正文 / JetBrains Mono 代码与领域值</li>
+      <li>布局：双栏（侧栏浅于主区），主区居中阅读流，设置页全窗口替换聊天页</li>
+      <li>状态：idle / streaming / empty / no-project / 配额 / 刷新中 / 缺 key 全覆盖</li>
+    </ul>
+  </div>
+
+  <div class="src">
+    Claude desktop 风格暖色（背景更白净、赭橙更亮）。<br>
+    原型目录：<code>design/prototypes/</code> · 设计系统总览：<a href="06-claude-warm-index.html" style="color:var(--clay);text-decoration:none">06-claude-warm-index.html</a>
+  </div>
+
+</div>
+</body>
+</html>
