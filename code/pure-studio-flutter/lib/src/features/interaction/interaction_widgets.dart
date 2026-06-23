@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../app/theme/studio_tokens.dart';
+import '../../shared/studio_chrome.dart';
+
 class InteractionDockShell extends StatelessWidget {
   const InteractionDockShell({
     required this.kind,
@@ -22,58 +25,45 @@ class InteractionDockShell extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 460;
-        return DecoratedBox(
-          decoration: BoxDecoration(
-            color: colors.surface,
-            border: Border.all(
-              color: colors.outlineVariant.withValues(alpha: 0.9),
-            ),
-            borderRadius: BorderRadius.circular(8),
-            boxShadow: [
-              BoxShadow(
-                color: colors.shadow.withValues(alpha: 0.07),
-                blurRadius: 18,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(compact ? 10 : 14, 12, 12, 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (!compact) ...[
-                  Icon(
-                    _iconFor(kind),
-                    size: 20,
-                    color: colors.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 12),
-                ],
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      DefaultTextStyle.merge(
-                        style: Theme.of(context).textTheme.titleSmall,
-                        child: header,
-                      ),
-                      const SizedBox(height: 10),
-                      child,
-                      if (footer != null) ...[
-                        const SizedBox(height: 12),
-                        footer!,
-                      ],
-                    ],
-                  ),
-                ),
-                if (trailing != null) ...[
-                  SizedBox(width: compact ? 6 : 8),
-                  trailing!,
-                ],
+        return StudioPanel(
+          backgroundColor: colors.surfaceContainerLowest,
+          borderColor: colors.outlineVariant.withValues(alpha: 0.86),
+          radius: StudioRadii.lg,
+          shadow: true,
+          padding: EdgeInsets.fromLTRB(compact ? 10 : 14, 12, 12, 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (!compact) ...[
+                StudioIconBadge(icon: _iconFor(kind), size: 32),
+                const SizedBox(width: 12),
               ],
-            ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DefaultTextStyle.merge(
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: context.studioInk,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      child: header,
+                    ),
+                    const SizedBox(height: 10),
+                    child,
+                    if (footer != null) ...[
+                      const SizedBox(height: 12),
+                      footer!,
+                    ],
+                  ],
+                ),
+              ),
+              if (trailing != null) ...[
+                SizedBox(width: compact ? 6 : 8),
+                trailing!,
+              ],
+            ],
           ),
         );
       },
@@ -107,7 +97,7 @@ class DockTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, size: 17),
+        Icon(icon, size: 17, color: StudioColors.clayDeep),
         const SizedBox(width: 7),
         Expanded(child: Text(label, overflow: TextOverflow.ellipsis)),
         if (trailing != null) ...[const SizedBox(width: 8), trailing!],
@@ -143,12 +133,10 @@ class InfoChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Chip(
-      avatar: Icon(icon, size: 18),
-      label: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 520),
-        child: Text(label, overflow: TextOverflow.ellipsis),
-      ),
+    return StudioPill(
+      icon: icon,
+      label: label,
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
     );
   }
 }
@@ -165,16 +153,18 @@ class InteractionCodeBlock extends StatelessWidget {
       width: double.infinity,
       constraints: const BoxConstraints(maxHeight: 180),
       decoration: BoxDecoration(
-        color: colors.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(8),
+        color: colors.surfaceContainerLow,
+        border: Border.all(color: colors.outlineVariant),
+        borderRadius: BorderRadius.circular(StudioRadii.sm),
       ),
       padding: const EdgeInsets.all(10),
       child: SingleChildScrollView(
         child: SelectableText(
           text,
-          style: Theme.of(
-            context,
-          ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            fontFamily: 'JetBrains Mono',
+            fontFamilyFallback: const ['Consolas', 'monospace'],
+          ),
         ),
       ),
     );
