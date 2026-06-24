@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../app/theme/studio_tokens.dart';
+import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_chrome.dart';
 import '../../shared/upward_popup_menu.dart';
 import 'context_usage_ring.dart';
@@ -47,13 +48,19 @@ class SessionStatusBar extends ConsumerWidget {
                         if (runtime.costLabel.isNotEmpty)
                           _StatusChip(
                             label: runtime.costLabel,
-                            tooltip: 'Cost',
+                            tooltip: context.l10n.statusCost,
                           ),
-                        if (_runtimeCapabilityLabel(runtime).isNotEmpty)
+                        if (_runtimeCapabilityLabel(
+                          context,
+                          runtime,
+                        ).isNotEmpty)
                           _StatusChip(
                             icon: Icons.tune_outlined,
-                            label: _runtimeCapabilityLabel(runtime),
-                            tooltip: _runtimeCapabilityTooltip(runtime),
+                            label: _runtimeCapabilityLabel(context, runtime),
+                            tooltip: _runtimeCapabilityTooltip(
+                              context,
+                              runtime,
+                            ),
                           ),
                       ],
                     ),
@@ -73,28 +80,36 @@ class SessionStatusBar extends ConsumerWidget {
   }
 }
 
-String _runtimeCapabilityLabel(SessionRuntimeView runtime) {
+String _runtimeCapabilityLabel(
+  BuildContext context,
+  SessionRuntimeView runtime,
+) {
   final parts = [
     if (runtime.activeSkills.isNotEmpty)
-      '${runtime.activeSkills.length} skills',
+      context.l10n.statusSkillsCount(runtime.activeSkills.length),
     if (runtime.activeMcpServers.isNotEmpty)
-      '${runtime.activeMcpServers.length} MCP',
+      context.l10n.statusMcpCount(runtime.activeMcpServers.length),
     if (runtime.activeLspServers.isNotEmpty)
-      '${runtime.activeLspServers.length} LSP',
-    if (runtime.agentCount > 0) '${runtime.agentCount} agents',
+      context.l10n.statusLspCount(runtime.activeLspServers.length),
+    if (runtime.agentCount > 0)
+      context.l10n.statusAgentsCount(runtime.agentCount),
   ];
   return parts.join(' · ');
 }
 
-String _runtimeCapabilityTooltip(SessionRuntimeView runtime) {
+String _runtimeCapabilityTooltip(
+  BuildContext context,
+  SessionRuntimeView runtime,
+) {
   final sections = [
     if (runtime.activeSkills.isNotEmpty)
-      'Skills\n${runtime.activeSkills.join('\n')}',
+      '${context.l10n.statusSkillsSection}\n${runtime.activeSkills.join('\n')}',
     if (runtime.activeMcpServers.isNotEmpty)
-      'MCP\n${runtime.activeMcpServers.join('\n')}',
+      '${context.l10n.statusMcpSection}\n${runtime.activeMcpServers.join('\n')}',
     if (runtime.activeLspServers.isNotEmpty)
-      'LSP\n${runtime.activeLspServers.join('\n')}',
-    if (runtime.agentCount > 0) 'Subagents\n${runtime.agentCount}',
+      '${context.l10n.statusLspSection}\n${runtime.activeLspServers.join('\n')}',
+    if (runtime.agentCount > 0)
+      '${context.l10n.statusSubagentsSection}\n${runtime.agentCount}',
   ];
   return sections.join('\n\n');
 }
@@ -108,7 +123,7 @@ class _SessionModeSelector extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return UpwardPopupMenu<CompileMode>(
-      tooltip: 'Session mode',
+      tooltip: context.l10n.statusSessionMode,
       enabled: enabled,
       initialValue: mode,
       onSelected: ref.read(studioControllerProvider.notifier).setSessionMode,
@@ -162,7 +177,7 @@ class _PlannerModelSelector extends ConsumerWidget {
     final role = state.role('planner');
     final current = _plannerModelFor(state) ?? options.first;
     return UpwardPopupMenu<String>(
-      tooltip: 'Planner model',
+      tooltip: context.l10n.statusPlannerModel,
       initialValue: current.key,
       onSelected: (key) {
         final option = options.firstWhere((option) => option.key == key);
@@ -220,7 +235,7 @@ class _ReasoningEffortSelector extends ConsumerWidget {
     }
     final current = efforts.contains(role.effort) ? role.effort : efforts.first;
     return UpwardPopupMenu<String>(
-      tooltip: 'Reasoning effort',
+      tooltip: context.l10n.statusReasoningEffort,
       initialValue: current,
       onSelected: (effort) {
         ref

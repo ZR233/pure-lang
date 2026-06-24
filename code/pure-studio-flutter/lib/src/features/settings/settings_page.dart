@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../app/theme/studio_tokens.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
+import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_chrome.dart';
 
 part 'settings_provider_tab.dart';
@@ -41,20 +42,42 @@ class SettingsPage extends ConsumerWidget {
 }
 
 const _settingsTabs = [
-  _SettingsTabInfo(Icons.cloud_outlined, 'Providers'),
-  _SettingsTabInfo(Icons.notes_outlined, 'Instructions'),
-  _SettingsTabInfo(Icons.extension_outlined, 'Skills'),
-  _SettingsTabInfo(Icons.badge_outlined, 'Roles'),
-  _SettingsTabInfo(Icons.hub_outlined, 'MCP'),
-  _SettingsTabInfo(Icons.security_outlined, 'Security'),
-  _SettingsTabInfo(Icons.tune_outlined, 'General'),
+  _SettingsTabInfo(Icons.cloud_outlined, _SettingsTab.providers),
+  _SettingsTabInfo(Icons.notes_outlined, _SettingsTab.instructions),
+  _SettingsTabInfo(Icons.extension_outlined, _SettingsTab.skills),
+  _SettingsTabInfo(Icons.badge_outlined, _SettingsTab.roles),
+  _SettingsTabInfo(Icons.hub_outlined, _SettingsTab.mcp),
+  _SettingsTabInfo(Icons.security_outlined, _SettingsTab.security),
+  _SettingsTabInfo(Icons.tune_outlined, _SettingsTab.general),
 ];
 
 class _SettingsTabInfo {
-  const _SettingsTabInfo(this.icon, this.label);
+  const _SettingsTabInfo(this.icon, this.tab);
 
   final IconData icon;
-  final String label;
+  final _SettingsTab tab;
+
+  String label(BuildContext context) {
+    return switch (tab) {
+      _SettingsTab.providers => context.l10n.settingsProvidersTab,
+      _SettingsTab.instructions => context.l10n.settingsInstructionsTab,
+      _SettingsTab.skills => context.l10n.settingsSkillsTab,
+      _SettingsTab.roles => context.l10n.settingsRolesTab,
+      _SettingsTab.mcp => context.l10n.settingsMcpTab,
+      _SettingsTab.security => context.l10n.settingsSecurityTab,
+      _SettingsTab.general => context.l10n.settingsGeneralTab,
+    };
+  }
+}
+
+enum _SettingsTab {
+  providers,
+  instructions,
+  skills,
+  roles,
+  mcp,
+  security,
+  general,
 }
 
 class _SettingsScaffold extends StatelessWidget {
@@ -157,9 +180,9 @@ class _SettingsNav extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(12, 18, 12, 16),
               children: [
                 const _SettingsBackTile(compact: false),
-                const _SettingsNavGroupLabel('Workspace'),
+                _SettingsNavGroupLabel(context.l10n.settingsWorkspaceGroup),
                 ...navItems.take(5),
-                const _SettingsNavGroupLabel('System'),
+                _SettingsNavGroupLabel(context.l10n.settingsSystemGroup),
                 ...navItems.skip(5),
               ],
             ),
@@ -183,18 +206,22 @@ class _SettingsBackTile extends StatelessWidget {
         Icon(Icons.arrow_back, size: 16, color: context.studioInkSoft),
         if (!compact) ...[
           const SizedBox(width: 8),
-          Text(
-            '返回聊天',
-            style: context.text.labelMedium?.copyWith(
-              color: context.studioInkSoft,
-              fontWeight: FontWeight.w500,
+          Expanded(
+            child: Text(
+              context.l10n.settingsBackToChat,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: context.text.labelMedium?.copyWith(
+                color: context.studioInkSoft,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
         ],
       ],
     );
     return Tooltip(
-      message: 'Back',
+      message: context.l10n.settingsBack,
       child: Material(
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(StudioRadii.sm),
@@ -251,6 +278,7 @@ class _SettingsNavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final foreground = selected ? StudioColors.clayDeep : context.studioInkSoft;
+    final label = tab.label(context);
     return Padding(
       padding: EdgeInsets.only(right: compact ? 8 : 0, bottom: compact ? 0 : 6),
       child: Material(
@@ -276,7 +304,7 @@ class _SettingsNavItem extends StatelessWidget {
                 const SizedBox(width: 10),
                 if (compact)
                   Text(
-                    tab.label,
+                    label,
                     overflow: TextOverflow.ellipsis,
                     style: context.text.labelMedium?.copyWith(
                       color: foreground,
@@ -286,7 +314,7 @@ class _SettingsNavItem extends StatelessWidget {
                 else
                   Expanded(
                     child: Text(
-                      tab.label,
+                      label,
                       overflow: TextOverflow.ellipsis,
                       style: context.text.labelMedium?.copyWith(
                         color: foreground,

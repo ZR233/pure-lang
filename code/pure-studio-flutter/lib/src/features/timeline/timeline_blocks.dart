@@ -5,11 +5,11 @@ class _EmptyTimeline extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    return Center(
       child: StudioEmptyState(
         icon: Icons.forum_outlined,
-        title: 'No messages yet',
-        message: 'Open a project or start a session to begin.',
+        title: context.l10n.timelineEmptyTitle,
+        message: context.l10n.timelineEmptyMessage,
       ),
     );
   }
@@ -28,7 +28,7 @@ class _JumpToLatestButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final textStyle = Theme.of(context).textTheme.labelSmall;
     return Tooltip(
-      message: '跳到最新',
+      message: context.l10n.timelineJumpToLatest,
       child: Material(
         elevation: 0,
         color: StudioColors.claySoft,
@@ -54,7 +54,7 @@ class _JumpToLatestButton extends StatelessWidget {
                 if (pendingCount > 0) ...[
                   const SizedBox(width: 4),
                   Text(
-                    'New',
+                    context.l10n.timelineNew,
                     style: textStyle?.copyWith(color: StudioColors.clayDeep),
                   ),
                 ],
@@ -201,7 +201,7 @@ class _ReasoningPartState extends State<_ReasoningPart> {
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.part.title ?? 'Reasoning';
+    final title = widget.part.title ?? context.l10n.timelineReasoningFallback;
     return _TimelinePanel(
       child: ExpansionTile(
         tilePadding: const EdgeInsets.symmetric(horizontal: 12),
@@ -241,7 +241,7 @@ class _ToolPart extends StatelessWidget {
     return _TimelinePanel(
       child: _TimelineMetaRow(
         icon: Icons.terminal,
-        title: part.title ?? 'Tool',
+        title: part.title ?? context.l10n.timelineToolFallback,
         subtitle: part.text,
         trailing: _StatusPill(label: part.status),
       ),
@@ -268,7 +268,7 @@ class _PlanPart extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    part.title ?? 'Plan',
+                    part.title ?? context.l10n.timelinePlanFallback,
                     style: Theme.of(context).textTheme.titleSmall,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -302,7 +302,7 @@ class _AgentPart extends StatelessWidget {
     return _TimelinePanel(
       child: _TimelineMetaRow(
         icon: Icons.account_tree_outlined,
-        title: part.title ?? 'Agent',
+        title: part.title ?? context.l10n.timelineAgentFallback,
         subtitle: part.text,
       ),
     );

@@ -5,6 +5,7 @@ import 'package:gpt_markdown/gpt_markdown.dart';
 
 import '../../app/theme/studio_tokens.dart';
 import '../../domain/models/studio_models.dart';
+import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_chrome.dart';
 import 'markdown_repair.dart';
 

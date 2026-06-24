@@ -34,7 +34,7 @@ class _Sidebar extends ConsumerWidget {
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                'Pure Studio',
+                                context.l10n.appTitle,
                                 overflow: TextOverflow.ellipsis,
                                 style: Theme.of(context).textTheme.titleMedium
                                     ?.copyWith(
@@ -69,7 +69,7 @@ class _Sidebar extends ConsumerWidget {
                         vertical: 6,
                       ),
                       child: Text(
-                        'Sessions',
+                        context.l10n.sidebarSessions,
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: context.studioInkSoft,
                           fontWeight: FontWeight.w600,
@@ -127,7 +127,7 @@ class _ProjectTile extends ConsumerWidget {
             ),
           ),
           IconButton(
-            tooltip: 'Close project',
+            tooltip: context.l10n.sidebarCloseProject,
             icon: const Icon(Icons.close, size: 18),
             onPressed: canArchive
                 ? () => controller.archiveProject(project.id)
@@ -144,7 +144,7 @@ class _ProjectTile extends ConsumerWidget {
       iconColor: selected ? StudioColors.clayDeep : colors.onSurfaceVariant,
       onTap: () => controller.selectProject(project.id),
       trailing: IconButton(
-        tooltip: 'Close project',
+        tooltip: context.l10n.sidebarCloseProject,
         style: IconButton.styleFrom(
           minimumSize: const Size.square(30),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -193,12 +193,12 @@ class _SessionTile extends ConsumerWidget {
       selected: selected,
       icon: modeIcon,
       title: session.title,
-      subtitle: _sessionSubtitle(session),
+      subtitle: _sessionSubtitle(context, session),
       iconColor: selected ? StudioColors.clayDeep : colors.onSurfaceVariant,
       onTap: () =>
           ref.read(studioControllerProvider.notifier).selectSession(session.id),
       trailing: IconButton(
-        tooltip: 'Archive session',
+        tooltip: context.l10n.sidebarArchiveSession,
         style: IconButton.styleFrom(
           minimumSize: const Size.square(30),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -308,7 +308,7 @@ class _SidebarActions extends ConsumerWidget {
           ? Column(
               children: [
                 IconButton(
-                  tooltip: 'New session',
+                  tooltip: context.l10n.sidebarNewSession,
                   icon: const Icon(Icons.add_comment_outlined),
                   onPressed: state.selectedProjectId == null || state.isBusy
                       ? null
@@ -317,12 +317,12 @@ class _SidebarActions extends ConsumerWidget {
                             .createSession,
                 ),
                 IconButton(
-                  tooltip: 'Open project',
+                  tooltip: context.l10n.sidebarOpenProject,
                   icon: const Icon(Icons.create_new_folder),
                   onPressed: () => _openProject(ref),
                 ),
                 IconButton(
-                  tooltip: 'Settings',
+                  tooltip: context.l10n.sidebarSettings,
                   icon: const Icon(Icons.settings),
                   onPressed: () => context.go('/settings'),
                 ),
@@ -333,8 +333,8 @@ class _SidebarActions extends ConsumerWidget {
                 Expanded(
                   child: _SidebarActionButton(
                     icon: Icons.add_comment_outlined,
-                    label: 'New',
-                    tooltip: 'New session',
+                    label: context.l10n.sidebarNew,
+                    tooltip: context.l10n.sidebarNewSession,
                     onPressed: state.selectedProjectId == null || state.isBusy
                         ? null
                         : ref
@@ -346,14 +346,14 @@ class _SidebarActions extends ConsumerWidget {
                 Expanded(
                   child: _SidebarActionButton(
                     icon: Icons.create_new_folder,
-                    label: 'Open',
-                    tooltip: 'Open project',
+                    label: context.l10n.sidebarOpen,
+                    tooltip: context.l10n.sidebarOpenProject,
                     onPressed: () => _openProject(ref),
                   ),
                 ),
                 const SizedBox(width: 8),
                 IconButton(
-                  tooltip: 'Settings',
+                  tooltip: context.l10n.sidebarSettings,
                   icon: const Icon(Icons.settings),
                   onPressed: () => context.go('/settings'),
                 ),

@@ -60,28 +60,28 @@ class _InstructionsTabState extends ConsumerState<_InstructionsTab> {
   Widget build(BuildContext context) {
     return _SettingsPane(
       children: [
-        const _SettingsHeader(
-          title: 'Instructions',
-          subtitle: 'Injected into each turn; changes save after typing stops.',
+        _SettingsHeader(
+          title: context.l10n.settingsInstructionsTitle,
+          subtitle: context.l10n.settingsInstructionsSubtitle,
         ),
         const SizedBox(height: 16),
         _InstructionEditor(
           controller: _baseController,
-          label: 'Base instructions',
+          label: context.l10n.settingsBaseInstructions,
           icon: Icons.notes_outlined,
           onChanged: _scheduleSave,
         ),
         const SizedBox(height: 12),
         _InstructionEditor(
           controller: _developerController,
-          label: 'Developer instructions',
+          label: context.l10n.settingsDeveloperInstructions,
           icon: Icons.code,
           onChanged: _scheduleSave,
         ),
         const SizedBox(height: 12),
         _InstructionEditor(
           controller: _userController,
-          label: 'User context',
+          label: context.l10n.settingsUserContext,
           icon: Icons.person_outline,
           onChanged: _scheduleSave,
         ),
@@ -174,7 +174,7 @@ class _InstructionEditor extends StatelessWidget {
               height: 1.55,
             ),
             decoration: InputDecoration(
-              hintText: 'Add project guidance here',
+              hintText: context.l10n.settingsInstructionHint,
               filled: true,
               fillColor: context.studioPaper,
               contentPadding: const EdgeInsets.symmetric(
@@ -245,9 +245,8 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
     return _SettingsPane(
       children: [
         _SettingsHeader(
-          title: 'Skills',
-          subtitle:
-              'Disable noisy skills or discover project/user/system catalogs.',
+          title: context.l10n.settingsSkillsTitle,
+          subtitle: context.l10n.settingsSkillsSubtitle,
           trailing: FilledButton.icon(
             icon: _discovering
                 ? const SizedBox.square(
@@ -255,7 +254,11 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.travel_explore),
-            label: Text(_discovering ? 'Discovering' : 'Discover'),
+            label: Text(
+              _discovering
+                  ? context.l10n.settingsDiscovering
+                  : context.l10n.settingsDiscover,
+            ),
             onPressed: widget.projectId == null || _discovering
                 ? null
                 : _discoverSkills,
@@ -263,7 +266,7 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
         ),
         const SizedBox(height: 16),
         _SettingsSearchField(
-          hintText: 'Filter skills',
+          hintText: context.l10n.settingsFilterSkills,
           onChanged: (value) => setState(() => _query = value),
         ),
         const SizedBox(height: 14),
@@ -276,8 +279,8 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
                   icon: Icons.extension_outlined,
                   title: skill,
                   subtitle: disabledSkills.contains(skill)
-                      ? 'Disabled for this workspace'
-                      : 'Enabled',
+                      ? context.l10n.settingsSkillDisabled
+                      : context.l10n.settingsSkillEnabled,
                   value: !disabledSkills.contains(skill),
                   onChanged: (selected) {
                     final disabled = {...disabledSkills};
@@ -297,11 +300,11 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
           _EmptySettingsMessage(
             icon: Icons.extension_outlined,
             title: widget.projectId == null
-                ? 'Open a project to discover skills'
-                : 'No skills match this filter',
+                ? context.l10n.settingsOpenProjectToDiscoverSkills
+                : context.l10n.settingsNoSkillsMatchFilter,
             body: widget.projectId == null
-                ? 'Skills are discovered from the selected workspace and configured user/system sources.'
-                : 'Clear the search or run discovery again.',
+                ? context.l10n.settingsSkillsDiscoverySources
+                : context.l10n.settingsClearSearchOrDiscoverAgain,
           ),
         ],
         if (_discoverError != null) ...[

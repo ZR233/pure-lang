@@ -1,0 +1,732 @@
+// ignore: unused_import
+import 'package:intl/intl.dart' as intl;
+import 'app_localizations.dart';
+
+// ignore_for_file: type=lint
+
+/// The translations for English (`en`).
+class AppLocalizationsEn extends AppLocalizations {
+  AppLocalizationsEn([String locale = 'en']) : super(locale);
+
+  @override
+  String get appTitle => 'Pure Studio';
+
+  @override
+  String get sidebarSessions => 'Sessions';
+
+  @override
+  String get sidebarCloseProject => 'Close project';
+
+  @override
+  String get sidebarArchiveSession => 'Archive session';
+
+  @override
+  String get sidebarNewSession => 'New session';
+
+  @override
+  String get sidebarOpenProject => 'Open project';
+
+  @override
+  String get sidebarSettings => 'Settings';
+
+  @override
+  String get sidebarNew => 'New';
+
+  @override
+  String get sidebarOpen => 'Open';
+
+  @override
+  String get shellNoSession => 'No session';
+
+  @override
+  String shellSessionUpdated(String mode, String time) {
+    return '$mode · updated $time';
+  }
+
+  @override
+  String get settingsBack => 'Back';
+
+  @override
+  String get settingsBackToChat => 'Back to chat';
+
+  @override
+  String get settingsWorkspaceGroup => 'Workspace';
+
+  @override
+  String get settingsSystemGroup => 'System';
+
+  @override
+  String get settingsProvidersTab => 'Providers';
+
+  @override
+  String get settingsInstructionsTab => 'Instructions';
+
+  @override
+  String get settingsSkillsTab => 'Skills';
+
+  @override
+  String get settingsRolesTab => 'Roles';
+
+  @override
+  String get settingsMcpTab => 'MCP';
+
+  @override
+  String get settingsSecurityTab => 'Security';
+
+  @override
+  String get settingsGeneralTab => 'General';
+
+  @override
+  String get composerHint => 'Describe what you need...';
+
+  @override
+  String get composerSend => 'Send';
+
+  @override
+  String get composerStop => 'Stop';
+
+  @override
+  String get permissionModeTooltip => 'Permission mode';
+
+  @override
+  String get statusCost => 'Cost';
+
+  @override
+  String get statusSessionMode => 'Session mode';
+
+  @override
+  String get statusPlannerModel => 'Planner model';
+
+  @override
+  String get statusReasoningEffort => 'Reasoning effort';
+
+  @override
+  String get statusContextLabel => 'Context';
+
+  @override
+  String statusContextTooltip(
+    int contextTokens,
+    int contextWindow,
+    int percent,
+    int totalTokens,
+    String model,
+  ) {
+    return 'Context: $contextTokens/$contextWindow ($percent%)\n\nTotal tokens: $totalTokens\n\nModel: $model';
+  }
+
+  @override
+  String statusContextTooltipNoModel(
+    int contextTokens,
+    int contextWindow,
+    int percent,
+    int totalTokens,
+  ) {
+    return 'Context: $contextTokens/$contextWindow ($percent%)\n\nTotal tokens: $totalTokens';
+  }
+
+  @override
+  String statusSkillsCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count skills',
+      one: '1 skill',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String statusMcpCount(int count) {
+    return '$count MCP';
+  }
+
+  @override
+  String statusLspCount(int count) {
+    return '$count LSP';
+  }
+
+  @override
+  String statusAgentsCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count agents',
+      one: '1 agent',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get statusSkillsSection => 'Skills';
+
+  @override
+  String get statusMcpSection => 'MCP';
+
+  @override
+  String get statusLspSection => 'LSP';
+
+  @override
+  String get statusSubagentsSection => 'Subagents';
+
+  @override
+  String get timelineEmptyTitle => 'No messages yet';
+
+  @override
+  String get timelineEmptyMessage =>
+      'Open a project or start a session to begin.';
+
+  @override
+  String get timelineJumpToLatest => 'Jump to latest';
+
+  @override
+  String get timelineNew => 'New';
+
+  @override
+  String get timelineReasoningFallback => 'Reasoning';
+
+  @override
+  String get timelineToolFallback => 'Tool';
+
+  @override
+  String get timelinePlanFallback => 'Plan';
+
+  @override
+  String get timelineAgentFallback => 'Agent';
+
+  @override
+  String get interactionQuestionsTitle => 'A few questions';
+
+  @override
+  String get interactionLastQuestion => 'Last question';
+
+  @override
+  String get interactionContinueAfterAnswer => 'Continue after answering';
+
+  @override
+  String get interactionSubmitEmptyAnswersHint =>
+      'Unanswered questions are submitted as empty arrays.';
+
+  @override
+  String interactionAnsweredPendingHint(int answeredCount, int pendingCount) {
+    return '$answeredCount answered · $pendingCount pending';
+  }
+
+  @override
+  String get interactionPreviousQuestion => 'Previous';
+
+  @override
+  String get interactionNextQuestion => 'Next';
+
+  @override
+  String get interactionSubmitAnswers => 'Submit answers';
+
+  @override
+  String get interactionNeedInputTitle => 'Input needed';
+
+  @override
+  String get interactionAnswerHint =>
+      'Pure will use this answer to continue the current question.';
+
+  @override
+  String get interactionAnswerButton => 'Answer';
+
+  @override
+  String get interactionAnswerLabel => 'Answer';
+
+  @override
+  String interactionQuestionProgress(int current, int total) {
+    return 'Question $current / $total';
+  }
+
+  @override
+  String interactionAnsweredCount(int count) {
+    return '$count answered';
+  }
+
+  @override
+  String interactionQuestionTooltip(int index) {
+    return 'Question $index';
+  }
+
+  @override
+  String get interactionQuestionFallback => 'Question';
+
+  @override
+  String get interactionOtherLabel => 'Other';
+
+  @override
+  String get interactionSecretHint => 'Enter secret answer';
+
+  @override
+  String get interactionTextHint => 'Enter your answer...';
+
+  @override
+  String get interactionPermissionTitle => 'Permission needed';
+
+  @override
+  String get interactionPermissionSubtitle => 'Pure wants to run a tool call';
+
+  @override
+  String get interactionPermissionFooterHint =>
+      'The tool runs in the current working directory; adjust permission mode in the composer.';
+
+  @override
+  String get interactionReject => 'Reject';
+
+  @override
+  String get interactionApprove => 'Approve';
+
+  @override
+  String get interactionReasonLabel => 'Reason';
+
+  @override
+  String get interactionPlanConfirmTitle => 'Implement this plan?';
+
+  @override
+  String get interactionPlanConfirmSubtitle =>
+      'The plan stays in the timeline above.';
+
+  @override
+  String get interactionPlanEditingFooterHint =>
+      'Only your adjustment will be sent; the plan body is not returned.';
+
+  @override
+  String get interactionPlanImplementFooterHint =>
+      'Implementing switches back to Auto mode and submits the background implementation prompt.';
+
+  @override
+  String get interactionPlanIgnore => 'Ignore';
+
+  @override
+  String get interactionPlanAdjust => 'Tell Pure how to adjust';
+
+  @override
+  String get interactionPlanImplement => 'Implement this plan';
+
+  @override
+  String get interactionPlanAdjustHint =>
+      'Tell Pure how the plan should change...';
+
+  @override
+  String get interactionPlanAdjustSubmit => 'Submit adjustment';
+
+  @override
+  String get interactionPlanEditingNotice =>
+      'Continue planning: only your adjustment will be submitted.';
+
+  @override
+  String get interactionPlanViewNotice =>
+      'Plan content is not edited here; review the full plan in the timeline.';
+
+  @override
+  String get interactionPlanContinueReason => 'continue planning';
+
+  @override
+  String get settingsProvidersTitle => 'Providers';
+
+  @override
+  String get settingsProvidersSubtitle =>
+      'Model providers, credentials, models, and usage';
+
+  @override
+  String get settingsRefreshUsage => 'Refresh usage';
+
+  @override
+  String get settingsAddProvider => 'Add provider';
+
+  @override
+  String get settingsSearchProviders => 'Search providers';
+
+  @override
+  String get settingsNoProvidersMatchTitle => 'No providers match this filter';
+
+  @override
+  String get settingsNoProvidersMatchMessage =>
+      'Clear the search to see all configured providers.';
+
+  @override
+  String get settingsNoProvidersTitle => 'No providers found';
+
+  @override
+  String get settingsNoProvidersMessage =>
+      'Add a provider to configure credentials and models.';
+
+  @override
+  String get settingsDefaultProvider => 'Default provider';
+
+  @override
+  String get settingsSetAsDefaultProvider => 'Set as default';
+
+  @override
+  String get settingsOpenDetails => 'Open details';
+
+  @override
+  String get settingsEditProvider => 'Edit provider';
+
+  @override
+  String get settingsDeleteProvider => 'Delete provider';
+
+  @override
+  String get settingsNoProviderSelected => 'No provider selected';
+
+  @override
+  String get settingsProviderTitle => 'Provider';
+
+  @override
+  String get settingsProviderModelsTitle => 'Models';
+
+  @override
+  String get settingsProviderConnectionTitle => 'Connection';
+
+  @override
+  String get settingsProviderDefaultModelsTitle => 'Default models';
+
+  @override
+  String get settingsProviderCustomModelsTitle => 'Custom models';
+
+  @override
+  String get settingsNewProvider => 'New provider';
+
+  @override
+  String get settingsProviderKey => 'Provider key';
+
+  @override
+  String get settingsTemplate => 'Template';
+
+  @override
+  String get settingsDefaultModel => 'Default model';
+
+  @override
+  String get settingsApiKey => 'API key';
+
+  @override
+  String get settingsApiKeyKeepCurrent =>
+      'API key (leave blank to keep current)';
+
+  @override
+  String get settingsConfigured => 'configured';
+
+  @override
+  String get settingsMissing => 'missing';
+
+  @override
+  String get settingsDisplayName => 'Display name';
+
+  @override
+  String get settingsProtocolType => 'Protocol type';
+
+  @override
+  String get settingsBaseUrl => 'Base URL';
+
+  @override
+  String get settingsModelSlug => 'Model slug';
+
+  @override
+  String get settingsReasoningEfforts => 'Reasoning efforts';
+
+  @override
+  String get settingsEdit => 'Edit';
+
+  @override
+  String get settingsCancel => 'Cancel';
+
+  @override
+  String get settingsSave => 'Save';
+
+  @override
+  String get settingsAddModel => 'Add model';
+
+  @override
+  String get settingsRemoveModel => 'Remove model';
+
+  @override
+  String get settingsNoCustomModels => 'No custom models';
+
+  @override
+  String settingsBundledModels(int count) {
+    return '$count bundled';
+  }
+
+  @override
+  String get settingsDefaultBadge => 'default';
+
+  @override
+  String get settingsReadyBadge => 'ready';
+
+  @override
+  String get settingsSetupBadge => 'setup';
+
+  @override
+  String get settingsUsageTitle => 'Usage';
+
+  @override
+  String settingsUsageUpdated(String updatedAt) {
+    return 'Updated $updatedAt';
+  }
+
+  @override
+  String get settingsUsageAvailableBalance => 'Available balance';
+
+  @override
+  String get settingsUsageBalanceUnavailable => 'Balance unavailable';
+
+  @override
+  String settingsUsageGranted(String amount) {
+    return 'Granted $amount';
+  }
+
+  @override
+  String settingsUsageToppedUp(String amount) {
+    return 'Topped up $amount';
+  }
+
+  @override
+  String get settingsUsageRefreshing => 'Refreshing usage...';
+
+  @override
+  String get settingsUsageChecking => 'Checking usage...';
+
+  @override
+  String get settingsUsageCheckingShort => 'Checking usage';
+
+  @override
+  String get settingsUsageNotLoaded => 'Usage not loaded';
+
+  @override
+  String get settingsUsageUnsupported => 'Unsupported';
+
+  @override
+  String get settingsUsageNotSupported => 'Usage not supported';
+
+  @override
+  String get settingsUsageMissingKey => 'Missing key';
+
+  @override
+  String get settingsUsageFailed => 'Usage failed';
+
+  @override
+  String get settingsUsageQueryFailed => 'Usage query failed';
+
+  @override
+  String get settingsUsageApiKeyMissing => 'Provider API key is not configured';
+
+  @override
+  String settingsUsageUnsupportedForProvider(String providerName) {
+    return 'Usage is not supported for $providerName';
+  }
+
+  @override
+  String get settingsUsageNotChecked => 'Not checked';
+
+  @override
+  String get settingsUsageUnavailable => 'Usage is unavailable';
+
+  @override
+  String get settingsUsageError => 'Could not load usage';
+
+  @override
+  String get settingsUsageNoQuota => 'No quota details returned.';
+
+  @override
+  String get settingsUsageTools => 'Tools';
+
+  @override
+  String get settingsUsageToken => 'Token usage';
+
+  @override
+  String get settingsUsageSpend => 'Spend';
+
+  @override
+  String get settingsUsageRemaining => 'Remaining';
+
+  @override
+  String get settingsUsageUsed => 'Used';
+
+  @override
+  String get settingsUsageFiveHourQuota => '5 hour quota';
+
+  @override
+  String get settingsUsageWeeklyQuota => 'Weekly quota';
+
+  @override
+  String get settingsUsageMcpQuota => 'MCP quota';
+
+  @override
+  String get settingsUsageQuota => 'Quota';
+
+  @override
+  String settingsUsageQuotaRemaining(String remaining, String total) {
+    return '$remaining of $total remaining';
+  }
+
+  @override
+  String settingsUsageQuotaUsed(String current, String total) {
+    return '$current of $total used';
+  }
+
+  @override
+  String settingsUsagePercentRemaining(String percent) {
+    return '$percent remaining';
+  }
+
+  @override
+  String settingsUsageReset(String time) {
+    return 'Reset $time';
+  }
+
+  @override
+  String get settingsInstructionsTitle => 'Instructions';
+
+  @override
+  String get settingsInstructionsSubtitle =>
+      'Injected into each turn; changes save after typing stops.';
+
+  @override
+  String get settingsBaseInstructions => 'Base instructions';
+
+  @override
+  String get settingsDeveloperInstructions => 'Developer instructions';
+
+  @override
+  String get settingsUserContext => 'User context';
+
+  @override
+  String get settingsInstructionHint => 'Add project guidance here';
+
+  @override
+  String get settingsSkillsTitle => 'Skills';
+
+  @override
+  String get settingsSkillsSubtitle =>
+      'Disable noisy skills or discover project/user/system catalogs.';
+
+  @override
+  String get settingsDiscover => 'Discover';
+
+  @override
+  String get settingsDiscovering => 'Discovering';
+
+  @override
+  String get settingsFilterSkills => 'Filter skills';
+
+  @override
+  String get settingsSkillDisabled => 'Disabled for this workspace';
+
+  @override
+  String get settingsSkillEnabled => 'Enabled';
+
+  @override
+  String get settingsOpenProjectToDiscoverSkills =>
+      'Open a project to discover skills';
+
+  @override
+  String get settingsNoSkillsMatchFilter => 'No skills match this filter';
+
+  @override
+  String get settingsSkillsDiscoverySources =>
+      'Skills are discovered from the selected workspace and configured user/system sources.';
+
+  @override
+  String get settingsClearSearchOrDiscoverAgain =>
+      'Clear the search or run discovery again.';
+
+  @override
+  String get settingsNoSkillsTitle => 'No skills found';
+
+  @override
+  String get settingsNoSkillsMessage =>
+      'Try another filter or discover skills for this project.';
+
+  @override
+  String get settingsRolesTitle => 'Roles';
+
+  @override
+  String get settingsRolesSubtitle =>
+      'Choose provider/model defaults for each fixed agent role.';
+
+  @override
+  String get settingsRoleExplorerDescription =>
+      'Explore code and collect context.';
+
+  @override
+  String get settingsRolePlannerDescription =>
+      'Draft plans and structure intent.';
+
+  @override
+  String get settingsRoleExecutorDescription => 'Apply edits and run tools.';
+
+  @override
+  String get settingsRoleReviewerDescription =>
+      'Review results and verify risk.';
+
+  @override
+  String get settingsRoleFallbackDescription => 'Studio role';
+
+  @override
+  String get settingsModelField => 'Model';
+
+  @override
+  String get settingsMcpTitle => 'MCP';
+
+  @override
+  String get settingsMcpSubtitle =>
+      'Model Context Protocol servers and inline endpoints.';
+
+  @override
+  String get settingsEndpoint => 'Endpoint';
+
+  @override
+  String get settingsMcpEmptyTitle => 'No MCP servers';
+
+  @override
+  String get settingsMcpEmptyMessage =>
+      'Configured MCP servers will appear here.';
+
+  @override
+  String get settingsSecurityTitle => 'Security';
+
+  @override
+  String get settingsSecuritySubtitle =>
+      'Choose the default approval posture for this workspace.';
+
+  @override
+  String get settingsSecurityModeSubtitle =>
+      'Tool execution permission mode; changes apply immediately.';
+
+  @override
+  String settingsCurrentMode(String mode) {
+    return 'Current: $mode';
+  }
+
+  @override
+  String get settingsWorkspaceBoundary =>
+      'Workspace boundary policy remains unchanged.';
+
+  @override
+  String get settingsGeneralTitle => 'General';
+
+  @override
+  String get settingsGeneralSubtitle =>
+      'Interface preferences saved into the Studio store.';
+
+  @override
+  String get settingsFollowSystemTheme => 'Follow system theme';
+
+  @override
+  String get settingsFollowSystemThemeSubtitle =>
+      'Switch light and dark mode with the OS.';
+
+  @override
+  String get settingsFollowActiveTurn => 'Follow active turn';
+
+  @override
+  String get settingsFollowActiveTurnSubtitle =>
+      'Keep new timeline output pinned to the latest turn.';
+
+  @override
+  String get settingsCompactTimeline => 'Compact timeline';
+
+  @override
+  String get settingsCompactTimelineSubtitle =>
+      'Reduce message spacing for denser reading.';
+}

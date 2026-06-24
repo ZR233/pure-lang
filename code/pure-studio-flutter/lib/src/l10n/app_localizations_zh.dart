@@ -1,0 +1,1377 @@
+// ignore: unused_import
+import 'package:intl/intl.dart' as intl;
+import 'app_localizations.dart';
+
+// ignore_for_file: type=lint
+
+/// The translations for Chinese (`zh`).
+class AppLocalizationsZh extends AppLocalizations {
+  AppLocalizationsZh([String locale = 'zh']) : super(locale);
+
+  @override
+  String get appTitle => 'Pure Studio';
+
+  @override
+  String get sidebarSessions => '会话';
+
+  @override
+  String get sidebarCloseProject => '关闭项目';
+
+  @override
+  String get sidebarArchiveSession => '归档会话';
+
+  @override
+  String get sidebarNewSession => '新建会话';
+
+  @override
+  String get sidebarOpenProject => '打开项目';
+
+  @override
+  String get sidebarSettings => '设置';
+
+  @override
+  String get sidebarNew => '新建';
+
+  @override
+  String get sidebarOpen => '打开';
+
+  @override
+  String get shellNoSession => '没有会话';
+
+  @override
+  String shellSessionUpdated(String mode, String time) {
+    return '$mode · 更新于 $time';
+  }
+
+  @override
+  String get settingsBack => '返回';
+
+  @override
+  String get settingsBackToChat => '返回聊天';
+
+  @override
+  String get settingsWorkspaceGroup => '工作区';
+
+  @override
+  String get settingsSystemGroup => '系统';
+
+  @override
+  String get settingsProvidersTab => '服务';
+
+  @override
+  String get settingsInstructionsTab => '指令';
+
+  @override
+  String get settingsSkillsTab => '技能';
+
+  @override
+  String get settingsRolesTab => '角色';
+
+  @override
+  String get settingsMcpTab => 'MCP';
+
+  @override
+  String get settingsSecurityTab => '安全';
+
+  @override
+  String get settingsGeneralTab => '通用';
+
+  @override
+  String get composerHint => '描述你的需求...';
+
+  @override
+  String get composerSend => '发送';
+
+  @override
+  String get composerStop => '停止';
+
+  @override
+  String get permissionModeTooltip => '权限模式';
+
+  @override
+  String get statusCost => '费用';
+
+  @override
+  String get statusSessionMode => '会话模式';
+
+  @override
+  String get statusPlannerModel => 'Planner 模型';
+
+  @override
+  String get statusReasoningEffort => '思考等级';
+
+  @override
+  String get statusContextLabel => '上下文';
+
+  @override
+  String statusContextTooltip(
+    int contextTokens,
+    int contextWindow,
+    int percent,
+    int totalTokens,
+    String model,
+  ) {
+    return '上下文：$contextTokens/$contextWindow（$percent%）\n\n总 token：$totalTokens\n\n模型：$model';
+  }
+
+  @override
+  String statusContextTooltipNoModel(
+    int contextTokens,
+    int contextWindow,
+    int percent,
+    int totalTokens,
+  ) {
+    return '上下文：$contextTokens/$contextWindow（$percent%）\n\n总 token：$totalTokens';
+  }
+
+  @override
+  String statusSkillsCount(int count) {
+    return '$count 个 skill';
+  }
+
+  @override
+  String statusMcpCount(int count) {
+    return '$count 个 MCP';
+  }
+
+  @override
+  String statusLspCount(int count) {
+    return '$count 个 LSP';
+  }
+
+  @override
+  String statusAgentsCount(int count) {
+    return '$count 个 agent';
+  }
+
+  @override
+  String get statusSkillsSection => 'Skills';
+
+  @override
+  String get statusMcpSection => 'MCP';
+
+  @override
+  String get statusLspSection => 'LSP';
+
+  @override
+  String get statusSubagentsSection => 'Subagents';
+
+  @override
+  String get timelineEmptyTitle => '还没有消息';
+
+  @override
+  String get timelineEmptyMessage => '打开项目或开始会话后继续。';
+
+  @override
+  String get timelineJumpToLatest => '跳到最新';
+
+  @override
+  String get timelineNew => '新内容';
+
+  @override
+  String get timelineReasoningFallback => 'Reasoning';
+
+  @override
+  String get timelineToolFallback => 'Tool';
+
+  @override
+  String get timelinePlanFallback => 'Plan';
+
+  @override
+  String get timelineAgentFallback => 'Agent';
+
+  @override
+  String get interactionQuestionsTitle => '几个问题想确认';
+
+  @override
+  String get interactionLastQuestion => '最后一题';
+
+  @override
+  String get interactionContinueAfterAnswer => '回答后继续';
+
+  @override
+  String get interactionSubmitEmptyAnswersHint => '提交后未答问题保留空数组。';
+
+  @override
+  String interactionAnsweredPendingHint(int answeredCount, int pendingCount) {
+    return '已答 $answeredCount 题 · $pendingCount 题待答';
+  }
+
+  @override
+  String get interactionPreviousQuestion => '上一题';
+
+  @override
+  String get interactionNextQuestion => '下一题';
+
+  @override
+  String get interactionSubmitAnswers => '提交答案';
+
+  @override
+  String get interactionNeedInputTitle => '需要你的输入';
+
+  @override
+  String get interactionAnswerHint => 'Pure 会把这条回答作为当前问题的答案继续执行。';
+
+  @override
+  String get interactionAnswerButton => '回答';
+
+  @override
+  String get interactionAnswerLabel => '答案';
+
+  @override
+  String interactionQuestionProgress(int current, int total) {
+    return '问题 $current / $total';
+  }
+
+  @override
+  String interactionAnsweredCount(int count) {
+    return '$count 已答';
+  }
+
+  @override
+  String interactionQuestionTooltip(int index) {
+    return '问题 $index';
+  }
+
+  @override
+  String get interactionQuestionFallback => '问题';
+
+  @override
+  String get interactionOtherLabel => '其它';
+
+  @override
+  String get interactionSecretHint => '输入秘密答案';
+
+  @override
+  String get interactionTextHint => '输入你的回答...';
+
+  @override
+  String get interactionPermissionTitle => '需要权限';
+
+  @override
+  String get interactionPermissionSubtitle => 'Pure 想运行一个工具调用';
+
+  @override
+  String get interactionPermissionFooterHint =>
+      '工具将在当前工作目录执行；可在 composer 中调整权限模式。';
+
+  @override
+  String get interactionReject => '拒绝';
+
+  @override
+  String get interactionApprove => '批准';
+
+  @override
+  String get interactionReasonLabel => '原因';
+
+  @override
+  String get interactionPlanConfirmTitle => '实施此计划？';
+
+  @override
+  String get interactionPlanConfirmSubtitle => '计划正文保留在上方 timeline 卡片中';
+
+  @override
+  String get interactionPlanEditingFooterHint => '只会发送你的调整说明，不会回传计划正文。';
+
+  @override
+  String get interactionPlanImplementFooterHint =>
+      '选择实施会切回 Auto 模式并提交后台实施 prompt。';
+
+  @override
+  String get interactionPlanIgnore => '忽略';
+
+  @override
+  String get interactionPlanAdjust => '告诉 Pure 如何调整';
+
+  @override
+  String get interactionPlanImplement => '实施此计划';
+
+  @override
+  String get interactionPlanAdjustHint => '告诉 Pure 需要怎样调整计划...';
+
+  @override
+  String get interactionPlanAdjustSubmit => '提交调整';
+
+  @override
+  String get interactionPlanEditingNotice => '继续规划：只提交你的调整说明。';
+
+  @override
+  String get interactionPlanViewNotice => '计划内容不会在这里编辑；请在 timeline 中查看完整计划。';
+
+  @override
+  String get interactionPlanContinueReason => 'continue planning';
+
+  @override
+  String get settingsProvidersTitle => '服务';
+
+  @override
+  String get settingsProvidersSubtitle => '模型服务、凭据、模型和用量';
+
+  @override
+  String get settingsRefreshUsage => '刷新用量';
+
+  @override
+  String get settingsAddProvider => '添加 provider';
+
+  @override
+  String get settingsSearchProviders => '搜索 providers';
+
+  @override
+  String get settingsNoProvidersMatchTitle => '没有匹配的 providers';
+
+  @override
+  String get settingsNoProvidersMatchMessage => '清空搜索以查看所有已配置 providers。';
+
+  @override
+  String get settingsNoProvidersTitle => '没有 providers';
+
+  @override
+  String get settingsNoProvidersMessage => '添加 provider 后配置凭据和 models。';
+
+  @override
+  String get settingsDefaultProvider => '默认 provider';
+
+  @override
+  String get settingsSetAsDefaultProvider => '设为默认';
+
+  @override
+  String get settingsOpenDetails => '打开详情';
+
+  @override
+  String get settingsEditProvider => '编辑 provider';
+
+  @override
+  String get settingsDeleteProvider => '删除 provider';
+
+  @override
+  String get settingsNoProviderSelected => '未选择 provider';
+
+  @override
+  String get settingsProviderTitle => 'Provider 信息';
+
+  @override
+  String get settingsProviderModelsTitle => '模型';
+
+  @override
+  String get settingsProviderConnectionTitle => '连接';
+
+  @override
+  String get settingsProviderDefaultModelsTitle => '默认 models';
+
+  @override
+  String get settingsProviderCustomModelsTitle => '自定义 models';
+
+  @override
+  String get settingsNewProvider => '新建 provider';
+
+  @override
+  String get settingsProviderKey => 'Provider key';
+
+  @override
+  String get settingsTemplate => 'Template';
+
+  @override
+  String get settingsDefaultModel => 'Default model';
+
+  @override
+  String get settingsApiKey => 'API key';
+
+  @override
+  String get settingsApiKeyKeepCurrent => 'API key（留空以保留当前值）';
+
+  @override
+  String get settingsConfigured => '已配置';
+
+  @override
+  String get settingsMissing => '缺失';
+
+  @override
+  String get settingsDisplayName => 'Display name';
+
+  @override
+  String get settingsProtocolType => 'Protocol type';
+
+  @override
+  String get settingsBaseUrl => 'Base URL';
+
+  @override
+  String get settingsModelSlug => 'Model slug';
+
+  @override
+  String get settingsReasoningEfforts => 'Reasoning efforts';
+
+  @override
+  String get settingsEdit => '编辑';
+
+  @override
+  String get settingsCancel => '取消';
+
+  @override
+  String get settingsSave => '保存';
+
+  @override
+  String get settingsAddModel => '添加 model';
+
+  @override
+  String get settingsRemoveModel => '移除 model';
+
+  @override
+  String get settingsNoCustomModels => '没有自定义 models';
+
+  @override
+  String settingsBundledModels(int count) {
+    return '$count 个内置';
+  }
+
+  @override
+  String get settingsDefaultBadge => 'default';
+
+  @override
+  String get settingsReadyBadge => 'ready';
+
+  @override
+  String get settingsSetupBadge => 'setup';
+
+  @override
+  String get settingsUsageTitle => '用量';
+
+  @override
+  String settingsUsageUpdated(String updatedAt) {
+    return '更新于 $updatedAt';
+  }
+
+  @override
+  String get settingsUsageAvailableBalance => '可用余额';
+
+  @override
+  String get settingsUsageBalanceUnavailable => '余额不可用';
+
+  @override
+  String settingsUsageGranted(String amount) {
+    return '赠送 $amount';
+  }
+
+  @override
+  String settingsUsageToppedUp(String amount) {
+    return '充值 $amount';
+  }
+
+  @override
+  String get settingsUsageRefreshing => '正在刷新用量...';
+
+  @override
+  String get settingsUsageChecking => '正在检查用量...';
+
+  @override
+  String get settingsUsageCheckingShort => '正在检查用量';
+
+  @override
+  String get settingsUsageNotLoaded => '用量未加载';
+
+  @override
+  String get settingsUsageUnsupported => '不支持';
+
+  @override
+  String get settingsUsageNotSupported => '不支持用量查询';
+
+  @override
+  String get settingsUsageMissingKey => '缺少 key';
+
+  @override
+  String get settingsUsageFailed => '用量查询失败';
+
+  @override
+  String get settingsUsageQueryFailed => '用量查询失败';
+
+  @override
+  String get settingsUsageApiKeyMissing => '未配置 provider API key';
+
+  @override
+  String settingsUsageUnsupportedForProvider(String providerName) {
+    return '$providerName 不支持用量查询';
+  }
+
+  @override
+  String get settingsUsageNotChecked => '未检查';
+
+  @override
+  String get settingsUsageUnavailable => '用量不可用';
+
+  @override
+  String get settingsUsageError => '无法加载用量';
+
+  @override
+  String get settingsUsageNoQuota => '没有返回额度详情。';
+
+  @override
+  String get settingsUsageTools => 'Tools';
+
+  @override
+  String get settingsUsageToken => 'Token 用量';
+
+  @override
+  String get settingsUsageSpend => '花费';
+
+  @override
+  String get settingsUsageRemaining => '剩余';
+
+  @override
+  String get settingsUsageUsed => '已用';
+
+  @override
+  String get settingsUsageFiveHourQuota => '5 小时额度';
+
+  @override
+  String get settingsUsageWeeklyQuota => '每周额度';
+
+  @override
+  String get settingsUsageMcpQuota => 'MCP 额度';
+
+  @override
+  String get settingsUsageQuota => '额度';
+
+  @override
+  String settingsUsageQuotaRemaining(String remaining, String total) {
+    return '剩余 $remaining / $total';
+  }
+
+  @override
+  String settingsUsageQuotaUsed(String current, String total) {
+    return '已用 $current / $total';
+  }
+
+  @override
+  String settingsUsagePercentRemaining(String percent) {
+    return '剩余 $percent';
+  }
+
+  @override
+  String settingsUsageReset(String time) {
+    return '$time 重置';
+  }
+
+  @override
+  String get settingsInstructionsTitle => '指令';
+
+  @override
+  String get settingsInstructionsSubtitle => '注入到每轮对话；停止输入后自动保存。';
+
+  @override
+  String get settingsBaseInstructions => 'Base instructions';
+
+  @override
+  String get settingsDeveloperInstructions => 'Developer instructions';
+
+  @override
+  String get settingsUserContext => 'User context';
+
+  @override
+  String get settingsInstructionHint => '在这里添加项目指导';
+
+  @override
+  String get settingsSkillsTitle => '技能';
+
+  @override
+  String get settingsSkillsSubtitle => '禁用过于嘈杂的 skills，或发现项目/用户/系统 skill 目录。';
+
+  @override
+  String get settingsDiscover => '发现';
+
+  @override
+  String get settingsDiscovering => '发现中';
+
+  @override
+  String get settingsFilterSkills => '过滤 skills';
+
+  @override
+  String get settingsSkillDisabled => '此工作区已禁用';
+
+  @override
+  String get settingsSkillEnabled => '已启用';
+
+  @override
+  String get settingsOpenProjectToDiscoverSkills => '打开项目以发现 skills';
+
+  @override
+  String get settingsNoSkillsMatchFilter => '没有匹配的 skills';
+
+  @override
+  String get settingsSkillsDiscoverySources =>
+      'Skills 会从当前工作区以及已配置的用户/系统来源中发现。';
+
+  @override
+  String get settingsClearSearchOrDiscoverAgain => '清空搜索，或重新运行发现。';
+
+  @override
+  String get settingsNoSkillsTitle => '没有找到 skills';
+
+  @override
+  String get settingsNoSkillsMessage => '换个过滤条件，或发现当前项目的 skills。';
+
+  @override
+  String get settingsRolesTitle => '角色';
+
+  @override
+  String get settingsRolesSubtitle => '为每个固定 agent role 选择 provider/model 默认值。';
+
+  @override
+  String get settingsRoleExplorerDescription => '探索代码并收集上下文。';
+
+  @override
+  String get settingsRolePlannerDescription => '起草计划并组织意图。';
+
+  @override
+  String get settingsRoleExecutorDescription => '应用编辑并运行工具。';
+
+  @override
+  String get settingsRoleReviewerDescription => '审查结果并验证风险。';
+
+  @override
+  String get settingsRoleFallbackDescription => 'Studio role';
+
+  @override
+  String get settingsModelField => 'Model';
+
+  @override
+  String get settingsMcpTitle => 'MCP';
+
+  @override
+  String get settingsMcpSubtitle => 'Model Context Protocol servers 和内联端点。';
+
+  @override
+  String get settingsEndpoint => 'Endpoint';
+
+  @override
+  String get settingsMcpEmptyTitle => '没有 MCP servers';
+
+  @override
+  String get settingsMcpEmptyMessage => '已配置的 MCP servers 会显示在这里。';
+
+  @override
+  String get settingsSecurityTitle => '安全';
+
+  @override
+  String get settingsSecuritySubtitle => '选择此工作区默认审批姿态。';
+
+  @override
+  String get settingsSecurityModeSubtitle => '工具执行权限模式；修改会立即生效。';
+
+  @override
+  String settingsCurrentMode(String mode) {
+    return '当前：$mode';
+  }
+
+  @override
+  String get settingsWorkspaceBoundary => '工作区边界策略保持不变。';
+
+  @override
+  String get settingsGeneralTitle => '通用';
+
+  @override
+  String get settingsGeneralSubtitle => '界面偏好保存到 Studio store。';
+
+  @override
+  String get settingsFollowSystemTheme => '跟随系统主题';
+
+  @override
+  String get settingsFollowSystemThemeSubtitle => '随操作系统切换亮色和暗色模式。';
+
+  @override
+  String get settingsFollowActiveTurn => '跟随当前 turn';
+
+  @override
+  String get settingsFollowActiveTurnSubtitle =>
+      '让新的 timeline 输出保持 pinned 到最新 turn。';
+
+  @override
+  String get settingsCompactTimeline => 'Compact timeline';
+
+  @override
+  String get settingsCompactTimelineSubtitle => '减少消息间距，适合更密集阅读。';
+}
+
+/// The translations for Chinese, using the Han script (`zh_Hans`).
+class AppLocalizationsZhHans extends AppLocalizationsZh {
+  AppLocalizationsZhHans() : super('zh_Hans');
+
+  @override
+  String get appTitle => 'Pure Studio';
+
+  @override
+  String get sidebarSessions => '会话';
+
+  @override
+  String get sidebarCloseProject => '关闭项目';
+
+  @override
+  String get sidebarArchiveSession => '归档会话';
+
+  @override
+  String get sidebarNewSession => '新建会话';
+
+  @override
+  String get sidebarOpenProject => '打开项目';
+
+  @override
+  String get sidebarSettings => '设置';
+
+  @override
+  String get sidebarNew => '新建';
+
+  @override
+  String get sidebarOpen => '打开';
+
+  @override
+  String get shellNoSession => '没有会话';
+
+  @override
+  String shellSessionUpdated(String mode, String time) {
+    return '$mode · 更新于 $time';
+  }
+
+  @override
+  String get settingsBack => '返回';
+
+  @override
+  String get settingsBackToChat => '返回聊天';
+
+  @override
+  String get settingsWorkspaceGroup => '工作区';
+
+  @override
+  String get settingsSystemGroup => '系统';
+
+  @override
+  String get settingsProvidersTab => '服务';
+
+  @override
+  String get settingsInstructionsTab => '指令';
+
+  @override
+  String get settingsSkillsTab => '技能';
+
+  @override
+  String get settingsRolesTab => '角色';
+
+  @override
+  String get settingsMcpTab => 'MCP';
+
+  @override
+  String get settingsSecurityTab => '安全';
+
+  @override
+  String get settingsGeneralTab => '通用';
+
+  @override
+  String get composerHint => '描述你的需求...';
+
+  @override
+  String get composerSend => '发送';
+
+  @override
+  String get composerStop => '停止';
+
+  @override
+  String get permissionModeTooltip => '权限模式';
+
+  @override
+  String get statusCost => '费用';
+
+  @override
+  String get statusSessionMode => '会话模式';
+
+  @override
+  String get statusPlannerModel => 'Planner 模型';
+
+  @override
+  String get statusReasoningEffort => '思考等级';
+
+  @override
+  String get statusContextLabel => '上下文';
+
+  @override
+  String statusContextTooltip(
+    int contextTokens,
+    int contextWindow,
+    int percent,
+    int totalTokens,
+    String model,
+  ) {
+    return '上下文：$contextTokens/$contextWindow（$percent%）\n\n总 token：$totalTokens\n\n模型：$model';
+  }
+
+  @override
+  String statusContextTooltipNoModel(
+    int contextTokens,
+    int contextWindow,
+    int percent,
+    int totalTokens,
+  ) {
+    return '上下文：$contextTokens/$contextWindow（$percent%）\n\n总 token：$totalTokens';
+  }
+
+  @override
+  String statusSkillsCount(int count) {
+    return '$count 个 skill';
+  }
+
+  @override
+  String statusMcpCount(int count) {
+    return '$count 个 MCP';
+  }
+
+  @override
+  String statusLspCount(int count) {
+    return '$count 个 LSP';
+  }
+
+  @override
+  String statusAgentsCount(int count) {
+    return '$count 个 agent';
+  }
+
+  @override
+  String get statusSkillsSection => 'Skills';
+
+  @override
+  String get statusMcpSection => 'MCP';
+
+  @override
+  String get statusLspSection => 'LSP';
+
+  @override
+  String get statusSubagentsSection => 'Subagents';
+
+  @override
+  String get timelineEmptyTitle => '还没有消息';
+
+  @override
+  String get timelineEmptyMessage => '打开项目或开始会话后继续。';
+
+  @override
+  String get timelineJumpToLatest => '跳到最新';
+
+  @override
+  String get timelineNew => '新内容';
+
+  @override
+  String get timelineReasoningFallback => 'Reasoning';
+
+  @override
+  String get timelineToolFallback => 'Tool';
+
+  @override
+  String get timelinePlanFallback => 'Plan';
+
+  @override
+  String get timelineAgentFallback => 'Agent';
+
+  @override
+  String get interactionQuestionsTitle => '几个问题想确认';
+
+  @override
+  String get interactionLastQuestion => '最后一题';
+
+  @override
+  String get interactionContinueAfterAnswer => '回答后继续';
+
+  @override
+  String get interactionSubmitEmptyAnswersHint => '提交后未答问题保留空数组。';
+
+  @override
+  String interactionAnsweredPendingHint(int answeredCount, int pendingCount) {
+    return '已答 $answeredCount 题 · $pendingCount 题待答';
+  }
+
+  @override
+  String get interactionPreviousQuestion => '上一题';
+
+  @override
+  String get interactionNextQuestion => '下一题';
+
+  @override
+  String get interactionSubmitAnswers => '提交答案';
+
+  @override
+  String get interactionNeedInputTitle => '需要你的输入';
+
+  @override
+  String get interactionAnswerHint => 'Pure 会把这条回答作为当前问题的答案继续执行。';
+
+  @override
+  String get interactionAnswerButton => '回答';
+
+  @override
+  String get interactionAnswerLabel => '答案';
+
+  @override
+  String interactionQuestionProgress(int current, int total) {
+    return '问题 $current / $total';
+  }
+
+  @override
+  String interactionAnsweredCount(int count) {
+    return '$count 已答';
+  }
+
+  @override
+  String interactionQuestionTooltip(int index) {
+    return '问题 $index';
+  }
+
+  @override
+  String get interactionQuestionFallback => '问题';
+
+  @override
+  String get interactionOtherLabel => '其它';
+
+  @override
+  String get interactionSecretHint => '输入秘密答案';
+
+  @override
+  String get interactionTextHint => '输入你的回答...';
+
+  @override
+  String get interactionPermissionTitle => '需要权限';
+
+  @override
+  String get interactionPermissionSubtitle => 'Pure 想运行一个工具调用';
+
+  @override
+  String get interactionPermissionFooterHint =>
+      '工具将在当前工作目录执行；可在 composer 中调整权限模式。';
+
+  @override
+  String get interactionReject => '拒绝';
+
+  @override
+  String get interactionApprove => '批准';
+
+  @override
+  String get interactionReasonLabel => '原因';
+
+  @override
+  String get interactionPlanConfirmTitle => '实施此计划？';
+
+  @override
+  String get interactionPlanConfirmSubtitle => '计划正文保留在上方 timeline 卡片中';
+
+  @override
+  String get interactionPlanEditingFooterHint => '只会发送你的调整说明，不会回传计划正文。';
+
+  @override
+  String get interactionPlanImplementFooterHint =>
+      '选择实施会切回 Auto 模式并提交后台实施 prompt。';
+
+  @override
+  String get interactionPlanIgnore => '忽略';
+
+  @override
+  String get interactionPlanAdjust => '告诉 Pure 如何调整';
+
+  @override
+  String get interactionPlanImplement => '实施此计划';
+
+  @override
+  String get interactionPlanAdjustHint => '告诉 Pure 需要怎样调整计划...';
+
+  @override
+  String get interactionPlanAdjustSubmit => '提交调整';
+
+  @override
+  String get interactionPlanEditingNotice => '继续规划：只提交你的调整说明。';
+
+  @override
+  String get interactionPlanViewNotice => '计划内容不会在这里编辑；请在 timeline 中查看完整计划。';
+
+  @override
+  String get interactionPlanContinueReason => 'continue planning';
+
+  @override
+  String get settingsProvidersTitle => '服务';
+
+  @override
+  String get settingsProvidersSubtitle => '模型服务、凭据、模型和用量';
+
+  @override
+  String get settingsRefreshUsage => '刷新用量';
+
+  @override
+  String get settingsAddProvider => '添加 provider';
+
+  @override
+  String get settingsSearchProviders => '搜索 providers';
+
+  @override
+  String get settingsNoProvidersMatchTitle => '没有匹配的 providers';
+
+  @override
+  String get settingsNoProvidersMatchMessage => '清空搜索以查看所有已配置 providers。';
+
+  @override
+  String get settingsNoProvidersTitle => '没有 providers';
+
+  @override
+  String get settingsNoProvidersMessage => '添加 provider 后配置凭据和 models。';
+
+  @override
+  String get settingsDefaultProvider => '默认 provider';
+
+  @override
+  String get settingsSetAsDefaultProvider => '设为默认';
+
+  @override
+  String get settingsOpenDetails => '打开详情';
+
+  @override
+  String get settingsEditProvider => '编辑 provider';
+
+  @override
+  String get settingsDeleteProvider => '删除 provider';
+
+  @override
+  String get settingsNoProviderSelected => '未选择 provider';
+
+  @override
+  String get settingsProviderTitle => 'Provider 信息';
+
+  @override
+  String get settingsProviderModelsTitle => '模型';
+
+  @override
+  String get settingsProviderConnectionTitle => '连接';
+
+  @override
+  String get settingsProviderDefaultModelsTitle => '默认 models';
+
+  @override
+  String get settingsProviderCustomModelsTitle => '自定义 models';
+
+  @override
+  String get settingsNewProvider => '新建 provider';
+
+  @override
+  String get settingsProviderKey => 'Provider key';
+
+  @override
+  String get settingsTemplate => 'Template';
+
+  @override
+  String get settingsDefaultModel => 'Default model';
+
+  @override
+  String get settingsApiKey => 'API key';
+
+  @override
+  String get settingsApiKeyKeepCurrent => 'API key（留空以保留当前值）';
+
+  @override
+  String get settingsConfigured => '已配置';
+
+  @override
+  String get settingsMissing => '缺失';
+
+  @override
+  String get settingsDisplayName => 'Display name';
+
+  @override
+  String get settingsProtocolType => 'Protocol type';
+
+  @override
+  String get settingsBaseUrl => 'Base URL';
+
+  @override
+  String get settingsModelSlug => 'Model slug';
+
+  @override
+  String get settingsReasoningEfforts => 'Reasoning efforts';
+
+  @override
+  String get settingsEdit => '编辑';
+
+  @override
+  String get settingsCancel => '取消';
+
+  @override
+  String get settingsSave => '保存';
+
+  @override
+  String get settingsAddModel => '添加 model';
+
+  @override
+  String get settingsRemoveModel => '移除 model';
+
+  @override
+  String get settingsNoCustomModels => '没有自定义 models';
+
+  @override
+  String settingsBundledModels(int count) {
+    return '$count 个内置';
+  }
+
+  @override
+  String get settingsDefaultBadge => 'default';
+
+  @override
+  String get settingsReadyBadge => 'ready';
+
+  @override
+  String get settingsSetupBadge => 'setup';
+
+  @override
+  String get settingsUsageTitle => '用量';
+
+  @override
+  String settingsUsageUpdated(String updatedAt) {
+    return '更新于 $updatedAt';
+  }
+
+  @override
+  String get settingsUsageAvailableBalance => '可用余额';
+
+  @override
+  String get settingsUsageBalanceUnavailable => '余额不可用';
+
+  @override
+  String settingsUsageGranted(String amount) {
+    return '赠送 $amount';
+  }
+
+  @override
+  String settingsUsageToppedUp(String amount) {
+    return '充值 $amount';
+  }
+
+  @override
+  String get settingsUsageRefreshing => '正在刷新用量...';
+
+  @override
+  String get settingsUsageChecking => '正在检查用量...';
+
+  @override
+  String get settingsUsageCheckingShort => '正在检查用量';
+
+  @override
+  String get settingsUsageNotLoaded => '用量未加载';
+
+  @override
+  String get settingsUsageUnsupported => '不支持';
+
+  @override
+  String get settingsUsageNotSupported => '不支持用量查询';
+
+  @override
+  String get settingsUsageMissingKey => '缺少 key';
+
+  @override
+  String get settingsUsageFailed => '用量查询失败';
+
+  @override
+  String get settingsUsageQueryFailed => '用量查询失败';
+
+  @override
+  String get settingsUsageApiKeyMissing => '未配置 provider API key';
+
+  @override
+  String settingsUsageUnsupportedForProvider(String providerName) {
+    return '$providerName 不支持用量查询';
+  }
+
+  @override
+  String get settingsUsageNotChecked => '未检查';
+
+  @override
+  String get settingsUsageUnavailable => '用量不可用';
+
+  @override
+  String get settingsUsageError => '无法加载用量';
+
+  @override
+  String get settingsUsageNoQuota => '没有返回额度详情。';
+
+  @override
+  String get settingsUsageTools => 'Tools';
+
+  @override
+  String get settingsUsageToken => 'Token 用量';
+
+  @override
+  String get settingsUsageSpend => '花费';
+
+  @override
+  String get settingsUsageRemaining => '剩余';
+
+  @override
+  String get settingsUsageUsed => '已用';
+
+  @override
+  String get settingsUsageFiveHourQuota => '5 小时额度';
+
+  @override
+  String get settingsUsageWeeklyQuota => '每周额度';
+
+  @override
+  String get settingsUsageMcpQuota => 'MCP 额度';
+
+  @override
+  String get settingsUsageQuota => '额度';
+
+  @override
+  String settingsUsageQuotaRemaining(String remaining, String total) {
+    return '剩余 $remaining / $total';
+  }
+
+  @override
+  String settingsUsageQuotaUsed(String current, String total) {
+    return '已用 $current / $total';
+  }
+
+  @override
+  String settingsUsagePercentRemaining(String percent) {
+    return '剩余 $percent';
+  }
+
+  @override
+  String settingsUsageReset(String time) {
+    return '$time 重置';
+  }
+
+  @override
+  String get settingsInstructionsTitle => '指令';
+
+  @override
+  String get settingsInstructionsSubtitle => '注入到每轮对话；停止输入后自动保存。';
+
+  @override
+  String get settingsBaseInstructions => 'Base instructions';
+
+  @override
+  String get settingsDeveloperInstructions => 'Developer instructions';
+
+  @override
+  String get settingsUserContext => 'User context';
+
+  @override
+  String get settingsInstructionHint => '在这里添加项目指导';
+
+  @override
+  String get settingsSkillsTitle => '技能';
+
+  @override
+  String get settingsSkillsSubtitle => '禁用过于嘈杂的 skills，或发现项目/用户/系统 skill 目录。';
+
+  @override
+  String get settingsDiscover => '发现';
+
+  @override
+  String get settingsDiscovering => '发现中';
+
+  @override
+  String get settingsFilterSkills => '过滤 skills';
+
+  @override
+  String get settingsSkillDisabled => '此工作区已禁用';
+
+  @override
+  String get settingsSkillEnabled => '已启用';
+
+  @override
+  String get settingsOpenProjectToDiscoverSkills => '打开项目以发现 skills';
+
+  @override
+  String get settingsNoSkillsMatchFilter => '没有匹配的 skills';
+
+  @override
+  String get settingsSkillsDiscoverySources =>
+      'Skills 会从当前工作区以及已配置的用户/系统来源中发现。';
+
+  @override
+  String get settingsClearSearchOrDiscoverAgain => '清空搜索，或重新运行发现。';
+
+  @override
+  String get settingsNoSkillsTitle => '没有找到 skills';
+
+  @override
+  String get settingsNoSkillsMessage => '换个过滤条件，或发现当前项目的 skills。';
+
+  @override
+  String get settingsRolesTitle => '角色';
+
+  @override
+  String get settingsRolesSubtitle => '为每个固定 agent role 选择 provider/model 默认值。';
+
+  @override
+  String get settingsRoleExplorerDescription => '探索代码并收集上下文。';
+
+  @override
+  String get settingsRolePlannerDescription => '起草计划并组织意图。';
+
+  @override
+  String get settingsRoleExecutorDescription => '应用编辑并运行工具。';
+
+  @override
+  String get settingsRoleReviewerDescription => '审查结果并验证风险。';
+
+  @override
+  String get settingsRoleFallbackDescription => 'Studio role';
+
+  @override
+  String get settingsModelField => 'Model';
+
+  @override
+  String get settingsMcpTitle => 'MCP';
+
+  @override
+  String get settingsMcpSubtitle => 'Model Context Protocol servers 和内联端点。';
+
+  @override
+  String get settingsEndpoint => 'Endpoint';
+
+  @override
+  String get settingsMcpEmptyTitle => '没有 MCP servers';
+
+  @override
+  String get settingsMcpEmptyMessage => '已配置的 MCP servers 会显示在这里。';
+
+  @override
+  String get settingsSecurityTitle => '安全';
+
+  @override
+  String get settingsSecuritySubtitle => '选择此工作区默认审批姿态。';
+
+  @override
+  String get settingsSecurityModeSubtitle => '工具执行权限模式；修改会立即生效。';
+
+  @override
+  String settingsCurrentMode(String mode) {
+    return '当前：$mode';
+  }
+
+  @override
+  String get settingsWorkspaceBoundary => '工作区边界策略保持不变。';
+
+  @override
+  String get settingsGeneralTitle => '通用';
+
+  @override
+  String get settingsGeneralSubtitle => '界面偏好保存到 Studio store。';
+
+  @override
+  String get settingsFollowSystemTheme => '跟随系统主题';
+
+  @override
+  String get settingsFollowSystemThemeSubtitle => '随操作系统切换亮色和暗色模式。';
+
+  @override
+  String get settingsFollowActiveTurn => '跟随当前 turn';
+
+  @override
+  String get settingsFollowActiveTurnSubtitle =>
+      '让新的 timeline 输出保持 pinned 到最新 turn。';
+
+  @override
+  String get settingsCompactTimeline => 'Compact timeline';
+
+  @override
+  String get settingsCompactTimelineSubtitle => '减少消息间距，适合更密集阅读。';
+}

@@ -1,0 +1,327 @@
+{
+  "appTitle": "Pure Studio",
+  "sidebarSessions": "Sessions",
+  "sidebarCloseProject": "Close project",
+  "sidebarArchiveSession": "Archive session",
+  "sidebarNewSession": "New session",
+  "sidebarOpenProject": "Open project",
+  "sidebarSettings": "Settings",
+  "sidebarNew": "New",
+  "sidebarOpen": "Open",
+  "shellNoSession": "No session",
+  "shellSessionUpdated": "{mode} · updated {time}",
+  "@shellSessionUpdated": {
+    "placeholders": {
+      "mode": { "type": "String" },
+      "time": { "type": "String" }
+    }
+  },
+  "settingsBack": "Back",
+  "settingsBackToChat": "Back to chat",
+  "settingsWorkspaceGroup": "Workspace",
+  "settingsSystemGroup": "System",
+  "settingsProvidersTab": "Providers",
+  "settingsInstructionsTab": "Instructions",
+  "settingsSkillsTab": "Skills",
+  "settingsRolesTab": "Roles",
+  "settingsMcpTab": "MCP",
+  "settingsSecurityTab": "Security",
+  "settingsGeneralTab": "General",
+  "composerHint": "Describe what you need...",
+  "composerSend": "Send",
+  "composerStop": "Stop",
+  "permissionModeTooltip": "Permission mode",
+  "statusCost": "Cost",
+  "statusSessionMode": "Session mode",
+  "statusPlannerModel": "Planner model",
+  "statusReasoningEffort": "Reasoning effort",
+  "statusContextLabel": "Context",
+  "statusContextTooltip": "Context: {contextTokens}/{contextWindow} ({percent}%)\n\nTotal tokens: {totalTokens}\n\nModel: {model}",
+  "@statusContextTooltip": {
+    "placeholders": {
+      "contextTokens": { "type": "int" },
+      "contextWindow": { "type": "int" },
+      "percent": { "type": "int" },
+      "totalTokens": { "type": "int" },
+      "model": { "type": "String" }
+    }
+  },
+  "statusContextTooltipNoModel": "Context: {contextTokens}/{contextWindow} ({percent}%)\n\nTotal tokens: {totalTokens}",
+  "@statusContextTooltipNoModel": {
+    "placeholders": {
+      "contextTokens": { "type": "int" },
+      "contextWindow": { "type": "int" },
+      "percent": { "type": "int" },
+      "totalTokens": { "type": "int" }
+    }
+  },
+  "statusSkillsCount": "{count, plural, =1{1 skill} other{{count} skills}}",
+  "@statusSkillsCount": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "statusMcpCount": "{count} MCP",
+  "@statusMcpCount": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "statusLspCount": "{count} LSP",
+  "@statusLspCount": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "statusAgentsCount": "{count, plural, =1{1 agent} other{{count} agents}}",
+  "@statusAgentsCount": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "statusSkillsSection": "Skills",
+  "statusMcpSection": "MCP",
+  "statusLspSection": "LSP",
+  "statusSubagentsSection": "Subagents",
+  "timelineEmptyTitle": "No messages yet",
+  "timelineEmptyMessage": "Open a project or start a session to begin.",
+  "timelineJumpToLatest": "Jump to latest",
+  "timelineNew": "New",
+  "timelineReasoningFallback": "Reasoning",
+  "timelineToolFallback": "Tool",
+  "timelinePlanFallback": "Plan",
+  "timelineAgentFallback": "Agent",
+  "interactionQuestionsTitle": "A few questions",
+  "interactionLastQuestion": "Last question",
+  "interactionContinueAfterAnswer": "Continue after answering",
+  "interactionSubmitEmptyAnswersHint": "Unanswered questions are submitted as empty arrays.",
+  "interactionAnsweredPendingHint": "{answeredCount} answered · {pendingCount} pending",
+  "@interactionAnsweredPendingHint": {
+    "placeholders": {
+      "answeredCount": { "type": "int" },
+      "pendingCount": { "type": "int" }
+    }
+  },
+  "interactionPreviousQuestion": "Previous",
+  "interactionNextQuestion": "Next",
+  "interactionSubmitAnswers": "Submit answers",
+  "interactionNeedInputTitle": "Input needed",
+  "interactionAnswerHint": "Pure will use this answer to continue the current question.",
+  "interactionAnswerButton": "Answer",
+  "interactionAnswerLabel": "Answer",
+  "interactionQuestionProgress": "Question {current} / {total}",
+  "@interactionQuestionProgress": {
+    "placeholders": {
+      "current": { "type": "int" },
+      "total": { "type": "int" }
+    }
+  },
+  "interactionAnsweredCount": "{count} answered",
+  "@interactionAnsweredCount": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "interactionQuestionTooltip": "Question {index}",
+  "@interactionQuestionTooltip": {
+    "placeholders": {
+      "index": { "type": "int" }
+    }
+  },
+  "interactionQuestionFallback": "Question",
+  "interactionOtherLabel": "Other",
+  "interactionSecretHint": "Enter secret answer",
+  "interactionTextHint": "Enter your answer...",
+  "interactionPermissionTitle": "Permission needed",
+  "interactionPermissionSubtitle": "Pure wants to run a tool call",
+  "interactionPermissionFooterHint": "The tool runs in the current working directory; adjust permission mode in the composer.",
+  "interactionReject": "Reject",
+  "interactionApprove": "Approve",
+  "interactionReasonLabel": "Reason",
+  "interactionPlanConfirmTitle": "Implement this plan?",
+  "interactionPlanConfirmSubtitle": "The plan stays in the timeline above.",
+  "interactionPlanEditingFooterHint": "Only your adjustment will be sent; the plan body is not returned.",
+  "interactionPlanImplementFooterHint": "Implementing switches back to Auto mode and submits the background implementation prompt.",
+  "interactionPlanIgnore": "Ignore",
+  "interactionPlanAdjust": "Tell Pure how to adjust",
+  "interactionPlanImplement": "Implement this plan",
+  "interactionPlanAdjustHint": "Tell Pure how the plan should change...",
+  "interactionPlanAdjustSubmit": "Submit adjustment",
+  "interactionPlanEditingNotice": "Continue planning: only your adjustment will be submitted.",
+  "interactionPlanViewNotice": "Plan content is not edited here; review the full plan in the timeline.",
+  "interactionPlanContinueReason": "continue planning",
+  "settingsProvidersTitle": "Providers",
+  "settingsProvidersSubtitle": "Model providers, credentials, models, and usage",
+  "settingsRefreshUsage": "Refresh usage",
+  "settingsAddProvider": "Add provider",
+  "settingsSearchProviders": "Search providers",
+  "settingsNoProvidersMatchTitle": "No providers match this filter",
+  "settingsNoProvidersMatchMessage": "Clear the search to see all configured providers.",
+  "settingsNoProvidersTitle": "No providers found",
+  "settingsNoProvidersMessage": "Add a provider to configure credentials and models.",
+  "settingsDefaultProvider": "Default provider",
+  "settingsSetAsDefaultProvider": "Set as default",
+  "settingsOpenDetails": "Open details",
+  "settingsEditProvider": "Edit provider",
+  "settingsDeleteProvider": "Delete provider",
+  "settingsNoProviderSelected": "No provider selected",
+  "settingsProviderTitle": "Provider",
+  "settingsProviderModelsTitle": "Models",
+  "settingsProviderConnectionTitle": "Connection",
+  "settingsProviderDefaultModelsTitle": "Default models",
+  "settingsProviderCustomModelsTitle": "Custom models",
+  "settingsNewProvider": "New provider",
+  "settingsProviderKey": "Provider key",
+  "settingsTemplate": "Template",
+  "settingsDefaultModel": "Default model",
+  "settingsApiKey": "API key",
+  "settingsApiKeyKeepCurrent": "API key (leave blank to keep current)",
+  "settingsConfigured": "configured",
+  "settingsMissing": "missing",
+  "settingsDisplayName": "Display name",
+  "settingsProtocolType": "Protocol type",
+  "settingsBaseUrl": "Base URL",
+  "settingsModelSlug": "Model slug",
+  "settingsReasoningEfforts": "Reasoning efforts",
+  "settingsEdit": "Edit",
+  "settingsCancel": "Cancel",
+  "settingsSave": "Save",
+  "settingsAddModel": "Add model",
+  "settingsRemoveModel": "Remove model",
+  "settingsNoCustomModels": "No custom models",
+  "settingsBundledModels": "{count} bundled",
+  "@settingsBundledModels": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "settingsDefaultBadge": "default",
+  "settingsReadyBadge": "ready",
+  "settingsSetupBadge": "setup",
+  "settingsUsageTitle": "Usage",
+  "settingsUsageUpdated": "Updated {updatedAt}",
+  "@settingsUsageUpdated": {
+    "placeholders": {
+      "updatedAt": { "type": "String" }
+    }
+  },
+  "settingsUsageAvailableBalance": "Available balance",
+  "settingsUsageBalanceUnavailable": "Balance unavailable",
+  "settingsUsageGranted": "Granted {amount}",
+  "@settingsUsageGranted": {
+    "placeholders": {
+      "amount": { "type": "String" }
+    }
+  },
+  "settingsUsageToppedUp": "Topped up {amount}",
+  "@settingsUsageToppedUp": {
+    "placeholders": {
+      "amount": { "type": "String" }
+    }
+  },
+  "settingsUsageRefreshing": "Refreshing usage...",
+  "settingsUsageChecking": "Checking usage...",
+  "settingsUsageCheckingShort": "Checking usage",
+  "settingsUsageNotLoaded": "Usage not loaded",
+  "settingsUsageUnsupported": "Unsupported",
+  "settingsUsageNotSupported": "Usage not supported",
+  "settingsUsageMissingKey": "Missing key",
+  "settingsUsageFailed": "Usage failed",
+  "settingsUsageQueryFailed": "Usage query failed",
+  "settingsUsageApiKeyMissing": "Provider API key is not configured",
+  "settingsUsageUnsupportedForProvider": "Usage is not supported for {providerName}",
+  "@settingsUsageUnsupportedForProvider": {
+    "placeholders": {
+      "providerName": { "type": "String" }
+    }
+  },
+  "settingsUsageNotChecked": "Not checked",
+  "settingsUsageUnavailable": "Usage is unavailable",
+  "settingsUsageError": "Could not load usage",
+  "settingsUsageNoQuota": "No quota details returned.",
+  "settingsUsageTools": "Tools",
+  "settingsUsageToken": "Token usage",
+  "settingsUsageSpend": "Spend",
+  "settingsUsageRemaining": "Remaining",
+  "settingsUsageUsed": "Used",
+  "settingsUsageFiveHourQuota": "5 hour quota",
+  "settingsUsageWeeklyQuota": "Weekly quota",
+  "settingsUsageMcpQuota": "MCP quota",
+  "settingsUsageQuota": "Quota",
+  "settingsUsageQuotaRemaining": "{remaining} of {total} remaining",
+  "@settingsUsageQuotaRemaining": {
+    "placeholders": {
+      "remaining": { "type": "String" },
+      "total": { "type": "String" }
+    }
+  },
+  "settingsUsageQuotaUsed": "{current} of {total} used",
+  "@settingsUsageQuotaUsed": {
+    "placeholders": {
+      "current": { "type": "String" },
+      "total": { "type": "String" }
+    }
+  },
+  "settingsUsagePercentRemaining": "{percent} remaining",
+  "@settingsUsagePercentRemaining": {
+    "placeholders": {
+      "percent": { "type": "String" }
+    }
+  },
+  "settingsUsageReset": "Reset {time}",
+  "@settingsUsageReset": {
+    "placeholders": {
+      "time": { "type": "String" }
+    }
+  },
+  "settingsInstructionsTitle": "Instructions",
+  "settingsInstructionsSubtitle": "Injected into each turn; changes save after typing stops.",
+  "settingsBaseInstructions": "Base instructions",
+  "settingsDeveloperInstructions": "Developer instructions",
+  "settingsUserContext": "User context",
+  "settingsInstructionHint": "Add project guidance here",
+  "settingsSkillsTitle": "Skills",
+  "settingsSkillsSubtitle": "Disable noisy skills or discover project/user/system catalogs.",
+  "settingsDiscover": "Discover",
+  "settingsDiscovering": "Discovering",
+  "settingsFilterSkills": "Filter skills",
+  "settingsSkillDisabled": "Disabled for this workspace",
+  "settingsSkillEnabled": "Enabled",
+  "settingsOpenProjectToDiscoverSkills": "Open a project to discover skills",
+  "settingsNoSkillsMatchFilter": "No skills match this filter",
+  "settingsSkillsDiscoverySources": "Skills are discovered from the selected workspace and configured user/system sources.",
+  "settingsClearSearchOrDiscoverAgain": "Clear the search or run discovery again.",
+  "settingsNoSkillsTitle": "No skills found",
+  "settingsNoSkillsMessage": "Try another filter or discover skills for this project.",
+  "settingsRolesTitle": "Roles",
+  "settingsRolesSubtitle": "Choose provider/model defaults for each fixed agent role.",
+  "settingsRoleExplorerDescription": "Explore code and collect context.",
+  "settingsRolePlannerDescription": "Draft plans and structure intent.",
+  "settingsRoleExecutorDescription": "Apply edits and run tools.",
+  "settingsRoleReviewerDescription": "Review results and verify risk.",
+  "settingsRoleFallbackDescription": "Studio role",
+  "settingsModelField": "Model",
+  "settingsMcpTitle": "MCP",
+  "settingsMcpSubtitle": "Model Context Protocol servers and inline endpoints.",
+  "settingsEndpoint": "Endpoint",
+  "settingsMcpEmptyTitle": "No MCP servers",
+  "settingsMcpEmptyMessage": "Configured MCP servers will appear here.",
+  "settingsSecurityTitle": "Security",
+  "settingsSecuritySubtitle": "Choose the default approval posture for this workspace.",
+  "settingsSecurityModeSubtitle": "Tool execution permission mode; changes apply immediately.",
+  "settingsCurrentMode": "Current: {mode}",
+  "@settingsCurrentMode": {
+    "placeholders": {
+      "mode": { "type": "String" }
+    }
+  },
+  "settingsWorkspaceBoundary": "Workspace boundary policy remains unchanged.",
+  "settingsGeneralTitle": "General",
+  "settingsGeneralSubtitle": "Interface preferences saved into the Studio store.",
+  "settingsFollowSystemTheme": "Follow system theme",
+  "settingsFollowSystemThemeSubtitle": "Switch light and dark mode with the OS.",
+  "settingsFollowActiveTurn": "Follow active turn",
+  "settingsFollowActiveTurnSubtitle": "Keep new timeline output pinned to the latest turn.",
+  "settingsCompactTimeline": "Compact timeline",
+  "settingsCompactTimelineSubtitle": "Reduce message spacing for denser reading."
+}

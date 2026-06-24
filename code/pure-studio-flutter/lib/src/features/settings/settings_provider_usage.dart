@@ -37,7 +37,7 @@ class _ProviderUsagePanel extends StatelessWidget {
               const SizedBox(width: 7),
               Expanded(
                 child: Text(
-                  'Usage',
+                  context.l10n.settingsUsageTitle,
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     color: context.studioInk,
                     fontWeight: FontWeight.w600,
@@ -45,7 +45,7 @@ class _ProviderUsagePanel extends StatelessWidget {
                 ),
               ),
               Text(
-                _usageUpdatedLabel(usage?.updatedAt),
+                _usageUpdatedLabel(context, usage?.updatedAt),
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   color: colors.onSurfaceVariant,
                 ),
@@ -53,8 +53,8 @@ class _ProviderUsagePanel extends StatelessWidget {
               const SizedBox(width: 4),
               IconButton(
                 tooltip: _providerSupportsUsage(provider)
-                    ? 'Refresh usage'
-                    : 'Usage is not supported',
+                    ? context.l10n.settingsRefreshUsage
+                    : context.l10n.settingsUsageNotSupported,
                 icon: loading
                     ? const SizedBox(
                         width: 18,
@@ -83,10 +83,10 @@ class _ProviderUsagePanel extends StatelessWidget {
                   ? Icons.hourglass_empty
                   : Icons.account_balance_wallet_outlined,
               message: loading
-                  ? 'Checking usage...'
+                  ? context.l10n.settingsUsageChecking
                   : _providerSupportsUsage(provider)
-                  ? 'Usage not loaded'
-                  : 'Usage not supported',
+                  ? context.l10n.settingsUsageNotLoaded
+                  : context.l10n.settingsUsageNotSupported,
               tone: loading ? _UsageTone.neutral : _UsageTone.muted,
             )
           else if (usage.status == 'ready' &&
@@ -104,7 +104,7 @@ class _ProviderUsagePanel extends StatelessWidget {
                       usage.status == 'missingCredential'
                   ? Icons.error_outline
                   : Icons.info_outline,
-              message: _providerUsageMessage(provider, usage),
+              message: _providerUsageMessage(context, provider, usage),
               tone: usage.status == 'failed'
                   ? _UsageTone.failed
                   : usage.status == 'missingCredential'
@@ -130,9 +130,9 @@ class _DeepSeekUsage extends StatelessWidget {
             .firstOrNull ??
         usage.balances.firstOrNull;
     if (primary == null) {
-      return const _ProviderUsageMessage(
+      return _ProviderUsageMessage(
         icon: Icons.info_outline,
-        message: 'Usage unavailable',
+        message: context.l10n.settingsUsageUnavailable,
         tone: _UsageTone.muted,
       );
     }
@@ -144,7 +144,9 @@ class _DeepSeekUsage extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                usage.isAvailable ? 'Available balance' : 'Balance unavailable',
+                usage.isAvailable
+                    ? context.l10n.settingsUsageAvailableBalance
+                    : context.l10n.settingsUsageBalanceUnavailable,
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   color: colors.onSurfaceVariant,
                 ),
@@ -163,11 +165,13 @@ class _DeepSeekUsage extends StatelessWidget {
           children: [
             _InfoPill(
               icon: Icons.card_giftcard_outlined,
-              label: 'Granted ${primary.grantedBalance}',
+              label: context.l10n.settingsUsageGranted(primary.grantedBalance),
             ),
             _InfoPill(
               icon: Icons.payments_outlined,
-              label: 'Topped up ${primary.toppedUpBalance}',
+              label: context.l10n.settingsUsageToppedUp(
+                primary.toppedUpBalance,
+              ),
             ),
             for (final item in usage.balances.where(
               (item) => item.currency != primary.currency,
@@ -207,9 +211,9 @@ class _ZhipuCodingPlanUsage extends StatelessWidget {
           const SizedBox(height: 8),
         ],
         if (ordered.isEmpty)
-          const _ProviderUsageMessage(
+          _ProviderUsageMessage(
             icon: Icons.info_outline,
-            message: 'Usage unavailable',
+            message: context.l10n.settingsUsageUnavailable,
             tone: _UsageTone.muted,
           )
         else
@@ -259,14 +263,14 @@ class _QuotaCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    _quotaTitle(limit),
+                    _quotaTitle(context, limit),
                     style: Theme.of(
                       context,
                     ).textTheme.labelLarge?.copyWith(color: context.studioInk),
                   ),
                 ),
                 Text(
-                  _resetLabel(limit.nextResetAt),
+                  _resetLabel(context, limit.nextResetAt),
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     color: context.studioInkSoft,
                   ),
@@ -282,7 +286,7 @@ class _QuotaCard extends StatelessWidget {
               ),
             ),
             Text(
-              _quotaDetail(limit),
+              _quotaDetail(context, limit),
               style: Theme.of(
                 context,
               ).textTheme.bodySmall?.copyWith(color: context.studioInkSoft),

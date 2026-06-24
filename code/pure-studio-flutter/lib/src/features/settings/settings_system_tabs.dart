@@ -19,9 +19,9 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
     final options = _roleModelOptions(widget.providers);
     return _SettingsPane(
       children: [
-        const _SettingsHeader(
-          title: 'Roles',
-          subtitle: 'Choose provider/model defaults for each fixed agent role.',
+        _SettingsHeader(
+          title: context.l10n.settingsRolesTitle,
+          subtitle: context.l10n.settingsRolesSubtitle,
         ),
         const SizedBox(height: 16),
         LayoutBuilder(
@@ -140,14 +140,16 @@ class _RoleSettingsCard extends StatelessWidget {
       title: role,
       children: [
         Text(
-          _roleDescription(role),
+          _roleDescription(context, role),
           style: context.text.bodySmall?.copyWith(color: context.studioInkSoft),
         ),
         const SizedBox(height: 10),
         DropdownButtonFormField<String>(
           initialValue: selectedValue,
           isExpanded: true,
-          decoration: const InputDecoration(labelText: 'Model'),
+          decoration: InputDecoration(
+            labelText: context.l10n.settingsModelField,
+          ),
           selectedItemBuilder: (context) {
             final entries = options.isEmpty
                 ? const [_RoleModelOption.defaultOption()]
@@ -184,13 +186,13 @@ class _RoleSettingsCard extends StatelessWidget {
   }
 }
 
-String _roleDescription(String role) {
+String _roleDescription(BuildContext context, String role) {
   return switch (role) {
-    'explorer' => 'Explore code and collect context.',
-    'planner' => 'Draft plans and structure intent.',
-    'executor' => 'Apply edits and run tools.',
-    'reviewer' => 'Review results and verify risk.',
-    _ => 'Studio role',
+    'explorer' => context.l10n.settingsRoleExplorerDescription,
+    'planner' => context.l10n.settingsRolePlannerDescription,
+    'executor' => context.l10n.settingsRoleExecutorDescription,
+    'reviewer' => context.l10n.settingsRoleReviewerDescription,
+    _ => context.l10n.settingsRoleFallbackDescription,
   };
 }
 
@@ -241,9 +243,9 @@ class _McpTabState extends ConsumerState<_McpTab> {
   Widget build(BuildContext context) {
     return _SettingsPane(
       children: [
-        const _SettingsHeader(
-          title: 'MCP',
-          subtitle: 'Model Context Protocol servers and inline endpoints.',
+        _SettingsHeader(
+          title: context.l10n.settingsMcpTitle,
+          subtitle: context.l10n.settingsMcpSubtitle,
         ),
         const SizedBox(height: 16),
         for (final server in widget.servers)
@@ -278,7 +280,9 @@ class _McpTabState extends ConsumerState<_McpTab> {
                 const SizedBox(height: 10),
                 TextFormField(
                   initialValue: server.endpoint,
-                  decoration: const InputDecoration(labelText: 'Endpoint'),
+                  decoration: InputDecoration(
+                    labelText: context.l10n.settingsEndpoint,
+                  ),
                   onChanged: (value) => setState(() {
                     _endpointByServer[server.id] = value;
                     _scheduleSave();
@@ -331,10 +335,9 @@ class _SecurityTab extends ConsumerWidget {
     return _SettingsPane(
       maxWidth: 620,
       children: [
-        const _SettingsHeader(
-          title: 'Security',
-          subtitle:
-              'Tool execution permission mode; changes apply immediately.',
+        _SettingsHeader(
+          title: context.l10n.settingsSecurityTitle,
+          subtitle: context.l10n.settingsSecurityModeSubtitle,
         ),
         const SizedBox(height: 16),
         SegmentedButton<PermissionMode>(
@@ -366,8 +369,8 @@ class _SecurityTab extends ConsumerWidget {
         const SizedBox(height: 12),
         _SettingsRow(
           icon: Icons.security_outlined,
-          title: 'Current: ${mode.name}',
-          subtitle: 'Workspace boundary policy remains unchanged.',
+          title: context.l10n.settingsCurrentMode(mode.name),
+          subtitle: context.l10n.settingsWorkspaceBoundary,
         ),
       ],
     );
@@ -390,15 +393,15 @@ class _GeneralTabState extends ConsumerState<_GeneralTab> {
   Widget build(BuildContext context) {
     return _SettingsPane(
       children: [
-        const _SettingsHeader(
-          title: 'General',
-          subtitle: 'Interface preferences saved into the Studio store.',
+        _SettingsHeader(
+          title: context.l10n.settingsGeneralTitle,
+          subtitle: context.l10n.settingsGeneralSubtitle,
         ),
         const SizedBox(height: 16),
         _SettingsToggleRow(
           icon: Icons.dark_mode_outlined,
-          title: 'Follow system theme',
-          subtitle: 'Switch light and dark mode with the OS.',
+          title: context.l10n.settingsFollowSystemTheme,
+          subtitle: context.l10n.settingsFollowSystemThemeSubtitle,
           value: widget.settings.followSystemTheme,
           onChanged: (value) =>
               _save(widget.settings.copyWith(followSystemTheme: value)),
@@ -406,8 +409,8 @@ class _GeneralTabState extends ConsumerState<_GeneralTab> {
         const SizedBox(height: 10),
         _SettingsToggleRow(
           icon: Icons.vertical_align_bottom,
-          title: 'Follow active turn',
-          subtitle: 'Keep new timeline output pinned to the latest turn.',
+          title: context.l10n.settingsFollowActiveTurn,
+          subtitle: context.l10n.settingsFollowActiveTurnSubtitle,
           value: widget.settings.followActiveTurn,
           onChanged: (value) =>
               _save(widget.settings.copyWith(followActiveTurn: value)),
@@ -415,8 +418,8 @@ class _GeneralTabState extends ConsumerState<_GeneralTab> {
         const SizedBox(height: 10),
         _SettingsToggleRow(
           icon: Icons.view_agenda_outlined,
-          title: 'Compact timeline',
-          subtitle: 'Reduce message spacing for denser reading.',
+          title: context.l10n.settingsCompactTimeline,
+          subtitle: context.l10n.settingsCompactTimelineSubtitle,
           value: widget.settings.compactTimeline,
           onChanged: (value) =>
               _save(widget.settings.copyWith(compactTimeline: value)),
