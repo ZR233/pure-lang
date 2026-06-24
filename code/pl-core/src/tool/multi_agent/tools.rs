@@ -4,16 +4,18 @@ use pl_trace::AgentEvent;
 use super::events::emit_agent_record;
 use super::runner::run_agent_turn;
 use super::types::{
-    AgentMessageArgs, AgentRunConfig, CloseAgentArgs, FollowupTaskTool, ListAgentsArgs,
-    ListAgentsResult, ListAgentsTool, MessageResult, SendMessageTool, SpawnAgentArgs,
-    SpawnAgentResult, SpawnAgentTool, WaitAgentArgs, WaitAgentResult, WaitAgentTool,
+    AgentMessageArgs, AgentRunConfig, AgentToolRuntime, CloseAgentArgs, FollowupTaskTool,
+    ListAgentsArgs, ListAgentsResult, ListAgentsTool, MessageResult, SendMessageTool,
+    SpawnAgentArgs, SpawnAgentResult, SpawnAgentTool, WaitAgentArgs, WaitAgentResult,
+    WaitAgentTool,
 };
 use super::{
     CloseAgentTool, ForkTurns, Tool, ToolContext, ToolInput, ToolOutput, agent_tool_records,
     child_agent_options, current_agent_path, fork_session, invalid_spawn_input, json_output,
     message_schema, unix_seconds,
 };
-use crate::agent::{AgentSpawnInput, MessageDeliveryMode};
+use crate::agent::{AgentMailboxMessage, AgentRecord, AgentSpawnInput, MessageDeliveryMode};
+use crate::tool::ToolRuntimeLockPolicy;
 use crate::tool::recoverable::{
     is_recoverable_subagent_capacity_error, recoverable_subagent_failures,
     recoverable_subagent_failures_message, recoverable_subagent_tool_output,
@@ -30,12 +32,14 @@ impl SpawnAgentTool {
         workspace_instructions: Option<String>,
     ) -> Self {
         Self {
-            provider,
-            reasoning_effort,
-            config,
-            mcp_runtime,
-            lsp_runtime,
-            workspace_instructions,
+            runtime: AgentToolRuntime::new(
+                provider,
+                reasoning_effort,
+                config,
+                mcp_runtime,
+                lsp_runtime,
+                workspace_instructions,
+            ),
         }
     }
 }
@@ -50,12 +54,48 @@ impl FollowupTaskTool {
         workspace_instructions: Option<String>,
     ) -> Self {
         Self {
-            provider,
-            reasoning_effort,
-            config,
-            mcp_runtime,
-            lsp_runtime,
-            workspace_instructions,
+            runtime: AgentToolRuntime::new(
+                provider,
+                reasoning_effort,
+                config,
+                mcp_runtime,
+                lsp_runtime,
+                workspace_instructions,
+            ),
+        }
+    }
+}
+
+impl AgentToolRuntime {
+    fn run_config(
+        &self,
+        context: &ToolContext,
+        record: &AgentRecord,
+        options: crate::TurnOptions,
+        role: String,
+        message: String,
+    ) -> AgentRunConfig {
+        AgentRunConfig {
+            provider: self.provider.clone(),
+            reasoning_effort: self.reasoning_effort.clone(),
+            config: self.config.clone(),
+            mcp_runtime: self.mcp_runtime.clone(),
+            lsp_runtime: self.lsp_runtime.clone(),
+            workspace_instructions: context
+                .workspace_instructions
+                .clone()
+                .or_else(|| self.workspace_instructions.clone()),
+            instruction_snapshot: context.instruction_snapshot.clone(),
+            workspace_root: context.workspace_root.clone(),
+            options,
+            agent_control: context.agent_control.clone(),
+            event_tx: context.event_tx.clone(),
+            agent_id: record.id.clone(),
+            agent_path: record.path.clone(),
+            role,
+            message,
+            mode: context.mode,
+            budget: TurnBudget::child_default(),
         }
     }
 }
@@ -201,28 +241,9 @@ impl Tool for SpawnAgentTool {
                     .attach_cancellation_token(&handle.id, token)
                     .await;
             }
-            let run = AgentRunConfig {
-                provider: self.provider.clone(),
-                reasoning_effort: self.reasoning_effort.clone(),
-                config: self.config.clone(),
-                mcp_runtime: self.mcp_runtime.clone(),
-                lsp_runtime: self.lsp_runtime.clone(),
-                workspace_instructions: context
-                    .workspace_instructions
-                    .clone()
-                    .or_else(|| self.workspace_instructions.clone()),
-                instruction_snapshot: context.instruction_snapshot.clone(),
-                workspace_root: context.workspace_root.clone(),
-                options,
-                agent_control: context.agent_control.clone(),
-                event_tx: context.event_tx.clone(),
-                agent_id: handle.id.clone(),
-                agent_path: handle.path.clone(),
-                role,
-                message: prompt,
-                mode: context.mode,
-                budget: TurnBudget::child_default(),
-            };
+            let run = self
+                .runtime
+                .run_config(&context, &record, options, role, prompt);
             tokio::spawn(run_agent_turn(run));
 
             json_output(SpawnAgentResult {
@@ -262,6 +283,10 @@ impl Tool for WaitAgentTool {
 
     fn supports_parallel_tool_calls(&self) -> bool {
         true
+    }
+
+    fn runtime_lock_policy(&self) -> ToolRuntimeLockPolicy {
+        ToolRuntimeLockPolicy::None
     }
 
     fn execute<'a>(
@@ -435,31 +460,16 @@ impl Tool for FollowupTaskTool {
                 .agent_control
                 .resolve_agent(&current_agent_path(&context), &target)
                 .await?;
-            if let Some(message) = context.agent_control.take_trigger_message(&agent_id).await
+            if let Some(messages) = context.agent_control.take_turn_messages(&agent_id).await
                 && let Some(record) = context.agent_control.record(&agent_id).await
             {
-                let run = AgentRunConfig {
-                    provider: self.provider.clone(),
-                    reasoning_effort: self.reasoning_effort.clone(),
-                    config: self.config.clone(),
-                    mcp_runtime: self.mcp_runtime.clone(),
-                    lsp_runtime: self.lsp_runtime.clone(),
-                    workspace_instructions: context
-                        .workspace_instructions
-                        .clone()
-                        .or_else(|| self.workspace_instructions.clone()),
-                    instruction_snapshot: context.instruction_snapshot.clone(),
-                    workspace_root: context.workspace_root.clone(),
-                    options: child_agent_options(&context.options),
-                    agent_control: context.agent_control.clone(),
-                    event_tx: context.event_tx.clone(),
-                    agent_id: agent_id.clone(),
-                    agent_path: record.path,
-                    role: record.role,
-                    message,
-                    mode: context.mode,
-                    budget: TurnBudget::child_default(),
-                };
+                let run = self.runtime.run_config(
+                    &context,
+                    &record,
+                    child_agent_options(&context.options),
+                    record.role.clone(),
+                    followup_prompt(messages),
+                );
                 if let Some(token) = run.options.cancellation_token.clone() {
                     context
                         .agent_control
@@ -544,15 +554,36 @@ impl Tool for CloseAgentTool {
                 completed_at: unix_seconds(),
                 sender_path,
                 receiver_path: previous.path.clone(),
-                status: previous.status,
+                status: shutdown.status,
                 error: None,
             });
             json_output(MessageResult {
                 target: previous.path,
-                status: previous.status,
+                status: shutdown.status,
             })
         })
     }
+}
+
+pub(super) fn followup_prompt(messages: Vec<AgentMailboxMessage>) -> String {
+    let multiple = messages.len() > 1;
+    let mut prompt = String::new();
+    for (index, message) in messages.into_iter().enumerate() {
+        if index > 0 {
+            prompt.push_str("\n\n");
+        }
+        if multiple {
+            if message.trigger_turn {
+                prompt.push_str("Follow-up task");
+            } else {
+                prompt.push_str("Queued message from ");
+                prompt.push_str(&message.sender_path);
+            }
+            prompt.push_str(":\n");
+        }
+        prompt.push_str(&message.message);
+    }
+    prompt
 }
 
 async fn handle_message_tool(

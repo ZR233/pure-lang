@@ -13,7 +13,7 @@ use crate::permission::{PermissionDecision, decide_tool_permission};
 use crate::session::CoreSession;
 use crate::tool::{
     RECOVERABLE_SUBAGENT_429_MARKER, SubagentContext, ToolContext, ToolInput, ToolOutput,
-    ToolRuntimeEvent, WorkspaceAccess,
+    ToolRuntimeEvent, ToolRuntimeLockPolicy, WorkspaceAccess,
 };
 use crate::turn::{BudgetTracker, ToolApprovalDecision, ToolExecutionMode, TurnOptions};
 
@@ -180,6 +180,14 @@ pub(super) async fn execute_tool_calls(
                 context.options.tool_execution_mode,
                 ToolExecutionMode::ModelDefault | ToolExecutionMode::Parallel
             );
+        let runtime_lock_policy = if matches!(
+            context.options.tool_execution_mode,
+            ToolExecutionMode::ModelDefault | ToolExecutionMode::Parallel
+        ) {
+            tool.runtime_lock_policy()
+        } else {
+            ToolRuntimeLockPolicy::Exclusive
+        };
         let tool_context = ToolContext {
             event_tx: recorder.sender().clone(),
             options: context.options.clone(),
@@ -295,12 +303,18 @@ pub(super) async fn execute_tool_calls(
                     tool_call: tool_call.clone(),
                     item,
                     future: Box::pin(async move {
-                        let result = if supports_parallel {
-                            let _guard = lock.read().await;
-                            tool.execute(tool_input, tool_context).await
-                        } else {
-                            let _guard = lock.write().await;
-                            tool.execute(tool_input, tool_context).await
+                        let result = match runtime_lock_policy {
+                            ToolRuntimeLockPolicy::Shared if supports_parallel => {
+                                let _guard = lock.read().await;
+                                tool.execute(tool_input, tool_context).await
+                            }
+                            ToolRuntimeLockPolicy::None => {
+                                tool.execute(tool_input, tool_context).await
+                            }
+                            ToolRuntimeLockPolicy::Exclusive | ToolRuntimeLockPolicy::Shared => {
+                                let _guard = lock.write().await;
+                                tool.execute(tool_input, tool_context).await
+                            }
                         };
                         tool_execution_record(tool_call_for_task, tool_name, result)
                     }),

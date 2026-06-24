@@ -98,6 +98,8 @@ struct AgentControlState {
     next_id: u64,
     max_agents: usize,
     max_depth: u32,
+    activity_seq: u64,
+    observed_activity_seq: u64,
 }
 
 impl Default for AgentControlState {
@@ -108,6 +110,8 @@ impl Default for AgentControlState {
             next_id: 0,
             max_agents: 16,
             max_depth: 3,
+            activity_seq: 0,
+            observed_activity_seq: 0,
         };
         let root = AgentRecord {
             id: "agent-root".to_string(),
@@ -135,6 +139,35 @@ impl Default for AgentControlState {
             },
         );
         state
+    }
+}
+
+impl AgentControlState {
+    fn mark_activity(&mut self) {
+        self.activity_seq = self.activity_seq.saturating_add(1);
+    }
+
+    fn has_final_agent(&self) -> bool {
+        self.agents.values().any(|entry| {
+            !entry.record.path.as_str().eq(AgentPath::ROOT) && entry.record.status.is_final()
+        })
+    }
+
+    fn agent_records(&self, path_prefix: Option<&str>) -> Vec<AgentRecord> {
+        let prefix = path_prefix
+            .map(str::trim)
+            .filter(|prefix| !prefix.is_empty());
+        let mut agents: Vec<_> = self
+            .agents
+            .values()
+            .map(|entry| entry.record.clone())
+            .filter(|agent| {
+                !agent.path.as_str().eq(AgentPath::ROOT)
+                    && prefix.is_none_or(|prefix| path_matches_prefix(&agent.path, prefix))
+            })
+            .collect();
+        agents.sort_by(|left, right| left.path.cmp(&right.path));
+        agents
     }
 }
 
@@ -230,6 +263,7 @@ impl AgentControl {
                 cancellation_token: None,
             },
         );
+        state.mark_activity();
         self.notify.notify_waiters();
         Ok(AgentHandle {
             id,
@@ -240,20 +274,7 @@ impl AgentControl {
 
     pub async fn list_agents(&self, path_prefix: Option<&str>) -> Vec<AgentRecord> {
         let state = self.state.lock().await;
-        let prefix = path_prefix
-            .map(str::trim)
-            .filter(|prefix| !prefix.is_empty());
-        let mut agents: Vec<_> = state
-            .agents
-            .values()
-            .map(|entry| entry.record.clone())
-            .filter(|agent| {
-                !agent.path.as_str().eq(AgentPath::ROOT)
-                    && prefix.is_none_or(|prefix| agent.path.starts_with(prefix))
-            })
-            .collect();
-        agents.sort_by(|left, right| left.path.cmp(&right.path));
-        agents
+        state.agent_records(path_prefix)
     }
 
     pub async fn resolve_agent(
@@ -326,6 +347,12 @@ impl AgentControl {
             return Some(entry.record.clone());
         }
         entry.record.status = update.status;
+        if matches!(
+            update.status,
+            AgentStatus::Queued | AgentStatus::Running | AgentStatus::Completed
+        ) {
+            clear_status_details(&mut entry.record);
+        }
         if update.summary.is_some() {
             entry.record.summary = update.summary;
         }
@@ -343,6 +370,7 @@ impl AgentControl {
         }
         entry.record.updated_at = unix_seconds();
         let record = entry.record.clone();
+        state.mark_activity();
         drop(state);
         self.notify.notify_waiters();
         Some(record)
@@ -412,26 +440,31 @@ impl AgentControl {
             message,
             trigger_turn: mode.trigger_turn(),
         });
-        entry.record.status = if mode.trigger_turn() {
-            AgentStatus::Queued
-        } else {
-            AgentStatus::Waiting
-        };
+        if mode.trigger_turn() {
+            entry.record.status = AgentStatus::Queued;
+            clear_status_details(&mut entry.record);
+        } else if !matches!(
+            entry.record.status,
+            AgentStatus::Queued | AgentStatus::Running
+        ) {
+            entry.record.status = AgentStatus::Waiting;
+        }
         entry.record.updated_at = unix_seconds();
         let record = entry.record.clone();
+        state.mark_activity();
         drop(state);
         self.notify.notify_waiters();
         Ok(record)
     }
 
-    pub async fn take_trigger_message(&self, agent_id: &str) -> Option<String> {
+    pub async fn take_turn_messages(&self, agent_id: &str) -> Option<Vec<AgentMailboxMessage>> {
         let mut state = self.state.lock().await;
         let entry = state.agents.get_mut(agent_id)?;
-        let index = entry
+        entry
             .mailbox
             .iter()
-            .position(|message| message.trigger_turn)?;
-        entry.mailbox.remove(index).map(|message| message.message)
+            .any(|message| message.trigger_turn)
+            .then(|| entry.mailbox.drain(..).collect())
     }
 
     pub async fn load_session(&self, agent_id: &str) -> Option<CoreSession> {
@@ -490,6 +523,7 @@ impl AgentControl {
                 }
             }
         }
+        state.mark_activity();
         drop(state);
         self.notify.notify_waiters();
         Ok(record)
@@ -512,24 +546,62 @@ impl AgentControl {
                 records.push(entry.record.clone());
             }
         }
-        drop(state);
         if !records.is_empty() {
+            state.mark_activity();
+            drop(state);
             self.notify.notify_waiters();
+        } else {
+            drop(state);
         }
         records
     }
 
     pub async fn wait_for_activity(&self, timeout_ms: i64) -> AgentWaitOutcome {
+        use tokio::time::{Duration, Instant};
+
         let timeout_ms = timeout_ms.clamp(250, 120_000) as u64;
-        let notified = tokio::time::timeout(
-            std::time::Duration::from_millis(timeout_ms),
-            self.notify.notified(),
-        )
-        .await
-        .is_ok();
-        AgentWaitOutcome {
-            timed_out: !notified,
-            agents: self.list_agents(None).await,
+        let start_seq = {
+            let mut state = self.state.lock().await;
+            if state.observed_activity_seq == 0 {
+                if state.has_final_agent() {
+                    state.observed_activity_seq = state.activity_seq;
+                    return AgentWaitOutcome {
+                        timed_out: false,
+                        agents: state.agent_records(None),
+                    };
+                }
+                state.activity_seq
+            } else if state.activity_seq > state.observed_activity_seq {
+                state.observed_activity_seq = state.activity_seq;
+                return AgentWaitOutcome {
+                    timed_out: false,
+                    agents: state.agent_records(None),
+                };
+            } else {
+                state.observed_activity_seq
+            }
+        };
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+        loop {
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            {
+                let mut state = self.state.lock().await;
+                if state.activity_seq > start_seq {
+                    state.observed_activity_seq = state.activity_seq;
+                    return AgentWaitOutcome {
+                        timed_out: false,
+                        agents: state.agent_records(None),
+                    };
+                }
+            }
+            if tokio::time::timeout_at(deadline, notified).await.is_err() {
+                return AgentWaitOutcome {
+                    timed_out: true,
+                    agents: self.list_agents(None).await,
+                };
+            }
         }
     }
 }
@@ -546,6 +618,20 @@ fn descendant_ids(state: &AgentControlState, agent_id: &str) -> Vec<String> {
             (id != agent_id && entry.record.path.starts_with(&prefix)).then_some(id.clone())
         })
         .collect()
+}
+
+fn path_matches_prefix(path: &str, prefix: &str) -> bool {
+    path == prefix
+        || path
+            .strip_prefix(prefix)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn clear_status_details(record: &mut AgentRecord) {
+    record.error = None;
+    record.reason = None;
+    record.budget_limit_kind = None;
+    record.budget_usage = None;
 }
 
 #[cfg(test)]
@@ -569,15 +655,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_agents_path_prefix_matches_subtree_boundaries() {
+        let control = AgentControl::default();
+        let a = control
+            .spawn_agent(AgentSpawnInput {
+                task_name: "a".to_string(),
+                message: "inspect a".to_string(),
+                role: "explorer".to_string(),
+                parent_path: None,
+            })
+            .await
+            .unwrap();
+        control
+            .spawn_agent(AgentSpawnInput {
+                task_name: "child".to_string(),
+                message: "inspect child".to_string(),
+                role: "explorer".to_string(),
+                parent_path: Some(a.path),
+            })
+            .await
+            .unwrap();
+        control
+            .spawn_agent(AgentSpawnInput {
+                task_name: "ab".to_string(),
+                message: "inspect ab".to_string(),
+                role: "explorer".to_string(),
+                parent_path: None,
+            })
+            .await
+            .unwrap();
+
+        let agents = control.list_agents(Some("/root/a")).await;
+
+        assert_eq!(
+            agents
+                .into_iter()
+                .map(|agent| agent.path)
+                .collect::<Vec<_>>(),
+            vec!["/root/a".to_string(), "/root/a/child".to_string()]
+        );
+    }
+
+    #[tokio::test]
     async fn sends_and_closes_agent() {
         let control = AgentControl::default();
-        control
+        let handle = control
             .spawn_agent(AgentSpawnInput {
                 task_name: "worker".to_string(),
                 message: "inspect".to_string(),
                 role: "explorer".to_string(),
                 parent_path: None,
             })
+            .await
+            .unwrap();
+        control
+            .update_status(&handle.id, AgentStatus::Interrupted, None, None)
             .await
             .unwrap();
         let record = control
@@ -605,6 +737,46 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn send_message_preserves_queued_or_running_status() {
+        let control = AgentControl::default();
+        let handle = control
+            .spawn_agent(AgentSpawnInput {
+                task_name: "worker".to_string(),
+                message: "inspect".to_string(),
+                role: "explorer".to_string(),
+                parent_path: None,
+            })
+            .await
+            .unwrap();
+
+        let queued = control
+            .append_message(
+                AgentPath::ROOT,
+                "worker",
+                "queued context".to_string(),
+                MessageDeliveryMode::QueueOnly,
+            )
+            .await
+            .unwrap();
+        control
+            .update_status(&handle.id, AgentStatus::Running, None, None)
+            .await
+            .unwrap();
+        let running = control
+            .append_message(
+                AgentPath::ROOT,
+                "worker",
+                "running context".to_string(),
+                MessageDeliveryMode::QueueOnly,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(queued.status, AgentStatus::Queued);
+        assert_eq!(running.status, AgentStatus::Running);
     }
 
     #[tokio::test]
@@ -674,6 +846,139 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn followup_task_clears_stale_interruption_details() {
+        let control = AgentControl::default();
+        let handle = control
+            .spawn_agent(AgentSpawnInput {
+                task_name: "worker".to_string(),
+                message: "inspect".to_string(),
+                role: "explorer".to_string(),
+                parent_path: None,
+            })
+            .await
+            .unwrap();
+        control
+            .update_status_with(
+                &handle.id,
+                AgentStatusUpdate {
+                    status: AgentStatus::Interrupted,
+                    summary: None,
+                    error: Some("budget used".to_string()),
+                    reason: Some("budgetLimited".to_string()),
+                    budget_limit_kind: Some(BudgetLimitKind::ModelStep),
+                    budget_usage: Some(BudgetUsage {
+                        model_steps: 1,
+                        tool_calls: 0,
+                        wait_calls: 0,
+                        elapsed_ms: 10,
+                    }),
+                },
+            )
+            .await
+            .unwrap();
+
+        let queued = control
+            .append_message(
+                AgentPath::ROOT,
+                "worker",
+                "resume".to_string(),
+                MessageDeliveryMode::TriggerTurn,
+            )
+            .await
+            .unwrap();
+        let running = control
+            .update_status(&handle.id, AgentStatus::Running, None, None)
+            .await
+            .unwrap();
+        let completed = control
+            .update_status(
+                &handle.id,
+                AgentStatus::Completed,
+                Some("done".to_string()),
+                None,
+            )
+            .await
+            .unwrap();
+
+        for record in [queued, running, completed] {
+            assert_eq!(record.error, None);
+            assert_eq!(record.reason, None);
+            assert_eq!(record.budget_limit_kind, None);
+            assert_eq!(record.budget_usage, None);
+        }
+    }
+
+    #[tokio::test]
+    async fn take_turn_messages_drains_queued_messages_with_trigger() {
+        let control = AgentControl::default();
+        let handle = control
+            .spawn_agent(AgentSpawnInput {
+                task_name: "worker".to_string(),
+                message: "inspect".to_string(),
+                role: "explorer".to_string(),
+                parent_path: None,
+            })
+            .await
+            .unwrap();
+        control
+            .update_status(&handle.id, AgentStatus::Interrupted, None, None)
+            .await
+            .unwrap();
+        control
+            .append_message(
+                AgentPath::ROOT,
+                "worker",
+                "context".to_string(),
+                MessageDeliveryMode::QueueOnly,
+            )
+            .await
+            .unwrap();
+        assert!(control.take_turn_messages(&handle.id).await.is_none());
+        control
+            .append_message(
+                AgentPath::ROOT,
+                "worker",
+                "resume".to_string(),
+                MessageDeliveryMode::TriggerTurn,
+            )
+            .await
+            .unwrap();
+        control
+            .append_message(
+                AgentPath::ROOT,
+                "worker",
+                "late context".to_string(),
+                MessageDeliveryMode::QueueOnly,
+            )
+            .await
+            .unwrap();
+
+        let messages = control.take_turn_messages(&handle.id).await.unwrap();
+
+        assert_eq!(
+            messages,
+            vec![
+                AgentMailboxMessage {
+                    sender_path: AgentPath::ROOT.to_string(),
+                    message: "context".to_string(),
+                    trigger_turn: false,
+                },
+                AgentMailboxMessage {
+                    sender_path: AgentPath::ROOT.to_string(),
+                    message: "resume".to_string(),
+                    trigger_turn: true,
+                },
+                AgentMailboxMessage {
+                    sender_path: AgentPath::ROOT.to_string(),
+                    message: "late context".to_string(),
+                    trigger_turn: false,
+                },
+            ]
+        );
+        assert!(control.take_turn_messages(&handle.id).await.is_none());
+    }
+
+    #[tokio::test]
     async fn followup_task_rejects_running_or_queued_agent() {
         let control = AgentControl::default();
         let handle = control
@@ -712,6 +1017,74 @@ mod tests {
 
         assert!(queued_error.contains("already queued"));
         assert!(running_error.contains("already running"));
+    }
+
+    #[tokio::test]
+    async fn wait_for_activity_returns_completed_snapshot_without_new_notify() {
+        let control = AgentControl::default();
+        let handle = control
+            .spawn_agent(AgentSpawnInput {
+                task_name: "worker".to_string(),
+                message: "inspect".to_string(),
+                role: "explorer".to_string(),
+                parent_path: None,
+            })
+            .await
+            .unwrap();
+        control
+            .update_status(
+                &handle.id,
+                AgentStatus::Completed,
+                Some("done".to_string()),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let outcome = control.wait_for_activity(250).await;
+
+        assert!(!outcome.timed_out);
+        assert_eq!(outcome.agents.len(), 1);
+        assert_eq!(outcome.agents[0].status, AgentStatus::Completed);
+        assert_eq!(outcome.agents[0].summary.as_deref(), Some("done"));
+    }
+
+    #[tokio::test]
+    async fn wait_for_activity_does_not_replay_old_final_agents() {
+        let control = AgentControl::default();
+        let first = control
+            .spawn_agent(AgentSpawnInput {
+                task_name: "first".to_string(),
+                message: "inspect first".to_string(),
+                role: "explorer".to_string(),
+                parent_path: None,
+            })
+            .await
+            .unwrap();
+        let second = control
+            .spawn_agent(AgentSpawnInput {
+                task_name: "second".to_string(),
+                message: "inspect second".to_string(),
+                role: "explorer".to_string(),
+                parent_path: None,
+            })
+            .await
+            .unwrap();
+        control
+            .update_status(&first.id, AgentStatus::Completed, None, None)
+            .await
+            .unwrap();
+        control
+            .update_status(&second.id, AgentStatus::Running, None, None)
+            .await
+            .unwrap();
+        assert!(!control.wait_for_activity(250).await.timed_out);
+
+        let before = tokio::time::Instant::now();
+        let outcome = control.wait_for_activity(250).await;
+
+        assert!(outcome.timed_out);
+        assert!(before.elapsed() >= std::time::Duration::from_millis(200));
     }
 
     #[tokio::test]

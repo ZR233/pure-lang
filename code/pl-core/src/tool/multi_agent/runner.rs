@@ -44,6 +44,9 @@ pub(crate) async fn run_agent_turn(config: AgentRunConfig) {
     else {
         return;
     };
+    if record.status != AgentStatus::Running {
+        return;
+    }
     emit_agent_record(&config.event_tx, &record);
 
     let role = ModelRole::from_key(&config.role).unwrap_or(ModelRole::Executor);
