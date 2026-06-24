@@ -35,7 +35,6 @@ class _ProviderDetails extends StatelessWidget {
         ],
       );
     }
-    final colors = Theme.of(context).colorScheme;
     return ListView(
       children: [
         Align(
@@ -92,23 +91,7 @@ class _ProviderDetails extends StatelessWidget {
           title: 'Models',
           children: [
             for (final model in provider.allModels)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Material(
-                  color: colors.surfaceContainerLowest,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    side: BorderSide(color: colors.outlineVariant),
-                  ),
-                  child: ListTile(
-                    dense: true,
-                    leading: const Icon(Icons.smart_toy_outlined),
-                    title: Text(model.displayName),
-                    subtitle: Text(model.slug),
-                    trailing: Text(_modelPriceLabel(model)),
-                  ),
-                ),
-              ),
+              _ModelReadout(model: model, framed: true),
           ],
         ),
       ],
@@ -177,70 +160,45 @@ class _ProviderEditor extends StatelessWidget {
         _SectionPanel(
           title: 'Connection',
           children: [
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final twoColumns = constraints.maxWidth >= 620;
-                final fields = [
-                  _TextEdit(
-                    label: 'Provider key',
-                    value: provider.id,
-                    enabled: !saving,
-                    onChanged: (value) =>
-                        onUpdate((item) => item.copyWith(id: value)),
-                  ),
-                  DropdownButtonFormField<String>(
-                    initialValue: provider.templateKind,
-                    decoration: const InputDecoration(labelText: 'Template'),
-                    items: [
-                      for (final template in _providerTemplates)
-                        DropdownMenuItem(
-                          value: template.id,
-                          child: Text(template.name),
-                        ),
-                    ],
-                    onChanged: saving
-                        ? null
-                        : (value) {
-                            if (value != null) {
-                              onChangeTemplate(value);
-                            }
-                          },
-                  ),
-                  _TextEdit(
-                    label: 'Display name',
-                    value: provider.name,
-                    enabled: !saving,
-                    onChanged: (value) =>
-                        onUpdate((item) => item.copyWith(name: value)),
-                  ),
-                  _ReadonlyField(
-                    label: 'Protocol type',
-                    value: provider.providerKind,
-                  ),
-                ];
-                if (!twoColumns) {
-                  return Column(
-                    children: [
-                      for (final field in fields)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: field,
-                        ),
-                    ],
-                  );
-                }
-                return Wrap(
-                  spacing: 12,
-                  runSpacing: 10,
-                  children: [
-                    for (final field in fields)
-                      SizedBox(
-                        width: (constraints.maxWidth - 12) / 2,
-                        child: field,
+            _ResponsiveFieldGrid(
+              children: [
+                _TextEdit(
+                  label: 'Provider key',
+                  value: provider.id,
+                  enabled: !saving,
+                  onChanged: (value) =>
+                      onUpdate((item) => item.copyWith(id: value)),
+                ),
+                DropdownButtonFormField<String>(
+                  initialValue: provider.templateKind,
+                  decoration: const InputDecoration(labelText: 'Template'),
+                  items: [
+                    for (final template in _providerTemplates)
+                      DropdownMenuItem(
+                        value: template.id,
+                        child: Text(template.name),
                       ),
                   ],
-                );
-              },
+                  onChanged: saving
+                      ? null
+                      : (value) {
+                          if (value != null) {
+                            onChangeTemplate(value);
+                          }
+                        },
+                ),
+                _TextEdit(
+                  label: 'Display name',
+                  value: provider.name,
+                  enabled: !saving,
+                  onChanged: (value) =>
+                      onUpdate((item) => item.copyWith(name: value)),
+                ),
+                _ReadonlyField(
+                  label: 'Protocol type',
+                  value: provider.providerKind,
+                ),
+              ],
             ),
             const SizedBox(height: 10),
             _TextEdit(
@@ -404,18 +362,30 @@ class _CustomModelEditor extends StatelessWidget {
 }
 
 class _ModelReadout extends StatelessWidget {
-  const _ModelReadout({required this.model});
+  const _ModelReadout({required this.model, this.framed = false});
 
   final ProviderModelView model;
+  final bool framed;
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
+    final tile = ListTile(
       dense: true,
       leading: const Icon(Icons.smart_toy_outlined),
       title: Text(model.displayName),
       subtitle: Text(model.slug),
       trailing: Text(_modelPriceLabel(model)),
+    );
+    if (!framed) {
+      return tile;
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: StudioPanel(
+        backgroundColor: Theme.of(context).colorScheme.surfaceContainerLowest,
+        radius: StudioRadii.sm,
+        child: tile,
+      ),
     );
   }
 }

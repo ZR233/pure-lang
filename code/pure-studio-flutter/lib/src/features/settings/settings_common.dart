@@ -116,6 +116,40 @@ class _TextEdit extends StatelessWidget {
   }
 }
 
+class _ResponsiveFieldGrid extends StatelessWidget {
+  const _ResponsiveFieldGrid({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final twoColumns = constraints.maxWidth >= 620;
+        if (!twoColumns) {
+          return Column(
+            children: [
+              for (final child in children)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: child,
+                ),
+            ],
+          );
+        }
+        return Wrap(
+          spacing: 12,
+          runSpacing: 10,
+          children: [
+            for (final child in children)
+              SizedBox(width: (constraints.maxWidth - 12) / 2, child: child),
+          ],
+        );
+      },
+    );
+  }
+}
+
 class _Readout extends StatelessWidget {
   const _Readout({required this.label, required this.value});
 
@@ -198,5 +232,43 @@ class _InfoPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return StudioPill(icon: icon, label: label);
+  }
+}
+
+class _InlineError extends StatelessWidget {
+  const _InlineError({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return StudioNotice(
+      icon: Icons.error_outline,
+      message: message,
+      tone: StudioNoticeTone.danger,
+      padding: const EdgeInsets.all(10),
+    );
+  }
+}
+
+class _EmptySettingsMessage extends StatelessWidget {
+  const _EmptySettingsMessage({
+    required this.icon,
+    required this.title,
+    required this.body,
+  });
+
+  final IconData icon;
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    return StudioNotice(
+      icon: icon,
+      title: title,
+      message: body,
+      padding: const EdgeInsets.all(16),
+    );
   }
 }

@@ -267,46 +267,13 @@ class _ControlChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(right: 6),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: enabled
-              ? colors.surfaceContainerLowest.withValues(alpha: 0.78)
-              : colors.surfaceContainerHighest,
-          border: Border.all(
-            color: colors.outlineVariant.withValues(alpha: 0.72),
-          ),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 15, color: colors.onSurfaceVariant),
-              const SizedBox(width: 5),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 160),
-                child: Text(
-                  label,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: colors.onSurfaceVariant,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 2),
-              Icon(
-                Icons.keyboard_arrow_down,
-                size: 15,
-                color: colors.onSurfaceVariant,
-              ),
-            ],
-          ),
-        ),
-      ),
+    return StudioCompactChip(
+      icon: icon,
+      label: label,
+      enabled: enabled,
+      maxWidth: 160,
+      margin: const EdgeInsets.only(right: 6),
+      trailingIcon: Icons.keyboard_arrow_down,
     );
   }
 }
@@ -388,48 +355,12 @@ class _StatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip.isEmpty ? label : tooltip,
-      child: Padding(
-        padding: const EdgeInsets.only(right: 8),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerLowest,
-            border: Border.all(
-              color: Theme.of(
-                context,
-              ).colorScheme.outlineVariant.withValues(alpha: 0.72),
-            ),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (icon != null) ...[
-                  Icon(
-                    icon,
-                    size: 15,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 5),
-                ],
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 180),
-                  child: Text(
-                    label,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+    return StudioCompactChip(
+      icon: icon,
+      label: label,
+      tooltip: tooltip.isEmpty ? label : tooltip,
+      maxWidth: 180,
+      margin: const EdgeInsets.only(right: 8),
     );
   }
 }

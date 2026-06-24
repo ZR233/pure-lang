@@ -5,33 +5,11 @@ class _EmptyTimeline extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 380),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const StudioIconBadge(icon: Icons.forum_outlined, size: 44),
-            const SizedBox(height: 14),
-            Text(
-              'No messages yet',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: context.studioInk,
-                fontWeight: FontWeight.w700,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Open a project or start a session to begin.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
+    return const Center(
+      child: StudioEmptyState(
+        icon: Icons.forum_outlined,
+        title: 'No messages yet',
+        message: 'Open a project or start a session to begin.',
       ),
     );
   }
@@ -384,78 +362,26 @@ class _AgentMarkdown extends StatelessWidget {
       key: ValueKey('gpt-markdown-$id-$status-${repaired.length}'),
       style: _markdownBodyStyle(context),
       codeBuilder: (context, name, code, closed) {
-        return _CodeBlock(code: code, language: name, surface: surface);
-      },
-    );
-  }
-}
-
-class _CodeBlock extends StatelessWidget {
-  const _CodeBlock({
-    required this.code,
-    required this.language,
-    required this.surface,
-  });
-
-  final String code;
-  final String language;
-  final _MarkdownSurface surface;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
-    final codeBackground = surface == _MarkdownSurface.user
-        ? scheme.surfaceContainerHigh
-        : scheme.surfaceContainerLow;
-    final languageLabel = language.trim();
-
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      decoration: BoxDecoration(
-        color: codeBackground,
-        borderRadius: BorderRadius.circular(StudioRadii.sm),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (languageLabel.isNotEmpty)
-            DecoratedBox(
-              decoration: BoxDecoration(color: scheme.surfaceContainerHighest),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 7, 12, 6),
-                child: Text(
-                  languageLabel,
-                  style: textTheme.labelSmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                    fontFamily: 'JetBrains Mono',
-                    fontFamilyFallback: const ['Consolas', 'monospace'],
-                  ),
-                ),
-              ),
-            ),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: SelectableText(
-                code,
-                style: textTheme.bodyMedium?.copyWith(
-                  color: scheme.onSurface,
-                  fontFamily: 'JetBrains Mono',
-                  fontFamilyFallback: const ['Consolas', 'monospace'],
-                  fontSize: (textTheme.bodyMedium?.fontSize ?? 14) * 0.92,
-                  height: 1.35,
-                ),
-              ),
-            ),
+        final scheme = Theme.of(context).colorScheme;
+        final textTheme = Theme.of(context).textTheme;
+        final codeBackground = surface == _MarkdownSurface.user
+            ? scheme.surfaceContainerHigh
+            : scheme.surfaceContainerLow;
+        return StudioCodeBlock(
+          text: code,
+          language: name,
+          margin: const EdgeInsets.symmetric(vertical: 6),
+          backgroundColor: codeBackground,
+          borderColor: scheme.outlineVariant,
+          textStyle: textTheme.bodyMedium?.copyWith(
+            color: scheme.onSurface,
+            fontFamily: 'JetBrains Mono',
+            fontFamilyFallback: const ['Consolas', 'monospace'],
+            fontSize: (textTheme.bodyMedium?.fontSize ?? 14) * 0.92,
+            height: 1.35,
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
