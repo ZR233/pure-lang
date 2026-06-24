@@ -57,7 +57,7 @@ Flutter bridge crate 不承载流程逻辑，只把 Dart 调用转发到 `pl-cor
 - agent 运行时状态对齐 Codex：`queued | running | waiting | completed | errored | interrupted | shutdown | notFound`
 - `budgetLimited` 不是 agent 状态，而是 turn abort reason；子 agent 预算耗尽时状态为 `interrupted`，并携带 `reason`、`budgetLimitKind` 和 `budgetUsage`
 - `interrupted` 是可恢复的非终局状态；`completed | errored | shutdown | notFound` 是终局状态
-- `send_message` / `followup_task` 不能重新激活终局 agent；`interrupted` agent 可以通过 followup 恢复为 `queued`
+- `send_message` / `followup_task` 不能重新激活终局 agent；`followup_task` 不抢占已经 `running` 或已 `queued` 的 agent，调用方应等待该 agent 进入可接收新 turn 的状态；`interrupted` agent 可以通过 followup 恢复为 `queued`
 - 父 agent 因中断、错误、预算限制或关闭而停止时，必须级联关闭仍在运行的子树，避免后台子 agent 残留为 `running`
 
 ## 3.3 核心 turn 编排

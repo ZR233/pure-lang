@@ -14,6 +14,21 @@ use crate::InteractionCallback;
 use crate::studio::StudioStore;
 use crate::studio::ids::unix_seconds;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InteractionCancelScope {
+    All,
+    TransientOnly,
+}
+
+impl InteractionCancelScope {
+    fn includes(self, interaction: &InteractionRequest) -> bool {
+        match self {
+            Self::All => true,
+            Self::TransientOnly => interaction.kind != InteractionKind::PlanConfirmation,
+        }
+    }
+}
+
 pub type InteractionEmitterFuture = Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 pub type InteractionEmitter =
     Arc<dyn Fn(InteractionRequest) -> InteractionEmitterFuture + Send + Sync>;
@@ -92,26 +107,8 @@ impl InteractionRuntime {
         reason: &str,
         emitter: InteractionEmitter,
     ) -> Result<()> {
-        let pending = self.store.list_pending_interactions(session_id).await?;
-        for mut interaction in pending {
-            let resolution = cancelled_resolution(&interaction.kind, reason);
-            let now = unix_seconds();
-            interaction.status = InteractionStatus::Cancelled;
-            interaction.updated_at = now;
-            interaction.resolved_at = Some(now);
-            interaction.resolution = Some(resolution.clone());
-            self.persist_and_emit(interaction.clone(), emitter.clone())
-                .await?;
-            if let Some(waiter) = self
-                .waiters
-                .lock()
-                .await
-                .remove(&interaction.interaction_id)
-            {
-                let _ = waiter.sender.send(resolution);
-            }
-        }
-        Ok(())
+        self.cancel_pending_interactions(session_id, reason, emitter, InteractionCancelScope::All)
+            .await
     }
 
     pub async fn cancel_transient_interactions(
@@ -120,9 +117,25 @@ impl InteractionRuntime {
         reason: &str,
         emitter: InteractionEmitter,
     ) -> Result<()> {
+        self.cancel_pending_interactions(
+            session_id,
+            reason,
+            emitter,
+            InteractionCancelScope::TransientOnly,
+        )
+        .await
+    }
+
+    async fn cancel_pending_interactions(
+        &self,
+        session_id: &str,
+        reason: &str,
+        emitter: InteractionEmitter,
+        scope: InteractionCancelScope,
+    ) -> Result<()> {
         let pending = self.store.list_pending_interactions(session_id).await?;
         for mut interaction in pending {
-            if interaction.kind == InteractionKind::PlanConfirmation {
+            if !scope.includes(&interaction) {
                 continue;
             }
             let resolution = cancelled_resolution(&interaction.kind, reason);
@@ -160,7 +173,13 @@ impl InteractionRuntime {
         self.waiters
             .lock()
             .await
-            .insert(interaction_id.clone(), InteractionWaiter { sender });
+            .insert(interaction_id.clone(), InteractionWaiter { sender })
+            .map(|waiter| {
+                let _ = waiter.sender.send(cancelled_resolution(
+                    &request.kind,
+                    "interaction replaced by a newer request",
+                ));
+            });
         if let Err(error) = self.persist_and_emit(request.clone(), emitter).await {
             self.waiters.lock().await.remove(&interaction_id);
             eprintln!("[pl-core] failed to persist interaction: {error}");
@@ -392,6 +411,40 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(wait_event_count(&events, 2).await, 2);
+    }
+
+    #[tokio::test]
+    async fn duplicate_interaction_id_releases_replaced_waiter() {
+        let (store, session_id) = store_with_session().await;
+        let runtime = InteractionRuntime::new(store.clone());
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let callback = runtime.callback(session_id.clone(), emitter(events.clone()));
+        let first_waiter = tokio::spawn(callback(user_input_interaction("ask-1")));
+        assert_eq!(wait_pending(&store, &session_id).await.len(), 1);
+
+        let second_waiter = tokio::spawn(callback(user_input_interaction("ask-1")));
+        let first_resolution = first_waiter.await.unwrap();
+        assert_eq!(
+            first_resolution,
+            InteractionResolution::UserInput {
+                answers: HashMap::new()
+            }
+        );
+
+        let resolution = InteractionResolution::UserInput {
+            answers: HashMap::from([(
+                "mode".to_string(),
+                UserInputAnswer {
+                    answers: vec!["Careful".to_string()],
+                },
+            )]),
+        };
+        runtime
+            .resolve("ask-1", resolution.clone(), emitter(events.clone()))
+            .await
+            .unwrap();
+
+        assert_eq!(second_waiter.await.unwrap(), resolution);
     }
 
     #[tokio::test]

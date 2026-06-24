@@ -680,6 +680,25 @@ impl StudioStore {
             .collect()
     }
 
+    pub async fn list_sessions_with_transient_pending_interactions(&self) -> Result<Vec<String>> {
+        use entities::interaction;
+        let rows = interaction::Entity::find()
+            .filter(interaction::Column::Status.eq(InteractionStatus::Pending.as_str()))
+            .filter(interaction::Column::Kind.is_in([
+                InteractionKind::UserInput.as_str(),
+                InteractionKind::ToolApproval.as_str(),
+            ]))
+            .all(&self.db)
+            .await?;
+        let mut session_ids = rows
+            .into_iter()
+            .map(|row| row.session_id)
+            .collect::<Vec<_>>();
+        session_ids.sort();
+        session_ids.dedup();
+        Ok(session_ids)
+    }
+
     pub async fn upsert_agent_snapshot(&self, record: AgentSnapshotRecord) -> Result<()> {
         use entities::agent;
         if let Some(existing) = agent::Entity::find_by_id(record.id.clone())

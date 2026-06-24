@@ -88,6 +88,8 @@ Flutter 首版 `ListView.builder` 必须实现同一滚动语义。Timeline 以 
 
 普通 prompt、Plan 确认、tool approval、ask-user、legacy session handoff、agent latest snapshot、agent timeline event 和 runtime usage 都以 `sessionId` 为边界。切换会话时用后端当前 session snapshot 替换当前 view；后台 session 事件只更新对应 view，不污染当前 timeline 或状态栏。Plan 确认的实施动作必须留在当前 session 内，不能改变 `selectedSessionId`。
 
+Studio runtime 的恢复语义必须保证 UI 不展示已经无法唤醒的等待态。应用启动时，未完成 turn 标记为取消，`userInput` 与 `toolApproval` 这类依赖内存 waiter 的 transient pending interaction 同步取消并发出 interaction snapshot；`planConfirmation` 可在 turn 完成后继续等待用户决策，因此不会被普通启动恢复或 turn 收尾清理取消。单个 session 的 active turn 只在对应后台 turn 未终止时出现在 runtime snapshot 中，完成、失败、中断和取消后必须从 snapshot 中移除。
+
 聊天底部只渲染一个最高优先级 pending interaction，优先级为 `toolApproval > userInput > planConfirmation`。这个区域采用 opencode dock prompt 语义：pending 的问题与权限请求不写入 timeline view model，timeline 中 pending `request_user_input` / `question` tool part 隐藏，由 dock 显示真实问题、选项和输入控件；完成后的问题 tool part 可以作为普通 assistant tool part 显示“Questions / answered”摘要。普通 prompt 输入不再渲染 Auto/Plan 二级按钮，模式切换只存在于状态栏，避免与状态栏重复。`submit_prompt` 和 `resolve_interaction` 只表示提交成功，不返回最终 timeline；后续展示完全由 Studio event stream 驱动。`toolApproval` 必须显示工具名、参数、工作目录和 approve/deny；`userInput` 必须显示每个问题、选项、free text/other/secret 输入并提交 `{ [questionId]: { answers } }`，secret 答案不得以明文出现在 timeline；`planConfirmation` 保留 implement fresh、continue planning、dismiss 三动作，并和问题/权限一样使用 dock prompt，而不是从 timeline 自行推断“是否实施计划”。
 
 Flutter 的 `planConfirmation` dock 对齐 Codex 桌面 app 的决策式提示：标题固定为“实施此计划？”，计划正文留在 timeline plan card 中展示，dock 只提供“实施此计划”“告诉 Pure 如何调整”和弱化的忽略动作；实施动作不回传可编辑计划正文，继续调整只回传用户输入的调整内容。Flutter 的 `userInput` dock 对齐 Codex 的分题交互：顶部显示问题数量与进度点，当前只聚焦一个问题，选项使用多选 checkbox row，Other/free text/secret 输入跟随当前问题展示，上一题/下一题/提交按钮保留在 dock footer；提交时为每个问题生成 `{ answers: [...] }`，未回答问题也保留空数组。
