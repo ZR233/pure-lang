@@ -8,7 +8,7 @@ use super::child_agent_options;
 use super::fork_session;
 use super::json_output;
 use super::tools::followup_prompt;
-use super::types::{ListAgentsResult, WaitAgentResult};
+use super::types::{AgentToolRecord, ListAgentsResult, WaitAgentResult};
 use crate::agent::{AgentMailboxMessage, AgentRecord};
 use crate::tool::recoverable::{
     recoverable_subagent_failures, recoverable_subagent_failures_message,
@@ -51,24 +51,22 @@ fn wait_agent_result_serializes_recoverable_failures() {
         recoverable_failures,
     })
     .unwrap();
-    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+    let result = serde_json::from_str::<WaitAgentResult>(&output.description).unwrap();
 
-    assert_eq!(value["timedOut"], false);
     assert_eq!(
-        value["message"],
-        "recoverableSubagentProvider429: 1 subagent(s) are unavailable because the provider returned 429 concurrency/rate-limit capacity. Stop creating or retrying subagents and continue the remaining work in the current agent."
+        result,
+        WaitAgentResult {
+            message: "recoverableSubagentProvider429: 1 subagent(s) are unavailable because the provider returned 429 concurrency/rate-limit capacity. Stop creating or retrying subagents and continue the remaining work in the current agent.".to_string(),
+            timed_out: false,
+            agents: agent_tool_records(&agents, false),
+            recoverable_failures: recoverable_subagent_failures(&agents),
+        }
     );
-    assert_eq!(value["recoverableFailures"][0]["agentId"], "agent-1");
-    assert_eq!(value["recoverableFailures"][0]["path"], "/root/agent-1");
-    assert_eq!(value["agents"].as_array().unwrap().len(), 2);
-    assert_eq!(value["agents"][0]["status"], "errored");
-    assert_eq!(value["agents"][1]["status"], "completed");
-    assert!(value["agents"][0]["id"].is_null());
-    assert!(value["agents"][0]["updatedAt"].is_null());
+    assert!(matches!(result.agents[0], AgentToolRecord::Compact(_)));
 }
 
 #[test]
-fn list_agents_result_defaults_to_compact_agents_and_recoverable_failures() {
+fn list_agents_result_round_trips_compact_agents_and_recoverable_failures() {
     let agents = vec![
         agent_record(
             "agent-1",
@@ -83,30 +81,24 @@ fn list_agents_result_defaults_to_compact_agents_and_recoverable_failures() {
         recoverable_failures,
     })
     .unwrap();
-    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+    let result = serde_json::from_str::<ListAgentsResult>(&output.description).unwrap();
 
-    assert_eq!(value["agents"].as_array().unwrap().len(), 2);
-    assert_eq!(value["agents"][0]["path"], "/root/agent-1");
-    assert!(value["agents"][0]["id"].is_null());
-    assert_eq!(value["recoverableFailures"][0]["agentId"], "agent-1");
     assert_eq!(
-        value["recoverableFailures"][0]["error"],
-        "provider returned status 429"
+        result,
+        ListAgentsResult {
+            agents: agent_tool_records(&agents, false),
+            recoverable_failures: recoverable_subagent_failures(&agents),
+        }
     );
-}
+    assert!(matches!(result.agents[0], AgentToolRecord::Compact(_)));
 
-#[test]
-fn list_agents_result_can_include_full_details() {
-    let agents = vec![agent_record("agent-1", AgentStatus::Completed, None)];
-    let output = json_output(ListAgentsResult {
+    let detailed_output = json_output(ListAgentsResult {
         agents: agent_tool_records(&agents, true),
         recoverable_failures: Vec::new(),
     })
     .unwrap();
-    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
-
-    assert_eq!(value["agents"][0]["id"], "agent-1");
-    assert_eq!(value["agents"][0]["updatedAt"], 1);
+    let detailed = serde_json::from_str::<ListAgentsResult>(&detailed_output.description).unwrap();
+    assert!(matches!(detailed.agents[0], AgentToolRecord::Detailed(_)));
 }
 
 #[test]

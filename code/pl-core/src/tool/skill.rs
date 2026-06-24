@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use pl_protocol::{PureError, SkillActivation};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::config::SkillsConfig;
@@ -76,6 +76,63 @@ enum ReplaceMode {
     All,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillsListOutput<'a> {
+    success: bool,
+    count: usize,
+    project_dir: &'a Path,
+    skills: Vec<&'a SkillMetadata>,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillViewOutput<'a> {
+    success: bool,
+    skill: &'a SkillMetadata,
+    file_path: String,
+    support_files: Vec<crate::skill::SkillFile>,
+    content: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillPathOutput<'a> {
+    success: bool,
+    action: &'static str,
+    name: &'a str,
+    path: &'a Path,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillPatchOutput<'a> {
+    success: bool,
+    action: &'static str,
+    name: &'a str,
+    replacements: usize,
+    path: &'a Path,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillDeleteOutput<'a> {
+    success: bool,
+    action: &'static str,
+    name: &'a str,
+    absorbed_into: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillFileOutput<'a> {
+    success: bool,
+    action: &'static str,
+    name: &'a str,
+    file_path: &'a str,
+}
+
 impl SkillsListTool {
     pub fn new(config: SkillsConfig) -> Self {
         Self { config }
@@ -138,13 +195,13 @@ impl Tool for SkillsListTool {
                     })
                 })
                 .collect::<Vec<_>>();
-            json_output(json!({
-                "success": true,
-                "count": skills.len(),
-                "projectDir": catalog.project_dir,
-                "skills": skills,
-                "warnings": catalog.warnings,
-            }))
+            json_output(SkillsListOutput {
+                success: true,
+                count: skills.len(),
+                project_dir: &catalog.project_dir,
+                skills,
+                warnings: catalog.warnings,
+            })
         })
     }
 }
@@ -201,13 +258,13 @@ impl Tool for SkillViewTool {
             };
             let activation = skill_activation(skill, &turn_id, &tool_id);
             json_output_with_events(
-                json!({
-                "success": true,
-                "skill": skill,
-                "filePath": read.file_path,
-                "supportFiles": support_files,
-                "content": read.content,
-                }),
+                SkillViewOutput {
+                    success: true,
+                    skill,
+                    file_path: read.file_path,
+                    support_files,
+                    content: read.content,
+                },
                 vec![ToolRuntimeEvent::SkillActivated { activation }],
             )
         })
@@ -311,12 +368,12 @@ fn create_skill(
     fs::write(skill_dir.join("SKILL.md"), content)
         .map_err(|error| tool_error(tool, format!("failed to write SKILL.md: {error}")))?;
     mark_project_skill_created(&skill_dir).map_err(|error| tool_error(tool, error))?;
-    json_output(json!({
-        "success": true,
-        "action": "create",
-        "name": metadata.name,
-        "path": skill_dir,
-    }))
+    json_output(SkillPathOutput {
+        success: true,
+        action: "create",
+        name: &metadata.name,
+        path: &skill_dir,
+    })
 }
 
 fn edit_skill(
@@ -332,12 +389,12 @@ fn edit_skill(
     fs::write(skill.path.join("SKILL.md"), content)
         .map_err(|error| tool_error(tool, format!("failed to write SKILL.md: {error}")))?;
     bump_project_patch(&skill.path).map_err(|error| tool_error(tool, error))?;
-    json_output(json!({
-        "success": true,
-        "action": "edit",
-        "name": metadata.name,
-        "path": skill.path,
-    }))
+    json_output(SkillPathOutput {
+        success: true,
+        action: "edit",
+        name: &metadata.name,
+        path: &skill.path,
+    })
 }
 
 fn patch_skill(
@@ -376,16 +433,16 @@ fn patch_skill(
     fs::write(&path, updated)
         .map_err(|error| tool_error(tool, format!("failed to write SKILL.md: {error}")))?;
     bump_project_patch(&skill.path).map_err(|error| tool_error(tool, error))?;
-    json_output(json!({
-        "success": true,
-        "action": "patch",
-        "name": skill.name,
-        "replacements": match replace_mode {
+    json_output(SkillPatchOutput {
+        success: true,
+        action: "patch",
+        name: &skill.name,
+        replacements: match replace_mode {
             ReplaceMode::One => 1,
             ReplaceMode::All => matches,
         },
-        "path": skill.path,
-    }))
+        path: &skill.path,
+    })
 }
 
 fn delete_skill(
@@ -397,12 +454,12 @@ fn delete_skill(
     ensure_project_child(&catalog.project_dir, &skill.path, tool)?;
     fs::remove_dir_all(&skill.path)
         .map_err(|error| tool_error(tool, format!("failed to delete skill: {error}")))?;
-    json_output(json!({
-        "success": true,
-        "action": "delete",
-        "name": skill.name,
-        "absorbedInto": input.absorbed_into,
-    }))
+    json_output(SkillDeleteOutput {
+        success: true,
+        action: "delete",
+        name: &skill.name,
+        absorbed_into: input.absorbed_into,
+    })
 }
 
 fn write_support_file(
@@ -427,12 +484,12 @@ fn write_support_file(
     fs::write(&path, file_content)
         .map_err(|error| tool_error(tool, format!("failed to write support file: {error}")))?;
     bump_project_patch(&skill.path).map_err(|error| tool_error(tool, error))?;
-    json_output(json!({
-        "success": true,
-        "action": "writeFile",
-        "name": skill.name,
-        "filePath": file_path,
-    }))
+    json_output(SkillFileOutput {
+        success: true,
+        action: "writeFile",
+        name: &skill.name,
+        file_path: &file_path,
+    })
 }
 
 fn remove_support_file(
@@ -454,12 +511,12 @@ fn remove_support_file(
     fs::remove_file(&path)
         .map_err(|error| tool_error(tool, format!("failed to remove support file: {error}")))?;
     bump_project_patch(&skill.path).map_err(|error| tool_error(tool, error))?;
-    json_output(json!({
-        "success": true,
-        "action": "removeFile",
-        "name": skill.name,
-        "filePath": file_path,
-    }))
+    json_output(SkillFileOutput {
+        success: true,
+        action: "removeFile",
+        name: &skill.name,
+        file_path: &file_path,
+    })
 }
 
 fn writable_project_skill<'a>(
@@ -522,12 +579,12 @@ fn required(value: Option<String>, tool: &str, field: &str) -> Result<String, Pu
     value.ok_or_else(|| tool_error(tool, format!("{field} is required")))
 }
 
-fn json_output(value: serde_json::Value) -> Result<ToolOutput, PureError> {
+fn json_output(value: impl Serialize) -> Result<ToolOutput, PureError> {
     json_output_with_events(value, Vec::new())
 }
 
 fn json_output_with_events(
-    value: serde_json::Value,
+    value: impl Serialize,
     runtime_events: Vec<ToolRuntimeEvent>,
 ) -> Result<ToolOutput, PureError> {
     let description = serde_json::to_string_pretty(&value)?;
@@ -638,6 +695,16 @@ mod tests {
             panic!("expected skill activation")
         };
         activation
+    }
+
+    #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
+    #[serde(rename_all = "camelCase")]
+    struct SkillViewOutputSnapshot {
+        success: bool,
+        skill: SkillMetadata,
+        file_path: String,
+        support_files: Vec<crate::skill::SkillFile>,
+        content: String,
     }
 
     #[test]
@@ -766,12 +833,14 @@ mod tests {
             )
             .await
             .unwrap();
-        let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+        let result = serde_json::from_str::<SkillViewOutputSnapshot>(&output.description).unwrap();
 
         assert_eq!(activation_from_output(&output).name, "local-flow");
-        assert_eq!(value["filePath"], "SKILL.md");
-        assert_eq!(value["supportFiles"][0]["path"], "references/example.md");
-        assert!(value["content"].as_str().unwrap().contains("# local-flow"));
+        assert!(result.success);
+        assert_eq!(result.skill.name, "local-flow");
+        assert_eq!(result.file_path, "SKILL.md");
+        assert_eq!(result.support_files[0].path, "references/example.md");
+        assert!(result.content.contains("# local-flow"));
         fs::remove_dir_all(workspace).unwrap();
     }
 
