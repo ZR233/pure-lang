@@ -11,10 +11,12 @@ import '../../shared/studio_chrome.dart';
 
 part 'settings_provider_tab.dart';
 part 'settings_provider_list.dart';
+part 'settings_provider_usage.dart';
 part 'settings_provider_editor.dart';
 part 'settings_common.dart';
 part 'settings_provider_drafts.dart';
 part 'settings_tabs.dart';
+part 'settings_system_tabs.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -30,14 +32,7 @@ class SettingsPage extends ConsumerWidget {
       data: (state) => DefaultTabController(
         length: _settingsTabs.length,
         child: Scaffold(
-          appBar: AppBar(
-            leading: IconButton(
-              tooltip: 'Back',
-              icon: const Icon(Icons.arrow_back),
-              onPressed: () => context.go('/'),
-            ),
-            title: const Text('Settings'),
-          ),
+          backgroundColor: context.studioPaper,
           body: _SettingsScaffold(state: state),
         ),
       ),
@@ -92,7 +87,6 @@ class _SettingsScaffold extends StatelessWidget {
           return Column(
             children: [
               _SettingsNav(compact: true),
-              Divider(height: 1, color: context.studioLine),
               Expanded(child: TabBarView(children: views)),
             ],
           );
@@ -121,7 +115,7 @@ class _SettingsNav extends StatelessWidget {
       animation: controller,
       builder: (context, _) {
         final selected = controller.index;
-        final children = [
+        final navItems = [
           for (var index = 0; index < _settingsTabs.length; index++)
             _SettingsNavItem(
               tab: _settingsTabs[index],
@@ -133,15 +127,24 @@ class _SettingsNav extends StatelessWidget {
         if (compact) {
           return Material(
             color: context.studioPaper2,
-            child: SizedBox(
-              height: 56,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 8,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: context.studioLine)),
+              ),
+              child: SizedBox(
+                height: 56,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  children: [
+                    _SettingsBackTile(compact: true),
+                    const SizedBox(width: 8),
+                    ...navItems,
+                  ],
                 ),
-                children: children,
               ),
             ),
           );
@@ -149,38 +152,85 @@ class _SettingsNav extends StatelessWidget {
         return Material(
           color: context.studioPaper2,
           child: SizedBox(
-            width: 232,
+            width: 212,
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(12, 14, 12, 16),
+              padding: const EdgeInsets.fromLTRB(12, 18, 12, 16),
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 2, 4, 14),
-                  child: Row(
-                    children: [
-                      const StudioIconBadge(
-                        icon: Icons.tune_outlined,
-                        size: 32,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          'Studio Settings',
-                          overflow: TextOverflow.ellipsis,
-                          style: context.text.titleSmall?.copyWith(
-                            color: context.studioInk,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                ...children,
+                const _SettingsBackTile(compact: false),
+                const _SettingsNavGroupLabel('Workspace'),
+                ...navItems.take(5),
+                const _SettingsNavGroupLabel('System'),
+                ...navItems.skip(5),
               ],
             ),
           ),
         );
       },
+    );
+  }
+}
+
+class _SettingsBackTile extends StatelessWidget {
+  const _SettingsBackTile({required this.compact});
+
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final content = Row(
+      mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
+      children: [
+        Icon(Icons.arrow_back, size: 16, color: context.studioInkSoft),
+        if (!compact) ...[
+          const SizedBox(width: 8),
+          Text(
+            '返回聊天',
+            style: context.text.labelMedium?.copyWith(
+              color: context.studioInkSoft,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ],
+    );
+    return Tooltip(
+      message: 'Back',
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(StudioRadii.sm),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(StudioRadii.sm),
+          onTap: () => context.go('/'),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 10 : 10,
+              vertical: compact ? 9 : 8,
+            ),
+            child: content,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsNavGroupLabel extends StatelessWidget {
+  const _SettingsNavGroupLabel(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 14, 10, 6),
+      child: Text(
+        label,
+        style: context.text.labelSmall?.copyWith(
+          color: context.studioInkSoft.withValues(alpha: 0.64),
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0,
+        ),
+      ),
     );
   }
 }
@@ -204,8 +254,13 @@ class _SettingsNavItem extends StatelessWidget {
     return Padding(
       padding: EdgeInsets.only(right: compact ? 8 : 0, bottom: compact ? 0 : 6),
       child: Material(
-        color: selected ? StudioColors.claySoft : Colors.transparent,
-        borderRadius: BorderRadius.circular(StudioRadii.sm),
+        color: selected ? context.studioPaper : Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(StudioRadii.sm),
+          side: BorderSide(
+            color: selected ? context.studioLine2 : Colors.transparent,
+          ),
+        ),
         child: InkWell(
           borderRadius: BorderRadius.circular(StudioRadii.sm),
           onTap: onTap,
@@ -218,15 +273,29 @@ class _SettingsNavItem extends StatelessWidget {
               mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
               children: [
                 Icon(tab.icon, size: 18, color: foreground),
-                const SizedBox(width: 9),
-                Text(
-                  tab.label,
-                  overflow: TextOverflow.ellipsis,
-                  style: context.text.labelMedium?.copyWith(
-                    color: foreground,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                const SizedBox(width: 10),
+                if (compact)
+                  Text(
+                    tab.label,
+                    overflow: TextOverflow.ellipsis,
+                    style: context.text.labelMedium?.copyWith(
+                      color: foreground,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                    ),
+                  )
+                else
+                  Expanded(
+                    child: Text(
+                      tab.label,
+                      overflow: TextOverflow.ellipsis,
+                      style: context.text.labelMedium?.copyWith(
+                        color: foreground,
+                        fontWeight: selected
+                            ? FontWeight.w600
+                            : FontWeight.w500,
+                      ),
+                    ),
                   ),
-                ),
               ],
             ),
           ),
@@ -249,7 +318,7 @@ class _SettingsPane extends StatelessWidget {
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(24, 22, 24, 28),
+          padding: const EdgeInsets.fromLTRB(28, 22, 28, 30),
           children: children,
         ),
       ),

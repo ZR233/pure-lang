@@ -369,22 +369,63 @@ class _ModelReadout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tile = ListTile(
-      dense: true,
-      leading: const Icon(Icons.smart_toy_outlined),
-      title: Text(model.displayName),
-      subtitle: Text(model.slug),
-      trailing: Text(_modelPriceLabel(model)),
+    final price = _modelPriceLabel(model);
+    final row = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Row(
+        children: [
+          StudioIconBadge(
+            icon: Icons.smart_toy_outlined,
+            size: 30,
+            backgroundColor: context.studioPaper2,
+            foregroundColor: context.studioInkSoft,
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  model.displayName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.text.labelLarge?.copyWith(
+                    color: context.studioInk,
+                  ),
+                ),
+                Text(
+                  model.slug,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.text.bodySmall?.copyWith(
+                    color: context.studioInkSoft,
+                    fontFamily: 'Consolas',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (price.isNotEmpty) ...[
+            const SizedBox(width: 10),
+            Text(
+              price,
+              style: context.text.labelSmall?.copyWith(
+                color: context.studioInkSoft,
+              ),
+            ),
+          ],
+        ],
+      ),
     );
     if (!framed) {
-      return tile;
+      return row;
     }
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: StudioPanel(
         backgroundColor: Theme.of(context).colorScheme.surfaceContainerLowest,
         radius: StudioRadii.sm,
-        child: tile,
+        child: row,
       ),
     );
   }

@@ -981,7 +981,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byType(SearchBar), 'no-such-provider');
+    await tester.enterText(find.byType(TextField).first, 'no-such-provider');
     await tester.pumpAndSettle();
 
     expect(find.text('No providers match this filter'), findsOneWidget);
@@ -1103,7 +1103,7 @@ void main() {
 
       await tester.tap(find.text('General'));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(SwitchListTile, 'Compact timeline'));
+      await tester.tap(find.text('Compact timeline'));
       await tester.pumpAndSettle();
       expect(api.savedGeneralSettings?['compactTimeline'], isTrue);
 

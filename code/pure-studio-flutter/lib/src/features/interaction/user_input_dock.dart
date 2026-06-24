@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/theme/studio_tokens.dart';
 import '../../data/repositories/studio_repository.dart';
 import 'interaction_payload.dart';
 import 'interaction_widgets.dart';
@@ -433,13 +434,34 @@ class _QuestionOptionRow extends StatelessWidget {
       subtitle: option.description,
       selected: selected,
       onPressed: () => onChanged(!selected),
-      leading: SizedBox.square(
-        dimension: 22,
-        child: Checkbox(
-          value: selected,
-          onChanged: (value) => onChanged(value ?? false),
+      leading: _OptionMark(selected: selected),
+    );
+  }
+}
+
+class _OptionMark extends StatelessWidget {
+  const _OptionMark({required this.selected});
+
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 140),
+      width: 20,
+      height: 20,
+      margin: const EdgeInsets.only(top: 1),
+      decoration: BoxDecoration(
+        color: selected ? StudioColors.clay : StudioColors.white,
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(
+          color: selected ? StudioColors.clay : context.studioLine2,
+          width: 2,
         ),
       ),
+      child: selected
+          ? const Icon(Icons.check, size: 13, color: StudioColors.white)
+          : null,
     );
   }
 }

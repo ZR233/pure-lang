@@ -20,13 +20,13 @@ class SessionStatusBar extends ConsumerWidget {
         .where((session) => session.id == state.selectedSessionId)
         .firstOrNull;
     return SizedBox(
-      height: 34,
+      height: 44,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 5, 18, 0),
+        padding: const EdgeInsets.symmetric(horizontal: 26),
         child: Align(
           alignment: Alignment.center,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 860),
+            constraints: const BoxConstraints(maxWidth: 740),
             child: Row(
               children: [
                 Expanded(
