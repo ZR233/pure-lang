@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use pl_protocol::PureError;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::truncation::OutputTruncation;
 use super::{BoxFuture, Tool, ToolContext, ToolInput, ToolOutput};
@@ -13,6 +13,13 @@ pub struct PlanExitTool;
 #[serde(rename_all = "camelCase")]
 struct PlanExitInput {
     content: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct PlanExitResult {
+    status: String,
+    message: String,
 }
 
 impl Tool for PlanExitTool {
@@ -65,11 +72,10 @@ impl Tool for PlanExitTool {
                 });
             }
 
-            let description = serde_json::json!({
-                "status": "submitted",
-                "message": "Plan submitted for user confirmation. Return a brief final acknowledgement and stop."
-            })
-            .to_string();
+            let description = serde_json::to_string(&PlanExitResult {
+                status: "submitted".to_string(),
+                message: "Plan submitted for user confirmation. Return a brief final acknowledgement and stop.".to_string(),
+            })?;
             Ok(ToolOutput {
                 description,
                 truncated: OutputTruncation::empty(),
@@ -124,8 +130,13 @@ mod tests {
             .await
             .unwrap();
 
-        let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
-        assert_eq!(value["status"], "submitted");
+        assert_eq!(
+            serde_json::from_str::<PlanExitResult>(&output.description).unwrap(),
+            PlanExitResult {
+                status: "submitted".to_string(),
+                message: "Plan submitted for user confirmation. Return a brief final acknowledgement and stop.".to_string(),
+            }
+        );
     }
 
     #[tokio::test]

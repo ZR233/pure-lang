@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use pl_protocol::AgentStatus;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::ToolOutput;
 use super::truncation::OutputTruncation;
@@ -11,7 +11,7 @@ use crate::provider_error::is_provider_429_error;
 
 pub(crate) const RECOVERABLE_SUBAGENT_429_MARKER: &str = "recoverableSubagentProvider429";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct RecoverableSubagentFailure {
     pub agent_id: String,

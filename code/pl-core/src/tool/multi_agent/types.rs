@@ -103,7 +103,7 @@ pub(super) struct CloseAgentArgs {
     pub target: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct SpawnAgentResult {
     pub agent_id: String,
@@ -112,7 +112,7 @@ pub(super) struct SpawnAgentResult {
     pub status: AgentStatus,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct WaitAgentResult {
     pub message: String,
@@ -121,15 +121,15 @@ pub(super) struct WaitAgentResult {
     pub recoverable_failures: Vec<RecoverableSubagentFailure>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct ListAgentsResult {
     pub agents: Vec<AgentToolRecord>,
     pub recoverable_failures: Vec<RecoverableSubagentFailure>,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct CompactAgentRecord {
     pub path: String,
     pub status: AgentStatus,
@@ -139,7 +139,7 @@ pub(super) struct CompactAgentRecord {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub(super) enum AgentToolRecord {
     Compact(CompactAgentRecord),

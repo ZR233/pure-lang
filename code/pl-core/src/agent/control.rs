@@ -639,6 +639,64 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
 
+    async fn spawn(control: &AgentControl, task_name: &str) -> AgentHandle {
+        control
+            .spawn_agent(AgentSpawnInput {
+                task_name: task_name.to_string(),
+                message: format!("inspect {task_name}"),
+                role: "explorer".to_string(),
+                parent_path: None,
+            })
+            .await
+            .unwrap()
+    }
+
+    async fn spawn_child(
+        control: &AgentControl,
+        parent_path: &str,
+        task_name: &str,
+    ) -> AgentHandle {
+        control
+            .spawn_agent(AgentSpawnInput {
+                task_name: task_name.to_string(),
+                message: format!("inspect {task_name}"),
+                role: "explorer".to_string(),
+                parent_path: Some(parent_path.to_string()),
+            })
+            .await
+            .unwrap()
+    }
+
+    async fn update_status(
+        control: &AgentControl,
+        agent_id: &str,
+        status: AgentStatus,
+    ) -> AgentRecord {
+        control
+            .update_status(agent_id, status, None, None)
+            .await
+            .unwrap()
+    }
+
+    async fn append_message(
+        control: &AgentControl,
+        target: &str,
+        message: &str,
+        mode: MessageDeliveryMode,
+    ) -> Result<AgentRecord, PureError> {
+        control
+            .append_message(AgentPath::ROOT, target, message.to_string(), mode)
+            .await
+    }
+
+    fn root_message(message: &str, trigger_turn: bool) -> AgentMailboxMessage {
+        AgentMailboxMessage {
+            sender_path: AgentPath::ROOT.to_string(),
+            message: message.to_string(),
+            trigger_turn,
+        }
+    }
+
     #[tokio::test]
     async fn spawns_lists_and_rejects_duplicate_paths() {
         let control = AgentControl::default();
@@ -657,33 +715,9 @@ mod tests {
     #[tokio::test]
     async fn list_agents_path_prefix_matches_subtree_boundaries() {
         let control = AgentControl::default();
-        let a = control
-            .spawn_agent(AgentSpawnInput {
-                task_name: "a".to_string(),
-                message: "inspect a".to_string(),
-                role: "explorer".to_string(),
-                parent_path: None,
-            })
-            .await
-            .unwrap();
-        control
-            .spawn_agent(AgentSpawnInput {
-                task_name: "child".to_string(),
-                message: "inspect child".to_string(),
-                role: "explorer".to_string(),
-                parent_path: Some(a.path),
-            })
-            .await
-            .unwrap();
-        control
-            .spawn_agent(AgentSpawnInput {
-                task_name: "ab".to_string(),
-                message: "inspect ab".to_string(),
-                role: "explorer".to_string(),
-                parent_path: None,
-            })
-            .await
-            .unwrap();
+        let a = spawn(&control, "a").await;
+        spawn_child(&control, &a.path, "child").await;
+        spawn(&control, "ab").await;
 
         let agents = control.list_agents(Some("/root/a")).await;
 
@@ -699,28 +733,16 @@ mod tests {
     #[tokio::test]
     async fn sends_and_closes_agent() {
         let control = AgentControl::default();
-        let handle = control
-            .spawn_agent(AgentSpawnInput {
-                task_name: "worker".to_string(),
-                message: "inspect".to_string(),
-                role: "explorer".to_string(),
-                parent_path: None,
-            })
-            .await
-            .unwrap();
-        control
-            .update_status(&handle.id, AgentStatus::Interrupted, None, None)
-            .await
-            .unwrap();
-        let record = control
-            .append_message(
-                AgentPath::ROOT,
-                "worker",
-                "follow up".to_string(),
-                MessageDeliveryMode::QueueOnly,
-            )
-            .await
-            .unwrap();
+        let handle = spawn(&control, "worker").await;
+        update_status(&control, &handle.id, AgentStatus::Interrupted).await;
+        let record = append_message(
+            &control,
+            "worker",
+            "follow up",
+            MessageDeliveryMode::QueueOnly,
+        )
+        .await
+        .unwrap();
         assert_eq!(record.status, AgentStatus::Waiting);
         let previous = control
             .close_agent(AgentPath::ROOT, "worker")
@@ -742,38 +764,25 @@ mod tests {
     #[tokio::test]
     async fn send_message_preserves_queued_or_running_status() {
         let control = AgentControl::default();
-        let handle = control
-            .spawn_agent(AgentSpawnInput {
-                task_name: "worker".to_string(),
-                message: "inspect".to_string(),
-                role: "explorer".to_string(),
-                parent_path: None,
-            })
-            .await
-            .unwrap();
+        let handle = spawn(&control, "worker").await;
 
-        let queued = control
-            .append_message(
-                AgentPath::ROOT,
-                "worker",
-                "queued context".to_string(),
-                MessageDeliveryMode::QueueOnly,
-            )
-            .await
-            .unwrap();
-        control
-            .update_status(&handle.id, AgentStatus::Running, None, None)
-            .await
-            .unwrap();
-        let running = control
-            .append_message(
-                AgentPath::ROOT,
-                "worker",
-                "running context".to_string(),
-                MessageDeliveryMode::QueueOnly,
-            )
-            .await
-            .unwrap();
+        let queued = append_message(
+            &control,
+            "worker",
+            "queued context",
+            MessageDeliveryMode::QueueOnly,
+        )
+        .await
+        .unwrap();
+        update_status(&control, &handle.id, AgentStatus::Running).await;
+        let running = append_message(
+            &control,
+            "worker",
+            "running context",
+            MessageDeliveryMode::QueueOnly,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(queued.status, AgentStatus::Queued);
         assert_eq!(running.status, AgentStatus::Running);
@@ -782,30 +791,18 @@ mod tests {
     #[tokio::test]
     async fn append_message_rejects_final_agent_statuses() {
         let control = AgentControl::default();
-        let handle = control
-            .spawn_agent(AgentSpawnInput {
-                task_name: "worker".to_string(),
-                message: "inspect".to_string(),
-                role: "explorer".to_string(),
-                parent_path: None,
-            })
-            .await
-            .unwrap();
-        control
-            .update_status(&handle.id, AgentStatus::Completed, None, None)
-            .await
-            .unwrap();
+        let handle = spawn(&control, "worker").await;
+        update_status(&control, &handle.id, AgentStatus::Completed).await;
 
-        let error = control
-            .append_message(
-                AgentPath::ROOT,
-                "worker",
-                "follow up".to_string(),
-                MessageDeliveryMode::TriggerTurn,
-            )
-            .await
-            .unwrap_err()
-            .to_string();
+        let error = append_message(
+            &control,
+            "worker",
+            "follow up",
+            MessageDeliveryMode::TriggerTurn,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
 
         assert!(error.contains("followup_task"));
         assert!(error.contains("already completed"));
@@ -816,47 +813,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn followup_task_recovers_interrupted_agent() {
-        let control = AgentControl::default();
-        let handle = control
-            .spawn_agent(AgentSpawnInput {
-                task_name: "worker".to_string(),
-                message: "inspect".to_string(),
-                role: "explorer".to_string(),
-                parent_path: None,
-            })
-            .await
-            .unwrap();
-        control
-            .update_status(&handle.id, AgentStatus::Interrupted, None, None)
-            .await
-            .unwrap();
-
-        let record = control
-            .append_message(
-                AgentPath::ROOT,
-                "worker",
-                "resume".to_string(),
-                MessageDeliveryMode::TriggerTurn,
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(record.status, AgentStatus::Queued);
-    }
-
-    #[tokio::test]
     async fn followup_task_clears_stale_interruption_details() {
         let control = AgentControl::default();
-        let handle = control
-            .spawn_agent(AgentSpawnInput {
-                task_name: "worker".to_string(),
-                message: "inspect".to_string(),
-                role: "explorer".to_string(),
-                parent_path: None,
-            })
-            .await
-            .unwrap();
+        let handle = spawn(&control, "worker").await;
         control
             .update_status_with(
                 &handle.id,
@@ -877,19 +836,16 @@ mod tests {
             .await
             .unwrap();
 
-        let queued = control
-            .append_message(
-                AgentPath::ROOT,
-                "worker",
-                "resume".to_string(),
-                MessageDeliveryMode::TriggerTurn,
-            )
-            .await
-            .unwrap();
-        let running = control
-            .update_status(&handle.id, AgentStatus::Running, None, None)
-            .await
-            .unwrap();
+        let queued = append_message(
+            &control,
+            "worker",
+            "resume",
+            MessageDeliveryMode::TriggerTurn,
+        )
+        .await
+        .unwrap();
+        assert_eq!(queued.status, AgentStatus::Queued);
+        let running = update_status(&control, &handle.id, AgentStatus::Running).await;
         let completed = control
             .update_status(
                 &handle.id,
@@ -911,68 +867,42 @@ mod tests {
     #[tokio::test]
     async fn take_turn_messages_drains_queued_messages_with_trigger() {
         let control = AgentControl::default();
-        let handle = control
-            .spawn_agent(AgentSpawnInput {
-                task_name: "worker".to_string(),
-                message: "inspect".to_string(),
-                role: "explorer".to_string(),
-                parent_path: None,
-            })
-            .await
-            .unwrap();
-        control
-            .update_status(&handle.id, AgentStatus::Interrupted, None, None)
-            .await
-            .unwrap();
-        control
-            .append_message(
-                AgentPath::ROOT,
-                "worker",
-                "context".to_string(),
-                MessageDeliveryMode::QueueOnly,
-            )
-            .await
-            .unwrap();
+        let handle = spawn(&control, "worker").await;
+        update_status(&control, &handle.id, AgentStatus::Interrupted).await;
+        append_message(
+            &control,
+            "worker",
+            "context",
+            MessageDeliveryMode::QueueOnly,
+        )
+        .await
+        .unwrap();
         assert!(control.take_turn_messages(&handle.id).await.is_none());
-        control
-            .append_message(
-                AgentPath::ROOT,
-                "worker",
-                "resume".to_string(),
-                MessageDeliveryMode::TriggerTurn,
-            )
-            .await
-            .unwrap();
-        control
-            .append_message(
-                AgentPath::ROOT,
-                "worker",
-                "late context".to_string(),
-                MessageDeliveryMode::QueueOnly,
-            )
-            .await
-            .unwrap();
+        append_message(
+            &control,
+            "worker",
+            "resume",
+            MessageDeliveryMode::TriggerTurn,
+        )
+        .await
+        .unwrap();
+        append_message(
+            &control,
+            "worker",
+            "late context",
+            MessageDeliveryMode::QueueOnly,
+        )
+        .await
+        .unwrap();
 
         let messages = control.take_turn_messages(&handle.id).await.unwrap();
 
         assert_eq!(
             messages,
             vec![
-                AgentMailboxMessage {
-                    sender_path: AgentPath::ROOT.to_string(),
-                    message: "context".to_string(),
-                    trigger_turn: false,
-                },
-                AgentMailboxMessage {
-                    sender_path: AgentPath::ROOT.to_string(),
-                    message: "resume".to_string(),
-                    trigger_turn: true,
-                },
-                AgentMailboxMessage {
-                    sender_path: AgentPath::ROOT.to_string(),
-                    message: "late context".to_string(),
-                    trigger_turn: false,
-                },
+                root_message("context", false),
+                root_message("resume", true),
+                root_message("late context", false),
             ]
         );
         assert!(control.take_turn_messages(&handle.id).await.is_none());
@@ -981,39 +911,26 @@ mod tests {
     #[tokio::test]
     async fn followup_task_rejects_running_or_queued_agent() {
         let control = AgentControl::default();
-        let handle = control
-            .spawn_agent(AgentSpawnInput {
-                task_name: "worker".to_string(),
-                message: "inspect".to_string(),
-                role: "explorer".to_string(),
-                parent_path: None,
-            })
-            .await
-            .unwrap();
-        let queued_error = control
-            .append_message(
-                AgentPath::ROOT,
-                "worker",
-                "queued follow up".to_string(),
-                MessageDeliveryMode::TriggerTurn,
-            )
-            .await
-            .unwrap_err()
-            .to_string();
-        control
-            .update_status(&handle.id, AgentStatus::Running, None, None)
-            .await
-            .unwrap();
-        let running_error = control
-            .append_message(
-                AgentPath::ROOT,
-                "worker",
-                "running follow up".to_string(),
-                MessageDeliveryMode::TriggerTurn,
-            )
-            .await
-            .unwrap_err()
-            .to_string();
+        let handle = spawn(&control, "worker").await;
+        let queued_error = append_message(
+            &control,
+            "worker",
+            "queued follow up",
+            MessageDeliveryMode::TriggerTurn,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        update_status(&control, &handle.id, AgentStatus::Running).await;
+        let running_error = append_message(
+            &control,
+            "worker",
+            "running follow up",
+            MessageDeliveryMode::TriggerTurn,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
 
         assert!(queued_error.contains("already queued"));
         assert!(running_error.contains("already running"));
@@ -1022,15 +939,7 @@ mod tests {
     #[tokio::test]
     async fn wait_for_activity_returns_completed_snapshot_without_new_notify() {
         let control = AgentControl::default();
-        let handle = control
-            .spawn_agent(AgentSpawnInput {
-                task_name: "worker".to_string(),
-                message: "inspect".to_string(),
-                role: "explorer".to_string(),
-                parent_path: None,
-            })
-            .await
-            .unwrap();
+        let handle = spawn(&control, "worker").await;
         control
             .update_status(
                 &handle.id,
@@ -1052,32 +961,10 @@ mod tests {
     #[tokio::test]
     async fn wait_for_activity_does_not_replay_old_final_agents() {
         let control = AgentControl::default();
-        let first = control
-            .spawn_agent(AgentSpawnInput {
-                task_name: "first".to_string(),
-                message: "inspect first".to_string(),
-                role: "explorer".to_string(),
-                parent_path: None,
-            })
-            .await
-            .unwrap();
-        let second = control
-            .spawn_agent(AgentSpawnInput {
-                task_name: "second".to_string(),
-                message: "inspect second".to_string(),
-                role: "explorer".to_string(),
-                parent_path: None,
-            })
-            .await
-            .unwrap();
-        control
-            .update_status(&first.id, AgentStatus::Completed, None, None)
-            .await
-            .unwrap();
-        control
-            .update_status(&second.id, AgentStatus::Running, None, None)
-            .await
-            .unwrap();
+        let first = spawn(&control, "first").await;
+        let second = spawn(&control, "second").await;
+        update_status(&control, &first.id, AgentStatus::Completed).await;
+        update_status(&control, &second.id, AgentStatus::Running).await;
         assert!(!control.wait_for_activity(250).await.timed_out);
 
         let before = tokio::time::Instant::now();
@@ -1109,24 +996,8 @@ mod tests {
     #[tokio::test]
     async fn shutdown_descendants_marks_live_children() {
         let control = AgentControl::default();
-        let parent = control
-            .spawn_agent(AgentSpawnInput {
-                task_name: "worker".to_string(),
-                message: "inspect".to_string(),
-                role: "explorer".to_string(),
-                parent_path: None,
-            })
-            .await
-            .unwrap();
-        let child = control
-            .spawn_agent(AgentSpawnInput {
-                task_name: "child".to_string(),
-                message: "inspect child".to_string(),
-                role: "explorer".to_string(),
-                parent_path: Some(parent.path),
-            })
-            .await
-            .unwrap();
+        let parent = spawn(&control, "worker").await;
+        let child = spawn_child(&control, &parent.path, "child").await;
 
         let records = control
             .shutdown_descendants(&parent.id, "budgetLimited")
