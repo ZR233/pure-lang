@@ -260,13 +260,11 @@ class DockOptionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return Material(
-      color: selected
-          ? colors.primaryContainer.withValues(alpha: 0.3)
-          : colors.surfaceContainerLowest,
+      color: selected ? StudioColors.claySoft : colors.surfaceContainerLowest,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(StudioRadii.sm),
         side: BorderSide(
-          color: selected ? colors.primary : colors.outlineVariant,
+          color: selected ? StudioColors.clay : context.studioLine,
         ),
       ),
       clipBehavior: Clip.antiAlias,
@@ -288,7 +286,7 @@ class DockOptionRow extends StatelessWidget {
                       Text(
                         subtitle!,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colors.onSurfaceVariant,
+                          color: context.studioInkSoft,
                         ),
                       ),
                     ],

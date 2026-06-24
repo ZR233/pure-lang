@@ -208,24 +208,25 @@ bool _providerSupportsUsage(ProviderSettingsView provider) {
 }
 
 String _providerUsageSummary(
+  BuildContext context,
   ProviderSettingsView provider,
   ProviderUsageView? usage,
   bool loading,
 ) {
   if (loading && usage == null) {
-    return 'Checking usage';
+    return context.l10n.settingsUsageCheckingShort;
   }
   if (usage == null) {
     return _providerSupportsUsage(provider)
-        ? 'Usage not loaded'
-        : 'Unsupported';
+        ? context.l10n.settingsUsageNotLoaded
+        : context.l10n.settingsUsageUnsupported;
   }
   return switch (usage.status) {
-    'unsupported' => 'Unsupported',
-    'missingCredential' => 'Missing key',
-    'failed' => 'Usage failed',
+    'unsupported' => context.l10n.settingsUsageUnsupported,
+    'missingCredential' => context.l10n.settingsUsageMissingKey,
+    'failed' => context.l10n.settingsUsageFailed,
     'ready' => _readyProviderUsageSummary(provider, usage),
-    _ => 'Usage unavailable',
+    _ => context.l10n.settingsUsageUnavailable,
   };
 }
 
@@ -255,23 +256,26 @@ String _readyProviderUsageSummary(
 }
 
 String _providerUsageMessage(
+  BuildContext context,
   ProviderSettingsView provider,
   ProviderUsageView usage,
 ) {
   return switch (usage.status) {
     'missingCredential' =>
-      usage.message ?? 'Provider API key is not configured',
-    'failed' => usage.message ?? 'Usage query failed',
-    'unsupported' => 'Usage is not supported for ${provider.name}',
-    _ => 'Usage unavailable',
+      usage.message ?? context.l10n.settingsUsageApiKeyMissing,
+    'failed' => usage.message ?? context.l10n.settingsUsageQueryFailed,
+    'unsupported' => context.l10n.settingsUsageUnsupportedForProvider(
+      provider.name,
+    ),
+    _ => context.l10n.settingsUsageUnavailable,
   };
 }
 
-String _usageUpdatedLabel(int? seconds) {
+String _usageUpdatedLabel(BuildContext context, int? seconds) {
   if (seconds == null || seconds <= 0) {
-    return 'Not checked';
+    return context.l10n.settingsUsageNotChecked;
   }
-  return 'Updated ${_formatUnixShort(seconds)}';
+  return context.l10n.settingsUsageUpdated(_formatUnixShort(seconds));
 }
 
 ZhipuQuotaLimitView? _findQuotaLimit(
@@ -290,33 +294,41 @@ double _quotaRemainingPercent(ZhipuQuotaLimitView limit) {
   return _clampPercent(100 - limit.percentage);
 }
 
-String _quotaTitle(ZhipuQuotaLimitView limit) {
+String _quotaTitle(BuildContext context, ZhipuQuotaLimitView limit) {
   return switch (limit.window) {
-    'fiveHour' => '5 hour quota',
-    'weekly' => 'Weekly quota',
-    'mcpMonthly' => 'MCP quota',
-    _ => limit.label.isEmpty ? 'Quota' : limit.label,
+    'fiveHour' => context.l10n.settingsUsageFiveHourQuota,
+    'weekly' => context.l10n.settingsUsageWeeklyQuota,
+    'mcpMonthly' => context.l10n.settingsUsageMcpQuota,
+    _ => limit.label.isEmpty ? context.l10n.settingsUsageQuota : limit.label,
   };
 }
 
-String _quotaDetail(ZhipuQuotaLimitView limit) {
+String _quotaDetail(BuildContext context, ZhipuQuotaLimitView limit) {
   final remaining = limit.remaining;
   final currentValue = limit.currentValue;
   final total = limit.total;
   if (remaining != null && total != null) {
-    return '${_formatCompactNumber(remaining)} of ${_formatCompactNumber(total)} remaining';
+    return context.l10n.settingsUsageQuotaRemaining(
+      _formatCompactNumber(remaining),
+      _formatCompactNumber(total),
+    );
   }
   if (currentValue != null && total != null) {
-    return '${_formatCompactNumber(currentValue)} of ${_formatCompactNumber(total)} used';
+    return context.l10n.settingsUsageQuotaUsed(
+      _formatCompactNumber(currentValue),
+      _formatCompactNumber(total),
+    );
   }
-  return '${_formatPercent(_quotaRemainingPercent(limit))} remaining';
+  return context.l10n.settingsUsagePercentRemaining(
+    _formatPercent(_quotaRemainingPercent(limit)),
+  );
 }
 
-String _resetLabel(int? seconds) {
+String _resetLabel(BuildContext context, int? seconds) {
   if (seconds == null || seconds <= 0) {
     return '';
   }
-  return 'Reset ${_formatUnixShort(seconds)}';
+  return context.l10n.settingsUsageReset(_formatUnixShort(seconds));
 }
 
 String _formatToolUsage(ZhipuToolUsageDetailView detail) {

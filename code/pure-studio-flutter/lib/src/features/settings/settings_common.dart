@@ -13,36 +13,55 @@ class _SettingsHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: Column(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 620;
+        final titleBlock = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                color: context.studioInk,
+                fontWeight: FontWeight.w500,
+                height: 1.12,
+              ),
+            ),
+            if (subtitle.isNotEmpty) ...[
+              const SizedBox(height: 5),
+              Text(
+                subtitle,
+                maxLines: compact ? 2 : 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: context.studioInkSoft),
+              ),
+            ],
+          ],
+        );
+        if (trailing == null) {
+          return titleBlock;
+        }
+        if (compact) {
+          return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                title,
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color: context.studioInk,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              if (subtitle.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
+              titleBlock,
+              const SizedBox(height: 12),
+              Align(alignment: Alignment.centerLeft, child: trailing!),
             ],
-          ),
-        ),
-        ?trailing,
-      ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Expanded(child: titleBlock),
+            const SizedBox(width: 16),
+            trailing!,
+          ],
+        );
+      },
     );
   }
 }
@@ -63,7 +82,7 @@ class _SectionPanel extends StatelessWidget {
     return StudioPanel(
       backgroundColor: Theme.of(context).colorScheme.surfaceContainerLowest,
       radius: StudioRadii.md,
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -74,7 +93,7 @@ class _SectionPanel extends StatelessWidget {
                   title,
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     color: context.studioInk,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
@@ -110,7 +129,23 @@ class _TextEdit extends StatelessWidget {
       initialValue: value,
       enabled: enabled,
       obscureText: obscureText,
-      decoration: InputDecoration(labelText: label),
+      style: context.text.bodyMedium?.copyWith(color: context.studioInk),
+      decoration: InputDecoration(
+        labelText: label,
+        filled: true,
+        fillColor: context.colors.surfaceContainerLowest,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(StudioRadii.sm),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(StudioRadii.sm),
+          borderSide: BorderSide(color: context.studioLine),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(StudioRadii.sm),
+          borderSide: const BorderSide(color: StudioColors.clay),
+        ),
+      ),
       onChanged: onChanged,
     );
   }
@@ -159,7 +194,7 @@ class _Readout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(vertical: 7),
       child: Row(
         children: [
           SizedBox(
@@ -211,25 +246,12 @@ class _MiniMeta extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(
-          icon,
-          size: 14,
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
-        ),
-        const SizedBox(width: 4),
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 240),
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ),
-      ],
+    return StudioCompactChip(
+      icon: icon,
+      label: label,
+      maxWidth: 220,
+      backgroundColor: context.studioPaper2,
+      borderColor: context.studioLine,
     );
   }
 }
@@ -242,7 +264,13 @@ class _InfoPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StudioPill(icon: icon, label: label);
+    return StudioCompactChip(
+      icon: icon,
+      label: label,
+      backgroundColor: context.studioPaper2,
+      borderColor: context.studioLine,
+      maxWidth: 220,
+    );
   }
 }
 
@@ -258,6 +286,138 @@ class _InlineError extends StatelessWidget {
       message: message,
       tone: StudioNoticeTone.danger,
       padding: const EdgeInsets.all(10),
+    );
+  }
+}
+
+class _SettingsSearchField extends StatelessWidget {
+  const _SettingsSearchField({required this.hintText, required this.onChanged});
+
+  final String hintText;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 380),
+      child: TextField(
+        decoration: InputDecoration(
+          hintText: hintText,
+          prefixIcon: const Icon(Icons.search, size: 18),
+          filled: true,
+          fillColor: context.colors.surfaceContainerLowest,
+          isDense: true,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(StudioRadii.sm),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(StudioRadii.sm),
+            borderSide: BorderSide(color: context.studioLine),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(StudioRadii.sm),
+            borderSide: const BorderSide(color: StudioColors.clay),
+          ),
+        ),
+        onChanged: onChanged,
+      ),
+    );
+  }
+}
+
+class _SettingsRow extends StatelessWidget {
+  const _SettingsRow({
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    const accent = StudioColors.clay;
+    final content = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        children: [
+          StudioIconBadge(
+            icon: icon,
+            size: 32,
+            backgroundColor: accent.withValues(alpha: 0.14),
+            foregroundColor: accent,
+          ),
+          const SizedBox(width: 13),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.text.bodyMedium?.copyWith(
+                    color: context.studioInk,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (subtitle?.isNotEmpty ?? false) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: context.text.bodySmall?.copyWith(
+                      color: context.studioInkSoft.withValues(alpha: 0.72),
+                      fontFamily: subtitle!.contains('/') ? 'Consolas' : null,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (trailing != null) ...[const SizedBox(width: 12), trailing!],
+        ],
+      ),
+    );
+    return StudioPanel(
+      backgroundColor: context.colors.surfaceContainerLowest,
+      borderColor: context.studioLine,
+      radius: StudioRadii.md,
+      child: onTap == null ? content : InkWell(onTap: onTap, child: content),
+    );
+  }
+}
+
+class _SettingsToggleRow extends StatelessWidget {
+  const _SettingsToggleRow({
+    required this.icon,
+    required this.title,
+    required this.value,
+    required this.onChanged,
+    this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingsRow(
+      icon: icon,
+      title: title,
+      subtitle: subtitle,
+      trailing: Switch(value: value, onChanged: onChanged),
+      onTap: () => onChanged(!value),
     );
   }
 }
