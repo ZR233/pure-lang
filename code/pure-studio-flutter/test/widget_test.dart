@@ -1092,10 +1092,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.text('Tell me which branch to use'), findsWidgets);
-    expect(find.widgetWithText(FilledButton, 'Answer'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, '回答'), findsOneWidget);
     await tester.enterText(find.byType(TextField).last, 'use main');
     await tester.pump(const Duration(milliseconds: 50));
-    await tester.tap(find.widgetWithText(FilledButton, 'Answer'));
+    await tester.tap(find.widgetWithText(FilledButton, '回答'));
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(api.resolvedInteractionId, 'interaction-1');
@@ -1164,27 +1164,27 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 50));
 
-    expect(find.text('3 questions'), findsOneWidget);
-    expect(find.text('Question 1 / 3'), findsOneWidget);
+    expect(find.text('几个问题想确认'), findsOneWidget);
+    expect(find.text('问题 1 / 3'), findsOneWidget);
     await tester.tap(find.text('UI'));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.tap(find.text('Tests'));
     await tester.pump(const Duration(milliseconds: 50));
-    await tester.tap(find.widgetWithText(FilledButton, 'Next'));
+    await tester.tap(find.widgetWithText(FilledButton, '下一题'));
     await tester.pump(const Duration(milliseconds: 50));
 
-    expect(find.text('Question 2 / 3'), findsOneWidget);
+    expect(find.text('问题 2 / 3'), findsOneWidget);
     await tester.tap(find.text('Docs'));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.enterText(find.byType(TextField).last, 'also mention risk');
     await tester.pump(const Duration(milliseconds: 50));
-    await tester.tap(find.widgetWithText(FilledButton, 'Next'));
+    await tester.tap(find.widgetWithText(FilledButton, '下一题'));
     await tester.pump(const Duration(milliseconds: 50));
 
-    expect(find.text('Question 3 / 3'), findsOneWidget);
+    expect(find.text('问题 3 / 3'), findsOneWidget);
     await tester.enterText(find.byType(TextField).last, 'secret-value');
     await tester.pump(const Duration(milliseconds: 50));
-    await tester.tap(find.widgetWithText(FilledButton, 'Submit answers'));
+    await tester.tap(find.widgetWithText(FilledButton, '提交答案'));
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(api.resolvedInteractionId, 'interaction-questions');
@@ -1244,11 +1244,11 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 50));
 
-    expect(find.text('Implement this plan?'), findsOneWidget);
-    expect(find.text('Yes, implement this plan'), findsOneWidget);
+    expect(find.text('实施此计划？'), findsOneWidget);
+    expect(find.text('实施此计划'), findsOneWidget);
     expect(find.text('Plan content'), findsNothing);
     expect(find.text('Plan'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilledButton, 'Implement plan'));
+    await tester.tap(find.widgetWithText(FilledButton, '实施此计划'));
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(api.resolvedInteractionId, 'interaction-plan');
@@ -1292,11 +1292,11 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 50));
 
-    await tester.tap(find.text('No, tell Pure what to adjust'));
+    await tester.tap(find.text('告诉 Pure 如何调整'));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.enterText(find.byType(TextField).last, 'add tests first');
     await tester.pump(const Duration(milliseconds: 50));
-    await tester.tap(find.widgetWithText(FilledButton, 'Submit'));
+    await tester.tap(find.widgetWithText(FilledButton, '提交调整'));
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(api.resolvedInteractionId, 'interaction-plan-adjust');

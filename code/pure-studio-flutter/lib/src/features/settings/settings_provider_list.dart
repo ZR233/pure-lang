@@ -74,7 +74,14 @@ class _ProviderList extends StatelessWidget {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 980),
               child: providers.isEmpty
-                  ? const Center(child: Text('No providers found'))
+                  ? const Center(
+                      child: StudioEmptyState(
+                        icon: Icons.cloud_off_outlined,
+                        title: 'No providers found',
+                        message:
+                            'Add a provider to configure credentials and models.',
+                      ),
+                    )
                   : ListView.builder(
                       itemCount: providers.length,
                       itemBuilder: (context, index) {
@@ -631,104 +638,8 @@ class _ProviderUsageMessage extends StatelessWidget {
       _UsageTone.warning => colors.tertiary,
       _UsageTone.neutral || _UsageTone.muted => colors.onSurfaceVariant,
     };
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: color),
-        const SizedBox(width: 7),
-        Expanded(
-          child: Text(
-            message,
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: color),
-          ),
-        ),
-      ],
-    );
+    return StudioInlineMessage(icon: icon, message: message, color: color);
   }
 }
 
 enum _UsageTone { failed, warning, neutral, muted }
-
-class _InlineError extends StatelessWidget {
-  const _InlineError({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colors.errorContainer.withValues(alpha: 0.5),
-        border: Border.all(color: colors.error.withValues(alpha: 0.35)),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Row(
-          children: [
-            Icon(Icons.error_outline, color: colors.error),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                message,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: colors.onErrorContainer),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _EmptySettingsMessage extends StatelessWidget {
-  const _EmptySettingsMessage({
-    required this.icon,
-    required this.title,
-    required this.body,
-  });
-
-  final IconData icon;
-  final String title;
-  final String body;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Material(
-      color: colors.surfaceContainerLowest,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-        side: BorderSide(color: colors.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Icon(icon, color: colors.onSurfaceVariant),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: Theme.of(context).textTheme.titleSmall),
-                  const SizedBox(height: 3),
-                  Text(
-                    body,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colors.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/repositories/studio_repository.dart';
+import '../../shared/studio_chrome.dart';
 import 'interaction_widgets.dart';
 
 class PlanConfirmationDock extends ConsumerStatefulWidget {
@@ -36,17 +37,27 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
     return InteractionDockShell(
       kind: InteractionDockKind.plan,
       trailing: widget.trailing,
-      header: const Text('Implement this plan?'),
+      title: '实施此计划？',
+      subtitle: '计划正文保留在上方 timeline 卡片中',
+      footerHint: _editingAdjustment
+          ? '只会发送你的调整说明，不会回传计划正文。'
+          : '选择实施会切回 Auto 模式并提交后台实施 prompt。',
       footer: DockActions(
         children: [
           TextButton.icon(
             icon: const Icon(Icons.close),
-            label: const Text('Ignore'),
+            label: const Text('忽略'),
             onPressed: _resolveDismiss,
           ),
+          if (!_editingAdjustment)
+            OutlinedButton.icon(
+              icon: const Icon(Icons.edit_note),
+              label: const Text('告诉 Pure 如何调整'),
+              onPressed: () => setState(() => _editingAdjustment = true),
+            ),
           FilledButton.icon(
             icon: Icon(_editingAdjustment ? Icons.check : Icons.play_arrow),
-            label: Text(_editingAdjustment ? 'Submit' : 'Implement plan'),
+            label: Text(_editingAdjustment ? '提交调整' : '实施此计划'),
             onPressed: _editingAdjustment
                 ? (canSubmitAdjustment ? _resolveContinuePlanning : null)
                 : _resolveImplement,
@@ -57,42 +68,38 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          _PlanChoiceTile(
-            index: 1,
-            icon: Icons.check_circle_outline,
-            title: 'Yes, implement this plan',
-            subtitle: 'Start implementation in the current session.',
-            selected: !_editingAdjustment,
-            onPressed: _resolveImplement,
+          StudioNotice(
+            icon: _editingAdjustment
+                ? Icons.edit_note_outlined
+                : Icons.info_outline,
+            message: _editingAdjustment
+                ? '继续规划：只提交你的调整说明。'
+                : '计划内容不会在这里编辑；请在 timeline 中查看完整计划。',
+            tone: StudioNoticeTone.warning,
+            iconSize: 17,
+            padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
           ),
-          const SizedBox(height: 8),
-          _PlanChoiceTile(
-            index: 2,
-            icon: Icons.edit_note,
-            title: 'No, tell Pure what to adjust',
-            subtitle: 'Keep planning with a short instruction.',
-            selected: _editingAdjustment,
-            onPressed: () => setState(() => _editingAdjustment = true),
-          ),
-          if (_editingAdjustment) ...[
-            const SizedBox(height: 8),
-            TextField(
-              controller: _adjustmentController,
-              autofocus: true,
-              minLines: 2,
-              maxLines: 5,
-              decoration: const InputDecoration(
-                hintText: 'Tell Pure how to adjust the plan...',
-                alignLabelWithHint: true,
+          if (_editingAdjustment)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: TextField(
+                controller: _adjustmentController,
+                autofocus: true,
+                minLines: 2,
+                maxLines: 5,
+                decoration: const InputDecoration(
+                  hintText: '告诉 Pure 需要怎样调整计划...',
+                  alignLabelWithHint: true,
+                  prefixIcon: Icon(Icons.edit_note),
+                ),
+                onChanged: (_) => setState(() {}),
+                onSubmitted: (_) {
+                  if (canSubmitAdjustment) {
+                    _resolveContinuePlanning();
+                  }
+                },
               ),
-              onChanged: (_) => setState(() {}),
-              onSubmitted: (_) {
-                if (canSubmitAdjustment) {
-                  _resolveContinuePlanning();
-                }
-              },
             ),
-          ],
         ],
       ),
     );
@@ -124,103 +131,5 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
       'decision': 'dismiss',
       'reason': 'dismissed',
     });
-  }
-}
-
-class _PlanChoiceTile extends StatelessWidget {
-  const _PlanChoiceTile({
-    required this.index,
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.selected,
-    required this.onPressed,
-  });
-
-  final int index;
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final bool selected;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final compact = constraints.maxWidth < 360;
-        return Material(
-          color: selected
-              ? colors.primaryContainer.withValues(alpha: 0.35)
-              : colors.surfaceContainerLowest,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: BorderSide(
-              color: selected ? colors.primary : colors.outlineVariant,
-            ),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: onPressed,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox.square(
-                    dimension: 24,
-                    child: Center(
-                      child: Text(
-                        '$index',
-                        style: Theme.of(context).textTheme.labelMedium
-                            ?.copyWith(
-                              color: selected
-                                  ? colors.primary
-                                  : colors.onSurfaceVariant,
-                            ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Icon(
-                      icon,
-                      size: 18,
-                      color: selected
-                          ? colors.primary
-                          : colors.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          maxLines: compact ? 2 : 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.labelLarge,
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          subtitle,
-                          maxLines: compact ? 2 : 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: colors.onSurfaceVariant),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
   }
 }

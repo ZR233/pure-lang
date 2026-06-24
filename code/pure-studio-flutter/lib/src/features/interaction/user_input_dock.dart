@@ -72,25 +72,22 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
     return InteractionDockShell(
       kind: InteractionDockKind.question,
       trailing: widget.trailing,
-      header: _QuestionHeader(
-        total: total,
-        currentIndex: index,
-        answeredCount: answeredCount,
-        questions: questions,
-        answered: _answered,
-        onSelected: (value) => setState(() => _index = value),
-      ),
+      title: '几个问题想确认',
+      subtitle: isLast ? '最后一题' : '回答后继续',
+      footerHint: isLast
+          ? '提交后未答问题保留空数组'
+          : '已答 $answeredCount 题 · ${total - answeredCount} 题待答',
       footer: DockActions(
         children: [
           if (index > 0)
             OutlinedButton.icon(
               icon: const Icon(Icons.chevron_left),
-              label: const Text('Back'),
+              label: const Text('上一题'),
               onPressed: () => setState(() => _index -= 1),
             ),
           FilledButton.icon(
             icon: Icon(isLast ? Icons.check : Icons.chevron_right),
-            label: Text(isLast ? 'Submit answers' : 'Next'),
+            label: Text(isLast ? '提交答案' : '下一题'),
             onPressed: () {
               if (isLast) {
                 _submitAnswers();
@@ -101,22 +98,37 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
           ),
         ],
       ),
-      child: _QuestionStep(
-        question: question,
-        controller: _textControllers[question.id]!,
-        selected: _selectedOptions[question.id] ?? <String>{},
-        onOptionChanged: (label, selected) {
-          setState(() {
-            final values = _selectedOptions[question.id] ?? <String>{};
-            if (selected) {
-              values.add(label);
-            } else {
-              values.remove(label);
-            }
-            _selectedOptions[question.id] = values;
-          });
-        },
-        onTextChanged: (_) => setState(() {}),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _QuestionProgress(
+            total: total,
+            currentIndex: index,
+            answeredCount: answeredCount,
+            questions: questions,
+            answered: _answered,
+            onSelected: (value) => setState(() => _index = value),
+          ),
+          const SizedBox(height: 12),
+          _QuestionStep(
+            question: question,
+            controller: _textControllers[question.id]!,
+            selected: _selectedOptions[question.id] ?? <String>{},
+            onOptionChanged: (label, selected) {
+              setState(() {
+                final values = _selectedOptions[question.id] ?? <String>{};
+                if (selected) {
+                  values.add(label);
+                } else {
+                  values.remove(label);
+                }
+                _selectedOptions[question.id] = values;
+              });
+            },
+            onTextChanged: (_) => setState(() {}),
+          ),
+        ],
       ),
     );
   }
@@ -204,12 +216,14 @@ class _FallbackQuestionDock extends StatelessWidget {
     return InteractionDockShell(
       kind: InteractionDockKind.question,
       trailing: trailing,
-      header: const Text('Assistant needs input'),
+      title: '需要你的输入',
+      subtitle: '回答后继续',
+      footerHint: 'Pure 会把这条回答作为当前问题的答案继续执行。',
       footer: DockActions(
         children: [
           FilledButton.icon(
             icon: const Icon(Icons.reply),
-            label: const Text('Answer'),
+            label: const Text('回答'),
             onPressed: onSubmit,
           ),
         ],
@@ -227,7 +241,7 @@ class _FallbackQuestionDock extends StatelessWidget {
             minLines: 1,
             maxLines: 4,
             decoration: const InputDecoration(
-              labelText: 'Answer',
+              labelText: '答案',
               prefixIcon: Icon(Icons.short_text_outlined),
             ),
             onChanged: (_) => onChanged(),
@@ -239,8 +253,8 @@ class _FallbackQuestionDock extends StatelessWidget {
   }
 }
 
-class _QuestionHeader extends StatelessWidget {
-  const _QuestionHeader({
+class _QuestionProgress extends StatelessWidget {
+  const _QuestionProgress({
     required this.total,
     required this.currentIndex,
     required this.answeredCount,
@@ -259,51 +273,38 @@ class _QuestionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                '$total ${total == 1 ? 'question' : 'questions'}',
-                overflow: TextOverflow.ellipsis,
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          Text(
+            '问题 ${currentIndex + 1} / $total',
+            style: Theme.of(
+              context,
+            ).textTheme.labelMedium?.copyWith(color: colors.onSurfaceVariant),
+          ),
+          const SizedBox(width: 10),
+          for (var index = 0; index < questions.length; index++)
+            Padding(
+              padding: EdgeInsets.only(
+                right: index == questions.length - 1 ? 0 : 6,
+              ),
+              child: _ProgressDot(
+                index: index,
+                active: index == currentIndex,
+                answered: answered(questions[index]),
+                onPressed: () => onSelected(index),
               ),
             ),
-            Text(
-              'Question ${currentIndex + 1} / $total',
-              style: Theme.of(
-                context,
-              ).textTheme.labelSmall?.copyWith(color: colors.onSurfaceVariant),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            for (var index = 0; index < questions.length; index++)
-              Padding(
-                padding: EdgeInsets.only(
-                  right: index == questions.length - 1 ? 0 : 6,
-                ),
-                child: _ProgressDot(
-                  index: index,
-                  active: index == currentIndex,
-                  answered: answered(questions[index]),
-                  onPressed: () => onSelected(index),
-                ),
-              ),
-            const SizedBox(width: 10),
-            Text(
-              '$answeredCount answered',
-              style: Theme.of(
-                context,
-              ).textTheme.labelSmall?.copyWith(color: colors.onSurfaceVariant),
-            ),
-          ],
-        ),
-      ],
+          const SizedBox(width: 10),
+          Text(
+            '$answeredCount 已答',
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(color: colors.onSurfaceVariant),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -330,7 +331,7 @@ class _ProgressDot extends StatelessWidget {
         ? colors.primary.withValues(alpha: 0.42)
         : colors.surfaceContainerHighest;
     return Tooltip(
-      message: 'Question ${index + 1}',
+      message: '问题 ${index + 1}',
       child: InkResponse(
         onTap: onPressed,
         radius: 12,
@@ -371,7 +372,7 @@ class _QuestionStep extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          question.header.isEmpty ? 'Question' : question.header,
+          question.header.isEmpty ? '问题' : question.header,
           style: Theme.of(context).textTheme.labelLarge,
         ),
         if (question.question.isNotEmpty) ...[
@@ -398,10 +399,8 @@ class _QuestionStep extends StatelessWidget {
             minLines: 1,
             maxLines: question.isSecret ? 1 : 4,
             decoration: InputDecoration(
-              labelText: question.isOther ? 'Other' : 'Answer',
-              hintText: question.isSecret
-                  ? 'Enter secret answer'
-                  : 'Type your answer...',
+              labelText: question.isOther ? '其它' : '答案',
+              hintText: question.isSecret ? '输入秘密答案' : '输入你的回答...',
               prefixIcon: Icon(
                 question.isSecret
                     ? Icons.password_outlined
@@ -429,55 +428,16 @@ class _QuestionOptionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Material(
-      color: selected
-          ? colors.primaryContainer.withValues(alpha: 0.3)
-          : colors.surfaceContainerLowest,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-        side: BorderSide(
-          color: selected ? colors.primary : colors.outlineVariant,
-        ),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => onChanged(!selected),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 8, 12, 8),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox.square(
-                dimension: 22,
-                child: Checkbox(
-                  value: selected,
-                  onChanged: (value) => onChanged(value ?? false),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      option.label,
-                      style: Theme.of(context).textTheme.labelLarge,
-                    ),
-                    if (option.description.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        option.description,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colors.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
+    return DockOptionRow(
+      title: option.label,
+      subtitle: option.description,
+      selected: selected,
+      onPressed: () => onChanged(!selected),
+      leading: SizedBox.square(
+        dimension: 22,
+        child: Checkbox(
+          value: selected,
+          onChanged: (value) => onChanged(value ?? false),
         ),
       ),
     );

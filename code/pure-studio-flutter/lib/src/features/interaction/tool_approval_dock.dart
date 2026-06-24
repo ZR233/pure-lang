@@ -37,20 +37,19 @@ class _ToolApprovalDockState extends ConsumerState<ToolApprovalDock> {
     return InteractionDockShell(
       kind: InteractionDockKind.permission,
       trailing: widget.trailing,
-      header: const DockTitle(
-        icon: Icons.shield_outlined,
-        label: 'Permission required',
-      ),
+      title: '需要权限',
+      subtitle: 'Pure 想运行一个工具调用',
+      footerHint: '工具将在当前工作目录执行；可在 composer 中调整权限模式。',
       footer: DockActions(
         children: [
           OutlinedButton.icon(
             icon: const Icon(Icons.close),
-            label: const Text('Deny'),
+            label: const Text('拒绝'),
             onPressed: () => _resolve('denied'),
           ),
           FilledButton.icon(
             icon: const Icon(Icons.check),
-            label: const Text('Approve'),
+            label: const Text('批准'),
             onPressed: () => _resolve('approved'),
           ),
         ],
@@ -81,7 +80,7 @@ class _ToolApprovalDockState extends ConsumerState<ToolApprovalDock> {
             minLines: 1,
             maxLines: 3,
             decoration: const InputDecoration(
-              labelText: 'Reason',
+              labelText: '原因',
               prefixIcon: Icon(Icons.chat_bubble_outline),
             ),
             onChanged: (_) => setState(() {}),
