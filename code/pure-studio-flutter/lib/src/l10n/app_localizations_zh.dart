@@ -12,6 +12,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get appTitle => 'Pure Studio';
 
   @override
+  String get sidebarProjects => '项目';
+
+  @override
   String get sidebarSessions => '会话';
 
   @override
@@ -90,6 +93,18 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get statusCost => '费用';
+
+  @override
+  String get statusCostDetailTitle => '会话费用';
+
+  @override
+  String get statusTotalTokensLabel => '总 token';
+
+  @override
+  String get statusModelLabel => '模型';
+
+  @override
+  String get statusCapabilitiesTitle => '活动能力';
 
   @override
   String get statusSessionMode => '会话模式';
@@ -698,6 +713,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get appTitle => 'Pure Studio';
 
   @override
+  String get sidebarProjects => '项目';
+
+  @override
   String get sidebarSessions => '会话';
 
   @override
@@ -776,6 +794,18 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get statusCost => '费用';
+
+  @override
+  String get statusCostDetailTitle => '会话费用';
+
+  @override
+  String get statusTotalTokensLabel => '总 token';
+
+  @override
+  String get statusModelLabel => '模型';
+
+  @override
+  String get statusCapabilitiesTitle => '活动能力';
 
   @override
   String get statusSessionMode => '会话模式';

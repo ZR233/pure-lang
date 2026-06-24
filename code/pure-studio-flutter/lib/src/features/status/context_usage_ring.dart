@@ -5,31 +5,58 @@ import 'package:flutter/material.dart';
 import '../../app/theme/studio_tokens.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
+import 'status_detail_popover.dart';
 
-class ContextUsageRing extends StatelessWidget {
+class ContextUsageRing extends StatefulWidget {
   const ContextUsageRing({required this.runtime, super.key});
 
   final SessionRuntimeView runtime;
 
   @override
+  State<ContextUsageRing> createState() => _ContextUsageRingState();
+}
+
+class _ContextUsageRingState extends State<ContextUsageRing> {
+  bool _hovering = false;
+
+  @override
   Widget build(BuildContext context) {
+    final runtime = widget.runtime;
     final progress = runtime.contextWindow <= 0
         ? 0.0
         : (runtime.contextTokens / runtime.contextWindow).clamp(0.0, 1.0);
-    return Tooltip(
-      message: _contextTooltip(context, runtime),
+    return StatusDetailPopover(
+      width: 314,
+      detailBuilder: (context) => _ContextDetail(
+        runtime: runtime,
+        progress: progress,
+        progressColor: _progressColor(progress),
+      ),
       child: Padding(
-        padding: const EdgeInsets.only(left: 2, right: 10),
-        child: Semantics(
-          label: context.l10n.statusContextLabel,
-          value: '${(progress * 100).round()}%',
-          child: SizedBox.square(
-            dimension: 18,
-            child: CustomPaint(
-              painter: _ContextUsagePainter(
-                progress: progress,
-                trackColor: context.colors.outlineVariant,
-                progressColor: _progressColor(progress),
+        padding: const EdgeInsets.only(right: 2),
+        child: MouseRegion(
+          onEnter: (_) => setState(() => _hovering = true),
+          onExit: (_) => setState(() => _hovering = false),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            height: 28,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(
+              color: _hovering ? context.studioPaper : Colors.transparent,
+              borderRadius: BorderRadius.circular(StudioRadii.sm),
+            ),
+            child: Semantics(
+              label: context.l10n.statusContextLabel,
+              value: '${(progress * 100).round()}%',
+              child: SizedBox.square(
+                dimension: 18,
+                child: CustomPaint(
+                  painter: _ContextUsagePainter(
+                    progress: progress,
+                    trackColor: context.studioLine,
+                    progressColor: _progressColor(progress),
+                  ),
+                ),
               ),
             ),
           ),
@@ -49,32 +76,105 @@ class ContextUsageRing extends StatelessWidget {
   }
 }
 
+class _ContextDetail extends StatelessWidget {
+  const _ContextDetail({
+    required this.runtime,
+    required this.progress,
+    required this.progressColor,
+  });
+
+  final SessionRuntimeView runtime;
+  final double progress;
+  final Color progressColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final percent = (progress * 100).round();
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox.square(
+          dimension: 72,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              CustomPaint(
+                size: const Size.square(72),
+                painter: _ContextUsagePainter(
+                  progress: progress,
+                  trackColor: context.studioLine,
+                  progressColor: progressColor,
+                  strokeWidth: 7,
+                  radiusInset: 6,
+                ),
+              ),
+              Text(
+                '$percent%',
+                style: context.text.titleMedium?.copyWith(
+                  color: context.studioInk,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              StatusDetailRow(
+                label: context.l10n.statusContextLabel,
+                value:
+                    '${_formatCount(runtime.contextTokens)} / ${_formatCount(runtime.contextWindow)}',
+              ),
+              StatusDetailRow(
+                label: context.l10n.statusTotalTokensLabel,
+                value: _formatCount(runtime.totalTokens),
+              ),
+              if (runtime.model.isNotEmpty)
+                StatusDetailRow(
+                  label: context.l10n.statusModelLabel,
+                  value: runtime.model,
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _ContextUsagePainter extends CustomPainter {
   const _ContextUsagePainter({
     required this.progress,
     required this.trackColor,
     required this.progressColor,
+    this.strokeWidth = 2.6,
+    this.radiusInset = 2,
   });
 
   final double progress;
   final Color trackColor;
   final Color progressColor;
+  final double strokeWidth;
+  final double radiusInset;
 
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
     final center = rect.center;
-    final radius = math.min(size.width, size.height) / 2 - 2;
+    final radius = math.min(size.width, size.height) / 2 - radiusInset;
     final trackPaint = Paint()
       ..color = trackColor.withValues(alpha: 0.74)
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = 2.6;
+      ..strokeWidth = strokeWidth;
     final progressPaint = Paint()
       ..color = progressColor
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = 2.6;
+      ..strokeWidth = strokeWidth;
 
     canvas.drawCircle(center, radius, trackPaint);
     if (progress <= 0) {
@@ -93,29 +193,20 @@ class _ContextUsagePainter extends CustomPainter {
   bool shouldRepaint(covariant _ContextUsagePainter oldDelegate) {
     return progress != oldDelegate.progress ||
         trackColor != oldDelegate.trackColor ||
-        progressColor != oldDelegate.progressColor;
+        progressColor != oldDelegate.progressColor ||
+        strokeWidth != oldDelegate.strokeWidth ||
+        radiusInset != oldDelegate.radiusInset;
   }
 }
 
-String _contextTooltip(BuildContext context, SessionRuntimeView runtime) {
-  final percent = runtime.contextWindow <= 0
-      ? 0
-      : ((runtime.contextTokens / runtime.contextWindow) * 100)
-            .clamp(0, 100)
-            .round();
-  if (runtime.model.isEmpty) {
-    return context.l10n.statusContextTooltipNoModel(
-      runtime.contextTokens,
-      runtime.contextWindow,
-      percent,
-      runtime.totalTokens,
-    );
+String _formatCount(int value) {
+  final text = value.toString();
+  final buffer = StringBuffer();
+  for (var index = 0; index < text.length; index++) {
+    if (index > 0 && (text.length - index) % 3 == 0) {
+      buffer.write(',');
+    }
+    buffer.write(text[index]);
   }
-  return context.l10n.statusContextTooltip(
-    runtime.contextTokens,
-    runtime.contextWindow,
-    percent,
-    runtime.totalTokens,
-    runtime.model,
-  );
+  return buffer.toString();
 }

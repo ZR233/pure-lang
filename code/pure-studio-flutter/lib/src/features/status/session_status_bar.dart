@@ -5,9 +5,10 @@ import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../app/theme/studio_tokens.dart';
 import '../../l10n/studio_l10n.dart';
-import '../../shared/studio_chrome.dart';
 import '../../shared/upward_popup_menu.dart';
 import 'context_usage_ring.dart';
+import 'status_bar_chip.dart';
+import 'status_detail_popover.dart';
 
 class SessionStatusBar extends ConsumerWidget {
   const SessionStatusBar({required this.state, super.key});
@@ -20,58 +21,69 @@ class SessionStatusBar extends ConsumerWidget {
     final session = state.sessions
         .where((session) => session.id == state.selectedSessionId)
         .firstOrNull;
-    return SizedBox(
-      height: 44,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 26),
-        child: Align(
-          alignment: Alignment.center,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 740),
-            child: Row(
-              children: [
-                Expanded(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        if (session != null)
-                          _SessionModeSelector(
-                            mode: session.mode,
-                            enabled: !state.isBusy,
-                          ),
-                        if (state.providers.isNotEmpty)
-                          _PlannerModelSelector(state: state),
-                        if (_plannerEffortsForState(state).isNotEmpty)
-                          _ReasoningEffortSelector(state: state),
-                        ContextUsageRing(runtime: runtime),
-                        if (runtime.costLabel.isNotEmpty)
-                          _StatusChip(
-                            label: runtime.costLabel,
-                            tooltip: context.l10n.statusCost,
-                          ),
-                        if (_runtimeCapabilityLabel(
-                          context,
-                          runtime,
-                        ).isNotEmpty)
-                          _StatusChip(
-                            icon: Icons.tune_outlined,
-                            label: _runtimeCapabilityLabel(context, runtime),
-                            tooltip: _runtimeCapabilityTooltip(
-                              context,
-                              runtime,
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: context.studioPaper2,
+        border: Border(top: BorderSide(color: context.studioLine)),
+      ),
+      child: SizedBox(
+        height: 44,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 26),
+          child: Align(
+            alignment: Alignment.center,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 740),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          if (session != null)
+                            _SessionModeSelector(
+                              mode: session.mode,
+                              enabled: !state.isBusy,
                             ),
-                          ),
-                      ],
+                          if (state.providers.isNotEmpty)
+                            _PlannerModelSelector(state: state),
+                          if (_plannerEffortsForState(state).isNotEmpty)
+                            _ReasoningEffortSelector(state: state),
+                          ContextUsageRing(runtime: runtime),
+                          if (runtime.costLabel.isNotEmpty)
+                            _StatusChip(
+                              label: runtime.costLabel,
+                              tooltip: context.l10n.statusCost,
+                              detailWidth: 260,
+                              detailBuilder: (context) =>
+                                  _CostDetail(runtime: runtime),
+                            ),
+                          if (_runtimeCapabilityLabel(
+                            context,
+                            runtime,
+                          ).isNotEmpty)
+                            _StatusChip(
+                              icon: Icons.tune_outlined,
+                              label: _runtimeCapabilityLabel(context, runtime),
+                              tooltip: context.l10n.statusCapabilitiesTitle,
+                              detailWidth: 310,
+                              maxWidth: 150,
+                              detailBuilder: (context) =>
+                                  _CapabilityDetail(runtime: runtime),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                _PhasePill(
-                  phase:
-                      state.activeInteraction?.kind.name ??
-                      state.turnPhase.name,
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  _PhasePill(
+                    phase:
+                        state.activeInteraction?.kind.name ??
+                        state.turnPhase.name,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -95,23 +107,6 @@ String _runtimeCapabilityLabel(
       context.l10n.statusAgentsCount(runtime.agentCount),
   ];
   return parts.join(' · ');
-}
-
-String _runtimeCapabilityTooltip(
-  BuildContext context,
-  SessionRuntimeView runtime,
-) {
-  final sections = [
-    if (runtime.activeSkills.isNotEmpty)
-      '${context.l10n.statusSkillsSection}\n${runtime.activeSkills.join('\n')}',
-    if (runtime.activeMcpServers.isNotEmpty)
-      '${context.l10n.statusMcpSection}\n${runtime.activeMcpServers.join('\n')}',
-    if (runtime.activeLspServers.isNotEmpty)
-      '${context.l10n.statusLspSection}\n${runtime.activeLspServers.join('\n')}',
-    if (runtime.agentCount > 0)
-      '${context.l10n.statusSubagentsSection}\n${runtime.agentCount}',
-  ];
-  return sections.join('\n\n');
 }
 
 class _SessionModeSelector extends ConsumerWidget {
@@ -282,12 +277,11 @@ class _ControlChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StudioCompactChip(
+    return StatusBarChip(
       icon: icon,
       label: label,
       enabled: enabled,
       maxWidth: 160,
-      margin: const EdgeInsets.only(right: 6),
       trailingIcon: Icons.keyboard_arrow_down,
     );
   }
@@ -362,22 +356,130 @@ List<_PlannerModelOption> _plannerModelOptions(
 }
 
 class _StatusChip extends StatelessWidget {
-  const _StatusChip({required this.label, required this.tooltip, this.icon});
+  const _StatusChip({
+    required this.label,
+    required this.tooltip,
+    this.icon,
+    this.detailBuilder,
+    this.detailWidth = 300,
+    this.maxWidth = 180,
+  });
 
   final IconData? icon;
   final String label;
   final String tooltip;
+  final WidgetBuilder? detailBuilder;
+  final double detailWidth;
+  final double maxWidth;
 
   @override
   Widget build(BuildContext context) {
-    return StudioCompactChip(
+    final chip = StatusBarChip(
       icon: icon,
       label: label,
-      tooltip: tooltip.isEmpty ? label : tooltip,
-      maxWidth: 180,
-      margin: const EdgeInsets.only(right: 8),
+      tooltip: detailBuilder == null
+          ? (tooltip.isEmpty ? label : tooltip)
+          : null,
+      detailBuilder: detailBuilder,
+      detailWidth: detailWidth,
+      enableHover: detailBuilder == null,
+      maxWidth: maxWidth,
+    );
+    return chip;
+  }
+}
+
+class _CostDetail extends StatelessWidget {
+  const _CostDetail({required this.runtime});
+
+  final SessionRuntimeView runtime;
+
+  @override
+  Widget build(BuildContext context) {
+    return StatusDetailPanel(
+      title: context.l10n.statusCostDetailTitle,
+      children: [
+        Text(
+          runtime.costLabel,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: context.text.headlineSmall?.copyWith(
+            color: StudioColors.clayDeep,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 8),
+        StatusDetailRow(
+          label: context.l10n.statusTotalTokensLabel,
+          value: _formatStatusCount(runtime.totalTokens),
+        ),
+        if (runtime.agentCount > 0)
+          StatusDetailRow(
+            label: context.l10n.statusSubagentsSection,
+            value: context.l10n.statusAgentsCount(runtime.agentCount),
+          ),
+      ],
     );
   }
+}
+
+class _CapabilityDetail extends StatelessWidget {
+  const _CapabilityDetail({required this.runtime});
+
+  final SessionRuntimeView runtime;
+
+  @override
+  Widget build(BuildContext context) {
+    return StatusDetailPanel(
+      title: context.l10n.statusCapabilitiesTitle,
+      children: [
+        if (runtime.activeSkills.isNotEmpty)
+          StatusDetailIconRow(
+            icon: Icons.extension_outlined,
+            title: context.l10n.statusSkillsSection,
+            detail: runtime.activeSkills.join(', '),
+            iconColor: StudioColors.clayDeep,
+            backgroundColor: StudioColors.claySoft,
+          ),
+        if (runtime.activeMcpServers.isNotEmpty)
+          StatusDetailIconRow(
+            icon: Icons.hub_outlined,
+            title: context.l10n.statusMcpSection,
+            detail: runtime.activeMcpServers.join(', '),
+            iconColor: StudioColors.sage,
+            backgroundColor: StudioColors.sageSoft,
+          ),
+        if (runtime.activeLspServers.isNotEmpty)
+          StatusDetailIconRow(
+            icon: Icons.terminal_outlined,
+            title: context.l10n.statusLspSection,
+            detail: runtime.activeLspServers.join(', '),
+            iconColor: StudioColors.ochre,
+            backgroundColor: StudioColors.ochre.withValues(alpha: 0.15),
+          ),
+        if (runtime.agentCount > 0)
+          StatusDetailIconRow(
+            icon: Icons.group_outlined,
+            title: context.l10n.statusSubagentsSection,
+            detail: context.l10n.statusAgentsCount(runtime.agentCount),
+            iconColor: StudioColors.rose,
+            backgroundColor: StudioColors.rose.withValues(alpha: 0.13),
+          ),
+      ],
+    );
+  }
+}
+
+String _formatStatusCount(int value) {
+  final text = value.toString();
+  final buffer = StringBuffer();
+  for (var index = 0; index < text.length; index++) {
+    if (index > 0 && (text.length - index) % 3 == 0) {
+      buffer.write(',');
+    }
+    buffer.write(text[index]);
+  }
+  return buffer.toString();
 }
 
 class _PhasePill extends StatelessWidget {
@@ -387,11 +489,48 @@ class _PhasePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StudioPill(
-      label: phase,
-      backgroundColor: StudioColors.claySoft,
-      foregroundColor: StudioColors.clayDeep,
-      borderColor: StudioColors.claySoft,
+    final idle = phase == TurnPhase.idle.name;
+    final foreground = idle ? context.studioInkSoft : StudioColors.clayDeep;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: idle ? context.studioPaper3 : StudioColors.claySoft,
+        border: Border.all(
+          color: idle ? context.studioLine2 : StudioColors.claySoft,
+        ),
+        borderRadius: BorderRadius.circular(StudioRadii.pill),
+      ),
+      child: SizedBox(
+        height: 26,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: idle ? context.studioInkSoft : StudioColors.clay,
+                  borderRadius: BorderRadius.circular(StudioRadii.pill),
+                ),
+                child: const SizedBox.square(dimension: 5),
+              ),
+              const SizedBox(width: 7),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 160),
+                child: Text(
+                  phase,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.text.labelSmall?.copyWith(
+                    color: foreground,
+                    fontWeight: FontWeight.w500,
+                    height: 1,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

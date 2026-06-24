@@ -8,7 +8,7 @@ class _Sidebar extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final width = compact ? 68.0 : 268.0;
+    final width = compact ? 68.0 : 262.0;
     return SizedBox(
       width: width,
       child: Material(
@@ -21,14 +21,18 @@ class _Sidebar extends ConsumerWidget {
                 child: compact
                     ? const StudioIconBadge(
                         icon: Icons.auto_awesome_motion,
+                        backgroundColor: StudioColors.clay,
+                        foregroundColor: Colors.white,
                         size: 34,
                       )
                     : Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
                         child: Row(
                           children: [
                             const StudioIconBadge(
                               icon: Icons.auto_awesome_motion,
+                              backgroundColor: StudioColors.clay,
+                              foregroundColor: Colors.white,
                               size: 34,
                             ),
                             const SizedBox(width: 10),
@@ -50,8 +54,12 @@ class _Sidebar extends ConsumerWidget {
             ),
             Expanded(
               child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
+                padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 14),
                 children: [
+                  if (!compact) ...[
+                    _SidebarSectionLabel(label: context.l10n.sidebarProjects),
+                    const SizedBox(height: 4),
+                  ],
                   for (final project in state.projects)
                     _ProjectTile(
                       project: project,
@@ -61,21 +69,11 @@ class _Sidebar extends ConsumerWidget {
                           !state.isBusy ||
                           project.id != state.selectedProjectId,
                     ),
-                  const SizedBox(height: 8),
-                  if (!compact)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 6,
-                      ),
-                      child: Text(
-                        context.l10n.sidebarSessions,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: context.studioInkSoft,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
+                  const SizedBox(height: 12),
+                  if (!compact) ...[
+                    _SidebarSectionLabel(label: context.l10n.sidebarSessions),
+                    const SizedBox(height: 4),
+                  ],
                   for (final session in state.sessions)
                     _SessionTile(
                       session: session,
@@ -89,6 +87,31 @@ class _Sidebar extends ConsumerWidget {
             Divider(height: 1, color: context.studioLine),
             _SidebarActions(state: state, compact: compact),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SidebarSectionLabel extends StatelessWidget {
+  const _SidebarSectionLabel({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Text(
+        label.toUpperCase(),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: context.text.labelSmall?.copyWith(
+          color: context.studioInkSoft.withValues(alpha: 0.72),
+          fontFamily: 'Consolas',
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 1.2,
         ),
       ),
     );
@@ -141,6 +164,7 @@ class _ProjectTile extends ConsumerWidget {
       icon: selected ? Icons.folder : Icons.folder_open,
       title: project.name,
       subtitle: project.path,
+      dense: false,
       iconColor: selected ? StudioColors.clayDeep : colors.onSurfaceVariant,
       onTap: () => controller.selectProject(project.id),
       trailing: IconButton(
@@ -194,7 +218,11 @@ class _SessionTile extends ConsumerWidget {
       icon: modeIcon,
       title: session.title,
       subtitle: _sessionSubtitle(context, session),
+      dense: true,
       iconColor: selected ? StudioColors.clayDeep : colors.onSurfaceVariant,
+      markerColor: session.mode == CompileMode.plan
+          ? StudioColors.clay
+          : StudioColors.sage,
       onTap: () =>
           ref.read(studioControllerProvider.notifier).selectSession(session.id),
       trailing: IconButton(
@@ -214,15 +242,17 @@ class _SessionTile extends ConsumerWidget {
   }
 }
 
-class _SidebarTile extends StatelessWidget {
+class _SidebarTile extends StatefulWidget {
   const _SidebarTile({
     required this.selected,
     required this.icon,
     required this.iconColor,
     required this.title,
     required this.subtitle,
+    required this.dense,
     required this.onTap,
     required this.trailing,
+    this.markerColor,
   });
 
   final bool selected;
@@ -230,62 +260,116 @@ class _SidebarTile extends StatelessWidget {
   final Color iconColor;
   final String title;
   final String subtitle;
+  final bool dense;
   final VoidCallback onTap;
   final Widget trailing;
+  final Color? markerColor;
+
+  @override
+  State<_SidebarTile> createState() => _SidebarTileState();
+}
+
+class _SidebarTileState extends State<_SidebarTile> {
+  bool _hovering = false;
 
   @override
   Widget build(BuildContext context) {
-    final foreground = selected ? StudioColors.clayDeep : context.studioInk;
+    final foreground = widget.selected
+        ? StudioColors.clayDeep
+        : context.studioInk;
+    final trailingVisible = widget.selected || _hovering;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Material(
-        color: selected ? context.studioPaper : Colors.transparent,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(StudioRadii.sm),
-          side: BorderSide(
-            color: selected ? context.studioLine2 : Colors.transparent,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovering = true),
+        onExit: (_) => setState(() => _hovering = false),
+        child: Material(
+          color: widget.selected ? context.studioPaper : Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(9),
+            side: BorderSide(
+              color: widget.selected ? context.studioLine2 : Colors.transparent,
+            ),
           ),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 7, 4, 7),
-            child: Row(
-              children: [
-                Icon(icon, size: 17, color: iconColor),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: context.text.labelLarge?.copyWith(
-                          color: foreground,
-                          fontWeight: selected
-                              ? FontWeight.w600
-                              : FontWeight.w500,
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: widget.onTap,
+            hoverColor: context.studioPaper.withValues(alpha: 0.72),
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                10,
+                widget.dense ? 6 : 8,
+                4,
+                widget.dense ? 6 : 8,
+              ),
+              child: Row(
+                children: [
+                  if (widget.markerColor == null)
+                    Icon(widget.icon, size: 17, color: widget.iconColor)
+                  else
+                    SizedBox(
+                      width: 17,
+                      child: Center(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: widget.markerColor,
+                            borderRadius: BorderRadius.circular(
+                              StudioRadii.pill,
+                            ),
+                          ),
+                          child: const SizedBox.square(dimension: 5),
                         ),
                       ),
-                      if (subtitle.isNotEmpty) ...[
-                        const SizedBox(height: 1),
+                    ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                         Text(
-                          subtitle,
+                          widget.title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: context.text.bodySmall?.copyWith(
-                            color: context.studioInkSoft,
+                          style: context.text.labelLarge?.copyWith(
+                            color: foreground,
+                            fontWeight: widget.selected
+                                ? FontWeight.w600
+                                : FontWeight.w500,
                           ),
                         ),
+                        if (widget.subtitle.isNotEmpty) ...[
+                          const SizedBox(height: 1),
+                          Text(
+                            widget.subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: context.text.bodySmall?.copyWith(
+                              color: widget.selected
+                                  ? context.studioInkSoft
+                                  : context.studioInkSoft.withValues(
+                                      alpha: 0.72,
+                                    ),
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
-                ),
-                trailing,
-              ],
+                  AnimatedOpacity(
+                    opacity: trailingVisible ? 1 : 0,
+                    duration: const Duration(milliseconds: 140),
+                    alwaysIncludeSemantics: true,
+                    child: IconTheme.merge(
+                      data: IconThemeData(
+                        color: trailingVisible
+                            ? context.studioInkSoft
+                            : context.studioInkSoft.withValues(alpha: 0.48),
+                      ),
+                      child: widget.trailing,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -302,8 +386,14 @@ class _SidebarActions extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final horizontalPadding = compact ? 8.0 : 14.0;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 9, 8, 10),
+      padding: EdgeInsets.fromLTRB(
+        horizontalPadding,
+        11,
+        horizontalPadding,
+        12,
+      ),
       child: compact
           ? Column(
               children: [

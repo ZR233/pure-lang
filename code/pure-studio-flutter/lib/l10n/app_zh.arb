@@ -1,5 +1,6 @@
 {
   "appTitle": "Pure Studio",
+  "sidebarProjects": "项目",
   "sidebarSessions": "会话",
   "sidebarCloseProject": "关闭项目",
   "sidebarArchiveSession": "归档会话",
@@ -26,6 +27,10 @@
   "composerStop": "停止",
   "permissionModeTooltip": "权限模式",
   "statusCost": "费用",
+  "statusCostDetailTitle": "会话费用",
+  "statusTotalTokensLabel": "总 token",
+  "statusModelLabel": "模型",
+  "statusCapabilitiesTitle": "活动能力",
   "statusSessionMode": "会话模式",
   "statusPlannerModel": "Planner 模型",
   "statusReasoningEffort": "思考等级",

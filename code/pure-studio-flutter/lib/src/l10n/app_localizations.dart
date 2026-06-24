@@ -105,6 +105,12 @@ abstract class AppLocalizations {
   /// **'Pure Studio'**
   String get appTitle;
 
+  /// No description provided for @sidebarProjects.
+  ///
+  /// In en, this message translates to:
+  /// **'Projects'**
+  String get sidebarProjects;
+
   /// No description provided for @sidebarSessions.
   ///
   /// In en, this message translates to:
@@ -260,6 +266,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Cost'**
   String get statusCost;
+
+  /// No description provided for @statusCostDetailTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Session cost'**
+  String get statusCostDetailTitle;
+
+  /// No description provided for @statusTotalTokensLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Total tokens'**
+  String get statusTotalTokensLabel;
+
+  /// No description provided for @statusModelLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Model'**
+  String get statusModelLabel;
+
+  /// No description provided for @statusCapabilitiesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Active capabilities'**
+  String get statusCapabilitiesTitle;
 
   /// No description provided for @statusSessionMode.
   ///

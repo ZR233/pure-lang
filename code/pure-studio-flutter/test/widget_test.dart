@@ -811,7 +811,26 @@ void main() {
     await gesture.addPointer();
     await gesture.moveTo(tester.getCenter(find.bySemanticsLabel('Context')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Context: 42/100'), findsOneWidget);
+    expect(find.text('42 / 100'), findsOneWidget);
+    expect(find.text('128'), findsOneWidget);
+    expect(find.text('planner/local'), findsOneWidget);
+    await gesture.moveTo(Offset.zero);
+    await tester.pumpAndSettle();
+    await gesture.removePointer();
+
+    final capabilityCenter = tester.getCenter(
+      find.text('1 skill · 1 MCP · 1 LSP · 2 agents'),
+    );
+    final capabilityRect = tester.getRect(
+      find.text('1 skill · 1 MCP · 1 LSP · 2 agents'),
+    );
+    await tester.tapAt(Offset(capabilityRect.left + 8, capabilityCenter.dy));
+    await tester.pumpAndSettle();
+    expect(find.text('ACTIVE CAPABILITIES'), findsOneWidget);
+    expect(find.textContaining('Skills · flutter-ui'), findsOneWidget);
+    expect(find.textContaining('MCP · dart'), findsOneWidget);
+    expect(find.textContaining('LSP · rust-analyzer'), findsOneWidget);
+    expect(find.textContaining('Subagents · 2 agents'), findsOneWidget);
     await gesture.moveTo(Offset.zero);
     await tester.pumpAndSettle();
 
