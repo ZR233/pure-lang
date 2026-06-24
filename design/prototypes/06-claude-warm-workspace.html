@@ -109,6 +109,10 @@
   .topbar{height:56px;display:flex;align-items:center;gap:14px;padding:0 26px;border-bottom:1px solid var(--line)}
   .topbar .crumb b{font-family:var(--font-serif);font-size:17px;font-weight:400;display:block}
   .topbar .crumb s{text-decoration:none;font-size:11.5px;color:var(--ink-faint);display:block;margin-top:0}
+  .topbar .ts{font-size:10.5px;color:var(--ink-faint);font-family:var(--font-mono);margin-left:auto;align-self:center}
+  .topbar .set-btn{width:32px;height:32px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink-soft);display:grid;place-items:center;cursor:default;flex:none}
+  .topbar .set-btn:hover{background:var(--paper-2);color:var(--clay)}
+  .topbar .set-btn svg{width:16px;height:16px}
   .topbar .live{margin-left:auto;display:inline-flex;align-items:center;gap:8px;font-size:11.5px;color:var(--clay);background:var(--clay-soft);border:1px solid #f0ddd0;padding:5px 12px;border-radius:999px;font-weight:500}
   .spinner{width:13px;height:13px;border-radius:50%;border:2px solid #f0ddd0;border-top-color:var(--clay);animation:spin 1s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
@@ -196,6 +200,10 @@
   .composer .row{display:flex;align-items:center;gap:8px;padding:8px 14px 12px}
   .perm{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--ink-soft);background:var(--paper-2);border:1px solid var(--line);padding:6px 11px;border-radius:8px}
   .perm svg{width:14px;height:14px}
+  .tool-btn{width:32px;height:32px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink-soft);display:grid;place-items:center;cursor:default;flex:none}
+  .tool-btn:hover{background:var(--paper-2);color:var(--clay);border-color:var(--line-2)}
+  .tool-btn svg{width:15px;height:15px}
+  .composer .kbd{margin-left:auto;font-size:10.5px;color:var(--ink-faint);font-family:var(--font-mono)}
   .send{margin-left:auto;width:32px;height:32px;border-radius:8px;border:none;cursor:default;color:#fff;display:grid;place-items:center;background:var(--clay);box-shadow:0 4px 10px -4px rgba(217,119,87,.5)}
   .send svg{width:16px;height:16px}
   .send.stop{background:var(--ink);box-shadow:none}
@@ -342,6 +350,8 @@
           <main class="main">
             <div class="topbar">
               <div class="crumb"><b>重构 parser 错误恢复</b><s>pure-lang · ~/Documents/opensource/pure-lang</s></div>
+              <span class="ts">14:32</span>
+              <button class="set-btn" title="设置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 13a7.5 7.5 0 000-2l2-1.4-2-3.4-2.3.9a7.5 7.5 0 00-1.7-1L15 3h-4l-.4 2.6a7.5 7.5 0 00-1.7 1l-2.3-.9-2 3.4 2 1.4a7.5 7.5 0 000 2l-2 1.4 2 3.4 2.3-.9a7.5 7.5 0 001.7 1l.4 2.6h4l.4-2.6a7.5 7.5 0 001.7-1l2.3.9 2-3.4z"/></svg></button>
               <div class="phase idle">Idle</div>
             </div>
 
@@ -395,8 +405,8 @@
             </div></div>
 
             <div class="composer-wrap"><div class="composer">
-              <div class="field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg><textarea rows="1" placeholder="Ask Pure Studio…"></textarea></div>
-              <div class="row"><span class="perm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>Request<span style="opacity:.5">▾</span></span><button class="send" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button></div>
+              <div class="field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg><textarea rows="1" placeholder="Ask Pure Studio…  使用 @ 引用文件，/ 调用工具"></textarea></div>
+              <div class="row"><span class="perm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>Request<span style="opacity:.5">▾</span></span><button class="tool-btn" title="引用文件 / 上下文"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 7h16M4 12h16M4 17h10"/><circle cx="20" cy="7" r="1.5"/></svg></button><button class="tool-btn" title="附件"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 11l-9 9a5 5 0 01-7-7l9-9a3.5 3.5 0 015 5L10 18a2 2 0 01-3-3l8-8"/></svg></button><span class="kbd">⌘↵</span><button class="send" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button></div>
             </div></div>
           </main>
         </div>
@@ -428,6 +438,8 @@
           <main class="main">
             <div class="topbar">
               <div class="crumb"><b>重构 parser 错误恢复</b><s>pure-lang · ~/Documents/opensource/pure-lang</s></div>
+              <span class="ts">14:38</span>
+              <button class="set-btn" title="设置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 13a7.5 7.5 0 000-2l2-1.4-2-3.4-2.3.9a7.5 7.5 0 00-1.7-1L15 3h-4l-.4 2.6a7.5 7.5 0 00-1.7 1l-2.3-.9-2 3.4 2 1.4a7.5 7.5 0 000 2l-2 1.4 2 3.4 2.3-.9a7.5 7.5 0 001.7 1l.4 2.6h4l.4-2.6a7.5 7.5 0 001.7-1l2.3.9 2-3.4z"/></svg></button>
               <div class="live"><span class="spinner"></span> Planning</div>
             </div>
 
@@ -462,7 +474,7 @@
 
             <div class="composer-wrap"><div class="composer">
               <div class="field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg><textarea rows="1" disabled placeholder="Generating…"></textarea></div>
-              <div class="row"><span class="perm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>Request</span><button class="send stop" title="Stop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="7" y="7" width="10" height="10" rx="2"/></svg></button></div>
+              <div class="row"><span class="perm" style="opacity:.6"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>Request</span><span style="font-size:11.5px;color:var(--clay);font-family:var(--font-mono)">生成中 · 已用 0:42</span><button class="send stop" title="停止"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="7" y="7" width="10" height="10" rx="2"/></svg></button></div>
             </div></div>
           </main>
         </div>
@@ -493,6 +505,8 @@
           <main class="main">
             <div class="topbar">
               <div class="crumb"><b>新会话</b><s>pure-lang · ~/Documents/opensource/pure-lang</s></div>
+              <span class="ts">now</span>
+              <button class="set-btn" title="设置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 13a7.5 7.5 0 000-2l2-1.4-2-3.4-2.3.9a7.5 7.5 0 00-1.7-1L15 3h-4l-.4 2.6a7.5 7.5 0 00-1.7 1l-2.3-.9-2 3.4 2 1.4a7.5 7.5 0 000 2l-2 1.4 2 3.4 2.3-.9a7.5 7.5 0 001.7 1l.4 2.6h4l.4-2.6a7.5 7.5 0 001.7-1l2.3.9 2-3.4z"/></svg></button>
               <div class="phase idle">Idle</div>
             </div>
             <div class="empty">
@@ -516,7 +530,7 @@
             </div></div>
             <div class="composer-wrap"><div class="composer">
               <div class="field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg><textarea rows="2" placeholder="描述你的需求… (⌘+Enter 发送)"></textarea></div>
-              <div class="row"><span class="perm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>Request<span style="opacity:.5">▾</span></span><button class="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button></div>
+              <div class="row"><span class="perm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>Request<span style="opacity:.5">▾</span></span><button class="tool-btn" title="引用文件 / 上下文"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 7h16M4 12h16M4 17h10"/><circle cx="20" cy="7" r="1.5"/></svg></button><button class="tool-btn" title="附件"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 11l-9 9a5 5 0 01-7-7l9-9a3.5 3.5 0 015 5L10 18a2 2 0 01-3-3l8-8"/></svg></button><span class="kbd">⌘↵</span><button class="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button></div>
             </div></div>
           </main>
         </div>
@@ -543,6 +557,7 @@
           <main class="main">
             <div class="topbar">
               <div class="crumb"><b>Pure Studio</b><s>未选择项目</s></div>
+              <button class="set-btn" style="margin-left:auto" title="设置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 13a7.5 7.5 0 000-2l2-1.4-2-3.4-2.3.9a7.5 7.5 0 00-1.7-1L15 3h-4l-.4 2.6a7.5 7.5 0 00-1.7 1l-2.3-.9-2 3.4 2 1.4a7.5 7.5 0 000 2l-2 1.4 2 3.4 2.3-.9a7.5 7.5 0 001.7 1l.4 2.6h4l.4-2.6a7.5 7.5 0 001.7-1l2.3.9 2-3.4z"/></svg></button>
             </div>
             <div class="empty">
               <div class="glow">P</div>

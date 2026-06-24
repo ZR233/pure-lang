@@ -132,7 +132,12 @@
   .finput,.fselect{background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:13px;color:var(--ink);outline:none;font-family:inherit}
   .fselect{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a8a097' stroke-width='2'><path d='M6 9l6 6 6-6'/></svg>");background-repeat:no-repeat;background-position:right 12px center;padding-right:32px}
   .fmono{font-family:var(--font-mono);font-size:12px}
-  .fsecret{font-family:var(--font-mono);letter-spacing:.1em}
+  .fsecret{font-family:var(--font-mono);letter-spacing:.1em;padding-right:38px}
+  .secret-wrap{position:relative}
+  .secret-wrap .finput{width:100%}
+  .secret-wrap .eye{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:26px;height:26px;border:none;background:none;color:var(--ink-faint);display:grid;place-items:center;cursor:default;border-radius:6px}
+  .secret-wrap .eye:hover{color:var(--clay);background:var(--paper-2)}
+  .secret-wrap .eye svg{width:15px;height:15px}
   .finput:focus,.fselect:focus{border-color:var(--clay);box-shadow:0 0 0 3px var(--clay-soft)}
   .fhint{font-size:10.5px;color:var(--ink-faint);line-height:1.5}
   .seg-list{display:flex;gap:8px}
@@ -200,7 +205,7 @@
                   <div class="pcard-h"><div class="av" style="background:var(--clay)">智</div><div><b>Zhipu Coding Plan</b><s>open.bigmodel.cn · glm-5.2</s></div><span class="star">★ 默认</span></div>
                   <div class="quota">
                     <div class="quota-t"><span>5 小时额度</span><span><b>72%</b> <span class="pct">剩余</span></span></div>
-                    <div class="bar"><i style="width:72%"></i></div>
+                    <div class="bar"><i style="width:72%;background:var(--sage)"></i></div>
                     <div class="quota-t" style="margin-top:12px"><span>周额度</span><span><b>54%</b> <span class="pct">剩余</span></span></div>
                     <div class="bar"><i style="width:54%"></i></div>
                     <div class="quota-t" style="margin-top:12px"><span>MCP 额度</span><span><b>89%</b> <span class="pct">剩余</span></span></div>
@@ -379,7 +384,7 @@
                 <div class="form-field"><span class="lab">显示名</span><input class="finput" value="Zhipu Coding Plan"></div>
                 <div class="form-field"><span class="lab">协议类型</span><select class="fselect"><option>OpenAI 兼容</option></select></div>
                 <div class="form-field full"><span class="lab">Base URL</span><input class="finput fmono" value="https://open.bigmodel.cn/api/paas/v4"></div>
-                <div class="form-field full"><span class="lab">API Key</span><input class="finput fsecret" value="••••••••••••••••••••••••••••••"><span class="fhint">已配置 · 点击修改会重新保存</span></div>
+                <div class="form-field full"><span class="lab">API Key</span><div class="secret-wrap"><input class="finput fsecret" value="••••••••••••••••••••••••••••••"><button class="eye" title="显示 / 隐藏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></button></div><span class="fhint">已配置 · 点击修改会重新保存</span></div>
                 <div class="form-field"><span class="lab">默认模型</span><select class="fselect"><option>glm-5.2</option><option>glm-5</option></select></div>
               </div>
 
