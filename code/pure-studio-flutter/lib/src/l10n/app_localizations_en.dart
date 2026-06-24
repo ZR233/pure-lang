@@ -12,6 +12,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get appTitle => 'Pure Studio';
 
   @override
+  String get sidebarProjects => 'Projects';
+
+  @override
   String get sidebarSessions => 'Sessions';
 
   @override
@@ -90,6 +93,18 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get statusCost => 'Cost';
+
+  @override
+  String get statusCostDetailTitle => 'Session cost';
+
+  @override
+  String get statusTotalTokensLabel => 'Total tokens';
+
+  @override
+  String get statusModelLabel => 'Model';
+
+  @override
+  String get statusCapabilitiesTitle => 'Active capabilities';
 
   @override
   String get statusSessionMode => 'Session mode';

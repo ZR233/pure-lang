@@ -1,5 +1,6 @@
 {
   "appTitle": "Pure Studio",
+  "sidebarProjects": "Projects",
   "sidebarSessions": "Sessions",
   "sidebarCloseProject": "Close project",
   "sidebarArchiveSession": "Archive session",
@@ -32,6 +33,10 @@
   "composerStop": "Stop",
   "permissionModeTooltip": "Permission mode",
   "statusCost": "Cost",
+  "statusCostDetailTitle": "Session cost",
+  "statusTotalTokensLabel": "Total tokens",
+  "statusModelLabel": "Model",
+  "statusCapabilitiesTitle": "Active capabilities",
   "statusSessionMode": "Session mode",
   "statusPlannerModel": "Planner model",
   "statusReasoningEffort": "Reasoning effort",

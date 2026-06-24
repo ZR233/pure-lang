@@ -97,14 +97,8 @@ class _Footer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
     return DecoratedBox(
-      decoration: BoxDecoration(
-        color: context.studioPaper,
-        border: Border(
-          top: BorderSide(color: colors.outlineVariant.withValues(alpha: 0.7)),
-        ),
-      ),
+      decoration: BoxDecoration(color: context.studioPaper),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
