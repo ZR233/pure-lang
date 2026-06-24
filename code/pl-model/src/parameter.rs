@@ -128,12 +128,16 @@ mod tests {
 
     use super::*;
 
+    fn body_value(body: Map<String, Value>) -> Value {
+        Value::Object(body)
+    }
+
     #[test]
     fn set_nested_writes_top_level_field() {
         let mut body = Map::new();
         set_nested(&mut body, "reasoning_effort", json!("high"));
 
-        assert_eq!(body["reasoning_effort"], json!("high"));
+        assert_eq!(body_value(body), json!({"reasoning_effort": "high"}));
     }
 
     #[test]
@@ -141,7 +145,7 @@ mod tests {
         let mut body = Map::new();
         set_nested(&mut body, "reasoning.effort", json!("high"));
 
-        assert_eq!(body["reasoning"]["effort"], json!("high"));
+        assert_eq!(body_value(body), json!({"reasoning": {"effort": "high"}}));
     }
 
     #[test]
@@ -149,7 +153,7 @@ mod tests {
         let mut body = Map::new();
         set_nested(&mut body, "a.b.c", json!("v"));
 
-        assert_eq!(body["a"]["b"]["c"], json!("v"));
+        assert_eq!(body_value(body), json!({"a": {"b": {"c": "v"}}}));
     }
 
     #[test]
@@ -159,7 +163,7 @@ mod tests {
 
         set_nested(&mut body, "thinking.type", json!("enabled"));
 
-        assert_eq!(body["thinking"]["type"], json!("enabled"));
+        assert_eq!(body_value(body), json!({"thinking": {"type": "enabled"}}));
     }
 
     #[test]
@@ -168,8 +172,10 @@ mod tests {
         let mut body = Map::new();
         set_nested(&mut body, "thinking.clear_thinking", json!(false));
 
-        assert_eq!(body["thinking"]["clear_thinking"], json!(false));
-        assert!(body["thinking"]["clear_thinking"].is_boolean());
+        assert_eq!(
+            body_value(body),
+            json!({"thinking": {"clear_thinking": false}})
+        );
     }
 
     #[test]
@@ -178,8 +184,7 @@ mod tests {
         set_nested(&mut body, ".thinking.type.", json!("enabled"));
         set_nested(&mut body, "", json!("ignored"));
 
-        assert_eq!(body["thinking"]["type"], json!("enabled"));
-        assert!(!body.contains_key(""));
+        assert_eq!(body_value(body), json!({"thinking": {"type": "enabled"}}));
     }
 
     #[test]
@@ -192,7 +197,7 @@ mod tests {
         assert!(!body.contains_key("reasoning_effort"));
 
         remove_nested(&mut body, "thinking.type");
-        assert!(body["thinking"].as_object().unwrap().is_empty());
+        assert_eq!(body_value(body), json!({"thinking": {}}));
     }
 
     #[test]
@@ -219,8 +224,7 @@ mod tests {
 
         wire.apply_to(&mut body);
 
-        assert_eq!(body["thinking"]["type"], json!("disabled"));
-        assert!(!body.contains_key("reasoning_effort"));
+        assert_eq!(body_value(body), json!({"thinking": {"type": "disabled"}}));
     }
 
     #[test]
@@ -237,7 +241,7 @@ mod tests {
 
         wire.apply_to(&mut body);
 
-        assert!(!body.contains_key("reasoning_effort"));
+        assert_eq!(body, Map::new());
     }
 
     #[test]
