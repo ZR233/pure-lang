@@ -7,11 +7,13 @@ use super::agent_tool_records;
 use super::child_agent_options;
 use super::fork_session;
 use super::json_output;
+use super::tools::followup_prompt;
 use super::types::{ListAgentsResult, WaitAgentResult};
-use crate::agent::AgentRecord;
+use crate::agent::{AgentMailboxMessage, AgentRecord};
 use crate::tool::recoverable::{
     recoverable_subagent_failures, recoverable_subagent_failures_message,
 };
+use crate::tool::{Tool, ToolRuntimeLockPolicy};
 
 fn agent_record(id: &str, status: AgentStatus, error: Option<&str>) -> AgentRecord {
     AgentRecord {
@@ -220,4 +222,35 @@ fn child_agent_options_inherit_interaction_callback() {
     let child = child_agent_options(&parent);
 
     assert!(child.interaction_callback.is_some());
+}
+
+#[test]
+fn followup_prompt_includes_queued_messages_in_order() {
+    let prompt = followup_prompt(vec![
+        AgentMailboxMessage {
+            sender_path: "/root".to_string(),
+            message: "context".to_string(),
+            trigger_turn: false,
+        },
+        AgentMailboxMessage {
+            sender_path: "/root".to_string(),
+            message: "resume".to_string(),
+            trigger_turn: true,
+        },
+    ]);
+
+    assert_eq!(
+        prompt,
+        "Queued message from /root:\ncontext\n\nFollow-up task:\nresume"
+    );
+}
+
+#[test]
+fn wait_agent_does_not_hold_runtime_lock() {
+    let wait_agent = super::WaitAgentTool;
+
+    assert_eq!(
+        wait_agent.runtime_lock_policy(),
+        ToolRuntimeLockPolicy::None
+    );
 }

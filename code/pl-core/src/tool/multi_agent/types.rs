@@ -12,13 +12,38 @@ use crate::turn::{CompileMode, TurnBudget};
 pub(super) const DEFAULT_WAIT_TIMEOUT_MS: i64 = 30_000;
 
 #[derive(Debug, Clone)]
-pub struct SpawnAgentTool {
+pub(super) struct AgentToolRuntime {
     pub provider: SharedModelProvider,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub config: Option<PureConfig>,
     pub mcp_runtime: Option<crate::mcp::McpRuntimeRegistry>,
     pub lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     pub workspace_instructions: Option<String>,
+}
+
+impl AgentToolRuntime {
+    pub fn new(
+        provider: SharedModelProvider,
+        reasoning_effort: Option<ReasoningEffort>,
+        config: Option<PureConfig>,
+        mcp_runtime: Option<crate::mcp::McpRuntimeRegistry>,
+        lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
+        workspace_instructions: Option<String>,
+    ) -> Self {
+        Self {
+            provider,
+            reasoning_effort,
+            config,
+            mcp_runtime,
+            lsp_runtime,
+            workspace_instructions,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SpawnAgentTool {
+    pub(super) runtime: AgentToolRuntime,
 }
 
 #[derive(Debug, Clone)]
@@ -32,12 +57,7 @@ pub struct SendMessageTool;
 
 #[derive(Debug, Clone)]
 pub struct FollowupTaskTool {
-    pub provider: SharedModelProvider,
-    pub reasoning_effort: Option<ReasoningEffort>,
-    pub config: Option<PureConfig>,
-    pub mcp_runtime: Option<crate::mcp::McpRuntimeRegistry>,
-    pub lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
-    pub workspace_instructions: Option<String>,
+    pub(super) runtime: AgentToolRuntime,
 }
 
 #[derive(Debug, Clone)]

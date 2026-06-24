@@ -58,6 +58,13 @@ pub trait Tool: fmt::Debug + Send + Sync {
     fn supports_parallel_tool_calls(&self) -> bool {
         false
     }
+    fn runtime_lock_policy(&self) -> ToolRuntimeLockPolicy {
+        if self.supports_parallel_tool_calls() {
+            ToolRuntimeLockPolicy::Shared
+        } else {
+            ToolRuntimeLockPolicy::Exclusive
+        }
+    }
 
     fn execute<'a>(
         &'a self,
@@ -68,6 +75,14 @@ pub trait Tool: fmt::Debug + Send + Sync {
     fn to_schema(&self) -> ToolSchema {
         ToolSchema::function(self.name(), self.description(), self.input_schema())
     }
+}
+
+/// Runtime coordination policy for tools within one model response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolRuntimeLockPolicy {
+    Exclusive,
+    Shared,
+    None,
 }
 
 /// 单次工具执行上下文。
