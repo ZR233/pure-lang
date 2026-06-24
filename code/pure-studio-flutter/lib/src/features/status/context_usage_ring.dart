@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/studio_tokens.dart';
 import '../../domain/models/studio_models.dart';
+import '../../l10n/studio_l10n.dart';
 
 class ContextUsageRing extends StatelessWidget {
   const ContextUsageRing({required this.runtime, super.key});
@@ -16,11 +17,11 @@ class ContextUsageRing extends StatelessWidget {
         ? 0.0
         : (runtime.contextTokens / runtime.contextWindow).clamp(0.0, 1.0);
     return Tooltip(
-      message: _contextTooltip(runtime),
+      message: _contextTooltip(context, runtime),
       child: Padding(
         padding: const EdgeInsets.only(left: 2, right: 10),
         child: Semantics(
-          label: 'Context',
+          label: context.l10n.statusContextLabel,
           value: '${(progress * 100).round()}%',
           child: SizedBox.square(
             dimension: 18,
@@ -96,16 +97,25 @@ class _ContextUsagePainter extends CustomPainter {
   }
 }
 
-String _contextTooltip(SessionRuntimeView runtime) {
+String _contextTooltip(BuildContext context, SessionRuntimeView runtime) {
   final percent = runtime.contextWindow <= 0
       ? 0
       : ((runtime.contextTokens / runtime.contextWindow) * 100)
             .clamp(0, 100)
             .round();
-  final sections = [
-    'Context: ${runtime.contextTokens}/${runtime.contextWindow} ($percent%)',
-    'Total tokens: ${runtime.totalTokens}',
-    if (runtime.model.isNotEmpty) 'Model: ${runtime.model}',
-  ];
-  return sections.join('\n\n');
+  if (runtime.model.isEmpty) {
+    return context.l10n.statusContextTooltipNoModel(
+      runtime.contextTokens,
+      runtime.contextWindow,
+      percent,
+      runtime.totalTokens,
+    );
+  }
+  return context.l10n.statusContextTooltip(
+    runtime.contextTokens,
+    runtime.contextWindow,
+    percent,
+    runtime.totalTokens,
+    runtime.model,
+  );
 }

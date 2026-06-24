@@ -39,19 +39,19 @@ class _ProviderList extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _SettingsHeader(
-          title: 'Providers',
-          subtitle: 'Model providers, credentials, models, and usage',
+          title: context.l10n.settingsProvidersTitle,
+          subtitle: context.l10n.settingsProvidersSubtitle,
           trailing: Wrap(
             spacing: 8,
             children: [
               OutlinedButton.icon(
                 icon: const Icon(Icons.refresh),
-                label: const Text('Refresh usage'),
+                label: Text(context.l10n.settingsRefreshUsage),
                 onPressed: () => onRefreshAll(),
               ),
               FilledButton.icon(
                 icon: const Icon(Icons.add),
-                label: const Text('Add provider'),
+                label: Text(context.l10n.settingsAddProvider),
                 onPressed: onAdd,
               ),
             ],
@@ -59,7 +59,7 @@ class _ProviderList extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         _SettingsSearchField(
-          hintText: 'Search providers',
+          hintText: context.l10n.settingsSearchProviders,
           onChanged: onQueryChanged,
         ),
         const SizedBox(height: 14),
@@ -69,11 +69,11 @@ class _ProviderList extends StatelessWidget {
                   child: StudioEmptyState(
                     icon: Icons.cloud_off_outlined,
                     title: filtering
-                        ? 'No providers match this filter'
-                        : 'No providers found',
+                        ? context.l10n.settingsNoProvidersMatchTitle
+                        : context.l10n.settingsNoProvidersTitle,
                     message: filtering
-                        ? 'Clear the search to see all configured providers.'
-                        : 'Add a provider to configure credentials and models.',
+                        ? context.l10n.settingsNoProvidersMatchMessage
+                        : context.l10n.settingsNoProvidersMessage,
                   ),
                 )
               : LayoutBuilder(
@@ -197,7 +197,12 @@ class _ProviderCard extends StatelessWidget {
                   ),
                   _MiniMeta(
                     icon: Icons.account_balance_wallet_outlined,
-                    label: _providerUsageSummary(provider, usage, usageLoading),
+                    label: _providerUsageSummary(
+                      context,
+                      provider,
+                      usage,
+                      usageLoading,
+                    ),
                   ),
                 ],
               ),
@@ -291,8 +296,8 @@ class _ProviderCardTitle extends StatelessWidget {
             ),
             if (isDefault) ...[
               const SizedBox(width: 8),
-              const StudioPill(
-                label: 'default',
+              StudioPill(
+                label: context.l10n.settingsDefaultBadge,
                 backgroundColor: StudioColors.claySoft,
                 foregroundColor: StudioColors.clayDeep,
                 borderColor: StudioColors.claySoft,
@@ -341,7 +346,9 @@ class _ProviderCardActions extends StatelessWidget {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         Tooltip(
-          message: isDefault ? 'Default provider' : 'Set as default',
+          message: isDefault
+              ? context.l10n.settingsDefaultProvider
+              : context.l10n.settingsSetAsDefaultProvider,
           child: IconButton(
             style: IconButton.styleFrom(
               minimumSize: const Size.square(30),
@@ -360,7 +367,7 @@ class _ProviderCardActions extends StatelessWidget {
             minimumSize: const Size.square(30),
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
-          tooltip: 'Open details',
+          tooltip: context.l10n.settingsOpenDetails,
           icon: const Icon(Icons.open_in_new),
           onPressed: onOpen,
         ),
@@ -369,7 +376,7 @@ class _ProviderCardActions extends StatelessWidget {
             minimumSize: const Size.square(30),
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
-          tooltip: 'Refresh usage',
+          tooltip: context.l10n.settingsRefreshUsage,
           icon: const Icon(Icons.refresh),
           onPressed: onRefreshUsage,
         ),
@@ -378,7 +385,7 @@ class _ProviderCardActions extends StatelessWidget {
             minimumSize: const Size.square(30),
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
-          tooltip: 'Edit provider',
+          tooltip: context.l10n.settingsEditProvider,
           icon: const Icon(Icons.edit_outlined),
           onPressed: onEdit,
         ),
@@ -387,7 +394,7 @@ class _ProviderCardActions extends StatelessWidget {
             minimumSize: const Size.square(30),
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
-          tooltip: 'Delete provider',
+          tooltip: context.l10n.settingsDeleteProvider,
           icon: const Icon(Icons.delete_outline),
           onPressed: onDelete,
         ),

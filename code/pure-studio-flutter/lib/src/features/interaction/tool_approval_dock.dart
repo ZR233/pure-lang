@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/repositories/studio_repository.dart';
+import '../../l10n/studio_l10n.dart';
 import 'interaction_payload.dart';
 import 'interaction_widgets.dart';
 
@@ -37,19 +38,19 @@ class _ToolApprovalDockState extends ConsumerState<ToolApprovalDock> {
     return InteractionDockShell(
       kind: InteractionDockKind.permission,
       trailing: widget.trailing,
-      title: '需要权限',
-      subtitle: 'Pure 想运行一个工具调用',
-      footerHint: '工具将在当前工作目录执行；可在 composer 中调整权限模式。',
+      title: context.l10n.interactionPermissionTitle,
+      subtitle: context.l10n.interactionPermissionSubtitle,
+      footerHint: context.l10n.interactionPermissionFooterHint,
       footer: DockActions(
         children: [
           OutlinedButton.icon(
             icon: const Icon(Icons.close),
-            label: const Text('拒绝'),
+            label: Text(context.l10n.interactionReject),
             onPressed: () => _resolve('denied'),
           ),
           FilledButton.icon(
             icon: const Icon(Icons.check),
-            label: const Text('批准'),
+            label: Text(context.l10n.interactionApprove),
             onPressed: () => _resolve('approved'),
           ),
         ],
@@ -79,9 +80,9 @@ class _ToolApprovalDockState extends ConsumerState<ToolApprovalDock> {
             controller: _reasonController,
             minLines: 1,
             maxLines: 3,
-            decoration: const InputDecoration(
-              labelText: '原因',
-              prefixIcon: Icon(Icons.chat_bubble_outline),
+            decoration: InputDecoration(
+              labelText: context.l10n.interactionReasonLabel,
+              prefixIcon: const Icon(Icons.chat_bubble_outline),
             ),
             onChanged: (_) => setState(() {}),
           ),

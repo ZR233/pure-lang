@@ -28,10 +28,12 @@ class _ProviderDetails extends StatelessWidget {
         children: [
           TextButton.icon(
             icon: const Icon(Icons.arrow_back),
-            label: const Text('Providers'),
+            label: Text(context.l10n.settingsProvidersTitle),
             onPressed: onBack,
           ),
-          const Expanded(child: Center(child: Text('No provider selected'))),
+          Expanded(
+            child: Center(child: Text(context.l10n.settingsNoProviderSelected)),
+          ),
         ],
       );
     }
@@ -41,7 +43,7 @@ class _ProviderDetails extends StatelessWidget {
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
             icon: const Icon(Icons.arrow_back),
-            label: const Text('Providers'),
+            label: Text(context.l10n.settingsProvidersTitle),
             onPressed: onBack,
           ),
         ),
@@ -51,7 +53,7 @@ class _ProviderDetails extends StatelessWidget {
           subtitle: provider.baseUrl,
           trailing: FilledButton.tonalIcon(
             icon: const Icon(Icons.edit_outlined),
-            label: const Text('Edit'),
+            label: Text(context.l10n.settingsEdit),
             onPressed: () => onEdit(provider),
           ),
         ),
@@ -75,20 +77,31 @@ class _ProviderDetails extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         _SectionPanel(
-          title: 'Provider',
+          title: context.l10n.settingsProviderTitle,
           children: [
-            _Readout(label: 'Provider key', value: provider.id),
-            _Readout(label: 'Template', value: provider.templateKind),
-            _Readout(label: 'Default model', value: provider.defaultModel),
             _Readout(
-              label: 'API key',
-              value: provider.hasBearerToken ? 'configured' : 'missing',
+              label: context.l10n.settingsProviderKey,
+              value: provider.id,
+            ),
+            _Readout(
+              label: context.l10n.settingsTemplate,
+              value: provider.templateKind,
+            ),
+            _Readout(
+              label: context.l10n.settingsDefaultModel,
+              value: provider.defaultModel,
+            ),
+            _Readout(
+              label: context.l10n.settingsApiKey,
+              value: provider.hasBearerToken
+                  ? context.l10n.settingsConfigured
+                  : context.l10n.settingsMissing,
             ),
           ],
         ),
         const SizedBox(height: 12),
         _SectionPanel(
-          title: 'Models',
+          title: context.l10n.settingsProviderModelsTitle,
           children: [
             for (final model in provider.allModels)
               _ModelReadout(model: model, framed: true),
@@ -133,7 +146,7 @@ class _ProviderEditor extends StatelessWidget {
       children: [
         _SettingsHeader(
           title: draft.mode == _ProviderDraftMode.create
-              ? 'New provider'
+              ? context.l10n.settingsNewProvider
               : provider.name,
           subtitle: provider.baseUrl,
           trailing: Wrap(
@@ -141,12 +154,12 @@ class _ProviderEditor extends StatelessWidget {
             children: [
               OutlinedButton.icon(
                 icon: const Icon(Icons.close),
-                label: const Text('Cancel'),
+                label: Text(context.l10n.settingsCancel),
                 onPressed: saving ? null : onCancel,
               ),
               FilledButton.icon(
                 icon: const Icon(Icons.save_outlined),
-                label: const Text('Save'),
+                label: Text(context.l10n.settingsSave),
                 onPressed: saving ? null : onSave,
               ),
             ],
@@ -158,12 +171,12 @@ class _ProviderEditor extends StatelessWidget {
         ],
         const SizedBox(height: 12),
         _SectionPanel(
-          title: 'Connection',
+          title: context.l10n.settingsProviderConnectionTitle,
           children: [
             _ResponsiveFieldGrid(
               children: [
                 _TextEdit(
-                  label: 'Provider key',
+                  label: context.l10n.settingsProviderKey,
                   value: provider.id,
                   enabled: !saving,
                   onChanged: (value) =>
@@ -171,7 +184,9 @@ class _ProviderEditor extends StatelessWidget {
                 ),
                 DropdownButtonFormField<String>(
                   initialValue: provider.templateKind,
-                  decoration: const InputDecoration(labelText: 'Template'),
+                  decoration: InputDecoration(
+                    labelText: context.l10n.settingsTemplate,
+                  ),
                   items: [
                     for (final template in _providerTemplates)
                       DropdownMenuItem(
@@ -188,21 +203,21 @@ class _ProviderEditor extends StatelessWidget {
                         },
                 ),
                 _TextEdit(
-                  label: 'Display name',
+                  label: context.l10n.settingsDisplayName,
                   value: provider.name,
                   enabled: !saving,
                   onChanged: (value) =>
                       onUpdate((item) => item.copyWith(name: value)),
                 ),
                 _ReadonlyField(
-                  label: 'Protocol type',
+                  label: context.l10n.settingsProtocolType,
                   value: provider.providerKind,
                 ),
               ],
             ),
             const SizedBox(height: 10),
             _TextEdit(
-              label: 'Base URL',
+              label: context.l10n.settingsBaseUrl,
               value: provider.baseUrl,
               enabled: !saving,
               onChanged: (value) =>
@@ -211,8 +226,8 @@ class _ProviderEditor extends StatelessWidget {
             const SizedBox(height: 10),
             _TextEdit(
               label: provider.hasBearerToken
-                  ? 'API key (leave blank to keep current)'
-                  : 'API key',
+                  ? context.l10n.settingsApiKeyKeepCurrent
+                  : context.l10n.settingsApiKey,
               value: provider.bearerToken,
               enabled: !saving,
               obscureText: true,
@@ -225,7 +240,9 @@ class _ProviderEditor extends StatelessWidget {
                   models.any((model) => model.slug == provider.defaultModel)
                   ? provider.defaultModel
                   : models.firstOrNull?.slug,
-              decoration: const InputDecoration(labelText: 'Default model'),
+              decoration: InputDecoration(
+                labelText: context.l10n.settingsDefaultModel,
+              ),
               items: [
                 for (final model in models)
                   DropdownMenuItem(
@@ -245,8 +262,10 @@ class _ProviderEditor extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         _SectionPanel(
-          title: 'Default models',
-          trailing: Text('${provider.defaultModels.length} bundled'),
+          title: context.l10n.settingsProviderDefaultModelsTitle,
+          trailing: Text(
+            context.l10n.settingsBundledModels(provider.defaultModels.length),
+          ),
           children: [
             for (final model in provider.defaultModels)
               _ModelReadout(model: model),
@@ -254,17 +273,17 @@ class _ProviderEditor extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         _SectionPanel(
-          title: 'Custom models',
+          title: context.l10n.settingsProviderCustomModelsTitle,
           trailing: OutlinedButton.icon(
             icon: const Icon(Icons.add),
-            label: const Text('Add model'),
+            label: Text(context.l10n.settingsAddModel),
             onPressed: saving ? null : onAddCustomModel,
           ),
           children: [
             if (provider.customModels.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text('No custom models'),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(context.l10n.settingsNoCustomModels),
               )
             else
               for (var index = 0; index < provider.customModels.length; index++)
@@ -313,7 +332,7 @@ class _CustomModelEditor extends StatelessWidget {
                 children: [
                   Expanded(
                     child: _TextEdit(
-                      label: 'Model slug',
+                      label: context.l10n.settingsModelSlug,
                       value: model.slug,
                       enabled: enabled,
                       onChanged: (value) =>
@@ -323,7 +342,7 @@ class _CustomModelEditor extends StatelessWidget {
                   const SizedBox(width: 10),
                   Expanded(
                     child: _TextEdit(
-                      label: 'Display name',
+                      label: context.l10n.settingsDisplayName,
                       value: model.displayName,
                       enabled: enabled,
                       onChanged: (value) =>
@@ -332,7 +351,7 @@ class _CustomModelEditor extends StatelessWidget {
                   ),
                   const SizedBox(width: 6),
                   IconButton(
-                    tooltip: 'Remove model',
+                    tooltip: context.l10n.settingsRemoveModel,
                     icon: const Icon(Icons.delete_outline),
                     onPressed: enabled ? onRemove : null,
                   ),
@@ -340,7 +359,7 @@ class _CustomModelEditor extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               _TextEdit(
-                label: 'Reasoning efforts',
+                label: context.l10n.settingsReasoningEfforts,
                 value: model.reasoningEfforts.join(', '),
                 enabled: enabled,
                 onChanged: (value) => onChanged(

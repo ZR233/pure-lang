@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/studio_tokens.dart';
 import '../../data/repositories/studio_repository.dart';
+import '../../l10n/studio_l10n.dart';
 import 'interaction_payload.dart';
 import 'interaction_widgets.dart';
 
@@ -73,22 +74,31 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
     return InteractionDockShell(
       kind: InteractionDockKind.question,
       trailing: widget.trailing,
-      title: '几个问题想确认',
-      subtitle: isLast ? '最后一题' : '回答后继续',
+      title: context.l10n.interactionQuestionsTitle,
+      subtitle: isLast
+          ? context.l10n.interactionLastQuestion
+          : context.l10n.interactionContinueAfterAnswer,
       footerHint: isLast
-          ? '提交后未答问题保留空数组'
-          : '已答 $answeredCount 题 · ${total - answeredCount} 题待答',
+          ? context.l10n.interactionSubmitEmptyAnswersHint
+          : context.l10n.interactionAnsweredPendingHint(
+              answeredCount,
+              total - answeredCount,
+            ),
       footer: DockActions(
         children: [
           if (index > 0)
             OutlinedButton.icon(
               icon: const Icon(Icons.chevron_left),
-              label: const Text('上一题'),
+              label: Text(context.l10n.interactionPreviousQuestion),
               onPressed: () => setState(() => _index -= 1),
             ),
           FilledButton.icon(
             icon: Icon(isLast ? Icons.check : Icons.chevron_right),
-            label: Text(isLast ? '提交答案' : '下一题'),
+            label: Text(
+              isLast
+                  ? context.l10n.interactionSubmitAnswers
+                  : context.l10n.interactionNextQuestion,
+            ),
             onPressed: () {
               if (isLast) {
                 _submitAnswers();
@@ -217,14 +227,14 @@ class _FallbackQuestionDock extends StatelessWidget {
     return InteractionDockShell(
       kind: InteractionDockKind.question,
       trailing: trailing,
-      title: '需要你的输入',
-      subtitle: '回答后继续',
-      footerHint: 'Pure 会把这条回答作为当前问题的答案继续执行。',
+      title: context.l10n.interactionNeedInputTitle,
+      subtitle: context.l10n.interactionContinueAfterAnswer,
+      footerHint: context.l10n.interactionAnswerHint,
       footer: DockActions(
         children: [
           FilledButton.icon(
             icon: const Icon(Icons.reply),
-            label: const Text('回答'),
+            label: Text(context.l10n.interactionAnswerButton),
             onPressed: onSubmit,
           ),
         ],
@@ -241,9 +251,9 @@ class _FallbackQuestionDock extends StatelessWidget {
             controller: controller,
             minLines: 1,
             maxLines: 4,
-            decoration: const InputDecoration(
-              labelText: '答案',
-              prefixIcon: Icon(Icons.short_text_outlined),
+            decoration: InputDecoration(
+              labelText: context.l10n.interactionAnswerLabel,
+              prefixIcon: const Icon(Icons.short_text_outlined),
             ),
             onChanged: (_) => onChanged(),
             onSubmitted: (_) => onSubmit?.call(),
@@ -279,7 +289,7 @@ class _QuestionProgress extends StatelessWidget {
       child: Row(
         children: [
           Text(
-            '问题 ${currentIndex + 1} / $total',
+            context.l10n.interactionQuestionProgress(currentIndex + 1, total),
             style: Theme.of(
               context,
             ).textTheme.labelMedium?.copyWith(color: colors.onSurfaceVariant),
@@ -299,7 +309,7 @@ class _QuestionProgress extends StatelessWidget {
             ),
           const SizedBox(width: 10),
           Text(
-            '$answeredCount 已答',
+            context.l10n.interactionAnsweredCount(answeredCount),
             style: Theme.of(
               context,
             ).textTheme.labelSmall?.copyWith(color: colors.onSurfaceVariant),
@@ -332,7 +342,7 @@ class _ProgressDot extends StatelessWidget {
         ? colors.primary.withValues(alpha: 0.42)
         : colors.surfaceContainerHighest;
     return Tooltip(
-      message: '问题 ${index + 1}',
+      message: context.l10n.interactionQuestionTooltip(index + 1),
       child: InkResponse(
         onTap: onPressed,
         radius: 12,
@@ -373,7 +383,9 @@ class _QuestionStep extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          question.header.isEmpty ? '问题' : question.header,
+          question.header.isEmpty
+              ? context.l10n.interactionQuestionFallback
+              : question.header,
           style: Theme.of(context).textTheme.labelLarge,
         ),
         if (question.question.isNotEmpty) ...[
@@ -400,8 +412,12 @@ class _QuestionStep extends StatelessWidget {
             minLines: 1,
             maxLines: question.isSecret ? 1 : 4,
             decoration: InputDecoration(
-              labelText: question.isOther ? '其它' : '答案',
-              hintText: question.isSecret ? '输入秘密答案' : '输入你的回答...',
+              labelText: question.isOther
+                  ? context.l10n.interactionOtherLabel
+                  : context.l10n.interactionAnswerLabel,
+              hintText: question.isSecret
+                  ? context.l10n.interactionSecretHint
+                  : context.l10n.interactionTextHint,
               prefixIcon: Icon(
                 question.isSecret
                     ? Icons.password_outlined
