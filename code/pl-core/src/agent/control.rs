@@ -392,6 +392,18 @@ impl AgentControl {
                 ),
             });
         }
+        if mode == MessageDeliveryMode::TriggerTurn
+            && matches!(entry.record.status, AgentStatus::Queued | AgentStatus::Running)
+        {
+            return Err(PureError::ToolExecutionFailed {
+                tool: "followup_task".to_string(),
+                error: format!(
+                    "target agent {} is already {}",
+                    entry.record.path,
+                    entry.record.status.as_str()
+                ),
+            });
+        }
         entry.mailbox.push_back(AgentMailboxMessage {
             sender_path: current_path.to_string(),
             message,
@@ -570,16 +582,16 @@ mod tests {
                 AgentPath::ROOT,
                 "worker",
                 "follow up".to_string(),
-                MessageDeliveryMode::TriggerTurn,
+                MessageDeliveryMode::QueueOnly,
             )
             .await
             .unwrap();
-        assert_eq!(record.status, AgentStatus::Queued);
+        assert_eq!(record.status, AgentStatus::Waiting);
         let previous = control
             .close_agent(AgentPath::ROOT, "worker")
             .await
             .unwrap();
-        assert_eq!(previous.status, AgentStatus::Queued);
+        assert_eq!(previous.status, AgentStatus::Waiting);
         assert_eq!(
             control.record(&previous.id).await.unwrap().status,
             AgentStatus::Shutdown
@@ -656,6 +668,47 @@ mod tests {
             .unwrap();
 
         assert_eq!(record.status, AgentStatus::Queued);
+    }
+
+    #[tokio::test]
+    async fn followup_task_rejects_running_or_queued_agent() {
+        let control = AgentControl::default();
+        let handle = control
+            .spawn_agent(AgentSpawnInput {
+                task_name: "worker".to_string(),
+                message: "inspect".to_string(),
+                role: "explorer".to_string(),
+                parent_path: None,
+            })
+            .await
+            .unwrap();
+        let queued_error = control
+            .append_message(
+                AgentPath::ROOT,
+                "worker",
+                "queued follow up".to_string(),
+                MessageDeliveryMode::TriggerTurn,
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        control
+            .update_status(&handle.id, AgentStatus::Running, None, None)
+            .await
+            .unwrap();
+        let running_error = control
+            .append_message(
+                AgentPath::ROOT,
+                "worker",
+                "running follow up".to_string(),
+                MessageDeliveryMode::TriggerTurn,
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(queued_error.contains("already queued"));
+        assert!(running_error.contains("already running"));
     }
 
     #[tokio::test]

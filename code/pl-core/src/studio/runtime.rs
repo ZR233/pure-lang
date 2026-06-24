@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -12,13 +11,13 @@ use pl_protocol::{
     StudioTurnStatus,
 };
 use pl_trace::{AgentEvent, TraceEvent, TraceEventKind, TracePart, TracePartKind};
-use tokio::sync::Mutex;
 use tokio::sync::broadcast::error::RecvError;
 use tokio_util::sync::CancellationToken;
 
 use crate::config::{ConfigStore, ModelRole, PureConfig, ReasoningEffort, RoleConfig};
 use crate::mcp::McpRuntimeRegistry;
 use crate::skill::SkillCatalog;
+use crate::studio::active_turns::StudioActiveTurns;
 use crate::studio::StudioStore;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::mappers::default_session_runtime_record;
@@ -161,27 +160,30 @@ pub struct StudioRuntime {
     interactions: InteractionRuntime,
     events: StudioEventRuntime,
     runtime_state: StudioRuntimeState,
-    active_turns: Arc<Mutex<HashMap<String, CancellationToken>>>,
+    active_turns: StudioActiveTurns,
 }
 
 impl StudioRuntime {
     pub async fn default_app() -> Result<Self> {
         let store = StudioStore::default_app().await?;
-        let runtime = Self {
-            interactions: InteractionRuntime::new(store.clone()),
-            events: StudioEventRuntime::new(store.clone()),
+        let runtime = Self::with_runtime_state(
             store,
-            config_store: ConfigStore::default_app()?,
-            mcp_runtime: McpRuntimeRegistry::new(),
-            lsp_runtime: pl_lsp::LspRuntimeRegistry::new(),
-            runtime_state: StudioRuntimeState::new(),
-            active_turns: Arc::new(Mutex::new(HashMap::new())),
-        };
+            ConfigStore::default_app()?,
+            StudioRuntimeState::new(),
+        );
         let _ = runtime.initialize_runtime().await?;
         Ok(runtime)
     }
 
     pub fn new(store: StudioStore, config_store: ConfigStore) -> Self {
+        Self::with_runtime_state(store, config_store, StudioRuntimeState::ready())
+    }
+
+    fn with_runtime_state(
+        store: StudioStore,
+        config_store: ConfigStore,
+        runtime_state: StudioRuntimeState,
+    ) -> Self {
         Self {
             interactions: InteractionRuntime::new(store.clone()),
             events: StudioEventRuntime::new(store.clone()),
@@ -189,8 +191,8 @@ impl StudioRuntime {
             config_store,
             mcp_runtime: McpRuntimeRegistry::new(),
             lsp_runtime: pl_lsp::LspRuntimeRegistry::new(),
-            runtime_state: StudioRuntimeState::ready(),
-            active_turns: Arc::new(Mutex::new(HashMap::new())),
+            runtime_state: runtime_state.clone(),
+            active_turns: StudioActiveTurns::new(runtime_state),
         }
     }
 
@@ -229,14 +231,20 @@ impl StudioRuntime {
         let _ = self
             .runtime_state
             .transition(StudioRuntimeStatus::Initializing, None)?;
-        match self
-            .store
-            .cancel_unfinished_turns("application restarted")
-            .await
-        {
-            Ok(_) => self
-                .runtime_state
-                .transition(StudioRuntimeStatus::Ready, None),
+        let initialization = async {
+            let turns = self
+                .store
+                .cancel_unfinished_turns("application restarted")
+                .await?;
+            self.cancel_recovered_transient_interactions(turns).await?;
+            Ok::<(), anyhow::Error>(())
+        }
+        .await;
+        match initialization {
+            Ok(()) => {
+                self.runtime_state
+                    .transition(StudioRuntimeStatus::Ready, None)
+            }
             Err(error) => {
                 let message = format!("{error:#}");
                 let _ = self
@@ -272,13 +280,7 @@ impl StudioRuntime {
         let _ = self
             .runtime_state
             .transition(StudioRuntimeStatus::ShuttingDown, None)?;
-        {
-            let mut active_turns = self.active_turns.lock().await;
-            for token in active_turns.values() {
-                token.cancel();
-            }
-            active_turns.clear();
-        }
+        self.active_turns.cancel_all_and_clear().await;
         self.mcp_runtime.shutdown().await;
         self.lsp_runtime.shutdown().await;
         self.runtime_state
@@ -346,7 +348,7 @@ impl StudioRuntime {
     }
 
     pub async fn archive_session(&self, session_id: String) -> Result<Option<SessionRecord>> {
-        if self.active_turns.lock().await.contains_key(&session_id) {
+        if self.active_turns.contains(&session_id).await {
             bail!("session has an active turn");
         }
         let emitter = self.interaction_emitter(session_id.clone());
@@ -362,13 +364,8 @@ impl StudioRuntime {
 
     pub async fn archive_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {
         let session_ids = self.store.list_project_session_ids(project_id).await?;
-        {
-            let active_turns = self.active_turns.lock().await;
-            for session_id in &session_ids {
-                if active_turns.contains_key(session_id) {
-                    bail!("project has an active turn");
-                }
-            }
+        if self.active_turns.contains_any(&session_ids).await {
+            bail!("project has an active turn");
         }
         for session_id in session_ids {
             let emitter = self.interaction_emitter(session_id.clone());
@@ -503,16 +500,13 @@ impl StudioRuntime {
         }
         let turn_id = new_id("turn");
         let cancellation_token = CancellationToken::new();
-        {
-            let mut active_turns = self.active_turns.lock().await;
-            if active_turns.contains_key(&session_id) {
-                bail!("session already has an active turn");
-            }
-            active_turns.insert(session_id.clone(), cancellation_token.clone());
-        }
-        let _ = self
-            .runtime_state
-            .mark_active_turn(session_id.clone(), turn_id.clone());
+        self.active_turns
+            .insert(
+                session_id.clone(),
+                turn_id.clone(),
+                cancellation_token.clone(),
+            )
+            .await?;
         let submit_result = async {
             self.events
                 .emit_turn(&session_id, &turn_id, StudioTurnStatus::Queued, None)
@@ -539,8 +533,7 @@ impl StudioRuntime {
         let cursor = match submit_result {
             Ok(cursor) => cursor as u64,
             Err(error) => {
-                self.active_turns.lock().await.remove(&session_id);
-                let _ = self.runtime_state.clear_active_turn(&session_id);
+                self.active_turns.remove(&session_id).await;
                 return Err(error);
             }
         };
@@ -567,7 +560,7 @@ impl StudioRuntime {
     }
 
     pub async fn stop_prompt(&self, session_id: String) -> Result<StudioStopPromptResponse> {
-        let token = self.active_turns.lock().await.get(&session_id).cloned();
+        let token = self.active_turns.token(&session_id).await;
         let Some(token) = token else {
             return Ok(StudioStopPromptResponse {
                 session_id,
@@ -619,13 +612,22 @@ impl StudioRuntime {
     }
 
     pub async fn run_prompt(&self, request: RunPromptRequest) -> Result<StudioPromptOutcome> {
+        let mut request = request;
         let session_id = request.session_id.clone();
         let turn_id = request.turn_id.clone();
-        let _ = self
-            .runtime_state
-            .mark_active_turn(session_id.clone(), turn_id);
+        let cancellation_token = request
+            .options
+            .cancellation_token
+            .clone()
+            .unwrap_or_else(CancellationToken::new);
+        if request.options.cancellation_token.is_none() {
+            request.options = request.options.with_cancellation(cancellation_token.clone());
+        }
+        self.active_turns
+            .insert(session_id.clone(), turn_id, cancellation_token)
+            .await?;
         let outcome = self.run_prompt_inner(request).await;
-        let _ = self.runtime_state.clear_active_turn(&session_id);
+        self.active_turns.remove(&session_id).await;
         outcome
     }
 
@@ -655,7 +657,7 @@ impl StudioRuntime {
             .with_cancellation(cancellation_token)
             .with_interaction_callback(interaction_callback.clone());
         let result = self
-            .run_prompt(RunPromptRequest {
+            .run_prompt_inner(RunPromptRequest {
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
                 prompt,
@@ -665,7 +667,7 @@ impl StudioRuntime {
                 options,
             })
             .await;
-        self.active_turns.lock().await.remove(&session_id);
+        self.active_turns.remove(&session_id).await;
         let _ = self
             .interactions
             .cancel_transient_interactions(&session_id, "turn completed", emitter)
@@ -991,6 +993,30 @@ impl StudioRuntime {
                 Ok(())
             })
         })
+    }
+
+    async fn cancel_recovered_transient_interactions(
+        &self,
+        cancelled_turns: Vec<crate::studio::records::StudioTurnRecord>,
+    ) -> Result<()> {
+        let mut session_ids = cancelled_turns
+            .into_iter()
+            .map(|turn| turn.session_id)
+            .collect::<Vec<_>>();
+        session_ids.extend(
+            self.store
+                .list_sessions_with_transient_pending_interactions()
+                .await?,
+        );
+        session_ids.sort();
+        session_ids.dedup();
+        for session_id in session_ids {
+            let emitter = self.interaction_emitter(session_id.clone());
+            self.interactions
+                .cancel_transient_interactions(&session_id, "application restarted", emitter)
+                .await?;
+        }
+        Ok(())
     }
 
     async fn run_prompt_inner(&self, request: RunPromptRequest) -> Result<StudioPromptOutcome> {
@@ -1729,6 +1755,44 @@ mod tests {
         })
     }
 
+    fn pending_interaction(
+        id: &str,
+        session_id: &str,
+        kind: InteractionKind,
+        payload: InteractionPayload,
+    ) -> InteractionRequest {
+        InteractionRequest {
+            interaction_id: id.to_string(),
+            kind,
+            status: InteractionStatus::Pending,
+            scope: InteractionScope {
+                session_id: session_id.to_string(),
+                turn_id: "turn-recovered".to_string(),
+                item_id: Some(id.to_string()),
+                tool_id: Some(id.to_string()),
+                agent_path: None,
+            },
+            payload,
+            created_at: 1,
+            updated_at: 1,
+            resolved_at: None,
+            resolution: None,
+        }
+    }
+
+    async fn wait_for_no_active_turn(runtime: &StudioRuntime) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if runtime.runtime_snapshot().active_turns.is_empty() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn set_model_role_persists_planner_model_and_default_effort() {
         let unique = std::time::SystemTime::now()
@@ -1763,6 +1827,111 @@ mod tests {
         assert_eq!(next.roles.planner.effort.as_str(), "low");
         let saved = runtime.config_store().load_or_default().unwrap();
         assert_eq!(saved.roles.planner, next.roles.planner);
+        let _ = tokio::fs::remove_dir_all(home).await;
+    }
+
+    #[tokio::test]
+    async fn initialize_runtime_cancels_recovered_transient_interactions() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/recovered").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Recovered", CompileMode::Auto)
+            .await
+            .unwrap();
+        store
+            .create_turn(
+                &session.id,
+                "turn-recovered",
+                StudioTurnStatus::WaitingForModel,
+                1,
+            )
+            .await
+            .unwrap();
+        store
+            .upsert_interaction(&pending_interaction(
+                "ask-recovered",
+                &session.id,
+                InteractionKind::UserInput,
+                InteractionPayload::UserInput {
+                    questions: Vec::new(),
+                },
+            ))
+            .await
+            .unwrap();
+        store
+            .upsert_interaction(&pending_interaction(
+                "approval-recovered",
+                &session.id,
+                InteractionKind::ToolApproval,
+                InteractionPayload::ToolApproval {
+                    name: "bash".to_string(),
+                    arguments: serde_json::json!({"command": "echo hi"}),
+                    working_directory: None,
+                    parent_agent_id: None,
+                },
+            ))
+            .await
+            .unwrap();
+        store
+            .upsert_interaction(&pending_interaction(
+                "plan-recovered",
+                &session.id,
+                InteractionKind::PlanConfirmation,
+                InteractionPayload::PlanConfirmation {
+                    plan_id: "plan-1".to_string(),
+                    content: "Plan".to_string(),
+                },
+            ))
+            .await
+            .unwrap();
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let home = std::env::temp_dir().join(format!("pure-recovered-runtime-home-{unique}"));
+        let runtime = StudioRuntime::with_runtime_state(
+            store.clone(),
+            ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
+            StudioRuntimeState::new(),
+        );
+
+        let snapshot = runtime.initialize_runtime().await.unwrap();
+
+        assert_eq!(snapshot.status, StudioRuntimeStatus::Ready);
+        assert_eq!(snapshot.active_turns, Vec::new());
+        let ask = store
+            .read_interaction("ask-recovered")
+            .await
+            .unwrap()
+            .unwrap();
+        let approval = store
+            .read_interaction("approval-recovered")
+            .await
+            .unwrap()
+            .unwrap();
+        let plan = store
+            .read_interaction("plan-recovered")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(ask.status, InteractionStatus::Cancelled);
+        assert_eq!(approval.status, InteractionStatus::Cancelled);
+        assert_eq!(plan.status, InteractionStatus::Pending);
+        let studio_events = store
+            .load_studio_events(&session.id, None, None)
+            .await
+            .unwrap();
+        let cancelled_interactions = studio_events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    &event.kind,
+                    StudioEventKind::InteractionChanged { event }
+                        if event.interaction.status == InteractionStatus::Cancelled
+                )
+            })
+            .count();
+        assert_eq!(cancelled_interactions, 2);
         let _ = tokio::fs::remove_dir_all(home).await;
     }
 
@@ -1807,16 +1976,50 @@ mod tests {
         assert_eq!(stopped.session_id, session.id);
         assert!(stopped.stopped);
         let _ = release_tx.send(());
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                if runtime.runtime_snapshot().active_turns.is_empty() {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .unwrap();
+        wait_for_no_active_turn(&runtime).await;
+        handle.await.unwrap();
+        let _ = tokio::fs::remove_dir_all(home).await;
+        let _ = tokio::fs::remove_dir_all(workspace).await;
+    }
+
+    #[tokio::test]
+    async fn ui_submit_clears_active_runtime_snapshot_after_completion() {
+        let sse_body = concat!(
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"done\"}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+            "data: [DONE]\n\n"
+        )
+        .to_string();
+        let (base_url, handle) = serve_sse_once(sse_body).await;
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let home = std::env::temp_dir().join(format!("pure-ui-complete-home-{unique}"));
+        let workspace = std::env::temp_dir().join(format!("pure-ui-complete-workspace-{unique}"));
+        tokio::fs::create_dir_all(&workspace).await.unwrap();
+        let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+        config_store.save(&test_config(base_url)).unwrap();
+        let store = StudioStore::open_memory().await.unwrap();
+        let runtime = StudioRuntime::new(store.clone(), config_store);
+        let project = runtime.open_project(&workspace).await.unwrap();
+        let session = store
+            .create_session(&project.id, "UI completion", CompileMode::Auto)
+            .await
+            .unwrap();
+
+        runtime
+            .submit_prompt(StudioSubmitPromptRequest {
+                session_id: session.id.clone(),
+                prompt: "complete".to_string(),
+                attachment_ids: Vec::new(),
+                options: StudioSubmitPromptOptions::default(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(runtime.runtime_snapshot().active_turns.len(), 1);
+
+        wait_for_no_active_turn(&runtime).await;
         handle.await.unwrap();
         let _ = tokio::fs::remove_dir_all(home).await;
         let _ = tokio::fs::remove_dir_all(workspace).await;
