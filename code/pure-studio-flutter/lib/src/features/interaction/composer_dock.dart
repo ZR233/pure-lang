@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/studio_tokens.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
+import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_chrome.dart';
 import '../../shared/upward_popup_menu.dart';
 import 'interaction_payload.dart';
@@ -22,11 +23,11 @@ class ComposerDock extends ConsumerWidget {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 4, 18, 14),
+        padding: const EdgeInsets.fromLTRB(26, 8, 26, 18),
         child: Align(
           alignment: Alignment.center,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 760),
+            constraints: const BoxConstraints(maxWidth: 740),
             child: interaction == null
                 ? _PromptComposer(state: state)
                 : _InteractionDock(state: state, interaction: interaction),
@@ -81,11 +82,11 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
         widget.state.composerText.trim().isNotEmpty &&
         !widget.state.isBusy;
     return StudioPanel(
-      backgroundColor: colors.surfaceContainerLowest,
+      backgroundColor: StudioColors.white,
       borderColor: colors.outlineVariant.withValues(alpha: 0.86),
       radius: StudioRadii.lg,
       shadow: true,
-      padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+      padding: const EdgeInsets.fromLTRB(12, 8, 10, 10),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -94,7 +95,7 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
             minLines: 1,
             maxLines: 6,
             decoration: InputDecoration(
-              hintText: 'Ask Pure Studio',
+              hintText: context.l10n.composerHint,
               hintStyle: TextStyle(color: colors.onSurfaceVariant),
               isDense: true,
               filled: false,
@@ -122,13 +123,13 @@ class _PromptComposerState extends ConsumerState<_PromptComposer> {
               const Spacer(),
               if (widget.state.isBusy)
                 IconButton.filledTonal(
-                  tooltip: 'Stop',
+                  tooltip: context.l10n.composerStop,
                   icon: const Icon(Icons.stop),
                   onPressed: ref.read(studioControllerProvider.notifier).stop,
                 )
               else
                 IconButton.filled(
-                  tooltip: 'Send',
+                  tooltip: context.l10n.composerSend,
                   style: IconButton.styleFrom(
                     backgroundColor: StudioColors.clay,
                     foregroundColor: Colors.white,
@@ -156,7 +157,7 @@ class _PermissionSelector extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return UpwardPopupMenu<PermissionMode>(
-      tooltip: 'Permission mode',
+      tooltip: context.l10n.permissionModeTooltip,
       initialValue: mode,
       onSelected: ref.read(studioControllerProvider.notifier).setPermissionMode,
       itemBuilder: (context) => [
@@ -183,7 +184,7 @@ class _PermissionSelector extends ConsumerWidget {
       ],
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerLow,
+          color: context.studioPaper2,
           border: Border.all(color: context.studioLine),
           borderRadius: BorderRadius.circular(StudioRadii.sm),
         ),
@@ -266,7 +267,7 @@ class _StopButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return IconButton.filledTonal(
-      tooltip: 'Stop',
+      tooltip: context.l10n.composerStop,
       icon: const Icon(Icons.stop),
       onPressed: ref.read(studioControllerProvider.notifier).stop,
     );

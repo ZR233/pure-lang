@@ -60,34 +60,30 @@ class _InstructionsTabState extends ConsumerState<_InstructionsTab> {
   Widget build(BuildContext context) {
     return _SettingsPane(
       children: [
-        TextField(
+        _SettingsHeader(
+          title: context.l10n.settingsInstructionsTitle,
+          subtitle: context.l10n.settingsInstructionsSubtitle,
+        ),
+        const SizedBox(height: 16),
+        _InstructionEditor(
           controller: _baseController,
-          maxLines: 8,
-          decoration: const InputDecoration(
-            labelText: 'Base instructions',
-            prefixIcon: Icon(Icons.notes_outlined),
-          ),
-          onChanged: (_) => _scheduleSave(),
+          label: context.l10n.settingsBaseInstructions,
+          icon: Icons.notes_outlined,
+          onChanged: _scheduleSave,
         ),
         const SizedBox(height: 12),
-        TextField(
+        _InstructionEditor(
           controller: _developerController,
-          maxLines: 8,
-          decoration: const InputDecoration(
-            labelText: 'Developer instructions',
-            prefixIcon: Icon(Icons.code),
-          ),
-          onChanged: (_) => _scheduleSave(),
+          label: context.l10n.settingsDeveloperInstructions,
+          icon: Icons.code,
+          onChanged: _scheduleSave,
         ),
         const SizedBox(height: 12),
-        TextField(
+        _InstructionEditor(
           controller: _userController,
-          maxLines: 8,
-          decoration: const InputDecoration(
-            labelText: 'User context',
-            prefixIcon: Icon(Icons.person_outline),
-          ),
-          onChanged: (_) => _scheduleSave(),
+          label: context.l10n.settingsUserContext,
+          icon: Icons.person_outline,
+          onChanged: _scheduleSave,
         ),
         if (_saving || _error != null) ...[
           const SizedBox(height: 12),
@@ -130,6 +126,78 @@ class _InstructionsTabState extends ConsumerState<_InstructionsTab> {
         setState(() => _saving = false);
       }
     }
+  }
+}
+
+class _InstructionEditor extends StatelessWidget {
+  const _InstructionEditor({
+    required this.controller,
+    required this.label,
+    required this.icon,
+    required this.onChanged,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final IconData icon;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return StudioPanel(
+      backgroundColor: context.colors.surfaceContainerLowest,
+      radius: StudioRadii.md,
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: context.studioInkSoft),
+              const SizedBox(width: 10),
+              Text(
+                label,
+                style: context.text.titleSmall?.copyWith(
+                  color: context.studioInk,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: controller,
+            minLines: 5,
+            maxLines: 8,
+            style: context.text.bodyMedium?.copyWith(
+              color: context.studioInk,
+              height: 1.55,
+            ),
+            decoration: InputDecoration(
+              hintText: context.l10n.settingsInstructionHint,
+              filled: true,
+              fillColor: context.studioPaper,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 13,
+                vertical: 12,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(StudioRadii.sm),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(StudioRadii.sm),
+                borderSide: BorderSide(color: context.studioLine),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(StudioRadii.sm),
+                borderSide: const BorderSide(color: StudioColors.clay),
+              ),
+            ),
+            onChanged: (_) => onChanged(),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -176,30 +244,54 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
         .toList();
     return _SettingsPane(
       children: [
-        SearchBar(
-          leading: const Icon(Icons.search),
-          hintText: 'Filter skills',
+        _SettingsHeader(
+          title: context.l10n.settingsSkillsTitle,
+          subtitle: context.l10n.settingsSkillsSubtitle,
+          trailing: FilledButton.icon(
+            icon: _discovering
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.travel_explore),
+            label: Text(
+              _discovering
+                  ? context.l10n.settingsDiscovering
+                  : context.l10n.settingsDiscover,
+            ),
+            onPressed: widget.projectId == null || _discovering
+                ? null
+                : _discoverSkills,
+          ),
+        ),
+        const SizedBox(height: 16),
+        _SettingsSearchField(
+          hintText: context.l10n.settingsFilterSkills,
           onChanged: (value) => setState(() => _query = value),
         ),
         const SizedBox(height: 14),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+        Column(
           children: [
             for (final skill in filteredSkills)
-              FilterChip(
-                avatar: const Icon(Icons.extension_outlined, size: 18),
-                label: Text(skill, overflow: TextOverflow.ellipsis),
-                selected: !disabledSkills.contains(skill),
-                onSelected: (selected) {
-                  final disabled = {...disabledSkills};
-                  if (selected) {
-                    disabled.remove(skill);
-                  } else {
-                    disabled.add(skill);
-                  }
-                  unawaited(_saveDisabled(disabled));
-                },
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _SettingsToggleRow(
+                  icon: Icons.extension_outlined,
+                  title: skill,
+                  subtitle: disabledSkills.contains(skill)
+                      ? context.l10n.settingsSkillDisabled
+                      : context.l10n.settingsSkillEnabled,
+                  value: !disabledSkills.contains(skill),
+                  onChanged: (selected) {
+                    final disabled = {...disabledSkills};
+                    if (selected) {
+                      disabled.remove(skill);
+                    } else {
+                      disabled.add(skill);
+                    }
+                    unawaited(_saveDisabled(disabled));
+                  },
+                ),
               ),
           ],
         ),
@@ -208,11 +300,11 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
           _EmptySettingsMessage(
             icon: Icons.extension_outlined,
             title: widget.projectId == null
-                ? 'Open a project to discover skills'
-                : 'No skills match this filter',
+                ? context.l10n.settingsOpenProjectToDiscoverSkills
+                : context.l10n.settingsNoSkillsMatchFilter,
             body: widget.projectId == null
-                ? 'Skills are discovered from the selected workspace and configured user/system sources.'
-                : 'Clear the search or run discovery again.',
+                ? context.l10n.settingsSkillsDiscoverySources
+                : context.l10n.settingsClearSearchOrDiscoverAgain,
           ),
         ],
         if (_discoverError != null) ...[
@@ -223,22 +315,6 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
           const SizedBox(height: 12),
           _InlineError(message: _saveError!),
         ],
-        const SizedBox(height: 16),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: FilledButton.icon(
-            icon: _discovering
-                ? const SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.travel_explore),
-            label: Text(_discovering ? 'Discovering' : 'Discover'),
-            onPressed: widget.projectId == null || _discovering
-                ? null
-                : _discoverSkills,
-          ),
-        ),
       ],
     );
   }
@@ -285,373 +361,5 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
         setState(() => _discovering = false);
       }
     }
-  }
-}
-
-class _RolesTab extends ConsumerStatefulWidget {
-  const _RolesTab({required this.providers, required this.roles});
-
-  final List<ProviderSettingsView> providers;
-  final List<RoleSettingsView> roles;
-
-  @override
-  ConsumerState<_RolesTab> createState() => _RolesTabState();
-}
-
-class _RolesTabState extends ConsumerState<_RolesTab> {
-  final Map<String, String> _selectionByRole = {};
-
-  @override
-  Widget build(BuildContext context) {
-    const roles = ['explorer', 'planner', 'executor', 'reviewer'];
-    final options = _roleModelOptions(widget.providers);
-    return _SettingsPane(
-      children: [
-        for (final role in roles)
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  const Icon(Icons.badge_outlined),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    flex: 2,
-                    child: Text(
-                      role,
-                      style: Theme.of(context).textTheme.titleSmall,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    flex: 3,
-                    child: DropdownButtonFormField<String>(
-                      initialValue: _selectedRoleModelKey(role, options),
-                      decoration: const InputDecoration(labelText: 'Model'),
-                      items: [
-                        if (options.isEmpty)
-                          const DropdownMenuItem(
-                            value: 'default::default',
-                            child: Text('default'),
-                          )
-                        else
-                          for (final option in options)
-                            DropdownMenuItem(
-                              value: option.key,
-                              child: Text(
-                                option.label,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                      ],
-                      onChanged: (value) {
-                        if (value == null) {
-                          return;
-                        }
-                        setState(() => _selectionByRole[role] = value);
-                        final option = options.firstWhere(
-                          (option) => option.key == value,
-                        );
-                        ref
-                            .read(studioControllerProvider.notifier)
-                            .setModelRole(
-                              roleKey: role,
-                              providerId: option.providerId,
-                              model: option.model,
-                              effort: option.effort,
-                            );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
-  String? _roleSelectionKey(String roleKey) {
-    final role = widget.roles.where((role) => role.key == roleKey).firstOrNull;
-    if (role == null || role.providerId.isEmpty || role.model.isEmpty) {
-      return null;
-    }
-    return '${role.providerId}::${role.model}';
-  }
-
-  String _selectedRoleModelKey(String role, List<_RoleModelOption> options) {
-    final selected = _selectionByRole[role];
-    if (selected != null && options.any((option) => option.key == selected)) {
-      return selected;
-    }
-    final configured = _roleSelectionKey(role);
-    if (configured != null &&
-        options.any((option) => option.key == configured)) {
-      return configured;
-    }
-    return options.isEmpty ? 'default::default' : options.first.key;
-  }
-
-  List<_RoleModelOption> _roleModelOptions(
-    List<ProviderSettingsView> providers,
-  ) {
-    final options = <_RoleModelOption>[];
-    for (final provider in providers) {
-      final models = provider.models.isEmpty
-          ? [
-              ProviderModelView(
-                slug: provider.defaultModel,
-                displayName: provider.defaultModel,
-                reasoningEfforts: const [],
-              ),
-            ]
-          : provider.models;
-      for (final model in models) {
-        if (model.slug.isEmpty) {
-          continue;
-        }
-        options.add(
-          _RoleModelOption(
-            providerId: provider.id,
-            model: model.slug,
-            label:
-                '${provider.name} / ${model.displayName.isEmpty ? model.slug : model.displayName}',
-            effort: model.reasoningEfforts.firstOrNull,
-          ),
-        );
-      }
-    }
-    return options;
-  }
-}
-
-class _RoleModelOption {
-  const _RoleModelOption({
-    required this.providerId,
-    required this.model,
-    required this.label,
-    required this.effort,
-  });
-
-  final String providerId;
-  final String model;
-  final String label;
-  final String? effort;
-
-  String get key => '$providerId::$model';
-}
-
-class _McpTab extends ConsumerStatefulWidget {
-  const _McpTab({required this.servers});
-
-  final List<McpServerSettingsView> servers;
-
-  @override
-  ConsumerState<_McpTab> createState() => _McpTabState();
-}
-
-class _McpTabState extends ConsumerState<_McpTab> {
-  final Map<String, bool> _enabledByServer = {};
-  final Map<String, String> _endpointByServer = {};
-  Timer? _saveTimer;
-  String? _error;
-
-  @override
-  void dispose() {
-    _saveTimer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return _SettingsPane(
-      children: [
-        for (final server in widget.servers)
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                children: [
-                  SwitchListTile(
-                    value: _enabledByServer[server.id] ?? server.enabled,
-                    onChanged: (value) {
-                      setState(() {
-                        _enabledByServer[server.id] = value;
-                      });
-                      unawaited(_save());
-                    },
-                    secondary: const Icon(Icons.hub_outlined),
-                    title: Text(server.id),
-                    subtitle: Text('${server.transport}  ${server.status}'),
-                  ),
-                  TextFormField(
-                    initialValue: server.endpoint,
-                    decoration: const InputDecoration(labelText: 'Endpoint'),
-                    onChanged: (value) => setState(() {
-                      _endpointByServer[server.id] = value;
-                      _scheduleSave();
-                    }),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        if (_error != null) _InlineError(message: _error!),
-      ],
-    );
-  }
-
-  void _scheduleSave() {
-    _saveTimer?.cancel();
-    _saveTimer = Timer(const Duration(milliseconds: 650), () {
-      unawaited(_save());
-    });
-  }
-
-  Future<void> _save() async {
-    try {
-      setState(() => _error = null);
-      await ref.read(studioControllerProvider.notifier).saveMcpSettings({
-        'servers': [
-          for (final server in widget.servers)
-            {
-              'id': server.id,
-              'enabled': _enabledByServer[server.id] ?? server.enabled,
-              'transport': server.transport,
-              'endpoint': _endpointByServer[server.id] ?? server.endpoint,
-            },
-        ],
-      });
-    } catch (error) {
-      if (mounted) {
-        setState(() => _error = error.toString());
-      }
-    }
-  }
-}
-
-class _SecurityTab extends ConsumerWidget {
-  const _SecurityTab({required this.mode});
-
-  final PermissionMode mode;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return _SettingsPane(
-      maxWidth: 620,
-      children: [
-        SegmentedButton<PermissionMode>(
-          showSelectedIcon: false,
-          segments: const [
-            ButtonSegment(
-              value: PermissionMode.requestApproval,
-              icon: Icon(Icons.verified_user_outlined),
-              label: Text('Request'),
-            ),
-            ButtonSegment(
-              value: PermissionMode.autoReview,
-              icon: Icon(Icons.rule_folder_outlined),
-              label: Text('Review'),
-            ),
-            ButtonSegment(
-              value: PermissionMode.fullAccess,
-              icon: Icon(Icons.lock_open_outlined),
-              label: Text('Full'),
-            ),
-          ],
-          selected: {mode},
-          onSelectionChanged: (selection) {
-            ref
-                .read(studioControllerProvider.notifier)
-                .setPermissionMode(selection.first);
-          },
-        ),
-        const SizedBox(height: 12),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.security_outlined),
-            title: Text(mode.name),
-            subtitle: const Text('Workspace boundary policy'),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _GeneralTab extends ConsumerStatefulWidget {
-  const _GeneralTab({required this.settings});
-
-  final GeneralSettingsView settings;
-
-  @override
-  ConsumerState<_GeneralTab> createState() => _GeneralTabState();
-}
-
-class _GeneralTabState extends ConsumerState<_GeneralTab> {
-  String? _error;
-
-  @override
-  Widget build(BuildContext context) {
-    return _SettingsPane(
-      children: [
-        SwitchListTile(
-          value: widget.settings.followSystemTheme,
-          onChanged: (value) =>
-              _save(widget.settings.copyWith(followSystemTheme: value)),
-          secondary: const Icon(Icons.dark_mode_outlined),
-          title: const Text('Follow system theme'),
-        ),
-        SwitchListTile(
-          value: widget.settings.followActiveTurn,
-          onChanged: (value) =>
-              _save(widget.settings.copyWith(followActiveTurn: value)),
-          secondary: const Icon(Icons.vertical_align_bottom),
-          title: const Text('Follow active turn'),
-        ),
-        SwitchListTile(
-          value: widget.settings.compactTimeline,
-          onChanged: (value) =>
-              _save(widget.settings.copyWith(compactTimeline: value)),
-          secondary: const Icon(Icons.view_agenda_outlined),
-          title: const Text('Compact timeline'),
-        ),
-        if (_error != null) _InlineError(message: _error!),
-      ],
-    );
-  }
-
-  Future<void> _save(GeneralSettingsView settings) async {
-    try {
-      setState(() => _error = null);
-      await ref.read(studioControllerProvider.notifier).saveGeneralSettings({
-        'followSystemTheme': settings.followSystemTheme,
-        'followActiveTurn': settings.followActiveTurn,
-        'compactTimeline': settings.compactTimeline,
-      });
-    } catch (error) {
-      if (mounted) {
-        setState(() => _error = error.toString());
-      }
-    }
-  }
-}
-
-class _ReadonlyField extends StatelessWidget {
-  const _ReadonlyField({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: TextFormField(
-        initialValue: value,
-        readOnly: true,
-        decoration: InputDecoration(labelText: label),
-      ),
-    );
   }
 }

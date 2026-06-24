@@ -28,7 +28,7 @@ class _Header extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    session?.title ?? 'No session',
+                    session?.title ?? context.l10n.shellNoSession,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -80,14 +80,14 @@ String _projectSubtitle(StudioProject? project) {
   return '${project.name} · ${project.path}';
 }
 
-String _sessionSubtitle(StudioSession session) {
+String _sessionSubtitle(BuildContext context, StudioSession session) {
   final mode = switch (session.mode) {
     CompileMode.auto => 'Auto',
     CompileMode.plan => 'Plan',
   };
   final hour = session.updatedAt.hour.toString().padLeft(2, '0');
   final minute = session.updatedAt.minute.toString().padLeft(2, '0');
-  return '$mode · updated $hour:$minute';
+  return context.l10n.shellSessionUpdated(mode, '$hour:$minute');
 }
 
 class _Footer extends StatelessWidget {

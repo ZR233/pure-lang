@@ -5,6 +5,7 @@ import 'package:gpt_markdown/gpt_markdown.dart';
 
 import '../../app/theme/studio_tokens.dart';
 import '../../domain/models/studio_models.dart';
+import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_chrome.dart';
 import 'markdown_repair.dart';
 
@@ -110,7 +111,7 @@ class _TimelineViewState extends State<TimelineView> {
         Align(
           alignment: Alignment.topCenter,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 760),
+            constraints: const BoxConstraints(maxWidth: 740),
             child: ListView.builder(
               key: const ValueKey('timeline-scrollable'),
               controller: _controller,
@@ -133,7 +134,7 @@ class _TimelineViewState extends State<TimelineView> {
             child: Align(
               alignment: Alignment.bottomCenter,
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 760),
+                constraints: const BoxConstraints(maxWidth: 740),
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
                   child: Align(

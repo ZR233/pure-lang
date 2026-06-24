@@ -34,7 +34,7 @@ class _Sidebar extends ConsumerWidget {
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                'Pure Studio',
+                                context.l10n.appTitle,
                                 overflow: TextOverflow.ellipsis,
                                 style: Theme.of(context).textTheme.titleMedium
                                     ?.copyWith(
@@ -69,7 +69,7 @@ class _Sidebar extends ConsumerWidget {
                         vertical: 6,
                       ),
                       child: Text(
-                        'Sessions',
+                        context.l10n.sidebarSessions,
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: context.studioInkSoft,
                           fontWeight: FontWeight.w600,
@@ -127,7 +127,7 @@ class _ProjectTile extends ConsumerWidget {
             ),
           ),
           IconButton(
-            tooltip: 'Close project',
+            tooltip: context.l10n.sidebarCloseProject,
             icon: const Icon(Icons.close, size: 18),
             onPressed: canArchive
                 ? () => controller.archiveProject(project.id)
@@ -136,45 +136,23 @@ class _ProjectTile extends ConsumerWidget {
         ],
       );
     }
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: ListTile(
-        dense: true,
-        selected: selected,
-        tileColor: selected ? StudioColors.claySoft : null,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        leading: Icon(
-          selected ? Icons.folder : Icons.folder_open,
-          color: selected ? StudioColors.clayDeep : colors.onSurfaceVariant,
+    return _SidebarTile(
+      selected: selected,
+      icon: selected ? Icons.folder : Icons.folder_open,
+      title: project.name,
+      subtitle: project.path,
+      iconColor: selected ? StudioColors.clayDeep : colors.onSurfaceVariant,
+      onTap: () => controller.selectProject(project.id),
+      trailing: IconButton(
+        tooltip: context.l10n.sidebarCloseProject,
+        style: IconButton.styleFrom(
+          minimumSize: const Size.square(30),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
-        title: Text(
-          project.name,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: selected ? StudioColors.clayDeep : context.studioInk,
-            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-          ),
-        ),
-        subtitle: Text(
-          project.path,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(
-            context,
-          ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
-        ),
-        trailing: IconButton(
-          tooltip: 'Close project',
-          style: IconButton.styleFrom(
-            minimumSize: const Size.square(34),
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          ),
-          icon: const Icon(Icons.close, size: 18),
-          onPressed: canArchive
-              ? () => controller.archiveProject(project.id)
-              : null,
-        ),
-        onTap: () => controller.selectProject(project.id),
+        icon: const Icon(Icons.close, size: 17),
+        onPressed: canArchive
+            ? () => controller.archiveProject(project.id)
+            : null,
       ),
     );
   }
@@ -199,7 +177,6 @@ class _SessionTile extends ConsumerWidget {
         ? Icons.route
         : Icons.flash_on;
     final colors = Theme.of(context).colorScheme;
-    final color = selected ? StudioColors.claySoft : null;
     if (compact) {
       return Tooltip(
         message: session.title,
@@ -212,51 +189,106 @@ class _SessionTile extends ConsumerWidget {
         ),
       );
     }
+    return _SidebarTile(
+      selected: selected,
+      icon: modeIcon,
+      title: session.title,
+      subtitle: _sessionSubtitle(context, session),
+      iconColor: selected ? StudioColors.clayDeep : colors.onSurfaceVariant,
+      onTap: () =>
+          ref.read(studioControllerProvider.notifier).selectSession(session.id),
+      trailing: IconButton(
+        tooltip: context.l10n.sidebarArchiveSession,
+        style: IconButton.styleFrom(
+          minimumSize: const Size.square(30),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        icon: const Icon(Icons.archive_outlined, size: 18),
+        onPressed: canArchive
+            ? () => ref
+                  .read(studioControllerProvider.notifier)
+                  .archiveSession(session.id)
+            : null,
+      ),
+    );
+  }
+}
+
+class _SidebarTile extends StatelessWidget {
+  const _SidebarTile({
+    required this.selected,
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    required this.trailing,
+  });
+
+  final bool selected;
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final Widget trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = selected ? StudioColors.clayDeep : context.studioInk;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
-      child: ListTile(
-        dense: true,
-        selected: selected,
-        tileColor: color,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        leading: Icon(
-          modeIcon,
-          size: 18,
-          color: selected ? StudioColors.clayDeep : colors.onSurfaceVariant,
-        ),
-        title: Text(
-          session.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: selected ? StudioColors.clayDeep : context.studioInk,
-            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+      child: Material(
+        color: selected ? context.studioPaper : Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(StudioRadii.sm),
+          side: BorderSide(
+            color: selected ? context.studioLine2 : Colors.transparent,
           ),
         ),
-        subtitle: Text(
-          _sessionSubtitle(session),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(
-            context,
-          ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
-        ),
-        trailing: IconButton(
-          tooltip: 'Archive session',
-          style: IconButton.styleFrom(
-            minimumSize: const Size.square(34),
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 7, 4, 7),
+            child: Row(
+              children: [
+                Icon(icon, size: 17, color: iconColor),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: context.text.labelLarge?.copyWith(
+                          color: foreground,
+                          fontWeight: selected
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                        ),
+                      ),
+                      if (subtitle.isNotEmpty) ...[
+                        const SizedBox(height: 1),
+                        Text(
+                          subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: context.text.bodySmall?.copyWith(
+                            color: context.studioInkSoft,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                trailing,
+              ],
+            ),
           ),
-          icon: const Icon(Icons.archive_outlined, size: 20),
-          onPressed: canArchive
-              ? () => ref
-                    .read(studioControllerProvider.notifier)
-                    .archiveSession(session.id)
-              : null,
         ),
-        onTap: () => ref
-            .read(studioControllerProvider.notifier)
-            .selectSession(session.id),
       ),
     );
   }
@@ -276,7 +308,7 @@ class _SidebarActions extends ConsumerWidget {
           ? Column(
               children: [
                 IconButton(
-                  tooltip: 'New session',
+                  tooltip: context.l10n.sidebarNewSession,
                   icon: const Icon(Icons.add_comment_outlined),
                   onPressed: state.selectedProjectId == null || state.isBusy
                       ? null
@@ -285,12 +317,12 @@ class _SidebarActions extends ConsumerWidget {
                             .createSession,
                 ),
                 IconButton(
-                  tooltip: 'Open project',
+                  tooltip: context.l10n.sidebarOpenProject,
                   icon: const Icon(Icons.create_new_folder),
                   onPressed: () => _openProject(ref),
                 ),
                 IconButton(
-                  tooltip: 'Settings',
+                  tooltip: context.l10n.sidebarSettings,
                   icon: const Icon(Icons.settings),
                   onPressed: () => context.go('/settings'),
                 ),
@@ -301,8 +333,8 @@ class _SidebarActions extends ConsumerWidget {
                 Expanded(
                   child: _SidebarActionButton(
                     icon: Icons.add_comment_outlined,
-                    label: 'New',
-                    tooltip: 'New session',
+                    label: context.l10n.sidebarNew,
+                    tooltip: context.l10n.sidebarNewSession,
                     onPressed: state.selectedProjectId == null || state.isBusy
                         ? null
                         : ref
@@ -314,14 +346,14 @@ class _SidebarActions extends ConsumerWidget {
                 Expanded(
                   child: _SidebarActionButton(
                     icon: Icons.create_new_folder,
-                    label: 'Open',
-                    tooltip: 'Open project',
+                    label: context.l10n.sidebarOpen,
+                    tooltip: context.l10n.sidebarOpenProject,
                     onPressed: () => _openProject(ref),
                   ),
                 ),
                 const SizedBox(width: 8),
                 IconButton(
-                  tooltip: 'Settings',
+                  tooltip: context.l10n.sidebarSettings,
                   icon: const Icon(Icons.settings),
                   onPressed: () => context.go('/settings'),
                 ),

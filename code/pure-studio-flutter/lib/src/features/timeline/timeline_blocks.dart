@@ -5,11 +5,11 @@ class _EmptyTimeline extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    return Center(
       child: StudioEmptyState(
         icon: Icons.forum_outlined,
-        title: 'No messages yet',
-        message: 'Open a project or start a session to begin.',
+        title: context.l10n.timelineEmptyTitle,
+        message: context.l10n.timelineEmptyMessage,
       ),
     );
   }
@@ -28,7 +28,7 @@ class _JumpToLatestButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final textStyle = Theme.of(context).textTheme.labelSmall;
     return Tooltip(
-      message: '跳到最新',
+      message: context.l10n.timelineJumpToLatest,
       child: Material(
         elevation: 0,
         color: StudioColors.claySoft,
@@ -54,7 +54,7 @@ class _JumpToLatestButton extends StatelessWidget {
                 if (pendingCount > 0) ...[
                   const SizedBox(width: 4),
                   Text(
-                    'New',
+                    context.l10n.timelineNew,
                     style: textStyle?.copyWith(color: StudioColors.clayDeep),
                   ),
                 ],
@@ -201,7 +201,7 @@ class _ReasoningPartState extends State<_ReasoningPart> {
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.part.title ?? 'Reasoning';
+    final title = widget.part.title ?? context.l10n.timelineReasoningFallback;
     return _TimelinePanel(
       child: ExpansionTile(
         tilePadding: const EdgeInsets.symmetric(horizontal: 12),
@@ -239,11 +239,10 @@ class _ToolPart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _TimelinePanel(
-      child: ListTile(
-        dense: true,
-        leading: const Icon(Icons.terminal, size: 18),
-        title: Text(part.title ?? 'Tool', overflow: TextOverflow.ellipsis),
-        subtitle: Text(part.text, maxLines: 4, overflow: TextOverflow.ellipsis),
+      child: _TimelineMetaRow(
+        icon: Icons.terminal,
+        title: part.title ?? context.l10n.timelineToolFallback,
+        subtitle: part.text,
         trailing: _StatusPill(label: part.status),
       ),
     );
@@ -269,7 +268,7 @@ class _PlanPart extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    part.title ?? 'Plan',
+                    part.title ?? context.l10n.timelinePlanFallback,
                     style: Theme.of(context).textTheme.titleSmall,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -301,11 +300,64 @@ class _AgentPart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _TimelinePanel(
-      child: ListTile(
-        dense: true,
-        leading: const Icon(Icons.account_tree_outlined, size: 18),
-        title: Text(part.title ?? 'Agent', overflow: TextOverflow.ellipsis),
-        subtitle: Text(part.text, overflow: TextOverflow.ellipsis),
+      child: _TimelineMetaRow(
+        icon: Icons.account_tree_outlined,
+        title: part.title ?? context.l10n.timelineAgentFallback,
+        subtitle: part.text,
+      ),
+    );
+  }
+}
+
+class _TimelineMetaRow extends StatelessWidget {
+  const _TimelineMetaRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      child: Row(
+        children: [
+          Icon(icon, size: 17, color: context.studioInkSoft),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.text.labelLarge?.copyWith(
+                    color: context.studioInk,
+                  ),
+                ),
+                if (subtitle.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: context.text.bodySmall?.copyWith(
+                      color: context.studioInkSoft,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (trailing != null) ...[const SizedBox(width: 10), trailing!],
+        ],
       ),
     );
   }
@@ -320,7 +372,7 @@ class _TimelinePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return StudioPanel(
-      backgroundColor: colors.surfaceContainerLowest.withValues(alpha: 0.84),
+      backgroundColor: context.studioPaper2,
       borderColor: colors.outlineVariant.withValues(alpha: 0.82),
       radius: StudioRadii.md,
       child: child,
@@ -359,7 +411,7 @@ class _AgentMarkdown extends StatelessWidget {
     final repaired = repairAgentMarkdownForDisplay(text);
     return GptMarkdown(
       repaired,
-      key: ValueKey('gpt-markdown-$id-$status-${repaired.length}'),
+      key: ValueKey('gpt-markdown-$id-$status'),
       style: _markdownBodyStyle(context),
       codeBuilder: (context, name, code, closed) {
         final scheme = Theme.of(context).colorScheme;

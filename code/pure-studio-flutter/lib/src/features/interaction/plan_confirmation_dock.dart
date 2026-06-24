@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/repositories/studio_repository.dart';
+import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_chrome.dart';
 import 'interaction_widgets.dart';
 
@@ -37,27 +38,31 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
     return InteractionDockShell(
       kind: InteractionDockKind.plan,
       trailing: widget.trailing,
-      title: '实施此计划？',
-      subtitle: '计划正文保留在上方 timeline 卡片中',
+      title: context.l10n.interactionPlanConfirmTitle,
+      subtitle: context.l10n.interactionPlanConfirmSubtitle,
       footerHint: _editingAdjustment
-          ? '只会发送你的调整说明，不会回传计划正文。'
-          : '选择实施会切回 Auto 模式并提交后台实施 prompt。',
+          ? context.l10n.interactionPlanEditingFooterHint
+          : context.l10n.interactionPlanImplementFooterHint,
       footer: DockActions(
         children: [
           TextButton.icon(
             icon: const Icon(Icons.close),
-            label: const Text('忽略'),
+            label: Text(context.l10n.interactionPlanIgnore),
             onPressed: _resolveDismiss,
           ),
           if (!_editingAdjustment)
             OutlinedButton.icon(
               icon: const Icon(Icons.edit_note),
-              label: const Text('告诉 Pure 如何调整'),
+              label: Text(context.l10n.interactionPlanAdjust),
               onPressed: () => setState(() => _editingAdjustment = true),
             ),
           FilledButton.icon(
             icon: Icon(_editingAdjustment ? Icons.check : Icons.play_arrow),
-            label: Text(_editingAdjustment ? '提交调整' : '实施此计划'),
+            label: Text(
+              _editingAdjustment
+                  ? context.l10n.interactionPlanAdjustSubmit
+                  : context.l10n.interactionPlanImplement,
+            ),
             onPressed: _editingAdjustment
                 ? (canSubmitAdjustment ? _resolveContinuePlanning : null)
                 : _resolveImplement,
@@ -73,8 +78,8 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
                 ? Icons.edit_note_outlined
                 : Icons.info_outline,
             message: _editingAdjustment
-                ? '继续规划：只提交你的调整说明。'
-                : '计划内容不会在这里编辑；请在 timeline 中查看完整计划。',
+                ? context.l10n.interactionPlanEditingNotice
+                : context.l10n.interactionPlanViewNotice,
             tone: StudioNoticeTone.warning,
             iconSize: 17,
             padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
@@ -87,10 +92,10 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
                 autofocus: true,
                 minLines: 2,
                 maxLines: 5,
-                decoration: const InputDecoration(
-                  hintText: '告诉 Pure 需要怎样调整计划...',
+                decoration: InputDecoration(
+                  hintText: context.l10n.interactionPlanAdjustHint,
                   alignLabelWithHint: true,
-                  prefixIcon: Icon(Icons.edit_note),
+                  prefixIcon: const Icon(Icons.edit_note),
                 ),
                 onChanged: (_) => setState(() {}),
                 onSubmitted: (_) {

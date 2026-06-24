@@ -13,6 +13,7 @@ import 'package:pure_studio_flutter/src/features/settings/settings_page.dart';
 import 'package:pure_studio_flutter/src/features/shell/studio_shell.dart';
 import 'package:pure_studio_flutter/src/features/timeline/markdown_repair.dart';
 import 'package:pure_studio_flutter/src/features/timeline/timeline_view.dart';
+import 'package:pure_studio_flutter/src/l10n/app_localizations.dart';
 
 void main() {
   test(
@@ -407,7 +408,7 @@ void main() {
     ];
 
     await tester.pumpWidget(
-      MaterialApp(
+      _localizedApp(
         home: Scaffold(
           body: SizedBox(
             width: 980,
@@ -464,7 +465,7 @@ void main() {
     ];
 
     await tester.pumpWidget(
-      MaterialApp(
+      _localizedApp(
         home: Scaffold(
           body: SizedBox(
             width: 980,
@@ -522,7 +523,7 @@ void main() {
     ];
 
     await tester.pumpWidget(
-      MaterialApp(
+      _localizedApp(
         home: Scaffold(
           body: SizedBox(
             width: 980,
@@ -601,7 +602,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(_timelinePixels(tester), closeTo(offsetBeforeAppend, 1));
-    expect(find.byTooltip('跳到最新'), findsOneWidget);
+    expect(find.byTooltip('Jump to latest'), findsOneWidget);
   });
 
   testWidgets('jump to latest button restores bottom following', (
@@ -630,11 +631,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('跳到最新'));
+    await tester.tap(find.byTooltip('Jump to latest'));
     await tester.pumpAndSettle();
 
     expect(_timelineExtentAfter(tester), lessThanOrEqualTo(80));
-    expect(find.byTooltip('跳到最新'), findsNothing);
+    expect(find.byTooltip('Jump to latest'), findsNothing);
   });
 
   testWidgets('timeline follows streaming content growth near the bottom', (
@@ -702,7 +703,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(_timelinePixels(tester), closeTo(sessionAOffset, 1));
-    expect(find.byTooltip('跳到最新'), findsOneWidget);
+    expect(find.byTooltip('Jump to latest'), findsOneWidget);
   });
 
   testWidgets('sidebar session actions call Studio API', (tester) async {
@@ -715,7 +716,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
-        child: const MaterialApp(home: StudioShell()),
+        child: _localizedApp(home: const StudioShell()),
       ),
     );
     await tester.pumpAndSettle();
@@ -746,7 +747,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
-        child: const MaterialApp(home: StudioShell()),
+        child: _localizedApp(home: const StudioShell()),
       ),
     );
     await tester.pump();
@@ -792,7 +793,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
-        child: const MaterialApp(home: StudioShell()),
+        child: _localizedApp(home: const StudioShell()),
       ),
     );
     await tester.pumpAndSettle();
@@ -803,7 +804,7 @@ void main() {
     expect(find.bySemanticsLabel('Context'), findsOneWidget);
     expect(find.text('42/100'), findsNothing);
     expect(find.text('CNY 0.16'), findsOneWidget);
-    expect(find.text('1 skills · 1 MCP · 1 LSP · 2 agents'), findsOneWidget);
+    expect(find.text('1 skill · 1 MCP · 1 LSP · 2 agents'), findsOneWidget);
 
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     addTearDown(gesture.removePointer);
@@ -869,7 +870,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
-        child: const MaterialApp(home: StudioShell()),
+        child: _localizedApp(home: const StudioShell()),
       ),
     );
     await tester.pumpAndSettle();
@@ -908,7 +909,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
-        child: const MaterialApp(home: SettingsPage()),
+        child: _localizedApp(home: const SettingsPage()),
       ),
     );
     await tester.pumpAndSettle();
@@ -943,7 +944,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
-        child: const MaterialApp(home: SettingsPage()),
+        child: _localizedApp(home: const SettingsPage()),
       ),
     );
     await tester.pumpAndSettle();
@@ -976,12 +977,12 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
-        child: const MaterialApp(home: SettingsPage()),
+        child: _localizedApp(home: const SettingsPage()),
       ),
     );
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byType(SearchBar), 'no-such-provider');
+    await tester.enterText(find.byType(TextField).first, 'no-such-provider');
     await tester.pumpAndSettle();
 
     expect(find.text('No providers match this filter'), findsOneWidget);
@@ -1029,7 +1030,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
-        child: const MaterialApp(home: SettingsPage()),
+        child: _localizedApp(home: const SettingsPage()),
       ),
     );
     await tester.pumpAndSettle();
@@ -1070,7 +1071,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [studioApiProvider.overrideWithValue(api)],
-          child: const MaterialApp(home: SettingsPage()),
+          child: _localizedApp(home: const SettingsPage()),
         ),
       );
       await tester.pumpAndSettle();
@@ -1103,7 +1104,7 @@ void main() {
 
       await tester.tap(find.text('General'));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(SwitchListTile, 'Compact timeline'));
+      await tester.tap(find.text('Compact timeline'));
       await tester.pumpAndSettle();
       expect(api.savedGeneralSettings?['compactTimeline'], isTrue);
 
@@ -1125,7 +1126,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
-        child: const MaterialApp(home: SettingsPage()),
+        child: _localizedApp(home: const SettingsPage()),
       ),
     );
     await tester.pumpAndSettle();
@@ -1139,6 +1140,53 @@ void main() {
 
     expect(api.savedInstructionsSettings?['baseOverride'], 'new base');
   });
+
+  testWidgets(
+    'zh Hans locale localizes shell while config names pass through',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final api = _FakeStudioApi(_stateWithPlannerModels());
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(
+            locale: const Locale.fromSubtags(
+              languageCode: 'zh',
+              scriptCode: 'Hans',
+            ),
+            home: const SettingsPage(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('服务'), findsWidgets);
+      expect(find.text('添加 provider'), findsOneWidget);
+      expect(find.text('DeepSeek'), findsOneWidget);
+      expect(find.text('deepseek-reasoner'), findsWidgets);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(
+            locale: const Locale.fromSubtags(
+              languageCode: 'zh',
+              scriptCode: 'Hans',
+            ),
+            home: const StudioShell(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('描述你的需求...'), findsOneWidget);
+      expect(find.text('deepseek-v4-flash'), findsOneWidget);
+      expect(find.text('high'), findsOneWidget);
+    },
+  );
 
   testWidgets('user input interaction accepts freeform fallback answers', (
     tester,
@@ -1164,16 +1212,16 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
-        child: const MaterialApp(home: StudioShell()),
+        child: _localizedApp(home: const StudioShell()),
       ),
     );
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.text('Tell me which branch to use'), findsWidgets);
-    expect(find.widgetWithText(FilledButton, '回答'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Answer'), findsOneWidget);
     await tester.enterText(find.byType(TextField).last, 'use main');
     await tester.pump(const Duration(milliseconds: 50));
-    await tester.tap(find.widgetWithText(FilledButton, '回答'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Answer'));
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(api.resolvedInteractionId, 'interaction-1');
@@ -1237,32 +1285,32 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
-        child: const MaterialApp(home: StudioShell()),
+        child: _localizedApp(home: const StudioShell()),
       ),
     );
     await tester.pump(const Duration(milliseconds: 50));
 
-    expect(find.text('几个问题想确认'), findsOneWidget);
-    expect(find.text('问题 1 / 3'), findsOneWidget);
+    expect(find.text('A few questions'), findsOneWidget);
+    expect(find.text('Question 1 / 3'), findsOneWidget);
     await tester.tap(find.text('UI'));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.tap(find.text('Tests'));
     await tester.pump(const Duration(milliseconds: 50));
-    await tester.tap(find.widgetWithText(FilledButton, '下一题'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Next'));
     await tester.pump(const Duration(milliseconds: 50));
 
-    expect(find.text('问题 2 / 3'), findsOneWidget);
+    expect(find.text('Question 2 / 3'), findsOneWidget);
     await tester.tap(find.text('Docs'));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.enterText(find.byType(TextField).last, 'also mention risk');
     await tester.pump(const Duration(milliseconds: 50));
-    await tester.tap(find.widgetWithText(FilledButton, '下一题'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Next'));
     await tester.pump(const Duration(milliseconds: 50));
 
-    expect(find.text('问题 3 / 3'), findsOneWidget);
+    expect(find.text('Question 3 / 3'), findsOneWidget);
     await tester.enterText(find.byType(TextField).last, 'secret-value');
     await tester.pump(const Duration(milliseconds: 50));
-    await tester.tap(find.widgetWithText(FilledButton, '提交答案'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Submit answers'));
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(api.resolvedInteractionId, 'interaction-questions');
@@ -1317,16 +1365,16 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
-        child: const MaterialApp(home: StudioShell()),
+        child: _localizedApp(home: const StudioShell()),
       ),
     );
     await tester.pump(const Duration(milliseconds: 50));
 
-    expect(find.text('实施此计划？'), findsOneWidget);
-    expect(find.text('实施此计划'), findsOneWidget);
+    expect(find.text('Implement this plan?'), findsOneWidget);
+    expect(find.text('Implement this plan'), findsOneWidget);
     expect(find.text('Plan content'), findsNothing);
     expect(find.text('Plan'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilledButton, '实施此计划'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Implement this plan'));
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(api.resolvedInteractionId, 'interaction-plan');
@@ -1365,16 +1413,16 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
-        child: const MaterialApp(home: StudioShell()),
+        child: _localizedApp(home: const StudioShell()),
       ),
     );
     await tester.pump(const Duration(milliseconds: 50));
 
-    await tester.tap(find.text('告诉 Pure 如何调整'));
+    await tester.tap(find.text('Tell Pure how to adjust'));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.enterText(find.byType(TextField).last, 'add tests first');
     await tester.pump(const Duration(milliseconds: 50));
-    await tester.tap(find.widgetWithText(FilledButton, '提交调整'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Submit adjustment'));
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(api.resolvedInteractionId, 'interaction-plan-adjust');
@@ -1397,7 +1445,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
-        child: const MaterialApp(home: SettingsPage()),
+        child: _localizedApp(home: const SettingsPage()),
       ),
     );
     await tester.pumpAndSettle();
@@ -1419,7 +1467,7 @@ Widget _timelineHarness({
   required String sessionId,
   required List<TimelineMessage> messages,
 }) {
-  return MaterialApp(
+  return _localizedApp(
     home: Scaffold(
       body: SizedBox(
         width: 980,
@@ -1427,6 +1475,18 @@ Widget _timelineHarness({
         child: TimelineView(sessionId: sessionId, messages: messages),
       ),
     ),
+  );
+}
+
+Widget _localizedApp({
+  required Widget home,
+  Locale locale = const Locale('en'),
+}) {
+  return MaterialApp(
+    locale: locale,
+    localizationsDelegates: AppLocalizations.localizationsDelegates,
+    supportedLocales: AppLocalizations.supportedLocales,
+    home: home,
   );
 }
 
