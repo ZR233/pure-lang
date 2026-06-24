@@ -17,8 +17,8 @@ use tokio_util::sync::CancellationToken;
 use crate::config::{ConfigStore, ModelRole, PureConfig, ReasoningEffort, RoleConfig};
 use crate::mcp::McpRuntimeRegistry;
 use crate::skill::SkillCatalog;
-use crate::studio::active_turns::StudioActiveTurns;
 use crate::studio::StudioStore;
+use crate::studio::active_turns::StudioActiveTurns;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::mappers::default_session_runtime_record;
 use crate::studio::records::{
@@ -241,10 +241,9 @@ impl StudioRuntime {
         }
         .await;
         match initialization {
-            Ok(()) => {
-                self.runtime_state
-                    .transition(StudioRuntimeStatus::Ready, None)
-            }
+            Ok(()) => self
+                .runtime_state
+                .transition(StudioRuntimeStatus::Ready, None),
             Err(error) => {
                 let message = format!("{error:#}");
                 let _ = self
@@ -619,9 +618,11 @@ impl StudioRuntime {
             .options
             .cancellation_token
             .clone()
-            .unwrap_or_else(CancellationToken::new);
+            .unwrap_or_default();
         if request.options.cancellation_token.is_none() {
-            request.options = request.options.with_cancellation(cancellation_token.clone());
+            request.options = request
+                .options
+                .with_cancellation(cancellation_token.clone());
         }
         self.active_turns
             .insert(session_id.clone(), turn_id, cancellation_token)
