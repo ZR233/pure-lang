@@ -64,7 +64,7 @@ pub struct WriteStdinInput {
     pub max_output_chars: Option<usize>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CommandJsonOutput {
     status: String,
@@ -382,6 +382,10 @@ mod tests {
         (bash, stdin)
     }
 
+    fn command_json(output: &ToolOutput) -> CommandJsonOutput {
+        serde_json::from_str(&output.description).unwrap()
+    }
+
     fn test_context() -> ToolContext {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
         ToolContext {
@@ -438,9 +442,9 @@ mod tests {
             .execute(tool_input("echo hello", "s1", "t1"), test_context())
             .await
             .unwrap();
-        let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+        let result = command_json(&output);
 
-        assert_eq!(value["status"], "completed");
+        assert_eq!(result.status, "completed");
         assert!(!output.timed_out);
         assert!(!output.truncated.stdout.was_truncated);
         assert!(output.truncated.stdout.content.contains("hello"));
@@ -502,10 +506,10 @@ mod tests {
             .execute(tool_input("exit 42", "s3", "t3"), test_context())
             .await
             .unwrap();
-        let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+        let result = command_json(&output);
 
         assert_eq!(output.exit_code, Some(42));
-        assert_eq!(value["status"], "failed");
+        assert_eq!(result.status, "failed");
     }
 
     #[tokio::test]
@@ -669,12 +673,12 @@ mod tests {
             )
             .await
             .unwrap();
-        let value: serde_json::Value = serde_json::from_str(&running.description).unwrap();
+        let running_result = command_json(&running);
 
-        assert_eq!(value["status"], "running", "{value}");
-        let process_id = value["processId"].as_str().unwrap().to_string();
+        assert_eq!(running_result.status, "running", "{running_result:?}");
+        let process_id = running_result.process_id.unwrap();
 
-        let mut value = serde_json::Value::Null;
+        let mut result = None;
         for _ in 0..5 {
             let completed = stdin
                 .execute(
@@ -691,14 +695,15 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            value = serde_json::from_str(&completed.description).unwrap();
-            if value["status"] == "completed" {
+            result = Some(command_json(&completed));
+            if result.as_ref().unwrap().status == "completed" {
                 break;
             }
         }
+        let result = result.unwrap();
 
-        assert_eq!(value["status"], "completed", "{value}");
-        assert!(value["stdout"].as_str().unwrap().contains("done"));
+        assert_eq!(result.status, "completed", "{result:?}");
+        assert!(result.stdout.contains("done"));
     }
 
     #[tokio::test]
@@ -718,11 +723,11 @@ mod tests {
             )
             .await
             .unwrap();
-        let value: serde_json::Value = serde_json::from_str(&running.description).unwrap();
-        assert_eq!(value["status"], "running", "{value}");
-        let process_id = value["processId"].as_str().unwrap().to_string();
+        let running_result = command_json(&running);
+        assert_eq!(running_result.status, "running", "{running_result:?}");
+        let process_id = running_result.process_id.unwrap();
 
-        let mut value = serde_json::Value::Null;
+        let mut result = None;
         for attempt in 0..5 {
             let completed = stdin
                 .execute(
@@ -739,14 +744,15 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            value = serde_json::from_str(&completed.description).unwrap();
-            if value["status"] == "completed" {
+            result = Some(command_json(&completed));
+            if result.as_ref().unwrap().status == "completed" {
                 break;
             }
         }
+        let result = result.unwrap();
 
-        assert_eq!(value["status"], "completed", "{value}");
-        assert!(value["stdout"].as_str().unwrap().contains("got:hello"));
+        assert_eq!(result.status, "completed", "{result:?}");
+        assert!(result.stdout.contains("got:hello"));
     }
 
     #[tokio::test]
@@ -767,11 +773,11 @@ mod tests {
             )
             .await
             .unwrap();
-        let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+        let result = command_json(&output);
 
-        assert_eq!(value["status"], "timedOut");
+        assert_eq!(result.status, "timedOut");
         assert!(output.timed_out);
-        assert!(value["processId"].is_null());
+        assert_eq!(result.process_id, None);
     }
 
     #[tokio::test]
@@ -793,8 +799,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let first_value: serde_json::Value = serde_json::from_str(&first.description).unwrap();
-        let process_id = first_value["processId"].as_str().unwrap().to_string();
+        let process_id = command_json(&first).process_id.unwrap();
 
         let second = bash
             .execute(
@@ -866,14 +871,13 @@ mod tests {
             )
             .await
             .unwrap();
-        let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
-        let stdout = value["stdout"].as_str().unwrap();
+        let result = command_json(&output);
         let file_content = tokio::fs::read_to_string(&output.output_file)
             .await
             .unwrap();
 
-        assert!(stdout.len() < 5000);
-        assert!(stdout.contains("omitted"));
-        assert!(file_content.len() > stdout.len());
+        assert!(result.stdout.len() < 5000);
+        assert!(result.stdout.contains("omitted"));
+        assert!(file_content.len() > result.stdout.len());
     }
 }
