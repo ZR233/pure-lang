@@ -61,6 +61,7 @@ Flutter bridge crate 不承载流程逻辑，只把 Dart 调用转发到 `pl-cor
 - `send_message` 只把消息放入目标 agent mailbox，不启动 turn，也不把 `running` / `queued` agent 降级为 `waiting`；queued message 会在下一次 `followup_task` 触发的新 turn 中按入队顺序并入 prompt
 - `wait_agent` 必须用 agent 活动版本判断自上次观察后的新变化，不能只依赖下一次 notify；如果第一次调用前已有 agent 处于终态，应立即返回当前摘要而不是超时，但历史终态不能让后续等待绕过仍在运行的 agent
 - 父 agent 因中断、错误、预算限制或关闭而停止时，必须级联关闭仍在运行的子树，避免后台子 agent 残留为 `running`
+- `AgentControl` 是 agent latest snapshot 的唯一状态机入口；内部状态迁移必须集中处理 `status`、`updatedAt`、错误原因与预算详情。进入 `queued`、`running` 或 `completed` 时清理旧的 `error/reason/budgetLimitKind/budgetUsage`，避免从 `interrupted` 恢复后残留旧预算限制；进入 `errored/interrupted/shutdown` 时按当前 turn 或关闭原因写入详情。状态机必须拒绝从终局状态重新激活 agent，`send_message` 对 `queued/running` 保持原状态，`followup_task` 只把可恢复非运行状态推进到 `queued`。
 
 ## 3.3 核心 turn 编排
 
