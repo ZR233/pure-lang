@@ -3,7 +3,8 @@ part of 'settings_page.dart';
 class _ProviderList extends StatelessWidget {
   const _ProviderList({
     required this.providers,
-    required this.selectedProviderId,
+    required this.defaultProviderId,
+    required this.filtering,
     required this.usageByProvider,
     required this.loadingProviderIds,
     required this.usageError,
@@ -18,7 +19,8 @@ class _ProviderList extends StatelessWidget {
   });
 
   final List<ProviderSettingsView> providers;
-  final String? selectedProviderId;
+  final String? defaultProviderId;
+  final bool filtering;
   final Map<String, ProviderUsageView> usageByProvider;
   final Set<String> loadingProviderIds;
   final String? usageError;
@@ -74,12 +76,15 @@ class _ProviderList extends StatelessWidget {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 980),
               child: providers.isEmpty
-                  ? const Center(
+                  ? Center(
                       child: StudioEmptyState(
                         icon: Icons.cloud_off_outlined,
-                        title: 'No providers found',
-                        message:
-                            'Add a provider to configure credentials and models.',
+                        title: filtering
+                            ? 'No providers match this filter'
+                            : 'No providers found',
+                        message: filtering
+                            ? 'Clear the search to see all configured providers.'
+                            : 'Add a provider to configure credentials and models.',
                       ),
                     )
                   : ListView.builder(
@@ -90,7 +95,7 @@ class _ProviderList extends StatelessWidget {
                           padding: const EdgeInsets.only(bottom: 12),
                           child: _ProviderCard(
                             provider: provider,
-                            selected: provider.id == selectedProviderId,
+                            isDefault: provider.id == defaultProviderId,
                             usage: usageByProvider[provider.id],
                             usageLoading: loadingProviderIds.contains(
                               provider.id,
@@ -118,7 +123,7 @@ class _ProviderList extends StatelessWidget {
 class _ProviderCard extends StatelessWidget {
   const _ProviderCard({
     required this.provider,
-    required this.selected,
+    required this.isDefault,
     required this.usage,
     required this.usageLoading,
     required this.usageError,
@@ -130,7 +135,7 @@ class _ProviderCard extends StatelessWidget {
   });
 
   final ProviderSettingsView provider;
-  final bool selected;
+  final bool isDefault;
   final ProviderUsageView? usage;
   final bool usageLoading;
   final String? usageError;
@@ -145,160 +150,279 @@ class _ProviderCard extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     final models = provider.allModels;
     return Material(
-      color: selected ? StudioColors.claySoft : colors.surfaceContainerLowest,
+      color: colors.surfaceContainerLowest,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(StudioRadii.md),
         side: BorderSide(
-          color: selected
-              ? StudioColors.clay.withValues(alpha: 0.34)
+          color: isDefault
+              ? StudioColors.clay.withValues(alpha: 0.56)
               : colors.outlineVariant,
         ),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(StudioRadii.md),
         onTap: onOpen,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  CircleAvatar(
-                    radius: 18,
-                    backgroundColor: selected
+              SizedBox(
+                width: 4,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: isDefault
                         ? StudioColors.clay
-                        : colors.surfaceContainerHigh,
-                    child: Text(
-                      _initials(provider.name),
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: selected ? Colors.white : context.studioInk,
-                        fontWeight: FontWeight.w700,
-                      ),
+                        : colors.outlineVariant,
+                    borderRadius: const BorderRadius.horizontal(
+                      left: Radius.circular(StudioRadii.md),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
+                ),
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _ProviderLogo(provider: provider, active: isDefault),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _ProviderCardTitle(
+                              provider: provider,
+                              isDefault: isDefault,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          _ProviderCardActions(
+                            isDefault: isDefault,
+                            onOpen: onOpen,
+                            onSetDefault: onSetDefault,
+                            onRefreshUsage: onRefreshUsage,
+                            onEdit: onEdit,
+                            onDelete: onDelete,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 6,
+                        children: [
+                          _MiniMeta(
+                            icon: Icons.key_outlined,
+                            label: provider.id,
+                          ),
+                          _ProviderStatusChip(provider: provider),
+                          _MiniMeta(
+                            icon: Icons.link_outlined,
+                            label: provider.baseUrl,
+                          ),
+                          _MiniMeta(
+                            icon: Icons.hub_outlined,
+                            label: provider.providerKind,
+                          ),
+                          _MiniMeta(
+                            icon: Icons.smart_toy_outlined,
+                            label: provider.defaultModel,
+                          ),
+                          _MiniMeta(
+                            icon: Icons.memory_outlined,
+                            label: '${models.length} models',
+                          ),
+                          if (provider.updatedAt.isNotEmpty)
+                            _MiniMeta(
+                              icon: Icons.update_outlined,
+                              label: provider.updatedAt,
+                            ),
+                          _MiniMeta(
+                            icon: Icons.account_balance_wallet_outlined,
+                            label: _providerUsageSummary(
+                              provider,
+                              usage,
+                              usageLoading,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      _ProviderUsagePanel(
+                        provider: provider,
+                        usage: usage,
+                        loading: usageLoading,
+                        error: usageError,
+                        onRefresh: onRefreshUsage,
+                      ),
+                      if (models.isNotEmpty) ...[
+                        const SizedBox(height: 12),
                         Row(
                           children: [
                             Expanded(
-                              child: Text(
-                                provider.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(
-                                      color: selected
-                                          ? StudioColors.clayDeep
-                                          : context.studioInk,
-                                      fontWeight: FontWeight.w700,
-                                    ),
+                              child: Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                children: [
+                                  for (final model in models.take(5))
+                                    StudioPill(label: model.slug),
+                                  if (models.length > 5)
+                                    StudioPill(label: '+${models.length - 5}'),
+                                ],
                               ),
                             ),
-                            if (selected)
-                              const _InfoPill(
-                                icon: Icons.star_outline,
-                                label: 'default',
-                              ),
                           ],
                         ),
-                        const SizedBox(height: 3),
-                        Text(
-                          provider.id,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: colors.onSurfaceVariant),
-                        ),
                       ],
-                    ),
+                    ],
                   ),
-                  const SizedBox(width: 10),
-                  _ProviderStatusChip(provider: provider),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                runSpacing: 6,
-                children: [
-                  _MiniMeta(
-                    icon: Icons.smart_toy_outlined,
-                    label: provider.defaultModel,
-                  ),
-                  _MiniMeta(
-                    icon: Icons.memory_outlined,
-                    label: '${models.length} models',
-                  ),
-                  _MiniMeta(
-                    icon: Icons.hub_outlined,
-                    label: provider.providerKind,
-                  ),
-                  _MiniMeta(
-                    icon: Icons.account_balance_wallet_outlined,
-                    label: _providerUsageSummary(provider, usage, usageLoading),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _ProviderUsagePanel(
-                provider: provider,
-                usage: usage,
-                loading: usageLoading,
-                error: usageError,
-                onRefresh: onRefreshUsage,
-              ),
-              if (models.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    for (final model in models.take(5))
-                      StudioPill(label: model.slug),
-                    if (models.length > 5)
-                      StudioPill(label: '+${models.length - 5}'),
-                  ],
-                ),
-              ],
-              const SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerRight,
-                child: Wrap(
-                  spacing: 4,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    TextButton.icon(
-                      icon: const Icon(Icons.open_in_new),
-                      label: const Text('Details'),
-                      onPressed: onOpen,
-                    ),
-                    TextButton.icon(
-                      icon: const Icon(Icons.star_outline),
-                      label: const Text('Set default'),
-                      onPressed: selected ? null : onSetDefault,
-                    ),
-                    IconButton(
-                      tooltip: 'Edit provider',
-                      icon: const Icon(Icons.edit_outlined),
-                      onPressed: onEdit,
-                    ),
-                    IconButton(
-                      tooltip: 'Delete provider',
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: onDelete,
-                    ),
-                  ],
                 ),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _ProviderLogo extends StatelessWidget {
+  const _ProviderLogo({required this.provider, required this.active});
+
+  final ProviderSettingsView provider;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return SizedBox.square(
+      dimension: 46,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: active ? StudioColors.clay : colors.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(StudioRadii.sm),
+          border: Border.all(color: colors.outlineVariant),
+        ),
+        child: Center(
+          child: Text(
+            _initials(provider.name),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: active ? Colors.white : context.studioInk,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProviderCardTitle extends StatelessWidget {
+  const _ProviderCardTitle({required this.provider, required this.isDefault});
+
+  final ProviderSettingsView provider;
+  final bool isDefault;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                provider.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: context.studioInk,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            if (isDefault) ...[
+              const SizedBox(width: 8),
+              const StudioPill(
+                icon: Icons.check_circle_outline,
+                label: 'default',
+              ),
+            ],
+          ],
+        ),
+        if (provider.subtitle.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Text(
+            provider.subtitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _ProviderCardActions extends StatelessWidget {
+  const _ProviderCardActions({
+    required this.isDefault,
+    required this.onOpen,
+    required this.onSetDefault,
+    required this.onRefreshUsage,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final bool isDefault;
+  final VoidCallback onOpen;
+  final VoidCallback onSetDefault;
+  final VoidCallback onRefreshUsage;
+  final VoidCallback onEdit;
+  final VoidCallback? onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Tooltip(
+          message: isDefault ? 'Default provider' : 'Set as default',
+          child: IconButton.outlined(
+            icon: Icon(
+              isDefault
+                  ? Icons.check_circle_outline
+                  : Icons.radio_button_unchecked,
+            ),
+            onPressed: isDefault ? null : onSetDefault,
+          ),
+        ),
+        IconButton.outlined(
+          tooltip: 'Open details',
+          icon: const Icon(Icons.open_in_new),
+          onPressed: onOpen,
+        ),
+        IconButton.outlined(
+          tooltip: 'Refresh usage',
+          icon: const Icon(Icons.refresh),
+          onPressed: onRefreshUsage,
+        ),
+        IconButton.outlined(
+          tooltip: 'Edit provider',
+          icon: const Icon(Icons.edit_outlined),
+          onPressed: onEdit,
+        ),
+        IconButton.outlined(
+          tooltip: 'Delete provider',
+          icon: const Icon(Icons.delete_outline),
+          onPressed: onDelete,
+        ),
+      ],
     );
   }
 }

@@ -43,12 +43,17 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
 
   @override
   Widget build(BuildContext context) {
-    final selectedId = _selectedProviderId ?? widget.providers.firstOrNull?.id;
+    final state = ref.watch(studioControllerProvider).asData?.value;
+    final defaultProviderId =
+        state?.defaultProviderId ?? widget.providers.firstOrNull?.id;
+    final selectedId =
+        _selectedProviderId ??
+        defaultProviderId ??
+        widget.providers.firstOrNull?.id;
     final selected = widget.providers
         .where((provider) => provider.id == selectedId)
         .firstOrNull;
     final filtered = _filteredProviders();
-    final state = ref.watch(studioControllerProvider).asData?.value;
     final usageByProvider = {
       for (final usage in state?.providerUsages ?? const <ProviderUsageView>[])
         usage.providerId: usage,
@@ -104,7 +109,8 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
           padding: const EdgeInsets.all(20),
           child: _ProviderList(
             providers: filtered,
-            selectedProviderId: selectedId,
+            defaultProviderId: defaultProviderId,
+            filtering: _query.trim().isNotEmpty,
             usageByProvider: usageByProvider,
             loadingProviderIds: _usageLoadingProviderIds,
             usageError: _usageError,
@@ -260,7 +266,7 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
             ];
       await _saveProviders(
         providers,
-        selectedProviderId: provider.id,
+        selectedProviderId: _defaultProviderIdAfterDraftSave(current, provider),
         renamedFrom: current.originalId == provider.id
             ? null
             : current.originalId,
@@ -291,9 +297,14 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
     final providers = widget.providers
         .where((candidate) => candidate.id != provider.id)
         .toList();
-    final selectedProviderId = _selectedProviderId == provider.id
+    final currentDefaultId = ref
+        .read(studioControllerProvider)
+        .asData
+        ?.value
+        .defaultProviderId;
+    final selectedProviderId = currentDefaultId == provider.id
         ? providers.firstOrNull?.id
-        : _selectedProviderId;
+        : currentDefaultId;
     await _saveProviders(
       providers,
       selectedProviderId: selectedProviderId,
@@ -315,6 +326,24 @@ class _ProvidersTabState extends ConsumerState<_ProvidersTab> {
     setState(() => _selectedProviderId = provider.id);
     await _saveProviders(widget.providers, selectedProviderId: provider.id);
     await _refreshUsages(providerId: provider.id);
+  }
+
+  String? _defaultProviderIdAfterDraftSave(
+    _ProviderDraft draft,
+    ProviderSettingsView provider,
+  ) {
+    final currentDefaultId = ref
+        .read(studioControllerProvider)
+        .asData
+        ?.value
+        .defaultProviderId;
+    if (draft.mode == _ProviderDraftMode.create) {
+      return provider.id;
+    }
+    if (currentDefaultId == draft.originalId) {
+      return provider.id;
+    }
+    return currentDefaultId ?? widget.providers.firstOrNull?.id ?? provider.id;
   }
 
   Future<void> _refreshUsages({String? providerId}) async {
