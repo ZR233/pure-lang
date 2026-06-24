@@ -964,6 +964,84 @@ void main() {
     expect(find.text('Search providers'), findsOneWidget);
   });
 
+  testWidgets('provider search empty state explains active filter', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_stateWithPlannerModels());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: const MaterialApp(home: SettingsPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(SearchBar), 'no-such-provider');
+    await tester.pumpAndSettle();
+
+    expect(find.text('No providers match this filter'), findsOneWidget);
+    expect(
+      find.text('Add a provider to configure credentials and models.'),
+      findsNothing,
+    );
+  });
+
+  testWidgets('editing non-default provider keeps current default provider', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(
+      _stateWithPlannerModels().copyWith(
+        defaultProviderId: 'deepseek',
+        providers: [
+          ..._stateWithPlannerModels().providers,
+          const ProviderSettingsView(
+            id: 'openai',
+            templateKind: 'openai',
+            name: 'OpenAI',
+            subtitle: 'OpenAI Platform',
+            baseUrl: 'https://api.openai.com/v1',
+            defaultModel: 'gpt-5.5',
+            models: [
+              ProviderModelView(
+                slug: 'gpt-5.5',
+                displayName: 'GPT-5.5',
+                reasoningEfforts: ['medium'],
+              ),
+            ],
+            status: 'ready',
+            usageLabel: '1 models',
+            modelCount: '1',
+            providerKind: 'open_ai',
+          ),
+        ],
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: const MaterialApp(home: SettingsPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Edit provider').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    expect(api.savedProviderSettings?['defaultProviderId'], 'deepseek');
+  });
+
   testWidgets(
     'settings ordinary controls save immediately without draft buttons',
     (tester) async {
@@ -1781,6 +1859,7 @@ class _FakeStudioApi implements StudioApi {
     jsonEncode(settings);
     savedProviderSettings = settings;
     return initialState.copyWith(
+      defaultProviderId: settings['defaultProviderId'] as String?,
       providers: [
         for (final value in settings['providers'] as List<Object?>)
           _providerFromSettings(value),

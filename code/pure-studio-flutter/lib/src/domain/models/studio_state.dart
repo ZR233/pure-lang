@@ -13,6 +13,7 @@ class StudioState {
     required this.sessions,
     required this.messagesBySession,
     required this.providers,
+    this.defaultProviderId,
     this.providerUsages = const [],
     required this.roles,
     required this.mcpServers,
@@ -33,6 +34,7 @@ class StudioState {
   final List<StudioSession> sessions;
   final Map<String, List<TimelineMessage>> messagesBySession;
   final List<ProviderSettingsView> providers;
+  final String? defaultProviderId;
   final List<ProviderUsageView> providerUsages;
   final List<RoleSettingsView> roles;
   final List<McpServerSettingsView> mcpServers;
@@ -95,6 +97,7 @@ class StudioState {
     List<StudioSession>? sessions,
     Map<String, List<TimelineMessage>>? messagesBySession,
     List<ProviderSettingsView>? providers,
+    String? defaultProviderId,
     List<ProviderUsageView>? providerUsages,
     List<RoleSettingsView>? roles,
     List<McpServerSettingsView>? mcpServers,
@@ -115,6 +118,7 @@ class StudioState {
       sessions: sessions ?? this.sessions,
       messagesBySession: messagesBySession ?? this.messagesBySession,
       providers: providers ?? this.providers,
+      defaultProviderId: defaultProviderId ?? this.defaultProviderId,
       providerUsages: providerUsages ?? this.providerUsages,
       roles: roles ?? this.roles,
       mcpServers: mcpServers ?? this.mcpServers,

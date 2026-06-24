@@ -559,6 +559,7 @@ StudioState _stateFromJson(
     sessions: studioSessionsFromJson(json['sessions']),
     messagesBySession: messagesBySession,
     providers: _providersFromConfig(config),
+    defaultProviderId: _defaultProviderIdFromConfig(config),
     roles: _rolesFromConfig(config),
     mcpServers: _mcpServersFromConfig(config),
     instructions: _instructionsFromConfig(config),
@@ -582,6 +583,30 @@ StudioState _stateFromJson(
         ? const {}
         : {selectedSessionId: eventNextSequence - 1},
   );
+}
+
+String? _defaultProviderIdFromConfig(Map<String, Object?> config) {
+  final value = _string(
+    _firstValue(config, const [
+      'defaultProviderId',
+      'default_provider_id',
+      'defaultProvider',
+      'default_provider',
+    ]),
+  ).trim();
+  if (value.isNotEmpty) {
+    return value;
+  }
+  final roles = _map(config['roles']);
+  final planner = _map(roles['planner']);
+  final plannerProvider = _string(
+    _firstValue(planner, const ['provider', 'providerId', 'provider_id']),
+  ).trim();
+  if (plannerProvider.isNotEmpty) {
+    return plannerProvider;
+  }
+  final providers = _map(config['providers']);
+  return providers.keys.firstOrNull;
 }
 
 Map<String, List<TimelineMessage>> _messagesBySession(

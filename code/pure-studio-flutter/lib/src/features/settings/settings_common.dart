@@ -187,10 +187,18 @@ class _ProviderStatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     final ready = provider.status == 'ready';
-    return _InfoPill(
+    return StudioPill(
       icon: ready ? Icons.check_circle_outline : Icons.error_outline,
       label: ready ? 'ready' : 'setup',
+      backgroundColor: ready
+          ? colors.secondaryContainer.withValues(alpha: 0.42)
+          : colors.tertiaryContainer.withValues(alpha: 0.38),
+      foregroundColor: ready ? colors.secondary : colors.tertiary,
+      borderColor: ready
+          ? colors.secondary.withValues(alpha: 0.24)
+          : colors.tertiary.withValues(alpha: 0.22),
     );
   }
 }
@@ -212,11 +220,14 @@ class _MiniMeta extends StatelessWidget {
           color: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
         const SizedBox(width: 4),
-        Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.bodySmall,
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 240),
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
         ),
       ],
     );
