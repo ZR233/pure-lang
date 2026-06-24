@@ -393,7 +393,10 @@ impl AgentControl {
             });
         }
         if mode == MessageDeliveryMode::TriggerTurn
-            && matches!(entry.record.status, AgentStatus::Queued | AgentStatus::Running)
+            && matches!(
+                entry.record.status,
+                AgentStatus::Queued | AgentStatus::Running
+            )
         {
             return Err(PureError::ToolExecutionFailed {
                 tool: "followup_task".to_string(),

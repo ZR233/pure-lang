@@ -170,16 +170,17 @@ impl InteractionRuntime {
         }
         let (sender, receiver) = oneshot::channel();
         let interaction_id = request.interaction_id.clone();
-        self.waiters
+        if let Some(waiter) = self
+            .waiters
             .lock()
             .await
             .insert(interaction_id.clone(), InteractionWaiter { sender })
-            .map(|waiter| {
-                let _ = waiter.sender.send(cancelled_resolution(
-                    &request.kind,
-                    "interaction replaced by a newer request",
-                ));
-            });
+        {
+            let _ = waiter.sender.send(cancelled_resolution(
+                &request.kind,
+                "interaction replaced by a newer request",
+            ));
+        }
         if let Err(error) = self.persist_and_emit(request.clone(), emitter).await {
             self.waiters.lock().await.remove(&interaction_id);
             eprintln!("[pl-core] failed to persist interaction: {error}");
