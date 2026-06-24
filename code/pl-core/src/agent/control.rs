@@ -91,6 +91,65 @@ struct AgentEntry {
     cancellation_token: Option<CancellationToken>,
 }
 
+#[derive(Debug, Clone)]
+enum AgentStatusTransition {
+    Update(AgentStatusUpdate),
+    QueueFollowup,
+    QueueMessage,
+    Shutdown { reason: String },
+}
+
+impl AgentEntry {
+    fn apply_status_transition(&mut self, transition: AgentStatusTransition) -> bool {
+        if self.record.status.is_final() {
+            return false;
+        }
+        match transition {
+            AgentStatusTransition::Update(update) => self.apply_status_update(update),
+            AgentStatusTransition::QueueFollowup => {
+                self.record.status = AgentStatus::Queued;
+                clear_status_details(&mut self.record);
+            }
+            AgentStatusTransition::QueueMessage => {
+                if !matches!(
+                    self.record.status,
+                    AgentStatus::Queued | AgentStatus::Running
+                ) {
+                    self.record.status = AgentStatus::Waiting;
+                }
+            }
+            AgentStatusTransition::Shutdown { reason } => {
+                self.record.status = AgentStatus::Shutdown;
+                self.record.reason = Some(reason);
+            }
+        }
+        self.record.updated_at = unix_seconds();
+        true
+    }
+
+    fn apply_status_update(&mut self, update: AgentStatusUpdate) {
+        self.record.status = update.status;
+        if clears_status_details(update.status) {
+            clear_status_details(&mut self.record);
+        }
+        if update.summary.is_some() {
+            self.record.summary = update.summary;
+        }
+        if update.error.is_some() {
+            self.record.error = update.error;
+        }
+        if update.reason.is_some() {
+            self.record.reason = update.reason;
+        }
+        if update.budget_limit_kind.is_some() {
+            self.record.budget_limit_kind = update.budget_limit_kind;
+        }
+        if update.budget_usage.is_some() {
+            self.record.budget_usage = update.budget_usage;
+        }
+    }
+}
+
 #[derive(Debug)]
 struct AgentControlState {
     agents: HashMap<String, AgentEntry>,
@@ -343,32 +402,9 @@ impl AgentControl {
     ) -> Option<AgentRecord> {
         let mut state = self.state.lock().await;
         let entry = state.agents.get_mut(agent_id)?;
-        if entry.record.status.is_final() {
+        if !entry.apply_status_transition(AgentStatusTransition::Update(update)) {
             return Some(entry.record.clone());
         }
-        entry.record.status = update.status;
-        if matches!(
-            update.status,
-            AgentStatus::Queued | AgentStatus::Running | AgentStatus::Completed
-        ) {
-            clear_status_details(&mut entry.record);
-        }
-        if update.summary.is_some() {
-            entry.record.summary = update.summary;
-        }
-        if update.error.is_some() {
-            entry.record.error = update.error;
-        }
-        if update.reason.is_some() {
-            entry.record.reason = update.reason;
-        }
-        if update.budget_limit_kind.is_some() {
-            entry.record.budget_limit_kind = update.budget_limit_kind;
-        }
-        if update.budget_usage.is_some() {
-            entry.record.budget_usage = update.budget_usage;
-        }
-        entry.record.updated_at = unix_seconds();
         let record = entry.record.clone();
         state.mark_activity();
         drop(state);
@@ -441,15 +477,10 @@ impl AgentControl {
             trigger_turn: mode.trigger_turn(),
         });
         if mode.trigger_turn() {
-            entry.record.status = AgentStatus::Queued;
-            clear_status_details(&mut entry.record);
-        } else if !matches!(
-            entry.record.status,
-            AgentStatus::Queued | AgentStatus::Running
-        ) {
-            entry.record.status = AgentStatus::Waiting;
+            entry.apply_status_transition(AgentStatusTransition::QueueFollowup);
+        } else {
+            entry.apply_status_transition(AgentStatusTransition::QueueMessage);
         }
-        entry.record.updated_at = unix_seconds();
         let record = entry.record.clone();
         state.mark_activity();
         drop(state);
@@ -513,14 +544,12 @@ impl AgentControl {
         let affected = descendant_ids(&state, &agent_id);
         for id in std::iter::once(agent_id.clone()).chain(affected) {
             if let Some(entry) = state.agents.get_mut(&id)
-                && !entry.record.status.is_final()
+                && entry.apply_status_transition(AgentStatusTransition::Shutdown {
+                    reason: "closed".to_string(),
+                })
+                && let Some(token) = &entry.cancellation_token
             {
-                entry.record.status = AgentStatus::Shutdown;
-                entry.record.reason = Some("closed".to_string());
-                entry.record.updated_at = unix_seconds();
-                if let Some(token) = &entry.cancellation_token {
-                    token.cancel();
-                }
+                token.cancel();
             }
         }
         state.mark_activity();
@@ -535,11 +564,10 @@ impl AgentControl {
         let mut records = Vec::new();
         for id in ids {
             if let Some(entry) = state.agents.get_mut(&id)
-                && !entry.record.status.is_final()
+                && entry.apply_status_transition(AgentStatusTransition::Shutdown {
+                    reason: reason.to_string(),
+                })
             {
-                entry.record.status = AgentStatus::Shutdown;
-                entry.record.reason = Some(reason.to_string());
-                entry.record.updated_at = unix_seconds();
                 if let Some(token) = &entry.cancellation_token {
                     token.cancel();
                 }
@@ -625,6 +653,13 @@ fn path_matches_prefix(path: &str, prefix: &str) -> bool {
         || path
             .strip_prefix(prefix)
             .is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn clears_status_details(status: AgentStatus) -> bool {
+    matches!(
+        status,
+        AgentStatus::Queued | AgentStatus::Running | AgentStatus::Completed
+    )
 }
 
 fn clear_status_details(record: &mut AgentRecord) {
@@ -786,6 +821,46 @@ mod tests {
 
         assert_eq!(queued.status, AgentStatus::Queued);
         assert_eq!(running.status, AgentStatus::Running);
+    }
+
+    #[tokio::test]
+    async fn send_message_preserves_interruption_details_without_triggering_turn() {
+        let control = AgentControl::default();
+        let handle = spawn(&control, "worker").await;
+        control
+            .update_status_with(
+                &handle.id,
+                AgentStatusUpdate {
+                    status: AgentStatus::Interrupted,
+                    summary: None,
+                    error: Some("budget used".to_string()),
+                    reason: Some("budgetLimited".to_string()),
+                    budget_limit_kind: Some(BudgetLimitKind::ModelStep),
+                    budget_usage: Some(BudgetUsage {
+                        model_steps: 1,
+                        tool_calls: 0,
+                        wait_calls: 0,
+                        elapsed_ms: 10,
+                    }),
+                },
+            )
+            .await
+            .unwrap();
+
+        let record = append_message(
+            &control,
+            "worker",
+            "context",
+            MessageDeliveryMode::QueueOnly,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(record.status, AgentStatus::Waiting);
+        assert_eq!(record.error.as_deref(), Some("budget used"));
+        assert_eq!(record.reason.as_deref(), Some("budgetLimited"));
+        assert_eq!(record.budget_limit_kind, Some(BudgetLimitKind::ModelStep));
+        assert!(record.budget_usage.is_some());
     }
 
     #[tokio::test]
@@ -998,6 +1073,25 @@ mod tests {
         let control = AgentControl::default();
         let parent = spawn(&control, "worker").await;
         let child = spawn_child(&control, &parent.path, "child").await;
+        control
+            .update_status_with(
+                &child.id,
+                AgentStatusUpdate {
+                    status: AgentStatus::Interrupted,
+                    summary: None,
+                    error: Some("needs cleanup".to_string()),
+                    reason: Some("budgetLimited".to_string()),
+                    budget_limit_kind: Some(BudgetLimitKind::WallClock),
+                    budget_usage: Some(BudgetUsage {
+                        model_steps: 1,
+                        tool_calls: 2,
+                        wait_calls: 3,
+                        elapsed_ms: 4,
+                    }),
+                },
+            )
+            .await
+            .unwrap();
 
         let records = control
             .shutdown_descendants(&parent.id, "budgetLimited")
@@ -1006,6 +1100,12 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].id, child.id);
         assert_eq!(records[0].status, AgentStatus::Shutdown);
+        assert_eq!(records[0].error.as_deref(), Some("needs cleanup"));
         assert_eq!(records[0].reason.as_deref(), Some("budgetLimited"));
+        assert_eq!(
+            records[0].budget_limit_kind,
+            Some(BudgetLimitKind::WallClock)
+        );
+        assert!(records[0].budget_usage.is_some());
     }
 }
