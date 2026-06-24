@@ -742,7 +742,12 @@ impl StdioMcpClient {
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    eprintln!("[pl-core] mcp stderr: {line}");
+                    match classify_mcp_stderr_line(&line) {
+                        McpStderrSeverity::Info => {}
+                        McpStderrSeverity::Warning | McpStderrSeverity::Error => {
+                            eprintln!("[pl-core] mcp stderr: {line}");
+                        }
+                    }
                 }
             });
         }
@@ -879,6 +884,53 @@ async fn write_stdio_message<T: Serialize>(stdin: &mut ChildStdin, value: &T) ->
     stdin.write_all(b"\n").await?;
     stdin.flush().await?;
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum McpStderrSeverity {
+    Info,
+    Warning,
+    Error,
+}
+
+fn classify_mcp_stderr_line(line: &str) -> McpStderrSeverity {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return McpStderrSeverity::Info;
+    }
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed)
+        && let Some(level) = value.get("level").and_then(Value::as_str)
+    {
+        return mcp_stderr_severity_from_level(level);
+    }
+    if let Some(level) = extract_bracketed_mcp_log_level(trimmed) {
+        return mcp_stderr_severity_from_level(level);
+    }
+    let upper = trimmed.to_ascii_uppercase();
+    if upper.contains(" ERROR") || upper.starts_with("ERROR") {
+        return McpStderrSeverity::Error;
+    }
+    if upper.contains(" WARN") || upper.starts_with("WARN") {
+        return McpStderrSeverity::Warning;
+    }
+    McpStderrSeverity::Error
+}
+
+fn extract_bracketed_mcp_log_level(line: &str) -> Option<&str> {
+    let marker = "] ";
+    let index = line.find(marker)?;
+    line[index + marker.len()..]
+        .split_once(':')
+        .map(|(level, _)| level.trim())
+}
+
+fn mcp_stderr_severity_from_level(level: &str) -> McpStderrSeverity {
+    match level.to_ascii_uppercase().as_str() {
+        "TRACE" | "DEBUG" | "INFO" => McpStderrSeverity::Info,
+        "WARN" | "WARNING" => McpStderrSeverity::Warning,
+        "ERROR" | "FATAL" => McpStderrSeverity::Error,
+        _ => McpStderrSeverity::Error,
+    }
 }
 
 struct HttpMcpClient {
@@ -1236,6 +1288,39 @@ mod tests {
         ];
 
         assert_eq!(format_mcp_content(&content), "hello\n{\"ok\":true}");
+    }
+
+    #[test]
+    fn mcp_stderr_info_lines_are_suppressed() {
+        assert_eq!(
+            classify_mcp_stderr_line(
+                r#"{"timestamp":"2026-06-24T12:28:05.798Z","level":"INFO","message":"Running"}"#
+            ),
+            McpStderrSeverity::Info
+        );
+        assert_eq!(
+            classify_mcp_stderr_line("[2026-06-24T12:28:05.798Z] INFO: MCP Server started"),
+            McpStderrSeverity::Info
+        );
+        assert_eq!(classify_mcp_stderr_line(""), McpStderrSeverity::Info);
+    }
+
+    #[test]
+    fn mcp_stderr_warning_error_and_unknown_lines_are_forwarded() {
+        assert_eq!(
+            classify_mcp_stderr_line(
+                r#"{"timestamp":"2026-06-24T12:28:05.798Z","level":"WARN","message":"Retrying"}"#
+            ),
+            McpStderrSeverity::Warning
+        );
+        assert_eq!(
+            classify_mcp_stderr_line("[2026-06-24T12:28:05.798Z] ERROR: startup failed"),
+            McpStderrSeverity::Error
+        );
+        assert_eq!(
+            classify_mcp_stderr_line("child process exited unexpectedly"),
+            McpStderrSeverity::Error
+        );
     }
 
     #[test]
