@@ -239,11 +239,10 @@ class _ToolPart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _TimelinePanel(
-      child: ListTile(
-        dense: true,
-        leading: const Icon(Icons.terminal, size: 18),
-        title: Text(part.title ?? 'Tool', overflow: TextOverflow.ellipsis),
-        subtitle: Text(part.text, maxLines: 4, overflow: TextOverflow.ellipsis),
+      child: _TimelineMetaRow(
+        icon: Icons.terminal,
+        title: part.title ?? 'Tool',
+        subtitle: part.text,
         trailing: _StatusPill(label: part.status),
       ),
     );
@@ -301,11 +300,64 @@ class _AgentPart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _TimelinePanel(
-      child: ListTile(
-        dense: true,
-        leading: const Icon(Icons.account_tree_outlined, size: 18),
-        title: Text(part.title ?? 'Agent', overflow: TextOverflow.ellipsis),
-        subtitle: Text(part.text, overflow: TextOverflow.ellipsis),
+      child: _TimelineMetaRow(
+        icon: Icons.account_tree_outlined,
+        title: part.title ?? 'Agent',
+        subtitle: part.text,
+      ),
+    );
+  }
+}
+
+class _TimelineMetaRow extends StatelessWidget {
+  const _TimelineMetaRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      child: Row(
+        children: [
+          Icon(icon, size: 17, color: context.studioInkSoft),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.text.labelLarge?.copyWith(
+                    color: context.studioInk,
+                  ),
+                ),
+                if (subtitle.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: context.text.bodySmall?.copyWith(
+                      color: context.studioInkSoft,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (trailing != null) ...[const SizedBox(width: 10), trailing!],
+        ],
       ),
     );
   }
@@ -320,7 +372,7 @@ class _TimelinePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return StudioPanel(
-      backgroundColor: colors.surfaceContainerLowest.withValues(alpha: 0.84),
+      backgroundColor: context.studioPaper2,
       borderColor: colors.outlineVariant.withValues(alpha: 0.82),
       radius: StudioRadii.md,
       child: child,
@@ -359,7 +411,7 @@ class _AgentMarkdown extends StatelessWidget {
     final repaired = repairAgentMarkdownForDisplay(text);
     return GptMarkdown(
       repaired,
-      key: ValueKey('gpt-markdown-$id-$status-${repaired.length}'),
+      key: ValueKey('gpt-markdown-$id-$status'),
       style: _markdownBodyStyle(context),
       codeBuilder: (context, name, code, closed) {
         final scheme = Theme.of(context).colorScheme;
