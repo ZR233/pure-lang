@@ -108,7 +108,7 @@ Flutter context readout 对齐 Codex 桌面 app 的圆形用量 ring：状态栏
 
 会话列表是独立滚动区域，row 采用 opencode 式单行 flex 布局：图标/状态固定宽度，标题 `min-width:0` 且 `truncate`，列表项 `flex-shrink:0`。Sessions 区域过长时只滚动列表，不挤压 project 区、settings 按钮或相邻 session row。
 
-项目和会话管理继续走 Studio store/runtime API，不能在组件里手动拼接状态。Flutter 使用 `pl-studio-bridge.openProject(path)`，该接口在 `pl-core` 内完成 open project、LSP reconcile、session ensure 和 bootstrap，然后返回新的 project/session/sidebar 快照。打开项目支持两种入口：系统目录选择器和手动路径输入。Flutter 选择项目调用 `selectProject(projectId)`，关闭项目调用 `archiveProject(projectId, selectedProjectId)`，新建会话调用 `createSession(projectId, title)`；所有返回 payload 都必须原子替换 `projects`、当前项目的 `sessions`、`selectedProjectId`、`selectedSessionId`、agent/runtime/interaction/MCP/LSP health，并在有 `selectedSessionId` 时立即用 `loadSessionState` 恢复会话历史 projection。若没有选中会话，timeline、状态栏和 composer 显示无会话空态。
+项目和会话管理继续走 Studio store/runtime API，不能在组件里手动拼接状态。Flutter 使用 `pl-studio-bridge.openProject(path)`，该接口在 `pl-core` 内完成 open project、LSP reconcile、session ensure 和 bootstrap，然后返回新的 project/session/sidebar 快照。打开项目支持两种入口：系统目录选择器和手动路径输入。Flutter 选择项目调用 `selectProject(projectId)`，关闭项目调用 `archiveProject(projectId, selectedProjectId)`，新建会话调用 `createSession(projectId, title)`；所有返回 payload 都必须原子替换 `projects`、当前项目的 `sessions`、`selectedProjectId`、`selectedSessionId`、agent/runtime/interaction 快照，并通过 `sessionRuntime.activeMcpServers/activeLspServers` 恢复状态栏 active 能力；MCP/LSP server catalog 由 config snapshot 与全局 health event 更新。若有 `selectedSessionId`，前端必须立即用 `loadSessionState` 恢复会话历史 projection。若没有选中会话，timeline、状态栏和 composer 显示无会话空态。
 
 项目关闭和会话关闭都是归档语义，不删除磁盘内容、配置或历史会话。Project row 上的关闭按钮调用 `archiveProject(projectId, selectedProjectId)`；关闭当前项目后切换到后端返回的下一个可用项目/会话，关闭最后一个项目后清空当前 selection 并取消 session stream。Session row 上的关闭按钮调用 `archiveSession(sessionId, selectedSessionId)`；后端会拒绝 active turn，会取消该会话 pending interaction，并返回同项目的新 session selection。前端收到 payload 后删除/隐藏归档 session、切换到返回的 `selectedSessionId`，并用 `loadSessionState` 恢复新会话 projection；如果项目内没有剩余 session，状态栏与 composer 禁用，用户可以用新建会话按钮创建会话。会话列表只显示 `visibility=active && parentSessionId=null`，legacy handoff child/archived session 不作为 root row 出现。
 
@@ -147,7 +147,7 @@ Flutter 交互组件优先使用 Material 3 原生控件，按业务领域组织
 
 视觉参考以 `output/design` 中的 Pure Studio chat 状态图为准：默认聊天、流式响应、计划确认、环境弹层、select 菜单与窄屏响应式。实现时必须保持低对比侧栏、居中阅读流、底部同宽状态栏与 dock、计划卡渐隐预览、以及窄屏 icon rail，不得新增常驻右侧环境信息栏。
 
-聊天输入框中的权限模式是可交互设置项，使用 Ark Select 直接绑定 `save_permission_mode`，不得退化为静态提示文字，也不得在状态栏重复放置权限选择。状态栏的上下文、费用、能力、子智能体等 readout 使用 Ark HoverCard 展示详情，鼠标或焦点离开触发器和浮层后必须自动关闭；readout 本身不显示向下箭头。点击选择只保留给模式、模型和 reasoning effort 这些真正的状态栏 select 控件。
+聊天输入框中的权限模式是可交互设置项，使用 Flutter/Material 的紧凑菜单控件调用 `saveRuntimePermissionMode(mode)`，不得退化为静态提示文字，也不得在状态栏重复放置权限选择。状态栏的上下文、费用、能力、子智能体等 readout 使用 Flutter hover/focus popover 或 tooltip 展示详情，鼠标或焦点离开触发器和浮层后必须自动关闭；readout 本身不显示下拉箭头。点击选择只保留给模式、模型和 reasoning effort 这些真正的状态栏菜单控件。
 
 Flutter 窗口 resize 时 UI 不应持续触发昂贵测量。Timeline 的贴底逻辑只在新内容、会话切换和少量后续 layout settle 帧内测量，不能长时间逐帧调用列表 measure 或反复写入 scroll offset。
 

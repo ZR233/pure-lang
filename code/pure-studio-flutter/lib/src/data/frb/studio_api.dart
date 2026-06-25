@@ -446,6 +446,7 @@ SessionRuntimeView sessionRuntimeFromJson(Object? value) {
   final json = _map(value);
   final usage = _map(json['usage']);
   final source = usage.isEmpty ? json : usage;
+  final agentCount = _list(json['agents']).length;
   return SessionRuntimeView(
     model: _string(source['model']),
     contextTokens: _int(source['latestContextTokens']),
@@ -458,7 +459,7 @@ SessionRuntimeView sessionRuntimeFromJson(Object? value) {
     activeSkills: _stringList(json['activeSkills']),
     activeMcpServers: _stringList(json['activeMcpServers']),
     activeLspServers: _stringList(json['activeLspServers']),
-    agentCount: _list(json['agents']).length,
+    agentCount: agentCount,
   );
 }
 
@@ -551,6 +552,10 @@ StudioState _stateFromJson(
     messagesBySession.putIfAbsent(session.id, () => []);
   }
   final config = _map(json['config']);
+  final runtimeJson = Map<String, Object?>.from(_map(json['sessionRuntime']));
+  if (!runtimeJson.containsKey('agents')) {
+    runtimeJson['agents'] = _list(json['agents']);
+  }
   final eventNextSequence = _int(
     _firstValue(json, const ['eventNextSequence', 'event_next_sequence']),
   );
@@ -574,7 +579,7 @@ StudioState _stateFromJson(
       ]),
     ),
     turnPhase: TurnPhase.idle,
-    runtime: sessionRuntimeFromJson(json['sessionRuntime']),
+    runtime: sessionRuntimeFromJson(runtimeJson),
     pendingInteractions: _list(json['interactions'])
         .map(pendingInteractionFromJson)
         .where((interaction) => interaction.id.isNotEmpty)

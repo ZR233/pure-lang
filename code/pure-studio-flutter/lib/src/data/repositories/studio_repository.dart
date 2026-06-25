@@ -448,7 +448,9 @@ class StudioController extends AsyncNotifier<StudioState> {
         event.payload['event'],
       ),
       'sessionRuntimeChanged' => current.copyWith(
-        runtime: sessionRuntimeFromJson(event.payload['runtime']),
+        runtime: sessionRuntimeFromJson(
+          event.payload['runtime'],
+        ).copyWith(agentCount: current.runtime.agentCount),
       ),
       'sessionListChanged' => _mergeSessionListChanged(current, event),
       'agentChanged' => _applyAgentChanged(current, event.payload['agent']),

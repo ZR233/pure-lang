@@ -32,8 +32,8 @@ v1 只内置 `rust-analyzer`：
 `pure-studio-flutter` 只负责展示和事件订阅：
 
 - `SessionRuntimeDto.activeLspServers` 表示当前项目 active 的 LSP server 名称。
-- `BootstrapDto` / `ProjectSelectionDto` 携带一次性 LSP health 快照，避免启动或切换项目时错过首个探测事件。
-- `studio-lsp-health-updated` 事件同步 LSP 快照和 active 列表。
+- `BootstrapDto` / `ProjectSelectionDto` 的 `sessionRuntime.activeLspServers` 携带一次性 active LSP 列表，避免启动或切换项目时状态栏空白。
+- `lspHealthChanged` 事件同步完整 LSP server snapshot 和 active 列表。
 - 状态栏能力弹层展示 Skills、MCP、LSP 三组。
 
 ## 状态模型

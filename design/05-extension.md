@@ -39,7 +39,7 @@ OpenAI-compatible 不是一等公共 provider 抽象。新增供应商必须显�
 
 命令执行、文件编辑、工具系统和沙箱能力必须以独立策略接入，并通过权限模型和事件流暴露给核心流程。
 
-桌面端允许注册 `bash`、完整 agent 协作工具和文件工具。当前 Studio 运行路径默认使用 `AutoAllow` 直接执行已注册工具；切换到 `Manual` 时，审批结果通过 `AgentEvent` 和 Studio SeaORM 状态记录，拒绝时将拒绝原因作为 tool result 写回会话。
+桌面端允许注册 `bash`、完整 agent 协作工具和文件工具。当前 Studio 运行路径默认使用 `PermissionMode::RequestApproval`：workspace 内访问按工具策略直接放行，workspace 外访问请求用户审批；`auto-review` 会把 workspace 外访问交给 reviewer，`full-access` 在策略层放行已暴露工具。旧 `ToolApprovalPolicy::Manual` 和 `DenyAll` 只作为兼容构造保留；审批和交互结果通过统一 `Interaction` 与 Studio event/projection 记录，拒绝时将拒绝原因作为 tool result 写回会话。
 
 文件工具作为 `pl-core` 工具系统的一部分注册，当前不新增独立 `pl-tool` crate。文件工具包括读取、写入、列目录、搜索、stat、建目录、删除、复制、移动和 `apply_patch`。工具 schema 不强制模型提供绝对路径；workspace-relative 路径按 `workspaceRoot` 解析，执行层统一转换为规范化绝对路径后再校验、审批和执行。只读工具仍受工作区路径边界限制；修改工具进入现有工具审批流程。
 

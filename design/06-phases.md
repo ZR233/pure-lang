@@ -5,11 +5,14 @@
 | Crate | 范围 |
 | --- | --- |
 | `pl-protocol` | 公共错误、消息、事件、权限类型 |
+| `pl-trace` | 内部 AgentEvent、TraceEvent、TracePart 运行事件 |
 | `pl-model` | LLM provider、模型元数据、wire API、SSE |
+| `pl-lsp` | LSP client、语言服务器进程与代码智能查询 |
 | `pl-core` | turn、session、Studio SQLite、角色化配置、工具审批、核心编译流程编排 |
+| `pl-studio-bridge` | Flutter Rust Bridge v2 native crate，转发 Flutter API 与 event stream |
 | `pure-studio-flutter` | Flutter Windows 桌面前端，负责 Material 3 UI、FRB 调用、事件订阅和输入回调 |
 
-P0 不包含独立沙箱。`pure-studio-flutter` 可以接入工具系统；当前 Studio 运行路径暂时使用 `AutoAllow`，后续再补充更细粒度的手动审批、持久化授权和沙箱实现。
+P0 不包含独立沙箱。`pure-studio-flutter` 接入工具系统时默认使用 `PermissionMode::RequestApproval`：workspace 内访问直接放行，workspace 外访问按权限模式请求用户审批、AI reviewer 审批或在 `full-access` 下放行。后续可以继续补充持久化授权和更强隔离，但不得把默认路径退回无边界的直接执行。
 
 ## 6.2 P1：核心能力完善
 
@@ -35,7 +38,9 @@ P0 不包含独立沙箱。`pure-studio-flutter` 可以接入工具系统；当�
 cargo fmt
 cargo clippy -- -D warnings
 cargo test -p pl-protocol
+cargo test -p pl-trace
 cargo test -p pl-model
+cargo test -p pl-lsp
 cargo test -p pl-core
 cargo test -p pl-studio-bridge
 cd code/pure-studio-flutter

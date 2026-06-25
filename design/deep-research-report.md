@@ -1,5 +1,7 @@
 # ZR233 pure-lang 架构与设计深度研究与重构方案
 
+> 归档说明：本文是早期调研报告，保留当时基于 Tauri/React 版本仓库状态形成的证据与建议，不再作为当前实现事实源。当前有效架构以 `README.md`、`design/01-overview.md`、`design/02-crates.md`、`design/03-pipeline.md`、`design/04-security.md`、`design/08-streaming.md` 和 `design/11-studio-ui.md` 为准；桌面端已经收束为 `pure-studio-flutter` + `pl-studio-bridge`，默认权限模式为 `PermissionMode::RequestApproval`。
+
 ## 连接器与外部来源
 
 本次研究按你的要求，先以仓库本身为一手来源，再用高质量外部资料补充。优先来源如下：

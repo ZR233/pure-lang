@@ -20,7 +20,9 @@ pl-core                   核心编译引擎与 Studio runtime
   ├────► pl-lsp           LSP 客户端
   │                       rust-analyzer 支持、代码智能查询
   ├────► pl-protocol      公共协议层
-  │                       Agent 事件、消息、权限、错误类型
+  │                       Studio wire DTO、消息、权限、错误类型
+  ├────► pl-trace         内部 trace 事件层
+  │                       AgentEvent、TraceEvent、TracePart
   ▲
   │
 pl-studio-bridge          Flutter Rust Bridge v2 桥接 crate
@@ -35,17 +37,18 @@ pure-studio-flutter       Flutter Windows 桌面应用
 | Crate | 路径 | 职责 |
 |-------|------|------|
 | `pl-protocol` | `code/pl-protocol/` | 跨 crate 协议类型：消息、事件、错误、权限 |
+| `pl-trace` | `code/pl-trace/` | 内部运行事件类型：AgentEvent、TraceEvent、TracePart |
 | `pl-model` | `code/pl-model/` | LLM provider 抽象与适配：OpenAI 兼容 API、SSE 流式、模型元数据管理 |
 | `pl-lsp` | `code/pl-lsp/` | LSP 客户端：rust-analyzer 支持、代码智能查询 |
-| `pl-core` | `code/pl-core/` | 核心编译引擎：端口-适配器架构，含 `application`、`domain`、`infrastructure`、`interfaces` 四层 |
+| `pl-core` | `code/pl-core/` | 核心编译引擎与 Studio runtime：turn/session、配置、工具、MCP、SQLite projection，并通过 `interfaces` 等模块逐步端口化 |
 | `pl-studio-bridge` | `code/pure-studio-flutter/rust/` | Flutter Rust Bridge v2 桥接 crate：把 Flutter API 转为 `pl-core` runtime 调用 |
 | `pure-studio-flutter` | `code/pure-studio-flutter/` | Flutter Windows 桌面应用：Material 3、Riverpod、会话级事件订阅 |
 
 ### 依赖规则
 
 ```
-pl-protocol  ←  pl-model  ←  pl-core  ←  pl-studio-bridge  ←  pure-studio-flutter
-                pl-lsp     ←  pl-core
+pl-protocol  ←  pl-trace  ←  pl-model  ←  pl-core  ←  pl-studio-bridge  ←  pure-studio-flutter
+                              pl-lsp    ←  pl-core
 （底层）                                                         （顶层）
 ```
 
@@ -149,7 +152,7 @@ pure-lang/
 | **Skill** | 项目技能系统，定义 Codex 协作规则和可复用流程 |
 | **Studio** | Pure Studio 桌面运行时，管理项目、会话和配置 |
 | **Provider** | LLM Provider 抽象（OpenAI、DeepSeek、智谱等） |
-| **CompileMode** | 编译模式（auto / plan / compact） |
+| **CompileMode** | 编译模式（auto / plan） |
 
 ### 内置工具
 
@@ -180,7 +183,9 @@ cargo clippy -- -D warnings
 
 # 运行各 crate 测试
 cargo test -p pl-protocol
+cargo test -p pl-trace
 cargo test -p pl-model
+cargo test -p pl-lsp
 cargo test -p pl-core
 cargo test -p pl-studio-bridge
 
@@ -226,6 +231,7 @@ Markdown/timeline 视觉检查可以使用本地 demo 数据启动，不连接 r
 | [12-plan-b-implementation-spec.md](./design/12-plan-b-implementation-spec.md) | 方案乙实现规约 |
 | [13-skills.md](./design/13-skills.md) | 技能系统设计 |
 | [13-tool-calling-runtime.md](./design/13-tool-calling-runtime.md) | 工具调用运行时 |
+| [14-lsp-runtime.md](./design/14-lsp-runtime.md) | LSP 运行时 |
 
 ## 项目规范
 

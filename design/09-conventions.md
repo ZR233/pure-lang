@@ -60,7 +60,7 @@ pub trait ModelProvider: Send + Sync {
 - 公共协议层：`pl-protocol`。
 - 内部 trace 协议层：`pl-trace`。
 
-当前版本不承诺独立沙箱。工具系统必须由明确 `ToolApprovalPolicy` 控制；Studio 当前使用 `AutoAllow`，保留切回 `Manual` 的事件和 UI 能力。
+当前版本不承诺独立沙箱。工具系统必须由明确 `PermissionMode` 和工具访问分类控制；默认模式为 `request-approval`。旧 `ToolApprovalPolicy::AutoAllow | Manual | DenyAll` 只作为兼容构造存在，新增设计不得再把 `AutoAllow` 描述为无条件直接执行。
 
 ## 9.7 配置约定
 
