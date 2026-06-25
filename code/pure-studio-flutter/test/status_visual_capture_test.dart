@@ -13,6 +13,10 @@ import 'package:pure_studio_flutter/src/l10n/app_localizations.dart';
 
 void main() {
   testWidgets('capture status detail screenshots', (tester) async {
+    if (!const bool.fromEnvironment('PURE_CAPTURE_VISUALS')) {
+      return;
+    }
+
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);

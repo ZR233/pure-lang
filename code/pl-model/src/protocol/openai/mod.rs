@@ -97,11 +97,8 @@ impl OpenAiProtocol {
         }
     }
 
-    pub(crate) fn parse_stream_events(
-        &self,
-        event: &sse::SseStreamEvent,
-    ) -> Result<Vec<sse::StreamEvent>> {
-        Ok(sse::process_sse_events(event))
+    pub(crate) fn new_stream_decoder(&self) -> sse::OpenAiStreamDecoder {
+        sse::OpenAiStreamDecoder::new(matches!(self.endpoint, OpenAiEndpoint::Responses))
     }
 }
 

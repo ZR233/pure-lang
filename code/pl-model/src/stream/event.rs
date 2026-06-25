@@ -19,6 +19,7 @@ pub(crate) enum ModelStreamEvent {
     TextCompleted {
         id: String,
         channel: TraceTextChannel,
+        authoritative_text: Option<String>,
     },
     ReasoningStarted {
         id: String,

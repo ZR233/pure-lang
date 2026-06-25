@@ -196,6 +196,38 @@ class AppLocalizationsZh extends AppLocalizations {
   String get timelineAgentFallback => 'Agent';
 
   @override
+  String timelineToolCompleted(String name) {
+    return '$name 已完成';
+  }
+
+  @override
+  String timelineToolFailed(String name) {
+    return '$name 失败';
+  }
+
+  @override
+  String timelineToolDenied(String name) {
+    return '$name 被拒绝';
+  }
+
+  @override
+  String timelineToolRunning(String name) {
+    return '$name 运行中';
+  }
+
+  @override
+  String get timelineAgentSubagent => '子代理';
+
+  @override
+  String get timelineAgentSubagentMessage => '子代理消息';
+
+  @override
+  String get timelineAgentWaiting => '等待子代理';
+
+  @override
+  String get timelineAgentClose => '关闭子代理';
+
+  @override
   String get interactionQuestionsTitle => '几个问题想确认';
 
   @override
@@ -895,6 +927,38 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get timelineAgentFallback => 'Agent';
+
+  @override
+  String timelineToolCompleted(String name) {
+    return '$name 已完成';
+  }
+
+  @override
+  String timelineToolFailed(String name) {
+    return '$name 失败';
+  }
+
+  @override
+  String timelineToolDenied(String name) {
+    return '$name 被拒绝';
+  }
+
+  @override
+  String timelineToolRunning(String name) {
+    return '$name 运行中';
+  }
+
+  @override
+  String get timelineAgentSubagent => '子代理';
+
+  @override
+  String get timelineAgentSubagentMessage => '子代理消息';
+
+  @override
+  String get timelineAgentWaiting => '等待子代理';
+
+  @override
+  String get timelineAgentClose => '关闭子代理';
 
   @override
   String get interactionQuestionsTitle => '几个问题想确认';

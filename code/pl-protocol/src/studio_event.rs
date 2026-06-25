@@ -149,6 +149,8 @@ pub struct StudioPart {
     pub turn_id: String,
     pub part_type: StudioPartType,
     pub order: u64,
+    #[serde(default)]
+    pub revision: u64,
     pub status: StudioPartStatus,
     pub created_at: i64,
     pub updated_at: i64,
@@ -344,6 +346,8 @@ pub struct StudioPartDelta {
     pub session_id: String,
     pub message_id: String,
     pub part_id: String,
+    #[serde(default)]
+    pub revision: u64,
     pub field: StudioPartDeltaField,
     pub delta: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

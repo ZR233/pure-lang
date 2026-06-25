@@ -2,6 +2,7 @@ use async_openai::types::stream::StreamResponse;
 use futures::StreamExt;
 use pl_protocol::{PureError, Result};
 use pl_trace::{AgentEventSender, TraceTextChannel};
+use std::collections::HashMap;
 
 pub(crate) mod event;
 mod lifecycle;
@@ -28,6 +29,7 @@ pub(crate) async fn process_provider_stream(
     trace: Option<CompletionTraceContext>,
 ) -> Result<CompletionResponse> {
     let mut accumulator = StreamCompletionAccumulator::new(trace);
+    let mut decoder = protocol.new_stream_decoder();
     let mut stream = std::pin::pin!(stream);
 
     while let Some(event) = stream.next().await {
@@ -37,7 +39,7 @@ pub(crate) async fn process_provider_stream(
                 return Err(PureError::LlmError(format!("provider stream error: {e}")));
             }
         };
-        for stream_event in protocol.parse_stream_events(&sse_event)? {
+        for stream_event in decoder.decode(&sse_event) {
             accumulator.apply(stream_event, event_tx)?;
         }
     }
@@ -46,7 +48,8 @@ pub(crate) async fn process_provider_stream(
 }
 
 pub(crate) struct StreamCompletionAccumulator {
-    content_parts: Vec<String>,
+    content_parts: Vec<ContentPart>,
+    content_indexes: HashMap<String, usize>,
     raw_content_parts: Vec<String>,
     reasoning_parts: Vec<String>,
     tool_calls: Vec<ToolCall>,
@@ -63,6 +66,7 @@ impl StreamCompletionAccumulator {
         let plan_mode = trace.as_ref().is_some_and(|context| context.plan_mode);
         Self {
             content_parts: Vec::new(),
+            content_indexes: HashMap::new(),
             raw_content_parts: Vec::new(),
             reasoning_parts: Vec::new(),
             tool_calls: Vec::new(),
@@ -103,12 +107,21 @@ impl StreamCompletionAccumulator {
             }
             ModelStreamEvent::TextDelta { id, channel, delta } => {
                 if channel == TraceTextChannel::Final {
-                    self.content_parts.push(delta.clone());
+                    self.append_content_part(&id, &delta);
                 }
                 self.record_text_delta(&id, delta, event_tx, channel);
             }
-            ModelStreamEvent::TextCompleted { id, channel } => {
-                self.record_text_completed(&id, channel, event_tx);
+            ModelStreamEvent::TextCompleted {
+                id,
+                channel,
+                authoritative_text,
+            } => {
+                if channel == TraceTextChannel::Final
+                    && let Some(text) = authoritative_text.as_deref()
+                {
+                    self.complete_content_part(&id, text);
+                }
+                self.record_text_completed(&id, channel, authoritative_text, event_tx);
             }
             ModelStreamEvent::ReasoningStarted {
                 id,
@@ -249,7 +262,12 @@ impl StreamCompletionAccumulator {
         let content = if self.content_parts.is_empty() {
             None
         } else {
-            Some(self.content_parts.join(""))
+            Some(
+                self.content_parts
+                    .iter()
+                    .map(|part| part.text.as_str())
+                    .collect::<String>(),
+            )
         };
         let raw_content = if self.raw_content_parts.is_empty() {
             None
@@ -323,14 +341,41 @@ impl StreamCompletionAccumulator {
         &mut self,
         item_id: &str,
         text_channel: TraceTextChannel,
+        authoritative_text: Option<String>,
         event_tx: &AgentEventSender,
     ) {
         let Some(trace) = self.trace.as_mut() else {
             return;
         };
-        for event in trace.complete_text(item_id, text_channel) {
+        for event in trace.complete_text(item_id, text_channel, authoritative_text) {
             let _ = event_tx.send(event);
         }
+    }
+
+    fn append_content_part(&mut self, item_id: &str, delta: &str) {
+        let index = *self
+            .content_indexes
+            .entry(item_id.to_string())
+            .or_insert_with(|| {
+                self.content_parts.push(ContentPart {
+                    text: String::new(),
+                });
+                self.content_parts.len() - 1
+            });
+        self.content_parts[index].text.push_str(delta);
+    }
+
+    fn complete_content_part(&mut self, item_id: &str, text: &str) {
+        let index = *self
+            .content_indexes
+            .entry(item_id.to_string())
+            .or_insert_with(|| {
+                self.content_parts.push(ContentPart {
+                    text: String::new(),
+                });
+                self.content_parts.len() - 1
+            });
+        self.content_parts[index].text = text.to_string();
     }
 
     fn record_plan_started(&mut self, item_id: &str, event_tx: &AgentEventSender) {
@@ -427,4 +472,8 @@ impl StreamCompletionAccumulator {
             }
         }
     }
+}
+
+struct ContentPart {
+    text: String,
 }

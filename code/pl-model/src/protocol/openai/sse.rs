@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::request::TokenUsage;
 use crate::stream::event::{ModelStreamEvent, ToolInputDeltaPayload, ToolInputPayloadKind};
@@ -78,6 +81,77 @@ pub(crate) type ToolCallDeltaPayload = ToolInputDeltaPayload;
 
 const DEFAULT_TEXT_ID: &str = "final";
 const DEFAULT_REASONING_ID: &str = "thinking";
+
+/// Stateful OpenAI stream decoder.
+///
+/// Responses output text deltas do not carry the assistant message phase, so
+/// the decoder remembers `response.output_item.added` metadata for the stream.
+pub(crate) struct OpenAiStreamDecoder {
+    use_native_phases: bool,
+    text_channels: HashMap<String, TraceTextChannel>,
+}
+
+impl OpenAiStreamDecoder {
+    pub(crate) fn new(use_native_phases: bool) -> Self {
+        Self {
+            use_native_phases,
+            text_channels: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn decode(&mut self, event: &SseStreamEvent) -> Vec<StreamEvent> {
+        if !self.use_native_phases {
+            return process_sse_events(event);
+        }
+
+        match event.kind.as_str() {
+            "response.output_item.added" => {
+                if let Some((item_id, channel)) = assistant_message_identity(event.item.as_ref()) {
+                    self.text_channels.insert(item_id.clone(), channel);
+                    return vec![StreamEvent::TextStarted {
+                        id: item_id,
+                        channel,
+                    }];
+                }
+            }
+            "response.output_text.delta" => {
+                let item_id = event
+                    .item_id
+                    .clone()
+                    .unwrap_or_else(|| DEFAULT_TEXT_ID.to_string());
+                let channel = self
+                    .text_channels
+                    .get(&item_id)
+                    .copied()
+                    .unwrap_or(TraceTextChannel::Final);
+                if let Some(delta) = event.delta.clone() {
+                    return vec![StreamEvent::TextDelta {
+                        id: item_id,
+                        channel,
+                        delta,
+                    }];
+                }
+                return Vec::new();
+            }
+            "response.output_item.done" => {
+                if let Some(item) = event.item.as_ref()
+                    && let Some((item_id, item_channel)) = assistant_message_identity(Some(item))
+                {
+                    let channel = self.text_channels.remove(&item_id).unwrap_or(item_channel);
+                    let authoritative_text = assistant_message_text(item);
+                    return vec![StreamEvent::TextCompleted {
+                        id: item_id,
+                        channel,
+                        authoritative_text,
+                    }];
+                }
+            }
+            _ => {}
+        }
+
+        process_sse_events(event)
+    }
+}
 
 /// 将原始 SSE 事件解析为 canonical stream event。
 pub fn process_sse_events(event: &SseStreamEvent) -> Vec<StreamEvent> {
@@ -418,6 +492,40 @@ fn value_string(value: &serde_json::Value, field: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn assistant_message_identity(item: Option<&Value>) -> Option<(String, TraceTextChannel)> {
+    let item = item?;
+    if item.get("type")?.as_str()? != "message" {
+        return None;
+    }
+    if item
+        .get("role")
+        .and_then(Value::as_str)
+        .is_some_and(|role| role != "assistant")
+    {
+        return None;
+    }
+    let item_id = item.get("id")?.as_str()?.to_string();
+    let channel = match item.get("phase").and_then(Value::as_str) {
+        Some("commentary") => TraceTextChannel::Commentary,
+        Some("final_answer" | "final") => TraceTextChannel::Final,
+        _ => TraceTextChannel::Final,
+    };
+    Some((item_id, channel))
+}
+
+fn assistant_message_text(item: &Value) -> Option<String> {
+    let text = item
+        .get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|part| part.get("type").and_then(Value::as_str) == Some("output_text"))
+        .filter_map(|part| part.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .concat();
+    (!text.is_empty()).then_some(text)
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -515,6 +623,72 @@ mod tests {
                 assert_eq!(usage.cached_prompt_tokens, 35);
             }
             other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn responses_decoder_preserves_native_text_phase_and_completed_text() {
+        let mut decoder = OpenAiStreamDecoder::new(true);
+        let commentary_added: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.output_item.added",
+            "item": {
+                "id": "msg_progress",
+                "type": "message",
+                "role": "assistant",
+                "phase": "commentary",
+                "content": []
+            }
+        }))
+        .unwrap();
+        match decoder.decode(&commentary_added).as_slice() {
+            [StreamEvent::TextStarted { id, channel }] => {
+                assert_eq!(id, "msg_progress");
+                assert_eq!(*channel, TraceTextChannel::Commentary);
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+
+        let commentary_delta: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.output_text.delta",
+            "item_id": "msg_progress",
+            "delta": "正在检查。"
+        }))
+        .unwrap();
+        match decoder.decode(&commentary_delta).as_slice() {
+            [StreamEvent::TextDelta { id, channel, delta }] => {
+                assert_eq!(id, "msg_progress");
+                assert_eq!(*channel, TraceTextChannel::Commentary);
+                assert_eq!(delta, "正在检查。");
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+
+        let final_done: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.output_item.done",
+            "item": {
+                "id": "msg_final",
+                "type": "message",
+                "role": "assistant",
+                "phase": "final_answer",
+                "content": [
+                    {"type": "output_text", "text": "完成。"}
+                ]
+            }
+        }))
+        .unwrap();
+        match decoder.decode(&final_done).as_slice() {
+            [
+                StreamEvent::TextCompleted {
+                    id,
+                    channel,
+                    authoritative_text,
+                },
+            ] => {
+                assert_eq!(id, "msg_final");
+                assert_eq!(*channel, TraceTextChannel::Final);
+                assert_eq!(authoritative_text.as_deref(), Some("完成。"));
+            }
+            other => panic!("unexpected events: {other:?}"),
         }
     }
 

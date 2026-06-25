@@ -59,6 +59,7 @@ impl TraceProjection {
                 turn_id: self.turn_id.clone(),
                 item_id: item_id.clone(),
                 started_sequence: self.sequence,
+                revision: 0,
                 kind: TracePartKind::Text,
                 status: TracePartStatus::Streaming,
                 created_at: now,
@@ -89,14 +90,21 @@ impl TraceProjection {
         let mut events = self.start_text(item_id, text_channel);
         let item_id = self.active_text_item_id(item_id, text_channel);
         if let Some(item) = self.started.get_mut(&item_id) {
+            item.revision += 1;
             item.status = TracePartStatus::Streaming;
             item.updated_at = now;
             item.content.push_str(&delta);
         }
+        let revision = self
+            .started
+            .get(&item_id)
+            .map(|item| item.revision)
+            .unwrap_or_default();
         let event = TracePartDeltaEvent {
             turn_id: self.turn_id.clone(),
             item_id,
             started_sequence: self.sequence,
+            revision,
             kind: TracePartKind::Text,
             status: TracePartStatus::Streaming,
             created_at: now,
@@ -120,12 +128,18 @@ impl TraceProjection {
         &mut self,
         item_id: &str,
         text_channel: TraceTextChannel,
+        authoritative_text: Option<String>,
     ) -> Vec<AgentEvent> {
         let key = text_provider_key(item_id, text_channel);
         let Some(item_id) = self.active_text_items.remove(&key) else {
             return Vec::new();
         };
-        self.complete_item_by_resolved_id(&item_id, TracePartKind::Text, Some(text_channel))
+        self.complete_item_by_resolved_id(
+            &item_id,
+            TracePartKind::Text,
+            Some(text_channel),
+            authoritative_text,
+        )
     }
 
     pub(crate) fn start_plan(&mut self, item_id: &str) -> Vec<AgentEvent> {
@@ -138,6 +152,7 @@ impl TraceProjection {
             turn_id: self.turn_id.clone(),
             item_id: item_id.clone(),
             started_sequence: self.sequence,
+            revision: 0,
             kind: TracePartKind::Plan,
             status: TracePartStatus::Streaming,
             created_at: now,
@@ -161,14 +176,21 @@ impl TraceProjection {
         let mut events = self.start_plan(item_id);
         let item_id = self.active_plan_item_id(item_id);
         if let Some(item) = self.started.get_mut(&item_id) {
+            item.revision += 1;
             item.status = TracePartStatus::Streaming;
             item.updated_at = now;
             item.content.push_str(&delta);
         }
+        let revision = self
+            .started
+            .get(&item_id)
+            .map(|item| item.revision)
+            .unwrap_or_default();
         let event = TracePartDeltaEvent {
             turn_id: self.turn_id.clone(),
             item_id,
             started_sequence: self.sequence,
+            revision,
             kind: TracePartKind::Plan,
             status: TracePartStatus::Streaming,
             created_at: now,
@@ -190,7 +212,7 @@ impl TraceProjection {
         let Some(item_id) = self.active_plan_items.remove(&key) else {
             return Vec::new();
         };
-        self.complete_item_by_resolved_id(&item_id, TracePartKind::Plan, None)
+        self.complete_item_by_resolved_id(&item_id, TracePartKind::Plan, None, None)
     }
 
     pub(crate) fn start_thinking(&mut self, item_id: &str) -> Vec<AgentEvent> {
@@ -202,6 +224,7 @@ impl TraceProjection {
                 turn_id: self.turn_id.clone(),
                 item_id: item_id.clone(),
                 started_sequence: self.sequence,
+                revision: 0,
                 kind: TracePartKind::Thinking,
                 status: TracePartStatus::Streaming,
                 created_at: now,
@@ -232,6 +255,7 @@ impl TraceProjection {
         let mut events = self.start_thinking(item_id);
         let item_id = self.active_thinking_item_id(item_id);
         if let Some(item) = self.started.get_mut(&item_id) {
+            item.revision += 1;
             item.status = TracePartStatus::Streaming;
             item.updated_at = now;
             match item
@@ -247,10 +271,16 @@ impl TraceProjection {
             }
             item.thinking_chunks.sort_by_key(|chunk| chunk.chunk_index);
         }
+        let revision = self
+            .started
+            .get(&item_id)
+            .map(|item| item.revision)
+            .unwrap_or_default();
         let event = TracePartDeltaEvent {
             turn_id: self.turn_id.clone(),
             item_id,
             started_sequence: self.sequence,
+            revision,
             kind: TracePartKind::Thinking,
             status: TracePartStatus::Streaming,
             created_at: now,
@@ -272,7 +302,7 @@ impl TraceProjection {
         let Some(item_id) = self.active_thinking_items.remove(&key) else {
             return Vec::new();
         };
-        self.complete_item_by_resolved_id(&item_id, TracePartKind::Thinking, None)
+        self.complete_item_by_resolved_id(&item_id, TracePartKind::Thinking, None, None)
     }
 
     pub(crate) fn start_tool(&mut self, snapshot: &ToolCallAccumulatorSnapshot) -> Vec<AgentEvent> {
@@ -286,6 +316,7 @@ impl TraceProjection {
             turn_id: self.turn_id.clone(),
             item_id: item_id.clone(),
             started_sequence: self.sequence,
+            revision: 0,
             kind: TracePartKind::Tool,
             status: TracePartStatus::Streaming,
             created_at: now,
@@ -325,6 +356,7 @@ impl TraceProjection {
             self.namespaced_item_id(&trace_tool_part_id(snapshot.call_id.as_ref(), &snapshot.id));
         let mut events = self.start_tool(snapshot);
         if let Some(item) = self.started.get_mut(&item_id) {
+            item.revision += 1;
             item.status = TracePartStatus::Streaming;
             item.updated_at = now;
             if let Some(tool) = &mut item.tool {
@@ -334,10 +366,16 @@ impl TraceProjection {
                 tool.provider_item_id = (!snapshot.id.is_empty()).then(|| snapshot.id.clone());
             }
         }
+        let revision = self
+            .started
+            .get(&item_id)
+            .map(|item| item.revision)
+            .unwrap_or_default();
         let event = TracePartDeltaEvent {
             turn_id: self.turn_id.clone(),
             item_id,
             started_sequence: self.sequence,
+            revision,
             kind: TracePartKind::Tool,
             status: TracePartStatus::Streaming,
             created_at: now,
@@ -398,6 +436,7 @@ impl TraceProjection {
                 turn_id,
                 item_id: item_id.clone(),
                 started_sequence: sequence,
+                revision: 0,
                 kind: TracePartKind::Tool,
                 status: TracePartStatus::Started,
                 created_at: now,
@@ -487,6 +526,7 @@ impl TraceProjection {
         item_id: &str,
         kind: TracePartKind,
         text_channel: Option<TraceTextChannel>,
+        authoritative_text: Option<String>,
     ) -> Vec<AgentEvent> {
         let Some(item) = self.started.get_mut(item_id) else {
             return Vec::new();
@@ -496,6 +536,11 @@ impl TraceProjection {
             || item.status == TracePartStatus::Completed
         {
             return Vec::new();
+        }
+        if let Some(text) = authoritative_text
+            && item.content != text
+        {
+            item.content = text;
         }
         item.status = TracePartStatus::Completed;
         item.updated_at = unix_seconds();
@@ -543,7 +588,7 @@ fn thinking_provider_key(provider_item_id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use pl_trace::{AgentEvent, TracePartKind};
+    use pl_trace::{AgentEvent, TracePart, TracePartKind};
 
     use super::*;
 
@@ -613,6 +658,24 @@ mod tests {
         assert_eq!(second_delta, "inference-2-reasoning-1");
     }
 
+    #[test]
+    fn completed_text_uses_authoritative_text_and_revision() {
+        let mut trace = trace();
+        let _ = trace.append_text_delta("msg_1", TraceTextChannel::Final, "par".to_string());
+        let completed = trace
+            .complete_text(
+                "msg_1",
+                TraceTextChannel::Final,
+                Some("final text".to_string()),
+            )
+            .into_iter()
+            .find_map(completed_text_item)
+            .expect("completed text item");
+
+        assert_eq!(completed.content, "final text");
+        assert_eq!(completed.revision, 1);
+    }
+
     fn delta_item_id(event: AgentEvent) -> Option<String> {
         match event {
             AgentEvent::TracePartDelta { event } if event.kind == TracePartKind::Thinking => {
@@ -645,6 +708,37 @@ mod tests {
         match event {
             AgentEvent::TracePartCompleted { item } if item.kind == TracePartKind::Thinking => {
                 Some(item.item_id)
+            }
+            AgentEvent::TracePartStarted { .. }
+            | AgentEvent::TracePartDelta { .. }
+            | AgentEvent::TracePartFailed { .. }
+            | AgentEvent::InteractionChanged { .. }
+            | AgentEvent::AgentRuntimeUpdated { .. }
+            | AgentEvent::AgentStateChanged { .. }
+            | AgentEvent::CollabAgentSpawnBegin { .. }
+            | AgentEvent::CollabAgentSpawnEnd { .. }
+            | AgentEvent::CollabAgentInteractionBegin { .. }
+            | AgentEvent::CollabAgentInteractionEnd { .. }
+            | AgentEvent::CollabWaitingBegin { .. }
+            | AgentEvent::CollabWaitingEnd { .. }
+            | AgentEvent::CollabCloseBegin { .. }
+            | AgentEvent::CollabCloseEnd { .. }
+            | AgentEvent::TurnInterrupted { .. }
+            | AgentEvent::TurnBudgetLimited { .. }
+            | AgentEvent::SkillActivated { .. }
+            | AgentEvent::Done
+            | AgentEvent::Error { .. }
+            | AgentEvent::TracePartCompleted { .. } => None,
+        }
+    }
+
+    fn completed_text_item(event: AgentEvent) -> Option<TracePart> {
+        match event {
+            AgentEvent::TracePartCompleted { item }
+                if item.kind == TracePartKind::Text
+                    && item.text_channel == Some(TraceTextChannel::Final) =>
+            {
+                Some(item)
             }
             AgentEvent::TracePartStarted { .. }
             | AgentEvent::TracePartDelta { .. }

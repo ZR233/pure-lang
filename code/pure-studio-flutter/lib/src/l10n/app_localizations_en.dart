@@ -209,6 +209,38 @@ class AppLocalizationsEn extends AppLocalizations {
   String get timelineAgentFallback => 'Agent';
 
   @override
+  String timelineToolCompleted(String name) {
+    return '$name completed';
+  }
+
+  @override
+  String timelineToolFailed(String name) {
+    return '$name failed';
+  }
+
+  @override
+  String timelineToolDenied(String name) {
+    return '$name denied';
+  }
+
+  @override
+  String timelineToolRunning(String name) {
+    return '$name running';
+  }
+
+  @override
+  String get timelineAgentSubagent => 'Subagent';
+
+  @override
+  String get timelineAgentSubagentMessage => 'Subagent message';
+
+  @override
+  String get timelineAgentWaiting => 'Waiting for subagents';
+
+  @override
+  String get timelineAgentClose => 'Close subagent';
+
+  @override
   String get interactionQuestionsTitle => 'A few questions';
 
   @override

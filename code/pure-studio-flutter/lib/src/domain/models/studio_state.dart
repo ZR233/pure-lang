@@ -12,6 +12,8 @@ class StudioState {
     required this.projects,
     required this.sessions,
     required this.messagesBySession,
+    this.partSnapshotsBySession = const {},
+    this.partOverlaysBySession = const {},
     required this.providers,
     this.defaultProviderId,
     this.providerUsages = const [],
@@ -33,6 +35,8 @@ class StudioState {
   final List<StudioProject> projects;
   final List<StudioSession> sessions;
   final Map<String, List<TimelineMessage>> messagesBySession;
+  final Map<String, Map<String, TimelinePartSnapshot>> partSnapshotsBySession;
+  final Map<String, Map<String, TimelinePartOverlay>> partOverlaysBySession;
   final List<ProviderSettingsView> providers;
   final String? defaultProviderId;
   final List<ProviderUsageView> providerUsages;
@@ -96,6 +100,8 @@ class StudioState {
     List<StudioProject>? projects,
     List<StudioSession>? sessions,
     Map<String, List<TimelineMessage>>? messagesBySession,
+    Map<String, Map<String, TimelinePartSnapshot>>? partSnapshotsBySession,
+    Map<String, Map<String, TimelinePartOverlay>>? partOverlaysBySession,
     List<ProviderSettingsView>? providers,
     String? defaultProviderId,
     List<ProviderUsageView>? providerUsages,
@@ -117,6 +123,10 @@ class StudioState {
       projects: projects ?? this.projects,
       sessions: sessions ?? this.sessions,
       messagesBySession: messagesBySession ?? this.messagesBySession,
+      partSnapshotsBySession:
+          partSnapshotsBySession ?? this.partSnapshotsBySession,
+      partOverlaysBySession:
+          partOverlaysBySession ?? this.partOverlaysBySession,
       providers: providers ?? this.providers,
       defaultProviderId: defaultProviderId ?? this.defaultProviderId,
       providerUsages: providerUsages ?? this.providerUsages,

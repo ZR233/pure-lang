@@ -48,9 +48,17 @@ impl StreamLifecycle {
                     vec![ModelStreamEvent::TextDelta { id, channel, delta }]
                 }
             }
-            ModelStreamEvent::TextCompleted { id, channel } => {
+            ModelStreamEvent::TextCompleted {
+                id,
+                channel,
+                authoritative_text,
+            } => {
                 self.open_text.remove(&block_key(channel.as_str(), &id));
-                vec![ModelStreamEvent::TextCompleted { id, channel }]
+                vec![ModelStreamEvent::TextCompleted {
+                    id,
+                    channel,
+                    authoritative_text,
+                }]
             }
             ModelStreamEvent::ReasoningStarted {
                 id,
@@ -261,6 +269,7 @@ impl StreamLifecycle {
             events.push(ModelStreamEvent::TextCompleted {
                 id: id.to_string(),
                 channel: parse_channel(channel),
+                authoritative_text: None,
             });
         }
         for id in std::mem::take(&mut self.open_reasoning) {

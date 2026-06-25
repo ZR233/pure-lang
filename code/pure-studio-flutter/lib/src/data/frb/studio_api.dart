@@ -426,19 +426,83 @@ TimelineMessage timelineMessageFromJson(Object? value) {
   );
 }
 
-TimelinePart timelinePartFromJson(Object? value) {
+TimelinePartSnapshot timelinePartSnapshotFromJson(Object? value) {
   final json = _map(value);
   final type = _partType(
     _string(json['partType'], fallback: _string(json['type'])),
   );
-  return TimelinePart(
+  return TimelinePartSnapshot(
     id: _string(json['partId'], fallback: _string(json['id'])),
     messageId: _string(json['messageId']),
+    sessionId: _string(json['sessionId']),
+    turnId: _string(json['turnId']),
     type: type,
-    title: _partTitle(json, type),
+    order: _int(json['order']),
+    revision: _int(json['revision']),
     text: _partText(json, type),
     status: _string(json['status'], fallback: 'completed'),
-    collapsed: type == TimelinePartType.reasoning,
+    createdAt: _dateFromUnix(_int(json['createdAt'])),
+    updatedAt: _dateFromUnix(_int(json['updatedAt'])),
+    completedAt: _nullableInt(json['completedAt']) == null
+        ? null
+        : _dateFromUnix(_nullableInt(json['completedAt'])!),
+    error: _nullableString(json['error']),
+    textChannel: _textChannel(json['textChannel']),
+    tool: _toolPart(json['tool']),
+    agent: _agentPart(json['agent']),
+    planContent: _string(_map(json['plan'])['content']),
+    synthetic: _bool(json['synthetic']),
+    ignored: _bool(json['ignored']),
+  );
+}
+
+TimelinePart timelinePartFromSnapshot(
+  TimelinePartSnapshot snapshot, {
+  TimelinePartOverlay? overlay,
+}) {
+  final text = overlay?.values['text'] ?? snapshot.text;
+  final planContent = overlay?.values['planContent'] ?? snapshot.planContent;
+  final snapshotTool = snapshot.tool;
+  final tool = snapshotTool?.copyWith(
+    arguments: overlay?.values['tool.arguments'] ?? snapshotTool.arguments,
+    result: overlay?.values['tool.result'] ?? snapshotTool.result,
+  );
+  final visibleText = switch (snapshot.type) {
+    TimelinePartType.plan => planContent ?? text,
+    TimelinePartType.tool => _toolActivityText(tool, snapshot.status),
+    TimelinePartType.agent =>
+      snapshot.agent?.summary ?? snapshot.agent?.task ?? text,
+    TimelinePartType.reasoning => '',
+    TimelinePartType.text => text,
+  };
+  return TimelinePart(
+    id: snapshot.id,
+    messageId: snapshot.messageId,
+    type: snapshot.type,
+    order: snapshot.order,
+    revision: snapshot.revision,
+    title: _partTitleFromSnapshot(snapshot),
+    text: visibleText,
+    status: snapshot.status,
+    textChannel: snapshot.textChannel,
+    tool: tool,
+    agent: snapshot.agent,
+    collapsed: snapshot.type == TimelinePartType.reasoning,
+    synthetic: snapshot.synthetic,
+    ignored: snapshot.ignored,
+  );
+}
+
+TimelinePartDelta timelinePartDeltaFromJson(Object? value) {
+  final json = _map(value);
+  return TimelinePartDelta(
+    sessionId: _string(json['sessionId']),
+    messageId: _string(json['messageId']),
+    partId: _string(json['partId']),
+    revision: _int(json['revision']),
+    field: _string(json['field']),
+    delta: _string(json['delta']),
+    chunkIndex: _nullableInt(json['chunkIndex']),
   );
 }
 
@@ -544,12 +608,12 @@ StudioState _stateFromJson(
   required String? selectedProjectId,
   required String? selectedSessionId,
 }) {
-  final messagesBySession = _messagesBySession(
+  final timeline = _timelineFromJson(
     _list(json['messages']),
     _list(json['parts']),
   );
   for (final session in studioSessionsFromJson(json['sessions'])) {
-    messagesBySession.putIfAbsent(session.id, () => []);
+    timeline.messagesBySession.putIfAbsent(session.id, () => []);
   }
   final config = _map(json['config']);
   final runtimeJson = Map<String, Object?>.from(_map(json['sessionRuntime']));
@@ -562,7 +626,9 @@ StudioState _stateFromJson(
   return StudioState(
     projects: _list(json['projects']).map(_projectFromJson).toList(),
     sessions: studioSessionsFromJson(json['sessions']),
-    messagesBySession: messagesBySession,
+    messagesBySession: timeline.messagesBySession,
+    partSnapshotsBySession: timeline.partSnapshotsBySession,
+    partOverlaysBySession: const {},
     providers: _providersFromConfig(config),
     defaultProviderId: _defaultProviderIdFromConfig(config),
     roles: _rolesFromConfig(config),
@@ -614,22 +680,37 @@ String? _defaultProviderIdFromConfig(Map<String, Object?> config) {
   return providers.keys.firstOrNull;
 }
 
-Map<String, List<TimelineMessage>> _messagesBySession(
+class _TimelineLoadResult {
+  const _TimelineLoadResult({
+    required this.messagesBySession,
+    required this.partSnapshotsBySession,
+  });
+
+  final Map<String, List<TimelineMessage>> messagesBySession;
+  final Map<String, Map<String, TimelinePartSnapshot>> partSnapshotsBySession;
+}
+
+_TimelineLoadResult _timelineFromJson(
   List<Object?> messageValues,
   List<Object?> partValues,
 ) {
-  final partsByMessage = <String, List<TimelinePart>>{};
+  final snapshotsByMessage = <String, List<TimelinePartSnapshot>>{};
+  final snapshotsBySession = <String, Map<String, TimelinePartSnapshot>>{};
   for (final value in partValues) {
     final nested = _map(_map(value)['part']);
     final partJson = nested.isEmpty ? _map(value) : nested;
-    final part = timelinePartFromJson(partJson);
-    if (part.id.isEmpty || part.messageId.isEmpty) {
+    final part = timelinePartSnapshotFromJson(partJson);
+    if (part.id.isEmpty || part.messageId.isEmpty || part.sessionId.isEmpty) {
       continue;
     }
-    partsByMessage.putIfAbsent(part.messageId, () => []).add(part);
+    snapshotsByMessage.putIfAbsent(part.messageId, () => []).add(part);
+    snapshotsBySession.putIfAbsent(part.sessionId, () => {})[part.id] = part;
   }
-  for (final parts in partsByMessage.values) {
-    parts.sort((a, b) => a.id.compareTo(b.id));
+  for (final parts in snapshotsByMessage.values) {
+    parts.sort((a, b) {
+      final order = a.order.compareTo(b.order);
+      return order != 0 ? order : a.id.compareTo(b.id);
+    });
   }
 
   final bySession = <String, List<TimelineMessage>>{};
@@ -637,7 +718,12 @@ Map<String, List<TimelineMessage>> _messagesBySession(
     final nested = _map(_map(value)['message']);
     final messageJson = nested.isEmpty ? _map(value) : nested;
     final message = timelineMessageFromJson(messageJson).copyWith(
-      parts: partsByMessage[_string(messageJson['messageId'])] ?? const [],
+      parts: [
+        for (final part
+            in snapshotsByMessage[_string(messageJson['messageId'])] ??
+                const <TimelinePartSnapshot>[])
+          timelinePartFromSnapshot(part),
+      ],
     );
     if (message.id.isEmpty || message.sessionId.isEmpty) {
       continue;
@@ -647,7 +733,10 @@ Map<String, List<TimelineMessage>> _messagesBySession(
   for (final messages in bySession.values) {
     messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
   }
-  return bySession;
+  return _TimelineLoadResult(
+    messagesBySession: bySession,
+    partSnapshotsBySession: snapshotsBySession,
+  );
 }
 
 StudioProject _projectFromJson(Object? value) {
@@ -949,22 +1038,6 @@ List<McpServerSettingsView> _mcpServersFromConfig(Map<String, Object?> config) {
   return servers;
 }
 
-String _partTitle(Map<String, Object?> json, TimelinePartType type) {
-  return switch (type) {
-    TimelinePartType.tool => _string(
-      _map(json['tool'])['name'],
-      fallback: 'Tool',
-    ),
-    TimelinePartType.plan => 'Plan',
-    TimelinePartType.agent => _string(
-      _map(json['agent'])['role'],
-      fallback: 'Agent',
-    ),
-    TimelinePartType.reasoning => 'Reasoning',
-    TimelinePartType.text => '',
-  };
-}
-
 String _partText(Map<String, Object?> json, TimelinePartType type) {
   final text = _string(json['text']);
   if (text.isNotEmpty) {
@@ -982,6 +1055,107 @@ String _partText(Map<String, Object?> json, TimelinePartType type) {
     ),
     TimelinePartType.reasoning || TimelinePartType.text => '',
   };
+}
+
+TimelineTextChannel? _textChannel(Object? value) {
+  return switch (_string(value)) {
+    'user' => TimelineTextChannel.user,
+    'commentary' => TimelineTextChannel.commentary,
+    'final' => TimelineTextChannel.finalAnswer,
+    _ => null,
+  };
+}
+
+TimelineToolPart? _toolPart(Object? value) {
+  final json = _map(value);
+  if (json.isEmpty) {
+    return null;
+  }
+  return TimelineToolPart(
+    toolCallId: _string(json['toolCallId']),
+    callId: _nullableString(json['callId']),
+    providerItemId: _nullableString(json['providerItemId']),
+    name: _string(json['name'], fallback: 'tool'),
+    arguments: _string(json['arguments']),
+    result: _nullableString(json['result']),
+    exitCode: _nullableInt(json['exitCode']),
+    timedOut: _bool(json['timedOut']),
+    workingDirectory: _nullableString(json['workingDirectory']),
+    denialReason: _nullableString(json['denialReason']),
+  );
+}
+
+TimelineAgentPart? _agentPart(Object? value) {
+  final json = _map(value);
+  if (json.isEmpty) {
+    return null;
+  }
+  return TimelineAgentPart(
+    id: _string(json['id']),
+    path: _string(json['path']),
+    parentPath: _nullableString(json['parentPath']),
+    role: _string(json['role'], fallback: 'agent'),
+    task: _string(json['task']),
+    status: _string(json['status']),
+    summary: _nullableString(json['summary']),
+    depth: _int(json['depth']),
+    error: _nullableString(json['error']),
+    reason: _nullableString(json['reason']),
+  );
+}
+
+String _partTitleFromSnapshot(TimelinePartSnapshot snapshot) {
+  return switch (snapshot.type) {
+    TimelinePartType.tool => snapshot.tool?.name ?? 'Tool',
+    TimelinePartType.plan => 'Plan',
+    TimelinePartType.agent => snapshot.agent?.role ?? 'Agent',
+    TimelinePartType.reasoning => 'Reasoning',
+    TimelinePartType.text => '',
+  };
+}
+
+String _toolActivityText(TimelineToolPart? tool, String status) {
+  if (tool == null) {
+    return '';
+  }
+  return [
+    _commandSummary(tool.arguments),
+    tool.workingDirectory,
+    tool.denialReason,
+    tool.result,
+  ].whereType<String>().where((value) => value.trim().isNotEmpty).join('\n');
+}
+
+String? _commandSummary(String arguments) {
+  final json = _tryDecodeMap(arguments);
+  final command = _string(json['command']);
+  final path = _string(
+    _firstValue(json, const [
+      'path',
+      'filePath',
+      'targetPath',
+      'workingDirectory',
+    ]),
+  );
+  final query = _string(json['query']);
+  final value = command.isNotEmpty
+      ? command.split('\n').first
+      : path.isNotEmpty
+      ? path
+      : query;
+  return value.isEmpty ? null : value;
+}
+
+Map<String, Object?> _tryDecodeMap(String value) {
+  if (value.trim().isEmpty) {
+    return const {};
+  }
+  try {
+    final decoded = jsonDecode(value);
+    return _map(decoded);
+  } catch (_) {
+    return const {};
+  }
 }
 
 String _interactionTitle(InteractionKind kind, Map<String, Object?> payload) {
@@ -1576,8 +1750,12 @@ class DemoStudioApi implements StudioApi {
           'messageId': userMessageId,
           'sessionId': sessionId,
           'partType': 'text',
+          'order': 0,
+          'revision': 0,
           'status': 'completed',
           'createdAt': now,
+          'updatedAt': now,
+          'textChannel': 'user',
           'text': trimmed,
         },
       },
@@ -1612,8 +1790,12 @@ class DemoStudioApi implements StudioApi {
           'messageId': assistantMessageId,
           'sessionId': sessionId,
           'partType': 'text',
+          'order': 1,
+          'revision': 0,
           'status': 'completed',
           'createdAt': now + 1,
+          'updatedAt': now + 1,
+          'textChannel': 'final',
           'text':
               'Demo response for: **$trimmed**\n\n'
               '- FRB session stream is connected\n'

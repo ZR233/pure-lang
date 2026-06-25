@@ -434,6 +434,54 @@ abstract class AppLocalizations {
   /// **'Agent'**
   String get timelineAgentFallback;
 
+  /// No description provided for @timelineToolCompleted.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} completed'**
+  String timelineToolCompleted(String name);
+
+  /// No description provided for @timelineToolFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} failed'**
+  String timelineToolFailed(String name);
+
+  /// No description provided for @timelineToolDenied.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} denied'**
+  String timelineToolDenied(String name);
+
+  /// No description provided for @timelineToolRunning.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} running'**
+  String timelineToolRunning(String name);
+
+  /// No description provided for @timelineAgentSubagent.
+  ///
+  /// In en, this message translates to:
+  /// **'Subagent'**
+  String get timelineAgentSubagent;
+
+  /// No description provided for @timelineAgentSubagentMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Subagent message'**
+  String get timelineAgentSubagentMessage;
+
+  /// No description provided for @timelineAgentWaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for subagents'**
+  String get timelineAgentWaiting;
+
+  /// No description provided for @timelineAgentClose.
+  ///
+  /// In en, this message translates to:
+  /// **'Close subagent'**
+  String get timelineAgentClose;
+
   /// No description provided for @interactionQuestionsTitle.
   ///
   /// In en, this message translates to:

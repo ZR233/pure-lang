@@ -251,6 +251,7 @@ pub fn studio_part_record(model: entities::message_part::Model) -> Result<Studio
             turn_id: model.turn_id,
             part_type: studio_part_type_from_label(&model.part_type)?,
             order: model.part_order as u64,
+            revision: model.revision as u64,
             status: studio_part_status_from_label(&model.status)?,
             created_at: model.created_at,
             updated_at: model.updated_at,

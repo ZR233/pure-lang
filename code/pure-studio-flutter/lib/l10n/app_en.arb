@@ -96,6 +96,34 @@
   "timelineToolFallback": "Tool",
   "timelinePlanFallback": "Plan",
   "timelineAgentFallback": "Agent",
+  "timelineToolCompleted": "{name} completed",
+  "@timelineToolCompleted": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "timelineToolFailed": "{name} failed",
+  "@timelineToolFailed": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "timelineToolDenied": "{name} denied",
+  "@timelineToolDenied": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "timelineToolRunning": "{name} running",
+  "@timelineToolRunning": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "timelineAgentSubagent": "Subagent",
+  "timelineAgentSubagentMessage": "Subagent message",
+  "timelineAgentWaiting": "Waiting for subagents",
+  "timelineAgentClose": "Close subagent",
   "interactionQuestionsTitle": "A few questions",
   "interactionLastQuestion": "Last question",
   "interactionContinueAfterAnswer": "Continue after answering",

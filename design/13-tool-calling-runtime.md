@@ -98,3 +98,7 @@ MCP tool 成功结果写回紧凑字符串。文本内容按 MCP content 顺序�
 ## Studio 展示
 
 Studio timeline 以 message/part projection 派生的 conversation row 为准。工具 entry 和工具组详情必须显示工具名称、状态、关键路径或命令摘要。静默文件工具的成功结果可以隐藏；但失败、拒绝、中断和预算受限时必须展示 result/error 详情，避免用户只看到“工具调用失败”而无法定位原因。
+
+工具、命令、文件修改和子代理协作活动的用户可读文本由前端 projection 根据结构化 `StudioPart.tool`、`StudioPart.agent` 与 `StudioAgentTimelineEvent` 生成。后端不新增 `activityText` 之类的本地化文案字段；如果展示层缺少必要事实，应补充结构化字段而不是补一段后端写死文本。固定标签和状态说明由 Flutter i18n 负责，工具名、agent path、工作目录、路径、命令摘要和模型名按原始领域值展示。
+
+父 timeline 默认只展示子代理高层协作事件，例如 spawn、wait、send/followup 和 close，并按 `callId` 合并 begin/end 状态。子代理内部普通工具 trace 不自动灌入父 timeline；这些细节应保留在子代理详情、状态栏弹层或专门的 agent 视图中。`AgentChanged` 是 latest snapshot merge，适合更新状态栏和活动详情，不应作为每次状态变更的新 timeline row。
