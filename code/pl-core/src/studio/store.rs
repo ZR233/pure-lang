@@ -12,8 +12,8 @@ use pl_protocol::{
     InteractionResolution, InteractionStatus, Message, PlanConfirmationResolution,
     PlanLifecycleEvent, PlanLifecycleState, RuntimeUsageSnapshot, SkillActivation,
     StudioAgentTimelineEvent, StudioAgentTimelineEventKind, StudioAttachment, StudioEventEnvelope,
-    StudioEventKind, StudioMessage, StudioPart, StudioRuntimeUsage, StudioSessionRuntime,
-    StudioTurnStatus,
+    StudioEventKind, StudioMessage, StudioPart, StudioPartStatus, StudioRuntimeUsage,
+    StudioSessionRuntime, StudioTurnStatus,
 };
 use pl_trace::{TraceAttachment, TraceEvent, TraceEventKind};
 use sea_orm::{
@@ -1605,7 +1605,10 @@ async fn upsert_message_part_with_tx(
         .one(tx)
         .await?
     {
-        if existing.sequence > sequence {
+        if existing.sequence > sequence
+            || (is_terminal_part_status_label(&existing.status)
+                && !is_terminal_part_status(part.status))
+        {
             return Ok(());
         }
         let mut active: message_part::ActiveModel = existing.into();
@@ -1614,6 +1617,7 @@ async fn upsert_message_part_with_tx(
         active.turn_id = Set(part.turn_id.clone());
         active.part_type = Set(studio_part_type_label(part.part_type).to_string());
         active.part_order = Set(part.order as i64);
+        active.revision = Set(part.revision as i64);
         active.status = Set(studio_part_status_label(part.status).to_string());
         active.created_at = Set(part.created_at);
         active.updated_at = Set(part.updated_at);
@@ -1643,6 +1647,7 @@ async fn upsert_message_part_with_tx(
             turn_id: Set(part.turn_id.clone()),
             part_type: Set(studio_part_type_label(part.part_type).to_string()),
             part_order: Set(part.order as i64),
+            revision: Set(part.revision as i64),
             status: Set(studio_part_status_label(part.status).to_string()),
             created_at: Set(part.created_at),
             updated_at: Set(part.updated_at),
@@ -2104,6 +2109,24 @@ fn is_terminal_turn_status(status: StudioTurnStatus) -> bool {
     )
 }
 
+fn is_terminal_part_status(status: StudioPartStatus) -> bool {
+    matches!(
+        status,
+        StudioPartStatus::Completed
+            | StudioPartStatus::Failed
+            | StudioPartStatus::Interrupted
+            | StudioPartStatus::Denied
+            | StudioPartStatus::BudgetLimited
+    )
+}
+
+fn is_terminal_part_status_label(status: &str) -> bool {
+    matches!(
+        status,
+        "completed" | "failed" | "interrupted" | "denied" | "budgetLimited"
+    )
+}
+
 async fn upsert_session_skill_events_with_tx(
     tx: &sea_orm::DatabaseTransaction,
     trace_events: &[TraceEvent],
@@ -2406,6 +2429,7 @@ mod tests {
             turn_id: "turn-1".to_string(),
             part_type: StudioPartType::Text,
             order: 999,
+            revision: 0,
             status: StudioPartStatus::Streaming,
             created_at: 10,
             updated_at: 10,
@@ -2439,6 +2463,7 @@ mod tests {
             .unwrap();
         let mut completed_part = part;
         completed_part.order = 777;
+        completed_part.revision = 1;
         completed_part.status = StudioPartStatus::Completed;
         completed_part.text = "hello".to_string();
         completed_part.updated_at = 11;
@@ -2495,6 +2520,7 @@ mod tests {
                         session_id: "session-1".to_string(),
                         message_id: "message-1".to_string(),
                         part_id: "part-1".to_string(),
+                        revision: 1,
                         field: StudioPartDeltaField::Text,
                         delta: "live".to_string(),
                         chunk_index: None,
@@ -2507,6 +2533,80 @@ mod tests {
             err.to_string()
                 .contains("messagePartDelta is live-only and must not be persisted")
         );
+    }
+
+    #[tokio::test]
+    async fn terminal_message_part_snapshot_does_not_regress_to_streaming() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/beta").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Terminal", CompileMode::Auto)
+            .await
+            .unwrap();
+        let part = StudioPart {
+            part_id: "part-terminal".to_string(),
+            message_id: "message-terminal".to_string(),
+            session_id: session.id.clone(),
+            turn_id: "turn-1".to_string(),
+            part_type: StudioPartType::Text,
+            order: 1,
+            revision: 1,
+            status: StudioPartStatus::Completed,
+            created_at: 10,
+            updated_at: 11,
+            completed_at: Some(11),
+            error: None,
+            text_channel: Some(StudioTextChannel::Final),
+            text: "done".to_string(),
+            attachments: Vec::new(),
+            tool: None,
+            agent: None,
+            inference: None,
+            plan: None,
+            file: None,
+            usage: None,
+            synthetic: false,
+            ignored: false,
+        };
+        store
+            .append_studio_event(StudioEventEnvelope {
+                event_id: "studio-event-terminal".to_string(),
+                project_id: Some(project.id.clone()),
+                session_id: Some(session.id.clone()),
+                turn_id: Some("turn-1".to_string()),
+                sequence: 0,
+                created_at: 11,
+                kind: StudioEventKind::MessagePartUpdated {
+                    part: Box::new(part.clone()),
+                },
+            })
+            .await
+            .unwrap();
+
+        let mut stale_streaming = part;
+        stale_streaming.status = StudioPartStatus::Streaming;
+        stale_streaming.revision = 2;
+        stale_streaming.text = "partial".to_string();
+        store
+            .append_studio_event(StudioEventEnvelope {
+                event_id: "studio-event-streaming".to_string(),
+                project_id: Some(project.id),
+                session_id: Some(session.id.clone()),
+                turn_id: Some("turn-1".to_string()),
+                sequence: 0,
+                created_at: 12,
+                kind: StudioEventKind::MessagePartUpdated {
+                    part: Box::new(stale_streaming),
+                },
+            })
+            .await
+            .unwrap();
+
+        let parts = store.load_message_parts(&session.id).await.unwrap();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].part.status, StudioPartStatus::Completed);
+        assert_eq!(parts[0].part.revision, 1);
+        assert_eq!(parts[0].part.text, "done");
     }
 
     #[tokio::test]

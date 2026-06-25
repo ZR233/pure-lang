@@ -20,7 +20,7 @@ part 类型固定为：
 - `inference`
 - `plan`
 
-每个 message snapshot 必须携带 `messageId`、`sessionId`、`turnId`、`role`、`status`、`createdAt` 和 `updatedAt`。每个 part snapshot 必须携带 `partId`、`messageId`、`sessionId`、`turnId`、`partType`、`order`、`createdAt` 和 `updatedAt`。`StudioEventEnvelope.sequence` 是会话内唯一 durable 事件顺序号；part `order` 只表示同一 message 内展示顺序。后续 snapshot 只 upsert 同一个 part，并且不得改变该 part 的首次展示顺序。delta 不携带第二套 durable 顺序，只表达对某个字段的 live 追加。
+每个 message snapshot 必须携带 `messageId`、`sessionId`、`turnId`、`role`、`status`、`createdAt` 和 `updatedAt`。每个 part snapshot 必须携带 `partId`、`messageId`、`sessionId`、`turnId`、`partType`、`order`、`revision`、`createdAt` 和 `updatedAt`。`StudioEventEnvelope.sequence` 是会话内唯一 durable 事件顺序号；part `order` 只表示同一 message 内展示顺序。后续 snapshot 只 upsert 同一个 part，并且不得改变该 part 的首次展示顺序。`revision` 是单个 part 的 live 内容修订号，start snapshot 为 0，delta 递增，terminal snapshot 携带最新 revision；旧历史或旧客户端缺失该字段时默认 0。delta 不携带第二套 durable 顺序，只表达对某个字段的 live 追加。
 
 `text` part 必须携带 `textChannel`，固定为：
 
@@ -28,7 +28,7 @@ part 类型固定为：
 - `commentary`：Codex 风格可见进展更新，只用于 UI 展示，不写入最终 assistant 消息历史。
 - `final`：最终 assistant 正文，会写入会话历史并作为本轮最终答复。
 
-`StudioPartDelta` 必须包含 `messageId`、`partId`、`field` 和 `delta`；`field` 固定为 `text`、`tool.arguments`、`tool.result`、`reasoning.text` 或 `plan.content` 等协议字段。delta 只能在前端已有 part snapshot 时应用；孤儿 delta 按 opencode 逻辑丢弃。旧的 `role` 字段不再作为 Studio 协议语义入口。
+`StudioPartDelta` 必须包含 `messageId`、`partId`、`revision`、`field` 和 `delta`；`field` 固定为 `text`、`tool.arguments`、`tool.result`、`reasoningText` 或 `planContent` 等协议字段。delta 只能在前端已有 part snapshot 时应用；孤儿 delta 按 opencode 逻辑丢弃。旧的 `role` 字段不再作为 Studio 协议语义入口。
 
 用户 `text` part 可以携带 `attachments` 元数据，当前只用于图片输入缩略图展示。part 的持久语义只依赖附件 id、文件名、媒体类型、尺寸和大小；GUI 事件可以携带派生的 `dataUrl` 预览值用于即时缩略图。模型可见的 base64 图片内容由 `pl-core` 在请求前按附件 id materialize，不写入消息正文。
 
@@ -44,8 +44,10 @@ snapshot 与 live delta 的优先级完全对齐 opencode：
 - 文本、commentary、reasoning、plan、工具参数和工具结果的流式片段发 `messagePartDelta`，只作为 live overlay。
 - 前端按 16ms frame 合批事件；同一 frame 内同一个 part 的多个 snapshot 只保留最后一个，若同 part 的 snapshot 到达，跳过同 part 尚未应用的旧 delta。若 snapshot 因 coalescing 覆盖了更早 snapshot，也必须把同 part 的 pending delta 标记为 stale 并跳过。
 - snapshot 到达后清除同 part 的 delta overlay，并以 snapshot 内容为准。
-- terminal snapshot 到达后，sequence 不高于该 snapshot 的 live delta 不得再修改 part。带 `chunkIndex` 的 delta 必须按 part 去重；重复或倒序 chunk 直接丢弃。
+- terminal snapshot 到达后，后续 `streaming`、`started` 或低 revision snapshot 不得覆盖 `completed`、`failed`、`interrupted`、`denied`、`budgetLimited` 等终态；revision 不高于当前 overlay/snapshot 的 live delta 不得再修改 part。带 `chunkIndex` 的 delta 必须按 part 去重；重复或倒序 chunk 直接丢弃。
 - reload、历史恢复和 stale backfill 只依赖 durable snapshot；丢失 live delta 不影响最终可恢复状态。
+
+reasoning part 默认只作为折叠的标题/摘要行显示。raw reasoning、provider replay metadata 或内部 thinking chunk 可以保留在 provider metadata、trace 或历史重放所需结构中，但不得作为 timeline 正文默认展示；只有 provider 明确输出的 `<commentary>`、`<final>` 或 `<proposed_plan>` 可见标签段会被投影成对应 commentary、final 或 plan part。
 
 ## 8.2 数据流
 

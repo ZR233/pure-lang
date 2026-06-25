@@ -87,13 +87,225 @@ void main() {
           },
         ),
       );
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
 
       state = container.read(studioControllerProvider).requireValue;
       expect(state.selectedMessages.single.role, 'assistant');
       expect(state.selectedMessages.single.parts.single.text, 'hello');
     },
   );
+
+  test('timeline deltas use overlay revision guards', () async {
+    final api = _FakeStudioApi(_emptyState());
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(studioControllerProvider.future);
+    api.emitSession(
+      StudioBridgeEvent(
+        kindType: 'messageUpdated',
+        sessionId: 'session-1',
+        payload: {
+          'message': {
+            'messageId': 'turn-1:assistant',
+            'sessionId': 'session-1',
+            'turnId': 'turn-1',
+            'role': 'assistant',
+            'status': 'streaming',
+            'createdAt': 1,
+            'updatedAt': 1,
+          },
+        },
+      ),
+    );
+    api.emitSession(
+      StudioBridgeEvent(
+        kindType: 'messagePartUpdated',
+        sessionId: 'session-1',
+        payload: {
+          'part': {
+            'partId': 'part-1',
+            'messageId': 'turn-1:assistant',
+            'sessionId': 'session-1',
+            'turnId': 'turn-1',
+            'partType': 'text',
+            'order': 7,
+            'revision': 0,
+            'status': 'streaming',
+            'createdAt': 1,
+            'updatedAt': 1,
+            'textChannel': 'commentary',
+            'text': '',
+          },
+        },
+      ),
+    );
+    for (final revision in [1, 1, 2]) {
+      api.emitSession(
+        StudioBridgeEvent(
+          kindType: 'messagePartDelta',
+          sessionId: 'session-1',
+          payload: {
+            'delta': {
+              'sessionId': 'session-1',
+              'messageId': 'turn-1:assistant',
+              'partId': 'part-1',
+              'revision': revision,
+              'field': 'text',
+              'delta': revision == 1 ? 'a' : 'b',
+            },
+          },
+        ),
+      );
+    }
+    await pumpEventQueue();
+
+    var state = container.read(studioControllerProvider).requireValue;
+    var part = state.selectedMessages.single.parts.single;
+    expect(part.text, 'ab');
+    expect(part.order, 7);
+    expect(part.textChannel, TimelineTextChannel.commentary);
+    expect(state.partSnapshotsBySession['session-1']!['part-1']!.text, '');
+
+    api.emitSession(
+      StudioBridgeEvent(
+        kindType: 'messagePartUpdated',
+        sessionId: 'session-1',
+        payload: {
+          'part': {
+            'partId': 'part-1',
+            'messageId': 'turn-1:assistant',
+            'sessionId': 'session-1',
+            'turnId': 'turn-1',
+            'partType': 'text',
+            'order': 7,
+            'revision': 2,
+            'status': 'completed',
+            'createdAt': 1,
+            'updatedAt': 2,
+            'textChannel': 'commentary',
+            'text': 'snapshot',
+          },
+        },
+      ),
+    );
+    api.emitSession(
+      StudioBridgeEvent(
+        kindType: 'messagePartDelta',
+        sessionId: 'session-1',
+        payload: {
+          'delta': {
+            'sessionId': 'session-1',
+            'messageId': 'turn-1:assistant',
+            'partId': 'part-1',
+            'revision': 3,
+            'field': 'text',
+            'delta': 'late',
+          },
+        },
+      ),
+    );
+    await pumpEventQueue();
+
+    state = container.read(studioControllerProvider).requireValue;
+    part = state.selectedMessages.single.parts.single;
+    expect(part.text, 'snapshot');
+    expect(state.partOverlaysBySession['session-1'], isEmpty);
+  });
+
+  test('timeline snapshot wins over same tick delta batch', () async {
+    final api = _FakeStudioApi(_emptyState());
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(studioControllerProvider.future);
+    api.emitSession(
+      StudioBridgeEvent(
+        kindType: 'messageUpdated',
+        sessionId: 'session-1',
+        payload: {
+          'message': {
+            'messageId': 'turn-1:assistant',
+            'sessionId': 'session-1',
+            'turnId': 'turn-1',
+            'role': 'assistant',
+            'status': 'streaming',
+            'createdAt': 1,
+            'updatedAt': 1,
+          },
+        },
+      ),
+    );
+    api.emitSession(
+      StudioBridgeEvent(
+        kindType: 'messagePartUpdated',
+        sessionId: 'session-1',
+        payload: {
+          'part': {
+            'partId': 'part-1',
+            'messageId': 'turn-1:assistant',
+            'sessionId': 'session-1',
+            'turnId': 'turn-1',
+            'partType': 'text',
+            'order': 0,
+            'revision': 0,
+            'status': 'streaming',
+            'createdAt': 1,
+            'updatedAt': 1,
+            'textChannel': 'final',
+            'text': '',
+          },
+        },
+      ),
+    );
+    api.emitSession(
+      StudioBridgeEvent(
+        kindType: 'messagePartDelta',
+        sessionId: 'session-1',
+        payload: {
+          'delta': {
+            'sessionId': 'session-1',
+            'messageId': 'turn-1:assistant',
+            'partId': 'part-1',
+            'revision': 1,
+            'field': 'text',
+            'delta': 'partial',
+          },
+        },
+      ),
+    );
+    api.emitSession(
+      StudioBridgeEvent(
+        kindType: 'messagePartUpdated',
+        sessionId: 'session-1',
+        payload: {
+          'part': {
+            'partId': 'part-1',
+            'messageId': 'turn-1:assistant',
+            'sessionId': 'session-1',
+            'turnId': 'turn-1',
+            'partType': 'text',
+            'order': 0,
+            'revision': 1,
+            'status': 'completed',
+            'createdAt': 1,
+            'updatedAt': 2,
+            'textChannel': 'final',
+            'text': 'authoritative',
+          },
+        },
+      ),
+    );
+    await pumpEventQueue();
+
+    final state = container.read(studioControllerProvider).requireValue;
+    expect(state.selectedMessages.single.parts.single.text, 'authoritative');
+    expect(state.partOverlaysBySession['session-1'], isEmpty);
+  });
 
   test('session list stream updates only the addressed project', () async {
     final now = DateTime.fromMillisecondsSinceEpoch(1000);
@@ -129,7 +341,7 @@ void main() {
         payload: {'projectId': 'project-1', 'sessions': <Object?>[]},
       ),
     );
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
 
     final sessions = container
         .read(studioControllerProvider)
@@ -190,7 +402,7 @@ void main() {
           },
         ),
       );
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
 
       final runtime = container
           .read(studioControllerProvider)
@@ -230,7 +442,7 @@ void main() {
           },
         ),
       );
-      await Future<void>.delayed(Duration.zero);
+      await pumpEventQueue();
 
       final unchangedRuntime = container
           .read(studioControllerProvider)
@@ -254,7 +466,7 @@ void main() {
         .updateComposer('demo hello');
 
     await container.read(studioControllerProvider.notifier).submitComposer();
-    await Future<void>.delayed(Duration.zero);
+    await pumpEventQueue();
 
     final state = container.read(studioControllerProvider).requireValue;
     expect(state.turnPhase, TurnPhase.completed);
@@ -496,7 +708,7 @@ void main() {
             messageId: 'message-1',
             type: TimelinePartType.reasoning,
             title: 'Reasoning',
-            text: '> check parser\n\n- keep current delta visible',
+            text: '> hidden raw reasoning\n\n- keep this out of timeline',
             collapsed: false,
           ),
           TimelinePart(
@@ -529,7 +741,8 @@ void main() {
     expect(find.textContaining('File'), findsOneWidget);
     expect(find.textContaining('app.dart'), findsOneWidget);
     expect(find.textContaining("print('ok')"), findsOneWidget);
-    expect(find.textContaining('check parser'), findsOneWidget);
+    expect(find.text('Reasoning'), findsOneWidget);
+    expect(find.textContaining('hidden raw reasoning'), findsNothing);
     expect(find.textContaining('Next steps'), findsOneWidget);
     expect(find.textContaining('Analyze'), findsOneWidget);
   });

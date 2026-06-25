@@ -285,6 +285,8 @@ pub struct TracePart {
     pub item_id: String,
     #[serde(alias = "sequence")]
     pub started_sequence: u64,
+    #[serde(default)]
+    pub revision: u64,
     pub kind: TracePartKind,
     pub status: TracePartStatus,
     pub created_at: i64,
@@ -321,6 +323,7 @@ impl TracePart {
             turn_id: turn_id.into(),
             item_id: item_id.into(),
             started_sequence: sequence,
+            revision: 0,
             kind: TracePartKind::Text,
             status,
             created_at: timestamp,
@@ -370,6 +373,8 @@ pub struct TracePartDeltaEvent {
     pub item_id: String,
     #[serde(alias = "sequence")]
     pub started_sequence: u64,
+    #[serde(default)]
+    pub revision: u64,
     pub kind: TracePartKind,
     pub status: TracePartStatus,
     pub created_at: i64,

@@ -211,6 +211,7 @@ pub mod message_part {
         pub turn_id: String,
         pub part_type: String,
         pub part_order: i64,
+        pub revision: i64,
         pub status: String,
         pub created_at: i64,
         pub updated_at: i64,

@@ -18,12 +18,16 @@ final studioControllerProvider =
 class StudioController extends AsyncNotifier<StudioState> {
   StreamSubscription<Object>? _globalSubscription;
   StreamSubscription<Object>? _sessionSubscription;
+  Timer? _partDeltaFlushTimer;
+  final List<StudioBridgeEvent> _pendingPartDeltas = [];
 
   StudioApi get _api => ref.read(studioApiProvider);
 
   @override
   Future<StudioState> build() async {
     ref.onDispose(() {
+      _partDeltaFlushTimer?.cancel();
+      _pendingPartDeltas.clear();
       final global = _globalSubscription;
       final session = _sessionSubscription;
       if (global != null) {
@@ -90,6 +94,7 @@ class StudioController extends AsyncNotifier<StudioState> {
   }
 
   void _subscribe(String? sessionId) {
+    _flushPartDeltaBatch();
     _globalSubscription ??= _api.subscribeGlobalEvents().listen(_handleEvent);
     final oldSession = _sessionSubscription;
     if (oldSession != null) {
@@ -343,6 +348,11 @@ class StudioController extends AsyncNotifier<StudioState> {
     if (current == null || event is! StudioBridgeEvent) {
       return;
     }
+    if (event.kindType == 'messagePartDelta') {
+      _queuePartDelta(current, event);
+      return;
+    }
+    _flushPartDeltaBatch();
     if (event.kindType == 'stale') {
       final sessionId = event.sessionId ?? current.selectedSessionId;
       if (sessionId != null) {
@@ -356,6 +366,38 @@ class StudioController extends AsyncNotifier<StudioState> {
     }
     final reduced = _reduceEvent(current, event);
     state = AsyncData(_withEventCursor(reduced, event));
+  }
+
+  void _queuePartDelta(StudioState current, StudioBridgeEvent event) {
+    if (!_targetsSelectedSession(current, event)) {
+      return;
+    }
+    _pendingPartDeltas.add(event);
+    _partDeltaFlushTimer ??= Timer(Duration.zero, _flushPartDeltaBatch);
+  }
+
+  void _flushPartDeltaBatch() {
+    if (_pendingPartDeltas.isEmpty) {
+      _partDeltaFlushTimer?.cancel();
+      _partDeltaFlushTimer = null;
+      return;
+    }
+    final events = List<StudioBridgeEvent>.of(_pendingPartDeltas);
+    _pendingPartDeltas.clear();
+    _partDeltaFlushTimer?.cancel();
+    _partDeltaFlushTimer = null;
+    final current = state.value;
+    if (current == null) {
+      return;
+    }
+    var latest = current;
+    for (final event in events) {
+      if (!_targetsSelectedSession(latest, event)) {
+        continue;
+      }
+      latest = _reduceEvent(latest, event);
+    }
+    state = AsyncData(latest);
   }
 
   Future<void> _reloadSession(String sessionId) async {
@@ -479,16 +521,27 @@ class StudioController extends AsyncNotifier<StudioState> {
     final messagesBySession = Map<String, List<TimelineMessage>>.from(
       current.messagesBySession,
     );
+    final snapshotsBySession =
+        Map<String, Map<String, TimelinePartSnapshot>>.from(
+          current.partSnapshotsBySession,
+        );
     final sessionId = sessionState.selectedSessionId;
     if (sessionId != null) {
       messagesBySession[sessionId] =
           sessionState.messagesBySession[sessionId] ?? const [];
+      snapshotsBySession[sessionId] =
+          sessionState.partSnapshotsBySession[sessionId] ?? const {};
     }
     return current.copyWith(
       sessions: sessionState.sessions.isEmpty
           ? current.sessions
           : sessionState.sessions,
       messagesBySession: messagesBySession,
+      partSnapshotsBySession: snapshotsBySession,
+      partOverlaysBySession: {
+        ...current.partOverlaysBySession,
+        ?sessionId: const {},
+      },
       selectedProjectId:
           sessionState.selectedProjectId ?? current.selectedProjectId,
       selectedSessionId: sessionId ?? current.selectedSessionId,
@@ -567,72 +620,129 @@ class StudioController extends AsyncNotifier<StudioState> {
   }
 
   StudioState _upsertPart(StudioState current, Object? value) {
-    final part = timelinePartFromJson(value);
-    final sessionId = _stringFromMap(value, 'sessionId');
-    if (part.id.isEmpty || part.messageId.isEmpty || sessionId.isEmpty) {
+    final snapshot = timelinePartSnapshotFromJson(value);
+    final sessionId = snapshot.sessionId;
+    if (snapshot.id.isEmpty ||
+        snapshot.messageId.isEmpty ||
+        sessionId.isEmpty) {
       return current;
     }
+    final snapshots = {
+      ...(current.partSnapshotsBySession[sessionId] ?? const {}),
+      snapshot.id: snapshot,
+    };
+    final overlays = {...(current.partOverlaysBySession[sessionId] ?? const {})}
+      ..remove(snapshot.id);
     final messages = _messagesFor(current, sessionId);
     final messageIndex = messages.indexWhere(
-      (message) => message.id == part.messageId,
+      (message) => message.id == snapshot.messageId,
     );
+    final projected = timelinePartFromSnapshot(snapshot);
     if (messageIndex < 0) {
       messages.add(
         TimelineMessage(
-          id: part.messageId,
+          id: snapshot.messageId,
           sessionId: sessionId,
           role: 'assistant',
-          createdAt: DateTime.now(),
-          parts: [part],
+          createdAt: snapshot.createdAt,
+          parts: [projected],
         ),
       );
-      return _withMessages(current, sessionId, messages);
+      return _withTimelineState(
+        current,
+        sessionId,
+        messages,
+        snapshots,
+        overlays,
+      );
     }
     final message = messages[messageIndex];
     final parts = [...message.parts];
-    final partIndex = parts.indexWhere((candidate) => candidate.id == part.id);
+    final partIndex = parts.indexWhere(
+      (candidate) => candidate.id == snapshot.id,
+    );
     if (partIndex >= 0) {
-      parts[partIndex] = part;
+      parts[partIndex] = projected;
     } else {
-      parts.add(part);
+      parts.add(projected);
     }
+    parts.sort((a, b) {
+      final order = a.order.compareTo(b.order);
+      return order != 0 ? order : a.id.compareTo(b.id);
+    });
     messages[messageIndex] = message.copyWith(parts: parts);
-    return _withMessages(current, sessionId, messages);
+    return _withTimelineState(
+      current,
+      sessionId,
+      messages,
+      snapshots,
+      overlays,
+    );
   }
 
   StudioState _appendPartDelta(StudioState current, Object? value) {
-    final sessionId = _stringFromMap(value, 'sessionId');
-    final messageId = _stringFromMap(value, 'messageId');
-    final partId = _stringFromMap(value, 'partId');
-    final field = _stringFromMap(value, 'field');
-    final delta = _stringFromMap(value, 'delta');
-    if (sessionId.isEmpty ||
-        messageId.isEmpty ||
-        partId.isEmpty ||
-        delta.isEmpty ||
-        !_canAppendDeltaField(field)) {
+    final delta = timelinePartDeltaFromJson(value);
+    if (delta.sessionId.isEmpty ||
+        delta.messageId.isEmpty ||
+        delta.partId.isEmpty ||
+        delta.delta.isEmpty ||
+        !_canAppendDeltaField(delta.field)) {
       return current;
     }
-    final messages = _messagesFor(current, sessionId);
+    final snapshot =
+        current.partSnapshotsBySession[delta.sessionId]?[delta.partId];
+    if (snapshot == null || _isTerminalPartStatus(snapshot.status)) {
+      return current;
+    }
+    final currentOverlay =
+        current.partOverlaysBySession[delta.sessionId]?[delta.partId] ??
+        const TimelinePartOverlay();
+    final lastRevision =
+        currentOverlay.lastRevisions[delta.field] ?? snapshot.revision;
+    if (delta.revision > 0 && delta.revision <= lastRevision) {
+      return current;
+    }
+    if (delta.chunkIndex != null) {
+      final previousChunk = currentOverlay.lastChunkIndexes[delta.field] ?? -1;
+      if (delta.chunkIndex! < previousChunk) {
+        return current;
+      }
+    }
+    final baseValue =
+        currentOverlay.values[delta.field] ??
+        _snapshotField(snapshot, delta.field);
+    final nextOverlay = currentOverlay.append(
+      field: delta.field,
+      value: '$baseValue${delta.delta}',
+      revision: delta.revision,
+      chunkIndex: delta.chunkIndex,
+    );
+    final overlays = {
+      ...(current.partOverlaysBySession[delta.sessionId] ?? const {}),
+      delta.partId: nextOverlay,
+    };
+    final messages = _messagesFor(current, delta.sessionId);
     final messageIndex = messages.indexWhere(
-      (message) => message.id == messageId,
+      (message) => message.id == delta.messageId,
     );
     if (messageIndex < 0) {
       return current;
     }
     final message = messages[messageIndex];
     final parts = [...message.parts];
-    final partIndex = parts.indexWhere((part) => part.id == partId);
+    final partIndex = parts.indexWhere((part) => part.id == delta.partId);
     if (partIndex < 0) {
       return current;
     }
-    final part = parts[partIndex];
-    if (_isTerminalPartStatus(part.status)) {
-      return current;
-    }
-    parts[partIndex] = part.copyWith(text: '${part.text}$delta');
+    parts[partIndex] = timelinePartFromSnapshot(snapshot, overlay: nextOverlay);
     messages[messageIndex] = message.copyWith(parts: parts);
-    return _withMessages(current, sessionId, messages);
+    return _withTimelineState(
+      current,
+      delta.sessionId,
+      messages,
+      current.partSnapshotsBySession[delta.sessionId] ?? const {},
+      overlays,
+    );
   }
 
   StudioState _removeMessage(
@@ -648,7 +758,18 @@ class StudioController extends AsyncNotifier<StudioState> {
       current,
       sessionId,
     ).where((message) => message.id != messageId).toList();
-    return _withMessages(current, sessionId, messages);
+    final snapshots = {
+      ...(current.partSnapshotsBySession[sessionId] ?? const {}),
+    }..removeWhere((_, part) => part.messageId == messageId);
+    final overlays = {...(current.partOverlaysBySession[sessionId] ?? const {})}
+      ..removeWhere((partId, _) => !snapshots.containsKey(partId));
+    return _withTimelineState(
+      current,
+      sessionId,
+      messages,
+      snapshots,
+      overlays,
+    );
   }
 
   StudioState _removePart(
@@ -676,7 +797,18 @@ class StudioController extends AsyncNotifier<StudioState> {
     messages[messageIndex] = message.copyWith(
       parts: message.parts.where((part) => part.id != partId).toList(),
     );
-    return _withMessages(current, sessionId, messages);
+    final snapshots = {
+      ...(current.partSnapshotsBySession[sessionId] ?? const {}),
+    }..remove(partId);
+    final overlays = {...(current.partOverlaysBySession[sessionId] ?? const {})}
+      ..remove(partId);
+    return _withTimelineState(
+      current,
+      sessionId,
+      messages,
+      snapshots,
+      overlays,
+    );
   }
 
   StudioState _applyAgentChanged(StudioState current, Object? value) {
@@ -700,16 +832,20 @@ class StudioController extends AsyncNotifier<StudioState> {
         eventId.isEmpty) {
       return current;
     }
-    final kind = _stringFromMap(value, 'kind');
-    final payloadJson = _stringFromMap(value, 'payloadJson');
+    final kind = _nested(value, 'kind');
+    final kindType = _stringFromMap(kind, 'type');
+    final callId = _stringFromMap(kind, 'callId');
     final createdAt = _intFromMap(value, 'createdAt');
-    final messageId = 'agent-timeline:$eventId';
+    final messageId = 'agent-timeline:${callId.isEmpty ? eventId : callId}';
     final part = TimelinePart(
       id: '$messageId:part',
       messageId: messageId,
       type: TimelinePartType.agent,
-      title: kind.isEmpty ? 'Agent' : kind,
-      text: payloadJson,
+      order: createdAt,
+      revision: 0,
+      title: _agentActivityTitle(kindType),
+      text: _agentActivityText(kind),
+      status: _stringFromMap(kind, 'status', fallback: 'completed'),
     );
     final messages = _messagesFor(current, sessionId);
     final index = messages.indexWhere((message) => message.id == messageId);
@@ -820,6 +956,55 @@ class StudioController extends AsyncNotifier<StudioState> {
     );
     bySession[sessionId] = messages;
     return state.copyWith(messagesBySession: bySession);
+  }
+
+  String _agentActivityTitle(String kindType) {
+    return switch (kindType) {
+      'spawnBegin' || 'spawnEnd' => 'agentTimeline.spawn',
+      'interactionBegin' || 'interactionEnd' => 'agentTimeline.message',
+      'waitingBegin' || 'waitingEnd' => 'agentTimeline.waiting',
+      'closeBegin' || 'closeEnd' => 'agentTimeline.close',
+      _ => 'agentTimeline.agent',
+    };
+  }
+
+  String _agentActivityText(Object? value) {
+    final kind = _map(value);
+    final receiver = _stringFromMap(kind, 'receiverPath');
+    final path = _stringFromMap(kind, 'path', fallback: receiver);
+    final task = _stringFromMap(kind, 'taskName');
+    final prompt = _stringFromMap(kind, 'prompt');
+    final error = _stringFromMap(kind, 'error');
+    return [
+      path,
+      task,
+      prompt,
+      error,
+    ].where((part) => part.trim().isNotEmpty).join('\n');
+  }
+
+  StudioState _withTimelineState(
+    StudioState state,
+    String sessionId,
+    List<TimelineMessage> messages,
+    Map<String, TimelinePartSnapshot> snapshots,
+    Map<String, TimelinePartOverlay> overlays,
+  ) {
+    final bySession = Map<String, List<TimelineMessage>>.from(
+      state.messagesBySession,
+    );
+    bySession[sessionId] = messages;
+    return state.copyWith(
+      messagesBySession: bySession,
+      partSnapshotsBySession: {
+        ...state.partSnapshotsBySession,
+        sessionId: snapshots,
+      },
+      partOverlaysBySession: {
+        ...state.partOverlaysBySession,
+        sessionId: overlays,
+      },
+    );
   }
 
   TurnPhase _turnPhase(Object? value) {
@@ -966,18 +1151,29 @@ class StudioController extends AsyncNotifier<StudioState> {
 
   bool _canAppendDeltaField(String field) {
     return switch (field) {
-      'text' ||
-      'reasoningText' ||
-      'planContent' ||
-      'tool.arguments' ||
-      'tool.result' => true,
+      'text' || 'planContent' || 'tool.arguments' || 'tool.result' => true,
       _ => false,
+    };
+  }
+
+  String _snapshotField(TimelinePartSnapshot snapshot, String field) {
+    return switch (field) {
+      'text' => snapshot.text,
+      'planContent' => snapshot.planContent ?? snapshot.text,
+      'tool.arguments' => snapshot.tool?.arguments ?? '',
+      'tool.result' => snapshot.tool?.result ?? '',
+      _ => '',
     };
   }
 
   bool _isTerminalPartStatus(String status) {
     return switch (status) {
-      'completed' || 'failed' || 'cancelled' || 'budgetLimited' => true,
+      'completed' ||
+      'failed' ||
+      'interrupted' ||
+      'cancelled' ||
+      'denied' ||
+      'budgetLimited' => true,
       _ => false,
     };
   }
@@ -1052,10 +1248,10 @@ class StudioController extends AsyncNotifier<StudioState> {
     return null;
   }
 
-  String _stringFromMap(Object? value, String key) {
+  String _stringFromMap(Object? value, String key, {String fallback = ''}) {
     final nested = _nested(value, key);
     if (nested == null) {
-      return '';
+      return fallback;
     }
     return nested is String ? nested : nested.toString();
   }

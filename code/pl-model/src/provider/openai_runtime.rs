@@ -862,6 +862,49 @@ mod tests {
     }
 
     #[test]
+    fn stream_accumulator_uses_authoritative_completed_text_for_response_content() {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "inf-1".to_string(),
+            plan_mode: false,
+        }));
+
+        accumulator
+            .apply(
+                StreamEvent::TextDelta {
+                    id: "msg_1".to_string(),
+                    channel: pl_trace::TraceTextChannel::Final,
+                    delta: "partial".to_string(),
+                },
+                &event_tx,
+            )
+            .unwrap();
+        accumulator
+            .apply(
+                StreamEvent::TextCompleted {
+                    id: "final".to_string(),
+                    channel: pl_trace::TraceTextChannel::Final,
+                    authoritative_text: Some("final text".to_string()),
+                },
+                &event_tx,
+            )
+            .unwrap();
+        apply_completed(&mut accumulator, &event_tx);
+
+        let response = accumulator.finish(&event_tx).unwrap();
+
+        assert_eq!(response.content.as_deref(), Some("final text"));
+        assert!(response.trace_events.iter().any(|event| matches!(
+            &event.kind,
+            TraceEventKind::TracePartCompleted { item }
+                if item.text_channel == Some(pl_trace::TraceTextChannel::Final)
+                    && item.content == "final text"
+        )));
+    }
+
+    #[test]
     fn stream_accumulator_extracts_proposed_plan_item() {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
         let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {

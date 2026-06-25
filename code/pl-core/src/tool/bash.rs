@@ -411,6 +411,14 @@ mod tests {
         }
     }
 
+    fn long_sleep_then_echo_command() -> &'static str {
+        if cfg!(target_os = "windows") {
+            "Start-Sleep -Seconds 10; Write-Output 'done'"
+        } else {
+            "sleep 10; echo done"
+        }
+    }
+
     fn stdin_echo_command() -> &'static str {
         if cfg!(target_os = "windows") {
             "$line = [Console]::In.ReadLine(); Write-Output ('got:' + $line)"
@@ -762,9 +770,9 @@ mod tests {
             .execute(
                 ToolInput {
                     arguments: serde_json::json!({
-                        "command": sleep_then_echo_command(),
-                        "timeoutSeconds": 0,
-                        "yieldTimeMs": 1000,
+                        "command": long_sleep_then_echo_command(),
+                        "timeoutSeconds": 1,
+                        "yieldTimeMs": 3000,
                     }),
                     session_id: "timeout-session".to_string(),
                     tool_id: "timeout-tool".to_string(),

@@ -161,18 +161,24 @@ class _MarkdownBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final surface = isUser ? _MarkdownSurface.user : _MarkdownSurface.assistant;
+    final isCommentary =
+        part.textChannel == TimelineTextChannel.commentary && !isUser;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: isUser ? context.studioPaper2 : Colors.transparent,
-        border: isUser
-            ? Border.all(color: scheme.outlineVariant.withValues(alpha: 0.78))
+        color: isUser
+            ? context.studioPaper2
+            : isCommentary
+            ? context.studioPaper2.withValues(alpha: 0.52)
+            : Colors.transparent,
+        border: isUser || isCommentary
+            ? Border.all(color: scheme.outlineVariant.withValues(alpha: 0.72))
             : null,
         borderRadius: BorderRadius.circular(StudioRadii.md),
       ),
       child: Padding(
         padding: EdgeInsets.symmetric(
-          horizontal: isUser ? 14 : 0,
-          vertical: isUser ? 10 : 0,
+          horizontal: isUser || isCommentary ? 14 : 0,
+          vertical: isUser || isCommentary ? 10 : 0,
         ),
         child: SelectionArea(
           child: _AgentMarkdown(
@@ -215,13 +221,11 @@ class _ReasoningPartState extends State<_ReasoningPart> {
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: SelectionArea(
-                child: _AgentMarkdown(
-                  id: widget.part.id,
-                  status: widget.part.status,
-                  text: widget.part.text,
-                  surface: _MarkdownSurface.panel,
-                ),
+              child: Text(
+                widget.part.status,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: context.studioInkSoft),
               ),
             ),
           ),
@@ -238,14 +242,48 @@ class _ToolPart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tool = part.tool;
+    final title = tool == null
+        ? part.title ?? context.l10n.timelineToolFallback
+        : _toolTitle(context, tool.name, part.status);
+    final subtitle = tool == null ? part.text : _toolSubtitle(tool);
     return _TimelinePanel(
       child: _TimelineMetaRow(
         icon: Icons.terminal,
-        title: part.title ?? context.l10n.timelineToolFallback,
-        subtitle: part.text,
+        title: title,
+        subtitle: subtitle,
         trailing: _StatusPill(label: part.status),
       ),
     );
+  }
+
+  String _toolTitle(BuildContext context, String name, String status) {
+    return switch (status) {
+      'completed' => context.l10n.timelineToolCompleted(name),
+      'failed' => context.l10n.timelineToolFailed(name),
+      'denied' => context.l10n.timelineToolDenied(name),
+      'running' ||
+      'streaming' ||
+      'started' => context.l10n.timelineToolRunning(name),
+      _ => name,
+    };
+  }
+
+  String _toolSubtitle(TimelineToolPart tool) {
+    return [
+      _firstLine(tool.arguments),
+      tool.workingDirectory,
+      tool.denialReason,
+      tool.result,
+    ].whereType<String>().where((part) => part.trim().isNotEmpty).join('\n');
+  }
+
+  String? _firstLine(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    return trimmed.split('\n').first;
   }
 }
 
@@ -302,10 +340,21 @@ class _AgentPart extends StatelessWidget {
     return _TimelinePanel(
       child: _TimelineMetaRow(
         icon: Icons.account_tree_outlined,
-        title: part.title ?? context.l10n.timelineAgentFallback,
+        title: _agentTitle(context, part.title),
         subtitle: part.text,
       ),
     );
+  }
+
+  String _agentTitle(BuildContext context, String? title) {
+    return switch (title) {
+      'agentTimeline.spawn' => context.l10n.timelineAgentSubagent,
+      'agentTimeline.message' => context.l10n.timelineAgentSubagentMessage,
+      'agentTimeline.waiting' => context.l10n.timelineAgentWaiting,
+      'agentTimeline.close' => context.l10n.timelineAgentClose,
+      'agentTimeline.agent' => context.l10n.timelineAgentFallback,
+      _ => title ?? context.l10n.timelineAgentFallback,
+    };
   }
 }
 

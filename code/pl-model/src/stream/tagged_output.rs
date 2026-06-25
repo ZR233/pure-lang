@@ -39,11 +39,19 @@ impl TaggedVisibleOutputAdapter {
                     vec![ModelStreamEvent::TextDelta { id, channel, delta }]
                 }
             }
-            ModelStreamEvent::TextCompleted { id, channel } => {
+            ModelStreamEvent::TextCompleted {
+                id,
+                channel,
+                authoritative_text,
+            } => {
                 if channel == TraceTextChannel::Final {
-                    self.flush_visible_text()
+                    self.flush_visible_text(authoritative_text)
                 } else {
-                    vec![ModelStreamEvent::TextCompleted { id, channel }]
+                    vec![ModelStreamEvent::TextCompleted {
+                        id,
+                        channel,
+                        authoritative_text,
+                    }]
                 }
             }
             ModelStreamEvent::ReasoningDelta {
@@ -101,13 +109,18 @@ impl TaggedVisibleOutputAdapter {
             .collect()
     }
 
-    fn flush_visible_text(&mut self) -> Vec<ModelStreamEvent> {
-        self.text_parser
+    fn flush_visible_text(&mut self, authoritative_text: Option<String>) -> Vec<ModelStreamEvent> {
+        let mut events: Vec<_> = self
+            .text_parser
             .finish()
             .segments
             .into_iter()
             .flat_map(|segment| self.segment_events(segment, true))
-            .collect()
+            .collect();
+        if let Some(text) = authoritative_text {
+            events.extend(self.authoritative_segment_completed_events(text));
+        }
+        events
     }
 
     fn flush_reasoning_visible_text(&mut self) -> Vec<ModelStreamEvent> {
@@ -120,10 +133,41 @@ impl TaggedVisibleOutputAdapter {
     }
 
     fn flush_all(&mut self) -> Vec<ModelStreamEvent> {
-        self.flush_visible_text()
+        self.flush_visible_text(None)
             .into_iter()
             .chain(self.flush_reasoning_visible_text())
             .collect()
+    }
+
+    fn authoritative_segment_completed_events(&self, text: String) -> Vec<ModelStreamEvent> {
+        let mut parser = VisibleTextParser::new(false);
+        let mut segments = parser.push_str(&text).segments;
+        segments.extend(parser.finish().segments);
+        let mut events = Vec::new();
+        for segment in segments {
+            match segment {
+                VisibleTextSegment::Untagged(text) | VisibleTextSegment::Final(text) => {
+                    if !text.trim().is_empty() {
+                        events.push(ModelStreamEvent::TextCompleted {
+                            id: self.final_id.clone(),
+                            channel: TraceTextChannel::Final,
+                            authoritative_text: Some(text),
+                        });
+                    }
+                }
+                VisibleTextSegment::Commentary(text) => {
+                    if !text.trim().is_empty() {
+                        events.push(ModelStreamEvent::TextCompleted {
+                            id: self.commentary_id.clone(),
+                            channel: TraceTextChannel::Commentary,
+                            authoritative_text: Some(text),
+                        });
+                    }
+                }
+                VisibleTextSegment::ProposedPlan(_) => {}
+            }
+        }
+        events
     }
 
     fn segment_events(
