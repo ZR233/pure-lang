@@ -212,13 +212,8 @@ impl CommandProcessManager {
         if let Some(stderr) = stderr {
             tokio::spawn(read_stderr(entry.clone(), stderr));
         }
-        self.snapshot_after_wait(
-            &process_id,
-            request.yield_time,
-            request.max_output_chars,
-            ReleaseFinalProcess::Yes,
-        )
-        .await
+        self.snapshot_after_wait(&process_id, request.yield_time, request.max_output_chars)
+            .await
     }
 
     pub(crate) async fn write_stdin(
@@ -241,7 +236,6 @@ impl CommandProcessManager {
                         &request.process_id,
                         Duration::ZERO,
                         request.max_output_chars,
-                        ReleaseFinalProcess::Yes,
                     )
                     .await;
             }
@@ -270,7 +264,6 @@ impl CommandProcessManager {
             &request.process_id,
             request.yield_time,
             request.max_output_chars,
-            ReleaseFinalProcess::Yes,
         )
         .await
     }
@@ -284,7 +277,6 @@ impl CommandProcessManager {
         process_id: &str,
         yield_time: Duration,
         max_output_chars: usize,
-        release_final: ReleaseFinalProcess,
     ) -> Result<CommandOutputSnapshot, PureError> {
         let Some(entry) = self.entry(process_id).await else {
             return Err(tool_error(
@@ -294,16 +286,11 @@ impl CommandProcessManager {
         };
         wait_for_process_activity(&entry, yield_time).await;
         let snapshot = entry.snapshot(max_output_chars).await;
-        if matches!(release_final, ReleaseFinalProcess::Yes) && snapshot.process_id.is_none() {
+        if snapshot.process_id.is_none() {
             self.state.lock().await.entries.remove(process_id);
         }
         Ok(snapshot)
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ReleaseFinalProcess {
-    Yes,
 }
 
 impl CommandProcessEntry {
@@ -359,6 +346,10 @@ impl CommandProcessState {
                 | CommandProcessPhase::Draining(CommandProcessResult::TimedOut)
                 | CommandProcessPhase::Final(CommandProcessResult::TimedOut)
         )
+    }
+
+    fn is_draining_output(&self) -> bool {
+        matches!(self.phase, CommandProcessPhase::Draining(_))
     }
 
     fn apply_transition(&mut self, transition: CommandProcessTransition) {
@@ -696,8 +687,12 @@ fn message_for_state(
         );
     }
     match status_for_state(state) {
+        "running" if state.is_draining_output() => format!(
+            "Command exited and is draining remaining output. Use write_stdin with processId '{}' and empty chars to wait or poll. Read outputFile for complete output.",
+            process_id.unwrap_or_default()
+        ),
         "running" => format!(
-            "Command is still running or draining output. Use write_stdin with processId '{}' to wait, poll, or send input. Read outputFile for complete output.",
+            "Command is still running. Use write_stdin with processId '{}' to wait, poll, or send input. Read outputFile for complete output.",
             process_id.unwrap_or_default()
         ),
         "completed" => {
@@ -750,7 +745,7 @@ mod tests {
 
     use super::{
         CommandProcessPhase, CommandProcessState, CommandProcessTransition, HeadTailBuffer,
-        INTERNAL_BUFFER_BYTES, StreamKind, status_for_state,
+        INTERNAL_BUFFER_BYTES, StreamKind, message_for_state, status_for_state,
     };
 
     fn running_state() -> CommandProcessState {
@@ -798,5 +793,18 @@ mod tests {
         assert_eq!(status_for_state(&state), "timedOut");
         assert!(state.timed_out());
         assert!(state.is_final());
+    }
+
+    #[test]
+    fn draining_output_message_only_suggests_polling() {
+        let mut state = running_state();
+
+        state.apply_transition(CommandProcessTransition::ProcessExited { exit_code: Some(0) });
+
+        let message = message_for_state(&state, Some("proc-1"), std::path::Path::new("output.log"));
+
+        assert!(message.contains("draining remaining output"));
+        assert!(message.contains("empty chars"));
+        assert!(!message.contains("send input"));
     }
 }
