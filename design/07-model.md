@@ -15,6 +15,8 @@
 
 `protocol` 只负责把 provider 私有 SSE chunk 映射为 `stream` 的 canonical event。OpenAI Responses、OpenAI Chat、DeepSeek 和 Zhipu/GLM 兼容接口在进入 accumulator 前必须统一为文本、思考、工具参数、工具完成、usage 和完成/失败事件。核心层和 Studio timeline 不解析 provider 原始 JSON。
 
+`stream` 层负责稳定工具调用 identity。OpenAI Responses 可能先发送只有 provider `item_id` 的 `output_item.added`，后续 delta 或 done 才补 `call_id`；Chat Completions 也可能只依赖 chunk index 作为 `stream_id`。同一个工具调用一旦通过 `stream_id`、`item_id` 或 `call_id` 中任一非空身份进入 accumulator，后续 late metadata 必须合并到同一个 open tool，不得因为 `call_id` 后到而拆成第二个 tool call 或第二个 trace part。trace 的 tool part id 以最早稳定的 provider item/runtime tool id 为锚，`call_id` 只作为 metadata 写入 tool snapshot，用于协议回放和 provider tool result 匹配。
+
 ## 7.2 依赖
 
 ```text

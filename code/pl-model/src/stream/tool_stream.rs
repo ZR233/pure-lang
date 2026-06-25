@@ -25,25 +25,10 @@ impl ToolStream {
         name: Option<String>,
         payload_delta: ToolInputDeltaPayload,
     ) -> ToolInputSnapshot {
-        let key = tool_call_accumulator_key(stream_id, call_id, &item_id);
-        let initial_id = if item_id.is_empty() {
-            key.clone()
-        } else {
-            item_id.clone()
-        };
-        let initial_call_id = call_id
-            .filter(|call_id| !call_id.is_empty())
-            .map(ToOwned::to_owned);
-        let acc = self
-            .accumulators
-            .entry(key.clone())
-            .or_insert_with(|| ToolCallAccumulator {
-                id: initial_id,
-                has_stable_id: !item_id.is_empty(),
-                call_id: initial_call_id,
-                name: String::new(),
-                payload: ToolCallPayloadAccumulator::FunctionArguments(String::new()),
-            });
+        let key = self.resolve_key(stream_id, call_id, &item_id);
+        let acc = self.get_or_insert_accumulator(&key, call_id, &item_id, || {
+            ToolCallPayloadAccumulator::FunctionArguments(String::new())
+        });
         acc.merge_metadata(&key, &item_id, call_id, name);
         let delta_text = payload_delta.text().to_string();
         acc.push_delta(payload_delta);
@@ -61,25 +46,10 @@ impl ToolStream {
         name: Option<String>,
         payload: ToolInputDeltaPayload,
     ) -> ToolInputSnapshot {
-        let key = tool_call_accumulator_key(stream_id, call_id, &item_id);
-        let initial_id = if item_id.is_empty() {
-            key.clone()
-        } else {
-            item_id.clone()
-        };
-        let initial_call_id = call_id
-            .filter(|call_id| !call_id.is_empty())
-            .map(ToOwned::to_owned);
-        let acc = self
-            .accumulators
-            .entry(key.clone())
-            .or_insert_with(|| ToolCallAccumulator {
-                id: initial_id,
-                has_stable_id: !item_id.is_empty(),
-                call_id: initial_call_id,
-                name: String::new(),
-                payload: ToolCallPayloadAccumulator::from_payload(payload),
-            });
+        let key = self.resolve_key(stream_id, call_id, &item_id);
+        let acc = self.get_or_insert_accumulator(&key, call_id, &item_id, || {
+            ToolCallPayloadAccumulator::from_payload(payload)
+        });
         acc.merge_metadata(&key, &item_id, call_id, name);
         ToolInputSnapshot {
             tool: acc.snapshot(),
@@ -95,25 +65,15 @@ impl ToolStream {
         name: Option<String>,
         payload: Option<ToolInputDeltaPayload>,
     ) -> Result<Option<ToolCall>> {
-        let mut acc = self
-            .take_accumulator(stream_id, call_id, item_id)
-            .unwrap_or_else(|| {
-                let key = tool_call_accumulator_key(stream_id, call_id, item_id);
-                ToolCallAccumulator {
-                    id: if item_id.is_empty() {
-                        key.clone()
-                    } else {
-                        item_id.to_string()
-                    },
-                    has_stable_id: !item_id.is_empty(),
-                    call_id: call_id
-                        .filter(|call_id| !call_id.is_empty())
-                        .map(ToOwned::to_owned),
-                    name: String::new(),
-                    payload: ToolCallPayloadAccumulator::FunctionArguments(String::new()),
-                }
-            });
-        let key = tool_call_accumulator_key(stream_id, call_id, item_id);
+        let key = self.resolve_key(stream_id, call_id, item_id);
+        let mut acc = self.remove_accumulator(&key).unwrap_or_else(|| {
+            ToolCallAccumulator::new(
+                &key,
+                call_id,
+                item_id,
+                ToolCallPayloadAccumulator::FunctionArguments(String::new()),
+            )
+        });
         acc.merge_metadata(&key, item_id, call_id, name);
         if let Some(payload) = payload {
             acc.replace_payload(payload);
@@ -129,25 +89,10 @@ impl ToolStream {
         name: Option<String>,
         payload: Option<ToolInputDeltaPayload>,
     ) {
-        let key = tool_call_accumulator_key(stream_id, call_id, item_id);
-        let initial_id = if item_id.is_empty() {
-            key.clone()
-        } else {
-            item_id.to_string()
-        };
-        let initial_call_id = call_id
-            .filter(|call_id| !call_id.is_empty())
-            .map(ToOwned::to_owned);
-        let acc = self
-            .accumulators
-            .entry(key.clone())
-            .or_insert_with(|| ToolCallAccumulator {
-                id: initial_id,
-                has_stable_id: !item_id.is_empty(),
-                call_id: initial_call_id,
-                name: String::new(),
-                payload: ToolCallPayloadAccumulator::FunctionArguments(String::new()),
-            });
+        let key = self.resolve_key(stream_id, call_id, item_id);
+        let acc = self.get_or_insert_accumulator(&key, call_id, item_id, || {
+            ToolCallPayloadAccumulator::FunctionArguments(String::new())
+        });
         acc.merge_metadata(&key, item_id, call_id, name);
         if let Some(payload) = payload {
             acc.replace_payload(payload);
@@ -166,26 +111,41 @@ impl ToolStream {
         Ok(calls)
     }
 
-    fn take_accumulator(
+    fn resolve_key(
         &mut self,
         stream_id: Option<&String>,
         call_id: Option<&String>,
         item_id: &str,
-    ) -> Option<ToolCallAccumulator> {
+    ) -> String {
         let key = tool_call_accumulator_key(stream_id, call_id, item_id);
         if self.accumulators.contains_key(&key) {
-            return self.accumulators.remove(&key);
+            return key;
         }
 
-        let fallback_key = self.accumulators.iter().find_map(|(key, accumulator)| {
-            let call_id_matches = call_id
-                .filter(|call_id| !call_id.is_empty())
-                .zip(accumulator.call_id.as_ref())
-                .is_some_and(|(left, right)| left == right);
-            let item_id_matches = !item_id.is_empty() && accumulator.id == item_id;
-            (call_id_matches || item_id_matches).then(|| key.clone())
-        });
-        fallback_key.and_then(|key| self.accumulators.remove(&key))
+        self.accumulators
+            .iter()
+            .find_map(|(key, accumulator)| {
+                accumulator
+                    .matches_identity(call_id, item_id)
+                    .then(|| key.clone())
+            })
+            .unwrap_or(key)
+    }
+
+    fn remove_accumulator(&mut self, key: &str) -> Option<ToolCallAccumulator> {
+        self.accumulators.remove(key)
+    }
+
+    fn get_or_insert_accumulator(
+        &mut self,
+        key: &str,
+        call_id: Option<&String>,
+        item_id: &str,
+        payload: impl FnOnce() -> ToolCallPayloadAccumulator,
+    ) -> &mut ToolCallAccumulator {
+        self.accumulators
+            .entry(key.to_string())
+            .or_insert_with(|| ToolCallAccumulator::new(key, call_id, item_id, payload()))
     }
 }
 
@@ -203,6 +163,36 @@ struct ToolCallAccumulator {
 }
 
 impl ToolCallAccumulator {
+    fn new(
+        key: &str,
+        call_id: Option<&String>,
+        item_id: &str,
+        payload: ToolCallPayloadAccumulator,
+    ) -> Self {
+        Self {
+            id: if item_id.is_empty() {
+                key.to_string()
+            } else {
+                item_id.to_string()
+            },
+            has_stable_id: !item_id.is_empty(),
+            call_id: call_id
+                .filter(|call_id| !call_id.is_empty())
+                .map(ToOwned::to_owned),
+            name: String::new(),
+            payload,
+        }
+    }
+
+    fn matches_identity(&self, call_id: Option<&String>, item_id: &str) -> bool {
+        let call_id_matches = call_id
+            .filter(|call_id| !call_id.is_empty())
+            .zip(self.call_id.as_ref())
+            .is_some_and(|(left, right)| left == right);
+        let item_id_matches = !item_id.is_empty() && self.id == item_id;
+        call_id_matches || item_id_matches
+    }
+
     fn merge_metadata(
         &mut self,
         key: &str,
@@ -320,10 +310,13 @@ pub(crate) struct ToolCallAccumulatorSnapshot {
 }
 
 pub(crate) fn trace_tool_part_id(call_id: Option<&String>, id: &str) -> String {
+    if !id.is_empty() {
+        return id.to_string();
+    }
     call_id
         .filter(|call_id| !call_id.is_empty())
         .cloned()
-        .unwrap_or_else(|| id.to_string())
+        .unwrap_or_else(|| "tool_call".to_string())
 }
 
 fn tool_call_accumulator_key(

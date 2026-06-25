@@ -123,7 +123,9 @@ impl StreamLifecycle {
                 payload_kind,
             } => {
                 let mut events = self.close_open_content_blocks();
+                let key = self.resolve_tool_key(stream_id.as_ref(), call_id.as_ref(), &item_id);
                 self.upsert_tool_input(
+                    &key,
                     stream_id.as_ref(),
                     &item_id,
                     call_id.as_ref(),
@@ -145,9 +147,10 @@ impl StreamLifecycle {
                 name,
                 payload_delta,
             } => {
-                let key = tool_key(stream_id.as_ref(), call_id.as_ref(), &item_id);
+                let key = self.resolve_tool_key(stream_id.as_ref(), call_id.as_ref(), &item_id);
                 let is_new = !self.open_tools.contains_key(&key);
                 self.upsert_tool_input(
+                    &key,
                     stream_id.as_ref(),
                     &item_id,
                     call_id.as_ref(),
@@ -187,8 +190,8 @@ impl StreamLifecycle {
                 name,
                 payload,
             } => {
-                self.open_tools
-                    .remove(&tool_key(stream_id.as_ref(), call_id.as_ref(), &item_id));
+                let key = self.resolve_tool_key(stream_id.as_ref(), call_id.as_ref(), &item_id);
+                self.open_tools.remove(&key);
                 vec![ModelStreamEvent::ToolInputCompleted {
                     stream_id,
                     item_id,
@@ -215,8 +218,8 @@ impl StreamLifecycle {
                 payload,
             } => {
                 let mut events = self.close_open_content_blocks();
-                self.open_tools
-                    .remove(&tool_key(stream_id.as_ref(), call_id.as_ref(), &item_id));
+                let key = self.resolve_tool_key(stream_id.as_ref(), call_id.as_ref(), &item_id);
+                self.open_tools.remove(&key);
                 events.push(ModelStreamEvent::ToolCallReady {
                     stream_id,
                     item_id,
@@ -274,18 +277,21 @@ impl StreamLifecycle {
 
     fn upsert_tool_input(
         &mut self,
+        key: &str,
         stream_id: Option<&String>,
         item_id: &str,
         call_id: Option<&String>,
         name: Option<&String>,
     ) {
-        let key = tool_key(stream_id, call_id, item_id);
-        let entry = self.open_tools.entry(key).or_insert_with(|| OpenToolInput {
-            stream_id: stream_id.cloned(),
-            item_id: item_id.to_string(),
-            call_id: call_id.cloned(),
-            name: None,
-        });
+        let entry = self
+            .open_tools
+            .entry(key.to_string())
+            .or_insert_with(|| OpenToolInput {
+                stream_id: stream_id.cloned(),
+                item_id: item_id.to_string(),
+                call_id: call_id.cloned(),
+                name: None,
+            });
         if entry.stream_id.as_ref().is_none_or(String::is_empty)
             && let Some(stream_id) = stream_id.filter(|value| !value.is_empty())
         {
@@ -304,6 +310,33 @@ impl StreamLifecycle {
         {
             entry.name = Some(name.clone());
         }
+    }
+
+    fn resolve_tool_key(
+        &self,
+        stream_id: Option<&String>,
+        call_id: Option<&String>,
+        item_id: &str,
+    ) -> String {
+        let key = tool_key(stream_id, call_id, item_id);
+        if self.open_tools.contains_key(&key) {
+            return key;
+        }
+        self.open_tools
+            .iter()
+            .find_map(|(key, tool)| tool.matches_identity(call_id, item_id).then(|| key.clone()))
+            .unwrap_or(key)
+    }
+}
+
+impl OpenToolInput {
+    fn matches_identity(&self, call_id: Option<&String>, item_id: &str) -> bool {
+        let call_id_matches = call_id
+            .filter(|value| !value.is_empty())
+            .zip(self.call_id.as_ref())
+            .is_some_and(|(left, right)| left == right);
+        let item_id_matches = !item_id.is_empty() && self.item_id == item_id;
+        call_id_matches || item_id_matches
     }
 }
 
