@@ -352,6 +352,15 @@ impl CommandProcessState {
         matches!(self.phase, CommandProcessPhase::Draining(_))
     }
 
+    fn termination_reason(&self) -> Option<CommandTerminationReason> {
+        match self.phase {
+            CommandProcessPhase::Terminating(reason) => Some(reason),
+            CommandProcessPhase::Running
+            | CommandProcessPhase::Draining(_)
+            | CommandProcessPhase::Final(_) => None,
+        }
+    }
+
     fn apply_transition(&mut self, transition: CommandProcessTransition) {
         match transition {
             CommandProcessTransition::TimedOut => {
@@ -450,6 +459,15 @@ impl From<CommandTerminationReason> for CommandProcessResult {
         match reason {
             CommandTerminationReason::TimedOut => Self::TimedOut,
             CommandTerminationReason::Interrupted => Self::Interrupted,
+        }
+    }
+}
+
+impl CommandTerminationReason {
+    fn message_fragment(self) -> &'static str {
+        match self {
+            Self::TimedOut => "timed out",
+            Self::Interrupted => "was interrupted",
         }
     }
 }
@@ -686,6 +704,13 @@ fn message_for_state(
             output_file.display()
         );
     }
+    if let Some(reason) = state.termination_reason() {
+        return format!(
+            "Command {} and termination is in progress. Use write_stdin with processId '{}' and empty chars to wait or poll. Read outputFile for captured output.",
+            reason.message_fragment(),
+            process_id.unwrap_or_default()
+        );
+    }
     match status_for_state(state) {
         "running" if state.is_draining_output() => format!(
             "Command exited and is draining remaining output. Use write_stdin with processId '{}' and empty chars to wait or poll. Read outputFile for complete output.",
@@ -806,5 +831,34 @@ mod tests {
         assert!(message.contains("draining remaining output"));
         assert!(message.contains("empty chars"));
         assert!(!message.contains("send input"));
+    }
+
+    #[test]
+    fn terminating_message_only_suggests_polling() {
+        let mut timed_out = running_state();
+        timed_out.apply_transition(CommandProcessTransition::TimedOut);
+        let timeout_message = message_for_state(
+            &timed_out,
+            Some("proc-1"),
+            std::path::Path::new("output.log"),
+        );
+
+        assert!(timeout_message.contains("timed out"));
+        assert!(timeout_message.contains("termination is in progress"));
+        assert!(timeout_message.contains("empty chars"));
+        assert!(!timeout_message.contains("send input"));
+
+        let mut interrupted = running_state();
+        interrupted.apply_transition(CommandProcessTransition::Interrupted);
+        let interrupted_message = message_for_state(
+            &interrupted,
+            Some("proc-2"),
+            std::path::Path::new("output.log"),
+        );
+
+        assert!(interrupted_message.contains("was interrupted"));
+        assert!(interrupted_message.contains("termination is in progress"));
+        assert!(interrupted_message.contains("empty chars"));
+        assert!(!interrupted_message.contains("send input"));
     }
 }
