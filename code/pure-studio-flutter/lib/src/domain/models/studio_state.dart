@@ -14,6 +14,7 @@ class StudioState {
     required this.messagesBySession,
     this.partSnapshotsBySession = const {},
     this.partOverlaysBySession = const {},
+    this.agentTimelineEventsBySession = const {},
     required this.providers,
     this.defaultProviderId,
     this.providerUsages = const [],
@@ -37,6 +38,8 @@ class StudioState {
   final Map<String, List<TimelineMessage>> messagesBySession;
   final Map<String, Map<String, TimelinePartSnapshot>> partSnapshotsBySession;
   final Map<String, Map<String, TimelinePartOverlay>> partOverlaysBySession;
+  final Map<String, Map<String, TimelineAgentEvent>>
+  agentTimelineEventsBySession;
   final List<ProviderSettingsView> providers;
   final String? defaultProviderId;
   final List<ProviderUsageView> providerUsages;
@@ -59,7 +62,25 @@ class StudioState {
     if (sessionId == null) {
       return const [];
     }
-    return messagesBySession[sessionId] ?? const [];
+    return [...(messagesBySession[sessionId] ?? const [])]
+      ..sort(_compareTimelineMessages);
+  }
+
+  List<TimelineRow> get selectedTimelineRows {
+    final sessionId = selectedSessionId;
+    if (sessionId == null) {
+      return const [];
+    }
+    final snapshots = partSnapshotsBySession[sessionId] ?? const {};
+    final overlays = partOverlaysBySession[sessionId] ?? const {};
+    return timelineRowsFromMessages(
+      selectedMessages,
+      parts: [
+        for (final snapshot in snapshots.values)
+          timelinePartFromSnapshot(snapshot, overlay: overlays[snapshot.id]),
+      ],
+      agentEvents: agentTimelineEventsBySession[sessionId]?.values ?? const [],
+    );
   }
 
   PendingInteraction? get activeInteraction {
@@ -102,6 +123,7 @@ class StudioState {
     Map<String, List<TimelineMessage>>? messagesBySession,
     Map<String, Map<String, TimelinePartSnapshot>>? partSnapshotsBySession,
     Map<String, Map<String, TimelinePartOverlay>>? partOverlaysBySession,
+    Map<String, Map<String, TimelineAgentEvent>>? agentTimelineEventsBySession,
     List<ProviderSettingsView>? providers,
     String? defaultProviderId,
     List<ProviderUsageView>? providerUsages,
@@ -127,6 +149,8 @@ class StudioState {
           partSnapshotsBySession ?? this.partSnapshotsBySession,
       partOverlaysBySession:
           partOverlaysBySession ?? this.partOverlaysBySession,
+      agentTimelineEventsBySession:
+          agentTimelineEventsBySession ?? this.agentTimelineEventsBySession,
       providers: providers ?? this.providers,
       defaultProviderId: defaultProviderId ?? this.defaultProviderId,
       providerUsages: providerUsages ?? this.providerUsages,
@@ -146,4 +170,16 @@ class StudioState {
       composerText: composerText ?? this.composerText,
     );
   }
+}
+
+int _compareTimelineMessages(TimelineMessage left, TimelineMessage right) {
+  final sequence = left.sequence.compareTo(right.sequence);
+  if (sequence != 0) {
+    return sequence;
+  }
+  final createdAt = left.createdAt.compareTo(right.createdAt);
+  if (createdAt != 0) {
+    return createdAt;
+  }
+  return left.id.compareTo(right.id);
 }

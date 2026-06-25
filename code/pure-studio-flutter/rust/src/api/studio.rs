@@ -12,8 +12,10 @@ use pl_core::{
     StudioSubmitPromptRequest, ZhipuQuotaWindow, is_builtin_mcp_server_id,
 };
 use pl_protocol::{
-    AgentStatus, BudgetLimitKind, BudgetUsage, InteractionRequest, InteractionResolution,
-    RuntimeUsageSnapshot, StudioEventEnvelope, StudioEventKind, StudioMessage, StudioPart,
+    InteractionPayload, InteractionRequest, InteractionResolution, RuntimeCostAmount,
+    SkillActivation, StudioAgentSnapshot, StudioAgentTimelineEvent, StudioAgentTimelineEventKind,
+    StudioEventEnvelope, StudioEventKind, StudioLspHealth, StudioMcpHealth, StudioMessage,
+    StudioPart, StudioPartDelta, StudioPartDeltaField, StudioSessionRuntime, StudioTurn,
 };
 use serde::{Deserialize, Serialize};
 
@@ -24,12 +26,6 @@ static BRIDGE: OnceLock<BridgeRuntime> = OnceLock::new();
 struct BridgeRuntime {
     tokio: tokio::runtime::Runtime,
     studio: StudioRuntime,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct JsonResponse {
-    pub json: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -59,7 +55,7 @@ pub struct BridgeActiveTurn {
     pub turn_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeEventEnvelope {
     pub event_id: String,
@@ -67,232 +63,570 @@ pub struct BridgeEventEnvelope {
     pub turn_id: Option<String>,
     pub sequence: u64,
     pub created_at: i64,
-    pub kind_type: String,
-    pub payload_json: String,
+    pub payload: BridgeEventPayload,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct BootstrapResponse {
-    projects: Vec<ProjectDto>,
-    selected_project_id: Option<String>,
-    sessions: Vec<SessionDto>,
-    selected_session_id: Option<String>,
-    agent_events: Vec<AgentTimelineEventDto>,
-    agents: Vec<AgentDto>,
-    interactions: Vec<InteractionRequest>,
-    session_runtime: Option<SessionRuntimeDto>,
-    config: serde_json::Value,
-    general_settings: serde_json::Value,
+pub enum BridgeEventPayload {
+    TurnChanged {
+        turn: BridgeStudioTurnDto,
+    },
+    MessageUpdated {
+        message: BridgeStudioMessageDto,
+    },
+    MessageRemoved {
+        message_id: String,
+    },
+    MessagePartUpdated {
+        part: Box<BridgeStudioPartDto>,
+    },
+    MessagePartRemoved {
+        message_id: String,
+        part_id: String,
+    },
+    MessagePartDelta {
+        delta: BridgeStudioPartDeltaDto,
+    },
+    InteractionChanged {
+        event: BridgeInteractionChangedDto,
+    },
+    AgentChanged {
+        agent: Box<BridgeAgentSnapshotDto>,
+    },
+    AgentTimelineChanged {
+        event: BridgeAgentTimelineEventDto,
+    },
+    SessionRuntimeChanged {
+        runtime: BridgeSessionRuntimeDto,
+    },
+    SkillActivated {
+        activation: BridgeSkillActivationDto,
+    },
+    PlanLifecycleChanged {
+        event: BridgePlanLifecycleDto,
+    },
+    SessionHandoffChanged,
+    SessionListChanged {
+        project_id: String,
+        sessions: Vec<SessionDto>,
+    },
+    McpHealthChanged {
+        health: BridgeMcpHealthDto,
+    },
+    LspHealthChanged {
+        health: BridgeLspHealthDto,
+    },
+    Stale {
+        lagged_events: u64,
+    },
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct ProjectDto {
-    id: String,
-    name: String,
-    path: String,
-    updated_at: i64,
+pub struct BridgeStudioTurnDto {
+    pub turn_id: String,
+    pub session_id: String,
+    pub status: String,
+    pub reason: Option<String>,
+    pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct SessionDto {
-    id: String,
-    project_id: String,
-    title: String,
-    mode: String,
-    updated_at: i64,
-    visibility: String,
-    parent_session_id: Option<String>,
+pub struct BridgeStudioMessageDto {
+    pub message_id: String,
+    pub session_id: String,
+    pub turn_id: String,
+    pub role: String,
+    pub status: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub completed_at: Option<i64>,
+    pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct AgentDto {
-    id: String,
-    session_id: String,
-    path: String,
-    parent_path: Option<String>,
-    role: String,
-    task: String,
-    status: AgentStatus,
-    summary: Option<String>,
-    depth: i32,
-    error: Option<String>,
-    reason: Option<String>,
-    budget_limit_kind: Option<BudgetLimitKind>,
-    budget_usage: Option<BudgetUsage>,
-    runtime_usage: Option<RuntimeUsageSnapshot>,
-    updated_at: i64,
+pub struct BridgeStudioPartDto {
+    pub part_id: String,
+    pub message_id: String,
+    pub session_id: String,
+    pub turn_id: String,
+    pub part_type: String,
+    pub order: u64,
+    pub revision: u64,
+    pub status: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub completed_at: Option<i64>,
+    pub error: Option<String>,
+    pub text_channel: Option<String>,
+    pub text: String,
+    pub tool: Option<BridgeStudioToolPartDto>,
+    pub agent: Option<BridgeStudioAgentPartDto>,
+    pub plan: Option<BridgeStudioPlanPartDto>,
+    pub synthetic: bool,
+    pub ignored: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct AgentTimelineEventDto {
-    event_id: String,
-    session_id: String,
-    sequence: i64,
-    kind: String,
-    agent_id: Option<String>,
-    path: Option<String>,
-    parent_path: Option<String>,
-    payload_json: String,
-    created_at: i64,
+pub struct BridgeStudioToolPartDto {
+    pub tool_call_id: String,
+    pub call_id: Option<String>,
+    pub provider_item_id: Option<String>,
+    pub name: String,
+    pub arguments: String,
+    pub result: Option<String>,
+    pub exit_code: Option<i32>,
+    pub timed_out: bool,
+    pub working_directory: Option<String>,
+    pub denial_reason: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct SessionRuntimeDto {
-    session_id: String,
-    model: String,
-    context_window: Option<u64>,
-    latest_context_tokens: u64,
-    prompt_tokens: u64,
-    completion_tokens: u64,
-    cached_prompt_tokens: u64,
-    total_tokens: u64,
-    estimated_costs: Vec<pl_protocol::RuntimeCostAmount>,
-    has_unpriced_usage: bool,
-    active_skills: Vec<String>,
-    active_mcp_servers: Vec<String>,
-    active_lsp_servers: Vec<String>,
-    updated_at: i64,
+pub struct BridgeStudioAgentPartDto {
+    pub id: String,
+    pub path: String,
+    pub parent_path: Option<String>,
+    pub role: String,
+    pub task: String,
+    pub status: String,
+    pub summary: Option<String>,
+    pub depth: u32,
+    pub error: Option<String>,
+    pub reason: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct StudioEventsResponse {
-    session_id: String,
-    events: Vec<StudioEventEnvelope>,
-    next_sequence: u64,
+pub struct BridgeStudioPlanPartDto {
+    pub content: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct SessionStateResponse {
-    session_id: String,
-    session: SessionDto,
-    sessions: Vec<SessionDto>,
-    messages: Vec<StudioMessageProjectionDto>,
-    parts: Vec<StudioPartProjectionDto>,
-    events: Vec<StudioEventEnvelope>,
-    event_next_sequence: u64,
-    agents: Vec<AgentDto>,
-    agent_events: Vec<AgentTimelineEventDto>,
-    interactions: Vec<InteractionRequest>,
-    session_runtime: Option<SessionRuntimeDto>,
+pub struct BridgeStudioPartDeltaDto {
+    pub session_id: String,
+    pub message_id: String,
+    pub part_id: String,
+    pub revision: u64,
+    pub field: String,
+    pub delta: String,
+    pub chunk_index: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct StudioMessageProjectionDto {
-    message: StudioMessage,
-    sequence: u64,
+pub struct BridgeInteractionChangedDto {
+    pub interaction_id: String,
+    pub kind: String,
+    pub status: String,
+    pub session_id: String,
+    pub turn_id: String,
+    pub item_id: Option<String>,
+    pub tool_id: Option<String>,
+    pub agent_path: Option<String>,
+    pub payload: BridgeInteractionPayloadDto,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub resolved_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct StudioPartProjectionDto {
-    part: StudioPart,
-    sequence: u64,
+pub enum BridgeInteractionPayloadDto {
+    UserInput {
+        questions: Vec<BridgeUserQuestionDto>,
+    },
+    ToolApproval {
+        name: String,
+        arguments_json: String,
+        working_directory: Option<String>,
+        parent_agent_id: Option<String>,
+    },
+    PlanConfirmation {
+        plan_id: String,
+        content: String,
+    },
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct SubmitPromptResponse {
-    session_id: String,
-    turn_id: String,
-    cursor: u64,
+pub struct BridgeUserQuestionDto {
+    pub id: String,
+    pub header: String,
+    pub question: String,
+    pub is_other: bool,
+    pub is_secret: bool,
+    pub options: Option<Vec<BridgeUserQuestionOptionDto>>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct StopPromptResponse {
-    session_id: String,
-    stopped: bool,
+pub struct BridgeUserQuestionOptionDto {
+    pub label: String,
+    pub description: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct ResolveInteractionResponse {
-    session_id: String,
-    interaction: InteractionRequest,
-    sessions: Vec<SessionDto>,
+pub struct BridgeAgentSnapshotDto {
+    pub id: String,
+    pub session_id: String,
+    pub path: String,
+    pub parent_path: Option<String>,
+    pub role: String,
+    pub task: String,
+    pub status: String,
+    pub summary: Option<String>,
+    pub depth: u32,
+    pub error: Option<String>,
+    pub reason: Option<String>,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeAgentTimelineEventDto {
+    pub event_id: String,
+    pub session_id: String,
+    pub sequence: u64,
+    pub created_at: i64,
+    pub payload: BridgeAgentTimelinePayloadDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeAgentTimelinePayloadDto {
+    SpawnBegin {
+        call_id: String,
+        sender_path: String,
+        task_name: String,
+        prompt: String,
+        role: String,
+        model: Option<String>,
+        reasoning_effort: Option<String>,
+    },
+    SpawnEnd {
+        call_id: String,
+        sender_path: String,
+        agent_id: Option<String>,
+        path: Option<String>,
+        role: Option<String>,
+        status: String,
+        prompt: String,
+        error: Option<String>,
+    },
+    InteractionBegin {
+        call_id: String,
+        sender_path: String,
+        receiver_path: String,
+        prompt: String,
+    },
+    InteractionEnd {
+        call_id: String,
+        sender_path: String,
+        receiver_path: String,
+        status: String,
+        prompt: String,
+        error: Option<String>,
+    },
+    WaitingBegin {
+        call_id: String,
+        sender_path: String,
+    },
+    WaitingEnd {
+        call_id: String,
+        sender_path: String,
+        timed_out: bool,
+    },
+    CloseBegin {
+        call_id: String,
+        sender_path: String,
+        receiver_path: String,
+    },
+    CloseEnd {
+        call_id: String,
+        sender_path: String,
+        receiver_path: String,
+        status: String,
+        error: Option<String>,
+    },
+    Unknown {
+        kind_type: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeSessionRuntimeDto {
+    pub session_id: String,
+    pub model: String,
+    pub context_window: Option<u64>,
+    pub latest_context_tokens: u64,
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub cached_prompt_tokens: u64,
+    pub total_tokens: u64,
+    pub estimated_costs: Vec<BridgeRuntimeCostAmountDto>,
+    pub has_unpriced_usage: bool,
+    pub active_skills: Vec<String>,
+    pub active_mcp_servers: Vec<String>,
+    pub active_lsp_servers: Vec<String>,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeRuntimeCostAmountDto {
+    pub currency: String,
+    pub amount: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeSkillActivationDto {
+    pub name: String,
+    pub source: String,
+    pub path: String,
+    pub turn_id: String,
+    pub tool_call_id: String,
+    pub activated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgePlanLifecycleDto {
+    pub plan_id: String,
+    pub state: String,
+    pub turn_id: Option<String>,
+    pub reason: Option<String>,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeMcpHealthDto {
+    pub active_mcp_servers: Vec<String>,
+    pub mcp_servers: Vec<BridgeMcpServerDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeMcpServerDto {
+    pub id: String,
+    pub enabled: bool,
+    pub transport: String,
+    pub command: Option<String>,
+    pub url: Option<String>,
+    pub endpoint: String,
+    pub status_kind: String,
+    pub availability_kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeLspHealthDto {
+    pub active_lsp_servers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeStudioSnapshotResponse {
+    pub projects: Vec<ProjectDto>,
+    pub selected_project_id: Option<String>,
+    pub sessions: Vec<SessionDto>,
+    pub selected_session_id: Option<String>,
+    pub agent_events: Vec<BridgeAgentTimelineEventDto>,
+    pub agents: Vec<BridgeAgentSnapshotDto>,
+    pub interactions: Vec<BridgeInteractionChangedDto>,
+    pub session_runtime: Option<BridgeSessionRuntimeDto>,
+    pub config_json: String,
+    pub general_settings_json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDto {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionDto {
+    pub id: String,
+    pub project_id: String,
+    pub title: String,
+    pub mode: String,
+    pub updated_at: i64,
+    pub visibility: String,
+    pub parent_session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeStudioEventsResponse {
+    pub session_id: String,
+    pub events: Vec<BridgeEventEnvelope>,
+    pub next_sequence: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeSessionStateResponse {
+    pub session_id: String,
+    pub session: SessionDto,
+    pub sessions: Vec<SessionDto>,
+    pub messages: Vec<BridgeStudioMessageProjectionDto>,
+    pub parts: Vec<BridgeStudioPartProjectionDto>,
+    pub events: Vec<BridgeEventEnvelope>,
+    pub event_next_sequence: u64,
+    pub agents: Vec<BridgeAgentSnapshotDto>,
+    pub agent_events: Vec<BridgeAgentTimelineEventDto>,
+    pub interactions: Vec<BridgeInteractionChangedDto>,
+    pub session_runtime: Option<BridgeSessionRuntimeDto>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeStudioMessageProjectionDto {
+    pub message: BridgeStudioMessageDto,
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeStudioPartProjectionDto {
+    pub part: BridgeStudioPartDto,
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitPromptResponse {
+    pub session_id: String,
+    pub turn_id: String,
+    pub cursor: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StopPromptResponse {
+    pub session_id: String,
+    pub stopped: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveInteractionResponse {
+    pub session_id: String,
+    pub interaction: BridgeInteractionChangedDto,
+    pub sessions: Vec<SessionDto>,
 }
 
 /// Provider 用量查询返回体。
 ///
 /// 与 Studio provider usage wire 格式保持 camelCase，供 Flutter 列表卡片渲染。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct ProviderUsagesResponse {
-    usages: Vec<ProviderUsageDto>,
+pub struct ProviderUsagesResponse {
+    pub usages: Vec<ProviderUsageDto>,
 }
 
 /// 单个 Provider 的用量状态。
 ///
 /// status/usage_kind 是 Dart 层路由字段，复杂 provider payload 保持结构化字段。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct ProviderUsageDto {
-    provider_id: String,
-    updated_at: i64,
-    status: String,
-    usage_kind: String,
-    message: Option<String>,
-    balance: Option<DeepSeekBalanceDto>,
-    coding_plan: Option<ZhipuCodingPlanUsageDto>,
+pub struct ProviderUsageDto {
+    pub provider_id: String,
+    pub updated_at: i64,
+    pub status: String,
+    pub usage_kind: String,
+    pub message: Option<String>,
+    pub balance: Option<DeepSeekBalanceDto>,
+    pub coding_plan: Option<ZhipuCodingPlanUsageDto>,
 }
 
 /// DeepSeek 余额用量。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct DeepSeekBalanceDto {
-    is_available: bool,
-    balances: Vec<DeepSeekBalanceInfoDto>,
+pub struct DeepSeekBalanceDto {
+    pub is_available: bool,
+    pub balances: Vec<DeepSeekBalanceInfoDto>,
 }
 
 /// DeepSeek 单币种余额明细。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct DeepSeekBalanceInfoDto {
-    currency: String,
-    total_balance: String,
-    granted_balance: String,
-    topped_up_balance: String,
+pub struct DeepSeekBalanceInfoDto {
+    pub currency: String,
+    pub total_balance: String,
+    pub granted_balance: String,
+    pub topped_up_balance: String,
 }
 
 /// 智谱 Coding Plan 用量。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct ZhipuCodingPlanUsageDto {
-    level: Option<String>,
-    limits: Vec<ZhipuQuotaLimitDto>,
+pub struct ZhipuCodingPlanUsageDto {
+    pub level: Option<String>,
+    pub limits: Vec<ZhipuQuotaLimitDto>,
 }
 
 /// 智谱 Coding Plan 单个时间窗口额度。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct ZhipuQuotaLimitDto {
-    window: String,
-    label: String,
-    percentage: f64,
-    current_value: Option<f64>,
-    total: Option<f64>,
-    remaining: Option<f64>,
-    next_reset_at: Option<i64>,
-    usage_details: Vec<ZhipuToolUsageDetailDto>,
+pub struct ZhipuQuotaLimitDto {
+    pub window: String,
+    pub label: String,
+    pub percentage: f64,
+    pub current_value: Option<f64>,
+    pub total: Option<f64>,
+    pub remaining: Option<f64>,
+    pub next_reset_at: Option<i64>,
+    pub usage_details: Vec<ZhipuToolUsageDetailDto>,
 }
 
 /// 智谱 Coding Plan 工具级用量明细。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct ZhipuToolUsageDetailDto {
-    name: String,
-    current_value: Option<f64>,
-    total: Option<f64>,
-    percentage: Option<f64>,
+pub struct ZhipuToolUsageDetailDto {
+    pub name: String,
+    pub current_value: Option<f64>,
+    pub total: Option<f64>,
+    pub percentage: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillsResponse {
+    pub skills: Vec<SkillSummaryDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillSummaryDto {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsDraftResponse {
+    pub section: String,
+    pub saved: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigSavedResponse {
+    pub saved: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -392,12 +726,12 @@ pub fn shutdown_runtime() -> Result<RuntimeSnapshot> {
     bridge.block_on(async { bridge.studio.shutdown_runtime().await.map(runtime_snapshot) })
 }
 
-pub fn bootstrap_studio() -> Result<JsonResponse> {
+pub fn bootstrap_studio() -> Result<BridgeStudioSnapshotResponse> {
     let bridge = bridge()?;
-    bridge.block_on(async { json_response(bootstrap_studio_inner(bridge).await?) })
+    bridge.block_on(async { bootstrap_studio_inner(bridge).await })
 }
 
-pub fn open_project(path: String) -> Result<JsonResponse> {
+pub fn open_project(path: String) -> Result<BridgeStudioSnapshotResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
         let project = bridge.studio.open_project(path).await?;
@@ -406,21 +740,19 @@ pub fn open_project(path: String) -> Result<JsonResponse> {
             .reconcile_lsp_runtime_for_project(&project.id)
             .await?;
         let _ = bridge.studio.ensure_project_sessions(&project.id).await?;
-        json_response(studio_snapshot_inner(bridge, Some(project.id), None).await?)
+        studio_snapshot_inner(bridge, Some(project.id), None).await
     })
 }
 
-pub fn select_project(project_id: String) -> Result<JsonResponse> {
+pub fn select_project(project_id: String) -> Result<BridgeStudioSnapshotResponse> {
     let bridge = bridge()?;
-    bridge.block_on(async {
-        json_response(studio_snapshot_inner(bridge, Some(project_id), None).await?)
-    })
+    bridge.block_on(async { studio_snapshot_inner(bridge, Some(project_id), None).await })
 }
 
 pub fn archive_project(
     project_id: String,
     selected_project_id: Option<String>,
-) -> Result<JsonResponse> {
+) -> Result<BridgeStudioSnapshotResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
         bridge
@@ -432,27 +764,28 @@ pub fn archive_project(
         let next_project_id = selected_project_id
             .filter(|id| id != &project_id && projects.iter().any(|project| project.id == *id))
             .or_else(|| projects.first().map(|project| project.id.clone()));
-        json_response(
-            studio_snapshot_from_projects_inner(bridge, projects, next_project_id, None).await?,
-        )
+        studio_snapshot_from_projects_inner(bridge, projects, next_project_id, None).await
     })
 }
 
-pub fn create_session(project_id: String, title: Option<String>) -> Result<JsonResponse> {
+pub fn create_session(
+    project_id: String,
+    title: Option<String>,
+) -> Result<BridgeStudioSnapshotResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
         let title = title
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "新会话".to_string());
         let session = bridge.studio.create_session(&project_id, &title).await?;
-        json_response(studio_snapshot_inner(bridge, Some(project_id), Some(session.id)).await?)
+        studio_snapshot_inner(bridge, Some(project_id), Some(session.id)).await
     })
 }
 
 pub fn archive_session(
     session_id: String,
     selected_session_id: Option<String>,
-) -> Result<JsonResponse> {
+) -> Result<BridgeStudioSnapshotResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
         let archived = bridge
@@ -468,20 +801,18 @@ pub fn archive_session(
         let next_session_id = selected_session_id
             .filter(|id| id != &session_id && sessions.iter().any(|session| session.id == *id))
             .or_else(|| sessions.first().map(|session| session.id.clone()));
-        json_response(
-            studio_snapshot_inner(bridge, Some(archived.project_id), next_session_id).await?,
-        )
+        studio_snapshot_inner(bridge, Some(archived.project_id), next_session_id).await
     })
 }
 
-pub fn set_session_mode(session_id: String, mode: String) -> Result<JsonResponse> {
+pub fn set_session_mode(session_id: String, mode: String) -> Result<BridgeSessionStateResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
         bridge
             .studio
             .set_session_mode(&session_id, CompileMode::from_label(&mode))
             .await?;
-        json_response(load_session_state_inner(bridge, session_id).await?)
+        load_session_state_inner(bridge, session_id).await
     })
 }
 
@@ -491,7 +822,7 @@ pub fn set_model_role(
     model: String,
     effort: Option<String>,
     selected_session_id: Option<String>,
-) -> Result<JsonResponse> {
+) -> Result<BridgeStudioSnapshotResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
         let role = ModelRole::from_key(role_key.trim())
@@ -512,23 +843,21 @@ pub fn set_model_role(
             ),
             None => None,
         };
-        json_response(
-            studio_snapshot_inner(bridge, selected_project_id, selected_session_id).await?,
-        )
+        studio_snapshot_inner(bridge, selected_project_id, selected_session_id).await
     })
 }
 
-pub fn save_runtime_permission_mode(mode: String) -> Result<JsonResponse> {
+pub fn save_runtime_permission_mode(mode: String) -> Result<ConfigSavedResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
         let mut config = bridge.studio.config_store().load_or_default()?;
         config.runtime.permission_mode = PermissionMode::from_label(&mode);
         bridge.studio.config_store().save(&config)?;
-        json_response(serde_json::json!({ "config": config }))
+        Ok(ConfigSavedResponse { saved: true })
     })
 }
 
-pub fn save_provider_settings(settings_json: String) -> Result<JsonResponse> {
+pub fn save_provider_settings(settings_json: String) -> Result<BridgeStudioSnapshotResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
         let input: ProviderSettingsInput =
@@ -536,11 +865,11 @@ pub fn save_provider_settings(settings_json: String) -> Result<JsonResponse> {
         let current = bridge.studio.config_store().load_or_default()?;
         let next = provider_settings_edit(input, &current)?.to_config(&current)?;
         bridge.studio.config_store().save(&next)?;
-        json_response(studio_snapshot_inner(bridge, None, None).await?)
+        studio_snapshot_inner(bridge, None, None).await
     })
 }
 
-pub fn save_instructions_settings(settings_json: String) -> Result<JsonResponse> {
+pub fn save_instructions_settings(settings_json: String) -> Result<BridgeStudioSnapshotResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
         let input: InstructionsSettingsInput =
@@ -558,11 +887,11 @@ pub fn save_instructions_settings(settings_json: String) -> Result<JsonResponse>
             .collect();
         config.validate()?;
         bridge.studio.config_store().save(&config)?;
-        json_response(studio_snapshot_inner(bridge, None, None).await?)
+        studio_snapshot_inner(bridge, None, None).await
     })
 }
 
-pub fn save_skills_settings(settings_json: String) -> Result<JsonResponse> {
+pub fn save_skills_settings(settings_json: String) -> Result<BridgeStudioSnapshotResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
         let input: SkillsSettingsInput =
@@ -583,11 +912,11 @@ pub fn save_skills_settings(settings_json: String) -> Result<JsonResponse> {
         config.skills.auto_learn_min_tool_calls = input.auto_learn_min_tool_calls;
         config.validate()?;
         bridge.studio.config_store().save(&config)?;
-        json_response(studio_snapshot_inner(bridge, None, None).await?)
+        studio_snapshot_inner(bridge, None, None).await
     })
 }
 
-pub fn save_mcp_settings(settings_json: String) -> Result<JsonResponse> {
+pub fn save_mcp_settings(settings_json: String) -> Result<BridgeStudioSnapshotResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
         let input: McpSettingsInput =
@@ -634,11 +963,11 @@ pub fn save_mcp_settings(settings_json: String) -> Result<JsonResponse> {
         config.builtin_mcp_servers = next_builtin;
         config.validate()?;
         bridge.studio.config_store().save(&config)?;
-        json_response(studio_snapshot_inner(bridge, None, None).await?)
+        studio_snapshot_inner(bridge, None, None).await
     })
 }
 
-pub fn save_general_settings(settings_json: String) -> Result<JsonResponse> {
+pub fn save_general_settings(settings_json: String) -> Result<BridgeStudioSnapshotResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
         let draft: serde_json::Value =
@@ -649,11 +978,11 @@ pub fn save_general_settings(settings_json: String) -> Result<JsonResponse> {
             .store()
             .save_setting("flutterSettings:general", &normalized)
             .await?;
-        json_response(studio_snapshot_inner(bridge, None, None).await?)
+        studio_snapshot_inner(bridge, None, None).await
     })
 }
 
-pub fn load_provider_usages() -> Result<JsonResponse> {
+pub fn load_provider_usages() -> Result<ProviderUsagesResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
         let usages = bridge
@@ -663,19 +992,28 @@ pub fn load_provider_usages() -> Result<JsonResponse> {
             .into_iter()
             .map(provider_usage_dto)
             .collect();
-        json_response(ProviderUsagesResponse { usages })
+        Ok(ProviderUsagesResponse { usages })
     })
 }
 
-pub fn list_discovered_skills(project_id: String) -> Result<JsonResponse> {
+pub fn list_discovered_skills(project_id: String) -> Result<SkillsResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
         let catalog = bridge.studio.discovered_skills(&project_id).await?;
-        json_response(catalog)
+        Ok(SkillsResponse {
+            skills: catalog
+                .skills
+                .into_iter()
+                .map(|skill| SkillSummaryDto { name: skill.name })
+                .collect(),
+        })
     })
 }
 
-pub fn save_studio_settings_draft(section: String, draft_json: String) -> Result<JsonResponse> {
+pub fn save_studio_settings_draft(
+    section: String,
+    draft_json: String,
+) -> Result<SettingsDraftResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
         let draft: serde_json::Value =
@@ -686,10 +1024,10 @@ pub fn save_studio_settings_draft(section: String, draft_json: String) -> Result
             .store()
             .save_setting(&studio_settings_draft_key(&section), &normalized)
             .await?;
-        json_response(serde_json::json!({
-            "section": section,
-            "saved": true
-        }))
+        Ok(SettingsDraftResponse {
+            section,
+            saved: true,
+        })
     })
 }
 
@@ -858,7 +1196,7 @@ pub fn submit_prompt(
     session_id: String,
     prompt: String,
     attachment_ids: Vec<String>,
-) -> Result<JsonResponse> {
+) -> Result<SubmitPromptResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
         let response = bridge
@@ -870,7 +1208,7 @@ pub fn submit_prompt(
                 options: StudioSubmitPromptOptions::default(),
             })
             .await?;
-        json_response(SubmitPromptResponse {
+        Ok(SubmitPromptResponse {
             session_id: response.session_id,
             turn_id: response.turn_id,
             cursor: response.cursor,
@@ -878,11 +1216,11 @@ pub fn submit_prompt(
     })
 }
 
-pub fn stop_prompt(session_id: String) -> Result<JsonResponse> {
+pub fn stop_prompt(session_id: String) -> Result<StopPromptResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
         let response = bridge.studio.stop_prompt(session_id).await?;
-        json_response(StopPromptResponse {
+        Ok(StopPromptResponse {
             session_id: response.session_id,
             stopped: response.stopped,
         })
@@ -892,7 +1230,7 @@ pub fn stop_prompt(session_id: String) -> Result<JsonResponse> {
 pub fn resolve_interaction(
     interaction_id: String,
     resolution_json: String,
-) -> Result<JsonResponse> {
+) -> Result<ResolveInteractionResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
         let resolution: InteractionResolution = serde_json::from_str(&resolution_json)
@@ -901,20 +1239,20 @@ pub fn resolve_interaction(
             .studio
             .resolve_interaction(interaction_id, resolution)
             .await?;
-        json_response(resolve_interaction_response(response))
+        Ok(resolve_interaction_response(response))
     })
 }
 
-pub fn load_session_state(session_id: String) -> Result<JsonResponse> {
+pub fn load_session_state(session_id: String) -> Result<BridgeSessionStateResponse> {
     let bridge = bridge()?;
-    bridge.block_on(async { json_response(load_session_state_inner(bridge, session_id).await?) })
+    bridge.block_on(async { load_session_state_inner(bridge, session_id).await })
 }
 
 pub fn load_studio_events(
     session_id: String,
     after_sequence: Option<i64>,
     limit: Option<i64>,
-) -> Result<JsonResponse> {
+) -> Result<BridgeStudioEventsResponse> {
     let bridge = bridge()?;
     bridge.block_on(async {
         let events = bridge
@@ -922,12 +1260,17 @@ pub fn load_studio_events(
             .store()
             .load_studio_events(&session_id, after_sequence, limit)
             .await?;
+        let events = events
+            .into_iter()
+            .filter(bridge_visible_event)
+            .map(BridgeEventEnvelope::from)
+            .collect::<Vec<_>>();
         let next_sequence = bridge
             .studio
             .store()
             .next_studio_event_sequence(&session_id)
             .await? as u64;
-        json_response(StudioEventsResponse {
+        Ok(BridgeStudioEventsResponse {
             session_id,
             events,
             next_sequence,
@@ -946,6 +1289,9 @@ pub fn subscribe_session_events(
         loop {
             match events.recv().await {
                 Ok(event) => {
+                    if !bridge_visible_event(&event) {
+                        continue;
+                    }
                     if sink.add(BridgeEventEnvelope::from(event)).is_err() {
                         break;
                     }
@@ -975,6 +1321,9 @@ pub fn subscribe_global_events(sink: StreamSink<BridgeEventEnvelope>) -> Result<
         loop {
             match events.recv().await {
                 Ok(event) => {
+                    if !bridge_visible_event(&event) {
+                        continue;
+                    }
                     if sink.add(BridgeEventEnvelope::from(event)).is_err() {
                         break;
                     }
@@ -1020,7 +1369,9 @@ fn bridge() -> Result<&'static BridgeRuntime> {
         .context("Studio bridge runtime was not initialized")
 }
 
-async fn bootstrap_studio_inner(bridge: &'static BridgeRuntime) -> Result<BootstrapResponse> {
+async fn bootstrap_studio_inner(
+    bridge: &'static BridgeRuntime,
+) -> Result<BridgeStudioSnapshotResponse> {
     let mut projects = bridge.studio.list_projects().await?;
     if projects.is_empty()
         && !bridge.studio.store().has_projects().await?
@@ -1036,7 +1387,7 @@ async fn studio_snapshot_inner(
     bridge: &'static BridgeRuntime,
     requested_project_id: Option<String>,
     requested_session_id: Option<String>,
-) -> Result<BootstrapResponse> {
+) -> Result<BridgeStudioSnapshotResponse> {
     let projects = bridge.studio.list_projects().await?;
     studio_snapshot_from_projects_inner(
         bridge,
@@ -1052,7 +1403,7 @@ async fn studio_snapshot_from_projects_inner(
     projects: Vec<pl_core::ProjectRecord>,
     requested_project_id: Option<String>,
     requested_session_id: Option<String>,
-) -> Result<BootstrapResponse> {
+) -> Result<BridgeStudioSnapshotResponse> {
     let selected_project = requested_project_id
         .as_deref()
         .and_then(|project_id| {
@@ -1089,10 +1440,10 @@ async fn studio_snapshot_from_projects_inner(
         }
     }
     let session_runtime = match selected_session_id.as_deref() {
-        Some(session_id) => Some(session_runtime_dto(bridge, session_id).await?),
+        Some(session_id) => Some(bridge_session_runtime_view(bridge, session_id).await?),
         None => None,
     };
-    let config = serde_json::to_value(bridge.studio.config_store().load_or_default()?)?;
+    let config_json = serde_json::to_string(&bridge.studio.config_store().load_or_default()?)?;
     let general_settings = bridge
         .studio
         .store()
@@ -1100,25 +1451,32 @@ async fn studio_snapshot_from_projects_inner(
         .await?
         .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
         .unwrap_or_else(|| serde_json::json!({}));
+    let general_settings_json = serde_json::to_string(&general_settings)?;
 
-    Ok(BootstrapResponse {
+    Ok(BridgeStudioSnapshotResponse {
         projects: projects.into_iter().map(project_dto).collect(),
         selected_project_id,
         sessions: sessions.into_iter().map(session_dto).collect(),
         selected_session_id,
-        agent_events: agent_events.into_iter().map(agent_event_dto).collect(),
-        agents: agents.into_iter().map(agent_dto).collect(),
-        interactions,
+        agent_events: agent_events
+            .into_iter()
+            .map(agent_event_bridge_dto)
+            .collect(),
+        agents: agents.into_iter().map(agent_bridge_dto).collect(),
+        interactions: interactions
+            .into_iter()
+            .map(interaction_request_bridge_dto)
+            .collect(),
         session_runtime,
-        config,
-        general_settings,
+        config_json,
+        general_settings_json,
     })
 }
 
 async fn load_session_state_inner(
     bridge: &'static BridgeRuntime,
     session_id: String,
-) -> Result<SessionStateResponse> {
+) -> Result<BridgeSessionStateResponse> {
     let session = bridge
         .studio
         .store()
@@ -1131,7 +1489,9 @@ async fn load_session_state_inner(
         .load_studio_events(&session_id, None, None)
         .await?
         .into_iter()
+        .filter(bridge_visible_event)
         .filter(is_session_state_event)
+        .map(BridgeEventEnvelope::from)
         .collect();
     let messages = bridge
         .studio
@@ -1139,8 +1499,8 @@ async fn load_session_state_inner(
         .load_studio_messages(&session_id)
         .await?
         .into_iter()
-        .map(|record| StudioMessageProjectionDto {
-            message: record.message,
+        .map(|record| BridgeStudioMessageProjectionDto {
+            message: bridge_message(record.message),
             sequence: record.sequence.max(0) as u64,
         })
         .collect();
@@ -1150,8 +1510,8 @@ async fn load_session_state_inner(
         .load_message_parts(&session_id)
         .await?
         .into_iter()
-        .map(|record| StudioPartProjectionDto {
-            part: record.part,
+        .map(|record| BridgeStudioPartProjectionDto {
+            part: bridge_part(record.part),
             sequence: record.sequence.max(0) as u64,
         })
         .collect();
@@ -1174,7 +1534,7 @@ async fn load_session_state_inner(
         .list_agents(&session_id)
         .await?
         .into_iter()
-        .map(agent_dto)
+        .map(agent_bridge_dto)
         .collect();
     let agent_events = bridge
         .studio
@@ -1182,16 +1542,19 @@ async fn load_session_state_inner(
         .list_agent_events(&session_id)
         .await?
         .into_iter()
-        .map(agent_event_dto)
+        .map(agent_event_bridge_dto)
         .collect();
     let interactions = bridge
         .studio
         .store()
         .list_pending_interactions(&session_id)
-        .await?;
-    let session_runtime = session_runtime_dto(bridge, &session_id).await.ok();
+        .await?
+        .into_iter()
+        .map(interaction_request_bridge_dto)
+        .collect();
+    let session_runtime = bridge_session_runtime_view(bridge, &session_id).await.ok();
 
-    Ok(SessionStateResponse {
+    Ok(BridgeSessionStateResponse {
         session_id: session_id.clone(),
         session: session_dto(session),
         sessions,
@@ -1213,6 +1576,7 @@ fn is_session_state_event(event: &StudioEventEnvelope) -> bool {
         | StudioEventKind::MessagePartUpdated { .. }
         | StudioEventKind::MessagePartRemoved { .. }
         | StudioEventKind::MessagePartDelta { .. }
+        | StudioEventKind::SessionHandoffChanged { .. }
         | StudioEventKind::Stale { .. } => false,
         StudioEventKind::TurnChanged { .. }
         | StudioEventKind::InteractionChanged { .. }
@@ -1221,11 +1585,14 @@ fn is_session_state_event(event: &StudioEventEnvelope) -> bool {
         | StudioEventKind::AgentChanged { .. }
         | StudioEventKind::AgentTimelineChanged { .. }
         | StudioEventKind::SkillActivated { .. }
-        | StudioEventKind::SessionHandoffChanged { .. }
         | StudioEventKind::SessionListChanged { .. }
         | StudioEventKind::McpHealthChanged { .. }
         | StudioEventKind::LspHealthChanged { .. } => true,
     }
+}
+
+fn bridge_visible_event(event: &StudioEventEnvelope) -> bool {
+    !matches!(event.kind, StudioEventKind::SessionHandoffChanged { .. })
 }
 
 fn project_dto(project: pl_core::ProjectRecord) -> ProjectDto {
@@ -1249,51 +1616,51 @@ fn session_dto(session: SessionRecord) -> SessionDto {
     }
 }
 
-fn agent_dto(agent: pl_core::StudioAgentSnapshotRecord) -> AgentDto {
-    AgentDto {
+fn agent_bridge_dto(agent: pl_core::StudioAgentSnapshotRecord) -> BridgeAgentSnapshotDto {
+    BridgeAgentSnapshotDto {
         id: agent.id,
         session_id: agent.session_id,
         path: agent.path,
         parent_path: agent.parent_path,
         role: agent.role,
         task: agent.task,
-        status: agent.status,
+        status: agent.status.as_str().to_string(),
         summary: agent.summary,
-        depth: agent.depth,
+        depth: agent.depth as u32,
         error: agent.error,
         reason: agent.reason,
-        budget_limit_kind: agent.budget_limit_kind,
-        budget_usage: agent.budget_usage,
-        runtime_usage: agent.runtime_usage,
         updated_at: agent.updated_at,
     }
 }
 
-fn agent_event_dto(event: pl_core::StudioAgentTimelineEventRecord) -> AgentTimelineEventDto {
-    AgentTimelineEventDto {
+fn agent_event_bridge_dto(
+    event: pl_core::StudioAgentTimelineEventRecord,
+) -> BridgeAgentTimelineEventDto {
+    let payload = serde_json::from_str::<StudioAgentTimelineEvent>(&event.payload_json)
+        .map(|event| bridge_agent_timeline_payload(event.kind))
+        .unwrap_or_else(|_| BridgeAgentTimelinePayloadDto::Unknown {
+            kind_type: event.kind,
+        });
+    BridgeAgentTimelineEventDto {
         event_id: event.event_id,
         session_id: event.session_id,
-        sequence: event.sequence,
-        kind: event.kind,
-        agent_id: event.agent_id,
-        path: event.path,
-        parent_path: event.parent_path,
-        payload_json: event.payload_json,
+        sequence: event.sequence.max(0) as u64,
         created_at: event.created_at,
+        payload,
     }
 }
 
-async fn session_runtime_dto(
+async fn bridge_session_runtime_view(
     bridge: &'static BridgeRuntime,
     session_id: &str,
-) -> Result<SessionRuntimeDto> {
+) -> Result<BridgeSessionRuntimeDto> {
     let runtime = bridge.studio.session_runtime(session_id).await?;
     let active_skills = bridge
         .studio
         .store()
         .list_session_skill_names(session_id)
         .await?;
-    Ok(SessionRuntimeDto {
+    Ok(BridgeSessionRuntimeDto {
         session_id: runtime.session_id,
         model: runtime.model,
         context_window: runtime.context_window,
@@ -1302,7 +1669,11 @@ async fn session_runtime_dto(
         completion_tokens: runtime.completion_tokens,
         cached_prompt_tokens: runtime.cached_prompt_tokens,
         total_tokens: runtime.total_tokens,
-        estimated_costs: runtime.estimated_costs,
+        estimated_costs: runtime
+            .estimated_costs
+            .into_iter()
+            .map(bridge_cost_amount)
+            .collect(),
         has_unpriced_usage: runtime.has_unpriced_usage,
         active_skills,
         active_mcp_servers: bridge.studio.mcp_runtime().available_server_names().await,
@@ -1311,12 +1682,18 @@ async fn session_runtime_dto(
     })
 }
 
+fn interaction_request_bridge_dto(interaction: InteractionRequest) -> BridgeInteractionChangedDto {
+    bridge_interaction_changed(pl_protocol::InteractionChangedEvent { interaction })
+}
+
 fn resolve_interaction_response(
     response: CoreResolveInteractionResponse,
 ) -> ResolveInteractionResponse {
     ResolveInteractionResponse {
         session_id: response.session_id,
-        interaction: response.interaction,
+        interaction: bridge_interaction_changed(pl_protocol::InteractionChangedEvent {
+            interaction: response.interaction,
+        }),
         sessions: response.sessions.into_iter().map(session_dto).collect(),
     }
 }
@@ -1346,24 +1723,14 @@ fn runtime_snapshot(snapshot: CoreRuntimeSnapshot) -> RuntimeSnapshot {
 
 impl From<StudioEventEnvelope> for BridgeEventEnvelope {
     fn from(event: StudioEventEnvelope) -> Self {
-        let kind_type = serde_json::to_value(&event.kind)
-            .ok()
-            .and_then(|value| {
-                value
-                    .get("type")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string)
-            })
-            .unwrap_or_else(|| "unknown".to_string());
-        let payload_json = serde_json::to_string(&event.kind).unwrap_or_else(|_| "{}".to_string());
+        let payload = bridge_event_payload(event.kind);
         Self {
             event_id: event.event_id,
             session_id: event.session_id,
             turn_id: event.turn_id,
             sequence: event.sequence,
             created_at: event.created_at,
-            kind_type,
-            payload_json,
+            payload,
         }
     }
 }
@@ -1376,20 +1743,451 @@ impl BridgeEventEnvelope {
             turn_id: None,
             sequence: 0,
             created_at: unix_seconds(),
-            kind_type: "stale".to_string(),
-            payload_json: serde_json::json!({
-                "type": "stale",
-                "laggedEvents": lagged_events
-            })
-            .to_string(),
+            payload: BridgeEventPayload::Stale { lagged_events },
         }
     }
 }
 
-fn json_response(value: impl Serialize) -> Result<JsonResponse> {
-    Ok(JsonResponse {
-        json: serde_json::to_string(&value)?,
-    })
+fn bridge_event_payload(kind: StudioEventKind) -> BridgeEventPayload {
+    match kind {
+        StudioEventKind::TurnChanged { turn } => BridgeEventPayload::TurnChanged {
+            turn: bridge_turn(turn),
+        },
+        StudioEventKind::MessageUpdated { message } => BridgeEventPayload::MessageUpdated {
+            message: bridge_message(*message),
+        },
+        StudioEventKind::MessageRemoved { message_id } => {
+            BridgeEventPayload::MessageRemoved { message_id }
+        }
+        StudioEventKind::MessagePartUpdated { part } => BridgeEventPayload::MessagePartUpdated {
+            part: Box::new(bridge_part(*part)),
+        },
+        StudioEventKind::MessagePartRemoved {
+            message_id,
+            part_id,
+        } => BridgeEventPayload::MessagePartRemoved {
+            message_id,
+            part_id,
+        },
+        StudioEventKind::MessagePartDelta { delta } => BridgeEventPayload::MessagePartDelta {
+            delta: bridge_part_delta(delta),
+        },
+        StudioEventKind::InteractionChanged { event } => BridgeEventPayload::InteractionChanged {
+            event: bridge_interaction_changed(*event),
+        },
+        StudioEventKind::AgentChanged { agent } => BridgeEventPayload::AgentChanged {
+            agent: Box::new(bridge_agent_snapshot(agent)),
+        },
+        StudioEventKind::AgentTimelineChanged { event } => {
+            BridgeEventPayload::AgentTimelineChanged {
+                event: bridge_agent_timeline_event(event),
+            }
+        }
+        StudioEventKind::SessionRuntimeChanged { runtime } => {
+            BridgeEventPayload::SessionRuntimeChanged {
+                runtime: bridge_session_runtime(runtime),
+            }
+        }
+        StudioEventKind::SkillActivated { activation } => BridgeEventPayload::SkillActivated {
+            activation: bridge_skill_activation(activation),
+        },
+        StudioEventKind::PlanLifecycleChanged { event } => {
+            BridgeEventPayload::PlanLifecycleChanged {
+                event: BridgePlanLifecycleDto {
+                    plan_id: event.plan_id,
+                    state: event.state.as_str().to_string(),
+                    turn_id: event.turn_id,
+                    reason: event.reason,
+                    updated_at: event.updated_at,
+                },
+            }
+        }
+        StudioEventKind::SessionHandoffChanged { .. } => BridgeEventPayload::SessionHandoffChanged,
+        StudioEventKind::SessionListChanged {
+            project_id,
+            sessions,
+        } => BridgeEventPayload::SessionListChanged {
+            project_id,
+            sessions: sessions.into_iter().map(session_summary_dto).collect(),
+        },
+        StudioEventKind::McpHealthChanged { health } => BridgeEventPayload::McpHealthChanged {
+            health: bridge_mcp_health(health),
+        },
+        StudioEventKind::LspHealthChanged { health } => BridgeEventPayload::LspHealthChanged {
+            health: bridge_lsp_health(health),
+        },
+        StudioEventKind::Stale { lagged_events } => BridgeEventPayload::Stale { lagged_events },
+    }
+}
+
+fn bridge_turn(turn: StudioTurn) -> BridgeStudioTurnDto {
+    BridgeStudioTurnDto {
+        turn_id: turn.turn_id,
+        session_id: turn.session_id,
+        status: turn.status.as_str().to_string(),
+        reason: turn.reason,
+        updated_at: turn.updated_at,
+    }
+}
+
+fn bridge_message(message: StudioMessage) -> BridgeStudioMessageDto {
+    BridgeStudioMessageDto {
+        message_id: message.message_id,
+        session_id: message.session_id,
+        turn_id: message.turn_id,
+        role: message.role.as_str().to_string(),
+        status: message.status.as_str().to_string(),
+        created_at: message.created_at,
+        updated_at: message.updated_at,
+        completed_at: message.completed_at,
+        error: message.error,
+    }
+}
+
+fn bridge_part(part: StudioPart) -> BridgeStudioPartDto {
+    BridgeStudioPartDto {
+        part_id: part.part_id,
+        message_id: part.message_id,
+        session_id: part.session_id,
+        turn_id: part.turn_id,
+        part_type: part.part_type.as_str().to_string(),
+        order: part.order,
+        revision: part.revision,
+        status: part.status.as_str().to_string(),
+        created_at: part.created_at,
+        updated_at: part.updated_at,
+        completed_at: part.completed_at,
+        error: part.error,
+        text_channel: part
+            .text_channel
+            .map(|channel| channel.as_str().to_string()),
+        text: part.text,
+        tool: part.tool.map(|tool| BridgeStudioToolPartDto {
+            tool_call_id: tool.tool_call_id,
+            call_id: tool.call_id,
+            provider_item_id: tool.provider_item_id,
+            name: tool.name,
+            arguments: tool.arguments,
+            result: tool.result,
+            exit_code: tool.exit_code,
+            timed_out: tool.timed_out,
+            working_directory: tool.working_directory,
+            denial_reason: tool.denial_reason,
+        }),
+        agent: part.agent.map(|agent| BridgeStudioAgentPartDto {
+            id: agent.id,
+            path: agent.path,
+            parent_path: agent.parent_path,
+            role: agent.role,
+            task: agent.task,
+            status: agent.status.as_str().to_string(),
+            summary: agent.summary,
+            depth: agent.depth,
+            error: agent.error,
+            reason: agent.reason,
+        }),
+        plan: part.plan.map(|plan| BridgeStudioPlanPartDto {
+            content: plan.content,
+        }),
+        synthetic: part.synthetic,
+        ignored: part.ignored,
+    }
+}
+
+fn bridge_part_delta(delta: StudioPartDelta) -> BridgeStudioPartDeltaDto {
+    BridgeStudioPartDeltaDto {
+        session_id: delta.session_id,
+        message_id: delta.message_id,
+        part_id: delta.part_id,
+        revision: delta.revision,
+        field: bridge_part_delta_field(delta.field),
+        delta: delta.delta,
+        chunk_index: delta.chunk_index,
+    }
+}
+
+fn bridge_part_delta_field(field: StudioPartDeltaField) -> String {
+    match field {
+        StudioPartDeltaField::Text => "text".to_string(),
+        StudioPartDeltaField::ReasoningSummary => "reasoning.summary".to_string(),
+        StudioPartDeltaField::PlanContent => "planContent".to_string(),
+        StudioPartDeltaField::ToolArguments => "tool.arguments".to_string(),
+        StudioPartDeltaField::ToolResult => "tool.result".to_string(),
+    }
+}
+
+fn bridge_interaction_changed(
+    event: pl_protocol::InteractionChangedEvent,
+) -> BridgeInteractionChangedDto {
+    let interaction = event.interaction;
+    BridgeInteractionChangedDto {
+        interaction_id: interaction.interaction_id,
+        kind: interaction.kind.as_str().to_string(),
+        status: interaction.status.as_str().to_string(),
+        session_id: interaction.scope.session_id,
+        turn_id: interaction.scope.turn_id,
+        item_id: interaction.scope.item_id,
+        tool_id: interaction.scope.tool_id,
+        agent_path: interaction.scope.agent_path,
+        payload: bridge_interaction_payload(interaction.payload),
+        created_at: interaction.created_at,
+        updated_at: interaction.updated_at,
+        resolved_at: interaction.resolved_at,
+    }
+}
+
+fn bridge_interaction_payload(payload: InteractionPayload) -> BridgeInteractionPayloadDto {
+    match payload {
+        InteractionPayload::UserInput { questions } => BridgeInteractionPayloadDto::UserInput {
+            questions: questions
+                .into_iter()
+                .map(|question| BridgeUserQuestionDto {
+                    id: question.id,
+                    header: question.header,
+                    question: question.question,
+                    is_other: question.is_other,
+                    is_secret: question.is_secret,
+                    options: question.options.map(|options| {
+                        options
+                            .into_iter()
+                            .map(|option| BridgeUserQuestionOptionDto {
+                                label: option.label,
+                                description: option.description,
+                            })
+                            .collect()
+                    }),
+                })
+                .collect(),
+        },
+        InteractionPayload::ToolApproval {
+            name,
+            arguments,
+            working_directory,
+            parent_agent_id,
+        } => BridgeInteractionPayloadDto::ToolApproval {
+            name,
+            arguments_json: serde_json::to_string(&arguments).unwrap_or_else(|_| "{}".into()),
+            working_directory,
+            parent_agent_id,
+        },
+        InteractionPayload::PlanConfirmation { plan_id, content } => {
+            BridgeInteractionPayloadDto::PlanConfirmation { plan_id, content }
+        }
+    }
+}
+
+fn bridge_agent_snapshot(agent: StudioAgentSnapshot) -> BridgeAgentSnapshotDto {
+    BridgeAgentSnapshotDto {
+        id: agent.id,
+        session_id: agent.session_id,
+        path: agent.path,
+        parent_path: agent.parent_path,
+        role: agent.role,
+        task: agent.task,
+        status: agent.status.as_str().to_string(),
+        summary: agent.summary,
+        depth: agent.depth,
+        error: agent.error,
+        reason: agent.reason,
+        updated_at: agent.updated_at,
+    }
+}
+
+fn bridge_agent_timeline_event(event: StudioAgentTimelineEvent) -> BridgeAgentTimelineEventDto {
+    BridgeAgentTimelineEventDto {
+        event_id: event.event_id,
+        session_id: event.session_id,
+        sequence: event.sequence,
+        created_at: event.created_at,
+        payload: bridge_agent_timeline_payload(event.kind),
+    }
+}
+
+fn bridge_agent_timeline_payload(
+    kind: StudioAgentTimelineEventKind,
+) -> BridgeAgentTimelinePayloadDto {
+    match kind {
+        StudioAgentTimelineEventKind::SpawnBegin {
+            call_id,
+            sender_path,
+            task_name,
+            prompt,
+            role,
+            model,
+            reasoning_effort,
+        } => BridgeAgentTimelinePayloadDto::SpawnBegin {
+            call_id,
+            sender_path,
+            task_name,
+            prompt,
+            role,
+            model,
+            reasoning_effort,
+        },
+        StudioAgentTimelineEventKind::SpawnEnd {
+            call_id,
+            sender_path,
+            agent_id,
+            path,
+            role,
+            status,
+            prompt,
+            error,
+        } => BridgeAgentTimelinePayloadDto::SpawnEnd {
+            call_id,
+            sender_path,
+            agent_id,
+            path,
+            role,
+            status: status.as_str().to_string(),
+            prompt,
+            error,
+        },
+        StudioAgentTimelineEventKind::InteractionBegin {
+            call_id,
+            sender_path,
+            receiver_path,
+            prompt,
+        } => BridgeAgentTimelinePayloadDto::InteractionBegin {
+            call_id,
+            sender_path,
+            receiver_path,
+            prompt,
+        },
+        StudioAgentTimelineEventKind::InteractionEnd {
+            call_id,
+            sender_path,
+            receiver_path,
+            status,
+            prompt,
+            error,
+        } => BridgeAgentTimelinePayloadDto::InteractionEnd {
+            call_id,
+            sender_path,
+            receiver_path,
+            status: status.as_str().to_string(),
+            prompt,
+            error,
+        },
+        StudioAgentTimelineEventKind::WaitingBegin {
+            call_id,
+            sender_path,
+        } => BridgeAgentTimelinePayloadDto::WaitingBegin {
+            call_id,
+            sender_path,
+        },
+        StudioAgentTimelineEventKind::WaitingEnd {
+            call_id,
+            sender_path,
+            timed_out,
+        } => BridgeAgentTimelinePayloadDto::WaitingEnd {
+            call_id,
+            sender_path,
+            timed_out,
+        },
+        StudioAgentTimelineEventKind::CloseBegin {
+            call_id,
+            sender_path,
+            receiver_path,
+        } => BridgeAgentTimelinePayloadDto::CloseBegin {
+            call_id,
+            sender_path,
+            receiver_path,
+        },
+        StudioAgentTimelineEventKind::CloseEnd {
+            call_id,
+            sender_path,
+            receiver_path,
+            status,
+            error,
+        } => BridgeAgentTimelinePayloadDto::CloseEnd {
+            call_id,
+            sender_path,
+            receiver_path,
+            status: status.as_str().to_string(),
+            error,
+        },
+    }
+}
+
+fn bridge_session_runtime(runtime: StudioSessionRuntime) -> BridgeSessionRuntimeDto {
+    BridgeSessionRuntimeDto {
+        session_id: runtime.session_id,
+        model: runtime.usage.model,
+        context_window: runtime.usage.context_window,
+        latest_context_tokens: runtime.usage.latest_context_tokens,
+        prompt_tokens: runtime.usage.prompt_tokens,
+        completion_tokens: runtime.usage.completion_tokens,
+        cached_prompt_tokens: runtime.usage.cached_prompt_tokens,
+        total_tokens: runtime.usage.total_tokens,
+        estimated_costs: runtime
+            .usage
+            .estimated_costs
+            .into_iter()
+            .map(bridge_cost_amount)
+            .collect(),
+        has_unpriced_usage: runtime.usage.has_unpriced_usage,
+        active_skills: runtime.active_skills,
+        active_mcp_servers: runtime.active_mcp_servers,
+        active_lsp_servers: runtime.active_lsp_servers,
+        updated_at: runtime.updated_at,
+    }
+}
+
+fn bridge_cost_amount(cost: RuntimeCostAmount) -> BridgeRuntimeCostAmountDto {
+    BridgeRuntimeCostAmountDto {
+        currency: cost.currency,
+        amount: cost.amount,
+    }
+}
+
+fn bridge_skill_activation(activation: SkillActivation) -> BridgeSkillActivationDto {
+    BridgeSkillActivationDto {
+        name: activation.name,
+        source: activation.source,
+        path: activation.path,
+        turn_id: activation.turn_id,
+        tool_call_id: activation.tool_call_id,
+        activated_at: activation.activated_at,
+    }
+}
+
+fn session_summary_dto(session: pl_protocol::StudioSessionSummary) -> SessionDto {
+    SessionDto {
+        id: session.id,
+        project_id: session.project_id,
+        title: session.title,
+        mode: session.mode,
+        updated_at: session.updated_at,
+        visibility: session.visibility,
+        parent_session_id: session.parent_session_id,
+    }
+}
+
+fn bridge_mcp_health(health: StudioMcpHealth) -> BridgeMcpHealthDto {
+    BridgeMcpHealthDto {
+        active_mcp_servers: health.active_mcp_servers,
+        mcp_servers: health
+            .mcp_servers
+            .into_iter()
+            .map(|server| BridgeMcpServerDto {
+                id: server.id,
+                enabled: server.enabled,
+                transport: server.transport,
+                command: server.command,
+                url: server.url,
+                endpoint: server.endpoint,
+                status_kind: server.status_kind,
+                availability_kind: server.availability_kind,
+            })
+            .collect(),
+    }
+}
+
+fn bridge_lsp_health(health: StudioLspHealth) -> BridgeLspHealthDto {
+    BridgeLspHealthDto {
+        active_lsp_servers: health.active_lsp_servers,
+    }
 }
 
 fn studio_settings_draft_key(section: &str) -> String {
@@ -1434,10 +2232,15 @@ mod tests {
     use pl_protocol::StudioEventKind;
     use pretty_assertions::assert_eq;
 
-    use super::{BridgeEventEnvelope, JsonResponse};
+    use super::{
+        BridgeEventEnvelope, BridgeEventPayload, BridgeSessionStateResponse,
+        BridgeStudioEventsResponse, BridgeStudioSnapshotResponse, ConfigSavedResponse,
+        ProviderUsagesResponse, ResolveInteractionResponse, SettingsDraftResponse, SkillsResponse,
+        StopPromptResponse, SubmitPromptResponse,
+    };
 
     #[test]
-    fn bridge_event_envelope_uses_kind_type_and_payload_json() {
+    fn bridge_event_envelope_uses_typed_payload() {
         let event = pl_protocol::StudioEventEnvelope {
             event_id: "event-1".to_string(),
             project_id: None,
@@ -1450,36 +2253,86 @@ mod tests {
 
         let envelope = BridgeEventEnvelope::from(event);
 
-        assert_eq!(envelope.kind_type, "stale");
         assert_eq!(envelope.session_id.as_deref(), Some("session-1"));
         assert_eq!(envelope.sequence, 7);
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&envelope.payload_json).unwrap(),
-            serde_json::json!({
-                "type": "stale",
-                "laggedEvents": 2
-            })
+            envelope.payload,
+            BridgeEventPayload::Stale { lagged_events: 2 }
         );
     }
 
     #[test]
+    fn bridge_filters_legacy_session_handoff_events() {
+        let event = pl_protocol::StudioEventEnvelope {
+            event_id: "event-1".to_string(),
+            project_id: None,
+            session_id: Some("session-1".to_string()),
+            turn_id: Some("turn-1".to_string()),
+            sequence: 7,
+            created_at: 10,
+            kind: StudioEventKind::SessionHandoffChanged {
+                handoff: pl_protocol::StudioSessionHandoff {
+                    origin_session_id: "session-1".to_string(),
+                    target_session_id: "session-2".to_string(),
+                    target_session: None,
+                    kind: "planImplementation".to_string(),
+                    status: "completed".to_string(),
+                    plan_id: None,
+                    updated_at: 10,
+                },
+            },
+        };
+
+        assert!(!super::bridge_visible_event(&event));
+    }
+
+    #[test]
     fn archive_project_api_is_exposed_to_flutter() {
-        let _api: fn(String, Option<String>) -> anyhow::Result<JsonResponse> =
+        let _api: fn(String, Option<String>) -> anyhow::Result<BridgeStudioSnapshotResponse> =
             super::archive_project;
     }
 
     #[test]
     fn list_discovered_skills_api_is_exposed_to_flutter() {
-        let _api: fn(String) -> anyhow::Result<JsonResponse> = super::list_discovered_skills;
+        let _api: fn(String) -> anyhow::Result<SkillsResponse> = super::list_discovered_skills;
+    }
+
+    #[test]
+    fn small_command_responses_are_typed_for_flutter() {
+        let _runtime_permission: fn(String) -> anyhow::Result<ConfigSavedResponse> =
+            super::save_runtime_permission_mode;
+        let _provider_usages: fn() -> anyhow::Result<ProviderUsagesResponse> =
+            super::load_provider_usages;
+        let _submit: fn(String, String, Vec<String>) -> anyhow::Result<SubmitPromptResponse> =
+            super::submit_prompt;
+        let _stop: fn(String) -> anyhow::Result<StopPromptResponse> = super::stop_prompt;
+        let _resolve: fn(String, String) -> anyhow::Result<ResolveInteractionResponse> =
+            super::resolve_interaction;
+        let _draft: fn(String, String) -> anyhow::Result<SettingsDraftResponse> =
+            super::save_studio_settings_draft;
+    }
+
+    #[test]
+    fn load_studio_events_api_returns_typed_bridge_events() {
+        let _api: fn(
+            String,
+            Option<i64>,
+            Option<i64>,
+        ) -> anyhow::Result<BridgeStudioEventsResponse> = super::load_studio_events;
     }
 
     #[test]
     fn typed_settings_apis_are_exposed_to_flutter() {
-        let _instructions: fn(String) -> anyhow::Result<JsonResponse> =
+        let _session: fn(String) -> anyhow::Result<BridgeSessionStateResponse> =
+            super::load_session_state;
+        let _instructions: fn(String) -> anyhow::Result<BridgeStudioSnapshotResponse> =
             super::save_instructions_settings;
-        let _skills: fn(String) -> anyhow::Result<JsonResponse> = super::save_skills_settings;
-        let _mcp: fn(String) -> anyhow::Result<JsonResponse> = super::save_mcp_settings;
-        let _general: fn(String) -> anyhow::Result<JsonResponse> = super::save_general_settings;
+        let _skills: fn(String) -> anyhow::Result<BridgeStudioSnapshotResponse> =
+            super::save_skills_settings;
+        let _mcp: fn(String) -> anyhow::Result<BridgeStudioSnapshotResponse> =
+            super::save_mcp_settings;
+        let _general: fn(String) -> anyhow::Result<BridgeStudioSnapshotResponse> =
+            super::save_general_settings;
     }
 
     #[test]

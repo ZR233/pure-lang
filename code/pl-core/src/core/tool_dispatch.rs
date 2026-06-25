@@ -32,6 +32,7 @@ pub(super) struct ToolExecutionRecord {
     pub(super) status: TracePartStatus,
     pub(super) exit_code: Option<i32>,
     pub(super) timed_out: bool,
+    pub(super) revision: Option<u64>,
     pub(super) runtime_events: Vec<ToolRuntimeEvent>,
 }
 
@@ -294,6 +295,7 @@ pub(super) async fn execute_tool_calls(
                     arguments: invocation.payload.arguments_for_tool(),
                     session_id: context.session_id.to_string(),
                     tool_id: invocation.runtime_tool_call_id.clone(),
+                    revision_base: item.revision,
                 };
                 let lock = runtime_lock.clone();
                 let tool_name = invocation.name.clone();
@@ -479,6 +481,9 @@ fn finalize_tool_item(
         tool.exit_code = record.exit_code;
         tool.timed_out = record.timed_out;
     }
+    if let Some(revision) = record.revision {
+        item.revision = item.revision.max(revision);
+    }
     let status = item.status;
     match status {
         TracePartStatus::Failed
@@ -505,6 +510,7 @@ fn finalize_tool_item(
                         activation: activation.clone(),
                     });
                 }
+                ToolRuntimeEvent::ToolResultRevision { .. } => {}
             }
         }
     }
@@ -578,6 +584,10 @@ fn tool_execution_record_from_envelope(
         timed_out,
         runtime_events,
     } = envelope;
+    let revision = runtime_events.iter().find_map(|event| match event {
+        ToolRuntimeEvent::ToolResultRevision { revision } => Some(*revision),
+        ToolRuntimeEvent::SkillActivated { .. } => None,
+    });
     let display_result = display_result_for_tool(&tool_call, &tool_name, &display_text, status);
     ToolExecutionRecord {
         id: tool_call.id.clone(),
@@ -590,6 +600,7 @@ fn tool_execution_record_from_envelope(
         status,
         exit_code,
         timed_out,
+        revision,
         runtime_events,
     }
 }

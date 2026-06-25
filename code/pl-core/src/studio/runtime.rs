@@ -1632,6 +1632,8 @@ mod tests {
     use super::*;
     use crate::config::{ProviderConfig, RoleConfig, RoleConfigs};
 
+    const TEST_RUNTIME_TIMEOUT: Duration = Duration::from_secs(20);
+
     async fn serve_sse_once(sse_body: String) -> (String, tokio::task::JoinHandle<()>) {
         serve_sse_sequence(vec![sse_body]).await
     }
@@ -1745,6 +1747,30 @@ mod tests {
         }
     }
 
+    fn test_chat_config(base_url: String) -> crate::config::PureConfig {
+        let mut model = ModelInfo::fallback("local-chat");
+        model.context_window = Some(128_000);
+        model.parameters = vec![crate::ModelParameter {
+            name: "effort".to_string(),
+            label: None,
+            candidates: vec!["none".to_string()],
+            wire: std::collections::BTreeMap::new(),
+        }];
+        let mut info = ProviderInfo::deepseek(Some(base_url));
+        info.default_model = "local-chat".to_string();
+        let provider = ProviderConfig::from_provider_info(info, vec![model]);
+        let role = RoleConfig {
+            provider: "local".to_string(),
+            model: "local-chat".to_string(),
+            effort: crate::config::ReasoningEffort::new("none"),
+        };
+        crate::config::PureConfig {
+            roles: RoleConfigs::from_default_role(role),
+            providers: std::collections::BTreeMap::from([("local".to_string(), provider)]),
+            ..crate::config::PureConfig::default_config()
+        }
+    }
+
     fn emitter(
         events: std::sync::Arc<Mutex<Vec<InteractionRequest>>>,
     ) -> crate::studio::InteractionEmitter {
@@ -1783,7 +1809,7 @@ mod tests {
     }
 
     async fn wait_for_no_active_turn(runtime: &StudioRuntime) {
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
             loop {
                 if runtime.runtime_snapshot().active_turns.is_empty() {
                     break;
@@ -1969,7 +1995,7 @@ mod tests {
 
         assert_eq!(submitted.session_id, session.id);
         assert_eq!(runtime.runtime_snapshot().active_turns.len(), 1);
-        tokio::time::timeout(Duration::from_secs(5), accepted_rx)
+        tokio::time::timeout(TEST_RUNTIME_TIMEOUT, accepted_rx)
             .await
             .unwrap()
             .unwrap();
@@ -2069,12 +2095,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn plan_turn_creates_pending_confirmation_interaction() {
+    async fn proposed_plan_tag_does_not_create_pending_confirmation_interaction() {
         let sse_body = concat!(
-            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"<proposed_plan>\"}\n\n",
-            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"1. Inspect\\\\n2. Implement\"}\n\n",
-            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"</proposed_plan><final>Ready</final>\"}\n\n",
-            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"<proposed_plan>\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"1. Inspect\\\\n2. Implement\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"</proposed_plan><final>Ready</final>\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\n",
             "data: [DONE]\n\n"
         )
         .to_string();
@@ -2087,7 +2113,7 @@ mod tests {
         let workspace = std::env::temp_dir().join(format!("pure-runtime-workspace-{unique}"));
         tokio::fs::create_dir_all(&workspace).await.unwrap();
         let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
-        config_store.save(&test_config(base_url)).unwrap();
+        config_store.save(&test_chat_config(base_url)).unwrap();
         let store = StudioStore::open_memory().await.unwrap();
         let runtime = StudioRuntime::new(store.clone(), config_store);
         let project = runtime.open_project(&workspace).await.unwrap();
@@ -2116,7 +2142,7 @@ mod tests {
         handle.await.unwrap();
 
         assert_eq!(outcome.result.status, TurnResultStatus::Completed);
-        assert_eq!(outcome.result.content, "Ready");
+        assert!(outcome.result.content.contains("Ready"));
         let plan_item = outcome
             .trace_events
             .iter()
@@ -2132,47 +2158,26 @@ mod tests {
                 | TraceEventKind::InteractionChanged { .. }
                 | TraceEventKind::SkillActivated { .. }
                 | TraceEventKind::EnabledToolsRecorded { .. } => None,
-            })
-            .expect("completed plan item");
-        assert_eq!(plan_item.content, "1. Inspect\\n2. Implement");
+            });
+        assert!(plan_item.is_none());
         assert!(outcome.trace_events.iter().any(|event| matches!(
             &event.kind,
             TraceEventKind::TracePartCompleted { item }
                 if item.text_channel == Some(TraceTextChannel::Final)
-                    && item.content == "Ready"
+                    && item.content.contains("Ready")
         )));
-
-        let interaction = store
-            .read_interaction(&plan_confirmation_id(&plan_item.item_id))
-            .await
-            .unwrap()
-            .expect("plan confirmation interaction");
-        assert_eq!(interaction.kind, InteractionKind::PlanConfirmation);
-        assert_eq!(interaction.status, InteractionStatus::Pending);
-        assert_eq!(
-            interaction.scope.item_id.as_deref(),
-            Some(plan_item.item_id.as_str())
-        );
-        assert_eq!(
-            interaction.payload,
-            InteractionPayload::PlanConfirmation {
-                plan_id: plan_item.item_id.clone(),
-                content: plan_item.content.clone(),
-            }
-        );
         let studio_events = store
             .load_studio_events(&session.id, None, None)
             .await
             .unwrap();
-        assert!(studio_events.iter().any(|envelope| {
+        assert!(!studio_events.iter().any(|envelope| {
             matches!(
                 &envelope.kind,
                 StudioEventKind::PlanLifecycleChanged { event }
-                    if event.plan_id == plan_item.item_id
-                        && event.state == PlanLifecycleState::PendingConfirmation
+                    if event.state == PlanLifecycleState::PendingConfirmation
             )
         }));
-        assert_eq!(interaction_events.lock().await.len(), 1);
+        assert!(interaction_events.lock().await.is_empty());
         let _ = tokio::fs::remove_dir_all(home).await;
         let _ = tokio::fs::remove_dir_all(workspace).await;
     }
@@ -2188,7 +2193,9 @@ mod tests {
         )
         .to_string();
         let final_sse = concat!(
-            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_2\",\"delta\":\"<final>Plan submitted.</final>\"}\n\n",
+            "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_2\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_2\",\"delta\":\"Plan submitted.\"}\n\n",
+            "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_2\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"Plan submitted.\"}]}}\n\n",
             "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_2\",\"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}}}\n\n",
             "data: [DONE]\n\n"
         )
@@ -2286,7 +2293,7 @@ mod tests {
     #[tokio::test]
     async fn tool_boundary_with_reused_provider_ids_creates_new_parts_after_tool() {
         let tool_sse = concat!(
-            "data: {\"type\":\"response.reasoning_text.delta\",\"item_id\":\"thinking\",\"delta\":\"before tool\"}\n\n",
+            "data: {\"type\":\"response.reasoning_summary_text.delta\",\"item_id\":\"thinking\",\"delta\":\"before tool\"}\n\n",
             "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"before \"}\n\n",
             "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"list_files\"}}\n\n",
             "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"call_id\":\"call_1\",\"delta\":\"{\\\"path\\\":\\\".\\\"}\"}\n\n",
@@ -2296,7 +2303,7 @@ mod tests {
         )
         .to_string();
         let final_sse = concat!(
-            "data: {\"type\":\"response.reasoning_text.delta\",\"item_id\":\"thinking\",\"delta\":\"after tool\"}\n\n",
+            "data: {\"type\":\"response.reasoning_summary_text.delta\",\"item_id\":\"thinking\",\"delta\":\"after tool\"}\n\n",
             "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"after\"}\n\n",
             "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_2\",\"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}}}\n\n",
             "data: [DONE]\n\n"

@@ -11,7 +11,7 @@ pure-studio-flutter
   │  Flutter Windows 桌面应用：Material 3、Riverpod、按会话订阅事件流
   ▼
 pl-studio-bridge
-  │  flutter_rust_bridge v2：FRB API、Stream<BridgeEventEnvelope>、camelCase JSON payload
+  │  flutter_rust_bridge v2：FRB API、Stream<BridgeEventEnvelope> typed payload
   ▼
 pl-core
 ```
@@ -34,8 +34,8 @@ pl-core
 - `pl-model` 只依赖 `pl-protocol` 与 `pl-trace`，不承担核心流程编排。
 - `pl-lsp` 只依赖 LSP 协议与异步运行时，不依赖 `pl-core`。
 - `pl-core` 可以依赖 `pl-model`、`pl-lsp`、`pl-protocol` 和 `pl-trace`，负责组合核心逻辑、持久化配置和 Studio SQLite 状态。
-- `pure-studio-flutter` 保持薄入口层，Flutter UI 不直接持久化业务状态，只通过 `pl-studio-bridge` 调用 `pl-core` 并消费 typed event stream。
-- `pl-studio-bridge` 不拥有业务规则。复杂 payload 通过 canonical camelCase JSON 字符串传输，Dart 层用 `kindType` 和 typed routing fields 解码为 sealed model，避免 FRB API 直接暴露 `serde_json::Value`。
+- `pure-studio-flutter` 保持薄入口层，Flutter UI 不直接持久化业务状态，只通过 `pl-studio-bridge` 调用 `pl-core` 并消费稳定的 Studio event envelope。
+- `pl-studio-bridge` 不拥有业务规则。实时 stream 和 stale backfill 的 `BridgeEventEnvelope` 使用 typed FRB payload union，Dart 边界层归一为 `StudioBridgeEventPayload` 后交给 Riverpod reducer；snapshot 和命令响应使用 typed DTO。完整 config/general settings 与工具参数这类开放 JSON 标量只能停留在 FRB adapter 边界，不能扩散到 UI store；interaction payload 与 agent timeline payload 必须作为 typed DTO/union 传递。桥接层避免直接暴露 `serde_json::Value`，未知协议不得静默降级。
 - 当前版本没有独立沙箱层；Studio 运行路径默认使用 `PermissionMode::RequestApproval`。workspace 内访问按本地策略直接放行，workspace 外访问按权限模式请求用户审批、AI reviewer 审批或在 `full-access` 下放行。
 
 ## 1.4 桌面编译路径

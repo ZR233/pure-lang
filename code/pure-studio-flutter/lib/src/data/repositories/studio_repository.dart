@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/models/studio_models.dart';
@@ -18,16 +19,21 @@ final studioControllerProvider =
 class StudioController extends AsyncNotifier<StudioState> {
   StreamSubscription<Object>? _globalSubscription;
   StreamSubscription<Object>? _sessionSubscription;
-  Timer? _partDeltaFlushTimer;
   final List<StudioBridgeEvent> _pendingPartDeltas = [];
+  bool _partDeltaFrameScheduled = false;
+  final List<StudioBridgeEvent> _sessionLoadBuffer = [];
+  int _sessionGeneration = 0;
+  String? _loadingSessionId;
+  int? _loadingGeneration;
+  bool _bufferedStaleSession = false;
 
   StudioApi get _api => ref.read(studioApiProvider);
 
   @override
   Future<StudioState> build() async {
     ref.onDispose(() {
-      _partDeltaFlushTimer?.cancel();
       _pendingPartDeltas.clear();
+      _partDeltaFrameScheduled = false;
       final global = _globalSubscription;
       final session = _sessionSubscription;
       if (global != null) {
@@ -36,10 +42,18 @@ class StudioController extends AsyncNotifier<StudioState> {
       if (session != null) {
         unawaited(session.cancel());
       }
+      _clearAnySessionLoadBarrier();
     });
     final bootstrapped = await _api.bootstrap();
-    _subscribe(bootstrapped.selectedSessionId);
-    return _withSelectedSessionProjection(bootstrapped);
+    final sessionId = bootstrapped.selectedSessionId;
+    _subscribe(sessionId);
+    if (sessionId == null) {
+      return bootstrapped;
+    }
+    final generation = _sessionGeneration;
+    _startSessionLoadBarrier(sessionId, generation);
+    final projected = await _withSelectedSessionProjection(bootstrapped);
+    return _flushSessionLoadBuffer(projected, sessionId, generation);
   }
 
   Future<void> openProject(String path) async {
@@ -95,6 +109,8 @@ class StudioController extends AsyncNotifier<StudioState> {
 
   void _subscribe(String? sessionId) {
     _flushPartDeltaBatch();
+    _sessionGeneration += 1;
+    final generation = _sessionGeneration;
     _globalSubscription ??= _api.subscribeGlobalEvents().listen(_handleEvent);
     final oldSession = _sessionSubscription;
     if (oldSession != null) {
@@ -102,7 +118,11 @@ class StudioController extends AsyncNotifier<StudioState> {
     }
     _sessionSubscription = sessionId == null
         ? null
-        : _api.subscribeSessionEvents(sessionId).listen(_handleEvent);
+        : _api
+              .subscribeSessionEvents(sessionId)
+              .listen(
+                (event) => _handleSessionEvent(event, sessionId, generation),
+              );
   }
 
   Future<void> selectSession(String sessionId) async {
@@ -112,12 +132,19 @@ class StudioController extends AsyncNotifier<StudioState> {
     }
     state = AsyncData(current.copyWith(selectedSessionId: sessionId));
     _subscribe(sessionId);
+    final generation = _sessionGeneration;
+    _startSessionLoadBarrier(sessionId, generation);
     final sessionState = await _api.loadSessionState(sessionId);
     final latest = state.value;
-    if (latest == null || latest.selectedSessionId != sessionId) {
+    if (latest == null ||
+        latest.selectedSessionId != sessionId ||
+        generation != _sessionGeneration) {
+      _clearSessionLoadBarrier(sessionId, generation);
       return;
     }
-    state = AsyncData(_mergeSessionState(latest, sessionState));
+    var merged = _mergeSessionState(latest, sessionState);
+    merged = _flushSessionLoadBuffer(merged, sessionId, generation);
+    state = AsyncData(merged);
   }
 
   void updateComposer(String value) {
@@ -348,12 +375,12 @@ class StudioController extends AsyncNotifier<StudioState> {
     if (current == null || event is! StudioBridgeEvent) {
       return;
     }
-    if (event.kindType == 'messagePartDelta') {
+    if (event.payload is MessagePartDeltaPayload) {
       _queuePartDelta(current, event);
       return;
     }
     _flushPartDeltaBatch();
-    if (event.kindType == 'stale') {
+    if (event.payload is StalePayload) {
       final sessionId = event.sessionId ?? current.selectedSessionId;
       if (sessionId != null) {
         unawaited(_recoverStaleSession(sessionId));
@@ -368,24 +395,112 @@ class StudioController extends AsyncNotifier<StudioState> {
     state = AsyncData(_withEventCursor(reduced, event));
   }
 
+  void _handleSessionEvent(Object event, String sessionId, int generation) {
+    if (generation != _sessionGeneration || event is! StudioBridgeEvent) {
+      return;
+    }
+    final eventSessionId = _eventSessionId(event);
+    if (eventSessionId != null && eventSessionId != sessionId) {
+      return;
+    }
+    if (_loadingSessionId == sessionId && _loadingGeneration == generation) {
+      if (event.payload is StalePayload) {
+        _bufferedStaleSession = true;
+      } else {
+        _sessionLoadBuffer.add(event);
+      }
+      return;
+    }
+    _handleEvent(event);
+  }
+
+  void _startSessionLoadBarrier(String sessionId, int generation) {
+    _flushPartDeltaBatch();
+    _loadingSessionId = sessionId;
+    _loadingGeneration = generation;
+    _bufferedStaleSession = false;
+    _sessionLoadBuffer.clear();
+  }
+
+  void _clearAnySessionLoadBarrier() {
+    _loadingSessionId = null;
+    _loadingGeneration = null;
+    _bufferedStaleSession = false;
+    _sessionLoadBuffer.clear();
+  }
+
+  void _clearSessionLoadBarrier(String sessionId, int generation) {
+    if (_loadingSessionId == sessionId && _loadingGeneration == generation) {
+      _clearAnySessionLoadBarrier();
+    }
+  }
+
+  StudioState _flushSessionLoadBuffer(
+    StudioState current,
+    String sessionId,
+    int generation,
+  ) {
+    if (_loadingSessionId != sessionId || _loadingGeneration != generation) {
+      return current;
+    }
+    _sessionLoadBuffer.sort((a, b) {
+      final aSequence = a.sequence?.toInt() ?? 0;
+      final bSequence = b.sequence?.toInt() ?? 0;
+      final sequence = switch ((aSequence > 0, bSequence > 0)) {
+        (true, true) => aSequence.compareTo(bSequence),
+        (true, false) => -1,
+        (false, true) => 1,
+        (false, false) => 0,
+      };
+      if (sequence != 0) {
+        return sequence;
+      }
+      final createdAt = (a.createdAt?.millisecondsSinceEpoch ?? 0).compareTo(
+        b.createdAt?.millisecondsSinceEpoch ?? 0,
+      );
+      if (createdAt != 0) {
+        return createdAt;
+      }
+      return (a.eventId ?? '').compareTo(b.eventId ?? '');
+    });
+    var latest = current;
+    for (final event in _sessionLoadBuffer) {
+      if (!_targetsSelectedSession(latest, event)) {
+        continue;
+      }
+      latest = _withEventCursor(_reduceEvent(latest, event), event);
+    }
+    final shouldRecover = _bufferedStaleSession;
+    _clearAnySessionLoadBarrier();
+    if (shouldRecover) {
+      unawaited(_recoverStaleSession(sessionId));
+    }
+    return latest;
+  }
+
   void _queuePartDelta(StudioState current, StudioBridgeEvent event) {
     if (!_targetsSelectedSession(current, event)) {
       return;
     }
     _pendingPartDeltas.add(event);
-    _partDeltaFlushTimer ??= Timer(Duration.zero, _flushPartDeltaBatch);
+    if (_partDeltaFrameScheduled) {
+      return;
+    }
+    _partDeltaFrameScheduled = true;
+    SchedulerBinding.instance.scheduleFrameCallback((_) {
+      _partDeltaFrameScheduled = false;
+      _flushPartDeltaBatch();
+    });
   }
 
   void _flushPartDeltaBatch() {
     if (_pendingPartDeltas.isEmpty) {
-      _partDeltaFlushTimer?.cancel();
-      _partDeltaFlushTimer = null;
+      _partDeltaFrameScheduled = false;
       return;
     }
     final events = List<StudioBridgeEvent>.of(_pendingPartDeltas);
     _pendingPartDeltas.clear();
-    _partDeltaFlushTimer?.cancel();
-    _partDeltaFlushTimer = null;
+    _partDeltaFrameScheduled = false;
     final current = state.value;
     if (current == null) {
       return;
@@ -416,12 +531,19 @@ class StudioController extends AsyncNotifier<StudioState> {
     if (sessionId == null) {
       return;
     }
+    final generation = _sessionGeneration;
+    _startSessionLoadBarrier(sessionId, generation);
     final withProjection = await _withSelectedSessionProjection(next);
     final current = state.value;
-    if (current == null || current.selectedSessionId != sessionId) {
+    if (current == null ||
+        current.selectedSessionId != sessionId ||
+        generation != _sessionGeneration) {
+      _clearSessionLoadBarrier(sessionId, generation);
       return;
     }
-    state = AsyncData(_mergeSessionState(current, withProjection));
+    var merged = _mergeSessionState(current, withProjection);
+    merged = _flushSessionLoadBuffer(merged, sessionId, generation);
+    state = AsyncData(merged);
   }
 
   Future<StudioState> _withSelectedSessionProjection(StudioState next) async {
@@ -467,50 +589,56 @@ class StudioController extends AsyncNotifier<StudioState> {
   }
 
   StudioState _reduceEvent(StudioState current, StudioBridgeEvent event) {
-    return switch (event.kindType) {
-      'messageUpdated' => _upsertMessage(current, event.payload['message']),
-      'messageRemoved' => _removeMessage(
+    return switch (event.payload) {
+      MessageUpdatedPayload(:final message) => _upsertMessageSnapshot(
+        current,
+        message,
+      ),
+      MessageRemovedPayload(:final messageId) => _removeMessage(
         current,
         event.sessionId,
-        event.payload['messageId'],
+        messageId,
       ),
-      'messagePartUpdated' => _upsertPart(current, event.payload['part']),
-      'messagePartRemoved' => _removePart(
+      MessagePartUpdatedPayload(:final part) => _upsertPartSnapshot(
+        current,
+        part,
+      ),
+      MessagePartRemovedPayload(:final messageId, :final partId) => _removePart(
         current,
         event.sessionId,
-        event.payload['messageId'],
-        event.payload['partId'],
+        messageId,
+        partId,
       ),
-      'messagePartDelta' => _appendPartDelta(current, event.payload['delta']),
-      'turnChanged' => current.copyWith(
-        turnPhase: _turnPhase(event.payload['turn']),
+      MessagePartDeltaPayload(:final delta) => _appendPartDelta(current, delta),
+      TurnChangedPayload(:final turn) => current.copyWith(
+        turnPhase: _turnPhase(turn),
       ),
-      'interactionChanged' => _upsertInteraction(
+      InteractionChangedPayload(:final interaction, :final status) =>
+        _upsertInteraction(current, interaction, status),
+      SessionRuntimeChangedPayload(:final runtime) => current.copyWith(
+        runtime: runtime.copyWith(agentCount: current.runtime.agentCount),
+      ),
+      SessionListChangedPayload() => _mergeSessionListChanged(current, event),
+      AgentChangedPayload(:final agent) => _applyAgentChanged(current, agent),
+      AgentTimelineChangedPayload(:final event) => _upsertAgentTimelineEvent(
         current,
-        event.payload['event'],
+        event,
       ),
-      'sessionRuntimeChanged' => current.copyWith(
-        runtime: sessionRuntimeFromJson(
-          event.payload['runtime'],
-        ).copyWith(agentCount: current.runtime.agentCount),
-      ),
-      'sessionListChanged' => _mergeSessionListChanged(current, event),
-      'agentChanged' => _applyAgentChanged(current, event.payload['agent']),
-      'agentTimelineChanged' => _upsertAgentTimelineEvent(
+      SkillActivatedPayload(:final name) => _applySkillActivation(
         current,
-        event.payload['event'],
+        name,
       ),
-      'skillActivated' => _applySkillActivation(
+      McpHealthChangedPayload(:final activeMcpServers, :final servers) =>
+        _applyMcpHealth(current, activeMcpServers, servers),
+      LspHealthChangedPayload(:final activeLspServers) => _applyLspHealth(
         current,
-        event.payload['activation'],
+        activeLspServers,
       ),
-      'mcpHealthChanged' => _applyMcpHealth(current, event.payload['health']),
-      'lspHealthChanged' => _applyLspHealth(current, event.payload['health']),
-      'planLifecycleChanged' => _applyPlanLifecycle(
+      PlanLifecycleChangedPayload(:final state) => _applyPlanLifecycle(
         current,
-        event.payload['event'],
+        state,
       ),
-      _ => current,
+      StalePayload() || SettingsDraftSavedPayload() => current,
     };
   }
 
@@ -518,39 +646,48 @@ class StudioController extends AsyncNotifier<StudioState> {
     StudioState current,
     StudioState sessionState,
   ) {
-    final messagesBySession = Map<String, List<TimelineMessage>>.from(
-      current.messagesBySession,
-    );
-    final snapshotsBySession =
-        Map<String, Map<String, TimelinePartSnapshot>>.from(
-          current.partSnapshotsBySession,
-        );
     final sessionId = sessionState.selectedSessionId;
+    var merged = current;
     if (sessionId != null) {
-      messagesBySession[sessionId] =
-          sessionState.messagesBySession[sessionId] ?? const [];
-      snapshotsBySession[sessionId] =
-          sessionState.partSnapshotsBySession[sessionId] ?? const {};
+      for (final message
+          in sessionState.messagesBySession[sessionId] ?? const []) {
+        merged = _upsertMessageSnapshot(merged, message);
+      }
+      final snapshots = sessionState.partSnapshotsBySession[sessionId] ?? {};
+      final orderedSnapshots = snapshots.values.toList()
+        ..sort((a, b) {
+          final order = a.order.compareTo(b.order);
+          if (order != 0) {
+            return order;
+          }
+          final sequence = a.sequence.compareTo(b.sequence);
+          return sequence != 0 ? sequence : a.id.compareTo(b.id);
+        });
+      for (final snapshot in orderedSnapshots) {
+        merged = _upsertPartSnapshot(merged, snapshot);
+      }
+      final agentEvents =
+          sessionState.agentTimelineEventsBySession[sessionId] ?? const {};
+      if (agentEvents.isNotEmpty) {
+        merged = _withAgentTimelineEvents(merged, sessionId, {
+          ...(merged.agentTimelineEventsBySession[sessionId] ?? const {}),
+          ...agentEvents,
+        });
+      }
     }
-    return current.copyWith(
+    return merged.copyWith(
       sessions: sessionState.sessions.isEmpty
-          ? current.sessions
+          ? merged.sessions
           : sessionState.sessions,
-      messagesBySession: messagesBySession,
-      partSnapshotsBySession: snapshotsBySession,
-      partOverlaysBySession: {
-        ...current.partOverlaysBySession,
-        ?sessionId: const {},
-      },
       selectedProjectId:
-          sessionState.selectedProjectId ?? current.selectedProjectId,
-      selectedSessionId: sessionId ?? current.selectedSessionId,
+          sessionState.selectedProjectId ?? merged.selectedProjectId,
+      selectedSessionId: sessionId ?? merged.selectedSessionId,
       runtime: sessionState.runtime,
       pendingInteractions: sessionState.pendingInteractions,
-      eventCursorsBySession: {
-        ...current.eventCursorsBySession,
-        ...sessionState.eventCursorsBySession,
-      },
+      eventCursorsBySession: _mergeEventCursors(
+        merged.eventCursorsBySession,
+        sessionState.eventCursorsBySession,
+      ),
     );
   }
 
@@ -576,10 +713,12 @@ class StudioController extends AsyncNotifier<StudioState> {
     StudioState current,
     StudioBridgeEvent event,
   ) {
-    final incoming = studioSessionsFromJson(event.payload['sessions']);
-    final projectId = _emptyToNull(
-      event.payload['projectId']?.toString() ?? '',
-    );
+    final payload = event.payload;
+    if (payload is! SessionListChangedPayload) {
+      return current;
+    }
+    final incoming = payload.sessions;
+    final projectId = payload.projectId;
     if (projectId == null && incoming.isEmpty) {
       return current.copyWith(sessions: const []);
     }
@@ -594,8 +733,24 @@ class StudioController extends AsyncNotifier<StudioState> {
     return current.copyWith(sessions: sessions);
   }
 
-  StudioState _upsertMessage(StudioState current, Object? value) {
-    final message = timelineMessageFromJson(value);
+  Map<String, int> _mergeEventCursors(
+    Map<String, int> current,
+    Map<String, int> incoming,
+  ) {
+    final merged = {...current};
+    for (final entry in incoming.entries) {
+      final existing = merged[entry.key] ?? 0;
+      if (entry.value > existing) {
+        merged[entry.key] = entry.value;
+      }
+    }
+    return merged;
+  }
+
+  StudioState _upsertMessageSnapshot(
+    StudioState current,
+    TimelineMessage message,
+  ) {
     if (message.id.isEmpty || message.sessionId.isEmpty) {
       return current;
     }
@@ -605,12 +760,17 @@ class StudioController extends AsyncNotifier<StudioState> {
     );
     if (index >= 0) {
       final existing = messages[index];
-      messages[index] = TimelineMessage(
-        id: message.id,
-        sessionId: message.sessionId,
+      if (message.sequence > 0 && message.sequence < existing.sequence) {
+        return current;
+      }
+      messages[index] = existing.copyWith(
         role: message.role,
-        createdAt: message.createdAt,
-        parts: existing.parts,
+        createdAt: message.sequence >= existing.sequence
+            ? message.createdAt
+            : existing.createdAt,
+        sequence: message.sequence > existing.sequence
+            ? message.sequence
+            : existing.sequence,
       );
     } else {
       messages.add(message);
@@ -619,58 +779,42 @@ class StudioController extends AsyncNotifier<StudioState> {
     return _withMessages(current, message.sessionId, messages);
   }
 
-  StudioState _upsertPart(StudioState current, Object? value) {
-    final snapshot = timelinePartSnapshotFromJson(value);
+  StudioState _upsertPartSnapshot(
+    StudioState current,
+    TimelinePartSnapshot snapshot,
+  ) {
     final sessionId = snapshot.sessionId;
     if (snapshot.id.isEmpty ||
         snapshot.messageId.isEmpty ||
         sessionId.isEmpty) {
       return current;
     }
+    final existingSnapshot =
+        current.partSnapshotsBySession[sessionId]?[snapshot.id];
+    if (existingSnapshot != null &&
+        snapshot.sequence > 0 &&
+        snapshot.sequence < existingSnapshot.sequence) {
+      return current;
+    }
     final snapshots = {
       ...(current.partSnapshotsBySession[sessionId] ?? const {}),
       snapshot.id: snapshot,
     };
-    final overlays = {...(current.partOverlaysBySession[sessionId] ?? const {})}
-      ..remove(snapshot.id);
+    final overlays = {
+      ...(current.partOverlaysBySession[sessionId] ?? const {}),
+    };
+    final currentOverlay = overlays[snapshot.id];
+    if (currentOverlay != null &&
+        _snapshotCoversOverlay(snapshot, currentOverlay)) {
+      overlays.remove(snapshot.id);
+    }
     final messages = _messagesFor(current, sessionId);
     final messageIndex = messages.indexWhere(
       (message) => message.id == snapshot.messageId,
     );
-    final projected = timelinePartFromSnapshot(snapshot);
     if (messageIndex < 0) {
-      messages.add(
-        TimelineMessage(
-          id: snapshot.messageId,
-          sessionId: sessionId,
-          role: 'assistant',
-          createdAt: snapshot.createdAt,
-          parts: [projected],
-        ),
-      );
-      return _withTimelineState(
-        current,
-        sessionId,
-        messages,
-        snapshots,
-        overlays,
-      );
+      return current;
     }
-    final message = messages[messageIndex];
-    final parts = [...message.parts];
-    final partIndex = parts.indexWhere(
-      (candidate) => candidate.id == snapshot.id,
-    );
-    if (partIndex >= 0) {
-      parts[partIndex] = projected;
-    } else {
-      parts.add(projected);
-    }
-    parts.sort((a, b) {
-      final order = a.order.compareTo(b.order);
-      return order != 0 ? order : a.id.compareTo(b.id);
-    });
-    messages[messageIndex] = message.copyWith(parts: parts);
     return _withTimelineState(
       current,
       sessionId,
@@ -680,8 +824,7 @@ class StudioController extends AsyncNotifier<StudioState> {
     );
   }
 
-  StudioState _appendPartDelta(StudioState current, Object? value) {
-    final delta = timelinePartDeltaFromJson(value);
+  StudioState _appendPartDelta(StudioState current, TimelinePartDelta delta) {
     if (delta.sessionId.isEmpty ||
         delta.messageId.isEmpty ||
         delta.partId.isEmpty ||
@@ -699,7 +842,7 @@ class StudioController extends AsyncNotifier<StudioState> {
         const TimelinePartOverlay();
     final lastRevision =
         currentOverlay.lastRevisions[delta.field] ?? snapshot.revision;
-    if (delta.revision > 0 && delta.revision <= lastRevision) {
+    if (delta.revision <= lastRevision) {
       return current;
     }
     if (delta.chunkIndex != null) {
@@ -721,25 +864,10 @@ class StudioController extends AsyncNotifier<StudioState> {
       ...(current.partOverlaysBySession[delta.sessionId] ?? const {}),
       delta.partId: nextOverlay,
     };
-    final messages = _messagesFor(current, delta.sessionId);
-    final messageIndex = messages.indexWhere(
-      (message) => message.id == delta.messageId,
-    );
-    if (messageIndex < 0) {
-      return current;
-    }
-    final message = messages[messageIndex];
-    final parts = [...message.parts];
-    final partIndex = parts.indexWhere((part) => part.id == delta.partId);
-    if (partIndex < 0) {
-      return current;
-    }
-    parts[partIndex] = timelinePartFromSnapshot(snapshot, overlay: nextOverlay);
-    messages[messageIndex] = message.copyWith(parts: parts);
     return _withTimelineState(
       current,
       delta.sessionId,
-      messages,
+      _messagesFor(current, delta.sessionId),
       current.partSnapshotsBySession[delta.sessionId] ?? const {},
       overlays,
     );
@@ -748,9 +876,8 @@ class StudioController extends AsyncNotifier<StudioState> {
   StudioState _removeMessage(
     StudioState current,
     String? sessionId,
-    Object? messageIdValue,
+    String messageId,
   ) {
-    final messageId = messageIdValue?.toString() ?? '';
     if (sessionId == null || sessionId.isEmpty || messageId.isEmpty) {
       return current;
     }
@@ -775,11 +902,9 @@ class StudioController extends AsyncNotifier<StudioState> {
   StudioState _removePart(
     StudioState current,
     String? sessionId,
-    Object? messageIdValue,
-    Object? partIdValue,
+    String messageId,
+    String partId,
   ) {
-    final messageId = messageIdValue?.toString() ?? '';
-    final partId = partIdValue?.toString() ?? '';
     if (sessionId == null ||
         sessionId.isEmpty ||
         messageId.isEmpty ||
@@ -787,16 +912,6 @@ class StudioController extends AsyncNotifier<StudioState> {
       return current;
     }
     final messages = _messagesFor(current, sessionId);
-    final messageIndex = messages.indexWhere(
-      (message) => message.id == messageId,
-    );
-    if (messageIndex < 0) {
-      return current;
-    }
-    final message = messages[messageIndex];
-    messages[messageIndex] = message.copyWith(
-      parts: message.parts.where((part) => part.id != partId).toList(),
-    );
     final snapshots = {
       ...(current.partSnapshotsBySession[sessionId] ?? const {}),
     }..remove(partId);
@@ -811,9 +926,9 @@ class StudioController extends AsyncNotifier<StudioState> {
     );
   }
 
-  StudioState _applyAgentChanged(StudioState current, Object? value) {
-    final sessionId = _stringFromMap(value, 'sessionId');
-    if (sessionId.isNotEmpty && sessionId != current.selectedSessionId) {
+  StudioState _applyAgentChanged(StudioState current, StudioAgentView agent) {
+    if (agent.sessionId.isNotEmpty &&
+        agent.sessionId != current.selectedSessionId) {
       return current;
     }
     final nextCount = current.runtime.agentCount == 0
@@ -824,49 +939,19 @@ class StudioController extends AsyncNotifier<StudioState> {
     );
   }
 
-  StudioState _upsertAgentTimelineEvent(StudioState current, Object? value) {
-    final sessionId = _stringFromMap(value, 'sessionId');
-    final eventId = _stringFromMap(value, 'eventId');
-    if (sessionId.isEmpty ||
-        sessionId != current.selectedSessionId ||
-        eventId.isEmpty) {
+  StudioState _upsertAgentTimelineEvent(
+    StudioState current,
+    TimelineAgentEvent event,
+  ) {
+    if (event.sessionId.isEmpty ||
+        event.sessionId != current.selectedSessionId ||
+        event.eventId.isEmpty) {
       return current;
     }
-    final kind = _nested(value, 'kind');
-    final kindType = _stringFromMap(kind, 'type');
-    final callId = _stringFromMap(kind, 'callId');
-    final createdAt = _intFromMap(value, 'createdAt');
-    final messageId = 'agent-timeline:${callId.isEmpty ? eventId : callId}';
-    final part = TimelinePart(
-      id: '$messageId:part',
-      messageId: messageId,
-      type: TimelinePartType.agent,
-      order: createdAt,
-      revision: 0,
-      title: _agentActivityTitle(kindType),
-      text: _agentActivityText(kind),
-      status: _stringFromMap(kind, 'status', fallback: 'completed'),
-    );
-    final messages = _messagesFor(current, sessionId);
-    final index = messages.indexWhere((message) => message.id == messageId);
-    final message = TimelineMessage(
-      id: messageId,
-      sessionId: sessionId,
-      role: 'assistant',
-      createdAt: DateTime.fromMillisecondsSinceEpoch(createdAt * 1000),
-      parts: [part],
-    );
-    if (index >= 0) {
-      messages[index] = message;
-    } else {
-      messages.add(message);
-    }
-    messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-    return _withMessages(current, sessionId, messages);
+    return _withAgentTimelineEvent(current, event);
   }
 
-  StudioState _applySkillActivation(StudioState current, Object? value) {
-    final name = _stringFromMap(value, 'name');
+  StudioState _applySkillActivation(StudioState current, String name) {
     if (name.isEmpty || current.runtime.activeSkills.contains(name)) {
       return current;
     }
@@ -877,34 +962,29 @@ class StudioController extends AsyncNotifier<StudioState> {
     );
   }
 
-  StudioState _applyMcpHealth(StudioState current, Object? value) {
-    final health = _map(value);
-    final active = _stringList(
-      health['activeMcpServers'] ?? health['active_mcp_servers'],
-    );
-    final servers = _list(health['mcpServers'] ?? health['mcp_servers'])
-        .map(_mcpServerFromHealth)
-        .where((server) => server.id.isNotEmpty)
-        .toList();
+  StudioState _applyMcpHealth(
+    StudioState current,
+    List<String> activeMcpServers,
+    List<McpServerSettingsView> servers,
+  ) {
     return current.copyWith(
-      runtime: current.runtime.copyWith(activeMcpServers: active),
+      runtime: current.runtime.copyWith(activeMcpServers: activeMcpServers),
       mcpServers: servers.isEmpty ? current.mcpServers : servers,
     );
   }
 
-  StudioState _applyLspHealth(StudioState current, Object? value) {
-    final health = _map(value);
-    final active = _stringList(
-      health['activeLspServers'] ?? health['active_lsp_servers'],
-    );
+  StudioState _applyLspHealth(
+    StudioState current,
+    List<String> activeLspServers,
+  ) {
     return current.copyWith(
-      runtime: current.runtime.copyWith(activeLspServers: active),
+      runtime: current.runtime.copyWith(activeLspServers: activeLspServers),
     );
   }
 
-  StudioState _applyPlanLifecycle(StudioState current, Object? value) {
+  StudioState _applyPlanLifecycle(StudioState current, String planState) {
     return current.copyWith(
-      turnPhase: switch (_stringFromMap(value, 'state')) {
+      turnPhase: switch (planState) {
         'pendingConfirmation' => TurnPhase.waitingForInteraction,
         'accepted' || 'implementing' => TurnPhase.runningTool,
         'implementationFailed' => TurnPhase.failed,
@@ -917,10 +997,11 @@ class StudioController extends AsyncNotifier<StudioState> {
     );
   }
 
-  StudioState _upsertInteraction(StudioState current, Object? value) {
-    final interaction = pendingInteractionFromJson(
-      _nested(value, 'interaction'),
-    );
+  StudioState _upsertInteraction(
+    StudioState current,
+    PendingInteraction interaction,
+    String status,
+  ) {
     if (interaction.id.isEmpty) {
       return current;
     }
@@ -928,7 +1009,7 @@ class StudioController extends AsyncNotifier<StudioState> {
     final index = interactions.indexWhere(
       (candidate) => candidate.id == interaction.id,
     );
-    if (_stringFromMap(_nested(value, 'interaction'), 'status') != 'pending') {
+    if (status != 'pending') {
       if (index >= 0) {
         interactions.removeAt(index);
       }
@@ -958,31 +1039,6 @@ class StudioController extends AsyncNotifier<StudioState> {
     return state.copyWith(messagesBySession: bySession);
   }
 
-  String _agentActivityTitle(String kindType) {
-    return switch (kindType) {
-      'spawnBegin' || 'spawnEnd' => 'agentTimeline.spawn',
-      'interactionBegin' || 'interactionEnd' => 'agentTimeline.message',
-      'waitingBegin' || 'waitingEnd' => 'agentTimeline.waiting',
-      'closeBegin' || 'closeEnd' => 'agentTimeline.close',
-      _ => 'agentTimeline.agent',
-    };
-  }
-
-  String _agentActivityText(Object? value) {
-    final kind = _map(value);
-    final receiver = _stringFromMap(kind, 'receiverPath');
-    final path = _stringFromMap(kind, 'path', fallback: receiver);
-    final task = _stringFromMap(kind, 'taskName');
-    final prompt = _stringFromMap(kind, 'prompt');
-    final error = _stringFromMap(kind, 'error');
-    return [
-      path,
-      task,
-      prompt,
-      error,
-    ].where((part) => part.trim().isNotEmpty).join('\n');
-  }
-
   StudioState _withTimelineState(
     StudioState state,
     String sessionId,
@@ -1007,8 +1063,32 @@ class StudioController extends AsyncNotifier<StudioState> {
     );
   }
 
-  TurnPhase _turnPhase(Object? value) {
-    return switch (_stringFromMap(value, 'status')) {
+  StudioState _withAgentTimelineEvent(
+    StudioState state,
+    TimelineAgentEvent event,
+  ) {
+    final events = {
+      ...(state.agentTimelineEventsBySession[event.sessionId] ?? const {}),
+      event.eventId: event,
+    };
+    return _withAgentTimelineEvents(state, event.sessionId, events);
+  }
+
+  StudioState _withAgentTimelineEvents(
+    StudioState state,
+    String sessionId,
+    Map<String, TimelineAgentEvent> events,
+  ) {
+    return state.copyWith(
+      agentTimelineEventsBySession: {
+        ...state.agentTimelineEventsBySession,
+        sessionId: events,
+      },
+    );
+  }
+
+  TurnPhase _turnPhase(StudioTurnView turn) {
+    return switch (turn.status) {
       'queued' => TurnPhase.queued,
       'contextLoading' => TurnPhase.contextLoading,
       'waitingForModel' => TurnPhase.waitingForModel,
@@ -1047,7 +1127,7 @@ class StudioController extends AsyncNotifier<StudioState> {
   }
 
   bool _isDuplicateDurableEvent(StudioState current, StudioBridgeEvent event) {
-    if (event.kindType == 'messagePartDelta') {
+    if (event.payload is MessagePartDeltaPayload) {
       return false;
     }
     final sessionId = _eventSessionId(event);
@@ -1059,7 +1139,7 @@ class StudioController extends AsyncNotifier<StudioState> {
   }
 
   StudioState _withEventCursor(StudioState current, StudioBridgeEvent event) {
-    if (event.kindType == 'messagePartDelta') {
+    if (event.payload is MessagePartDeltaPayload) {
       return current;
     }
     final sessionId = _eventSessionId(event);
@@ -1083,36 +1163,7 @@ class StudioController extends AsyncNotifier<StudioState> {
     if (event.sessionId != null && event.sessionId!.isNotEmpty) {
       return event.sessionId;
     }
-    return switch (event.kindType) {
-      'messageUpdated' => _emptyToNull(
-        _stringFromMap(event.payload['message'], 'sessionId'),
-      ),
-      'messagePartUpdated' => _emptyToNull(
-        _stringFromMap(event.payload['part'], 'sessionId'),
-      ),
-      'messagePartDelta' => _emptyToNull(
-        _stringFromMap(event.payload['delta'], 'sessionId'),
-      ),
-      'turnChanged' => _emptyToNull(
-        _stringFromMap(event.payload['turn'], 'sessionId'),
-      ),
-      'interactionChanged' => _emptyToNull(
-        _stringFromMap(
-          _nested(event.payload['event'], 'interaction'),
-          'sessionId',
-        ),
-      ),
-      'agentChanged' => _emptyToNull(
-        _stringFromMap(event.payload['agent'], 'sessionId'),
-      ),
-      'agentTimelineChanged' => _emptyToNull(
-        _stringFromMap(event.payload['event'], 'sessionId'),
-      ),
-      'sessionRuntimeChanged' => _emptyToNull(
-        _stringFromMap(event.payload['runtime'], 'sessionId'),
-      ),
-      _ => null,
-    };
+    return event.payload.sessionId;
   }
 
   List<RoleSettingsView> _replaceRole(
@@ -1151,7 +1202,11 @@ class StudioController extends AsyncNotifier<StudioState> {
 
   bool _canAppendDeltaField(String field) {
     return switch (field) {
-      'text' || 'planContent' || 'tool.arguments' || 'tool.result' => true,
+      'text' ||
+      'reasoning.summary' ||
+      'planContent' ||
+      'tool.arguments' ||
+      'tool.result' => true,
       _ => false,
     };
   }
@@ -1159,11 +1214,24 @@ class StudioController extends AsyncNotifier<StudioState> {
   String _snapshotField(TimelinePartSnapshot snapshot, String field) {
     return switch (field) {
       'text' => snapshot.text,
+      'reasoning.summary' => snapshot.text,
       'planContent' => snapshot.planContent ?? snapshot.text,
       'tool.arguments' => snapshot.tool?.arguments ?? '',
       'tool.result' => snapshot.tool?.result ?? '',
       _ => '',
     };
+  }
+
+  bool _snapshotCoversOverlay(
+    TimelinePartSnapshot snapshot,
+    TimelinePartOverlay overlay,
+  ) {
+    if (_isTerminalPartStatus(snapshot.status)) {
+      return true;
+    }
+    return overlay.lastRevisions.values.every(
+      (revision) => revision <= snapshot.revision,
+    );
   }
 
   bool _isTerminalPartStatus(String status) {
@@ -1176,83 +1244,5 @@ class StudioController extends AsyncNotifier<StudioState> {
       'budgetLimited' => true,
       _ => false,
     };
-  }
-
-  McpServerSettingsView _mcpServerFromHealth(Object? value) {
-    final json = _map(value);
-    final command = _stringFromMap(json, 'command');
-    final url = _stringFromMap(json, 'url');
-    final endpoint = _stringFromMap(json, 'endpoint');
-    return McpServerSettingsView(
-      id: _stringFromMap(json, 'id'),
-      transport: _stringFromMap(json, 'transport'),
-      endpoint: endpoint.isNotEmpty ? endpoint : (url.isEmpty ? command : url),
-      enabled: _boolFromMap(json, 'enabled'),
-      status: _stringFromMap(json, 'statusKind').isEmpty
-          ? _stringFromMap(json, 'availabilityKind')
-          : _stringFromMap(json, 'statusKind'),
-    );
-  }
-
-  Map<String, Object?> _map(Object? value) {
-    if (value is Map<String, Object?>) {
-      return value;
-    }
-    if (value is Map) {
-      return value.map((key, value) => MapEntry(key.toString(), value));
-    }
-    return const {};
-  }
-
-  List<Object?> _list(Object? value) {
-    if (value is List) {
-      return value.cast<Object?>();
-    }
-    return const [];
-  }
-
-  List<String> _stringList(Object? value) {
-    return _list(value)
-        .map((item) => item?.toString() ?? '')
-        .where((item) => item.isNotEmpty)
-        .toList();
-  }
-
-  bool _boolFromMap(Object? value, String key) {
-    final nested = _nested(value, key);
-    if (nested is bool) {
-      return nested;
-    }
-    return nested?.toString() == 'true';
-  }
-
-  int _intFromMap(Object? value, String key) {
-    final nested = _nested(value, key);
-    if (nested is int) {
-      return nested;
-    }
-    return int.tryParse(nested?.toString() ?? '') ?? 0;
-  }
-
-  String? _emptyToNull(String value) {
-    return value.isEmpty ? null : value;
-  }
-
-  Object? _nested(Object? value, String key) {
-    if (value is Map<String, Object?>) {
-      return value[key];
-    }
-    if (value is Map) {
-      return value[key];
-    }
-    return null;
-  }
-
-  String _stringFromMap(Object? value, String key, {String fallback = ''}) {
-    final nested = _nested(value, key);
-    if (nested == null) {
-      return fallback;
-    }
-    return nested is String ? nested : nested.toString();
   }
 }

@@ -72,24 +72,20 @@ class FrbStudioApi implements StudioApi {
   @override
   Future<StudioState> bootstrap() async {
     await _ensureReady();
-    return studioStateFromBootstrapJson(
-      _decodeJson((await frb.bootstrapStudio()).json),
-    );
+    return studioStateFromFrbSnapshot(await frb.bootstrapStudio());
   }
 
   @override
   Future<StudioState> openProject(String path) async {
     await _ensureReady();
-    return studioStateFromBootstrapJson(
-      _decodeJson((await frb.openProject(path: path)).json),
-    );
+    return studioStateFromFrbSnapshot(await frb.openProject(path: path));
   }
 
   @override
   Future<StudioState> selectProject(String projectId) async {
     await _ensureReady();
-    return studioStateFromBootstrapJson(
-      _decodeJson((await frb.selectProject(projectId: projectId)).json),
+    return studioStateFromFrbSnapshot(
+      await frb.selectProject(projectId: projectId),
     );
   }
 
@@ -99,12 +95,10 @@ class FrbStudioApi implements StudioApi {
     String? selectedProjectId,
   }) async {
     await _ensureReady();
-    return studioStateFromBootstrapJson(
-      _decodeJson(
-        (await frb.archiveProject(
-          projectId: projectId,
-          selectedProjectId: selectedProjectId,
-        )).json,
+    return studioStateFromFrbSnapshot(
+      await frb.archiveProject(
+        projectId: projectId,
+        selectedProjectId: selectedProjectId,
       ),
     );
   }
@@ -112,10 +106,8 @@ class FrbStudioApi implements StudioApi {
   @override
   Future<StudioState> createSession(String projectId, {String? title}) async {
     await _ensureReady();
-    return studioStateFromBootstrapJson(
-      _decodeJson(
-        (await frb.createSession(projectId: projectId, title: title)).json,
-      ),
+    return studioStateFromFrbSnapshot(
+      await frb.createSession(projectId: projectId, title: title),
     );
   }
 
@@ -125,12 +117,10 @@ class FrbStudioApi implements StudioApi {
     String? selectedSessionId,
   }) async {
     await _ensureReady();
-    return studioStateFromBootstrapJson(
-      _decodeJson(
-        (await frb.archiveSession(
-          sessionId: sessionId,
-          selectedSessionId: selectedSessionId,
-        )).json,
+    return studioStateFromFrbSnapshot(
+      await frb.archiveSession(
+        sessionId: sessionId,
+        selectedSessionId: selectedSessionId,
       ),
     );
   }
@@ -138,12 +128,10 @@ class FrbStudioApi implements StudioApi {
   @override
   Future<StudioState> setSessionMode(String sessionId, CompileMode mode) async {
     await _ensureReady();
-    return studioStateFromSessionJson(
-      _decodeJson(
-        (await frb.setSessionMode(
-          sessionId: sessionId,
-          mode: _compileModeLabel(mode),
-        )).json,
+    return studioStateFromFrbSession(
+      await frb.setSessionMode(
+        sessionId: sessionId,
+        mode: _compileModeLabel(mode),
       ),
     );
   }
@@ -157,15 +145,13 @@ class FrbStudioApi implements StudioApi {
     String? selectedSessionId,
   }) async {
     await _ensureReady();
-    return studioStateFromBootstrapJson(
-      _decodeJson(
-        (await frb.setModelRole(
-          roleKey: roleKey,
-          providerId: providerId,
-          model: model,
-          effort: effort,
-          selectedSessionId: selectedSessionId,
-        )).json,
+    return studioStateFromFrbSnapshot(
+      await frb.setModelRole(
+        roleKey: roleKey,
+        providerId: providerId,
+        model: model,
+        effort: effort,
+        selectedSessionId: selectedSessionId,
       ),
     );
   }
@@ -173,8 +159,8 @@ class FrbStudioApi implements StudioApi {
   @override
   Future<StudioState> loadSessionState(String sessionId) async {
     await _ensureReady();
-    return studioStateFromSessionJson(
-      _decodeJson((await frb.loadSessionState(sessionId: sessionId)).json),
+    return studioStateFromFrbSession(
+      await frb.loadSessionState(sessionId: sessionId),
     );
   }
 
@@ -185,14 +171,12 @@ class FrbStudioApi implements StudioApi {
     int limit = 500,
   }) async {
     await _ensureReady();
-    final response = _decodeJson(
-      (await frb.loadStudioEvents(
-        sessionId: sessionId,
-        afterSequence: afterSequence,
-        limit: limit,
-      )).json,
+    final response = await frb.loadStudioEvents(
+      sessionId: sessionId,
+      afterSequence: afterSequence,
+      limit: limit,
     );
-    return _list(response['events']).map(studioBridgeEventFromJson).toList();
+    return response.events.map(StudioBridgeEvent.fromFrb).toList();
   }
 
   @override
@@ -252,12 +236,8 @@ class FrbStudioApi implements StudioApi {
     Map<String, Object?> settings,
   ) async {
     await _ensureReady();
-    return studioStateFromBootstrapJson(
-      _decodeJson(
-        (await frb.saveProviderSettings(
-          settingsJson: jsonEncode(settings),
-        )).json,
-      ),
+    return studioStateFromFrbSnapshot(
+      await frb.saveProviderSettings(settingsJson: jsonEncode(settings)),
     );
   }
 
@@ -266,63 +246,48 @@ class FrbStudioApi implements StudioApi {
     Map<String, Object?> settings,
   ) async {
     await _ensureReady();
-    return studioStateFromBootstrapJson(
-      _decodeJson(
-        (await frb.saveInstructionsSettings(
-          settingsJson: jsonEncode(settings),
-        )).json,
-      ),
+    return studioStateFromFrbSnapshot(
+      await frb.saveInstructionsSettings(settingsJson: jsonEncode(settings)),
     );
   }
 
   @override
   Future<StudioState> saveSkillsSettings(Map<String, Object?> settings) async {
     await _ensureReady();
-    return studioStateFromBootstrapJson(
-      _decodeJson(
-        (await frb.saveSkillsSettings(settingsJson: jsonEncode(settings))).json,
-      ),
+    return studioStateFromFrbSnapshot(
+      await frb.saveSkillsSettings(settingsJson: jsonEncode(settings)),
     );
   }
 
   @override
   Future<StudioState> saveMcpSettings(Map<String, Object?> settings) async {
     await _ensureReady();
-    return studioStateFromBootstrapJson(
-      _decodeJson(
-        (await frb.saveMcpSettings(settingsJson: jsonEncode(settings))).json,
-      ),
+    return studioStateFromFrbSnapshot(
+      await frb.saveMcpSettings(settingsJson: jsonEncode(settings)),
     );
   }
 
   @override
   Future<StudioState> saveGeneralSettings(Map<String, Object?> settings) async {
     await _ensureReady();
-    return studioStateFromBootstrapJson(
-      _decodeJson(
-        (await frb.saveGeneralSettings(
-          settingsJson: jsonEncode(settings),
-        )).json,
-      ),
+    return studioStateFromFrbSnapshot(
+      await frb.saveGeneralSettings(settingsJson: jsonEncode(settings)),
     );
   }
 
   @override
   Future<List<ProviderUsageView>> loadProviderUsages() async {
     await _ensureReady();
-    final json = _decodeJson((await frb.loadProviderUsages()).json);
-    return _list(json['usages']).map(providerUsageFromJson).toList();
+    final response = await frb.loadProviderUsages();
+    return response.usages.map(_providerUsageFromFrb).toList();
   }
 
   @override
   Future<List<String>> listDiscoveredSkills(String projectId) async {
     await _ensureReady();
-    final json = _decodeJson(
-      (await frb.listDiscoveredSkills(projectId: projectId)).json,
-    );
-    return _list(json['skills'])
-        .map(_map)
-        .map((skill) => _string(skill['name']))
+    final response = await frb.listDiscoveredSkills(projectId: projectId);
+    return response.skills
+        .map((skill) => skill.name)
         .where((name) => name.isNotEmpty)
         .toList()
       ..sort();
@@ -343,7 +308,6 @@ class FrbStudioApi implements StudioApi {
 
 class StudioBridgeEvent {
   const StudioBridgeEvent({
-    required this.kindType,
     required this.payload,
     this.eventId,
     this.sessionId,
@@ -359,8 +323,7 @@ class StudioBridgeEvent {
       turnId: event.turnId,
       sequence: event.sequence,
       createdAt: _dateFromUnix(event.createdAt),
-      kindType: event.kindType,
-      payload: _decodeJson(event.payloadJson),
+      payload: _bridgePayloadFromFrb(event.payload, sequence: event.sequence),
     );
   }
 
@@ -369,25 +332,559 @@ class StudioBridgeEvent {
   final String? turnId;
   final BigInt? sequence;
   final DateTime? createdAt;
-  final String kindType;
-  final Map<String, Object?> payload;
+  final StudioBridgeEventPayload payload;
 }
 
-StudioBridgeEvent studioBridgeEventFromJson(Object? value) {
-  final map = _map(value);
-  final kind = _map(map['kind']);
-  final type = _string(kind['type']).isNotEmpty
-      ? _string(kind['type'])
-      : _string(map['kindType']);
-  return StudioBridgeEvent(
-    eventId: _nullableString(map['eventId']),
-    sessionId: _nullableString(map['sessionId']),
-    turnId: _nullableString(map['turnId']),
-    sequence: _bigInt(map['sequence']),
-    createdAt: _dateFromUnix(_int(map['createdAt'])),
-    kindType: type,
-    payload: kind.isEmpty ? map : kind,
+sealed class StudioBridgeEventPayload {
+  const StudioBridgeEventPayload();
+
+  String? get sessionId => null;
+}
+
+final class TurnChangedPayload extends StudioBridgeEventPayload {
+  const TurnChangedPayload({required this.turn});
+
+  final StudioTurnView turn;
+
+  @override
+  String get sessionId => turn.sessionId;
+}
+
+final class MessageUpdatedPayload extends StudioBridgeEventPayload {
+  const MessageUpdatedPayload({required this.message});
+
+  final TimelineMessage message;
+
+  @override
+  String get sessionId => message.sessionId;
+}
+
+final class MessageRemovedPayload extends StudioBridgeEventPayload {
+  const MessageRemovedPayload({required this.messageId});
+
+  final String messageId;
+}
+
+final class MessagePartUpdatedPayload extends StudioBridgeEventPayload {
+  const MessagePartUpdatedPayload({required this.part});
+
+  final TimelinePartSnapshot part;
+
+  @override
+  String get sessionId => part.sessionId;
+}
+
+final class MessagePartRemovedPayload extends StudioBridgeEventPayload {
+  const MessagePartRemovedPayload({
+    required this.messageId,
+    required this.partId,
+  });
+
+  final String messageId;
+  final String partId;
+}
+
+final class MessagePartDeltaPayload extends StudioBridgeEventPayload {
+  const MessagePartDeltaPayload({required this.delta});
+
+  final TimelinePartDelta delta;
+
+  @override
+  String get sessionId => delta.sessionId;
+}
+
+final class InteractionChangedPayload extends StudioBridgeEventPayload {
+  const InteractionChangedPayload({
+    required this.interaction,
+    required this.status,
+  });
+
+  final PendingInteraction interaction;
+  final String status;
+
+  @override
+  String get sessionId => interaction.sessionId;
+}
+
+final class AgentChangedPayload extends StudioBridgeEventPayload {
+  const AgentChangedPayload({required this.agent});
+
+  final StudioAgentView agent;
+
+  @override
+  String get sessionId => agent.sessionId;
+}
+
+final class AgentTimelineChangedPayload extends StudioBridgeEventPayload {
+  const AgentTimelineChangedPayload({required this.event});
+
+  final TimelineAgentEvent event;
+
+  @override
+  String get sessionId => event.sessionId;
+}
+
+final class SessionRuntimeChangedPayload extends StudioBridgeEventPayload {
+  const SessionRuntimeChangedPayload({
+    required this.runtime,
+    required this.sessionId,
+  });
+
+  final SessionRuntimeView runtime;
+
+  @override
+  final String sessionId;
+}
+
+final class SkillActivatedPayload extends StudioBridgeEventPayload {
+  const SkillActivatedPayload({required this.name});
+
+  final String name;
+}
+
+final class PlanLifecycleChangedPayload extends StudioBridgeEventPayload {
+  const PlanLifecycleChangedPayload({required this.state});
+
+  final String state;
+}
+
+final class SessionListChangedPayload extends StudioBridgeEventPayload {
+  const SessionListChangedPayload({
+    required this.projectId,
+    required this.sessions,
+  });
+
+  final String? projectId;
+  final List<StudioSession> sessions;
+}
+
+final class McpHealthChangedPayload extends StudioBridgeEventPayload {
+  const McpHealthChangedPayload({
+    required this.activeMcpServers,
+    required this.servers,
+  });
+
+  final List<String> activeMcpServers;
+  final List<McpServerSettingsView> servers;
+}
+
+final class LspHealthChangedPayload extends StudioBridgeEventPayload {
+  const LspHealthChangedPayload({required this.activeLspServers});
+
+  final List<String> activeLspServers;
+}
+
+final class StalePayload extends StudioBridgeEventPayload {
+  const StalePayload({required this.laggedEvents});
+
+  final int laggedEvents;
+}
+
+final class SettingsDraftSavedPayload extends StudioBridgeEventPayload {
+  const SettingsDraftSavedPayload({required this.section, required this.saved});
+
+  final String section;
+  final bool saved;
+}
+
+class StudioTurnView {
+  const StudioTurnView({required this.sessionId, required this.status});
+
+  final String sessionId;
+  final String status;
+}
+
+class StudioAgentView {
+  const StudioAgentView({required this.sessionId});
+
+  final String sessionId;
+}
+
+StudioBridgeEventPayload _bridgePayloadFromFrb(
+  frb.BridgeEventPayload payload, {
+  required BigInt sequence,
+}) {
+  final itemSequence = sequence.toInt();
+  return switch (payload) {
+    frb.BridgeEventPayload_TurnChanged(:final turn) => TurnChangedPayload(
+      turn: StudioTurnView(sessionId: turn.sessionId, status: turn.status),
+    ),
+    frb.BridgeEventPayload_MessageUpdated(:final message) =>
+      MessageUpdatedPayload(
+        message: _timelineMessageFromFrb(message, sequence: itemSequence),
+      ),
+    frb.BridgeEventPayload_MessageRemoved(:final messageId) =>
+      MessageRemovedPayload(messageId: messageId),
+    frb.BridgeEventPayload_MessagePartUpdated(:final part_) =>
+      MessagePartUpdatedPayload(
+        part: _timelinePartSnapshotFromFrb(part_, sequence: itemSequence),
+      ),
+    frb.BridgeEventPayload_MessagePartRemoved(
+      :final messageId,
+      :final partId,
+    ) =>
+      MessagePartRemovedPayload(messageId: messageId, partId: partId),
+    frb.BridgeEventPayload_MessagePartDelta(:final delta) =>
+      MessagePartDeltaPayload(delta: _timelinePartDeltaFromFrb(delta)),
+    frb.BridgeEventPayload_InteractionChanged(:final event) =>
+      _interactionChangedPayloadFromFrb(event),
+    frb.BridgeEventPayload_AgentChanged(:final agent) => AgentChangedPayload(
+      agent: StudioAgentView(sessionId: agent.sessionId),
+    ),
+    frb.BridgeEventPayload_AgentTimelineChanged(:final event) =>
+      AgentTimelineChangedPayload(event: _timelineAgentEventFromFrb(event)),
+    frb.BridgeEventPayload_SessionRuntimeChanged(:final runtime) =>
+      SessionRuntimeChangedPayload(
+        runtime: _sessionRuntimeFromFrb(runtime),
+        sessionId: runtime.sessionId,
+      ),
+    frb.BridgeEventPayload_SkillActivated(:final activation) =>
+      SkillActivatedPayload(name: activation.name),
+    frb.BridgeEventPayload_PlanLifecycleChanged(:final event) =>
+      PlanLifecycleChangedPayload(state: event.state),
+    frb.BridgeEventPayload_SessionHandoffChanged() => throw FormatException(
+      'sessionHandoffChanged is not a Flutter bridge event',
+    ),
+    frb.BridgeEventPayload_SessionListChanged(
+      :final projectId,
+      :final sessions,
+    ) =>
+      SessionListChangedPayload(
+        projectId: _emptyToNull(projectId),
+        sessions: sessions.map(_sessionFromFrb).toList(),
+      ),
+    frb.BridgeEventPayload_McpHealthChanged(:final health) =>
+      McpHealthChangedPayload(
+        activeMcpServers: health.activeMcpServers,
+        servers: health.mcpServers.map(_mcpServerFromFrb).toList(),
+      ),
+    frb.BridgeEventPayload_LspHealthChanged(:final health) =>
+      LspHealthChangedPayload(activeLspServers: health.activeLspServers),
+    frb.BridgeEventPayload_Stale(:final laggedEvents) => StalePayload(
+      laggedEvents: laggedEvents.toInt(),
+    ),
+  };
+}
+
+TimelineMessage _timelineMessageFromFrb(
+  frb.BridgeStudioMessageDto message, {
+  required int sequence,
+}) {
+  return TimelineMessage(
+    id: message.messageId,
+    sessionId: message.sessionId,
+    role: message.role.isEmpty ? 'assistant' : message.role,
+    createdAt: _dateFromUnix(message.createdAt),
+    sequence: sequence,
   );
+}
+
+TimelinePartSnapshot _timelinePartSnapshotFromFrb(
+  frb.BridgeStudioPartDto part, {
+  required int sequence,
+}) {
+  return TimelinePartSnapshot(
+    id: part.partId,
+    messageId: part.messageId,
+    sessionId: part.sessionId,
+    turnId: part.turnId,
+    type: _partType(part.partType),
+    order: part.order.toInt(),
+    revision: part.revision.toInt(),
+    sequence: sequence,
+    text: _frbPartText(part),
+    status: part.status.isEmpty ? 'completed' : part.status,
+    createdAt: _dateFromUnix(part.createdAt),
+    updatedAt: _dateFromUnix(part.updatedAt),
+    completedAt: part.completedAt == null
+        ? null
+        : _dateFromUnix(part.completedAt!),
+    error: part.error,
+    textChannel: _textChannel(part.textChannel),
+    tool: _toolPartFromFrb(part.tool),
+    agent: _agentPartFromFrb(part.agent),
+    planContent: part.plan?.content,
+    synthetic: part.synthetic,
+    ignored: part.ignored,
+  );
+}
+
+String _frbPartText(frb.BridgeStudioPartDto part) {
+  if (part.text.isNotEmpty) {
+    return part.text;
+  }
+  return switch (_partType(part.partType)) {
+    TimelinePartType.tool => [
+      part.tool?.arguments,
+      part.tool?.result,
+    ].whereType<String>().where((value) => value.isNotEmpty).join('\n'),
+    TimelinePartType.plan => part.plan?.content ?? '',
+    TimelinePartType.agent => part.agent?.summary ?? part.agent?.task ?? '',
+    TimelinePartType.reasoning || TimelinePartType.text => '',
+  };
+}
+
+TimelineToolPart? _toolPartFromFrb(frb.BridgeStudioToolPartDto? tool) {
+  if (tool == null) {
+    return null;
+  }
+  return TimelineToolPart(
+    toolCallId: tool.toolCallId,
+    callId: tool.callId,
+    providerItemId: tool.providerItemId,
+    name: tool.name.isEmpty ? 'tool' : tool.name,
+    arguments: tool.arguments,
+    result: tool.result,
+    exitCode: tool.exitCode,
+    timedOut: tool.timedOut,
+    workingDirectory: tool.workingDirectory,
+    denialReason: tool.denialReason,
+  );
+}
+
+TimelineAgentPart? _agentPartFromFrb(frb.BridgeStudioAgentPartDto? agent) {
+  if (agent == null) {
+    return null;
+  }
+  return TimelineAgentPart(
+    id: agent.id,
+    path: agent.path,
+    parentPath: agent.parentPath,
+    role: agent.role.isEmpty ? 'agent' : agent.role,
+    task: agent.task,
+    status: agent.status,
+    summary: agent.summary,
+    depth: agent.depth,
+    error: agent.error,
+    reason: agent.reason,
+  );
+}
+
+TimelinePartDelta _timelinePartDeltaFromFrb(
+  frb.BridgeStudioPartDeltaDto delta,
+) {
+  return TimelinePartDelta(
+    sessionId: delta.sessionId,
+    messageId: delta.messageId,
+    partId: delta.partId,
+    revision: delta.revision.toInt(),
+    field: _timelineDeltaField(delta.field),
+    delta: delta.delta,
+    chunkIndex: delta.chunkIndex,
+  );
+}
+
+InteractionChangedPayload _interactionChangedPayloadFromFrb(
+  frb.BridgeInteractionChangedDto event,
+) {
+  final payload = _interactionPayloadFromFrb(event.payload);
+  final kind = _interactionKind(event.kind);
+  final interaction = PendingInteraction(
+    id: event.interactionId,
+    sessionId: event.sessionId,
+    kind: kind,
+    title: _interactionTitle(kind, payload),
+    body: _interactionBody(kind, payload),
+    payload: payload,
+  );
+  return InteractionChangedPayload(
+    interaction: interaction,
+    status: event.status,
+  );
+}
+
+TimelineAgentEvent _timelineAgentEventFromFrb(
+  frb.BridgeAgentTimelineEventDto event,
+) {
+  final payload = _agentTimelinePayloadFromFrb(event.payload);
+  return timelineAgentEventFromPayload(
+    payload,
+    eventId: event.eventId,
+    sessionId: event.sessionId,
+    sequence: event.sequence.toInt(),
+    createdAt: _dateFromUnix(event.createdAt),
+    kindType: _string(payload['type']),
+  );
+}
+
+Map<String, Object?> _agentTimelinePayloadFromFrb(
+  frb.BridgeAgentTimelinePayloadDto payload,
+) {
+  return switch (payload) {
+    frb.BridgeAgentTimelinePayloadDto_SpawnBegin(
+      :final callId,
+      :final senderPath,
+      :final taskName,
+      :final prompt,
+      :final role,
+      :final model,
+      :final reasoningEffort,
+    ) =>
+      {
+        'type': 'spawnBegin',
+        'callId': callId,
+        'senderPath': senderPath,
+        'taskName': taskName,
+        'prompt': prompt,
+        'role': role,
+        'model': ?model,
+        'reasoningEffort': ?reasoningEffort,
+      },
+    frb.BridgeAgentTimelinePayloadDto_SpawnEnd(
+      :final callId,
+      :final senderPath,
+      :final agentId,
+      :final path,
+      :final role,
+      :final status,
+      :final prompt,
+      :final error,
+    ) =>
+      {
+        'type': 'spawnEnd',
+        'callId': callId,
+        'senderPath': senderPath,
+        'agentId': ?agentId,
+        'path': ?path,
+        'role': ?role,
+        'status': status,
+        'prompt': prompt,
+        'error': ?error,
+      },
+    frb.BridgeAgentTimelinePayloadDto_InteractionBegin(
+      :final callId,
+      :final senderPath,
+      :final receiverPath,
+      :final prompt,
+    ) =>
+      {
+        'type': 'interactionBegin',
+        'callId': callId,
+        'senderPath': senderPath,
+        'receiverPath': receiverPath,
+        'prompt': prompt,
+      },
+    frb.BridgeAgentTimelinePayloadDto_InteractionEnd(
+      :final callId,
+      :final senderPath,
+      :final receiverPath,
+      :final status,
+      :final prompt,
+      :final error,
+    ) =>
+      {
+        'type': 'interactionEnd',
+        'callId': callId,
+        'senderPath': senderPath,
+        'receiverPath': receiverPath,
+        'status': status,
+        'prompt': prompt,
+        'error': ?error,
+      },
+    frb.BridgeAgentTimelinePayloadDto_WaitingBegin(
+      :final callId,
+      :final senderPath,
+    ) =>
+      {'type': 'waitingBegin', 'callId': callId, 'senderPath': senderPath},
+    frb.BridgeAgentTimelinePayloadDto_WaitingEnd(
+      :final callId,
+      :final senderPath,
+      :final timedOut,
+    ) =>
+      {
+        'type': 'waitingEnd',
+        'callId': callId,
+        'senderPath': senderPath,
+        'timedOut': timedOut,
+      },
+    frb.BridgeAgentTimelinePayloadDto_CloseBegin(
+      :final callId,
+      :final senderPath,
+      :final receiverPath,
+    ) =>
+      {
+        'type': 'closeBegin',
+        'callId': callId,
+        'senderPath': senderPath,
+        'receiverPath': receiverPath,
+      },
+    frb.BridgeAgentTimelinePayloadDto_CloseEnd(
+      :final callId,
+      :final senderPath,
+      :final receiverPath,
+      :final status,
+      :final error,
+    ) =>
+      {
+        'type': 'closeEnd',
+        'callId': callId,
+        'senderPath': senderPath,
+        'receiverPath': receiverPath,
+        'status': status,
+        'error': ?error,
+      },
+    frb.BridgeAgentTimelinePayloadDto_Unknown(:final kindType) => {
+      'type': kindType,
+    },
+  };
+}
+
+SessionRuntimeView _sessionRuntimeFromFrb(frb.BridgeSessionRuntimeDto runtime) {
+  return _sessionRuntimeFromFrbWithAgents(runtime, agentCount: 0);
+}
+
+SessionRuntimeView _sessionRuntimeFromFrbWithAgents(
+  frb.BridgeSessionRuntimeDto runtime, {
+  required int agentCount,
+}) {
+  return SessionRuntimeView(
+    model: runtime.model,
+    contextTokens: runtime.latestContextTokens.toInt(),
+    contextWindow: runtime.contextWindow?.toInt() ?? 0,
+    totalTokens: runtime.totalTokens.toInt(),
+    costLabel: _costLabel(
+      runtime.estimatedCosts
+          .map((cost) => {'currency': cost.currency, 'amount': cost.amount})
+          .toList(),
+      runtime.hasUnpricedUsage,
+    ),
+    activeSkills: runtime.activeSkills,
+    activeMcpServers: runtime.activeMcpServers,
+    activeLspServers: runtime.activeLspServers,
+    agentCount: agentCount,
+  );
+}
+
+StudioProject _projectFromFrb(frb.ProjectDto project) {
+  return StudioProject(id: project.id, name: project.name, path: project.path);
+}
+
+StudioSession _sessionFromFrb(frb.SessionDto session) {
+  return StudioSession(
+    id: session.id,
+    projectId: session.projectId,
+    title: session.title,
+    mode: _compileMode(session.mode),
+    updatedAt: _dateFromUnix(session.updatedAt),
+  );
+}
+
+McpServerSettingsView _mcpServerFromFrb(frb.BridgeMcpServerDto server) {
+  return McpServerSettingsView(
+    id: server.id,
+    transport: server.transport,
+    endpoint: server.endpoint.isNotEmpty
+        ? server.endpoint
+        : (server.url ?? server.command ?? ''),
+    enabled: server.enabled,
+    status: server.statusKind.isEmpty
+        ? server.availabilityKind
+        : server.statusKind,
+  );
+}
+
+String? _emptyToNull(String value) {
+  return value.isEmpty ? null : value;
 }
 
 StudioState studioStateFromBootstrapJson(Map<String, Object?> json) {
@@ -411,22 +908,171 @@ StudioState studioStateFromSessionJson(Map<String, Object?> json) {
   );
 }
 
+PendingInteraction _pendingInteractionFromFrb(
+  frb.BridgeInteractionChangedDto event,
+) {
+  final payload = _interactionPayloadFromFrb(event.payload);
+  final kind = _interactionKind(event.kind);
+  return PendingInteraction(
+    id: event.interactionId,
+    sessionId: event.sessionId,
+    kind: kind,
+    title: _interactionTitle(kind, payload),
+    body: _interactionBody(kind, payload),
+    payload: payload,
+  );
+}
+
+Map<String, Object?> _interactionPayloadFromFrb(
+  frb.BridgeInteractionPayloadDto payload,
+) {
+  return switch (payload) {
+    frb.BridgeInteractionPayloadDto_UserInput(:final questions) => {
+      'type': 'userInput',
+      'questions': questions
+          .map(
+            (question) => {
+              'id': question.id,
+              'header': question.header,
+              'question': question.question,
+              'prompt': question.question,
+              'isOther': question.isOther,
+              'isSecret': question.isSecret,
+              if (question.options != null)
+                'options': question.options!
+                    .map(
+                      (option) => {
+                        'label': option.label,
+                        'description': option.description,
+                      },
+                    )
+                    .toList(),
+            },
+          )
+          .toList(),
+    },
+    frb.BridgeInteractionPayloadDto_ToolApproval(
+      :final name,
+      :final argumentsJson,
+      :final workingDirectory,
+      :final parentAgentId,
+    ) =>
+      {
+        'type': 'toolApproval',
+        'name': name,
+        'arguments': _tryDecodeJsonValue(argumentsJson),
+        'workingDirectory': ?workingDirectory,
+        'parentAgentId': ?parentAgentId,
+      },
+    frb.BridgeInteractionPayloadDto_PlanConfirmation(
+      :final planId,
+      :final content,
+    ) =>
+      {'type': 'planConfirmation', 'planId': planId, 'content': content},
+  };
+}
+
+Map<String, Map<String, TimelineAgentEvent>> _agentTimelineEventsFromTyped(
+  Iterable<TimelineAgentEvent> events,
+) {
+  final bySession = <String, Map<String, TimelineAgentEvent>>{};
+  for (final event in events) {
+    if (event.eventId.isEmpty || event.sessionId.isEmpty) {
+      continue;
+    }
+    bySession.putIfAbsent(event.sessionId, () => {})[event.eventId] = event;
+  }
+  return bySession;
+}
+
+StudioState studioStateFromFrbSnapshot(frb.BridgeStudioSnapshotResponse value) {
+  return _stateFromTypedSnapshot(
+    projects: value.projects.map(_projectFromFrb).toList(),
+    sessions: value.sessions.map(_sessionFromFrb).toList(),
+    selectedProjectId: value.selectedProjectId,
+    selectedSessionId: value.selectedSessionId,
+    messages: const [],
+    parts: const [],
+    agentEvents: value.agentEvents.map(_timelineAgentEventFromFrb).toList(),
+    agents: value.agents,
+    interactions: value.interactions
+        .map(_pendingInteractionFromFrb)
+        .where((interaction) => interaction.id.isNotEmpty)
+        .toList(),
+    runtime: value.sessionRuntime == null
+        ? _emptyRuntimeView()
+        : _sessionRuntimeFromFrbWithAgents(
+            value.sessionRuntime!,
+            agentCount: value.agents.length,
+          ),
+    config: _decodeJson(value.configJson),
+    generalSettings: _decodeJson(value.generalSettingsJson),
+    eventNextSequence: 0,
+  );
+}
+
+StudioState studioStateFromFrbSession(frb.BridgeSessionStateResponse value) {
+  return _stateFromTypedSnapshot(
+    projects: const [],
+    sessions: value.sessions.map(_sessionFromFrb).toList(),
+    selectedProjectId: value.session.projectId,
+    selectedSessionId: value.sessionId.isEmpty
+        ? value.session.id
+        : value.sessionId,
+    messages: value.messages
+        .map(
+          (item) => _timelineMessageFromFrb(
+            item.message,
+            sequence: item.sequence.toInt(),
+          ),
+        )
+        .toList(),
+    parts: value.parts
+        .map(
+          (item) => _timelinePartSnapshotFromFrb(
+            item.part_,
+            sequence: item.sequence.toInt(),
+          ),
+        )
+        .toList(),
+    events: value.events.map(StudioBridgeEvent.fromFrb).toList(),
+    agentEvents: value.agentEvents.map(_timelineAgentEventFromFrb).toList(),
+    agents: value.agents,
+    interactions: value.interactions
+        .map(_pendingInteractionFromFrb)
+        .where((interaction) => interaction.id.isNotEmpty)
+        .toList(),
+    runtime: value.sessionRuntime == null
+        ? _emptyRuntimeView()
+        : _sessionRuntimeFromFrbWithAgents(
+            value.sessionRuntime!,
+            agentCount: value.agents.length,
+          ),
+    config: const {},
+    generalSettings: const {},
+    eventNextSequence: value.eventNextSequence.toInt(),
+  );
+}
+
 List<StudioSession> studioSessionsFromJson(Object? value) {
   return _list(value).map(_sessionFromJson).toList();
 }
 
-TimelineMessage timelineMessageFromJson(Object? value) {
+TimelineMessage timelineMessageFromJson(Object? value, {int sequence = 0}) {
   final json = _map(value);
   return TimelineMessage(
     id: _string(json['messageId'], fallback: _string(json['id'])),
     sessionId: _string(json['sessionId']),
     role: _string(json['role'], fallback: 'assistant'),
     createdAt: _dateFromUnix(_int(json['createdAt'])),
-    parts: const [],
+    sequence: sequence,
   );
 }
 
-TimelinePartSnapshot timelinePartSnapshotFromJson(Object? value) {
+TimelinePartSnapshot timelinePartSnapshotFromJson(
+  Object? value, {
+  int sequence = 0,
+}) {
   final json = _map(value);
   final type = _partType(
     _string(json['partType'], fallback: _string(json['type'])),
@@ -439,6 +1085,7 @@ TimelinePartSnapshot timelinePartSnapshotFromJson(Object? value) {
     type: type,
     order: _int(json['order']),
     revision: _int(json['revision']),
+    sequence: sequence,
     text: _partText(json, type),
     status: _string(json['status'], fallback: 'completed'),
     createdAt: _dateFromUnix(_int(json['createdAt'])),
@@ -456,43 +1103,6 @@ TimelinePartSnapshot timelinePartSnapshotFromJson(Object? value) {
   );
 }
 
-TimelinePart timelinePartFromSnapshot(
-  TimelinePartSnapshot snapshot, {
-  TimelinePartOverlay? overlay,
-}) {
-  final text = overlay?.values['text'] ?? snapshot.text;
-  final planContent = overlay?.values['planContent'] ?? snapshot.planContent;
-  final snapshotTool = snapshot.tool;
-  final tool = snapshotTool?.copyWith(
-    arguments: overlay?.values['tool.arguments'] ?? snapshotTool.arguments,
-    result: overlay?.values['tool.result'] ?? snapshotTool.result,
-  );
-  final visibleText = switch (snapshot.type) {
-    TimelinePartType.plan => planContent ?? text,
-    TimelinePartType.tool => _toolActivityText(tool, snapshot.status),
-    TimelinePartType.agent =>
-      snapshot.agent?.summary ?? snapshot.agent?.task ?? text,
-    TimelinePartType.reasoning => '',
-    TimelinePartType.text => text,
-  };
-  return TimelinePart(
-    id: snapshot.id,
-    messageId: snapshot.messageId,
-    type: snapshot.type,
-    order: snapshot.order,
-    revision: snapshot.revision,
-    title: _partTitleFromSnapshot(snapshot),
-    text: visibleText,
-    status: snapshot.status,
-    textChannel: snapshot.textChannel,
-    tool: tool,
-    agent: snapshot.agent,
-    collapsed: snapshot.type == TimelinePartType.reasoning,
-    synthetic: snapshot.synthetic,
-    ignored: snapshot.ignored,
-  );
-}
-
 TimelinePartDelta timelinePartDeltaFromJson(Object? value) {
   final json = _map(value);
   return TimelinePartDelta(
@@ -500,10 +1110,22 @@ TimelinePartDelta timelinePartDeltaFromJson(Object? value) {
     messageId: _string(json['messageId']),
     partId: _string(json['partId']),
     revision: _int(json['revision']),
-    field: _string(json['field']),
+    field: _timelineDeltaField(json['field']),
     delta: _string(json['delta']),
     chunkIndex: _nullableInt(json['chunkIndex']),
   );
+}
+
+String _timelineDeltaField(Object? value) {
+  final field = _string(value);
+  return switch (field) {
+    'text' ||
+    'reasoning.summary' ||
+    'planContent' ||
+    'tool.arguments' ||
+    'tool.result' => field,
+    _ => throw FormatException('Unknown timeline delta field: $field'),
+  };
 }
 
 SessionRuntimeView sessionRuntimeFromJson(Object? value) {
@@ -524,6 +1146,20 @@ SessionRuntimeView sessionRuntimeFromJson(Object? value) {
     activeMcpServers: _stringList(json['activeMcpServers']),
     activeLspServers: _stringList(json['activeLspServers']),
     agentCount: agentCount,
+  );
+}
+
+SessionRuntimeView _emptyRuntimeView() {
+  return const SessionRuntimeView(
+    model: '',
+    contextTokens: 0,
+    contextWindow: 0,
+    totalTokens: 0,
+    costLabel: '',
+    activeSkills: [],
+    activeMcpServers: [],
+    activeLspServers: [],
+    agentCount: 0,
   );
 }
 
@@ -603,6 +1239,60 @@ ProviderUsageView providerUsageFromJson(Object? value) {
   );
 }
 
+ProviderUsageView _providerUsageFromFrb(frb.ProviderUsageDto usage) {
+  return ProviderUsageView(
+    providerId: usage.providerId,
+    updatedAt: usage.updatedAt,
+    status: usage.status.isEmpty ? 'unknown' : usage.status,
+    usageKind: usage.usageKind.isEmpty ? 'unknown' : usage.usageKind,
+    message: usage.message,
+    balance: usage.balance == null
+        ? null
+        : DeepSeekBalanceUsageView(
+            isAvailable: usage.balance!.isAvailable,
+            balances: usage.balance!.balances
+                .map(
+                  (item) => DeepSeekBalanceInfoView(
+                    currency: item.currency,
+                    totalBalance: item.totalBalance,
+                    grantedBalance: item.grantedBalance,
+                    toppedUpBalance: item.toppedUpBalance,
+                  ),
+                )
+                .where((item) => item.currency.isNotEmpty)
+                .toList(),
+          ),
+    codingPlan: usage.codingPlan == null
+        ? null
+        : ZhipuCodingPlanUsageView(
+            level: usage.codingPlan!.level,
+            limits: usage.codingPlan!.limits
+                .map(
+                  (item) => ZhipuQuotaLimitView(
+                    window: item.window.isEmpty ? 'other' : item.window,
+                    label: item.label,
+                    percentage: item.percentage,
+                    currentValue: item.currentValue,
+                    total: item.total,
+                    remaining: item.remaining,
+                    nextResetAt: item.nextResetAt,
+                    usageDetails: item.usageDetails
+                        .map(
+                          (detail) => ZhipuToolUsageDetailView(
+                            name: detail.name,
+                            currentValue: detail.currentValue,
+                            total: detail.total,
+                            percentage: detail.percentage,
+                          ),
+                        )
+                        .toList(),
+                  ),
+                )
+                .toList(),
+          ),
+  );
+}
+
 StudioState _stateFromJson(
   Map<String, Object?> json, {
   required String? selectedProjectId,
@@ -623,37 +1313,210 @@ StudioState _stateFromJson(
   final eventNextSequence = _int(
     _firstValue(json, const ['eventNextSequence', 'event_next_sequence']),
   );
-  return StudioState(
+  return _stateFromTypedSnapshot(
     projects: _list(json['projects']).map(_projectFromJson).toList(),
     sessions: studioSessionsFromJson(json['sessions']),
-    messagesBySession: timeline.messagesBySession,
-    partSnapshotsBySession: timeline.partSnapshotsBySession,
-    partOverlaysBySession: const {},
-    providers: _providersFromConfig(config),
-    defaultProviderId: _defaultProviderIdFromConfig(config),
-    roles: _rolesFromConfig(config),
-    mcpServers: _mcpServersFromConfig(config),
-    instructions: _instructionsFromConfig(config),
-    skills: _skillsFromConfig(config),
-    general: _generalFromJson(json['generalSettings']),
     selectedProjectId: selectedProjectId,
     selectedSessionId: selectedSessionId,
-    permissionMode: _permissionMode(
-      _firstValue(_map(config['runtime']), const [
-        'permissionMode',
-        'permission_mode',
-      ]),
+    messages: timeline.messagesBySession.values
+        .expand((messages) => messages)
+        .toList(),
+    parts: timeline.partSnapshotsBySession.values
+        .expand((parts) => parts.values)
+        .toList(),
+    agentTimelineEventsBySession: _agentTimelineEventsFromJson(
+      json['agentEvents'],
     ),
-    turnPhase: TurnPhase.idle,
-    runtime: sessionRuntimeFromJson(runtimeJson),
-    pendingInteractions: _list(json['interactions'])
+    interactions: _list(json['interactions'])
         .map(pendingInteractionFromJson)
         .where((interaction) => interaction.id.isNotEmpty)
         .toList(),
-    eventCursorsBySession: selectedSessionId == null || eventNextSequence <= 0
-        ? const {}
-        : {selectedSessionId: eventNextSequence - 1},
+    runtime: sessionRuntimeFromJson(runtimeJson),
+    config: config,
+    generalSettings: _map(json['generalSettings']),
+    eventNextSequence: eventNextSequence,
+    agents: const [],
   );
+}
+
+StudioState _stateFromTypedSnapshot({
+  required List<StudioProject> projects,
+  required List<StudioSession> sessions,
+  required String? selectedProjectId,
+  required String? selectedSessionId,
+  required List<TimelineMessage> messages,
+  required List<TimelinePartSnapshot> parts,
+  Iterable<StudioBridgeEvent> events = const [],
+  Iterable<TimelineAgentEvent> agentEvents = const [],
+  Map<String, Map<String, TimelineAgentEvent>>? agentTimelineEventsBySession,
+  required Iterable<frb.BridgeAgentSnapshotDto> agents,
+  required List<PendingInteraction> interactions,
+  required SessionRuntimeView runtime,
+  required Map<String, Object?> config,
+  required Map<String, Object?> generalSettings,
+  required int eventNextSequence,
+}) {
+  final messagesBySession = <String, List<TimelineMessage>>{};
+  for (final message in messages) {
+    if (message.id.isEmpty || message.sessionId.isEmpty) {
+      continue;
+    }
+    messagesBySession.putIfAbsent(message.sessionId, () => []).add(message);
+  }
+  for (final messages in messagesBySession.values) {
+    messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+  }
+  final partSnapshotsBySession = <String, Map<String, TimelinePartSnapshot>>{};
+  for (final part in parts) {
+    if (part.id.isEmpty || part.messageId.isEmpty || part.sessionId.isEmpty) {
+      continue;
+    }
+    partSnapshotsBySession.putIfAbsent(part.sessionId, () => {})[part.id] =
+        part;
+  }
+  for (final session in sessions) {
+    messagesBySession.putIfAbsent(session.id, () => []);
+  }
+  final agentEventsBySession =
+      agentTimelineEventsBySession ??
+      _agentTimelineEventsFromTyped(agentEvents);
+  final latest = events.fold<StudioState>(
+    StudioState(
+      projects: projects,
+      sessions: sessions,
+      messagesBySession: messagesBySession,
+      partSnapshotsBySession: partSnapshotsBySession,
+      partOverlaysBySession: const {},
+      agentTimelineEventsBySession: agentEventsBySession,
+      providers: _providersFromConfig(config),
+      defaultProviderId: _defaultProviderIdFromConfig(config),
+      roles: _rolesFromConfig(config),
+      mcpServers: _mcpServersFromConfig(config),
+      instructions: _instructionsFromConfig(config),
+      skills: _skillsFromConfig(config),
+      general: _generalFromJson(generalSettings),
+      selectedProjectId: selectedProjectId,
+      selectedSessionId: selectedSessionId,
+      permissionMode: _permissionMode(
+        _firstValue(_map(config['runtime']), const [
+          'permissionMode',
+          'permission_mode',
+        ]),
+      ),
+      turnPhase: TurnPhase.idle,
+      runtime: runtime,
+      pendingInteractions: interactions,
+      eventCursorsBySession: selectedSessionId == null || eventNextSequence <= 0
+          ? const {}
+          : {selectedSessionId: eventNextSequence - 1},
+    ),
+    _applySnapshotEvent,
+  );
+  return latest.copyWith(
+    runtime: latest.runtime.copyWith(
+      agentCount: agents
+          .where((agent) => agent.sessionId == selectedSessionId)
+          .length,
+    ),
+  );
+}
+
+StudioState _applySnapshotEvent(StudioState state, StudioBridgeEvent event) {
+  return switch (event.payload) {
+    TurnChangedPayload(:final turn) => state.copyWith(
+      turnPhase: _turnPhaseFromStatus(turn.status),
+    ),
+    InteractionChangedPayload(:final interaction, :final status) =>
+      _withInteraction(state, interaction, status),
+    SessionRuntimeChangedPayload(:final runtime) => state.copyWith(
+      runtime: runtime.copyWith(agentCount: state.runtime.agentCount),
+    ),
+    AgentTimelineChangedPayload(:final event) => state.copyWith(
+      agentTimelineEventsBySession: {
+        ...state.agentTimelineEventsBySession,
+        event.sessionId: {
+          ...(state.agentTimelineEventsBySession[event.sessionId] ?? const {}),
+          event.eventId: event,
+        },
+      },
+    ),
+    McpHealthChangedPayload(:final activeMcpServers, :final servers) =>
+      state.copyWith(
+        mcpServers: servers,
+        runtime: state.runtime.copyWith(activeMcpServers: activeMcpServers),
+      ),
+    LspHealthChangedPayload(:final activeLspServers) => state.copyWith(
+      runtime: state.runtime.copyWith(activeLspServers: activeLspServers),
+    ),
+    SessionListChangedPayload(:final projectId, :final sessions)
+        when projectId == null || projectId == state.selectedProjectId =>
+      state.copyWith(sessions: sessions),
+    _ => state,
+  };
+}
+
+StudioState _withInteraction(
+  StudioState state,
+  PendingInteraction interaction,
+  String status,
+) {
+  final interactions = [...state.pendingInteractions];
+  final index = interactions.indexWhere((item) => item.id == interaction.id);
+  if (status == 'pending') {
+    if (index >= 0) {
+      interactions[index] = interaction;
+    } else {
+      interactions.add(interaction);
+    }
+  } else if (index >= 0) {
+    interactions.removeAt(index);
+  }
+  return StudioState(
+    projects: state.projects,
+    sessions: state.sessions,
+    messagesBySession: state.messagesBySession,
+    partSnapshotsBySession: state.partSnapshotsBySession,
+    partOverlaysBySession: state.partOverlaysBySession,
+    agentTimelineEventsBySession: state.agentTimelineEventsBySession,
+    providers: state.providers,
+    defaultProviderId: state.defaultProviderId,
+    providerUsages: state.providerUsages,
+    roles: state.roles,
+    mcpServers: state.mcpServers,
+    instructions: state.instructions,
+    skills: state.skills,
+    general: state.general,
+    selectedProjectId: state.selectedProjectId,
+    selectedSessionId: state.selectedSessionId,
+    permissionMode: state.permissionMode,
+    turnPhase: state.turnPhase,
+    runtime: state.runtime,
+    pendingInteractions: interactions,
+    eventCursorsBySession: state.eventCursorsBySession,
+    composerText: state.composerText,
+  );
+}
+
+Map<String, Map<String, TimelineAgentEvent>> _agentTimelineEventsFromJson(
+  Object? value,
+) {
+  final bySession = <String, Map<String, TimelineAgentEvent>>{};
+  for (final item in _list(value)) {
+    final json = _map(item);
+    final event = timelineAgentEventFromPayload(
+      json,
+      eventId: _string(json['eventId']),
+      sessionId: _string(json['sessionId']),
+      sequence: _int(json['sequence']),
+      createdAt: _dateFromUnix(_int(json['createdAt'])),
+      kindType: _string(json['kindType']),
+    );
+    if (event.eventId.isEmpty || event.sessionId.isEmpty) {
+      continue;
+    }
+    bySession.putIfAbsent(event.sessionId, () => {})[event.eventId] = event;
+  }
+  return bySession;
 }
 
 String? _defaultProviderIdFromConfig(Map<String, Object?> config) {
@@ -694,36 +1557,29 @@ _TimelineLoadResult _timelineFromJson(
   List<Object?> messageValues,
   List<Object?> partValues,
 ) {
-  final snapshotsByMessage = <String, List<TimelinePartSnapshot>>{};
   final snapshotsBySession = <String, Map<String, TimelinePartSnapshot>>{};
   for (final value in partValues) {
-    final nested = _map(_map(value)['part']);
+    final wrapper = _map(value);
+    final nested = _map(wrapper['part']);
     final partJson = nested.isEmpty ? _map(value) : nested;
-    final part = timelinePartSnapshotFromJson(partJson);
+    final part = timelinePartSnapshotFromJson(
+      partJson,
+      sequence: _int(wrapper['sequence']),
+    );
     if (part.id.isEmpty || part.messageId.isEmpty || part.sessionId.isEmpty) {
       continue;
     }
-    snapshotsByMessage.putIfAbsent(part.messageId, () => []).add(part);
     snapshotsBySession.putIfAbsent(part.sessionId, () => {})[part.id] = part;
-  }
-  for (final parts in snapshotsByMessage.values) {
-    parts.sort((a, b) {
-      final order = a.order.compareTo(b.order);
-      return order != 0 ? order : a.id.compareTo(b.id);
-    });
   }
 
   final bySession = <String, List<TimelineMessage>>{};
   for (final value in messageValues) {
-    final nested = _map(_map(value)['message']);
+    final wrapper = _map(value);
+    final nested = _map(wrapper['message']);
     final messageJson = nested.isEmpty ? _map(value) : nested;
-    final message = timelineMessageFromJson(messageJson).copyWith(
-      parts: [
-        for (final part
-            in snapshotsByMessage[_string(messageJson['messageId'])] ??
-                const <TimelinePartSnapshot>[])
-          timelinePartFromSnapshot(part),
-      ],
+    final message = timelineMessageFromJson(
+      messageJson,
+      sequence: _int(wrapper['sequence']),
     );
     if (message.id.isEmpty || message.sessionId.isEmpty) {
       continue;
@@ -1058,11 +1914,15 @@ String _partText(Map<String, Object?> json, TimelinePartType type) {
 }
 
 TimelineTextChannel? _textChannel(Object? value) {
-  return switch (_string(value)) {
+  final label = _string(value);
+  if (label.isEmpty) {
+    return null;
+  }
+  return switch (label) {
     'user' => TimelineTextChannel.user,
     'commentary' => TimelineTextChannel.commentary,
     'final' => TimelineTextChannel.finalAnswer,
-    _ => null,
+    _ => throw FormatException('Unknown text channel: $label'),
   };
 }
 
@@ -1104,60 +1964,6 @@ TimelineAgentPart? _agentPart(Object? value) {
   );
 }
 
-String _partTitleFromSnapshot(TimelinePartSnapshot snapshot) {
-  return switch (snapshot.type) {
-    TimelinePartType.tool => snapshot.tool?.name ?? 'Tool',
-    TimelinePartType.plan => 'Plan',
-    TimelinePartType.agent => snapshot.agent?.role ?? 'Agent',
-    TimelinePartType.reasoning => 'Reasoning',
-    TimelinePartType.text => '',
-  };
-}
-
-String _toolActivityText(TimelineToolPart? tool, String status) {
-  if (tool == null) {
-    return '';
-  }
-  return [
-    _commandSummary(tool.arguments),
-    tool.workingDirectory,
-    tool.denialReason,
-    tool.result,
-  ].whereType<String>().where((value) => value.trim().isNotEmpty).join('\n');
-}
-
-String? _commandSummary(String arguments) {
-  final json = _tryDecodeMap(arguments);
-  final command = _string(json['command']);
-  final path = _string(
-    _firstValue(json, const [
-      'path',
-      'filePath',
-      'targetPath',
-      'workingDirectory',
-    ]),
-  );
-  final query = _string(json['query']);
-  final value = command.isNotEmpty
-      ? command.split('\n').first
-      : path.isNotEmpty
-      ? path
-      : query;
-  return value.isEmpty ? null : value;
-}
-
-Map<String, Object?> _tryDecodeMap(String value) {
-  if (value.trim().isEmpty) {
-    return const {};
-  }
-  try {
-    final decoded = jsonDecode(value);
-    return _map(decoded);
-  } catch (_) {
-    return const {};
-  }
-}
-
 String _interactionTitle(InteractionKind kind, Map<String, Object?> payload) {
   return switch (kind) {
     InteractionKind.toolApproval => _string(
@@ -1183,11 +1989,12 @@ String _interactionBody(InteractionKind kind, Map<String, Object?> payload) {
 
 TimelinePartType _partType(String value) {
   return switch (value) {
+    'text' => TimelinePartType.text,
     'reasoning' => TimelinePartType.reasoning,
     'tool' => TimelinePartType.tool,
     'plan' => TimelinePartType.plan,
     'agent' => TimelinePartType.agent,
-    _ => TimelinePartType.text,
+    _ => throw FormatException('Unknown timeline part type: $value'),
   };
 }
 
@@ -1207,6 +2014,21 @@ PermissionMode _permissionMode(Object? value) {
     'autoReview' || 'auto-review' => PermissionMode.autoReview,
     'fullAccess' || 'full-access' => PermissionMode.fullAccess,
     _ => PermissionMode.requestApproval,
+  };
+}
+
+TurnPhase _turnPhaseFromStatus(String status) {
+  return switch (status) {
+    'queued' => TurnPhase.queued,
+    'contextLoading' => TurnPhase.contextLoading,
+    'waitingForModel' => TurnPhase.waitingForModel,
+    'streaming' => TurnPhase.streaming,
+    'waitingForInteraction' => TurnPhase.waitingForInteraction,
+    'runningTool' => TurnPhase.runningTool,
+    'completed' => TurnPhase.completed,
+    'failed' => TurnPhase.failed,
+    'cancelled' => TurnPhase.cancelled,
+    _ => TurnPhase.idle,
   };
 }
 
@@ -1256,6 +2078,17 @@ String _compactAmount(String value) {
 Map<String, Object?> _decodeJson(String json) {
   final value = jsonDecode(json);
   return _map(value);
+}
+
+Object? _tryDecodeJsonValue(String json) {
+  if (json.trim().isEmpty) {
+    return null;
+  }
+  try {
+    return jsonDecode(json);
+  } catch (_) {
+    return null;
+  }
 }
 
 Map<String, Object?> _map(Object? value) {
@@ -1331,14 +2164,6 @@ double? _nullableDouble(Object? value) {
 
 double _double(Object? value) => _nullableDouble(value) ?? 0;
 
-BigInt? _bigInt(Object? value) {
-  if (value is BigInt) {
-    return value;
-  }
-  final string = _string(value);
-  return string.isEmpty ? null : BigInt.tryParse(string);
-}
-
 bool _bool(Object? value) {
   if (value is bool) {
     return value;
@@ -1395,6 +2220,114 @@ class DemoStudioApi implements StudioApi {
       mode: CompileMode.auto,
       updatedAt: now,
     );
+    final userCreatedAt = now.subtract(const Duration(minutes: 9));
+    final assistantCreatedAt = now.subtract(const Duration(minutes: 8));
+    final demoParts = [
+      TimelinePartSnapshot(
+        id: 'turn-demo:user-text',
+        messageId: 'turn-demo:user',
+        sessionId: session.id,
+        turnId: 'turn-demo',
+        type: TimelinePartType.text,
+        order: 0,
+        revision: 0,
+        text:
+            '用 Flutter 重构 Pure Studio。\n\n'
+            '- timeline 要像 Web 版一样即时渲染 Markdown\n'
+            '- streaming 中的代码块和表格不要抖动',
+        status: 'completed',
+        createdAt: userCreatedAt,
+        updatedAt: userCreatedAt,
+        textChannel: TimelineTextChannel.user,
+      ),
+      TimelinePartSnapshot(
+        id: 'turn-demo:reasoning-1',
+        messageId: 'turn-demo:assistant',
+        sessionId: session.id,
+        turnId: 'turn-demo',
+        type: TimelinePartType.reasoning,
+        order: 0,
+        revision: 0,
+        text:
+            '## 判断\n\n'
+            '> UI 只消费当前会话的高频事件，后台会话不应该继续推 delta。\n\n'
+            '- `messagePartDelta` 只作为 live overlay\n'
+            '- terminal snapshot 到达后覆盖未完成文本',
+        status: 'completed',
+        createdAt: assistantCreatedAt,
+        updatedAt: assistantCreatedAt,
+      ),
+      TimelinePartSnapshot(
+        id: 'turn-demo:tool-1',
+        messageId: 'turn-demo:assistant',
+        sessionId: session.id,
+        turnId: 'turn-demo',
+        type: TimelinePartType.tool,
+        order: 1,
+        revision: 0,
+        text: '',
+        status: 'completed',
+        createdAt: assistantCreatedAt,
+        updatedAt: assistantCreatedAt,
+        tool: const TimelineToolPart(
+          toolCallId: 'turn-demo:tool-call-1',
+          name: 'cargo test -p pl-studio-bridge',
+          result: '1 passed; bridge envelope uses typed payload.',
+        ),
+      ),
+      TimelinePartSnapshot(
+        id: 'turn-demo:plan-1',
+        messageId: 'turn-demo:assistant',
+        sessionId: session.id,
+        turnId: 'turn-demo',
+        type: TimelinePartType.plan,
+        order: 2,
+        revision: 0,
+        text: '',
+        status: 'completed',
+        createdAt: assistantCreatedAt,
+        updatedAt: assistantCreatedAt,
+        planContent:
+            '## Implementation checklist\n\n'
+            '1. Keep the Flutter shell aligned with runtime contracts.\n'
+            '2. Use Riverpod selectors for derived views.\n'
+            '3. Subscribe only the selected session stream.\n'
+            '4. Verify Markdown in streaming mode.\n\n'
+            '| Area | Status |\n'
+            '| --- | --- |\n'
+            '| FRB runtime | ready |\n'
+            '| Timeline Markdown | streaming |\n\n'
+            '```text\n'
+            'WeatherDay>```\n\n'
+            '## Inline fence recovery\n\n'
+            '| Renderer | Result |\n'
+            '| --- | --- |\n'
+            '| Timeline | headings and tables stay live |',
+      ),
+      TimelinePartSnapshot(
+        id: 'turn-demo:final-1',
+        messageId: 'turn-demo:assistant',
+        sessionId: session.id,
+        turnId: 'turn-demo',
+        type: TimelinePartType.text,
+        order: 3,
+        revision: 0,
+        text:
+            '### Streaming Markdown preview\n\n'
+            '正文、**加粗**、`inline code` 和链接都应该按 GFM 渲染。\n\n'
+            '- text / plan / reasoning 走同一个 renderer\n'
+            '- fenced code block 即使还没收到结束 fence，也应该显示成代码块\n\n'
+            '```dart\n'
+            'final stream = subscribeSessionEvents(sessionId);\n'
+            'await for (final event in stream) {\n'
+            '  reducer.apply(event);\n'
+            '}',
+        status: 'completed',
+        createdAt: assistantCreatedAt,
+        updatedAt: assistantCreatedAt,
+        textChannel: TimelineTextChannel.finalAnswer,
+      ),
+    ];
     final state = StudioState(
       projects: const [project],
       sessions: [session],
@@ -1422,86 +2355,18 @@ class DemoStudioApi implements StudioApi {
             id: 'turn-demo:user',
             sessionId: session.id,
             role: 'user',
-            createdAt: now.subtract(const Duration(minutes: 9)),
-            parts: const [
-              TimelinePart(
-                id: 'turn-demo:user-text',
-                messageId: 'turn-demo:user',
-                type: TimelinePartType.text,
-                text:
-                    '用 Flutter 重构 Pure Studio。\n\n'
-                    '- timeline 要像 Web 版一样即时渲染 Markdown\n'
-                    '- streaming 中的代码块和表格不要抖动',
-              ),
-            ],
+            createdAt: userCreatedAt,
           ),
           TimelineMessage(
             id: 'turn-demo:assistant',
             sessionId: session.id,
             role: 'assistant',
-            createdAt: now.subtract(const Duration(minutes: 8)),
-            parts: const [
-              TimelinePart(
-                id: 'turn-demo:reasoning-1',
-                messageId: 'turn-demo:assistant',
-                type: TimelinePartType.reasoning,
-                title: 'Runtime boundary',
-                text:
-                    '## 判断\n\n'
-                    '> UI 只消费当前会话的高频事件，后台会话不应该继续推 delta。\n\n'
-                    '- `messagePartDelta` 只作为 live overlay\n'
-                    '- terminal snapshot 到达后覆盖未完成文本',
-                collapsed: false,
-              ),
-              TimelinePart(
-                id: 'turn-demo:tool-1',
-                messageId: 'turn-demo:assistant',
-                type: TimelinePartType.tool,
-                title: 'cargo test -p pl-studio-bridge',
-                text:
-                    '1 passed; bridge envelope uses kindType and canonical payloadJson.',
-              ),
-              TimelinePart(
-                id: 'turn-demo:plan-1',
-                messageId: 'turn-demo:assistant',
-                type: TimelinePartType.plan,
-                title: 'Plan',
-                text:
-                    '## Implementation checklist\n\n'
-                    '1. Keep the Flutter shell aligned with runtime contracts.\n'
-                    '2. Use Riverpod selectors for derived views.\n'
-                    '3. Subscribe only the selected session stream.\n'
-                    '4. Verify Markdown in streaming mode.\n\n'
-                    '| Area | Status |\n'
-                    '| --- | --- |\n'
-                    '| FRB runtime | ready |\n'
-                    '| Timeline Markdown | streaming |\n'
-                    '| Settings pages | covered |\n\n'
-                    '```text\n'
-                    'WeatherDay>```\n\n'
-                    '## Inline fence recovery\n\n'
-                    '| Renderer | Result |\n'
-                    '| --- | --- |\n'
-                    '| Timeline | headings and tables stay live |',
-              ),
-              TimelinePart(
-                id: 'turn-demo:final-1',
-                messageId: 'turn-demo:assistant',
-                type: TimelinePartType.text,
-                text:
-                    '### Streaming Markdown preview\n\n'
-                    '正文、**加粗**、`inline code` 和链接都应该按 GFM 渲染。\n\n'
-                    '- text / plan / reasoning 走同一个 renderer\n'
-                    '- fenced code block 即使还没收到结束 fence，也应该显示成代码块\n\n'
-                    '```dart\n'
-                    'final stream = subscribeSessionEvents(sessionId);\n'
-                    'await for (final event in stream) {\n'
-                    '  reducer.apply(event);\n'
-                    '}',
-              ),
-            ],
+            createdAt: assistantCreatedAt,
           ),
         ],
+      },
+      partSnapshotsBySession: {
+        session.id: {for (final part in demoParts) part.id: part},
       },
       providers:
           _providers ??
@@ -1703,10 +2568,9 @@ class DemoStudioApi implements StudioApi {
   Future<void> stopPrompt(String sessionId) async {
     _emitSessionEvent(
       sessionId: sessionId,
-      kindType: 'turnChanged',
-      payload: {
-        'turn': {'sessionId': sessionId, 'status': 'cancelled'},
-      },
+      payload: TurnChangedPayload(
+        turn: StudioTurnView(sessionId: sessionId, status: 'cancelled'),
+      ),
     );
   }
 
@@ -1731,21 +2595,19 @@ class DemoStudioApi implements StudioApi {
     final userMessageId = 'demo-user-$_eventSequence';
     _emitSessionEvent(
       sessionId: sessionId,
-      kindType: 'messageUpdated',
-      payload: {
-        'message': {
+      payload: MessageUpdatedPayload(
+        message: timelineMessageFromJson({
           'messageId': userMessageId,
           'sessionId': sessionId,
           'role': 'user',
           'createdAt': now,
-        },
-      },
+        }),
+      ),
     );
     _emitSessionEvent(
       sessionId: sessionId,
-      kindType: 'messagePartUpdated',
-      payload: {
-        'part': {
+      payload: MessagePartUpdatedPayload(
+        part: timelinePartSnapshotFromJson({
           'partId': '$userMessageId:text',
           'messageId': userMessageId,
           'sessionId': sessionId,
@@ -1757,35 +2619,32 @@ class DemoStudioApi implements StudioApi {
           'updatedAt': now,
           'textChannel': 'user',
           'text': trimmed,
-        },
-      },
+        }),
+      ),
     );
     _emitSessionEvent(
       sessionId: sessionId,
-      kindType: 'turnChanged',
-      payload: {
-        'turn': {'sessionId': sessionId, 'status': 'streaming'},
-      },
+      payload: TurnChangedPayload(
+        turn: StudioTurnView(sessionId: sessionId, status: 'streaming'),
+      ),
     );
     await Future<void>.delayed(const Duration(milliseconds: 120));
     final assistantMessageId = 'demo-assistant-$_eventSequence';
     _emitSessionEvent(
       sessionId: sessionId,
-      kindType: 'messageUpdated',
-      payload: {
-        'message': {
+      payload: MessageUpdatedPayload(
+        message: timelineMessageFromJson({
           'messageId': assistantMessageId,
           'sessionId': sessionId,
           'role': 'assistant',
           'createdAt': now + 1,
-        },
-      },
+        }),
+      ),
     );
     _emitSessionEvent(
       sessionId: sessionId,
-      kindType: 'messagePartUpdated',
-      payload: {
-        'part': {
+      payload: MessagePartUpdatedPayload(
+        part: timelinePartSnapshotFromJson({
           'partId': '$assistantMessageId:text',
           'messageId': assistantMessageId,
           'sessionId': sessionId,
@@ -1800,15 +2659,14 @@ class DemoStudioApi implements StudioApi {
               'Demo response for: **$trimmed**\n\n'
               '- FRB session stream is connected\n'
               '- Markdown renders through the live timeline path',
-        },
-      },
+        }),
+      ),
     );
     _emitSessionEvent(
       sessionId: sessionId,
-      kindType: 'turnChanged',
-      payload: {
-        'turn': {'sessionId': sessionId, 'status': 'completed'},
-      },
+      payload: TurnChangedPayload(
+        turn: StudioTurnView(sessionId: sessionId, status: 'completed'),
+      ),
     );
   }
 
@@ -1879,25 +2737,22 @@ class DemoStudioApi implements StudioApi {
     _settingsDrafts[section] = Map<String, Object?>.from(draft);
     _globalEvents.add(
       StudioBridgeEvent(
-        kindType: 'settingsDraftSaved',
-        payload: {'section': section, 'saved': true},
+        payload: SettingsDraftSavedPayload(section: section, saved: true),
       ),
     );
   }
 
   void _emitSessionEvent({
     required String sessionId,
-    required String kindType,
-    required Map<String, Object?> payload,
+    required StudioBridgeEventPayload payload,
   }) {
     _eventSequence += 1;
     _sessionEvents.add(
       StudioBridgeEvent(
-        kindType: kindType,
+        payload: payload,
         sessionId: sessionId,
         sequence: BigInt.from(_eventSequence),
         createdAt: DateTime.now(),
-        payload: payload,
       ),
     );
   }

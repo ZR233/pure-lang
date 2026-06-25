@@ -185,7 +185,7 @@ fn opencode_timeline_events_keep_wire_shape_for_parts_and_deltas() {
                     message_id: "turn-golden-1:assistant".to_string(),
                     part_id: "reason-a".to_string(),
                     revision: 1,
-                    field: StudioPartDeltaField::ReasoningText,
+                    field: StudioPartDeltaField::ReasoningSummary,
                     delta: "thinking".to_string(),
                     chunk_index: Some(0),
                 },
@@ -312,7 +312,7 @@ fn opencode_timeline_events_keep_wire_shape_for_parts_and_deltas() {
                         "messageId": "turn-golden-1:assistant",
                         "partId": "reason-a",
                         "revision": 1,
-                        "field": "reasoningText",
+                        "field": "reasoning.summary",
                         "delta": "thinking",
                         "chunkIndex": 0
                     }

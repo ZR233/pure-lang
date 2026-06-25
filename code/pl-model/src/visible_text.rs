@@ -2,15 +2,12 @@ const COMMENTARY_OPEN_TAG: &str = "<commentary>";
 const COMMENTARY_CLOSE_TAG: &str = "</commentary>";
 const FINAL_OPEN_TAG: &str = "<final>";
 const FINAL_CLOSE_TAG: &str = "</final>";
-const PLAN_OPEN_TAG: &str = "<proposed_plan>";
-const PLAN_CLOSE_TAG: &str = "</proposed_plan>";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VisibleTextSegment {
     Untagged(String),
     Commentary(String),
     Final(String),
-    ProposedPlan(String),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -22,7 +19,6 @@ pub struct VisibleTextChunk {
 enum ActiveTag {
     Commentary,
     Final,
-    ProposedPlan,
 }
 
 impl ActiveTag {
@@ -30,7 +26,6 @@ impl ActiveTag {
         match self {
             Self::Commentary => COMMENTARY_CLOSE_TAG,
             Self::Final => FINAL_CLOSE_TAG,
-            Self::ProposedPlan => PLAN_CLOSE_TAG,
         }
     }
 
@@ -38,7 +33,6 @@ impl ActiveTag {
         match self {
             Self::Commentary => VisibleTextSegment::Commentary(text),
             Self::Final => VisibleTextSegment::Final(text),
-            Self::ProposedPlan => VisibleTextSegment::ProposedPlan(text),
         }
     }
 }
@@ -52,20 +46,18 @@ struct OpenTag {
 /// Parser for Codex-style visible output tags emitted by the model.
 ///
 /// The parser accepts arbitrary stream chunk boundaries and removes channel
-/// tags from visible visible text. Untagged text is reported separately so
+/// tags from visible text. Untagged text is reported separately so
 /// Studio turns can reject provider output that does not follow the channel
 /// protocol.
 #[derive(Debug)]
 pub struct VisibleTextParser {
-    allow_plan: bool,
     active_tag: Option<ActiveTag>,
     pending: String,
 }
 
 impl VisibleTextParser {
-    pub fn new(allow_plan: bool) -> Self {
+    pub fn new() -> Self {
         Self {
-            allow_plan,
             active_tag: None,
             pending: String::new(),
         }
@@ -155,7 +147,7 @@ impl VisibleTextParser {
     }
 
     fn open_tags(&self) -> Vec<OpenTag> {
-        let mut tags = vec![
+        vec![
             OpenTag {
                 tag: ActiveTag::Commentary,
                 text: COMMENTARY_OPEN_TAG,
@@ -164,14 +156,7 @@ impl VisibleTextParser {
                 tag: ActiveTag::Final,
                 text: FINAL_OPEN_TAG,
             },
-        ];
-        if self.allow_plan {
-            tags.push(OpenTag {
-                tag: ActiveTag::ProposedPlan,
-                text: PLAN_OPEN_TAG,
-            });
-        }
-        tags
+        ]
     }
 }
 
@@ -206,8 +191,8 @@ mod tests {
     use super::{VisibleTextParser, VisibleTextSegment};
     use pretty_assertions::assert_eq;
 
-    fn collect(chunks: &[&str], allow_plan: bool) -> Vec<VisibleTextSegment> {
-        let mut parser = VisibleTextParser::new(allow_plan);
+    fn collect(chunks: &[&str]) -> Vec<VisibleTextSegment> {
+        let mut parser = VisibleTextParser::new();
         let mut segments = Vec::new();
         for chunk in chunks {
             segments.extend(parser.push_str(chunk).segments);
@@ -219,15 +204,12 @@ mod tests {
     #[test]
     fn extracts_channels_split_across_chunks() {
         assert_eq!(
-            collect(
-                &[
-                    "<comm",
-                    "entary>checking",
-                    "</commentary><fi",
-                    "nal>done</final>"
-                ],
-                false,
-            ),
+            collect(&[
+                "<comm",
+                "entary>checking",
+                "</commentary><fi",
+                "nal>done</final>"
+            ],),
             vec![
                 VisibleTextSegment::Commentary("checking".to_string()),
                 VisibleTextSegment::Final("done".to_string()),
@@ -236,20 +218,17 @@ mod tests {
     }
 
     #[test]
-    fn extracts_plan_split_across_chunks() {
+    fn leaves_proposed_plan_as_untagged_text() {
         assert_eq!(
-            collect(
-                &[
-                    "before\n<prop",
-                    "osed_plan>\n- step\n",
-                    "</proposed_plan>\nafter"
-                ],
-                true,
-            ),
+            collect(&[
+                "before\n<prop",
+                "osed_plan>\n- step\n",
+                "</proposed_plan>\nafter"
+            ]),
             vec![
-                VisibleTextSegment::Untagged("before\n".to_string()),
-                VisibleTextSegment::ProposedPlan("\n- step\n".to_string()),
-                VisibleTextSegment::Untagged("\nafter".to_string()),
+                VisibleTextSegment::Untagged("before\n<prop".to_string()),
+                VisibleTextSegment::Untagged("osed_plan>\n- step\n".to_string()),
+                VisibleTextSegment::Untagged("</proposed_plan>\nafter".to_string()),
             ]
         );
     }
@@ -257,7 +236,7 @@ mod tests {
     #[test]
     fn closes_unterminated_final_on_finish() {
         assert_eq!(
-            collect(&["<final>done"], false),
+            collect(&["<final>done"]),
             vec![VisibleTextSegment::Final("done".to_string())]
         );
     }
@@ -265,7 +244,7 @@ mod tests {
     #[test]
     fn preserves_untagged_text_without_tags() {
         assert_eq!(
-            collect(&["hello ", "world"], false),
+            collect(&["hello ", "world"]),
             vec![
                 VisibleTextSegment::Untagged("hello ".to_string()),
                 VisibleTextSegment::Untagged("world".to_string()),

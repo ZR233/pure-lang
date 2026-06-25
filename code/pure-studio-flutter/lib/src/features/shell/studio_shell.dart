@@ -45,7 +45,7 @@ class StudioShell extends ConsumerWidget {
                         Expanded(
                           child: TimelineView(
                             sessionId: state.selectedSessionId,
-                            messages: state.selectedMessages,
+                            rows: state.selectedTimelineRows,
                           ),
                         ),
                         _Footer(state: state),

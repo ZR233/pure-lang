@@ -44,9 +44,11 @@ lib/src/shared/
 
 `messageUpdated` upsert message snapshot；`messagePartUpdated` upsert 完整 part snapshot 并清除该 part 的 live delta；`messagePartDelta` 只允许命中已有 part，orphan delta 直接丢弃。`messagePartDelta` 不推进 durable cursor，也不得覆盖 terminal snapshot。前端记录 part 的 snapshot sequence、delta sequence 和可选 `chunkIndex`，丢弃同 part stale delta、低序 delta 与重复/倒序 chunk。`messageRemoved`、`messagePartRemoved`、session reset 和 projection snapshot 替换必须清理相关 delta accum。
 
-`StudioPart.revision` 与 `StudioPartDelta.revision` 是每个 part 的 live 版本号。start snapshot 使用 `revision=0`，同 part 每个 delta 递增，terminal snapshot 携带最新 revision。前端 reducer 必须按 `partId + field` 保存 overlay，并在 `delta.revision <= lastRevision` 时丢弃该 delta；terminal snapshot 到达后清理 overlay，terminal 后到达的 delta 一律丢弃。旧历史或旧后端缺失 revision 时按默认 0 读取，只能作为 durable snapshot 初始化，不能用缺省 revision 覆盖已有 live overlay。
+`StudioPart.revision` 与 `StudioPartDelta.revision` 是每个 part 的 live 版本号。start snapshot 使用 `revision=0`，同 part 每个 delta 递增，terminal snapshot 携带最新 revision。前端 reducer 必须按 `partId + field` 保存 overlay，并在 `delta.revision <= lastRevision` 时丢弃该 delta；terminal snapshot 到达后清理 overlay，terminal 后到达的 delta 一律丢弃。旧历史或旧后端缺失 revision 时按默认 0 读取，只能作为 durable snapshot 初始化；live delta 必须携带大于当前 field revision 的 revision，不能用缺省 0 覆盖已有 snapshot 或 overlay。
 
 历史、实时和 stale backfill 都进入同一个 event reducer。`load_session_state` 用 projection snapshot 初始化 message/part 与 per-id sequence guard；`load_studio_events(afterSequence)` 只回放 durable envelope。前端不得恢复旧 `TimelineItem`、`ConversationEntry` 或 raw `AgentEvent` 入口。
+
+切换或恢复选中 session 时必须建立 session load barrier：先带 generation 订阅目标 `sessionId` 的实时 stream，再加载 `load_session_state`，加载期间同 generation 的 session event 只进入 buffer，不直接修改 timeline。snapshot 返回后若 generation/session 已过期则丢弃；否则先用 per-message/per-part sequence guard 合并 snapshot，再按事件 sequence 和到达顺序重放 buffer。cursor 合并取较大值，`messagePartDelta` 继续作为 live-only overlay，不推进 durable cursor。旧订阅迟到事件、缺失 sessionId 的 timeline event 或 generation 不匹配的 event 必须丢弃，不能污染当前会话。
 
 状态管理对齐 opencode `global-sync`：Flutter Riverpod store 只保存归一化 entity 表和少量 UI 本地状态，组件不得直接把多个表临时拼成业务状态。选中会话、状态栏、timeline、交互 dock 和会话列表都必须通过 selector/view model 派生：
 
@@ -60,9 +62,19 @@ Flutter Riverpod store 使用同一归一化状态结构：`StudioController` �
 
 Flutter reducer 必须按 `sessionId` 过滤实时事件，旧 session stream 取消后迟到的事件不得覆盖当前会话。每个 session 维护 durable event cursor；收到 live-only `stale` 时优先调用 `loadStudioEvents(sessionId, afterSequence, limit)` 补拉缺口，补拉事件与实时事件进入同一 reducer。`messagePartDelta` 不推进 durable cursor，但只能追加到已有且未 terminal 的 part 字段。
 
+Flutter store 中的 message snapshot、part snapshot、live overlay 与 agent timeline event 是 timeline 的事实源。`TimelineMessage` 是纯 message snapshot，不携带 `parts` 字段；可渲染 `TimelinePart` 只存在于 `TimelineRow` projection/view model 中，reducer 不得把 overlay 后的 `TimelinePart` 再写回 message snapshot，避免 snapshot state 与 projected part 双写不一致。`timelineRowsProvider` 必须按 message `sequence -> createdAt -> id`、part `order -> sequence -> id` 从 `messagesBySession + partSnapshotsBySession + partOverlaysBySession` 派生可渲染 row；`agentTimelineEventsBySession` 按 `callId` 合并 begin/end 后投影为独立 `AgentActivity` row，不写入 `messagesBySession`，也不伪造 message/part identity。
+
+FRB JSON bootstrap 与 `load_session_state` 解包时只能写入 message snapshot 表和 part snapshot 表，不能为了方便 UI 渲染把 `timelinePartFromSnapshot` 的结果写回 message snapshot。刷新、重载和实时流必须通过同一个 selector 得到一致的 projected rows。
+
+样例数据、demo API 和测试 fixture 也必须使用 message snapshot + part snapshot 表，或显式的 row projection helper，表达 timeline；不能绕过 selector 在持久 message 上挂载 parts。
+
+Flutter timeline 协议解析必须严格处理枚举值。未知 `partType` 或非空未知 `textChannel` 是协议错误，应直接抛出并暴露给调用方；不得默认降级为 `text` 或 `final`，避免新协议字段被旧 UI 错误展示。
+
+Flutter bridge event 协议解析同样必须严格处理事件类型。实时 stream 使用 FRB `BridgeEventPayload` sealed union；未知或不允许进入 Flutter 的事件是协议错误，应在 FRB/JSON 入口抛出。FRB adapter 必须把事件归一为 typed app `StudioBridgeEventPayload` 后交给 reducer，reducer 不得读取 `payloadJson`/Map 或用 `_ => current` 静默忽略未知事件。`sessionHandoffChanged` 不再作为前端 bridge event 兼容入口；旧 handoff 数据只能通过历史会话列表/查询视图体现，不参与实时 reducer。
+
 ## 3. Timeline Projection
 
-Timeline row 从 `messages + parts + partTextAccumDelta` 派生，不从 raw event 渲染。row key 只由稳定领域身份组成：
+Timeline row 从 `messages + parts + partTextAccumDelta + agentTimelineEvents` 派生，不从 raw event 渲染。Flutter 使用 `TimelineRow` view model 承载 row 类型，`TimelineView` 只消费 rows，不直接消费 message snapshot。row key 只由稳定领域身份组成：
 
 - `user-message:{messageId}`
 - `assistant-part:{userMessageId}:{groupKey}`
@@ -72,13 +84,13 @@ Timeline row 从 `messages + parts + partTextAccumDelta` 派生，不从 raw eve
 
 reasoning part 按 opencode 普通 assistant part 处理，参与 `groupParts`，不再把同 turn 的多个 reasoning part 合并成旧 thought entry。这样新 reasoning 的 `messageId + partId` 不会复用旧 row key，也不会把流式 delta 写回旧思考行。
 
-reasoning 正文默认折叠。运行中的 reasoning 只在 header 显示 `Thinking...` 或从首行推导出的 heading，不自动展开正文；用户手动展开后才显示完整 thinking 文本。`showReasoningSummaries` 只能控制是否显示 reasoning summary/row，不能把多个 reasoning part 合并成一个旧 thought row。
+reasoning 默认折叠为标题/摘要行，只展示 provider 明确标记的 summary 或由 summary 推导出的 heading；raw reasoning、内部 thinking chunk 和 provider replay metadata 不进入 timeline 正文，也不因展开而显示完整 thinking 文本。`showReasoningSummaries` 只能控制是否显示 reasoning summary/row，不能把多个 reasoning part 合并成一个旧 thought row。
 
-text/reasoning 的显示文本读取 `partTextAccumDelta[partId] ?? part.text`。snapshot 到达后以 snapshot 为准并清 overlay；同一 frame 内同 part 的 snapshot 覆盖旧 delta。若 snapshot coalescing 替换了 start snapshot，同 part 的 pending delta 进入 stale set 并跳过，避免旧思考 chunk 倒灌到 terminal 文本。
+text/reasoning 的显示文本读取 `partTextAccumDelta[partId] ?? part.text`。snapshot 到达后以 snapshot 为准并清 overlay；同一 frame 内同 part 的 snapshot 覆盖旧 delta。Flutter reducer 使用 frame callback 批处理 `messagePartDelta`；切换 session 或 durable snapshot 到达前必须先 flush 当前 pending delta。若 snapshot coalescing 替换了 start snapshot，同 part 的 pending delta 进入 stale set 并跳过，避免旧思考 chunk 倒灌到 terminal 文本。
 
 阶段性文本输出使用普通 `text` part，`textChannel=commentary`。start snapshot 创建空 part，delta 追加到 live overlay，terminal snapshot 固化完整文本。即使终态 snapshot 很快到达，前端也必须能在流式期间显示 commentary/final 中间文本；不能把 commentary 合并进 final，也不能把工具后的新文本追加到工具前的 part。
 
-`textChannel=commentary` 表示模型主动输出的可见进度，视觉层级应轻于最终答复但完整可读；`textChannel=final` 表示最终答复，必须单独完整展示。OpenAI Responses 原生 `phase=commentary/final_answer/final` 是优先来源；不支持 native phase 的 provider 继续通过 `<commentary>`、`<final>` 和 `<proposed_plan>` 标签映射到相同 part 类型。隐藏 reasoning 不得被当作 commentary 展开。
+`textChannel=commentary` 表示模型主动输出的可见进度，视觉层级应轻于最终答复但完整可读；`textChannel=final` 表示最终答复，必须单独完整展示。OpenAI Responses 原生 `phase=commentary/final_answer/final` 是优先来源；不支持 native phase 的 Chat provider 通过 `<commentary>` 和 `<final>` 标签映射到相同 text part 类型。计划内容不再通过 `<proposed_plan>` 进入 timeline，只能由 `plan_exit.content` 生成 plan part。隐藏 reasoning 不得被当作 commentary 展开。
 
 plan、commentary、reasoning 和普通 text 的 live overlay 必须使用 stream-safe Markdown 渲染。Flutter timeline 原生直接使用 `gpt_markdown` 的 `GptMarkdown` widget 渲染，不再包一层兼容 renderer facade。展示前只做轻量 agent repair（CRLF 归一化、CJK 标题补空格、行尾 closing fence 拆行、代码块内 inline closing fence 拆行），不在协议层或 reducer 层改写 Markdown。未闭合 fenced code block、不完整表格和逐字输出期间的临时结构由 renderer 容错展示，不能依赖 Rust/FRB 补全。运行中 delta 可以是不完整 Markdown，但 UI 仍应尽量即时显示列表、标题、表格、代码块等结构；terminal snapshot 到达后清 overlay，并以完整 snapshot 重新渲染。
 
@@ -87,6 +99,8 @@ plan、commentary、reasoning 和普通 text 的 live overlay 必须使用 strea
 工具、命令、文件修改和 subagent 活动文本由 Flutter timeline projection 基于结构化事实确定性生成，不在 `pl-core` 或 `pl-protocol` 中新增本地化文案字段。固定 UI 文案走 i18n；tool 名称、agent path、model slug、路径、命令摘要和 provider 返回值按领域值原样展示。`AgentTimelineChanged` 的 begin/end 事件应按 `callId` 合并为一条高层活动行；`AgentChanged` 只更新状态栏、agent 列表或活动详情，不应每次 snapshot 都在父 timeline 新增一行。父 timeline 默认不展开子代理内部工具 trace。
 
 Timeline 虚拟滚动必须监听 opencode 同款 active assistant content version：当前 active assistant message 的完成状态、错误、text/reasoning 展示长度、tool status、tool result/metadata 长度变化都要触发 `virtua.measure()` 和底部锚定。row key 不变但内容增长时，仍要保持底部跟随；切换 session 时写入/读取 row cache，并用 keep-mounted 行避免 active turn 被虚拟列表过早卸载。
+
+Flutter `TimelineRow` 必须携带 `renderVersion`，由 part revision、状态、可见文本、tool arguments/result/workingDirectory/exitCode、agent 状态等会影响布局或内容的字段计算。滚动跟随、pending 新事件和 `ListView` 内容版本比较使用 `renderVersion`，不能只比较文本长度，避免同长度 authoritative replacement 或工具字段变化漏刷新。
 
 Flutter 首版 `ListView.builder` 必须实现同一滚动语义。Timeline 以 `sessionId` 为边界保存滚动状态：用户位于底部附近（`extentAfter <= 80px`）时进入 bottom-following，新消息用短动画贴到底部，streaming 内容增长用 frame-coalesced `jumpTo(maxScrollExtent)` 保持即时跟随；用户向上滚动并离开底部阈值后进入 detached，不再因新消息或 delta 抢占滚动，只累计 pending 新事件。detached 或离底时，阅读流右下方、composer/status bar 上方显示紧凑“跳到最新”悬浮按钮，使用向下箭头图标和 `跳到最新` tooltip；点击后滚到当前会话底部、清空 pending 并恢复 bottom-following。程序滚动必须用内部标记和用户滚动区分，不能把自动滚动误判为用户操作。
 

@@ -111,6 +111,10 @@ impl StudioEventRuntime {
                 .set_turn_status(turn_id, status, reason.clone(), now)
                 .await?;
         }
+        if let Some(message_status) = assistant_message_status_for_turn(status) {
+            self.finish_assistant_message(session_id, turn_id, message_status, reason.clone())
+                .await?;
+        }
         self.emit(
             None,
             Some(session_id.to_string()),
@@ -356,17 +360,12 @@ impl StudioEventRuntime {
         session_id: &str,
         item: TracePart,
     ) -> Result<StudioEventEnvelope> {
-        let message = studio_message_from_trace_part(session_id, &item);
-        self.emit(
-            None,
-            Some(session_id.to_string()),
-            Some(item.turn_id.clone()),
-            StudioEventKind::MessageUpdated {
-                message: Box::new(message),
-            },
-        )
-        .await?;
-        let part = studio_part_from_trace_part(session_id, item);
+        self.ensure_assistant_message_started(session_id, &item)
+            .await?;
+        let mut part = studio_part_from_trace_part(session_id, item);
+        if let Some(existing) = self.store.read_message_part(&part.part_id).await? {
+            part.order = existing.part.order;
+        }
         self.emit(
             None,
             Some(session_id.to_string()),
@@ -376,6 +375,71 @@ impl StudioEventRuntime {
             },
         )
         .await
+    }
+
+    async fn ensure_assistant_message_started(
+        &self,
+        session_id: &str,
+        item: &TracePart,
+    ) -> Result<()> {
+        if message_role_for_trace_part(item) != StudioMessageRole::Assistant {
+            return Ok(());
+        }
+        let message_id = message_id_for_trace_part(item);
+        if self.store.read_studio_message(&message_id).await?.is_some() {
+            return Ok(());
+        }
+        self.emit(
+            None,
+            Some(session_id.to_string()),
+            Some(item.turn_id.clone()),
+            StudioEventKind::MessageUpdated {
+                message: Box::new(StudioMessage {
+                    message_id,
+                    session_id: session_id.to_string(),
+                    turn_id: item.turn_id.clone(),
+                    role: StudioMessageRole::Assistant,
+                    status: StudioMessageStatus::Streaming,
+                    created_at: item.created_at,
+                    updated_at: item.created_at,
+                    completed_at: None,
+                    error: None,
+                    metadata: serde_json::json!({}),
+                }),
+            },
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn finish_assistant_message(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        status: StudioMessageStatus,
+        error: Option<String>,
+    ) -> Result<()> {
+        let message_id = format!("{turn_id}:assistant");
+        let Some(current) = self.store.read_studio_message(&message_id).await? else {
+            return Ok(());
+        };
+        let now = unix_seconds();
+        self.emit(
+            None,
+            Some(session_id.to_string()),
+            Some(turn_id.to_string()),
+            StudioEventKind::MessageUpdated {
+                message: Box::new(StudioMessage {
+                    status,
+                    updated_at: now,
+                    completed_at: Some(now),
+                    error,
+                    ..current.message
+                }),
+            },
+        )
+        .await?;
+        Ok(())
     }
 }
 
@@ -411,7 +475,7 @@ fn trace_part_delta_is_user_text(event: &TracePartDeltaEvent) -> bool {
 fn studio_part_delta(session_id: &str, event: TracePartDeltaEvent) -> StudioPartDelta {
     let field = match &event.delta {
         TraceDelta::Text { .. } => StudioPartDeltaField::Text,
-        TraceDelta::Thinking { .. } => StudioPartDeltaField::ReasoningText,
+        TraceDelta::Thinking { .. } => StudioPartDeltaField::ReasoningSummary,
         TraceDelta::ToolArguments { .. } => StudioPartDeltaField::ToolArguments,
         TraceDelta::ToolResult { .. } => StudioPartDeltaField::ToolResult,
         TraceDelta::Plan { .. } => StudioPartDeltaField::PlanContent,
@@ -578,30 +642,6 @@ fn studio_agent_timeline_event(session_id: &str, event: AgentEvent) -> StudioAge
     }
 }
 
-fn studio_message_from_trace_part(session_id: &str, item: &TracePart) -> StudioMessage {
-    let role = message_role_for_trace_part(item);
-    let status = message_status_for_trace_part(item);
-    let completed_at = matches!(
-        status,
-        StudioMessageStatus::Completed
-            | StudioMessageStatus::Failed
-            | StudioMessageStatus::Cancelled
-    )
-    .then_some(item.updated_at);
-    StudioMessage {
-        message_id: message_id_for_trace_part(item),
-        session_id: session_id.to_string(),
-        turn_id: item.turn_id.clone(),
-        role,
-        status,
-        created_at: item.created_at,
-        updated_at: item.updated_at,
-        completed_at,
-        error: error_for_trace_part(item),
-        metadata: serde_json::json!({}),
-    }
-}
-
 fn studio_part_from_trace_part(session_id: &str, item: TracePart) -> StudioPart {
     let part_type = part_type_for_trace_kind(item.kind);
     let status = part_status_for_trace_status(item.status);
@@ -731,16 +771,18 @@ fn message_role_for_trace_part(item: &TracePart) -> StudioMessageRole {
     }
 }
 
-fn message_status_for_trace_part(item: &TracePart) -> StudioMessageStatus {
-    match item.status {
-        TracePartStatus::Started
-        | TracePartStatus::Streaming
-        | TracePartStatus::AwaitingApproval
-        | TracePartStatus::Approved
-        | TracePartStatus::Running => StudioMessageStatus::Streaming,
-        TracePartStatus::Completed | TracePartStatus::Denied => StudioMessageStatus::Completed,
-        TracePartStatus::Failed | TracePartStatus::BudgetLimited => StudioMessageStatus::Failed,
-        TracePartStatus::Interrupted => StudioMessageStatus::Cancelled,
+fn assistant_message_status_for_turn(status: StudioTurnStatus) -> Option<StudioMessageStatus> {
+    match status {
+        StudioTurnStatus::Completed => Some(StudioMessageStatus::Completed),
+        StudioTurnStatus::Failed => Some(StudioMessageStatus::Failed),
+        StudioTurnStatus::Cancelled => Some(StudioMessageStatus::Cancelled),
+        StudioTurnStatus::Queued
+        | StudioTurnStatus::ContextLoading
+        | StudioTurnStatus::WaitingForModel
+        | StudioTurnStatus::Streaming
+        | StudioTurnStatus::RunningTool
+        | StudioTurnStatus::WaitingForInteraction
+        | StudioTurnStatus::Persisting => None,
     }
 }
 
@@ -831,21 +873,6 @@ fn studio_inference_part(inference: TraceInferencePart) -> StudioInferencePart {
     }
 }
 
-fn error_for_trace_part(item: &TracePart) -> Option<String> {
-    match item.status {
-        TracePartStatus::Failed | TracePartStatus::Interrupted | TracePartStatus::BudgetLimited => {
-            (!item.content.trim().is_empty()).then(|| item.content.clone())
-        }
-        TracePartStatus::Started
-        | TracePartStatus::Streaming
-        | TracePartStatus::AwaitingApproval
-        | TracePartStatus::Approved
-        | TracePartStatus::Denied
-        | TracePartStatus::Running
-        | TracePartStatus::Completed => None,
-    }
-}
-
 fn error_for_part_status(status: StudioPartStatus, content: &str) -> Option<String> {
     match status {
         StudioPartStatus::Failed
@@ -866,4 +893,80 @@ fn error_for_part_status(status: StudioPartStatus, content: &str) -> Option<Stri
 #[allow(dead_code)]
 fn _assert_agent_status_is_used(status: AgentStatus) -> AgentStatus {
     status
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::CompileMode;
+
+    #[tokio::test]
+    async fn assistant_message_lifecycle_follows_turn_not_part_status() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/studio").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Visible progress", CompileMode::Auto)
+            .await
+            .unwrap();
+        let runtime = StudioEventRuntime::new(store.clone());
+
+        let commentary = TracePart::text(
+            "turn-1",
+            "commentary-1",
+            10,
+            TraceTextChannel::Commentary,
+            "working",
+            TracePartStatus::Completed,
+            100,
+        );
+        runtime
+            .emit_agent_event(
+                &session.id,
+                AgentEvent::TracePartCompleted { item: commentary },
+            )
+            .await
+            .unwrap();
+
+        let messages = store.load_studio_messages(&session.id).await.unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].message.status, StudioMessageStatus::Streaming);
+        assert_eq!(messages[0].message.created_at, 100);
+        assert_eq!(messages[0].message.completed_at, None);
+
+        let final_answer = TracePart::text(
+            "turn-1",
+            "final-1",
+            11,
+            TraceTextChannel::Final,
+            "done",
+            TracePartStatus::Started,
+            200,
+        );
+        runtime
+            .emit_agent_event(
+                &session.id,
+                AgentEvent::TracePartStarted { item: final_answer },
+            )
+            .await
+            .unwrap();
+
+        let messages = store.load_studio_messages(&session.id).await.unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].message.status, StudioMessageStatus::Streaming);
+        assert_eq!(messages[0].message.created_at, 100);
+        assert_eq!(messages[0].message.completed_at, None);
+
+        runtime
+            .emit_turn(&session.id, "turn-1", StudioTurnStatus::Completed, None)
+            .await
+            .unwrap();
+
+        let messages = store.load_studio_messages(&session.id).await.unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].message.status, StudioMessageStatus::Completed);
+        assert_eq!(messages[0].message.created_at, 100);
+        assert!(messages[0].message.completed_at.is_some());
+    }
 }

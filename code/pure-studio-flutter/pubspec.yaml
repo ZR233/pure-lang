@@ -32,11 +32,14 @@ dependencies:
   flutter_rust_bridge: ^2.12.0
   gpt_markdown: 1.1.7
   intl: any
+  freezed_annotation: ^3.1.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
 
   flutter_lints: ^6.0.0
+  build_runner: ^2.15.0
+  freezed: 3.2.3
 
 flutter:
   generate: true

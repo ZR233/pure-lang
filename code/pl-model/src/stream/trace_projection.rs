@@ -16,7 +16,6 @@ pub(crate) struct TraceProjection {
     sequence: u64,
     started: HashMap<String, TracePart>,
     active_text_items: HashMap<String, String>,
-    active_plan_items: HashMap<String, String>,
     active_thinking_items: HashMap<String, String>,
     segment_occurrences: HashMap<String, u64>,
     events: Vec<TraceEvent>,
@@ -31,7 +30,6 @@ impl TraceProjection {
             sequence: 0,
             started: HashMap::new(),
             active_text_items: HashMap::new(),
-            active_plan_items: HashMap::new(),
             active_thinking_items: HashMap::new(),
             segment_occurrences: HashMap::new(),
             events: Vec::new(),
@@ -140,79 +138,6 @@ impl TraceProjection {
             Some(text_channel),
             authoritative_text,
         )
-    }
-
-    pub(crate) fn start_plan(&mut self, item_id: &str) -> Vec<AgentEvent> {
-        let now = unix_seconds();
-        let item_id = self.active_plan_item_id(item_id);
-        if self.started.contains_key(&item_id) {
-            return Vec::new();
-        }
-        let item = TracePart {
-            turn_id: self.turn_id.clone(),
-            item_id: item_id.clone(),
-            started_sequence: self.sequence,
-            revision: 0,
-            kind: TracePartKind::Plan,
-            status: TracePartStatus::Streaming,
-            created_at: now,
-            updated_at: now,
-            text_channel: None,
-            content: String::new(),
-            attachments: Vec::new(),
-            thinking_chunks: Vec::new(),
-            tool: None,
-            agent: None,
-            inference: None,
-            usage: None,
-        };
-        self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now);
-        self.started.insert(item_id, item.clone());
-        vec![AgentEvent::TracePartStarted { item }]
-    }
-
-    pub(crate) fn append_plan_delta(&mut self, item_id: &str, delta: String) -> Vec<AgentEvent> {
-        let now = unix_seconds();
-        let mut events = self.start_plan(item_id);
-        let item_id = self.active_plan_item_id(item_id);
-        if let Some(item) = self.started.get_mut(&item_id) {
-            item.revision += 1;
-            item.status = TracePartStatus::Streaming;
-            item.updated_at = now;
-            item.content.push_str(&delta);
-        }
-        let revision = self
-            .started
-            .get(&item_id)
-            .map(|item| item.revision)
-            .unwrap_or_default();
-        let event = TracePartDeltaEvent {
-            turn_id: self.turn_id.clone(),
-            item_id,
-            started_sequence: self.sequence,
-            revision,
-            kind: TracePartKind::Plan,
-            status: TracePartStatus::Streaming,
-            created_at: now,
-            updated_at: now,
-            delta: TraceDelta::Plan { delta },
-        };
-        self.record(
-            TraceEventKind::TracePartDelta {
-                event: event.clone(),
-            },
-            now,
-        );
-        events.push(AgentEvent::TracePartDelta { event });
-        events
-    }
-
-    pub(crate) fn complete_plan(&mut self, item_id: &str) -> Vec<AgentEvent> {
-        let key = plan_provider_key(item_id);
-        let Some(item_id) = self.active_plan_items.remove(&key) else {
-            return Vec::new();
-        };
-        self.complete_item_by_resolved_id(&item_id, TracePartKind::Plan, None, None)
     }
 
     pub(crate) fn start_thinking(&mut self, item_id: &str) -> Vec<AgentEvent> {
@@ -492,16 +417,6 @@ impl TraceProjection {
         item_id
     }
 
-    fn active_plan_item_id(&mut self, provider_item_id: &str) -> String {
-        let key = plan_provider_key(provider_item_id);
-        if let Some(item_id) = self.active_plan_items.get(&key) {
-            return item_id.clone();
-        }
-        let item_id = self.next_segment_item_id("plan");
-        self.active_plan_items.insert(key, item_id.clone());
-        item_id
-    }
-
     fn active_thinking_item_id(&mut self, provider_item_id: &str) -> String {
         let key = thinking_provider_key(provider_item_id);
         if let Some(item_id) = self.active_thinking_items.get(&key) {
@@ -572,14 +487,6 @@ fn unix_seconds() -> i64 {
 
 fn text_provider_key(provider_item_id: &str, channel: TraceTextChannel) -> String {
     format!("text:{}:{provider_item_id}", channel.as_str())
-}
-
-fn plan_provider_key(provider_item_id: &str) -> String {
-    if provider_item_id.is_empty() {
-        "plan:plan".to_string()
-    } else {
-        format!("plan:{provider_item_id}")
-    }
 }
 
 fn thinking_provider_key(provider_item_id: &str) -> String {

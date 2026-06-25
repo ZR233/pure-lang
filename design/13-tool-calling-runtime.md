@@ -46,7 +46,7 @@ MCP tools 由进程内 MCP runtime registry 的当前可用快照注册，工具
 
 每个 turn 开始时，运行时会把经过当前模式过滤后实际暴露给模型的工具名快照保留为 core 内部 `TracePart`，并在需要时通过 typed Studio part snapshot 展示。该记录只包含 turn id、模式和工具名列表，用于诊断工具可见性，不进入模型上下文；旧 `timeline_events` 表由 migration drop，运行期没有写入路径。
 
-`plan_exit` 是 Plan Mode 专用的内置协调工具，schema 只包含 `content: string`。它表示“计划已完成，请 Studio 发起确认交互”，不是普通执行工具：运行时只在 Plan Mode 暴露它，Auto Mode 不暴露；工具执行成功后返回紧凑状态文本，不在工具内部等待用户、不切换模式、不写计划文件。`pl-core` 在工具成功后从原始参数读取 `content`，生成或补齐当前 turn 的 plan part snapshot。Plan turn 完成后，Studio runtime 继续复用既有 `PlanConfirmation` pending interaction 和 fresh-context handoff 流程。兼容的 `<proposed_plan>` 流式块仍可生成 plan part，但同一 turn 内 `plan_exit.content` 是确认计划的优先来源。
+`plan_exit` 是 Plan Mode 专用的内置协调工具，schema 只包含 `content: string`。它表示“计划已完成，请 Studio 发起确认交互”，不是普通执行工具：运行时只在 Plan Mode 暴露它，Auto Mode 不暴露；工具执行成功后返回紧凑状态文本，不在工具内部等待用户、不切换模式、不写计划文件。`pl-core` 在工具成功后从原始参数读取 `content`，生成或补齐当前 turn 的 plan part snapshot。Plan turn 完成后，Studio runtime 继续复用既有 `PlanConfirmation` pending interaction；用户确认实施时在当前 session 内启动实施 turn，不再走 fresh-context handoff 实时事件。`<proposed_plan>` 不再是协议入口，按普通未标记文本处理，不生成 plan part，也不能触发计划确认。
 
 后台 stdio 子进程（MCP server、`bash` 命令、LSP server）由运行时显式持有生命周期。正常路径必须通过 async shutdown / terminate 请求关闭 stdin、终止进程树并等待退出；Drop 只能做 best-effort 兜底。Windows GUI 进程中启动这些后台子进程和兜底终止命令时不得显示额外终端窗口。
 
@@ -86,6 +86,8 @@ MCP tools 由进程内 MCP runtime registry 的当前可用快照注册，工具
 - `message`：面向模型的下一步提示。
 
 当 `bash` 在 `yieldTimeMs` 内未完成时，result 使用 `running` 状态并带 `processId`。后续模型必须用 `write_stdin` 携带该 `processId` 发送输入或传空 `chars` 轮询，不应重复执行同一条 `bash` 命令。命令管理器只有在子进程退出且 stdout/stderr 管道都已读到 EOF、完整输出文件已写入后，才返回 `completed`、`failed`、`timedOut` 或 `interrupted` 终态并释放 `processId`；如果子进程已退出但尾部输出仍在排空，结果仍保持 `running` 并提示继续轮询。需要完整输出时，模型应使用文件读取工具读取 `outputFile`，不要要求命令工具把大输出完整塞回上下文。`write_stdin` 找不到 live process、进程数量达到上限、stdin 写入失败或后台命令已被终止时，应返回可恢复错误，让模型等待、轮询或解释当前状态。
+
+Studio 实时展示层可以在 `bash` 子进程仍运行时看到 stdout/stderr chunk。命令管理器读取管道后先更新内存截断缓冲并分配输出 revision，再通过 trace delta 把 chunk 投影到原 `bash` tool part 的 `tool.result` live overlay，同时异步追加完整输出文件；delta revision 从该 part 已有 revision 继续递增，终态 JSON snapshot 的 revision 不低于最后一个输出 chunk。`write_stdin` 负责写入或轮询后台进程，返回自己的紧凑 JSON 结果；后台进程新增输出仍归属最初启动它的 `bash` tool part，不在父 timeline 中复制成新的工具输出正文。
 
 Windows 上 `bash.command` 的默认宿主 shell 是 PowerShell：运行时先查找 `pwsh.exe`，再查找 `powershell.exe`，都不可用时才使用 `cmd.exe /C`。PowerShell 命令以 `-NoProfile -Command` 执行，并注入 UTF-8 输出设置；这只影响命令字符串的宿主 shell，不改变 `bash` / `write_stdin` 的公开 schema、审批策略或 JSON 结果字段。
 

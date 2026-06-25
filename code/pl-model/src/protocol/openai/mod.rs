@@ -37,6 +37,12 @@ pub(crate) struct OpenAiProtocol {
     endpoint: OpenAiEndpoint,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VisibleOutputProtocol {
+    NativePhases,
+    TaggedText,
+}
+
 impl OpenAiProtocol {
     pub(crate) fn responses() -> Self {
         Self {
@@ -99,6 +105,13 @@ impl OpenAiProtocol {
 
     pub(crate) fn new_stream_decoder(&self) -> sse::OpenAiStreamDecoder {
         sse::OpenAiStreamDecoder::new(matches!(self.endpoint, OpenAiEndpoint::Responses))
+    }
+
+    pub(crate) fn visible_output_protocol(&self) -> VisibleOutputProtocol {
+        match self.endpoint {
+            OpenAiEndpoint::Responses => VisibleOutputProtocol::NativePhases,
+            OpenAiEndpoint::ChatCompletions => VisibleOutputProtocol::TaggedText,
+        }
     }
 }
 

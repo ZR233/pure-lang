@@ -1,6 +1,6 @@
 use pl_trace::TraceTextChannel;
 
-use crate::proposed_plan::{VisibleTextParser, VisibleTextSegment};
+use crate::visible_text::{VisibleTextParser, VisibleTextSegment};
 
 use super::event::ModelStreamEvent;
 
@@ -9,17 +9,15 @@ pub(crate) struct TaggedVisibleOutputAdapter {
     reasoning_parser: VisibleTextParser,
     final_id: String,
     commentary_id: String,
-    plan_id: String,
 }
 
 impl TaggedVisibleOutputAdapter {
-    pub(crate) fn new(plan_mode: bool) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            text_parser: VisibleTextParser::new(plan_mode),
-            reasoning_parser: VisibleTextParser::new(plan_mode),
+            text_parser: VisibleTextParser::new(),
+            reasoning_parser: VisibleTextParser::new(),
             final_id: "final".to_string(),
             commentary_id: "commentary".to_string(),
-            plan_id: "plan".to_string(),
         }
     }
 
@@ -54,9 +52,10 @@ impl TaggedVisibleOutputAdapter {
                     }]
                 }
             }
-            ModelStreamEvent::ReasoningDelta {
+            ModelStreamEvent::ReasoningSummaryDelta { .. } => vec![event],
+            ModelStreamEvent::ReasoningRawDelta {
                 id,
-                chunk_index,
+                content_index,
                 delta,
             } => {
                 let visible = self
@@ -65,24 +64,26 @@ impl TaggedVisibleOutputAdapter {
                     .segments
                     .into_iter()
                     .flat_map(|segment| self.segment_events(segment, false));
-                std::iter::once(ModelStreamEvent::ReasoningDelta {
+                std::iter::once(ModelStreamEvent::ReasoningRawDelta {
                     id,
-                    chunk_index,
+                    content_index,
                     delta,
                 })
                 .chain(visible)
                 .collect()
             }
-            ModelStreamEvent::ReasoningCompleted {
+            ModelStreamEvent::ReasoningSummaryCompleted {
                 id,
                 provider_metadata,
+                authoritative_summary,
             } => {
                 let visible = self.flush_reasoning_visible_text();
                 visible
                     .into_iter()
-                    .chain([ModelStreamEvent::ReasoningCompleted {
+                    .chain([ModelStreamEvent::ReasoningSummaryCompleted {
                         id,
                         provider_metadata,
+                        authoritative_summary,
                     }])
                     .collect()
             }
@@ -140,7 +141,7 @@ impl TaggedVisibleOutputAdapter {
     }
 
     fn authoritative_segment_completed_events(&self, text: String) -> Vec<ModelStreamEvent> {
-        let mut parser = VisibleTextParser::new(false);
+        let mut parser = VisibleTextParser::new();
         let mut segments = parser.push_str(&text).segments;
         segments.extend(parser.finish().segments);
         let mut events = Vec::new();
@@ -164,7 +165,6 @@ impl TaggedVisibleOutputAdapter {
                         });
                     }
                 }
-                VisibleTextSegment::ProposedPlan(_) => {}
             }
         }
         events
@@ -191,16 +191,6 @@ impl TaggedVisibleOutputAdapter {
                 TraceTextChannel::Commentary,
                 text,
             ),
-            VisibleTextSegment::ProposedPlan(delta) => {
-                if delta.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![ModelStreamEvent::PlanDelta {
-                        id: self.plan_id.clone(),
-                        delta,
-                    }]
-                }
-            }
         }
     }
 

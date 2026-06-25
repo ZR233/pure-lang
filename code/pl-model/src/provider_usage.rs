@@ -537,8 +537,18 @@ mod tests {
         tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut buffer = [0_u8; 4096];
-            let read = socket.read(&mut buffer).await.unwrap();
-            let request = String::from_utf8_lossy(&buffer[..read]).to_string();
+            let mut request = Vec::new();
+            loop {
+                let read = socket.read(&mut buffer).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buffer[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let request = String::from_utf8_lossy(&request).to_string();
             let _ = request_tx.send(request);
             socket.write_all(response.as_bytes()).await.unwrap();
             socket.shutdown().await.unwrap();

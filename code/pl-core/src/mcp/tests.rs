@@ -288,6 +288,7 @@ async fn tool_transport_failure_marks_server_unavailable() {
                 arguments: serde_json::json!({}),
                 session_id: "session".to_string(),
                 tool_id: "tool".to_string(),
+                revision_base: 0,
             },
             context,
         )

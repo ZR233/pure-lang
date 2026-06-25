@@ -771,6 +771,7 @@ mod tests {
                     arguments: json!({"name": "local-flow"}),
                     session_id: "turn-1".to_string(),
                     tool_id: "call-1".to_string(),
+                    revision_base: 0,
                 },
                 tool_context(workspace.clone()),
             )
@@ -801,6 +802,7 @@ mod tests {
                     arguments: json!({"name": "local-flow", "filePath": "references/example.md"}),
                     session_id: "turn-1".to_string(),
                     tool_id: "call-1".to_string(),
+                    revision_base: 0,
                 },
                 tool_context(workspace.clone()),
             )
@@ -828,6 +830,7 @@ mod tests {
                     arguments: json!({"name": "local-flow", "filePath": "SKILL.md"}),
                     session_id: "turn-1".to_string(),
                     tool_id: "call-1".to_string(),
+                    revision_base: 0,
                 },
                 tool_context(workspace.clone()),
             )
@@ -858,6 +861,7 @@ mod tests {
                     arguments: json!({"name": "missing"}),
                     session_id: "turn-1".to_string(),
                     tool_id: "call-1".to_string(),
+                    revision_base: 0,
                 },
                 tool_context(workspace.clone()),
             )

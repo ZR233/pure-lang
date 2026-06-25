@@ -10,8 +10,8 @@ mod tagged_output;
 mod tool_stream;
 mod trace_projection;
 
-use crate::protocol::openai::OpenAiProtocol;
 use crate::protocol::openai::sse;
+use crate::protocol::openai::{OpenAiProtocol, VisibleOutputProtocol};
 use crate::request::{
     CompletionResponse, CompletionTraceContext, FinishReason, TokenUsage, ToolCall,
 };
@@ -30,6 +30,7 @@ pub(crate) async fn process_provider_stream(
 ) -> Result<CompletionResponse> {
     let mut accumulator = StreamCompletionAccumulator::new(trace);
     let mut decoder = protocol.new_stream_decoder();
+    let mut visible_output = VisibleOutputDecoder::new(protocol.visible_output_protocol());
     let mut stream = std::pin::pin!(stream);
 
     while let Some(event) = stream.next().await {
@@ -40,7 +41,9 @@ pub(crate) async fn process_provider_stream(
             }
         };
         for stream_event in decoder.decode(&sse_event) {
-            accumulator.apply(stream_event, event_tx)?;
+            for stream_event in visible_output.decode(stream_event) {
+                accumulator.apply(stream_event, event_tx)?;
+            }
         }
     }
 
@@ -55,7 +58,6 @@ pub(crate) struct StreamCompletionAccumulator {
     tool_calls: Vec<ToolCall>,
     tool_stream: ToolStream,
     lifecycle: StreamLifecycle,
-    tagged_output: TaggedVisibleOutputAdapter,
     final_usage: Option<TokenUsage>,
     completed: bool,
     trace: Option<TraceProjection>,
@@ -63,7 +65,6 @@ pub(crate) struct StreamCompletionAccumulator {
 
 impl StreamCompletionAccumulator {
     pub(crate) fn new(trace: Option<CompletionTraceContext>) -> Self {
-        let plan_mode = trace.as_ref().is_some_and(|context| context.plan_mode);
         Self {
             content_parts: Vec::new(),
             content_indexes: HashMap::new(),
@@ -72,7 +73,6 @@ impl StreamCompletionAccumulator {
             tool_calls: Vec::new(),
             tool_stream: ToolStream::new(),
             lifecycle: StreamLifecycle::new(),
-            tagged_output: TaggedVisibleOutputAdapter::new(plan_mode),
             final_usage: None,
             completed: false,
             trace: trace.map(TraceProjection::new),
@@ -87,10 +87,8 @@ impl StreamCompletionAccumulator {
         if let ModelStreamEvent::TextDelta { delta, .. } = &stream_event {
             self.raw_content_parts.push(delta.clone());
         }
-        for stream_event in self.tagged_output.adapt(stream_event) {
-            for stream_event in self.lifecycle.normalize(stream_event) {
-                self.apply_normalized(stream_event, event_tx)?;
-            }
+        for stream_event in self.lifecycle.normalize(stream_event) {
+            self.apply_normalized(stream_event, event_tx)?;
         }
 
         Ok(())
@@ -123,36 +121,38 @@ impl StreamCompletionAccumulator {
                 }
                 self.record_text_completed(&id, channel, authoritative_text, event_tx);
             }
-            ModelStreamEvent::ReasoningStarted {
+            ModelStreamEvent::ReasoningSummaryStarted {
                 id,
                 provider_metadata,
             } => {
                 let _ = provider_metadata;
                 self.record_thinking_started(&id, event_tx);
             }
-            ModelStreamEvent::ReasoningDelta {
+            ModelStreamEvent::ReasoningSummaryDelta {
                 id,
-                chunk_index,
+                section_index,
                 delta,
             } => {
                 self.reasoning_parts.push(delta.clone());
-                self.record_thinking_delta(&id, chunk_index, delta, event_tx);
+                self.record_thinking_delta(&id, section_index, delta, event_tx);
             }
-            ModelStreamEvent::ReasoningCompleted {
+            ModelStreamEvent::ReasoningSummaryCompleted {
                 id,
                 provider_metadata,
+                authoritative_summary,
             } => {
                 let _ = provider_metadata;
+                let _ = authoritative_summary;
                 self.record_thinking_completed(&id, event_tx);
             }
-            ModelStreamEvent::PlanStarted { id } => {
-                self.record_plan_started(&id, event_tx);
-            }
-            ModelStreamEvent::PlanDelta { id, delta } => {
-                self.record_plan_delta(&id, delta, event_tx);
-            }
-            ModelStreamEvent::PlanCompleted { id } => {
-                self.record_plan_completed(&id, event_tx);
+            ModelStreamEvent::ReasoningRawDelta {
+                id,
+                content_index,
+                delta,
+            } => {
+                let _ = id;
+                let _ = content_index;
+                self.reasoning_parts.push(delta);
             }
             ModelStreamEvent::ToolInputStarted {
                 stream_id,
@@ -378,33 +378,6 @@ impl StreamCompletionAccumulator {
         self.content_parts[index].text = text.to_string();
     }
 
-    fn record_plan_started(&mut self, item_id: &str, event_tx: &AgentEventSender) {
-        let Some(trace) = self.trace.as_mut() else {
-            return;
-        };
-        for event in trace.start_plan(item_id) {
-            let _ = event_tx.send(event);
-        }
-    }
-
-    fn record_plan_delta(&mut self, item_id: &str, delta: String, event_tx: &AgentEventSender) {
-        let Some(trace) = self.trace.as_mut() else {
-            return;
-        };
-        for event in trace.append_plan_delta(item_id, delta) {
-            let _ = event_tx.send(event);
-        }
-    }
-
-    fn record_plan_completed(&mut self, item_id: &str, event_tx: &AgentEventSender) {
-        let Some(trace) = self.trace.as_mut() else {
-            return;
-        };
-        for event in trace.complete_plan(item_id) {
-            let _ = event_tx.send(event);
-        }
-    }
-
     fn record_thinking_started(&mut self, item_id: &str, event_tx: &AgentEventSender) {
         let Some(trace) = self.trace.as_mut() else {
             return;
@@ -476,4 +449,77 @@ impl StreamCompletionAccumulator {
 
 struct ContentPart {
     text: String,
+}
+
+pub(crate) enum VisibleOutputDecoder {
+    NativePhases,
+    TaggedText(TaggedVisibleOutputAdapter),
+}
+
+impl VisibleOutputDecoder {
+    pub(crate) fn new(protocol: VisibleOutputProtocol) -> Self {
+        match protocol {
+            VisibleOutputProtocol::NativePhases => Self::NativePhases,
+            VisibleOutputProtocol::TaggedText => {
+                Self::TaggedText(TaggedVisibleOutputAdapter::new())
+            }
+        }
+    }
+
+    pub(crate) fn decode(&mut self, event: ModelStreamEvent) -> Vec<ModelStreamEvent> {
+        match self {
+            Self::NativePhases => vec![event],
+            Self::TaggedText(decoder) => decoder.adapt(event),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_phase_decoder_does_not_parse_visible_tags() {
+        let mut decoder = VisibleOutputDecoder::new(VisibleOutputProtocol::NativePhases);
+        let events = decoder.decode(ModelStreamEvent::TextDelta {
+            id: "native-final".to_string(),
+            channel: TraceTextChannel::Final,
+            delta: "<final>literal</final>".to_string(),
+        });
+
+        assert!(matches!(
+            events.as_slice(),
+            [ModelStreamEvent::TextDelta { id, channel: TraceTextChannel::Final, delta }]
+                if id == "native-final" && delta == "<final>literal</final>"
+        ));
+    }
+
+    #[test]
+    fn tagged_text_decoder_extracts_visible_tags() {
+        let mut decoder = VisibleOutputDecoder::new(VisibleOutputProtocol::TaggedText);
+        let events = decoder.decode(ModelStreamEvent::TextDelta {
+            id: "chat-final".to_string(),
+            channel: TraceTextChannel::Final,
+            delta: "<commentary>working</commentary><final>done</final>".to_string(),
+        });
+
+        assert!(matches!(
+            events.as_slice(),
+            [
+                ModelStreamEvent::TextDelta {
+                    id: commentary_id,
+                    channel: TraceTextChannel::Commentary,
+                    delta: commentary,
+                },
+                ModelStreamEvent::TextDelta {
+                    id: final_id,
+                    channel: TraceTextChannel::Final,
+                    delta: final_text,
+                },
+            ] if commentary_id == "commentary"
+                && commentary == "working"
+                && final_id == "final"
+                && final_text == "done"
+        ));
+    }
 }

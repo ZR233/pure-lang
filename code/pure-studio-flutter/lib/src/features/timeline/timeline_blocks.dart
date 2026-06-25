@@ -67,14 +67,14 @@ class _JumpToLatestButton extends StatelessWidget {
   }
 }
 
-class _MessageBlock extends StatelessWidget {
-  const _MessageBlock({required this.message, super.key});
+class _TimelineRowBlock extends StatelessWidget {
+  const _TimelineRowBlock({required this.row, super.key});
 
-  final TimelineMessage message;
+  final TimelineRow row;
 
   @override
   Widget build(BuildContext context) {
-    final isUser = message.role == 'user';
+    final isUser = row.type == TimelineRowType.userMessage;
     return Padding(
       padding: const EdgeInsets.only(bottom: 24),
       child: Row(
@@ -91,13 +91,7 @@ class _MessageBlock extends StatelessWidget {
                 crossAxisAlignment: isUser
                     ? CrossAxisAlignment.end
                     : CrossAxisAlignment.start,
-                children: [
-                  for (final part in message.parts)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: _PartCard(part: part, isUser: isUser),
-                    ),
-                ],
+                children: [_RowCard(row: row)],
               ),
             ),
           ),
@@ -133,20 +127,24 @@ class _Avatar extends StatelessWidget {
   }
 }
 
-class _PartCard extends StatelessWidget {
-  const _PartCard({required this.part, required this.isUser});
+class _RowCard extends StatelessWidget {
+  const _RowCard({required this.row});
 
-  final TimelinePart part;
-  final bool isUser;
+  final TimelineRow row;
 
   @override
   Widget build(BuildContext context) {
-    return switch (part.type) {
-      TimelinePartType.text => _MarkdownBubble(part: part, isUser: isUser),
-      TimelinePartType.reasoning => _ReasoningPart(part: part),
-      TimelinePartType.tool => _ToolPart(part: part),
-      TimelinePartType.plan => _PlanPart(part: part),
-      TimelinePartType.agent => _AgentPart(part: part),
+    return switch (row.type) {
+      TimelineRowType.userMessage => _MarkdownBubble(
+        part: row.part!,
+        isUser: true,
+      ),
+      TimelineRowType.commentary || TimelineRowType.finalAnswer =>
+        _MarkdownBubble(part: row.part!, isUser: false),
+      TimelineRowType.reasoningSummary => _ReasoningPart(part: row.part!),
+      TimelineRowType.toolActivity => _ToolPart(part: row.part!),
+      TimelineRowType.plan => _PlanPart(part: row.part!),
+      TimelineRowType.agentActivity => _AgentPart(event: row.agentEvent!),
     };
   }
 }
@@ -246,12 +244,11 @@ class _ToolPart extends StatelessWidget {
     final title = tool == null
         ? part.title ?? context.l10n.timelineToolFallback
         : _toolTitle(context, tool.name, part.status);
-    final subtitle = tool == null ? part.text : _toolSubtitle(tool);
     return _TimelinePanel(
       child: _TimelineMetaRow(
         icon: Icons.terminal,
         title: title,
-        subtitle: subtitle,
+        subtitle: part.text,
         trailing: _StatusPill(label: part.status),
       ),
     );
@@ -267,23 +264,6 @@ class _ToolPart extends StatelessWidget {
       'started' => context.l10n.timelineToolRunning(name),
       _ => name,
     };
-  }
-
-  String _toolSubtitle(TimelineToolPart tool) {
-    return [
-      _firstLine(tool.arguments),
-      tool.workingDirectory,
-      tool.denialReason,
-      tool.result,
-    ].whereType<String>().where((part) => part.trim().isNotEmpty).join('\n');
-  }
-
-  String? _firstLine(String value) {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty) {
-      return null;
-    }
-    return trimmed.split('\n').first;
   }
 }
 
@@ -331,29 +311,29 @@ class _PlanPart extends StatelessWidget {
 }
 
 class _AgentPart extends StatelessWidget {
-  const _AgentPart({required this.part});
+  const _AgentPart({required this.event});
 
-  final TimelinePart part;
+  final TimelineAgentEvent event;
 
   @override
   Widget build(BuildContext context) {
     return _TimelinePanel(
       child: _TimelineMetaRow(
         icon: Icons.account_tree_outlined,
-        title: _agentTitle(context, part.title),
-        subtitle: part.text,
+        title: _agentTitle(context, event.title),
+        subtitle: event.text,
       ),
     );
   }
 
-  String _agentTitle(BuildContext context, String? title) {
+  String _agentTitle(BuildContext context, String title) {
     return switch (title) {
       'agentTimeline.spawn' => context.l10n.timelineAgentSubagent,
       'agentTimeline.message' => context.l10n.timelineAgentSubagentMessage,
       'agentTimeline.waiting' => context.l10n.timelineAgentWaiting,
       'agentTimeline.close' => context.l10n.timelineAgentClose,
       'agentTimeline.agent' => context.l10n.timelineAgentFallback,
-      _ => title ?? context.l10n.timelineAgentFallback,
+      _ => title,
     };
   }
 }

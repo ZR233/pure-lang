@@ -81,34 +81,34 @@
 - `initializeRuntime() -> RuntimeSnapshot`
 - `startRuntime() -> RuntimeSnapshot`
 - `shutdownRuntime() -> RuntimeSnapshot`
-- `bootstrapStudio() -> JsonResponse`
-- `openProject(path) -> JsonResponse`
-- `selectProject(projectId) -> JsonResponse`
-- `archiveProject(projectId, selectedProjectId) -> JsonResponse`
-- `createSession(projectId, title) -> JsonResponse`
-- `archiveSession(sessionId, selectedSessionId) -> JsonResponse`
-- `setSessionMode(sessionId, mode) -> JsonResponse`
-- `setModelRole(roleKey, providerId, model, effort, selectedSessionId) -> JsonResponse`
-- `saveRuntimePermissionMode(mode) -> JsonResponse`
-- `saveProviderSettings(settingsJson) -> JsonResponse`
-- `saveInstructionsSettings(settingsJson) -> JsonResponse`
-- `saveSkillsSettings(settingsJson) -> JsonResponse`
-- `saveMcpSettings(settingsJson) -> JsonResponse`
-- `saveGeneralSettings(settingsJson) -> JsonResponse`
-- `saveStudioSettingsDraft(section, draftJson) -> JsonResponse`
-- `loadProviderUsages() -> JsonResponse`
-- `submitPrompt(sessionId, prompt, attachmentIds) -> JsonResponse`
-- `stopPrompt(sessionId) -> JsonResponse`
-- `resolveInteraction(interactionId, resolutionJson) -> JsonResponse`
-- `loadSessionState(sessionId) -> JsonResponse`
-- `loadStudioEvents(sessionId, afterSequence, limit) -> JsonResponse`
-- `listDiscoveredSkills(projectId) -> JsonResponse`
+- `bootstrapStudio() -> BridgeStudioSnapshotResponse`
+- `openProject(path) -> BridgeStudioSnapshotResponse`
+- `selectProject(projectId) -> BridgeStudioSnapshotResponse`
+- `archiveProject(projectId, selectedProjectId) -> BridgeStudioSnapshotResponse`
+- `createSession(projectId, title) -> BridgeStudioSnapshotResponse`
+- `archiveSession(sessionId, selectedSessionId) -> BridgeStudioSnapshotResponse`
+- `setSessionMode(sessionId, mode) -> BridgeSessionStateResponse`
+- `setModelRole(roleKey, providerId, model, effort, selectedSessionId) -> BridgeStudioSnapshotResponse`
+- `saveRuntimePermissionMode(mode) -> ConfigSavedResponse`
+- `saveProviderSettings(settingsJson) -> BridgeStudioSnapshotResponse`
+- `saveInstructionsSettings(settingsJson) -> BridgeStudioSnapshotResponse`
+- `saveSkillsSettings(settingsJson) -> BridgeStudioSnapshotResponse`
+- `saveMcpSettings(settingsJson) -> BridgeStudioSnapshotResponse`
+- `saveGeneralSettings(settingsJson) -> BridgeStudioSnapshotResponse`
+- `saveStudioSettingsDraft(section, draftJson) -> SettingsDraftResponse`
+- `loadProviderUsages() -> ProviderUsagesResponse`
+- `submitPrompt(sessionId, prompt, attachmentIds) -> SubmitPromptResponse`
+- `stopPrompt(sessionId) -> StopPromptResponse`
+- `resolveInteraction(interactionId, resolutionJson) -> ResolveInteractionResponse`
+- `loadSessionState(sessionId) -> BridgeSessionStateResponse`
+- `loadStudioEvents(sessionId, afterSequence, limit) -> BridgeStudioEventsResponse`
+- `listDiscoveredSkills(projectId) -> SkillsResponse`
 - `subscribeSessionEvents(sessionId) -> Stream<BridgeEventEnvelope>`
 - `subscribeGlobalEvents() -> Stream<BridgeEventEnvelope>`
 
-`openProject` 调用 `pl-core::studio` 的项目打开、LSP reconcile 和 session bootstrap 流程后返回新的 Studio 快照。`selectProject`、`archiveProject`、`createSession`、`archiveSession`、`setSessionMode` 和 `setModelRole` 都返回 Studio 快照或当前 session snapshot，由 Flutter store 原子替换项目、会话、选中项、config view，并对返回的 `selectedSessionId` 再调用 `loadSessionState` 恢复当前会话 projection。`archiveProject` 是归档语义，不删除项目目录或历史会话；关闭当前项目时返回下一个可用项目/会话，没有剩余项目时返回空选中态。`setSessionMode` 只修改 session 的下一轮 `compileMode`；`setModelRole` 修改 `~/.pure/config.toml` 中对应模型角色，状态栏 planner 模型选择固定写 `planner` role，因为 Studio 根聊天 turn 始终使用 planner 角色。`listDiscoveredSkills` 只读取当前项目 workspace、user、system 与 external skill catalog，返回 camelCase JSON 中的 `skills[]`，不改变配置。typed settings 保存接口直接写回 canonical config 或 Studio setting，并返回新的 Studio 快照；`saveStudioSettingsDraft` 只保留兼容旧草稿入口，不作为当前设置页生效配置的主路径。
+`openProject` 调用 `pl-core::studio` 的项目打开、LSP reconcile 和 session bootstrap 流程后返回新的 Studio 快照。`selectProject`、`archiveProject`、`createSession`、`archiveSession`、`setSessionMode` 和 `setModelRole` 都返回 Studio 快照或当前 session snapshot，由 Flutter store 原子替换项目、会话、选中项、config view，并对返回的 `selectedSessionId` 再调用 `loadSessionState` 恢复当前会话 projection。`archiveProject` 是归档语义，不删除项目目录或历史会话；关闭当前项目时返回下一个可用项目/会话，没有剩余项目时返回空选中态。`setSessionMode` 只修改 session 的下一轮 `compileMode`；`setModelRole` 修改 `~/.pure/config.toml` 中对应模型角色，状态栏 planner 模型选择固定写 `planner` role，因为 Studio 根聊天 turn 始终使用 planner 角色。`listDiscoveredSkills` 只读取当前项目 workspace、user、system 与 external skill catalog，返回 typed `skills[]`，不改变配置。typed settings 保存接口直接写回 canonical config 或 Studio setting，并返回新的 Studio 快照；`saveStudioSettingsDraft` 只保留兼容旧草稿入口，不作为当前设置页生效配置的主路径。
 
-`BridgeEventEnvelope` 使用稳定字段：`eventId`、`sessionId`、`turnId`、`sequence`、`createdAt`、`kindType`、`payloadJson`。复杂 payload 保持 canonical camelCase JSON 字符串；Dart 层根据 `kindType` 解码为 sealed model。桥接层不得把 `serde_json::Value` 直接暴露为 FRB 类型，也不得复制 UI 业务规则。
+`BridgeEventEnvelope` 当前 wire 字段为：`eventId`、`sessionId`、`turnId`、`sequence`、`createdAt`、`payload: BridgeEventPayload`。`BridgeEventPayload` 是 FRB/Freezed sealed union，承载 turn、message、part、delta、interaction、agent、agent timeline、runtime、health、session list 和 stale 等结构化事件；Dart FRB adapter 将其归一为 app 内部 typed `StudioBridgeEventPayload` 后交给 Riverpod reducer。`loadStudioEvents` backfill 返回 `BridgeStudioEventsResponse`，其中 `events[]` 与实时 stream 使用同一个 typed `BridgeEventEnvelope`。Studio snapshot、session snapshot 和小型命令响应均使用 typed DTO；完整 config 与 general settings 暂以 `configJson`/`generalSettingsJson` 字符串保留在 adapter 边界，agent timeline payload 使用 `BridgeAgentTimelinePayloadDto` union 表达。桥接层不得把 `serde_json::Value` 直接暴露为 FRB 类型，也不得复制 UI 业务规则。
 
 ## 2.8 pure-studio-flutter（Flutter UI）
 

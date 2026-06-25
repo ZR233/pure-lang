@@ -358,7 +358,8 @@ pub struct StudioPartDelta {
 #[serde(rename_all = "camelCase")]
 pub enum StudioPartDeltaField {
     Text,
-    ReasoningText,
+    #[serde(rename = "reasoning.summary")]
+    ReasoningSummary,
     PlanContent,
     #[serde(rename = "tool.arguments")]
     ToolArguments,
