@@ -173,9 +173,9 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
         if let Some(delta) = &choice.delta.reasoning_content
             && !delta.is_empty()
         {
-            events.push(StreamEvent::ReasoningDelta {
+            events.push(StreamEvent::ReasoningRawDelta {
                 id: DEFAULT_REASONING_ID.to_string(),
-                chunk_index: 0,
+                content_index: 0,
                 delta: delta.clone(),
             });
         }
@@ -272,18 +272,25 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
 
         "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
             event.delta.as_ref().map(|d| {
-                StreamEventBatch::Single(StreamEvent::ReasoningDelta {
-                    id: event
-                        .item_id
-                        .clone()
-                        .unwrap_or_else(|| DEFAULT_REASONING_ID.to_string()),
-                    chunk_index: event
-                        .summary_index
-                        .or(event.content_index)
-                        .unwrap_or(0)
-                        .max(0) as u32,
-                    delta: d.clone(),
-                })
+                if event.kind == "response.reasoning_summary_text.delta" {
+                    StreamEventBatch::Single(StreamEvent::ReasoningSummaryDelta {
+                        id: event
+                            .item_id
+                            .clone()
+                            .unwrap_or_else(|| DEFAULT_REASONING_ID.to_string()),
+                        section_index: event.summary_index.unwrap_or(0).max(0) as u32,
+                        delta: d.clone(),
+                    })
+                } else {
+                    StreamEventBatch::Single(StreamEvent::ReasoningRawDelta {
+                        id: event
+                            .item_id
+                            .clone()
+                            .unwrap_or_else(|| DEFAULT_REASONING_ID.to_string()),
+                        content_index: event.content_index.unwrap_or(0).max(0) as u32,
+                        delta: d.clone(),
+                    })
+                }
             })
         }
 
@@ -555,7 +562,7 @@ mod tests {
         }));
 
         match single_event(&event) {
-            Some(StreamEvent::ReasoningDelta { delta, .. }) => {
+            Some(StreamEvent::ReasoningRawDelta { delta, .. }) => {
                 assert_eq!(delta, "先比较整数位。");
             }
             other => panic!("unexpected event: {other:?}"),
@@ -585,7 +592,7 @@ mod tests {
 
         match process_sse_events(&event).as_slice() {
             [
-                StreamEvent::ReasoningDelta {
+                StreamEvent::ReasoningRawDelta {
                     delta: reasoning, ..
                 },
                 StreamEvent::TextDelta { delta: content, .. },
@@ -621,6 +628,49 @@ mod tests {
                 StreamEvent::Completed { response_id: None },
             ] => {
                 assert_eq!(usage.cached_prompt_tokens, 35);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn process_responses_marks_summary_and_raw_reasoning() {
+        let summary: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.reasoning_summary_text.delta",
+            "item_id": "rs_1",
+            "summary_index": 1,
+            "delta": "摘要"
+        }))
+        .unwrap();
+        let raw: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.reasoning_text.delta",
+            "item_id": "rt_1",
+            "content_index": 2,
+            "delta": "内部推理"
+        }))
+        .unwrap();
+
+        match single_event(&summary) {
+            Some(StreamEvent::ReasoningSummaryDelta {
+                id,
+                section_index,
+                delta,
+            }) => {
+                assert_eq!(id, "rs_1");
+                assert_eq!(section_index, 1);
+                assert_eq!(delta, "摘要");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+        match single_event(&raw) {
+            Some(StreamEvent::ReasoningRawDelta {
+                id,
+                content_index,
+                delta,
+            }) => {
+                assert_eq!(id, "rt_1");
+                assert_eq!(content_index, 2);
+                assert_eq!(delta, "内部推理");
             }
             other => panic!("unexpected event: {other:?}"),
         }

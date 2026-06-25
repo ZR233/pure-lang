@@ -288,6 +288,8 @@ pub struct ToolInput {
     pub arguments: serde_json::Value,
     pub session_id: String,
     pub tool_id: String,
+    #[serde(default)]
+    pub revision_base: u64,
 }
 
 /// 通用工具输出。
@@ -307,6 +309,7 @@ pub struct ToolOutput {
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum ToolRuntimeEvent {
     SkillActivated { activation: SkillActivation },
+    ToolResultRevision { revision: u64 },
 }
 
 #[cfg(test)]

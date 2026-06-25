@@ -40,6 +40,7 @@ fn input(arguments: serde_json::Value) -> ToolInput {
         arguments,
         session_id: "session".to_string(),
         tool_id: "tool".to_string(),
+        revision_base: 0,
     }
 }
 

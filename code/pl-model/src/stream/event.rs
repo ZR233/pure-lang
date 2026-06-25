@@ -21,28 +21,24 @@ pub(crate) enum ModelStreamEvent {
         channel: TraceTextChannel,
         authoritative_text: Option<String>,
     },
-    ReasoningStarted {
+    ReasoningSummaryStarted {
         id: String,
         provider_metadata: Option<serde_json::Value>,
     },
-    ReasoningDelta {
+    ReasoningSummaryDelta {
         id: String,
-        chunk_index: u32,
+        section_index: u32,
         delta: String,
     },
-    ReasoningCompleted {
+    ReasoningSummaryCompleted {
         id: String,
         provider_metadata: Option<serde_json::Value>,
+        authoritative_summary: Option<Vec<String>>,
     },
-    PlanStarted {
+    ReasoningRawDelta {
         id: String,
-    },
-    PlanDelta {
-        id: String,
+        content_index: u32,
         delta: String,
-    },
-    PlanCompleted {
-        id: String,
     },
     ToolInputStarted {
         stream_id: Option<String>,

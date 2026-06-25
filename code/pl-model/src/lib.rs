@@ -4,13 +4,13 @@ mod manager;
 mod model_family;
 mod model_info;
 mod parameter;
-mod proposed_plan;
 mod protocol;
 mod provider;
 mod provider_info;
 mod provider_usage;
 mod request;
 mod stream;
+mod visible_text;
 
 pub use capabilities::{
     ModelCapabilities, ModelModality, ProviderCapabilities, ReasoningInterleaved,

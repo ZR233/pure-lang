@@ -7,7 +7,6 @@ use super::event::{ModelStreamEvent, ToolInputDeltaPayload, ToolInputPayloadKind
 pub(crate) struct StreamLifecycle {
     open_text: BTreeSet<String>,
     open_reasoning: BTreeSet<String>,
-    open_plan: BTreeSet<String>,
     open_tools: HashMap<String, OpenToolInput>,
 }
 
@@ -23,7 +22,6 @@ impl StreamLifecycle {
         Self {
             open_text: BTreeSet::new(),
             open_reasoning: BTreeSet::new(),
-            open_plan: BTreeSet::new(),
             open_tools: HashMap::new(),
         }
     }
@@ -53,76 +51,87 @@ impl StreamLifecycle {
                 channel,
                 authoritative_text,
             } => {
-                self.open_text.remove(&block_key(channel.as_str(), &id));
-                vec![ModelStreamEvent::TextCompleted {
-                    id,
-                    channel,
-                    authoritative_text,
-                }]
+                if self.open_text.remove(&block_key(channel.as_str(), &id)) {
+                    vec![ModelStreamEvent::TextCompleted {
+                        id,
+                        channel,
+                        authoritative_text,
+                    }]
+                } else if authoritative_text
+                    .as_deref()
+                    .is_some_and(|text| !text.is_empty())
+                {
+                    vec![
+                        ModelStreamEvent::TextStarted {
+                            id: id.clone(),
+                            channel,
+                        },
+                        ModelStreamEvent::TextCompleted {
+                            id,
+                            channel,
+                            authoritative_text,
+                        },
+                    ]
+                } else {
+                    Vec::new()
+                }
             }
-            ModelStreamEvent::ReasoningStarted {
+            ModelStreamEvent::ReasoningSummaryStarted {
                 id,
                 provider_metadata,
             } => {
                 self.open_reasoning.insert(id.clone());
-                vec![ModelStreamEvent::ReasoningStarted {
+                vec![ModelStreamEvent::ReasoningSummaryStarted {
                     id,
                     provider_metadata,
                 }]
             }
-            ModelStreamEvent::ReasoningDelta {
+            ModelStreamEvent::ReasoningSummaryDelta {
                 id,
-                chunk_index,
+                section_index,
                 delta,
             } => {
                 if self.open_reasoning.insert(id.clone()) {
                     vec![
-                        ModelStreamEvent::ReasoningStarted {
+                        ModelStreamEvent::ReasoningSummaryStarted {
                             id: id.clone(),
                             provider_metadata: None,
                         },
-                        ModelStreamEvent::ReasoningDelta {
+                        ModelStreamEvent::ReasoningSummaryDelta {
                             id,
-                            chunk_index,
+                            section_index,
                             delta,
                         },
                     ]
                 } else {
-                    vec![ModelStreamEvent::ReasoningDelta {
+                    vec![ModelStreamEvent::ReasoningSummaryDelta {
                         id,
-                        chunk_index,
+                        section_index,
                         delta,
                     }]
                 }
             }
-            ModelStreamEvent::ReasoningCompleted {
+            ModelStreamEvent::ReasoningSummaryCompleted {
                 id,
                 provider_metadata,
+                authoritative_summary,
             } => {
                 self.open_reasoning.remove(&id);
-                vec![ModelStreamEvent::ReasoningCompleted {
+                vec![ModelStreamEvent::ReasoningSummaryCompleted {
                     id,
                     provider_metadata,
+                    authoritative_summary,
                 }]
             }
-            ModelStreamEvent::PlanStarted { id } => {
-                self.open_plan.insert(id.clone());
-                vec![ModelStreamEvent::PlanStarted { id }]
-            }
-            ModelStreamEvent::PlanDelta { id, delta } => {
-                if self.open_plan.insert(id.clone()) {
-                    vec![
-                        ModelStreamEvent::PlanStarted { id: id.clone() },
-                        ModelStreamEvent::PlanDelta { id, delta },
-                    ]
-                } else {
-                    vec![ModelStreamEvent::PlanDelta { id, delta }]
-                }
-            }
-            ModelStreamEvent::PlanCompleted { id } => {
-                self.open_plan.remove(&id);
-                vec![ModelStreamEvent::PlanCompleted { id }]
-            }
+            ModelStreamEvent::ReasoningRawDelta {
+                id,
+                content_index,
+                delta,
+            } => vec![ModelStreamEvent::ReasoningRawDelta {
+                id,
+                content_index,
+                delta,
+            }],
             ModelStreamEvent::ToolInputStarted {
                 stream_id,
                 item_id,
@@ -273,13 +282,11 @@ impl StreamLifecycle {
             });
         }
         for id in std::mem::take(&mut self.open_reasoning) {
-            events.push(ModelStreamEvent::ReasoningCompleted {
+            events.push(ModelStreamEvent::ReasoningSummaryCompleted {
                 id,
                 provider_metadata: None,
+                authoritative_summary: None,
             });
-        }
-        for id in std::mem::take(&mut self.open_plan) {
-            events.push(ModelStreamEvent::PlanCompleted { id });
         }
         events
     }
@@ -373,4 +380,40 @@ fn tool_key(stream_id: Option<&String>, call_id: Option<&String>, item_id: &str)
 
 pub(crate) fn tool_start_payload(kind: ToolInputPayloadKind) -> ToolInputDeltaPayload {
     kind.empty_payload()
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[test]
+    fn authoritative_completion_without_delta_still_starts_and_completes_text() {
+        let mut lifecycle = StreamLifecycle::new();
+
+        let events = lifecycle.normalize(ModelStreamEvent::TextCompleted {
+            id: "msg_progress".to_string(),
+            channel: TraceTextChannel::Commentary,
+            authoritative_text: Some("已完成检查".to_string()),
+        });
+
+        match events.as_slice() {
+            [
+                ModelStreamEvent::TextStarted { id, channel },
+                ModelStreamEvent::TextCompleted {
+                    id: completed_id,
+                    channel: completed_channel,
+                    authoritative_text,
+                },
+            ] => {
+                assert_eq!(id, "msg_progress");
+                assert_eq!(*channel, TraceTextChannel::Commentary);
+                assert_eq!(completed_id, "msg_progress");
+                assert_eq!(*completed_channel, TraceTextChannel::Commentary);
+                assert_eq!(authoritative_text.as_deref(), Some("已完成检查"));
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+    }
 }

@@ -28,7 +28,7 @@ part 类型固定为：
 - `commentary`：Codex 风格可见进展更新，只用于 UI 展示，不写入最终 assistant 消息历史。
 - `final`：最终 assistant 正文，会写入会话历史并作为本轮最终答复。
 
-`StudioPartDelta` 必须包含 `messageId`、`partId`、`revision`、`field` 和 `delta`；`field` 固定为 `text`、`tool.arguments`、`tool.result`、`reasoningText` 或 `planContent` 等协议字段。delta 只能在前端已有 part snapshot 时应用；孤儿 delta 按 opencode 逻辑丢弃。旧的 `role` 字段不再作为 Studio 协议语义入口。
+`StudioPartDelta` 必须包含 `messageId`、`partId`、`revision`、`field` 和 `delta`；`field` 固定为 `text`、`tool.arguments`、`tool.result`、`reasoning.summary` 或 `planContent` 等协议字段。delta 只能在前端已有 part snapshot 时应用；孤儿 delta 按 opencode 逻辑丢弃。旧的 `role` 字段不再作为 Studio 协议语义入口。
 
 用户 `text` part 可以携带 `attachments` 元数据，当前只用于图片输入缩略图展示。part 的持久语义只依赖附件 id、文件名、媒体类型、尺寸和大小；GUI 事件可以携带派生的 `dataUrl` 预览值用于即时缩略图。模型可见的 base64 图片内容由 `pl-core` 在请求前按附件 id materialize，不写入消息正文。
 
@@ -47,7 +47,9 @@ snapshot 与 live delta 的优先级完全对齐 opencode：
 - terminal snapshot 到达后，后续 `streaming`、`started` 或低 revision snapshot 不得覆盖 `completed`、`failed`、`interrupted`、`denied`、`budgetLimited` 等终态；revision 不高于当前 overlay/snapshot 的 live delta 不得再修改 part。带 `chunkIndex` 的 delta 必须按 part 去重；重复或倒序 chunk 直接丢弃。
 - reload、历史恢复和 stale backfill 只依赖 durable snapshot；丢失 live delta 不影响最终可恢复状态。
 
-reasoning part 默认只作为折叠的标题/摘要行显示。raw reasoning、provider replay metadata 或内部 thinking chunk 可以保留在 provider metadata、trace 或历史重放所需结构中，但不得作为 timeline 正文默认展示；只有 provider 明确输出的 `<commentary>`、`<final>` 或 `<proposed_plan>` 可见标签段会被投影成对应 commentary、final 或 plan part。
+`bash` 命令运行期间，stdout/stderr chunk 作为原始命令输出追加到原 `bash` tool part 的 `tool.result` live overlay；stderr chunk 由投影层保留来源标记，前端按普通工具结果增量展示。每个 chunk 使用该 tool part 当前 revision 作为基线继续递增，终态 `messagePartUpdated` 携带不低于最后一个输出 delta 的 revision，并以紧凑 JSON 结果固化 snapshot；`write_stdin` 轮询只返回自己的紧凑结果，不把同一后台进程的输出复制成新的父 timeline tool part。
+
+reasoning part 默认只作为折叠的标题/摘要行显示，来源只能是 provider 明确标记的 reasoning summary，并通过 `reasoning.summary` delta 字段进入 Studio。raw reasoning、provider replay metadata 或内部 thinking chunk 可以保留在 provider metadata、`CompletionResponse.reasoning_content` 或历史重放所需结构中，但不得作为 timeline 正文默认展示；只有 Responses native phase，或 Chat provider 明确输出的 `<commentary>`、`<final>` 可见标签段，会被投影成对应 commentary 或 final part。Plan part 只能来自 `plan_exit.content`。
 
 ## 8.2 数据流
 
@@ -64,7 +66,7 @@ pl-model provider
   → Flutter Riverpod Studio event reducer
 ```
 
-`pure-studio-flutter` 不直接订阅 `AgentEventReceiver`，也不依赖内部 `pl-trace` crate。raw `AgentEvent` 到 typed Studio event 的映射在 `pl-core` 内完成；`pl-studio-bridge` 只转发已经规范化的 `StudioEventEnvelope`。Flutter 端使用 opencode app 风格的 store 与 timeline row projection；event reducer 按事件 kind 更新当前或后台 session view：
+`pure-studio-flutter` 不直接订阅 `AgentEventReceiver`，也不依赖内部 `pl-trace` crate。raw `AgentEvent` 到 Studio event 的映射在 `pl-core` 内完成；`pl-studio-bridge` 只转发已经规范化的 `StudioEventEnvelope`。Flutter FRB adapter 从 `BridgeEventPayload` sealed union 归一为 app 内部 typed `StudioBridgeEventPayload`；event reducer 按 payload 类型更新当前或后台 session view：
 
 - `messageUpdated` upsert 完整 message snapshot。
 - `messagePartUpdated` upsert 完整 part snapshot，并清空同 part 的 delta overlay。
@@ -74,7 +76,7 @@ pl-model provider
 - `agentChanged` / `agentTimelineChanged` 分别更新 latest snapshot 与 append-only 协作事件。
 - `sessionRuntimeChanged`、`skillActivated`、`mcpHealthChanged`、`lspHealthChanged` 即时更新状态栏。
 - `sessionListChanged` 是会话元状态的事实事件，payload 必须包含 `projectId` 和该项目最新 root `sessions`。创建会话、归档会话、归档项目、切换 session mode、Plan 实施把当前 session 切回 `auto` 等会话列表或会话摘要变化，都必须在持久写入后广播该事件；命令返回值只作为请求确认或冷启动 snapshot，不作为 UI 唯一刷新路径。
-- `sessionHandoffChanged` 仅作为 legacy 事件保留；Plan 实施在当前 `sessionId` 内启动新 turn，不再依赖 handoff target child session 展示实施过程。`sessionListChanged` 只驱动 root 会话列表可见性，legacy child/archived session 不计入 root session 列表。
+- `sessionHandoffChanged` 不再作为 Flutter 前端协议入口；Plan 实施在当前 `sessionId` 内启动新 turn，不再依赖 handoff target child session 展示实施过程。`sessionListChanged` 只驱动 root 会话列表可见性，legacy child/archived session 不计入 root session 列表。
 
 `TextDelta`、`ThinkingDelta`、`ToolCallDelta`、`ToolCallComplete` 不再是 Studio 的协议或兼容入口。
 
@@ -96,42 +98,41 @@ BridgeEventEnvelope {
   turnId,
   sequence,
   createdAt,
-  kindType,
-  payloadJson,
+  payload: BridgeEventPayload,
 }
 ```
 
-字段命名在 Dart wire 层使用 camelCase。`payloadJson` 是 canonical camelCase JSON 字符串；Dart 通过 `kindType` 路由到 sealed model。桥接层不得暴露 `serde_json::Value`，也不得把 Flutter 专用字段混入 `StudioEventEnvelope`。
+字段命名在 Dart wire 层使用 camelCase。`payload` 是 FRB/Freezed sealed union，承载结构化事件事实；Dart adapter 只做 DTO 到 app domain 的归一化，Riverpod reducer 不读取 payload Map。桥接层不得暴露 `serde_json::Value`，也不得把 Flutter 专用字段混入 `StudioEventEnvelope`。实时 stream、`loadStudioEvents` backfill、bootstrap snapshot、session snapshot 和命令响应均使用 typed FRB DTO；完整 config/general settings 与工具参数这类开放 JSON 标量只能停留在 Dart adapter 边界，interaction payload 与 agent timeline payload 必须使用 typed DTO/union，不得重新成为实时 reducer 协议。
 
 模型 provider 流的成功边界由 canonical `ModelStreamEvent::Completed` 明确表示。protocol mapper 可以把 provider 私有终止 chunk 转换为该事件；如果底层 SSE parse、transport 或 EOF 在 completed 之前发生，`pl-model` 必须返回错误，并由 turn 层发出 failed turn、`Error` 和 `Done`，不得把局部内容当作成功消息落库。completed 之后的 usage、文本、思考和工具调用 snapshot 才能进入最终 `CompletionResponse`。
 
 Plan Mode 下计划确认的主触发源是 `plan_exit` 工具。模型完成可执行计划后调用 `plan_exit({ content })`，`pl-core` 使用工具参数中的 Markdown 计划补齐或覆盖同一 turn 的 `plan` part，并在 turn 完成后创建 `PlanConfirmation` interaction。`plan_exit` 只提交计划，不在工具内部等待用户选择，也不写入 opencode 风格计划文件。
 
-模型输出的 `<proposed_plan>...</proposed_plan>` 块仍由 `pl-model::stream` accumulator 提取为 `plan` part，用于流式展示和旧会话兼容。计划正文写入 `StudioPart.plan.content`，增量使用 `StudioPartDelta(field=planContent)`；同一块内容不得同时出现在普通 assistant `text` part 中。计划块之外的普通文本仍按 assistant `text` part 流式输出。如果同一 turn 同时出现 `<proposed_plan>` 和成功的 `plan_exit`，以 `plan_exit.content` 作为最终确认计划。
+Chat provider 不再通过 `<proposed_plan>...</proposed_plan>` 提交或展示计划；该旧标签按普通未标记文本处理，不生成 `plan` part，也不能触发计划确认。计划正文写入 `StudioPart.plan.content`，增量使用 `StudioPartDelta(field=planContent)`，来源只能是 `plan_exit.content` 或后续明确的 Plan lifecycle 事件。
 
-Auto 与 Plan Mode 下模型可见输出优先使用显式标签：`<commentary>...</commentary>` 表示中间进展，`<final>...</final>` 表示最终正文；Plan Mode 的最终计划优先通过 `plan_exit` 提交，`<proposed_plan>...</proposed_plan>` 只作为流式展示和兼容入口。`pl-model::stream` accumulator 负责跨 chunk 解析这些标签，标签本身不得进入 timeline。未标记的普通输出默认进入 `final` 文本通道并写入 assistant 正文，不能导致 turn 失败；Plan Mode 下未标记文本也不伪造 `plan` part。
+Auto 与 Plan Mode 下模型可见输出优先使用 provider 原生可见 phase；Chat 兼容 provider 使用显式标签：`<commentary>...</commentary>` 表示中间进展，`<final>...</final>` 表示最终正文；Plan Mode 的最终计划必须通过 `plan_exit` 提交。`pl-model` visible output decoder 负责按 endpoint 协议跨 chunk 解析或归属这些可见输出，标签本身不得进入 timeline。未标记的普通输出默认进入 `final` 文本通道并写入 assistant 正文，不能导致 turn 失败；Plan Mode 下未标记文本也不伪造 `plan` part。
 
-部分 OpenAI-compatible Chat provider 会把带可见标签的输出放入 `reasoning_content`。accumulator 必须保留这部分原始内容作为 thinking/reasoning，同时只把其中显式 `<commentary>`、`<final>`、`<proposed_plan>` 标签段投影到可见 timeline；无标签 `reasoning_content` 不得变成 assistant 正文或 plan。
+部分 OpenAI-compatible Chat provider 会把带可见标签的输出放入 `reasoning_content`。Chat tagged decoder 必须保留这部分原始内容作为 raw reasoning，同时只把其中显式 `<commentary>` 和 `<final>` 标签段投影到可见 timeline；无标签 `reasoning_content` 不得变成 assistant 正文、plan 或 reasoning summary row。
 
 计划的采纳与实施状态不改变 `plan` part 本身，而是通过 `StudioEventKind::PlanLifecycleChanged` 写入 durable `studio_events` 并广播。事件包含 `planId`、`state`、可选 `turnId`、可选 `reason` 和 `updatedAt`；Studio 从 durable events 中按 `planId` 折叠 latest plan state。Plan turn 完成后需要用户确认实施时，后端创建 `InteractionKind::PlanConfirmation`，前端不再从历史 timeline 自行恢复旧确认 composer。确认 resolution 固定为 `implementFreshContext | continuePlanning | dismiss`；`continuePlanning` 的 `content` 是确认 composer 同次提交的用户补充内容，resolution 成功后由前端立即作为普通 prompt 发送；`implementFreshContext` 保留 wire 名称但不再创建 fresh session，后端必须在当前 session 内解决 interaction、把当前 session mode 持久切换为 `auto`、广播 `accepted/implementing`，并用同一 `sessionId` 启动实施 turn。前端在提交 `implementFreshContext` 后应立即把当前 session mode 乐观投影为 `auto`，避免状态栏在实施 turn 已启动时仍显示 Plan。实施 turn 的实时 `turnChanged/messageUpdated/messagePartUpdated/messagePartDelta/sessionRuntimeChanged` 直接更新当前会话，不能通过 `sessionHandoffChanged` 切换目标会话。
 
 Studio 前端的实时事件、`load_session_state` projection snapshot 和 `load_studio_events` 补拉结果必须进入同一个 StudioEvent reducer：
 
 - `load_session_state` 返回当前 `{ message, sequence }[]`、`{ part, sequence }[]` projection snapshot、非 message/part durable 状态事件与 `eventNextSequence`；前端先用 projection record 初始化 message/part state 和 per-id sequence guard，再用同一个 reducer 应用状态事件。
-- `load_studio_events(afterSequence)` 返回缺失的 canonical envelope；payload 必须与数据库中保存的 payload 完全一致。
+- `load_studio_events(afterSequence)` 返回缺失的 typed bridge envelope；其 payload 事实必须与数据库中保存的 durable envelope 一致，并通过与实时 stream 相同的 reducer 入口应用。
 - `StudioMessage` / `StudioPart` 是前端 reducer 的状态事实源；timeline row 只是 selector/view model 的折叠结果，不作为 bridge command 的主输入 DTO。
 - `submit_prompt` 与触发实施的 `resolve_interaction` 不返回最终 timeline；它们只返回提交成功、目标 `sessionId/turnId/cursor`。
 - `set_session_mode`、`create_session`、`archive_session` 和 Plan 实施确认必须通过 `SessionListChanged` 更新前端会话摘要；前端可以做乐观投影，但最终仍以 stream reducer 中的事件为准。
 - Plan lifecycle 与 interaction 状态均通过 `StudioEvent` 实时更新，并在 `bootstrap`、`select_session`、`load_session_state` 和 `load_studio_events` 中恢复。
 - `SkillActivated` 是 skill runtime fact 的实时通知与可追踪记录。它不渲染成普通 timeline row；Studio 收到后从后端 runtime snapshot 更新 `activeSkills`，历史恢复以结构化 session skill 表为准，而不是解析 `skill_view` 的 tool result 文本。
 - `Done` 只表示 turn 状态完成，不携带 timeline 内容；最终正文必须通过 `textChannel=final` 的 `text` part 表达。
-- Plan Mode 的最终可执行计划必须通过 `plan` part 表达；该 part 可以来自 `plan_exit.content` 或兼容的 `<proposed_plan>` 流式块。如果模型只提交计划而没有普通正文，不应生成空 assistant `text` part。
+- Plan Mode 的最终可执行计划必须通过 `plan_exit.content` 生成 `plan` part。如果模型只提交计划而没有普通正文，不应生成空 assistant `text` part。
 
 Studio 渲染使用 opencode app 同款 timeline 框架语义：`virtua` 虚拟列表、自写 row algebra、stable row key、bottom spacer、row cache、part group 和 delta overlay。虚拟滚动层不得改变 Message/Part 协议语义、事件游标或 reducer 合并规则。动态高度、流式 delta overlay 和自动跟随底部属于前端渲染适配层职责；协议层仍只表达 message/part snapshot 与 live delta。
 
 流式 Markdown 使用 opencode 的 stream-safe 渲染规则。`planContent`、普通 text 和 commentary 的 live overlay 在 Flutter timeline 展示层原生直接用 `GptMarkdown` 渲染，以当前 part 累计文本作为输入，不再通过自定义兼容 renderer facade 转发。展示前只允许做轻量 agent repair，未闭合代码块、链接引用和不完整 Markdown 由 renderer 容错展示；Rust/FRB 事件协议仍只表达 message/part snapshot 与 live delta，不承担 Markdown 补全。terminal `messagePartUpdated` 到达后清除 overlay，并用完整 snapshot 重新渲染。
 
-状态栏同样是 Studio store projection 的消费者。Flutter store 必须保存当前 session 的 `sessionRuntime`、`turnPhase/turnStartedAt`、`agents`、`mcpServers/activeMcpServers`、`lspServers/activeLspServers`、`providers/roles/permissionMode`，并由 typed Studio event 与 bootstrap/session snapshot 恢复。模型、reasoning effort、模式和权限控制通过 `pl-studio-bridge` command 更新配置或 session mode；状态栏不得直接推断 timeline 内容来累计 token 或费用。普通 root turn 和 Plan 实施 turn 在写入最新 runtime snapshot 后必须广播 `SessionRuntimeChanged`，避免只有刷新或切换 session 后才看到 context/cost 更新。Flutter 状态栏的 context 展示使用无数字圆形进度条；鼠标悬停进度条时显示具体 context token/window、百分比、总 token 和模型。费用、active skills、MCP、LSP 与 subagent 活动仍作为独立状态项保留。
+状态栏同样是 Studio store projection 的消费者。Flutter store 必须保存当前 session 的 `sessionRuntime`、`turnPhase/turnStartedAt`、`agents`、`mcpServers/activeMcpServers`、`lspServers/activeLspServers`、`providers/roles/permissionMode`，并由 Studio event 与 bootstrap/session snapshot 恢复。模型、reasoning effort、模式和权限控制通过 `pl-studio-bridge` command 更新配置或 session mode；状态栏不得直接推断 timeline 内容来累计 token 或费用。普通 root turn 和 Plan 实施 turn 在写入最新 runtime snapshot 后必须广播 `SessionRuntimeChanged`，避免只有刷新或切换 session 后才看到 context/cost 更新。Flutter 状态栏的 context 展示使用无数字圆形进度条；鼠标悬停进度条时显示具体 context token/window、百分比、总 token 和模型。费用、active skills、MCP、LSP 与 subagent 活动仍作为独立状态项保留。
 
 ## 8.3 背压与容量
 
@@ -149,7 +150,7 @@ Flutter runtime bridge 检测到底层 broadcast receiver `Lagged` 时，必须�
 
 `StudioEventKind::InteractionChanged` 是审批、用户输入和计划确认的唯一实时交互事件。事件携带 `InteractionRequest`，包括 `kind`、`status`、`scope` 和类型化 payload；持久恢复以 `interactions` 表为准。`userInput` 对齐 opencode 的 `question` 工具体验：pending/running 阶段由 dock prompt 负责真实问题输入，timeline 隐藏对应 `request_user_input`/`question` tool part；resolved 后可以从 redacted tool result 渲染问题与答案摘要。`userInput` 的 resolved 事件不回传 secret 答案明文到普通 timeline 展示；答案只通过 interaction resolution 返回给等待中的工具。`planConfirmation` 同样是 dock prompt 交互，不是从 timeline plan part 自行派生的按钮。旧 `UserInputRequested` / `UserInputAnswered`、`ToolApprovalRequested`、`studio-interaction-changed` 等 sideband 不是 Studio 协议入口。
 
-agent 协作 timeline 也遵循 typed Studio 协议：`agentChanged` 更新 latest snapshot，`agentTimelineChanged` 只携带 typed spawn/interaction/wait/close lifecycle event。`bootstrap`、`select_session` 和 `load_session_state` 的 `agentEvents` 历史快照也直接返回 `StudioAgentTimelineEvent[]`，不得再暴露旧式 `kind + payload` DTO。MCP/LSP health 事件同样携带 typed `StudioMcpHealth` / `StudioLspHealth` snapshot。前端不得反序列化 raw `AgentEvent` 或健康检查 payload；内部 trace 如需保留原始事件，只能作为诊断输入，在进入 Studio wire 前完成映射。
+agent 协作 timeline 遵循 Studio 规范化协议：`agentChanged` 更新 latest snapshot，`agentTimelineChanged` 只携带 spawn/interaction/wait/close lifecycle event 的规范化 payload。`bootstrap`、`select_session` 和 `load_session_state` 的 `agentEvents` 历史快照返回 `BridgeAgentTimelineEventDto`，其中 payload 为 `BridgeAgentTimelinePayloadDto` typed union；Flutter 不解析 raw `AgentEvent` 或历史 `payloadJson` 记录。MCP/LSP health 事件同样携带 canonical health snapshot。内部 trace 如需保留原始事件，只能作为诊断输入，在进入 Studio wire 前完成映射。
 
 子代理内部事件不直接转发完整文本流、思考流、工具调用流或工具输出。`pl-core` 将子代理生命周期压缩为 `agent` part 和 `AgentStateChanged` snapshot，状态固定为 `queued`、`running`、`waiting`、`completed`、`errored`、`interrupted`、`shutdown`、`notFound`。Studio 持久化这些状态事件，并在聊天界面只渲染路径、状态、摘要和最终错误文本，避免把子代理内部执行细节混入父会话 timeline。
 
@@ -163,11 +164,11 @@ root agent 的 provider `429` 错误码是当前轮的终止错误，不进入�
 
 ## 8.5 流式工具调用聚合与 ID
 
-`pl-model` 负责把 provider 的工具调用 delta 聚合为完整的 `ToolCall` 后再交给 `pl-core` 执行。protocol 层先把 OpenAI Responses 或 Chat Completions SSE 映射为 provider 无关的 content block lifecycle `ModelStreamEvent`，`stream` 层只消费该归一化事件，不解析 OpenAI 原始 JSON。Chat Completions 流式响应中的后续参数片段可能只带 `index`，不再重复 `id` 或 `name`；Responses API 的 custom/freeform 输入 delta 也可能只带 `item_id` / `call_id`。因此聚合层必须使用稳定的流式序号或 item/call id 合并片段，并保留最早出现的 provider id、工具名和调用种类。
+`pl-model` 负责把 provider 的工具调用 delta 聚合为完整的 `ToolCall` 后再交给 `pl-core` 执行。protocol 层先把 OpenAI Responses 或 Chat Completions SSE 映射为 provider 无关的 content block lifecycle `ModelStreamEvent`，`stream` 层只消费该归一化事件，不解析 OpenAI 原始 JSON。Responses 和 Chat 的可见文本协议必须在 decoder 层显式分离：Responses 使用 native phase decoder，优先读取 `response.output_item.added/done` 中 assistant message 的 `phase=commentary/final_answer/final`，并把后续 `response.output_text.delta` 归属到对应 `textChannel`；Chat Completions 使用 tagged text decoder，把普通 `content` 以及带标签的 `reasoning_content` 中的 `<commentary>`、`<final>` 转成 canonical text lifecycle。provider-independent accumulator 不再持有 tag parser，也不再根据 endpoint 猜测可见输出协议。Chat Completions 流式响应中的后续参数片段可能只带 `index`，不再重复 `id` 或 `name`；Responses API 的 custom/freeform 输入 delta 也可能只带 `item_id` / `call_id`。因此聚合层必须使用稳定的流式序号或 item/call id 合并片段，并保留最早出现的 provider id、工具名和调用种类。
 
 `ModelStreamEvent` 的 assistant content 语义与 opencode 的 part/lifecycle 模型对齐：`text`、`reasoning`、`plan` 和 `tool` 都有独立 start/delta/complete 生命周期。`pl-model::stream::lifecycle` 负责为缺失 start 的 delta 补 start，并在 step finish 前补齐仍打开的 text、reasoning 和 plan block。进入 Studio 前必须转为 `StudioMessage` / `StudioPart` snapshot 或 live delta，不再从普通文本或 thinking 内容推断 plan。
 
-Plan 是协议级 block。provider 或 prompt 兼容层可以继续识别 `<proposed_plan>`，但必须先转换为 `PlanStarted/PlanDelta/PlanCompleted` 后再进入 accumulator；`pl-core` 也可以从 Plan Mode 中成功执行的 `plan_exit.content` 生成同一个 `plan` part。`<commentary>` 与 `<final>` 同理转换为带 `TraceTextChannel` 的 text lifecycle。未标签普通 text 默认进入 `final` text block；未标签 reasoning 永远只进入 thinking block，不能生成 assistant 正文或 plan。部分 OpenAI-compatible Chat provider 会把带可见标签的输出放入 `reasoning_content`，该兼容转换只允许提取显式标签段，同时保留完整 reasoning 原文作为 thinking。
+Plan 是协议级 block，Plan Mode 中只能由成功执行的 `plan_exit.content` 生成 `plan` part。`<commentary>` 与 `<final>` 由 Chat tagged decoder 转换为带 `TraceTextChannel` 的 text lifecycle。Responses native phase decoder 不解析这些标签，也不得把 native commentary/final 文本再次交给 tag parser。未标签普通 Chat text 默认进入 `final` text block；未标签 raw reasoning 只进入内部 reasoning buffer，不能生成 assistant 正文、plan 或 reasoning summary row。部分 OpenAI-compatible Chat provider 会把带可见标签的输出放入 `reasoning_content`，该兼容转换只允许提取显式 commentary/final 标签段，同时保留完整 reasoning 原文作为 raw reasoning。
 
 工具 part 的 `partId` 使用 `toolCallId`。当 provider 提供 `call_id` 时，`toolCallId` 优先使用该值；provider 的原始 item id 只作为聚合辅助信息保留在内部。工具参数流、审批、执行和结果都 upsert 到同一个 tool part。
 

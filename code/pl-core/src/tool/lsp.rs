@@ -382,6 +382,7 @@ mod tests {
             arguments: serde_json::json!({"operation": "diagnostics"}),
             session_id: "session-1".to_string(),
             tool_id: "tool-1".to_string(),
+            revision_base: 0,
         };
 
         let error = tool.execute(input, context).await.unwrap_err();

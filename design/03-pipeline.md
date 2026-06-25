@@ -29,7 +29,7 @@ Flutter bridge crate 不承载流程逻辑，只把 Dart 调用转发到 `pl-cor
 - `turnOptions.permissionMode`：默认固定 `request-approval`
 - `prompt`、`sessionId`、`workspaceRoot` 等进入 application service
 
-`compileMode` 是会话级协作模式，不是模型角色路由。Studio 根聊天 turn 始终使用 `planner` 角色模型；`auto` 表示执行型协作模式，允许模型在审批策略约束内主动修改工作区；`plan` 是 Codex 风格规划模式，允许读取、搜索、运行经审批的探索命令和调度探索型子代理，但最终交付物应是一段可执行计划，而不是直接修改文件。前端切换 Auto/Plan 调用 `setSessionMode(sessionId, mode)` 持久化 session 默认模式；前端切换根聊天模型调用 `setModelRole(roleKey=planner, providerId, model, effort)` 持久化 planner role，下一轮 turn 按新的 planner role 解析 provider/model。模型可见输出使用 Codex 风格通道标签：`<commentary>...</commentary>` 表示运行中的短进展更新，`<final>...</final>` 表示最终答复；Plan Mode 的最终计划使用 `<proposed_plan>...</proposed_plan>` 包裹，由 streaming 层提取为独立 plan part。普通 assistant 正文不显示这些标签。
+`compileMode` 是会话级协作模式，不是模型角色路由。Studio 根聊天 turn 始终使用 `planner` 角色模型；`auto` 表示执行型协作模式，允许模型在审批策略约束内主动修改工作区；`plan` 是 Codex 风格规划模式，允许读取、搜索、运行经审批的探索命令和调度探索型子代理，但最终交付物应是一段可执行计划，而不是直接修改文件。前端切换 Auto/Plan 调用 `setSessionMode(sessionId, mode)` 持久化 session 默认模式；前端切换根聊天模型调用 `setModelRole(roleKey=planner, providerId, model, effort)` 持久化 planner role，下一轮 turn 按新的 planner role 解析 provider/model。模型可见输出在协议层分流：OpenAI Responses 等 native phase provider 使用原生 `commentary` / `final_answer` phase，Chat tagged provider 使用 `<commentary>...</commentary>` 表示运行中的短进展更新、`<final>...</final>` 表示最终答复。streaming 层把这些 provider 输出统一投影为 text part；plan part 只能由 `plan_exit.content` 或后续明确的 plan lifecycle 事件生成。普通 assistant 正文不显示 Chat 标签，Responses native phase 不解析标签，`<proposed_plan>` 按普通未标记文本处理。
 
 `workspaceRoot` 是运行期有效工作区，而不是简单等于 UI 当前选中的目录。Studio 读取 project path 后先解析到规范化目录；如果该目录位于 Git 仓库中，则提升到最近的 Git 仓库根。这样用户从子 crate 或桌面壳层进入项目时，工具仍能访问完整仓库上下文。工作区记忆按 Codex 风格从 Git 根到当前工作目录读取层级文档，候选文件优先级为 `AGENTS.override.md`、`AGENTS.md`、`Agents.md`，并受配置的总字节预算限制。
 
@@ -126,7 +126,7 @@ Agent 协作 timeline 与状态分层：
 - agent timeline 是 append-only 协作事件流，只记录 spawn、wait、message、followup、close、final status 等事实事件
 - agent tree 是 latest snapshot，只按 `agent_id/path` 覆盖最新状态，供状态栏、树视图和 `list_agents` 使用
 - 前端不得用 latest snapshot 渲染 timeline；同一个 agent 的多次状态变化必须在 timeline 中保留为多条独立事件
-- `AgentStateChanged` 只用于更新 latest snapshot；UI timeline 消费 `agentEvents` 中的 append-only event。实时 `agentTimelineChanged` 与历史 `agentEvents` 都必须携带 typed `StudioAgentTimelineEvent`，不得再把 raw `AgentEvent` 或旧式 `kind + payload` DTO 交给前端解析。
+- `AgentStateChanged` 只用于更新 latest snapshot；UI timeline 消费 `agentEvents` 中的 append-only event。实时 `agentTimelineChanged` 与历史 `agentEvents` 都必须携带 canonical `StudioAgentTimelineEvent` 语义，Flutter 只解析规范化 payload，不得读取 raw `AgentEvent`。
 
 持久化原则：
 
@@ -193,9 +193,10 @@ turn 生命周期持久化语义固定：
 Flutter/FRB 输出使用同一语义，桥接层统一包成：
 
 - `RuntimeSnapshot`：runtime 状态、活动会话/turn、更新时间与可展示错误
-- `JsonResponse`：canonical camelCase JSON 字符串，payload 类型由调用 API 决定
-- `BridgeEventEnvelope`：`eventId/sessionId/turnId/sequence/createdAt/kindType/payloadJson`
+- `BridgeEventEnvelope`：`eventId/sessionId/turnId/sequence/createdAt/payload`
+- `BridgeStudioEventsResponse`：`sessionId/events/nextSequence`，其中 `events[]` 与实时 stream 共用 typed `BridgeEventEnvelope`
+- `BridgeStudioSnapshotResponse`、`BridgeSessionStateResponse`、`ProviderUsagesResponse`、`SkillsResponse`、`SubmitPromptResponse`、`StopPromptResponse`、`ResolveInteractionResponse`、`SettingsDraftResponse`、`ConfigSavedResponse`：FRB typed DTO。完整 config 与 general settings 作为 snapshot DTO 的 `configJson`/`generalSettingsJson` 留在 Dart adapter 边界。
 
-Dart 层只根据 `kindType` 和 typed routing fields 更新 Riverpod store；不得从命令最终响应推导 timeline 终态。
+Dart FRB adapter 从 `BridgeEventPayload` sealed union 归一出 app 内部 typed `StudioBridgeEventPayload`；Riverpod reducer 只按 payload 类型更新 store，不再读取 `event.payload[...]` Map。实时 stream 与 `loadStudioEvents` backfill 必须共用这套 typed envelope。命令与 snapshot 返回不使用 `JsonResponse` 外壳；Dart 只在 adapter 边界解 `configJson`、`generalSettingsJson` 和工具参数这类开放 JSON 标量。agent timeline 在 FRB 边界使用 typed payload union；Flutter 不解析历史 `payloadJson` agent event 记录，持久层必须在进入 Flutter 前投影为 typed `BridgeAgentTimelineEventDto`。
 
 Flutter 桥接动作按同一 runtime 边界命名：`bootstrapStudio`、`openProject`、`selectProject`、`createSession` 和 `archiveSession` 返回新的 Studio 快照，`setSessionMode` 持久化当前 session 的下一轮协作模式，`setModelRole` 写回 provider/role 配置并返回 canonical config view，`submitPrompt`/`stopPrompt`/`resolveInteraction` 只表示请求已提交，`loadSessionState`/`loadStudioEvents` 用于会话恢复与 stale backfill，`saveRuntimePermissionMode` 写回 runtime config，`saveStudioSettingsDraft` 持久化尚未 typed 化的设置页草稿。

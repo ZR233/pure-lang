@@ -1,14 +1,17 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use pl_protocol::PureError;
+use pl_trace::{AgentEvent, TraceDelta, TracePartDeltaEvent, TracePartKind, TracePartStatus};
 use serde::{Deserialize, Serialize};
 
 use super::command::{
-    CommandOutputSnapshot, CommandProcessManager, CommandStartRequest, CommandWriteRequest,
+    CommandOutputObserver, CommandOutputSnapshot, CommandOutputStream, CommandProcessManager,
+    CommandStartRequest, CommandWriteRequest,
 };
 use super::truncation::{OutputTruncation, TruncationStrategy};
-use super::{Tool, ToolContext, ToolInput, ToolOutput, ToolPathPolicy};
+use super::{Tool, ToolContext, ToolInput, ToolOutput, ToolPathPolicy, ToolRuntimeEvent};
 
 const TOOL_OUTPUT_DIR: &str = "target/pure";
 const OUTPUT_LOG_FILE: &str = "output.log";
@@ -141,6 +144,35 @@ impl BashTool {
     }
 }
 
+struct ToolResultOutputObserver {
+    event_tx: pl_trace::AgentEventSender,
+    turn_id: String,
+    item_id: String,
+    revision_base: u64,
+}
+
+impl CommandOutputObserver for ToolResultOutputObserver {
+    fn output_chunk(&self, stream: CommandOutputStream, chunk: &[u8], revision: u64) {
+        let mut delta = String::from_utf8_lossy(chunk).to_string();
+        if matches!(stream, CommandOutputStream::Stderr) {
+            delta = format!("[stderr] {delta}");
+        }
+        let now = unix_seconds();
+        let event = TracePartDeltaEvent {
+            turn_id: self.turn_id.clone(),
+            item_id: self.item_id.clone(),
+            started_sequence: 0,
+            revision: self.revision_base.saturating_add(revision),
+            kind: TracePartKind::Tool,
+            status: TracePartStatus::Running,
+            created_at: now,
+            updated_at: now,
+            delta: TraceDelta::ToolResult { delta },
+        };
+        let _ = self.event_tx.send(AgentEvent::TracePartDelta { event });
+    }
+}
+
 pub(crate) fn command_tool_pair(workspace_root: PathBuf) -> (BashTool, WriteStdinTool) {
     let manager = CommandProcessManager::default();
     (
@@ -225,6 +257,12 @@ impl Tool for BashTool {
                 context.allows_workspace_escape(),
             )?;
             let output_file = self.output_path(&input.session_id, &input.tool_id);
+            let observer = Arc::new(ToolResultOutputObserver {
+                event_tx: context.event_tx.clone(),
+                turn_id: input.session_id.clone(),
+                item_id: input.tool_id.clone(),
+                revision_base: input.revision_base,
+            });
             let snapshot = self
                 .process_manager
                 .start(CommandStartRequest {
@@ -235,10 +273,11 @@ impl Tool for BashTool {
                     max_output_chars,
                     output_file,
                     cancellation_token: context.options.cancellation_token.clone(),
+                    output_observer: Some(observer),
                 })
                 .await?;
 
-            tool_output_from_snapshot(snapshot, self.name())
+            tool_output_from_snapshot(snapshot, self.name(), input.revision_base)
         })
     }
 }
@@ -301,7 +340,7 @@ impl Tool for WriteStdinTool {
                 })
                 .await?;
 
-            tool_output_from_snapshot(snapshot, self.name())
+            tool_output_from_snapshot(snapshot, self.name(), input.revision_base)
         })
     }
 }
@@ -321,6 +360,7 @@ fn max_output_chars(value: Option<usize>, default: usize) -> usize {
 fn tool_output_from_snapshot(
     snapshot: CommandOutputSnapshot,
     tool: &str,
+    revision_base: u64,
 ) -> Result<ToolOutput, PureError> {
     let output = CommandJsonOutput {
         status: snapshot.status,
@@ -346,8 +386,17 @@ fn tool_output_from_snapshot(
         output_file: snapshot.output_file,
         exit_code: snapshot.exit_code,
         timed_out: snapshot.timed_out,
-        runtime_events: Vec::new(),
+        runtime_events: vec![ToolRuntimeEvent::ToolResultRevision {
+            revision: revision_base.saturating_add(snapshot.output_revision),
+        }],
     })
+}
+
+fn unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 #[cfg(test)]
@@ -360,6 +409,7 @@ mod tests {
             arguments: serde_json::json!({ "command": command }),
             session_id: session_id.to_string(),
             tool_id: tool_id.to_string(),
+            revision_base: 0,
         }
     }
 
@@ -388,6 +438,10 @@ mod tests {
 
     fn test_context() -> ToolContext {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        test_context_with_sender(event_tx)
+    }
+
+    fn test_context_with_sender(event_tx: pl_trace::AgentEventSender) -> ToolContext {
         ToolContext {
             event_tx,
             options: crate::turn::TurnOptions::default(),
@@ -460,6 +514,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn streams_tool_result_delta_for_command_output() {
+        let tool = test_tool();
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
+        let mut input = tool_input("echo streaming", "stream-session", "stream-tool");
+        input.revision_base = 5;
+        let output = tool
+            .execute(input, test_context_with_sender(event_tx))
+            .await
+            .unwrap();
+
+        let mut streamed = String::new();
+        let mut revision = 0;
+        while let Ok(event) = event_rx.try_recv() {
+            if let pl_trace::AgentEvent::TracePartDelta { event } = event
+                && let pl_trace::TraceDelta::ToolResult { delta } = event.delta
+            {
+                revision = revision.max(event.revision);
+                streamed.push_str(&delta);
+            }
+        }
+
+        assert!(streamed.contains("streaming"));
+        assert!(revision > 5);
+        assert!(output.runtime_events.iter().any(|event| matches!(
+            event,
+            ToolRuntimeEvent::ToolResultRevision {
+                revision: output_revision
+            } if *output_revision >= revision
+        )));
+    }
+
+    #[tokio::test]
     async fn captures_stderr() {
         let tool = test_tool();
         let output = tool
@@ -529,6 +615,7 @@ mod tests {
                     arguments: serde_json::json!({}),
                     session_id: "s4".to_string(),
                     tool_id: "t4".to_string(),
+                    revision_base: 0,
                 },
                 test_context(),
             )
@@ -565,6 +652,7 @@ mod tests {
                     }),
                     session_id: "cwd-session".to_string(),
                     tool_id: "escape-tool".to_string(),
+                    revision_base: 0,
                 },
                 test_context(),
             )
@@ -588,6 +676,7 @@ mod tests {
                     }),
                     session_id: "cwd-session".to_string(),
                     tool_id: "relative-cwd".to_string(),
+                    revision_base: 0,
                 },
                 test_context(),
             )
@@ -615,6 +704,7 @@ mod tests {
                     }),
                     session_id: "cwd-session".to_string(),
                     tool_id: "full-access-cwd".to_string(),
+                    revision_base: 0,
                 },
                 context,
             )
@@ -676,6 +766,7 @@ mod tests {
                     }),
                     session_id: "long-session".to_string(),
                     tool_id: "long-tool".to_string(),
+                    revision_base: 0,
                 },
                 test_context(),
             )
@@ -698,6 +789,7 @@ mod tests {
                         }),
                         session_id: "long-session".to_string(),
                         tool_id: "poll-tool".to_string(),
+                        revision_base: 0,
                     },
                     test_context(),
                 )
@@ -726,6 +818,7 @@ mod tests {
                     }),
                     session_id: "stdin-session".to_string(),
                     tool_id: "stdin-tool".to_string(),
+                    revision_base: 0,
                 },
                 test_context(),
             )
@@ -747,6 +840,7 @@ mod tests {
                         }),
                         session_id: "stdin-session".to_string(),
                         tool_id: format!("stdin-write-{attempt}"),
+                        revision_base: 0,
                     },
                     test_context(),
                 )
@@ -765,7 +859,7 @@ mod tests {
 
     #[tokio::test]
     async fn timeout_terminates_background_process() {
-        let tool = test_tool();
+        let (tool, stdin) = shared_tools();
         let output = tool
             .execute(
                 ToolInput {
@@ -776,15 +870,42 @@ mod tests {
                     }),
                     session_id: "timeout-session".to_string(),
                     tool_id: "timeout-tool".to_string(),
+                    revision_base: 0,
                 },
                 test_context(),
             )
             .await
             .unwrap();
-        let result = command_json(&output);
+        let mut result = command_json(&output);
+        let mut timed_out = output.timed_out || result.timed_out;
+        for attempt in 0..8 {
+            if result.status == "timedOut" {
+                break;
+            }
+            let Some(process_id) = result.process_id.clone() else {
+                break;
+            };
+            let polled = stdin
+                .execute(
+                    ToolInput {
+                        arguments: serde_json::json!({
+                            "processId": process_id,
+                            "yieldTimeMs": 1000,
+                        }),
+                        session_id: "timeout-session".to_string(),
+                        tool_id: format!("timeout-poll-{attempt}"),
+                        revision_base: 0,
+                    },
+                    test_context(),
+                )
+                .await
+                .unwrap();
+            timed_out = timed_out || polled.timed_out;
+            result = command_json(&polled);
+        }
 
-        assert_eq!(result.status, "timedOut");
-        assert!(output.timed_out);
+        assert_eq!(result.status, "timedOut", "{result:?}");
+        assert!(timed_out);
         assert_eq!(result.process_id, None);
     }
 
@@ -802,6 +923,7 @@ mod tests {
                     }),
                     session_id: "limit-session".to_string(),
                     tool_id: "first-tool".to_string(),
+                    revision_base: 0,
                 },
                 test_context(),
             )
@@ -818,6 +940,7 @@ mod tests {
                     }),
                     session_id: "limit-session".to_string(),
                     tool_id: "second-tool".to_string(),
+                    revision_base: 0,
                 },
                 test_context(),
             )
@@ -834,6 +957,7 @@ mod tests {
                     }),
                     session_id: "limit-session".to_string(),
                     tool_id: "cleanup-tool".to_string(),
+                    revision_base: 0,
                 },
                 test_context(),
             )
@@ -849,6 +973,7 @@ mod tests {
                     arguments: serde_json::json!({ "processId": "missing" }),
                     session_id: "missing-session".to_string(),
                     tool_id: "missing-tool".to_string(),
+                    revision_base: 0,
                 },
                 test_context(),
             )
@@ -874,6 +999,7 @@ mod tests {
                     }),
                     session_id: "large-session".to_string(),
                     tool_id: "large-tool".to_string(),
+                    revision_base: 0,
                 },
                 test_context(),
             )

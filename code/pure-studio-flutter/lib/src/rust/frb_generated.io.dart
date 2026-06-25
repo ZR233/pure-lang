@@ -29,16 +29,218 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String dco_decode_String(dynamic raw);
 
   @protected
+  bool dco_decode_bool(dynamic raw);
+
+  @protected
+  BridgeAgentTimelineEventDto
+  dco_decode_box_autoadd_bridge_agent_timeline_event_dto(dynamic raw);
+
+  @protected
+  BridgeInteractionChangedDto
+  dco_decode_box_autoadd_bridge_interaction_changed_dto(dynamic raw);
+
+  @protected
+  BridgeLspHealthDto dco_decode_box_autoadd_bridge_lsp_health_dto(dynamic raw);
+
+  @protected
+  BridgeMcpHealthDto dco_decode_box_autoadd_bridge_mcp_health_dto(dynamic raw);
+
+  @protected
+  BridgePlanLifecycleDto dco_decode_box_autoadd_bridge_plan_lifecycle_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeSessionRuntimeDto dco_decode_box_autoadd_bridge_session_runtime_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeSkillActivationDto dco_decode_box_autoadd_bridge_skill_activation_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeStudioAgentPartDto dco_decode_box_autoadd_bridge_studio_agent_part_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeStudioMessageDto dco_decode_box_autoadd_bridge_studio_message_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeStudioPartDeltaDto dco_decode_box_autoadd_bridge_studio_part_delta_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeStudioPlanPartDto dco_decode_box_autoadd_bridge_studio_plan_part_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeStudioToolPartDto dco_decode_box_autoadd_bridge_studio_tool_part_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeStudioTurnDto dco_decode_box_autoadd_bridge_studio_turn_dto(
+    dynamic raw,
+  );
+
+  @protected
+  DeepSeekBalanceDto dco_decode_box_autoadd_deep_seek_balance_dto(dynamic raw);
+
+  @protected
+  double dco_decode_box_autoadd_f_64(dynamic raw);
+
+  @protected
+  int dco_decode_box_autoadd_i_32(dynamic raw);
+
+  @protected
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
+
+  @protected
+  int dco_decode_box_autoadd_u_32(dynamic raw);
+
+  @protected
+  BigInt dco_decode_box_autoadd_u_64(dynamic raw);
+
+  @protected
+  ZhipuCodingPlanUsageDto dco_decode_box_autoadd_zhipu_coding_plan_usage_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeAgentSnapshotDto dco_decode_box_bridge_agent_snapshot_dto(dynamic raw);
+
+  @protected
+  BridgeStudioPartDto dco_decode_box_bridge_studio_part_dto(dynamic raw);
 
   @protected
   BridgeActiveTurn dco_decode_bridge_active_turn(dynamic raw);
 
   @protected
+  BridgeAgentSnapshotDto dco_decode_bridge_agent_snapshot_dto(dynamic raw);
+
+  @protected
+  BridgeAgentTimelineEventDto dco_decode_bridge_agent_timeline_event_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeAgentTimelinePayloadDto dco_decode_bridge_agent_timeline_payload_dto(
+    dynamic raw,
+  );
+
+  @protected
   BridgeEventEnvelope dco_decode_bridge_event_envelope(dynamic raw);
 
   @protected
+  BridgeEventPayload dco_decode_bridge_event_payload(dynamic raw);
+
+  @protected
+  BridgeInteractionChangedDto dco_decode_bridge_interaction_changed_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeInteractionPayloadDto dco_decode_bridge_interaction_payload_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeLspHealthDto dco_decode_bridge_lsp_health_dto(dynamic raw);
+
+  @protected
+  BridgeMcpHealthDto dco_decode_bridge_mcp_health_dto(dynamic raw);
+
+  @protected
+  BridgeMcpServerDto dco_decode_bridge_mcp_server_dto(dynamic raw);
+
+  @protected
+  BridgePlanLifecycleDto dco_decode_bridge_plan_lifecycle_dto(dynamic raw);
+
+  @protected
+  BridgeRuntimeCostAmountDto dco_decode_bridge_runtime_cost_amount_dto(
+    dynamic raw,
+  );
+
+  @protected
   BridgeRuntimeStatus dco_decode_bridge_runtime_status(dynamic raw);
+
+  @protected
+  BridgeSessionRuntimeDto dco_decode_bridge_session_runtime_dto(dynamic raw);
+
+  @protected
+  BridgeSessionStateResponse dco_decode_bridge_session_state_response(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeSkillActivationDto dco_decode_bridge_skill_activation_dto(dynamic raw);
+
+  @protected
+  BridgeStudioAgentPartDto dco_decode_bridge_studio_agent_part_dto(dynamic raw);
+
+  @protected
+  BridgeStudioEventsResponse dco_decode_bridge_studio_events_response(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeStudioMessageDto dco_decode_bridge_studio_message_dto(dynamic raw);
+
+  @protected
+  BridgeStudioMessageProjectionDto
+  dco_decode_bridge_studio_message_projection_dto(dynamic raw);
+
+  @protected
+  BridgeStudioPartDeltaDto dco_decode_bridge_studio_part_delta_dto(dynamic raw);
+
+  @protected
+  BridgeStudioPartDto dco_decode_bridge_studio_part_dto(dynamic raw);
+
+  @protected
+  BridgeStudioPartProjectionDto dco_decode_bridge_studio_part_projection_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeStudioPlanPartDto dco_decode_bridge_studio_plan_part_dto(dynamic raw);
+
+  @protected
+  BridgeStudioSnapshotResponse dco_decode_bridge_studio_snapshot_response(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeStudioToolPartDto dco_decode_bridge_studio_tool_part_dto(dynamic raw);
+
+  @protected
+  BridgeStudioTurnDto dco_decode_bridge_studio_turn_dto(dynamic raw);
+
+  @protected
+  BridgeUserQuestionDto dco_decode_bridge_user_question_dto(dynamic raw);
+
+  @protected
+  BridgeUserQuestionOptionDto dco_decode_bridge_user_question_option_dto(
+    dynamic raw,
+  );
+
+  @protected
+  ConfigSavedResponse dco_decode_config_saved_response(dynamic raw);
+
+  @protected
+  DeepSeekBalanceDto dco_decode_deep_seek_balance_dto(dynamic raw);
+
+  @protected
+  DeepSeekBalanceInfoDto dco_decode_deep_seek_balance_info_dto(dynamic raw);
+
+  @protected
+  double dco_decode_f_64(dynamic raw);
 
   @protected
   int dco_decode_i_32(dynamic raw);
@@ -47,25 +249,163 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64 dco_decode_i_64(dynamic raw);
 
   @protected
-  JsonResponse dco_decode_json_response(dynamic raw);
-
-  @protected
   List<String> dco_decode_list_String(dynamic raw);
 
   @protected
   List<BridgeActiveTurn> dco_decode_list_bridge_active_turn(dynamic raw);
 
   @protected
+  List<BridgeAgentSnapshotDto> dco_decode_list_bridge_agent_snapshot_dto(
+    dynamic raw,
+  );
+
+  @protected
+  List<BridgeAgentTimelineEventDto>
+  dco_decode_list_bridge_agent_timeline_event_dto(dynamic raw);
+
+  @protected
+  List<BridgeEventEnvelope> dco_decode_list_bridge_event_envelope(dynamic raw);
+
+  @protected
+  List<BridgeInteractionChangedDto>
+  dco_decode_list_bridge_interaction_changed_dto(dynamic raw);
+
+  @protected
+  List<BridgeMcpServerDto> dco_decode_list_bridge_mcp_server_dto(dynamic raw);
+
+  @protected
+  List<BridgeRuntimeCostAmountDto>
+  dco_decode_list_bridge_runtime_cost_amount_dto(dynamic raw);
+
+  @protected
+  List<BridgeStudioMessageProjectionDto>
+  dco_decode_list_bridge_studio_message_projection_dto(dynamic raw);
+
+  @protected
+  List<BridgeStudioPartProjectionDto>
+  dco_decode_list_bridge_studio_part_projection_dto(dynamic raw);
+
+  @protected
+  List<BridgeUserQuestionDto> dco_decode_list_bridge_user_question_dto(
+    dynamic raw,
+  );
+
+  @protected
+  List<BridgeUserQuestionOptionDto>
+  dco_decode_list_bridge_user_question_option_dto(dynamic raw);
+
+  @protected
+  List<DeepSeekBalanceInfoDto> dco_decode_list_deep_seek_balance_info_dto(
+    dynamic raw,
+  );
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
+
+  @protected
+  List<ProjectDto> dco_decode_list_project_dto(dynamic raw);
+
+  @protected
+  List<ProviderUsageDto> dco_decode_list_provider_usage_dto(dynamic raw);
+
+  @protected
+  List<SessionDto> dco_decode_list_session_dto(dynamic raw);
+
+  @protected
+  List<SkillSummaryDto> dco_decode_list_skill_summary_dto(dynamic raw);
+
+  @protected
+  List<ZhipuQuotaLimitDto> dco_decode_list_zhipu_quota_limit_dto(dynamic raw);
+
+  @protected
+  List<ZhipuToolUsageDetailDto> dco_decode_list_zhipu_tool_usage_detail_dto(
+    dynamic raw,
+  );
 
   @protected
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
+  BridgeSessionRuntimeDto?
+  dco_decode_opt_box_autoadd_bridge_session_runtime_dto(dynamic raw);
+
+  @protected
+  BridgeStudioAgentPartDto?
+  dco_decode_opt_box_autoadd_bridge_studio_agent_part_dto(dynamic raw);
+
+  @protected
+  BridgeStudioPlanPartDto?
+  dco_decode_opt_box_autoadd_bridge_studio_plan_part_dto(dynamic raw);
+
+  @protected
+  BridgeStudioToolPartDto?
+  dco_decode_opt_box_autoadd_bridge_studio_tool_part_dto(dynamic raw);
+
+  @protected
+  DeepSeekBalanceDto? dco_decode_opt_box_autoadd_deep_seek_balance_dto(
+    dynamic raw,
+  );
+
+  @protected
+  double? dco_decode_opt_box_autoadd_f_64(dynamic raw);
+
+  @protected
+  int? dco_decode_opt_box_autoadd_i_32(dynamic raw);
+
+  @protected
   PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
 
   @protected
+  int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
+
+  @protected
+  BigInt? dco_decode_opt_box_autoadd_u_64(dynamic raw);
+
+  @protected
+  ZhipuCodingPlanUsageDto?
+  dco_decode_opt_box_autoadd_zhipu_coding_plan_usage_dto(dynamic raw);
+
+  @protected
+  List<BridgeUserQuestionOptionDto>?
+  dco_decode_opt_list_bridge_user_question_option_dto(dynamic raw);
+
+  @protected
+  ProjectDto dco_decode_project_dto(dynamic raw);
+
+  @protected
+  ProviderUsageDto dco_decode_provider_usage_dto(dynamic raw);
+
+  @protected
+  ProviderUsagesResponse dco_decode_provider_usages_response(dynamic raw);
+
+  @protected
+  ResolveInteractionResponse dco_decode_resolve_interaction_response(
+    dynamic raw,
+  );
+
+  @protected
   RuntimeSnapshot dco_decode_runtime_snapshot(dynamic raw);
+
+  @protected
+  SessionDto dco_decode_session_dto(dynamic raw);
+
+  @protected
+  SettingsDraftResponse dco_decode_settings_draft_response(dynamic raw);
+
+  @protected
+  SkillSummaryDto dco_decode_skill_summary_dto(dynamic raw);
+
+  @protected
+  SkillsResponse dco_decode_skills_response(dynamic raw);
+
+  @protected
+  StopPromptResponse dco_decode_stop_prompt_response(dynamic raw);
+
+  @protected
+  SubmitPromptResponse dco_decode_submit_prompt_response(dynamic raw);
+
+  @protected
+  int dco_decode_u_32(dynamic raw);
 
   @protected
   BigInt dco_decode_u_64(dynamic raw);
@@ -75,6 +415,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void dco_decode_unit(dynamic raw);
+
+  @protected
+  ZhipuCodingPlanUsageDto dco_decode_zhipu_coding_plan_usage_dto(dynamic raw);
+
+  @protected
+  ZhipuQuotaLimitDto dco_decode_zhipu_quota_limit_dto(dynamic raw);
+
+  @protected
+  ZhipuToolUsageDetailDto dco_decode_zhipu_tool_usage_detail_dto(dynamic raw);
 
   @protected
   AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
@@ -87,13 +436,170 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
+  bool sse_decode_bool(SseDeserializer deserializer);
+
+  @protected
+  BridgeAgentTimelineEventDto
+  sse_decode_box_autoadd_bridge_agent_timeline_event_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeInteractionChangedDto
+  sse_decode_box_autoadd_bridge_interaction_changed_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeLspHealthDto sse_decode_box_autoadd_bridge_lsp_health_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeMcpHealthDto sse_decode_box_autoadd_bridge_mcp_health_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgePlanLifecycleDto sse_decode_box_autoadd_bridge_plan_lifecycle_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeSessionRuntimeDto sse_decode_box_autoadd_bridge_session_runtime_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeSkillActivationDto sse_decode_box_autoadd_bridge_skill_activation_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioAgentPartDto sse_decode_box_autoadd_bridge_studio_agent_part_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioMessageDto sse_decode_box_autoadd_bridge_studio_message_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioPartDeltaDto sse_decode_box_autoadd_bridge_studio_part_delta_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioPlanPartDto sse_decode_box_autoadd_bridge_studio_plan_part_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioToolPartDto sse_decode_box_autoadd_bridge_studio_tool_part_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioTurnDto sse_decode_box_autoadd_bridge_studio_turn_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  DeepSeekBalanceDto sse_decode_box_autoadd_deep_seek_balance_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  double sse_decode_box_autoadd_f_64(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_box_autoadd_i_32(SseDeserializer deserializer);
+
+  @protected
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
+
+  @protected
+  BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer);
+
+  @protected
+  ZhipuCodingPlanUsageDto sse_decode_box_autoadd_zhipu_coding_plan_usage_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeAgentSnapshotDto sse_decode_box_bridge_agent_snapshot_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioPartDto sse_decode_box_bridge_studio_part_dto(
+    SseDeserializer deserializer,
+  );
 
   @protected
   BridgeActiveTurn sse_decode_bridge_active_turn(SseDeserializer deserializer);
 
   @protected
+  BridgeAgentSnapshotDto sse_decode_bridge_agent_snapshot_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeAgentTimelineEventDto sse_decode_bridge_agent_timeline_event_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeAgentTimelinePayloadDto sse_decode_bridge_agent_timeline_payload_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeEventEnvelope sse_decode_bridge_event_envelope(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeEventPayload sse_decode_bridge_event_payload(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeInteractionChangedDto sse_decode_bridge_interaction_changed_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeInteractionPayloadDto sse_decode_bridge_interaction_payload_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeLspHealthDto sse_decode_bridge_lsp_health_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeMcpHealthDto sse_decode_bridge_mcp_health_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeMcpServerDto sse_decode_bridge_mcp_server_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgePlanLifecycleDto sse_decode_bridge_plan_lifecycle_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeRuntimeCostAmountDto sse_decode_bridge_runtime_cost_amount_dto(
     SseDeserializer deserializer,
   );
 
@@ -103,13 +609,107 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeSessionRuntimeDto sse_decode_bridge_session_runtime_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeSessionStateResponse sse_decode_bridge_session_state_response(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeSkillActivationDto sse_decode_bridge_skill_activation_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioAgentPartDto sse_decode_bridge_studio_agent_part_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioEventsResponse sse_decode_bridge_studio_events_response(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioMessageDto sse_decode_bridge_studio_message_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioMessageProjectionDto
+  sse_decode_bridge_studio_message_projection_dto(SseDeserializer deserializer);
+
+  @protected
+  BridgeStudioPartDeltaDto sse_decode_bridge_studio_part_delta_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioPartDto sse_decode_bridge_studio_part_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioPartProjectionDto sse_decode_bridge_studio_part_projection_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioPlanPartDto sse_decode_bridge_studio_plan_part_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioSnapshotResponse sse_decode_bridge_studio_snapshot_response(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioToolPartDto sse_decode_bridge_studio_tool_part_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioTurnDto sse_decode_bridge_studio_turn_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeUserQuestionDto sse_decode_bridge_user_question_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeUserQuestionOptionDto sse_decode_bridge_user_question_option_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  ConfigSavedResponse sse_decode_config_saved_response(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  DeepSeekBalanceDto sse_decode_deep_seek_balance_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  DeepSeekBalanceInfoDto sse_decode_deep_seek_balance_info_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  double sse_decode_f_64(SseDeserializer deserializer);
+
+  @protected
   int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
   PlatformInt64 sse_decode_i_64(SseDeserializer deserializer);
-
-  @protected
-  JsonResponse sse_decode_json_response(SseDeserializer deserializer);
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
@@ -120,16 +720,191 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<BridgeAgentSnapshotDto> sse_decode_list_bridge_agent_snapshot_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeAgentTimelineEventDto>
+  sse_decode_list_bridge_agent_timeline_event_dto(SseDeserializer deserializer);
+
+  @protected
+  List<BridgeEventEnvelope> sse_decode_list_bridge_event_envelope(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeInteractionChangedDto>
+  sse_decode_list_bridge_interaction_changed_dto(SseDeserializer deserializer);
+
+  @protected
+  List<BridgeMcpServerDto> sse_decode_list_bridge_mcp_server_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeRuntimeCostAmountDto>
+  sse_decode_list_bridge_runtime_cost_amount_dto(SseDeserializer deserializer);
+
+  @protected
+  List<BridgeStudioMessageProjectionDto>
+  sse_decode_list_bridge_studio_message_projection_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeStudioPartProjectionDto>
+  sse_decode_list_bridge_studio_part_projection_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeUserQuestionDto> sse_decode_list_bridge_user_question_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeUserQuestionOptionDto>
+  sse_decode_list_bridge_user_question_option_dto(SseDeserializer deserializer);
+
+  @protected
+  List<DeepSeekBalanceInfoDto> sse_decode_list_deep_seek_balance_info_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
+
+  @protected
+  List<ProjectDto> sse_decode_list_project_dto(SseDeserializer deserializer);
+
+  @protected
+  List<ProviderUsageDto> sse_decode_list_provider_usage_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<SessionDto> sse_decode_list_session_dto(SseDeserializer deserializer);
+
+  @protected
+  List<SkillSummaryDto> sse_decode_list_skill_summary_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<ZhipuQuotaLimitDto> sse_decode_list_zhipu_quota_limit_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<ZhipuToolUsageDetailDto> sse_decode_list_zhipu_tool_usage_detail_dto(
+    SseDeserializer deserializer,
+  );
 
   @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
+  BridgeSessionRuntimeDto?
+  sse_decode_opt_box_autoadd_bridge_session_runtime_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioAgentPartDto?
+  sse_decode_opt_box_autoadd_bridge_studio_agent_part_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioPlanPartDto?
+  sse_decode_opt_box_autoadd_bridge_studio_plan_part_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStudioToolPartDto?
+  sse_decode_opt_box_autoadd_bridge_studio_tool_part_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  DeepSeekBalanceDto? sse_decode_opt_box_autoadd_deep_seek_balance_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  double? sse_decode_opt_box_autoadd_f_64(SseDeserializer deserializer);
+
+  @protected
+  int? sse_decode_opt_box_autoadd_i_32(SseDeserializer deserializer);
+
+  @protected
   PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
+  int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
+
+  @protected
+  BigInt? sse_decode_opt_box_autoadd_u_64(SseDeserializer deserializer);
+
+  @protected
+  ZhipuCodingPlanUsageDto?
+  sse_decode_opt_box_autoadd_zhipu_coding_plan_usage_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeUserQuestionOptionDto>?
+  sse_decode_opt_list_bridge_user_question_option_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  ProjectDto sse_decode_project_dto(SseDeserializer deserializer);
+
+  @protected
+  ProviderUsageDto sse_decode_provider_usage_dto(SseDeserializer deserializer);
+
+  @protected
+  ProviderUsagesResponse sse_decode_provider_usages_response(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  ResolveInteractionResponse sse_decode_resolve_interaction_response(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   RuntimeSnapshot sse_decode_runtime_snapshot(SseDeserializer deserializer);
+
+  @protected
+  SessionDto sse_decode_session_dto(SseDeserializer deserializer);
+
+  @protected
+  SettingsDraftResponse sse_decode_settings_draft_response(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SkillSummaryDto sse_decode_skill_summary_dto(SseDeserializer deserializer);
+
+  @protected
+  SkillsResponse sse_decode_skills_response(SseDeserializer deserializer);
+
+  @protected
+  StopPromptResponse sse_decode_stop_prompt_response(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SubmitPromptResponse sse_decode_submit_prompt_response(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  int sse_decode_u_32(SseDeserializer deserializer);
 
   @protected
   BigInt sse_decode_u_64(SseDeserializer deserializer);
@@ -141,7 +916,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_decode_unit(SseDeserializer deserializer);
 
   @protected
-  bool sse_decode_bool(SseDeserializer deserializer);
+  ZhipuCodingPlanUsageDto sse_decode_zhipu_coding_plan_usage_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  ZhipuQuotaLimitDto sse_decode_zhipu_quota_limit_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  ZhipuToolUsageDetailDto sse_decode_zhipu_tool_usage_detail_dto(
+    SseDeserializer deserializer,
+  );
 
   @protected
   void sse_encode_AnyhowException(
@@ -159,8 +946,125 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_String(String self, SseSerializer serializer);
 
   @protected
+  void sse_encode_bool(bool self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_bridge_agent_timeline_event_dto(
+    BridgeAgentTimelineEventDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_interaction_changed_dto(
+    BridgeInteractionChangedDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_lsp_health_dto(
+    BridgeLspHealthDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_mcp_health_dto(
+    BridgeMcpHealthDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_plan_lifecycle_dto(
+    BridgePlanLifecycleDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_session_runtime_dto(
+    BridgeSessionRuntimeDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_skill_activation_dto(
+    BridgeSkillActivationDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_studio_agent_part_dto(
+    BridgeStudioAgentPartDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_studio_message_dto(
+    BridgeStudioMessageDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_studio_part_delta_dto(
+    BridgeStudioPartDeltaDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_studio_plan_part_dto(
+    BridgeStudioPlanPartDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_studio_tool_part_dto(
+    BridgeStudioToolPartDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_studio_turn_dto(
+    BridgeStudioTurnDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_deep_seek_balance_dto(
+    DeepSeekBalanceDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_i_32(int self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_i_64(
     PlatformInt64 self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_zhipu_coding_plan_usage_dto(
+    ZhipuCodingPlanUsageDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_bridge_agent_snapshot_dto(
+    BridgeAgentSnapshotDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_bridge_studio_part_dto(
+    BridgeStudioPartDto self,
     SseSerializer serializer,
   );
 
@@ -171,8 +1075,74 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_agent_snapshot_dto(
+    BridgeAgentSnapshotDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_agent_timeline_event_dto(
+    BridgeAgentTimelineEventDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_agent_timeline_payload_dto(
+    BridgeAgentTimelinePayloadDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_event_envelope(
     BridgeEventEnvelope self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_event_payload(
+    BridgeEventPayload self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_interaction_changed_dto(
+    BridgeInteractionChangedDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_interaction_payload_dto(
+    BridgeInteractionPayloadDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_lsp_health_dto(
+    BridgeLspHealthDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_mcp_health_dto(
+    BridgeMcpHealthDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_mcp_server_dto(
+    BridgeMcpServerDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_plan_lifecycle_dto(
+    BridgePlanLifecycleDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_runtime_cost_amount_dto(
+    BridgeRuntimeCostAmountDto self,
     SseSerializer serializer,
   );
 
@@ -183,13 +1153,127 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_session_runtime_dto(
+    BridgeSessionRuntimeDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_session_state_response(
+    BridgeSessionStateResponse self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_skill_activation_dto(
+    BridgeSkillActivationDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_studio_agent_part_dto(
+    BridgeStudioAgentPartDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_studio_events_response(
+    BridgeStudioEventsResponse self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_studio_message_dto(
+    BridgeStudioMessageDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_studio_message_projection_dto(
+    BridgeStudioMessageProjectionDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_studio_part_delta_dto(
+    BridgeStudioPartDeltaDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_studio_part_dto(
+    BridgeStudioPartDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_studio_part_projection_dto(
+    BridgeStudioPartProjectionDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_studio_plan_part_dto(
+    BridgeStudioPlanPartDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_studio_snapshot_response(
+    BridgeStudioSnapshotResponse self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_studio_tool_part_dto(
+    BridgeStudioToolPartDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_studio_turn_dto(
+    BridgeStudioTurnDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_user_question_dto(
+    BridgeUserQuestionDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_user_question_option_dto(
+    BridgeUserQuestionOptionDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_config_saved_response(
+    ConfigSavedResponse self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_deep_seek_balance_dto(
+    DeepSeekBalanceDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_deep_seek_balance_info_dto(
+    DeepSeekBalanceInfoDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_f_64(double self, SseSerializer serializer);
+
+  @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_json_response(JsonResponse self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
@@ -201,13 +1285,151 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_bridge_agent_snapshot_dto(
+    List<BridgeAgentSnapshotDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_agent_timeline_event_dto(
+    List<BridgeAgentTimelineEventDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_event_envelope(
+    List<BridgeEventEnvelope> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_interaction_changed_dto(
+    List<BridgeInteractionChangedDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_mcp_server_dto(
+    List<BridgeMcpServerDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_runtime_cost_amount_dto(
+    List<BridgeRuntimeCostAmountDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_studio_message_projection_dto(
+    List<BridgeStudioMessageProjectionDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_studio_part_projection_dto(
+    List<BridgeStudioPartProjectionDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_user_question_dto(
+    List<BridgeUserQuestionDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_user_question_option_dto(
+    List<BridgeUserQuestionOptionDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_deep_seek_balance_info_dto(
+    List<DeepSeekBalanceInfoDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_prim_u_8_strict(
     Uint8List self,
     SseSerializer serializer,
   );
 
   @protected
+  void sse_encode_list_project_dto(
+    List<ProjectDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_provider_usage_dto(
+    List<ProviderUsageDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_session_dto(
+    List<SessionDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_skill_summary_dto(
+    List<SkillSummaryDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_zhipu_quota_limit_dto(
+    List<ZhipuQuotaLimitDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_zhipu_tool_usage_detail_dto(
+    List<ZhipuToolUsageDetailDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_session_runtime_dto(
+    BridgeSessionRuntimeDto? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_studio_agent_part_dto(
+    BridgeStudioAgentPartDto? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_studio_plan_part_dto(
+    BridgeStudioPlanPartDto? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_studio_tool_part_dto(
+    BridgeStudioToolPartDto? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_deep_seek_balance_dto(
+    DeepSeekBalanceDto? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_f_64(double? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_i_32(int? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_i_64(
@@ -216,10 +1438,85 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_u_64(BigInt? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_zhipu_coding_plan_usage_dto(
+    ZhipuCodingPlanUsageDto? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_list_bridge_user_question_option_dto(
+    List<BridgeUserQuestionOptionDto>? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_project_dto(ProjectDto self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_provider_usage_dto(
+    ProviderUsageDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_provider_usages_response(
+    ProviderUsagesResponse self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_resolve_interaction_response(
+    ResolveInteractionResponse self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_runtime_snapshot(
     RuntimeSnapshot self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_session_dto(SessionDto self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_settings_draft_response(
+    SettingsDraftResponse self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_skill_summary_dto(
+    SkillSummaryDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_skills_response(
+    SkillsResponse self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_stop_prompt_response(
+    StopPromptResponse self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_submit_prompt_response(
+    SubmitPromptResponse self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_u_32(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_64(BigInt self, SseSerializer serializer);
@@ -231,7 +1528,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_unit(void self, SseSerializer serializer);
 
   @protected
-  void sse_encode_bool(bool self, SseSerializer serializer);
+  void sse_encode_zhipu_coding_plan_usage_dto(
+    ZhipuCodingPlanUsageDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_zhipu_quota_limit_dto(
+    ZhipuQuotaLimitDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_zhipu_tool_usage_detail_dto(
+    ZhipuToolUsageDetailDto self,
+    SseSerializer serializer,
+  );
 }
 
 // Section: wire_class

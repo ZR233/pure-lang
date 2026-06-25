@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pure_studio_flutter/src/data/frb/studio_api.dart';
@@ -14,6 +15,7 @@ import 'package:pure_studio_flutter/src/features/shell/studio_shell.dart';
 import 'package:pure_studio_flutter/src/features/timeline/markdown_repair.dart';
 import 'package:pure_studio_flutter/src/features/timeline/timeline_view.dart';
 import 'package:pure_studio_flutter/src/l10n/app_localizations.dart';
+import 'package:pure_studio_flutter/src/rust/api/studio.dart' as frb;
 
 void main() {
   test(
@@ -36,62 +38,54 @@ void main() {
       expect(state.selectedMessages, isEmpty);
 
       api.emitSession(
-        StudioBridgeEvent(
-          kindType: 'messageUpdated',
+        _messageUpdatedEvent(
           sessionId: 'session-1',
-          payload: {
-            'message': {
-              'messageId': 'turn-1:assistant',
-              'sessionId': 'session-1',
-              'turnId': 'turn-1',
-              'role': 'assistant',
-              'status': 'streaming',
-              'createdAt': 1,
-              'updatedAt': 1,
-            },
+          message: {
+            'messageId': 'turn-1:assistant',
+            'sessionId': 'session-1',
+            'turnId': 'turn-1',
+            'role': 'assistant',
+            'status': 'streaming',
+            'createdAt': 1,
+            'updatedAt': 1,
           },
         ),
       );
       api.emitSession(
-        StudioBridgeEvent(
-          kindType: 'messagePartUpdated',
+        _partUpdatedEvent(
           sessionId: 'session-1',
-          payload: {
-            'part': {
-              'partId': 'part-1',
-              'messageId': 'turn-1:assistant',
-              'sessionId': 'session-1',
-              'turnId': 'turn-1',
-              'partType': 'text',
-              'order': 0,
-              'status': 'streaming',
-              'createdAt': 1,
-              'updatedAt': 1,
-              'text': 'hel',
-            },
+          part: {
+            'partId': 'part-1',
+            'messageId': 'turn-1:assistant',
+            'sessionId': 'session-1',
+            'turnId': 'turn-1',
+            'partType': 'text',
+            'order': 0,
+            'status': 'streaming',
+            'createdAt': 1,
+            'updatedAt': 1,
+            'text': 'hel',
           },
         ),
       );
       api.emitSession(
-        StudioBridgeEvent(
-          kindType: 'messagePartDelta',
+        _partDeltaEvent(
           sessionId: 'session-1',
-          payload: {
-            'delta': {
-              'sessionId': 'session-1',
-              'messageId': 'turn-1:assistant',
-              'partId': 'part-1',
-              'field': 'text',
-              'delta': 'lo',
-            },
+          delta: {
+            'sessionId': 'session-1',
+            'messageId': 'turn-1:assistant',
+            'partId': 'part-1',
+            'revision': 1,
+            'field': 'text',
+            'delta': 'lo',
           },
         ),
       );
-      await pumpEventQueue();
+      await _pumpFrameBatch();
 
       state = container.read(studioControllerProvider).requireValue;
       expect(state.selectedMessages.single.role, 'assistant');
-      expect(state.selectedMessages.single.parts.single.text, 'hello');
+      expect(state.selectedTimelineRows.single.part!.text, 'hello');
     },
   );
 
@@ -104,115 +98,447 @@ void main() {
 
     await container.read(studioControllerProvider.future);
     api.emitSession(
-      StudioBridgeEvent(
-        kindType: 'messageUpdated',
+      _messageUpdatedEvent(
         sessionId: 'session-1',
-        payload: {
-          'message': {
-            'messageId': 'turn-1:assistant',
-            'sessionId': 'session-1',
-            'turnId': 'turn-1',
-            'role': 'assistant',
-            'status': 'streaming',
-            'createdAt': 1,
-            'updatedAt': 1,
-          },
+        message: {
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'role': 'assistant',
+          'status': 'streaming',
+          'createdAt': 1,
+          'updatedAt': 1,
         },
       ),
     );
     api.emitSession(
-      StudioBridgeEvent(
-        kindType: 'messagePartUpdated',
+      _partUpdatedEvent(
         sessionId: 'session-1',
-        payload: {
-          'part': {
-            'partId': 'part-1',
-            'messageId': 'turn-1:assistant',
-            'sessionId': 'session-1',
-            'turnId': 'turn-1',
-            'partType': 'text',
-            'order': 7,
-            'revision': 0,
-            'status': 'streaming',
-            'createdAt': 1,
-            'updatedAt': 1,
-            'textChannel': 'commentary',
-            'text': '',
-          },
+        part: {
+          'partId': 'part-1',
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'partType': 'text',
+          'order': 7,
+          'revision': 0,
+          'status': 'streaming',
+          'createdAt': 1,
+          'updatedAt': 1,
+          'textChannel': 'commentary',
+          'text': '',
+        },
+      ),
+    );
+    api.emitSession(
+      _partDeltaEvent(
+        sessionId: 'session-1',
+        delta: {
+          'sessionId': 'session-1',
+          'messageId': 'turn-1:assistant',
+          'partId': 'part-1',
+          'revision': 0,
+          'field': 'text',
+          'delta': 'legacy',
         },
       ),
     );
     for (final revision in [1, 1, 2]) {
       api.emitSession(
-        StudioBridgeEvent(
-          kindType: 'messagePartDelta',
+        _partDeltaEvent(
           sessionId: 'session-1',
-          payload: {
-            'delta': {
-              'sessionId': 'session-1',
-              'messageId': 'turn-1:assistant',
-              'partId': 'part-1',
-              'revision': revision,
-              'field': 'text',
-              'delta': revision == 1 ? 'a' : 'b',
-            },
+          delta: {
+            'sessionId': 'session-1',
+            'messageId': 'turn-1:assistant',
+            'partId': 'part-1',
+            'revision': revision,
+            'field': 'text',
+            'delta': revision == 1 ? 'a' : 'b',
           },
         ),
       );
     }
-    await pumpEventQueue();
+    await _pumpFrameBatch();
 
     var state = container.read(studioControllerProvider).requireValue;
-    var part = state.selectedMessages.single.parts.single;
+    var part = state.selectedTimelineRows.single.part!;
     expect(part.text, 'ab');
     expect(part.order, 7);
     expect(part.textChannel, TimelineTextChannel.commentary);
     expect(state.partSnapshotsBySession['session-1']!['part-1']!.text, '');
 
     api.emitSession(
-      StudioBridgeEvent(
-        kindType: 'messagePartUpdated',
+      _partUpdatedEvent(
         sessionId: 'session-1',
-        payload: {
-          'part': {
-            'partId': 'part-1',
-            'messageId': 'turn-1:assistant',
-            'sessionId': 'session-1',
-            'turnId': 'turn-1',
-            'partType': 'text',
-            'order': 7,
-            'revision': 2,
-            'status': 'completed',
-            'createdAt': 1,
-            'updatedAt': 2,
-            'textChannel': 'commentary',
-            'text': 'snapshot',
+        part: {
+          'partId': 'part-1',
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'partType': 'text',
+          'order': 7,
+          'revision': 2,
+          'status': 'completed',
+          'createdAt': 1,
+          'updatedAt': 2,
+          'textChannel': 'commentary',
+          'text': 'snapshot',
+        },
+      ),
+    );
+    api.emitSession(
+      _partDeltaEvent(
+        sessionId: 'session-1',
+        delta: {
+          'sessionId': 'session-1',
+          'messageId': 'turn-1:assistant',
+          'partId': 'part-1',
+          'revision': 3,
+          'field': 'text',
+          'delta': 'late',
+        },
+      ),
+    );
+    await _pumpFrameBatch();
+
+    state = container.read(studioControllerProvider).requireValue;
+    part = state.selectedTimelineRows.single.part!;
+    expect(part.text, 'snapshot');
+    expect(state.partOverlaysBySession['session-1'], isEmpty);
+  });
+
+  test('timeline drops orphan part snapshots', () async {
+    final api = _FakeStudioApi(_emptyState());
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(studioControllerProvider.future);
+    api.emitSession(
+      _partUpdatedEvent(
+        sessionId: 'session-1',
+        part: {
+          'partId': 'part-orphan',
+          'messageId': 'missing-message',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'partType': 'text',
+          'order': 0,
+          'revision': 0,
+          'status': 'streaming',
+          'createdAt': 1,
+          'updatedAt': 1,
+          'text': 'orphan',
+        },
+      ),
+    );
+    await pumpEventQueue();
+
+    final state = container.read(studioControllerProvider).requireValue;
+    expect(state.selectedMessages, isEmpty);
+    expect(state.partSnapshotsBySession['session-1'], isNull);
+    expect(state.selectedTimelineRows, isEmpty);
+  });
+
+  test('timeline row render version changes for same length replacements', () {
+    final now = DateTime.fromMillisecondsSinceEpoch(0);
+    TimelineRow rowForPart(String text) {
+      return timelineRowsFromMessages(
+        [
+          TimelineMessage(
+            id: 'message-1',
+            sessionId: 'session-1',
+            role: 'assistant',
+            createdAt: now,
+          ),
+        ],
+        parts: [
+          TimelinePart(
+            id: 'part-1',
+            messageId: 'message-1',
+            type: TimelinePartType.text,
+            text: text,
+            status: 'streaming',
+          ),
+        ],
+      ).single;
+    }
+
+    expect('alpha'.length, 'bravo'.length);
+    expect(
+      rowForPart('alpha').renderVersion,
+      isNot(rowForPart('bravo').renderVersion),
+    );
+  });
+
+  test('agent timeline events stay outside message snapshots', () async {
+    final api = _FakeStudioApi(_emptyState());
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(studioControllerProvider.future);
+    api.emitSession(
+      _agentTimelineEvent(
+        sessionId: 'session-1',
+        event: {
+          'eventId': 'agent-event-1',
+          'sessionId': 'session-1',
+          'sequence': 1,
+          'createdAt': 1,
+          'kind': {
+            'type': 'spawnBegin',
+            'callId': 'call-1',
+            'senderPath': 'root',
+            'taskName': 'Audit',
+            'prompt': 'check',
+            'role': 'reviewer',
           },
         },
       ),
     );
     api.emitSession(
-      StudioBridgeEvent(
-        kindType: 'messagePartDelta',
+      _agentTimelineEvent(
         sessionId: 'session-1',
-        payload: {
-          'delta': {
-            'sessionId': 'session-1',
-            'messageId': 'turn-1:assistant',
-            'partId': 'part-1',
-            'revision': 3,
-            'field': 'text',
-            'delta': 'late',
+        event: {
+          'eventId': 'agent-event-2',
+          'sessionId': 'session-1',
+          'sequence': 2,
+          'createdAt': 2,
+          'kind': {
+            'type': 'spawnEnd',
+            'callId': 'call-1',
+            'senderPath': 'root',
+            'path': 'root/reviewer',
+            'status': 'completed',
+            'prompt': 'check',
           },
         },
       ),
     );
     await pumpEventQueue();
 
-    state = container.read(studioControllerProvider).requireValue;
-    part = state.selectedMessages.single.parts.single;
-    expect(part.text, 'snapshot');
-    expect(state.partOverlaysBySession['session-1'], isEmpty);
+    final state = container.read(studioControllerProvider).requireValue;
+    expect(state.messagesBySession['session-1'], isEmpty);
+    expect(state.agentTimelineEventsBySession['session-1']!.keys, {
+      'agent-event-1',
+      'agent-event-2',
+    });
+    expect(state.selectedMessages, isEmpty);
+    final row = state.selectedTimelineRows.single;
+    expect(row.messageId, isNull);
+    expect(row.part, isNull);
+    expect(row.agentEvent!.callId, 'call-1');
+    expect(row.agentEvent!.title, 'agentTimeline.spawn');
+    expect(row.agentEvent!.text, contains('root/reviewer'));
+    expect(row.agentEvent!.status, 'completed');
+  });
+
+  test(
+    'typed session snapshot restores agent timeline events for projection',
+    () {
+      const session = frb.SessionDto(
+        id: 'session-1',
+        projectId: 'project-1',
+        title: 'Session',
+        mode: 'auto',
+        updatedAt: 1,
+        visibility: 'visible',
+      );
+      final state = studioStateFromFrbSession(
+        frb.BridgeSessionStateResponse(
+          sessionId: 'session-1',
+          session: session,
+          sessions: const [session],
+          messages: const [],
+          parts: const [],
+          events: const [],
+          eventNextSequence: BigInt.zero,
+          agents: const [],
+          agentEvents: [
+            frb.BridgeAgentTimelineEventDto(
+              eventId: 'agent-event-1',
+              sessionId: 'session-1',
+              sequence: BigInt.from(7),
+              createdAt: 3,
+              payload: const frb.BridgeAgentTimelinePayloadDto.interactionBegin(
+                callId: 'call-2',
+                senderPath: 'root',
+                receiverPath: 'root/worker',
+                prompt: 'status',
+              ),
+            ),
+          ],
+          interactions: const [],
+        ),
+      );
+
+      expect(state.agentTimelineEventsBySession['session-1']!.keys, {
+        'agent-event-1',
+      });
+      expect(state.selectedMessages, isEmpty);
+      final row = state.selectedTimelineRows.single;
+      expect(row.messageId, isNull);
+      expect(row.part, isNull);
+      expect(row.agentEvent!.callId, 'call-2');
+      expect(row.agentEvent!.title, 'agentTimeline.message');
+      expect(row.agentEvent!.text, contains('root/worker'));
+      expect(row.agentEvent!.text, contains('status'));
+    },
+  );
+
+  test('session JSON keeps message snapshots free of projected parts', () {
+    final state = studioStateFromSessionJson({
+      'sessionId': 'session-1',
+      'session': {
+        'id': 'session-1',
+        'projectId': 'project-1',
+        'title': 'Session',
+        'mode': 'auto',
+        'updatedAt': 1,
+      },
+      'sessions': [
+        {
+          'id': 'session-1',
+          'projectId': 'project-1',
+          'title': 'Session',
+          'mode': 'auto',
+          'updatedAt': 1,
+        },
+      ],
+      'messages': [
+        {
+          'sequence': 1,
+          'message': {
+            'messageId': 'turn-1:assistant',
+            'sessionId': 'session-1',
+            'turnId': 'turn-1',
+            'role': 'assistant',
+            'status': 'completed',
+            'createdAt': 1,
+            'updatedAt': 2,
+          },
+        },
+      ],
+      'parts': [
+        {
+          'sequence': 2,
+          'part': {
+            'partId': 'part-1',
+            'messageId': 'turn-1:assistant',
+            'sessionId': 'session-1',
+            'turnId': 'turn-1',
+            'partType': 'text',
+            'order': 0,
+            'revision': 0,
+            'status': 'completed',
+            'createdAt': 1,
+            'updatedAt': 2,
+            'textChannel': 'final',
+            'text': 'restored from snapshot',
+          },
+        },
+      ],
+    });
+
+    expect(state.messagesBySession['session-1']!.single.id, 'turn-1:assistant');
+    expect(
+      state.selectedTimelineRows.single.part!.text,
+      'restored from snapshot',
+    );
+  });
+
+  test('timeline parser rejects unknown part type and text channel', () {
+    final base = {
+      'partId': 'part-1',
+      'messageId': 'turn-1:assistant',
+      'sessionId': 'session-1',
+      'turnId': 'turn-1',
+      'order': 0,
+      'revision': 0,
+      'status': 'completed',
+      'createdAt': 1,
+      'updatedAt': 2,
+      'text': 'hello',
+    };
+
+    expect(
+      () => timelinePartSnapshotFromJson({...base, 'partType': 'file'}),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          contains('Unknown timeline part type'),
+        ),
+      ),
+    );
+    expect(
+      () => timelinePartSnapshotFromJson({
+        ...base,
+        'partType': 'text',
+        'textChannel': 'draft',
+      }),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          contains('Unknown text channel'),
+        ),
+      ),
+    );
+  });
+
+  test('studio bridge event normalizes FRB sealed payload', () {
+    final event = StudioBridgeEvent.fromFrb(
+      frb.BridgeEventEnvelope(
+        eventId: 'event-1',
+        sessionId: 'session-1',
+        sequence: BigInt.from(9),
+        createdAt: 1,
+        payload: frb.BridgeEventPayload.messagePartDelta(
+          delta: frb.BridgeStudioPartDeltaDto(
+            sessionId: 'session-1',
+            messageId: 'message-1',
+            partId: 'part-1',
+            revision: BigInt.from(4),
+            field: 'text',
+            delta: 'typed',
+          ),
+        ),
+      ),
+    );
+
+    final payload = event.payload;
+    expect(payload, isA<MessagePartDeltaPayload>());
+    expect((payload as MessagePartDeltaPayload).delta.delta, 'typed');
+    expect(payload.delta.revision, 4);
+  });
+
+  test('timeline delta parser accepts only v2 fields', () {
+    final base = {
+      'sessionId': 'session-1',
+      'messageId': 'message-1',
+      'partId': 'part-1',
+      'revision': 1,
+      'delta': 'summary',
+    };
+
+    expect(
+      timelinePartDeltaFromJson({...base, 'field': 'reasoning.summary'}).field,
+      'reasoning.summary',
+    );
+    expect(
+      () => timelinePartDeltaFromJson({...base, 'field': 'reasoningText'}),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          contains('Unknown timeline delta field'),
+        ),
+      ),
+    );
   });
 
   test('timeline snapshot wins over same tick delta batch', () async {
@@ -224,86 +550,74 @@ void main() {
 
     await container.read(studioControllerProvider.future);
     api.emitSession(
-      StudioBridgeEvent(
-        kindType: 'messageUpdated',
+      _messageUpdatedEvent(
         sessionId: 'session-1',
-        payload: {
-          'message': {
-            'messageId': 'turn-1:assistant',
-            'sessionId': 'session-1',
-            'turnId': 'turn-1',
-            'role': 'assistant',
-            'status': 'streaming',
-            'createdAt': 1,
-            'updatedAt': 1,
-          },
+        message: {
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'role': 'assistant',
+          'status': 'streaming',
+          'createdAt': 1,
+          'updatedAt': 1,
         },
       ),
     );
     api.emitSession(
-      StudioBridgeEvent(
-        kindType: 'messagePartUpdated',
+      _partUpdatedEvent(
         sessionId: 'session-1',
-        payload: {
-          'part': {
-            'partId': 'part-1',
-            'messageId': 'turn-1:assistant',
-            'sessionId': 'session-1',
-            'turnId': 'turn-1',
-            'partType': 'text',
-            'order': 0,
-            'revision': 0,
-            'status': 'streaming',
-            'createdAt': 1,
-            'updatedAt': 1,
-            'textChannel': 'final',
-            'text': '',
-          },
+        part: {
+          'partId': 'part-1',
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'partType': 'text',
+          'order': 0,
+          'revision': 0,
+          'status': 'streaming',
+          'createdAt': 1,
+          'updatedAt': 1,
+          'textChannel': 'final',
+          'text': '',
         },
       ),
     );
     api.emitSession(
-      StudioBridgeEvent(
-        kindType: 'messagePartDelta',
+      _partDeltaEvent(
         sessionId: 'session-1',
-        payload: {
-          'delta': {
-            'sessionId': 'session-1',
-            'messageId': 'turn-1:assistant',
-            'partId': 'part-1',
-            'revision': 1,
-            'field': 'text',
-            'delta': 'partial',
-          },
+        delta: {
+          'sessionId': 'session-1',
+          'messageId': 'turn-1:assistant',
+          'partId': 'part-1',
+          'revision': 1,
+          'field': 'text',
+          'delta': 'partial',
         },
       ),
     );
     api.emitSession(
-      StudioBridgeEvent(
-        kindType: 'messagePartUpdated',
+      _partUpdatedEvent(
         sessionId: 'session-1',
-        payload: {
-          'part': {
-            'partId': 'part-1',
-            'messageId': 'turn-1:assistant',
-            'sessionId': 'session-1',
-            'turnId': 'turn-1',
-            'partType': 'text',
-            'order': 0,
-            'revision': 1,
-            'status': 'completed',
-            'createdAt': 1,
-            'updatedAt': 2,
-            'textChannel': 'final',
-            'text': 'authoritative',
-          },
+        part: {
+          'partId': 'part-1',
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'partType': 'text',
+          'order': 0,
+          'revision': 1,
+          'status': 'completed',
+          'createdAt': 1,
+          'updatedAt': 2,
+          'textChannel': 'final',
+          'text': 'authoritative',
         },
       ),
     );
     await pumpEventQueue();
 
     final state = container.read(studioControllerProvider).requireValue;
-    expect(state.selectedMessages.single.parts.single.text, 'authoritative');
+    expect(state.selectedTimelineRows.single.part!.text, 'authoritative');
     expect(state.partOverlaysBySession['session-1'], isEmpty);
   });
 
@@ -336,10 +650,7 @@ void main() {
 
     await container.read(studioControllerProvider.future);
     api.emitGlobal(
-      StudioBridgeEvent(
-        kindType: 'sessionListChanged',
-        payload: {'projectId': 'project-1', 'sessions': <Object?>[]},
-      ),
+      _sessionListChangedEvent(projectId: 'project-1', sessions: const []),
     );
     await pumpEventQueue();
 
@@ -375,31 +686,29 @@ void main() {
 
       await container.read(studioControllerProvider.future);
       api.emitSession(
-        StudioBridgeEvent(
-          kindType: 'sessionRuntimeChanged',
-          payload: {
-            'runtime': {
-              'sessionId': 'session-1',
-              'usage': {
-                'model': 'planner/new',
-                'latestContextTokens': 42,
-                'contextWindow': 128000,
-                'promptTokens': 21,
-                'completionTokens': 21,
-                'cachedPromptTokens': 0,
-                'totalTokens': 42,
-                'estimatedCosts': [
-                  {'currency': 'CNY', 'amount': '0.1600'},
-                ],
-                'hasUnpricedUsage': false,
-                'updatedAt': 2,
-              },
-              'activeSkills': ['new-skill'],
-              'activeMcpServers': ['new-mcp'],
-              'activeLspServers': ['new-lsp'],
+        _sessionRuntimeChangedEvent(
+          sessionId: 'session-1',
+          runtime: sessionRuntimeFromJson({
+            'sessionId': 'session-1',
+            'usage': {
+              'model': 'planner/new',
+              'latestContextTokens': 42,
+              'contextWindow': 128000,
+              'promptTokens': 21,
+              'completionTokens': 21,
+              'cachedPromptTokens': 0,
+              'totalTokens': 42,
+              'estimatedCosts': [
+                {'currency': 'CNY', 'amount': '0.1600'},
+              ],
+              'hasUnpricedUsage': false,
               'updatedAt': 2,
             },
-          },
+            'activeSkills': ['new-skill'],
+            'activeMcpServers': ['new-mcp'],
+            'activeLspServers': ['new-lsp'],
+            'updatedAt': 2,
+          }),
         ),
       );
       await pumpEventQueue();
@@ -417,29 +726,27 @@ void main() {
       expect(runtime.agentCount, 2);
 
       api.emitSession(
-        StudioBridgeEvent(
-          kindType: 'sessionRuntimeChanged',
-          payload: {
-            'runtime': {
-              'sessionId': 'other-session',
-              'usage': {
-                'model': 'planner/other',
-                'latestContextTokens': 7,
-                'contextWindow': 128000,
-                'promptTokens': 7,
-                'completionTokens': 0,
-                'cachedPromptTokens': 0,
-                'totalTokens': 7,
-                'estimatedCosts': <Object?>[],
-                'hasUnpricedUsage': false,
-                'updatedAt': 3,
-              },
-              'activeSkills': ['other-skill'],
-              'activeMcpServers': ['other-mcp'],
-              'activeLspServers': ['other-lsp'],
+        _sessionRuntimeChangedEvent(
+          sessionId: 'other-session',
+          runtime: sessionRuntimeFromJson({
+            'sessionId': 'other-session',
+            'usage': {
+              'model': 'planner/other',
+              'latestContextTokens': 7,
+              'contextWindow': 128000,
+              'promptTokens': 7,
+              'completionTokens': 0,
+              'cachedPromptTokens': 0,
+              'totalTokens': 7,
+              'estimatedCosts': <Object?>[],
+              'hasUnpricedUsage': false,
               'updatedAt': 3,
             },
-          },
+            'activeSkills': ['other-skill'],
+            'activeMcpServers': ['other-mcp'],
+            'activeLspServers': ['other-lsp'],
+            'updatedAt': 3,
+          }),
         ),
       );
       await pumpEventQueue();
@@ -471,22 +778,34 @@ void main() {
     final state = container.read(studioControllerProvider).requireValue;
     expect(state.turnPhase, TurnPhase.completed);
     expect(
-      state.selectedMessages
-          .where((message) => message.role == 'user')
+      state.selectedTimelineRows
+          .where((row) => row.role == 'user')
           .last
-          .parts
-          .single
+          .part!
           .text,
       'demo hello',
     );
     expect(
-      state.selectedMessages
-          .where((message) => message.role == 'assistant')
+      state.selectedTimelineRows
+          .where((row) => row.role == 'assistant')
           .last
-          .parts
-          .single
+          .part!
           .text,
       contains('Demo response for'),
+    );
+  });
+
+  test('demo API stores sample timeline as snapshots only', () async {
+    final state = await DemoStudioApi().bootstrap();
+    final sessionId = state.selectedSessionId!;
+
+    expect(state.messagesBySession[sessionId], isNotEmpty);
+    expect(state.partSnapshotsBySession[sessionId], isNotEmpty);
+    expect(
+      state.selectedTimelineRows
+          .where((row) => row.role == 'assistant')
+          .map((row) => row.part!.id),
+      contains('turn-demo:final-1'),
     );
   });
 
@@ -509,7 +828,7 @@ void main() {
     expect(api.loadedSessionIds, ['session-a']);
     expect(state.selectedSessionId, 'session-a');
     expect(
-      state.selectedMessages.single.parts.single.text,
+      state.selectedTimelineRows.single.part!.text,
       'restored history from session a',
     );
   });
@@ -541,10 +860,108 @@ void main() {
     expect(state.selectedProjectId, 'project-b');
     expect(state.selectedSessionId, 'session-b');
     expect(
-      state.selectedMessages.single.parts.single.text,
+      state.selectedTimelineRows.single.part!.text,
       'restored history from session b',
     );
   });
+
+  test(
+    'session load buffers live events until snapshot merge completes',
+    () async {
+      final api = _FakeStudioApi(
+        _twoProjectState(selectedProjectId: 'project-a'),
+      );
+      api.selectProjectStates['project-b'] = _twoProjectState(
+        selectedProjectId: 'project-b',
+      );
+      api.sessionStates['session-b'] = _sessionHistoryState(
+        projectId: 'project-b',
+        sessionId: 'session-b',
+        text: 'old snapshot',
+        eventCursor: 99,
+        messageSequence: 1,
+        partSequence: 2,
+      );
+      final blockedLoad = Completer<StudioState>();
+      api.blockedSessionLoads['session-b'] = blockedLoad;
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      await container.read(studioControllerProvider.future);
+
+      final selectFuture = container
+          .read(studioControllerProvider.notifier)
+          .selectProject('project-b');
+      await pumpEventQueue();
+
+      api.emitSession(
+        _messageUpdatedEvent(
+          sessionId: 'session-b',
+          sequence: BigInt.from(5),
+          message: {
+            'messageId': 'turn-live:assistant',
+            'sessionId': 'session-b',
+            'turnId': 'turn-live',
+            'role': 'assistant',
+            'status': 'streaming',
+            'createdAt': 5,
+            'updatedAt': 5,
+          },
+        ),
+      );
+      api.emitSession(
+        _partUpdatedEvent(
+          sessionId: 'session-b',
+          sequence: BigInt.from(6),
+          part: {
+            'partId': 'part-live',
+            'messageId': 'turn-live:assistant',
+            'sessionId': 'session-b',
+            'turnId': 'turn-live',
+            'partType': 'text',
+            'order': 6,
+            'revision': 0,
+            'status': 'streaming',
+            'createdAt': 5,
+            'updatedAt': 5,
+            'textChannel': 'commentary',
+            'text': 'live ',
+          },
+        ),
+      );
+      api.emitSession(
+        _partDeltaEvent(
+          sessionId: 'session-b',
+          delta: {
+            'sessionId': 'session-b',
+            'messageId': 'turn-live:assistant',
+            'partId': 'part-live',
+            'revision': 1,
+            'field': 'text',
+            'delta': 'buffer',
+          },
+        ),
+      );
+      await pumpEventQueue();
+
+      var state = container.read(studioControllerProvider).requireValue;
+      expect(state.selectedSessionId, 'session-b');
+      expect(state.selectedMessages, isEmpty);
+
+      blockedLoad.complete(api.sessionStates['session-b']!);
+      await selectFuture;
+      await pumpEventQueue();
+
+      state = container.read(studioControllerProvider).requireValue;
+      expect(state.selectedSessionId, 'session-b');
+      final liveRow = state.selectedTimelineRows.singleWhere(
+        (row) => row.messageId == 'turn-live:assistant',
+      );
+      expect(liveRow.part!.text, 'live buffer');
+      expect(state.eventCursorsBySession['session-b'], 99);
+    },
+  );
 
   test(
     'archive project switches project and reloads selected session history',
@@ -580,7 +997,7 @@ void main() {
       expect(state.projects.map((project) => project.id), ['project-b']);
       expect(state.selectedProjectId, 'project-b');
       expect(
-        state.selectedMessages.single.parts.single.text,
+        state.selectedTimelineRows.single.part!.text,
         'history after project close',
       );
     },
@@ -679,46 +1096,44 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final now = DateTime.fromMillisecondsSinceEpoch(0);
-    final messages = [
-      TimelineMessage(
-        id: 'message-1',
-        sessionId: 'session-1',
-        role: 'assistant',
-        createdAt: now,
-        parts: const [
-          TimelinePart(
-            id: 'text-1',
-            messageId: 'message-1',
-            type: TimelinePartType.text,
-            text:
-                '# Build result\n'
-                '- **Compile** runtime\n'
-                '- Render `timeline`\n\n'
-                '| File | State |\n'
-                '| --- | --- |\n'
-                '| app.dart | ready |\n\n'
-                '```dart\n'
-                'void main() {\n'
-                "  print('ok');\n"
-                '}',
-            status: 'streaming',
-          ),
-          TimelinePart(
-            id: 'reasoning-1',
-            messageId: 'message-1',
-            type: TimelinePartType.reasoning,
-            title: 'Reasoning',
-            text: '> hidden raw reasoning\n\n- keep this out of timeline',
-            collapsed: false,
-          ),
-          TimelinePart(
-            id: 'plan-1',
-            messageId: 'message-1',
-            type: TimelinePartType.plan,
-            title: 'Plan',
-            text: '## Next steps\n1. Analyze\n2. Ship',
-          ),
-        ],
+    final message = TimelineMessage(
+      id: 'message-1',
+      sessionId: 'session-1',
+      role: 'assistant',
+      createdAt: now,
+    );
+    const parts = [
+      TimelinePart(
+        id: 'text-1',
+        messageId: 'message-1',
+        type: TimelinePartType.text,
+        text:
+            '# Build result\n'
+            '- **Compile** runtime\n'
+            '- Render `timeline`\n\n'
+            '| File | State |\n'
+            '| --- | --- |\n'
+            '| app.dart | ready |\n\n'
+            '```dart\n'
+            'void main() {\n'
+            "  print('ok');\n"
+            '}',
+        status: 'streaming',
+      ),
+      TimelinePart(
+        id: 'reasoning-1',
+        messageId: 'message-1',
+        type: TimelinePartType.reasoning,
+        title: 'Reasoning',
+        text: '> hidden raw reasoning\n\n- keep this out of timeline',
+        collapsed: false,
+      ),
+      TimelinePart(
+        id: 'plan-1',
+        messageId: 'message-1',
+        type: TimelinePartType.plan,
+        title: 'Plan',
+        text: '## Next steps\n1. Analyze\n2. Ship',
       ),
     ];
 
@@ -728,7 +1143,10 @@ void main() {
           body: SizedBox(
             width: 980,
             height: 820,
-            child: TimelineView(sessionId: 'session-1', messages: messages),
+            child: TimelineView(
+              sessionId: 'session-1',
+              rows: timelineRowsFromMessages([message], parts: parts),
+            ),
           ),
         ),
       ),
@@ -747,6 +1165,69 @@ void main() {
     expect(find.textContaining('Analyze'), findsOneWidget);
   });
 
+  testWidgets('timeline tool activity uses projected command summary', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final part = timelinePartFromSnapshot(
+      TimelinePartSnapshot(
+        id: 'tool-part-1',
+        messageId: 'message-tool',
+        sessionId: 'session-1',
+        turnId: 'turn-tool',
+        type: TimelinePartType.tool,
+        order: 0,
+        revision: 0,
+        text: '',
+        status: 'completed',
+        createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+        updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+        tool: TimelineToolPart(
+          toolCallId: 'tool-call-1',
+          name: 'bash',
+          arguments: jsonEncode({
+            'command': 'cargo test -p pl-model\ncargo test -p pl-core',
+          }),
+          workingDirectory: 'D:/work/project',
+          result: 'ok',
+        ),
+      ),
+    );
+    final messages = [
+      TimelineMessage(
+        id: 'message-tool',
+        sessionId: 'session-1',
+        role: 'assistant',
+        createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _localizedApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 520,
+            child: TimelineView(
+              sessionId: 'session-1',
+              rows: timelineRowsFromMessages(messages, parts: [part]),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('cargo test -p pl-model'), findsOneWidget);
+    expect(find.textContaining('D:/work/project'), findsOneWidget);
+    expect(find.textContaining('"command"'), findsNothing);
+    expect(find.textContaining('pl-core'), findsNothing);
+  });
+
   testWidgets('timeline renders markdown after inline code fence closure', (
     tester,
   ) async {
@@ -756,27 +1237,25 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final now = DateTime.fromMillisecondsSinceEpoch(0);
-    final messages = [
-      TimelineMessage(
-        id: 'message-inline-fence',
-        sessionId: 'session-1',
-        role: 'assistant',
-        createdAt: now,
-        parts: const [
-          TimelinePart(
-            id: 'plan-inline-fence',
-            messageId: 'message-inline-fence',
-            type: TimelinePartType.plan,
-            title: 'Plan',
-            text:
-                '```text\n'
-                'WttrResponse ├ weather: Vec<WeatherDay>```\n\n'
-                '## 依赖选型\n\n'
-                '| 依赖 | 用途 |\n'
-                '| --- | --- |\n'
-                '| serde | JSON |',
-          ),
-        ],
+    final message = TimelineMessage(
+      id: 'message-inline-fence',
+      sessionId: 'session-1',
+      role: 'assistant',
+      createdAt: now,
+    );
+    const parts = [
+      TimelinePart(
+        id: 'plan-inline-fence',
+        messageId: 'message-inline-fence',
+        type: TimelinePartType.plan,
+        title: 'Plan',
+        text:
+            '```text\n'
+            'WttrResponse ├ weather: Vec<WeatherDay>```\n\n'
+            '## 依赖选型\n\n'
+            '| 依赖 | 用途 |\n'
+            '| --- | --- |\n'
+            '| serde | JSON |',
       ),
     ];
 
@@ -786,7 +1265,10 @@ void main() {
           body: SizedBox(
             width: 980,
             height: 820,
-            child: TimelineView(sessionId: 'session-1', messages: messages),
+            child: TimelineView(
+              sessionId: 'session-1',
+              rows: timelineRowsFromMessages([message], parts: parts),
+            ),
           ),
         ),
       ),
@@ -810,31 +1292,29 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final now = DateTime.fromMillisecondsSinceEpoch(0);
-    final messages = [
-      TimelineMessage(
-        id: 'message-agent-markdown',
-        sessionId: 'session-1',
-        role: 'assistant',
-        createdAt: now,
-        parts: const [
-          TimelinePart(
-            id: 'plan-agent-markdown',
-            messageId: 'message-agent-markdown',
-            type: TimelinePartType.plan,
-            title: 'Plan',
-            text:
-                'glm-intro.html代码结构单文件 HTML（~850行），GLM产品介绍落地页。\n\n'
-                '###整体层级```\n'
-                '└──<html>\n'
-                '├──<head>\n'
-                '│ └──<style> → 全部 CSS\n'
-                'CSS组织```\n'
-                'hero { display: grid; }\n\n'
-                '###实现计划\n'
-                '- 拆分结构\n'
-                '- 保持动效',
-          ),
-        ],
+    final message = TimelineMessage(
+      id: 'message-agent-markdown',
+      sessionId: 'session-1',
+      role: 'assistant',
+      createdAt: now,
+    );
+    const parts = [
+      TimelinePart(
+        id: 'plan-agent-markdown',
+        messageId: 'message-agent-markdown',
+        type: TimelinePartType.plan,
+        title: 'Plan',
+        text:
+            'glm-intro.html代码结构单文件 HTML（~850行），GLM产品介绍落地页。\n\n'
+            '###整体层级```\n'
+            '└──<html>\n'
+            '├──<head>\n'
+            '│ └──<style> → 全部 CSS\n'
+            'CSS组织```\n'
+            'hero { display: grid; }\n\n'
+            '###实现计划\n'
+            '- 拆分结构\n'
+            '- 保持动效',
       ),
     ];
 
@@ -844,7 +1324,10 @@ void main() {
           body: SizedBox(
             width: 980,
             height: 820,
-            child: TimelineView(sessionId: 'session-1', messages: messages),
+            child: TimelineView(
+              sessionId: 'session-1',
+              rows: timelineRowsFromMessages([message], parts: parts),
+            ),
           ),
         ),
       ),
@@ -1156,20 +1639,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(api.sessionModeUpdate, CompileMode.plan);
     api.emitGlobal(
-      StudioBridgeEvent(
-        kindType: 'sessionListChanged',
-        payload: {
-          'projectId': 'project-1',
-          'sessions': [
-            {
-              'id': 'session-1',
-              'projectId': 'project-1',
-              'title': 'Session',
-              'mode': 'plan',
-              'updatedAt': 1,
-            },
-          ],
-        },
+      _sessionListChangedEvent(
+        projectId: 'project-1',
+        sessions: [
+          StudioSession(
+            id: 'session-1',
+            projectId: 'project-1',
+            title: 'Session',
+            mode: CompileMode.plan,
+            updatedAt: DateTime.fromMillisecondsSinceEpoch(1000),
+          ),
+        ],
       ),
     );
     await tester.pumpAndSettle();
@@ -1800,16 +2280,35 @@ void main() {
 
 Widget _timelineHarness({
   required String sessionId,
-  required List<TimelineMessage> messages,
+  required List<_ProjectedMessageFixture> messages,
 }) {
   return _localizedApp(
     home: Scaffold(
       body: SizedBox(
         width: 980,
         height: 520,
-        child: TimelineView(sessionId: sessionId, messages: messages),
+        child: TimelineView(
+          sessionId: sessionId,
+          rows: _rowsFromProjectedMessages(messages),
+        ),
       ),
     ),
+  );
+}
+
+class _ProjectedMessageFixture {
+  const _ProjectedMessageFixture({required this.message, required this.parts});
+
+  final TimelineMessage message;
+  final List<TimelinePart> parts;
+}
+
+List<TimelineRow> _rowsFromProjectedMessages(
+  List<_ProjectedMessageFixture> fixtures,
+) {
+  return timelineRowsFromMessages(
+    [for (final fixture in fixtures) fixture.message],
+    parts: [for (final fixture in fixtures) ...fixture.parts],
   );
 }
 
@@ -1822,6 +2321,105 @@ Widget _localizedApp({
     localizationsDelegates: AppLocalizations.localizationsDelegates,
     supportedLocales: AppLocalizations.supportedLocales,
     home: home,
+  );
+}
+
+Future<void> _pumpFrameBatch() async {
+  await pumpEventQueue();
+  final binding = SchedulerBinding.instance;
+  binding.handleBeginFrame(const Duration(milliseconds: 16));
+  binding.handleDrawFrame();
+  await pumpEventQueue();
+}
+
+StudioBridgeEvent _messageUpdatedEvent({
+  required String sessionId,
+  required Map<String, Object?> message,
+  BigInt? sequence,
+}) {
+  return StudioBridgeEvent(
+    sessionId: sessionId,
+    sequence: sequence,
+    payload: MessageUpdatedPayload(
+      message: timelineMessageFromJson({
+        ...message,
+        if (!message.containsKey('sessionId')) 'sessionId': sessionId,
+      }, sequence: sequence?.toInt() ?? 0),
+    ),
+  );
+}
+
+StudioBridgeEvent _partUpdatedEvent({
+  required String sessionId,
+  required Map<String, Object?> part,
+  BigInt? sequence,
+}) {
+  return StudioBridgeEvent(
+    sessionId: sessionId,
+    sequence: sequence,
+    payload: MessagePartUpdatedPayload(
+      part: timelinePartSnapshotFromJson({
+        ...part,
+        if (!part.containsKey('sessionId')) 'sessionId': sessionId,
+      }, sequence: sequence?.toInt() ?? 0),
+    ),
+  );
+}
+
+StudioBridgeEvent _partDeltaEvent({
+  required String sessionId,
+  required Map<String, Object?> delta,
+  BigInt? sequence,
+}) {
+  return StudioBridgeEvent(
+    sessionId: sessionId,
+    sequence: sequence,
+    payload: MessagePartDeltaPayload(
+      delta: timelinePartDeltaFromJson({
+        ...delta,
+        if (!delta.containsKey('sessionId')) 'sessionId': sessionId,
+      }),
+    ),
+  );
+}
+
+StudioBridgeEvent _agentTimelineEvent({
+  required String sessionId,
+  required Map<String, Object?> event,
+}) {
+  return StudioBridgeEvent(
+    sessionId: sessionId,
+    payload: AgentTimelineChangedPayload(
+      event: timelineAgentEventFromPayload({
+        ...event,
+        if (!event.containsKey('sessionId')) 'sessionId': sessionId,
+      }),
+    ),
+  );
+}
+
+StudioBridgeEvent _sessionListChangedEvent({
+  required String? projectId,
+  required List<StudioSession> sessions,
+}) {
+  return StudioBridgeEvent(
+    payload: SessionListChangedPayload(
+      projectId: projectId,
+      sessions: sessions,
+    ),
+  );
+}
+
+StudioBridgeEvent _sessionRuntimeChangedEvent({
+  required String sessionId,
+  required SessionRuntimeView runtime,
+}) {
+  return StudioBridgeEvent(
+    sessionId: sessionId,
+    payload: SessionRuntimeChangedPayload(
+      sessionId: sessionId,
+      runtime: runtime,
+    ),
   );
 }
 
@@ -1846,7 +2444,7 @@ Future<void> _expectMenuOpensAboveTrigger({
   await tester.pumpAndSettle();
 }
 
-List<TimelineMessage> _scrollMessages(
+List<_ProjectedMessageFixture> _scrollMessages(
   String sessionId,
   int count, {
   bool expandedLast = false,
@@ -1854,11 +2452,13 @@ List<TimelineMessage> _scrollMessages(
   final now = DateTime.fromMillisecondsSinceEpoch(0);
   return [
     for (var index = 0; index < count; index++)
-      TimelineMessage(
-        id: '$sessionId-message-$index',
-        sessionId: sessionId,
-        role: index.isEven ? 'assistant' : 'user',
-        createdAt: now.add(Duration(seconds: index)),
+      _ProjectedMessageFixture(
+        message: TimelineMessage(
+          id: '$sessionId-message-$index',
+          sessionId: sessionId,
+          role: index.isEven ? 'assistant' : 'user',
+          createdAt: now.add(Duration(seconds: index)),
+        ),
         parts: [
           TimelinePart(
             id: '$sessionId-part-$index',
@@ -2017,6 +2617,9 @@ StudioState _sessionHistoryState({
   required String projectId,
   required String sessionId,
   required String text,
+  int eventCursor = 42,
+  int messageSequence = 0,
+  int partSequence = 0,
 }) {
   final session = StudioSession(
     id: sessionId,
@@ -2037,19 +2640,29 @@ StudioState _sessionHistoryState({
           sessionId: sessionId,
           role: 'assistant',
           createdAt: DateTime.fromMillisecondsSinceEpoch(1),
-          parts: [
-            TimelinePart(
-              id: '$sessionId-part-history',
-              messageId: '$sessionId-message-history',
-              type: TimelinePartType.text,
-              text: text,
-              status: 'completed',
-            ),
-          ],
+          sequence: messageSequence,
         ),
       ],
     },
-    eventCursorsBySession: {sessionId: 42},
+    partSnapshotsBySession: {
+      sessionId: {
+        '$sessionId-part-history': TimelinePartSnapshot(
+          id: '$sessionId-part-history',
+          messageId: '$sessionId-message-history',
+          sessionId: sessionId,
+          turnId: '$sessionId-turn-history',
+          type: TimelinePartType.text,
+          order: 0,
+          revision: 0,
+          sequence: partSequence,
+          text: text,
+          status: 'completed',
+          createdAt: DateTime.fromMillisecondsSinceEpoch(1),
+          updatedAt: DateTime.fromMillisecondsSinceEpoch(1),
+        ),
+      },
+    },
+    eventCursorsBySession: {sessionId: eventCursor},
   );
 }
 
@@ -2097,6 +2710,7 @@ class _FakeStudioApi implements StudioApi {
   final _global = StreamController<Object>.broadcast();
   final _session = StreamController<Object>.broadcast();
   final Map<String, StudioState> sessionStates = {};
+  final Map<String, Completer<StudioState>> blockedSessionLoads = {};
   final Map<String, StudioState> selectProjectStates = {};
   final Map<String, StudioState> archiveProjectStates = {};
   final List<String> loadedSessionIds = [];
@@ -2128,6 +2742,10 @@ class _FakeStudioApi implements StudioApi {
   @override
   Future<StudioState> loadSessionState(String sessionId) async {
     loadedSessionIds.add(sessionId);
+    final blocked = blockedSessionLoads.remove(sessionId);
+    if (blocked != null) {
+      return blocked.future;
+    }
     return sessionStates[sessionId] ?? initialState;
   }
 

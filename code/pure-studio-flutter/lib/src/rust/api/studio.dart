@@ -5,10 +5,12 @@
 
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
+part 'studio.freezed.dart';
 
-// These functions are ignored because they are not marked as `pub`: `agent_dto`, `agent_event_dto`, `block_on`, `bootstrap_studio_inner`, `bridge`, `is_session_state_event`, `json_response`, `load_session_state_inner`, `new`, `project_dto`, `provider_edit`, `provider_model_edit`, `provider_settings_edit`, `provider_usage_dto`, `resolve_interaction_response`, `role_edit`, `runtime_snapshot`, `session_dto`, `session_runtime_dto`, `stale`, `studio_settings_draft_key`, `studio_snapshot_from_projects_inner`, `studio_snapshot_inner`, `unix_nanos_hex`, `unix_seconds`, `zhipu_window_labels`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `AgentDto`, `AgentTimelineEventDto`, `BootstrapResponse`, `BridgeRuntime`, `DeepSeekBalanceDto`, `DeepSeekBalanceInfoDto`, `ProjectDto`, `ProviderInput`, `ProviderModelInput`, `ProviderSettingsInput`, `ProviderUsageDto`, `ProviderUsagesResponse`, `ResolveInteractionResponse`, `RoleInput`, `SessionDto`, `SessionRuntimeDto`, `SessionStateResponse`, `StopPromptResponse`, `StudioEventsResponse`, `StudioMessageProjectionDto`, `StudioPartProjectionDto`, `SubmitPromptResponse`, `ZhipuCodingPlanUsageDto`, `ZhipuQuotaLimitDto`, `ZhipuToolUsageDetailDto`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
+// These functions are ignored because they are not marked as `pub`: `agent_bridge_dto`, `agent_event_bridge_dto`, `block_on`, `bootstrap_studio_inner`, `bridge_agent_snapshot`, `bridge_agent_timeline_event`, `bridge_agent_timeline_payload`, `bridge_cost_amount`, `bridge_event_payload`, `bridge_interaction_changed`, `bridge_interaction_payload`, `bridge_lsp_health`, `bridge_mcp_health`, `bridge_message`, `bridge_part_delta_field`, `bridge_part_delta`, `bridge_part`, `bridge_session_runtime_view`, `bridge_session_runtime`, `bridge_skill_activation`, `bridge_turn`, `bridge_visible_event`, `bridge`, `interaction_request_bridge_dto`, `is_session_state_event`, `load_session_state_inner`, `mcp_transport_from_label`, `new`, `normalized_string_list`, `project_dto`, `provider_edit`, `provider_model_edit`, `provider_settings_edit`, `provider_usage_dto`, `resolve_interaction_response`, `role_edit`, `runtime_snapshot`, `session_dto`, `session_summary_dto`, `stale`, `studio_settings_draft_key`, `studio_snapshot_from_projects_inner`, `studio_snapshot_inner`, `unix_nanos_hex`, `unix_seconds`, `zhipu_window_labels`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `BridgeRuntime`, `InstructionsSettingsInput`, `McpServerInput`, `McpSettingsInput`, `ProviderInput`, `ProviderModelInput`, `ProviderSettingsInput`, `RoleInput`, `SkillsSettingsInput`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
 
 Future<RuntimeSnapshot> initializeRuntime() =>
     RustLib.instance.api.crateApiStudioInitializeRuntime();
@@ -19,16 +21,17 @@ Future<RuntimeSnapshot> startRuntime() =>
 Future<RuntimeSnapshot> shutdownRuntime() =>
     RustLib.instance.api.crateApiStudioShutdownRuntime();
 
-Future<JsonResponse> bootstrapStudio() =>
+Future<BridgeStudioSnapshotResponse> bootstrapStudio() =>
     RustLib.instance.api.crateApiStudioBootstrapStudio();
 
-Future<JsonResponse> openProject({required String path}) =>
+Future<BridgeStudioSnapshotResponse> openProject({required String path}) =>
     RustLib.instance.api.crateApiStudioOpenProject(path: path);
 
-Future<JsonResponse> selectProject({required String projectId}) =>
-    RustLib.instance.api.crateApiStudioSelectProject(projectId: projectId);
+Future<BridgeStudioSnapshotResponse> selectProject({
+  required String projectId,
+}) => RustLib.instance.api.crateApiStudioSelectProject(projectId: projectId);
 
-Future<JsonResponse> archiveProject({
+Future<BridgeStudioSnapshotResponse> archiveProject({
   required String projectId,
   String? selectedProjectId,
 }) => RustLib.instance.api.crateApiStudioArchiveProject(
@@ -36,7 +39,7 @@ Future<JsonResponse> archiveProject({
   selectedProjectId: selectedProjectId,
 );
 
-Future<JsonResponse> createSession({
+Future<BridgeStudioSnapshotResponse> createSession({
   required String projectId,
   String? title,
 }) => RustLib.instance.api.crateApiStudioCreateSession(
@@ -44,7 +47,7 @@ Future<JsonResponse> createSession({
   title: title,
 );
 
-Future<JsonResponse> archiveSession({
+Future<BridgeStudioSnapshotResponse> archiveSession({
   required String sessionId,
   String? selectedSessionId,
 }) => RustLib.instance.api.crateApiStudioArchiveSession(
@@ -52,7 +55,7 @@ Future<JsonResponse> archiveSession({
   selectedSessionId: selectedSessionId,
 );
 
-Future<JsonResponse> setSessionMode({
+Future<BridgeSessionStateResponse> setSessionMode({
   required String sessionId,
   required String mode,
 }) => RustLib.instance.api.crateApiStudioSetSessionMode(
@@ -60,7 +63,7 @@ Future<JsonResponse> setSessionMode({
   mode: mode,
 );
 
-Future<JsonResponse> setModelRole({
+Future<BridgeStudioSnapshotResponse> setModelRole({
   required String roleKey,
   required String providerId,
   required String model,
@@ -74,43 +77,48 @@ Future<JsonResponse> setModelRole({
   selectedSessionId: selectedSessionId,
 );
 
-Future<JsonResponse> saveRuntimePermissionMode({required String mode}) =>
+Future<ConfigSavedResponse> saveRuntimePermissionMode({required String mode}) =>
     RustLib.instance.api.crateApiStudioSaveRuntimePermissionMode(mode: mode);
 
-Future<JsonResponse> saveProviderSettings({required String settingsJson}) =>
-    RustLib.instance.api.crateApiStudioSaveProviderSettings(
-      settingsJson: settingsJson,
-    );
+Future<BridgeStudioSnapshotResponse> saveProviderSettings({
+  required String settingsJson,
+}) => RustLib.instance.api.crateApiStudioSaveProviderSettings(
+  settingsJson: settingsJson,
+);
 
-Future<JsonResponse> saveInstructionsSettings({required String settingsJson}) =>
-    RustLib.instance.api.crateApiStudioSaveInstructionsSettings(
-      settingsJson: settingsJson,
-    );
+Future<BridgeStudioSnapshotResponse> saveInstructionsSettings({
+  required String settingsJson,
+}) => RustLib.instance.api.crateApiStudioSaveInstructionsSettings(
+  settingsJson: settingsJson,
+);
 
-Future<JsonResponse> saveSkillsSettings({required String settingsJson}) =>
-    RustLib.instance.api.crateApiStudioSaveSkillsSettings(
-      settingsJson: settingsJson,
-    );
+Future<BridgeStudioSnapshotResponse> saveSkillsSettings({
+  required String settingsJson,
+}) => RustLib.instance.api.crateApiStudioSaveSkillsSettings(
+  settingsJson: settingsJson,
+);
 
-Future<JsonResponse> saveMcpSettings({required String settingsJson}) => RustLib
-    .instance
-    .api
-    .crateApiStudioSaveMcpSettings(settingsJson: settingsJson);
+Future<BridgeStudioSnapshotResponse> saveMcpSettings({
+  required String settingsJson,
+}) => RustLib.instance.api.crateApiStudioSaveMcpSettings(
+  settingsJson: settingsJson,
+);
 
-Future<JsonResponse> saveGeneralSettings({required String settingsJson}) =>
-    RustLib.instance.api.crateApiStudioSaveGeneralSettings(
-      settingsJson: settingsJson,
-    );
+Future<BridgeStudioSnapshotResponse> saveGeneralSettings({
+  required String settingsJson,
+}) => RustLib.instance.api.crateApiStudioSaveGeneralSettings(
+  settingsJson: settingsJson,
+);
 
-Future<JsonResponse> loadProviderUsages() =>
+Future<ProviderUsagesResponse> loadProviderUsages() =>
     RustLib.instance.api.crateApiStudioLoadProviderUsages();
 
-Future<JsonResponse> listDiscoveredSkills({required String projectId}) =>
+Future<SkillsResponse> listDiscoveredSkills({required String projectId}) =>
     RustLib.instance.api.crateApiStudioListDiscoveredSkills(
       projectId: projectId,
     );
 
-Future<JsonResponse> saveStudioSettingsDraft({
+Future<SettingsDraftResponse> saveStudioSettingsDraft({
   required String section,
   required String draftJson,
 }) => RustLib.instance.api.crateApiStudioSaveStudioSettingsDraft(
@@ -118,7 +126,7 @@ Future<JsonResponse> saveStudioSettingsDraft({
   draftJson: draftJson,
 );
 
-Future<JsonResponse> submitPrompt({
+Future<SubmitPromptResponse> submitPrompt({
   required String sessionId,
   required String prompt,
   required List<String> attachmentIds,
@@ -128,10 +136,10 @@ Future<JsonResponse> submitPrompt({
   attachmentIds: attachmentIds,
 );
 
-Future<JsonResponse> stopPrompt({required String sessionId}) =>
+Future<StopPromptResponse> stopPrompt({required String sessionId}) =>
     RustLib.instance.api.crateApiStudioStopPrompt(sessionId: sessionId);
 
-Future<JsonResponse> resolveInteraction({
+Future<ResolveInteractionResponse> resolveInteraction({
   required String interactionId,
   required String resolutionJson,
 }) => RustLib.instance.api.crateApiStudioResolveInteraction(
@@ -139,10 +147,11 @@ Future<JsonResponse> resolveInteraction({
   resolutionJson: resolutionJson,
 );
 
-Future<JsonResponse> loadSessionState({required String sessionId}) =>
-    RustLib.instance.api.crateApiStudioLoadSessionState(sessionId: sessionId);
+Future<BridgeSessionStateResponse> loadSessionState({
+  required String sessionId,
+}) => RustLib.instance.api.crateApiStudioLoadSessionState(sessionId: sessionId);
 
-Future<JsonResponse> loadStudioEvents({
+Future<BridgeStudioEventsResponse> loadStudioEvents({
   required String sessionId,
   PlatformInt64? afterSequence,
   PlatformInt64? limit,
@@ -179,14 +188,175 @@ class BridgeActiveTurn {
           turnId == other.turnId;
 }
 
+class BridgeAgentSnapshotDto {
+  final String id;
+  final String sessionId;
+  final String path;
+  final String? parentPath;
+  final String role;
+  final String task;
+  final String status;
+  final String? summary;
+  final int depth;
+  final String? error;
+  final String? reason;
+  final PlatformInt64 updatedAt;
+
+  const BridgeAgentSnapshotDto({
+    required this.id,
+    required this.sessionId,
+    required this.path,
+    this.parentPath,
+    required this.role,
+    required this.task,
+    required this.status,
+    this.summary,
+    required this.depth,
+    this.error,
+    this.reason,
+    required this.updatedAt,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      sessionId.hashCode ^
+      path.hashCode ^
+      parentPath.hashCode ^
+      role.hashCode ^
+      task.hashCode ^
+      status.hashCode ^
+      summary.hashCode ^
+      depth.hashCode ^
+      error.hashCode ^
+      reason.hashCode ^
+      updatedAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeAgentSnapshotDto &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          sessionId == other.sessionId &&
+          path == other.path &&
+          parentPath == other.parentPath &&
+          role == other.role &&
+          task == other.task &&
+          status == other.status &&
+          summary == other.summary &&
+          depth == other.depth &&
+          error == other.error &&
+          reason == other.reason &&
+          updatedAt == other.updatedAt;
+}
+
+class BridgeAgentTimelineEventDto {
+  final String eventId;
+  final String sessionId;
+  final BigInt sequence;
+  final PlatformInt64 createdAt;
+  final BridgeAgentTimelinePayloadDto payload;
+
+  const BridgeAgentTimelineEventDto({
+    required this.eventId,
+    required this.sessionId,
+    required this.sequence,
+    required this.createdAt,
+    required this.payload,
+  });
+
+  @override
+  int get hashCode =>
+      eventId.hashCode ^
+      sessionId.hashCode ^
+      sequence.hashCode ^
+      createdAt.hashCode ^
+      payload.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeAgentTimelineEventDto &&
+          runtimeType == other.runtimeType &&
+          eventId == other.eventId &&
+          sessionId == other.sessionId &&
+          sequence == other.sequence &&
+          createdAt == other.createdAt &&
+          payload == other.payload;
+}
+
+@freezed
+sealed class BridgeAgentTimelinePayloadDto
+    with _$BridgeAgentTimelinePayloadDto {
+  const BridgeAgentTimelinePayloadDto._();
+
+  const factory BridgeAgentTimelinePayloadDto.spawnBegin({
+    required String callId,
+    required String senderPath,
+    required String taskName,
+    required String prompt,
+    required String role,
+    String? model,
+    String? reasoningEffort,
+  }) = BridgeAgentTimelinePayloadDto_SpawnBegin;
+  const factory BridgeAgentTimelinePayloadDto.spawnEnd({
+    required String callId,
+    required String senderPath,
+    String? agentId,
+    String? path,
+    String? role,
+    required String status,
+    required String prompt,
+    String? error,
+  }) = BridgeAgentTimelinePayloadDto_SpawnEnd;
+  const factory BridgeAgentTimelinePayloadDto.interactionBegin({
+    required String callId,
+    required String senderPath,
+    required String receiverPath,
+    required String prompt,
+  }) = BridgeAgentTimelinePayloadDto_InteractionBegin;
+  const factory BridgeAgentTimelinePayloadDto.interactionEnd({
+    required String callId,
+    required String senderPath,
+    required String receiverPath,
+    required String status,
+    required String prompt,
+    String? error,
+  }) = BridgeAgentTimelinePayloadDto_InteractionEnd;
+  const factory BridgeAgentTimelinePayloadDto.waitingBegin({
+    required String callId,
+    required String senderPath,
+  }) = BridgeAgentTimelinePayloadDto_WaitingBegin;
+  const factory BridgeAgentTimelinePayloadDto.waitingEnd({
+    required String callId,
+    required String senderPath,
+    required bool timedOut,
+  }) = BridgeAgentTimelinePayloadDto_WaitingEnd;
+  const factory BridgeAgentTimelinePayloadDto.closeBegin({
+    required String callId,
+    required String senderPath,
+    required String receiverPath,
+  }) = BridgeAgentTimelinePayloadDto_CloseBegin;
+  const factory BridgeAgentTimelinePayloadDto.closeEnd({
+    required String callId,
+    required String senderPath,
+    required String receiverPath,
+    required String status,
+    String? error,
+  }) = BridgeAgentTimelinePayloadDto_CloseEnd;
+  const factory BridgeAgentTimelinePayloadDto.unknown({
+    required String kindType,
+  }) = BridgeAgentTimelinePayloadDto_Unknown;
+}
+
 class BridgeEventEnvelope {
   final String eventId;
   final String? sessionId;
   final String? turnId;
   final BigInt sequence;
   final PlatformInt64 createdAt;
-  final String kindType;
-  final String payloadJson;
+  final BridgeEventPayload payload;
 
   const BridgeEventEnvelope({
     required this.eventId,
@@ -194,8 +364,7 @@ class BridgeEventEnvelope {
     this.turnId,
     required this.sequence,
     required this.createdAt,
-    required this.kindType,
-    required this.payloadJson,
+    required this.payload,
   });
 
   @override
@@ -205,8 +374,7 @@ class BridgeEventEnvelope {
       turnId.hashCode ^
       sequence.hashCode ^
       createdAt.hashCode ^
-      kindType.hashCode ^
-      payloadJson.hashCode;
+      payload.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -218,8 +386,285 @@ class BridgeEventEnvelope {
           turnId == other.turnId &&
           sequence == other.sequence &&
           createdAt == other.createdAt &&
-          kindType == other.kindType &&
-          payloadJson == other.payloadJson;
+          payload == other.payload;
+}
+
+@freezed
+sealed class BridgeEventPayload with _$BridgeEventPayload {
+  const BridgeEventPayload._();
+
+  const factory BridgeEventPayload.turnChanged({
+    required BridgeStudioTurnDto turn,
+  }) = BridgeEventPayload_TurnChanged;
+  const factory BridgeEventPayload.messageUpdated({
+    required BridgeStudioMessageDto message,
+  }) = BridgeEventPayload_MessageUpdated;
+  const factory BridgeEventPayload.messageRemoved({required String messageId}) =
+      BridgeEventPayload_MessageRemoved;
+  const factory BridgeEventPayload.messagePartUpdated({
+    required BridgeStudioPartDto part_,
+  }) = BridgeEventPayload_MessagePartUpdated;
+  const factory BridgeEventPayload.messagePartRemoved({
+    required String messageId,
+    required String partId,
+  }) = BridgeEventPayload_MessagePartRemoved;
+  const factory BridgeEventPayload.messagePartDelta({
+    required BridgeStudioPartDeltaDto delta,
+  }) = BridgeEventPayload_MessagePartDelta;
+  const factory BridgeEventPayload.interactionChanged({
+    required BridgeInteractionChangedDto event,
+  }) = BridgeEventPayload_InteractionChanged;
+  const factory BridgeEventPayload.agentChanged({
+    required BridgeAgentSnapshotDto agent,
+  }) = BridgeEventPayload_AgentChanged;
+  const factory BridgeEventPayload.agentTimelineChanged({
+    required BridgeAgentTimelineEventDto event,
+  }) = BridgeEventPayload_AgentTimelineChanged;
+  const factory BridgeEventPayload.sessionRuntimeChanged({
+    required BridgeSessionRuntimeDto runtime,
+  }) = BridgeEventPayload_SessionRuntimeChanged;
+  const factory BridgeEventPayload.skillActivated({
+    required BridgeSkillActivationDto activation,
+  }) = BridgeEventPayload_SkillActivated;
+  const factory BridgeEventPayload.planLifecycleChanged({
+    required BridgePlanLifecycleDto event,
+  }) = BridgeEventPayload_PlanLifecycleChanged;
+  const factory BridgeEventPayload.sessionHandoffChanged() =
+      BridgeEventPayload_SessionHandoffChanged;
+  const factory BridgeEventPayload.sessionListChanged({
+    required String projectId,
+    required List<SessionDto> sessions,
+  }) = BridgeEventPayload_SessionListChanged;
+  const factory BridgeEventPayload.mcpHealthChanged({
+    required BridgeMcpHealthDto health,
+  }) = BridgeEventPayload_McpHealthChanged;
+  const factory BridgeEventPayload.lspHealthChanged({
+    required BridgeLspHealthDto health,
+  }) = BridgeEventPayload_LspHealthChanged;
+  const factory BridgeEventPayload.stale({required BigInt laggedEvents}) =
+      BridgeEventPayload_Stale;
+}
+
+class BridgeInteractionChangedDto {
+  final String interactionId;
+  final String kind;
+  final String status;
+  final String sessionId;
+  final String turnId;
+  final String? itemId;
+  final String? toolId;
+  final String? agentPath;
+  final BridgeInteractionPayloadDto payload;
+  final PlatformInt64 createdAt;
+  final PlatformInt64 updatedAt;
+  final PlatformInt64? resolvedAt;
+
+  const BridgeInteractionChangedDto({
+    required this.interactionId,
+    required this.kind,
+    required this.status,
+    required this.sessionId,
+    required this.turnId,
+    this.itemId,
+    this.toolId,
+    this.agentPath,
+    required this.payload,
+    required this.createdAt,
+    required this.updatedAt,
+    this.resolvedAt,
+  });
+
+  @override
+  int get hashCode =>
+      interactionId.hashCode ^
+      kind.hashCode ^
+      status.hashCode ^
+      sessionId.hashCode ^
+      turnId.hashCode ^
+      itemId.hashCode ^
+      toolId.hashCode ^
+      agentPath.hashCode ^
+      payload.hashCode ^
+      createdAt.hashCode ^
+      updatedAt.hashCode ^
+      resolvedAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeInteractionChangedDto &&
+          runtimeType == other.runtimeType &&
+          interactionId == other.interactionId &&
+          kind == other.kind &&
+          status == other.status &&
+          sessionId == other.sessionId &&
+          turnId == other.turnId &&
+          itemId == other.itemId &&
+          toolId == other.toolId &&
+          agentPath == other.agentPath &&
+          payload == other.payload &&
+          createdAt == other.createdAt &&
+          updatedAt == other.updatedAt &&
+          resolvedAt == other.resolvedAt;
+}
+
+@freezed
+sealed class BridgeInteractionPayloadDto with _$BridgeInteractionPayloadDto {
+  const BridgeInteractionPayloadDto._();
+
+  const factory BridgeInteractionPayloadDto.userInput({
+    required List<BridgeUserQuestionDto> questions,
+  }) = BridgeInteractionPayloadDto_UserInput;
+  const factory BridgeInteractionPayloadDto.toolApproval({
+    required String name,
+    required String argumentsJson,
+    String? workingDirectory,
+    String? parentAgentId,
+  }) = BridgeInteractionPayloadDto_ToolApproval;
+  const factory BridgeInteractionPayloadDto.planConfirmation({
+    required String planId,
+    required String content,
+  }) = BridgeInteractionPayloadDto_PlanConfirmation;
+}
+
+class BridgeLspHealthDto {
+  final List<String> activeLspServers;
+
+  const BridgeLspHealthDto({required this.activeLspServers});
+
+  @override
+  int get hashCode => activeLspServers.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeLspHealthDto &&
+          runtimeType == other.runtimeType &&
+          activeLspServers == other.activeLspServers;
+}
+
+class BridgeMcpHealthDto {
+  final List<String> activeMcpServers;
+  final List<BridgeMcpServerDto> mcpServers;
+
+  const BridgeMcpHealthDto({
+    required this.activeMcpServers,
+    required this.mcpServers,
+  });
+
+  @override
+  int get hashCode => activeMcpServers.hashCode ^ mcpServers.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeMcpHealthDto &&
+          runtimeType == other.runtimeType &&
+          activeMcpServers == other.activeMcpServers &&
+          mcpServers == other.mcpServers;
+}
+
+class BridgeMcpServerDto {
+  final String id;
+  final bool enabled;
+  final String transport;
+  final String? command;
+  final String? url;
+  final String endpoint;
+  final String statusKind;
+  final String availabilityKind;
+
+  const BridgeMcpServerDto({
+    required this.id,
+    required this.enabled,
+    required this.transport,
+    this.command,
+    this.url,
+    required this.endpoint,
+    required this.statusKind,
+    required this.availabilityKind,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      enabled.hashCode ^
+      transport.hashCode ^
+      command.hashCode ^
+      url.hashCode ^
+      endpoint.hashCode ^
+      statusKind.hashCode ^
+      availabilityKind.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeMcpServerDto &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          enabled == other.enabled &&
+          transport == other.transport &&
+          command == other.command &&
+          url == other.url &&
+          endpoint == other.endpoint &&
+          statusKind == other.statusKind &&
+          availabilityKind == other.availabilityKind;
+}
+
+class BridgePlanLifecycleDto {
+  final String planId;
+  final String state;
+  final String? turnId;
+  final String? reason;
+  final PlatformInt64 updatedAt;
+
+  const BridgePlanLifecycleDto({
+    required this.planId,
+    required this.state,
+    this.turnId,
+    this.reason,
+    required this.updatedAt,
+  });
+
+  @override
+  int get hashCode =>
+      planId.hashCode ^
+      state.hashCode ^
+      turnId.hashCode ^
+      reason.hashCode ^
+      updatedAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgePlanLifecycleDto &&
+          runtimeType == other.runtimeType &&
+          planId == other.planId &&
+          state == other.state &&
+          turnId == other.turnId &&
+          reason == other.reason &&
+          updatedAt == other.updatedAt;
+}
+
+class BridgeRuntimeCostAmountDto {
+  final String currency;
+  final double amount;
+
+  const BridgeRuntimeCostAmountDto({
+    required this.currency,
+    required this.amount,
+  });
+
+  @override
+  int get hashCode => currency.hashCode ^ amount.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeRuntimeCostAmountDto &&
+          runtimeType == other.runtimeType &&
+          currency == other.currency &&
+          amount == other.amount;
 }
 
 enum BridgeRuntimeStatus {
@@ -231,20 +676,886 @@ enum BridgeRuntimeStatus {
   failed,
 }
 
-class JsonResponse {
-  final String json;
+class BridgeSessionRuntimeDto {
+  final String sessionId;
+  final String model;
+  final BigInt? contextWindow;
+  final BigInt latestContextTokens;
+  final BigInt promptTokens;
+  final BigInt completionTokens;
+  final BigInt cachedPromptTokens;
+  final BigInt totalTokens;
+  final List<BridgeRuntimeCostAmountDto> estimatedCosts;
+  final bool hasUnpricedUsage;
+  final List<String> activeSkills;
+  final List<String> activeMcpServers;
+  final List<String> activeLspServers;
+  final PlatformInt64 updatedAt;
 
-  const JsonResponse({required this.json});
+  const BridgeSessionRuntimeDto({
+    required this.sessionId,
+    required this.model,
+    this.contextWindow,
+    required this.latestContextTokens,
+    required this.promptTokens,
+    required this.completionTokens,
+    required this.cachedPromptTokens,
+    required this.totalTokens,
+    required this.estimatedCosts,
+    required this.hasUnpricedUsage,
+    required this.activeSkills,
+    required this.activeMcpServers,
+    required this.activeLspServers,
+    required this.updatedAt,
+  });
 
   @override
-  int get hashCode => json.hashCode;
+  int get hashCode =>
+      sessionId.hashCode ^
+      model.hashCode ^
+      contextWindow.hashCode ^
+      latestContextTokens.hashCode ^
+      promptTokens.hashCode ^
+      completionTokens.hashCode ^
+      cachedPromptTokens.hashCode ^
+      totalTokens.hashCode ^
+      estimatedCosts.hashCode ^
+      hasUnpricedUsage.hashCode ^
+      activeSkills.hashCode ^
+      activeMcpServers.hashCode ^
+      activeLspServers.hashCode ^
+      updatedAt.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is JsonResponse &&
+      other is BridgeSessionRuntimeDto &&
           runtimeType == other.runtimeType &&
-          json == other.json;
+          sessionId == other.sessionId &&
+          model == other.model &&
+          contextWindow == other.contextWindow &&
+          latestContextTokens == other.latestContextTokens &&
+          promptTokens == other.promptTokens &&
+          completionTokens == other.completionTokens &&
+          cachedPromptTokens == other.cachedPromptTokens &&
+          totalTokens == other.totalTokens &&
+          estimatedCosts == other.estimatedCosts &&
+          hasUnpricedUsage == other.hasUnpricedUsage &&
+          activeSkills == other.activeSkills &&
+          activeMcpServers == other.activeMcpServers &&
+          activeLspServers == other.activeLspServers &&
+          updatedAt == other.updatedAt;
+}
+
+class BridgeSessionStateResponse {
+  final String sessionId;
+  final SessionDto session;
+  final List<SessionDto> sessions;
+  final List<BridgeStudioMessageProjectionDto> messages;
+  final List<BridgeStudioPartProjectionDto> parts;
+  final List<BridgeEventEnvelope> events;
+  final BigInt eventNextSequence;
+  final List<BridgeAgentSnapshotDto> agents;
+  final List<BridgeAgentTimelineEventDto> agentEvents;
+  final List<BridgeInteractionChangedDto> interactions;
+  final BridgeSessionRuntimeDto? sessionRuntime;
+
+  const BridgeSessionStateResponse({
+    required this.sessionId,
+    required this.session,
+    required this.sessions,
+    required this.messages,
+    required this.parts,
+    required this.events,
+    required this.eventNextSequence,
+    required this.agents,
+    required this.agentEvents,
+    required this.interactions,
+    this.sessionRuntime,
+  });
+
+  @override
+  int get hashCode =>
+      sessionId.hashCode ^
+      session.hashCode ^
+      sessions.hashCode ^
+      messages.hashCode ^
+      parts.hashCode ^
+      events.hashCode ^
+      eventNextSequence.hashCode ^
+      agents.hashCode ^
+      agentEvents.hashCode ^
+      interactions.hashCode ^
+      sessionRuntime.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeSessionStateResponse &&
+          runtimeType == other.runtimeType &&
+          sessionId == other.sessionId &&
+          session == other.session &&
+          sessions == other.sessions &&
+          messages == other.messages &&
+          parts == other.parts &&
+          events == other.events &&
+          eventNextSequence == other.eventNextSequence &&
+          agents == other.agents &&
+          agentEvents == other.agentEvents &&
+          interactions == other.interactions &&
+          sessionRuntime == other.sessionRuntime;
+}
+
+class BridgeSkillActivationDto {
+  final String name;
+  final String source;
+  final String path;
+  final String turnId;
+  final String toolCallId;
+  final PlatformInt64 activatedAt;
+
+  const BridgeSkillActivationDto({
+    required this.name,
+    required this.source,
+    required this.path,
+    required this.turnId,
+    required this.toolCallId,
+    required this.activatedAt,
+  });
+
+  @override
+  int get hashCode =>
+      name.hashCode ^
+      source.hashCode ^
+      path.hashCode ^
+      turnId.hashCode ^
+      toolCallId.hashCode ^
+      activatedAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeSkillActivationDto &&
+          runtimeType == other.runtimeType &&
+          name == other.name &&
+          source == other.source &&
+          path == other.path &&
+          turnId == other.turnId &&
+          toolCallId == other.toolCallId &&
+          activatedAt == other.activatedAt;
+}
+
+class BridgeStudioAgentPartDto {
+  final String id;
+  final String path;
+  final String? parentPath;
+  final String role;
+  final String task;
+  final String status;
+  final String? summary;
+  final int depth;
+  final String? error;
+  final String? reason;
+
+  const BridgeStudioAgentPartDto({
+    required this.id,
+    required this.path,
+    this.parentPath,
+    required this.role,
+    required this.task,
+    required this.status,
+    this.summary,
+    required this.depth,
+    this.error,
+    this.reason,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      path.hashCode ^
+      parentPath.hashCode ^
+      role.hashCode ^
+      task.hashCode ^
+      status.hashCode ^
+      summary.hashCode ^
+      depth.hashCode ^
+      error.hashCode ^
+      reason.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeStudioAgentPartDto &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          path == other.path &&
+          parentPath == other.parentPath &&
+          role == other.role &&
+          task == other.task &&
+          status == other.status &&
+          summary == other.summary &&
+          depth == other.depth &&
+          error == other.error &&
+          reason == other.reason;
+}
+
+class BridgeStudioEventsResponse {
+  final String sessionId;
+  final List<BridgeEventEnvelope> events;
+  final BigInt nextSequence;
+
+  const BridgeStudioEventsResponse({
+    required this.sessionId,
+    required this.events,
+    required this.nextSequence,
+  });
+
+  @override
+  int get hashCode =>
+      sessionId.hashCode ^ events.hashCode ^ nextSequence.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeStudioEventsResponse &&
+          runtimeType == other.runtimeType &&
+          sessionId == other.sessionId &&
+          events == other.events &&
+          nextSequence == other.nextSequence;
+}
+
+class BridgeStudioMessageDto {
+  final String messageId;
+  final String sessionId;
+  final String turnId;
+  final String role;
+  final String status;
+  final PlatformInt64 createdAt;
+  final PlatformInt64 updatedAt;
+  final PlatformInt64? completedAt;
+  final String? error;
+
+  const BridgeStudioMessageDto({
+    required this.messageId,
+    required this.sessionId,
+    required this.turnId,
+    required this.role,
+    required this.status,
+    required this.createdAt,
+    required this.updatedAt,
+    this.completedAt,
+    this.error,
+  });
+
+  @override
+  int get hashCode =>
+      messageId.hashCode ^
+      sessionId.hashCode ^
+      turnId.hashCode ^
+      role.hashCode ^
+      status.hashCode ^
+      createdAt.hashCode ^
+      updatedAt.hashCode ^
+      completedAt.hashCode ^
+      error.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeStudioMessageDto &&
+          runtimeType == other.runtimeType &&
+          messageId == other.messageId &&
+          sessionId == other.sessionId &&
+          turnId == other.turnId &&
+          role == other.role &&
+          status == other.status &&
+          createdAt == other.createdAt &&
+          updatedAt == other.updatedAt &&
+          completedAt == other.completedAt &&
+          error == other.error;
+}
+
+class BridgeStudioMessageProjectionDto {
+  final BridgeStudioMessageDto message;
+  final BigInt sequence;
+
+  const BridgeStudioMessageProjectionDto({
+    required this.message,
+    required this.sequence,
+  });
+
+  @override
+  int get hashCode => message.hashCode ^ sequence.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeStudioMessageProjectionDto &&
+          runtimeType == other.runtimeType &&
+          message == other.message &&
+          sequence == other.sequence;
+}
+
+class BridgeStudioPartDeltaDto {
+  final String sessionId;
+  final String messageId;
+  final String partId;
+  final BigInt revision;
+  final String field;
+  final String delta;
+  final int? chunkIndex;
+
+  const BridgeStudioPartDeltaDto({
+    required this.sessionId,
+    required this.messageId,
+    required this.partId,
+    required this.revision,
+    required this.field,
+    required this.delta,
+    this.chunkIndex,
+  });
+
+  @override
+  int get hashCode =>
+      sessionId.hashCode ^
+      messageId.hashCode ^
+      partId.hashCode ^
+      revision.hashCode ^
+      field.hashCode ^
+      delta.hashCode ^
+      chunkIndex.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeStudioPartDeltaDto &&
+          runtimeType == other.runtimeType &&
+          sessionId == other.sessionId &&
+          messageId == other.messageId &&
+          partId == other.partId &&
+          revision == other.revision &&
+          field == other.field &&
+          delta == other.delta &&
+          chunkIndex == other.chunkIndex;
+}
+
+class BridgeStudioPartDto {
+  final String partId;
+  final String messageId;
+  final String sessionId;
+  final String turnId;
+  final String partType;
+  final BigInt order;
+  final BigInt revision;
+  final String status;
+  final PlatformInt64 createdAt;
+  final PlatformInt64 updatedAt;
+  final PlatformInt64? completedAt;
+  final String? error;
+  final String? textChannel;
+  final String text;
+  final BridgeStudioToolPartDto? tool;
+  final BridgeStudioAgentPartDto? agent;
+  final BridgeStudioPlanPartDto? plan;
+  final bool synthetic;
+  final bool ignored;
+
+  const BridgeStudioPartDto({
+    required this.partId,
+    required this.messageId,
+    required this.sessionId,
+    required this.turnId,
+    required this.partType,
+    required this.order,
+    required this.revision,
+    required this.status,
+    required this.createdAt,
+    required this.updatedAt,
+    this.completedAt,
+    this.error,
+    this.textChannel,
+    required this.text,
+    this.tool,
+    this.agent,
+    this.plan,
+    required this.synthetic,
+    required this.ignored,
+  });
+
+  @override
+  int get hashCode =>
+      partId.hashCode ^
+      messageId.hashCode ^
+      sessionId.hashCode ^
+      turnId.hashCode ^
+      partType.hashCode ^
+      order.hashCode ^
+      revision.hashCode ^
+      status.hashCode ^
+      createdAt.hashCode ^
+      updatedAt.hashCode ^
+      completedAt.hashCode ^
+      error.hashCode ^
+      textChannel.hashCode ^
+      text.hashCode ^
+      tool.hashCode ^
+      agent.hashCode ^
+      plan.hashCode ^
+      synthetic.hashCode ^
+      ignored.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeStudioPartDto &&
+          runtimeType == other.runtimeType &&
+          partId == other.partId &&
+          messageId == other.messageId &&
+          sessionId == other.sessionId &&
+          turnId == other.turnId &&
+          partType == other.partType &&
+          order == other.order &&
+          revision == other.revision &&
+          status == other.status &&
+          createdAt == other.createdAt &&
+          updatedAt == other.updatedAt &&
+          completedAt == other.completedAt &&
+          error == other.error &&
+          textChannel == other.textChannel &&
+          text == other.text &&
+          tool == other.tool &&
+          agent == other.agent &&
+          plan == other.plan &&
+          synthetic == other.synthetic &&
+          ignored == other.ignored;
+}
+
+class BridgeStudioPartProjectionDto {
+  final BridgeStudioPartDto part_;
+  final BigInt sequence;
+
+  const BridgeStudioPartProjectionDto({
+    required this.part_,
+    required this.sequence,
+  });
+
+  @override
+  int get hashCode => part_.hashCode ^ sequence.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeStudioPartProjectionDto &&
+          runtimeType == other.runtimeType &&
+          part_ == other.part_ &&
+          sequence == other.sequence;
+}
+
+class BridgeStudioPlanPartDto {
+  final String content;
+
+  const BridgeStudioPlanPartDto({required this.content});
+
+  @override
+  int get hashCode => content.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeStudioPlanPartDto &&
+          runtimeType == other.runtimeType &&
+          content == other.content;
+}
+
+class BridgeStudioSnapshotResponse {
+  final List<ProjectDto> projects;
+  final String? selectedProjectId;
+  final List<SessionDto> sessions;
+  final String? selectedSessionId;
+  final List<BridgeAgentTimelineEventDto> agentEvents;
+  final List<BridgeAgentSnapshotDto> agents;
+  final List<BridgeInteractionChangedDto> interactions;
+  final BridgeSessionRuntimeDto? sessionRuntime;
+  final String configJson;
+  final String generalSettingsJson;
+
+  const BridgeStudioSnapshotResponse({
+    required this.projects,
+    this.selectedProjectId,
+    required this.sessions,
+    this.selectedSessionId,
+    required this.agentEvents,
+    required this.agents,
+    required this.interactions,
+    this.sessionRuntime,
+    required this.configJson,
+    required this.generalSettingsJson,
+  });
+
+  @override
+  int get hashCode =>
+      projects.hashCode ^
+      selectedProjectId.hashCode ^
+      sessions.hashCode ^
+      selectedSessionId.hashCode ^
+      agentEvents.hashCode ^
+      agents.hashCode ^
+      interactions.hashCode ^
+      sessionRuntime.hashCode ^
+      configJson.hashCode ^
+      generalSettingsJson.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeStudioSnapshotResponse &&
+          runtimeType == other.runtimeType &&
+          projects == other.projects &&
+          selectedProjectId == other.selectedProjectId &&
+          sessions == other.sessions &&
+          selectedSessionId == other.selectedSessionId &&
+          agentEvents == other.agentEvents &&
+          agents == other.agents &&
+          interactions == other.interactions &&
+          sessionRuntime == other.sessionRuntime &&
+          configJson == other.configJson &&
+          generalSettingsJson == other.generalSettingsJson;
+}
+
+class BridgeStudioToolPartDto {
+  final String toolCallId;
+  final String? callId;
+  final String? providerItemId;
+  final String name;
+  final String arguments;
+  final String? result;
+  final int? exitCode;
+  final bool timedOut;
+  final String? workingDirectory;
+  final String? denialReason;
+
+  const BridgeStudioToolPartDto({
+    required this.toolCallId,
+    this.callId,
+    this.providerItemId,
+    required this.name,
+    required this.arguments,
+    this.result,
+    this.exitCode,
+    required this.timedOut,
+    this.workingDirectory,
+    this.denialReason,
+  });
+
+  @override
+  int get hashCode =>
+      toolCallId.hashCode ^
+      callId.hashCode ^
+      providerItemId.hashCode ^
+      name.hashCode ^
+      arguments.hashCode ^
+      result.hashCode ^
+      exitCode.hashCode ^
+      timedOut.hashCode ^
+      workingDirectory.hashCode ^
+      denialReason.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeStudioToolPartDto &&
+          runtimeType == other.runtimeType &&
+          toolCallId == other.toolCallId &&
+          callId == other.callId &&
+          providerItemId == other.providerItemId &&
+          name == other.name &&
+          arguments == other.arguments &&
+          result == other.result &&
+          exitCode == other.exitCode &&
+          timedOut == other.timedOut &&
+          workingDirectory == other.workingDirectory &&
+          denialReason == other.denialReason;
+}
+
+class BridgeStudioTurnDto {
+  final String turnId;
+  final String sessionId;
+  final String status;
+  final String? reason;
+  final PlatformInt64 updatedAt;
+
+  const BridgeStudioTurnDto({
+    required this.turnId,
+    required this.sessionId,
+    required this.status,
+    this.reason,
+    required this.updatedAt,
+  });
+
+  @override
+  int get hashCode =>
+      turnId.hashCode ^
+      sessionId.hashCode ^
+      status.hashCode ^
+      reason.hashCode ^
+      updatedAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeStudioTurnDto &&
+          runtimeType == other.runtimeType &&
+          turnId == other.turnId &&
+          sessionId == other.sessionId &&
+          status == other.status &&
+          reason == other.reason &&
+          updatedAt == other.updatedAt;
+}
+
+class BridgeUserQuestionDto {
+  final String id;
+  final String header;
+  final String question;
+  final bool isOther;
+  final bool isSecret;
+  final List<BridgeUserQuestionOptionDto>? options;
+
+  const BridgeUserQuestionDto({
+    required this.id,
+    required this.header,
+    required this.question,
+    required this.isOther,
+    required this.isSecret,
+    this.options,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      header.hashCode ^
+      question.hashCode ^
+      isOther.hashCode ^
+      isSecret.hashCode ^
+      options.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeUserQuestionDto &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          header == other.header &&
+          question == other.question &&
+          isOther == other.isOther &&
+          isSecret == other.isSecret &&
+          options == other.options;
+}
+
+class BridgeUserQuestionOptionDto {
+  final String label;
+  final String description;
+
+  const BridgeUserQuestionOptionDto({
+    required this.label,
+    required this.description,
+  });
+
+  @override
+  int get hashCode => label.hashCode ^ description.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeUserQuestionOptionDto &&
+          runtimeType == other.runtimeType &&
+          label == other.label &&
+          description == other.description;
+}
+
+class ConfigSavedResponse {
+  final bool saved;
+
+  const ConfigSavedResponse({required this.saved});
+
+  @override
+  int get hashCode => saved.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ConfigSavedResponse &&
+          runtimeType == other.runtimeType &&
+          saved == other.saved;
+}
+
+/// DeepSeek 余额用量。
+class DeepSeekBalanceDto {
+  final bool isAvailable;
+  final List<DeepSeekBalanceInfoDto> balances;
+
+  const DeepSeekBalanceDto({required this.isAvailable, required this.balances});
+
+  @override
+  int get hashCode => isAvailable.hashCode ^ balances.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DeepSeekBalanceDto &&
+          runtimeType == other.runtimeType &&
+          isAvailable == other.isAvailable &&
+          balances == other.balances;
+}
+
+/// DeepSeek 单币种余额明细。
+class DeepSeekBalanceInfoDto {
+  final String currency;
+  final String totalBalance;
+  final String grantedBalance;
+  final String toppedUpBalance;
+
+  const DeepSeekBalanceInfoDto({
+    required this.currency,
+    required this.totalBalance,
+    required this.grantedBalance,
+    required this.toppedUpBalance,
+  });
+
+  @override
+  int get hashCode =>
+      currency.hashCode ^
+      totalBalance.hashCode ^
+      grantedBalance.hashCode ^
+      toppedUpBalance.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DeepSeekBalanceInfoDto &&
+          runtimeType == other.runtimeType &&
+          currency == other.currency &&
+          totalBalance == other.totalBalance &&
+          grantedBalance == other.grantedBalance &&
+          toppedUpBalance == other.toppedUpBalance;
+}
+
+class ProjectDto {
+  final String id;
+  final String name;
+  final String path;
+  final PlatformInt64 updatedAt;
+
+  const ProjectDto({
+    required this.id,
+    required this.name,
+    required this.path,
+    required this.updatedAt,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^ name.hashCode ^ path.hashCode ^ updatedAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ProjectDto &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          path == other.path &&
+          updatedAt == other.updatedAt;
+}
+
+/// 单个 Provider 的用量状态。
+///
+/// status/usage_kind 是 Dart 层路由字段，复杂 provider payload 保持结构化字段。
+class ProviderUsageDto {
+  final String providerId;
+  final PlatformInt64 updatedAt;
+  final String status;
+  final String usageKind;
+  final String? message;
+  final DeepSeekBalanceDto? balance;
+  final ZhipuCodingPlanUsageDto? codingPlan;
+
+  const ProviderUsageDto({
+    required this.providerId,
+    required this.updatedAt,
+    required this.status,
+    required this.usageKind,
+    this.message,
+    this.balance,
+    this.codingPlan,
+  });
+
+  @override
+  int get hashCode =>
+      providerId.hashCode ^
+      updatedAt.hashCode ^
+      status.hashCode ^
+      usageKind.hashCode ^
+      message.hashCode ^
+      balance.hashCode ^
+      codingPlan.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ProviderUsageDto &&
+          runtimeType == other.runtimeType &&
+          providerId == other.providerId &&
+          updatedAt == other.updatedAt &&
+          status == other.status &&
+          usageKind == other.usageKind &&
+          message == other.message &&
+          balance == other.balance &&
+          codingPlan == other.codingPlan;
+}
+
+/// Provider 用量查询返回体。
+///
+/// 与 Studio provider usage wire 格式保持 camelCase，供 Flutter 列表卡片渲染。
+class ProviderUsagesResponse {
+  final List<ProviderUsageDto> usages;
+
+  const ProviderUsagesResponse({required this.usages});
+
+  @override
+  int get hashCode => usages.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ProviderUsagesResponse &&
+          runtimeType == other.runtimeType &&
+          usages == other.usages;
+}
+
+class ResolveInteractionResponse {
+  final String sessionId;
+  final BridgeInteractionChangedDto interaction;
+  final List<SessionDto> sessions;
+
+  const ResolveInteractionResponse({
+    required this.sessionId,
+    required this.interaction,
+    required this.sessions,
+  });
+
+  @override
+  int get hashCode =>
+      sessionId.hashCode ^ interaction.hashCode ^ sessions.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ResolveInteractionResponse &&
+          runtimeType == other.runtimeType &&
+          sessionId == other.sessionId &&
+          interaction == other.interaction &&
+          sessions == other.sessions;
 }
 
 class RuntimeSnapshot {
@@ -276,4 +1587,238 @@ class RuntimeSnapshot {
           activeTurns == other.activeTurns &&
           updatedAt == other.updatedAt &&
           error == other.error;
+}
+
+class SessionDto {
+  final String id;
+  final String projectId;
+  final String title;
+  final String mode;
+  final PlatformInt64 updatedAt;
+  final String visibility;
+  final String? parentSessionId;
+
+  const SessionDto({
+    required this.id,
+    required this.projectId,
+    required this.title,
+    required this.mode,
+    required this.updatedAt,
+    required this.visibility,
+    this.parentSessionId,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      projectId.hashCode ^
+      title.hashCode ^
+      mode.hashCode ^
+      updatedAt.hashCode ^
+      visibility.hashCode ^
+      parentSessionId.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SessionDto &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          projectId == other.projectId &&
+          title == other.title &&
+          mode == other.mode &&
+          updatedAt == other.updatedAt &&
+          visibility == other.visibility &&
+          parentSessionId == other.parentSessionId;
+}
+
+class SettingsDraftResponse {
+  final String section;
+  final bool saved;
+
+  const SettingsDraftResponse({required this.section, required this.saved});
+
+  @override
+  int get hashCode => section.hashCode ^ saved.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SettingsDraftResponse &&
+          runtimeType == other.runtimeType &&
+          section == other.section &&
+          saved == other.saved;
+}
+
+class SkillSummaryDto {
+  final String name;
+
+  const SkillSummaryDto({required this.name});
+
+  @override
+  int get hashCode => name.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SkillSummaryDto &&
+          runtimeType == other.runtimeType &&
+          name == other.name;
+}
+
+class SkillsResponse {
+  final List<SkillSummaryDto> skills;
+
+  const SkillsResponse({required this.skills});
+
+  @override
+  int get hashCode => skills.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SkillsResponse &&
+          runtimeType == other.runtimeType &&
+          skills == other.skills;
+}
+
+class StopPromptResponse {
+  final String sessionId;
+  final bool stopped;
+
+  const StopPromptResponse({required this.sessionId, required this.stopped});
+
+  @override
+  int get hashCode => sessionId.hashCode ^ stopped.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is StopPromptResponse &&
+          runtimeType == other.runtimeType &&
+          sessionId == other.sessionId &&
+          stopped == other.stopped;
+}
+
+class SubmitPromptResponse {
+  final String sessionId;
+  final String turnId;
+  final BigInt cursor;
+
+  const SubmitPromptResponse({
+    required this.sessionId,
+    required this.turnId,
+    required this.cursor,
+  });
+
+  @override
+  int get hashCode => sessionId.hashCode ^ turnId.hashCode ^ cursor.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SubmitPromptResponse &&
+          runtimeType == other.runtimeType &&
+          sessionId == other.sessionId &&
+          turnId == other.turnId &&
+          cursor == other.cursor;
+}
+
+/// 智谱 Coding Plan 用量。
+class ZhipuCodingPlanUsageDto {
+  final String? level;
+  final List<ZhipuQuotaLimitDto> limits;
+
+  const ZhipuCodingPlanUsageDto({this.level, required this.limits});
+
+  @override
+  int get hashCode => level.hashCode ^ limits.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ZhipuCodingPlanUsageDto &&
+          runtimeType == other.runtimeType &&
+          level == other.level &&
+          limits == other.limits;
+}
+
+/// 智谱 Coding Plan 单个时间窗口额度。
+class ZhipuQuotaLimitDto {
+  final String window;
+  final String label;
+  final double percentage;
+  final double? currentValue;
+  final double? total;
+  final double? remaining;
+  final PlatformInt64? nextResetAt;
+  final List<ZhipuToolUsageDetailDto> usageDetails;
+
+  const ZhipuQuotaLimitDto({
+    required this.window,
+    required this.label,
+    required this.percentage,
+    this.currentValue,
+    this.total,
+    this.remaining,
+    this.nextResetAt,
+    required this.usageDetails,
+  });
+
+  @override
+  int get hashCode =>
+      window.hashCode ^
+      label.hashCode ^
+      percentage.hashCode ^
+      currentValue.hashCode ^
+      total.hashCode ^
+      remaining.hashCode ^
+      nextResetAt.hashCode ^
+      usageDetails.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ZhipuQuotaLimitDto &&
+          runtimeType == other.runtimeType &&
+          window == other.window &&
+          label == other.label &&
+          percentage == other.percentage &&
+          currentValue == other.currentValue &&
+          total == other.total &&
+          remaining == other.remaining &&
+          nextResetAt == other.nextResetAt &&
+          usageDetails == other.usageDetails;
+}
+
+/// 智谱 Coding Plan 工具级用量明细。
+class ZhipuToolUsageDetailDto {
+  final String name;
+  final double? currentValue;
+  final double? total;
+  final double? percentage;
+
+  const ZhipuToolUsageDetailDto({
+    required this.name,
+    this.currentValue,
+    this.total,
+    this.percentage,
+  });
+
+  @override
+  int get hashCode =>
+      name.hashCode ^
+      currentValue.hashCode ^
+      total.hashCode ^
+      percentage.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ZhipuToolUsageDetailDto &&
+          runtimeType == other.runtimeType &&
+          name == other.name &&
+          currentValue == other.currentValue &&
+          total == other.total &&
+          percentage == other.percentage;
 }

@@ -120,6 +120,7 @@ mod tests {
             arguments: serde_json::json!({ "content": content }),
             session_id: "session-1".to_string(),
             tool_id: "call-1".to_string(),
+            revision_base: 0,
         }
     }
 

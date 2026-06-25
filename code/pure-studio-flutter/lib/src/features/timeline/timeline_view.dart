@@ -12,14 +12,10 @@ import 'markdown_repair.dart';
 part 'timeline_blocks.dart';
 
 class TimelineView extends StatefulWidget {
-  const TimelineView({
-    required this.sessionId,
-    required this.messages,
-    super.key,
-  });
+  const TimelineView({required this.sessionId, required this.rows, super.key});
 
   final String? sessionId;
-  final List<TimelineMessage> messages;
+  final List<TimelineRow> rows;
 
   @override
   State<TimelineView> createState() => _TimelineViewState();
@@ -43,7 +39,7 @@ class _TimelineViewState extends State<TimelineView> {
   @override
   void initState() {
     super.initState();
-    _contentVersion = _timelineContentVersion(widget.messages);
+    _contentVersion = _timelineContentVersion(widget.rows);
     _restoreSessionState();
     _controller.addListener(_handleScrollPositionChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -60,7 +56,7 @@ class _TimelineViewState extends State<TimelineView> {
     if (sessionChanged) {
       _saveSessionState(oldWidget.sessionId);
       _restoreSessionState();
-      _contentVersion = _timelineContentVersion(widget.messages);
+      _contentVersion = _timelineContentVersion(widget.rows);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _restorePendingPosition();
@@ -69,12 +65,12 @@ class _TimelineViewState extends State<TimelineView> {
       return;
     }
 
-    final nextContentVersion = _timelineContentVersion(widget.messages);
+    final nextContentVersion = _timelineContentVersion(widget.rows);
     if (nextContentVersion == _contentVersion) {
       return;
     }
     final wasNearBottom = _isNearBottom();
-    final appendedMessage = widget.messages.length > oldWidget.messages.length;
+    final appendedMessage = widget.rows.length > oldWidget.rows.length;
     _contentVersion = nextContentVersion;
 
     if (!_detachedByUser && (_followingBottom || wasNearBottom)) {
@@ -103,7 +99,7 @@ class _TimelineViewState extends State<TimelineView> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.messages.isEmpty) {
+    if (widget.rows.isEmpty) {
       return const _EmptyTimeline();
     }
     return Stack(
@@ -116,14 +112,14 @@ class _TimelineViewState extends State<TimelineView> {
               key: const ValueKey('timeline-scrollable'),
               controller: _controller,
               padding: const EdgeInsets.fromLTRB(24, 28, 24, 38),
-              itemCount: widget.messages.length + 1,
+              itemCount: widget.rows.length + 1,
               itemBuilder: (context, index) {
-                if (index == widget.messages.length) {
+                if (index == widget.rows.length) {
                   return const SizedBox(height: 24);
                 }
-                return _MessageBlock(
-                  key: ValueKey(widget.messages[index].id),
-                  message: widget.messages[index],
+                return _TimelineRowBlock(
+                  key: ValueKey(widget.rows[index].id),
+                  row: widget.rows[index],
                 );
               },
             ),
@@ -153,7 +149,7 @@ class _TimelineViewState extends State<TimelineView> {
   }
 
   bool get _showJumpToLatest {
-    return widget.messages.isNotEmpty &&
+    return widget.rows.isNotEmpty &&
         (_detachedByUser || _pendingNewEvents > 0 || !_isNearBottom());
   }
 
@@ -324,20 +320,9 @@ class _TimelineScrollSnapshot {
   final int pendingNewEvents;
 }
 
-int _timelineContentVersion(List<TimelineMessage> messages) {
+int _timelineContentVersion(List<TimelineRow> rows) {
   return Object.hashAll([
-    messages.length,
-    for (final message in messages) ...[
-      message.id,
-      message.role,
-      message.parts.length,
-      for (final part in message.parts) ...[
-        part.id,
-        part.type,
-        part.status,
-        part.title,
-        part.text.length,
-      ],
-    ],
+    rows.length,
+    for (final row in rows) ...[row.id, row.role, row.type, row.renderVersion],
   ]);
 }

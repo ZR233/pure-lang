@@ -909,6 +909,18 @@ impl StudioStore {
         rows.into_iter().map(studio_message_record).collect()
     }
 
+    pub async fn read_studio_message(
+        &self,
+        message_id: &str,
+    ) -> Result<Option<StudioMessageRecord>> {
+        use entities::studio_message;
+        studio_message::Entity::find_by_id(message_id.to_string())
+            .one(&self.db)
+            .await?
+            .map(studio_message_record)
+            .transpose()
+    }
+
     pub async fn load_message_parts(&self, session_id: &str) -> Result<Vec<StudioPartRecord>> {
         use entities::message_part;
         let rows = message_part::Entity::find()
@@ -919,6 +931,15 @@ impl StudioStore {
             .all(&self.db)
             .await?;
         rows.into_iter().map(studio_part_record).collect()
+    }
+
+    pub async fn read_message_part(&self, part_id: &str) -> Result<Option<StudioPartRecord>> {
+        use entities::message_part;
+        message_part::Entity::find_by_id(part_id.to_string())
+            .one(&self.db)
+            .await?
+            .map(studio_part_record)
+            .transpose()
     }
 
     pub async fn create_turn(
@@ -1429,7 +1450,13 @@ where
     if let StudioEventKind::MessagePartUpdated { part } = &mut envelope.kind {
         let existing_order =
             existing_message_part_order_with_connection(conn, &part.part_id).await?;
-        part.order = existing_order.unwrap_or(envelope.sequence);
+        if let Some(existing_order) = existing_order {
+            if part.order != existing_order {
+                bail!("part order cannot change");
+            }
+        } else {
+            part.order = envelope.sequence;
+        }
     }
     if let StudioEventKind::AgentTimelineChanged { event } = &mut envelope.kind {
         event.event_id = envelope.event_id.clone();
@@ -1605,28 +1632,13 @@ async fn upsert_message_part_with_tx(
         .one(tx)
         .await?
     {
-        if existing.sequence > sequence
-            || (is_terminal_part_status_label(&existing.status)
-                && !is_terminal_part_status(part.status))
-        {
-            return Ok(());
-        }
+        validate_part_update(&existing, part, sequence)?;
         let mut active: message_part::ActiveModel = existing.into();
-        active.message_id = Set(part.message_id.clone());
-        active.session_id = Set(part.session_id.clone());
-        active.turn_id = Set(part.turn_id.clone());
-        active.part_type = Set(studio_part_type_label(part.part_type).to_string());
-        active.part_order = Set(part.order as i64);
         active.revision = Set(part.revision as i64);
         active.status = Set(studio_part_status_label(part.status).to_string());
-        active.created_at = Set(part.created_at);
         active.updated_at = Set(part.updated_at);
         active.completed_at = Set(part.completed_at);
         active.error = Set(part.error.clone());
-        active.text_channel = Set(part
-            .text_channel
-            .map(studio_text_channel_label)
-            .map(str::to_string));
         active.text = Set(part.text.clone());
         active.attachments_json = Set(attachments_json);
         active.tool_json = Set(tool_json);
@@ -2109,22 +2121,99 @@ fn is_terminal_turn_status(status: StudioTurnStatus) -> bool {
     )
 }
 
-fn is_terminal_part_status(status: StudioPartStatus) -> bool {
-    matches!(
-        status,
-        StudioPartStatus::Completed
-            | StudioPartStatus::Failed
-            | StudioPartStatus::Interrupted
-            | StudioPartStatus::Denied
-            | StudioPartStatus::BudgetLimited
-    )
+fn validate_part_update(
+    existing: &entities::message_part::Model,
+    incoming: &StudioPart,
+    incoming_sequence: i64,
+) -> Result<()> {
+    if incoming_sequence <= existing.sequence {
+        bail!("part sequence must increase");
+    }
+    if (incoming.revision as i64) < existing.revision {
+        bail!("part revision cannot decrease");
+    }
+    if incoming.message_id != existing.message_id {
+        bail!("part messageId cannot change");
+    }
+    if incoming.session_id != existing.session_id {
+        bail!("part sessionId cannot change");
+    }
+    if incoming.turn_id != existing.turn_id {
+        bail!("part turnId cannot change");
+    }
+    if studio_part_type_label(incoming.part_type) != existing.part_type {
+        bail!("part type cannot change");
+    }
+    if incoming.order as i64 != existing.part_order {
+        bail!("part order cannot change");
+    }
+    let incoming_text_channel = incoming
+        .text_channel
+        .map(studio_text_channel_label)
+        .map(str::to_string);
+    if incoming_text_channel != existing.text_channel {
+        bail!("part textChannel cannot change");
+    }
+    let existing_status = part_status_from_label_for_projection(&existing.status)?;
+    if !valid_part_transition(existing_status, incoming.status) {
+        bail!(
+            "invalid part transition: {} -> {}",
+            existing.status,
+            studio_part_status_label(incoming.status)
+        );
+    }
+    Ok(())
 }
 
-fn is_terminal_part_status_label(status: &str) -> bool {
-    matches!(
-        status,
-        "completed" | "failed" | "interrupted" | "denied" | "budgetLimited"
-    )
+fn part_status_from_label_for_projection(label: &str) -> Result<StudioPartStatus> {
+    match label {
+        "started" => Ok(StudioPartStatus::Started),
+        "streaming" => Ok(StudioPartStatus::Streaming),
+        "awaitingApproval" => Ok(StudioPartStatus::AwaitingApproval),
+        "approved" => Ok(StudioPartStatus::Approved),
+        "denied" => Ok(StudioPartStatus::Denied),
+        "running" => Ok(StudioPartStatus::Running),
+        "completed" => Ok(StudioPartStatus::Completed),
+        "failed" => Ok(StudioPartStatus::Failed),
+        "interrupted" => Ok(StudioPartStatus::Interrupted),
+        "budgetLimited" => Ok(StudioPartStatus::BudgetLimited),
+        other => bail!("unsupported studio part status in db: {other}"),
+    }
+}
+
+fn valid_part_transition(from: StudioPartStatus, to: StudioPartStatus) -> bool {
+    use StudioPartStatus::{
+        Approved, AwaitingApproval, BudgetLimited, Completed, Denied, Failed, Interrupted, Running,
+        Started, Streaming,
+    };
+
+    match from {
+        Completed | Failed | Interrupted | Denied | BudgetLimited => from == to,
+        Started => matches!(
+            to,
+            Streaming
+                | AwaitingApproval
+                | Approved
+                | Running
+                | Completed
+                | Failed
+                | Interrupted
+                | Denied
+                | BudgetLimited
+        ),
+        Streaming | AwaitingApproval | Approved | Running => matches!(
+            to,
+            Streaming
+                | AwaitingApproval
+                | Approved
+                | Running
+                | Completed
+                | Failed
+                | Interrupted
+                | Denied
+                | BudgetLimited
+        ),
+    }
 }
 
 async fn upsert_session_skill_events_with_tx(
@@ -2462,7 +2551,7 @@ mod tests {
             .await
             .unwrap();
         let mut completed_part = part;
-        completed_part.order = 777;
+        completed_part.order = 1;
         completed_part.revision = 1;
         completed_part.status = StudioPartStatus::Completed;
         completed_part.text = "hello".to_string();
@@ -2536,7 +2625,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn terminal_message_part_snapshot_does_not_regress_to_streaming() {
+    async fn invalid_message_part_projection_updates_are_rejected() {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project("C:/work/beta").await.unwrap();
         let session = store
@@ -2583,11 +2672,13 @@ mod tests {
             .await
             .unwrap();
 
-        let mut stale_streaming = part;
+        let stored_parts = store.load_message_parts(&session.id).await.unwrap();
+        assert_eq!(stored_parts.len(), 1);
+        let mut stale_streaming = stored_parts[0].part.clone();
         stale_streaming.status = StudioPartStatus::Streaming;
         stale_streaming.revision = 2;
         stale_streaming.text = "partial".to_string();
-        store
+        let err = store
             .append_studio_event(StudioEventEnvelope {
                 event_id: "studio-event-streaming".to_string(),
                 project_id: Some(project.id),
@@ -2600,13 +2691,99 @@ mod tests {
                 },
             })
             .await
-            .unwrap();
+            .unwrap_err();
+        assert!(err.to_string().contains("invalid part transition"));
 
         let parts = store.load_message_parts(&session.id).await.unwrap();
         assert_eq!(parts.len(), 1);
         assert_eq!(parts[0].part.status, StudioPartStatus::Completed);
         assert_eq!(parts[0].part.revision, 1);
         assert_eq!(parts[0].part.text, "done");
+
+        let mutable_part = StudioPart {
+            part_id: "part-mutable".to_string(),
+            message_id: "message-terminal".to_string(),
+            session_id: session.id.clone(),
+            turn_id: "turn-1".to_string(),
+            part_type: StudioPartType::Text,
+            order: 2,
+            revision: 3,
+            status: StudioPartStatus::Streaming,
+            created_at: 12,
+            updated_at: 12,
+            completed_at: None,
+            error: None,
+            text_channel: Some(StudioTextChannel::Final),
+            text: "live".to_string(),
+            attachments: Vec::new(),
+            tool: None,
+            agent: None,
+            inference: None,
+            plan: None,
+            file: None,
+            usage: None,
+            synthetic: false,
+            ignored: false,
+        };
+        store
+            .append_studio_event(StudioEventEnvelope {
+                event_id: "studio-event-mutable".to_string(),
+                project_id: None,
+                session_id: Some(session.id.clone()),
+                turn_id: Some("turn-1".to_string()),
+                sequence: 0,
+                created_at: 12,
+                kind: StudioEventKind::MessagePartUpdated {
+                    part: Box::new(mutable_part.clone()),
+                },
+            })
+            .await
+            .unwrap();
+
+        let parts = store.load_message_parts(&session.id).await.unwrap();
+        let stored_mutable = parts
+            .iter()
+            .find(|record| record.part.part_id == "part-mutable")
+            .expect("mutable part should be projected")
+            .part
+            .clone();
+
+        let mut low_revision = stored_mutable.clone();
+        low_revision.revision = 2;
+        let err = store
+            .append_studio_event(StudioEventEnvelope {
+                event_id: "studio-event-low-revision".to_string(),
+                project_id: None,
+                session_id: Some(session.id.clone()),
+                turn_id: Some("turn-1".to_string()),
+                sequence: 0,
+                created_at: 13,
+                kind: StudioEventKind::MessagePartUpdated {
+                    part: Box::new(low_revision),
+                },
+            })
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("part revision cannot decrease"));
+
+        let mut changed_order = stored_mutable;
+        changed_order.revision = 4;
+        changed_order.order = 9;
+        let err = store
+            .append_studio_event(StudioEventEnvelope {
+                event_id: "studio-event-order-change".to_string(),
+                project_id: None,
+                session_id: Some(session.id.clone()),
+                turn_id: Some("turn-1".to_string()),
+                sequence: 0,
+                created_at: 14,
+                kind: StudioEventKind::MessagePartUpdated {
+                    part: Box::new(changed_order),
+                },
+            })
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("part order cannot change"));
     }
 
     #[tokio::test]

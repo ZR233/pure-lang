@@ -40,10 +40,10 @@ fn openai_request(model: String) -> CompletionRequest {
     CompletionRequest {
         model,
         instructions: Some(
-            "Answer briefly. Put all visible answer text inside <final>...</final>; do not write plain text outside tags."
+            "Answer briefly. Use the provider's native visible output channels when available. Reply with exactly: ok."
                 .to_string(),
         ),
-        messages: vec![user_message("Reply with exactly: <final>ok</final>")],
+        messages: vec![user_message("Reply with exactly: ok")],
         tools: Vec::new(),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: false,
@@ -119,7 +119,12 @@ async fn openai_responses_smoke() {
     };
     let counts = counter.await.unwrap();
 
-    assert!(!response.content.unwrap_or_default().trim().is_empty());
+    let content = response.content.unwrap_or_default();
+    assert!(!content.trim().is_empty());
+    assert!(
+        !content.contains("<final>"),
+        "OpenAI Responses native phase output should not require visible tags: {content:?}"
+    );
     assert!(response.usage.total_tokens > 0);
     assert!(counts.text > 0, "OpenAI stream should emit text deltas");
 }

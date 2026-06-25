@@ -404,9 +404,11 @@ mod tests {
     use tokio::net::TcpListener;
 
     use super::*;
+    use crate::protocol::openai::VisibleOutputProtocol;
     use crate::protocol::openai::sse::{StreamEvent, ToolCallDeltaPayload};
     use crate::request::{CompletionRequest, CompletionTraceContext, ToolCallPayload};
-    use crate::stream::StreamCompletionAccumulator;
+    use crate::stream::event::ModelStreamEvent;
+    use crate::stream::{StreamCompletionAccumulator, VisibleOutputDecoder};
     use pl_trace::TraceEventKind;
 
     fn apply_completed(
@@ -416,6 +418,21 @@ mod tests {
         accumulator
             .apply(StreamEvent::Completed { response_id: None }, event_tx)
             .unwrap();
+    }
+
+    fn apply_tagged(
+        decoder: &mut VisibleOutputDecoder,
+        accumulator: &mut StreamCompletionAccumulator,
+        event: ModelStreamEvent,
+        event_tx: &pl_trace::AgentEventSender,
+    ) {
+        for event in decoder.decode(event) {
+            accumulator.apply(event, event_tx).unwrap();
+        }
+    }
+
+    fn tagged_decoder() -> VisibleOutputDecoder {
+        VisibleOutputDecoder::new(VisibleOutputProtocol::TaggedText)
     }
 
     fn trace_part_text(item: &pl_trace::TracePart) -> String {
@@ -581,9 +598,71 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stream_complete_chat_tags_project_commentary_and_final_only() {
+        let sse_body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"<commentary>检查配置。</commentary>\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"<final>Ready</final>\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\n",
+            "data: [DONE]\n\n"
+        )
+        .to_string();
+        let (base_url, handle) = serve_sse_once(sse_body).await;
+        let mut model = ModelInfo::fallback("local-chat");
+        model.context_window = Some(128_000);
+        let provider = OpenAiProvider::new(
+            ProviderInfo {
+                provider_kind: crate::provider_info::ProviderKind::DeepSeek,
+                name: "Local Chat".to_string(),
+                base_url,
+                default_model: "local-chat".to_string(),
+                bearer_token: None,
+                http_headers: None,
+                tool_wire_policy: crate::provider_info::ToolWirePolicy::FunctionFallback,
+                apply_patch_tool_type: None,
+            },
+            vec![model],
+        )
+        .unwrap();
+        let request = CompletionRequest {
+            trace: Some(CompletionTraceContext {
+                session_id: "session-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                inference_id: "inf-1".to_string(),
+                plan_mode: true,
+            }),
+            ..minimal_request("local-chat")
+        };
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
+
+        let response = provider.stream_complete(request, event_tx).await.unwrap();
+        let captured = handle.await.unwrap();
+
+        assert_eq!(captured.request_line, "POST /chat/completions HTTP/1.1");
+        assert_eq!(response.content.as_deref(), Some("Ready"));
+        assert!(response.trace_events.iter().any(|event| matches!(
+            &event.kind,
+            TraceEventKind::TracePartCompleted { item }
+                if item.text_channel == Some(pl_trace::TraceTextChannel::Commentary)
+                    && item.content == "检查配置。"
+        )));
+        assert!(!response.trace_events.iter().any(|event| matches!(
+            &event.kind,
+            TraceEventKind::TracePartCompleted { item } if item.kind == TracePartKind::Plan
+        )));
+        assert!(response.trace_events.iter().any(|event| matches!(
+            &event.kind,
+            TraceEventKind::TracePartCompleted { item }
+                if item.text_channel == Some(pl_trace::TraceTextChannel::Final)
+                    && item.content == "Ready"
+        )));
+    }
+
+    #[tokio::test]
     async fn stream_complete_sends_responses_bearer_and_custom_headers() {
         let sse_body = concat!(
-            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"<final>ok</final>\"}\n\n",
+            "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n",
+            "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}}\n\n",
             "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
             "data: [DONE]\n\n"
         )
@@ -639,36 +718,34 @@ mod tests {
             inference_id: "inf-1".to_string(),
             plan_mode: false,
         }));
+        let mut decoder = tagged_decoder();
 
         accumulator
             .apply(
-                StreamEvent::ReasoningDelta {
+                StreamEvent::ReasoningSummaryDelta {
                     id: "thinking".to_string(),
-                    chunk_index: 0,
+                    section_index: 0,
                     delta: "先比较整数位。".to_string(),
                 },
                 &event_tx,
             )
             .unwrap();
-        accumulator
-            .apply(
-                StreamEvent::TextDelta {
-                    id: "final".to_string(),
-                    channel: pl_trace::TraceTextChannel::Final,
-                    delta: "<final>9.11 更大。</final>".to_string(),
-                },
-                &event_tx,
-            )
-            .unwrap();
+        apply_tagged(
+            &mut decoder,
+            &mut accumulator,
+            StreamEvent::TextDelta {
+                id: "final".to_string(),
+                channel: pl_trace::TraceTextChannel::Final,
+                delta: "<final>9.11 更大。</final>".to_string(),
+            },
+            &event_tx,
+        );
 
         apply_completed(&mut accumulator, &event_tx);
         let response = accumulator.finish(&event_tx).unwrap();
 
         assert_eq!(response.content.as_deref(), Some("9.11 更大。"));
-        assert_eq!(
-            response.raw_content.as_deref(),
-            Some("<final>9.11 更大。</final>")
-        );
+        assert_eq!(response.raw_content.as_deref(), Some("9.11 更大。"));
         assert_eq!(
             response.reasoning_content.as_deref(),
             Some("先比较整数位。")
@@ -700,22 +777,23 @@ mod tests {
             inference_id: "inf-1".to_string(),
             plan_mode: false,
         }));
+        let mut decoder = tagged_decoder();
 
         for delta in [
             "<comm",
             "entary>检查配置。</commentary>",
             "<final>完成。</final>",
         ] {
-            accumulator
-                .apply(
-                    StreamEvent::TextDelta {
-                        id: "final".to_string(),
-                        channel: pl_trace::TraceTextChannel::Final,
-                        delta: delta.to_string(),
-                    },
-                    &event_tx,
-                )
-                .unwrap();
+            apply_tagged(
+                &mut decoder,
+                &mut accumulator,
+                StreamEvent::TextDelta {
+                    id: "final".to_string(),
+                    channel: pl_trace::TraceTextChannel::Final,
+                    delta: delta.to_string(),
+                },
+                &event_tx,
+            );
         }
 
         apply_completed(&mut accumulator, &event_tx);
@@ -737,7 +815,7 @@ mod tests {
     }
 
     #[test]
-    fn stream_accumulator_extracts_visible_tags_from_reasoning_content() {
+    fn stream_accumulator_extracts_commentary_and_final_from_reasoning_content() {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
         let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
             session_id: "session-1".to_string(),
@@ -745,21 +823,22 @@ mod tests {
             inference_id: "inf-1".to_string(),
             plan_mode: true,
         }));
+        let mut decoder = tagged_decoder();
 
         for delta in [
-            "<commentary>正在分析日志。</commentary><prop",
-            "osed_plan>\n- 修复 GLM 流\n</proposed_plan><final>完成。</final>",
+            "<commentary>正在分析日志。</commentary>",
+            "<final>完成。</final>",
         ] {
-            accumulator
-                .apply(
-                    StreamEvent::ReasoningDelta {
-                        id: "thinking".to_string(),
-                        chunk_index: 0,
-                        delta: delta.to_string(),
-                    },
-                    &event_tx,
-                )
-                .unwrap();
+            apply_tagged(
+                &mut decoder,
+                &mut accumulator,
+                StreamEvent::ReasoningRawDelta {
+                    id: "thinking".to_string(),
+                    content_index: 0,
+                    delta: delta.to_string(),
+                },
+                &event_tx,
+            );
         }
 
         apply_completed(&mut accumulator, &event_tx);
@@ -768,9 +847,7 @@ mod tests {
         assert_eq!(response.content.as_deref(), Some("完成。"));
         assert_eq!(
             response.reasoning_content.as_deref(),
-            Some(
-                "<commentary>正在分析日志。</commentary><proposed_plan>\n- 修复 GLM 流\n</proposed_plan><final>完成。</final>"
-            )
+            Some("<commentary>正在分析日志。</commentary><final>完成。</final>")
         );
         assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
@@ -778,10 +855,9 @@ mod tests {
                 if item.text_channel == Some(pl_trace::TraceTextChannel::Commentary)
                     && item.content == "正在分析日志。"
         )));
-        assert!(response.trace_events.iter().any(|event| matches!(
+        assert!(!response.trace_events.iter().any(|event| matches!(
             &event.kind,
-            TraceEventKind::TracePartCompleted { item }
-                if item.kind == TracePartKind::Plan && item.content == "\n- 修复 GLM 流\n"
+            TraceEventKind::TracePartCompleted { item } if item.kind == TracePartKind::Plan
         )));
         assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
@@ -803,9 +879,9 @@ mod tests {
 
         accumulator
             .apply(
-                StreamEvent::ReasoningDelta {
+                StreamEvent::ReasoningRawDelta {
                     id: "thinking".to_string(),
-                    chunk_index: 0,
+                    content_index: 0,
                     delta: "先比较整数位。".to_string(),
                 },
                 &event_tx,
@@ -825,6 +901,7 @@ mod tests {
             TraceEventKind::TracePartCompleted { item }
                 if item.kind == TracePartKind::Text
                     || item.kind == TracePartKind::Plan
+                    || item.kind == TracePartKind::Thinking
         )));
     }
 
@@ -884,7 +961,7 @@ mod tests {
         accumulator
             .apply(
                 StreamEvent::TextCompleted {
-                    id: "final".to_string(),
+                    id: "msg_1".to_string(),
                     channel: pl_trace::TraceTextChannel::Final,
                     authoritative_text: Some("final text".to_string()),
                 },
@@ -905,7 +982,45 @@ mod tests {
     }
 
     #[test]
-    fn stream_accumulator_extracts_proposed_plan_item() {
+    fn stream_accumulator_creates_part_for_authoritative_completion_without_delta() {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "inf-1".to_string(),
+            plan_mode: false,
+        }));
+
+        accumulator
+            .apply(
+                StreamEvent::TextCompleted {
+                    id: "msg_progress".to_string(),
+                    channel: pl_trace::TraceTextChannel::Commentary,
+                    authoritative_text: Some("已完成检查".to_string()),
+                },
+                &event_tx,
+            )
+            .unwrap();
+        apply_completed(&mut accumulator, &event_tx);
+
+        let response = accumulator.finish(&event_tx).unwrap();
+
+        assert!(response.trace_events.iter().any(|event| matches!(
+            &event.kind,
+            TraceEventKind::TracePartStarted { item }
+                if item.text_channel == Some(pl_trace::TraceTextChannel::Commentary)
+                    && item.content.is_empty()
+        )));
+        assert!(response.trace_events.iter().any(|event| matches!(
+            &event.kind,
+            TraceEventKind::TracePartCompleted { item }
+                if item.text_channel == Some(pl_trace::TraceTextChannel::Commentary)
+                    && item.content == "已完成检查"
+        )));
+    }
+
+    #[test]
+    fn stream_accumulator_does_not_extract_proposed_plan_item() {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
         let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
             session_id: "session-1".to_string(),
@@ -913,33 +1028,35 @@ mod tests {
             inference_id: "inf-1".to_string(),
             plan_mode: true,
         }));
+        let mut decoder = tagged_decoder();
 
         for delta in [
             "<commentary>Intro</commentary>\n<prop",
             "osed_plan>\n- step\n",
             "</proposed_plan>\n<final>Outro</final>",
         ] {
-            accumulator
-                .apply(
-                    StreamEvent::TextDelta {
-                        id: "final".to_string(),
-                        channel: pl_trace::TraceTextChannel::Final,
-                        delta: delta.to_string(),
-                    },
-                    &event_tx,
-                )
-                .unwrap();
+            apply_tagged(
+                &mut decoder,
+                &mut accumulator,
+                StreamEvent::TextDelta {
+                    id: "final".to_string(),
+                    channel: pl_trace::TraceTextChannel::Final,
+                    delta: delta.to_string(),
+                },
+                &event_tx,
+            );
         }
 
         apply_completed(&mut accumulator, &event_tx);
         let response = accumulator.finish(&event_tx).unwrap();
 
-        assert_eq!(response.content.as_deref(), Some("Outro"));
+        assert_eq!(
+            response.content.as_deref(),
+            Some("\n<proposed_plan>\n- step\n</proposed_plan>\nOutro")
+        );
         assert_eq!(
             response.raw_content.as_deref(),
-            Some(
-                "<commentary>Intro</commentary>\n<proposed_plan>\n- step\n</proposed_plan>\n<final>Outro</final>"
-            )
+            Some("Intro\n<proposed_plan>\n- step\n</proposed_plan>\nOutro")
         );
         let completed_plan = response
             .trace_events
@@ -957,10 +1074,7 @@ mod tests {
                 | TraceEventKind::SkillActivated { .. }
                 | TraceEventKind::EnabledToolsRecorded { .. } => None,
             });
-        assert_eq!(
-            completed_plan.map(|item| item.content.as_str()),
-            Some("\n- step\n")
-        );
+        assert!(completed_plan.is_none());
     }
 
     #[test]
@@ -1021,9 +1135,9 @@ mod tests {
 
         accumulator
             .apply(
-                StreamEvent::ReasoningDelta {
+                StreamEvent::ReasoningSummaryDelta {
                     id: "thinking".to_string(),
-                    chunk_index: 0,
+                    section_index: 0,
                     delta: "before".to_string(),
                 },
                 &event_tx,
@@ -1067,9 +1181,9 @@ mod tests {
             .unwrap();
         accumulator
             .apply(
-                StreamEvent::ReasoningDelta {
+                StreamEvent::ReasoningSummaryDelta {
                     id: "thinking".to_string(),
-                    chunk_index: 0,
+                    section_index: 0,
                     delta: "after".to_string(),
                 },
                 &event_tx,
@@ -1138,9 +1252,9 @@ mod tests {
 
         accumulator
             .apply(
-                StreamEvent::ReasoningDelta {
+                StreamEvent::ReasoningSummaryDelta {
                     id: "thinking".to_string(),
-                    chunk_index: 0,
+                    section_index: 0,
                     delta: "think".to_string(),
                 },
                 &event_tx,
