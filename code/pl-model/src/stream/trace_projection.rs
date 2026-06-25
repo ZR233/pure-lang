@@ -437,7 +437,7 @@ impl TraceProjection {
     }
 
     fn namespaced_item_id(&self, item_id: &str) -> String {
-        if item_id.starts_with(&self.turn_id) {
+        if item_id == self.turn_id || item_id.starts_with(&format!("{}-", self.turn_id)) {
             return item_id.to_string();
         }
         format!("{}-{item_id}", self.turn_id)

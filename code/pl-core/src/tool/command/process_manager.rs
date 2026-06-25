@@ -45,19 +45,30 @@ struct CommandProcessEntry {
 
 #[derive(Debug)]
 struct CommandProcessState {
-    lifecycle: CommandProcessLifecycle,
+    phase: CommandProcessPhase,
     exit_code: Option<i32>,
-    timed_out: bool,
-    interrupted: bool,
+    stdout_open: bool,
+    stderr_open: bool,
     stdout: HeadTailBuffer,
     stderr: HeadTailBuffer,
     error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CommandProcessLifecycle {
+enum CommandProcessPhase {
     Running,
-    Exited,
+    Terminating(CommandTerminationReason),
+    Draining(CommandProcessResult),
+    Final(CommandProcessResult),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CommandProcessTransition {
+    TimedOut,
+    Interrupted,
+    ProcessExited { exit_code: Option<i32> },
+    ProcessWaitFailed,
+    StreamClosed(StreamKind),
 }
 
 #[derive(Debug)]
@@ -106,6 +117,11 @@ impl Drop for CommandProcessManager {
             return;
         };
         for entry in state.entries.values() {
+            if let Ok(process_state) = entry.state.try_lock()
+                && !process_state.has_live_child()
+            {
+                continue;
+            }
             terminate_process_tree_sync(entry.os_pid);
         }
     }
@@ -158,6 +174,8 @@ impl CommandProcessManager {
                 .map_err(|error| tool_error("bash", format!("failed to spawn command: {error}")))?;
             let stdout = child.stdout.take();
             let stderr = child.stderr.take();
+            let stdout_open = stdout.is_some();
+            let stderr_open = stderr.is_some();
             let stdin = child.stdin.take();
             let entry = Arc::new(CommandProcessEntry {
                 process_id: process_id.clone(),
@@ -165,10 +183,10 @@ impl CommandProcessManager {
                 output_file: request.output_file.clone(),
                 stdin: Mutex::new(stdin),
                 state: Mutex::new(CommandProcessState {
-                    lifecycle: CommandProcessLifecycle::Running,
+                    phase: CommandProcessPhase::Running,
                     exit_code: None,
-                    timed_out: false,
-                    interrupted: false,
+                    stdout_open,
+                    stderr_open,
                     stdout: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
                     stderr: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
                     error: None,
@@ -291,9 +309,11 @@ enum ReleaseFinalProcess {
 impl CommandProcessEntry {
     async fn can_accept_input(&self) -> bool {
         let state = self.state.lock().await;
-        matches!(state.lifecycle, CommandProcessLifecycle::Running)
-            && !state.timed_out
-            && !state.interrupted
+        state.can_accept_input()
+    }
+
+    async fn is_final(&self) -> bool {
+        self.state.lock().await.is_final()
     }
 
     async fn snapshot(&self, max_output_chars: usize) -> CommandOutputSnapshot {
@@ -307,7 +327,7 @@ impl CommandProcessEntry {
             status: status.to_string(),
             process_id,
             exit_code: state.exit_code,
-            timed_out: state.timed_out,
+            timed_out: state.timed_out(),
             stdout,
             stderr,
             output_file: self.output_file.clone(),
@@ -316,10 +336,140 @@ impl CommandProcessEntry {
     }
 }
 
+impl CommandProcessState {
+    fn can_accept_input(&self) -> bool {
+        matches!(self.phase, CommandProcessPhase::Running)
+    }
+
+    fn is_final(&self) -> bool {
+        matches!(self.phase, CommandProcessPhase::Final(_))
+    }
+
+    fn has_live_child(&self) -> bool {
+        matches!(
+            self.phase,
+            CommandProcessPhase::Running | CommandProcessPhase::Terminating(_)
+        )
+    }
+
+    fn timed_out(&self) -> bool {
+        matches!(
+            self.phase,
+            CommandProcessPhase::Terminating(CommandTerminationReason::TimedOut)
+                | CommandProcessPhase::Draining(CommandProcessResult::TimedOut)
+                | CommandProcessPhase::Final(CommandProcessResult::TimedOut)
+        )
+    }
+
+    fn apply_transition(&mut self, transition: CommandProcessTransition) {
+        match transition {
+            CommandProcessTransition::TimedOut => {
+                if matches!(self.phase, CommandProcessPhase::Running) {
+                    self.phase =
+                        CommandProcessPhase::Terminating(CommandTerminationReason::TimedOut);
+                }
+            }
+            CommandProcessTransition::Interrupted => {
+                if matches!(self.phase, CommandProcessPhase::Running) {
+                    self.phase =
+                        CommandProcessPhase::Terminating(CommandTerminationReason::Interrupted);
+                }
+            }
+            CommandProcessTransition::ProcessExited { exit_code } => {
+                self.exit_code = exit_code;
+                let result = match self.phase {
+                    CommandProcessPhase::Terminating(reason) => reason.into(),
+                    CommandProcessPhase::Running
+                    | CommandProcessPhase::Draining(_)
+                    | CommandProcessPhase::Final(_) => {
+                        if self.error.is_some() || exit_code != Some(0) {
+                            CommandProcessResult::Failed
+                        } else {
+                            CommandProcessResult::Completed
+                        }
+                    }
+                };
+                self.finish_or_drain(result);
+            }
+            CommandProcessTransition::ProcessWaitFailed => {
+                let result = match self.phase {
+                    CommandProcessPhase::Terminating(reason) => reason.into(),
+                    CommandProcessPhase::Running
+                    | CommandProcessPhase::Draining(_)
+                    | CommandProcessPhase::Final(_) => CommandProcessResult::Failed,
+                };
+                self.finish_or_drain(result);
+            }
+            CommandProcessTransition::StreamClosed(stream) => {
+                match stream {
+                    StreamKind::Stdout => self.stdout_open = false,
+                    StreamKind::Stderr => self.stderr_open = false,
+                }
+                if let CommandProcessPhase::Draining(result) = self.phase
+                    && self.output_streams_closed()
+                {
+                    self.phase = CommandProcessPhase::Final(result);
+                }
+            }
+        }
+    }
+
+    fn record_error(&mut self, error: String) {
+        self.error = Some(error);
+        self.phase = match self.phase {
+            CommandProcessPhase::Draining(CommandProcessResult::Completed) => {
+                CommandProcessPhase::Draining(CommandProcessResult::Failed)
+            }
+            CommandProcessPhase::Final(CommandProcessResult::Completed) => {
+                CommandProcessPhase::Final(CommandProcessResult::Failed)
+            }
+            phase => phase,
+        };
+    }
+
+    fn finish_or_drain(&mut self, result: CommandProcessResult) {
+        self.phase = if self.output_streams_closed() {
+            CommandProcessPhase::Final(result)
+        } else {
+            CommandProcessPhase::Draining(result)
+        };
+    }
+
+    fn output_streams_closed(&self) -> bool {
+        !self.stdout_open && !self.stderr_open
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CommandTerminationReason {
+    TimedOut,
+    Interrupted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CommandProcessResult {
+    Completed,
+    Failed,
+    TimedOut,
+    Interrupted,
+}
+
+impl From<CommandTerminationReason> for CommandProcessResult {
+    fn from(reason: CommandTerminationReason) -> Self {
+        match reason {
+            CommandTerminationReason::TimedOut => Self::TimedOut,
+            CommandTerminationReason::Interrupted => Self::Interrupted,
+        }
+    }
+}
+
 async fn wait_for_process_activity(entry: &CommandProcessEntry, yield_time: Duration) {
+    if yield_time.is_zero() {
+        return;
+    }
     let deadline = Instant::now() + yield_time;
     loop {
-        if !entry.can_accept_input().await || yield_time.is_zero() {
+        if entry.is_final().await {
             break;
         }
         let now = Instant::now();
@@ -347,14 +497,14 @@ fn spawn_lifecycle_task(
         let wait_result = match outcome {
             LifecycleOutcome::Exited(result) => result,
             LifecycleOutcome::TimedOut => {
-                mark_timed_out(&entry).await;
+                apply_transition(&entry, CommandProcessTransition::TimedOut).await;
                 close_stdin(&entry).await;
                 terminate_process_tree(child.id()).await;
                 let _ = child.start_kill();
                 child.wait().await
             }
             LifecycleOutcome::Interrupted => {
-                mark_interrupted(&entry).await;
+                apply_transition(&entry, CommandProcessTransition::Interrupted).await;
                 close_stdin(&entry).await;
                 terminate_process_tree(child.id()).await;
                 let _ = child.start_kill();
@@ -365,19 +515,24 @@ fn spawn_lifecycle_task(
             let mut stdin = entry.stdin.lock().await;
             stdin.take();
         }
-        let mut state = entry.state.lock().await;
         match wait_result {
             Ok(status) => {
-                state.lifecycle = CommandProcessLifecycle::Exited;
-                state.exit_code = status.code();
+                apply_transition(
+                    &entry,
+                    CommandProcessTransition::ProcessExited {
+                        exit_code: status.code(),
+                    },
+                )
+                .await;
             }
             Err(error) => {
-                state.lifecycle = CommandProcessLifecycle::Exited;
-                state.error = Some(format!("failed to wait for process: {error}"));
+                {
+                    let mut state = entry.state.lock().await;
+                    state.record_error(format!("failed to wait for process: {error}"));
+                }
+                apply_transition(&entry, CommandProcessTransition::ProcessWaitFailed).await;
             }
         }
-        drop(state);
-        entry.notify.notify_waiters();
     });
 }
 
@@ -406,20 +561,9 @@ async fn wait_for_lifecycle_outcome(
     }
 }
 
-async fn mark_timed_out(entry: &CommandProcessEntry) {
+async fn apply_transition(entry: &CommandProcessEntry, transition: CommandProcessTransition) {
     let mut state = entry.state.lock().await;
-    if matches!(state.lifecycle, CommandProcessLifecycle::Running) && !state.interrupted {
-        state.timed_out = true;
-    }
-    drop(state);
-    entry.notify.notify_waiters();
-}
-
-async fn mark_interrupted(entry: &CommandProcessEntry) {
-    let mut state = entry.state.lock().await;
-    if matches!(state.lifecycle, CommandProcessLifecycle::Running) && !state.timed_out {
-        state.interrupted = true;
-    }
+    state.apply_transition(transition);
     drop(state);
     entry.notify.notify_waiters();
 }
@@ -456,21 +600,21 @@ where
                 }
                 if let Err(error) = append_output_chunk(&entry, stream, chunk).await {
                     let mut state = entry.state.lock().await;
-                    state.error = Some(error);
+                    state.record_error(error);
                 }
                 entry.notify.notify_waiters();
             }
             Err(error) => {
                 let mut state = entry.state.lock().await;
-                state.error = Some(format!("failed to read process output: {error}"));
+                state.record_error(format!("failed to read process output: {error}"));
                 break;
             }
         }
     }
-    entry.notify.notify_waiters();
+    apply_transition(&entry, CommandProcessTransition::StreamClosed(stream)).await;
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StreamKind {
     Stdout,
     Stderr,
@@ -529,21 +673,14 @@ async fn append_output_chunk(
 }
 
 fn status_for_state(state: &CommandProcessState) -> &'static str {
-    if state.timed_out {
-        return "timedOut";
-    }
-    if state.interrupted {
-        return "interrupted";
-    }
-    match state.lifecycle {
-        CommandProcessLifecycle::Running => "running",
-        CommandProcessLifecycle::Exited => {
-            if state.exit_code == Some(0) {
-                "completed"
-            } else {
-                "failed"
-            }
-        }
+    match state.phase {
+        CommandProcessPhase::Running
+        | CommandProcessPhase::Terminating(_)
+        | CommandProcessPhase::Draining(_) => "running",
+        CommandProcessPhase::Final(CommandProcessResult::Completed) => "completed",
+        CommandProcessPhase::Final(CommandProcessResult::Failed) => "failed",
+        CommandProcessPhase::Final(CommandProcessResult::TimedOut) => "timedOut",
+        CommandProcessPhase::Final(CommandProcessResult::Interrupted) => "interrupted",
     }
 }
 
@@ -560,7 +697,7 @@ fn message_for_state(
     }
     match status_for_state(state) {
         "running" => format!(
-            "Command is still running. Use write_stdin with processId '{}' to wait, poll, or send input. Read outputFile for complete output.",
+            "Command is still running or draining output. Use write_stdin with processId '{}' to wait, poll, or send input. Read outputFile for complete output.",
             process_id.unwrap_or_default()
         ),
         "completed" => {
@@ -604,5 +741,62 @@ impl From<&CommandOutputSnapshot> for OutputTruncation {
             stdout: snapshot.stdout.clone(),
             stderr: snapshot.stderr.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::{
+        CommandProcessPhase, CommandProcessState, CommandProcessTransition, HeadTailBuffer,
+        INTERNAL_BUFFER_BYTES, StreamKind, status_for_state,
+    };
+
+    fn running_state() -> CommandProcessState {
+        CommandProcessState {
+            phase: CommandProcessPhase::Running,
+            exit_code: None,
+            stdout_open: true,
+            stderr_open: true,
+            stdout: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
+            stderr: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
+            error: None,
+        }
+    }
+
+    #[test]
+    fn process_exit_waits_for_output_streams_before_final_status() {
+        let mut state = running_state();
+
+        state.apply_transition(CommandProcessTransition::ProcessExited { exit_code: Some(0) });
+        assert_eq!(status_for_state(&state), "running");
+        assert!(!state.can_accept_input());
+
+        state.apply_transition(CommandProcessTransition::StreamClosed(StreamKind::Stdout));
+        assert_eq!(status_for_state(&state), "running");
+
+        state.apply_transition(CommandProcessTransition::StreamClosed(StreamKind::Stderr));
+        assert_eq!(status_for_state(&state), "completed");
+        assert!(state.is_final());
+    }
+
+    #[test]
+    fn termination_reason_survives_until_streams_are_drained() {
+        let mut state = running_state();
+
+        state.apply_transition(CommandProcessTransition::TimedOut);
+        assert_eq!(status_for_state(&state), "running");
+        assert!(state.timed_out());
+
+        state.apply_transition(CommandProcessTransition::ProcessExited { exit_code: None });
+        assert_eq!(status_for_state(&state), "running");
+
+        state.apply_transition(CommandProcessTransition::StreamClosed(StreamKind::Stdout));
+        state.apply_transition(CommandProcessTransition::StreamClosed(StreamKind::Stderr));
+
+        assert_eq!(status_for_state(&state), "timedOut");
+        assert!(state.timed_out());
+        assert!(state.is_final());
     }
 }
