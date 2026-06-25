@@ -154,6 +154,9 @@ struct SessionRuntimeDto {
     total_tokens: u64,
     estimated_costs: Vec<pl_protocol::RuntimeCostAmount>,
     has_unpriced_usage: bool,
+    active_skills: Vec<String>,
+    active_mcp_servers: Vec<String>,
+    active_lsp_servers: Vec<String>,
     updated_at: i64,
 }
 
@@ -606,11 +609,12 @@ pub fn save_mcp_settings(settings_json: String) -> Result<JsonResponse> {
                 );
                 continue;
             }
-            let mut config = next_servers.remove(&server_id).unwrap_or_else(|| {
-                let mut config = McpServerConfig::default();
-                config.transport = mcp_transport_from_label(&server.transport);
-                config
-            });
+            let mut config = next_servers
+                .remove(&server_id)
+                .unwrap_or_else(|| McpServerConfig {
+                    transport: mcp_transport_from_label(&server.transport),
+                    ..Default::default()
+                });
             config.enabled = server.enabled;
             if !server.transport.trim().is_empty() {
                 config.transport = mcp_transport_from_label(&server.transport);
@@ -1085,9 +1089,7 @@ async fn studio_snapshot_from_projects_inner(
         }
     }
     let session_runtime = match selected_session_id.as_deref() {
-        Some(session_id) => Some(session_runtime_dto(
-            bridge.studio.session_runtime(session_id).await?,
-        )),
+        Some(session_id) => Some(session_runtime_dto(bridge, session_id).await?),
         None => None,
     };
     let config = serde_json::to_value(bridge.studio.config_store().load_or_default()?)?;
@@ -1187,12 +1189,7 @@ async fn load_session_state_inner(
         .store()
         .list_pending_interactions(&session_id)
         .await?;
-    let session_runtime = bridge
-        .studio
-        .session_runtime(&session_id)
-        .await
-        .map(session_runtime_dto)
-        .ok();
+    let session_runtime = session_runtime_dto(bridge, &session_id).await.ok();
 
     Ok(SessionStateResponse {
         session_id: session_id.clone(),
@@ -1286,8 +1283,17 @@ fn agent_event_dto(event: pl_core::StudioAgentTimelineEventRecord) -> AgentTimel
     }
 }
 
-fn session_runtime_dto(runtime: pl_core::SessionRuntimeRecord) -> SessionRuntimeDto {
-    SessionRuntimeDto {
+async fn session_runtime_dto(
+    bridge: &'static BridgeRuntime,
+    session_id: &str,
+) -> Result<SessionRuntimeDto> {
+    let runtime = bridge.studio.session_runtime(session_id).await?;
+    let active_skills = bridge
+        .studio
+        .store()
+        .list_session_skill_names(session_id)
+        .await?;
+    Ok(SessionRuntimeDto {
         session_id: runtime.session_id,
         model: runtime.model,
         context_window: runtime.context_window,
@@ -1298,8 +1304,11 @@ fn session_runtime_dto(runtime: pl_core::SessionRuntimeRecord) -> SessionRuntime
         total_tokens: runtime.total_tokens,
         estimated_costs: runtime.estimated_costs,
         has_unpriced_usage: runtime.has_unpriced_usage,
+        active_skills,
+        active_mcp_servers: bridge.studio.mcp_runtime().available_server_names().await,
+        active_lsp_servers: bridge.studio.lsp_runtime().active_server_names().await,
         updated_at: runtime.updated_at,
-    }
+    })
 }
 
 fn resolve_interaction_response(

@@ -24,6 +24,7 @@ pl-core
 | `pl-studio-bridge` | Flutter Rust Bridge v2 桥接 crate，把 Flutter API 转为 `pl-core` Studio runtime 调用，并把 Rust event stream 映射为 Dart stream |
 | `pl-core` | 核心逻辑层，组合配置、Studio 状态库、会话、单轮请求、工具审批、模型调用、runtime 状态机和结果整理 |
 | `pl-model` | LLM provider 层，负责外部模型 API 适配 |
+| `pl-lsp` | LSP 客户端层，负责语言服务器进程、JSON-RPC framing 和代码智能查询 |
 | `pl-protocol` | 公共协议层，定义消息、Studio wire DTO、错误、权限和状态等共享类型 |
 | `pl-trace` | 内部 trace 协议层，定义 `AgentEvent`、`TraceEvent` 和 `TracePart`，进入 Studio 前必须映射为 message/part 事件 |
 
@@ -31,17 +32,18 @@ pl-core
 
 - `pl-protocol` 不依赖内部 crate，是协议和类型边界。
 - `pl-model` 只依赖 `pl-protocol` 与 `pl-trace`，不承担核心流程编排。
-- `pl-core` 可以依赖 `pl-model`、`pl-protocol` 和 `pl-trace`，负责组合核心逻辑、持久化配置和 Studio SQLite 状态。
+- `pl-lsp` 只依赖 LSP 协议与异步运行时，不依赖 `pl-core`。
+- `pl-core` 可以依赖 `pl-model`、`pl-lsp`、`pl-protocol` 和 `pl-trace`，负责组合核心逻辑、持久化配置和 Studio SQLite 状态。
 - `pure-studio-flutter` 保持薄入口层，Flutter UI 不直接持久化业务状态，只通过 `pl-studio-bridge` 调用 `pl-core` 并消费 typed event stream。
 - `pl-studio-bridge` 不拥有业务规则。复杂 payload 通过 canonical camelCase JSON 字符串传输，Dart 层用 `kindType` 和 typed routing fields 解码为 sealed model，避免 FRB API 直接暴露 `serde_json::Value`。
-- 当前版本没有独立沙箱层；Studio 运行路径暂时使用 `ToolApprovalPolicy::AutoAllow`，已注册工具会按 `pl-core` 的工作区边界和工具实现直接执行。
+- 当前版本没有独立沙箱层；Studio 运行路径默认使用 `PermissionMode::RequestApproval`。workspace 内访问按本地策略直接放行，workspace 外访问按权限模式请求用户审批、AI reviewer 审批或在 `full-access` 下放行。
 
 ## 1.4 桌面编译路径
 
 ```text
 用户选择项目和会话
   → pure-studio-flutter 调用 pl-core Studio API
-  → pl-core 读取 ~/.pure/studio/studio_1.sqlite
+  → pl-core 读取 ~/.pure/studio/studio_2.sqlite
   → pl-core 读取 ~/.pure/config.toml
   → pl-core 确认 Studio runtime 状态为 Ready
   → pl-core 构造 TurnRequest 和 TurnOptions
@@ -70,15 +72,8 @@ Studio 事件分为两类订阅：
 ## 1.5 依赖规则
 
 ```text
-pl-protocol
-    ↑
-pl-trace
-    ↑
-pl-model
-    ↑
-pl-studio-bridge
-    ↑
-pure-studio-flutter
+pl-protocol  ←  pl-trace  ←  pl-model  ←  pl-core  ←  pl-studio-bridge  ←  pure-studio-flutter
+                              pl-lsp    ←  pl-core
 ```
 
-`pl-core` 也直接依赖 `pl-protocol` 与 `pl-trace`，分别用于公共 wire/status 类型和内部运行 trace 类型。
+`pl-core` 也直接依赖 `pl-protocol`、`pl-trace`、`pl-model` 与 `pl-lsp`，分别用于公共 wire/status 类型、内部运行 trace、模型 provider 和 LSP 查询能力。

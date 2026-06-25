@@ -10,12 +10,14 @@
 
 ## 2. 命名与模块边界
 
-`pl-core` 固定四层语义：
+`pl-core` 固定端口-适配器边界，并以四个边界入口渐进式整理实现：
 
-- `application`：use case 编排
-- `domain`：领域类型与状态
+- `application`：use case 编排入口
+- `domain`：领域类型与状态入口
 - `interfaces`：端口 trait
-- `infrastructure`：适配器实现
+- `infrastructure`：适配器入口
+
+当前实现仍允许 `studio`、`core`、`tool`、`config`、`mcp` 等业务命名空间承载主要代码；新增抽象和大块重构应优先向上述边界收敛，避免再把应用编排、存储、工具执行和桥接 DTO 混回单个大模块。
 
 Flutter/FRB 固定结构：
 
@@ -64,7 +66,8 @@ config：
 
 ## 5. 安全默认
 
-- 默认审批策略固定 `ToolApprovalPolicy::AutoAllow`
+- 默认权限模式固定 `PermissionMode::RequestApproval`
+- 旧 `ToolApprovalPolicy::AutoAllow | Manual | DenyAll` 只作为兼容构造保留，核心执行前统一以 `PermissionMode` 做策略判断
 - Flutter/FRB 桥接层不暴露 raw provider 私有结构
 - token 不在 UI 和日志明文扩散
 
