@@ -923,6 +923,9 @@ class StudioController extends AsyncNotifier<StudioState> {
       'agentTimelineChanged' => _emptyToNull(
         _stringFromMap(event.payload['event'], 'sessionId'),
       ),
+      'sessionRuntimeChanged' => _emptyToNull(
+        _stringFromMap(event.payload['runtime'], 'sessionId'),
+      ),
       _ => null,
     };
   }

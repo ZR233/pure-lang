@@ -165,7 +165,6 @@ void main() {
       api.emitSession(
         StudioBridgeEvent(
           kindType: 'sessionRuntimeChanged',
-          sessionId: 'session-1',
           payload: {
             'runtime': {
               'sessionId': 'session-1',
@@ -204,6 +203,41 @@ void main() {
       expect(runtime.activeMcpServers, ['new-mcp']);
       expect(runtime.activeLspServers, ['new-lsp']);
       expect(runtime.agentCount, 2);
+
+      api.emitSession(
+        StudioBridgeEvent(
+          kindType: 'sessionRuntimeChanged',
+          payload: {
+            'runtime': {
+              'sessionId': 'other-session',
+              'usage': {
+                'model': 'planner/other',
+                'latestContextTokens': 7,
+                'contextWindow': 128000,
+                'promptTokens': 7,
+                'completionTokens': 0,
+                'cachedPromptTokens': 0,
+                'totalTokens': 7,
+                'estimatedCosts': <Object?>[],
+                'hasUnpricedUsage': false,
+                'updatedAt': 3,
+              },
+              'activeSkills': ['other-skill'],
+              'activeMcpServers': ['other-mcp'],
+              'activeLspServers': ['other-lsp'],
+              'updatedAt': 3,
+            },
+          },
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      final unchangedRuntime = container
+          .read(studioControllerProvider)
+          .requireValue
+          .runtime;
+      expect(unchangedRuntime.model, 'planner/new');
+      expect(unchangedRuntime.activeSkills, ['new-skill']);
     },
   );
 
