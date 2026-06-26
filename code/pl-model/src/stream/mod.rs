@@ -16,7 +16,7 @@ use crate::request::{
     CompletionResponse, CompletionTraceContext, FinishReason, TokenUsage, ToolCall,
 };
 
-use event::ModelStreamEvent;
+use event::{ModelBlockContent, ModelBlockField, ModelBlockKind, ModelStreamEvent};
 use lifecycle::StreamLifecycle;
 use tagged_output::TaggedVisibleOutputAdapter;
 use tool_stream::ToolStream;
@@ -84,7 +84,15 @@ impl StreamCompletionAccumulator {
         stream_event: ModelStreamEvent,
         event_tx: &AgentEventSender,
     ) -> Result<()> {
-        if let ModelStreamEvent::TextDelta { delta, .. } = &stream_event {
+        if let ModelStreamEvent::BlockDelta {
+            kind:
+                ModelBlockKind::Text {
+                    channel: TraceTextChannel::Final,
+                },
+            delta,
+            ..
+        } = &stream_event
+        {
             self.raw_content_parts.push(delta.clone());
         }
         for stream_event in self.lifecycle.normalize(stream_event) {
@@ -100,20 +108,69 @@ impl StreamCompletionAccumulator {
         event_tx: &AgentEventSender,
     ) -> Result<()> {
         match stream_event {
-            ModelStreamEvent::TextStarted { id, channel } => {
+            ModelStreamEvent::BlockOpened {
+                id,
+                kind: ModelBlockKind::Text { channel },
+                ..
+            } => {
                 self.record_text_started(&id, channel, event_tx);
             }
-            ModelStreamEvent::TextDelta { id, channel, delta } => {
+            ModelStreamEvent::BlockOpened {
+                id,
+                kind: ModelBlockKind::ReasoningSummary,
+                ..
+            } => {
+                self.record_thinking_started(&id, event_tx);
+            }
+            ModelStreamEvent::BlockOpened {
+                kind: ModelBlockKind::Plan,
+                ..
+            } => {}
+            ModelStreamEvent::BlockDelta {
+                id,
+                kind: ModelBlockKind::Text { channel },
+                field: ModelBlockField::Text,
+                delta,
+                ..
+            } => {
                 if channel == TraceTextChannel::Final {
                     self.append_content_part(&id, &delta);
                 }
                 self.record_text_delta(&id, delta, event_tx, channel);
             }
-            ModelStreamEvent::TextCompleted {
+            ModelStreamEvent::BlockDelta {
                 id,
-                channel,
-                authoritative_text,
+                kind: ModelBlockKind::ReasoningSummary,
+                field: ModelBlockField::ReasoningSummary,
+                delta,
+                section_index,
             } => {
+                self.reasoning_parts.push(delta.clone());
+                self.record_thinking_delta(&id, section_index.unwrap_or_default(), delta, event_tx);
+            }
+            ModelStreamEvent::BlockDelta {
+                kind: ModelBlockKind::Plan,
+                ..
+            }
+            | ModelStreamEvent::BlockDelta {
+                kind: ModelBlockKind::Text { .. },
+                ..
+            }
+            | ModelStreamEvent::BlockDelta {
+                kind: ModelBlockKind::ReasoningSummary,
+                ..
+            } => {}
+            ModelStreamEvent::BlockClosed {
+                id,
+                kind: ModelBlockKind::Text { channel },
+                authoritative_content,
+                ..
+            } => {
+                let authoritative_text = match authoritative_content {
+                    Some(ModelBlockContent::Text(text)) => Some(text),
+                    Some(ModelBlockContent::ReasoningSummary(_) | ModelBlockContent::Plan(_))
+                    | None => None,
+                };
                 if channel == TraceTextChannel::Final
                     && let Some(text) = authoritative_text.as_deref()
                 {
@@ -121,30 +178,21 @@ impl StreamCompletionAccumulator {
                 }
                 self.record_text_completed(&id, channel, authoritative_text, event_tx);
             }
-            ModelStreamEvent::ReasoningSummaryStarted {
+            ModelStreamEvent::BlockClosed {
                 id,
-                provider_metadata,
+                kind: ModelBlockKind::ReasoningSummary,
+                authoritative_content,
+                ..
             } => {
-                let _ = provider_metadata;
-                self.record_thinking_started(&id, event_tx);
-            }
-            ModelStreamEvent::ReasoningSummaryDelta {
-                id,
-                section_index,
-                delta,
-            } => {
-                self.reasoning_parts.push(delta.clone());
-                self.record_thinking_delta(&id, section_index, delta, event_tx);
-            }
-            ModelStreamEvent::ReasoningSummaryCompleted {
-                id,
-                provider_metadata,
-                authoritative_summary,
-            } => {
-                let _ = provider_metadata;
-                let _ = authoritative_summary;
+                if let Some(ModelBlockContent::ReasoningSummary(summary)) = authoritative_content {
+                    self.reasoning_parts = summary;
+                }
                 self.record_thinking_completed(&id, event_tx);
             }
+            ModelStreamEvent::BlockClosed {
+                kind: ModelBlockKind::Plan,
+                ..
+            } => {}
             ModelStreamEvent::ReasoningRawDelta {
                 id,
                 content_index,
@@ -481,15 +529,23 @@ mod tests {
     #[test]
     fn native_phase_decoder_does_not_parse_visible_tags() {
         let mut decoder = VisibleOutputDecoder::new(VisibleOutputProtocol::NativePhases);
-        let events = decoder.decode(ModelStreamEvent::TextDelta {
-            id: "native-final".to_string(),
-            channel: TraceTextChannel::Final,
-            delta: "<final>literal</final>".to_string(),
-        });
+        let events = decoder.decode(ModelStreamEvent::text_delta(
+            "native-final".to_string(),
+            TraceTextChannel::Final,
+            "<final>literal</final>".to_string(),
+        ));
 
         assert!(matches!(
             events.as_slice(),
-            [ModelStreamEvent::TextDelta { id, channel: TraceTextChannel::Final, delta }]
+            [ModelStreamEvent::BlockDelta {
+                id,
+                kind: ModelBlockKind::Text {
+                    channel: TraceTextChannel::Final,
+                },
+                field: ModelBlockField::Text,
+                delta,
+                ..
+            }]
                 if id == "native-final" && delta == "<final>literal</final>"
         ));
     }
@@ -497,42 +553,62 @@ mod tests {
     #[test]
     fn tagged_text_decoder_extracts_visible_tags() {
         let mut decoder = VisibleOutputDecoder::new(VisibleOutputProtocol::TaggedText);
-        let events = decoder.decode(ModelStreamEvent::TextDelta {
-            id: "chat-final".to_string(),
-            channel: TraceTextChannel::Final,
-            delta: "<commentary>working</commentary><final>done</final>".to_string(),
-        });
+        let events = decoder.decode(ModelStreamEvent::text_delta(
+            "chat-final".to_string(),
+            TraceTextChannel::Final,
+            "<commentary>working</commentary><final>done</final>".to_string(),
+        ));
 
         assert!(matches!(
             events.as_slice(),
             [
-                ModelStreamEvent::TextStarted {
+                ModelStreamEvent::BlockOpened {
                     id: commentary_started_id,
-                    channel: TraceTextChannel::Commentary,
+                    kind: ModelBlockKind::Text {
+                        channel: TraceTextChannel::Commentary,
+                    },
+                    ..
                 },
-                ModelStreamEvent::TextDelta {
+                ModelStreamEvent::BlockDelta {
                     id: commentary_id,
-                    channel: TraceTextChannel::Commentary,
+                    kind: ModelBlockKind::Text {
+                        channel: TraceTextChannel::Commentary,
+                    },
+                    field: ModelBlockField::Text,
                     delta: commentary,
+                    ..
                 },
-                ModelStreamEvent::TextCompleted {
+                ModelStreamEvent::BlockClosed {
                     id: commentary_completed_id,
-                    channel: TraceTextChannel::Commentary,
-                    authoritative_text: None,
+                    kind: ModelBlockKind::Text {
+                        channel: TraceTextChannel::Commentary,
+                    },
+                    authoritative_content: None,
+                    ..
                 },
-                ModelStreamEvent::TextStarted {
+                ModelStreamEvent::BlockOpened {
                     id: final_started_id,
-                    channel: TraceTextChannel::Final,
+                    kind: ModelBlockKind::Text {
+                        channel: TraceTextChannel::Final,
+                    },
+                    ..
                 },
-                ModelStreamEvent::TextDelta {
+                ModelStreamEvent::BlockDelta {
                     id: final_id,
-                    channel: TraceTextChannel::Final,
+                    kind: ModelBlockKind::Text {
+                        channel: TraceTextChannel::Final,
+                    },
+                    field: ModelBlockField::Text,
                     delta: final_text,
+                    ..
                 },
-                ModelStreamEvent::TextCompleted {
+                ModelStreamEvent::BlockClosed {
                     id: final_completed_id,
-                    channel: TraceTextChannel::Final,
-                    authoritative_text: None,
+                    kind: ModelBlockKind::Text {
+                        channel: TraceTextChannel::Final,
+                    },
+                    authoritative_content: None,
+                    ..
                 },
             ] if commentary_started_id == "tagged-commentary-1"
                 && commentary_id == commentary_started_id
@@ -548,27 +624,28 @@ mod tests {
     #[test]
     fn tagged_text_decoder_gives_repeated_tags_distinct_blocks() {
         let mut decoder = VisibleOutputDecoder::new(VisibleOutputProtocol::TaggedText);
-        let events = decoder.decode(ModelStreamEvent::TextDelta {
-            id: "chat-final".to_string(),
-            channel: TraceTextChannel::Final,
-            delta: "<commentary>A</commentary><commentary>B</commentary>".to_string(),
-        });
+        let events = decoder.decode(ModelStreamEvent::text_delta(
+            "chat-final".to_string(),
+            TraceTextChannel::Final,
+            "<commentary>A</commentary><commentary>B</commentary>".to_string(),
+        ));
 
         let completed_ids = events
             .iter()
             .filter_map(|event| match event {
-                ModelStreamEvent::TextCompleted {
+                ModelStreamEvent::BlockClosed {
                     id,
-                    channel: TraceTextChannel::Commentary,
-                    authoritative_text: None,
+                    kind:
+                        ModelBlockKind::Text {
+                            channel: TraceTextChannel::Commentary,
+                        },
+                    authoritative_content: None,
+                    ..
                 } => Some(id.as_str()),
                 ModelStreamEvent::StepStarted { .. }
-                | ModelStreamEvent::TextStarted { .. }
-                | ModelStreamEvent::TextDelta { .. }
-                | ModelStreamEvent::TextCompleted { .. }
-                | ModelStreamEvent::ReasoningSummaryStarted { .. }
-                | ModelStreamEvent::ReasoningSummaryDelta { .. }
-                | ModelStreamEvent::ReasoningSummaryCompleted { .. }
+                | ModelStreamEvent::BlockOpened { .. }
+                | ModelStreamEvent::BlockDelta { .. }
+                | ModelStreamEvent::BlockClosed { .. }
                 | ModelStreamEvent::ReasoningRawDelta { .. }
                 | ModelStreamEvent::ToolInputStarted { .. }
                 | ModelStreamEvent::ToolInputDelta { .. }

@@ -388,14 +388,21 @@ class TimelinePart {
     required this.messageId,
     required this.type,
     required this.text,
+    this.sessionId = '',
+    this.turnId = '',
     this.order = 0,
     this.sequence = 0,
     this.status = 'completed',
     this.revision = 0,
+    this.createdAt,
+    this.updatedAt,
+    this.completedAt,
+    this.error,
     this.title,
     this.textChannel,
     this.tool,
     this.agent,
+    this.planContent,
     this.collapsed = false,
     this.synthetic = false,
     this.ignored = false,
@@ -403,6 +410,8 @@ class TimelinePart {
 
   final String id;
   final String messageId;
+  final String sessionId;
+  final String turnId;
   final TimelinePartType type;
   final int order;
   final int sequence;
@@ -410,9 +419,14 @@ class TimelinePart {
   final String? title;
   final String status;
   final int revision;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+  final DateTime? completedAt;
+  final String? error;
   final TimelineTextChannel? textChannel;
   final TimelineToolPart? tool;
   final TimelineAgentPart? agent;
+  final String? planContent;
   final bool collapsed;
   final bool synthetic;
   final bool ignored;
@@ -430,7 +444,9 @@ TimelinePart timelinePartFromSnapshot(
     result: overlay?.values['tool.result'] ?? snapshotTool.result,
   );
   final visibleText = switch (snapshot.type) {
-    TimelinePartType.plan => planContent ?? text,
+    TimelinePartType.plan => planContent?.isNotEmpty == true
+        ? planContent!
+        : text,
     TimelinePartType.tool => _toolActivityText(tool),
     TimelinePartType.agent =>
       snapshot.agent?.summary ?? snapshot.agent?.task ?? text,
@@ -443,16 +459,23 @@ TimelinePart timelinePartFromSnapshot(
   return TimelinePart(
     id: snapshot.id,
     messageId: snapshot.messageId,
+    sessionId: snapshot.sessionId,
+    turnId: snapshot.turnId,
     type: snapshot.type,
     order: snapshot.order,
     sequence: snapshot.sequence,
     revision: snapshot.revision,
+    createdAt: snapshot.createdAt,
+    updatedAt: snapshot.updatedAt,
+    completedAt: snapshot.completedAt,
+    error: snapshot.error,
     title: _partTitleFromSnapshot(snapshot),
     text: visibleText,
     status: snapshot.status,
     textChannel: snapshot.textChannel,
     tool: tool,
     agent: snapshot.agent,
+    planContent: planContent,
     collapsed: snapshot.type == TimelinePartType.reasoning,
     synthetic: snapshot.synthetic,
     ignored: snapshot.ignored,
@@ -560,8 +583,10 @@ class TimelineRow {
     required this.role,
     required this.type,
     required this.createdAt,
+    required this.order,
     required this.sequence,
     required this.renderVersion,
+    this.turnId,
     this.part,
     this.agentEvent,
   });
@@ -583,8 +608,10 @@ class TimelineRow {
       role: role,
       type: type,
       createdAt: createdAt,
+      order: part.order,
       sequence: sequence,
       renderVersion: _timelineRowRenderVersion(part),
+      turnId: part.turnId,
       part: part,
     );
   }
@@ -597,6 +624,7 @@ class TimelineRow {
       role: null,
       type: TimelineRowType.agentActivity,
       createdAt: event.createdAt,
+      order: 0,
       sequence: event.sequence,
       renderVersion: _timelineAgentEventRenderVersion(event),
       agentEvent: event,
@@ -609,8 +637,10 @@ class TimelineRow {
   final String? role;
   final TimelineRowType type;
   final DateTime createdAt;
+  final int order;
   final int sequence;
   final int renderVersion;
+  final String? turnId;
   final TimelinePart? part;
   final TimelineAgentEvent? agentEvent;
 }
@@ -657,8 +687,8 @@ List<TimelineRow> _timelineRowsForMessage(
         messageId: message.id,
         role: message.role,
         type: _timelineRowType(message, part),
-        createdAt: message.createdAt,
-        sequence: message.sequence,
+        createdAt: part.createdAt ?? message.createdAt,
+        sequence: part.sequence == 0 ? message.sequence : part.sequence,
         part: part,
       ),
   ];
@@ -689,6 +719,12 @@ int _compareParts(TimelinePart left, TimelinePart right) {
 }
 
 int _compareRows(TimelineRow left, TimelineRow right) {
+  if (left.messageId != null && left.messageId == right.messageId) {
+    final order = left.order.compareTo(right.order);
+    if (order != 0) {
+      return order;
+    }
+  }
   final sequence = left.sequence.compareTo(right.sequence);
   if (sequence != 0) {
     return sequence;
@@ -704,11 +740,20 @@ int _timelineRowRenderVersion(TimelinePart part) {
   final tool = part.tool;
   final agent = part.agent;
   return Object.hashAll([
+    part.sessionId,
+    part.turnId,
+    part.order,
     part.revision,
     part.sequence,
     part.status,
+    part.textChannel,
     part.title,
     part.text,
+    part.planContent,
+    part.createdAt?.millisecondsSinceEpoch,
+    part.updatedAt?.millisecondsSinceEpoch,
+    part.completedAt?.millisecondsSinceEpoch,
+    part.error,
     part.collapsed,
     part.synthetic,
     part.ignored,
@@ -729,6 +774,7 @@ int _timelineRowRenderVersion(TimelinePart part) {
       agent.task,
       agent.status,
       agent.summary,
+      agent.depth,
       agent.error,
       agent.reason,
     ],

@@ -7,33 +7,23 @@ pub(crate) enum ModelStreamEvent {
     StepStarted {
         response_id: Option<String>,
     },
-    TextStarted {
+    BlockOpened {
         id: String,
-        channel: TraceTextChannel,
-    },
-    TextDelta {
-        id: String,
-        channel: TraceTextChannel,
-        delta: String,
-    },
-    TextCompleted {
-        id: String,
-        channel: TraceTextChannel,
-        authoritative_text: Option<String>,
-    },
-    ReasoningSummaryStarted {
-        id: String,
+        kind: ModelBlockKind,
         provider_metadata: Option<serde_json::Value>,
     },
-    ReasoningSummaryDelta {
+    BlockDelta {
         id: String,
-        section_index: u32,
+        kind: ModelBlockKind,
+        field: ModelBlockField,
         delta: String,
+        section_index: Option<u32>,
     },
-    ReasoningSummaryCompleted {
+    BlockClosed {
         id: String,
+        kind: ModelBlockKind,
+        authoritative_content: Option<ModelBlockContent>,
         provider_metadata: Option<serde_json::Value>,
-        authoritative_summary: Option<Vec<String>>,
     },
     ReasoningRawDelta {
         id: String,
@@ -79,6 +69,32 @@ pub(crate) enum ModelStreamEvent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModelBlockKind {
+    Text {
+        channel: TraceTextChannel,
+    },
+    ReasoningSummary,
+    #[allow(dead_code)]
+    Plan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ModelBlockField {
+    Text,
+    ReasoningSummary,
+    #[allow(dead_code)]
+    PlanContent,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum ModelBlockContent {
+    Text(String),
+    ReasoningSummary(Vec<String>),
+    #[allow(dead_code)]
+    Plan(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ToolInputPayloadKind {
     FunctionArguments,
     CustomInput,
@@ -101,6 +117,73 @@ impl ToolInputDeltaPayload {
     pub(crate) fn text(&self) -> &str {
         match self {
             Self::FunctionArguments(delta) | Self::CustomInput(delta) => delta,
+        }
+    }
+}
+
+impl ModelStreamEvent {
+    pub(crate) fn text_started(id: String, channel: TraceTextChannel) -> Self {
+        Self::BlockOpened {
+            id,
+            kind: ModelBlockKind::Text { channel },
+            provider_metadata: None,
+        }
+    }
+
+    pub(crate) fn text_delta(id: String, channel: TraceTextChannel, delta: String) -> Self {
+        Self::BlockDelta {
+            id,
+            kind: ModelBlockKind::Text { channel },
+            field: ModelBlockField::Text,
+            delta,
+            section_index: None,
+        }
+    }
+
+    pub(crate) fn text_completed(
+        id: String,
+        channel: TraceTextChannel,
+        authoritative_text: Option<String>,
+    ) -> Self {
+        Self::BlockClosed {
+            id,
+            kind: ModelBlockKind::Text { channel },
+            authoritative_content: authoritative_text.map(ModelBlockContent::Text),
+            provider_metadata: None,
+        }
+    }
+
+    pub(crate) fn reasoning_summary_started(
+        id: String,
+        provider_metadata: Option<serde_json::Value>,
+    ) -> Self {
+        Self::BlockOpened {
+            id,
+            kind: ModelBlockKind::ReasoningSummary,
+            provider_metadata,
+        }
+    }
+
+    pub(crate) fn reasoning_summary_delta(id: String, section_index: u32, delta: String) -> Self {
+        Self::BlockDelta {
+            id,
+            kind: ModelBlockKind::ReasoningSummary,
+            field: ModelBlockField::ReasoningSummary,
+            delta,
+            section_index: Some(section_index),
+        }
+    }
+
+    pub(crate) fn reasoning_summary_completed(
+        id: String,
+        provider_metadata: Option<serde_json::Value>,
+        authoritative_summary: Option<Vec<String>>,
+    ) -> Self {
+        Self::BlockClosed {
+            id,
+            kind: ModelBlockKind::ReasoningSummary,
+            authoritative_content: authoritative_summary.map(ModelBlockContent::ReasoningSummary),
+            provider_metadata,
         }
     }
 }

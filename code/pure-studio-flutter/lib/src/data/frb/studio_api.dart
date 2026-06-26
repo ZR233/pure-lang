@@ -1074,13 +1074,13 @@ TimelinePartSnapshot timelinePartSnapshotFromJson(
 }) {
   final json = _map(value);
   final type = _partType(
-    _string(json['partType'], fallback: _string(json['type'])),
+    _firstValue(json, const ['partType', 'part_type', 'type']),
   );
   return TimelinePartSnapshot(
-    id: _string(json['partId'], fallback: _string(json['id'])),
-    messageId: _string(json['messageId']),
-    sessionId: _string(json['sessionId']),
-    turnId: _string(json['turnId']),
+    id: _string(_firstValue(json, const ['partId', 'part_id', 'id'])),
+    messageId: _string(_firstValue(json, const ['messageId', 'message_id'])),
+    sessionId: _string(_firstValue(json, const ['sessionId', 'session_id'])),
+    turnId: _string(_firstValue(json, const ['turnId', 'turn_id'])),
     type: type,
     order: _int(json['order']),
     revision: _int(json['revision']),
@@ -1093,10 +1093,12 @@ TimelinePartSnapshot timelinePartSnapshotFromJson(
         ? null
         : _dateFromUnix(_nullableInt(json['completedAt'])!),
     error: _nullableString(json['error']),
-    textChannel: _textChannel(json['textChannel']),
+    textChannel: _textChannel(
+      _firstValue(json, const ['textChannel', 'text_channel']),
+    ),
     tool: _toolPart(json['tool']),
     agent: _agentPart(json['agent']),
-    planContent: _string(_map(json['plan'])['content']),
+    planContent: _partPlanContent(json),
     synthetic: _bool(json['synthetic']),
     ignored: _bool(json['ignored']),
   );
@@ -1907,7 +1909,7 @@ String _partText(Map<String, Object?> json, TimelinePartType type) {
       _string(_map(json['tool'])['arguments']),
       _string(_map(json['tool'])['result']),
     ].where((part) => part.isNotEmpty).join('\n'),
-    TimelinePartType.plan => _string(_map(json['plan'])['content']),
+    TimelinePartType.plan => _partPlanContent(json),
     TimelinePartType.agent => _string(
       _map(json['agent'])['summary'],
       fallback: _string(_map(json['agent'])['task']),
@@ -1921,14 +1923,15 @@ String _partText(Map<String, Object?> json, TimelinePartType type) {
 }
 
 TimelineTextChannel? _textChannel(Object? value) {
-  final label = _string(value);
+  final label = _normalizedWireLabel(value);
   if (label.isEmpty) {
     return null;
   }
   return switch (label) {
     'user' => TimelineTextChannel.user,
     'commentary' => TimelineTextChannel.commentary,
-    'final' => TimelineTextChannel.finalAnswer,
+    'final' || 'finalanswer' || 'final_answer' =>
+      TimelineTextChannel.finalAnswer,
     _ => throw FormatException('Unknown text channel: $label'),
   };
 }
@@ -1939,16 +1942,24 @@ TimelineToolPart? _toolPart(Object? value) {
     return null;
   }
   return TimelineToolPart(
-    toolCallId: _string(json['toolCallId']),
-    callId: _nullableString(json['callId']),
-    providerItemId: _nullableString(json['providerItemId']),
+    toolCallId: _string(
+      _firstValue(json, const ['toolCallId', 'tool_call_id']),
+    ),
+    callId: _nullableString(_firstValue(json, const ['callId', 'call_id'])),
+    providerItemId: _nullableString(
+      _firstValue(json, const ['providerItemId', 'provider_item_id']),
+    ),
     name: _string(json['name'], fallback: 'tool'),
     arguments: _string(json['arguments']),
     result: _nullableString(json['result']),
-    exitCode: _nullableInt(json['exitCode']),
-    timedOut: _bool(json['timedOut']),
-    workingDirectory: _nullableString(json['workingDirectory']),
-    denialReason: _nullableString(json['denialReason']),
+    exitCode: _nullableInt(_firstValue(json, const ['exitCode', 'exit_code'])),
+    timedOut: _bool(_firstValue(json, const ['timedOut', 'timed_out'])),
+    workingDirectory: _nullableString(
+      _firstValue(json, const ['workingDirectory', 'working_directory']),
+    ),
+    denialReason: _nullableString(
+      _firstValue(json, const ['denialReason', 'denial_reason']),
+    ),
   );
 }
 
@@ -1960,7 +1971,9 @@ TimelineAgentPart? _agentPart(Object? value) {
   return TimelineAgentPart(
     id: _string(json['id']),
     path: _string(json['path']),
-    parentPath: _nullableString(json['parentPath']),
+    parentPath: _nullableString(
+      _firstValue(json, const ['parentPath', 'parent_path']),
+    ),
     role: _string(json['role'], fallback: 'agent'),
     task: _string(json['task']),
     status: _string(json['status']),
@@ -1969,6 +1982,20 @@ TimelineAgentPart? _agentPart(Object? value) {
     error: _nullableString(json['error']),
     reason: _nullableString(json['reason']),
   );
+}
+
+String _partPlanContent(Map<String, Object?> json) {
+  final direct = _string(
+    _firstValue(json, const ['planContent', 'plan_content']),
+  );
+  if (direct.isNotEmpty) {
+    return direct;
+  }
+  final plan = _map(json['plan']);
+  if (plan.isNotEmpty) {
+    return _string(plan['content']);
+  }
+  return _string(json['plan']);
 }
 
 String _interactionTitle(InteractionKind kind, Map<String, Object?> payload) {
@@ -1994,21 +2021,22 @@ String _interactionBody(InteractionKind kind, Map<String, Object?> payload) {
   };
 }
 
-TimelinePartType _partType(String value) {
-  return switch (value) {
+TimelinePartType _partType(Object? value) {
+  final label = _normalizedWireLabel(value);
+  return switch (label) {
     'text' => TimelinePartType.text,
-    'reasoning' => TimelinePartType.reasoning,
-    'tool' => TimelinePartType.tool,
+    'reasoning' || 'reasoning_summary' => TimelinePartType.reasoning,
+    'tool' || 'tool_activity' => TimelinePartType.tool,
     'plan' => TimelinePartType.plan,
-    'agent' => TimelinePartType.agent,
-    'turn' => TimelinePartType.turn,
-    'inference' => TimelinePartType.inference,
+    'agent' || 'agent_activity' => TimelinePartType.agent,
+    'turn' || 'turn_lifecycle' => TimelinePartType.turn,
+    'inference' || 'inference_lifecycle' => TimelinePartType.inference,
     'file' => TimelinePartType.file,
-    _ => throw FormatException('Unknown timeline part type: $value'),
+    _ => throw FormatException('Unknown timeline part type: $label'),
   };
 }
 
-bool _isIgnoredTimelinePartType(String value) {
+bool _isIgnoredTimelinePartType(Object? value) {
   return isInternalTimelinePartType(_partType(value));
 }
 
@@ -2143,6 +2171,20 @@ String _string(Object? value, {String fallback = ''}) {
     return value.isEmpty ? fallback : value;
   }
   return value.toString();
+}
+
+String _normalizedWireLabel(Object? value) {
+  final label = _string(value).trim();
+  if (label.isEmpty) {
+    return '';
+  }
+  return label
+      .replaceAllMapped(
+        RegExp(r'([a-z0-9])([A-Z])'),
+        (match) => '${match.group(1)}_${match.group(2)}',
+      )
+      .replaceAll('-', '_')
+      .toLowerCase();
 }
 
 String? _nullableString(Object? value) {

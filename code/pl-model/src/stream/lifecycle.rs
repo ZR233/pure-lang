@@ -1,13 +1,19 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap, btree_map::Entry};
 
-use pl_trace::TraceTextChannel;
-
-use super::event::{ModelStreamEvent, ToolInputDeltaPayload, ToolInputPayloadKind};
+use super::event::{
+    ModelBlockContent, ModelBlockKind, ModelStreamEvent, ToolInputDeltaPayload,
+    ToolInputPayloadKind,
+};
 
 pub(crate) struct StreamLifecycle {
-    open_text: BTreeSet<String>,
-    open_reasoning: BTreeSet<String>,
+    open_blocks: BTreeMap<String, OpenBlock>,
     open_tools: HashMap<String, OpenToolInput>,
+}
+
+#[derive(Debug, Clone)]
+struct OpenBlock {
+    id: String,
+    kind: ModelBlockKind,
 }
 
 struct OpenToolInput {
@@ -20,108 +26,103 @@ struct OpenToolInput {
 impl StreamLifecycle {
     pub(crate) fn new() -> Self {
         Self {
-            open_text: BTreeSet::new(),
-            open_reasoning: BTreeSet::new(),
+            open_blocks: BTreeMap::new(),
             open_tools: HashMap::new(),
         }
     }
 
     pub(crate) fn normalize(&mut self, event: ModelStreamEvent) -> Vec<ModelStreamEvent> {
         match event {
-            ModelStreamEvent::TextStarted { id, channel } => {
-                self.open_text.insert(block_key(channel.as_str(), &id));
-                vec![ModelStreamEvent::TextStarted { id, channel }]
+            ModelStreamEvent::BlockOpened {
+                id,
+                kind,
+                provider_metadata,
+            } => {
+                self.open_blocks.insert(
+                    block_key(kind, &id),
+                    OpenBlock {
+                        id: id.clone(),
+                        kind,
+                    },
+                );
+                vec![ModelStreamEvent::BlockOpened {
+                    id,
+                    kind,
+                    provider_metadata,
+                }]
             }
-            ModelStreamEvent::TextDelta { id, channel, delta } => {
-                let key = block_key(channel.as_str(), &id);
-                if self.open_text.insert(key) {
-                    vec![
-                        ModelStreamEvent::TextStarted {
+            ModelStreamEvent::BlockDelta {
+                id,
+                kind,
+                field,
+                delta,
+                section_index,
+            } => {
+                let key = block_key(kind, &id);
+                match self.open_blocks.entry(key) {
+                    Entry::Occupied(_) => vec![ModelStreamEvent::BlockDelta {
+                        id,
+                        kind,
+                        field,
+                        delta,
+                        section_index,
+                    }],
+                    Entry::Vacant(entry) => {
+                        entry.insert(OpenBlock {
                             id: id.clone(),
-                            channel,
-                        },
-                        ModelStreamEvent::TextDelta { id, channel, delta },
-                    ]
-                } else {
-                    vec![ModelStreamEvent::TextDelta { id, channel, delta }]
+                            kind,
+                        });
+                        vec![
+                            ModelStreamEvent::BlockOpened {
+                                id: id.clone(),
+                                kind,
+                                provider_metadata: None,
+                            },
+                            ModelStreamEvent::BlockDelta {
+                                id,
+                                kind,
+                                field,
+                                delta,
+                                section_index,
+                            },
+                        ]
+                    }
                 }
             }
-            ModelStreamEvent::TextCompleted {
+            ModelStreamEvent::BlockClosed {
                 id,
-                channel,
-                authoritative_text,
+                kind,
+                authoritative_content,
+                provider_metadata,
             } => {
-                if self.open_text.remove(&block_key(channel.as_str(), &id)) {
-                    vec![ModelStreamEvent::TextCompleted {
+                let key = block_key(kind, &id);
+                if self.open_blocks.remove(&key).is_some() {
+                    vec![ModelStreamEvent::BlockClosed {
                         id,
-                        channel,
-                        authoritative_text,
+                        kind,
+                        authoritative_content,
+                        provider_metadata,
                     }]
-                } else if authoritative_text
-                    .as_deref()
-                    .is_some_and(|text| !text.is_empty())
+                } else if authoritative_content
+                    .as_ref()
+                    .is_some_and(block_content_is_non_empty)
                 {
                     vec![
-                        ModelStreamEvent::TextStarted {
+                        ModelStreamEvent::BlockOpened {
                             id: id.clone(),
-                            channel,
+                            kind,
+                            provider_metadata: None,
                         },
-                        ModelStreamEvent::TextCompleted {
+                        ModelStreamEvent::BlockClosed {
                             id,
-                            channel,
-                            authoritative_text,
+                            kind,
+                            authoritative_content,
+                            provider_metadata,
                         },
                     ]
                 } else {
                     Vec::new()
                 }
-            }
-            ModelStreamEvent::ReasoningSummaryStarted {
-                id,
-                provider_metadata,
-            } => {
-                self.open_reasoning.insert(id.clone());
-                vec![ModelStreamEvent::ReasoningSummaryStarted {
-                    id,
-                    provider_metadata,
-                }]
-            }
-            ModelStreamEvent::ReasoningSummaryDelta {
-                id,
-                section_index,
-                delta,
-            } => {
-                if self.open_reasoning.insert(id.clone()) {
-                    vec![
-                        ModelStreamEvent::ReasoningSummaryStarted {
-                            id: id.clone(),
-                            provider_metadata: None,
-                        },
-                        ModelStreamEvent::ReasoningSummaryDelta {
-                            id,
-                            section_index,
-                            delta,
-                        },
-                    ]
-                } else {
-                    vec![ModelStreamEvent::ReasoningSummaryDelta {
-                        id,
-                        section_index,
-                        delta,
-                    }]
-                }
-            }
-            ModelStreamEvent::ReasoningSummaryCompleted {
-                id,
-                provider_metadata,
-                authoritative_summary,
-            } => {
-                self.open_reasoning.remove(&id);
-                vec![ModelStreamEvent::ReasoningSummaryCompleted {
-                    id,
-                    provider_metadata,
-                    authoritative_summary,
-                }]
             }
             ModelStreamEvent::ReasoningRawDelta {
                 id,
@@ -270,25 +271,15 @@ impl StreamLifecycle {
     }
 
     fn close_open_content_blocks(&mut self) -> Vec<ModelStreamEvent> {
-        let mut events = Vec::new();
-        for key in std::mem::take(&mut self.open_text) {
-            let Some((channel, id)) = key.split_once(':') else {
-                continue;
-            };
-            events.push(ModelStreamEvent::TextCompleted {
-                id: id.to_string(),
-                channel: parse_channel(channel),
-                authoritative_text: None,
-            });
-        }
-        for id in std::mem::take(&mut self.open_reasoning) {
-            events.push(ModelStreamEvent::ReasoningSummaryCompleted {
-                id,
+        std::mem::take(&mut self.open_blocks)
+            .into_values()
+            .map(|block| ModelStreamEvent::BlockClosed {
+                id: block.id,
+                kind: block.kind,
+                authoritative_content: None,
                 provider_metadata: None,
-                authoritative_summary: None,
-            });
-        }
-        events
+            })
+            .collect()
     }
 
     fn upsert_tool_input(
@@ -356,17 +347,23 @@ impl OpenToolInput {
     }
 }
 
-fn parse_channel(channel: &str) -> TraceTextChannel {
-    match channel {
-        "commentary" => TraceTextChannel::Commentary,
-        "final" => TraceTextChannel::Final,
-        "user" => TraceTextChannel::User,
-        _ => TraceTextChannel::Final,
+fn block_key(kind: ModelBlockKind, id: &str) -> String {
+    format!("{}:{id}", block_kind_label(kind))
+}
+
+fn block_kind_label(kind: ModelBlockKind) -> &'static str {
+    match kind {
+        ModelBlockKind::Text { channel } => channel.as_str(),
+        ModelBlockKind::ReasoningSummary => "reasoning.summary",
+        ModelBlockKind::Plan => "plan",
     }
 }
 
-fn block_key(prefix: &str, id: &str) -> String {
-    format!("{prefix}:{id}")
+fn block_content_is_non_empty(content: &ModelBlockContent) -> bool {
+    match content {
+        ModelBlockContent::Text(text) | ModelBlockContent::Plan(text) => !text.is_empty(),
+        ModelBlockContent::ReasoningSummary(summary) => summary.iter().any(|item| !item.is_empty()),
+    }
 }
 
 fn tool_key(stream_id: Option<&String>, call_id: Option<&String>, item_id: &str) -> String {
@@ -384,7 +381,10 @@ pub(crate) fn tool_start_payload(kind: ToolInputPayloadKind) -> ToolInputDeltaPa
 
 #[cfg(test)]
 mod tests {
+    use pl_trace::TraceTextChannel;
     use pretty_assertions::assert_eq;
+
+    use crate::stream::event::ModelBlockField;
 
     use super::*;
 
@@ -392,28 +392,66 @@ mod tests {
     fn authoritative_completion_without_delta_still_starts_and_completes_text() {
         let mut lifecycle = StreamLifecycle::new();
 
-        let events = lifecycle.normalize(ModelStreamEvent::TextCompleted {
-            id: "msg_progress".to_string(),
-            channel: TraceTextChannel::Commentary,
-            authoritative_text: Some("已完成检查".to_string()),
-        });
+        let events = lifecycle.normalize(ModelStreamEvent::text_completed(
+            "msg_progress".to_string(),
+            TraceTextChannel::Commentary,
+            Some("已完成检查".to_string()),
+        ));
 
         match events.as_slice() {
             [
-                ModelStreamEvent::TextStarted { id, channel },
-                ModelStreamEvent::TextCompleted {
+                ModelStreamEvent::BlockOpened { id, kind, .. },
+                ModelStreamEvent::BlockClosed {
                     id: completed_id,
-                    channel: completed_channel,
-                    authoritative_text,
+                    kind: completed_kind,
+                    authoritative_content,
+                    ..
                 },
             ] => {
                 assert_eq!(id, "msg_progress");
-                assert_eq!(*channel, TraceTextChannel::Commentary);
+                assert_eq!(
+                    *kind,
+                    ModelBlockKind::Text {
+                        channel: TraceTextChannel::Commentary
+                    }
+                );
                 assert_eq!(completed_id, "msg_progress");
-                assert_eq!(*completed_channel, TraceTextChannel::Commentary);
-                assert_eq!(authoritative_text.as_deref(), Some("已完成检查"));
+                assert_eq!(*completed_kind, *kind);
+                assert!(matches!(
+                    authoritative_content,
+                    Some(ModelBlockContent::Text(text)) if text == "已完成检查"
+                ));
             }
             other => panic!("unexpected events: {other:?}"),
         }
+    }
+
+    #[test]
+    fn delta_without_start_opens_block_before_delta() {
+        let mut lifecycle = StreamLifecycle::new();
+
+        let events = lifecycle.normalize(ModelStreamEvent::reasoning_summary_delta(
+            "thinking".to_string(),
+            0,
+            "summary".to_string(),
+        ));
+
+        assert!(matches!(
+            events.as_slice(),
+            [
+                ModelStreamEvent::BlockOpened {
+                    id,
+                    kind: ModelBlockKind::ReasoningSummary,
+                    ..
+                },
+                ModelStreamEvent::BlockDelta {
+                    id: delta_id,
+                    kind: ModelBlockKind::ReasoningSummary,
+                    field: ModelBlockField::ReasoningSummary,
+                    delta,
+                    section_index: Some(0),
+                },
+            ] if id == "thinking" && delta_id == id && delta == "summary"
+        ));
     }
 }

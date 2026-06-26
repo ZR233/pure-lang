@@ -108,10 +108,15 @@ impl OpenAiStreamDecoder {
             "response.output_item.added" => {
                 if let Some((item_id, channel)) = assistant_message_identity(event.item.as_ref()) {
                     self.text_channels.insert(item_id.clone(), channel);
-                    return vec![StreamEvent::TextStarted {
-                        id: item_id,
-                        channel,
-                    }];
+                    return vec![StreamEvent::text_started(item_id, channel)];
+                }
+                if let Some(item) = event.item.as_ref()
+                    && let Some(item_id) = reasoning_item_id(item)
+                {
+                    return vec![StreamEvent::reasoning_summary_started(
+                        item_id,
+                        Some(item.clone()),
+                    )];
                 }
             }
             "response.output_text.delta" => {
@@ -125,11 +130,7 @@ impl OpenAiStreamDecoder {
                     .copied()
                     .unwrap_or(TraceTextChannel::Final);
                 if let Some(delta) = event.delta.clone() {
-                    return vec![StreamEvent::TextDelta {
-                        id: item_id,
-                        channel,
-                        delta,
-                    }];
+                    return vec![StreamEvent::text_delta(item_id, channel, delta)];
                 }
                 return Vec::new();
             }
@@ -139,11 +140,20 @@ impl OpenAiStreamDecoder {
                 {
                     let channel = self.text_channels.remove(&item_id).unwrap_or(item_channel);
                     let authoritative_text = assistant_message_text(item);
-                    return vec![StreamEvent::TextCompleted {
-                        id: item_id,
+                    return vec![StreamEvent::text_completed(
+                        item_id,
                         channel,
                         authoritative_text,
-                    }];
+                    )];
+                }
+                if let Some(item) = event.item.as_ref()
+                    && let Some(item_id) = reasoning_item_id(item)
+                {
+                    return vec![StreamEvent::reasoning_summary_completed(
+                        item_id,
+                        Some(item.clone()),
+                        reasoning_summary_texts(item),
+                    )];
                 }
             }
             _ => {}
@@ -183,11 +193,11 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
         if let Some(content) = &choice.delta.content
             && !content.is_empty()
         {
-            events.push(StreamEvent::TextDelta {
-                id: DEFAULT_TEXT_ID.to_string(),
-                channel: TraceTextChannel::Final,
-                delta: content.clone(),
-            });
+            events.push(StreamEvent::text_delta(
+                DEFAULT_TEXT_ID.to_string(),
+                TraceTextChannel::Final,
+                content.clone(),
+            ));
         }
 
         if let Some(tool_calls) = &choice.delta.tool_calls {
@@ -260,27 +270,27 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
         })),
 
         "response.output_text.delta" => event.delta.as_ref().map(|d| {
-            StreamEventBatch::Single(StreamEvent::TextDelta {
-                id: event
+            StreamEventBatch::Single(StreamEvent::text_delta(
+                event
                     .item_id
                     .clone()
                     .unwrap_or_else(|| DEFAULT_TEXT_ID.to_string()),
-                channel: TraceTextChannel::Final,
-                delta: d.clone(),
-            })
+                TraceTextChannel::Final,
+                d.clone(),
+            ))
         }),
 
         "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
             event.delta.as_ref().map(|d| {
                 if event.kind == "response.reasoning_summary_text.delta" {
-                    StreamEventBatch::Single(StreamEvent::ReasoningSummaryDelta {
-                        id: event
+                    StreamEventBatch::Single(StreamEvent::reasoning_summary_delta(
+                        event
                             .item_id
                             .clone()
                             .unwrap_or_else(|| DEFAULT_REASONING_ID.to_string()),
-                        section_index: event.summary_index.unwrap_or(0).max(0) as u32,
-                        delta: d.clone(),
-                    })
+                        event.summary_index.unwrap_or(0).max(0) as u32,
+                        d.clone(),
+                    ))
                 } else {
                     StreamEventBatch::Single(StreamEvent::ReasoningRawDelta {
                         id: event
@@ -533,9 +543,49 @@ fn assistant_message_text(item: &Value) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
+fn reasoning_item_id(item: &Value) -> Option<String> {
+    if item.get("type")?.as_str()? != "reasoning" {
+        return None;
+    }
+    item.get("id")?.as_str().map(ToOwned::to_owned)
+}
+
+fn reasoning_summary_texts(item: &Value) -> Option<Vec<String>> {
+    let mut summaries = Vec::new();
+    for field in ["summary", "content"] {
+        if let Some(parts) = item.get(field).and_then(Value::as_array) {
+            summaries.extend(
+                parts
+                    .iter()
+                    .filter_map(reasoning_summary_part_text)
+                    .map(ToOwned::to_owned),
+            );
+        }
+    }
+    (!summaries.is_empty()).then_some(summaries)
+}
+
+fn reasoning_summary_part_text(part: &Value) -> Option<&str> {
+    match part {
+        Value::String(text) => Some(text.as_str()).filter(|text| !text.is_empty()),
+        Value::Object(_) => {
+            let kind = part.get("type").and_then(Value::as_str);
+            matches!(
+                kind,
+                Some("summary_text" | "reasoning_summary_text" | "output_text")
+            )
+            .then(|| part.get("text").and_then(Value::as_str))?
+            .filter(|text| !text.is_empty())
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
+
+    use crate::stream::event::{ModelBlockContent, ModelBlockField, ModelBlockKind};
 
     use super::*;
 
@@ -576,7 +626,11 @@ mod tests {
         }));
 
         match single_event(&event) {
-            Some(StreamEvent::TextDelta { delta, .. }) => {
+            Some(StreamEvent::BlockDelta {
+                field: ModelBlockField::Text,
+                delta,
+                ..
+            }) => {
                 assert_eq!(delta, "9.11 更大。");
             }
             other => panic!("unexpected event: {other:?}"),
@@ -595,7 +649,11 @@ mod tests {
                 StreamEvent::ReasoningRawDelta {
                     delta: reasoning, ..
                 },
-                StreamEvent::TextDelta { delta: content, .. },
+                StreamEvent::BlockDelta {
+                    field: ModelBlockField::Text,
+                    delta: content,
+                    ..
+                },
             ] => {
                 assert_eq!(reasoning, "先比较整数位。");
                 assert_eq!(content, "<final>9.11 更大。</final>");
@@ -651,13 +709,15 @@ mod tests {
         .unwrap();
 
         match single_event(&summary) {
-            Some(StreamEvent::ReasoningSummaryDelta {
+            Some(StreamEvent::BlockDelta {
                 id,
+                kind: ModelBlockKind::ReasoningSummary,
+                field: ModelBlockField::ReasoningSummary,
                 section_index,
                 delta,
             }) => {
                 assert_eq!(id, "rs_1");
-                assert_eq!(section_index, 1);
+                assert_eq!(section_index, Some(1));
                 assert_eq!(delta, "摘要");
             }
             other => panic!("unexpected event: {other:?}"),
@@ -691,9 +751,17 @@ mod tests {
         }))
         .unwrap();
         match decoder.decode(&commentary_added).as_slice() {
-            [StreamEvent::TextStarted { id, channel }] => {
+            [
+                StreamEvent::BlockOpened {
+                    id,
+                    kind:
+                        ModelBlockKind::Text {
+                            channel: TraceTextChannel::Commentary,
+                        },
+                    ..
+                },
+            ] => {
                 assert_eq!(id, "msg_progress");
-                assert_eq!(*channel, TraceTextChannel::Commentary);
             }
             other => panic!("unexpected events: {other:?}"),
         }
@@ -705,9 +773,19 @@ mod tests {
         }))
         .unwrap();
         match decoder.decode(&commentary_delta).as_slice() {
-            [StreamEvent::TextDelta { id, channel, delta }] => {
+            [
+                StreamEvent::BlockDelta {
+                    id,
+                    kind:
+                        ModelBlockKind::Text {
+                            channel: TraceTextChannel::Commentary,
+                        },
+                    field: ModelBlockField::Text,
+                    delta,
+                    ..
+                },
+            ] => {
                 assert_eq!(id, "msg_progress");
-                assert_eq!(*channel, TraceTextChannel::Commentary);
                 assert_eq!(delta, "正在检查。");
             }
             other => panic!("unexpected events: {other:?}"),
@@ -728,15 +806,93 @@ mod tests {
         .unwrap();
         match decoder.decode(&final_done).as_slice() {
             [
-                StreamEvent::TextCompleted {
+                StreamEvent::BlockClosed {
                     id,
-                    channel,
-                    authoritative_text,
+                    kind:
+                        ModelBlockKind::Text {
+                            channel: TraceTextChannel::Final,
+                        },
+                    authoritative_content: Some(ModelBlockContent::Text(authoritative_text)),
+                    ..
                 },
             ] => {
                 assert_eq!(id, "msg_final");
-                assert_eq!(*channel, TraceTextChannel::Final);
-                assert_eq!(authoritative_text.as_deref(), Some("完成。"));
+                assert_eq!(authoritative_text, "完成。");
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn responses_decoder_tracks_reasoning_summary_lifecycle() {
+        let mut decoder = OpenAiStreamDecoder::new(true);
+        let reasoning_added: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.output_item.added",
+            "item": {
+                "id": "rs_1",
+                "type": "reasoning",
+                "summary": []
+            }
+        }))
+        .unwrap();
+        match decoder.decode(&reasoning_added).as_slice() {
+            [
+                StreamEvent::BlockOpened {
+                    id,
+                    kind: ModelBlockKind::ReasoningSummary,
+                    ..
+                },
+            ] => {
+                assert_eq!(id, "rs_1");
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+
+        let summary_delta: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.reasoning_summary_text.delta",
+            "item_id": "rs_1",
+            "summary_index": 0,
+            "delta": "先检查输入。"
+        }))
+        .unwrap();
+        match decoder.decode(&summary_delta).as_slice() {
+            [
+                StreamEvent::BlockDelta {
+                    id,
+                    kind: ModelBlockKind::ReasoningSummary,
+                    field: ModelBlockField::ReasoningSummary,
+                    section_index: Some(0),
+                    delta,
+                },
+            ] => {
+                assert_eq!(id, "rs_1");
+                assert_eq!(delta, "先检查输入。");
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+
+        let reasoning_done: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.output_item.done",
+            "item": {
+                "id": "rs_1",
+                "type": "reasoning",
+                "summary": [
+                    {"type": "summary_text", "text": "最终摘要。"}
+                ]
+            }
+        }))
+        .unwrap();
+        match decoder.decode(&reasoning_done).as_slice() {
+            [
+                StreamEvent::BlockClosed {
+                    id,
+                    kind: ModelBlockKind::ReasoningSummary,
+                    authoritative_content: Some(ModelBlockContent::ReasoningSummary(summary)),
+                    ..
+                },
+            ] => {
+                assert_eq!(id, "rs_1");
+                assert_eq!(summary, &vec!["最终摘要。".to_string()]);
             }
             other => panic!("unexpected events: {other:?}"),
         }
