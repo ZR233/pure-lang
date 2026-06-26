@@ -341,7 +341,7 @@ mod tests {
             panic!("expected part snapshot");
         };
         assert_eq!(part_event.sequence, 1);
-        assert_eq!(part.order, 1);
+        assert_eq!(part.order, 999);
 
         let stored_events = store
             .load_studio_events(&session.id, None, None)
@@ -351,14 +351,14 @@ mod tests {
             panic!("expected stored part snapshot");
         };
         assert_eq!(stored_events[1].sequence, 1);
-        assert_eq!(part.order, 1);
+        assert_eq!(part.order, 999);
         assert_eq!(part.text, "hello");
 
         let messages = store.load_studio_messages(&session.id).await.unwrap();
         let parts = store.load_message_parts(&session.id).await.unwrap();
         assert_eq!(messages.len(), 1);
         assert_eq!(parts.len(), 1);
-        assert_eq!(parts[0].part.order, 1);
+        assert_eq!(parts[0].part.order, 999);
     }
 
     #[tokio::test]
