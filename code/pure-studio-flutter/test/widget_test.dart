@@ -207,6 +207,79 @@ void main() {
     expect(state.partOverlaysBySession['session-1'], isEmpty);
   });
 
+  test('part reducers leave message snapshots untouched', () async {
+    final api = _FakeStudioApi(_emptyState());
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(studioControllerProvider.future);
+    api.emitSession(
+      _messageUpdatedEvent(
+        sessionId: 'session-1',
+        sequence: BigInt.from(3),
+        message: {
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'role': 'assistant',
+          'status': 'streaming',
+          'createdAt': 10,
+          'updatedAt': 10,
+        },
+      ),
+    );
+    await _pumpFrameBatch();
+
+    final before = container
+        .read(studioControllerProvider)
+        .requireValue
+        .messagesBySession['session-1']!
+        .single;
+
+    api.emitSession(
+      _partUpdatedEvent(
+        sessionId: 'session-1',
+        part: {
+          'partId': 'part-1',
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'partType': 'text',
+          'order': 1,
+          'revision': 0,
+          'status': 'streaming',
+          'createdAt': 20,
+          'updatedAt': 20,
+          'textChannel': 'final',
+          'text': '',
+        },
+      ),
+    );
+    api.emitSession(
+      _partDeltaEvent(
+        sessionId: 'session-1',
+        delta: {
+          'sessionId': 'session-1',
+          'messageId': 'turn-1:assistant',
+          'partId': 'part-1',
+          'revision': 1,
+          'field': 'text',
+          'delta': 'projected only',
+        },
+      ),
+    );
+    await _pumpFrameBatch();
+
+    final state = container.read(studioControllerProvider).requireValue;
+    final after = state.messagesBySession['session-1']!.single;
+    expect(identical(before, after), isTrue);
+    expect(after.sequence, 3);
+    expect(after.createdAt, DateTime.fromMillisecondsSinceEpoch(10));
+    expect(state.selectedTimelineRows.single.part!.text, 'projected only');
+  });
+
   test(
     'timeline delta revision gaps clear overlay and recover session',
     () async {
