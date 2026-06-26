@@ -55,7 +55,7 @@ extension BridgeAgentTimelinePayloadDtoPatterns on BridgeAgentTimelinePayloadDto
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeAgentTimelinePayloadDto_SpawnBegin value)?  spawnBegin,TResult Function( BridgeAgentTimelinePayloadDto_SpawnEnd value)?  spawnEnd,TResult Function( BridgeAgentTimelinePayloadDto_InteractionBegin value)?  interactionBegin,TResult Function( BridgeAgentTimelinePayloadDto_InteractionEnd value)?  interactionEnd,TResult Function( BridgeAgentTimelinePayloadDto_WaitingBegin value)?  waitingBegin,TResult Function( BridgeAgentTimelinePayloadDto_WaitingEnd value)?  waitingEnd,TResult Function( BridgeAgentTimelinePayloadDto_CloseBegin value)?  closeBegin,TResult Function( BridgeAgentTimelinePayloadDto_CloseEnd value)?  closeEnd,TResult Function( BridgeAgentTimelinePayloadDto_Unknown value)?  unknown,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeAgentTimelinePayloadDto_SpawnBegin value)?  spawnBegin,TResult Function( BridgeAgentTimelinePayloadDto_SpawnEnd value)?  spawnEnd,TResult Function( BridgeAgentTimelinePayloadDto_InteractionBegin value)?  interactionBegin,TResult Function( BridgeAgentTimelinePayloadDto_InteractionEnd value)?  interactionEnd,TResult Function( BridgeAgentTimelinePayloadDto_WaitingBegin value)?  waitingBegin,TResult Function( BridgeAgentTimelinePayloadDto_WaitingEnd value)?  waitingEnd,TResult Function( BridgeAgentTimelinePayloadDto_CloseBegin value)?  closeBegin,TResult Function( BridgeAgentTimelinePayloadDto_CloseEnd value)?  closeEnd,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case BridgeAgentTimelinePayloadDto_SpawnBegin() when spawnBegin != null:
@@ -66,8 +66,7 @@ return interactionEnd(_that);case BridgeAgentTimelinePayloadDto_WaitingBegin() w
 return waitingBegin(_that);case BridgeAgentTimelinePayloadDto_WaitingEnd() when waitingEnd != null:
 return waitingEnd(_that);case BridgeAgentTimelinePayloadDto_CloseBegin() when closeBegin != null:
 return closeBegin(_that);case BridgeAgentTimelinePayloadDto_CloseEnd() when closeEnd != null:
-return closeEnd(_that);case BridgeAgentTimelinePayloadDto_Unknown() when unknown != null:
-return unknown(_that);case _:
+return closeEnd(_that);case _:
   return orElse();
 
 }
@@ -85,7 +84,7 @@ return unknown(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeAgentTimelinePayloadDto_SpawnBegin value)  spawnBegin,required TResult Function( BridgeAgentTimelinePayloadDto_SpawnEnd value)  spawnEnd,required TResult Function( BridgeAgentTimelinePayloadDto_InteractionBegin value)  interactionBegin,required TResult Function( BridgeAgentTimelinePayloadDto_InteractionEnd value)  interactionEnd,required TResult Function( BridgeAgentTimelinePayloadDto_WaitingBegin value)  waitingBegin,required TResult Function( BridgeAgentTimelinePayloadDto_WaitingEnd value)  waitingEnd,required TResult Function( BridgeAgentTimelinePayloadDto_CloseBegin value)  closeBegin,required TResult Function( BridgeAgentTimelinePayloadDto_CloseEnd value)  closeEnd,required TResult Function( BridgeAgentTimelinePayloadDto_Unknown value)  unknown,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeAgentTimelinePayloadDto_SpawnBegin value)  spawnBegin,required TResult Function( BridgeAgentTimelinePayloadDto_SpawnEnd value)  spawnEnd,required TResult Function( BridgeAgentTimelinePayloadDto_InteractionBegin value)  interactionBegin,required TResult Function( BridgeAgentTimelinePayloadDto_InteractionEnd value)  interactionEnd,required TResult Function( BridgeAgentTimelinePayloadDto_WaitingBegin value)  waitingBegin,required TResult Function( BridgeAgentTimelinePayloadDto_WaitingEnd value)  waitingEnd,required TResult Function( BridgeAgentTimelinePayloadDto_CloseBegin value)  closeBegin,required TResult Function( BridgeAgentTimelinePayloadDto_CloseEnd value)  closeEnd,}){
 final _that = this;
 switch (_that) {
 case BridgeAgentTimelinePayloadDto_SpawnBegin():
@@ -96,8 +95,7 @@ return interactionEnd(_that);case BridgeAgentTimelinePayloadDto_WaitingBegin():
 return waitingBegin(_that);case BridgeAgentTimelinePayloadDto_WaitingEnd():
 return waitingEnd(_that);case BridgeAgentTimelinePayloadDto_CloseBegin():
 return closeBegin(_that);case BridgeAgentTimelinePayloadDto_CloseEnd():
-return closeEnd(_that);case BridgeAgentTimelinePayloadDto_Unknown():
-return unknown(_that);}
+return closeEnd(_that);}
 }
 /// A variant of `map` that fallback to returning `null`.
 ///
@@ -111,7 +109,7 @@ return unknown(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeAgentTimelinePayloadDto_SpawnBegin value)?  spawnBegin,TResult? Function( BridgeAgentTimelinePayloadDto_SpawnEnd value)?  spawnEnd,TResult? Function( BridgeAgentTimelinePayloadDto_InteractionBegin value)?  interactionBegin,TResult? Function( BridgeAgentTimelinePayloadDto_InteractionEnd value)?  interactionEnd,TResult? Function( BridgeAgentTimelinePayloadDto_WaitingBegin value)?  waitingBegin,TResult? Function( BridgeAgentTimelinePayloadDto_WaitingEnd value)?  waitingEnd,TResult? Function( BridgeAgentTimelinePayloadDto_CloseBegin value)?  closeBegin,TResult? Function( BridgeAgentTimelinePayloadDto_CloseEnd value)?  closeEnd,TResult? Function( BridgeAgentTimelinePayloadDto_Unknown value)?  unknown,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeAgentTimelinePayloadDto_SpawnBegin value)?  spawnBegin,TResult? Function( BridgeAgentTimelinePayloadDto_SpawnEnd value)?  spawnEnd,TResult? Function( BridgeAgentTimelinePayloadDto_InteractionBegin value)?  interactionBegin,TResult? Function( BridgeAgentTimelinePayloadDto_InteractionEnd value)?  interactionEnd,TResult? Function( BridgeAgentTimelinePayloadDto_WaitingBegin value)?  waitingBegin,TResult? Function( BridgeAgentTimelinePayloadDto_WaitingEnd value)?  waitingEnd,TResult? Function( BridgeAgentTimelinePayloadDto_CloseBegin value)?  closeBegin,TResult? Function( BridgeAgentTimelinePayloadDto_CloseEnd value)?  closeEnd,}){
 final _that = this;
 switch (_that) {
 case BridgeAgentTimelinePayloadDto_SpawnBegin() when spawnBegin != null:
@@ -122,8 +120,7 @@ return interactionEnd(_that);case BridgeAgentTimelinePayloadDto_WaitingBegin() w
 return waitingBegin(_that);case BridgeAgentTimelinePayloadDto_WaitingEnd() when waitingEnd != null:
 return waitingEnd(_that);case BridgeAgentTimelinePayloadDto_CloseBegin() when closeBegin != null:
 return closeBegin(_that);case BridgeAgentTimelinePayloadDto_CloseEnd() when closeEnd != null:
-return closeEnd(_that);case BridgeAgentTimelinePayloadDto_Unknown() when unknown != null:
-return unknown(_that);case _:
+return closeEnd(_that);case _:
   return null;
 
 }
@@ -140,7 +137,7 @@ return unknown(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String callId,  String senderPath,  String taskName,  String prompt,  String role,  String? model,  String? reasoningEffort)?  spawnBegin,TResult Function( String callId,  String senderPath,  String? agentId,  String? path,  String? role,  String status,  String prompt,  String? error)?  spawnEnd,TResult Function( String callId,  String senderPath,  String receiverPath,  String prompt)?  interactionBegin,TResult Function( String callId,  String senderPath,  String receiverPath,  String status,  String prompt,  String? error)?  interactionEnd,TResult Function( String callId,  String senderPath)?  waitingBegin,TResult Function( String callId,  String senderPath,  bool timedOut)?  waitingEnd,TResult Function( String callId,  String senderPath,  String receiverPath)?  closeBegin,TResult Function( String callId,  String senderPath,  String receiverPath,  String status,  String? error)?  closeEnd,TResult Function( String kindType)?  unknown,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String callId,  String senderPath,  String taskName,  String prompt,  String role,  String? model,  String? reasoningEffort)?  spawnBegin,TResult Function( String callId,  String senderPath,  String? agentId,  String? path,  String? role,  String status,  String prompt,  String? error)?  spawnEnd,TResult Function( String callId,  String senderPath,  String receiverPath,  String prompt)?  interactionBegin,TResult Function( String callId,  String senderPath,  String receiverPath,  String status,  String prompt,  String? error)?  interactionEnd,TResult Function( String callId,  String senderPath)?  waitingBegin,TResult Function( String callId,  String senderPath,  bool timedOut)?  waitingEnd,TResult Function( String callId,  String senderPath,  String receiverPath)?  closeBegin,TResult Function( String callId,  String senderPath,  String receiverPath,  String status,  String? error)?  closeEnd,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case BridgeAgentTimelinePayloadDto_SpawnBegin() when spawnBegin != null:
 return spawnBegin(_that.callId,_that.senderPath,_that.taskName,_that.prompt,_that.role,_that.model,_that.reasoningEffort);case BridgeAgentTimelinePayloadDto_SpawnEnd() when spawnEnd != null:
@@ -150,8 +147,7 @@ return interactionEnd(_that.callId,_that.senderPath,_that.receiverPath,_that.sta
 return waitingBegin(_that.callId,_that.senderPath);case BridgeAgentTimelinePayloadDto_WaitingEnd() when waitingEnd != null:
 return waitingEnd(_that.callId,_that.senderPath,_that.timedOut);case BridgeAgentTimelinePayloadDto_CloseBegin() when closeBegin != null:
 return closeBegin(_that.callId,_that.senderPath,_that.receiverPath);case BridgeAgentTimelinePayloadDto_CloseEnd() when closeEnd != null:
-return closeEnd(_that.callId,_that.senderPath,_that.receiverPath,_that.status,_that.error);case BridgeAgentTimelinePayloadDto_Unknown() when unknown != null:
-return unknown(_that.kindType);case _:
+return closeEnd(_that.callId,_that.senderPath,_that.receiverPath,_that.status,_that.error);case _:
   return orElse();
 
 }
@@ -169,7 +165,7 @@ return unknown(_that.kindType);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String callId,  String senderPath,  String taskName,  String prompt,  String role,  String? model,  String? reasoningEffort)  spawnBegin,required TResult Function( String callId,  String senderPath,  String? agentId,  String? path,  String? role,  String status,  String prompt,  String? error)  spawnEnd,required TResult Function( String callId,  String senderPath,  String receiverPath,  String prompt)  interactionBegin,required TResult Function( String callId,  String senderPath,  String receiverPath,  String status,  String prompt,  String? error)  interactionEnd,required TResult Function( String callId,  String senderPath)  waitingBegin,required TResult Function( String callId,  String senderPath,  bool timedOut)  waitingEnd,required TResult Function( String callId,  String senderPath,  String receiverPath)  closeBegin,required TResult Function( String callId,  String senderPath,  String receiverPath,  String status,  String? error)  closeEnd,required TResult Function( String kindType)  unknown,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String callId,  String senderPath,  String taskName,  String prompt,  String role,  String? model,  String? reasoningEffort)  spawnBegin,required TResult Function( String callId,  String senderPath,  String? agentId,  String? path,  String? role,  String status,  String prompt,  String? error)  spawnEnd,required TResult Function( String callId,  String senderPath,  String receiverPath,  String prompt)  interactionBegin,required TResult Function( String callId,  String senderPath,  String receiverPath,  String status,  String prompt,  String? error)  interactionEnd,required TResult Function( String callId,  String senderPath)  waitingBegin,required TResult Function( String callId,  String senderPath,  bool timedOut)  waitingEnd,required TResult Function( String callId,  String senderPath,  String receiverPath)  closeBegin,required TResult Function( String callId,  String senderPath,  String receiverPath,  String status,  String? error)  closeEnd,}) {final _that = this;
 switch (_that) {
 case BridgeAgentTimelinePayloadDto_SpawnBegin():
 return spawnBegin(_that.callId,_that.senderPath,_that.taskName,_that.prompt,_that.role,_that.model,_that.reasoningEffort);case BridgeAgentTimelinePayloadDto_SpawnEnd():
@@ -179,8 +175,7 @@ return interactionEnd(_that.callId,_that.senderPath,_that.receiverPath,_that.sta
 return waitingBegin(_that.callId,_that.senderPath);case BridgeAgentTimelinePayloadDto_WaitingEnd():
 return waitingEnd(_that.callId,_that.senderPath,_that.timedOut);case BridgeAgentTimelinePayloadDto_CloseBegin():
 return closeBegin(_that.callId,_that.senderPath,_that.receiverPath);case BridgeAgentTimelinePayloadDto_CloseEnd():
-return closeEnd(_that.callId,_that.senderPath,_that.receiverPath,_that.status,_that.error);case BridgeAgentTimelinePayloadDto_Unknown():
-return unknown(_that.kindType);}
+return closeEnd(_that.callId,_that.senderPath,_that.receiverPath,_that.status,_that.error);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -194,7 +189,7 @@ return unknown(_that.kindType);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String callId,  String senderPath,  String taskName,  String prompt,  String role,  String? model,  String? reasoningEffort)?  spawnBegin,TResult? Function( String callId,  String senderPath,  String? agentId,  String? path,  String? role,  String status,  String prompt,  String? error)?  spawnEnd,TResult? Function( String callId,  String senderPath,  String receiverPath,  String prompt)?  interactionBegin,TResult? Function( String callId,  String senderPath,  String receiverPath,  String status,  String prompt,  String? error)?  interactionEnd,TResult? Function( String callId,  String senderPath)?  waitingBegin,TResult? Function( String callId,  String senderPath,  bool timedOut)?  waitingEnd,TResult? Function( String callId,  String senderPath,  String receiverPath)?  closeBegin,TResult? Function( String callId,  String senderPath,  String receiverPath,  String status,  String? error)?  closeEnd,TResult? Function( String kindType)?  unknown,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String callId,  String senderPath,  String taskName,  String prompt,  String role,  String? model,  String? reasoningEffort)?  spawnBegin,TResult? Function( String callId,  String senderPath,  String? agentId,  String? path,  String? role,  String status,  String prompt,  String? error)?  spawnEnd,TResult? Function( String callId,  String senderPath,  String receiverPath,  String prompt)?  interactionBegin,TResult? Function( String callId,  String senderPath,  String receiverPath,  String status,  String prompt,  String? error)?  interactionEnd,TResult? Function( String callId,  String senderPath)?  waitingBegin,TResult? Function( String callId,  String senderPath,  bool timedOut)?  waitingEnd,TResult? Function( String callId,  String senderPath,  String receiverPath)?  closeBegin,TResult? Function( String callId,  String senderPath,  String receiverPath,  String status,  String? error)?  closeEnd,}) {final _that = this;
 switch (_that) {
 case BridgeAgentTimelinePayloadDto_SpawnBegin() when spawnBegin != null:
 return spawnBegin(_that.callId,_that.senderPath,_that.taskName,_that.prompt,_that.role,_that.model,_that.reasoningEffort);case BridgeAgentTimelinePayloadDto_SpawnEnd() when spawnEnd != null:
@@ -204,8 +199,7 @@ return interactionEnd(_that.callId,_that.senderPath,_that.receiverPath,_that.sta
 return waitingBegin(_that.callId,_that.senderPath);case BridgeAgentTimelinePayloadDto_WaitingEnd() when waitingEnd != null:
 return waitingEnd(_that.callId,_that.senderPath,_that.timedOut);case BridgeAgentTimelinePayloadDto_CloseBegin() when closeBegin != null:
 return closeBegin(_that.callId,_that.senderPath,_that.receiverPath);case BridgeAgentTimelinePayloadDto_CloseEnd() when closeEnd != null:
-return closeEnd(_that.callId,_that.senderPath,_that.receiverPath,_that.status,_that.error);case BridgeAgentTimelinePayloadDto_Unknown() when unknown != null:
-return unknown(_that.kindType);case _:
+return closeEnd(_that.callId,_that.senderPath,_that.receiverPath,_that.status,_that.error);case _:
   return null;
 
 }
@@ -804,70 +798,6 @@ as String?,
 /// @nodoc
 
 
-class BridgeAgentTimelinePayloadDto_Unknown extends BridgeAgentTimelinePayloadDto {
-  const BridgeAgentTimelinePayloadDto_Unknown({required this.kindType}): super._();
-
-
- final  String kindType;
-
-/// Create a copy of BridgeAgentTimelinePayloadDto
-/// with the given fields replaced by the non-null parameter values.
-@JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgeAgentTimelinePayloadDto_UnknownCopyWith<BridgeAgentTimelinePayloadDto_Unknown> get copyWith => _$BridgeAgentTimelinePayloadDto_UnknownCopyWithImpl<BridgeAgentTimelinePayloadDto_Unknown>(this, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentTimelinePayloadDto_Unknown&&(identical(other.kindType, kindType) || other.kindType == kindType));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,kindType);
-
-@override
-String toString() {
-  return 'BridgeAgentTimelinePayloadDto.unknown(kindType: $kindType)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgeAgentTimelinePayloadDto_UnknownCopyWith<$Res> implements $BridgeAgentTimelinePayloadDtoCopyWith<$Res> {
-  factory $BridgeAgentTimelinePayloadDto_UnknownCopyWith(BridgeAgentTimelinePayloadDto_Unknown value, $Res Function(BridgeAgentTimelinePayloadDto_Unknown) _then) = _$BridgeAgentTimelinePayloadDto_UnknownCopyWithImpl;
-@useResult
-$Res call({
- String kindType
-});
-
-
-
-
-}
-/// @nodoc
-class _$BridgeAgentTimelinePayloadDto_UnknownCopyWithImpl<$Res>
-    implements $BridgeAgentTimelinePayloadDto_UnknownCopyWith<$Res> {
-  _$BridgeAgentTimelinePayloadDto_UnknownCopyWithImpl(this._self, this._then);
-
-  final BridgeAgentTimelinePayloadDto_Unknown _self;
-  final $Res Function(BridgeAgentTimelinePayloadDto_Unknown) _then;
-
-/// Create a copy of BridgeAgentTimelinePayloadDto
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? kindType = null,}) {
-  return _then(BridgeAgentTimelinePayloadDto_Unknown(
-kindType: null == kindType ? _self.kindType : kindType // ignore: cast_nullable_to_non_nullable
-as String,
-  ));
-}
-
-
-}
-
-/// @nodoc
 mixin _$BridgeEventPayload {
 
 

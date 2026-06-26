@@ -74,7 +74,7 @@ FRB JSON bootstrap 与 `load_session_state` 解包时只能写入 message snapsh
 
 Flutter timeline 协议解析必须严格处理枚举值。未知 `partType` 或非空未知 `textChannel` 是协议错误，应直接抛出并暴露给调用方；不得默认降级为 `text` 或 `final`，避免新协议字段被旧 UI 错误展示。
 
-Flutter bridge event 协议解析同样必须严格处理事件类型。实时 stream 使用 FRB `BridgeEventPayload` sealed union；未知或不允许进入 Flutter 的事件是协议错误，应在 FRB/JSON 入口抛出。FRB adapter 必须把事件归一为 typed app `StudioBridgeEventPayload` 后交给 reducer，reducer 不得读取 `payloadJson`/Map 或用 `_ => current` 静默忽略未知事件。`sessionHandoffChanged` 不再作为前端 bridge event 兼容入口；旧 handoff 数据只能通过历史会话列表/查询视图体现，不参与实时 reducer。
+Flutter bridge event 协议解析同样必须严格处理事件类型。实时 stream 使用 FRB `BridgeEventPayload` sealed union；未知或不允许进入 Flutter 的事件是协议错误，应在 FRB/JSON 入口抛出。FRB adapter 必须把事件归一为 typed app `StudioBridgeEventPayload` 后交给 reducer，reducer 不得读取 `payloadJson`/Map 或用 `_ => current` 静默忽略未知事件。`AgentTimelineChanged` 进入 Flutter domain 后也必须保持 typed payload，不得用 string kind + `Map<String, Object?>` 作为 reducer 协议；桥接层如果遇到未知 agent timeline payload，应抛出协议错误而不是生成 generic activity row。`sessionHandoffChanged` 不再作为前端 bridge event 兼容入口；旧 handoff 数据只能通过历史会话列表/查询视图体现，不参与实时 reducer。
 
 `StudioPartType::Turn` 与 `StudioPartType::Inference` 是后端 trace lifecycle synthetic part，只用于恢复 turn/inference 状态与诊断，不是 Studio timeline 可渲染 row。Flutter adapter 在 typed FRB 边界必须过滤历史 snapshot 中的这两类 part，并把实时 `messagePartUpdated` 中的这两类 part 归一为 no-op；其他未知 `partType` 仍应抛出协议错误。
 

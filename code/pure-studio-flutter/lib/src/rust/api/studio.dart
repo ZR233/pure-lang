@@ -345,9 +345,6 @@ sealed class BridgeAgentTimelinePayloadDto
     required String status,
     String? error,
   }) = BridgeAgentTimelinePayloadDto_CloseEnd;
-  const factory BridgeAgentTimelinePayloadDto.unknown({
-    required String kindType,
-  }) = BridgeAgentTimelinePayloadDto_Unknown;
 }
 
 class BridgeEventEnvelope {

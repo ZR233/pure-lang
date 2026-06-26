@@ -1273,12 +1273,6 @@ impl SseDecode for crate::api::studio::BridgeAgentTimelinePayloadDto {
                     error: var_error,
                 };
             }
-            8 => {
-                let mut var_kindType = <String>::sse_decode(deserializer);
-                return crate::api::studio::BridgeAgentTimelinePayloadDto::Unknown {
-                    kind_type: var_kindType,
-                };
-            }
             _ => {
                 unimplemented!("");
             }
@@ -2975,9 +2969,6 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::BridgeAgentTimelinePa
                 error.into_into_dart().into_dart(),
             ]
             .into_dart(),
-            crate::api::studio::BridgeAgentTimelinePayloadDto::Unknown { kind_type } => {
-                [8.into_dart(), kind_type.into_into_dart().into_dart()].into_dart()
-            }
             _ => {
                 unimplemented!("");
             }
@@ -4297,10 +4288,6 @@ impl SseEncode for crate::api::studio::BridgeAgentTimelinePayloadDto {
                 <String>::sse_encode(receiver_path, serializer);
                 <String>::sse_encode(status, serializer);
                 <Option<String>>::sse_encode(error, serializer);
-            }
-            crate::api::studio::BridgeAgentTimelinePayloadDto::Unknown { kind_type } => {
-                <i32>::sse_encode(8, serializer);
-                <String>::sse_encode(kind_type, serializer);
             }
             _ => {
                 unimplemented!("");

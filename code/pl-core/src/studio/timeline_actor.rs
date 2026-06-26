@@ -8,6 +8,8 @@ use super::records::StudioPartRecord;
 #[derive(Default)]
 pub(super) struct TurnTimelineActor {
     part_revisions: HashMap<String, u64>,
+    part_orders: HashMap<String, u64>,
+    next_orders_by_message: HashMap<String, u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,14 +20,33 @@ pub(super) enum TimelineDeltaDecision {
 
 impl TurnTimelineActor {
     pub(super) fn prepare_snapshot_order(
-        &self,
+        &mut self,
         part: &mut StudioPart,
         existing: Option<&StudioPartRecord>,
-        next_order: u64,
+        durable_next_order: u64,
     ) {
-        part.order = existing
-            .map(|record| record.part.order)
-            .unwrap_or(next_order);
+        if let Some(existing) = existing {
+            let order = existing.part.order;
+            part.order = order;
+            self.part_orders.insert(part.part_id.clone(), order);
+            self.seed_next_order(&part.message_id, durable_next_order.max(order + 1));
+            return;
+        }
+
+        if let Some(order) = self.part_orders.get(&part.part_id).copied() {
+            part.order = order;
+            self.seed_next_order(&part.message_id, durable_next_order);
+            return;
+        }
+
+        let next_order = self
+            .next_orders_by_message
+            .entry(part.message_id.clone())
+            .and_modify(|order| *order = (*order).max(durable_next_order))
+            .or_insert(durable_next_order);
+        part.order = *next_order;
+        *next_order += 1;
+        self.part_orders.insert(part.part_id.clone(), part.order);
     }
 
     pub(super) fn prepare_snapshot(&mut self, part: &mut StudioPart) {
@@ -74,6 +95,13 @@ impl TurnTimelineActor {
         } else {
             TimelineDeltaDecision::Stale
         }
+    }
+
+    fn seed_next_order(&mut self, message_id: &str, minimum_next_order: u64) {
+        self.next_orders_by_message
+            .entry(message_id.to_string())
+            .and_modify(|order| *order = (*order).max(minimum_next_order))
+            .or_insert(minimum_next_order);
     }
 }
 
@@ -138,7 +166,7 @@ mod tests {
 
     #[test]
     fn snapshot_order_uses_existing_part_or_next_message_order() {
-        let actor = TurnTimelineActor::default();
+        let mut actor = TurnTimelineActor::default();
         let existing = StudioPartRecord {
             part: {
                 let mut part = part("part-1", StudioPartStatus::Streaming, 0);
@@ -154,6 +182,34 @@ mod tests {
         let mut new_part = part("part-2", StudioPartStatus::Started, 0);
         actor.prepare_snapshot_order(&mut new_part, None, 42);
         assert_eq!(new_part.order, 42);
+    }
+
+    #[test]
+    fn snapshot_order_allocates_unique_orders_inside_message_scope() {
+        let mut actor = TurnTimelineActor::default();
+        let mut first = part("part-1", StudioPartStatus::Started, 0);
+        let mut second = part("part-2", StudioPartStatus::Started, 0);
+        let mut third = part("part-3", StudioPartStatus::Started, 0);
+
+        actor.prepare_snapshot_order(&mut first, None, 5);
+        actor.prepare_snapshot_order(&mut second, None, 5);
+        actor.prepare_snapshot_order(&mut third, None, 10);
+
+        assert_eq!(first.order, 5);
+        assert_eq!(second.order, 6);
+        assert_eq!(third.order, 10);
+    }
+
+    #[test]
+    fn snapshot_order_reuses_live_allocation_for_repeated_part() {
+        let mut actor = TurnTimelineActor::default();
+        let mut first = part("part-1", StudioPartStatus::Started, 0);
+        actor.prepare_snapshot_order(&mut first, None, 7);
+
+        let mut repeat = part("part-1", StudioPartStatus::Streaming, 1);
+        actor.prepare_snapshot_order(&mut repeat, None, 7);
+
+        assert_eq!(repeat.order, 7);
     }
 
     #[test]
