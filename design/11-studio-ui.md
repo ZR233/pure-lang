@@ -66,6 +66,8 @@ Flutter reducer 必须按 `sessionId` 过滤实时事件，旧 session stream �
 
 Flutter store 中的 message snapshot、part snapshot、live overlay 与 agent timeline event 是 timeline 的事实源。`TimelineMessage` 是纯 message snapshot，不携带 `parts` 字段；可渲染 `TimelinePart` 只存在于 `TimelineRow` projection/view model 中，reducer 不得把 overlay 后的 `TimelinePart` 再写回 message snapshot，避免 snapshot state 与 projected part 双写不一致。`timelineRowsProvider` 必须按 message `sequence -> createdAt -> id`、part `order -> sequence -> id` 从 `messagesBySession + partSnapshotsBySession + partOverlaysBySession` 派生可渲染 row；`agentTimelineEventsBySession` 按 `callId` 合并 begin/end 后投影为独立 `AgentActivity` row，不写入 `messagesBySession`，也不伪造 message/part identity。
 
+Part snapshot、part delta、part removal 的 reducer 路径只能写 `partSnapshotsBySession` 与 `partOverlaysBySession`；不得把当前 message list 作为可写参数传入 part reducer，也不得因为 part 更新重排或重写 `messagesBySession`。message list 只由 message snapshot、message removal 和 session snapshot 初始化维护。
+
 FRB JSON bootstrap 与 `load_session_state` 解包时只能写入 message snapshot 表和 part snapshot 表，不能为了方便 UI 渲染把 `timelinePartFromSnapshot` 的结果写回 message snapshot。刷新、重载和实时流必须通过同一个 selector 得到一致的 projected rows。
 
 样例数据、demo API 和测试 fixture 也必须使用 message snapshot + part snapshot 表，或显式的 row projection helper，表达 timeline；不能绕过 selector 在持久 message 上挂载 parts。

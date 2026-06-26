@@ -814,13 +814,7 @@ class StudioController extends AsyncNotifier<StudioState> {
     if (messageIndex < 0) {
       return current;
     }
-    return _withTimelineState(
-      current,
-      sessionId,
-      messages,
-      snapshots,
-      overlays,
-    );
+    return _withPartState(current, sessionId, snapshots, overlays);
   }
 
   StudioState _appendPartDelta(StudioState current, TimelinePartDelta delta) {
@@ -849,10 +843,9 @@ class StudioController extends AsyncNotifier<StudioState> {
         ...(current.partOverlaysBySession[delta.sessionId] ?? const {}),
       }..remove(delta.partId);
       unawaited(_recoverStaleSession(delta.sessionId));
-      return _withTimelineState(
+      return _withPartState(
         current,
         delta.sessionId,
-        _messagesFor(current, delta.sessionId),
         current.partSnapshotsBySession[delta.sessionId] ?? const {},
         overlays,
       );
@@ -876,10 +869,9 @@ class StudioController extends AsyncNotifier<StudioState> {
       ...(current.partOverlaysBySession[delta.sessionId] ?? const {}),
       delta.partId: nextOverlay,
     };
-    return _withTimelineState(
+    return _withPartState(
       current,
       delta.sessionId,
-      _messagesFor(current, delta.sessionId),
       current.partSnapshotsBySession[delta.sessionId] ?? const {},
       overlays,
     );
@@ -902,7 +894,7 @@ class StudioController extends AsyncNotifier<StudioState> {
     }..removeWhere((_, part) => part.messageId == messageId);
     final overlays = {...(current.partOverlaysBySession[sessionId] ?? const {})}
       ..removeWhere((partId, _) => !snapshots.containsKey(partId));
-    return _withTimelineState(
+    return _withMessageAndPartState(
       current,
       sessionId,
       messages,
@@ -923,19 +915,12 @@ class StudioController extends AsyncNotifier<StudioState> {
         partId.isEmpty) {
       return current;
     }
-    final messages = _messagesFor(current, sessionId);
     final snapshots = {
       ...(current.partSnapshotsBySession[sessionId] ?? const {}),
     }..remove(partId);
     final overlays = {...(current.partOverlaysBySession[sessionId] ?? const {})}
       ..remove(partId);
-    return _withTimelineState(
-      current,
-      sessionId,
-      messages,
-      snapshots,
-      overlays,
-    );
+    return _withPartState(current, sessionId, snapshots, overlays);
   }
 
   StudioState _applyAgentChanged(StudioState current, StudioAgentView agent) {
@@ -1051,19 +1036,13 @@ class StudioController extends AsyncNotifier<StudioState> {
     return state.copyWith(messagesBySession: bySession);
   }
 
-  StudioState _withTimelineState(
+  StudioState _withPartState(
     StudioState state,
     String sessionId,
-    List<TimelineMessage> messages,
     Map<String, TimelinePartSnapshot> snapshots,
     Map<String, TimelinePartOverlay> overlays,
   ) {
-    final bySession = Map<String, List<TimelineMessage>>.from(
-      state.messagesBySession,
-    );
-    bySession[sessionId] = messages;
     return state.copyWith(
-      messagesBySession: bySession,
       partSnapshotsBySession: {
         ...state.partSnapshotsBySession,
         sessionId: snapshots,
@@ -1073,6 +1052,17 @@ class StudioController extends AsyncNotifier<StudioState> {
         sessionId: overlays,
       },
     );
+  }
+
+  StudioState _withMessageAndPartState(
+    StudioState state,
+    String sessionId,
+    List<TimelineMessage> messages,
+    Map<String, TimelinePartSnapshot> snapshots,
+    Map<String, TimelinePartOverlay> overlays,
+  ) {
+    final withMessages = _withMessages(state, sessionId, messages);
+    return _withPartState(withMessages, sessionId, snapshots, overlays);
   }
 
   StudioState _withAgentTimelineEvent(
