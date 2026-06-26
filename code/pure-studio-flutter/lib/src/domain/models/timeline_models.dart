@@ -252,6 +252,7 @@ TimelinePart timelinePartFromSnapshot(
       snapshot.agent?.summary ?? snapshot.agent?.task ?? text,
     TimelinePartType.reasoning => '',
     TimelinePartType.text => text,
+    TimelinePartType.turn || TimelinePartType.inference => '',
   };
   return TimelinePart(
     id: snapshot.id,
@@ -279,6 +280,8 @@ String _partTitleFromSnapshot(TimelinePartSnapshot snapshot) {
     TimelinePartType.agent => snapshot.agent?.role ?? 'Agent',
     TimelinePartType.reasoning => 'Reasoning',
     TimelinePartType.text => '',
+    TimelinePartType.turn => 'Turn',
+    TimelinePartType.inference => 'Inference',
   };
 }
 
@@ -437,7 +440,9 @@ List<TimelineRow> timelineRowsFromMessages(
   final sortedMessages = [...messagesById.values]..sort(_compareMessages);
   final partsByMessage = <String, List<TimelinePart>>{};
   for (final part in parts) {
-    if (!messagesById.containsKey(part.messageId)) {
+    if (!messagesById.containsKey(part.messageId) ||
+        part.ignored ||
+        isInternalTimelinePartType(part.type)) {
       continue;
     }
     partsByMessage.putIfAbsent(part.messageId, () => []).add(part);
@@ -557,6 +562,8 @@ TimelineRowType _timelineRowType(TimelineMessage message, TimelinePart part) {
       TimelineTextChannel.user => TimelineRowType.userMessage,
       TimelineTextChannel.finalAnswer || null => TimelineRowType.finalAnswer,
     },
+    TimelinePartType.turn ||
+    TimelinePartType.inference => TimelineRowType.toolActivity,
   };
 }
 

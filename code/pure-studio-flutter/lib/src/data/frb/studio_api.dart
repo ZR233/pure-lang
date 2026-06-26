@@ -626,7 +626,10 @@ String _frbPartText(frb.BridgeStudioPartDto part) {
     ].whereType<String>().where((value) => value.isNotEmpty).join('\n'),
     TimelinePartType.plan => part.plan?.content ?? '',
     TimelinePartType.agent => part.agent?.summary ?? part.agent?.task ?? '',
-    TimelinePartType.reasoning || TimelinePartType.text => '',
+    TimelinePartType.reasoning ||
+    TimelinePartType.text ||
+    TimelinePartType.turn ||
+    TimelinePartType.inference => '',
   };
 }
 
@@ -1573,7 +1576,11 @@ _TimelineLoadResult _timelineFromJson(
       partJson,
       sequence: _int(wrapper['sequence']),
     );
-    if (part.id.isEmpty || part.messageId.isEmpty || part.sessionId.isEmpty) {
+    if (part.id.isEmpty ||
+        part.messageId.isEmpty ||
+        part.sessionId.isEmpty ||
+        part.ignored ||
+        isInternalTimelinePartType(part.type)) {
       continue;
     }
     snapshotsBySession.putIfAbsent(part.sessionId, () => {})[part.id] = part;
@@ -1916,7 +1923,10 @@ String _partText(Map<String, Object?> json, TimelinePartType type) {
       _map(json['agent'])['summary'],
       fallback: _string(_map(json['agent'])['task']),
     ),
-    TimelinePartType.reasoning || TimelinePartType.text => '',
+    TimelinePartType.reasoning ||
+    TimelinePartType.text ||
+    TimelinePartType.turn ||
+    TimelinePartType.inference => '',
   };
 }
 
@@ -2001,12 +2011,14 @@ TimelinePartType _partType(String value) {
     'tool' => TimelinePartType.tool,
     'plan' => TimelinePartType.plan,
     'agent' => TimelinePartType.agent,
+    'turn' => TimelinePartType.turn,
+    'inference' => TimelinePartType.inference,
     _ => throw FormatException('Unknown timeline part type: $value'),
   };
 }
 
 bool _isIgnoredTimelinePartType(String value) {
-  return value == 'turn' || value == 'inference';
+  return isInternalTimelinePartType(_partType(value));
 }
 
 CompileMode _compileMode(Object? value) {
