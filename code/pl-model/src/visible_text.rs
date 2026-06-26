@@ -3,6 +3,7 @@ const COMMENTARY_CLOSE_TAG: &str = "</commentary>";
 const FINAL_OPEN_TAG: &str = "<final>";
 const FINAL_CLOSE_TAG: &str = "</final>";
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VisibleTextSegment {
     Untagged(String),
@@ -10,9 +11,38 @@ pub enum VisibleTextSegment {
     Final(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisibleTextKind {
+    Commentary,
+    Final,
+}
+
+impl VisibleTextKind {
+    pub fn channel_label(self) -> &'static str {
+        match self {
+            Self::Commentary => "commentary",
+            Self::Final => "final",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VisibleTextEvent {
+    Untagged(String),
+    Open(VisibleTextKind),
+    Delta(VisibleTextKind, String),
+    Close(VisibleTextKind),
+}
+
+#[cfg(test)]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct VisibleTextChunk {
     pub segments: Vec<VisibleTextSegment>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VisibleTextEventChunk {
+    pub events: Vec<VisibleTextEvent>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +59,14 @@ impl ActiveTag {
         }
     }
 
+    fn kind(self) -> VisibleTextKind {
+        match self {
+            Self::Commentary => VisibleTextKind::Commentary,
+            Self::Final => VisibleTextKind::Final,
+        }
+    }
+
+    #[cfg(test)]
     fn segment(self, text: String) -> VisibleTextSegment {
         match self {
             Self::Commentary => VisibleTextSegment::Commentary(text),
@@ -63,15 +101,27 @@ impl VisibleTextParser {
         }
     }
 
+    #[cfg(test)]
     pub fn push_str(&mut self, chunk: &str) -> VisibleTextChunk {
         self.pending.push_str(chunk);
         self.drain_pending(false)
     }
 
+    #[cfg(test)]
     pub fn finish(&mut self) -> VisibleTextChunk {
         self.drain_pending(true)
     }
 
+    pub fn push_events(&mut self, chunk: &str) -> VisibleTextEventChunk {
+        self.pending.push_str(chunk);
+        self.drain_pending_events(false)
+    }
+
+    pub fn finish_events(&mut self) -> VisibleTextEventChunk {
+        self.drain_pending_events(true)
+    }
+
+    #[cfg(test)]
     fn drain_pending(&mut self, finish: bool) -> VisibleTextChunk {
         let mut segments = Vec::new();
         loop {
@@ -146,6 +196,92 @@ impl VisibleTextParser {
         VisibleTextChunk { segments }
     }
 
+    fn drain_pending_events(&mut self, finish: bool) -> VisibleTextEventChunk {
+        let mut events = Vec::new();
+        loop {
+            if let Some(active_tag) = self.active_tag {
+                let close_tag = active_tag.close_tag();
+                match self.pending.find(close_tag) {
+                    Some(index) => {
+                        if index > 0 {
+                            events.push(VisibleTextEvent::Delta(
+                                active_tag.kind(),
+                                self.pending[..index].to_string(),
+                            ));
+                        }
+                        self.pending.drain(..index + close_tag.len());
+                        self.active_tag = None;
+                        events.push(VisibleTextEvent::Close(active_tag.kind()));
+                    }
+                    None => {
+                        let keep = if finish {
+                            0
+                        } else {
+                            suffix_prefix_len(&self.pending, close_tag)
+                        };
+                        let emit_len = self.pending.len().saturating_sub(keep);
+                        if emit_len > 0 {
+                            events.push(VisibleTextEvent::Delta(
+                                active_tag.kind(),
+                                self.pending[..emit_len].to_string(),
+                            ));
+                            self.pending.drain(..emit_len);
+                        }
+                        if finish {
+                            if !self.pending.is_empty() {
+                                events.push(VisibleTextEvent::Delta(
+                                    active_tag.kind(),
+                                    self.pending.clone(),
+                                ));
+                                self.pending.clear();
+                            }
+                            self.active_tag = None;
+                            events.push(VisibleTextEvent::Close(active_tag.kind()));
+                        }
+                        break;
+                    }
+                }
+            } else {
+                let open_tags = self.open_tags();
+                match earliest_open_tag(&self.pending, &open_tags) {
+                    Some((index, open_tag)) => {
+                        if index > 0 {
+                            events.push(VisibleTextEvent::Untagged(
+                                self.pending[..index].to_string(),
+                            ));
+                        }
+                        self.pending.drain(..index + open_tag.text.len());
+                        self.active_tag = Some(open_tag.tag);
+                        events.push(VisibleTextEvent::Open(open_tag.tag.kind()));
+                    }
+                    None => {
+                        let keep = if finish {
+                            0
+                        } else {
+                            max_suffix_prefix_len(
+                                &self.pending,
+                                open_tags.iter().map(|tag| tag.text),
+                            )
+                        };
+                        let emit_len = self.pending.len().saturating_sub(keep);
+                        if emit_len > 0 {
+                            events.push(VisibleTextEvent::Untagged(
+                                self.pending[..emit_len].to_string(),
+                            ));
+                            self.pending.drain(..emit_len);
+                        }
+                        if finish && !self.pending.is_empty() {
+                            events.push(VisibleTextEvent::Untagged(self.pending.clone()));
+                            self.pending.clear();
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        VisibleTextEventChunk { events }
+    }
+
     fn open_tags(&self) -> Vec<OpenTag> {
         vec![
             OpenTag {
@@ -188,7 +324,7 @@ fn suffix_prefix_len(text: &str, pattern: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{VisibleTextParser, VisibleTextSegment};
+    use super::{VisibleTextEvent, VisibleTextKind, VisibleTextParser, VisibleTextSegment};
     use pretty_assertions::assert_eq;
 
     fn collect(chunks: &[&str]) -> Vec<VisibleTextSegment> {
@@ -199,6 +335,16 @@ mod tests {
         }
         segments.extend(parser.finish().segments);
         segments
+    }
+
+    fn collect_events(chunks: &[&str]) -> Vec<VisibleTextEvent> {
+        let mut parser = VisibleTextParser::new();
+        let mut events = Vec::new();
+        for chunk in chunks {
+            events.extend(parser.push_events(chunk).events);
+        }
+        events.extend(parser.finish_events().events);
+        events
     }
 
     #[test]
@@ -238,6 +384,28 @@ mod tests {
         assert_eq!(
             collect(&["<final>done"]),
             vec![VisibleTextSegment::Final("done".to_string())]
+        );
+    }
+
+    #[test]
+    fn event_parser_emits_open_delta_close_for_repeated_tags() {
+        assert_eq!(
+            collect_events(&[
+                "<commentary>A</commentary><comm",
+                "entary>B</commentary>",
+                "<final>C"
+            ]),
+            vec![
+                VisibleTextEvent::Open(VisibleTextKind::Commentary),
+                VisibleTextEvent::Delta(VisibleTextKind::Commentary, "A".to_string()),
+                VisibleTextEvent::Close(VisibleTextKind::Commentary),
+                VisibleTextEvent::Open(VisibleTextKind::Commentary),
+                VisibleTextEvent::Delta(VisibleTextKind::Commentary, "B".to_string()),
+                VisibleTextEvent::Close(VisibleTextKind::Commentary),
+                VisibleTextEvent::Open(VisibleTextKind::Final),
+                VisibleTextEvent::Delta(VisibleTextKind::Final, "C".to_string()),
+                VisibleTextEvent::Close(VisibleTextKind::Final),
+            ]
         );
     }
 
