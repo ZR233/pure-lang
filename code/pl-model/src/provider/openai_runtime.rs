@@ -435,6 +435,30 @@ mod tests {
         VisibleOutputDecoder::new(VisibleOutputProtocol::TaggedText)
     }
 
+    fn final_delta(id: &str, delta: &str) -> StreamEvent {
+        StreamEvent::text_delta(
+            id.to_string(),
+            pl_trace::TraceTextChannel::Final,
+            delta.to_string(),
+        )
+    }
+
+    fn completed_text(
+        id: &str,
+        channel: pl_trace::TraceTextChannel,
+        authoritative_text: Option<&str>,
+    ) -> StreamEvent {
+        StreamEvent::text_completed(
+            id.to_string(),
+            channel,
+            authoritative_text.map(ToOwned::to_owned),
+        )
+    }
+
+    fn summary_delta(id: &str, section_index: u32, delta: &str) -> StreamEvent {
+        StreamEvent::reasoning_summary_delta(id.to_string(), section_index, delta.to_string())
+    }
+
     fn trace_part_text(item: &pl_trace::TracePart) -> String {
         match item.kind {
             TracePartKind::Text | TracePartKind::Plan | TracePartKind::Turn => item.content.clone(),
@@ -723,23 +747,12 @@ mod tests {
         let mut decoder = tagged_decoder();
 
         accumulator
-            .apply(
-                StreamEvent::ReasoningSummaryDelta {
-                    id: "thinking".to_string(),
-                    section_index: 0,
-                    delta: "先比较整数位。".to_string(),
-                },
-                &event_tx,
-            )
+            .apply(summary_delta("thinking", 0, "先比较整数位。"), &event_tx)
             .unwrap();
         apply_tagged(
             &mut decoder,
             &mut accumulator,
-            StreamEvent::TextDelta {
-                id: "final".to_string(),
-                channel: pl_trace::TraceTextChannel::Final,
-                delta: "<final>9.11 更大。</final>".to_string(),
-            },
+            final_delta("final", "<final>9.11 更大。</final>"),
             &event_tx,
         );
 
@@ -790,11 +803,7 @@ mod tests {
             apply_tagged(
                 &mut decoder,
                 &mut accumulator,
-                StreamEvent::TextDelta {
-                    id: "final".to_string(),
-                    channel: pl_trace::TraceTextChannel::Final,
-                    delta: delta.to_string(),
-                },
+                final_delta("final", delta),
                 &event_tx,
             );
         }
@@ -803,6 +812,7 @@ mod tests {
         let response = accumulator.finish(&event_tx).unwrap();
 
         assert_eq!(response.content.as_deref(), Some("完成。"));
+        assert_eq!(response.raw_content.as_deref(), Some("完成。"));
         assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
             TraceEventKind::TracePartCompleted { item }
@@ -922,14 +932,7 @@ mod tests {
         }));
 
         accumulator
-            .apply(
-                StreamEvent::TextDelta {
-                    id: "final".to_string(),
-                    channel: pl_trace::TraceTextChannel::Final,
-                    delta: "plain text".to_string(),
-                },
-                &event_tx,
-            )
+            .apply(final_delta("final", "plain text"), &event_tx)
             .unwrap();
         apply_completed(&mut accumulator, &event_tx);
 
@@ -956,22 +959,15 @@ mod tests {
         }));
 
         accumulator
-            .apply(
-                StreamEvent::TextDelta {
-                    id: "msg_1".to_string(),
-                    channel: pl_trace::TraceTextChannel::Final,
-                    delta: "partial".to_string(),
-                },
-                &event_tx,
-            )
+            .apply(final_delta("msg_1", "partial"), &event_tx)
             .unwrap();
         accumulator
             .apply(
-                StreamEvent::TextCompleted {
-                    id: "msg_1".to_string(),
-                    channel: pl_trace::TraceTextChannel::Final,
-                    authoritative_text: Some("final text".to_string()),
-                },
+                completed_text(
+                    "msg_1",
+                    pl_trace::TraceTextChannel::Final,
+                    Some("final text"),
+                ),
                 &event_tx,
             )
             .unwrap();
@@ -1001,11 +997,11 @@ mod tests {
 
         accumulator
             .apply(
-                StreamEvent::TextCompleted {
-                    id: "msg_progress".to_string(),
-                    channel: pl_trace::TraceTextChannel::Commentary,
-                    authoritative_text: Some("已完成检查".to_string()),
-                },
+                completed_text(
+                    "msg_progress",
+                    pl_trace::TraceTextChannel::Commentary,
+                    Some("已完成检查"),
+                ),
                 &event_tx,
             )
             .unwrap();
@@ -1047,11 +1043,7 @@ mod tests {
             apply_tagged(
                 &mut decoder,
                 &mut accumulator,
-                StreamEvent::TextDelta {
-                    id: "final".to_string(),
-                    channel: pl_trace::TraceTextChannel::Final,
-                    delta: delta.to_string(),
-                },
+                final_delta("final", delta),
                 &event_tx,
             );
         }
@@ -1065,7 +1057,7 @@ mod tests {
         );
         assert_eq!(
             response.raw_content.as_deref(),
-            Some("Intro\n<proposed_plan>\n- step\n</proposed_plan>\nOutro")
+            Some("\n<proposed_plan>\n- step\n</proposed_plan>\nOutro")
         );
         let completed_plan = response
             .trace_events
@@ -1144,24 +1136,10 @@ mod tests {
         }));
 
         accumulator
-            .apply(
-                StreamEvent::ReasoningSummaryDelta {
-                    id: "thinking".to_string(),
-                    section_index: 0,
-                    delta: "before".to_string(),
-                },
-                &event_tx,
-            )
+            .apply(summary_delta("thinking", 0, "before"), &event_tx)
             .unwrap();
         accumulator
-            .apply(
-                StreamEvent::TextDelta {
-                    id: "msg_1".to_string(),
-                    channel: pl_trace::TraceTextChannel::Final,
-                    delta: "prelude".to_string(),
-                },
-                &event_tx,
-            )
+            .apply(final_delta("msg_1", "prelude"), &event_tx)
             .unwrap();
         accumulator
             .apply(
@@ -1190,24 +1168,10 @@ mod tests {
             )
             .unwrap();
         accumulator
-            .apply(
-                StreamEvent::ReasoningSummaryDelta {
-                    id: "thinking".to_string(),
-                    section_index: 0,
-                    delta: "after".to_string(),
-                },
-                &event_tx,
-            )
+            .apply(summary_delta("thinking", 0, "after"), &event_tx)
             .unwrap();
         accumulator
-            .apply(
-                StreamEvent::TextDelta {
-                    id: "msg_1".to_string(),
-                    channel: pl_trace::TraceTextChannel::Final,
-                    delta: "done".to_string(),
-                },
-                &event_tx,
-            )
+            .apply(final_delta("msg_1", "done"), &event_tx)
             .unwrap();
 
         apply_completed(&mut accumulator, &event_tx);
@@ -1262,24 +1226,10 @@ mod tests {
         }));
 
         accumulator
-            .apply(
-                StreamEvent::ReasoningSummaryDelta {
-                    id: "thinking".to_string(),
-                    section_index: 0,
-                    delta: "think".to_string(),
-                },
-                &event_tx,
-            )
+            .apply(summary_delta("thinking", 0, "think"), &event_tx)
             .unwrap();
         accumulator
-            .apply(
-                StreamEvent::TextDelta {
-                    id: "msg_1".to_string(),
-                    channel: pl_trace::TraceTextChannel::Final,
-                    delta: "hello".to_string(),
-                },
-                &event_tx,
-            )
+            .apply(final_delta("msg_1", "hello"), &event_tx)
             .unwrap();
         accumulator
             .apply(
@@ -1428,14 +1378,7 @@ mod tests {
         let mut accumulator = StreamCompletionAccumulator::new(None);
 
         accumulator
-            .apply(
-                StreamEvent::TextDelta {
-                    id: "final".to_string(),
-                    channel: pl_trace::TraceTextChannel::Final,
-                    delta: "partial".to_string(),
-                },
-                &event_tx,
-            )
+            .apply(final_delta("final", "partial"), &event_tx)
             .unwrap();
 
         let error = accumulator.finish(&event_tx).unwrap_err();

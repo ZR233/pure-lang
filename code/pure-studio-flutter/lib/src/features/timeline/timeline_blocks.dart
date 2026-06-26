@@ -158,10 +158,12 @@ class _RowCard extends StatelessWidget {
         key: ValueKey(row.part!.id),
         part: row.part!,
       ),
-      TimelineRowType.agentActivity => _AgentPart(
-        key: ValueKey(row.agentEvent!.eventId),
-        event: row.agentEvent!,
-      ),
+      TimelineRowType.agentActivity => row.agentEvent == null
+          ? _AgentSnapshotPart(key: ValueKey(row.part!.id), part: row.part!)
+          : _AgentPart(
+              key: ValueKey(row.agentEvent!.eventId),
+              event: row.agentEvent!,
+            ),
     };
   }
 }
@@ -360,6 +362,27 @@ class _AgentPart extends StatelessWidget {
       'agentTimeline.agent' => context.l10n.timelineAgentFallback,
       _ => title,
     };
+  }
+}
+
+class _AgentSnapshotPart extends StatelessWidget {
+  const _AgentSnapshotPart({required this.part, super.key});
+
+  final TimelinePart part;
+
+  @override
+  Widget build(BuildContext context) {
+    final agent = part.agent;
+    return _TimelinePanel(
+      child: _TimelineMetaRow(
+        icon: Icons.account_tree_outlined,
+        title: agent?.role.isNotEmpty == true
+            ? agent!.role
+            : (part.title ?? context.l10n.timelineAgentFallback),
+        subtitle: part.text,
+        trailing: _StatusPill(label: part.status),
+      ),
+    );
   }
 }
 

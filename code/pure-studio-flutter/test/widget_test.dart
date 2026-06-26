@@ -793,6 +793,86 @@ void main() {
     );
   });
 
+  test('session JSON accepts legacy type and snake case timeline fields', () {
+    final state = studioStateFromSessionJson({
+      'sessionId': 'session-1',
+      'session': {
+        'id': 'session-1',
+        'projectId': 'project-1',
+        'title': 'Session',
+        'mode': 'auto',
+        'updatedAt': 1,
+      },
+      'sessions': [
+        {
+          'id': 'session-1',
+          'projectId': 'project-1',
+          'title': 'Session',
+          'mode': 'auto',
+          'updatedAt': 1,
+        },
+      ],
+      'messages': [
+        {
+          'sequence': 1,
+          'message': {
+            'messageId': 'turn-1:assistant',
+            'sessionId': 'session-1',
+            'turnId': 'turn-1',
+            'role': 'assistant',
+            'status': 'completed',
+            'createdAt': 1,
+            'updatedAt': 2,
+          },
+        },
+      ],
+      'parts': [
+        {
+          'sequence': 2,
+          'part': {
+            'id': 'turn-1',
+            'message_id': 'turn-1:assistant',
+            'session_id': 'session-1',
+            'turn_id': 'turn-1',
+            'type': 'turn',
+            'order': 0,
+            'revision': 0,
+            'status': 'completed',
+            'createdAt': 1,
+            'updatedAt': 2,
+            'text': 'turn lifecycle',
+            'synthetic': true,
+          },
+        },
+        {
+          'sequence': 3,
+          'part': {
+            'id': 'part-1',
+            'message_id': 'turn-1:assistant',
+            'session_id': 'session-1',
+            'turn_id': 'turn-1',
+            'type': 'text',
+            'order': 1,
+            'revision': 2,
+            'status': 'completed',
+            'createdAt': 1,
+            'updatedAt': 2,
+            'text_channel': 'final_answer',
+            'text': 'legacy visible answer',
+          },
+        },
+      ],
+    });
+
+    expect(state.partSnapshotsBySession['session-1']!.keys, {'part-1'});
+    final part = state.selectedTimelineRows.single.part!;
+    expect(part.textChannel, TimelineTextChannel.finalAnswer);
+    expect(part.text, 'legacy visible answer');
+    expect(part.sessionId, 'session-1');
+    expect(part.turnId, 'turn-1');
+    expect(part.revision, 2);
+  });
+
   test('timeline parser accepts file part and rejects unknown values', () {
     final base = {
       'partId': 'part-1',

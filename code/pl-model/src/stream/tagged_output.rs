@@ -2,7 +2,7 @@ use pl_trace::TraceTextChannel;
 
 use crate::visible_text::{VisibleTextEvent, VisibleTextKind, VisibleTextParser};
 
-use super::event::ModelStreamEvent;
+use super::event::{ModelBlockContent, ModelBlockKind, ModelStreamEvent};
 
 pub(crate) struct TaggedVisibleOutputAdapter {
     text_parser: VisibleTextParser,
@@ -31,14 +31,28 @@ impl TaggedVisibleOutputAdapter {
 
     pub(crate) fn adapt(&mut self, event: ModelStreamEvent) -> Vec<ModelStreamEvent> {
         match event {
-            ModelStreamEvent::TextStarted { id, channel } => {
+            ModelStreamEvent::BlockOpened {
+                id,
+                kind: ModelBlockKind::Text { channel },
+                provider_metadata,
+            } => {
                 if channel == TraceTextChannel::Final {
                     Vec::new()
                 } else {
-                    vec![ModelStreamEvent::TextStarted { id, channel }]
+                    vec![ModelStreamEvent::BlockOpened {
+                        id,
+                        kind: ModelBlockKind::Text { channel },
+                        provider_metadata,
+                    }]
                 }
             }
-            ModelStreamEvent::TextDelta { id, channel, delta } => {
+            ModelStreamEvent::BlockDelta {
+                id,
+                kind: ModelBlockKind::Text { channel },
+                field,
+                delta,
+                section_index,
+            } => {
                 if channel == TraceTextChannel::Final {
                     Self::parse_visible_events(
                         &mut self.text_parser,
@@ -48,13 +62,20 @@ impl TaggedVisibleOutputAdapter {
                         true,
                     )
                 } else {
-                    vec![ModelStreamEvent::TextDelta { id, channel, delta }]
+                    vec![ModelStreamEvent::BlockDelta {
+                        id,
+                        kind: ModelBlockKind::Text { channel },
+                        field,
+                        delta,
+                        section_index,
+                    }]
                 }
             }
-            ModelStreamEvent::TextCompleted {
+            ModelStreamEvent::BlockClosed {
                 id,
-                channel,
-                authoritative_text,
+                kind: ModelBlockKind::Text { channel },
+                authoritative_content,
+                provider_metadata,
             } => {
                 if channel == TraceTextChannel::Final {
                     let mut events = Self::finish_visible_events(
@@ -63,7 +84,7 @@ impl TaggedVisibleOutputAdapter {
                         &mut self.next_segment_ordinal,
                         true,
                     );
-                    if let Some(text) = authoritative_text {
+                    if let Some(ModelBlockContent::Text(text)) = authoritative_content {
                         events.extend(Self::authoritative_visible_events(
                             &mut self.next_segment_ordinal,
                             text,
@@ -71,14 +92,17 @@ impl TaggedVisibleOutputAdapter {
                     }
                     events
                 } else {
-                    vec![ModelStreamEvent::TextCompleted {
+                    vec![ModelStreamEvent::BlockClosed {
                         id,
-                        channel,
-                        authoritative_text,
+                        kind: ModelBlockKind::Text { channel },
+                        authoritative_content,
+                        provider_metadata,
                     }]
                 }
             }
-            ModelStreamEvent::ReasoningSummaryDelta { .. } => vec![event],
+            ModelStreamEvent::BlockOpened { .. } | ModelStreamEvent::BlockDelta { .. } => {
+                vec![event]
+            }
             ModelStreamEvent::ReasoningRawDelta {
                 id,
                 content_index,
@@ -99,10 +123,11 @@ impl TaggedVisibleOutputAdapter {
                 .chain(visible)
                 .collect()
             }
-            ModelStreamEvent::ReasoningSummaryCompleted {
+            ModelStreamEvent::BlockClosed {
                 id,
+                kind: ModelBlockKind::ReasoningSummary,
+                authoritative_content,
                 provider_metadata,
-                authoritative_summary,
             } => {
                 let visible = Self::finish_visible_events(
                     &mut self.reasoning_parser,
@@ -112,13 +137,15 @@ impl TaggedVisibleOutputAdapter {
                 );
                 visible
                     .into_iter()
-                    .chain([ModelStreamEvent::ReasoningSummaryCompleted {
+                    .chain([ModelStreamEvent::BlockClosed {
                         id,
+                        kind: ModelBlockKind::ReasoningSummary,
+                        authoritative_content,
                         provider_metadata,
-                        authoritative_summary,
                     }])
                     .collect()
             }
+            ModelStreamEvent::BlockClosed { .. } => vec![event],
             ModelStreamEvent::Completed { response_id } => self
                 .flush_all()
                 .into_iter()
@@ -215,11 +242,11 @@ impl TaggedVisibleOutputAdapter {
             })
             .collect();
         if let Some(block) = active_block.take() {
-            events.push(ModelStreamEvent::TextCompleted {
-                id: block.id,
-                channel: Self::text_channel(block.kind),
-                authoritative_text: None,
-            });
+            events.push(ModelStreamEvent::text_completed(
+                block.id,
+                Self::text_channel(block.kind),
+                None,
+            ));
         }
         events
     }
@@ -245,21 +272,18 @@ impl TaggedVisibleOutputAdapter {
             VisibleTextEvent::Open(kind) => {
                 let mut events = Vec::new();
                 if let Some(block) = active_block.take() {
-                    events.push(ModelStreamEvent::TextCompleted {
-                        id: block.id,
-                        channel: Self::text_channel(block.kind),
-                        authoritative_text: None,
-                    });
+                    events.push(ModelStreamEvent::text_completed(
+                        block.id,
+                        Self::text_channel(block.kind),
+                        None,
+                    ));
                 }
                 let id = Self::next_segment_id(next_segment_ordinal, kind);
                 *active_block = Some(TaggedBlock {
                     kind,
                     id: id.clone(),
                 });
-                events.push(ModelStreamEvent::TextStarted {
-                    id,
-                    channel: Self::text_channel(kind),
-                });
+                events.push(ModelStreamEvent::text_started(id, Self::text_channel(kind)));
                 events
             }
             VisibleTextEvent::Delta(kind, delta) => {
@@ -272,11 +296,11 @@ impl TaggedVisibleOutputAdapter {
                 let Some(block) = active_block.take() else {
                     return Vec::new();
                 };
-                vec![ModelStreamEvent::TextCompleted {
-                    id: block.id,
-                    channel: Self::text_channel(block.kind),
-                    authoritative_text: None,
-                }]
+                vec![ModelStreamEvent::text_completed(
+                    block.id,
+                    Self::text_channel(block.kind),
+                    None,
+                )]
             }
         }
     }
@@ -292,21 +316,21 @@ impl TaggedVisibleOutputAdapter {
             Some(block) if block.kind == kind => block.id.clone(),
             Some(_) => {
                 if let Some(block) = active_block.take() {
-                    events.push(ModelStreamEvent::TextCompleted {
-                        id: block.id,
-                        channel: Self::text_channel(block.kind),
-                        authoritative_text: None,
-                    });
+                    events.push(ModelStreamEvent::text_completed(
+                        block.id,
+                        Self::text_channel(block.kind),
+                        None,
+                    ));
                 }
                 let id = Self::next_segment_id(next_segment_ordinal, kind);
                 *active_block = Some(TaggedBlock {
                     kind,
                     id: id.clone(),
                 });
-                events.push(ModelStreamEvent::TextStarted {
-                    id: id.clone(),
-                    channel: Self::text_channel(kind),
-                });
+                events.push(ModelStreamEvent::text_started(
+                    id.clone(),
+                    Self::text_channel(kind),
+                ));
                 id
             }
             None => {
@@ -315,18 +339,18 @@ impl TaggedVisibleOutputAdapter {
                     kind,
                     id: id.clone(),
                 });
-                events.push(ModelStreamEvent::TextStarted {
-                    id: id.clone(),
-                    channel: Self::text_channel(kind),
-                });
+                events.push(ModelStreamEvent::text_started(
+                    id.clone(),
+                    Self::text_channel(kind),
+                ));
                 id
             }
         };
-        events.push(ModelStreamEvent::TextDelta {
+        events.push(ModelStreamEvent::text_delta(
             id,
-            channel: Self::text_channel(kind),
+            Self::text_channel(kind),
             delta,
-        });
+        ));
         events
     }
 
