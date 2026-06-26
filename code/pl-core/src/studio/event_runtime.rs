@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use anyhow::Result;
 use pl_protocol::{
     AgentStatus, InteractionChangedEvent, StudioAgentPart, StudioAgentSnapshot,
@@ -11,7 +14,7 @@ use pl_trace::{
     AgentEvent, TraceAgentPart, TraceDelta, TraceInferencePart, TracePart, TracePartDeltaEvent,
     TracePartKind, TracePartStatus, TraceTextChannel, TraceToolPart,
 };
-use tokio::sync::broadcast;
+use tokio::sync::{Mutex, broadcast};
 
 use crate::studio::ids::{new_studio_event_id, unix_seconds};
 use crate::studio::{
@@ -22,12 +25,22 @@ use crate::studio::{
 pub struct StudioEventRuntime {
     store: StudioStore,
     tx: broadcast::Sender<StudioEventEnvelope>,
+    timeline_state: Arc<Mutex<TimelineLiveState>>,
+}
+
+#[derive(Default)]
+struct TimelineLiveState {
+    part_revisions: HashMap<String, u64>,
 }
 
 impl StudioEventRuntime {
     pub fn new(store: StudioStore) -> Self {
         let (tx, _) = broadcast::channel(1024);
-        Self { store, tx }
+        Self {
+            store,
+            tx,
+            timeline_state: Arc::new(Mutex::new(TimelineLiveState::default())),
+        }
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<StudioEventEnvelope> {
@@ -216,17 +229,7 @@ impl StudioEventRuntime {
                 if trace_part_delta_is_user_text(&event) {
                     return Ok(None);
                 }
-                let turn_id = event.turn_id.clone();
-                let delta = studio_part_delta(session_id, event);
-                return self
-                    .emit_live(
-                        None,
-                        Some(session_id.to_string()),
-                        Some(turn_id),
-                        StudioEventKind::MessagePartDelta { delta },
-                    )
-                    .await
-                    .map(Some);
+                return self.emit_trace_part_delta(session_id, event).await;
             }
             AgentEvent::TracePartCompleted { item } => {
                 if trace_part_is_user_text(&item) {
@@ -368,15 +371,104 @@ impl StudioEventRuntime {
         } else {
             part.order = self.store.next_message_part_order(&part.message_id).await?;
         }
-        self.emit(
+        if is_terminal_studio_part_status(part.status)
+            && let Some(live_revision) = self.live_part_revision(&part.part_id).await
+            && part.revision < live_revision
+        {
+            part.revision = live_revision;
+        }
+        let envelope_part = part.clone();
+        let envelope = self
+            .emit(
+                None,
+                Some(session_id.to_string()),
+                Some(part.turn_id.clone()),
+                StudioEventKind::MessagePartUpdated {
+                    part: Box::new(envelope_part),
+                },
+            )
+            .await?;
+        self.record_trace_part_snapshot(&part).await;
+        Ok(envelope)
+    }
+
+    async fn emit_trace_part_delta(
+        &self,
+        session_id: &str,
+        event: TracePartDeltaEvent,
+    ) -> Result<Option<StudioEventEnvelope>> {
+        if !self.accept_trace_part_delta(session_id, &event).await? {
+            return Ok(None);
+        }
+        let turn_id = event.turn_id.clone();
+        let delta = studio_part_delta(session_id, event);
+        self.emit_live(
             None,
             Some(session_id.to_string()),
-            Some(part.turn_id.clone()),
-            StudioEventKind::MessagePartUpdated {
-                part: Box::new(part),
-            },
+            Some(turn_id),
+            StudioEventKind::MessagePartDelta { delta },
         )
         .await
+        .map(Some)
+    }
+
+    async fn accept_trace_part_delta(
+        &self,
+        session_id: &str,
+        event: &TracePartDeltaEvent,
+    ) -> Result<bool> {
+        let Some(existing) = self.store.read_message_part(&event.item_id).await? else {
+            self.emit_stale(session_id, 1).await?;
+            return Ok(false);
+        };
+        if is_terminal_studio_part_status(existing.part.status) {
+            self.emit_stale(session_id, 1).await?;
+            return Ok(false);
+        }
+        let accepted = {
+            let mut state = self.timeline_state.lock().await;
+            let current_revision = state
+                .part_revisions
+                .get(&event.item_id)
+                .copied()
+                .unwrap_or(existing.part.revision);
+            if event.revision == current_revision + 1 {
+                state
+                    .part_revisions
+                    .insert(event.item_id.clone(), event.revision);
+                true
+            } else {
+                false
+            }
+        };
+        if !accepted {
+            self.emit_stale(session_id, 1).await?;
+        }
+        Ok(accepted)
+    }
+
+    async fn live_part_revision(&self, part_id: &str) -> Option<u64> {
+        self.timeline_state
+            .lock()
+            .await
+            .part_revisions
+            .get(part_id)
+            .copied()
+    }
+
+    async fn record_trace_part_snapshot(&self, part: &StudioPart) {
+        let mut state = self.timeline_state.lock().await;
+        if is_terminal_studio_part_status(part.status) {
+            state.part_revisions.remove(&part.part_id);
+        } else {
+            let revision = state
+                .part_revisions
+                .get(&part.part_id)
+                .copied()
+                .unwrap_or(0)
+                .max(part.revision);
+            state.part_revisions.insert(part.part_id.clone(), revision);
+        }
     }
 
     async fn ensure_assistant_message_started(
@@ -647,14 +739,7 @@ fn studio_agent_timeline_event(session_id: &str, event: AgentEvent) -> StudioAge
 fn studio_part_from_trace_part(session_id: &str, item: TracePart) -> StudioPart {
     let part_type = part_type_for_trace_kind(item.kind);
     let status = part_status_for_trace_status(item.status);
-    let completed_at = matches!(
-        status,
-        StudioPartStatus::Completed
-            | StudioPartStatus::Failed
-            | StudioPartStatus::Interrupted
-            | StudioPartStatus::BudgetLimited
-    )
-    .then_some(item.updated_at);
+    let completed_at = is_terminal_studio_part_status(status).then_some(item.updated_at);
     let text = part_text(&item);
     let message_id = message_id_for_trace_part(&item);
     let part_id = part_id_for_trace_part(&item);
@@ -702,6 +787,17 @@ fn studio_part_from_trace_part(session_id: &str, item: TracePart) -> StudioPart 
         synthetic: matches!(part_type, StudioPartType::Turn | StudioPartType::Inference),
         ignored: false,
     }
+}
+
+fn is_terminal_studio_part_status(status: StudioPartStatus) -> bool {
+    matches!(
+        status,
+        StudioPartStatus::Completed
+            | StudioPartStatus::Failed
+            | StudioPartStatus::Interrupted
+            | StudioPartStatus::Denied
+            | StudioPartStatus::BudgetLimited
+    )
 }
 
 fn part_id_for_trace_part(item: &TracePart) -> String {
@@ -1023,5 +1119,229 @@ mod tests {
                 ("second-final".to_string(), 1, "second".to_string()),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn trace_part_delta_requires_existing_part() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/studio").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Delta guard", CompileMode::Auto)
+            .await
+            .unwrap();
+        let runtime = StudioEventRuntime::new(store);
+        let mut rx = runtime.subscribe_session(session.id.clone());
+
+        let result = runtime
+            .emit_agent_event(
+                &session.id,
+                AgentEvent::TracePartDelta {
+                    event: text_delta_event("turn-delta", "missing-part", 1, "hello"),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(result.is_none());
+        let event = rx.recv().await.unwrap();
+        assert!(matches!(
+            event.kind,
+            StudioEventKind::Stale { lagged_events: 1 }
+        ));
+    }
+
+    #[tokio::test]
+    async fn trace_part_delta_requires_contiguous_revision() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/studio").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Delta revision", CompileMode::Auto)
+            .await
+            .unwrap();
+        let runtime = StudioEventRuntime::new(store);
+        runtime
+            .emit_agent_event(
+                &session.id,
+                AgentEvent::TracePartStarted {
+                    item: streaming_text_part("turn-delta", "part-delta"),
+                },
+            )
+            .await
+            .unwrap();
+
+        let first = runtime
+            .emit_agent_event(
+                &session.id,
+                AgentEvent::TracePartDelta {
+                    event: text_delta_event("turn-delta", "part-delta", 1, "hel"),
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let StudioEventKind::MessagePartDelta { delta } = first.kind else {
+            panic!("expected messagePartDelta");
+        };
+        assert_eq!(delta.revision, 1);
+        assert_eq!(delta.delta, "hel");
+
+        let mut rx = runtime.subscribe_session(session.id.clone());
+        let duplicate = runtime
+            .emit_agent_event(
+                &session.id,
+                AgentEvent::TracePartDelta {
+                    event: text_delta_event("turn-delta", "part-delta", 1, "lo"),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(duplicate.is_none());
+        let event = rx.recv().await.unwrap();
+        assert!(matches!(
+            event.kind,
+            StudioEventKind::Stale { lagged_events: 1 }
+        ));
+    }
+
+    #[tokio::test]
+    async fn trace_part_delta_after_terminal_snapshot_emits_stale() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/studio").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Terminal delta", CompileMode::Auto)
+            .await
+            .unwrap();
+        let runtime = StudioEventRuntime::new(store);
+        runtime
+            .emit_agent_event(
+                &session.id,
+                AgentEvent::TracePartCompleted {
+                    item: TracePart::text(
+                        "turn-terminal",
+                        "part-terminal",
+                        0,
+                        TraceTextChannel::Final,
+                        "done",
+                        TracePartStatus::Completed,
+                        100,
+                    ),
+                },
+            )
+            .await
+            .unwrap();
+        let mut rx = runtime.subscribe_session(session.id.clone());
+
+        let result = runtime
+            .emit_agent_event(
+                &session.id,
+                AgentEvent::TracePartDelta {
+                    event: text_delta_event("turn-terminal", "part-terminal", 1, "late"),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(result.is_none());
+        let event = rx.recv().await.unwrap();
+        assert!(matches!(
+            event.kind,
+            StudioEventKind::Stale { lagged_events: 1 }
+        ));
+    }
+
+    #[tokio::test]
+    async fn terminal_snapshot_carries_latest_live_revision() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/studio").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Terminal revision", CompileMode::Auto)
+            .await
+            .unwrap();
+        let runtime = StudioEventRuntime::new(store.clone());
+        runtime
+            .emit_agent_event(
+                &session.id,
+                AgentEvent::TracePartStarted {
+                    item: streaming_text_part("turn-terminal-revision", "part-terminal-revision"),
+                },
+            )
+            .await
+            .unwrap();
+        runtime
+            .emit_agent_event(
+                &session.id,
+                AgentEvent::TracePartDelta {
+                    event: text_delta_event(
+                        "turn-terminal-revision",
+                        "part-terminal-revision",
+                        1,
+                        "done",
+                    ),
+                },
+            )
+            .await
+            .unwrap();
+        let mut completed = TracePart::text(
+            "turn-terminal-revision",
+            "part-terminal-revision",
+            0,
+            TraceTextChannel::Final,
+            "done",
+            TracePartStatus::Completed,
+            100,
+        );
+        completed.updated_at = 101;
+
+        runtime
+            .emit_agent_event(
+                &session.id,
+                AgentEvent::TracePartCompleted { item: completed },
+            )
+            .await
+            .unwrap();
+
+        let part = store
+            .read_message_part("part-terminal-revision")
+            .await
+            .unwrap()
+            .unwrap()
+            .part;
+        assert_eq!(part.status, StudioPartStatus::Completed);
+        assert_eq!(part.revision, 1);
+    }
+
+    fn streaming_text_part(turn_id: &str, item_id: &str) -> TracePart {
+        TracePart::text(
+            turn_id,
+            item_id,
+            0,
+            TraceTextChannel::Final,
+            "",
+            TracePartStatus::Streaming,
+            100,
+        )
+    }
+
+    fn text_delta_event(
+        turn_id: &str,
+        item_id: &str,
+        revision: u64,
+        delta: &str,
+    ) -> TracePartDeltaEvent {
+        TracePartDeltaEvent {
+            turn_id: turn_id.to_string(),
+            item_id: item_id.to_string(),
+            started_sequence: 0,
+            revision,
+            kind: TracePartKind::Text,
+            status: TracePartStatus::Streaming,
+            created_at: 100,
+            updated_at: 100,
+            delta: TraceDelta::Text {
+                text_channel: TraceTextChannel::Final,
+                delta: delta.to_string(),
+            },
+        }
     }
 }
