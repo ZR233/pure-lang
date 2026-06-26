@@ -11,6 +11,7 @@ mod runtime;
 mod runtime_state;
 mod store;
 mod store_support;
+mod timeline_actor;
 
 pub use event_runtime::StudioEventRuntime;
 pub use event_subscription::{StudioEventFilter, StudioEventScope, StudioFilteredEventReceiver};

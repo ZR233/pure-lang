@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -17,6 +16,9 @@ use pl_trace::{
 use tokio::sync::{Mutex, broadcast};
 
 use crate::studio::ids::{new_studio_event_id, unix_seconds};
+use crate::studio::timeline_actor::{
+    TimelineDeltaDecision, TurnTimelineActor, is_terminal_studio_part_status,
+};
 use crate::studio::{
     SessionHandoffRecord, StudioEventFilter, StudioFilteredEventReceiver, StudioStore,
 };
@@ -25,12 +27,7 @@ use crate::studio::{
 pub struct StudioEventRuntime {
     store: StudioStore,
     tx: broadcast::Sender<StudioEventEnvelope>,
-    timeline_state: Arc<Mutex<TimelineLiveState>>,
-}
-
-#[derive(Default)]
-struct TimelineLiveState {
-    part_revisions: HashMap<String, u64>,
+    timeline_actor: Arc<Mutex<TurnTimelineActor>>,
 }
 
 impl StudioEventRuntime {
@@ -39,7 +36,7 @@ impl StudioEventRuntime {
         Self {
             store,
             tx,
-            timeline_state: Arc::new(Mutex::new(TimelineLiveState::default())),
+            timeline_actor: Arc::new(Mutex::new(TurnTimelineActor::default())),
         }
     }
 
@@ -371,12 +368,7 @@ impl StudioEventRuntime {
         } else {
             part.order = self.store.next_message_part_order(&part.message_id).await?;
         }
-        if is_terminal_studio_part_status(part.status)
-            && let Some(live_revision) = self.live_part_revision(&part.part_id).await
-            && part.revision < live_revision
-        {
-            part.revision = live_revision;
-        }
+        self.prepare_trace_part_snapshot(&mut part).await;
         let envelope_part = part.clone();
         let envelope = self
             .emit(
@@ -417,58 +409,25 @@ impl StudioEventRuntime {
         session_id: &str,
         event: &TracePartDeltaEvent,
     ) -> Result<bool> {
-        let Some(existing) = self.store.read_message_part(&event.item_id).await? else {
-            self.emit_stale(session_id, 1).await?;
-            return Ok(false);
-        };
-        if is_terminal_studio_part_status(existing.part.status) {
-            self.emit_stale(session_id, 1).await?;
-            return Ok(false);
-        }
-        let accepted = {
-            let mut state = self.timeline_state.lock().await;
-            let current_revision = state
-                .part_revisions
-                .get(&event.item_id)
-                .copied()
-                .unwrap_or(existing.part.revision);
-            if event.revision == current_revision + 1 {
-                state
-                    .part_revisions
-                    .insert(event.item_id.clone(), event.revision);
-                true
-            } else {
-                false
-            }
-        };
-        if !accepted {
-            self.emit_stale(session_id, 1).await?;
-        }
-        Ok(accepted)
-    }
-
-    async fn live_part_revision(&self, part_id: &str) -> Option<u64> {
-        self.timeline_state
+        let existing = self.store.read_message_part(&event.item_id).await?;
+        let decision = self
+            .timeline_actor
             .lock()
             .await
-            .part_revisions
-            .get(part_id)
-            .copied()
+            .prepare_delta(event, existing.as_ref());
+        if decision == TimelineDeltaDecision::Stale {
+            self.emit_stale(session_id, 1).await?;
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    async fn prepare_trace_part_snapshot(&self, part: &mut StudioPart) {
+        self.timeline_actor.lock().await.prepare_snapshot(part);
     }
 
     async fn record_trace_part_snapshot(&self, part: &StudioPart) {
-        let mut state = self.timeline_state.lock().await;
-        if is_terminal_studio_part_status(part.status) {
-            state.part_revisions.remove(&part.part_id);
-        } else {
-            let revision = state
-                .part_revisions
-                .get(&part.part_id)
-                .copied()
-                .unwrap_or(0)
-                .max(part.revision);
-            state.part_revisions.insert(part.part_id.clone(), revision);
-        }
+        self.timeline_actor.lock().await.record_snapshot(part);
     }
 
     async fn ensure_assistant_message_started(
@@ -787,17 +746,6 @@ fn studio_part_from_trace_part(session_id: &str, item: TracePart) -> StudioPart 
         synthetic: matches!(part_type, StudioPartType::Turn | StudioPartType::Inference),
         ignored: false,
     }
-}
-
-fn is_terminal_studio_part_status(status: StudioPartStatus) -> bool {
-    matches!(
-        status,
-        StudioPartStatus::Completed
-            | StudioPartStatus::Failed
-            | StudioPartStatus::Interrupted
-            | StudioPartStatus::Denied
-            | StudioPartStatus::BudgetLimited
-    )
 }
 
 fn part_id_for_trace_part(item: &TracePart) -> String {
