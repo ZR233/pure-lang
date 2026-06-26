@@ -91,7 +91,7 @@ class _TimelineRowBlock extends StatelessWidget {
                 crossAxisAlignment: isUser
                     ? CrossAxisAlignment.end
                     : CrossAxisAlignment.start,
-                children: [_RowCard(row: row)],
+                children: [_RowCard(key: ValueKey(row.id), row: row)],
               ),
             ),
           ),
@@ -128,7 +128,7 @@ class _Avatar extends StatelessWidget {
 }
 
 class _RowCard extends StatelessWidget {
-  const _RowCard({required this.row});
+  const _RowCard({required this.row, super.key});
 
   final TimelineRow row;
 
@@ -136,21 +136,38 @@ class _RowCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return switch (row.type) {
       TimelineRowType.userMessage => _MarkdownBubble(
+        key: ValueKey(row.part!.id),
         part: row.part!,
         isUser: true,
       ),
-      TimelineRowType.commentary || TimelineRowType.finalAnswer =>
-        _MarkdownBubble(part: row.part!, isUser: false),
-      TimelineRowType.reasoningSummary => _ReasoningPart(part: row.part!),
-      TimelineRowType.toolActivity => _ToolPart(part: row.part!),
-      TimelineRowType.plan => _PlanPart(part: row.part!),
-      TimelineRowType.agentActivity => _AgentPart(event: row.agentEvent!),
+      TimelineRowType.commentary ||
+      TimelineRowType.finalAnswer => _MarkdownBubble(
+        key: ValueKey(row.part!.id),
+        part: row.part!,
+        isUser: false,
+      ),
+      TimelineRowType.reasoningSummary => _ReasoningPart(
+        key: ValueKey(row.part!.id),
+        part: row.part!,
+      ),
+      TimelineRowType.toolActivity => _ToolPart(
+        key: ValueKey(row.part!.id),
+        part: row.part!,
+      ),
+      TimelineRowType.plan => _PlanPart(
+        key: ValueKey(row.part!.id),
+        part: row.part!,
+      ),
+      TimelineRowType.agentActivity => _AgentPart(
+        key: ValueKey(row.agentEvent!.eventId),
+        event: row.agentEvent!,
+      ),
     };
   }
 }
 
 class _MarkdownBubble extends StatelessWidget {
-  const _MarkdownBubble({required this.part, required this.isUser});
+  const _MarkdownBubble({required this.part, required this.isUser, super.key});
 
   final TimelinePart part;
   final bool isUser;
@@ -192,7 +209,7 @@ class _MarkdownBubble extends StatelessWidget {
 }
 
 class _ReasoningPart extends StatefulWidget {
-  const _ReasoningPart({required this.part});
+  const _ReasoningPart({required this.part, super.key});
 
   final TimelinePart part;
 
@@ -202,6 +219,14 @@ class _ReasoningPart extends StatefulWidget {
 
 class _ReasoningPartState extends State<_ReasoningPart> {
   late bool expanded = !widget.part.collapsed;
+
+  @override
+  void didUpdateWidget(covariant _ReasoningPart oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.part.id != widget.part.id) {
+      expanded = !widget.part.collapsed;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -234,7 +259,7 @@ class _ReasoningPartState extends State<_ReasoningPart> {
 }
 
 class _ToolPart extends StatelessWidget {
-  const _ToolPart({required this.part});
+  const _ToolPart({required this.part, super.key});
 
   final TimelinePart part;
 
@@ -268,7 +293,7 @@ class _ToolPart extends StatelessWidget {
 }
 
 class _PlanPart extends StatelessWidget {
-  const _PlanPart({required this.part});
+  const _PlanPart({required this.part, super.key});
 
   final TimelinePart part;
 
@@ -311,7 +336,7 @@ class _PlanPart extends StatelessWidget {
 }
 
 class _AgentPart extends StatelessWidget {
-  const _AgentPart({required this.event});
+  const _AgentPart({required this.event, super.key});
 
   final TimelineAgentEvent event;
 

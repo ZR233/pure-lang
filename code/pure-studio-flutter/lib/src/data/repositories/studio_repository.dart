@@ -767,9 +767,6 @@ class StudioController extends AsyncNotifier<StudioState> {
       }
       messages[index] = existing.copyWith(
         role: message.role,
-        createdAt: message.sequence >= existing.sequence
-            ? message.createdAt
-            : existing.createdAt,
         sequence: message.sequence > existing.sequence
             ? message.sequence
             : existing.sequence,

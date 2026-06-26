@@ -152,6 +152,8 @@ Flutter runtime bridge 检测到底层 broadcast receiver `Lagged` 时，必须�
 
 agent 协作 timeline 遵循 Studio 规范化协议：`agentChanged` 更新 latest snapshot，`agentTimelineChanged` 只携带 spawn/interaction/wait/close lifecycle event 的规范化 payload。`bootstrap`、`select_session` 和 `load_session_state` 的 `agentEvents` 历史快照返回 `BridgeAgentTimelineEventDto`，其中 payload 为 `BridgeAgentTimelinePayloadDto` typed union；Flutter 不解析 raw `AgentEvent` 或历史 `payloadJson` 记录。MCP/LSP health 事件同样携带 canonical health snapshot。内部 trace 如需保留原始事件，只能作为诊断输入，在进入 Studio wire 前完成映射。
 
+在 `TurnTimelineActor` 落地前，模型 stream trace projection 必须使用当前 turn recorder sequence 作为每次 inference 的 `trace_sequence_base`，避免每个 inference 内部 part order 从 0 重置后被 Studio 当成同一 assistant message 的全局展示顺序。该规则只是止血兼容层：最终 part order 仍应由 turn 级 timeline actor 独立分配，不能长期把 provider event sequence、trace event sequence 与 Studio part order 混为一个概念。
+
 子代理内部事件不直接转发完整文本流、思考流、工具调用流或工具输出。`pl-core` 将子代理生命周期压缩为 `agent` part 和 `AgentStateChanged` snapshot，状态固定为 `queued`、`running`、`waiting`、`completed`、`errored`、`interrupted`、`shutdown`、`notFound`。Studio 持久化这些状态事件，并在聊天界面只渲染路径、状态、摘要和最终错误文本，避免把子代理内部执行细节混入父会话 timeline。
 
 失败的子代理必须在 latest snapshot 的 `error` 字段保留可展示的失败文本。`reason` 只作为结构化分类，例如 `providerError`、`toolError`、`budgetLimited` 或 `interrupted`，不能替代 `error`。如果 provider 在子代理已有部分摘要后失败，最终状态仍必须把 provider/tool 错误写入 `error`，否则 UI 无法解释失败原因。

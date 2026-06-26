@@ -61,6 +61,7 @@ fn deepseek_request(messages: Vec<Message>, turn_id: &str) -> CompletionRequest 
             turn_id: turn_id.to_string(),
             inference_id: format!("{turn_id}-inference"),
             plan_mode: false,
+            trace_sequence_base: 0,
         }),
     }
 }

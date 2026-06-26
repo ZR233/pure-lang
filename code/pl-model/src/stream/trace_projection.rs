@@ -27,7 +27,7 @@ impl TraceProjection {
             session_id: context.session_id,
             turn_id: context.turn_id,
             inference_id: context.inference_id,
-            sequence: 0,
+            sequence: context.trace_sequence_base,
             started: HashMap::new(),
             active_text_items: HashMap::new(),
             active_thinking_items: HashMap::new(),
@@ -505,6 +505,7 @@ mod tests {
             turn_id: "turn-1".to_string(),
             inference_id: "inference-1".to_string(),
             plan_mode: false,
+            trace_sequence_base: 0,
         })
     }
 
@@ -548,6 +549,7 @@ mod tests {
             turn_id: "turn-1".to_string(),
             inference_id: "inference-2".to_string(),
             plan_mode: false,
+            trace_sequence_base: 0,
         });
 
         let first_delta = first
@@ -566,6 +568,38 @@ mod tests {
     }
 
     #[test]
+    fn trace_sequence_base_offsets_started_sequence() {
+        let mut first = TraceProjection::new(CompletionTraceContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "turn-1-inf-0".to_string(),
+            plan_mode: false,
+            trace_sequence_base: 10,
+        });
+        let mut second = TraceProjection::new(CompletionTraceContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "turn-1-inf-1".to_string(),
+            plan_mode: false,
+            trace_sequence_base: 20,
+        });
+
+        let first_sequence = first
+            .start_thinking("thinking")
+            .into_iter()
+            .find_map(started_sequence)
+            .expect("first started sequence");
+        let second_sequence = second
+            .start_thinking("thinking")
+            .into_iter()
+            .find_map(started_sequence)
+            .expect("second started sequence");
+
+        assert_eq!(first_sequence, 10);
+        assert_eq!(second_sequence, 20);
+    }
+
+    #[test]
     fn completed_text_uses_authoritative_text_and_revision() {
         let mut trace = trace();
         let _ = trace.append_text_delta("msg_1", TraceTextChannel::Final, "par".to_string());
@@ -581,6 +615,31 @@ mod tests {
 
         assert_eq!(completed.content, "final text");
         assert_eq!(completed.revision, 1);
+    }
+
+    fn started_sequence(event: AgentEvent) -> Option<u64> {
+        match event {
+            AgentEvent::TracePartStarted { item } => Some(item.started_sequence),
+            AgentEvent::TracePartDelta { .. }
+            | AgentEvent::TracePartCompleted { .. }
+            | AgentEvent::TracePartFailed { .. }
+            | AgentEvent::InteractionChanged { .. }
+            | AgentEvent::AgentRuntimeUpdated { .. }
+            | AgentEvent::AgentStateChanged { .. }
+            | AgentEvent::CollabAgentSpawnBegin { .. }
+            | AgentEvent::CollabAgentSpawnEnd { .. }
+            | AgentEvent::CollabAgentInteractionBegin { .. }
+            | AgentEvent::CollabAgentInteractionEnd { .. }
+            | AgentEvent::CollabWaitingBegin { .. }
+            | AgentEvent::CollabWaitingEnd { .. }
+            | AgentEvent::CollabCloseBegin { .. }
+            | AgentEvent::CollabCloseEnd { .. }
+            | AgentEvent::TurnInterrupted { .. }
+            | AgentEvent::TurnBudgetLimited { .. }
+            | AgentEvent::SkillActivated { .. }
+            | AgentEvent::Done
+            | AgentEvent::Error { .. } => None,
+        }
     }
 
     fn delta_item_id(event: AgentEvent) -> Option<String> {

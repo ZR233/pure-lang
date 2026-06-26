@@ -113,6 +113,15 @@ class _TimelineViewState extends State<TimelineView> {
               controller: _controller,
               padding: const EdgeInsets.fromLTRB(24, 28, 24, 38),
               itemCount: widget.rows.length + 1,
+              findChildIndexCallback: (key) {
+                if (key is! ValueKey<String>) {
+                  return null;
+                }
+                final index = widget.rows.indexWhere(
+                  (row) => row.id == key.value,
+                );
+                return index == -1 ? null : index;
+              },
               itemBuilder: (context, index) {
                 if (index == widget.rows.length) {
                   return const SizedBox(height: 24);

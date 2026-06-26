@@ -59,6 +59,7 @@ fn openai_request(model: String) -> CompletionRequest {
             turn_id: "openai-live-turn".to_string(),
             inference_id: "openai-live-inference".to_string(),
             plan_mode: false,
+            trace_sequence_base: 0,
         }),
     }
 }
