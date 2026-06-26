@@ -259,6 +259,7 @@ pub(super) async fn run_turn_with_trace(
                 turn_id: turn_id.clone(),
                 inference_id: inference_id.clone(),
                 plan_mode: matches!(request.mode, CompileMode::Plan),
+                trace_sequence_base: recorder.current_sequence(),
             }),
         };
 

@@ -60,6 +60,7 @@ pub struct CompletionTraceContext {
     pub turn_id: String,
     pub inference_id: String,
     pub plan_mode: bool,
+    pub trace_sequence_base: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

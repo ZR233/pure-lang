@@ -629,6 +629,7 @@ mod tests {
                 turn_id: "turn-1".to_string(),
                 inference_id: "inf-1".to_string(),
                 plan_mode: true,
+                trace_sequence_base: 0,
             }),
             ..minimal_request("local-chat")
         };
@@ -717,6 +718,7 @@ mod tests {
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
             plan_mode: false,
+            trace_sequence_base: 0,
         }));
         let mut decoder = tagged_decoder();
 
@@ -776,6 +778,7 @@ mod tests {
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
             plan_mode: false,
+            trace_sequence_base: 0,
         }));
         let mut decoder = tagged_decoder();
 
@@ -822,6 +825,7 @@ mod tests {
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
             plan_mode: true,
+            trace_sequence_base: 0,
         }));
         let mut decoder = tagged_decoder();
 
@@ -875,6 +879,7 @@ mod tests {
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
             plan_mode: true,
+            trace_sequence_base: 0,
         }));
 
         accumulator
@@ -913,6 +918,7 @@ mod tests {
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
             plan_mode: false,
+            trace_sequence_base: 0,
         }));
 
         accumulator
@@ -946,6 +952,7 @@ mod tests {
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
             plan_mode: false,
+            trace_sequence_base: 0,
         }));
 
         accumulator
@@ -989,6 +996,7 @@ mod tests {
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
             plan_mode: false,
+            trace_sequence_base: 0,
         }));
 
         accumulator
@@ -1027,6 +1035,7 @@ mod tests {
             turn_id: "turn-1".to_string(),
             inference_id: "inf-1".to_string(),
             plan_mode: true,
+            trace_sequence_base: 0,
         }));
         let mut decoder = tagged_decoder();
 
@@ -1131,6 +1140,7 @@ mod tests {
             turn_id: "turn-1".to_string(),
             inference_id: "turn-1-inf-0".to_string(),
             plan_mode: false,
+            trace_sequence_base: 0,
         }));
 
         accumulator
@@ -1248,6 +1258,7 @@ mod tests {
             turn_id: "turn-1".to_string(),
             inference_id: "turn-1-inf-0".to_string(),
             plan_mode: false,
+            trace_sequence_base: 0,
         }));
 
         accumulator
@@ -1476,6 +1487,7 @@ mod tests {
             turn_id: "turn-1".to_string(),
             inference_id: "turn-1-inf-0".to_string(),
             plan_mode: false,
+            trace_sequence_base: 0,
         }));
 
         accumulator
@@ -1540,6 +1552,7 @@ mod tests {
             turn_id: "turn-1".to_string(),
             inference_id: "turn-1-inf-0".to_string(),
             plan_mode: false,
+            trace_sequence_base: 0,
         }));
 
         accumulator
@@ -1622,6 +1635,7 @@ mod tests {
             turn_id: "turn-1".to_string(),
             inference_id: "turn-1-inf-0".to_string(),
             plan_mode: false,
+            trace_sequence_base: 0,
         }));
 
         accumulator

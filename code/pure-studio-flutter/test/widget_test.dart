@@ -207,6 +207,55 @@ void main() {
     expect(state.partOverlaysBySession['session-1'], isEmpty);
   });
 
+  test('message snapshots keep original createdAt', () async {
+    final api = _FakeStudioApi(_emptyState());
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(studioControllerProvider.future);
+    api.emitSession(
+      _messageUpdatedEvent(
+        sessionId: 'session-1',
+        sequence: BigInt.one,
+        message: {
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'role': 'assistant',
+          'status': 'streaming',
+          'createdAt': 10,
+          'updatedAt': 10,
+        },
+      ),
+    );
+    api.emitSession(
+      _messageUpdatedEvent(
+        sessionId: 'session-1',
+        sequence: BigInt.two,
+        message: {
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'role': 'assistant',
+          'status': 'completed',
+          'createdAt': 20,
+          'updatedAt': 20,
+        },
+      ),
+    );
+    await pumpEventQueue();
+
+    final message = container
+        .read(studioControllerProvider)
+        .requireValue
+        .selectedMessages
+        .single;
+    expect(message.createdAt, DateTime.fromMillisecondsSinceEpoch(10000));
+    expect(message.sequence, 2);
+  });
+
   test('timeline drops orphan part snapshots', () async {
     final api = _FakeStudioApi(_emptyState());
     final container = ProviderContainer(
@@ -1271,6 +1320,108 @@ void main() {
     expect(find.textContaining('Next steps'), findsOneWidget);
     expect(find.textContaining('Analyze'), findsOneWidget);
   });
+
+  testWidgets(
+    'timeline keeps reasoning expansion state attached to part identity',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final now = DateTime.fromMillisecondsSinceEpoch(0);
+      final message = TimelineMessage(
+        id: 'message-reasoning-identity',
+        sessionId: 'session-1',
+        role: 'assistant',
+        createdAt: now,
+      );
+
+      TimelinePart reasoningPart({
+        required String id,
+        required String title,
+        required String status,
+        required int order,
+      }) {
+        return TimelinePart(
+          id: id,
+          messageId: message.id,
+          type: TimelinePartType.reasoning,
+          order: order,
+          title: title,
+          status: status,
+          text: '',
+        );
+      }
+
+      Widget timelineFor(List<TimelinePart> parts) {
+        return _localizedApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 980,
+              height: 820,
+              child: TimelineView(
+                sessionId: 'session-1',
+                rows: timelineRowsFromMessages([message], parts: parts),
+              ),
+            ),
+          ),
+        );
+      }
+
+      await tester.pumpWidget(
+        timelineFor([
+          reasoningPart(
+            id: 'reasoning-a',
+            title: 'Reasoning A',
+            status: 'status-a',
+            order: 0,
+          ),
+          reasoningPart(
+            id: 'reasoning-b',
+            title: 'Reasoning B',
+            status: 'status-b',
+            order: 1,
+          ),
+        ]),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Reasoning B'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('status-a'), findsOneWidget);
+      expect(find.text('status-b'), findsNothing);
+
+      await tester.pumpWidget(
+        timelineFor([
+          reasoningPart(
+            id: 'reasoning-b',
+            title: 'Reasoning B',
+            status: 'status-b',
+            order: 0,
+          ),
+          reasoningPart(
+            id: 'reasoning-c',
+            title: 'Reasoning C',
+            status: 'status-c',
+            order: 1,
+          ),
+          reasoningPart(
+            id: 'reasoning-a',
+            title: 'Reasoning A',
+            status: 'status-a',
+            order: 2,
+          ),
+        ]),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('status-b'), findsNothing);
+      expect(find.text('status-c'), findsOneWidget);
+      expect(find.text('status-a'), findsOneWidget);
+    },
+  );
 
   testWidgets('timeline tool activity uses projected command summary', (
     tester,

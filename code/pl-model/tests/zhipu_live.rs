@@ -76,6 +76,7 @@ fn zhipu_thinking_request() -> CompletionRequest {
             turn_id: "zhipu-live-thinking-turn".to_string(),
             inference_id: "zhipu-live-thinking-inference".to_string(),
             plan_mode: false,
+            trace_sequence_base: 0,
         }),
     }
 }
