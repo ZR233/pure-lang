@@ -363,12 +363,14 @@ impl StudioEventRuntime {
         self.ensure_assistant_message_started(session_id, &item)
             .await?;
         let mut part = studio_part_from_trace_part(session_id, item);
-        if let Some(existing) = self.store.read_message_part(&part.part_id).await? {
-            part.order = existing.part.order;
+        let existing = self.store.read_message_part(&part.part_id).await?;
+        let next_order = if existing.is_some() {
+            part.order
         } else {
-            part.order = self.store.next_message_part_order(&part.message_id).await?;
-        }
-        self.prepare_trace_part_snapshot(&mut part).await;
+            self.store.next_message_part_order(&part.message_id).await?
+        };
+        self.prepare_trace_part_snapshot(&mut part, existing.as_ref(), next_order)
+            .await;
         let envelope_part = part.clone();
         let envelope = self
             .emit(
@@ -422,8 +424,15 @@ impl StudioEventRuntime {
         Ok(true)
     }
 
-    async fn prepare_trace_part_snapshot(&self, part: &mut StudioPart) {
-        self.timeline_actor.lock().await.prepare_snapshot(part);
+    async fn prepare_trace_part_snapshot(
+        &self,
+        part: &mut StudioPart,
+        existing: Option<&crate::studio::records::StudioPartRecord>,
+        next_order: u64,
+    ) {
+        let mut actor = self.timeline_actor.lock().await;
+        actor.prepare_snapshot_order(part, existing, next_order);
+        actor.prepare_snapshot(part);
     }
 
     async fn record_trace_part_snapshot(&self, part: &StudioPart) {
