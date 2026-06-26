@@ -629,7 +629,8 @@ String _frbPartText(frb.BridgeStudioPartDto part) {
     TimelinePartType.reasoning ||
     TimelinePartType.text ||
     TimelinePartType.turn ||
-    TimelinePartType.inference => '',
+    TimelinePartType.inference ||
+    TimelinePartType.file => '',
   };
 }
 
@@ -1926,7 +1927,8 @@ String _partText(Map<String, Object?> json, TimelinePartType type) {
     TimelinePartType.reasoning ||
     TimelinePartType.text ||
     TimelinePartType.turn ||
-    TimelinePartType.inference => '',
+    TimelinePartType.inference ||
+    TimelinePartType.file => '',
   };
 }
 
@@ -2013,6 +2015,7 @@ TimelinePartType _partType(String value) {
     'agent' => TimelinePartType.agent,
     'turn' => TimelinePartType.turn,
     'inference' => TimelinePartType.inference,
+    'file' => TimelinePartType.file,
     _ => throw FormatException('Unknown timeline part type: $value'),
   };
 }

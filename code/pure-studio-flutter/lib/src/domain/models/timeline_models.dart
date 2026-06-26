@@ -252,7 +252,9 @@ TimelinePart timelinePartFromSnapshot(
       snapshot.agent?.summary ?? snapshot.agent?.task ?? text,
     TimelinePartType.reasoning => '',
     TimelinePartType.text => text,
-    TimelinePartType.turn || TimelinePartType.inference => '',
+    TimelinePartType.turn ||
+    TimelinePartType.inference ||
+    TimelinePartType.file => '',
   };
   return TimelinePart(
     id: snapshot.id,
@@ -282,6 +284,7 @@ String _partTitleFromSnapshot(TimelinePartSnapshot snapshot) {
     TimelinePartType.text => '',
     TimelinePartType.turn => 'Turn',
     TimelinePartType.inference => 'Inference',
+    TimelinePartType.file => 'File',
   };
 }
 
@@ -563,7 +566,8 @@ TimelineRowType _timelineRowType(TimelineMessage message, TimelinePart part) {
       TimelineTextChannel.finalAnswer || null => TimelineRowType.finalAnswer,
     },
     TimelinePartType.turn ||
-    TimelinePartType.inference => TimelineRowType.toolActivity,
+    TimelinePartType.inference ||
+    TimelinePartType.file => TimelineRowType.toolActivity,
   };
 }
 
