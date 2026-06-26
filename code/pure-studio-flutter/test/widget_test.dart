@@ -547,12 +547,46 @@ void main() {
         {
           'sequence': 2,
           'part': {
+            'partId': 'turn-1',
+            'messageId': 'turn-1:assistant',
+            'sessionId': 'session-1',
+            'turnId': 'turn-1',
+            'partType': 'turn',
+            'order': 0,
+            'revision': 0,
+            'status': 'completed',
+            'createdAt': 1,
+            'updatedAt': 2,
+            'text': 'turn lifecycle',
+            'synthetic': true,
+          },
+        },
+        {
+          'sequence': 3,
+          'part': {
+            'partId': 'turn-1-inf-1',
+            'messageId': 'turn-1:assistant',
+            'sessionId': 'session-1',
+            'turnId': 'turn-1',
+            'partType': 'inference',
+            'order': 1,
+            'revision': 0,
+            'status': 'completed',
+            'createdAt': 1,
+            'updatedAt': 2,
+            'text': 'inference lifecycle',
+            'synthetic': true,
+          },
+        },
+        {
+          'sequence': 4,
+          'part': {
             'partId': 'part-1',
             'messageId': 'turn-1:assistant',
             'sessionId': 'session-1',
             'turnId': 'turn-1',
             'partType': 'text',
-            'order': 0,
+            'order': 2,
             'revision': 0,
             'status': 'completed',
             'createdAt': 1,
@@ -565,6 +599,7 @@ void main() {
     });
 
     expect(state.messagesBySession['session-1']!.single.id, 'turn-1:assistant');
+    expect(state.partSnapshotsBySession['session-1']!.keys, {'part-1'});
     expect(
       state.selectedTimelineRows.single.part!.text,
       'restored from snapshot',
