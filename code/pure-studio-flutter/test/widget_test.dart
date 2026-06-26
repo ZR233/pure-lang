@@ -207,6 +207,105 @@ void main() {
     expect(state.partOverlaysBySession['session-1'], isEmpty);
   });
 
+  test(
+    'timeline delta revision gaps clear overlay and recover session',
+    () async {
+      final recovered = _emptyState().copyWith(
+        messagesBySession: {
+          'session-1': [
+            TimelineMessage(
+              id: 'turn-1:assistant',
+              sessionId: 'session-1',
+              role: 'assistant',
+              createdAt: DateTime.fromMillisecondsSinceEpoch(1),
+              sequence: 1,
+            ),
+          ],
+        },
+        partSnapshotsBySession: {
+          'session-1': {
+            'part-1': TimelinePartSnapshot(
+              id: 'part-1',
+              messageId: 'turn-1:assistant',
+              sessionId: 'session-1',
+              turnId: 'turn-1',
+              type: TimelinePartType.text,
+              order: 0,
+              revision: 3,
+              sequence: 2,
+              text: 'restored',
+              status: 'streaming',
+              createdAt: DateTime.fromMillisecondsSinceEpoch(1),
+              updatedAt: DateTime.fromMillisecondsSinceEpoch(2),
+              textChannel: TimelineTextChannel.finalAnswer,
+            ),
+          },
+        },
+      );
+      final api = _FakeStudioApi(_emptyState());
+      api.sessionStates['session-1'] = recovered;
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(studioControllerProvider.future);
+      api.emitSession(
+        _messageUpdatedEvent(
+          sessionId: 'session-1',
+          message: {
+            'messageId': 'turn-1:assistant',
+            'sessionId': 'session-1',
+            'turnId': 'turn-1',
+            'role': 'assistant',
+            'status': 'streaming',
+            'createdAt': 1,
+            'updatedAt': 1,
+          },
+        ),
+      );
+      api.emitSession(
+        _partUpdatedEvent(
+          sessionId: 'session-1',
+          part: {
+            'partId': 'part-1',
+            'messageId': 'turn-1:assistant',
+            'sessionId': 'session-1',
+            'turnId': 'turn-1',
+            'partType': 'text',
+            'order': 0,
+            'revision': 0,
+            'status': 'streaming',
+            'createdAt': 1,
+            'updatedAt': 1,
+            'textChannel': 'final',
+            'text': '',
+          },
+        ),
+      );
+      api.emitSession(
+        _partDeltaEvent(
+          sessionId: 'session-1',
+          delta: {
+            'sessionId': 'session-1',
+            'messageId': 'turn-1:assistant',
+            'partId': 'part-1',
+            'revision': 2,
+            'field': 'text',
+            'delta': 'skipped',
+          },
+        ),
+      );
+      await _pumpFrameBatch();
+      await pumpEventQueue();
+
+      final state = container.read(studioControllerProvider).requireValue;
+      expect(api.loadedSessionIds, contains('session-1'));
+      expect(state.partOverlaysBySession['session-1'], isEmpty);
+      expect(state.selectedTimelineRows.single.part!.text, 'restored');
+    },
+  );
+
   test('message snapshots keep original createdAt', () async {
     final api = _FakeStudioApi(_emptyState());
     final container = ProviderContainer(

@@ -844,9 +844,22 @@ class StudioController extends AsyncNotifier<StudioState> {
     if (delta.revision <= lastRevision) {
       return current;
     }
+    if (delta.revision != lastRevision + 1) {
+      final overlays = {
+        ...(current.partOverlaysBySession[delta.sessionId] ?? const {}),
+      }..remove(delta.partId);
+      unawaited(_recoverStaleSession(delta.sessionId));
+      return _withTimelineState(
+        current,
+        delta.sessionId,
+        _messagesFor(current, delta.sessionId),
+        current.partSnapshotsBySession[delta.sessionId] ?? const {},
+        overlays,
+      );
+    }
     if (delta.chunkIndex != null) {
       final previousChunk = currentOverlay.lastChunkIndexes[delta.field] ?? -1;
-      if (delta.chunkIndex! < previousChunk) {
+      if (delta.chunkIndex! <= previousChunk) {
         return current;
       }
     }
