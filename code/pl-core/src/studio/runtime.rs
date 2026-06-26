@@ -2414,7 +2414,7 @@ mod tests {
             .iter()
             .find(|part| {
                 part.part_type == pl_protocol::StudioPartType::Tool
-                    && part.part_id == "turn-tool-boundary-test-call_1"
+                    && part.part_id == "turn-tool-boundary-test-fc_1"
             })
             .expect("tool part");
         assert!(tool.order > compact[1].3 && tool.order < compact[2].3);

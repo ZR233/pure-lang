@@ -19,7 +19,7 @@ Core 会话中的 tool result metadata 同时保存两个字段：
 
 这些 metadata 必须通过 typed helper 写入和读取，不允许在 `pl-core`、`pl-model` 之间散落字符串 key。新增会话消息缺少 `tool_call_kind`、`tool_call_id` 或 Responses `call_id` 时，provider request 构造应返回协议错误；只有历史兼容路径可以把缺少 `tool_call_kind` 的旧 tool result 当作 function 读取。unknown `tool_call_kind` 一律是协议错误，不能静默回退到 function。
 
-Studio 工具 part id 使用可展示、可去重的运行时 id：优先取 `ToolCall.call_id`，否则取 `ToolCall.id`，再按 turn 做命名空间隔离。`StudioPart.partId` 和 `StudioToolPart.toolCallId` 表示 runtime 展示 id；provider item id 使用 `StudioToolPart.providerItemId`；Responses call id 使用 `StudioToolPart.callId`。core trace 中的 `TracePart` 来自内部 `pl-trace` crate，只允许作为诊断输入，经 Studio runtime 转换为 `message.part.updated` / `message.part.delta` 后才能进入 UI。
+Studio 工具 part id 使用最早稳定的 provider item id 或 runtime tool id 作为锚，再按 turn 做命名空间隔离；如果 provider 没有 item id，才回退到 `ToolCall.call_id` 或本地 fallback id。这样 Responses 在后续 delta/done 才补 `call_id` 时，不会把同一个工具调用拆成第二个 trace part。`StudioPart.partId` 和 `StudioToolPart.toolCallId` 表示该 runtime 展示 id；provider item id 使用 `StudioToolPart.providerItemId`；Responses call id 使用 `StudioToolPart.callId`。core trace 中的 `TracePart` 来自内部 `pl-trace` crate，只允许作为诊断输入，经 Studio runtime 转换为 `message.part.updated` / `message.part.delta` 后才能进入 UI。
 
 ## 模型流完成语义
 
@@ -56,7 +56,7 @@ MCP tools 由进程内 MCP runtime registry 的当前可用快照注册，工具
 
 工具调度层使用轻量 runtime envelope 统一执行结果：
 
-- `ToolInvocation` 保存工具名、runtime item id、provider item id、Responses call id、payload 和执行上下文。
+- `ToolInvocation` 保存工具名、实际复用或创建的 trace part id、provider item id、Responses call id、payload 和执行上下文；工具 runtime 发出的结果 delta 必须使用同一个 trace part id。
 - `ToolPayload` 区分 `Function(serde_json::Value)` 和 `Custom(String)`，避免 custom/freeform 工具被 JSON function 回放吞掉。
 - `ToolOutputEnvelope` 区分模型可见文本、timeline 展示文本、完整输出文件、退出码和 timeout 标记。
 - `ToolExecutionError::RespondToModel` 表示模型可恢复错误，必须写 tool result；`ToolExecutionError::Fatal` 表示内部 invariant、join failure 或历史污染，当前 turn 以 `ToolError` 失败。

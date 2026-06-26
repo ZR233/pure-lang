@@ -379,7 +379,7 @@ use turn_result::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tool::{Tool, ToolInput, ToolOutput};
+    use crate::tool::{OutputTruncation, Tool, ToolInput, ToolOutput};
     use crate::turn::{CompileMode, PermissionMode, ToolApprovalPolicy};
     use crate::{ConfigStore, ModelRole};
     use pl_model::ToolCall;
@@ -452,6 +452,45 @@ mod tests {
                 | TraceEventKind::TracePartStarted { .. }
                 | TraceEventKind::TracePartCompleted { .. }
                 | TraceEventKind::TracePartFailed { .. } => None,
+            })
+            .collect()
+    }
+
+    fn live_tool_result_deltas(events: &[AgentEvent], item_id: &str) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                AgentEvent::TracePartDelta { event }
+                    if event.kind == TracePartKind::Tool && event.item_id == item_id =>
+                {
+                    match &event.delta {
+                        pl_trace::TraceDelta::ToolResult { delta } => Some(delta.clone()),
+                        pl_trace::TraceDelta::Text { .. }
+                        | pl_trace::TraceDelta::Thinking { .. }
+                        | pl_trace::TraceDelta::ToolArguments { .. }
+                        | pl_trace::TraceDelta::Plan { .. } => None,
+                    }
+                }
+                AgentEvent::TracePartStarted { .. }
+                | AgentEvent::TracePartDelta { .. }
+                | AgentEvent::TracePartCompleted { .. }
+                | AgentEvent::TracePartFailed { .. }
+                | AgentEvent::InteractionChanged { .. }
+                | AgentEvent::AgentStateChanged { .. }
+                | AgentEvent::AgentRuntimeUpdated { .. }
+                | AgentEvent::SkillActivated { .. }
+                | AgentEvent::CollabAgentSpawnBegin { .. }
+                | AgentEvent::CollabAgentSpawnEnd { .. }
+                | AgentEvent::CollabAgentInteractionBegin { .. }
+                | AgentEvent::CollabAgentInteractionEnd { .. }
+                | AgentEvent::CollabWaitingBegin { .. }
+                | AgentEvent::CollabWaitingEnd { .. }
+                | AgentEvent::CollabCloseBegin { .. }
+                | AgentEvent::CollabCloseEnd { .. }
+                | AgentEvent::TurnInterrupted { .. }
+                | AgentEvent::TurnBudgetLimited { .. }
+                | AgentEvent::Error { .. }
+                | AgentEvent::Done => None,
             })
             .collect()
     }
@@ -601,6 +640,65 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct DeltaEchoTool;
+
+    impl Tool for DeltaEchoTool {
+        fn name(&self) -> &str {
+            "delta_echo"
+        }
+
+        fn description(&self) -> &str {
+            "Echoes a trace delta before completing"
+        }
+
+        fn input_schema(&self) -> serde_json::Value {
+            serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            })
+        }
+
+        fn execute<'a>(
+            &'a self,
+            input: ToolInput,
+            context: ToolContext,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = std::result::Result<ToolOutput, PureError>>
+                    + Send
+                    + 'a,
+            >,
+        > {
+            Box::pin(async move {
+                let now = crate::core::turn_result::unix_seconds();
+                let event = pl_trace::TracePartDeltaEvent {
+                    turn_id: input.session_id.clone(),
+                    item_id: input.tool_id.clone(),
+                    started_sequence: 0,
+                    revision: input.revision_base.saturating_add(1),
+                    kind: TracePartKind::Tool,
+                    status: TracePartStatus::Running,
+                    created_at: now,
+                    updated_at: now,
+                    delta: pl_trace::TraceDelta::ToolResult {
+                        delta: "runtime delta".to_string(),
+                    },
+                };
+                let _ = context.event_tx.send(AgentEvent::TracePartDelta { event });
+                Ok(ToolOutput {
+                    description: "delta complete".to_string(),
+                    truncated: OutputTruncation::empty(),
+                    output_file: std::path::PathBuf::new(),
+                    exit_code: Some(0),
+                    timed_out: false,
+                    runtime_events: Vec::new(),
+                })
+            })
+        }
+    }
+
     #[test]
     fn config_core_uses_planner_role_model_and_effort() {
         let config = ConfigStore::new(crate::ConfigPaths::from_home("unused"))
@@ -733,7 +831,7 @@ mod tests {
         let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
         let streamed_item = recorder.tool_item(
             "turn-1",
-            "turn-1-call-1",
+            "turn-1-provider-item-1",
             "read_file".to_string(),
             "{\"path\":\"note.txt\"}".to_string(),
             Some("call-1".to_string()),
@@ -766,7 +864,8 @@ mod tests {
             .iter()
             .find_map(|event| match &event.kind {
                 TraceEventKind::TracePartCompleted { item }
-                    if item.kind == TracePartKind::Tool && item.item_id == "turn-1-call-1" =>
+                    if item.kind == TracePartKind::Tool
+                        && item.item_id == "turn-1-provider-item-1" =>
                 {
                     Some(item)
                 }
@@ -790,7 +889,7 @@ mod tests {
         assert_eq!(tool.arguments, "{\"path\":\"note.txt\"}");
         assert_eq!(tool.result.as_deref(), Some("provider item reuse"));
         assert_eq!(
-            tool_statuses(&events, "turn-1-call-1"),
+            tool_statuses(&events, "turn-1-provider-item-1"),
             vec![
                 TracePartStatus::Started,
                 TracePartStatus::Approved,
@@ -799,6 +898,62 @@ mod tests {
             ]
         );
         let _ = tokio::fs::remove_dir_all(workspace_root).await;
+    }
+
+    #[tokio::test]
+    async fn tool_runtime_deltas_use_trace_part_id() {
+        let mut core = PureCore::default_provider().unwrap();
+        core.register_tool(DeltaEchoTool);
+        let tool_call = ToolCall::function(
+            "provider-item-1",
+            "delta_echo",
+            serde_json::json!({}),
+            Some("call-1".to_string()),
+        );
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
+        let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+        let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+
+        let records = execute_tool_calls(
+            &[tool_call],
+            &mut budget,
+            &mut recorder,
+            ToolExecutionContext {
+                core: &core,
+                options: &TurnOptions::default(),
+                mode: crate::turn::CompileMode::Auto,
+                session_id: "turn-1",
+                workspace_root: &std::env::temp_dir(),
+                workspace_instructions: None,
+                instruction_snapshot: None,
+                active_subagent: None,
+                agent_control: crate::AgentControl::default(),
+                parent_session: std::sync::Arc::new(CoreSession::new()),
+            },
+        )
+        .await
+        .unwrap();
+        let mut live_events = Vec::new();
+        while let Ok(event) = event_rx.try_recv() {
+            live_events.push(event);
+        }
+        let events = recorder.drain();
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].status, TracePartStatus::Completed);
+        assert_eq!(
+            live_tool_result_deltas(&live_events, "turn-1-provider-item-1"),
+            vec!["runtime delta".to_string()]
+        );
+        assert_eq!(
+            tool_statuses(&events, "turn-1-provider-item-1"),
+            vec![
+                TracePartStatus::Started,
+                TracePartStatus::Approved,
+                TracePartStatus::Running,
+                TracePartStatus::Completed,
+            ]
+        );
     }
 
     #[test]
@@ -1187,7 +1342,7 @@ mod tests {
         assert!(records[0].result.contains("Unknown tool: missing_tool"));
         assert_eq!(terminal_tool_event_count(&events), 1);
         assert_eq!(
-            tool_statuses(&events, "turn-1-call-1"),
+            tool_statuses(&events, "turn-1-provider-item-1"),
             vec![
                 TracePartStatus::Started,
                 TracePartStatus::Failed,
@@ -1240,7 +1395,7 @@ mod tests {
         );
         assert_eq!(terminal_tool_event_count(&events), 1);
         assert_eq!(
-            tool_statuses(&events, "turn-1-call-1"),
+            tool_statuses(&events, "turn-1-provider-item-1"),
             vec![
                 TracePartStatus::Started,
                 TracePartStatus::Denied,
@@ -1313,7 +1468,7 @@ mod tests {
         );
         assert_eq!(terminal_tool_event_count(&events), 1);
         assert_eq!(
-            tool_statuses(&events, "turn-1-call-1"),
+            tool_statuses(&events, "turn-1-provider-item-1"),
             vec![
                 TracePartStatus::Started,
                 TracePartStatus::Denied,
@@ -1369,7 +1524,7 @@ mod tests {
         assert_eq!(records[0].result, "Tool execution interrupted");
         assert_eq!(terminal_tool_event_count(&events), 1);
         assert_eq!(
-            tool_statuses(&events, "turn-1-call-1"),
+            tool_statuses(&events, "turn-1-provider-item-1"),
             vec![
                 TracePartStatus::Started,
                 TracePartStatus::Approved,

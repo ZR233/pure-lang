@@ -105,11 +105,7 @@ pub(super) async fn execute_tool_calls(
                 "tool call missing tool name".to_string(),
             ));
         }
-        let tool_call_id = tool_call
-            .call_id
-            .clone()
-            .unwrap_or_else(|| tool_call.id.clone());
-        let trace_part_id = namespaced_tool_trace_part_id(context.session_id, &tool_call_id);
+        let trace_part_id = tool_trace_part_id(context.session_id, tool_call);
         let mut item = recorder
             .latest_trace_part(&trace_part_id)
             .unwrap_or_else(|| {
@@ -285,7 +281,7 @@ pub(super) async fn execute_tool_calls(
                 emit_tool_snapshot(recorder, &mut item, TracePartStatus::Approved);
                 emit_tool_snapshot(recorder, &mut item, TracePartStatus::Running);
                 let invocation =
-                    ToolInvocation::from_tool_call(tool_call, tool_call_id.clone(), tool_context);
+                    ToolInvocation::from_tool_call(tool_call, trace_part_id.clone(), tool_context);
                 let _runtime_identity = (
                     invocation.provider_item_id.as_str(),
                     invocation.call_id.as_deref(),
@@ -352,6 +348,15 @@ pub(super) fn namespaced_tool_trace_part_id(turn_id: &str, tool_call_id: &str) -
         return tool_call_id.to_string();
     }
     format!("{turn_id}-{tool_call_id}")
+}
+
+fn tool_trace_part_id(turn_id: &str, tool_call: &pl_model::ToolCall) -> String {
+    let tool_call_id = if tool_call.id.is_empty() {
+        tool_call.call_id.as_deref().unwrap_or("tool_call")
+    } else {
+        &tool_call.id
+    };
+    namespaced_tool_trace_part_id(turn_id, tool_call_id)
 }
 
 impl ToolInvocation {
