@@ -705,7 +705,7 @@ void main() {
     );
   });
 
-  test('timeline parser rejects unknown part type and text channel', () {
+  test('timeline parser accepts file part and rejects unknown values', () {
     final base = {
       'partId': 'part-1',
       'messageId': 'turn-1:assistant',
@@ -719,8 +719,27 @@ void main() {
       'text': 'hello',
     };
 
+    final filePart = timelinePartSnapshotFromJson({
+      ...base,
+      'partType': 'file',
+    });
+    expect(filePart.type, TimelinePartType.file);
     expect(
-      () => timelinePartSnapshotFromJson({...base, 'partType': 'file'}),
+      timelineRowsFromMessages(
+        [
+          TimelineMessage(
+            id: 'turn-1:assistant',
+            sessionId: 'session-1',
+            role: 'assistant',
+            createdAt: DateTime.fromMillisecondsSinceEpoch(1000),
+          ),
+        ],
+        parts: [timelinePartFromSnapshot(filePart)],
+      ),
+      isEmpty,
+    );
+    expect(
+      () => timelinePartSnapshotFromJson({...base, 'partType': 'widget'}),
       throwsA(
         isA<FormatException>().having(
           (error) => error.message,

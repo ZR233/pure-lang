@@ -48,6 +48,8 @@ lib/src/shared/
 
 历史、实时和 stale backfill 都进入同一个 event reducer。`load_session_state` 用 projection snapshot 初始化 message/part 与 per-id sequence guard；`load_studio_events(afterSequence)` 只回放 durable envelope。前端不得恢复旧 `TimelineItem`、`ConversationEntry` 或 raw `AgentEvent` 入口。
 
+Flutter 解析层必须接受 Studio 协议内的所有 part type。当前不直接渲染的 lifecycle/internal/file part 可以进入 normalized snapshot 后由 row projection 过滤，或在 bridge payload 层忽略，但不能把协议内类型当未知类型抛出导致 timeline 白屏。真正未知的 part type 仍应 fail fast。
+
 切换或恢复选中 session 时必须建立 session load barrier：先带 generation 订阅目标 `sessionId` 的实时 stream，再加载 `load_session_state`，加载期间同 generation 的 session event 只进入 buffer，不直接修改 timeline。snapshot 返回后若 generation/session 已过期则丢弃；否则先用 per-message/per-part sequence guard 合并 snapshot，再按事件 sequence 和到达顺序重放 buffer。cursor 合并取较大值，`messagePartDelta` 继续作为 live-only overlay，不推进 durable cursor。旧订阅迟到事件、缺失 sessionId 的 timeline event 或 generation 不匹配的 event 必须丢弃，不能污染当前会话。
 
 状态管理对齐 opencode `global-sync`：Flutter Riverpod store 只保存归一化 entity 表和少量 UI 本地状态，组件不得直接把多个表临时拼成业务状态。选中会话、状态栏、timeline、交互 dock 和会话列表都必须通过 selector/view model 派生：

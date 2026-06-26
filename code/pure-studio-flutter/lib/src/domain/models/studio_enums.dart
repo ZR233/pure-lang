@@ -15,11 +15,22 @@ enum TurnPhase {
   cancelled,
 }
 
-enum TimelinePartType { text, reasoning, tool, plan, agent, turn, inference }
+enum TimelinePartType {
+  text,
+  reasoning,
+  tool,
+  plan,
+  agent,
+  turn,
+  inference,
+  file,
+}
 
 bool isInternalTimelinePartType(TimelinePartType type) {
   return switch (type) {
-    TimelinePartType.turn || TimelinePartType.inference => true,
+    TimelinePartType.turn ||
+    TimelinePartType.inference ||
+    TimelinePartType.file => true,
     TimelinePartType.text ||
     TimelinePartType.reasoning ||
     TimelinePartType.tool ||
