@@ -942,6 +942,19 @@ impl StudioStore {
             .transpose()
     }
 
+    pub async fn next_message_part_order(&self, message_id: &str) -> Result<u64> {
+        use entities::message_part;
+        let Some(row) = message_part::Entity::find()
+            .filter(message_part::Column::MessageId.eq(message_id.to_string()))
+            .order_by_desc(message_part::Column::PartOrder)
+            .one(&self.db)
+            .await?
+        else {
+            return Ok(0);
+        };
+        Ok(u64::try_from(row.part_order).context("message part order must be non-negative")? + 1)
+    }
+
     pub async fn create_turn(
         &self,
         session_id: &str,
@@ -1448,14 +1461,16 @@ where
     C: ConnectionTrait,
 {
     if let StudioEventKind::MessagePartUpdated { part } = &mut envelope.kind {
-        let existing_order =
-            existing_message_part_order_with_connection(conn, &part.part_id).await?;
-        if let Some(existing_order) = existing_order {
+        if let Some(existing_order) =
+            existing_message_part_order_with_connection(conn, &part.part_id).await?
+        {
             if part.order != existing_order {
                 bail!("part order cannot change");
             }
-        } else {
-            part.order = envelope.sequence;
+        } else if message_part_order_exists_with_connection(conn, &part.message_id, part.order)
+            .await?
+        {
+            bail!("part order already exists for message");
         }
     }
     if let StudioEventKind::AgentTimelineChanged { event } = &mut envelope.kind {
@@ -1479,6 +1494,23 @@ where
         .one(conn)
         .await?
         .map(|row| row.part_order as u64))
+}
+
+async fn message_part_order_exists_with_connection<C>(
+    conn: &C,
+    message_id: &str,
+    order: u64,
+) -> Result<bool>
+where
+    C: ConnectionTrait,
+{
+    use entities::message_part;
+    Ok(message_part::Entity::find()
+        .filter(message_part::Column::MessageId.eq(message_id.to_string()))
+        .filter(message_part::Column::PartOrder.eq(order as i64))
+        .one(conn)
+        .await?
+        .is_some())
 }
 
 async fn upsert_agent_snapshot_with_tx(
@@ -2559,7 +2591,7 @@ mod tests {
             session_id: session.id.clone(),
             turn_id: "turn-1".to_string(),
             part_type: StudioPartType::Text,
-            order: 999,
+            order: 2,
             revision: 0,
             status: StudioPartStatus::Streaming,
             created_at: 10,
@@ -2592,8 +2624,29 @@ mod tests {
             })
             .await
             .unwrap();
+        let mut duplicate_order_part = part.clone();
+        duplicate_order_part.part_id = "turn-1-other-final".to_string();
+        let err = store
+            .append_studio_event(StudioEventEnvelope {
+                event_id: "studio-event-duplicate-order".to_string(),
+                project_id: Some(project.id.clone()),
+                session_id: Some(session.id.clone()),
+                turn_id: Some("turn-1".to_string()),
+                sequence: 0,
+                created_at: 10,
+                kind: StudioEventKind::MessagePartUpdated {
+                    part: Box::new(duplicate_order_part),
+                },
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("part order already exists for message")
+        );
+
         let mut completed_part = part;
-        completed_part.order = 1;
+        completed_part.order = 2;
         completed_part.revision = 1;
         completed_part.status = StudioPartStatus::Completed;
         completed_part.text = "hello".to_string();
@@ -2617,15 +2670,15 @@ mod tests {
         let StudioEventKind::MessagePartUpdated { part } = first_part.kind else {
             panic!("expected first part snapshot");
         };
-        assert_eq!(part.order, 1);
+        assert_eq!(part.order, 2);
         let StudioEventKind::MessagePartUpdated { part } = second_part.kind else {
             panic!("expected second part snapshot");
         };
-        assert_eq!(part.order, 1);
+        assert_eq!(part.order, 2);
 
         let parts = store.load_message_parts(&session.id).await.unwrap();
         assert_eq!(parts.len(), 1);
-        assert_eq!(parts[0].part.order, 1);
+        assert_eq!(parts[0].part.order, 2);
         assert_eq!(parts[0].part.text, "hello");
         assert_eq!(parts[0].sequence, 2);
     }

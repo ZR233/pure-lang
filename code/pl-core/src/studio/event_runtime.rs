@@ -365,6 +365,8 @@ impl StudioEventRuntime {
         let mut part = studio_part_from_trace_part(session_id, item);
         if let Some(existing) = self.store.read_message_part(&part.part_id).await? {
             part.order = existing.part.order;
+        } else {
+            part.order = self.store.next_message_part_order(&part.message_id).await?;
         }
         self.emit(
             None,
@@ -968,5 +970,58 @@ mod tests {
         assert_eq!(messages[0].message.status, StudioMessageStatus::Completed);
         assert_eq!(messages[0].message.created_at, 100);
         assert!(messages[0].message.completed_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn trace_part_order_is_allocated_by_runtime_not_trace_sequence() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/studio").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Part order", CompileMode::Auto)
+            .await
+            .unwrap();
+        let runtime = StudioEventRuntime::new(store.clone());
+
+        let first = TracePart::text(
+            "turn-order",
+            "first-final",
+            999,
+            TraceTextChannel::Final,
+            "first",
+            TracePartStatus::Completed,
+            100,
+        );
+        runtime
+            .emit_agent_event(&session.id, AgentEvent::TracePartCompleted { item: first })
+            .await
+            .unwrap();
+
+        let second = TracePart::text(
+            "turn-order",
+            "second-final",
+            10,
+            TraceTextChannel::Final,
+            "second",
+            TracePartStatus::Completed,
+            101,
+        );
+        runtime
+            .emit_agent_event(&session.id, AgentEvent::TracePartCompleted { item: second })
+            .await
+            .unwrap();
+
+        let parts = store.load_message_parts(&session.id).await.unwrap();
+        let compact = parts
+            .into_iter()
+            .map(|record| (record.part.part_id, record.part.order, record.part.text))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            compact,
+            vec![
+                ("first-final".to_string(), 0, "first".to_string()),
+                ("second-final".to_string(), 1, "second".to_string()),
+            ]
+        );
     }
 }
