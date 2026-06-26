@@ -86,23 +86,207 @@ class TimelineAgentEvent {
     required this.eventId,
     required this.sessionId,
     required this.sequence,
-    required this.callId,
-    required this.kindType,
-    required this.title,
-    required this.text,
-    required this.status,
+    required this.payload,
     required this.createdAt,
   });
 
   final String eventId;
   final String sessionId;
   final int sequence;
-  final String callId;
-  final String kindType;
-  final String title;
-  final String text;
-  final String status;
+  final TimelineAgentEventPayload payload;
   final DateTime createdAt;
+
+  String get callId => payload.callId;
+
+  String get title {
+    return switch (payload) {
+      TimelineAgentSpawnBegin() || TimelineAgentSpawnEnd() =>
+        'agentTimeline.spawn',
+      TimelineAgentInteractionBegin() || TimelineAgentInteractionEnd() =>
+        'agentTimeline.message',
+      TimelineAgentWaitingBegin() || TimelineAgentWaitingEnd() =>
+        'agentTimeline.waiting',
+      TimelineAgentCloseBegin() || TimelineAgentCloseEnd() =>
+        'agentTimeline.close',
+    };
+  }
+
+  String get text => payload.activityText;
+
+  String get status => payload.status;
+}
+
+sealed class TimelineAgentEventPayload {
+  const TimelineAgentEventPayload();
+
+  String get callId;
+
+  String get status => 'completed';
+
+  String get activityText;
+}
+
+class TimelineAgentSpawnBegin extends TimelineAgentEventPayload {
+  const TimelineAgentSpawnBegin({
+    required this.callId,
+    required this.senderPath,
+    required this.taskName,
+    required this.prompt,
+    required this.role,
+    this.model,
+    this.reasoningEffort,
+  });
+
+  @override
+  final String callId;
+  final String senderPath;
+  final String taskName;
+  final String prompt;
+  final String role;
+  final String? model;
+  final String? reasoningEffort;
+
+  @override
+  String get activityText => _agentActivityText([senderPath, taskName, prompt]);
+}
+
+class TimelineAgentSpawnEnd extends TimelineAgentEventPayload {
+  const TimelineAgentSpawnEnd({
+    required this.callId,
+    required this.senderPath,
+    required this.status,
+    required this.prompt,
+    this.agentId,
+    this.path,
+    this.role,
+    this.error,
+  });
+
+  @override
+  final String callId;
+  final String senderPath;
+  @override
+  final String status;
+  final String prompt;
+  final String? agentId;
+  final String? path;
+  final String? role;
+  final String? error;
+
+  @override
+  String get activityText =>
+      _agentActivityText([path, senderPath, prompt, error]);
+}
+
+class TimelineAgentInteractionBegin extends TimelineAgentEventPayload {
+  const TimelineAgentInteractionBegin({
+    required this.callId,
+    required this.senderPath,
+    required this.receiverPath,
+    required this.prompt,
+  });
+
+  @override
+  final String callId;
+  final String senderPath;
+  final String receiverPath;
+  final String prompt;
+
+  @override
+  String get activityText =>
+      _agentActivityText([receiverPath, senderPath, prompt]);
+}
+
+class TimelineAgentInteractionEnd extends TimelineAgentEventPayload {
+  const TimelineAgentInteractionEnd({
+    required this.callId,
+    required this.senderPath,
+    required this.receiverPath,
+    required this.status,
+    required this.prompt,
+    this.error,
+  });
+
+  @override
+  final String callId;
+  final String senderPath;
+  final String receiverPath;
+  @override
+  final String status;
+  final String prompt;
+  final String? error;
+
+  @override
+  String get activityText =>
+      _agentActivityText([receiverPath, senderPath, prompt, error]);
+}
+
+class TimelineAgentWaitingBegin extends TimelineAgentEventPayload {
+  const TimelineAgentWaitingBegin({
+    required this.callId,
+    required this.senderPath,
+  });
+
+  @override
+  final String callId;
+  final String senderPath;
+
+  @override
+  String get activityText => _agentActivityText([senderPath]);
+}
+
+class TimelineAgentWaitingEnd extends TimelineAgentEventPayload {
+  const TimelineAgentWaitingEnd({
+    required this.callId,
+    required this.senderPath,
+    required this.timedOut,
+  });
+
+  @override
+  final String callId;
+  final String senderPath;
+  final bool timedOut;
+
+  @override
+  String get activityText => _agentActivityText([senderPath]);
+}
+
+class TimelineAgentCloseBegin extends TimelineAgentEventPayload {
+  const TimelineAgentCloseBegin({
+    required this.callId,
+    required this.senderPath,
+    required this.receiverPath,
+  });
+
+  @override
+  final String callId;
+  final String senderPath;
+  final String receiverPath;
+
+  @override
+  String get activityText => _agentActivityText([receiverPath, senderPath]);
+}
+
+class TimelineAgentCloseEnd extends TimelineAgentEventPayload {
+  const TimelineAgentCloseEnd({
+    required this.callId,
+    required this.senderPath,
+    required this.receiverPath,
+    required this.status,
+    this.error,
+  });
+
+  @override
+  final String callId;
+  final String senderPath;
+  final String receiverPath;
+  @override
+  final String status;
+  final String? error;
+
+  @override
+  String get activityText =>
+      _agentActivityText([receiverPath, senderPath, error]);
 }
 
 class TimelinePartSnapshot {
@@ -587,11 +771,7 @@ TimelineAgentEvent timelineAgentEventFromPayload(
     eventId: _nonEmpty(eventId, _stringValue(payload['eventId'])),
     sessionId: _nonEmpty(sessionId, _stringValue(payload['sessionId'])),
     sequence: sequence == 0 ? _intValue(payload['sequence']) : sequence,
-    callId: _stringValue(eventKind['callId']) ?? '',
-    kindType: resolvedKindType,
-    title: _agentActivityTitle(resolvedKindType),
-    text: _agentActivityText(eventKind),
-    status: _stringValue(eventKind['status']) ?? 'completed',
+    payload: _agentEventPayloadFromMap(resolvedKindType, eventKind),
     createdAt:
         createdAt ??
         DateTime.fromMillisecondsSinceEpoch(
@@ -645,39 +825,81 @@ int _timelineAgentEventRenderVersion(TimelineAgentEvent event) {
     event.eventId,
     event.sequence,
     event.callId,
-    event.kindType,
     event.title,
     event.text,
     event.status,
+    event.payload.runtimeType,
     event.createdAt.millisecondsSinceEpoch,
   ]);
 }
 
-String _agentActivityTitle(String kindType) {
+TimelineAgentEventPayload _agentEventPayloadFromMap(
+  String kindType,
+  Map<String, Object?> kind,
+) {
   return switch (kindType) {
-    'spawnBegin' || 'spawnEnd' => 'agentTimeline.spawn',
-    'interactionBegin' || 'interactionEnd' => 'agentTimeline.message',
-    'waitingBegin' || 'waitingEnd' => 'agentTimeline.waiting',
-    'closeBegin' || 'closeEnd' => 'agentTimeline.close',
-    _ => 'agentTimeline.agent',
+    'spawnBegin' => TimelineAgentSpawnBegin(
+      callId: _stringValue(kind['callId']) ?? '',
+      senderPath: _stringValue(kind['senderPath']) ?? '',
+      taskName: _stringValue(kind['taskName']) ?? '',
+      prompt: _stringValue(kind['prompt']) ?? '',
+      role: _stringValue(kind['role']) ?? '',
+      model: _stringValue(kind['model']),
+      reasoningEffort: _stringValue(kind['reasoningEffort']),
+    ),
+    'spawnEnd' => TimelineAgentSpawnEnd(
+      callId: _stringValue(kind['callId']) ?? '',
+      senderPath: _stringValue(kind['senderPath']) ?? '',
+      agentId: _stringValue(kind['agentId']),
+      path: _stringValue(kind['path']),
+      role: _stringValue(kind['role']),
+      status: _stringValue(kind['status']) ?? 'completed',
+      prompt: _stringValue(kind['prompt']) ?? '',
+      error: _stringValue(kind['error']),
+    ),
+    'interactionBegin' => TimelineAgentInteractionBegin(
+      callId: _stringValue(kind['callId']) ?? '',
+      senderPath: _stringValue(kind['senderPath']) ?? '',
+      receiverPath: _stringValue(kind['receiverPath']) ?? '',
+      prompt: _stringValue(kind['prompt']) ?? '',
+    ),
+    'interactionEnd' => TimelineAgentInteractionEnd(
+      callId: _stringValue(kind['callId']) ?? '',
+      senderPath: _stringValue(kind['senderPath']) ?? '',
+      receiverPath: _stringValue(kind['receiverPath']) ?? '',
+      status: _stringValue(kind['status']) ?? 'completed',
+      prompt: _stringValue(kind['prompt']) ?? '',
+      error: _stringValue(kind['error']),
+    ),
+    'waitingBegin' => TimelineAgentWaitingBegin(
+      callId: _stringValue(kind['callId']) ?? '',
+      senderPath: _stringValue(kind['senderPath']) ?? '',
+    ),
+    'waitingEnd' => TimelineAgentWaitingEnd(
+      callId: _stringValue(kind['callId']) ?? '',
+      senderPath: _stringValue(kind['senderPath']) ?? '',
+      timedOut: _boolValue(kind['timedOut']),
+    ),
+    'closeBegin' => TimelineAgentCloseBegin(
+      callId: _stringValue(kind['callId']) ?? '',
+      senderPath: _stringValue(kind['senderPath']) ?? '',
+      receiverPath: _stringValue(kind['receiverPath']) ?? '',
+    ),
+    'closeEnd' => TimelineAgentCloseEnd(
+      callId: _stringValue(kind['callId']) ?? '',
+      senderPath: _stringValue(kind['senderPath']) ?? '',
+      receiverPath: _stringValue(kind['receiverPath']) ?? '',
+      status: _stringValue(kind['status']) ?? 'completed',
+      error: _stringValue(kind['error']),
+    ),
+    _ => throw FormatException('Unknown agent timeline event type: $kindType'),
   };
 }
 
-String _agentActivityText(Map<String, Object?> kind) {
-  final receiver = _stringValue(kind['receiverPath']);
-  final path =
-      _stringValue(kind['path']) ??
-      receiver ??
-      _stringValue(kind['senderPath']);
-  final task = _stringValue(kind['taskName']);
-  final prompt = _stringValue(kind['prompt']);
-  final error = _stringValue(kind['error']);
-  return [
-    path,
-    task,
-    prompt,
-    error,
-  ].whereType<String>().where((part) => part.trim().isNotEmpty).join('\n');
+String _agentActivityText(Iterable<String?> parts) {
+  return parts.whereType<String>().where((part) => part.trim().isNotEmpty).join(
+    '\n',
+  );
 }
 
 String _nonEmpty(String? preferred, String? fallback) {
@@ -695,6 +917,13 @@ int _intValue(Object? value) {
     return value.toInt();
   }
   return int.tryParse(_stringValue(value) ?? '') ?? 0;
+}
+
+bool _boolValue(Object? value) {
+  if (value is bool) {
+    return value;
+  }
+  return value.toString() == 'true';
 }
 
 Map<String, Object?> _objectMap(Object? value) {

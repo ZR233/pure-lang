@@ -364,11 +364,7 @@ impl StudioEventRuntime {
             .await?;
         let mut part = studio_part_from_trace_part(session_id, item);
         let existing = self.store.read_message_part(&part.part_id).await?;
-        let next_order = if existing.is_some() {
-            part.order
-        } else {
-            self.store.next_message_part_order(&part.message_id).await?
-        };
+        let next_order = self.store.next_message_part_order(&part.message_id).await?;
         self.prepare_trace_part_snapshot(&mut part, existing.as_ref(), next_order)
             .await;
         let envelope_part = part.clone();

@@ -1378,10 +1378,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           status: dco_decode_String(raw[4]),
           error: dco_decode_opt_String(raw[5]),
         );
-      case 8:
-        return BridgeAgentTimelinePayloadDto_Unknown(
-          kindType: dco_decode_String(raw[1]),
-        );
       default:
         throw Exception("unreachable");
     }
@@ -2792,9 +2788,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           status: var_status,
           error: var_error,
         );
-      case 8:
-        var var_kindType = sse_decode_String(deserializer);
-        return BridgeAgentTimelinePayloadDto_Unknown(kindType: var_kindType);
       default:
         throw UnimplementedError('');
     }
@@ -4563,9 +4556,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(receiverPath, serializer);
         sse_encode_String(status, serializer);
         sse_encode_opt_String(error, serializer);
-      case BridgeAgentTimelinePayloadDto_Unknown(kindType: final kindType):
-        sse_encode_i_32(8, serializer);
-        sse_encode_String(kindType, serializer);
     }
   }
 

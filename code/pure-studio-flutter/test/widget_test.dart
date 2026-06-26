@@ -555,6 +555,7 @@ void main() {
     expect(row.agentEvent!.title, 'agentTimeline.spawn');
     expect(row.agentEvent!.text, contains('root/reviewer'));
     expect(row.agentEvent!.status, 'completed');
+    expect(row.agentEvent!.payload, isA<TimelineAgentSpawnEnd>());
   });
 
   test(
@@ -607,8 +608,22 @@ void main() {
       expect(row.agentEvent!.title, 'agentTimeline.message');
       expect(row.agentEvent!.text, contains('root/worker'));
       expect(row.agentEvent!.text, contains('status'));
+      expect(row.agentEvent!.payload, isA<TimelineAgentInteractionBegin>());
     },
   );
+
+  test('unknown agent timeline kinds fail protocol projection', () {
+    expect(
+      () => timelineAgentEventFromPayload({
+        'eventId': 'agent-event-unknown',
+        'sessionId': 'session-1',
+        'sequence': 1,
+        'createdAt': 1,
+        'kind': {'type': 'mystery', 'callId': 'call-1'},
+      }),
+      throwsA(isA<FormatException>()),
+    );
+  });
 
   test('typed session snapshot filters synthetic lifecycle parts', () {
     const session = frb.SessionDto(

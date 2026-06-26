@@ -355,9 +355,6 @@ pub enum BridgeAgentTimelinePayloadDto {
         status: String,
         error: Option<String>,
     },
-    Unknown {
-        kind_type: String,
-    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1461,7 +1458,7 @@ async fn studio_snapshot_from_projects_inner(
         agent_events: agent_events
             .into_iter()
             .map(agent_event_bridge_dto)
-            .collect(),
+            .collect::<Result<Vec<_>>>()?,
         agents: agents.into_iter().map(agent_bridge_dto).collect(),
         interactions: interactions
             .into_iter()
@@ -1543,7 +1540,7 @@ async fn load_session_state_inner(
         .await?
         .into_iter()
         .map(agent_event_bridge_dto)
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
     let interactions = bridge
         .studio
         .store()
@@ -1635,19 +1632,17 @@ fn agent_bridge_dto(agent: pl_core::StudioAgentSnapshotRecord) -> BridgeAgentSna
 
 fn agent_event_bridge_dto(
     event: pl_core::StudioAgentTimelineEventRecord,
-) -> BridgeAgentTimelineEventDto {
+) -> Result<BridgeAgentTimelineEventDto> {
     let payload = serde_json::from_str::<StudioAgentTimelineEvent>(&event.payload_json)
-        .map(|event| bridge_agent_timeline_payload(event.kind))
-        .unwrap_or_else(|_| BridgeAgentTimelinePayloadDto::Unknown {
-            kind_type: event.kind,
-        });
-    BridgeAgentTimelineEventDto {
+        .with_context(|| format!("invalid agent timeline payload: {}", event.event_id))
+        .map(|event| bridge_agent_timeline_payload(event.kind))?;
+    Ok(BridgeAgentTimelineEventDto {
         event_id: event.event_id,
         session_id: event.session_id,
         sequence: event.sequence.max(0) as u64,
         created_at: event.created_at,
         payload,
-    }
+    })
 }
 
 async fn bridge_session_runtime_view(

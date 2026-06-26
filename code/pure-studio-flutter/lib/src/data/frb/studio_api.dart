@@ -706,18 +706,16 @@ InteractionChangedPayload _interactionChangedPayloadFromFrb(
 TimelineAgentEvent _timelineAgentEventFromFrb(
   frb.BridgeAgentTimelineEventDto event,
 ) {
-  final payload = _agentTimelinePayloadFromFrb(event.payload);
-  return timelineAgentEventFromPayload(
-    payload,
+  return TimelineAgentEvent(
     eventId: event.eventId,
     sessionId: event.sessionId,
     sequence: event.sequence.toInt(),
+    payload: _agentTimelinePayloadFromFrb(event.payload),
     createdAt: _dateFromUnix(event.createdAt),
-    kindType: _string(payload['type']),
   );
 }
 
-Map<String, Object?> _agentTimelinePayloadFromFrb(
+TimelineAgentEventPayload _agentTimelinePayloadFromFrb(
   frb.BridgeAgentTimelinePayloadDto payload,
 ) {
   return switch (payload) {
@@ -730,16 +728,15 @@ Map<String, Object?> _agentTimelinePayloadFromFrb(
       :final model,
       :final reasoningEffort,
     ) =>
-      {
-        'type': 'spawnBegin',
-        'callId': callId,
-        'senderPath': senderPath,
-        'taskName': taskName,
-        'prompt': prompt,
-        'role': role,
-        'model': ?model,
-        'reasoningEffort': ?reasoningEffort,
-      },
+      TimelineAgentSpawnBegin(
+        callId: callId,
+        senderPath: senderPath,
+        taskName: taskName,
+        prompt: prompt,
+        role: role,
+        model: model,
+        reasoningEffort: reasoningEffort,
+      ),
     frb.BridgeAgentTimelinePayloadDto_SpawnEnd(
       :final callId,
       :final senderPath,
@@ -750,30 +747,28 @@ Map<String, Object?> _agentTimelinePayloadFromFrb(
       :final prompt,
       :final error,
     ) =>
-      {
-        'type': 'spawnEnd',
-        'callId': callId,
-        'senderPath': senderPath,
-        'agentId': ?agentId,
-        'path': ?path,
-        'role': ?role,
-        'status': status,
-        'prompt': prompt,
-        'error': ?error,
-      },
+      TimelineAgentSpawnEnd(
+        callId: callId,
+        senderPath: senderPath,
+        agentId: agentId,
+        path: path,
+        role: role,
+        status: status,
+        prompt: prompt,
+        error: error,
+      ),
     frb.BridgeAgentTimelinePayloadDto_InteractionBegin(
       :final callId,
       :final senderPath,
       :final receiverPath,
       :final prompt,
     ) =>
-      {
-        'type': 'interactionBegin',
-        'callId': callId,
-        'senderPath': senderPath,
-        'receiverPath': receiverPath,
-        'prompt': prompt,
-      },
+      TimelineAgentInteractionBegin(
+        callId: callId,
+        senderPath: senderPath,
+        receiverPath: receiverPath,
+        prompt: prompt,
+      ),
     frb.BridgeAgentTimelinePayloadDto_InteractionEnd(
       :final callId,
       :final senderPath,
@@ -782,42 +777,39 @@ Map<String, Object?> _agentTimelinePayloadFromFrb(
       :final prompt,
       :final error,
     ) =>
-      {
-        'type': 'interactionEnd',
-        'callId': callId,
-        'senderPath': senderPath,
-        'receiverPath': receiverPath,
-        'status': status,
-        'prompt': prompt,
-        'error': ?error,
-      },
+      TimelineAgentInteractionEnd(
+        callId: callId,
+        senderPath: senderPath,
+        receiverPath: receiverPath,
+        status: status,
+        prompt: prompt,
+        error: error,
+      ),
     frb.BridgeAgentTimelinePayloadDto_WaitingBegin(
       :final callId,
       :final senderPath,
     ) =>
-      {'type': 'waitingBegin', 'callId': callId, 'senderPath': senderPath},
+      TimelineAgentWaitingBegin(callId: callId, senderPath: senderPath),
     frb.BridgeAgentTimelinePayloadDto_WaitingEnd(
       :final callId,
       :final senderPath,
       :final timedOut,
     ) =>
-      {
-        'type': 'waitingEnd',
-        'callId': callId,
-        'senderPath': senderPath,
-        'timedOut': timedOut,
-      },
+      TimelineAgentWaitingEnd(
+        callId: callId,
+        senderPath: senderPath,
+        timedOut: timedOut,
+      ),
     frb.BridgeAgentTimelinePayloadDto_CloseBegin(
       :final callId,
       :final senderPath,
       :final receiverPath,
     ) =>
-      {
-        'type': 'closeBegin',
-        'callId': callId,
-        'senderPath': senderPath,
-        'receiverPath': receiverPath,
-      },
+      TimelineAgentCloseBegin(
+        callId: callId,
+        senderPath: senderPath,
+        receiverPath: receiverPath,
+      ),
     frb.BridgeAgentTimelinePayloadDto_CloseEnd(
       :final callId,
       :final senderPath,
@@ -825,17 +817,13 @@ Map<String, Object?> _agentTimelinePayloadFromFrb(
       :final status,
       :final error,
     ) =>
-      {
-        'type': 'closeEnd',
-        'callId': callId,
-        'senderPath': senderPath,
-        'receiverPath': receiverPath,
-        'status': status,
-        'error': ?error,
-      },
-    frb.BridgeAgentTimelinePayloadDto_Unknown(:final kindType) => {
-      'type': kindType,
-    },
+      TimelineAgentCloseEnd(
+        callId: callId,
+        senderPath: senderPath,
+        receiverPath: receiverPath,
+        status: status,
+        error: error,
+      ),
   };
 }
 
