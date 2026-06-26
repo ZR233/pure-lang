@@ -2147,6 +2147,9 @@ fn validate_part_update(
     if incoming.order as i64 != existing.part_order {
         bail!("part order cannot change");
     }
+    if incoming.created_at != existing.created_at {
+        bail!("part createdAt cannot change");
+    }
     let incoming_text_channel = incoming
         .text_channel
         .map(studio_text_channel_label)
@@ -2161,6 +2164,45 @@ fn validate_part_update(
             existing.status,
             studio_part_status_label(incoming.status)
         );
+    }
+    if is_terminal_part_status(existing_status) {
+        validate_terminal_part_unchanged(existing, incoming)?;
+    }
+    Ok(())
+}
+
+fn is_terminal_part_status(status: StudioPartStatus) -> bool {
+    matches!(
+        status,
+        StudioPartStatus::Completed
+            | StudioPartStatus::Failed
+            | StudioPartStatus::Interrupted
+            | StudioPartStatus::Denied
+            | StudioPartStatus::BudgetLimited
+    )
+}
+
+fn validate_terminal_part_unchanged(
+    existing: &entities::message_part::Model,
+    incoming: &StudioPart,
+) -> Result<()> {
+    let incoming_completed_at = incoming.completed_at;
+    if incoming.revision as i64 != existing.revision
+        || studio_part_status_label(incoming.status) != existing.status
+        || incoming_completed_at != existing.completed_at
+        || incoming.error != existing.error
+        || incoming.text != existing.text
+        || serde_json::to_string(&incoming.attachments)? != existing.attachments_json
+        || optional_json_string(&incoming.tool)? != existing.tool_json
+        || optional_json_string(&incoming.agent)? != existing.agent_json
+        || optional_json_string(&incoming.inference)? != existing.inference_json
+        || optional_json_string(&incoming.plan)? != existing.plan_json
+        || optional_json_string(&incoming.file)? != existing.file_json
+        || optional_json_string(&incoming.usage)? != existing.usage_json
+        || i32::from(incoming.synthetic) != existing.synthetic
+        || i32::from(incoming.ignored) != existing.ignored
+    {
+        bail!("terminal part cannot change");
     }
     Ok(())
 }
@@ -2699,6 +2741,43 @@ mod tests {
         assert_eq!(parts[0].part.status, StudioPartStatus::Completed);
         assert_eq!(parts[0].part.revision, 1);
         assert_eq!(parts[0].part.text, "done");
+
+        let stored_terminal = parts[0].part.clone();
+        let mut changed_created_at = stored_terminal.clone();
+        changed_created_at.created_at = 9;
+        let err = store
+            .append_studio_event(StudioEventEnvelope {
+                event_id: "studio-event-created-at-change".to_string(),
+                project_id: None,
+                session_id: Some(session.id.clone()),
+                turn_id: Some("turn-1".to_string()),
+                sequence: 0,
+                created_at: 13,
+                kind: StudioEventKind::MessagePartUpdated {
+                    part: Box::new(changed_created_at),
+                },
+            })
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("part createdAt cannot change"));
+
+        let mut changed_terminal_text = stored_terminal;
+        changed_terminal_text.text = "changed".to_string();
+        let err = store
+            .append_studio_event(StudioEventEnvelope {
+                event_id: "studio-event-terminal-content-change".to_string(),
+                project_id: None,
+                session_id: Some(session.id.clone()),
+                turn_id: Some("turn-1".to_string()),
+                sequence: 0,
+                created_at: 14,
+                kind: StudioEventKind::MessagePartUpdated {
+                    part: Box::new(changed_terminal_text),
+                },
+            })
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("terminal part cannot change"));
 
         let mutable_part = StudioPart {
             part_id: "part-mutable".to_string(),

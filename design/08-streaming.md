@@ -47,6 +47,8 @@ snapshot 与 live delta 的优先级完全对齐 opencode：
 - terminal snapshot 到达后，后续 `streaming`、`started` 或低 revision snapshot 不得覆盖 `completed`、`failed`、`interrupted`、`denied`、`budgetLimited` 等终态；revision 不高于当前 overlay/snapshot 的 live delta 不得再修改 part。live delta 的 revision 必须相对当前可见 revision 严格连续递增；发现 revision 跳号时前端必须丢弃该 part 的 live overlay 并触发 session 恢复，不能静默拼接缺失片段后的内容。带 `chunkIndex` 的 delta 必须按 part 去重；重复或倒序 chunk 直接丢弃。
 - reload、历史恢复和 stale backfill 只依赖 durable snapshot；丢失 live delta 不影响最终可恢复状态。
 
+Studio store 持久化 `messagePartUpdated` 前必须在同一事务内验证 part 状态转移。首次创建后的 `partId`、`messageId`、`sessionId`、`turnId`、`partType`、`textChannel`、`order` 和 `createdAt` 不可变；revision 不得倒退；terminal part 不允许被任何后续 snapshot 修改正文、工具结果、附件、错误、usage、synthetic/ignored 或其他内容字段。校验失败的 snapshot 不写入 projection，也不写入 durable `studio_events`。
+
 `bash` 命令运行期间，stdout/stderr chunk 作为原始命令输出追加到原 `bash` tool part 的 `tool.result` live overlay；stderr chunk 由投影层保留来源标记，前端按普通工具结果增量展示。每个 chunk 使用该 tool part 当前 revision 作为基线继续递增，终态 `messagePartUpdated` 携带不低于最后一个输出 delta 的 revision，并以紧凑 JSON 结果固化 snapshot；`write_stdin` 轮询只返回自己的紧凑结果，不把同一后台进程的输出复制成新的父 timeline tool part。
 
 reasoning part 默认只作为折叠的标题/摘要行显示，来源只能是 provider 明确标记的 reasoning summary，并通过 `reasoning.summary` delta 字段进入 Studio。raw reasoning、provider replay metadata 或内部 thinking chunk 可以保留在 provider metadata、`CompletionResponse.reasoning_content` 或历史重放所需结构中，但不得作为 timeline 正文默认展示；只有 Responses native phase，或 Chat provider 明确输出的 `<commentary>`、`<final>` 可见标签段，会被投影成对应 commentary 或 final part。Plan part 只能来自 `plan_exit.content`。
