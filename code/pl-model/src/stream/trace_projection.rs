@@ -354,10 +354,10 @@ impl TraceProjection {
         let item_id = self.namespaced_item_id(&trace_tool_part_id(call.call_id.as_ref(), &call.id));
         let turn_id = self.turn_id.clone();
         let sequence = self.sequence;
-        let item = self
-            .started
-            .entry(item_id.clone())
-            .or_insert_with(|| TracePart {
+        let mut inserted = false;
+        let item = self.started.entry(item_id.clone()).or_insert_with(|| {
+            inserted = true;
+            TracePart {
                 turn_id,
                 item_id: item_id.clone(),
                 started_sequence: sequence,
@@ -385,8 +385,11 @@ impl TraceProjection {
                 agent: None,
                 inference: None,
                 usage: None,
-            });
-        item.status = TracePartStatus::Started;
+            }
+        });
+        if inserted {
+            item.status = TracePartStatus::Started;
+        }
         item.updated_at = now;
         if let Some(tool) = &mut item.tool {
             tool.tool_call_id = item_id.clone();
@@ -498,6 +501,7 @@ mod tests {
     use pl_trace::{AgentEvent, TracePart, TracePartKind};
 
     use super::*;
+    use crate::{ToolCall, ToolCallPayload};
 
     fn trace() -> TraceProjection {
         TraceProjection::new(CompletionTraceContext {
@@ -617,6 +621,36 @@ mod tests {
         assert_eq!(completed.revision, 1);
     }
 
+    #[test]
+    fn update_tool_trace_keeps_streaming_tool_status_after_arguments_delta() {
+        let mut trace = trace();
+        let snapshot = ToolCallAccumulatorSnapshot {
+            id: "provider-tool-1".to_string(),
+            call_id: Some("call-1".to_string()),
+            name: "bash".to_string(),
+            arguments: "{\"cmd\":\"ec".to_string(),
+        };
+        let _ = trace.append_tool_arguments_delta(&snapshot, "{\"cmd\":\"ec".to_string());
+        let updated = trace
+            .update_tool_trace(&ToolCall {
+                id: "provider-tool-1".to_string(),
+                call_id: Some("call-1".to_string()),
+                name: "bash".to_string(),
+                payload: ToolCallPayload::Function {
+                    arguments: serde_json::json!({"cmd": "echo hi"}),
+                },
+            })
+            .into_iter()
+            .find_map(started_tool_item)
+            .expect("updated tool snapshot");
+
+        assert_eq!(updated.item_id, "turn-1-provider-tool-1");
+        assert_eq!(updated.status, TracePartStatus::Streaming);
+        assert_eq!(updated.revision, 1);
+        let tool = updated.tool.expect("tool metadata");
+        assert_eq!(tool.arguments, "{\"cmd\":\"echo hi\"}");
+    }
+
     fn started_sequence(event: AgentEvent) -> Option<u64> {
         match event {
             AgentEvent::TracePartStarted { item } => Some(item.started_sequence),
@@ -726,6 +760,32 @@ mod tests {
             | AgentEvent::Done
             | AgentEvent::Error { .. }
             | AgentEvent::TracePartCompleted { .. } => None,
+        }
+    }
+
+    fn started_tool_item(event: AgentEvent) -> Option<TracePart> {
+        match event {
+            AgentEvent::TracePartStarted { item } if item.kind == TracePartKind::Tool => Some(item),
+            AgentEvent::TracePartDelta { .. }
+            | AgentEvent::TracePartCompleted { .. }
+            | AgentEvent::TracePartFailed { .. }
+            | AgentEvent::InteractionChanged { .. }
+            | AgentEvent::AgentRuntimeUpdated { .. }
+            | AgentEvent::AgentStateChanged { .. }
+            | AgentEvent::CollabAgentSpawnBegin { .. }
+            | AgentEvent::CollabAgentSpawnEnd { .. }
+            | AgentEvent::CollabAgentInteractionBegin { .. }
+            | AgentEvent::CollabAgentInteractionEnd { .. }
+            | AgentEvent::CollabWaitingBegin { .. }
+            | AgentEvent::CollabWaitingEnd { .. }
+            | AgentEvent::CollabCloseBegin { .. }
+            | AgentEvent::CollabCloseEnd { .. }
+            | AgentEvent::TurnInterrupted { .. }
+            | AgentEvent::TurnBudgetLimited { .. }
+            | AgentEvent::SkillActivated { .. }
+            | AgentEvent::Done
+            | AgentEvent::Error { .. }
+            | AgentEvent::TracePartStarted { .. } => None,
         }
     }
 }
