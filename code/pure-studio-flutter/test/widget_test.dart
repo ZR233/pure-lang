@@ -389,6 +389,78 @@ void main() {
     },
   );
 
+  test('typed session snapshot filters synthetic lifecycle parts', () {
+    const session = frb.SessionDto(
+      id: 'session-1',
+      projectId: 'project-1',
+      title: 'Session',
+      mode: 'auto',
+      updatedAt: 1,
+      visibility: 'visible',
+    );
+    final state = studioStateFromFrbSession(
+      frb.BridgeSessionStateResponse(
+        sessionId: 'session-1',
+        session: session,
+        sessions: const [session],
+        messages: [
+          frb.BridgeStudioMessageProjectionDto(
+            message: const frb.BridgeStudioMessageDto(
+              messageId: 'turn-1:assistant',
+              sessionId: 'session-1',
+              turnId: 'turn-1',
+              role: 'assistant',
+              status: 'completed',
+              createdAt: 1,
+              updatedAt: 1,
+            ),
+            sequence: BigInt.from(1),
+          ),
+        ],
+        parts: [
+          frb.BridgeStudioPartProjectionDto(
+            part_: _bridgePartDto(
+              partId: 'turn-1',
+              messageId: 'turn-1:assistant',
+              partType: 'turn',
+              text: 'turn lifecycle',
+              synthetic: true,
+            ),
+            sequence: BigInt.from(2),
+          ),
+          frb.BridgeStudioPartProjectionDto(
+            part_: _bridgePartDto(
+              partId: 'turn-1-inf-1',
+              messageId: 'turn-1:assistant',
+              partType: 'inference',
+              text: 'inference lifecycle',
+              synthetic: true,
+            ),
+            sequence: BigInt.from(3),
+          ),
+          frb.BridgeStudioPartProjectionDto(
+            part_: _bridgePartDto(
+              partId: 'turn-1-final',
+              messageId: 'turn-1:assistant',
+              partType: 'text',
+              text: 'visible answer',
+              textChannel: 'final',
+            ),
+            sequence: BigInt.from(4),
+          ),
+        ],
+        events: const [],
+        eventNextSequence: BigInt.zero,
+        agents: const [],
+        agentEvents: const [],
+        interactions: const [],
+      ),
+    );
+
+    expect(state.partSnapshotsBySession['session-1']!.keys, {'turn-1-final'});
+    expect(state.selectedTimelineRows.single.part!.text, 'visible answer');
+  });
+
   test('session JSON keeps message snapshots free of projected parts', () {
     final state = studioStateFromSessionJson({
       'sessionId': 'session-1',
@@ -488,6 +560,41 @@ void main() {
         ),
       ),
     );
+  });
+
+  test('realtime synthetic lifecycle part updates are ignored', () async {
+    final api = _FakeStudioApi(_emptyState());
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(studioControllerProvider.future);
+    api.emitSession(
+      StudioBridgeEvent.fromFrb(
+        frb.BridgeEventEnvelope(
+          eventId: 'event-1',
+          sessionId: 'session-1',
+          sequence: BigInt.from(1),
+          createdAt: 1,
+          payload: frb.BridgeEventPayload.messagePartUpdated(
+            part_: _bridgePartDto(
+              partId: 'turn-1',
+              messageId: 'turn-1:assistant',
+              partType: 'turn',
+              text: 'turn lifecycle',
+              synthetic: true,
+            ),
+          ),
+        ),
+      ),
+    );
+    await pumpEventQueue();
+
+    final state = container.read(studioControllerProvider).requireValue;
+    expect(state.partSnapshotsBySession['session-1'], isNull);
+    expect(state.selectedTimelineRows, isEmpty);
+    expect(state.eventCursorsBySession['session-1'], 1);
   });
 
   test('studio bridge event normalizes FRB sealed payload', () {
@@ -2700,6 +2807,35 @@ StudioState _stateWithPlannerModels() {
       ),
     ],
     runtime: state.runtime.copyWith(model: 'deepseek-v4-flash'),
+  );
+}
+
+frb.BridgeStudioPartDto _bridgePartDto({
+  required String partId,
+  required String messageId,
+  required String partType,
+  String sessionId = 'session-1',
+  String turnId = 'turn-1',
+  String status = 'completed',
+  String text = '',
+  String? textChannel,
+  bool synthetic = false,
+}) {
+  return frb.BridgeStudioPartDto(
+    partId: partId,
+    messageId: messageId,
+    sessionId: sessionId,
+    turnId: turnId,
+    partType: partType,
+    order: BigInt.zero,
+    revision: BigInt.zero,
+    status: status,
+    createdAt: 1,
+    updatedAt: 1,
+    textChannel: textChannel,
+    text: text,
+    synthetic: synthetic,
+    ignored: false,
   );
 }
 
