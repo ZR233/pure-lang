@@ -17,6 +17,17 @@ pub(super) enum TimelineDeltaDecision {
 }
 
 impl TurnTimelineActor {
+    pub(super) fn prepare_snapshot_order(
+        &self,
+        part: &mut StudioPart,
+        existing: Option<&StudioPartRecord>,
+        next_order: u64,
+    ) {
+        part.order = existing
+            .map(|record| record.part.order)
+            .unwrap_or(next_order);
+    }
+
     pub(super) fn prepare_snapshot(&mut self, part: &mut StudioPart) {
         if is_terminal_studio_part_status(part.status)
             && let Some(live_revision) = self.part_revisions.get(&part.part_id).copied()
@@ -123,6 +134,26 @@ mod tests {
         actor.prepare_snapshot(&mut terminal);
 
         assert_eq!(terminal.revision, 1);
+    }
+
+    #[test]
+    fn snapshot_order_uses_existing_part_or_next_message_order() {
+        let actor = TurnTimelineActor::default();
+        let existing = StudioPartRecord {
+            part: {
+                let mut part = part("part-1", StudioPartStatus::Streaming, 0);
+                part.order = 7;
+                part
+            },
+            sequence: 0,
+        };
+        let mut repeat = part("part-1", StudioPartStatus::Completed, 1);
+        actor.prepare_snapshot_order(&mut repeat, Some(&existing), 42);
+        assert_eq!(repeat.order, 7);
+
+        let mut new_part = part("part-2", StudioPartStatus::Started, 0);
+        actor.prepare_snapshot_order(&mut new_part, None, 42);
+        assert_eq!(new_part.order, 42);
     }
 
     #[test]
