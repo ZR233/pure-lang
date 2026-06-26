@@ -506,20 +506,83 @@ mod tests {
         assert!(matches!(
             events.as_slice(),
             [
+                ModelStreamEvent::TextStarted {
+                    id: commentary_started_id,
+                    channel: TraceTextChannel::Commentary,
+                },
                 ModelStreamEvent::TextDelta {
                     id: commentary_id,
                     channel: TraceTextChannel::Commentary,
                     delta: commentary,
+                },
+                ModelStreamEvent::TextCompleted {
+                    id: commentary_completed_id,
+                    channel: TraceTextChannel::Commentary,
+                    authoritative_text: None,
+                },
+                ModelStreamEvent::TextStarted {
+                    id: final_started_id,
+                    channel: TraceTextChannel::Final,
                 },
                 ModelStreamEvent::TextDelta {
                     id: final_id,
                     channel: TraceTextChannel::Final,
                     delta: final_text,
                 },
-            ] if commentary_id == "commentary"
+                ModelStreamEvent::TextCompleted {
+                    id: final_completed_id,
+                    channel: TraceTextChannel::Final,
+                    authoritative_text: None,
+                },
+            ] if commentary_started_id == "tagged-commentary-1"
+                && commentary_id == commentary_started_id
+                && commentary_completed_id == commentary_started_id
                 && commentary == "working"
-                && final_id == "final"
+                && final_started_id == "tagged-final-2"
+                && final_id == final_started_id
+                && final_completed_id == final_started_id
                 && final_text == "done"
         ));
+    }
+
+    #[test]
+    fn tagged_text_decoder_gives_repeated_tags_distinct_blocks() {
+        let mut decoder = VisibleOutputDecoder::new(VisibleOutputProtocol::TaggedText);
+        let events = decoder.decode(ModelStreamEvent::TextDelta {
+            id: "chat-final".to_string(),
+            channel: TraceTextChannel::Final,
+            delta: "<commentary>A</commentary><commentary>B</commentary>".to_string(),
+        });
+
+        let completed_ids = events
+            .iter()
+            .filter_map(|event| match event {
+                ModelStreamEvent::TextCompleted {
+                    id,
+                    channel: TraceTextChannel::Commentary,
+                    authoritative_text: None,
+                } => Some(id.as_str()),
+                ModelStreamEvent::StepStarted { .. }
+                | ModelStreamEvent::TextStarted { .. }
+                | ModelStreamEvent::TextDelta { .. }
+                | ModelStreamEvent::TextCompleted { .. }
+                | ModelStreamEvent::ReasoningSummaryStarted { .. }
+                | ModelStreamEvent::ReasoningSummaryDelta { .. }
+                | ModelStreamEvent::ReasoningSummaryCompleted { .. }
+                | ModelStreamEvent::ReasoningRawDelta { .. }
+                | ModelStreamEvent::ToolInputStarted { .. }
+                | ModelStreamEvent::ToolInputDelta { .. }
+                | ModelStreamEvent::ToolInputCompleted { .. }
+                | ModelStreamEvent::ToolCallReady { .. }
+                | ModelStreamEvent::Usage(_)
+                | ModelStreamEvent::Completed { .. }
+                | ModelStreamEvent::Failed { .. } => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            completed_ids,
+            vec!["tagged-commentary-1", "tagged-commentary-2"]
+        );
     }
 }
