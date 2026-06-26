@@ -72,6 +72,8 @@ Flutter timeline 协议解析必须严格处理枚举值。未知 `partType` 或
 
 Flutter bridge event 协议解析同样必须严格处理事件类型。实时 stream 使用 FRB `BridgeEventPayload` sealed union；未知或不允许进入 Flutter 的事件是协议错误，应在 FRB/JSON 入口抛出。FRB adapter 必须把事件归一为 typed app `StudioBridgeEventPayload` 后交给 reducer，reducer 不得读取 `payloadJson`/Map 或用 `_ => current` 静默忽略未知事件。`sessionHandoffChanged` 不再作为前端 bridge event 兼容入口；旧 handoff 数据只能通过历史会话列表/查询视图体现，不参与实时 reducer。
 
+`StudioPartType::Turn` 与 `StudioPartType::Inference` 是后端 trace lifecycle synthetic part，只用于恢复 turn/inference 状态与诊断，不是 Studio timeline 可渲染 row。Flutter adapter 在 typed FRB 边界必须过滤历史 snapshot 中的这两类 part，并把实时 `messagePartUpdated` 中的这两类 part 归一为 no-op；其他未知 `partType` 仍应抛出协议错误。
+
 ## 3. Timeline Projection
 
 Timeline row 从 `messages + parts + partTextAccumDelta + agentTimelineEvents` 派生，不从 raw event 渲染。Flutter 使用 `TimelineRow` view model 承载 row 类型，`TimelineView` 只消费 rows，不直接消费 message snapshot。row key 只由稳定领域身份组成：

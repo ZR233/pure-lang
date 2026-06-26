@@ -638,7 +638,9 @@ class StudioController extends AsyncNotifier<StudioState> {
         current,
         state,
       ),
-      StalePayload() || SettingsDraftSavedPayload() => current,
+      StalePayload() ||
+      IgnoredBridgeEventPayload() ||
+      SettingsDraftSavedPayload() => current,
     };
   }
 

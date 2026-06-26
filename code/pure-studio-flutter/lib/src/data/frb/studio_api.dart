@@ -480,6 +480,10 @@ final class StalePayload extends StudioBridgeEventPayload {
   final int laggedEvents;
 }
 
+final class IgnoredBridgeEventPayload extends StudioBridgeEventPayload {
+  const IgnoredBridgeEventPayload();
+}
+
 final class SettingsDraftSavedPayload extends StudioBridgeEventPayload {
   const SettingsDraftSavedPayload({required this.section, required this.saved});
 
@@ -516,9 +520,11 @@ StudioBridgeEventPayload _bridgePayloadFromFrb(
     frb.BridgeEventPayload_MessageRemoved(:final messageId) =>
       MessageRemovedPayload(messageId: messageId),
     frb.BridgeEventPayload_MessagePartUpdated(:final part_) =>
-      MessagePartUpdatedPayload(
-        part: _timelinePartSnapshotFromFrb(part_, sequence: itemSequence),
-      ),
+      _isIgnoredTimelinePartType(part_.partType)
+          ? const IgnoredBridgeEventPayload()
+          : MessagePartUpdatedPayload(
+              part: _timelinePartSnapshotFromFrb(part_, sequence: itemSequence),
+            ),
     frb.BridgeEventPayload_MessagePartRemoved(
       :final messageId,
       :final partId,
@@ -1028,6 +1034,7 @@ StudioState studioStateFromFrbSession(frb.BridgeSessionStateResponse value) {
         )
         .toList(),
     parts: value.parts
+        .where((item) => !_isIgnoredTimelinePartType(item.part_.partType))
         .map(
           (item) => _timelinePartSnapshotFromFrb(
             item.part_,
@@ -1996,6 +2003,10 @@ TimelinePartType _partType(String value) {
     'agent' => TimelinePartType.agent,
     _ => throw FormatException('Unknown timeline part type: $value'),
   };
+}
+
+bool _isIgnoredTimelinePartType(String value) {
+  return value == 'turn' || value == 'inference';
 }
 
 CompileMode _compileMode(Object? value) {
