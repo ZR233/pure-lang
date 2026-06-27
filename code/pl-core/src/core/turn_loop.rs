@@ -20,6 +20,7 @@ use super::PureCore;
 use super::SUBAGENT_DISPATCH_CONSTRAINT;
 use super::SUBAGENT_FORCE_DISPATCH_INSTRUCTION;
 use super::permission::cancellation_reason;
+use super::progress::{ProgressEmitter, ProgressVerbosity};
 use super::tool_dispatch::{
     ToolExecutionContext, ToolExecutionError, execute_tool_calls,
     tool_results_include_recoverable_subagent_capacity,
@@ -82,6 +83,12 @@ pub(super) async fn run_turn_with_trace(
     record_enabled_tools(recorder, &turn_id, request.mode, &tool_schemas);
     let turn_item = recorder.turn_item(&turn_id, TracePartStatus::Running);
     recorder.start_item(turn_item.clone());
+    let mut progress = ProgressEmitter::new(
+        recorder.sender().clone(),
+        turn_id.clone(),
+        ProgressVerbosity::from_env(),
+    );
+    progress.milestone("已接收请求，正在准备上下文。");
     let model = provider.default_model().to_string();
 
     let mut last_content = String::new();
@@ -185,6 +192,7 @@ pub(super) async fn run_turn_with_trace(
                     request_messages: &instruction_bundle.prelude_messages,
                     trigger: compaction_trigger,
                     event_tx: recorder.sender().clone(),
+                    progress: Some(&mut progress),
                 },
             )
             .await;
@@ -236,6 +244,11 @@ pub(super) async fn run_turn_with_trace(
             materialize_messages(session.messages(), &request.materialized_attachments)?;
         let mut messages = instruction_bundle.prelude_messages.clone();
         messages.extend(history_messages.clone());
+        if iteration == 0 {
+            progress.milestone("上下文已整理，准备调用模型。");
+        } else {
+            progress.milestone("工具结果已写入上下文，准备继续调用模型。");
+        }
 
         let inference_id = format!("{turn_id}-inf-{iteration}");
         let mut inference_item = recorder.inference_item(&turn_id, &inference_id, &model);
@@ -262,6 +275,8 @@ pub(super) async fn run_turn_with_trace(
                 trace_sequence_base: recorder.current_sequence(),
             }),
         };
+        progress.heartbeat("正在等待模型响应。");
+        progress.debug(format!("模型 `{model}` 流式请求已发起。"));
 
         let response_result = match &cancellation_token {
             Some(token) => {
@@ -367,6 +382,7 @@ pub(super) async fn run_turn_with_trace(
         last_model = actual_model;
 
         if tool_calls.is_empty() {
+            progress.milestone("模型已完成正文生成。");
             if looks_like_unexecuted_tool_call_text(&content) {
                 return Ok(failed_turn_result(
                     recorder,
@@ -424,6 +440,7 @@ pub(super) async fn run_turn_with_trace(
         if response_reached_auto_compact_limit {
             provider_prompt_tokens_for_compaction = Some(response_prompt_tokens);
         }
+        progress.tool(format!("模型请求调用 {} 个工具。", tool_calls.len()));
 
         let tool_results = match execute_tool_calls(
             &tool_calls,
@@ -466,6 +483,7 @@ pub(super) async fn run_turn_with_trace(
         if tool_results_include_recoverable_subagent_capacity(&tool_results) {
             subagent_dispatch_recovered = true;
         }
+        progress.tool("工具执行完成，准备回写结果。");
         if request.mode == CompileMode::Plan {
             record_plan_exit_items(recorder, &turn_id, &tool_results);
         }
@@ -544,6 +562,7 @@ pub(super) async fn run_turn_with_trace(
         total_tokens: total_usage.total_tokens,
     });
     recorder.complete_item(completed_turn_item);
+    progress.milestone("本轮已完成。");
     recorder.broadcast(AgentEvent::Done);
 
     Ok(TurnResult {

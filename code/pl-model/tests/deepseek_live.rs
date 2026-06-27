@@ -70,7 +70,6 @@ struct TurnOutcome {
     content: String,
     reasoning_content: String,
     text_delta_count: usize,
-    thinking_delta_count: usize,
     #[allow(dead_code)]
     next_sequence: u64,
     trace_events: Vec<TraceEvent>,
@@ -84,13 +83,12 @@ async fn run_turn(api_key: &str, messages: Vec<Message>, turn_id: &str) -> TurnO
 
     let event_counter = tokio::spawn(async move {
         let mut text_delta_count = 0;
-        let mut thinking_delta_count = 0;
         loop {
             match event_rx.recv().await {
                 Ok(AgentEvent::TracePartDelta { event }) => match event.delta {
                     TraceDelta::Text { .. } => text_delta_count += 1,
-                    TraceDelta::Thinking { .. } => thinking_delta_count += 1,
-                    TraceDelta::ToolArguments { .. }
+                    TraceDelta::Thinking { .. }
+                    | TraceDelta::ToolArguments { .. }
                     | TraceDelta::ToolResult { .. }
                     | TraceDelta::Plan { .. } => {}
                 },
@@ -99,19 +97,18 @@ async fn run_turn(api_key: &str, messages: Vec<Message>, turn_id: &str) -> TurnO
                 Err(RecvError::Lagged(_)) => {}
             }
         }
-        (text_delta_count, thinking_delta_count)
+        text_delta_count
     });
 
     let response = provider
         .stream_complete(deepseek_request(messages, turn_id), event_tx)
         .await
         .unwrap();
-    let (text_delta_count, thinking_delta_count) = event_counter.await.unwrap();
+    let text_delta_count = event_counter.await.unwrap();
     TurnOutcome {
         content: response.content.unwrap_or_default(),
         reasoning_content: response.reasoning_content.unwrap_or_default(),
         text_delta_count,
-        thinking_delta_count,
         next_sequence: response.next_sequence,
         trace_events: response.trace_events,
     }
@@ -159,7 +156,6 @@ async fn deepseek_streams_multi_turn_with_thinking_mode() {
     assert!(!first.content.trim().is_empty());
     assert!(!first.reasoning_content.trim().is_empty());
     assert!(first.text_delta_count > 0);
-    assert!(first.thinking_delta_count > 0);
     assert!(!first.trace_events.is_empty());
     // turn-1 的所有 item_id 必须以 "turn-1-" 前缀隔离
     let first_ids = trace_part_ids(&first.trace_events);

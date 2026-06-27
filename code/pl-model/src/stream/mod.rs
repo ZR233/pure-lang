@@ -18,7 +18,7 @@ use crate::request::{
 
 use event::{ModelBlockContent, ModelBlockField, ModelBlockKind, ModelStreamEvent};
 use lifecycle::StreamLifecycle;
-use tagged_output::TaggedVisibleOutputAdapter;
+use tagged_output::{TaggedOutputDiagnostics, TaggedVisibleOutputAdapter};
 use tool_stream::ToolStream;
 use trace_projection::TraceProjection;
 
@@ -47,6 +47,7 @@ pub(crate) async fn process_provider_stream(
         }
     }
 
+    visible_output.record_diagnostics();
     accumulator.finish(event_tx)
 }
 
@@ -520,6 +521,24 @@ impl VisibleOutputDecoder {
             Self::TaggedText(decoder) => decoder.adapt(event),
         }
     }
+
+    pub(crate) fn diagnostics(&self) -> TaggedOutputDiagnostics {
+        match self {
+            Self::NativePhases => TaggedOutputDiagnostics::default(),
+            Self::TaggedText(decoder) => decoder.diagnostics(),
+        }
+    }
+
+    fn record_diagnostics(&self) {
+        let diagnostics = self.diagnostics();
+        if diagnostics.untagged_visible_text_segments == 0 {
+            return;
+        }
+        eprintln!(
+            "[pl-model] tagged visible output contained {} untagged visible text segment(s), {} char(s); using fallback final text",
+            diagnostics.untagged_visible_text_segments, diagnostics.untagged_visible_text_chars
+        );
+    }
 }
 
 #[cfg(test)]
@@ -619,6 +638,46 @@ mod tests {
                 && final_completed_id == final_started_id
                 && final_text == "done"
         ));
+    }
+
+    #[test]
+    fn tagged_text_decoder_records_untagged_visible_text_diagnostic() {
+        let mut decoder = VisibleOutputDecoder::new(VisibleOutputProtocol::TaggedText);
+        let events = decoder.decode(ModelStreamEvent::text_delta(
+            "chat-final".to_string(),
+            TraceTextChannel::Final,
+            "plain fallback".to_string(),
+        ));
+
+        assert!(matches!(
+            events.as_slice(),
+            [
+                ModelStreamEvent::BlockOpened {
+                    id,
+                    kind: ModelBlockKind::Text {
+                        channel: TraceTextChannel::Final,
+                    },
+                    ..
+                },
+                ModelStreamEvent::BlockDelta {
+                    id: delta_id,
+                    kind: ModelBlockKind::Text {
+                        channel: TraceTextChannel::Final,
+                    },
+                    field: ModelBlockField::Text,
+                    delta,
+                    ..
+                },
+            ] if id == "tagged-final-1"
+                && delta_id == id
+                && delta == "plain fallback"
+        ));
+        let diagnostics = decoder.diagnostics();
+        assert_eq!(diagnostics.untagged_visible_text_segments, 1);
+        assert_eq!(
+            diagnostics.untagged_visible_text_chars,
+            "plain fallback".len()
+        );
     }
 
     #[test]

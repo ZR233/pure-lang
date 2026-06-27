@@ -19,6 +19,7 @@ use crate::turn::{BudgetTracker, ToolApprovalDecision, ToolExecutionMode, TurnOp
 
 use super::PureCore;
 use super::permission::{approval_request, request_user_approval, requested_workspace_access};
+use super::progress::{ProgressEmitter, ProgressVerbosity};
 use super::turn_result::{is_cancelled, tool_allowed_in_mode, unix_seconds};
 
 pub(super) struct ToolExecutionRecord {
@@ -95,6 +96,12 @@ pub(super) async fn execute_tool_calls(
 ) -> Result<Vec<ToolExecutionRecord>, ToolExecutionError> {
     let mut scheduled = Vec::new();
     let runtime_lock = Arc::new(RwLock::new(()));
+    let mut progress = ProgressEmitter::new_scoped(
+        recorder.sender().clone(),
+        context.session_id.to_string(),
+        format!("{}:tool-progress", context.session_id),
+        ProgressVerbosity::from_env(),
+    );
 
     for tool_call in tool_calls {
         if is_cancelled(context.options) {
@@ -214,6 +221,7 @@ pub(super) async fn execute_tool_calls(
             }
             PermissionDecision::NeedsUserApproval { workspace_access } => {
                 emit_tool_snapshot(recorder, &mut item, TracePartStatus::AwaitingApproval);
+                progress.tool(format!("工具 `{}` 正在等待授权。", tool_call.name));
                 let decision =
                     request_user_approval(context.options, &approval_request, context.session_id)
                         .await;
@@ -232,6 +240,7 @@ pub(super) async fn execute_tool_calls(
             }
             PermissionDecision::NeedsAiReview { workspace_access } => {
                 emit_tool_snapshot(recorder, &mut item, TracePartStatus::AwaitingApproval);
+                progress.tool(format!("正在审查工具 `{}`。", tool_call.name));
                 let mut review_context = tool_context.clone();
                 review_context.workspace_access = workspace_access;
                 let decision = context
@@ -280,6 +289,7 @@ pub(super) async fn execute_tool_calls(
                 tool_context.workspace_access = execution_workspace_access;
                 emit_tool_snapshot(recorder, &mut item, TracePartStatus::Approved);
                 emit_tool_snapshot(recorder, &mut item, TracePartStatus::Running);
+                progress.tool(tool_start_progress_message(&tool_call.name));
                 let invocation =
                     ToolInvocation::from_tool_call(tool_call, trace_part_id.clone(), tool_context);
                 let _runtime_identity = (
@@ -340,7 +350,7 @@ pub(super) async fn execute_tool_calls(
         }
     }
 
-    collect_scheduled_tools(scheduled, recorder, context.options).await
+    collect_scheduled_tools(scheduled, recorder, context.options, &mut progress).await
 }
 
 pub(super) fn namespaced_tool_trace_part_id(turn_id: &str, tool_call_id: &str) -> String {
@@ -406,6 +416,7 @@ async fn collect_scheduled_tools(
     scheduled: Vec<ScheduledToolExecution<'_>>,
     recorder: &mut crate::trace::TraceRecorder,
     options: &TurnOptions,
+    progress: &mut ProgressEmitter,
 ) -> Result<Vec<ToolExecutionRecord>, ToolExecutionError> {
     let mut pending = BTreeMap::new();
     let mut futures = FuturesUnordered::new();
@@ -435,6 +446,7 @@ async fn collect_scheduled_tools(
                         for (index, (tool_call, item)) in pending {
                             let record = interrupted_tool_execution_record(tool_call);
                             finalize_tool_item(recorder, item, &record);
+                            emit_tool_progress(progress, &record);
                             ordered_records[index] = Some(record);
                         }
                         return Ok(ordered_records.into_iter().flatten().collect());
@@ -458,10 +470,62 @@ async fn collect_scheduled_tools(
             }
         };
         finalize_tool_item(recorder, item, &record);
+        emit_tool_progress(progress, &record);
         ordered_records[index] = Some(record);
     }
 
     Ok(ordered_records.into_iter().flatten().collect())
+}
+
+fn emit_tool_progress(progress: &mut ProgressEmitter, record: &ToolExecutionRecord) {
+    progress.tool(tool_terminal_progress_message(record));
+}
+
+fn tool_start_progress_message(name: &str) -> String {
+    match name {
+        "plan_exit" => "正在提交计划。".to_string(),
+        "request_user_input" => "正在等待用户输入。".to_string(),
+        "spawn_agent" => "正在创建子代理。".to_string(),
+        "wait_agent" => "正在等待子代理。".to_string(),
+        "list_agents" => "正在检查子代理状态。".to_string(),
+        "send_message" => "正在给子代理发送消息。".to_string(),
+        "followup_task" => "正在给子代理追加任务。".to_string(),
+        "close_agent" => "正在关闭子代理。".to_string(),
+        _ => format!("正在执行工具 `{name}`。"),
+    }
+}
+
+fn tool_terminal_progress_message(record: &ToolExecutionRecord) -> String {
+    let name = &record.name;
+    match record.status {
+        TracePartStatus::Completed => match name.as_str() {
+            "plan_exit" => "计划已生成，等待确认。".to_string(),
+            "request_user_input" => "用户输入已收到。".to_string(),
+            "spawn_agent" => "子代理已创建。".to_string(),
+            "wait_agent" if record.timed_out => "等待子代理已超时。".to_string(),
+            "wait_agent" => "子代理等待已结束。".to_string(),
+            "list_agents" => "子代理状态已更新。".to_string(),
+            "send_message" => "子代理消息已发送。".to_string(),
+            "followup_task" => "子代理任务已追加。".to_string(),
+            "close_agent" => "子代理已关闭。".to_string(),
+            _ => format!("工具 `{name}` 已完成。"),
+        },
+        TracePartStatus::Denied => format!("工具 `{name}` 已拒绝。"),
+        TracePartStatus::Failed => match name.as_str() {
+            "plan_exit" => "计划提交失败。".to_string(),
+            "request_user_input" => "用户输入请求失败。".to_string(),
+            "spawn_agent" | "wait_agent" | "list_agents" | "send_message" | "followup_task"
+            | "close_agent" => format!("子代理工具 `{name}` 执行失败。"),
+            _ => format!("工具 `{name}` 执行失败。"),
+        },
+        TracePartStatus::Interrupted => format!("工具 `{name}` 已中断。"),
+        TracePartStatus::BudgetLimited => format!("工具 `{name}` 因预算限制停止。"),
+        TracePartStatus::Started
+        | TracePartStatus::Streaming
+        | TracePartStatus::AwaitingApproval
+        | TracePartStatus::Approved
+        | TracePartStatus::Running => format!("工具 `{name}` 已结束。"),
+    }
 }
 
 fn emit_tool_snapshot(
@@ -714,7 +778,29 @@ pub(super) fn tool_results_include_recoverable_subagent_capacity(
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use super::redact_user_input_display_result;
+    use super::{
+        ToolExecutionRecord, redact_user_input_display_result, tool_start_progress_message,
+        tool_terminal_progress_message,
+    };
+    use pl_protocol::ToolCallKind;
+    use pl_trace::TracePartStatus;
+
+    fn completed_record(name: &str) -> ToolExecutionRecord {
+        ToolExecutionRecord {
+            id: "item-1".to_string(),
+            call_id: None,
+            name: name.to_string(),
+            kind: ToolCallKind::Function,
+            result: String::new(),
+            display_result: String::new(),
+            arguments: "{}".to_string(),
+            status: TracePartStatus::Completed,
+            exit_code: None,
+            timed_out: false,
+            revision: None,
+            runtime_events: Vec::new(),
+        }
+    }
 
     #[test]
     fn redacts_secret_user_input_answers_for_display() {
@@ -742,6 +828,39 @@ mod tests {
                     "mode": { "answers": ["Fast"] }
                 }
             })
+        );
+    }
+
+    #[test]
+    fn progress_messages_describe_plan_and_subagent_lifecycle() {
+        assert_eq!(tool_start_progress_message("plan_exit"), "正在提交计划。");
+        assert_eq!(
+            tool_terminal_progress_message(&completed_record("plan_exit")),
+            "计划已生成，等待确认。"
+        );
+        assert_eq!(
+            tool_start_progress_message("spawn_agent"),
+            "正在创建子代理。"
+        );
+        assert_eq!(
+            tool_terminal_progress_message(&completed_record("spawn_agent")),
+            "子代理已创建。"
+        );
+        assert_eq!(
+            tool_start_progress_message("wait_agent"),
+            "正在等待子代理。"
+        );
+        assert_eq!(
+            tool_terminal_progress_message(&completed_record("wait_agent")),
+            "子代理等待已结束。"
+        );
+        assert_eq!(
+            tool_start_progress_message("read_file"),
+            "正在执行工具 `read_file`。"
+        );
+        assert_eq!(
+            tool_terminal_progress_message(&completed_record("read_file")),
+            "工具 `read_file` 已完成。"
         );
     }
 }

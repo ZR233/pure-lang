@@ -6,6 +6,7 @@ use pl_model::{
 use pl_protocol::{ContentPart, Message, MessageContent, MessageRole, PureError, Result};
 use pl_trace::AgentEventSender;
 
+use crate::core::progress::ProgressEmitter;
 use crate::session::CoreSession;
 
 const COMPACT_PROMPT: &str = include_str!("../prompts/compact.md");
@@ -34,25 +35,32 @@ pub(crate) struct ContextCompactionRequest<'a> {
     pub request_messages: &'a [Message],
     pub trigger: CompactionTrigger,
     pub event_tx: AgentEventSender,
+    pub progress: Option<&'a mut ProgressEmitter>,
 }
 
 pub(crate) async fn maybe_compact_session(
     session: &mut CoreSession,
     request: ContextCompactionRequest<'_>,
 ) -> Result<CompactionOutcome> {
-    let model_info = request.provider.model_info(request.model);
+    let ContextCompactionRequest {
+        provider,
+        model,
+        request_instructions,
+        request_messages,
+        trigger,
+        event_tx,
+        mut progress,
+    } = request;
+    let model_info = provider.model_info(model);
     let Some(limit) = model_info.resolved_auto_compact_limit() else {
         return Ok(CompactionOutcome::Skipped);
     };
     if !has_compactable_history(session.messages()) {
         return Ok(CompactionOutcome::Skipped);
     }
-    let estimated_tokens = estimate_request_tokens(
-        request.request_instructions,
-        request.request_messages,
-        session.messages(),
-    );
-    let should_compact = match request.trigger {
+    let estimated_tokens =
+        estimate_request_tokens(request_instructions, request_messages, session.messages());
+    let should_compact = match trigger {
         CompactionTrigger::EstimatedTokens => estimated_tokens >= limit,
         CompactionTrigger::ProviderPromptTokens(prompt_tokens) => {
             prompt_tokens >= limit || estimated_tokens >= limit
@@ -62,11 +70,14 @@ pub(crate) async fn maybe_compact_session(
         return Ok(CompactionOutcome::Skipped);
     }
 
+    if let Some(progress) = progress.as_deref_mut() {
+        progress.milestone("上下文接近上限，正在压缩历史。");
+    }
     let mut messages = session.messages().to_vec();
     let max_tokens = Some(model_info.max_output_tokens.unwrap_or(4096).min(4096));
     loop {
         let completion_request = CompletionRequest {
-            model: request.model.to_string(),
+            model: model.to_string(),
             instructions: Some(COMPACT_PROMPT.to_string()),
             messages: compaction_prompt_messages(&messages),
             tools: Vec::new(),
@@ -78,13 +89,15 @@ pub(crate) async fn maybe_compact_session(
             stream: true,
             trace: None,
         };
-        let response = match request
-            .provider
-            .stream_complete(completion_request, request.event_tx.clone())
+        let response = match provider
+            .stream_complete(completion_request, event_tx.clone())
             .await
         {
             Ok(response) => response,
             Err(error) if can_retry_compaction(&error, &mut messages) => {
+                if let Some(progress) = progress.as_deref_mut() {
+                    progress.milestone("上下文压缩请求过大，正在缩小历史后重试。");
+                }
                 continue;
             }
             Err(error) => return Err(error),
@@ -99,6 +112,9 @@ pub(crate) async fn maybe_compact_session(
         };
         let replacement = build_compacted_history(&messages, &summary);
         session.replace_messages(replacement);
+        if let Some(progress) = progress.as_deref_mut() {
+            progress.milestone("上下文已压缩，继续准备模型调用。");
+        }
         return Ok(CompactionOutcome::Compacted {
             usage: response.usage,
         });
@@ -255,7 +271,12 @@ fn estimate_text_tokens(text: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::progress::{ProgressEmitter, ProgressVerbosity};
+    use pl_model::{ModelInfo, ProviderInfo, create_provider_with_models};
+    use pl_trace::{AgentEvent, TracePartSource};
     use pretty_assertions::assert_eq;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     fn text_message(role: MessageRole, text: &str) -> Message {
         Message {
@@ -309,10 +330,140 @@ mod tests {
         assert!(!has_compactable_history(&messages));
     }
 
+    #[tokio::test]
+    async fn context_compaction_retry_emits_runtime_progress() {
+        let summary_sse = concat!(
+            "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_summary\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_summary\",\"delta\":\"summary\"}\n\n",
+            "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_summary\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"summary\"}]}}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let (base_url, handle) = serve_http_responses(vec![
+            http_response(
+                "400 Bad Request",
+                "text/plain",
+                "context token limit exceeded",
+            ),
+            http_response("200 OK", "text/event-stream", summary_sse),
+        ])
+        .await;
+        let mut provider_info = ProviderInfo::openai(Some(base_url));
+        provider_info.bearer_token = Some("test-token".to_string());
+        provider_info.default_model = "compact-test".to_string();
+        let mut model = ModelInfo::fallback("compact-test");
+        model.context_window = Some(100);
+        model.max_context_window = Some(100);
+        model.auto_compact_token_limit = Some(1);
+        let provider = create_provider_with_models(provider_info, vec![model]).unwrap();
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
+        let mut progress =
+            ProgressEmitter::new(event_tx.clone(), "turn-compact", ProgressVerbosity::Normal);
+        let mut session = CoreSession::new();
+        session.push_user_prompt("old request ".repeat(20));
+        session.push_assistant_response("old answer ".repeat(20), None);
+        session.push_user_prompt("latest request ".repeat(20));
+
+        let outcome = maybe_compact_session(
+            &mut session,
+            ContextCompactionRequest {
+                provider: &provider,
+                model: "compact-test",
+                request_instructions: "",
+                request_messages: &[],
+                trigger: CompactionTrigger::EstimatedTokens,
+                event_tx,
+                progress: Some(&mut progress),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(outcome, CompactionOutcome::Compacted { .. }));
+        assert_eq!(handle.await.unwrap(), 2);
+        assert_eq!(
+            runtime_progress_texts(&mut event_rx),
+            vec![
+                "上下文接近上限，正在压缩历史。".to_string(),
+                "上下文压缩请求过大，正在缩小历史后重试。".to_string(),
+                "上下文已压缩，继续准备模型调用。".to_string(),
+            ]
+        );
+    }
+
     fn message_text(message: &Message) -> &str {
         match &message.content {
             MessageContent::Text(text) => text,
             MessageContent::MultiPart(_) => panic!("expected text message"),
         }
+    }
+
+    fn runtime_progress_texts(
+        event_rx: &mut tokio::sync::broadcast::Receiver<AgentEvent>,
+    ) -> Vec<String> {
+        let mut texts = Vec::new();
+        while let Ok(event) = event_rx.try_recv() {
+            if let AgentEvent::TracePartCompleted { item } = event
+                && item.source == TracePartSource::Runtime
+            {
+                texts.push(item.content);
+            }
+        }
+        texts
+    }
+
+    async fn serve_http_responses(
+        responses: Vec<String>,
+    ) -> (String, tokio::task::JoinHandle<usize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            let mut served = 0;
+            for response in responses {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                read_http_request(&mut socket).await;
+                socket.write_all(response.as_bytes()).await.unwrap();
+                socket.shutdown().await.unwrap();
+                served += 1;
+            }
+            served
+        });
+
+        (format!("http://{addr}"), handle)
+    }
+
+    async fn read_http_request(socket: &mut tokio::net::TcpStream) {
+        let mut buffer = Vec::new();
+        let mut temp = [0_u8; 1024];
+        let (header_end, content_length) = loop {
+            let n = socket.read(&mut temp).await.unwrap();
+            assert_ne!(n, 0);
+            buffer.extend_from_slice(&temp[..n]);
+            if let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+                let headers = String::from_utf8_lossy(&buffer[..header_end]);
+                let content_length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())?
+                    })
+                    .unwrap_or(0);
+                break (header_end, content_length);
+            }
+        };
+
+        while buffer.len() < header_end + 4 + content_length {
+            let n = socket.read(&mut temp).await.unwrap();
+            assert_ne!(n, 0);
+            buffer.extend_from_slice(&temp[..n]);
+        }
+    }
+
+    fn http_response(status: &str, content_type: &str, body: &str) -> String {
+        format!(
+            "HTTP/1.1 {status}\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        )
     }
 }

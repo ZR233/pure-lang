@@ -967,6 +967,29 @@ void main() {
     expect(state.eventCursorsBySession['session-1'], 1);
   });
 
+  test('live stale events do not advance durable cursor', () async {
+    final api = _FakeStudioApi(
+      _emptyState().copyWith(eventCursorsBySession: const {'session-1': 1}),
+    );
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(studioControllerProvider.future);
+    api.emitSession(
+      StudioBridgeEvent(
+        sessionId: 'session-1',
+        sequence: BigInt.from(9),
+        payload: const StalePayload(laggedEvents: 1),
+      ),
+    );
+    await pumpEventQueue();
+
+    final state = container.read(studioControllerProvider).requireValue;
+    expect(state.eventCursorsBySession['session-1'], 1);
+  });
+
   test('studio bridge event normalizes FRB sealed payload', () {
     final event = StudioBridgeEvent.fromFrb(
       frb.BridgeEventEnvelope(
@@ -1640,6 +1663,95 @@ void main() {
     expect(find.textContaining('hidden raw reasoning'), findsNothing);
     expect(find.textContaining('Next steps'), findsOneWidget);
     expect(find.textContaining('Analyze'), findsOneWidget);
+  });
+
+  testWidgets('timeline groups consecutive synthetic commentary rows', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final now = DateTime.fromMillisecondsSinceEpoch(0);
+    final message = TimelineMessage(
+      id: 'message-progress',
+      sessionId: 'session-1',
+      role: 'assistant',
+      createdAt: now,
+    );
+    const parts = [
+      TimelinePart(
+        id: 'progress-1',
+        messageId: 'message-progress',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        type: TimelinePartType.text,
+        order: 0,
+        textChannel: TimelineTextChannel.commentary,
+        text: '已接收请求，正在准备上下文。',
+        synthetic: true,
+      ),
+      TimelinePart(
+        id: 'progress-2',
+        messageId: 'message-progress',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        type: TimelinePartType.text,
+        order: 1,
+        textChannel: TimelineTextChannel.commentary,
+        text: '正在执行工具 `bash`。',
+        synthetic: true,
+      ),
+      TimelinePart(
+        id: 'progress-3',
+        messageId: 'message-progress',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        type: TimelinePartType.text,
+        order: 2,
+        textChannel: TimelineTextChannel.commentary,
+        text: '工具 `bash` 已完成。',
+        synthetic: true,
+      ),
+      TimelinePart(
+        id: 'final-1',
+        messageId: 'message-progress',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        type: TimelinePartType.text,
+        order: 3,
+        textChannel: TimelineTextChannel.finalAnswer,
+        text: '最终答复保持独立。',
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _localizedApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 820,
+            child: TimelineView(
+              sessionId: 'session-1',
+              rows: timelineRowsFromMessages([message], parts: parts),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('工具 `bash` 已完成。'), findsOneWidget);
+    expect(find.text('已接收请求，正在准备上下文。'), findsNothing);
+    expect(find.text('最终答复保持独立。'), findsOneWidget);
+
+    await tester.tap(find.text('工具 `bash` 已完成。'));
+    await tester.pump();
+
+    expect(find.text('已接收请求，正在准备上下文。'), findsOneWidget);
+    expect(find.text('正在执行工具 `bash`。'), findsOneWidget);
+    expect(find.text('工具 `bash` 已完成。'), findsNWidgets(2));
   });
 
   testWidgets(

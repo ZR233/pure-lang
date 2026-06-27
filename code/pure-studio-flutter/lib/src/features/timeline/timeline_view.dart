@@ -102,6 +102,7 @@ class _TimelineViewState extends State<TimelineView> {
     if (widget.rows.isEmpty) {
       return const _EmptyTimeline();
     }
+    final blocks = _timelineDisplayBlocks(widget.rows);
     return Stack(
       children: [
         Align(
@@ -112,24 +113,30 @@ class _TimelineViewState extends State<TimelineView> {
               key: const ValueKey('timeline-scrollable'),
               controller: _controller,
               padding: const EdgeInsets.fromLTRB(24, 28, 24, 38),
-              itemCount: widget.rows.length + 1,
+              itemCount: blocks.length + 1,
               findChildIndexCallback: (key) {
                 if (key is! ValueKey<String>) {
                   return null;
                 }
-                final index = widget.rows.indexWhere(
-                  (row) => row.id == key.value,
+                final index = blocks.indexWhere(
+                  (block) => block.id == key.value,
                 );
                 return index == -1 ? null : index;
               },
               itemBuilder: (context, index) {
-                if (index == widget.rows.length) {
+                if (index == blocks.length) {
                   return const SizedBox(height: 24);
                 }
-                return _TimelineRowBlock(
-                  key: ValueKey(widget.rows[index].id),
-                  row: widget.rows[index],
-                );
+                final block = blocks[index];
+                return block.isRuntimeProgressGroup
+                    ? _TimelineProgressGroupBlock(
+                        key: ValueKey(block.id),
+                        block: block,
+                      )
+                    : _TimelineRowBlock(
+                        key: ValueKey(block.id),
+                        row: block.rows.single,
+                      );
               },
             ),
           ),
@@ -334,4 +341,67 @@ int _timelineContentVersion(List<TimelineRow> rows) {
     rows.length,
     for (final row in rows) ...[row.id, row.role, row.type, row.renderVersion],
   ]);
+}
+
+class _TimelineDisplayBlock {
+  const _TimelineDisplayBlock._(this.rows, {required this.id});
+
+  factory _TimelineDisplayBlock.single(TimelineRow row) {
+    return _TimelineDisplayBlock._([row], id: row.id);
+  }
+
+  factory _TimelineDisplayBlock.runtimeProgress(List<TimelineRow> rows) {
+    return _TimelineDisplayBlock._(
+      List.unmodifiable(rows),
+      id: 'runtime-progress:${rows.first.id}',
+    );
+  }
+
+  final List<TimelineRow> rows;
+  final String id;
+
+  bool get isRuntimeProgressGroup => rows.length > 1;
+}
+
+List<_TimelineDisplayBlock> _timelineDisplayBlocks(List<TimelineRow> rows) {
+  final blocks = <_TimelineDisplayBlock>[];
+  final pendingProgress = <TimelineRow>[];
+
+  void flushProgress() {
+    if (pendingProgress.isEmpty) {
+      return;
+    }
+    if (pendingProgress.length == 1) {
+      blocks.add(_TimelineDisplayBlock.single(pendingProgress.single));
+    } else {
+      blocks.add(_TimelineDisplayBlock.runtimeProgress(pendingProgress));
+    }
+    pendingProgress.clear();
+  }
+
+  for (final row in rows) {
+    if (_isRuntimeProgressRow(row)) {
+      final previous = pendingProgress.lastOrNull;
+      if (previous != null && !_sameRuntimeProgressGroup(previous, row)) {
+        flushProgress();
+      }
+      pendingProgress.add(row);
+      continue;
+    }
+    flushProgress();
+    blocks.add(_TimelineDisplayBlock.single(row));
+  }
+  flushProgress();
+
+  return blocks;
+}
+
+bool _isRuntimeProgressRow(TimelineRow row) {
+  return row.type == TimelineRowType.commentary && row.part?.synthetic == true;
+}
+
+bool _sameRuntimeProgressGroup(TimelineRow left, TimelineRow right) {
+  return left.sessionId == right.sessionId &&
+      left.messageId == right.messageId &&
+      left.turnId == right.turnId;
 }

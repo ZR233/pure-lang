@@ -1930,8 +1930,9 @@ TimelineTextChannel? _textChannel(Object? value) {
   return switch (label) {
     'user' => TimelineTextChannel.user,
     'commentary' => TimelineTextChannel.commentary,
-    'final' || 'finalanswer' || 'final_answer' =>
-      TimelineTextChannel.finalAnswer,
+    'final' ||
+    'finalanswer' ||
+    'final_answer' => TimelineTextChannel.finalAnswer,
     _ => throw FormatException('Unknown text channel: $label'),
   };
 }

@@ -28,6 +28,8 @@ part 类型固定为：
 - `commentary`：Codex 风格可见进展更新，只用于 UI 展示，不写入最终 assistant 消息历史。
 - `final`：最终 assistant 正文，会写入会话历史并作为本轮最终答复。
 
+`commentary` 可以来自模型可见输出，也可以来自运行时生命周期。内部 trace 必须能区分模型输出与运行时主动生成的进展提示；运行时生成的 commentary 在 Studio part 中标记为 `synthetic=true`，用于 timeline 可见展示和历史恢复，但不得作为模型最终正文、assistant 历史消息或后续 provider replay 输入。模型输出的 commentary 保持普通可见输出语义，不自动标记为 synthetic。
+
 `StudioPartDelta` 必须包含 `messageId`、`partId`、`revision`、`field` 和 `delta`；`field` 固定为 `text`、`tool.arguments`、`tool.result`、`reasoning.summary` 或 `planContent` 等协议字段。delta 只能在前端已有 part snapshot 时应用；孤儿 delta 按 opencode 逻辑丢弃。旧的 `role` 字段不再作为 Studio 协议语义入口。
 
 用户 `text` part 可以携带 `attachments` 元数据，当前只用于图片输入缩略图展示。part 的持久语义只依赖附件 id、文件名、媒体类型、尺寸和大小；GUI 事件可以携带派生的 `dataUrl` 预览值用于即时缩略图。模型可见的 base64 图片内容由 `pl-core` 在请求前按附件 id materialize，不写入消息正文。
@@ -50,6 +52,10 @@ snapshot 与 live delta 的优先级完全对齐 opencode：
 Studio store 持久化 `messagePartUpdated` 前必须在同一事务内验证 part 状态转移，但不得再使用 durable event sequence 分配新 part 的展示 order。`StudioEventRuntime` 托管的 turn timeline actor 在 trace part 首次进入 Studio 前按 message scope 分配 `order`，并维护每个 part 的 live revision 基线；store 暴露的下一可用 order 只作为 actor 在恢复或并发进入时的 durable 下界，不能替代 actor 对本轮新 part 的分配状态。`messagePartDelta` 只有在目标 part 已存在、目标 part 尚未终态、且 revision 相对当前 live revision 严格 `+1` 时才广播。孤儿、跳号、重复或终态后的 delta 统一转成 live-only `stale` 提示，由前端按当前 cursor 补拉 durable snapshot。首次创建后的 `partId`、`messageId`、`sessionId`、`turnId`、`partType`、`textChannel`、`order` 和 `createdAt` 不可变；同一 message 内不能出现重复 order；revision 不得倒退；terminal part 不允许被任何后续 snapshot 修改正文、工具结果、附件、错误、usage、synthetic/ignored 或其他内容字段。校验失败的 snapshot 不写入 projection，也不写入 durable `studio_events`。
 
 模型流投影在收到 provider tool input 增量时创建 tool part，并把 arguments 增量作为 `tool.arguments` live delta；当同一 provider item 后续被确认为可执行 tool call 时，只能刷新名称、参数和 provider/call id 等结构字段，不能把已经 `streaming`、`awaitingApproval`、`approved` 或 `running` 的 tool part 回退成 `started`。执行阶段只能沿 `awaitingApproval -> approved -> running -> terminal` 或直接 terminal 的方向推进。
+
+工具调度层应在每个工具开始、完成或失败时生成简短 runtime commentary，用于让长 turn 在模型静默或工具运行期间仍有可见进展。该 commentary 不替代 tool part，也不承载工具参数、stdout/stderr 或最终结果；工具事实仍以 `tool` part snapshot 和 `tool.result` delta 为准。工具进度 commentary 必须标记为 synthetic，并且不得写入后续 provider history。
+
+上下文自动压缩属于 turn 内部 runtime 阶段，也应生成 synthetic commentary：开始压缩、因 context/token limit 缩小历史后重试、压缩完成并继续模型调用。该进展不改变消息历史协议；压缩后的摘要仍只通过 session history replacement 生效，重试过程不得写入 assistant final 正文。
 
 `bash` 命令运行期间，stdout/stderr chunk 作为原始命令输出追加到原 `bash` tool part 的 `tool.result` live overlay；stderr chunk 由投影层保留来源标记，前端按普通工具结果增量展示。每个 chunk 使用该 tool part 当前 revision 作为基线继续递增，终态 `messagePartUpdated` 携带不低于最后一个输出 delta 的 revision，并以紧凑 JSON 结果固化 snapshot；`write_stdin` 轮询只返回自己的紧凑结果，不把同一后台进程的输出复制成新的父 timeline tool part。
 
@@ -179,6 +185,8 @@ root agent 的 provider `429` 错误码是当前轮的终止错误，不进入�
 Plan 是协议级 block，Plan Mode 中只能由成功执行的 `plan_exit.content` 生成 `plan` part。`<commentary>` 与 `<final>` 由 Chat tagged decoder 转换为带 `TraceTextChannel` 的 text lifecycle。Responses native phase decoder 不解析这些标签，也不得把 native commentary/final 文本再次交给 tag parser。未标签普通 Chat text 默认进入 `final` text block；未标签 raw reasoning 只进入内部 reasoning buffer，不能生成 assistant 正文、plan 或 reasoning summary row。部分 OpenAI-compatible Chat provider 会把带可见标签的输出放入 `reasoning_content`，该兼容转换只允许提取显式 commentary/final 标签段，同时保留完整 reasoning 原文作为 raw reasoning。
 
 Chat tagged decoder 输出的 text lifecycle 必须反映标签开闭边界：每个显式可见标签段拥有独立 provider-local block id，并产生 start/delta/complete；闭标签之后的后续标签或未标记 fallback 文本不得继续复用已完成 block。该 id 只用于 `pl-model::stream` 内部归并，不能作为最终 Studio part identity。
+
+Chat tagged decoder 对未标记普通 `content` 保持兼容：默认仍作为 fallback `final` block 展示和进入最终正文，避免旧 provider 直接失败；同时应记录未标记可见文本诊断，供开发者观察 provider 是否遵守 commentary/final 标签合约。诊断不得改变 wire 形状，也不得把未标记 raw reasoning 转成可见正文。
 
 工具 part 的 `partId` 使用 `toolCallId`。当 provider 提供 `call_id` 时，`toolCallId` 优先使用该值；provider 的原始 item id 只作为聚合辅助信息保留在内部。工具参数流、审批、执行和结果都 upsert 到同一个 tool part。
 
