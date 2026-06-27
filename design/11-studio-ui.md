@@ -98,6 +98,8 @@ text/reasoning 的显示文本读取 `partTextAccumDelta[partId] ?? part.text`�
 
 `textChannel=commentary` 表示模型主动输出的可见进度，视觉层级应轻于最终答复但完整可读；`textChannel=final` 表示最终答复，必须单独完整展示。OpenAI Responses 原生 `phase=commentary/final_answer/final` 是优先来源；不支持 native phase 的 Chat provider 通过 `<commentary>` 和 `<final>` 标签映射到相同 text part 类型。计划内容不再通过 `<proposed_plan>` 进入 timeline，只能由 `plan_exit.content` 生成 plan part。隐藏 reasoning 不得被当作 commentary 展开。
 
+`source=runtime` 且 `synthetic=true` 的 commentary 表示 Pure 运行时确定性产生的阶段进展，不代表模型输出。Flutter 展示层可以把同一 session/message/turn 内连续 runtime commentary 合并为一个可折叠进展组；分组只影响展示，不合并后端 part，不改变 durable cursor，也不得把模型 commentary 或 final 正文并入该组。
+
 plan、commentary、reasoning 和普通 text 的 live overlay 必须使用 stream-safe Markdown 渲染。Flutter timeline 原生直接使用 `gpt_markdown` 的 `GptMarkdown` widget 渲染，不再包一层兼容 renderer facade。展示前只做轻量 agent repair（CRLF 归一化、CJK 标题补空格、行尾 closing fence 拆行、代码块内 inline closing fence 拆行），不在协议层或 reducer 层改写 Markdown。未闭合 fenced code block、不完整表格和逐字输出期间的临时结构由 renderer 容错展示，不能依赖 Rust/FRB 补全。运行中 delta 可以是不完整 Markdown，但 UI 仍应尽量即时显示列表、标题、表格、代码块等结构；terminal snapshot 到达后清 overlay，并以完整 snapshot 重新渲染。
 
 工具展示使用 opencode `groupParts` 语义：普通 part group key 为 `part:{messageId}:{partId}`，连续 context tool 可聚合为 context group，group key 取首个 part id。工具状态以 part snapshot 的 `status` 为准；展示层不得改写 `StudioPart`。

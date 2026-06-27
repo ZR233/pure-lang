@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use pl_trace::{
     AgentEvent, TraceDelta, TraceEvent, TraceEventKind, TracePart, TracePartDeltaEvent,
-    TracePartKind, TracePartStatus, TraceTextChannel, TraceThinkingChunk, TraceToolPart,
+    TracePartKind, TracePartSource, TracePartStatus, TraceTextChannel, TraceThinkingChunk,
+    TraceToolPart,
 };
 
 use crate::request::{CompletionTraceContext, ToolCall};
@@ -62,6 +63,7 @@ impl TraceProjection {
                 status: TracePartStatus::Streaming,
                 created_at: now,
                 updated_at: now,
+                source: TracePartSource::Model,
                 text_channel: Some(text_channel),
                 content: String::new(),
                 attachments: Vec::new(),
@@ -154,6 +156,7 @@ impl TraceProjection {
                 status: TracePartStatus::Streaming,
                 created_at: now,
                 updated_at: now,
+                source: TracePartSource::Model,
                 text_channel: None,
                 content: String::new(),
                 attachments: Vec::new(),
@@ -246,6 +249,7 @@ impl TraceProjection {
             status: TracePartStatus::Streaming,
             created_at: now,
             updated_at: now,
+            source: TracePartSource::Model,
             text_channel: None,
             content: String::new(),
             attachments: Vec::new(),
@@ -366,6 +370,7 @@ impl TraceProjection {
                 status: TracePartStatus::Started,
                 created_at: now,
                 updated_at: now,
+                source: TracePartSource::Model,
                 text_channel: None,
                 content: String::new(),
                 attachments: Vec::new(),

@@ -599,6 +599,9 @@ mod tests {
         );
         assert!(snapshot.base.content.contains("再开始写代码"));
         assert!(snapshot.base.content.contains("整体回看计划"));
+        assert!(snapshot.base.content.contains("首次调用工具前必须输出一句"));
+        assert!(snapshot.base.content.contains("每次 commentary 只写 1 句"));
+        assert!(snapshot.base.content.contains("final 只出现一次"));
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -1623,7 +1623,7 @@ mod tests {
     use std::time::Duration;
 
     use pl_model::{ModelInfo, ProviderInfo};
-    use pl_trace::{TracePart, TracePartStatus, TraceTextChannel};
+    use pl_trace::{TracePart, TracePartSource, TracePartStatus, TraceTextChannel};
     use pretty_assertions::assert_eq;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -2064,6 +2064,7 @@ mod tests {
             status: TracePartStatus::Started,
             created_at: 1,
             updated_at: 1,
+            source: TracePartSource::Model,
             text_channel: None,
             content: String::new(),
             attachments: Vec::new(),
@@ -2355,7 +2356,10 @@ mod tests {
         let parts = store.load_message_parts(&session.id).await.unwrap();
         let assistant_parts = parts
             .iter()
-            .filter(|record| record.part.message_id == "turn-tool-boundary-test:assistant")
+            .filter(|record| {
+                record.part.message_id == "turn-tool-boundary-test:assistant"
+                    && !record.part.synthetic
+            })
             .map(|record| &record.part)
             .collect::<Vec<_>>();
         let compact = assistant_parts

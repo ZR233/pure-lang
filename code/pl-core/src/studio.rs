@@ -51,7 +51,8 @@ mod tests {
         StudioPartStatus, StudioPartType, StudioTextChannel, TokenUsageSnapshot,
     };
     use pl_trace::{
-        TraceEvent, TraceEventKind, TracePart, TracePartKind, TracePartStatus, TraceTextChannel,
+        TraceEvent, TraceEventKind, TracePart, TracePartKind, TracePartSource, TracePartStatus,
+        TraceTextChannel,
     };
     use pretty_assertions::assert_eq;
 
@@ -440,6 +441,7 @@ mod tests {
             status: TracePartStatus::Completed,
             created_at: 11,
             updated_at: 11,
+            source: TracePartSource::Model,
             text_channel: Some(TraceTextChannel::User),
             content: "hello".to_string(),
             attachments: Vec::new(),

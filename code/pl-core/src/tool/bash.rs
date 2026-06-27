@@ -489,6 +489,22 @@ mod tests {
         }
     }
 
+    fn collect_tool_result_stream(
+        event_rx: &mut tokio::sync::broadcast::Receiver<pl_trace::AgentEvent>,
+    ) -> (String, u64) {
+        let mut streamed = String::new();
+        let mut revision = 0;
+        while let Ok(event) = event_rx.try_recv() {
+            if let pl_trace::AgentEvent::TracePartDelta { event } = event
+                && let pl_trace::TraceDelta::ToolResult { delta } = event.delta
+            {
+                revision = revision.max(event.revision);
+                streamed.push_str(&delta);
+            }
+        }
+        (streamed, revision)
+    }
+
     fn large_output_command() -> &'static str {
         if cfg!(target_os = "windows") {
             "for ($i = 0; $i -lt 250; $i++) { Write-Output 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }"
@@ -524,19 +540,38 @@ mod tests {
             .await
             .unwrap();
 
-        let mut streamed = String::new();
-        let mut revision = 0;
-        while let Ok(event) = event_rx.try_recv() {
-            if let pl_trace::AgentEvent::TracePartDelta { event } = event
-                && let pl_trace::TraceDelta::ToolResult { delta } = event.delta
-            {
-                revision = revision.max(event.revision);
-                streamed.push_str(&delta);
-            }
-        }
+        let (streamed, revision) = collect_tool_result_stream(&mut event_rx);
 
         assert!(streamed.contains("streaming"));
         assert!(revision > 5);
+        assert!(output.runtime_events.iter().any(|event| matches!(
+            event,
+            ToolRuntimeEvent::ToolResultRevision {
+                revision: output_revision
+            } if *output_revision >= revision
+        )));
+    }
+
+    #[tokio::test]
+    async fn streams_tool_result_delta_for_stderr_output() {
+        let tool = test_tool();
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
+        let output = tool
+            .execute(
+                tool_input(
+                    stderr_command(),
+                    "stderr-stream-session",
+                    "stderr-stream-tool",
+                ),
+                test_context_with_sender(event_tx),
+            )
+            .await
+            .unwrap();
+
+        let (streamed, revision) = collect_tool_result_stream(&mut event_rx);
+
+        assert!(streamed.contains("[stderr]"));
+        assert!(streamed.contains("err"));
         assert!(output.runtime_events.iter().any(|event| matches!(
             event,
             ToolRuntimeEvent::ToolResultRevision {

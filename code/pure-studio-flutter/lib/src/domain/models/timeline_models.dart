@@ -100,14 +100,14 @@ class TimelineAgentEvent {
 
   String get title {
     return switch (payload) {
-      TimelineAgentSpawnBegin() || TimelineAgentSpawnEnd() =>
-        'agentTimeline.spawn',
-      TimelineAgentInteractionBegin() || TimelineAgentInteractionEnd() =>
-        'agentTimeline.message',
-      TimelineAgentWaitingBegin() || TimelineAgentWaitingEnd() =>
-        'agentTimeline.waiting',
-      TimelineAgentCloseBegin() || TimelineAgentCloseEnd() =>
-        'agentTimeline.close',
+      TimelineAgentSpawnBegin() ||
+      TimelineAgentSpawnEnd() => 'agentTimeline.spawn',
+      TimelineAgentInteractionBegin() ||
+      TimelineAgentInteractionEnd() => 'agentTimeline.message',
+      TimelineAgentWaitingBegin() ||
+      TimelineAgentWaitingEnd() => 'agentTimeline.waiting',
+      TimelineAgentCloseBegin() ||
+      TimelineAgentCloseEnd() => 'agentTimeline.close',
     };
   }
 
@@ -444,9 +444,8 @@ TimelinePart timelinePartFromSnapshot(
     result: overlay?.values['tool.result'] ?? snapshotTool.result,
   );
   final visibleText = switch (snapshot.type) {
-    TimelinePartType.plan => planContent?.isNotEmpty == true
-        ? planContent!
-        : text,
+    TimelinePartType.plan =>
+      planContent?.isNotEmpty == true ? planContent! : text,
     TimelinePartType.tool => _toolActivityText(tool),
     TimelinePartType.agent =>
       snapshot.agent?.summary ?? snapshot.agent?.task ?? text,
@@ -943,9 +942,10 @@ TimelineAgentEventPayload _agentEventPayloadFromMap(
 }
 
 String _agentActivityText(Iterable<String?> parts) {
-  return parts.whereType<String>().where((part) => part.trim().isNotEmpty).join(
-    '\n',
-  );
+  return parts
+      .whereType<String>()
+      .where((part) => part.trim().isNotEmpty)
+      .join('\n');
 }
 
 String _nonEmpty(String? preferred, String? fallback) {

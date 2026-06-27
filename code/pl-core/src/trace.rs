@@ -1,7 +1,8 @@
 use pl_protocol::TokenUsageSnapshot;
 use pl_trace::{
     AgentEvent, AgentEventSender, TraceAgentPart, TraceDelta, TraceEvent, TraceEventKind,
-    TraceInferencePart, TracePart, TracePartKind, TracePartStatus, TraceTextChannel, TraceToolPart,
+    TraceInferencePart, TracePart, TracePartKind, TracePartSource, TracePartStatus,
+    TraceTextChannel, TraceToolPart,
 };
 
 /// In-memory trace recorder that captures structured lifecycle events during a turn.
@@ -177,6 +178,7 @@ impl TraceRecorder {
             status,
             created_at: timestamp,
             updated_at: timestamp,
+            source: TracePartSource::Model,
             text_channel: None,
             content: String::new(),
             attachments: Vec::new(),
@@ -205,6 +207,7 @@ impl TraceRecorder {
                 status: TracePartStatus::Started,
                 created_at: timestamp,
                 updated_at: timestamp,
+                source: TracePartSource::Model,
                 text_channel: None,
                 content: String::new(),
                 attachments: Vec::new(),
@@ -235,6 +238,7 @@ impl TraceRecorder {
             status: TracePartStatus::Running,
             created_at: timestamp,
             updated_at: timestamp,
+            source: TracePartSource::Model,
             text_channel: None,
             content: String::new(),
             attachments: Vec::new(),
@@ -275,6 +279,7 @@ impl TraceRecorder {
             status: TracePartStatus::Started,
             created_at: timestamp,
             updated_at: timestamp,
+            source: TracePartSource::Model,
             text_channel: None,
             content: String::new(),
             attachments: Vec::new(),
@@ -337,6 +342,7 @@ impl TraceRecorder {
             status,
             created_at: timestamp,
             updated_at: timestamp,
+            source: TracePartSource::Model,
             text_channel: None,
             content: String::new(),
             attachments: Vec::new(),

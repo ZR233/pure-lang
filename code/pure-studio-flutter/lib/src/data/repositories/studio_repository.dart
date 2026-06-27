@@ -1129,7 +1129,7 @@ class StudioController extends AsyncNotifier<StudioState> {
   }
 
   bool _isDuplicateDurableEvent(StudioState current, StudioBridgeEvent event) {
-    if (event.payload is MessagePartDeltaPayload) {
+    if (_isLiveOnlyEvent(event)) {
       return false;
     }
     final sessionId = _eventSessionId(event);
@@ -1141,7 +1141,7 @@ class StudioController extends AsyncNotifier<StudioState> {
   }
 
   StudioState _withEventCursor(StudioState current, StudioBridgeEvent event) {
-    if (event.payload is MessagePartDeltaPayload) {
+    if (_isLiveOnlyEvent(event)) {
       return current;
     }
     final sessionId = _eventSessionId(event);
@@ -1159,6 +1159,11 @@ class StudioController extends AsyncNotifier<StudioState> {
         sessionId: sequence,
       },
     );
+  }
+
+  bool _isLiveOnlyEvent(StudioBridgeEvent event) {
+    return event.payload is MessagePartDeltaPayload ||
+        event.payload is StalePayload;
   }
 
   String? _eventSessionId(StudioBridgeEvent event) {

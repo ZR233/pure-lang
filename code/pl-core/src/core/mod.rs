@@ -32,6 +32,7 @@ use crate::turn::{
 };
 
 mod permission;
+pub(crate) mod progress;
 mod tool_dispatch;
 mod turn_loop;
 mod turn_result;
@@ -384,7 +385,7 @@ mod tests {
     use crate::{ConfigStore, ModelRole};
     use pl_model::ToolCall;
     use pl_protocol::{InteractionPayload, InteractionResolution, ToolApprovalResolution};
-    use pl_trace::{TraceEventKind, TracePartKind, TraceTextChannel};
+    use pl_trace::{TraceEventKind, TracePartKind, TracePartSource, TraceTextChannel};
     use pretty_assertions::assert_eq;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -493,6 +494,108 @@ mod tests {
                 | AgentEvent::Done => None,
             })
             .collect()
+    }
+
+    fn runtime_progress_texts(
+        event_rx: &mut tokio::sync::broadcast::Receiver<AgentEvent>,
+    ) -> Vec<String> {
+        let mut progress_texts = Vec::new();
+        while let Ok(event) = event_rx.try_recv() {
+            match event {
+                AgentEvent::TracePartCompleted { item }
+                    if item.source == TracePartSource::Runtime
+                        && item.text_channel == Some(TraceTextChannel::Commentary) =>
+                {
+                    progress_texts.push(item.content)
+                }
+                AgentEvent::TracePartStarted { .. }
+                | AgentEvent::TracePartDelta { .. }
+                | AgentEvent::TracePartCompleted { .. }
+                | AgentEvent::TracePartFailed { .. }
+                | AgentEvent::InteractionChanged { .. }
+                | AgentEvent::AgentStateChanged { .. }
+                | AgentEvent::AgentRuntimeUpdated { .. }
+                | AgentEvent::SkillActivated { .. }
+                | AgentEvent::CollabAgentSpawnBegin { .. }
+                | AgentEvent::CollabAgentSpawnEnd { .. }
+                | AgentEvent::CollabAgentInteractionBegin { .. }
+                | AgentEvent::CollabAgentInteractionEnd { .. }
+                | AgentEvent::CollabWaitingBegin { .. }
+                | AgentEvent::CollabWaitingEnd { .. }
+                | AgentEvent::CollabCloseBegin { .. }
+                | AgentEvent::CollabCloseEnd { .. }
+                | AgentEvent::TurnInterrupted { .. }
+                | AgentEvent::TurnBudgetLimited { .. }
+                | AgentEvent::Error { .. }
+                | AgentEvent::Done => {}
+            }
+        }
+        progress_texts
+    }
+
+    #[test]
+    fn progress_emitter_sends_runtime_commentary_by_verbosity() {
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
+        let mut progress =
+            progress::ProgressEmitter::new(event_tx, "turn-1", progress::ProgressVerbosity::Normal);
+
+        progress.milestone("正在准备上下文。");
+        progress.heartbeat("等待模型响应。");
+        progress.tool("正在执行工具 `bash`。");
+
+        let first = event_rx.try_recv().unwrap();
+        let second = event_rx.try_recv().unwrap();
+        assert!(event_rx.try_recv().is_err());
+
+        let AgentEvent::TracePartCompleted { item: first } = first else {
+            panic!("expected completed progress part");
+        };
+        assert_eq!(first.turn_id, "turn-1");
+        assert_eq!(first.item_id, "turn-1:progress:1");
+        assert_eq!(first.started_sequence, 1);
+        assert_eq!(first.source, TracePartSource::Runtime);
+        assert_eq!(first.text_channel, Some(TraceTextChannel::Commentary));
+        assert_eq!(first.content, "正在准备上下文。");
+
+        let AgentEvent::TracePartCompleted { item: second } = second else {
+            panic!("expected completed progress part");
+        };
+        assert_eq!(second.item_id, "turn-1:progress:2");
+        assert_eq!(second.source, TracePartSource::Runtime);
+        assert_eq!(second.content, "正在执行工具 `bash`。");
+    }
+
+    #[test]
+    fn progress_emitter_scopes_item_ids_without_changing_turn_id() {
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
+        let mut root_progress = progress::ProgressEmitter::new(
+            event_tx.clone(),
+            "turn-1",
+            progress::ProgressVerbosity::Normal,
+        );
+        let mut tool_progress = progress::ProgressEmitter::new_scoped(
+            event_tx,
+            "turn-1",
+            "turn-1:tool-progress",
+            progress::ProgressVerbosity::Normal,
+        );
+
+        root_progress.milestone("准备上下文");
+        tool_progress.tool("执行工具");
+
+        let first = event_rx.try_recv().unwrap();
+        let second = event_rx.try_recv().unwrap();
+
+        let AgentEvent::TracePartCompleted { item: first } = first else {
+            panic!("expected completed progress part");
+        };
+        let AgentEvent::TracePartCompleted { item: second } = second else {
+            panic!("expected completed progress part");
+        };
+        assert_eq!(first.turn_id, "turn-1");
+        assert_eq!(first.item_id, "turn-1:progress:1");
+        assert_eq!(second.turn_id, "turn-1");
+        assert_eq!(second.item_id, "turn-1:tool-progress:1");
     }
 
     async fn serve_sse_once(sse_body: String) -> (String, tokio::task::JoinHandle<()>) {
@@ -827,7 +930,7 @@ mod tests {
             serde_json::json!({"path": "note.txt"}),
             Some("call-1".to_string()),
         );
-        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
         let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
         let streamed_item = recorder.tool_item(
             "turn-1",
@@ -895,6 +998,13 @@ mod tests {
                 TracePartStatus::Approved,
                 TracePartStatus::Running,
                 TracePartStatus::Completed,
+            ]
+        );
+        assert_eq!(
+            runtime_progress_texts(&mut event_rx),
+            vec![
+                "正在执行工具 `read_file`。".to_string(),
+                "工具 `read_file` 已完成。".to_string(),
             ]
         );
         let _ = tokio::fs::remove_dir_all(workspace_root).await;
@@ -1279,12 +1389,11 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].status, TracePartStatus::Completed);
         assert!(records[0].result.contains("external ok"));
-        assert!(matches!(
-            event_rx.try_recv().unwrap(),
-            AgentEvent::TracePartStarted { .. }
-        ));
         assert!(seen_interaction.lock().unwrap().is_some());
-        while event_rx.try_recv().is_ok() {}
+        let progress_texts = runtime_progress_texts(&mut event_rx);
+        assert!(progress_texts.contains(&"工具 `read_file` 正在等待授权。".to_string()));
+        assert!(progress_texts.contains(&"正在执行工具 `read_file`。".to_string()));
+        assert!(progress_texts.contains(&"工具 `read_file` 已完成。".to_string()));
         let events = recorder.drain();
         assert_eq!(terminal_tool_event_count(&events), 1);
         assert_eq!(
@@ -1748,6 +1857,49 @@ mod tests {
             .expect("user trace part");
         assert_eq!(user_item.started_sequence, 0);
         assert_eq!(user_item.content, "Build the thing");
+    }
+
+    #[tokio::test]
+    async fn run_turn_emits_runtime_progress_commentary() {
+        let sse_body = concat!(
+            "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n",
+            "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+            "data: [DONE]\n\n"
+        )
+        .to_string();
+        let (base_url, handle) = serve_sse_once(sse_body).await;
+        let mut provider = ProviderInfo::openai(Some(base_url));
+        provider.bearer_token = Some("test-token".to_string());
+        provider.default_model = "local-responses".to_string();
+        let core = PureCore::from_provider_info(provider).unwrap();
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(64);
+        let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+        let mut session = CoreSession::new();
+
+        let result = core
+            .run_turn_with_trace(
+                &mut session,
+                TurnRequest::new("Build the thing".to_string(), CompileMode::Auto)
+                    .with_budget(crate::turn::TurnBudget::new(60_000)),
+                &mut recorder,
+                TurnOptions::default(),
+            )
+            .await
+            .unwrap();
+        handle.await.unwrap();
+
+        assert_eq!(result.status, TurnResultStatus::Completed);
+        assert_eq!(
+            runtime_progress_texts(&mut event_rx),
+            vec![
+                "已接收请求，正在准备上下文。".to_string(),
+                "上下文已整理，准备调用模型。".to_string(),
+                "模型已完成正文生成。".to_string(),
+                "本轮已完成。".to_string(),
+            ]
+        );
     }
 
     #[tokio::test]

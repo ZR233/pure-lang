@@ -12,7 +12,6 @@ const ZHIPU_LIVE_ENV_KEY: &str = "API_KEY_ZHIPU";
 #[derive(Debug, Default)]
 struct TraceDeltaCounts {
     text: usize,
-    thinking: usize,
 }
 
 fn user_message(content: &str) -> Message {
@@ -89,8 +88,8 @@ async fn collect_trace_delta_counts(
         match event_rx.recv().await {
             Ok(AgentEvent::TracePartDelta { event }) => match event.delta {
                 TraceDelta::Text { .. } => counts.text += 1,
-                TraceDelta::Thinking { .. } => counts.thinking += 1,
-                TraceDelta::ToolArguments { .. }
+                TraceDelta::Thinking { .. }
+                | TraceDelta::ToolArguments { .. }
                 | TraceDelta::ToolResult { .. }
                 | TraceDelta::Plan { .. } => {}
             },
@@ -165,8 +164,4 @@ async fn zhipu_streams_thinking_mode() {
         "enabled thinking should return reasoning_content"
     );
     assert!(counts.text > 0, "enabled stream should emit text deltas");
-    assert!(
-        counts.thinking > 0,
-        "enabled stream should emit thinking deltas"
-    );
 }

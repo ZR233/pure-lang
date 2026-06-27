@@ -190,6 +190,20 @@ impl TracePartStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum TracePartSource {
+    #[default]
+    Model,
+    Runtime,
+}
+
+impl TracePartSource {
+    pub fn is_model(&self) -> bool {
+        matches!(self, Self::Model)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum TraceTextChannel {
@@ -291,6 +305,8 @@ pub struct TracePart {
     pub status: TracePartStatus,
     pub created_at: i64,
     pub updated_at: i64,
+    #[serde(default, skip_serializing_if = "TracePartSource::is_model")]
+    pub source: TracePartSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_channel: Option<TraceTextChannel>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -328,7 +344,36 @@ impl TracePart {
             status,
             created_at: timestamp,
             updated_at: timestamp,
+            source: TracePartSource::Model,
             text_channel: Some(text_channel),
+            content: content.into(),
+            attachments: Vec::new(),
+            thinking_chunks: Vec::new(),
+            tool: None,
+            agent: None,
+            inference: None,
+            usage: None,
+        }
+    }
+
+    pub fn runtime_commentary(
+        turn_id: impl Into<String>,
+        item_id: impl Into<String>,
+        sequence: u64,
+        content: impl Into<String>,
+        timestamp: i64,
+    ) -> Self {
+        Self {
+            turn_id: turn_id.into(),
+            item_id: item_id.into(),
+            started_sequence: sequence,
+            revision: 0,
+            kind: TracePartKind::Text,
+            status: TracePartStatus::Completed,
+            created_at: timestamp,
+            updated_at: timestamp,
+            source: TracePartSource::Runtime,
+            text_channel: Some(TraceTextChannel::Commentary),
             content: content.into(),
             attachments: Vec::new(),
             thinking_chunks: Vec::new(),

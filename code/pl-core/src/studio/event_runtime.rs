@@ -11,7 +11,7 @@ use pl_protocol::{
 };
 use pl_trace::{
     AgentEvent, TraceAgentPart, TraceDelta, TraceInferencePart, TracePart, TracePartDeltaEvent,
-    TracePartKind, TracePartStatus, TraceTextChannel, TraceToolPart,
+    TracePartKind, TracePartSource, TracePartStatus, TraceTextChannel, TraceToolPart,
 };
 use tokio::sync::{Mutex, broadcast};
 
@@ -701,6 +701,7 @@ fn studio_agent_timeline_event(session_id: &str, event: AgentEvent) -> StudioAge
 }
 
 fn studio_part_from_trace_part(session_id: &str, item: TracePart) -> StudioPart {
+    let source = item.source;
     let part_type = part_type_for_trace_kind(item.kind);
     let status = part_status_for_trace_status(item.status);
     let completed_at = is_terminal_studio_part_status(status).then_some(item.updated_at);
@@ -748,7 +749,8 @@ fn studio_part_from_trace_part(session_id: &str, item: TracePart) -> StudioPart 
         plan,
         file: None,
         usage: item.usage,
-        synthetic: matches!(part_type, StudioPartType::Turn | StudioPartType::Inference),
+        synthetic: matches!(source, TracePartSource::Runtime)
+            || matches!(part_type, StudioPartType::Turn | StudioPartType::Inference),
         ignored: false,
     }
 }
@@ -1070,6 +1072,76 @@ mod tests {
             vec![
                 ("first-final".to_string(), 0, "first".to_string()),
                 ("second-final".to_string(), 1, "second".to_string()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn runtime_commentary_is_projected_as_synthetic() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/studio").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Runtime commentary", CompileMode::Auto)
+            .await
+            .unwrap();
+        let runtime = StudioEventRuntime::new(store.clone());
+
+        let runtime_commentary =
+            TracePart::runtime_commentary("turn-1", "progress-1", 1, "正在准备上下文。", 100);
+        runtime
+            .emit_agent_event(
+                &session.id,
+                AgentEvent::TracePartCompleted {
+                    item: runtime_commentary,
+                },
+            )
+            .await
+            .unwrap();
+
+        let model_commentary = TracePart::text(
+            "turn-1",
+            "commentary-1",
+            2,
+            TraceTextChannel::Commentary,
+            "模型进展",
+            TracePartStatus::Completed,
+            101,
+        );
+        runtime
+            .emit_agent_event(
+                &session.id,
+                AgentEvent::TracePartCompleted {
+                    item: model_commentary,
+                },
+            )
+            .await
+            .unwrap();
+
+        let parts = store.load_message_parts(&session.id).await.unwrap();
+        let compact = parts
+            .into_iter()
+            .map(|record| {
+                (
+                    record.part.part_id,
+                    record.part.text_channel,
+                    record.part.synthetic,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            compact,
+            vec![
+                (
+                    "progress-1".to_string(),
+                    Some(StudioTextChannel::Commentary),
+                    true,
+                ),
+                (
+                    "commentary-1".to_string(),
+                    Some(StudioTextChannel::Commentary),
+                    false,
+                ),
             ]
         );
     }

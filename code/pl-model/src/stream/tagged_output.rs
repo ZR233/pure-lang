@@ -10,12 +10,19 @@ pub(crate) struct TaggedVisibleOutputAdapter {
     next_segment_ordinal: u64,
     active_text_block: Option<TaggedBlock>,
     active_reasoning_block: Option<TaggedBlock>,
+    diagnostics: TaggedOutputDiagnostics,
 }
 
 #[derive(Debug, Clone)]
 struct TaggedBlock {
     kind: VisibleTextKind,
     id: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct TaggedOutputDiagnostics {
+    pub(crate) untagged_visible_text_segments: usize,
+    pub(crate) untagged_visible_text_chars: usize,
 }
 
 impl TaggedVisibleOutputAdapter {
@@ -26,7 +33,12 @@ impl TaggedVisibleOutputAdapter {
             next_segment_ordinal: 0,
             active_text_block: None,
             active_reasoning_block: None,
+            diagnostics: TaggedOutputDiagnostics::default(),
         }
+    }
+
+    pub(crate) fn diagnostics(&self) -> TaggedOutputDiagnostics {
+        self.diagnostics
     }
 
     pub(crate) fn adapt(&mut self, event: ModelStreamEvent) -> Vec<ModelStreamEvent> {
@@ -58,6 +70,7 @@ impl TaggedVisibleOutputAdapter {
                         &mut self.text_parser,
                         &mut self.active_text_block,
                         &mut self.next_segment_ordinal,
+                        &mut self.diagnostics,
                         &delta,
                         true,
                     )
@@ -82,6 +95,7 @@ impl TaggedVisibleOutputAdapter {
                         &mut self.text_parser,
                         &mut self.active_text_block,
                         &mut self.next_segment_ordinal,
+                        &mut self.diagnostics,
                         true,
                     );
                     if let Some(ModelBlockContent::Text(text)) = authoritative_content {
@@ -112,6 +126,7 @@ impl TaggedVisibleOutputAdapter {
                     &mut self.reasoning_parser,
                     &mut self.active_reasoning_block,
                     &mut self.next_segment_ordinal,
+                    &mut self.diagnostics,
                     &delta,
                     false,
                 );
@@ -133,6 +148,7 @@ impl TaggedVisibleOutputAdapter {
                     &mut self.reasoning_parser,
                     &mut self.active_reasoning_block,
                     &mut self.next_segment_ordinal,
+                    &mut self.diagnostics,
                     false,
                 );
                 visible
@@ -165,6 +181,7 @@ impl TaggedVisibleOutputAdapter {
             &mut self.text_parser,
             &mut self.active_text_block,
             &mut self.next_segment_ordinal,
+            &mut self.diagnostics,
             true,
         )
         .into_iter()
@@ -172,6 +189,7 @@ impl TaggedVisibleOutputAdapter {
             &mut self.reasoning_parser,
             &mut self.active_reasoning_block,
             &mut self.next_segment_ordinal,
+            &mut self.diagnostics,
             false,
         ))
         .collect()
@@ -183,10 +201,12 @@ impl TaggedVisibleOutputAdapter {
     ) -> Vec<ModelStreamEvent> {
         let mut parser = VisibleTextParser::new();
         let mut active_block = None;
+        let mut diagnostics = TaggedOutputDiagnostics::default();
         Self::parse_visible_events(
             &mut parser,
             &mut active_block,
             next_segment_ordinal,
+            &mut diagnostics,
             &text,
             true,
         )
@@ -195,6 +215,7 @@ impl TaggedVisibleOutputAdapter {
             &mut parser,
             &mut active_block,
             next_segment_ordinal,
+            &mut diagnostics,
             true,
         ))
         .collect()
@@ -204,6 +225,7 @@ impl TaggedVisibleOutputAdapter {
         parser: &mut VisibleTextParser,
         active_block: &mut Option<TaggedBlock>,
         next_segment_ordinal: &mut u64,
+        diagnostics: &mut TaggedOutputDiagnostics,
         delta: &str,
         include_untagged: bool,
     ) -> Vec<ModelStreamEvent> {
@@ -215,6 +237,7 @@ impl TaggedVisibleOutputAdapter {
                 Self::visible_event_events(
                     active_block,
                     next_segment_ordinal,
+                    diagnostics,
                     include_untagged,
                     event,
                 )
@@ -226,6 +249,7 @@ impl TaggedVisibleOutputAdapter {
         parser: &mut VisibleTextParser,
         active_block: &mut Option<TaggedBlock>,
         next_segment_ordinal: &mut u64,
+        diagnostics: &mut TaggedOutputDiagnostics,
         include_untagged: bool,
     ) -> Vec<ModelStreamEvent> {
         let mut events: Vec<_> = parser
@@ -236,6 +260,7 @@ impl TaggedVisibleOutputAdapter {
                 Self::visible_event_events(
                     active_block,
                     next_segment_ordinal,
+                    diagnostics,
                     include_untagged,
                     event,
                 )
@@ -254,6 +279,7 @@ impl TaggedVisibleOutputAdapter {
     fn visible_event_events(
         active_block: &mut Option<TaggedBlock>,
         next_segment_ordinal: &mut u64,
+        diagnostics: &mut TaggedOutputDiagnostics,
         include_untagged: bool,
         event: VisibleTextEvent,
     ) -> Vec<ModelStreamEvent> {
@@ -262,6 +288,8 @@ impl TaggedVisibleOutputAdapter {
                 if !include_untagged || text.is_empty() {
                     return Vec::new();
                 }
+                diagnostics.untagged_visible_text_segments += 1;
+                diagnostics.untagged_visible_text_chars += text.len();
                 Self::text_delta(
                     active_block,
                     next_segment_ordinal,
