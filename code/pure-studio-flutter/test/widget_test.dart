@@ -276,7 +276,7 @@ void main() {
     final after = state.messagesBySession['session-1']!.single;
     expect(identical(before, after), isTrue);
     expect(after.sequence, 3);
-    expect(after.createdAt, DateTime.fromMillisecondsSinceEpoch(10));
+    expect(after.createdAt, DateTime.fromMillisecondsSinceEpoch(10000));
     expect(state.selectedTimelineRows.single.part!.text, 'projected only');
   });
 
