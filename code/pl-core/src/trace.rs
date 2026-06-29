@@ -325,6 +325,35 @@ impl TraceRecorder {
             })
     }
 
+    pub fn latest_tool_trace_part(
+        &self,
+        item_id: &str,
+        call_id: Option<&str>,
+        provider_item_id: Option<&str>,
+    ) -> Option<TracePart> {
+        self.events
+            .iter()
+            .rev()
+            .find_map(|event| match &event.kind {
+                TraceEventKind::TracePartStarted { item }
+                | TraceEventKind::TracePartCompleted { item }
+                | TraceEventKind::TracePartFailed { item, .. }
+                    if item.kind == TracePartKind::Tool
+                        && tool_item_matches(item, item_id, call_id, provider_item_id) =>
+                {
+                    Some(item.clone())
+                }
+                TraceEventKind::TracePartDelta { .. }
+                | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. }
+                | TraceEventKind::TracePartStarted { .. }
+                | TraceEventKind::TracePartCompleted { .. }
+                | TraceEventKind::TracePartFailed { .. } => None,
+            })
+    }
+
     pub fn agent_item(
         &mut self,
         turn_id: &str,
@@ -432,6 +461,28 @@ fn unix_seconds() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+fn tool_item_matches(
+    item: &TracePart,
+    item_id: &str,
+    call_id: Option<&str>,
+    provider_item_id: Option<&str>,
+) -> bool {
+    if item.item_id == item_id {
+        return true;
+    }
+    let Some(tool) = item.tool.as_ref() else {
+        return false;
+    };
+    call_id
+        .filter(|value| !value.is_empty())
+        .zip(tool.call_id.as_deref())
+        .is_some_and(|(left, right)| left == right)
+        || provider_item_id
+            .filter(|value| !value.is_empty())
+            .zip(tool.provider_item_id.as_deref())
+            .is_some_and(|(left, right)| left == right)
 }
 
 #[cfg(test)]

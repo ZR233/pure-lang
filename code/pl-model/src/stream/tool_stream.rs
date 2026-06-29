@@ -103,7 +103,10 @@ impl ToolStream {
         let remaining = std::mem::take(&mut self.accumulators);
         let mut calls = Vec::new();
         for (_, acc) in remaining {
-            if existing.iter().any(|call| call.id == acc.id) {
+            if existing
+                .iter()
+                .any(|call| acc.matches_tool_call_identity(call))
+            {
                 continue;
             }
             calls.push(acc.into_tool_call()?);
@@ -156,6 +159,7 @@ pub(crate) struct ToolInputSnapshot {
 
 struct ToolCallAccumulator {
     id: String,
+    trace_id: String,
     has_stable_id: bool,
     call_id: Option<String>,
     name: String,
@@ -169,12 +173,14 @@ impl ToolCallAccumulator {
         item_id: &str,
         payload: ToolCallPayloadAccumulator,
     ) -> Self {
+        let trace_id = trace_tool_part_id(call_id, item_id, key);
         Self {
             id: if item_id.is_empty() {
                 key.to_string()
             } else {
                 item_id.to_string()
             },
+            trace_id,
             has_stable_id: !item_id.is_empty(),
             call_id: call_id
                 .filter(|call_id| !call_id.is_empty())
@@ -191,6 +197,16 @@ impl ToolCallAccumulator {
             .is_some_and(|(left, right)| left == right);
         let item_id_matches = !item_id.is_empty() && self.id == item_id;
         call_id_matches || item_id_matches
+    }
+
+    fn matches_tool_call_identity(&self, call: &ToolCall) -> bool {
+        call.id == self.id
+            || call
+                .call_id
+                .as_ref()
+                .filter(|call_id| !call_id.is_empty())
+                .zip(self.call_id.as_ref())
+                .is_some_and(|(left, right)| left == right)
     }
 
     fn merge_metadata(
@@ -249,6 +265,7 @@ impl ToolCallAccumulator {
     fn snapshot(&self) -> ToolCallAccumulatorSnapshot {
         ToolCallAccumulatorSnapshot {
             id: self.id.clone(),
+            trace_id: self.trace_id.clone(),
             call_id: self.call_id.clone(),
             name: self.name.clone(),
             arguments: self.payload.text().to_string(),
@@ -304,19 +321,20 @@ impl ToolCallPayloadAccumulator {
 
 pub(crate) struct ToolCallAccumulatorSnapshot {
     pub(crate) id: String,
+    pub(crate) trace_id: String,
     pub(crate) call_id: Option<String>,
     pub(crate) name: String,
     pub(crate) arguments: String,
 }
 
-pub(crate) fn trace_tool_part_id(call_id: Option<&String>, id: &str) -> String {
+fn trace_tool_part_id(call_id: Option<&String>, id: &str, fallback_id: &str) -> String {
     if !id.is_empty() {
         return id.to_string();
     }
     call_id
         .filter(|call_id| !call_id.is_empty())
         .cloned()
-        .unwrap_or_else(|| "tool_call".to_string())
+        .unwrap_or_else(|| fallback_id.to_string())
 }
 
 fn tool_call_accumulator_key(
@@ -334,4 +352,76 @@ fn tool_call_accumulator_key(
         })
         .or_else(|| (!item_id.is_empty()).then(|| item_id.to_string()))
         .unwrap_or_else(|| "tool_call".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[test]
+    fn late_provider_item_id_keeps_original_trace_id() {
+        let mut stream = ToolStream::new();
+        let call_id = "call-1".to_string();
+
+        let first = stream.append_delta(
+            None,
+            String::new(),
+            Some(&call_id),
+            Some("bash".to_string()),
+            ToolInputDeltaPayload::FunctionArguments("{\"cmd\":\"ec".to_string()),
+        );
+        let second = stream.append_delta(
+            None,
+            "provider-tool-1".to_string(),
+            Some(&call_id),
+            None,
+            ToolInputDeltaPayload::FunctionArguments("ho hi\"}".to_string()),
+        );
+        let ready = stream
+            .finish_ready(
+                None,
+                Some(&call_id),
+                "provider-tool-1",
+                Some("bash".to_string()),
+                None,
+            )
+            .unwrap()
+            .expect("ready tool call");
+
+        assert_eq!(first.tool.id, "call-1");
+        assert_eq!(first.tool.trace_id, "call-1");
+        assert_eq!(second.tool.id, "provider-tool-1");
+        assert_eq!(second.tool.trace_id, "call-1");
+        assert_eq!(ready.id, "provider-tool-1");
+        assert_eq!(ready.call_id.as_deref(), Some("call-1"));
+    }
+
+    #[test]
+    fn stream_id_is_used_as_trace_id_until_provider_identity_arrives() {
+        let mut stream = ToolStream::new();
+        let first_stream_id = "chat_tool_call:0".to_string();
+        let second_stream_id = "chat_tool_call:1".to_string();
+
+        let first = stream.append_delta(
+            Some(&first_stream_id),
+            String::new(),
+            None,
+            Some("read_file".to_string()),
+            ToolInputDeltaPayload::FunctionArguments("{\"path\":\"a\"}".to_string()),
+        );
+        let second = stream.append_delta(
+            Some(&second_stream_id),
+            String::new(),
+            None,
+            Some("read_file".to_string()),
+            ToolInputDeltaPayload::FunctionArguments("{\"path\":\"b\"}".to_string()),
+        );
+
+        assert_eq!(first.tool.id, "chat_tool_call:0");
+        assert_eq!(first.tool.trace_id, "chat_tool_call:0");
+        assert_eq!(second.tool.id, "chat_tool_call:1");
+        assert_eq!(second.tool.trace_id, "chat_tool_call:1");
+    }
 }

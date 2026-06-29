@@ -114,7 +114,11 @@ pub(super) async fn execute_tool_calls(
         }
         let trace_part_id = tool_trace_part_id(context.session_id, tool_call);
         let mut item = recorder
-            .latest_trace_part(&trace_part_id)
+            .latest_tool_trace_part(
+                &trace_part_id,
+                tool_call.call_id.as_deref(),
+                Some(tool_call.id.as_str()),
+            )
             .unwrap_or_else(|| {
                 let item = recorder.tool_item(
                     context.session_id,
