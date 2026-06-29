@@ -223,19 +223,26 @@ impl Tool for SearchFilesTool {
     }
 
     fn description(&self) -> &str {
-        "Search UTF-8 text files inside the workspace for literal text."
+        "Search UTF-8 text files inside the workspace for literal text. `pattern` is the text to \
+         find; `filePattern` optionally filters file paths."
     }
 
     fn input_schema(&self) -> serde_json::Value {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "query": { "type": "string" },
+                "pattern": {
+                    "type": "string",
+                    "description": "Literal text to find inside UTF-8 file contents."
+                },
                 "path": { "type": "string" },
-                "pattern": { "type": "string" },
+                "filePattern": {
+                    "type": "string",
+                    "description": "Optional file path filter such as `*.rs` or `src/*`."
+                },
                 "maxResults": { "type": "integer", "minimum": 1 }
             },
-            "required": ["query"],
+            "required": ["pattern"],
             "additionalProperties": false
         })
     }
@@ -260,8 +267,8 @@ impl Tool for SearchFilesTool {
             search_files(
                 &paths,
                 &root,
-                &input.query,
-                input.pattern.as_deref(),
+                &input.pattern,
+                input.file_pattern.as_deref(),
                 max_results,
                 &mut results,
             )
@@ -347,8 +354,8 @@ async fn list_entries(
 async fn search_files(
     paths: &WorkspacePaths,
     root: &Path,
-    query: &str,
-    pattern: Option<&str>,
+    pattern: &str,
+    file_pattern: Option<&str>,
     max_results: usize,
     results: &mut Vec<String>,
 ) -> Result<(), PureError> {
@@ -369,14 +376,14 @@ async fn search_files(
             continue;
         }
         let display = paths.display_relative(&path);
-        if !matches_pattern(&display, pattern) {
+        if !matches_pattern(&display, file_pattern) {
             continue;
         }
         let Ok(content) = tokio::fs::read_to_string(&path).await else {
             continue;
         };
         for (line_index, line) in content.lines().enumerate() {
-            if line.contains(query) {
+            if line.contains(pattern) {
                 results.push(format!("{}:{}: {}", display, line_index + 1, line));
                 if results.len() >= max_results {
                     break;

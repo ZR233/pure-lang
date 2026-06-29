@@ -99,6 +99,8 @@ MCP tool 成功结果写回紧凑字符串。文本内容按 MCP content 顺序�
 
 文件修改工具不向 schema 暴露语义模糊的 bool 参数。`delete_path` 使用 `mode: "file" | "emptyDirectory" | "recursiveDirectory"`；`copy_path` 和 `move_path` 使用 `collision: "failIfExists" | "overwrite"`。运行时仅为旧历史或人工输入兼容读取旧 `recursive` / `overwrite` 字段，新请求和工具描述不得继续暴露这些 bool 字段。
 
+文件搜索工具的参数名必须避免把“搜索内容”和“路径过滤”混在一起。`search_files` 使用必填 `pattern` 表示要在 UTF-8 文件内容中查找的 literal text；可选 `filePattern` 仅用于过滤被搜索的文件路径，例如 `*.rs` 或 `src/*`。`search_files` 不暴露 `query` 字段，也不把 `pattern` 解释为路径过滤。`list_files.pattern` 只在列目录语境下表示条目路径过滤，不参与文件内容搜索。
+
 ## Studio 展示
 
 Studio timeline 以 message/part projection 派生的 conversation row 为准。后端不创建聚合工具 part；每个工具调用仍作为独立 `StudioPartType::Tool` snapshot/delta 持久化，但 tool part 必须在 Studio wire、FRB DTO 和 `message_parts.activity_group_id` 中携带 `activityGroupId`。该字段由 turn timeline actor 根据 assistant 阅读流边界分配：连续工具复用当前工具活动段，遇到可见 assistant text/commentary/final、reasoning、plan 或 agent row 后关闭当前段，之后工具新开段。Flutter timeline projection 只把相同 `activityGroupId` 的 tool part 合并为一个默认折叠的工具活动组；缺失该字段的历史 tool part 按单工具组展示。工具组详情必须显示工具名称、状态、关键路径或命令摘要。静默文件工具的成功结果可以隐藏在详情中；但失败、拒绝、中断和预算受限时必须在组摘要和详情中展示 result/error，避免用户只看到“工具调用失败”而无法定位原因。
