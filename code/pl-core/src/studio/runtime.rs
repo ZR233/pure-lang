@@ -904,6 +904,7 @@ impl StudioRuntime {
             completed_at: Some(now),
             error: None,
             text_channel: Some(StudioTextChannel::User),
+            activity_group_id: None,
             text: options.user_prompt.visible_prompt(prompt).to_string(),
             attachments,
             tool: None,

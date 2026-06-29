@@ -1043,6 +1043,7 @@ class BridgeStudioPartDto {
   final PlatformInt64? completedAt;
   final String? error;
   final String? textChannel;
+  final String? activityGroupId;
   final String text;
   final BridgeStudioToolPartDto? tool;
   final BridgeStudioAgentPartDto? agent;
@@ -1064,6 +1065,7 @@ class BridgeStudioPartDto {
     this.completedAt,
     this.error,
     this.textChannel,
+    this.activityGroupId,
     required this.text,
     this.tool,
     this.agent,
@@ -1087,6 +1089,7 @@ class BridgeStudioPartDto {
       completedAt.hashCode ^
       error.hashCode ^
       textChannel.hashCode ^
+      activityGroupId.hashCode ^
       text.hashCode ^
       tool.hashCode ^
       agent.hashCode ^
@@ -1112,6 +1115,7 @@ class BridgeStudioPartDto {
           completedAt == other.completedAt &&
           error == other.error &&
           textChannel == other.textChannel &&
+          activityGroupId == other.activityGroupId &&
           text == other.text &&
           tool == other.tool &&
           agent == other.agent &&

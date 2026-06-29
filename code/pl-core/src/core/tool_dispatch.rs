@@ -225,7 +225,7 @@ pub(super) async fn execute_tool_calls(
             }
             PermissionDecision::NeedsUserApproval { workspace_access } => {
                 emit_tool_snapshot(recorder, &mut item, TracePartStatus::AwaitingApproval);
-                progress.tool(format!("工具 `{}` 正在等待授权。", tool_call.name));
+                progress.tool_detail(format!("工具 `{}` 正在等待授权。", tool_call.name));
                 let decision =
                     request_user_approval(context.options, &approval_request, context.session_id)
                         .await;
@@ -244,7 +244,7 @@ pub(super) async fn execute_tool_calls(
             }
             PermissionDecision::NeedsAiReview { workspace_access } => {
                 emit_tool_snapshot(recorder, &mut item, TracePartStatus::AwaitingApproval);
-                progress.tool(format!("正在审查工具 `{}`。", tool_call.name));
+                progress.tool_detail(format!("正在审查工具 `{}`。", tool_call.name));
                 let mut review_context = tool_context.clone();
                 review_context.workspace_access = workspace_access;
                 let decision = context
@@ -293,7 +293,7 @@ pub(super) async fn execute_tool_calls(
                 tool_context.workspace_access = execution_workspace_access;
                 emit_tool_snapshot(recorder, &mut item, TracePartStatus::Approved);
                 emit_tool_snapshot(recorder, &mut item, TracePartStatus::Running);
-                progress.tool(tool_start_progress_message(&tool_call.name));
+                progress.tool_detail(tool_start_progress_message(&tool_call.name));
                 let invocation =
                     ToolInvocation::from_tool_call(tool_call, trace_part_id.clone(), tool_context);
                 let _runtime_identity = (
@@ -482,7 +482,7 @@ async fn collect_scheduled_tools(
 }
 
 fn emit_tool_progress(progress: &mut ProgressEmitter, record: &ToolExecutionRecord) {
-    progress.tool(tool_terminal_progress_message(record));
+    progress.tool_detail(tool_terminal_progress_message(record));
 }
 
 fn tool_start_progress_message(name: &str) -> String {

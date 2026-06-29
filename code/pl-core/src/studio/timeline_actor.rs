@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use pl_protocol::{StudioPart, StudioPartStatus};
+use pl_protocol::{StudioPart, StudioPartStatus, StudioPartType};
 
 use super::records::StudioPartRecord;
 
@@ -11,6 +11,8 @@ pub(super) struct TurnTimelineActor {
     part_orders: HashMap<String, u64>,
     trace_part_ids: HashMap<TracePartScope, String>,
     next_orders_by_message: HashMap<MessageScope, u64>,
+    active_tool_groups_by_message: HashMap<MessageScope, String>,
+    tool_groups_by_part: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -96,6 +98,58 @@ impl TurnTimelineActor {
         }
     }
 
+    pub(super) fn prepare_activity_group(
+        &mut self,
+        part: &mut StudioPart,
+        existing: Option<&StudioPartRecord>,
+    ) {
+        if let Some(existing) = existing {
+            part.activity_group_id = existing.part.activity_group_id.clone();
+            if let Some(group_id) = &part.activity_group_id {
+                self.tool_groups_by_part
+                    .insert(part.part_id.clone(), group_id.clone());
+            }
+            if closes_active_tool_group(part) {
+                self.active_tool_groups_by_message
+                    .remove(&MessageScope::for_part(part));
+            }
+            return;
+        }
+
+        match part.part_type {
+            StudioPartType::Tool => {
+                if let Some(group_id) = self.tool_groups_by_part.get(&part.part_id).cloned() {
+                    part.activity_group_id = Some(group_id);
+                    return;
+                }
+                let message_scope = MessageScope::for_part(part);
+                let group_id = self
+                    .active_tool_groups_by_message
+                    .get(&message_scope)
+                    .cloned()
+                    .unwrap_or_else(|| new_tool_group_id(part));
+                self.active_tool_groups_by_message
+                    .insert(message_scope, group_id.clone());
+                self.tool_groups_by_part
+                    .insert(part.part_id.clone(), group_id.clone());
+                part.activity_group_id = Some(group_id);
+            }
+            StudioPartType::Text
+            | StudioPartType::Reasoning
+            | StudioPartType::Agent
+            | StudioPartType::Turn
+            | StudioPartType::Inference
+            | StudioPartType::Plan
+            | StudioPartType::File => {
+                part.activity_group_id = None;
+                if closes_active_tool_group(part) {
+                    self.active_tool_groups_by_message
+                        .remove(&MessageScope::for_part(part));
+                }
+            }
+        }
+    }
+
     pub(super) fn record_snapshot(&mut self, part: &StudioPart) {
         if is_terminal_studio_part_status(part.status) {
             self.part_revisions.remove(&part.part_id);
@@ -178,6 +232,27 @@ impl MessageScope {
 
 fn should_allocate_part_id(trace_scope: Option<&TracePartScope>, part_id: &str) -> bool {
     trace_scope.is_some_and(|scope| scope.trace_part_id == part_id)
+}
+
+fn closes_active_tool_group(part: &StudioPart) -> bool {
+    if !is_assistant_message_part(part) || part.ignored || part.synthetic {
+        return false;
+    }
+    matches!(
+        part.part_type,
+        StudioPartType::Text
+            | StudioPartType::Reasoning
+            | StudioPartType::Agent
+            | StudioPartType::Plan
+    )
+}
+
+fn is_assistant_message_part(part: &StudioPart) -> bool {
+    part.message_id.ends_with(":assistant")
+}
+
+fn new_tool_group_id(part: &StudioPart) -> String {
+    format!("tool-group:{}:{}", part.turn_id, part.order)
 }
 
 pub(super) fn is_terminal_studio_part_status(status: StudioPartStatus) -> bool {
@@ -358,6 +433,89 @@ mod tests {
     }
 
     #[test]
+    fn consecutive_tools_reuse_active_activity_group() {
+        let mut actor = TurnTimelineActor::default();
+        let mut first = tool_part("tool-a", "turn-1:assistant", "turn-1", 0);
+        let mut second = tool_part("tool-b", "turn-1:assistant", "turn-1", 1);
+
+        actor.prepare_activity_group(&mut first, None);
+        actor.prepare_activity_group(&mut second, None);
+
+        assert_eq!(
+            first.activity_group_id.as_deref(),
+            Some("tool-group:turn-1:0")
+        );
+        assert_eq!(second.activity_group_id, first.activity_group_id);
+    }
+
+    #[test]
+    fn visible_assistant_part_closes_active_activity_group() {
+        let mut actor = TurnTimelineActor::default();
+        let mut first = tool_part("tool-a", "turn-1:assistant", "turn-1", 0);
+        let mut text = part("text-a", StudioPartStatus::Completed, 0);
+        text.order = 1;
+        text.text = "模型回复".to_string();
+        let mut second = tool_part("tool-b", "turn-1:assistant", "turn-1", 2);
+
+        actor.prepare_activity_group(&mut first, None);
+        actor.prepare_activity_group(&mut text, None);
+        actor.prepare_activity_group(&mut second, None);
+
+        assert_eq!(
+            first.activity_group_id.as_deref(),
+            Some("tool-group:turn-1:0")
+        );
+        assert_eq!(
+            second.activity_group_id.as_deref(),
+            Some("tool-group:turn-1:2")
+        );
+    }
+
+    #[test]
+    fn synthetic_runtime_commentary_does_not_close_activity_group() {
+        let mut actor = TurnTimelineActor::default();
+        let mut first = tool_part("tool-a", "turn-1:assistant", "turn-1", 0);
+        let mut commentary = part("progress-a", StudioPartStatus::Completed, 0);
+        commentary.order = 1;
+        commentary.synthetic = true;
+        commentary.text = "正在执行工具".to_string();
+        let mut second = tool_part("tool-b", "turn-1:assistant", "turn-1", 2);
+
+        actor.prepare_activity_group(&mut first, None);
+        actor.prepare_activity_group(&mut commentary, None);
+        actor.prepare_activity_group(&mut second, None);
+
+        assert_eq!(second.activity_group_id, first.activity_group_id);
+    }
+
+    #[test]
+    fn existing_tool_snapshot_preserves_activity_group_without_reopening_it() {
+        let mut actor = TurnTimelineActor::default();
+        let mut first = tool_part("tool-a", "turn-1:assistant", "turn-1", 0);
+        let mut text = part("text-a", StudioPartStatus::Completed, 0);
+        text.order = 1;
+        let mut terminal = tool_part("tool-a", "turn-1:assistant", "turn-1", 0);
+        terminal.status = StudioPartStatus::Completed;
+        terminal.revision = 1;
+        actor.prepare_activity_group(&mut first, None);
+        let existing = StudioPartRecord {
+            part: first.clone(),
+            sequence: 0,
+        };
+        let mut second = tool_part("tool-b", "turn-1:assistant", "turn-1", 2);
+
+        actor.prepare_activity_group(&mut text, None);
+        actor.prepare_activity_group(&mut terminal, Some(&existing));
+        actor.prepare_activity_group(&mut second, None);
+
+        assert_eq!(terminal.activity_group_id, first.activity_group_id);
+        assert_eq!(
+            second.activity_group_id.as_deref(),
+            Some("tool-group:turn-1:2")
+        );
+    }
+
+    #[test]
     fn terminal_parts_reject_late_deltas() {
         let mut actor = TurnTimelineActor::default();
         let existing = StudioPartRecord {
@@ -386,6 +544,7 @@ mod tests {
             completed_at: None,
             error: None,
             text_channel: Some(StudioTextChannel::Final),
+            activity_group_id: None,
             text: String::new(),
             attachments: Vec::new(),
             tool: None,
@@ -401,5 +560,15 @@ mod tests {
 
     fn scope(session_id: &str, turn_id: &str, trace_part_id: &str) -> TracePartScope {
         TracePartScope::new(session_id, turn_id, trace_part_id)
+    }
+
+    fn tool_part(part_id: &str, message_id: &str, turn_id: &str, order: u64) -> StudioPart {
+        let mut part = part(part_id, StudioPartStatus::Running, 0);
+        part.message_id = message_id.to_string();
+        part.turn_id = turn_id.to_string();
+        part.part_type = StudioPartType::Tool;
+        part.order = order;
+        part.text_channel = None;
+        part
     }
 }

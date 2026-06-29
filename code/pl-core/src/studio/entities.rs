@@ -218,6 +218,7 @@ pub mod message_part {
         pub completed_at: Option<i64>,
         pub error: Option<String>,
         pub text_channel: Option<String>,
+        pub activity_group_id: Option<String>,
         pub text: String,
         pub attachments_json: String,
         pub tool_json: Option<String>,

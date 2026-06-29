@@ -1799,6 +1799,7 @@ impl SseDecode for crate::api::studio::BridgeStudioPartDto {
         let mut var_completedAt = <Option<i64>>::sse_decode(deserializer);
         let mut var_error = <Option<String>>::sse_decode(deserializer);
         let mut var_textChannel = <Option<String>>::sse_decode(deserializer);
+        let mut var_activityGroupId = <Option<String>>::sse_decode(deserializer);
         let mut var_text = <String>::sse_decode(deserializer);
         let mut var_tool =
             <Option<crate::api::studio::BridgeStudioToolPartDto>>::sse_decode(deserializer);
@@ -1822,6 +1823,7 @@ impl SseDecode for crate::api::studio::BridgeStudioPartDto {
             completed_at: var_completedAt,
             error: var_error,
             text_channel: var_textChannel,
+            activity_group_id: var_activityGroupId,
             text: var_text,
             tool: var_tool,
             agent: var_agent,
@@ -3532,6 +3534,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::BridgeStudioPartDto {
             self.completed_at.into_into_dart().into_dart(),
             self.error.into_into_dart().into_dart(),
             self.text_channel.into_into_dart().into_dart(),
+            self.activity_group_id.into_into_dart().into_dart(),
             self.text.into_into_dart().into_dart(),
             self.tool.into_into_dart().into_dart(),
             self.agent.into_into_dart().into_dart(),
@@ -4650,6 +4653,7 @@ impl SseEncode for crate::api::studio::BridgeStudioPartDto {
         <Option<i64>>::sse_encode(self.completed_at, serializer);
         <Option<String>>::sse_encode(self.error, serializer);
         <Option<String>>::sse_encode(self.text_channel, serializer);
+        <Option<String>>::sse_encode(self.activity_group_id, serializer);
         <String>::sse_encode(self.text, serializer);
         <Option<crate::api::studio::BridgeStudioToolPartDto>>::sse_encode(self.tool, serializer);
         <Option<crate::api::studio::BridgeStudioAgentPartDto>>::sse_encode(self.agent, serializer);

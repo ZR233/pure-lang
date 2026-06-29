@@ -190,6 +190,33 @@ class AppLocalizationsZh extends AppLocalizations {
   String get timelineToolFallback => 'Tool';
 
   @override
+  String get timelineToolGroupTitle => '工具活动';
+
+  @override
+  String timelineToolGroupSummary(int count) {
+    return '$count 个工具';
+  }
+
+  @override
+  String timelineToolGroupSummaryRunning(int count, int runningCount) {
+    return '$count 个工具，$runningCount 个运行中';
+  }
+
+  @override
+  String timelineToolGroupSummaryIssues(int count, int issueCount) {
+    return '$count 个工具，$issueCount 个需要注意';
+  }
+
+  @override
+  String timelineToolGroupSummaryRunningWithIssues(
+    int count,
+    int runningCount,
+    int issueCount,
+  ) {
+    return '$count 个工具，$runningCount 个运行中，$issueCount 个需要注意';
+  }
+
+  @override
   String get timelinePlanFallback => 'Plan';
 
   @override
@@ -211,9 +238,22 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String timelineToolAwaitingApproval(String name) {
+    return '$name 等待授权';
+  }
+
+  @override
   String timelineToolRunning(String name) {
     return '$name 运行中';
   }
+
+  @override
+  String timelineToolExitCode(int code) {
+    return '退出码 $code';
+  }
+
+  @override
+  String get timelineToolTimedOut => '已超时';
 
   @override
   String get timelineAgentSubagent => '子代理';
@@ -923,6 +963,33 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get timelineToolFallback => 'Tool';
 
   @override
+  String get timelineToolGroupTitle => '工具活动';
+
+  @override
+  String timelineToolGroupSummary(int count) {
+    return '$count 个工具';
+  }
+
+  @override
+  String timelineToolGroupSummaryRunning(int count, int runningCount) {
+    return '$count 个工具，$runningCount 个运行中';
+  }
+
+  @override
+  String timelineToolGroupSummaryIssues(int count, int issueCount) {
+    return '$count 个工具，$issueCount 个需要注意';
+  }
+
+  @override
+  String timelineToolGroupSummaryRunningWithIssues(
+    int count,
+    int runningCount,
+    int issueCount,
+  ) {
+    return '$count 个工具，$runningCount 个运行中，$issueCount 个需要注意';
+  }
+
+  @override
   String get timelinePlanFallback => 'Plan';
 
   @override
@@ -944,9 +1011,22 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   }
 
   @override
+  String timelineToolAwaitingApproval(String name) {
+    return '$name 等待授权';
+  }
+
+  @override
   String timelineToolRunning(String name) {
     return '$name 运行中';
   }
+
+  @override
+  String timelineToolExitCode(int code) {
+    return '退出码 $code';
+  }
+
+  @override
+  String get timelineToolTimedOut => '已超时';
 
   @override
   String get timelineAgentSubagent => '子代理';
