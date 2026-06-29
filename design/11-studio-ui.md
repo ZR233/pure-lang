@@ -42,7 +42,7 @@ lib/src/shared/
 - `mcpServers/lspServers`
 - `turnPhase/turnStartedAt`
 
-`messageUpdated` upsert message snapshot；`messagePartUpdated` upsert 完整 part snapshot 并清除该 part 的 live delta；`messagePartDelta` payload 只携带 `partId/revision/field/delta/chunkIndex`，session 归属来自 envelope，message/turn 归属来自已有 part snapshot，不在 delta 内重复携带或信任第二套身份。`messagePartDelta` 只允许命中已有 part，orphan delta 直接丢弃。`messagePartDelta` 不推进 durable cursor，也不得覆盖 terminal snapshot。前端记录 part 的 snapshot sequence、delta sequence 和可选 `chunkIndex`，丢弃同 part stale delta、低序 delta 与重复/倒序 chunk。`messageRemoved`、`messagePartRemoved`、session reset 和 projection snapshot 替换必须清理相关 delta accum。
+`messageUpdated` upsert message snapshot；message snapshot 保留 `turnId/status/updatedAt/completedAt/error` 等 lifecycle 字段，但 message `createdAt` 首次创建后不可因后续 snapshot 回退或覆盖。message lifecycle 只更新 message snapshot，不驱动 part 终态，也不从 part 状态反推 message 状态。`messagePartUpdated` upsert 完整 part snapshot 并清除该 part 的 live delta；`messagePartDelta` payload 只携带 `partId/revision/field/delta/chunkIndex`，session 归属来自 envelope，message/turn 归属来自已有 part snapshot，不在 delta 内重复携带或信任第二套身份。`messagePartDelta` 只允许命中已有 part，orphan delta 直接丢弃。`messagePartDelta` 不推进 durable cursor，也不得覆盖 terminal snapshot。前端记录 part 的 snapshot sequence、delta sequence 和可选 `chunkIndex`，丢弃同 part stale delta、低序 delta 与重复/倒序 chunk。`messageRemoved`、`messagePartRemoved`、session reset 和 projection snapshot 替换必须清理相关 delta accum。
 
 `StudioPart.revision` 与 `StudioPartDelta.revision` 是每个 part 的 live 版本号。start snapshot 使用 `revision=0`，同 part 每个 delta 递增，terminal snapshot 携带最新 revision。前端 reducer 必须按 `partId + field` 保存 overlay，并在 `delta.revision <= lastRevision` 时丢弃该 delta；terminal snapshot 到达后清理 overlay，terminal 后到达的 delta 一律丢弃。旧历史或旧后端缺失 revision 时按默认 0 读取，只能作为 durable snapshot 初始化；live delta 必须携带大于当前 field revision 的 revision，不能用缺省 0 覆盖已有 snapshot 或 overlay。
 
@@ -50,7 +50,7 @@ lib/src/shared/
 
 Flutter 解析层必须接受 Studio 协议内的所有 part type。当前不直接渲染的 lifecycle/internal/file part 可以进入 normalized snapshot 后由 row projection 过滤，或在 bridge payload 层忽略，但不能把协议内类型当未知类型抛出导致 timeline 白屏。真正未知的 part type 仍应 fail fast。
 
-切换或恢复选中 session 时必须建立 session load barrier：先带 generation 订阅目标 `sessionId` 的实时 stream，再加载 `load_session_state`，加载期间同 generation 的 session event 只进入 buffer，不直接修改 timeline。snapshot 返回后若 generation/session 已过期则丢弃；否则先用 per-message/per-part sequence guard 合并 snapshot，再按事件 sequence 和到达顺序重放 buffer。重放 durable event 前必须按 snapshot 合并后的 `eventCursorsBySession[sessionId]` 丢弃 `sequence <= cursor` 的旧事件；cursor 合并取较大值。`messagePartDelta` 继续作为 live-only overlay，不推进 durable cursor，只按 part revision 单独处理。旧订阅迟到事件、缺失 sessionId 的 timeline event 或 generation 不匹配的 event 必须丢弃，不能污染当前会话。
+切换或恢复选中 session 时必须建立 session load barrier：先带 generation 订阅目标 `sessionId` 的实时 stream，再加载 `load_session_state`，加载期间同 generation 的 session event 只进入 buffer，不直接修改 timeline。snapshot 返回后若 generation/session 已过期则丢弃；否则先用 per-message/per-part sequence guard 合并 snapshot，再按事件 sequence 和到达顺序重放 buffer。live-only 事件没有 durable 排序语义，若多个 live-only 事件在 barrier 中拥有相同 sequence/createdAt，必须保留接收顺序，不能用 eventId 重新排序导致 part revision gap。重放 durable event 前必须按 snapshot 合并后的 `eventCursorsBySession[sessionId]` 丢弃 `sequence <= cursor` 的旧事件；cursor 合并取较大值。`messagePartDelta` 继续作为 live-only overlay，不推进 durable cursor，只按 part revision 单独处理。旧订阅迟到事件、缺失 sessionId 的 timeline event 或 generation 不匹配的 event 必须丢弃，不能污染当前会话。
 
 状态管理对齐 opencode `global-sync`：Flutter Riverpod store 只保存归一化 entity 表和少量 UI 本地状态，组件不得直接把多个表临时拼成业务状态。选中会话、状态栏、timeline、交互 dock 和会话列表都必须通过 selector/view model 派生：
 
@@ -106,7 +106,7 @@ plan、commentary、reasoning 和普通 text 的 live overlay 必须使用 strea
 
 工具展示使用 opencode `groupParts` 语义：普通 part group key 为 `part:{messageId}:{partId}`，连续 context tool 可聚合为 context group，group key 取首个 part id。工具状态以 part snapshot 的 `status` 为准；展示层不得改写 `StudioPart`。
 
-工具、命令、文件修改和 subagent 活动文本由 Flutter timeline projection 基于结构化事实确定性生成，不在 `pl-core` 或 `pl-protocol` 中新增本地化文案字段。固定 UI 文案走 i18n；tool 名称、agent path、model slug、路径、命令摘要和 provider 返回值按领域值原样展示。`AgentTimelineChanged` 的 begin/end 事件应按 `callId` 合并为一条高层活动行；`AgentChanged` 只更新状态栏、agent 列表或活动详情，不应每次 snapshot 都在父 timeline 新增一行。父 timeline 默认不展开子代理内部工具 trace。
+工具、命令、文件修改和 subagent 活动文本由 Flutter timeline projection 基于结构化事实确定性生成，不在 `pl-core` 或 `pl-protocol` 中新增本地化文案字段。固定 UI 文案走 i18n；tool 名称、agent path、model slug、路径、命令摘要和 provider 返回值按领域值原样展示。`AgentTimelineChanged` 的 begin/end 事件应按 `callId` 合并为一条高层活动行，row identity 使用 `callId` 分组键而不是 begin/end 的具体 event id，避免终态更新被 UI 当作新活动行。`AgentChanged` 只更新状态栏、agent 列表或活动详情，不应每次 snapshot 都在父 timeline 新增一行。父 timeline 默认不展开子代理内部工具 trace。
 
 Timeline 虚拟滚动必须监听 opencode 同款 active assistant content version：当前 active assistant message 的完成状态、错误、text/reasoning 展示长度、tool status、tool result/metadata 长度变化都要触发 `virtua.measure()` 和底部锚定。row key 不变但内容增长时，仍要保持底部跟随；切换 session 时写入/读取 row cache，并用 keep-mounted 行避免 active turn 被虚拟列表过早卸载。
 

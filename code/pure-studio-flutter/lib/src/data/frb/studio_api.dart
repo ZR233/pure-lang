@@ -495,12 +495,6 @@ class StudioTurnView {
   final String status;
 }
 
-class StudioAgentView {
-  const StudioAgentView({required this.sessionId});
-
-  final String sessionId;
-}
-
 StudioBridgeEventPayload _bridgePayloadFromFrb(
   frb.BridgeEventPayload payload, {
   required BigInt sequence,
@@ -532,7 +526,7 @@ StudioBridgeEventPayload _bridgePayloadFromFrb(
     frb.BridgeEventPayload_InteractionChanged(:final event) =>
       _interactionChangedPayloadFromFrb(event),
     frb.BridgeEventPayload_AgentChanged(:final agent) => AgentChangedPayload(
-      agent: StudioAgentView(sessionId: agent.sessionId),
+      agent: _agentViewFromFrb(agent),
     ),
     frb.BridgeEventPayload_AgentTimelineChanged(:final event) =>
       AgentTimelineChangedPayload(event: _timelineAgentEventFromFrb(event)),
@@ -576,8 +570,15 @@ TimelineMessage _timelineMessageFromFrb(
   return TimelineMessage(
     id: message.messageId,
     sessionId: message.sessionId,
+    turnId: message.turnId,
     role: message.role.isEmpty ? 'assistant' : message.role,
+    status: message.status.isEmpty ? 'completed' : message.status,
     createdAt: _dateFromUnix(message.createdAt),
+    updatedAt: _dateFromUnix(message.updatedAt),
+    completedAt: message.completedAt == null
+        ? null
+        : _dateFromUnix(message.completedAt!),
+    error: message.error,
     sequence: sequence,
   );
 }
@@ -978,6 +979,36 @@ Map<String, Map<String, TimelineAgentEvent>> _agentTimelineEventsFromTyped(
   return bySession;
 }
 
+Map<String, Map<String, StudioAgentView>> _agentsFromTyped(
+  Iterable<frb.BridgeAgentSnapshotDto> agents,
+) {
+  final bySession = <String, Map<String, StudioAgentView>>{};
+  for (final agent in agents.map(_agentViewFromFrb)) {
+    if (agent.id.isEmpty || agent.sessionId.isEmpty) {
+      continue;
+    }
+    bySession.putIfAbsent(agent.sessionId, () => {})[agent.id] = agent;
+  }
+  return bySession;
+}
+
+StudioAgentView _agentViewFromFrb(frb.BridgeAgentSnapshotDto value) {
+  return StudioAgentView(
+    id: value.id,
+    sessionId: value.sessionId,
+    path: value.path,
+    parentPath: value.parentPath,
+    role: value.role,
+    task: value.task,
+    status: value.status,
+    summary: value.summary,
+    depth: value.depth,
+    error: value.error,
+    reason: value.reason,
+    updatedAt: _dateFromUnix(value.updatedAt),
+  );
+}
+
 StudioState studioStateFromFrbSnapshot(frb.BridgeStudioSnapshotResponse value) {
   return _stateFromTypedSnapshot(
     projects: value.projects.map(_projectFromFrb).toList(),
@@ -1054,11 +1085,20 @@ List<StudioSession> studioSessionsFromJson(Object? value) {
 
 TimelineMessage timelineMessageFromJson(Object? value, {int sequence = 0}) {
   final json = _map(value);
+  final createdAt = _int(json['createdAt']);
+  final updatedAt = _nullableInt(json['updatedAt']) ?? createdAt;
   return TimelineMessage(
     id: _string(json['messageId'], fallback: _string(json['id'])),
     sessionId: _string(json['sessionId']),
+    turnId: _string(json['turnId']),
     role: _string(json['role'], fallback: 'assistant'),
-    createdAt: _dateFromUnix(_int(json['createdAt'])),
+    status: _string(json['status'], fallback: 'completed'),
+    createdAt: _dateFromUnix(createdAt),
+    updatedAt: _dateFromUnix(updatedAt),
+    completedAt: _nullableInt(json['completedAt']) == null
+        ? null
+        : _dateFromUnix(_nullableInt(json['completedAt'])!),
+    error: _nullableString(json['error']),
     sequence: sequence,
   );
 }
@@ -1374,6 +1414,7 @@ StudioState _stateFromTypedSnapshot({
   final agentEventsBySession =
       agentTimelineEventsBySession ??
       _agentTimelineEventsFromTyped(agentEvents);
+  final agentsBySession = _agentsFromTyped(agents);
   final latest = events.fold<StudioState>(
     StudioState(
       projects: projects,
@@ -1382,6 +1423,7 @@ StudioState _stateFromTypedSnapshot({
       partSnapshotsBySession: partSnapshotsBySession,
       partOverlaysBySession: const {},
       agentTimelineEventsBySession: agentEventsBySession,
+      agentsBySession: agentsBySession,
       providers: _providersFromConfig(config),
       defaultProviderId: _defaultProviderIdFromConfig(config),
       roles: _rolesFromConfig(config),
@@ -1408,9 +1450,7 @@ StudioState _stateFromTypedSnapshot({
   );
   return latest.copyWith(
     runtime: latest.runtime.copyWith(
-      agentCount: agents
-          .where((agent) => agent.sessionId == selectedSessionId)
-          .length,
+      agentCount: agentsBySession[selectedSessionId]?.length ?? 0,
     ),
   );
 }
@@ -1472,6 +1512,7 @@ StudioState _withInteraction(
     partSnapshotsBySession: state.partSnapshotsBySession,
     partOverlaysBySession: state.partOverlaysBySession,
     agentTimelineEventsBySession: state.agentTimelineEventsBySession,
+    agentsBySession: state.agentsBySession,
     providers: state.providers,
     defaultProviderId: state.defaultProviderId,
     providerUsages: state.providerUsages,
@@ -2418,6 +2459,29 @@ class DemoStudioApi implements StudioApi {
       partSnapshotsBySession: {
         session.id: {for (final part in demoParts) part.id: part},
       },
+      agentsBySession: {
+        session.id: {
+          'agent-reviewer': StudioAgentView(
+            id: 'agent-reviewer',
+            sessionId: session.id,
+            path: 'root/reviewer',
+            role: 'reviewer',
+            task: 'Audit timeline projection',
+            status: 'running',
+            updatedAt: assistantCreatedAt,
+          ),
+          'agent-worker': StudioAgentView(
+            id: 'agent-worker',
+            sessionId: session.id,
+            path: 'root/worker',
+            role: 'worker',
+            task: 'Implement visible progress',
+            status: 'completed',
+            summary: 'Patched Flutter projection',
+            updatedAt: assistantCreatedAt,
+          ),
+        },
+      },
       providers:
           _providers ??
           const [
@@ -2519,6 +2583,7 @@ class DemoStudioApi implements StudioApi {
         projects: const [],
         sessions: const [],
         messagesBySession: const {},
+        agentsBySession: const {},
         providers: state.providers,
         roles: state.roles,
         mcpServers: state.mcpServers,

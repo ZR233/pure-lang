@@ -84,6 +84,12 @@ impl StudioEventRuntime {
         turn_id: Option<String>,
         kind: StudioEventKind,
     ) -> Result<StudioEventEnvelope> {
+        if !matches!(
+            kind,
+            StudioEventKind::MessagePartDelta { .. } | StudioEventKind::Stale { .. }
+        ) {
+            anyhow::bail!("emit_live only accepts live-only studio events");
+        }
         let sequence = if let Some(session_id) = session_id.as_deref() {
             self.store.next_studio_event_sequence(session_id).await? as u64
         } else {
@@ -1653,6 +1659,43 @@ mod tests {
             event.kind,
             StudioEventKind::Stale { lagged_events: 1 }
         ));
+    }
+
+    #[tokio::test]
+    async fn emit_live_rejects_durable_event_kinds() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/studio").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Live guard", CompileMode::Auto)
+            .await
+            .unwrap();
+        let runtime = StudioEventRuntime::new(store);
+        let mut rx = runtime.subscribe();
+
+        let error = runtime
+            .emit_live(
+                None,
+                Some(session.id.clone()),
+                Some("turn-live-guard".to_string()),
+                StudioEventKind::TurnChanged {
+                    turn: StudioTurn {
+                        turn_id: "turn-live-guard".to_string(),
+                        session_id: session.id.clone(),
+                        status: StudioTurnStatus::Completed,
+                        reason: None,
+                        updated_at: 100,
+                    },
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("emit_live only accepts live-only studio events")
+        );
+        assert!(rx.try_recv().is_err());
     }
 
     #[tokio::test]

@@ -16,12 +16,20 @@ final studioApiProvider = Provider<StudioApi>((ref) {
 final studioControllerProvider =
     AsyncNotifierProvider<StudioController, StudioState>(StudioController.new);
 
+class _BufferedSessionEvent {
+  const _BufferedSessionEvent(this.event, this.arrivalIndex);
+
+  final StudioBridgeEvent event;
+  final int arrivalIndex;
+}
+
 class StudioController extends AsyncNotifier<StudioState> {
   StreamSubscription<Object>? _globalSubscription;
   StreamSubscription<Object>? _sessionSubscription;
   final List<StudioBridgeEvent> _pendingPartDeltas = [];
   bool _partDeltaFrameScheduled = false;
-  final List<StudioBridgeEvent> _sessionLoadBuffer = [];
+  final List<_BufferedSessionEvent> _sessionLoadBuffer = [];
+  int _sessionLoadBufferNextIndex = 0;
   int _sessionGeneration = 0;
   String? _loadingSessionId;
   int? _loadingGeneration;
@@ -380,18 +388,22 @@ class StudioController extends AsyncNotifier<StudioState> {
       return;
     }
     _flushPartDeltaBatch();
+    final latest = state.value;
+    if (latest == null) {
+      return;
+    }
     if (event.payload is StalePayload) {
-      final sessionId = event.sessionId ?? current.selectedSessionId;
+      final sessionId = event.sessionId ?? latest.selectedSessionId;
       if (sessionId != null) {
         unawaited(_recoverStaleSession(sessionId));
       }
       return;
     }
-    if (!_targetsSelectedSession(current, event) ||
-        _isDuplicateDurableEvent(current, event)) {
+    if (!_targetsSelectedSession(latest, event) ||
+        _isDuplicateDurableEvent(latest, event)) {
       return;
     }
-    final reduced = _reduceEvent(current, event);
+    final reduced = _reduceEvent(latest, event);
     state = AsyncData(_withEventCursor(reduced, event));
   }
 
@@ -407,7 +419,9 @@ class StudioController extends AsyncNotifier<StudioState> {
       if (event.payload is StalePayload) {
         _bufferedStaleSession = true;
       } else {
-        _sessionLoadBuffer.add(event);
+        _sessionLoadBuffer.add(
+          _BufferedSessionEvent(event, _sessionLoadBufferNextIndex++),
+        );
       }
       return;
     }
@@ -420,6 +434,7 @@ class StudioController extends AsyncNotifier<StudioState> {
     _loadingGeneration = generation;
     _bufferedStaleSession = false;
     _sessionLoadBuffer.clear();
+    _sessionLoadBufferNextIndex = 0;
   }
 
   void _clearAnySessionLoadBarrier() {
@@ -427,6 +442,7 @@ class StudioController extends AsyncNotifier<StudioState> {
     _loadingGeneration = null;
     _bufferedStaleSession = false;
     _sessionLoadBuffer.clear();
+    _sessionLoadBufferNextIndex = 0;
   }
 
   void _clearSessionLoadBarrier(String sessionId, int generation) {
@@ -444,8 +460,13 @@ class StudioController extends AsyncNotifier<StudioState> {
       return current;
     }
     _sessionLoadBuffer.sort((a, b) {
-      final aSequence = a.sequence?.toInt() ?? 0;
-      final bSequence = b.sequence?.toInt() ?? 0;
+      final aEvent = a.event;
+      final bEvent = b.event;
+      if (_isLiveOnlyEvent(aEvent) && _isLiveOnlyEvent(bEvent)) {
+        return a.arrivalIndex.compareTo(b.arrivalIndex);
+      }
+      final aSequence = aEvent.sequence?.toInt() ?? 0;
+      final bSequence = bEvent.sequence?.toInt() ?? 0;
       final sequence = switch ((aSequence > 0, bSequence > 0)) {
         (true, true) => aSequence.compareTo(bSequence),
         (true, false) => -1,
@@ -455,16 +476,16 @@ class StudioController extends AsyncNotifier<StudioState> {
       if (sequence != 0) {
         return sequence;
       }
-      final createdAt = (a.createdAt?.millisecondsSinceEpoch ?? 0).compareTo(
-        b.createdAt?.millisecondsSinceEpoch ?? 0,
-      );
+      final createdAt = (aEvent.createdAt?.millisecondsSinceEpoch ?? 0)
+          .compareTo(bEvent.createdAt?.millisecondsSinceEpoch ?? 0);
       if (createdAt != 0) {
         return createdAt;
       }
-      return (a.eventId ?? '').compareTo(b.eventId ?? '');
+      return (aEvent.eventId ?? '').compareTo(bEvent.eventId ?? '');
     });
     var latest = current;
-    for (final event in _sessionLoadBuffer) {
+    for (final buffered in _sessionLoadBuffer) {
+      final event = buffered.event;
       if (!_targetsSelectedSession(latest, event) ||
           _isDuplicateDurableEvent(latest, event)) {
         continue;
@@ -681,6 +702,12 @@ class StudioController extends AsyncNotifier<StudioState> {
           ...agentEvents,
         });
       }
+      final agents =
+          sessionState.agentsBySession[sessionId] ??
+          const <String, StudioAgentView>{};
+      if (agents.isNotEmpty) {
+        merged = _withAgents(merged, sessionId, agents);
+      }
     }
     return merged.copyWith(
       sessions: sessionState.sessions.isEmpty
@@ -771,7 +798,12 @@ class StudioController extends AsyncNotifier<StudioState> {
         return current;
       }
       messages[index] = existing.copyWith(
+        turnId: message.turnId.isEmpty ? existing.turnId : message.turnId,
         role: message.role,
+        status: message.status,
+        updatedAt: message.updatedAt,
+        completedAt: message.completedAt,
+        error: message.error,
         sequence: message.sequence > existing.sequence
             ? message.sequence
             : existing.sequence,
@@ -936,11 +968,20 @@ class StudioController extends AsyncNotifier<StudioState> {
         agent.sessionId != current.selectedSessionId) {
       return current;
     }
-    final nextCount = current.runtime.agentCount == 0
-        ? 1
-        : current.runtime.agentCount;
-    return current.copyWith(
-      runtime: current.runtime.copyWith(agentCount: nextCount),
+    final sessionId = agent.sessionId;
+    if (sessionId.isEmpty || agent.id.isEmpty) {
+      return current;
+    }
+    final agents = <String, StudioAgentView>{
+      ...(current.agentsBySession[sessionId] ?? const {}),
+      agent.id: agent,
+    };
+    return _withAgents(
+      current.copyWith(
+        runtime: current.runtime.copyWith(agentCount: agents.length),
+      ),
+      sessionId,
+      agents,
     );
   }
 
@@ -1094,6 +1135,16 @@ class StudioController extends AsyncNotifier<StudioState> {
         ...state.agentTimelineEventsBySession,
         sessionId: events,
       },
+    );
+  }
+
+  StudioState _withAgents(
+    StudioState state,
+    String sessionId,
+    Map<String, StudioAgentView> agents,
+  ) {
+    return state.copyWith(
+      agentsBySession: {...state.agentsBySession, sessionId: agents},
     );
   }
 

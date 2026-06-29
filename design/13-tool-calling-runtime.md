@@ -89,6 +89,8 @@ MCP tools 由进程内 MCP runtime registry 的当前可用快照注册，工具
 
 Studio 实时展示层可以在 `bash` 子进程仍运行时看到 stdout/stderr chunk。命令管理器读取管道后先更新内存截断缓冲并分配输出 revision，再通过 trace delta 把 chunk 投影到原 `bash` tool part 的 `tool.result` live overlay，同时异步追加完整输出文件；delta revision 从该 part 已有 revision 继续递增，终态 JSON snapshot 的 revision 不低于最后一个输出 chunk。`write_stdin` 负责写入或轮询后台进程，返回自己的紧凑 JSON 结果；后台进程新增输出仍归属最初启动它的 `bash` tool part，不在父 timeline 中复制成新的工具输出正文。
 
+Studio runtime 的 live-only event 通道只允许发送 `MessagePartDelta` 和 `Stale`。turn、message、part snapshot、agent snapshot、interaction、runtime usage 等 durable 事件必须先通过 store transaction 校验、分配 durable sequence、写入 projection 并持久化后再广播，不能误用 live-only 通道，否则前端 durable cursor 与历史回放会分叉。
+
 Windows 上 `bash.command` 的默认宿主 shell 是 PowerShell：运行时先查找 `pwsh.exe`，再查找 `powershell.exe`，都不可用时才使用 `cmd.exe /C`。PowerShell 命令以 `-NoProfile -Command` 执行，并注入 UTF-8 输出设置；这只影响命令字符串的宿主 shell，不改变 `bash` / `write_stdin` 的公开 schema、审批策略或 JSON 结果字段。
 
 `wait_agent` 和 `list_agents` 默认只回传紧凑 agent 摘要，避免把完整 agent snapshot 反复写入模型上下文。调用方显式传入 `includeDetails: true` 时，工具结果可包含完整 `AgentRecord`，用于诊断；普通协作流程应优先依赖精简摘要和最终子代理总结。`spawn_agent.forkTurns` 的历史继承只复制过滤后的父会话消息，不复制工具结果、工具调用 metadata、reasoning 内容或运行时调度提示。
