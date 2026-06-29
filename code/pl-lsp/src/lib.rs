@@ -1,8 +1,11 @@
 mod client;
+mod diagnostics;
 mod formatting;
 mod framing;
 mod process;
 mod registry;
+mod server_definition;
+mod status;
 mod types;
 mod uri;
 
