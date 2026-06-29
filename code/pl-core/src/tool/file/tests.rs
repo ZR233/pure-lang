@@ -5,7 +5,7 @@ use crate::tool::{Tool, ToolContext, ToolInput};
 use crate::turn::TurnOptions;
 use pretty_assertions::assert_eq;
 
-use super::read::ReadFileTool;
+use super::read::{ReadFileTool, SearchFilesTool};
 use super::write::WriteFileTool;
 use super::{ApplyPatchTool, CopyPathTool, DeletePathTool, MovePathTool};
 
@@ -494,6 +494,70 @@ fn file_tool_schemas_do_not_expose_legacy_bool_fields() {
     assert!(copy_schema["properties"].get("overwrite").is_none());
     assert!(move_schema["properties"].get("collision").is_some());
     assert!(move_schema["properties"].get("overwrite").is_none());
+}
+
+#[test]
+fn search_files_schema_uses_pattern_for_content_and_file_pattern_for_paths() {
+    let schema = SearchFilesTool.input_schema();
+
+    assert!(schema["properties"].get("pattern").is_some());
+    assert!(schema["properties"].get("filePattern").is_some());
+    assert!(schema["properties"].get("query").is_none());
+    assert_eq!(schema["required"], serde_json::json!(["pattern"]));
+}
+
+#[tokio::test]
+async fn search_files_accepts_pattern_as_search_text() {
+    let root = unique_temp_dir("search-pattern-text");
+    tokio::fs::create_dir_all(root.join("src")).await.unwrap();
+    tokio::fs::write(root.join("src/args.rs"), "fn parse_args() {}\n")
+        .await
+        .unwrap();
+    let tool = SearchFilesTool;
+
+    let output = tool
+        .execute(
+            input(serde_json::json!({
+                "path": "src/args.rs",
+                "pattern": "fn parse_args"
+            })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+
+    assert!(output.description.contains("src"));
+    assert!(output.description.contains("args.rs:1: fn parse_args() {}"));
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn search_files_file_pattern_filters_paths() {
+    let root = unique_temp_dir("search-file-pattern");
+    tokio::fs::create_dir_all(root.join("src")).await.unwrap();
+    tokio::fs::write(root.join("src/lib.rs"), "needle\n")
+        .await
+        .unwrap();
+    tokio::fs::write(root.join("src/readme.txt"), "needle\n")
+        .await
+        .unwrap();
+    let tool = SearchFilesTool;
+
+    let output = tool
+        .execute(
+            input(serde_json::json!({
+                "path": "src",
+                "pattern": "needle",
+                "filePattern": "*.rs"
+            })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+
+    assert!(output.description.contains("lib.rs:1: needle"));
+    assert!(!output.description.contains("readme.txt"));
+    let _ = tokio::fs::remove_dir_all(root).await;
 }
 
 #[tokio::test]

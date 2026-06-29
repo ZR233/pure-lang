@@ -37,9 +37,9 @@ pub(super) struct ListFilesInput {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct SearchFilesInput {
-    pub query: String,
+    pub pattern: String,
     pub path: Option<String>,
-    pub pattern: Option<String>,
+    pub file_pattern: Option<String>,
     pub max_results: Option<usize>,
 }
 
