@@ -605,6 +605,7 @@ TimelinePartSnapshot _timelinePartSnapshotFromFrb(
         : _dateFromUnix(part.completedAt!),
     error: part.error,
     textChannel: _textChannel(part.textChannel),
+    activityGroupId: part.activityGroupId,
     tool: _toolPartFromFrb(part.tool),
     agent: _agentPartFromFrb(part.agent),
     planContent: part.plan?.content,
@@ -1130,6 +1131,9 @@ TimelinePartSnapshot timelinePartSnapshotFromJson(
     error: _nullableString(json['error']),
     textChannel: _textChannel(
       _firstValue(json, const ['textChannel', 'text_channel']),
+    ),
+    activityGroupId: _nullableString(
+      _firstValue(json, const ['activityGroupId', 'activity_group_id']),
     ),
     tool: _toolPart(json['tool']),
     agent: _agentPart(json['agent']),

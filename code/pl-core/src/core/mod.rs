@@ -542,6 +542,7 @@ mod tests {
         progress.milestone("正在准备上下文。");
         progress.heartbeat("等待模型响应。");
         progress.tool("正在执行工具 `bash`。");
+        progress.tool_detail("工具 `bash` 已完成。");
 
         let first = event_rx.try_recv().unwrap();
         let second = event_rx.try_recv().unwrap();
@@ -563,6 +564,33 @@ mod tests {
         assert_eq!(second.item_id, "turn-1:progress:2");
         assert_eq!(second.source, TracePartSource::Runtime);
         assert_eq!(second.content, "正在执行工具 `bash`。");
+    }
+
+    #[test]
+    fn progress_emitter_sends_tool_detail_only_when_verbose() {
+        let (normal_tx, mut normal_rx) = tokio::sync::broadcast::channel(8);
+        let mut normal = progress::ProgressEmitter::new(
+            normal_tx,
+            "turn-1",
+            progress::ProgressVerbosity::Normal,
+        );
+        normal.tool_detail("工具 `bash` 已完成。");
+        assert!(normal_rx.try_recv().is_err());
+
+        let (verbose_tx, mut verbose_rx) = tokio::sync::broadcast::channel(8);
+        let mut verbose = progress::ProgressEmitter::new(
+            verbose_tx,
+            "turn-1",
+            progress::ProgressVerbosity::Verbose,
+        );
+        verbose.tool_detail("工具 `bash` 已完成。");
+
+        let AgentEvent::TracePartCompleted { item } = verbose_rx.try_recv().unwrap() else {
+            panic!("expected completed progress part");
+        };
+        assert_eq!(item.source, TracePartSource::Runtime);
+        assert_eq!(item.text_channel, Some(TraceTextChannel::Commentary));
+        assert_eq!(item.content, "工具 `bash` 已完成。");
     }
 
     #[test]
@@ -1000,13 +1028,7 @@ mod tests {
                 TracePartStatus::Completed,
             ]
         );
-        assert_eq!(
-            runtime_progress_texts(&mut event_rx),
-            vec![
-                "正在执行工具 `read_file`。".to_string(),
-                "工具 `read_file` 已完成。".to_string(),
-            ]
-        );
+        assert!(runtime_progress_texts(&mut event_rx).is_empty());
         let _ = tokio::fs::remove_dir_all(workspace_root).await;
     }
 
@@ -1495,10 +1517,7 @@ mod tests {
         assert_eq!(records[0].status, TracePartStatus::Completed);
         assert!(records[0].result.contains("external ok"));
         assert!(seen_interaction.lock().unwrap().is_some());
-        let progress_texts = runtime_progress_texts(&mut event_rx);
-        assert!(progress_texts.contains(&"工具 `read_file` 正在等待授权。".to_string()));
-        assert!(progress_texts.contains(&"正在执行工具 `read_file`。".to_string()));
-        assert!(progress_texts.contains(&"工具 `read_file` 已完成。".to_string()));
+        assert!(runtime_progress_texts(&mut event_rx).is_empty());
         let events = recorder.drain();
         assert_eq!(terminal_tool_event_count(&events), 1);
         assert_eq!(

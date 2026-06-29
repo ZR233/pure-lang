@@ -7,7 +7,7 @@ enum TimelineTextChannel { user, commentary, finalAnswer }
 enum TimelineRowType {
   userMessage,
   commentary,
-  toolActivity,
+  toolGroup,
   reasoningSummary,
   plan,
   agentActivity,
@@ -53,6 +53,91 @@ class TimelineToolPart {
       denialReason: denialReason,
     );
   }
+}
+
+class TimelineToolGroupItem {
+  const TimelineToolGroupItem({required this.part});
+
+  final TimelinePart part;
+
+  TimelineToolPart? get tool => part.tool;
+
+  String get id => part.id;
+
+  String get name => tool?.name ?? part.title ?? 'Tool';
+
+  String get status => part.status;
+
+  String get summary => _commandSummary(tool?.arguments ?? '') ?? '';
+
+  String get details => part.text;
+}
+
+class TimelineToolGroup {
+  const TimelineToolGroup({
+    required this.id,
+    required this.sessionId,
+    required this.messageId,
+    required this.turnId,
+    required this.items,
+  });
+
+  final String id;
+  final String sessionId;
+  final String messageId;
+  final String turnId;
+  final List<TimelineToolGroupItem> items;
+
+  int get count => items.length;
+
+  int get runningCount =>
+      items.where((item) => _isActiveToolStatus(item.status)).length;
+
+  int get issueCount =>
+      items.where((item) => _isIssueToolStatus(item.status)).length;
+
+  String get status {
+    final statuses = items.map((item) => item.status).toSet();
+    if (statuses.contains('awaitingApproval')) {
+      return 'awaitingApproval';
+    }
+    if (statuses.any(_isActiveToolStatus)) {
+      return 'running';
+    }
+    for (final status in const [
+      'failed',
+      'denied',
+      'interrupted',
+      'budgetLimited',
+      'completed',
+    ]) {
+      if (statuses.contains(status)) {
+        return status;
+      }
+    }
+    return statuses.isEmpty ? 'completed' : statuses.first;
+  }
+
+  int get order => items.isEmpty ? 0 : items.first.part.order;
+
+  int get sequence => items.fold(0, (value, item) {
+    final sequence = item.part.sequence;
+    return sequence > value ? sequence : value;
+  });
+
+  DateTime? get createdAt => items.isEmpty ? null : items.first.part.createdAt;
+
+  int get renderVersion => Object.hashAll([
+    id,
+    sessionId,
+    messageId,
+    turnId,
+    status,
+    count,
+    runningCount,
+    issueCount,
+    for (final item in items) _timelineRowRenderVersion(item.part),
+  ]);
 }
 
 class TimelineAgentPart {
@@ -306,6 +391,7 @@ class TimelinePartSnapshot {
     this.completedAt,
     this.error,
     this.textChannel,
+    this.activityGroupId,
     this.tool,
     this.agent,
     this.planContent,
@@ -328,6 +414,7 @@ class TimelinePartSnapshot {
   final DateTime? completedAt;
   final String? error;
   final TimelineTextChannel? textChannel;
+  final String? activityGroupId;
   final TimelineToolPart? tool;
   final TimelineAgentPart? agent;
   final String? planContent;
@@ -396,6 +483,7 @@ class TimelinePart {
     this.error,
     this.title,
     this.textChannel,
+    this.activityGroupId,
     this.tool,
     this.agent,
     this.planContent,
@@ -420,6 +508,7 @@ class TimelinePart {
   final DateTime? completedAt;
   final String? error;
   final TimelineTextChannel? textChannel;
+  final String? activityGroupId;
   final TimelineToolPart? tool;
   final TimelineAgentPart? agent;
   final String? planContent;
@@ -468,6 +557,7 @@ TimelinePart timelinePartFromSnapshot(
     text: visibleText,
     status: snapshot.status,
     textChannel: snapshot.textChannel,
+    activityGroupId: snapshot.activityGroupId,
     tool: tool,
     agent: snapshot.agent,
     planContent: planContent,
@@ -607,6 +697,7 @@ class TimelineRow {
     required this.renderVersion,
     this.turnId,
     this.part,
+    this.toolGroup,
     this.agentEvent,
   });
 
@@ -650,6 +741,25 @@ class TimelineRow {
     );
   }
 
+  factory TimelineRow.toolGroup({
+    required TimelineMessage message,
+    required TimelineToolGroup group,
+  }) {
+    return TimelineRow._(
+      id: group.id,
+      sessionId: group.sessionId,
+      messageId: message.id,
+      role: message.role,
+      type: TimelineRowType.toolGroup,
+      createdAt: group.createdAt ?? message.createdAt,
+      order: group.order,
+      sequence: group.sequence == 0 ? message.sequence : group.sequence,
+      renderVersion: group.renderVersion,
+      turnId: group.turnId,
+      toolGroup: group,
+    );
+  }
+
   final String id;
   final String sessionId;
   final String? messageId;
@@ -661,6 +771,7 @@ class TimelineRow {
   final int renderVersion;
   final String? turnId;
   final TimelinePart? part;
+  final TimelineToolGroup? toolGroup;
   final TimelineAgentEvent? agentEvent;
 }
 
@@ -698,8 +809,20 @@ List<TimelineRow> _timelineRowsForMessage(
   List<TimelinePart>? parts,
 ) {
   final sortedParts = [...?parts]..sort(_compareParts);
-  return [
-    for (final part in sortedParts)
+  final rows = <TimelineRow>[];
+  final toolGroupsById = _toolGroupsForMessage(message, sortedParts);
+  final insertedToolGroups = <String>{};
+
+  for (final part in sortedParts) {
+    if (message.role != 'user' && part.type == TimelinePartType.tool) {
+      final groupId = _toolGroupId(message, part);
+      final toolGroup = toolGroupsById[groupId];
+      if (toolGroup != null && insertedToolGroups.add(groupId)) {
+        rows.add(TimelineRow.toolGroup(message: message, group: toolGroup));
+      }
+      continue;
+    }
+    rows.add(
       TimelineRow.messagePart(
         id: '${message.id}:${part.id}',
         sessionId: message.sessionId,
@@ -710,7 +833,49 @@ List<TimelineRow> _timelineRowsForMessage(
         sequence: part.sequence == 0 ? message.sequence : part.sequence,
         part: part,
       ),
-  ];
+    );
+  }
+  return rows;
+}
+
+Map<String, TimelineToolGroup> _toolGroupsForMessage(
+  TimelineMessage message,
+  List<TimelinePart> sortedParts,
+) {
+  if (message.role == 'user') {
+    return const {};
+  }
+  final partsByGroupId = <String, List<TimelinePart>>{};
+  for (final part in sortedParts) {
+    if (part.type != TimelinePartType.tool) {
+      continue;
+    }
+    partsByGroupId.putIfAbsent(_toolGroupId(message, part), () => []).add(part);
+  }
+  return {
+    for (final entry in partsByGroupId.entries)
+      entry.key: TimelineToolGroup(
+        id: entry.key,
+        sessionId: message.sessionId,
+        messageId: message.id,
+        turnId: _toolGroupTurnId(message, entry.value.first),
+        items: entry.value
+            .map((part) => TimelineToolGroupItem(part: part))
+            .toList(growable: false),
+      ),
+  };
+}
+
+String _toolGroupId(TimelineMessage message, TimelinePart part) {
+  final activityGroupId = part.activityGroupId;
+  if (activityGroupId != null && activityGroupId.isNotEmpty) {
+    return activityGroupId;
+  }
+  return 'tool-group:${message.sessionId}:${message.id}:${part.id}';
+}
+
+String _toolGroupTurnId(TimelineMessage message, TimelinePart part) {
+  return part.turnId.isEmpty ? message.turnId : part.turnId;
 }
 
 int _compareMessages(TimelineMessage left, TimelineMessage right) {
@@ -805,7 +970,7 @@ TimelineRowType _timelineRowType(TimelineMessage message, TimelinePart part) {
     return TimelineRowType.userMessage;
   }
   return switch (part.type) {
-    TimelinePartType.tool => TimelineRowType.toolActivity,
+    TimelinePartType.tool => TimelineRowType.toolGroup,
     TimelinePartType.reasoning => TimelineRowType.reasoningSummary,
     TimelinePartType.plan => TimelineRowType.plan,
     TimelinePartType.agent => TimelineRowType.agentActivity,
@@ -820,6 +985,19 @@ TimelineRowType _timelineRowType(TimelineMessage message, TimelinePart part) {
       'Internal timeline part type cannot be projected: ${part.type.name}',
     ),
   };
+}
+
+bool _isActiveToolStatus(String status) {
+  return const {'started', 'streaming', 'approved', 'running'}.contains(status);
+}
+
+bool _isIssueToolStatus(String status) {
+  return const {
+    'failed',
+    'denied',
+    'interrupted',
+    'budgetLimited',
+  }.contains(status);
 }
 
 TimelineAgentEvent timelineAgentEventFromPayload(

@@ -94,6 +94,35 @@
   "timelineNew": "New",
   "timelineReasoningFallback": "Reasoning",
   "timelineToolFallback": "Tool",
+  "timelineToolGroupTitle": "Tool activity",
+  "timelineToolGroupSummary": "{count} tools",
+  "@timelineToolGroupSummary": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "timelineToolGroupSummaryRunning": "{count} tools, {runningCount} running",
+  "@timelineToolGroupSummaryRunning": {
+    "placeholders": {
+      "count": { "type": "int" },
+      "runningCount": { "type": "int" }
+    }
+  },
+  "timelineToolGroupSummaryIssues": "{count} tools, {issueCount} need attention",
+  "@timelineToolGroupSummaryIssues": {
+    "placeholders": {
+      "count": { "type": "int" },
+      "issueCount": { "type": "int" }
+    }
+  },
+  "timelineToolGroupSummaryRunningWithIssues": "{count} tools, {runningCount} running, {issueCount} need attention",
+  "@timelineToolGroupSummaryRunningWithIssues": {
+    "placeholders": {
+      "count": { "type": "int" },
+      "runningCount": { "type": "int" },
+      "issueCount": { "type": "int" }
+    }
+  },
   "timelinePlanFallback": "Plan",
   "timelineAgentFallback": "Agent",
   "timelineToolCompleted": "{name} completed",
@@ -114,12 +143,25 @@
       "name": { "type": "String" }
     }
   },
+  "timelineToolAwaitingApproval": "{name} awaiting approval",
+  "@timelineToolAwaitingApproval": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
   "timelineToolRunning": "{name} running",
   "@timelineToolRunning": {
     "placeholders": {
       "name": { "type": "String" }
     }
   },
+  "timelineToolExitCode": "exit code {code}",
+  "@timelineToolExitCode": {
+    "placeholders": {
+      "code": { "type": "int" }
+    }
+  },
+  "timelineToolTimedOut": "timed out",
   "timelineAgentSubagent": "Subagent",
   "timelineAgentSubagentMessage": "Subagent message",
   "timelineAgentWaiting": "Waiting for subagents",

@@ -162,6 +162,7 @@ pub struct BridgeStudioPartDto {
     pub completed_at: Option<i64>,
     pub error: Option<String>,
     pub text_channel: Option<String>,
+    pub activity_group_id: Option<String>,
     pub text: String,
     pub tool: Option<BridgeStudioToolPartDto>,
     pub agent: Option<BridgeStudioAgentPartDto>,
@@ -1854,6 +1855,7 @@ fn bridge_part(part: StudioPart) -> BridgeStudioPartDto {
         text_channel: part
             .text_channel
             .map(|channel| channel.as_str().to_string()),
+        activity_group_id: part.activity_group_id,
         text: part.text,
         tool: part.tool.map(|tool| BridgeStudioToolPartDto {
             tool_call_id: tool.tool_call_id,

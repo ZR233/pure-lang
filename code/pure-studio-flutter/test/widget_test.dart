@@ -810,6 +810,244 @@ void main() {
     );
   });
 
+  test('timeline groups tool parts by activityGroupId', () {
+    final now = DateTime.fromMillisecondsSinceEpoch(0);
+    final firstMessage = TimelineMessage(
+      id: 'turn-1:assistant',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      role: 'assistant',
+      createdAt: now,
+      sequence: 1,
+    );
+    final secondMessage = TimelineMessage(
+      id: 'turn-2:assistant',
+      sessionId: 'session-1',
+      turnId: 'turn-2',
+      role: 'assistant',
+      createdAt: now,
+      sequence: 10,
+    );
+    final rows = timelineRowsFromMessages(
+      [firstMessage, secondMessage],
+      parts: [
+        _toolTimelinePart(
+          id: 'tool-a',
+          messageId: firstMessage.id,
+          turnId: 'turn-1',
+          order: 2,
+          sequence: 3,
+          name: 'read_file',
+          activityGroupId: 'tool-group:turn-1:2',
+          result: 'ok',
+        ),
+        TimelinePart(
+          id: 'final-a',
+          messageId: firstMessage.id,
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          type: TimelinePartType.text,
+          text: 'answer',
+          textChannel: TimelineTextChannel.finalAnswer,
+          order: 4,
+          sequence: 5,
+        ),
+        _toolTimelinePart(
+          id: 'tool-b',
+          messageId: firstMessage.id,
+          turnId: 'turn-1',
+          order: 6,
+          sequence: 7,
+          name: 'search_files',
+          activityGroupId: 'tool-group:turn-1:2',
+          result: 'matches',
+        ),
+        _toolTimelinePart(
+          id: 'tool-d',
+          messageId: firstMessage.id,
+          turnId: 'turn-1b',
+          order: 8,
+          sequence: 9,
+          name: 'write_file',
+          activityGroupId: 'tool-group:turn-1:8',
+          status: 'denied',
+        ),
+        _toolTimelinePart(
+          id: 'tool-c',
+          messageId: secondMessage.id,
+          turnId: 'turn-2',
+          order: 0,
+          sequence: 11,
+          name: 'bash',
+          activityGroupId: 'tool-group:turn-2:0',
+          status: 'running',
+        ),
+      ],
+    );
+
+    final toolGroups = rows
+        .where((row) => row.type == TimelineRowType.toolGroup)
+        .toList();
+    expect(toolGroups, hasLength(3));
+    expect(toolGroups.first.id, 'tool-group:turn-1:2');
+    expect(toolGroups.first.order, 2);
+    expect(toolGroups.first.sequence, 7);
+    expect(toolGroups.first.toolGroup!.items.map((item) => item.id), [
+      'tool-a',
+      'tool-b',
+    ]);
+    expect(toolGroups.first.toolGroup!.status, 'completed');
+    expect(toolGroups[1].id, 'tool-group:turn-1:8');
+    expect(toolGroups[1].toolGroup!.status, 'denied');
+    expect(toolGroups.last.toolGroup!.status, 'running');
+  });
+
+  test(
+    'timeline keeps different activityGroupId separate inside one message',
+    () {
+      final now = DateTime.fromMillisecondsSinceEpoch(0);
+      final message = TimelineMessage(
+        id: 'turn-1:assistant',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        role: 'assistant',
+        createdAt: now,
+      );
+      final rows = timelineRowsFromMessages(
+        [message],
+        parts: [
+          TimelinePart(
+            id: 'text-before',
+            messageId: message.id,
+            sessionId: 'session-1',
+            turnId: 'turn-1',
+            type: TimelinePartType.text,
+            text: '先看一下。',
+            textChannel: TimelineTextChannel.commentary,
+            order: 0,
+          ),
+          _toolTimelinePart(
+            id: 'tool-a',
+            messageId: message.id,
+            turnId: 'turn-1',
+            order: 1,
+            name: 'read_file',
+            activityGroupId: 'tool-group:turn-1:1',
+          ),
+          _toolTimelinePart(
+            id: 'tool-b',
+            messageId: message.id,
+            turnId: 'turn-1',
+            order: 2,
+            name: 'search_files',
+            activityGroupId: 'tool-group:turn-1:1',
+          ),
+          TimelinePart(
+            id: 'text-middle',
+            messageId: message.id,
+            sessionId: 'session-1',
+            turnId: 'turn-1',
+            type: TimelinePartType.text,
+            text: '我再查一个点。',
+            textChannel: TimelineTextChannel.commentary,
+            order: 3,
+          ),
+          _toolTimelinePart(
+            id: 'tool-c',
+            messageId: message.id,
+            turnId: 'turn-1',
+            order: 4,
+            name: 'bash',
+            activityGroupId: 'tool-group:turn-1:4',
+          ),
+        ],
+      );
+
+      expect(rows.map((row) => row.type), [
+        TimelineRowType.commentary,
+        TimelineRowType.toolGroup,
+        TimelineRowType.commentary,
+        TimelineRowType.toolGroup,
+      ]);
+      expect(rows[1].id, 'tool-group:turn-1:1');
+      expect(rows[1].toolGroup!.items.map((item) => item.id), [
+        'tool-a',
+        'tool-b',
+      ]);
+      expect(rows[3].id, 'tool-group:turn-1:4');
+      expect(rows[3].toolGroup!.items.single.id, 'tool-c');
+    },
+  );
+
+  test('timeline keeps tools without activityGroupId as singleton groups', () {
+    final now = DateTime.fromMillisecondsSinceEpoch(0);
+    final message = TimelineMessage(
+      id: 'turn-1:assistant',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      role: 'assistant',
+      createdAt: now,
+    );
+    final rows = timelineRowsFromMessages(
+      [message],
+      parts: [
+        _toolTimelinePart(
+          id: 'tool-a',
+          messageId: message.id,
+          turnId: 'turn-1',
+          order: 1,
+          name: 'read_file',
+          activityGroupId: null,
+        ),
+        _toolTimelinePart(
+          id: 'tool-b',
+          messageId: message.id,
+          turnId: 'turn-1',
+          order: 2,
+          name: 'search_files',
+          activityGroupId: null,
+        ),
+      ],
+    );
+
+    expect(rows, hasLength(2));
+    expect(rows.map((row) => row.toolGroup!.items.single.id), [
+      'tool-a',
+      'tool-b',
+    ]);
+  });
+
+  test('timeline tool group render version tracks tool result changes', () {
+    final now = DateTime.fromMillisecondsSinceEpoch(0);
+    final message = TimelineMessage(
+      id: 'turn-1:assistant',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      role: 'assistant',
+      createdAt: now,
+    );
+
+    TimelineRow rowForResult(String result) {
+      return timelineRowsFromMessages(
+        [message],
+        parts: [
+          _toolTimelinePart(
+            id: 'tool-a',
+            messageId: message.id,
+            turnId: 'turn-1',
+            name: 'bash',
+            result: result,
+          ),
+        ],
+      ).single;
+    }
+
+    expect(
+      rowForResult('alpha').renderVersion,
+      isNot(rowForResult('bravo').renderVersion),
+    );
+  });
+
   test('agent timeline events stay outside message snapshots', () async {
     final api = _FakeStudioApi(_emptyState());
     final container = ProviderContainer(
@@ -1759,7 +1997,7 @@ void main() {
     expect(state.partSnapshotsBySession[sessionId], isNotEmpty);
     expect(
       state.selectedTimelineRows
-          .where((row) => row.role == 'assistant')
+          .where((row) => row.role == 'assistant' && row.part != null)
           .map((row) => row.part!.id),
       contains('turn-demo:final-1'),
     );
@@ -2469,7 +2707,7 @@ void main() {
     },
   );
 
-  testWidgets('timeline tool activity uses projected command summary', (
+  testWidgets('timeline tool group defaults collapsed and expands details', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1280, 700);
@@ -2490,6 +2728,7 @@ void main() {
         status: 'completed',
         createdAt: DateTime.fromMillisecondsSinceEpoch(0),
         updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+        activityGroupId: 'tool-group:turn-tool:0',
         tool: TimelineToolPart(
           toolCallId: 'tool-call-1',
           name: 'bash',
@@ -2526,10 +2765,202 @@ void main() {
     );
     await tester.pump();
 
+    expect(find.text('Tool activity'), findsOneWidget);
+    expect(find.text('1 tools'), findsOneWidget);
+    expect(find.textContaining('cargo test -p pl-model'), findsNothing);
+    expect(find.textContaining('D:/work/project'), findsNothing);
+    expect(find.textContaining('"command"'), findsNothing);
+
+    await tester.tap(find.text('Tool activity'));
+    await tester.pump();
+
     expect(find.textContaining('cargo test -p pl-model'), findsOneWidget);
     expect(find.textContaining('D:/work/project'), findsOneWidget);
-    expect(find.textContaining('"command"'), findsNothing);
     expect(find.textContaining('pl-core'), findsNothing);
+  });
+
+  testWidgets('timeline renders separate tool groups around assistant text', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 760);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final now = DateTime.fromMillisecondsSinceEpoch(0);
+    final message = TimelineMessage(
+      id: 'turn-1:assistant',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      role: 'assistant',
+      createdAt: now,
+    );
+    final parts = [
+      TimelinePart(
+        id: 'text-before',
+        messageId: message.id,
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        type: TimelinePartType.text,
+        text: '先读取相关文件。',
+        textChannel: TimelineTextChannel.commentary,
+        order: 0,
+      ),
+      _toolTimelinePart(
+        id: 'tool-a',
+        messageId: message.id,
+        turnId: 'turn-1',
+        order: 1,
+        name: 'read_file',
+        arguments: jsonEncode({'path': 'lib/a.dart'}),
+        activityGroupId: 'tool-group:turn-1:1',
+      ),
+      _toolTimelinePart(
+        id: 'tool-b',
+        messageId: message.id,
+        turnId: 'turn-1',
+        order: 2,
+        name: 'search_files',
+        arguments: jsonEncode({'query': 'activityGroupId'}),
+        activityGroupId: 'tool-group:turn-1:1',
+      ),
+      TimelinePart(
+        id: 'text-middle',
+        messageId: message.id,
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        type: TimelinePartType.text,
+        text: '再跑一下测试。',
+        textChannel: TimelineTextChannel.commentary,
+        order: 3,
+      ),
+      _toolTimelinePart(
+        id: 'tool-c',
+        messageId: message.id,
+        turnId: 'turn-1',
+        order: 4,
+        name: 'bash',
+        arguments: jsonEncode({'command': 'flutter test'}),
+        activityGroupId: 'tool-group:turn-1:4',
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 620,
+            child: TimelineView(
+              sessionId: 'session-1',
+              rows: timelineRowsFromMessages([message], parts: parts),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Tool activity'), findsNWidgets(2));
+    expect(find.text('先读取相关文件。'), findsOneWidget);
+    expect(find.text('再跑一下测试。'), findsOneWidget);
+    expect(find.textContaining('lib/a.dart'), findsNothing);
+    expect(find.textContaining('flutter test'), findsNothing);
+
+    await tester.tap(find.text('Tool activity').first);
+    await tester.pump();
+
+    expect(find.text('read_file completed'), findsOneWidget);
+    expect(find.text('search_files completed'), findsOneWidget);
+    expect(find.text('bash completed'), findsNothing);
+    expect(find.textContaining('lib/a.dart'), findsOneWidget);
+    expect(find.textContaining('activityGroupId'), findsOneWidget);
+    expect(find.textContaining('flutter test'), findsNothing);
+
+    await tester.tap(find.text('Tool activity').last);
+    await tester.pump();
+
+    expect(find.text('bash completed'), findsOneWidget);
+    expect(find.textContaining('flutter test'), findsOneWidget);
+  });
+
+  testWidgets('timeline tool group summarizes running and issue states', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final message = TimelineMessage(
+      id: 'message-tool',
+      sessionId: 'session-1',
+      role: 'assistant',
+      createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+    );
+    final parts = [
+      _toolTimelinePart(
+        id: 'tool-awaiting',
+        messageId: message.id,
+        turnId: 'turn-tool',
+        status: 'awaitingApproval',
+        name: 'bash',
+        arguments: jsonEncode({'command': 'cargo test -p pl-core'}),
+        activityGroupId: 'tool-group:turn-tool:0',
+      ),
+      _toolTimelinePart(
+        id: 'tool-failed',
+        messageId: message.id,
+        turnId: 'turn-tool',
+        order: 1,
+        status: 'failed',
+        name: 'read_file',
+        arguments: jsonEncode({'path': 'lib/main.dart'}),
+        result: 'file missing',
+        exitCode: 2,
+        activityGroupId: 'tool-group:turn-tool:0',
+      ),
+      _toolTimelinePart(
+        id: 'tool-running',
+        messageId: message.id,
+        turnId: 'turn-tool',
+        order: 2,
+        status: 'running',
+        name: 'search_files',
+        arguments: jsonEncode({'query': 'TimelineToolGroup'}),
+        activityGroupId: 'tool-group:turn-tool:0',
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 520,
+            child: TimelineView(
+              sessionId: 'session-1',
+              rows: timelineRowsFromMessages([message], parts: parts),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Tool activity'), findsOneWidget);
+    expect(find.text('3 tools, 1 running, 1 need attention'), findsOneWidget);
+    expect(find.text('awaitingApproval'), findsOneWidget);
+
+    await tester.tap(find.text('Tool activity'));
+    await tester.pump();
+
+    expect(find.text('bash awaiting approval'), findsOneWidget);
+    expect(find.text('read_file failed'), findsOneWidget);
+    expect(find.textContaining('cargo test -p pl-core'), findsOneWidget);
+    expect(find.textContaining('lib/main.dart'), findsOneWidget);
+    expect(find.textContaining('exit code 2'), findsOneWidget);
+    expect(find.textContaining('file missing'), findsOneWidget);
   });
 
   testWidgets('timeline renders markdown after inline code fence closure', (
@@ -3607,6 +4038,56 @@ class _ProjectedMessageFixture {
   final List<TimelinePart> parts;
 }
 
+TimelinePart _toolTimelinePart({
+  required String id,
+  required String messageId,
+  required String turnId,
+  required String name,
+  String sessionId = 'session-1',
+  int order = 0,
+  int sequence = 0,
+  String status = 'completed',
+  String arguments = '{}',
+  String? result,
+  String? workingDirectory,
+  String? denialReason,
+  int? exitCode,
+  bool timedOut = false,
+  String? activityGroupId = '',
+}) {
+  final now = DateTime.fromMillisecondsSinceEpoch(0);
+  final resolvedActivityGroupId = activityGroupId == ''
+      ? 'tool-group:$turnId:$order'
+      : activityGroupId;
+  return timelinePartFromSnapshot(
+    TimelinePartSnapshot(
+      id: id,
+      messageId: messageId,
+      sessionId: sessionId,
+      turnId: turnId,
+      type: TimelinePartType.tool,
+      order: order,
+      revision: 0,
+      sequence: sequence,
+      text: '',
+      status: status,
+      createdAt: now,
+      updatedAt: now,
+      activityGroupId: resolvedActivityGroupId,
+      tool: TimelineToolPart(
+        toolCallId: id,
+        name: name,
+        arguments: arguments,
+        result: result,
+        exitCode: exitCode,
+        timedOut: timedOut,
+        workingDirectory: workingDirectory,
+        denialReason: denialReason,
+      ),
+    ),
+  );
+}
+
 List<TimelineRow> _rowsFromProjectedMessages(
   List<_ProjectedMessageFixture> fixtures,
 ) {
@@ -4036,6 +4517,7 @@ frb.BridgeStudioPartDto _bridgePartDto({
   String status = 'completed',
   String text = '',
   String? textChannel,
+  String? activityGroupId,
   bool synthetic = false,
 }) {
   return frb.BridgeStudioPartDto(
@@ -4050,6 +4532,7 @@ frb.BridgeStudioPartDto _bridgePartDto({
     createdAt: 1,
     updatedAt: 1,
     textChannel: textChannel,
+    activityGroupId: activityGroupId,
     text: text,
     synthetic: synthetic,
     ignored: false,

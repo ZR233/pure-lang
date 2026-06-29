@@ -203,6 +203,33 @@ class AppLocalizationsEn extends AppLocalizations {
   String get timelineToolFallback => 'Tool';
 
   @override
+  String get timelineToolGroupTitle => 'Tool activity';
+
+  @override
+  String timelineToolGroupSummary(int count) {
+    return '$count tools';
+  }
+
+  @override
+  String timelineToolGroupSummaryRunning(int count, int runningCount) {
+    return '$count tools, $runningCount running';
+  }
+
+  @override
+  String timelineToolGroupSummaryIssues(int count, int issueCount) {
+    return '$count tools, $issueCount need attention';
+  }
+
+  @override
+  String timelineToolGroupSummaryRunningWithIssues(
+    int count,
+    int runningCount,
+    int issueCount,
+  ) {
+    return '$count tools, $runningCount running, $issueCount need attention';
+  }
+
+  @override
   String get timelinePlanFallback => 'Plan';
 
   @override
@@ -224,9 +251,22 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String timelineToolAwaitingApproval(String name) {
+    return '$name awaiting approval';
+  }
+
+  @override
   String timelineToolRunning(String name) {
     return '$name running';
   }
+
+  @override
+  String timelineToolExitCode(int code) {
+    return 'exit code $code';
+  }
+
+  @override
+  String get timelineToolTimedOut => 'timed out';
 
   @override
   String get timelineAgentSubagent => 'Subagent';

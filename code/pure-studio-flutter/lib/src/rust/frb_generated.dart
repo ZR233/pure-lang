@@ -1756,8 +1756,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeStudioPartDto dco_decode_bridge_studio_part_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 19)
-      throw Exception('unexpected arr length: expect 19 but see ${arr.length}');
+    if (arr.length != 20)
+      throw Exception('unexpected arr length: expect 20 but see ${arr.length}');
     return BridgeStudioPartDto(
       partId: dco_decode_String(arr[0]),
       messageId: dco_decode_String(arr[1]),
@@ -1772,12 +1772,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       completedAt: dco_decode_opt_box_autoadd_i_64(arr[10]),
       error: dco_decode_opt_String(arr[11]),
       textChannel: dco_decode_opt_String(arr[12]),
-      text: dco_decode_String(arr[13]),
-      tool: dco_decode_opt_box_autoadd_bridge_studio_tool_part_dto(arr[14]),
-      agent: dco_decode_opt_box_autoadd_bridge_studio_agent_part_dto(arr[15]),
-      plan: dco_decode_opt_box_autoadd_bridge_studio_plan_part_dto(arr[16]),
-      synthetic: dco_decode_bool(arr[17]),
-      ignored: dco_decode_bool(arr[18]),
+      activityGroupId: dco_decode_opt_String(arr[13]),
+      text: dco_decode_String(arr[14]),
+      tool: dco_decode_opt_box_autoadd_bridge_studio_tool_part_dto(arr[15]),
+      agent: dco_decode_opt_box_autoadd_bridge_studio_agent_part_dto(arr[16]),
+      plan: dco_decode_opt_box_autoadd_bridge_studio_plan_part_dto(arr[17]),
+      synthetic: dco_decode_bool(arr[18]),
+      ignored: dco_decode_bool(arr[19]),
     );
   }
 
@@ -3282,6 +3283,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_completedAt = sse_decode_opt_box_autoadd_i_64(deserializer);
     var var_error = sse_decode_opt_String(deserializer);
     var var_textChannel = sse_decode_opt_String(deserializer);
+    var var_activityGroupId = sse_decode_opt_String(deserializer);
     var var_text = sse_decode_String(deserializer);
     var var_tool = sse_decode_opt_box_autoadd_bridge_studio_tool_part_dto(
       deserializer,
@@ -3308,6 +3310,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       completedAt: var_completedAt,
       error: var_error,
       textChannel: var_textChannel,
+      activityGroupId: var_activityGroupId,
       text: var_text,
       tool: var_tool,
       agent: var_agent,
@@ -4920,6 +4923,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_i_64(self.completedAt, serializer);
     sse_encode_opt_String(self.error, serializer);
     sse_encode_opt_String(self.textChannel, serializer);
+    sse_encode_opt_String(self.activityGroupId, serializer);
     sse_encode_String(self.text, serializer);
     sse_encode_opt_box_autoadd_bridge_studio_tool_part_dto(
       self.tool,

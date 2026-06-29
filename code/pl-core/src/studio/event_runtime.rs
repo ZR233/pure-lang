@@ -462,6 +462,7 @@ impl StudioEventRuntime {
     ) {
         let mut actor = self.timeline_actor.lock().await;
         actor.prepare_snapshot_order(part, trace_scope, existing, next_order);
+        actor.prepare_activity_group(part, existing);
         actor.prepare_snapshot(part);
     }
 
@@ -824,6 +825,7 @@ fn studio_part_from_trace_part(session_id: &str, item: TracePart) -> StudioPart 
         completed_at,
         error,
         text_channel: item.text_channel.map(studio_text_channel),
+        activity_group_id: None,
         text,
         attachments: item
             .attachments

@@ -422,6 +422,40 @@ abstract class AppLocalizations {
   /// **'Tool'**
   String get timelineToolFallback;
 
+  /// No description provided for @timelineToolGroupTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Tool activity'**
+  String get timelineToolGroupTitle;
+
+  /// No description provided for @timelineToolGroupSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} tools'**
+  String timelineToolGroupSummary(int count);
+
+  /// No description provided for @timelineToolGroupSummaryRunning.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} tools, {runningCount} running'**
+  String timelineToolGroupSummaryRunning(int count, int runningCount);
+
+  /// No description provided for @timelineToolGroupSummaryIssues.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} tools, {issueCount} need attention'**
+  String timelineToolGroupSummaryIssues(int count, int issueCount);
+
+  /// No description provided for @timelineToolGroupSummaryRunningWithIssues.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} tools, {runningCount} running, {issueCount} need attention'**
+  String timelineToolGroupSummaryRunningWithIssues(
+    int count,
+    int runningCount,
+    int issueCount,
+  );
+
   /// No description provided for @timelinePlanFallback.
   ///
   /// In en, this message translates to:
@@ -452,11 +486,29 @@ abstract class AppLocalizations {
   /// **'{name} denied'**
   String timelineToolDenied(String name);
 
+  /// No description provided for @timelineToolAwaitingApproval.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} awaiting approval'**
+  String timelineToolAwaitingApproval(String name);
+
   /// No description provided for @timelineToolRunning.
   ///
   /// In en, this message translates to:
   /// **'{name} running'**
   String timelineToolRunning(String name);
+
+  /// No description provided for @timelineToolExitCode.
+  ///
+  /// In en, this message translates to:
+  /// **'exit code {code}'**
+  String timelineToolExitCode(int code);
+
+  /// No description provided for @timelineToolTimedOut.
+  ///
+  /// In en, this message translates to:
+  /// **'timed out'**
+  String get timelineToolTimedOut;
 
   /// No description provided for @timelineAgentSubagent.
   ///

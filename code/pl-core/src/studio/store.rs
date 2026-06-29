@@ -12,8 +12,8 @@ use pl_protocol::{
     InteractionResolution, InteractionStatus, Message, PlanConfirmationResolution,
     PlanLifecycleEvent, PlanLifecycleState, RuntimeUsageSnapshot, SkillActivation,
     StudioAgentTimelineEvent, StudioAgentTimelineEventKind, StudioAttachment, StudioEventEnvelope,
-    StudioEventKind, StudioMessage, StudioPart, StudioPartStatus, StudioRuntimeUsage,
-    StudioSessionRuntime, StudioTurnStatus,
+    StudioEventKind, StudioMessage, StudioPart, StudioPartStatus, StudioPartType,
+    StudioRuntimeUsage, StudioSessionRuntime, StudioTurnStatus,
 };
 use pl_trace::{TraceAttachment, TraceEvent, TraceEventKind};
 use sea_orm::{
@@ -1647,6 +1647,7 @@ async fn upsert_message_part_with_tx(
     sequence: i64,
 ) -> Result<()> {
     use entities::message_part;
+    validate_part_activity_group(part)?;
     let attachments_json = serde_json::to_string(&part.attachments)?;
     let tool_json = optional_json_string(&part.tool)?;
     let agent_json = optional_json_string(&part.agent)?;
@@ -1665,6 +1666,7 @@ async fn upsert_message_part_with_tx(
         active.updated_at = Set(part.updated_at);
         active.completed_at = Set(part.completed_at);
         active.error = Set(part.error.clone());
+        active.activity_group_id = Set(part.activity_group_id.clone());
         active.text = Set(part.text.clone());
         active.attachments_json = Set(attachments_json);
         active.tool_json = Set(tool_json);
@@ -1695,6 +1697,7 @@ async fn upsert_message_part_with_tx(
                 .text_channel
                 .map(studio_text_channel_label)
                 .map(str::to_string)),
+            activity_group_id: Set(part.activity_group_id.clone()),
             text: Set(part.text.clone()),
             attachments_json: Set(attachments_json),
             tool_json: Set(tool_json),
@@ -1726,6 +1729,29 @@ async fn delete_message_part_with_tx(
 
 fn optional_json_string<T: serde::Serialize>(value: &Option<T>) -> Result<Option<String>> {
     Ok(value.as_ref().map(serde_json::to_string).transpose()?)
+}
+
+fn validate_part_activity_group(part: &StudioPart) -> Result<()> {
+    match part.part_type {
+        StudioPartType::Tool => {
+            if !matches!(part.activity_group_id.as_deref(), Some(group_id) if !group_id.is_empty())
+            {
+                bail!("tool part must include activityGroupId");
+            }
+        }
+        StudioPartType::Text
+        | StudioPartType::Reasoning
+        | StudioPartType::Agent
+        | StudioPartType::Turn
+        | StudioPartType::Inference
+        | StudioPartType::Plan
+        | StudioPartType::File => {
+            if part.activity_group_id.is_some() {
+                bail!("non-tool part cannot include activityGroupId");
+            }
+        }
+    }
+    Ok(())
 }
 
 fn runtime_usage_snapshot(usage: StudioRuntimeUsage) -> RuntimeUsageSnapshot {
@@ -2220,6 +2246,9 @@ fn validate_part_update(
     if incoming_text_channel != existing.text_channel {
         bail!("part textChannel cannot change");
     }
+    if incoming.activity_group_id != existing.activity_group_id {
+        bail!("part activityGroupId cannot change");
+    }
     let existing_status = part_status_from_label_for_projection(&existing.status)?;
     if !valid_part_transition(existing_status, incoming.status) {
         bail!(
@@ -2557,7 +2586,7 @@ mod tests {
     use pl_protocol::{
         StudioEventEnvelope, StudioEventKind, StudioMessage, StudioMessageRole,
         StudioMessageStatus, StudioPart, StudioPartDelta, StudioPartDeltaField, StudioPartStatus,
-        StudioPartType, StudioTextChannel,
+        StudioPartType, StudioTextChannel, StudioToolPart,
     };
     use pretty_assertions::assert_eq;
 
@@ -2630,6 +2659,7 @@ mod tests {
             completed_at: None,
             error: None,
             text_channel: Some(StudioTextChannel::Final),
+            activity_group_id: None,
             text: String::new(),
             attachments: Vec::new(),
             tool: None,
@@ -2715,6 +2745,112 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn message_part_snapshot_round_trip_preserves_activity_group_id() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/alpha").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Conversation", CompileMode::Auto)
+            .await
+            .unwrap();
+        let message = StudioMessage {
+            message_id: "turn-1:assistant".to_string(),
+            session_id: session.id.clone(),
+            turn_id: "turn-1".to_string(),
+            role: StudioMessageRole::Assistant,
+            status: StudioMessageStatus::Streaming,
+            created_at: 10,
+            updated_at: 10,
+            completed_at: None,
+            error: None,
+            metadata: serde_json::json!({}),
+        };
+        store
+            .append_studio_event(StudioEventEnvelope {
+                event_id: "studio-event-tool-message".to_string(),
+                project_id: Some(project.id.clone()),
+                session_id: Some(session.id.clone()),
+                turn_id: Some("turn-1".to_string()),
+                sequence: 0,
+                created_at: 10,
+                kind: StudioEventKind::MessageUpdated {
+                    message: Box::new(message),
+                },
+            })
+            .await
+            .unwrap();
+        let part = StudioPart {
+            part_id: "turn-1:part-1".to_string(),
+            message_id: "turn-1:assistant".to_string(),
+            session_id: session.id.clone(),
+            turn_id: "turn-1".to_string(),
+            part_type: StudioPartType::Tool,
+            order: 1,
+            revision: 0,
+            status: StudioPartStatus::Running,
+            created_at: 10,
+            updated_at: 10,
+            completed_at: None,
+            error: None,
+            text_channel: None,
+            activity_group_id: Some("tool-group:turn-1:1".to_string()),
+            text: String::new(),
+            attachments: Vec::new(),
+            tool: Some(StudioToolPart {
+                tool_call_id: "tool-a".to_string(),
+                call_id: Some("call-a".to_string()),
+                provider_item_id: Some("item-a".to_string()),
+                name: "bash".to_string(),
+                arguments: "{\"command\":\"cargo test -p pl-core\"}".to_string(),
+                result: None,
+                exit_code: None,
+                timed_out: false,
+                working_directory: Some("D:/work".to_string()),
+                denial_reason: None,
+            }),
+            agent: None,
+            inference: None,
+            plan: None,
+            file: None,
+            usage: None,
+            synthetic: false,
+            ignored: false,
+        };
+        store
+            .append_studio_event(StudioEventEnvelope {
+                event_id: "studio-event-tool-part".to_string(),
+                project_id: Some(project.id),
+                session_id: Some(session.id.clone()),
+                turn_id: Some("turn-1".to_string()),
+                sequence: 0,
+                created_at: 10,
+                kind: StudioEventKind::MessagePartUpdated {
+                    part: Box::new(part.clone()),
+                },
+            })
+            .await
+            .unwrap();
+
+        let parts = store.load_message_parts(&session.id).await.unwrap();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(
+            parts[0].part.activity_group_id.as_deref(),
+            Some("tool-group:turn-1:1")
+        );
+
+        let events = store
+            .load_studio_events(&session.id, None, None)
+            .await
+            .unwrap();
+        let StudioEventKind::MessagePartUpdated { part } = &events[1].kind else {
+            panic!("expected tool part snapshot");
+        };
+        assert_eq!(
+            part.activity_group_id.as_deref(),
+            Some("tool-group:turn-1:1")
+        );
+    }
+
+    #[tokio::test]
     async fn message_part_delta_is_not_durable() {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project("C:/work/beta").await.unwrap();
@@ -2770,6 +2906,7 @@ mod tests {
             completed_at: Some(11),
             error: None,
             text_channel: Some(StudioTextChannel::Final),
+            activity_group_id: None,
             text: "done".to_string(),
             attachments: Vec::new(),
             tool: None,
@@ -2875,6 +3012,7 @@ mod tests {
             completed_at: None,
             error: None,
             text_channel: Some(StudioTextChannel::Final),
+            activity_group_id: None,
             text: "live".to_string(),
             attachments: Vec::new(),
             tool: None,

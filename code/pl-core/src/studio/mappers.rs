@@ -262,6 +262,7 @@ pub fn studio_part_record(model: entities::message_part::Model) -> Result<Studio
                 .as_deref()
                 .map(studio_text_channel_from_label)
                 .transpose()?,
+            activity_group_id: model.activity_group_id,
             text: model.text,
             attachments: json_field(&model.attachments_json, &id, "attachments")?,
             tool: optional_json_field(model.tool_json.as_deref(), &id, "tool")?,
