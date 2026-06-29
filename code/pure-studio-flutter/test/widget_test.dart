@@ -3144,6 +3144,64 @@ void main() {
     expect(find.textContaining('| serde | JSON |'), findsNothing);
   });
 
+  testWidgets('timeline renders inline code and quotes with studio chrome', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final now = DateTime.fromMillisecondsSinceEpoch(0);
+    final message = TimelineMessage(
+      id: 'message-markdown-chrome',
+      sessionId: 'session-1',
+      role: 'assistant',
+      createdAt: now,
+    );
+    const parts = [
+      TimelinePart(
+        id: 'text-markdown-chrome',
+        messageId: 'message-markdown-chrome',
+        type: TimelinePartType.text,
+        text:
+            '项目使用 `std::env::args()` 读取参数。\n\n'
+            '> 这是一段引用\n'
+            '> 包含 `inline` 代码',
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 820,
+            child: TimelineView(
+              sessionId: 'session-1',
+              rows: timelineRowsFromMessages([message], parts: parts),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final inlineCode = find.text('std::env::args()');
+    expect(inlineCode, findsOneWidget);
+    expect(
+      find.ancestor(
+        of: inlineCode,
+        matching: find.byKey(const ValueKey('studio-markdown-inline-code')),
+      ),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('studio-markdown-quote')), findsOneWidget);
+    expect(find.textContaining('这是一段引用'), findsOneWidget);
+    expect(find.textContaining('> 这是一段引用'), findsNothing);
+  });
+
   testWidgets('timeline renders agent markdown with tight CJK headings', (
     tester,
   ) async {
