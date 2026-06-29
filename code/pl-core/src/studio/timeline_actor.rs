@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use pl_protocol::{StudioPart, StudioPartStatus};
-use pl_trace::TracePartDeltaEvent;
 
 use super::records::StudioPartRecord;
 
@@ -9,6 +8,7 @@ use super::records::StudioPartRecord;
 pub(super) struct TurnTimelineActor {
     part_revisions: HashMap<String, u64>,
     part_orders: HashMap<String, u64>,
+    trace_part_ids: HashMap<String, String>,
     next_orders_by_message: HashMap<String, u64>,
 }
 
@@ -19,22 +19,42 @@ pub(super) enum TimelineDeltaDecision {
 }
 
 impl TurnTimelineActor {
+    pub(super) fn resolve_trace_part_id(
+        &self,
+        trace_part_id: &str,
+        existing: Option<&StudioPartRecord>,
+    ) -> Option<String> {
+        existing
+            .map(|record| record.part.part_id.clone())
+            .or_else(|| self.trace_part_ids.get(trace_part_id).cloned())
+    }
+
     pub(super) fn prepare_snapshot_order(
         &mut self,
         part: &mut StudioPart,
+        trace_part_id: Option<&str>,
         existing: Option<&StudioPartRecord>,
         durable_next_order: u64,
     ) {
         if let Some(existing) = existing {
+            part.part_id = existing.part.part_id.clone();
             let order = existing.part.order;
             part.order = order;
             self.part_orders.insert(part.part_id.clone(), order);
+            self.remember_trace_part_id(trace_part_id, &part.part_id);
             self.seed_next_order(&part.message_id, durable_next_order.max(order + 1));
             return;
         }
 
+        if let Some(studio_part_id) =
+            trace_part_id.and_then(|trace_part_id| self.trace_part_ids.get(trace_part_id))
+        {
+            part.part_id = studio_part_id.clone();
+        }
+
         if let Some(order) = self.part_orders.get(&part.part_id).copied() {
             part.order = order;
+            self.remember_trace_part_id(trace_part_id, &part.part_id);
             self.seed_next_order(&part.message_id, durable_next_order);
             return;
         }
@@ -46,7 +66,11 @@ impl TurnTimelineActor {
             .or_insert(durable_next_order);
         part.order = *next_order;
         *next_order += 1;
+        if should_allocate_part_id(trace_part_id, &part.part_id) {
+            part.part_id = format!("{}:part-{}", part.turn_id, part.order);
+        }
         self.part_orders.insert(part.part_id.clone(), part.order);
+        self.remember_trace_part_id(trace_part_id, &part.part_id);
     }
 
     pub(super) fn prepare_snapshot(&mut self, part: &mut StudioPart) {
@@ -74,7 +98,8 @@ impl TurnTimelineActor {
 
     pub(super) fn prepare_delta(
         &mut self,
-        event: &TracePartDeltaEvent,
+        part_id: &str,
+        revision: u64,
         existing: Option<&StudioPartRecord>,
     ) -> TimelineDeltaDecision {
         let Some(existing) = existing else {
@@ -85,12 +110,11 @@ impl TurnTimelineActor {
         }
         let current_revision = self
             .part_revisions
-            .get(&event.item_id)
+            .get(part_id)
             .copied()
             .unwrap_or(existing.part.revision);
-        if event.revision == current_revision + 1 {
-            self.part_revisions
-                .insert(event.item_id.clone(), event.revision);
+        if revision == current_revision + 1 {
+            self.part_revisions.insert(part_id.to_string(), revision);
             TimelineDeltaDecision::Accept
         } else {
             TimelineDeltaDecision::Stale
@@ -103,6 +127,17 @@ impl TurnTimelineActor {
             .and_modify(|order| *order = (*order).max(minimum_next_order))
             .or_insert(minimum_next_order);
     }
+
+    fn remember_trace_part_id(&mut self, trace_part_id: Option<&str>, part_id: &str) {
+        if let Some(trace_part_id) = trace_part_id {
+            self.trace_part_ids
+                .insert(trace_part_id.to_string(), part_id.to_string());
+        }
+    }
+}
+
+fn should_allocate_part_id(trace_part_id: Option<&str>, part_id: &str) -> bool {
+    trace_part_id.is_some_and(|trace_part_id| trace_part_id == part_id)
 }
 
 pub(super) fn is_terminal_studio_part_status(status: StudioPartStatus) -> bool {
@@ -119,7 +154,6 @@ pub(super) fn is_terminal_studio_part_status(status: StudioPartStatus) -> bool {
 #[cfg(test)]
 mod tests {
     use pl_protocol::{StudioPartType, StudioTextChannel};
-    use pl_trace::{TraceDelta, TracePartDeltaEvent, TracePartKind, TracePartStatus};
 
     use super::*;
 
@@ -132,19 +166,19 @@ mod tests {
         };
 
         assert_eq!(
-            actor.prepare_delta(&delta("part-1", 1), Some(&existing)),
+            actor.prepare_delta("part-1", 1, Some(&existing)),
             TimelineDeltaDecision::Accept
         );
         assert_eq!(
-            actor.prepare_delta(&delta("part-1", 1), Some(&existing)),
+            actor.prepare_delta("part-1", 1, Some(&existing)),
             TimelineDeltaDecision::Stale
         );
         assert_eq!(
-            actor.prepare_delta(&delta("part-1", 3), Some(&existing)),
+            actor.prepare_delta("part-1", 3, Some(&existing)),
             TimelineDeltaDecision::Stale
         );
         assert_eq!(
-            actor.prepare_delta(&delta("part-1", 2), Some(&existing)),
+            actor.prepare_delta("part-1", 2, Some(&existing)),
             TimelineDeltaDecision::Accept
         );
     }
@@ -156,7 +190,7 @@ mod tests {
             part: part("part-1", StudioPartStatus::Streaming, 0),
             sequence: 0,
         };
-        let _ = actor.prepare_delta(&delta("part-1", 1), Some(&existing));
+        let _ = actor.prepare_delta("part-1", 1, Some(&existing));
         let mut terminal = part("part-1", StudioPartStatus::Completed, 0);
 
         actor.prepare_snapshot(&mut terminal);
@@ -176,11 +210,11 @@ mod tests {
             sequence: 0,
         };
         let mut repeat = part("part-1", StudioPartStatus::Completed, 1);
-        actor.prepare_snapshot_order(&mut repeat, Some(&existing), 42);
+        actor.prepare_snapshot_order(&mut repeat, None, Some(&existing), 42);
         assert_eq!(repeat.order, 7);
 
         let mut new_part = part("part-2", StudioPartStatus::Started, 0);
-        actor.prepare_snapshot_order(&mut new_part, None, 42);
+        actor.prepare_snapshot_order(&mut new_part, None, None, 42);
         assert_eq!(new_part.order, 42);
     }
 
@@ -191,9 +225,9 @@ mod tests {
         let mut second = part("part-2", StudioPartStatus::Started, 0);
         let mut third = part("part-3", StudioPartStatus::Started, 0);
 
-        actor.prepare_snapshot_order(&mut first, None, 5);
-        actor.prepare_snapshot_order(&mut second, None, 5);
-        actor.prepare_snapshot_order(&mut third, None, 10);
+        actor.prepare_snapshot_order(&mut first, None, None, 5);
+        actor.prepare_snapshot_order(&mut second, None, None, 5);
+        actor.prepare_snapshot_order(&mut third, None, None, 10);
 
         assert_eq!(first.order, 5);
         assert_eq!(second.order, 6);
@@ -204,12 +238,34 @@ mod tests {
     fn snapshot_order_reuses_live_allocation_for_repeated_part() {
         let mut actor = TurnTimelineActor::default();
         let mut first = part("part-1", StudioPartStatus::Started, 0);
-        actor.prepare_snapshot_order(&mut first, None, 7);
+        actor.prepare_snapshot_order(&mut first, None, None, 7);
 
         let mut repeat = part("part-1", StudioPartStatus::Streaming, 1);
-        actor.prepare_snapshot_order(&mut repeat, None, 7);
+        actor.prepare_snapshot_order(&mut repeat, None, None, 7);
 
         assert_eq!(repeat.order, 7);
+    }
+
+    #[test]
+    fn snapshot_order_allocates_actor_part_id_for_trace_item() {
+        let mut actor = TurnTimelineActor::default();
+        let mut first = part("provider-text-1", StudioPartStatus::Started, 0);
+        actor.prepare_snapshot_order(&mut first, Some("provider-text-1"), None, 3);
+
+        assert_eq!(first.part_id, "turn-1:part-3");
+        assert_eq!(first.order, 3);
+        assert_eq!(
+            actor
+                .resolve_trace_part_id("provider-text-1", None)
+                .as_deref(),
+            Some("turn-1:part-3")
+        );
+
+        let mut repeat = part("provider-text-1", StudioPartStatus::Streaming, 1);
+        actor.prepare_snapshot_order(&mut repeat, Some("provider-text-1"), None, 3);
+
+        assert_eq!(repeat.part_id, "turn-1:part-3");
+        assert_eq!(repeat.order, 3);
     }
 
     #[test]
@@ -221,7 +277,7 @@ mod tests {
         };
 
         assert_eq!(
-            actor.prepare_delta(&delta("part-1", 2), Some(&existing)),
+            actor.prepare_delta("part-1", 2, Some(&existing)),
             TimelineDeltaDecision::Stale
         );
     }
@@ -251,23 +307,6 @@ mod tests {
             usage: None,
             synthetic: false,
             ignored: false,
-        }
-    }
-
-    fn delta(part_id: &str, revision: u64) -> TracePartDeltaEvent {
-        TracePartDeltaEvent {
-            turn_id: "turn-1".to_string(),
-            item_id: part_id.to_string(),
-            started_sequence: 0,
-            revision,
-            kind: TracePartKind::Text,
-            status: TracePartStatus::Streaming,
-            created_at: 100,
-            updated_at: 100,
-            delta: TraceDelta::Text {
-                text_channel: pl_trace::TraceTextChannel::Final,
-                delta: "x".to_string(),
-            },
         }
     }
 }
