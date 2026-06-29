@@ -207,6 +207,74 @@ void main() {
     expect(state.partOverlaysBySession['session-1'], isEmpty);
   });
 
+  test('durable events preserve flushed live part overlays', () async {
+    final api = _FakeStudioApi(_emptyState());
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(studioControllerProvider.future);
+    api.emitSession(
+      _messageUpdatedEvent(
+        sessionId: 'session-1',
+        message: {
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'role': 'assistant',
+          'status': 'streaming',
+          'createdAt': 1,
+          'updatedAt': 1,
+        },
+      ),
+    );
+    api.emitSession(
+      _partUpdatedEvent(
+        sessionId: 'session-1',
+        part: {
+          'partId': 'part-1',
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'partType': 'text',
+          'order': 0,
+          'revision': 0,
+          'status': 'streaming',
+          'createdAt': 1,
+          'updatedAt': 1,
+          'textChannel': 'final',
+          'text': '',
+        },
+      ),
+    );
+    api.emitSession(
+      _partDeltaEvent(
+        sessionId: 'session-1',
+        delta: {
+          'sessionId': 'session-1',
+          'messageId': 'turn-1:assistant',
+          'partId': 'part-1',
+          'revision': 1,
+          'field': 'text',
+          'delta': 'live',
+        },
+      ),
+    );
+    api.emitSession(
+      _turnChangedEvent(sessionId: 'session-1', status: 'streaming'),
+    );
+    await _pumpFrameBatch();
+
+    final state = container.read(studioControllerProvider).requireValue;
+    expect(state.turnPhase, TurnPhase.streaming);
+    expect(state.selectedTimelineRows.single.part!.text, 'live');
+    expect(
+      state.partOverlaysBySession['session-1']!['part-1']!.values['text'],
+      'live',
+    );
+  });
+
   test('timeline deltas route by envelope session and part snapshot', () async {
     final api = _FakeStudioApi(_emptyState());
     final container = ProviderContainer(
@@ -641,18 +709,40 @@ void main() {
           'status': 'completed',
           'createdAt': 20,
           'updatedAt': 20,
+          'completedAt': 20,
+        },
+      ),
+    );
+    api.emitSession(
+      _partUpdatedEvent(
+        sessionId: 'session-1',
+        part: {
+          'partId': 'part-1',
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'partType': 'text',
+          'order': 0,
+          'revision': 0,
+          'status': 'streaming',
+          'createdAt': 10,
+          'updatedAt': 10,
+          'textChannel': 'final',
+          'text': 'still streaming',
         },
       ),
     );
     await pumpEventQueue();
 
-    final message = container
-        .read(studioControllerProvider)
-        .requireValue
-        .selectedMessages
-        .single;
+    final state = container.read(studioControllerProvider).requireValue;
+    final message = state.selectedMessages.single;
     expect(message.createdAt, DateTime.fromMillisecondsSinceEpoch(10000));
+    expect(message.updatedAt, DateTime.fromMillisecondsSinceEpoch(20000));
+    expect(message.completedAt, DateTime.fromMillisecondsSinceEpoch(20000));
+    expect(message.status, 'completed');
+    expect(message.turnId, 'turn-1');
     expect(message.sequence, 2);
+    expect(state.selectedTimelineRows.single.part!.status, 'streaming');
   });
 
   test('timeline drops orphan part snapshots', () async {
@@ -778,11 +868,80 @@ void main() {
     final row = state.selectedTimelineRows.single;
     expect(row.messageId, isNull);
     expect(row.part, isNull);
+    expect(row.id, 'agent-activity:call-1');
     expect(row.agentEvent!.callId, 'call-1');
+    expect(row.agentEvent!.eventId, 'agent-event-2');
     expect(row.agentEvent!.title, 'agentTimeline.spawn');
     expect(row.agentEvent!.text, contains('root/reviewer'));
     expect(row.agentEvent!.status, 'completed');
     expect(row.agentEvent!.payload, isA<TimelineAgentSpawnEnd>());
+  });
+
+  test('agent snapshots update status state without timeline rows', () async {
+    final api = _FakeStudioApi(_emptyState());
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(studioControllerProvider.future);
+    api.emitSession(
+      StudioBridgeEvent.fromFrb(
+        frb.BridgeEventEnvelope(
+          eventId: 'agent-snapshot-1',
+          sessionId: 'session-1',
+          sequence: BigInt.from(1),
+          createdAt: 1,
+          payload: frb.BridgeEventPayload.agentChanged(
+            agent: frb.BridgeAgentSnapshotDto(
+              id: 'agent-1',
+              sessionId: 'session-1',
+              path: 'root/reviewer',
+              role: 'reviewer',
+              task: 'Audit timeline',
+              status: 'running',
+              depth: 1,
+              updatedAt: 1,
+            ),
+          ),
+        ),
+      ),
+    );
+    api.emitSession(
+      StudioBridgeEvent.fromFrb(
+        frb.BridgeEventEnvelope(
+          eventId: 'agent-snapshot-2',
+          sessionId: 'session-1',
+          sequence: BigInt.from(2),
+          createdAt: 2,
+          payload: frb.BridgeEventPayload.agentChanged(
+            agent: frb.BridgeAgentSnapshotDto(
+              id: 'agent-1',
+              sessionId: 'session-1',
+              path: 'root/reviewer',
+              role: 'reviewer',
+              task: 'Audit timeline',
+              status: 'completed',
+              summary: 'done',
+              depth: 1,
+              updatedAt: 2,
+            ),
+          ),
+        ),
+      ),
+    );
+    await pumpEventQueue();
+
+    final state = container.read(studioControllerProvider).requireValue;
+    expect(state.selectedTimelineRows, isEmpty);
+    expect(state.runtime.agentCount, 1);
+    expect(state.selectedAgents, hasLength(1));
+    expect(state.selectedAgents.single.status, 'completed');
+    expect(state.selectedAgents.single.summary, 'done');
+    expect(
+      state.agentsBySession['session-1']!['agent-1']!.path,
+      'root/reviewer',
+    );
   });
 
   test(
@@ -838,6 +997,49 @@ void main() {
       expect(row.agentEvent!.payload, isA<TimelineAgentInteractionBegin>());
     },
   );
+
+  test('typed session snapshot restores agent status state', () {
+    const session = frb.SessionDto(
+      id: 'session-1',
+      projectId: 'project-1',
+      title: 'Session',
+      mode: 'auto',
+      updatedAt: 1,
+      visibility: 'visible',
+    );
+    final state = studioStateFromFrbSession(
+      frb.BridgeSessionStateResponse(
+        sessionId: 'session-1',
+        session: session,
+        sessions: const [session],
+        messages: const [],
+        parts: const [],
+        events: const [],
+        eventNextSequence: BigInt.zero,
+        agents: const [
+          frb.BridgeAgentSnapshotDto(
+            id: 'agent-1',
+            sessionId: 'session-1',
+            path: 'root/worker',
+            role: 'worker',
+            task: 'Implement',
+            status: 'running',
+            summary: 'halfway',
+            depth: 1,
+            updatedAt: 4,
+          ),
+        ],
+        agentEvents: const [],
+        interactions: const [],
+      ),
+    );
+
+    expect(state.runtime.agentCount, 1);
+    expect(state.selectedTimelineRows, isEmpty);
+    expect(state.selectedAgents.single.id, 'agent-1');
+    expect(state.selectedAgents.single.path, 'root/worker');
+    expect(state.selectedAgents.single.summary, 'halfway');
+  });
 
   test('unknown agent timeline kinds fail protocol projection', () {
     expect(
@@ -1722,6 +1924,120 @@ void main() {
       );
       expect(liveRow.part!.text, 'live durable');
       expect(state.eventCursorsBySession['session-b'], 101);
+    },
+  );
+
+  test(
+    'session load keeps live delta arrival order inside hydrate barrier',
+    () async {
+      final api = _FakeStudioApi(
+        _twoProjectState(selectedProjectId: 'project-a'),
+      );
+      api.selectProjectStates['project-b'] = _twoProjectState(
+        selectedProjectId: 'project-b',
+      );
+      api.sessionStates['session-b'] = _sessionHistoryState(
+        projectId: 'project-b',
+        sessionId: 'session-b',
+        text: '',
+        eventCursor: 20,
+        messageSequence: 1,
+        partSequence: 2,
+      );
+      final blockedLoad = Completer<StudioState>();
+      api.blockedSessionLoads['session-b'] = blockedLoad;
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      await container.read(studioControllerProvider.future);
+
+      final selectFuture = container
+          .read(studioControllerProvider.notifier)
+          .selectProject('project-b');
+      await pumpEventQueue();
+
+      api.emitSession(
+        _messageUpdatedEvent(
+          sessionId: 'session-b',
+          sequence: BigInt.from(21),
+          message: {
+            'messageId': 'turn-live:assistant',
+            'sessionId': 'session-b',
+            'turnId': 'turn-live',
+            'role': 'assistant',
+            'status': 'streaming',
+            'createdAt': 5,
+            'updatedAt': 5,
+          },
+        ),
+      );
+      api.emitSession(
+        _partUpdatedEvent(
+          sessionId: 'session-b',
+          sequence: BigInt.from(22),
+          part: {
+            'partId': 'part-live',
+            'sessionId': 'session-b',
+            'messageId': 'turn-live:assistant',
+            'turnId': 'turn-live',
+            'partType': 'text',
+            'order': 0,
+            'revision': 0,
+            'status': 'streaming',
+            'createdAt': 5,
+            'updatedAt': 5,
+            'textChannel': 'final',
+            'text': '',
+          },
+        ),
+      );
+      api.emitSession(
+        _partDeltaEvent(
+          sessionId: 'session-b',
+          sequence: BigInt.from(23),
+          eventId: 'z-revision-1',
+          createdAt: DateTime.fromMillisecondsSinceEpoch(5000),
+          delta: {
+            'sessionId': 'session-b',
+            'messageId': 'turn-live:assistant',
+            'partId': 'part-live',
+            'revision': 1,
+            'field': 'text',
+            'delta': 'a',
+          },
+        ),
+      );
+      api.emitSession(
+        _partDeltaEvent(
+          sessionId: 'session-b',
+          sequence: BigInt.from(23),
+          eventId: 'a-revision-2',
+          createdAt: DateTime.fromMillisecondsSinceEpoch(5000),
+          delta: {
+            'sessionId': 'session-b',
+            'messageId': 'turn-live:assistant',
+            'partId': 'part-live',
+            'revision': 2,
+            'field': 'text',
+            'delta': 'b',
+          },
+        ),
+      );
+      await pumpEventQueue();
+
+      blockedLoad.complete(api.sessionStates['session-b']!);
+      await selectFuture;
+      await pumpEventQueue();
+
+      final state = container.read(studioControllerProvider).requireValue;
+      final liveRow = state.selectedTimelineRows.singleWhere(
+        (row) => row.messageId == 'turn-live:assistant',
+      );
+      expect(liveRow.part!.text, 'ab');
+      expect(state.partOverlaysBySession['session-b']!['part-live']!.values, {
+        'text': 'ab',
+      });
     },
   );
 
@@ -3367,11 +3683,27 @@ StudioBridgeEvent _partDeltaEvent({
   required String sessionId,
   required Map<String, Object?> delta,
   BigInt? sequence,
+  String? eventId,
+  DateTime? createdAt,
+}) {
+  return StudioBridgeEvent(
+    eventId: eventId,
+    sessionId: sessionId,
+    sequence: sequence,
+    createdAt: createdAt,
+    payload: MessagePartDeltaPayload(delta: timelinePartDeltaFromJson(delta)),
+  );
+}
+
+StudioBridgeEvent _turnChangedEvent({
+  required String sessionId,
+  required String status,
 }) {
   return StudioBridgeEvent(
     sessionId: sessionId,
-    sequence: sequence,
-    payload: MessagePartDeltaPayload(delta: timelinePartDeltaFromJson(delta)),
+    payload: TurnChangedPayload(
+      turn: StudioTurnView(sessionId: sessionId, status: status),
+    ),
   );
 }
 

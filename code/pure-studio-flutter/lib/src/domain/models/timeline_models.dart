@@ -550,21 +550,45 @@ class TimelineMessage {
     required this.sessionId,
     required this.role,
     required this.createdAt,
+    this.turnId = '',
+    this.status = 'completed',
+    DateTime? updatedAt,
+    this.completedAt,
+    this.error,
     this.sequence = 0,
-  });
+  }) : updatedAt = updatedAt ?? createdAt;
 
   final String id;
   final String sessionId;
+  final String turnId;
   final String role;
+  final String status;
   final DateTime createdAt;
+  final DateTime updatedAt;
+  final DateTime? completedAt;
+  final String? error;
   final int sequence;
 
-  TimelineMessage copyWith({String? role, DateTime? createdAt, int? sequence}) {
+  TimelineMessage copyWith({
+    String? turnId,
+    String? role,
+    String? status,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    DateTime? completedAt,
+    String? error,
+    int? sequence,
+  }) {
     return TimelineMessage(
       id: id,
       sessionId: sessionId,
+      turnId: turnId ?? this.turnId,
       role: role ?? this.role,
+      status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      completedAt: completedAt ?? this.completedAt,
+      error: error ?? this.error,
       sequence: sequence ?? this.sequence,
     );
   }
@@ -613,7 +637,7 @@ class TimelineRow {
 
   factory TimelineRow.agentActivity(TimelineAgentEvent event) {
     return TimelineRow._(
-      id: 'agent-activity:${event.eventId}',
+      id: 'agent-activity:${timelineAgentEventGroupKey(event)}',
       sessionId: event.sessionId,
       messageId: null,
       role: null,

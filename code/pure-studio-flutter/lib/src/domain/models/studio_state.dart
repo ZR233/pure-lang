@@ -1,3 +1,4 @@
+import 'agent_models.dart';
 import 'collection_extensions.dart';
 import 'interaction_models.dart';
 import 'provider_models.dart';
@@ -15,6 +16,7 @@ class StudioState {
     this.partSnapshotsBySession = const {},
     this.partOverlaysBySession = const {},
     this.agentTimelineEventsBySession = const {},
+    this.agentsBySession = const {},
     required this.providers,
     this.defaultProviderId,
     this.providerUsages = const [],
@@ -40,6 +42,7 @@ class StudioState {
   final Map<String, Map<String, TimelinePartOverlay>> partOverlaysBySession;
   final Map<String, Map<String, TimelineAgentEvent>>
   agentTimelineEventsBySession;
+  final Map<String, Map<String, StudioAgentView>> agentsBySession;
   final List<ProviderSettingsView> providers;
   final String? defaultProviderId;
   final List<ProviderUsageView> providerUsages;
@@ -98,6 +101,25 @@ class StudioState {
     return scoped.firstOrNull;
   }
 
+  List<StudioAgentView> get selectedAgents {
+    final sessionId = selectedSessionId;
+    if (sessionId == null) {
+      return const [];
+    }
+    final agents = [
+      ...(agentsBySession[sessionId]?.values ??
+          const Iterable<StudioAgentView>.empty()),
+    ];
+    agents.sort((left, right) {
+      final path = left.path.compareTo(right.path);
+      if (path != 0) {
+        return path;
+      }
+      return left.id.compareTo(right.id);
+    });
+    return agents;
+  }
+
   RoleSettingsView? role(String key) {
     return roles.where((role) => role.key == key).firstOrNull;
   }
@@ -124,6 +146,7 @@ class StudioState {
     Map<String, Map<String, TimelinePartSnapshot>>? partSnapshotsBySession,
     Map<String, Map<String, TimelinePartOverlay>>? partOverlaysBySession,
     Map<String, Map<String, TimelineAgentEvent>>? agentTimelineEventsBySession,
+    Map<String, Map<String, StudioAgentView>>? agentsBySession,
     List<ProviderSettingsView>? providers,
     String? defaultProviderId,
     List<ProviderUsageView>? providerUsages,
@@ -151,6 +174,7 @@ class StudioState {
           partOverlaysBySession ?? this.partOverlaysBySession,
       agentTimelineEventsBySession:
           agentTimelineEventsBySession ?? this.agentTimelineEventsBySession,
+      agentsBySession: agentsBySession ?? this.agentsBySession,
       providers: providers ?? this.providers,
       defaultProviderId: defaultProviderId ?? this.defaultProviderId,
       providerUsages: providerUsages ?? this.providerUsages,

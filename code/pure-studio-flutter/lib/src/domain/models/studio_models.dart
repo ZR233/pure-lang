@@ -1,3 +1,4 @@
+export 'agent_models.dart';
 export 'collection_extensions.dart';
 export 'interaction_models.dart';
 export 'provider_models.dart';
