@@ -1242,6 +1242,34 @@ void main() {
     expect(payload.delta.revision, 4);
   });
 
+  test('FRB typed message part events reject unknown part types', () {
+    expect(
+      () => StudioBridgeEvent.fromFrb(
+        frb.BridgeEventEnvelope(
+          eventId: 'event-unknown-part',
+          sessionId: 'session-1',
+          sequence: BigInt.from(1),
+          createdAt: 1,
+          payload: frb.BridgeEventPayload.messagePartUpdated(
+            part_: _bridgePartDto(
+              partId: 'part-1',
+              messageId: 'turn-1:assistant',
+              partType: 'widget',
+              text: 'should not enter reducer',
+            ),
+          ),
+        ),
+      ),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          contains('Unknown timeline part type'),
+        ),
+      ),
+    );
+  });
+
   test('timeline delta parser accepts only v2 fields', () {
     final base = {
       'sessionId': 'session-1',
