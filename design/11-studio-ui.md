@@ -92,6 +92,8 @@ reasoning part 按 opencode 普通 assistant part 处理，参与 `groupParts`�
 
 reasoning 默认折叠为标题/摘要行，只展示 provider 明确标记的 summary 或由 summary 推导出的 heading；raw reasoning、内部 thinking chunk 和 provider replay metadata 不进入 timeline 正文，也不因展开而显示完整 thinking 文本。`showReasoningSummaries` 只能控制是否显示 reasoning summary/row，不能把多个 reasoning part 合并成一个旧 thought row。
 
+reasoning 展开/折叠是前端 UI 状态，不写回 `StudioPart` snapshot，也不参与 live overlay。Flutter 以 `sessionId + partId` 为 key 保存展开状态；row 重排、snapshot 刷新或 widget 重建时必须保持同一 reasoning part 的展开状态，切换到其他 session 时不得复用同名 part 的 UI 状态。
+
 text/reasoning 的显示文本读取 `partTextAccumDelta[partId] ?? part.text`。snapshot 到达后以 snapshot 为准并清 overlay；同一 frame 内同 part 的 snapshot 覆盖旧 delta。Flutter reducer 使用 frame callback 批处理 `messagePartDelta`；切换 session 或 durable snapshot 到达前必须先 flush 当前 pending delta。若 snapshot coalescing 替换了 start snapshot，同 part 的 pending delta 进入 stale set 并跳过，避免旧思考 chunk 倒灌到 terminal 文本。
 
 阶段性文本输出使用普通 `text` part，`textChannel=commentary`。start snapshot 创建空 part，delta 追加到 live overlay，terminal snapshot 固化完整文本。即使终态 snapshot 很快到达，前端也必须能在流式期间显示 commentary/final 中间文本；不能把 commentary 合并进 final，也不能把工具后的新文本追加到工具前的 part。
