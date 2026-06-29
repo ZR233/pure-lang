@@ -87,6 +87,11 @@ impl StreamCompletionAccumulator {
         stream_event: ModelStreamEvent,
         event_tx: &AgentEventSender,
     ) -> Result<()> {
+        if self.completed {
+            return Err(PureError::LlmError(
+                "provider stream emitted event after completion".to_string(),
+            ));
+        }
         if let ModelStreamEvent::BlockDelta {
             kind:
                 ModelBlockKind::Text {
