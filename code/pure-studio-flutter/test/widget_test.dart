@@ -1626,7 +1626,7 @@ void main() {
         type: TimelinePartType.reasoning,
         title: 'Reasoning',
         text: '> hidden raw reasoning\n\n- keep this out of timeline',
-        collapsed: false,
+        collapsed: true,
       ),
       TimelinePart(
         id: 'plan-1',
@@ -1638,7 +1638,7 @@ void main() {
     ];
 
     await tester.pumpWidget(
-      _localizedApp(
+      _timelineApp(
         home: Scaffold(
           body: SizedBox(
             width: 980,
@@ -1784,18 +1784,29 @@ void main() {
           title: title,
           status: status,
           text: '',
+          collapsed: true,
         );
       }
 
-      Widget timelineFor(List<TimelinePart> parts) {
-        return _localizedApp(
+      Widget timelineFor({
+        String sessionId = 'session-1',
+        required List<TimelinePart> parts,
+      }) {
+        return _timelineApp(
           home: Scaffold(
             body: SizedBox(
               width: 980,
               height: 820,
               child: TimelineView(
-                sessionId: 'session-1',
-                rows: timelineRowsFromMessages([message], parts: parts),
+                sessionId: sessionId,
+                rows: timelineRowsFromMessages([
+                  TimelineMessage(
+                    id: message.id,
+                    sessionId: sessionId,
+                    role: message.role,
+                    createdAt: message.createdAt,
+                  ),
+                ], parts: parts),
               ),
             ),
           ),
@@ -1803,56 +1814,80 @@ void main() {
       }
 
       await tester.pumpWidget(
-        timelineFor([
-          reasoningPart(
-            id: 'reasoning-a',
-            title: 'Reasoning A',
-            status: 'status-a',
-            order: 0,
-          ),
-          reasoningPart(
-            id: 'reasoning-b',
-            title: 'Reasoning B',
-            status: 'status-b',
-            order: 1,
-          ),
-        ]),
+        timelineFor(
+          parts: [
+            reasoningPart(
+              id: 'reasoning-a',
+              title: 'Reasoning A',
+              status: 'status-a',
+              order: 0,
+            ),
+            reasoningPart(
+              id: 'reasoning-b',
+              title: 'Reasoning B',
+              status: 'status-b',
+              order: 1,
+            ),
+          ],
+        ),
       );
       await tester.pumpAndSettle();
+
+      expect(find.text('status-a'), findsNothing);
+      expect(find.text('status-b'), findsNothing);
 
       await tester.tap(find.text('Reasoning B'));
       await tester.pumpAndSettle();
 
-      expect(find.text('status-a'), findsOneWidget);
-      expect(find.text('status-b'), findsNothing);
+      expect(find.text('status-a'), findsNothing);
+      expect(find.text('status-b'), findsOneWidget);
 
       await tester.pumpWidget(
-        timelineFor([
-          reasoningPart(
-            id: 'reasoning-b',
-            title: 'Reasoning B',
-            status: 'status-b',
-            order: 0,
-          ),
-          reasoningPart(
-            id: 'reasoning-c',
-            title: 'Reasoning C',
-            status: 'status-c',
-            order: 1,
-          ),
-          reasoningPart(
-            id: 'reasoning-a',
-            title: 'Reasoning A',
-            status: 'status-a',
-            order: 2,
-          ),
-        ]),
+        timelineFor(
+          parts: [
+            reasoningPart(
+              id: 'reasoning-b',
+              title: 'Reasoning B',
+              status: 'status-b',
+              order: 0,
+            ),
+            reasoningPart(
+              id: 'reasoning-c',
+              title: 'Reasoning C',
+              status: 'status-c',
+              order: 1,
+            ),
+            reasoningPart(
+              id: 'reasoning-a',
+              title: 'Reasoning A',
+              status: 'status-a',
+              order: 2,
+            ),
+          ],
+        ),
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('status-b'), findsNothing);
-      expect(find.text('status-c'), findsOneWidget);
-      expect(find.text('status-a'), findsOneWidget);
+      expect(find.text('status-b'), findsOneWidget);
+      expect(find.text('status-c'), findsNothing);
+      expect(find.text('status-a'), findsNothing);
+
+      await tester.pumpWidget(
+        timelineFor(
+          sessionId: 'session-2',
+          parts: [
+            reasoningPart(
+              id: 'reasoning-b',
+              title: 'Reasoning B',
+              status: 'status-b-session-2',
+              order: 0,
+            ),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('status-b-session-2'), findsNothing);
     },
   );
 
@@ -1898,7 +1933,7 @@ void main() {
     ];
 
     await tester.pumpWidget(
-      _localizedApp(
+      _timelineApp(
         home: Scaffold(
           body: SizedBox(
             width: 980,
@@ -1951,7 +1986,7 @@ void main() {
     ];
 
     await tester.pumpWidget(
-      _localizedApp(
+      _timelineApp(
         home: Scaffold(
           body: SizedBox(
             width: 980,
@@ -2010,7 +2045,7 @@ void main() {
     ];
 
     await tester.pumpWidget(
-      _localizedApp(
+      _timelineApp(
         home: Scaffold(
           body: SizedBox(
             width: 980,
@@ -2973,7 +3008,7 @@ Widget _timelineHarness({
   required String sessionId,
   required List<_ProjectedMessageFixture> messages,
 }) {
-  return _localizedApp(
+  return _timelineApp(
     home: Scaffold(
       body: SizedBox(
         width: 980,
@@ -3012,6 +3047,15 @@ Widget _localizedApp({
     localizationsDelegates: AppLocalizations.localizationsDelegates,
     supportedLocales: AppLocalizations.supportedLocales,
     home: home,
+  );
+}
+
+Widget _timelineApp({
+  required Widget home,
+  Locale locale = const Locale('en'),
+}) {
+  return ProviderScope(
+    child: _localizedApp(home: home, locale: locale),
   );
 }
 

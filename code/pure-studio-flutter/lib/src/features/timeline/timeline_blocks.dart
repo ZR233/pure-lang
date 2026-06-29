@@ -302,7 +302,8 @@ class _RowCard extends StatelessWidget {
         isUser: false,
       ),
       TimelineRowType.reasoningSummary => _ReasoningPart(
-        key: ValueKey(row.part!.id),
+        key: ValueKey('${row.sessionId}:${row.part!.id}'),
+        sessionId: row.sessionId,
         part: row.part!,
       ),
       TimelineRowType.toolActivity => _ToolPart(
@@ -366,44 +367,43 @@ class _MarkdownBubble extends StatelessWidget {
   }
 }
 
-class _ReasoningPart extends StatefulWidget {
-  const _ReasoningPart({required this.part, super.key});
+class _ReasoningPart extends ConsumerWidget {
+  const _ReasoningPart({
+    required this.sessionId,
+    required this.part,
+    super.key,
+  });
 
+  final String sessionId;
   final TimelinePart part;
 
   @override
-  State<_ReasoningPart> createState() => _ReasoningPartState();
-}
-
-class _ReasoningPartState extends State<_ReasoningPart> {
-  late bool expanded = !widget.part.collapsed;
-
-  @override
-  void didUpdateWidget(covariant _ReasoningPart oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.part.id != widget.part.id) {
-      expanded = !widget.part.collapsed;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final title = widget.part.title ?? context.l10n.timelineReasoningFallback;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final expansionKey = _ReasoningExpansionKey(
+      sessionId: sessionId,
+      partId: part.id,
+    );
+    final expanded = ref.watch(_reasoningExpandedProvider(expansionKey));
+    final title = part.title ?? context.l10n.timelineReasoningFallback;
     return _TimelinePanel(
       child: ExpansionTile(
+        key: ValueKey('reasoning:$sessionId:${part.id}:$expanded'),
         tilePadding: const EdgeInsets.symmetric(horizontal: 12),
         childrenPadding: EdgeInsets.zero,
         initiallyExpanded: expanded,
         leading: const Icon(Icons.psychology_alt_outlined, size: 18),
         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        onExpansionChanged: (value) => setState(() => expanded = value),
+        onExpansionChanged: (value) {
+          ref.read(_reasoningExpandedProvider(expansionKey).notifier).state =
+              value;
+        },
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                widget.part.status,
+                part.status,
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(color: context.studioInkSoft),

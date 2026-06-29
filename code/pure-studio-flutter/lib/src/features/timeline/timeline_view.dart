@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
 
 import '../../app/theme/studio_tokens.dart';
@@ -10,6 +12,27 @@ import '../../shared/studio_chrome.dart';
 import 'markdown_repair.dart';
 
 part 'timeline_blocks.dart';
+
+final _reasoningExpandedProvider =
+    StateProvider.family<bool, _ReasoningExpansionKey>((ref, key) => false);
+
+@immutable
+class _ReasoningExpansionKey {
+  const _ReasoningExpansionKey({required this.sessionId, required this.partId});
+
+  final String sessionId;
+  final String partId;
+
+  @override
+  bool operator ==(Object other) {
+    return other is _ReasoningExpansionKey &&
+        other.sessionId == sessionId &&
+        other.partId == partId;
+  }
+
+  @override
+  int get hashCode => Object.hash(sessionId, partId);
+}
 
 class TimelineView extends StatefulWidget {
   const TimelineView({required this.sessionId, required this.rows, super.key});
