@@ -1195,6 +1195,101 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn trace_part_order_spans_inference_ids_and_tool_boundary() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/studio").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Inference boundary", CompileMode::Auto)
+            .await
+            .unwrap();
+        let runtime = StudioEventRuntime::new(store.clone());
+        let turn_id = "turn-inference-boundary";
+
+        let items = [
+            thinking_part(turn_id, "inf-a-reasoning-1", 20, "thinking a"),
+            TracePart::text(
+                turn_id,
+                "inf-a-text-commentary-1",
+                0,
+                TraceTextChannel::Commentary,
+                "commentary a",
+                TracePartStatus::Completed,
+                101,
+            ),
+            tool_part(turn_id, "inf-a-tool-1", 1),
+            TracePart::text(
+                turn_id,
+                "inf-b-text-final-1",
+                0,
+                TraceTextChannel::Final,
+                "final b",
+                TracePartStatus::Completed,
+                103,
+            ),
+        ];
+
+        for item in items {
+            runtime
+                .emit_agent_event(&session.id, AgentEvent::TracePartCompleted { item })
+                .await
+                .unwrap();
+        }
+
+        let parts = store.load_message_parts(&session.id).await.unwrap();
+        let compact = parts
+            .iter()
+            .map(|record| {
+                (
+                    record.part.part_id.clone(),
+                    record.part.order,
+                    record.part.part_type,
+                    record.part.text_channel,
+                    record.part.text.clone(),
+                    record.part.tool.as_ref().map(|tool| tool.name.clone()),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            compact,
+            vec![
+                (
+                    "turn-inference-boundary:part-0".to_string(),
+                    0,
+                    StudioPartType::Reasoning,
+                    None,
+                    "thinking a".to_string(),
+                    None,
+                ),
+                (
+                    "turn-inference-boundary:part-1".to_string(),
+                    1,
+                    StudioPartType::Text,
+                    Some(StudioTextChannel::Commentary),
+                    "commentary a".to_string(),
+                    None,
+                ),
+                (
+                    "turn-inference-boundary:part-2".to_string(),
+                    2,
+                    StudioPartType::Tool,
+                    None,
+                    String::new(),
+                    Some("bash".to_string()),
+                ),
+                (
+                    "turn-inference-boundary:part-3".to_string(),
+                    3,
+                    StudioPartType::Text,
+                    Some(StudioTextChannel::Final),
+                    "final b".to_string(),
+                    None,
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
     async fn runtime_commentary_is_projected_as_synthetic() {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project("C:/work/studio").await.unwrap();

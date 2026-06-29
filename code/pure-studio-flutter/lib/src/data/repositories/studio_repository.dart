@@ -666,7 +666,7 @@ class StudioController extends AsyncNotifier<StudioState> {
           return sequence != 0 ? sequence : a.id.compareTo(b.id);
         });
       for (final snapshot in orderedSnapshots) {
-        merged = _upsertPartSnapshot(merged, snapshot);
+        merged = _upsertPartSnapshot(merged, snapshot, recoverOnInvalid: false);
       }
       final agentEvents =
           sessionState.agentTimelineEventsBySession[sessionId] ?? const {};
@@ -780,8 +780,9 @@ class StudioController extends AsyncNotifier<StudioState> {
 
   StudioState _upsertPartSnapshot(
     StudioState current,
-    TimelinePartSnapshot snapshot,
-  ) {
+    TimelinePartSnapshot snapshot, {
+    bool recoverOnInvalid = true,
+  }) {
     final sessionId = snapshot.sessionId;
     if (snapshot.id.isEmpty ||
         snapshot.messageId.isEmpty ||
@@ -793,6 +794,13 @@ class StudioController extends AsyncNotifier<StudioState> {
     if (existingSnapshot != null &&
         snapshot.sequence > 0 &&
         snapshot.sequence < existingSnapshot.sequence) {
+      return current;
+    }
+    if (existingSnapshot != null &&
+        !_canApplyPartSnapshot(existingSnapshot, snapshot)) {
+      if (recoverOnInvalid) {
+        unawaited(_recoverStaleSession(sessionId));
+      }
       return current;
     }
     final snapshots = {
@@ -1251,5 +1259,89 @@ class StudioController extends AsyncNotifier<StudioState> {
       'budgetLimited' => true,
       _ => false,
     };
+  }
+
+  bool _canApplyPartSnapshot(
+    TimelinePartSnapshot existing,
+    TimelinePartSnapshot incoming,
+  ) {
+    if (!_samePartIdentity(existing, incoming)) {
+      return false;
+    }
+    if (incoming.revision < existing.revision) {
+      return false;
+    }
+    if (_isTerminalPartStatus(existing.status) &&
+        !_samePartSnapshot(existing, incoming)) {
+      return false;
+    }
+    return true;
+  }
+
+  bool _samePartIdentity(
+    TimelinePartSnapshot existing,
+    TimelinePartSnapshot incoming,
+  ) {
+    return existing.id == incoming.id &&
+        existing.messageId == incoming.messageId &&
+        existing.sessionId == incoming.sessionId &&
+        existing.turnId == incoming.turnId &&
+        existing.type == incoming.type &&
+        existing.order == incoming.order &&
+        existing.createdAt == incoming.createdAt &&
+        existing.textChannel == incoming.textChannel;
+  }
+
+  bool _samePartSnapshot(
+    TimelinePartSnapshot existing,
+    TimelinePartSnapshot incoming,
+  ) {
+    return _samePartIdentity(existing, incoming) &&
+        existing.revision == incoming.revision &&
+        existing.text == incoming.text &&
+        existing.status == incoming.status &&
+        existing.updatedAt == incoming.updatedAt &&
+        existing.completedAt == incoming.completedAt &&
+        existing.error == incoming.error &&
+        _sameToolPart(existing.tool, incoming.tool) &&
+        _sameAgentPart(existing.agent, incoming.agent) &&
+        existing.planContent == incoming.planContent &&
+        existing.synthetic == incoming.synthetic &&
+        existing.ignored == incoming.ignored;
+  }
+
+  bool _sameToolPart(TimelineToolPart? existing, TimelineToolPart? incoming) {
+    if (existing == null || incoming == null) {
+      return existing == incoming;
+    }
+    return existing.toolCallId == incoming.toolCallId &&
+        existing.name == incoming.name &&
+        existing.callId == incoming.callId &&
+        existing.providerItemId == incoming.providerItemId &&
+        existing.arguments == incoming.arguments &&
+        existing.result == incoming.result &&
+        existing.exitCode == incoming.exitCode &&
+        existing.timedOut == incoming.timedOut &&
+        existing.workingDirectory == incoming.workingDirectory &&
+        existing.denialReason == incoming.denialReason;
+  }
+
+  bool _sameAgentPart(
+    TimelineAgentPart? existing,
+    TimelineAgentPart? incoming,
+  ) {
+    if (existing == null || incoming == null) {
+      return existing == incoming;
+    }
+    return existing.id == incoming.id &&
+        existing.path == incoming.path &&
+        existing.parentPath == incoming.parentPath &&
+        existing.role == incoming.role &&
+        existing.task == incoming.task &&
+        existing.status == incoming.status &&
+        existing.summary == incoming.summary &&
+        existing.depth == incoming.depth &&
+        existing.error == incoming.error &&
+        existing.reason == incoming.reason;
   }
 }
