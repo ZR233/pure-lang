@@ -1100,7 +1100,7 @@ void main() {
     expect(part.revision, 2);
   });
 
-  test('timeline parser accepts file part and rejects unknown values', () {
+  test('timeline parser accepts internal parts and rejects unknown values', () {
     final base = {
       'partId': 'part-1',
       'messageId': 'turn-1:assistant',
@@ -1114,25 +1114,26 @@ void main() {
       'text': 'hello',
     };
 
-    final filePart = timelinePartSnapshotFromJson({
-      ...base,
-      'partType': 'file',
-    });
-    expect(filePart.type, TimelinePartType.file);
-    expect(
-      timelineRowsFromMessages(
-        [
-          TimelineMessage(
-            id: 'turn-1:assistant',
-            sessionId: 'session-1',
-            role: 'assistant',
-            createdAt: DateTime.fromMillisecondsSinceEpoch(1000),
-          ),
-        ],
-        parts: [timelinePartFromSnapshot(filePart)],
-      ),
-      isEmpty,
+    final message = TimelineMessage(
+      id: 'turn-1:assistant',
+      sessionId: 'session-1',
+      role: 'assistant',
+      createdAt: DateTime.fromMillisecondsSinceEpoch(1000),
     );
+    for (final internalType in ['file', 'turn', 'inference']) {
+      final internalPart = timelinePartSnapshotFromJson({
+        ...base,
+        'partType': internalType,
+      });
+      expect(isInternalTimelinePartType(internalPart.type), isTrue);
+      expect(
+        timelineRowsFromMessages(
+          [message],
+          parts: [timelinePartFromSnapshot(internalPart)],
+        ),
+        isEmpty,
+      );
+    }
     expect(
       () => timelinePartSnapshotFromJson({...base, 'partType': 'widget'}),
       throwsA(
@@ -1591,7 +1592,7 @@ void main() {
   });
 
   test(
-    'session load buffers live events until snapshot merge completes',
+    'session load replays only buffered durable events after snapshot cursor',
     () async {
       final api = _FakeStudioApi(
         _twoProjectState(selectedProjectId: 'project-a'),
@@ -1623,7 +1624,22 @@ void main() {
       api.emitSession(
         _messageUpdatedEvent(
           sessionId: 'session-b',
-          sequence: BigInt.from(5),
+          sequence: BigInt.from(98),
+          message: {
+            'messageId': 'turn-stale:assistant',
+            'sessionId': 'session-b',
+            'turnId': 'turn-stale',
+            'role': 'assistant',
+            'status': 'streaming',
+            'createdAt': 5,
+            'updatedAt': 5,
+          },
+        ),
+      );
+      api.emitSession(
+        _messageUpdatedEvent(
+          sessionId: 'session-b',
+          sequence: BigInt.from(100),
           message: {
             'messageId': 'turn-live:assistant',
             'sessionId': 'session-b',
@@ -1638,11 +1654,11 @@ void main() {
       api.emitSession(
         _partUpdatedEvent(
           sessionId: 'session-b',
-          sequence: BigInt.from(6),
+          sequence: BigInt.from(101),
           part: {
             'partId': 'part-live',
-            'messageId': 'turn-live:assistant',
             'sessionId': 'session-b',
+            'messageId': 'turn-live:assistant',
             'turnId': 'turn-live',
             'partType': 'text',
             'order': 6,
@@ -1651,20 +1667,7 @@ void main() {
             'createdAt': 5,
             'updatedAt': 5,
             'textChannel': 'commentary',
-            'text': 'live ',
-          },
-        ),
-      );
-      api.emitSession(
-        _partDeltaEvent(
-          sessionId: 'session-b',
-          delta: {
-            'sessionId': 'session-b',
-            'messageId': 'turn-live:assistant',
-            'partId': 'part-live',
-            'revision': 1,
-            'field': 'text',
-            'delta': 'buffer',
+            'text': 'live durable',
           },
         ),
       );
@@ -1680,11 +1683,17 @@ void main() {
 
       state = container.read(studioControllerProvider).requireValue;
       expect(state.selectedSessionId, 'session-b');
+      expect(
+        state.selectedMessages.where(
+          (message) => message.id == 'turn-stale:assistant',
+        ),
+        isEmpty,
+      );
       final liveRow = state.selectedTimelineRows.singleWhere(
         (row) => row.messageId == 'turn-live:assistant',
       );
-      expect(liveRow.part!.text, 'live buffer');
-      expect(state.eventCursorsBySession['session-b'], 99);
+      expect(liveRow.part!.text, 'live durable');
+      expect(state.eventCursorsBySession['session-b'], 101);
     },
   );
 

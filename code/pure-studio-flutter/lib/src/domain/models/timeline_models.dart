@@ -792,7 +792,9 @@ TimelineRowType _timelineRowType(TimelineMessage message, TimelinePart part) {
     },
     TimelinePartType.turn ||
     TimelinePartType.inference ||
-    TimelinePartType.file => TimelineRowType.toolActivity,
+    TimelinePartType.file => throw StateError(
+      'Internal timeline part type cannot be projected: ${part.type.name}',
+    ),
   };
 }
 
