@@ -1741,16 +1741,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return BridgeStudioPartDeltaDto(
-      sessionId: dco_decode_String(arr[0]),
-      messageId: dco_decode_String(arr[1]),
-      partId: dco_decode_String(arr[2]),
-      revision: dco_decode_u_64(arr[3]),
-      field: dco_decode_String(arr[4]),
-      delta: dco_decode_String(arr[5]),
-      chunkIndex: dco_decode_opt_box_autoadd_u_32(arr[6]),
+      partId: dco_decode_String(arr[0]),
+      revision: dco_decode_u_64(arr[1]),
+      field: dco_decode_String(arr[2]),
+      delta: dco_decode_String(arr[3]),
+      chunkIndex: dco_decode_opt_box_autoadd_u_32(arr[4]),
     );
   }
 
@@ -3252,16 +3250,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_sessionId = sse_decode_String(deserializer);
-    var var_messageId = sse_decode_String(deserializer);
     var var_partId = sse_decode_String(deserializer);
     var var_revision = sse_decode_u_64(deserializer);
     var var_field = sse_decode_String(deserializer);
     var var_delta = sse_decode_String(deserializer);
     var var_chunkIndex = sse_decode_opt_box_autoadd_u_32(deserializer);
     return BridgeStudioPartDeltaDto(
-      sessionId: var_sessionId,
-      messageId: var_messageId,
       partId: var_partId,
       revision: var_revision,
       field: var_field,
@@ -4900,8 +4894,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.sessionId, serializer);
-    sse_encode_String(self.messageId, serializer);
     sse_encode_String(self.partId, serializer);
     sse_encode_u_64(self.revision, serializer);
     sse_encode_String(self.field, serializer);

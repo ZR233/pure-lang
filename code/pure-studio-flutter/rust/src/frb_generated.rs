@@ -1768,16 +1768,12 @@ impl SseDecode for crate::api::studio::BridgeStudioMessageProjectionDto {
 impl SseDecode for crate::api::studio::BridgeStudioPartDeltaDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_sessionId = <String>::sse_decode(deserializer);
-        let mut var_messageId = <String>::sse_decode(deserializer);
         let mut var_partId = <String>::sse_decode(deserializer);
         let mut var_revision = <u64>::sse_decode(deserializer);
         let mut var_field = <String>::sse_decode(deserializer);
         let mut var_delta = <String>::sse_decode(deserializer);
         let mut var_chunkIndex = <Option<u32>>::sse_decode(deserializer);
         return crate::api::studio::BridgeStudioPartDeltaDto {
-            session_id: var_sessionId,
-            message_id: var_messageId,
             part_id: var_partId,
             revision: var_revision,
             field: var_field,
@@ -3499,8 +3495,6 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::BridgeStudioMessagePr
 impl flutter_rust_bridge::IntoDart for crate::api::studio::BridgeStudioPartDeltaDto {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
-            self.session_id.into_into_dart().into_dart(),
-            self.message_id.into_into_dart().into_dart(),
             self.part_id.into_into_dart().into_dart(),
             self.revision.into_into_dart().into_dart(),
             self.field.into_into_dart().into_dart(),
@@ -4632,8 +4626,6 @@ impl SseEncode for crate::api::studio::BridgeStudioMessageProjectionDto {
 impl SseEncode for crate::api::studio::BridgeStudioPartDeltaDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <String>::sse_encode(self.session_id, serializer);
-        <String>::sse_encode(self.message_id, serializer);
         <String>::sse_encode(self.part_id, serializer);
         <u64>::sse_encode(self.revision, serializer);
         <String>::sse_encode(self.field, serializer);

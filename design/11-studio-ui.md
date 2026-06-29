@@ -42,7 +42,7 @@ lib/src/shared/
 - `mcpServers/lspServers`
 - `turnPhase/turnStartedAt`
 
-`messageUpdated` upsert message snapshot；`messagePartUpdated` upsert 完整 part snapshot 并清除该 part 的 live delta；`messagePartDelta` 只允许命中已有 part，orphan delta 直接丢弃。`messagePartDelta` 不推进 durable cursor，也不得覆盖 terminal snapshot。前端记录 part 的 snapshot sequence、delta sequence 和可选 `chunkIndex`，丢弃同 part stale delta、低序 delta 与重复/倒序 chunk。`messageRemoved`、`messagePartRemoved`、session reset 和 projection snapshot 替换必须清理相关 delta accum。
+`messageUpdated` upsert message snapshot；`messagePartUpdated` upsert 完整 part snapshot 并清除该 part 的 live delta；`messagePartDelta` payload 只携带 `partId/revision/field/delta/chunkIndex`，session 归属来自 envelope，message/turn 归属来自已有 part snapshot，不在 delta 内重复携带或信任第二套身份。`messagePartDelta` 只允许命中已有 part，orphan delta 直接丢弃。`messagePartDelta` 不推进 durable cursor，也不得覆盖 terminal snapshot。前端记录 part 的 snapshot sequence、delta sequence 和可选 `chunkIndex`，丢弃同 part stale delta、低序 delta 与重复/倒序 chunk。`messageRemoved`、`messagePartRemoved`、session reset 和 projection snapshot 替换必须清理相关 delta accum。
 
 `StudioPart.revision` 与 `StudioPartDelta.revision` 是每个 part 的 live 版本号。start snapshot 使用 `revision=0`，同 part 每个 delta 递增，terminal snapshot 携带最新 revision。前端 reducer 必须按 `partId + field` 保存 overlay，并在 `delta.revision <= lastRevision` 时丢弃该 delta；terminal snapshot 到达后清理 overlay，terminal 后到达的 delta 一律丢弃。旧历史或旧后端缺失 revision 时按默认 0 读取，只能作为 durable snapshot 初始化；live delta 必须携带大于当前 field revision 的 revision，不能用缺省 0 覆盖已有 snapshot 或 overlay。
 

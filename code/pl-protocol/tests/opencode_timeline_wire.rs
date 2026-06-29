@@ -181,8 +181,6 @@ fn opencode_timeline_events_keep_wire_shape_for_parts_and_deltas() {
             5,
             StudioEventKind::MessagePartDelta {
                 delta: StudioPartDelta {
-                    session_id: "session-golden".to_string(),
-                    message_id: "turn-golden-1:assistant".to_string(),
                     part_id: "reason-a".to_string(),
                     revision: 1,
                     field: StudioPartDeltaField::ReasoningSummary,
@@ -201,8 +199,6 @@ fn opencode_timeline_events_keep_wire_shape_for_parts_and_deltas() {
             7,
             StudioEventKind::MessagePartDelta {
                 delta: StudioPartDelta {
-                    session_id: "session-golden".to_string(),
-                    message_id: "turn-golden-1:assistant".to_string(),
                     part_id: "tool-call-1".to_string(),
                     revision: 1,
                     field: StudioPartDeltaField::ToolResult,
@@ -308,8 +304,6 @@ fn opencode_timeline_events_keep_wire_shape_for_parts_and_deltas() {
                 "kind": {
                     "type": "messagePartDelta",
                     "delta": {
-                        "sessionId": "session-golden",
-                        "messageId": "turn-golden-1:assistant",
                         "partId": "reason-a",
                         "revision": 1,
                         "field": "reasoning.summary",
@@ -356,8 +350,6 @@ fn opencode_timeline_events_keep_wire_shape_for_parts_and_deltas() {
                 "kind": {
                     "type": "messagePartDelta",
                     "delta": {
-                        "sessionId": "session-golden",
-                        "messageId": "turn-golden-1:assistant",
                         "partId": "tool-call-1",
                         "revision": 1,
                         "field": "tool.result",

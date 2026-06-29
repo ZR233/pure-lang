@@ -7,6 +7,7 @@ use super::records::StudioPartRecord;
 #[derive(Default)]
 pub(super) struct TurnTimelineActor {
     part_revisions: HashMap<String, u64>,
+    source_revisions: HashMap<String, u64>,
     part_orders: HashMap<String, u64>,
     trace_part_ids: HashMap<TracePartScope, String>,
     next_orders_by_message: HashMap<MessageScope, u64>,
@@ -98,6 +99,7 @@ impl TurnTimelineActor {
     pub(super) fn record_snapshot(&mut self, part: &StudioPart) {
         if is_terminal_studio_part_status(part.status) {
             self.part_revisions.remove(&part.part_id);
+            self.source_revisions.remove(&part.part_id);
         } else {
             let revision = self
                 .part_revisions
@@ -112,7 +114,7 @@ impl TurnTimelineActor {
     pub(super) fn prepare_delta(
         &mut self,
         part_id: &str,
-        revision: u64,
+        source_revision: u64,
         existing: Option<&StudioPartRecord>,
     ) -> TimelineDeltaDecision {
         let Some(existing) = existing else {
@@ -121,20 +123,22 @@ impl TurnTimelineActor {
         if is_terminal_studio_part_status(existing.part.status) {
             return TimelineDeltaDecision::Stale;
         }
-        let current_revision = self
+        let current_source_revision = self.source_revisions.get(part_id).copied().unwrap_or(0);
+        if source_revision != current_source_revision + 1 {
+            return TimelineDeltaDecision::Stale;
+        }
+        let current_part_revision = self
             .part_revisions
             .get(part_id)
             .copied()
             .unwrap_or(existing.part.revision);
-        if revision == current_revision + 1 {
-            let actor_revision = current_revision + 1;
-            self.part_revisions
-                .insert(part_id.to_string(), actor_revision);
-            TimelineDeltaDecision::Accept {
-                revision: actor_revision,
-            }
-        } else {
-            TimelineDeltaDecision::Stale
+        let actor_revision = current_part_revision + 1;
+        self.source_revisions
+            .insert(part_id.to_string(), source_revision);
+        self.part_revisions
+            .insert(part_id.to_string(), actor_revision);
+        TimelineDeltaDecision::Accept {
+            revision: actor_revision,
         }
     }
 
@@ -216,6 +220,24 @@ mod tests {
         assert_eq!(
             actor.prepare_delta("part-1", 2, Some(&existing)),
             TimelineDeltaDecision::Accept { revision: 2 }
+        );
+    }
+
+    #[test]
+    fn allocates_studio_revision_independently_from_source_revision() {
+        let mut actor = TurnTimelineActor::default();
+        let existing = StudioPartRecord {
+            part: part("part-1", StudioPartStatus::Streaming, 7),
+            sequence: 0,
+        };
+
+        assert_eq!(
+            actor.prepare_delta("part-1", 1, Some(&existing)),
+            TimelineDeltaDecision::Accept { revision: 8 }
+        );
+        assert_eq!(
+            actor.prepare_delta("part-1", 2, Some(&existing)),
+            TimelineDeltaDecision::Accept { revision: 9 }
         );
     }
 

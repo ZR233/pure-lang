@@ -209,8 +209,6 @@ pub struct BridgeStudioPlanPartDto {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeStudioPartDeltaDto {
-    pub session_id: String,
-    pub message_id: String,
     pub part_id: String,
     pub revision: u64,
     pub field: String,
@@ -1891,8 +1889,6 @@ fn bridge_part(part: StudioPart) -> BridgeStudioPartDto {
 
 fn bridge_part_delta(delta: StudioPartDelta) -> BridgeStudioPartDeltaDto {
     BridgeStudioPartDeltaDto {
-        session_id: delta.session_id,
-        message_id: delta.message_id,
         part_id: delta.part_id,
         revision: delta.revision,
         field: bridge_part_delta_field(delta.field),

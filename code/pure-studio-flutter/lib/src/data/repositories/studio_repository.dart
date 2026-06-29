@@ -609,7 +609,11 @@ class StudioController extends AsyncNotifier<StudioState> {
         messageId,
         partId,
       ),
-      MessagePartDeltaPayload(:final delta) => _appendPartDelta(current, delta),
+      MessagePartDeltaPayload(:final delta) => _appendPartDelta(
+        current,
+        event.sessionId,
+        delta,
+      ),
       TurnChangedPayload(:final turn) => current.copyWith(
         turnPhase: _turnPhase(turn),
       ),
@@ -825,21 +829,26 @@ class StudioController extends AsyncNotifier<StudioState> {
     return _withPartState(current, sessionId, snapshots, overlays);
   }
 
-  StudioState _appendPartDelta(StudioState current, TimelinePartDelta delta) {
-    if (delta.sessionId.isEmpty ||
-        delta.messageId.isEmpty ||
+  StudioState _appendPartDelta(
+    StudioState current,
+    String? eventSessionId,
+    TimelinePartDelta delta,
+  ) {
+    final sessionId = eventSessionId ?? current.selectedSessionId;
+    if (sessionId == null ||
+        sessionId.isEmpty ||
         delta.partId.isEmpty ||
         delta.delta.isEmpty ||
         !_canAppendDeltaField(delta.field)) {
       return current;
     }
-    final snapshot =
-        current.partSnapshotsBySession[delta.sessionId]?[delta.partId];
+    final snapshots = current.partSnapshotsBySession[sessionId] ?? const {};
+    final snapshot = snapshots[delta.partId];
     if (snapshot == null || _isTerminalPartStatus(snapshot.status)) {
       return current;
     }
     final currentOverlay =
-        current.partOverlaysBySession[delta.sessionId]?[delta.partId] ??
+        current.partOverlaysBySession[sessionId]?[delta.partId] ??
         const TimelinePartOverlay();
     final lastRevision =
         currentOverlay.lastRevisions[delta.field] ?? snapshot.revision;
@@ -848,15 +857,10 @@ class StudioController extends AsyncNotifier<StudioState> {
     }
     if (delta.revision != lastRevision + 1) {
       final overlays = {
-        ...(current.partOverlaysBySession[delta.sessionId] ?? const {}),
+        ...(current.partOverlaysBySession[sessionId] ?? const {}),
       }..remove(delta.partId);
-      unawaited(_recoverStaleSession(delta.sessionId));
-      return _withPartState(
-        current,
-        delta.sessionId,
-        current.partSnapshotsBySession[delta.sessionId] ?? const {},
-        overlays,
-      );
+      unawaited(_recoverStaleSession(sessionId));
+      return _withPartState(current, sessionId, snapshots, overlays);
     }
     if (delta.chunkIndex != null) {
       final previousChunk = currentOverlay.lastChunkIndexes[delta.field] ?? -1;
@@ -874,15 +878,10 @@ class StudioController extends AsyncNotifier<StudioState> {
       chunkIndex: delta.chunkIndex,
     );
     final overlays = {
-      ...(current.partOverlaysBySession[delta.sessionId] ?? const {}),
+      ...(current.partOverlaysBySession[sessionId] ?? const {}),
       delta.partId: nextOverlay,
     };
-    return _withPartState(
-      current,
-      delta.sessionId,
-      current.partSnapshotsBySession[delta.sessionId] ?? const {},
-      overlays,
-    );
+    return _withPartState(current, sessionId, snapshots, overlays);
   }
 
   StudioState _removeMessage(
