@@ -92,6 +92,21 @@ class AppLocalizationsEn extends AppLocalizations {
   String get permissionModeTooltip => 'Permission mode';
 
   @override
+  String get compileModeAuto => 'Auto';
+
+  @override
+  String get compileModePlan => 'Plan';
+
+  @override
+  String get permissionModeRequestApproval => 'Request';
+
+  @override
+  String get permissionModeAutoReview => 'Review';
+
+  @override
+  String get permissionModeFullAccess => 'Full';
+
+  @override
   String get statusCost => 'Cost';
 
   @override
@@ -197,7 +212,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get timelineNew => 'New';
 
   @override
-  String get timelineReasoningFallback => 'Reasoning';
+  String get timelineReasoningFallback => 'Thinking';
+
+  @override
+  String get timelineReasoningActive => 'Thinking';
+
+  @override
+  String get timelineReasoningCompleted => 'Thought';
+
+  @override
+  String get timelineReasoningEmpty => 'No reasoning text was provided.';
 
   @override
   String get timelineToolFallback => 'Tool';
@@ -371,15 +395,16 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get interactionPlanConfirmSubtitle =>
-      'The plan stays in the timeline above.';
+      'Implement it, or describe what should change.';
 
   @override
   String get interactionPlanEditingFooterHint =>
       'Only your adjustment will be sent; the plan body is not returned.';
 
   @override
-  String get interactionPlanImplementFooterHint =>
-      'Implementing switches back to Auto mode and submits the background implementation prompt.';
+  String interactionPlanImplementFooterHint(String mode) {
+    return 'Implementing switches back to $mode mode and starts execution.';
+  }
 
   @override
   String get interactionPlanIgnore => 'Ignore';
@@ -391,8 +416,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get interactionPlanImplement => 'Implement this plan';
 
   @override
-  String get interactionPlanAdjustHint =>
-      'Tell Pure how the plan should change...';
+  String get interactionPlanAdjustHint => 'Describe what should change...';
 
   @override
   String get interactionPlanAdjustSubmit => 'Submit adjustment';

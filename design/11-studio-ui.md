@@ -90,13 +90,14 @@ Timeline row 从 `messages + parts + partTextAccumDelta + agentTimelineEvents` �
 
 reasoning part 按 opencode 普通 assistant part 处理，参与 `groupParts`，不再把同 turn 的多个 reasoning part 合并成旧 thought entry。这样新 reasoning 的 `messageId + partId` 不会复用旧 row key，也不会把流式 delta 写回旧思考行。
 
-reasoning 默认折叠为标题/摘要行，只展示 provider 明确标记的 summary 或由 summary 推导出的 heading；raw reasoning、内部 thinking chunk 和 provider replay metadata 不进入 timeline 正文，也不因展开而显示完整 thinking 文本。`showReasoningSummaries` 只能控制是否显示 reasoning summary/row，不能把多个 reasoning part 合并成一个旧 thought row。
+reasoning 默认折叠为“思考中 / 已思考”结构化行，只在 header 展示状态与可选耗时；展开后展示 `StudioPart.text` 中的完整 provider-emitted reasoning summary/thinking stream，并使用与普通 Markdown 相同的 stream-safe 渲染。provider replay metadata、后端诊断和未进入 `StudioPart.text` 的内部推理不进入 timeline 正文。`showReasoningSummaries` 只能控制是否显示 reasoning summary/row，不能把多个 reasoning part 合并成一个旧 thought row。
 
 reasoning 展开/折叠是前端 UI 状态，不写回 `StudioPart` snapshot，也不参与 live overlay。Flutter 以 `sessionId + partId` 为 key 保存展开状态；row 重排、snapshot 刷新或 widget 重建时必须保持同一 reasoning part 的展开状态，切换到其他 session 时不得复用同名 part 的 UI 状态。
 
 text/reasoning 的显示文本读取 `partTextAccumDelta[partId] ?? part.text`。snapshot 到达后以 snapshot 为准并清 overlay；同一 frame 内同 part 的 snapshot 覆盖旧 delta。Flutter reducer 使用 frame callback 批处理 `messagePartDelta`；切换 session 或 durable snapshot 到达前必须先 flush 当前 pending delta。若 snapshot coalescing 替换了 start snapshot，同 part 的 pending delta 进入 stale set 并跳过，避免旧思考 chunk 倒灌到 terminal 文本。
 
 阶段性文本输出使用普通 `text` part，`textChannel=commentary`。start snapshot 创建空 part，delta 追加到 live overlay，terminal snapshot 固化完整文本。即使终态 snapshot 很快到达，前端也必须能在流式期间显示 commentary/final 中间文本；不能把 commentary 合并进 final，也不能把工具后的新文本追加到工具前的 part。
+Provider stream adapter 必须在工具输入开始、工具调用就绪或新 step 开始前关闭当前可见文本段；对于 Chat/DeepSeek 这类通过 `<commentary>/<final>` 或未标记文本解析可见输出的 provider，文本段边界也必须在 stream projection 层产生，不能由 `pl-core` 事后补写兜底文本。
 
 `textChannel=commentary` 表示模型主动输出的可见进度，视觉层级应轻于最终答复但完整可读；`textChannel=final` 表示最终答复，必须单独完整展示。OpenAI Responses 原生 `phase=commentary/final_answer/final` 是优先来源；不支持 native phase 的 Chat provider 通过 `<commentary>` 和 `<final>` 标签映射到相同 text part 类型。计划内容不再通过 `<proposed_plan>` 进入 timeline，只能由 `plan_exit.content` 生成 plan part。隐藏 reasoning 不得被当作 commentary 展开。
 
@@ -122,7 +123,7 @@ Studio runtime 的恢复语义必须保证 UI 不展示已经无法唤醒的等�
 
 聊天底部只渲染一个最高优先级 pending interaction，优先级为 `toolApproval > userInput > planConfirmation`。这个区域采用 opencode dock prompt 语义：pending 的问题与权限请求不写入 timeline view model，timeline 中 pending `request_user_input` / `question` tool part 隐藏，由 dock 显示真实问题、选项和输入控件；完成后的问题 tool part 可以作为普通 assistant tool part 显示“Questions / answered”摘要。普通 prompt 输入不再渲染 Auto/Plan 二级按钮，模式切换只存在于状态栏，避免与状态栏重复。`submit_prompt` 和 `resolve_interaction` 只表示提交成功，不返回最终 timeline；后续展示完全由 Studio event stream 驱动。`toolApproval` 必须显示工具名、参数、工作目录和 approve/deny；`userInput` 必须显示每个问题、选项、free text/other/secret 输入并提交 `{ [questionId]: { answers } }`，secret 答案不得以明文出现在 timeline；`planConfirmation` 保留 implement fresh、continue planning、dismiss 三动作，并和问题/权限一样使用 dock prompt，而不是从 timeline 自行推断“是否实施计划”。
 
-Flutter 的 `planConfirmation` dock 对齐 Codex 桌面 app 的决策式提示：标题固定为“实施此计划？”，计划正文留在 timeline plan card 中展示，dock 只提供“实施此计划”“告诉 Pure 如何调整”和弱化的忽略动作；实施动作不回传可编辑计划正文，继续调整只回传用户输入的调整内容。Flutter 的 `userInput` dock 对齐 Codex 的分题交互：顶部显示问题数量与进度点，当前只聚焦一个问题，选项使用多选 checkbox row，Other/free text/secret 输入跟随当前问题展示，上一题/下一题/提交按钮保留在 dock footer；提交时为每个问题生成 `{ answers: [...] }`，未回答问题也保留空数组。
+Flutter 的 `planConfirmation` dock 对齐 Codex 桌面 app 的决策式提示：标题固定为“实施此计划？”，计划正文留在 timeline plan card 中展示，dock 内常驻一个轻量调整输入框，用户可直接输入调整要求并提交 `continuePlanning`，不再通过二级按钮跳转到独立 composer 状态；实施动作不回传可编辑计划正文，继续调整只回传用户输入的调整内容，忽略动作保持弱化展示。Flutter 的 `userInput` dock 对齐 Codex 的分题交互：顶部显示问题数量与进度点，当前只聚焦一个问题，选项使用多选 checkbox row，Other/free text/secret 输入跟随当前问题展示，上一题/下一题/提交按钮保留在 dock footer；提交时为每个问题生成 `{ answers: [...] }`，未回答问题也保留空数组。
 
 pending interaction 只替换普通 prompt 输入，不得隐藏当前 turn 的停止控制；只要当前 session 的 turn 仍处于非终态，footer 必须保留停止按钮并调用 `stop_prompt(sessionId)`。`busy` 与停止按钮状态必须按 `sessionId` 归属计算，后台 session 的 turn event 不能让当前 session 显示不可用的停止态。
 
@@ -181,6 +182,6 @@ Flutter 交互组件优先使用 Material 3 原生控件，按业务领域组织
 
 Flutter 窗口 resize 时 UI 不应持续触发昂贵测量。Timeline 的贴底逻辑只在新内容、会话切换和少量后续 layout settle 帧内测量，不能长时间逐帧调用列表 measure 或反复写入 scroll offset。
 
-计划确认 dock 的固定文案语义为“实施此计划？”：主操作是实施计划，次操作是继续调整，忽略动作保持弱化展示。所有固定 UI 文案必须走 i18n；模型名称、provider 名称、tool 名称、agent 路径、reasoning effort 等领域值仍按原始字符串透传。
+计划确认 dock 的固定文案语义为“实施此计划？”：主操作是实施计划，次操作是从同一卡片内输入并提交调整要求，忽略动作保持弱化展示。所有固定 UI 文案必须走 i18n；模型名称、provider 名称、tool 名称、agent 路径、reasoning effort 等领域值仍按原始字符串透传。
 
 用户选择“实施此计划”后，当前 session 必须退出 Plan 模式并切回执行用的 Auto 模式，再提交用于实施计划的后台 prompt。前端收到 resolve interaction 响应后要同步 session 列表中的 mode，避免状态栏和会话列表仍显示 plan。

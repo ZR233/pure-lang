@@ -173,7 +173,7 @@ class _PermissionSelector extends ConsumerWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      _permissionLabel(option),
+                      context.permissionModeLabel(option),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -200,7 +200,7 @@ class _PermissionSelector extends ConsumerWidget {
               ),
               const SizedBox(width: 6),
               Text(
-                _permissionLabel(mode),
+                context.permissionModeLabel(mode),
                 style: Theme.of(
                   context,
                 ).textTheme.labelMedium?.copyWith(color: context.studioInkSoft),
@@ -223,14 +223,6 @@ class _PermissionSelector extends ConsumerWidget {
       PermissionMode.requestApproval => Icons.verified_user_outlined,
       PermissionMode.autoReview => Icons.rule_folder_outlined,
       PermissionMode.fullAccess => Icons.lock_open_outlined,
-    };
-  }
-
-  String _permissionLabel(PermissionMode value) {
-    return switch (value) {
-      PermissionMode.requestApproval => 'Request',
-      PermissionMode.autoReview => 'Review',
-      PermissionMode.fullAccess => 'Full',
     };
   }
 }

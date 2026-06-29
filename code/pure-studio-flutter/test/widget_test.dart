@@ -5,6 +5,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pure_studio_flutter/src/data/frb/studio_api.dart';
@@ -808,6 +809,44 @@ void main() {
       rowForPart('alpha').renderVersion,
       isNot(rowForPart('bravo').renderVersion),
     );
+  });
+
+  test('timeline reasoning part preserves text and render version', () {
+    final now = DateTime.fromMillisecondsSinceEpoch(0);
+    final message = TimelineMessage(
+      id: 'message-1',
+      sessionId: 'session-1',
+      role: 'assistant',
+      createdAt: now,
+    );
+
+    TimelineRow rowForReasoning(String text) {
+      return timelineRowsFromMessages(
+        [message],
+        parts: [
+          timelinePartFromSnapshot(
+            TimelinePartSnapshot(
+              id: 'reasoning-1',
+              messageId: message.id,
+              sessionId: 'session-1',
+              turnId: 'turn-1',
+              type: TimelinePartType.reasoning,
+              order: 0,
+              revision: 0,
+              text: text,
+              status: 'streaming',
+              createdAt: now,
+              updatedAt: now,
+            ),
+          ),
+        ],
+      ).single;
+    }
+
+    final first = rowForReasoning('alpha');
+    final second = rowForReasoning('bravo');
+    expect(first.part!.text, 'alpha');
+    expect(first.renderVersion, isNot(second.renderVersion));
   });
 
   test('timeline groups tool parts by activityGroupId', () {
@@ -2455,6 +2494,7 @@ void main() {
 
     await tester.pumpWidget(
       _timelineApp(
+        locale: const Locale('zh', 'Hans'),
         home: Scaffold(
           body: SizedBox(
             width: 980,
@@ -2475,8 +2515,11 @@ void main() {
     expect(find.textContaining('File'), findsOneWidget);
     expect(find.textContaining('app.dart'), findsOneWidget);
     expect(find.textContaining("print('ok')"), findsOneWidget);
-    expect(find.text('Reasoning'), findsOneWidget);
+    expect(find.text('已思考'), findsOneWidget);
     expect(find.textContaining('hidden raw reasoning'), findsNothing);
+    await tester.tap(find.text('已思考'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('hidden raw reasoning'), findsOneWidget);
     expect(find.textContaining('Next steps'), findsOneWidget);
     expect(find.textContaining('Analyze'), findsOneWidget);
   });
@@ -2516,16 +2559,38 @@ void main() {
         type: TimelinePartType.text,
         order: 1,
         textChannel: TimelineTextChannel.commentary,
-        text: '正在执行工具 `bash`。',
+        text: '上下文已整理，准备调用模型。',
         synthetic: true,
       ),
       TimelinePart(
-        id: 'progress-3',
+        id: 'tool-progress-1',
         messageId: 'message-progress',
         sessionId: 'session-1',
         turnId: 'turn-1',
         type: TimelinePartType.text,
         order: 2,
+        textChannel: TimelineTextChannel.commentary,
+        text: '模型请求调用 3 个工具。',
+        synthetic: true,
+      ),
+      TimelinePart(
+        id: 'tool-progress-2',
+        messageId: 'message-progress',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        type: TimelinePartType.text,
+        order: 3,
+        textChannel: TimelineTextChannel.commentary,
+        text: '正在执行工具 `bash`。',
+        synthetic: true,
+      ),
+      TimelinePart(
+        id: 'tool-progress-3',
+        messageId: 'message-progress',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        type: TimelinePartType.text,
+        order: 4,
         textChannel: TimelineTextChannel.commentary,
         text: '工具 `bash` 已完成。',
         synthetic: true,
@@ -2536,7 +2601,7 @@ void main() {
         sessionId: 'session-1',
         turnId: 'turn-1',
         type: TimelinePartType.text,
-        order: 3,
+        order: 5,
         textChannel: TimelineTextChannel.finalAnswer,
         text: '最终答复保持独立。',
       ),
@@ -2558,16 +2623,20 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('工具 `bash` 已完成。'), findsOneWidget);
+    expect(find.text('上下文已整理，准备调用模型。'), findsOneWidget);
     expect(find.text('已接收请求，正在准备上下文。'), findsNothing);
+    expect(find.text('模型请求调用 3 个工具。'), findsNothing);
+    expect(find.text('正在执行工具 `bash`。'), findsNothing);
+    expect(find.text('工具 `bash` 已完成。'), findsNothing);
     expect(find.text('最终答复保持独立。'), findsOneWidget);
 
-    await tester.tap(find.text('工具 `bash` 已完成。'));
+    await tester.tap(find.text('上下文已整理，准备调用模型。'));
     await tester.pump();
 
     expect(find.text('已接收请求，正在准备上下文。'), findsOneWidget);
-    expect(find.text('正在执行工具 `bash`。'), findsOneWidget);
-    expect(find.text('工具 `bash` 已完成。'), findsNWidgets(2));
+    expect(find.text('模型请求调用 3 个工具。'), findsNothing);
+    expect(find.text('正在执行工具 `bash`。'), findsNothing);
+    expect(find.text('工具 `bash` 已完成。'), findsNothing);
   });
 
   testWidgets(
@@ -2589,7 +2658,7 @@ void main() {
       TimelinePart reasoningPart({
         required String id,
         required String title,
-        required String status,
+        required String text,
         required int order,
       }) {
         return TimelinePart(
@@ -2598,8 +2667,8 @@ void main() {
           type: TimelinePartType.reasoning,
           order: order,
           title: title,
-          status: status,
-          text: '',
+          status: 'completed',
+          text: text,
           collapsed: true,
         );
       }
@@ -2635,13 +2704,13 @@ void main() {
             reasoningPart(
               id: 'reasoning-a',
               title: 'Reasoning A',
-              status: 'status-a',
+              text: 'reasoning-text-a',
               order: 0,
             ),
             reasoningPart(
               id: 'reasoning-b',
               title: 'Reasoning B',
-              status: 'status-b',
+              text: 'reasoning-text-b',
               order: 1,
             ),
           ],
@@ -2649,14 +2718,14 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('status-a'), findsNothing);
-      expect(find.text('status-b'), findsNothing);
+      expect(find.textContaining('reasoning-text-a'), findsNothing);
+      expect(find.textContaining('reasoning-text-b'), findsNothing);
 
       await tester.tap(find.text('Reasoning B'));
       await tester.pumpAndSettle();
 
-      expect(find.text('status-a'), findsNothing);
-      expect(find.text('status-b'), findsOneWidget);
+      expect(find.textContaining('reasoning-text-a'), findsNothing);
+      expect(find.textContaining('reasoning-text-b'), findsOneWidget);
 
       await tester.pumpWidget(
         timelineFor(
@@ -2664,19 +2733,19 @@ void main() {
             reasoningPart(
               id: 'reasoning-b',
               title: 'Reasoning B',
-              status: 'status-b',
+              text: 'reasoning-text-b',
               order: 0,
             ),
             reasoningPart(
               id: 'reasoning-c',
               title: 'Reasoning C',
-              status: 'status-c',
+              text: 'reasoning-text-c',
               order: 1,
             ),
             reasoningPart(
               id: 'reasoning-a',
               title: 'Reasoning A',
-              status: 'status-a',
+              text: 'reasoning-text-a',
               order: 2,
             ),
           ],
@@ -2684,9 +2753,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('status-b'), findsOneWidget);
-      expect(find.text('status-c'), findsNothing);
-      expect(find.text('status-a'), findsNothing);
+      expect(find.textContaining('reasoning-text-b'), findsOneWidget);
+      expect(find.textContaining('reasoning-text-c'), findsNothing);
+      expect(find.textContaining('reasoning-text-a'), findsNothing);
 
       await tester.pumpWidget(
         timelineFor(
@@ -2695,7 +2764,7 @@ void main() {
             reasoningPart(
               id: 'reasoning-b',
               title: 'Reasoning B',
-              status: 'status-b-session-2',
+              text: 'reasoning-text-b-session-2',
               order: 0,
             ),
           ],
@@ -2703,9 +2772,66 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('status-b-session-2'), findsNothing);
+      expect(find.textContaining('reasoning-text-b-session-2'), findsNothing);
     },
   );
+
+  testWidgets('timeline reasoning row shows active state while streaming', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final now = DateTime.fromMillisecondsSinceEpoch(0);
+    final message = TimelineMessage(
+      id: 'message-reasoning-active',
+      sessionId: 'session-1',
+      role: 'assistant',
+      createdAt: now,
+    );
+    final part = timelinePartFromSnapshot(
+      TimelinePartSnapshot(
+        id: 'reasoning-active',
+        messageId: message.id,
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        type: TimelinePartType.reasoning,
+        order: 0,
+        revision: 0,
+        text: '正在分析调用结果。',
+        status: 'streaming',
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+
+    await tester.pumpWidget(
+      _timelineApp(
+        locale: const Locale('zh', 'Hans'),
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 520,
+            child: TimelineView(
+              sessionId: 'session-1',
+              rows: timelineRowsFromMessages([message], parts: [part]),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('思考中'), findsOneWidget);
+    expect(find.textContaining('正在分析调用结果'), findsNothing);
+
+    await tester.tap(find.text('思考中'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('正在分析调用结果'), findsOneWidget);
+  });
 
   testWidgets('timeline tool group defaults collapsed and expands details', (
     tester,
@@ -3408,6 +3534,58 @@ void main() {
     expect(api.roleUpdate?.effort, 'max');
   });
 
+  testWidgets('zh Hans localizes session and permission mode labels', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(
+      _stateWithPlannerModels().copyWith(
+        sessions: [
+          StudioSession(
+            id: 'session-1',
+            projectId: 'project-1',
+            title: 'Session',
+            mode: CompileMode.plan,
+            updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+          ),
+        ],
+        permissionMode: PermissionMode.fullAccess,
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(
+          locale: const Locale('zh', 'Hans'),
+          home: const StudioShell(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('计划 · 更新于'), findsOneWidget);
+    expect(find.text('计划'), findsWidgets);
+    expect(find.text('完全'), findsOneWidget);
+    expect(find.text('Plan'), findsNothing);
+    expect(find.text('Full'), findsNothing);
+
+    await tester.tap(find.byTooltip('会话模式'));
+    await tester.pumpAndSettle();
+    expect(find.text('自动'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('权限模式'));
+    await tester.pumpAndSettle();
+    expect(find.text('请求'), findsOneWidget);
+    expect(find.text('审查'), findsOneWidget);
+    expect(find.text('完全'), findsWidgets);
+  });
+
   testWidgets('select menus open upward and stay clear of their triggers', (
     tester,
   ) async {
@@ -3968,8 +4146,11 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 50));
 
-    await tester.tap(find.text('Tell Pure how to adjust'));
-    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('Tell Pure how to adjust'), findsNothing);
+    expect(
+      find.widgetWithText(TextField, 'Describe what should change...'),
+      findsOneWidget,
+    );
     await tester.enterText(find.byType(TextField).last, 'add tests first');
     await tester.pump(const Duration(milliseconds: 50));
     await tester.tap(find.widgetWithText(FilledButton, 'Submit adjustment'));

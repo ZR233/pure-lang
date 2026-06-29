@@ -81,10 +81,7 @@ String _projectSubtitle(StudioProject? project) {
 }
 
 String _sessionSubtitle(BuildContext context, StudioSession session) {
-  final mode = switch (session.mode) {
-    CompileMode.auto => 'Auto',
-    CompileMode.plan => 'Plan',
-  };
+  final mode = context.compileModeLabel(session.mode);
   final hour = session.updatedAt.hour.toString().padLeft(2, '0');
   final minute = session.updatedAt.minute.toString().padLeft(2, '0');
   return context.l10n.shellSessionUpdated(mode, '$hour:$minute');

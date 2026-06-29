@@ -160,11 +160,19 @@ impl TaggedVisibleOutputAdapter {
                 .into_iter()
                 .chain([ModelStreamEvent::Failed { code, message }])
                 .collect(),
+            event @ (ModelStreamEvent::ToolInputStarted { .. }
+            | ModelStreamEvent::ToolInputDelta { .. }
+            | ModelStreamEvent::ToolCallReady { .. }
+            | ModelStreamEvent::StepStarted { .. }) => self
+                .flush_visible_text()
+                .into_iter()
+                .chain([event])
+                .collect(),
             other => vec![other],
         }
     }
 
-    fn flush_all(&mut self) -> Vec<ModelStreamEvent> {
+    fn flush_visible_text(&mut self) -> Vec<ModelStreamEvent> {
         Self::finish_visible_events(
             &mut self.text_parser,
             &mut self.active_text_block,
@@ -172,15 +180,19 @@ impl TaggedVisibleOutputAdapter {
             &mut self.diagnostics,
             true,
         )
-        .into_iter()
-        .chain(Self::finish_visible_events(
-            &mut self.reasoning_parser,
-            &mut self.active_reasoning_block,
-            &mut self.next_segment_ordinal,
-            &mut self.diagnostics,
-            false,
-        ))
-        .collect()
+    }
+
+    fn flush_all(&mut self) -> Vec<ModelStreamEvent> {
+        self.flush_visible_text()
+            .into_iter()
+            .chain(Self::finish_visible_events(
+                &mut self.reasoning_parser,
+                &mut self.active_reasoning_block,
+                &mut self.next_segment_ordinal,
+                &mut self.diagnostics,
+                false,
+            ))
+            .collect()
     }
 
     fn authoritative_visible_events(

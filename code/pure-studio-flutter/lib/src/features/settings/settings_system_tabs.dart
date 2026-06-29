@@ -342,21 +342,27 @@ class _SecurityTab extends ConsumerWidget {
         const SizedBox(height: 16),
         SegmentedButton<PermissionMode>(
           showSelectedIcon: false,
-          segments: const [
+          segments: [
             ButtonSegment(
               value: PermissionMode.requestApproval,
-              icon: Icon(Icons.verified_user_outlined),
-              label: Text('Request'),
+              icon: const Icon(Icons.verified_user_outlined),
+              label: Text(
+                context.permissionModeLabel(PermissionMode.requestApproval),
+              ),
             ),
             ButtonSegment(
               value: PermissionMode.autoReview,
-              icon: Icon(Icons.rule_folder_outlined),
-              label: Text('Review'),
+              icon: const Icon(Icons.rule_folder_outlined),
+              label: Text(
+                context.permissionModeLabel(PermissionMode.autoReview),
+              ),
             ),
             ButtonSegment(
               value: PermissionMode.fullAccess,
-              icon: Icon(Icons.lock_open_outlined),
-              label: Text('Full'),
+              icon: const Icon(Icons.lock_open_outlined),
+              label: Text(
+                context.permissionModeLabel(PermissionMode.fullAccess),
+              ),
             ),
           ],
           selected: {mode},
@@ -369,7 +375,9 @@ class _SecurityTab extends ConsumerWidget {
         const SizedBox(height: 12),
         _SettingsRow(
           icon: Icons.security_outlined,
-          title: context.l10n.settingsCurrentMode(mode.name),
+          title: context.l10n.settingsCurrentMode(
+            context.permissionModeLabel(mode),
+          ),
           subtitle: context.l10n.settingsWorkspaceBoundary,
         ),
       ],

@@ -534,7 +534,7 @@ TimelinePart timelinePartFromSnapshot(
     TimelinePartType.tool => _toolActivityText(tool),
     TimelinePartType.agent =>
       snapshot.agent?.summary ?? snapshot.agent?.task ?? text,
-    TimelinePartType.reasoning => '',
+    TimelinePartType.reasoning => text,
     TimelinePartType.text => text,
     TimelinePartType.turn ||
     TimelinePartType.inference ||
@@ -570,9 +570,9 @@ TimelinePart timelinePartFromSnapshot(
 String _partTitleFromSnapshot(TimelinePartSnapshot snapshot) {
   return switch (snapshot.type) {
     TimelinePartType.tool => snapshot.tool?.name ?? 'Tool',
-    TimelinePartType.plan => 'Plan',
+    TimelinePartType.plan => '',
     TimelinePartType.agent => snapshot.agent?.role ?? 'Agent',
-    TimelinePartType.reasoning => 'Reasoning',
+    TimelinePartType.reasoning => '',
     TimelinePartType.text => '',
     TimelinePartType.turn => 'Turn',
     TimelinePartType.inference => 'Inference',
@@ -789,7 +789,8 @@ List<TimelineRow> timelineRowsFromMessages(
   for (final part in parts) {
     if (!messagesById.containsKey(part.messageId) ||
         part.ignored ||
-        isInternalTimelinePartType(part.type)) {
+        isInternalTimelinePartType(part.type) ||
+        _isLowSignalRuntimeToolProgress(part)) {
       continue;
     }
     partsByMessage.putIfAbsent(part.messageId, () => []).add(part);
@@ -876,6 +877,25 @@ String _toolGroupId(TimelineMessage message, TimelinePart part) {
 
 String _toolGroupTurnId(TimelineMessage message, TimelinePart part) {
   return part.turnId.isEmpty ? message.turnId : part.turnId;
+}
+
+bool _isLowSignalRuntimeToolProgress(TimelinePart part) {
+  if (part.type != TimelinePartType.text ||
+      !part.synthetic ||
+      part.textChannel != TimelineTextChannel.commentary) {
+    return false;
+  }
+  final text = part.text.trim();
+  if (RegExp(r'^模型请求调用 \d+ 个工具。$').hasMatch(text)) {
+    return true;
+  }
+  if (RegExp(r'^正在执行工具 `[^`]+`。$').hasMatch(text)) {
+    return true;
+  }
+  if (RegExp(r'^工具 `[^`]+` 已完成。$').hasMatch(text)) {
+    return true;
+  }
+  return text == '工具执行完成，准备回写结果。' || text == '工具结果已写入上下文，准备继续调用模型。';
 }
 
 int _compareMessages(TimelineMessage left, TimelineMessage right) {
