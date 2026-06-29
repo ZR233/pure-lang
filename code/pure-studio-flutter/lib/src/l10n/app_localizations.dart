@@ -261,6 +261,36 @@ abstract class AppLocalizations {
   /// **'Permission mode'**
   String get permissionModeTooltip;
 
+  /// No description provided for @compileModeAuto.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto'**
+  String get compileModeAuto;
+
+  /// No description provided for @compileModePlan.
+  ///
+  /// In en, this message translates to:
+  /// **'Plan'**
+  String get compileModePlan;
+
+  /// No description provided for @permissionModeRequestApproval.
+  ///
+  /// In en, this message translates to:
+  /// **'Request'**
+  String get permissionModeRequestApproval;
+
+  /// No description provided for @permissionModeAutoReview.
+  ///
+  /// In en, this message translates to:
+  /// **'Review'**
+  String get permissionModeAutoReview;
+
+  /// No description provided for @permissionModeFullAccess.
+  ///
+  /// In en, this message translates to:
+  /// **'Full'**
+  String get permissionModeFullAccess;
+
   /// No description provided for @statusCost.
   ///
   /// In en, this message translates to:
@@ -413,8 +443,26 @@ abstract class AppLocalizations {
   /// No description provided for @timelineReasoningFallback.
   ///
   /// In en, this message translates to:
-  /// **'Reasoning'**
+  /// **'Thinking'**
   String get timelineReasoningFallback;
+
+  /// No description provided for @timelineReasoningActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Thinking'**
+  String get timelineReasoningActive;
+
+  /// No description provided for @timelineReasoningCompleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Thought'**
+  String get timelineReasoningCompleted;
+
+  /// No description provided for @timelineReasoningEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No reasoning text was provided.'**
+  String get timelineReasoningEmpty;
 
   /// No description provided for @timelineToolFallback.
   ///
@@ -693,7 +741,7 @@ abstract class AppLocalizations {
   /// No description provided for @interactionPlanConfirmSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'The plan stays in the timeline above.'**
+  /// **'Implement it, or describe what should change.'**
   String get interactionPlanConfirmSubtitle;
 
   /// No description provided for @interactionPlanEditingFooterHint.
@@ -705,8 +753,8 @@ abstract class AppLocalizations {
   /// No description provided for @interactionPlanImplementFooterHint.
   ///
   /// In en, this message translates to:
-  /// **'Implementing switches back to Auto mode and submits the background implementation prompt.'**
-  String get interactionPlanImplementFooterHint;
+  /// **'Implementing switches back to {mode} mode and starts execution.'**
+  String interactionPlanImplementFooterHint(String mode);
 
   /// No description provided for @interactionPlanIgnore.
   ///
@@ -729,7 +777,7 @@ abstract class AppLocalizations {
   /// No description provided for @interactionPlanAdjustHint.
   ///
   /// In en, this message translates to:
-  /// **'Tell Pure how the plan should change...'**
+  /// **'Describe what should change...'**
   String get interactionPlanAdjustHint;
 
   /// No description provided for @interactionPlanAdjustSubmit.

@@ -13,7 +13,6 @@ pub(crate) enum ProgressVerbosity {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProgressLevel {
     Milestone,
-    Tool,
     ToolDetail,
     Heartbeat,
     Debug,
@@ -32,7 +31,7 @@ impl ProgressVerbosity {
     pub(crate) fn allows(self, level: ProgressLevel) -> bool {
         match (self, level) {
             (Self::Quiet, _) => false,
-            (Self::Normal, ProgressLevel::Milestone | ProgressLevel::Tool) => true,
+            (Self::Normal, ProgressLevel::Milestone) => true,
             (
                 Self::Normal,
                 ProgressLevel::ToolDetail | ProgressLevel::Heartbeat | ProgressLevel::Debug,
@@ -80,10 +79,6 @@ impl ProgressEmitter {
 
     pub(crate) fn milestone(&mut self, text: impl Into<String>) {
         self.emit(ProgressLevel::Milestone, text);
-    }
-
-    pub(crate) fn tool(&mut self, text: impl Into<String>) {
-        self.emit(ProgressLevel::Tool, text);
     }
 
     pub(crate) fn tool_detail(&mut self, text: impl Into<String>) {

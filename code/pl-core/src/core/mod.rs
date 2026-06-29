@@ -541,11 +541,9 @@ mod tests {
 
         progress.milestone("正在准备上下文。");
         progress.heartbeat("等待模型响应。");
-        progress.tool("正在执行工具 `bash`。");
         progress.tool_detail("工具 `bash` 已完成。");
 
         let first = event_rx.try_recv().unwrap();
-        let second = event_rx.try_recv().unwrap();
         assert!(event_rx.try_recv().is_err());
 
         let AgentEvent::TracePartCompleted { item: first } = first else {
@@ -557,13 +555,6 @@ mod tests {
         assert_eq!(first.source, TracePartSource::Runtime);
         assert_eq!(first.text_channel, Some(TraceTextChannel::Commentary));
         assert_eq!(first.content, "正在准备上下文。");
-
-        let AgentEvent::TracePartCompleted { item: second } = second else {
-            panic!("expected completed progress part");
-        };
-        assert_eq!(second.item_id, "turn-1:progress:2");
-        assert_eq!(second.source, TracePartSource::Runtime);
-        assert_eq!(second.content, "正在执行工具 `bash`。");
     }
 
     #[test]
@@ -575,6 +566,8 @@ mod tests {
             progress::ProgressVerbosity::Normal,
         );
         normal.tool_detail("工具 `bash` 已完成。");
+        normal.tool_detail("工具结果已写入上下文，准备继续调用模型。");
+        normal.tool_detail("模型请求调用 2 个工具。");
         assert!(normal_rx.try_recv().is_err());
 
         let (verbose_tx, mut verbose_rx) = tokio::sync::broadcast::channel(8);
@@ -584,13 +577,29 @@ mod tests {
             progress::ProgressVerbosity::Verbose,
         );
         verbose.tool_detail("工具 `bash` 已完成。");
+        verbose.tool_detail("工具结果已写入上下文，准备继续调用模型。");
+        verbose.tool_detail("模型请求调用 2 个工具。");
 
-        let AgentEvent::TracePartCompleted { item } = verbose_rx.try_recv().unwrap() else {
+        let AgentEvent::TracePartCompleted { item: first } = verbose_rx.try_recv().unwrap() else {
             panic!("expected completed progress part");
         };
-        assert_eq!(item.source, TracePartSource::Runtime);
-        assert_eq!(item.text_channel, Some(TraceTextChannel::Commentary));
-        assert_eq!(item.content, "工具 `bash` 已完成。");
+        assert_eq!(first.source, TracePartSource::Runtime);
+        assert_eq!(first.text_channel, Some(TraceTextChannel::Commentary));
+        assert_eq!(first.content, "工具 `bash` 已完成。");
+
+        let AgentEvent::TracePartCompleted { item: second } = verbose_rx.try_recv().unwrap() else {
+            panic!("expected completed progress part");
+        };
+        assert_eq!(second.source, TracePartSource::Runtime);
+        assert_eq!(second.text_channel, Some(TraceTextChannel::Commentary));
+        assert_eq!(second.content, "工具结果已写入上下文，准备继续调用模型。");
+
+        let AgentEvent::TracePartCompleted { item: third } = verbose_rx.try_recv().unwrap() else {
+            panic!("expected completed progress part");
+        };
+        assert_eq!(third.source, TracePartSource::Runtime);
+        assert_eq!(third.text_channel, Some(TraceTextChannel::Commentary));
+        assert_eq!(third.content, "模型请求调用 2 个工具。");
     }
 
     #[test]
@@ -609,7 +618,7 @@ mod tests {
         );
 
         root_progress.milestone("准备上下文");
-        tool_progress.tool("执行工具");
+        tool_progress.milestone("执行工具");
 
         let first = event_rx.try_recv().unwrap();
         let second = event_rx.try_recv().unwrap();

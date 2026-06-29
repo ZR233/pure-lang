@@ -247,7 +247,7 @@ pub(super) async fn run_turn_with_trace(
         if iteration == 0 {
             progress.milestone("上下文已整理，准备调用模型。");
         } else {
-            progress.milestone("工具结果已写入上下文，准备继续调用模型。");
+            progress.tool_detail("工具结果已写入上下文，准备继续调用模型。");
         }
 
         let inference_id = format!("{turn_id}-inf-{iteration}");
@@ -440,7 +440,7 @@ pub(super) async fn run_turn_with_trace(
         if response_reached_auto_compact_limit {
             provider_prompt_tokens_for_compaction = Some(response_prompt_tokens);
         }
-        progress.tool(format!("模型请求调用 {} 个工具。", tool_calls.len()));
+        progress.tool_detail(format!("模型请求调用 {} 个工具。", tool_calls.len()));
 
         let tool_results = match execute_tool_calls(
             &tool_calls,
@@ -483,7 +483,7 @@ pub(super) async fn run_turn_with_trace(
         if tool_results_include_recoverable_subagent_capacity(&tool_results) {
             subagent_dispatch_recovered = true;
         }
-        progress.tool("工具执行完成，准备回写结果。");
+        progress.tool_detail("工具执行完成，准备回写结果。");
         if request.mode == CompileMode::Plan {
             record_plan_exit_items(recorder, &turn_id, &tool_results);
         }

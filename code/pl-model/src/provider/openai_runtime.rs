@@ -1322,6 +1322,94 @@ mod tests {
     }
 
     #[test]
+    fn tagged_stream_flushes_visible_text_before_tool_call() {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "turn-1-inf-0".to_string(),
+            plan_mode: false,
+            trace_sequence_base: 0,
+        }));
+        let mut decoder = tagged_decoder();
+
+        apply_tagged(
+            &mut decoder,
+            &mut accumulator,
+            final_delta("chat-final", "我先检查项目结构。"),
+            &event_tx,
+        );
+        apply_tagged(
+            &mut decoder,
+            &mut accumulator,
+            StreamEvent::ToolInputStarted {
+                stream_id: Some("chat_tool_call:0".to_string()),
+                item_id: "call_1".to_string(),
+                call_id: None,
+                name: Some("read_file".to_string()),
+                payload_kind: crate::stream::event::ToolInputPayloadKind::FunctionArguments,
+            },
+            &event_tx,
+        );
+        apply_tagged(
+            &mut decoder,
+            &mut accumulator,
+            StreamEvent::ToolCallReady {
+                stream_id: Some("chat_tool_call:0".to_string()),
+                item_id: "call_1".to_string(),
+                call_id: None,
+                name: Some("read_file".to_string()),
+                payload: Some(ToolCallDeltaPayload::FunctionArguments(
+                    r#"{"path":"Cargo.toml"}"#.to_string(),
+                )),
+            },
+            &event_tx,
+        );
+
+        apply_completed(&mut accumulator, &event_tx);
+        let response = accumulator.finish(&event_tx).unwrap();
+        let ordered_trace = response
+            .trace_events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                TraceEventKind::TracePartCompleted { item } => {
+                    Some((item.kind, item.item_id.as_str(), trace_part_text(item)))
+                }
+                TraceEventKind::TracePartStarted { item } => {
+                    Some((item.kind, item.item_id.as_str(), trace_part_text(item)))
+                }
+                TraceEventKind::TracePartDelta { event } => Some((
+                    event.kind,
+                    event.item_id.as_str(),
+                    trace_delta_text(&event.delta),
+                )),
+                TraceEventKind::TracePartFailed { .. }
+                | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. } => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(response.content.as_deref(), Some("我先检查项目结构。"));
+        assert_eq!(response.tool_calls.len(), 1);
+        assert!(ordered_trace.iter().any(|(kind, _, text)| {
+            *kind == TracePartKind::Text && text == "我先检查项目结构。"
+        }));
+        let text_index = ordered_trace
+            .iter()
+            .position(|(kind, _, text)| {
+                *kind == TracePartKind::Text && text == "我先检查项目结构。"
+            })
+            .expect("text part should complete before tool");
+        let tool_index = ordered_trace
+            .iter()
+            .position(|(kind, _, _)| *kind == TracePartKind::Tool)
+            .expect("tool part should start");
+        assert!(text_index < tool_index);
+    }
+
+    #[test]
     fn stream_accumulator_terminal_snapshots_converge_with_live_deltas() {
         let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(32);
         let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {

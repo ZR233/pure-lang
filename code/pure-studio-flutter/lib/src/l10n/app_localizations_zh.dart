@@ -92,6 +92,21 @@ class AppLocalizationsZh extends AppLocalizations {
   String get permissionModeTooltip => '权限模式';
 
   @override
+  String get compileModeAuto => '自动';
+
+  @override
+  String get compileModePlan => '计划';
+
+  @override
+  String get permissionModeRequestApproval => '请求';
+
+  @override
+  String get permissionModeAutoReview => '审查';
+
+  @override
+  String get permissionModeFullAccess => '完全';
+
+  @override
   String get statusCost => '费用';
 
   @override
@@ -184,7 +199,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get timelineNew => '新内容';
 
   @override
-  String get timelineReasoningFallback => 'Reasoning';
+  String get timelineReasoningFallback => '思考';
+
+  @override
+  String get timelineReasoningActive => '思考中';
+
+  @override
+  String get timelineReasoningCompleted => '已思考';
+
+  @override
+  String get timelineReasoningEmpty => '没有可展示的思考内容。';
 
   @override
   String get timelineToolFallback => 'Tool';
@@ -217,7 +241,7 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get timelinePlanFallback => 'Plan';
+  String get timelinePlanFallback => '计划';
 
   @override
   String get timelineAgentFallback => 'Agent';
@@ -355,14 +379,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get interactionPlanConfirmTitle => '实施此计划？';
 
   @override
-  String get interactionPlanConfirmSubtitle => '计划正文保留在上方 timeline 卡片中';
+  String get interactionPlanConfirmSubtitle => '确认实施，或直接写下调整要求';
 
   @override
   String get interactionPlanEditingFooterHint => '只会发送你的调整说明，不会回传计划正文。';
 
   @override
-  String get interactionPlanImplementFooterHint =>
-      '选择实施会切回 Auto 模式并提交后台实施 prompt。';
+  String interactionPlanImplementFooterHint(String mode) {
+    return '实施会切回$mode模式并开始执行。';
+  }
 
   @override
   String get interactionPlanIgnore => '忽略';
@@ -374,7 +399,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get interactionPlanImplement => '实施此计划';
 
   @override
-  String get interactionPlanAdjustHint => '告诉 Pure 需要怎样调整计划...';
+  String get interactionPlanAdjustHint => '输入要调整的要求...';
 
   @override
   String get interactionPlanAdjustSubmit => '提交调整';
@@ -865,6 +890,21 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get permissionModeTooltip => '权限模式';
 
   @override
+  String get compileModeAuto => '自动';
+
+  @override
+  String get compileModePlan => '计划';
+
+  @override
+  String get permissionModeRequestApproval => '请求';
+
+  @override
+  String get permissionModeAutoReview => '审查';
+
+  @override
+  String get permissionModeFullAccess => '完全';
+
+  @override
   String get statusCost => '费用';
 
   @override
@@ -957,7 +997,16 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get timelineNew => '新内容';
 
   @override
-  String get timelineReasoningFallback => 'Reasoning';
+  String get timelineReasoningFallback => '思考';
+
+  @override
+  String get timelineReasoningActive => '思考中';
+
+  @override
+  String get timelineReasoningCompleted => '已思考';
+
+  @override
+  String get timelineReasoningEmpty => '没有可展示的思考内容。';
 
   @override
   String get timelineToolFallback => 'Tool';
@@ -990,7 +1039,7 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   }
 
   @override
-  String get timelinePlanFallback => 'Plan';
+  String get timelinePlanFallback => '计划';
 
   @override
   String get timelineAgentFallback => 'Agent';
@@ -1128,14 +1177,15 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get interactionPlanConfirmTitle => '实施此计划？';
 
   @override
-  String get interactionPlanConfirmSubtitle => '计划正文保留在上方 timeline 卡片中';
+  String get interactionPlanConfirmSubtitle => '确认实施，或直接写下调整要求';
 
   @override
   String get interactionPlanEditingFooterHint => '只会发送你的调整说明，不会回传计划正文。';
 
   @override
-  String get interactionPlanImplementFooterHint =>
-      '选择实施会切回 Auto 模式并提交后台实施 prompt。';
+  String interactionPlanImplementFooterHint(String mode) {
+    return '实施会切回$mode模式并开始执行。';
+  }
 
   @override
   String get interactionPlanIgnore => '忽略';
@@ -1147,7 +1197,7 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get interactionPlanImplement => '实施此计划';
 
   @override
-  String get interactionPlanAdjustHint => '告诉 Pure 需要怎样调整计划...';
+  String get interactionPlanAdjustHint => '输入要调整的要求...';
 
   @override
   String get interactionPlanAdjustSubmit => '提交调整';

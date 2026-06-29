@@ -130,14 +130,14 @@ class _SessionModeSelector extends ConsumerWidget {
               children: [
                 Icon(_modeIcon(option), size: 18),
                 const SizedBox(width: 10),
-                Text(_modeLabel(option)),
+                Text(context.compileModeLabel(option)),
               ],
             ),
           ),
       ],
       child: _ControlChip(
         icon: _modeIcon(mode),
-        label: _modeLabel(mode),
+        label: context.compileModeLabel(mode),
         enabled: enabled,
       ),
     );
@@ -147,13 +147,6 @@ class _SessionModeSelector extends ConsumerWidget {
     return switch (value) {
       CompileMode.auto => Icons.flash_on,
       CompileMode.plan => Icons.route_outlined,
-    };
-  }
-
-  String _modeLabel(CompileMode value) {
-    return switch (value) {
-      CompileMode.auto => 'Auto',
-      CompileMode.plan => 'Plan',
     };
   }
 }

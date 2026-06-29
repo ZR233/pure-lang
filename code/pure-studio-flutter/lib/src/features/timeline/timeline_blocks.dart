@@ -384,31 +384,50 @@ class _ReasoningPart extends ConsumerWidget {
       partId: part.id,
     );
     final expanded = ref.watch(_reasoningExpandedProvider(expansionKey));
-    final title = part.title ?? context.l10n.timelineReasoningFallback;
+    final title = part.status == 'completed'
+        ? context.l10n.timelineReasoningCompleted
+        : context.l10n.timelineReasoningActive;
+    final details = part.text.trim();
     return _TimelinePanel(
       child: ExpansionTile(
         key: ValueKey('reasoning:$sessionId:${part.id}:$expanded'),
         tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-        childrenPadding: EdgeInsets.zero,
+        childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
         initiallyExpanded: expanded,
         leading: const Icon(Icons.psychology_alt_outlined, size: 18),
         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: part.title?.isNotEmpty == true
+            ? Text(
+                part.title!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: context.studioInkSoft),
+              )
+            : null,
         onExpansionChanged: (value) {
           ref.read(_reasoningExpandedProvider(expansionKey).notifier).state =
               value;
         },
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                part.status,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: context.studioInkSoft),
-              ),
-            ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: details.isEmpty
+                ? Text(
+                    context.l10n.timelineReasoningEmpty,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: context.studioInkSoft,
+                    ),
+                  )
+                : SelectionArea(
+                    child: _AgentMarkdown(
+                      id: part.id,
+                      status: part.status,
+                      text: details,
+                      surface: _MarkdownSurface.assistant,
+                    ),
+                  ),
           ),
         ],
       ),
@@ -610,7 +629,9 @@ class _PlanPart extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    part.title ?? context.l10n.timelinePlanFallback,
+                    (part.title?.trim().isNotEmpty ?? false)
+                        ? part.title!.trim()
+                        : context.l10n.timelinePlanFallback,
                     style: Theme.of(context).textTheme.titleSmall,
                     overflow: TextOverflow.ellipsis,
                   ),
