@@ -27,7 +27,7 @@ struct MessageScope {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TimelineDeltaDecision {
-    Accept,
+    Accept { revision: u64 },
     Stale,
 }
 
@@ -127,8 +127,12 @@ impl TurnTimelineActor {
             .copied()
             .unwrap_or(existing.part.revision);
         if revision == current_revision + 1 {
-            self.part_revisions.insert(part_id.to_string(), revision);
-            TimelineDeltaDecision::Accept
+            let actor_revision = current_revision + 1;
+            self.part_revisions
+                .insert(part_id.to_string(), actor_revision);
+            TimelineDeltaDecision::Accept {
+                revision: actor_revision,
+            }
         } else {
             TimelineDeltaDecision::Stale
         }
@@ -199,7 +203,7 @@ mod tests {
 
         assert_eq!(
             actor.prepare_delta("part-1", 1, Some(&existing)),
-            TimelineDeltaDecision::Accept
+            TimelineDeltaDecision::Accept { revision: 1 }
         );
         assert_eq!(
             actor.prepare_delta("part-1", 1, Some(&existing)),
@@ -211,7 +215,7 @@ mod tests {
         );
         assert_eq!(
             actor.prepare_delta("part-1", 2, Some(&existing)),
-            TimelineDeltaDecision::Accept
+            TimelineDeltaDecision::Accept { revision: 2 }
         );
     }
 
