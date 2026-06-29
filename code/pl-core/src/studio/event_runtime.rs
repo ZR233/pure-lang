@@ -398,11 +398,12 @@ impl StudioEventRuntime {
         session_id: &str,
         event: TracePartDeltaEvent,
     ) -> Result<Option<StudioEventEnvelope>> {
-        let Some(part_id) = self.accept_trace_part_delta(session_id, &event).await? else {
+        let Some((part_id, revision)) = self.accept_trace_part_delta(session_id, &event).await?
+        else {
             return Ok(None);
         };
         let turn_id = event.turn_id.clone();
-        let delta = studio_part_delta(session_id, event, part_id);
+        let delta = studio_part_delta(session_id, event, part_id, revision);
         self.emit_live(
             None,
             Some(session_id.to_string()),
@@ -417,23 +418,33 @@ impl StudioEventRuntime {
         &self,
         session_id: &str,
         event: &TracePartDeltaEvent,
-    ) -> Result<Option<String>> {
+    ) -> Result<Option<(String, u64)>> {
         let trace_scope = TracePartScope::new(session_id, &event.turn_id, &event.item_id);
         let Some(part_id) = self.resolve_trace_part_id(&trace_scope).await else {
             self.emit_stale(session_id, 1).await?;
             return Ok(None);
         };
         let existing = self.store.read_message_part(&part_id).await?;
-        let decision = self.timeline_actor.lock().await.prepare_delta(
-            &part_id,
-            event.revision,
-            existing.as_ref(),
-        );
-        if decision == TimelineDeltaDecision::Stale {
+        let Some(existing) = existing.as_ref() else {
+            self.emit_stale(session_id, 1).await?;
+            return Ok(None);
+        };
+        if !trace_delta_matches_part(session_id, event, existing) {
             self.emit_stale(session_id, 1).await?;
             return Ok(None);
         }
-        Ok(Some(part_id))
+        let decision = self.timeline_actor.lock().await.prepare_delta(
+            &part_id,
+            event.revision,
+            Some(existing),
+        );
+        match decision {
+            TimelineDeltaDecision::Accept { revision } => Ok(Some((part_id, revision))),
+            TimelineDeltaDecision::Stale => {
+                self.emit_stale(session_id, 1).await?;
+                Ok(None)
+            }
+        }
     }
 
     async fn prepare_trace_part_snapshot(
@@ -558,6 +569,7 @@ fn studio_part_delta(
     session_id: &str,
     event: TracePartDeltaEvent,
     part_id: String,
+    revision: u64,
 ) -> StudioPartDelta {
     let field = match &event.delta {
         TraceDelta::Text { .. } => StudioPartDeltaField::Text,
@@ -577,10 +589,62 @@ fn studio_part_delta(
         session_id: session_id.to_string(),
         message_id: message_id_for_trace_delta(&event),
         part_id,
-        revision: event.revision,
+        revision,
         field,
         delta: trace_delta_text(event.delta),
         chunk_index,
+    }
+}
+
+fn trace_delta_matches_part(
+    session_id: &str,
+    event: &TracePartDeltaEvent,
+    existing: &crate::studio::records::StudioPartRecord,
+) -> bool {
+    let part = &existing.part;
+    part.session_id == session_id
+        && part.turn_id == event.turn_id
+        && part.message_id == message_id_for_trace_delta(event)
+        && trace_delta_field_matches_part(event, part)
+}
+
+fn trace_delta_field_matches_part(event: &TracePartDeltaEvent, part: &StudioPart) -> bool {
+    match (&event.kind, &event.delta, part.part_type, part.text_channel) {
+        (
+            TracePartKind::Text,
+            TraceDelta::Text { text_channel, .. },
+            StudioPartType::Text,
+            Some(part_channel),
+        ) => studio_text_channel(*text_channel) == part_channel,
+        (TracePartKind::Thinking, TraceDelta::Thinking { .. }, StudioPartType::Reasoning, _) => {
+            true
+        }
+        (TracePartKind::Tool, TraceDelta::ToolArguments { .. }, StudioPartType::Tool, _)
+        | (TracePartKind::Tool, TraceDelta::ToolResult { .. }, StudioPartType::Tool, _) => true,
+        (TracePartKind::Plan, TraceDelta::Plan { .. }, StudioPartType::Plan, _) => true,
+        (
+            TracePartKind::Text
+            | TracePartKind::Thinking
+            | TracePartKind::Tool
+            | TracePartKind::Agent
+            | TracePartKind::Turn
+            | TracePartKind::Inference
+            | TracePartKind::Plan,
+            TraceDelta::Text { .. }
+            | TraceDelta::Thinking { .. }
+            | TraceDelta::ToolArguments { .. }
+            | TraceDelta::ToolResult { .. }
+            | TraceDelta::Plan { .. },
+            StudioPartType::Text
+            | StudioPartType::Reasoning
+            | StudioPartType::Tool
+            | StudioPartType::Agent
+            | StudioPartType::Turn
+            | StudioPartType::Inference
+            | StudioPartType::Plan
+            | StudioPartType::File,
+            _,
+        ) => false,
     }
 }
 
@@ -1443,6 +1507,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn trace_part_delta_rejects_mismatched_message_or_field() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/studio").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Delta identity guard", CompileMode::Auto)
+            .await
+            .unwrap();
+        let runtime = StudioEventRuntime::new(store.clone());
+        runtime
+            .emit_agent_event(
+                &session.id,
+                AgentEvent::TracePartStarted {
+                    item: streaming_text_part("turn-delta-identity", "part-delta"),
+                },
+            )
+            .await
+            .unwrap();
+
+        let mut rx = runtime.subscribe_session(session.id.clone());
+        let mismatched = runtime
+            .emit_agent_event(
+                &session.id,
+                AgentEvent::TracePartDelta {
+                    event: commentary_delta_event(
+                        "turn-delta-identity",
+                        "part-delta",
+                        1,
+                        "wrong channel",
+                    ),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(mismatched.is_none());
+        let event = rx.recv().await.unwrap();
+        assert!(matches!(
+            event.kind,
+            StudioEventKind::Stale { lagged_events: 1 }
+        ));
+        let part = store
+            .read_message_part("turn-delta-identity:part-0")
+            .await
+            .unwrap()
+            .unwrap()
+            .part;
+        assert_eq!(part.revision, 0);
+        assert_eq!(part.text_channel, Some(StudioTextChannel::Final));
+    }
+
+    #[tokio::test]
     async fn trace_part_delta_routes_by_session_turn_scoped_identity() {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project("C:/work/studio").await.unwrap();
@@ -1691,6 +1806,28 @@ mod tests {
             updated_at: 100,
             delta: TraceDelta::Text {
                 text_channel: TraceTextChannel::Final,
+                delta: delta.to_string(),
+            },
+        }
+    }
+
+    fn commentary_delta_event(
+        turn_id: &str,
+        item_id: &str,
+        revision: u64,
+        delta: &str,
+    ) -> TracePartDeltaEvent {
+        TracePartDeltaEvent {
+            turn_id: turn_id.to_string(),
+            item_id: item_id.to_string(),
+            started_sequence: 0,
+            revision,
+            kind: TracePartKind::Text,
+            status: TracePartStatus::Streaming,
+            created_at: 100,
+            updated_at: 100,
+            delta: TraceDelta::Text {
+                text_channel: TraceTextChannel::Commentary,
                 delta: delta.to_string(),
             },
         }
