@@ -379,6 +379,160 @@ void main() {
     },
   );
 
+  test('part snapshots reject identity and terminal regressions', () async {
+    final recovered = _emptyState().copyWith(
+      messagesBySession: {
+        'session-1': [
+          TimelineMessage(
+            id: 'turn-1:assistant',
+            sessionId: 'session-1',
+            role: 'assistant',
+            createdAt: DateTime.fromMillisecondsSinceEpoch(1),
+            sequence: 1,
+          ),
+        ],
+      },
+      partSnapshotsBySession: {
+        'session-1': {
+          'part-1': TimelinePartSnapshot(
+            id: 'part-1',
+            messageId: 'turn-1:assistant',
+            sessionId: 'session-1',
+            turnId: 'turn-1',
+            type: TimelinePartType.text,
+            order: 0,
+            revision: 3,
+            sequence: 2,
+            text: 'recovered',
+            status: 'completed',
+            createdAt: DateTime.fromMillisecondsSinceEpoch(1),
+            updatedAt: DateTime.fromMillisecondsSinceEpoch(3),
+            completedAt: DateTime.fromMillisecondsSinceEpoch(3),
+            textChannel: TimelineTextChannel.finalAnswer,
+          ),
+        },
+      },
+    );
+    final api = _FakeStudioApi(_emptyState());
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(studioControllerProvider.future);
+    final blockedRecovery = Completer<StudioState>();
+    api.blockedSessionLoads['session-1'] = blockedRecovery;
+    api.emitSession(
+      _messageUpdatedEvent(
+        sessionId: 'session-1',
+        message: {
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'role': 'assistant',
+          'status': 'streaming',
+          'createdAt': 1,
+          'updatedAt': 1,
+        },
+      ),
+    );
+    api.emitSession(
+      _partUpdatedEvent(
+        sessionId: 'session-1',
+        part: {
+          'partId': 'part-1',
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'partType': 'text',
+          'order': 0,
+          'revision': 2,
+          'status': 'completed',
+          'createdAt': 1,
+          'updatedAt': 2,
+          'completedAt': 2,
+          'textChannel': 'final',
+          'text': 'stable',
+        },
+      ),
+    );
+    await pumpEventQueue();
+
+    api.emitSession(
+      _partUpdatedEvent(
+        sessionId: 'session-1',
+        part: {
+          'partId': 'part-1',
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'partType': 'text',
+          'order': 9,
+          'revision': 2,
+          'status': 'completed',
+          'createdAt': 1,
+          'updatedAt': 2,
+          'completedAt': 2,
+          'textChannel': 'final',
+          'text': 'wrong order',
+        },
+      ),
+    );
+    api.emitSession(
+      _partUpdatedEvent(
+        sessionId: 'session-1',
+        part: {
+          'partId': 'part-1',
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'partType': 'text',
+          'order': 0,
+          'revision': 1,
+          'status': 'completed',
+          'createdAt': 1,
+          'updatedAt': 2,
+          'completedAt': 2,
+          'textChannel': 'final',
+          'text': 'low revision',
+        },
+      ),
+    );
+    api.emitSession(
+      _partUpdatedEvent(
+        sessionId: 'session-1',
+        part: {
+          'partId': 'part-1',
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'partType': 'text',
+          'order': 0,
+          'revision': 2,
+          'status': 'completed',
+          'createdAt': 1,
+          'updatedAt': 2,
+          'completedAt': 2,
+          'textChannel': 'final',
+          'text': 'changed terminal',
+        },
+      ),
+    );
+    await pumpEventQueue();
+
+    final state = container.read(studioControllerProvider).requireValue;
+    expect(state.selectedTimelineRows.single.part!.text, 'stable');
+    expect(state.partSnapshotsBySession['session-1']!['part-1']!.order, 0);
+    expect(api.loadedSessionIds, contains('session-1'));
+
+    blockedRecovery.complete(recovered);
+    await pumpEventQueue();
+    final recoveredState = container
+        .read(studioControllerProvider)
+        .requireValue;
+    expect(recoveredState.selectedTimelineRows.single.part!.text, 'stable');
+  });
+
   test('message snapshots keep original createdAt', () async {
     final api = _FakeStudioApi(_emptyState());
     final container = ProviderContainer(
