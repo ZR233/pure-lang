@@ -372,24 +372,25 @@ impl OpenAiStreamDecoder {
         item_id: &str,
         channel: TraceTextChannel,
     ) -> (String, Vec<StreamEvent>) {
-        match self.open_text_blocks.get(item_id) {
-            Some(block) if block.channel == channel => (block.id.clone(), Vec::new()),
-            Some(block) => (block.id.clone(), Vec::new()),
-            None => {
-                let block_id = self.next_text_block_id(item_id, channel);
-                self.open_text_blocks.insert(
-                    item_id.to_string(),
-                    OpenTextBlock {
-                        id: block_id.clone(),
-                        channel,
-                    },
-                );
-                (
-                    block_id.clone(),
-                    vec![StreamEvent::text_started(block_id, channel)],
-                )
-            }
+        if let Some(block) = self.open_text_blocks.get(item_id)
+            && block.channel == channel
+        {
+            return (block.id.clone(), Vec::new());
         }
+        let mut events = Vec::new();
+        if let Some(block) = self.open_text_blocks.remove(item_id) {
+            events.push(StreamEvent::text_completed(block.id, block.channel, None));
+        }
+        let block_id = self.next_text_block_id(item_id);
+        self.open_text_blocks.insert(
+            item_id.to_string(),
+            OpenTextBlock {
+                id: block_id.clone(),
+                channel,
+            },
+        );
+        events.push(StreamEvent::text_started(block_id.clone(), channel));
+        (block_id, events)
     }
 
     fn ensure_reasoning_block_open(&mut self, item_id: &str) -> (String, Vec<StreamEvent>) {
@@ -418,8 +419,8 @@ impl OpenAiStreamDecoder {
         events
     }
 
-    fn next_text_block_id(&mut self, item_id: &str, channel: TraceTextChannel) -> String {
-        let key = text_block_counter_key(item_id, channel);
+    fn next_text_block_id(&mut self, item_id: &str) -> String {
+        let key = text_block_counter_key(item_id);
         let ordinal = self.next_text_block_ordinal.entry(key).or_insert(0);
         *ordinal += 1;
         if *ordinal == 1 {
@@ -443,8 +444,8 @@ impl OpenAiStreamDecoder {
     }
 }
 
-fn text_block_counter_key(item_id: &str, channel: TraceTextChannel) -> String {
-    format!("{}:{item_id}", channel.as_str())
+fn text_block_counter_key(item_id: &str) -> String {
+    item_id.to_string()
 }
 
 /// 将原始 SSE 事件解析为 canonical stream event。
@@ -1369,6 +1370,97 @@ mod tests {
                 },
             ] if opened_id == "msg_1#2" && delta_id == opened_id
         ));
+    }
+
+    #[test]
+    fn responses_decoder_reopens_text_block_when_phase_arrives_late() {
+        let mut decoder = OpenAiStreamDecoder::new(true);
+        let default_delta: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.output_text.delta",
+            "item_id": "msg_1",
+            "delta": "default "
+        }))
+        .unwrap();
+        let first_text = decoder.decode(&default_delta);
+        assert!(matches!(
+            first_text.as_slice(),
+            [
+                StreamEvent::BlockOpened {
+                    id: opened_id,
+                    kind:
+                        ModelBlockKind::Text {
+                            channel: TraceTextChannel::Final,
+                        },
+                    ..
+                },
+                StreamEvent::BlockDelta {
+                    id: delta_id,
+                    kind:
+                        ModelBlockKind::Text {
+                            channel: TraceTextChannel::Final,
+                        },
+                    ..
+                },
+            ] if opened_id == "msg_1" && delta_id == opened_id
+        ));
+
+        let commentary_added: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.output_item.added",
+            "item": {
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "phase": "commentary",
+                "content": []
+            }
+        }))
+        .unwrap();
+        let channel_boundary = decoder.decode(&commentary_added);
+        assert!(matches!(
+            channel_boundary.as_slice(),
+            [
+                StreamEvent::BlockClosed {
+                    id: closed_id,
+                    kind:
+                        ModelBlockKind::Text {
+                            channel: TraceTextChannel::Final,
+                        },
+                    ..
+                },
+                StreamEvent::BlockOpened {
+                    id: opened_id,
+                    kind:
+                        ModelBlockKind::Text {
+                            channel: TraceTextChannel::Commentary,
+                        },
+                    ..
+                },
+            ] if closed_id == "msg_1" && opened_id == "msg_1#2"
+        ));
+
+        let commentary_delta: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.output_text.delta",
+            "item_id": "msg_1",
+            "delta": "commentary"
+        }))
+        .unwrap();
+        match decoder.decode(&commentary_delta).as_slice() {
+            [
+                StreamEvent::BlockDelta {
+                    id,
+                    kind:
+                        ModelBlockKind::Text {
+                            channel: TraceTextChannel::Commentary,
+                        },
+                    delta,
+                    ..
+                },
+            ] => {
+                assert_eq!(id, "msg_1#2");
+                assert_eq!(delta, "commentary");
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
     }
 
     #[test]

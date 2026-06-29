@@ -2417,4 +2417,81 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(home).await;
         let _ = tokio::fs::remove_dir_all(workspace).await;
     }
+
+    #[tokio::test]
+    async fn late_responses_phase_reopens_text_block_as_new_part() {
+        let sse_body = concat!(
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"default \"}\n\n",
+            "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"commentary\"}}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"commentary\"}\n\n",
+            "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"commentary\",\"content\":[{\"type\":\"output_text\",\"text\":\"commentary\"}]}}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+            "data: [DONE]\n\n"
+        )
+        .to_string();
+        let (base_url, handle) = serve_sse_once(sse_body).await;
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let home = std::env::temp_dir().join(format!("pure-late-phase-home-{unique}"));
+        let workspace = std::env::temp_dir().join(format!("pure-late-phase-workspace-{unique}"));
+        tokio::fs::create_dir_all(&workspace).await.unwrap();
+        let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+        config_store.save(&test_config(base_url)).unwrap();
+        let store = StudioStore::open_memory().await.unwrap();
+        let runtime = StudioRuntime::new(store.clone(), config_store);
+        let project = runtime.open_project(&workspace).await.unwrap();
+        let session = store
+            .create_session(&project.id, "Late phase test", CompileMode::Auto)
+            .await
+            .unwrap();
+        let interaction_events = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let interaction_emitter = emitter(interaction_events.clone());
+        let interaction_callback = runtime
+            .interactions()
+            .callback(session.id.clone(), interaction_emitter.clone());
+
+        let outcome = runtime
+            .run_prompt(RunPromptRequest {
+                session_id: session.id.clone(),
+                turn_id: "turn-late-phase-test".to_string(),
+                prompt: "stream late phase".to_string(),
+                attachment_ids: Vec::new(),
+                interaction_callback,
+                interaction_emitter,
+                options: TurnOptions::default(),
+            })
+            .await
+            .unwrap();
+        handle.await.unwrap();
+
+        assert_eq!(outcome.result.status, TurnResultStatus::Completed);
+        assert_eq!(outcome.result.content, "default ");
+
+        let parts = store.load_message_parts(&session.id).await.unwrap();
+        let text_parts = parts
+            .iter()
+            .filter_map(|record| {
+                (record.part.message_id == "turn-late-phase-test:assistant"
+                    && record.part.part_type == pl_protocol::StudioPartType::Text
+                    && !record.part.synthetic)
+                    .then_some(&record.part)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(text_parts.len(), 2);
+        assert_ne!(text_parts[0].part_id, text_parts[1].part_id);
+        assert!(text_parts[0].order < text_parts[1].order);
+        assert_eq!(text_parts[0].text_channel, Some(StudioTextChannel::Final));
+        assert_eq!(text_parts[0].text, "default ");
+        assert_eq!(
+            text_parts[1].text_channel,
+            Some(StudioTextChannel::Commentary)
+        );
+        assert_eq!(text_parts[1].text, "commentary");
+
+        let _ = tokio::fs::remove_dir_all(home).await;
+        let _ = tokio::fs::remove_dir_all(workspace).await;
+    }
 }
