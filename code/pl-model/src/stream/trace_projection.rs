@@ -142,9 +142,9 @@ impl TraceProjection {
         )
     }
 
-    pub(crate) fn start_thinking(&mut self, item_id: &str) -> Vec<AgentEvent> {
+    pub(crate) fn start_thinking(&mut self, item_id: &str, chunk_index: u32) -> Vec<AgentEvent> {
         let now = unix_seconds();
-        let item_id = self.active_thinking_item_id(item_id);
+        let item_id = self.active_thinking_item_id(item_id, chunk_index);
         let mut events = Vec::new();
         if !self.started.contains_key(&item_id) {
             let item = TracePart {
@@ -180,8 +180,8 @@ impl TraceProjection {
         delta: String,
     ) -> Vec<AgentEvent> {
         let now = unix_seconds();
-        let mut events = self.start_thinking(item_id);
-        let item_id = self.active_thinking_item_id(item_id);
+        let mut events = self.start_thinking(item_id, chunk_index);
+        let item_id = self.active_thinking_item_id(item_id, chunk_index);
         if let Some(item) = self.started.get_mut(&item_id) {
             item.revision += 1;
             item.status = TracePartStatus::Streaming;
@@ -225,12 +225,46 @@ impl TraceProjection {
         events
     }
 
-    pub(crate) fn complete_thinking(&mut self, item_id: &str) -> Vec<AgentEvent> {
-        let key = thinking_provider_key(item_id);
-        let Some(item_id) = self.active_thinking_items.remove(&key) else {
-            return Vec::new();
-        };
-        self.complete_item_by_resolved_id(&item_id, TracePartKind::Thinking, None, None)
+    pub(crate) fn complete_thinking(
+        &mut self,
+        item_id: &str,
+        authoritative_summary: Option<Vec<String>>,
+    ) -> Vec<AgentEvent> {
+        let mut events = Vec::new();
+        if let Some(summary) = authoritative_summary {
+            for (index, text) in summary.into_iter().enumerate() {
+                let chunk_index = index as u32;
+                events.extend(self.start_thinking(item_id, chunk_index));
+                let resolved_id = self.active_thinking_item_id(item_id, chunk_index);
+                if let Some(item) = self.started.get_mut(&resolved_id) {
+                    item.thinking_chunks = vec![TraceThinkingChunk {
+                        chunk_index,
+                        content: text,
+                    }];
+                    item.updated_at = unix_seconds();
+                }
+            }
+        }
+        let prefix = thinking_provider_key_prefix(item_id);
+        let item_ids = self
+            .active_thinking_items
+            .keys()
+            .filter(|key| key.starts_with(&prefix))
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut item_ids = item_ids;
+        item_ids.sort();
+        for key in item_ids {
+            if let Some(item_id) = self.active_thinking_items.remove(&key) {
+                events.extend(self.complete_item_by_resolved_id(
+                    &item_id,
+                    TracePartKind::Thinking,
+                    None,
+                    None,
+                ));
+            }
+        }
+        events
     }
 
     pub(crate) fn start_tool(&mut self, snapshot: &ToolCallAccumulatorSnapshot) -> Vec<AgentEvent> {
@@ -425,8 +459,8 @@ impl TraceProjection {
         item_id
     }
 
-    fn active_thinking_item_id(&mut self, provider_item_id: &str) -> String {
-        let key = thinking_provider_key(provider_item_id);
+    fn active_thinking_item_id(&mut self, provider_item_id: &str, chunk_index: u32) -> String {
+        let key = thinking_provider_key(provider_item_id, chunk_index);
         if let Some(item_id) = self.active_thinking_items.get(&key) {
             return item_id.clone();
         }
@@ -497,8 +531,15 @@ fn text_provider_key(provider_item_id: &str, channel: TraceTextChannel) -> Strin
     format!("text:{}:{provider_item_id}", channel.as_str())
 }
 
-fn thinking_provider_key(provider_item_id: &str) -> String {
-    format!("reasoning:{provider_item_id}")
+fn thinking_provider_key(provider_item_id: &str, chunk_index: u32) -> String {
+    format!(
+        "{}:{chunk_index}",
+        thinking_provider_key_prefix(provider_item_id)
+    )
+}
+
+fn thinking_provider_key_prefix(provider_item_id: &str) -> String {
+    format!("reasoning:{provider_item_id}:")
 }
 
 #[cfg(test)]
@@ -523,9 +564,9 @@ mod tests {
         let mut trace = trace();
 
         let first = trace.append_thinking_delta("thinking", 0, "first".to_string());
-        let first_completed = trace.complete_thinking("thinking");
+        let first_completed = trace.complete_thinking("thinking", None);
         let second = trace.append_thinking_delta("thinking", 0, "second".to_string());
-        let second_completed = trace.complete_thinking("thinking");
+        let second_completed = trace.complete_thinking("thinking", None);
 
         let first_delta = first
             .into_iter()
@@ -548,6 +589,48 @@ mod tests {
         assert_eq!(first_completed, first_delta);
         assert_eq!(second_delta, "inference-1-reasoning-2");
         assert_eq!(second_completed, second_delta);
+    }
+
+    #[test]
+    fn reasoning_summary_sections_get_distinct_part_ids() {
+        let mut trace = trace();
+
+        let first = trace.append_thinking_delta("thinking", 0, "first".to_string());
+        let second = trace.append_thinking_delta("thinking", 1, "second".to_string());
+        let completed = trace.complete_thinking(
+            "thinking",
+            Some(vec!["first done".to_string(), "second done".to_string()]),
+        );
+
+        let first_delta = first
+            .into_iter()
+            .find_map(delta_item_id)
+            .expect("first delta");
+        let second_delta = second
+            .into_iter()
+            .find_map(delta_item_id)
+            .expect("second delta");
+        let completed = completed
+            .into_iter()
+            .filter_map(completed_thinking_item)
+            .map(|item| (item.item_id.clone(), trace_part_text(&item)))
+            .collect::<Vec<_>>();
+
+        assert_eq!(first_delta, "inference-1-reasoning-1");
+        assert_eq!(second_delta, "inference-1-reasoning-2");
+        assert_eq!(
+            completed,
+            vec![
+                (
+                    "inference-1-reasoning-1".to_string(),
+                    "first done".to_string(),
+                ),
+                (
+                    "inference-1-reasoning-2".to_string(),
+                    "second done".to_string(),
+                ),
+            ]
+        );
     }
 
     #[test]
@@ -594,12 +677,12 @@ mod tests {
         });
 
         let first_sequence = first
-            .start_thinking("thinking")
+            .start_thinking("thinking", 0)
             .into_iter()
             .find_map(started_sequence)
             .expect("first started sequence");
         let second_sequence = second
-            .start_thinking("thinking")
+            .start_thinking("thinking", 0)
             .into_iter()
             .find_map(started_sequence)
             .expect("second started sequence");
@@ -766,6 +849,42 @@ mod tests {
             | AgentEvent::Error { .. }
             | AgentEvent::TracePartCompleted { .. } => None,
         }
+    }
+
+    fn completed_thinking_item(event: AgentEvent) -> Option<TracePart> {
+        match event {
+            AgentEvent::TracePartCompleted { item } if item.kind == TracePartKind::Thinking => {
+                Some(item)
+            }
+            AgentEvent::TracePartStarted { .. }
+            | AgentEvent::TracePartDelta { .. }
+            | AgentEvent::TracePartFailed { .. }
+            | AgentEvent::InteractionChanged { .. }
+            | AgentEvent::AgentRuntimeUpdated { .. }
+            | AgentEvent::AgentStateChanged { .. }
+            | AgentEvent::CollabAgentSpawnBegin { .. }
+            | AgentEvent::CollabAgentSpawnEnd { .. }
+            | AgentEvent::CollabAgentInteractionBegin { .. }
+            | AgentEvent::CollabAgentInteractionEnd { .. }
+            | AgentEvent::CollabWaitingBegin { .. }
+            | AgentEvent::CollabWaitingEnd { .. }
+            | AgentEvent::CollabCloseBegin { .. }
+            | AgentEvent::CollabCloseEnd { .. }
+            | AgentEvent::TurnInterrupted { .. }
+            | AgentEvent::TurnBudgetLimited { .. }
+            | AgentEvent::SkillActivated { .. }
+            | AgentEvent::Done
+            | AgentEvent::Error { .. }
+            | AgentEvent::TracePartCompleted { .. } => None,
+        }
+    }
+
+    fn trace_part_text(item: &TracePart) -> String {
+        item.thinking_chunks
+            .iter()
+            .map(|chunk| chunk.content.as_str())
+            .collect::<Vec<_>>()
+            .join("")
     }
 
     fn started_tool_item(event: AgentEvent) -> Option<TracePart> {

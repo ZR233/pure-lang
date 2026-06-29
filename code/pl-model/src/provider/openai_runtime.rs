@@ -846,7 +846,7 @@ mod tests {
     }
 
     #[test]
-    fn stream_accumulator_extracts_commentary_and_final_from_reasoning_content() {
+    fn stream_accumulator_keeps_tagged_raw_reasoning_hidden() {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
         let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
             session_id: "session-1".to_string(),
@@ -876,26 +876,17 @@ mod tests {
         apply_completed(&mut accumulator, &event_tx);
         let response = accumulator.finish(&event_tx).unwrap();
 
-        assert_eq!(response.content.as_deref(), Some("完成。"));
+        assert_eq!(response.content, None);
         assert_eq!(
             response.reasoning_content.as_deref(),
             Some("<commentary>正在分析日志。</commentary><final>完成。</final>")
         );
-        assert!(response.trace_events.iter().any(|event| matches!(
-            &event.kind,
-            TraceEventKind::TracePartCompleted { item }
-                if item.text_channel == Some(pl_trace::TraceTextChannel::Commentary)
-                    && item.content == "正在分析日志。"
-        )));
         assert!(!response.trace_events.iter().any(|event| matches!(
             &event.kind,
-            TraceEventKind::TracePartCompleted { item } if item.kind == TracePartKind::Plan
-        )));
-        assert!(response.trace_events.iter().any(|event| matches!(
-            &event.kind,
             TraceEventKind::TracePartCompleted { item }
-                if item.text_channel == Some(pl_trace::TraceTextChannel::Final)
-                    && item.content == "完成。"
+                if item.kind == TracePartKind::Text
+                    || item.kind == TracePartKind::Plan
+                    || item.kind == TracePartKind::Thinking
         )));
     }
 
@@ -1201,16 +1192,16 @@ mod tests {
             )
             .unwrap();
         accumulator
-            .apply(summary_started("thinking"), &event_tx)
+            .apply(summary_started("thinking#2"), &event_tx)
             .unwrap();
         accumulator
-            .apply(summary_delta("thinking", 0, "after"), &event_tx)
+            .apply(summary_delta("thinking#2", 0, "after"), &event_tx)
             .unwrap();
         accumulator
-            .apply(final_started("msg_1"), &event_tx)
+            .apply(final_started("msg_1#2"), &event_tx)
             .unwrap();
         accumulator
-            .apply(final_delta("msg_1", "done"), &event_tx)
+            .apply(final_delta("msg_1#2", "done"), &event_tx)
             .unwrap();
 
         apply_completed(&mut accumulator, &event_tx);
