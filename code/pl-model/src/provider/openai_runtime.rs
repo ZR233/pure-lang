@@ -443,6 +443,14 @@ mod tests {
         )
     }
 
+    fn final_started(id: &str) -> StreamEvent {
+        StreamEvent::text_started(id.to_string(), pl_trace::TraceTextChannel::Final)
+    }
+
+    fn commentary_started(id: &str) -> StreamEvent {
+        StreamEvent::text_started(id.to_string(), pl_trace::TraceTextChannel::Commentary)
+    }
+
     fn completed_text(
         id: &str,
         channel: pl_trace::TraceTextChannel,
@@ -457,6 +465,10 @@ mod tests {
 
     fn summary_delta(id: &str, section_index: u32, delta: &str) -> StreamEvent {
         StreamEvent::reasoning_summary_delta(id.to_string(), section_index, delta.to_string())
+    }
+
+    fn summary_started(id: &str) -> StreamEvent {
+        StreamEvent::reasoning_summary_started(id.to_string(), None)
     }
 
     fn trace_part_text(item: &pl_trace::TracePart) -> String {
@@ -747,6 +759,9 @@ mod tests {
         let mut decoder = tagged_decoder();
 
         accumulator
+            .apply(summary_started("thinking"), &event_tx)
+            .unwrap();
+        accumulator
             .apply(summary_delta("thinking", 0, "先比较整数位。"), &event_tx)
             .unwrap();
         apply_tagged(
@@ -761,10 +776,13 @@ mod tests {
 
         assert_eq!(response.content.as_deref(), Some("9.11 更大。"));
         assert_eq!(response.raw_content.as_deref(), Some("9.11 更大。"));
-        assert_eq!(
-            response.reasoning_content.as_deref(),
-            Some("先比较整数位。")
-        );
+        assert_eq!(response.reasoning_content, None);
+        assert!(response.trace_events.iter().any(|event| matches!(
+            &event.kind,
+            TraceEventKind::TracePartCompleted { item }
+                if item.kind == TracePartKind::Thinking
+                    && trace_part_text(item) == "先比较整数位。"
+        )));
         assert!(matches!(
             event_rx.try_recv().unwrap(),
             AgentEvent::TracePartStarted { .. }
@@ -932,6 +950,9 @@ mod tests {
         }));
 
         accumulator
+            .apply(final_started("final"), &event_tx)
+            .unwrap();
+        accumulator
             .apply(final_delta("final", "plain text"), &event_tx)
             .unwrap();
         apply_completed(&mut accumulator, &event_tx);
@@ -958,6 +979,9 @@ mod tests {
             trace_sequence_base: 0,
         }));
 
+        accumulator
+            .apply(final_started("msg_1"), &event_tx)
+            .unwrap();
         accumulator
             .apply(final_delta("msg_1", "partial"), &event_tx)
             .unwrap();
@@ -995,6 +1019,9 @@ mod tests {
             trace_sequence_base: 0,
         }));
 
+        accumulator
+            .apply(commentary_started("msg_progress"), &event_tx)
+            .unwrap();
         accumulator
             .apply(
                 completed_text(
@@ -1136,7 +1163,13 @@ mod tests {
         }));
 
         accumulator
+            .apply(summary_started("thinking"), &event_tx)
+            .unwrap();
+        accumulator
             .apply(summary_delta("thinking", 0, "before"), &event_tx)
+            .unwrap();
+        accumulator
+            .apply(final_started("msg_1"), &event_tx)
             .unwrap();
         accumulator
             .apply(final_delta("msg_1", "prelude"), &event_tx)
@@ -1168,7 +1201,13 @@ mod tests {
             )
             .unwrap();
         accumulator
+            .apply(summary_started("thinking"), &event_tx)
+            .unwrap();
+        accumulator
             .apply(summary_delta("thinking", 0, "after"), &event_tx)
+            .unwrap();
+        accumulator
+            .apply(final_started("msg_1"), &event_tx)
             .unwrap();
         accumulator
             .apply(final_delta("msg_1", "done"), &event_tx)
@@ -1226,7 +1265,13 @@ mod tests {
         }));
 
         accumulator
+            .apply(summary_started("thinking"), &event_tx)
+            .unwrap();
+        accumulator
             .apply(summary_delta("thinking", 0, "think"), &event_tx)
+            .unwrap();
+        accumulator
+            .apply(final_started("msg_1"), &event_tx)
             .unwrap();
         accumulator
             .apply(final_delta("msg_1", "hello"), &event_tx)
@@ -1377,6 +1422,9 @@ mod tests {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
         let mut accumulator = StreamCompletionAccumulator::new(None);
 
+        accumulator
+            .apply(final_started("final"), &event_tx)
+            .unwrap();
         accumulator
             .apply(final_delta("final", "partial"), &event_tx)
             .unwrap();

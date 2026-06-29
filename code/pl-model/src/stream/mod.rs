@@ -55,7 +55,8 @@ pub(crate) struct StreamCompletionAccumulator {
     content_parts: Vec<ContentPart>,
     content_indexes: HashMap<String, usize>,
     raw_content_parts: Vec<String>,
-    reasoning_parts: Vec<String>,
+    reasoning_summary_parts: Vec<String>,
+    raw_reasoning_parts: Vec<String>,
     tool_calls: Vec<ToolCall>,
     tool_stream: ToolStream,
     lifecycle: StreamLifecycle,
@@ -70,7 +71,8 @@ impl StreamCompletionAccumulator {
             content_parts: Vec::new(),
             content_indexes: HashMap::new(),
             raw_content_parts: Vec::new(),
-            reasoning_parts: Vec::new(),
+            reasoning_summary_parts: Vec::new(),
+            raw_reasoning_parts: Vec::new(),
             tool_calls: Vec::new(),
             tool_stream: ToolStream::new(),
             lifecycle: StreamLifecycle::new(),
@@ -96,7 +98,7 @@ impl StreamCompletionAccumulator {
         {
             self.raw_content_parts.push(delta.clone());
         }
-        for stream_event in self.lifecycle.normalize(stream_event) {
+        for stream_event in self.lifecycle.normalize(stream_event)? {
             self.apply_normalized(stream_event, event_tx)?;
         }
 
@@ -146,7 +148,7 @@ impl StreamCompletionAccumulator {
                 delta,
                 section_index,
             } => {
-                self.reasoning_parts.push(delta.clone());
+                self.reasoning_summary_parts.push(delta.clone());
                 self.record_thinking_delta(&id, section_index.unwrap_or_default(), delta, event_tx);
             }
             ModelStreamEvent::BlockDelta {
@@ -186,7 +188,7 @@ impl StreamCompletionAccumulator {
                 ..
             } => {
                 if let Some(ModelBlockContent::ReasoningSummary(summary)) = authoritative_content {
-                    self.reasoning_parts = summary;
+                    self.reasoning_summary_parts = summary;
                 }
                 self.record_thinking_completed(&id, event_tx);
             }
@@ -201,7 +203,7 @@ impl StreamCompletionAccumulator {
             } => {
                 let _ = id;
                 let _ = content_index;
-                self.reasoning_parts.push(delta);
+                self.raw_reasoning_parts.push(delta);
             }
             ModelStreamEvent::ToolInputStarted {
                 stream_id,
@@ -323,10 +325,10 @@ impl StreamCompletionAccumulator {
         } else {
             Some(self.raw_content_parts.join(""))
         };
-        let reasoning_content = if self.reasoning_parts.is_empty() {
+        let reasoning_content = if self.raw_reasoning_parts.is_empty() {
             None
         } else {
-            Some(self.reasoning_parts.join(""))
+            Some(self.raw_reasoning_parts.join(""))
         };
         let finish_reason = if self.tool_calls.is_empty() {
             FinishReason::Stop
