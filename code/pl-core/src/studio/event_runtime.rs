@@ -362,11 +362,21 @@ impl StudioEventRuntime {
     ) -> Result<StudioEventEnvelope> {
         self.ensure_assistant_message_started(session_id, &item)
             .await?;
+        let trace_part_id = item.item_id.clone();
         let mut part = studio_part_from_trace_part(session_id, item);
-        let existing = self.store.read_message_part(&part.part_id).await?;
+        let existing_part_id = self.resolve_trace_part_id(&trace_part_id).await;
+        let existing = self
+            .store
+            .read_message_part(existing_part_id.as_deref().unwrap_or(&part.part_id))
+            .await?;
         let next_order = self.store.next_message_part_order(&part.message_id).await?;
-        self.prepare_trace_part_snapshot(&mut part, existing.as_ref(), next_order)
-            .await;
+        self.prepare_trace_part_snapshot(
+            &mut part,
+            Some(trace_part_id.as_str()),
+            existing.as_ref(),
+            next_order,
+        )
+        .await;
         let envelope_part = part.clone();
         let envelope = self
             .emit(
@@ -387,11 +397,11 @@ impl StudioEventRuntime {
         session_id: &str,
         event: TracePartDeltaEvent,
     ) -> Result<Option<StudioEventEnvelope>> {
-        if !self.accept_trace_part_delta(session_id, &event).await? {
+        let Some(part_id) = self.accept_trace_part_delta(session_id, &event).await? else {
             return Ok(None);
-        }
+        };
         let turn_id = event.turn_id.clone();
-        let delta = studio_part_delta(session_id, event);
+        let delta = studio_part_delta(session_id, event, part_id);
         self.emit_live(
             None,
             Some(session_id.to_string()),
@@ -406,33 +416,45 @@ impl StudioEventRuntime {
         &self,
         session_id: &str,
         event: &TracePartDeltaEvent,
-    ) -> Result<bool> {
-        let existing = self.store.read_message_part(&event.item_id).await?;
-        let decision = self
-            .timeline_actor
-            .lock()
-            .await
-            .prepare_delta(event, existing.as_ref());
+    ) -> Result<Option<String>> {
+        let Some(part_id) = self.resolve_trace_part_id(&event.item_id).await else {
+            self.emit_stale(session_id, 1).await?;
+            return Ok(None);
+        };
+        let existing = self.store.read_message_part(&part_id).await?;
+        let decision = self.timeline_actor.lock().await.prepare_delta(
+            &part_id,
+            event.revision,
+            existing.as_ref(),
+        );
         if decision == TimelineDeltaDecision::Stale {
             self.emit_stale(session_id, 1).await?;
-            return Ok(false);
+            return Ok(None);
         }
-        Ok(true)
+        Ok(Some(part_id))
     }
 
     async fn prepare_trace_part_snapshot(
         &self,
         part: &mut StudioPart,
+        trace_part_id: Option<&str>,
         existing: Option<&crate::studio::records::StudioPartRecord>,
         next_order: u64,
     ) {
         let mut actor = self.timeline_actor.lock().await;
-        actor.prepare_snapshot_order(part, existing, next_order);
+        actor.prepare_snapshot_order(part, trace_part_id, existing, next_order);
         actor.prepare_snapshot(part);
     }
 
     async fn record_trace_part_snapshot(&self, part: &StudioPart) {
         self.timeline_actor.lock().await.record_snapshot(part);
+    }
+
+    async fn resolve_trace_part_id(&self, trace_part_id: &str) -> Option<String> {
+        self.timeline_actor
+            .lock()
+            .await
+            .resolve_trace_part_id(trace_part_id, None)
     }
 
     async fn ensure_assistant_message_started(
@@ -530,7 +552,11 @@ fn trace_part_delta_is_user_text(event: &TracePartDeltaEvent) -> bool {
     )
 }
 
-fn studio_part_delta(session_id: &str, event: TracePartDeltaEvent) -> StudioPartDelta {
+fn studio_part_delta(
+    session_id: &str,
+    event: TracePartDeltaEvent,
+    part_id: String,
+) -> StudioPartDelta {
     let field = match &event.delta {
         TraceDelta::Text { .. } => StudioPartDeltaField::Text,
         TraceDelta::Thinking { .. } => StudioPartDeltaField::ReasoningSummary,
@@ -548,7 +574,7 @@ fn studio_part_delta(session_id: &str, event: TracePartDeltaEvent) -> StudioPart
     StudioPartDelta {
         session_id: session_id.to_string(),
         message_id: message_id_for_trace_delta(&event),
-        part_id: event.item_id,
+        part_id,
         revision: event.revision,
         field,
         delta: trace_delta_text(event.delta),
@@ -1070,8 +1096,98 @@ mod tests {
         assert_eq!(
             compact,
             vec![
-                ("first-final".to_string(), 0, "first".to_string()),
-                ("second-final".to_string(), 1, "second".to_string()),
+                ("turn-order:part-0".to_string(), 0, "first".to_string()),
+                ("turn-order:part-1".to_string(), 1, "second".to_string()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn trace_part_identity_is_allocated_by_runtime_actor() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/studio").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Part identity", CompileMode::Auto)
+            .await
+            .unwrap();
+        let runtime = StudioEventRuntime::new(store.clone());
+
+        let inputs = [
+            ("reasoning-0", TracePartKind::Thinking, 0, "r0"),
+            ("commentary-0", TracePartKind::Text, 2, "c0"),
+            ("tool-0", TracePartKind::Tool, 4, ""),
+            ("reasoning-1", TracePartKind::Thinking, 0, "r1"),
+            ("commentary-1", TracePartKind::Text, 2, "c1"),
+            ("tool-1", TracePartKind::Tool, 4, ""),
+            ("reasoning-2", TracePartKind::Thinking, 0, "r2"),
+            ("final-2", TracePartKind::Text, 2, "final"),
+        ];
+
+        for (trace_id, kind, sequence, text) in inputs {
+            let item = match kind {
+                TracePartKind::Text => TracePart::text(
+                    "turn-identity",
+                    trace_id,
+                    sequence,
+                    if trace_id.starts_with("commentary") {
+                        TraceTextChannel::Commentary
+                    } else {
+                        TraceTextChannel::Final
+                    },
+                    text,
+                    TracePartStatus::Completed,
+                    100 + sequence as i64,
+                ),
+                TracePartKind::Thinking => thinking_part("turn-identity", trace_id, sequence, text),
+                TracePartKind::Tool => tool_part("turn-identity", trace_id, sequence),
+                TracePartKind::Agent
+                | TracePartKind::Turn
+                | TracePartKind::Inference
+                | TracePartKind::Plan => {
+                    unreachable!("test only creates visible assistant parts")
+                }
+            };
+            runtime
+                .emit_agent_event(&session.id, AgentEvent::TracePartCompleted { item })
+                .await
+                .unwrap();
+        }
+
+        let parts = store.load_message_parts(&session.id).await.unwrap();
+        let compact = parts
+            .iter()
+            .map(|record| {
+                (
+                    record.part.part_id.clone(),
+                    record.part.order,
+                    record.part.part_type,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            compact,
+            vec![
+                (
+                    "turn-identity:part-0".to_string(),
+                    0,
+                    StudioPartType::Reasoning,
+                ),
+                ("turn-identity:part-1".to_string(), 1, StudioPartType::Text,),
+                ("turn-identity:part-2".to_string(), 2, StudioPartType::Tool,),
+                (
+                    "turn-identity:part-3".to_string(),
+                    3,
+                    StudioPartType::Reasoning,
+                ),
+                ("turn-identity:part-4".to_string(), 4, StudioPartType::Text,),
+                ("turn-identity:part-5".to_string(), 5, StudioPartType::Tool,),
+                (
+                    "turn-identity:part-6".to_string(),
+                    6,
+                    StudioPartType::Reasoning,
+                ),
+                ("turn-identity:part-7".to_string(), 7, StudioPartType::Text,),
             ]
         );
     }
@@ -1133,12 +1249,12 @@ mod tests {
             compact,
             vec![
                 (
-                    "progress-1".to_string(),
+                    "turn-1:part-0".to_string(),
                     Some(StudioTextChannel::Commentary),
                     true,
                 ),
                 (
-                    "commentary-1".to_string(),
+                    "turn-1:part-1".to_string(),
                     Some(StudioTextChannel::Commentary),
                     false,
                 ),
@@ -1327,7 +1443,7 @@ mod tests {
             .unwrap();
 
         let part = store
-            .read_message_part("part-terminal-revision")
+            .read_message_part("turn-terminal-revision:part-0")
             .await
             .unwrap()
             .unwrap()
@@ -1346,6 +1462,64 @@ mod tests {
             TracePartStatus::Streaming,
             100,
         )
+    }
+
+    fn thinking_part(turn_id: &str, item_id: &str, sequence: u64, text: &str) -> TracePart {
+        TracePart {
+            turn_id: turn_id.to_string(),
+            item_id: item_id.to_string(),
+            started_sequence: sequence,
+            revision: 0,
+            kind: TracePartKind::Thinking,
+            status: TracePartStatus::Completed,
+            created_at: 100,
+            updated_at: 100,
+            source: TracePartSource::Model,
+            text_channel: None,
+            content: String::new(),
+            attachments: Vec::new(),
+            thinking_chunks: vec![pl_trace::TraceThinkingChunk {
+                chunk_index: 0,
+                content: text.to_string(),
+            }],
+            tool: None,
+            agent: None,
+            inference: None,
+            usage: None,
+        }
+    }
+
+    fn tool_part(turn_id: &str, item_id: &str, sequence: u64) -> TracePart {
+        TracePart {
+            turn_id: turn_id.to_string(),
+            item_id: item_id.to_string(),
+            started_sequence: sequence,
+            revision: 0,
+            kind: TracePartKind::Tool,
+            status: TracePartStatus::Completed,
+            created_at: 100,
+            updated_at: 100,
+            source: TracePartSource::Model,
+            text_channel: None,
+            content: String::new(),
+            attachments: Vec::new(),
+            thinking_chunks: Vec::new(),
+            tool: Some(TraceToolPart {
+                tool_call_id: item_id.to_string(),
+                call_id: Some(format!("{item_id}-call")),
+                provider_item_id: Some(item_id.to_string()),
+                name: "bash".to_string(),
+                arguments: "{}".to_string(),
+                result: Some("ok".to_string()),
+                exit_code: Some(0),
+                timed_out: false,
+                working_directory: None,
+                denial_reason: None,
+            }),
+            agent: None,
+            inference: None,
+            usage: None,
+        }
     }
 
     fn text_delta_event(

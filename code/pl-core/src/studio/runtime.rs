@@ -2383,32 +2383,19 @@ mod tests {
             .collect::<Vec<_>>();
         let compact_identity = compact
             .iter()
-            .map(|(part_id, part_type, text, _)| (*part_id, *part_type, *text))
+            .map(|(part_id, part_type, text, _)| {
+                assert!(part_id.starts_with("turn-tool-boundary-test:part-"));
+                (*part_type, *text)
+            })
             .collect::<Vec<_>>();
 
         assert_eq!(
             compact_identity,
             vec![
-                (
-                    "turn-tool-boundary-test-inf-0-reasoning-1",
-                    pl_protocol::StudioPartType::Reasoning,
-                    "before tool",
-                ),
-                (
-                    "turn-tool-boundary-test-inf-0-text-final-1",
-                    pl_protocol::StudioPartType::Text,
-                    "before ",
-                ),
-                (
-                    "turn-tool-boundary-test-inf-1-reasoning-1",
-                    pl_protocol::StudioPartType::Reasoning,
-                    "after tool",
-                ),
-                (
-                    "turn-tool-boundary-test-inf-1-text-final-1",
-                    pl_protocol::StudioPartType::Text,
-                    "after",
-                ),
+                (pl_protocol::StudioPartType::Reasoning, "before tool",),
+                (pl_protocol::StudioPartType::Text, "before ",),
+                (pl_protocol::StudioPartType::Reasoning, "after tool",),
+                (pl_protocol::StudioPartType::Text, "after",),
             ]
         );
         assert!(compact[0].3 < compact[1].3);
@@ -2416,11 +2403,15 @@ mod tests {
         assert!(compact[2].3 < compact[3].3);
         let tool = assistant_parts
             .iter()
-            .find(|part| {
-                part.part_type == pl_protocol::StudioPartType::Tool
-                    && part.part_id == "turn-tool-boundary-test-fc_1"
-            })
+            .find(|part| part.part_type == pl_protocol::StudioPartType::Tool)
             .expect("tool part");
+        assert!(tool.part_id.starts_with("turn-tool-boundary-test:part-"));
+        assert_eq!(
+            tool.tool
+                .as_ref()
+                .and_then(|tool| tool.provider_item_id.as_deref()),
+            Some("fc_1")
+        );
         assert!(tool.order > compact[1].3 && tool.order < compact[2].3);
 
         let _ = tokio::fs::remove_dir_all(home).await;
