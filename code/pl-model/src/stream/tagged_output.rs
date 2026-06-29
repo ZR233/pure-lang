@@ -121,23 +121,11 @@ impl TaggedVisibleOutputAdapter {
                 id,
                 content_index,
                 delta,
-            } => {
-                let visible = Self::parse_visible_events(
-                    &mut self.reasoning_parser,
-                    &mut self.active_reasoning_block,
-                    &mut self.next_segment_ordinal,
-                    &mut self.diagnostics,
-                    &delta,
-                    false,
-                );
-                std::iter::once(ModelStreamEvent::ReasoningRawDelta {
-                    id,
-                    content_index,
-                    delta,
-                })
-                .chain(visible)
-                .collect()
-            }
+            } => vec![ModelStreamEvent::ReasoningRawDelta {
+                id,
+                content_index,
+                delta,
+            }],
             ModelStreamEvent::BlockClosed {
                 id,
                 kind: ModelBlockKind::ReasoningSummary,

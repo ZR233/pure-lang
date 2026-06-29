@@ -123,7 +123,7 @@ impl StreamCompletionAccumulator {
                 kind: ModelBlockKind::ReasoningSummary,
                 ..
             } => {
-                self.record_thinking_started(&id, event_tx);
+                let _ = id;
             }
             ModelStreamEvent::BlockOpened {
                 kind: ModelBlockKind::Plan,
@@ -187,10 +187,16 @@ impl StreamCompletionAccumulator {
                 authoritative_content,
                 ..
             } => {
-                if let Some(ModelBlockContent::ReasoningSummary(summary)) = authoritative_content {
-                    self.reasoning_summary_parts = summary;
-                }
-                self.record_thinking_completed(&id, event_tx);
+                let authoritative_summary =
+                    if let Some(ModelBlockContent::ReasoningSummary(summary)) =
+                        authoritative_content
+                    {
+                        self.reasoning_summary_parts = summary.clone();
+                        Some(summary)
+                    } else {
+                        None
+                    };
+                self.record_thinking_completed(&id, authoritative_summary, event_tx);
             }
             ModelStreamEvent::BlockClosed {
                 kind: ModelBlockKind::Plan,
@@ -429,15 +435,6 @@ impl StreamCompletionAccumulator {
         self.content_parts[index].text = text.to_string();
     }
 
-    fn record_thinking_started(&mut self, item_id: &str, event_tx: &AgentEventSender) {
-        let Some(trace) = self.trace.as_mut() else {
-            return;
-        };
-        for event in trace.start_thinking(item_id) {
-            let _ = event_tx.send(event);
-        }
-    }
-
     fn record_thinking_delta(
         &mut self,
         item_id: &str,
@@ -453,11 +450,16 @@ impl StreamCompletionAccumulator {
         }
     }
 
-    fn record_thinking_completed(&mut self, item_id: &str, event_tx: &AgentEventSender) {
+    fn record_thinking_completed(
+        &mut self,
+        item_id: &str,
+        authoritative_summary: Option<Vec<String>>,
+        event_tx: &AgentEventSender,
+    ) {
         let Some(trace) = self.trace.as_mut() else {
             return;
         };
-        for event in trace.complete_thinking(item_id) {
+        for event in trace.complete_thinking(item_id, authoritative_summary) {
             let _ = event_tx.send(event);
         }
     }
@@ -722,5 +724,21 @@ mod tests {
             completed_ids,
             vec!["tagged-commentary-1", "tagged-commentary-2"]
         );
+    }
+
+    #[test]
+    fn tagged_text_decoder_keeps_raw_reasoning_tags_hidden() {
+        let mut decoder = VisibleOutputDecoder::new(VisibleOutputProtocol::TaggedText);
+        let events = decoder.decode(ModelStreamEvent::ReasoningRawDelta {
+            id: "thinking".to_string(),
+            content_index: 0,
+            delta: "<commentary>hidden</commentary><final>hidden</final>".to_string(),
+        });
+
+        assert!(matches!(
+            events.as_slice(),
+            [ModelStreamEvent::ReasoningRawDelta { delta, .. }]
+                if delta == "<commentary>hidden</commentary><final>hidden</final>"
+        ));
     }
 }

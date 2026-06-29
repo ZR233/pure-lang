@@ -91,8 +91,16 @@ const DEFAULT_REASONING_ID: &str = "thinking";
 pub(crate) struct OpenAiStreamDecoder {
     use_native_phases: bool,
     text_channels: HashMap<String, TraceTextChannel>,
-    opened_text_blocks: HashMap<String, TraceTextChannel>,
-    opened_reasoning_blocks: HashMap<String, ()>,
+    open_text_blocks: HashMap<String, OpenTextBlock>,
+    open_reasoning_blocks: HashMap<String, String>,
+    next_text_block_ordinal: HashMap<String, u64>,
+    next_reasoning_block_ordinal: HashMap<String, u64>,
+}
+
+#[derive(Debug, Clone)]
+struct OpenTextBlock {
+    id: String,
+    channel: TraceTextChannel,
 }
 
 impl OpenAiStreamDecoder {
@@ -100,8 +108,10 @@ impl OpenAiStreamDecoder {
         Self {
             use_native_phases,
             text_channels: HashMap::new(),
-            opened_text_blocks: HashMap::new(),
-            opened_reasoning_blocks: HashMap::new(),
+            open_text_blocks: HashMap::new(),
+            open_reasoning_blocks: HashMap::new(),
+            next_text_block_ordinal: HashMap::new(),
+            next_reasoning_block_ordinal: HashMap::new(),
         }
     }
 
@@ -114,17 +124,22 @@ impl OpenAiStreamDecoder {
             "response.output_item.added" => {
                 if let Some((item_id, channel)) = assistant_message_identity(event.item.as_ref()) {
                     self.text_channels.insert(item_id.clone(), channel);
-                    self.opened_text_blocks.insert(item_id.clone(), channel);
-                    return vec![StreamEvent::text_started(item_id, channel)];
+                    let (block_id, events) = self.ensure_text_block_open(&item_id, channel);
+                    let _ = block_id;
+                    return events;
                 }
                 if let Some(item) = event.item.as_ref()
                     && let Some(item_id) = reasoning_item_id(item)
                 {
-                    self.opened_reasoning_blocks.insert(item_id.clone(), ());
-                    return vec![StreamEvent::reasoning_summary_started(
-                        item_id,
-                        Some(item.clone()),
-                    )];
+                    let (block_id, mut events) = self.ensure_reasoning_block_open(&item_id);
+                    if let Some(StreamEvent::BlockOpened {
+                        provider_metadata, ..
+                    }) = events.first_mut()
+                    {
+                        *provider_metadata = Some(item.clone());
+                    }
+                    let _ = block_id;
+                    return events;
                 }
             }
             "response.output_text.delta" => {
@@ -138,8 +153,8 @@ impl OpenAiStreamDecoder {
                     .copied()
                     .unwrap_or(TraceTextChannel::Final);
                 if let Some(delta) = event.delta.clone() {
-                    let mut events = self.ensure_text_block_open(&item_id, channel);
-                    events.push(StreamEvent::text_delta(item_id, channel, delta));
+                    let (block_id, mut events) = self.ensure_text_block_open(&item_id, channel);
+                    events.push(StreamEvent::text_delta(block_id, channel, delta));
                     return events;
                 }
                 return Vec::new();
@@ -150,18 +165,22 @@ impl OpenAiStreamDecoder {
                 {
                     let channel = self.text_channels.remove(&item_id).unwrap_or(item_channel);
                     let authoritative_text = assistant_message_text(item);
-                    let was_open = self.opened_text_blocks.contains_key(&item_id);
-                    let mut events = if authoritative_text.is_some() {
+                    let was_open = self.open_text_blocks.contains_key(&item_id);
+                    let (block_id, mut events) = if authoritative_text.is_some() {
                         self.ensure_text_block_open(&item_id, channel)
                     } else {
-                        Vec::new()
+                        (item_id.clone(), Vec::new())
                     };
                     if authoritative_text.is_none() && !was_open {
                         return Vec::new();
                     }
-                    self.opened_text_blocks.remove(&item_id);
+                    let block_id = self
+                        .open_text_blocks
+                        .remove(&item_id)
+                        .map(|block| block.id)
+                        .unwrap_or(block_id);
                     events.push(StreamEvent::text_completed(
-                        item_id,
+                        block_id,
                         channel,
                         authoritative_text,
                     ));
@@ -171,18 +190,21 @@ impl OpenAiStreamDecoder {
                     && let Some(item_id) = reasoning_item_id(item)
                 {
                     let authoritative_summary = reasoning_summary_texts(item);
-                    let was_open = self.opened_reasoning_blocks.contains_key(&item_id);
-                    let mut events = if authoritative_summary.is_some() {
+                    let was_open = self.open_reasoning_blocks.contains_key(&item_id);
+                    let (block_id, mut events) = if authoritative_summary.is_some() {
                         self.ensure_reasoning_block_open(&item_id)
                     } else {
-                        Vec::new()
+                        (item_id.clone(), Vec::new())
                     };
                     if authoritative_summary.is_none() && !was_open {
                         return Vec::new();
                     }
-                    self.opened_reasoning_blocks.remove(&item_id);
+                    let block_id = self
+                        .open_reasoning_blocks
+                        .remove(&item_id)
+                        .unwrap_or(block_id);
                     events.push(StreamEvent::reasoning_summary_completed(
-                        item_id,
+                        block_id,
                         Some(item.clone()),
                         authoritative_summary,
                     ));
@@ -204,22 +226,41 @@ impl OpenAiStreamDecoder {
                     kind: ModelBlockKind::Text { channel },
                     provider_metadata,
                 } => {
-                    self.opened_text_blocks.insert(id.clone(), channel);
-                    normalized.push(StreamEvent::BlockOpened {
-                        id,
-                        kind: ModelBlockKind::Text { channel },
-                        provider_metadata,
-                    });
+                    let (block_id, mut events) = self.ensure_text_block_open(&id, channel);
+                    if let Some(StreamEvent::BlockOpened {
+                        provider_metadata: metadata,
+                        ..
+                    }) = events.first_mut()
+                    {
+                        *metadata = provider_metadata;
+                    }
+                    let _ = block_id;
+                    normalized.extend(events);
                 }
                 StreamEvent::BlockOpened {
                     id,
                     kind: ModelBlockKind::ReasoningSummary,
                     provider_metadata,
                 } => {
-                    self.opened_reasoning_blocks.insert(id.clone(), ());
+                    let (block_id, mut events) = self.ensure_reasoning_block_open(&id);
+                    if let Some(StreamEvent::BlockOpened {
+                        provider_metadata: metadata,
+                        ..
+                    }) = events.first_mut()
+                    {
+                        *metadata = provider_metadata;
+                    }
+                    let _ = block_id;
+                    normalized.extend(events);
+                }
+                StreamEvent::BlockOpened {
+                    id,
+                    kind: ModelBlockKind::Plan,
+                    provider_metadata,
+                } => {
                     normalized.push(StreamEvent::BlockOpened {
                         id,
-                        kind: ModelBlockKind::ReasoningSummary,
+                        kind: ModelBlockKind::Plan,
                         provider_metadata,
                     });
                 }
@@ -230,9 +271,10 @@ impl OpenAiStreamDecoder {
                     delta,
                     section_index,
                 } => {
-                    normalized.extend(self.ensure_text_block_open(&id, channel));
+                    let (block_id, events) = self.ensure_text_block_open(&id, channel);
+                    normalized.extend(events);
                     normalized.push(StreamEvent::BlockDelta {
-                        id,
+                        id: block_id,
                         kind: ModelBlockKind::Text { channel },
                         field,
                         delta,
@@ -246,9 +288,10 @@ impl OpenAiStreamDecoder {
                     delta,
                     section_index,
                 } => {
-                    normalized.extend(self.ensure_reasoning_block_open(&id));
+                    let (block_id, events) = self.ensure_reasoning_block_open(&id);
+                    normalized.extend(events);
                     normalized.push(StreamEvent::BlockDelta {
-                        id,
+                        id: block_id,
                         kind: ModelBlockKind::ReasoningSummary,
                         field,
                         delta,
@@ -261,16 +304,23 @@ impl OpenAiStreamDecoder {
                     authoritative_content,
                     provider_metadata,
                 } => {
-                    let was_open = self.opened_text_blocks.contains_key(&id);
-                    if authoritative_content.is_some() {
-                        normalized.extend(self.ensure_text_block_open(&id, channel));
-                    }
+                    let was_open = self.open_text_blocks.contains_key(&id);
+                    let (block_id, events) = if authoritative_content.is_some() {
+                        self.ensure_text_block_open(&id, channel)
+                    } else {
+                        (id.clone(), Vec::new())
+                    };
+                    normalized.extend(events);
                     if authoritative_content.is_none() && !was_open {
                         continue;
                     }
-                    self.opened_text_blocks.remove(&id);
+                    let block_id = self
+                        .open_text_blocks
+                        .remove(&id)
+                        .map(|block| block.id)
+                        .unwrap_or(block_id);
                     normalized.push(StreamEvent::BlockClosed {
-                        id,
+                        id: block_id,
                         kind: ModelBlockKind::Text { channel },
                         authoritative_content,
                         provider_metadata,
@@ -282,16 +332,19 @@ impl OpenAiStreamDecoder {
                     authoritative_content,
                     provider_metadata,
                 } => {
-                    let was_open = self.opened_reasoning_blocks.contains_key(&id);
-                    if authoritative_content.is_some() {
-                        normalized.extend(self.ensure_reasoning_block_open(&id));
-                    }
+                    let was_open = self.open_reasoning_blocks.contains_key(&id);
+                    let (block_id, events) = if authoritative_content.is_some() {
+                        self.ensure_reasoning_block_open(&id)
+                    } else {
+                        (id.clone(), Vec::new())
+                    };
+                    normalized.extend(events);
                     if authoritative_content.is_none() && !was_open {
                         continue;
                     }
-                    self.opened_reasoning_blocks.remove(&id);
+                    let block_id = self.open_reasoning_blocks.remove(&id).unwrap_or(block_id);
                     normalized.push(StreamEvent::BlockClosed {
-                        id,
+                        id: block_id,
                         kind: ModelBlockKind::ReasoningSummary,
                         authoritative_content,
                         provider_metadata,
@@ -318,38 +371,80 @@ impl OpenAiStreamDecoder {
         &mut self,
         item_id: &str,
         channel: TraceTextChannel,
-    ) -> Vec<StreamEvent> {
-        match self.opened_text_blocks.get(item_id).copied() {
-            Some(existing_channel) if existing_channel == channel => Vec::new(),
-            Some(_) => Vec::new(),
+    ) -> (String, Vec<StreamEvent>) {
+        match self.open_text_blocks.get(item_id) {
+            Some(block) if block.channel == channel => (block.id.clone(), Vec::new()),
+            Some(block) => (block.id.clone(), Vec::new()),
             None => {
-                self.opened_text_blocks.insert(item_id.to_string(), channel);
-                vec![StreamEvent::text_started(item_id.to_string(), channel)]
+                let block_id = self.next_text_block_id(item_id, channel);
+                self.open_text_blocks.insert(
+                    item_id.to_string(),
+                    OpenTextBlock {
+                        id: block_id.clone(),
+                        channel,
+                    },
+                );
+                (
+                    block_id.clone(),
+                    vec![StreamEvent::text_started(block_id, channel)],
+                )
             }
         }
     }
 
-    fn ensure_reasoning_block_open(&mut self, item_id: &str) -> Vec<StreamEvent> {
-        if self.opened_reasoning_blocks.contains_key(item_id) {
-            return Vec::new();
+    fn ensure_reasoning_block_open(&mut self, item_id: &str) -> (String, Vec<StreamEvent>) {
+        if let Some(block_id) = self.open_reasoning_blocks.get(item_id) {
+            return (block_id.clone(), Vec::new());
         }
-        self.opened_reasoning_blocks.insert(item_id.to_string(), ());
-        vec![StreamEvent::reasoning_summary_started(
-            item_id.to_string(),
-            None,
-        )]
+        let block_id = self.next_reasoning_block_id(item_id);
+        self.open_reasoning_blocks
+            .insert(item_id.to_string(), block_id.clone());
+        (
+            block_id.clone(),
+            vec![StreamEvent::reasoning_summary_started(block_id, None)],
+        )
     }
 
     fn close_open_content_blocks(&mut self) -> Vec<StreamEvent> {
         let mut events = Vec::new();
-        for (id, channel) in std::mem::take(&mut self.opened_text_blocks) {
-            events.push(StreamEvent::text_completed(id, channel, None));
+        for (_, block) in std::mem::take(&mut self.open_text_blocks) {
+            events.push(StreamEvent::text_completed(block.id, block.channel, None));
         }
-        for (id, ()) in std::mem::take(&mut self.opened_reasoning_blocks) {
-            events.push(StreamEvent::reasoning_summary_completed(id, None, None));
+        for (_, block_id) in std::mem::take(&mut self.open_reasoning_blocks) {
+            events.push(StreamEvent::reasoning_summary_completed(
+                block_id, None, None,
+            ));
         }
         events
     }
+
+    fn next_text_block_id(&mut self, item_id: &str, channel: TraceTextChannel) -> String {
+        let key = text_block_counter_key(item_id, channel);
+        let ordinal = self.next_text_block_ordinal.entry(key).or_insert(0);
+        *ordinal += 1;
+        if *ordinal == 1 {
+            item_id.to_string()
+        } else {
+            format!("{item_id}#{}", *ordinal)
+        }
+    }
+
+    fn next_reasoning_block_id(&mut self, item_id: &str) -> String {
+        let ordinal = self
+            .next_reasoning_block_ordinal
+            .entry(item_id.to_string())
+            .or_insert(0);
+        *ordinal += 1;
+        if *ordinal == 1 {
+            item_id.to_string()
+        } else {
+            format!("{item_id}#{}", *ordinal)
+        }
+    }
+}
+
+fn text_block_counter_key(item_id: &str, channel: TraceTextChannel) -> String {
+    format!("{}:{item_id}", channel.as_str())
 }
 
 /// 将原始 SSE 事件解析为 canonical stream event。
@@ -1165,6 +1260,115 @@ mod tests {
             ] => assert_eq!(response_id, "resp_1"),
             other => panic!("unexpected events: {other:?}"),
         }
+    }
+
+    #[test]
+    fn responses_decoder_allocates_new_blocks_after_tool_boundary() {
+        let mut decoder = OpenAiStreamDecoder::new(true);
+        let reasoning_delta: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.reasoning_summary_text.delta",
+            "item_id": "thinking",
+            "summary_index": 0,
+            "delta": "before tool"
+        }))
+        .unwrap();
+        let first_reasoning = decoder.decode(&reasoning_delta);
+        assert!(matches!(
+            first_reasoning.as_slice(),
+            [
+                StreamEvent::BlockOpened {
+                    id: opened_id,
+                    kind: ModelBlockKind::ReasoningSummary,
+                    ..
+                },
+                StreamEvent::BlockDelta {
+                    id: delta_id,
+                    kind: ModelBlockKind::ReasoningSummary,
+                    ..
+                },
+            ] if opened_id == "thinking" && delta_id == opened_id
+        ));
+
+        let text_delta: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.output_text.delta",
+            "item_id": "msg_1",
+            "delta": "before "
+        }))
+        .unwrap();
+        let first_text = decoder.decode(&text_delta);
+        assert!(matches!(
+            first_text.as_slice(),
+            [
+                StreamEvent::BlockOpened {
+                    id: opened_id,
+                    kind:
+                        ModelBlockKind::Text {
+                            channel: TraceTextChannel::Final,
+                        },
+                    ..
+                },
+                StreamEvent::BlockDelta {
+                    id: delta_id,
+                    kind:
+                        ModelBlockKind::Text {
+                            channel: TraceTextChannel::Final,
+                        },
+                    ..
+                },
+            ] if opened_id == "msg_1" && delta_id == opened_id
+        ));
+
+        let tool_added: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.output_item.added",
+            "item": {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "list_files"
+            }
+        }))
+        .unwrap();
+        let _ = decoder.decode(&tool_added);
+
+        let second_reasoning = decoder.decode(&reasoning_delta);
+        assert!(matches!(
+            second_reasoning.as_slice(),
+            [
+                StreamEvent::BlockOpened {
+                    id: opened_id,
+                    kind: ModelBlockKind::ReasoningSummary,
+                    ..
+                },
+                StreamEvent::BlockDelta {
+                    id: delta_id,
+                    kind: ModelBlockKind::ReasoningSummary,
+                    ..
+                },
+            ] if opened_id == "thinking#2" && delta_id == opened_id
+        ));
+
+        let second_text = decoder.decode(&text_delta);
+        assert!(matches!(
+            second_text.as_slice(),
+            [
+                StreamEvent::BlockOpened {
+                    id: opened_id,
+                    kind:
+                        ModelBlockKind::Text {
+                            channel: TraceTextChannel::Final,
+                        },
+                    ..
+                },
+                StreamEvent::BlockDelta {
+                    id: delta_id,
+                    kind:
+                        ModelBlockKind::Text {
+                            channel: TraceTextChannel::Final,
+                        },
+                    ..
+                },
+            ] if opened_id == "msg_1#2" && delta_id == opened_id
+        ));
     }
 
     #[test]

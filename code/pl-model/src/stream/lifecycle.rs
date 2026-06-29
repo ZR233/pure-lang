@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, btree_map::Entry};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use pl_protocol::{PureError, Result};
 
@@ -6,6 +6,7 @@ use super::event::{ModelBlockKind, ModelStreamEvent, ToolInputDeltaPayload, Tool
 
 pub(crate) struct StreamLifecycle {
     open_blocks: BTreeMap<String, OpenBlock>,
+    closed_blocks: BTreeSet<String>,
     open_tools: HashMap<String, OpenToolInput>,
 }
 
@@ -26,6 +27,7 @@ impl StreamLifecycle {
     pub(crate) fn new() -> Self {
         Self {
             open_blocks: BTreeMap::new(),
+            closed_blocks: BTreeSet::new(),
             open_tools: HashMap::new(),
         }
     }
@@ -37,8 +39,19 @@ impl StreamLifecycle {
                 kind,
                 provider_metadata,
             } => {
+                let key = block_key(kind, &id);
+                if self.closed_blocks.contains(&key) {
+                    return Err(PureError::LlmError(format!(
+                        "provider stream protocol error: open targets closed block {key}"
+                    )));
+                }
+                if self.open_blocks.contains_key(&key) {
+                    return Err(PureError::LlmError(format!(
+                        "provider stream protocol error: block already open {key}"
+                    )));
+                }
                 self.open_blocks.insert(
-                    block_key(kind, &id),
+                    key,
                     OpenBlock {
                         id: id.clone(),
                         kind,
@@ -58,20 +71,22 @@ impl StreamLifecycle {
                 section_index,
             } => {
                 let key = block_key(kind, &id);
-                match self.open_blocks.entry(key) {
-                    Entry::Occupied(_) => vec![ModelStreamEvent::BlockDelta {
+                if self.open_blocks.contains_key(&key) {
+                    vec![ModelStreamEvent::BlockDelta {
                         id,
                         kind,
                         field,
                         delta,
                         section_index,
-                    }],
-                    Entry::Vacant(_) => {
-                        return Err(PureError::LlmError(format!(
-                            "provider stream protocol error: delta targets unopened block {}",
-                            block_key(kind, &id)
-                        )));
-                    }
+                    }]
+                } else if self.closed_blocks.contains(&key) {
+                    return Err(PureError::LlmError(format!(
+                        "provider stream protocol error: delta targets closed block {key}"
+                    )));
+                } else {
+                    return Err(PureError::LlmError(format!(
+                        "provider stream protocol error: delta targets unopened block {key}"
+                    )));
                 }
             }
             ModelStreamEvent::BlockClosed {
@@ -82,16 +97,20 @@ impl StreamLifecycle {
             } => {
                 let key = block_key(kind, &id);
                 if self.open_blocks.remove(&key).is_some() {
+                    self.closed_blocks.insert(key);
                     vec![ModelStreamEvent::BlockClosed {
                         id,
                         kind,
                         authoritative_content,
                         provider_metadata,
                     }]
+                } else if self.closed_blocks.contains(&key) {
+                    return Err(PureError::LlmError(format!(
+                        "provider stream protocol error: close targets closed block {key}"
+                    )));
                 } else {
                     return Err(PureError::LlmError(format!(
-                        "provider stream protocol error: close targets unopened block {}",
-                        block_key(kind, &id)
+                        "provider stream protocol error: close targets unopened block {key}"
                     )));
                 }
             }
@@ -244,11 +263,14 @@ impl StreamLifecycle {
     fn close_open_content_blocks(&mut self) -> Vec<ModelStreamEvent> {
         std::mem::take(&mut self.open_blocks)
             .into_values()
-            .map(|block| ModelStreamEvent::BlockClosed {
-                id: block.id,
-                kind: block.kind,
-                authoritative_content: None,
-                provider_metadata: None,
+            .map(|block| {
+                self.closed_blocks.insert(block_key(block.kind, &block.id));
+                ModelStreamEvent::BlockClosed {
+                    id: block.id,
+                    kind: block.kind,
+                    authoritative_content: None,
+                    provider_metadata: None,
+                }
             })
             .collect()
     }
@@ -390,6 +412,77 @@ mod tests {
                 .contains("delta targets unopened block reasoning.summary:thinking"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn duplicate_open_is_protocol_error() {
+        let mut lifecycle = StreamLifecycle::new();
+
+        lifecycle
+            .normalize(ModelStreamEvent::text_started(
+                "msg_progress".to_string(),
+                TraceTextChannel::Commentary,
+            ))
+            .unwrap();
+        let error = lifecycle
+            .normalize(ModelStreamEvent::text_started(
+                "msg_progress".to_string(),
+                TraceTextChannel::Commentary,
+            ))
+            .unwrap_err();
+
+        assert! {
+            error
+                .to_string()
+                .contains("block already open commentary:msg_progress"),
+            "{error}"
+        };
+    }
+
+    #[test]
+    fn closed_block_rejects_late_delta_and_reopen() {
+        let mut lifecycle = StreamLifecycle::new();
+
+        lifecycle
+            .normalize(ModelStreamEvent::text_started(
+                "msg_progress".to_string(),
+                TraceTextChannel::Commentary,
+            ))
+            .unwrap();
+        lifecycle
+            .normalize(ModelStreamEvent::text_completed(
+                "msg_progress".to_string(),
+                TraceTextChannel::Commentary,
+                None,
+            ))
+            .unwrap();
+
+        let delta_error = lifecycle
+            .normalize(ModelStreamEvent::text_delta(
+                "msg_progress".to_string(),
+                TraceTextChannel::Commentary,
+                "late".to_string(),
+            ))
+            .unwrap_err();
+        assert! {
+            delta_error
+                .to_string()
+                .contains("delta targets closed block commentary:msg_progress"),
+            "{delta_error}"
+        };
+
+        let reopen_error = lifecycle
+            .normalize(ModelStreamEvent::text_started(
+                "msg_progress".to_string(),
+                TraceTextChannel::Commentary,
+            ))
+            .unwrap_err();
+        assert! {
+            reopen_error
+                .to_string()
+                .contains("open targets closed block commentary:msg_progress"),
+            "{reopen_error}"
+        };
     }
 
     #[test]
