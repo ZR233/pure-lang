@@ -1,9 +1,8 @@
 use std::collections::{BTreeMap, HashMap, btree_map::Entry};
 
-use super::event::{
-    ModelBlockContent, ModelBlockKind, ModelStreamEvent, ToolInputDeltaPayload,
-    ToolInputPayloadKind,
-};
+use pl_protocol::{PureError, Result};
+
+use super::event::{ModelBlockKind, ModelStreamEvent, ToolInputDeltaPayload, ToolInputPayloadKind};
 
 pub(crate) struct StreamLifecycle {
     open_blocks: BTreeMap<String, OpenBlock>,
@@ -31,8 +30,8 @@ impl StreamLifecycle {
         }
     }
 
-    pub(crate) fn normalize(&mut self, event: ModelStreamEvent) -> Vec<ModelStreamEvent> {
-        match event {
+    pub(crate) fn normalize(&mut self, event: ModelStreamEvent) -> Result<Vec<ModelStreamEvent>> {
+        Ok(match event {
             ModelStreamEvent::BlockOpened {
                 id,
                 kind,
@@ -67,25 +66,11 @@ impl StreamLifecycle {
                         delta,
                         section_index,
                     }],
-                    Entry::Vacant(entry) => {
-                        entry.insert(OpenBlock {
-                            id: id.clone(),
-                            kind,
-                        });
-                        vec![
-                            ModelStreamEvent::BlockOpened {
-                                id: id.clone(),
-                                kind,
-                                provider_metadata: None,
-                            },
-                            ModelStreamEvent::BlockDelta {
-                                id,
-                                kind,
-                                field,
-                                delta,
-                                section_index,
-                            },
-                        ]
+                    Entry::Vacant(_) => {
+                        return Err(PureError::LlmError(format!(
+                            "provider stream protocol error: delta targets unopened block {}",
+                            block_key(kind, &id)
+                        )));
                     }
                 }
             }
@@ -103,25 +88,11 @@ impl StreamLifecycle {
                         authoritative_content,
                         provider_metadata,
                     }]
-                } else if authoritative_content
-                    .as_ref()
-                    .is_some_and(block_content_is_non_empty)
-                {
-                    vec![
-                        ModelStreamEvent::BlockOpened {
-                            id: id.clone(),
-                            kind,
-                            provider_metadata: None,
-                        },
-                        ModelStreamEvent::BlockClosed {
-                            id,
-                            kind,
-                            authoritative_content,
-                            provider_metadata,
-                        },
-                    ]
                 } else {
-                    Vec::new()
+                    return Err(PureError::LlmError(format!(
+                        "provider stream protocol error: close targets unopened block {}",
+                        block_key(kind, &id)
+                    )));
                 }
             }
             ModelStreamEvent::ReasoningRawDelta {
@@ -253,7 +224,7 @@ impl StreamLifecycle {
                 events.push(ModelStreamEvent::Failed { code, message });
                 events
             }
-        }
+        })
     }
 
     fn close_open_blocks(&mut self) -> Vec<ModelStreamEvent> {
@@ -359,13 +330,6 @@ fn block_kind_label(kind: ModelBlockKind) -> &'static str {
     }
 }
 
-fn block_content_is_non_empty(content: &ModelBlockContent) -> bool {
-    match content {
-        ModelBlockContent::Text(text) | ModelBlockContent::Plan(text) => !text.is_empty(),
-        ModelBlockContent::ReasoningSummary(summary) => summary.iter().any(|item| !item.is_empty()),
-    }
-}
-
 fn tool_key(stream_id: Option<&String>, call_id: Option<&String>, item_id: &str) -> String {
     stream_id
         .filter(|value| !value.is_empty())
@@ -384,26 +348,100 @@ mod tests {
     use pl_trace::TraceTextChannel;
     use pretty_assertions::assert_eq;
 
-    use crate::stream::event::ModelBlockField;
+    use crate::stream::event::{ModelBlockContent, ModelBlockField};
 
     use super::*;
 
     #[test]
-    fn authoritative_completion_without_delta_still_starts_and_completes_text() {
+    fn close_without_open_is_protocol_error() {
         let mut lifecycle = StreamLifecycle::new();
 
-        let events = lifecycle.normalize(ModelStreamEvent::text_completed(
-            "msg_progress".to_string(),
-            TraceTextChannel::Commentary,
-            Some("已完成检查".to_string()),
-        ));
+        let error = lifecycle
+            .normalize(ModelStreamEvent::text_completed(
+                "msg_progress".to_string(),
+                TraceTextChannel::Commentary,
+                Some("已完成检查".to_string()),
+            ))
+            .unwrap_err();
 
-        match events.as_slice() {
+        assert!(
+            error
+                .to_string()
+                .contains("close targets unopened block commentary:msg_progress"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn delta_without_open_is_protocol_error() {
+        let mut lifecycle = StreamLifecycle::new();
+
+        let error = lifecycle
+            .normalize(ModelStreamEvent::reasoning_summary_delta(
+                "thinking".to_string(),
+                0,
+                "summary".to_string(),
+            ))
+            .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("delta targets unopened block reasoning.summary:thinking"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn explicit_open_delta_close_flows_through() {
+        let mut lifecycle = StreamLifecycle::new();
+
+        let opened = lifecycle
+            .normalize(ModelStreamEvent::text_started(
+                "msg_progress".to_string(),
+                TraceTextChannel::Commentary,
+            ))
+            .unwrap();
+        let delta = lifecycle
+            .normalize(ModelStreamEvent::text_delta(
+                "msg_progress".to_string(),
+                TraceTextChannel::Commentary,
+                "检查中".to_string(),
+            ))
+            .unwrap();
+        let closed = lifecycle
+            .normalize(ModelStreamEvent::text_completed(
+                "msg_progress".to_string(),
+                TraceTextChannel::Commentary,
+                Some("已完成检查".to_string()),
+            ))
+            .unwrap();
+
+        assert!(matches!(
+            opened.as_slice(),
+            [ModelStreamEvent::BlockOpened { id, kind, .. }]
+                if id == "msg_progress"
+                    && *kind == ModelBlockKind::Text {
+                        channel: TraceTextChannel::Commentary
+                    }
+        ));
+        assert!(matches!(
+            delta.as_slice(),
+            [ModelStreamEvent::BlockDelta {
+                id,
+                kind: ModelBlockKind::Text {
+                    channel: TraceTextChannel::Commentary,
+                },
+                field: ModelBlockField::Text,
+                delta,
+                ..
+            }] if id == "msg_progress" && delta == "检查中"
+        ));
+        match closed.as_slice() {
             [
-                ModelStreamEvent::BlockOpened { id, kind, .. },
                 ModelStreamEvent::BlockClosed {
-                    id: completed_id,
-                    kind: completed_kind,
+                    id,
+                    kind,
                     authoritative_content,
                     ..
                 },
@@ -415,8 +453,6 @@ mod tests {
                         channel: TraceTextChannel::Commentary
                     }
                 );
-                assert_eq!(completed_id, "msg_progress");
-                assert_eq!(*completed_kind, *kind);
                 assert!(matches!(
                     authoritative_content,
                     Some(ModelBlockContent::Text(text)) if text == "已完成检查"
@@ -424,34 +460,5 @@ mod tests {
             }
             other => panic!("unexpected events: {other:?}"),
         }
-    }
-
-    #[test]
-    fn delta_without_start_opens_block_before_delta() {
-        let mut lifecycle = StreamLifecycle::new();
-
-        let events = lifecycle.normalize(ModelStreamEvent::reasoning_summary_delta(
-            "thinking".to_string(),
-            0,
-            "summary".to_string(),
-        ));
-
-        assert!(matches!(
-            events.as_slice(),
-            [
-                ModelStreamEvent::BlockOpened {
-                    id,
-                    kind: ModelBlockKind::ReasoningSummary,
-                    ..
-                },
-                ModelStreamEvent::BlockDelta {
-                    id: delta_id,
-                    kind: ModelBlockKind::ReasoningSummary,
-                    field: ModelBlockField::ReasoningSummary,
-                    delta,
-                    section_index: Some(0),
-                },
-            ] if id == "thinking" && delta_id == id && delta == "summary"
-        ));
     }
 }

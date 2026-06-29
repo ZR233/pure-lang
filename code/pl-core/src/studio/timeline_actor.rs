@@ -8,8 +8,21 @@ use super::records::StudioPartRecord;
 pub(super) struct TurnTimelineActor {
     part_revisions: HashMap<String, u64>,
     part_orders: HashMap<String, u64>,
-    trace_part_ids: HashMap<String, String>,
-    next_orders_by_message: HashMap<String, u64>,
+    trace_part_ids: HashMap<TracePartScope, String>,
+    next_orders_by_message: HashMap<MessageScope, u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(super) struct TracePartScope {
+    session_id: String,
+    turn_id: String,
+    trace_part_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct MessageScope {
+    session_id: String,
+    message_id: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,18 +34,18 @@ pub(super) enum TimelineDeltaDecision {
 impl TurnTimelineActor {
     pub(super) fn resolve_trace_part_id(
         &self,
-        trace_part_id: &str,
+        scope: &TracePartScope,
         existing: Option<&StudioPartRecord>,
     ) -> Option<String> {
         existing
             .map(|record| record.part.part_id.clone())
-            .or_else(|| self.trace_part_ids.get(trace_part_id).cloned())
+            .or_else(|| self.trace_part_ids.get(scope).cloned())
     }
 
     pub(super) fn prepare_snapshot_order(
         &mut self,
         part: &mut StudioPart,
-        trace_part_id: Option<&str>,
+        trace_scope: Option<&TracePartScope>,
         existing: Option<&StudioPartRecord>,
         durable_next_order: u64,
     ) {
@@ -41,36 +54,36 @@ impl TurnTimelineActor {
             let order = existing.part.order;
             part.order = order;
             self.part_orders.insert(part.part_id.clone(), order);
-            self.remember_trace_part_id(trace_part_id, &part.part_id);
-            self.seed_next_order(&part.message_id, durable_next_order.max(order + 1));
+            self.remember_trace_part_id(trace_scope, &part.part_id);
+            self.seed_next_order(part, durable_next_order.max(order + 1));
             return;
         }
 
         if let Some(studio_part_id) =
-            trace_part_id.and_then(|trace_part_id| self.trace_part_ids.get(trace_part_id))
+            trace_scope.and_then(|trace_scope| self.trace_part_ids.get(trace_scope))
         {
             part.part_id = studio_part_id.clone();
         }
 
         if let Some(order) = self.part_orders.get(&part.part_id).copied() {
             part.order = order;
-            self.remember_trace_part_id(trace_part_id, &part.part_id);
-            self.seed_next_order(&part.message_id, durable_next_order);
+            self.remember_trace_part_id(trace_scope, &part.part_id);
+            self.seed_next_order(part, durable_next_order);
             return;
         }
 
         let next_order = self
             .next_orders_by_message
-            .entry(part.message_id.clone())
+            .entry(MessageScope::for_part(part))
             .and_modify(|order| *order = (*order).max(durable_next_order))
             .or_insert(durable_next_order);
         part.order = *next_order;
         *next_order += 1;
-        if should_allocate_part_id(trace_part_id, &part.part_id) {
+        if should_allocate_part_id(trace_scope, &part.part_id) {
             part.part_id = format!("{}:part-{}", part.turn_id, part.order);
         }
         self.part_orders.insert(part.part_id.clone(), part.order);
-        self.remember_trace_part_id(trace_part_id, &part.part_id);
+        self.remember_trace_part_id(trace_scope, &part.part_id);
     }
 
     pub(super) fn prepare_snapshot(&mut self, part: &mut StudioPart) {
@@ -121,23 +134,42 @@ impl TurnTimelineActor {
         }
     }
 
-    fn seed_next_order(&mut self, message_id: &str, minimum_next_order: u64) {
+    fn seed_next_order(&mut self, part: &StudioPart, minimum_next_order: u64) {
         self.next_orders_by_message
-            .entry(message_id.to_string())
+            .entry(MessageScope::for_part(part))
             .and_modify(|order| *order = (*order).max(minimum_next_order))
             .or_insert(minimum_next_order);
     }
 
-    fn remember_trace_part_id(&mut self, trace_part_id: Option<&str>, part_id: &str) {
-        if let Some(trace_part_id) = trace_part_id {
+    fn remember_trace_part_id(&mut self, trace_scope: Option<&TracePartScope>, part_id: &str) {
+        if let Some(trace_scope) = trace_scope {
             self.trace_part_ids
-                .insert(trace_part_id.to_string(), part_id.to_string());
+                .insert(trace_scope.clone(), part_id.to_string());
         }
     }
 }
 
-fn should_allocate_part_id(trace_part_id: Option<&str>, part_id: &str) -> bool {
-    trace_part_id.is_some_and(|trace_part_id| trace_part_id == part_id)
+impl TracePartScope {
+    pub(super) fn new(session_id: &str, turn_id: &str, trace_part_id: &str) -> Self {
+        Self {
+            session_id: session_id.to_string(),
+            turn_id: turn_id.to_string(),
+            trace_part_id: trace_part_id.to_string(),
+        }
+    }
+}
+
+impl MessageScope {
+    fn for_part(part: &StudioPart) -> Self {
+        Self {
+            session_id: part.session_id.clone(),
+            message_id: part.message_id.clone(),
+        }
+    }
+}
+
+fn should_allocate_part_id(trace_scope: Option<&TracePartScope>, part_id: &str) -> bool {
+    trace_scope.is_some_and(|scope| scope.trace_part_id == part_id)
 }
 
 pub(super) fn is_terminal_studio_part_status(status: StudioPartStatus) -> bool {
@@ -249,23 +281,54 @@ mod tests {
     #[test]
     fn snapshot_order_allocates_actor_part_id_for_trace_item() {
         let mut actor = TurnTimelineActor::default();
+        let trace_scope = scope("session-1", "turn-1", "provider-text-1");
         let mut first = part("provider-text-1", StudioPartStatus::Started, 0);
-        actor.prepare_snapshot_order(&mut first, Some("provider-text-1"), None, 3);
+        actor.prepare_snapshot_order(&mut first, Some(&trace_scope), None, 3);
 
         assert_eq!(first.part_id, "turn-1:part-3");
         assert_eq!(first.order, 3);
         assert_eq!(
-            actor
-                .resolve_trace_part_id("provider-text-1", None)
-                .as_deref(),
+            actor.resolve_trace_part_id(&trace_scope, None).as_deref(),
             Some("turn-1:part-3")
         );
 
         let mut repeat = part("provider-text-1", StudioPartStatus::Streaming, 1);
-        actor.prepare_snapshot_order(&mut repeat, Some("provider-text-1"), None, 3);
+        actor.prepare_snapshot_order(&mut repeat, Some(&trace_scope), None, 3);
 
         assert_eq!(repeat.part_id, "turn-1:part-3");
         assert_eq!(repeat.order, 3);
+    }
+
+    #[test]
+    fn trace_part_identity_is_scoped_by_session_and_turn() {
+        let mut actor = TurnTimelineActor::default();
+        let first_scope = scope("session-1", "turn-1", "provider-text-1");
+        let second_scope = scope("session-1", "turn-2", "provider-text-1");
+        let third_scope = scope("session-2", "turn-1", "provider-text-1");
+        let mut first = part("provider-text-1", StudioPartStatus::Started, 0);
+        actor.prepare_snapshot_order(&mut first, Some(&first_scope), None, 3);
+
+        let mut second = part("provider-text-1", StudioPartStatus::Started, 0);
+        second.turn_id = "turn-2".to_string();
+        second.message_id = "turn-2:assistant".to_string();
+        actor.prepare_snapshot_order(&mut second, Some(&second_scope), None, 0);
+
+        let mut third = part("provider-text-1", StudioPartStatus::Started, 0);
+        third.session_id = "session-2".to_string();
+        actor.prepare_snapshot_order(&mut third, Some(&third_scope), None, 0);
+
+        assert_eq!(
+            actor.resolve_trace_part_id(&first_scope, None).as_deref(),
+            Some("turn-1:part-3")
+        );
+        assert_eq!(
+            actor.resolve_trace_part_id(&second_scope, None).as_deref(),
+            Some("turn-2:part-0")
+        );
+        assert_eq!(
+            actor.resolve_trace_part_id(&third_scope, None).as_deref(),
+            Some("turn-1:part-0")
+        );
     }
 
     #[test]
@@ -308,5 +371,9 @@ mod tests {
             synthetic: false,
             ignored: false,
         }
+    }
+
+    fn scope(session_id: &str, turn_id: &str, trace_part_id: &str) -> TracePartScope {
+        TracePartScope::new(session_id, turn_id, trace_part_id)
     }
 }

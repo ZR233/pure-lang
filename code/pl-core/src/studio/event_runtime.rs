@@ -17,7 +17,7 @@ use tokio::sync::{Mutex, broadcast};
 
 use crate::studio::ids::{new_studio_event_id, unix_seconds};
 use crate::studio::timeline_actor::{
-    TimelineDeltaDecision, TurnTimelineActor, is_terminal_studio_part_status,
+    TimelineDeltaDecision, TracePartScope, TurnTimelineActor, is_terminal_studio_part_status,
 };
 use crate::studio::{
     SessionHandoffRecord, StudioEventFilter, StudioFilteredEventReceiver, StudioStore,
@@ -363,8 +363,9 @@ impl StudioEventRuntime {
         self.ensure_assistant_message_started(session_id, &item)
             .await?;
         let trace_part_id = item.item_id.clone();
+        let trace_scope = TracePartScope::new(session_id, &item.turn_id, &trace_part_id);
         let mut part = studio_part_from_trace_part(session_id, item);
-        let existing_part_id = self.resolve_trace_part_id(&trace_part_id).await;
+        let existing_part_id = self.resolve_trace_part_id(&trace_scope).await;
         let existing = self
             .store
             .read_message_part(existing_part_id.as_deref().unwrap_or(&part.part_id))
@@ -372,7 +373,7 @@ impl StudioEventRuntime {
         let next_order = self.store.next_message_part_order(&part.message_id).await?;
         self.prepare_trace_part_snapshot(
             &mut part,
-            Some(trace_part_id.as_str()),
+            Some(&trace_scope),
             existing.as_ref(),
             next_order,
         )
@@ -417,7 +418,8 @@ impl StudioEventRuntime {
         session_id: &str,
         event: &TracePartDeltaEvent,
     ) -> Result<Option<String>> {
-        let Some(part_id) = self.resolve_trace_part_id(&event.item_id).await else {
+        let trace_scope = TracePartScope::new(session_id, &event.turn_id, &event.item_id);
+        let Some(part_id) = self.resolve_trace_part_id(&trace_scope).await else {
             self.emit_stale(session_id, 1).await?;
             return Ok(None);
         };
@@ -437,12 +439,12 @@ impl StudioEventRuntime {
     async fn prepare_trace_part_snapshot(
         &self,
         part: &mut StudioPart,
-        trace_part_id: Option<&str>,
+        trace_scope: Option<&TracePartScope>,
         existing: Option<&crate::studio::records::StudioPartRecord>,
         next_order: u64,
     ) {
         let mut actor = self.timeline_actor.lock().await;
-        actor.prepare_snapshot_order(part, trace_part_id, existing, next_order);
+        actor.prepare_snapshot_order(part, trace_scope, existing, next_order);
         actor.prepare_snapshot(part);
     }
 
@@ -450,11 +452,11 @@ impl StudioEventRuntime {
         self.timeline_actor.lock().await.record_snapshot(part);
     }
 
-    async fn resolve_trace_part_id(&self, trace_part_id: &str) -> Option<String> {
+    async fn resolve_trace_part_id(&self, trace_scope: &TracePartScope) -> Option<String> {
         self.timeline_actor
             .lock()
             .await
-            .resolve_trace_part_id(trace_part_id, None)
+            .resolve_trace_part_id(trace_scope, None)
     }
 
     async fn ensure_assistant_message_started(
@@ -1343,6 +1345,61 @@ mod tests {
             event.kind,
             StudioEventKind::Stale { lagged_events: 1 }
         ));
+    }
+
+    #[tokio::test]
+    async fn trace_part_delta_routes_by_session_turn_scoped_identity() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store.upsert_project("C:/work/studio").await.unwrap();
+        let session = store
+            .create_session(&project.id, "Scoped delta", CompileMode::Auto)
+            .await
+            .unwrap();
+        let runtime = StudioEventRuntime::new(store);
+        for turn_id in ["turn-a", "turn-b"] {
+            runtime
+                .emit_agent_event(
+                    &session.id,
+                    AgentEvent::TracePartStarted {
+                        item: streaming_text_part(turn_id, "provider-text"),
+                    },
+                )
+                .await
+                .unwrap();
+        }
+
+        let first = runtime
+            .emit_agent_event(
+                &session.id,
+                AgentEvent::TracePartDelta {
+                    event: text_delta_event("turn-a", "provider-text", 1, "a"),
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let second = runtime
+            .emit_agent_event(
+                &session.id,
+                AgentEvent::TracePartDelta {
+                    event: text_delta_event("turn-b", "provider-text", 1, "b"),
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        let StudioEventKind::MessagePartDelta { delta: first } = first.kind else {
+            panic!("expected first delta");
+        };
+        let StudioEventKind::MessagePartDelta { delta: second } = second.kind else {
+            panic!("expected second delta");
+        };
+        assert_eq!(first.part_id, "turn-a:part-0");
+        assert_eq!(second.part_id, "turn-b:part-0");
+        assert_ne!(first.part_id, second.part_id);
+        assert_eq!(first.delta, "a");
+        assert_eq!(second.delta, "b");
     }
 
     #[tokio::test]

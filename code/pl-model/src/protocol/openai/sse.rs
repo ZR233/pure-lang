@@ -4,7 +4,9 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::request::TokenUsage;
-use crate::stream::event::{ModelStreamEvent, ToolInputDeltaPayload, ToolInputPayloadKind};
+use crate::stream::event::{
+    ModelBlockKind, ModelStreamEvent, ToolInputDeltaPayload, ToolInputPayloadKind,
+};
 use pl_trace::TraceTextChannel;
 
 /// SSE 流事件原始结构（从 JSON 解析）
@@ -89,6 +91,8 @@ const DEFAULT_REASONING_ID: &str = "thinking";
 pub(crate) struct OpenAiStreamDecoder {
     use_native_phases: bool,
     text_channels: HashMap<String, TraceTextChannel>,
+    opened_text_blocks: HashMap<String, TraceTextChannel>,
+    opened_reasoning_blocks: HashMap<String, ()>,
 }
 
 impl OpenAiStreamDecoder {
@@ -96,23 +100,27 @@ impl OpenAiStreamDecoder {
         Self {
             use_native_phases,
             text_channels: HashMap::new(),
+            opened_text_blocks: HashMap::new(),
+            opened_reasoning_blocks: HashMap::new(),
         }
     }
 
     pub(crate) fn decode(&mut self, event: &SseStreamEvent) -> Vec<StreamEvent> {
         if !self.use_native_phases {
-            return process_sse_events(event);
+            return self.normalize_legacy_events(process_sse_events(event));
         }
 
         match event.kind.as_str() {
             "response.output_item.added" => {
                 if let Some((item_id, channel)) = assistant_message_identity(event.item.as_ref()) {
                     self.text_channels.insert(item_id.clone(), channel);
+                    self.opened_text_blocks.insert(item_id.clone(), channel);
                     return vec![StreamEvent::text_started(item_id, channel)];
                 }
                 if let Some(item) = event.item.as_ref()
                     && let Some(item_id) = reasoning_item_id(item)
                 {
+                    self.opened_reasoning_blocks.insert(item_id.clone(), ());
                     return vec![StreamEvent::reasoning_summary_started(
                         item_id,
                         Some(item.clone()),
@@ -130,7 +138,9 @@ impl OpenAiStreamDecoder {
                     .copied()
                     .unwrap_or(TraceTextChannel::Final);
                 if let Some(delta) = event.delta.clone() {
-                    return vec![StreamEvent::text_delta(item_id, channel, delta)];
+                    let mut events = self.ensure_text_block_open(&item_id, channel);
+                    events.push(StreamEvent::text_delta(item_id, channel, delta));
+                    return events;
                 }
                 return Vec::new();
             }
@@ -140,26 +150,205 @@ impl OpenAiStreamDecoder {
                 {
                     let channel = self.text_channels.remove(&item_id).unwrap_or(item_channel);
                     let authoritative_text = assistant_message_text(item);
-                    return vec![StreamEvent::text_completed(
+                    let was_open = self.opened_text_blocks.contains_key(&item_id);
+                    let mut events = if authoritative_text.is_some() {
+                        self.ensure_text_block_open(&item_id, channel)
+                    } else {
+                        Vec::new()
+                    };
+                    if authoritative_text.is_none() && !was_open {
+                        return Vec::new();
+                    }
+                    self.opened_text_blocks.remove(&item_id);
+                    events.push(StreamEvent::text_completed(
                         item_id,
                         channel,
                         authoritative_text,
-                    )];
+                    ));
+                    return events;
                 }
                 if let Some(item) = event.item.as_ref()
                     && let Some(item_id) = reasoning_item_id(item)
                 {
-                    return vec![StreamEvent::reasoning_summary_completed(
+                    let authoritative_summary = reasoning_summary_texts(item);
+                    let was_open = self.opened_reasoning_blocks.contains_key(&item_id);
+                    let mut events = if authoritative_summary.is_some() {
+                        self.ensure_reasoning_block_open(&item_id)
+                    } else {
+                        Vec::new()
+                    };
+                    if authoritative_summary.is_none() && !was_open {
+                        return Vec::new();
+                    }
+                    self.opened_reasoning_blocks.remove(&item_id);
+                    events.push(StreamEvent::reasoning_summary_completed(
                         item_id,
                         Some(item.clone()),
-                        reasoning_summary_texts(item),
-                    )];
+                        authoritative_summary,
+                    ));
+                    return events;
                 }
             }
             _ => {}
         }
 
-        process_sse_events(event)
+        self.normalize_legacy_events(process_sse_events(event))
+    }
+
+    fn normalize_legacy_events(&mut self, events: Vec<StreamEvent>) -> Vec<StreamEvent> {
+        let mut normalized = Vec::new();
+        for event in events {
+            match event {
+                StreamEvent::BlockOpened {
+                    id,
+                    kind: ModelBlockKind::Text { channel },
+                    provider_metadata,
+                } => {
+                    self.opened_text_blocks.insert(id.clone(), channel);
+                    normalized.push(StreamEvent::BlockOpened {
+                        id,
+                        kind: ModelBlockKind::Text { channel },
+                        provider_metadata,
+                    });
+                }
+                StreamEvent::BlockOpened {
+                    id,
+                    kind: ModelBlockKind::ReasoningSummary,
+                    provider_metadata,
+                } => {
+                    self.opened_reasoning_blocks.insert(id.clone(), ());
+                    normalized.push(StreamEvent::BlockOpened {
+                        id,
+                        kind: ModelBlockKind::ReasoningSummary,
+                        provider_metadata,
+                    });
+                }
+                StreamEvent::BlockDelta {
+                    id,
+                    kind: ModelBlockKind::Text { channel },
+                    field,
+                    delta,
+                    section_index,
+                } => {
+                    normalized.extend(self.ensure_text_block_open(&id, channel));
+                    normalized.push(StreamEvent::BlockDelta {
+                        id,
+                        kind: ModelBlockKind::Text { channel },
+                        field,
+                        delta,
+                        section_index,
+                    });
+                }
+                StreamEvent::BlockDelta {
+                    id,
+                    kind: ModelBlockKind::ReasoningSummary,
+                    field,
+                    delta,
+                    section_index,
+                } => {
+                    normalized.extend(self.ensure_reasoning_block_open(&id));
+                    normalized.push(StreamEvent::BlockDelta {
+                        id,
+                        kind: ModelBlockKind::ReasoningSummary,
+                        field,
+                        delta,
+                        section_index,
+                    });
+                }
+                StreamEvent::BlockClosed {
+                    id,
+                    kind: ModelBlockKind::Text { channel },
+                    authoritative_content,
+                    provider_metadata,
+                } => {
+                    let was_open = self.opened_text_blocks.contains_key(&id);
+                    if authoritative_content.is_some() {
+                        normalized.extend(self.ensure_text_block_open(&id, channel));
+                    }
+                    if authoritative_content.is_none() && !was_open {
+                        continue;
+                    }
+                    self.opened_text_blocks.remove(&id);
+                    normalized.push(StreamEvent::BlockClosed {
+                        id,
+                        kind: ModelBlockKind::Text { channel },
+                        authoritative_content,
+                        provider_metadata,
+                    });
+                }
+                StreamEvent::BlockClosed {
+                    id,
+                    kind: ModelBlockKind::ReasoningSummary,
+                    authoritative_content,
+                    provider_metadata,
+                } => {
+                    let was_open = self.opened_reasoning_blocks.contains_key(&id);
+                    if authoritative_content.is_some() {
+                        normalized.extend(self.ensure_reasoning_block_open(&id));
+                    }
+                    if authoritative_content.is_none() && !was_open {
+                        continue;
+                    }
+                    self.opened_reasoning_blocks.remove(&id);
+                    normalized.push(StreamEvent::BlockClosed {
+                        id,
+                        kind: ModelBlockKind::ReasoningSummary,
+                        authoritative_content,
+                        provider_metadata,
+                    });
+                }
+                event @ (StreamEvent::ToolInputStarted { .. }
+                | StreamEvent::ToolInputDelta { .. }
+                | StreamEvent::ToolCallReady { .. }
+                | StreamEvent::StepStarted { .. }) => {
+                    normalized.extend(self.close_open_content_blocks());
+                    normalized.push(event);
+                }
+                StreamEvent::Completed { response_id } => {
+                    normalized.extend(self.close_open_content_blocks());
+                    normalized.push(StreamEvent::Completed { response_id });
+                }
+                other => normalized.push(other),
+            }
+        }
+        normalized
+    }
+
+    fn ensure_text_block_open(
+        &mut self,
+        item_id: &str,
+        channel: TraceTextChannel,
+    ) -> Vec<StreamEvent> {
+        match self.opened_text_blocks.get(item_id).copied() {
+            Some(existing_channel) if existing_channel == channel => Vec::new(),
+            Some(_) => Vec::new(),
+            None => {
+                self.opened_text_blocks.insert(item_id.to_string(), channel);
+                vec![StreamEvent::text_started(item_id.to_string(), channel)]
+            }
+        }
+    }
+
+    fn ensure_reasoning_block_open(&mut self, item_id: &str) -> Vec<StreamEvent> {
+        if self.opened_reasoning_blocks.contains_key(item_id) {
+            return Vec::new();
+        }
+        self.opened_reasoning_blocks.insert(item_id.to_string(), ());
+        vec![StreamEvent::reasoning_summary_started(
+            item_id.to_string(),
+            None,
+        )]
+    }
+
+    fn close_open_content_blocks(&mut self) -> Vec<StreamEvent> {
+        let mut events = Vec::new();
+        for (id, channel) in std::mem::take(&mut self.opened_text_blocks) {
+            events.push(StreamEvent::text_completed(id, channel, None));
+        }
+        for (id, ()) in std::mem::take(&mut self.opened_reasoning_blocks) {
+            events.push(StreamEvent::reasoning_summary_completed(id, None, None));
+        }
+        events
     }
 }
 
@@ -806,6 +995,14 @@ mod tests {
         .unwrap();
         match decoder.decode(&final_done).as_slice() {
             [
+                StreamEvent::BlockOpened {
+                    id: opened_id,
+                    kind:
+                        ModelBlockKind::Text {
+                            channel: TraceTextChannel::Final,
+                        },
+                    ..
+                },
                 StreamEvent::BlockClosed {
                     id,
                     kind:
@@ -816,6 +1013,7 @@ mod tests {
                     ..
                 },
             ] => {
+                assert_eq!(opened_id, "msg_final");
                 assert_eq!(id, "msg_final");
                 assert_eq!(authoritative_text, "完成。");
             }
@@ -894,6 +1092,77 @@ mod tests {
                 assert_eq!(id, "rs_1");
                 assert_eq!(summary, &vec!["最终摘要。".to_string()]);
             }
+            other => panic!("unexpected events: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn responses_decoder_closes_content_at_tool_boundary_once() {
+        let mut decoder = OpenAiStreamDecoder::new(true);
+        let reasoning_delta: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.reasoning_summary_text.delta",
+            "item_id": "thinking",
+            "summary_index": 0,
+            "delta": "before tool"
+        }))
+        .unwrap();
+        assert_eq!(decoder.decode(&reasoning_delta).len(), 2);
+
+        let text_delta: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.output_text.delta",
+            "item_id": "msg_1",
+            "delta": "before "
+        }))
+        .unwrap();
+        assert_eq!(decoder.decode(&text_delta).len(), 2);
+
+        let tool_added: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.output_item.added",
+            "item": {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "list_files"
+            }
+        }))
+        .unwrap();
+        let boundary_events = decoder.decode(&tool_added);
+        assert_eq!(boundary_events.len(), 3);
+        assert!(boundary_events.iter().any(|event| matches!(
+            event,
+            StreamEvent::BlockClosed {
+                id,
+                kind: ModelBlockKind::ReasoningSummary,
+                ..
+            } if id == "thinking"
+        )));
+        assert!(boundary_events.iter().any(|event| matches!(
+            event,
+            StreamEvent::BlockClosed {
+                id,
+                kind:
+                    ModelBlockKind::Text {
+                        channel: TraceTextChannel::Final,
+                    },
+                ..
+            } if id == "msg_1"
+        )));
+        assert!(boundary_events.iter().any(|event| matches!(
+            event,
+            StreamEvent::ToolInputStarted { item_id, .. } if item_id == "fc_1"
+        )));
+
+        let completed: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.completed",
+            "response": {"id": "resp_1"}
+        }))
+        .unwrap();
+        match decoder.decode(&completed).as_slice() {
+            [
+                StreamEvent::Completed {
+                    response_id: Some(response_id),
+                },
+            ] => assert_eq!(response_id, "resp_1"),
             other => panic!("unexpected events: {other:?}"),
         }
     }
