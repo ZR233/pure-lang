@@ -1,4 +1,8 @@
 mod client;
+mod client_config;
+mod client_retry;
+mod client_server;
+mod client_wire;
 mod diagnostics;
 mod formatting;
 mod framing;

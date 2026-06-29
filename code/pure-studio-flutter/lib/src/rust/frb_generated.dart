@@ -3,7 +3,18 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
-import 'api/studio.dart';
+import 'api/studio/handlers/events.dart';
+import 'api/studio/handlers/lifecycle.dart';
+import 'api/studio/handlers/prompt.dart';
+import 'api/studio/handlers/providers.dart';
+import 'api/studio/handlers/session.dart';
+import 'api/studio/handlers/settings.dart';
+import 'api/studio/types/agent.dart';
+import 'api/studio/types/event.dart';
+import 'api/studio/types/interaction.dart';
+import 'api/studio/types/message.dart';
+import 'api/studio/types/response.dart';
+import 'api/studio/types/runtime.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'frb_generated.dart';
@@ -64,7 +75,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -2111974741;
+  int get rustContentHash => -2114480529;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -76,84 +87,93 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 }
 
 abstract class RustLibApi extends BaseApi {
-  Future<BridgeStudioSnapshotResponse> crateApiStudioArchiveProject({
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersLifecycleArchiveProject({
     required String projectId,
     String? selectedProjectId,
   });
 
-  Future<BridgeStudioSnapshotResponse> crateApiStudioArchiveSession({
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersSessionArchiveSession({
     required String sessionId,
     String? selectedSessionId,
   });
 
-  Future<BridgeStudioSnapshotResponse> crateApiStudioBootstrapStudio();
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersLifecycleBootstrapStudio();
 
-  Future<BridgeStudioSnapshotResponse> crateApiStudioCreateSession({
+  Future<BridgeEventEnvelope> crateApiStudioTypesEventBridgeEventEnvelopeStale({
+    String? sessionId,
+    required BigInt laggedEvents,
+  });
+
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersSessionCreateSession({
     required String projectId,
     String? title,
   });
 
-  Future<RuntimeSnapshot> crateApiStudioInitializeRuntime();
+  Future<RuntimeSnapshot> crateApiStudioHandlersLifecycleInitializeRuntime();
 
-  Future<SkillsResponse> crateApiStudioListDiscoveredSkills({
+  Future<SkillsResponse> crateApiStudioHandlersProvidersListDiscoveredSkills({
     required String projectId,
   });
 
-  Future<ProviderUsagesResponse> crateApiStudioLoadProviderUsages();
+  Future<ProviderUsagesResponse>
+  crateApiStudioHandlersProvidersLoadProviderUsages();
 
-  Future<BridgeSessionStateResponse> crateApiStudioLoadSessionState({
-    required String sessionId,
-  });
+  Future<BridgeSessionStateResponse>
+  crateApiStudioHandlersSessionLoadSessionState({required String sessionId});
 
-  Future<BridgeStudioEventsResponse> crateApiStudioLoadStudioEvents({
+  Future<BridgeStudioEventsResponse>
+  crateApiStudioHandlersEventsLoadStudioEvents({
     required String sessionId,
     PlatformInt64? afterSequence,
     PlatformInt64? limit,
   });
 
-  Future<BridgeStudioSnapshotResponse> crateApiStudioOpenProject({
-    required String path,
-  });
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersLifecycleOpenProject({required String path});
 
-  Future<ResolveInteractionResponse> crateApiStudioResolveInteraction({
+  Future<ResolveInteractionResponse>
+  crateApiStudioHandlersPromptResolveInteraction({
     required String interactionId,
     required String resolutionJson,
   });
 
-  Future<BridgeStudioSnapshotResponse> crateApiStudioSaveGeneralSettings({
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersSettingsSaveGeneralSettings({
     required String settingsJson,
   });
 
-  Future<BridgeStudioSnapshotResponse> crateApiStudioSaveInstructionsSettings({
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersSettingsSaveInstructionsSettings({
     required String settingsJson,
   });
 
-  Future<BridgeStudioSnapshotResponse> crateApiStudioSaveMcpSettings({
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersSettingsSaveMcpSettings({required String settingsJson});
+
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersSettingsSaveProviderSettings({
     required String settingsJson,
   });
 
-  Future<BridgeStudioSnapshotResponse> crateApiStudioSaveProviderSettings({
-    required String settingsJson,
-  });
-
-  Future<ConfigSavedResponse> crateApiStudioSaveRuntimePermissionMode({
+  Future<ConfigSavedResponse>
+  crateApiStudioHandlersSettingsSaveRuntimePermissionMode({
     required String mode,
   });
 
-  Future<BridgeStudioSnapshotResponse> crateApiStudioSaveSkillsSettings({
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersSettingsSaveSkillsSettings({
     required String settingsJson,
   });
 
-  Future<SettingsDraftResponse> crateApiStudioSaveStudioSettingsDraft({
-    required String section,
-    required String draftJson,
-  });
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersLifecycleSelectProject({required String projectId});
 
-  Future<BridgeStudioSnapshotResponse> crateApiStudioSelectProject({
-    required String projectId,
-  });
-
-  Future<BridgeStudioSnapshotResponse> crateApiStudioSetModelRole({
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersSessionSetModelRole({
     required String roleKey,
     required String providerId,
     required String model,
@@ -161,28 +181,31 @@ abstract class RustLibApi extends BaseApi {
     String? selectedSessionId,
   });
 
-  Future<BridgeSessionStateResponse> crateApiStudioSetSessionMode({
+  Future<BridgeSessionStateResponse>
+  crateApiStudioHandlersSessionSetSessionMode({
     required String sessionId,
     required String mode,
   });
 
-  Future<RuntimeSnapshot> crateApiStudioShutdownRuntime();
+  Future<RuntimeSnapshot> crateApiStudioHandlersLifecycleShutdownRuntime();
 
-  Future<RuntimeSnapshot> crateApiStudioStartRuntime();
+  Future<RuntimeSnapshot> crateApiStudioHandlersLifecycleStartRuntime();
 
-  Future<StopPromptResponse> crateApiStudioStopPrompt({
+  Future<StopPromptResponse> crateApiStudioHandlersPromptStopPrompt({
     required String sessionId,
   });
 
-  Future<SubmitPromptResponse> crateApiStudioSubmitPrompt({
+  Future<SubmitPromptResponse> crateApiStudioHandlersPromptSubmitPrompt({
     required String sessionId,
     required String prompt,
     required List<String> attachmentIds,
   });
 
-  Stream<BridgeEventEnvelope> crateApiStudioSubscribeGlobalEvents();
+  Stream<BridgeEventEnvelope>
+  crateApiStudioHandlersEventsSubscribeGlobalEvents();
 
-  Stream<BridgeEventEnvelope> crateApiStudioSubscribeSessionEvents({
+  Stream<BridgeEventEnvelope>
+  crateApiStudioHandlersEventsSubscribeSessionEvents({
     required String sessionId,
   });
 }
@@ -196,7 +219,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   });
 
   @override
-  Future<BridgeStudioSnapshotResponse> crateApiStudioArchiveProject({
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersLifecycleArchiveProject({
     required String projectId,
     String? selectedProjectId,
   }) {
@@ -217,21 +241,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_bridge_studio_snapshot_response,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioArchiveProjectConstMeta,
+        constMeta: kCrateApiStudioHandlersLifecycleArchiveProjectConstMeta,
         argValues: [projectId, selectedProjectId],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioArchiveProjectConstMeta =>
+  TaskConstMeta get kCrateApiStudioHandlersLifecycleArchiveProjectConstMeta =>
       const TaskConstMeta(
         debugName: "archive_project",
         argNames: ["projectId", "selectedProjectId"],
       );
 
   @override
-  Future<BridgeStudioSnapshotResponse> crateApiStudioArchiveSession({
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersSessionArchiveSession({
     required String sessionId,
     String? selectedSessionId,
   }) {
@@ -252,21 +277,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_bridge_studio_snapshot_response,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioArchiveSessionConstMeta,
+        constMeta: kCrateApiStudioHandlersSessionArchiveSessionConstMeta,
         argValues: [sessionId, selectedSessionId],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioArchiveSessionConstMeta =>
+  TaskConstMeta get kCrateApiStudioHandlersSessionArchiveSessionConstMeta =>
       const TaskConstMeta(
         debugName: "archive_session",
         argNames: ["sessionId", "selectedSessionId"],
       );
 
   @override
-  Future<BridgeStudioSnapshotResponse> crateApiStudioBootstrapStudio() {
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersLifecycleBootstrapStudio() {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -282,18 +308,55 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_bridge_studio_snapshot_response,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioBootstrapStudioConstMeta,
+        constMeta: kCrateApiStudioHandlersLifecycleBootstrapStudioConstMeta,
         argValues: [],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioBootstrapStudioConstMeta =>
+  TaskConstMeta get kCrateApiStudioHandlersLifecycleBootstrapStudioConstMeta =>
       const TaskConstMeta(debugName: "bootstrap_studio", argNames: []);
 
   @override
-  Future<BridgeStudioSnapshotResponse> crateApiStudioCreateSession({
+  Future<BridgeEventEnvelope> crateApiStudioTypesEventBridgeEventEnvelopeStale({
+    String? sessionId,
+    required BigInt laggedEvents,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_opt_String(sessionId, serializer);
+          sse_encode_u_64(laggedEvents, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 4,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bridge_event_envelope,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiStudioTypesEventBridgeEventEnvelopeStaleConstMeta,
+        argValues: [sessionId, laggedEvents],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateApiStudioTypesEventBridgeEventEnvelopeStaleConstMeta =>
+      const TaskConstMeta(
+        debugName: "bridge_event_envelope_stale",
+        argNames: ["sessionId", "laggedEvents"],
+      );
+
+  @override
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersSessionCreateSession({
     required String projectId,
     String? title,
   }) {
@@ -306,7 +369,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 4,
+            funcId: 5,
             port: port_,
           );
         },
@@ -314,21 +377,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_bridge_studio_snapshot_response,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioCreateSessionConstMeta,
+        constMeta: kCrateApiStudioHandlersSessionCreateSessionConstMeta,
         argValues: [projectId, title],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioCreateSessionConstMeta =>
+  TaskConstMeta get kCrateApiStudioHandlersSessionCreateSessionConstMeta =>
       const TaskConstMeta(
         debugName: "create_session",
         argNames: ["projectId", "title"],
       );
 
   @override
-  Future<RuntimeSnapshot> crateApiStudioInitializeRuntime() {
+  Future<RuntimeSnapshot> crateApiStudioHandlersLifecycleInitializeRuntime() {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -336,7 +399,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 5,
+            funcId: 6,
             port: port_,
           );
         },
@@ -344,18 +407,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_runtime_snapshot,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioInitializeRuntimeConstMeta,
+        constMeta: kCrateApiStudioHandlersLifecycleInitializeRuntimeConstMeta,
         argValues: [],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioInitializeRuntimeConstMeta =>
+  TaskConstMeta
+  get kCrateApiStudioHandlersLifecycleInitializeRuntimeConstMeta =>
       const TaskConstMeta(debugName: "initialize_runtime", argNames: []);
 
   @override
-  Future<SkillsResponse> crateApiStudioListDiscoveredSkills({
+  Future<SkillsResponse> crateApiStudioHandlersProvidersListDiscoveredSkills({
     required String projectId,
   }) {
     return handler.executeNormal(
@@ -366,7 +430,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 6,
+            funcId: 7,
             port: port_,
           );
         },
@@ -374,55 +438,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_skills_response,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioListDiscoveredSkillsConstMeta,
+        constMeta:
+            kCrateApiStudioHandlersProvidersListDiscoveredSkillsConstMeta,
         argValues: [projectId],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioListDiscoveredSkillsConstMeta =>
+  TaskConstMeta
+  get kCrateApiStudioHandlersProvidersListDiscoveredSkillsConstMeta =>
       const TaskConstMeta(
         debugName: "list_discovered_skills",
         argNames: ["projectId"],
       );
 
   @override
-  Future<ProviderUsagesResponse> crateApiStudioLoadProviderUsages() {
+  Future<ProviderUsagesResponse>
+  crateApiStudioHandlersProvidersLoadProviderUsages() {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 7,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_provider_usages_response,
-          decodeErrorData: sse_decode_AnyhowException,
-        ),
-        constMeta: kCrateApiStudioLoadProviderUsagesConstMeta,
-        argValues: [],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta get kCrateApiStudioLoadProviderUsagesConstMeta =>
-      const TaskConstMeta(debugName: "load_provider_usages", argNames: []);
-
-  @override
-  Future<BridgeSessionStateResponse> crateApiStudioLoadSessionState({
-    required String sessionId,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(sessionId, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -431,24 +468,55 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
+          decodeSuccessData: sse_decode_provider_usages_response,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiStudioHandlersProvidersLoadProviderUsagesConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateApiStudioHandlersProvidersLoadProviderUsagesConstMeta =>
+      const TaskConstMeta(debugName: "load_provider_usages", argNames: []);
+
+  @override
+  Future<BridgeSessionStateResponse>
+  crateApiStudioHandlersSessionLoadSessionState({required String sessionId}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(sessionId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 9,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
           decodeSuccessData: sse_decode_bridge_session_state_response,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioLoadSessionStateConstMeta,
+        constMeta: kCrateApiStudioHandlersSessionLoadSessionStateConstMeta,
         argValues: [sessionId],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioLoadSessionStateConstMeta =>
+  TaskConstMeta get kCrateApiStudioHandlersSessionLoadSessionStateConstMeta =>
       const TaskConstMeta(
         debugName: "load_session_state",
         argNames: ["sessionId"],
       );
 
   @override
-  Future<BridgeStudioEventsResponse> crateApiStudioLoadStudioEvents({
+  Future<BridgeStudioEventsResponse>
+  crateApiStudioHandlersEventsLoadStudioEvents({
     required String sessionId,
     PlatformInt64? afterSequence,
     PlatformInt64? limit,
@@ -463,7 +531,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 9,
+            funcId: 10,
             port: port_,
           );
         },
@@ -471,23 +539,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_bridge_studio_events_response,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioLoadStudioEventsConstMeta,
+        constMeta: kCrateApiStudioHandlersEventsLoadStudioEventsConstMeta,
         argValues: [sessionId, afterSequence, limit],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioLoadStudioEventsConstMeta =>
+  TaskConstMeta get kCrateApiStudioHandlersEventsLoadStudioEventsConstMeta =>
       const TaskConstMeta(
         debugName: "load_studio_events",
         argNames: ["sessionId", "afterSequence", "limit"],
       );
 
   @override
-  Future<BridgeStudioSnapshotResponse> crateApiStudioOpenProject({
-    required String path,
-  }) {
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersLifecycleOpenProject({required String path}) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -496,7 +563,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 10,
+            funcId: 11,
             port: port_,
           );
         },
@@ -504,18 +571,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_bridge_studio_snapshot_response,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioOpenProjectConstMeta,
+        constMeta: kCrateApiStudioHandlersLifecycleOpenProjectConstMeta,
         argValues: [path],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioOpenProjectConstMeta =>
+  TaskConstMeta get kCrateApiStudioHandlersLifecycleOpenProjectConstMeta =>
       const TaskConstMeta(debugName: "open_project", argNames: ["path"]);
 
   @override
-  Future<ResolveInteractionResponse> crateApiStudioResolveInteraction({
+  Future<ResolveInteractionResponse>
+  crateApiStudioHandlersPromptResolveInteraction({
     required String interactionId,
     required String resolutionJson,
   }) {
@@ -528,7 +596,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 11,
+            funcId: 12,
             port: port_,
           );
         },
@@ -536,54 +604,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_resolve_interaction_response,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioResolveInteractionConstMeta,
+        constMeta: kCrateApiStudioHandlersPromptResolveInteractionConstMeta,
         argValues: [interactionId, resolutionJson],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioResolveInteractionConstMeta =>
+  TaskConstMeta get kCrateApiStudioHandlersPromptResolveInteractionConstMeta =>
       const TaskConstMeta(
         debugName: "resolve_interaction",
         argNames: ["interactionId", "resolutionJson"],
       );
 
   @override
-  Future<BridgeStudioSnapshotResponse> crateApiStudioSaveGeneralSettings({
-    required String settingsJson,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(settingsJson, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 12,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_bridge_studio_snapshot_response,
-          decodeErrorData: sse_decode_AnyhowException,
-        ),
-        constMeta: kCrateApiStudioSaveGeneralSettingsConstMeta,
-        argValues: [settingsJson],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta get kCrateApiStudioSaveGeneralSettingsConstMeta =>
-      const TaskConstMeta(
-        debugName: "save_general_settings",
-        argNames: ["settingsJson"],
-      );
-
-  @override
-  Future<BridgeStudioSnapshotResponse> crateApiStudioSaveInstructionsSettings({
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersSettingsSaveGeneralSettings({
     required String settingsJson,
   }) {
     return handler.executeNormal(
@@ -602,21 +638,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_bridge_studio_snapshot_response,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioSaveInstructionsSettingsConstMeta,
+        constMeta: kCrateApiStudioHandlersSettingsSaveGeneralSettingsConstMeta,
         argValues: [settingsJson],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioSaveInstructionsSettingsConstMeta =>
+  TaskConstMeta
+  get kCrateApiStudioHandlersSettingsSaveGeneralSettingsConstMeta =>
       const TaskConstMeta(
-        debugName: "save_instructions_settings",
+        debugName: "save_general_settings",
         argNames: ["settingsJson"],
       );
 
   @override
-  Future<BridgeStudioSnapshotResponse> crateApiStudioSaveMcpSettings({
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersSettingsSaveInstructionsSettings({
     required String settingsJson,
   }) {
     return handler.executeNormal(
@@ -635,21 +673,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_bridge_studio_snapshot_response,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioSaveMcpSettingsConstMeta,
+        constMeta:
+            kCrateApiStudioHandlersSettingsSaveInstructionsSettingsConstMeta,
         argValues: [settingsJson],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioSaveMcpSettingsConstMeta =>
+  TaskConstMeta
+  get kCrateApiStudioHandlersSettingsSaveInstructionsSettingsConstMeta =>
       const TaskConstMeta(
-        debugName: "save_mcp_settings",
+        debugName: "save_instructions_settings",
         argNames: ["settingsJson"],
       );
 
   @override
-  Future<BridgeStudioSnapshotResponse> crateApiStudioSaveProviderSettings({
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersSettingsSaveMcpSettings({
     required String settingsJson,
   }) {
     return handler.executeNormal(
@@ -668,54 +709,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_bridge_studio_snapshot_response,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioSaveProviderSettingsConstMeta,
+        constMeta: kCrateApiStudioHandlersSettingsSaveMcpSettingsConstMeta,
         argValues: [settingsJson],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioSaveProviderSettingsConstMeta =>
+  TaskConstMeta get kCrateApiStudioHandlersSettingsSaveMcpSettingsConstMeta =>
       const TaskConstMeta(
-        debugName: "save_provider_settings",
+        debugName: "save_mcp_settings",
         argNames: ["settingsJson"],
       );
 
   @override
-  Future<ConfigSavedResponse> crateApiStudioSaveRuntimePermissionMode({
-    required String mode,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(mode, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 16,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_config_saved_response,
-          decodeErrorData: sse_decode_AnyhowException,
-        ),
-        constMeta: kCrateApiStudioSaveRuntimePermissionModeConstMeta,
-        argValues: [mode],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta get kCrateApiStudioSaveRuntimePermissionModeConstMeta =>
-      const TaskConstMeta(
-        debugName: "save_runtime_permission_mode",
-        argNames: ["mode"],
-      );
-
-  @override
-  Future<BridgeStudioSnapshotResponse> crateApiStudioSaveSkillsSettings({
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersSettingsSaveProviderSettings({
     required String settingsJson,
   }) {
     return handler.executeNormal(
@@ -726,7 +735,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 17,
+            funcId: 16,
             port: port_,
           );
         },
@@ -734,30 +743,66 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_bridge_studio_snapshot_response,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioSaveSkillsSettingsConstMeta,
+        constMeta: kCrateApiStudioHandlersSettingsSaveProviderSettingsConstMeta,
         argValues: [settingsJson],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioSaveSkillsSettingsConstMeta =>
+  TaskConstMeta
+  get kCrateApiStudioHandlersSettingsSaveProviderSettingsConstMeta =>
       const TaskConstMeta(
-        debugName: "save_skills_settings",
+        debugName: "save_provider_settings",
         argNames: ["settingsJson"],
       );
 
   @override
-  Future<SettingsDraftResponse> crateApiStudioSaveStudioSettingsDraft({
-    required String section,
-    required String draftJson,
+  Future<ConfigSavedResponse>
+  crateApiStudioHandlersSettingsSaveRuntimePermissionMode({
+    required String mode,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(section, serializer);
-          sse_encode_String(draftJson, serializer);
+          sse_encode_String(mode, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 17,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_config_saved_response,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta:
+            kCrateApiStudioHandlersSettingsSaveRuntimePermissionModeConstMeta,
+        argValues: [mode],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateApiStudioHandlersSettingsSaveRuntimePermissionModeConstMeta =>
+      const TaskConstMeta(
+        debugName: "save_runtime_permission_mode",
+        argNames: ["mode"],
+      );
+
+  @override
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersSettingsSaveSkillsSettings({
+    required String settingsJson,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(settingsJson, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -766,26 +811,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_settings_draft_response,
+          decodeSuccessData: sse_decode_bridge_studio_snapshot_response,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioSaveStudioSettingsDraftConstMeta,
-        argValues: [section, draftJson],
+        constMeta: kCrateApiStudioHandlersSettingsSaveSkillsSettingsConstMeta,
+        argValues: [settingsJson],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioSaveStudioSettingsDraftConstMeta =>
+  TaskConstMeta
+  get kCrateApiStudioHandlersSettingsSaveSkillsSettingsConstMeta =>
       const TaskConstMeta(
-        debugName: "save_studio_settings_draft",
-        argNames: ["section", "draftJson"],
+        debugName: "save_skills_settings",
+        argNames: ["settingsJson"],
       );
 
   @override
-  Future<BridgeStudioSnapshotResponse> crateApiStudioSelectProject({
-    required String projectId,
-  }) {
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersLifecycleSelectProject({required String projectId}) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -802,18 +847,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_bridge_studio_snapshot_response,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioSelectProjectConstMeta,
+        constMeta: kCrateApiStudioHandlersLifecycleSelectProjectConstMeta,
         argValues: [projectId],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioSelectProjectConstMeta =>
+  TaskConstMeta get kCrateApiStudioHandlersLifecycleSelectProjectConstMeta =>
       const TaskConstMeta(debugName: "select_project", argNames: ["projectId"]);
 
   @override
-  Future<BridgeStudioSnapshotResponse> crateApiStudioSetModelRole({
+  Future<BridgeStudioSnapshotResponse>
+  crateApiStudioHandlersSessionSetModelRole({
     required String roleKey,
     required String providerId,
     required String model,
@@ -840,20 +886,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_bridge_studio_snapshot_response,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioSetModelRoleConstMeta,
+        constMeta: kCrateApiStudioHandlersSessionSetModelRoleConstMeta,
         argValues: [roleKey, providerId, model, effort, selectedSessionId],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioSetModelRoleConstMeta => const TaskConstMeta(
-    debugName: "set_model_role",
-    argNames: ["roleKey", "providerId", "model", "effort", "selectedSessionId"],
-  );
+  TaskConstMeta get kCrateApiStudioHandlersSessionSetModelRoleConstMeta =>
+      const TaskConstMeta(
+        debugName: "set_model_role",
+        argNames: [
+          "roleKey",
+          "providerId",
+          "model",
+          "effort",
+          "selectedSessionId",
+        ],
+      );
 
   @override
-  Future<BridgeSessionStateResponse> crateApiStudioSetSessionMode({
+  Future<BridgeSessionStateResponse>
+  crateApiStudioHandlersSessionSetSessionMode({
     required String sessionId,
     required String mode,
   }) {
@@ -874,21 +928,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_bridge_session_state_response,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioSetSessionModeConstMeta,
+        constMeta: kCrateApiStudioHandlersSessionSetSessionModeConstMeta,
         argValues: [sessionId, mode],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioSetSessionModeConstMeta =>
+  TaskConstMeta get kCrateApiStudioHandlersSessionSetSessionModeConstMeta =>
       const TaskConstMeta(
         debugName: "set_session_mode",
         argNames: ["sessionId", "mode"],
       );
 
   @override
-  Future<RuntimeSnapshot> crateApiStudioShutdownRuntime() {
+  Future<RuntimeSnapshot> crateApiStudioHandlersLifecycleShutdownRuntime() {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -904,18 +958,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_runtime_snapshot,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioShutdownRuntimeConstMeta,
+        constMeta: kCrateApiStudioHandlersLifecycleShutdownRuntimeConstMeta,
         argValues: [],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioShutdownRuntimeConstMeta =>
+  TaskConstMeta get kCrateApiStudioHandlersLifecycleShutdownRuntimeConstMeta =>
       const TaskConstMeta(debugName: "shutdown_runtime", argNames: []);
 
   @override
-  Future<RuntimeSnapshot> crateApiStudioStartRuntime() {
+  Future<RuntimeSnapshot> crateApiStudioHandlersLifecycleStartRuntime() {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -931,18 +985,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_runtime_snapshot,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioStartRuntimeConstMeta,
+        constMeta: kCrateApiStudioHandlersLifecycleStartRuntimeConstMeta,
         argValues: [],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioStartRuntimeConstMeta =>
+  TaskConstMeta get kCrateApiStudioHandlersLifecycleStartRuntimeConstMeta =>
       const TaskConstMeta(debugName: "start_runtime", argNames: []);
 
   @override
-  Future<StopPromptResponse> crateApiStudioStopPrompt({
+  Future<StopPromptResponse> crateApiStudioHandlersPromptStopPrompt({
     required String sessionId,
   }) {
     return handler.executeNormal(
@@ -961,18 +1015,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_stop_prompt_response,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioStopPromptConstMeta,
+        constMeta: kCrateApiStudioHandlersPromptStopPromptConstMeta,
         argValues: [sessionId],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioStopPromptConstMeta =>
+  TaskConstMeta get kCrateApiStudioHandlersPromptStopPromptConstMeta =>
       const TaskConstMeta(debugName: "stop_prompt", argNames: ["sessionId"]);
 
   @override
-  Future<SubmitPromptResponse> crateApiStudioSubmitPrompt({
+  Future<SubmitPromptResponse> crateApiStudioHandlersPromptSubmitPrompt({
     required String sessionId,
     required String prompt,
     required List<String> attachmentIds,
@@ -995,20 +1049,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_submit_prompt_response,
           decodeErrorData: sse_decode_AnyhowException,
         ),
-        constMeta: kCrateApiStudioSubmitPromptConstMeta,
+        constMeta: kCrateApiStudioHandlersPromptSubmitPromptConstMeta,
         argValues: [sessionId, prompt, attachmentIds],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioSubmitPromptConstMeta => const TaskConstMeta(
-    debugName: "submit_prompt",
-    argNames: ["sessionId", "prompt", "attachmentIds"],
-  );
+  TaskConstMeta get kCrateApiStudioHandlersPromptSubmitPromptConstMeta =>
+      const TaskConstMeta(
+        debugName: "submit_prompt",
+        argNames: ["sessionId", "prompt", "attachmentIds"],
+      );
 
   @override
-  Stream<BridgeEventEnvelope> crateApiStudioSubscribeGlobalEvents() {
+  Stream<BridgeEventEnvelope>
+  crateApiStudioHandlersEventsSubscribeGlobalEvents() {
     final sink = RustStreamSink<BridgeEventEnvelope>();
     unawaited(
       handler.executeNormal(
@@ -1027,7 +1083,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             decodeSuccessData: sse_decode_unit,
             decodeErrorData: sse_decode_AnyhowException,
           ),
-          constMeta: kCrateApiStudioSubscribeGlobalEventsConstMeta,
+          constMeta:
+              kCrateApiStudioHandlersEventsSubscribeGlobalEventsConstMeta,
           argValues: [sink],
           apiImpl: this,
         ),
@@ -1036,14 +1093,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return sink.stream;
   }
 
-  TaskConstMeta get kCrateApiStudioSubscribeGlobalEventsConstMeta =>
+  TaskConstMeta
+  get kCrateApiStudioHandlersEventsSubscribeGlobalEventsConstMeta =>
       const TaskConstMeta(
         debugName: "subscribe_global_events",
         argNames: ["sink"],
       );
 
   @override
-  Stream<BridgeEventEnvelope> crateApiStudioSubscribeSessionEvents({
+  Stream<BridgeEventEnvelope>
+  crateApiStudioHandlersEventsSubscribeSessionEvents({
     required String sessionId,
   }) {
     final sink = RustStreamSink<BridgeEventEnvelope>();
@@ -1065,7 +1124,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             decodeSuccessData: sse_decode_unit,
             decodeErrorData: sse_decode_AnyhowException,
           ),
-          constMeta: kCrateApiStudioSubscribeSessionEventsConstMeta,
+          constMeta:
+              kCrateApiStudioHandlersEventsSubscribeSessionEventsConstMeta,
           argValues: [sessionId, sink],
           apiImpl: this,
         ),
@@ -1074,7 +1134,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return sink.stream;
   }
 
-  TaskConstMeta get kCrateApiStudioSubscribeSessionEventsConstMeta =>
+  TaskConstMeta
+  get kCrateApiStudioHandlersEventsSubscribeSessionEventsConstMeta =>
       const TaskConstMeta(
         debugName: "subscribe_session_events",
         argNames: ["sessionId", "sink"],
@@ -1455,21 +1516,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           event: dco_decode_box_autoadd_bridge_plan_lifecycle_dto(raw[1]),
         );
       case 12:
-        return BridgeEventPayload_SessionHandoffChanged();
-      case 13:
         return BridgeEventPayload_SessionListChanged(
           projectId: dco_decode_String(raw[1]),
           sessions: dco_decode_list_session_dto(raw[2]),
         );
-      case 14:
+      case 13:
         return BridgeEventPayload_McpHealthChanged(
           health: dco_decode_box_autoadd_bridge_mcp_health_dto(raw[1]),
         );
-      case 15:
+      case 14:
         return BridgeEventPayload_LspHealthChanged(
           health: dco_decode_box_autoadd_bridge_lsp_health_dto(raw[1]),
         );
-      case 16:
+      case 15:
         return BridgeEventPayload_Stale(laggedEvents: dco_decode_u_64(raw[1]));
       default:
         throw Exception("unreachable");
@@ -2298,18 +2357,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  SettingsDraftResponse dco_decode_settings_draft_response(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
-    return SettingsDraftResponse(
-      section: dco_decode_String(arr[0]),
-      saved: dco_decode_bool(arr[1]),
-    );
-  }
-
-  @protected
   SkillSummaryDto dco_decode_skill_summary_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -2878,25 +2925,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         );
         return BridgeEventPayload_PlanLifecycleChanged(event: var_event);
       case 12:
-        return BridgeEventPayload_SessionHandoffChanged();
-      case 13:
         var var_projectId = sse_decode_String(deserializer);
         var var_sessions = sse_decode_list_session_dto(deserializer);
         return BridgeEventPayload_SessionListChanged(
           projectId: var_projectId,
           sessions: var_sessions,
         );
-      case 14:
+      case 13:
         var var_health = sse_decode_box_autoadd_bridge_mcp_health_dto(
           deserializer,
         );
         return BridgeEventPayload_McpHealthChanged(health: var_health);
-      case 15:
+      case 14:
         var var_health = sse_decode_box_autoadd_bridge_lsp_health_dto(
           deserializer,
         );
         return BridgeEventPayload_LspHealthChanged(health: var_health);
-      case 16:
+      case 15:
         var var_laggedEvents = sse_decode_u_64(deserializer);
         return BridgeEventPayload_Stale(laggedEvents: var_laggedEvents);
       default:
@@ -4054,16 +4099,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  SettingsDraftResponse sse_decode_settings_draft_response(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_section = sse_decode_String(deserializer);
-    var var_saved = sse_decode_bool(deserializer);
-    return SettingsDraftResponse(section: var_section, saved: var_saved);
-  }
-
-  @protected
   SkillSummaryDto sse_decode_skill_summary_dto(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_name = sse_decode_String(deserializer);
@@ -4626,23 +4661,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       case BridgeEventPayload_PlanLifecycleChanged(event: final event):
         sse_encode_i_32(11, serializer);
         sse_encode_box_autoadd_bridge_plan_lifecycle_dto(event, serializer);
-      case BridgeEventPayload_SessionHandoffChanged():
-        sse_encode_i_32(12, serializer);
       case BridgeEventPayload_SessionListChanged(
         projectId: final projectId,
         sessions: final sessions,
       ):
-        sse_encode_i_32(13, serializer);
+        sse_encode_i_32(12, serializer);
         sse_encode_String(projectId, serializer);
         sse_encode_list_session_dto(sessions, serializer);
       case BridgeEventPayload_McpHealthChanged(health: final health):
-        sse_encode_i_32(14, serializer);
+        sse_encode_i_32(13, serializer);
         sse_encode_box_autoadd_bridge_mcp_health_dto(health, serializer);
       case BridgeEventPayload_LspHealthChanged(health: final health):
-        sse_encode_i_32(15, serializer);
+        sse_encode_i_32(14, serializer);
         sse_encode_box_autoadd_bridge_lsp_health_dto(health, serializer);
       case BridgeEventPayload_Stale(laggedEvents: final laggedEvents):
-        sse_encode_i_32(16, serializer);
+        sse_encode_i_32(15, serializer);
         sse_encode_u_64(laggedEvents, serializer);
     }
   }
@@ -5552,16 +5585,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_64(self.updatedAt, serializer);
     sse_encode_String(self.visibility, serializer);
     sse_encode_opt_String(self.parentSessionId, serializer);
-  }
-
-  @protected
-  void sse_encode_settings_draft_response(
-    SettingsDraftResponse self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.section, serializer);
-    sse_encode_bool(self.saved, serializer);
   }
 
   @protected

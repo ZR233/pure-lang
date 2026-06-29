@@ -1,24 +1,30 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::Duration;
 
-use lsp_types::{
-    DidChangeWatchedFilesParams, FileChangeType, FileEvent, ProgressParams, ProgressToken,
-    PublishDiagnosticsParams, Uri, WorkDoneProgressCreateParams,
-};
+use lsp_types::{FileChangeType, ProgressParams, PublishDiagnosticsParams};
 use serde_json::Value;
-use tokio::io::{AsyncWriteExt, BufReader};
+use tokio::io::BufReader;
 use tokio::process::{Child, ChildStdin, Command};
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::Mutex;
 
+use crate::client_config::{initialize_params, watched_file_event_params};
+use crate::client_retry::is_content_modified_error;
+pub(crate) use crate::client_retry::with_content_modified_retries;
+use crate::client_server::{
+    apply_progress_status, clear_progress_status, record_last_error_status,
+    respond_to_server_request,
+};
+use crate::client_wire::{
+    PendingRequests, fail_pending, notify_raw, request_raw, response_id, response_result,
+};
 use crate::diagnostics::DiagnosticSink;
-use crate::framing::{encode_message, read_message};
+use crate::framing::read_message;
 use crate::process::{configure_background_command, terminate_process_tree};
-use crate::server_definition::{LspServerDefinition, RUST_ANALYZER_ID};
+use crate::server_definition::LspServerDefinition;
 use crate::status::{LspClientRuntimeStatus, LspClientStatus};
 use crate::types::{LspResult, LspRuntimeError};
 
@@ -26,9 +32,6 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_FILE_SIZE_BYTES: u64 = 10_000_000;
-
-type PendingResponseSender = oneshot::Sender<LspResult<Value>>;
-type PendingRequests = Arc<Mutex<HashMap<i64, PendingResponseSender>>>;
 
 pub(crate) struct LspClient {
     definition: LspServerDefinition,
@@ -167,31 +170,6 @@ impl LspClient {
         Ok(())
     }
 
-    pub fn server_id(&self) -> &str {
-        &self.definition.id
-    }
-
-    pub fn server_name(&self) -> &str {
-        &self.definition.display_name
-    }
-
-    pub fn workspace_root(&self) -> &Path {
-        &self.definition.workspace_root
-    }
-
-    pub fn extension(&self) -> &[String] {
-        &self.definition.extensions
-    }
-
-    pub fn diagnostic_sink(&self) -> &DiagnosticSink {
-        &self.diagnostics
-    }
-
-    pub async fn file_created(&self, path: &Path) -> LspResult<()> {
-        self.notify_watched_file_event(path, FileChangeType::CREATED)
-            .await
-    }
-
     pub async fn file_changed(&self, path: &Path) -> LspResult<()> {
         self.notify_watched_file_event(path, FileChangeType::CHANGED)
             .await
@@ -289,12 +267,11 @@ impl LspClient {
                         Ok(0) | Err(_) => break,
                         Ok(_) => {
                             let line = line.trim();
-                            if !line.is_empty() {
-                                if is_error_stderr_line(line)
-                                    && record_last_error_status(&status, line.to_string()).await
-                                {
-                                    let _ = updates.send(());
-                                }
+                            if !line.is_empty()
+                                && is_error_stderr_line(line)
+                                && record_last_error_status(&status, line.to_string()).await
+                            {
+                                let _ = updates.send(());
                             }
                         }
                     }
@@ -411,376 +388,7 @@ impl LspClient {
     }
 }
 
-async fn request_raw(
-    stdin: &Arc<Mutex<Option<ChildStdin>>>,
-    pending: &PendingRequests,
-    next_id: &AtomicI64,
-    method: &str,
-    params: Value,
-    timeout: Duration,
-) -> LspResult<Value> {
-    let id = next_id.fetch_add(1, Ordering::Relaxed);
-    let (sender, receiver) = oneshot::channel();
-    pending.lock().await.insert(id, sender);
-    let write = write_message(
-        stdin,
-        serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": params,
-        }),
-    )
-    .await;
-    if let Err(error) = write {
-        pending.lock().await.remove(&id);
-        return Err(error);
-    }
-    match tokio::time::timeout(timeout, receiver).await {
-        Ok(Ok(result)) => result,
-        Ok(Err(_)) => Err(LspRuntimeError::Unavailable(format!(
-            "LSP request channel closed for {method}"
-        ))),
-        Err(_) => {
-            pending.lock().await.remove(&id);
-            Err(LspRuntimeError::Timeout(method.to_string()))
-        }
-    }
-}
-
-async fn notify_raw(
-    stdin: &Arc<Mutex<Option<ChildStdin>>>,
-    method: &str,
-    params: Value,
-) -> LspResult<()> {
-    write_message(
-        stdin,
-        serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params,
-        }),
-    )
-    .await
-}
-
-async fn write_message(stdin: &Arc<Mutex<Option<ChildStdin>>>, message: Value) -> LspResult<()> {
-    let bytes = encode_message(&message)?;
-    let mut guard = stdin.lock().await;
-    let stdin = guard
-        .as_mut()
-        .ok_or_else(|| LspRuntimeError::Unavailable("LSP stdin unavailable".to_string()))?;
-    stdin.write_all(&bytes).await?;
-    stdin.flush().await?;
-    Ok(())
-}
-
-async fn respond_to_server_request(
-    stdin: &Arc<Mutex<Option<ChildStdin>>>,
-    id: i64,
-    method: &str,
-    params: Option<&Value>,
-    server_id: &str,
-    status: &Arc<Mutex<LspClientStatus>>,
-    updates: &tokio::sync::broadcast::Sender<()>,
-) -> LspResult<()> {
-    let result = match method {
-        "workspace/configuration" => workspace_configuration_response(params, server_id),
-        "window/workDoneProgress/create" => {
-            if let Some(params) = params
-                && let Ok(params) =
-                    serde_json::from_value::<WorkDoneProgressCreateParams>(params.clone())
-                && register_progress_token_status(status, params.token).await
-            {
-                let _ = updates.send(());
-            }
-            Value::Null
-        }
-        "client/registerCapability" | "client/unregisterCapability" => Value::Null,
-        _ => Value::Null,
-    };
-    write_message(
-        stdin,
-        serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": result,
-        }),
-    )
-    .await
-}
-
-async fn register_progress_token_status(
-    status: &Arc<Mutex<LspClientStatus>>,
-    token: ProgressToken,
-) -> bool {
-    status.lock().await.register_progress_token(token)
-}
-
-async fn apply_progress_status(
-    status: &Arc<Mutex<LspClientStatus>>,
-    params: ProgressParams,
-) -> bool {
-    status.lock().await.apply_progress(params)
-}
-
-async fn clear_progress_status(status: &Arc<Mutex<LspClientStatus>>) -> bool {
-    status.lock().await.clear_progress()
-}
-
-async fn record_last_error_status(status: &Arc<Mutex<LspClientStatus>>, message: String) -> bool {
-    status.lock().await.record_error(message)
-}
-
-fn initialize_params(definition: &LspServerDefinition) -> Value {
-    let workspace_uri = crate::uri::path_to_file_uri(&definition.workspace_root);
-    let workspace_name = definition
-        .workspace_root
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("workspace");
-    serde_json::json!({
-        "processId": null,
-        "rootPath": definition.workspace_root,
-        "rootUri": workspace_uri,
-        "workspaceFolders": [{
-            "uri": workspace_uri,
-            "name": workspace_name,
-        }],
-        "capabilities": {
-            "window": {
-                "workDoneProgress": true,
-            },
-            "workspace": {
-                "configuration": true,
-                "didChangeWatchedFiles": {
-                    "dynamicRegistration": true,
-                },
-            },
-            "textDocument": {
-                "publishDiagnostics": {
-                    "relatedInformation": true,
-                    "codeDescription": true,
-                    "dataSupport": true,
-                },
-                "hover": {
-                    "contentFormat": ["markdown"],
-                },
-                "completion": {
-                    "completionItem": {
-                        "documentationFormat": ["markdown"],
-                    },
-                },
-                "definition": {},
-                "references": {},
-                "documentSymbol": {},
-                "implementation": {},
-                "callHierarchy": { "dynamicRegistration": false },
-            },
-            "general": {
-                "positionEncodings": ["utf-16"],
-            },
-        },
-        "initializationOptions": initialization_options(definition),
-    })
-}
-
-fn initialization_options(definition: &LspServerDefinition) -> Value {
-    if definition.id == RUST_ANALYZER_ID {
-        rust_analyzer_settings()
-    } else {
-        Value::Null
-    }
-}
-
-fn workspace_configuration_response(params: Option<&Value>, server_id: &str) -> Value {
-    let Some(items) = params
-        .and_then(|params| params.get("items"))
-        .and_then(Value::as_array)
-    else {
-        return serde_json::json!([]);
-    };
-    Value::Array(
-        items
-            .iter()
-            .map(|item| {
-                let section = item.get("section").and_then(Value::as_str);
-                configuration_value_for_section(server_id, section)
-            })
-            .collect(),
-    )
-}
-
-fn configuration_value_for_section(server_id: &str, section: Option<&str>) -> Value {
-    if server_id != RUST_ANALYZER_ID {
-        return Value::Null;
-    }
-    match section {
-        Some("rust-analyzer") | None => rust_analyzer_settings(),
-        Some("rust-analyzer.files") => serde_json::json!({ "watcher": "client" }),
-        Some("rust-analyzer.files.watcher") => serde_json::json!("client"),
-        Some(_) => Value::Null,
-    }
-}
-
-fn rust_analyzer_settings() -> Value {
-    serde_json::json!({
-        "files": {
-            "watcher": "client",
-        },
-    })
-}
-
 fn is_error_stderr_line(line: &str) -> bool {
     let line = line.to_ascii_lowercase();
     line.contains("warn") || line.contains("error")
-}
-
-fn watched_file_event_params(path: &Path, typ: FileChangeType) -> LspResult<Value> {
-    let uri = Uri::from_str(&crate::uri::path_to_file_uri(path))
-        .map_err(|error| LspRuntimeError::InvalidQuery(format!("invalid file URI: {error}")))?;
-    let params = DidChangeWatchedFilesParams {
-        changes: vec![FileEvent::new(uri, typ)],
-    };
-    Ok(serde_json::to_value(params)?)
-}
-
-fn response_id(value: &Value) -> Option<i64> {
-    value
-        .get("id")
-        .and_then(|id| id.as_i64().or_else(|| id.as_u64().map(|id| id as i64)))
-}
-
-fn response_result(value: Value) -> LspResult<Value> {
-    if let Some(error) = value.get("error") {
-        let code = error
-            .get("code")
-            .and_then(Value::as_i64)
-            .unwrap_or_default();
-        let message = error
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("LSP request failed")
-            .to_string();
-        return Err(LspRuntimeError::Server { code, message });
-    }
-    Ok(value.get("result").cloned().unwrap_or(Value::Null))
-}
-
-async fn fail_pending(pending: &PendingRequests, error: LspRuntimeError) {
-    let mut pending = pending.lock().await;
-    for (_, sender) in pending.drain() {
-        let _ = sender.send(Err(LspRuntimeError::Unavailable(error.to_string())));
-    }
-}
-
-pub(crate) fn is_content_modified_error(error: &LspRuntimeError) -> bool {
-    matches!(error, LspRuntimeError::Server { code: -32801, .. })
-}
-
-pub(crate) async fn with_content_modified_retries<F, Fut>(mut operation: F) -> LspResult<Value>
-where
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = LspResult<Value>>,
-{
-    let mut delay = Duration::from_millis(500);
-    for attempt in 0..=3 {
-        match operation().await {
-            Ok(value) => return Ok(value),
-            Err(error) if is_content_modified_error(&error) && attempt < 3 => {
-                tokio::time::sleep(delay).await;
-                delay *= 2;
-            }
-            Err(error) => return Err(error),
-        }
-    }
-    unreachable!("retry loop always returns")
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-    use crate::server_definition::RUST_ANALYZER_ID;
-
-    #[test]
-    fn initialize_params_configures_rust_analyzer_client_watcher() {
-        let params = initialize_params(&test_definition(RUST_ANALYZER_ID));
-
-        assert_eq!(
-            params["capabilities"]["window"]["workDoneProgress"],
-            serde_json::json!(true)
-        );
-        assert_eq!(
-            params["capabilities"]["workspace"]["configuration"],
-            serde_json::json!(true)
-        );
-        assert_eq!(
-            params["capabilities"]["workspace"]["didChangeWatchedFiles"]["dynamicRegistration"],
-            serde_json::json!(true)
-        );
-        assert_eq!(
-            params["initializationOptions"],
-            serde_json::json!({ "files": { "watcher": "client" } })
-        );
-    }
-
-    #[test]
-    fn workspace_configuration_returns_rust_analyzer_watcher_settings() {
-        let params = serde_json::json!({
-            "items": [
-                { "section": "rust-analyzer" },
-                { "section": "rust-analyzer.files" },
-                { "section": "rust-analyzer.files.watcher" },
-                { "section": "rust-analyzer.cargo" }
-            ]
-        });
-
-        let result = workspace_configuration_response(Some(&params), RUST_ANALYZER_ID);
-
-        assert_eq!(
-            result,
-            serde_json::json!([
-                { "files": { "watcher": "client" } },
-                { "watcher": "client" },
-                "client",
-                null
-            ])
-        );
-    }
-
-    #[tokio::test]
-    async fn with_content_modified_errors() {
-        let attempts = AtomicUsize::new(0);
-
-        let result = with_content_modified_retries(|| async {
-            if attempts.fetch_add(1, Ordering::SeqCst) < 2 {
-                return Err(LspRuntimeError::Server {
-                    code: -32801,
-                    message: "content modified".to_string(),
-                });
-            }
-            Ok(serde_json::json!({"ok": true}))
-        })
-        .await
-        .unwrap();
-
-        assert_eq!(attempts.load(Ordering::SeqCst), 3);
-        assert_eq!(result, serde_json::json!({"ok": true}));
-    }
-
-    fn test_definition(id: &str) -> LspServerDefinition {
-        LspServerDefinition {
-            id: id.to_string(),
-            display_name: id.to_string(),
-            command: id.to_string(),
-            args: Vec::new(),
-            extensions: vec![".rs".to_string()],
-            language_ids: vec!["rust".to_string()],
-            workspace_root: std::env::current_dir().unwrap(),
-        }
-    }
 }

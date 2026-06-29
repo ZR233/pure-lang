@@ -1,15 +1,10 @@
+mod convert;
+pub mod handlers;
+mod runtime;
+pub mod types;
+
 // Re-exports from submodules
-pub use super::convert::{
-    agent_bridge_dto, agent_event_bridge_dto, bridge_agent_snapshot, bridge_agent_timeline_event,
-    bridge_agent_timeline_payload, bridge_cost_amount, bridge_event_envelope, bridge_event_payload,
-    bridge_interaction_changed, bridge_interaction_payload, bridge_lsp_health, bridge_mcp_health,
-    bridge_message, bridge_part, bridge_part_delta, bridge_part_delta_field,
-    bridge_session_runtime, bridge_session_runtime_view, bridge_skill_activation, bridge_turn,
-    interaction_request_bridge_dto, is_session_state_event, mcp_transport_from_label,
-    normalized_string_list, project_dto, provider_settings_edit, provider_usage_dto,
-    resolve_interaction_response, runtime_snapshot, session_dto, session_summary_dto,
-};
-pub use super::handlers::{
+pub use self::handlers::{
     archive_project, archive_session, bootstrap_studio, create_session, initialize_runtime,
     list_discovered_skills, load_provider_usages, load_session_state, load_studio_events,
     open_project, resolve_interaction, save_general_settings, save_instructions_settings,
@@ -17,7 +12,7 @@ pub use super::handlers::{
     select_project, set_model_role, set_session_mode, shutdown_runtime, start_runtime, stop_prompt,
     submit_prompt, subscribe_global_events, subscribe_session_events,
 };
-pub use super::types::{
+pub use self::types::{
     BridgeActiveTurn, BridgeAgentSnapshotDto, BridgeAgentTimelineEventDto,
     BridgeAgentTimelinePayloadDto, BridgeEventEnvelope, BridgeEventPayload,
     BridgeInteractionChangedDto, BridgeInteractionPayloadDto, BridgeLspHealthDto,
@@ -59,7 +54,8 @@ mod tests {
             kind: StudioEventKind::Stale { lagged_events: 2 },
         };
 
-        let envelope = super::bridge_event_envelope(event).expect("event is bridge-visible");
+        let envelope =
+            super::convert::bridge_event_envelope(event).expect("event is bridge-visible");
 
         assert_eq!(envelope.session_id.as_deref(), Some("session-1"));
         assert_eq!(envelope.sequence, 7);
@@ -91,7 +87,7 @@ mod tests {
             },
         };
 
-        assert!(!super::bridge_visible_event(&event));
+        assert!(!super::convert::bridge_visible_event(&event));
     }
 
     #[test]
@@ -116,7 +112,7 @@ mod tests {
             },
         };
 
-        assert_eq!(super::bridge_event_envelope(event), None);
+        assert_eq!(super::convert::bridge_event_envelope(event), None);
     }
 
     #[test]
@@ -169,19 +165,19 @@ mod tests {
     #[test]
     fn mcp_transport_label_accepts_ui_values() {
         assert_eq!(
-            super::mcp_transport_from_label("streamableHttp"),
+            super::convert::mcp_transport_from_label("streamableHttp"),
             McpServerTransport::StreamableHttp
         );
         assert_eq!(
-            super::mcp_transport_from_label("streamable_http"),
+            super::convert::mcp_transport_from_label("streamable_http"),
             McpServerTransport::StreamableHttp
         );
         assert_eq!(
-            super::mcp_transport_from_label("http"),
+            super::convert::mcp_transport_from_label("http"),
             McpServerTransport::StreamableHttp
         );
         assert_eq!(
-            super::mcp_transport_from_label("stdio"),
+            super::convert::mcp_transport_from_label("stdio"),
             McpServerTransport::Stdio
         );
     }
@@ -189,7 +185,7 @@ mod tests {
     #[test]
     fn normalized_string_list_trims_sorts_and_deduplicates() {
         assert_eq!(
-            super::normalized_string_list(vec![
+            super::convert::normalized_string_list(vec![
                 " beta ".to_string(),
                 String::new(),
                 "alpha".to_string(),
