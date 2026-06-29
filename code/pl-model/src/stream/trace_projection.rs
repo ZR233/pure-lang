@@ -8,7 +8,7 @@ use pl_trace::{
 
 use crate::request::{CompletionTraceContext, ToolCall};
 
-use super::tool_stream::{ToolCallAccumulatorSnapshot, trace_tool_part_id};
+use super::tool_stream::ToolCallAccumulatorSnapshot;
 
 pub(crate) struct TraceProjection {
     session_id: String,
@@ -18,6 +18,7 @@ pub(crate) struct TraceProjection {
     started: HashMap<String, TracePart>,
     active_text_items: HashMap<String, String>,
     active_thinking_items: HashMap<String, String>,
+    active_tool_items: HashMap<String, String>,
     segment_occurrences: HashMap<String, u64>,
     events: Vec<TraceEvent>,
 }
@@ -32,6 +33,7 @@ impl TraceProjection {
             started: HashMap::new(),
             active_text_items: HashMap::new(),
             active_thinking_items: HashMap::new(),
+            active_tool_items: HashMap::new(),
             segment_occurrences: HashMap::new(),
             events: Vec::new(),
         }
@@ -269,8 +271,7 @@ impl TraceProjection {
 
     pub(crate) fn start_tool(&mut self, snapshot: &ToolCallAccumulatorSnapshot) -> Vec<AgentEvent> {
         let now = unix_seconds();
-        let item_id =
-            self.namespaced_item_id(&trace_tool_part_id(snapshot.call_id.as_ref(), &snapshot.id));
+        let item_id = self.active_tool_item_id(snapshot);
         if self.started.contains_key(&item_id) {
             return Vec::new();
         }
@@ -315,8 +316,7 @@ impl TraceProjection {
         delta: String,
     ) -> Vec<AgentEvent> {
         let now = unix_seconds();
-        let item_id =
-            self.namespaced_item_id(&trace_tool_part_id(snapshot.call_id.as_ref(), &snapshot.id));
+        let item_id = self.active_tool_item_id(snapshot);
         let mut events = self.start_tool(snapshot);
         if let Some(item) = self.started.get_mut(&item_id) {
             item.revision += 1;
@@ -389,7 +389,7 @@ impl TraceProjection {
 
     pub(crate) fn update_tool_trace(&mut self, call: &ToolCall) -> Vec<AgentEvent> {
         let now = unix_seconds();
-        let item_id = self.namespaced_item_id(&trace_tool_part_id(call.call_id.as_ref(), &call.id));
+        let item_id = self.active_tool_call_item_id(call);
         let turn_id = self.turn_id.clone();
         let sequence = self.sequence;
         let mut inserted = false;
@@ -469,6 +469,36 @@ impl TraceProjection {
         item_id
     }
 
+    fn active_tool_item_id(&mut self, snapshot: &ToolCallAccumulatorSnapshot) -> String {
+        let aliases = tool_aliases(snapshot.call_id.as_ref(), &snapshot.id, &snapshot.trace_id);
+        self.resolve_tool_item_id(aliases, &snapshot.trace_id)
+    }
+
+    fn active_tool_call_item_id(&mut self, call: &ToolCall) -> String {
+        let trace_id = trace_tool_part_id(call.call_id.as_ref(), &call.id);
+        let aliases = tool_aliases(call.call_id.as_ref(), &call.id, &trace_id);
+        self.resolve_tool_item_id(aliases, &trace_id)
+    }
+
+    fn resolve_tool_item_id(&mut self, aliases: Vec<String>, trace_id: &str) -> String {
+        if let Some(item_id) = aliases
+            .iter()
+            .find_map(|alias| self.active_tool_items.get(alias).cloned())
+        {
+            for alias in aliases {
+                self.active_tool_items
+                    .entry(alias)
+                    .or_insert_with(|| item_id.clone());
+            }
+            return item_id;
+        }
+        let item_id = self.namespaced_item_id(trace_id);
+        for alias in aliases {
+            self.active_tool_items.insert(alias, item_id.clone());
+        }
+        item_id
+    }
+
     fn next_segment_item_id(&mut self, segment: &str) -> String {
         let occurrence = self
             .segment_occurrences
@@ -540,6 +570,32 @@ fn thinking_provider_key(provider_item_id: &str, chunk_index: u32) -> String {
 
 fn thinking_provider_key_prefix(provider_item_id: &str) -> String {
     format!("reasoning:{provider_item_id}:")
+}
+
+fn trace_tool_part_id(call_id: Option<&String>, id: &str) -> String {
+    if !id.is_empty() {
+        return id.to_string();
+    }
+    call_id
+        .filter(|call_id| !call_id.is_empty())
+        .cloned()
+        .unwrap_or_else(|| "tool_call".to_string())
+}
+
+fn tool_aliases(call_id: Option<&String>, id: &str, trace_id: &str) -> Vec<String> {
+    let mut aliases = Vec::new();
+    push_tool_alias(&mut aliases, trace_id);
+    push_tool_alias(&mut aliases, id);
+    if let Some(call_id) = call_id {
+        push_tool_alias(&mut aliases, call_id);
+    }
+    aliases
+}
+
+fn push_tool_alias(aliases: &mut Vec<String>, value: &str) {
+    if !value.is_empty() && !aliases.iter().any(|alias| alias == value) {
+        aliases.push(value.to_string());
+    }
 }
 
 #[cfg(test)]
@@ -714,6 +770,7 @@ mod tests {
         let mut trace = trace();
         let snapshot = ToolCallAccumulatorSnapshot {
             id: "provider-tool-1".to_string(),
+            trace_id: "provider-tool-1".to_string(),
             call_id: Some("call-1".to_string()),
             name: "bash".to_string(),
             arguments: "{\"cmd\":\"ec".to_string(),
@@ -737,6 +794,56 @@ mod tests {
         assert_eq!(updated.revision, 1);
         let tool = updated.tool.expect("tool metadata");
         assert_eq!(tool.arguments, "{\"cmd\":\"echo hi\"}");
+    }
+
+    #[test]
+    fn late_provider_tool_id_keeps_original_trace_part_id() {
+        let mut trace = trace();
+        let early = ToolCallAccumulatorSnapshot {
+            id: "call-1".to_string(),
+            trace_id: "call-1".to_string(),
+            call_id: Some("call-1".to_string()),
+            name: "bash".to_string(),
+            arguments: "{\"cmd\":\"ec".to_string(),
+        };
+        let late = ToolCallAccumulatorSnapshot {
+            id: "provider-tool-1".to_string(),
+            trace_id: "call-1".to_string(),
+            call_id: Some("call-1".to_string()),
+            name: "bash".to_string(),
+            arguments: "{\"cmd\":\"echo hi\"}".to_string(),
+        };
+
+        let first_delta = trace
+            .append_tool_arguments_delta(&early, "{\"cmd\":\"ec".to_string())
+            .into_iter()
+            .find_map(tool_delta_item_id)
+            .expect("first tool delta");
+        let second_delta = trace
+            .append_tool_arguments_delta(&late, "ho hi\"}".to_string())
+            .into_iter()
+            .find_map(tool_delta_item_id)
+            .expect("second tool delta");
+        let updated = trace
+            .update_tool_trace(&ToolCall {
+                id: "provider-tool-1".to_string(),
+                call_id: Some("call-1".to_string()),
+                name: "bash".to_string(),
+                payload: ToolCallPayload::Function {
+                    arguments: serde_json::json!({"cmd": "echo hi"}),
+                },
+            })
+            .into_iter()
+            .find_map(started_tool_item)
+            .expect("updated tool snapshot");
+
+        assert_eq!(first_delta, "turn-1-call-1");
+        assert_eq!(second_delta, "turn-1-call-1");
+        assert_eq!(updated.item_id, "turn-1-call-1");
+        assert_eq!(updated.revision, 2);
+        let tool = updated.tool.expect("tool metadata");
+        assert_eq!(tool.provider_item_id.as_deref(), Some("provider-tool-1"));
+        assert_eq!(tool.call_id.as_deref(), Some("call-1"));
     }
 
     fn started_sequence(event: AgentEvent) -> Option<u64> {
@@ -767,6 +874,34 @@ mod tests {
     fn delta_item_id(event: AgentEvent) -> Option<String> {
         match event {
             AgentEvent::TracePartDelta { event } if event.kind == TracePartKind::Thinking => {
+                Some(event.item_id)
+            }
+            AgentEvent::TracePartStarted { .. }
+            | AgentEvent::TracePartCompleted { .. }
+            | AgentEvent::TracePartFailed { .. }
+            | AgentEvent::InteractionChanged { .. }
+            | AgentEvent::AgentRuntimeUpdated { .. }
+            | AgentEvent::AgentStateChanged { .. }
+            | AgentEvent::CollabAgentSpawnBegin { .. }
+            | AgentEvent::CollabAgentSpawnEnd { .. }
+            | AgentEvent::CollabAgentInteractionBegin { .. }
+            | AgentEvent::CollabAgentInteractionEnd { .. }
+            | AgentEvent::CollabWaitingBegin { .. }
+            | AgentEvent::CollabWaitingEnd { .. }
+            | AgentEvent::CollabCloseBegin { .. }
+            | AgentEvent::CollabCloseEnd { .. }
+            | AgentEvent::TurnInterrupted { .. }
+            | AgentEvent::TurnBudgetLimited { .. }
+            | AgentEvent::SkillActivated { .. }
+            | AgentEvent::Done
+            | AgentEvent::Error { .. }
+            | AgentEvent::TracePartDelta { .. } => None,
+        }
+    }
+
+    fn tool_delta_item_id(event: AgentEvent) -> Option<String> {
+        match event {
+            AgentEvent::TracePartDelta { event } if event.kind == TracePartKind::Tool => {
                 Some(event.item_id)
             }
             AgentEvent::TracePartStarted { .. }

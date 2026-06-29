@@ -1610,6 +1610,106 @@ mod tests {
     }
 
     #[test]
+    fn stream_accumulator_keeps_tool_trace_id_when_item_id_arrives_late() {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "turn-1-inf-0".to_string(),
+            plan_mode: false,
+            trace_sequence_base: 0,
+        }));
+
+        accumulator
+            .apply(
+                StreamEvent::ToolInputDelta {
+                    stream_id: None,
+                    item_id: String::new(),
+                    call_id: Some("call_1".to_string()),
+                    name: Some("read_file".to_string()),
+                    payload_delta: ToolCallDeltaPayload::FunctionArguments(
+                        r#"{"path":"Car"#.to_string(),
+                    ),
+                },
+                &event_tx,
+            )
+            .unwrap();
+        accumulator
+            .apply(
+                StreamEvent::ToolInputDelta {
+                    stream_id: None,
+                    item_id: "fc_1".to_string(),
+                    call_id: Some("call_1".to_string()),
+                    name: None,
+                    payload_delta: ToolCallDeltaPayload::FunctionArguments(
+                        r#"go.toml"}"#.to_string(),
+                    ),
+                },
+                &event_tx,
+            )
+            .unwrap();
+        accumulator
+            .apply(
+                StreamEvent::ToolCallReady {
+                    stream_id: None,
+                    item_id: "fc_1".to_string(),
+                    call_id: Some("call_1".to_string()),
+                    name: None,
+                    payload: None,
+                },
+                &event_tx,
+            )
+            .unwrap();
+
+        apply_completed(&mut accumulator, &event_tx);
+        let response = accumulator.finish(&event_tx).unwrap();
+
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].id, "fc_1");
+        assert_eq!(response.tool_calls[0].call_id.as_deref(), Some("call_1"));
+        assert_eq!(response.tool_calls[0].name, "read_file");
+        let item_ids = response
+            .trace_events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                TraceEventKind::TracePartStarted { item }
+                | TraceEventKind::TracePartCompleted { item }
+                    if item.kind == TracePartKind::Tool =>
+                {
+                    Some(item.item_id.as_str())
+                }
+                TraceEventKind::TracePartDelta { event } if event.kind == TracePartKind::Tool => {
+                    Some(event.item_id.as_str())
+                }
+                TraceEventKind::TracePartStarted { .. }
+                | TraceEventKind::TracePartCompleted { .. }
+                | TraceEventKind::TracePartDelta { .. }
+                | TraceEventKind::TracePartFailed { .. }
+                | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            item_ids
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>(),
+            std::collections::BTreeSet::from(["turn-1-call_1"])
+        );
+        assert_eq!(
+            item_ids,
+            vec![
+                "turn-1-call_1",
+                "turn-1-call_1",
+                "turn-1-call_1",
+                "turn-1-call_1"
+            ]
+        );
+    }
+
+    #[test]
     fn stream_trace_scope_rejects_similar_turn_prefix() {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
         let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {

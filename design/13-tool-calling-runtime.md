@@ -19,7 +19,7 @@ Core 会话中的 tool result metadata 同时保存两个字段：
 
 这些 metadata 必须通过 typed helper 写入和读取，不允许在 `pl-core`、`pl-model` 之间散落字符串 key。新增会话消息缺少 `tool_call_kind`、`tool_call_id` 或 Responses `call_id` 时，provider request 构造应返回协议错误；只有历史兼容路径可以把缺少 `tool_call_kind` 的旧 tool result 当作 function 读取。unknown `tool_call_kind` 一律是协议错误，不能静默回退到 function。
 
-Studio 工具 trace item id 使用最早稳定的 provider item id 或 runtime tool id 作为相关性锚点，再按 turn 做命名空间隔离；如果 provider 没有 item id，才回退到 `ToolCall.call_id` 或本地 fallback id。这样 Responses 在后续 delta/done 才补 `call_id` 时，不会把同一个工具调用拆成第二个 trace item。`StudioPart.partId` 不再透传该 trace id，而是在 trace part 首次进入 Studio runtime 时由 turn timeline actor 分配；`StudioToolPart.toolCallId` 表示 runtime 工具展示/执行 id，provider item id 使用 `StudioToolPart.providerItemId`，Responses call id 使用 `StudioToolPart.callId`。core trace 中的 `TracePart` 来自内部 `pl-trace` crate，只允许作为诊断输入，经 Studio runtime 转换为 actor-owned `message.part.updated` / `message.part.delta` 后才能进入 UI。
+Studio 工具 trace item id 使用最早稳定的 provider item id 或 runtime tool id 作为相关性锚点，再按 turn 做命名空间隔离；如果 provider 没有 item id，才回退到 `ToolCall.call_id` 或本地 fallback id。后续 delta/done 才补 `call_id` 或 provider item id 时，运行时必须把新身份作为同一工具调用的 correlation alias，继续更新原 trace item，不能把同一个工具调用拆成第二个 trace item。`StudioPart.partId` 不再透传该 trace id，而是在 trace part 首次进入 Studio runtime 时由 turn timeline actor 分配；`StudioToolPart.toolCallId` 表示 runtime 工具展示/执行 id，provider item id 使用 `StudioToolPart.providerItemId`，Responses call id 使用 `StudioToolPart.callId`。core trace 中的 `TracePart` 来自内部 `pl-trace` crate，只允许作为诊断输入，经 Studio runtime 转换为 actor-owned `message.part.updated` / `message.part.delta` 后才能进入 UI。
 
 ## 模型流完成语义
 
