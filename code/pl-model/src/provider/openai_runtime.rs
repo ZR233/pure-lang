@@ -891,6 +891,83 @@ mod tests {
     }
 
     #[test]
+    fn stream_accumulator_splits_repeated_tagged_commentary_and_final_blocks() {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+        let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "inf-1".to_string(),
+            plan_mode: false,
+            trace_sequence_base: 0,
+        }));
+        let mut decoder = tagged_decoder();
+
+        for delta in [
+            "<commentary>A</commentary><final>B</final>",
+            "<commentary>C</commentary><final>D</final>",
+        ] {
+            apply_tagged(
+                &mut decoder,
+                &mut accumulator,
+                final_delta("final", delta),
+                &event_tx,
+            );
+        }
+
+        apply_completed(&mut accumulator, &event_tx);
+        let response = accumulator.finish(&event_tx).unwrap();
+        let completed_text = response
+            .trace_events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                TraceEventKind::TracePartCompleted { item } if item.kind == TracePartKind::Text => {
+                    Some((
+                        item.item_id.as_str(),
+                        item.text_channel,
+                        item.content.as_str(),
+                    ))
+                }
+                TraceEventKind::TracePartStarted { .. }
+                | TraceEventKind::TracePartDelta { .. }
+                | TraceEventKind::TracePartCompleted { .. }
+                | TraceEventKind::TracePartFailed { .. }
+                | TraceEventKind::PlanLifecycleChanged { .. }
+                | TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. } => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(response.content.as_deref(), Some("BD"));
+        assert_eq!(response.raw_content.as_deref(), Some("BD"));
+        assert_eq!(
+            completed_text,
+            vec![
+                (
+                    "inf-1-text-commentary-1",
+                    Some(pl_trace::TraceTextChannel::Commentary),
+                    "A",
+                ),
+                (
+                    "inf-1-text-final-1",
+                    Some(pl_trace::TraceTextChannel::Final),
+                    "B",
+                ),
+                (
+                    "inf-1-text-commentary-2",
+                    Some(pl_trace::TraceTextChannel::Commentary),
+                    "C",
+                ),
+                (
+                    "inf-1-text-final-2",
+                    Some(pl_trace::TraceTextChannel::Final),
+                    "D",
+                ),
+            ]
+        );
+    }
+
+    #[test]
     fn stream_accumulator_keeps_untagged_reasoning_hidden() {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
         let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
