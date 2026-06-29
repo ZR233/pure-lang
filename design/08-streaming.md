@@ -20,7 +20,7 @@ part 类型固定为：
 - `inference`
 - `plan`
 
-每个 message snapshot 必须携带 `messageId`、`sessionId`、`turnId`、`role`、`status`、`createdAt` 和 `updatedAt`。每个 part snapshot 必须携带 `partId`、`messageId`、`sessionId`、`turnId`、`partType`、`order`、`revision`、`createdAt` 和 `updatedAt`。`StudioEventEnvelope.sequence` 是会话内唯一 durable 事件顺序号；part `order` 只表示同一 message 内展示顺序。后续 snapshot 只 upsert 同一个 part，并且不得改变该 part 的首次展示顺序。`revision` 是单个 part 的 live 内容修订号，start snapshot 为 0，delta 递增，terminal snapshot 携带最新 revision；旧历史或旧客户端缺失该字段时默认 0。delta 不携带第二套 durable 顺序，只表达对某个字段的 live 追加。
+每个 message snapshot 必须携带 `messageId`、`sessionId`、`turnId`、`role`、`status`、`createdAt` 和 `updatedAt`。message 首次投影后 `sessionId/turnId/role/createdAt` 不可变；后续 snapshot 只能推进 status、`updatedAt`、`completedAt`、error 和 metadata，terminal message 不得再被后续 snapshot 改写。每个 part snapshot 必须携带 `partId`、`messageId`、`sessionId`、`turnId`、`partType`、`order`、`revision`、`createdAt` 和 `updatedAt`。`StudioEventEnvelope.sequence` 是会话内唯一 durable 事件顺序号；part `order` 只表示同一 message 内展示顺序。后续 snapshot 只 upsert 同一个 part，并且不得改变该 part 的首次展示顺序。`revision` 是单个 part 的 live 内容修订号，start snapshot 为 0，delta 递增，terminal snapshot 携带最新 revision；旧历史或旧客户端缺失该字段时默认 0。delta payload 只携带 `partId/revision/field/delta/chunkIndex`，不携带第二套 message/session 身份或 durable 顺序，只表达对某个 part 字段的 live 追加。
 
 `text` part 必须携带 `textChannel`，固定为：
 

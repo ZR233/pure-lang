@@ -465,7 +465,8 @@ class StudioController extends AsyncNotifier<StudioState> {
     });
     var latest = current;
     for (final event in _sessionLoadBuffer) {
-      if (!_targetsSelectedSession(latest, event)) {
+      if (!_targetsSelectedSession(latest, event) ||
+          _isDuplicateDurableEvent(latest, event)) {
         continue;
       }
       latest = _withEventCursor(_reduceEvent(latest, event), event);
