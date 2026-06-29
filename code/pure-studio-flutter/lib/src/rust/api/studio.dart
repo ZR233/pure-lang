@@ -995,8 +995,6 @@ class BridgeStudioMessageProjectionDto {
 }
 
 class BridgeStudioPartDeltaDto {
-  final String sessionId;
-  final String messageId;
   final String partId;
   final BigInt revision;
   final String field;
@@ -1004,8 +1002,6 @@ class BridgeStudioPartDeltaDto {
   final int? chunkIndex;
 
   const BridgeStudioPartDeltaDto({
-    required this.sessionId,
-    required this.messageId,
     required this.partId,
     required this.revision,
     required this.field,
@@ -1015,8 +1011,6 @@ class BridgeStudioPartDeltaDto {
 
   @override
   int get hashCode =>
-      sessionId.hashCode ^
-      messageId.hashCode ^
       partId.hashCode ^
       revision.hashCode ^
       field.hashCode ^
@@ -1028,8 +1022,6 @@ class BridgeStudioPartDeltaDto {
       identical(this, other) ||
       other is BridgeStudioPartDeltaDto &&
           runtimeType == other.runtimeType &&
-          sessionId == other.sessionId &&
-          messageId == other.messageId &&
           partId == other.partId &&
           revision == other.revision &&
           field == other.field &&

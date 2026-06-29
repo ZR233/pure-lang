@@ -343,8 +343,6 @@ pub struct StudioFilePart {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioPartDelta {
-    pub session_id: String,
-    pub message_id: String,
     pub part_id: String,
     #[serde(default)]
     pub revision: u64,

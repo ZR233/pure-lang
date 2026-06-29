@@ -207,6 +207,79 @@ void main() {
     expect(state.partOverlaysBySession['session-1'], isEmpty);
   });
 
+  test('timeline deltas route by envelope session and part snapshot', () async {
+    final api = _FakeStudioApi(_emptyState());
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(studioControllerProvider.future);
+    api.emitSession(
+      _messageUpdatedEvent(
+        sessionId: 'session-1',
+        message: {
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'role': 'assistant',
+          'status': 'streaming',
+          'createdAt': 1,
+          'updatedAt': 1,
+        },
+      ),
+    );
+    api.emitSession(
+      _partUpdatedEvent(
+        sessionId: 'session-1',
+        part: {
+          'partId': 'part-1',
+          'messageId': 'turn-1:assistant',
+          'sessionId': 'session-1',
+          'turnId': 'turn-1',
+          'partType': 'text',
+          'order': 0,
+          'revision': 0,
+          'status': 'streaming',
+          'createdAt': 1,
+          'updatedAt': 1,
+          'textChannel': 'commentary',
+          'text': '',
+        },
+      ),
+    );
+
+    api.emitSession(
+      _partDeltaEvent(
+        sessionId: 'session-1',
+        delta: {
+          'partId': 'part-1',
+          'revision': 1,
+          'field': 'text',
+          'delta': 'v2',
+        },
+      ),
+    );
+    api.emitSession(
+      _partDeltaEvent(
+        sessionId: 'session-1',
+        delta: {
+          'sessionId': 'other-session',
+          'messageId': 'other-message',
+          'partId': 'part-1',
+          'revision': 2,
+          'field': 'text',
+          'delta': '-safe',
+        },
+      ),
+    );
+    await _pumpFrameBatch();
+
+    final state = container.read(studioControllerProvider).requireValue;
+    expect(state.selectedTimelineRows.single.part!.text, 'v2-safe');
+    expect(state.partOverlaysBySession['other-session'], isNull);
+  });
+
   test('part reducers leave message snapshots untouched', () async {
     final api = _FakeStudioApi(_emptyState());
     final container = ProviderContainer(
@@ -1153,8 +1226,6 @@ void main() {
         createdAt: 1,
         payload: frb.BridgeEventPayload.messagePartDelta(
           delta: frb.BridgeStudioPartDeltaDto(
-            sessionId: 'session-1',
-            messageId: 'message-1',
             partId: 'part-1',
             revision: BigInt.from(4),
             field: 'text',
@@ -3263,12 +3334,7 @@ StudioBridgeEvent _partDeltaEvent({
   return StudioBridgeEvent(
     sessionId: sessionId,
     sequence: sequence,
-    payload: MessagePartDeltaPayload(
-      delta: timelinePartDeltaFromJson({
-        ...delta,
-        if (!delta.containsKey('sessionId')) 'sessionId': sessionId,
-      }),
-    ),
+    payload: MessagePartDeltaPayload(delta: timelinePartDeltaFromJson(delta)),
   );
 }
 

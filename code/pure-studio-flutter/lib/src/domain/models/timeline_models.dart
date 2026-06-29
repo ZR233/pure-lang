@@ -337,8 +337,6 @@ class TimelinePartSnapshot {
 
 class TimelinePartDelta {
   const TimelinePartDelta({
-    required this.sessionId,
-    required this.messageId,
     required this.partId,
     required this.revision,
     required this.field,
@@ -346,8 +344,6 @@ class TimelinePartDelta {
     this.chunkIndex,
   });
 
-  final String sessionId;
-  final String messageId;
   final String partId;
   final int revision;
   final String field;

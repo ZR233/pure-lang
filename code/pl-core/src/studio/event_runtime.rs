@@ -403,7 +403,7 @@ impl StudioEventRuntime {
             return Ok(None);
         };
         let turn_id = event.turn_id.clone();
-        let delta = studio_part_delta(session_id, event, part_id, revision);
+        let delta = studio_part_delta(event, part_id, revision);
         self.emit_live(
             None,
             Some(session_id.to_string()),
@@ -566,7 +566,6 @@ fn trace_part_delta_is_user_text(event: &TracePartDeltaEvent) -> bool {
 }
 
 fn studio_part_delta(
-    session_id: &str,
     event: TracePartDeltaEvent,
     part_id: String,
     revision: u64,
@@ -586,8 +585,6 @@ fn studio_part_delta(
         | TraceDelta::Plan { .. } => None,
     };
     StudioPartDelta {
-        session_id: session_id.to_string(),
-        message_id: message_id_for_trace_delta(&event),
         part_id,
         revision,
         field,

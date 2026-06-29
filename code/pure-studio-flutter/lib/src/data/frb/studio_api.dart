@@ -388,9 +388,6 @@ final class MessagePartDeltaPayload extends StudioBridgeEventPayload {
   const MessagePartDeltaPayload({required this.delta});
 
   final TimelinePartDelta delta;
-
-  @override
-  String get sessionId => delta.sessionId;
 }
 
 final class InteractionChangedPayload extends StudioBridgeEventPayload {
@@ -674,8 +671,6 @@ TimelinePartDelta _timelinePartDeltaFromFrb(
   frb.BridgeStudioPartDeltaDto delta,
 ) {
   return TimelinePartDelta(
-    sessionId: delta.sessionId,
-    messageId: delta.messageId,
     partId: delta.partId,
     revision: delta.revision.toInt(),
     field: _timelineDeltaField(delta.field),
@@ -1107,8 +1102,6 @@ TimelinePartSnapshot timelinePartSnapshotFromJson(
 TimelinePartDelta timelinePartDeltaFromJson(Object? value) {
   final json = _map(value);
   return TimelinePartDelta(
-    sessionId: _string(json['sessionId']),
-    messageId: _string(json['messageId']),
     partId: _string(json['partId']),
     revision: _int(json['revision']),
     field: _timelineDeltaField(json['field']),

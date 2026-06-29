@@ -2701,8 +2701,6 @@ mod tests {
                 created_at: 10,
                 kind: StudioEventKind::MessagePartDelta {
                     delta: StudioPartDelta {
-                        session_id: "session-1".to_string(),
-                        message_id: "message-1".to_string(),
                         part_id: "part-1".to_string(),
                         revision: 1,
                         field: StudioPartDeltaField::Text,
