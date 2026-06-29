@@ -6,7 +6,18 @@
 // Static analysis wrongly picks the IO variant, thus ignore this
 // ignore_for_file: argument_type_not_assignable
 
-import 'api/studio.dart';
+import 'api/studio/handlers/events.dart';
+import 'api/studio/handlers/lifecycle.dart';
+import 'api/studio/handlers/prompt.dart';
+import 'api/studio/handlers/providers.dart';
+import 'api/studio/handlers/session.dart';
+import 'api/studio/handlers/settings.dart';
+import 'api/studio/types/agent.dart';
+import 'api/studio/types/event.dart';
+import 'api/studio/types/interaction.dart';
+import 'api/studio/types/message.dart';
+import 'api/studio/types/response.dart';
+import 'api/studio/types/runtime.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'frb_generated.dart';
@@ -390,9 +401,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SessionDto dco_decode_session_dto(dynamic raw);
-
-  @protected
-  SettingsDraftResponse dco_decode_settings_draft_response(dynamic raw);
 
   @protected
   SkillSummaryDto dco_decode_skill_summary_dto(dynamic raw);
@@ -883,11 +891,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SessionDto sse_decode_session_dto(SseDeserializer deserializer);
-
-  @protected
-  SettingsDraftResponse sse_decode_settings_draft_response(
-    SseDeserializer deserializer,
-  );
 
   @protected
   SkillSummaryDto sse_decode_skill_summary_dto(SseDeserializer deserializer);
@@ -1486,12 +1489,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_session_dto(SessionDto self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_settings_draft_response(
-    SettingsDraftResponse self,
-    SseSerializer serializer,
-  );
 
   @protected
   void sse_encode_skill_summary_dto(

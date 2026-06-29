@@ -2,8 +2,6 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::LspRuntimeError;
-
 /// Pure-Lang 内置 rust-analyzer 服务器标识
 pub(crate) const RUST_ANALYZER_ID: &str = "rust-analyzer";
 
@@ -29,20 +27,5 @@ impl LspServerDefinition {
             .position(|candidate| candidate == &extension)
             .and_then(|index| self.language_ids.get(index))
             .map(String::as_str)
-    }
-
-    /// 检查是否支持指定的文件扩展名。
-    pub fn supports_extension(&self, extension: &str) -> bool {
-        self.extensions.iter().any(|e| e == extension)
-    }
-
-    /// 验证服务器定义是否合法。
-    pub fn validate(&self) -> Result<(), LspRuntimeError> {
-        if self.command.is_empty() {
-            return Err(LspRuntimeError::Unavailable(
-                "LSP server command is empty".to_string(),
-            ));
-        }
-        Ok(())
     }
 }

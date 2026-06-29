@@ -298,11 +298,7 @@ class FrbStudioApi implements StudioApi {
     String section,
     Map<String, Object?> draft,
   ) async {
-    await _ensureReady();
-    await frb.saveStudioSettingsDraft(
-      section: section,
-      draftJson: jsonEncode(draft),
-    );
+    return;
   }
 }
 
@@ -539,9 +535,6 @@ StudioBridgeEventPayload _bridgePayloadFromFrb(
       SkillActivatedPayload(name: activation.name),
     frb.BridgeEventPayload_PlanLifecycleChanged(:final event) =>
       PlanLifecycleChangedPayload(state: event.state),
-    frb.BridgeEventPayload_SessionHandoffChanged() => throw FormatException(
-      'sessionHandoffChanged is not a Flutter bridge event',
-    ),
     frb.BridgeEventPayload_SessionListChanged(
       :final projectId,
       :final sessions,

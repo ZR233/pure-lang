@@ -1,0 +1,710 @@
+use pretty_assertions::assert_eq;
+
+use crate::stream::event::{
+    ModelBlockContent, ModelBlockField, ModelBlockKind, ToolInputPayloadKind,
+};
+
+use super::*;
+
+fn single_event(event: &SseStreamEvent) -> Option<StreamEvent> {
+    let events = process_sse_events(event);
+    assert!(events.len() <= 1, "expected at most one event: {events:?}");
+    events.into_iter().next()
+}
+
+fn chat_event(delta: serde_json::Value) -> SseStreamEvent {
+    serde_json::from_value(serde_json::json!({
+        "choices": [{
+            "delta": delta,
+            "finish_reason": null
+        }]
+    }))
+    .unwrap()
+}
+
+#[test]
+fn process_chat_reasoning_content_as_thinking_delta() {
+    let event = chat_event(serde_json::json!({
+        "reasoning_content": "先比较整数位。"
+    }));
+
+    match single_event(&event) {
+        Some(StreamEvent::ReasoningRawDelta { delta, .. }) => {
+            assert_eq!(delta, "先比较整数位。");
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
+fn process_chat_content_as_output_text_delta() {
+    let event = chat_event(serde_json::json!({
+        "content": "9.11 更大。"
+    }));
+
+    match single_event(&event) {
+        Some(StreamEvent::BlockDelta {
+            field: ModelBlockField::Text,
+            delta,
+            ..
+        }) => {
+            assert_eq!(delta, "9.11 更大。");
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
+fn process_chat_reasoning_and_content_from_same_chunk() {
+    let event = chat_event(serde_json::json!({
+        "reasoning_content": "先比较整数位。",
+        "content": "<final>9.11 更大。</final>"
+    }));
+
+    match process_sse_events(&event).as_slice() {
+        [
+            StreamEvent::ReasoningRawDelta {
+                delta: reasoning, ..
+            },
+            StreamEvent::BlockDelta {
+                field: ModelBlockField::Text,
+                delta: content,
+                ..
+            },
+        ] => {
+            assert_eq!(reasoning, "先比较整数位。");
+            assert_eq!(content, "<final>9.11 更大。</final>");
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
+fn process_chat_completed_reads_cached_prompt_tokens() {
+    let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "choices": [{
+            "delta": {},
+            "finish_reason": "stop"
+        }],
+        "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
+            "prompt_tokens_details": {
+                "cached_tokens": 35
+            }
+        }
+    }))
+    .unwrap();
+
+    match process_sse_events(&event).as_slice() {
+        [
+            StreamEvent::Usage(usage),
+            StreamEvent::Completed { response_id: None },
+        ] => {
+            assert_eq!(usage.cached_prompt_tokens, 35);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
+fn process_responses_marks_summary_and_raw_reasoning() {
+    let summary: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.reasoning_summary_text.delta",
+        "item_id": "rs_1",
+        "summary_index": 1,
+        "delta": "摘要"
+    }))
+    .unwrap();
+    let raw: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.reasoning_text.delta",
+        "item_id": "rt_1",
+        "content_index": 2,
+        "delta": "内部推理"
+    }))
+    .unwrap();
+
+    match single_event(&summary) {
+        Some(StreamEvent::BlockDelta {
+            id,
+            kind: ModelBlockKind::ReasoningSummary,
+            field: ModelBlockField::ReasoningSummary,
+            section_index,
+            delta,
+        }) => {
+            assert_eq!(id, "rs_1");
+            assert_eq!(section_index, Some(1));
+            assert_eq!(delta, "摘要");
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+    match single_event(&raw) {
+        Some(StreamEvent::ReasoningRawDelta {
+            id,
+            content_index,
+            delta,
+        }) => {
+            assert_eq!(id, "rt_1");
+            assert_eq!(content_index, 2);
+            assert_eq!(delta, "内部推理");
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
+fn responses_decoder_preserves_native_text_phase_and_completed_text() {
+    let mut decoder = OpenAiStreamDecoder::new(true);
+    let commentary_added: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.output_item.added",
+        "item": {
+            "id": "msg_progress",
+            "type": "message",
+            "role": "assistant",
+            "phase": "commentary",
+            "content": []
+        }
+    }))
+    .unwrap();
+    match decoder.decode(&commentary_added).as_slice() {
+        [
+            StreamEvent::BlockOpened {
+                id,
+                kind:
+                    ModelBlockKind::Text {
+                        channel: TraceTextChannel::Commentary,
+                    },
+                ..
+            },
+        ] => {
+            assert_eq!(id, "msg_progress");
+        }
+        other => panic!("unexpected events: {other:?}"),
+    }
+
+    let commentary_delta: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.output_text.delta",
+        "item_id": "msg_progress",
+        "delta": "正在检查。"
+    }))
+    .unwrap();
+    match decoder.decode(&commentary_delta).as_slice() {
+        [
+            StreamEvent::BlockDelta {
+                id,
+                kind:
+                    ModelBlockKind::Text {
+                        channel: TraceTextChannel::Commentary,
+                    },
+                field: ModelBlockField::Text,
+                delta,
+                ..
+            },
+        ] => {
+            assert_eq!(id, "msg_progress");
+            assert_eq!(delta, "正在检查。");
+        }
+        other => panic!("unexpected events: {other:?}"),
+    }
+
+    let final_done: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.output_item.done",
+        "item": {
+            "id": "msg_final",
+            "type": "message",
+            "role": "assistant",
+            "phase": "final_answer",
+            "content": [
+                {"type": "output_text", "text": "完成。"}
+            ]
+        }
+    }))
+    .unwrap();
+    match decoder.decode(&final_done).as_slice() {
+        [
+            StreamEvent::BlockOpened {
+                id: opened_id,
+                kind:
+                    ModelBlockKind::Text {
+                        channel: TraceTextChannel::Final,
+                    },
+                ..
+            },
+            StreamEvent::BlockClosed {
+                id,
+                kind:
+                    ModelBlockKind::Text {
+                        channel: TraceTextChannel::Final,
+                    },
+                authoritative_content: Some(ModelBlockContent::Text(authoritative_text)),
+                ..
+            },
+        ] => {
+            assert_eq!(opened_id, "msg_final");
+            assert_eq!(id, "msg_final");
+            assert_eq!(authoritative_text, "完成。");
+        }
+        other => panic!("unexpected events: {other:?}"),
+    }
+}
+
+#[test]
+fn responses_decoder_tracks_reasoning_summary_lifecycle() {
+    let mut decoder = OpenAiStreamDecoder::new(true);
+    let reasoning_added: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.output_item.added",
+        "item": {
+            "id": "rs_1",
+            "type": "reasoning",
+            "summary": []
+        }
+    }))
+    .unwrap();
+    match decoder.decode(&reasoning_added).as_slice() {
+        [
+            StreamEvent::BlockOpened {
+                id,
+                kind: ModelBlockKind::ReasoningSummary,
+                ..
+            },
+        ] => {
+            assert_eq!(id, "rs_1");
+        }
+        other => panic!("unexpected events: {other:?}"),
+    }
+
+    let summary_delta: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.reasoning_summary_text.delta",
+        "item_id": "rs_1",
+        "summary_index": 0,
+        "delta": "先检查输入。"
+    }))
+    .unwrap();
+    match decoder.decode(&summary_delta).as_slice() {
+        [
+            StreamEvent::BlockDelta {
+                id,
+                kind: ModelBlockKind::ReasoningSummary,
+                field: ModelBlockField::ReasoningSummary,
+                section_index: Some(0),
+                delta,
+            },
+        ] => {
+            assert_eq!(id, "rs_1");
+            assert_eq!(delta, "先检查输入。");
+        }
+        other => panic!("unexpected events: {other:?}"),
+    }
+
+    let reasoning_done: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.output_item.done",
+        "item": {
+            "id": "rs_1",
+            "type": "reasoning",
+            "summary": [
+                {"type": "summary_text", "text": "最终摘要。"}
+            ]
+        }
+    }))
+    .unwrap();
+    match decoder.decode(&reasoning_done).as_slice() {
+        [
+            StreamEvent::BlockClosed {
+                id,
+                kind: ModelBlockKind::ReasoningSummary,
+                authoritative_content: Some(ModelBlockContent::ReasoningSummary(summary)),
+                ..
+            },
+        ] => {
+            assert_eq!(id, "rs_1");
+            assert_eq!(summary, &vec!["最终摘要。".to_string()]);
+        }
+        other => panic!("unexpected events: {other:?}"),
+    }
+}
+
+#[test]
+fn responses_decoder_closes_content_at_tool_boundary_once() {
+    let mut decoder = OpenAiStreamDecoder::new(true);
+    let reasoning_delta: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.reasoning_summary_text.delta",
+        "item_id": "thinking",
+        "summary_index": 0,
+        "delta": "before tool"
+    }))
+    .unwrap();
+    assert_eq!(decoder.decode(&reasoning_delta).len(), 2);
+
+    let text_delta: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.output_text.delta",
+        "item_id": "msg_1",
+        "delta": "before "
+    }))
+    .unwrap();
+    assert_eq!(decoder.decode(&text_delta).len(), 2);
+
+    let tool_added: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.output_item.added",
+        "item": {
+            "type": "function_call",
+            "id": "fc_1",
+            "call_id": "call_1",
+            "name": "list_files"
+        }
+    }))
+    .unwrap();
+    let boundary_events = decoder.decode(&tool_added);
+    assert_eq!(boundary_events.len(), 3);
+    assert!(boundary_events.iter().any(|event| matches!(
+        event,
+        StreamEvent::BlockClosed {
+            id,
+            kind: ModelBlockKind::ReasoningSummary,
+            ..
+        } if id == "thinking"
+    )));
+    assert!(boundary_events.iter().any(|event| matches!(
+        event,
+        StreamEvent::BlockClosed {
+            id,
+            kind:
+                ModelBlockKind::Text {
+                    channel: TraceTextChannel::Final,
+                },
+            ..
+        } if id == "msg_1"
+    )));
+    assert!(boundary_events.iter().any(|event| matches!(
+        event,
+        StreamEvent::ToolInputStarted { item_id, .. } if item_id == "fc_1"
+    )));
+
+    let completed: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.completed",
+        "response": {"id": "resp_1"}
+    }))
+    .unwrap();
+    match decoder.decode(&completed).as_slice() {
+        [
+            StreamEvent::Completed {
+                response_id: Some(response_id),
+            },
+        ] => assert_eq!(response_id, "resp_1"),
+        other => panic!("unexpected events: {other:?}"),
+    }
+}
+
+#[test]
+fn responses_decoder_allocates_new_blocks_after_tool_boundary() {
+    let mut decoder = OpenAiStreamDecoder::new(true);
+    let reasoning_delta: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.reasoning_summary_text.delta",
+        "item_id": "thinking",
+        "summary_index": 0,
+        "delta": "before tool"
+    }))
+    .unwrap();
+    let first_reasoning = decoder.decode(&reasoning_delta);
+    assert!(matches!(
+        first_reasoning.as_slice(),
+        [
+            StreamEvent::BlockOpened {
+                id: opened_id,
+                kind: ModelBlockKind::ReasoningSummary,
+                ..
+            },
+            StreamEvent::BlockDelta {
+                id: delta_id,
+                kind: ModelBlockKind::ReasoningSummary,
+                ..
+            },
+        ] if opened_id == "thinking" && delta_id == opened_id
+    ));
+
+    let text_delta: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.output_text.delta",
+        "item_id": "msg_1",
+        "delta": "before "
+    }))
+    .unwrap();
+    let first_text = decoder.decode(&text_delta);
+    assert!(matches!(
+        first_text.as_slice(),
+        [
+            StreamEvent::BlockOpened {
+                id: opened_id,
+                kind:
+                    ModelBlockKind::Text {
+                        channel: TraceTextChannel::Final,
+                    },
+                ..
+            },
+            StreamEvent::BlockDelta {
+                id: delta_id,
+                kind:
+                    ModelBlockKind::Text {
+                        channel: TraceTextChannel::Final,
+                    },
+                ..
+            },
+        ] if opened_id == "msg_1" && delta_id == opened_id
+    ));
+
+    let tool_added: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.output_item.added",
+        "item": {
+            "type": "function_call",
+            "id": "fc_1",
+            "call_id": "call_1",
+            "name": "list_files"
+        }
+    }))
+    .unwrap();
+    let _ = decoder.decode(&tool_added);
+
+    let second_reasoning = decoder.decode(&reasoning_delta);
+    assert!(matches!(
+        second_reasoning.as_slice(),
+        [
+            StreamEvent::BlockOpened {
+                id: opened_id,
+                kind: ModelBlockKind::ReasoningSummary,
+                ..
+            },
+            StreamEvent::BlockDelta {
+                id: delta_id,
+                kind: ModelBlockKind::ReasoningSummary,
+                ..
+            },
+        ] if opened_id == "thinking#2" && delta_id == opened_id
+    ));
+
+    let second_text = decoder.decode(&text_delta);
+    assert!(matches!(
+        second_text.as_slice(),
+        [
+            StreamEvent::BlockOpened {
+                id: opened_id,
+                kind:
+                    ModelBlockKind::Text {
+                        channel: TraceTextChannel::Final,
+                    },
+                ..
+            },
+            StreamEvent::BlockDelta {
+                id: delta_id,
+                kind:
+                    ModelBlockKind::Text {
+                        channel: TraceTextChannel::Final,
+                    },
+                ..
+            },
+        ] if opened_id == "msg_1#2" && delta_id == opened_id
+    ));
+}
+
+#[test]
+fn responses_decoder_reopens_text_block_when_phase_arrives_late() {
+    let mut decoder = OpenAiStreamDecoder::new(true);
+    let default_delta: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.output_text.delta",
+        "item_id": "msg_1",
+        "delta": "default "
+    }))
+    .unwrap();
+    let first_text = decoder.decode(&default_delta);
+    assert!(matches!(
+        first_text.as_slice(),
+        [
+            StreamEvent::BlockOpened {
+                id: opened_id,
+                kind:
+                    ModelBlockKind::Text {
+                        channel: TraceTextChannel::Final,
+                    },
+                ..
+            },
+            StreamEvent::BlockDelta {
+                id: delta_id,
+                kind:
+                    ModelBlockKind::Text {
+                        channel: TraceTextChannel::Final,
+                    },
+                ..
+            },
+        ] if opened_id == "msg_1" && delta_id == opened_id
+    ));
+
+    let commentary_added: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.output_item.added",
+        "item": {
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "phase": "commentary",
+            "content": []
+        }
+    }))
+    .unwrap();
+    let channel_boundary = decoder.decode(&commentary_added);
+    assert!(matches!(
+        channel_boundary.as_slice(),
+        [
+            StreamEvent::BlockClosed {
+                id: closed_id,
+                kind:
+                    ModelBlockKind::Text {
+                        channel: TraceTextChannel::Final,
+                    },
+                ..
+            },
+            StreamEvent::BlockOpened {
+                id: opened_id,
+                kind:
+                    ModelBlockKind::Text {
+                        channel: TraceTextChannel::Commentary,
+                    },
+                ..
+            },
+        ] if closed_id == "msg_1" && opened_id == "msg_1#2"
+    ));
+
+    let commentary_delta: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.output_text.delta",
+        "item_id": "msg_1",
+        "delta": "commentary"
+    }))
+    .unwrap();
+    match decoder.decode(&commentary_delta).as_slice() {
+        [
+            StreamEvent::BlockDelta {
+                id,
+                kind:
+                    ModelBlockKind::Text {
+                        channel: TraceTextChannel::Commentary,
+                    },
+                delta,
+                ..
+            },
+        ] => {
+            assert_eq!(id, "msg_1#2");
+            assert_eq!(delta, "commentary");
+        }
+        other => panic!("unexpected events: {other:?}"),
+    }
+}
+
+#[test]
+fn process_responses_custom_tool_delta() {
+    let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.custom_tool_call_input.delta",
+        "item_id": "ctc_1",
+        "call_id": "call_1",
+        "delta": "*** Begin Patch\n"
+    }))
+    .unwrap();
+
+    match single_event(&event) {
+        Some(StreamEvent::ToolInputDelta {
+            item_id,
+            call_id,
+            payload_delta: ToolCallDeltaPayload::CustomInput(delta),
+            ..
+        }) => {
+            assert_eq!(item_id, "ctc_1");
+            assert_eq!(call_id.as_deref(), Some("call_1"));
+            assert_eq!(delta, "*** Begin Patch\n");
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
+fn process_chat_custom_tool_delta() {
+    let event = chat_event(serde_json::json!({
+        "tool_calls": [{
+            "index": 0,
+            "id": "call_1",
+            "type": "custom",
+            "custom": {
+                "name": "apply_patch",
+                "input": "*** Begin Patch\n"
+            }
+        }]
+    }));
+
+    match single_event(&event) {
+        Some(StreamEvent::ToolInputDelta {
+            stream_id,
+            item_id,
+            name,
+            payload_delta: ToolCallDeltaPayload::CustomInput(delta),
+            ..
+        }) => {
+            assert_eq!(stream_id.as_deref(), Some("chat_tool_call:0"));
+            assert_eq!(item_id, "call_1");
+            assert_eq!(name.as_deref(), Some("apply_patch"));
+            assert_eq!(delta, "*** Begin Patch\n");
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
+fn process_chat_followup_tool_delta_keeps_stream_id_without_item_id() {
+    let event = chat_event(serde_json::json!({
+        "tool_calls": [{
+            "index": 0,
+            "function": {
+                "arguments": "{\"path\":\"Cargo.toml\"}"
+            }
+        }]
+    }));
+
+    match single_event(&event) {
+        Some(StreamEvent::ToolInputDelta {
+            stream_id,
+            item_id,
+            name,
+            payload_delta: ToolCallDeltaPayload::FunctionArguments(delta),
+            ..
+        }) => {
+            assert_eq!(stream_id.as_deref(), Some("chat_tool_call:0"));
+            assert_eq!(item_id, "");
+            assert_eq!(name, None);
+            assert_eq!(delta, "{\"path\":\"Cargo.toml\"}");
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
+fn process_responses_output_item_added_captures_tool_name() {
+    let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.output_item.added",
+        "item": {
+            "type": "custom_tool_call",
+            "id": "ctc_1",
+            "call_id": "call_1",
+            "name": "apply_patch"
+        }
+    }))
+    .unwrap();
+
+    match single_event(&event) {
+        Some(StreamEvent::ToolInputStarted {
+            item_id,
+            call_id,
+            name,
+            payload_kind,
+            ..
+        }) => {
+            assert_eq!(item_id, "ctc_1");
+            assert_eq!(call_id.as_deref(), Some("call_1"));
+            assert_eq!(name.as_deref(), Some("apply_patch"));
+            assert_eq!(payload_kind, ToolInputPayloadKind::CustomInput);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
