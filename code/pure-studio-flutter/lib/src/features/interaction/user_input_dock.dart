@@ -8,8 +8,14 @@ import 'interaction_payload.dart';
 import 'interaction_widgets.dart';
 
 class UserInputDock extends ConsumerStatefulWidget {
-  const UserInputDock({required this.payload, this.trailing, super.key});
+  const UserInputDock({
+    required this.interactionId,
+    required this.payload,
+    this.trailing,
+    super.key,
+  });
 
+  final String interactionId;
   final InteractionPayloadSnapshot payload;
   final Widget? trailing;
 
@@ -33,8 +39,8 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
   @override
   void didUpdateWidget(covariant UserInputDock oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (_questionSignature(oldWidget.payload.questions) !=
-        _questionSignature(widget.payload.questions)) {
+    if (_dockSignature(oldWidget.interactionId, oldWidget.payload.questions) !=
+        _dockSignature(widget.interactionId, widget.payload.questions)) {
       _resetQuestionDraft(widget.payload.questions);
     }
   }
@@ -68,6 +74,7 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
       _index = index;
     }
     final question = questions[index];
+    final key = _questionKey(question, index);
     final total = questions.length;
     final answeredCount = questions.where(_answered).length;
     final isLast = index >= total - 1;
@@ -124,17 +131,17 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
           const SizedBox(height: 12),
           _QuestionStep(
             question: question,
-            controller: _textControllers[question.id]!,
-            selected: _selectedOptions[question.id] ?? <String>{},
+            controller: _textControllers[key]!,
+            selected: _selectedOptions[key] ?? <String>{},
             onOptionChanged: (label, selected) {
               setState(() {
-                final values = _selectedOptions[question.id] ?? <String>{};
+                final values = _selectedOptions[key] ?? <String>{};
                 if (selected) {
                   values.add(label);
                 } else {
                   values.remove(label);
                 }
-                _selectedOptions[question.id] = values;
+                _selectedOptions[key] = values;
               });
             },
             onTextChanged: (_) => setState(() {}),
@@ -151,35 +158,43 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
     _textControllers
       ..clear()
       ..addEntries(
-        questions.map(
-          (question) => MapEntry(question.id, TextEditingController()),
+        questions.indexed.map(
+          (entry) => MapEntry(
+            _questionKey(entry.$2, entry.$1),
+            TextEditingController(),
+          ),
         ),
       );
     _selectedOptions
       ..clear()
       ..addEntries(
-        questions.map((question) => MapEntry(question.id, <String>{})),
+        questions.indexed.map(
+          (entry) => MapEntry(_questionKey(entry.$2, entry.$1), <String>{}),
+        ),
       );
     _index = 0;
   }
 
   bool _answered(UserQuestionView question) {
-    final selected = _selectedOptions[question.id] ?? const <String>{};
-    final text = _textControllers[question.id]?.text.trim() ?? '';
+    final index = widget.payload.questions.indexOf(question);
+    final key = _questionKey(question, index);
+    final selected = _selectedOptions[key] ?? const <String>{};
+    final text = _textControllers[key]?.text.trim() ?? '';
     return selected.isNotEmpty || text.isNotEmpty;
   }
 
   Map<String, Object> _answers() {
     final answers = <String, Object>{};
-    for (final question in widget.payload.questions) {
-      final values = <String>[
-        ...(_selectedOptions[question.id] ?? const <String>{}),
-      ];
-      final text = _textControllers[question.id]?.text.trim() ?? '';
+    for (final entry in widget.payload.questions.indexed) {
+      final index = entry.$1;
+      final question = entry.$2;
+      final key = _questionKey(question, index);
+      final values = <String>[...(_selectedOptions[key] ?? const <String>{})];
+      final text = _textControllers[key]?.text.trim() ?? '';
       if ((question.isOther || question.options.isEmpty) && text.isNotEmpty) {
         values.add(text);
       }
-      answers[question.id] = {'answers': values};
+      answers[key] = {'answers': values};
     }
     return answers;
   }
@@ -482,8 +497,24 @@ class _OptionMark extends StatelessWidget {
   }
 }
 
-String _questionSignature(List<UserQuestionView> questions) {
-  return questions
-      .map((question) => '${question.id}:${question.options.length}')
-      .join('|');
+String _dockSignature(String interactionId, List<UserQuestionView> questions) {
+  return [
+    interactionId,
+    ...questions.indexed.map(
+      (entry) => [
+        _questionKey(entry.$2, entry.$1),
+        entry.$2.header,
+        entry.$2.question,
+        entry.$2.isOther,
+        entry.$2.isSecret,
+        for (final option in entry.$2.options)
+          '${option.label}\u{1f}${option.description}',
+      ].join('\u{1e}'),
+    ),
+  ].join('\u{1d}');
+}
+
+String _questionKey(UserQuestionView question, int index) {
+  final id = question.id.trim();
+  return id.isEmpty ? 'answer_$index' : id;
 }

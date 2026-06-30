@@ -8,6 +8,12 @@ import 'settings_models.dart';
 import 'studio_enums.dart';
 import 'timeline_models.dart';
 
+class _StudioStateUnset {
+  const _StudioStateUnset();
+}
+
+const _studioStateUnset = _StudioStateUnset();
+
 class StudioState {
   const StudioState({
     required this.projects,
@@ -148,15 +154,15 @@ class StudioState {
     Map<String, Map<String, TimelineAgentEvent>>? agentTimelineEventsBySession,
     Map<String, Map<String, StudioAgentView>>? agentsBySession,
     List<ProviderSettingsView>? providers,
-    String? defaultProviderId,
+    Object? defaultProviderId = _studioStateUnset,
     List<ProviderUsageView>? providerUsages,
     List<RoleSettingsView>? roles,
     List<McpServerSettingsView>? mcpServers,
     InstructionsSettingsView? instructions,
     SkillsSettingsView? skills,
     GeneralSettingsView? general,
-    String? selectedProjectId,
-    String? selectedSessionId,
+    Object? selectedProjectId = _studioStateUnset,
+    Object? selectedSessionId = _studioStateUnset,
     PermissionMode? permissionMode,
     TurnPhase? turnPhase,
     SessionRuntimeView? runtime,
@@ -176,15 +182,21 @@ class StudioState {
           agentTimelineEventsBySession ?? this.agentTimelineEventsBySession,
       agentsBySession: agentsBySession ?? this.agentsBySession,
       providers: providers ?? this.providers,
-      defaultProviderId: defaultProviderId ?? this.defaultProviderId,
+      defaultProviderId: identical(defaultProviderId, _studioStateUnset)
+          ? this.defaultProviderId
+          : defaultProviderId as String?,
       providerUsages: providerUsages ?? this.providerUsages,
       roles: roles ?? this.roles,
       mcpServers: mcpServers ?? this.mcpServers,
       instructions: instructions ?? this.instructions,
       skills: skills ?? this.skills,
       general: general ?? this.general,
-      selectedProjectId: selectedProjectId ?? this.selectedProjectId,
-      selectedSessionId: selectedSessionId ?? this.selectedSessionId,
+      selectedProjectId: identical(selectedProjectId, _studioStateUnset)
+          ? this.selectedProjectId
+          : selectedProjectId as String?,
+      selectedSessionId: identical(selectedSessionId, _studioStateUnset)
+          ? this.selectedSessionId
+          : selectedSessionId as String?,
       permissionMode: permissionMode ?? this.permissionMode,
       turnPhase: turnPhase ?? this.turnPhase,
       runtime: runtime ?? this.runtime,

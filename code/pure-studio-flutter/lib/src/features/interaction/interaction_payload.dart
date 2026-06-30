@@ -116,7 +116,7 @@ class UserQuestionView {
         .toList();
     final id = value['id']?.toString().trim() ?? '';
     return UserQuestionView(
-      id: id.isEmpty ? 'answer' : id,
+      id: id,
       header: value['header']?.toString() ?? 'Input',
       question: value['question']?.toString() ?? '',
       isOther: value['isOther'] == true || value['is_other'] == true,

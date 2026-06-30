@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use pl_model::{
-    CompletionRequest, ModelProvider, ReasoningConfig, SharedModelProvider, TokenUsage,
-};
+use pl_model::{CompletionRequest, ModelProvider, ReasoningConfig, TokenUsage};
 use pl_protocol::{ContentPart, Message, MessageContent, MessageRole, PureError, Result};
 use pl_trace::AgentEventSender;
 
@@ -28,8 +26,8 @@ pub(crate) enum CompactionOutcome {
     Compacted { usage: TokenUsage },
 }
 
-pub(crate) struct ContextCompactionRequest<'a> {
-    pub provider: &'a SharedModelProvider,
+pub(crate) struct ContextCompactionRequest<'a, P: ModelProvider + ?Sized> {
+    pub provider: &'a P,
     pub model: &'a str,
     pub request_instructions: &'a str,
     pub request_messages: &'a [Message],
@@ -40,7 +38,7 @@ pub(crate) struct ContextCompactionRequest<'a> {
 
 pub(crate) async fn maybe_compact_session(
     session: &mut CoreSession,
-    request: ContextCompactionRequest<'_>,
+    request: ContextCompactionRequest<'_, impl ModelProvider + ?Sized>,
 ) -> Result<CompactionOutcome> {
     let ContextCompactionRequest {
         provider,
@@ -272,11 +270,13 @@ fn estimate_text_tokens(text: &str) -> u64 {
 mod tests {
     use super::*;
     use crate::core::progress::{ProgressEmitter, ProgressVerbosity};
-    use pl_model::{ModelInfo, ProviderInfo, create_provider_with_models};
+    use pl_model::{
+        CompletionResponse, FinishReason, ModelCapabilities, ModelInfo, ProviderCapabilities,
+        ProviderInfo,
+    };
     use pl_trace::{AgentEvent, TracePartSource};
     use pretty_assertions::assert_eq;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpListener;
+    use std::sync::{Arc, Mutex};
 
     fn text_message(role: MessageRole, text: &str) -> Message {
         Message {
@@ -332,30 +332,11 @@ mod tests {
 
     #[tokio::test]
     async fn context_compaction_retry_emits_runtime_progress() {
-        let summary_sse = concat!(
-            "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_summary\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
-            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_summary\",\"delta\":\"summary\"}\n\n",
-            "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_summary\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"summary\"}]}}\n\n",
-            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
-            "data: [DONE]\n\n"
-        );
-        let (base_url, handle) = serve_http_responses(vec![
-            http_response(
-                "400 Bad Request",
-                "text/plain",
-                "context token limit exceeded",
-            ),
-            http_response("200 OK", "text/event-stream", summary_sse),
-        ])
-        .await;
-        let mut provider_info = ProviderInfo::openai(Some(base_url));
-        provider_info.bearer_token = Some("test-token".to_string());
-        provider_info.default_model = "compact-test".to_string();
         let mut model = ModelInfo::fallback("compact-test");
         model.context_window = Some(100);
         model.max_context_window = Some(100);
         model.auto_compact_token_limit = Some(1);
-        let provider = create_provider_with_models(provider_info, vec![model]).unwrap();
+        let provider = FakeCompactionProvider::new(model);
         let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
         let mut progress =
             ProgressEmitter::new(event_tx.clone(), "turn-compact", ProgressVerbosity::Normal);
@@ -380,7 +361,8 @@ mod tests {
         .unwrap();
 
         assert!(matches!(outcome, CompactionOutcome::Compacted { .. }));
-        assert_eq!(handle.await.unwrap(), 2);
+        let recorded_messages = provider.recorded_message_counts();
+        assert_eq!(recorded_messages, vec![4, 3]);
         assert_eq!(
             runtime_progress_texts(&mut event_rx),
             vec![
@@ -412,58 +394,95 @@ mod tests {
         texts
     }
 
-    async fn serve_http_responses(
-        responses: Vec<String>,
-    ) -> (String, tokio::task::JoinHandle<usize>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let handle = tokio::spawn(async move {
-            let mut served = 0;
-            for response in responses {
-                let (mut socket, _) = listener.accept().await.unwrap();
-                read_http_request(&mut socket).await;
-                socket.write_all(response.as_bytes()).await.unwrap();
-                socket.shutdown().await.unwrap();
-                served += 1;
-            }
-            served
-        });
-
-        (format!("http://{addr}"), handle)
+    #[derive(Debug)]
+    struct FakeCompactionProvider {
+        info: ProviderInfo,
+        model: ModelInfo,
+        calls: Arc<Mutex<Vec<CompletionRequest>>>,
     }
 
-    async fn read_http_request(socket: &mut tokio::net::TcpStream) {
-        let mut buffer = Vec::new();
-        let mut temp = [0_u8; 1024];
-        let (header_end, content_length) = loop {
-            let n = socket.read(&mut temp).await.unwrap();
-            assert_ne!(n, 0);
-            buffer.extend_from_slice(&temp[..n]);
-            if let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
-                let headers = String::from_utf8_lossy(&buffer[..header_end]);
-                let content_length = headers
-                    .lines()
-                    .find_map(|line| {
-                        let (name, value) = line.split_once(':')?;
-                        name.eq_ignore_ascii_case("content-length")
-                            .then(|| value.trim().parse::<usize>().ok())?
-                    })
-                    .unwrap_or(0);
-                break (header_end, content_length);
+    impl FakeCompactionProvider {
+        fn new(model: ModelInfo) -> Self {
+            let mut info = ProviderInfo::openai(Some("http://example.invalid".to_string()));
+            info.default_model = model.slug.clone();
+            Self {
+                info,
+                model,
+                calls: Arc::new(Mutex::new(Vec::new())),
             }
-        };
+        }
 
-        while buffer.len() < header_end + 4 + content_length {
-            let n = socket.read(&mut temp).await.unwrap();
-            assert_ne!(n, 0);
-            buffer.extend_from_slice(&temp[..n]);
+        fn recorded_message_counts(&self) -> Vec<usize> {
+            self.calls
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|request| request.messages.len())
+                .collect()
         }
     }
 
-    fn http_response(status: &str, content_type: &str, body: &str) -> String {
-        format!(
-            "HTTP/1.1 {status}\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-            body.len()
-        )
+    impl ModelProvider for FakeCompactionProvider {
+        fn info(&self) -> &ProviderInfo {
+            &self.info
+        }
+
+        fn capabilities(&self) -> ProviderCapabilities {
+            ProviderCapabilities::STREAMING
+        }
+
+        async fn stream_complete(
+            &self,
+            request: CompletionRequest,
+            _event_tx: AgentEventSender,
+        ) -> Result<CompletionResponse> {
+            let mut calls = self.calls.lock().unwrap();
+            calls.push(request);
+            if calls.len() == 1 {
+                return Err(PureError::LlmError(
+                    "context token limit exceeded".to_string(),
+                ));
+            }
+            Ok(CompletionResponse {
+                content: Some("summary".to_string()),
+                raw_content: Some("summary".to_string()),
+                reasoning_content: None,
+                tool_calls: Vec::new(),
+                trace_events: Vec::new(),
+                next_sequence: 0,
+                usage: TokenUsage {
+                    prompt_tokens: 1,
+                    completion_tokens: 2,
+                    total_tokens: 3,
+                    cached_prompt_tokens: 0,
+                },
+                finish_reason: FinishReason::Stop,
+                model: self.model.slug.clone(),
+            })
+        }
+
+        async fn auth_token(&self) -> Result<Option<String>> {
+            Ok(None)
+        }
+
+        fn model_info(&self, model: &str) -> ModelInfo {
+            if model == self.model.slug {
+                self.model.clone()
+            } else {
+                ModelInfo::fallback(model)
+            }
+        }
+
+        fn list_models(&self) -> Vec<ModelInfo> {
+            vec![self.model.clone()]
+        }
+
+        fn effective_model_capabilities(&self, model: &str) -> ModelCapabilities {
+            self.model_info(model).capabilities
+        }
+
+        fn default_model(&self) -> &str {
+            &self.info.default_model
+        }
     }
 }

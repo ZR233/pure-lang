@@ -6,8 +6,7 @@ use pl_protocol::{
     StudioAgentTimelineEventKind, StudioAttachment, StudioEventEnvelope, StudioEventKind,
     StudioInferencePart, StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart,
     StudioPartDelta, StudioPartDeltaField, StudioPartStatus, StudioPartType, StudioPlanPart,
-    StudioSessionHandoff, StudioSessionSummary, StudioTextChannel, StudioToolPart, StudioTurn,
-    StudioTurnStatus,
+    StudioSessionSummary, StudioTextChannel, StudioToolPart, StudioTurn, StudioTurnStatus,
 };
 use pl_trace::{
     AgentEvent, TraceAgentPart, TraceDelta, TraceInferencePart, TracePart, TracePartDeltaEvent,
@@ -19,9 +18,7 @@ use crate::studio::ids::{new_studio_event_id, unix_seconds};
 use crate::studio::timeline_actor::{
     TimelineDeltaDecision, TracePartScope, TurnTimelineActor, is_terminal_studio_part_status,
 };
-use crate::studio::{
-    SessionHandoffRecord, StudioEventFilter, StudioFilteredEventReceiver, StudioStore,
-};
+use crate::studio::{StudioEventFilter, StudioFilteredEventReceiver, StudioStore};
 
 #[derive(Clone)]
 pub struct StudioEventRuntime {
@@ -160,34 +157,6 @@ impl StudioEventRuntime {
             turn_id,
             StudioEventKind::InteractionChanged {
                 event: Box::new(event),
-            },
-        )
-        .await
-    }
-
-    pub async fn emit_handoff(
-        &self,
-        handoff: &SessionHandoffRecord,
-    ) -> Result<StudioEventEnvelope> {
-        let target_session = self
-            .store
-            .read_session(&handoff.target_session_id)
-            .await?
-            .map(studio_session_summary);
-        self.emit(
-            Some(handoff.project_id.clone()),
-            Some(handoff.target_session_id.clone()),
-            None,
-            StudioEventKind::SessionHandoffChanged {
-                handoff: StudioSessionHandoff {
-                    origin_session_id: handoff.origin_session_id.clone(),
-                    target_session_id: handoff.target_session_id.clone(),
-                    target_session,
-                    kind: handoff.kind.as_str().to_string(),
-                    status: handoff.status.as_str().to_string(),
-                    plan_id: Some(handoff.plan_id.clone()),
-                    updated_at: handoff.updated_at,
-                },
             },
         )
         .await

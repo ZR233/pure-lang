@@ -20,9 +20,8 @@ pub use interaction_runtime::{
 };
 pub use records::{
     AgentSnapshotRecord, AgentTimelineEventRecord, AttachmentRecord, MaterializedAttachment,
-    PlanImplementationHandoffStart, ProjectRecord, SessionHandoffKind, SessionHandoffRecord,
-    SessionHandoffStatus, SessionRecord, SessionRuntimeRecord, SessionSkillRecord,
-    SessionVisibility, StudioPromptOutcome,
+    ProjectRecord, SessionRecord, SessionRuntimeRecord, SessionSkillRecord, SessionVisibility,
+    StudioPromptOutcome,
 };
 pub use runtime::{
     RunPromptRequest, StudioPlanImplementationLifecycle, StudioResolveInteractionResponse,
@@ -43,12 +42,10 @@ mod tests {
         ModelCapabilities, ModelInfo, ModelRequestProfile, TokenUsage, TruncationPolicy,
     };
     use pl_protocol::{
-        AgentRuntimeDelta, AgentStatus, ContentPart, ImageSource, InteractionKind,
-        InteractionPayload, InteractionRequest, InteractionResolution, InteractionScope,
-        InteractionStatus, Message, MessageContent, MessageRole, PlanConfirmationResolution,
-        PlanLifecycleState, RuntimeCostAmount, SkillActivation, StudioEventEnvelope,
-        StudioEventKind, StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart,
-        StudioPartStatus, StudioPartType, StudioTextChannel, TokenUsageSnapshot,
+        AgentRuntimeDelta, AgentStatus, ContentPart, ImageSource, Message, MessageContent,
+        MessageRole, RuntimeCostAmount, SkillActivation, StudioEventEnvelope, StudioEventKind,
+        StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart, StudioPartStatus,
+        StudioPartType, StudioTextChannel, TokenUsageSnapshot,
     };
     use pl_trace::{
         TraceEvent, TraceEventKind, TracePart, TracePartKind, TracePartSource, TracePartStatus,
@@ -56,7 +53,7 @@ mod tests {
     };
     use pretty_assertions::assert_eq;
 
-    use crate::{CompileMode, SessionVisibility, TurnResult, TurnResultStatus};
+    use crate::{CompileMode, TurnResult, TurnResultStatus};
     use crate::{InstructionBlock, InstructionSnapshot, InstructionSource, InstructionSourceKind};
 
     use super::*;
@@ -646,82 +643,6 @@ mod tests {
         assert_eq!(archived.id, session.id);
         assert_eq!(sessions, Vec::<SessionRecord>::new());
         assert_eq!(restored, vec![message]);
-    }
-
-    #[tokio::test]
-    async fn plan_implementation_handoff_creates_child_and_reuses_target() {
-        let store = StudioStore::open_memory().await.unwrap();
-        let project = store.upsert_project("C:/work/alpha").await.unwrap();
-        let origin = store
-            .create_session(&project.id, "Plan work", CompileMode::Plan)
-            .await
-            .unwrap();
-        let interaction = InteractionRequest {
-            interaction_id: "plan-confirmation-plan-1".to_string(),
-            kind: InteractionKind::PlanConfirmation,
-            status: InteractionStatus::Pending,
-            scope: InteractionScope {
-                session_id: origin.id.clone(),
-                turn_id: "turn-1".to_string(),
-                item_id: Some("plan-1".to_string()),
-                tool_id: None,
-                agent_path: None,
-            },
-            payload: InteractionPayload::PlanConfirmation {
-                plan_id: "plan-1".to_string(),
-                content: "1. Inspect\n2. Implement".to_string(),
-            },
-            created_at: 10,
-            updated_at: 10,
-            resolved_at: None,
-            resolution: None,
-        };
-        store.upsert_interaction(&interaction).await.unwrap();
-
-        let resolution = InteractionResolution::PlanConfirmation {
-            decision: PlanConfirmationResolution::ImplementFreshContext,
-            content: None,
-            reason: None,
-        };
-        let first = store
-            .start_plan_implementation_handoff(&interaction.interaction_id, resolution.clone())
-            .await
-            .unwrap();
-        let second = store
-            .start_plan_implementation_handoff(&interaction.interaction_id, resolution)
-            .await
-            .unwrap();
-        let listed = store.list_sessions(&project.id).await.unwrap();
-        let restored_origin = store.read_session(&origin.id).await.unwrap().unwrap();
-
-        assert!(first.should_start_run);
-        assert!(!second.should_start_run);
-        assert_eq!(first.target_session.id, second.target_session.id);
-        assert_eq!(listed, vec![restored_origin.clone()]);
-        assert_eq!(restored_origin.visibility, SessionVisibility::Active);
-        assert_eq!(
-            first.target_session.parent_session_id,
-            Some(restored_origin.id.clone())
-        );
-        assert_eq!(
-            second.target_session.parent_session_id,
-            Some(restored_origin.id)
-        );
-        assert_eq!(first.interaction.status, InteractionStatus::Resolved);
-        assert_eq!(first.plan_content, "1. Inspect\n2. Implement");
-        let states = first
-            .plan_lifecycle_events
-            .iter()
-            .map(|event| event.state)
-            .collect::<Vec<_>>();
-        assert_eq!(
-            states,
-            vec![
-                PlanLifecycleState::Accepted,
-                PlanLifecycleState::Implementing,
-            ]
-        );
-        assert_eq!(second.plan_lifecycle_events, Vec::new());
     }
 
     #[tokio::test]

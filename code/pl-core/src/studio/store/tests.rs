@@ -1,7 +1,6 @@
-
-use super::{
-    MAX_BASE64_IMAGE_BYTES, MAX_IMAGE_SIDE, StudioStore, base64_encoded_len,
-    normalize_image_attachment,
+use super::StudioStore;
+use super::attachment::{
+    MAX_BASE64_IMAGE_BYTES, MAX_IMAGE_SIDE, base64_encoded_len, normalize_image_attachment,
 };
 use crate::CompileMode;
 use pl_protocol::{
@@ -10,6 +9,7 @@ use pl_protocol::{
     StudioTextChannel, StudioToolPart,
 };
 use pretty_assertions::assert_eq;
+use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
 #[test]
 fn oversized_image_attachment_is_resized_and_compressed() {
@@ -163,6 +163,24 @@ async fn message_part_snapshot_projection_preserves_first_order() {
     assert_eq!(parts[0].part.order, 2);
     assert_eq!(parts[0].part.text, "hello");
     assert_eq!(parts[0].sequence, 2);
+}
+
+#[tokio::test]
+async fn migrations_drop_legacy_agent_and_handoff_tables() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let rows = store
+        .db
+        .query_all(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT name FROM sqlite_master
+             WHERE type = 'table'
+               AND name IN ('agent_messages', 'agent_turns', 'session_handoffs')"
+                .to_string(),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(rows.len(), 0);
 }
 
 #[tokio::test]

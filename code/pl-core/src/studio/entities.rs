@@ -311,30 +311,6 @@ pub mod interaction {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
-pub mod session_handoff {
-    use super::*;
-
-    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
-    #[sea_orm(table_name = "session_handoffs")]
-    pub struct Model {
-        #[sea_orm(primary_key, auto_increment = false)]
-        pub id: String,
-        pub project_id: String,
-        pub origin_session_id: String,
-        pub target_session_id: String,
-        pub kind: String,
-        pub plan_id: String,
-        pub status: String,
-        pub created_at: i64,
-        pub updated_at: i64,
-    }
-
-    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-    pub enum Relation {}
-
-    impl ActiveModelBehavior for ActiveModel {}
-}
-
 pub mod session_skill {
     use super::*;
 

@@ -43,65 +43,6 @@ impl SessionVisibility {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionHandoffKind {
-    PlanImplementation,
-}
-
-impl SessionHandoffKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::PlanImplementation => "planImplementation",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SessionHandoffStatus {
-    Pending,
-    Running,
-    Completed,
-    Failed,
-    Cancelled,
-}
-
-impl SessionHandoffStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Running => "running",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionHandoffRecord {
-    pub id: String,
-    pub project_id: String,
-    pub origin_session_id: String,
-    pub target_session_id: String,
-    pub kind: SessionHandoffKind,
-    pub plan_id: String,
-    pub status: SessionHandoffStatus,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PlanImplementationHandoffStart {
-    pub origin_session: SessionRecord,
-    pub target_session: SessionRecord,
-    pub handoff: SessionHandoffRecord,
-    pub interaction: pl_protocol::InteractionRequest,
-    pub plan_id: String,
-    pub plan_content: String,
-    pub plan_lifecycle_events: Vec<pl_protocol::PlanLifecycleEvent>,
-    pub should_start_run: bool,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentSnapshotRecord {
     pub id: String,
