@@ -21,7 +21,7 @@ pub use message::{
     ContentPart, ImageSource, Message, MessageContent, MessageRole,
     TOOL_CALL_ARGUMENTS_METADATA_KEY, TOOL_CALL_CALL_ID_METADATA_KEY, TOOL_CALL_ID_METADATA_KEY,
     TOOL_CALL_KIND_METADATA_KEY, TOOL_CALLS_METADATA_KEY, TOOL_NAME_METADATA_KEY,
-    ToolCallHistoryMetadata, ToolCallKind, ToolMetadataCompatibility, ToolResultMetadata,
+    ToolCallHistoryMetadata, ToolCallKind, ToolResultMetadata,
 };
 pub use permission::PermissionLevel;
 pub use studio_event::{

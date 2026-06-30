@@ -2,8 +2,7 @@ use std::collections::{HashMap, VecDeque};
 
 use pl_protocol::{
     ContentPart, ImageSource, Message, MessageContent, MessageRole, PureError, Result,
-    TOOL_CALLS_METADATA_KEY, ToolCallHistoryMetadata, ToolCallKind, ToolMetadataCompatibility,
-    ToolResultMetadata,
+    TOOL_CALLS_METADATA_KEY, ToolCallHistoryMetadata, ToolCallKind, ToolResultMetadata,
 };
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -84,11 +83,8 @@ impl ResponsesRequestBody {
                     }
                 }
                 MessageRole::Tool => {
-                    let metadata = ToolResultMetadata::from_metadata(
-                        &msg.metadata,
-                        ToolMetadataCompatibility::LegacyMissingKindAsFunction,
-                    )
-                    .map_err(protocol_error)?;
+                    let metadata =
+                        ToolResultMetadata::from_metadata(&msg.metadata).map_err(protocol_error)?;
                     let call_id = metadata
                         .tool_call_call_id
                         .clone()
@@ -352,11 +348,8 @@ impl ChatRequestBody {
                     });
                 }
                 MessageRole::Tool => {
-                    let metadata = ToolResultMetadata::from_metadata(
-                        &msg.metadata,
-                        ToolMetadataCompatibility::LegacyMissingKindAsFunction,
-                    )
-                    .map_err(protocol_error)?;
+                    let metadata =
+                        ToolResultMetadata::from_metadata(&msg.metadata).map_err(protocol_error)?;
                     messages.push(ChatMessage::Tool {
                         tool_call_id: metadata.tool_call_id,
                         content: message_content_text(&msg.content),
@@ -730,11 +723,8 @@ fn validate_tool_history(messages: &[Message], endpoint: OpenAiEndpoint) -> Resu
                 }
             }
             MessageRole::Tool => {
-                let metadata = ToolResultMetadata::from_metadata(
-                    &message.metadata,
-                    ToolMetadataCompatibility::LegacyMissingKindAsFunction,
-                )
-                .map_err(protocol_error)?;
+                let metadata =
+                    ToolResultMetadata::from_metadata(&message.metadata).map_err(protocol_error)?;
                 let expected = expected_outputs.pop_front().ok_or_else(|| {
                     protocol_error("tool result has no preceding assistant tool call")
                 })?;

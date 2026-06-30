@@ -44,6 +44,7 @@ fn text_part(
         completed_at: None,
         error: None,
         text_channel: Some(text_channel),
+        activity_group_id: None,
         text: String::new(),
         attachments: vec![],
         tool: None,
@@ -72,6 +73,7 @@ fn reasoning_part(part_id: &str, order: u64, text: &str, status: StudioPartStatu
         completed_at: None,
         error: None,
         text_channel: None,
+        activity_group_id: None,
         text: text.to_string(),
         attachments: vec![],
         tool: None,
@@ -100,6 +102,7 @@ fn tool_part(part_id: &str, status: StudioPartStatus) -> StudioPart {
         completed_at: None,
         error: None,
         text_channel: None,
+        activity_group_id: None,
         text: String::new(),
         attachments: vec![],
         tool: Some(StudioToolPart {

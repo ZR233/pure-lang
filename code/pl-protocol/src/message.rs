@@ -82,12 +82,6 @@ impl ToolCallKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToolMetadataCompatibility {
-    Strict,
-    LegacyMissingKindAsFunction,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolCallHistoryMetadata {
     pub tool_calls_json: String,
@@ -151,25 +145,17 @@ impl ToolResultMetadata {
         }
     }
 
-    pub fn from_metadata(
-        metadata: &HashMap<String, String>,
-        compatibility: ToolMetadataCompatibility,
-    ) -> std::result::Result<Self, String> {
+    pub fn from_metadata(metadata: &HashMap<String, String>) -> std::result::Result<Self, String> {
         let tool_call_id = metadata
             .get(TOOL_CALL_ID_METADATA_KEY)
             .filter(|value| !value.is_empty())
             .cloned()
             .ok_or_else(|| "tool result metadata missing tool_call_id".to_string())?;
-        let tool_call_kind = match metadata
+        let tool_call_kind = metadata
             .get(TOOL_CALL_KIND_METADATA_KEY)
             .map(String::as_str)
-        {
-            Some(value) => ToolCallKind::from_metadata_value(value)?,
-            None if compatibility == ToolMetadataCompatibility::LegacyMissingKindAsFunction => {
-                ToolCallKind::Function
-            }
-            None => return Err("tool result metadata missing tool_call_kind".to_string()),
-        };
+            .map(ToolCallKind::from_metadata_value)
+            .ok_or_else(|| "tool result metadata missing tool_call_kind".to_string())??;
 
         Ok(Self {
             tool_call_id,

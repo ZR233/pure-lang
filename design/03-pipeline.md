@@ -130,7 +130,7 @@ Agent 协作 timeline 与状态分层：
 
 持久化原则：
 
-- 消息和内部 `pl-trace` 诊断事件采用事务批量写入，避免逐条写放大；旧 `timeline_events` 表由破坏性迁移 drop，运行期不再保留 entity、写入、读取或清理路径
+- 消息和内部 `pl-trace` 诊断事件采用事务批量写入，避免逐条写放大；旧 `timeline_events` 表的 entity、运行期写入、读取和清理路径均已删除，迁移历史按 append-only 保留（不再有运行期代码读写该表）
 - `studio_events` 是 Studio UI 的唯一 durable 重放事实流。每个 durable 事件带 `sessionId`、会话内单调 `sequence`、`createdAt` 和类型化 `kind`；前端通过 cursor 补拉缺失事件，而不是依赖命令最终响应补状态。广播 payload 必须与持久化 payload 完全一致，禁止 projection 重写一份、实时广播另一份。高频 `messagePartDelta` 是实时 overlay，不写入 durable log，必须能被后续 `messagePartUpdated` 完全覆盖。
 - `turns` 表保存当前与历史 turn 状态：`queued | contextLoading | waitingForModel | streaming | waitingForInteraction | runningTool | persisting | completed | failed | cancelled`。启动时所有非终态 turn 必须收敛为 `cancelled`
 - `studio_messages`、`message_parts`、`agent_events`、`interactions`、`session_skills`、`session_handoffs` 是 `StudioEventRuntime` 的 projection 表。message/part projection 保存 latest snapshot，live delta 只作为前端 overlay；除一次性迁移和启动恢复外，运行期不得由前端推断直接写入。Plan lifecycle 也必须先写 `StudioEventKind::PlanLifecycleChanged`，再由 projection 更新查询表。
@@ -161,7 +161,7 @@ Flutter/FRB 端使用两类订阅：
 
 这保证高频 delta 下 UI 不会因为 lagged 直接断流。Flutter bridge 检测到 lagged 时必须为 active session 发 live-only `stale`，驱动前端用 durable cursor 补拉 snapshot。前端按 opencode 的事件批处理方式在 16ms frame 内合并事件：如果同一 part 的 durable snapshot 到达，跳过该 frame 中同 part 尚未应用的旧 live delta，并清除该 part 的 delta overlay；若 snapshot 被 coalescing 覆盖，也必须把同 part pending delta 标成 stale。terminal snapshot 到达后，低序或等序 live delta 不得再修改该 part；带 `chunkIndex` 的 delta 需要按 part 去重。
 
-`messagePartDelta` 只用于 live overlay。即使底层为了诊断保留了 delta 事件，也不得写入 `studio_events`。`stale` 也是 live-only 补拉提示，不占用 durable sequence，不参与历史重放。`load_session_state` 从 `studio_messages/message_parts` projection record 恢复终态，每条 record 必须携带来源 event sequence 供前端建立新旧 guard，并附带非 message/part durable 状态事件；`load_studio_events` 只回放 durable snapshot 与状态事件，历史恢复不得依赖 delta。旧 `timeline_events` 表由 migration drop，运行期不再提供实体、写入、读取或 cursor API。
+`messagePartDelta` 只用于 live overlay。即使底层为了诊断保留了 delta 事件，也不得写入 `studio_events`。`stale` 也是 live-only 补拉提示，不占用 durable sequence，不参与历史重放。`load_session_state` 从 `studio_messages/message_parts` projection record 恢复终态，每条 record 必须携带来源 event sequence 供前端建立新旧 guard，并附带非 message/part durable 状态事件；`load_studio_events` 只回放 durable snapshot 与状态事件，历史恢复不得依赖 delta。旧 `timeline_events` 表的实体、写入、读取与 cursor API 均已从运行期删除；其 drop/创建语句作为 append-only 迁移历史保留，但运行期不再有代码读写该表。
 
 `Done`、turn final、agent final 属于 lossless 事件：转发层必须确保它们不会因为普通 delta 的背压被丢弃。
 

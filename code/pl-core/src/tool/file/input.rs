@@ -53,20 +53,12 @@ pub(super) struct PathInput {
 #[serde(rename_all = "camelCase")]
 pub(super) struct DeletePathInput {
     pub path: String,
-    pub mode: Option<DeleteMode>,
-    /// Legacy compatibility for old tool calls. New schemas expose `mode`.
-    pub recursive: Option<bool>,
+    pub mode: DeleteMode,
 }
 
 impl DeletePathInput {
     pub fn delete_mode(&self) -> DeleteMode {
-        self.mode.unwrap_or_else(|| {
-            if self.recursive.unwrap_or(false) {
-                DeleteMode::RecursiveDirectory
-            } else {
-                DeleteMode::File
-            }
-        })
+        self.mode
     }
 }
 
@@ -83,20 +75,12 @@ pub(super) enum DeleteMode {
 pub(super) struct CopyMoveInput {
     pub from: String,
     pub to: String,
-    pub collision: Option<PathCollision>,
-    /// Legacy compatibility for old tool calls. New schemas expose `collision`.
-    pub overwrite: Option<bool>,
+    pub collision: PathCollision,
 }
 
 impl CopyMoveInput {
     pub fn collision(&self) -> PathCollision {
-        self.collision.unwrap_or_else(|| {
-            if self.overwrite.unwrap_or(false) {
-                PathCollision::Overwrite
-            } else {
-                PathCollision::FailIfExists
-            }
-        })
+        self.collision
     }
 }
 

@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use pl_protocol::{
-    AgentStatus, InteractionChangedEvent, StudioAgentPart, StudioAgentSnapshot,
-    StudioAgentTimelineEvent, StudioAgentTimelineEventKind, StudioAttachment, StudioEventEnvelope,
-    StudioEventKind, StudioInferencePart, StudioMessage, StudioMessageRole, StudioMessageStatus,
-    StudioPart, StudioPartDelta, StudioPartDeltaField, StudioPartStatus, StudioPartType,
-    StudioPlanPart, StudioSessionHandoff, StudioSessionSummary, StudioTextChannel, StudioToolPart,
-    StudioTurn, StudioTurnStatus,
+    InteractionChangedEvent, StudioAgentPart, StudioAgentSnapshot, StudioAgentTimelineEvent,
+    StudioAgentTimelineEventKind, StudioAttachment, StudioEventEnvelope, StudioEventKind,
+    StudioInferencePart, StudioMessage, StudioMessageRole, StudioMessageStatus, StudioPart,
+    StudioPartDelta, StudioPartDeltaField, StudioPartStatus, StudioPartType, StudioPlanPart,
+    StudioSessionHandoff, StudioSessionSummary, StudioTextChannel, StudioToolPart, StudioTurn,
+    StudioTurnStatus,
 };
 use pl_trace::{
     AgentEvent, TraceAgentPart, TraceDelta, TraceInferencePart, TracePart, TracePartDeltaEvent,
@@ -1038,11 +1038,6 @@ fn error_for_part_status(status: StudioPartStatus, content: &str) -> Option<Stri
         | StudioPartStatus::Running
         | StudioPartStatus::Completed => None,
     }
-}
-
-#[allow(dead_code)]
-fn _assert_agent_status_is_used(status: AgentStatus) -> AgentStatus {
-    status
 }
 
 #[cfg(test)]
