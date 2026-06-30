@@ -361,28 +361,6 @@ async fn delete_path_modes_are_explicit() {
 }
 
 #[tokio::test]
-async fn delete_path_legacy_recursive_still_works() {
-    let root = unique_temp_dir("delete-legacy-recursive");
-    tokio::fs::create_dir_all(root.join("tree/nested"))
-        .await
-        .unwrap();
-    tokio::fs::write(root.join("tree/nested/file.txt"), "file")
-        .await
-        .unwrap();
-    let tool = DeletePathTool;
-
-    tool.execute(
-        input(serde_json::json!({ "path": "tree", "recursive": true })),
-        context(&root).await,
-    )
-    .await
-    .unwrap();
-
-    assert!(!tokio::fs::try_exists(root.join("tree")).await.unwrap());
-    let _ = tokio::fs::remove_dir_all(root).await;
-}
-
-#[tokio::test]
 async fn copy_and_move_collision_modes_are_explicit() {
     let root = unique_temp_dir("collision-mode");
     tokio::fs::create_dir_all(&root).await.unwrap();
@@ -446,38 +424,6 @@ async fn copy_and_move_collision_modes_are_explicit() {
             .await
             .unwrap(),
         "moved"
-    );
-    let _ = tokio::fs::remove_dir_all(root).await;
-}
-
-#[tokio::test]
-async fn copy_path_legacy_overwrite_still_works() {
-    let root = unique_temp_dir("copy-legacy-overwrite");
-    tokio::fs::create_dir_all(&root).await.unwrap();
-    tokio::fs::write(root.join("source.txt"), "new")
-        .await
-        .unwrap();
-    tokio::fs::write(root.join("target.txt"), "old")
-        .await
-        .unwrap();
-    let copy = CopyPathTool;
-
-    copy.execute(
-        input(serde_json::json!({
-            "from": "source.txt",
-            "to": "target.txt",
-            "overwrite": true
-        })),
-        context(&root).await,
-    )
-    .await
-    .unwrap();
-
-    assert_eq!(
-        tokio::fs::read_to_string(root.join("target.txt"))
-            .await
-            .unwrap(),
-        "new"
     );
     let _ = tokio::fs::remove_dir_all(root).await;
 }

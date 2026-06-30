@@ -47,15 +47,13 @@ pub trait SessionRepository: Send + Sync {
 
 ## 4. 数据迁移策略
 
-SQLite：
+SQLite（一次性破坏性升级已完成，运行期不再保留迁移入口与兼容读取路径）：
 
-1. 检测旧库
-2. 生成时间戳备份
-3. 创建新 schema（v2+agent）
-4. 不读取旧表
-5. `subagent_events` 被 `agent_events` 替代；新 schema 不再创建旧表，运行期不读写旧表
-6. `trace_events` 不再作为 Studio 对话流读取源；新 schema 使用 `studio_events`、`studio_messages`、`message_parts`、`turns` 和 `interactions` 作为 durable snapshot 与 projection
-7. 旧 `timeline_events` 由破坏性迁移 drop；运行期不再保留 entity、写入、读取或 cursor API
+1. v1→v2 切换的 `studio_1.sqlite` 检测/备份/重建逻辑已删除；运行期只识别当前 `studio_2.sqlite`
+2. 新 schema（v2+agent）为唯一支持结构
+3. `subagent_events` 被 `agent_events` 替代；旧表不再创建，运行期不读写，也不在关闭项目时清理旧 `agent_messages` / `agent_turns` 残留行
+4. `trace_events` 不再作为 Studio 对话流读取源；新 schema 使用 `studio_events`、`studio_messages`、`message_parts`、`turns` 和 `interactions` 作为 durable snapshot 与 projection
+5. 旧 `timeline_events` 的 entity、运行期写入、读取、cursor API 与项目关闭清理路径均已删除；其 drop 与 create 语句作为 append-only 迁移历史保留，确保已部署库的版本号不漂移，但运行期不再有代码读写该表
 
 config：
 

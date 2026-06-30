@@ -390,7 +390,7 @@ mod tests {
         match error {
             PureError::ToolExecutionFailed { tool, error } => {
                 assert_eq!(tool, "lsp_query_rust");
-                assert!(error.contains("No LSP server configured for language: rust"));
+                assert!(error.contains("no LSP server found for language: rust"));
             }
             other => panic!("unexpected error: {other}"),
         }

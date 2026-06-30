@@ -17,7 +17,7 @@ Core 会话中的 tool result metadata 同时保存两个字段：
 - `tool_call_kind`：写入 `function` 或 `custom`，供下一轮请求按原始工具种类回放。
 - `tool_name` / `tool_call_arguments`：写入工具名和原始参数，供历史校验、调试和兼容旧会话读取。
 
-这些 metadata 必须通过 typed helper 写入和读取，不允许在 `pl-core`、`pl-model` 之间散落字符串 key。新增会话消息缺少 `tool_call_kind`、`tool_call_id` 或 Responses `call_id` 时，provider request 构造应返回协议错误；只有历史兼容路径可以把缺少 `tool_call_kind` 的旧 tool result 当作 function 读取。unknown `tool_call_kind` 一律是协议错误，不能静默回退到 function。
+这些 metadata 必须通过 typed helper 写入和读取，不允许在 `pl-core`、`pl-model` 之间散落字符串 key。新增会话消息缺少 `tool_call_kind`、`tool_call_id` 或 Responses `call_id` 时，provider request 构造一律返回协议错误——运行期不保留任何缺字段兼容路径。unknown `tool_call_kind` 或缺失 `tool_call_kind` 都是协议错误，不能静默回退到 function。
 
 Studio 工具 trace item id 使用最早稳定的 provider item id 或 runtime tool id 作为相关性锚点，再按 turn 做命名空间隔离；如果 provider 没有 item id，才回退到 `ToolCall.call_id` 或本地 fallback id。后续 delta/done 才补 `call_id` 或 provider item id 时，运行时必须把新身份作为同一工具调用的 correlation alias，继续更新原 trace item，不能把同一个工具调用拆成第二个 trace item。`StudioPart.partId` 不再透传该 trace id，而是在 trace part 首次进入 Studio runtime 时由 turn timeline actor 分配；`StudioToolPart.toolCallId` 表示 runtime 工具展示/执行 id，provider item id 使用 `StudioToolPart.providerItemId`，Responses call id 使用 `StudioToolPart.callId`。core trace 中的 `TracePart` 来自内部 `pl-trace` crate，只允许作为诊断输入，经 Studio runtime 转换为 actor-owned `message.part.updated` / `message.part.delta` 后才能进入 UI。
 
@@ -44,7 +44,7 @@ MCP tools 由进程内 MCP runtime registry 的当前可用快照注册，工具
 
 内置 Zhipu Coding Plan MCP server 优先复用 Zhipu Coding Plan provider 的 `bearer_token`，并兼容回退到普通 Zhipu provider 的 `bearer_token`。缺少 token 时内置 server 处于 `missingCredential`，不参与后台探测，也不应导致普通 turn 或 subagent 启动失败；检测到 token 后进入后台探测流程，只有探测成功的 server 会被主会话和 subagent runner 注册。HTTP 内置 server 在 transport 层直接发送 bearer token；stdio Vision server 在启动进程时注入 `Z_AI_API_KEY` 和 `Z_AI_MODE=ZHIPU`。
 
-每个 turn 开始时，运行时会把经过当前模式过滤后实际暴露给模型的工具名快照保留为 core 内部 `TracePart`，并在需要时通过 typed Studio part snapshot 展示。该记录只包含 turn id、模式和工具名列表，用于诊断工具可见性，不进入模型上下文；旧 `timeline_events` 表由 migration drop，运行期没有写入路径。
+每个 turn 开始时，运行时会把经过当前模式过滤后实际暴露给模型的工具名快照保留为 core 内部 `TracePart`，并在需要时通过 typed Studio part snapshot 展示。该记录只包含 turn id、模式和工具名列表，用于诊断工具可见性，不进入模型上下文；旧 `timeline_events` 表及其 migration、运行期读写路径均已删除。
 
 `plan_exit` 是 Plan Mode 专用的内置协调工具，schema 只包含 `content: string`。它表示“计划已完成，请 Studio 发起确认交互”，不是普通执行工具：运行时只在 Plan Mode 暴露它，Auto Mode 不暴露；工具执行成功后返回紧凑状态文本，不在工具内部等待用户、不切换模式、不写计划文件。`pl-core` 在工具成功后从原始参数读取 `content`，生成或补齐当前 turn 的 plan part snapshot。Plan turn 完成后，Studio runtime 继续复用既有 `PlanConfirmation` pending interaction；用户确认实施时在当前 session 内启动实施 turn，不再走 fresh-context handoff 实时事件。`<proposed_plan>` 不再是协议入口，按普通未标记文本处理，不生成 plan part，也不能触发计划确认。
 
@@ -97,7 +97,7 @@ Windows 上 `bash.command` 的默认宿主 shell 是 PowerShell：运行时先�
 
 MCP tool 成功结果写回紧凑字符串。文本内容按 MCP content 顺序合并；JSON 或非文本内容序列化为紧凑 JSON。MCP `isError` 或 transport/protocol 错误按本地执行错误处理，使用 `Tool execution error: {error}` 前缀写回模型上下文，同时在 Studio timeline 中展示失败原因。transport/protocol 错误还会把对应 server 的 availability 标记为 `unavailable`，后续 turn 不再暴露该 server 的 tools，直到后台周期重检或保存配置后的 reconcile 恢复。MCP runtime 命名空间按职责拆分：registry 只维护 server availability 和可用工具快照，tool adapter 只负责 exposed tool 到 `tools/call` 的转换，transport client 按 stdio/http 持有连接生命周期，JSON-RPC wire 类型集中在协议子模块，避免单个 `mcp` 模块同时承载状态机、I/O 和 wire schema。
 
-文件修改工具不向 schema 暴露语义模糊的 bool 参数。`delete_path` 使用 `mode: "file" | "emptyDirectory" | "recursiveDirectory"`；`copy_path` 和 `move_path` 使用 `collision: "failIfExists" | "overwrite"`。运行时仅为旧历史或人工输入兼容读取旧 `recursive` / `overwrite` 字段，新请求和工具描述不得继续暴露这些 bool 字段。
+文件修改工具不向 schema 暴露语义模糊的 bool 参数。`delete_path` 使用 `mode: "file" | "emptyDirectory" | "recursiveDirectory"`；`copy_path` 和 `move_path` 使用 `collision: "failIfExists" | "overwrite"`。运行期不再保留 `recursive` / `overwrite` 旧 bool 字段的读取路径，历史会话或手写输入若使用旧字段会被 schema 校验拒绝，工具描述只暴露 `mode` / `collision`。
 
 文件搜索工具的参数名必须避免把“搜索内容”和“路径过滤”混在一起。`search_files` 使用必填 `pattern` 表示要在 UTF-8 文件内容中查找的 literal text；可选 `filePattern` 仅用于过滤被搜索的文件路径，例如 `*.rs` 或 `src/*`。`search_files` 不暴露 `query` 字段，也不把 `pattern` 解释为路径过滤。`list_files.pattern` 只在列目录语境下表示条目路径过滤，不参与文件内容搜索。
 

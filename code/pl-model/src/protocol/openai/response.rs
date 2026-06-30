@@ -46,7 +46,7 @@ impl ProviderTokenUsage {
         Some(TokenUsage {
             prompt_tokens: self.prompt_tokens?,
             completion_tokens: self.completion_tokens?,
-            total_tokens: self.total_tokens?,
+            total_tokens: self.total_tokens.unwrap_or(0),
             cached_prompt_tokens: self.cached_prompt_tokens(),
         })
     }

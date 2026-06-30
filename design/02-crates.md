@@ -118,11 +118,11 @@ Flutter store 不直接读取 SQLite 或配置文件，只通过 `pl-studio-brid
 
 ## 2.9 本地数据版本
 
-方案乙采用破坏性升级，不保留运行期兼容层：
+方案乙采用破坏性升级，运行期不再保留迁移与兼容读取路径：
 
-- SQLite 切换到新 schema（v2）
-- `config.toml` 切换到新结构（v2）
-- 启动时检测旧格式：先备份，再重建新结构
+- SQLite 固定使用新 schema（v2），v1→v2 检测/备份/重建逻辑已删除
+- `config.toml` 固定使用新结构（v2）
+- 旧格式数据不再被识别或迁移，用户需从备份手动恢复
 
 Flutter 桌面端不做额外 SQLite 或 `~/.pure/config.toml` 破坏性迁移。
 

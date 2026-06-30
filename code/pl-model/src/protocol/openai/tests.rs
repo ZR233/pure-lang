@@ -702,22 +702,6 @@ fn missing_tool_output_fails_request_build() {
 }
 
 #[test]
-fn legacy_function_tool_result_without_kind_replays_as_function() {
-    let mut tool_metadata = HashMap::new();
-    tool_metadata.insert("tool_call_id".to_string(), "fc_1".to_string());
-    tool_metadata.insert("tool_call_call_id".to_string(), "call_1".to_string());
-    tool_metadata.insert("tool_name".to_string(), "read_file".to_string());
-    let request = request_with_function_tool_history(tool_metadata);
-
-    let body = OpenAiProtocol::responses().build_request_body(&request);
-
-    assert_eq!(
-        body["input"][1]["type"],
-        serde_json::json!("function_call_output")
-    );
-}
-
-#[test]
 fn responses_history_requires_call_id_but_chat_uses_tool_call_id() {
     let calls = vec![ToolCall::function(
         "fc_1",
