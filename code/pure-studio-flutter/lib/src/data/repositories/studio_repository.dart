@@ -728,6 +728,7 @@ class StudioController extends AsyncNotifier<StudioState> {
   StudioState _mergeConfigState(StudioState current, StudioState next) {
     return current.copyWith(
       providers: next.providers.isEmpty ? current.providers : next.providers,
+      defaultProviderId: next.defaultProviderId,
       providerUsages: next.providerUsages.isEmpty
           ? current.providerUsages
           : next.providerUsages,

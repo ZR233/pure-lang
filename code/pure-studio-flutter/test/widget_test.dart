@@ -422,6 +422,24 @@ void main() {
     expect(state.selectedTimelineRows.single.part!.text, 'projected only');
   });
 
+  test('studio state copyWith can explicitly clear nullable fields', () {
+    final state = _stateWithPlannerModels().copyWith(
+      defaultProviderId: 'deepseek',
+    );
+
+    final cleared = state.copyWith(
+      defaultProviderId: null,
+      selectedProjectId: null,
+      selectedSessionId: null,
+    );
+
+    expect(cleared.defaultProviderId, isNull);
+    expect(cleared.selectedProjectId, isNull);
+    expect(cleared.selectedSessionId, isNull);
+    expect(cleared.projects, state.projects);
+    expect(cleared.sessions, state.sessions);
+  });
+
   test(
     'timeline delta revision gaps clear overlay and recover session',
     () async {
@@ -3718,6 +3736,36 @@ void main() {
     expect(settings['defaultProviderId'], 'deepseek-2');
   });
 
+  test('provider settings save updates default provider in store', () async {
+    final api = _FakeStudioApi(_stateWithPlannerModels());
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(studioControllerProvider.future);
+    await container
+        .read(studioControllerProvider.notifier)
+        .saveProviderSettings({
+          'defaultProviderId': 'deepseek',
+          'providers': [
+            {
+              'id': 'deepseek',
+              'templateKind': 'deepseek',
+              'name': 'DeepSeek',
+              'baseUrl': 'https://api.deepseek.com',
+              'defaultModel': 'deepseek-v4-flash',
+              'models': [
+                {'slug': 'deepseek-v4-flash'},
+              ],
+            },
+          ],
+        });
+
+    final state = container.read(studioControllerProvider).requireValue;
+    expect(state.defaultProviderId, 'deepseek');
+  });
+
   testWidgets('provider editor cancel does not save local draft', (
     tester,
   ) async {
@@ -4114,6 +4162,84 @@ void main() {
     });
   });
 
+  testWidgets('user input interaction resets drafts for new question payload', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final firstInteraction = const PendingInteraction(
+      id: 'interaction-first',
+      sessionId: 'session-1',
+      kind: InteractionKind.userInput,
+      title: 'Need input',
+      body: 'First question',
+      payload: {
+        'questions': [
+          {'header': 'First', 'question': 'First free text?'},
+        ],
+      },
+    );
+    final secondInteraction = const PendingInteraction(
+      id: 'interaction-second',
+      sessionId: 'session-1',
+      kind: InteractionKind.userInput,
+      title: 'Need input',
+      body: 'Second question',
+      payload: {
+        'questions': [
+          {'header': 'Second', 'question': 'Second free text?'},
+        ],
+      },
+    );
+    final api = _FakeStudioApi(
+      _emptyState().copyWith(
+        pendingInteractions: [firstInteraction],
+        turnPhase: TurnPhase.waitingForInteraction,
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.enterText(find.byType(TextField).last, 'old draft');
+    await tester.pump(const Duration(milliseconds: 50));
+
+    api.emitSession(
+      _interactionChangedEvent(
+        sessionId: 'session-1',
+        interaction: firstInteraction,
+        status: 'resolved',
+      ),
+    );
+    api.emitSession(
+      _interactionChangedEvent(
+        sessionId: 'session-1',
+        interaction: secondInteraction,
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('old draft'), findsNothing);
+    expect(find.text('Second free text?'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).last, 'new answer');
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.widgetWithText(FilledButton, 'Submit answers'));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(api.resolvedInteractionId, 'interaction-second');
+    expect(api.resolvedInteraction?['answers'], {
+      'answer_0': {
+        'answers': ['new answer'],
+      },
+    });
+  });
+
   testWidgets('plan confirmation implement keeps plan content in timeline', (
     tester,
   ) async {
@@ -4463,6 +4589,20 @@ StudioBridgeEvent _sessionRuntimeChangedEvent({
     payload: SessionRuntimeChangedPayload(
       sessionId: sessionId,
       runtime: runtime,
+    ),
+  );
+}
+
+StudioBridgeEvent _interactionChangedEvent({
+  required String sessionId,
+  required PendingInteraction interaction,
+  String status = 'pending',
+}) {
+  return StudioBridgeEvent(
+    sessionId: sessionId,
+    payload: InteractionChangedPayload(
+      interaction: interaction,
+      status: status,
     ),
   );
 }

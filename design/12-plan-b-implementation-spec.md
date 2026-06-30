@@ -51,9 +51,10 @@ SQLite（一次性破坏性升级已完成，运行期不再保留迁移入口�
 
 1. v1→v2 切换的 `studio_1.sqlite` 检测/备份/重建逻辑已删除；运行期只识别当前 `studio_2.sqlite`
 2. 新 schema（v2+agent）为唯一支持结构
-3. `subagent_events` 被 `agent_events` 替代；旧表不再创建，运行期不读写，也不在关闭项目时清理旧 `agent_messages` / `agent_turns` 残留行
+3. `subagent_events` 被 `agent_events` 替代；当前最终 schema 不再包含旧 `agent_messages` / `agent_turns` 表。历史 append-only migration 可以先创建或变更旧表，但后续 migration 必须显式 drop，运行期不读写，也不在关闭项目时清理旧残留行
 4. `trace_events` 不再作为 Studio 对话流读取源；新 schema 使用 `studio_events`、`studio_messages`、`message_parts`、`turns` 和 `interactions` 作为 durable snapshot 与 projection
-5. 旧 `timeline_events` 的 entity、运行期写入、读取、cursor API 与项目关闭清理路径均已删除；其 drop 与 create 语句作为 append-only 迁移历史保留，确保已部署库的版本号不漂移，但运行期不再有代码读写该表
+5. 旧 `session_handoffs` handoff/child session projection 已退出当前 schema。Plan 实施只在当前 session 内启动新 turn；历史 migration 可用于迁移旧 parent/child 关系，但最终 schema 需要 drop `session_handoffs`
+6. 旧 `timeline_events` 的 entity、运行期写入、读取、cursor API 与项目关闭清理路径均已删除；其 drop 与 create 语句作为 append-only 迁移历史保留，确保已部署库的版本号不漂移，但运行期不再有代码读写该表
 
 config：
 

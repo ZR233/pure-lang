@@ -243,6 +243,7 @@ class _InteractionDock extends StatelessWidget {
         trailing: trailing,
       ),
       InteractionKind.userInput => UserInputDock(
+        interactionId: interaction.id,
         payload: payload,
         trailing: trailing,
       ),

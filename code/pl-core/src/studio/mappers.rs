@@ -12,8 +12,7 @@ use pl_protocol::{
 use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::records::{
-    AgentSnapshotRecord, AgentTimelineEventRecord, AttachmentRecord, ProjectRecord,
-    SessionHandoffKind, SessionHandoffRecord, SessionHandoffStatus, SessionRecord,
+    AgentSnapshotRecord, AgentTimelineEventRecord, AttachmentRecord, ProjectRecord, SessionRecord,
     SessionRuntimeRecord, SessionSkillRecord, SessionVisibility, StudioEventRecord,
     StudioMessageRecord, StudioPartRecord, StudioTurnRecord,
 };
@@ -50,38 +49,6 @@ fn session_visibility_from_label(label: &str) -> SessionVisibility {
         "handoffOrigin" => SessionVisibility::HandoffOrigin,
         "archived" => SessionVisibility::Archived,
         _ => SessionVisibility::Archived,
-    }
-}
-
-pub fn session_handoff_record(model: entities::session_handoff::Model) -> SessionHandoffRecord {
-    SessionHandoffRecord {
-        id: model.id,
-        project_id: model.project_id,
-        origin_session_id: model.origin_session_id,
-        target_session_id: model.target_session_id,
-        kind: session_handoff_kind_from_label(&model.kind),
-        plan_id: model.plan_id,
-        status: session_handoff_status_from_label(&model.status),
-        created_at: model.created_at,
-        updated_at: model.updated_at,
-    }
-}
-
-fn session_handoff_kind_from_label(label: &str) -> SessionHandoffKind {
-    match label {
-        "planImplementation" => SessionHandoffKind::PlanImplementation,
-        _ => SessionHandoffKind::PlanImplementation,
-    }
-}
-
-fn session_handoff_status_from_label(label: &str) -> SessionHandoffStatus {
-    match label {
-        "pending" => SessionHandoffStatus::Pending,
-        "running" => SessionHandoffStatus::Running,
-        "completed" => SessionHandoffStatus::Completed,
-        "failed" => SessionHandoffStatus::Failed,
-        "cancelled" => SessionHandoffStatus::Cancelled,
-        _ => SessionHandoffStatus::Failed,
     }
 }
 

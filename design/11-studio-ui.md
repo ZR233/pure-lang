@@ -64,6 +64,8 @@ Flutter Riverpod store 使用同一归一化状态结构：`StudioController` �
 
 Flutter reducer 必须按 `sessionId` 过滤实时事件，旧 session stream 取消后迟到的事件不得覆盖当前会话。每个 session 维护 durable event cursor；收到 live-only `stale` 时优先调用 `loadStudioEvents(sessionId, afterSequence, limit)` 补拉缺口，补拉事件与实时事件进入同一 reducer。`messagePartDelta` 不推进 durable cursor，但只能追加到已有且未 terminal 的 part 字段。
 
+`StudioState.copyWith` 必须支持对 nullable selection/config 字段显式置空。`selectedProjectId`、`selectedSessionId`、`defaultProviderId` 等字段的 `null` 表示清空领域状态，而不是“保持不变”；需要保持原值时调用方应省略对应参数。
+
 Flutter store 中的 message snapshot、part snapshot、live overlay 与 agent timeline event 是 timeline 的事实源。`TimelineMessage` 是纯 message snapshot，不携带 `parts` 字段；可渲染 `TimelinePart` 只存在于 `TimelineRow` projection/view model 中，reducer 不得把 overlay 后的 `TimelinePart` 再写回 message snapshot，避免 snapshot state 与 projected part 双写不一致。`timelineRowsProvider` 必须按 message `sequence -> createdAt -> id`、part `order -> sequence -> id` 从 `messagesBySession + partSnapshotsBySession + partOverlaysBySession` 派生可渲染 row；`agentTimelineEventsBySession` 按 `callId` 合并 begin/end 后投影为独立 `AgentActivity` row，不写入 `messagesBySession`，也不伪造 message/part identity。
 
 Part snapshot、part delta、part removal 的 reducer 路径只能写 `partSnapshotsBySession` 与 `partOverlaysBySession`；不得把当前 message list 作为可写参数传入 part reducer，也不得因为 part 更新重排或重写 `messagesBySession`。message list 只由 message snapshot、message removal 和 session snapshot 初始化维护。
@@ -125,6 +127,8 @@ Studio runtime 的恢复语义必须保证 UI 不展示已经无法唤醒的等�
 
 Flutter 的 `planConfirmation` dock 对齐 Codex 桌面 app 的决策式提示：标题固定为“实施此计划？”，计划正文留在 timeline plan card 中展示，dock 内常驻一个轻量调整输入框，用户可直接输入调整要求并提交 `continuePlanning`，不再通过二级按钮跳转到独立 composer 状态；实施动作不回传可编辑计划正文，继续调整只回传用户输入的调整内容，忽略动作保持弱化展示。Flutter 的 `userInput` dock 对齐 Codex 的分题交互：顶部显示问题数量与进度点，当前只聚焦一个问题，选项使用多选 checkbox row，Other/free text/secret 输入跟随当前问题展示，上一题/下一题/提交按钮保留在 dock footer；提交时为每个问题生成 `{ answers: [...] }`，未回答问题也保留空数组。
 
+`userInput` dock 的本地草稿必须以 `interactionId` 与问题结构共同作为重置边界。后端未提供 question id 时，前端用题目 index 生成稳定 key；问题签名必须覆盖问题文案、header、选项内容和 secret/other 状态，避免连续不同问题复用上一题答案。
+
 pending interaction 只替换普通 prompt 输入，不得隐藏当前 turn 的停止控制；只要当前 session 的 turn 仍处于非终态，footer 必须保留停止按钮并调用 `stop_prompt(sessionId)`。`busy` 与停止按钮状态必须按 `sessionId` 归属计算，后台 session 的 turn event 不能让当前 session 显示不可用的停止态。
 
 Flutter 状态栏保留模式切换、planner 模型选择、reasoning effort、context/token/cost、active skills、MCP、LSP 和 subagent 活动列表。模式切换调用 `setSessionMode(sessionId, mode)`，planner 模型选择调用 `setModelRole(roleKey=planner, providerId, model, effort)`，不能只更新本地 chip 或 settings draft。权限模式不在状态栏重复展示，只在 composer 权限选择器和 Settings/Security 中修改。状态栏所有数据来自 Studio store；`mcpHealthChanged` 与 `lspHealthChanged` 必须更新对应 snapshot，不能在 reducer 中丢弃。
@@ -144,6 +148,8 @@ Flutter context readout 对齐 Codex 桌面 app 的圆形用量 ring：状态栏
 项目关闭和会话关闭都是归档语义，不删除磁盘内容、配置或历史会话。Project row 上的关闭按钮调用 `archiveProject(projectId, selectedProjectId)`；关闭当前项目后切换到后端返回的下一个可用项目/会话，关闭最后一个项目后清空当前 selection 并取消 session stream。Session row 上的关闭按钮调用 `archiveSession(sessionId, selectedSessionId)`；后端会拒绝 active turn，会取消该会话 pending interaction，并返回同项目的新 session selection。前端收到 payload 后删除/隐藏归档 session、切换到返回的 `selectedSessionId`，并用 `loadSessionState` 恢复新会话 projection；如果项目内没有剩余 session，状态栏与 composer 禁用，用户可以用新建会话按钮创建会话。会话列表只显示 `visibility=active && parentSessionId=null`，legacy handoff child/archived session 不作为 root row 出现。
 
 Settings 是独立页面栈中的配置编辑入口。它必须覆盖 Providers、Instructions、Skills、Roles、MCP、Security 和 General 页签。Flutter 通过 FRB 读取 bootstrap config 与 runtime snapshot；设置页不提供全局保存、重载或草稿保存按钮。普通设置项改完即保存：Security 权限模式调用 `saveRuntimePermissionMode(mode)`，Roles 模型角色修改调用 `setModelRole`，Instructions 文本停止输入后调用 typed instructions save，Skills 禁用项调用 typed skills save，MCP inline 开关和 endpoint 调用 typed MCP save，General UI 偏好即时写入 Studio store。Provider 新增/编辑是独立页面，保留取消和保存按钮，编辑期间只改本地草稿，点击保存后调用 `saveProviderSettings(settingsJson)` 写回 config。Provider payload 对齐 Studio provider settings wire 格式：`defaultProviderId`、`providers[]`、`roles[]`、provider 的 `id/templateKind/name/baseUrl/bearerToken/defaultModel/providerKind/customModels[]`，以及 model 的 `slug/displayName/reasoningEfforts/baseInstructions`。Skills 页的 Discover 按钮调用 `listDiscoveredSkills(projectId)`，用返回 catalog 刷新当前页的可选 skill 列表。`saveStudioSettingsDraft(section, draftJson)` 只保留兼容旧入口，不作为设置页可生效配置的保存路径。所有 typed save 成功后必须用返回的 canonical config 更新 providers、roles、templates、instructions、skills、MCP servers、permission mode、config TOML 和 config exists 状态。
+
+Provider typed save 返回的 canonical config 必须同步 `defaultProviderId`。保存默认 provider 后列表、卡片和状态栏应立即从 store 反映新默认值，不能等下一次 bootstrap 或页面重载。
 
 Flutter Provider 页采用页面栈式互斥视图：列表页、详情页、新增页和编辑页不得同时显示。列表页提供可搜索 provider 卡片、刷新用量、选择默认 provider 和新增入口；点击详情或编辑进入当前 Provider tab 内的独立页面，顶部提供返回列表和保存/取消操作。新增时从内置模板创建 provider，自动建议不冲突的 id，编辑时支持 provider key、模板类型、显示名、协议类型、base URL、API key、默认模型和自定义模型。Provider 列表必须显示当前默认 provider、credential 状态、模型数量、默认模型、usage 摘要和可用模型 chip；删除 provider 时至少保留一个 provider，并在删除默认 provider 后选择下一个 provider。保存成功后以 bridge 返回的 bootstrap snapshot 归一化刷新 Flutter store，而不是只更新本地 draft。
 

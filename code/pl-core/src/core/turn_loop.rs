@@ -186,7 +186,7 @@ pub(super) async fn run_turn_with_trace(
             let compaction_result = maybe_compact_session(
                 session,
                 ContextCompactionRequest {
-                    provider: &provider,
+                    provider: provider.as_ref(),
                     model: &model,
                     request_instructions: &instruction_bundle.instructions,
                     request_messages: &instruction_bundle.prelude_messages,
