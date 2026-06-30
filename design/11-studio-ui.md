@@ -62,6 +62,8 @@ Flutter 解析层必须接受 Studio 协议内的所有 part type。当前不直
 
 Flutter Riverpod store 使用同一归一化状态结构：`StudioController` 负责 bootstrap、session stream 切换和全局 stream 生命周期；`timelineRowsProvider(sessionId)`、`selectedSessionViewProvider`、`statusBarViewProvider`、`settingsPageProvider` 等 selector 只派生 view model，不直接发起 bridge 调用。`subscribeSessionEvents(sessionId)` 的取消必须跟随选中会话变化，避免后台会话继续接收高频 delta。
 
+Flutter 数据层必须保持编排与归约分离：`StudioController` 只负责桥接 API 调用、订阅生命周期、session load barrier、frame 批处理和 stale recovery 副作用；事件归约、session/config snapshot merge、durable cursor、part overlay 与 agent timeline projection 逻辑放在纯 reducer 模块。纯 reducer 不访问 Riverpod、不调用 bridge、不调度异步任务；需要触发 stale recovery 时只返回明确的 session id 给 controller 执行。
+
 Flutter reducer 必须按 `sessionId` 过滤实时事件，旧 session stream 取消后迟到的事件不得覆盖当前会话。每个 session 维护 durable event cursor；收到 live-only `stale` 时优先调用 `loadStudioEvents(sessionId, afterSequence, limit)` 补拉缺口，补拉事件与实时事件进入同一 reducer。`messagePartDelta` 不推进 durable cursor，但只能追加到已有且未 terminal 的 part 字段。
 
 `StudioState.copyWith` 必须支持对 nullable selection/config 字段显式置空。`selectedProjectId`、`selectedSessionId`、`defaultProviderId` 等字段的 `null` 表示清空领域状态，而不是“保持不变”；需要保持原值时调用方应省略对应参数。
@@ -78,6 +80,8 @@ Flutter timeline 协议解析必须严格处理枚举值。未知 `partType` 或
 
 Flutter bridge event 协议解析同样必须严格处理事件类型。实时 stream 使用 FRB `BridgeEventPayload` sealed union；未知或不允许进入 Flutter 的事件是协议错误，应在 FRB/JSON 入口抛出。FRB adapter 必须把事件归一为 typed app `StudioBridgeEventPayload` 后交给 reducer，reducer 不得读取 `payloadJson`/Map 或用 `_ => current` 静默忽略未知事件。`AgentTimelineChanged` 进入 Flutter domain 后也必须保持 typed payload，不得用 string kind + `Map<String, Object?>` 作为 reducer 协议；桥接层如果遇到未知 agent timeline payload，应抛出协议错误而不是生成 generic activity row。`sessionHandoffChanged` 不再作为前端 bridge event 兼容入口；旧 handoff 数据只能通过历史会话列表/查询视图体现，不参与实时 reducer。
 
+`lib/src/rust/**` 与 `frb_generated.dart` 是生成边界，业务代码不得手写修改；`lib/src/data/frb/studio_api.dart` 保持对外稳定 barrel，内部按 `StudioApi` 接口、FRB runtime adapter、typed bridge event、FRB DTO converter、legacy/demo converter 和 demo API 分文件维护。生产路径只从 FRB typed DTO/union 进入 domain model；legacy JSON 解析必须集中在明确命名的 legacy/demo adapter 中，不能混入实时 FRB stream reducer。
+
 `StudioPartType::Turn` 与 `StudioPartType::Inference` 是后端 trace lifecycle synthetic part，只用于恢复 turn/inference 状态与诊断，不是 Studio timeline 可渲染 row。Flutter adapter 在 typed FRB 边界必须过滤历史 snapshot 中的这两类 part，并把实时 `messagePartUpdated` 中的这两类 part 归一为 no-op；其他未知 `partType` 仍应抛出协议错误。
 
 ## 3. Timeline Projection
@@ -89,6 +93,8 @@ Timeline row 从 `messages + parts + partTextAccumDelta + agentTimelineEvents` �
 - `thinking:{userMessageId}`
 - `diff-summary:{userMessageId}`
 - `bottom-spacer`
+
+`timeline_models.dart` 是对外稳定导出入口，调用方继续通过 `studio_models.dart` 或该入口读取 timeline 类型。内部可按实体模型、agent timeline payload、row projection/grouping/sorting 拆成 `part` 文件，但不得改变公开类型名、构造参数和 projection 函数语义。UI 渲染块也应按消息、runtime progress、tool、plan/agent 和 Markdown renderer 分文件维护，仍由 `TimelineView` 作为唯一 widget 入口消费 `TimelineRow`。
 
 reasoning part 按 opencode 普通 assistant part 处理，参与 `groupParts`，不再把同 turn 的多个 reasoning part 合并成旧 thought entry。这样新 reasoning 的 `messageId + partId` 不会复用旧 row key，也不会把流式 delta 写回旧思考行。
 

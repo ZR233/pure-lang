@@ -13,6 +13,10 @@ import '../../shared/studio_chrome.dart';
 import 'markdown_repair.dart';
 
 part 'timeline_blocks.dart';
+part 'timeline_markdown_blocks.dart';
+part 'timeline_plan_agent_blocks.dart';
+part 'timeline_runtime_progress_blocks.dart';
+part 'timeline_tool_blocks.dart';
 
 final _reasoningExpandedProvider =
     StateProvider.family<bool, _ReasoningExpansionKey>((ref, key) => false);
