@@ -161,6 +161,10 @@ Flutter/FRB 端使用两类订阅：
 
 这保证高频 delta 下 UI 不会因为 lagged 直接断流。Flutter bridge 检测到 lagged 时必须为 active session 发 live-only `stale`，驱动前端用 durable cursor 补拉 snapshot。前端按 opencode 的事件批处理方式在 16ms frame 内合并事件：如果同一 part 的 durable snapshot 到达，跳过该 frame 中同 part 尚未应用的旧 live delta，并清除该 part 的 delta overlay；若 snapshot 被 coalescing 覆盖，也必须把同 part pending delta 标成 stale。terminal snapshot 到达后，低序或等序 live delta 不得再修改该 part；带 `chunkIndex` 的 delta 需要按 part 去重。
 
+`StudioEventRuntime` 的运行时职责与映射职责分层维护：运行时入口负责订阅、持久化广播、live/durable 分流和 timeline actor 状态协作；trace 到 Studio 协议的纯映射（message/part id、part 类型/状态、agent timeline、delta field 与文本提取）放在独立 mapper 子模块。mapper 只做确定性结构转换，不访问 store、不广播事件、不分配 durable sequence；所有持久化游标和 projection 更新仍由 `StudioEventRuntime` 与 `StudioStore` 负责。
+
+`StudioRuntime` 保持 use case 门面边界：公开入口仍由 `StudioRuntime` 暴露；runtime 初始化/启动/关闭放入 lifecycle 子模块；项目、会话、配置角色、provider usage 与 skill catalog 查询放入 session-service 子模块；agent/runtime usage 的展示快照映射放入 projection 子模块；skills 自学习触发、阈值统计和后台 reviewer turn 放入 self-learning 子模块。子模块不得直接替代 runtime 发事件或写 store，只返回确定性 projection、执行门面方法对应的持久化动作，或启动明确的后台 review 任务。
+
 `messagePartDelta` 只用于 live overlay。即使底层为了诊断保留了 delta 事件，也不得写入 `studio_events`。`stale` 也是 live-only 补拉提示，不占用 durable sequence，不参与历史重放。`load_session_state` 从 `studio_messages/message_parts` projection record 恢复终态，每条 record 必须携带来源 event sequence 供前端建立新旧 guard，并附带非 message/part durable 状态事件；`load_studio_events` 只回放 durable snapshot 与状态事件，历史恢复不得依赖 delta。旧 `timeline_events` 表的实体、写入、读取与 cursor API 均已从运行期删除；其 drop/创建语句作为 append-only 迁移历史保留，但运行期不再有代码读写该表。
 
 `Done`、turn final、agent final 属于 lossless 事件：转发层必须确保它们不会因为普通 delta 的背压被丢弃。

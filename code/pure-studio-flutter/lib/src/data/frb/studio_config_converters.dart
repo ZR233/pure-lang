@@ -1,0 +1,304 @@
+part of 'studio_api.dart';
+
+String? _defaultProviderIdFromConfig(Map<String, Object?> config) {
+  final value = _string(
+    _firstValue(config, const [
+      'defaultProviderId',
+      'default_provider_id',
+      'defaultProvider',
+      'default_provider',
+    ]),
+  ).trim();
+  if (value.isNotEmpty) {
+    return value;
+  }
+  final roles = _map(config['roles']);
+  final planner = _map(roles['planner']);
+  final plannerProvider = _string(
+    _firstValue(planner, const ['provider', 'providerId', 'provider_id']),
+  ).trim();
+  if (plannerProvider.isNotEmpty) {
+    return plannerProvider;
+  }
+  final providers = _map(config['providers']);
+  return providers.keys.firstOrNull;
+}
+
+List<ProviderSettingsView> _providersFromConfig(Map<String, Object?> config) {
+  final providers = _map(config['providers']);
+  return providers.entries.map((entry) {
+    final value = _map(entry.value);
+    final templateKind = _providerTemplateKind(entry.key, value);
+    final defaultSlugs = _templateDefaultModelSlugs(templateKind);
+    final providerModels = _providerModels(value['models']);
+    final defaultModels = providerModels
+        .where((model) => defaultSlugs.contains(model.slug))
+        .toList();
+    final customModels = providerModels
+        .where((model) => !defaultSlugs.contains(model.slug))
+        .toList();
+    final visibleModels = defaultModels.isEmpty
+        ? providerModels
+        : [...defaultModels, ...customModels];
+    final defaultModel = _string(
+      _firstValue(value, const ['defaultModel', 'default_model']),
+    );
+    final bearerToken = _string(
+      _firstValue(value, const ['bearerToken', 'bearer_token']),
+    );
+    final name = _string(
+      _firstValue(value, const ['displayName', 'display_name', 'name']),
+      fallback: entry.key,
+    );
+    return ProviderSettingsView(
+      id: entry.key,
+      templateKind: templateKind,
+      name: name,
+      subtitle: '$name Platform',
+      baseUrl: _string(_firstValue(value, const ['baseUrl', 'base_url'])),
+      bearerToken: '',
+      hasBearerToken: bearerToken.trim().isNotEmpty,
+      defaultModel: defaultModel,
+      models: visibleModels,
+      defaultModels: defaultModels.isEmpty ? providerModels : defaultModels,
+      customModels: customModels,
+      status: bearerToken.trim().isEmpty ? 'missingCredential' : 'ready',
+      usageLabel: visibleModels.isEmpty
+          ? defaultModel
+          : '${visibleModels.length} models',
+      modelCount: '${visibleModels.length}',
+      updatedAt: 'Loaded',
+      providerKind: _providerKindName(_string(value['provider_kind'])),
+    );
+  }).toList();
+}
+
+List<ProviderModelView> _providerModels(Object? value) {
+  return _list(value)
+      .map((modelValue) {
+        final model = _map(modelValue);
+        final slug = _string(model['slug']);
+        return ProviderModelView(
+          slug: slug,
+          displayName: _string(
+            _firstValue(model, const ['displayName', 'display_name']),
+            fallback: slug,
+          ),
+          description: _string(model['description']),
+          contextWindow: _nullableInt(
+            _firstValue(model, const ['contextWindow', 'context_window']),
+          ),
+          maxOutputTokens: _nullableInt(
+            _firstValue(model, const ['maxOutputTokens', 'max_output_tokens']),
+          ),
+          currency: _string(model['currency']),
+          inputPricePerMTok: _nullableDouble(
+            _firstValue(model, const [
+              'inputPricePerMTok',
+              'input_price_per_mtok',
+            ]),
+          ),
+          outputPricePerMTok: _nullableDouble(
+            _firstValue(model, const [
+              'outputPricePerMTok',
+              'output_price_per_mtok',
+            ]),
+          ),
+          cacheReadPricePerMTok: _nullableDouble(
+            _firstValue(model, const [
+              'cacheReadPricePerMTok',
+              'cache_read_price_per_mtok',
+            ]),
+          ),
+          baseInstructions: _string(
+            _firstValue(model, const ['baseInstructions', 'base_instructions']),
+          ),
+          reasoningEfforts: _modelReasoningEfforts(model),
+        );
+      })
+      .where((model) => model.slug.isNotEmpty)
+      .toList();
+}
+
+String _providerTemplateKind(String providerId, Map<String, Object?> provider) {
+  final direct = _string(
+    _firstValue(provider, const ['templateKind', 'template_kind']),
+  );
+  if (direct.isNotEmpty) {
+    return direct;
+  }
+  final providerKind = _string(provider['provider_kind']);
+  final baseUrl = _string(_firstValue(provider, const ['baseUrl', 'base_url']));
+  if (providerId == 'zhipu-coding-plan' ||
+      baseUrl.contains('/api/coding/paas/')) {
+    return 'zhipu-coding-plan';
+  }
+  return switch (providerKind) {
+    'deep_seek' => 'deepseek',
+    'zhipu' => 'zhipu',
+    _ => 'openai',
+  };
+}
+
+String _providerKindName(String value) {
+  return switch (value) {
+    'deep_seek' => 'deep_seek',
+    'zhipu' => 'zhipu',
+    'open_ai' => 'open_ai',
+    _ => value.isEmpty ? 'open_ai' : value,
+  };
+}
+
+Set<String> _templateDefaultModelSlugs(String templateKind) {
+  return switch (templateKind) {
+    'deepseek' => {'deepseek-v4-flash', 'deepseek-v4-pro'},
+    'zhipu' || 'zhipu-coding-plan' => {
+      'glm-5.2',
+      'glm-5',
+      'glm-5-turbo',
+      'glm-4.7',
+      'glm-4.7-flashx',
+      'glm-4.7-flash',
+    },
+    _ => {'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'},
+  };
+}
+
+List<String> _modelReasoningEfforts(Map<String, Object?> model) {
+  final direct = _stringList(
+    _firstValue(model, const ['reasoningEfforts', 'reasoning_efforts']),
+  );
+  if (direct.isNotEmpty) {
+    return direct;
+  }
+  final efforts = <String>{};
+  for (final parameterValue in _list(model['parameters'])) {
+    final parameter = _map(parameterValue);
+    if (_string(parameter['name']) != 'effort') {
+      continue;
+    }
+    efforts.addAll(_stringList(parameter['candidates']));
+  }
+  return efforts.toList();
+}
+
+List<RoleSettingsView> _rolesFromConfig(Map<String, Object?> config) {
+  final roles = _map(config['roles']);
+  const roleKeys = ['explorer', 'planner', 'executor', 'reviewer'];
+  return [
+    for (final key in roleKeys)
+      if (_map(roles[key]).isNotEmpty)
+        RoleSettingsView(
+          key: key,
+          providerId: _string(_map(roles[key])['provider']),
+          model: _string(_map(roles[key])['model']),
+          effort: _string(_map(roles[key])['effort']),
+        ),
+  ];
+}
+
+InstructionsSettingsView _instructionsFromConfig(Map<String, Object?> config) {
+  final instructions = _map(config['instructions']);
+  return InstructionsSettingsView(
+    baseOverride: _string(
+      _firstValue(instructions, const ['baseOverride', 'base_override']),
+    ),
+    developer: _string(instructions['developer']),
+    user: _string(instructions['user']),
+    projectDocMaxBytes: _int(
+      _firstValue(instructions, const [
+        'projectDocMaxBytes',
+        'project_doc_max_bytes',
+      ]),
+      fallback: 65536,
+    ),
+    projectDocFallbackFilenames: _stringList(
+      _firstValue(instructions, const [
+        'projectDocFallbackFilenames',
+        'project_doc_fallback_filenames',
+      ]),
+    ),
+  );
+}
+
+SkillsSettingsView _skillsFromConfig(Map<String, Object?> config) {
+  final skills = _map(config['skills']);
+  final system = _map(skills['system']);
+  return SkillsSettingsView(
+    enabled: _boolWithDefault(skills['enabled'], true),
+    autoLearn: _boolWithDefault(
+      _firstValue(skills, const ['autoLearn', 'auto_learn']),
+      true,
+    ),
+    systemEnabled: _boolWithDefault(system['enabled'], true),
+    projectDir: _string(
+      _firstValue(skills, const ['projectDir', 'project_dir']),
+      fallback: 'skills',
+    ),
+    userDir: _string(
+      _firstValue(skills, const ['userDir', 'user_dir']),
+      fallback: '~/.pure/skills',
+    ),
+    externalDirs: _stringList(
+      _firstValue(skills, const ['externalDirs', 'external_dirs']),
+    ),
+    disabled: _stringList(skills['disabled']),
+    autoLearnMinToolCalls: _int(
+      _firstValue(skills, const [
+        'autoLearnMinToolCalls',
+        'auto_learn_min_tool_calls',
+      ]),
+      fallback: 5,
+    ),
+  );
+}
+
+GeneralSettingsView _generalFromJson(Object? value) {
+  final json = _map(value);
+  return GeneralSettingsView(
+    followSystemTheme: _boolWithDefault(json['followSystemTheme'], true),
+    followActiveTurn: _boolWithDefault(json['followActiveTurn'], true),
+    compactTimeline: _bool(json['compactTimeline']),
+  );
+}
+
+List<McpServerSettingsView> _mcpServersFromConfig(Map<String, Object?> config) {
+  final servers = <McpServerSettingsView>[];
+  void addServers(Object? value, {required bool builtin}) {
+    for (final entry in _map(value).entries) {
+      final server = _map(entry.value);
+      final transport = _string(
+        server['transport'],
+        fallback: _string(server['type']),
+      );
+      final command = _string(server['command']);
+      final url = _string(server['url'], fallback: _string(server['endpoint']));
+      final enabled = builtin
+          ? _boolWithDefault(server['enabled'], true)
+          : !_bool(server['disabled']) &&
+                _boolWithDefault(server['enabled'], true) &&
+                _string(server['status'], fallback: 'enabled') != 'disabled';
+      servers.add(
+        McpServerSettingsView(
+          id: entry.key,
+          transport: transport.isEmpty
+              ? (builtin ? 'builtin' : 'stdio')
+              : transport,
+          endpoint: url.isEmpty ? command : url,
+          enabled: enabled,
+          status: enabled ? 'enabled' : 'disabled',
+        ),
+      );
+    }
+  }
+
+  addServers(
+    _firstValue(config, const ['mcpServers', 'mcp_servers']),
+    builtin: false,
+  );
+  addServers(
+    _firstValue(config, const ['builtinMcpServers', 'builtin_mcp_servers']),
+    builtin: true,
+  );
+  return servers;
+}
