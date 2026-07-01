@@ -83,7 +83,9 @@ impl TurnTimelineActor {
         part.order = *next_order;
         *next_order += 1;
         if should_allocate_part_id(trace_scope, &part.part_id) {
-            part.part_id = format!("{}:part-{}", part.turn_id, part.order);
+            let turn_id = &part.turn_id;
+            let order = part.order;
+            part.part_id = format!("{turn_id}:part-{order}");
         }
         self.part_orders.insert(part.part_id.clone(), part.order);
         self.remember_trace_part_id(trace_scope, &part.part_id);
@@ -252,7 +254,9 @@ fn is_assistant_message_part(part: &StudioPart) -> bool {
 }
 
 fn new_tool_group_id(part: &StudioPart) -> String {
-    format!("tool-group:{}:{}", part.turn_id, part.order)
+    let turn_id = &part.turn_id;
+    let order = part.order;
+    format!("tool-group:{turn_id}:{order}")
 }
 
 pub(super) fn is_terminal_studio_part_status(status: StudioPartStatus) -> bool {

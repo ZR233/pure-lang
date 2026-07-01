@@ -34,6 +34,15 @@ pub enum VisibleTextEvent {
     Close(VisibleTextKind),
 }
 
+/// Controls whether [`VisibleTextParser::drain_pending`] should finalize the chunk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DrainMode {
+    /// Flush pending content as a partial chunk.
+    Partial,
+    /// Flush and mark the chunk as final.
+    Final,
+}
+
 #[cfg(test)]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct VisibleTextChunk {
@@ -104,25 +113,25 @@ impl VisibleTextParser {
     #[cfg(test)]
     pub fn push_str(&mut self, chunk: &str) -> VisibleTextChunk {
         self.pending.push_str(chunk);
-        self.drain_pending(false)
+        self.drain_pending(DrainMode::Partial)
     }
 
     #[cfg(test)]
     pub fn finish(&mut self) -> VisibleTextChunk {
-        self.drain_pending(true)
+        self.drain_pending(DrainMode::Final)
     }
 
     pub fn push_events(&mut self, chunk: &str) -> VisibleTextEventChunk {
         self.pending.push_str(chunk);
-        self.drain_pending_events(false)
+        self.drain_pending_events(DrainMode::Partial)
     }
 
     pub fn finish_events(&mut self) -> VisibleTextEventChunk {
-        self.drain_pending_events(true)
+        self.drain_pending_events(DrainMode::Final)
     }
 
     #[cfg(test)]
-    fn drain_pending(&mut self, finish: bool) -> VisibleTextChunk {
+    fn drain_pending(&mut self, mode: DrainMode) -> VisibleTextChunk {
         let mut segments = Vec::new();
         loop {
             if let Some(active_tag) = self.active_tag {
@@ -136,7 +145,7 @@ impl VisibleTextParser {
                         self.active_tag = None;
                     }
                     None => {
-                        let keep = if finish {
+                        let keep = if matches!(mode, DrainMode::Final) {
                             0
                         } else {
                             suffix_prefix_len(&self.pending, close_tag)
@@ -146,7 +155,7 @@ impl VisibleTextParser {
                             segments.push(active_tag.segment(self.pending[..emit_len].to_string()));
                             self.pending.drain(..emit_len);
                         }
-                        if finish {
+                        if matches!(mode, DrainMode::Final) {
                             if !self.pending.is_empty() {
                                 segments.push(active_tag.segment(self.pending.clone()));
                                 self.pending.clear();
@@ -169,7 +178,7 @@ impl VisibleTextParser {
                         self.active_tag = Some(open_tag.tag);
                     }
                     None => {
-                        let keep = if finish {
+                        let keep = if matches!(mode, DrainMode::Final) {
                             0
                         } else {
                             max_suffix_prefix_len(
@@ -184,7 +193,7 @@ impl VisibleTextParser {
                             ));
                             self.pending.drain(..emit_len);
                         }
-                        if finish && !self.pending.is_empty() {
+                        if matches!(mode, DrainMode::Final) && !self.pending.is_empty() {
                             segments.push(VisibleTextSegment::Untagged(self.pending.clone()));
                             self.pending.clear();
                         }
@@ -196,7 +205,7 @@ impl VisibleTextParser {
         VisibleTextChunk { segments }
     }
 
-    fn drain_pending_events(&mut self, finish: bool) -> VisibleTextEventChunk {
+    fn drain_pending_events(&mut self, mode: DrainMode) -> VisibleTextEventChunk {
         let mut events = Vec::new();
         loop {
             if let Some(active_tag) = self.active_tag {
@@ -214,7 +223,7 @@ impl VisibleTextParser {
                         events.push(VisibleTextEvent::Close(active_tag.kind()));
                     }
                     None => {
-                        let keep = if finish {
+                        let keep = if matches!(mode, DrainMode::Final) {
                             0
                         } else {
                             suffix_prefix_len(&self.pending, close_tag)
@@ -227,7 +236,7 @@ impl VisibleTextParser {
                             ));
                             self.pending.drain(..emit_len);
                         }
-                        if finish {
+                        if matches!(mode, DrainMode::Final) {
                             if !self.pending.is_empty() {
                                 events.push(VisibleTextEvent::Delta(
                                     active_tag.kind(),
@@ -255,7 +264,7 @@ impl VisibleTextParser {
                         events.push(VisibleTextEvent::Open(open_tag.tag.kind()));
                     }
                     None => {
-                        let keep = if finish {
+                        let keep = if matches!(mode, DrainMode::Final) {
                             0
                         } else {
                             max_suffix_prefix_len(
@@ -270,7 +279,7 @@ impl VisibleTextParser {
                             ));
                             self.pending.drain(..emit_len);
                         }
-                        if finish && !self.pending.is_empty() {
+                        if matches!(mode, DrainMode::Final) && !self.pending.is_empty() {
                             events.push(VisibleTextEvent::Untagged(self.pending.clone()));
                             self.pending.clear();
                         }

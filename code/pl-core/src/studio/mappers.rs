@@ -168,8 +168,11 @@ pub fn studio_event_record(model: entities::studio_event::Model) -> StudioEventR
 }
 
 pub fn studio_event_envelope(record: StudioEventRecord) -> Result<StudioEventEnvelope> {
-    let envelope = serde_json::from_str::<StudioEventEnvelope>(&record.payload_json)
-        .with_context(|| format!("failed to parse studio event {}", record.id))?;
+    let envelope =
+        serde_json::from_str::<StudioEventEnvelope>(&record.payload_json).with_context(|| {
+            let id = &record.id;
+            format!("failed to parse studio event {id}")
+        })?;
     Ok(envelope)
 }
 
@@ -188,8 +191,10 @@ pub fn studio_turn_record(model: entities::turn::Model) -> StudioTurnRecord {
 pub fn studio_message_record(
     model: entities::studio_message::Model,
 ) -> Result<StudioMessageRecord> {
-    let metadata = serde_json::from_str(&model.metadata_json)
-        .with_context(|| format!("failed to parse studio message metadata: {}", model.id))?;
+    let metadata = serde_json::from_str(&model.metadata_json).with_context(|| {
+        let id = &model.id;
+        format!("failed to parse studio message metadata: {id}")
+    })?;
     Ok(StudioMessageRecord {
         sequence: model.sequence,
         message: StudioMessage {
@@ -352,14 +357,20 @@ pub fn studio_turn_status_from_label(label: &str) -> StudioTurnStatus {
 }
 
 pub fn interaction_record(model: entities::interaction::Model) -> Result<InteractionRequest> {
-    let payload = serde_json::from_str::<InteractionPayload>(&model.payload_json)
-        .with_context(|| format!("failed to parse interaction payload: {}", model.id))?;
+    let payload =
+        serde_json::from_str::<InteractionPayload>(&model.payload_json).with_context(|| {
+            let id = &model.id;
+            format!("failed to parse interaction payload: {id}")
+        })?;
     let resolution = model
         .resolution_json
         .as_deref()
         .map(serde_json::from_str::<InteractionResolution>)
         .transpose()
-        .with_context(|| format!("failed to parse interaction resolution: {}", model.id))?;
+        .with_context(|| {
+            let id = &model.id;
+            format!("failed to parse interaction resolution: {id}")
+        })?;
     Ok(InteractionRequest {
         interaction_id: model.id,
         kind: interaction_kind_from_label(&model.kind)?,
@@ -473,8 +484,10 @@ pub fn row_to_message(row: entities::message::Model) -> Result<Message> {
         "tool" => MessageRole::Tool,
         other => bail!("unsupported message role in studio db: {other}"),
     };
-    let metadata = serde_json::from_str(&row.metadata_json)
-        .with_context(|| format!("failed to parse message metadata: {}", row.id))?;
+    let metadata = serde_json::from_str(&row.metadata_json).with_context(|| {
+        let id = &row.id;
+        format!("failed to parse message metadata: {id}")
+    })?;
     Ok(Message {
         role,
         content: row_content_to_message_content(&row.content),

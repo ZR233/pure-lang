@@ -98,7 +98,8 @@ pub(super) fn descendant_ids(state: &AgentSupervisorState, agent_id: &str) -> Ve
     let Some(root) = state.agents.get(agent_id) else {
         return Vec::new();
     };
-    let prefix = format!("{}/", root.record.path);
+    let path = &root.record.path;
+    let prefix = format!("{path}/");
     state
         .agents
         .iter()

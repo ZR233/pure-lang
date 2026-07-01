@@ -442,7 +442,8 @@ pub(super) async fn run_turn_with_trace(
         if response_reached_auto_compact_limit {
             provider_prompt_tokens_for_compaction = Some(response_prompt_tokens);
         }
-        progress.tool_detail(format!("模型请求调用 {} 个工具。", tool_calls.len()));
+        let count = tool_calls.len();
+        progress.tool_detail(format!("模型请求调用 {count} 个工具。"));
 
         let tool_results = match execute_tool_calls(
             &tool_calls,

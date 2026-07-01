@@ -34,7 +34,8 @@ where
 
 pub(crate) fn encode_message(value: &serde_json::Value) -> LspResult<Vec<u8>> {
     let body = serde_json::to_vec(value)?;
-    let header = format!("Content-Length: {}\r\n\r\n", body.len());
+    let len = body.len();
+    let header = format!("Content-Length: {len}\r\n\r\n");
     let mut output = Vec::with_capacity(header.len() + body.len());
     output.extend_from_slice(header.as_bytes());
     output.extend_from_slice(&body);
@@ -51,7 +52,8 @@ mod tests {
     #[tokio::test]
     async fn reads_content_length_framed_message() {
         let payload = br#"{"jsonrpc":"2.0","id":1,"result":true}"#;
-        let input = format!("Content-Length: {}\r\n\r\n", payload.len());
+        let len = payload.len();
+        let input = format!("Content-Length: {len}\r\n\r\n");
         let bytes = [input.as_bytes(), payload].concat();
         let mut reader = BufReader::new(bytes.as_slice());
 

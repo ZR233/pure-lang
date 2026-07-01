@@ -252,7 +252,8 @@ impl Tool for SkillViewTool {
             let catalog = SkillCatalog::discover(&context.workspace_root, &self.config)
                 .map_err(|error| tool_error(self.name(), error))?;
             let skill = catalog.find(&input.name).ok_or_else(|| {
-                tool_error(self.name(), format!("skill not found: {}", input.name))
+                let name = &input.name;
+                tool_error(self.name(), format!("skill not found: {name}"))
             })?;
             let read = read_skill_file(skill, input.file_path.as_deref())
                 .map_err(|error| tool_error(self.name(), error))?;

@@ -15,6 +15,78 @@ platforms: ["windows", "linux", "macos"]
 - 所有 crate 在 `code/` 下：`pl-protocol`、`pl-trace`、`pl-model`、`pl-lsp`、`pl-core`、`pure-studio-flutter/rust`（pl-studio-bridge）。
 - 跨 crate 依赖方向：`pl-protocol` ← `pl-trace` ← `pl-model` ← `pl-core` ← `pl-studio-bridge`。
 - 模块大小目标 ≤500 行（不含测试），超 800 行强制拆分。
+- `frb_generated.rs` 为自动生成文件，不参与审查。
+
+## 扫描命令参考
+
+以下 rg 命令可以直接用于发现对应问题。注意排除 `*frb_generated*` 和测试文件。
+
+### 文件行数（生产代码行数）
+```
+# 列出所有超限文件，并排除嵌入式测试模块
+Get-ChildItem -Recurse "*.rs" -Exclude "*frb_generated*" | ForEach-Object {
+  $total = (Get-Content $_.FullName | Measure-Object -Line).Lines
+  $testStart = (Get-Content $_.FullName | Select-String -Pattern '#\[cfg\(test\)\]' | Select-Object -First 1).LineNumber
+  $prod = if ($testStart) { $testStart - 1 } else { $total }
+  if ($prod -gt 500) { "{0,5}  {1}" -f $prod, $_.FullName }
+} | Sort-Object -Descending
+```
+
+> 注意：单独文件（如 `tests.rs`）和 `tests/` 目录下的文件不在行数统计范围内。
+
+### 异步 Trait 违规
+```
+rg '#\[async_trait\]' code/ --glob '*.rs'  -n
+rg '#\[allow\(async_fn_in_trait\)\]' code/ --glob '*.rs'  -n
+```
+
+### `bool` 参数和 `Option<bool>`
+```
+rg 'fn .*\b\w+: bool\b' code/ --glob '*.rs' --glob '!*frb_generated*' -n
+rg ': Option<bool>' code/ --glob '*.rs' --glob '!*frb_generated*' -n
+```
+
+### `_ => {}` 静默忽略
+```
+rg '_ => \{\}' code/ --glob '*.rs' -n
+```
+
+### Serde `rename_all` 合规检查
+```
+# 找出 derive Serialize/Deserialize 且没有 rename_all 的类型
+rg '#\[derive\(.*[Ss]erialize.*\)\]' code/ --glob '*.rs' --glob '!*frb_generated*' -A3 -n 2>$null | rg -v 'rename_all' | rg 'derive.*[Ss]erialize'
+```
+> 注意：`pl-trace` 内部 trace 类型、`pl-core/src/mcp/wire.rs` 的 JSON-RPC 类型、`pl-lsp/src/server_definition.rs` 的内部配置类型可能有正当理由不使用 camelCase。逐个判断后记录例外。
+
+### `format!` 位置参数（非内联变量）
+```
+# 生产代码中查找，排除测试文件
+rg 'format!\("[^"]*\{\}' code/ --glob '*.rs' --glob '!*tests*' --glob '!*test*' --glob '!*frb_generated*' -n
+```
+
+### 生产代码 `unwrap()` / `expect()`
+```
+# 排除 *tests* / *test* / *live* 是快速过滤，但嵌入式测试模块仍会命中，需二次确认
+rg '\.unwrap\(\)|\.expect\(' code/ --glob '*.rs' --glob '!*tests*' --glob '!*test*' --glob '!*frb_generated*' -n
+```
+
+### `unwrap_or_default()` 掩盖错误
+```
+rg 'unwrap_or_default\(\)' code/ --glob '*.rs' -n
+```
+
+### 跨 crate 分组统计
+将扫描结果按 crate 分组比直接看文件列表更易把握分布：
+```powershell
+$hits = rg '<PATTERN>' code/ --glob '*.rs' -n 2>$null
+$hits | ForEach-Object { ($_ -split '\\')[1] } | Group-Object | Sort-Object Count -Descending
+```
+此法适用于 `format!` 位置参数、`unwrap()` 等分布较广的问题。
+
+### TODO / FIXME / HACK / XXX
+```
+rg 'TODO|FIXME|HACK|XXX' code/ --glob '*.rs'  -n
+```
 
 ## 审查清单
 
@@ -31,10 +103,15 @@ platforms: ["windows", "linux", "macos"]
 ### 3. 参数设计
 - 搜索 `fn.*: bool)` 和 `Option<bool>` 模式，检查调用点是否能理解参数含义。
 - 语义模糊的应改为枚举：`WorkspaceEscapePolicy { AllowEscape, RestrictToWorkspace }`。
+- 已有代码库示例：`pl-model/src/visible_text.rs` 将 `drain_pending(finish: bool)` 改为 `DrainMode::{Partial, Final}` 枚举，调用点从 `true`/`false` 变为 `DrainMode::Final`/`DrainMode::Partial`，语义自明。
+- 双 bool 参数（如 `ProcessManagerState::new(stdout_open: bool, stderr_open: bool)`）可考虑 bitflags 或 options struct，但若只有少量调用点可暂缓。
 
 ### 4. Match 穷尽匹配
 - 搜索 `_ => {}` 模式，确认不是在枚举 match 中静默忽略变体。
-- 尤其注意 SSE 解析器中的字符串 match，如果用 `_ => {}` 应记录警告日志而非静默忽略。
+- 区分两种情况：
+  - **真正静默忽略**：`_ => {}` 后直接结束 match 块，应改为记录警告日志。
+  - **有意 fall-through**：`_ => {}` 后继续执行 match 之后的代码（如 SSE 解码器中未命中特殊处理的事件让 legacy 处理器兜底），可添加 `tracing::trace!` 日志辅助调试，而非改为警告。
+- 尤其注意 SSE 解析器中的字符串 match，如果用 `_ => {}` 应至少记录 trace 日志。
 
 ### 5. Trait 文档
 - 所有新增 trait 必须有大段文档注释，说明角色和实现/使用方式。
@@ -47,11 +124,19 @@ platforms: ["windows", "linux", "macos"]
 
 ### 7. 格式化偏好
 - 搜索 `format!("{}",` 模式，必须使用内联变量 `format!("{name}")`。
-- 项目 edition 2024，支持 `format!("{expr.field}")` 和 `format!("{fn()}")`。
+- Rust format! 只支持标识符内联（`format!("{var}")`），不支持 `{expr.field}` 或 `{fn()}` 语法。字段访问需要引入临时变量或使用命名参数。
+- 闭包体内的 `format!` 如果参数是方法调用（如 `.display()`、`.len()`），引入临时变量会显著降低可读性，可以保留位置参数。
 
 ### 8. `unwrap()` / `expect()` 在非测试代码中
 - 生产代码（非 `#[cfg(test)]`）禁止 `unwrap()` 或 `expect()`。
 - 发现后应替换为 `?` 操作符或更安全的错误处理。
+- Mutex 中毒场景可复用的恢复模式：
+  ```rust
+  let mut locks = self.locks.lock().unwrap_or_else(|poisoned| {
+      tracing::warn!("lock was poisoned, recovering");
+      poisoned.into_inner()
+  });
+  ```
 
 ### 9. TODO / FIXME / HACK / XXX
 - 搜索并列出所有出现，评估是否需要立即处理或归档 issue。
@@ -80,6 +165,31 @@ platforms: ["windows", "linux", "macos"]
 | 4 | `pure-studio-flutter/rust/` (bridge) | 模块大小、FRB 错误转换、format! 内联 |
 
 父 agent 合取各子报告，交叉验证，输出汇总表和修复计划。
+
+## 执行器子代理分工
+
+修复阶段可使用 `spawn_agent agentType: "executor"` 按 crate 并行实施机械化修改。
+
+典型分工：
+
+| Agent | Scope | 包含修改 |
+|-------|-------|----------|
+| pl-lsp | `code/pl-lsp/src/` | format! 内联、serde 补全、unwrap_or_default 安全化 |
+| pl-model | `code/pl-model/src/` | format! 内联、SSE 日志、bool→enum 重构 |
+| pl-core | `code/pl-core/src/` | format! 内联、Mutex expect 恢复、serde 补全 |
+
+每个执行器 agent 的任务应包含：
+- 明确的文件列表和行号（来自审查扫描结果）
+- 精确的转换规则（什么模式改成什么模式）
+- 该 crate 专属的额外修复项
+- 不修改测试文件、自动生成文件的约束
+- 完成后需 `cargo fmt` 的指令
+
+父 agent 在所有执行器完成后：
+1. 运行 `cargo fmt` 统一定格式
+2. 运行 `cargo clippy --workspace --all-targets -- -D warnings` 验证
+3. 运行 `cargo test --workspace` 确认回归
+4. 汇总各执行器交付结果
 
 ## 常见发现模式
 

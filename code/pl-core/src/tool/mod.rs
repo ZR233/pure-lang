@@ -9,16 +9,15 @@ mod plan;
 mod skill;
 mod truncation;
 
+use pl_model::ToolSchema;
+use pl_protocol::{PureError, SkillActivation};
+use pl_trace::AgentEventSender;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
-
-use pl_model::ToolSchema;
-use pl_protocol::{PureError, SkillActivation};
-use pl_trace::AgentEventSender;
-use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::AgentSupervisor;
@@ -162,7 +161,10 @@ impl WorkspaceWriteLocks {
         let key =
             std::fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
         let lock = {
-            let mut locks = self.locks.lock().expect("workspace write locks poisoned");
+            let mut locks = self.locks.lock().unwrap_or_else(|poisoned| {
+                tracing::warn!("workspace write lock was poisoned, recovering");
+                poisoned.into_inner()
+            });
             locks
                 .entry(key)
                 .or_insert_with(|| Arc::new(Mutex::new(())))
@@ -266,7 +268,8 @@ impl ToolRegistry {
         });
         let mut registered = Vec::new();
         for info in &available {
-            let tool_name = format!("lsp_query_{}", info.language_id);
+            let lang_id = &info.language_id;
+            let tool_name = format!("lsp_query_{lang_id}");
             if self.get(&tool_name).is_none() {
                 self.tools
                     .push(lsp_tool_for_language(info, registry.clone()));

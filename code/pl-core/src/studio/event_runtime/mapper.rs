@@ -245,13 +245,15 @@ pub(super) fn message_id_for_trace_part(item: &TracePart) -> String {
         StudioMessageRole::Assistant => "assistant",
         StudioMessageRole::System => "system",
     };
-    format!("{}:{suffix}", item.turn_id)
+    let turn_id = &item.turn_id;
+    format!("{turn_id}:{suffix}")
 }
 
 fn part_id_for_trace_part(item: &TracePart) -> String {
     match (item.kind, item.text_channel) {
         (TracePartKind::Text, Some(TraceTextChannel::User)) => {
-            format!("{}:user-text", item.turn_id)
+            let turn_id = &item.turn_id;
+            format!("{turn_id}:user-text")
         }
         (TracePartKind::Text, Some(TraceTextChannel::Commentary))
         | (TracePartKind::Text, Some(TraceTextChannel::Final))
@@ -288,7 +290,8 @@ fn message_id_for_trace_delta(event: &TracePartDeltaEvent) -> String {
         | TracePartKind::Inference
         | TracePartKind::Plan => "assistant",
     };
-    format!("{}:{suffix}", event.turn_id)
+    let turn_id = &event.turn_id;
+    format!("{turn_id}:{suffix}")
 }
 
 pub(super) fn message_role_for_trace_part(item: &TracePart) -> StudioMessageRole {

@@ -123,7 +123,10 @@ async fn run_command_capture(
             return Err(ProbeError::Failed(timeout_message.to_string()));
         }
     };
-    let stdout = stdout_task.await.unwrap_or_default();
+    let stdout = stdout_task.await.unwrap_or_else(|e| {
+        tracing::warn!("rustup stdout task failed: {e}");
+        Vec::new()
+    });
     let stderr = stderr_task.await.unwrap_or_default();
     if status.success() {
         return Ok(if stdout.is_empty() { stderr } else { stdout });

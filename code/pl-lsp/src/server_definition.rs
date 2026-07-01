@@ -7,6 +7,7 @@ pub(crate) const RUST_ANALYZER_ID: &str = "rust-analyzer";
 
 /// LSP 服务器定义，用于描述如何启动一个 LSP 服务器以及它支持的语言。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct LspServerDefinition {
     pub id: String,
     pub display_name: String,

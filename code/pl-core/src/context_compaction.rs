@@ -196,9 +196,10 @@ fn summary_message(summary: &str) -> Message {
         SUMMARY_METADATA_KEY.to_string(),
         SUMMARY_METADATA_VALUE.to_string(),
     );
+    let trimmed = summary.trim();
     Message {
         role: MessageRole::User,
-        content: MessageContent::Text(format!("{SUMMARY_PREFIX}\n\n{}", summary.trim())),
+        content: MessageContent::Text(format!("{SUMMARY_PREFIX}\n\n{trimmed}")),
         reasoning_content: None,
         metadata,
     }

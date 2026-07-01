@@ -63,10 +63,12 @@ impl DiagnosticSink {
                 received_at,
             })
             .collect::<Vec<_>>();
-        self.diagnostics.lock().await.insert(
-            format!("{}:{}", self.server_id, params.uri.as_str()),
-            diagnostics,
-        );
+        let server_id = &self.server_id;
+        let uri_str = params.uri.as_str();
+        self.diagnostics
+            .lock()
+            .await
+            .insert(format!("{server_id}:{uri_str}"), diagnostics);
         let _ = self.updates.send(());
     }
 }

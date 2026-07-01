@@ -341,7 +341,8 @@ impl OpenToolInput {
 }
 
 fn block_key(kind: ModelBlockKind, id: &str) -> String {
-    format!("{}:{id}", block_kind_label(kind))
+    let label = block_kind_label(kind);
+    format!("{label}:{id}")
 }
 
 fn block_kind_label(kind: ModelBlockKind) -> &'static str {

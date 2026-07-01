@@ -95,8 +95,9 @@ impl StudioStore {
             result.model.clone()
         };
         let (estimated_costs, has_unpriced_usage) = cost_for_usage(&usage, model);
+        let count = result.session_message_count;
         let delta = AgentRuntimeDelta {
-            inference_id: format!("root-usage-{}", result.session_message_count),
+            inference_id: format!("root-usage-{count}"),
             agent_id: ROOT_AGENT_ID.to_string(),
             path: ROOT_AGENT_PATH.to_string(),
             parent_path: None,

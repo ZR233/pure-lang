@@ -96,10 +96,11 @@ pub(super) async fn execute_tool_calls(
 ) -> Result<Vec<ToolExecutionRecord>, ToolExecutionError> {
     let mut scheduled = Vec::new();
     let runtime_lock = Arc::new(RwLock::new(()));
+    let sid = &context.session_id;
     let mut progress = ProgressEmitter::new_scoped(
         recorder.sender().clone(),
         context.session_id.to_string(),
-        format!("{}:tool-progress", context.session_id),
+        format!("{sid}:tool-progress"),
         ProgressVerbosity::from_env(),
     );
 
@@ -169,12 +170,13 @@ pub(super) async fn execute_tool_calls(
                 tool_call.name, available
             );
             emit_tool_snapshot(recorder, &mut item, TracePartStatus::Failed);
+            let name = &tool_call.name;
             scheduled.push(ScheduledToolExecution {
                 tool_call: tool_call.clone(),
                 item,
                 future: Box::pin(ready_tool_execution_record(
                     tool_call.clone(),
-                    ToolExecutionError::RespondToModel(format!("Unknown tool: {}", tool_call.name)),
+                    ToolExecutionError::RespondToModel(format!("Unknown tool: {name}")),
                     TracePartStatus::Failed,
                     None,
                     false,
@@ -225,7 +227,8 @@ pub(super) async fn execute_tool_calls(
             }
             PermissionDecision::NeedsUserApproval { workspace_access } => {
                 emit_tool_snapshot(recorder, &mut item, TracePartStatus::AwaitingApproval);
-                progress.tool_detail(format!("工具 `{}` 正在等待授权。", tool_call.name));
+                let name = &tool_call.name;
+                progress.tool_detail(format!("工具 `{name}` 正在等待授权。"));
                 let decision =
                     request_user_approval(context.options, &approval_request, context.session_id)
                         .await;
@@ -244,7 +247,8 @@ pub(super) async fn execute_tool_calls(
             }
             PermissionDecision::NeedsAiReview { workspace_access } => {
                 emit_tool_snapshot(recorder, &mut item, TracePartStatus::AwaitingApproval);
-                progress.tool_detail(format!("正在审查工具 `{}`。", tool_call.name));
+                let name = &tool_call.name;
+                progress.tool_detail(format!("正在审查工具 `{name}`。"));
                 let mut review_context = tool_context.clone();
                 review_context.workspace_access = workspace_access;
                 let decision = context

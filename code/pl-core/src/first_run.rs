@@ -181,7 +181,8 @@ impl FirstRunProviderDraft {
         let mut info = self.kind.provider_info();
         info.name = non_empty_trimmed(&self.name, "provider name")?;
         info.base_url = trim_optional(self.base_url.as_deref()).ok_or_else(|| {
-            PureError::ConfigError(format!("provider {} base_url must not be empty", self.key))
+            let key = &self.key;
+            PureError::ConfigError(format!("provider {key} base_url must not be empty"))
         })?;
         info.default_model = non_empty_trimmed(&self.default_model, "provider default_model")?;
         info.bearer_token = Some(bearer_token.to_string());
