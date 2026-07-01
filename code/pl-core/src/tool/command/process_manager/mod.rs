@@ -15,7 +15,11 @@ use super::shell::shell_command;
 use crate::process::{
     configure_background_command, terminate_process_tree, terminate_process_tree_sync,
 };
-use crate::tool::truncation::{OutputTruncation, TruncatedOutput, TruncationStrategy};
+use crate::tool::truncation::TruncatedOutput;
+
+mod snapshot;
+
+use snapshot::{message_for_state, status_for_state, truncate_text};
 
 const DEFAULT_MAX_PROCESSES: usize = 16;
 const INTERNAL_BUFFER_BYTES: usize = 64 * 1024;
@@ -507,15 +511,6 @@ impl From<CommandTerminationReason> for CommandProcessResult {
     }
 }
 
-impl CommandTerminationReason {
-    fn message_fragment(self) -> &'static str {
-        match self {
-            Self::TimedOut => "timed out",
-            Self::Interrupted => "was interrupted",
-        }
-    }
-}
-
 async fn wait_for_process_activity(entry: &CommandProcessEntry, yield_time: Duration) {
     if yield_time.is_zero() {
         return;
@@ -740,73 +735,6 @@ async fn append_output_chunk(
     Ok(())
 }
 
-fn status_for_state(state: &CommandProcessState) -> &'static str {
-    match state.phase {
-        CommandProcessPhase::Running
-        | CommandProcessPhase::Terminating(_)
-        | CommandProcessPhase::Draining(_) => "running",
-        CommandProcessPhase::Final(CommandProcessResult::Completed) => "completed",
-        CommandProcessPhase::Final(CommandProcessResult::Failed) => "failed",
-        CommandProcessPhase::Final(CommandProcessResult::TimedOut) => "timedOut",
-        CommandProcessPhase::Final(CommandProcessResult::Interrupted) => "interrupted",
-    }
-}
-
-fn message_for_state(
-    state: &CommandProcessState,
-    process_id: Option<&str>,
-    output_file: &std::path::Path,
-) -> String {
-    if let Some(error) = &state.error {
-        return format!(
-            "{error}. Full command output is available at '{}'.",
-            output_file.display()
-        );
-    }
-    if let Some(reason) = state.termination_reason() {
-        return format!(
-            "Command {} and termination is in progress. Use write_stdin with processId '{}' and empty chars to wait or poll. Read outputFile for captured output.",
-            reason.message_fragment(),
-            process_id.unwrap_or_default()
-        );
-    }
-    match status_for_state(state) {
-        "running" if state.is_draining_output() => format!(
-            "Command exited and is draining remaining output. Use write_stdin with processId '{}' and empty chars to wait or poll. Read outputFile for complete output.",
-            process_id.unwrap_or_default()
-        ),
-        "running" => format!(
-            "Command is still running. Use write_stdin with processId '{}' to wait, poll, or send input. Read outputFile for complete output.",
-            process_id.unwrap_or_default()
-        ),
-        "completed" => {
-            "Command completed successfully. Read outputFile for complete output if needed."
-                .to_string()
-        }
-        "failed" => format!(
-            "Command exited with code {}. Read outputFile for complete stdout/stderr.",
-            state
-                .exit_code
-                .map(|code| code.to_string())
-                .unwrap_or_else(|| "unknown".to_string())
-        ),
-        "timedOut" => {
-            "Command timed out and was terminated. Read outputFile for captured output.".to_string()
-        }
-        "interrupted" => {
-            "Command was interrupted and termination was requested. Read outputFile for captured output."
-                .to_string()
-        }
-        _ => "Command status is unavailable.".to_string(),
-    }
-}
-
-fn truncate_text(text: &str, max_output_chars: usize) -> TruncatedOutput {
-    let head = max_output_chars / 2;
-    let tail = max_output_chars.saturating_sub(head);
-    TruncationStrategy::new(head, tail).truncate(text)
-}
-
 fn tool_error(tool: &str, error: impl std::fmt::Display) -> PureError {
     PureError::ToolExecutionFailed {
         tool: tool.to_string(),
@@ -814,111 +742,5 @@ fn tool_error(tool: &str, error: impl std::fmt::Display) -> PureError {
     }
 }
 
-impl From<&CommandOutputSnapshot> for OutputTruncation {
-    fn from(snapshot: &CommandOutputSnapshot) -> Self {
-        Self {
-            stdout: snapshot.stdout.clone(),
-            stderr: snapshot.stderr.clone(),
-        }
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use pretty_assertions::assert_eq;
-
-    use super::{
-        CommandProcessPhase, CommandProcessState, CommandProcessTransition, HeadTailBuffer,
-        INTERNAL_BUFFER_BYTES, StreamKind, message_for_state, status_for_state,
-    };
-
-    fn running_state() -> CommandProcessState {
-        CommandProcessState {
-            phase: CommandProcessPhase::Running,
-            exit_code: None,
-            stdout_open: true,
-            stderr_open: true,
-            stdout: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
-            stderr: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
-            output_revision: 0,
-            error: None,
-        }
-    }
-
-    #[test]
-    fn process_exit_waits_for_output_streams_before_final_status() {
-        let mut state = running_state();
-
-        state.apply_transition(CommandProcessTransition::ProcessExited { exit_code: Some(0) });
-        assert_eq!(status_for_state(&state), "running");
-        assert!(!state.can_accept_input());
-
-        state.apply_transition(CommandProcessTransition::StreamClosed(StreamKind::Stdout));
-        assert_eq!(status_for_state(&state), "running");
-
-        state.apply_transition(CommandProcessTransition::StreamClosed(StreamKind::Stderr));
-        assert_eq!(status_for_state(&state), "completed");
-        assert!(state.is_final());
-    }
-
-    #[test]
-    fn termination_reason_survives_until_streams_are_drained() {
-        let mut state = running_state();
-
-        state.apply_transition(CommandProcessTransition::TimedOut);
-        assert_eq!(status_for_state(&state), "running");
-        assert!(state.timed_out());
-
-        state.apply_transition(CommandProcessTransition::ProcessExited { exit_code: None });
-        assert_eq!(status_for_state(&state), "running");
-
-        state.apply_transition(CommandProcessTransition::StreamClosed(StreamKind::Stdout));
-        state.apply_transition(CommandProcessTransition::StreamClosed(StreamKind::Stderr));
-
-        assert_eq!(status_for_state(&state), "timedOut");
-        assert!(state.timed_out());
-        assert!(state.is_final());
-    }
-
-    #[test]
-    fn draining_output_message_only_suggests_polling() {
-        let mut state = running_state();
-
-        state.apply_transition(CommandProcessTransition::ProcessExited { exit_code: Some(0) });
-
-        let message = message_for_state(&state, Some("proc-1"), std::path::Path::new("output.log"));
-
-        assert!(message.contains("draining remaining output"));
-        assert!(message.contains("empty chars"));
-        assert!(!message.contains("send input"));
-    }
-
-    #[test]
-    fn terminating_message_only_suggests_polling() {
-        let mut timed_out = running_state();
-        timed_out.apply_transition(CommandProcessTransition::TimedOut);
-        let timeout_message = message_for_state(
-            &timed_out,
-            Some("proc-1"),
-            std::path::Path::new("output.log"),
-        );
-
-        assert!(timeout_message.contains("timed out"));
-        assert!(timeout_message.contains("termination is in progress"));
-        assert!(timeout_message.contains("empty chars"));
-        assert!(!timeout_message.contains("send input"));
-
-        let mut interrupted = running_state();
-        interrupted.apply_transition(CommandProcessTransition::Interrupted);
-        let interrupted_message = message_for_state(
-            &interrupted,
-            Some("proc-2"),
-            std::path::Path::new("output.log"),
-        );
-
-        assert!(interrupted_message.contains("was interrupted"));
-        assert!(interrupted_message.contains("termination is in progress"));
-        assert!(interrupted_message.contains("empty chars"));
-        assert!(!interrupted_message.contains("send input"));
-    }
-}
+mod tests;
