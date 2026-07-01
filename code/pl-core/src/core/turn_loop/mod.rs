@@ -267,6 +267,9 @@ pub(super) async fn run_turn_with_trace(
             parallel_tool_calls,
             temperature: None,
             max_tokens: None,
+            store: None,
+            previous_response_id: None,
+            prompt_cache_key: None,
             reasoning: reasoning.clone(),
             stream: true,
             trace: Some(pl_model::CompletionTraceContext {

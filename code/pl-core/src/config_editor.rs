@@ -49,7 +49,7 @@ pub fn infer_provider_template_kind(
     provider: &ProviderConfig,
 ) -> ProviderTemplateKind {
     match provider.provider_kind {
-        ProviderKind::OpenAi => ProviderTemplateKind::OpenAi,
+        ProviderKind::OpenAi | ProviderKind::OpenAiCompatibleChat => ProviderTemplateKind::OpenAi,
         ProviderKind::DeepSeek => ProviderTemplateKind::DeepSeek,
         ProviderKind::Zhipu => {
             if is_zhipu_coding_plan_provider(provider_key, provider) {

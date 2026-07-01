@@ -2,7 +2,7 @@
 
 ## 7.1 职责
 
-`pl-model` 是 LLM provider 与模型协议适配层，负责把核心层的统一请求转为具体 provider 的 API 请求，并把流式结果转换为 `pl-trace::AgentEvent` 和 `CompletionResponse`。
+`pl-model` 是 LLM provider 与模型协议适配层，负责把核心层的统一请求转为具体 provider 的 API 请求，并把流式结果转换为 provider 无关的 `CompletionStreamEvent`、`pl-trace::AgentEvent` 和 `CompletionResponse`。
 
 `pl-model` 不维护会话，不解析 CLI，也不决定编译阶段。
 `pl-model` 可以消费已经解析好的自定义模型列表，但不读取配置文件。
@@ -11,9 +11,11 @@
 
 - `provider`：一等供应商运行时，当前只包含 OpenAI、DeepSeek 和 Zhipu。
 - `protocol`：API 协议编解码，当前实现 OpenAI Responses / Chat Completions，Anthropic 仅保留占位。
-- `stream`：provider 无关的 canonical stream event、工具调用合并、plan 提取和 timeline 投影。
+- `stream`：provider 无关的 public canonical stream event、工具调用合并、plan 提取和 timeline 投影。
 
-`protocol` 只负责把 provider 私有 SSE chunk 映射为 `stream` 的 canonical event。OpenAI Responses、OpenAI Chat、DeepSeek 和 Zhipu/GLM 兼容接口在进入 accumulator 前必须统一为文本、思考、工具参数、工具完成、usage 和完成/失败事件。核心层和 Studio timeline 不解析 provider 原始 JSON。
+`protocol` 只负责把 provider 私有 SSE chunk 映射为 `stream` 的 canonical event。OpenAI Responses、OpenAI Chat、DeepSeek 和 Zhipu/GLM 兼容接口在进入 accumulator 前必须统一为 response started/id、文本、思考、reasoning summary、工具参数、工具 ready/done、usage 和完成/失败事件。核心层、Studio timeline 和外部集成方不解析 provider 原始 JSON。
+
+`CompletionEventStream` 是 `pl-model` 的公开流式边界，元素类型为 `Result<CompletionStreamEvent>`。`ModelProvider::stream_events` 返回该流，供 `mai-team` 等调用方原生消费 provider 无关事件；`stream_complete` 保留为兼容 API，但必须通过同一条 public stream API 累计出 `CompletionResponse`，避免在核心层或外部仓库复刻 provider adapter。
 
 `stream` 层负责稳定工具调用 identity。OpenAI Responses 可能先发送只有 provider `item_id` 的 `output_item.added`，后续 delta 或 done 才补 `call_id`；Chat Completions 也可能只依赖 chunk index 作为 `stream_id`。同一个工具调用一旦通过 `stream_id`、`item_id` 或 `call_id` 中任一非空身份进入 accumulator，后续 late metadata 必须合并到同一个 open tool，不得因为 `call_id` 后到而拆成第二个 tool call 或第二个 trace part。trace 的 tool part id 以最早稳定的 provider item/runtime tool id 为锚，`call_id` 只作为 metadata 写入 tool snapshot，用于协议回放和 provider tool result 匹配。
 
@@ -47,7 +49,7 @@ provider 适配实现可以依赖 `async-openai`、`reqwest` 和 `serde`。这�
 
 `pl-core` 只读取这些 provider 无关能力来做本地校验和 UI 展示：图片输入必须要求模型声明 `input = ["image"]`，工具调用必须匹配工具能力，推理请求必须匹配 `reasoning = true`。provider 私有差异不扩散到 `pl-core`。
 
-模型级 provider override 使用 `ModelRequestProfile` 表达，包括 `api_model`、`headers`、`body` 和 `options`。`body` 作为 base body 注入请求体（如 DeepSeek 固定的 `thinking.type = enabled`）；其余可变字段（如 effort 透传的 `reasoning_effort`、GLM `thinking.clear_thinking`）由 `ModelInfo.parameters` 声明驱动（见 7.8）。这些字段只由 `pl-model` 的 provider adapter 消费；核心编排层不得读取或拼接这些私有字段。
+模型级 provider override 使用 `ModelRequestProfile` 表达，包括 `api_model`、`headers`、`body`、`options` 和 `max_tokens_field`。`body` 作为 base body 注入请求体（如 DeepSeek 固定的 `thinking.type = enabled`）；其余可变字段（如 effort 透传的 `reasoning_effort`、GLM `thinking.clear_thinking`）由 `ModelInfo.parameters` 声明驱动（见 7.8）。这些字段只由 `pl-model` 的 provider adapter 消费；核心编排层不得读取或拼接这些私有字段。Chat Completions 的最大输出 token 字段默认写入 `max_tokens`；OpenAI-compatible provider 若要求新字段（如 MiMo 的 `max_completion_tokens`）可在模型 profile 中声明。Responses endpoint 仍使用 `max_output_tokens`。
 
 ## 7.4 Provider 抽象
 
@@ -55,6 +57,7 @@ provider 适配实现可以依赖 `async-openai`、`reqwest` 和 `serde`。这�
 
 - `info()`
 - `capabilities()`
+- `stream_events(...)`
 - `stream_complete(...)`
 - `auth_token()`
 - `model_info(...)`
@@ -67,6 +70,8 @@ provider 适配实现可以依赖 `async-openai`、`reqwest` 和 `serde`。这�
 `SharedModelProvider` 是 `Arc<OpenAiProvider>`。三个供应商（OpenAI、DeepSeek、Zhipu）共享同一个 OpenAI 兼容 transport，差异仅在 endpoint 选择、bundled 模型目录和 `ProviderCapabilities`，由 `ProviderKind` 在构造时一次决定；不使用 `dyn ModelProvider`，也不引入 `async_trait`，不再为每供应商单独定义 struct 或穷尽枚举分发。未来若引入协议真正不同的供应商（如 Anthropic），再新增独立 provider struct 与分发枚举。
 
 每个 provider 拥有自己的 profile：默认 base URL、默认模型、模型目录、tool wire policy 和协议 endpoint policy。reasoning/thinking/effort 的 wire 规则不再由 provider struct 携带，而是由模型 `parameters` 声明驱动（见 7.8），provider 层与协议层都不再包含任何 reasoning policy 硬编码。模型目录只包含该 provider 的 bundled/configured 模型，不从全局模型列表兜底生成 provider 列表。
+
+OpenAI-compatible Chat 供应商使用通用 `ProviderKind::OpenAiCompatibleChat` 表达，不为 MiMo 等兼容供应商新增 runtime struct。它复用 OpenAI transport、Chat Completions endpoint、配置模型目录和通用 parameter/profile wire；具体 base URL、默认模型、headers、tool wire policy 与模型能力由 `ProviderInfo` 和 `ModelInfo` 提供。
 
 Zhipu Coding Plan 是 Zhipu profile 的配置模板，默认使用 `https://open.bigmodel.cn/api/coding/paas/v4`，模型列表与现有 Zhipu 模板完全一致；它不新增 `ProviderRuntime` 变体，也不改变 `ProviderKind::Zhipu` 的协议边界。
 
@@ -84,6 +89,8 @@ OpenAI、DeepSeek 和 Zhipu 都复用 `protocol::openai`。OpenAI 默认使用 R
 effort 等可调参数的 wire 写入由通用透传机制驱动，协议层不再为每供应商硬编码 reasoning/thinking 映射。`build_request` 接收当前 `ModelInfo`，先序列化强类型核心字段（model、messages、stream、tools 等）为 JSON 对象，再依次注入：base body（`ModelRequestProfile.body`，如 DeepSeek 固定的 `thinking.type = enabled`），以及 parameter wire（用户选中的候选值按模型 `parameters` 声明写入或移除字段，见 7.8）。覆盖优先级为 parameter wire > base body > 协议默认字段。
 
 OpenAI Responses 的 `reasoning.summary` 仍按 Codex wire 语义发送（`Auto` 和兼容层的 `Enabled` 都发送 `auto`，`Disabled` 不发送 summary 字段），由 `ReasoningConfig.summary` 独立驱动，不进入 parameter wire。模型返回的 `reasoning_content` 进入 canonical reasoning event；历史回放时仍通过 assistant message 的 `reasoning_content` 字段写回 Chat Completions。
+
+OpenAI Responses continuation 字段由 `CompletionRequest` 承载：`store`、`previous_response_id`、`prompt_cache_key`。这些字段只序列化到 Responses 请求体；Chat Completions 请求体不得发送这些字段。
 
 provider transport 层把第三方 API 错误统一转换为 `PureError` 时必须先脱敏。错误文本中不得包含 bearer token、API key 或形如 `sk-...` 的密钥片段；鉴权失败、配额不足、模型不存在等服务端错误可以保留 status、错误类型、code 和可读原因，但密钥值必须替换为稳定占位。
 

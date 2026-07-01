@@ -43,6 +43,9 @@ fn zhipu_disabled_request() -> CompletionRequest {
         parallel_tool_calls: false,
         temperature: None,
         max_tokens: Some(128),
+        store: None,
+        previous_response_id: None,
+        prompt_cache_key: None,
         reasoning: Some(ReasoningConfig {
             effort: Some("none".to_string()),
             summary: Some(ReasoningSummary::Disabled),
@@ -65,6 +68,9 @@ fn zhipu_thinking_request() -> CompletionRequest {
         parallel_tool_calls: false,
         temperature: None,
         max_tokens: Some(1024),
+        store: None,
+        previous_response_id: None,
+        prompt_cache_key: None,
         reasoning: Some(ReasoningConfig {
             effort: Some("enabled".to_string()),
             summary: Some(ReasoningSummary::Enabled),

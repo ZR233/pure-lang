@@ -42,6 +42,34 @@ async fn stream_complete_uses_chat_endpoint_without_auth_when_token_missing() {
 }
 
 #[tokio::test]
+async fn openai_compatible_chat_provider_uses_chat_endpoint() {
+    let sse_body = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"<final>mimo ok</final>\"},\"finish_reason\":null}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let (base_url, handle) = serve_sse_once(sse_body).await;
+    let mut model = ModelInfo::fallback("mimo-chat");
+    model.context_window = Some(128_000);
+    let provider = OpenAiProvider::new(
+        ProviderInfo::openai_compatible_chat("MiMo", base_url, "mimo-chat"),
+        vec![model],
+    )
+    .unwrap();
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+
+    let response = provider
+        .stream_complete(minimal_request("mimo-chat"), event_tx)
+        .await
+        .unwrap();
+    let captured = handle.await.unwrap();
+
+    assert_eq!(response.content.as_deref(), Some("mimo ok"));
+    assert_eq!(captured.request_line, "POST /chat/completions HTTP/1.1");
+}
+
+#[tokio::test]
 async fn stream_complete_chat_tags_project_commentary_and_final_only() {
     let sse_body = concat!(
         "data: {\"choices\":[{\"delta\":{\"content\":\"<commentary>检查配置。</commentary>\"},\"finish_reason\":null}]}\n\n",

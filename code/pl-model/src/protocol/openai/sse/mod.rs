@@ -360,7 +360,7 @@ impl OpenAiStreamDecoder {
                 event @ (StreamEvent::ToolInputStarted { .. }
                 | StreamEvent::ToolInputDelta { .. }
                 | StreamEvent::ToolCallReady { .. }
-                | StreamEvent::StepStarted { .. }) => {
+                | StreamEvent::ResponseStarted { .. }) => {
                     normalized.extend(self.close_open_content_blocks());
                     normalized.push(event);
                 }
@@ -556,7 +556,7 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
     }
 
     match event.kind.as_str() {
-        "response.created" => Some(StreamEventBatch::Single(StreamEvent::StepStarted {
+        "response.created" => Some(StreamEventBatch::Single(StreamEvent::ResponseStarted {
             response_id: event
                 .response
                 .as_ref()
