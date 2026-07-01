@@ -3,9 +3,7 @@ use crate::api::studio::types::{
 };
 use anyhow::{Context, Result};
 use pl_protocol::{StudioAgentSnapshot, StudioAgentTimelineEvent, StudioAgentTimelineEventKind};
-pub(crate) fn agent_bridge_dto(
-    agent: pl_core::StudioAgentSnapshotRecord,
-) -> BridgeAgentSnapshotDto {
+pub(crate) fn agent_bridge_dto(agent: pl_core::AgentSnapshotRecord) -> BridgeAgentSnapshotDto {
     BridgeAgentSnapshotDto {
         id: agent.id,
         session_id: agent.session_id,
@@ -23,7 +21,7 @@ pub(crate) fn agent_bridge_dto(
 }
 
 pub(crate) fn agent_event_bridge_dto(
-    event: pl_core::StudioAgentTimelineEventRecord,
+    event: pl_core::AgentTimelineEventRecord,
 ) -> Result<BridgeAgentTimelineEventDto> {
     let payload = serde_json::from_str::<StudioAgentTimelineEvent>(&event.payload_json)
         .with_context(|| {

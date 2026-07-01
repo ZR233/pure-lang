@@ -1,7 +1,7 @@
 use super::snapshot::{
     bootstrap_studio_inner, studio_snapshot_from_projects_inner, studio_snapshot_inner,
 };
-use crate::api::studio::convert::runtime_snapshot;
+use crate::api::studio::convert::runtime::runtime_snapshot;
 use crate::api::studio::runtime::bridge;
 use crate::api::studio::types::{BridgeStudioSnapshotResponse, RuntimeSnapshot};
 use anyhow::{Context, Result};

@@ -10,14 +10,14 @@
 
 ## 2. 命名与模块边界
 
-`pl-core` 固定端口-适配器边界，并以四个边界入口渐进式整理实现：
+`pl-core` 固定端口-适配器边界，但不再保留只做 re-export 的分层包装模块。公开 API 由 crate root 直接导出稳定入口，内部实现按业务命名空间组织：
 
-- `application`：use case 编排入口
-- `domain`：领域类型与状态入口
 - `interfaces`：端口 trait
-- `infrastructure`：适配器入口
+- `studio`：Studio runtime、store、事件投影和 UI-facing records
+- `core`：turn pipeline、权限和工具调度
+- `tool`、`config`、`mcp`：具体适配器与运行时能力
 
-当前实现仍允许 `studio`、`core`、`tool`、`config`、`mcp` 等业务命名空间承载主要代码；新增抽象和大块重构应优先向上述边界收敛，避免再把应用编排、存储、工具执行和桥接 DTO 混回单个大模块。
+新增端口抽象放入 `interfaces`；新增实现优先进入对应业务命名空间。不得新增 `application`、`domain`、`infrastructure` 这类只转发类型的兼容包装层；调用方应直接引用 crate root 导出的稳定类型，或在 crate 内部引用真实模块路径。
 
 Flutter/FRB 固定结构：
 

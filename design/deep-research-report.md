@@ -17,7 +17,7 @@
 
 问题不在“有没有架构”，而在“架构边界没有被实现细化”。当前实现把大量职责继续压回少数超大文件：`pure-studio/src-tauri/src/main.rs` 已达到 **1491 行**，而仓库自己的协作约定明确要求模块目标控制在 **500 行以内**、超过 **800 行** 时新功能应继续拆分；`pl-core/src/config.rs` 也达到 **945 行**。同时，Tauri 命令桥接、UI 状态管理、配置 DTO、事件排水、审批状态、SQLite 读写、trace 序列化等都呈现集中化趋势。citeturn26view0turn30view0turn44view0turn27view0turn29view0turn28view7
 
-我认为最优路径不是“轻微整理后继续堆功能”，也不是立刻拆成后台服务，而是实施一套**端口-适配器化的模块化单体重构**：保留现有 Tauri 桌面形态与 Cargo workspace，不做进程级拆分；将 `pl-core` 从“超级应用层”重构为 **application / domain / infrastructure / interface adapter** 四个清晰边界，把 `StudioStore`、`ConfigStore`、工具系统、事件转发和前端桥接从“实现细节”沉到底层适配器；同时把 `pure-studio` 前端改为 reducer/state-machine 驱动，减少 `App.tsx` 的耦合与状态散落。这样既能解决当前最大的可维护性与可测试性问题，又不会引入“本地守护进程 + IPC + 运维复杂度”的过度设计。该方案与 Hexagonal Architecture 的核心意图一致：把 UI、数据库和外部服务都放到边缘，核心只依赖抽象端口。citeturn15view0turn17view1turn48search3
+我当时认为最优路径不是“轻微整理后继续堆功能”，也不是立刻拆成后台服务，而是实施一套**端口-适配器化的模块化单体重构**：保留桌面形态与 Cargo workspace，不做进程级拆分；将 `pl-core` 从“超级应用层”重构为清晰边界，把 `StudioStore`、`ConfigStore`、工具系统、事件转发和前端桥接从“实现细节”沉到底层适配器。后续实现已经改为 crate root 直接导出稳定 API、`interfaces` 承载端口 trait、`studio` / `core` / `tool` / `config` / `mcp` 承载真实实现，不再保留只转发类型的 `application`、`domain`、`infrastructure` 包装模块。该方案与 Hexagonal Architecture 的核心意图一致：把 UI、数据库和外部服务都放到边缘，核心只依赖抽象端口。citeturn15view0turn17view1turn48search3
 
 推荐方案是下文的**方案乙：端口-适配器化模块化单体**。按 3 名工程师（2 名 Rust/后端兼桌面、1 名前端）估算，主线可在 **6–8 周** 内落地；若把 CI/CD、回归基线、数据迁移与安全治理一起纳入，则建议排 **8–10 周** 完整周期。这个方案在成本、风险、收益和兼容性之间最均衡：收益远高于“只做外科拆文件”，风险远低于“拆后台服务”。其关键验收指标应包括：不破坏现有 `config.toml` 与 `studio_1.sqlite`；Tauri 命令对前端保持兼容或提供兼容层；关键路径的单元/集成测试与回归测试成体系；事件流在高频 delta 下不再因 `broadcast` lag 而静默中断；前端与后端都有自动化流水线而非手工执行。citeturn31view3turn28view4turn47view2turn50view3turn39view0turn45view0turn49search0
 
@@ -164,7 +164,7 @@ sequenceDiagram
 | 迁移步骤 | 先拆 main.rs/前端状态，再补测试与 CI | 先定义 ports，再把旧实现迁成 adapters，最后逐步删旧路径 | 先抽 runtime API，再双写/双跑，最后默认切换到 daemon |
 | 时间与人力 | 2–3 人，3–4 周 | 3 人，6–8 周 | 4 人，10–14 周 |
 | 风险与缓解 | 风险：拆完仍然耦合；缓解：以“可测接口”而不是“文件名”做拆分 | 风险：抽象过度；缓解：先围绕现有痛点抽最小 ports，不引入新框架 | 风险：复杂度暴涨；缓解：必须坚持“先模块化单体，再进程拆分” |
-| 回滚策略 | 每次拆分保留旧模块 façade，出问题可回滚到旧入口 | 在 `pl-core` 外层保留兼容 façade，前端命令名与 DTO 版本化 | 保留 in-process 引擎作为 fallback，通过 feature flag 或启动参数切换 |
+| 回滚策略 | 每次拆分保持小步可回滚，避免长期保留旧模块 façade | 前端命令名与 DTO 版本化，`pl-core` 不新增只转发的兼容 façade | 保留 in-process 引擎作为 fallback，通过 feature flag 或启动参数切换 |
 
 我对三套方案的判断来自当前系统的**真实规模和实际部署形态**：仓库现在仍是单机桌面应用，`bundle` 未启用、也没有正式 release，说明引入本地 daemon 的收益暂时不足以覆盖系统复杂度；但与此同时，当前集中化问题已经明显大于“只拆文件就够了”的程度，因此推荐跳过纯止血方案，直接进入方案乙。citeturn46view0turn45view0turn15view2turn15view0
 
@@ -291,7 +291,7 @@ function studioReducer(state: StudioState, action: StudioAction): StudioState {
 |---|---|---|---|---:|
 | Phase A | 建立基线，先止血 | 记录当前命令接口、DTO、trace 结构；补 GitHub Actions；冻结对外 Tauri 命令名 | 基线文档、CI 初版、回归样本 | 1 周 |
 | Phase B | 重构 Tauri 桥接层 | 把 `main.rs` 拆成 `commands/*`、`dto/*`、`events/*`、`approvals/*`、`state/*` | `main.rs` 降到壳层；命令模块化 | 1–2 周 |
-| Phase C | `pl-core` 端口化 | 拆出 `application`、`domain`、`infrastructure`，抽 `SessionRepository/ConfigRepository/EventSink/ToolExecutor` | `pl-core` 新边界；兼容 façade | 2 周 |
+| Phase C | `pl-core` 端口化 | 保留 crate root 直接导出，按 `interfaces`、`studio`、`core`、`tool`、`config`、`mcp` 整理端口和实现 | `pl-core` 边界清晰；无只转发的兼容 façade | 2 周 |
 | Phase D | 持久化与事件链路优化 | 为消息/trace 增加事务批量写；修复 `drain_events` 的 lag 处理；清理 trace 双重 JSON 负担 | 新的持久化实现和回归基准 | 1–2 周 |
 | Phase E | 前端状态重构 | 用 reducer/state-machine 替换 `App.tsx` 的分散状态；按功能拆组件与 hooks | 可测试的 UI 状态层 | 1–2 周 |
 | Phase F | 安全与发布工程化 | token 存储抽象、补 CSP、补制品构建与签名占位、补迁移脚本与发布说明 | 安全基线与打包流水线 | 1 周 |
@@ -346,7 +346,7 @@ CI/CD 层建议分成两个 workflow。其一是 **PR 质量门**：Rust fmt、c
 |---|---|---|
 | 团队规模 | 约 3 名工程师，其中至少 2 人能同时处理 Rust/Tauri，1 人处理前端 | 直接影响方案乙的 6–8 周时间估算；若只有 1–2 人，需按 1.5–2 倍周期重估。 |
 | 业务目标 | 未来 6–12 个月仍以 **桌面端** 为主，而不是立即发展为多前端平台 | 这是我不推荐方案丙的前提。 |
-| 兼容要求 | 现有 `config.toml` 与 `studio_1.sqlite` 需要平滑迁移，最好无人工操作 | 因此我推荐“模块化单体 + 兼容 façade”，而不是破坏性重写。 |
+| 兼容要求 | 现有 `config.toml` 与 `studio_1.sqlite` 需要平滑迁移，最好无人工操作 | 因此推荐“小步模块化单体重构”，而不是破坏性重写或长期兼容 façade。 |
 | 可接受停机 | 单机桌面应用可接受一次性本地数据迁移，但不应要求长时间停用 | 影响迁移策略与 SQLite schema 改造方式。 |
 | 预算上限 | 可以接受一次中等规模重构，但不希望引入新的长期运维面 | 这是我把方案乙放在最佳平衡点的核心原因。 |
 | 安全目标 | 短期以“本地应用可控风险”为目标，中期逐步引入系统密钥链与更严格 CSP | 因此安全建议分阶段推进，而非一步到位做企业级端点治理。 |

@@ -7,7 +7,7 @@ use super::agent_tool_records;
 use super::child_agent_options;
 use super::fork_session;
 use super::json_output;
-use super::tools::followup_prompt;
+use super::tools::message::followup_prompt;
 use super::types::{AgentToolRecord, ListAgentsResult, WaitAgentResult};
 use crate::agent::{AgentMailboxMessage, AgentRecord};
 use crate::tool::recoverable::{

@@ -235,7 +235,12 @@ fn record_enabled_tools_for_core(
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new(session_id.to_string(), event_tx, 0);
 
-    super::turn_loop::record_enabled_tools(&mut recorder, turn_id, mode, &tool_schemas);
+    super::turn_loop::enabled_tools::record_enabled_tools(
+        &mut recorder,
+        turn_id,
+        mode,
+        &tool_schemas,
+    );
 
     recorder.drain()
 }

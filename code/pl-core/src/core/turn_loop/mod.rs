@@ -5,11 +5,11 @@ use pl_trace::{AgentEvent, TracePartStatus};
 use std::sync::Arc;
 
 mod attachments;
-mod enabled_tools;
+pub(super) mod enabled_tools;
 mod plan_exit;
 
 use attachments::materialize_messages;
-pub(super) use enabled_tools::record_enabled_tools;
+use enabled_tools::record_enabled_tools;
 use plan_exit::record_plan_exit_items;
 
 use crate::context_compaction::{
@@ -29,10 +29,8 @@ use super::SUBAGENT_DISPATCH_CONSTRAINT;
 use super::SUBAGENT_FORCE_DISPATCH_INSTRUCTION;
 use super::permission::cancellation_reason;
 use super::progress::{ProgressEmitter, ProgressVerbosity};
-use super::tool_dispatch::{
-    ToolExecutionContext, ToolExecutionError, execute_tool_calls,
-    tool_results_include_recoverable_subagent_capacity,
-};
+use super::tool_dispatch::records::tool_results_include_recoverable_subagent_capacity;
+use super::tool_dispatch::{ToolExecutionContext, ToolExecutionError, execute_tool_calls};
 use super::turn_result::{
     budget_limited_turn_result, default_workspace_root, failed_turn_result,
     failed_turn_result_with_abort_reason, interrupted_turn_result, is_cancelled,

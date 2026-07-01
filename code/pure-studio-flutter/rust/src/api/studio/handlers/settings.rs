@@ -1,5 +1,5 @@
 use super::snapshot::studio_snapshot_inner;
-use crate::api::studio::convert::{
+use crate::api::studio::convert::settings::{
     mcp_transport_from_label, normalized_string_list, provider_settings_edit,
 };
 use crate::api::studio::runtime::bridge;
