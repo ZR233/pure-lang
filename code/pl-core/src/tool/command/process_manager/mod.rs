@@ -216,7 +216,8 @@ impl CommandProcessManager {
                 ));
             }
             manager_state.next_id = manager_state.next_id.saturating_add(1);
-            let process_id = format!("proc-{}", manager_state.next_id);
+            let next_id = manager_state.next_id;
+            let process_id = format!("proc-{next_id}");
             let mut child = command
                 .spawn()
                 .map_err(|error| tool_error("bash", format!("failed to spawn command: {error}")))?;

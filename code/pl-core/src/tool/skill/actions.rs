@@ -20,9 +20,10 @@ pub(super) fn create_skill(
     input: SkillManageInput,
 ) -> Result<ToolOutput, PureError> {
     if catalog.project_skill(&input.name).is_some() {
+        let name = &input.name;
         return Err(tool_error(
             tool,
-            format!("project skill already exists: {}", input.name),
+            format!("project skill already exists: {name}"),
         ));
     }
     let content = required(input.content, tool, "content")?;

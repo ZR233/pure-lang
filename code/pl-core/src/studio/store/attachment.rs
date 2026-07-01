@@ -218,7 +218,10 @@ async fn materialize_attachments(
     for record in records {
         let bytes = tokio::fs::read(PathBuf::from(&record.storage_path))
             .await
-            .with_context(|| format!("failed to read attachment {}", record.id))?;
+            .with_context(|| {
+                let id = &record.id;
+                format!("failed to read attachment {id}")
+            })?;
         materialized.push(MaterializedAttachment {
             attachment_id: record.id,
             media_type: record.media_type,

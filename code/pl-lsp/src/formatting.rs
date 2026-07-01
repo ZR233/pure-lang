@@ -95,7 +95,10 @@ fn format_locations(value: &Value, workspace_root: &Path, noun: &str) -> Formatt
         .iter()
         .map(|location| {
             files.insert(location.path.clone());
-            format!("{}:{}:{}", location.path, location.line, location.character)
+            let path = &location.path;
+            let line = location.line;
+            let character = location.character;
+            format!("{path}:{line}:{character}")
         })
         .collect::<Vec<_>>();
     let prefix = if locations.len() == 1 {
@@ -107,7 +110,8 @@ fn format_locations(value: &Value, workspace_root: &Path, noun: &str) -> Formatt
             files.len()
         )
     };
-    let text = format!("{prefix}\n{}", lines.join("\n"));
+    let joined = lines.join("\n");
+    let text = format!("{prefix}\n{joined}");
     let _ = workspace_root;
     FormattedLspResult::new(text, Some(locations.len()), Some(files.len()))
 }

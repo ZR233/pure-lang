@@ -157,7 +157,8 @@ pub struct LspLanguageTool {
 
 impl LspLanguageTool {
     pub fn new(info: &LanguageToolInfo, registry: LspRuntimeRegistry) -> Self {
-        let name = format!("lsp_query_{}", info.language_id);
+        let lang_id = &info.language_id;
+        let name = format!("lsp_query_{lang_id}");
         let language_name = language_display_name(&info.language_id);
         let extensions = if info.extensions.is_empty() {
             "none declared".to_string()

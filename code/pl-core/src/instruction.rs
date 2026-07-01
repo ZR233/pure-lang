@@ -89,11 +89,9 @@ impl InstructionAssembler {
             user: Vec::new(),
         };
 
+        let mode = request.mode.label();
         snapshot.push_developer(
-            InstructionSource::new(
-                InstructionSourceKind::Mode,
-                format!("compile mode: {}", request.mode.label()),
-            ),
+            InstructionSource::new(InstructionSourceKind::Mode, format!("compile mode: {mode}")),
             request.mode.instructions(),
         );
         snapshot.push_developer(

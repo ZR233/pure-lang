@@ -61,9 +61,9 @@ impl HeadTailBuffer {
             bytes.extend_from_slice(chunk);
         }
         if self.omitted_bytes > 0 {
-            bytes.extend_from_slice(
-                format!("\n\n... [{} bytes omitted] ...\n\n", self.omitted_bytes).as_bytes(),
-            );
+            let omitted = self.omitted_bytes;
+            bytes
+                .extend_from_slice(format!("\n\n... [{omitted} bytes omitted] ...\n\n").as_bytes());
         }
         for chunk in &self.tail {
             bytes.extend_from_slice(chunk);

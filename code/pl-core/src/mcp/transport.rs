@@ -504,9 +504,11 @@ impl McpClient for HttpMcpClient {
 
 fn json_rpc_response_result(response: JsonRpcResponse) -> Result<Value> {
     if let Some(error) = response.error {
+        let code = error.code;
+        let message = &error.message;
         return Err(PureError::ToolExecutionFailed {
             tool: "mcp".to_string(),
-            error: format!("JSON-RPC error {}: {}", error.code, error.message),
+            error: format!("JSON-RPC error {code}: {message}"),
         });
     }
     response

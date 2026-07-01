@@ -326,7 +326,8 @@ impl Config for PureOpenAiConfig {
     }
 
     fn url(&self, path: &str) -> String {
-        format!("{}{}", self.api_base, path)
+        let base = &self.api_base;
+        format!("{base}{path}")
     }
 
     fn query(&self) -> Vec<(&str, &str)> {

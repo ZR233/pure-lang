@@ -12,6 +12,7 @@ pub(super) struct JsonRpcRequest<'a> {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct JsonRpcResponse {
     pub(super) id: Option<u64>,
     pub(super) result: Option<Value>,
@@ -19,6 +20,7 @@ pub(super) struct JsonRpcResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct JsonRpcError {
     pub(super) code: i64,
     pub(super) message: String,

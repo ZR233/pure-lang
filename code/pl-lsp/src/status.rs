@@ -122,7 +122,8 @@ impl LspClientStatus {
 
 /// 根据进度标题和消息判断活动类型。
 fn activity_kind_for_progress(title: &str, message: Option<&str>) -> LspActivityKind {
-    let text = format!("{title} {}", message.unwrap_or_default()).to_ascii_lowercase();
+    let msg = message.unwrap_or_default();
+    let text = format!("{title} {msg}").to_ascii_lowercase();
     if text.contains("index")
         || text.contains("fetching")
         || text.contains("crategraph")

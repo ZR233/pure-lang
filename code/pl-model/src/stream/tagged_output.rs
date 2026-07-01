@@ -384,7 +384,8 @@ impl TaggedVisibleOutputAdapter {
 
     fn next_segment_id(next_segment_ordinal: &mut u64, kind: VisibleTextKind) -> String {
         *next_segment_ordinal += 1;
-        format!("tagged-{}-{next_segment_ordinal}", kind.channel_label())
+        let label = kind.channel_label();
+        format!("tagged-{label}-{next_segment_ordinal}")
     }
 
     fn text_channel(kind: VisibleTextKind) -> TraceTextChannel {

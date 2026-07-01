@@ -99,7 +99,9 @@ impl ProgressEmitter {
         }
 
         self.next_ordinal += 1;
-        let item_id = format!("{}:{}", self.item_prefix, self.next_ordinal);
+        let prefix = &self.item_prefix;
+        let ordinal = self.next_ordinal;
+        let item_id = format!("{prefix}:{ordinal}");
         let now = unix_seconds();
         let item = TracePart::runtime_commentary(
             self.turn_id.clone(),

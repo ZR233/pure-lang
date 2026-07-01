@@ -443,10 +443,11 @@ impl TraceProjection {
     }
 
     fn namespaced_item_id(&self, item_id: &str) -> String {
-        if item_id == self.turn_id || item_id.starts_with(&format!("{}-", self.turn_id)) {
+        let turn_id = &self.turn_id;
+        if item_id == self.turn_id || item_id.starts_with(&format!("{turn_id}-")) {
             return item_id.to_string();
         }
-        format!("{}-{item_id}", self.turn_id)
+        format!("{turn_id}-{item_id}")
     }
 
     fn active_text_item_id(&mut self, provider_item_id: &str, channel: TraceTextChannel) -> String {
@@ -454,7 +455,8 @@ impl TraceProjection {
         if let Some(item_id) = self.active_text_items.get(&key) {
             return item_id.clone();
         }
-        let item_id = self.next_segment_item_id(&format!("text-{}", channel.as_str()));
+        let channel_str = channel.as_str();
+        let item_id = self.next_segment_item_id(&format!("text-{channel_str}"));
         self.active_text_items.insert(key, item_id.clone());
         item_id
     }
@@ -505,7 +507,9 @@ impl TraceProjection {
             .entry(segment.to_string())
             .or_insert(0);
         *occurrence += 1;
-        format!("{}-{segment}-{}", self.inference_id, *occurrence)
+        let inference_id = &self.inference_id;
+        let occ = *occurrence;
+        format!("{inference_id}-{segment}-{occ}")
     }
 
     fn complete_item_by_resolved_id(
@@ -558,7 +562,8 @@ fn unix_seconds() -> i64 {
 }
 
 fn text_provider_key(provider_item_id: &str, channel: TraceTextChannel) -> String {
-    format!("text:{}:{provider_item_id}", channel.as_str())
+    let channel_str = channel.as_str();
+    format!("text:{channel_str}:{provider_item_id}")
 }
 
 fn thinking_provider_key(provider_item_id: &str, chunk_index: u32) -> String {

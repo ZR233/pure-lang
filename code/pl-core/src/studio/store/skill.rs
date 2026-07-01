@@ -99,5 +99,6 @@ pub(super) async fn upsert_session_skill_with_tx(
 }
 
 fn session_skill_id(session_id: &str, skill_name: &str) -> String {
-    format!("{session_id}:{}", skill_name.to_ascii_lowercase())
+    let lowered = skill_name.to_ascii_lowercase();
+    format!("{session_id}:{lowered}")
 }

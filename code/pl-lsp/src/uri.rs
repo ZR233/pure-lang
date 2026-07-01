@@ -10,13 +10,16 @@ pub(crate) fn path_to_file_uri(path: &Path) -> String {
     if cfg!(windows) {
         let path = normalize_windows_verbatim_path(&absolute.to_string_lossy()).replace('\\', "/");
         if let Some(unc_path) = path.strip_prefix("//") {
-            format!("file://{}", encode_path(unc_path))
+            let encoded = encode_path(unc_path);
+            format!("file://{encoded}")
         } else {
-            format!("file:///{}", encode_path(&path))
+            let encoded = encode_path(&path);
+            format!("file:///{encoded}")
         }
     } else {
         let path = absolute.to_string_lossy().replace('\\', "/");
-        format!("file://{}", encode_path(&path))
+        let encoded = encode_path(&path);
+        format!("file://{encoded}")
     }
 }
 

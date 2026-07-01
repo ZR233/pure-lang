@@ -45,5 +45,6 @@ pub(crate) fn build_openai_request_body(
 }
 
 fn protocol_error(message: impl Into<String>) -> PureError {
-    PureError::LlmError(format!("OpenAI request protocol error: {}", message.into()))
+    let msg = message.into();
+    PureError::LlmError(format!("OpenAI request protocol error: {msg}"))
 }

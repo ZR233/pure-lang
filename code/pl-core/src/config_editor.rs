@@ -192,7 +192,8 @@ fn role_edits_to_configs(
 
     for edit in edits {
         let role = ModelRole::from_key(edit.key.trim()).ok_or_else(|| {
-            PureError::ConfigError(format!("unsupported model role: {}", edit.key))
+            let key = &edit.key;
+            PureError::ConfigError(format!("unsupported model role: {key}"))
         })?;
         if !seen.insert(role) {
             return Err(PureError::ConfigError(format!(
@@ -219,9 +220,9 @@ fn role_edit_to_config(
 ) -> Result<RoleConfig> {
     let provider_key = non_empty_trimmed(&edit.provider, "role provider")?;
     let provider = providers.get(&provider_key).ok_or_else(|| {
+        let role_key = role.key();
         PureError::ConfigError(format!(
-            "role {} references missing provider: {provider_key}",
-            role.key()
+            "role {role_key} references missing provider: {provider_key}"
         ))
     })?;
     let model_slug = non_empty_trimmed(&edit.model, "role model")?;
@@ -230,15 +231,16 @@ fn role_edit_to_config(
         .iter()
         .find(|model| model.slug == model_slug)
         .ok_or_else(|| {
+            let role_key = role.key();
             PureError::ConfigError(format!(
-                "role {} references missing model: {provider_key}.{model_slug}",
-                role.key()
+                "role {role_key} references missing model: {provider_key}.{model_slug}"
             ))
         })?;
     let effort = edit.effort.trim();
     let effort = if effort.is_empty() {
         model.default_effort().ok_or_else(|| {
-            PureError::ConfigError(format!("role {} model must define effort", role.key()))
+            let role_key = role.key();
+            PureError::ConfigError(format!("role {role_key} model must define effort"))
         })?
     } else if model
         .supported_efforts()

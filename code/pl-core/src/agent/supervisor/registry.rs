@@ -52,7 +52,8 @@ impl AgentSupervisor {
                 });
             }
             state.next_id += 1;
-            let id = format!("agent-{}", state.next_id);
+            let next_id = state.next_id;
+            let id = format!("agent-{next_id}");
             let record = AgentRecord {
                 id: id.clone(),
                 path: path.to_string(),

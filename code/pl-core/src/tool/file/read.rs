@@ -87,9 +87,10 @@ impl Tool for ReadFileTool {
             let path = paths.resolve_existing(&input.path).await?;
             let metadata = tokio::fs::metadata(&path).await?;
             if !metadata.is_file() {
+                let path = &input.path;
                 return Err(super::helpers::tool_error(
                     self.name(),
-                    format!("'{}' is not a regular file", input.path),
+                    format!("'{path}' is not a regular file"),
                 ));
             }
             if metadata.len() > MAX_READ_FILE_BYTES {
@@ -384,7 +385,8 @@ async fn search_files(
         };
         for (line_index, line) in content.lines().enumerate() {
             if line.contains(pattern) {
-                results.push(format!("{}:{}: {}", display, line_index + 1, line));
+                let line_num = line_index + 1;
+                results.push(format!("{display}:{line_num}: {line}"));
                 if results.len() >= max_results {
                     break;
                 }

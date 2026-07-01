@@ -37,9 +37,12 @@ pub fn read_skill_file(skill: &SkillMetadata, file_path: Option<&str>) -> Result
         }
         SkillFileSelection::Main => skill.path.join(SKILL_FILE_NAME),
     };
-    let content = fs::read_to_string(&path).map_err(|error| PureError::ToolExecutionFailed {
-        tool: "skill_view".to_string(),
-        error: format!("failed to read skill file {}: {error}", path.display()),
+    let content = fs::read_to_string(&path).map_err(|error| {
+        let display_path = path.display();
+        PureError::ToolExecutionFailed {
+            tool: "skill_view".to_string(),
+            error: format!("failed to read skill file {display_path}: {error}"),
+        }
     })?;
     Ok(SkillFileRead {
         file_path: target.display_path().to_string(),
@@ -167,7 +170,8 @@ pub(super) fn metadata_from_file(
     })?;
     let mut metadata = validate_skill_document(&content, None)?;
     let skill_dir = skill_file.parent().ok_or_else(|| {
-        PureError::ConfigError(format!("invalid skill path: {}", skill_file.display()))
+        let display = skill_file.display();
+        PureError::ConfigError(format!("invalid skill path: {display}"))
     })?;
     if metadata.category.is_none() {
         metadata.category = category_from_path(source_root, skill_dir);

@@ -216,7 +216,9 @@ impl OpenAiStreamDecoder {
                     return events;
                 }
             }
-            _ => {}
+            _ => {
+                tracing::trace!(kind = %event.kind, "sse event: no special handling, delegating to legacy processor");
+            }
         }
 
         self.normalize_legacy_events(process_sse_events(event))
@@ -431,7 +433,8 @@ impl OpenAiStreamDecoder {
         if *ordinal == 1 {
             item_id.to_string()
         } else {
-            format!("{item_id}#{}", *ordinal)
+            let ord = *ordinal;
+            format!("{item_id}#{ord}")
         }
     }
 
@@ -444,7 +447,8 @@ impl OpenAiStreamDecoder {
         if *ordinal == 1 {
             item_id.to_string()
         } else {
-            format!("{item_id}#{}", *ordinal)
+            let ord = *ordinal;
+            format!("{item_id}#{ord}")
         }
     }
 }
