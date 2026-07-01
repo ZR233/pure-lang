@@ -1,0 +1,99 @@
+use super::*;
+use pretty_assertions::assert_eq;
+
+#[test]
+fn root_provider_429_is_transient_but_subagent_provider_429_stays_recoverable() {
+    assert!(matches!(
+        provider_error_severity(None, "API error 429 Too Many Requests"),
+        ErrorSeverity::Transient
+    ));
+
+    let subagent = SubagentContext {
+        id: "agent-1".to_string(),
+        parent_id: None,
+        agent_path: Some("/root/worker".to_string()),
+        role: "executor".to_string(),
+        task: "inspect worker".to_string(),
+        depth: 1,
+    };
+    assert!(matches!(
+        provider_error_severity(Some(&subagent), "API error 429 Too Many Requests"),
+        ErrorSeverity::Recoverable
+    ));
+    assert!(matches!(
+        provider_error_severity(None, "API error 500"),
+        ErrorSeverity::Recoverable
+    ));
+}
+
+#[test]
+fn detects_unexecuted_tool_call_text() {
+    assert!(looks_like_unexecuted_tool_call_text(
+        "<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name=\"spawn_agent\">"
+    ));
+    assert!(looks_like_unexecuted_tool_call_text(
+        r#"{"tool_calls":[{"name":"spawn_agent"}]}"#
+    ));
+    assert!(!looks_like_unexecuted_tool_call_text(
+        "源码中有 tool_calls 字段、name 字段和 subagent.rs 文件。"
+    ));
+    assert!(!looks_like_unexecuted_tool_call_text(
+        r#"{"summary":"tool_calls and name are discussed in docs"}"#
+    ));
+    assert!(!looks_like_unexecuted_tool_call_text(
+        "已完成探索，没有工具调用文本。"
+    ));
+}
+
+#[test]
+fn failed_turn_result_preserves_error_message() {
+    let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
+    let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+
+    let result = failed_turn_result(
+        &mut recorder,
+        "turn-1",
+        crate::turn::CompileMode::Auto,
+        "partial summary".to_string(),
+        None,
+        "model-a".to_string(),
+        TokenUsage::default(),
+        3,
+        "provider rejected request".to_string(),
+        ErrorSeverity::Transient,
+    );
+
+    assert_eq!(result.status, TurnResultStatus::Errored);
+    assert_eq!(
+        result.abort_reason,
+        Some(crate::turn::TurnAbortReason::ProviderError),
+    );
+    assert_eq!(result.content, "partial summary");
+    assert_eq!(result.error.as_deref(), Some("provider rejected request"));
+    assert!(matches!(
+        event_rx.try_recv().unwrap(),
+        AgentEvent::TracePartStarted { item }
+            if item.item_id == "turn-1-assistant"
+                && item.text_channel == Some(TraceTextChannel::Final)
+                && item.content == "partial summary"
+    ));
+    assert!(matches!(
+        event_rx.try_recv().unwrap(),
+        AgentEvent::TracePartCompleted { item, .. }
+            if item.item_id == "turn-1-assistant"
+                && item.text_channel == Some(TraceTextChannel::Final)
+                && item.content == "partial summary"
+    ));
+    assert!(matches!(
+        event_rx.try_recv().unwrap(),
+        AgentEvent::TracePartFailed { item, .. } if item.item_id == "turn-1-turn"
+    ));
+    assert!(matches!(
+        event_rx.try_recv().unwrap(),
+        AgentEvent::Error {
+            severity: ErrorSeverity::Transient,
+            ..
+        }
+    ));
+    assert!(matches!(event_rx.try_recv().unwrap(), AgentEvent::Done));
+}
