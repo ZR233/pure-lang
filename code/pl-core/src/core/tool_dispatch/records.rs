@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use pl_protocol::PureError;
 use pl_trace::{AgentEvent, TraceEventKind, TracePartStatus};
 
-use crate::tool::{RECOVERABLE_SUBAGENT_429_MARKER, ToolOutput, ToolRuntimeEvent};
+use crate::tool::{ToolOutput, ToolRuntimeEvent};
 
 use super::display::display_result_for_tool;
 use super::unix_seconds;
@@ -200,17 +200,4 @@ pub(super) fn respond_to_model_tool_execution_record(
         },
         TracePartStatus::Failed,
     )
-}
-
-pub(in crate::core) fn tool_results_include_recoverable_subagent_capacity(
-    tool_results: &[ToolExecutionRecord],
-) -> bool {
-    tool_results.iter().any(|tool_result| {
-        tool_result.status == TracePartStatus::Completed
-            && matches!(
-                tool_result.name.as_str(),
-                "spawn_agent" | "wait_agent" | "list_agents"
-            )
-            && tool_result.result.contains(RECOVERABLE_SUBAGENT_429_MARKER)
-    })
 }

@@ -18,47 +18,8 @@ fn detects_explicit_subagent_partition_requests() {
 }
 
 #[test]
-fn subagent_dispatch_instructions_describe_recoverable_429() {
-    assert!(SUBAGENT_DISPATCH_CONSTRAINT.contains("429"));
-    assert!(SUBAGENT_DISPATCH_CONSTRAINT.contains("recoverableSubagentProvider429"));
-    assert!(SUBAGENT_FORCE_DISPATCH_INSTRUCTION.contains("429"));
-}
-
-#[test]
-fn detects_recoverable_subagent_tool_result_marker() {
-    let records = vec![
-        ToolExecutionRecord {
-            id: "item-1".to_string(),
-            call_id: Some("call-1".to_string()),
-            name: "spawn_agent".to_string(),
-            kind: ToolCallKind::Function,
-            arguments: "{}".to_string(),
-            result: "recoverableSubagentProvider429: retry locally".to_string(),
-            display_result: "recoverableSubagentProvider429: retry locally".to_string(),
-            status: TracePartStatus::Completed,
-            exit_code: None,
-            timed_out: false,
-            revision: None,
-            runtime_events: Vec::new(),
-        },
-        ToolExecutionRecord {
-            id: "item-2".to_string(),
-            call_id: Some("call-2".to_string()),
-            name: "bash".to_string(),
-            kind: ToolCallKind::Function,
-            arguments: "{}".to_string(),
-            result: "recoverableSubagentProvider429: unrelated text".to_string(),
-            display_result: "recoverableSubagentProvider429: unrelated text".to_string(),
-            status: TracePartStatus::Completed,
-            exit_code: None,
-            timed_out: false,
-            revision: None,
-            runtime_events: Vec::new(),
-        },
-    ];
-
-    assert!(tool_results_include_recoverable_subagent_capacity(&records));
-    assert!(!tool_results_include_recoverable_subagent_capacity(
-        &records[1..]
-    ));
+fn subagent_dispatch_instructions_describe_structured_capacity_errors() {
+    assert!(SUBAGENT_DISPATCH_CONSTRAINT.contains("结构化容量错误"));
+    assert!(SUBAGENT_DISPATCH_CONSTRAINT.contains("停止继续创建"));
+    assert!(SUBAGENT_FORCE_DISPATCH_INSTRUCTION.contains("结构化容量错误"));
 }

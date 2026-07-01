@@ -2,7 +2,7 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[test]
-fn root_provider_429_is_transient_but_subagent_provider_429_stays_recoverable() {
+fn root_provider_429_is_transient_and_subagent_429_is_provider_capacity() {
     assert!(matches!(
         provider_error_severity(None, "API error 429 Too Many Requests"),
         ErrorSeverity::Transient
@@ -16,10 +16,15 @@ fn root_provider_429_is_transient_but_subagent_provider_429_stays_recoverable() 
         task: "inspect worker".to_string(),
         depth: 1,
     };
-    assert!(matches!(
-        provider_error_severity(Some(&subagent), "API error 429 Too Many Requests"),
-        ErrorSeverity::Recoverable
-    ));
+    let (error, severity) = normalize_provider_error(
+        Some(&subagent),
+        "API error 429 Too Many Requests".to_string(),
+    );
+    assert_eq!(
+        error,
+        "provider capacity unavailable: API error 429 Too Many Requests"
+    );
+    assert!(matches!(severity, ErrorSeverity::Recoverable));
     assert!(matches!(
         provider_error_severity(None, "API error 500"),
         ErrorSeverity::Recoverable

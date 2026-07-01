@@ -1,5 +1,3 @@
-mod events;
-mod runner;
 mod tools;
 mod types;
 
@@ -147,25 +145,19 @@ fn last_user_turns(messages: Vec<Message>, turns: usize) -> Vec<Message> {
     result
 }
 
-fn agent_tool_records(agents: &[AgentRecord], include_details: bool) -> Vec<AgentToolRecord> {
+fn agent_tool_records(agents: &[AgentRecord]) -> Vec<AgentToolRecord> {
     agents
         .iter()
         .cloned()
-        .map(|agent| {
-            if include_details {
-                AgentToolRecord::Detailed(agent)
-            } else {
-                AgentToolRecord::Compact(CompactAgentRecord {
-                    path: agent.path,
-                    status: agent.status,
-                    role: agent.role,
-                    task: crate::core::compact_text(&agent.task),
-                    summary: agent
-                        .summary
-                        .map(|summary| crate::core::compact_text(&summary)),
-                    error: agent.error.map(|error| crate::core::compact_text(&error)),
-                })
-            }
+        .map(|agent| CompactAgentRecord {
+            path: agent.path,
+            status: agent.status,
+            role: agent.role,
+            task: crate::core::compact_text(&agent.task),
+            summary: agent
+                .summary
+                .map(|summary| crate::core::compact_text(&summary)),
+            error: agent.error.map(|error| crate::core::compact_text(&error)),
         })
         .collect()
 }
@@ -184,13 +176,6 @@ fn json_output(value: impl Serialize) -> Result<ToolOutput, PureError> {
         timed_out: false,
         runtime_events: Vec::new(),
     })
-}
-
-fn unix_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
 }
 
 pub(super) fn current_agent_path(context: &ToolContext) -> String {

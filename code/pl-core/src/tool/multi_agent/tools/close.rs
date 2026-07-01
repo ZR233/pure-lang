@@ -1,11 +1,8 @@
-use pl_protocol::{AgentStatus, PureError};
-use pl_trace::AgentEvent;
+use pl_protocol::PureError;
 
-use super::super::events::emit_agent_record;
 use super::super::types::{CloseAgentArgs, CloseAgentTool, MessageResult};
 use super::super::{
     BoxFuture, Tool, ToolContext, ToolInput, ToolOutput, current_agent_path, json_output,
-    unix_seconds,
 };
 
 impl Tool for CloseAgentTool {
@@ -44,47 +41,19 @@ impl Tool for CloseAgentTool {
                     }
                 })?;
             let sender_path = current_agent_path(&context);
-            let _ = context.event_tx.send(AgentEvent::CollabCloseBegin {
-                call_id: input.tool_id.clone(),
-                started_at: unix_seconds(),
-                sender_path: sender_path.clone(),
-                receiver_path: args.target.clone(),
-            });
-            let previous = context
-                .agent_control
-                .close_agent(&sender_path, &args.target)
-                .await;
-            let previous = match previous {
-                Ok(previous) => previous,
-                Err(error) => {
-                    let _ = context.event_tx.send(AgentEvent::CollabCloseEnd {
-                        call_id: input.tool_id,
-                        completed_at: unix_seconds(),
-                        sender_path,
-                        receiver_path: args.target,
-                        status: AgentStatus::NotFound,
-                        error: Some(error.to_string()),
-                    });
-                    return Err(error);
-                }
-            };
-            let shutdown = context
-                .agent_control
-                .record(&previous.id)
-                .await
-                .unwrap_or_else(|| previous.clone());
-            emit_agent_record(&context.event_tx, &shutdown);
-            let _ = context.event_tx.send(AgentEvent::CollabCloseEnd {
-                call_id: input.tool_id,
-                completed_at: unix_seconds(),
-                sender_path,
-                receiver_path: previous.path.clone(),
-                status: shutdown.status,
-                error: None,
-            });
+            let record = context
+                .agent_supervisor
+                .close_agent(
+                    &sender_path,
+                    &args.target,
+                    "closed by close_agent",
+                    &context.event_tx,
+                    input.tool_id,
+                )
+                .await?;
             json_output(MessageResult {
-                target: previous.path,
-                status: shutdown.status,
+                target: record.path,
+                status: record.status,
             })
         })
     }

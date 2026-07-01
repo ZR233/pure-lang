@@ -272,7 +272,7 @@ mod tests {
 
     use super::*;
     use crate::turn::{CompileMode, TurnOptions};
-    use crate::{AgentControl, CoreSession};
+    use crate::{AgentSupervisor, CoreSession};
 
     fn test_context(
         workspace_root: PathBuf,
@@ -288,7 +288,7 @@ mod tests {
             workspace_instructions: None,
             instruction_snapshot: None,
             active_subagent: None,
-            agent_control: AgentControl::default(),
+            agent_supervisor: AgentSupervisor::default(),
             lsp_runtime: None,
             parent_session: Arc::new(CoreSession::new()),
         }

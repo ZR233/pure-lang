@@ -1,6 +1,7 @@
+use pl_protocol::SubAgentActivityKind;
 use pl_trace::AgentEvent;
 
-use crate::agent::AgentRecord;
+use super::AgentRecord;
 
 pub(crate) fn emit_agent_record(event_tx: &pl_trace::AgentEventSender, record: &AgentRecord) {
     let _ = event_tx.send(AgentEvent::AgentStateChanged {
@@ -20,6 +21,30 @@ pub(crate) fn emit_agent_record(event_tx: &pl_trace::AgentEventSender, record: &
     });
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn emit_subagent_activity(
+    event_tx: &pl_trace::AgentEventSender,
+    call_id: String,
+    agent: Option<&AgentRecord>,
+    kind: SubAgentActivityKind,
+    message: Option<String>,
+    timed_out: Option<bool>,
+    error: Option<String>,
+) {
+    let _ = event_tx.send(AgentEvent::SubAgentActivity {
+        call_id,
+        occurred_at: super::snapshot::unix_seconds(),
+        agent_id: agent.map(|agent| agent.id.clone()),
+        path: agent.map(|agent| agent.path.clone()),
+        parent_path: agent.and_then(|agent| agent.parent_path.clone()),
+        kind,
+        status: agent.map(|agent| agent.status),
+        message,
+        timed_out,
+        error,
+    });
+}
+
 pub(super) async fn forward_agent_lifecycle_events(
     mut event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
     parent_event_tx: pl_trace::AgentEventSender,
@@ -29,14 +54,7 @@ pub(super) async fn forward_agent_lifecycle_events(
             Ok(
                 event @ (AgentEvent::AgentStateChanged { .. }
                 | AgentEvent::AgentRuntimeUpdated { .. }
-                | AgentEvent::CollabAgentSpawnBegin { .. }
-                | AgentEvent::CollabAgentSpawnEnd { .. }
-                | AgentEvent::CollabAgentInteractionBegin { .. }
-                | AgentEvent::CollabAgentInteractionEnd { .. }
-                | AgentEvent::CollabWaitingBegin { .. }
-                | AgentEvent::CollabWaitingEnd { .. }
-                | AgentEvent::CollabCloseBegin { .. }
-                | AgentEvent::CollabCloseEnd { .. }
+                | AgentEvent::SubAgentActivity { .. }
                 | AgentEvent::InteractionChanged { .. }
                 | AgentEvent::SkillActivated { .. }),
             ) => {

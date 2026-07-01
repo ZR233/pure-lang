@@ -127,6 +127,28 @@ impl AgentStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SubAgentActivityKind {
+    Spawned,
+    MessageQueued,
+    FollowupStarted,
+    WaitCompleted,
+    Closed,
+}
+
+impl SubAgentActivityKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Spawned => "spawned",
+            Self::MessageQueued => "messageQueued",
+            Self::FollowupStarted => "followupStarted",
+            Self::WaitCompleted => "waitCompleted",
+            Self::Closed => "closed",
+        }
+    }
+}
+
 /// Kind of runtime budget that stopped a turn or agent.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

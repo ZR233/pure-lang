@@ -30,58 +30,15 @@ pub struct BridgeAgentTimelineEventDto {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum BridgeAgentTimelinePayloadDto {
-    SpawnBegin {
+    SubAgentActivity {
         call_id: String,
-        sender_path: String,
-        task_name: String,
-        prompt: String,
-        role: String,
-        model: Option<String>,
-        reasoning_effort: Option<String>,
-    },
-    SpawnEnd {
-        call_id: String,
-        sender_path: String,
         agent_id: Option<String>,
         path: Option<String>,
-        role: Option<String>,
-        status: String,
-        prompt: String,
-        error: Option<String>,
-    },
-    InteractionBegin {
-        call_id: String,
-        sender_path: String,
-        receiver_path: String,
-        prompt: String,
-    },
-    InteractionEnd {
-        call_id: String,
-        sender_path: String,
-        receiver_path: String,
-        status: String,
-        prompt: String,
-        error: Option<String>,
-    },
-    WaitingBegin {
-        call_id: String,
-        sender_path: String,
-    },
-    WaitingEnd {
-        call_id: String,
-        sender_path: String,
+        parent_path: Option<String>,
+        kind: String,
+        status: Option<String>,
+        message: Option<String>,
         timed_out: bool,
-    },
-    CloseBegin {
-        call_id: String,
-        sender_path: String,
-        receiver_path: String,
-    },
-    CloseEnd {
-        call_id: String,
-        sender_path: String,
-        receiver_path: String,
-        status: String,
         error: Option<String>,
     },
 }

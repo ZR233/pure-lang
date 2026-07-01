@@ -18,7 +18,7 @@ fn test_tool_context(event_tx: AgentEventSender) -> ToolContext {
         workspace_instructions: None,
         instruction_snapshot: None,
         active_subagent: None,
-        agent_control: crate::AgentControl::default(),
+        agent_supervisor: crate::AgentSupervisor::default(),
         lsp_runtime: None,
         parent_session: std::sync::Arc::new(CoreSession::new()),
     }
@@ -98,14 +98,7 @@ fn live_tool_result_deltas(events: &[AgentEvent], item_id: &str) -> Vec<String> 
             | AgentEvent::AgentStateChanged { .. }
             | AgentEvent::AgentRuntimeUpdated { .. }
             | AgentEvent::SkillActivated { .. }
-            | AgentEvent::CollabAgentSpawnBegin { .. }
-            | AgentEvent::CollabAgentSpawnEnd { .. }
-            | AgentEvent::CollabAgentInteractionBegin { .. }
-            | AgentEvent::CollabAgentInteractionEnd { .. }
-            | AgentEvent::CollabWaitingBegin { .. }
-            | AgentEvent::CollabWaitingEnd { .. }
-            | AgentEvent::CollabCloseBegin { .. }
-            | AgentEvent::CollabCloseEnd { .. }
+            | AgentEvent::SubAgentActivity { .. }
             | AgentEvent::TurnInterrupted { .. }
             | AgentEvent::TurnBudgetLimited { .. }
             | AgentEvent::Error { .. }
@@ -134,14 +127,7 @@ fn runtime_progress_texts(
             | AgentEvent::AgentStateChanged { .. }
             | AgentEvent::AgentRuntimeUpdated { .. }
             | AgentEvent::SkillActivated { .. }
-            | AgentEvent::CollabAgentSpawnBegin { .. }
-            | AgentEvent::CollabAgentSpawnEnd { .. }
-            | AgentEvent::CollabAgentInteractionBegin { .. }
-            | AgentEvent::CollabAgentInteractionEnd { .. }
-            | AgentEvent::CollabWaitingBegin { .. }
-            | AgentEvent::CollabWaitingEnd { .. }
-            | AgentEvent::CollabCloseBegin { .. }
-            | AgentEvent::CollabCloseEnd { .. }
+            | AgentEvent::SubAgentActivity { .. }
             | AgentEvent::TurnInterrupted { .. }
             | AgentEvent::TurnBudgetLimited { .. }
             | AgentEvent::Error { .. }

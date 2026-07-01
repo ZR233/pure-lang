@@ -1378,66 +1378,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     switch (raw[0]) {
       case 0:
-        return BridgeAgentTimelinePayloadDto_SpawnBegin(
+        return BridgeAgentTimelinePayloadDto_SubAgentActivity(
           callId: dco_decode_String(raw[1]),
-          senderPath: dco_decode_String(raw[2]),
-          taskName: dco_decode_String(raw[3]),
-          prompt: dco_decode_String(raw[4]),
-          role: dco_decode_String(raw[5]),
-          model: dco_decode_opt_String(raw[6]),
-          reasoningEffort: dco_decode_opt_String(raw[7]),
-        );
-      case 1:
-        return BridgeAgentTimelinePayloadDto_SpawnEnd(
-          callId: dco_decode_String(raw[1]),
-          senderPath: dco_decode_String(raw[2]),
-          agentId: dco_decode_opt_String(raw[3]),
-          path: dco_decode_opt_String(raw[4]),
-          role: dco_decode_opt_String(raw[5]),
-          status: dco_decode_String(raw[6]),
-          prompt: dco_decode_String(raw[7]),
-          error: dco_decode_opt_String(raw[8]),
-        );
-      case 2:
-        return BridgeAgentTimelinePayloadDto_InteractionBegin(
-          callId: dco_decode_String(raw[1]),
-          senderPath: dco_decode_String(raw[2]),
-          receiverPath: dco_decode_String(raw[3]),
-          prompt: dco_decode_String(raw[4]),
-        );
-      case 3:
-        return BridgeAgentTimelinePayloadDto_InteractionEnd(
-          callId: dco_decode_String(raw[1]),
-          senderPath: dco_decode_String(raw[2]),
-          receiverPath: dco_decode_String(raw[3]),
-          status: dco_decode_String(raw[4]),
-          prompt: dco_decode_String(raw[5]),
-          error: dco_decode_opt_String(raw[6]),
-        );
-      case 4:
-        return BridgeAgentTimelinePayloadDto_WaitingBegin(
-          callId: dco_decode_String(raw[1]),
-          senderPath: dco_decode_String(raw[2]),
-        );
-      case 5:
-        return BridgeAgentTimelinePayloadDto_WaitingEnd(
-          callId: dco_decode_String(raw[1]),
-          senderPath: dco_decode_String(raw[2]),
-          timedOut: dco_decode_bool(raw[3]),
-        );
-      case 6:
-        return BridgeAgentTimelinePayloadDto_CloseBegin(
-          callId: dco_decode_String(raw[1]),
-          senderPath: dco_decode_String(raw[2]),
-          receiverPath: dco_decode_String(raw[3]),
-        );
-      case 7:
-        return BridgeAgentTimelinePayloadDto_CloseEnd(
-          callId: dco_decode_String(raw[1]),
-          senderPath: dco_decode_String(raw[2]),
-          receiverPath: dco_decode_String(raw[3]),
-          status: dco_decode_String(raw[4]),
-          error: dco_decode_opt_String(raw[5]),
+          agentId: dco_decode_opt_String(raw[2]),
+          path: dco_decode_opt_String(raw[3]),
+          parentPath: dco_decode_opt_String(raw[4]),
+          kind: dco_decode_String(raw[5]),
+          status: dco_decode_opt_String(raw[6]),
+          message: dco_decode_opt_String(raw[7]),
+          timedOut: dco_decode_bool(raw[8]),
+          error: dco_decode_opt_String(raw[9]),
         );
       default:
         throw Exception("unreachable");
@@ -2736,102 +2686,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     switch (tag_) {
       case 0:
         var var_callId = sse_decode_String(deserializer);
-        var var_senderPath = sse_decode_String(deserializer);
-        var var_taskName = sse_decode_String(deserializer);
-        var var_prompt = sse_decode_String(deserializer);
-        var var_role = sse_decode_String(deserializer);
-        var var_model = sse_decode_opt_String(deserializer);
-        var var_reasoningEffort = sse_decode_opt_String(deserializer);
-        return BridgeAgentTimelinePayloadDto_SpawnBegin(
-          callId: var_callId,
-          senderPath: var_senderPath,
-          taskName: var_taskName,
-          prompt: var_prompt,
-          role: var_role,
-          model: var_model,
-          reasoningEffort: var_reasoningEffort,
-        );
-      case 1:
-        var var_callId = sse_decode_String(deserializer);
-        var var_senderPath = sse_decode_String(deserializer);
         var var_agentId = sse_decode_opt_String(deserializer);
         var var_path = sse_decode_opt_String(deserializer);
-        var var_role = sse_decode_opt_String(deserializer);
-        var var_status = sse_decode_String(deserializer);
-        var var_prompt = sse_decode_String(deserializer);
+        var var_parentPath = sse_decode_opt_String(deserializer);
+        var var_kind = sse_decode_String(deserializer);
+        var var_status = sse_decode_opt_String(deserializer);
+        var var_message = sse_decode_opt_String(deserializer);
+        var var_timedOut = sse_decode_bool(deserializer);
         var var_error = sse_decode_opt_String(deserializer);
-        return BridgeAgentTimelinePayloadDto_SpawnEnd(
+        return BridgeAgentTimelinePayloadDto_SubAgentActivity(
           callId: var_callId,
-          senderPath: var_senderPath,
           agentId: var_agentId,
           path: var_path,
-          role: var_role,
+          parentPath: var_parentPath,
+          kind: var_kind,
           status: var_status,
-          prompt: var_prompt,
-          error: var_error,
-        );
-      case 2:
-        var var_callId = sse_decode_String(deserializer);
-        var var_senderPath = sse_decode_String(deserializer);
-        var var_receiverPath = sse_decode_String(deserializer);
-        var var_prompt = sse_decode_String(deserializer);
-        return BridgeAgentTimelinePayloadDto_InteractionBegin(
-          callId: var_callId,
-          senderPath: var_senderPath,
-          receiverPath: var_receiverPath,
-          prompt: var_prompt,
-        );
-      case 3:
-        var var_callId = sse_decode_String(deserializer);
-        var var_senderPath = sse_decode_String(deserializer);
-        var var_receiverPath = sse_decode_String(deserializer);
-        var var_status = sse_decode_String(deserializer);
-        var var_prompt = sse_decode_String(deserializer);
-        var var_error = sse_decode_opt_String(deserializer);
-        return BridgeAgentTimelinePayloadDto_InteractionEnd(
-          callId: var_callId,
-          senderPath: var_senderPath,
-          receiverPath: var_receiverPath,
-          status: var_status,
-          prompt: var_prompt,
-          error: var_error,
-        );
-      case 4:
-        var var_callId = sse_decode_String(deserializer);
-        var var_senderPath = sse_decode_String(deserializer);
-        return BridgeAgentTimelinePayloadDto_WaitingBegin(
-          callId: var_callId,
-          senderPath: var_senderPath,
-        );
-      case 5:
-        var var_callId = sse_decode_String(deserializer);
-        var var_senderPath = sse_decode_String(deserializer);
-        var var_timedOut = sse_decode_bool(deserializer);
-        return BridgeAgentTimelinePayloadDto_WaitingEnd(
-          callId: var_callId,
-          senderPath: var_senderPath,
+          message: var_message,
           timedOut: var_timedOut,
-        );
-      case 6:
-        var var_callId = sse_decode_String(deserializer);
-        var var_senderPath = sse_decode_String(deserializer);
-        var var_receiverPath = sse_decode_String(deserializer);
-        return BridgeAgentTimelinePayloadDto_CloseBegin(
-          callId: var_callId,
-          senderPath: var_senderPath,
-          receiverPath: var_receiverPath,
-        );
-      case 7:
-        var var_callId = sse_decode_String(deserializer);
-        var var_senderPath = sse_decode_String(deserializer);
-        var var_receiverPath = sse_decode_String(deserializer);
-        var var_status = sse_decode_String(deserializer);
-        var var_error = sse_decode_opt_String(deserializer);
-        return BridgeAgentTimelinePayloadDto_CloseEnd(
-          callId: var_callId,
-          senderPath: var_senderPath,
-          receiverPath: var_receiverPath,
-          status: var_status,
           error: var_error,
         );
       default:
@@ -4488,105 +4359,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     switch (self) {
-      case BridgeAgentTimelinePayloadDto_SpawnBegin(
+      case BridgeAgentTimelinePayloadDto_SubAgentActivity(
         callId: final callId,
-        senderPath: final senderPath,
-        taskName: final taskName,
-        prompt: final prompt,
-        role: final role,
-        model: final model,
-        reasoningEffort: final reasoningEffort,
+        agentId: final agentId,
+        path: final path,
+        parentPath: final parentPath,
+        kind: final kind,
+        status: final status,
+        message: final message,
+        timedOut: final timedOut,
+        error: final error,
       ):
         sse_encode_i_32(0, serializer);
         sse_encode_String(callId, serializer);
-        sse_encode_String(senderPath, serializer);
-        sse_encode_String(taskName, serializer);
-        sse_encode_String(prompt, serializer);
-        sse_encode_String(role, serializer);
-        sse_encode_opt_String(model, serializer);
-        sse_encode_opt_String(reasoningEffort, serializer);
-      case BridgeAgentTimelinePayloadDto_SpawnEnd(
-        callId: final callId,
-        senderPath: final senderPath,
-        agentId: final agentId,
-        path: final path,
-        role: final role,
-        status: final status,
-        prompt: final prompt,
-        error: final error,
-      ):
-        sse_encode_i_32(1, serializer);
-        sse_encode_String(callId, serializer);
-        sse_encode_String(senderPath, serializer);
         sse_encode_opt_String(agentId, serializer);
         sse_encode_opt_String(path, serializer);
-        sse_encode_opt_String(role, serializer);
-        sse_encode_String(status, serializer);
-        sse_encode_String(prompt, serializer);
-        sse_encode_opt_String(error, serializer);
-      case BridgeAgentTimelinePayloadDto_InteractionBegin(
-        callId: final callId,
-        senderPath: final senderPath,
-        receiverPath: final receiverPath,
-        prompt: final prompt,
-      ):
-        sse_encode_i_32(2, serializer);
-        sse_encode_String(callId, serializer);
-        sse_encode_String(senderPath, serializer);
-        sse_encode_String(receiverPath, serializer);
-        sse_encode_String(prompt, serializer);
-      case BridgeAgentTimelinePayloadDto_InteractionEnd(
-        callId: final callId,
-        senderPath: final senderPath,
-        receiverPath: final receiverPath,
-        status: final status,
-        prompt: final prompt,
-        error: final error,
-      ):
-        sse_encode_i_32(3, serializer);
-        sse_encode_String(callId, serializer);
-        sse_encode_String(senderPath, serializer);
-        sse_encode_String(receiverPath, serializer);
-        sse_encode_String(status, serializer);
-        sse_encode_String(prompt, serializer);
-        sse_encode_opt_String(error, serializer);
-      case BridgeAgentTimelinePayloadDto_WaitingBegin(
-        callId: final callId,
-        senderPath: final senderPath,
-      ):
-        sse_encode_i_32(4, serializer);
-        sse_encode_String(callId, serializer);
-        sse_encode_String(senderPath, serializer);
-      case BridgeAgentTimelinePayloadDto_WaitingEnd(
-        callId: final callId,
-        senderPath: final senderPath,
-        timedOut: final timedOut,
-      ):
-        sse_encode_i_32(5, serializer);
-        sse_encode_String(callId, serializer);
-        sse_encode_String(senderPath, serializer);
+        sse_encode_opt_String(parentPath, serializer);
+        sse_encode_String(kind, serializer);
+        sse_encode_opt_String(status, serializer);
+        sse_encode_opt_String(message, serializer);
         sse_encode_bool(timedOut, serializer);
-      case BridgeAgentTimelinePayloadDto_CloseBegin(
-        callId: final callId,
-        senderPath: final senderPath,
-        receiverPath: final receiverPath,
-      ):
-        sse_encode_i_32(6, serializer);
-        sse_encode_String(callId, serializer);
-        sse_encode_String(senderPath, serializer);
-        sse_encode_String(receiverPath, serializer);
-      case BridgeAgentTimelinePayloadDto_CloseEnd(
-        callId: final callId,
-        senderPath: final senderPath,
-        receiverPath: final receiverPath,
-        status: final status,
-        error: final error,
-      ):
-        sse_encode_i_32(7, serializer);
-        sse_encode_String(callId, serializer);
-        sse_encode_String(senderPath, serializer);
-        sse_encode_String(receiverPath, serializer);
-        sse_encode_String(status, serializer);
         sse_encode_opt_String(error, serializer);
     }
   }

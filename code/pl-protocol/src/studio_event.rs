@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AgentStatus, BudgetLimitKind, BudgetUsage, InteractionChangedEvent, PlanLifecycleEvent,
-    RuntimeCostAmount, SkillActivation, TokenUsageSnapshot,
+    RuntimeCostAmount, SkillActivation, SubAgentActivityKind, TokenUsageSnapshot,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -454,65 +454,21 @@ pub struct StudioAgentTimelineEvent {
     tag = "type"
 )]
 pub enum StudioAgentTimelineEventKind {
-    SpawnBegin {
+    SubAgentActivity {
         call_id: String,
-        sender_path: String,
-        task_name: String,
-        prompt: String,
-        role: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        model: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        reasoning_effort: Option<String>,
-    },
-    SpawnEnd {
-        call_id: String,
-        sender_path: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         path: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        role: Option<String>,
-        status: AgentStatus,
-        prompt: String,
+        parent_path: Option<String>,
+        kind: SubAgentActivityKind,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-    },
-    InteractionBegin {
-        call_id: String,
-        sender_path: String,
-        receiver_path: String,
-        prompt: String,
-    },
-    InteractionEnd {
-        call_id: String,
-        sender_path: String,
-        receiver_path: String,
-        status: AgentStatus,
-        prompt: String,
+        status: Option<AgentStatus>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-    },
-    WaitingBegin {
-        call_id: String,
-        sender_path: String,
-    },
-    WaitingEnd {
-        call_id: String,
-        sender_path: String,
-        timed_out: bool,
-    },
-    CloseBegin {
-        call_id: String,
-        sender_path: String,
-        receiver_path: String,
-    },
-    CloseEnd {
-        call_id: String,
-        sender_path: String,
-        receiver_path: String,
-        status: AgentStatus,
+        message: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timed_out: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },

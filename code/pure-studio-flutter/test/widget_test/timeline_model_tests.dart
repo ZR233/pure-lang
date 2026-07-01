@@ -325,12 +325,14 @@ void registerTimelineModelTests() {
           'sequence': 1,
           'createdAt': 1,
           'kind': {
-            'type': 'spawnBegin',
+            'type': 'subAgentActivity',
             'callId': 'call-1',
-            'senderPath': 'root',
-            'taskName': 'Audit',
-            'prompt': 'check',
-            'role': 'reviewer',
+            'path': 'root/reviewer',
+            'parentPath': 'root',
+            'kind': 'spawned',
+            'status': 'queued',
+            'message': 'check',
+            'timedOut': false,
           },
         },
       ),
@@ -344,12 +346,14 @@ void registerTimelineModelTests() {
           'sequence': 2,
           'createdAt': 2,
           'kind': {
-            'type': 'spawnEnd',
+            'type': 'subAgentActivity',
             'callId': 'call-1',
-            'senderPath': 'root',
             'path': 'root/reviewer',
+            'parentPath': 'root',
+            'kind': 'spawned',
             'status': 'completed',
-            'prompt': 'check',
+            'message': 'check',
+            'timedOut': false,
           },
         },
       ),
@@ -372,7 +376,7 @@ void registerTimelineModelTests() {
     expect(row.agentEvent!.title, 'agentTimeline.spawn');
     expect(row.agentEvent!.text, contains('root/reviewer'));
     expect(row.agentEvent!.status, 'completed');
-    expect(row.agentEvent!.payload, isA<TimelineAgentSpawnEnd>());
+    expect(row.agentEvent!.payload, isA<TimelineSubAgentActivity>());
   });
 
   test('agent snapshots update status state without timeline rows', () async {
@@ -469,11 +473,14 @@ void registerTimelineModelTests() {
               sessionId: 'session-1',
               sequence: BigInt.from(7),
               createdAt: 3,
-              payload: const frb.BridgeAgentTimelinePayloadDto.interactionBegin(
+              payload: const frb.BridgeAgentTimelinePayloadDto.subAgentActivity(
                 callId: 'call-2',
-                senderPath: 'root',
-                receiverPath: 'root/worker',
-                prompt: 'status',
+                path: 'root/worker',
+                parentPath: 'root',
+                kind: 'messageQueued',
+                status: 'waiting',
+                message: 'status',
+                timedOut: false,
               ),
             ),
           ],
@@ -492,7 +499,7 @@ void registerTimelineModelTests() {
       expect(row.agentEvent!.title, 'agentTimeline.message');
       expect(row.agentEvent!.text, contains('root/worker'));
       expect(row.agentEvent!.text, contains('status'));
-      expect(row.agentEvent!.payload, isA<TimelineAgentInteractionBegin>());
+      expect(row.agentEvent!.payload, isA<TimelineSubAgentActivity>());
     },
   );
 

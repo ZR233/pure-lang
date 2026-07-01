@@ -303,14 +303,7 @@ fn stream_accumulator_terminal_snapshots_converge_with_live_deltas() {
             | AgentEvent::InteractionChanged { .. }
             | AgentEvent::AgentRuntimeUpdated { .. }
             | AgentEvent::AgentStateChanged { .. }
-            | AgentEvent::CollabAgentSpawnBegin { .. }
-            | AgentEvent::CollabAgentSpawnEnd { .. }
-            | AgentEvent::CollabAgentInteractionBegin { .. }
-            | AgentEvent::CollabAgentInteractionEnd { .. }
-            | AgentEvent::CollabWaitingBegin { .. }
-            | AgentEvent::CollabWaitingEnd { .. }
-            | AgentEvent::CollabCloseBegin { .. }
-            | AgentEvent::CollabCloseEnd { .. }
+            | AgentEvent::SubAgentActivity { .. }
             | AgentEvent::TurnInterrupted { .. }
             | AgentEvent::TurnBudgetLimited { .. }
             | AgentEvent::SkillActivated { .. }
@@ -339,14 +332,7 @@ fn stream_accumulator_terminal_snapshots_converge_with_live_deltas() {
             AgentEvent::InteractionChanged { .. }
             | AgentEvent::AgentRuntimeUpdated { .. }
             | AgentEvent::AgentStateChanged { .. }
-            | AgentEvent::CollabAgentSpawnBegin { .. }
-            | AgentEvent::CollabAgentSpawnEnd { .. }
-            | AgentEvent::CollabAgentInteractionBegin { .. }
-            | AgentEvent::CollabAgentInteractionEnd { .. }
-            | AgentEvent::CollabWaitingBegin { .. }
-            | AgentEvent::CollabWaitingEnd { .. }
-            | AgentEvent::CollabCloseBegin { .. }
-            | AgentEvent::CollabCloseEnd { .. }
+            | AgentEvent::SubAgentActivity { .. }
             | AgentEvent::TurnInterrupted { .. }
             | AgentEvent::TurnBudgetLimited { .. }
             | AgentEvent::SkillActivated { .. }

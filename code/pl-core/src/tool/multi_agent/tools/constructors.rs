@@ -1,8 +1,7 @@
-use crate::agent::AgentRecord;
 use crate::tool::ToolContext;
 use crate::turn::TurnBudget;
 
-use super::super::types::{AgentRunConfig, AgentToolRuntime, FollowupTaskTool, SpawnAgentTool};
+use super::super::types::{AgentToolRuntime, FollowupTaskTool, SpawnAgentTool};
 
 impl SpawnAgentTool {
     pub fn new(
@@ -52,12 +51,12 @@ impl AgentToolRuntime {
     pub(in crate::tool::multi_agent) fn run_config(
         &self,
         context: &ToolContext,
-        record: &AgentRecord,
         options: crate::TurnOptions,
-        role: String,
+        call_id: String,
         message: String,
-    ) -> AgentRunConfig {
-        AgentRunConfig {
+        initial_session: crate::CoreSession,
+    ) -> crate::AgentRunSpec {
+        crate::AgentRunSpec {
             provider: self.provider.clone(),
             reasoning_effort: self.reasoning_effort.clone(),
             config: self.config.clone(),
@@ -70,14 +69,12 @@ impl AgentToolRuntime {
             instruction_snapshot: context.instruction_snapshot.clone(),
             workspace_root: context.workspace_root.clone(),
             options,
-            agent_control: context.agent_control.clone(),
             event_tx: context.event_tx.clone(),
-            agent_id: record.id.clone(),
-            agent_path: record.path.clone(),
-            role,
+            call_id,
             message,
             mode: context.mode,
             budget: TurnBudget::child_default(),
+            initial_session,
         }
     }
 }

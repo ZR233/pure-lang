@@ -231,7 +231,7 @@ mod tests {
 
     use super::*;
     use crate::tool::WorkspaceAccess;
-    use crate::{AgentControl, TurnOptions};
+    use crate::{AgentSupervisor, TurnOptions};
 
     fn context(options: TurnOptions) -> ToolContext {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
@@ -244,7 +244,7 @@ mod tests {
             workspace_instructions: None,
             instruction_snapshot: None,
             active_subagent: None,
-            agent_control: AgentControl::default(),
+            agent_supervisor: AgentSupervisor::default(),
             lsp_runtime: None,
             parent_session: Arc::new(crate::CoreSession::new()),
         }

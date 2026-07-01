@@ -1,6 +1,6 @@
 ---
 name: subagent-workflow
-description: Use when a task benefits from Pure subagents, multi-agent exploration, or validation. Covers spawn_agent coordination, task partitioning, recoverable 429 handling, and result synthesis.
+description: Use when a task benefits from Pure subagents, multi-agent exploration, or validation. Covers spawn_agent coordination, task partitioning, structured capacity errors, and result synthesis.
 category: agents
 ---
 
@@ -35,9 +35,9 @@ The parent owns coordination:
 4. Reconcile conflicts in child findings.
 5. Produce the final answer or implementation plan.
 
-## Recoverable Capacity Failures
+## Capacity Failures
 
-If a subagent tool result mentions `recoverableSubagentProvider429` or recoverable capacity failures, stop spawning or retrying child agents. Continue the remaining task in the parent agent and explain that provider capacity limited subagent execution only when relevant.
+If `spawn_agent` or `followup_task` returns a structured capacity error, stop spawning or retrying child agents. Continue the remaining task in the parent agent and explain that provider or agent capacity limited subagent execution only when relevant.
 
 ## Validation Pattern
 

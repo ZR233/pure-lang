@@ -1205,78 +1205,23 @@ impl SseDecode for crate::api::studio::types::agent::BridgeAgentTimelinePayloadD
         match tag_ {
             0 => {
                 let mut var_callId = <String>::sse_decode(deserializer);
-                let mut var_senderPath = <String>::sse_decode(deserializer);
-                let mut var_taskName = <String>::sse_decode(deserializer);
-                let mut var_prompt = <String>::sse_decode(deserializer);
-                let mut var_role = <String>::sse_decode(deserializer);
-                let mut var_model = <Option<String>>::sse_decode(deserializer);
-                let mut var_reasoningEffort = <Option<String>>::sse_decode(deserializer);
-                return crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::SpawnBegin{call_id: var_callId, sender_path: var_senderPath, task_name: var_taskName, prompt: var_prompt, role: var_role, model: var_model, reasoning_effort: var_reasoningEffort};
-            }
-            1 => {
-                let mut var_callId = <String>::sse_decode(deserializer);
-                let mut var_senderPath = <String>::sse_decode(deserializer);
                 let mut var_agentId = <Option<String>>::sse_decode(deserializer);
                 let mut var_path = <Option<String>>::sse_decode(deserializer);
-                let mut var_role = <Option<String>>::sse_decode(deserializer);
-                let mut var_status = <String>::sse_decode(deserializer);
-                let mut var_prompt = <String>::sse_decode(deserializer);
+                let mut var_parentPath = <Option<String>>::sse_decode(deserializer);
+                let mut var_kind = <String>::sse_decode(deserializer);
+                let mut var_status = <Option<String>>::sse_decode(deserializer);
+                let mut var_message = <Option<String>>::sse_decode(deserializer);
+                let mut var_timedOut = <bool>::sse_decode(deserializer);
                 let mut var_error = <Option<String>>::sse_decode(deserializer);
-                return crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::SpawnEnd {
+                return crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::SubAgentActivity {
                     call_id: var_callId,
-                    sender_path: var_senderPath,
                     agent_id: var_agentId,
                     path: var_path,
-                    role: var_role,
+                    parent_path: var_parentPath,
+                    kind: var_kind,
                     status: var_status,
-                    prompt: var_prompt,
-                    error: var_error,
-                };
-            }
-            2 => {
-                let mut var_callId = <String>::sse_decode(deserializer);
-                let mut var_senderPath = <String>::sse_decode(deserializer);
-                let mut var_receiverPath = <String>::sse_decode(deserializer);
-                let mut var_prompt = <String>::sse_decode(deserializer);
-                return crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::InteractionBegin{call_id: var_callId, sender_path: var_senderPath, receiver_path: var_receiverPath, prompt: var_prompt};
-            }
-            3 => {
-                let mut var_callId = <String>::sse_decode(deserializer);
-                let mut var_senderPath = <String>::sse_decode(deserializer);
-                let mut var_receiverPath = <String>::sse_decode(deserializer);
-                let mut var_status = <String>::sse_decode(deserializer);
-                let mut var_prompt = <String>::sse_decode(deserializer);
-                let mut var_error = <Option<String>>::sse_decode(deserializer);
-                return crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::InteractionEnd{call_id: var_callId, sender_path: var_senderPath, receiver_path: var_receiverPath, status: var_status, prompt: var_prompt, error: var_error};
-            }
-            4 => {
-                let mut var_callId = <String>::sse_decode(deserializer);
-                let mut var_senderPath = <String>::sse_decode(deserializer);
-                return crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::WaitingBegin{call_id: var_callId, sender_path: var_senderPath};
-            }
-            5 => {
-                let mut var_callId = <String>::sse_decode(deserializer);
-                let mut var_senderPath = <String>::sse_decode(deserializer);
-                let mut var_timedOut = <bool>::sse_decode(deserializer);
-                return crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::WaitingEnd{call_id: var_callId, sender_path: var_senderPath, timed_out: var_timedOut};
-            }
-            6 => {
-                let mut var_callId = <String>::sse_decode(deserializer);
-                let mut var_senderPath = <String>::sse_decode(deserializer);
-                let mut var_receiverPath = <String>::sse_decode(deserializer);
-                return crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::CloseBegin{call_id: var_callId, sender_path: var_senderPath, receiver_path: var_receiverPath};
-            }
-            7 => {
-                let mut var_callId = <String>::sse_decode(deserializer);
-                let mut var_senderPath = <String>::sse_decode(deserializer);
-                let mut var_receiverPath = <String>::sse_decode(deserializer);
-                let mut var_status = <String>::sse_decode(deserializer);
-                let mut var_error = <Option<String>>::sse_decode(deserializer);
-                return crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::CloseEnd {
-                    call_id: var_callId,
-                    sender_path: var_senderPath,
-                    receiver_path: var_receiverPath,
-                    status: var_status,
+                    message: var_message,
+                    timed_out: var_timedOut,
                     error: var_error,
                 };
             }
@@ -1286,7 +1231,6 @@ impl SseDecode for crate::api::studio::types::agent::BridgeAgentTimelinePayloadD
         }
     }
 }
-
 impl SseDecode for crate::api::studio::types::event::BridgeEventEnvelope {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3043,119 +2987,26 @@ impl flutter_rust_bridge::IntoDart
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
-            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::SpawnBegin {
+            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::SubAgentActivity {
                 call_id,
-                sender_path,
-                task_name,
-                prompt,
-                role,
-                model,
-                reasoning_effort,
+                agent_id,
+                path,
+                parent_path,
+                kind,
+                status,
+                message,
+                timed_out,
+                error,
             } => [
                 0.into_dart(),
                 call_id.into_into_dart().into_dart(),
-                sender_path.into_into_dart().into_dart(),
-                task_name.into_into_dart().into_dart(),
-                prompt.into_into_dart().into_dart(),
-                role.into_into_dart().into_dart(),
-                model.into_into_dart().into_dart(),
-                reasoning_effort.into_into_dart().into_dart(),
-            ]
-            .into_dart(),
-            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::SpawnEnd {
-                call_id,
-                sender_path,
-                agent_id,
-                path,
-                role,
-                status,
-                prompt,
-                error,
-            } => [
-                1.into_dart(),
-                call_id.into_into_dart().into_dart(),
-                sender_path.into_into_dart().into_dart(),
                 agent_id.into_into_dart().into_dart(),
                 path.into_into_dart().into_dart(),
-                role.into_into_dart().into_dart(),
+                parent_path.into_into_dart().into_dart(),
+                kind.into_into_dart().into_dart(),
                 status.into_into_dart().into_dart(),
-                prompt.into_into_dart().into_dart(),
-                error.into_into_dart().into_dart(),
-            ]
-            .into_dart(),
-            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::InteractionBegin {
-                call_id,
-                sender_path,
-                receiver_path,
-                prompt,
-            } => [
-                2.into_dart(),
-                call_id.into_into_dart().into_dart(),
-                sender_path.into_into_dart().into_dart(),
-                receiver_path.into_into_dart().into_dart(),
-                prompt.into_into_dart().into_dart(),
-            ]
-            .into_dart(),
-            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::InteractionEnd {
-                call_id,
-                sender_path,
-                receiver_path,
-                status,
-                prompt,
-                error,
-            } => [
-                3.into_dart(),
-                call_id.into_into_dart().into_dart(),
-                sender_path.into_into_dart().into_dart(),
-                receiver_path.into_into_dart().into_dart(),
-                status.into_into_dart().into_dart(),
-                prompt.into_into_dart().into_dart(),
-                error.into_into_dart().into_dart(),
-            ]
-            .into_dart(),
-            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::WaitingBegin {
-                call_id,
-                sender_path,
-            } => [
-                4.into_dart(),
-                call_id.into_into_dart().into_dart(),
-                sender_path.into_into_dart().into_dart(),
-            ]
-            .into_dart(),
-            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::WaitingEnd {
-                call_id,
-                sender_path,
-                timed_out,
-            } => [
-                5.into_dart(),
-                call_id.into_into_dart().into_dart(),
-                sender_path.into_into_dart().into_dart(),
+                message.into_into_dart().into_dart(),
                 timed_out.into_into_dart().into_dart(),
-            ]
-            .into_dart(),
-            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::CloseBegin {
-                call_id,
-                sender_path,
-                receiver_path,
-            } => [
-                6.into_dart(),
-                call_id.into_into_dart().into_dart(),
-                sender_path.into_into_dart().into_dart(),
-                receiver_path.into_into_dart().into_dart(),
-            ]
-            .into_dart(),
-            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::CloseEnd {
-                call_id,
-                sender_path,
-                receiver_path,
-                status,
-                error,
-            } => [
-                7.into_dart(),
-                call_id.into_into_dart().into_dart(),
-                sender_path.into_into_dart().into_dart(),
-                receiver_path.into_into_dart().into_dart(),
-                status.into_into_dart().into_dart(),
                 error.into_into_dart().into_dart(),
             ]
             .into_dart(),
@@ -4387,112 +4238,26 @@ impl SseEncode for crate::api::studio::types::agent::BridgeAgentTimelinePayloadD
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         match self {
-            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::SpawnBegin {
+            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::SubAgentActivity {
                 call_id,
-                sender_path,
-                task_name,
-                prompt,
-                role,
-                model,
-                reasoning_effort,
+                agent_id,
+                path,
+                parent_path,
+                kind,
+                status,
+                message,
+                timed_out,
+                error,
             } => {
                 <i32>::sse_encode(0, serializer);
                 <String>::sse_encode(call_id, serializer);
-                <String>::sse_encode(sender_path, serializer);
-                <String>::sse_encode(task_name, serializer);
-                <String>::sse_encode(prompt, serializer);
-                <String>::sse_encode(role, serializer);
-                <Option<String>>::sse_encode(model, serializer);
-                <Option<String>>::sse_encode(reasoning_effort, serializer);
-            }
-            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::SpawnEnd {
-                call_id,
-                sender_path,
-                agent_id,
-                path,
-                role,
-                status,
-                prompt,
-                error,
-            } => {
-                <i32>::sse_encode(1, serializer);
-                <String>::sse_encode(call_id, serializer);
-                <String>::sse_encode(sender_path, serializer);
                 <Option<String>>::sse_encode(agent_id, serializer);
                 <Option<String>>::sse_encode(path, serializer);
-                <Option<String>>::sse_encode(role, serializer);
-                <String>::sse_encode(status, serializer);
-                <String>::sse_encode(prompt, serializer);
-                <Option<String>>::sse_encode(error, serializer);
-            }
-            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::InteractionBegin {
-                call_id,
-                sender_path,
-                receiver_path,
-                prompt,
-            } => {
-                <i32>::sse_encode(2, serializer);
-                <String>::sse_encode(call_id, serializer);
-                <String>::sse_encode(sender_path, serializer);
-                <String>::sse_encode(receiver_path, serializer);
-                <String>::sse_encode(prompt, serializer);
-            }
-            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::InteractionEnd {
-                call_id,
-                sender_path,
-                receiver_path,
-                status,
-                prompt,
-                error,
-            } => {
-                <i32>::sse_encode(3, serializer);
-                <String>::sse_encode(call_id, serializer);
-                <String>::sse_encode(sender_path, serializer);
-                <String>::sse_encode(receiver_path, serializer);
-                <String>::sse_encode(status, serializer);
-                <String>::sse_encode(prompt, serializer);
-                <Option<String>>::sse_encode(error, serializer);
-            }
-            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::WaitingBegin {
-                call_id,
-                sender_path,
-            } => {
-                <i32>::sse_encode(4, serializer);
-                <String>::sse_encode(call_id, serializer);
-                <String>::sse_encode(sender_path, serializer);
-            }
-            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::WaitingEnd {
-                call_id,
-                sender_path,
-                timed_out,
-            } => {
-                <i32>::sse_encode(5, serializer);
-                <String>::sse_encode(call_id, serializer);
-                <String>::sse_encode(sender_path, serializer);
+                <Option<String>>::sse_encode(parent_path, serializer);
+                <String>::sse_encode(kind, serializer);
+                <Option<String>>::sse_encode(status, serializer);
+                <Option<String>>::sse_encode(message, serializer);
                 <bool>::sse_encode(timed_out, serializer);
-            }
-            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::CloseBegin {
-                call_id,
-                sender_path,
-                receiver_path,
-            } => {
-                <i32>::sse_encode(6, serializer);
-                <String>::sse_encode(call_id, serializer);
-                <String>::sse_encode(sender_path, serializer);
-                <String>::sse_encode(receiver_path, serializer);
-            }
-            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::CloseEnd {
-                call_id,
-                sender_path,
-                receiver_path,
-                status,
-                error,
-            } => {
-                <i32>::sse_encode(7, serializer);
-                <String>::sse_encode(call_id, serializer);
-                <String>::sse_encode(sender_path, serializer);
-                <String>::sse_encode(receiver_path, serializer);
-                <String>::sse_encode(status, serializer);
                 <Option<String>>::sse_encode(error, serializer);
             }
             _ => {
@@ -4501,7 +4266,6 @@ impl SseEncode for crate::api::studio::types::agent::BridgeAgentTimelinePayloadD
         }
     }
 }
-
 impl SseEncode for crate::api::studio::types::event::BridgeEventEnvelope {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {

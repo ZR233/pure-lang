@@ -1,19 +1,22 @@
 use pl_protocol::AgentStatus;
 
 use super::events::emit_agent_record;
-use super::types::AgentRunConfig;
-use crate::agent::AgentStatusUpdate;
+use super::{AgentRunSpec, AgentStatusUpdate, AgentSupervisor};
 use crate::config::ModelRole;
 use crate::core::compact_text;
 use crate::session::CoreSession;
-use crate::turn::{TurnAbortReason, TurnResultStatus};
+use crate::turn::{TurnAbortReason, TurnRequest, TurnResultStatus};
 use crate::{PureCore, SubagentContext};
 
-pub(super) async fn mark_agent_failed(config: &AgentRunConfig, error: String) {
-    if let Some(record) = config
-        .agent_control
+async fn mark_agent_failed(
+    supervisor: &AgentSupervisor,
+    agent_id: &str,
+    config: &AgentRunSpec,
+    error: String,
+) {
+    if let Some(record) = supervisor
         .update_status_with(
-            &config.agent_id,
+            agent_id,
             AgentStatusUpdate {
                 status: AgentStatus::Errored,
                 summary: None,
@@ -27,19 +30,18 @@ pub(super) async fn mark_agent_failed(config: &AgentRunConfig, error: String) {
     {
         emit_agent_record(&config.event_tx, &record);
     }
-    for record in config
-        .agent_control
-        .shutdown_descendants(&config.agent_id, "errored")
-        .await
-    {
+    for record in supervisor.shutdown_descendants(agent_id, "errored").await {
         emit_agent_record(&config.event_tx, &record);
     }
 }
 
-pub(crate) async fn run_agent_turn(config: AgentRunConfig) {
-    let Some(record) = config
-        .agent_control
-        .update_status(&config.agent_id, AgentStatus::Running, None, None)
+pub(super) async fn run_agent_turn(
+    supervisor: AgentSupervisor,
+    agent_id: String,
+    config: AgentRunSpec,
+) {
+    let Some(record) = supervisor
+        .update_status(&agent_id, AgentStatus::Running, None, None)
         .await
     else {
         return;
@@ -49,7 +51,7 @@ pub(crate) async fn run_agent_turn(config: AgentRunConfig) {
     }
     emit_agent_record(&config.event_tx, &record);
 
-    let role = ModelRole::from_key(&config.role).unwrap_or(ModelRole::Executor);
+    let role = ModelRole::from_key(&record.role).unwrap_or(ModelRole::Executor);
     let core_result = match &config.config {
         Some(pure_config) => PureCore::from_config(pure_config, role),
         None => Ok(match &config.reasoning_effort {
@@ -63,12 +65,12 @@ pub(crate) async fn run_agent_turn(config: AgentRunConfig) {
         Ok(core) => {
             let mut core = core
                 .with_mcp_runtime(config.mcp_runtime.clone().unwrap_or_default())
-                .with_agent_control(config.agent_control.clone())
+                .with_agent_supervisor(supervisor.clone())
                 .with_subagent_context(SubagentContext {
-                    id: config.agent_id.clone(),
+                    id: agent_id.clone(),
                     parent_id: record.parent_path.clone(),
-                    agent_path: Some(config.agent_path.clone()),
-                    role: config.role.clone(),
+                    agent_path: Some(record.path.clone()),
+                    role: record.role.clone(),
                     task: compact_text(&config.message),
                     depth: record.depth,
                 });
@@ -78,7 +80,7 @@ pub(crate) async fn run_agent_turn(config: AgentRunConfig) {
             core
         }
         Err(error) => {
-            mark_agent_failed(&config, error.to_string()).await;
+            mark_agent_failed(&supervisor, &agent_id, &config, error.to_string()).await;
             return;
         }
     };
@@ -88,17 +90,16 @@ pub(crate) async fn run_agent_turn(config: AgentRunConfig) {
     )
     .await;
     if let Err(error) = core.register_configured_mcp_tools().await {
-        mark_agent_failed(&config, error.to_string()).await;
+        mark_agent_failed(&supervisor, &agent_id, &config, error.to_string()).await;
         return;
     }
 
-    let mut session = config
-        .agent_control
-        .load_session(&config.agent_id)
+    let mut session = supervisor
+        .load_session(&agent_id)
         .await
         .unwrap_or_else(CoreSession::new);
-    let mut request = crate::turn::TurnRequest::new(config.message.clone(), config.mode)
-        .with_budget(config.budget);
+    let mut request =
+        TurnRequest::new(config.message.clone(), config.mode).with_budget(config.budget);
     if let Some(instructions) = config.workspace_instructions.clone() {
         request = request.with_workspace_instructions(instructions);
     }
@@ -120,10 +121,7 @@ pub(crate) async fn run_agent_turn(config: AgentRunConfig) {
         .await;
     drop(agent_event_tx);
     let _ = forward_task.await;
-    config
-        .agent_control
-        .store_session(&config.agent_id, session)
-        .await;
+    supervisor.store_session(&agent_id, session).await;
 
     match result {
         Ok(result) => {
@@ -151,13 +149,12 @@ pub(crate) async fn run_agent_turn(config: AgentRunConfig) {
                     .or_else(|| Some("subagent errored".to_string())),
                 TurnResultStatus::Completed | TurnResultStatus::Aborted => result.error.clone(),
             };
-            if let Some(record) = config
-                .agent_control
+            if let Some(record) = supervisor
                 .update_status_with(
-                    &config.agent_id,
+                    &agent_id,
                     AgentStatusUpdate {
                         status,
-                        summary: (!summary.is_empty()).then_some(summary.clone()),
+                        summary: (!summary.is_empty()).then_some(summary),
                         error,
                         reason,
                         budget_limit_kind: result.budget_limit_kind,
@@ -173,17 +170,13 @@ pub(crate) async fn run_agent_turn(config: AgentRunConfig) {
                     .abort_reason
                     .map(|reason| reason.as_str())
                     .unwrap_or("errored");
-                for record in config
-                    .agent_control
-                    .shutdown_descendants(&config.agent_id, reason)
-                    .await
-                {
+                for record in supervisor.shutdown_descendants(&agent_id, reason).await {
                     emit_agent_record(&config.event_tx, &record);
                 }
             }
         }
         Err(error) => {
-            mark_agent_failed(&config, error.to_string()).await;
+            mark_agent_failed(&supervisor, &agent_id, &config, error.to_string()).await;
         }
     }
 }

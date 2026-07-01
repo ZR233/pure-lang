@@ -50,9 +50,9 @@ fn generate_turn_id() -> String {
     format!("{ts:x}-{seq:x}")
 }
 
-const SUBAGENT_DISPATCH_CONSTRAINT: &str = "\n\n# 子代理调度约束\n用户明确要求使用 subagent/子代理分工时，必须先调度 `spawn_agent` 工具；不要只用 `bash` 或文件工具替代。若尚未知道 crate 列表，可以先用只读工具定位 workspace，再为每个 crate 创建 explorer agent，最后由父会话汇总。如果 `wait_agent` 或 `list_agents` 返回 `recoverableSubagentProvider429` 或 `recoverableFailures`，表示 provider 429 并发/容量上限导致子代理不可用；此时停止继续创建或重试子代理，由当前父 agent 自己完成剩余工作。";
+const SUBAGENT_DISPATCH_CONSTRAINT: &str = "\n\n# 子代理调度约束\n用户明确要求使用 subagent/子代理分工时，必须先调度 `spawn_agent` 工具；不要只用 `bash` 或文件工具替代。若尚未知道 crate 列表，可以先用只读工具定位 workspace，再为每个 crate 创建 explorer agent，最后由父会话汇总。如果子代理创建返回结构化容量错误，表示 provider 并发/容量或 agent 数量限制导致子代理不可用；此时停止继续创建或重试子代理，由当前父 agent 自己完成剩余工作。";
 
-const SUBAGENT_FORCE_DISPATCH_INSTRUCTION: &str = "# 当前轮强制要求\n前面已进行了必要定位但尚未创建 agent。本轮必须调用 `spawn_agent`，不要继续调用文件、shell 或搜索工具，也不要输出最终回答。若工具结果提示 `recoverableSubagentProvider429`，后续不再重试创建子代理，改由当前 agent 自己完成任务。";
+const SUBAGENT_FORCE_DISPATCH_INSTRUCTION: &str = "# 当前轮强制要求\n前面已进行了必要定位但尚未创建 agent。本轮必须调用 `spawn_agent`，不要继续调用文件、shell 或搜索工具，也不要输出最终回答。若子代理创建返回结构化容量错误，后续不再重试创建子代理，改由当前 agent 自己完成任务。";
 
 /// Pure-Lang 核心逻辑层。
 ///
@@ -68,7 +68,7 @@ pub struct PureCore {
     workspace_root: Option<PathBuf>,
     workspace_instructions: Option<String>,
     active_subagent: Option<SubagentContext>,
-    agent_control: crate::AgentControl,
+    agent_supervisor: crate::AgentSupervisor,
     tools: ToolRegistry,
 }
 
@@ -83,7 +83,7 @@ impl PureCore {
             workspace_root: None,
             workspace_instructions: None,
             active_subagent: None,
-            agent_control: crate::AgentControl::default(),
+            agent_supervisor: crate::AgentSupervisor::default(),
             tools: ToolRegistry::new(),
         }
     }
@@ -101,7 +101,7 @@ impl PureCore {
             workspace_root: None,
             workspace_instructions: None,
             active_subagent: None,
-            agent_control: crate::AgentControl::default(),
+            agent_supervisor: crate::AgentSupervisor::default(),
             tools: ToolRegistry::new(),
         }
     }
@@ -126,7 +126,7 @@ impl PureCore {
             workspace_root: None,
             workspace_instructions: None,
             active_subagent: None,
-            agent_control: crate::AgentControl::default(),
+            agent_supervisor: crate::AgentSupervisor::default(),
             tools: ToolRegistry::new(),
         })
     }
@@ -136,8 +136,11 @@ impl PureCore {
         self
     }
 
-    pub(crate) fn with_agent_control(mut self, agent_control: crate::AgentControl) -> Self {
-        self.agent_control = agent_control;
+    pub(crate) fn with_agent_supervisor(
+        mut self,
+        agent_supervisor: crate::AgentSupervisor,
+    ) -> Self {
+        self.agent_supervisor = agent_supervisor;
         self
     }
 
@@ -365,17 +368,13 @@ impl PureCore {
 #[cfg(test)]
 use permission::{approval_request, approve_tool_call};
 #[cfg(test)]
-use pl_model::{TokenUsage, ToolCallKind};
+use pl_model::TokenUsage;
 #[cfg(test)]
-use tool_dispatch::records::tool_results_include_recoverable_subagent_capacity;
-#[cfg(test)]
-use tool_dispatch::{
-    ToolExecutionContext, ToolExecutionRecord, execute_tool_calls, namespaced_tool_trace_part_id,
-};
+use tool_dispatch::{ToolExecutionContext, execute_tool_calls, namespaced_tool_trace_part_id};
 #[cfg(test)]
 use turn_result::{
-    failed_turn_result, looks_like_unexecuted_tool_call_text, prompt_requires_subagent_dispatch,
-    provider_error_severity, tool_allowed_in_mode,
+    failed_turn_result, looks_like_unexecuted_tool_call_text, normalize_provider_error,
+    prompt_requires_subagent_dispatch, provider_error_severity, tool_allowed_in_mode,
 };
 
 #[cfg(test)]

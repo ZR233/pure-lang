@@ -14,6 +14,15 @@ pub enum PureError {
     #[error("tool execution failed: {tool}: {error}")]
     ToolExecutionFailed { tool: String, error: String },
 
+    #[error("agent limit reached: max agents {max_agents}")]
+    AgentLimitReached { max_agents: usize },
+
+    #[error("agent depth limit reached: max depth {max_depth}")]
+    AgentDepthLimitReached { max_depth: u32 },
+
+    #[error("provider capacity unavailable: {message}")]
+    ProviderCapacity { message: String },
+
     #[error("permission denied: {0}")]
     PermissionDenied(String),
 

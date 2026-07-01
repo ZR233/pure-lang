@@ -6,7 +6,6 @@ mod lsp;
 mod multi_agent;
 mod path_policy;
 mod plan;
-mod recoverable;
 mod skill;
 mod truncation;
 
@@ -22,7 +21,7 @@ use pl_trace::AgentEventSender;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
-use crate::AgentControl;
+use crate::AgentSupervisor;
 use crate::turn::TurnOptions;
 
 pub use ask_user::AskUserTool;
@@ -39,7 +38,6 @@ pub use multi_agent::{
 };
 pub(crate) use path_policy::{PathAccess, ToolPathPolicy};
 pub use plan::PlanExitTool;
-pub(crate) use recoverable::RECOVERABLE_SUBAGENT_429_MARKER;
 pub use skill::{SkillManageTool, SkillViewTool, SkillsListTool};
 pub use truncation::{OutputTruncation, TruncatedOutput, TruncationStrategy};
 
@@ -99,7 +97,7 @@ pub struct ToolContext {
     pub workspace_instructions: Option<String>,
     pub instruction_snapshot: Option<crate::instruction::InstructionSnapshot>,
     pub active_subagent: Option<SubagentContext>,
-    pub agent_control: AgentControl,
+    pub agent_supervisor: AgentSupervisor,
     pub lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     pub parent_session: Arc<crate::session::CoreSession>,
 }
@@ -461,7 +459,7 @@ mod tests {
             workspace_instructions: None,
             instruction_snapshot: None,
             active_subagent: None,
-            agent_control: AgentControl::default(),
+            agent_supervisor: AgentSupervisor::default(),
             lsp_runtime: None,
             parent_session: Arc::new(crate::session::CoreSession::new()),
         };
