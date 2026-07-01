@@ -213,9 +213,9 @@ impl StreamLifecycle {
                 events.push(ModelStreamEvent::Completed { response_id });
                 events
             }
-            ModelStreamEvent::StepStarted { response_id } => {
+            ModelStreamEvent::ResponseStarted { response_id } => {
                 let mut events = self.close_open_content_blocks();
-                events.push(ModelStreamEvent::StepStarted { response_id });
+                events.push(ModelStreamEvent::ResponseStarted { response_id });
                 events
             }
             ModelStreamEvent::ToolCallReady {

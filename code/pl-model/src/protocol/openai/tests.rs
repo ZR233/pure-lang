@@ -4,6 +4,7 @@ use pl_protocol::{ContentPart, ImageSource, Message, MessageContent, MessageRole
 use pretty_assertions::assert_eq;
 
 use super::*;
+use crate::model_info::MaxTokensField;
 use crate::request::{ReasoningConfig, ReasoningSummary, ToolCall, ToolCallPayload, ToolSchema};
 
 fn text_message(role: MessageRole, content: &str) -> Message {
@@ -45,6 +46,9 @@ fn request_with_effort(effort: &str) -> CompletionRequest {
         parallel_tool_calls: true,
         temperature: None,
         max_tokens: None,
+        store: None,
+        previous_response_id: None,
+        prompt_cache_key: None,
         reasoning: Some(ReasoningConfig {
             effort: Some(effort.to_string()),
             summary: None,
@@ -69,6 +73,9 @@ fn responses_use_top_level_instructions_and_chat_prepends_system_message() {
         parallel_tool_calls: false,
         temperature: None,
         max_tokens: None,
+        store: None,
+        previous_response_id: None,
+        prompt_cache_key: None,
         reasoning: None,
         stream: true,
         trace: None,
@@ -113,6 +120,9 @@ fn responses_maps_image_parts_to_input_image() {
         parallel_tool_calls: false,
         temperature: None,
         max_tokens: None,
+        store: None,
+        previous_response_id: None,
+        prompt_cache_key: None,
         reasoning: None,
         stream: true,
         trace: None,
@@ -140,6 +150,9 @@ fn chat_maps_image_parts_to_content_array() {
         parallel_tool_calls: false,
         temperature: None,
         max_tokens: None,
+        store: None,
+        previous_response_id: None,
+        prompt_cache_key: None,
         reasoning: None,
         stream: true,
         trace: None,
@@ -189,6 +202,9 @@ fn request_with_tool_history(tool_metadata: HashMap<String, String>) -> Completi
         parallel_tool_calls: false,
         temperature: None,
         max_tokens: None,
+        store: None,
+        previous_response_id: None,
+        prompt_cache_key: None,
         reasoning: None,
         stream: true,
         trace: None,
@@ -229,6 +245,9 @@ fn request_with_function_tool_history(tool_metadata: HashMap<String, String>) ->
         parallel_tool_calls: false,
         temperature: None,
         max_tokens: None,
+        store: None,
+        previous_response_id: None,
+        prompt_cache_key: None,
         reasoning: None,
         stream: true,
         trace: None,
@@ -271,6 +290,44 @@ fn responses_body_omits_disabled_reasoning_summary() {
     let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
 
     assert!(body["reasoning"].get("summary").is_none());
+}
+
+#[test]
+fn responses_body_writes_continuation_fields() {
+    let mut request = request_with_effort("medium");
+    request.store = Some(true);
+    request.previous_response_id = Some("resp_previous".to_string());
+    request.prompt_cache_key = Some("project-cache-key".to_string());
+
+    let responses_body = OpenAiProtocol::responses().build_request_body(&request);
+    let chat_body = OpenAiProtocol::chat().build_request_body(&request);
+
+    assert_eq!(responses_body["store"], serde_json::json!(true));
+    assert_eq!(
+        responses_body["previous_response_id"],
+        serde_json::json!("resp_previous")
+    );
+    assert_eq!(
+        responses_body["prompt_cache_key"],
+        serde_json::json!("project-cache-key")
+    );
+    assert!(chat_body.get("store").is_none());
+    assert!(chat_body.get("previous_response_id").is_none());
+    assert!(chat_body.get("prompt_cache_key").is_none());
+}
+
+#[test]
+fn chat_body_can_use_profiled_max_completion_tokens_field() {
+    let mut model = ModelInfo::fallback("mimo-chat");
+    model.request_profile.max_tokens_field = MaxTokensField::MaxCompletionTokens;
+    let mut request = request_with_effort("high");
+    request.model = "mimo-chat".to_string();
+    request.max_tokens = Some(8192);
+
+    let body = OpenAiProtocol::chat().build_request_body_with_model(&request, &model);
+
+    assert!(body.get("max_tokens").is_none());
+    assert_eq!(body["max_completion_tokens"], serde_json::json!(8192));
 }
 
 #[test]
@@ -684,6 +741,9 @@ fn missing_tool_output_fails_request_build() {
         parallel_tool_calls: false,
         temperature: None,
         max_tokens: None,
+        store: None,
+        previous_response_id: None,
+        prompt_cache_key: None,
         reasoning: None,
         stream: true,
         trace: None,
@@ -740,6 +800,9 @@ fn responses_history_requires_call_id_but_chat_uses_tool_call_id() {
         parallel_tool_calls: false,
         temperature: None,
         max_tokens: None,
+        store: None,
+        previous_response_id: None,
+        prompt_cache_key: None,
         reasoning: None,
         stream: true,
         trace: None,

@@ -22,7 +22,9 @@ pub use default_models::{
 };
 pub use manager::{DefaultModelsManager, ModelsManager};
 pub use model_family::{ModelFamily, ModelPricing};
-pub use model_info::{ModelInfo, ModelRequestProfile, TruncationMode, TruncationPolicy};
+pub use model_info::{
+    MaxTokensField, ModelInfo, ModelRequestProfile, TruncationMode, TruncationPolicy,
+};
 pub use parameter::{ModelParameter, ParameterWire, WireAssignment};
 pub use pl_protocol::ToolCallKind;
 pub use provider::{
@@ -40,4 +42,9 @@ pub use provider_usage::{
 pub use request::{
     CompletionRequest, CompletionResponse, CompletionTraceContext, FinishReason, ReasoningConfig,
     ReasoningSummary, TokenUsage, ToolCall, ToolCallPayload, ToolFormat, ToolSchema,
+};
+pub use stream::{
+    CompletionBlockContent, CompletionBlockField, CompletionBlockKind, CompletionEventStream,
+    CompletionStreamAccumulator, CompletionStreamEvent, ToolInputDeltaPayload,
+    ToolInputPayloadKind, collect_completion_event_stream,
 };

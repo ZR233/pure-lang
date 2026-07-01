@@ -37,7 +37,7 @@ pub(crate) fn build_openai_request_body(
             Ok(OpenAiRequestBody::Responses(body))
         }
         OpenAiEndpoint::ChatCompletions => {
-            let mut body = to_object_map(&ChatRequestBody::from_request(request)?)?;
+            let mut body = to_object_map(&ChatRequestBody::from_request(request, model)?)?;
             finalize_body(&mut body, model, &request.reasoning);
             Ok(OpenAiRequestBody::Chat(body))
         }

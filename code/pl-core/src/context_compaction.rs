@@ -83,6 +83,9 @@ pub(crate) async fn maybe_compact_session(
             parallel_tool_calls: false,
             temperature: None,
             max_tokens,
+            store: None,
+            previous_response_id: None,
+            prompt_cache_key: None,
             reasoning: None::<ReasoningConfig>,
             stream: true,
             trace: None,
@@ -272,8 +275,8 @@ mod tests {
     use super::*;
     use crate::core::progress::{ProgressEmitter, ProgressVerbosity};
     use pl_model::{
-        CompletionResponse, FinishReason, ModelCapabilities, ModelInfo, ProviderCapabilities,
-        ProviderInfo,
+        CompletionEventStream, CompletionResponse, FinishReason, ModelCapabilities, ModelInfo,
+        ProviderCapabilities, ProviderInfo,
     };
     use pl_trace::{AgentEvent, TracePartSource};
     use pretty_assertions::assert_eq;
@@ -430,6 +433,15 @@ mod tests {
 
         fn capabilities(&self) -> ProviderCapabilities {
             ProviderCapabilities::STREAMING
+        }
+
+        async fn stream_events(
+            &self,
+            _request: CompletionRequest,
+        ) -> Result<CompletionEventStream> {
+            Err(PureError::LlmError(
+                "fake compaction provider does not stream events".to_string(),
+            ))
         }
 
         async fn stream_complete(

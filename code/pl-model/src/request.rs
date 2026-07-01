@@ -22,6 +22,12 @@ pub struct CompletionRequest {
     pub parallel_tool_calls: bool,
     pub temperature: Option<f32>,
     pub max_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_response_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_key: Option<String>,
     pub reasoning: Option<ReasoningConfig>,
     #[serde(default = "default_true")]
     pub stream: bool,
@@ -370,7 +376,7 @@ pub struct TokenUsage {
     pub cached_prompt_tokens: u64,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FinishReason {
     Stop,
     ToolCalls,
@@ -426,6 +432,9 @@ mod tests {
             parallel_tool_calls: false,
             temperature: None,
             max_tokens: None,
+            store: None,
+            previous_response_id: None,
+            prompt_cache_key: None,
             reasoning: None,
             stream: true,
             trace: None,

@@ -156,7 +156,7 @@ fn tagged_text_decoder_gives_repeated_tags_distinct_blocks() {
                 authoritative_content: None,
                 ..
             } => Some(id.as_str()),
-            ModelStreamEvent::StepStarted { .. }
+            ModelStreamEvent::ResponseStarted { .. }
             | ModelStreamEvent::BlockOpened { .. }
             | ModelStreamEvent::BlockDelta { .. }
             | ModelStreamEvent::BlockClosed { .. }

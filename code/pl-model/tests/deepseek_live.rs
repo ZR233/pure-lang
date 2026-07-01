@@ -51,6 +51,9 @@ fn deepseek_request(messages: Vec<Message>, turn_id: &str) -> CompletionRequest 
         parallel_tool_calls: false,
         temperature: None,
         max_tokens: Some(2048),
+        store: None,
+        previous_response_id: None,
+        prompt_cache_key: None,
         reasoning: Some(ReasoningConfig {
             effort: Some("high".to_string()),
             summary: Some(ReasoningSummary::Enabled),

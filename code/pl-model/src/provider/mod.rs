@@ -9,6 +9,7 @@ use crate::model_info::ModelInfo;
 use crate::provider_info::ProviderInfo;
 use crate::request::CompletionRequest;
 use crate::request::CompletionResponse;
+use crate::stream::CompletionEventStream;
 
 mod openai_runtime;
 
@@ -26,6 +27,11 @@ pub use openai_runtime::OpenAiProvider;
 pub trait ModelProvider: fmt::Debug + Send + Sync {
     fn info(&self) -> &ProviderInfo;
     fn capabilities(&self) -> ProviderCapabilities;
+
+    fn stream_events(
+        &self,
+        request: CompletionRequest,
+    ) -> impl std::future::Future<Output = Result<CompletionEventStream>> + Send;
 
     fn stream_complete(
         &self,
@@ -63,6 +69,13 @@ impl ModelProvider for OpenAiProvider {
 
     fn capabilities(&self) -> ProviderCapabilities {
         OpenAiProvider::capabilities(self)
+    }
+
+    fn stream_events(
+        &self,
+        request: CompletionRequest,
+    ) -> impl std::future::Future<Output = Result<CompletionEventStream>> + Send {
+        OpenAiProvider::stream_events(self, request)
     }
 
     fn stream_complete(

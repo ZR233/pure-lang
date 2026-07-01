@@ -1,8 +1,10 @@
 use async_openai::types::stream::StreamResponse;
+use futures::Stream;
 use futures::StreamExt;
 use pl_protocol::{PureError, Result};
 use pl_trace::{AgentEventSender, TraceTextChannel};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::pin::Pin;
 
 pub(crate) mod event;
 mod lifecycle;
@@ -22,36 +24,80 @@ use tagged_output::{TaggedOutputDiagnostics, TaggedVisibleOutputAdapter};
 use tool_stream::ToolStream;
 use trace_projection::TraceProjection;
 
-pub(crate) async fn process_provider_stream(
+pub use event::{
+    ModelBlockContent as CompletionBlockContent, ModelBlockField as CompletionBlockField,
+    ModelBlockKind as CompletionBlockKind, ModelStreamEvent as CompletionStreamEvent,
+    ToolInputDeltaPayload, ToolInputPayloadKind,
+};
+
+pub type CompletionEventStream = Pin<Box<dyn Stream<Item = Result<CompletionStreamEvent>> + Send>>;
+
+pub type CompletionStreamAccumulator = StreamCompletionAccumulator;
+
+pub(crate) fn decode_provider_stream(
     stream: StreamResponse<sse::SseStreamEvent>,
+    protocol: OpenAiProtocol,
+) -> CompletionEventStream {
+    let state = ProviderStreamDecodeState {
+        stream: Box::pin(stream),
+        decoder: protocol.new_stream_decoder(),
+        visible_output: VisibleOutputDecoder::new(protocol.visible_output_protocol()),
+        pending: VecDeque::new(),
+    };
+
+    Box::pin(futures::stream::unfold(state, |mut state| async move {
+        loop {
+            if let Some(event) = state.pending.pop_front() {
+                return Some((Ok(event), state));
+            }
+
+            let sse_event = match state.stream.next().await {
+                Some(Ok(event)) => event,
+                Some(Err(error)) => {
+                    return Some((
+                        Err(PureError::LlmError(format!(
+                            "provider stream error: {error}"
+                        ))),
+                        state,
+                    ));
+                }
+                None => {
+                    state.visible_output.record_diagnostics();
+                    return None;
+                }
+            };
+
+            for stream_event in state.decoder.decode(&sse_event) {
+                state
+                    .pending
+                    .extend(state.visible_output.decode(stream_event));
+            }
+        }
+    }))
+}
+
+struct ProviderStreamDecodeState {
+    stream: Pin<Box<StreamResponse<sse::SseStreamEvent>>>,
+    decoder: sse::OpenAiStreamDecoder,
+    visible_output: VisibleOutputDecoder,
+    pending: VecDeque<CompletionStreamEvent>,
+}
+
+pub async fn collect_completion_event_stream(
+    mut stream: CompletionEventStream,
     event_tx: &AgentEventSender,
-    protocol: &OpenAiProtocol,
     trace: Option<CompletionTraceContext>,
 ) -> Result<CompletionResponse> {
     let mut accumulator = StreamCompletionAccumulator::new(trace);
-    let mut decoder = protocol.new_stream_decoder();
-    let mut visible_output = VisibleOutputDecoder::new(protocol.visible_output_protocol());
-    let mut stream = std::pin::pin!(stream);
 
     while let Some(event) = stream.next().await {
-        let sse_event = match event {
-            Ok(e) => e,
-            Err(e) => {
-                return Err(PureError::LlmError(format!("provider stream error: {e}")));
-            }
-        };
-        for stream_event in decoder.decode(&sse_event) {
-            for stream_event in visible_output.decode(stream_event) {
-                accumulator.apply(stream_event, event_tx)?;
-            }
-        }
+        accumulator.apply(event?, event_tx)?;
     }
 
-    visible_output.record_diagnostics();
     accumulator.finish(event_tx)
 }
 
-pub(crate) struct StreamCompletionAccumulator {
+pub struct StreamCompletionAccumulator {
     content_parts: Vec<ContentPart>,
     content_indexes: HashMap<String, usize>,
     raw_content_parts: Vec<String>,
@@ -66,7 +112,7 @@ pub(crate) struct StreamCompletionAccumulator {
 }
 
 impl StreamCompletionAccumulator {
-    pub(crate) fn new(trace: Option<CompletionTraceContext>) -> Self {
+    pub fn new(trace: Option<CompletionTraceContext>) -> Self {
         Self {
             content_parts: Vec::new(),
             content_indexes: HashMap::new(),
@@ -82,7 +128,7 @@ impl StreamCompletionAccumulator {
         }
     }
 
-    pub(crate) fn apply(
+    pub fn apply(
         &mut self,
         stream_event: ModelStreamEvent,
         event_tx: &AgentEventSender,
@@ -296,7 +342,7 @@ impl StreamCompletionAccumulator {
                 let _ = code;
                 return Err(PureError::LlmError(message));
             }
-            ModelStreamEvent::StepStarted { response_id } => {
+            ModelStreamEvent::ResponseStarted { response_id } => {
                 let _ = response_id;
             }
         }
@@ -304,7 +350,7 @@ impl StreamCompletionAccumulator {
         Ok(())
     }
 
-    pub(crate) fn finish(mut self, event_tx: &AgentEventSender) -> Result<CompletionResponse> {
+    pub fn finish(mut self, event_tx: &AgentEventSender) -> Result<CompletionResponse> {
         if !self.completed {
             return Err(PureError::LlmError(
                 "provider stream ended before completion".to_string(),

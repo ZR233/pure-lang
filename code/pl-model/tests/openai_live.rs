@@ -49,6 +49,9 @@ fn openai_request(model: String) -> CompletionRequest {
         parallel_tool_calls: false,
         temperature: None,
         max_tokens: Some(128),
+        store: None,
+        previous_response_id: None,
+        prompt_cache_key: None,
         reasoning: Some(ReasoningConfig {
             effort: Some("medium".to_string()),
             summary: Some(ReasoningSummary::Enabled),
