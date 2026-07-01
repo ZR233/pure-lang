@@ -374,6 +374,8 @@ pub struct TokenUsage {
     pub total_tokens: u64,
     #[serde(default)]
     pub cached_prompt_tokens: u64,
+    #[serde(default)]
+    pub reasoning_tokens: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

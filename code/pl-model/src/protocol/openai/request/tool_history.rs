@@ -28,7 +28,11 @@ struct ExpectedToolOutput {
     tool_call_kind: ToolCallKind,
 }
 
-pub(super) fn validate_tool_history(messages: &[Message], endpoint: OpenAiEndpoint) -> Result<()> {
+pub(super) fn validate_tool_history(
+    messages: &[Message],
+    endpoint: OpenAiEndpoint,
+    allow_leading_tool_results: bool,
+) -> Result<()> {
     let mut expected_outputs = VecDeque::new();
 
     for message in messages {
@@ -60,9 +64,14 @@ pub(super) fn validate_tool_history(messages: &[Message], endpoint: OpenAiEndpoi
             MessageRole::Tool => {
                 let metadata =
                     ToolResultMetadata::from_metadata(&message.metadata).map_err(protocol_error)?;
-                let expected = expected_outputs.pop_front().ok_or_else(|| {
-                    protocol_error("tool result has no preceding assistant tool call")
-                })?;
+                let Some(expected) = expected_outputs.pop_front() else {
+                    if allow_leading_tool_results {
+                        continue;
+                    }
+                    return Err(protocol_error(
+                        "tool result has no preceding assistant tool call",
+                    ));
+                };
                 if metadata.tool_call_id != expected.tool_call_id {
                     return Err(protocol_error(format!(
                         "tool result id {} does not match assistant tool call id {}",
