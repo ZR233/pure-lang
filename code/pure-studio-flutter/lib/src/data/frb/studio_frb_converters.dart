@@ -218,109 +218,26 @@ TimelineAgentEventPayload _agentTimelinePayloadFromFrb(
   frb.BridgeAgentTimelinePayloadDto payload,
 ) {
   return switch (payload) {
-    frb.BridgeAgentTimelinePayloadDto_SpawnBegin(
+    frb.BridgeAgentTimelinePayloadDto_SubAgentActivity(
       :final callId,
-      :final senderPath,
-      :final taskName,
-      :final prompt,
-      :final role,
-      :final model,
-      :final reasoningEffort,
-    ) =>
-      TimelineAgentSpawnBegin(
-        callId: callId,
-        senderPath: senderPath,
-        taskName: taskName,
-        prompt: prompt,
-        role: role,
-        model: model,
-        reasoningEffort: reasoningEffort,
-      ),
-    frb.BridgeAgentTimelinePayloadDto_SpawnEnd(
-      :final callId,
-      :final senderPath,
       :final agentId,
       :final path,
-      :final role,
+      :final parentPath,
+      :final kind,
       :final status,
-      :final prompt,
+      :final message,
+      :final timedOut,
       :final error,
     ) =>
-      TimelineAgentSpawnEnd(
+      TimelineSubAgentActivity(
         callId: callId,
-        senderPath: senderPath,
         agentId: agentId,
         path: path,
-        role: role,
-        status: status,
-        prompt: prompt,
-        error: error,
-      ),
-    frb.BridgeAgentTimelinePayloadDto_InteractionBegin(
-      :final callId,
-      :final senderPath,
-      :final receiverPath,
-      :final prompt,
-    ) =>
-      TimelineAgentInteractionBegin(
-        callId: callId,
-        senderPath: senderPath,
-        receiverPath: receiverPath,
-        prompt: prompt,
-      ),
-    frb.BridgeAgentTimelinePayloadDto_InteractionEnd(
-      :final callId,
-      :final senderPath,
-      :final receiverPath,
-      :final status,
-      :final prompt,
-      :final error,
-    ) =>
-      TimelineAgentInteractionEnd(
-        callId: callId,
-        senderPath: senderPath,
-        receiverPath: receiverPath,
-        status: status,
-        prompt: prompt,
-        error: error,
-      ),
-    frb.BridgeAgentTimelinePayloadDto_WaitingBegin(
-      :final callId,
-      :final senderPath,
-    ) =>
-      TimelineAgentWaitingBegin(callId: callId, senderPath: senderPath),
-    frb.BridgeAgentTimelinePayloadDto_WaitingEnd(
-      :final callId,
-      :final senderPath,
-      :final timedOut,
-    ) =>
-      TimelineAgentWaitingEnd(
-        callId: callId,
-        senderPath: senderPath,
+        parentPath: parentPath,
+        kind: kind,
+        statusValue: status,
+        message: message,
         timedOut: timedOut,
-      ),
-    frb.BridgeAgentTimelinePayloadDto_CloseBegin(
-      :final callId,
-      :final senderPath,
-      :final receiverPath,
-    ) =>
-      TimelineAgentCloseBegin(
-        callId: callId,
-        senderPath: senderPath,
-        receiverPath: receiverPath,
-      ),
-    frb.BridgeAgentTimelinePayloadDto_CloseEnd(
-      :final callId,
-      :final senderPath,
-      :final receiverPath,
-      :final status,
-      :final error,
-    ) =>
-      TimelineAgentCloseEnd(
-        callId: callId,
-        senderPath: senderPath,
-        receiverPath: receiverPath,
-        status: status,
         error: error,
       ),
   };

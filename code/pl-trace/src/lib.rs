@@ -4,7 +4,8 @@ use tokio::sync::broadcast;
 
 use pl_protocol::{
     AgentRuntimeDelta, AgentStatus, BudgetLimitKind, BudgetUsage, ErrorSeverity,
-    InteractionChangedEvent, PlanLifecycleEvent, SkillActivation, TokenUsageSnapshot,
+    InteractionChangedEvent, PlanLifecycleEvent, SkillActivation, SubAgentActivityKind,
+    TokenUsageSnapshot,
 };
 
 pub type AgentEventSender = broadcast::Sender<AgentEvent>;
@@ -55,66 +56,16 @@ pub enum AgentEvent {
     SkillActivated {
         activation: SkillActivation,
     },
-    CollabAgentSpawnBegin {
+    SubAgentActivity {
         call_id: String,
-        started_at: i64,
-        sender_path: String,
-        task_name: String,
-        prompt: String,
-        role: String,
-        model: Option<String>,
-        reasoning_effort: Option<String>,
-    },
-    CollabAgentSpawnEnd {
-        call_id: String,
-        completed_at: i64,
-        sender_path: String,
+        occurred_at: i64,
         agent_id: Option<String>,
         path: Option<String>,
-        role: Option<String>,
-        status: AgentStatus,
-        prompt: String,
-        error: Option<String>,
-    },
-    CollabAgentInteractionBegin {
-        call_id: String,
-        started_at: i64,
-        sender_path: String,
-        receiver_path: String,
-        prompt: String,
-    },
-    CollabAgentInteractionEnd {
-        call_id: String,
-        completed_at: i64,
-        sender_path: String,
-        receiver_path: String,
-        status: AgentStatus,
-        prompt: String,
-        error: Option<String>,
-    },
-    CollabWaitingBegin {
-        call_id: String,
-        started_at: i64,
-        sender_path: String,
-    },
-    CollabWaitingEnd {
-        call_id: String,
-        completed_at: i64,
-        sender_path: String,
-        timed_out: bool,
-    },
-    CollabCloseBegin {
-        call_id: String,
-        started_at: i64,
-        sender_path: String,
-        receiver_path: String,
-    },
-    CollabCloseEnd {
-        call_id: String,
-        completed_at: i64,
-        sender_path: String,
-        receiver_path: String,
-        status: AgentStatus,
+        parent_path: Option<String>,
+        kind: SubAgentActivityKind,
+        status: Option<AgentStatus>,
+        message: Option<String>,
+        timed_out: Option<bool>,
         error: Option<String>,
     },
     TurnInterrupted {

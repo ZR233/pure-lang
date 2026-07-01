@@ -137,112 +137,26 @@ pub(super) fn studio_agent_timeline_event(
     event: AgentEvent,
 ) -> StudioAgentTimelineEvent {
     let kind = match event {
-        AgentEvent::CollabAgentSpawnBegin {
+        AgentEvent::SubAgentActivity {
             call_id,
-            sender_path,
-            task_name,
-            prompt,
-            role,
-            model,
-            reasoning_effort,
-            ..
-        } => StudioAgentTimelineEventKind::SpawnBegin {
-            call_id,
-            sender_path,
-            task_name,
-            prompt,
-            role,
-            model,
-            reasoning_effort,
-        },
-        AgentEvent::CollabAgentSpawnEnd {
-            call_id,
-            sender_path,
             agent_id,
             path,
-            role,
+            parent_path,
+            kind,
             status,
-            prompt,
+            message,
+            timed_out,
             error,
             ..
-        } => StudioAgentTimelineEventKind::SpawnEnd {
+        } => StudioAgentTimelineEventKind::SubAgentActivity {
             call_id,
-            sender_path,
             agent_id,
             path,
-            role,
+            parent_path,
+            kind,
             status,
-            prompt,
-            error,
-        },
-        AgentEvent::CollabAgentInteractionBegin {
-            call_id,
-            sender_path,
-            receiver_path,
-            prompt,
-            ..
-        } => StudioAgentTimelineEventKind::InteractionBegin {
-            call_id,
-            sender_path,
-            receiver_path,
-            prompt,
-        },
-        AgentEvent::CollabAgentInteractionEnd {
-            call_id,
-            sender_path,
-            receiver_path,
-            status,
-            prompt,
-            error,
-            ..
-        } => StudioAgentTimelineEventKind::InteractionEnd {
-            call_id,
-            sender_path,
-            receiver_path,
-            status,
-            prompt,
-            error,
-        },
-        AgentEvent::CollabWaitingBegin {
-            call_id,
-            sender_path,
-            ..
-        } => StudioAgentTimelineEventKind::WaitingBegin {
-            call_id,
-            sender_path,
-        },
-        AgentEvent::CollabWaitingEnd {
-            call_id,
-            sender_path,
+            message,
             timed_out,
-            ..
-        } => StudioAgentTimelineEventKind::WaitingEnd {
-            call_id,
-            sender_path,
-            timed_out,
-        },
-        AgentEvent::CollabCloseBegin {
-            call_id,
-            sender_path,
-            receiver_path,
-            ..
-        } => StudioAgentTimelineEventKind::CloseBegin {
-            call_id,
-            sender_path,
-            receiver_path,
-        },
-        AgentEvent::CollabCloseEnd {
-            call_id,
-            sender_path,
-            receiver_path,
-            status,
-            error,
-            ..
-        } => StudioAgentTimelineEventKind::CloseEnd {
-            call_id,
-            sender_path,
-            receiver_path,
-            status,
             error,
         },
         AgentEvent::TracePartStarted { .. }

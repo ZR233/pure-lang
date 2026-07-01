@@ -21,8 +21,9 @@ mod turn;
 mod workspace;
 
 pub use agent::{
-    AgentControl, AgentHandle, AgentMailboxMessage, AgentPath, AgentRecord, AgentSpawnInput,
-    AgentStatus, AgentStatusUpdate, AgentWaitOutcome, MessageDeliveryMode,
+    AgentHandle, AgentMessage, AgentMessageMode, AgentMessageRequest, AgentPath, AgentRecord,
+    AgentRunSpec, AgentSpawnInput, AgentStatus, AgentStatusUpdate, AgentSupervisor,
+    AgentWaitOutcome,
 };
 pub use config::{
     BuiltinMcpServerState, ConfigPaths, ConfigStore, DEFAULT_PROJECT_DOC_MAX_BYTES,

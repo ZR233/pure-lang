@@ -48,7 +48,7 @@ fn test_context_with_sender(event_tx: pl_trace::AgentEventSender) -> ToolContext
         workspace_instructions: None,
         instruction_snapshot: None,
         active_subagent: None,
-        agent_control: crate::AgentControl::default(),
+        agent_supervisor: crate::AgentSupervisor::default(),
         lsp_runtime: None,
         parent_session: std::sync::Arc::new(crate::CoreSession::new()),
     }

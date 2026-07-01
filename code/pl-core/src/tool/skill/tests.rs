@@ -29,7 +29,7 @@ fn tool_context(workspace_root: PathBuf) -> ToolContext {
         workspace_instructions: None,
         instruction_snapshot: None,
         active_subagent: None,
-        agent_control: crate::AgentControl::default(),
+        agent_supervisor: crate::AgentSupervisor::default(),
         lsp_runtime: None,
         parent_session: Arc::new(CoreSession::new()),
     }

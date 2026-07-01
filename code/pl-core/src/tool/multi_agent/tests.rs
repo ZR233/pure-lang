@@ -7,12 +7,8 @@ use super::agent_tool_records;
 use super::child_agent_options;
 use super::fork_session;
 use super::json_output;
-use super::tools::message::followup_prompt;
-use super::types::{AgentToolRecord, ListAgentsResult, WaitAgentResult};
-use crate::agent::{AgentMailboxMessage, AgentRecord};
-use crate::tool::recoverable::{
-    recoverable_subagent_failures, recoverable_subagent_failures_message,
-};
+use super::types::{ListAgentsResult, WaitAgentResult};
+use crate::agent::AgentRecord;
 use crate::tool::{Tool, ToolRuntimeLockPolicy};
 
 fn agent_record(id: &str, status: AgentStatus, error: Option<&str>) -> AgentRecord {
@@ -34,21 +30,10 @@ fn agent_record(id: &str, status: AgentStatus, error: Option<&str>) -> AgentReco
 }
 
 #[test]
-fn wait_agent_result_serializes_recoverable_failures() {
-    let agents = vec![
-        agent_record(
-            "agent-1",
-            AgentStatus::Errored,
-            Some("API error 429 Too Many Requests"),
-        ),
-        agent_record("agent-2", AgentStatus::Completed, None),
-    ];
-    let recoverable_failures = recoverable_subagent_failures(&agents);
+fn wait_agent_result_serializes_activity_message() {
     let output = json_output(WaitAgentResult {
-        message: recoverable_subagent_failures_message(recoverable_failures.len()),
+        message: "wait_agent observed agent activity.".to_string(),
         timed_out: false,
-        agents: agent_tool_records(&agents, false),
-        recoverable_failures,
     })
     .unwrap();
     let result = serde_json::from_str::<WaitAgentResult>(&output.description).unwrap();
@@ -56,17 +41,14 @@ fn wait_agent_result_serializes_recoverable_failures() {
     assert_eq!(
         result,
         WaitAgentResult {
-            message: "recoverableSubagentProvider429: 1 subagent(s) are unavailable because the provider returned 429 concurrency/rate-limit capacity. Stop creating or retrying subagents and continue the remaining work in the current agent.".to_string(),
+            message: "wait_agent observed agent activity.".to_string(),
             timed_out: false,
-            agents: agent_tool_records(&agents, false),
-            recoverable_failures: recoverable_subagent_failures(&agents),
         }
     );
-    assert!(matches!(result.agents[0], AgentToolRecord::Compact(_)));
 }
 
 #[test]
-fn list_agents_result_round_trips_compact_agents_and_recoverable_failures() {
+fn list_agents_result_round_trips_compact_agents() {
     let agents = vec![
         agent_record(
             "agent-1",
@@ -75,10 +57,8 @@ fn list_agents_result_round_trips_compact_agents_and_recoverable_failures() {
         ),
         agent_record("agent-2", AgentStatus::Completed, None),
     ];
-    let recoverable_failures = recoverable_subagent_failures(&agents);
     let output = json_output(ListAgentsResult {
-        agents: agent_tool_records(&agents, false),
-        recoverable_failures,
+        agents: agent_tool_records(&agents),
     })
     .unwrap();
     let result = serde_json::from_str::<ListAgentsResult>(&output.description).unwrap();
@@ -86,19 +66,11 @@ fn list_agents_result_round_trips_compact_agents_and_recoverable_failures() {
     assert_eq!(
         result,
         ListAgentsResult {
-            agents: agent_tool_records(&agents, false),
-            recoverable_failures: recoverable_subagent_failures(&agents),
+            agents: agent_tool_records(&agents),
         }
     );
-    assert!(matches!(result.agents[0], AgentToolRecord::Compact(_)));
-
-    let detailed_output = json_output(ListAgentsResult {
-        agents: agent_tool_records(&agents, true),
-        recoverable_failures: Vec::new(),
-    })
-    .unwrap();
-    let detailed = serde_json::from_str::<ListAgentsResult>(&detailed_output.description).unwrap();
-    assert!(matches!(detailed.agents[0], AgentToolRecord::Detailed(_)));
+    assert_eq!(result.agents[0].path, "/root/agent-1");
+    assert_eq!(result.agents[0].status, AgentStatus::Interrupted);
 }
 
 #[test]
@@ -214,27 +186,6 @@ fn child_agent_options_inherit_interaction_callback() {
     let child = child_agent_options(&parent);
 
     assert!(child.interaction_callback.is_some());
-}
-
-#[test]
-fn followup_prompt_includes_queued_messages_in_order() {
-    let prompt = followup_prompt(vec![
-        AgentMailboxMessage {
-            sender_path: "/root".to_string(),
-            message: "context".to_string(),
-            trigger_turn: false,
-        },
-        AgentMailboxMessage {
-            sender_path: "/root".to_string(),
-            message: "resume".to_string(),
-            trigger_turn: true,
-        },
-    ]);
-
-    assert_eq!(
-        prompt,
-        "Queued message from /root:\ncontext\n\nFollow-up task:\nresume"
-    );
 }
 
 #[test]

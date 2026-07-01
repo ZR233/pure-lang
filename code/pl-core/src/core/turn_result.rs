@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use pl_model::ModelCapabilities;
-use pl_protocol::{BudgetLimitKind, BudgetUsage, ErrorSeverity};
+use pl_protocol::{BudgetLimitKind, BudgetUsage, ErrorSeverity, PureError};
 use pl_trace::{AgentEvent, TracePartStatus};
 
 use crate::trace::TraceRecorder;
@@ -18,6 +18,20 @@ pub(super) fn provider_error_severity(
     } else {
         ErrorSeverity::Recoverable
     }
+}
+
+pub(super) fn normalize_provider_error(
+    active_subagent: Option<&crate::tool::SubagentContext>,
+    error: String,
+) -> (String, ErrorSeverity) {
+    if active_subagent.is_some() && crate::provider_error::is_provider_429_error(&error) {
+        return (
+            PureError::ProviderCapacity { message: error }.to_string(),
+            ErrorSeverity::Recoverable,
+        );
+    }
+    let severity = provider_error_severity(active_subagent, &error);
+    (error, severity)
 }
 
 pub(super) fn should_request_parallel_tool_calls(

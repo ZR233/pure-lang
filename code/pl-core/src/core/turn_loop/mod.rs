@@ -29,13 +29,12 @@ use super::SUBAGENT_DISPATCH_CONSTRAINT;
 use super::SUBAGENT_FORCE_DISPATCH_INSTRUCTION;
 use super::permission::cancellation_reason;
 use super::progress::{ProgressEmitter, ProgressVerbosity};
-use super::tool_dispatch::records::tool_results_include_recoverable_subagent_capacity;
 use super::tool_dispatch::{ToolExecutionContext, ToolExecutionError, execute_tool_calls};
 use super::turn_result::{
     budget_limited_turn_result, default_workspace_root, failed_turn_result,
     failed_turn_result_with_abort_reason, interrupted_turn_result, is_cancelled,
-    looks_like_unexecuted_tool_call_text, prompt_requires_subagent_dispatch,
-    provider_error_severity, should_request_parallel_tool_calls, tool_allowed_in_mode,
+    looks_like_unexecuted_tool_call_text, normalize_provider_error,
+    prompt_requires_subagent_dispatch, should_request_parallel_tool_calls, tool_allowed_in_mode,
     unix_seconds,
 };
 
@@ -54,8 +53,8 @@ pub(super) async fn run_turn_with_trace(
         .unwrap_or_else(default_workspace_root);
     let workspace_instructions = core.workspace_instructions.clone();
     let active_subagent = core.active_subagent.clone();
-    let agent_control = core.agent_control.clone();
-    agent_control
+    let agent_supervisor = core.agent_supervisor.clone();
+    agent_supervisor
         .configure_limits(AGENT_MAX_COUNT, AGENT_MAX_DEPTH)
         .await;
     let cancellation_token = options.cancellation_token.clone();
@@ -75,11 +74,10 @@ pub(super) async fn run_turn_with_trace(
     let requires_subagent_dispatch =
         active_subagent.is_none() && prompt_requires_subagent_dispatch(&request.prompt);
     let initial_agent_count = if requires_subagent_dispatch {
-        Some(agent_control.list_agents(None).await.len())
+        Some(agent_supervisor.list_agents(None).await.len())
     } else {
         None
     };
-    let mut subagent_dispatch_recovered = false;
     recorder.user_text_item_with_attachments(
         &turn_id,
         request.prompt.clone(),
@@ -138,9 +136,7 @@ pub(super) async fn run_turn_with_trace(
     let mut iteration = 0_u32;
     loop {
         let must_dispatch_agent_now = if let Some(initial_count) = initial_agent_count {
-            iteration >= 2
-                && !subagent_dispatch_recovered
-                && agent_control.list_agents(None).await.len() <= initial_count
+            iteration >= 2 && agent_supervisor.list_agents(None).await.len() <= initial_count
         } else {
             false
         };
@@ -224,8 +220,8 @@ pub(super) async fn run_turn_with_trace(
                     });
                 }
                 Err(error) => {
-                    let error = error.to_string();
-                    let severity = provider_error_severity(active_subagent.as_ref(), &error);
+                    let (error, severity) =
+                        normalize_provider_error(active_subagent.as_ref(), error.to_string());
                     return Ok(failed_turn_result(
                         recorder,
                         &turn_id,
@@ -327,8 +323,8 @@ pub(super) async fn run_turn_with_trace(
                 ));
             }
             Err(error) => {
-                let error = error.to_string();
-                let severity = provider_error_severity(active_subagent.as_ref(), &error);
+                let (error, severity) =
+                    normalize_provider_error(active_subagent.as_ref(), error.to_string());
                 return Ok(failed_turn_result(
                     recorder,
                     &turn_id,
@@ -404,8 +400,8 @@ pub(super) async fn run_turn_with_trace(
                 ));
             }
             if let Some(initial_count) = initial_agent_count {
-                let current_count = agent_control.list_agents(None).await.len();
-                if current_count <= initial_count && !subagent_dispatch_recovered {
+                let current_count = agent_supervisor.list_agents(None).await.len();
+                if current_count <= initial_count {
                     return Ok(failed_turn_result(
                         recorder,
                         &turn_id,
@@ -460,7 +456,7 @@ pub(super) async fn run_turn_with_trace(
                 workspace_root: &workspace_root,
                 workspace_instructions: workspace_instructions.clone(),
                 active_subagent: active_subagent.clone(),
-                agent_control: agent_control.clone(),
+                agent_supervisor: agent_supervisor.clone(),
                 instruction_snapshot: Some(instruction_snapshot.clone()),
                 parent_session: Arc::new(CoreSession::from_messages(history_messages)),
             },
@@ -486,9 +482,6 @@ pub(super) async fn run_turn_with_trace(
                 ));
             }
         };
-        if tool_results_include_recoverable_subagent_capacity(&tool_results) {
-            subagent_dispatch_recovered = true;
-        }
         progress.tool_detail("工具执行完成，准备回写结果。");
         if request.mode == CompileMode::Plan {
             record_plan_exit_items(recorder, &turn_id, &tool_results);

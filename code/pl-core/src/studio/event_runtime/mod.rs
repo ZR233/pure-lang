@@ -275,14 +275,7 @@ impl StudioEventRuntime {
                     updated_at,
                 },
             },
-            AgentEvent::CollabAgentSpawnBegin { .. }
-            | AgentEvent::CollabAgentSpawnEnd { .. }
-            | AgentEvent::CollabAgentInteractionBegin { .. }
-            | AgentEvent::CollabAgentInteractionEnd { .. }
-            | AgentEvent::CollabWaitingBegin { .. }
-            | AgentEvent::CollabWaitingEnd { .. }
-            | AgentEvent::CollabCloseBegin { .. }
-            | AgentEvent::CollabCloseEnd { .. } => StudioEventKind::AgentTimelineChanged {
+            AgentEvent::SubAgentActivity { .. } => StudioEventKind::AgentTimelineChanged {
                 event: studio_agent_timeline_event(session_id, event),
             },
             AgentEvent::TurnInterrupted { reason } => StudioEventKind::TurnChanged {

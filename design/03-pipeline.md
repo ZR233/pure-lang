@@ -51,17 +51,17 @@ Flutter bridge crate 不承载流程逻辑，只把 Dart 调用转发到 `pl-cor
 - Studio 中的 Plan Mode 会保留 `bash` 探索能力；`request-approval` 与 `auto-review` 下 bash 必须走手动审批，`full-access` 下直接放行。明确写入类工具不会暴露给模型，也不能执行模型幻觉出的写入工具调用
 - 用户显式要求 `subagent`/子代理分工时，核心提示必须将异步 agent 调度作为强约束；普通 shell 或文件探索不能替代子代理调度
 - 显式子代理分工允许最多两轮只读定位；若仍未创建 agent，后续推理只暴露 `spawn_agent` 并保持 `auto` tool choice，避免触发不支持 required tool choice 的 provider 限制
-- 多 agent 协作只通过 `spawn_agent`、`wait_agent`、`list_agents`、`send_message`、`followup_task`、`close_agent` 组成，不提供同步等待到最终摘要的 `subagent` 入口
+- 多 agent 协作只通过 `spawn_agent`、`wait_agent`、`list_agents`、`send_message`、`followup_task`、`close_agent` 组成，不提供同步等待到最终摘要的 `subagent` 入口；这些工具只提交协作操作，实际 agent 生命周期由 `AgentSupervisor` 统一管理
 - `request_user_input` 是 Codex 风格的阻塞交互工具，root agent 与 subagent 都可用；工具通过统一 `Interaction` 域创建 `userInput` 请求，等待前端 resolution 后把答案作为工具结果返回，不作为普通用户聊天消息写入历史
 - `planner` 是所有 Studio 根聊天 turn 的唯一模型角色，包括 Auto、Plan 和 Plan 实施；`executor` 只用于 planner 通过子代理工具创建或继续的 child agent turn
 - agent 运行时状态对齐 Codex：`queued | running | waiting | completed | errored | interrupted | shutdown | notFound`
 - `budgetLimited` 不是 agent 状态，而是 turn abort reason；子 agent 预算耗尽时状态为 `interrupted`，并携带 `reason`、`budgetLimitKind` 和 `budgetUsage`
 - `interrupted` 是可恢复的非终局状态；`completed | errored | shutdown | notFound` 是终局状态
-- `send_message` / `followup_task` 不能重新激活终局 agent；`followup_task` 不抢占已经 `running` 或已 `queued` 的 agent，调用方应等待该 agent 进入可接收新 turn 的状态；`interrupted` agent 可以通过 followup 恢复为 `queued`
-- `send_message` 只把消息放入目标 agent mailbox，不启动 turn，也不把 `running` / `queued` agent 降级为 `waiting`；queued message 会在下一次 `followup_task` 触发的新 turn 中按入队顺序并入 prompt
-- `wait_agent` 必须用 agent 活动版本判断自上次观察后的新变化，不能只依赖下一次 notify；如果第一次调用前已有 agent 处于终态，应立即返回当前摘要而不是超时，但历史终态不能让后续等待绕过仍在运行的 agent
+- `send_message` / `followup_task` 不能重新激活终局 agent；`followup_task` 不抢占已经 `running` 或已 `queued` 的 agent，调用方应等待该 agent 进入可接收新 turn 的状态；`interrupted` agent 是可恢复状态，可以通过 followup 进入新 turn
+- `send_message` 只把消息放入目标 agent 队列，不启动 turn，也不把 `running` / `queued` agent 降级为 `waiting`；queued message 会在下一次 `followup_task` 触发的新 turn 中按入队顺序并入 prompt
+- `wait_agent` 等待 supervisor 活动流，只返回 `{ message, timedOut }`；状态明细通过 `list_agents` 和实时 `agentChanged`/`agentTimelineChanged` 获取，不能把完整 agent snapshot 塞回 wait 工具结果
 - 父 agent 因中断、错误、预算限制或关闭而停止时，必须级联关闭仍在运行的子树，避免后台子 agent 残留为 `running`
-- `AgentControl` 是 agent latest snapshot 的唯一状态机入口；内部状态迁移必须集中处理 `status`、`updatedAt`、错误原因与预算详情。进入 `queued`、`running` 或 `completed` 时清理旧的 `error/reason/budgetLimitKind/budgetUsage`，避免从 `interrupted` 恢复后残留旧预算限制；进入 `errored/interrupted/shutdown` 时按当前 turn 或关闭原因写入详情。状态机必须拒绝从终局状态重新激活 agent，`send_message` 对 `queued/running` 保持原状态，`followup_task` 只把可恢复非运行状态推进到 `queued`。
+- `AgentSupervisor` 是 agent latest snapshot、运行 handle、取消 token、父子路径和执行容量的唯一状态机入口；内部状态迁移必须集中处理 `status`、`updatedAt`、错误原因与预算详情。进入 `queued`、`running` 或 `completed` 时清理旧的 `error/reason/budgetLimitKind/budgetUsage`，避免从 `interrupted` 恢复后残留旧预算限制；进入 `errored/interrupted/shutdown` 时按当前 turn 或关闭原因写入详情。状态机必须拒绝从终局状态重新激活 agent，`send_message` 对 `queued/running` 保持原状态，`followup_task` 只把可恢复非运行状态推进到 `queued`。
 
 ## 3.3 核心 turn 编排
 
@@ -97,7 +97,7 @@ assistant 的 text、commentary、reasoning 和 plan part identity 不得直接�
 
 `run_turn_with_trace` 在每次模型请求前执行自动上下文压缩检查。压缩阈值来自当前模型的 `autoCompactTokenLimit`，未配置时使用有效上下文窗口的 90%；模型没有上下文窗口信息时不触发自动压缩。压缩估算包含 base/system、developer、user context 和真实消息历史。压缩由 `pl-core` 本地摘要完成：用当前模型和固定 compact prompt 生成 handoff summary，再用一条带 metadata 的用户摘要消息加最近真实用户消息替换原始历史。工具调用、工具结果和 assistant 中间过程不以原始片段保留，避免压缩后出现破碎的 tool-call 配对。
 
-子代理没有独立的压缩实现。`spawn_agent` 和 `followup_task` 创建的 child session 复用同一个 `PureCore` turn pipeline，因此每个子代理独立维护自己的压缩历史；父会话不会替子代理压缩，也不会因为子代理压缩而改写父历史。
+子代理没有独立的压缩实现。`AgentSupervisor` 为每个 agent 保存独立 `CoreSession`，`spawn_agent` 和 `followup_task` 提交的 child turn 复用同一个 `PureCore` turn pipeline，因此每个子代理独立维护自己的压缩历史；父会话不会替子代理压缩，也不会因为子代理压缩而改写父历史。
 
 子代理继承父 turn 的 `compileMode` 和稳定 instruction context，但不继承 root 的模型角色。child agent 的模型角色由 `agentType` 决定，默认 executor；只有子代理路径可以使用 executor 角色。child turn 同样按当前 mode 注入 Auto/Plan overlay，并复用同一套工具边界和 proposed-plan 输出约定。
 
@@ -126,7 +126,7 @@ Agent 协作 timeline 与状态分层：
 - agent timeline 是 append-only 协作事件流，只记录 spawn、wait、message、followup、close、final status 等事实事件
 - agent tree 是 latest snapshot，只按 `agent_id/path` 覆盖最新状态，供状态栏、树视图和 `list_agents` 使用
 - 前端不得用 latest snapshot 渲染 timeline；同一个 agent 的多次状态变化必须在 timeline 中保留为多条独立事件
-- `AgentStateChanged` 只用于更新 latest snapshot；UI timeline 消费 `agentEvents` 中的 append-only event。实时 `agentTimelineChanged` 与历史 `agentEvents` 都必须携带 canonical `StudioAgentTimelineEvent` 语义，Flutter 只解析规范化 payload，不得读取 raw `AgentEvent`。
+- `AgentStateChanged` 只用于更新 latest snapshot；UI timeline 消费 `agentEvents` 中的 append-only `SubAgentActivity` event。实时 `agentTimelineChanged` 与历史 `agentEvents` 都必须携带 canonical `StudioAgentTimelineEvent` 语义，Flutter 只解析规范化 payload，不得读取 raw `AgentEvent`。旧 spawn/interaction/wait/close begin/end payload 不再作为运行期协议保留。
 
 持久化原则：
 

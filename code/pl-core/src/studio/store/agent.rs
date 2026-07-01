@@ -213,66 +213,17 @@ pub(super) fn agent_timeline_event_record_from_event(
     event: &StudioAgentTimelineEvent,
 ) -> Option<AgentTimelineEventRecord> {
     let (kind, agent_id, path, parent_path) = match &event.kind {
-        StudioAgentTimelineEventKind::SpawnBegin { sender_path, .. } => (
-            "spawnBegin".to_string(),
-            None,
-            Some(sender_path.clone()),
-            None,
-        ),
-        StudioAgentTimelineEventKind::SpawnEnd { agent_id, path, .. } => {
-            ("spawnEnd".to_string(), agent_id.clone(), path.clone(), None)
-        }
-        StudioAgentTimelineEventKind::InteractionBegin {
-            receiver_path,
-            sender_path,
+        StudioAgentTimelineEventKind::SubAgentActivity {
+            agent_id,
+            path,
+            parent_path,
+            kind,
             ..
         } => (
-            "interactionBegin".to_string(),
-            None,
-            Some(receiver_path.clone()),
-            Some(sender_path.clone()),
-        ),
-        StudioAgentTimelineEventKind::InteractionEnd {
-            receiver_path,
-            sender_path,
-            ..
-        } => (
-            "interactionEnd".to_string(),
-            None,
-            Some(receiver_path.clone()),
-            Some(sender_path.clone()),
-        ),
-        StudioAgentTimelineEventKind::WaitingBegin { sender_path, .. } => (
-            "waitingBegin".to_string(),
-            None,
-            Some(sender_path.clone()),
-            None,
-        ),
-        StudioAgentTimelineEventKind::WaitingEnd { sender_path, .. } => (
-            "waitingEnd".to_string(),
-            None,
-            Some(sender_path.clone()),
-            None,
-        ),
-        StudioAgentTimelineEventKind::CloseBegin {
-            receiver_path,
-            sender_path,
-            ..
-        } => (
-            "closeBegin".to_string(),
-            None,
-            Some(receiver_path.clone()),
-            Some(sender_path.clone()),
-        ),
-        StudioAgentTimelineEventKind::CloseEnd {
-            receiver_path,
-            sender_path,
-            ..
-        } => (
-            "closeEnd".to_string(),
-            None,
-            Some(receiver_path.clone()),
-            Some(sender_path.clone()),
+            kind.as_str().to_string(),
+            agent_id.clone(),
+            path.clone(),
+            parent_path.clone(),
         ),
     };
     Some(AgentTimelineEventRecord {

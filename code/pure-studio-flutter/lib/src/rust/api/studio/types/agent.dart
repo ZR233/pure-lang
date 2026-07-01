@@ -113,58 +113,15 @@ sealed class BridgeAgentTimelinePayloadDto
     with _$BridgeAgentTimelinePayloadDto {
   const BridgeAgentTimelinePayloadDto._();
 
-  const factory BridgeAgentTimelinePayloadDto.spawnBegin({
+  const factory BridgeAgentTimelinePayloadDto.subAgentActivity({
     required String callId,
-    required String senderPath,
-    required String taskName,
-    required String prompt,
-    required String role,
-    String? model,
-    String? reasoningEffort,
-  }) = BridgeAgentTimelinePayloadDto_SpawnBegin;
-  const factory BridgeAgentTimelinePayloadDto.spawnEnd({
-    required String callId,
-    required String senderPath,
     String? agentId,
     String? path,
-    String? role,
-    required String status,
-    required String prompt,
-    String? error,
-  }) = BridgeAgentTimelinePayloadDto_SpawnEnd;
-  const factory BridgeAgentTimelinePayloadDto.interactionBegin({
-    required String callId,
-    required String senderPath,
-    required String receiverPath,
-    required String prompt,
-  }) = BridgeAgentTimelinePayloadDto_InteractionBegin;
-  const factory BridgeAgentTimelinePayloadDto.interactionEnd({
-    required String callId,
-    required String senderPath,
-    required String receiverPath,
-    required String status,
-    required String prompt,
-    String? error,
-  }) = BridgeAgentTimelinePayloadDto_InteractionEnd;
-  const factory BridgeAgentTimelinePayloadDto.waitingBegin({
-    required String callId,
-    required String senderPath,
-  }) = BridgeAgentTimelinePayloadDto_WaitingBegin;
-  const factory BridgeAgentTimelinePayloadDto.waitingEnd({
-    required String callId,
-    required String senderPath,
+    String? parentPath,
+    required String kind,
+    String? status,
+    String? message,
     required bool timedOut,
-  }) = BridgeAgentTimelinePayloadDto_WaitingEnd;
-  const factory BridgeAgentTimelinePayloadDto.closeBegin({
-    required String callId,
-    required String senderPath,
-    required String receiverPath,
-  }) = BridgeAgentTimelinePayloadDto_CloseBegin;
-  const factory BridgeAgentTimelinePayloadDto.closeEnd({
-    required String callId,
-    required String senderPath,
-    required String receiverPath,
-    required String status,
     String? error,
-  }) = BridgeAgentTimelinePayloadDto_CloseEnd;
+  }) = BridgeAgentTimelinePayloadDto_SubAgentActivity;
 }

@@ -224,14 +224,7 @@ impl StudioRuntime {
             | AgentEvent::InteractionChanged { .. }
             | AgentEvent::AgentRuntimeUpdated { .. }
             | AgentEvent::SkillActivated { .. }
-            | AgentEvent::CollabAgentSpawnBegin { .. }
-            | AgentEvent::CollabAgentSpawnEnd { .. }
-            | AgentEvent::CollabAgentInteractionBegin { .. }
-            | AgentEvent::CollabAgentInteractionEnd { .. }
-            | AgentEvent::CollabWaitingBegin { .. }
-            | AgentEvent::CollabWaitingEnd { .. }
-            | AgentEvent::CollabCloseBegin { .. }
-            | AgentEvent::CollabCloseEnd { .. }
+            | AgentEvent::SubAgentActivity { .. }
             | AgentEvent::TurnInterrupted { .. }
             | AgentEvent::TurnBudgetLimited { .. }
             | AgentEvent::Done

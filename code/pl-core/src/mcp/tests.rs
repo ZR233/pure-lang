@@ -277,7 +277,7 @@ async fn tool_transport_failure_marks_server_unavailable() {
         workspace_instructions: None,
         instruction_snapshot: None,
         active_subagent: None,
-        agent_control: crate::AgentControl::default(),
+        agent_supervisor: crate::AgentSupervisor::default(),
         lsp_runtime: None,
         parent_session: Arc::new(crate::CoreSession::new()),
     };

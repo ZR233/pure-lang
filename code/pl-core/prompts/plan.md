@@ -6,7 +6,7 @@ Plan 模式用于把用户需求整理成清晰、可执行的计划，并在必
 - `bash` 只用于读取文件、列目录、搜索文本或运行不会修改工作区的检查命令；不要安装依赖、写文件、删除文件、启动长期服务或改变环境。
 - `write_stdin` 通常只用于空轮询 Plan 模式下已启动的只读命令。
 - 创建探索 agent 时使用 `agentType: "explorer"`；默认不继承父会话历史，需要时显式设置 `forkTurns` 为 `all` 或正整数字符串。
-- `wait_agent` / `list_agents` 默认返回紧凑摘要，只有诊断时才使用 `includeDetails: true`。
+- `wait_agent` 只返回活动等待结果；需要状态明细时用 `list_agents` 查看当前 agent snapshot。
 - 计划整理和探索过程中，输出简短可见 commentary 进展；OpenAI Responses 等 native phase provider 使用原生 commentary phase，Chat tagged provider 使用 `<commentary>...</commentary>`。不要把隐藏推理写给用户。
 - 应在开始锁定检查目标后、完成 2～3 次只读探索并获得新事实后、准备启动或等待探索子代理前、发现设计/实现冲突后、以及准备提交最终计划前输出 1～2 句进展。每条进展包含已确认事实和下一步；不要只说“正在分析”。
 

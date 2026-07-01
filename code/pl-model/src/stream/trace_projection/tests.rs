@@ -253,14 +253,7 @@ fn started_sequence(event: AgentEvent) -> Option<u64> {
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::AgentStateChanged { .. }
-        | AgentEvent::CollabAgentSpawnBegin { .. }
-        | AgentEvent::CollabAgentSpawnEnd { .. }
-        | AgentEvent::CollabAgentInteractionBegin { .. }
-        | AgentEvent::CollabAgentInteractionEnd { .. }
-        | AgentEvent::CollabWaitingBegin { .. }
-        | AgentEvent::CollabWaitingEnd { .. }
-        | AgentEvent::CollabCloseBegin { .. }
-        | AgentEvent::CollabCloseEnd { .. }
+        | AgentEvent::SubAgentActivity { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::SkillActivated { .. }
@@ -280,14 +273,7 @@ fn delta_item_id(event: AgentEvent) -> Option<String> {
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::AgentStateChanged { .. }
-        | AgentEvent::CollabAgentSpawnBegin { .. }
-        | AgentEvent::CollabAgentSpawnEnd { .. }
-        | AgentEvent::CollabAgentInteractionBegin { .. }
-        | AgentEvent::CollabAgentInteractionEnd { .. }
-        | AgentEvent::CollabWaitingBegin { .. }
-        | AgentEvent::CollabWaitingEnd { .. }
-        | AgentEvent::CollabCloseBegin { .. }
-        | AgentEvent::CollabCloseEnd { .. }
+        | AgentEvent::SubAgentActivity { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::SkillActivated { .. }
@@ -308,14 +294,7 @@ fn tool_delta_item_id(event: AgentEvent) -> Option<String> {
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::AgentStateChanged { .. }
-        | AgentEvent::CollabAgentSpawnBegin { .. }
-        | AgentEvent::CollabAgentSpawnEnd { .. }
-        | AgentEvent::CollabAgentInteractionBegin { .. }
-        | AgentEvent::CollabAgentInteractionEnd { .. }
-        | AgentEvent::CollabWaitingBegin { .. }
-        | AgentEvent::CollabWaitingEnd { .. }
-        | AgentEvent::CollabCloseBegin { .. }
-        | AgentEvent::CollabCloseEnd { .. }
+        | AgentEvent::SubAgentActivity { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::SkillActivated { .. }
@@ -336,14 +315,7 @@ fn completed_item_id(event: AgentEvent) -> Option<String> {
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::AgentStateChanged { .. }
-        | AgentEvent::CollabAgentSpawnBegin { .. }
-        | AgentEvent::CollabAgentSpawnEnd { .. }
-        | AgentEvent::CollabAgentInteractionBegin { .. }
-        | AgentEvent::CollabAgentInteractionEnd { .. }
-        | AgentEvent::CollabWaitingBegin { .. }
-        | AgentEvent::CollabWaitingEnd { .. }
-        | AgentEvent::CollabCloseBegin { .. }
-        | AgentEvent::CollabCloseEnd { .. }
+        | AgentEvent::SubAgentActivity { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::SkillActivated { .. }
@@ -367,14 +339,7 @@ fn completed_text_item(event: AgentEvent) -> Option<TracePart> {
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::AgentStateChanged { .. }
-        | AgentEvent::CollabAgentSpawnBegin { .. }
-        | AgentEvent::CollabAgentSpawnEnd { .. }
-        | AgentEvent::CollabAgentInteractionBegin { .. }
-        | AgentEvent::CollabAgentInteractionEnd { .. }
-        | AgentEvent::CollabWaitingBegin { .. }
-        | AgentEvent::CollabWaitingEnd { .. }
-        | AgentEvent::CollabCloseBegin { .. }
-        | AgentEvent::CollabCloseEnd { .. }
+        | AgentEvent::SubAgentActivity { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::SkillActivated { .. }
@@ -395,14 +360,7 @@ fn completed_thinking_item(event: AgentEvent) -> Option<TracePart> {
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::AgentStateChanged { .. }
-        | AgentEvent::CollabAgentSpawnBegin { .. }
-        | AgentEvent::CollabAgentSpawnEnd { .. }
-        | AgentEvent::CollabAgentInteractionBegin { .. }
-        | AgentEvent::CollabAgentInteractionEnd { .. }
-        | AgentEvent::CollabWaitingBegin { .. }
-        | AgentEvent::CollabWaitingEnd { .. }
-        | AgentEvent::CollabCloseBegin { .. }
-        | AgentEvent::CollabCloseEnd { .. }
+        | AgentEvent::SubAgentActivity { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::SkillActivated { .. }
@@ -429,14 +387,7 @@ fn started_tool_item(event: AgentEvent) -> Option<TracePart> {
         | AgentEvent::InteractionChanged { .. }
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::AgentStateChanged { .. }
-        | AgentEvent::CollabAgentSpawnBegin { .. }
-        | AgentEvent::CollabAgentSpawnEnd { .. }
-        | AgentEvent::CollabAgentInteractionBegin { .. }
-        | AgentEvent::CollabAgentInteractionEnd { .. }
-        | AgentEvent::CollabWaitingBegin { .. }
-        | AgentEvent::CollabWaitingEnd { .. }
-        | AgentEvent::CollabCloseBegin { .. }
-        | AgentEvent::CollabCloseEnd { .. }
+        | AgentEvent::SubAgentActivity { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::SkillActivated { .. }

@@ -1,13 +1,8 @@
-use std::path::PathBuf;
-
 use pl_model::SharedModelProvider;
 use pl_protocol::AgentStatus;
 use serde::{Deserialize, Serialize};
 
-use crate::agent::AgentRecord;
 use crate::config::{PureConfig, ReasoningEffort};
-use crate::tool::recoverable::RecoverableSubagentFailure;
-use crate::turn::{CompileMode, TurnBudget};
 
 pub(super) const DEFAULT_WAIT_TIMEOUT_MS: i64 = 30_000;
 
@@ -69,8 +64,10 @@ pub(super) struct SpawnAgentArgs {
     pub task_name: String,
     pub message: String,
     pub agent_type: Option<String>,
-    pub model: Option<String>,
-    pub reasoning_effort: Option<String>,
+    #[serde(rename = "model")]
+    pub _model: Option<String>,
+    #[serde(rename = "reasoningEffort")]
+    pub _reasoning_effort: Option<String>,
     pub fork_turns: Option<String>,
 }
 
@@ -78,16 +75,12 @@ pub(super) struct SpawnAgentArgs {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct WaitAgentArgs {
     pub timeout_ms: Option<i64>,
-    #[serde(default)]
-    pub include_details: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct ListAgentsArgs {
     pub path_prefix: Option<String>,
-    #[serde(default)]
-    pub include_details: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -117,15 +110,12 @@ pub(super) struct SpawnAgentResult {
 pub(super) struct WaitAgentResult {
     pub message: String,
     pub timed_out: bool,
-    pub agents: Vec<AgentToolRecord>,
-    pub recoverable_failures: Vec<RecoverableSubagentFailure>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct ListAgentsResult {
     pub agents: Vec<AgentToolRecord>,
-    pub recoverable_failures: Vec<RecoverableSubagentFailure>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,36 +129,11 @@ pub(super) struct CompactAgentRecord {
     pub error: Option<String>,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub(super) enum AgentToolRecord {
-    Compact(CompactAgentRecord),
-    Detailed(AgentRecord),
-}
+pub(super) type AgentToolRecord = CompactAgentRecord;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct MessageResult {
     pub target: String,
     pub status: AgentStatus,
-}
-
-pub(crate) struct AgentRunConfig {
-    pub provider: SharedModelProvider,
-    pub reasoning_effort: Option<ReasoningEffort>,
-    pub config: Option<PureConfig>,
-    pub mcp_runtime: Option<crate::mcp::McpRuntimeRegistry>,
-    pub lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
-    pub workspace_instructions: Option<String>,
-    pub instruction_snapshot: Option<crate::instruction::InstructionSnapshot>,
-    pub workspace_root: PathBuf,
-    pub options: crate::TurnOptions,
-    pub agent_control: crate::AgentControl,
-    pub event_tx: pl_trace::AgentEventSender,
-    pub agent_id: String,
-    pub agent_path: String,
-    pub role: String,
-    pub message: String,
-    pub mode: CompileMode,
-    pub budget: TurnBudget,
 }
