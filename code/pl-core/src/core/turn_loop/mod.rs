@@ -1,8 +1,16 @@
 use pl_model::{CompletionRequest, ModelProvider, ReasoningConfig, ReasoningSummary};
 use pl_protocol::TokenUsageSnapshot;
-use pl_protocol::{ContentPart, ErrorSeverity, ImageSource, Message, MessageContent, Result};
-use pl_trace::{AgentEvent, EnabledToolsEvent, TraceEventKind, TracePartStatus};
+use pl_protocol::{ErrorSeverity, Result};
+use pl_trace::{AgentEvent, TracePartStatus};
 use std::sync::Arc;
+
+mod attachments;
+mod enabled_tools;
+mod plan_exit;
+
+use attachments::materialize_messages;
+pub(super) use enabled_tools::record_enabled_tools;
+use plan_exit::record_plan_exit_items;
 
 use crate::context_compaction::{
     CompactionOutcome, ContextCompactionRequest, maybe_compact_session,
@@ -579,108 +587,4 @@ pub(super) async fn run_turn_with_trace(
         budget_usage: None,
         trace_events: recorder.drain(),
     })
-}
-
-pub(super) fn record_enabled_tools(
-    recorder: &mut TraceRecorder,
-    turn_id: &str,
-    mode: CompileMode,
-    tool_schemas: &[pl_model::ToolSchema],
-) {
-    let tools = tool_schemas
-        .iter()
-        .map(pl_model::ToolSchema::name)
-        .map(ToOwned::to_owned)
-        .collect();
-    recorder.record_trace_only(TraceEventKind::EnabledToolsRecorded {
-        event: EnabledToolsEvent {
-            turn_id: turn_id.to_string(),
-            mode: mode.label().to_string(),
-            tools,
-        },
-    });
-}
-
-fn record_plan_exit_items(
-    recorder: &mut TraceRecorder,
-    turn_id: &str,
-    tool_results: &[super::tool_dispatch::ToolExecutionRecord],
-) {
-    for tool_result in tool_results {
-        if tool_result.name != "plan_exit" || tool_result.status != TracePartStatus::Completed {
-            continue;
-        }
-        if let Some(content) = plan_exit_content(&tool_result.arguments) {
-            let item_id = format!("{turn_id}-plan");
-            recorder.complete_plan_item(turn_id, &item_id, content);
-        }
-    }
-}
-
-fn plan_exit_content(arguments: &str) -> Option<String> {
-    let value = serde_json::from_str::<serde_json::Value>(arguments).ok()?;
-    let content = value.get("content")?.as_str()?.trim();
-    if content.is_empty() {
-        None
-    } else {
-        Some(content.to_string())
-    }
-}
-
-fn materialize_messages(
-    messages: &[Message],
-    attachments: &[crate::studio::MaterializedAttachment],
-) -> Result<Vec<Message>> {
-    messages
-        .iter()
-        .map(|message| {
-            let mut message = message.clone();
-            message.content = materialize_content(&message.content, attachments)?;
-            Ok(message)
-        })
-        .collect()
-}
-
-fn materialize_content(
-    content: &MessageContent,
-    attachments: &[crate::studio::MaterializedAttachment],
-) -> Result<MessageContent> {
-    match content {
-        MessageContent::Text(text) => Ok(MessageContent::Text(text.clone())),
-        MessageContent::MultiPart(parts) => parts
-            .iter()
-            .map(|part| match part {
-                ContentPart::Text { text } => Ok(ContentPart::Text { text: text.clone() }),
-                ContentPart::Image {
-                    source,
-                    media_type,
-                    filename,
-                } => {
-                    let ImageSource::Attachment { attachment_id } = source else {
-                        return Ok(part.clone());
-                    };
-                    let attachment = attachments
-                        .iter()
-                        .find(|attachment| attachment.attachment_id == *attachment_id)
-                        .ok_or_else(|| {
-                            pl_protocol::PureError::ConfigError(format!(
-                                "attachment {attachment_id} was not materialized"
-                            ))
-                        })?;
-                    Ok(ContentPart::Image {
-                        source: ImageSource::InlineBase64 {
-                            data: attachment.data.clone(),
-                        },
-                        media_type: if media_type.is_empty() {
-                            attachment.media_type.clone()
-                        } else {
-                            media_type.clone()
-                        },
-                        filename: filename.clone().or_else(|| attachment.filename.clone()),
-                    })
-                }
-            })
-            .collect::<Result<Vec<_>>>()
-            .map(MessageContent::MultiPart),
-    }
 }

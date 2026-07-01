@@ -2,24 +2,27 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use pl_protocol::PureError;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::process::{ChildStderr, ChildStdin, ChildStdout};
+use tokio::io::AsyncWriteExt;
+use tokio::process::ChildStdin;
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
 use super::head_tail_buffer::HeadTailBuffer;
 use super::shell::shell_command;
-use crate::process::{
-    configure_background_command, terminate_process_tree, terminate_process_tree_sync,
-};
+use crate::process::{configure_background_command, terminate_process_tree_sync};
 use crate::tool::truncation::TruncatedOutput;
 
+mod lifecycle;
 mod snapshot;
+mod state;
+mod stream_io;
 
+use lifecycle::{spawn_lifecycle_task, wait_for_process_activity};
 use snapshot::{message_for_state, status_for_state, truncate_text};
+use stream_io::{prepare_output_file, read_stderr, read_stdout};
 
 const DEFAULT_MAX_PROCESSES: usize = 16;
 const INTERNAL_BUFFER_BYTES: usize = 64 * 1024;
@@ -227,16 +230,7 @@ impl CommandProcessManager {
                 os_pid: child.id(),
                 output_file: request.output_file.clone(),
                 stdin: Mutex::new(stdin),
-                state: Mutex::new(CommandProcessState {
-                    phase: CommandProcessPhase::Running,
-                    exit_code: None,
-                    stdout_open,
-                    stderr_open,
-                    stdout: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
-                    stderr: HeadTailBuffer::new(INTERNAL_BUFFER_BYTES),
-                    output_revision: 0,
-                    error: None,
-                }),
+                state: Mutex::new(CommandProcessState::new(stdout_open, stderr_open)),
                 notify: Notify::new(),
                 output_file_lock: Mutex::new(()),
                 output_observer: request.output_observer.clone(),
@@ -371,123 +365,6 @@ impl CommandProcessEntry {
     }
 }
 
-impl CommandProcessState {
-    fn can_accept_input(&self) -> bool {
-        matches!(self.phase, CommandProcessPhase::Running)
-    }
-
-    fn is_final(&self) -> bool {
-        matches!(self.phase, CommandProcessPhase::Final(_))
-    }
-
-    fn has_live_child(&self) -> bool {
-        matches!(
-            self.phase,
-            CommandProcessPhase::Running | CommandProcessPhase::Terminating(_)
-        )
-    }
-
-    fn timed_out(&self) -> bool {
-        matches!(
-            self.phase,
-            CommandProcessPhase::Terminating(CommandTerminationReason::TimedOut)
-                | CommandProcessPhase::Draining(CommandProcessResult::TimedOut)
-                | CommandProcessPhase::Final(CommandProcessResult::TimedOut)
-        )
-    }
-
-    fn is_draining_output(&self) -> bool {
-        matches!(self.phase, CommandProcessPhase::Draining(_))
-    }
-
-    fn termination_reason(&self) -> Option<CommandTerminationReason> {
-        match self.phase {
-            CommandProcessPhase::Terminating(reason) => Some(reason),
-            CommandProcessPhase::Running
-            | CommandProcessPhase::Draining(_)
-            | CommandProcessPhase::Final(_) => None,
-        }
-    }
-
-    fn apply_transition(&mut self, transition: CommandProcessTransition) {
-        match transition {
-            CommandProcessTransition::TimedOut => {
-                if matches!(self.phase, CommandProcessPhase::Running) {
-                    self.phase =
-                        CommandProcessPhase::Terminating(CommandTerminationReason::TimedOut);
-                }
-            }
-            CommandProcessTransition::Interrupted => {
-                if matches!(self.phase, CommandProcessPhase::Running) {
-                    self.phase =
-                        CommandProcessPhase::Terminating(CommandTerminationReason::Interrupted);
-                }
-            }
-            CommandProcessTransition::ProcessExited { exit_code } => {
-                self.exit_code = exit_code;
-                let result = match self.phase {
-                    CommandProcessPhase::Terminating(reason) => reason.into(),
-                    CommandProcessPhase::Running
-                    | CommandProcessPhase::Draining(_)
-                    | CommandProcessPhase::Final(_) => {
-                        if self.error.is_some() || exit_code != Some(0) {
-                            CommandProcessResult::Failed
-                        } else {
-                            CommandProcessResult::Completed
-                        }
-                    }
-                };
-                self.finish_or_drain(result);
-            }
-            CommandProcessTransition::ProcessWaitFailed => {
-                let result = match self.phase {
-                    CommandProcessPhase::Terminating(reason) => reason.into(),
-                    CommandProcessPhase::Running
-                    | CommandProcessPhase::Draining(_)
-                    | CommandProcessPhase::Final(_) => CommandProcessResult::Failed,
-                };
-                self.finish_or_drain(result);
-            }
-            CommandProcessTransition::StreamClosed(stream) => {
-                match stream {
-                    StreamKind::Stdout => self.stdout_open = false,
-                    StreamKind::Stderr => self.stderr_open = false,
-                }
-                if let CommandProcessPhase::Draining(result) = self.phase
-                    && self.output_streams_closed()
-                {
-                    self.phase = CommandProcessPhase::Final(result);
-                }
-            }
-        }
-    }
-
-    fn record_error(&mut self, error: String) {
-        self.error = Some(error);
-        self.phase = match self.phase {
-            CommandProcessPhase::Draining(CommandProcessResult::Completed) => {
-                CommandProcessPhase::Draining(CommandProcessResult::Failed)
-            }
-            CommandProcessPhase::Final(CommandProcessResult::Completed) => {
-                CommandProcessPhase::Final(CommandProcessResult::Failed)
-            }
-            phase => phase,
-        };
-    }
-
-    fn finish_or_drain(&mut self, result: CommandProcessResult) {
-        self.phase = if self.output_streams_closed() {
-            CommandProcessPhase::Final(result)
-        } else {
-            CommandProcessPhase::Draining(result)
-        };
-    }
-
-    fn output_streams_closed(&self) -> bool {
-        !self.stdout_open && !self.stderr_open
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CommandTerminationReason {
     TimedOut,
@@ -511,228 +388,10 @@ impl From<CommandTerminationReason> for CommandProcessResult {
     }
 }
 
-async fn wait_for_process_activity(entry: &CommandProcessEntry, yield_time: Duration) {
-    if yield_time.is_zero() {
-        return;
-    }
-    let deadline = Instant::now() + yield_time;
-    loop {
-        if entry.is_final().await {
-            break;
-        }
-        let now = Instant::now();
-        if now >= deadline {
-            break;
-        }
-        let remaining = deadline.saturating_duration_since(now);
-        if tokio::time::timeout(remaining, entry.notify.notified())
-            .await
-            .is_err()
-        {
-            break;
-        }
-    }
-}
-
-fn spawn_lifecycle_task(
-    entry: Arc<CommandProcessEntry>,
-    mut child: tokio::process::Child,
-    timeout: Duration,
-    cancellation_token: Option<CancellationToken>,
-) {
-    tokio::spawn(async move {
-        let outcome = wait_for_lifecycle_outcome(&mut child, timeout, cancellation_token).await;
-        let wait_result = match outcome {
-            LifecycleOutcome::Exited(result) => result,
-            LifecycleOutcome::TimedOut => {
-                apply_transition(&entry, CommandProcessTransition::TimedOut).await;
-                close_stdin(&entry).await;
-                terminate_process_tree(child.id()).await;
-                let _ = child.start_kill();
-                child.wait().await
-            }
-            LifecycleOutcome::Interrupted => {
-                apply_transition(&entry, CommandProcessTransition::Interrupted).await;
-                close_stdin(&entry).await;
-                terminate_process_tree(child.id()).await;
-                let _ = child.start_kill();
-                child.wait().await
-            }
-        };
-        {
-            let mut stdin = entry.stdin.lock().await;
-            stdin.take();
-        }
-        match wait_result {
-            Ok(status) => {
-                apply_transition(
-                    &entry,
-                    CommandProcessTransition::ProcessExited {
-                        exit_code: status.code(),
-                    },
-                )
-                .await;
-            }
-            Err(error) => {
-                {
-                    let mut state = entry.state.lock().await;
-                    state.record_error(format!("failed to wait for process: {error}"));
-                }
-                apply_transition(&entry, CommandProcessTransition::ProcessWaitFailed).await;
-            }
-        }
-    });
-}
-
-enum LifecycleOutcome {
-    Exited(std::io::Result<std::process::ExitStatus>),
-    TimedOut,
-    Interrupted,
-}
-
-async fn wait_for_lifecycle_outcome(
-    child: &mut tokio::process::Child,
-    timeout: Duration,
-    cancellation_token: Option<CancellationToken>,
-) -> LifecycleOutcome {
-    if let Some(token) = cancellation_token {
-        tokio::select! {
-            result = child.wait() => LifecycleOutcome::Exited(result),
-            _ = tokio::time::sleep(timeout) => LifecycleOutcome::TimedOut,
-            _ = token.cancelled() => LifecycleOutcome::Interrupted,
-        }
-    } else {
-        tokio::select! {
-            result = child.wait() => LifecycleOutcome::Exited(result),
-            _ = tokio::time::sleep(timeout) => LifecycleOutcome::TimedOut,
-        }
-    }
-}
-
-async fn apply_transition(entry: &CommandProcessEntry, transition: CommandProcessTransition) {
-    let mut state = entry.state.lock().await;
-    state.apply_transition(transition);
-    drop(state);
-    entry.notify.notify_waiters();
-}
-
-async fn close_stdin(entry: &CommandProcessEntry) {
-    let mut stdin = entry.stdin.lock().await;
-    stdin.take();
-}
-
-async fn read_stdout(entry: Arc<CommandProcessEntry>, stdout: ChildStdout) {
-    read_stream(entry, stdout, StreamKind::Stdout).await;
-}
-
-async fn read_stderr(entry: Arc<CommandProcessEntry>, stderr: ChildStderr) {
-    read_stream(entry, stderr, StreamKind::Stderr).await;
-}
-
-async fn read_stream<R>(entry: Arc<CommandProcessEntry>, mut reader: R, stream: StreamKind)
-where
-    R: tokio::io::AsyncRead + Unpin,
-{
-    let mut buffer = [0_u8; 8192];
-    loop {
-        match reader.read(&mut buffer).await {
-            Ok(0) => break,
-            Ok(n) => {
-                let chunk = &buffer[..n];
-                let revision = {
-                    let mut state = entry.state.lock().await;
-                    state.output_revision = state.output_revision.saturating_add(1);
-                    let revision = state.output_revision;
-                    match stream {
-                        StreamKind::Stdout => state.stdout.push_chunk(chunk),
-                        StreamKind::Stderr => state.stderr.push_chunk(chunk),
-                    }
-                    revision
-                };
-                if let Some(observer) = &entry.output_observer {
-                    observer.output_chunk(stream.into(), chunk, revision);
-                }
-                if let Err(error) = append_output_chunk(&entry, stream, chunk).await {
-                    let mut state = entry.state.lock().await;
-                    state.record_error(error);
-                }
-                entry.notify.notify_waiters();
-            }
-            Err(error) => {
-                let mut state = entry.state.lock().await;
-                state.record_error(format!("failed to read process output: {error}"));
-                break;
-            }
-        }
-    }
-    apply_transition(&entry, CommandProcessTransition::StreamClosed(stream)).await;
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StreamKind {
     Stdout,
     Stderr,
-}
-
-impl From<StreamKind> for CommandOutputStream {
-    fn from(value: StreamKind) -> Self {
-        match value {
-            StreamKind::Stdout => Self::Stdout,
-            StreamKind::Stderr => Self::Stderr,
-        }
-    }
-}
-
-async fn prepare_output_file(
-    output_file: &std::path::Path,
-    command: &str,
-    working_directory: &std::path::Path,
-) -> Result<(), PureError> {
-    if let Some(parent) = output_file.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(|error| {
-            tool_error(
-                "bash",
-                format!("failed to create output directory: {error}"),
-            )
-        })?;
-    }
-    let header = format!(
-        "=== COMMAND ===\n{command}\n\n=== CWD ===\n{}\n\n",
-        working_directory.display()
-    );
-    tokio::fs::write(output_file, header.as_bytes())
-        .await
-        .map_err(|error| tool_error("bash", format!("failed to write output file: {error}")))
-}
-
-async fn append_output_chunk(
-    entry: &CommandProcessEntry,
-    stream: StreamKind,
-    chunk: &[u8],
-) -> Result<(), String> {
-    let _guard = entry.output_file_lock.lock().await;
-    let mut file = tokio::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&entry.output_file)
-        .await
-        .map_err(|error| format!("failed to open output file: {error}"))?;
-    let label = match stream {
-        StreamKind::Stdout => "STDOUT",
-        StreamKind::Stderr => "STDERR",
-    };
-    file.write_all(format!("=== {label} ===\n").as_bytes())
-        .await
-        .map_err(|error| format!("failed to write output label: {error}"))?;
-    file.write_all(chunk)
-        .await
-        .map_err(|error| format!("failed to write output chunk: {error}"))?;
-    if !chunk.ends_with(b"\n") {
-        file.write_all(b"\n")
-            .await
-            .map_err(|error| format!("failed to finish output chunk: {error}"))?;
-    }
-    Ok(())
 }
 
 fn tool_error(tool: &str, error: impl std::fmt::Display) -> PureError {
