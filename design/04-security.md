@@ -23,9 +23,9 @@ Plan Mode 的工具白名单优先于权限模式。即使当前权限模式是 
 安全边界按端口-适配器落位：
 
 - `pure-studio-flutter`：输入收集、事件展示、命令调用
-- `pl-core/application`：策略编排与约束
+- `pl-core::StudioRuntime` / `pl-core::PureCore`：策略编排与约束
 - `pl-core/interfaces`：安全相关端口抽象
-- `pl-core/infrastructure`：文件、数据库、工具执行、事件落盘
+- `pl-core::studio`、`pl-core::tool`、`pl-core::config`、`pl-core::mcp`：文件、数据库、工具执行、事件落盘
 - `pl-model`：仅访问已配置 API
 
 `pl-protocol` 只承载类型，不持有策略实现。

@@ -1,4 +1,4 @@
-use crate::api::studio::convert::resolve_interaction_response;
+use crate::api::studio::convert::interaction::resolve_interaction_response;
 use crate::api::studio::runtime::bridge;
 use crate::api::studio::types::{
     ResolveInteractionResponse, StopPromptResponse, SubmitPromptResponse,

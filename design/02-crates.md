@@ -46,12 +46,12 @@
 
 ## 2.6 pl-core（端口-适配器）
 
-`pl-core` 继续作为所有桌面端共享的 Studio runtime 所有者，并按端口-适配器边界渐进式整理。当前代码中 `interfaces` 放置可替换端口 trait，`application`、`domain` 和 `infrastructure` 作为边界入口与 re-export；既有实现仍按 `studio`、`core`、`tool`、`config`、`mcp` 等业务命名空间组织，后续重构应逐步把新端口和适配器沉入对应边界。
+`pl-core` 继续作为所有桌面端共享的 Studio runtime 所有者，并按端口-适配器边界渐进式整理。当前代码中 `interfaces` 放置可替换端口 trait；公开 API 由 crate root 直接 re-export，具体实现按 `studio`、`core`、`tool`、`config`、`mcp` 等业务命名空间组织。不要再新增只转发类型的 `application`、`domain` 或 `infrastructure` 包装模块；需要新端口时放入 `interfaces`，需要新实现时放入对应业务命名空间。
 
-- `application`：use case 编排入口（当前 re-export `StudioRuntime`）
-- `domain`：项目、会话和 runtime 记录等领域类型入口
 - `interfaces`：端口 trait（RPITIT + `Send`）
-- `infrastructure`：配置、SQLite store 等适配器入口
+- `studio`：Studio runtime、store、事件投影和 UI-facing records
+- `core`：turn pipeline、权限、工具调度和结果归一化
+- `tool`、`config`、`mcp`：具体适配器与运行时能力
 
 当前核心端口：
 

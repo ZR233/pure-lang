@@ -24,10 +24,9 @@ use super::turn_result::{is_cancelled, tool_allowed_in_mode, unix_seconds};
 
 mod display;
 mod progress_messages;
-mod records;
+pub(super) mod records;
 
 use progress_messages::{emit_tool_progress, tool_start_progress_message};
-pub(super) use records::tool_results_include_recoverable_subagent_capacity;
 use records::{
     emit_tool_snapshot, finalize_tool_item, interrupted_tool_execution_record,
     ready_tool_execution_record, respond_to_model_tool_execution_record, tool_execution_record,

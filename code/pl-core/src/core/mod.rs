@@ -367,9 +367,10 @@ use permission::{approval_request, approve_tool_call};
 #[cfg(test)]
 use pl_model::{TokenUsage, ToolCallKind};
 #[cfg(test)]
+use tool_dispatch::records::tool_results_include_recoverable_subagent_capacity;
+#[cfg(test)]
 use tool_dispatch::{
     ToolExecutionContext, ToolExecutionRecord, execute_tool_calls, namespaced_tool_trace_part_id,
-    tool_results_include_recoverable_subagent_capacity,
 };
 #[cfg(test)]
 use turn_result::{

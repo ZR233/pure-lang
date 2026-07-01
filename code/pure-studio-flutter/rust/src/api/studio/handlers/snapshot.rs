@@ -1,8 +1,9 @@
-use crate::api::studio::convert::{
-    agent_bridge_dto, agent_event_bridge_dto, bridge_event_envelope, bridge_message, bridge_part,
-    bridge_session_runtime_view, interaction_request_bridge_dto, is_session_state_event,
-    project_dto, session_dto,
-};
+use crate::api::studio::convert::agent::{agent_bridge_dto, agent_event_bridge_dto};
+use crate::api::studio::convert::event::{bridge_event_envelope, is_session_state_event};
+use crate::api::studio::convert::interaction::interaction_request_bridge_dto;
+use crate::api::studio::convert::message::{bridge_message, bridge_part};
+use crate::api::studio::convert::records::{project_dto, session_dto};
+use crate::api::studio::convert::runtime::bridge_session_runtime_view;
 use crate::api::studio::runtime::BridgeRuntime;
 use crate::api::studio::types::{
     BridgeSessionStateResponse, BridgeStudioMessageProjectionDto, BridgeStudioPartProjectionDto,

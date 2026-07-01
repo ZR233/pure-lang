@@ -1,12 +1,9 @@
 mod agent;
-pub mod application;
 mod config;
 mod config_editor;
 mod context_compaction;
 mod core;
-pub mod domain;
 mod first_run;
-pub mod infrastructure;
 mod instruction;
 pub mod interfaces;
 mod mcp;
@@ -79,11 +76,10 @@ pub use provider_usage::{
 pub use session::CoreSession;
 pub use skill::{SkillCatalog, SkillMetadata, SkillSourceKind};
 pub use studio::{
-    AgentSnapshotRecord as StudioAgentSnapshotRecord,
-    AgentTimelineEventRecord as StudioAgentTimelineEventRecord, AttachmentRecord,
-    InteractionEmitter, InteractionEmitterFuture, InteractionRuntime, MaterializedAttachment,
-    ProjectRecord, RunPromptRequest, SessionRecord, SessionRuntimeRecord, SessionSkillRecord,
-    SessionVisibility, StudioActiveTurn, StudioEventFilter, StudioEventRuntime, StudioEventScope,
+    AgentSnapshotRecord, AgentTimelineEventRecord, AttachmentRecord, InteractionEmitter,
+    InteractionEmitterFuture, InteractionRuntime, MaterializedAttachment, ProjectRecord,
+    RunPromptRequest, SessionRecord, SessionRuntimeRecord, SessionSkillRecord, SessionVisibility,
+    StudioActiveTurn, StudioEventFilter, StudioEventRuntime, StudioEventScope,
     StudioFilteredEventReceiver, StudioPlanImplementationLifecycle, StudioPromptOutcome,
     StudioResolveInteractionResponse, StudioRuntime, StudioRuntimeSnapshot, StudioRuntimeState,
     StudioRuntimeStatus, StudioStopPromptResponse, StudioStore, StudioSubmitPromptOptions,

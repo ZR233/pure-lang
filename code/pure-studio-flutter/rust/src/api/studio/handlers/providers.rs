@@ -1,4 +1,4 @@
-use crate::api::studio::convert::provider_usage_dto;
+use crate::api::studio::convert::settings::provider_usage_dto;
 use crate::api::studio::runtime::bridge;
 use crate::api::studio::types::{ProviderUsagesResponse, SkillSummaryDto, SkillsResponse};
 use anyhow::Result;

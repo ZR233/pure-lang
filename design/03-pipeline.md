@@ -7,10 +7,10 @@
 ```text
 Flutter action
   -> flutter_rust_bridge API (pl-studio-bridge)
-  -> pl-core application service (StudioRuntime)
+  -> pl-core StudioRuntime
   -> StudioConversationSink / StudioEventRuntime
   -> interfaces ports
-  -> infrastructure adapters (sqlite/config/fs/event/tool)
+  -> studio/config/tool/mcp adapters (sqlite/config/fs/event/tool)
   -> PureCore turn pipeline
   -> pl-trace AgentEvent / TraceEvent / TracePart
   -> StudioEventRuntime canonical message/part snapshot + live part delta
@@ -27,7 +27,7 @@ Flutter bridge crate 不承载流程逻辑，只把 Dart 调用转发到 `pl-cor
 
 - `compileMode`：`plan | auto`
 - `turnOptions.permissionMode`：默认固定 `request-approval`
-- `prompt`、`sessionId`、`workspaceRoot` 等进入 application service
+- `prompt`、`sessionId`、`workspaceRoot` 等进入 `StudioRuntime`
 
 `compileMode` 是会话级协作模式，不是模型角色路由。Studio 根聊天 turn 始终使用 `planner` 角色模型；`auto` 表示执行型协作模式，允许模型在审批策略约束内主动修改工作区；`plan` 是 Codex 风格规划模式，允许读取、搜索、运行经审批的探索命令和调度探索型子代理，但最终交付物应是一段可执行计划，而不是直接修改文件。前端切换 Auto/Plan 调用 `setSessionMode(sessionId, mode)` 持久化 session 默认模式；前端切换根聊天模型调用 `setModelRole(roleKey=planner, providerId, model, effort)` 持久化 planner role，下一轮 turn 按新的 planner role 解析 provider/model。模型可见输出在协议层分流：OpenAI Responses 等 native phase provider 使用原生 `commentary` / `final_answer` phase，Chat tagged provider 使用 `<commentary>...</commentary>` 表示运行中的短进展更新、`<final>...</final>` 表示最终答复。streaming 层把这些 provider 输出统一投影为 text part；plan part 只能由 `plan_exit.content` 或后续明确的 plan lifecycle 事件生成。普通 assistant 正文不显示 Chat 标签，Responses native phase 不解析标签，`<proposed_plan>` 按普通未标记文本处理。
 

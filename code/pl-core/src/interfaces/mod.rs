@@ -5,13 +5,13 @@ use pl_protocol::Message;
 use pl_trace::AgentEvent;
 
 use crate::{
-    ConfigStore, CoreSession, ProjectRecord, SessionRecord, SessionRuntimeRecord,
-    StudioAgentTimelineEventRecord, StudioStore, TurnResult,
+    AgentTimelineEventRecord, ConfigStore, CoreSession, ProjectRecord, SessionRecord,
+    SessionRuntimeRecord, StudioStore, TurnResult,
 };
 
 /// 会话与项目存储端口。
 ///
-/// application 层通过该端口访问会话、消息和项目数据，不感知具体数据库细节。
+/// Studio runtime 可通过该端口访问会话、消息和项目数据，不感知具体数据库细节。
 pub trait SessionRepository: Send + Sync {
     fn list_projects(&self) -> impl Future<Output = Result<Vec<ProjectRecord>>> + Send;
     fn upsert_project(
@@ -47,7 +47,7 @@ pub trait SessionRepository: Send + Sync {
 
 /// 配置读取端口。
 ///
-/// application 层通过该端口加载运行配置，不直接操作 TOML 文件。
+/// Studio runtime 可通过该端口加载运行配置，不直接操作 TOML 文件。
 pub trait ConfigRepository: Send + Sync {
     fn load_or_default(&self) -> impl Future<Output = Result<crate::PureConfig>> + Send;
 }
@@ -58,13 +58,13 @@ pub trait ConfigRepository: Send + Sync {
 pub trait EventSink: Send + Sync {
     fn record_agent_event(
         &self,
-        record: StudioAgentTimelineEventRecord,
+        record: AgentTimelineEventRecord,
     ) -> impl Future<Output = Result<()>> + Send;
 }
 
 /// 模型 turn 结果持久化端口。
 ///
-/// application 层通过该端口更新运行快照与 turn 结果相关数据。
+/// Studio runtime 可通过该端口更新运行快照与 turn 结果相关数据。
 pub trait TurnSnapshotRepository: Send + Sync {
     fn upsert_session_runtime(
         &self,
@@ -131,7 +131,7 @@ impl ConfigRepository for ConfigStore {
 }
 
 impl EventSink for StudioStore {
-    async fn record_agent_event(&self, record: StudioAgentTimelineEventRecord) -> Result<()> {
+    async fn record_agent_event(&self, record: AgentTimelineEventRecord) -> Result<()> {
         self.record_agent_event(record).await
     }
 }

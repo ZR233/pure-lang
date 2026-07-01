@@ -1,7 +1,7 @@
 use sea_orm::DatabaseConnection;
 
 mod agent;
-mod attachment;
+pub(super) mod attachment;
 mod event_log;
 mod interaction;
 mod project;
@@ -13,7 +13,6 @@ mod skill;
 mod turn;
 
 pub use attachment::studio_attachment;
-pub(crate) use attachment::trace_attachment;
 #[derive(Clone)]
 pub struct StudioStore {
     db: DatabaseConnection,

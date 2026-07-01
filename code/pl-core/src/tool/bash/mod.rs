@@ -6,7 +6,7 @@ use pl_protocol::PureError;
 use pl_trace::{AgentEvent, TraceDelta, TracePartDeltaEvent, TracePartKind, TracePartStatus};
 use serde::{Deserialize, Serialize};
 
-use super::command::{
+use super::command::process_manager::{
     CommandOutputObserver, CommandOutputSnapshot, CommandOutputStream, CommandProcessManager,
     CommandStartRequest, CommandWriteRequest,
 };

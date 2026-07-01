@@ -55,7 +55,7 @@ mod tests {
         };
 
         let envelope =
-            super::convert::bridge_event_envelope(event).expect("event is bridge-visible");
+            super::convert::event::bridge_event_envelope(event).expect("event is bridge-visible");
 
         assert_eq!(envelope.session_id.as_deref(), Some("session-1"));
         assert_eq!(envelope.sequence, 7);
@@ -87,7 +87,7 @@ mod tests {
             },
         };
 
-        assert!(!super::convert::bridge_visible_event(&event));
+        assert!(!super::convert::event::bridge_visible_event(&event));
     }
 
     #[test]
@@ -112,7 +112,7 @@ mod tests {
             },
         };
 
-        assert_eq!(super::convert::bridge_event_envelope(event), None);
+        assert_eq!(super::convert::event::bridge_event_envelope(event), None);
     }
 
     #[test]
@@ -165,19 +165,19 @@ mod tests {
     #[test]
     fn mcp_transport_label_accepts_ui_values() {
         assert_eq!(
-            super::convert::mcp_transport_from_label("streamableHttp"),
+            super::convert::settings::mcp_transport_from_label("streamableHttp"),
             McpServerTransport::StreamableHttp
         );
         assert_eq!(
-            super::convert::mcp_transport_from_label("streamable_http"),
+            super::convert::settings::mcp_transport_from_label("streamable_http"),
             McpServerTransport::StreamableHttp
         );
         assert_eq!(
-            super::convert::mcp_transport_from_label("http"),
+            super::convert::settings::mcp_transport_from_label("http"),
             McpServerTransport::StreamableHttp
         );
         assert_eq!(
-            super::convert::mcp_transport_from_label("stdio"),
+            super::convert::settings::mcp_transport_from_label("stdio"),
             McpServerTransport::Stdio
         );
     }
@@ -185,7 +185,7 @@ mod tests {
     #[test]
     fn normalized_string_list_trims_sorts_and_deduplicates() {
         assert_eq!(
-            super::convert::normalized_string_list(vec![
+            super::convert::settings::normalized_string_list(vec![
                 " beta ".to_string(),
                 String::new(),
                 "alpha".to_string(),

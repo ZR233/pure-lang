@@ -1,4 +1,4 @@
-use crate::api::studio::convert::bridge_event_envelope;
+use crate::api::studio::convert::event::bridge_event_envelope;
 use crate::api::studio::runtime::bridge;
 use crate::api::studio::types::{BridgeEventEnvelope, BridgeStudioEventsResponse};
 use crate::frb_generated::StreamSink;

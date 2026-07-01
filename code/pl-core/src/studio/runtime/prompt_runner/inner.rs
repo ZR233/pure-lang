@@ -44,7 +44,7 @@ impl StudioRuntime {
         let trace_attachments = selected_attachments
             .iter()
             .map(|record| {
-                let mut attachment = crate::studio::store::trace_attachment(record);
+                let mut attachment = crate::studio::store::attachment::trace_attachment(record);
                 attachment.data_url = selected_materialized
                     .iter()
                     .find(|materialized| materialized.attachment_id == record.id)
