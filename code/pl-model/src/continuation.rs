@@ -32,6 +32,15 @@ impl ModelContinuationState {
             .map(|_| self.acknowledged_message_count)
     }
 
+    pub fn acknowledged_tail<'a, T>(&self, items: &'a [T], use_continuation: bool) -> &'a [T] {
+        if !use_continuation {
+            return items;
+        }
+        self.continuation_start_index()
+            .and_then(|start| items.get(start..))
+            .unwrap_or(items)
+    }
+
     pub fn disabled(&self) -> bool {
         self.disabled
     }
@@ -80,6 +89,12 @@ impl ModelContinuationState {
     }
 }
 
+pub fn is_continuation_unsupported_error(error: &pl_protocol::PureError) -> bool {
+    let message = error.to_string();
+    message.contains("previous_response_id")
+        && (message.contains("not supported") || message.contains("only supported"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,5 +131,31 @@ mod tests {
         assert_eq!(state.prompt_cache_key(), Some("cache-1"));
         assert_eq!(state.previous_response_id(), None);
         assert_eq!(state.continuation_start_index(), None);
+    }
+
+    #[test]
+    fn acknowledged_tail_uses_previous_response_prefix_only_when_enabled() {
+        let items = ["system", "user-1", "assistant-1", "user-2"];
+        let mut state = ModelContinuationState::default();
+        state.acknowledge_response(2, Some("resp-1".to_string()), items.len());
+
+        assert_eq!(state.acknowledged_tail(&items, true), &items[2..]);
+        assert_eq!(state.acknowledged_tail(&items, false), &items);
+
+        state.mark_unsupported();
+
+        assert_eq!(state.acknowledged_tail(&items, true), &items);
+    }
+
+    #[test]
+    fn recognizes_previous_response_id_unsupported_errors() {
+        let error = pl_protocol::PureError::LlmError(
+            "previous_response_id is only supported on Responses WebSocket v2".to_string(),
+        );
+
+        assert!(is_continuation_unsupported_error(&error));
+        assert!(!is_continuation_unsupported_error(
+            &pl_protocol::PureError::LlmError("rate limit".to_string())
+        ));
     }
 }

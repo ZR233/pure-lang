@@ -312,22 +312,15 @@ impl PureCore {
             reasoning_content: None,
             metadata: HashMap::new(),
         };
-        let completion_request = CompletionRequest {
-            model: provider.default_model().to_string(),
-            instructions: Some(include_str!("../../prompts/permission_review.md").to_string()),
-            messages: vec![message],
-            tools: Vec::new(),
-            tool_choice: "none".to_string(),
-            parallel_tool_calls: false,
-            temperature: Some(0.0),
-            max_tokens: Some(512),
-            store: None,
-            previous_response_id: None,
-            prompt_cache_key: None,
-            reasoning,
-            stream: false,
-            trace: None,
-        };
+        let completion_request = CompletionRequest::builder(provider.default_model())
+            .instructions(include_str!("../../prompts/permission_review.md"))
+            .messages(vec![message])
+            .tool_choice("none")
+            .temperature(Some(0.0))
+            .max_tokens(512)
+            .reasoning(reasoning)
+            .stream(false)
+            .build();
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(1);
         match provider.stream_complete(completion_request, event_tx).await {
             Ok(response) => {

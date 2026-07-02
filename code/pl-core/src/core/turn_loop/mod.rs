@@ -1,4 +1,7 @@
-use pl_model::{CompletionRequest, ModelProvider, ReasoningConfig, ReasoningSummary};
+use pl_model::{
+    CompletionRequest, ModelProvider, ReasoningConfig, ReasoningSummary,
+    is_continuation_unsupported_error,
+};
 use pl_protocol::TokenUsageSnapshot;
 use pl_protocol::{ErrorSeverity, Result};
 use pl_trace::{AgentEvent, TracePartStatus};
@@ -37,12 +40,6 @@ use super::turn_result::{
     prompt_requires_subagent_dispatch, should_request_parallel_tool_calls, tool_allowed_in_mode,
     unix_seconds,
 };
-
-fn is_continuation_unsupported_error(error: &pl_protocol::PureError) -> bool {
-    let message = error.to_string();
-    message.contains("previous_response_id")
-        && (message.contains("not supported") || message.contains("only supported"))
-}
 
 pub(super) async fn run_turn_with_trace(
     core: &PureCore,
@@ -279,28 +276,23 @@ pub(super) async fn run_turn_with_trace(
         let model_capabilities = provider.effective_model_capabilities(&model);
         let parallel_tool_calls = should_request_parallel_tool_calls(model_capabilities, &options);
 
-        let completion_request = CompletionRequest {
-            model: model.clone(),
-            instructions: Some(instruction_bundle.instructions.clone()),
-            messages: messages.clone(),
-            tools: iteration_tools,
-            tool_choice: "auto".to_string(),
-            parallel_tool_calls,
-            temperature: None,
-            max_tokens: None,
-            store: session.prompt_cache_key().map(|_| true),
-            previous_response_id: session.previous_response_id().map(ToString::to_string),
-            prompt_cache_key: session.prompt_cache_key().map(ToString::to_string),
-            reasoning: reasoning.clone(),
-            stream: true,
-            trace: Some(pl_model::CompletionTraceContext {
+        let completion_request = CompletionRequest::builder(model.clone())
+            .instructions(instruction_bundle.instructions.clone())
+            .messages(messages.clone())
+            .tools(iteration_tools)
+            .parallel_tool_calls(parallel_tool_calls)
+            .store(session.prompt_cache_key().map(|_| true))
+            .previous_response_id(session.previous_response_id().map(ToString::to_string))
+            .prompt_cache_key(session.prompt_cache_key().map(ToString::to_string))
+            .reasoning(reasoning.clone())
+            .trace(Some(pl_model::CompletionTraceContext {
                 session_id: recorder.session_id().to_string(),
                 turn_id: turn_id.clone(),
                 inference_id: inference_id.clone(),
                 plan_mode: matches!(request.mode, CompileMode::Plan),
                 trace_sequence_base: recorder.current_sequence(),
-            }),
-        };
+            }))
+            .build();
         progress.heartbeat("正在等待模型响应。");
         progress.debug(format!("模型 `{model}` 流式请求已发起。"));
 
