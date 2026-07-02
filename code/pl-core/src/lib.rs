@@ -1,10 +1,12 @@
 mod agent;
+mod attachment;
 mod config;
 mod config_editor;
 mod context_compaction;
 mod core;
 mod first_run;
 mod instruction;
+#[cfg(feature = "studio")]
 pub mod interfaces;
 mod mcp;
 mod permission;
@@ -14,6 +16,7 @@ mod provider_usage;
 mod runtime_usage;
 mod session;
 mod skill;
+#[cfg(feature = "studio")]
 mod studio;
 mod tool;
 mod trace;
@@ -25,6 +28,7 @@ pub use agent::{
     AgentRunSpec, AgentSpawnInput, AgentStatus, AgentStatusUpdate, AgentSupervisor,
     AgentWaitOutcome,
 };
+pub use attachment::MaterializedAttachment;
 pub use config::{
     BuiltinMcpServerState, ConfigPaths, ConfigStore, DEFAULT_PROJECT_DOC_MAX_BYTES,
     EffectiveMcpServerConfig, InstructionsConfig, McpServerConfig, McpServerMutationPolicy,
@@ -37,14 +41,18 @@ pub use config::{
 pub use config_editor::{
     ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit, infer_provider_template_kind,
 };
-pub use core::PureCore;
+pub use core::{
+    AgentBackendProfile, CoreRuntimeOptions, CoreRuntimeProfile, PureCore, PureCoreBuilder,
+    ToolProfile, WorkspaceProfile,
+};
 pub use first_run::{
     FirstRunConfigDraft, FirstRunModelDraft, FirstRunProviderDraft, ProviderTemplateKind,
 };
 pub use instruction::{
     InstructionAssembler, InstructionAssemblyRequest, InstructionBlock, InstructionBundle,
-    InstructionSnapshot, InstructionSource, InstructionSourceKind,
+    InstructionProfile, InstructionSnapshot, InstructionSource, InstructionSourceKind,
 };
+#[cfg(feature = "studio")]
 pub use interfaces::{
     ConfigRepository, EventSink, RuntimeEventEmitter, SessionRepository, TurnSnapshotRepository,
 };
@@ -54,10 +62,10 @@ pub use pl_lsp::{
     LspQueryResult, LspRange, LspRuntimeRegistry, LspServerSnapshot,
 };
 pub use pl_model::{
-    DeepSeekBalanceInfo, DeepSeekBalanceUsage, ModelCapabilities, ModelInfo, ModelModality,
-    ModelParameter, ModelRequestProfile, ProviderKind, ReasoningInterleaved,
-    ReasoningInterleavedField, ToolCapabilities, ToolWirePolicy, TruncationMode,
-    ZhipuCodingPlanUsage, ZhipuQuotaLimit, ZhipuQuotaWindow, ZhipuToolUsageDetail,
+    DeepSeekBalanceInfo, DeepSeekBalanceUsage, ModelCapabilities, ModelContinuationState,
+    ModelInfo, ModelModality, ModelParameter, ModelRequestProfile, ProviderKind,
+    ReasoningInterleaved, ReasoningInterleavedField, ToolCapabilities, ToolWirePolicy,
+    TruncationMode, ZhipuCodingPlanUsage, ZhipuQuotaLimit, ZhipuQuotaWindow, ZhipuToolUsageDetail,
 };
 pub use pl_protocol::{
     AgentRuntimeDelta, BudgetLimitKind, BudgetUsage, ContentPart, ErrorSeverity, ImageSource,
@@ -76,16 +84,17 @@ pub use provider_usage::{
 };
 pub use session::CoreSession;
 pub use skill::{SkillCatalog, SkillMetadata, SkillSourceKind};
+#[cfg(feature = "studio")]
 pub use studio::{
     AgentSnapshotRecord, AgentTimelineEventRecord, AttachmentRecord, InteractionEmitter,
-    InteractionEmitterFuture, InteractionRuntime, MaterializedAttachment, ProjectRecord,
-    RunPromptRequest, SessionRecord, SessionRuntimeRecord, SessionSkillRecord, SessionVisibility,
-    StudioActiveTurn, StudioEventFilter, StudioEventRuntime, StudioEventScope,
-    StudioFilteredEventReceiver, StudioPlanImplementationLifecycle, StudioPromptOutcome,
-    StudioResolveInteractionResponse, StudioRuntime, StudioRuntimeSnapshot, StudioRuntimeState,
-    StudioRuntimeStatus, StudioStopPromptResponse, StudioStore, StudioSubmitPromptOptions,
-    StudioSubmitPromptRequest, StudioSubmitPromptResponse, StudioUserPromptPresentation,
-    resolution_matches_kind, studio_attachment,
+    InteractionEmitterFuture, InteractionRuntime, ProjectRecord, RunPromptRequest, SessionRecord,
+    SessionRuntimeRecord, SessionSkillRecord, SessionVisibility, StudioActiveTurn,
+    StudioEventFilter, StudioEventRuntime, StudioEventScope, StudioFilteredEventReceiver,
+    StudioPlanImplementationLifecycle, StudioPromptOutcome, StudioResolveInteractionResponse,
+    StudioRuntime, StudioRuntimeSnapshot, StudioRuntimeState, StudioRuntimeStatus,
+    StudioStopPromptResponse, StudioStore, StudioSubmitPromptOptions, StudioSubmitPromptRequest,
+    StudioSubmitPromptResponse, StudioUserPromptPresentation, resolution_matches_kind,
+    studio_attachment,
 };
 pub use tool::{
     AskUserTool, BashInput, BashTool, LspLanguageTool, LspQueryTool, OutputTruncation,

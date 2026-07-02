@@ -1,10 +1,13 @@
 use crate::request::TokenUsage;
 use pl_trace::TraceTextChannel;
 
-/// Provider-independent streaming event consumed by the model accumulator.
+/// Provider 无关的模型流式事件。
+///
+/// provider runtime 把私有 SSE chunk 转换为该事件流，调用方可以直接消费，
+/// 也可以交给 `CompletionStreamAccumulator` 累计为 `CompletionResponse`。
 #[derive(Debug, Clone)]
-pub(crate) enum ModelStreamEvent {
-    StepStarted {
+pub enum ModelStreamEvent {
+    ResponseStarted {
         response_id: Option<String>,
     },
     BlockOpened {
@@ -69,7 +72,7 @@ pub(crate) enum ModelStreamEvent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ModelBlockKind {
+pub enum ModelBlockKind {
     Text {
         channel: TraceTextChannel,
     },
@@ -79,7 +82,7 @@ pub(crate) enum ModelBlockKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum ModelBlockField {
+pub enum ModelBlockField {
     Text,
     ReasoningSummary,
     #[allow(dead_code)]
@@ -87,7 +90,7 @@ pub(crate) enum ModelBlockField {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum ModelBlockContent {
+pub enum ModelBlockContent {
     Text(String),
     ReasoningSummary(Vec<String>),
     #[allow(dead_code)]
@@ -95,26 +98,26 @@ pub(crate) enum ModelBlockContent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ToolInputPayloadKind {
+pub enum ToolInputPayloadKind {
     FunctionArguments,
     CustomInput,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum ToolInputDeltaPayload {
+pub enum ToolInputDeltaPayload {
     FunctionArguments(String),
     CustomInput(String),
 }
 
 impl ToolInputDeltaPayload {
-    pub(crate) fn kind(&self) -> ToolInputPayloadKind {
+    pub fn kind(&self) -> ToolInputPayloadKind {
         match self {
             Self::FunctionArguments(_) => ToolInputPayloadKind::FunctionArguments,
             Self::CustomInput(_) => ToolInputPayloadKind::CustomInput,
         }
     }
 
-    pub(crate) fn text(&self) -> &str {
+    pub fn text(&self) -> &str {
         match self {
             Self::FunctionArguments(delta) | Self::CustomInput(delta) => delta,
         }
@@ -122,7 +125,7 @@ impl ToolInputDeltaPayload {
 }
 
 impl ModelStreamEvent {
-    pub(crate) fn text_started(id: String, channel: TraceTextChannel) -> Self {
+    pub fn text_started(id: String, channel: TraceTextChannel) -> Self {
         Self::BlockOpened {
             id,
             kind: ModelBlockKind::Text { channel },
@@ -130,7 +133,7 @@ impl ModelStreamEvent {
         }
     }
 
-    pub(crate) fn text_delta(id: String, channel: TraceTextChannel, delta: String) -> Self {
+    pub fn text_delta(id: String, channel: TraceTextChannel, delta: String) -> Self {
         Self::BlockDelta {
             id,
             kind: ModelBlockKind::Text { channel },
@@ -140,7 +143,7 @@ impl ModelStreamEvent {
         }
     }
 
-    pub(crate) fn text_completed(
+    pub fn text_completed(
         id: String,
         channel: TraceTextChannel,
         authoritative_text: Option<String>,
@@ -153,7 +156,7 @@ impl ModelStreamEvent {
         }
     }
 
-    pub(crate) fn reasoning_summary_started(
+    pub fn reasoning_summary_started(
         id: String,
         provider_metadata: Option<serde_json::Value>,
     ) -> Self {
@@ -164,7 +167,7 @@ impl ModelStreamEvent {
         }
     }
 
-    pub(crate) fn reasoning_summary_delta(id: String, section_index: u32, delta: String) -> Self {
+    pub fn reasoning_summary_delta(id: String, section_index: u32, delta: String) -> Self {
         Self::BlockDelta {
             id,
             kind: ModelBlockKind::ReasoningSummary,
@@ -174,7 +177,7 @@ impl ModelStreamEvent {
         }
     }
 
-    pub(crate) fn reasoning_summary_completed(
+    pub fn reasoning_summary_completed(
         id: String,
         provider_metadata: Option<serde_json::Value>,
         authoritative_summary: Option<Vec<String>>,
@@ -189,7 +192,7 @@ impl ModelStreamEvent {
 }
 
 impl ToolInputPayloadKind {
-    pub(crate) fn empty_payload(self) -> ToolInputDeltaPayload {
+    pub fn empty_payload(self) -> ToolInputDeltaPayload {
         match self {
             Self::FunctionArguments => ToolInputDeltaPayload::FunctionArguments(String::new()),
             Self::CustomInput => ToolInputDeltaPayload::CustomInput(String::new()),

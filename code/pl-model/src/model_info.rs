@@ -52,6 +52,8 @@ pub struct ModelRequestProfile {
     pub body: Map<String, Value>,
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub options: Map<String, Value>,
+    #[serde(default, skip_serializing_if = "MaxTokensField::is_default")]
+    pub max_tokens_field: MaxTokensField,
 }
 
 impl ModelRequestProfile {
@@ -61,6 +63,21 @@ impl ModelRequestProfile {
             && self.headers.is_empty()
             && self.body.is_empty()
             && self.options.is_empty()
+            && self.max_tokens_field.is_default()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MaxTokensField {
+    #[default]
+    MaxTokens,
+    MaxCompletionTokens,
+}
+
+impl MaxTokensField {
+    pub fn is_default(&self) -> bool {
+        *self == Self::MaxTokens
     }
 }
 

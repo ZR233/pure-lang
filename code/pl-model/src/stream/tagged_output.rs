@@ -163,7 +163,7 @@ impl TaggedVisibleOutputAdapter {
             event @ (ModelStreamEvent::ToolInputStarted { .. }
             | ModelStreamEvent::ToolInputDelta { .. }
             | ModelStreamEvent::ToolCallReady { .. }
-            | ModelStreamEvent::StepStarted { .. }) => self
+            | ModelStreamEvent::ResponseStarted { .. }) => self
                 .flush_visible_text()
                 .into_iter()
                 .chain([event])

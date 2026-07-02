@@ -32,11 +32,16 @@ use crate::turn::{
 };
 
 mod permission;
+mod profile;
 pub(crate) mod progress;
 mod tool_dispatch;
 mod turn_loop;
 mod turn_result;
 
+pub use profile::{
+    AgentBackendProfile, CoreRuntimeOptions, CoreRuntimeProfile, PureCoreBuilder, ToolProfile,
+    WorkspaceProfile,
+};
 pub(crate) use turn_result::compact_text;
 /// 生成唯一的 turn ID（毫秒时间戳 + 序列号），用于隔离每个 turn 的 trace part id。
 fn generate_turn_id() -> String {
@@ -67,6 +72,9 @@ pub struct PureCore {
     lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     workspace_root: Option<PathBuf>,
     workspace_instructions: Option<String>,
+    instruction_profile: Option<crate::instruction::InstructionProfile>,
+    tool_profile: ToolProfile,
+    runtime_options: CoreRuntimeOptions,
     active_subagent: Option<SubagentContext>,
     agent_supervisor: crate::AgentSupervisor,
     tools: ToolRegistry,
@@ -82,6 +90,9 @@ impl PureCore {
             lsp_runtime: None,
             workspace_root: None,
             workspace_instructions: None,
+            instruction_profile: None,
+            tool_profile: ToolProfile::Minimal,
+            runtime_options: CoreRuntimeOptions::default(),
             active_subagent: None,
             agent_supervisor: crate::AgentSupervisor::default(),
             tools: ToolRegistry::new(),
@@ -100,6 +111,9 @@ impl PureCore {
             lsp_runtime: None,
             workspace_root: None,
             workspace_instructions: None,
+            instruction_profile: None,
+            tool_profile: ToolProfile::Minimal,
+            runtime_options: CoreRuntimeOptions::default(),
             active_subagent: None,
             agent_supervisor: crate::AgentSupervisor::default(),
             tools: ToolRegistry::new(),
@@ -117,29 +131,18 @@ impl PureCore {
     pub fn from_config(config: &PureConfig, role: ModelRole) -> Result<Self> {
         let resolved = config.resolve_role(role)?;
         let provider = create_provider_with_models(resolved.provider_info, resolved.models)?;
-        Ok(Self {
-            provider,
-            reasoning_effort: Some(resolved.role_config.effort),
-            config: Some(config.clone()),
-            mcp_runtime: None,
-            lsp_runtime: None,
-            workspace_root: None,
-            workspace_instructions: None,
-            active_subagent: None,
-            agent_supervisor: crate::AgentSupervisor::default(),
-            tools: ToolRegistry::new(),
-        })
+        Ok(PureCoreBuilder::new(provider)
+            .with_reasoning_effort(resolved.role_config.effort)
+            .with_config(config.clone())
+            .build())
     }
 
-    pub(crate) fn with_subagent_context(mut self, context: SubagentContext) -> Self {
+    pub fn with_subagent_context(mut self, context: SubagentContext) -> Self {
         self.active_subagent = Some(context);
         self
     }
 
-    pub(crate) fn with_agent_supervisor(
-        mut self,
-        agent_supervisor: crate::AgentSupervisor,
-    ) -> Self {
+    pub fn with_agent_supervisor(mut self, agent_supervisor: crate::AgentSupervisor) -> Self {
         self.agent_supervisor = agent_supervisor;
         self
     }
@@ -152,6 +155,19 @@ impl PureCore {
     pub fn with_lsp_runtime(mut self, registry: pl_lsp::LspRuntimeRegistry) -> Self {
         self.lsp_runtime = Some(registry);
         self
+    }
+
+    pub async fn register_profile_tools(&mut self) {
+        match self.tool_profile {
+            ToolProfile::LocalWorkspace => {
+                let workspace_root = self.workspace_root.clone().unwrap_or_else(|| {
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+                });
+                self.register_default_tools(workspace_root, self.workspace_instructions.clone())
+                    .await;
+            }
+            ToolProfile::HostProvided | ToolProfile::Minimal => {}
+        }
     }
 
     /// 注册一个工具。
@@ -174,6 +190,7 @@ impl PureCore {
         let workspace_root = workspace_root.into();
         self.workspace_root = Some(workspace_root.clone());
         self.workspace_instructions = workspace_instructions.clone();
+        self.tool_profile = ToolProfile::LocalWorkspace;
         self.register_skill_tools_for_workspace(
             workspace_root.clone(),
             workspace_instructions.clone(),
@@ -229,6 +246,7 @@ impl PureCore {
         self.register_available_mcp_tools().await
     }
 
+    #[cfg_attr(not(feature = "studio"), allow(dead_code))]
     pub(crate) fn register_skill_tools(
         &mut self,
         workspace_root: impl Into<std::path::PathBuf>,
@@ -303,6 +321,9 @@ impl PureCore {
             parallel_tool_calls: false,
             temperature: Some(0.0),
             max_tokens: Some(512),
+            store: None,
+            previous_response_id: None,
+            prompt_cache_key: None,
             reasoning,
             stream: false,
             trace: None,
@@ -338,7 +359,12 @@ impl PureCore {
         request: TurnRequest,
         event_tx: AgentEventSender,
     ) -> impl std::future::Future<Output = Result<TurnResult>> + Send + 'a {
-        self.run_turn_with_options(session, request, event_tx, TurnOptions::default())
+        self.run_turn_with_options(
+            session,
+            request,
+            event_tx,
+            self.runtime_options.default_turn_options.clone(),
+        )
     }
 
     pub async fn run_turn_with_options(

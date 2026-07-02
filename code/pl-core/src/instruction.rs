@@ -67,24 +67,99 @@ pub enum InstructionSourceKind {
     BuiltInBase,
     ModelBase,
     ConfigBaseOverride,
+    ProfileBaseOverride,
     Mode,
     Platform,
     ConfigDeveloper,
+    ProfileDeveloper,
     Skills,
     SubagentConstraint,
     SubagentForce,
     ConfigUser,
+    ProfileUser,
     ProjectDoc,
     WorkspaceFallback,
+    ProfileWorkspace,
+}
+
+/// 初始化阶段传入的提示词配置。
+///
+/// `InstructionProfile` 用于让不同宿主复用同一个 `pl-core` turn loop，
+/// 同时按运行场景注入系统提示词、开发者约束和用户上下文。它不包含具体
+/// 执行环境能力；工具和 workspace 行为由 core runtime profile 单独配置。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InstructionProfile {
+    base_system_prompt: Option<String>,
+    developer_blocks: Vec<InstructionBlock>,
+    user_context_blocks: Vec<InstructionBlock>,
+    workspace_instructions: Option<String>,
+}
+
+impl InstructionProfile {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_base_system_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.base_system_prompt = Some(prompt.into());
+        self
+    }
+
+    pub fn with_developer_block(
+        mut self,
+        label: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
+        self.developer_blocks.push(InstructionBlock {
+            source: InstructionSource::new(InstructionSourceKind::ProfileDeveloper, label),
+            content: content.into(),
+        });
+        self
+    }
+
+    pub fn with_user_context_block(
+        mut self,
+        label: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
+        self.user_context_blocks.push(InstructionBlock {
+            source: InstructionSource::new(InstructionSourceKind::ProfileUser, label),
+            content: content.into(),
+        });
+        self
+    }
+
+    pub fn with_workspace_instructions(mut self, instructions: impl Into<String>) -> Self {
+        self.workspace_instructions = Some(instructions.into());
+        self
+    }
+
+    pub fn workspace_instructions(&self) -> Option<&str> {
+        self.workspace_instructions.as_deref()
+    }
 }
 
 pub struct InstructionAssembler;
 
 impl InstructionAssembler {
     pub fn assemble(request: InstructionAssemblyRequest<'_>) -> Result<InstructionSnapshot> {
+        Self::assemble_inner(request, None)
+    }
+
+    pub fn assemble_with_profile(
+        request: InstructionAssemblyRequest<'_>,
+        profile: &InstructionProfile,
+    ) -> Result<InstructionSnapshot> {
+        Self::assemble_inner(request, Some(profile))
+    }
+
+    fn assemble_inner(
+        request: InstructionAssemblyRequest<'_>,
+        profile: Option<&InstructionProfile>,
+    ) -> Result<InstructionSnapshot> {
         let config_instructions = request.config.map(|config| &config.instructions);
         let mut snapshot = InstructionSnapshot {
-            base: base_block(config_instructions, request.model),
+            base: base_block(profile, config_instructions, request.model),
             developer: Vec::new(),
             user: Vec::new(),
         };
@@ -103,6 +178,11 @@ impl InstructionAssembler {
                 InstructionSource::new(InstructionSourceKind::ConfigDeveloper, "config developer"),
                 &config.developer,
             );
+        }
+        if let Some(profile) = profile {
+            for block in &profile.developer_blocks {
+                snapshot.push_developer(block.source.clone(), &block.content);
+            }
         }
         if let Some(config) = request.config {
             match crate::skill::build_skills_prompt(request.workspace_root, &config.skills) {
@@ -144,6 +224,17 @@ impl InstructionAssembler {
                 InstructionSource::new(InstructionSourceKind::WorkspaceFallback, "workspace"),
                 instructions,
             );
+        }
+        if let Some(profile) = profile {
+            for block in &profile.user_context_blocks {
+                snapshot.push_user(block.source.clone(), &block.content);
+            }
+            if let Some(instructions) = profile.workspace_instructions() {
+                snapshot.push_user(
+                    InstructionSource::new(InstructionSourceKind::ProfileWorkspace, "workspace"),
+                    instructions,
+                );
+            }
         }
 
         Ok(snapshot)
@@ -262,7 +353,24 @@ impl InstructionSource {
     }
 }
 
-fn base_block(config: Option<&InstructionsConfig>, model: &ModelInfo) -> InstructionBlock {
+fn base_block(
+    profile: Option<&InstructionProfile>,
+    config: Option<&InstructionsConfig>,
+    model: &ModelInfo,
+) -> InstructionBlock {
+    if let Some(base_override) = profile
+        .and_then(|profile| profile.base_system_prompt.as_deref())
+        .map(str::trim)
+        .filter(|content| !content.is_empty())
+    {
+        return InstructionBlock {
+            source: InstructionSource::new(
+                InstructionSourceKind::ProfileBaseOverride,
+                "profile base override",
+            ),
+            content: base_override.to_string(),
+        };
+    }
     if let Some(base_override) = config
         .map(|config| config.base_override.trim())
         .filter(|content| !content.is_empty())
@@ -519,6 +627,62 @@ mod tests {
 
         assert_eq!(snapshot.base.content, "model base");
         assert_eq!(snapshot.user, Vec::new());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn profile_can_override_base_and_add_context_blocks() {
+        let dir = temp_dir("profile");
+        fs::create_dir_all(&dir).unwrap();
+        let profile = InstructionProfile::new()
+            .with_base_system_prompt("profile base")
+            .with_developer_block("runtime", "profile developer")
+            .with_user_context_block("host", "profile user")
+            .with_workspace_instructions("profile workspace");
+
+        let snapshot = InstructionAssembler::assemble_with_profile(
+            InstructionAssemblyRequest {
+                config: None,
+                model: &ModelInfo::fallback("test-model"),
+                mode: CompileMode::Auto,
+                workspace_root: &dir,
+                current_dir: &dir,
+                workspace_instructions: None,
+                subagent_constraint: None,
+            },
+            &profile,
+        )
+        .unwrap();
+        let bundle = snapshot.to_bundle();
+
+        assert_eq!(snapshot.base.content, "profile base");
+        assert_eq!(
+            snapshot.base.source.kind,
+            InstructionSourceKind::ProfileBaseOverride
+        );
+        assert!(bundle.prelude_messages.iter().any(|message| {
+            matches!(
+                &message.content,
+                MessageContent::Text(text) if text.contains("profile developer")
+            )
+        }));
+        assert!(bundle.prelude_messages.iter().any(|message| {
+            matches!(
+                &message.content,
+                MessageContent::Text(text) if text.contains("profile user")
+            )
+        }));
+        assert_eq!(
+            snapshot
+                .user
+                .iter()
+                .map(|block| block.source.kind)
+                .collect::<Vec<_>>(),
+            vec![
+                InstructionSourceKind::ProfileUser,
+                InstructionSourceKind::ProfileWorkspace
+            ]
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 

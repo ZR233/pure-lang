@@ -190,6 +190,106 @@ async fn serve_sse_once(sse_body: String) -> (String, tokio::task::JoinHandle<()
     (format!("http://{addr}"), handle)
 }
 
+async fn serve_sse_sequence(
+    sse_bodies: Vec<String>,
+) -> (
+    String,
+    std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+    tokio::task::JoinHandle<()>,
+) {
+    serve_http_sequence(sse_bodies.into_iter().map(TestHttpResponse::sse).collect()).await
+}
+
+struct TestHttpResponse {
+    status: u16,
+    content_type: &'static str,
+    body: String,
+}
+
+impl TestHttpResponse {
+    fn sse(body: String) -> Self {
+        Self {
+            status: 200,
+            content_type: "text/event-stream",
+            body,
+        }
+    }
+
+    fn json(status: u16, body: String) -> Self {
+        Self {
+            status,
+            content_type: "application/json",
+            body,
+        }
+    }
+}
+
+async fn serve_http_sequence(
+    responses: Vec<TestHttpResponse>,
+) -> (
+    String,
+    std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+    tokio::task::JoinHandle<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let bodies = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let captured = bodies.clone();
+    let handle = tokio::spawn(async move {
+        for response in responses {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = Vec::new();
+            let mut temp = [0_u8; 1024];
+            let (header_end, content_length) = loop {
+                let n = socket.read(&mut temp).await.unwrap();
+                assert_ne!(n, 0);
+                buffer.extend_from_slice(&temp[..n]);
+                if let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n")
+                {
+                    let headers = String::from_utf8_lossy(&buffer[..header_end]);
+                    let content_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().ok())?
+                        })
+                        .unwrap_or(0);
+                    break (header_end, content_length);
+                }
+            };
+
+            while buffer.len() < header_end + 4 + content_length {
+                let n = socket.read(&mut temp).await.unwrap();
+                assert_ne!(n, 0);
+                buffer.extend_from_slice(&temp[..n]);
+            }
+            let body = &buffer[header_end + 4..header_end + 4 + content_length];
+            captured
+                .lock()
+                .unwrap()
+                .push(serde_json::from_slice(body).unwrap());
+
+            let response = format!(
+                "HTTP/1.1 {} {}\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                response.status,
+                if response.status >= 400 {
+                    "Error"
+                } else {
+                    "OK"
+                },
+                response.content_type,
+                response.body.len(),
+                response.body
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+            socket.shutdown().await.unwrap();
+        }
+    });
+
+    (format!("http://{addr}"), bodies, handle)
+}
+
 fn trace_started_kinds(events: &[TraceEvent]) -> Vec<TracePartKind> {
     events
         .iter()

@@ -28,6 +28,12 @@ pub(super) struct ResponsesRequestBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_output_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    store: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    previous_response_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prompt_cache_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     reasoning: Option<ResponsesReasoning>,
 }
 
@@ -98,6 +104,9 @@ impl ResponsesRequestBody {
             tools,
             temperature: request.temperature,
             max_output_tokens: request.max_tokens,
+            store: request.store,
+            previous_response_id: request.previous_response_id.clone(),
+            prompt_cache_key: request.prompt_cache_key.clone(),
             reasoning: request
                 .reasoning
                 .as_ref()
