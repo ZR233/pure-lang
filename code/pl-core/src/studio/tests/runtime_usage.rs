@@ -362,6 +362,7 @@ fn turn_result_with_usage(
             completion_tokens,
             total_tokens: prompt_tokens + completion_tokens,
             cached_prompt_tokens: 0,
+            reasoning_tokens: 0,
         },
         mode: CompileMode::Auto,
         session_message_count,

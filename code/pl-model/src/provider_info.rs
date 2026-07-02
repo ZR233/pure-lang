@@ -24,6 +24,7 @@ pub struct ProviderInfo {
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
     OpenAi,
+    OpenAiCompatibleChat,
     #[default]
     DeepSeek,
     Zhipu,
@@ -100,6 +101,23 @@ impl ProviderInfo {
         }
     }
 
+    pub fn openai_compatible_chat(
+        name: impl Into<String>,
+        base_url: impl Into<String>,
+        default_model: impl Into<String>,
+    ) -> Self {
+        Self {
+            provider_kind: ProviderKind::OpenAiCompatibleChat,
+            name: name.into(),
+            base_url: base_url.into(),
+            default_model: default_model.into(),
+            bearer_token: None,
+            http_headers: None,
+            tool_wire_policy: ToolWirePolicy::FunctionFallback,
+            apply_patch_tool_type: None,
+        }
+    }
+
     pub fn uses_native_custom_tools(&self) -> bool {
         matches!(self.tool_wire_policy, ToolWirePolicy::NativeCustomTools)
     }
@@ -149,6 +167,21 @@ mod tests {
         assert_eq!(info.name, "Zhipu Coding Plan");
         assert_eq!(info.base_url, ZHIPU_CODING_PLAN_BASE_URL);
         assert_eq!(info.default_model, "glm-5.2");
+        assert_eq!(info.tool_wire_policy, ToolWirePolicy::FunctionFallback);
+    }
+
+    #[test]
+    fn openai_compatible_chat_provider_can_express_mimo() {
+        let info = ProviderInfo::openai_compatible_chat(
+            "MiMo",
+            "https://mimo.example.com/v1",
+            "mimo-chat",
+        );
+
+        assert_eq!(info.provider_kind, ProviderKind::OpenAiCompatibleChat);
+        assert_eq!(info.name, "MiMo");
+        assert_eq!(info.base_url, "https://mimo.example.com/v1");
+        assert_eq!(info.default_model, "mimo-chat");
         assert_eq!(info.tool_wire_policy, ToolWirePolicy::FunctionFallback);
     }
 }

@@ -3,6 +3,7 @@ use pl_protocol::{
 };
 use serde::Serialize;
 
+use crate::model_info::{MaxTokensField, ModelInfo};
 use crate::request::{CompletionRequest, ToolCall, ToolCallPayload, ToolSchema};
 
 use super::body::ToolFormatBody;
@@ -22,10 +23,12 @@ pub(super) struct ChatRequestBody {
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_completion_tokens: Option<u64>,
 }
 
 impl ChatRequestBody {
-    pub(super) fn from_request(request: &CompletionRequest) -> Result<Self> {
+    pub(super) fn from_request(request: &CompletionRequest, model: &ModelInfo) -> Result<Self> {
         let mut messages = Vec::new();
 
         if let Some(instructions) = &request.instructions {
@@ -75,6 +78,11 @@ impl ChatRequestBody {
             .then(|| request.tools.iter().map(ChatTool::from_schema).collect());
         let tool_choice = tools.as_ref().map(|_| request.tool_choice.clone());
 
+        let (max_tokens, max_completion_tokens) = match model.request_profile.max_tokens_field {
+            MaxTokensField::MaxTokens => (request.max_tokens, None),
+            MaxTokensField::MaxCompletionTokens => (None, request.max_tokens),
+        };
+
         Ok(Self {
             model: request.model.clone(),
             messages,
@@ -82,7 +90,8 @@ impl ChatRequestBody {
             tools,
             tool_choice,
             temperature: request.temperature,
-            max_tokens: request.max_tokens,
+            max_tokens,
+            max_completion_tokens,
         })
     }
 }

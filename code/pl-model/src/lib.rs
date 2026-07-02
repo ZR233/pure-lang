@@ -1,4 +1,5 @@
 mod capabilities;
+mod continuation;
 mod default_models;
 mod manager;
 mod model_family;
@@ -16,13 +17,16 @@ pub use capabilities::{
     ModelCapabilities, ModelModality, ProviderCapabilities, ReasoningInterleaved,
     ReasoningInterleavedField, ToolCapabilities,
 };
+pub use continuation::ModelContinuationState;
 pub use default_models::{
     deepseek_default_model_slugs, default_models, openai_default_model_slugs,
     zhipu_default_model_slugs,
 };
 pub use manager::{DefaultModelsManager, ModelsManager};
 pub use model_family::{ModelFamily, ModelPricing};
-pub use model_info::{ModelInfo, ModelRequestProfile, TruncationMode, TruncationPolicy};
+pub use model_info::{
+    MaxTokensField, ModelInfo, ModelRequestProfile, TruncationMode, TruncationPolicy,
+};
 pub use parameter::{ModelParameter, ParameterWire, WireAssignment};
 pub use pl_protocol::ToolCallKind;
 pub use provider::{
@@ -40,4 +44,9 @@ pub use provider_usage::{
 pub use request::{
     CompletionRequest, CompletionResponse, CompletionTraceContext, FinishReason, ReasoningConfig,
     ReasoningSummary, TokenUsage, ToolCall, ToolCallPayload, ToolFormat, ToolSchema,
+};
+pub use stream::{
+    CompletionBlockContent, CompletionBlockField, CompletionBlockKind, CompletionEventStream,
+    CompletionStreamAccumulator, CompletionStreamEvent, ToolInputDeltaPayload,
+    ToolInputPayloadKind, collect_completion_event_stream,
 };

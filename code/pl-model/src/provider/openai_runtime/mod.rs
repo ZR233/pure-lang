@@ -20,7 +20,9 @@ use crate::protocol::openai::sse;
 use crate::protocol::openai::{OpenAiProtocol, OpenAiRequestBody};
 use crate::provider_info::{ProviderInfo, ProviderKind};
 use crate::request::{CompletionRequest, CompletionResponse};
-use crate::stream::process_provider_stream;
+use crate::stream::{
+    CompletionEventStream, collect_completion_event_stream, decode_provider_stream,
+};
 
 #[derive(Debug)]
 pub struct OpenAiProvider {
@@ -74,6 +76,17 @@ impl OpenAiProvider {
         request: CompletionRequest,
         event_tx: AgentEventSender,
     ) -> impl std::future::Future<Output = Result<CompletionResponse>> + Send {
+        let trace = request.trace.clone();
+        async move {
+            let event_stream = self.stream_events(request).await?;
+            collect_completion_event_stream(event_stream, &event_tx, trace).await
+        }
+    }
+
+    pub(crate) fn stream_events(
+        &self,
+        request: CompletionRequest,
+    ) -> impl std::future::Future<Output = Result<CompletionEventStream>> + Send {
         let http_client = self.http_client.clone();
         let api_base = self.resolve_base_url();
         let protocol = self.protocol;
@@ -91,7 +104,6 @@ impl OpenAiProvider {
             let supports_custom_tools = info.uses_native_custom_tools()
                 && effective_capabilities.supports_custom_tools()
                 && effective_capabilities.supports_freeform_tools();
-            let trace = request.trace.clone();
             let mut request = request.provider_compatible(supports_custom_tools);
             request.validate_against(&effective_capabilities)?;
             if let Some(api_model) = &model_info.request_profile.api_model {
@@ -118,7 +130,7 @@ impl OpenAiProvider {
                     .map_err(openai_error_to_pure)?,
             };
 
-            process_provider_stream(stream, &event_tx, &protocol, trace).await
+            Ok(decode_provider_stream(stream, protocol))
         }
     }
 
@@ -235,6 +247,13 @@ fn provider_profile(
             openai_default_model_slugs(),
             OpenAiProtocol::responses(),
             ProviderCapabilities::all(),
+        ),
+        ProviderKind::OpenAiCompatibleChat => (
+            &[],
+            OpenAiProtocol::chat(),
+            ProviderCapabilities::STREAMING
+                | ProviderCapabilities::FUNCTION_CALLING
+                | ProviderCapabilities::PARALLEL_TOOL_CALLS,
         ),
         ProviderKind::DeepSeek => (
             deepseek_default_model_slugs(),

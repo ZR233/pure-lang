@@ -80,6 +80,8 @@ pub struct ChatTokenUsage {
     pub total_tokens: Option<u64>,
     pub prompt_tokens_details: Option<serde_json::Value>,
     pub input_tokens_details: Option<serde_json::Value>,
+    pub completion_tokens_details: Option<serde_json::Value>,
+    pub output_tokens_details: Option<serde_json::Value>,
     pub prompt_cache_hit_tokens: Option<u64>,
 }
 
@@ -360,7 +362,7 @@ impl OpenAiStreamDecoder {
                 event @ (StreamEvent::ToolInputStarted { .. }
                 | StreamEvent::ToolInputDelta { .. }
                 | StreamEvent::ToolCallReady { .. }
-                | StreamEvent::StepStarted { .. }) => {
+                | StreamEvent::ResponseStarted { .. }) => {
                     normalized.extend(self.close_open_content_blocks());
                     normalized.push(event);
                 }
@@ -543,6 +545,18 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
                             .and_then(cached_tokens_from_details)
                     })
                     .unwrap_or(0),
+                reasoning_tokens: u
+                    .output_tokens_details
+                    .as_ref()
+                    .and_then(|details| details.get("reasoning_tokens"))
+                    .and_then(serde_json::Value::as_u64)
+                    .or_else(|| {
+                        u.completion_tokens_details
+                            .as_ref()
+                            .and_then(|details| details.get("reasoning_tokens"))
+                            .and_then(serde_json::Value::as_u64)
+                    })
+                    .unwrap_or(0),
             });
             if let Some(usage) = usage {
                 events.push(StreamEvent::Usage(usage));
@@ -556,7 +570,7 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
     }
 
     match event.kind.as_str() {
-        "response.created" => Some(StreamEventBatch::Single(StreamEvent::StepStarted {
+        "response.created" => Some(StreamEventBatch::Single(StreamEvent::ResponseStarted {
             response_id: event
                 .response
                 .as_ref()
@@ -653,6 +667,16 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
                                     .and_then(cached_tokens_from_details)
                             })
                             .or_else(|| u.get("prompt_cache_hit_tokens").and_then(|v| v.as_u64()))
+                            .unwrap_or(0),
+                        reasoning_tokens: u
+                            .get("output_tokens_details")
+                            .and_then(|details| details.get("reasoning_tokens"))
+                            .and_then(serde_json::Value::as_u64)
+                            .or_else(|| {
+                                u.get("completion_tokens_details")
+                                    .and_then(|details| details.get("reasoning_tokens"))
+                                    .and_then(serde_json::Value::as_u64)
+                            })
                             .unwrap_or(0),
                     })
                 })

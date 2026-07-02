@@ -14,6 +14,8 @@ struct ProviderTokenUsage {
     cached_prompt_tokens: Option<u64>,
     prompt_tokens_details: Option<TokenUsageDetails>,
     input_tokens_details: Option<TokenUsageDetails>,
+    completion_tokens_details: Option<TokenUsageDetails>,
+    output_tokens_details: Option<TokenUsageDetails>,
 }
 
 impl ProviderTokenUsage {
@@ -33,12 +35,25 @@ impl ProviderTokenUsage {
             .unwrap_or(0)
     }
 
+    fn reasoning_tokens(&self) -> u64 {
+        self.output_tokens_details
+            .as_ref()
+            .and_then(TokenUsageDetails::reasoning)
+            .or_else(|| {
+                self.completion_tokens_details
+                    .as_ref()
+                    .and_then(TokenUsageDetails::reasoning)
+            })
+            .unwrap_or(0)
+    }
+
     fn to_responses_usage(&self) -> Option<TokenUsage> {
         Some(TokenUsage {
             prompt_tokens: self.input_tokens?,
             completion_tokens: self.output_tokens?,
             total_tokens: self.total_tokens.unwrap_or(0),
             cached_prompt_tokens: self.cached_prompt_tokens(),
+            reasoning_tokens: self.reasoning_tokens(),
         })
     }
 
@@ -48,6 +63,7 @@ impl ProviderTokenUsage {
             completion_tokens: self.completion_tokens?,
             total_tokens: self.total_tokens.unwrap_or(0),
             cached_prompt_tokens: self.cached_prompt_tokens(),
+            reasoning_tokens: self.reasoning_tokens(),
         })
     }
 }
@@ -57,6 +73,7 @@ struct TokenUsageDetails {
     cached_tokens: Option<u64>,
     cache_read_tokens: Option<u64>,
     cached_input_tokens: Option<u64>,
+    reasoning_tokens: Option<u64>,
 }
 
 impl TokenUsageDetails {
@@ -65,10 +82,15 @@ impl TokenUsageDetails {
             .or(self.cache_read_tokens)
             .or(self.cached_input_tokens)
     }
+
+    fn reasoning(&self) -> Option<u64> {
+        self.reasoning_tokens
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
 struct ResponsesResponseBody {
+    id: Option<String>,
     model: Option<String>,
     output: Option<Vec<ResponsesOutputItem>>,
     usage: Option<ProviderTokenUsage>,
@@ -116,6 +138,7 @@ pub(crate) fn responses_parse_response(body: serde_json::Value) -> Result<Comple
     };
 
     Ok(CompletionResponse {
+        response_id: body.id,
         raw_content: content.clone(),
         content,
         reasoning_content: None,
@@ -224,6 +247,7 @@ pub(crate) fn chat_parse_response(body: serde_json::Value) -> Result<CompletionR
         .unwrap_or(FinishReason::Stop);
 
     Ok(CompletionResponse {
+        response_id: None,
         raw_content: content.clone(),
         content,
         reasoning_content,

@@ -2,6 +2,8 @@ use pl_protocol::{
     AgentStatus, BudgetLimitKind, BudgetUsage, Message, RuntimeUsageSnapshot, StudioMessage,
     StudioPart, StudioTurnStatus,
 };
+
+pub use crate::attachment::MaterializedAttachment;
 use pl_trace::TraceEvent;
 
 use crate::TurnResult;
@@ -87,17 +89,6 @@ pub struct AttachmentRecord {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub created_at: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MaterializedAttachment {
-    pub attachment_id: String,
-    pub media_type: String,
-    pub filename: Option<String>,
-    pub data: String,
-    pub byte_size: u64,
-    pub width: Option<u32>,
-    pub height: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

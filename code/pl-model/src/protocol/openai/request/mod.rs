@@ -29,7 +29,11 @@ pub(crate) fn build_openai_request_body(
     request: &CompletionRequest,
     model: &ModelInfo,
 ) -> Result<OpenAiRequestBody> {
-    validate_tool_history(&request.messages, endpoint)?;
+    validate_tool_history(
+        &request.messages,
+        endpoint,
+        endpoint == OpenAiEndpoint::Responses && request.previous_response_id.is_some(),
+    )?;
     match endpoint {
         OpenAiEndpoint::Responses => {
             let mut body = to_object_map(&ResponsesRequestBody::from_request(request)?)?;
@@ -37,7 +41,7 @@ pub(crate) fn build_openai_request_body(
             Ok(OpenAiRequestBody::Responses(body))
         }
         OpenAiEndpoint::ChatCompletions => {
-            let mut body = to_object_map(&ChatRequestBody::from_request(request)?)?;
+            let mut body = to_object_map(&ChatRequestBody::from_request(request, model)?)?;
             finalize_body(&mut body, model, &request.reasoning);
             Ok(OpenAiRequestBody::Chat(body))
         }

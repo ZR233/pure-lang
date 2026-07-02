@@ -19,9 +19,8 @@ pub use interaction_runtime::{
     InteractionEmitter, InteractionEmitterFuture, InteractionRuntime, resolution_matches_kind,
 };
 pub use records::{
-    AgentSnapshotRecord, AgentTimelineEventRecord, AttachmentRecord, MaterializedAttachment,
-    ProjectRecord, SessionRecord, SessionRuntimeRecord, SessionSkillRecord, SessionVisibility,
-    StudioPromptOutcome,
+    AgentSnapshotRecord, AgentTimelineEventRecord, AttachmentRecord, ProjectRecord, SessionRecord,
+    SessionRuntimeRecord, SessionSkillRecord, SessionVisibility, StudioPromptOutcome,
 };
 pub use runtime::{
     RunPromptRequest, StudioPlanImplementationLifecycle, StudioResolveInteractionResponse,

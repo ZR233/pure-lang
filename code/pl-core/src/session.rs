@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use pl_model::ToolCall;
+use pl_model::{ModelContinuationState, ToolCall};
 use pl_protocol::{
     Message, MessageContent, MessageRole, ToolCallHistoryMetadata, ToolCallKind, ToolResultMetadata,
 };
@@ -12,6 +12,7 @@ use pl_protocol::{
 pub struct CoreSession {
     messages: Vec<Message>,
     revision: u64,
+    continuation: ModelContinuationState,
 }
 
 impl CoreSession {
@@ -23,6 +24,7 @@ impl CoreSession {
         Self {
             messages,
             revision: 0,
+            continuation: ModelContinuationState::default(),
         }
     }
 
@@ -37,10 +39,20 @@ impl CoreSession {
     pub fn replace_messages(&mut self, messages: Vec<Message>) {
         self.messages = messages;
         self.revision = self.revision.saturating_add(1);
+        self.reset_continuation();
+    }
+
+    pub fn replace_messages_preserving_continuation(&mut self, messages: Vec<Message>) {
+        self.messages = messages;
+        self.revision = self.revision.saturating_add(1);
+        self.continuation
+            .reset_if_acknowledged_messages_were_removed(self.messages.len());
     }
 
     pub(crate) fn truncate_messages(&mut self, len: usize) {
         self.messages.truncate(len);
+        self.continuation
+            .reset_if_acknowledged_messages_were_removed(len);
     }
 
     pub fn push_user_prompt(&mut self, prompt: String) {
@@ -120,6 +132,50 @@ impl CoreSession {
     pub fn is_empty(&self) -> bool {
         self.messages.is_empty()
     }
+
+    pub fn set_prompt_cache_key(&mut self, key: String) {
+        self.continuation.set_prompt_cache_key(key);
+    }
+
+    pub fn prompt_cache_key(&self) -> Option<&str> {
+        self.continuation.prompt_cache_key()
+    }
+
+    pub fn previous_response_id(&self) -> Option<&str> {
+        self.continuation.previous_response_id()
+    }
+
+    pub fn acknowledged_message_count(&self) -> usize {
+        self.continuation.acknowledged_message_count()
+    }
+
+    pub fn continuation_start_index(&self) -> Option<usize> {
+        self.continuation.continuation_start_index()
+    }
+
+    pub fn continuation_disabled(&self) -> bool {
+        self.continuation.disabled()
+    }
+
+    pub fn acknowledge_model_response(
+        &mut self,
+        acknowledged_message_count: usize,
+        response_id: Option<String>,
+    ) {
+        self.continuation.acknowledge_response(
+            acknowledged_message_count,
+            response_id,
+            self.messages.len(),
+        );
+    }
+
+    pub fn mark_continuation_unsupported(&mut self) {
+        self.continuation.mark_unsupported();
+    }
+
+    pub fn reset_continuation(&mut self) {
+        self.continuation.reset();
+    }
 }
 
 #[cfg(test)]
@@ -128,6 +184,15 @@ mod tests {
 
     use super::*;
     use pretty_assertions::assert_eq;
+
+    fn text_message(text: &str) -> Message {
+        Message {
+            role: MessageRole::User,
+            content: MessageContent::Text(text.to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        }
+    }
 
     #[test]
     fn new_session_is_empty() {
@@ -279,5 +344,49 @@ mod tests {
             session.messages()[0].content,
             MessageContent::Text("first".to_string())
         );
+    }
+
+    #[test]
+    fn continuation_state_tracks_response_and_acknowledged_messages() {
+        let mut session = CoreSession::new();
+        session.push_user_prompt("hello".to_string());
+        session.set_prompt_cache_key("cache-1".to_string());
+        session.acknowledge_model_response(session.len(), Some("resp-1".to_string()));
+
+        assert_eq!(session.prompt_cache_key(), Some("cache-1"));
+        assert_eq!(session.previous_response_id(), Some("resp-1"));
+        assert_eq!(session.acknowledged_message_count(), 1);
+        assert_eq!(session.continuation_start_index(), Some(1));
+
+        session.mark_continuation_unsupported();
+
+        assert_eq!(session.previous_response_id(), None);
+        assert_eq!(session.acknowledged_message_count(), 0);
+        assert_eq!(session.continuation_start_index(), None);
+        assert!(session.continuation_disabled());
+    }
+
+    #[test]
+    fn replace_messages_preserving_continuation_keeps_valid_response_state() {
+        let mut session = CoreSession::from_messages(vec![text_message("first")]);
+        session.set_prompt_cache_key("cache-1".to_string());
+        session.acknowledge_model_response(session.len(), Some("resp-1".to_string()));
+
+        session.replace_messages_preserving_continuation(vec![
+            text_message("first"),
+            text_message("second"),
+        ]);
+
+        assert_eq!(session.prompt_cache_key(), Some("cache-1"));
+        assert_eq!(session.previous_response_id(), Some("resp-1"));
+        assert_eq!(session.acknowledged_message_count(), 1);
+        assert_eq!(session.continuation_start_index(), Some(1));
+
+        session.replace_messages_preserving_continuation(Vec::new());
+
+        assert_eq!(session.prompt_cache_key(), Some("cache-1"));
+        assert_eq!(session.previous_response_id(), None);
+        assert_eq!(session.acknowledged_message_count(), 0);
+        assert_eq!(session.continuation_start_index(), None);
     }
 }

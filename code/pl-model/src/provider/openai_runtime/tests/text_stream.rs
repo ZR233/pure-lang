@@ -57,6 +57,33 @@ fn stream_accumulator_returns_content_and_reasoning_content() {
 }
 
 #[test]
+fn stream_accumulator_preserves_response_id() {
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let mut accumulator = StreamCompletionAccumulator::new(None);
+
+    accumulator
+        .apply(
+            StreamEvent::ResponseStarted {
+                response_id: Some("resp_started".to_string()),
+            },
+            &event_tx,
+        )
+        .unwrap();
+    accumulator
+        .apply(
+            StreamEvent::Completed {
+                response_id: Some("resp_completed".to_string()),
+            },
+            &event_tx,
+        )
+        .unwrap();
+
+    let response = accumulator.finish(&event_tx).unwrap();
+
+    assert_eq!(response.response_id.as_deref(), Some("resp_completed"));
+}
+
+#[test]
 fn stream_accumulator_streams_commentary_without_content() {
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
     let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {

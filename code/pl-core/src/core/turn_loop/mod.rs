@@ -38,6 +38,12 @@ use super::turn_result::{
     unix_seconds,
 };
 
+fn is_continuation_unsupported_error(error: &pl_protocol::PureError) -> bool {
+    let message = error.to_string();
+    message.contains("previous_response_id")
+        && (message.contains("not supported") || message.contains("only supported"))
+}
+
 pub(super) async fn run_turn_with_trace(
     core: &PureCore,
     session: &mut CoreSession,
@@ -83,6 +89,9 @@ pub(super) async fn run_turn_with_trace(
         request.prompt.clone(),
         request.trace_attachments.clone(),
     );
+    if let Some(prompt_cache_key) = options.prompt_cache_key.clone() {
+        session.set_prompt_cache_key(prompt_cache_key);
+    }
     session.push_user_content(request.user_content.clone());
     record_enabled_tools(recorder, &turn_id, request.mode, &tool_schemas);
     let turn_item = recorder.turn_item(&turn_id, TracePartStatus::Running);
@@ -105,15 +114,23 @@ pub(super) async fn run_turn_with_trace(
     let model_info = provider.model_info(&model);
     let instruction_snapshot = match request.instruction_snapshot.clone() {
         Some(snapshot) => snapshot,
-        None => InstructionAssembler::assemble(InstructionAssemblyRequest {
-            config: core.config.as_ref(),
-            model: &model_info,
-            mode: request.mode,
-            workspace_root: &workspace_root,
-            current_dir: &workspace_root,
-            workspace_instructions: request.workspace_instructions.as_deref(),
-            subagent_constraint: None,
-        })?,
+        None => {
+            let assembly_request = InstructionAssemblyRequest {
+                config: core.config.as_ref(),
+                model: &model_info,
+                mode: request.mode,
+                workspace_root: &workspace_root,
+                current_dir: &workspace_root,
+                workspace_instructions: request.workspace_instructions.as_deref(),
+                subagent_constraint: None,
+            };
+            match core.instruction_profile.as_ref() {
+                Some(profile) => {
+                    InstructionAssembler::assemble_with_profile(assembly_request, profile)?
+                }
+                None => InstructionAssembler::assemble(assembly_request)?,
+            }
+        }
     };
     let turn_instruction_snapshot = if requires_subagent_dispatch {
         instruction_snapshot
@@ -242,8 +259,12 @@ pub(super) async fn run_turn_with_trace(
             break;
         }
         budget_tracker.record_model_step();
+        let continuation_start = session.continuation_start_index();
+        let history_source = continuation_start
+            .and_then(|start| session.messages().get(start..))
+            .unwrap_or_else(|| session.messages());
         let history_messages =
-            materialize_messages(session.messages(), &request.materialized_attachments)?;
+            materialize_messages(history_source, &request.materialized_attachments)?;
         let mut messages = instruction_bundle.prelude_messages.clone();
         messages.extend(history_messages.clone());
         if iteration == 0 {
@@ -267,6 +288,9 @@ pub(super) async fn run_turn_with_trace(
             parallel_tool_calls,
             temperature: None,
             max_tokens: None,
+            store: session.prompt_cache_key().map(|_| true),
+            previous_response_id: session.previous_response_id().map(ToString::to_string),
+            prompt_cache_key: session.prompt_cache_key().map(ToString::to_string),
             reasoning: reasoning.clone(),
             stream: true,
             trace: Some(pl_model::CompletionTraceContext {
@@ -280,6 +304,7 @@ pub(super) async fn run_turn_with_trace(
         progress.heartbeat("正在等待模型响应。");
         progress.debug(format!("模型 `{model}` 流式请求已发起。"));
 
+        let had_continuation = completion_request.previous_response_id.is_some();
         let response_result = match &cancellation_token {
             Some(token) => {
                 tokio::select! {
@@ -323,6 +348,13 @@ pub(super) async fn run_turn_with_trace(
                 ));
             }
             Err(error) => {
+                if had_continuation && is_continuation_unsupported_error(&error) {
+                    session.mark_continuation_unsupported();
+                    progress.tool_detail(
+                        "provider 不支持 previous_response_id，已回退为完整上下文。".to_string(),
+                    );
+                    continue;
+                }
                 let (error, severity) =
                     normalize_provider_error(active_subagent.as_ref(), error.to_string());
                 return Ok(failed_turn_result(
@@ -375,6 +407,7 @@ pub(super) async fn run_turn_with_trace(
 
         let content = response.content.unwrap_or_default();
         let reasoning_content = response.reasoning_content.clone();
+        let response_id = response.response_id.clone();
         let tool_calls = response.tool_calls;
 
         total_usage.prompt_tokens += response.usage.prompt_tokens;
@@ -421,6 +454,7 @@ pub(super) async fn run_turn_with_trace(
             last_reasoning_content = reasoning_content;
             session_message_count = session.messages().len();
             safe_message_count = session_message_count;
+            session.acknowledge_model_response(session_message_count, response_id);
             break;
         }
 
@@ -442,6 +476,7 @@ pub(super) async fn run_turn_with_trace(
         if response_reached_auto_compact_limit {
             provider_prompt_tokens_for_compaction = Some(response_prompt_tokens);
         }
+        session.acknowledge_model_response(session.messages().len(), response_id);
         let count = tool_calls.len();
         progress.tool_detail(format!("模型请求调用 {count} 个工具。"));
 

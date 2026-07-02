@@ -22,6 +22,36 @@ async fn default_tools_register_bash_and_agent_tools() {
 }
 
 #[tokio::test]
+async fn profiled_local_workspace_registers_default_tools() {
+    let runtime = CoreRuntimeProfile::local_workspace(std::env::temp_dir())
+        .with_workspace_instructions("rules");
+    let mut core = PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
+        .unwrap()
+        .with_runtime_profile(runtime)
+        .build();
+
+    core.register_profile_tools().await;
+
+    assert!(core.tools.get("bash").is_some());
+    assert!(core.tools.get("read_file").is_some());
+    assert!(core.tools.get("spawn_agent").is_some());
+}
+
+#[tokio::test]
+async fn profiled_host_tools_do_not_register_local_workspace_tools() {
+    let runtime = CoreRuntimeProfile::host_provided(std::env::temp_dir())
+        .with_workspace_instructions("rules");
+    let mut core = PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
+        .unwrap()
+        .with_runtime_profile(runtime)
+        .build();
+
+    core.register_profile_tools().await;
+
+    assert!(core.tools.is_empty());
+}
+
+#[tokio::test]
 async fn default_tools_register_lsp_query_when_runtime_is_shared() {
     let registry = pl_lsp::LspRuntimeRegistry::new();
     let mut core = PureCore::default_provider()
