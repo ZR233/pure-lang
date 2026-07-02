@@ -1,5 +1,7 @@
 use pretty_assertions::assert_eq;
 
+use crate::ToolCallPayload;
+use crate::stream::StreamCompletionAccumulator;
 use crate::stream::event::{
     ModelBlockContent, ModelBlockField, ModelBlockKind, ToolInputPayloadKind,
 };
@@ -676,6 +678,58 @@ fn process_chat_followup_tool_delta_keeps_stream_id_without_item_id() {
             assert_eq!(delta, "{\"path\":\"Cargo.toml\"}");
         }
         other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
+fn chat_completion_split_tool_chunks_finish_as_one_named_call() {
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let mut decoder = OpenAiStreamDecoder::new(false);
+    let mut accumulator = StreamCompletionAccumulator::new(None);
+    let events = [
+        chat_event(serde_json::json!({
+            "tool_calls": [{
+                "index": 0,
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "list_agents",
+                    "arguments": ""
+                }
+            }]
+        })),
+        chat_event(serde_json::json!({
+            "tool_calls": [{
+                "index": 0,
+                "function": {
+                    "arguments": "{}"
+                }
+            }]
+        })),
+        serde_json::from_value(serde_json::json!({
+            "choices": [{
+                "delta": {},
+                "finish_reason": "tool_calls"
+            }]
+        }))
+        .unwrap(),
+    ];
+
+    for event in &events {
+        for stream_event in decoder.decode(event) {
+            accumulator.apply(stream_event, &event_tx).unwrap();
+        }
+    }
+    let response = accumulator.finish(&event_tx).unwrap();
+
+    assert_eq!(response.tool_calls.len(), 1);
+    assert_eq!(response.tool_calls[0].id, "call_1");
+    assert_eq!(response.tool_calls[0].name, "list_agents");
+    match &response.tool_calls[0].payload {
+        ToolCallPayload::Function { arguments } => {
+            assert_eq!(arguments, &serde_json::json!({}));
+        }
+        other => panic!("unexpected payload: {other:?}"),
     }
 }
 
