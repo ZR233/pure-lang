@@ -160,3 +160,177 @@ async fn enabled_tools_snapshot_remains_internal_trace_event() {
     assert_eq!(event.turn_id, "turn-1");
     assert!(event.tools.contains(&"read_file".to_string()));
 }
+
+#[tokio::test]
+async fn run_turn_uses_prompt_cache_and_previous_response_id_incrementally() {
+    let first_sse = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"first ok\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"first ok\"}]}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let second_sse = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_2\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_2\",\"delta\":\"second ok\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_2\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"second ok\"}]}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_2\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let (base_url, bodies, handle) = serve_sse_sequence(vec![first_sse, second_sse]).await;
+    let mut provider = ProviderInfo::openai(Some(base_url));
+    provider.bearer_token = Some("test-token".to_string());
+    provider.default_model = "local-responses".to_string();
+    let core = PureCore::from_provider_info(provider).unwrap();
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
+    let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+    let mut session = CoreSession::new();
+    let options = TurnOptions::default().with_prompt_cache_key("cache-session".to_string());
+
+    core.run_turn_with_trace(
+        &mut session,
+        TurnRequest::new("first prompt".to_string(), CompileMode::Auto)
+            .with_budget(crate::turn::TurnBudget::new(60_000)),
+        &mut recorder,
+        options.clone(),
+    )
+    .await
+    .unwrap();
+    core.run_turn_with_trace(
+        &mut session,
+        TurnRequest::new("second prompt".to_string(), CompileMode::Auto)
+            .with_budget(crate::turn::TurnBudget::new(60_000)),
+        &mut recorder,
+        options,
+    )
+    .await
+    .unwrap();
+    handle.await.unwrap();
+
+    let bodies = bodies.lock().unwrap();
+    assert_eq!(bodies.len(), 2);
+    assert_eq!(bodies[0]["store"], serde_json::json!(true));
+    assert_eq!(
+        bodies[0]["prompt_cache_key"],
+        serde_json::json!("cache-session")
+    );
+    assert!(bodies[0].get("previous_response_id").is_none());
+    assert_eq!(bodies[1]["store"], serde_json::json!(true));
+    assert_eq!(
+        bodies[1]["prompt_cache_key"],
+        serde_json::json!("cache-session")
+    );
+    assert_eq!(
+        bodies[1]["previous_response_id"],
+        serde_json::json!("resp_1")
+    );
+    let second_input = serde_json::to_string(&bodies[1]["input"]).unwrap();
+    assert!(second_input.contains("second prompt"));
+    assert!(!second_input.contains("first prompt"));
+    assert!(!second_input.contains("first ok"));
+}
+
+#[tokio::test]
+async fn run_turn_uses_runtime_profile_default_turn_options() {
+    let sse_body = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let (base_url, bodies, handle) = serve_sse_sequence(vec![sse_body]).await;
+    let mut provider = ProviderInfo::openai(Some(base_url));
+    provider.bearer_token = Some("test-token".to_string());
+    provider.default_model = "local-responses".to_string();
+    let runtime = CoreRuntimeProfile::minimal().with_runtime_options(
+        CoreRuntimeOptions::default()
+            .with_turn_options(TurnOptions::default().with_prompt_cache_key("profile-cache")),
+    );
+    let core = PureCoreBuilder::from_provider_info(provider)
+        .unwrap()
+        .with_runtime_profile(runtime)
+        .build();
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
+    let mut session = CoreSession::new();
+
+    core.run_turn(
+        &mut session,
+        TurnRequest::new("profile prompt".to_string(), CompileMode::Auto)
+            .with_budget(crate::turn::TurnBudget::new(60_000)),
+        event_tx,
+    )
+    .await
+    .unwrap();
+    handle.await.unwrap();
+
+    let bodies = bodies.lock().unwrap();
+    assert_eq!(bodies.len(), 1);
+    assert_eq!(bodies[0]["store"], serde_json::json!(true));
+    assert_eq!(
+        bodies[0]["prompt_cache_key"],
+        serde_json::json!("profile-cache")
+    );
+}
+
+#[tokio::test]
+async fn run_turn_retries_full_history_when_continuation_is_unsupported() {
+    let retry_sse = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_retry\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_retry\",\"delta\":\"retry ok\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_retry\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"retry ok\"}]}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_retry\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let unsupported = serde_json::json!({
+        "error": {
+            "message": "previous_response_id is not supported by this endpoint"
+        }
+    })
+    .to_string();
+    let (base_url, bodies, handle) = serve_http_sequence(vec![
+        TestHttpResponse::json(400, unsupported),
+        TestHttpResponse::sse(retry_sse),
+    ])
+    .await;
+    let mut provider = ProviderInfo::openai(Some(base_url));
+    provider.bearer_token = Some("test-token".to_string());
+    provider.default_model = "local-responses".to_string();
+    let core = PureCore::from_provider_info(provider).unwrap();
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
+    let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+    let mut session = CoreSession::new();
+    session.push_user_prompt("old prompt".to_string());
+    session.push_assistant_response("old answer".to_string(), None);
+    session.set_prompt_cache_key("cache-session".to_string());
+    session.acknowledge_model_response(session.len(), Some("resp_old".to_string()));
+
+    let result = core
+        .run_turn_with_trace(
+            &mut session,
+            TurnRequest::new("new prompt".to_string(), CompileMode::Auto)
+                .with_budget(crate::turn::TurnBudget::new(60_000)),
+            &mut recorder,
+            TurnOptions::default().with_prompt_cache_key("cache-session".to_string()),
+        )
+        .await
+        .unwrap();
+    handle.await.unwrap();
+
+    assert_eq!(result.status, TurnResultStatus::Completed);
+    let bodies = bodies.lock().unwrap();
+    assert_eq!(bodies.len(), 2);
+    assert_eq!(
+        bodies[0]["previous_response_id"],
+        serde_json::json!("resp_old")
+    );
+    assert!(bodies[1].get("previous_response_id").is_none());
+    let retry_input = serde_json::to_string(&bodies[1]["input"]).unwrap();
+    assert!(retry_input.contains("old prompt"));
+    assert!(retry_input.contains("old answer"));
+    assert!(retry_input.contains("new prompt"));
+}

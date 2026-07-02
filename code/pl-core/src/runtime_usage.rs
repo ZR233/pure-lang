@@ -103,6 +103,7 @@ pub(crate) fn agent_runtime_delta(
     }
 }
 
+#[cfg_attr(not(feature = "studio"), allow(dead_code))]
 pub(crate) fn aggregate_runtime_usage(
     session_id: &str,
     snapshots: impl IntoIterator<Item = RuntimeUsageSnapshot>,
@@ -146,6 +147,7 @@ pub(crate) fn aggregate_runtime_usage(
     aggregate
 }
 
+#[cfg_attr(not(feature = "studio"), allow(dead_code))]
 pub(crate) fn merge_costs(target: &mut Vec<RuntimeCostAmount>, incoming: &[RuntimeCostAmount]) {
     for cost in incoming {
         match target

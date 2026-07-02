@@ -181,7 +181,7 @@ pub struct TurnRequest {
     pub workspace_instructions: Option<String>,
     pub instruction_snapshot: Option<InstructionSnapshot>,
     pub budget: TurnBudget,
-    pub materialized_attachments: Vec<crate::studio::MaterializedAttachment>,
+    pub materialized_attachments: Vec<crate::MaterializedAttachment>,
     pub trace_attachments: Vec<TraceAttachment>,
 }
 
@@ -213,7 +213,7 @@ impl TurnRequest {
 
     pub fn with_materialized_attachments(
         mut self,
-        attachments: Vec<crate::studio::MaterializedAttachment>,
+        attachments: Vec<crate::MaterializedAttachment>,
     ) -> Self {
         self.materialized_attachments = attachments;
         self
@@ -337,6 +337,7 @@ pub struct TurnOptions {
     pub interaction_callback: Option<InteractionCallback>,
     pub cancellation_token: Option<CancellationToken>,
     pub tool_execution_mode: ToolExecutionMode,
+    pub prompt_cache_key: Option<String>,
 }
 
 impl TurnOptions {
@@ -351,6 +352,7 @@ impl TurnOptions {
             interaction_callback: None,
             cancellation_token: None,
             tool_execution_mode: ToolExecutionMode::ModelDefault,
+            prompt_cache_key: None,
         }
     }
 
@@ -365,6 +367,11 @@ impl TurnOptions {
 
     pub fn with_tool_execution_mode(mut self, tool_execution_mode: ToolExecutionMode) -> Self {
         self.tool_execution_mode = tool_execution_mode;
+        self
+    }
+
+    pub fn with_prompt_cache_key(mut self, prompt_cache_key: impl Into<String>) -> Self {
+        self.prompt_cache_key = Some(prompt_cache_key.into());
         self
     }
 
@@ -404,6 +411,7 @@ impl std::fmt::Debug for TurnOptions {
                 &self.cancellation_token.as_ref().map(|_| "<token>"),
             )
             .field("tool_execution_mode", &self.tool_execution_mode)
+            .field("prompt_cache_key", &self.prompt_cache_key)
             .finish()
     }
 }

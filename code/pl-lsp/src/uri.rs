@@ -25,7 +25,7 @@ pub(crate) fn path_to_file_uri(path: &Path) -> String {
 
 pub(crate) fn file_uri_to_path(uri: &str) -> PathBuf {
     let mut value = uri.strip_prefix("file://").unwrap_or(uri).to_string();
-    if cfg!(windows) && value.starts_with('/') && value.as_bytes().get(2) == Some(&b':') {
+    if value.starts_with('/') && value.as_bytes().get(2) == Some(&b':') {
         value.remove(0);
     } else if cfg!(windows) && !value.starts_with('/') && !value.is_empty() {
         value = format!("//{value}");
