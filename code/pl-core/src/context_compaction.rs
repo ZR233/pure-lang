@@ -74,22 +74,13 @@ pub(crate) async fn maybe_compact_session(
     let mut messages = session.messages().to_vec();
     let max_tokens = Some(model_info.max_output_tokens.unwrap_or(4096).min(4096));
     loop {
-        let completion_request = CompletionRequest {
-            model: model.to_string(),
-            instructions: Some(COMPACT_PROMPT.to_string()),
-            messages: compaction_prompt_messages(&messages),
-            tools: Vec::new(),
-            tool_choice: "none".to_string(),
-            parallel_tool_calls: false,
-            temperature: None,
-            max_tokens,
-            store: None,
-            previous_response_id: None,
-            prompt_cache_key: None,
-            reasoning: None::<ReasoningConfig>,
-            stream: true,
-            trace: None,
-        };
+        let completion_request = CompletionRequest::builder(model)
+            .instructions(COMPACT_PROMPT)
+            .messages(compaction_prompt_messages(&messages))
+            .tool_choice("none")
+            .maybe_max_tokens(max_tokens)
+            .reasoning(None::<ReasoningConfig>)
+            .build();
         let response = match provider
             .stream_complete(completion_request, event_tx.clone())
             .await
