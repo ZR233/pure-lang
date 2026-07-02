@@ -77,7 +77,7 @@ impl Default for AgentBackendProfile {
 ///
 /// 这些选项作为初始化级默认值使用；调用 `run_turn_with_options` 时仍可用
 /// turn 级 options 完整覆盖。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CoreRuntimeOptions {
     pub default_turn_options: TurnOptions,
 }
@@ -86,14 +86,6 @@ impl CoreRuntimeOptions {
     pub fn with_turn_options(mut self, options: TurnOptions) -> Self {
         self.default_turn_options = options;
         self
-    }
-}
-
-impl Default for CoreRuntimeOptions {
-    fn default() -> Self {
-        Self {
-            default_turn_options: TurnOptions::default(),
-        }
     }
 }
 
