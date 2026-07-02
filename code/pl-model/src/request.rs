@@ -45,6 +45,8 @@ fn default_true() -> bool {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletionResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_id: Option<String>,
     pub content: Option<String>,
     pub raw_content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -367,7 +369,7 @@ impl RequestRequirements {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TokenUsage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,

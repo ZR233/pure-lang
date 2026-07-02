@@ -1,4 +1,5 @@
 mod capabilities;
+mod continuation;
 mod default_models;
 mod manager;
 mod model_family;
@@ -16,6 +17,7 @@ pub use capabilities::{
     ModelCapabilities, ModelModality, ProviderCapabilities, ReasoningInterleaved,
     ReasoningInterleavedField, ToolCapabilities,
 };
+pub use continuation::ModelContinuationState;
 pub use default_models::{
     deepseek_default_model_slugs, default_models, openai_default_model_slugs,
     zhipu_default_model_slugs,

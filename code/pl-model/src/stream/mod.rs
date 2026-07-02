@@ -107,6 +107,7 @@ pub struct StreamCompletionAccumulator {
     tool_stream: ToolStream,
     lifecycle: StreamLifecycle,
     final_usage: Option<TokenUsage>,
+    response_id: Option<String>,
     completed: bool,
     trace: Option<TraceProjection>,
 }
@@ -123,6 +124,7 @@ impl StreamCompletionAccumulator {
             tool_stream: ToolStream::new(),
             lifecycle: StreamLifecycle::new(),
             final_usage: None,
+            response_id: None,
             completed: false,
             trace: trace.map(TraceProjection::new),
         }
@@ -335,15 +337,19 @@ impl StreamCompletionAccumulator {
                     self.update_tool_trace(&call, event_tx);
                     self.tool_calls.push(call);
                 }
+                if response_id.is_some() {
+                    self.response_id = response_id;
+                }
                 self.completed = true;
-                let _ = response_id;
             }
             ModelStreamEvent::Failed { code, message } => {
                 let _ = code;
                 return Err(PureError::LlmError(message));
             }
             ModelStreamEvent::ResponseStarted { response_id } => {
-                let _ = response_id;
+                if self.response_id.is_none() {
+                    self.response_id = response_id;
+                }
             }
         }
 
@@ -404,6 +410,7 @@ impl StreamCompletionAccumulator {
             .unwrap_or_default();
 
         Ok(CompletionResponse {
+            response_id: self.response_id,
             content,
             raw_content,
             reasoning_content,

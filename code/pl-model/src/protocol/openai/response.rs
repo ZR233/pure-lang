@@ -90,6 +90,7 @@ impl TokenUsageDetails {
 
 #[derive(Debug, Clone, Deserialize)]
 struct ResponsesResponseBody {
+    id: Option<String>,
     model: Option<String>,
     output: Option<Vec<ResponsesOutputItem>>,
     usage: Option<ProviderTokenUsage>,
@@ -137,6 +138,7 @@ pub(crate) fn responses_parse_response(body: serde_json::Value) -> Result<Comple
     };
 
     Ok(CompletionResponse {
+        response_id: body.id,
         raw_content: content.clone(),
         content,
         reasoning_content: None,
@@ -245,6 +247,7 @@ pub(crate) fn chat_parse_response(body: serde_json::Value) -> Result<CompletionR
         .unwrap_or(FinishReason::Stop);
 
     Ok(CompletionResponse {
+        response_id: None,
         raw_content: content.clone(),
         content,
         reasoning_content,

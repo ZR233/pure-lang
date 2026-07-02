@@ -2,7 +2,7 @@ use pl_protocol::{ContentPart, ImageSource, Message, MessageContent, Result};
 
 pub(super) fn materialize_messages(
     messages: &[Message],
-    attachments: &[crate::studio::MaterializedAttachment],
+    attachments: &[crate::MaterializedAttachment],
 ) -> Result<Vec<Message>> {
     messages
         .iter()
@@ -16,7 +16,7 @@ pub(super) fn materialize_messages(
 
 fn materialize_content(
     content: &MessageContent,
-    attachments: &[crate::studio::MaterializedAttachment],
+    attachments: &[crate::MaterializedAttachment],
 ) -> Result<MessageContent> {
     match content {
         MessageContent::Text(text) => Ok(MessageContent::Text(text.clone())),

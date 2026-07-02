@@ -457,6 +457,7 @@ mod tests {
                 ));
             }
             Ok(CompletionResponse {
+                response_id: None,
                 content: Some("summary".to_string()),
                 raw_content: Some("summary".to_string()),
                 reasoning_content: None,
@@ -468,6 +469,7 @@ mod tests {
                     completion_tokens: 2,
                     total_tokens: 3,
                     cached_prompt_tokens: 0,
+                    reasoning_tokens: 0,
                 },
                 finish_reason: FinishReason::Stop,
                 model: self.model.slug.clone(),
