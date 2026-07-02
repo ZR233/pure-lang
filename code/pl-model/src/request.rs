@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::{ModelCapabilities, ModelModality};
+use crate::{ModelCapabilities, ModelContinuationState, ModelModality};
 use pl_protocol::{ContentPart, ImageSource, Message, MessageContent, PureError, ToolCallKind};
 use pl_trace::TraceEvent;
 
@@ -41,6 +41,117 @@ fn default_tool_choice() -> String {
 
 fn default_true() -> bool {
     true
+}
+
+#[derive(Debug, Clone)]
+pub struct CompletionRequestBuilder {
+    request: CompletionRequest,
+}
+
+impl CompletionRequestBuilder {
+    pub fn instructions(mut self, instructions: impl Into<String>) -> Self {
+        self.request.instructions = Some(instructions.into());
+        self
+    }
+
+    pub fn maybe_instructions(mut self, instructions: Option<String>) -> Self {
+        self.request.instructions = instructions;
+        self
+    }
+
+    pub fn messages(mut self, messages: Vec<Message>) -> Self {
+        self.request.messages = messages;
+        self
+    }
+
+    pub fn messages_from_continuation(
+        mut self,
+        messages: &[Message],
+        continuation: &ModelContinuationState,
+        use_continuation: bool,
+    ) -> Self {
+        self.request.messages = continuation
+            .acknowledged_tail(messages, use_continuation)
+            .to_vec();
+        self.continuation(continuation, use_continuation)
+    }
+
+    pub fn tools(mut self, tools: Vec<ToolSchema>) -> Self {
+        self.request.tools = tools;
+        self
+    }
+
+    pub fn tool_choice(mut self, tool_choice: impl Into<String>) -> Self {
+        self.request.tool_choice = tool_choice.into();
+        self
+    }
+
+    pub fn parallel_tool_calls(mut self, parallel_tool_calls: bool) -> Self {
+        self.request.parallel_tool_calls = parallel_tool_calls;
+        self
+    }
+
+    pub fn temperature(mut self, temperature: Option<f32>) -> Self {
+        self.request.temperature = temperature;
+        self
+    }
+
+    pub fn max_tokens(mut self, max_tokens: u64) -> Self {
+        self.request.max_tokens = Some(max_tokens);
+        self
+    }
+
+    pub fn maybe_max_tokens(mut self, max_tokens: Option<u64>) -> Self {
+        self.request.max_tokens = max_tokens;
+        self
+    }
+
+    pub fn store(mut self, store: Option<bool>) -> Self {
+        self.request.store = store;
+        self
+    }
+
+    pub fn previous_response_id(mut self, response_id: Option<String>) -> Self {
+        self.request.previous_response_id = response_id;
+        self
+    }
+
+    pub fn prompt_cache_key(mut self, prompt_cache_key: Option<String>) -> Self {
+        self.request.prompt_cache_key = prompt_cache_key;
+        self
+    }
+
+    pub fn continuation(
+        mut self,
+        continuation: &ModelContinuationState,
+        use_continuation: bool,
+    ) -> Self {
+        self.request.store = Some(use_continuation);
+        self.request.previous_response_id = use_continuation
+            .then(|| continuation.previous_response_id().map(ToString::to_string))
+            .flatten();
+        self.request.prompt_cache_key = continuation.prompt_cache_key().map(ToString::to_string);
+        self
+    }
+
+    pub fn reasoning(mut self, reasoning: Option<ReasoningConfig>) -> Self {
+        self.request.reasoning = reasoning;
+        self
+    }
+
+    pub fn stream(mut self, stream: bool) -> Self {
+        self.request.stream = stream;
+        self
+    }
+
+    pub fn trace(mut self, trace: Option<CompletionTraceContext>) -> Self {
+        self.request.trace = trace;
+        self
+    }
+
+    pub fn build(self) -> CompletionRequest {
+        self.request
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -263,6 +374,27 @@ pub enum ToolFormat {
 }
 
 impl CompletionRequest {
+    pub fn builder(model: impl Into<String>) -> CompletionRequestBuilder {
+        CompletionRequestBuilder {
+            request: CompletionRequest {
+                model: model.into(),
+                instructions: None,
+                messages: Vec::new(),
+                tools: Vec::new(),
+                tool_choice: default_tool_choice(),
+                parallel_tool_calls: false,
+                temperature: None,
+                max_tokens: None,
+                store: None,
+                previous_response_id: None,
+                prompt_cache_key: None,
+                reasoning: None,
+                stream: true,
+                trace: None,
+            },
+        }
+    }
+
     pub fn provider_compatible(mut self, supports_custom_tools: bool) -> Self {
         self.tools = self
             .tools
@@ -519,5 +651,60 @@ mod tests {
             error.to_string(),
             "configuration error: model model does not support reasoning"
         );
+    }
+
+    #[test]
+    fn builder_applies_continuation_state_and_message_tail() {
+        let messages = vec![
+            Message {
+                role: MessageRole::System,
+                content: MessageContent::Text("system".to_string()),
+                reasoning_content: None,
+                metadata: HashMap::new(),
+            },
+            Message {
+                role: MessageRole::User,
+                content: MessageContent::Text("first".to_string()),
+                reasoning_content: None,
+                metadata: HashMap::new(),
+            },
+            Message {
+                role: MessageRole::Assistant,
+                content: MessageContent::Text("answer".to_string()),
+                reasoning_content: None,
+                metadata: HashMap::new(),
+            },
+            Message {
+                role: MessageRole::User,
+                content: MessageContent::Text("second".to_string()),
+                reasoning_content: None,
+                metadata: HashMap::new(),
+            },
+        ];
+        let mut continuation = crate::ModelContinuationState::default();
+        continuation.set_prompt_cache_key("cache-1".to_string());
+        continuation.acknowledge_response(2, Some("resp-1".to_string()), messages.len());
+
+        let request = CompletionRequest::builder("gpt-5.5")
+            .instructions("reply briefly")
+            .messages_from_continuation(&messages, &continuation, true)
+            .tools(vec![ToolSchema::function(
+                "lookup",
+                "Lookup docs",
+                serde_json::json!({ "type": "object" }),
+            )])
+            .parallel_tool_calls(true)
+            .max_tokens(128)
+            .build();
+
+        assert_eq!(request.model, "gpt-5.5");
+        assert_eq!(request.instructions.as_deref(), Some("reply briefly"));
+        assert_eq!(request.messages, messages[2..]);
+        assert_eq!(request.store, Some(true));
+        assert_eq!(request.previous_response_id.as_deref(), Some("resp-1"));
+        assert_eq!(request.prompt_cache_key.as_deref(), Some("cache-1"));
+        assert_eq!(request.tools.len(), 1);
+        assert!(request.parallel_tool_calls);
+        assert_eq!(request.max_tokens, Some(128));
     }
 }

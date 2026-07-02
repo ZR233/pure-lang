@@ -17,7 +17,7 @@ pub use capabilities::{
     ModelCapabilities, ModelModality, ProviderCapabilities, ReasoningInterleaved,
     ReasoningInterleavedField, ToolCapabilities,
 };
-pub use continuation::ModelContinuationState;
+pub use continuation::{ModelContinuationState, is_continuation_unsupported_error};
 pub use default_models::{
     deepseek_default_model_slugs, default_models, openai_default_model_slugs,
     zhipu_default_model_slugs,
@@ -42,8 +42,9 @@ pub use provider_usage::{
     zhipu_limit_by_window,
 };
 pub use request::{
-    CompletionRequest, CompletionResponse, CompletionTraceContext, FinishReason, ReasoningConfig,
-    ReasoningSummary, TokenUsage, ToolCall, ToolCallPayload, ToolFormat, ToolSchema,
+    CompletionRequest, CompletionRequestBuilder, CompletionResponse, CompletionTraceContext,
+    FinishReason, ReasoningConfig, ReasoningSummary, TokenUsage, ToolCall, ToolCallPayload,
+    ToolFormat, ToolSchema,
 };
 pub use stream::{
     CompletionBlockContent, CompletionBlockField, CompletionBlockKind, CompletionEventStream,
