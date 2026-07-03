@@ -123,10 +123,10 @@ Skills 管理工具同样以 `workspaceRoot` 为边界，但写入面收窄到 `
 
 Agent 协作 timeline 与状态分层：
 
-- agent timeline 是 append-only 协作事件流，只记录 spawn、wait、message、followup、close、final status 等事实事件
+- agent timeline 是 append-only 协作事件流，只记录 spawn、wait、message、followup、close、final status 和 todo list update 等事实事件
 - agent tree 是 latest snapshot，只按 `agent_id/path` 覆盖最新状态，供状态栏、树视图和 `list_agents` 使用
 - 前端不得用 latest snapshot 渲染 timeline；同一个 agent 的多次状态变化必须在 timeline 中保留为多条独立事件
-- `AgentStateChanged` 只用于更新 latest snapshot；UI timeline 消费 `agentEvents` 中的 append-only `SubAgentActivity` event。实时 `agentTimelineChanged` 与历史 `agentEvents` 都必须携带 canonical `StudioAgentTimelineEvent` 语义，Flutter 只解析规范化 payload，不得读取 raw `AgentEvent`。旧 spawn/interaction/wait/close begin/end payload 不再作为运行期协议保留。
+- `AgentStateChanged` 只用于更新 latest snapshot；UI timeline 消费 `agentEvents` 中的 append-only `SubAgentActivity` 与 `TodoListUpdated` event。`update_todo_list` 是 Codex `update_plan` 风格的 checklist 工具事件，不是 Plan Mode plan part；每次调用提交完整 todo 快照，并在 timeline 中新增一条独立 row，不按 `callId` 覆盖旧 row。实时 `agentTimelineChanged` 与历史 `agentEvents` 都必须携带 canonical `StudioAgentTimelineEvent` 语义，Flutter 只解析规范化 payload，不得读取 raw `AgentEvent`。旧 spawn/interaction/wait/close begin/end payload 不再作为运行期协议保留。
 
 持久化原则：
 

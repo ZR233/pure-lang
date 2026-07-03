@@ -55,6 +55,7 @@ pub(super) async fn forward_agent_lifecycle_events(
                 event @ (AgentEvent::AgentStateChanged { .. }
                 | AgentEvent::AgentRuntimeUpdated { .. }
                 | AgentEvent::SubAgentActivity { .. }
+                | AgentEvent::TodoListUpdated { .. }
                 | AgentEvent::InteractionChanged { .. }
                 | AgentEvent::SkillActivated { .. }),
             ) => {

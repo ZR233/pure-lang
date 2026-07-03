@@ -292,6 +292,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get timelineAgentClose => '关闭子代理';
 
   @override
+  String get timelineTodoListFallback => '待办列表';
+
+  @override
+  String get timelineTodoPending => '待处理';
+
+  @override
+  String get timelineTodoInProgress => '进行中';
+
+  @override
+  String get timelineTodoCompleted => '已完成';
+
+  @override
   String get interactionQuestionsTitle => '几个问题想确认';
 
   @override
@@ -1088,6 +1100,18 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get timelineAgentClose => '关闭子代理';
+
+  @override
+  String get timelineTodoListFallback => '待办列表';
+
+  @override
+  String get timelineTodoPending => '待处理';
+
+  @override
+  String get timelineTodoInProgress => '进行中';
+
+  @override
+  String get timelineTodoCompleted => '已完成';
 
   @override
   String get interactionQuestionsTitle => '几个问题想确认';

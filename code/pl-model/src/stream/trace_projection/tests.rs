@@ -254,6 +254,7 @@ fn started_sequence(event: AgentEvent) -> Option<u64> {
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::AgentStateChanged { .. }
         | AgentEvent::SubAgentActivity { .. }
+        | AgentEvent::TodoListUpdated { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::SkillActivated { .. }
@@ -274,6 +275,7 @@ fn delta_item_id(event: AgentEvent) -> Option<String> {
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::AgentStateChanged { .. }
         | AgentEvent::SubAgentActivity { .. }
+        | AgentEvent::TodoListUpdated { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::SkillActivated { .. }
@@ -295,6 +297,7 @@ fn tool_delta_item_id(event: AgentEvent) -> Option<String> {
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::AgentStateChanged { .. }
         | AgentEvent::SubAgentActivity { .. }
+        | AgentEvent::TodoListUpdated { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::SkillActivated { .. }
@@ -316,6 +319,7 @@ fn completed_item_id(event: AgentEvent) -> Option<String> {
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::AgentStateChanged { .. }
         | AgentEvent::SubAgentActivity { .. }
+        | AgentEvent::TodoListUpdated { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::SkillActivated { .. }
@@ -340,6 +344,7 @@ fn completed_text_item(event: AgentEvent) -> Option<TracePart> {
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::AgentStateChanged { .. }
         | AgentEvent::SubAgentActivity { .. }
+        | AgentEvent::TodoListUpdated { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::SkillActivated { .. }
@@ -361,6 +366,7 @@ fn completed_thinking_item(event: AgentEvent) -> Option<TracePart> {
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::AgentStateChanged { .. }
         | AgentEvent::SubAgentActivity { .. }
+        | AgentEvent::TodoListUpdated { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::SkillActivated { .. }
@@ -388,6 +394,7 @@ fn started_tool_item(event: AgentEvent) -> Option<TracePart> {
         | AgentEvent::AgentRuntimeUpdated { .. }
         | AgentEvent::AgentStateChanged { .. }
         | AgentEvent::SubAgentActivity { .. }
+        | AgentEvent::TodoListUpdated { .. }
         | AgentEvent::TurnInterrupted { .. }
         | AgentEvent::TurnBudgetLimited { .. }
         | AgentEvent::SkillActivated { .. }

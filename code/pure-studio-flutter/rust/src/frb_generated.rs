@@ -1225,12 +1225,55 @@ impl SseDecode for crate::api::studio::types::agent::BridgeAgentTimelinePayloadD
                     error: var_error,
                 };
             }
+            1 => {
+                let mut var_snapshot =
+                    <crate::api::studio::types::agent::BridgeTodoListSnapshotDto>::sse_decode(
+                        deserializer,
+                    );
+                return crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::TodoListUpdated {
+                    snapshot: var_snapshot,
+                };
+            }
             _ => {
                 unimplemented!("");
             }
         }
     }
 }
+
+impl SseDecode for crate::api::studio::types::agent::BridgeTodoListSnapshotDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_callId = <String>::sse_decode(deserializer);
+        let mut var_agentId = <Option<String>>::sse_decode(deserializer);
+        let mut var_path = <Option<String>>::sse_decode(deserializer);
+        let mut var_parentPath = <Option<String>>::sse_decode(deserializer);
+        let mut var_explanation = <Option<String>>::sse_decode(deserializer);
+        let mut var_items =
+            <Vec<crate::api::studio::types::agent::BridgeTodoItemDto>>::sse_decode(deserializer);
+        return crate::api::studio::types::agent::BridgeTodoListSnapshotDto {
+            call_id: var_callId,
+            agent_id: var_agentId,
+            path: var_path,
+            parent_path: var_parentPath,
+            explanation: var_explanation,
+            items: var_items,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::agent::BridgeTodoItemDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_step = <String>::sse_decode(deserializer);
+        let mut var_status = <String>::sse_decode(deserializer);
+        return crate::api::studio::types::agent::BridgeTodoItemDto {
+            step: var_step,
+            status: var_status,
+        };
+    }
+}
+
 impl SseDecode for crate::api::studio::types::event::BridgeEventEnvelope {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2068,6 +2111,20 @@ impl SseDecode for Vec<crate::api::studio::types::agent::BridgeAgentTimelineEven
                 <crate::api::studio::types::agent::BridgeAgentTimelineEventDto>::sse_decode(
                     deserializer,
                 ),
+            );
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::studio::types::agent::BridgeTodoItemDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(
+                <crate::api::studio::types::agent::BridgeTodoItemDto>::sse_decode(deserializer),
             );
         }
         return ans_;
@@ -3010,9 +3067,9 @@ impl flutter_rust_bridge::IntoDart
                 error.into_into_dart().into_dart(),
             ]
             .into_dart(),
-            _ => {
-                unimplemented!("");
-            }
+            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::TodoListUpdated {
+                snapshot,
+            } => [1.into_dart(), snapshot.into_into_dart().into_dart()].into_dart(),
         }
     }
 }
@@ -3026,6 +3083,52 @@ impl
     > for crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto
 {
     fn into_into_dart(self) -> crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::agent::BridgeTodoListSnapshotDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.call_id.into_into_dart().into_dart(),
+            self.agent_id.into_into_dart().into_dart(),
+            self.path.into_into_dart().into_dart(),
+            self.parent_path.into_into_dart().into_dart(),
+            self.explanation.into_into_dart().into_dart(),
+            self.items.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::agent::BridgeTodoListSnapshotDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::agent::BridgeTodoListSnapshotDto>
+    for crate::api::studio::types::agent::BridgeTodoListSnapshotDto
+{
+    fn into_into_dart(self) -> crate::api::studio::types::agent::BridgeTodoListSnapshotDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::agent::BridgeTodoItemDto {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.step.into_into_dart().into_dart(),
+            self.status.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::agent::BridgeTodoItemDto
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::agent::BridgeTodoItemDto>
+    for crate::api::studio::types::agent::BridgeTodoItemDto
+{
+    fn into_into_dart(self) -> crate::api::studio::types::agent::BridgeTodoItemDto {
         self
     }
 }
@@ -4260,10 +4363,35 @@ impl SseEncode for crate::api::studio::types::agent::BridgeAgentTimelinePayloadD
                 <bool>::sse_encode(timed_out, serializer);
                 <Option<String>>::sse_encode(error, serializer);
             }
-            _ => {
-                unimplemented!("");
+            crate::api::studio::types::agent::BridgeAgentTimelinePayloadDto::TodoListUpdated {
+                snapshot,
+            } => {
+                <i32>::sse_encode(1, serializer);
+                <crate::api::studio::types::agent::BridgeTodoListSnapshotDto>::sse_encode(
+                    snapshot, serializer,
+                );
             }
         }
+    }
+}
+impl SseEncode for crate::api::studio::types::agent::BridgeTodoListSnapshotDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.call_id, serializer);
+        <Option<String>>::sse_encode(self.agent_id, serializer);
+        <Option<String>>::sse_encode(self.path, serializer);
+        <Option<String>>::sse_encode(self.parent_path, serializer);
+        <Option<String>>::sse_encode(self.explanation, serializer);
+        <Vec<crate::api::studio::types::agent::BridgeTodoItemDto>>::sse_encode(
+            self.items, serializer,
+        );
+    }
+}
+impl SseEncode for crate::api::studio::types::agent::BridgeTodoItemDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.step, serializer);
+        <String>::sse_encode(self.status, serializer);
     }
 }
 impl SseEncode for crate::api::studio::types::event::BridgeEventEnvelope {
@@ -4864,6 +4992,16 @@ impl SseEncode for Vec<crate::api::studio::types::agent::BridgeAgentTimelineEven
             <crate::api::studio::types::agent::BridgeAgentTimelineEventDto>::sse_encode(
                 item, serializer,
             );
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::studio::types::agent::BridgeTodoItemDto> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::studio::types::agent::BridgeTodoItemDto>::sse_encode(item, serializer);
         }
     }
 }

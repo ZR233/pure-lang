@@ -147,6 +147,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTodoListSnapshotDto dco_decode_bridge_todo_list_snapshot_dto(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeTodoItemDto dco_decode_bridge_todo_item_dto(dynamic raw);
+
+  @protected
   BridgeEventEnvelope dco_decode_bridge_event_envelope(dynamic raw);
 
   @protected
@@ -273,6 +281,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   List<BridgeAgentTimelineEventDto>
   dco_decode_list_bridge_agent_timeline_event_dto(dynamic raw);
+
+  @protected
+  List<BridgeTodoItemDto> dco_decode_list_bridge_todo_item_dto(dynamic raw);
 
   @protected
   List<BridgeEventEnvelope> dco_decode_list_bridge_event_envelope(dynamic raw);
@@ -567,6 +578,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTodoListSnapshotDto sse_decode_bridge_todo_list_snapshot_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeTodoItemDto sse_decode_bridge_todo_item_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeEventEnvelope sse_decode_bridge_event_envelope(
     SseDeserializer deserializer,
   );
@@ -735,6 +756,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   List<BridgeAgentTimelineEventDto>
   sse_decode_list_bridge_agent_timeline_event_dto(SseDeserializer deserializer);
+
+  @protected
+  List<BridgeTodoItemDto> sse_decode_list_bridge_todo_item_dto(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<BridgeEventEnvelope> sse_decode_list_bridge_event_envelope(
@@ -1096,6 +1122,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_todo_list_snapshot_dto(
+    BridgeTodoListSnapshotDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_todo_item_dto(
+    BridgeTodoItemDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_event_envelope(
     BridgeEventEnvelope self,
     SseSerializer serializer,
@@ -1296,6 +1334,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_agent_timeline_event_dto(
     List<BridgeAgentTimelineEventDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_todo_item_dto(
+    List<BridgeTodoItemDto> self,
     SseSerializer serializer,
   );
 

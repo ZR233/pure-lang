@@ -9,8 +9,9 @@ pub use error::{PureError, Result};
 pub use event::{
     AgentRuntimeDelta, AgentStatus, BudgetLimitKind, BudgetUsage, ErrorSeverity, OutputStream,
     PipelineStage, PlanLifecycleEvent, PlanLifecycleState, RuntimeCostAmount, RuntimeUsageSnapshot,
-    SkillActivation, SubAgentActivityKind, TokenUsageSnapshot, UserInputAnswer, UserInputRequest,
-    UserInputResponse, UserQuestion, UserQuestionOption,
+    SkillActivation, SubAgentActivityKind, TodoItem, TodoListSnapshot, TodoStatus,
+    TokenUsageSnapshot, UserInputAnswer, UserInputRequest, UserInputResponse, UserQuestion,
+    UserQuestionOption,
 };
 pub use interaction::{
     InteractionChangedEvent, InteractionKind, InteractionPayload, InteractionRequest,

@@ -14,6 +14,7 @@ async fn default_tools_register_bash_and_agent_tools() {
     assert!(core.tools.get("wait_agent").is_some());
     assert!(core.tools.get("list_agents").is_some());
     assert!(core.tools.get("request_user_input").is_some());
+    assert!(core.tools.get("update_todo_list").is_some());
     assert!(core.tools.get("plan_exit").is_some());
     assert!(core.tools.get("subagent").is_none());
     assert!(core.tools.get("read_file").is_some());

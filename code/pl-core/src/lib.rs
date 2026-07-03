@@ -98,8 +98,9 @@ pub use studio::{
 };
 pub use tool::{
     AskUserTool, BashInput, BashTool, LspLanguageTool, LspQueryTool, OutputTruncation,
-    PlanExitTool, SubagentContext, Tool, ToolContext, ToolInput, ToolOutput, ToolRegistry,
-    ToolRuntimeEvent, TruncatedOutput, TruncationStrategy, WriteStdinTool, lsp_tool_for_language,
+    PlanExitTool, SubagentContext, TodoListTool, Tool, ToolContext, ToolInput, ToolOutput,
+    ToolRegistry, ToolRuntimeEvent, TruncatedOutput, TruncationStrategy, WriteStdinTool,
+    lsp_tool_for_language,
 };
 pub use trace::TraceRecorder;
 pub use turn::{

@@ -1,6 +1,60 @@
 part of '../widget_test.dart';
 
 void registerTimelineToolTests() {
+  testWidgets('timeline renders todo list update rows', (tester) async {
+    tester.view.physicalSize = const Size(900, 620);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final row = TimelineRow.agentActivity(
+      TimelineAgentEvent(
+        eventId: 'todo-event-1',
+        sessionId: 'session-1',
+        sequence: 1,
+        createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+        payload: const TimelineTodoListUpdate(
+          callId: 'call-1',
+          explanation: 'Implementation checklist',
+          items: [
+            TimelineTodoItem(
+              step: 'Read existing timeline projection',
+              status: 'completed',
+            ),
+            TimelineTodoItem(
+              step: 'Wire update_todo_list through bridge',
+              status: 'inProgress',
+            ),
+            TimelineTodoItem(
+              step: 'Run the focused Rust and Flutter tests before handoff',
+              status: 'pending',
+            ),
+          ],
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 720,
+            height: 480,
+            child: TimelineView(sessionId: 'session-1', rows: [row]),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Implementation checklist'), findsOneWidget);
+    expect(find.text('Completed'), findsOneWidget);
+    expect(find.text('In progress'), findsOneWidget);
+    expect(find.text('Pending'), findsOneWidget);
+    expect(find.textContaining('update_todo_list'), findsOneWidget);
+    expect(find.textContaining('focused Rust and Flutter'), findsOneWidget);
+  });
+
   testWidgets('timeline tool group defaults collapsed and expands details', (
     tester,
   ) async {

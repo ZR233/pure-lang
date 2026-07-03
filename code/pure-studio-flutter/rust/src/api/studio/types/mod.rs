@@ -8,6 +8,7 @@ pub mod settings;
 
 pub use agent::{
     BridgeAgentSnapshotDto, BridgeAgentTimelineEventDto, BridgeAgentTimelinePayloadDto,
+    BridgeTodoItemDto, BridgeTodoListSnapshotDto,
 };
 pub use event::{BridgeEventEnvelope, BridgeEventPayload};
 pub use interaction::{

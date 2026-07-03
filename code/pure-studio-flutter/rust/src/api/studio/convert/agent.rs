@@ -1,5 +1,6 @@
 use crate::api::studio::types::{
     BridgeAgentSnapshotDto, BridgeAgentTimelineEventDto, BridgeAgentTimelinePayloadDto,
+    BridgeTodoItemDto, BridgeTodoListSnapshotDto,
 };
 use anyhow::{Context, Result};
 use pl_protocol::{StudioAgentSnapshot, StudioAgentTimelineEvent, StudioAgentTimelineEventKind};
@@ -94,5 +95,24 @@ pub(crate) fn bridge_agent_timeline_payload(
             timed_out: timed_out.unwrap_or(false),
             error,
         },
+        StudioAgentTimelineEventKind::TodoListUpdated { snapshot } => {
+            BridgeAgentTimelinePayloadDto::TodoListUpdated {
+                snapshot: BridgeTodoListSnapshotDto {
+                    call_id: snapshot.call_id,
+                    agent_id: snapshot.agent_id,
+                    path: snapshot.path,
+                    parent_path: snapshot.parent_path,
+                    explanation: snapshot.explanation,
+                    items: snapshot
+                        .items
+                        .into_iter()
+                        .map(|item| BridgeTodoItemDto {
+                            step: item.step,
+                            status: item.status.as_str().to_string(),
+                        })
+                        .collect(),
+                },
+            }
+        }
     }
 }

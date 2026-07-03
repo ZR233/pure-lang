@@ -304,6 +304,7 @@ fn stream_accumulator_terminal_snapshots_converge_with_live_deltas() {
             | AgentEvent::AgentRuntimeUpdated { .. }
             | AgentEvent::AgentStateChanged { .. }
             | AgentEvent::SubAgentActivity { .. }
+            | AgentEvent::TodoListUpdated { .. }
             | AgentEvent::TurnInterrupted { .. }
             | AgentEvent::TurnBudgetLimited { .. }
             | AgentEvent::SkillActivated { .. }
@@ -333,6 +334,7 @@ fn stream_accumulator_terminal_snapshots_converge_with_live_deltas() {
             | AgentEvent::AgentRuntimeUpdated { .. }
             | AgentEvent::AgentStateChanged { .. }
             | AgentEvent::SubAgentActivity { .. }
+            | AgentEvent::TodoListUpdated { .. }
             | AgentEvent::TurnInterrupted { .. }
             | AgentEvent::TurnBudgetLimited { .. }
             | AgentEvent::SkillActivated { .. }
