@@ -13,6 +13,7 @@ use super::{
     SkillPathOutput, json_output, required, tool_error,
 };
 use crate::tool::ToolOutput;
+use crate::tool::text_escape::decode_json_escaped_fragment_once;
 
 pub(super) fn create_skill(
     tool: &str,
@@ -90,10 +91,12 @@ pub(super) fn patch_skill(
     let path = skill.path.join("SKILL.md");
     let content = fs::read_to_string(&path)
         .map_err(|error| tool_error(tool, format!("failed to read SKILL.md: {error}")))?;
-    let matches = content.matches(&old_string).count();
-    if matches == 0 {
-        return Err(tool_error(tool, "oldString was not found in SKILL.md"));
-    }
+    let (needle, matches) = patch_needle(&content, &old_string).ok_or_else(|| {
+        tool_error(
+            tool,
+            "oldString was not found in SKILL.md; read the current skill text and pass an exact oldString",
+        )
+    })?;
     let replace_mode = input.replace_mode.unwrap_or(ReplaceMode::One);
     if matches > 1 && matches!(replace_mode, ReplaceMode::One) {
         return Err(tool_error(
@@ -104,8 +107,8 @@ pub(super) fn patch_skill(
         ));
     }
     let updated = match replace_mode {
-        ReplaceMode::One => content.replacen(&old_string, &new_string, 1),
-        ReplaceMode::All => content.replace(&old_string, &new_string),
+        ReplaceMode::One => content.replacen(&needle, &new_string, 1),
+        ReplaceMode::All => content.replace(&needle, &new_string),
     };
     validate_skill_document(&updated, Some(&input.name))
         .map_err(|error| tool_error(tool, error))?;
@@ -122,6 +125,17 @@ pub(super) fn patch_skill(
         },
         path: &skill.path,
     })
+}
+
+fn patch_needle(content: &str, old_string: &str) -> Option<(String, usize)> {
+    let matches = content.matches(old_string).count();
+    if matches > 0 {
+        return Some((old_string.to_string(), matches));
+    }
+
+    let normalized = decode_json_escaped_fragment_once(old_string)?;
+    let matches = content.matches(&normalized).count();
+    (matches > 0).then_some((normalized, matches))
 }
 
 pub(super) fn delete_skill(

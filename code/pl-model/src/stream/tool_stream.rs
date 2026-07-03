@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use pl_protocol::{PureError, Result};
 
 use crate::request::ToolCall;
+use crate::tool_arguments::parse_function_tool_arguments;
 
 use super::event::ToolInputDeltaPayload;
 
@@ -286,8 +287,8 @@ impl ToolCallAccumulator {
         match self.payload {
             ToolCallPayloadAccumulator::FunctionArguments(arguments) => Ok(ToolCall::function(
                 self.id,
-                self.name,
-                serde_json::from_str(&arguments).unwrap_or(serde_json::Value::String(arguments)),
+                self.name.clone(),
+                parse_function_tool_arguments(&arguments, &self.name)?,
                 self.call_id,
             )),
             ToolCallPayloadAccumulator::CustomInput(input) => {
@@ -423,5 +424,30 @@ mod tests {
         assert_eq!(first.tool.trace_id, "chat_tool_call:0");
         assert_eq!(second.tool.id, "chat_tool_call:1");
         assert_eq!(second.tool.trace_id, "chat_tool_call:1");
+    }
+
+    #[test]
+    fn invalid_function_arguments_fail_instead_of_becoming_string() {
+        let mut stream = ToolStream::new();
+        let call_id = "call-1".to_string();
+        stream.append_delta(
+            None,
+            "provider-tool-1".to_string(),
+            Some(&call_id),
+            Some("read_file".to_string()),
+            ToolInputDeltaPayload::FunctionArguments("{bad".to_string()),
+        );
+
+        let error = stream
+            .finish_ready(None, Some(&call_id), "provider-tool-1", None, None)
+            .unwrap_err();
+
+        match error {
+            PureError::LlmError(message) => {
+                assert!(message.contains("invalid JSON arguments"));
+                assert!(message.contains("read_file"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }

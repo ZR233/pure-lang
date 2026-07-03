@@ -61,6 +61,8 @@ MCP tools 由进程内 MCP runtime registry 的当前可用快照注册，工具
 - `ToolOutputEnvelope` 区分模型可见文本、timeline 展示文本、完整输出文件、退出码和 timeout 标记。
 - `ToolExecutionError::RespondToModel` 表示模型可恢复错误，必须写 tool result；`ToolExecutionError::Fatal` 表示内部 invariant、join failure 或历史污染，当前 turn 以 `ToolError` 失败。
 
+provider 输出的 function tool arguments 必须是合法 JSON，并由 `pl-model` 统一解析为 `serde_json::Value` 后进入 `ToolCall`。非流式响应和流式 accumulator 都不得在解析失败时静默丢弃 tool call，也不得把失败的 JSON 降级为字符串参数；该情况属于 provider 协议错误，当前模型调用必须失败并把错误暴露到 turn。
+
 `Tool` trait 为了支持运行时注册表和 MCP 动态工具，暂时保留 dyn-compatible `BoxFuture` 返回值。这是 trait object 边界的例外，不引入 `#[async_trait]`，也不扩散到新增业务 trait。
 
 ## 结果回传
@@ -97,7 +99,7 @@ Windows 上 `bash.command` 的默认宿主 shell 是 PowerShell：运行时先�
 
 `update_todo_list` 是 Codex `update_plan` 风格的内置 checklist 工具，root agent 与 subagent 都可用，且不代表 Plan Mode 的 `plan` part。工具输入是完整快照：`explanation?: string` 与 `items: [{ step, status }]`，其中 `status` 只允许 `pending | inProgress | completed`，且同一快照最多一个 `inProgress`。工具成功后只返回紧凑 `{ status: "updated" }` 给模型，同时发送 `TodoListUpdated` agent timeline event；后端不维护 latest todo cache，也不按 patch 增量合并。
 
-MCP tool 成功结果写回紧凑字符串。文本内容按 MCP content 顺序合并；JSON 或非文本内容序列化为紧凑 JSON。MCP `isError` 或 transport/protocol 错误按本地执行错误处理，使用 `Tool execution error: {error}` 前缀写回模型上下文，同时在 Studio timeline 中展示失败原因。transport/protocol 错误还会把对应 server 的 availability 标记为 `unavailable`，后续 turn 不再暴露该 server 的 tools，直到后台周期重检或保存配置后的 reconcile 恢复。MCP runtime 命名空间按职责拆分：registry 只维护 server availability 和可用工具快照，tool adapter 只负责 exposed tool 到 `tools/call` 的转换，transport client 按 stdio/http 持有连接生命周期，JSON-RPC wire 类型集中在协议子模块，避免单个 `mcp` 模块同时承载状态机、I/O 和 wire schema。
+MCP tool 成功结果写回紧凑字符串。文本内容按 MCP content 顺序合并；JSON 或非文本内容序列化为紧凑 JSON。MCP `isError` 或 transport/protocol 错误按本地执行错误处理，使用 `Tool execution error: {error}` 前缀写回模型上下文，同时在 Studio timeline 中展示失败原因。transport/protocol 错误还会把对应 server 的 availability 标记为 `unavailable`，后续 turn 不再暴露该 server 的 tools，直到后台周期重检或保存配置后的 reconcile 恢复。HTTP MCP 的 SSE 响应必须先按事件收集完整 `data` payload，再交给 JSON-RPC wire 类型反序列化，不能只解析第一行 `data`。MCP runtime 命名空间按职责拆分：registry 只维护 server availability 和可用工具快照，tool adapter 只负责 exposed tool 到 `tools/call` 的转换，transport client 按 stdio/http 持有连接生命周期，JSON-RPC wire 类型集中在协议子模块，避免单个 `mcp` 模块同时承载状态机、I/O 和 wire schema。
 
 文件修改工具不向 schema 暴露语义模糊的 bool 参数。`delete_path` 使用 `mode: "file" | "emptyDirectory" | "recursiveDirectory"`；`copy_path` 和 `move_path` 使用 `collision: "failIfExists" | "overwrite"`。运行期不再保留 `recursive` / `overwrite` 旧 bool 字段的读取路径，历史会话或手写输入若使用旧字段会被 schema 校验拒绝，工具描述只暴露 `mode` / `collision`。
 

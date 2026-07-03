@@ -586,6 +586,30 @@ fn responses_parse_response_reads_custom_tool_call() {
 }
 
 #[test]
+fn responses_parse_response_rejects_invalid_function_arguments() {
+    let error = OpenAiProtocol::responses()
+        .parse_response(serde_json::json!({
+            "model": "gpt-5.5",
+            "output": [{
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "read_file",
+                "arguments": "{bad"
+            }]
+        }))
+        .unwrap_err();
+
+    match error {
+        PureError::LlmError(message) => {
+            assert!(message.contains("invalid JSON arguments"));
+            assert!(message.contains("read_file"));
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+#[test]
 fn chat_parse_response_reads_custom_tool_call() {
     let response = OpenAiProtocol::chat()
         .parse_response(serde_json::json!({
@@ -617,6 +641,37 @@ fn chat_parse_response_reads_custom_tool_call() {
         response.tool_calls[0].payload,
         ToolCallPayload::Custom { .. }
     ));
+}
+
+#[test]
+fn chat_parse_response_rejects_invalid_function_arguments() {
+    let error = OpenAiProtocol::chat()
+        .parse_response(serde_json::json!({
+            "model": "gpt-5.5",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": "{bad"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        }))
+        .unwrap_err();
+
+    match error {
+        PureError::LlmError(message) => {
+            assert!(message.contains("invalid JSON arguments"));
+            assert!(message.contains("read_file"));
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
 }
 
 #[test]
