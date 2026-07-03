@@ -6,6 +6,7 @@ import '../../domain/models/studio_models.dart';
 import '../../app/theme/studio_tokens.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/upward_popup_menu.dart';
+import 'agent_detail_panel.dart';
 import 'context_usage_ring.dart';
 import 'status_bar_chip.dart';
 import 'status_detail_popover.dart';
@@ -18,6 +19,7 @@ class SessionStatusBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final runtime = state.runtime;
+    final selectedAgents = state.selectedAgents;
     final session = state.sessions
         .where((session) => session.id == state.selectedSessionId)
         .firstOrNull;
@@ -33,7 +35,7 @@ class SessionStatusBar extends ConsumerWidget {
           child: Align(
             alignment: Alignment.center,
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 740),
+              constraints: const BoxConstraints(maxWidth: 980),
               child: Row(
                 children: [
                   Expanded(
@@ -72,6 +74,8 @@ class SessionStatusBar extends ConsumerWidget {
                               detailBuilder: (context) =>
                                   _CapabilityDetail(runtime: runtime),
                             ),
+                          if (selectedAgents.isNotEmpty)
+                            _AgentStatusChip(agents: selectedAgents),
                         ],
                       ),
                     ),
@@ -103,8 +107,6 @@ String _runtimeCapabilityLabel(
       context.l10n.statusMcpCount(runtime.activeMcpServers.length),
     if (runtime.activeLspServers.isNotEmpty)
       context.l10n.statusLspCount(runtime.activeLspServers.length),
-    if (runtime.agentCount > 0)
-      context.l10n.statusAgentsCount(runtime.agentCount),
   ];
   return parts.join(' · ');
 }
@@ -346,6 +348,34 @@ List<_PlannerModelOption> _plannerModelOptions(
     }
   }
   return options;
+}
+
+class _AgentStatusChip extends StatelessWidget {
+  const _AgentStatusChip({required this.agents});
+
+  final List<StudioAgentView> agents;
+
+  @override
+  Widget build(BuildContext context) {
+    final runningCount = agents.where(_agentIsActive).length;
+    final label = runningCount > 0
+        ? context.l10n.agentDetailSummary(agents.length, runningCount)
+        : context.l10n.statusAgentsCount(agents.length);
+    return StatusBarChip(
+      icon: Icons.account_tree_outlined,
+      label: label,
+      tooltip: context.l10n.statusAgentChipTooltip,
+      interactive: true,
+      enableHover: true,
+      detailWidth: 380,
+      maxWidth: 200,
+      detailBuilder: (context) => AgentDetailPanel(agents: agents),
+    );
+  }
+
+  bool _agentIsActive(StudioAgentView agent) {
+    return const {'queued', 'running', 'waiting'}.contains(agent.status);
+  }
 }
 
 class _StatusChip extends StatelessWidget {

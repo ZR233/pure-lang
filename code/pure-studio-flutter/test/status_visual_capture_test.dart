@@ -56,7 +56,7 @@ void main() {
     await contextGesture.removePointer();
     await tester.pump(const Duration(milliseconds: 250));
 
-    final capabilityText = find.text('2 skills · 1 MCP · 1 LSP · 2 agents');
+    final capabilityText = find.text('2 skills · 1 MCP · 1 LSP');
     final capabilityRect = tester.getRect(capabilityText);
     await tester.tapAt(
       Offset(capabilityRect.left + 8, capabilityRect.center.dy),
@@ -66,6 +66,12 @@ void main() {
       boundaryKey,
       '${outputDir.path}/status-capability-detail.png',
     );
+
+    final agentText = find.text('4 agents · 2 running');
+    final agentRect = tester.getRect(agentText);
+    await tester.tapAt(Offset(agentRect.left + 8, agentRect.center.dy));
+    await tester.pump(const Duration(milliseconds: 250));
+    await _capture(boundaryKey, '${outputDir.path}/status-agent-detail.png');
   });
 }
 

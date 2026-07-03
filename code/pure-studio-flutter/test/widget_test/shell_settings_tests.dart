@@ -70,6 +70,7 @@ void registerShellSettingsTests() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
+    final updatedAt = DateTime.fromMillisecondsSinceEpoch(1);
     final api = _FakeStudioApi(
       _stateWithPlannerModels().copyWith(
         runtime: const SessionRuntimeView(
@@ -83,6 +84,30 @@ void registerShellSettingsTests() {
           activeLspServers: ['rust-analyzer'],
           agentCount: 2,
         ),
+        agentsBySession: {
+          'session-1': {
+            'agent-reviewer': StudioAgentView(
+              id: 'agent-reviewer',
+              sessionId: 'session-1',
+              path: 'root/reviewer',
+              role: 'reviewer',
+              task: 'Audit timeline projection',
+              status: 'running',
+              summary: 'Checking status projection',
+              updatedAt: updatedAt,
+            ),
+            'agent-worker': StudioAgentView(
+              id: 'agent-worker',
+              sessionId: 'session-1',
+              path: 'root/worker',
+              role: 'worker',
+              task: 'Patch Flutter status bar',
+              status: 'completed',
+              depth: 1,
+              updatedAt: updatedAt,
+            ),
+          },
+        },
       ),
     );
     await tester.pumpWidget(
@@ -99,7 +124,8 @@ void registerShellSettingsTests() {
     expect(find.bySemanticsLabel('Context'), findsOneWidget);
     expect(find.text('42/100'), findsNothing);
     expect(find.text('CNY 0.16'), findsOneWidget);
-    expect(find.text('1 skill · 1 MCP · 1 LSP · 2 agents'), findsOneWidget);
+    expect(find.text('1 skill · 1 MCP · 1 LSP'), findsOneWidget);
+    expect(find.text('2 agents · 1 running'), findsOneWidget);
 
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     addTearDown(gesture.removePointer);
@@ -113,20 +139,31 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
     await gesture.removePointer();
 
+    final agentsCenter = tester.getCenter(find.text('2 agents · 1 running'));
+    final agentsRect = tester.getRect(find.text('2 agents · 1 running'));
+    await tester.tapAt(Offset(agentsRect.left + 8, agentsCenter.dy));
+    await tester.pumpAndSettle();
+    expect(find.text('SUBAGENTS'), findsOneWidget);
+    expect(find.text('reviewer'), findsOneWidget);
+    expect(find.text('worker'), findsOneWidget);
+    expect(find.text('Running'), findsOneWidget);
+    await tester.tap(find.text('reviewer'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Checking status projection'), findsOneWidget);
+    await tester.tapAt(Offset.zero);
+    await tester.pumpAndSettle();
+
     final capabilityCenter = tester.getCenter(
-      find.text('1 skill · 1 MCP · 1 LSP · 2 agents'),
+      find.text('1 skill · 1 MCP · 1 LSP'),
     );
-    final capabilityRect = tester.getRect(
-      find.text('1 skill · 1 MCP · 1 LSP · 2 agents'),
-    );
+    final capabilityRect = tester.getRect(find.text('1 skill · 1 MCP · 1 LSP'));
     await tester.tapAt(Offset(capabilityRect.left + 8, capabilityCenter.dy));
     await tester.pumpAndSettle();
     expect(find.text('ACTIVE CAPABILITIES'), findsOneWidget);
     expect(find.textContaining('Skills · flutter-ui'), findsOneWidget);
     expect(find.textContaining('MCP · dart'), findsOneWidget);
     expect(find.textContaining('LSP · rust-analyzer'), findsOneWidget);
-    expect(find.textContaining('Subagents · 2 agents'), findsOneWidget);
-    await gesture.moveTo(Offset.zero);
+    await tester.tapAt(Offset(capabilityRect.left + 8, capabilityCenter.dy));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('Session mode'));

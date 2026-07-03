@@ -416,6 +416,102 @@ abstract class AppLocalizations {
   /// **'Subagents'**
   String get statusSubagentsSection;
 
+  /// No description provided for @statusAgentChipTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Subagent status'**
+  String get statusAgentChipTooltip;
+
+  /// No description provided for @agentDetailTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Subagents'**
+  String get agentDetailTitle;
+
+  /// No description provided for @agentDetailSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 agent · {running} running} other{{count} agents · {running} running}}'**
+  String agentDetailSummary(int count, int running);
+
+  /// No description provided for @agentDetailEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No subagents'**
+  String get agentDetailEmpty;
+
+  /// No description provided for @agentDetailStatusQueued.
+  ///
+  /// In en, this message translates to:
+  /// **'Queued'**
+  String get agentDetailStatusQueued;
+
+  /// No description provided for @agentDetailStatusRunning.
+  ///
+  /// In en, this message translates to:
+  /// **'Running'**
+  String get agentDetailStatusRunning;
+
+  /// No description provided for @agentDetailStatusWaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting'**
+  String get agentDetailStatusWaiting;
+
+  /// No description provided for @agentDetailStatusCompleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Completed'**
+  String get agentDetailStatusCompleted;
+
+  /// No description provided for @agentDetailStatusErrored.
+  ///
+  /// In en, this message translates to:
+  /// **'Errored'**
+  String get agentDetailStatusErrored;
+
+  /// No description provided for @agentDetailStatusInterrupted.
+  ///
+  /// In en, this message translates to:
+  /// **'Interrupted'**
+  String get agentDetailStatusInterrupted;
+
+  /// No description provided for @agentDetailStatusShutdown.
+  ///
+  /// In en, this message translates to:
+  /// **'Shutdown'**
+  String get agentDetailStatusShutdown;
+
+  /// No description provided for @agentDetailStatusNotFound.
+  ///
+  /// In en, this message translates to:
+  /// **'Not found'**
+  String get agentDetailStatusNotFound;
+
+  /// No description provided for @agentDetailSummaryLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Summary'**
+  String get agentDetailSummaryLabel;
+
+  /// No description provided for @agentDetailErrorLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Error'**
+  String get agentDetailErrorLabel;
+
+  /// No description provided for @agentDetailReasonLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Reason'**
+  String get agentDetailReasonLabel;
+
+  /// No description provided for @agentDetailPathLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Path'**
+  String get agentDetailPathLabel;
+
   /// No description provided for @timelineEmptyTitle.
   ///
   /// In en, this message translates to:

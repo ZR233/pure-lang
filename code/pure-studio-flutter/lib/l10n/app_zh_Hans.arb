@@ -50,6 +50,28 @@
   "statusMcpSection": "MCP",
   "statusLspSection": "LSP",
   "statusSubagentsSection": "Subagents",
+  "statusAgentChipTooltip": "子代理状态",
+  "agentDetailTitle": "子代理",
+  "agentDetailSummary": "{count} 个 · {running} 运行中",
+  "@agentDetailSummary": {
+    "placeholders": {
+      "count": { "type": "int" },
+      "running": { "type": "int" }
+    }
+  },
+  "agentDetailEmpty": "暂无子代理",
+  "agentDetailStatusQueued": "排队中",
+  "agentDetailStatusRunning": "运行中",
+  "agentDetailStatusWaiting": "等待中",
+  "agentDetailStatusCompleted": "已完成",
+  "agentDetailStatusErrored": "出错",
+  "agentDetailStatusInterrupted": "已中断",
+  "agentDetailStatusShutdown": "已关闭",
+  "agentDetailStatusNotFound": "未找到",
+  "agentDetailSummaryLabel": "摘要",
+  "agentDetailErrorLabel": "错误",
+  "agentDetailReasonLabel": "原因",
+  "agentDetailPathLabel": "路径",
   "timelineEmptyTitle": "还没有消息",
   "timelineEmptyMessage": "打开项目或开始会话后继续。",
   "timelineJumpToLatest": "跳到最新",
