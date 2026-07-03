@@ -7,6 +7,7 @@ mod multi_agent;
 mod path_policy;
 mod plan;
 mod skill;
+mod todo;
 mod truncation;
 
 use pl_model::ToolSchema;
@@ -38,6 +39,7 @@ pub use multi_agent::{
 pub(crate) use path_policy::{PathAccess, ToolPathPolicy};
 pub use plan::PlanExitTool;
 pub use skill::{SkillManageTool, SkillViewTool, SkillsListTool};
+pub use todo::TodoListTool;
 pub use truncation::{OutputTruncation, TruncatedOutput, TruncationStrategy};
 
 /// 便捷类型别名：boxed future。

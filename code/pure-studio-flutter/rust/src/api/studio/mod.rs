@@ -21,13 +21,14 @@ pub use self::types::{
     BridgeSkillActivationDto, BridgeStudioAgentPartDto, BridgeStudioEventsResponse,
     BridgeStudioMessageDto, BridgeStudioMessageProjectionDto, BridgeStudioPartDeltaDto,
     BridgeStudioPartDto, BridgeStudioPartProjectionDto, BridgeStudioPlanPartDto,
-    BridgeStudioSnapshotResponse, BridgeStudioToolPartDto, BridgeStudioTurnDto,
-    BridgeUserQuestionDto, BridgeUserQuestionOptionDto, ConfigSavedResponse, DeepSeekBalanceDto,
-    DeepSeekBalanceInfoDto, InstructionsSettingsInput, McpServerInput, McpSettingsInput,
-    ProjectDto, ProviderInput, ProviderModelInput, ProviderSettingsInput, ProviderUsageDto,
-    ProviderUsagesResponse, ResolveInteractionResponse, RoleInput, RuntimeSnapshot, SessionDto,
-    SkillSummaryDto, SkillsResponse, SkillsSettingsInput, StopPromptResponse, SubmitPromptResponse,
-    ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
+    BridgeStudioSnapshotResponse, BridgeStudioToolPartDto, BridgeStudioTurnDto, BridgeTodoItemDto,
+    BridgeTodoListSnapshotDto, BridgeUserQuestionDto, BridgeUserQuestionOptionDto,
+    ConfigSavedResponse, DeepSeekBalanceDto, DeepSeekBalanceInfoDto, InstructionsSettingsInput,
+    McpServerInput, McpSettingsInput, ProjectDto, ProviderInput, ProviderModelInput,
+    ProviderSettingsInput, ProviderUsageDto, ProviderUsagesResponse, ResolveInteractionResponse,
+    RoleInput, RuntimeSnapshot, SessionDto, SkillSummaryDto, SkillsResponse, SkillsSettingsInput,
+    StopPromptResponse, SubmitPromptResponse, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto,
+    ZhipuToolUsageDetailDto,
 };
 
 #[cfg(test)]

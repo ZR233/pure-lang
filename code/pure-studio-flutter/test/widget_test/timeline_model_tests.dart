@@ -379,6 +379,58 @@ void registerTimelineModelTests() {
     expect(row.agentEvent!.payload, isA<TimelineSubAgentActivity>());
   });
 
+  test('todo list updates keep one timeline row per event', () {
+    final now = DateTime.fromMillisecondsSinceEpoch(0);
+    final rows = timelineRowsFromMessages(
+      const [],
+      agentEvents: [
+        TimelineAgentEvent(
+          eventId: 'todo-event-1',
+          sessionId: 'session-1',
+          sequence: 1,
+          createdAt: now,
+          payload: const TimelineTodoListUpdate(
+            callId: 'call-1',
+            path: '/root',
+            explanation: 'First pass',
+            items: [
+              TimelineTodoItem(step: 'Read code', status: 'completed'),
+              TimelineTodoItem(step: 'Patch code', status: 'inProgress'),
+            ],
+          ),
+        ),
+        TimelineAgentEvent(
+          eventId: 'todo-event-2',
+          sessionId: 'session-1',
+          sequence: 2,
+          createdAt: now.add(const Duration(seconds: 1)),
+          payload: const TimelineTodoListUpdate(
+            callId: 'call-1',
+            path: '/root',
+            explanation: 'Second pass',
+            items: [
+              TimelineTodoItem(step: 'Read code', status: 'completed'),
+              TimelineTodoItem(step: 'Patch code', status: 'completed'),
+              TimelineTodoItem(step: 'Run tests', status: 'pending'),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    expect(rows, hasLength(2));
+    expect(rows.map((row) => row.id), [
+      'agent-activity:todo-event-1',
+      'agent-activity:todo-event-2',
+    ]);
+    expect(
+      rows.every((row) => row.type == TimelineRowType.agentActivity),
+      true,
+    );
+    expect(rows.last.agentEvent!.payload, isA<TimelineTodoListUpdate>());
+    expect(rows.last.agentEvent!.status, 'pending');
+  });
+
   test('agent snapshots update status state without timeline rows', () async {
     final api = _FakeStudioApi(_emptyState());
     final container = ProviderContainer(
@@ -502,6 +554,66 @@ void registerTimelineModelTests() {
       expect(row.agentEvent!.payload, isA<TimelineSubAgentActivity>());
     },
   );
+
+  test('typed session snapshot restores todo list timeline events', () {
+    const session = frb.SessionDto(
+      id: 'session-1',
+      projectId: 'project-1',
+      title: 'Session',
+      mode: 'auto',
+      updatedAt: 1,
+      visibility: 'visible',
+    );
+    final state = studioStateFromFrbSession(
+      frb.BridgeSessionStateResponse(
+        sessionId: 'session-1',
+        session: session,
+        sessions: const [session],
+        messages: const [],
+        parts: const [],
+        events: const [],
+        eventNextSequence: BigInt.zero,
+        agents: const [],
+        agentEvents: [
+          frb.BridgeAgentTimelineEventDto(
+            eventId: 'todo-event-1',
+            sessionId: 'session-1',
+            sequence: BigInt.from(8),
+            createdAt: 4,
+            payload: const frb.BridgeAgentTimelinePayloadDto.todoListUpdated(
+              snapshot: frb.BridgeTodoListSnapshotDto(
+                callId: 'call-3',
+                path: '/root/worker',
+                parentPath: '/root',
+                explanation: 'Todo restore',
+                items: [
+                  frb.BridgeTodoItemDto(
+                    step: 'Restore payload',
+                    status: 'completed',
+                  ),
+                  frb.BridgeTodoItemDto(step: 'Render row', status: 'pending'),
+                ],
+              ),
+            ),
+          ),
+        ],
+        interactions: const [],
+      ),
+    );
+
+    final row = state.selectedTimelineRows.single;
+    expect(row.id, 'agent-activity:todo-event-1');
+    expect(row.agentEvent!.callId, 'call-3');
+    expect(row.agentEvent!.title, 'agentTimeline.todoList');
+    final payload = row.agentEvent!.payload;
+    expect(payload, isA<TimelineTodoListUpdate>());
+    final update = payload as TimelineTodoListUpdate;
+    expect(update.explanation, 'Todo restore');
+    expect(update.items.map((item) => item.step), [
+      'Restore payload',
+      'Render row',
+    ]);
+  });
 
   test('typed session snapshot restores agent status state', () {
     const session = frb.SessionDto(

@@ -99,6 +99,7 @@ fn live_tool_result_deltas(events: &[AgentEvent], item_id: &str) -> Vec<String> 
             | AgentEvent::AgentRuntimeUpdated { .. }
             | AgentEvent::SkillActivated { .. }
             | AgentEvent::SubAgentActivity { .. }
+            | AgentEvent::TodoListUpdated { .. }
             | AgentEvent::TurnInterrupted { .. }
             | AgentEvent::TurnBudgetLimited { .. }
             | AgentEvent::Error { .. }
@@ -128,6 +129,7 @@ fn runtime_progress_texts(
             | AgentEvent::AgentRuntimeUpdated { .. }
             | AgentEvent::SkillActivated { .. }
             | AgentEvent::SubAgentActivity { .. }
+            | AgentEvent::TodoListUpdated { .. }
             | AgentEvent::TurnInterrupted { .. }
             | AgentEvent::TurnBudgetLimited { .. }
             | AgentEvent::Error { .. }

@@ -159,6 +159,9 @@ pub(super) fn studio_agent_timeline_event(
             timed_out,
             error,
         },
+        AgentEvent::TodoListUpdated { snapshot } => {
+            StudioAgentTimelineEventKind::TodoListUpdated { snapshot }
+        }
         AgentEvent::TracePartStarted { .. }
         | AgentEvent::TracePartDelta { .. }
         | AgentEvent::TracePartCompleted { .. }

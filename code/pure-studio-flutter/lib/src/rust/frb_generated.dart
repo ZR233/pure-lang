@@ -1389,9 +1389,43 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           timedOut: dco_decode_bool(raw[8]),
           error: dco_decode_opt_String(raw[9]),
         );
+      case 1:
+        return BridgeAgentTimelinePayloadDto_TodoListUpdated(
+          snapshot: dco_decode_bridge_todo_list_snapshot_dto(raw[1]),
+        );
       default:
         throw Exception("unreachable");
     }
+  }
+
+  @protected
+  BridgeTodoListSnapshotDto dco_decode_bridge_todo_list_snapshot_dto(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    return BridgeTodoListSnapshotDto(
+      callId: dco_decode_String(arr[0]),
+      agentId: dco_decode_opt_String(arr[1]),
+      path: dco_decode_opt_String(arr[2]),
+      parentPath: dco_decode_opt_String(arr[3]),
+      explanation: dco_decode_opt_String(arr[4]),
+      items: dco_decode_list_bridge_todo_item_dto(arr[5]),
+    );
+  }
+
+  @protected
+  BridgeTodoItemDto dco_decode_bridge_todo_item_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return BridgeTodoItemDto(
+      step: dco_decode_String(arr[0]),
+      status: dco_decode_String(arr[1]),
+    );
   }
 
   @protected
@@ -1985,6 +2019,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return (raw as List<dynamic>)
         .map(dco_decode_bridge_agent_timeline_event_dto)
         .toList();
+  }
+
+  @protected
+  List<BridgeTodoItemDto> dco_decode_list_bridge_todo_item_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_bridge_todo_item_dto).toList();
   }
 
   @protected
@@ -2705,9 +2745,47 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           timedOut: var_timedOut,
           error: var_error,
         );
+      case 1:
+        var var_snapshot = sse_decode_bridge_todo_list_snapshot_dto(
+          deserializer,
+        );
+        return BridgeAgentTimelinePayloadDto_TodoListUpdated(
+          snapshot: var_snapshot,
+        );
       default:
         throw UnimplementedError('');
     }
+  }
+
+  @protected
+  BridgeTodoListSnapshotDto sse_decode_bridge_todo_list_snapshot_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_callId = sse_decode_String(deserializer);
+    var var_agentId = sse_decode_opt_String(deserializer);
+    var var_path = sse_decode_opt_String(deserializer);
+    var var_parentPath = sse_decode_opt_String(deserializer);
+    var var_explanation = sse_decode_opt_String(deserializer);
+    var var_items = sse_decode_list_bridge_todo_item_dto(deserializer);
+    return BridgeTodoListSnapshotDto(
+      callId: var_callId,
+      agentId: var_agentId,
+      path: var_path,
+      parentPath: var_parentPath,
+      explanation: var_explanation,
+      items: var_items,
+    );
+  }
+
+  @protected
+  BridgeTodoItemDto sse_decode_bridge_todo_item_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_step = sse_decode_String(deserializer);
+    var var_status = sse_decode_String(deserializer);
+    return BridgeTodoItemDto(step: var_step, status: var_status);
   }
 
   @protected
@@ -3484,6 +3562,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <BridgeAgentTimelineEventDto>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_bridge_agent_timeline_event_dto(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<BridgeTodoItemDto> sse_decode_list_bridge_todo_item_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeTodoItemDto>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_todo_item_dto(deserializer));
     }
     return ans_;
   }
@@ -4380,7 +4472,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(message, serializer);
         sse_encode_bool(timedOut, serializer);
         sse_encode_opt_String(error, serializer);
+      case BridgeAgentTimelinePayloadDto_TodoListUpdated(
+        snapshot: final snapshot,
+      ):
+        sse_encode_i_32(1, serializer);
+        sse_encode_bridge_todo_list_snapshot_dto(snapshot, serializer);
     }
+  }
+
+  @protected
+  void sse_encode_bridge_todo_list_snapshot_dto(
+    BridgeTodoListSnapshotDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.callId, serializer);
+    sse_encode_opt_String(self.agentId, serializer);
+    sse_encode_opt_String(self.path, serializer);
+    sse_encode_opt_String(self.parentPath, serializer);
+    sse_encode_opt_String(self.explanation, serializer);
+    sse_encode_list_bridge_todo_item_dto(self.items, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_todo_item_dto(
+    BridgeTodoItemDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.step, serializer);
+    sse_encode_String(self.status, serializer);
   }
 
   @protected
@@ -4961,6 +5082,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_bridge_agent_timeline_event_dto(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_bridge_todo_item_dto(
+    List<BridgeTodoItemDto> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (var item in self) {
+      sse_encode_bridge_todo_item_dto(item, serializer);
     }
   }
 

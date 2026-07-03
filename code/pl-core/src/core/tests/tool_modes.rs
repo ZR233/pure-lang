@@ -14,6 +14,7 @@ fn plan_mode_tool_allowlist_exposes_only_read_and_agent_tools() {
     assert!(tool_allowed_in_mode(plan, "spawn_agent"));
     assert!(tool_allowed_in_mode(plan, "followup_task"));
     assert!(tool_allowed_in_mode(plan, "request_user_input"));
+    assert!(tool_allowed_in_mode(plan, "update_todo_list"));
     assert!(tool_allowed_in_mode(plan, "bash"));
     assert!(tool_allowed_in_mode(plan, "lsp_query_rust"));
     assert!(tool_allowed_in_mode(plan, "mcp__github__search_issues"));

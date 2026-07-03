@@ -21,8 +21,8 @@ use crate::tool::{
     ApplyPatchTool, AskUserTool, CloseAgentTool, CopyPathTool, CreateDirectoryTool, DeletePathTool,
     FollowupTaskTool, ListAgentsTool, ListFilesTool, MovePathTool, PlanExitTool, ReadFileTool,
     SearchFilesTool, SendMessageTool, SkillManageTool, SkillViewTool, SkillsListTool,
-    SpawnAgentTool, StatPathTool, SubagentContext, ToolContext, ToolRegistry, WaitAgentTool,
-    WriteFileTool, command_tool_pair,
+    SpawnAgentTool, StatPathTool, SubagentContext, TodoListTool, ToolContext, ToolRegistry,
+    WaitAgentTool, WriteFileTool, command_tool_pair,
 };
 use crate::trace::TraceRecorder;
 #[cfg(test)]
@@ -232,6 +232,7 @@ impl PureCore {
         ));
         self.register_tool(CloseAgentTool);
         self.register_tool(AskUserTool);
+        self.register_tool(TodoListTool);
         self.register_tool(PlanExitTool);
     }
 

@@ -240,6 +240,18 @@ TimelineAgentEventPayload _agentTimelinePayloadFromFrb(
         timedOut: timedOut,
         error: error,
       ),
+    frb.BridgeAgentTimelinePayloadDto_TodoListUpdated(:final snapshot) =>
+      TimelineTodoListUpdate(
+        callId: snapshot.callId,
+        agentId: snapshot.agentId,
+        path: snapshot.path,
+        parentPath: snapshot.parentPath,
+        explanation: snapshot.explanation,
+        items: [
+          for (final item in snapshot.items)
+            TimelineTodoItem(step: item.step, status: item.status),
+        ],
+      ),
   };
 }
 

@@ -225,6 +225,7 @@ impl StudioRuntime {
             | AgentEvent::AgentRuntimeUpdated { .. }
             | AgentEvent::SkillActivated { .. }
             | AgentEvent::SubAgentActivity { .. }
+            | AgentEvent::TodoListUpdated { .. }
             | AgentEvent::TurnInterrupted { .. }
             | AgentEvent::TurnBudgetLimited { .. }
             | AgentEvent::Done

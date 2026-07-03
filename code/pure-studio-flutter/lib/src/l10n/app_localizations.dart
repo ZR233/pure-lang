@@ -582,6 +582,30 @@ abstract class AppLocalizations {
   /// **'Close subagent'**
   String get timelineAgentClose;
 
+  /// No description provided for @timelineTodoListFallback.
+  ///
+  /// In en, this message translates to:
+  /// **'Todo list'**
+  String get timelineTodoListFallback;
+
+  /// No description provided for @timelineTodoPending.
+  ///
+  /// In en, this message translates to:
+  /// **'Pending'**
+  String get timelineTodoPending;
+
+  /// No description provided for @timelineTodoInProgress.
+  ///
+  /// In en, this message translates to:
+  /// **'In progress'**
+  String get timelineTodoInProgress;
+
+  /// No description provided for @timelineTodoCompleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Completed'**
+  String get timelineTodoCompleted;
+
   /// No description provided for @interactionQuestionsTitle.
   ///
   /// In en, this message translates to:

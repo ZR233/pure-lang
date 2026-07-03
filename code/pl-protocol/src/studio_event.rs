@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AgentStatus, BudgetLimitKind, BudgetUsage, InteractionChangedEvent, PlanLifecycleEvent,
-    RuntimeCostAmount, SkillActivation, SubAgentActivityKind, TokenUsageSnapshot,
+    RuntimeCostAmount, SkillActivation, SubAgentActivityKind, TodoListSnapshot, TokenUsageSnapshot,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -471,6 +471,9 @@ pub enum StudioAgentTimelineEventKind {
         timed_out: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+    },
+    TodoListUpdated {
+        snapshot: TodoListSnapshot,
     },
 }
 

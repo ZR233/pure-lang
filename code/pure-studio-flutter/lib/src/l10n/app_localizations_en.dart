@@ -305,6 +305,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get timelineAgentClose => 'Close subagent';
 
   @override
+  String get timelineTodoListFallback => 'Todo list';
+
+  @override
+  String get timelineTodoPending => 'Pending';
+
+  @override
+  String get timelineTodoInProgress => 'In progress';
+
+  @override
+  String get timelineTodoCompleted => 'Completed';
+
+  @override
   String get interactionQuestionsTitle => 'A few questions';
 
   @override

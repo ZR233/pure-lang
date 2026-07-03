@@ -26,6 +26,7 @@ class TimelineAgentEvent {
         'closed' => 'agentTimeline.close',
         _ => 'agentTimeline.activity',
       },
+      TimelineTodoListUpdate() => 'agentTimeline.todoList',
     };
   }
 
@@ -81,6 +82,47 @@ class TimelineSubAgentActivity extends TimelineAgentEventPayload {
   ]);
 }
 
+class TimelineTodoListUpdate extends TimelineAgentEventPayload {
+  const TimelineTodoListUpdate({
+    required this.callId,
+    required this.items,
+    this.agentId,
+    this.path,
+    this.parentPath,
+    this.explanation,
+  });
+
+  @override
+  final String callId;
+  final String? agentId;
+  final String? path;
+  final String? parentPath;
+  final String? explanation;
+  final List<TimelineTodoItem> items;
+
+  @override
+  String get status {
+    if (items.any((item) => item.status == 'inProgress')) {
+      return 'running';
+    }
+    if (items.isNotEmpty && items.every((item) => item.status == 'completed')) {
+      return 'completed';
+    }
+    return 'pending';
+  }
+
+  @override
+  String get activityText =>
+      _agentActivityText([path, parentPath, explanation]);
+}
+
+class TimelineTodoItem {
+  const TimelineTodoItem({required this.step, required this.status});
+
+  final String step;
+  final String status;
+}
+
 TimelineAgentEvent timelineAgentEventFromPayload(
   Object? value, {
   String? eventId,
@@ -111,6 +153,9 @@ TimelineRow timelineRowFromAgentEvent(TimelineAgentEvent event) {
 }
 
 String timelineAgentEventGroupKey(TimelineAgentEvent event) {
+  if (event.payload is TimelineTodoListUpdate) {
+    return event.eventId;
+  }
   return event.callId.isEmpty ? event.eventId : event.callId;
 }
 
@@ -155,6 +200,8 @@ int _timelineAgentEventRenderVersion(TimelineAgentEvent event) {
     event.text,
     event.status,
     event.payload.runtimeType,
+    if (event.payload case TimelineTodoListUpdate(:final items))
+      for (final item in items) ...[item.step, item.status],
     event.createdAt.millisecondsSinceEpoch,
   ]);
 }
@@ -175,8 +222,27 @@ TimelineAgentEventPayload _agentEventPayloadFromMap(
       timedOut: _boolValue(kind['timedOut']),
       error: _stringValue(kind['error']),
     ),
+    'todoListUpdated' => _todoListPayloadFromMap(kind),
     _ => throw FormatException('Unknown agent timeline event type: $kindType'),
   };
+}
+
+TimelineTodoListUpdate _todoListPayloadFromMap(Map<String, Object?> kind) {
+  final snapshot = _objectMap(kind['snapshot']);
+  return TimelineTodoListUpdate(
+    callId: _stringValue(snapshot['callId']) ?? '',
+    agentId: _stringValue(snapshot['agentId']),
+    path: _stringValue(snapshot['path']),
+    parentPath: _stringValue(snapshot['parentPath']),
+    explanation: _stringValue(snapshot['explanation']),
+    items: [
+      for (final item in _listValue(snapshot['items']))
+        TimelineTodoItem(
+          step: _stringValue(_objectMap(item)['step']) ?? '',
+          status: _stringValue(_objectMap(item)['status']) ?? 'pending',
+        ),
+    ],
+  );
 }
 
 String _agentActivityText(Iterable<String?> parts) {

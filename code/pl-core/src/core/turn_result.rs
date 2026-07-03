@@ -72,6 +72,7 @@ pub(super) fn tool_allowed_in_mode(mode: CompileMode, name: &str) -> bool {
                     | "followup_task"
                     | "close_agent"
                     | "request_user_input"
+                    | "update_todo_list"
                     | "plan_exit"
             ) || name.starts_with("lsp_query_")
         }
