@@ -65,7 +65,7 @@ platforms: ["windows", "linux", "macos"]
 - `skill_view(name, filePath?)`：读取完整 `SKILL.md` 或支持文件，并记录使用统计。省略 `filePath`、传空字符串、`.` 或 `SKILL.md` 都表示读取主文档；只有真正的支持文件路径才必须位于 `references/`、`templates/`、`scripts/` 或 `assets/` 下。
 - `skill_manage(action, ...)`：管理项目目录中的 skill。
 
-`skill_manage` 支持 `create`、`patch`、`edit`、`delete`、`writeFile`、`removeFile`。所有写入都只作用于 `<workspace_root>/<project_dir>/`。写入动作进入现有工具审批流程。
+`skill_manage` 支持 `create`、`patch`、`edit`、`delete`、`writeFile`、`removeFile`。所有写入都只作用于 `<workspace_root>/<project_dir>/`。写入动作进入现有工具审批流程。`patch.oldString` 首先按 `SKILL.md` 原文字面量匹配；若完全匹配失败，运行时只允许把看起来像 JSON string fragment 的模型输出交给 `serde_json` 解码一层，再按同一匹配数量规则替换，避免因为 JSON/Markdown 二次转义噪声导致可恢复 patch 失败。运行时不维护额外的手写转义替换表。
 
 ## 13.5 Prompt 和 Subagent
 

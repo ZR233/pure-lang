@@ -7,6 +7,7 @@ mod multi_agent;
 mod path_policy;
 mod plan;
 mod skill;
+mod text_escape;
 mod todo;
 mod truncation;
 

@@ -92,6 +92,48 @@ fn create_writes_project_skill() {
 }
 
 #[test]
+fn patch_accepts_json_escaped_markdown_old_string() {
+    let workspace = temp_dir("patch-escaped-old-string");
+    let skill_dir = workspace.join("skills/local-flow");
+    fs::create_dir_all(&skill_dir).unwrap();
+    fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: local-flow\ndescription: Local flow\n---\n# local-flow\n\nSnippet: `\"unknown\\nusage\"`\n",
+    )
+    .unwrap();
+    let catalog = SkillCatalog {
+        project_dir: workspace.join("skills"),
+        skills: vec![SkillMetadata {
+            name: "local-flow".to_string(),
+            description: "Local flow".to_string(),
+            category: None,
+            platforms: Vec::new(),
+            source: SkillSourceKind::Project,
+            path: skill_dir.clone(),
+        }],
+        warnings: Vec::new(),
+    };
+    let input = SkillManageInput {
+        action: SkillManageAction::Patch,
+        name: "local-flow".to_string(),
+        content: None,
+        category: None,
+        file_path: None,
+        file_content: None,
+        old_string: Some(r#"Snippet: `\"unknown\\nusage\"`"#.to_string()),
+        new_string: Some("Snippet: `\"known\\nusage\"`".to_string()),
+        replace_mode: None,
+        absorbed_into: None,
+    };
+
+    patch_skill("skill_manage", &catalog, input).unwrap();
+
+    let updated = fs::read_to_string(skill_dir.join("SKILL.md")).unwrap();
+    assert!(updated.contains("Snippet: `\"known\\nusage\"`"));
+    fs::remove_dir_all(workspace).unwrap();
+}
+
+#[test]
 fn rejects_readonly_skill_patch() {
     let catalog = SkillCatalog {
         project_dir: PathBuf::from("project/skills"),
