@@ -15,6 +15,7 @@ class StatusBarChip extends StatefulWidget {
     this.detailWidth = 300,
     this.enabled = true,
     this.enableHover = true,
+    this.interactive = false,
     this.maxWidth = 180,
     super.key,
   });
@@ -27,6 +28,7 @@ class StatusBarChip extends StatefulWidget {
   final double detailWidth;
   final bool enabled;
   final bool enableHover;
+  final bool interactive;
   final double maxWidth;
 
   @override
@@ -35,6 +37,7 @@ class StatusBarChip extends StatefulWidget {
 
 class _StatusBarChipState extends State<StatusBarChip> {
   final GlobalKey _targetKey = GlobalKey();
+  final Object _tapRegionGroup = Object();
   OverlayEntry? _entry;
   Timer? _hideTimer;
   bool _hovering = false;
@@ -100,7 +103,7 @@ class _StatusBarChipState extends State<StatusBarChip> {
             },
             child: Listener(
               behavior: HitTestBehavior.translucent,
-              onPointerDown: (_) => _toggleDetail(),
+              onPointerDown: (_) => _handlePointerDown(),
               onPointerHover: (_) => _showDetail(),
               child: row,
             ),
@@ -132,11 +135,14 @@ class _StatusBarChipState extends State<StatusBarChip> {
       padding: const EdgeInsets.only(right: 2),
       child: interactive,
     );
+    final groupedChip = widget.interactive && detailBuilder != null
+        ? TapRegion(groupId: _tapRegionGroup, child: chip)
+        : chip;
     final tooltip = widget.tooltip;
     if (tooltip == null || tooltip.isEmpty) {
-      return chip;
+      return groupedChip;
     }
-    return Tooltip(message: tooltip, child: chip);
+    return Tooltip(message: tooltip, child: groupedChip);
   }
 
   void _toggleDetail() {
@@ -145,6 +151,14 @@ class _StatusBarChipState extends State<StatusBarChip> {
     } else {
       _hideDetail();
     }
+  }
+
+  void _handlePointerDown() {
+    if (widget.interactive && _hovering && _entry != null) {
+      _cancelHideDetail();
+      return;
+    }
+    _toggleDetail();
   }
 
   void _showDetail() {
@@ -168,46 +182,38 @@ class _StatusBarChipState extends State<StatusBarChip> {
     final bottom = math.max(8.0, overlaySize.height - targetTopLeft.dy + 8);
     final theme = Theme.of(context);
     final detailBuilder = widget.detailBuilder!;
+    final interactive = widget.interactive;
     _entry = OverlayEntry(
       builder: (context) {
+        final card = _detailCard(theme, detailBuilder);
+        final positioned = Positioned(
+          left: left,
+          bottom: bottom,
+          width: widget.detailWidth,
+          child: interactive
+              ? MouseRegion(
+                  onEnter: (_) => _cancelHideDetail(),
+                  onExit: (_) => _scheduleHideDetail(),
+                  child: TapRegion(
+                    groupId: _tapRegionGroup,
+                    onTapOutside: (_) => _hideDetail(),
+                    child: card,
+                  ),
+                )
+              : IgnorePointer(child: card),
+        );
         return Theme(
           data: theme,
-          child: Positioned.fill(
-            child: IgnorePointer(
-              child: Stack(
-                children: [
-                  Positioned(
-                    left: left,
-                    bottom: bottom,
-                    width: widget.detailWidth,
-                    child: Material(
-                      color: Colors.transparent,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceContainerLowest,
-                          border: Border.all(
-                            color: theme.colorScheme.outlineVariant,
-                          ),
-                          borderRadius: BorderRadius.circular(11),
-                          boxShadow: StudioShadows.lifted(
-                            theme.colorScheme.shadow,
-                          ),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: detailBuilder(context),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          child: Positioned.fill(child: Stack(children: [positioned])),
         );
       },
     );
     overlay.insert(_entry!);
+  }
+
+  void _cancelHideDetail() {
+    _hideTimer?.cancel();
+    _hideTimer = null;
   }
 
   void _scheduleHideDetail() {
@@ -218,5 +224,23 @@ class _StatusBarChipState extends State<StatusBarChip> {
   void _hideDetail() {
     _entry?.remove();
     _entry = null;
+  }
+
+  Widget _detailCard(ThemeData theme, WidgetBuilder detailBuilder) {
+    return Material(
+      color: Colors.transparent,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerLowest,
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+          borderRadius: BorderRadius.circular(11),
+          boxShadow: StudioShadows.lifted(theme.colorScheme.shadow),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: detailBuilder(context),
+        ),
+      ),
+    );
   }
 }

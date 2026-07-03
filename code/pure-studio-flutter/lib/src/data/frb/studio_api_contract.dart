@@ -168,8 +168,8 @@ class FrbStudioApi implements StudioApi {
     await _ensureReady();
     final response = await frb.loadStudioEvents(
       sessionId: sessionId,
-      afterSequence: afterSequence,
-      limit: limit,
+      afterSequence: _frbNullablePlatformInt64(afterSequence),
+      limit: _frbPlatformInt64(limit),
     );
     return response.events.map(StudioBridgeEvent.fromFrb).toList();
   }

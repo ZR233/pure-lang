@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+
 import '../../domain/models/studio_models.dart';
 import '../../rust/api/studio.dart' as frb;
 import '../../rust/frb_generated.dart';
@@ -212,8 +214,37 @@ bool _boolWithDefault(Object? value, bool fallback) {
   return _bool(value);
 }
 
-DateTime _dateFromUnix(int seconds) {
-  return DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
+int _frbInt(Object value) {
+  if (value is BigInt) {
+    return value.toInt();
+  }
+  if (value is int) {
+    return value;
+  }
+  if (value is num) {
+    return value.toInt();
+  }
+  return int.parse(value.toString());
+}
+
+int? _frbNullableInt(Object? value) {
+  if (value == null) {
+    return null;
+  }
+  return _frbInt(value);
+}
+
+PlatformInt64 _frbPlatformInt64(int value) => PlatformInt64Util.from(value);
+
+PlatformInt64? _frbNullablePlatformInt64(int? value) {
+  if (value == null) {
+    return null;
+  }
+  return _frbPlatformInt64(value);
+}
+
+DateTime _dateFromUnix(Object seconds) {
+  return DateTime.fromMillisecondsSinceEpoch(_frbInt(seconds) * 1000);
 }
 
 String _jsonText(Object? value) {
