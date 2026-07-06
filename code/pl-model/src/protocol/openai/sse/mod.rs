@@ -76,13 +76,16 @@ pub struct ChatStreamCustomDelta {
 #[allow(dead_code)]
 pub struct ChatTokenUsage {
     pub prompt_tokens: Option<u64>,
+    pub input_tokens: Option<u64>,
     pub completion_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
     pub prompt_tokens_details: Option<serde_json::Value>,
     pub input_tokens_details: Option<serde_json::Value>,
     pub completion_tokens_details: Option<serde_json::Value>,
     pub output_tokens_details: Option<serde_json::Value>,
     pub prompt_cache_hit_tokens: Option<u64>,
+    pub cached_prompt_tokens: Option<u64>,
 }
 
 pub(crate) type StreamEvent = ModelStreamEvent;
@@ -529,11 +532,12 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
 
         if choice.finish_reason.is_some() {
             let usage = event.usage.as_ref().map(|u| TokenUsage {
-                prompt_tokens: u.prompt_tokens.unwrap_or(0),
-                completion_tokens: u.completion_tokens.unwrap_or(0),
+                prompt_tokens: u.prompt_tokens.or(u.input_tokens).unwrap_or(0),
+                completion_tokens: u.completion_tokens.or(u.output_tokens).unwrap_or(0),
                 total_tokens: u.total_tokens.unwrap_or(0),
                 cached_prompt_tokens: u
                     .prompt_cache_hit_tokens
+                    .or(u.cached_prompt_tokens)
                     .or_else(|| {
                         u.prompt_tokens_details
                             .as_ref()
