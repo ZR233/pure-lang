@@ -134,6 +134,9 @@ impl McpRuntimeRegistry {
     }
 
     pub async fn register_available_tools(&self, core: &mut crate::PureCore) -> Result<()> {
+        if !core.mcp_tools_enabled() {
+            return Ok(());
+        }
         for available in self.available_servers().await {
             for definition in available.tools {
                 let adapter = McpToolAdapter::new(

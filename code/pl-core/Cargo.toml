@@ -7,17 +7,22 @@ license.workspace = true
 [features]
 default = ["studio"]
 studio = ["sea-orm"]
+docker-tools = []
 
 [dependencies]
 pl-protocol = { workspace = true }
 pl-trace = { workspace = true }
 pl-model = { workspace = true }
 pl-lsp = { workspace = true }
+pl-output = { workspace = true }
+pl-patch = { workspace = true }
+pl-skill-core = { workspace = true }
 anyhow = { workspace = true }
 sea-orm = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_norway = { workspace = true }
+secrecy = { workspace = true }
 include_dir = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

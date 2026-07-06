@@ -9,6 +9,7 @@ use pl_model::{
 
 use super::role::{ModelRole, ReasoningEffort};
 use super::runtime::SkillsConfig;
+use super::runtime::ToolCapabilityConfig;
 use super::store::{ConfigPaths, ConfigStore};
 use super::{
     BuiltinMcpServerState, CONFIG_SCHEMA_VERSION, DEFAULT_MODEL, McpServerConfig,
@@ -77,6 +78,9 @@ fn toml_round_trip_preserves_roles_models_and_token() {
     config.runtime.permission_mode = PermissionMode::AutoReview;
     config.runtime.active_skills = vec!["rust".to_string(), "git".to_string()];
     config.runtime.active_mcp_servers = vec!["github".to_string()];
+    config.runtime.tool_capabilities.git = true;
+    config.runtime.tool_capabilities.docker = true;
+    config.runtime.tool_capabilities.mcp = false;
     config.mcp_servers.insert(
         "filesystem".to_string(),
         McpServerConfig {
@@ -126,6 +130,9 @@ fn toml_round_trip_preserves_roles_models_and_token() {
         parsed.runtime.active_mcp_servers,
         vec!["github".to_string()]
     );
+    assert_eq!(parsed.runtime.tool_capabilities.git, true);
+    assert_eq!(parsed.runtime.tool_capabilities.docker, true);
+    assert_eq!(parsed.runtime.tool_capabilities.mcp, false);
     assert_eq!(
         active_mcp_server_names(&parsed),
         vec!["filesystem".to_string(), "github".to_string()]
@@ -417,6 +424,10 @@ fn missing_runtime_defaults_to_empty_lists() {
 
     assert!(parsed.runtime.active_skills.is_empty());
     assert!(parsed.runtime.active_mcp_servers.is_empty());
+    assert_eq!(
+        parsed.runtime.tool_capabilities,
+        ToolCapabilityConfig::default()
+    );
     assert_eq!(
         parsed.runtime.permission_mode,
         PermissionMode::RequestApproval

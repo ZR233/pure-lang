@@ -104,6 +104,7 @@ pub(super) async fn run_turn_with_trace(
     let mut last_content = String::new();
     let mut last_reasoning_content = None;
     let mut last_model = model.clone();
+    let mut last_context_tokens = None;
     let mut total_usage = pl_model::TokenUsage::default();
     let mut safe_message_count = session.len();
     let mut session_message_count = safe_message_count;
@@ -204,6 +205,7 @@ pub(super) async fn run_turn_with_trace(
                 ContextCompactionRequest {
                     provider: provider.as_ref(),
                     model: &model,
+                    config: &core.context_compaction,
                     request_instructions: &instruction_bundle.instructions,
                     request_messages: &instruction_bundle.prelude_messages,
                     trigger: compaction_trigger,
@@ -221,6 +223,7 @@ pub(super) async fn run_turn_with_trace(
                     total_usage.prompt_tokens += usage.prompt_tokens;
                     total_usage.completion_tokens += usage.completion_tokens;
                     total_usage.cached_prompt_tokens += usage.cached_prompt_tokens;
+                    total_usage.reasoning_tokens += usage.reasoning_tokens;
                     let usage_snapshot = token_usage_snapshot(&usage);
                     let model_info = provider.model_info(&model);
                     recorder.broadcast(AgentEvent::AgentRuntimeUpdated {
@@ -384,9 +387,14 @@ pub(super) async fn run_turn_with_trace(
         recorder.complete_inference_item(inference_item, usage_snapshot.clone());
         let model_info = provider.model_info(&actual_model);
         let response_prompt_tokens = response.usage.prompt_tokens;
+        let response_total_tokens = response
+            .usage
+            .total_tokens
+            .max(response.usage.prompt_tokens + response.usage.completion_tokens);
+        last_context_tokens = Some(response_total_tokens);
         let response_reached_auto_compact_limit = model_info
             .resolved_auto_compact_limit()
-            .is_some_and(|limit| response_prompt_tokens >= limit);
+            .is_some_and(|limit| response_prompt_tokens >= limit || response_total_tokens >= limit);
         recorder.broadcast(AgentEvent::AgentRuntimeUpdated {
             delta: agent_runtime_delta(
                 inference_id.clone(),
@@ -405,6 +413,7 @@ pub(super) async fn run_turn_with_trace(
         total_usage.prompt_tokens += response.usage.prompt_tokens;
         total_usage.completion_tokens += response.usage.completion_tokens;
         total_usage.cached_prompt_tokens += response.usage.cached_prompt_tokens;
+        total_usage.reasoning_tokens += response.usage.reasoning_tokens;
 
         last_model = actual_model;
 
@@ -466,7 +475,7 @@ pub(super) async fn run_turn_with_trace(
             last_reasoning_content = reasoning_content;
         }
         if response_reached_auto_compact_limit {
-            provider_prompt_tokens_for_compaction = Some(response_prompt_tokens);
+            provider_prompt_tokens_for_compaction = Some(response_total_tokens);
         }
         session.acknowledge_model_response(session.messages().len(), response_id);
         let count = tool_calls.len();
@@ -528,6 +537,12 @@ pub(super) async fn run_turn_with_trace(
                 cancellation_reason(),
             ));
         }
+        let should_end_turn = tool_results.iter().any(|tool_result| {
+            tool_result
+                .runtime_events
+                .iter()
+                .any(|event| matches!(event, crate::tool::ToolRuntimeEvent::EndTurn))
+        });
         for tool_result in tool_results {
             session.push_tool_result(
                 tool_result.id,
@@ -541,6 +556,9 @@ pub(super) async fn run_turn_with_trace(
 
         session_message_count = session.messages().len();
         safe_message_count = session_message_count;
+        if should_end_turn {
+            break;
+        }
         if budget_limit.is_some() {
             break;
         }
@@ -597,6 +615,7 @@ pub(super) async fn run_turn_with_trace(
         reasoning_content: last_reasoning_content,
         model: last_model,
         usage: total_usage,
+        last_context_tokens,
         mode: request.mode,
         session_message_count,
         status: TurnResultStatus::Completed,

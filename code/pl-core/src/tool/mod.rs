@@ -2,6 +2,7 @@ mod ask_user;
 mod bash;
 mod command;
 mod file;
+mod git;
 mod lsp;
 mod multi_agent;
 mod path_policy;
@@ -29,6 +30,13 @@ pub use bash::{BashInput, BashTool, WriteStdinTool};
 pub use file::{
     ApplyPatchTool, CopyPathTool, CreateDirectoryTool, DeletePathTool, ListFilesTool, MovePathTool,
     ReadFileTool, SearchFilesTool, StatPathTool, WriteFileTool,
+};
+pub use git::{
+    ExecutionBackend, ExecutionOutput, ExecutionRequest, GIT_TOKEN_ENV, GitCredential,
+    GitCredentialOperation, GitCredentialProvider, GitCredentialRequest, GitPolicy, GitTool,
+    GitToolKind, GitWorkspaceConfig, LocalExecutionBackend, NoGitCredentialProvider,
+    TOOL_GIT_BRANCH, TOOL_GIT_COMMIT, TOOL_GIT_DIFF, TOOL_GIT_FETCH, TOOL_GIT_PUSH,
+    TOOL_GIT_STATUS, TOOL_GIT_WORKSPACE_INFO,
 };
 pub use lsp::{LspLanguageTool, LspQueryTool, lsp_tool_for_language};
 pub use multi_agent::{
@@ -95,6 +103,7 @@ pub struct ToolContext {
     pub workspace_root: PathBuf,
     pub workspace_instructions: Option<String>,
     pub instruction_snapshot: Option<crate::instruction::InstructionSnapshot>,
+    pub provider_call_id: Option<String>,
     pub active_subagent: Option<SubagentContext>,
     pub agent_supervisor: AgentSupervisor,
     pub lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
@@ -132,6 +141,7 @@ impl fmt::Debug for ToolContext {
             .field("workspace_root", &self.workspace_root)
             .field("permission_mode", &self.options.permission_mode)
             .field("workspace_access", &self.workspace_access)
+            .field("provider_call_id", &self.provider_call_id)
             .field("active_subagent", &self.active_subagent)
             .field("lsp_runtime", &self.lsp_runtime.is_some())
             .finish_non_exhaustive()
@@ -311,6 +321,7 @@ pub struct ToolOutput {
 pub enum ToolRuntimeEvent {
     SkillActivated { activation: SkillActivation },
     ToolResultRevision { revision: u64 },
+    EndTurn,
 }
 
 #[cfg(test)]
@@ -461,6 +472,7 @@ mod tests {
             workspace_root: root.clone(),
             workspace_instructions: None,
             instruction_snapshot: None,
+            provider_call_id: None,
             active_subagent: None,
             agent_supervisor: AgentSupervisor::default(),
             lsp_runtime: None,

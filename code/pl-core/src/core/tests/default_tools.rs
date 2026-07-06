@@ -19,6 +19,59 @@ async fn default_tools_register_bash_and_agent_tools() {
     assert!(core.tools.get("read_file").is_some());
     assert!(core.tools.get("apply_patch").is_some());
     assert!(core.tools.get("lsp_query").is_none());
+    assert!(core.tools.get("git_status").is_none());
+    assert!(core.tools.get("git_push").is_none());
+    assert!(core.tools.get("docker").is_none());
+    assert!(core.tools.get("container").is_none());
+}
+
+#[tokio::test]
+async fn default_capabilities_keep_product_tools_disabled() {
+    let capabilities = crate::config::ToolCapabilityConfig::default();
+
+    assert!(!capabilities.git);
+    assert!(!capabilities.docker);
+    assert!(!capabilities.container);
+}
+
+#[tokio::test]
+async fn tool_set_builder_can_disable_shell_and_subagents() {
+    let mut core = PureCore::default_provider().unwrap();
+    let capabilities = crate::config::ToolCapabilityConfig {
+        bash: false,
+        subagents: false,
+        ..Default::default()
+    };
+
+    core.register_tools_with_capabilities(std::env::temp_dir(), None, capabilities)
+        .await;
+
+    assert!(core.tools.get("bash").is_none());
+    assert!(core.tools.get("write_stdin").is_none());
+    assert!(core.tools.get("spawn_agent").is_none());
+    assert!(core.tools.get("wait_agent").is_none());
+    assert!(core.tools.get("read_file").is_some());
+    assert!(core.tools.get("request_user_input").is_some());
+    assert!(core.tools.get("plan_exit").is_some());
+}
+
+#[test]
+fn register_git_tools_exposes_git_pack_explicitly() {
+    let mut core = PureCore::default_provider().unwrap();
+
+    core.register_git_tools(
+        crate::tool::GitWorkspaceConfig::local(std::env::temp_dir()),
+        std::sync::Arc::new(crate::tool::LocalExecutionBackend),
+        std::sync::Arc::new(crate::tool::NoGitCredentialProvider),
+    );
+
+    assert!(core.tools.get("git_status").is_some());
+    assert!(core.tools.get("git_diff").is_some());
+    assert!(core.tools.get("git_branch").is_some());
+    assert!(core.tools.get("git_fetch").is_some());
+    assert!(core.tools.get("git_commit").is_some());
+    assert!(core.tools.get("git_push").is_some());
+    assert!(core.tools.get("git_workspace_info").is_some());
 }
 
 #[tokio::test]

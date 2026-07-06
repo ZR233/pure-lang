@@ -1,0 +1,11 @@
+[package]
+name = "pl-output"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
