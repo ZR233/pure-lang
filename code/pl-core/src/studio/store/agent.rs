@@ -225,6 +225,12 @@ pub(super) fn agent_timeline_event_record_from_event(
             path.clone(),
             parent_path.clone(),
         ),
+        StudioAgentTimelineEventKind::TodoListUpdated { snapshot } => (
+            "todoListUpdated".to_string(),
+            snapshot.agent_id.clone(),
+            snapshot.path.clone(),
+            snapshot.parent_path.clone(),
+        ),
     };
     Some(AgentTimelineEventRecord {
         event_id: event.event_id.clone(),

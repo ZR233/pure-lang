@@ -512,3 +512,13 @@ Map<String, Object?> _objectMap(Object? value) {
   }
   return const {};
 }
+
+List<Object?> _listValue(Object? value) {
+  if (value is List<Object?>) {
+    return value;
+  }
+  if (value is Iterable) {
+    return value.cast<Object?>().toList(growable: false);
+  }
+  return const [];
+}

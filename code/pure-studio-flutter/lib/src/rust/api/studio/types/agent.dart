@@ -108,6 +108,63 @@ class BridgeAgentTimelineEventDto {
           payload == other.payload;
 }
 
+class BridgeTodoListSnapshotDto {
+  final String callId;
+  final String? agentId;
+  final String? path;
+  final String? parentPath;
+  final String? explanation;
+  final List<BridgeTodoItemDto> items;
+
+  const BridgeTodoListSnapshotDto({
+    required this.callId,
+    this.agentId,
+    this.path,
+    this.parentPath,
+    this.explanation,
+    required this.items,
+  });
+
+  @override
+  int get hashCode =>
+      callId.hashCode ^
+      agentId.hashCode ^
+      path.hashCode ^
+      parentPath.hashCode ^
+      explanation.hashCode ^
+      items.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTodoListSnapshotDto &&
+          runtimeType == other.runtimeType &&
+          callId == other.callId &&
+          agentId == other.agentId &&
+          path == other.path &&
+          parentPath == other.parentPath &&
+          explanation == other.explanation &&
+          items == other.items;
+}
+
+class BridgeTodoItemDto {
+  final String step;
+  final String status;
+
+  const BridgeTodoItemDto({required this.step, required this.status});
+
+  @override
+  int get hashCode => step.hashCode ^ status.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTodoItemDto &&
+          runtimeType == other.runtimeType &&
+          step == other.step &&
+          status == other.status;
+}
+
 @freezed
 sealed class BridgeAgentTimelinePayloadDto
     with _$BridgeAgentTimelinePayloadDto {
@@ -124,4 +181,8 @@ sealed class BridgeAgentTimelinePayloadDto
     required bool timedOut,
     String? error,
   }) = BridgeAgentTimelinePayloadDto_SubAgentActivity;
+
+  const factory BridgeAgentTimelinePayloadDto.todoListUpdated({
+    required BridgeTodoListSnapshotDto snapshot,
+  }) = BridgeAgentTimelinePayloadDto_TodoListUpdated;
 }

@@ -11,6 +11,7 @@ mod provider_info;
 mod provider_usage;
 mod request;
 mod stream;
+mod tool_arguments;
 mod visible_text;
 
 pub use capabilities::{

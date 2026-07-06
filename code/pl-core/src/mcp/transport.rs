@@ -520,12 +520,64 @@ fn json_rpc_response_result(response: JsonRpcResponse) -> Result<Value> {
 }
 
 fn parse_sse_json(text: &str) -> Result<Value> {
-    let data = text
-        .lines()
-        .filter_map(|line| line.strip_prefix("data:"))
-        .map(str::trim)
-        .find(|line| !line.is_empty() && *line != "[DONE]")
+    let data = sse_data_messages(text)
+        .into_iter()
+        .find(|message| {
+            let trimmed = message.trim();
+            !trimmed.is_empty() && trimmed != "[DONE]"
+        })
         .ok_or_else(|| PureError::HttpError("MCP SSE response did not contain data".to_string()))?;
-    let response = serde_json::from_str::<JsonRpcResponse>(data)?;
+    let response = serde_json::from_str::<JsonRpcResponse>(data.trim())?;
     json_rpc_response_result(response)
+}
+
+fn sse_data_messages(text: &str) -> Vec<String> {
+    let mut messages = Vec::new();
+    let mut current = Vec::new();
+    for line in text.lines() {
+        if line.is_empty() {
+            if !current.is_empty() {
+                messages.push(current.join("\n"));
+                current.clear();
+            }
+            continue;
+        }
+        if let Some(data) = line.strip_prefix("data:") {
+            current.push(data.strip_prefix(' ').unwrap_or(data).to_string());
+        }
+    }
+    if !current.is_empty() {
+        messages.push(current.join("\n"));
+    }
+    messages
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::parse_sse_json;
+
+    #[test]
+    fn parse_sse_json_reads_single_data_message() {
+        let value = parse_sse_json(
+            "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}\n\n",
+        )
+        .unwrap();
+
+        assert_eq!(value, serde_json::json!({ "ok": true }));
+    }
+
+    #[test]
+    fn parse_sse_json_joins_multiline_data_message() {
+        let value = parse_sse_json(
+            "event: message\n\
+             data: {\"jsonrpc\":\"2.0\",\n\
+             data: \"id\":1,\n\
+             data: \"result\":{\"ok\":true}}\n\n",
+        )
+        .unwrap();
+
+        assert_eq!(value, serde_json::json!({ "ok": true }));
+    }
 }

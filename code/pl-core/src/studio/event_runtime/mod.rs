@@ -275,9 +275,11 @@ impl StudioEventRuntime {
                     updated_at,
                 },
             },
-            AgentEvent::SubAgentActivity { .. } => StudioEventKind::AgentTimelineChanged {
-                event: studio_agent_timeline_event(session_id, event),
-            },
+            AgentEvent::SubAgentActivity { .. } | AgentEvent::TodoListUpdated { .. } => {
+                StudioEventKind::AgentTimelineChanged {
+                    event: studio_agent_timeline_event(session_id, event),
+                }
+            }
             AgentEvent::TurnInterrupted { reason } => StudioEventKind::TurnChanged {
                 turn: StudioTurn {
                     turn_id: String::new(),

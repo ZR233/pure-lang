@@ -5,7 +5,7 @@ use tokio::sync::broadcast;
 use pl_protocol::{
     AgentRuntimeDelta, AgentStatus, BudgetLimitKind, BudgetUsage, ErrorSeverity,
     InteractionChangedEvent, PlanLifecycleEvent, SkillActivation, SubAgentActivityKind,
-    TokenUsageSnapshot,
+    TodoListSnapshot, TokenUsageSnapshot,
 };
 
 pub type AgentEventSender = broadcast::Sender<AgentEvent>;
@@ -67,6 +67,9 @@ pub enum AgentEvent {
         message: Option<String>,
         timed_out: Option<bool>,
         error: Option<String>,
+    },
+    TodoListUpdated {
+        snapshot: TodoListSnapshot,
     },
     TurnInterrupted {
         reason: String,

@@ -105,9 +105,9 @@ pub use tool::{
     GitCredentialRequest, GitPolicy, GitTool, GitToolKind, GitWorkspaceConfig,
     LocalExecutionBackend, LspLanguageTool, LspQueryTool, NoGitCredentialProvider,
     OutputTruncation, PlanExitTool, SubagentContext, TOOL_GIT_BRANCH, TOOL_GIT_COMMIT,
-    TOOL_GIT_DIFF, TOOL_GIT_FETCH, TOOL_GIT_PUSH, TOOL_GIT_STATUS, TOOL_GIT_WORKSPACE_INFO, Tool,
-    ToolContext, ToolInput, ToolOutput, ToolRegistry, ToolRuntimeEvent, TruncatedOutput,
-    TruncationStrategy, WorkspaceAccess, WriteStdinTool, lsp_tool_for_language,
+    TOOL_GIT_DIFF, TOOL_GIT_FETCH, TOOL_GIT_PUSH, TOOL_GIT_STATUS, TOOL_GIT_WORKSPACE_INFO,
+    TodoListTool, Tool, ToolContext, ToolInput, ToolOutput, ToolRegistry, ToolRuntimeEvent,
+    TruncatedOutput, TruncationStrategy, WorkspaceAccess, WriteStdinTool, lsp_tool_for_language,
 };
 pub use trace::TraceRecorder;
 pub use turn::{

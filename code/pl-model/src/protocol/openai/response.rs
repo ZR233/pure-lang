@@ -1,7 +1,8 @@
-use pl_protocol::Result;
+use pl_protocol::{PureError, Result};
 use serde::Deserialize;
 
 use crate::request::{CompletionResponse, FinishReason, TokenUsage, ToolCall};
+use crate::tool_arguments::parse_function_tool_arguments;
 
 #[derive(Debug, Clone, Deserialize)]
 struct ProviderTokenUsage {
@@ -126,10 +127,12 @@ pub(crate) fn responses_parse_response(body: serde_json::Value) -> Result<Comple
                 .map(String::from)
         })?
     });
-    let tool_calls = output
-        .iter()
-        .filter_map(ResponsesOutputItem::to_tool_call)
-        .collect::<Vec<_>>();
+    let mut tool_calls = Vec::new();
+    for item in &output {
+        if let Some(tool_call) = item.to_tool_call()? {
+            tool_calls.push(tool_call);
+        }
+    }
 
     let finish_reason = if tool_calls.is_empty() {
         FinishReason::Stop
@@ -156,20 +159,49 @@ pub(crate) fn responses_parse_response(body: serde_json::Value) -> Result<Comple
 }
 
 impl ResponsesOutputItem {
-    fn to_tool_call(&self) -> Option<ToolCall> {
+    fn to_tool_call(&self) -> Result<Option<ToolCall>> {
         match self.kind.as_str() {
-            "function_call" => Some(ToolCall::function(
-                self.id.clone()?,
-                self.name.clone()?,
-                serde_json::from_str(self.arguments.as_deref()?).ok()?,
-                self.call_id.clone(),
-            )),
-            "custom_tool_call" => Some(ToolCall::custom(
-                self.id.clone().or_else(|| self.call_id.clone())?,
-                self.name.clone()?,
-                self.input.clone()?,
-                self.call_id.clone(),
-            )),
+            "function_call" => {
+                let id = self
+                    .id
+                    .clone()
+                    .ok_or_else(|| response_protocol_error("function_call missing id"))?;
+                let name = self
+                    .name
+                    .clone()
+                    .ok_or_else(|| response_protocol_error("function_call missing name"))?;
+                let arguments = self
+                    .arguments
+                    .as_deref()
+                    .ok_or_else(|| response_protocol_error("function_call missing arguments"))?;
+                Ok(Some(ToolCall::function(
+                    id,
+                    name.clone(),
+                    parse_function_tool_arguments(arguments, &name)?,
+                    self.call_id.clone(),
+                )))
+            }
+            "custom_tool_call" => {
+                let id = self
+                    .id
+                    .clone()
+                    .or_else(|| self.call_id.clone())
+                    .ok_or_else(|| response_protocol_error("custom_tool_call missing id"))?;
+                let name = self
+                    .name
+                    .clone()
+                    .ok_or_else(|| response_protocol_error("custom_tool_call missing name"))?;
+                let input = self
+                    .input
+                    .clone()
+                    .ok_or_else(|| response_protocol_error("custom_tool_call missing input"))?;
+                Ok(Some(ToolCall::custom(
+                    id,
+                    name,
+                    input,
+                    self.call_id.clone(),
+                )))
+            }
             "message"
             | "function_call_output"
             | "custom_tool_call_output"
@@ -179,8 +211,8 @@ impl ResponsesOutputItem {
             | "computer_call"
             | "computer_call_output"
             | "mcp_call"
-            | "code_interpreter_call" => None,
-            _ => None,
+            | "code_interpreter_call" => Ok(None),
+            _ => Ok(None),
         }
     }
 }
@@ -232,15 +264,14 @@ pub(crate) fn chat_parse_response(body: serde_json::Value) -> Result<CompletionR
     let message = choice.and_then(|choice| choice.message.as_ref());
     let content = message.and_then(|message| message.content.clone());
     let reasoning_content = message.and_then(|message| message.reasoning_content.clone());
-    let tool_calls = message
-        .and_then(|message| message.tool_calls.as_ref())
-        .map(|tool_calls| {
-            tool_calls
-                .iter()
-                .filter_map(ChatResponseToolCall::to_tool_call)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    let mut tool_calls = Vec::new();
+    if let Some(message_tool_calls) = message.and_then(|message| message.tool_calls.as_ref()) {
+        for tool_call in message_tool_calls {
+            if let Some(tool_call) = tool_call.to_tool_call()? {
+                tool_calls.push(tool_call);
+            }
+        }
+    }
     let finish_reason = choice
         .and_then(|choice| choice.finish_reason.as_deref())
         .map(finish_reason_from_chat)
@@ -265,29 +296,45 @@ pub(crate) fn chat_parse_response(body: serde_json::Value) -> Result<CompletionR
 }
 
 impl ChatResponseToolCall {
-    fn to_tool_call(&self) -> Option<ToolCall> {
+    fn to_tool_call(&self) -> Result<Option<ToolCall>> {
         match self.kind.as_deref() {
             Some("custom") => {
-                let custom = self.custom.as_ref()?;
-                Some(ToolCall::custom(
-                    self.id.clone()?,
+                let id = self
+                    .id
+                    .clone()
+                    .ok_or_else(|| response_protocol_error("custom tool call missing id"))?;
+                let custom = self.custom.as_ref().ok_or_else(|| {
+                    response_protocol_error("custom tool call missing custom payload")
+                })?;
+                Ok(Some(ToolCall::custom(
+                    id,
                     custom.name.clone(),
                     custom.input.clone(),
                     None,
-                ))
+                )))
             }
             Some("function") | None => {
-                let function = self.function.as_ref()?;
-                Some(ToolCall::function(
-                    self.id.clone()?,
+                let id = self
+                    .id
+                    .clone()
+                    .ok_or_else(|| response_protocol_error("function tool call missing id"))?;
+                let function = self.function.as_ref().ok_or_else(|| {
+                    response_protocol_error("function tool call missing function payload")
+                })?;
+                Ok(Some(ToolCall::function(
+                    id,
                     function.name.clone(),
-                    serde_json::from_str(&function.arguments).ok()?,
+                    parse_function_tool_arguments(&function.arguments, &function.name)?,
                     None,
-                ))
+                )))
             }
-            Some(_) => None,
+            Some(_) => Ok(None),
         }
     }
+}
+
+fn response_protocol_error(message: &str) -> PureError {
+    PureError::LlmError(format!("provider response protocol error: {message}"))
 }
 
 fn finish_reason_from_chat(reason: &str) -> FinishReason {

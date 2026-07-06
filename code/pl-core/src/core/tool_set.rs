@@ -4,8 +4,8 @@ use crate::config::ToolCapabilityConfig;
 use crate::tool::{
     ApplyPatchTool, AskUserTool, CloseAgentTool, CopyPathTool, CreateDirectoryTool, DeletePathTool,
     FollowupTaskTool, ListAgentsTool, ListFilesTool, MovePathTool, PlanExitTool, ReadFileTool,
-    SearchFilesTool, SendMessageTool, SpawnAgentTool, StatPathTool, WaitAgentTool, WriteFileTool,
-    command_tool_pair,
+    SearchFilesTool, SendMessageTool, SpawnAgentTool, StatPathTool, TodoListTool, WaitAgentTool,
+    WriteFileTool, command_tool_pair,
 };
 
 use super::PureCore;
@@ -68,6 +68,7 @@ impl ToolSetBuilder {
         if self.capabilities.ask_user {
             core.register_tool(AskUserTool);
         }
+        core.register_tool(TodoListTool);
         core.register_tool(PlanExitTool);
     }
 }

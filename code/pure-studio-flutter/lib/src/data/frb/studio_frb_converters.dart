@@ -240,6 +240,18 @@ TimelineAgentEventPayload _agentTimelinePayloadFromFrb(
         timedOut: timedOut,
         error: error,
       ),
+    frb.BridgeAgentTimelinePayloadDto_TodoListUpdated(:final snapshot) =>
+      TimelineTodoListUpdate(
+        callId: snapshot.callId,
+        agentId: snapshot.agentId,
+        path: snapshot.path,
+        parentPath: snapshot.parentPath,
+        explanation: snapshot.explanation,
+        items: [
+          for (final item in snapshot.items)
+            TimelineTodoItem(step: item.step, status: item.status),
+        ],
+      ),
   };
 }
 
@@ -481,7 +493,7 @@ StudioState studioStateFromFrbSession(frb.BridgeSessionStateResponse value) {
 ProviderUsageView _providerUsageFromFrb(frb.ProviderUsageDto usage) {
   return ProviderUsageView(
     providerId: usage.providerId,
-    updatedAt: usage.updatedAt,
+    updatedAt: _frbInt(usage.updatedAt),
     status: usage.status.isEmpty ? 'unknown' : usage.status,
     usageKind: usage.usageKind.isEmpty ? 'unknown' : usage.usageKind,
     message: usage.message,
@@ -514,7 +526,7 @@ ProviderUsageView _providerUsageFromFrb(frb.ProviderUsageDto usage) {
                     currentValue: item.currentValue,
                     total: item.total,
                     remaining: item.remaining,
-                    nextResetAt: item.nextResetAt,
+                    nextResetAt: _frbNullableInt(item.nextResetAt),
                     usageDetails: item.usageDetails
                         .map(
                           (detail) => ZhipuToolUsageDetailView(

@@ -187,6 +187,56 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusSubagentsSection => 'Subagents';
 
   @override
+  String get statusAgentChipTooltip => '子代理状态';
+
+  @override
+  String get agentDetailTitle => '子代理';
+
+  @override
+  String agentDetailSummary(int count, int running) {
+    return '$count 个 · $running 运行中';
+  }
+
+  @override
+  String get agentDetailEmpty => '暂无子代理';
+
+  @override
+  String get agentDetailStatusQueued => '排队中';
+
+  @override
+  String get agentDetailStatusRunning => '运行中';
+
+  @override
+  String get agentDetailStatusWaiting => '等待中';
+
+  @override
+  String get agentDetailStatusCompleted => '已完成';
+
+  @override
+  String get agentDetailStatusErrored => '出错';
+
+  @override
+  String get agentDetailStatusInterrupted => '已中断';
+
+  @override
+  String get agentDetailStatusShutdown => '已关闭';
+
+  @override
+  String get agentDetailStatusNotFound => '未找到';
+
+  @override
+  String get agentDetailSummaryLabel => '摘要';
+
+  @override
+  String get agentDetailErrorLabel => '错误';
+
+  @override
+  String get agentDetailReasonLabel => '原因';
+
+  @override
+  String get agentDetailPathLabel => '路径';
+
+  @override
   String get timelineEmptyTitle => '还没有消息';
 
   @override
@@ -290,6 +340,18 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get timelineAgentClose => '关闭子代理';
+
+  @override
+  String get timelineTodoListFallback => '待办列表';
+
+  @override
+  String get timelineTodoPending => '待处理';
+
+  @override
+  String get timelineTodoInProgress => '进行中';
+
+  @override
+  String get timelineTodoCompleted => '已完成';
 
   @override
   String get interactionQuestionsTitle => '几个问题想确认';
@@ -985,6 +1047,56 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get statusSubagentsSection => 'Subagents';
 
   @override
+  String get statusAgentChipTooltip => '子代理状态';
+
+  @override
+  String get agentDetailTitle => '子代理';
+
+  @override
+  String agentDetailSummary(int count, int running) {
+    return '$count 个 · $running 运行中';
+  }
+
+  @override
+  String get agentDetailEmpty => '暂无子代理';
+
+  @override
+  String get agentDetailStatusQueued => '排队中';
+
+  @override
+  String get agentDetailStatusRunning => '运行中';
+
+  @override
+  String get agentDetailStatusWaiting => '等待中';
+
+  @override
+  String get agentDetailStatusCompleted => '已完成';
+
+  @override
+  String get agentDetailStatusErrored => '出错';
+
+  @override
+  String get agentDetailStatusInterrupted => '已中断';
+
+  @override
+  String get agentDetailStatusShutdown => '已关闭';
+
+  @override
+  String get agentDetailStatusNotFound => '未找到';
+
+  @override
+  String get agentDetailSummaryLabel => '摘要';
+
+  @override
+  String get agentDetailErrorLabel => '错误';
+
+  @override
+  String get agentDetailReasonLabel => '原因';
+
+  @override
+  String get agentDetailPathLabel => '路径';
+
+  @override
   String get timelineEmptyTitle => '还没有消息';
 
   @override
@@ -1088,6 +1200,18 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get timelineAgentClose => '关闭子代理';
+
+  @override
+  String get timelineTodoListFallback => '待办列表';
+
+  @override
+  String get timelineTodoPending => '待处理';
+
+  @override
+  String get timelineTodoInProgress => '进行中';
+
+  @override
+  String get timelineTodoCompleted => '已完成';
 
   @override
   String get interactionQuestionsTitle => '几个问题想确认';
