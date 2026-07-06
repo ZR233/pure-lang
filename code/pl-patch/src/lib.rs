@@ -445,9 +445,8 @@ async fn write_text(
     content: &str,
     outcome: &mut PatchOutcome,
 ) -> PatchResult<()> {
-    backend.write_text(path, content).await.map_err(|error| {
+    backend.write_text(path, content).await.inspect_err(|_| {
         outcome.exact = false;
-        error
     })
 }
 
@@ -951,105 +950,67 @@ mod tests {
     }
 
     impl PatchBackend for MemoryBackend {
-        fn resolve_existing<'a>(
-            &'a self,
-            path: &'a str,
-        ) -> impl Future<Output = PatchResult<PathBuf>> + Send + 'a {
-            async move {
-                let path = PathBuf::from(path);
-                if self.files.lock().unwrap().contains_key(&path) {
-                    Ok(path)
-                } else {
-                    Err(PatchError::new(format!(
-                        "failed to resolve path '{}': not found",
-                        path.display()
-                    )))
-                }
+        async fn resolve_existing(&self, path: &str) -> PatchResult<PathBuf> {
+            let path = PathBuf::from(path);
+            if self.files.lock().unwrap().contains_key(&path) {
+                Ok(path)
+            } else {
+                Err(PatchError::new(format!(
+                    "failed to resolve path '{}': not found",
+                    path.display()
+                )))
             }
         }
 
-        fn resolve_for_write<'a>(
-            &'a self,
-            path: &'a str,
-        ) -> impl Future<Output = PatchResult<PathBuf>> + Send + 'a {
-            async move { Ok(PathBuf::from(path)) }
+        async fn resolve_for_write(&self, path: &str) -> PatchResult<PathBuf> {
+            Ok(PathBuf::from(path))
         }
 
-        fn reject_symlink_write<'a>(
-            &'a self,
-            _path: &'a Path,
-        ) -> impl Future<Output = PatchResult<()>> + Send + 'a {
-            async move { Ok(()) }
+        async fn reject_symlink_write(&self, _path: &Path) -> PatchResult<()> {
+            Ok(())
         }
 
-        fn ensure_file<'a>(
-            &'a self,
-            path: &'a Path,
-        ) -> impl Future<Output = PatchResult<()>> + Send + 'a {
-            async move {
-                if self.files.lock().unwrap().contains_key(path) {
-                    Ok(())
-                } else {
-                    Err(PatchError::new(format!(
-                        "cannot delete '{}': path is not a file",
-                        path.display()
-                    )))
-                }
-            }
-        }
-
-        fn read_to_string<'a>(
-            &'a self,
-            path: &'a Path,
-        ) -> impl Future<Output = PatchResult<String>> + Send + 'a {
-            async move {
-                self.files
-                    .lock()
-                    .unwrap()
-                    .get(path)
-                    .cloned()
-                    .ok_or_else(|| {
-                        PatchError::new(format!("failed to read '{}': not found", path.display()))
-                    })
-            }
-        }
-
-        fn read_optional_text<'a>(
-            &'a self,
-            path: &'a Path,
-        ) -> impl Future<Output = PatchResult<Option<String>>> + Send + 'a {
-            async move { Ok(self.files.lock().unwrap().get(path).cloned()) }
-        }
-
-        fn create_parent_dirs<'a>(
-            &'a self,
-            _path: &'a Path,
-        ) -> impl Future<Output = PatchResult<()>> + Send + 'a {
-            async move { Ok(()) }
-        }
-
-        fn write_text<'a>(
-            &'a self,
-            path: &'a Path,
-            content: &'a str,
-        ) -> impl Future<Output = PatchResult<()>> + Send + 'a {
-            async move {
-                self.files
-                    .lock()
-                    .unwrap()
-                    .insert(path.to_path_buf(), content.to_string());
+        async fn ensure_file(&self, path: &Path) -> PatchResult<()> {
+            if self.files.lock().unwrap().contains_key(path) {
                 Ok(())
+            } else {
+                Err(PatchError::new(format!(
+                    "cannot delete '{}': path is not a file",
+                    path.display()
+                )))
             }
         }
 
-        fn remove_file<'a>(
-            &'a self,
-            path: &'a Path,
-        ) -> impl Future<Output = PatchResult<()>> + Send + 'a {
-            async move {
-                self.files.lock().unwrap().remove(path);
-                Ok(())
-            }
+        async fn read_to_string(&self, path: &Path) -> PatchResult<String> {
+            self.files
+                .lock()
+                .unwrap()
+                .get(path)
+                .cloned()
+                .ok_or_else(|| {
+                    PatchError::new(format!("failed to read '{}': not found", path.display()))
+                })
+        }
+
+        async fn read_optional_text(&self, path: &Path) -> PatchResult<Option<String>> {
+            Ok(self.files.lock().unwrap().get(path).cloned())
+        }
+
+        async fn create_parent_dirs(&self, _path: &Path) -> PatchResult<()> {
+            Ok(())
+        }
+
+        async fn write_text(&self, path: &Path, content: &str) -> PatchResult<()> {
+            self.files
+                .lock()
+                .unwrap()
+                .insert(path.to_path_buf(), content.to_string());
+            Ok(())
+        }
+
+        async fn remove_file(&self, path: &Path) -> PatchResult<()> {
+            self.files.lock().unwrap().remove(path);
+            Ok(())
         }
     }
 

@@ -11,17 +11,9 @@ use crate::tool::{
 use super::PureCore;
 
 /// 按能力开关组装 pl-core 的共享工具集合。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ToolSetBuilder {
     capabilities: ToolCapabilityConfig,
-}
-
-impl Default for ToolSetBuilder {
-    fn default() -> Self {
-        Self {
-            capabilities: ToolCapabilityConfig::default(),
-        }
-    }
 }
 
 impl ToolSetBuilder {
@@ -57,10 +49,10 @@ impl ToolSetBuilder {
         if self.capabilities.workspace_files {
             register_file_tools(core);
         }
-        if self.capabilities.lsp {
-            if let Some(registry) = core.lsp_runtime.clone() {
-                core.tools.register_lsp_languages(&registry).await;
-            }
+        if self.capabilities.lsp
+            && let Some(registry) = core.lsp_runtime.clone()
+        {
+            core.tools.register_lsp_languages(&registry).await;
         }
         if self.capabilities.subagents {
             register_subagent_tools(core, workspace_instructions.clone());

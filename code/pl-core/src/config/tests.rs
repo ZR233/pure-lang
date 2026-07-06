@@ -130,9 +130,9 @@ fn toml_round_trip_preserves_roles_models_and_token() {
         parsed.runtime.active_mcp_servers,
         vec!["github".to_string()]
     );
-    assert_eq!(parsed.runtime.tool_capabilities.git, true);
-    assert_eq!(parsed.runtime.tool_capabilities.docker, true);
-    assert_eq!(parsed.runtime.tool_capabilities.mcp, false);
+    assert!(parsed.runtime.tool_capabilities.git);
+    assert!(parsed.runtime.tool_capabilities.docker);
+    assert!(!parsed.runtime.tool_capabilities.mcp);
     assert_eq!(
         active_mcp_server_names(&parsed),
         vec!["filesystem".to_string(), "github".to_string()]

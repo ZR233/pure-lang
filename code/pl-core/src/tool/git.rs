@@ -81,28 +81,23 @@ pub trait ExecutionBackend: fmt::Debug + Send + Sync {
 pub struct LocalExecutionBackend;
 
 impl ExecutionBackend for LocalExecutionBackend {
-    fn run(
-        &self,
-        request: ExecutionRequest,
-    ) -> impl Future<Output = Result<ExecutionOutput, PureError>> + Send {
-        async move {
-            let mut command = Command::new(&request.program);
-            command.args(&request.args);
-            command.current_dir(&request.cwd);
-            command.envs(&request.env);
-            let output = match request.timeout {
-                Some(timeout) => tokio::time::timeout(timeout, command.output())
-                    .await
-                    .map_err(|_| tool_error("execution", "command timed out"))?,
-                None => command.output().await,
-            }
-            .map_err(|error| tool_error("execution", format!("failed to run command: {error}")))?;
-            Ok(ExecutionOutput {
-                status: output.status.code().unwrap_or(-1),
-                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-            })
+    async fn run(&self, request: ExecutionRequest) -> Result<ExecutionOutput, PureError> {
+        let mut command = Command::new(&request.program);
+        command.args(&request.args);
+        command.current_dir(&request.cwd);
+        command.envs(&request.env);
+        let output = match request.timeout {
+            Some(timeout) => tokio::time::timeout(timeout, command.output())
+                .await
+                .map_err(|_| tool_error("execution", "command timed out"))?,
+            None => command.output().await,
         }
+        .map_err(|error| tool_error("execution", format!("failed to run command: {error}")))?;
+        Ok(ExecutionOutput {
+            status: output.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        })
     }
 }
 
@@ -156,11 +151,11 @@ pub trait GitCredentialProvider: fmt::Debug + Send + Sync {
 pub struct NoGitCredentialProvider;
 
 impl GitCredentialProvider for NoGitCredentialProvider {
-    fn credential(
+    async fn credential(
         &self,
         _request: GitCredentialRequest,
-    ) -> impl Future<Output = Result<Option<GitCredential>, PureError>> + Send {
-        async { Ok(None) }
+    ) -> Result<Option<GitCredential>, PureError> {
+        Ok(None)
     }
 }
 
@@ -763,7 +758,6 @@ fn tool_error(tool: &str, error: impl fmt::Display) -> PureError {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::future::Future;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
@@ -779,18 +773,13 @@ mod tests {
     }
 
     impl ExecutionBackend for RecordingBackend {
-        fn run(
-            &self,
-            request: ExecutionRequest,
-        ) -> impl Future<Output = Result<ExecutionOutput, PureError>> + Send {
+        async fn run(&self, request: ExecutionRequest) -> Result<ExecutionOutput, PureError> {
             self.requests.lock().unwrap().push(request);
-            async move {
-                Ok(ExecutionOutput {
-                    status: 0,
-                    stdout: "secret-token fetched".to_string(),
-                    stderr: String::new(),
-                })
-            }
+            Ok(ExecutionOutput {
+                status: 0,
+                stdout: "secret-token fetched".to_string(),
+                stderr: String::new(),
+            })
         }
     }
 
@@ -798,11 +787,11 @@ mod tests {
     struct StaticCredentialProvider;
 
     impl GitCredentialProvider for StaticCredentialProvider {
-        fn credential(
+        async fn credential(
             &self,
             _request: GitCredentialRequest,
-        ) -> impl Future<Output = Result<Option<GitCredential>, PureError>> + Send {
-            async { Ok(Some(GitCredential::new("secret-token".to_string()))) }
+        ) -> Result<Option<GitCredential>, PureError> {
+            Ok(Some(GitCredential::new("secret-token".to_string())))
         }
     }
 
