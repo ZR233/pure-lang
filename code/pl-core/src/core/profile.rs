@@ -4,6 +4,7 @@ use pl_model::{ProviderInfo, SharedModelProvider, create_provider, create_provid
 use pl_protocol::Result;
 
 use crate::config::{PureConfig, ReasoningEffort};
+use crate::context_compaction::ContextCompactionConfig;
 use crate::instruction::InstructionProfile;
 use crate::turn::TurnOptions;
 
@@ -101,6 +102,7 @@ pub struct CoreRuntimeProfile {
     pub tool_profile: ToolProfile,
     pub agent_backend: AgentBackendProfile,
     pub runtime_options: CoreRuntimeOptions,
+    pub context_compaction: ContextCompactionConfig,
 }
 
 impl CoreRuntimeProfile {
@@ -115,6 +117,7 @@ impl CoreRuntimeProfile {
             instruction_profile: None,
             agent_backend: AgentBackendProfile::default(),
             runtime_options: CoreRuntimeOptions::default(),
+            context_compaction: ContextCompactionConfig::default(),
         }
     }
 
@@ -125,6 +128,7 @@ impl CoreRuntimeProfile {
             instruction_profile: None,
             agent_backend: AgentBackendProfile::default(),
             runtime_options: CoreRuntimeOptions::default(),
+            context_compaction: ContextCompactionConfig::default(),
         }
     }
 
@@ -161,6 +165,11 @@ impl CoreRuntimeProfile {
 
     pub fn with_runtime_options(mut self, runtime_options: CoreRuntimeOptions) -> Self {
         self.runtime_options = runtime_options;
+        self
+    }
+
+    pub fn with_context_compaction(mut self, config: ContextCompactionConfig) -> Self {
+        self.context_compaction = config;
         self
     }
 }
@@ -232,12 +241,18 @@ impl PureCoreBuilder {
     }
 
     pub fn build(self) -> PureCore {
+        let tool_capabilities = self
+            .config
+            .as_ref()
+            .map(|config| config.runtime.tool_capabilities.clone())
+            .unwrap_or_default();
         let CoreRuntimeProfile {
             instruction_profile,
             workspace_profile,
             tool_profile,
             agent_backend,
             runtime_options,
+            context_compaction,
         } = self.runtime_profile;
         let agent_supervisor = self
             .agent_supervisor
@@ -252,7 +267,9 @@ impl PureCoreBuilder {
             workspace_instructions: workspace_profile.instructions,
             instruction_profile,
             tool_profile,
+            tool_capabilities,
             runtime_options,
+            context_compaction,
             active_subagent: None,
             agent_supervisor,
             tools: crate::tool::ToolRegistry::new(),

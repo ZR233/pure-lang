@@ -71,23 +71,6 @@ pub(super) fn user_home_dir() -> Result<PathBuf> {
         .ok_or_else(|| PureError::ConfigError("could not resolve user home directory".to_string()))
 }
 
-pub(super) fn normalized_platforms(platforms: Vec<String>) -> Vec<String> {
-    platforms
-        .into_iter()
-        .map(|platform| normalize_platform(&platform))
-        .filter(|platform| !platform.is_empty())
-        .collect()
-}
-
-fn normalize_platform(platform: &str) -> String {
-    match platform.trim().to_ascii_lowercase().as_str() {
-        "win" | "windows" => "windows".to_string(),
-        "mac" | "macos" | "darwin" => "macos".to_string(),
-        "linux" => "linux".to_string(),
-        other => other.to_string(),
-    }
-}
-
 pub(super) fn platform_matches(platforms: &[String]) -> bool {
     platforms.is_empty()
         || platforms

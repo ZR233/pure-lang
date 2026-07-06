@@ -179,6 +179,7 @@ mod tests {
                 workspace_root: std::env::temp_dir(),
                 workspace_instructions: None,
                 instruction_snapshot: None,
+                provider_call_id: None,
                 active_subagent: None,
                 agent_supervisor: AgentSupervisor::default(),
                 lsp_runtime: None,

@@ -1,18 +1,95 @@
 use std::collections::HashMap;
 
 use pl_model::{CompletionRequest, ModelProvider, ReasoningConfig, TokenUsage};
-use pl_protocol::{ContentPart, Message, MessageContent, MessageRole, PureError, Result};
+use pl_protocol::{
+    ContentPart, Message, MessageContent, MessageRole, PureError, Result,
+    TOOL_CALL_CALL_ID_METADATA_KEY, TOOL_CALL_ID_METADATA_KEY,
+};
 use pl_trace::AgentEventSender;
 
 use crate::core::progress::ProgressEmitter;
 use crate::session::CoreSession;
 
-const COMPACT_PROMPT: &str = include_str!("../prompts/compact.md");
+const DEFAULT_COMPACT_PROMPT: &str = include_str!("../prompts/compact.md");
+const DEFAULT_SUMMARY_REQUEST: &str = "请根据以上完整上下文生成压缩摘要。";
 const RECENT_USER_TOKEN_BUDGET: u64 = 20_000;
 const APPROX_CHARS_PER_TOKEN: u64 = 4;
 pub(crate) const SUMMARY_METADATA_KEY: &str = "context_compaction";
 pub(crate) const SUMMARY_METADATA_VALUE: &str = "summary";
-const SUMMARY_PREFIX: &str = "以下是此前对话的压缩摘要。";
+const DEFAULT_SUMMARY_PREFIX: &str = "以下是此前对话的压缩摘要。";
+const DEFAULT_EMPTY_SUMMARY_ERROR: &str = "context compaction returned an empty summary";
+
+/// 上下文压缩的产品级文案配置。
+///
+/// `pl-core` 提供默认提示词；宿主可以替换 prompt、摘要前缀和错误文案，
+/// 以保持已有历史回放或 UI 识别语义。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextCompactionConfig {
+    pub instructions: String,
+    pub summary_request: String,
+    pub summary_prefix: String,
+    pub empty_summary_error: String,
+    pub replacement: ContextCompactionReplacement,
+}
+
+impl ContextCompactionConfig {
+    pub fn new(
+        instructions: impl Into<String>,
+        summary_request: impl Into<String>,
+        summary_prefix: impl Into<String>,
+        empty_summary_error: impl Into<String>,
+    ) -> Self {
+        Self {
+            instructions: instructions.into(),
+            summary_request: summary_request.into(),
+            summary_prefix: summary_prefix.into(),
+            empty_summary_error: empty_summary_error.into(),
+            replacement: ContextCompactionReplacement::default(),
+        }
+    }
+
+    pub fn with_replacement(mut self, replacement: ContextCompactionReplacement) -> Self {
+        self.replacement = replacement;
+        self
+    }
+}
+
+impl Default for ContextCompactionConfig {
+    fn default() -> Self {
+        Self {
+            instructions: DEFAULT_COMPACT_PROMPT.to_string(),
+            summary_request: DEFAULT_SUMMARY_REQUEST.to_string(),
+            summary_prefix: DEFAULT_SUMMARY_PREFIX.to_string(),
+            empty_summary_error: DEFAULT_EMPTY_SUMMARY_ERROR.to_string(),
+            replacement: ContextCompactionReplacement::default(),
+        }
+    }
+}
+
+/// 压缩后历史的保留策略。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContextCompactionReplacement {
+    SummaryThenRecentUsers { token_budget: u64 },
+    RecentInteractionTail(RecentInteractionTailConfig),
+}
+
+impl Default for ContextCompactionReplacement {
+    fn default() -> Self {
+        Self::SummaryThenRecentUsers {
+            token_budget: RECENT_USER_TOKEN_BUDGET,
+        }
+    }
+}
+
+/// 压缩后保留近期交互尾部的限制。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecentInteractionTailConfig {
+    pub max_user_chars: usize,
+    pub max_assistant_chars: usize,
+    pub max_tool_output_chars: usize,
+    pub assistant_items: usize,
+    pub tool_output_items: usize,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CompactionTrigger {
@@ -29,6 +106,7 @@ pub(crate) enum CompactionOutcome {
 pub(crate) struct ContextCompactionRequest<'a, P: ModelProvider + ?Sized> {
     pub provider: &'a P,
     pub model: &'a str,
+    pub config: &'a ContextCompactionConfig,
     pub request_instructions: &'a str,
     pub request_messages: &'a [Message],
     pub trigger: CompactionTrigger,
@@ -43,6 +121,7 @@ pub(crate) async fn maybe_compact_session(
     let ContextCompactionRequest {
         provider,
         model,
+        config,
         request_instructions,
         request_messages,
         trigger,
@@ -75,8 +154,11 @@ pub(crate) async fn maybe_compact_session(
     let max_tokens = Some(model_info.max_output_tokens.unwrap_or(4096).min(4096));
     loop {
         let completion_request = CompletionRequest::builder(model)
-            .instructions(COMPACT_PROMPT)
-            .messages(compaction_prompt_messages(&messages))
+            .instructions(config.instructions.clone())
+            .messages(compaction_prompt_messages(
+                &messages,
+                &config.summary_request,
+            ))
             .tool_choice("none")
             .maybe_max_tokens(max_tokens)
             .reasoning(None::<ReasoningConfig>)
@@ -98,11 +180,9 @@ pub(crate) async fn maybe_compact_session(
             .content
             .filter(|content| !content.trim().is_empty())
         else {
-            return Err(PureError::LlmError(
-                "context compaction returned an empty summary".to_string(),
-            ));
+            return Err(PureError::LlmError(config.empty_summary_error.clone()));
         };
-        let replacement = build_compacted_history(&messages, &summary);
+        let replacement = build_compacted_history(&messages, &summary, config);
         session.replace_messages(replacement);
         if let Some(progress) = progress.as_deref_mut() {
             progress.milestone("上下文已压缩，继续准备模型调用。");
@@ -113,11 +193,11 @@ pub(crate) async fn maybe_compact_session(
     }
 }
 
-fn compaction_prompt_messages(messages: &[Message]) -> Vec<Message> {
+fn compaction_prompt_messages(messages: &[Message], summary_request: &str) -> Vec<Message> {
     let mut prompt_messages = messages.to_vec();
     prompt_messages.push(Message {
         role: MessageRole::User,
-        content: MessageContent::Text("请根据以上完整上下文生成压缩摘要。".to_string()),
+        content: MessageContent::Text(summary_request.to_string()),
         reasoning_content: None,
         metadata: HashMap::new(),
     });
@@ -177,14 +257,36 @@ fn has_compactable_history(messages: &[Message]) -> bool {
     raw_messages > 1
 }
 
-pub(crate) fn build_compacted_history(messages: &[Message], summary: &str) -> Vec<Message> {
-    let mut compacted = Vec::new();
-    compacted.push(summary_message(summary));
-    compacted.extend(recent_user_messages(messages, RECENT_USER_TOKEN_BUDGET));
-    compacted
+pub(crate) fn build_compacted_history(
+    messages: &[Message],
+    summary: &str,
+    config: &ContextCompactionConfig,
+) -> Vec<Message> {
+    match &config.replacement {
+        ContextCompactionReplacement::SummaryThenRecentUsers { token_budget } => {
+            let mut compacted = Vec::new();
+            compacted.push(summary_message(summary, &config.summary_prefix));
+            compacted.extend(recent_user_messages(messages, *token_budget));
+            compacted
+        }
+        ContextCompactionReplacement::RecentInteractionTail(tail) => {
+            let mut compacted =
+                recent_user_message_texts(messages, tail.max_user_chars, &config.summary_prefix)
+                    .into_iter()
+                    .map(user_text_message)
+                    .collect::<Vec<_>>();
+            compacted.extend(recent_interaction_tail(
+                messages,
+                &config.summary_prefix,
+                tail,
+            ));
+            compacted.push(summary_message(summary, &config.summary_prefix));
+            compacted
+        }
+    }
 }
 
-fn summary_message(summary: &str) -> Message {
+fn summary_message(summary: &str, summary_prefix: &str) -> Message {
     let mut metadata = HashMap::new();
     metadata.insert(
         SUMMARY_METADATA_KEY.to_string(),
@@ -193,7 +295,7 @@ fn summary_message(summary: &str) -> Message {
     let trimmed = summary.trim();
     Message {
         role: MessageRole::User,
-        content: MessageContent::Text(format!("{SUMMARY_PREFIX}\n\n{trimmed}")),
+        content: MessageContent::Text(format!("{summary_prefix}\n\n{trimmed}")),
         reasoning_content: None,
         metadata,
     }
@@ -219,11 +321,162 @@ fn recent_user_messages(messages: &[Message], token_budget: u64) -> Vec<Message>
     selected
 }
 
+fn recent_user_message_texts(
+    messages: &[Message],
+    max_chars: usize,
+    summary_prefix: &str,
+) -> Vec<String> {
+    let mut selected = Vec::new();
+    let mut remaining = max_chars;
+    for message in messages.iter().rev() {
+        if remaining == 0 {
+            break;
+        }
+        let Some(text) = user_message_text(message) else {
+            continue;
+        };
+        if is_summary_text(text.trim(), summary_prefix) {
+            continue;
+        }
+        let char_count = text.chars().count();
+        if char_count <= remaining {
+            selected.push(text.to_string());
+            remaining = remaining.saturating_sub(char_count);
+        } else {
+            selected.push(take_last_chars(text, remaining));
+            break;
+        }
+    }
+    selected.reverse();
+    selected
+}
+
+fn recent_interaction_tail(
+    messages: &[Message],
+    summary_prefix: &str,
+    config: &RecentInteractionTailConfig,
+) -> Vec<Message> {
+    let mut selected = Vec::new();
+    let mut assistant_items = 0;
+    let mut tool_output_items = 0;
+    for message in messages.iter().rev() {
+        match message.role {
+            MessageRole::Assistant => {
+                if assistant_items >= config.assistant_items {
+                    continue;
+                }
+                let text = message_text(message);
+                if text.trim().is_empty() {
+                    continue;
+                }
+                selected.push(assistant_text_message(take_last_chars(
+                    &text,
+                    config.max_assistant_chars,
+                )));
+                assistant_items += 1;
+            }
+            MessageRole::Tool => {
+                if tool_output_items >= config.tool_output_items {
+                    continue;
+                }
+                let call_id = message
+                    .metadata
+                    .get(TOOL_CALL_CALL_ID_METADATA_KEY)
+                    .or_else(|| message.metadata.get(TOOL_CALL_ID_METADATA_KEY))
+                    .map(String::as_str)
+                    .unwrap_or("unknown");
+                selected.push(user_text_message(format!(
+                    "Recent tool result `{call_id}` retained for context checkpoint:\n{}",
+                    compact_tool_output(&message_text(message), config.max_tool_output_chars)
+                )));
+                tool_output_items += 1;
+            }
+            MessageRole::User => {
+                let Some(text) = user_message_text(message) else {
+                    continue;
+                };
+                if is_summary_text(text.trim(), summary_prefix) {
+                    break;
+                }
+            }
+            MessageRole::System => {}
+        }
+    }
+    selected.reverse();
+    selected
+}
+
+fn user_text_message(text: impl Into<String>) -> Message {
+    Message {
+        role: MessageRole::User,
+        content: MessageContent::Text(text.into()),
+        reasoning_content: None,
+        metadata: HashMap::new(),
+    }
+}
+
+fn assistant_text_message(text: impl Into<String>) -> Message {
+    Message {
+        role: MessageRole::Assistant,
+        content: MessageContent::Text(text.into()),
+        reasoning_content: None,
+        metadata: HashMap::new(),
+    }
+}
+
+fn user_message_text(message: &Message) -> Option<&str> {
+    if message.role != MessageRole::User {
+        return None;
+    }
+    match &message.content {
+        MessageContent::Text(text) => Some(text.as_str()),
+        MessageContent::MultiPart(parts) => parts.iter().find_map(|part| match part {
+            ContentPart::Text { text } => Some(text.as_str()),
+            ContentPart::Image { .. } => None,
+        }),
+    }
+}
+
+fn message_text(message: &Message) -> String {
+    match &message.content {
+        MessageContent::Text(text) => text.clone(),
+        MessageContent::MultiPart(parts) => parts
+            .iter()
+            .filter_map(|part| match part {
+                ContentPart::Text { text } => Some(text.as_str()),
+                ContentPart::Image { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }
+}
+
+fn compact_tool_output(output: &str, max_chars: usize) -> String {
+    if output.chars().count() <= max_chars {
+        return output.to_string();
+    }
+    let tail = take_last_chars(output, max_chars);
+    format!("tool output truncated for context compaction; kept last {max_chars} chars\n{tail}")
+}
+
+fn take_last_chars(text: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let mut chars = text.chars().rev().take(max_chars).collect::<Vec<_>>();
+    chars.reverse();
+    chars.into_iter().collect()
+}
+
 fn is_compaction_summary(message: &Message) -> bool {
     message
         .metadata
         .get(SUMMARY_METADATA_KEY)
         .is_some_and(|value| value == SUMMARY_METADATA_VALUE)
+}
+
+fn is_summary_text(text: &str, summary_prefix: &str) -> bool {
+    text.starts_with(summary_prefix)
 }
 
 fn estimate_request_tokens(
@@ -297,7 +550,8 @@ mod tests {
             text_message(MessageRole::User, "latest request"),
         ];
 
-        let compacted = build_compacted_history(&messages, "new summary");
+        let config = ContextCompactionConfig::default();
+        let compacted = build_compacted_history(&messages, "new summary", &config);
 
         assert_eq!(compacted.len(), 3);
         assert!(is_compaction_summary(&compacted[0]));
@@ -345,6 +599,7 @@ mod tests {
             ContextCompactionRequest {
                 provider: &provider,
                 model: "compact-test",
+                config: &ContextCompactionConfig::default(),
                 request_instructions: "",
                 request_messages: &[],
                 trigger: CompactionTrigger::EstimatedTokens,

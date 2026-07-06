@@ -3,7 +3,7 @@ use std::path::{Component, Path, PathBuf};
 
 use pl_protocol::{PureError, Result};
 
-use super::util::{category_path, normalized_platforms, safe_relative_path};
+use super::util::category_path;
 use super::{
     ALLOWED_SUPPORT_DIRS, SKILL_FILE_NAME, SkillFile, SkillFrontmatter, SkillMetadata,
     SkillSourceKind,
@@ -116,32 +116,14 @@ pub fn validate_skill_document(
             .category
             .map(|category| category.trim().to_string())
             .filter(|category| !category.is_empty()),
-        platforms: normalized_platforms(frontmatter.platforms),
+        platforms: pl_skill_core::normalized_platforms(frontmatter.platforms),
         source: SkillSourceKind::Project,
         path: PathBuf::new(),
     })
 }
 
 pub fn support_file_path(path: &str) -> Result<PathBuf> {
-    let relative = safe_relative_path(path)?;
-    let first = relative
-        .components()
-        .next()
-        .and_then(|component| match component {
-            Component::Normal(part) => part.to_str(),
-            Component::CurDir
-            | Component::ParentDir
-            | Component::RootDir
-            | Component::Prefix(_) => None,
-        })
-        .ok_or_else(|| PureError::ConfigError("support file path must not be empty".to_string()))?;
-    if !ALLOWED_SUPPORT_DIRS.contains(&first) {
-        return Err(PureError::ConfigError(format!(
-            "support file path must start with one of: {}",
-            ALLOWED_SUPPORT_DIRS.join(", ")
-        )));
-    }
-    Ok(relative)
+    pl_skill_core::support_file_path(path, ALLOWED_SUPPORT_DIRS).map_err(skill_core_error)
 }
 
 pub fn project_skill_dir_for_create(
@@ -182,31 +164,14 @@ pub(super) fn metadata_from_file(
 }
 
 pub(super) fn parse_frontmatter(content: &str) -> Result<SkillFrontmatter> {
-    let normalized = content.strip_prefix('\u{feff}').unwrap_or(content);
-    let Some(after_open) = normalized.strip_prefix("---") else {
-        return Err(PureError::ConfigError(
-            "skill must start with YAML frontmatter".to_string(),
-        ));
-    };
-    let after_open = after_open
-        .strip_prefix("\r\n")
-        .or_else(|| after_open.strip_prefix('\n'))
-        .ok_or_else(|| {
-            PureError::ConfigError("skill frontmatter opener must be on its own line".to_string())
-        })?;
-    let mut frontmatter = String::new();
-    for line in after_open.lines() {
-        if line.trim() == "---" {
-            return serde_norway::from_str::<SkillFrontmatter>(&frontmatter).map_err(|error| {
-                PureError::ConfigError(format!("failed to parse skill frontmatter: {error}"))
-            });
-        }
-        frontmatter.push_str(line);
-        frontmatter.push('\n');
-    }
-    Err(PureError::ConfigError(
-        "skill frontmatter is missing closing ---".to_string(),
-    ))
+    pl_skill_core::parse_skill_frontmatter(content)
+        .map(|frontmatter| SkillFrontmatter {
+            name: frontmatter.name,
+            description: frontmatter.description,
+            category: frontmatter.category,
+            platforms: frontmatter.platforms,
+        })
+        .map_err(skill_core_error)
 }
 
 pub(super) fn find_skill_files(root: &Path) -> Vec<PathBuf> {
@@ -270,6 +235,10 @@ fn category_from_path(root: &Path, skill_dir: &Path) -> Option<String> {
     }
     components.pop();
     Some(components.join("/"))
+}
+
+fn skill_core_error(error: pl_skill_core::SkillCoreError) -> PureError {
+    PureError::ConfigError(error.into_message())
 }
 
 fn collect_support_files(skill_dir: &Path, dir: &Path, files: &mut Vec<SkillFile>) -> Result<()> {

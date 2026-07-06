@@ -6,6 +6,8 @@ use crate::turn::PermissionMode;
 pub struct RuntimeConfig {
     #[serde(default, skip_serializing_if = "PermissionMode::is_default")]
     pub permission_mode: PermissionMode,
+    #[serde(default, skip_serializing_if = "ToolCapabilityConfig::is_default")]
+    pub tool_capabilities: ToolCapabilityConfig,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub active_skills: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -15,8 +17,60 @@ pub struct RuntimeConfig {
 impl RuntimeConfig {
     pub fn is_empty(&self) -> bool {
         self.permission_mode.is_default()
+            && self.tool_capabilities.is_default()
             && self.active_skills.is_empty()
             && self.active_mcp_servers.is_empty()
+    }
+}
+
+/// 共享 agent runtime 的工具能力开关。
+///
+/// 默认配置保持 pure-studio 既有本地能力：shell、workspace 文件、skills、MCP/LSP、
+/// subagent 和用户输入工具开启；git、docker、container 等产品/环境相关能力关闭。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ToolCapabilityConfig {
+    #[serde(default = "default_true")]
+    pub bash: bool,
+    #[serde(default = "default_true")]
+    pub workspace_files: bool,
+    #[serde(default = "default_true")]
+    pub skills: bool,
+    #[serde(default = "default_true")]
+    pub mcp: bool,
+    #[serde(default = "default_true")]
+    pub lsp: bool,
+    #[serde(default = "default_true")]
+    pub subagents: bool,
+    #[serde(default = "default_true")]
+    pub ask_user: bool,
+    #[serde(default)]
+    pub git: bool,
+    #[serde(default)]
+    pub docker: bool,
+    #[serde(default)]
+    pub container: bool,
+}
+
+impl Default for ToolCapabilityConfig {
+    fn default() -> Self {
+        Self {
+            bash: true,
+            workspace_files: true,
+            skills: true,
+            mcp: true,
+            lsp: true,
+            subagents: true,
+            ask_user: true,
+            git: false,
+            docker: false,
+            container: false,
+        }
+    }
+}
+
+impl ToolCapabilityConfig {
+    pub fn is_default(&self) -> bool {
+        self == &Self::default()
     }
 }
 

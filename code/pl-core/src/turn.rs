@@ -453,6 +453,7 @@ pub struct TurnResult {
     pub reasoning_content: Option<String>,
     pub model: String,
     pub usage: TokenUsage,
+    pub last_context_tokens: Option<u64>,
     pub mode: CompileMode,
     pub session_message_count: usize,
     pub status: TurnResultStatus,
