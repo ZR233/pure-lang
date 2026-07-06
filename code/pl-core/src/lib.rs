@@ -34,16 +34,19 @@ pub use config::{
     EffectiveMcpServerConfig, InstructionsConfig, McpServerConfig, McpServerMutationPolicy,
     McpServerSourceKind, McpServerStatusKind, McpServerTransport, ModelRole, ProviderConfig,
     PureConfig, ReasoningEffort, ResolvedRoleConfig, RoleConfig, RoleConfigs, RuntimeConfig,
-    SkillsConfig, SystemSkillsConfig, active_mcp_server_names, builtin_mcp_server_ids,
-    effective_mcp_servers, is_builtin_mcp_server_id, normalize_builtin_mcp_server_states,
-    zhipu_coding_plan_token,
+    SkillsConfig, SystemSkillsConfig, ToolCapabilityConfig, active_mcp_server_names,
+    builtin_mcp_server_ids, effective_mcp_servers, is_builtin_mcp_server_id,
+    normalize_builtin_mcp_server_states, zhipu_coding_plan_token,
 };
 pub use config_editor::{
     ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit, infer_provider_template_kind,
 };
+pub use context_compaction::{
+    ContextCompactionConfig, ContextCompactionReplacement, RecentInteractionTailConfig,
+};
 pub use core::{
     AgentBackendProfile, CoreRuntimeOptions, CoreRuntimeProfile, PureCore, PureCoreBuilder,
-    ToolProfile, WorkspaceProfile,
+    ToolProfile, ToolSetBuilder, WorkspaceProfile,
 };
 pub use first_run::{
     FirstRunConfigDraft, FirstRunModelDraft, FirstRunProviderDraft, ProviderTemplateKind,
@@ -97,10 +100,14 @@ pub use studio::{
     studio_attachment,
 };
 pub use tool::{
-    AskUserTool, BashInput, BashTool, LspLanguageTool, LspQueryTool, OutputTruncation,
-    PlanExitTool, SubagentContext, TodoListTool, Tool, ToolContext, ToolInput, ToolOutput,
-    ToolRegistry, ToolRuntimeEvent, TruncatedOutput, TruncationStrategy, WriteStdinTool,
-    lsp_tool_for_language,
+    AskUserTool, BashInput, BashTool, ExecutionBackend, ExecutionOutput, ExecutionRequest,
+    GIT_TOKEN_ENV, GitCredential, GitCredentialOperation, GitCredentialProvider,
+    GitCredentialRequest, GitPolicy, GitTool, GitToolKind, GitWorkspaceConfig,
+    LocalExecutionBackend, LspLanguageTool, LspQueryTool, NoGitCredentialProvider,
+    OutputTruncation, PlanExitTool, SubagentContext, TOOL_GIT_BRANCH, TOOL_GIT_COMMIT,
+    TOOL_GIT_DIFF, TOOL_GIT_FETCH, TOOL_GIT_PUSH, TOOL_GIT_STATUS, TOOL_GIT_WORKSPACE_INFO,
+    TodoListTool, Tool, ToolContext, ToolInput, ToolOutput, ToolRegistry, ToolRuntimeEvent,
+    TruncatedOutput, TruncationStrategy, WorkspaceAccess, WriteStdinTool, lsp_tool_for_language,
 };
 pub use trace::TraceRecorder;
 pub use turn::{

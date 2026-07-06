@@ -12,18 +12,16 @@ use pl_trace::AgentEventSender;
 #[cfg(test)]
 use pl_trace::{AgentEvent, TraceEvent, TracePartStatus};
 
-use crate::config::{ModelRole, PureConfig, ReasoningEffort};
+use crate::config::{ModelRole, PureConfig, ReasoningEffort, ToolCapabilityConfig};
+use crate::context_compaction::ContextCompactionConfig;
 use crate::permission::parse_reviewer_decision;
 use crate::session::CoreSession;
-#[cfg(test)]
-use crate::tool::WorkspaceAccess;
 use crate::tool::{
-    ApplyPatchTool, AskUserTool, CloseAgentTool, CopyPathTool, CreateDirectoryTool, DeletePathTool,
-    FollowupTaskTool, ListAgentsTool, ListFilesTool, MovePathTool, PlanExitTool, ReadFileTool,
-    SearchFilesTool, SendMessageTool, SkillManageTool, SkillViewTool, SkillsListTool,
-    SpawnAgentTool, StatPathTool, SubagentContext, TodoListTool, ToolContext, ToolRegistry,
-    WaitAgentTool, WriteFileTool, command_tool_pair,
+    ExecutionBackend, GitCredentialProvider, GitTool, GitToolKind, GitWorkspaceConfig,
+    SkillManageTool, SkillViewTool, SkillsListTool, SubagentContext, ToolContext, ToolRegistry,
 };
+#[cfg(test)]
+use crate::tool::{ReadFileTool, WorkspaceAccess, WriteFileTool};
 use crate::trace::TraceRecorder;
 #[cfg(test)]
 use crate::turn::{BudgetTracker, TurnResultStatus};
@@ -35,6 +33,7 @@ mod permission;
 mod profile;
 pub(crate) mod progress;
 mod tool_dispatch;
+mod tool_set;
 mod turn_loop;
 mod turn_result;
 
@@ -42,6 +41,7 @@ pub use profile::{
     AgentBackendProfile, CoreRuntimeOptions, CoreRuntimeProfile, PureCoreBuilder, ToolProfile,
     WorkspaceProfile,
 };
+pub use tool_set::ToolSetBuilder;
 pub(crate) use turn_result::compact_text;
 /// 生成唯一的 turn ID（毫秒时间戳 + 序列号），用于隔离每个 turn 的 trace part id。
 fn generate_turn_id() -> String {
@@ -74,7 +74,9 @@ pub struct PureCore {
     workspace_instructions: Option<String>,
     instruction_profile: Option<crate::instruction::InstructionProfile>,
     tool_profile: ToolProfile,
+    tool_capabilities: ToolCapabilityConfig,
     runtime_options: CoreRuntimeOptions,
+    context_compaction: ContextCompactionConfig,
     active_subagent: Option<SubagentContext>,
     agent_supervisor: crate::AgentSupervisor,
     tools: ToolRegistry,
@@ -92,7 +94,9 @@ impl PureCore {
             workspace_instructions: None,
             instruction_profile: None,
             tool_profile: ToolProfile::Minimal,
+            tool_capabilities: ToolCapabilityConfig::default(),
             runtime_options: CoreRuntimeOptions::default(),
+            context_compaction: ContextCompactionConfig::default(),
             active_subagent: None,
             agent_supervisor: crate::AgentSupervisor::default(),
             tools: ToolRegistry::new(),
@@ -113,7 +117,9 @@ impl PureCore {
             workspace_instructions: None,
             instruction_profile: None,
             tool_profile: ToolProfile::Minimal,
+            tool_capabilities: ToolCapabilityConfig::default(),
             runtime_options: CoreRuntimeOptions::default(),
+            context_compaction: ContextCompactionConfig::default(),
             active_subagent: None,
             agent_supervisor: crate::AgentSupervisor::default(),
             tools: ToolRegistry::new(),
@@ -187,56 +193,52 @@ impl PureCore {
         workspace_root: impl Into<std::path::PathBuf>,
         workspace_instructions: Option<String>,
     ) {
-        let workspace_root = workspace_root.into();
-        self.workspace_root = Some(workspace_root.clone());
-        self.workspace_instructions = workspace_instructions.clone();
         self.tool_profile = ToolProfile::LocalWorkspace;
-        self.register_skill_tools_for_workspace(
-            workspace_root.clone(),
-            workspace_instructions.clone(),
-        );
-        let (bash_tool, write_stdin_tool) = command_tool_pair(workspace_root.clone());
-        self.register_tool(bash_tool);
-        self.register_tool(write_stdin_tool);
-        self.register_tool(ReadFileTool::new());
-        self.register_tool(WriteFileTool);
-        self.register_tool(ListFilesTool);
-        self.register_tool(SearchFilesTool);
-        self.register_tool(StatPathTool);
-        self.register_tool(CreateDirectoryTool);
-        self.register_tool(DeletePathTool);
-        self.register_tool(CopyPathTool);
-        self.register_tool(MovePathTool);
-        self.register_tool(ApplyPatchTool);
-        if let Some(registry) = self.lsp_runtime.clone() {
-            self.tools.register_lsp_languages(&registry).await;
+        self.register_tools_with_capabilities(
+            workspace_root,
+            workspace_instructions,
+            self.tool_capabilities.clone(),
+        )
+        .await;
+    }
+
+    /// 按显式 capability 注册共享工具集合。
+    pub async fn register_tools_with_capabilities(
+        &mut self,
+        workspace_root: impl Into<std::path::PathBuf>,
+        workspace_instructions: Option<String>,
+        capabilities: ToolCapabilityConfig,
+    ) {
+        self.tool_capabilities = capabilities.clone();
+        ToolSetBuilder::from_capabilities(capabilities)
+            .register(self, workspace_root, workspace_instructions)
+            .await;
+    }
+
+    /// 注册 pl-core 提供的通用 git 工具集合。
+    pub fn register_git_tools<B, P>(
+        &mut self,
+        config: GitWorkspaceConfig,
+        backend: std::sync::Arc<B>,
+        credential_provider: std::sync::Arc<P>,
+    ) where
+        B: ExecutionBackend + 'static,
+        P: GitCredentialProvider + 'static,
+    {
+        for kind in GitToolKind::all() {
+            self.register_tool(GitTool::new(
+                *kind,
+                config.clone(),
+                backend.clone(),
+                credential_provider.clone(),
+            ));
         }
-        self.register_tool(SpawnAgentTool::new(
-            self.provider.clone(),
-            self.reasoning_effort.clone(),
-            self.config.clone(),
-            self.mcp_runtime.clone(),
-            self.lsp_runtime.clone(),
-            workspace_instructions.clone(),
-        ));
-        self.register_tool(WaitAgentTool);
-        self.register_tool(ListAgentsTool);
-        self.register_tool(SendMessageTool);
-        self.register_tool(FollowupTaskTool::new(
-            self.provider.clone(),
-            self.reasoning_effort.clone(),
-            self.config.clone(),
-            self.mcp_runtime.clone(),
-            self.lsp_runtime.clone(),
-            workspace_instructions.clone(),
-        ));
-        self.register_tool(CloseAgentTool);
-        self.register_tool(AskUserTool);
-        self.register_tool(TodoListTool);
-        self.register_tool(PlanExitTool);
     }
 
     pub async fn register_available_mcp_tools(&mut self) -> Result<()> {
+        if !self.mcp_tools_enabled() {
+            return Ok(());
+        }
         let Some(registry) = self.mcp_runtime.clone() else {
             return Ok(());
         };
@@ -245,6 +247,10 @@ impl PureCore {
 
     pub async fn register_configured_mcp_tools(&mut self) -> Result<()> {
         self.register_available_mcp_tools().await
+    }
+
+    pub(crate) fn mcp_tools_enabled(&self) -> bool {
+        self.tool_capabilities.mcp
     }
 
     #[cfg_attr(not(feature = "studio"), allow(dead_code))]

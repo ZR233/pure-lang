@@ -47,6 +47,7 @@ fn test_context_with_sender(event_tx: pl_trace::AgentEventSender) -> ToolContext
         workspace_root: std::env::temp_dir(),
         workspace_instructions: None,
         instruction_snapshot: None,
+        provider_call_id: None,
         active_subagent: None,
         agent_supervisor: crate::AgentSupervisor::default(),
         lsp_runtime: None,

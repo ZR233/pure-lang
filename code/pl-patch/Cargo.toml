@@ -1,0 +1,11 @@
+[package]
+name = "pl-patch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tokio = { workspace = true }

@@ -22,7 +22,7 @@ pub use mcp::{
 };
 pub use provider::ProviderConfig;
 pub use role::{ModelRole, ReasoningEffort, ResolvedRoleConfig, RoleConfig, RoleConfigs};
-pub use runtime::{RuntimeConfig, SkillsConfig, SystemSkillsConfig};
+pub use runtime::{RuntimeConfig, SkillsConfig, SystemSkillsConfig, ToolCapabilityConfig};
 pub use store::{ConfigPaths, ConfigStore};
 
 pub const CONFIG_DIR_NAME: &str = ".pure";

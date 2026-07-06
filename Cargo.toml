@@ -4,6 +4,9 @@ members = [
     "code/pl-trace",
     "code/pl-model",
     "code/pl-lsp",
+    "code/pl-output",
+    "code/pl-patch",
+    "code/pl-skill-core",
     "code/pl-core",
     "code/pure-studio-flutter/rust",
 ]
@@ -50,5 +53,8 @@ sea-orm = { version = "1.1.20", default-features = false, features = [
 pl-protocol = { path = "code/pl-protocol" }
 pl-trace = { path = "code/pl-trace" }
 pl-lsp = { path = "code/pl-lsp" }
+pl-output = { path = "code/pl-output" }
+pl-patch = { path = "code/pl-patch" }
+pl-skill-core = { path = "code/pl-skill-core" }
 pl-core = { path = "code/pl-core" }
 pl-model = { path = "code/pl-model" }

@@ -364,6 +364,7 @@ fn turn_result_with_usage(
             cached_prompt_tokens: 0,
             reasoning_tokens: 0,
         },
+        last_context_tokens: None,
         mode: CompileMode::Auto,
         session_message_count,
         status: TurnResultStatus::Completed,

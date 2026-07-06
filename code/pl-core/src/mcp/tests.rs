@@ -192,6 +192,32 @@ async fn registry_registers_only_available_tools() {
 }
 
 #[tokio::test]
+async fn registry_respects_mcp_capability_gate() {
+    let registry = McpRuntimeRegistry::new();
+    registry.state.lock().await.servers.insert(
+        "github".to_string(),
+        McpRuntimeServerState::available(
+            1,
+            123,
+            fake_client(FakeMcpBehavior::Succeed),
+            vec![McpToolDefinition {
+                name: "search_issues".to_string(),
+                description: Some("Search issues".to_string()),
+                input_schema: default_input_schema(),
+            }],
+        ),
+    );
+    let mut config = PureConfig::default();
+    config.runtime.tool_capabilities.mcp = false;
+    let mut core =
+        crate::PureCore::from_config(&config, crate::config::ModelRole::Executor).unwrap();
+
+    registry.register_available_tools(&mut core).await.unwrap();
+
+    assert!(!core.has_tool("mcp__github__search_issues"));
+}
+
+#[tokio::test]
 async fn registry_shutdown_closes_available_clients() {
     let registry = McpRuntimeRegistry::new();
     let shutdown_count = Arc::new(AtomicUsize::new(0));
@@ -276,6 +302,7 @@ async fn tool_transport_failure_marks_server_unavailable() {
         workspace_root: std::env::temp_dir(),
         workspace_instructions: None,
         instruction_snapshot: None,
+        provider_call_id: None,
         active_subagent: None,
         agent_supervisor: crate::AgentSupervisor::default(),
         lsp_runtime: None,

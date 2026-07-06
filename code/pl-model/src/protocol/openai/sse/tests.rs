@@ -111,6 +111,42 @@ fn process_chat_completed_reads_cached_prompt_tokens() {
 }
 
 #[test]
+fn process_chat_completed_reads_responses_style_token_usage() {
+    let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "choices": [{
+            "delta": {},
+            "finish_reason": "stop"
+        }],
+        "usage": {
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "total_tokens": 120,
+            "input_tokens_details": {
+                "cached_tokens": 35
+            },
+            "output_tokens_details": {
+                "reasoning_tokens": 8
+            }
+        }
+    }))
+    .unwrap();
+
+    match process_sse_events(&event).as_slice() {
+        [
+            StreamEvent::Usage(usage),
+            StreamEvent::Completed { response_id: None },
+        ] => {
+            assert_eq!(usage.prompt_tokens, 100);
+            assert_eq!(usage.completion_tokens, 20);
+            assert_eq!(usage.total_tokens, 120);
+            assert_eq!(usage.cached_prompt_tokens, 35);
+            assert_eq!(usage.reasoning_tokens, 8);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+#[test]
 fn process_responses_marks_summary_and_raw_reasoning() {
     let summary: SseStreamEvent = serde_json::from_value(serde_json::json!({
         "type": "response.reasoning_summary_text.delta",

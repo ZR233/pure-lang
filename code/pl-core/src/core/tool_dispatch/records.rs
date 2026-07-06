@@ -71,6 +71,7 @@ pub(super) fn finalize_tool_item(
                     });
                 }
                 ToolRuntimeEvent::ToolResultRevision { .. } => {}
+                ToolRuntimeEvent::EndTurn => {}
             }
         }
     }
@@ -146,7 +147,7 @@ fn tool_execution_record_from_envelope(
     } = envelope;
     let revision = runtime_events.iter().find_map(|event| match event {
         ToolRuntimeEvent::ToolResultRevision { revision } => Some(*revision),
-        ToolRuntimeEvent::SkillActivated { .. } => None,
+        ToolRuntimeEvent::SkillActivated { .. } | ToolRuntimeEvent::EndTurn => None,
     });
     let display_result = display_result_for_tool(&tool_call, &tool_name, &display_text, status);
     ToolExecutionRecord {
