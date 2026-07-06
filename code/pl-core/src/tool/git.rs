@@ -215,11 +215,15 @@ impl GitPolicy {
     }
 
     pub fn validate_path(&self, path: &str) -> Result<(), PureError> {
-        if path.trim().is_empty()
-            || path.contains('\\')
-            || path.chars().any(char::is_control)
-            || Path::new(path).is_absolute()
-            || Path::new(path)
+        let normalized = path.trim();
+        if normalized.is_empty()
+            || normalized != path
+            || normalized.starts_with('/')
+            || normalized.contains('\\')
+            || has_windows_drive_prefix(normalized)
+            || normalized.chars().any(char::is_control)
+            || Path::new(normalized).is_absolute()
+            || Path::new(normalized)
                 .components()
                 .any(|component| matches!(component, Component::ParentDir))
         {
@@ -748,6 +752,11 @@ fn is_pull_request_head_destination(destination: &str, number: &str) -> bool {
         || destination == format!("refs/remotes/origin/pr/{number}")
 }
 
+fn has_windows_drive_prefix(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+}
+
 fn tool_error(tool: &str, error: impl fmt::Display) -> PureError {
     PureError::ToolExecutionFailed {
         tool: tool.to_string(),
@@ -843,6 +852,7 @@ mod tests {
         assert!(policy.validate_path("src/lib.rs").is_ok());
         assert!(policy.validate_path("../secret").is_err());
         assert!(policy.validate_path("/etc/passwd").is_err());
+        assert!(policy.validate_path("C:/Windows").is_err());
         assert!(policy.validate_path("bad\\path").is_err());
         assert!(policy.validate_path("bad\u{7f}path").is_err());
     }
