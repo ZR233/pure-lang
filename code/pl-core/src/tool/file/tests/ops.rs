@@ -174,6 +174,70 @@ fn file_tool_schemas_use_unified_camel_case_inputs() {
 }
 
 #[tokio::test]
+async fn list_files_directory_glob_matches_entries_relative_to_path() {
+    let root = unique_temp_dir("list-path-relative-dirs");
+    tokio::fs::create_dir_all(root.join("code/pl-core/src"))
+        .await
+        .unwrap();
+    tokio::fs::create_dir_all(root.join("code/pl-model"))
+        .await
+        .unwrap();
+    let tool = ListFilesTool;
+
+    let output = tool
+        .execute(
+            input(serde_json::json!({
+                "path": "code",
+                "glob": "*/",
+                "includeDirs": true,
+                "maxFiles": 10,
+            })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+
+    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+    let files = value["files"].as_array().unwrap();
+    assert!(files.contains(&serde_json::json!("code/pl-core/")));
+    assert!(files.contains(&serde_json::json!("code/pl-model/")));
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn list_files_globstar_matches_files_directly_under_prefix() {
+    let root = unique_temp_dir("list-globstar-direct");
+    tokio::fs::create_dir_all(root.join("design/nested"))
+        .await
+        .unwrap();
+    tokio::fs::write(root.join("design/overview.md"), "# Overview\n")
+        .await
+        .unwrap();
+    tokio::fs::write(root.join("design/nested/report.md"), "# Report\n")
+        .await
+        .unwrap();
+    let tool = ListFilesTool;
+
+    let output = tool
+        .execute(
+            input(serde_json::json!({
+                "glob": "design/**/*.md",
+                "maxFiles": 10,
+            })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+
+    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+    assert_eq!(
+        value["files"],
+        serde_json::json!(["design/nested/report.md", "design/overview.md"])
+    );
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn search_files_accepts_pattern_as_search_text() {
     let root = unique_temp_dir("search-pattern-text");
     tokio::fs::create_dir_all(root.join("src")).await.unwrap();
