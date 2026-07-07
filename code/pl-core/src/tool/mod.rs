@@ -1,6 +1,7 @@
 mod ask_user;
 mod bash;
 mod command;
+mod container;
 mod file;
 mod git;
 mod lsp;
@@ -29,6 +30,14 @@ use crate::turn::TurnOptions;
 pub use ask_user::AskUserTool;
 pub(crate) use bash::command_tool_pair;
 pub use bash::{BashInput, BashTool, WriteStdinTool};
+#[cfg(feature = "docker-tools")]
+pub use container::DockerCliContainerBackend;
+pub use container::{
+    ContainerBackend, ContainerCopyFromRequest, ContainerCopyToRequest, ContainerExecOutput,
+    ContainerExecRequest, ContainerTool, ContainerToolExecution, ContainerToolKind,
+    NoContainerBackend, TOOL_CONTAINER_CP_DOWNLOAD, TOOL_CONTAINER_CP_UPLOAD, TOOL_CONTAINER_EXEC,
+    execute_container_tool,
+};
 pub use file::{
     ApplyPatchTool, CopyPathTool, CreateDirectoryTool, DeletePathTool, ListFilesTool, MovePathTool,
     ReadFileTool, SearchFilesTool, StatPathTool, WriteFileTool,

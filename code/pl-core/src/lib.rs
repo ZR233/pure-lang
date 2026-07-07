@@ -100,15 +100,21 @@ pub use studio::{
     StudioSubmitPromptResponse, StudioUserPromptPresentation, resolution_matches_kind,
     studio_attachment,
 };
+#[cfg(feature = "docker-tools")]
+pub use tool::DockerCliContainerBackend;
 pub use tool::{
-    AskUserTool, BashInput, BashTool, ExecutionBackend, ExecutionOutput, ExecutionRequest,
+    AskUserTool, BashInput, BashTool, ContainerBackend, ContainerCopyFromRequest,
+    ContainerCopyToRequest, ContainerExecOutput, ContainerExecRequest, ContainerTool,
+    ContainerToolExecution, ContainerToolKind, ExecutionBackend, ExecutionOutput, ExecutionRequest,
     GIT_TOKEN_ENV, GitCredential, GitCredentialOperation, GitCredentialProvider,
     GitCredentialRequest, GitPolicy, GitTool, GitToolKind, GitWorkspaceConfig,
-    LocalExecutionBackend, LspLanguageTool, LspQueryTool, NoGitCredentialProvider,
-    OutputTruncation, PlanExitTool, SubagentContext, TOOL_GIT_BRANCH, TOOL_GIT_COMMIT,
-    TOOL_GIT_DIFF, TOOL_GIT_FETCH, TOOL_GIT_PUSH, TOOL_GIT_STATUS, TOOL_GIT_WORKSPACE_INFO,
-    TodoListTool, Tool, ToolContext, ToolInput, ToolOutput, ToolRegistry, ToolRuntimeEvent,
-    TruncatedOutput, TruncationStrategy, WorkspaceAccess, WriteStdinTool, lsp_tool_for_language,
+    LocalExecutionBackend, LspLanguageTool, LspQueryTool, NoContainerBackend,
+    NoGitCredentialProvider, OutputTruncation, PlanExitTool, SubagentContext,
+    TOOL_CONTAINER_CP_DOWNLOAD, TOOL_CONTAINER_CP_UPLOAD, TOOL_CONTAINER_EXEC, TOOL_GIT_BRANCH,
+    TOOL_GIT_COMMIT, TOOL_GIT_DIFF, TOOL_GIT_FETCH, TOOL_GIT_PUSH, TOOL_GIT_STATUS,
+    TOOL_GIT_WORKSPACE_INFO, TodoListTool, Tool, ToolContext, ToolInput, ToolOutput, ToolRegistry,
+    ToolRuntimeEvent, TruncatedOutput, TruncationStrategy, WorkspaceAccess, WriteStdinTool,
+    execute_container_tool, lsp_tool_for_language,
 };
 pub use trace::TraceRecorder;
 pub use turn::{

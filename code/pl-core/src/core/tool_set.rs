@@ -3,20 +3,26 @@ use std::sync::Arc;
 
 use crate::config::ToolCapabilityConfig;
 use crate::tool::{
-    ApplyPatchTool, AskUserTool, CloseAgentTool, CopyPathTool, CreateDirectoryTool, DeletePathTool,
-    ExecutionBackend, FollowupTaskTool, GitCredentialProvider, GitWorkspaceConfig, ListAgentsTool,
-    ListFilesTool, LocalExecutionBackend, MovePathTool, NoGitCredentialProvider, PlanExitTool,
-    ReadFileTool, SearchFilesTool, SendMessageTool, SpawnAgentTool, StatPathTool, TodoListTool,
-    WaitAgentTool, WriteFileTool, command_tool_pair,
+    ApplyPatchTool, AskUserTool, CloseAgentTool, ContainerBackend, CopyPathTool,
+    CreateDirectoryTool, DeletePathTool, ExecutionBackend, FollowupTaskTool, GitCredentialProvider,
+    GitWorkspaceConfig, ListAgentsTool, ListFilesTool, LocalExecutionBackend, MovePathTool,
+    NoContainerBackend, NoGitCredentialProvider, PlanExitTool, ReadFileTool, SearchFilesTool,
+    SendMessageTool, SpawnAgentTool, StatPathTool, TodoListTool, WaitAgentTool, WriteFileTool,
+    command_tool_pair,
 };
 
 use super::PureCore;
 
 /// 按能力开关组装 pl-core 的共享工具集合。
 #[derive(Debug, Clone, Default)]
-pub struct ToolSetBuilder<B = LocalExecutionBackend, P = NoGitCredentialProvider> {
+pub struct ToolSetBuilder<
+    B = LocalExecutionBackend,
+    P = NoGitCredentialProvider,
+    C = NoContainerBackend,
+> {
     capabilities: ToolCapabilityConfig,
     git_runtime: Option<GitToolRuntime<B, P>>,
+    container_runtime: Option<ContainerToolRuntime<C>>,
 }
 
 impl ToolSetBuilder {
@@ -24,17 +30,18 @@ impl ToolSetBuilder {
         Self {
             capabilities,
             git_runtime: None,
+            container_runtime: None,
         }
     }
 }
 
-impl<B, P> ToolSetBuilder<B, P> {
+impl<B, P, C> ToolSetBuilder<B, P, C> {
     pub fn with_git_tools<NB, NP>(
         self,
         config: GitWorkspaceConfig,
         backend: Arc<NB>,
         credential_provider: Arc<NP>,
-    ) -> ToolSetBuilder<NB, NP> {
+    ) -> ToolSetBuilder<NB, NP, C> {
         ToolSetBuilder {
             capabilities: self.capabilities,
             git_runtime: Some(GitToolRuntime {
@@ -42,6 +49,15 @@ impl<B, P> ToolSetBuilder<B, P> {
                 backend,
                 credential_provider,
             }),
+            container_runtime: self.container_runtime,
+        }
+    }
+
+    pub fn with_container_tools<NC>(self, backend: Arc<NC>) -> ToolSetBuilder<B, P, NC> {
+        ToolSetBuilder {
+            capabilities: self.capabilities,
+            git_runtime: self.git_runtime,
+            container_runtime: Some(ContainerToolRuntime { backend }),
         }
     }
 
@@ -50,10 +66,11 @@ impl<B, P> ToolSetBuilder<B, P> {
     }
 }
 
-impl<B, P> ToolSetBuilder<B, P>
+impl<B, P, C> ToolSetBuilder<B, P, C>
 where
     B: ExecutionBackend + 'static,
     P: GitCredentialProvider + 'static,
+    C: ContainerBackend + 'static,
 {
     pub async fn register(
         &self,
@@ -76,7 +93,9 @@ where
             core.register_tool(bash_tool);
             core.register_tool(write_stdin_tool);
         }
-        if self.capabilities.workspace_files {
+        let using_container_workspace =
+            self.capabilities.container && self.container_runtime.is_some();
+        if self.capabilities.workspace_files && !using_container_workspace {
             register_file_tools(core);
         }
         if self.capabilities.lsp
@@ -99,6 +118,11 @@ where
                 runtime.credential_provider.clone(),
             );
         }
+        if self.capabilities.container
+            && let Some(runtime) = &self.container_runtime
+        {
+            core.register_container_tools(runtime.backend.clone());
+        }
         core.register_tool(TodoListTool);
         core.register_tool(PlanExitTool);
     }
@@ -109,6 +133,11 @@ struct GitToolRuntime<B, P> {
     config: GitWorkspaceConfig,
     backend: Arc<B>,
     credential_provider: Arc<P>,
+}
+
+#[derive(Debug, Clone)]
+struct ContainerToolRuntime<C> {
+    backend: Arc<C>,
 }
 
 fn register_file_tools(core: &mut PureCore) {

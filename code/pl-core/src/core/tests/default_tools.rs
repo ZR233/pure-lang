@@ -103,6 +103,68 @@ async fn tool_set_builder_registers_git_only_with_runtime_config() {
     assert!(core.tools.get("git_push").is_some());
 }
 
+#[derive(Debug, Clone, Default)]
+struct FakeContainerBackend;
+
+impl crate::tool::ContainerBackend for FakeContainerBackend {
+    async fn exec(
+        &self,
+        _request: crate::tool::ContainerExecRequest,
+    ) -> crate::Result<crate::tool::ContainerExecOutput> {
+        Ok(crate::tool::ContainerExecOutput {
+            status: 0,
+            stdout: String::new(),
+            stderr: String::new(),
+            stdout_truncated: false,
+            stderr_truncated: false,
+            stdout_bytes: 0,
+            stderr_bytes: 0,
+            output_artifacts: Vec::new(),
+        })
+    }
+
+    async fn copy_from(
+        &self,
+        _request: crate::tool::ContainerCopyFromRequest,
+    ) -> crate::Result<Vec<u8>> {
+        Ok(Vec::new())
+    }
+
+    async fn copy_to(&self, _request: crate::tool::ContainerCopyToRequest) -> crate::Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn tool_set_builder_registers_container_only_with_backend() {
+    let capabilities = crate::config::ToolCapabilityConfig {
+        container: true,
+        ..Default::default()
+    };
+    let mut core = PureCore::default_provider().unwrap();
+
+    ToolSetBuilder::from_capabilities(capabilities.clone())
+        .register(&mut core, std::env::temp_dir(), None)
+        .await;
+
+    assert!(core.tools.get("container_exec").is_none());
+    assert!(core.tools.get("container_cp_upload").is_none());
+
+    let mut core = PureCore::default_provider().unwrap();
+    ToolSetBuilder::from_capabilities(capabilities)
+        .with_container_tools(std::sync::Arc::new(FakeContainerBackend))
+        .register(&mut core, std::env::temp_dir(), None)
+        .await;
+
+    assert!(core.tools.get("container_exec").is_some());
+    assert!(core.tools.get("read_file").is_some());
+    assert!(core.tools.get("list_files").is_some());
+    assert!(core.tools.get("search_files").is_some());
+    assert!(core.tools.get("apply_patch").is_some());
+    assert!(core.tools.get("container_cp_upload").is_some());
+    assert!(core.tools.get("container_cp_download").is_some());
+}
+
 #[tokio::test]
 async fn profiled_local_workspace_registers_default_tools() {
     let runtime = CoreRuntimeProfile::local_workspace(std::env::temp_dir())
