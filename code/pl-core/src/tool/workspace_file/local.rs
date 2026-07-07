@@ -236,7 +236,7 @@ async fn collect_entries(
                 continue;
             }
             let display = paths.display_relative(&path);
-            if include_dirs && matches_pattern(&display, Some(glob)) {
+            if include_dirs && matches_list_entry(root, &path, &display, glob, true) {
                 output.push(format!("{display}/"));
             }
             let mut entries = tokio::fs::read_dir(&path).await?;
@@ -245,12 +245,41 @@ async fn collect_entries(
             }
         } else if metadata.is_file() {
             let display = paths.display_relative(&path);
-            if matches_pattern(&display, Some(glob)) {
+            if matches_list_entry(root, &path, &display, glob, false) {
                 output.push(display);
             }
         }
     }
     Ok(())
+}
+
+fn matches_list_entry(root: &Path, path: &Path, display: &str, glob: &str, is_dir: bool) -> bool {
+    if matches_entry_candidate(display, glob) {
+        return true;
+    }
+    if is_dir && path != root && matches_entry_candidate(&format!("{display}/"), glob) {
+        return true;
+    }
+    let Some(path_relative) = display_relative_to(root, path) else {
+        return false;
+    };
+    if path_relative.is_empty() {
+        return false;
+    }
+    matches_entry_candidate(&path_relative, glob)
+        || (is_dir && matches_entry_candidate(&format!("{path_relative}/"), glob))
+}
+
+fn matches_entry_candidate(candidate: &str, glob: &str) -> bool {
+    matches_pattern(candidate, Some(glob))
+}
+
+fn display_relative_to(root: &Path, path: &Path) -> Option<String> {
+    let relative = path.strip_prefix(root).ok()?;
+    if relative.as_os_str().is_empty() {
+        return Some(String::new());
+    }
+    Some(relative.to_string_lossy().replace('\\', "/"))
 }
 
 async fn search_entries(

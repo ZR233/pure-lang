@@ -34,6 +34,30 @@ Get-ChildItem -Recurse "*.rs" -Exclude "*frb_generated*" | ForEach-Object {
 
 > 注意：单独文件（如 `tests.rs`）和 `tests/` 目录下的文件不在行数统计范围内。
 
+### 大结构体字段数扫描
+```
+# 扫描生产代码中字段数 > 8 的结构体，排除 frb_generated.rs 和 build 目录
+Get-ChildItem -Recurse -Filter "*.rs" code/ | Where-Object {
+  $_.FullName -notmatch "\\target\\" -and
+  $_.FullName -notmatch "frb_generated" -and
+  $_.FullName -notmatch "\\build\\"
+} | ForEach-Object {
+  $content = Get-Content $_.FullName -Raw
+  if ($content -match '#\[cfg\(test\)\]') { $content = ($content -split '#\[cfg\(test\)\]')[0] }
+  $matches = [regex]::Matches($content, '(?ms)pub struct (\w+) \{(.*?)\}')
+  foreach ($m in $matches) {
+    $name = $m.Groups[1].Value
+    $body = $m.Groups[2].Value
+    $fields = ([regex]::Matches($body, '^\s+pub \w+', 'Multiline')).Count
+    if ($fields -gt 8) {
+      "{0,3} fields {1}  {2}" -f $fields, $name, $_.FullName.Replace((Get-Location).Path + "\", "")
+    }
+  }
+} | Sort-Object -Descending
+```
+
+> 判断大结构体是否需要拆分时，区分两类：**DTO/序列化类型**（如 pl-protocol 和 bridge 中的事件类型）字段数虽多但天然需要统一序列化格式，拆分反增复杂度；**运行时状态/配置类型**（如超过 10 字段的 `TurnResult`、`ToolContext`）可以考虑按职责 grouping 重构。
+
 ### 异步 Trait 违规
 ```
 rg '#\[async_trait\]' code/ --glob '*.rs'  -n
@@ -94,7 +118,8 @@ rg 'TODO|FIXME|HACK|XXX' code/ --glob '*.rs'  -n
 
 ### 1. 模块大小
 - 列出所有超 500 行的模块（建议拆分），超 800 行的（必须拆分）。
-- 尤其关注：`studio/store.rs`、`studio/runtime.rs`、`core/mod.rs`、`studio/event_runtime.rs`、`studio.rs`、`api/studio.rs`（bridge）。
+- 当前主要关注：`pl-patch/src/lib.rs`、`pl-core/src/tool/git.rs`、`pl-model/src/protocol/openai/sse/mod.rs`、`pl-protocol/src/studio_event.rs`、`pl-core/src/core/turn_loop/mod.rs`、`pl-model/src/stream/mod.rs`。
+- 已拆分完毕的旧大文件不再列入扫描范围（如 `studio/store.rs`、`studio/runtime.rs`、`api/studio.rs`、`core/mod.rs` 已在过往审查中拆分）。
 
 ### 2. 异步 Trait
 - 搜索 `#[async_trait]` 和 `#[allow(async_fn_in_trait)]` — 全项目禁止使用。
@@ -232,12 +257,37 @@ rg 'TODO|FIXME|HACK|XXX' code/ --glob '*.rs'  -n
 ### 第三阶段：模块拆分（高风险，逐个验证）
 每次拆分一个文件，确保 `cargo test -p <crate>` 全通过后继续下一个。
 
-优先拆分顺序：
-1. `studio/store.rs`（3039 行）— 按领域拆出 migration、event-persistence、setting
-2. `studio/runtime.rs`（2363 行）— 按职责拆出 session-lifecycle、prompt-orchestration
-3. `api/studio.rs`（2203 行）— 拆为 types、handlers、convert、runtime
-4. `core/mod.rs`（1937 行）— 按编译阶段拆分 turn lifecycle、instruction assembly
-5. 其余超 800 行文件
+#### 拆分前：子代理预分析
+拆分不能靠猜测，需要先理解大文件的内部结构。建议在动手前使用 explorer subagent 分析目标文件：
+- 列出所有 `pub struct`、`pub enum`、`pub fn`、`impl`、`trait` 及其大致行数范围
+- 识别属于不同功能关注点的类型和函数
+- 判断是否有字段数 > 10 的大结构体，区分 DTO 与运行时状态
+- 定位 `#[cfg(test)]` 边界，确认生产代码实际行数
+
+子代理输出示例（结构化列表）：
+```
+| 定义                | 角色               | 行数范围 |
+|---------------------|-------------------|---------|
+| ExecutionRequest    | 通用命令执行请求   | 29-39   |
+| LocalExecutionBackend | 本地进程执行后端 | 89-107  |
+| GitCredential       | 凭证封装          | 120-135 |
+```
+
+父 agent 基于分析结果制定拆分方案：确定新模块列表、每个模块包含的 API、重导出策略，然后才进入代码修改。
+
+#### 拆分后验证
+每个文件拆分完成后：
+1. 运行 `cargo fmt`
+2. 运行 `cargo clippy -p <crate> -- -D warnings`
+3. 运行 `cargo test -p <crate>`
+4. 检查下游 crate 编译：`cargo check -p <下游crate>`
+
+#### 优先拆分顺序（当前状态）
+1. `pl-patch/src/lib.rs`（915 行生产代码）— 整个 crate 只一个文件，按功能拆为 error/parse/apply/match_util
+2. `pl-core/src/tool/git.rs`（766 行）— 多职责混杂，拆为 execution/credential/policy/types/helpers 子模块
+3. `pl-model/src/protocol/openai/sse/mod.rs`（721 行）— 拆为 types/decoder 子模块
+4. `pl-protocol/src/studio_event.rs`（639 行）— 按事件域拆为 message/part/agent/session/health 子模块
+5. 其余超 500 行的文件和模块视内部结构和变更频率决定是否拆分
 
 ## 验证
 
