@@ -3,6 +3,7 @@ use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
 use super::ForkTurns;
+use super::ResumeAgentTool;
 use super::agent_tool_records;
 use super::child_agent_options;
 use super::fork_session;
@@ -196,6 +197,48 @@ fn wait_agent_does_not_hold_runtime_lock() {
     assert_eq!(
         wait_agent.runtime_lock_policy(),
         ToolRuntimeLockPolicy::None
+    );
+}
+
+#[test]
+fn agent_control_kind_schemas_match_tool_schemas() {
+    let mut provider_info = pl_model::ProviderInfo::openai(Some("http://example.invalid".into()));
+    provider_info.default_model = "test-model".to_string();
+    let runtime = AgentToolRuntime::new(
+        pl_model::create_provider(provider_info).unwrap(),
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+
+    assert_eq!(
+        crate::tool::AgentControlToolKind::SpawnAgent.input_schema(),
+        super::SpawnAgentTool {
+            runtime: runtime.clone()
+        }
+        .input_schema()
+    );
+    assert_eq!(
+        crate::tool::AgentControlToolKind::SendInput.input_schema(),
+        super::SendInputTool { runtime }.input_schema()
+    );
+    assert_eq!(
+        crate::tool::AgentControlToolKind::WaitAgent.input_schema(),
+        super::WaitAgentTool.input_schema()
+    );
+    assert_eq!(
+        crate::tool::AgentControlToolKind::ListAgents.input_schema(),
+        super::ListAgentsTool.input_schema()
+    );
+    assert_eq!(
+        crate::tool::AgentControlToolKind::CloseAgent.input_schema(),
+        super::CloseAgentTool.input_schema()
+    );
+    assert_eq!(
+        crate::tool::AgentControlToolKind::ResumeAgent.input_schema(),
+        ResumeAgentTool.input_schema()
     );
 }
 

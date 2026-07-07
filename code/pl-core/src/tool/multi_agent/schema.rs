@@ -68,27 +68,32 @@ impl AgentControlToolKind {
                     "taskName",
                     json!({
                         "type": "string",
-                        "description": "Stable task name for the spawned agent."
+                        "description": "Stable lowercase task name using letters, digits, and underscores."
                     }),
-                    false,
+                    true,
                 ),
-                ("message", json!({ "type": "string" }), false),
-                ("items", collab_items_schema(), false),
+                (
+                    "message",
+                    json!({
+                        "type": "string",
+                        "description": "Initial task message for the spawned agent."
+                    }),
+                    true,
+                ),
                 (
                     "agentType",
                     json!({
                         "type": "string",
-                        "enum": ["default", "explorer", "worker", "planner", "executor", "reviewer"],
-                        "description": "Agent role or Codex-compatible agent type. Defaults to executor."
+                        "enum": ["explorer", "planner", "executor", "reviewer"],
+                        "description": "Agent role. Defaults to executor."
                     }),
                     false,
                 ),
                 (
                     "forkTurns",
                     json!({
-                        "type": "integer",
-                        "minimum": 0,
-                        "description": "Number of recent parent turns to fork into the child agent."
+                        "type": "string",
+                        "description": "Parent history to inherit: none, all, or a positive integer string. Defaults to none. Inherited history is filtered to remove tool calls/results and reasoning."
                     }),
                     false,
                 ),
@@ -118,8 +123,14 @@ impl AgentControlToolKind {
                     }),
                     true,
                 ),
-                ("message", json!({ "type": "string" }), false),
-                ("items", collab_items_schema(), false),
+                (
+                    "message",
+                    json!({
+                        "type": "string",
+                        "description": "Message to send to the target agent."
+                    }),
+                    true,
+                ),
                 (
                     "triggerTurn",
                     json!({
@@ -137,26 +148,15 @@ impl AgentControlToolKind {
                     false,
                 ),
             ]),
-            Self::WaitAgent => object_schema(vec![
-                (
-                    "targets",
-                    json!({
-                        "type": "array",
-                        "items": { "type": "string" },
-                        "description": "Agent ids to observe."
-                    }),
-                    false,
-                ),
-                (
-                    "timeoutMs",
-                    json!({
-                        "type": "integer",
-                        "minimum": 100,
-                        "description": "Wait timeout in milliseconds. Defaults to 30000."
-                    }),
-                    false,
-                ),
-            ]),
+            Self::WaitAgent => object_schema(vec![(
+                "timeoutMs",
+                json!({
+                    "type": "integer",
+                    "minimum": 100,
+                    "description": "Wait timeout in milliseconds. Defaults to 30000."
+                }),
+                false,
+            )]),
             Self::ListAgents => object_schema(vec![(
                 "pathPrefix",
                 json!({
@@ -179,25 +179,6 @@ impl AgentControlToolKind {
     pub fn to_schema(self) -> ToolSchema {
         ToolSchema::function(self.name(), self.description(), self.input_schema())
     }
-}
-
-fn collab_items_schema() -> Value {
-    json!({
-        "type": "array",
-        "items": {
-            "type": "object",
-            "properties": {
-                "type": {
-                    "type": "string",
-                    "enum": ["text", "skill"],
-                    "description": "Input item type."
-                },
-                "text": { "type": "string" },
-                "name": { "type": "string" },
-                "path": { "type": "string" }
-            }
-        }
-    })
 }
 
 fn object_schema(properties: Vec<(&str, Value, bool)>) -> Value {

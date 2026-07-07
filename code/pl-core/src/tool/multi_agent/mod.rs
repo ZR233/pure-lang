@@ -20,7 +20,9 @@ pub use schema::{
     AgentControlToolKind, TOOL_CLOSE_AGENT, TOOL_LIST_AGENTS, TOOL_RESUME_AGENT, TOOL_SEND_INPUT,
     TOOL_SPAWN_AGENT, TOOL_WAIT_AGENT,
 };
-pub use types::{CloseAgentTool, ListAgentsTool, SendInputTool, SpawnAgentTool, WaitAgentTool};
+pub use types::{
+    CloseAgentTool, ListAgentsTool, ResumeAgentTool, SendInputTool, SpawnAgentTool, WaitAgentTool,
+};
 
 fn role_key(role: Option<&str>) -> Result<String, PureError> {
     let role = role
@@ -33,31 +35,6 @@ fn role_key(role: Option<&str>) -> Result<String, PureError> {
             tool: "spawn_agent".to_string(),
             error: format!("unsupported agentType: {role}"),
         })
-}
-
-fn message_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "object",
-        "properties": {
-            "target": {
-                "type": "string",
-                "description": "Agent id, relative path, or canonical path."
-            },
-            "message": {
-                "type": "string",
-                "description": "Message to send to the target agent."
-            },
-            "triggerTurn": {
-                "type": "boolean",
-                "description": "When true, trigger a new turn for a waiting child agent instead of only queueing the input."
-            },
-            "interrupt": {
-                "type": "boolean",
-                "description": "Reserved for hosts that can interrupt a busy target before enqueueing this input."
-            }
-        },
-        "required": ["target", "message"]
-    })
 }
 
 fn invalid_spawn_input(error: serde_json::Error) -> PureError {

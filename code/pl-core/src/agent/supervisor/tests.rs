@@ -129,3 +129,104 @@ async fn close_agent_waits_for_cancelled_task_to_finish() {
     assert_eq!(entry.record.status, AgentStatus::Shutdown);
     assert!(entry.task.is_none());
 }
+
+#[tokio::test]
+async fn resume_agent_reactivates_shutdown_agent() {
+    let supervisor = AgentSupervisor::default();
+    let token = CancellationToken::new();
+    let handle = tokio::spawn(async {});
+    let mut record = agent_record("worker", AgentStatus::Shutdown);
+    record.error = Some("provider returned status 429".to_string());
+    record.reason = Some("closed for retry".to_string());
+    {
+        let mut state = supervisor.state.lock().await;
+        state
+            .path_to_id
+            .insert(record.path.clone(), record.id.clone());
+        let mut entry = AgentEntry::new(record.clone());
+        entry.cancellation_token = Some(token);
+        entry.task = Some(handle);
+        state.agents.insert(record.id.clone(), entry);
+    }
+    let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
+
+    let resumed = supervisor
+        .resume_agent(AgentPath::ROOT, "/root/worker", &event_tx)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resumed,
+        AgentRecord {
+            status: AgentStatus::Waiting,
+            error: None,
+            reason: None,
+            budget_limit_kind: None,
+            budget_usage: None,
+            updated_at: resumed.updated_at,
+            ..record
+        }
+    );
+    let state = supervisor.state.lock().await;
+    let entry = state.agents.get("worker").unwrap();
+    assert_eq!(entry.record, resumed);
+    assert!(entry.cancellation_token.is_none());
+    assert!(entry.task.is_none());
+    drop(state);
+
+    let event = event_rx.recv().await.unwrap();
+    match event {
+        pl_trace::AgentEvent::AgentStateChanged {
+            id,
+            path,
+            parent_path,
+            role,
+            task,
+            status,
+            summary,
+            depth,
+            error,
+            reason,
+            budget_limit_kind,
+            budget_usage,
+            updated_at,
+        } => {
+            assert_eq!(
+                AgentRecord {
+                    id,
+                    path,
+                    parent_path,
+                    role,
+                    task,
+                    status,
+                    summary,
+                    error,
+                    reason,
+                    budget_limit_kind,
+                    budget_usage,
+                    depth,
+                    updated_at,
+                },
+                resumed
+            );
+        }
+        _ => panic!("expected agent state change event"),
+    }
+}
+
+#[tokio::test]
+async fn resume_agent_rejects_active_agent() {
+    let supervisor = AgentSupervisor::default();
+    insert_agent(&supervisor, agent_record("worker", AgentStatus::Waiting)).await;
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+
+    let result = supervisor
+        .resume_agent(AgentPath::ROOT, "/root/worker", &event_tx)
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(PureError::ToolExecutionFailed { tool, error })
+            if tool == "resume_agent" && error == "target agent /root/worker is already waiting"
+    ));
+}

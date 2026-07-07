@@ -2,10 +2,11 @@ use pl_protocol::PureError;
 
 use crate::agent::{AgentMessageMode, AgentMessageRequest};
 
+use super::super::schema::AgentControlToolKind;
 use super::super::types::{AgentMessageArgs, SendInputResult, SendInputTool};
 use super::super::{
     BoxFuture, Tool, ToolContext, ToolInput, ToolOutput, child_agent_options, current_agent_path,
-    json_output, message_schema,
+    json_output,
 };
 
 impl Tool for SendInputTool {
@@ -18,7 +19,7 @@ impl Tool for SendInputTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        message_schema()
+        AgentControlToolKind::SendInput.input_schema()
     }
 
     fn execute<'a>(

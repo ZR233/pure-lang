@@ -14,6 +14,7 @@ async fn default_tools_register_bash_and_agent_tools() {
     assert!(core.tools.get("wait_agent").is_some());
     assert!(core.tools.get("list_agents").is_some());
     assert!(core.tools.get("send_input").is_some());
+    assert!(core.tools.get("resume_agent").is_some());
     assert!(core.tools.get("request_user_input").is_some());
     assert!(core.tools.get("update_todo_list").is_some());
     assert!(core.tools.get("plan_exit").is_some());
@@ -60,6 +61,7 @@ async fn shared_tools_expose_only_canonical_codex_shape_names() {
     let names = core.tools.names();
     for canonical in [
         "send_input",
+        "resume_agent",
         "git_workspace_info",
         "container_copy",
         "read_file",
@@ -129,6 +131,14 @@ fn agent_control_schemas_use_codex_camel_case_fields() {
             .is_some()
     );
     assert!(spawn_schema.pointer("/properties/forkTurns").is_some());
+    assert_eq!(
+        spawn_schema.pointer("/properties/forkTurns/type"),
+        Some(&serde_json::json!("string"))
+    );
+    assert_eq!(
+        spawn_schema.pointer("/required"),
+        Some(&serde_json::json!(["taskName", "message"]))
+    );
     assert!(spawn_schema.pointer("/properties/name").is_none());
     assert!(spawn_schema.pointer("/properties/agent_type").is_none());
     assert!(
@@ -138,9 +148,15 @@ fn agent_control_schemas_use_codex_camel_case_fields() {
     );
 
     let wait_schema = crate::tool::AgentControlToolKind::WaitAgent.input_schema();
-    assert!(wait_schema.pointer("/properties/targets").is_some());
+    assert!(wait_schema.pointer("/properties/targets").is_none());
     assert!(wait_schema.pointer("/properties/timeoutMs").is_some());
     assert!(wait_schema.pointer("/properties/timeout_ms").is_none());
+
+    let resume_schema = crate::tool::AgentControlToolKind::ResumeAgent.input_schema();
+    assert_eq!(
+        resume_schema.pointer("/required"),
+        Some(&serde_json::json!(["target"]))
+    );
 }
 
 #[tokio::test]
@@ -159,6 +175,7 @@ async fn tool_set_builder_can_disable_shell_and_subagents() {
     assert!(core.tools.get("write_stdin").is_none());
     assert!(core.tools.get("spawn_agent").is_none());
     assert!(core.tools.get("wait_agent").is_none());
+    assert!(core.tools.get("resume_agent").is_none());
     assert!(core.tools.get("read_file").is_some());
     assert!(core.tools.get("request_user_input").is_some());
     assert!(core.tools.get("plan_exit").is_some());

@@ -6,9 +6,9 @@ use crate::tool::{
     ApplyPatchTool, AskUserTool, CloseAgentTool, ContainerBackend, ContainerWorkspaceFileBackend,
     CopyPathTool, CreateDirectoryTool, DeletePathTool, ExecutionBackend, GitCredentialProvider,
     GitWorkspaceConfig, ListAgentsTool, ListFilesTool, LocalExecutionBackend, MovePathTool,
-    NoContainerBackend, NoGitCredentialProvider, PlanExitTool, ReadFileTool, SearchFilesTool,
-    SendInputTool, SpawnAgentTool, StatPathTool, TodoListTool, WaitAgentTool, WorkspaceFileTool,
-    WorkspaceFileToolKind, WriteFileTool, command_tool_pair,
+    NoContainerBackend, NoGitCredentialProvider, PlanExitTool, ReadFileTool, ResumeAgentTool,
+    SearchFilesTool, SendInputTool, SpawnAgentTool, StatPathTool, TodoListTool, WaitAgentTool,
+    WorkspaceFileTool, WorkspaceFileToolKind, WriteFileTool, command_tool_pair,
 };
 
 use super::PureCore;
@@ -189,4 +189,5 @@ fn register_subagent_tools(core: &mut PureCore, workspace_instructions: Option<S
         workspace_instructions,
     ));
     core.register_tool(CloseAgentTool);
+    core.register_tool(ResumeAgentTool);
 }

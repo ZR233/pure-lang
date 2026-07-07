@@ -55,6 +55,9 @@ pub struct SendInputTool {
 #[derive(Debug, Clone)]
 pub struct CloseAgentTool;
 
+#[derive(Debug, Clone)]
+pub struct ResumeAgentTool;
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct SpawnAgentArgs {

@@ -51,9 +51,9 @@ pub use git::{
 };
 pub use lsp::{LspLanguageTool, LspQueryTool, lsp_tool_for_language};
 pub use multi_agent::{
-    AgentControlToolKind, CloseAgentTool, ListAgentsTool, SendInputTool, SpawnAgentTool,
-    TOOL_CLOSE_AGENT, TOOL_LIST_AGENTS, TOOL_RESUME_AGENT, TOOL_SEND_INPUT, TOOL_SPAWN_AGENT,
-    TOOL_WAIT_AGENT, WaitAgentTool,
+    AgentControlToolKind, CloseAgentTool, ListAgentsTool, ResumeAgentTool, SendInputTool,
+    SpawnAgentTool, TOOL_CLOSE_AGENT, TOOL_LIST_AGENTS, TOOL_RESUME_AGENT, TOOL_SEND_INPUT,
+    TOOL_SPAWN_AGENT, TOOL_WAIT_AGENT, WaitAgentTool,
 };
 pub(crate) use path_policy::{PathAccess, ToolPathPolicy};
 pub use plan::PlanExitTool;
