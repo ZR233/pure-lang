@@ -53,7 +53,7 @@ impl WorkspaceFileToolKind {
     pub fn description(self) -> &'static str {
         match self {
             Self::ReadFile => {
-                "Read a UTF-8 text file from the agent workspace with bounded output. Use line_start/line_count for source files or offset/max_bytes for byte paging."
+                "Read a UTF-8 text file from the agent workspace with bounded output. Use lineStart/lineCount for source files or offset/maxBytes for byte paging."
             }
             Self::ListFiles => {
                 "List files from the agent workspace with an optional glob and bounded result count."
@@ -73,18 +73,18 @@ impl WorkspaceFileToolKind {
                 ("path", json!({ "type": "string" }), true),
                 ("cwd", json!({ "type": "string" }), false),
                 (
-                    "line_start",
+                    "lineStart",
                     json!({ "type": "integer", "minimum": 1 }),
                     false,
                 ),
                 (
-                    "line_count",
+                    "lineCount",
                     json!({ "type": "integer", "minimum": 1 }),
                     false,
                 ),
                 ("offset", json!({ "type": "integer", "minimum": 0 }), false),
                 (
-                    "max_bytes",
+                    "maxBytes",
                     json!({ "type": "integer", "minimum": 1 }),
                     false,
                 ),
@@ -101,12 +101,12 @@ impl WorkspaceFileToolKind {
                     false,
                 ),
                 (
-                    "max_files",
+                    "maxFiles",
                     json!({ "type": "integer", "minimum": 1 }),
                     false,
                 ),
                 (
-                    "include_dirs",
+                    "includeDirs",
                     json!({
                         "type": "boolean",
                         "description": "Whether directory entries should be included in addition to files."
@@ -141,7 +141,7 @@ impl WorkspaceFileToolKind {
                     false,
                 ),
                 (
-                    "case_sensitive",
+                    "caseSensitive",
                     json!({
                         "type": "boolean",
                         "description": "Whether matching should be case-sensitive."
@@ -157,12 +157,12 @@ impl WorkspaceFileToolKind {
                     false,
                 ),
                 (
-                    "max_matches",
+                    "maxMatches",
                     json!({ "type": "integer", "minimum": 1 }),
                     false,
                 ),
                 (
-                    "context_lines",
+                    "contextLines",
                     json!({
                         "type": "integer",
                         "minimum": 0,

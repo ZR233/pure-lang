@@ -14,6 +14,7 @@ use super::ops::tool_error;
 use super::schema::TOOL_APPLY_PATCH;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspacePatchOutput {
     pub cwd: String,
     pub added: Vec<String>,
@@ -28,6 +29,7 @@ pub struct WorkspacePatchOutput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspacePatchMove {
     pub from: String,
     pub to: String,

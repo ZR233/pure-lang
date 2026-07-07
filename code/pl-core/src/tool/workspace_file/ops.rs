@@ -70,7 +70,7 @@ where
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ReadFileInput {
     path: String,
     cwd: Option<String>,
@@ -129,15 +129,15 @@ where
         "path": input.path,
         "text": text,
         "offset": window_offset,
-        "bytes_returned": text.len(),
-        "bytes_omitted": bytes_omitted,
+        "bytesReturned": text.len(),
+        "bytesOmitted": bytes_omitted,
         "truncated": truncated,
-        "next_offset": next_offset,
+        "nextOffset": next_offset,
     }))
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ListFilesInput {
     path: Option<String>,
     cwd: Option<String>,
@@ -170,7 +170,7 @@ where
     Ok(json!({
         "path": path,
         "glob": glob,
-        "include_dirs": include_dirs,
+        "includeDirs": include_dirs,
         "files": result.files,
         "count": result.files.len(),
         "truncated": result.truncated,
@@ -178,7 +178,7 @@ where
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SearchFilesInput {
     query: String,
     path: Option<String>,
@@ -223,7 +223,7 @@ where
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ApplyPatchInput {
     input: String,
     cwd: Option<String>,

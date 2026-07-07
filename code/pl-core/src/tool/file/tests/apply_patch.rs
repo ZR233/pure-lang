@@ -20,7 +20,7 @@ async fn apply_patch_uses_unified_input_and_json_output() {
     assert_eq!(value["added"], serde_json::json!(["src/lib.rs"]));
     assert_eq!(value["updated"], serde_json::json!([]));
     assert_eq!(value["deleted"], serde_json::json!([]));
-    assert_eq!(value["changed_files"], serde_json::json!(["src/lib.rs"]));
+    assert_eq!(value["changedFiles"], serde_json::json!(["src/lib.rs"]));
     assert_eq!(value["stdout"], serde_json::json!("apply_patch completed"));
     assert_eq!(value["stderr"], serde_json::json!(""));
     let _ = tokio::fs::remove_dir_all(root).await;

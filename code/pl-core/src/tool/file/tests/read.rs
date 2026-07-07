@@ -15,7 +15,7 @@ fn read_output_json(output: &crate::tool::ToolOutput) -> serde_json::Value {
 }
 
 #[tokio::test]
-async fn read_file_uses_unified_snake_case_json_output() {
+async fn read_file_uses_unified_camel_case_json_output() {
     let root = unique_temp_dir("unified-read");
     let tool = ReadFileTool::new();
     tokio::fs::create_dir_all(&root).await.unwrap();
@@ -27,8 +27,8 @@ async fn read_file_uses_unified_snake_case_json_output() {
         .execute(
             input(serde_json::json!({
                 "path": "a.txt",
-                "line_start": 2,
-                "line_count": 1,
+                "lineStart": 2,
+                "lineCount": 1,
             })),
             context(&root).await,
         )
@@ -41,10 +41,10 @@ async fn read_file_uses_unified_snake_case_json_output() {
         serde_json::json!({
             "path": "a.txt",
             "offset": 0,
-            "bytes_returned": 4,
-            "bytes_omitted": 0,
+            "bytesReturned": 4,
+            "bytesOmitted": 0,
             "truncated": false,
-            "next_offset": null,
+            "nextOffset": null,
             "text": "two\n",
         })
     );
@@ -88,8 +88,8 @@ async fn write_and_read_file_roundtrip() {
         .execute(
             input(serde_json::json!({
                 "path": "notes/a.txt",
-                "line_start": 2,
-                "line_count": 1,
+                "lineStart": 2,
+                "lineCount": 1,
             })),
             context(&root).await,
         )
@@ -130,7 +130,7 @@ async fn read_file_line_offset_starts_at_given_line() {
         .unwrap();
     let output = tool
         .execute(
-            input(serde_json::json!({ "path": "a.txt", "line_start": 2 })),
+            input(serde_json::json!({ "path": "a.txt", "lineStart": 2 })),
             context(&root).await,
         )
         .await
@@ -152,8 +152,8 @@ async fn read_file_max_lines_limits_output() {
         .execute(
             input(serde_json::json!({
                 "path": "a.txt",
-                "line_start": 1,
-                "line_count": 2,
+                "lineStart": 1,
+                "lineCount": 2,
             })),
             context(&root).await,
         )
@@ -174,7 +174,7 @@ async fn read_file_line_offset_out_of_range_errors() {
         .unwrap();
     let result = tool
         .execute(
-            input(serde_json::json!({ "path": "a.txt", "line_start": 10 })),
+            input(serde_json::json!({ "path": "a.txt", "lineStart": 10 })),
             context(&root).await,
         )
         .await;
@@ -186,7 +186,7 @@ async fn read_file_line_offset_out_of_range_errors() {
 
 #[tokio::test]
 async fn read_file_trailing_newline_offset_at_end_returns_empty() {
-    // "one\ntwo\n" 有 2 行；line_start=3（行数+1）返回空切片，不报错（对齐 codex）
+    // "one\ntwo\n" 有 2 行；lineStart=3（行数+1）返回空切片，不报错（对齐 codex）
     let root = unique_temp_dir("offset-end");
     let tool = ReadFileTool::new();
     tokio::fs::create_dir_all(&root).await.unwrap();
@@ -195,7 +195,7 @@ async fn read_file_trailing_newline_offset_at_end_returns_empty() {
         .unwrap();
     let output = tool
         .execute(
-            input(serde_json::json!({ "path": "a.txt", "line_start": 3 })),
+            input(serde_json::json!({ "path": "a.txt", "lineStart": 3 })),
             context(&root).await,
         )
         .await
@@ -269,7 +269,7 @@ async fn read_file_truncates_large_output() {
     tokio::fs::write(root.join("big.txt"), &big).await.unwrap();
     let output = tool
         .execute(
-            input(serde_json::json!({ "path": "big.txt", "max_bytes": 10 })),
+            input(serde_json::json!({ "path": "big.txt", "maxBytes": 10 })),
             context(&root).await,
         )
         .await
@@ -278,7 +278,7 @@ async fn read_file_truncates_large_output() {
     let value = read_output_json(&output);
     assert_eq!(value["text"], serde_json::json!("aaaaaaaaaa"));
     assert_eq!(value["truncated"], serde_json::json!(true));
-    assert_eq!(value["next_offset"], serde_json::json!(10));
+    assert_eq!(value["nextOffset"], serde_json::json!(10));
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 

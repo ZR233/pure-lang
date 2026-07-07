@@ -2,19 +2,19 @@ use pl_protocol::PureError;
 
 use crate::agent::{AgentMessageMode, AgentMessageRequest};
 
-use super::super::types::{AgentMessageArgs, FollowupTaskTool, MessageResult, SendMessageTool};
+use super::super::types::{AgentMessageArgs, SendInputResult, SendInputTool};
 use super::super::{
     BoxFuture, Tool, ToolContext, ToolInput, ToolOutput, child_agent_options, current_agent_path,
     json_output, message_schema,
 };
 
-impl Tool for SendMessageTool {
+impl Tool for SendInputTool {
     fn name(&self) -> &str {
-        "send_message"
+        "send_input"
     }
 
     fn description(&self) -> &str {
-        "Queue a message for an existing agent without starting a new turn."
+        "Send input to an existing agent. Defaults to queueing the input; set triggerTurn=true to start a new turn for a waiting child agent."
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -27,65 +27,41 @@ impl Tool for SendMessageTool {
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            handle_message_tool(input, context, AgentMessageMode::QueueOnly, None).await
-        })
-    }
-}
-
-impl Tool for FollowupTaskTool {
-    fn name(&self) -> &str {
-        "followup_task"
-    }
-
-    fn description(&self) -> &str {
-        "Send a follow-up task to an existing non-root agent and trigger a new turn."
-    }
-
-    fn input_schema(&self) -> serde_json::Value {
-        message_schema()
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
-        context: ToolContext,
-    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
-        Box::pin(async move {
-            let run_spec = self.runtime.run_config(
-                &context,
-                child_agent_options(&context.options),
-                input.tool_id.clone(),
-                String::new(),
-                crate::CoreSession::new(),
-            );
-            handle_message_tool(
-                input,
-                context,
-                AgentMessageMode::TriggerTurn,
-                Some(run_spec),
-            )
-            .await
+            let args: AgentMessageArgs =
+                serde_json::from_value(input.arguments).map_err(|error| {
+                    PureError::ToolExecutionFailed {
+                        tool: "send_input".to_string(),
+                        error: format!("invalid input: {error}"),
+                    }
+                })?;
+            let mode = if args.trigger_turn {
+                AgentMessageMode::TriggerTurn
+            } else {
+                AgentMessageMode::QueueOnly
+            };
+            let run_spec = if args.trigger_turn {
+                Some(self.runtime.run_config(
+                    &context,
+                    child_agent_options(&context.options),
+                    input.tool_id.clone(),
+                    String::new(),
+                    crate::CoreSession::new(),
+                ))
+            } else {
+                None
+            };
+            handle_message_tool(input.tool_id, context, args, mode, run_spec).await
         })
     }
 }
 
 async fn handle_message_tool(
-    input: ToolInput,
+    tool_id: String,
     context: ToolContext,
+    args: AgentMessageArgs,
     mode: AgentMessageMode,
     run_spec: Option<crate::AgentRunSpec>,
 ) -> Result<ToolOutput, PureError> {
-    let tool = if mode == AgentMessageMode::TriggerTurn {
-        "followup_task"
-    } else {
-        "send_message"
-    };
-    let args: AgentMessageArgs = serde_json::from_value(input.arguments).map_err(|error| {
-        PureError::ToolExecutionFailed {
-            tool: tool.to_string(),
-            error: format!("invalid input: {error}"),
-        }
-    })?;
     let sender_path = current_agent_path(&context);
     let record = context
         .agent_supervisor
@@ -96,11 +72,12 @@ async fn handle_message_tool(
             mode,
             run_spec,
             event_tx: &context.event_tx,
-            call_id: input.tool_id,
+            call_id: tool_id,
         })
         .await?;
-    json_output(MessageResult {
+    json_output(SendInputResult {
         target: record.path,
         status: record.status,
+        interrupt: args.interrupt,
     })
 }

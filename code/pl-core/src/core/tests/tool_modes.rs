@@ -12,7 +12,7 @@ fn plan_mode_tool_allowlist_exposes_only_read_and_agent_tools() {
     assert!(tool_allowed_in_mode(plan, "skills_list"));
     assert!(tool_allowed_in_mode(plan, "skill_view"));
     assert!(tool_allowed_in_mode(plan, "spawn_agent"));
-    assert!(tool_allowed_in_mode(plan, "followup_task"));
+    assert!(tool_allowed_in_mode(plan, "send_input"));
     assert!(tool_allowed_in_mode(plan, "request_user_input"));
     assert!(tool_allowed_in_mode(plan, "update_todo_list"));
     assert!(tool_allowed_in_mode(plan, "bash"));

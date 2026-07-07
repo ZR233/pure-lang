@@ -48,10 +48,7 @@ pub struct WaitAgentTool;
 pub struct ListAgentsTool;
 
 #[derive(Debug, Clone)]
-pub struct SendMessageTool;
-
-#[derive(Debug, Clone)]
-pub struct FollowupTaskTool {
+pub struct SendInputTool {
     pub(super) runtime: AgentToolRuntime,
 }
 
@@ -88,6 +85,10 @@ pub(super) struct ListAgentsArgs {
 pub(super) struct AgentMessageArgs {
     pub target: String,
     pub message: String,
+    #[serde(default)]
+    pub trigger_turn: bool,
+    #[serde(default)]
+    pub interrupt: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -136,4 +137,12 @@ pub(super) type AgentToolRecord = CompactAgentRecord;
 pub(super) struct MessageResult {
     pub target: String,
     pub status: AgentStatus,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct SendInputResult {
+    pub target: String,
+    pub status: AgentStatus,
+    pub interrupt: bool,
 }

@@ -45,7 +45,7 @@ impl AgentMessageMode {
     }
 }
 
-/// Operation submitted by `send_message` or `followup_task`.
+/// Operation submitted by `send_input`.
 pub struct AgentMessageRequest<'a> {
     pub current_path: &'a str,
     pub target: &'a str,

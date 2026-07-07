@@ -186,16 +186,31 @@ async fn registered_container_tool_preserves_exec_metadata() {
     assert_eq!(output.truncated.stderr.content, "visible stderr");
 }
 
+#[test]
+fn container_tool_kind_rejects_dot_aliases() {
+    assert_eq!(
+        ContainerToolKind::from_name("container_exec"),
+        Some(ContainerToolKind::Exec)
+    );
+    assert_eq!(
+        ContainerToolKind::from_name("container_copy"),
+        Some(ContainerToolKind::Copy)
+    );
+    assert_eq!(ContainerToolKind::from_name("container.exec"), None);
+    assert_eq!(ContainerToolKind::from_name("container.copy"), None);
+}
+
 #[tokio::test]
 async fn upload_trims_base64_payload() {
     let backend = RecordingBackend::default();
 
     let result = execute_container_tool(
         &backend,
-        TOOL_CONTAINER_CP_UPLOAD,
+        TOOL_CONTAINER_COPY,
         json!({
+            "direction": "upload",
             "path": "/tmp/hello.txt",
-            "content_base64": " aGVsbG8= \n",
+            "contentBase64": " aGVsbG8= \n",
         }),
         None,
     )
@@ -230,8 +245,8 @@ async fn workspace_file_read_has_same_json_shape_for_local_and_container_backend
     ));
     let input = json!({
         "path": "a.txt",
-        "line_start": 2,
-        "line_count": 1,
+        "lineStart": 2,
+        "lineCount": 1,
     });
 
     let local_output = crate::tool::execute_workspace_file_tool(

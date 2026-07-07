@@ -37,7 +37,7 @@ The parent owns coordination:
 
 ## Capacity Failures
 
-If `spawn_agent` or `followup_task` returns a structured capacity error, stop spawning or retrying child agents. Continue the remaining task in the parent agent and explain that provider or agent capacity limited subagent execution only when relevant.
+If `spawn_agent` or `send_input` returns a structured capacity error, stop spawning or retrying child agents. Continue the remaining task in the parent agent and explain that provider or agent capacity limited subagent execution only when relevant.
 
 ## Validation Pattern
 

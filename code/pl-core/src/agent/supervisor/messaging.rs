@@ -21,14 +21,14 @@ impl AgentSupervisor {
         } = request;
         if message.trim().is_empty() {
             return Err(PureError::ToolExecutionFailed {
-                tool: "send_message".to_string(),
+                tool: "send_input".to_string(),
                 error: "message must not be empty".to_string(),
             });
         }
         let activity_message = message.clone();
         let mut trigger_run_spec = if mode == AgentMessageMode::TriggerTurn {
             Some(run_spec.ok_or_else(|| PureError::ToolExecutionFailed {
-                tool: "followup_task".to_string(),
+                tool: "send_input".to_string(),
                 error: "missing follow-up run configuration".to_string(),
             })?)
         } else {
@@ -47,24 +47,19 @@ impl AgentSupervisor {
                     .agents
                     .get_mut(&agent_id)
                     .ok_or_else(|| PureError::ToolExecutionFailed {
-                        tool: "send_message".to_string(),
+                        tool: "send_input".to_string(),
                         error: format!("target agent not found: {target}"),
                     })?;
             if entry.record.path == super::AgentPath::ROOT && mode == AgentMessageMode::TriggerTurn
             {
                 return Err(PureError::ToolExecutionFailed {
-                    tool: "followup_task".to_string(),
+                    tool: "send_input".to_string(),
                     error: "tasks cannot be assigned to the root agent".to_string(),
                 });
             }
             if entry.record.status.is_final() {
-                let tool = if mode == AgentMessageMode::TriggerTurn {
-                    "followup_task"
-                } else {
-                    "send_message"
-                };
                 return Err(PureError::ToolExecutionFailed {
-                    tool: tool.to_string(),
+                    tool: "send_input".to_string(),
                     error: format!(
                         "target agent {} is already {}",
                         entry.record.path,
@@ -79,7 +74,7 @@ impl AgentSupervisor {
                 )
             {
                 return Err(PureError::ToolExecutionFailed {
-                    tool: "followup_task".to_string(),
+                    tool: "send_input".to_string(),
                     error: format!(
                         "target agent {} is already {}",
                         entry.record.path,

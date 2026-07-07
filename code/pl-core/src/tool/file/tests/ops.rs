@@ -156,14 +156,15 @@ fn file_tool_schemas_do_not_expose_legacy_bool_fields() {
 }
 
 #[test]
-fn file_tool_schemas_use_unified_snake_case_inputs() {
+fn file_tool_schemas_use_unified_camel_case_inputs() {
     let read_schema = ReadFileTool::new().input_schema();
     let list_schema = ListFilesTool.input_schema();
     let search_schema = SearchFilesTool.input_schema();
 
-    assert!(read_schema["properties"].get("line_start").is_some());
-    assert!(read_schema["properties"].get("lineOffset").is_none());
-    assert!(list_schema["properties"].get("max_files").is_some());
+    assert!(read_schema["properties"].get("lineStart").is_some());
+    assert!(read_schema["properties"].get("line_start").is_none());
+    assert!(list_schema["properties"].get("maxFiles").is_some());
+    assert!(list_schema["properties"].get("max_files").is_none());
     assert!(list_schema["properties"].get("depth").is_none());
     assert!(search_schema["properties"].get("query").is_some());
     assert!(search_schema["properties"].get("glob").is_some());

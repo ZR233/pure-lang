@@ -7,7 +7,9 @@ use std::sync::Arc;
 use pl_protocol::{PureError, Result};
 use serde_json::Value;
 
-use crate::tool::{Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeLockPolicy};
+use crate::tool::{
+    RegisteredTool, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeLockPolicy,
+};
 use crate::trace::TraceRecorder;
 use crate::turn::{TurnOptions, TurnRequest, TurnResult};
 
@@ -180,6 +182,7 @@ pub struct AgentKernelBuilder<R = EmptyProductToolRouter> {
     core_builder: PureCoreBuilder,
     profile: CoreAgentProfile,
     product_tool_router: R,
+    registered_tools: Vec<RegisteredTool>,
 }
 
 impl AgentKernelBuilder<EmptyProductToolRouter> {
@@ -188,6 +191,7 @@ impl AgentKernelBuilder<EmptyProductToolRouter> {
             core_builder,
             profile: CoreAgentProfile::minimal(),
             product_tool_router: EmptyProductToolRouter,
+            registered_tools: Vec::new(),
         }
     }
 }
@@ -201,6 +205,19 @@ where
         self
     }
 
+    pub fn with_registered_tool(mut self, tool: RegisteredTool) -> Self {
+        self.registered_tools.push(tool);
+        self
+    }
+
+    pub fn with_registered_tools(
+        mut self,
+        tools: impl IntoIterator<Item = RegisteredTool>,
+    ) -> Self {
+        self.registered_tools.extend(tools);
+        self
+    }
+
     pub fn with_product_tool_router<N>(self, product_tool_router: N) -> AgentKernelBuilder<N>
     where
         N: ProductToolRouter + 'static,
@@ -209,6 +226,7 @@ where
             core_builder: self.core_builder,
             profile: self.profile,
             product_tool_router,
+            registered_tools: self.registered_tools,
         }
     }
 
@@ -218,6 +236,9 @@ where
             .with_runtime_profile(self.profile.clone())
             .build();
         core.register_profile_tools().await;
+        for tool in &self.registered_tools {
+            core.register_tool(tool.clone());
+        }
         for definition in self.product_tool_router.tool_definitions() {
             core.register_tool(ProductTool::new(
                 definition,
@@ -227,6 +248,7 @@ where
         core.agent_tool_registrar = Some(Arc::new(ProductToolRegistrar {
             profile: self.profile,
             router: self.product_tool_router,
+            registered_tools: self.registered_tools,
         }));
         AgentKernel { core }
     }
@@ -236,6 +258,7 @@ where
 struct ProductToolRegistrar<R> {
     profile: CoreAgentProfile,
     router: R,
+    registered_tools: Vec<RegisteredTool>,
 }
 
 impl<R> crate::AgentToolRegistrar for ProductToolRegistrar<R>
@@ -258,6 +281,9 @@ where
                     core.workspace_root = Some(workspace_root);
                     core.workspace_instructions = workspace_instructions;
                 }
+            }
+            for tool in &self.registered_tools {
+                core.register_tool(tool.clone());
             }
             for definition in self.router.tool_definitions() {
                 core.register_tool(ProductTool::new(definition, self.router.clone()));

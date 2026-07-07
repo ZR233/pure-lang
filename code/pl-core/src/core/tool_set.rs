@@ -4,11 +4,11 @@ use std::sync::Arc;
 use crate::config::ToolCapabilityConfig;
 use crate::tool::{
     ApplyPatchTool, AskUserTool, CloseAgentTool, ContainerBackend, ContainerWorkspaceFileBackend,
-    CopyPathTool, CreateDirectoryTool, DeletePathTool, ExecutionBackend, FollowupTaskTool,
-    GitCredentialProvider, GitWorkspaceConfig, ListAgentsTool, ListFilesTool,
-    LocalExecutionBackend, MovePathTool, NoContainerBackend, NoGitCredentialProvider, PlanExitTool,
-    ReadFileTool, SearchFilesTool, SendMessageTool, SpawnAgentTool, StatPathTool, TodoListTool,
-    WaitAgentTool, WorkspaceFileTool, WorkspaceFileToolKind, WriteFileTool, command_tool_pair,
+    CopyPathTool, CreateDirectoryTool, DeletePathTool, ExecutionBackend, GitCredentialProvider,
+    GitWorkspaceConfig, ListAgentsTool, ListFilesTool, LocalExecutionBackend, MovePathTool,
+    NoContainerBackend, NoGitCredentialProvider, PlanExitTool, ReadFileTool, SearchFilesTool,
+    SendInputTool, SpawnAgentTool, StatPathTool, TodoListTool, WaitAgentTool, WorkspaceFileTool,
+    WorkspaceFileToolKind, WriteFileTool, command_tool_pair,
 };
 
 use super::PureCore;
@@ -98,10 +98,11 @@ where
         if self.capabilities.workspace_files && !using_container_workspace {
             register_file_tools(core);
         }
-        if self.capabilities.workspace_files && using_container_workspace {
-            if let Some(runtime) = &self.container_runtime {
-                register_container_file_tools(core, runtime.backend.clone());
-            }
+        if self.capabilities.workspace_files
+            && using_container_workspace
+            && let Some(runtime) = &self.container_runtime
+        {
+            register_container_file_tools(core, runtime.backend.clone());
         }
         if self.capabilities.lsp
             && let Some(registry) = core.lsp_runtime.clone()
@@ -179,8 +180,7 @@ fn register_subagent_tools(core: &mut PureCore, workspace_instructions: Option<S
     ));
     core.register_tool(WaitAgentTool);
     core.register_tool(ListAgentsTool);
-    core.register_tool(SendMessageTool);
-    core.register_tool(FollowupTaskTool::new(
+    core.register_tool(SendInputTool::new(
         core.provider.clone(),
         core.reasoning_effort.clone(),
         core.config.clone(),

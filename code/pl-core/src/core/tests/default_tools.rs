@@ -13,9 +13,12 @@ async fn default_tools_register_bash_and_agent_tools() {
     assert!(core.tools.get("spawn_agent").is_some());
     assert!(core.tools.get("wait_agent").is_some());
     assert!(core.tools.get("list_agents").is_some());
+    assert!(core.tools.get("send_input").is_some());
     assert!(core.tools.get("request_user_input").is_some());
     assert!(core.tools.get("update_todo_list").is_some());
     assert!(core.tools.get("plan_exit").is_some());
+    assert!(core.tools.get("send_message").is_none());
+    assert!(core.tools.get("followup_task").is_none());
     assert!(core.tools.get("subagent").is_none());
     assert!(core.tools.get("read_file").is_some());
     assert!(core.tools.get("apply_patch").is_some());
@@ -33,6 +36,111 @@ async fn default_capabilities_keep_product_tools_disabled() {
     assert!(!capabilities.git);
     assert!(!capabilities.docker);
     assert!(!capabilities.container);
+}
+
+#[tokio::test]
+async fn shared_tools_expose_only_canonical_codex_shape_names() {
+    let mut core = PureCore::default_provider().unwrap();
+    let capabilities = crate::config::ToolCapabilityConfig {
+        container: true,
+        git: true,
+        ..Default::default()
+    };
+
+    ToolSetBuilder::from_capabilities(capabilities)
+        .with_container_tools(std::sync::Arc::new(FakeContainerBackend))
+        .with_git_tools(
+            crate::tool::GitWorkspaceConfig::local(std::env::temp_dir()),
+            std::sync::Arc::new(crate::tool::LocalExecutionBackend),
+            std::sync::Arc::new(crate::tool::NoGitCredentialProvider),
+        )
+        .register(&mut core, std::env::temp_dir(), None)
+        .await;
+
+    let names = core.tools.names();
+    for canonical in [
+        "send_input",
+        "git_workspace_info",
+        "container_copy",
+        "read_file",
+        "list_files",
+        "search_files",
+        "apply_patch",
+        "request_user_input",
+        "update_todo_list",
+    ] {
+        assert!(
+            names.contains(&canonical),
+            "missing canonical tool `{canonical}` in {names:?}"
+        );
+    }
+    for removed in [
+        "send_message",
+        "followup_task",
+        "git_worktree_info",
+        "github_api_get",
+        "container_cp_upload",
+        "container_cp_download",
+    ] {
+        assert!(
+            !names.contains(&removed),
+            "removed tool `{removed}` is still exposed in {names:?}"
+        );
+    }
+}
+
+#[test]
+fn workspace_file_schemas_use_codex_camel_case_fields() {
+    let read_schema = crate::tool::WorkspaceFileToolKind::ReadFile.input_schema();
+    assert!(read_schema.pointer("/properties/lineStart").is_some());
+    assert!(read_schema.pointer("/properties/lineCount").is_some());
+    assert!(read_schema.pointer("/properties/maxBytes").is_some());
+    assert!(read_schema.pointer("/properties/line_start").is_none());
+    assert!(read_schema.pointer("/properties/line_count").is_none());
+    assert!(read_schema.pointer("/properties/max_bytes").is_none());
+
+    let list_schema = crate::tool::WorkspaceFileToolKind::ListFiles.input_schema();
+    assert!(list_schema.pointer("/properties/maxFiles").is_some());
+    assert!(list_schema.pointer("/properties/includeDirs").is_some());
+    assert!(list_schema.pointer("/properties/max_files").is_none());
+    assert!(list_schema.pointer("/properties/include_dirs").is_none());
+
+    let search_schema = crate::tool::WorkspaceFileToolKind::SearchFiles.input_schema();
+    assert!(search_schema.pointer("/properties/caseSensitive").is_some());
+    assert!(search_schema.pointer("/properties/maxMatches").is_some());
+    assert!(search_schema.pointer("/properties/contextLines").is_some());
+    assert!(
+        search_schema
+            .pointer("/properties/case_sensitive")
+            .is_none()
+    );
+    assert!(search_schema.pointer("/properties/max_matches").is_none());
+    assert!(search_schema.pointer("/properties/context_lines").is_none());
+}
+
+#[test]
+fn agent_control_schemas_use_codex_camel_case_fields() {
+    let spawn_schema = crate::tool::AgentControlToolKind::SpawnAgent.input_schema();
+    assert!(spawn_schema.pointer("/properties/taskName").is_some());
+    assert!(spawn_schema.pointer("/properties/agentType").is_some());
+    assert!(
+        spawn_schema
+            .pointer("/properties/reasoningEffort")
+            .is_some()
+    );
+    assert!(spawn_schema.pointer("/properties/forkTurns").is_some());
+    assert!(spawn_schema.pointer("/properties/name").is_none());
+    assert!(spawn_schema.pointer("/properties/agent_type").is_none());
+    assert!(
+        spawn_schema
+            .pointer("/properties/reasoning_effort")
+            .is_none()
+    );
+
+    let wait_schema = crate::tool::AgentControlToolKind::WaitAgent.input_schema();
+    assert!(wait_schema.pointer("/properties/targets").is_some());
+    assert!(wait_schema.pointer("/properties/timeoutMs").is_some());
+    assert!(wait_schema.pointer("/properties/timeout_ms").is_none());
 }
 
 #[tokio::test]
@@ -148,7 +256,7 @@ async fn tool_set_builder_registers_container_only_with_backend() {
         .await;
 
     assert!(core.tools.get("container_exec").is_none());
-    assert!(core.tools.get("container_cp_upload").is_none());
+    assert!(core.tools.get("container_copy").is_none());
 
     let mut core = PureCore::default_provider().unwrap();
     ToolSetBuilder::from_capabilities(capabilities)
@@ -161,8 +269,7 @@ async fn tool_set_builder_registers_container_only_with_backend() {
     assert!(core.tools.get("list_files").is_some());
     assert!(core.tools.get("search_files").is_some());
     assert!(core.tools.get("apply_patch").is_some());
-    assert!(core.tools.get("container_cp_upload").is_some());
-    assert!(core.tools.get("container_cp_download").is_some());
+    assert!(core.tools.get("container_copy").is_some());
 }
 
 #[tokio::test]

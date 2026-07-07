@@ -12,7 +12,7 @@ use crate::tool::{
 };
 
 use super::backend::{ContainerBackend, ContainerExecRequest};
-use super::files::{copy_download, copy_upload};
+use super::files::copy_container;
 use super::helpers::{bounded_model_tool_output_with_tokens, parse_input, tool_error};
 use super::schema::{ContainerToolKind, TOOL_CONTAINER_EXEC};
 
@@ -47,12 +47,8 @@ where
     };
     let execution = match kind {
         ContainerToolKind::Exec => execute_shell(backend, arguments, cancellation_token).await?,
-        ContainerToolKind::CopyUpload => {
-            let output = copy_upload(backend, arguments).await?;
-            ContainerToolExecution::json(true, output, Vec::new(), DEFAULT_MODEL_TOOL_OUTPUT_TOKENS)
-        }
-        ContainerToolKind::CopyDownload => {
-            let output = copy_download(backend, arguments).await?;
+        ContainerToolKind::Copy => {
+            let output = copy_container(backend, arguments).await?;
             ContainerToolExecution::json(true, output, Vec::new(), DEFAULT_MODEL_TOOL_OUTPUT_TOKENS)
         }
     };
@@ -138,6 +134,7 @@ where
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ContainerExecInput {
     command: String,
     cwd: Option<String>,
@@ -178,11 +175,11 @@ where
             "status": output.status,
             "stdout": output.stdout,
             "stderr": output.stderr,
-            "stdout_truncated": output.stdout_truncated,
-            "stderr_truncated": output.stderr_truncated,
-            "stdout_bytes": output.stdout_bytes,
-            "stderr_bytes": output.stderr_bytes,
-            "output_artifacts": output.output_artifacts,
+            "stdoutTruncated": output.stdout_truncated,
+            "stderrTruncated": output.stderr_truncated,
+            "stdoutBytes": output.stdout_bytes,
+            "stderrBytes": output.stderr_bytes,
+            "outputArtifacts": output.output_artifacts,
         }),
         output.output_artifacts,
         max_output_tokens,

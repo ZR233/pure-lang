@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::tool::{RegisteredTool, ToolRuntimeLockPolicy};
 use pretty_assertions::assert_eq;
 use tokio::sync::Mutex;
 
@@ -53,6 +54,75 @@ impl ProductToolRouter for EchoProductRouter {
             })
         }
     }
+}
+
+#[tokio::test]
+async fn agent_kernel_registers_dynamic_tools_without_product_router() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let calls_for_tool = calls.clone();
+    let tool = RegisteredTool::new(
+        "dynamic_echo",
+        "Echo dynamic product input through a registered handler.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "message": { "type": "string" }
+            },
+            "required": ["message"],
+            "additionalProperties": false
+        }),
+        move |input, _context| {
+            let calls = calls_for_tool.clone();
+            Box::pin(async move {
+                let message = input
+                    .arguments
+                    .get("message")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                calls.lock().await.push(message.clone());
+                ToolOutput::json(serde_json::json!({
+                    "echo": message,
+                }))
+            })
+        },
+    )
+    .with_runtime_lock_policy(ToolRuntimeLockPolicy::Shared);
+    let kernel = AgentKernel::builder(
+        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+    )
+    .with_profile(CoreAgentProfile::host_provided(std::env::temp_dir()))
+    .with_registered_tool(tool)
+    .build()
+    .await;
+
+    assert_eq!(kernel.tool_names(), vec!["dynamic_echo".to_string()]);
+    let registered = kernel
+        .core()
+        .tools
+        .get("dynamic_echo")
+        .expect("dynamic tool registered");
+    assert_eq!(
+        registered.runtime_lock_policy(),
+        ToolRuntimeLockPolicy::Shared
+    );
+
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let output = registered
+        .execute(
+            ToolInput {
+                arguments: serde_json::json!({ "message": "hello" }),
+                session_id: "session-1".to_string(),
+                tool_id: "tool-1".to_string(),
+                revision_base: 0,
+            },
+            test_tool_context(event_tx),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(output.description, "{\"echo\":\"hello\"}");
+    assert_eq!(calls.lock().await.as_slice(), &["hello".to_string()]);
 }
 
 #[tokio::test]

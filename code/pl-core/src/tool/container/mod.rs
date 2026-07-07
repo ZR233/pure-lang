@@ -16,6 +16,4 @@ pub use backend::{
 #[cfg(feature = "docker-tools")]
 pub use docker::DockerCliContainerBackend;
 pub use exec::{ContainerTool, ContainerToolExecution, execute_container_tool};
-pub use schema::{
-    ContainerToolKind, TOOL_CONTAINER_CP_DOWNLOAD, TOOL_CONTAINER_CP_UPLOAD, TOOL_CONTAINER_EXEC,
-};
+pub use schema::{ContainerToolKind, TOOL_CONTAINER_COPY, TOOL_CONTAINER_EXEC};
