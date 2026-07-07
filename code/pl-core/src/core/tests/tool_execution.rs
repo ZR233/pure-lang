@@ -47,6 +47,7 @@ async fn tool_execution_reuses_streamed_trace_part() {
             instruction_snapshot: None,
             active_subagent: None,
             agent_supervisor: crate::AgentSupervisor::default(),
+            agent_tool_registrar: None,
             parent_session: std::sync::Arc::new(CoreSession::new()),
         },
     )
@@ -139,6 +140,7 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
             instruction_snapshot: None,
             active_subagent: None,
             agent_supervisor: crate::AgentSupervisor::default(),
+            agent_tool_registrar: None,
             parent_session: std::sync::Arc::new(CoreSession::new()),
         },
     )
@@ -226,6 +228,7 @@ async fn tool_runtime_deltas_use_trace_part_id() {
             instruction_snapshot: None,
             active_subagent: None,
             agent_supervisor: crate::AgentSupervisor::default(),
+            agent_tool_registrar: None,
             parent_session: std::sync::Arc::new(CoreSession::new()),
         },
     )

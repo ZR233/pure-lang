@@ -26,7 +26,7 @@ mod workspace;
 pub use agent::{
     AgentHandle, AgentMessage, AgentMessageMode, AgentMessageRequest, AgentPath, AgentRecord,
     AgentRunSpec, AgentSpawnInput, AgentStatus, AgentStatusUpdate, AgentSupervisor,
-    AgentWaitOutcome,
+    AgentToolRegistrar, AgentWaitOutcome,
 };
 pub use attachment::MaterializedAttachment;
 pub use config::{
@@ -45,8 +45,9 @@ pub use context_compaction::{
     ContextCompactionConfig, ContextCompactionReplacement, RecentInteractionTailConfig,
 };
 pub use core::{
-    AgentBackendProfile, CoreRuntimeOptions, CoreRuntimeProfile, PureCore, PureCoreBuilder,
-    ToolProfile, ToolSetBuilder, WorkspaceProfile,
+    AgentBackendProfile, AgentKernel, AgentKernelBuilder, CoreAgentProfile, CoreRuntimeOptions,
+    CoreRuntimeProfile, ProductToolDefinition, ProductToolRequest, ProductToolRouter, PureCore,
+    PureCoreBuilder, ToolProfile, ToolSetBuilder, WorkspaceProfile,
 };
 pub use first_run::{
     FirstRunConfigDraft, FirstRunModelDraft, FirstRunProviderDraft, ProviderTemplateKind,

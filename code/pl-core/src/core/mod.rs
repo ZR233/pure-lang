@@ -29,6 +29,7 @@ use crate::turn::{
     ToolApprovalDecision, ToolApprovalRequest, TurnOptions, TurnRequest, TurnResult,
 };
 
+mod kernel;
 mod permission;
 mod profile;
 pub(crate) mod progress;
@@ -37,6 +38,10 @@ mod tool_set;
 mod turn_loop;
 mod turn_result;
 
+pub use kernel::{
+    AgentKernel, AgentKernelBuilder, CoreAgentProfile, ProductToolDefinition, ProductToolRequest,
+    ProductToolRouter,
+};
 pub use profile::{
     AgentBackendProfile, CoreRuntimeOptions, CoreRuntimeProfile, PureCoreBuilder, ToolProfile,
     WorkspaceProfile,
@@ -79,6 +84,7 @@ pub struct PureCore {
     context_compaction: ContextCompactionConfig,
     active_subagent: Option<SubagentContext>,
     agent_supervisor: crate::AgentSupervisor,
+    agent_tool_registrar: Option<std::sync::Arc<dyn crate::AgentToolRegistrar>>,
     tools: ToolRegistry,
 }
 
@@ -99,6 +105,7 @@ impl PureCore {
             context_compaction: ContextCompactionConfig::default(),
             active_subagent: None,
             agent_supervisor: crate::AgentSupervisor::default(),
+            agent_tool_registrar: None,
             tools: ToolRegistry::new(),
         }
     }
@@ -122,6 +129,7 @@ impl PureCore {
             context_compaction: ContextCompactionConfig::default(),
             active_subagent: None,
             agent_supervisor: crate::AgentSupervisor::default(),
+            agent_tool_registrar: None,
             tools: ToolRegistry::new(),
         }
     }

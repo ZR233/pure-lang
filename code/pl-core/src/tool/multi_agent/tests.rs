@@ -7,9 +7,10 @@ use super::agent_tool_records;
 use super::child_agent_options;
 use super::fork_session;
 use super::json_output;
-use super::types::{ListAgentsResult, WaitAgentResult};
+use super::types::{AgentToolRuntime, ListAgentsResult, WaitAgentResult};
 use crate::agent::AgentRecord;
-use crate::tool::{Tool, ToolRuntimeLockPolicy};
+use crate::tool::{Tool, ToolContext, ToolRuntimeLockPolicy, WorkspaceAccess};
+use crate::turn::CompileMode;
 
 fn agent_record(id: &str, status: AgentStatus, error: Option<&str>) -> AgentRecord {
     AgentRecord {
@@ -196,4 +197,62 @@ fn wait_agent_does_not_hold_runtime_lock() {
         wait_agent.runtime_lock_policy(),
         ToolRuntimeLockPolicy::None
     );
+}
+
+#[derive(Debug)]
+struct NoopAgentToolRegistrar;
+
+impl crate::AgentToolRegistrar for NoopAgentToolRegistrar {
+    fn register_tools<'a>(
+        &'a self,
+        _core: &'a mut crate::PureCore,
+        _workspace_root: std::path::PathBuf,
+        _workspace_instructions: Option<String>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::Result<()>> + Send + 'a>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+#[test]
+fn child_agent_run_spec_inherits_parent_tool_registrar() {
+    let mut provider_info = pl_model::ProviderInfo::openai(Some("http://example.invalid".into()));
+    provider_info.default_model = "test-model".to_string();
+    let runtime = AgentToolRuntime::new(
+        pl_model::create_provider(provider_info).unwrap(),
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let registrar: Arc<dyn crate::AgentToolRegistrar> = Arc::new(NoopAgentToolRegistrar);
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let context = ToolContext {
+        event_tx,
+        options: crate::TurnOptions::default(),
+        workspace_access: WorkspaceAccess::WorkspaceOnly,
+        mode: CompileMode::Auto,
+        workspace_root: std::env::temp_dir(),
+        workspace_instructions: None,
+        instruction_snapshot: None,
+        provider_call_id: None,
+        active_subagent: None,
+        agent_supervisor: crate::AgentSupervisor::default(),
+        agent_tool_registrar: Some(registrar.clone()),
+        lsp_runtime: None,
+        parent_session: Arc::new(crate::CoreSession::new()),
+    };
+
+    let run_spec = runtime.run_config(
+        &context,
+        crate::TurnOptions::default(),
+        "call-1".to_string(),
+        "work".to_string(),
+        crate::CoreSession::new(),
+    );
+
+    assert!(Arc::ptr_eq(
+        run_spec.tool_registrar.as_ref().expect("tool registrar"),
+        &registrar
+    ));
 }

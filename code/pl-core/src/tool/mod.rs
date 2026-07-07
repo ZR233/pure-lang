@@ -109,6 +109,7 @@ pub struct ToolContext {
     pub provider_call_id: Option<String>,
     pub active_subagent: Option<SubagentContext>,
     pub agent_supervisor: AgentSupervisor,
+    pub agent_tool_registrar: Option<Arc<dyn crate::AgentToolRegistrar>>,
     pub lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     pub parent_session: Arc<crate::session::CoreSession>,
 }
@@ -478,6 +479,7 @@ mod tests {
             provider_call_id: None,
             active_subagent: None,
             agent_supervisor: AgentSupervisor::default(),
+            agent_tool_registrar: None,
             lsp_runtime: None,
             parent_session: Arc::new(crate::session::CoreSession::new()),
         };

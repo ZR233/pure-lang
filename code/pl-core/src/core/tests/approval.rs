@@ -144,6 +144,7 @@ async fn plan_mode_denies_disallowed_tool_before_execution_even_with_full_access
             instruction_snapshot: None,
             active_subagent: None,
             agent_supervisor: crate::AgentSupervisor::default(),
+            agent_tool_registrar: None,
             parent_session: std::sync::Arc::new(CoreSession::new()),
         },
     )
@@ -215,6 +216,7 @@ async fn request_approval_allows_external_path_after_user_approval() {
             instruction_snapshot: None,
             active_subagent: None,
             agent_supervisor: crate::AgentSupervisor::default(),
+            agent_tool_registrar: None,
             parent_session: std::sync::Arc::new(CoreSession::new()),
         },
     )
@@ -269,6 +271,7 @@ async fn unknown_tool_records_one_terminal_event_and_tool_result() {
             instruction_snapshot: None,
             active_subagent: None,
             agent_supervisor: crate::AgentSupervisor::default(),
+            agent_tool_registrar: None,
             parent_session: std::sync::Arc::new(CoreSession::new()),
         },
     )
@@ -320,6 +323,7 @@ async fn plan_disabled_tool_records_one_terminal_event_and_tool_result() {
             instruction_snapshot: None,
             active_subagent: None,
             agent_supervisor: crate::AgentSupervisor::default(),
+            agent_tool_registrar: None,
             parent_session: std::sync::Arc::new(CoreSession::new()),
         },
     )
@@ -393,6 +397,7 @@ async fn policy_denied_tool_records_one_terminal_event_and_tool_result() {
             instruction_snapshot: None,
             active_subagent: None,
             agent_supervisor: crate::AgentSupervisor::default(),
+            agent_tool_registrar: None,
             parent_session: std::sync::Arc::new(CoreSession::new()),
         },
     )
@@ -452,6 +457,7 @@ async fn cancelling_running_tool_records_interrupted_terminal_event() {
             instruction_snapshot: None,
             active_subagent: None,
             agent_supervisor: crate::AgentSupervisor::default(),
+            agent_tool_registrar: None,
             parent_session: std::sync::Arc::new(CoreSession::new()),
         },
     )

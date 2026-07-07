@@ -76,6 +76,34 @@ fn register_git_tools_exposes_git_pack_explicitly() {
 }
 
 #[tokio::test]
+async fn tool_set_builder_registers_git_only_with_runtime_config() {
+    let capabilities = crate::config::ToolCapabilityConfig {
+        git: true,
+        ..Default::default()
+    };
+    let mut core = PureCore::default_provider().unwrap();
+
+    ToolSetBuilder::from_capabilities(capabilities.clone())
+        .register(&mut core, std::env::temp_dir(), None)
+        .await;
+
+    assert!(core.tools.get("git_status").is_none());
+
+    let mut core = PureCore::default_provider().unwrap();
+    ToolSetBuilder::from_capabilities(capabilities)
+        .with_git_tools(
+            crate::tool::GitWorkspaceConfig::local(std::env::temp_dir()),
+            std::sync::Arc::new(crate::tool::LocalExecutionBackend),
+            std::sync::Arc::new(crate::tool::NoGitCredentialProvider),
+        )
+        .register(&mut core, std::env::temp_dir(), None)
+        .await;
+
+    assert!(core.tools.get("git_status").is_some());
+    assert!(core.tools.get("git_push").is_some());
+}
+
+#[tokio::test]
 async fn profiled_local_workspace_registers_default_tools() {
     let runtime = CoreRuntimeProfile::local_workspace(std::env::temp_dir())
         .with_workspace_instructions("rules");

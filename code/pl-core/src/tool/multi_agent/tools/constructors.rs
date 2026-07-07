@@ -67,6 +67,7 @@ impl AgentToolRuntime {
                 .clone()
                 .or_else(|| self.workspace_instructions.clone()),
             instruction_snapshot: context.instruction_snapshot.clone(),
+            tool_registrar: context.agent_tool_registrar.clone(),
             workspace_root: context.workspace_root.clone(),
             options,
             event_tx: context.event_tx.clone(),

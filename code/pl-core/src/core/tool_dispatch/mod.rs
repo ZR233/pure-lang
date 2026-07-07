@@ -85,6 +85,7 @@ pub(super) struct ToolExecutionContext<'a> {
     pub(super) instruction_snapshot: Option<crate::instruction::InstructionSnapshot>,
     pub(super) active_subagent: Option<SubagentContext>,
     pub(super) agent_supervisor: crate::AgentSupervisor,
+    pub(super) agent_tool_registrar: Option<Arc<dyn crate::AgentToolRegistrar>>,
     pub(super) parent_session: Arc<CoreSession>,
 }
 
@@ -209,6 +210,7 @@ pub(super) async fn execute_tool_calls(
             provider_call_id: tool_call.call_id.clone(),
             active_subagent: context.active_subagent.clone(),
             agent_supervisor: context.agent_supervisor.clone(),
+            agent_tool_registrar: context.agent_tool_registrar.clone(),
             lsp_runtime: context.core.lsp_runtime.clone(),
             parent_session: context.parent_session.clone(),
         };

@@ -20,6 +20,7 @@ fn test_tool_context(event_tx: AgentEventSender) -> ToolContext {
         provider_call_id: None,
         active_subagent: None,
         agent_supervisor: crate::AgentSupervisor::default(),
+        agent_tool_registrar: None,
         lsp_runtime: None,
         parent_session: std::sync::Arc::new(CoreSession::new()),
     }
@@ -140,6 +141,7 @@ fn runtime_progress_texts(
     progress_texts
 }
 
+mod agent_kernel;
 mod approval;
 mod configuration;
 mod default_tools;

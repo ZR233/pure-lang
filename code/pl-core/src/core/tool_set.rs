@@ -1,30 +1,60 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::config::ToolCapabilityConfig;
 use crate::tool::{
     ApplyPatchTool, AskUserTool, CloseAgentTool, CopyPathTool, CreateDirectoryTool, DeletePathTool,
-    FollowupTaskTool, ListAgentsTool, ListFilesTool, MovePathTool, PlanExitTool, ReadFileTool,
-    SearchFilesTool, SendMessageTool, SpawnAgentTool, StatPathTool, TodoListTool, WaitAgentTool,
-    WriteFileTool, command_tool_pair,
+    ExecutionBackend, FollowupTaskTool, GitCredentialProvider, GitWorkspaceConfig, ListAgentsTool,
+    ListFilesTool, LocalExecutionBackend, MovePathTool, NoGitCredentialProvider, PlanExitTool,
+    ReadFileTool, SearchFilesTool, SendMessageTool, SpawnAgentTool, StatPathTool, TodoListTool,
+    WaitAgentTool, WriteFileTool, command_tool_pair,
 };
 
 use super::PureCore;
 
 /// 按能力开关组装 pl-core 的共享工具集合。
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ToolSetBuilder {
+#[derive(Debug, Clone, Default)]
+pub struct ToolSetBuilder<B = LocalExecutionBackend, P = NoGitCredentialProvider> {
     capabilities: ToolCapabilityConfig,
+    git_runtime: Option<GitToolRuntime<B, P>>,
 }
 
 impl ToolSetBuilder {
     pub fn from_capabilities(capabilities: ToolCapabilityConfig) -> Self {
-        Self { capabilities }
+        Self {
+            capabilities,
+            git_runtime: None,
+        }
+    }
+}
+
+impl<B, P> ToolSetBuilder<B, P> {
+    pub fn with_git_tools<NB, NP>(
+        self,
+        config: GitWorkspaceConfig,
+        backend: Arc<NB>,
+        credential_provider: Arc<NP>,
+    ) -> ToolSetBuilder<NB, NP> {
+        ToolSetBuilder {
+            capabilities: self.capabilities,
+            git_runtime: Some(GitToolRuntime {
+                config,
+                backend,
+                credential_provider,
+            }),
+        }
     }
 
     pub fn capabilities(&self) -> &ToolCapabilityConfig {
         &self.capabilities
     }
+}
 
+impl<B, P> ToolSetBuilder<B, P>
+where
+    B: ExecutionBackend + 'static,
+    P: GitCredentialProvider + 'static,
+{
     pub async fn register(
         &self,
         core: &mut PureCore,
@@ -60,9 +90,25 @@ impl ToolSetBuilder {
         if self.capabilities.ask_user {
             core.register_tool(AskUserTool);
         }
+        if self.capabilities.git
+            && let Some(runtime) = &self.git_runtime
+        {
+            core.register_git_tools(
+                runtime.config.clone(),
+                runtime.backend.clone(),
+                runtime.credential_provider.clone(),
+            );
+        }
         core.register_tool(TodoListTool);
         core.register_tool(PlanExitTool);
     }
+}
+
+#[derive(Debug, Clone)]
+struct GitToolRuntime<B, P> {
+    config: GitWorkspaceConfig,
+    backend: Arc<B>,
+    credential_provider: Arc<P>,
 }
 
 fn register_file_tools(core: &mut PureCore) {

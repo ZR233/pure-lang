@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use pl_model::SharedModelProvider;
@@ -88,6 +89,19 @@ pub struct AgentStatusUpdate {
     pub budget_usage: Option<BudgetUsage>,
 }
 
+/// 子代理工具注册扩展点。
+///
+/// 宿主通过该 trait 把父 agent 的产品工具和共享工具 profile 传给子代理。
+/// 实现方只负责注册工具，不应重新实现模型 turn loop、trace 或 agent 状态机。
+pub trait AgentToolRegistrar: std::fmt::Debug + Send + Sync {
+    fn register_tools<'a>(
+        &'a self,
+        core: &'a mut crate::PureCore,
+        workspace_root: PathBuf,
+        workspace_instructions: Option<String>,
+    ) -> Pin<Box<dyn std::future::Future<Output = pl_protocol::Result<()>> + Send + 'a>>;
+}
+
 impl AgentStatusUpdate {
     pub fn new(status: AgentStatus) -> Self {
         Self {
@@ -110,6 +124,7 @@ pub struct AgentRunSpec {
     pub lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     pub workspace_instructions: Option<String>,
     pub instruction_snapshot: Option<crate::instruction::InstructionSnapshot>,
+    pub tool_registrar: Option<Arc<dyn AgentToolRegistrar>>,
     pub workspace_root: PathBuf,
     pub options: TurnOptions,
     pub event_tx: pl_trace::AgentEventSender,

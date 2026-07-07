@@ -48,6 +48,7 @@ fn test_run_spec(message: &str) -> AgentRunSpec {
         lsp_runtime: None,
         workspace_instructions: None,
         instruction_snapshot: None,
+        tool_registrar: None,
         workspace_root: PathBuf::from("."),
         options: TurnOptions::default(),
         event_tx: tokio::sync::broadcast::channel(8).0,
