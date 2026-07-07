@@ -60,12 +60,6 @@ pub(super) fn path_type(metadata: &std::fs::Metadata) -> &'static str {
     }
 }
 
-pub(super) fn is_skipped_dir(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| matches!(name, ".git" | "target" | "node_modules"))
-}
-
 pub(super) async fn ensure_overwrite(
     path: &Path,
     overwrite: bool,

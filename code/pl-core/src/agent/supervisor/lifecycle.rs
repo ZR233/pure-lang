@@ -2,7 +2,7 @@ use pl_protocol::{PureError, SubAgentActivityKind};
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, timeout};
 
-use super::snapshot::apply_status_update;
+use super::snapshot::{apply_status_update, clear_for_reactivation};
 use super::state::descendant_ids;
 use super::{AgentRecord, AgentStatus, AgentStatusUpdate, AgentSupervisor};
 
@@ -128,6 +128,50 @@ impl AgentSupervisor {
             None,
             None,
         );
+        Ok(record)
+    }
+
+    pub async fn resume_agent(
+        &self,
+        current_path: &str,
+        target: &str,
+        event_tx: &pl_trace::AgentEventSender,
+    ) -> Result<AgentRecord, PureError> {
+        let agent_id = self.resolve_agent(current_path, target).await?;
+        let record = {
+            let mut state = self.state.lock().await;
+            let Some(entry) = state.agents.get_mut(&agent_id) else {
+                return Err(PureError::ToolExecutionFailed {
+                    tool: "resume_agent".to_string(),
+                    error: format!("target agent not found: {target}"),
+                });
+            };
+            if entry.record.path == super::AgentPath::ROOT {
+                return Err(PureError::ToolExecutionFailed {
+                    tool: "resume_agent".to_string(),
+                    error: "root is not a spawned agent".to_string(),
+                });
+            }
+            if !entry.record.status.is_final() {
+                return Err(PureError::ToolExecutionFailed {
+                    tool: "resume_agent".to_string(),
+                    error: format!(
+                        "target agent {} is already {}",
+                        entry.record.path,
+                        entry.record.status.as_str()
+                    ),
+                });
+            }
+            entry.record.status = AgentStatus::Waiting;
+            clear_for_reactivation(&mut entry.record);
+            entry.cancellation_token = None;
+            entry.task = None;
+            let record = entry.record.clone();
+            state.mark_activity();
+            record
+        };
+        self.notify_activity();
+        super::events::emit_agent_record(event_tx, &record);
         Ok(record)
     }
 

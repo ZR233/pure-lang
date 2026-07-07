@@ -17,8 +17,9 @@ use crate::context_compaction::ContextCompactionConfig;
 use crate::permission::parse_reviewer_decision;
 use crate::session::CoreSession;
 use crate::tool::{
-    ExecutionBackend, GitCredentialProvider, GitTool, GitToolKind, GitWorkspaceConfig,
-    SkillManageTool, SkillViewTool, SkillsListTool, SubagentContext, ToolContext, ToolRegistry,
+    ContainerBackend, ContainerTool, ContainerToolKind, ExecutionBackend, GitCredentialProvider,
+    GitTool, GitToolKind, GitWorkspaceConfig, SkillManageTool, SkillViewTool, SkillsListTool,
+    SubagentContext, ToolContext, ToolRegistry,
 };
 #[cfg(test)]
 use crate::tool::{ReadFileTool, WorkspaceAccess, WriteFileTool};
@@ -29,6 +30,7 @@ use crate::turn::{
     ToolApprovalDecision, ToolApprovalRequest, TurnOptions, TurnRequest, TurnResult,
 };
 
+mod kernel;
 mod permission;
 mod profile;
 pub(crate) mod progress;
@@ -37,6 +39,10 @@ mod tool_set;
 mod turn_loop;
 mod turn_result;
 
+pub use kernel::{
+    AgentKernel, AgentKernelBuilder, CoreAgentProfile, ProductToolDefinition, ProductToolRequest,
+    ProductToolRouter,
+};
 pub use profile::{
     AgentBackendProfile, CoreRuntimeOptions, CoreRuntimeProfile, PureCoreBuilder, ToolProfile,
     WorkspaceProfile,
@@ -79,6 +85,7 @@ pub struct PureCore {
     context_compaction: ContextCompactionConfig,
     active_subagent: Option<SubagentContext>,
     agent_supervisor: crate::AgentSupervisor,
+    agent_tool_registrar: Option<std::sync::Arc<dyn crate::AgentToolRegistrar>>,
     tools: ToolRegistry,
 }
 
@@ -99,6 +106,7 @@ impl PureCore {
             context_compaction: ContextCompactionConfig::default(),
             active_subagent: None,
             agent_supervisor: crate::AgentSupervisor::default(),
+            agent_tool_registrar: None,
             tools: ToolRegistry::new(),
         }
     }
@@ -122,6 +130,7 @@ impl PureCore {
             context_compaction: ContextCompactionConfig::default(),
             active_subagent: None,
             agent_supervisor: crate::AgentSupervisor::default(),
+            agent_tool_registrar: None,
             tools: ToolRegistry::new(),
         }
     }
@@ -232,6 +241,16 @@ impl PureCore {
                 backend.clone(),
                 credential_provider.clone(),
             ));
+        }
+    }
+
+    /// 注册 pl-core 提供的通用容器 workspace 工具集合。
+    pub fn register_container_tools<B>(&mut self, backend: std::sync::Arc<B>)
+    where
+        B: ContainerBackend + 'static,
+    {
+        for kind in ContainerToolKind::all() {
+            self.register_tool(ContainerTool::new(*kind, backend.clone()));
         }
     }
 

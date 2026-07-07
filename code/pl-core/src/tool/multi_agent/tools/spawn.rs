@@ -2,6 +2,7 @@ use pl_protocol::{AgentStatus, PureError};
 
 use crate::agent::AgentSpawnInput;
 
+use super::super::schema::AgentControlToolKind;
 use super::super::types::{SpawnAgentArgs, SpawnAgentResult, SpawnAgentTool};
 use super::super::{
     BoxFuture, ForkTurns, Tool, ToolContext, ToolInput, ToolOutput, child_agent_options,
@@ -21,37 +22,7 @@ impl Tool for SpawnAgentTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "taskName": {
-                    "type": "string",
-                    "description": "Stable lowercase task name using letters, digits, and underscores."
-                },
-                "message": {
-                    "type": "string",
-                    "description": "Initial task message for the spawned agent."
-                },
-                "agentType": {
-                    "type": "string",
-                    "enum": ["explorer", "planner", "executor", "reviewer"],
-                    "description": "Agent role. Defaults to executor."
-                },
-                "model": {
-                    "type": "string",
-                    "description": "Reserved model override; omitted to inherit parent model."
-                },
-                "reasoningEffort": {
-                    "type": "string",
-                    "description": "Reserved reasoning override."
-                },
-                "forkTurns": {
-                    "type": "string",
-                    "description": "Parent history to inherit: none, all, or a positive integer string. Defaults to none. Inherited history is filtered to remove tool calls/results and reasoning."
-                }
-            },
-            "required": ["taskName", "message"]
-        })
+        AgentControlToolKind::SpawnAgent.input_schema()
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {

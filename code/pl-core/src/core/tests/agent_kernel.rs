@@ -1,0 +1,228 @@
+use std::sync::Arc;
+
+use crate::tool::{RegisteredTool, ToolRuntimeLockPolicy};
+use pretty_assertions::assert_eq;
+use tokio::sync::Mutex;
+
+use super::*;
+
+#[derive(Debug, Clone, Default)]
+struct EchoProductRouter {
+    calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl ProductToolRouter for EchoProductRouter {
+    fn tool_definitions(&self) -> Vec<ProductToolDefinition> {
+        vec![ProductToolDefinition::new(
+            "product_echo",
+            "Echo product input through the host router.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "message": { "type": "string" }
+                },
+                "required": ["message"],
+                "additionalProperties": false
+            }),
+        )]
+    }
+
+    fn execute(
+        &self,
+        request: ProductToolRequest,
+    ) -> impl std::future::Future<Output = std::result::Result<ToolOutput, PureError>> + Send {
+        let calls = self.calls.clone();
+        async move {
+            let message = request
+                .input
+                .arguments
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            calls
+                .lock()
+                .await
+                .push(format!("{}:{}", request.definition.name, message));
+            Ok(ToolOutput {
+                description: format!("product:{message}"),
+                truncated: OutputTruncation::empty(),
+                output_file: std::path::PathBuf::new(),
+                exit_code: Some(0),
+                timed_out: false,
+                runtime_events: Vec::new(),
+            })
+        }
+    }
+}
+
+#[tokio::test]
+async fn agent_kernel_registers_dynamic_tools_without_product_router() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let calls_for_tool = calls.clone();
+    let tool = RegisteredTool::new(
+        "dynamic_echo",
+        "Echo dynamic product input through a registered handler.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "message": { "type": "string" }
+            },
+            "required": ["message"],
+            "additionalProperties": false
+        }),
+        move |input, _context| {
+            let calls = calls_for_tool.clone();
+            Box::pin(async move {
+                let message = input
+                    .arguments
+                    .get("message")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                calls.lock().await.push(message.clone());
+                ToolOutput::json(serde_json::json!({
+                    "echo": message,
+                }))
+            })
+        },
+    )
+    .with_runtime_lock_policy(ToolRuntimeLockPolicy::Shared);
+    let kernel = AgentKernel::builder(
+        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+    )
+    .with_profile(CoreAgentProfile::host_provided(std::env::temp_dir()))
+    .with_registered_tool(tool)
+    .build()
+    .await;
+
+    assert_eq!(kernel.tool_names(), vec!["dynamic_echo".to_string()]);
+    let registered = kernel
+        .core()
+        .tools
+        .get("dynamic_echo")
+        .expect("dynamic tool registered");
+    assert_eq!(
+        registered.runtime_lock_policy(),
+        ToolRuntimeLockPolicy::Shared
+    );
+
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let output = registered
+        .execute(
+            ToolInput {
+                arguments: serde_json::json!({ "message": "hello" }),
+                session_id: "session-1".to_string(),
+                tool_id: "tool-1".to_string(),
+                revision_base: 0,
+            },
+            test_tool_context(event_tx),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(output.description, "{\"echo\":\"hello\"}");
+    assert_eq!(calls.lock().await.as_slice(), &["hello".to_string()]);
+}
+
+#[tokio::test]
+async fn agent_kernel_registers_and_routes_product_tools() {
+    let router = EchoProductRouter::default();
+    let kernel = AgentKernel::builder(
+        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+    )
+    .with_profile(CoreAgentProfile::host_provided(std::env::temp_dir()))
+    .with_product_tool_router(router.clone())
+    .build()
+    .await;
+
+    assert_eq!(kernel.tool_names(), vec!["product_echo".to_string()]);
+
+    let tool = kernel
+        .core()
+        .tools
+        .get("product_echo")
+        .expect("product tool registered");
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let output = tool
+        .execute(
+            ToolInput {
+                arguments: serde_json::json!({ "message": "hello" }),
+                session_id: "session-1".to_string(),
+                tool_id: "tool-1".to_string(),
+                revision_base: 0,
+            },
+            test_tool_context(event_tx),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(output.description, "product:hello");
+    assert_eq!(
+        router.calls.lock().await.as_slice(),
+        &["product_echo:hello".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn agent_kernel_host_profile_exposes_only_product_tools() {
+    let kernel = AgentKernel::builder(
+        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+    )
+    .with_profile(CoreAgentProfile::host_provided(std::env::temp_dir()))
+    .with_product_tool_router(EchoProductRouter::default())
+    .build()
+    .await;
+
+    assert_eq!(kernel.tool_names(), vec!["product_echo".to_string()]);
+    assert!(kernel.core().tools.get("bash").is_none());
+    assert!(kernel.core().tools.get("read_file").is_none());
+    assert!(kernel.core().tools.get("spawn_agent").is_none());
+    assert!(kernel.core().tools.get("git_status").is_none());
+}
+
+#[tokio::test]
+async fn agent_kernel_local_workspace_combines_shared_and_product_tools() {
+    let kernel = AgentKernel::builder(
+        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+    )
+    .with_profile(CoreAgentProfile::local_workspace(std::env::temp_dir()))
+    .with_product_tool_router(EchoProductRouter::default())
+    .build()
+    .await;
+    let names = kernel.tool_names();
+
+    assert!(names.contains(&"bash".to_string()));
+    assert!(names.contains(&"read_file".to_string()));
+    assert!(names.contains(&"spawn_agent".to_string()));
+    assert!(names.contains(&"product_echo".to_string()));
+    assert!(!names.contains(&"git_status".to_string()));
+}
+
+#[tokio::test]
+async fn agent_kernel_registrar_rebuilds_product_tools_for_child_core() {
+    let kernel = AgentKernel::builder(
+        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+    )
+    .with_profile(CoreAgentProfile::host_provided(std::env::temp_dir()))
+    .with_product_tool_router(EchoProductRouter::default())
+    .build()
+    .await;
+    let registrar = kernel
+        .core()
+        .agent_tool_registrar
+        .as_ref()
+        .expect("agent tool registrar");
+    let mut child_core =
+        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
+            .unwrap()
+            .build();
+
+    registrar
+        .register_tools(&mut child_core, std::env::temp_dir(), None)
+        .await
+        .unwrap();
+
+    assert!(child_core.tools.get("product_echo").is_some());
+    assert!(child_core.tools.get("bash").is_none());
+}

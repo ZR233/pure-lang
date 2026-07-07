@@ -2,6 +2,7 @@ use pl_protocol::{PureError, SubAgentActivityKind};
 
 use crate::tool::ToolRuntimeLockPolicy;
 
+use super::super::schema::AgentControlToolKind;
 use super::super::types::{
     ListAgentsArgs, ListAgentsResult, ListAgentsTool, WaitAgentArgs, WaitAgentResult, WaitAgentTool,
 };
@@ -20,15 +21,7 @@ impl Tool for WaitAgentTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "timeoutMs": {
-                    "type": "integer",
-                    "description": "Wait timeout in milliseconds. Defaults to 30000."
-                }
-            }
-        })
+        AgentControlToolKind::WaitAgent.input_schema()
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
@@ -87,15 +80,7 @@ impl Tool for ListAgentsTool {
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "pathPrefix": {
-                    "type": "string",
-                    "description": "Optional canonical path prefix, such as /root/research."
-                }
-            }
-        })
+        AgentControlToolKind::ListAgents.input_schema()
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {

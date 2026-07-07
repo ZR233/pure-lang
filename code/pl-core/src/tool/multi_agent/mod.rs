@@ -1,3 +1,4 @@
+mod schema;
 mod tools;
 mod types;
 
@@ -15,9 +16,12 @@ use super::{BoxFuture, Tool, ToolContext, ToolInput, ToolOutput};
 use crate::agent::AgentRecord;
 use types::{AgentToolRecord, CompactAgentRecord};
 
+pub use schema::{
+    AgentControlToolKind, TOOL_CLOSE_AGENT, TOOL_LIST_AGENTS, TOOL_RESUME_AGENT, TOOL_SEND_INPUT,
+    TOOL_SPAWN_AGENT, TOOL_WAIT_AGENT,
+};
 pub use types::{
-    CloseAgentTool, FollowupTaskTool, ListAgentsTool, SendMessageTool, SpawnAgentTool,
-    WaitAgentTool,
+    CloseAgentTool, ListAgentsTool, ResumeAgentTool, SendInputTool, SpawnAgentTool, WaitAgentTool,
 };
 
 fn role_key(role: Option<&str>) -> Result<String, PureError> {
@@ -31,23 +35,6 @@ fn role_key(role: Option<&str>) -> Result<String, PureError> {
             tool: "spawn_agent".to_string(),
             error: format!("unsupported agentType: {role}"),
         })
-}
-
-fn message_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "object",
-        "properties": {
-            "target": {
-                "type": "string",
-                "description": "Agent id, relative path, or canonical path."
-            },
-            "message": {
-                "type": "string",
-                "description": "Message to send to the target agent."
-            }
-        },
-        "required": ["target", "message"]
-    })
 }
 
 fn invalid_spawn_input(error: serde_json::Error) -> PureError {

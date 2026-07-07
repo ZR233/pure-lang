@@ -827,6 +827,7 @@ mod tests {
             provider_call_id: None,
             active_subagent: None,
             agent_supervisor: crate::AgentSupervisor::default(),
+            agent_tool_registrar: None,
             lsp_runtime: None,
             parent_session: Arc::new(crate::CoreSession::new()),
         }
