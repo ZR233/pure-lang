@@ -272,6 +272,7 @@ impl PureCoreBuilder {
             context_compaction,
             active_subagent: None,
             agent_supervisor,
+            agent_tool_registrar: None,
             tools: crate::tool::ToolRegistry::new(),
         }
     }

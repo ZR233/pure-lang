@@ -4,7 +4,7 @@ use std::time::UNIX_EPOCH;
 use crate::tool::{Tool, ToolContext, ToolInput};
 use crate::turn::TurnOptions;
 
-use super::read::{ReadFileTool, SearchFilesTool};
+use super::read::{ListFilesTool, ReadFileTool, SearchFilesTool};
 use super::write::WriteFileTool;
 use super::{ApplyPatchTool, CopyPathTool, DeletePathTool, MovePathTool};
 
@@ -30,6 +30,7 @@ async fn context(root: &Path) -> ToolContext {
         provider_call_id: None,
         active_subagent: None,
         agent_supervisor: crate::AgentSupervisor::default(),
+        agent_tool_registrar: None,
         lsp_runtime: None,
         parent_session: std::sync::Arc::new(crate::CoreSession::new()),
     }

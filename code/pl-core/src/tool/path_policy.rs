@@ -135,6 +135,7 @@ impl ToolPathPolicy {
             .unwrap_or(path)
             .display()
             .to_string()
+            .replace(std::path::MAIN_SEPARATOR, "/")
     }
 
     fn validate_for_execution(&self, path: &Path, original: &str) -> Result<(), PureError> {

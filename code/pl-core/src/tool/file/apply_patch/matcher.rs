@@ -5,7 +5,7 @@ use pl_protocol::PureError;
 use super::parser::{PATCH_RETRY_GUIDANCE, UpdateChunk};
 use super::tool_error;
 
-pub(super) fn apply_chunks(
+pub(crate) fn apply_chunks(
     content: &str,
     path: &Path,
     chunks: &[UpdateChunk],

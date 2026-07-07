@@ -494,6 +494,7 @@ pub(super) async fn run_turn_with_trace(
                 workspace_instructions: workspace_instructions.clone(),
                 active_subagent: active_subagent.clone(),
                 agent_supervisor: agent_supervisor.clone(),
+                agent_tool_registrar: core.agent_tool_registrar.clone(),
                 instruction_snapshot: Some(instruction_snapshot.clone()),
                 parent_session: Arc::new(CoreSession::from_messages(history_messages)),
             },

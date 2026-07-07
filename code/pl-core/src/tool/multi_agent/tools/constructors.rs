@@ -1,7 +1,7 @@
 use crate::tool::ToolContext;
 use crate::turn::TurnBudget;
 
-use super::super::types::{AgentToolRuntime, FollowupTaskTool, SpawnAgentTool};
+use super::super::types::{AgentToolRuntime, SendInputTool, SpawnAgentTool};
 
 impl SpawnAgentTool {
     pub fn new(
@@ -25,7 +25,7 @@ impl SpawnAgentTool {
     }
 }
 
-impl FollowupTaskTool {
+impl SendInputTool {
     pub fn new(
         provider: pl_model::SharedModelProvider,
         reasoning_effort: Option<crate::config::ReasoningEffort>,
@@ -67,6 +67,7 @@ impl AgentToolRuntime {
                 .clone()
                 .or_else(|| self.workspace_instructions.clone()),
             instruction_snapshot: context.instruction_snapshot.clone(),
+            tool_registrar: context.agent_tool_registrar.clone(),
             workspace_root: context.workspace_root.clone(),
             options,
             event_tx: context.event_tx.clone(),

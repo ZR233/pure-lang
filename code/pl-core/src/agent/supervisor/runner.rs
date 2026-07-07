@@ -84,11 +84,25 @@ pub(super) async fn run_agent_turn(
             return;
         }
     };
-    core.register_default_tools(
-        config.workspace_root.clone(),
-        config.workspace_instructions.clone(),
-    )
-    .await;
+    if let Some(registrar) = config.tool_registrar.clone() {
+        if let Err(error) = registrar
+            .register_tools(
+                &mut core,
+                config.workspace_root.clone(),
+                config.workspace_instructions.clone(),
+            )
+            .await
+        {
+            mark_agent_failed(&supervisor, &agent_id, &config, error.to_string()).await;
+            return;
+        }
+    } else {
+        core.register_default_tools(
+            config.workspace_root.clone(),
+            config.workspace_instructions.clone(),
+        )
+        .await;
+    }
     if let Err(error) = core.register_configured_mcp_tools().await {
         mark_agent_failed(&supervisor, &agent_id, &config, error.to_string()).await;
         return;

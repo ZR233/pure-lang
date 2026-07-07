@@ -1,6 +1,7 @@
 mod ask_user;
 mod bash;
 mod command;
+mod container;
 mod file;
 mod git;
 mod lsp;
@@ -11,6 +12,7 @@ mod skill;
 mod text_escape;
 mod todo;
 mod truncation;
+mod workspace_file;
 
 use pl_model::ToolSchema;
 use pl_protocol::{PureError, SkillActivation};
@@ -29,6 +31,13 @@ use crate::turn::TurnOptions;
 pub use ask_user::AskUserTool;
 pub(crate) use bash::command_tool_pair;
 pub use bash::{BashInput, BashTool, WriteStdinTool};
+#[cfg(feature = "docker-tools")]
+pub use container::DockerCliContainerBackend;
+pub use container::{
+    ContainerBackend, ContainerCopyFromRequest, ContainerCopyToRequest, ContainerExecOutput,
+    ContainerExecRequest, ContainerTool, ContainerToolExecution, ContainerToolKind,
+    NoContainerBackend, TOOL_CONTAINER_COPY, TOOL_CONTAINER_EXEC, execute_container_tool,
+};
 pub use file::{
     ApplyPatchTool, CopyPathTool, CreateDirectoryTool, DeletePathTool, ListFilesTool, MovePathTool,
     ReadFileTool, SearchFilesTool, StatPathTool, WriteFileTool,
@@ -42,17 +51,28 @@ pub use git::{
 };
 pub use lsp::{LspLanguageTool, LspQueryTool, lsp_tool_for_language};
 pub use multi_agent::{
-    CloseAgentTool, FollowupTaskTool, ListAgentsTool, SendMessageTool, SpawnAgentTool,
-    WaitAgentTool,
+    AgentControlToolKind, CloseAgentTool, ListAgentsTool, ResumeAgentTool, SendInputTool,
+    SpawnAgentTool, TOOL_CLOSE_AGENT, TOOL_LIST_AGENTS, TOOL_RESUME_AGENT, TOOL_SEND_INPUT,
+    TOOL_SPAWN_AGENT, TOOL_WAIT_AGENT, WaitAgentTool,
 };
 pub(crate) use path_policy::{PathAccess, ToolPathPolicy};
 pub use plan::PlanExitTool;
 pub use skill::{SkillManageTool, SkillViewTool, SkillsListTool};
 pub use todo::TodoListTool;
 pub use truncation::{OutputTruncation, TruncatedOutput, TruncationStrategy};
+pub use workspace_file::{
+    ContainerWorkspaceFileBackend, LocalWorkspaceFileBackend, WorkspaceFileBackend,
+    WorkspaceFileListEntry, WorkspaceFileListRequest, WorkspaceFileListResult,
+    WorkspaceFileReadRequest, WorkspaceFileRemoveRequest, WorkspaceFileSearchMatch,
+    WorkspaceFileSearchRequest, WorkspaceFileSearchResult, WorkspaceFileStat,
+    WorkspaceFileStatRequest, WorkspaceFileTool, WorkspaceFileToolExecution, WorkspaceFileToolKind,
+    WorkspaceFileWriteRequest, execute_workspace_file_tool,
+};
 
 /// 便捷类型别名：boxed future。
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+type RegisteredToolFuture = Pin<Box<dyn Future<Output = Result<ToolOutput, PureError>> + Send>>;
+type RegisteredToolHandler = dyn Fn(ToolInput, ToolContext) -> RegisteredToolFuture + Send + Sync;
 
 /// 工具执行抽象（dyn-compatible）。
 ///
@@ -109,6 +129,7 @@ pub struct ToolContext {
     pub provider_call_id: Option<String>,
     pub active_subagent: Option<SubagentContext>,
     pub agent_supervisor: AgentSupervisor,
+    pub agent_tool_registrar: Option<Arc<dyn crate::AgentToolRegistrar>>,
     pub lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
     pub parent_session: Arc<crate::session::CoreSession>,
 }
@@ -319,12 +340,126 @@ pub struct ToolOutput {
     pub runtime_events: Vec<ToolRuntimeEvent>,
 }
 
+impl ToolOutput {
+    pub fn json(value: impl Serialize) -> Result<Self, PureError> {
+        let description =
+            serde_json::to_string(&value).map_err(|error| PureError::ToolExecutionFailed {
+                tool: "registered_tool".to_string(),
+                error: format!("failed to serialize JSON output: {error}"),
+            })?;
+        Ok(Self {
+            description,
+            truncated: OutputTruncation::empty(),
+            output_file: PathBuf::new(),
+            exit_code: None,
+            timed_out: false,
+            runtime_events: Vec::new(),
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum ToolRuntimeEvent {
     SkillActivated { activation: SkillActivation },
     ToolResultRevision { revision: u64 },
     EndTurn,
+}
+
+/// 运行时动态注册的工具。
+///
+/// 宿主产品用它把自身业务 handler 挂入 pl-core 的统一 registry 和 dispatch；
+/// handler 只负责业务副作用，工具生命周期、trace、权限和 tool result history
+/// 仍由 pl-core 统一处理。
+#[derive(Clone)]
+pub struct RegisteredTool {
+    name: String,
+    description: String,
+    input_schema: serde_json::Value,
+    supports_parallel_tool_calls: bool,
+    runtime_lock_policy: Option<ToolRuntimeLockPolicy>,
+    handler: Arc<RegisteredToolHandler>,
+}
+
+impl fmt::Debug for RegisteredTool {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RegisteredTool")
+            .field("name", &self.name)
+            .field(
+                "supports_parallel_tool_calls",
+                &self.supports_parallel_tool_calls,
+            )
+            .field("runtime_lock_policy", &self.runtime_lock_policy)
+            .finish_non_exhaustive()
+    }
+}
+
+impl RegisteredTool {
+    pub fn new<F, Fut>(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        input_schema: serde_json::Value,
+        handler: F,
+    ) -> Self
+    where
+        F: Fn(ToolInput, ToolContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<ToolOutput, PureError>> + Send + 'static,
+    {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            input_schema,
+            supports_parallel_tool_calls: false,
+            runtime_lock_policy: None,
+            handler: Arc::new(move |input, context| Box::pin(handler(input, context))),
+        }
+    }
+
+    pub fn with_parallel_tool_calls(mut self) -> Self {
+        self.supports_parallel_tool_calls = true;
+        self
+    }
+
+    pub fn with_runtime_lock_policy(mut self, policy: ToolRuntimeLockPolicy) -> Self {
+        self.runtime_lock_policy = Some(policy);
+        self
+    }
+}
+
+impl Tool for RegisteredTool {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn description(&self) -> &str {
+        &self.description
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        self.input_schema.clone()
+    }
+
+    fn supports_parallel_tool_calls(&self) -> bool {
+        self.supports_parallel_tool_calls
+    }
+
+    fn runtime_lock_policy(&self) -> ToolRuntimeLockPolicy {
+        self.runtime_lock_policy.unwrap_or({
+            if self.supports_parallel_tool_calls {
+                ToolRuntimeLockPolicy::Shared
+            } else {
+                ToolRuntimeLockPolicy::Exclusive
+            }
+        })
+    }
+
+    fn execute<'a>(
+        &'a self,
+        input: ToolInput,
+        context: ToolContext,
+    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        (self.handler)(input, context)
+    }
 }
 
 #[cfg(test)]
@@ -478,6 +613,7 @@ mod tests {
             provider_call_id: None,
             active_subagent: None,
             agent_supervisor: AgentSupervisor::default(),
+            agent_tool_registrar: None,
             lsp_runtime: None,
             parent_session: Arc::new(crate::session::CoreSession::new()),
         };

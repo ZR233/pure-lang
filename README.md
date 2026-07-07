@@ -165,7 +165,7 @@ pure-lang/
 | 文件写入 | `write_file`, `create_directory`, `delete_path`, `copy_path`, `move_path` |
 | 补丁 | `apply_patch` |
 | 代码智能 | `lsp_query` |
-| 子代理 | `spawn_agent`, `wait_agent`, `list_agents`, `send_message`, `followup_task`, `close_agent` |
+| 子代理 | `spawn_agent`, `send_input`, `wait_agent`, `list_agents`, `close_agent`, `resume_agent` |
 | 用户交互 | `request_user_input` |
 | 技能 | `skills_list`, `skill_view`, `skill_manage` |
 | MCP | 动态注册（`mcp__<server>__<tool>`） |

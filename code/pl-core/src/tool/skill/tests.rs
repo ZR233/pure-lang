@@ -31,6 +31,7 @@ fn tool_context(workspace_root: PathBuf) -> ToolContext {
         provider_call_id: None,
         active_subagent: None,
         agent_supervisor: crate::AgentSupervisor::default(),
+        agent_tool_registrar: None,
         lsp_runtime: None,
         parent_session: Arc::new(CoreSession::new()),
     }

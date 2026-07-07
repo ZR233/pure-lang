@@ -26,7 +26,7 @@ mod workspace;
 pub use agent::{
     AgentHandle, AgentMessage, AgentMessageMode, AgentMessageRequest, AgentPath, AgentRecord,
     AgentRunSpec, AgentSpawnInput, AgentStatus, AgentStatusUpdate, AgentSupervisor,
-    AgentWaitOutcome,
+    AgentToolRegistrar, AgentWaitOutcome,
 };
 pub use attachment::MaterializedAttachment;
 pub use config::{
@@ -45,8 +45,9 @@ pub use context_compaction::{
     ContextCompactionConfig, ContextCompactionReplacement, RecentInteractionTailConfig,
 };
 pub use core::{
-    AgentBackendProfile, CoreRuntimeOptions, CoreRuntimeProfile, PureCore, PureCoreBuilder,
-    ToolProfile, ToolSetBuilder, WorkspaceProfile,
+    AgentBackendProfile, AgentKernel, AgentKernelBuilder, CoreAgentProfile, CoreRuntimeOptions,
+    CoreRuntimeProfile, ProductToolDefinition, ProductToolRequest, ProductToolRouter, PureCore,
+    PureCoreBuilder, ToolProfile, ToolSetBuilder, WorkspaceProfile,
 };
 pub use first_run::{
     FirstRunConfigDraft, FirstRunModelDraft, FirstRunProviderDraft, ProviderTemplateKind,
@@ -99,15 +100,28 @@ pub use studio::{
     StudioSubmitPromptResponse, StudioUserPromptPresentation, resolution_matches_kind,
     studio_attachment,
 };
+#[cfg(feature = "docker-tools")]
+pub use tool::DockerCliContainerBackend;
 pub use tool::{
-    AskUserTool, BashInput, BashTool, ExecutionBackend, ExecutionOutput, ExecutionRequest,
-    GIT_TOKEN_ENV, GitCredential, GitCredentialOperation, GitCredentialProvider,
-    GitCredentialRequest, GitPolicy, GitTool, GitToolKind, GitWorkspaceConfig,
-    LocalExecutionBackend, LspLanguageTool, LspQueryTool, NoGitCredentialProvider,
-    OutputTruncation, PlanExitTool, SubagentContext, TOOL_GIT_BRANCH, TOOL_GIT_COMMIT,
-    TOOL_GIT_DIFF, TOOL_GIT_FETCH, TOOL_GIT_PUSH, TOOL_GIT_STATUS, TOOL_GIT_WORKSPACE_INFO,
-    TodoListTool, Tool, ToolContext, ToolInput, ToolOutput, ToolRegistry, ToolRuntimeEvent,
-    TruncatedOutput, TruncationStrategy, WorkspaceAccess, WriteStdinTool, lsp_tool_for_language,
+    AgentControlToolKind, AskUserTool, BashInput, BashTool, ContainerBackend,
+    ContainerCopyFromRequest, ContainerCopyToRequest, ContainerExecOutput, ContainerExecRequest,
+    ContainerTool, ContainerToolExecution, ContainerToolKind, ContainerWorkspaceFileBackend,
+    ExecutionBackend, ExecutionOutput, ExecutionRequest, GIT_TOKEN_ENV, GitCredential,
+    GitCredentialOperation, GitCredentialProvider, GitCredentialRequest, GitPolicy, GitTool,
+    GitToolKind, GitWorkspaceConfig, LocalExecutionBackend, LocalWorkspaceFileBackend,
+    LspLanguageTool, LspQueryTool, NoContainerBackend, NoGitCredentialProvider, OutputTruncation,
+    PlanExitTool, RegisteredTool, ResumeAgentTool, SubagentContext, TOOL_CLOSE_AGENT,
+    TOOL_CONTAINER_COPY, TOOL_CONTAINER_EXEC, TOOL_GIT_BRANCH, TOOL_GIT_COMMIT, TOOL_GIT_DIFF,
+    TOOL_GIT_FETCH, TOOL_GIT_PUSH, TOOL_GIT_STATUS, TOOL_GIT_WORKSPACE_INFO, TOOL_LIST_AGENTS,
+    TOOL_RESUME_AGENT, TOOL_SEND_INPUT, TOOL_SPAWN_AGENT, TOOL_WAIT_AGENT, TodoListTool, Tool,
+    ToolContext, ToolInput, ToolOutput, ToolRegistry, ToolRuntimeEvent, ToolRuntimeLockPolicy,
+    TruncatedOutput, TruncationStrategy, WorkspaceAccess, WorkspaceFileBackend,
+    WorkspaceFileListEntry, WorkspaceFileListRequest, WorkspaceFileListResult,
+    WorkspaceFileReadRequest, WorkspaceFileRemoveRequest, WorkspaceFileSearchMatch,
+    WorkspaceFileSearchRequest, WorkspaceFileSearchResult, WorkspaceFileStat,
+    WorkspaceFileStatRequest, WorkspaceFileTool, WorkspaceFileToolExecution, WorkspaceFileToolKind,
+    WorkspaceFileWriteRequest, WriteStdinTool, execute_container_tool, execute_workspace_file_tool,
+    lsp_tool_for_language,
 };
 pub use trace::TraceRecorder;
 pub use turn::{
