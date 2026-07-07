@@ -1,6 +1,15 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+fn read_file_result_text(result: Option<&str>) -> String {
+    serde_json::from_str::<serde_json::Value>(result.expect("tool result"))
+        .expect("read_file json")
+        .get("text")
+        .and_then(serde_json::Value::as_str)
+        .expect("text")
+        .to_string()
+}
+
 #[tokio::test]
 async fn tool_execution_reuses_streamed_trace_part() {
     let unique = std::time::SystemTime::now()
@@ -80,7 +89,10 @@ async fn tool_execution_reuses_streamed_trace_part() {
     assert_eq!(tool.call_id.as_deref(), Some("call-1"));
     assert_eq!(tool.provider_item_id.as_deref(), Some("provider-item-1"));
     assert_eq!(tool.arguments, "{\"path\":\"note.txt\"}");
-    assert_eq!(tool.result.as_deref(), Some("provider item reuse"));
+    assert_eq!(
+        read_file_result_text(tool.result.as_deref()),
+        "provider item reuse"
+    );
     assert_eq!(
         tool_statuses(&events, "turn-1-provider-item-1"),
         vec![
@@ -186,7 +198,10 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
     let tool = terminal_tool.tool.as_ref().expect("tool trace metadata");
     assert_eq!(tool.call_id.as_deref(), Some("call-1"));
     assert_eq!(tool.provider_item_id.as_deref(), Some("provider-item-1"));
-    assert_eq!(tool.result.as_deref(), Some("late provider id"));
+    assert_eq!(
+        read_file_result_text(tool.result.as_deref()),
+        "late provider id"
+    );
     assert_eq!(
         tool_statuses(&events, "turn-1-call-1"),
         vec![

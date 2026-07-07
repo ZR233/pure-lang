@@ -12,9 +12,8 @@ use crate::tool::{
 };
 
 use super::backend::{ContainerBackend, ContainerExecRequest};
-use super::files::{copy_download, copy_upload, list_files, read_file, search_files};
+use super::files::{copy_download, copy_upload};
 use super::helpers::{bounded_model_tool_output_with_tokens, parse_input, tool_error};
-use super::patch::apply_patch;
 use super::schema::{ContainerToolKind, TOOL_CONTAINER_EXEC};
 
 const DEFAULT_MODEL_TOOL_OUTPUT_TOKENS: usize = 10_000;
@@ -48,22 +47,6 @@ where
     };
     let execution = match kind {
         ContainerToolKind::Exec => execute_shell(backend, arguments, cancellation_token).await?,
-        ContainerToolKind::ReadFile => {
-            let output = read_file(backend, arguments).await?;
-            ContainerToolExecution::json(true, output, Vec::new(), DEFAULT_MODEL_TOOL_OUTPUT_TOKENS)
-        }
-        ContainerToolKind::ListFiles => {
-            let output = list_files(backend, arguments).await?;
-            ContainerToolExecution::json(true, output, Vec::new(), DEFAULT_MODEL_TOOL_OUTPUT_TOKENS)
-        }
-        ContainerToolKind::SearchFiles => {
-            let output = search_files(backend, arguments, cancellation_token).await?;
-            ContainerToolExecution::json(true, output, Vec::new(), DEFAULT_MODEL_TOOL_OUTPUT_TOKENS)
-        }
-        ContainerToolKind::ApplyPatch => {
-            let output = apply_patch(backend, arguments).await?;
-            ContainerToolExecution::json(true, output, Vec::new(), DEFAULT_MODEL_TOOL_OUTPUT_TOKENS)
-        }
         ContainerToolKind::CopyUpload => {
             let output = copy_upload(backend, arguments).await?;
             ContainerToolExecution::json(true, output, Vec::new(), DEFAULT_MODEL_TOOL_OUTPUT_TOKENS)

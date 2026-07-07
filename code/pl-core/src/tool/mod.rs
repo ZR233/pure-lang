@@ -12,6 +12,7 @@ mod skill;
 mod text_escape;
 mod todo;
 mod truncation;
+mod workspace_file;
 
 use pl_model::ToolSchema;
 use pl_protocol::{PureError, SkillActivation};
@@ -59,6 +60,14 @@ pub use plan::PlanExitTool;
 pub use skill::{SkillManageTool, SkillViewTool, SkillsListTool};
 pub use todo::TodoListTool;
 pub use truncation::{OutputTruncation, TruncatedOutput, TruncationStrategy};
+pub use workspace_file::{
+    ContainerWorkspaceFileBackend, LocalWorkspaceFileBackend, WorkspaceFileBackend,
+    WorkspaceFileListEntry, WorkspaceFileListRequest, WorkspaceFileListResult,
+    WorkspaceFileReadRequest, WorkspaceFileRemoveRequest, WorkspaceFileSearchMatch,
+    WorkspaceFileSearchRequest, WorkspaceFileSearchResult, WorkspaceFileStat,
+    WorkspaceFileStatRequest, WorkspaceFileTool, WorkspaceFileToolExecution, WorkspaceFileToolKind,
+    WorkspaceFileWriteRequest, execute_workspace_file_tool,
+};
 
 /// 便捷类型别名：boxed future。
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;

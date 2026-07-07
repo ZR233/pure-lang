@@ -3,8 +3,7 @@ mod backend;
 mod docker;
 mod exec;
 mod files;
-mod helpers;
-mod patch;
+pub(crate) mod helpers;
 mod schema;
 
 #[cfg(test)]

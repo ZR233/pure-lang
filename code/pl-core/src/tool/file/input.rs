@@ -2,16 +2,6 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct ReadFileInput {
-    pub path: String,
-    /// 1-based 起始行号，默认 1（第 1 行）。
-    pub line_offset: Option<usize>,
-    /// 最多读取的行数；`None` 表示读到文件末尾。
-    pub max_lines: Option<usize>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub(super) struct WriteFileInput {
     pub path: String,
     pub content: String,
@@ -24,23 +14,6 @@ pub(super) enum WriteMode {
     Create,
     Overwrite,
     Append,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct ListFilesInput {
-    pub path: Option<String>,
-    pub depth: Option<usize>,
-    pub pattern: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct SearchFilesInput {
-    pub pattern: String,
-    pub path: Option<String>,
-    pub file_pattern: Option<String>,
-    pub max_results: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]

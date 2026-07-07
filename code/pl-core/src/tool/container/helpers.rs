@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 const TOKEN_ESTIMATE_BYTES: usize = 4;
 
-pub(super) fn object_schema(fields: Vec<(&str, Value, bool)>) -> Value {
+pub(crate) fn object_schema(fields: Vec<(&str, Value, bool)>) -> Value {
     let mut properties = serde_json::Map::new();
     let mut required = Vec::new();
     for (name, schema, is_required) in fields {
@@ -22,7 +22,7 @@ pub(super) fn object_schema(fields: Vec<(&str, Value, bool)>) -> Value {
     })
 }
 
-pub(super) fn parse_input<T: serde::de::DeserializeOwned>(
+pub(crate) fn parse_input<T: serde::de::DeserializeOwned>(
     arguments: Value,
     tool: &str,
 ) -> Result<T> {
@@ -30,14 +30,14 @@ pub(super) fn parse_input<T: serde::de::DeserializeOwned>(
         .map_err(|error| tool_error(tool, format!("invalid input: {error}")))
 }
 
-pub(super) fn shell_command(args: &[String]) -> String {
+pub(crate) fn shell_command(args: &[String]) -> String {
     args.iter()
         .map(|arg| shell_quote(arg))
         .collect::<Vec<_>>()
         .join(" ")
 }
 
-pub(super) fn shell_quote(value: &str) -> String {
+pub(crate) fn shell_quote(value: &str) -> String {
     if value.is_empty() {
         return "''".to_string();
     }
@@ -49,7 +49,7 @@ pub(super) fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
-pub(super) fn preview_error(stderr: &str, stdout: &str) -> String {
+pub(crate) fn preview_error(stderr: &str, stdout: &str) -> String {
     preview(format!("{stderr}\n{stdout}").trim(), 500)
 }
 
@@ -64,7 +64,7 @@ fn preview(value: &str, max: usize) -> String {
     format!("{}...", &value[..end])
 }
 
-pub(super) fn bounded_text(
+pub(crate) fn bounded_text(
     value: &str,
     max_bytes: usize,
     offset: usize,
@@ -81,7 +81,7 @@ pub(super) fn bounded_text(
     (text, true, omitted, Some(offset.saturating_add(end)))
 }
 
-pub(super) fn bounded_model_tool_output_with_tokens(output: &str, max_tokens: usize) -> String {
+pub(crate) fn bounded_model_tool_output_with_tokens(output: &str, max_tokens: usize) -> String {
     let max_bytes = max_tokens.saturating_mul(TOKEN_ESTIMATE_BYTES).max(1);
     if output.len() <= max_bytes {
         return output.to_string();
@@ -97,7 +97,7 @@ pub(super) fn bounded_model_tool_output_with_tokens(output: &str, max_tokens: us
     )
 }
 
-pub(super) fn tool_error(tool: &str, error: impl fmt::Display) -> PureError {
+pub(crate) fn tool_error(tool: &str, error: impl fmt::Display) -> PureError {
     PureError::ToolExecutionFailed {
         tool: tool.to_string(),
         error: error.to_string(),

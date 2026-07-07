@@ -156,13 +156,20 @@ fn file_tool_schemas_do_not_expose_legacy_bool_fields() {
 }
 
 #[test]
-fn search_files_schema_uses_pattern_for_content_and_file_pattern_for_paths() {
-    let schema = SearchFilesTool.input_schema();
+fn file_tool_schemas_use_unified_snake_case_inputs() {
+    let read_schema = ReadFileTool::new().input_schema();
+    let list_schema = ListFilesTool.input_schema();
+    let search_schema = SearchFilesTool.input_schema();
 
-    assert!(schema["properties"].get("pattern").is_some());
-    assert!(schema["properties"].get("filePattern").is_some());
-    assert!(schema["properties"].get("query").is_none());
-    assert_eq!(schema["required"], serde_json::json!(["pattern"]));
+    assert!(read_schema["properties"].get("line_start").is_some());
+    assert!(read_schema["properties"].get("lineOffset").is_none());
+    assert!(list_schema["properties"].get("max_files").is_some());
+    assert!(list_schema["properties"].get("depth").is_none());
+    assert!(search_schema["properties"].get("query").is_some());
+    assert!(search_schema["properties"].get("glob").is_some());
+    assert!(search_schema["properties"].get("pattern").is_none());
+    assert!(search_schema["properties"].get("filePattern").is_none());
+    assert_eq!(search_schema["required"], serde_json::json!(["query"]));
 }
 
 #[tokio::test]
@@ -178,15 +185,25 @@ async fn search_files_accepts_pattern_as_search_text() {
         .execute(
             input(serde_json::json!({
                 "path": "src/args.rs",
-                "pattern": "fn parse_args"
+                "query": "fn parse_args",
+                "literal": true
             })),
             context(&root).await,
         )
         .await
         .unwrap();
 
-    assert!(output.description.contains("src"));
-    assert!(output.description.contains("args.rs:1: fn parse_args() {}"));
+    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+    assert_eq!(value["count"], serde_json::json!(1));
+    assert_eq!(
+        value["matches"][0],
+        serde_json::json!({
+            "path": "src/args.rs",
+            "line": 1,
+            "column": 1,
+            "text": "fn parse_args() {}",
+        })
+    );
     let _ = tokio::fs::remove_dir_all(root).await;
 }
 
@@ -206,15 +223,17 @@ async fn search_files_file_pattern_filters_paths() {
         .execute(
             input(serde_json::json!({
                 "path": "src",
-                "pattern": "needle",
-                "filePattern": "*.rs"
+                "query": "needle",
+                "glob": "*.rs",
+                "literal": true
             })),
             context(&root).await,
         )
         .await
         .unwrap();
 
-    assert!(output.description.contains("lib.rs:1: needle"));
-    assert!(!output.description.contains("readme.txt"));
+    let value: serde_json::Value = serde_json::from_str(&output.description).unwrap();
+    assert_eq!(value["count"], serde_json::json!(1));
+    assert_eq!(value["matches"][0]["path"], serde_json::json!("src/lib.rs"));
     let _ = tokio::fs::remove_dir_all(root).await;
 }

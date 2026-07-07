@@ -3,12 +3,12 @@ use std::sync::Arc;
 
 use crate::config::ToolCapabilityConfig;
 use crate::tool::{
-    ApplyPatchTool, AskUserTool, CloseAgentTool, ContainerBackend, CopyPathTool,
-    CreateDirectoryTool, DeletePathTool, ExecutionBackend, FollowupTaskTool, GitCredentialProvider,
-    GitWorkspaceConfig, ListAgentsTool, ListFilesTool, LocalExecutionBackend, MovePathTool,
-    NoContainerBackend, NoGitCredentialProvider, PlanExitTool, ReadFileTool, SearchFilesTool,
-    SendMessageTool, SpawnAgentTool, StatPathTool, TodoListTool, WaitAgentTool, WriteFileTool,
-    command_tool_pair,
+    ApplyPatchTool, AskUserTool, CloseAgentTool, ContainerBackend, ContainerWorkspaceFileBackend,
+    CopyPathTool, CreateDirectoryTool, DeletePathTool, ExecutionBackend, FollowupTaskTool,
+    GitCredentialProvider, GitWorkspaceConfig, ListAgentsTool, ListFilesTool,
+    LocalExecutionBackend, MovePathTool, NoContainerBackend, NoGitCredentialProvider, PlanExitTool,
+    ReadFileTool, SearchFilesTool, SendMessageTool, SpawnAgentTool, StatPathTool, TodoListTool,
+    WaitAgentTool, WorkspaceFileTool, WorkspaceFileToolKind, WriteFileTool, command_tool_pair,
 };
 
 use super::PureCore;
@@ -98,6 +98,11 @@ where
         if self.capabilities.workspace_files && !using_container_workspace {
             register_file_tools(core);
         }
+        if self.capabilities.workspace_files && using_container_workspace {
+            if let Some(runtime) = &self.container_runtime {
+                register_container_file_tools(core, runtime.backend.clone());
+            }
+        }
         if self.capabilities.lsp
             && let Some(registry) = core.lsp_runtime.clone()
         {
@@ -151,6 +156,16 @@ fn register_file_tools(core: &mut PureCore) {
     core.register_tool(CopyPathTool);
     core.register_tool(MovePathTool);
     core.register_tool(ApplyPatchTool);
+}
+
+fn register_container_file_tools<C>(core: &mut PureCore, backend: Arc<C>)
+where
+    C: ContainerBackend + 'static,
+{
+    let backend = Arc::new(ContainerWorkspaceFileBackend::new(backend));
+    for kind in WorkspaceFileToolKind::all() {
+        core.register_tool(WorkspaceFileTool::new(*kind, backend.clone()));
+    }
 }
 
 fn register_subagent_tools(core: &mut PureCore, workspace_instructions: Option<String>) {

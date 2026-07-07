@@ -408,10 +408,7 @@ impl ToolPayload {
     fn arguments_for_tool(&self) -> serde_json::Value {
         match self {
             Self::Function(arguments) => arguments.clone(),
-            Self::Custom(input) => serde_json::json!({
-                "input": input,
-                "patch": input,
-            }),
+            Self::Custom(input) => serde_json::json!({ "input": input }),
         }
     }
 
