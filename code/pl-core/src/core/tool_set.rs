@@ -362,6 +362,9 @@ impl<B, P, C, A, Q, M, T> ToolSetBuilder<B, P, C, A, Q, M, T> {
 
     pub fn shared_tool_schemas(&self) -> Vec<ToolSchema> {
         let mut options = SharedToolSchemaOptions::from_capabilities(&self.capabilities);
+        if self.capabilities.container && self.container_runtime.is_none() {
+            options.workspace_files = false;
+        }
         options.git = options.git && self.git_runtime.is_some();
         options.container = options.container && self.container_runtime.is_some();
         options.mcp_resources = options.mcp_resources && self.mcp_resource_runtime.is_some();
@@ -424,7 +427,7 @@ where
         }
         let using_container_workspace =
             self.capabilities.container && self.container_runtime.is_some();
-        if self.capabilities.workspace_files && !using_container_workspace {
+        if self.capabilities.workspace_files && !self.capabilities.container {
             register_file_tools(core, |name| self.tool_allowed(name));
         }
         if self.capabilities.workspace_files

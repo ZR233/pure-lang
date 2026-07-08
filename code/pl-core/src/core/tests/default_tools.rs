@@ -511,14 +511,26 @@ async fn tool_set_builder_registers_container_only_with_backend() {
         container: true,
         ..Default::default()
     };
+    let schema_names_without_backend =
+        ToolSetBuilder::from_capabilities(capabilities.clone()).shared_tool_names();
     let mut core = PureCore::default_provider().unwrap();
 
     ToolSetBuilder::from_capabilities(capabilities.clone())
         .register(&mut core, std::env::temp_dir(), None)
         .await;
 
+    assert!(!schema_names_without_backend.contains(&"container_exec".to_string()));
+    assert!(!schema_names_without_backend.contains(&"container_copy".to_string()));
+    assert!(!schema_names_without_backend.contains(&"read_file".to_string()));
+    assert!(!schema_names_without_backend.contains(&"list_files".to_string()));
+    assert!(!schema_names_without_backend.contains(&"search_files".to_string()));
+    assert!(!schema_names_without_backend.contains(&"apply_patch".to_string()));
     assert!(core.tools.get("container_exec").is_none());
     assert!(core.tools.get("container_copy").is_none());
+    assert!(core.tools.get("read_file").is_none());
+    assert!(core.tools.get("list_files").is_none());
+    assert!(core.tools.get("search_files").is_none());
+    assert!(core.tools.get("apply_patch").is_none());
 
     let mut core = PureCore::default_provider().unwrap();
     ToolSetBuilder::from_capabilities(capabilities)
