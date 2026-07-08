@@ -159,6 +159,30 @@ pub fn function_tool_schema(
     ToolSchema::function(name, description, strict_tool_input_schema(fields))
 }
 
+/// 动态注册工具 schema 不符合 pl-core typed handler 入口时的错误。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisteredToolSchemaError {
+    name: String,
+}
+
+impl RegisteredToolSchemaError {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl fmt::Display for RegisteredToolSchemaError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "registered tool `{}` must use a function schema",
+            self.name
+        )
+    }
+}
+
+impl std::error::Error for RegisteredToolSchemaError {}
+
 /// 等待宿主工具后端 future，并统一响应 turn cancellation。
 ///
 /// 宿主 adapter 仍负责业务调用和错误类型；pl-core 负责维护工具执行过程中
@@ -800,6 +824,46 @@ impl RegisteredTool {
         })
     }
 
+    /// 从模型可见 function schema 注册带强类型输入的产品工具。
+    ///
+    /// 产品层只需传入自己已经声明的 `ToolSchema` 和业务 handler；pl-core 统一
+    /// 解包 function schema 的 name/description/input schema，并复用 typed
+    /// 输入解析、错误映射和 `ToolExecutionResult` 输出投影。
+    pub fn from_schema_typed_fallible_execution_result<Input, F, Fut, Artifact, Error>(
+        schema: ToolSchema,
+        handler: F,
+    ) -> std::result::Result<Self, RegisteredToolSchemaError>
+    where
+        Input: DeserializeOwned + Send + 'static,
+        F: Fn(Input, ToolContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = std::result::Result<ToolExecutionResult<Artifact>, Error>>
+            + Send
+            + 'static,
+        Artifact: Send + 'static,
+        Error: fmt::Display + Send + 'static,
+    {
+        match schema {
+            ToolSchema::Function {
+                name,
+                description,
+                input_schema,
+            } => Ok(Self::from_typed_fallible_execution_result(
+                name,
+                description,
+                input_schema,
+                handler,
+            )),
+            ToolSchema::Custom {
+                name,
+                description,
+                format,
+            } => {
+                let _ = (description, format);
+                Err(RegisteredToolSchemaError { name })
+            }
+        }
+    }
+
     /// 注册带强类型输入的产品工具。
     ///
     /// 宿主只提供产品输入类型和业务 handler；`pl-core` 负责把模型传入的
@@ -1372,6 +1436,66 @@ mod tests {
             .expect("typed product tool output");
 
         assert_eq!(output.description, "{\"itemId\":\"task-1\"}");
+    }
+
+    #[test]
+    fn registered_tool_from_schema_uses_function_schema_metadata() {
+        #[derive(Debug, Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct ProductInput {
+            _item_id: String,
+        }
+
+        let schema = function_tool_schema(
+            "product_tool",
+            "Product tool",
+            [ToolInputSchemaField::required(
+                "itemId",
+                serde_json::json!({ "type": "string" }),
+            )],
+        );
+
+        let tool = RegisteredTool::from_schema_typed_fallible_execution_result(
+            schema,
+            |_input: ProductInput, _context| async move {
+                Ok::<_, &'static str>(ToolExecutionResult::<serde_json::Value>::success("ok"))
+            },
+        )
+        .expect("function schema");
+
+        assert_eq!(tool.name(), "product_tool");
+        assert_eq!(tool.description(), "Product tool");
+        assert_eq!(
+            tool.input_schema(),
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "itemId": { "type": "string" }
+                },
+                "required": ["itemId"],
+                "additionalProperties": false,
+            })
+        );
+    }
+
+    #[test]
+    fn registered_tool_from_schema_rejects_custom_schema() {
+        #[derive(Debug, Deserialize)]
+        struct ProductInput;
+
+        let result = RegisteredTool::from_schema_typed_fallible_execution_result(
+            ToolSchema::custom_grammar("custom_tool", "Custom tool", "lark", "start: /x/"),
+            |_input: ProductInput, _context| async move {
+                Ok::<_, &'static str>(ToolExecutionResult::<serde_json::Value>::success("ok"))
+            },
+        );
+
+        assert_eq!(
+            result
+                .expect_err("custom schema must be rejected")
+                .to_string(),
+            "registered tool `custom_tool` must use a function schema"
+        );
     }
 
     #[tokio::test]
