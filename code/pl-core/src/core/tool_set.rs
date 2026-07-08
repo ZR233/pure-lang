@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -123,6 +123,89 @@ pub fn hosted_container_shared_tool_names(visibility: HostedSharedToolVisibility
     .into_iter()
     .filter(|name| visibility.includes(name))
     .collect()
+}
+
+/// 模型可见工具集合。
+///
+/// 宿主产品可以先用 pl-core 的 hosted/shared 能力生成共享工具名，再叠加产品工具
+/// 与动态 MCP 工具名。后续 schema 过滤、kernel allowed-tools 注册和 skill 保留名
+/// 都应消费同一个集合，避免各层各自维护一份工具可见性状态。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ToolVisibilitySet {
+    names: BTreeSet<String>,
+}
+
+impl ToolVisibilitySet {
+    pub fn empty() -> Self {
+        Self {
+            names: BTreeSet::new(),
+        }
+    }
+
+    pub fn hosted_container(visibility: HostedSharedToolVisibility) -> Self {
+        Self::from_tool_names(hosted_container_shared_tool_names(visibility))
+    }
+
+    pub fn from_tool_names<I, S>(names: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut set = Self::empty();
+        set.extend_tool_names(names);
+        set
+    }
+
+    pub fn with_tool_names<I, S>(mut self, names: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.extend_tool_names(names);
+        self
+    }
+
+    pub fn extend_tool_names<I, S>(&mut self, names: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.names.extend(names.into_iter().map(Into::into));
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.names.contains(name)
+    }
+
+    pub fn len(&self) -> usize {
+        self.names.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.names.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &String> {
+        self.names.iter()
+    }
+
+    pub fn into_names(self) -> BTreeSet<String> {
+        self.names
+    }
+
+    pub fn to_btree_set(&self) -> BTreeSet<String> {
+        self.names.clone()
+    }
+
+    pub fn filter_schemas<I>(&self, schemas: I) -> Vec<ToolSchema>
+    where
+        I: IntoIterator<Item = ToolSchema>,
+    {
+        schemas
+            .into_iter()
+            .filter(|schema| self.contains(schema.name()))
+            .collect()
+    }
 }
 
 /// 按能力开关组装 pl-core 的共享工具集合。

@@ -53,7 +53,7 @@ pub use profile::{
     WorkspaceProfile,
 };
 pub use tool_set::{
-    HostedSharedToolVisibility, SharedToolSchemaOptions, ToolSetBuilder,
+    HostedSharedToolVisibility, SharedToolSchemaOptions, ToolSetBuilder, ToolVisibilitySet,
     hosted_container_shared_tool_names, shared_tool_names, shared_tool_schemas,
 };
 pub(crate) use turn_result::compact_text;

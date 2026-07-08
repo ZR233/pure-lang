@@ -109,6 +109,34 @@ fn hosted_container_shared_tool_names_apply_visibility_toggles() {
 }
 
 #[test]
+fn tool_visibility_set_combines_shared_product_and_dynamic_tools() {
+    let visibility = ToolVisibilitySet::hosted_container(
+        HostedSharedToolVisibility::default().with_spawn_agent(true),
+    )
+    .with_tool_names(["github_api_request", "mcp__docs__lookup"]);
+
+    assert!(visibility.contains("read_file"));
+    assert!(visibility.contains("spawn_agent"));
+    assert!(visibility.contains("github_api_request"));
+    assert!(visibility.contains("mcp__docs__lookup"));
+    assert!(!visibility.contains("git_status"));
+    assert_eq!(visibility.len(), visibility.to_btree_set().len());
+
+    let schemas = visibility.filter_schemas([
+        pl_model::ToolSchema::function("github_api_request", "GitHub", serde_json::json!({})),
+        pl_model::ToolSchema::function("hidden_product_tool", "Hidden", serde_json::json!({})),
+    ]);
+
+    assert_eq!(
+        schemas
+            .into_iter()
+            .map(|schema| schema.name().to_string())
+            .collect::<Vec<_>>(),
+        vec!["github_api_request".to_string()]
+    );
+}
+
+#[test]
 fn shared_tool_schemas_can_include_mcp_resource_tools() {
     let names = shared_tool_schemas(SharedToolSchemaOptions {
         mcp_resources: true,
