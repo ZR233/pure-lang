@@ -21,6 +21,7 @@ pub const TOOL_GIT_FETCH: &str = "git_fetch";
 pub const TOOL_GIT_COMMIT: &str = "git_commit";
 pub const TOOL_GIT_PUSH: &str = "git_push";
 pub const TOOL_GIT_WORKSPACE_INFO: &str = "git_workspace_info";
+pub const TOOL_GIT_SYNC_DEFAULT_BRANCH: &str = "git_sync_default_branch";
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(600);
 pub const GIT_TOKEN_ENV: &str = "PL_GIT_TOKEN";
@@ -258,6 +259,7 @@ pub struct GitWorkspaceConfig {
     pub git_binary: PathBuf,
     pub policy: GitPolicy,
     pub default_push_branch: Option<String>,
+    pub remote_url: Option<String>,
     pub workspace_info: BTreeMap<String, Value>,
 }
 
@@ -268,6 +270,7 @@ impl GitWorkspaceConfig {
             git_binary: PathBuf::from("git"),
             policy: GitPolicy::default(),
             default_push_branch: None,
+            remote_url: None,
             workspace_info: BTreeMap::new(),
         }
     }
@@ -283,6 +286,7 @@ pub enum GitToolKind {
     Commit,
     Push,
     WorkspaceInfo,
+    SyncDefaultBranch,
 }
 
 impl GitToolKind {
@@ -295,7 +299,22 @@ impl GitToolKind {
             Self::Commit,
             Self::Push,
             Self::WorkspaceInfo,
+            Self::SyncDefaultBranch,
         ]
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            TOOL_GIT_STATUS => Some(Self::Status),
+            TOOL_GIT_DIFF => Some(Self::Diff),
+            TOOL_GIT_BRANCH => Some(Self::Branch),
+            TOOL_GIT_FETCH => Some(Self::Fetch),
+            TOOL_GIT_COMMIT => Some(Self::Commit),
+            TOOL_GIT_PUSH => Some(Self::Push),
+            TOOL_GIT_WORKSPACE_INFO => Some(Self::WorkspaceInfo),
+            TOOL_GIT_SYNC_DEFAULT_BRANCH => Some(Self::SyncDefaultBranch),
+            _ => None,
+        }
     }
 
     pub fn name(self) -> &'static str {
@@ -307,6 +326,7 @@ impl GitToolKind {
             Self::Commit => TOOL_GIT_COMMIT,
             Self::Push => TOOL_GIT_PUSH,
             Self::WorkspaceInfo => TOOL_GIT_WORKSPACE_INFO,
+            Self::SyncDefaultBranch => TOOL_GIT_SYNC_DEFAULT_BRANCH,
         }
     }
 
@@ -319,6 +339,9 @@ impl GitToolKind {
             Self::Commit => "Create a git commit in this workspace.",
             Self::Push => "Push the current branch using host-injected credentials.",
             Self::WorkspaceInfo => "Show information about this git workspace.",
+            Self::SyncDefaultBranch => {
+                "Synchronize this workspace branch with the configured default branch."
+            }
         }
     }
 
@@ -351,6 +374,24 @@ impl GitToolKind {
                 ("remote", json!({ "type": "string" }), false),
                 ("branch", json!({ "type": "string" }), false),
                 ("setUpstream", json!({ "type": "boolean" }), false),
+            ]),
+            Self::SyncDefaultBranch => object_schema(vec![
+                (
+                    "force",
+                    json!({
+                        "type": "boolean",
+                        "description": "Discard uncommitted workspace changes while syncing."
+                    }),
+                    false,
+                ),
+                (
+                    "preserveChanges",
+                    json!({
+                        "type": "boolean",
+                        "description": "Stash uncommitted workspace changes before syncing and restore them afterwards."
+                    }),
+                    false,
+                ),
             ]),
         }
     }
@@ -416,6 +457,9 @@ where
                 GitToolKind::Commit => self.run_commit(input.arguments).await,
                 GitToolKind::Push => self.run_push(input.arguments).await,
                 GitToolKind::WorkspaceInfo => self.workspace_info(),
+                GitToolKind::SyncDefaultBranch => {
+                    self.run_sync_default_branch(input.arguments).await
+                }
             }?;
             Ok(ToolOutput {
                 description: outcome.description,
@@ -545,6 +589,79 @@ where
         })
     }
 
+    async fn run_sync_default_branch(&self, arguments: Value) -> Result<GitToolOutcome, PureError> {
+        let input: GitSyncDefaultBranchInput = parse_input(self.name(), arguments)?;
+        if input.force && input.preserve_changes {
+            return Err(tool_error(
+                self.name(),
+                "force and preserveChanges cannot both be true",
+            ));
+        }
+
+        let status = self.run_plain(vec!["status", "--porcelain"]).await?;
+        let dirty = !status.description.trim().is_empty();
+        if dirty && !input.force && !input.preserve_changes {
+            return Err(tool_error(
+                self.name(),
+                "git workspace has uncommitted changes; pass force=true to discard them or preserveChanges=true to stash them before sync",
+            ));
+        }
+        if dirty && input.preserve_changes {
+            self.run_plain(vec![
+                "stash",
+                "push",
+                "-u",
+                "-m",
+                "pl-core sync default branch",
+            ])
+            .await?;
+        }
+        if let Some(remote_url) = self.config.remote_url.as_deref() {
+            self.run_plain(vec!["remote", "set-url", "origin", remote_url])
+                .await?;
+        }
+        self.run_with_credential(
+            vec!["fetch", "--prune", "origin"],
+            GitCredentialOperation::Fetch,
+            "origin".to_string(),
+        )
+        .await?;
+        let branch = self
+            .config
+            .default_push_branch
+            .as_deref()
+            .unwrap_or(&self.config.policy.default_branch);
+        self.config.policy.validate_branch(branch)?;
+        let origin_branch = format!("origin/{}", self.config.policy.default_branch);
+        self.run_plain(vec!["checkout", "-B", branch, &origin_branch])
+            .await?;
+        self.run_plain(vec!["reset", "--hard", &origin_branch])
+            .await?;
+        if input.force {
+            self.run_plain(vec!["clean", "-fdx"]).await?;
+        }
+        if dirty && input.preserve_changes {
+            self.run_plain(vec!["stash", "pop"]).await?;
+        }
+
+        let description = serde_json::to_string(&json!({
+            "clone": self.config.worktree,
+            "worktree": self.config.worktree,
+            "preservedChanges": dirty && input.preserve_changes,
+            "forced": input.force,
+        }))
+        .map_err(|error| {
+            tool_error(
+                self.name(),
+                format!("failed to serialize sync result: {error}"),
+            )
+        })?;
+        Ok(GitToolOutcome {
+            description,
+            exit_code: Some(0),
+        })
+    }
+
     async fn run_plain<S>(&self, args: Vec<S>) -> Result<GitToolOutcome, PureError>
     where
         S: AsRef<str>,
@@ -661,6 +778,15 @@ struct GitPushInput {
     branch: Option<String>,
     #[serde(default)]
     set_upstream: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GitSyncDefaultBranchInput {
+    #[serde(default)]
+    force: bool,
+    #[serde(default)]
+    preserve_changes: bool,
 }
 
 struct GitToolOutcome {
@@ -807,6 +933,28 @@ mod tests {
     }
 
     #[derive(Debug)]
+    struct ScriptedBackend {
+        requests: Mutex<Vec<ExecutionRequest>>,
+        outputs: Mutex<Vec<ExecutionOutput>>,
+    }
+
+    impl ScriptedBackend {
+        fn new(outputs: Vec<ExecutionOutput>) -> Self {
+            Self {
+                requests: Mutex::new(Vec::new()),
+                outputs: Mutex::new(outputs),
+            }
+        }
+    }
+
+    impl ExecutionBackend for ScriptedBackend {
+        async fn run(&self, request: ExecutionRequest) -> Result<ExecutionOutput, PureError> {
+            self.requests.lock().unwrap().push(request);
+            Ok(self.outputs.lock().unwrap().remove(0))
+        }
+    }
+
+    #[derive(Debug)]
     struct StaticCredentialProvider;
 
     impl GitCredentialProvider for StaticCredentialProvider {
@@ -824,7 +972,16 @@ mod tests {
             git_binary: PathBuf::from("git"),
             policy: GitPolicy::default(),
             default_push_branch: Some("mai-agent/test".to_string()),
+            remote_url: None,
             workspace_info: BTreeMap::new(),
+        }
+    }
+
+    fn ok(stdout: &str) -> ExecutionOutput {
+        ExecutionOutput {
+            status: 0,
+            stdout: stdout.to_string(),
+            stderr: String::new(),
         }
     }
 
@@ -1002,5 +1159,78 @@ mod tests {
 
         assert!(error.to_string().contains("unsafe git branch"));
         assert!(backend.requests.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn git_sync_default_branch_preserves_dirty_workspace_with_provider_token() {
+        let backend = Arc::new(ScriptedBackend::new(vec![
+            ok(" M README.md\n"),
+            ok("saved worktree"),
+            ok("remote set"),
+            ok("secret-token fetched"),
+            ok("checked out"),
+            ok("reset"),
+            ok("restored"),
+        ]));
+        let provider = Arc::new(StaticCredentialProvider);
+        let mut config = workspace_config();
+        config.policy = GitPolicy::new("dev");
+        config.remote_url = Some("https://github.com/owner/repo.git".to_string());
+        let tool = GitTool::new(
+            GitToolKind::SyncDefaultBranch,
+            config,
+            backend.clone(),
+            provider,
+        );
+
+        let output = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({ "preserveChanges": true }),
+                    session_id: "session".to_string(),
+                    tool_id: "tool".to_string(),
+                    revision_base: 0,
+                },
+                test_context(),
+            )
+            .await
+            .expect("sync default branch");
+
+        assert!(!output.description.contains("secret-token"));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&output.description).unwrap(),
+            serde_json::json!({
+                "clone": "/workspace/repo",
+                "worktree": "/workspace/repo",
+                "preservedChanges": true,
+                "forced": false
+            })
+        );
+        let requests = backend.requests.lock().unwrap();
+        let args = requests
+            .iter()
+            .map(|request| request.args.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            args,
+            vec![
+                vec!["status", "--porcelain"],
+                vec!["stash", "push", "-u", "-m", "pl-core sync default branch"],
+                vec![
+                    "remote",
+                    "set-url",
+                    "origin",
+                    "https://github.com/owner/repo.git"
+                ],
+                vec!["fetch", "--prune", "origin"],
+                vec!["checkout", "-B", "mai-agent/test", "origin/dev"],
+                vec!["reset", "--hard", "origin/dev"],
+                vec!["stash", "pop"],
+            ]
+        );
+        assert_eq!(
+            requests[3].env.get("PL_GIT_TOKEN").map(String::as_str),
+            Some("secret-token")
+        );
     }
 }

@@ -118,13 +118,20 @@ where
             )
             .await?
             .ok_or_else(|| tool_error(self.name(), "unknown container tool"))?;
+            let runtime_events = if execution.output_artifacts.is_empty() {
+                Vec::new()
+            } else {
+                vec![crate::tool::ToolRuntimeEvent::OutputArtifacts {
+                    artifacts: execution.output_artifacts.clone(),
+                }]
+            };
             Ok(ToolOutput {
                 description: execution.model_output,
                 truncated: execution.truncated,
                 output_file: PathBuf::new(),
                 exit_code: execution.exit_code,
                 timed_out: false,
-                runtime_events: Vec::new(),
+                runtime_events,
             })
         })
     }

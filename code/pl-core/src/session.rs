@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use pl_model::{ModelContinuationState, ToolCall};
 use pl_protocol::{
-    Message, MessageContent, MessageRole, ToolCallHistoryMetadata, ToolCallKind, ToolResultMetadata,
+    Message, MessageContent, MessageRole, TOOL_CALLS_METADATA_KEY, ToolCallHistoryMetadata,
+    ToolCallKind, ToolResultMetadata,
 };
 
 /// 核心编译会话。
@@ -175,6 +176,96 @@ impl CoreSession {
 
     pub fn reset_continuation(&mut self) {
         self.continuation.reset();
+    }
+}
+
+/// 修复不完整的工具调用历史。
+///
+/// 宿主恢复中断 turn 时，历史里可能保留 assistant tool call，但缺少对应 tool
+/// result。模型协议要求每个 tool call 都有结果；该函数会在下一条非 tool 消息前
+/// 插入 synthetic interrupted tool result，并返回历史是否发生变化。
+pub fn repair_incomplete_tool_history(history: &mut Vec<Message>) -> bool {
+    let mut insertions: Vec<(usize, Vec<Message>)> = Vec::new();
+    let mut i = 0;
+    while i < history.len() {
+        let mut call_ids = Vec::new();
+        while i < history.len() {
+            if history[i].metadata.contains_key(TOOL_CALLS_METADATA_KEY) {
+                call_ids.extend(tool_call_ids(&history[i]));
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        if call_ids.is_empty() {
+            i += 1;
+            continue;
+        }
+
+        let mut answered = HashSet::new();
+        while i < history.len() {
+            if history[i].role == MessageRole::Tool
+                && let Ok(metadata) = ToolResultMetadata::from_metadata(&history[i].metadata)
+                && call_ids.iter().any(|id| id == &metadata.tool_call_id)
+            {
+                answered.insert(metadata.tool_call_id);
+                i += 1;
+                continue;
+            }
+            break;
+        }
+
+        let missing_outputs = call_ids
+            .into_iter()
+            .filter(|call_id| !answered.contains(call_id))
+            .map(interrupted_tool_result_message)
+            .collect::<Vec<_>>();
+        if !missing_outputs.is_empty() {
+            insertions.push((i, missing_outputs));
+        }
+    }
+
+    let changed = !insertions.is_empty();
+    for (pos, items) in insertions.into_iter().rev() {
+        for item in items.into_iter().rev() {
+            history.insert(pos, item);
+        }
+    }
+    changed
+}
+
+fn tool_call_ids(message: &Message) -> Vec<String> {
+    ToolCallHistoryMetadata::from_metadata(&message.metadata)
+        .and_then(|metadata| {
+            serde_json::from_str::<serde_json::Value>(&metadata.tool_calls_json).ok()
+        })
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|item| {
+            item.get("id")
+                .or_else(|| item.get("call_id"))
+                .and_then(serde_json::Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .collect()
+}
+
+fn interrupted_tool_result_message(call_id: String) -> Message {
+    let mut metadata = HashMap::new();
+    ToolResultMetadata::new(
+        call_id,
+        None,
+        String::new(),
+        ToolCallKind::Function,
+        String::new(),
+    )
+    .insert_into(&mut metadata);
+    Message {
+        role: MessageRole::Tool,
+        content: MessageContent::Text("error: tool execution interrupted".to_string()),
+        reasoning_content: None,
+        metadata,
     }
 }
 
@@ -388,5 +479,34 @@ mod tests {
         assert_eq!(session.previous_response_id(), None);
         assert_eq!(session.acknowledged_message_count(), 0);
         assert_eq!(session.continuation_start_index(), None);
+    }
+
+    #[test]
+    fn repair_incomplete_tool_history_inserts_missing_result_before_next_user_message() {
+        let mut session = CoreSession::new();
+        session.push_assistant_tool_calls(
+            None,
+            vec![ToolCall::function(
+                "call-1",
+                "bash",
+                serde_json::json!({"command": "pwd"}),
+                Some("call-1".to_string()),
+            )],
+            None,
+        );
+        let mut history = session.messages().to_vec();
+        history.push(text_message("continue"));
+
+        assert!(repair_incomplete_tool_history(&mut history));
+
+        assert_eq!(history.len(), 3);
+        assert_eq!(history[1].role, MessageRole::Tool);
+        assert_eq!(
+            ToolResultMetadata::from_metadata(&history[1].metadata)
+                .expect("tool metadata")
+                .tool_call_id,
+            "call-1"
+        );
+        assert_eq!(history[2].role, MessageRole::User);
     }
 }

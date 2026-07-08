@@ -250,6 +250,7 @@ impl crate::tool::AgentControlBackend for FakeHostAgentControlBackend {
         &self,
         request: crate::tool::AgentControlSpawnRequest,
     ) -> crate::Result<crate::tool::AgentControlSpawnOutput> {
+        assert_eq!(request.skill_mentions, vec!["rust".to_string()]);
         Ok(crate::tool::AgentControlSpawnOutput {
             agent_id: "agent-1".to_string(),
             task_name: request.task_name,
@@ -354,7 +355,8 @@ async fn host_agent_control_tool_uses_shared_schema_parse_output_and_lock_policy
                 arguments: serde_json::json!({
                     "taskName": "inspect_runtime",
                     "message": "inspect",
-                    "agentType": "explorer"
+                    "agentType": "explorer",
+                    "skillMentions": ["rust"]
                 }),
                 session_id: "session-1".to_string(),
                 tool_id: "call-1".to_string(),

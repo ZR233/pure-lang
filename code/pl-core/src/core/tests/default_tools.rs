@@ -10,6 +10,7 @@ fn shared_tool_schemas_can_describe_hosted_workspace_surface() {
         subagents: true,
         git: true,
         container: true,
+        mcp_resources: false,
         todo: true,
         plan_exit: false,
     })
@@ -39,8 +40,29 @@ fn shared_tool_schemas_can_describe_hosted_workspace_surface() {
             "git_commit",
             "git_push",
             "git_workspace_info",
+            "git_sync_default_branch",
             "container_exec",
             "container_copy",
+        ]
+    );
+}
+
+#[test]
+fn shared_tool_schemas_can_include_mcp_resource_tools() {
+    let names = shared_tool_schemas(SharedToolSchemaOptions {
+        mcp_resources: true,
+        ..Default::default()
+    })
+    .into_iter()
+    .map(|schema| schema.name().to_string())
+    .collect::<Vec<_>>();
+
+    assert_eq!(
+        names,
+        vec![
+            "list_mcp_resources",
+            "list_mcp_resource_templates",
+            "read_mcp_resource",
         ]
     );
 }
@@ -195,6 +217,7 @@ fn agent_control_schemas_use_codex_camel_case_fields() {
             .is_some()
     );
     assert!(spawn_schema.pointer("/properties/forkTurns").is_some());
+    assert!(spawn_schema.pointer("/properties/skillMentions").is_some());
     assert_eq!(
         spawn_schema.pointer("/properties/forkTurns/type"),
         Some(&serde_json::json!("string"))
@@ -205,14 +228,22 @@ fn agent_control_schemas_use_codex_camel_case_fields() {
     );
     assert!(spawn_schema.pointer("/properties/name").is_none());
     assert!(spawn_schema.pointer("/properties/agent_type").is_none());
+    assert!(spawn_schema.pointer("/properties/skill_mentions").is_none());
     assert!(
         spawn_schema
             .pointer("/properties/reasoning_effort")
             .is_none()
     );
 
+    let send_schema = crate::tool::AgentControlToolKind::SendInput.input_schema();
+    assert!(send_schema.pointer("/properties/triggerTurn").is_some());
+    assert!(send_schema.pointer("/properties/skillMentions").is_some());
+    assert!(send_schema.pointer("/properties/trigger_turn").is_none());
+    assert!(send_schema.pointer("/properties/skill_mentions").is_none());
+
     let wait_schema = crate::tool::AgentControlToolKind::WaitAgent.input_schema();
-    assert!(wait_schema.pointer("/properties/targets").is_none());
+    assert!(wait_schema.pointer("/properties/target").is_some());
+    assert!(wait_schema.pointer("/properties/targets").is_some());
     assert!(wait_schema.pointer("/properties/timeoutMs").is_some());
     assert!(wait_schema.pointer("/properties/timeout_ms").is_none());
 
@@ -232,6 +263,14 @@ fn git_schemas_use_codex_camel_case_fields() {
     let push_schema = crate::tool::GitToolKind::Push.input_schema();
     assert!(push_schema.pointer("/properties/setUpstream").is_some());
     assert!(push_schema.pointer("/properties/set_upstream").is_none());
+
+    let sync_schema = crate::tool::GitToolKind::SyncDefaultBranch.input_schema();
+    assert!(sync_schema.pointer("/properties/preserveChanges").is_some());
+    assert!(
+        sync_schema
+            .pointer("/properties/preserve_changes")
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -273,6 +312,7 @@ fn register_git_tools_exposes_git_pack_explicitly() {
     assert!(core.tools.get("git_commit").is_some());
     assert!(core.tools.get("git_push").is_some());
     assert!(core.tools.get("git_workspace_info").is_some());
+    assert!(core.tools.get("git_sync_default_branch").is_some());
 }
 
 #[tokio::test]
@@ -362,6 +402,61 @@ async fn tool_set_builder_registers_container_only_with_backend() {
     assert!(core.tools.get("search_files").is_some());
     assert!(core.tools.get("apply_patch").is_some());
     assert!(core.tools.get("container_copy").is_some());
+}
+
+#[tokio::test]
+async fn tool_set_builder_respects_allowed_tools() {
+    let capabilities = crate::config::ToolCapabilityConfig {
+        container: true,
+        git: true,
+        ..Default::default()
+    };
+    let mut core = PureCore::default_provider().unwrap();
+
+    let builder = ToolSetBuilder::from_capabilities(capabilities)
+        .with_allowed_tools([
+            "container_exec",
+            "read_file",
+            "git_status",
+            "request_user_input",
+            "update_todo_list",
+        ])
+        .with_container_tools(std::sync::Arc::new(FakeContainerBackend))
+        .with_git_tools(
+            crate::tool::GitWorkspaceConfig::local(std::env::temp_dir()),
+            std::sync::Arc::new(crate::tool::LocalExecutionBackend),
+            std::sync::Arc::new(crate::tool::NoGitCredentialProvider),
+        );
+    let schema_names = builder
+        .shared_tool_schemas()
+        .into_iter()
+        .map(|schema| schema.name().to_string())
+        .collect::<Vec<_>>();
+
+    builder
+        .register(&mut core, std::env::temp_dir(), None)
+        .await;
+
+    assert_eq!(
+        schema_names,
+        vec![
+            "read_file",
+            "request_user_input",
+            "update_todo_list",
+            "git_status",
+            "container_exec",
+        ]
+    );
+    assert!(core.tools.get("container_exec").is_some());
+    assert!(core.tools.get("read_file").is_some());
+    assert!(core.tools.get("git_status").is_some());
+    assert!(core.tools.get("request_user_input").is_some());
+    assert!(core.tools.get("update_todo_list").is_some());
+
+    assert!(core.tools.get("container_copy").is_none());
+    assert!(core.tools.get("list_files").is_none());
+    assert!(core.tools.get("git_push").is_none());
+    assert!(core.tools.get("plan_exit").is_none());
 }
 
 #[tokio::test]

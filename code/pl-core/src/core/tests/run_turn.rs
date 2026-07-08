@@ -150,6 +150,64 @@ async fn run_turn_persists_only_final_text_to_session_history() {
 }
 
 #[tokio::test]
+async fn run_turn_exposes_context_compaction_snapshot() {
+    let compact_sse = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_compact\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_compact\",\"delta\":\"compressed memory\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_compact\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"compressed memory\"}]}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_compact\",\"usage\":{\"input_tokens\":9,\"output_tokens\":2,\"total_tokens\":11}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let answer_sse = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_answer\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_answer\",\"delta\":\"ok\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_answer\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_answer\",\"usage\":{\"input_tokens\":3,\"output_tokens\":1,\"total_tokens\":4}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let (base_url, _requests, handle) = serve_sse_sequence(vec![compact_sse, answer_sse]).await;
+    let mut provider = ProviderInfo::openai(Some(base_url));
+    provider.bearer_token = Some("test-token".to_string());
+    provider.default_model = "local-responses".to_string();
+    let mut model = pl_model::ModelInfo::fallback("local-responses");
+    model.auto_compact_token_limit = Some(1);
+    let core = PureCoreBuilder::from_provider_info_with_models(provider, vec![model])
+        .unwrap()
+        .build();
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
+    let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+    let mut session = CoreSession::new();
+    session.push_user_prompt("old context".to_string());
+
+    let result = core
+        .run_turn_with_trace(
+            &mut session,
+            TurnRequest::new("continue".to_string(), CompileMode::Auto)
+                .with_budget(crate::turn::TurnBudget::new(60_000)),
+            &mut recorder,
+            TurnOptions::default(),
+        )
+        .await
+        .unwrap();
+    handle.await.unwrap();
+
+    assert_eq!(result.status, TurnResultStatus::Completed);
+    assert_eq!(result.context_compactions.len(), 1);
+    let compaction = &result.context_compactions[0];
+    assert_eq!(compaction.summary, "compressed memory");
+    assert_eq!(compaction.trigger.as_str(), "estimatedTokens");
+    assert_eq!(compaction.provider_prompt_tokens, None);
+    assert_eq!(compaction.auto_compact_limit, 1);
+    assert!(
+        compaction
+            .replacement_tokens
+            .is_some_and(|tokens| tokens > 0)
+    );
+}
+
+#[tokio::test]
 async fn enabled_tools_snapshot_remains_internal_trace_event() {
     let mut core = PureCore::default_provider().unwrap();
     core.register_default_tools(std::env::temp_dir(), Some("rules".to_string()))

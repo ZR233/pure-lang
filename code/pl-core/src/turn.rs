@@ -8,6 +8,7 @@ use pl_trace::{TraceAttachment, TraceEvent};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
+use crate::context_compaction::ContextCompactionSnapshot;
 use crate::instruction::InstructionSnapshot;
 
 /// Agent 树结构限制常量。
@@ -326,6 +327,17 @@ pub enum ToolExecutionMode {
     Parallel,
 }
 
+/// `request_user_input` 工具的 turn 生命周期模式。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum UserInputMode {
+    /// 等待宿主返回用户回答，并把回答作为工具结果写回模型历史。
+    #[default]
+    AwaitResponse,
+    /// 发出用户交互事件后结束当前 turn，交由宿主在后续输入中继续。
+    EmitAndEndTurn,
+}
+
 /// 单轮运行选项。
 ///
 /// 用于前端控制工具审批等运行时行为。默认值允许 workspace 内工具直接执行，
@@ -338,6 +350,7 @@ pub struct TurnOptions {
     pub cancellation_token: Option<CancellationToken>,
     pub tool_execution_mode: ToolExecutionMode,
     pub prompt_cache_key: Option<String>,
+    pub user_input_mode: UserInputMode,
 }
 
 impl TurnOptions {
@@ -353,6 +366,7 @@ impl TurnOptions {
             cancellation_token: None,
             tool_execution_mode: ToolExecutionMode::ModelDefault,
             prompt_cache_key: None,
+            user_input_mode: UserInputMode::AwaitResponse,
         }
     }
 
@@ -373,6 +387,15 @@ impl TurnOptions {
     pub fn with_prompt_cache_key(mut self, prompt_cache_key: impl Into<String>) -> Self {
         self.prompt_cache_key = Some(prompt_cache_key.into());
         self
+    }
+
+    pub fn with_user_input_mode(mut self, user_input_mode: UserInputMode) -> Self {
+        self.user_input_mode = user_input_mode;
+        self
+    }
+
+    pub fn with_user_input_end_turn(self) -> Self {
+        self.with_user_input_mode(UserInputMode::EmitAndEndTurn)
     }
 
     pub fn with_interaction_callback(mut self, callback: InteractionCallback) -> Self {
@@ -412,6 +435,7 @@ impl std::fmt::Debug for TurnOptions {
             )
             .field("tool_execution_mode", &self.tool_execution_mode)
             .field("prompt_cache_key", &self.prompt_cache_key)
+            .field("user_input_mode", &self.user_input_mode)
             .finish()
     }
 }
@@ -454,6 +478,7 @@ pub struct TurnResult {
     pub model: String,
     pub usage: TokenUsage,
     pub last_context_tokens: Option<u64>,
+    pub context_compactions: Vec<ContextCompactionSnapshot>,
     pub mode: CompileMode,
     pub session_message_count: usize,
     pub status: TurnResultStatus,

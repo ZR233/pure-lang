@@ -5,6 +5,7 @@ mod container;
 mod file;
 mod git;
 mod lsp;
+mod mcp_resource;
 mod multi_agent;
 mod output_format;
 mod path_policy;
@@ -48,9 +49,14 @@ pub use git::{
     GitCredentialOperation, GitCredentialProvider, GitCredentialRequest, GitPolicy, GitTool,
     GitToolKind, GitWorkspaceConfig, LocalExecutionBackend, NoGitCredentialProvider,
     TOOL_GIT_BRANCH, TOOL_GIT_COMMIT, TOOL_GIT_DIFF, TOOL_GIT_FETCH, TOOL_GIT_PUSH,
-    TOOL_GIT_STATUS, TOOL_GIT_WORKSPACE_INFO,
+    TOOL_GIT_STATUS, TOOL_GIT_SYNC_DEFAULT_BRANCH, TOOL_GIT_WORKSPACE_INFO,
 };
 pub use lsp::{LspLanguageTool, LspQueryTool, lsp_tool_for_language};
+pub use mcp_resource::{
+    McpListResourceTemplatesRequest, McpListResourcesRequest, McpReadResourceRequest,
+    McpResourceBackend, McpResourceTool, McpResourceToolKind, TOOL_LIST_MCP_RESOURCE_TEMPLATES,
+    TOOL_LIST_MCP_RESOURCES, TOOL_READ_MCP_RESOURCE,
+};
 pub use multi_agent::{
     AgentControlAgentRecord, AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
     AgentControlMessageOutput, AgentControlSendInputOutput, AgentControlSendInputRequest,
@@ -68,15 +74,16 @@ pub use output_format::{
 pub(crate) use path_policy::{PathAccess, ToolPathPolicy};
 pub use plan::PlanExitTool;
 pub use skill::{SkillManageTool, SkillViewTool, SkillsListTool};
-pub use todo::TodoListTool;
+pub use todo::{TOOL_UPDATE_TODO_LIST, TodoListTool};
 pub use truncation::{OutputTruncation, TruncatedOutput, TruncationStrategy};
 pub use workspace_file::{
-    ContainerWorkspaceFileBackend, LocalWorkspaceFileBackend, WorkspaceFileBackend,
-    WorkspaceFileListEntry, WorkspaceFileListRequest, WorkspaceFileListResult,
-    WorkspaceFileReadRequest, WorkspaceFileRemoveRequest, WorkspaceFileSearchMatch,
-    WorkspaceFileSearchRequest, WorkspaceFileSearchResult, WorkspaceFileStat,
-    WorkspaceFileStatRequest, WorkspaceFileTool, WorkspaceFileToolExecution, WorkspaceFileToolKind,
-    WorkspaceFileWriteRequest, execute_workspace_file_tool,
+    ContainerWorkspaceFileBackend, LocalWorkspaceFileBackend, TOOL_APPLY_PATCH, TOOL_LIST_FILES,
+    TOOL_READ_FILE, TOOL_SEARCH_FILES, WorkspaceFileBackend, WorkspaceFileListEntry,
+    WorkspaceFileListRequest, WorkspaceFileListResult, WorkspaceFileReadRequest,
+    WorkspaceFileRemoveRequest, WorkspaceFileSearchMatch, WorkspaceFileSearchRequest,
+    WorkspaceFileSearchResult, WorkspaceFileStat, WorkspaceFileStatRequest, WorkspaceFileTool,
+    WorkspaceFileToolExecution, WorkspaceFileToolKind, WorkspaceFileWriteRequest,
+    execute_workspace_file_tool,
 };
 
 /// 便捷类型别名：boxed future。
@@ -112,6 +119,39 @@ pub trait Tool: fmt::Debug + Send + Sync {
 
     fn to_schema(&self) -> ToolSchema {
         ToolSchema::function(self.name(), self.description(), self.input_schema())
+    }
+}
+
+impl<T> Tool for Arc<T>
+where
+    T: Tool + ?Sized + 'static,
+{
+    fn name(&self) -> &str {
+        (**self).name()
+    }
+
+    fn description(&self) -> &str {
+        (**self).description()
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        (**self).input_schema()
+    }
+
+    fn supports_parallel_tool_calls(&self) -> bool {
+        (**self).supports_parallel_tool_calls()
+    }
+
+    fn runtime_lock_policy(&self) -> ToolRuntimeLockPolicy {
+        (**self).runtime_lock_policy()
+    }
+
+    fn execute<'a>(
+        &'a self,
+        input: ToolInput,
+        context: ToolContext,
+    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        (**self).execute(input, context)
     }
 }
 
@@ -373,6 +413,7 @@ impl ToolOutput {
 pub enum ToolRuntimeEvent {
     SkillActivated { activation: SkillActivation },
     ToolResultRevision { revision: u64 },
+    OutputArtifacts { artifacts: Vec<serde_json::Value> },
     EndTurn,
 }
 

@@ -31,6 +31,18 @@ impl AgentControlToolKind {
         ]
     }
 
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            TOOL_SPAWN_AGENT => Some(Self::SpawnAgent),
+            TOOL_SEND_INPUT => Some(Self::SendInput),
+            TOOL_WAIT_AGENT => Some(Self::WaitAgent),
+            TOOL_LIST_AGENTS => Some(Self::ListAgents),
+            TOOL_CLOSE_AGENT => Some(Self::CloseAgent),
+            TOOL_RESUME_AGENT => Some(Self::ResumeAgent),
+            _ => None,
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Self::SpawnAgent => TOOL_SPAWN_AGENT,
@@ -113,6 +125,15 @@ impl AgentControlToolKind {
                     }),
                     false,
                 ),
+                (
+                    "skillMentions",
+                    json!({
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional skill names the spawned agent should activate."
+                    }),
+                    false,
+                ),
             ]),
             Self::SendInput => object_schema(vec![
                 (
@@ -147,16 +168,44 @@ impl AgentControlToolKind {
                     }),
                     false,
                 ),
+                (
+                    "skillMentions",
+                    json!({
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional skill names the target agent should activate with this input."
+                    }),
+                    false,
+                ),
             ]),
-            Self::WaitAgent => object_schema(vec![(
-                "timeoutMs",
-                json!({
-                    "type": "integer",
-                    "minimum": 100,
-                    "description": "Wait timeout in milliseconds. Defaults to 30000."
-                }),
-                false,
-            )]),
+            Self::WaitAgent => object_schema(vec![
+                (
+                    "target",
+                    json!({
+                        "type": "string",
+                        "description": "Optional agent id, relative path, or canonical path to wait for."
+                    }),
+                    false,
+                ),
+                (
+                    "targets",
+                    json!({
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional set of agent ids, relative paths, or canonical paths to wait for."
+                    }),
+                    false,
+                ),
+                (
+                    "timeoutMs",
+                    json!({
+                        "type": "integer",
+                        "minimum": 100,
+                        "description": "Wait timeout in milliseconds. Defaults to 30000."
+                    }),
+                    false,
+                ),
+            ]),
             Self::ListAgents => object_schema(vec![(
                 "pathPrefix",
                 json!({

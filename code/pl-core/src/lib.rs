@@ -42,7 +42,8 @@ pub use config_editor::{
     ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit, infer_provider_template_kind,
 };
 pub use context_compaction::{
-    ContextCompactionConfig, ContextCompactionReplacement, RecentInteractionTailConfig,
+    ContextCompactionConfig, ContextCompactionReplacement, ContextCompactionSnapshot,
+    ContextCompactionTrigger, RecentInteractionTailConfig,
 };
 pub use core::{
     AgentBackendProfile, AgentKernel, AgentKernelBuilder, CoreAgentProfile, CoreModelTurnOptions,
@@ -88,7 +89,7 @@ pub use pl_protocol::{
 pub use provider_usage::{
     ProviderUsageData, ProviderUsageRecord, ProviderUsageState, provider_usage_records,
 };
-pub use session::CoreSession;
+pub use session::{CoreSession, repair_incomplete_tool_history};
 pub use skill::{SkillCatalog, SkillMetadata, SkillSourceKind};
 #[cfg(feature = "studio")]
 pub use studio::{
@@ -115,20 +116,24 @@ pub use tool::{
     ExecutionBackend, ExecutionOutput, ExecutionRequest, GIT_TOKEN_ENV, GitCredential,
     GitCredentialOperation, GitCredentialProvider, GitCredentialRequest, GitPolicy, GitTool,
     GitToolKind, GitWorkspaceConfig, LocalExecutionBackend, LocalWorkspaceFileBackend,
-    LspLanguageTool, LspQueryTool, NoContainerBackend, NoGitCredentialProvider, OutputTruncation,
-    PlanExitTool, RegisteredTool, ResumeAgentTool, SubagentContext, TOOL_CLOSE_AGENT,
-    TOOL_CONTAINER_COPY, TOOL_CONTAINER_EXEC, TOOL_GIT_BRANCH, TOOL_GIT_COMMIT, TOOL_GIT_DIFF,
-    TOOL_GIT_FETCH, TOOL_GIT_PUSH, TOOL_GIT_STATUS, TOOL_GIT_WORKSPACE_INFO, TOOL_LIST_AGENTS,
-    TOOL_RESUME_AGENT, TOOL_SEND_INPUT, TOOL_SPAWN_AGENT, TOOL_WAIT_AGENT, TodoListTool, Tool,
-    ToolContext, ToolInput, ToolOutput, ToolRegistry, ToolRuntimeEvent, ToolRuntimeLockPolicy,
-    TruncatedOutput, TruncationStrategy, WorkspaceAccess, WorkspaceFileBackend,
-    WorkspaceFileListEntry, WorkspaceFileListRequest, WorkspaceFileListResult,
-    WorkspaceFileReadRequest, WorkspaceFileRemoveRequest, WorkspaceFileSearchMatch,
-    WorkspaceFileSearchRequest, WorkspaceFileSearchResult, WorkspaceFileStat,
-    WorkspaceFileStatRequest, WorkspaceFileTool, WorkspaceFileToolExecution, WorkspaceFileToolKind,
-    WorkspaceFileWriteRequest, WriteStdinTool, execute_container_tool, execute_workspace_file_tool,
-    lsp_tool_for_language, model_visible_tool_output, model_visible_tool_output_with_tokens,
-    redacted_trace_preview_value, trace_preview_output, trace_preview_value,
+    LspLanguageTool, LspQueryTool, McpListResourceTemplatesRequest, McpListResourcesRequest,
+    McpReadResourceRequest, McpResourceBackend, McpResourceTool, McpResourceToolKind,
+    NoContainerBackend, NoGitCredentialProvider, OutputTruncation, PlanExitTool, RegisteredTool,
+    ResumeAgentTool, SubagentContext, TOOL_APPLY_PATCH, TOOL_CLOSE_AGENT, TOOL_CONTAINER_COPY,
+    TOOL_CONTAINER_EXEC, TOOL_GIT_BRANCH, TOOL_GIT_COMMIT, TOOL_GIT_DIFF, TOOL_GIT_FETCH,
+    TOOL_GIT_PUSH, TOOL_GIT_STATUS, TOOL_GIT_SYNC_DEFAULT_BRANCH, TOOL_GIT_WORKSPACE_INFO,
+    TOOL_LIST_AGENTS, TOOL_LIST_FILES, TOOL_LIST_MCP_RESOURCE_TEMPLATES, TOOL_LIST_MCP_RESOURCES,
+    TOOL_READ_FILE, TOOL_READ_MCP_RESOURCE, TOOL_RESUME_AGENT, TOOL_SEARCH_FILES, TOOL_SEND_INPUT,
+    TOOL_SPAWN_AGENT, TOOL_UPDATE_TODO_LIST, TOOL_WAIT_AGENT, TodoListTool, Tool, ToolContext,
+    ToolInput, ToolOutput, ToolRegistry, ToolRuntimeEvent, ToolRuntimeLockPolicy, TruncatedOutput,
+    TruncationStrategy, WorkspaceAccess, WorkspaceFileBackend, WorkspaceFileListEntry,
+    WorkspaceFileListRequest, WorkspaceFileListResult, WorkspaceFileReadRequest,
+    WorkspaceFileRemoveRequest, WorkspaceFileSearchMatch, WorkspaceFileSearchRequest,
+    WorkspaceFileSearchResult, WorkspaceFileStat, WorkspaceFileStatRequest, WorkspaceFileTool,
+    WorkspaceFileToolExecution, WorkspaceFileToolKind, WorkspaceFileWriteRequest, WriteStdinTool,
+    execute_container_tool, execute_workspace_file_tool, lsp_tool_for_language,
+    model_visible_tool_output, model_visible_tool_output_with_tokens, redacted_trace_preview_value,
+    trace_preview_output, trace_preview_value,
 };
 pub use trace::TraceRecorder;
 pub use turn::{
@@ -136,5 +141,6 @@ pub use turn::{
     DEFAULT_WALL_CLOCK_MS, InteractionCallback, InteractionFuture, PermissionMode,
     ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest, ToolExecutionMode,
     TurnAbortReason, TurnBudget, TurnOptions, TurnRequest, TurnResult, TurnResultStatus,
+    UserInputMode,
 };
 pub use workspace::{load_workspace_instructions, resolve_workspace_root};

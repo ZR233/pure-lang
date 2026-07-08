@@ -182,6 +182,7 @@ pub struct AgentKernelBuilder<R = EmptyProductToolRouter> {
     core_builder: PureCoreBuilder,
     profile: CoreAgentProfile,
     product_tool_router: R,
+    runtime_tools: Vec<Arc<dyn Tool>>,
     registered_tools: Vec<RegisteredTool>,
 }
 
@@ -191,6 +192,7 @@ impl AgentKernelBuilder<EmptyProductToolRouter> {
             core_builder,
             profile: CoreAgentProfile::minimal(),
             product_tool_router: EmptyProductToolRouter,
+            runtime_tools: Vec::new(),
             registered_tools: Vec::new(),
         }
     }
@@ -210,6 +212,16 @@ where
         self
     }
 
+    pub fn with_tool(mut self, tool: impl Tool + 'static) -> Self {
+        self.runtime_tools.push(Arc::new(tool));
+        self
+    }
+
+    pub fn with_tools(mut self, tools: impl IntoIterator<Item = Arc<dyn Tool>>) -> Self {
+        self.runtime_tools.extend(tools);
+        self
+    }
+
     pub fn with_registered_tools(
         mut self,
         tools: impl IntoIterator<Item = RegisteredTool>,
@@ -226,6 +238,7 @@ where
             core_builder: self.core_builder,
             profile: self.profile,
             product_tool_router,
+            runtime_tools: self.runtime_tools,
             registered_tools: self.registered_tools,
         }
     }
@@ -236,6 +249,9 @@ where
             .with_runtime_profile(self.profile.clone())
             .build();
         core.register_profile_tools().await;
+        for tool in &self.runtime_tools {
+            core.register_tool(tool.clone());
+        }
         for tool in &self.registered_tools {
             core.register_tool(tool.clone());
         }
@@ -248,6 +264,7 @@ where
         core.agent_tool_registrar = Some(Arc::new(ProductToolRegistrar {
             profile: self.profile,
             router: self.product_tool_router,
+            runtime_tools: self.runtime_tools,
             registered_tools: self.registered_tools,
         }));
         AgentKernel { core }
@@ -258,6 +275,7 @@ where
 struct ProductToolRegistrar<R> {
     profile: CoreAgentProfile,
     router: R,
+    runtime_tools: Vec<Arc<dyn Tool>>,
     registered_tools: Vec<RegisteredTool>,
 }
 
@@ -281,6 +299,9 @@ where
                     core.workspace_root = Some(workspace_root);
                     core.workspace_instructions = workspace_instructions;
                 }
+            }
+            for tool in &self.runtime_tools {
+                core.register_tool(tool.clone());
             }
             for tool in &self.registered_tools {
                 core.register_tool(tool.clone());

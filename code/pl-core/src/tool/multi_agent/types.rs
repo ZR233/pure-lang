@@ -69,11 +69,17 @@ pub(super) struct SpawnAgentArgs {
     #[serde(rename = "reasoningEffort")]
     pub _reasoning_effort: Option<String>,
     pub fork_turns: Option<String>,
+    #[serde(default, rename = "skillMentions")]
+    pub _skill_mentions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct WaitAgentArgs {
+    #[serde(rename = "target")]
+    pub _target: Option<String>,
+    #[serde(default, rename = "targets")]
+    pub _targets: Vec<String>,
     pub timeout_ms: Option<i64>,
 }
 
@@ -92,6 +98,8 @@ pub(super) struct AgentMessageArgs {
     pub trigger_turn: bool,
     #[serde(default)]
     pub interrupt: bool,
+    #[serde(default, rename = "skillMentions")]
+    pub _skill_mentions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -57,6 +57,8 @@ pub struct AgentControlSpawnRequest {
     pub model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub fork_turns: Option<String>,
+    #[serde(default)]
+    pub skill_mentions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -78,6 +80,8 @@ pub struct AgentControlSendInputRequest {
     pub trigger_turn: bool,
     #[serde(default)]
     pub interrupt: bool,
+    #[serde(default)]
+    pub skill_mentions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -91,6 +95,9 @@ pub struct AgentControlSendInputOutput {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentControlWaitRequest {
+    pub target: Option<String>,
+    #[serde(default)]
+    pub targets: Vec<String>,
     pub timeout_ms: Option<i64>,
 }
 

@@ -91,6 +91,34 @@ pub struct RecentInteractionTailConfig {
     pub tool_output_items: usize,
 }
 
+/// 触发上下文压缩的原因。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextCompactionTrigger {
+    EstimatedTokens,
+    ProviderPromptTokens,
+}
+
+impl ContextCompactionTrigger {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::EstimatedTokens => "estimatedTokens",
+            Self::ProviderPromptTokens => "providerPromptTokens",
+        }
+    }
+}
+
+/// 单次上下文压缩的可观测快照。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextCompactionSnapshot {
+    pub trigger: ContextCompactionTrigger,
+    pub tokens_before: u64,
+    pub estimated_request_tokens: u64,
+    pub provider_prompt_tokens: Option<u64>,
+    pub auto_compact_limit: u64,
+    pub replacement_tokens: Option<u64>,
+    pub summary: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CompactionTrigger {
     EstimatedTokens,
@@ -100,7 +128,10 @@ pub(crate) enum CompactionTrigger {
 #[derive(Debug, Clone)]
 pub(crate) enum CompactionOutcome {
     Skipped,
-    Compacted { usage: TokenUsage },
+    Compacted {
+        usage: TokenUsage,
+        snapshot: ContextCompactionSnapshot,
+    },
 }
 
 pub(crate) struct ContextCompactionRequest<'a, P: ModelProvider + ?Sized> {
@@ -183,14 +214,49 @@ pub(crate) async fn maybe_compact_session(
             return Err(PureError::LlmError(config.empty_summary_error.clone()));
         };
         let replacement = build_compacted_history(&messages, &summary, config);
+        let replacement_tokens = Some(estimate_request_tokens(
+            request_instructions,
+            request_messages,
+            &replacement,
+        ));
+        let snapshot = ContextCompactionSnapshot {
+            trigger: public_trigger(trigger),
+            tokens_before: tokens_before(trigger, estimated_tokens),
+            estimated_request_tokens: estimated_tokens,
+            provider_prompt_tokens: provider_prompt_tokens(trigger),
+            auto_compact_limit: limit,
+            replacement_tokens,
+            summary: summary.clone(),
+        };
         session.replace_messages(replacement);
         if let Some(progress) = progress.as_deref_mut() {
             progress.milestone("上下文已压缩，继续准备模型调用。");
         }
         return Ok(CompactionOutcome::Compacted {
             usage: response.usage,
+            snapshot,
         });
     }
+}
+
+fn public_trigger(trigger: CompactionTrigger) -> ContextCompactionTrigger {
+    match trigger {
+        CompactionTrigger::EstimatedTokens => ContextCompactionTrigger::EstimatedTokens,
+        CompactionTrigger::ProviderPromptTokens(_) => {
+            ContextCompactionTrigger::ProviderPromptTokens
+        }
+    }
+}
+
+fn provider_prompt_tokens(trigger: CompactionTrigger) -> Option<u64> {
+    match trigger {
+        CompactionTrigger::EstimatedTokens => None,
+        CompactionTrigger::ProviderPromptTokens(tokens) => Some(tokens),
+    }
+}
+
+fn tokens_before(trigger: CompactionTrigger, estimated_tokens: u64) -> u64 {
+    provider_prompt_tokens(trigger).unwrap_or(estimated_tokens)
 }
 
 fn compaction_prompt_messages(messages: &[Message], summary_request: &str) -> Vec<Message> {

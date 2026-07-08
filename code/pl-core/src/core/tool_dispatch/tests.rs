@@ -3,6 +3,7 @@ use pretty_assertions::assert_eq;
 use super::ToolExecutionRecord;
 use super::display::redact_user_input_display_result;
 use super::progress_messages::{tool_start_progress_message, tool_terminal_progress_message};
+use super::records::finalize_tool_item;
 use pl_protocol::ToolCallKind;
 use pl_trace::TracePartStatus;
 
@@ -82,5 +83,52 @@ fn progress_messages_describe_plan_and_subagent_lifecycle() {
     assert_eq!(
         tool_terminal_progress_message(&completed_record("read_file")),
         "工具 `read_file` 已完成。"
+    );
+}
+
+#[test]
+fn finalize_tool_item_carries_output_artifacts() {
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let mut recorder = crate::TraceRecorder::new("session".to_string(), event_tx, 0);
+    let item = recorder.tool_item(
+        "turn-1",
+        "turn-1-call-1",
+        "container_exec".to_string(),
+        "{}".to_string(),
+        Some("call-1".to_string()),
+        None,
+    );
+    let mut record = completed_record("container_exec");
+    record
+        .runtime_events
+        .push(crate::tool::ToolRuntimeEvent::OutputArtifacts {
+            artifacts: vec![serde_json::json!({
+                "id": "artifact-1",
+                "stream": "stdout",
+            })],
+        });
+
+    finalize_tool_item(&mut recorder, item, &record);
+    let events = recorder.drain();
+    let completed = events
+        .iter()
+        .find_map(|event| match &event.kind {
+            pl_trace::TraceEventKind::TracePartCompleted { item } => Some(item),
+            pl_trace::TraceEventKind::TracePartStarted { .. }
+            | pl_trace::TraceEventKind::TracePartDelta { .. }
+            | pl_trace::TraceEventKind::TracePartFailed { .. }
+            | pl_trace::TraceEventKind::PlanLifecycleChanged { .. }
+            | pl_trace::TraceEventKind::InteractionChanged { .. }
+            | pl_trace::TraceEventKind::SkillActivated { .. }
+            | pl_trace::TraceEventKind::EnabledToolsRecorded { .. } => None,
+        })
+        .expect("completed tool item");
+
+    assert_eq!(
+        completed.tool.as_ref().unwrap().output_artifacts,
+        vec![serde_json::json!({
+            "id": "artifact-1",
+            "stream": "stdout",
+        })]
     );
 }

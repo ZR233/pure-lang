@@ -365,6 +365,7 @@ fn turn_result_with_usage(
             reasoning_tokens: 0,
         },
         last_context_tokens: None,
+        context_compactions: Vec::new(),
         mode: CompileMode::Auto,
         session_message_count,
         status: TurnResultStatus::Completed,
