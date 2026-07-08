@@ -242,6 +242,21 @@ impl InstructionAssembler {
 }
 
 impl InstructionSnapshot {
+    /// 构造由宿主产品层提供的完整 base system prompt 快照。
+    ///
+    /// 这用于 mai-team 等宿主已经完成 profile 拼装的场景，避免宿主直接依赖
+    /// `InstructionBlock` 和 `InstructionSource` 的内部结构。
+    pub fn profile_base_override(label: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            base: InstructionBlock {
+                source: InstructionSource::new(InstructionSourceKind::ProfileBaseOverride, label),
+                content: content.into(),
+            },
+            developer: Vec::new(),
+            user: Vec::new(),
+        }
+    }
+
     pub fn with_turn_overlay(
         &self,
         request: InstructionAssemblyRequest<'_>,
@@ -497,6 +512,28 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("pure-instruction-{name}-{stamp}"))
+    }
+
+    #[test]
+    fn profile_base_override_snapshot_constructs_host_instruction_block() {
+        let snapshot =
+            InstructionSnapshot::profile_base_override("mai-team instructions", "host prompt");
+
+        assert_eq!(
+            snapshot,
+            InstructionSnapshot {
+                base: InstructionBlock {
+                    source: InstructionSource {
+                        kind: InstructionSourceKind::ProfileBaseOverride,
+                        label: "mai-team instructions".to_string(),
+                        path: None,
+                    },
+                    content: "host prompt".to_string(),
+                },
+                developer: Vec::new(),
+                user: Vec::new(),
+            }
+        );
     }
 
     #[test]
