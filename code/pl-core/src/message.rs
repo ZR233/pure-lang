@@ -8,6 +8,11 @@ pub fn message_content_text(content: &MessageContent) -> String {
     message_content_text_with_separator(content, "")
 }
 
+/// 提取消息内容中的文本片段，并用换行连接多模态文本 part。
+pub fn message_content_text_lines(content: &MessageContent) -> String {
+    message_content_text_with_separator(content, "\n")
+}
+
 /// 从模型完成响应中生成短预览文本。
 ///
 /// 预览按 reasoning、assistant content、tool call 的顺序拼接，并使用与 Codex
@@ -172,6 +177,27 @@ mod tests {
             super::append_message_fragment_text("hello".to_string(), Some(&fragment)),
             "hello\n\nskill one\nskill two"
         );
+    }
+
+    #[test]
+    fn message_content_text_lines_joins_text_parts_with_newlines() {
+        let content = MessageContent::MultiPart(vec![
+            ContentPart::Text {
+                text: "first".to_string(),
+            },
+            ContentPart::Image {
+                source: ImageSource::Attachment {
+                    attachment_id: "image-1".to_string(),
+                },
+                media_type: "image/png".to_string(),
+                filename: None,
+            },
+            ContentPart::Text {
+                text: "second".to_string(),
+            },
+        ]);
+
+        assert_eq!(super::message_content_text_lines(&content), "first\nsecond");
     }
 
     #[test]
