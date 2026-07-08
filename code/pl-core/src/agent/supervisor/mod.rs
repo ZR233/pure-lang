@@ -353,6 +353,25 @@ pub struct AgentWaitSnapshot {
 }
 
 impl AgentWaitSnapshot {
+    /// 根据一组目标 agent 的 completed/pending 分区生成共享 wait 快照。
+    ///
+    /// 多 agent `wait_agent` 只要观察到任一完成目标，或没有剩余 pending 目标，
+    /// 就可以返回；所有目标仍 pending 时继续等待。宿主 adapter 不需要重复维护
+    /// 这段分组等待语义。
+    pub fn from_group_counts(completed_count: usize, pending_count: usize) -> Self {
+        if completed_count > 0 || pending_count == 0 {
+            Self {
+                turn_presence: AgentTurnPresence::NoActiveTurn,
+                status: AgentLifecycleStatusKind::Completed,
+            }
+        } else {
+            Self {
+                turn_presence: AgentTurnPresence::ActiveTurn,
+                status: AgentLifecycleStatusKind::Active,
+            }
+        }
+    }
+
     /// 根据当前 turn presence 和状态分类判断 wait 是否可以返回。
     pub fn completion(self) -> AgentWaitCompletion {
         if matches!(self.turn_presence, AgentTurnPresence::NoActiveTurn)

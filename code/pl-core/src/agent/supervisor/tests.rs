@@ -271,6 +271,31 @@ fn agent_wait_completion_keeps_active_turn_pending() {
     assert_eq!(snapshot.completion(), AgentWaitCompletion::Pending);
 }
 
+#[test]
+fn agent_wait_snapshot_projects_group_progress() {
+    assert_eq!(
+        AgentWaitSnapshot::from_group_counts(0, 2),
+        AgentWaitSnapshot {
+            turn_presence: AgentTurnPresence::ActiveTurn,
+            status: AgentLifecycleStatusKind::Active,
+        }
+    );
+    assert_eq!(
+        AgentWaitSnapshot::from_group_counts(1, 1),
+        AgentWaitSnapshot {
+            turn_presence: AgentTurnPresence::NoActiveTurn,
+            status: AgentLifecycleStatusKind::Completed,
+        }
+    );
+    assert_eq!(
+        AgentWaitSnapshot::from_group_counts(0, 0),
+        AgentWaitSnapshot {
+            turn_presence: AgentTurnPresence::NoActiveTurn,
+            status: AgentLifecycleStatusKind::Completed,
+        }
+    );
+}
+
 #[tokio::test]
 async fn agent_wait_loop_returns_first_complete_snapshot() {
     let snapshots = Arc::new(Mutex::new(VecDeque::from([
