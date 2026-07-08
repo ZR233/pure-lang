@@ -528,6 +528,25 @@ impl ToolOutput {
             .filter_map(|value| serde_json::from_value(value.clone()).ok())
             .collect()
     }
+
+    /// 判断工具输出是否要求当前 turn 结束。
+    ///
+    /// 结束回合是 pl-core 工具运行时事件的一种语义；产品层应调用该方法，而不是
+    /// 直接匹配 `ToolRuntimeEvent::EndTurn`。
+    pub fn ends_turn(&self) -> bool {
+        self.runtime_events.iter().any(|event| match event {
+            ToolRuntimeEvent::EndTurn => true,
+            ToolRuntimeEvent::SkillActivated {
+                activation: _activation,
+            } => false,
+            ToolRuntimeEvent::ToolResultRevision {
+                revision: _revision,
+            } => false,
+            ToolRuntimeEvent::OutputArtifacts {
+                artifacts: _artifacts,
+            } => false,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -745,6 +764,28 @@ mod tests {
                 runtime_events: vec![ToolRuntimeEvent::EndTurn],
             }
         );
+    }
+
+    #[test]
+    fn tool_output_reports_end_turn_runtime_event() {
+        let output = ToolOutput {
+            description: "saved".to_string(),
+            truncated: OutputTruncation::empty(),
+            output_file: PathBuf::new(),
+            exit_code: Some(0),
+            timed_out: false,
+            runtime_events: vec![ToolRuntimeEvent::ToolResultRevision { revision: 1 }],
+        };
+        assert_eq!(output.ends_turn(), false);
+
+        let output = ToolOutput {
+            runtime_events: vec![
+                ToolRuntimeEvent::ToolResultRevision { revision: 1 },
+                ToolRuntimeEvent::EndTurn,
+            ],
+            ..output
+        };
+        assert_eq!(output.ends_turn(), true);
     }
 
     #[test]
