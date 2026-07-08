@@ -244,6 +244,33 @@ impl AgentControlWaitRequest {
             .max(MIN_AGENT_CONTROL_WAIT_TIMEOUT_MS) as u64;
         Duration::from_millis(timeout_ms)
     }
+
+    /// 返回 wait_agent 本轮要等待的目标列表。
+    ///
+    /// `target` 和 `targets` 是同一个模型可见工具的两种输入通道；pl-core 在这里
+    /// 统一合并并按出现顺序去重。模型没有显式传目标时，宿主只需要传入自己可管理的
+    /// 默认目标集合，避免各产品 adapter 重复维护选择语义。
+    pub fn targets_or_all<I, S>(&self, defaults: I) -> Vec<String>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut selected = Vec::new();
+        for target in self.target.iter().chain(self.targets.iter()) {
+            if !selected.contains(target) {
+                selected.push(target.clone());
+            }
+        }
+        if selected.is_empty() {
+            for target in defaults {
+                let target = target.into();
+                if !selected.contains(&target) {
+                    selected.push(target);
+                }
+            }
+        }
+        selected
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

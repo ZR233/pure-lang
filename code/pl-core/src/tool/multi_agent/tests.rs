@@ -166,6 +166,27 @@ fn agent_control_wait_request_normalizes_timeout_duration() {
 }
 
 #[test]
+fn agent_control_wait_request_selects_explicit_targets_or_all_defaults() {
+    let default_wait: crate::tool::AgentControlWaitRequest =
+        serde_json::from_value(serde_json::json!({})).unwrap();
+    let explicit_wait: crate::tool::AgentControlWaitRequest =
+        serde_json::from_value(serde_json::json!({
+            "target": "agent-1",
+            "targets": ["agent-2", "agent-1"]
+        }))
+        .unwrap();
+
+    assert_eq!(
+        default_wait.targets_or_all(["agent-1".to_string(), "agent-2".to_string()]),
+        vec!["agent-1".to_string(), "agent-2".to_string()]
+    );
+    assert_eq!(
+        explicit_wait.targets_or_all(["agent-3".to_string()]),
+        vec!["agent-1".to_string(), "agent-2".to_string()]
+    );
+}
+
+#[test]
 fn list_agents_result_round_trips_compact_agents() {
     let agents = vec![
         agent_record(
