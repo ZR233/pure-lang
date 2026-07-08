@@ -588,16 +588,7 @@ where
         for (key, value) in &self.config.workspace_info {
             payload.insert(key.clone(), value.clone());
         }
-        let description = serde_json::to_string(&payload).map_err(|error| {
-            tool_error(
-                self.name(),
-                format!("failed to serialize workspace info: {error}"),
-            )
-        })?;
-        Ok(GitToolOutcome {
-            description,
-            exit_code: Some(0),
-        })
+        GitToolOutcome::json(self.name(), Value::Object(payload), Some(0))
     }
 
     async fn run_sync_default_branch(&self, arguments: Value) -> Result<GitToolOutcome, PureError> {
@@ -610,7 +601,7 @@ where
         }
 
         let status = self.run_plain(vec!["status", "--porcelain"]).await?;
-        let dirty = !status.description.trim().is_empty();
+        let dirty = !status.stdout.trim().is_empty();
         if dirty && !input.force && !input.preserve_changes {
             return Err(tool_error(
                 self.name(),
@@ -655,22 +646,16 @@ where
             self.run_plain(vec!["stash", "pop"]).await?;
         }
 
-        let description = serde_json::to_string(&json!({
+        GitToolOutcome::json(
+            self.name(),
+            json!({
             "clone": self.config.worktree,
             "worktree": self.config.worktree,
             "preservedChanges": dirty && input.preserve_changes,
             "forced": input.force,
-        }))
-        .map_err(|error| {
-            tool_error(
-                self.name(),
-                format!("failed to serialize sync result: {error}"),
-            )
-        })?;
-        Ok(GitToolOutcome {
-            description,
-            exit_code: Some(0),
-        })
+            }),
+            Some(0),
+        )
     }
 
     async fn run_plain<S>(&self, args: Vec<S>) -> Result<GitToolOutcome, PureError>
@@ -741,10 +726,7 @@ where
         let stdout = redact(output.stdout, credential);
         let stderr = redact(output.stderr, credential);
         if output.status == 0 {
-            return Ok(GitToolOutcome {
-                description: stdout,
-                exit_code: Some(output.status),
-            });
+            return GitToolOutcome::command(self.name(), output.status, stdout, stderr);
         }
         let combined = format!("{stderr}\n{stdout}");
         Err(tool_error(
@@ -808,6 +790,38 @@ struct GitSyncDefaultBranchInput {
 struct GitToolOutcome {
     description: String,
     exit_code: Option<i32>,
+    stdout: String,
+}
+
+impl GitToolOutcome {
+    fn command(tool: &str, status: i32, stdout: String, stderr: String) -> Result<Self, PureError> {
+        let description = json_description(
+            tool,
+            json!({
+                "status": status,
+                "stdout": stdout,
+                "stderr": stderr,
+            }),
+        )?;
+        Ok(Self {
+            description,
+            exit_code: Some(status),
+            stdout,
+        })
+    }
+
+    fn json(tool: &str, value: Value, exit_code: Option<i32>) -> Result<Self, PureError> {
+        Ok(Self {
+            description: json_description(tool, value)?,
+            exit_code,
+            stdout: String::new(),
+        })
+    }
+}
+
+fn json_description(tool: &str, value: Value) -> Result<String, PureError> {
+    serde_json::to_string(&value)
+        .map_err(|error| tool_error(tool, format!("failed to serialize git output: {error}")))
 }
 
 fn object_schema(properties: Vec<(&'static str, Value, bool)>) -> Value {
@@ -1158,6 +1172,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn git_status_returns_json_output() {
+        let backend = Arc::new(RecordingBackend::default());
+        let provider = Arc::new(StaticCredentialProvider);
+        let tool = GitTool::new(GitToolKind::Status, workspace_config(), backend, provider);
+
+        let output = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({}),
+                    session_id: "session".to_string(),
+                    tool_id: "tool".to_string(),
+                    revision_base: 0,
+                },
+                test_context(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&output.description).unwrap(),
+            serde_json::json!({
+                "status": 0,
+                "stdout": "secret-token fetched",
+                "stderr": ""
+            })
+        );
+        assert_eq!(output.exit_code, Some(0));
+    }
+
+    #[tokio::test]
     async fn git_fetch_uses_provider_token_and_redacts_output() {
         let backend = Arc::new(RecordingBackend::default());
         let provider = Arc::new(StaticCredentialProvider);
@@ -1181,7 +1225,14 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(output.description, "[redacted] fetched");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&output.description).unwrap(),
+            serde_json::json!({
+                "status": 0,
+                "stdout": "[redacted] fetched",
+                "stderr": ""
+            })
+        );
         let requests = backend.requests.lock().unwrap();
         assert_eq!(requests.len(), 1);
         assert_eq!(
