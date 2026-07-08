@@ -421,11 +421,33 @@ pub struct ToolOutputCaptureRequest<'a> {
 /// 工具输出 artifact 的路径计算请求。
 #[derive(Debug, Clone, Copy)]
 pub struct ToolOutputArtifactPathRequest<'a> {
-    pub artifact_files_root: &'a Path,
-    pub namespace: Option<&'a str>,
-    pub call_id: &'a str,
-    pub artifact_id: &'a str,
-    pub name: &'a str,
+    artifact_files_root: &'a Path,
+    namespace: Option<&'a str>,
+    call_id: &'a str,
+    artifact_id: &'a str,
+    name: &'a str,
+}
+
+impl<'a> ToolOutputArtifactPathRequest<'a> {
+    pub fn new(
+        artifact_files_root: &'a Path,
+        call_id: &'a str,
+        artifact_id: &'a str,
+        name: &'a str,
+    ) -> Self {
+        Self {
+            artifact_files_root,
+            namespace: None,
+            call_id,
+            artifact_id,
+            name,
+        }
+    }
+
+    pub fn with_namespace(mut self, namespace: &'a str) -> Self {
+        self.namespace = Some(namespace);
+        self
+    }
 }
 
 /// stdout/stderr 捕获文件集合。
@@ -484,20 +506,24 @@ impl ToolOutputCapture {
     pub async fn prepare(request: ToolOutputCaptureRequest<'_>) -> crate::Result<Self> {
         let stdout_name = tool_output_file_name(request.command, ToolOutputStream::Stdout);
         let stderr_name = tool_output_file_name(request.command, ToolOutputStream::Stderr);
-        let stdout_path = tool_output_artifact_file_path(ToolOutputArtifactPathRequest {
-            artifact_files_root: request.artifact_files_root,
-            namespace: request.namespace,
-            call_id: request.call_id,
-            artifact_id: request.stdout_id,
-            name: &stdout_name,
-        });
-        let stderr_path = tool_output_artifact_file_path(ToolOutputArtifactPathRequest {
-            artifact_files_root: request.artifact_files_root,
-            namespace: request.namespace,
-            call_id: request.call_id,
-            artifact_id: request.stderr_id,
-            name: &stderr_name,
-        });
+        let mut stdout_request = ToolOutputArtifactPathRequest::new(
+            request.artifact_files_root,
+            request.call_id,
+            request.stdout_id,
+            &stdout_name,
+        );
+        let mut stderr_request = ToolOutputArtifactPathRequest::new(
+            request.artifact_files_root,
+            request.call_id,
+            request.stderr_id,
+            &stderr_name,
+        );
+        if let Some(namespace) = request.namespace {
+            stdout_request = stdout_request.with_namespace(namespace);
+            stderr_request = stderr_request.with_namespace(namespace);
+        }
+        let stdout_path = tool_output_artifact_file_path(stdout_request);
+        let stderr_path = tool_output_artifact_file_path(stderr_request);
         if let Some(parent) = stdout_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
@@ -784,13 +810,15 @@ mod tests {
         assert!(capture.stdout.path.exists());
         assert!(!capture.stderr.path.exists());
         assert_eq!(
-            super::tool_output_artifact_file_path(super::ToolOutputArtifactPathRequest {
-                artifact_files_root: &dir,
-                namespace: Some("agent/id"),
-                call_id: "call/id",
-                artifact_id: "artifact-id",
-                name: "cargo-stdout.txt",
-            }),
+            super::tool_output_artifact_file_path(
+                super::ToolOutputArtifactPathRequest::new(
+                    &dir,
+                    "call/id",
+                    "artifact-id",
+                    "cargo-stdout.txt"
+                )
+                .with_namespace("agent/id")
+            ),
             dir.join("tool-output")
                 .join("agent_id")
                 .join("call_id")
@@ -798,13 +826,15 @@ mod tests {
                 .join("cargo-stdout.txt")
         );
         assert_eq!(
-            super::tool_output_artifact_file_path(super::ToolOutputArtifactPathRequest {
-                artifact_files_root: &dir,
-                namespace: Some("../agent"),
-                call_id: "...",
-                artifact_id: "artifact/id",
-                name: "../stdout.txt",
-            }),
+            super::tool_output_artifact_file_path(
+                super::ToolOutputArtifactPathRequest::new(
+                    &dir,
+                    "...",
+                    "artifact/id",
+                    "../stdout.txt"
+                )
+                .with_namespace("../agent")
+            ),
             dir.join("tool-output")
                 .join("agent")
                 .join("tool-call")
@@ -812,6 +842,34 @@ mod tests {
                 .join("stdout.txt")
         );
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[test]
+    fn tool_output_artifact_path_request_hides_fields_behind_constructor() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tool/output_format.rs"
+        ))
+        .expect("source");
+        let request_fields = source
+            .split("pub struct ToolOutputArtifactPathRequest")
+            .nth(1)
+            .expect("request struct")
+            .split("/// stdout/stderr 捕获文件集合。")
+            .next()
+            .expect("request fields");
+        assert!(
+            request_fields.contains("pub fn new("),
+            "工具输出 artifact 路径请求应由 pl-core constructor 承载字段形状"
+        );
+        assert!(
+            !request_fields.contains("pub artifact_files_root:")
+                && !request_fields.contains("pub namespace:")
+                && !request_fields.contains("pub call_id:")
+                && !request_fields.contains("pub artifact_id:")
+                && !request_fields.contains("pub name:"),
+            "宿主不应直接手写 ToolOutputArtifactPathRequest 字段"
+        );
     }
 
     #[test]
