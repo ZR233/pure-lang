@@ -68,6 +68,7 @@ impl Tool for SpawnAgentTool {
                 task_name: args.task_name,
                 path: handle.path,
                 status: AgentStatus::Queued,
+                turn_id: None,
             })
         })
     }

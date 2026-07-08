@@ -8,7 +8,9 @@ use super::agent_tool_records;
 use super::child_agent_options;
 use super::fork_session;
 use super::json_output;
-use super::types::{AgentToolRuntime, ListAgentsResult, SendInputResult, WaitAgentResult};
+use super::types::{
+    AgentToolRuntime, ListAgentsResult, SendInputResult, SpawnAgentResult, WaitAgentResult,
+};
 use crate::agent::AgentRecord;
 use crate::tool::{Tool, ToolContext, ToolRuntimeLockPolicy, WorkspaceAccess};
 use crate::turn::CompileMode;
@@ -73,6 +75,29 @@ fn list_agents_result_round_trips_compact_agents() {
     );
     assert_eq!(result.agents[0].path, "/root/agent-1");
     assert_eq!(result.agents[0].status, AgentStatus::Interrupted);
+}
+
+#[test]
+fn spawn_agent_result_serializes_turn_metadata() {
+    let output = json_output(SpawnAgentResult {
+        agent_id: "agent-1".to_string(),
+        task_name: "inspect".to_string(),
+        path: "/root/agent-1".to_string(),
+        status: AgentStatus::Queued,
+        turn_id: None,
+    })
+    .unwrap();
+
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&output.description).unwrap(),
+        serde_json::json!({
+            "agentId": "agent-1",
+            "taskName": "inspect",
+            "path": "/root/agent-1",
+            "status": "queued",
+            "turnId": null
+        })
+    );
 }
 
 #[test]
