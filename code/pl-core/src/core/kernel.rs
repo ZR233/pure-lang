@@ -3,11 +3,12 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use pl_protocol::Result;
+use pl_protocol::{PureError, Result};
+use serde_json::Value;
 
-use crate::tool::{RegisteredTool, Tool};
+use crate::tool::{RegisteredTool, Tool, ToolContext, ToolInput, ToolOutput, WorkspaceAccess};
 use crate::trace::TraceRecorder;
-use crate::turn::{TurnOptions, TurnRequest, TurnResult};
+use crate::turn::{CompileMode, TurnOptions, TurnRequest, TurnResult};
 
 use super::{CoreRuntimeProfile, PureCore, PureCoreBuilder, ToolProfile};
 
@@ -56,6 +57,42 @@ impl AgentKernel {
             .collect()
     }
 
+    pub async fn execute_tool(&self, request: AgentKernelToolRequest) -> Result<ToolOutput> {
+        let tool = self
+            .tool(&request.name)
+            .ok_or_else(|| PureError::ToolExecutionFailed {
+                tool: request.name.clone(),
+                error: format!("Unknown tool: {}", request.name),
+            })?;
+        let workspace_root = self
+            .core
+            .workspace_root
+            .clone()
+            .unwrap_or_else(default_workspace_root);
+        let input = ToolInput {
+            arguments: request.arguments,
+            session_id: request.session_id,
+            tool_id: request.tool_id,
+            revision_base: request.revision_base,
+        };
+        let context = ToolContext {
+            event_tx: request.event_tx,
+            options: request.options,
+            workspace_access: request.workspace_access,
+            mode: request.mode,
+            workspace_root,
+            workspace_instructions: self.core.workspace_instructions.clone(),
+            instruction_snapshot: request.instruction_snapshot,
+            provider_call_id: request.provider_call_id,
+            active_subagent: self.core.active_subagent.clone(),
+            agent_supervisor: self.core.agent_supervisor.clone(),
+            agent_tool_registrar: self.core.agent_tool_registrar.clone(),
+            lsp_runtime: self.core.lsp_runtime.clone(),
+            parent_session: request.parent_session,
+        };
+        Tool::execute(tool, input, context).await
+    }
+
     pub fn run_turn<'a>(
         &'a self,
         session: &'a mut crate::CoreSession,
@@ -90,12 +127,100 @@ impl AgentKernel {
     }
 }
 
+/// 单次通过 `AgentKernel` 执行工具的请求。
+///
+/// 产品层用于测试、host facade 或非模型 turn 的单工具调用场景。请求只描述
+/// 本次调用的可变输入；workspace、agent registrar、LSP runtime 等稳定上下文
+/// 由 kernel 根据当前 profile 和已注册工具集统一注入。
+#[derive(Clone)]
+pub struct AgentKernelToolRequest {
+    name: String,
+    arguments: Value,
+    session_id: String,
+    tool_id: String,
+    revision_base: u64,
+    event_tx: pl_trace::AgentEventSender,
+    options: TurnOptions,
+    workspace_access: WorkspaceAccess,
+    mode: CompileMode,
+    instruction_snapshot: Option<crate::instruction::InstructionSnapshot>,
+    provider_call_id: Option<String>,
+    parent_session: Arc<crate::CoreSession>,
+}
+
+impl AgentKernelToolRequest {
+    pub fn new(
+        name: impl Into<String>,
+        arguments: Value,
+        session_id: impl Into<String>,
+        tool_id: impl Into<String>,
+        event_tx: pl_trace::AgentEventSender,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            arguments,
+            session_id: session_id.into(),
+            tool_id: tool_id.into(),
+            revision_base: 0,
+            event_tx,
+            options: TurnOptions::default(),
+            workspace_access: WorkspaceAccess::WorkspaceOnly,
+            mode: CompileMode::Auto,
+            instruction_snapshot: None,
+            provider_call_id: None,
+            parent_session: Arc::new(crate::CoreSession::new()),
+        }
+    }
+
+    pub fn with_revision_base(mut self, revision_base: u64) -> Self {
+        self.revision_base = revision_base;
+        self
+    }
+
+    pub fn with_options(mut self, options: TurnOptions) -> Self {
+        self.options = options;
+        self
+    }
+
+    pub fn with_workspace_access(mut self, access: WorkspaceAccess) -> Self {
+        self.workspace_access = access;
+        self
+    }
+
+    pub fn with_mode(mut self, mode: CompileMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    pub fn with_instruction_snapshot(
+        mut self,
+        snapshot: crate::instruction::InstructionSnapshot,
+    ) -> Self {
+        self.instruction_snapshot = Some(snapshot);
+        self
+    }
+
+    pub fn with_provider_call_id(mut self, call_id: impl Into<String>) -> Self {
+        self.provider_call_id = Some(call_id.into());
+        self
+    }
+
+    pub fn with_parent_session(mut self, session: Arc<crate::CoreSession>) -> Self {
+        self.parent_session = session;
+        self
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AgentKernelBuilder {
     core_builder: PureCoreBuilder,
     profile: CoreAgentProfile,
     runtime_tools: Vec<Arc<dyn Tool>>,
     registered_tools: Vec<RegisteredTool>,
+}
+
+fn default_workspace_root() -> PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
 impl AgentKernelBuilder {

@@ -133,6 +133,75 @@ async fn agent_kernel_registers_and_routes_product_tools_as_registered_tools() {
 }
 
 #[tokio::test]
+async fn agent_kernel_executes_registered_tool_with_kernel_context() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let calls_for_tool = calls.clone();
+    let workspace_root = std::env::temp_dir().join("pl-core-agent-kernel-tool-context");
+    let tool = RegisteredTool::new(
+        "context_echo",
+        "Echo input and record kernel supplied context.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "message": { "type": "string" }
+            },
+            "required": ["message"],
+            "additionalProperties": false
+        }),
+        move |input, context| {
+            let calls = calls_for_tool.clone();
+            async move {
+                let message = input
+                    .arguments
+                    .get("message")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                calls.lock().await.push(serde_json::json!({
+                    "message": message,
+                    "workspaceRoot": context.workspace_root,
+                    "hasRegistrar": context.agent_tool_registrar.is_some(),
+                    "sessionId": input.session_id,
+                    "toolId": input.tool_id,
+                }));
+                ToolOutput::json(serde_json::json!({ "ok": true }))
+            }
+        },
+    );
+    let kernel = AgentKernel::builder(
+        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+    )
+    .with_profile(CoreAgentProfile::host_provided(workspace_root.clone()))
+    .with_registered_tool(tool)
+    .build()
+    .await;
+
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let output = kernel
+        .execute_tool(AgentKernelToolRequest::new(
+            "context_echo",
+            serde_json::json!({ "message": "hello" }),
+            "session-1",
+            "tool-1",
+            event_tx,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(output.description, "{\"ok\":true}");
+    assert_eq!(
+        calls.lock().await.as_slice(),
+        &[serde_json::json!({
+            "message": "hello",
+            "workspaceRoot": workspace_root,
+            "hasRegistrar": true,
+            "sessionId": "session-1",
+            "toolId": "tool-1",
+        })]
+    );
+}
+
+#[tokio::test]
 async fn agent_kernel_host_profile_exposes_only_product_tools() {
     let tool = product_echo_tool(Arc::new(Mutex::new(Vec::new())));
     let kernel = AgentKernel::builder(
