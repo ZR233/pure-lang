@@ -697,6 +697,73 @@ pub enum AgentTurnStartOutcome<Status, TurnId, Timestamp> {
     Busy,
 }
 
+/// 完成 agent turn 的宿主无关状态转换输入。
+///
+/// pl-core 只判断即将完成的 turn 是否仍是当前 turn，并生成清空
+/// `current_turn`、写入终态和更新时间的通用 mutation。产品层继续负责
+/// 持久化、事件投影和错误展示策略。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTurnCompletionTransition<TurnId, Status, Timestamp> {
+    turn_id: TurnId,
+    terminal_status: Status,
+    updated_at: Timestamp,
+    error: Option<String>,
+}
+
+impl<TurnId, Status, Timestamp> AgentTurnCompletionTransition<TurnId, Status, Timestamp> {
+    pub fn new(
+        turn_id: TurnId,
+        terminal_status: Status,
+        updated_at: Timestamp,
+        error: Option<String>,
+    ) -> Self {
+        Self {
+            turn_id,
+            terminal_status,
+            updated_at,
+            error,
+        }
+    }
+}
+
+impl<TurnId, Status, Timestamp> AgentTurnCompletionTransition<TurnId, Status, Timestamp>
+where
+    TurnId: PartialEq,
+{
+    /// 根据当前宿主记录中的 turn id 生成完成状态变更。
+    pub fn evaluate(
+        self,
+        current_turn: Option<&TurnId>,
+    ) -> AgentTurnCompletionOutcome<Status, TurnId, Timestamp> {
+        if current_turn.is_some_and(|current| *current == self.turn_id) {
+            AgentTurnCompletionOutcome::Completed(AgentTurnCompletionMutation {
+                status: self.terminal_status,
+                current_turn: None,
+                updated_at: self.updated_at,
+                last_error: self.error,
+            })
+        } else {
+            AgentTurnCompletionOutcome::Stale
+        }
+    }
+}
+
+/// 完成 agent turn 后应写入宿主状态的通用字段。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTurnCompletionMutation<Status, TurnId, Timestamp> {
+    pub status: Status,
+    pub current_turn: Option<TurnId>,
+    pub updated_at: Timestamp,
+    pub last_error: Option<String>,
+}
+
+/// 完成 agent turn 的通用状态转换结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentTurnCompletionOutcome<Status, TurnId, Timestamp> {
+    Completed(AgentTurnCompletionMutation<Status, TurnId, Timestamp>),
+    Stale,
+}
+
 /// 单轮运行的最终状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnResultStatus {
@@ -1067,5 +1134,44 @@ mod tests {
             AgentTurnStartTransition::new("turn-a".to_string(), "running".to_string(), 42);
 
         assert_eq!(transition.evaluate(false), AgentTurnStartOutcome::Busy);
+    }
+
+    #[test]
+    fn agent_turn_completion_transition_builds_terminal_mutation() {
+        let transition = AgentTurnCompletionTransition::new(
+            "turn-a".to_string(),
+            "completed".to_string(),
+            42,
+            Some("finished".to_string()),
+        );
+        let current_turn = Some("turn-a".to_string());
+
+        let outcome = transition.evaluate(current_turn.as_ref());
+
+        assert_eq!(
+            outcome,
+            AgentTurnCompletionOutcome::Completed(AgentTurnCompletionMutation {
+                status: "completed".to_string(),
+                current_turn: None,
+                updated_at: 42,
+                last_error: Some("finished".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn agent_turn_completion_transition_reports_stale_without_mutation() {
+        let transition = AgentTurnCompletionTransition::new(
+            "turn-a".to_string(),
+            "completed".to_string(),
+            42,
+            None,
+        );
+        let current_turn = Some("turn-b".to_string());
+
+        assert_eq!(
+            transition.evaluate(current_turn.as_ref()),
+            AgentTurnCompletionOutcome::Stale
+        );
     }
 }
