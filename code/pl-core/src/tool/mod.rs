@@ -67,12 +67,13 @@ pub use multi_agent::{
     WaitAgentTool,
 };
 pub use output_format::{
-    DEFAULT_MODEL_TOOL_OUTPUT_TOKENS, ToolLifecyclePhase, ToolLifecycleProjection,
-    ToolOutputArtifactDescriptor, ToolOutputArtifactPathRequest, ToolOutputCapture,
-    ToolOutputCaptureRequest, ToolOutputStream, ToolOutputStreamCapture, ToolOutputStreamSizes,
-    model_visible_tool_output, model_visible_tool_output_with_tokens, redacted_trace_preview_value,
-    tool_lifecycle_projection, tool_lifecycle_projections, tool_output_artifact_file_path,
-    trace_preview_output, trace_preview_value,
+    DEFAULT_MODEL_TOOL_OUTPUT_TOKENS, ToolHistoryProjection, ToolLifecyclePhase,
+    ToolLifecycleProjection, ToolOutputArtifactDescriptor, ToolOutputArtifactPathRequest,
+    ToolOutputCapture, ToolOutputCaptureRequest, ToolOutputStream, ToolOutputStreamCapture,
+    ToolOutputStreamSizes, model_visible_tool_output, model_visible_tool_output_with_tokens,
+    redacted_trace_preview_value, tool_history_projection, tool_lifecycle_projection,
+    tool_lifecycle_projections, tool_output_artifact_file_path, trace_preview_output,
+    trace_preview_value,
 };
 pub(crate) use path_policy::{PathAccess, ToolPathPolicy};
 pub use plan::PlanExitTool;

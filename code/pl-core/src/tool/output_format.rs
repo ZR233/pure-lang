@@ -100,6 +100,80 @@ pub struct ToolLifecycleProjection {
     pub completed_at_unix: Option<i64>,
 }
 
+/// 从会话历史中抽出的工具调用详情。
+///
+/// 该投影用于产品层在持久化 trace 缺失时从 `pl_protocol::Message` 历史
+/// 恢复工具名、参数和模型可见输出；产品层仍负责补充 agent/session/turn
+/// 等业务标识和持久化事件 metadata。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolHistoryProjection {
+    pub call_id: String,
+    pub tool_name: String,
+    pub arguments: Value,
+    pub arguments_preview: String,
+    pub output: String,
+    pub output_preview: String,
+}
+
+pub fn tool_history_projection(
+    messages: &[pl_protocol::Message],
+    call_id: &str,
+    preview_chars: usize,
+) -> Option<ToolHistoryProjection> {
+    let mut tool_name = None;
+    let mut arguments = None;
+    let mut output = None;
+
+    for message in messages {
+        if let Some(metadata) =
+            pl_protocol::ToolCallHistoryMetadata::from_metadata(&message.metadata)
+            && let Ok(tool_calls) = serde_json::from_str::<Value>(&metadata.tool_calls_json)
+            && let Some(tool_calls) = tool_calls.as_array()
+        {
+            for tool_call in tool_calls {
+                if tool_call_matches(tool_call, call_id) {
+                    if tool_name.is_none() {
+                        tool_name = tool_call
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned);
+                    }
+                    if arguments.is_none() {
+                        arguments = tool_call_arguments(tool_call);
+                    }
+                }
+            }
+        }
+
+        if message.role == pl_protocol::MessageRole::Tool
+            && let Ok(metadata) = pl_protocol::ToolResultMetadata::from_metadata(&message.metadata)
+            && tool_result_matches(&metadata, call_id)
+        {
+            if tool_name.is_none() && !metadata.tool_name.is_empty() {
+                tool_name = Some(metadata.tool_name.clone());
+            }
+            if arguments.is_none()
+                && let Some(raw_arguments) = metadata.tool_call_arguments.as_deref()
+            {
+                arguments = Some(arguments_value(raw_arguments));
+            }
+            output = Some(message_content_text(&message.content));
+        }
+    }
+
+    let tool_name = tool_name?;
+    let arguments = arguments.unwrap_or_else(|| json!({}));
+    let output = output.unwrap_or_default();
+    Some(ToolHistoryProjection {
+        call_id: call_id.to_string(),
+        tool_name,
+        arguments_preview: trace_preview_value(&arguments, preview_chars),
+        arguments,
+        output_preview: trace_preview_output(&output, preview_chars),
+        output,
+    })
+}
+
 pub fn tool_lifecycle_projections(
     events: &[pl_trace::TraceEvent],
     preview_chars: usize,
@@ -186,6 +260,52 @@ fn arguments_value(arguments: &str) -> Value {
         let _error = error;
         json!(arguments)
     })
+}
+
+fn tool_call_matches(tool_call: &Value, call_id: &str) -> bool {
+    tool_call
+        .get("call_id")
+        .and_then(Value::as_str)
+        .is_some_and(|value| value == call_id)
+        || tool_call
+            .get("id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == call_id)
+}
+
+fn tool_result_matches(metadata: &pl_protocol::ToolResultMetadata, call_id: &str) -> bool {
+    metadata.tool_call_id == call_id || metadata.tool_call_call_id.as_deref() == Some(call_id)
+}
+
+fn tool_call_arguments(tool_call: &Value) -> Option<Value> {
+    let payload = tool_call.get("payload")?;
+    match payload.get("kind").and_then(Value::as_str) {
+        Some("function") => payload.get("arguments").cloned(),
+        Some("custom") => payload
+            .get("input")
+            .and_then(Value::as_str)
+            .map(|input| json!({ "input": input })),
+        Some(_other) => payload.get("arguments").cloned(),
+        None => payload.get("arguments").cloned(),
+    }
+}
+
+fn message_content_text(content: &pl_protocol::MessageContent) -> String {
+    match content {
+        pl_protocol::MessageContent::Text(text) => text.clone(),
+        pl_protocol::MessageContent::MultiPart(parts) => parts
+            .iter()
+            .filter_map(|part| match part {
+                pl_protocol::ContentPart::Text { text } => Some(text.as_str()),
+                pl_protocol::ContentPart::Image {
+                    source: _source,
+                    media_type: _media_type,
+                    filename: _filename,
+                } => None,
+            })
+            .collect::<Vec<_>>()
+            .join(""),
+    }
 }
 
 fn tool_call_id(tool: &pl_trace::TraceToolPart) -> String {
@@ -674,6 +794,43 @@ mod tests {
         );
     }
 
+    #[test]
+    fn tool_history_projection_recovers_call_arguments_and_output() {
+        let messages = vec![
+            tool_call_message(
+                "provider-call",
+                Some("call-1"),
+                "container_exec",
+                json!({"command": "pwd", "token": "secret"}),
+            ),
+            tool_result_message(
+                "provider-call",
+                Some("call-1"),
+                "container_exec",
+                r#"{"command":"pwd","token":"secret"}"#,
+                r#"{"status":0,"stdout":"/workspace\n","stderr":""}"#,
+            ),
+        ];
+
+        let projection =
+            super::tool_history_projection(&messages, "call-1", 160).expect("history projection");
+
+        assert_eq!(
+            projection,
+            super::ToolHistoryProjection {
+                call_id: "call-1".to_string(),
+                tool_name: "container_exec".to_string(),
+                arguments: json!({"command": "pwd", "token": "secret"}),
+                arguments_preview: "{\n  \"command\": \"pwd\",\n  \"token\": \"<redacted>\"\n}"
+                    .to_string(),
+                output: r#"{"status":0,"stdout":"/workspace\n","stderr":""}"#.to_string(),
+                output_preview:
+                    "{\n  \"status\": 0,\n  \"stderr\": \"\",\n  \"stdout\": \"/workspace\\n\"\n}"
+                        .to_string(),
+            }
+        );
+    }
+
     fn test_temp_dir() -> std::path::PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -722,6 +879,55 @@ mod tests {
             agent: None,
             inference: None,
             usage: None,
+        }
+    }
+
+    fn tool_call_message(
+        id: &str,
+        call_id: Option<&str>,
+        name: &str,
+        arguments: serde_json::Value,
+    ) -> pl_protocol::Message {
+        let tool_calls = vec![pl_model::ToolCall::function(
+            id,
+            name,
+            arguments,
+            call_id.map(ToString::to_string),
+        )];
+        let mut metadata = Default::default();
+        pl_protocol::ToolCallHistoryMetadata::new(
+            serde_json::to_string(&tool_calls).expect("tool calls json"),
+        )
+        .insert_into(&mut metadata);
+        pl_protocol::Message {
+            role: pl_protocol::MessageRole::Assistant,
+            content: pl_protocol::MessageContent::Text(String::new()),
+            reasoning_content: None,
+            metadata,
+        }
+    }
+
+    fn tool_result_message(
+        id: &str,
+        call_id: Option<&str>,
+        name: &str,
+        raw_arguments: &str,
+        output: &str,
+    ) -> pl_protocol::Message {
+        let mut metadata = Default::default();
+        pl_protocol::ToolResultMetadata::new(
+            id.to_string(),
+            call_id.map(ToString::to_string),
+            name.to_string(),
+            pl_protocol::ToolCallKind::Function,
+            raw_arguments.to_string(),
+        )
+        .insert_into(&mut metadata);
+        pl_protocol::Message {
+            role: pl_protocol::MessageRole::Tool,
+            content: pl_protocol::MessageContent::Text(output.to_string()),
+            reasoning_content: None,
+            metadata,
         }
     }
 }
