@@ -830,6 +830,15 @@ where
             })
         }
     }
+
+    /// 根据取消 token 和当前 turn id 生成状态变更。
+    pub fn evaluate_with_token(
+        self,
+        cancellation_token: &CancellationToken,
+        current_turn: Option<&TurnId>,
+    ) -> AgentTurnStatusOutcome<Status, Timestamp> {
+        self.evaluate(cancellation_token.is_cancelled(), current_turn)
+    }
 }
 
 /// turn 内状态更新后应写入宿主状态的通用字段。
@@ -1556,6 +1565,39 @@ mod tests {
 
         assert_eq!(
             transition.evaluate(true, current_turn.as_ref()),
+            AgentTurnStatusOutcome::Cancelled
+        );
+    }
+
+    #[test]
+    fn agent_turn_status_transition_evaluates_cancellation_token() {
+        let current_turn = Some("turn-a".to_string());
+        let token = CancellationToken::new();
+        let transition = AgentTurnStatusTransition::new(
+            "turn-a".to_string(),
+            "waiting".to_string(),
+            42,
+            AgentTurnStatusGuard::AllowStale,
+        );
+
+        assert_eq!(
+            transition.evaluate_with_token(&token, current_turn.as_ref()),
+            AgentTurnStatusOutcome::Applied(AgentTurnStatusMutation {
+                status: "waiting".to_string(),
+                updated_at: 42,
+            })
+        );
+
+        token.cancel();
+        let transition = AgentTurnStatusTransition::new(
+            "turn-a".to_string(),
+            "waiting".to_string(),
+            42,
+            AgentTurnStatusGuard::AllowStale,
+        );
+
+        assert_eq!(
+            transition.evaluate_with_token(&token, current_turn.as_ref()),
             AgentTurnStatusOutcome::Cancelled
         );
     }
