@@ -188,16 +188,16 @@ pub fn repair_incomplete_tool_history(history: &mut Vec<Message>) -> bool {
     let mut insertions: Vec<(usize, Vec<Message>)> = Vec::new();
     let mut i = 0;
     while i < history.len() {
-        let mut call_ids = Vec::new();
+        let mut pending_calls = Vec::new();
         while i < history.len() {
             if history[i].metadata.contains_key(TOOL_CALLS_METADATA_KEY) {
-                call_ids.extend(tool_call_ids(&history[i]));
+                pending_calls.extend(tool_calls(&history[i]));
                 i += 1;
             } else {
                 break;
             }
         }
-        if call_ids.is_empty() {
+        if pending_calls.is_empty() {
             i += 1;
             continue;
         }
@@ -206,7 +206,9 @@ pub fn repair_incomplete_tool_history(history: &mut Vec<Message>) -> bool {
         while i < history.len() {
             if history[i].role == MessageRole::Tool
                 && let Ok(metadata) = ToolResultMetadata::from_metadata(&history[i].metadata)
-                && call_ids.iter().any(|id| id == &metadata.tool_call_id)
+                && pending_calls
+                    .iter()
+                    .any(|call| call.id == metadata.tool_call_id)
             {
                 answered.insert(metadata.tool_call_id);
                 i += 1;
@@ -215,9 +217,9 @@ pub fn repair_incomplete_tool_history(history: &mut Vec<Message>) -> bool {
             break;
         }
 
-        let missing_outputs = call_ids
+        let missing_outputs = pending_calls
             .into_iter()
-            .filter(|call_id| !answered.contains(call_id))
+            .filter(|call| !answered.contains(&call.id))
             .map(interrupted_tool_result_message)
             .collect::<Vec<_>>();
         if !missing_outputs.is_empty() {
@@ -234,7 +236,16 @@ pub fn repair_incomplete_tool_history(history: &mut Vec<Message>) -> bool {
     changed
 }
 
-fn tool_call_ids(message: &Message) -> Vec<String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingToolCall {
+    id: String,
+    call_id: Option<String>,
+    name: String,
+    kind: ToolCallKind,
+    arguments: String,
+}
+
+fn tool_calls(message: &Message) -> Vec<PendingToolCall> {
     ToolCallHistoryMetadata::from_metadata(&message.metadata)
         .and_then(|metadata| {
             serde_json::from_str::<serde_json::Value>(&metadata.tool_calls_json).ok()
@@ -243,30 +254,67 @@ fn tool_call_ids(message: &Message) -> Vec<String> {
         .unwrap_or_default()
         .into_iter()
         .filter_map(|item| {
-            item.get("id")
+            let id = item
+                .get("id")
                 .or_else(|| item.get("call_id"))
                 .and_then(serde_json::Value::as_str)
-                .map(ToOwned::to_owned)
+                .map(ToOwned::to_owned)?;
+            let call_id = item
+                .get("call_id")
+                .and_then(serde_json::Value::as_str)
+                .map(ToOwned::to_owned);
+            let name = item
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let payload = item.get("payload");
+            let kind = payload
+                .and_then(|payload| payload.get("kind"))
+                .and_then(serde_json::Value::as_str)
+                .map(tool_call_kind_from_str)
+                .unwrap_or(ToolCallKind::Function);
+            let arguments = payload
+                .and_then(|payload| payload.get("arguments"))
+                .or_else(|| item.get("arguments"))
+                .map(tool_call_arguments)
+                .unwrap_or_else(|| "{}".to_string());
+            Some(PendingToolCall {
+                id,
+                call_id,
+                name,
+                kind,
+                arguments,
+            })
         })
         .collect()
 }
 
-fn interrupted_tool_result_message(call_id: String) -> Message {
+fn interrupted_tool_result_message(call: PendingToolCall) -> Message {
     let mut metadata = HashMap::new();
-    ToolResultMetadata::new(
-        call_id,
-        None,
-        String::new(),
-        ToolCallKind::Function,
-        String::new(),
-    )
-    .insert_into(&mut metadata);
+    ToolResultMetadata::new(call.id, call.call_id, call.name, call.kind, call.arguments)
+        .insert_into(&mut metadata);
     Message {
         role: MessageRole::Tool,
         content: MessageContent::Text("error: tool execution interrupted".to_string()),
         reasoning_content: None,
         metadata,
     }
+}
+
+fn tool_call_kind_from_str(value: &str) -> ToolCallKind {
+    match value {
+        "custom" => ToolCallKind::Custom,
+        "function" => ToolCallKind::Function,
+        _ => ToolCallKind::Function,
+    }
+}
+
+fn tool_call_arguments(value: &serde_json::Value) -> String {
+    value
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| value.to_string())
 }
 
 #[cfg(test)]
@@ -501,11 +549,14 @@ mod tests {
 
         assert_eq!(history.len(), 3);
         assert_eq!(history[1].role, MessageRole::Tool);
+        let metadata =
+            ToolResultMetadata::from_metadata(&history[1].metadata).expect("tool metadata");
+        assert_eq!(metadata.tool_call_id, "call-1");
+        assert_eq!(metadata.tool_call_call_id.as_deref(), Some("call-1"));
+        assert_eq!(metadata.tool_name, "bash");
         assert_eq!(
-            ToolResultMetadata::from_metadata(&history[1].metadata)
-                .expect("tool metadata")
-                .tool_call_id,
-            "call-1"
+            metadata.tool_call_arguments.as_deref(),
+            Some(r#"{"command":"pwd"}"#)
         );
         assert_eq!(history[2].role, MessageRole::User);
     }
