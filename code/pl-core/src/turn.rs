@@ -886,6 +886,49 @@ pub enum AgentTurnCurrentOutcome {
     Interrupted,
 }
 
+/// 取消请求命中的 turn 保护。
+///
+/// 宿主可能同时维护持久化的 `current_turn` 和内存中的 active turn 控制记录。
+/// 取消路径只要命中其中任意一处，就应允许取消继续执行；两处都不命中时，
+/// 该请求视为 stale，不应改写宿主状态。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTurnCancellationGuard<TurnId> {
+    turn_id: TurnId,
+}
+
+impl<TurnId> AgentTurnCancellationGuard<TurnId> {
+    pub fn new(turn_id: TurnId) -> Self {
+        Self { turn_id }
+    }
+}
+
+impl<TurnId> AgentTurnCancellationGuard<TurnId>
+where
+    TurnId: PartialEq,
+{
+    /// 判断目标 turn 是否仍由宿主当前状态或 active turn 控制记录持有。
+    pub fn evaluate(
+        &self,
+        current_turn: Option<&TurnId>,
+        active_turn: Option<&TurnId>,
+    ) -> AgentTurnCancellationOutcome {
+        let matches_current = current_turn.is_some_and(|current| *current == self.turn_id);
+        let matches_active = active_turn.is_some_and(|active| *active == self.turn_id);
+        if matches_current || matches_active {
+            AgentTurnCancellationOutcome::TargetActive
+        } else {
+            AgentTurnCancellationOutcome::Stale
+        }
+    }
+}
+
+/// 取消请求的通用命中结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentTurnCancellationOutcome {
+    TargetActive,
+    Stale,
+}
+
 /// 单轮运行的最终状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnResultStatus {
@@ -1401,6 +1444,40 @@ mod tests {
         assert_eq!(
             guard.evaluate(false, stale_turn.as_ref()),
             AgentTurnCurrentOutcome::Interrupted
+        );
+    }
+
+    #[test]
+    fn agent_turn_cancellation_guard_allows_current_or_active_turn() {
+        let guard = AgentTurnCancellationGuard::new("turn-a".to_string());
+        let matching_current = Some("turn-a".to_string());
+        let matching_active = Some("turn-a".to_string());
+        let stale_current = Some("turn-b".to_string());
+
+        assert_eq!(
+            guard.evaluate(matching_current.as_ref(), None),
+            AgentTurnCancellationOutcome::TargetActive
+        );
+        assert_eq!(
+            guard.evaluate(stale_current.as_ref(), matching_active.as_ref()),
+            AgentTurnCancellationOutcome::TargetActive
+        );
+    }
+
+    #[test]
+    fn agent_turn_cancellation_guard_reports_stale_without_matching_state() {
+        let guard = AgentTurnCancellationGuard::new("turn-a".to_string());
+        let stale_current = Some("turn-b".to_string());
+        let stale_active = Some("turn-c".to_string());
+        let missing_turn: Option<String> = None;
+
+        assert_eq!(
+            guard.evaluate(stale_current.as_ref(), stale_active.as_ref()),
+            AgentTurnCancellationOutcome::Stale
+        );
+        assert_eq!(
+            guard.evaluate(missing_turn.as_ref(), missing_turn.as_ref()),
+            AgentTurnCancellationOutcome::Stale
         );
     }
 }
