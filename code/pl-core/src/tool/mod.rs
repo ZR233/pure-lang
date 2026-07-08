@@ -20,7 +20,7 @@ mod workspace_file;
 use pl_model::ToolSchema;
 use pl_protocol::{PureError, SkillActivation};
 use pl_trace::AgentEventSender;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::fmt;
 use std::future::Future;
 use std::path::PathBuf;
@@ -502,6 +502,32 @@ impl ToolOutput {
             runtime_events: Vec::new(),
         })
     }
+
+    /// 从工具运行时事件中提取并解码输出 artifact。
+    ///
+    /// `OutputArtifacts` 是 pl-core 的工具执行事件细节，产品层应通过这个方法
+    /// 取得自身协议需要的 artifact 类型，而不是直接匹配 `ToolRuntimeEvent`。
+    /// 无法解码的条目会被忽略，和生命周期投影的 artifact 容错语义保持一致。
+    pub fn output_artifacts_as<T>(&self) -> Vec<T>
+    where
+        T: DeserializeOwned,
+    {
+        self.runtime_events
+            .iter()
+            .filter_map(|event| match event {
+                ToolRuntimeEvent::OutputArtifacts { artifacts } => Some(artifacts.as_slice()),
+                ToolRuntimeEvent::SkillActivated {
+                    activation: _activation,
+                } => None,
+                ToolRuntimeEvent::ToolResultRevision {
+                    revision: _revision,
+                } => None,
+                ToolRuntimeEvent::EndTurn => None,
+            })
+            .flatten()
+            .filter_map(|value| serde_json::from_value(value.clone()).ok())
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -718,6 +744,36 @@ mod tests {
                 timed_out: false,
                 runtime_events: vec![ToolRuntimeEvent::EndTurn],
             }
+        );
+    }
+
+    #[test]
+    fn tool_output_decodes_runtime_output_artifacts() {
+        #[derive(Debug, Deserialize, PartialEq, Eq)]
+        struct ArtifactRecord {
+            id: String,
+        }
+
+        let output = ToolOutput {
+            description: "saved".to_string(),
+            truncated: OutputTruncation::empty(),
+            output_file: PathBuf::new(),
+            exit_code: Some(0),
+            timed_out: false,
+            runtime_events: vec![
+                ToolRuntimeEvent::ToolResultRevision { revision: 1 },
+                ToolRuntimeEvent::OutputArtifacts {
+                    artifacts: vec![serde_json::json!({"id": "artifact-1"})],
+                },
+                ToolRuntimeEvent::EndTurn,
+            ],
+        };
+
+        assert_eq!(
+            output.output_artifacts_as::<ArtifactRecord>(),
+            vec![ArtifactRecord {
+                id: "artifact-1".to_string(),
+            }]
         );
     }
 
