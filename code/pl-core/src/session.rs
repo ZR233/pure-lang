@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use pl_model::{ModelContinuationState, ToolCall};
+use pl_model::{CompletionResponse, ModelContinuationState, ToolCall};
 use pl_protocol::{
     Message, MessageContent, MessageRole, TOOL_CALLS_METADATA_KEY, ToolCallHistoryMetadata,
     ToolCallKind, ToolResultMetadata,
@@ -97,6 +97,30 @@ impl CoreSession {
             reasoning_content,
             metadata,
         });
+    }
+
+    /// 将模型完成响应追加为 assistant 历史消息。
+    ///
+    /// 该方法集中维护 completion response 到会话历史的映射：普通响应写入
+    /// assistant 文本消息，带 tool call 的响应写入带 metadata 的 assistant
+    /// tool_calls 消息，并在写入后用 response id 更新 continuation ack。
+    pub fn push_assistant_completion_response(&mut self, response: &CompletionResponse) {
+        if response.tool_calls.is_empty() {
+            self.push_assistant_response(
+                response.content.clone().unwrap_or_default(),
+                response.reasoning_content.clone(),
+            );
+        } else {
+            self.push_assistant_tool_calls(
+                response
+                    .content
+                    .clone()
+                    .filter(|content| !content.is_empty()),
+                response.tool_calls.clone(),
+                response.reasoning_content.clone(),
+            );
+        }
+        self.acknowledge_model_response(self.messages.len(), response.response_id.clone());
     }
 
     /// 推入 tool result 消息。
@@ -378,7 +402,7 @@ fn tool_call_arguments(value: &serde_json::Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use pl_model::{ToolCall, ToolCallKind};
+    use pl_model::{CompletionResponse, FinishReason, TokenUsage, ToolCall, ToolCallKind};
 
     use super::*;
     use pretty_assertions::assert_eq;
@@ -439,6 +463,83 @@ mod tests {
         assert_eq!(session.len(), 1);
         assert_eq!(session.messages()[0].role, MessageRole::Assistant);
         assert!(session.messages()[0].metadata.contains_key("tool_calls"));
+    }
+
+    #[test]
+    fn push_assistant_completion_response_adds_text_message() {
+        let mut session = CoreSession::new();
+        let response = CompletionResponse {
+            content: Some("reply".to_string()),
+            raw_content: Some("reply".to_string()),
+            reasoning_content: Some("thinking".to_string()),
+            tool_calls: Vec::new(),
+            trace_events: Vec::new(),
+            next_sequence: 0,
+            usage: TokenUsage::default(),
+            finish_reason: FinishReason::Stop,
+            model: "test-model".to_string(),
+            response_id: Some("resp-1".to_string()),
+        };
+
+        session.push_assistant_completion_response(&response);
+
+        assert_eq!(
+            session.messages(),
+            &[Message {
+                role: MessageRole::Assistant,
+                content: MessageContent::Text("reply".to_string()),
+                reasoning_content: Some("thinking".to_string()),
+                metadata: HashMap::new(),
+            }]
+        );
+        assert_eq!(session.previous_response_id(), Some("resp-1"));
+        assert_eq!(session.acknowledged_message_count(), 1);
+        assert_eq!(session.continuation_start_index(), Some(1));
+    }
+
+    #[test]
+    fn push_assistant_completion_response_preserves_tool_call_history() {
+        let mut session = CoreSession::new();
+        let tool_calls = vec![ToolCall::function(
+            "call-1",
+            "bash",
+            serde_json::json!({"command": "pwd"}),
+            Some("call-1".to_string()),
+        )];
+        let response = CompletionResponse {
+            content: Some("running".to_string()),
+            raw_content: Some("running".to_string()),
+            reasoning_content: Some("thinking".to_string()),
+            tool_calls: tool_calls.clone(),
+            trace_events: Vec::new(),
+            next_sequence: 0,
+            usage: TokenUsage::default(),
+            finish_reason: FinishReason::ToolCalls,
+            model: "test-model".to_string(),
+            response_id: Some("resp-1".to_string()),
+        };
+
+        session.push_assistant_completion_response(&response);
+
+        assert_eq!(session.len(), 1);
+        assert_eq!(session.messages()[0].role, MessageRole::Assistant);
+        assert_eq!(
+            session.messages()[0].content,
+            MessageContent::Text("running".to_string())
+        );
+        assert_eq!(
+            session.messages()[0].reasoning_content,
+            Some("thinking".to_string())
+        );
+        let metadata = ToolCallHistoryMetadata::from_metadata(&session.messages()[0].metadata)
+            .expect("tool calls");
+        assert_eq!(
+            metadata.tool_calls_json,
+            serde_json::to_string(&tool_calls).expect("tool call json")
+        );
+        assert_eq!(session.previous_response_id(), Some("resp-1"));
+        assert_eq!(session.acknowledged_message_count(), 1);
+        assert_eq!(session.continuation_start_index(), Some(1));
     }
 
     #[test]
