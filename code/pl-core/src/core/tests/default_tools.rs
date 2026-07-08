@@ -656,24 +656,26 @@ async fn tool_set_builder_registers_host_agent_control_policy() {
 struct FakeMcpResourceBackend;
 
 impl crate::tool::McpResourceBackend for FakeMcpResourceBackend {
+    type Error = crate::PureError;
+
     async fn list_resources(
         &self,
         _request: crate::tool::McpListResourcesRequest,
-    ) -> crate::Result<serde_json::Value> {
+    ) -> std::result::Result<serde_json::Value, Self::Error> {
         Ok(serde_json::json!({ "resources": [] }))
     }
 
     async fn list_resource_templates(
         &self,
         _request: crate::tool::McpListResourceTemplatesRequest,
-    ) -> crate::Result<serde_json::Value> {
+    ) -> std::result::Result<serde_json::Value, Self::Error> {
         Ok(serde_json::json!({ "resourceTemplates": [] }))
     }
 
     async fn read_resource(
         &self,
         request: crate::tool::McpReadResourceRequest,
-    ) -> crate::Result<serde_json::Value> {
+    ) -> std::result::Result<serde_json::Value, Self::Error> {
         Ok(serde_json::json!({
             "server": request.server,
             "uri": request.uri,
@@ -685,10 +687,12 @@ impl crate::tool::McpResourceBackend for FakeMcpResourceBackend {
 struct FakeMcpToolBackend;
 
 impl crate::tool::McpToolBackend for FakeMcpToolBackend {
+    type Error = crate::PureError;
+
     async fn call_tool(
         &self,
         request: crate::tool::McpToolRequest,
-    ) -> crate::Result<serde_json::Value> {
+    ) -> std::result::Result<serde_json::Value, Self::Error> {
         Ok(serde_json::json!({
             "tool": request.name,
             "arguments": request.arguments,

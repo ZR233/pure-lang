@@ -655,22 +655,27 @@ impl AgentControlBackend for NoAgentControlBackend {
 pub struct NoMcpResourceBackend;
 
 impl McpResourceBackend for NoMcpResourceBackend {
-    async fn list_resources(&self, _request: McpListResourcesRequest) -> Result<Value> {
-        Err(missing_backend_error("list_mcp_resources", "MCP resource"))
+    type Error = String;
+
+    async fn list_resources(
+        &self,
+        _request: McpListResourcesRequest,
+    ) -> std::result::Result<Value, Self::Error> {
+        Err("MCP resource backend is not configured".to_string())
     }
 
     async fn list_resource_templates(
         &self,
         _request: McpListResourceTemplatesRequest,
-    ) -> Result<Value> {
-        Err(missing_backend_error(
-            "list_mcp_resource_templates",
-            "MCP resource",
-        ))
+    ) -> std::result::Result<Value, Self::Error> {
+        Err("MCP resource backend is not configured".to_string())
     }
 
-    async fn read_resource(&self, _request: McpReadResourceRequest) -> Result<Value> {
-        Err(missing_backend_error("read_mcp_resource", "MCP resource"))
+    async fn read_resource(
+        &self,
+        _request: McpReadResourceRequest,
+    ) -> std::result::Result<Value, Self::Error> {
+        Err("MCP resource backend is not configured".to_string())
     }
 }
 
@@ -678,8 +683,10 @@ impl McpResourceBackend for NoMcpResourceBackend {
 pub struct NoMcpToolBackend;
 
 impl McpToolBackend for NoMcpToolBackend {
-    async fn call_tool(&self, request: McpToolRequest) -> Result<Value> {
-        Err(missing_backend_error(&request.name, "MCP tool"))
+    type Error = String;
+
+    async fn call_tool(&self, _request: McpToolRequest) -> std::result::Result<Value, Self::Error> {
+        Err("MCP tool backend is not configured".to_string())
     }
 }
 

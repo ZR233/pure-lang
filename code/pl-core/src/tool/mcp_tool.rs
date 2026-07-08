@@ -47,7 +47,12 @@ pub struct McpToolRequest {
 /// pl-core 负责注册模型可见 schema、执行统一 tool dispatch、trace 和
 /// tool result history；宿主只把请求投递到自己管理的 MCP session。
 pub trait McpToolBackend: fmt::Debug + Send + Sync {
-    fn call_tool(&self, request: McpToolRequest) -> impl Future<Output = Result<Value>> + Send;
+    type Error: fmt::Display + Send + 'static;
+
+    fn call_tool(
+        &self,
+        request: McpToolRequest,
+    ) -> impl Future<Output = std::result::Result<Value, Self::Error>> + Send;
 }
 
 /// 宿主提供 schema 的 MCP tool。
@@ -112,18 +117,27 @@ where
                     name: self.name.clone(),
                     arguments: input.arguments,
                 })
-                .await?;
+                .await
+                .map_err(|error| tool_error(&self.name, error))?;
             json_output(&self.name, value)
         })
     }
 }
 
+fn tool_error(tool: &str, error: impl fmt::Display) -> PureError {
+    PureError::ToolExecutionFailed {
+        tool: tool.to_string(),
+        error: error.to_string(),
+    }
+}
+
 fn json_output(tool: &str, value: Value) -> Result<ToolOutput> {
-    let description =
-        serde_json::to_string(&value).map_err(|error| PureError::ToolExecutionFailed {
-            tool: tool.to_string(),
-            error: format!("failed to serialize MCP tool output: {error}"),
-        })?;
+    let description = serde_json::to_string(&value).map_err(|error| {
+        tool_error(
+            tool,
+            format!("failed to serialize MCP tool output: {error}"),
+        )
+    })?;
     Ok(ToolOutput {
         description,
         truncated: OutputTruncation::empty(),
@@ -137,10 +151,35 @@ fn json_output(tool: &str, value: Value) -> Result<ToolOutput> {
 #[cfg(test)]
 mod tests {
     use pl_model::ToolSchema;
+    use pl_protocol::PureError;
     use pretty_assertions::assert_eq;
     use serde_json::json;
 
-    use super::{HostMcpToolSpec, host_mcp_tool_schema};
+    use super::{HostMcpToolSpec, McpTool, McpToolBackend, McpToolRequest, host_mcp_tool_schema};
+    use crate::tool::{Tool, ToolContext, ToolInput, WorkspaceAccess};
+
+    #[derive(Debug)]
+    struct DisplayError(&'static str);
+
+    impl std::fmt::Display for DisplayError {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.0)
+        }
+    }
+
+    #[derive(Debug)]
+    struct FailingBackend;
+
+    impl McpToolBackend for FailingBackend {
+        type Error = DisplayError;
+
+        async fn call_tool(
+            &self,
+            _request: McpToolRequest,
+        ) -> std::result::Result<serde_json::Value, Self::Error> {
+            Err(DisplayError("offline"))
+        }
+    }
 
     #[test]
     fn host_mcp_tool_schema_uses_canonical_description_and_input_shape() {
@@ -187,5 +226,56 @@ mod tests {
         });
 
         assert_eq!(schema.description(), "Search repository docs.");
+    }
+
+    #[tokio::test]
+    async fn mcp_tool_maps_backend_display_error_to_tool_error() {
+        let tool = McpTool::new(
+            host_mcp_tool_schema(HostMcpToolSpec {
+                model_name: "mcp__docs__lookup".to_string(),
+                server: "docs".to_string(),
+                name: "lookup".to_string(),
+                description: String::new(),
+                input_schema: json!({ "type": "object" }),
+            }),
+            std::sync::Arc::new(FailingBackend),
+        );
+        let error = tool
+            .execute(
+                ToolInput {
+                    arguments: json!({}),
+                    session_id: "session".to_string(),
+                    tool_id: "tool-call".to_string(),
+                    revision_base: 0,
+                },
+                test_context(),
+            )
+            .await
+            .expect_err("backend should fail");
+
+        assert!(matches!(
+            error,
+            PureError::ToolExecutionFailed { tool, error }
+                if tool == "mcp__docs__lookup" && error == "offline"
+        ));
+    }
+
+    fn test_context() -> ToolContext {
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        ToolContext {
+            event_tx,
+            options: crate::TurnOptions::default(),
+            workspace_access: WorkspaceAccess::WorkspaceOnly,
+            mode: crate::CompileMode::Auto,
+            workspace_root: std::env::temp_dir(),
+            workspace_instructions: None,
+            instruction_snapshot: None,
+            provider_call_id: None,
+            active_subagent: None,
+            agent_supervisor: crate::AgentSupervisor::default(),
+            agent_tool_registrar: None,
+            lsp_runtime: None,
+            parent_session: std::sync::Arc::new(crate::CoreSession::new()),
+        }
     }
 }
