@@ -147,9 +147,10 @@ pub use trace::TraceRecorder;
 pub use turn::{
     AGENT_MAX_COUNT, AGENT_MAX_DEPTH, ActiveTurnControl, ActiveTurnSlot, AgentBudget,
     AgentTurnCompletionMutation, AgentTurnCompletionOutcome, AgentTurnCompletionTransition,
-    AgentTurnStartMutation, AgentTurnStartOutcome, AgentTurnStartTransition, AgentTurnStatusGuard,
-    AgentTurnStatusMutation, AgentTurnStatusOutcome, AgentTurnStatusTransition, BudgetPolicy,
-    CompileMode, DEFAULT_WALL_CLOCK_MS, InteractionCallback, InteractionFuture, PermissionMode,
+    AgentTurnCurrentGuard, AgentTurnCurrentOutcome, AgentTurnStartMutation, AgentTurnStartOutcome,
+    AgentTurnStartTransition, AgentTurnStatusGuard, AgentTurnStatusMutation,
+    AgentTurnStatusOutcome, AgentTurnStatusTransition, BudgetPolicy, CompileMode,
+    DEFAULT_WALL_CLOCK_MS, InteractionCallback, InteractionFuture, PermissionMode,
     ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest, ToolExecutionMode,
     TurnAbortReason, TurnBudget, TurnOptions, TurnOutcome, TurnOutcomeStatus, TurnRequest,
     TurnResult, TurnResultStatus, TurnReturnError, TurnTaskHandle, UserInputMode,

@@ -846,6 +846,46 @@ pub enum AgentTurnStatusOutcome<Status, Timestamp> {
     Cancelled,
 }
 
+/// 长流程步骤中的当前 turn 保护。
+///
+/// 容器、MCP 和其它耗时准备阶段可在副作用前后复用该 guard，确保当前
+/// 操作仍属于同一个 agent turn。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTurnCurrentGuard<TurnId> {
+    turn_id: TurnId,
+}
+
+impl<TurnId> AgentTurnCurrentGuard<TurnId> {
+    pub fn new(turn_id: TurnId) -> Self {
+        Self { turn_id }
+    }
+}
+
+impl<TurnId> AgentTurnCurrentGuard<TurnId>
+where
+    TurnId: PartialEq,
+{
+    /// 根据取消状态和宿主当前 turn id 判断流程是否还能继续。
+    pub fn evaluate(
+        &self,
+        cancelled: bool,
+        current_turn: Option<&TurnId>,
+    ) -> AgentTurnCurrentOutcome {
+        if cancelled || current_turn.is_none_or(|current| *current != self.turn_id) {
+            AgentTurnCurrentOutcome::Interrupted
+        } else {
+            AgentTurnCurrentOutcome::Current
+        }
+    }
+}
+
+/// 当前 turn 保护的判断结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentTurnCurrentOutcome {
+    Current,
+    Interrupted,
+}
+
 /// 单轮运行的最终状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnResultStatus {
@@ -1324,5 +1364,43 @@ mod tests {
             transition.evaluate(false, current_turn.as_ref()),
             AgentTurnStatusOutcome::Applied(_)
         ));
+    }
+
+    #[test]
+    fn agent_turn_current_guard_allows_matching_current_turn() {
+        let guard = AgentTurnCurrentGuard::new("turn-a".to_string());
+        let current_turn = Some("turn-a".to_string());
+
+        assert_eq!(
+            guard.evaluate(false, current_turn.as_ref()),
+            AgentTurnCurrentOutcome::Current
+        );
+    }
+
+    #[test]
+    fn agent_turn_current_guard_interrupts_cancelled_request() {
+        let guard = AgentTurnCurrentGuard::new("turn-a".to_string());
+        let current_turn = Some("turn-a".to_string());
+
+        assert_eq!(
+            guard.evaluate(true, current_turn.as_ref()),
+            AgentTurnCurrentOutcome::Interrupted
+        );
+    }
+
+    #[test]
+    fn agent_turn_current_guard_interrupts_missing_or_stale_turn() {
+        let guard = AgentTurnCurrentGuard::new("turn-a".to_string());
+        let missing_turn: Option<String> = None;
+        let stale_turn = Some("turn-b".to_string());
+
+        assert_eq!(
+            guard.evaluate(false, missing_turn.as_ref()),
+            AgentTurnCurrentOutcome::Interrupted
+        );
+        assert_eq!(
+            guard.evaluate(false, stale_turn.as_ref()),
+            AgentTurnCurrentOutcome::Interrupted
+        );
     }
 }
