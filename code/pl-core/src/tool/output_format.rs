@@ -535,12 +535,38 @@ impl ToolOutputStreamSizes {
 /// 与产品无关的工具输出 artifact 描述。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolOutputArtifactDescriptor {
-    pub id: String,
-    pub call_id: String,
-    pub name: String,
-    pub stream: ToolOutputStream,
-    pub path: PathBuf,
-    pub size_bytes: u64,
+    id: String,
+    call_id: String,
+    name: String,
+    stream: ToolOutputStream,
+    path: PathBuf,
+    size_bytes: u64,
+}
+
+impl ToolOutputArtifactDescriptor {
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub fn call_id(&self) -> &str {
+        &self.call_id
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn stream(&self) -> ToolOutputStream {
+        self.stream
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn size_bytes(&self) -> u64 {
+        self.size_bytes
+    }
 }
 
 impl ToolOutputCapture {
@@ -946,6 +972,40 @@ mod tests {
                 && !capture_fields.contains("pub stderr:")
                 && !capture_fields.contains("pub call_id:"),
             "宿主不应直接读取 ToolOutputCapture 内部字段"
+        );
+    }
+
+    #[test]
+    fn tool_output_artifact_descriptor_hides_fields_behind_accessors() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tool/output_format.rs"
+        ))
+        .expect("source");
+        let descriptor_fields = source
+            .split("pub struct ToolOutputArtifactDescriptor")
+            .nth(1)
+            .expect("descriptor struct")
+            .split("impl ToolOutputCapture")
+            .next()
+            .expect("descriptor fields");
+        assert!(
+            descriptor_fields.contains("pub fn id(")
+                && descriptor_fields.contains("pub fn call_id(")
+                && descriptor_fields.contains("pub fn name(")
+                && descriptor_fields.contains("pub fn stream(")
+                && descriptor_fields.contains("pub fn path(")
+                && descriptor_fields.contains("pub fn size_bytes("),
+            "工具输出 artifact 描述应由 pl-core accessor 暴露"
+        );
+        assert!(
+            !descriptor_fields.contains("pub id:")
+                && !descriptor_fields.contains("pub call_id:")
+                && !descriptor_fields.contains("pub name:")
+                && !descriptor_fields.contains("pub stream:")
+                && !descriptor_fields.contains("pub path:")
+                && !descriptor_fields.contains("pub size_bytes:"),
+            "宿主不应直接读取 ToolOutputArtifactDescriptor 字段"
         );
     }
 
