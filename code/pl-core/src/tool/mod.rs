@@ -382,7 +382,7 @@ pub struct ToolInput {
 }
 
 /// 通用工具输出。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolOutput {
     pub description: String,
@@ -394,7 +394,33 @@ pub struct ToolOutput {
     pub runtime_events: Vec<ToolRuntimeEvent>,
 }
 
+/// 根据产品工具的模型可见输出构造 pl-core 工具输出。
+///
+/// 产品工具 handler 仍负责业务执行和输出文本生成；pl-core 统一把成功状态和
+/// 结束回合语义映射成 canonical `ToolOutput`。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolOutputModelOutputRequest {
+    pub model_output: String,
+    pub success: bool,
+    pub ends_turn: bool,
+}
+
 impl ToolOutput {
+    pub fn from_model_output(request: ToolOutputModelOutputRequest) -> Self {
+        Self {
+            description: request.model_output,
+            truncated: OutputTruncation::empty(),
+            output_file: PathBuf::new(),
+            exit_code: if request.success { Some(0) } else { Some(1) },
+            timed_out: false,
+            runtime_events: if request.ends_turn {
+                vec![ToolRuntimeEvent::EndTurn]
+            } else {
+                Vec::new()
+            },
+        }
+    }
+
     pub fn json(value: impl Serialize) -> Result<Self, PureError> {
         let description =
             serde_json::to_string(&value).map_err(|error| PureError::ToolExecutionFailed {
@@ -589,6 +615,27 @@ mod tests {
         let reg = ToolRegistry::new();
         assert!(reg.is_empty());
         assert_eq!(reg.len(), 0);
+    }
+
+    #[test]
+    fn tool_output_from_model_output_sets_exit_code_and_end_turn_event() {
+        let output = ToolOutput::from_model_output(ToolOutputModelOutputRequest {
+            model_output: "saved".to_string(),
+            success: false,
+            ends_turn: true,
+        });
+
+        assert_eq!(
+            output,
+            ToolOutput {
+                description: "saved".to_string(),
+                truncated: OutputTruncation::empty(),
+                output_file: PathBuf::new(),
+                exit_code: Some(1),
+                timed_out: false,
+                runtime_events: vec![ToolRuntimeEvent::EndTurn],
+            }
+        );
     }
 
     #[test]
