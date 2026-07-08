@@ -85,6 +85,14 @@ impl CoreModelContinuationConfig {
             )),
         }
     }
+
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    pub fn cache_key(&self) -> Option<&str> {
+        self.cache_key.as_deref()
+    }
 }
 
 impl CoreModelTurnRequest {
@@ -301,9 +309,9 @@ mod tests {
             model: "gpt-5.5".to_string(),
         });
 
-        assert!(config.enabled);
+        assert!(config.enabled());
         assert_eq!(
-            config.cache_key.as_deref(),
+            config.cache_key(),
             Some("openai|https://api.openai.com/v1|gpt-5.5")
         );
 
@@ -342,8 +350,8 @@ mod tests {
             },
         ] {
             let config = CoreModelContinuationConfig::from_profile(profile);
-            assert!(!config.enabled);
-            assert_eq!(config.cache_key, None);
+            assert!(!config.enabled());
+            assert_eq!(config.cache_key(), None);
         }
     }
 }
