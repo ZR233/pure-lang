@@ -404,6 +404,158 @@ async fn tool_set_builder_registers_container_only_with_backend() {
     assert!(core.tools.get("container_copy").is_some());
 }
 
+#[derive(Debug, Clone, Default)]
+struct FakeAgentControlBackend;
+
+impl crate::tool::AgentControlBackend for FakeAgentControlBackend {
+    async fn spawn_agent(
+        &self,
+        request: crate::tool::AgentControlSpawnRequest,
+    ) -> crate::Result<crate::tool::AgentControlSpawnOutput> {
+        Ok(crate::tool::AgentControlSpawnOutput {
+            agent_id: "agent-1".to_string(),
+            task_name: request.task_name,
+            path: "agent-1".to_string(),
+            status: pl_protocol::AgentStatus::Running,
+            turn_id: None,
+        })
+    }
+
+    async fn send_input(
+        &self,
+        request: crate::tool::AgentControlSendInputRequest,
+    ) -> crate::Result<crate::tool::AgentControlSendInputOutput> {
+        Ok(crate::tool::AgentControlSendInputOutput {
+            target: request.target,
+            status: pl_protocol::AgentStatus::Running,
+            interrupt: request.interrupt,
+        })
+    }
+
+    async fn wait_agent(
+        &self,
+        _request: crate::tool::AgentControlWaitRequest,
+    ) -> crate::Result<crate::tool::AgentControlWaitOutput> {
+        Ok(crate::tool::AgentControlWaitOutput {
+            message: String::new(),
+            timed_out: false,
+        })
+    }
+
+    async fn list_agents(
+        &self,
+        _request: crate::tool::AgentControlListRequest,
+    ) -> crate::Result<crate::tool::AgentControlListOutput> {
+        Ok(crate::tool::AgentControlListOutput { agents: Vec::new() })
+    }
+
+    async fn close_agent(
+        &self,
+        request: crate::tool::AgentControlTargetRequest,
+    ) -> crate::Result<crate::tool::AgentControlMessageOutput> {
+        Ok(crate::tool::AgentControlMessageOutput {
+            target: request.target,
+            status: pl_protocol::AgentStatus::Shutdown,
+        })
+    }
+
+    async fn resume_agent(
+        &self,
+        request: crate::tool::AgentControlTargetRequest,
+    ) -> crate::Result<crate::tool::AgentControlMessageOutput> {
+        Ok(crate::tool::AgentControlMessageOutput {
+            target: request.target,
+            status: pl_protocol::AgentStatus::Running,
+        })
+    }
+}
+
+#[tokio::test]
+async fn tool_set_builder_registers_host_agent_control_backend() {
+    let capabilities = crate::config::ToolCapabilityConfig {
+        subagents: true,
+        ..Default::default()
+    };
+    let mut core = PureCore::default_provider().unwrap();
+
+    ToolSetBuilder::from_capabilities(capabilities.clone())
+        .with_allowed_tools(["spawn_agent", "send_input"])
+        .register(&mut core, std::env::temp_dir(), None)
+        .await;
+
+    assert!(core.tools.get("spawn_agent").is_some());
+    assert!(core.tools.get("send_input").is_some());
+    assert!(core.tools.get("wait_agent").is_none());
+
+    let mut core = PureCore::default_provider().unwrap();
+    ToolSetBuilder::from_capabilities(capabilities)
+        .with_allowed_tools(["spawn_agent", "send_input"])
+        .with_agent_control_tools(std::sync::Arc::new(FakeAgentControlBackend))
+        .register(&mut core, std::env::temp_dir(), None)
+        .await;
+
+    assert!(core.tools.get("spawn_agent").is_some());
+    assert!(core.tools.get("send_input").is_some());
+    assert!(core.tools.get("wait_agent").is_none());
+}
+
+#[derive(Debug, Clone, Default)]
+struct FakeMcpResourceBackend;
+
+impl crate::tool::McpResourceBackend for FakeMcpResourceBackend {
+    async fn list_resources(
+        &self,
+        _request: crate::tool::McpListResourcesRequest,
+    ) -> crate::Result<serde_json::Value> {
+        Ok(serde_json::json!({ "resources": [] }))
+    }
+
+    async fn list_resource_templates(
+        &self,
+        _request: crate::tool::McpListResourceTemplatesRequest,
+    ) -> crate::Result<serde_json::Value> {
+        Ok(serde_json::json!({ "resourceTemplates": [] }))
+    }
+
+    async fn read_resource(
+        &self,
+        request: crate::tool::McpReadResourceRequest,
+    ) -> crate::Result<serde_json::Value> {
+        Ok(serde_json::json!({
+            "server": request.server,
+            "uri": request.uri,
+        }))
+    }
+}
+
+#[tokio::test]
+async fn tool_set_builder_registers_mcp_resource_backend() {
+    let capabilities = crate::config::ToolCapabilityConfig {
+        mcp: true,
+        ..Default::default()
+    };
+    let mut core = PureCore::default_provider().unwrap();
+
+    ToolSetBuilder::from_capabilities(capabilities.clone())
+        .with_allowed_tools(["list_mcp_resources", "read_mcp_resource"])
+        .register(&mut core, std::env::temp_dir(), None)
+        .await;
+
+    assert!(core.tools.get("list_mcp_resources").is_none());
+    assert!(core.tools.get("read_mcp_resource").is_none());
+
+    let mut core = PureCore::default_provider().unwrap();
+    ToolSetBuilder::from_capabilities(capabilities)
+        .with_allowed_tools(["list_mcp_resources", "read_mcp_resource"])
+        .with_mcp_resource_tools(std::sync::Arc::new(FakeMcpResourceBackend))
+        .register(&mut core, std::env::temp_dir(), None)
+        .await;
+
+    assert!(core.tools.get("list_mcp_resources").is_some());
+    assert!(core.tools.get("list_mcp_resource_templates").is_none());
+    assert!(core.tools.get("read_mcp_resource").is_some());
+}
+
 #[tokio::test]
 async fn tool_set_builder_respects_allowed_tools() {
     let capabilities = crate::config::ToolCapabilityConfig {
