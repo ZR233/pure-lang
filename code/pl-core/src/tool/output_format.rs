@@ -101,6 +101,11 @@ pub struct ToolLifecycleProjection {
 }
 
 impl ToolLifecycleProjection {
+    /// 返回工具完成时间；缺失时回退到开始时间。
+    pub fn completed_at_unix_or_started(&self) -> i64 {
+        self.completed_at_unix.unwrap_or(self.started_at_unix)
+    }
+
     /// 将 trace 中保存的 artifact JSON 解码为产品层的 artifact 类型。
     ///
     /// pl-core 统一负责生命周期投影里的 JSON 解码策略；产品层只需要选择自身
@@ -829,6 +834,8 @@ mod tests {
                 id: "artifact-1".to_string(),
             }]
         );
+        assert_eq!(projections[0].completed_at_unix_or_started(), 10);
+        assert_eq!(projections[1].completed_at_unix_or_started(), 12);
     }
 
     #[test]
