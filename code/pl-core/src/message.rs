@@ -13,6 +13,20 @@ pub fn message_content_text_lines(content: &MessageContent) -> String {
     message_content_text_with_separator(content, "\n")
 }
 
+/// 生成按字符数截断的自然文本预览。
+///
+/// 该 helper 会先 trim 首尾空白；未超限时返回完整文本，超限时保留前
+/// `max_chars` 个字符并追加省略号。适用于 UI/service 事件的摘要文本。
+pub fn text_preview_chars(text: &str, max_chars: usize) -> String {
+    let trimmed = text.trim();
+    if trimmed.chars().count() <= max_chars {
+        return trimmed.to_string();
+    }
+    let mut preview = trimmed.chars().take(max_chars).collect::<String>();
+    preview.push_str("...");
+    preview
+}
+
 /// 从模型完成响应中生成短预览文本。
 ///
 /// 预览按 reasoning、assistant content、tool call 的顺序拼接，并使用与 Codex
@@ -310,5 +324,12 @@ mod tests {
         assert!(preview.ends_with("..."));
         assert!(preview.len() <= 503);
         assert!(std::str::from_utf8(preview.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn text_preview_chars_trims_and_truncates_by_char_count() {
+        assert_eq!(super::text_preview_chars("  hello  ", 10), "hello");
+        assert_eq!(super::text_preview_chars("你好世界", 2), "你好...");
+        assert_eq!(super::text_preview_chars("abc", 0), "...");
     }
 }
