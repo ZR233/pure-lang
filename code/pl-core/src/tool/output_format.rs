@@ -511,8 +511,25 @@ impl ToolOutputStream {
 /// 工具输出流的实际写入字节数。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ToolOutputStreamSizes {
-    pub stdout_bytes: u64,
-    pub stderr_bytes: u64,
+    stdout_bytes: u64,
+    stderr_bytes: u64,
+}
+
+impl ToolOutputStreamSizes {
+    pub fn new(stdout_bytes: u64, stderr_bytes: u64) -> Self {
+        Self {
+            stdout_bytes,
+            stderr_bytes,
+        }
+    }
+
+    pub fn stdout_bytes(&self) -> u64 {
+        self.stdout_bytes
+    }
+
+    pub fn stderr_bytes(&self) -> u64 {
+        self.stderr_bytes
+    }
 }
 
 /// 与产品无关的工具输出 artifact 描述。
@@ -580,14 +597,14 @@ impl ToolOutputCapture {
             &mut artifacts,
             &self.call_id,
             &self.stdout,
-            sizes.stdout_bytes,
+            sizes.stdout_bytes(),
         )
         .await?;
         push_or_remove_artifact(
             &mut artifacts,
             &self.call_id,
             &self.stderr,
-            sizes.stderr_bytes,
+            sizes.stderr_bytes(),
         )
         .await?;
         Ok(artifacts)
@@ -808,10 +825,7 @@ mod tests {
             .expect("stderr");
 
         let artifacts = capture
-            .collect_artifacts(super::ToolOutputStreamSizes {
-                stdout_bytes: 2,
-                stderr_bytes: 0,
-            })
+            .collect_artifacts(super::ToolOutputStreamSizes::new(2, 0))
             .await
             .expect("artifacts");
 
@@ -893,6 +907,31 @@ mod tests {
                 && !request_fields.contains("pub stderr_id:")
                 && !request_fields.contains("pub command:"),
             "宿主不应直接手写 ToolOutputCaptureRequest 字段"
+        );
+    }
+
+    #[test]
+    fn tool_output_stream_sizes_hides_fields_behind_constructor() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tool/output_format.rs"
+        ))
+        .expect("source");
+        let stream_size_fields = source
+            .split("pub struct ToolOutputStreamSizes")
+            .nth(1)
+            .expect("stream sizes struct")
+            .split("/// 与产品无关的工具输出 artifact 描述。")
+            .next()
+            .expect("stream sizes fields");
+        assert!(
+            stream_size_fields.contains("pub fn new("),
+            "工具输出流大小应由 pl-core constructor 承载字段形状"
+        );
+        assert!(
+            !stream_size_fields.contains("pub stdout_bytes:")
+                && !stream_size_fields.contains("pub stderr_bytes:"),
+            "宿主不应直接手写 ToolOutputStreamSizes 字段"
         );
     }
 
