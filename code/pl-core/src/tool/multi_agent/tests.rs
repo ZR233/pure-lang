@@ -242,6 +242,143 @@ fn agent_control_kind_schemas_match_tool_schemas() {
     );
 }
 
+#[derive(Debug, Clone)]
+struct FakeHostAgentControlBackend;
+
+impl crate::tool::AgentControlBackend for FakeHostAgentControlBackend {
+    async fn spawn_agent(
+        &self,
+        request: crate::tool::AgentControlSpawnRequest,
+    ) -> crate::Result<crate::tool::AgentControlSpawnOutput> {
+        assert_eq!(request.skill_mentions, vec!["rust".to_string()]);
+        Ok(crate::tool::AgentControlSpawnOutput {
+            agent_id: "agent-1".to_string(),
+            task_name: request.task_name,
+            path: "/root/agent-1".to_string(),
+            status: AgentStatus::Queued,
+            turn_id: Some("turn-1".to_string()),
+        })
+    }
+
+    async fn send_input(
+        &self,
+        request: crate::tool::AgentControlSendInputRequest,
+    ) -> crate::Result<crate::tool::AgentControlSendInputOutput> {
+        Ok(crate::tool::AgentControlSendInputOutput {
+            target: request.target,
+            status: AgentStatus::Running,
+            interrupt: request.interrupt,
+        })
+    }
+
+    async fn wait_agent(
+        &self,
+        _request: crate::tool::AgentControlWaitRequest,
+    ) -> crate::Result<crate::tool::AgentControlWaitOutput> {
+        Ok(crate::tool::AgentControlWaitOutput {
+            message: "observed".to_string(),
+            timed_out: false,
+        })
+    }
+
+    async fn list_agents(
+        &self,
+        _request: crate::tool::AgentControlListRequest,
+    ) -> crate::Result<crate::tool::AgentControlListOutput> {
+        Ok(crate::tool::AgentControlListOutput {
+            agents: vec![crate::tool::AgentControlAgentRecord {
+                path: "/root/agent-1".to_string(),
+                status: AgentStatus::Queued,
+                role: "executor".to_string(),
+                task: "inspect".to_string(),
+                summary: None,
+                error: None,
+            }],
+        })
+    }
+
+    async fn close_agent(
+        &self,
+        request: crate::tool::AgentControlTargetRequest,
+    ) -> crate::Result<crate::tool::AgentControlMessageOutput> {
+        Ok(crate::tool::AgentControlMessageOutput {
+            target: request.target,
+            status: AgentStatus::Shutdown,
+        })
+    }
+
+    async fn resume_agent(
+        &self,
+        request: crate::tool::AgentControlTargetRequest,
+    ) -> crate::Result<crate::tool::AgentControlMessageOutput> {
+        Ok(crate::tool::AgentControlMessageOutput {
+            target: request.target,
+            status: AgentStatus::Queued,
+        })
+    }
+}
+
+#[tokio::test]
+async fn host_agent_control_tool_uses_shared_schema_parse_output_and_lock_policy() {
+    let tool = crate::tool::AgentControlTool::new(
+        crate::tool::AgentControlToolKind::SpawnAgent,
+        Arc::new(FakeHostAgentControlBackend),
+    );
+
+    assert_eq!(tool.name(), "spawn_agent");
+    assert!(
+        tool.input_schema()
+            .pointer("/properties/taskName")
+            .is_some()
+    );
+    assert_eq!(tool.runtime_lock_policy(), ToolRuntimeLockPolicy::Shared);
+
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let context = ToolContext {
+        event_tx,
+        options: crate::TurnOptions::default(),
+        workspace_access: WorkspaceAccess::WorkspaceOnly,
+        mode: CompileMode::Auto,
+        workspace_root: std::env::temp_dir(),
+        workspace_instructions: None,
+        instruction_snapshot: None,
+        provider_call_id: None,
+        active_subagent: None,
+        agent_supervisor: crate::AgentSupervisor::default(),
+        agent_tool_registrar: None,
+        lsp_runtime: None,
+        parent_session: Arc::new(crate::CoreSession::new()),
+    };
+    let output = tool
+        .execute(
+            crate::tool::ToolInput {
+                arguments: serde_json::json!({
+                    "taskName": "inspect_runtime",
+                    "message": "inspect",
+                    "agentType": "explorer",
+                    "skillMentions": ["rust"]
+                }),
+                session_id: "session-1".to_string(),
+                tool_id: "call-1".to_string(),
+                revision_base: 0,
+            },
+            context,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&output.description).unwrap(),
+        serde_json::json!({
+            "agentId": "agent-1",
+            "taskName": "inspect_runtime",
+            "path": "/root/agent-1",
+            "status": "queued",
+            "turnId": "turn-1"
+        })
+    );
+}
+
 #[derive(Debug)]
 struct NoopAgentToolRegistrar;
 

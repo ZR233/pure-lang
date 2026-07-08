@@ -13,7 +13,7 @@ use crate::tool::{
 
 use super::backend::{ContainerBackend, ContainerExecRequest};
 use super::files::copy_container;
-use super::helpers::{bounded_model_tool_output_with_tokens, parse_input, tool_error};
+use super::helpers::{parse_input, tool_error};
 use super::schema::{ContainerToolKind, TOOL_CONTAINER_EXEC};
 
 const DEFAULT_MODEL_TOOL_OUTPUT_TOKENS: usize = 10_000;
@@ -63,7 +63,8 @@ impl ContainerToolExecution {
         max_output_tokens: usize,
     ) -> Self {
         let output = serde_json::to_string(&output).unwrap_or_else(|_| "{}".to_string());
-        let model_output = bounded_model_tool_output_with_tokens(&output, max_output_tokens);
+        let model_output =
+            crate::tool::model_visible_tool_output_with_tokens(&output, max_output_tokens);
         Self {
             success,
             output,
@@ -117,13 +118,20 @@ where
             )
             .await?
             .ok_or_else(|| tool_error(self.name(), "unknown container tool"))?;
+            let runtime_events = if execution.output_artifacts.is_empty() {
+                Vec::new()
+            } else {
+                vec![crate::tool::ToolRuntimeEvent::OutputArtifacts {
+                    artifacts: execution.output_artifacts.clone(),
+                }]
+            };
             Ok(ToolOutput {
                 description: execution.model_output,
                 truncated: execution.truncated,
                 output_file: PathBuf::new(),
                 exit_code: execution.exit_code,
                 timed_out: false,
-                runtime_events: Vec::new(),
+                runtime_events,
             })
         })
     }

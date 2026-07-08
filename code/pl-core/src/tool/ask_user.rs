@@ -9,7 +9,8 @@ use pl_protocol::{
 use serde::Deserialize;
 
 use super::truncation::OutputTruncation;
-use super::{BoxFuture, Tool, ToolContext, ToolInput, ToolOutput};
+use super::{BoxFuture, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeEvent};
+use crate::turn::UserInputMode;
 
 #[derive(Debug, Default)]
 pub struct AskUserTool;
@@ -109,21 +110,39 @@ impl Tool for AskUserTool {
                 });
             };
             let interaction = user_input_interaction(&input.session_id, &request, &context);
-            let resolution = match context.options.cancellation_token.clone() {
-                Some(token) => {
-                    tokio::select! {
-                        resolution = callback(interaction.clone()) => resolution,
-                        _ = token.cancelled() => InteractionResolution::UserInput {
-                            answers: Default::default(),
-                        },
-                    }
+            let (response, runtime_events) = match context.options.user_input_mode {
+                UserInputMode::AwaitResponse => {
+                    let resolution = match context.options.cancellation_token.clone() {
+                        Some(token) => {
+                            tokio::select! {
+                                resolution = callback(interaction.clone()) => resolution,
+                                _ = token.cancelled() => InteractionResolution::UserInput {
+                                    answers: Default::default(),
+                                },
+                            }
+                        }
+                        None => callback(interaction.clone()).await,
+                    };
+                    let response = match resolution {
+                        InteractionResolution::UserInput { answers } => {
+                            UserInputResponse { answers }
+                        }
+                        InteractionResolution::ToolApproval { .. }
+                        | InteractionResolution::PlanConfirmation { .. } => {
+                            UserInputResponse::default()
+                        }
+                    };
+                    (response, Vec::new())
                 }
-                None => callback(interaction.clone()).await,
-            };
-            let response = match resolution {
-                InteractionResolution::UserInput { answers } => UserInputResponse { answers },
-                InteractionResolution::ToolApproval { .. }
-                | InteractionResolution::PlanConfirmation { .. } => UserInputResponse::default(),
+                UserInputMode::EmitAndEndTurn => {
+                    tokio::spawn(async move {
+                        let _ = callback(interaction).await;
+                    });
+                    (
+                        UserInputResponse::default(),
+                        vec![ToolRuntimeEvent::EndTurn],
+                    )
+                }
             };
             let description = serde_json::to_string(&response).map_err(|error| {
                 PureError::ToolExecutionFailed {
@@ -137,7 +156,7 @@ impl Tool for AskUserTool {
                 output_file: PathBuf::new(),
                 exit_code: None,
                 timed_out: false,
-                runtime_events: Vec::new(),
+                runtime_events,
             })
         })
     }
@@ -367,6 +386,41 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<UserInputResponse>(&output.description).unwrap(),
             UserInputResponse::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn request_user_input_can_end_current_turn_after_request() {
+        let callback: crate::InteractionCallback = Arc::new(|_interaction| {
+            Box::pin(async {
+                std::future::pending::<()>().await;
+                InteractionResolution::UserInput {
+                    answers: Default::default(),
+                }
+            })
+        });
+        let output = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            AskUserTool.execute(
+                tool_input(),
+                context(
+                    TurnOptions::default()
+                        .with_interaction_callback(callback)
+                        .with_user_input_end_turn(),
+                ),
+            ),
+        )
+        .await
+        .expect("tool should not wait for user resolution")
+        .unwrap();
+
+        assert_eq!(
+            serde_json::from_str::<UserInputResponse>(&output.description).unwrap(),
+            UserInputResponse::default()
+        );
+        assert_eq!(
+            output.runtime_events,
+            vec![crate::tool::ToolRuntimeEvent::EndTurn]
         );
     }
 

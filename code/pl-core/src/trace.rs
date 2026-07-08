@@ -293,6 +293,7 @@ impl TraceRecorder {
                 result: None,
                 exit_code: None,
                 timed_out: false,
+                output_artifacts: Vec::new(),
                 working_directory: None,
                 denial_reason: None,
             }),

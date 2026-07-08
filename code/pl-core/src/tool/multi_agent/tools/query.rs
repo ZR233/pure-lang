@@ -38,8 +38,12 @@ impl Tool for WaitAgentTool {
         context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
         Box::pin(async move {
-            let args: WaitAgentArgs = serde_json::from_value(input.arguments)
-                .unwrap_or(WaitAgentArgs { timeout_ms: None });
+            let args: WaitAgentArgs =
+                serde_json::from_value(input.arguments).unwrap_or(WaitAgentArgs {
+                    _target: None,
+                    _targets: Vec::new(),
+                    timeout_ms: None,
+                });
             let sender_path = current_agent_path(&context);
             let outcome = context
                 .agent_supervisor

@@ -1,0 +1,165 @@
+use pl_model::{
+    CompletionRequest, CompletionResponse, ModelProvider, ReasoningConfig, SharedModelProvider,
+    ToolSchema, is_continuation_unsupported_error,
+};
+use pl_protocol::{PureError, Result};
+use pl_trace::AgentEventSender;
+use tokio_util::sync::CancellationToken;
+
+use crate::CoreSession;
+
+/// 单次模型 completion 请求配置。
+///
+/// 该结构覆盖不需要完整 `PureCore` turn loop 的宿主场景，例如只调用模型做
+/// context compaction。它复用 `CoreSession` 的 continuation 状态，避免宿主重复
+/// 实现 previous_response_id、prompt cache 和全量回退逻辑。
+#[derive(Debug, Clone)]
+pub struct CoreModelTurnRequest {
+    model: String,
+    instructions: Option<String>,
+    tools: Vec<ToolSchema>,
+    parallel_tool_calls: bool,
+    max_tokens: Option<u64>,
+    reasoning: Option<ReasoningConfig>,
+    use_continuation: bool,
+}
+
+impl CoreModelTurnRequest {
+    pub fn new(model: impl Into<String>) -> Self {
+        Self {
+            model: model.into(),
+            instructions: None,
+            tools: Vec::new(),
+            parallel_tool_calls: false,
+            max_tokens: None,
+            reasoning: None,
+            use_continuation: false,
+        }
+    }
+
+    pub fn with_instructions(mut self, instructions: impl Into<String>) -> Self {
+        self.instructions = Some(instructions.into());
+        self
+    }
+
+    pub fn with_tools(mut self, tools: Vec<ToolSchema>) -> Self {
+        self.tools = tools;
+        self
+    }
+
+    pub fn with_parallel_tool_calls(mut self, parallel_tool_calls: bool) -> Self {
+        self.parallel_tool_calls = parallel_tool_calls;
+        self
+    }
+
+    pub fn with_max_tokens(mut self, max_tokens: Option<u64>) -> Self {
+        self.max_tokens = max_tokens;
+        self
+    }
+
+    pub fn with_reasoning(mut self, reasoning: Option<ReasoningConfig>) -> Self {
+        self.reasoning = reasoning;
+        self
+    }
+
+    pub fn with_continuation(mut self, use_continuation: bool) -> Self {
+        self.use_continuation = use_continuation;
+        self
+    }
+}
+
+/// 单次模型 completion 执行选项。
+#[derive(Debug, Clone, Default)]
+pub struct CoreModelTurnOptions {
+    cancellation_token: Option<CancellationToken>,
+    event_tx: Option<AgentEventSender>,
+}
+
+impl CoreModelTurnOptions {
+    pub fn with_cancellation(mut self, cancellation_token: CancellationToken) -> Self {
+        self.cancellation_token = Some(cancellation_token);
+        self
+    }
+
+    pub fn with_event_sender(mut self, event_tx: AgentEventSender) -> Self {
+        self.event_tx = Some(event_tx);
+        self
+    }
+}
+
+pub async fn stream_session_completion_response(
+    provider: SharedModelProvider,
+    session: &mut CoreSession,
+    request: CoreModelTurnRequest,
+    options: CoreModelTurnOptions,
+) -> Result<CompletionResponse> {
+    let use_continuation = request.use_continuation && !session.continuation_disabled();
+    let request_body = completion_request(session, &request, use_continuation);
+    match stream_completion(&provider, request_body, &options).await {
+        Ok(response) => {
+            session.acknowledge_model_response(session.len(), response.response_id.clone());
+            Ok(response)
+        }
+        Err(error) if use_continuation && is_continuation_unsupported_error(&error) => {
+            session.mark_continuation_unsupported();
+            let fallback = completion_request(session, &request, false);
+            let response = stream_completion(&provider, fallback, &options).await?;
+            session.mark_continuation_unsupported();
+            Ok(response)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn completion_request(
+    session: &CoreSession,
+    request: &CoreModelTurnRequest,
+    use_continuation: bool,
+) -> CompletionRequest {
+    let history_source = if use_continuation {
+        session
+            .continuation_start_index()
+            .and_then(|start| session.messages().get(start..))
+            .unwrap_or_else(|| session.messages())
+    } else {
+        session.messages()
+    };
+    CompletionRequest::builder(request.model.clone())
+        .maybe_instructions(request.instructions.clone())
+        .messages(history_source.to_vec())
+        .tools(request.tools.clone())
+        .parallel_tool_calls(request.parallel_tool_calls)
+        .maybe_max_tokens(request.max_tokens)
+        .store(Some(use_continuation))
+        .previous_response_id(
+            use_continuation
+                .then(|| session.previous_response_id().map(ToString::to_string))
+                .flatten(),
+        )
+        .prompt_cache_key(session.prompt_cache_key().map(ToString::to_string))
+        .reasoning(request.reasoning.clone())
+        .build()
+}
+
+async fn stream_completion(
+    provider: &SharedModelProvider,
+    request: CompletionRequest,
+    options: &CoreModelTurnOptions,
+) -> Result<CompletionResponse> {
+    let event_tx = match &options.event_tx {
+        Some(event_tx) => event_tx.clone(),
+        None => {
+            let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+            event_tx
+        }
+    };
+    match &options.cancellation_token {
+        Some(token) => {
+            tokio::select! {
+                response = provider.stream_complete(request, event_tx) => response,
+                _ = token.cancelled() => Err(PureError::LlmError("model request cancelled".to_string())),
+            }
+        }
+        None => provider.stream_complete(request, event_tx).await,
+    }
+}
