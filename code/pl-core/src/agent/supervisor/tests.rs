@@ -235,12 +235,32 @@ fn agent_input_queue_start_attempt_restores_busy_input_to_front() {
 
 #[test]
 fn agent_wait_completion_completes_without_active_turn() {
-    let snapshot = AgentWaitSnapshot {
-        turn_presence: AgentTurnPresence::NoActiveTurn,
-        status: AgentLifecycleStatusKind::Active,
-    };
+    let snapshot = AgentWaitSnapshot::new(
+        AgentTurnPresence::NoActiveTurn,
+        AgentLifecycleStatusKind::Active,
+    );
 
     assert_eq!(snapshot.completion(), AgentWaitCompletion::Complete);
+}
+
+#[test]
+fn agent_wait_snapshot_hides_shared_fields_behind_constructor() {
+    let source = include_str!("mod.rs");
+    let wait_snapshot_fields = source
+        .split("pub struct AgentWaitSnapshot")
+        .nth(1)
+        .and_then(|text| text.split("impl AgentWaitSnapshot").next())
+        .expect("AgentWaitSnapshot definition");
+
+    assert!(
+        source.contains("pub fn new("),
+        "AgentWaitSnapshot 应通过构造器承载共享字段形状"
+    );
+    assert!(
+        !wait_snapshot_fields.contains("pub turn_presence:")
+            && !wait_snapshot_fields.contains("pub status:"),
+        "AgentWaitSnapshot 字段不应公开给宿主 adapter 手写"
+    );
 }
 
 #[test]

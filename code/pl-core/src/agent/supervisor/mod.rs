@@ -348,11 +348,29 @@ impl AgentLifecycleStatusKind {
 /// wait_agent 观察到的最小状态快照。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AgentWaitSnapshot {
-    pub turn_presence: AgentTurnPresence,
-    pub status: AgentLifecycleStatusKind,
+    turn_presence: AgentTurnPresence,
+    status: AgentLifecycleStatusKind,
 }
 
 impl AgentWaitSnapshot {
+    /// 使用最小 turn presence 和生命周期状态创建 wait 快照。
+    pub fn new(turn_presence: AgentTurnPresence, status: AgentLifecycleStatusKind) -> Self {
+        Self {
+            turn_presence,
+            status,
+        }
+    }
+
+    /// wait 快照观察到的 turn presence。
+    pub fn turn_presence(self) -> AgentTurnPresence {
+        self.turn_presence
+    }
+
+    /// wait 快照观察到的生命周期状态分类。
+    pub fn status(self) -> AgentLifecycleStatusKind {
+        self.status
+    }
+
     /// 根据一组目标 agent 的 completed/pending 分区生成共享 wait 快照。
     ///
     /// 多 agent `wait_agent` 只要观察到任一完成目标，或没有剩余 pending 目标，
@@ -360,15 +378,15 @@ impl AgentWaitSnapshot {
     /// 这段分组等待语义。
     pub fn from_group_counts(completed_count: usize, pending_count: usize) -> Self {
         if completed_count > 0 || pending_count == 0 {
-            Self {
-                turn_presence: AgentTurnPresence::NoActiveTurn,
-                status: AgentLifecycleStatusKind::Completed,
-            }
+            Self::new(
+                AgentTurnPresence::NoActiveTurn,
+                AgentLifecycleStatusKind::Completed,
+            )
         } else {
-            Self {
-                turn_presence: AgentTurnPresence::ActiveTurn,
-                status: AgentLifecycleStatusKind::Active,
-            }
+            Self::new(
+                AgentTurnPresence::ActiveTurn,
+                AgentLifecycleStatusKind::Active,
+            )
         }
     }
 
