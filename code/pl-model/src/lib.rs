@@ -28,7 +28,7 @@ pub use model_family::{ModelFamily, ModelPricing};
 pub use model_info::{
     MaxTokensField, ModelInfo, ModelRequestProfile, TruncationMode, TruncationPolicy,
 };
-pub use parameter::{ModelParameter, ParameterWire, WireAssignment};
+pub use parameter::{ModelParameter, ParameterWire, WireAssignment, wire_assignments_from_value};
 pub use pl_protocol::ToolCallKind;
 pub use provider::{
     ModelProvider, OpenAiProvider, SharedModelProvider, create_provider,

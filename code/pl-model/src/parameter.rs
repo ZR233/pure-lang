@@ -75,6 +75,43 @@ pub struct WireAssignment {
     pub value: Value,
 }
 
+/// 将 JSON 请求片段拍平成 wire 赋值列表。
+///
+/// object 会递归展开为 dot 路径，null 会被忽略，其它 JSON 值按叶子节点原样
+/// 保留。宿主产品可用它把配置中的 provider/model 请求片段转换为
+/// [`ParameterWire::set`]，避免重复实现路径拍平语义。
+pub fn wire_assignments_from_value(value: &Value) -> Vec<WireAssignment> {
+    let mut assignments = Vec::new();
+    collect_wire_assignments(None, value, &mut assignments);
+    assignments
+}
+
+fn collect_wire_assignments(
+    prefix: Option<&str>,
+    value: &Value,
+    assignments: &mut Vec<WireAssignment>,
+) {
+    match value {
+        Value::Object(object) => {
+            for (key, value) in object {
+                let path = prefix
+                    .map(|prefix| format!("{prefix}.{key}"))
+                    .unwrap_or_else(|| key.clone());
+                collect_wire_assignments(Some(&path), value, assignments);
+            }
+        }
+        Value::Null => {}
+        Value::Array(_) | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+            if let Some(path) = prefix {
+                assignments.push(WireAssignment {
+                    path: path.to_string(),
+                    value: value.clone(),
+                });
+            }
+        }
+    }
+}
+
 /// 按 dot 路径写入嵌套 JSON 对象。
 ///
 /// 中间节点不存在则创建 Object；中间节点存在但非 Object 则整体替换为 Object。
@@ -242,6 +279,41 @@ mod tests {
         wire.apply_to(&mut body);
 
         assert_eq!(body, Map::new());
+    }
+
+    #[test]
+    fn wire_assignments_from_value_flattens_scalar_leaves() {
+        let request = json!({
+            "reasoning_effort": "high",
+            "thinking": {
+                "type": "enabled",
+                "clear_thinking": false,
+                "ignored": null
+            },
+            "modalities": ["text"]
+        });
+
+        assert_eq!(
+            wire_assignments_from_value(&request),
+            vec![
+                WireAssignment {
+                    path: "modalities".to_string(),
+                    value: json!(["text"]),
+                },
+                WireAssignment {
+                    path: "reasoning_effort".to_string(),
+                    value: json!("high"),
+                },
+                WireAssignment {
+                    path: "thinking.clear_thinking".to_string(),
+                    value: json!(false),
+                },
+                WireAssignment {
+                    path: "thinking.type".to_string(),
+                    value: json!("enabled"),
+                },
+            ]
+        );
     }
 
     #[test]
