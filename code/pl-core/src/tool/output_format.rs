@@ -74,6 +74,134 @@ pub fn redacted_trace_preview_value(value: &Value) -> Value {
     }
 }
 
+/// 工具生命周期投影阶段。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolLifecyclePhase {
+    Started,
+    Finished { success: bool },
+}
+
+/// 从 pl-core trace 中抽出的工具生命周期通用视图。
+///
+/// 产品层可以把它映射到自身的 store、Web 事件或日志格式；pl-core 负责统一
+/// call id、参数 JSON、预览截断、输出 artifact 和耗时计算。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolLifecycleProjection {
+    pub phase: ToolLifecyclePhase,
+    pub call_id: String,
+    pub tool_name: String,
+    pub arguments: Value,
+    pub arguments_preview: String,
+    pub output: String,
+    pub output_preview: String,
+    pub output_artifacts: Vec<Value>,
+    pub duration_ms: Option<u64>,
+    pub started_at_unix: i64,
+    pub completed_at_unix: Option<i64>,
+}
+
+pub fn tool_lifecycle_projections(
+    events: &[pl_trace::TraceEvent],
+    preview_chars: usize,
+) -> Vec<ToolLifecycleProjection> {
+    events
+        .iter()
+        .filter_map(|event| tool_lifecycle_projection(event, preview_chars))
+        .collect()
+}
+
+pub fn tool_lifecycle_projection(
+    event: &pl_trace::TraceEvent,
+    preview_chars: usize,
+) -> Option<ToolLifecycleProjection> {
+    match &event.kind {
+        pl_trace::TraceEventKind::TracePartStarted { item } => {
+            if item.status == pl_trace::TracePartStatus::Started {
+                projection_from_trace_part(item, ToolLifecyclePhase::Started, preview_chars)
+            } else {
+                None
+            }
+        }
+        pl_trace::TraceEventKind::TracePartCompleted { item } => projection_from_trace_part(
+            item,
+            ToolLifecyclePhase::Finished { success: true },
+            preview_chars,
+        ),
+        pl_trace::TraceEventKind::TracePartFailed {
+            item,
+            error: _error,
+        } => projection_from_trace_part(
+            item,
+            ToolLifecyclePhase::Finished { success: false },
+            preview_chars,
+        ),
+        pl_trace::TraceEventKind::TracePartDelta { event: _event } => None,
+        pl_trace::TraceEventKind::PlanLifecycleChanged { event: _event } => None,
+        pl_trace::TraceEventKind::InteractionChanged { event: _event } => None,
+        pl_trace::TraceEventKind::EnabledToolsRecorded { event: _event } => None,
+        pl_trace::TraceEventKind::SkillActivated {
+            activation: _activation,
+        } => None,
+    }
+}
+
+fn projection_from_trace_part(
+    item: &pl_trace::TracePart,
+    phase: ToolLifecyclePhase,
+    preview_chars: usize,
+) -> Option<ToolLifecycleProjection> {
+    let tool = item.tool.as_ref()?;
+    let arguments = arguments_value(&tool.arguments);
+    let arguments_preview = trace_preview_value(&arguments, preview_chars);
+    let (output, output_preview, output_artifacts, duration_ms, completed_at_unix) = match &phase {
+        ToolLifecyclePhase::Started => (String::new(), String::new(), Vec::new(), None, None),
+        ToolLifecyclePhase::Finished { success: _success } => {
+            let output = tool.result.clone().unwrap_or_default();
+            (
+                output.clone(),
+                trace_preview_output(&output, preview_chars),
+                tool.output_artifacts.clone(),
+                duration_ms(item.created_at, item.updated_at),
+                Some(item.updated_at),
+            )
+        }
+    };
+    Some(ToolLifecycleProjection {
+        phase,
+        call_id: tool_call_id(tool),
+        tool_name: tool.name.clone(),
+        arguments,
+        arguments_preview,
+        output,
+        output_preview,
+        output_artifacts,
+        duration_ms,
+        started_at_unix: item.created_at,
+        completed_at_unix,
+    })
+}
+
+fn arguments_value(arguments: &str) -> Value {
+    serde_json::from_str(arguments).unwrap_or_else(|error| {
+        let _error = error;
+        json!(arguments)
+    })
+}
+
+fn tool_call_id(tool: &pl_trace::TraceToolPart) -> String {
+    tool.call_id
+        .clone()
+        .unwrap_or_else(|| tool.tool_call_id.clone())
+}
+
+fn duration_ms(created_at: i64, updated_at: i64) -> Option<u64> {
+    updated_at
+        .saturating_sub(created_at)
+        .try_into()
+        .ok()
+        .map(|seconds: u64| seconds.saturating_mul(1000))
+}
+
 /// 为捕获工具 stdout/stderr 输出准备文件路径。
 ///
 /// 宿主负责生成调用 id 与 artifact id；pl-core 只统一安全文件名、目录布局和
@@ -399,7 +527,12 @@ fn looks_like_base64(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use pl_trace::{
+        TraceEvent, TraceEventKind, TracePart, TracePartKind, TracePartSource, TracePartStatus,
+        TraceToolPart,
+    };
     use pretty_assertions::assert_eq;
+    use serde_json::json;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[tokio::test]
@@ -478,6 +611,69 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
+    #[test]
+    fn tool_lifecycle_projection_extracts_tool_events_and_artifacts() {
+        let events = vec![
+            TraceEvent {
+                session_id: "session".to_string(),
+                sequence: 1,
+                timestamp: 10,
+                kind: TraceEventKind::TracePartStarted {
+                    item: tool_part(TracePartStatus::Started, None, Vec::new()),
+                },
+            },
+            TraceEvent {
+                session_id: "session".to_string(),
+                sequence: 2,
+                timestamp: 12,
+                kind: TraceEventKind::TracePartCompleted {
+                    item: tool_part(
+                        TracePartStatus::Completed,
+                        Some(r#"{"ok":true,"api_key":"secret"}"#),
+                        vec![json!({"id": "artifact-1"})],
+                    ),
+                },
+            },
+        ];
+
+        let projections = super::tool_lifecycle_projections(&events, 120);
+
+        assert_eq!(
+            projections,
+            vec![
+                super::ToolLifecycleProjection {
+                    phase: super::ToolLifecyclePhase::Started,
+                    call_id: "call-1".to_string(),
+                    tool_name: "container_exec".to_string(),
+                    arguments: json!({"token": "secret", "path": "src"}),
+                    arguments_preview: "{\n  \"path\": \"src\",\n  \"token\": \"<redacted>\"\n}"
+                        .to_string(),
+                    output: String::new(),
+                    output_preview: String::new(),
+                    output_artifacts: Vec::new(),
+                    duration_ms: None,
+                    started_at_unix: 10,
+                    completed_at_unix: None,
+                },
+                super::ToolLifecycleProjection {
+                    phase: super::ToolLifecyclePhase::Finished { success: true },
+                    call_id: "call-1".to_string(),
+                    tool_name: "container_exec".to_string(),
+                    arguments: json!({"token": "secret", "path": "src"}),
+                    arguments_preview: "{\n  \"path\": \"src\",\n  \"token\": \"<redacted>\"\n}"
+                        .to_string(),
+                    output: r#"{"ok":true,"api_key":"secret"}"#.to_string(),
+                    output_preview: "{\n  \"api_key\": \"<redacted>\",\n  \"ok\": true\n}"
+                        .to_string(),
+                    output_artifacts: vec![json!({"id": "artifact-1"})],
+                    duration_ms: Some(2_000),
+                    started_at_unix: 10,
+                    completed_at_unix: Some(12),
+                },
+            ]
+        );
+    }
+
     fn test_temp_dir() -> std::path::PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -489,5 +685,43 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).expect("create temp dir");
         dir
+    }
+
+    fn tool_part(
+        status: TracePartStatus,
+        result: Option<&str>,
+        output_artifacts: Vec<serde_json::Value>,
+    ) -> TracePart {
+        TracePart {
+            turn_id: "turn".to_string(),
+            item_id: "item".to_string(),
+            started_sequence: 1,
+            revision: 0,
+            kind: TracePartKind::Tool,
+            status,
+            created_at: 10,
+            updated_at: 12,
+            source: TracePartSource::Runtime,
+            text_channel: None,
+            content: String::new(),
+            attachments: Vec::new(),
+            thinking_chunks: Vec::new(),
+            tool: Some(TraceToolPart {
+                tool_call_id: "trace-call".to_string(),
+                call_id: Some("call-1".to_string()),
+                provider_item_id: None,
+                name: "container_exec".to_string(),
+                arguments: r#"{"token":"secret","path":"src"}"#.to_string(),
+                result: result.map(ToString::to_string),
+                exit_code: None,
+                timed_out: false,
+                output_artifacts,
+                working_directory: None,
+                denial_reason: None,
+            }),
+            agent: None,
+            inference: None,
+            usage: None,
+        }
     }
 }
