@@ -764,6 +764,88 @@ pub enum AgentTurnCompletionOutcome<Status, TurnId, Timestamp> {
     Stale,
 }
 
+/// turn 内状态更新是否必须绑定当前 turn。
+///
+/// 宿主在进入模型、工具等待等阶段时通常需要校验当前 turn，恢复或非严格
+/// 投影路径则可以显式选择允许旧 turn 写入普通状态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentTurnStatusGuard {
+    EnforceCurrent,
+    AllowStale,
+}
+
+impl AgentTurnStatusGuard {
+    fn enforces_current(self) -> bool {
+        matches!(self, Self::EnforceCurrent)
+    }
+}
+
+/// turn 内部阶段状态更新的宿主无关状态转换输入。
+///
+/// pl-core 统一处理“请求已取消”和“必须匹配当前 turn”两类通用判断；
+/// 宿主只需要传入自己的状态枚举、turn id 和时间戳类型。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTurnStatusTransition<TurnId, Status, Timestamp> {
+    turn_id: TurnId,
+    status: Status,
+    updated_at: Timestamp,
+    guard: AgentTurnStatusGuard,
+}
+
+impl<TurnId, Status, Timestamp> AgentTurnStatusTransition<TurnId, Status, Timestamp> {
+    pub fn new(
+        turn_id: TurnId,
+        status: Status,
+        updated_at: Timestamp,
+        guard: AgentTurnStatusGuard,
+    ) -> Self {
+        Self {
+            turn_id,
+            status,
+            updated_at,
+            guard,
+        }
+    }
+}
+
+impl<TurnId, Status, Timestamp> AgentTurnStatusTransition<TurnId, Status, Timestamp>
+where
+    TurnId: PartialEq,
+{
+    /// 根据取消状态和当前 turn id 生成状态变更。
+    pub fn evaluate(
+        self,
+        cancelled: bool,
+        current_turn: Option<&TurnId>,
+    ) -> AgentTurnStatusOutcome<Status, Timestamp> {
+        if cancelled
+            || (self.guard.enforces_current()
+                && current_turn.is_none_or(|current| *current != self.turn_id))
+        {
+            AgentTurnStatusOutcome::Cancelled
+        } else {
+            AgentTurnStatusOutcome::Applied(AgentTurnStatusMutation {
+                status: self.status,
+                updated_at: self.updated_at,
+            })
+        }
+    }
+}
+
+/// turn 内状态更新后应写入宿主状态的通用字段。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTurnStatusMutation<Status, Timestamp> {
+    pub status: Status,
+    pub updated_at: Timestamp,
+}
+
+/// turn 内状态更新的通用状态转换结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentTurnStatusOutcome<Status, Timestamp> {
+    Applied(AgentTurnStatusMutation<Status, Timestamp>),
+    Cancelled,
+}
+
 /// 单轮运行的最终状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnResultStatus {
@@ -1173,5 +1255,74 @@ mod tests {
             transition.evaluate(current_turn.as_ref()),
             AgentTurnCompletionOutcome::Stale
         );
+    }
+
+    #[test]
+    fn agent_turn_status_transition_builds_status_mutation_when_current() {
+        let transition = AgentTurnStatusTransition::new(
+            "turn-a".to_string(),
+            "waiting".to_string(),
+            42,
+            AgentTurnStatusGuard::EnforceCurrent,
+        );
+        let current_turn = Some("turn-a".to_string());
+
+        let outcome = transition.evaluate(false, current_turn.as_ref());
+
+        assert_eq!(
+            outcome,
+            AgentTurnStatusOutcome::Applied(AgentTurnStatusMutation {
+                status: "waiting".to_string(),
+                updated_at: 42,
+            })
+        );
+    }
+
+    #[test]
+    fn agent_turn_status_transition_cancels_enforced_stale_turn() {
+        let transition = AgentTurnStatusTransition::new(
+            "turn-a".to_string(),
+            "waiting".to_string(),
+            42,
+            AgentTurnStatusGuard::EnforceCurrent,
+        );
+        let current_turn = Some("turn-b".to_string());
+
+        assert_eq!(
+            transition.evaluate(false, current_turn.as_ref()),
+            AgentTurnStatusOutcome::Cancelled
+        );
+    }
+
+    #[test]
+    fn agent_turn_status_transition_cancels_cancelled_request() {
+        let transition = AgentTurnStatusTransition::new(
+            "turn-a".to_string(),
+            "waiting".to_string(),
+            42,
+            AgentTurnStatusGuard::AllowStale,
+        );
+        let current_turn = Some("turn-a".to_string());
+
+        assert_eq!(
+            transition.evaluate(true, current_turn.as_ref()),
+            AgentTurnStatusOutcome::Cancelled
+        );
+    }
+
+    #[test]
+    fn agent_turn_status_transition_allows_unenforced_stale_turn() {
+        let transition = AgentTurnStatusTransition::new(
+            "turn-a".to_string(),
+            "waiting".to_string(),
+            42,
+            AgentTurnStatusGuard::AllowStale,
+        );
+        let current_turn = Some("turn-b".to_string());
+
+        assert!(matches!(
+            transition.evaluate(false, current_turn.as_ref()),
+            AgentTurnStatusOutcome::Applied(_)
+        ));
     }
 }
