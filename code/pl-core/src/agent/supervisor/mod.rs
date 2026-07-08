@@ -121,12 +121,12 @@ pub enum AgentTurnPresence {
     NoActiveTurn,
 }
 
-/// wait 判断所需的宿主无关 agent 状态分类。
+/// agent 生命周期判断所需的宿主无关状态分类。
 ///
 /// 不同产品可拥有自己的状态 enum；接入层只需要把产品状态映射到该分类，
-/// wait 的完成规则则由 pl-core 统一维护。
+/// wait 完成和 turn 启动等通用生命周期规则则由 pl-core 统一维护。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentWaitStatusKind {
+pub enum AgentLifecycleStatusKind {
     Active,
     Idle,
     Completed,
@@ -135,11 +135,18 @@ pub enum AgentWaitStatusKind {
     Deleted,
 }
 
-impl AgentWaitStatusKind {
-    fn is_completion_status(self) -> bool {
+impl AgentLifecycleStatusKind {
+    fn is_wait_completion_status(self) -> bool {
         matches!(
             self,
             Self::Idle | Self::Completed | Self::Failed | Self::Cancelled | Self::Deleted
+        )
+    }
+
+    fn is_turn_start_ready(self) -> bool {
+        matches!(
+            self,
+            Self::Idle | Self::Completed | Self::Failed | Self::Cancelled
         )
     }
 }
@@ -148,14 +155,14 @@ impl AgentWaitStatusKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AgentWaitSnapshot {
     pub turn_presence: AgentTurnPresence,
-    pub status: AgentWaitStatusKind,
+    pub status: AgentLifecycleStatusKind,
 }
 
 impl AgentWaitSnapshot {
     /// 根据当前 turn presence 和状态分类判断 wait 是否可以返回。
     pub fn completion(self) -> AgentWaitCompletion {
         if matches!(self.turn_presence, AgentTurnPresence::NoActiveTurn)
-            || self.status.is_completion_status()
+            || self.status.is_wait_completion_status()
         {
             AgentWaitCompletion::Complete
         } else {
@@ -173,6 +180,34 @@ impl AgentWaitSnapshot {
 pub enum AgentWaitCompletion {
     Complete,
     Pending,
+}
+
+/// 准备启动 agent turn 时观察到的最小状态快照。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentTurnStartSnapshot {
+    pub status: AgentLifecycleStatusKind,
+}
+
+impl AgentTurnStartSnapshot {
+    /// 判断当前状态是否允许启动新 turn。
+    pub fn readiness(self) -> AgentTurnStartReadiness {
+        if self.status.is_turn_start_ready() {
+            AgentTurnStartReadiness::Ready
+        } else {
+            AgentTurnStartReadiness::Busy
+        }
+    }
+
+    pub fn can_start(self) -> bool {
+        matches!(self.readiness(), AgentTurnStartReadiness::Ready)
+    }
+}
+
+/// 启动 agent turn 的共享可用性判断结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentTurnStartReadiness {
+    Ready,
+    Busy,
 }
 
 #[derive(Debug, Clone)]

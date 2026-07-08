@@ -24,10 +24,11 @@ mod turn;
 mod workspace;
 
 pub use agent::{
-    AgentHandle, AgentInputTurnMode, AgentMessage, AgentMessageMode, AgentMessageRequest,
-    AgentPath, AgentRecord, AgentRunSpec, AgentSpawnInput, AgentStatus, AgentStatusUpdate,
-    AgentSupervisor, AgentToolRegistrar, AgentTurnPresence, AgentWaitCompletion, AgentWaitOutcome,
-    AgentWaitSnapshot, AgentWaitStatusKind,
+    AgentHandle, AgentInputTurnMode, AgentLifecycleStatusKind, AgentMessage, AgentMessageMode,
+    AgentMessageRequest, AgentPath, AgentRecord, AgentRunSpec, AgentSpawnInput, AgentStatus,
+    AgentStatusUpdate, AgentSupervisor, AgentToolRegistrar, AgentTurnPresence,
+    AgentTurnStartReadiness, AgentTurnStartSnapshot, AgentWaitCompletion, AgentWaitOutcome,
+    AgentWaitSnapshot,
 };
 pub use attachment::MaterializedAttachment;
 pub use config::{

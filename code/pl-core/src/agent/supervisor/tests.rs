@@ -99,7 +99,7 @@ fn agent_input_turn_mode_exposes_queue_and_busy_semantics() {
 fn agent_wait_completion_completes_without_active_turn() {
     let snapshot = AgentWaitSnapshot {
         turn_presence: AgentTurnPresence::NoActiveTurn,
-        status: AgentWaitStatusKind::Active,
+        status: AgentLifecycleStatusKind::Active,
     };
 
     assert_eq!(snapshot.completion(), AgentWaitCompletion::Complete);
@@ -108,11 +108,11 @@ fn agent_wait_completion_completes_without_active_turn() {
 #[test]
 fn agent_wait_completion_completes_for_terminal_or_idle_status() {
     for status in [
-        AgentWaitStatusKind::Idle,
-        AgentWaitStatusKind::Completed,
-        AgentWaitStatusKind::Failed,
-        AgentWaitStatusKind::Cancelled,
-        AgentWaitStatusKind::Deleted,
+        AgentLifecycleStatusKind::Idle,
+        AgentLifecycleStatusKind::Completed,
+        AgentLifecycleStatusKind::Failed,
+        AgentLifecycleStatusKind::Cancelled,
+        AgentLifecycleStatusKind::Deleted,
     ] {
         let snapshot = AgentWaitSnapshot {
             turn_presence: AgentTurnPresence::ActiveTurn,
@@ -127,10 +127,36 @@ fn agent_wait_completion_completes_for_terminal_or_idle_status() {
 fn agent_wait_completion_keeps_active_turn_pending() {
     let snapshot = AgentWaitSnapshot {
         turn_presence: AgentTurnPresence::ActiveTurn,
-        status: AgentWaitStatusKind::Active,
+        status: AgentLifecycleStatusKind::Active,
     };
 
     assert_eq!(snapshot.completion(), AgentWaitCompletion::Pending);
+}
+
+#[test]
+fn agent_turn_start_readiness_allows_idle_and_restartable_statuses() {
+    for status in [
+        AgentLifecycleStatusKind::Idle,
+        AgentLifecycleStatusKind::Completed,
+        AgentLifecycleStatusKind::Failed,
+        AgentLifecycleStatusKind::Cancelled,
+    ] {
+        let snapshot = AgentTurnStartSnapshot { status };
+
+        assert_eq!(snapshot.readiness(), AgentTurnStartReadiness::Ready);
+    }
+}
+
+#[test]
+fn agent_turn_start_readiness_rejects_active_and_deleted_statuses() {
+    for status in [
+        AgentLifecycleStatusKind::Active,
+        AgentLifecycleStatusKind::Deleted,
+    ] {
+        let snapshot = AgentTurnStartSnapshot { status };
+
+        assert_eq!(snapshot.readiness(), AgentTurnStartReadiness::Busy);
+    }
 }
 
 #[tokio::test]
