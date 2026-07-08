@@ -667,6 +667,37 @@ impl RegisteredTool {
         })
     }
 
+    pub fn from_fallible_execution_result<F, Fut, Artifact, Error>(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        input_schema: serde_json::Value,
+        handler: F,
+    ) -> Self
+    where
+        F: Fn(ToolInput, ToolContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = std::result::Result<ToolExecutionResult<Artifact>, Error>>
+            + Send
+            + 'static,
+        Artifact: Send + 'static,
+        Error: fmt::Display + Send + 'static,
+    {
+        let name = name.into();
+        let tool_name = name.clone();
+        Self::new(name, description, input_schema, move |input, context| {
+            let future = handler(input, context);
+            let tool_name = tool_name.clone();
+            async move {
+                future
+                    .await
+                    .map(ToolExecutionResult::into_tool_output)
+                    .map_err(|error| PureError::ToolExecutionFailed {
+                        tool: tool_name,
+                        error: error.to_string(),
+                    })
+            }
+        })
+    }
+
     pub fn with_parallel_tool_calls(mut self) -> Self {
         self.supports_parallel_tool_calls = true;
         self
@@ -995,6 +1026,59 @@ mod tests {
                 if tool == "product_tool" && error.contains("cancel")
         ));
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn registered_tool_from_fallible_execution_result_maps_display_error() {
+        #[derive(Debug)]
+        struct DisplayError(&'static str);
+
+        impl fmt::Display for DisplayError {
+            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str(self.0)
+            }
+        }
+
+        let tool = RegisteredTool::from_fallible_execution_result(
+            "product_tool",
+            "Product tool",
+            serde_json::json!({ "type": "object" }),
+            |_input, _context| async move {
+                Err::<ToolExecutionResult<serde_json::Value>, DisplayError>(DisplayError("boom"))
+            },
+        );
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let result = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({}),
+                    session_id: "session".to_string(),
+                    tool_id: "tool-call".to_string(),
+                    revision_base: 0,
+                },
+                ToolContext {
+                    event_tx,
+                    options: TurnOptions::default(),
+                    workspace_access: WorkspaceAccess::WorkspaceOnly,
+                    mode: crate::turn::CompileMode::Auto,
+                    workspace_root: PathBuf::new(),
+                    workspace_instructions: None,
+                    instruction_snapshot: None,
+                    provider_call_id: None,
+                    active_subagent: None,
+                    agent_supervisor: AgentSupervisor::default(),
+                    agent_tool_registrar: None,
+                    lsp_runtime: None,
+                    parent_session: Arc::new(crate::session::CoreSession::new()),
+                },
+            )
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(PureError::ToolExecutionFailed { tool, error })
+                if tool == "product_tool" && error == "boom"
+        ));
     }
 
     #[test]
