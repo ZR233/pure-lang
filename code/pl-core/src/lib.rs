@@ -110,7 +110,8 @@ pub use studio::{
 #[cfg(feature = "docker-tools")]
 pub use tool::DockerCliContainerBackend;
 pub use tool::{
-    AgentControlAgentRecord, AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
+    AgentControlAgentRecord, AgentControlAgentType, AgentControlAgentTypePolicy,
+    AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
     AgentControlMessageOutput, AgentControlPolicy, AgentControlSendInputOutput,
     AgentControlSendInputRequest, AgentControlSpawnOutput, AgentControlSpawnRequest,
     AgentControlTargetRequest, AgentControlTool, AgentControlToolKind, AgentControlWaitOutput,

@@ -18,7 +18,8 @@ use crate::agent::AgentRecord;
 use types::{AgentToolRecord, CompactAgentRecord};
 
 pub use host::{
-    AgentControlAgentRecord, AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
+    AgentControlAgentRecord, AgentControlAgentType, AgentControlAgentTypePolicy,
+    AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
     AgentControlMessageOutput, AgentControlPolicy, AgentControlSendInputOutput,
     AgentControlSendInputRequest, AgentControlSpawnOutput, AgentControlSpawnRequest,
     AgentControlTargetRequest, AgentControlTool, AgentControlWaitOutput, AgentControlWaitRequest,

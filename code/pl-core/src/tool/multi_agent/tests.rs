@@ -72,6 +72,54 @@ fn agent_control_send_input_request_exposes_shared_turn_mode() {
 }
 
 #[test]
+fn agent_control_spawn_request_exposes_shared_agent_type_policy() {
+    let omitted: crate::tool::AgentControlSpawnRequest =
+        serde_json::from_value(serde_json::json!({ "taskName": "inspect", "message": "inspect" }))
+            .unwrap();
+    let reviewer: crate::tool::AgentControlSpawnRequest = serde_json::from_value(
+        serde_json::json!({ "taskName": "review", "message": "review", "agentType": "reviewer" }),
+    )
+    .unwrap();
+    let worker_alias: crate::tool::AgentControlSpawnRequest = serde_json::from_value(
+        serde_json::json!({ "taskName": "work", "message": "work", "agentType": "worker" }),
+    )
+    .unwrap();
+    let default_alias: crate::tool::AgentControlSpawnRequest = serde_json::from_value(
+        serde_json::json!({ "taskName": "work", "message": "work", "agentType": " default " }),
+    )
+    .unwrap();
+
+    assert_eq!(
+        omitted.agent_type_policy(),
+        crate::tool::AgentControlAgentTypePolicy {
+            kind: crate::tool::AgentControlAgentType::Executor,
+            role_profile_requested: false,
+        }
+    );
+    assert_eq!(
+        reviewer.agent_type_policy(),
+        crate::tool::AgentControlAgentTypePolicy {
+            kind: crate::tool::AgentControlAgentType::Reviewer,
+            role_profile_requested: true,
+        }
+    );
+    assert_eq!(
+        worker_alias.agent_type_policy(),
+        crate::tool::AgentControlAgentTypePolicy {
+            kind: crate::tool::AgentControlAgentType::Executor,
+            role_profile_requested: false,
+        }
+    );
+    assert_eq!(
+        default_alias.agent_type_policy(),
+        crate::tool::AgentControlAgentTypePolicy {
+            kind: crate::tool::AgentControlAgentType::Executor,
+            role_profile_requested: false,
+        }
+    );
+}
+
+#[test]
 fn agent_control_wait_request_normalizes_timeout_duration() {
     let default_timeout: crate::tool::AgentControlWaitRequest =
         serde_json::from_value(serde_json::json!({})).unwrap();

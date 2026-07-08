@@ -62,7 +62,8 @@ pub use mcp_tool::{
     host_mcp_tool_schemas,
 };
 pub use multi_agent::{
-    AgentControlAgentRecord, AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
+    AgentControlAgentRecord, AgentControlAgentType, AgentControlAgentTypePolicy,
+    AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
     AgentControlMessageOutput, AgentControlPolicy, AgentControlSendInputOutput,
     AgentControlSendInputRequest, AgentControlSpawnOutput, AgentControlSpawnRequest,
     AgentControlTargetRequest, AgentControlTool, AgentControlToolKind, AgentControlWaitOutput,

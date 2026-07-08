@@ -77,6 +77,46 @@ pub trait AgentControlPolicy: fmt::Debug + Send + Sync {
     ) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
 }
 
+/// 共享 `spawn_agent.agentType` 可识别的 agent 类型。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentControlAgentType {
+    Planner,
+    Explorer,
+    Executor,
+    Reviewer,
+}
+
+impl AgentControlAgentType {
+    /// 按模型可见协议解析 agent 类型，并保留历史 executor alias。
+    pub fn from_label(value: &str) -> Option<Self> {
+        match value.trim().to_lowercase().as_str() {
+            "planner" => Some(Self::Planner),
+            "explorer" => Some(Self::Explorer),
+            "executor" | "worker" | "default" | "" => Some(Self::Executor),
+            "reviewer" => Some(Self::Reviewer),
+            _other => None,
+        }
+    }
+
+    /// 返回模型可见 canonical 名称。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Planner => "planner",
+            Self::Explorer => "explorer",
+            Self::Executor => "executor",
+            Self::Reviewer => "reviewer",
+        }
+    }
+}
+
+/// `spawn_agent.agentType` 解析后的共享策略。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentControlAgentTypePolicy {
+    pub kind: AgentControlAgentType,
+    pub role_profile_requested: bool,
+}
+
 /// 默认允许所有 agent-control 调用的策略。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AllowAllAgentControlPolicy;
@@ -113,6 +153,28 @@ pub struct AgentControlSpawnRequest {
     pub skill_mentions: Vec<String>,
     #[serde(skip)]
     pub forked_messages: Option<Vec<Message>>,
+}
+
+impl AgentControlSpawnRequest {
+    /// 返回共享 agent 类型策略。
+    ///
+    /// 省略、空值和历史 alias 都按 executor 执行，但只有模型可见 canonical
+    /// role 名称会请求宿主使用对应角色 profile。
+    pub fn agent_type_policy(&self) -> AgentControlAgentTypePolicy {
+        let value = self.agent_type.as_deref().unwrap_or_default();
+        let kind =
+            AgentControlAgentType::from_label(value).unwrap_or(AgentControlAgentType::Executor);
+        let role_profile_requested = self.agent_type.as_deref().is_some_and(|value| {
+            matches!(
+                value.trim().to_lowercase().as_str(),
+                "planner" | "explorer" | "executor" | "reviewer"
+            )
+        });
+        AgentControlAgentTypePolicy {
+            kind,
+            role_profile_requested,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
