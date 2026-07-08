@@ -137,6 +137,25 @@ fn tool_visibility_set_combines_shared_product_and_dynamic_tools() {
 }
 
 #[test]
+fn hosted_container_visibility_combines_product_and_dynamic_names() {
+    let visibility = ToolVisibilitySet::hosted_container_with_tool_names(
+        HostedSharedToolVisibility::default()
+            .with_git(true)
+            .with_spawn_agent(true),
+        ["github_api_request", "save_artifact"],
+        ["mcp__docs__lookup"],
+    );
+
+    assert!(visibility.contains("read_file"));
+    assert!(visibility.contains("git_status"));
+    assert!(visibility.contains("spawn_agent"));
+    assert!(visibility.contains("github_api_request"));
+    assert!(visibility.contains("save_artifact"));
+    assert!(visibility.contains("mcp__docs__lookup"));
+    assert!(!visibility.contains("close_agent"));
+}
+
+#[test]
 fn shared_tool_schemas_can_include_mcp_resource_tools() {
     let names = shared_tool_schemas(SharedToolSchemaOptions {
         mcp_resources: true,

@@ -145,6 +145,22 @@ impl ToolVisibilitySet {
         Self::from_tool_names(hosted_container_shared_tool_names(visibility))
     }
 
+    pub fn hosted_container_with_tool_names<I, S, J, T>(
+        visibility: HostedSharedToolVisibility,
+        product_tool_names: I,
+        dynamic_tool_names: J,
+    ) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+        J: IntoIterator<Item = T>,
+        T: Into<String>,
+    {
+        Self::hosted_container(visibility)
+            .with_tool_names(product_tool_names)
+            .with_tool_names(dynamic_tool_names)
+    }
+
     pub fn from_tool_names<I, S>(names: I) -> Self
     where
         I: IntoIterator<Item = S>,
