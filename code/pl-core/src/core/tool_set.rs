@@ -63,6 +63,68 @@ impl SharedToolSchemaOptions {
     }
 }
 
+/// Host 提供容器 workspace 时，模型可见共享工具的产品侧开关。
+///
+/// pl-core 负责维护 canonical shared tool 目录；宿主只把自身策略映射为这些开关，
+/// 例如 project agent 才暴露 git，maintainer/root agent 才能 spawn/close 子 agent。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HostedSharedToolVisibility {
+    pub git: bool,
+    pub spawn_agent: bool,
+    pub close_agent: bool,
+}
+
+impl HostedSharedToolVisibility {
+    pub fn with_git(mut self, enabled: bool) -> Self {
+        self.git = enabled;
+        self
+    }
+
+    pub fn with_spawn_agent(mut self, enabled: bool) -> Self {
+        self.spawn_agent = enabled;
+        self
+    }
+
+    pub fn with_close_agent(mut self, enabled: bool) -> Self {
+        self.close_agent = enabled;
+        self
+    }
+
+    fn includes(self, name: &str) -> bool {
+        if GitToolKind::from_name(name).is_some() {
+            return self.git;
+        }
+        match AgentControlToolKind::from_name(name) {
+            Some(AgentControlToolKind::SpawnAgent) => self.spawn_agent,
+            Some(AgentControlToolKind::CloseAgent) => self.close_agent,
+            Some(
+                AgentControlToolKind::SendInput
+                | AgentControlToolKind::WaitAgent
+                | AgentControlToolKind::ListAgents
+                | AgentControlToolKind::ResumeAgent,
+            ) => true,
+            None => true,
+        }
+    }
+}
+
+/// 返回 hosted container agent 默认可见的 pl-core 共享工具名。
+///
+/// 该 helper 使用 `ToolCapabilityConfig::hosted_container_workspace()` 和关闭
+/// `plan_exit` 的 Codex tool shape，避免宿主项目各自拼装 shared schema options
+/// 或复制 git/subagent 工具名清单。
+pub fn hosted_container_shared_tool_names(visibility: HostedSharedToolVisibility) -> Vec<String> {
+    shared_tool_names(
+        SharedToolSchemaOptions::from_capabilities(
+            &ToolCapabilityConfig::hosted_container_workspace(),
+        )
+        .with_plan_exit(false),
+    )
+    .into_iter()
+    .filter(|name| visibility.includes(name))
+    .collect()
+}
+
 /// 按能力开关组装 pl-core 的共享工具集合。
 #[derive(Debug, Clone, Default)]
 pub struct ToolSetBuilder<

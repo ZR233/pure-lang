@@ -82,6 +82,33 @@ fn shared_tool_schema_options_can_disable_plan_exit_fluently() {
 }
 
 #[test]
+fn hosted_container_shared_tool_names_apply_visibility_toggles() {
+    let names = hosted_container_shared_tool_names(HostedSharedToolVisibility::default());
+
+    assert!(names.contains(&"read_file".to_string()));
+    assert!(names.contains(&"container_exec".to_string()));
+    assert!(names.contains(&"list_mcp_resources".to_string()));
+    assert!(names.contains(&"send_input".to_string()));
+    assert!(names.contains(&"wait_agent".to_string()));
+    assert!(!names.contains(&"spawn_agent".to_string()));
+    assert!(!names.contains(&"close_agent".to_string()));
+    assert!(!names.contains(&"git_status".to_string()));
+    assert!(!names.contains(&"plan_exit".to_string()));
+
+    let elevated = hosted_container_shared_tool_names(
+        HostedSharedToolVisibility::default()
+            .with_git(true)
+            .with_spawn_agent(true)
+            .with_close_agent(true),
+    );
+
+    assert!(elevated.contains(&"git_status".to_string()));
+    assert!(elevated.contains(&"git_workspace_info".to_string()));
+    assert!(elevated.contains(&"spawn_agent".to_string()));
+    assert!(elevated.contains(&"close_agent".to_string()));
+}
+
+#[test]
 fn shared_tool_schemas_can_include_mcp_resource_tools() {
     let names = shared_tool_schemas(SharedToolSchemaOptions {
         mcp_resources: true,

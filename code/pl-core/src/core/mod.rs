@@ -53,7 +53,8 @@ pub use profile::{
     WorkspaceProfile,
 };
 pub use tool_set::{
-    SharedToolSchemaOptions, ToolSetBuilder, shared_tool_names, shared_tool_schemas,
+    HostedSharedToolVisibility, SharedToolSchemaOptions, ToolSetBuilder,
+    hosted_container_shared_tool_names, shared_tool_names, shared_tool_schemas,
 };
 pub(crate) use turn_result::compact_text;
 /// 生成唯一的 turn ID（毫秒时间戳 + 序列号），用于隔离每个 turn 的 trace part id。
