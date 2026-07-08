@@ -547,6 +547,23 @@ impl ToolOutput {
             } => false,
         })
     }
+
+    /// 将 canonical 工具输出投影回产品层常用的执行结果形态。
+    ///
+    /// 该方法统一 `ToolOutput` 的成功判定、模型可见输出、结束回合语义和 artifact
+    /// 解码，避免产品 adapter 直接读取 `exit_code`、`description` 或运行时事件。
+    pub fn to_execution_result<T>(&self) -> ToolExecutionResult<T>
+    where
+        T: DeserializeOwned,
+    {
+        ToolExecutionResult::with_model_output(
+            self.exit_code.unwrap_or(0) == 0,
+            self.description.clone(),
+            self.description.clone(),
+            self.ends_turn(),
+            self.output_artifacts_as(),
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -815,6 +832,41 @@ mod tests {
             vec![ArtifactRecord {
                 id: "artifact-1".to_string(),
             }]
+        );
+    }
+
+    #[test]
+    fn tool_output_projects_execution_result_for_product_adapters() {
+        #[derive(Debug, Deserialize, PartialEq, Eq)]
+        struct ArtifactRecord {
+            id: String,
+        }
+
+        let output = ToolOutput {
+            description: "model output".to_string(),
+            truncated: OutputTruncation::empty(),
+            output_file: PathBuf::new(),
+            exit_code: Some(1),
+            timed_out: false,
+            runtime_events: vec![
+                ToolRuntimeEvent::OutputArtifacts {
+                    artifacts: vec![serde_json::json!({"id": "artifact-1"})],
+                },
+                ToolRuntimeEvent::EndTurn,
+            ],
+        };
+
+        assert_eq!(
+            output.to_execution_result::<ArtifactRecord>(),
+            ToolExecutionResult {
+                success: false,
+                output: "model output".to_string(),
+                model_output: "model output".to_string(),
+                ends_turn: true,
+                output_artifacts: vec![ArtifactRecord {
+                    id: "artifact-1".to_string(),
+                }],
+            }
         );
     }
 
