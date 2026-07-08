@@ -1,7 +1,9 @@
+use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use pl_protocol::{AgentStatus, PureError};
-use tokio::sync::oneshot;
+use tokio::sync::{Mutex, oneshot};
 use tokio::time::{Duration, timeout};
 use tokio_util::sync::CancellationToken;
 
@@ -227,6 +229,101 @@ fn agent_wait_completion_keeps_active_turn_pending() {
     };
 
     assert_eq!(snapshot.completion(), AgentWaitCompletion::Pending);
+}
+
+#[tokio::test]
+async fn agent_wait_loop_returns_first_complete_snapshot() {
+    let snapshots = Arc::new(Mutex::new(VecDeque::from([
+        (
+            AgentWaitSnapshot {
+                turn_presence: AgentTurnPresence::ActiveTurn,
+                status: AgentLifecycleStatusKind::Active,
+            },
+            "pending".to_string(),
+        ),
+        (
+            AgentWaitSnapshot {
+                turn_presence: AgentTurnPresence::NoActiveTurn,
+                status: AgentLifecycleStatusKind::Completed,
+            },
+            "done".to_string(),
+        ),
+    ])));
+
+    let result = wait_for_agent_completion(
+        {
+            let snapshots = Arc::clone(&snapshots);
+            move || {
+                let snapshots = Arc::clone(&snapshots);
+                async move { Ok::<_, ()>(snapshots.lock().await.pop_front().expect("snapshot")) }
+            }
+        },
+        AgentWaitLoopOptions::new(Duration::from_secs(1))
+            .with_poll_interval(Duration::from_millis(1)),
+        &CancellationToken::new(),
+    )
+    .await
+    .expect("wait result");
+
+    assert_eq!(
+        result,
+        AgentWaitLoopResult {
+            value: "done".to_string(),
+            timed_out: false,
+        }
+    );
+    assert!(snapshots.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn agent_wait_loop_returns_last_snapshot_on_timeout() {
+    let result = wait_for_agent_completion(
+        || async {
+            Ok::<_, ()>((
+                AgentWaitSnapshot {
+                    turn_presence: AgentTurnPresence::ActiveTurn,
+                    status: AgentLifecycleStatusKind::Active,
+                },
+                "pending".to_string(),
+            ))
+        },
+        AgentWaitLoopOptions::new(Duration::ZERO),
+        &CancellationToken::new(),
+    )
+    .await
+    .expect("wait result");
+
+    assert_eq!(
+        result,
+        AgentWaitLoopResult {
+            value: "pending".to_string(),
+            timed_out: true,
+        }
+    );
+}
+
+#[tokio::test]
+async fn agent_wait_loop_reports_cancelled() {
+    let cancellation = CancellationToken::new();
+    cancellation.cancel();
+
+    let err = wait_for_agent_completion(
+        || async {
+            Ok::<_, ()>((
+                AgentWaitSnapshot {
+                    turn_presence: AgentTurnPresence::ActiveTurn,
+                    status: AgentLifecycleStatusKind::Active,
+                },
+                "pending".to_string(),
+            ))
+        },
+        AgentWaitLoopOptions::new(Duration::from_secs(1)),
+        &cancellation,
+    )
+    .await
+    .expect_err("cancelled");
+
+    assert_eq!(err, AgentWaitLoopError::Cancelled);
 }
 
 #[test]

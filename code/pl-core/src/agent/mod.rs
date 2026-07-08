@@ -11,5 +11,6 @@ pub use supervisor::{
     AgentInputSubmission, AgentInputTurnMode, AgentLifecycleStatusKind, AgentMessage,
     AgentMessageMode, AgentMessageRequest, AgentRunSpec, AgentSpawnInput, AgentStatusUpdate,
     AgentSupervisor, AgentToolRegistrar, AgentTurnPresence, AgentTurnStartReadiness,
-    AgentTurnStartSnapshot, AgentWaitCompletion, AgentWaitOutcome, AgentWaitSnapshot,
+    AgentTurnStartSnapshot, AgentWaitCompletion, AgentWaitLoopError, AgentWaitLoopOptions,
+    AgentWaitLoopResult, AgentWaitOutcome, AgentWaitSnapshot, wait_for_agent_completion,
 };

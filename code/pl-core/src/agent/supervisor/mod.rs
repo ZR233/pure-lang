@@ -24,6 +24,9 @@ mod tests;
 mod wait;
 
 pub(crate) use events::emit_subagent_activity;
+pub use wait::{
+    AgentWaitLoopError, AgentWaitLoopOptions, AgentWaitLoopResult, wait_for_agent_completion,
+};
 
 /// Message queued for an existing agent.
 #[derive(Debug, Clone, PartialEq, Eq)]

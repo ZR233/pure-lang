@@ -29,8 +29,9 @@ pub use agent::{
     AgentInputSubmission, AgentInputTurnMode, AgentLifecycleStatusKind, AgentMessage,
     AgentMessageMode, AgentMessageRequest, AgentPath, AgentRecord, AgentRunSpec, AgentSpawnInput,
     AgentStatus, AgentStatusUpdate, AgentSupervisor, AgentToolRegistrar, AgentTurnPresence,
-    AgentTurnStartReadiness, AgentTurnStartSnapshot, AgentWaitCompletion, AgentWaitOutcome,
-    AgentWaitSnapshot,
+    AgentTurnStartReadiness, AgentTurnStartSnapshot, AgentWaitCompletion, AgentWaitLoopError,
+    AgentWaitLoopOptions, AgentWaitLoopResult, AgentWaitOutcome, AgentWaitSnapshot,
+    wait_for_agent_completion,
 };
 pub use attachment::MaterializedAttachment;
 pub use config::{
