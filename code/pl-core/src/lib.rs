@@ -25,9 +25,9 @@ mod workspace;
 
 pub use agent::{
     AgentHandle, AgentInputBusyAction, AgentInputInitialAction, AgentInputQueue,
-    AgentInputTurnMode, AgentLifecycleStatusKind, AgentMessage, AgentMessageMode,
-    AgentMessageRequest, AgentPath, AgentRecord, AgentRunSpec, AgentSpawnInput, AgentStatus,
-    AgentStatusUpdate, AgentSupervisor, AgentToolRegistrar, AgentTurnPresence,
+    AgentInputSubmission, AgentInputTurnMode, AgentLifecycleStatusKind, AgentMessage,
+    AgentMessageMode, AgentMessageRequest, AgentPath, AgentRecord, AgentRunSpec, AgentSpawnInput,
+    AgentStatus, AgentStatusUpdate, AgentSupervisor, AgentToolRegistrar, AgentTurnPresence,
     AgentTurnStartReadiness, AgentTurnStartSnapshot, AgentWaitCompletion, AgentWaitOutcome,
     AgentWaitSnapshot,
 };

@@ -96,6 +96,41 @@ fn agent_input_turn_mode_exposes_queue_and_busy_semantics() {
 }
 
 #[test]
+fn agent_input_submission_builds_send_input_output() {
+    let queued = AgentInputSubmission::queued().into_send_input_output(
+        "/root/worker".to_string(),
+        AgentStatus::Waiting,
+        false,
+    );
+    let started = AgentInputSubmission::started("turn-1").into_send_input_output(
+        "/root/worker".to_string(),
+        AgentStatus::Running,
+        true,
+    );
+
+    assert_eq!(
+        queued,
+        crate::tool::AgentControlSendInputOutput {
+            target: "/root/worker".to_string(),
+            status: AgentStatus::Waiting,
+            interrupt: false,
+            queued: true,
+            turn_id: None,
+        }
+    );
+    assert_eq!(
+        started,
+        crate::tool::AgentControlSendInputOutput {
+            target: "/root/worker".to_string(),
+            status: AgentStatus::Running,
+            interrupt: true,
+            queued: false,
+            turn_id: Some("turn-1".to_string()),
+        }
+    );
+}
+
+#[test]
 fn agent_input_turn_mode_exposes_dispatch_actions() {
     assert_eq!(
         AgentInputTurnMode::QueueOnly.initial_action(),

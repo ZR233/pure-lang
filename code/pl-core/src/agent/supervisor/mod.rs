@@ -116,6 +116,55 @@ pub enum AgentInputBusyAction {
     ReturnBusy,
 }
 
+/// `send_input` 提交输入后的共享结果。
+///
+/// 宿主可以用该类型在自身队列/turn 启动逻辑之间传递结果，避免用裸 JSON 表达
+/// `queued` / `turnId` 这类模型可见工具输出字段。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentInputSubmission {
+    queued: bool,
+    turn_id: Option<String>,
+}
+
+impl AgentInputSubmission {
+    pub fn queued() -> Self {
+        Self {
+            queued: true,
+            turn_id: None,
+        }
+    }
+
+    pub fn started(turn_id: impl Into<String>) -> Self {
+        Self {
+            queued: false,
+            turn_id: Some(turn_id.into()),
+        }
+    }
+
+    pub fn queued_flag(&self) -> bool {
+        self.queued
+    }
+
+    pub fn turn_id(&self) -> Option<&str> {
+        self.turn_id.as_deref()
+    }
+
+    pub fn into_send_input_output(
+        self,
+        target: String,
+        status: AgentStatus,
+        interrupt: bool,
+    ) -> crate::tool::AgentControlSendInputOutput {
+        crate::tool::AgentControlSendInputOutput {
+            target,
+            status,
+            interrupt,
+            queued: self.queued,
+            turn_id: self.turn_id,
+        }
+    }
+}
+
 /// agent 输入队列，负责保持 pending input 的 FIFO 与重试顺序。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentInputQueue<Input> {
