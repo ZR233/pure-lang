@@ -6,58 +6,29 @@ use tokio::sync::Mutex;
 
 use super::*;
 
-#[derive(Debug, Clone, Default)]
-struct EchoProductRouter {
-    calls: Arc<Mutex<Vec<String>>>,
-}
+#[test]
+fn agent_kernel_uses_registered_tools_as_product_extension_point() {
+    let kernel_source = include_str!("../kernel.rs");
 
-impl ProductToolRouter for EchoProductRouter {
-    fn tool_definitions(&self) -> Vec<ProductToolDefinition> {
-        vec![ProductToolDefinition::new(
-            "product_echo",
-            "Echo product input through the host router.",
-            serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "message": { "type": "string" }
-                },
-                "required": ["message"],
-                "additionalProperties": false
-            }),
-        )]
-    }
-
-    fn execute(
-        &self,
-        request: ProductToolRequest,
-    ) -> impl std::future::Future<Output = std::result::Result<ToolOutput, PureError>> + Send {
-        let calls = self.calls.clone();
-        async move {
-            let message = request
-                .input
-                .arguments
-                .get("message")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            calls
-                .lock()
-                .await
-                .push(format!("{}:{}", request.definition.name, message));
-            Ok(ToolOutput {
-                description: format!("product:{message}"),
-                truncated: OutputTruncation::empty(),
-                output_file: std::path::PathBuf::new(),
-                exit_code: Some(0),
-                timed_out: false,
-                runtime_events: Vec::new(),
-            })
-        }
+    assert!(
+        kernel_source.contains(&format!("{}{}", "Registered", "Tool")),
+        "AgentKernel 必须通过动态 RegisteredTool 暴露产品工具扩展点"
+    );
+    for old_extension in [
+        format!("{}{}", "ProductTool", "Router"),
+        format!("{}{}", "ProductTool", "Definition"),
+        format!("{}{}", "ProductTool", "Request"),
+        format!("{}{}", "with_product_tool", "_router"),
+    ] {
+        assert!(
+            !kernel_source.contains(&old_extension),
+            "AgentKernel 不应继续暴露旧产品工具扩展层 `{old_extension}`"
+        );
     }
 }
 
 #[tokio::test]
-async fn agent_kernel_registers_dynamic_tools_without_product_router() {
+async fn agent_kernel_registers_dynamic_tools() {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let calls_for_tool = calls.clone();
     let tool = RegisteredTool::new(
@@ -126,13 +97,14 @@ async fn agent_kernel_registers_dynamic_tools_without_product_router() {
 }
 
 #[tokio::test]
-async fn agent_kernel_registers_and_routes_product_tools() {
-    let router = EchoProductRouter::default();
+async fn agent_kernel_registers_and_routes_product_tools_as_registered_tools() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let tool = product_echo_tool(calls.clone());
     let kernel = AgentKernel::builder(
         PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
     )
     .with_profile(CoreAgentProfile::host_provided(std::env::temp_dir()))
-    .with_product_tool_router(router.clone())
+    .with_registered_tool(tool)
     .build()
     .await;
 
@@ -159,18 +131,19 @@ async fn agent_kernel_registers_and_routes_product_tools() {
 
     assert_eq!(output.description, "product:hello");
     assert_eq!(
-        router.calls.lock().await.as_slice(),
+        calls.lock().await.as_slice(),
         &["product_echo:hello".to_string()]
     );
 }
 
 #[tokio::test]
 async fn agent_kernel_host_profile_exposes_only_product_tools() {
+    let tool = product_echo_tool(Arc::new(Mutex::new(Vec::new())));
     let kernel = AgentKernel::builder(
         PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
     )
     .with_profile(CoreAgentProfile::host_provided(std::env::temp_dir()))
-    .with_product_tool_router(EchoProductRouter::default())
+    .with_registered_tool(tool)
     .build()
     .await;
 
@@ -183,11 +156,12 @@ async fn agent_kernel_host_profile_exposes_only_product_tools() {
 
 #[tokio::test]
 async fn agent_kernel_local_workspace_combines_shared_and_product_tools() {
+    let tool = product_echo_tool(Arc::new(Mutex::new(Vec::new())));
     let kernel = AgentKernel::builder(
         PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
     )
     .with_profile(CoreAgentProfile::local_workspace(std::env::temp_dir()))
-    .with_product_tool_router(EchoProductRouter::default())
+    .with_registered_tool(tool)
     .build()
     .await;
     let names = kernel.tool_names();
@@ -201,11 +175,12 @@ async fn agent_kernel_local_workspace_combines_shared_and_product_tools() {
 
 #[tokio::test]
 async fn agent_kernel_registrar_rebuilds_product_tools_for_child_core() {
+    let tool = product_echo_tool(Arc::new(Mutex::new(Vec::new())));
     let kernel = AgentKernel::builder(
         PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
     )
     .with_profile(CoreAgentProfile::host_provided(std::env::temp_dir()))
-    .with_product_tool_router(EchoProductRouter::default())
+    .with_registered_tool(tool)
     .build()
     .await;
     let registrar = kernel
@@ -225,4 +200,39 @@ async fn agent_kernel_registrar_rebuilds_product_tools_for_child_core() {
 
     assert!(child_core.tools.get("product_echo").is_some());
     assert!(child_core.tools.get("bash").is_none());
+}
+
+fn product_echo_tool(calls: Arc<Mutex<Vec<String>>>) -> RegisteredTool {
+    RegisteredTool::new(
+        "product_echo",
+        "Echo product input through a registered handler.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "message": { "type": "string" }
+            },
+            "required": ["message"],
+            "additionalProperties": false
+        }),
+        move |input, _context| {
+            let calls = calls.clone();
+            async move {
+                let message = input
+                    .arguments
+                    .get("message")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                calls.lock().await.push(format!("product_echo:{message}"));
+                Ok(ToolOutput {
+                    description: format!("product:{message}"),
+                    truncated: OutputTruncation::empty(),
+                    output_file: std::path::PathBuf::new(),
+                    exit_code: Some(0),
+                    timed_out: false,
+                    runtime_events: Vec::new(),
+                })
+            }
+        },
+    )
 }

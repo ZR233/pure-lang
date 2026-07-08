@@ -47,9 +47,8 @@ pub use context_compaction::{
 };
 pub use core::{
     AgentBackendProfile, AgentKernel, AgentKernelBuilder, CoreAgentProfile, CoreModelTurnOptions,
-    CoreModelTurnRequest, CoreRuntimeOptions, CoreRuntimeProfile, ProductToolDefinition,
-    ProductToolRequest, ProductToolRouter, PureCore, PureCoreBuilder, SharedToolSchemaOptions,
-    ToolProfile, ToolSetBuilder, WorkspaceProfile, shared_tool_schemas,
+    CoreModelTurnRequest, CoreRuntimeOptions, CoreRuntimeProfile, PureCore, PureCoreBuilder,
+    SharedToolSchemaOptions, ToolProfile, ToolSetBuilder, WorkspaceProfile, shared_tool_schemas,
     stream_session_completion_response,
 };
 pub use first_run::{
