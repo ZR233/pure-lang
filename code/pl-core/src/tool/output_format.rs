@@ -477,9 +477,9 @@ impl<'a> ToolOutputArtifactPathRequest<'a> {
 /// stdout/stderr 捕获文件集合。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolOutputCapture {
-    pub call_id: String,
-    pub stdout: ToolOutputStreamCapture,
-    pub stderr: ToolOutputStreamCapture,
+    call_id: String,
+    stdout: ToolOutputStreamCapture,
+    stderr: ToolOutputStreamCapture,
 }
 
 /// 单个输出流的捕获文件。
@@ -544,6 +544,14 @@ pub struct ToolOutputArtifactDescriptor {
 }
 
 impl ToolOutputCapture {
+    pub fn stdout_path(&self) -> &Path {
+        &self.stdout.path
+    }
+
+    pub fn stderr_path(&self) -> &Path {
+        &self.stderr.path
+    }
+
     pub async fn prepare(request: ToolOutputCaptureRequest<'_>) -> crate::Result<Self> {
         let stdout_name = tool_output_file_name(request.command, ToolOutputStream::Stdout);
         let stderr_name = tool_output_file_name(request.command, ToolOutputStream::Stderr);
@@ -817,10 +825,10 @@ mod tests {
         ))
         .await
         .expect("capture");
-        tokio::fs::write(&capture.stdout.path, b"ok")
+        tokio::fs::write(capture.stdout_path(), b"ok")
             .await
             .expect("stdout");
-        tokio::fs::write(&capture.stderr.path, b"")
+        tokio::fs::write(capture.stderr_path(), b"")
             .await
             .expect("stderr");
 
@@ -844,8 +852,8 @@ mod tests {
                 size_bytes: 2,
             }]
         );
-        assert!(capture.stdout.path.exists());
-        assert!(!capture.stderr.path.exists());
+        assert!(capture.stdout_path().exists());
+        assert!(!capture.stderr_path().exists());
         assert_eq!(
             super::tool_output_artifact_file_path(
                 super::ToolOutputArtifactPathRequest::new(
@@ -907,6 +915,37 @@ mod tests {
                 && !request_fields.contains("pub stderr_id:")
                 && !request_fields.contains("pub command:"),
             "宿主不应直接手写 ToolOutputCaptureRequest 字段"
+        );
+    }
+
+    #[test]
+    fn tool_output_capture_hides_stream_fields_behind_accessors() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tool/output_format.rs"
+        ))
+        .expect("source");
+        let capture_fields = source
+            .split("pub struct ToolOutputCapture {")
+            .nth(1)
+            .expect("capture struct")
+            .split("/// 单个输出流的捕获文件。")
+            .next()
+            .expect("capture fields");
+        let capture_impl = source
+            .split("impl ToolOutputCapture")
+            .nth(1)
+            .expect("capture impl");
+        assert!(
+            capture_impl.contains("pub fn stdout_path(")
+                && capture_impl.contains("pub fn stderr_path("),
+            "工具输出捕获文件路径应由 pl-core accessor 暴露"
+        );
+        assert!(
+            !capture_fields.contains("pub stdout:")
+                && !capture_fields.contains("pub stderr:")
+                && !capture_fields.contains("pub call_id:"),
+            "宿主不应直接读取 ToolOutputCapture 内部字段"
         );
     }
 
