@@ -70,8 +70,9 @@ pub use interfaces::{
 };
 pub use mcp::{McpAvailabilityKind, McpAvailabilitySnapshot, McpRuntimeRegistry};
 pub use message::{
-    append_message_fragment_text, assistant_reasoning_message, assistant_text_message,
-    completion_response_preview, is_compaction_summary_text, message_content_text,
+    CompletionResponseOutputSnapshot, CompletionResponseSnapshot, append_message_fragment_text,
+    assistant_reasoning_message, assistant_text_message, completion_response_preview,
+    completion_response_snapshot, is_compaction_summary_text, message_content_text,
     message_content_text_lines, text_preview_chars, user_message_text, user_text_message,
 };
 pub use pl_lsp::{

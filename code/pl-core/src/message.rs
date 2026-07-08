@@ -1,5 +1,7 @@
 use pl_protocol::{ContentPart, Message, MessageContent, MessageRole};
 
+use crate::runtime_usage::ModelTokenUsageSnapshot;
+
 /// 提取消息内容中模型可见的文本片段。
 ///
 /// 多模态消息中的图片不转换为占位文本；调用方只拿到真实文本 part，
@@ -52,6 +54,73 @@ pub fn completion_response_preview(response: &pl_model::CompletionResponse) -> S
         )
     }));
     text_preview(&parts.join("\n"), 500)
+}
+
+/// 模型完成响应面向宿主产品的结构化快照。
+///
+/// 产品层可以把该快照投影到自己的 Web/API DTO，但不应重复解释
+/// `pl_model::CompletionResponse` 的 reasoning、文本、tool call 和 usage 语义。
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompletionResponseSnapshot {
+    pub id: Option<String>,
+    pub output: Vec<CompletionResponseOutputSnapshot>,
+    pub usage: ModelTokenUsageSnapshot,
+}
+
+/// 模型完成响应中的结构化输出项。
+#[derive(Debug, Clone, PartialEq)]
+pub enum CompletionResponseOutputSnapshot {
+    Reasoning {
+        content: String,
+    },
+    Message {
+        text: String,
+    },
+    FunctionCall {
+        call_id: String,
+        name: String,
+        arguments: serde_json::Value,
+        raw_arguments: String,
+    },
+}
+
+/// 从模型完成响应生成结构化宿主快照。
+pub fn completion_response_snapshot(
+    response: &pl_model::CompletionResponse,
+) -> CompletionResponseSnapshot {
+    let mut output = Vec::new();
+    if let Some(reasoning) = response
+        .reasoning_content
+        .as_deref()
+        .filter(|text| !text.trim().is_empty())
+    {
+        output.push(CompletionResponseOutputSnapshot::Reasoning {
+            content: reasoning.to_string(),
+        });
+    }
+    if let Some(content) = response
+        .content
+        .as_deref()
+        .filter(|text| !text.trim().is_empty())
+    {
+        output.push(CompletionResponseOutputSnapshot::Message {
+            text: content.to_string(),
+        });
+    }
+    output.extend(response.tool_calls.iter().map(|call| {
+        CompletionResponseOutputSnapshot::FunctionCall {
+            call_id: call.call_id.clone().unwrap_or_else(|| call.id.clone()),
+            name: call.name.clone(),
+            arguments: call.arguments_for_tool(),
+            raw_arguments: call.payload_text(),
+        }
+    }));
+
+    CompletionResponseSnapshot {
+        id: response.response_id.clone(),
+        output,
+        usage: ModelTokenUsageSnapshot::from_model_usage(&response.usage),
+    }
 }
 
 /// 构造一条普通用户文本消息。
@@ -301,6 +370,73 @@ mod tests {
         assert_eq!(
             super::completion_response_preview(&response),
             r#"thinking\nanswer\nfunction_call read_file call_1: {"path":"Cargo.toml"}"#
+        );
+    }
+
+    #[test]
+    fn completion_response_snapshot_projects_model_response_shape() {
+        let response = pl_model::CompletionResponse {
+            response_id: Some("resp_1".to_string()),
+            content: Some("answer".to_string()),
+            raw_content: None,
+            reasoning_content: Some("thinking".to_string()),
+            tool_calls: vec![
+                pl_model::ToolCall::function(
+                    "call_item",
+                    "read_file",
+                    serde_json::json!({"path": "Cargo.toml"}),
+                    Some("call_1".to_string()),
+                ),
+                pl_model::ToolCall::custom("custom_item", "apply_patch", "*** Begin Patch", None),
+            ],
+            trace_events: Vec::new(),
+            next_sequence: 0,
+            usage: pl_model::TokenUsage {
+                prompt_tokens: 10,
+                cached_prompt_tokens: 4,
+                completion_tokens: 3,
+                reasoning_tokens: 2,
+                total_tokens: 13,
+            },
+            finish_reason: pl_model::FinishReason::ToolCalls,
+            model: "test-model".to_string(),
+        };
+
+        assert_eq!(
+            super::completion_response_snapshot(&response),
+            super::CompletionResponseSnapshot {
+                id: Some("resp_1".to_string()),
+                output: vec![
+                    super::CompletionResponseOutputSnapshot::Reasoning {
+                        content: "thinking".to_string(),
+                    },
+                    super::CompletionResponseOutputSnapshot::Message {
+                        text: "answer".to_string(),
+                    },
+                    super::CompletionResponseOutputSnapshot::FunctionCall {
+                        call_id: "call_1".to_string(),
+                        name: "read_file".to_string(),
+                        arguments: serde_json::json!({"path": "Cargo.toml"}),
+                        raw_arguments: r#"{"path":"Cargo.toml"}"#.to_string(),
+                    },
+                    super::CompletionResponseOutputSnapshot::FunctionCall {
+                        call_id: "custom_item".to_string(),
+                        name: "apply_patch".to_string(),
+                        arguments: serde_json::json!({
+                            "input": "*** Begin Patch",
+                            "patch": "*** Begin Patch",
+                        }),
+                        raw_arguments: "*** Begin Patch".to_string(),
+                    },
+                ],
+                usage: crate::ModelTokenUsageSnapshot {
+                    input_tokens: 10,
+                    cached_input_tokens: 4,
+                    output_tokens: 3,
+                    reasoning_output_tokens: 2,
+                    total_tokens: 13,
+                },
+            }
         );
     }
 
