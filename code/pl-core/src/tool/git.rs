@@ -72,10 +72,12 @@ pub struct ExecutionOutput {
 ///
 /// 实现方负责在指定工作目录运行命令，并遵守请求中给出的环境和超时。
 pub trait ExecutionBackend: fmt::Debug + Send + Sync {
+    type Error: fmt::Display + Send + 'static;
+
     fn run(
         &self,
         request: ExecutionRequest,
-    ) -> impl Future<Output = Result<ExecutionOutput, PureError>> + Send;
+    ) -> impl Future<Output = std::result::Result<ExecutionOutput, Self::Error>> + Send;
 }
 
 /// 本地进程执行后端。
@@ -83,7 +85,12 @@ pub trait ExecutionBackend: fmt::Debug + Send + Sync {
 pub struct LocalExecutionBackend;
 
 impl ExecutionBackend for LocalExecutionBackend {
-    async fn run(&self, request: ExecutionRequest) -> Result<ExecutionOutput, PureError> {
+    type Error = String;
+
+    async fn run(
+        &self,
+        request: ExecutionRequest,
+    ) -> std::result::Result<ExecutionOutput, Self::Error> {
         let mut command = Command::new(&request.program);
         command.args(&request.args);
         command.current_dir(&request.cwd);
@@ -91,10 +98,10 @@ impl ExecutionBackend for LocalExecutionBackend {
         let output = match request.timeout {
             Some(timeout) => tokio::time::timeout(timeout, command.output())
                 .await
-                .map_err(|_| tool_error("execution", "command timed out"))?,
+                .map_err(|_| "command timed out".to_string())?,
             None => command.output().await,
         }
-        .map_err(|error| tool_error("execution", format!("failed to run command: {error}")))?;
+        .map_err(|error| format!("failed to run command: {error}"))?;
         Ok(ExecutionOutput {
             status: output.status.code().unwrap_or(-1),
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
@@ -142,10 +149,12 @@ impl GitCredential {
 /// 实现方只返回当前 workspace 可用的短期 token；不得把 token 放进工具 schema、
 /// 参数回显或错误文本。返回 `None` 表示该操作没有可用凭据。
 pub trait GitCredentialProvider: fmt::Debug + Send + Sync {
+    type Error: fmt::Display + Send + 'static;
+
     fn credential(
         &self,
         request: GitCredentialRequest,
-    ) -> impl Future<Output = Result<Option<GitCredential>, PureError>> + Send;
+    ) -> impl Future<Output = std::result::Result<Option<GitCredential>, Self::Error>> + Send;
 }
 
 /// 不提供任何 git 凭据的 provider。
@@ -153,10 +162,12 @@ pub trait GitCredentialProvider: fmt::Debug + Send + Sync {
 pub struct NoGitCredentialProvider;
 
 impl GitCredentialProvider for NoGitCredentialProvider {
+    type Error = String;
+
     async fn credential(
         &self,
         _request: GitCredentialRequest,
-    ) -> Result<Option<GitCredential>, PureError> {
+    ) -> std::result::Result<Option<GitCredential>, Self::Error> {
         Ok(None)
     }
 }
@@ -682,7 +693,8 @@ where
         let credential = self
             .credential_provider
             .credential(GitCredentialRequest { operation, remote })
-            .await?
+            .await
+            .map_err(|error| tool_error(self.name(), error))?
             .ok_or_else(|| {
                 tool_error(self.name(), "project git account token is not configured")
             })?;
@@ -721,7 +733,11 @@ where
         request: ExecutionRequest,
         credential: Option<&GitCredential>,
     ) -> Result<GitToolOutcome, PureError> {
-        let output = self.backend.run(request).await?;
+        let output = self
+            .backend
+            .run(request)
+            .await
+            .map_err(|error| tool_error(self.name(), error))?;
         let stdout = redact(output.stdout, credential);
         let stderr = redact(output.stderr, credential);
         if output.status == 0 {
@@ -916,13 +932,27 @@ mod tests {
     use super::*;
     use crate::tool::{Tool, ToolContext, ToolInput};
 
+    #[derive(Debug, Clone)]
+    struct DisplayGitError(&'static str);
+
+    impl fmt::Display for DisplayGitError {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str(self.0)
+        }
+    }
+
     #[derive(Debug, Default)]
     struct RecordingBackend {
         requests: Mutex<Vec<ExecutionRequest>>,
     }
 
     impl ExecutionBackend for RecordingBackend {
-        async fn run(&self, request: ExecutionRequest) -> Result<ExecutionOutput, PureError> {
+        type Error = DisplayGitError;
+
+        async fn run(
+            &self,
+            request: ExecutionRequest,
+        ) -> std::result::Result<ExecutionOutput, Self::Error> {
             self.requests.lock().unwrap().push(request);
             Ok(ExecutionOutput {
                 status: 0,
@@ -948,9 +978,28 @@ mod tests {
     }
 
     impl ExecutionBackend for ScriptedBackend {
-        async fn run(&self, request: ExecutionRequest) -> Result<ExecutionOutput, PureError> {
+        type Error = DisplayGitError;
+
+        async fn run(
+            &self,
+            request: ExecutionRequest,
+        ) -> std::result::Result<ExecutionOutput, Self::Error> {
             self.requests.lock().unwrap().push(request);
             Ok(self.outputs.lock().unwrap().remove(0))
+        }
+    }
+
+    #[derive(Debug)]
+    struct BackendErrorExecutionBackend;
+
+    impl ExecutionBackend for BackendErrorExecutionBackend {
+        type Error = DisplayGitError;
+
+        async fn run(
+            &self,
+            _request: ExecutionRequest,
+        ) -> std::result::Result<ExecutionOutput, Self::Error> {
+            Err(DisplayGitError("git backend offline"))
         }
     }
 
@@ -958,11 +1007,27 @@ mod tests {
     struct StaticCredentialProvider;
 
     impl GitCredentialProvider for StaticCredentialProvider {
+        type Error = DisplayGitError;
+
         async fn credential(
             &self,
             _request: GitCredentialRequest,
-        ) -> Result<Option<GitCredential>, PureError> {
+        ) -> std::result::Result<Option<GitCredential>, Self::Error> {
             Ok(Some(GitCredential::new("secret-token".to_string())))
+        }
+    }
+
+    #[derive(Debug)]
+    struct CredentialErrorProvider;
+
+    impl GitCredentialProvider for CredentialErrorProvider {
+        type Error = DisplayGitError;
+
+        async fn credential(
+            &self,
+            _request: GitCredentialRequest,
+        ) -> std::result::Result<Option<GitCredential>, Self::Error> {
+            Err(DisplayGitError("token unavailable"))
         }
     }
 
@@ -1159,6 +1224,58 @@ mod tests {
 
         assert!(error.to_string().contains("unsafe git branch"));
         assert!(backend.requests.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn git_tool_maps_backend_display_error_to_current_tool() {
+        let backend = Arc::new(BackendErrorExecutionBackend);
+        let provider = Arc::new(StaticCredentialProvider);
+        let tool = GitTool::new(GitToolKind::Status, workspace_config(), backend, provider);
+
+        let error = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({}),
+                    session_id: "session".to_string(),
+                    tool_id: "tool".to_string(),
+                    revision_base: 0,
+                },
+                test_context(),
+            )
+            .await
+            .expect_err("backend should fail");
+
+        assert!(matches!(
+            error,
+            PureError::ToolExecutionFailed { tool, error }
+                if tool == TOOL_GIT_STATUS && error == "git backend offline"
+        ));
+    }
+
+    #[tokio::test]
+    async fn git_tool_maps_credential_display_error_to_current_tool() {
+        let backend = Arc::new(RecordingBackend::default());
+        let provider = Arc::new(CredentialErrorProvider);
+        let tool = GitTool::new(GitToolKind::Fetch, workspace_config(), backend, provider);
+
+        let error = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({ "remote": "origin" }),
+                    session_id: "session".to_string(),
+                    tool_id: "tool".to_string(),
+                    revision_base: 0,
+                },
+                test_context(),
+            )
+            .await
+            .expect_err("credential provider should fail");
+
+        assert!(matches!(
+            error,
+            PureError::ToolExecutionFailed { tool, error }
+                if tool == TOOL_GIT_FETCH && error == "token unavailable"
+        ));
     }
 
     #[tokio::test]
