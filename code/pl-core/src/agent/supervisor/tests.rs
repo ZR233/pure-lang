@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use pl_protocol::{AgentStatus, PureError};
+use serde_json::json;
 use tokio::sync::{Mutex, oneshot};
 use tokio::time::{Duration, timeout};
 use tokio_util::sync::CancellationToken;
@@ -144,6 +145,27 @@ fn agent_wait_outcome_builds_wait_agent_output() {
             timed_out: true,
         }
     );
+}
+
+#[test]
+fn agent_wait_outcome_builds_group_wait_agent_output() {
+    let output = AgentWaitOutcome { timed_out: true }.into_group_wait_agent_output(
+        vec![json!({ "agentId": "done" })],
+        vec![json!({ "agentId": "pending" })],
+    );
+    let message: serde_json::Value =
+        serde_json::from_str(&output.message).expect("wait message json");
+
+    assert_eq!(output.timed_out, true);
+    assert_eq!(
+        message,
+        json!({
+            "completed": [{ "agentId": "done" }],
+            "pending": [{ "agentId": "pending" }],
+            "timedOut": true,
+        })
+    );
+    assert!(message.get("timed_out").is_none());
 }
 
 #[test]

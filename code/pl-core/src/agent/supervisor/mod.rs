@@ -286,6 +286,26 @@ impl AgentWaitOutcome {
             timed_out: self.timed_out,
         }
     }
+
+    /// 将 completed/pending agent 快照投影为共享 `wait_agent` 组等待输出。
+    ///
+    /// 宿主只提供产品侧 agent 快照；completed/pending/timedOut 的 JSON 字段形状
+    /// 由 pl-core 统一维护，避免各产品 adapter 重复拼模型可见协议。
+    pub fn into_group_wait_agent_output(
+        self,
+        completed: Vec<serde_json::Value>,
+        pending: Vec<serde_json::Value>,
+    ) -> crate::tool::AgentControlWaitOutput {
+        let timed_out = self.timed_out;
+        self.into_wait_agent_output(
+            serde_json::json!({
+                "completed": completed,
+                "pending": pending,
+                "timedOut": timed_out,
+            })
+            .to_string(),
+        )
+    }
 }
 
 /// 宿主 agent 当前是否仍持有 active turn。
