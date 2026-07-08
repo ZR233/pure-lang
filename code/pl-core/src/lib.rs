@@ -69,7 +69,10 @@ pub use interfaces::{
     ConfigRepository, EventSink, RuntimeEventEmitter, SessionRepository, TurnSnapshotRepository,
 };
 pub use mcp::{McpAvailabilityKind, McpAvailabilitySnapshot, McpRuntimeRegistry};
-pub use message::{append_message_fragment_text, message_content_text};
+pub use message::{
+    append_message_fragment_text, assistant_reasoning_message, assistant_text_message,
+    is_compaction_summary_text, message_content_text, user_message_text, user_text_message,
+};
 pub use pl_lsp::{
     LspActivityKind, LspAvailabilityKind, LspDiagnostic, LspPosition, LspQuery, LspQueryOperation,
     LspQueryResult, LspRange, LspRuntimeRegistry, LspServerSnapshot,
