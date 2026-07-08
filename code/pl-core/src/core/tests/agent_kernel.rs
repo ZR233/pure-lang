@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::config::ToolCapabilityConfig;
 use crate::tool::{RegisteredTool, ToolRuntimeLockPolicy};
 use pretty_assertions::assert_eq;
 use tokio::sync::Mutex;
@@ -236,6 +237,46 @@ async fn agent_kernel_local_workspace_combines_shared_and_product_tools() {
     assert!(names.contains(&"spawn_agent".to_string()));
     assert!(names.contains(&"product_echo".to_string()));
     assert!(!names.contains(&"git_status".to_string()));
+}
+
+#[tokio::test]
+async fn agent_kernel_builder_registers_tool_set_and_replays_it_for_children() {
+    let workspace_root = std::env::temp_dir().join("pl-core-agent-kernel-tool-set");
+    let tool_set = ToolSetBuilder::from_capabilities(ToolCapabilityConfig {
+        bash: false,
+        workspace_files: false,
+        skills: false,
+        mcp: false,
+        lsp: false,
+        subagents: false,
+        ask_user: true,
+        git: false,
+        docker: false,
+        container: false,
+    });
+    let kernel = AgentKernel::builder(
+        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+    )
+    .with_profile(CoreAgentProfile::host_provided(workspace_root.clone()))
+    .with_tool_set(tool_set)
+    .build()
+    .await;
+
+    assert!(kernel.tool("request_user_input").is_some());
+
+    let registrar = kernel
+        .agent_tool_registrar()
+        .expect("kernel exposes child tool registrar");
+    let mut child_core =
+        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
+            .unwrap()
+            .build();
+    registrar
+        .register_tools(&mut child_core, workspace_root, None)
+        .await
+        .unwrap();
+
+    assert!(child_core.tools.get("request_user_input").is_some());
 }
 
 #[tokio::test]

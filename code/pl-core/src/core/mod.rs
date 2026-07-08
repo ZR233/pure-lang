@@ -40,7 +40,10 @@ mod tool_set;
 mod turn_loop;
 mod turn_result;
 
-pub use kernel::{AgentKernel, AgentKernelBuilder, AgentKernelToolRequest, CoreAgentProfile};
+pub use kernel::{
+    AgentKernel, AgentKernelBuilder, AgentKernelToolRequest, AgentKernelToolSet, CoreAgentProfile,
+    NoAgentKernelToolSet,
+};
 pub use model_turn::{
     CoreModelTurnOptions, CoreModelTurnRequest, stream_session_completion_response,
 };
