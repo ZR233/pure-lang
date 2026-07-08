@@ -416,10 +416,20 @@ pub enum AgentWaitCompletion {
 /// 准备启动 agent turn 时观察到的最小状态快照。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AgentTurnStartSnapshot {
-    pub status: AgentLifecycleStatusKind,
+    status: AgentLifecycleStatusKind,
 }
 
 impl AgentTurnStartSnapshot {
+    /// 使用生命周期状态创建 turn start 快照。
+    pub fn new(status: AgentLifecycleStatusKind) -> Self {
+        Self { status }
+    }
+
+    /// turn start 快照观察到的生命周期状态分类。
+    pub fn status(self) -> AgentLifecycleStatusKind {
+        self.status
+    }
+
     /// 判断当前状态是否允许启动新 turn。
     pub fn readiness(self) -> AgentTurnStartReadiness {
         if self.status.is_turn_start_ready() {

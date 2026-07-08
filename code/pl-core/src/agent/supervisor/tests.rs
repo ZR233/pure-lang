@@ -462,10 +462,29 @@ fn agent_turn_start_readiness_allows_idle_and_restartable_statuses() {
         AgentLifecycleStatusKind::Failed,
         AgentLifecycleStatusKind::Cancelled,
     ] {
-        let snapshot = AgentTurnStartSnapshot { status };
+        let snapshot = AgentTurnStartSnapshot::new(status);
 
         assert_eq!(snapshot.readiness(), AgentTurnStartReadiness::Ready);
     }
+}
+
+#[test]
+fn agent_turn_start_snapshot_hides_shared_fields_behind_constructor() {
+    let source = include_str!("mod.rs");
+    let turn_start_fields = source
+        .split("pub struct AgentTurnStartSnapshot")
+        .nth(1)
+        .and_then(|text| text.split("impl AgentTurnStartSnapshot").next())
+        .expect("AgentTurnStartSnapshot definition");
+
+    assert!(
+        source.contains("impl AgentTurnStartSnapshot {\n    /// 使用生命周期状态创建 turn start 快照。\n    pub fn new("),
+        "AgentTurnStartSnapshot 应通过构造器承载共享字段形状"
+    );
+    assert!(
+        !turn_start_fields.contains("pub status:"),
+        "AgentTurnStartSnapshot 字段不应公开给宿主 adapter 手写"
+    );
 }
 
 #[test]
@@ -474,7 +493,7 @@ fn agent_turn_start_readiness_rejects_active_and_deleted_statuses() {
         AgentLifecycleStatusKind::Active,
         AgentLifecycleStatusKind::Deleted,
     ] {
-        let snapshot = AgentTurnStartSnapshot { status };
+        let snapshot = AgentTurnStartSnapshot::new(status);
 
         assert_eq!(snapshot.readiness(), AgentTurnStartReadiness::Busy);
     }
