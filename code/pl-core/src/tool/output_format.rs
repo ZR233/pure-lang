@@ -244,15 +244,39 @@ impl ToolLifecycleProjection {
 /// 等业务标识和持久化事件 metadata。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolHistoryProjection {
-    pub call_id: String,
-    pub tool_name: String,
-    pub arguments: Value,
-    pub arguments_preview: String,
-    pub output: String,
-    pub output_preview: String,
+    call_id: String,
+    tool_name: String,
+    arguments: Value,
+    arguments_preview: String,
+    output: String,
+    output_preview: String,
 }
 
 impl ToolHistoryProjection {
+    pub fn call_id(&self) -> &str {
+        &self.call_id
+    }
+
+    pub fn tool_name(&self) -> &str {
+        &self.tool_name
+    }
+
+    pub fn arguments(&self) -> &Value {
+        &self.arguments
+    }
+
+    pub fn arguments_preview(&self) -> &str {
+        &self.arguments_preview
+    }
+
+    pub fn output(&self) -> &str {
+        &self.output
+    }
+
+    pub fn output_preview(&self) -> &str {
+        &self.output_preview
+    }
+
     /// 根据历史投影中恢复出的模型可见输出推断工具是否成功。
     pub fn inferred_success(&self) -> bool {
         !self.output.is_empty()
@@ -1068,6 +1092,51 @@ mod tests {
                 && !projection_fields.contains("pub started_at_unix:")
                 && !projection_fields.contains("pub completed_at_unix:"),
             "宿主不应直接读取 ToolLifecycleProjection 内部字段"
+        );
+    }
+
+    #[test]
+    fn tool_history_projection_hides_fields_behind_accessors() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tool/output_format.rs"
+        ))
+        .expect("source");
+        let projection_fields = source
+            .split("pub struct ToolHistoryProjection {")
+            .nth(1)
+            .expect("history projection struct")
+            .split("impl ToolHistoryProjection")
+            .next()
+            .expect("projection fields");
+        let projection_impl = source
+            .split("impl ToolHistoryProjection")
+            .nth(1)
+            .expect("projection impl")
+            .split("pub fn tool_history_projection")
+            .next()
+            .expect("projection impl body");
+        for accessor in [
+            "pub fn call_id(",
+            "pub fn tool_name(",
+            "pub fn arguments(",
+            "pub fn arguments_preview(",
+            "pub fn output(",
+            "pub fn output_preview(",
+        ] {
+            assert!(
+                projection_impl.contains(accessor),
+                "工具历史投影字段应由 pl-core accessor 暴露 `{accessor}`"
+            );
+        }
+        assert!(
+            !projection_fields.contains("pub call_id:")
+                && !projection_fields.contains("pub tool_name:")
+                && !projection_fields.contains("pub arguments:")
+                && !projection_fields.contains("pub arguments_preview:")
+                && !projection_fields.contains("pub output:")
+                && !projection_fields.contains("pub output_preview:"),
+            "宿主不应直接读取 ToolHistoryProjection 内部字段"
         );
     }
 
