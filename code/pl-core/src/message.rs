@@ -123,6 +123,23 @@ pub fn completion_response_snapshot(
     }
 }
 
+/// 提取模型完成响应中的助手可见文本输出。
+///
+/// reasoning 和 tool call 不属于普通助手消息文本；宿主产品需要标题、摘要等
+/// 纯文本用途时应使用该 helper，而不是重复解析 `CompletionResponse`。
+pub fn completion_response_message_text(response: &pl_model::CompletionResponse) -> String {
+    completion_response_snapshot(response)
+        .output
+        .into_iter()
+        .filter_map(|item| match item {
+            CompletionResponseOutputSnapshot::Message { text } => Some(text),
+            CompletionResponseOutputSnapshot::Reasoning { .. }
+            | CompletionResponseOutputSnapshot::FunctionCall { .. } => None,
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
 /// 构造一条普通用户文本消息。
 pub fn user_text_message(text: impl Into<String>) -> Message {
     text_message(MessageRole::User, text.into())
@@ -437,6 +454,32 @@ mod tests {
                     total_tokens: 13,
                 },
             }
+        );
+    }
+
+    #[test]
+    fn completion_response_message_text_uses_only_visible_message_output() {
+        let response = pl_model::CompletionResponse {
+            response_id: Some("resp_1".to_string()),
+            content: Some("Task title".to_string()),
+            raw_content: None,
+            reasoning_content: Some("hidden chain of thought".to_string()),
+            tool_calls: vec![pl_model::ToolCall::function(
+                "call_item",
+                "read_file",
+                serde_json::json!({"path": "Cargo.toml"}),
+                Some("call_1".to_string()),
+            )],
+            trace_events: Vec::new(),
+            next_sequence: 0,
+            usage: pl_model::TokenUsage::default(),
+            finish_reason: pl_model::FinishReason::ToolCalls,
+            model: "test-model".to_string(),
+        };
+
+        assert_eq!(
+            super::completion_response_message_text(&response),
+            "Task title"
         );
     }
 
