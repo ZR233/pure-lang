@@ -1004,9 +1004,23 @@ pub struct TurnResult {
 /// `TurnResult` 的底层字段组合。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnRuntimeSnapshot {
-    pub usage: Option<TokenUsage>,
-    pub last_context_tokens: Option<u64>,
-    pub latest_context_compaction: Option<ContextCompactionSnapshot>,
+    usage: Option<TokenUsage>,
+    last_context_tokens: Option<u64>,
+    latest_context_compaction: Option<ContextCompactionSnapshot>,
+}
+
+impl TurnRuntimeSnapshot {
+    pub fn usage(&self) -> Option<&TokenUsage> {
+        self.usage.as_ref()
+    }
+
+    pub fn last_context_tokens(&self) -> Option<u64> {
+        self.last_context_tokens
+    }
+
+    pub fn latest_context_compaction(&self) -> Option<&ContextCompactionSnapshot> {
+        self.latest_context_compaction.as_ref()
+    }
 }
 
 impl TurnResult {
@@ -1025,13 +1039,29 @@ impl TurnResult {
 /// 自己的持久化状态、Web 事件和产品错误类型。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnOutcome {
-    pub status: TurnOutcomeStatus,
-    pub final_text: Option<String>,
-    pub error: Option<String>,
-    pub return_error: Option<TurnReturnError>,
+    status: TurnOutcomeStatus,
+    final_text: Option<String>,
+    error: Option<String>,
+    return_error: Option<TurnReturnError>,
 }
 
 impl TurnOutcome {
+    pub fn status(&self) -> TurnOutcomeStatus {
+        self.status
+    }
+
+    pub fn final_text(&self) -> Option<&str> {
+        self.final_text.as_deref()
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
+    pub fn return_error(&self) -> Option<&TurnReturnError> {
+        self.return_error.as_ref()
+    }
+
     pub fn from_result(result: &TurnResult) -> Self {
         let final_text = (!result.content.trim().is_empty()).then_some(result.content.clone());
         let status = match result.status {
@@ -1084,12 +1114,24 @@ pub enum TurnReturnError {
 /// 映射到自身协议枚举与持久化格式。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnErrorProjection {
-    pub status: TurnOutcomeStatus,
-    pub error_message: Option<String>,
-    pub should_publish_error: bool,
+    status: TurnOutcomeStatus,
+    error_message: Option<String>,
+    should_publish_error: bool,
 }
 
 impl TurnErrorProjection {
+    pub fn status(&self) -> TurnOutcomeStatus {
+        self.status
+    }
+
+    pub fn error_message(&self) -> Option<&str> {
+        self.error_message.as_deref()
+    }
+
+    pub fn should_publish_error(&self) -> bool {
+        self.should_publish_error
+    }
+
     pub fn from_return_error(error: TurnReturnError) -> Self {
         match error {
             TurnReturnError::Cancelled => Self {
@@ -1230,6 +1272,107 @@ mod tests {
                 error_message: Some("model stream disconnected".to_string()),
                 should_publish_error: true,
             }
+        );
+    }
+
+    #[test]
+    fn turn_projection_types_hide_fields_behind_accessors() {
+        let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/turn.rs"))
+            .expect("turn source");
+
+        let runtime_snapshot_fields = source
+            .split("pub struct TurnRuntimeSnapshot {")
+            .nth(1)
+            .expect("runtime snapshot struct")
+            .split("impl TurnRuntimeSnapshot")
+            .next()
+            .expect("runtime snapshot fields");
+        let runtime_snapshot_impl = source
+            .split("impl TurnRuntimeSnapshot")
+            .nth(1)
+            .expect("runtime snapshot impl")
+            .split("impl TurnResult")
+            .next()
+            .expect("runtime snapshot impl body");
+        for accessor in [
+            "pub fn usage(",
+            "pub fn last_context_tokens(",
+            "pub fn latest_context_compaction(",
+        ] {
+            assert!(
+                runtime_snapshot_impl.contains(accessor),
+                "turn 运行时快照应由 pl-core accessor 暴露 `{accessor}`"
+            );
+        }
+        assert!(
+            !runtime_snapshot_fields.contains("pub usage:")
+                && !runtime_snapshot_fields.contains("pub last_context_tokens:")
+                && !runtime_snapshot_fields.contains("pub latest_context_compaction:"),
+            "宿主不应直接读取 TurnRuntimeSnapshot 字段"
+        );
+
+        let outcome_fields = source
+            .split("pub struct TurnOutcome {")
+            .nth(1)
+            .expect("turn outcome struct")
+            .split("impl TurnOutcome")
+            .next()
+            .expect("turn outcome fields");
+        let outcome_impl = source
+            .split("impl TurnOutcome")
+            .nth(1)
+            .expect("turn outcome impl")
+            .split("/// 宿主无关的单轮完成分类。")
+            .next()
+            .expect("turn outcome impl body");
+        for accessor in [
+            "pub fn status(",
+            "pub fn final_text(",
+            "pub fn error(",
+            "pub fn return_error(",
+        ] {
+            assert!(
+                outcome_impl.contains(accessor),
+                "turn outcome 应由 pl-core accessor 暴露 `{accessor}`"
+            );
+        }
+        assert!(
+            !outcome_fields.contains("pub status:")
+                && !outcome_fields.contains("pub final_text:")
+                && !outcome_fields.contains("pub error:")
+                && !outcome_fields.contains("pub return_error:"),
+            "宿主不应直接读取 TurnOutcome 字段"
+        );
+
+        let error_projection_fields = source
+            .split("pub struct TurnErrorProjection {")
+            .nth(1)
+            .expect("turn error projection struct")
+            .split("impl TurnErrorProjection")
+            .next()
+            .expect("turn error projection fields");
+        let error_projection_impl = source
+            .split("impl TurnErrorProjection")
+            .nth(1)
+            .expect("turn error projection impl")
+            .split("/// 检查 turn 取消信号")
+            .next()
+            .expect("turn error projection impl body");
+        for accessor in [
+            "pub fn status(",
+            "pub fn error_message(",
+            "pub fn should_publish_error(",
+        ] {
+            assert!(
+                error_projection_impl.contains(accessor),
+                "turn 错误投影应由 pl-core accessor 暴露 `{accessor}`"
+            );
+        }
+        assert!(
+            !error_projection_fields.contains("pub status:")
+                && !error_projection_fields.contains("pub error_message:")
+                && !error_projection_fields.contains("pub should_publish_error:"),
+            "宿主不应直接读取 TurnErrorProjection 字段"
         );
     }
 
