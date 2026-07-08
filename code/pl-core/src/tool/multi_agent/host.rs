@@ -2,15 +2,21 @@ use std::fmt;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use pl_protocol::{AgentStatus, Message, PureError, Result};
 use serde::{Deserialize, Serialize};
+
+use crate::agent::AgentInputTurnMode;
 
 use super::super::{
     BoxFuture, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeLockPolicy,
 };
 use super::schema::AgentControlToolKind;
 use super::{ForkTurns, fork_session};
+
+const DEFAULT_AGENT_CONTROL_WAIT_TIMEOUT_MS: i64 = 30_000;
+const MIN_AGENT_CONTROL_WAIT_TIMEOUT_MS: i64 = 100;
 
 /// 宿主产品提供的 agent-control 执行后端。
 ///
@@ -132,6 +138,13 @@ pub struct AgentControlSendInputRequest {
     pub skill_mentions: Vec<String>,
 }
 
+impl AgentControlSendInputRequest {
+    /// 返回共享 input turn mode，并在 pl-core 内统一表达 `interrupt` 隐含启动 turn。
+    pub fn turn_mode(&self) -> AgentInputTurnMode {
+        AgentInputTurnMode::from_codex_flags(self.trigger_turn || self.interrupt, self.interrupt)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentControlSendInputOutput {
@@ -149,6 +162,18 @@ pub struct AgentControlWaitRequest {
     #[serde(default)]
     pub targets: Vec<String>,
     pub timeout_ms: Option<i64>,
+}
+
+impl AgentControlWaitRequest {
+    /// 返回经过共享默认值和下限归一化后的等待时长。
+    pub fn timeout_duration(&self) -> Duration {
+        let timeout_ms = self
+            .timeout_ms
+            .and_then(|value| (value >= 0).then_some(value))
+            .unwrap_or(DEFAULT_AGENT_CONTROL_WAIT_TIMEOUT_MS)
+            .max(MIN_AGENT_CONTROL_WAIT_TIMEOUT_MS) as u64;
+        Duration::from_millis(timeout_ms)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

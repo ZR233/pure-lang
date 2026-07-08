@@ -11,6 +11,7 @@ use super::json_output;
 use super::types::{
     AgentToolRuntime, ListAgentsResult, SendInputResult, SpawnAgentResult, WaitAgentResult,
 };
+use crate::agent::AgentInputTurnMode;
 use crate::agent::AgentRecord;
 use crate::tool::{Tool, ToolContext, ToolRuntimeLockPolicy, WorkspaceAccess};
 use crate::turn::CompileMode;
@@ -48,6 +49,54 @@ fn wait_agent_result_serializes_activity_message() {
             message: "wait_agent observed agent activity.".to_string(),
             timed_out: false,
         }
+    );
+}
+
+#[test]
+fn agent_control_send_input_request_exposes_shared_turn_mode() {
+    let queue_only: crate::tool::AgentControlSendInputRequest =
+        serde_json::from_value(serde_json::json!({ "target": "agent-1", "message": "hold" }))
+            .unwrap();
+    let trigger_turn: crate::tool::AgentControlSendInputRequest = serde_json::from_value(
+        serde_json::json!({ "target": "agent-1", "message": "go", "triggerTurn": true }),
+    )
+    .unwrap();
+    let interrupt: crate::tool::AgentControlSendInputRequest = serde_json::from_value(
+        serde_json::json!({ "target": "agent-1", "message": "stop", "interrupt": true }),
+    )
+    .unwrap();
+
+    assert_eq!(queue_only.turn_mode(), AgentInputTurnMode::QueueOnly);
+    assert_eq!(trigger_turn.turn_mode(), AgentInputTurnMode::TriggerTurn);
+    assert_eq!(interrupt.turn_mode(), AgentInputTurnMode::Interrupt);
+}
+
+#[test]
+fn agent_control_wait_request_normalizes_timeout_duration() {
+    let default_timeout: crate::tool::AgentControlWaitRequest =
+        serde_json::from_value(serde_json::json!({})).unwrap();
+    let negative_timeout: crate::tool::AgentControlWaitRequest =
+        serde_json::from_value(serde_json::json!({ "timeoutMs": -1 })).unwrap();
+    let too_small_timeout: crate::tool::AgentControlWaitRequest =
+        serde_json::from_value(serde_json::json!({ "timeoutMs": 10 })).unwrap();
+    let explicit_timeout: crate::tool::AgentControlWaitRequest =
+        serde_json::from_value(serde_json::json!({ "timeoutMs": 1250 })).unwrap();
+
+    assert_eq!(
+        default_timeout.timeout_duration(),
+        std::time::Duration::from_secs(30)
+    );
+    assert_eq!(
+        negative_timeout.timeout_duration(),
+        std::time::Duration::from_secs(30)
+    );
+    assert_eq!(
+        too_small_timeout.timeout_duration(),
+        std::time::Duration::from_millis(100)
+    );
+    assert_eq!(
+        explicit_timeout.timeout_duration(),
+        std::time::Duration::from_millis(1250)
     );
 }
 
