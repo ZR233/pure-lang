@@ -286,6 +286,24 @@ pub struct AgentControlListRequest {
     pub path_prefix: Option<String>,
 }
 
+impl AgentControlListRequest {
+    /// 按 `list_agents` 的共享输入语义生成模型可见输出。
+    ///
+    /// 宿主只需要把自己可见的 agent 记录交给 pl-core；`pathPrefix` 过滤和 JSON
+    /// 输出形状由共享工具层维护，避免产品 adapter 重复拼协议。
+    pub fn into_list_output<I>(self, records: I) -> AgentControlListOutput
+    where
+        I: IntoIterator<Item = AgentControlAgentRecord>,
+    {
+        let path_prefix = self.path_prefix.unwrap_or_default();
+        let agents = records
+            .into_iter()
+            .filter(|record| path_prefix.is_empty() || record.path.starts_with(&path_prefix))
+            .collect();
+        AgentControlListOutput { agents }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentControlListOutput {
@@ -303,10 +321,44 @@ pub struct AgentControlAgentRecord {
     pub error: Option<String>,
 }
 
+impl AgentControlAgentRecord {
+    /// 创建模型可见的紧凑 agent 记录。
+    ///
+    /// `task`、`summary` 和 `error` 可能来自长上下文或 provider 报错；统一在
+    /// pl-core 压缩，保证所有宿主的 `list_agents` 输出一致且不会意外膨胀。
+    pub fn new(
+        path: impl Into<String>,
+        status: AgentStatus,
+        role: impl Into<String>,
+        task: impl AsRef<str>,
+        summary: Option<String>,
+        error: Option<String>,
+    ) -> Self {
+        Self {
+            path: path.into(),
+            status,
+            role: role.into(),
+            task: crate::core::compact_text(task.as_ref()),
+            summary: summary.as_deref().map(crate::core::compact_text),
+            error: error.as_deref().map(crate::core::compact_text),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentControlTargetRequest {
     pub target: String,
+}
+
+impl AgentControlTargetRequest {
+    /// 将目标 agent 状态投影为 close/resume 的统一模型可见输出。
+    pub fn into_message_output(self, status: AgentStatus) -> AgentControlMessageOutput {
+        AgentControlMessageOutput {
+            target: self.target,
+            status,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

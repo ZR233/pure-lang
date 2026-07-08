@@ -213,6 +213,58 @@ fn list_agents_result_round_trips_compact_agents() {
 }
 
 #[test]
+fn agent_control_list_request_filters_records_and_compacts_text() {
+    let request: crate::tool::AgentControlListRequest =
+        serde_json::from_value(serde_json::json!({ "pathPrefix": "/root/agent" })).unwrap();
+    let long_task = format!("  {}  ", "a".repeat(260));
+    let long_summary = format!("  {}  ", "b".repeat(260));
+    let long_error = format!("  {}  ", "c".repeat(260));
+    let matching = crate::tool::AgentControlAgentRecord::new(
+        "/root/agent-1",
+        AgentStatus::Running,
+        "executor",
+        long_task,
+        Some(long_summary),
+        Some(long_error),
+    );
+    let hidden = crate::tool::AgentControlAgentRecord::new(
+        "/root/other",
+        AgentStatus::Completed,
+        "reviewer",
+        "done",
+        None,
+        None,
+    );
+
+    let output = request.into_list_output([matching.clone(), hidden]);
+
+    assert_eq!(output.agents, vec![matching]);
+    assert_eq!(output.agents[0].task, format!("{}...", "a".repeat(240)));
+    assert_eq!(
+        output.agents[0].summary,
+        Some(format!("{}...", "b".repeat(240)))
+    );
+    assert_eq!(
+        output.agents[0].error,
+        Some(format!("{}...", "c".repeat(240)))
+    );
+}
+
+#[test]
+fn agent_control_target_request_builds_message_output() {
+    let request: crate::tool::AgentControlTargetRequest =
+        serde_json::from_value(serde_json::json!({ "target": "agent-1" })).unwrap();
+
+    assert_eq!(
+        request.into_message_output(AgentStatus::Shutdown),
+        crate::tool::AgentControlMessageOutput {
+            target: "agent-1".to_string(),
+            status: AgentStatus::Shutdown,
+        }
+    );
+}
+
+#[test]
 fn spawn_agent_result_serializes_turn_metadata() {
     let output = json_output(SpawnAgentResult {
         agent_id: "agent-1".to_string(),
