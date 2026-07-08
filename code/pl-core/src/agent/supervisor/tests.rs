@@ -303,6 +303,49 @@ async fn agent_wait_loop_returns_last_snapshot_on_timeout() {
 }
 
 #[tokio::test]
+async fn agent_wait_loop_can_wait_without_timeout() {
+    let snapshots = Arc::new(Mutex::new(VecDeque::from([
+        (
+            AgentWaitSnapshot {
+                turn_presence: AgentTurnPresence::ActiveTurn,
+                status: AgentLifecycleStatusKind::Active,
+            },
+            "pending".to_string(),
+        ),
+        (
+            AgentWaitSnapshot {
+                turn_presence: AgentTurnPresence::NoActiveTurn,
+                status: AgentLifecycleStatusKind::Completed,
+            },
+            "done".to_string(),
+        ),
+    ])));
+
+    let result = wait_for_agent_completion(
+        {
+            let snapshots = Arc::clone(&snapshots);
+            move || {
+                let snapshots = Arc::clone(&snapshots);
+                async move { Ok::<_, ()>(snapshots.lock().await.pop_front().expect("snapshot")) }
+            }
+        },
+        AgentWaitLoopOptions::until_complete().with_poll_interval(Duration::from_millis(1)),
+        &CancellationToken::new(),
+    )
+    .await
+    .expect("wait result");
+
+    assert_eq!(
+        result,
+        AgentWaitLoopResult {
+            value: "done".to_string(),
+            timed_out: false,
+        }
+    );
+    assert!(snapshots.lock().await.is_empty());
+}
+
+#[tokio::test]
 async fn agent_wait_loop_reports_cancelled() {
     let cancellation = CancellationToken::new();
     cancellation.cancel();

@@ -10,14 +10,21 @@ const DEFAULT_AGENT_WAIT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// agent wait loop 的共享执行选项。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AgentWaitLoopOptions {
-    timeout: Duration,
+    timeout: Option<Duration>,
     poll_interval: Duration,
 }
 
 impl AgentWaitLoopOptions {
     pub fn new(timeout: Duration) -> Self {
         Self {
-            timeout,
+            timeout: Some(timeout),
+            poll_interval: DEFAULT_AGENT_WAIT_POLL_INTERVAL,
+        }
+    }
+
+    pub fn until_complete() -> Self {
+        Self {
+            timeout: None,
             poll_interval: DEFAULT_AGENT_WAIT_POLL_INTERVAL,
         }
     }
@@ -55,7 +62,7 @@ where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<(AgentWaitSnapshot, T), E>>,
 {
-    let deadline = Instant::now() + options.timeout;
+    let deadline = options.timeout.map(|timeout| Instant::now() + timeout);
     loop {
         if cancellation_token.is_cancelled() {
             return Err(AgentWaitLoopError::Cancelled);
@@ -67,13 +74,16 @@ where
                 timed_out: false,
             });
         }
-        if Instant::now() >= deadline {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             return Ok(AgentWaitLoopResult {
                 value,
                 timed_out: true,
             });
         }
-        let next_poll = std::cmp::min(Instant::now() + options.poll_interval, deadline);
+        let next_poll = match deadline {
+            Some(deadline) => std::cmp::min(Instant::now() + options.poll_interval, deadline),
+            None => Instant::now() + options.poll_interval,
+        };
         tokio::select! {
             _ = tokio::time::sleep_until(next_poll) => {},
             _ = cancellation_token.cancelled() => return Err(AgentWaitLoopError::Cancelled),
