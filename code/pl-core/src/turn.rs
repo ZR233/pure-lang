@@ -1,7 +1,9 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
+use futures::future::{AbortHandle, AbortRegistration, Abortable};
 use pl_model::TokenUsage;
 use pl_protocol::{BudgetLimitKind, BudgetUsage, MessageContent};
 use pl_trace::{TraceAttachment, TraceEvent};
@@ -440,6 +442,89 @@ impl std::fmt::Debug for TurnOptions {
     }
 }
 
+/// 宿主可复用的单轮异步任务控制句柄。
+///
+/// 该类型只负责 turn task 的取消 token 与 abort 生命周期，不写入任何宿主状态。
+/// 产品层仍负责自己的持久化、事件投影、排队和最终状态转换。
+#[derive(Clone)]
+pub struct TurnTaskHandle {
+    cancellation_token: CancellationToken,
+    abort_handle: Option<AbortHandle>,
+}
+
+impl TurnTaskHandle {
+    /// 启动一个可取消、可 abort 的 turn task，并把同一个取消 token 传给任务体。
+    pub fn spawn_with_token<F, Fut>(task: F) -> Self
+    where
+        F: FnOnce(CancellationToken) -> Fut,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let (handle, abort_registration) = Self::new_abortable();
+        let task_token = handle.cancellation_token();
+        tokio::spawn(Abortable::new(task(task_token), abort_registration));
+        handle
+    }
+
+    /// 包装由宿主或测试外部管理的取消 token。
+    ///
+    /// 返回的句柄没有 abort 能力，调用 `abort` 或 `cancel_and_abort_after` 只会取消 token。
+    pub fn from_external_token(cancellation_token: CancellationToken) -> Self {
+        Self {
+            cancellation_token,
+            abort_handle: None,
+        }
+    }
+
+    /// 返回传给 turn task 的取消 token。
+    pub fn cancellation_token(&self) -> CancellationToken {
+        self.cancellation_token.clone()
+    }
+
+    /// 判断当前 turn task 是否已经收到取消信号。
+    pub fn is_cancelled(&self) -> bool {
+        self.cancellation_token.is_cancelled()
+    }
+
+    /// 只发送合作式取消信号，不强制 abort task。
+    pub fn cancel(&self) {
+        self.cancellation_token.cancel();
+    }
+
+    /// 立即 abort 由该句柄启动的 task。
+    pub fn abort(&self) {
+        if let Some(abort_handle) = self.abort_handle.clone() {
+            abort_handle.abort();
+        }
+    }
+
+    /// 先发送取消信号，等待 grace 后仍处于取消态则 abort task。
+    pub fn cancel_and_abort_after(&self, grace: Duration) {
+        self.cancel();
+        let Some(abort_handle) = self.abort_handle.clone() else {
+            return;
+        };
+        let token = self.cancellation_token.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(grace).await;
+            if token.is_cancelled() {
+                abort_handle.abort();
+            }
+        });
+    }
+
+    fn new_abortable() -> (Self, AbortRegistration) {
+        let cancellation_token = CancellationToken::new();
+        let (abort_handle, abort_registration) = AbortHandle::new_pair();
+        (
+            Self {
+                cancellation_token,
+                abort_handle: Some(abort_handle),
+            },
+            abort_registration,
+        )
+    }
+}
+
 /// 单轮运行的最终状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnResultStatus {
@@ -694,5 +779,52 @@ mod tests {
         let usage = tracker.usage();
         assert_eq!(usage.model_steps, 200);
         assert_eq!(usage.tool_calls, 200);
+    }
+
+    #[tokio::test]
+    async fn turn_task_handle_passes_shared_cancellation_token_to_task() {
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let handle = TurnTaskHandle::spawn_with_token(|token| async move {
+            started_tx.send(token.is_cancelled()).unwrap();
+            token.cancelled().await;
+        });
+
+        assert_eq!(started_rx.await.unwrap(), false);
+
+        handle.cancel();
+
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            handle.cancellation_token().cancelled(),
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn turn_task_handle_aborts_after_grace_when_task_ignores_cancel() {
+        struct DropSignal(Option<tokio::sync::oneshot::Sender<()>>);
+
+        impl Drop for DropSignal {
+            fn drop(&mut self) {
+                if let Some(sender) = self.0.take() {
+                    let _ = sender.send(());
+                }
+            }
+        }
+
+        let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel();
+        let handle = TurnTaskHandle::spawn_with_token(|_token| async move {
+            let _drop_signal = DropSignal(Some(dropped_tx));
+            std::future::pending::<()>().await;
+        });
+
+        handle.cancel_and_abort_after(std::time::Duration::from_millis(1));
+
+        tokio::time::timeout(std::time::Duration::from_millis(200), dropped_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(handle.is_cancelled());
     }
 }
