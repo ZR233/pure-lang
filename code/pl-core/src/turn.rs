@@ -979,6 +979,28 @@ pub struct TurnResult {
     pub trace_events: Vec<TraceEvent>,
 }
 
+/// 单轮运行时统计快照。
+///
+/// 宿主产品使用该结构把 pl-core 的 usage/context/compaction 状态投影到自身
+/// store 或 Web API；哪些统计需要暴露由 pl-core 统一判断，产品层不再直接解释
+/// `TurnResult` 的底层字段组合。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnRuntimeSnapshot {
+    pub usage: Option<TokenUsage>,
+    pub last_context_tokens: Option<u64>,
+    pub latest_context_compaction: Option<ContextCompactionSnapshot>,
+}
+
+impl TurnResult {
+    pub fn runtime_snapshot(&self) -> TurnRuntimeSnapshot {
+        TurnRuntimeSnapshot {
+            usage: (self.usage.total_tokens > 0).then_some(self.usage.clone()),
+            last_context_tokens: self.last_context_tokens,
+            latest_context_compaction: self.context_compactions.last().cloned(),
+        }
+    }
+}
+
 /// 宿主可投影到自身状态机的单轮归一化结果。
 ///
 /// `pl-core` 负责解释通用 turn 终态和中止原因；宿主仍负责把该结果映射到
@@ -1123,6 +1145,62 @@ mod tests {
                 final_text: Some("  final text  ".to_string()),
                 error: None,
                 return_error: Some(TurnReturnError::Failed("pl-core turn failed".to_string(),)),
+            }
+        );
+    }
+
+    #[test]
+    fn turn_result_runtime_snapshot_exposes_usage_and_context_state() {
+        let mut result = turn_result(TurnResultStatus::Completed, None);
+        result.usage = TokenUsage {
+            prompt_tokens: 11,
+            cached_prompt_tokens: 3,
+            completion_tokens: 5,
+            reasoning_tokens: 2,
+            total_tokens: 16,
+        };
+        result.last_context_tokens = Some(1234);
+        result.context_compactions = vec![
+            crate::context_compaction::ContextCompactionSnapshot {
+                trigger: crate::context_compaction::ContextCompactionTrigger::EstimatedTokens,
+                tokens_before: 900,
+                estimated_request_tokens: 910,
+                provider_prompt_tokens: None,
+                auto_compact_limit: 800,
+                replacement_tokens: Some(100),
+                summary: "older".to_string(),
+            },
+            crate::context_compaction::ContextCompactionSnapshot {
+                trigger: crate::context_compaction::ContextCompactionTrigger::ProviderPromptTokens,
+                tokens_before: 1200,
+                estimated_request_tokens: 1210,
+                provider_prompt_tokens: Some(1234),
+                auto_compact_limit: 1000,
+                replacement_tokens: Some(120),
+                summary: "latest".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            result.runtime_snapshot(),
+            TurnRuntimeSnapshot {
+                usage: Some(result.usage.clone()),
+                last_context_tokens: Some(1234),
+                latest_context_compaction: result.context_compactions.last().cloned(),
+            }
+        );
+    }
+
+    #[test]
+    fn turn_result_runtime_snapshot_omits_zero_usage() {
+        let result = turn_result(TurnResultStatus::Completed, None);
+
+        assert_eq!(
+            result.runtime_snapshot(),
+            TurnRuntimeSnapshot {
+                usage: None,
+                last_context_tokens: None,
+                latest_context_compaction: None,
             }
         );
     }
