@@ -644,6 +644,59 @@ where
     }
 }
 
+/// 启动 agent turn 的宿主无关状态转换输入。
+///
+/// pl-core 只定义“允许开始时应写入哪些通用字段”；具体状态枚举、
+/// turn id 和时间戳类型仍由产品层提供。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTurnStartTransition<TurnId, Status, Timestamp> {
+    turn_id: TurnId,
+    running_status: Status,
+    updated_at: Timestamp,
+}
+
+impl<TurnId, Status, Timestamp> AgentTurnStartTransition<TurnId, Status, Timestamp> {
+    pub fn new(turn_id: TurnId, running_status: Status, updated_at: Timestamp) -> Self {
+        Self {
+            turn_id,
+            running_status,
+            updated_at,
+        }
+    }
+
+    /// 根据产品层的可启动判断生成状态变更。
+    pub fn evaluate(self, can_start: bool) -> AgentTurnStartOutcome<Status, TurnId, Timestamp> {
+        if can_start {
+            AgentTurnStartOutcome::Started(AgentTurnStartMutation {
+                status: self.running_status,
+                current_turn: Some(self.turn_id),
+                updated_at: self.updated_at,
+                last_error: None,
+                cancel_requested: false,
+            })
+        } else {
+            AgentTurnStartOutcome::Busy
+        }
+    }
+}
+
+/// 启动 agent turn 后应写入宿主状态的通用字段。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTurnStartMutation<Status, TurnId, Timestamp> {
+    pub status: Status,
+    pub current_turn: Option<TurnId>,
+    pub updated_at: Timestamp,
+    pub last_error: Option<String>,
+    pub cancel_requested: bool,
+}
+
+/// 启动 agent turn 的通用状态转换结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentTurnStartOutcome<Status, TurnId, Timestamp> {
+    Started(AgentTurnStartMutation<Status, TurnId, Timestamp>),
+    Busy,
+}
+
 /// 单轮运行的最终状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnResultStatus {
@@ -987,5 +1040,32 @@ mod tests {
 
         assert_eq!(taken.session_id, "session-a");
         assert!(slot.current().is_none());
+    }
+
+    #[test]
+    fn agent_turn_start_transition_builds_running_mutation() {
+        let transition =
+            AgentTurnStartTransition::new("turn-a".to_string(), "running".to_string(), 42);
+
+        let outcome = transition.evaluate(true);
+
+        assert_eq!(
+            outcome,
+            AgentTurnStartOutcome::Started(AgentTurnStartMutation {
+                status: "running".to_string(),
+                current_turn: Some("turn-a".to_string()),
+                updated_at: 42,
+                last_error: None,
+                cancel_requested: false,
+            })
+        );
+    }
+
+    #[test]
+    fn agent_turn_start_transition_reports_busy_without_mutation() {
+        let transition =
+            AgentTurnStartTransition::new("turn-a".to_string(), "running".to_string(), 42);
+
+        assert_eq!(transition.evaluate(false), AgentTurnStartOutcome::Busy);
     }
 }
