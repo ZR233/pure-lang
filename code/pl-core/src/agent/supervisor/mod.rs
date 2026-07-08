@@ -239,6 +239,22 @@ pub struct AgentWaitOutcome {
     pub timed_out: bool,
 }
 
+impl AgentWaitOutcome {
+    /// 将共享 wait 结果投影为模型可见的 `wait_agent` 输出。
+    ///
+    /// 宿主仍可决定 message 中包含哪些产品诊断信息；`timedOut` 字段和输出形状
+    /// 由 pl-core 统一维护，避免宿主 adapter 解析或重建共享工具字段。
+    pub fn into_wait_agent_output(
+        self,
+        message: impl Into<String>,
+    ) -> crate::tool::AgentControlWaitOutput {
+        crate::tool::AgentControlWaitOutput {
+            message: message.into(),
+            timed_out: self.timed_out,
+        }
+    }
+}
+
 /// 宿主 agent 当前是否仍持有 active turn。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentTurnPresence {

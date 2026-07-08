@@ -131,6 +131,20 @@ fn agent_input_submission_builds_send_input_output() {
 }
 
 #[test]
+fn agent_wait_outcome_builds_wait_agent_output() {
+    let output = AgentWaitOutcome { timed_out: true }
+        .into_wait_agent_output("{\"pending\":[\"worker\"]}".to_string());
+
+    assert_eq!(
+        output,
+        crate::tool::AgentControlWaitOutput {
+            message: "{\"pending\":[\"worker\"]}".to_string(),
+            timed_out: true,
+        }
+    );
+}
+
+#[test]
 fn agent_input_turn_mode_exposes_dispatch_actions() {
     assert_eq!(
         AgentInputTurnMode::QueueOnly.initial_action(),
