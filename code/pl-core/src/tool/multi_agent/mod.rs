@@ -19,9 +19,10 @@ use types::{AgentToolRecord, CompactAgentRecord};
 
 pub use host::{
     AgentControlAgentRecord, AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
-    AgentControlMessageOutput, AgentControlSendInputOutput, AgentControlSendInputRequest,
-    AgentControlSpawnOutput, AgentControlSpawnRequest, AgentControlTargetRequest, AgentControlTool,
-    AgentControlWaitOutput, AgentControlWaitRequest,
+    AgentControlMessageOutput, AgentControlPolicy, AgentControlSendInputOutput,
+    AgentControlSendInputRequest, AgentControlSpawnOutput, AgentControlSpawnRequest,
+    AgentControlTargetRequest, AgentControlTool, AgentControlWaitOutput, AgentControlWaitRequest,
+    AllowAllAgentControlPolicy,
 };
 pub use schema::{
     AgentControlToolKind, TOOL_CLOSE_AGENT, TOOL_LIST_AGENTS, TOOL_RESUME_AGENT, TOOL_SEND_INPUT,

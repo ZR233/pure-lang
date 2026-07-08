@@ -64,12 +64,12 @@ pub use mcp_tool::{
 };
 pub use multi_agent::{
     AgentControlAgentRecord, AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
-    AgentControlMessageOutput, AgentControlSendInputOutput, AgentControlSendInputRequest,
-    AgentControlSpawnOutput, AgentControlSpawnRequest, AgentControlTargetRequest, AgentControlTool,
-    AgentControlToolKind, AgentControlWaitOutput, AgentControlWaitRequest, CloseAgentTool,
-    ListAgentsTool, ResumeAgentTool, SendInputTool, SpawnAgentTool, TOOL_CLOSE_AGENT,
-    TOOL_LIST_AGENTS, TOOL_RESUME_AGENT, TOOL_SEND_INPUT, TOOL_SPAWN_AGENT, TOOL_WAIT_AGENT,
-    WaitAgentTool,
+    AgentControlMessageOutput, AgentControlPolicy, AgentControlSendInputOutput,
+    AgentControlSendInputRequest, AgentControlSpawnOutput, AgentControlSpawnRequest,
+    AgentControlTargetRequest, AgentControlTool, AgentControlToolKind, AgentControlWaitOutput,
+    AgentControlWaitRequest, AllowAllAgentControlPolicy, CloseAgentTool, ListAgentsTool,
+    ResumeAgentTool, SendInputTool, SpawnAgentTool, TOOL_CLOSE_AGENT, TOOL_LIST_AGENTS,
+    TOOL_RESUME_AGENT, TOOL_SEND_INPUT, TOOL_SPAWN_AGENT, TOOL_WAIT_AGENT, WaitAgentTool,
 };
 pub use output_format::{
     DEFAULT_MODEL_TOOL_OUTPUT_TOKENS, ToolHistoryProjection, ToolLifecyclePhase,

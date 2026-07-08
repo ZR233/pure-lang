@@ -425,6 +425,89 @@ impl crate::tool::AgentControlBackend for RecordingHostAgentControlBackend {
     }
 }
 
+#[derive(Debug, Clone)]
+struct DenyTargetAgentControlPolicy {
+    calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl crate::tool::AgentControlPolicy for DenyTargetAgentControlPolicy {
+    async fn check_tool(&self, kind: crate::tool::AgentControlToolKind) -> crate::Result<()> {
+        self.calls
+            .lock()
+            .expect("policy calls")
+            .push(format!("tool:{}", kind.name()));
+        Ok(())
+    }
+
+    async fn check_target(
+        &self,
+        kind: crate::tool::AgentControlToolKind,
+        target: &str,
+    ) -> crate::Result<()> {
+        self.calls
+            .lock()
+            .expect("policy calls")
+            .push(format!("target:{}:{target}", kind.name()));
+        Err(pl_protocol::PureError::ToolExecutionFailed {
+            tool: kind.name().to_string(),
+            error: "target blocked by policy".to_string(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn host_agent_control_policy_denies_target_before_backend() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let send_tool = crate::tool::AgentControlTool::with_policy(
+        crate::tool::AgentControlToolKind::SendInput,
+        Arc::new(FakeHostAgentControlBackend),
+        Arc::new(DenyTargetAgentControlPolicy {
+            calls: Arc::clone(&calls),
+        }),
+    );
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let context = ToolContext {
+        event_tx,
+        options: crate::TurnOptions::default(),
+        workspace_access: WorkspaceAccess::WorkspaceOnly,
+        mode: CompileMode::Auto,
+        workspace_root: std::env::temp_dir(),
+        workspace_instructions: None,
+        instruction_snapshot: None,
+        provider_call_id: None,
+        active_subagent: None,
+        agent_supervisor: crate::AgentSupervisor::default(),
+        agent_tool_registrar: None,
+        lsp_runtime: None,
+        parent_session: Arc::new(crate::CoreSession::new()),
+    };
+
+    let error = send_tool
+        .execute(
+            crate::tool::ToolInput {
+                arguments: serde_json::json!({
+                    "target": "/root/blocked",
+                    "message": "continue"
+                }),
+                session_id: "session-1".to_string(),
+                tool_id: "call-1".to_string(),
+                revision_base: 0,
+            },
+            context,
+        )
+        .await
+        .expect_err("policy should deny target before backend");
+
+    assert!(error.to_string().contains("target blocked by policy"));
+    assert_eq!(
+        calls.lock().expect("policy calls").clone(),
+        vec![
+            "tool:send_input".to_string(),
+            "target:send_input:/root/blocked".to_string(),
+        ]
+    );
+}
+
 #[tokio::test]
 async fn host_agent_control_tool_uses_shared_schema_parse_output_and_lock_policy() {
     let spawn_tool = crate::tool::AgentControlTool::new(

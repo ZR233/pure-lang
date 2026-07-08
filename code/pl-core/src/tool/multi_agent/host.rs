@@ -49,6 +49,35 @@ pub trait AgentControlBackend: fmt::Debug + Send + Sync {
     ) -> impl Future<Output = Result<AgentControlMessageOutput>> + Send;
 }
 
+/// 宿主产品提供的 agent-control 权限策略。
+///
+/// pl-core 在共享 agent-control 工具执行 backend 之前统一调用该策略，保证工具
+/// 可见性、目标通信边界和产品权限检查属于 shared tool lifecycle，而不是散落在
+/// backend 的业务执行分支里。实现方应只检查权限，不执行状态变更。
+pub trait AgentControlPolicy: fmt::Debug + Send + Sync {
+    fn check_tool(&self, kind: AgentControlToolKind) -> impl Future<Output = Result<()>> + Send;
+
+    fn check_target(
+        &self,
+        kind: AgentControlToolKind,
+        target: &str,
+    ) -> impl Future<Output = Result<()>> + Send;
+}
+
+/// 默认允许所有 agent-control 调用的策略。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AllowAllAgentControlPolicy;
+
+impl AgentControlPolicy for AllowAllAgentControlPolicy {
+    async fn check_tool(&self, _kind: AgentControlToolKind) -> Result<()> {
+        Ok(())
+    }
+
+    async fn check_target(&self, _kind: AgentControlToolKind, _target: &str) -> Result<()> {
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentControlSpawnRequest {
@@ -151,20 +180,36 @@ pub struct AgentControlMessageOutput {
 
 /// 使用宿主后端执行共享 agent-control schema 的工具。
 #[derive(Debug, Clone)]
-pub struct AgentControlTool<B> {
+pub struct AgentControlTool<B, P = AllowAllAgentControlPolicy> {
     kind: AgentControlToolKind,
     backend: Arc<B>,
+    policy: Arc<P>,
 }
 
-impl<B> AgentControlTool<B> {
+impl<B> AgentControlTool<B, AllowAllAgentControlPolicy> {
     pub fn new(kind: AgentControlToolKind, backend: Arc<B>) -> Self {
-        Self { kind, backend }
+        Self {
+            kind,
+            backend,
+            policy: Arc::new(AllowAllAgentControlPolicy),
+        }
     }
 }
 
-impl<B> Tool for AgentControlTool<B>
+impl<B, P> AgentControlTool<B, P> {
+    pub fn with_policy(kind: AgentControlToolKind, backend: Arc<B>, policy: Arc<P>) -> Self {
+        Self {
+            kind,
+            backend,
+            policy,
+        }
+    }
+}
+
+impl<B, P> Tool for AgentControlTool<B, P>
 where
     B: AgentControlBackend + 'static,
+    P: AgentControlPolicy + 'static,
 {
     fn name(&self) -> &str {
         self.kind.name()
@@ -202,6 +247,7 @@ where
             match self.kind {
                 AgentControlToolKind::SpawnAgent => {
                     let mut request: AgentControlSpawnRequest = parse_input(self.name(), input)?;
+                    self.policy.check_tool(self.kind).await?;
                     let fork_turns = ForkTurns::parse(request.fork_turns.as_deref())?;
                     request.forked_messages = match fork_turns {
                         ForkTurns::None => None,
@@ -213,31 +259,40 @@ where
                     };
                     json_output(self.backend.spawn_agent(request).await?)
                 }
-                AgentControlToolKind::SendInput => json_output(
-                    self.backend
-                        .send_input(parse_input(self.name(), input)?)
-                        .await?,
-                ),
-                AgentControlToolKind::WaitAgent => json_output(
-                    self.backend
-                        .wait_agent(parse_input(self.name(), input)?)
-                        .await?,
-                ),
-                AgentControlToolKind::ListAgents => json_output(
-                    self.backend
-                        .list_agents(parse_input(self.name(), input)?)
-                        .await?,
-                ),
-                AgentControlToolKind::CloseAgent => json_output(
-                    self.backend
-                        .close_agent(parse_input(self.name(), input)?)
-                        .await?,
-                ),
-                AgentControlToolKind::ResumeAgent => json_output(
-                    self.backend
-                        .resume_agent(parse_input(self.name(), input)?)
-                        .await?,
-                ),
+                AgentControlToolKind::SendInput => {
+                    let request: AgentControlSendInputRequest = parse_input(self.name(), input)?;
+                    self.policy.check_tool(self.kind).await?;
+                    self.policy.check_target(self.kind, &request.target).await?;
+                    json_output(self.backend.send_input(request).await?)
+                }
+                AgentControlToolKind::WaitAgent => {
+                    let request: AgentControlWaitRequest = parse_input(self.name(), input)?;
+                    self.policy.check_tool(self.kind).await?;
+                    if let Some(target) = &request.target {
+                        self.policy.check_target(self.kind, target).await?;
+                    }
+                    for target in &request.targets {
+                        self.policy.check_target(self.kind, target).await?;
+                    }
+                    json_output(self.backend.wait_agent(request).await?)
+                }
+                AgentControlToolKind::ListAgents => {
+                    let request: AgentControlListRequest = parse_input(self.name(), input)?;
+                    self.policy.check_tool(self.kind).await?;
+                    json_output(self.backend.list_agents(request).await?)
+                }
+                AgentControlToolKind::CloseAgent => {
+                    let request: AgentControlTargetRequest = parse_input(self.name(), input)?;
+                    self.policy.check_tool(self.kind).await?;
+                    self.policy.check_target(self.kind, &request.target).await?;
+                    json_output(self.backend.close_agent(request).await?)
+                }
+                AgentControlToolKind::ResumeAgent => {
+                    let request: AgentControlTargetRequest = parse_input(self.name(), input)?;
+                    self.policy.check_tool(self.kind).await?;
+                    self.policy.check_target(self.kind, &request.target).await?;
+                    json_output(self.backend.resume_agent(request).await?)
+                }
             }
         })
     }

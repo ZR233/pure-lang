@@ -561,6 +561,26 @@ impl crate::tool::AgentControlBackend for FakeAgentControlBackend {
     }
 }
 
+#[derive(Debug, Clone)]
+struct DenyAgentControlTargetPolicy;
+
+impl crate::tool::AgentControlPolicy for DenyAgentControlTargetPolicy {
+    async fn check_tool(&self, _kind: crate::tool::AgentControlToolKind) -> crate::Result<()> {
+        Ok(())
+    }
+
+    async fn check_target(
+        &self,
+        kind: crate::tool::AgentControlToolKind,
+        _target: &str,
+    ) -> crate::Result<()> {
+        Err(crate::PureError::ToolExecutionFailed {
+            tool: kind.name().to_string(),
+            error: "target denied by builder policy".to_string(),
+        })
+    }
+}
+
 #[tokio::test]
 async fn tool_set_builder_registers_host_agent_control_backend() {
     let capabilities = crate::config::ToolCapabilityConfig {
@@ -588,6 +608,48 @@ async fn tool_set_builder_registers_host_agent_control_backend() {
     assert!(core.tools.get("spawn_agent").is_some());
     assert!(core.tools.get("send_input").is_some());
     assert!(core.tools.get("wait_agent").is_none());
+}
+
+#[tokio::test]
+async fn tool_set_builder_registers_host_agent_control_policy() {
+    let capabilities = crate::config::ToolCapabilityConfig {
+        subagents: true,
+        ..Default::default()
+    };
+    let mut core = PureCore::default_provider().unwrap();
+
+    ToolSetBuilder::from_capabilities(capabilities)
+        .with_allowed_tools(["send_input"])
+        .with_agent_control_tools(std::sync::Arc::new(FakeAgentControlBackend))
+        .with_agent_control_policy(std::sync::Arc::new(DenyAgentControlTargetPolicy))
+        .register(&mut core, std::env::temp_dir(), None)
+        .await;
+
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let error = core
+        .tools
+        .get("send_input")
+        .expect("send_input")
+        .execute(
+            crate::tool::ToolInput {
+                arguments: serde_json::json!({
+                    "target": "agent-1",
+                    "message": "continue"
+                }),
+                session_id: "session-1".to_string(),
+                tool_id: "call-1".to_string(),
+                revision_base: 0,
+            },
+            test_tool_context(event_tx),
+        )
+        .await
+        .expect_err("policy should deny target before backend");
+
+    assert!(
+        error
+            .to_string()
+            .contains("target denied by builder policy")
+    );
 }
 
 #[derive(Debug, Clone, Default)]

@@ -5,18 +5,19 @@ use std::sync::Arc;
 use crate::config::ToolCapabilityConfig;
 use crate::tool::{
     AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
-    AgentControlMessageOutput, AgentControlSendInputOutput, AgentControlSendInputRequest,
-    AgentControlSpawnOutput, AgentControlSpawnRequest, AgentControlTargetRequest, AgentControlTool,
-    AgentControlToolKind, AgentControlWaitOutput, AgentControlWaitRequest, ApplyPatchTool,
-    AskUserTool, CloseAgentTool, ContainerBackend, ContainerToolKind,
-    ContainerWorkspaceFileBackend, CopyPathTool, CreateDirectoryTool, DeletePathTool,
-    ExecutionBackend, GitCredentialProvider, GitToolKind, GitWorkspaceConfig, ListAgentsTool,
-    ListFilesTool, LocalExecutionBackend, McpListResourceTemplatesRequest, McpListResourcesRequest,
-    McpReadResourceRequest, McpResourceBackend, McpResourceTool, McpResourceToolKind, McpTool,
-    McpToolBackend, McpToolRequest, MovePathTool, NoContainerBackend, NoGitCredentialProvider,
-    PlanExitTool, ReadFileTool, ResumeAgentTool, SearchFilesTool, SendInputTool, SpawnAgentTool,
-    StatPathTool, TodoListTool, Tool, WaitAgentTool, WorkspaceFileTool, WorkspaceFileToolKind,
-    WriteFileTool, command_tool_pair,
+    AgentControlMessageOutput, AgentControlPolicy, AgentControlSendInputOutput,
+    AgentControlSendInputRequest, AgentControlSpawnOutput, AgentControlSpawnRequest,
+    AgentControlTargetRequest, AgentControlTool, AgentControlToolKind, AgentControlWaitOutput,
+    AgentControlWaitRequest, AllowAllAgentControlPolicy, ApplyPatchTool, AskUserTool,
+    CloseAgentTool, ContainerBackend, ContainerToolKind, ContainerWorkspaceFileBackend,
+    CopyPathTool, CreateDirectoryTool, DeletePathTool, ExecutionBackend, GitCredentialProvider,
+    GitToolKind, GitWorkspaceConfig, ListAgentsTool, ListFilesTool, LocalExecutionBackend,
+    McpListResourceTemplatesRequest, McpListResourcesRequest, McpReadResourceRequest,
+    McpResourceBackend, McpResourceTool, McpResourceToolKind, McpTool, McpToolBackend,
+    McpToolRequest, MovePathTool, NoContainerBackend, NoGitCredentialProvider, PlanExitTool,
+    ReadFileTool, ResumeAgentTool, SearchFilesTool, SendInputTool, SpawnAgentTool, StatPathTool,
+    TodoListTool, Tool, WaitAgentTool, WorkspaceFileTool, WorkspaceFileToolKind, WriteFileTool,
+    command_tool_pair,
 };
 use pl_model::ToolSchema;
 use pl_protocol::{PureError, Result};
@@ -215,13 +216,14 @@ pub struct ToolSetBuilder<
     P = NoGitCredentialProvider,
     C = NoContainerBackend,
     A = NoAgentControlBackend,
+    Q = AllowAllAgentControlPolicy,
     M = NoMcpResourceBackend,
     T = NoMcpToolBackend,
 > {
     capabilities: ToolCapabilityConfig,
     git_runtime: Option<GitToolRuntime<B, P>>,
     container_runtime: Option<ContainerToolRuntime<C>>,
-    agent_control_runtime: Option<AgentControlToolRuntime<A>>,
+    agent_control_runtime: Option<AgentControlToolRuntime<A, Q>>,
     mcp_resource_runtime: Option<McpResourceToolRuntime<M>>,
     mcp_tool_runtime: Option<McpToolRuntime<T>>,
     allowed_tools: Option<HashSet<String>>,
@@ -241,7 +243,7 @@ impl ToolSetBuilder {
     }
 }
 
-impl<B, P, C, A, M, T> ToolSetBuilder<B, P, C, A, M, T> {
+impl<B, P, C, A, Q, M, T> ToolSetBuilder<B, P, C, A, Q, M, T> {
     pub fn with_allowed_tools<I, S>(mut self, allowed_tools: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -256,7 +258,7 @@ impl<B, P, C, A, M, T> ToolSetBuilder<B, P, C, A, M, T> {
         config: GitWorkspaceConfig,
         backend: Arc<NB>,
         credential_provider: Arc<NP>,
-    ) -> ToolSetBuilder<NB, NP, C, A, M, T> {
+    ) -> ToolSetBuilder<NB, NP, C, A, Q, M, T> {
         ToolSetBuilder {
             capabilities: self.capabilities,
             git_runtime: Some(GitToolRuntime {
@@ -272,7 +274,10 @@ impl<B, P, C, A, M, T> ToolSetBuilder<B, P, C, A, M, T> {
         }
     }
 
-    pub fn with_container_tools<NC>(self, backend: Arc<NC>) -> ToolSetBuilder<B, P, NC, A, M, T> {
+    pub fn with_container_tools<NC>(
+        self,
+        backend: Arc<NC>,
+    ) -> ToolSetBuilder<B, P, NC, A, Q, M, T> {
         ToolSetBuilder {
             capabilities: self.capabilities,
             git_runtime: self.git_runtime,
@@ -287,12 +292,35 @@ impl<B, P, C, A, M, T> ToolSetBuilder<B, P, C, A, M, T> {
     pub fn with_agent_control_tools<NA>(
         self,
         backend: Arc<NA>,
-    ) -> ToolSetBuilder<B, P, C, NA, M, T> {
+    ) -> ToolSetBuilder<B, P, C, NA, AllowAllAgentControlPolicy, M, T> {
         ToolSetBuilder {
             capabilities: self.capabilities,
             git_runtime: self.git_runtime,
             container_runtime: self.container_runtime,
-            agent_control_runtime: Some(AgentControlToolRuntime { backend }),
+            agent_control_runtime: Some(AgentControlToolRuntime {
+                backend,
+                policy: Arc::new(AllowAllAgentControlPolicy),
+            }),
+            mcp_resource_runtime: self.mcp_resource_runtime,
+            mcp_tool_runtime: self.mcp_tool_runtime,
+            allowed_tools: self.allowed_tools,
+        }
+    }
+
+    pub fn with_agent_control_policy<NQ>(
+        self,
+        policy: Arc<NQ>,
+    ) -> ToolSetBuilder<B, P, C, A, NQ, M, T> {
+        ToolSetBuilder {
+            capabilities: self.capabilities,
+            git_runtime: self.git_runtime,
+            container_runtime: self.container_runtime,
+            agent_control_runtime: self.agent_control_runtime.map(|runtime| {
+                AgentControlToolRuntime {
+                    backend: runtime.backend,
+                    policy,
+                }
+            }),
             mcp_resource_runtime: self.mcp_resource_runtime,
             mcp_tool_runtime: self.mcp_tool_runtime,
             allowed_tools: self.allowed_tools,
@@ -302,7 +330,7 @@ impl<B, P, C, A, M, T> ToolSetBuilder<B, P, C, A, M, T> {
     pub fn with_mcp_resource_tools<NM>(
         self,
         backend: Arc<NM>,
-    ) -> ToolSetBuilder<B, P, C, A, NM, T> {
+    ) -> ToolSetBuilder<B, P, C, A, Q, NM, T> {
         ToolSetBuilder {
             capabilities: self.capabilities,
             git_runtime: self.git_runtime,
@@ -318,7 +346,7 @@ impl<B, P, C, A, M, T> ToolSetBuilder<B, P, C, A, M, T> {
         self,
         schemas: Vec<ToolSchema>,
         backend: Arc<NT>,
-    ) -> ToolSetBuilder<B, P, C, A, M, NT> {
+    ) -> ToolSetBuilder<B, P, C, A, Q, M, NT> {
         ToolSetBuilder {
             capabilities: self.capabilities,
             git_runtime: self.git_runtime,
@@ -365,12 +393,13 @@ impl<B, P, C, A, M, T> ToolSetBuilder<B, P, C, A, M, T> {
     }
 }
 
-impl<B, P, C, A, M, T> ToolSetBuilder<B, P, C, A, M, T>
+impl<B, P, C, A, Q, M, T> ToolSetBuilder<B, P, C, A, Q, M, T>
 where
     B: ExecutionBackend + 'static,
     P: GitCredentialProvider + 'static,
     C: ContainerBackend + 'static,
     A: AgentControlBackend + 'static,
+    Q: AgentControlPolicy + 'static,
     M: McpResourceBackend + 'static,
     T: McpToolBackend + 'static,
 {
@@ -415,9 +444,12 @@ where
         }
         if self.capabilities.subagents {
             if let Some(runtime) = &self.agent_control_runtime {
-                register_agent_control_tools(core, runtime.backend.clone(), |name| {
-                    self.tool_allowed(name)
-                });
+                register_agent_control_tools(
+                    core,
+                    runtime.backend.clone(),
+                    runtime.policy.clone(),
+                    |name| self.tool_allowed(name),
+                );
             } else {
                 register_subagent_tools(core, workspace_instructions.clone(), |name| {
                     self.tool_allowed(name)
@@ -556,8 +588,9 @@ struct ContainerToolRuntime<C> {
 }
 
 #[derive(Debug, Clone)]
-struct AgentControlToolRuntime<A> {
+struct AgentControlToolRuntime<A, Q> {
     backend: Arc<A>,
+    policy: Arc<Q>,
 }
 
 #[derive(Debug, Clone)]
@@ -695,16 +728,22 @@ fn register_container_file_tools<C>(
     }
 }
 
-fn register_agent_control_tools<A>(
+fn register_agent_control_tools<A, Q>(
     core: &mut PureCore,
     backend: Arc<A>,
+    policy: Arc<Q>,
     allowed: impl Fn(&str) -> bool,
 ) where
     A: AgentControlBackend + 'static,
+    Q: AgentControlPolicy + 'static,
 {
     for kind in AgentControlToolKind::all() {
         if allowed(kind.name()) {
-            core.register_tool(AgentControlTool::new(*kind, backend.clone()));
+            core.register_tool(AgentControlTool::with_policy(
+                *kind,
+                backend.clone(),
+                policy.clone(),
+            ));
         }
     }
 }

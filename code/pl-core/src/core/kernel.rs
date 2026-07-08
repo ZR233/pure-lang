@@ -240,12 +240,13 @@ impl AgentKernelToolSet for NoAgentKernelToolSet {
     }
 }
 
-impl<B, P, C, A, M, T> AgentKernelToolSet for ToolSetBuilder<B, P, C, A, M, T>
+impl<B, P, C, A, Q, M, T> AgentKernelToolSet for ToolSetBuilder<B, P, C, A, Q, M, T>
 where
     B: crate::tool::ExecutionBackend + 'static,
     P: crate::tool::GitCredentialProvider + 'static,
     C: crate::tool::ContainerBackend + 'static,
     A: crate::tool::AgentControlBackend + 'static,
+    Q: crate::tool::AgentControlPolicy + 'static,
     M: crate::tool::McpResourceBackend + 'static,
     T: crate::tool::McpToolBackend + 'static,
 {
