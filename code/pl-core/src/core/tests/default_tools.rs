@@ -436,10 +436,12 @@ async fn tool_set_builder_registers_git_only_with_runtime_config() {
 struct FakeContainerBackend;
 
 impl crate::tool::ContainerBackend for FakeContainerBackend {
+    type Error = String;
+
     async fn exec(
         &self,
         _request: crate::tool::ContainerExecRequest,
-    ) -> crate::Result<crate::tool::ContainerExecOutput> {
+    ) -> std::result::Result<crate::tool::ContainerExecOutput, Self::Error> {
         Ok(crate::tool::ContainerExecOutput {
             status: 0,
             stdout: String::new(),
@@ -455,11 +457,14 @@ impl crate::tool::ContainerBackend for FakeContainerBackend {
     async fn copy_from(
         &self,
         _request: crate::tool::ContainerCopyFromRequest,
-    ) -> crate::Result<Vec<u8>> {
+    ) -> std::result::Result<Vec<u8>, Self::Error> {
         Ok(Vec::new())
     }
 
-    async fn copy_to(&self, _request: crate::tool::ContainerCopyToRequest) -> crate::Result<()> {
+    async fn copy_to(
+        &self,
+        _request: crate::tool::ContainerCopyToRequest,
+    ) -> std::result::Result<(), Self::Error> {
         Ok(())
     }
 }

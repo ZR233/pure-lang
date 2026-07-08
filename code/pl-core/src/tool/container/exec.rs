@@ -176,7 +176,8 @@ where
             output_bytes_cap: Some(output_bytes_cap),
             cancellation_token,
         })
-        .await?;
+        .await
+        .map_err(|error| tool_error(TOOL_CONTAINER_EXEC, error))?;
     let mut execution = ContainerToolExecution::json(
         output.status == 0,
         json!({

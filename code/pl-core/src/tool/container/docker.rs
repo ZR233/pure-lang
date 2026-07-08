@@ -1,6 +1,5 @@
 use std::process::Stdio;
 
-use pl_protocol::{PureError, Result};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
@@ -41,7 +40,12 @@ impl DockerCliContainerBackend {
 }
 
 impl ContainerBackend for DockerCliContainerBackend {
-    async fn exec(&self, request: ContainerExecRequest) -> Result<ContainerExecOutput> {
+    type Error = String;
+
+    async fn exec(
+        &self,
+        request: ContainerExecRequest,
+    ) -> std::result::Result<ContainerExecOutput, Self::Error> {
         let shell_command = shell_command_with_optional_timeout(
             &request.command,
             request.timeout_secs.filter(|seconds| *seconds > 0),
@@ -70,7 +74,10 @@ impl ContainerBackend for DockerCliContainerBackend {
         })
     }
 
-    async fn copy_from(&self, request: ContainerCopyFromRequest) -> Result<Vec<u8>> {
+    async fn copy_from(
+        &self,
+        request: ContainerCopyFromRequest,
+    ) -> std::result::Result<Vec<u8>, Self::Error> {
         if request.archive {
             let source = format!("{}:{}", self.container_id, request.path);
             let output = Command::new(&self.binary)
@@ -101,7 +108,10 @@ impl ContainerBackend for DockerCliContainerBackend {
         Ok(output.stdout)
     }
 
-    async fn copy_to(&self, request: ContainerCopyToRequest) -> Result<()> {
+    async fn copy_to(
+        &self,
+        request: ContainerCopyToRequest,
+    ) -> std::result::Result<(), Self::Error> {
         let parent = parent_dir(&request.path);
         let copy_command = if parent.is_empty() {
             format!("cat > {}", shell_quote(&request.path))
@@ -186,11 +196,8 @@ fn stderr_or_stdout(output: &std::process::Output) -> String {
     }
 }
 
-fn docker_error(error: impl std::fmt::Display) -> PureError {
-    PureError::ToolExecutionFailed {
-        tool: "docker".to_string(),
-        error: error.to_string(),
-    }
+fn docker_error(error: impl std::fmt::Display) -> String {
+    error.to_string()
 }
 
 #[cfg(test)]
