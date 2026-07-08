@@ -46,6 +46,32 @@ pub(crate) fn token_usage_snapshot(usage: &TokenUsage) -> TokenUsageSnapshot {
     }
 }
 
+/// 模型 token usage 的宿主投影快照。
+///
+/// `TokenUsageSnapshot` 面向 pl-core runtime cost/trace，只保留成本计算需要的字段；
+/// 宿主产品若需要展示 reasoning token 或 provider 返回的总数，应使用该类型，避免
+/// 在产品层重复解释 `pl_model::TokenUsage`。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelTokenUsageSnapshot {
+    pub input_tokens: u64,
+    pub cached_input_tokens: u64,
+    pub output_tokens: u64,
+    pub reasoning_output_tokens: u64,
+    pub total_tokens: u64,
+}
+
+impl ModelTokenUsageSnapshot {
+    pub fn from_model_usage(usage: &TokenUsage) -> Self {
+        Self {
+            input_tokens: usage.prompt_tokens,
+            cached_input_tokens: usage.cached_prompt_tokens,
+            output_tokens: usage.completion_tokens,
+            reasoning_output_tokens: usage.reasoning_tokens,
+            total_tokens: usage.total_tokens,
+        }
+    }
+}
+
 pub(crate) fn cost_for_usage(
     usage: &TokenUsageSnapshot,
     model: Option<&ModelInfo>,
@@ -179,4 +205,32 @@ pub(crate) fn estimate_cost(
             + cached as f64 * cache_price)
             / 1_000_000.0,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn model_token_usage_snapshot_preserves_reasoning_and_provider_total() {
+        let usage = TokenUsage {
+            prompt_tokens: 10,
+            cached_prompt_tokens: 4,
+            completion_tokens: 3,
+            reasoning_tokens: 2,
+            total_tokens: 13,
+        };
+
+        assert_eq!(
+            ModelTokenUsageSnapshot::from_model_usage(&usage),
+            ModelTokenUsageSnapshot {
+                input_tokens: 10,
+                cached_input_tokens: 4,
+                output_tokens: 3,
+                reasoning_output_tokens: 2,
+                total_tokens: 13,
+            }
+        );
+    }
 }

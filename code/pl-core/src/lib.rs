@@ -99,6 +99,7 @@ pub use pl_protocol::{
 pub use provider_usage::{
     ProviderUsageData, ProviderUsageRecord, ProviderUsageState, provider_usage_records,
 };
+pub use runtime_usage::ModelTokenUsageSnapshot;
 pub use session::{
     CoreSession, repair_incomplete_tool_history, tool_call_history_message,
     tool_result_history_message,
