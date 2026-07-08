@@ -452,6 +452,38 @@ async fn model_turn_helper_retries_full_history_when_continuation_is_unsupported
 }
 
 #[tokio::test]
+async fn model_turn_text_helper_returns_assistant_message_text() {
+    let sse_body = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"title\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"title\"}]}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_title\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let (base_url, handle) = serve_sse_once(sse_body).await;
+    let mut provider_info = ProviderInfo::openai(Some(base_url));
+    provider_info.bearer_token = Some("test-token".to_string());
+    provider_info.default_model = "local-responses".to_string();
+    let provider = pl_model::create_provider(provider_info).unwrap();
+    let mut session = CoreSession::new();
+    session.push_user_prompt("summarize this".to_string());
+
+    let text = stream_session_completion_message_text(
+        provider,
+        &mut session,
+        CoreModelTurnRequest::new("local-responses").with_instructions("title only"),
+        CoreModelTurnOptions::default(),
+    )
+    .await
+    .unwrap();
+    handle.await.unwrap();
+
+    assert_eq!(text, "title");
+    assert_eq!(session.previous_response_id(), Some("resp_title"));
+}
+
+#[tokio::test]
 async fn model_turn_client_caches_unsupported_continuation_by_key() {
     let retry_sse = concat!(
         "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_retry\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",

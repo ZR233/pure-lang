@@ -57,7 +57,7 @@ pub use core::{
     CoreRuntimeProfile, HostedSharedToolVisibility, NoAgentKernelToolSet, PureCore,
     PureCoreBuilder, SharedToolSchemaOptions, ToolProfile, ToolSetBuilder, ToolVisibilitySet,
     WorkspaceProfile, hosted_container_shared_tool_names, shared_tool_names, shared_tool_schemas,
-    stream_session_completion_response,
+    stream_session_completion_message_text, stream_session_completion_response,
 };
 pub use first_run::{
     FirstRunConfigDraft, FirstRunModelDraft, FirstRunProviderDraft, ProviderTemplateKind,

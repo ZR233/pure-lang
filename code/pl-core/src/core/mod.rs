@@ -47,7 +47,7 @@ pub use kernel::{
 pub use model_turn::{
     CoreModelContinuationConfig, CoreModelContinuationProfile, CoreModelProviderFamily,
     CoreModelTurnClient, CoreModelTurnOptions, CoreModelTurnRequest, CoreModelWireApi,
-    stream_session_completion_response,
+    stream_session_completion_message_text, stream_session_completion_response,
 };
 pub use profile::{
     AgentBackendProfile, CoreRuntimeOptions, CoreRuntimeProfile, PureCoreBuilder, ToolProfile,

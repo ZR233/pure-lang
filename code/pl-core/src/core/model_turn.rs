@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use crate::CoreSession;
+use crate::message::completion_response_message_text;
 
 /// 单次模型 completion 请求配置。
 ///
@@ -210,6 +211,19 @@ impl CoreModelTurnClient {
         Ok(response)
     }
 
+    pub async fn stream_session_completion_message_text(
+        &self,
+        provider: SharedModelProvider,
+        session: &mut CoreSession,
+        request: CoreModelTurnRequest,
+        options: CoreModelTurnOptions,
+    ) -> Result<String> {
+        let response = self
+            .stream_session_completion_response(provider, session, request, options)
+            .await?;
+        Ok(completion_response_message_text(&response))
+    }
+
     async fn continuation_is_unsupported(&self, key: &str) -> bool {
         self.unsupported_continuations.lock().await.contains(key)
     }
@@ -237,6 +251,16 @@ pub async fn stream_session_completion_response(
         }
         Err(error) => Err(error),
     }
+}
+
+pub async fn stream_session_completion_message_text(
+    provider: SharedModelProvider,
+    session: &mut CoreSession,
+    request: CoreModelTurnRequest,
+    options: CoreModelTurnOptions,
+) -> Result<String> {
+    let response = stream_session_completion_response(provider, session, request, options).await?;
+    Ok(completion_response_message_text(&response))
 }
 
 fn completion_request(
