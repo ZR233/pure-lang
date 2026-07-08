@@ -58,7 +58,10 @@ pub use mcp_resource::{
     McpResourceBackend, McpResourceTool, McpResourceToolKind, TOOL_LIST_MCP_RESOURCE_TEMPLATES,
     TOOL_LIST_MCP_RESOURCES, TOOL_READ_MCP_RESOURCE,
 };
-pub use mcp_tool::{McpTool, McpToolBackend, McpToolRequest};
+pub use mcp_tool::{
+    HostMcpToolSpec, McpTool, McpToolBackend, McpToolRequest, host_mcp_tool_schema,
+    host_mcp_tool_schemas,
+};
 pub use multi_agent::{
     AgentControlAgentRecord, AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
     AgentControlMessageOutput, AgentControlSendInputOutput, AgentControlSendInputRequest,

@@ -9,6 +9,32 @@ use serde_json::{Value, json};
 
 use super::{BoxFuture, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput};
 
+/// 宿主侧 MCP tool 的模型可见 schema 描述。
+///
+/// 宿主负责发现 MCP session 里的原始 tool；pl-core 负责把这些发现结果
+/// 转成统一的模型工具 schema，并通过 `McpToolBackend` 进入共享 dispatch。
+#[derive(Debug, Clone, PartialEq)]
+pub struct HostMcpToolSpec {
+    pub model_name: String,
+    pub server: String,
+    pub name: String,
+    pub description: String,
+    pub input_schema: Value,
+}
+
+pub fn host_mcp_tool_schema(spec: HostMcpToolSpec) -> ToolSchema {
+    let description = if spec.description.is_empty() {
+        format!("Call MCP tool `{}` on server `{}`.", spec.name, spec.server)
+    } else {
+        spec.description
+    };
+    ToolSchema::function(spec.model_name, description, spec.input_schema)
+}
+
+pub fn host_mcp_tool_schemas(specs: impl IntoIterator<Item = HostMcpToolSpec>) -> Vec<ToolSchema> {
+    specs.into_iter().map(host_mcp_tool_schema).collect()
+}
+
 /// 宿主提供的 MCP tool 调用请求。
 #[derive(Debug, Clone, PartialEq)]
 pub struct McpToolRequest {
@@ -106,4 +132,60 @@ fn json_output(tool: &str, value: Value) -> Result<ToolOutput> {
         timed_out: false,
         runtime_events: Vec::new(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use pl_model::ToolSchema;
+    use pretty_assertions::assert_eq;
+    use serde_json::json;
+
+    use super::{HostMcpToolSpec, host_mcp_tool_schema};
+
+    #[test]
+    fn host_mcp_tool_schema_uses_canonical_description_and_input_shape() {
+        let schema = host_mcp_tool_schema(HostMcpToolSpec {
+            model_name: "mcp__docs__lookup".to_string(),
+            server: "docs".to_string(),
+            name: "lookup".to_string(),
+            description: String::new(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string" }
+                }
+            }),
+        });
+
+        assert_eq!(schema.name(), "mcp__docs__lookup");
+        assert_eq!(
+            schema.description(),
+            "Call MCP tool `lookup` on server `docs`."
+        );
+        let ToolSchema::Function { input_schema, .. } = schema else {
+            panic!("host MCP tool must be a function schema");
+        };
+        assert_eq!(
+            input_schema,
+            json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string" }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn host_mcp_tool_schema_preserves_explicit_description() {
+        let schema = host_mcp_tool_schema(HostMcpToolSpec {
+            model_name: "mcp__repo__search".to_string(),
+            server: "repo".to_string(),
+            name: "search".to_string(),
+            description: "Search repository docs.".to_string(),
+            input_schema: json!({ "type": "object" }),
+        });
+
+        assert_eq!(schema.description(), "Search repository docs.");
+    }
 }
