@@ -173,7 +173,7 @@ pub use turn::{
     AgentTurnStatusOutcome, AgentTurnStatusTransition, BudgetPolicy, CompileMode,
     DEFAULT_WALL_CLOCK_MS, InteractionCallback, InteractionFuture, PermissionMode,
     ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest, ToolExecutionMode,
-    TurnAbortReason, TurnBudget, TurnOptions, TurnOutcome, TurnOutcomeStatus, TurnRequest,
-    TurnResult, TurnResultStatus, TurnReturnError, TurnTaskHandle, UserInputMode,
+    TurnAbortReason, TurnBudget, TurnErrorProjection, TurnOptions, TurnOutcome, TurnOutcomeStatus,
+    TurnRequest, TurnResult, TurnResultStatus, TurnReturnError, TurnTaskHandle, UserInputMode,
 };
 pub use workspace::{load_workspace_instructions, resolve_workspace_root};

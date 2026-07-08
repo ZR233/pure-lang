@@ -1059,6 +1059,35 @@ pub enum TurnReturnError {
     Failed(String),
 }
 
+/// 宿主可投影到自身状态机的单轮错误终止语义。
+///
+/// `pl-core` 负责把取消、失败等通用返回错误解释为稳定的 turn 终态、
+/// 模型可见/界面可见错误文本和是否应广播错误事件；宿主只需要把该结果
+/// 映射到自身协议枚举与持久化格式。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnErrorProjection {
+    pub status: TurnOutcomeStatus,
+    pub error_message: Option<String>,
+    pub should_publish_error: bool,
+}
+
+impl TurnErrorProjection {
+    pub fn from_return_error(error: TurnReturnError) -> Self {
+        match error {
+            TurnReturnError::Cancelled => Self {
+                status: TurnOutcomeStatus::Cancelled,
+                error_message: None,
+                should_publish_error: false,
+            },
+            TurnReturnError::Failed(message) => Self {
+                status: TurnOutcomeStatus::Failed,
+                error_message: Some(message),
+                should_publish_error: true,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1145,6 +1174,29 @@ mod tests {
                 final_text: Some("  final text  ".to_string()),
                 error: None,
                 return_error: Some(TurnReturnError::Failed("pl-core turn failed".to_string(),)),
+            }
+        );
+    }
+
+    #[test]
+    fn turn_error_projection_distinguishes_cancelled_and_failed_returns() {
+        assert_eq!(
+            TurnErrorProjection::from_return_error(TurnReturnError::Cancelled),
+            TurnErrorProjection {
+                status: TurnOutcomeStatus::Cancelled,
+                error_message: None,
+                should_publish_error: false,
+            }
+        );
+
+        assert_eq!(
+            TurnErrorProjection::from_return_error(TurnReturnError::Failed(
+                "model stream disconnected".to_string(),
+            )),
+            TurnErrorProjection {
+                status: TurnOutcomeStatus::Failed,
+                error_message: Some("model stream disconnected".to_string()),
+                should_publish_error: true,
             }
         );
     }
