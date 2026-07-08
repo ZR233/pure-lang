@@ -429,6 +429,8 @@ impl crate::tool::AgentControlBackend for FakeAgentControlBackend {
             target: request.target,
             status: pl_protocol::AgentStatus::Running,
             interrupt: request.interrupt,
+            queued: !request.trigger_turn,
+            turn_id: None,
         })
     }
 

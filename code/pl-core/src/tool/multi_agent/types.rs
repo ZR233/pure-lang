@@ -156,4 +156,6 @@ pub(super) struct SendInputResult {
     pub target: String,
     pub status: AgentStatus,
     pub interrupt: bool,
+    pub queued: bool,
+    pub turn_id: Option<String>,
 }

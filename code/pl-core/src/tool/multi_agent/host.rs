@@ -90,6 +90,8 @@ pub struct AgentControlSendInputOutput {
     pub target: String,
     pub status: AgentStatus,
     pub interrupt: bool,
+    pub queued: bool,
+    pub turn_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

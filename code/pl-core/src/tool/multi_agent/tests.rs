@@ -8,7 +8,7 @@ use super::agent_tool_records;
 use super::child_agent_options;
 use super::fork_session;
 use super::json_output;
-use super::types::{AgentToolRuntime, ListAgentsResult, WaitAgentResult};
+use super::types::{AgentToolRuntime, ListAgentsResult, SendInputResult, WaitAgentResult};
 use crate::agent::AgentRecord;
 use crate::tool::{Tool, ToolContext, ToolRuntimeLockPolicy, WorkspaceAccess};
 use crate::turn::CompileMode;
@@ -73,6 +73,29 @@ fn list_agents_result_round_trips_compact_agents() {
     );
     assert_eq!(result.agents[0].path, "/root/agent-1");
     assert_eq!(result.agents[0].status, AgentStatus::Interrupted);
+}
+
+#[test]
+fn send_input_result_serializes_queue_metadata() {
+    let output = json_output(SendInputResult {
+        target: "/root/agent-1".to_string(),
+        status: AgentStatus::Running,
+        interrupt: false,
+        queued: true,
+        turn_id: Some("turn-1".to_string()),
+    })
+    .unwrap();
+
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&output.description).unwrap(),
+        serde_json::json!({
+            "target": "/root/agent-1",
+            "status": "running",
+            "interrupt": false,
+            "queued": true,
+            "turnId": "turn-1"
+        })
+    );
 }
 
 #[test]
@@ -268,6 +291,8 @@ impl crate::tool::AgentControlBackend for FakeHostAgentControlBackend {
             target: request.target,
             status: AgentStatus::Running,
             interrupt: request.interrupt,
+            queued: false,
+            turn_id: Some("turn-2".to_string()),
         })
     }
 
@@ -320,18 +345,22 @@ impl crate::tool::AgentControlBackend for FakeHostAgentControlBackend {
 
 #[tokio::test]
 async fn host_agent_control_tool_uses_shared_schema_parse_output_and_lock_policy() {
-    let tool = crate::tool::AgentControlTool::new(
+    let spawn_tool = crate::tool::AgentControlTool::new(
         crate::tool::AgentControlToolKind::SpawnAgent,
         Arc::new(FakeHostAgentControlBackend),
     );
 
-    assert_eq!(tool.name(), "spawn_agent");
+    assert_eq!(spawn_tool.name(), "spawn_agent");
     assert!(
-        tool.input_schema()
+        spawn_tool
+            .input_schema()
             .pointer("/properties/taskName")
             .is_some()
     );
-    assert_eq!(tool.runtime_lock_policy(), ToolRuntimeLockPolicy::Shared);
+    assert_eq!(
+        spawn_tool.runtime_lock_policy(),
+        ToolRuntimeLockPolicy::Shared
+    );
 
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
     let context = ToolContext {
@@ -349,7 +378,7 @@ async fn host_agent_control_tool_uses_shared_schema_parse_output_and_lock_policy
         lsp_runtime: None,
         parent_session: Arc::new(crate::CoreSession::new()),
     };
-    let output = tool
+    let output = spawn_tool
         .execute(
             crate::tool::ToolInput {
                 arguments: serde_json::json!({
@@ -362,7 +391,7 @@ async fn host_agent_control_tool_uses_shared_schema_parse_output_and_lock_policy
                 tool_id: "call-1".to_string(),
                 revision_base: 0,
             },
-            context,
+            context.clone(),
         )
         .await
         .unwrap();
@@ -375,6 +404,42 @@ async fn host_agent_control_tool_uses_shared_schema_parse_output_and_lock_policy
             "path": "/root/agent-1",
             "status": "queued",
             "turnId": "turn-1"
+        })
+    );
+
+    let send_tool = crate::tool::AgentControlTool::new(
+        crate::tool::AgentControlToolKind::SendInput,
+        Arc::new(FakeHostAgentControlBackend),
+    );
+    assert_eq!(
+        send_tool.runtime_lock_policy(),
+        ToolRuntimeLockPolicy::Exclusive
+    );
+    let output = send_tool
+        .execute(
+            crate::tool::ToolInput {
+                arguments: serde_json::json!({
+                    "target": "/root/agent-1",
+                    "message": "continue",
+                    "triggerTurn": true,
+                    "interrupt": true
+                }),
+                session_id: "session-1".to_string(),
+                tool_id: "call-2".to_string(),
+                revision_base: 0,
+            },
+            context,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&output.description).unwrap(),
+        serde_json::json!({
+            "target": "/root/agent-1",
+            "status": "running",
+            "interrupt": true,
+            "queued": false,
+            "turnId": "turn-2"
         })
     );
 }
