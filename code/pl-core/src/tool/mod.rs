@@ -742,6 +742,54 @@ impl RegisteredTool {
         })
     }
 
+    /// 注册带强类型输入的产品工具。
+    ///
+    /// 宿主只提供产品输入类型和业务 handler；`pl-core` 负责把模型传入的
+    /// JSON arguments 反序列化为该类型，并把输入解析错误、业务错误和
+    /// `ToolExecutionResult` 统一映射成 canonical `ToolOutput`。
+    pub fn from_typed_fallible_execution_result<Input, F, Fut, Artifact, Error>(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        input_schema: serde_json::Value,
+        handler: F,
+    ) -> Self
+    where
+        Input: DeserializeOwned + Send + 'static,
+        F: Fn(Input, ToolContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = std::result::Result<ToolExecutionResult<Artifact>, Error>>
+            + Send
+            + 'static,
+        Artifact: Send + 'static,
+        Error: fmt::Display + Send + 'static,
+    {
+        let name = name.into();
+        let tool_name = name.clone();
+        Self::new(name, description, input_schema, move |input, context| {
+            let tool_name = tool_name.clone();
+            let arguments = match serde_json::from_value::<Input>(input.arguments) {
+                Ok(arguments) => arguments,
+                Err(error) => {
+                    return Box::pin(async move {
+                        Err(PureError::ToolExecutionFailed {
+                            tool: tool_name,
+                            error: format!("invalid input: {error}"),
+                        })
+                    }) as RegisteredToolFuture;
+                }
+            };
+            let future = handler(arguments, context);
+            Box::pin(async move {
+                future
+                    .await
+                    .map(ToolExecutionResult::into_tool_output)
+                    .map_err(|error| PureError::ToolExecutionFailed {
+                        tool: tool_name,
+                        error: error.to_string(),
+                    })
+            }) as RegisteredToolFuture
+        })
+    }
+
     pub fn with_parallel_tool_calls(mut self) -> Self {
         self.supports_parallel_tool_calls = true;
         self
@@ -1155,6 +1203,111 @@ mod tests {
             result,
             Err(PureError::ToolExecutionFailed { tool, error })
                 if tool == "product_tool" && error == "boom"
+        ));
+    }
+
+    #[tokio::test]
+    async fn registered_tool_from_typed_fallible_execution_result_deserializes_input() {
+        #[derive(Debug, Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct ProductInput {
+            item_id: String,
+        }
+
+        let tool = RegisteredTool::from_typed_fallible_execution_result(
+            "product_tool",
+            "Product tool",
+            serde_json::json!({ "type": "object" }),
+            |input: ProductInput, _context| async move {
+                Ok::<_, &'static str>(
+                    ToolExecutionResult::<serde_json::Value>::json(serde_json::json!({
+                        "itemId": input.item_id
+                    }))
+                    .expect("json output"),
+                )
+            },
+        );
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let output = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({ "itemId": "task-1" }),
+                    session_id: "session".to_string(),
+                    tool_id: "tool-call".to_string(),
+                    revision_base: 0,
+                },
+                ToolContext {
+                    event_tx,
+                    options: TurnOptions::default(),
+                    workspace_access: WorkspaceAccess::WorkspaceOnly,
+                    mode: crate::turn::CompileMode::Auto,
+                    workspace_root: PathBuf::new(),
+                    workspace_instructions: None,
+                    instruction_snapshot: None,
+                    provider_call_id: None,
+                    active_subagent: None,
+                    agent_supervisor: AgentSupervisor::default(),
+                    agent_tool_registrar: None,
+                    lsp_runtime: None,
+                    parent_session: Arc::new(crate::session::CoreSession::new()),
+                },
+            )
+            .await
+            .expect("typed product tool output");
+
+        assert_eq!(output.description, "{\"itemId\":\"task-1\"}");
+    }
+
+    #[tokio::test]
+    async fn registered_tool_from_typed_fallible_execution_result_rejects_invalid_input() {
+        #[derive(Debug, Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct ProductInput {
+            #[serde(rename = "itemId")]
+            _item_id: String,
+        }
+
+        let tool = RegisteredTool::from_typed_fallible_execution_result(
+            "product_tool",
+            "Product tool",
+            serde_json::json!({ "type": "object" }),
+            |_input: ProductInput, _context| async move {
+                Ok::<_, &'static str>(ToolExecutionResult::<serde_json::Value>::success("ok"))
+            },
+        );
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let result = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({ "item_id": "task-1" }),
+                    session_id: "session".to_string(),
+                    tool_id: "tool-call".to_string(),
+                    revision_base: 0,
+                },
+                ToolContext {
+                    event_tx,
+                    options: TurnOptions::default(),
+                    workspace_access: WorkspaceAccess::WorkspaceOnly,
+                    mode: crate::turn::CompileMode::Auto,
+                    workspace_root: PathBuf::new(),
+                    workspace_instructions: None,
+                    instruction_snapshot: None,
+                    provider_call_id: None,
+                    active_subagent: None,
+                    agent_supervisor: AgentSupervisor::default(),
+                    agent_tool_registrar: None,
+                    lsp_runtime: None,
+                    parent_session: Arc::new(crate::session::CoreSession::new()),
+                },
+            )
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(PureError::ToolExecutionFailed { tool, error })
+                if tool == "product_tool"
+                    && error.contains("invalid input")
+                    && error.contains("itemId")
         ));
     }
 
