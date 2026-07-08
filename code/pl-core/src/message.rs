@@ -8,6 +8,33 @@ pub fn message_content_text(content: &MessageContent) -> String {
     message_content_text_with_separator(content, "")
 }
 
+/// 从模型完成响应中生成短预览文本。
+///
+/// 预览按 reasoning、assistant content、tool call 的顺序拼接，并使用与 Codex
+/// 工具事件一致的单行截断格式，便于产品层和服务探活共享同一展示语义。
+pub fn completion_response_preview(response: &pl_model::CompletionResponse) -> String {
+    let mut parts = Vec::new();
+    if let Some(reasoning) = response
+        .reasoning_content
+        .as_deref()
+        .filter(|text| !text.is_empty())
+    {
+        parts.push(reasoning.to_string());
+    }
+    if let Some(content) = response.content.as_deref().filter(|text| !text.is_empty()) {
+        parts.push(content.to_string());
+    }
+    parts.extend(response.tool_calls.iter().map(|call| {
+        format!(
+            "function_call {} {}: {}",
+            call.name,
+            call.call_id.as_deref().unwrap_or(&call.id),
+            call.payload_text()
+        )
+    }));
+    text_preview(&parts.join("\n"), 500)
+}
+
 /// 构造一条普通用户文本消息。
 pub fn user_text_message(text: impl Into<String>) -> Message {
     text_message(MessageRole::User, text.into())
@@ -78,6 +105,21 @@ fn text_message(role: MessageRole, content: String) -> Message {
         reasoning_content: None,
         metadata: Default::default(),
     }
+}
+
+fn text_preview(value: &str, max: usize) -> String {
+    let mut out = value.replace('\n', "\\n");
+    if out.len() > max {
+        let boundary = out
+            .char_indices()
+            .take_while(|(i, c)| i + c.len_utf8() <= max)
+            .last()
+            .map(|(i, c)| i + c.len_utf8())
+            .unwrap_or(0);
+        out.truncate(boundary);
+        out.push_str("...");
+    }
+    out
 }
 
 /// 将一条可选 fragment message 的文本追加到基础消息后。
@@ -194,5 +236,53 @@ mod tests {
             "Other text",
             "Context checkpoint"
         ));
+    }
+
+    #[test]
+    fn completion_response_preview_includes_reasoning_content_and_tool_calls() {
+        let response = pl_model::CompletionResponse {
+            response_id: Some("resp_1".to_string()),
+            content: Some("answer".to_string()),
+            raw_content: None,
+            reasoning_content: Some("thinking".to_string()),
+            tool_calls: vec![pl_model::ToolCall::function(
+                "call_item",
+                "read_file",
+                serde_json::json!({"path": "Cargo.toml"}),
+                Some("call_1".to_string()),
+            )],
+            trace_events: Vec::new(),
+            next_sequence: 0,
+            usage: pl_model::TokenUsage::default(),
+            finish_reason: pl_model::FinishReason::Stop,
+            model: "test-model".to_string(),
+        };
+
+        assert_eq!(
+            super::completion_response_preview(&response),
+            r#"thinking\nanswer\nfunction_call read_file call_1: {"path":"Cargo.toml"}"#
+        );
+    }
+
+    #[test]
+    fn completion_response_preview_truncates_on_char_boundary() {
+        let response = pl_model::CompletionResponse {
+            response_id: None,
+            content: Some("你".repeat(200)),
+            raw_content: None,
+            reasoning_content: None,
+            tool_calls: Vec::new(),
+            trace_events: Vec::new(),
+            next_sequence: 0,
+            usage: pl_model::TokenUsage::default(),
+            finish_reason: pl_model::FinishReason::Stop,
+            model: "test-model".to_string(),
+        };
+
+        let preview = super::completion_response_preview(&response);
+
+        assert!(preview.ends_with("..."));
+        assert!(preview.len() <= 503);
+        assert!(std::str::from_utf8(preview.as_bytes()).is_ok());
     }
 }
