@@ -497,10 +497,12 @@ async fn tool_set_builder_registers_container_only_with_backend() {
 struct FakeAgentControlBackend;
 
 impl crate::tool::AgentControlBackend for FakeAgentControlBackend {
+    type Error = String;
+
     async fn spawn_agent(
         &self,
         request: crate::tool::AgentControlSpawnRequest,
-    ) -> crate::Result<crate::tool::AgentControlSpawnOutput> {
+    ) -> std::result::Result<crate::tool::AgentControlSpawnOutput, Self::Error> {
         Ok(crate::tool::AgentControlSpawnOutput {
             agent_id: "agent-1".to_string(),
             task_name: request.task_name,
@@ -513,7 +515,7 @@ impl crate::tool::AgentControlBackend for FakeAgentControlBackend {
     async fn send_input(
         &self,
         request: crate::tool::AgentControlSendInputRequest,
-    ) -> crate::Result<crate::tool::AgentControlSendInputOutput> {
+    ) -> std::result::Result<crate::tool::AgentControlSendInputOutput, Self::Error> {
         Ok(crate::tool::AgentControlSendInputOutput {
             target: request.target,
             status: pl_protocol::AgentStatus::Running,
@@ -526,7 +528,7 @@ impl crate::tool::AgentControlBackend for FakeAgentControlBackend {
     async fn wait_agent(
         &self,
         _request: crate::tool::AgentControlWaitRequest,
-    ) -> crate::Result<crate::tool::AgentControlWaitOutput> {
+    ) -> std::result::Result<crate::tool::AgentControlWaitOutput, Self::Error> {
         Ok(crate::tool::AgentControlWaitOutput {
             message: String::new(),
             timed_out: false,
@@ -536,14 +538,14 @@ impl crate::tool::AgentControlBackend for FakeAgentControlBackend {
     async fn list_agents(
         &self,
         _request: crate::tool::AgentControlListRequest,
-    ) -> crate::Result<crate::tool::AgentControlListOutput> {
+    ) -> std::result::Result<crate::tool::AgentControlListOutput, Self::Error> {
         Ok(crate::tool::AgentControlListOutput { agents: Vec::new() })
     }
 
     async fn close_agent(
         &self,
         request: crate::tool::AgentControlTargetRequest,
-    ) -> crate::Result<crate::tool::AgentControlMessageOutput> {
+    ) -> std::result::Result<crate::tool::AgentControlMessageOutput, Self::Error> {
         Ok(crate::tool::AgentControlMessageOutput {
             target: request.target,
             status: pl_protocol::AgentStatus::Shutdown,
@@ -553,7 +555,7 @@ impl crate::tool::AgentControlBackend for FakeAgentControlBackend {
     async fn resume_agent(
         &self,
         request: crate::tool::AgentControlTargetRequest,
-    ) -> crate::Result<crate::tool::AgentControlMessageOutput> {
+    ) -> std::result::Result<crate::tool::AgentControlMessageOutput, Self::Error> {
         Ok(crate::tool::AgentControlMessageOutput {
             target: request.target,
             status: pl_protocol::AgentStatus::Running,
@@ -565,7 +567,12 @@ impl crate::tool::AgentControlBackend for FakeAgentControlBackend {
 struct DenyAgentControlTargetPolicy;
 
 impl crate::tool::AgentControlPolicy for DenyAgentControlTargetPolicy {
-    async fn check_tool(&self, _kind: crate::tool::AgentControlToolKind) -> crate::Result<()> {
+    type Error = String;
+
+    async fn check_tool(
+        &self,
+        _kind: crate::tool::AgentControlToolKind,
+    ) -> std::result::Result<(), Self::Error> {
         Ok(())
     }
 
@@ -573,11 +580,8 @@ impl crate::tool::AgentControlPolicy for DenyAgentControlTargetPolicy {
         &self,
         kind: crate::tool::AgentControlToolKind,
         _target: &str,
-    ) -> crate::Result<()> {
-        Err(crate::PureError::ToolExecutionFailed {
-            tool: kind.name().to_string(),
-            error: "target denied by builder policy".to_string(),
-        })
+    ) -> std::result::Result<(), Self::Error> {
+        Err(format!("target denied by builder policy: {}", kind.name()))
     }
 }
 

@@ -18,35 +18,37 @@ use super::{ForkTurns, fork_session};
 /// history；实现方只负责把共享控制语义映射到自己的 agent 生命周期、权限策略和
 /// 持久化系统。trait 方法使用 RPITIT，便于宿主用轻量 async 实现接入。
 pub trait AgentControlBackend: fmt::Debug + Send + Sync {
+    type Error: fmt::Display + Send + 'static;
+
     fn spawn_agent(
         &self,
         request: AgentControlSpawnRequest,
-    ) -> impl Future<Output = Result<AgentControlSpawnOutput>> + Send;
+    ) -> impl Future<Output = std::result::Result<AgentControlSpawnOutput, Self::Error>> + Send;
 
     fn send_input(
         &self,
         request: AgentControlSendInputRequest,
-    ) -> impl Future<Output = Result<AgentControlSendInputOutput>> + Send;
+    ) -> impl Future<Output = std::result::Result<AgentControlSendInputOutput, Self::Error>> + Send;
 
     fn wait_agent(
         &self,
         request: AgentControlWaitRequest,
-    ) -> impl Future<Output = Result<AgentControlWaitOutput>> + Send;
+    ) -> impl Future<Output = std::result::Result<AgentControlWaitOutput, Self::Error>> + Send;
 
     fn list_agents(
         &self,
         request: AgentControlListRequest,
-    ) -> impl Future<Output = Result<AgentControlListOutput>> + Send;
+    ) -> impl Future<Output = std::result::Result<AgentControlListOutput, Self::Error>> + Send;
 
     fn close_agent(
         &self,
         request: AgentControlTargetRequest,
-    ) -> impl Future<Output = Result<AgentControlMessageOutput>> + Send;
+    ) -> impl Future<Output = std::result::Result<AgentControlMessageOutput, Self::Error>> + Send;
 
     fn resume_agent(
         &self,
         request: AgentControlTargetRequest,
-    ) -> impl Future<Output = Result<AgentControlMessageOutput>> + Send;
+    ) -> impl Future<Output = std::result::Result<AgentControlMessageOutput, Self::Error>> + Send;
 }
 
 /// 宿主产品提供的 agent-control 权限策略。
@@ -55,13 +57,18 @@ pub trait AgentControlBackend: fmt::Debug + Send + Sync {
 /// 可见性、目标通信边界和产品权限检查属于 shared tool lifecycle，而不是散落在
 /// backend 的业务执行分支里。实现方应只检查权限，不执行状态变更。
 pub trait AgentControlPolicy: fmt::Debug + Send + Sync {
-    fn check_tool(&self, kind: AgentControlToolKind) -> impl Future<Output = Result<()>> + Send;
+    type Error: fmt::Display + Send + 'static;
+
+    fn check_tool(
+        &self,
+        kind: AgentControlToolKind,
+    ) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
 
     fn check_target(
         &self,
         kind: AgentControlToolKind,
         target: &str,
-    ) -> impl Future<Output = Result<()>> + Send;
+    ) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
 }
 
 /// 默认允许所有 agent-control 调用的策略。
@@ -69,11 +76,20 @@ pub trait AgentControlPolicy: fmt::Debug + Send + Sync {
 pub struct AllowAllAgentControlPolicy;
 
 impl AgentControlPolicy for AllowAllAgentControlPolicy {
-    async fn check_tool(&self, _kind: AgentControlToolKind) -> Result<()> {
+    type Error = String;
+
+    async fn check_tool(
+        &self,
+        _kind: AgentControlToolKind,
+    ) -> std::result::Result<(), Self::Error> {
         Ok(())
     }
 
-    async fn check_target(&self, _kind: AgentControlToolKind, _target: &str) -> Result<()> {
+    async fn check_target(
+        &self,
+        _kind: AgentControlToolKind,
+        _target: &str,
+    ) -> std::result::Result<(), Self::Error> {
         Ok(())
     }
 }
@@ -247,7 +263,10 @@ where
             match self.kind {
                 AgentControlToolKind::SpawnAgent => {
                     let mut request: AgentControlSpawnRequest = parse_input(self.name(), input)?;
-                    self.policy.check_tool(self.kind).await?;
+                    self.policy
+                        .check_tool(self.kind)
+                        .await
+                        .map_err(|error| tool_error(self.name(), error))?;
                     let fork_turns = ForkTurns::parse(request.fork_turns.as_deref())?;
                     request.forked_messages = match fork_turns {
                         ForkTurns::None => None,
@@ -257,41 +276,101 @@ where
                                 .to_vec(),
                         ),
                     };
-                    json_output(self.backend.spawn_agent(request).await?)
+                    let output = self
+                        .backend
+                        .spawn_agent(request)
+                        .await
+                        .map_err(|error| tool_error(self.name(), error))?;
+                    json_output(output)
                 }
                 AgentControlToolKind::SendInput => {
                     let request: AgentControlSendInputRequest = parse_input(self.name(), input)?;
-                    self.policy.check_tool(self.kind).await?;
-                    self.policy.check_target(self.kind, &request.target).await?;
-                    json_output(self.backend.send_input(request).await?)
+                    self.policy
+                        .check_tool(self.kind)
+                        .await
+                        .map_err(|error| tool_error(self.name(), error))?;
+                    self.policy
+                        .check_target(self.kind, &request.target)
+                        .await
+                        .map_err(|error| tool_error(self.name(), error))?;
+                    let output = self
+                        .backend
+                        .send_input(request)
+                        .await
+                        .map_err(|error| tool_error(self.name(), error))?;
+                    json_output(output)
                 }
                 AgentControlToolKind::WaitAgent => {
                     let request: AgentControlWaitRequest = parse_input(self.name(), input)?;
-                    self.policy.check_tool(self.kind).await?;
+                    self.policy
+                        .check_tool(self.kind)
+                        .await
+                        .map_err(|error| tool_error(self.name(), error))?;
                     if let Some(target) = &request.target {
-                        self.policy.check_target(self.kind, target).await?;
+                        self.policy
+                            .check_target(self.kind, target)
+                            .await
+                            .map_err(|error| tool_error(self.name(), error))?;
                     }
                     for target in &request.targets {
-                        self.policy.check_target(self.kind, target).await?;
+                        self.policy
+                            .check_target(self.kind, target)
+                            .await
+                            .map_err(|error| tool_error(self.name(), error))?;
                     }
-                    json_output(self.backend.wait_agent(request).await?)
+                    let output = self
+                        .backend
+                        .wait_agent(request)
+                        .await
+                        .map_err(|error| tool_error(self.name(), error))?;
+                    json_output(output)
                 }
                 AgentControlToolKind::ListAgents => {
                     let request: AgentControlListRequest = parse_input(self.name(), input)?;
-                    self.policy.check_tool(self.kind).await?;
-                    json_output(self.backend.list_agents(request).await?)
+                    self.policy
+                        .check_tool(self.kind)
+                        .await
+                        .map_err(|error| tool_error(self.name(), error))?;
+                    let output = self
+                        .backend
+                        .list_agents(request)
+                        .await
+                        .map_err(|error| tool_error(self.name(), error))?;
+                    json_output(output)
                 }
                 AgentControlToolKind::CloseAgent => {
                     let request: AgentControlTargetRequest = parse_input(self.name(), input)?;
-                    self.policy.check_tool(self.kind).await?;
-                    self.policy.check_target(self.kind, &request.target).await?;
-                    json_output(self.backend.close_agent(request).await?)
+                    self.policy
+                        .check_tool(self.kind)
+                        .await
+                        .map_err(|error| tool_error(self.name(), error))?;
+                    self.policy
+                        .check_target(self.kind, &request.target)
+                        .await
+                        .map_err(|error| tool_error(self.name(), error))?;
+                    let output = self
+                        .backend
+                        .close_agent(request)
+                        .await
+                        .map_err(|error| tool_error(self.name(), error))?;
+                    json_output(output)
                 }
                 AgentControlToolKind::ResumeAgent => {
                     let request: AgentControlTargetRequest = parse_input(self.name(), input)?;
-                    self.policy.check_tool(self.kind).await?;
-                    self.policy.check_target(self.kind, &request.target).await?;
-                    json_output(self.backend.resume_agent(request).await?)
+                    self.policy
+                        .check_tool(self.kind)
+                        .await
+                        .map_err(|error| tool_error(self.name(), error))?;
+                    self.policy
+                        .check_target(self.kind, &request.target)
+                        .await
+                        .map_err(|error| tool_error(self.name(), error))?;
+                    let output = self
+                        .backend
+                        .resume_agent(request)
+                        .await
+                        .map_err(|error| tool_error(self.name(), error))?;
+                    json_output(output)
                 }
             }
         })
@@ -303,6 +382,13 @@ fn parse_input<T: serde::de::DeserializeOwned>(tool: &str, input: ToolInput) -> 
         tool: tool.to_string(),
         error: format!("invalid input: {error}"),
     })
+}
+
+fn tool_error(tool: &str, error: impl fmt::Display) -> PureError {
+    PureError::ToolExecutionFailed {
+        tool: tool.to_string(),
+        error: error.to_string(),
+    }
 }
 
 fn json_output(value: impl Serialize) -> Result<ToolOutput> {

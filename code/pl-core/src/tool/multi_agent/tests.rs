@@ -294,10 +294,12 @@ fn agent_control_kind_schemas_match_tool_schemas() {
 struct FakeHostAgentControlBackend;
 
 impl crate::tool::AgentControlBackend for FakeHostAgentControlBackend {
+    type Error = DisplayAgentControlError;
+
     async fn spawn_agent(
         &self,
         request: crate::tool::AgentControlSpawnRequest,
-    ) -> crate::Result<crate::tool::AgentControlSpawnOutput> {
+    ) -> std::result::Result<crate::tool::AgentControlSpawnOutput, Self::Error> {
         assert_eq!(request.skill_mentions, vec!["rust".to_string()]);
         Ok(crate::tool::AgentControlSpawnOutput {
             agent_id: "agent-1".to_string(),
@@ -311,7 +313,7 @@ impl crate::tool::AgentControlBackend for FakeHostAgentControlBackend {
     async fn send_input(
         &self,
         request: crate::tool::AgentControlSendInputRequest,
-    ) -> crate::Result<crate::tool::AgentControlSendInputOutput> {
+    ) -> std::result::Result<crate::tool::AgentControlSendInputOutput, Self::Error> {
         Ok(crate::tool::AgentControlSendInputOutput {
             target: request.target,
             status: AgentStatus::Running,
@@ -324,7 +326,7 @@ impl crate::tool::AgentControlBackend for FakeHostAgentControlBackend {
     async fn wait_agent(
         &self,
         _request: crate::tool::AgentControlWaitRequest,
-    ) -> crate::Result<crate::tool::AgentControlWaitOutput> {
+    ) -> std::result::Result<crate::tool::AgentControlWaitOutput, Self::Error> {
         Ok(crate::tool::AgentControlWaitOutput {
             message: "observed".to_string(),
             timed_out: false,
@@ -334,7 +336,7 @@ impl crate::tool::AgentControlBackend for FakeHostAgentControlBackend {
     async fn list_agents(
         &self,
         _request: crate::tool::AgentControlListRequest,
-    ) -> crate::Result<crate::tool::AgentControlListOutput> {
+    ) -> std::result::Result<crate::tool::AgentControlListOutput, Self::Error> {
         Ok(crate::tool::AgentControlListOutput {
             agents: vec![crate::tool::AgentControlAgentRecord {
                 path: "/root/agent-1".to_string(),
@@ -350,7 +352,7 @@ impl crate::tool::AgentControlBackend for FakeHostAgentControlBackend {
     async fn close_agent(
         &self,
         request: crate::tool::AgentControlTargetRequest,
-    ) -> crate::Result<crate::tool::AgentControlMessageOutput> {
+    ) -> std::result::Result<crate::tool::AgentControlMessageOutput, Self::Error> {
         Ok(crate::tool::AgentControlMessageOutput {
             target: request.target,
             status: AgentStatus::Shutdown,
@@ -360,11 +362,69 @@ impl crate::tool::AgentControlBackend for FakeHostAgentControlBackend {
     async fn resume_agent(
         &self,
         request: crate::tool::AgentControlTargetRequest,
-    ) -> crate::Result<crate::tool::AgentControlMessageOutput> {
+    ) -> std::result::Result<crate::tool::AgentControlMessageOutput, Self::Error> {
         Ok(crate::tool::AgentControlMessageOutput {
             target: request.target,
             status: AgentStatus::Queued,
         })
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DisplayAgentControlError(&'static str);
+
+impl std::fmt::Display for DisplayAgentControlError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.0)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct FailingHostAgentControlBackend;
+
+impl crate::tool::AgentControlBackend for FailingHostAgentControlBackend {
+    type Error = DisplayAgentControlError;
+
+    async fn spawn_agent(
+        &self,
+        _request: crate::tool::AgentControlSpawnRequest,
+    ) -> std::result::Result<crate::tool::AgentControlSpawnOutput, Self::Error> {
+        Err(DisplayAgentControlError("spawn blocked"))
+    }
+
+    async fn send_input(
+        &self,
+        _request: crate::tool::AgentControlSendInputRequest,
+    ) -> std::result::Result<crate::tool::AgentControlSendInputOutput, Self::Error> {
+        unreachable!("send_input is not used by this test")
+    }
+
+    async fn wait_agent(
+        &self,
+        _request: crate::tool::AgentControlWaitRequest,
+    ) -> std::result::Result<crate::tool::AgentControlWaitOutput, Self::Error> {
+        unreachable!("wait_agent is not used by this test")
+    }
+
+    async fn list_agents(
+        &self,
+        _request: crate::tool::AgentControlListRequest,
+    ) -> std::result::Result<crate::tool::AgentControlListOutput, Self::Error> {
+        unreachable!("list_agents is not used by this test")
+    }
+
+    async fn close_agent(
+        &self,
+        _request: crate::tool::AgentControlTargetRequest,
+    ) -> std::result::Result<crate::tool::AgentControlMessageOutput, Self::Error> {
+        unreachable!("close_agent is not used by this test")
+    }
+
+    async fn resume_agent(
+        &self,
+        _request: crate::tool::AgentControlTargetRequest,
+    ) -> std::result::Result<crate::tool::AgentControlMessageOutput, Self::Error> {
+        unreachable!("resume_agent is not used by this test")
     }
 }
 
@@ -374,10 +434,12 @@ struct RecordingHostAgentControlBackend {
 }
 
 impl crate::tool::AgentControlBackend for RecordingHostAgentControlBackend {
+    type Error = DisplayAgentControlError;
+
     async fn spawn_agent(
         &self,
         request: crate::tool::AgentControlSpawnRequest,
-    ) -> crate::Result<crate::tool::AgentControlSpawnOutput> {
+    ) -> std::result::Result<crate::tool::AgentControlSpawnOutput, Self::Error> {
         *self.forked_messages.lock().expect("record forked messages") =
             request.forked_messages.clone();
         Ok(crate::tool::AgentControlSpawnOutput {
@@ -392,35 +454,35 @@ impl crate::tool::AgentControlBackend for RecordingHostAgentControlBackend {
     async fn send_input(
         &self,
         _request: crate::tool::AgentControlSendInputRequest,
-    ) -> crate::Result<crate::tool::AgentControlSendInputOutput> {
+    ) -> std::result::Result<crate::tool::AgentControlSendInputOutput, Self::Error> {
         unreachable!("send_input is not used by this test")
     }
 
     async fn wait_agent(
         &self,
         _request: crate::tool::AgentControlWaitRequest,
-    ) -> crate::Result<crate::tool::AgentControlWaitOutput> {
+    ) -> std::result::Result<crate::tool::AgentControlWaitOutput, Self::Error> {
         unreachable!("wait_agent is not used by this test")
     }
 
     async fn list_agents(
         &self,
         _request: crate::tool::AgentControlListRequest,
-    ) -> crate::Result<crate::tool::AgentControlListOutput> {
+    ) -> std::result::Result<crate::tool::AgentControlListOutput, Self::Error> {
         unreachable!("list_agents is not used by this test")
     }
 
     async fn close_agent(
         &self,
         _request: crate::tool::AgentControlTargetRequest,
-    ) -> crate::Result<crate::tool::AgentControlMessageOutput> {
+    ) -> std::result::Result<crate::tool::AgentControlMessageOutput, Self::Error> {
         unreachable!("close_agent is not used by this test")
     }
 
     async fn resume_agent(
         &self,
         _request: crate::tool::AgentControlTargetRequest,
-    ) -> crate::Result<crate::tool::AgentControlMessageOutput> {
+    ) -> std::result::Result<crate::tool::AgentControlMessageOutput, Self::Error> {
         unreachable!("resume_agent is not used by this test")
     }
 }
@@ -431,7 +493,12 @@ struct DenyTargetAgentControlPolicy {
 }
 
 impl crate::tool::AgentControlPolicy for DenyTargetAgentControlPolicy {
-    async fn check_tool(&self, kind: crate::tool::AgentControlToolKind) -> crate::Result<()> {
+    type Error = DisplayAgentControlError;
+
+    async fn check_tool(
+        &self,
+        kind: crate::tool::AgentControlToolKind,
+    ) -> std::result::Result<(), Self::Error> {
         self.calls
             .lock()
             .expect("policy calls")
@@ -443,16 +510,60 @@ impl crate::tool::AgentControlPolicy for DenyTargetAgentControlPolicy {
         &self,
         kind: crate::tool::AgentControlToolKind,
         target: &str,
-    ) -> crate::Result<()> {
+    ) -> std::result::Result<(), Self::Error> {
         self.calls
             .lock()
             .expect("policy calls")
             .push(format!("target:{}:{target}", kind.name()));
-        Err(pl_protocol::PureError::ToolExecutionFailed {
-            tool: kind.name().to_string(),
-            error: "target blocked by policy".to_string(),
-        })
+        Err(DisplayAgentControlError("target blocked by policy"))
     }
+}
+
+#[tokio::test]
+async fn host_agent_control_backend_display_error_maps_to_tool_error() {
+    let spawn_tool = crate::tool::AgentControlTool::new(
+        crate::tool::AgentControlToolKind::SpawnAgent,
+        Arc::new(FailingHostAgentControlBackend),
+    );
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let context = ToolContext {
+        event_tx,
+        options: crate::TurnOptions::default(),
+        workspace_access: WorkspaceAccess::WorkspaceOnly,
+        mode: CompileMode::Auto,
+        workspace_root: std::env::temp_dir(),
+        workspace_instructions: None,
+        instruction_snapshot: None,
+        provider_call_id: None,
+        active_subagent: None,
+        agent_supervisor: crate::AgentSupervisor::default(),
+        agent_tool_registrar: None,
+        lsp_runtime: None,
+        parent_session: Arc::new(crate::CoreSession::new()),
+    };
+
+    let error = spawn_tool
+        .execute(
+            crate::tool::ToolInput {
+                arguments: serde_json::json!({
+                    "taskName": "inspect",
+                    "message": "check this",
+                    "agentType": "executor"
+                }),
+                session_id: "session-1".to_string(),
+                tool_id: "call-1".to_string(),
+                revision_base: 0,
+            },
+            context,
+        )
+        .await
+        .expect_err("backend should fail");
+
+    assert!(matches!(
+        error,
+        pl_protocol::PureError::ToolExecutionFailed { tool, error }
+            if tool == "spawn_agent" && error == "spawn blocked"
+    ));
 }
 
 #[tokio::test]

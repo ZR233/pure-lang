@@ -20,7 +20,6 @@ use crate::tool::{
     command_tool_pair,
 };
 use pl_model::ToolSchema;
-use pl_protocol::{PureError, Result};
 use serde_json::Value;
 
 use super::PureCore;
@@ -608,46 +607,48 @@ struct McpToolRuntime<T> {
 pub struct NoAgentControlBackend;
 
 impl AgentControlBackend for NoAgentControlBackend {
+    type Error = String;
+
     async fn spawn_agent(
         &self,
         _request: AgentControlSpawnRequest,
-    ) -> Result<AgentControlSpawnOutput> {
-        Err(missing_backend_error("spawn_agent", "agent control"))
+    ) -> std::result::Result<AgentControlSpawnOutput, Self::Error> {
+        Err("agent control backend is not configured".to_string())
     }
 
     async fn send_input(
         &self,
         _request: AgentControlSendInputRequest,
-    ) -> Result<AgentControlSendInputOutput> {
-        Err(missing_backend_error("send_input", "agent control"))
+    ) -> std::result::Result<AgentControlSendInputOutput, Self::Error> {
+        Err("agent control backend is not configured".to_string())
     }
 
     async fn wait_agent(
         &self,
         _request: AgentControlWaitRequest,
-    ) -> Result<AgentControlWaitOutput> {
-        Err(missing_backend_error("wait_agent", "agent control"))
+    ) -> std::result::Result<AgentControlWaitOutput, Self::Error> {
+        Err("agent control backend is not configured".to_string())
     }
 
     async fn list_agents(
         &self,
         _request: AgentControlListRequest,
-    ) -> Result<AgentControlListOutput> {
-        Err(missing_backend_error("list_agents", "agent control"))
+    ) -> std::result::Result<AgentControlListOutput, Self::Error> {
+        Err("agent control backend is not configured".to_string())
     }
 
     async fn close_agent(
         &self,
         _request: AgentControlTargetRequest,
-    ) -> Result<AgentControlMessageOutput> {
-        Err(missing_backend_error("close_agent", "agent control"))
+    ) -> std::result::Result<AgentControlMessageOutput, Self::Error> {
+        Err("agent control backend is not configured".to_string())
     }
 
     async fn resume_agent(
         &self,
         _request: AgentControlTargetRequest,
-    ) -> Result<AgentControlMessageOutput> {
-        Err(missing_backend_error("resume_agent", "agent control"))
+    ) -> std::result::Result<AgentControlMessageOutput, Self::Error> {
+        Err("agent control backend is not configured".to_string())
     }
 }
 
@@ -687,13 +688,6 @@ impl McpToolBackend for NoMcpToolBackend {
 
     async fn call_tool(&self, _request: McpToolRequest) -> std::result::Result<Value, Self::Error> {
         Err("MCP tool backend is not configured".to_string())
-    }
-}
-
-fn missing_backend_error(tool: &str, backend: &str) -> PureError {
-    PureError::ToolExecutionFailed {
-        tool: tool.to_string(),
-        error: format!("{backend} backend is not configured"),
     }
 }
 
