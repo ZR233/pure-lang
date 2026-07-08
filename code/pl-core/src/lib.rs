@@ -145,7 +145,7 @@ pub use tool::{
 };
 pub use trace::TraceRecorder;
 pub use turn::{
-    AGENT_MAX_COUNT, AGENT_MAX_DEPTH, AgentBudget, BudgetPolicy, CompileMode,
+    AGENT_MAX_COUNT, AGENT_MAX_DEPTH, ActiveTurnControl, AgentBudget, BudgetPolicy, CompileMode,
     DEFAULT_WALL_CLOCK_MS, InteractionCallback, InteractionFuture, PermissionMode,
     ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest, ToolExecutionMode,
     TurnAbortReason, TurnBudget, TurnOptions, TurnOutcome, TurnOutcomeStatus, TurnRequest,

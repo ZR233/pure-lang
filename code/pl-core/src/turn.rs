@@ -525,6 +525,48 @@ impl TurnTaskHandle {
     }
 }
 
+/// 活动 turn 的宿主无关控制记录。
+///
+/// 该结构保存宿主自己的 turn/session 标识，同时把 task 取消与 abort 操作统一
+/// 委托给 pl-core 的 `TurnTaskHandle`。宿主可以继续用自己的持久化模型记录状态，
+/// 但不再需要复制 task 生命周期控制字段。
+#[derive(Clone)]
+pub struct ActiveTurnControl<TurnId, SessionId> {
+    pub turn_id: TurnId,
+    pub session_id: SessionId,
+    task_handle: TurnTaskHandle,
+}
+
+impl<TurnId, SessionId> ActiveTurnControl<TurnId, SessionId> {
+    pub fn new(turn_id: TurnId, session_id: SessionId, task_handle: TurnTaskHandle) -> Self {
+        Self {
+            turn_id,
+            session_id,
+            task_handle,
+        }
+    }
+
+    /// 判断底层 turn task 是否已经收到取消信号。
+    pub fn is_task_cancelled(&self) -> bool {
+        self.task_handle.is_cancelled()
+    }
+
+    /// 只取消底层 turn task，不强制 abort。
+    pub fn cancel_task(&self) {
+        self.task_handle.cancel();
+    }
+
+    /// 立即 abort 底层 turn task。
+    pub fn abort_task(&self) {
+        self.task_handle.abort();
+    }
+
+    /// 先取消底层 turn task，等待 grace 后仍处于取消态则强制 abort。
+    pub fn cancel_task_and_abort_after(&self, grace: Duration) {
+        self.task_handle.cancel_and_abort_after(grace);
+    }
+}
+
 /// 单轮运行的最终状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnResultStatus {
@@ -826,5 +868,22 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(handle.is_cancelled());
+    }
+
+    #[test]
+    fn active_turn_control_owns_task_cancellation_boundary() {
+        let token = CancellationToken::new();
+        let control = ActiveTurnControl::new(
+            "turn-a".to_string(),
+            "session-a".to_string(),
+            TurnTaskHandle::from_external_token(token.clone()),
+        );
+
+        assert_eq!(control.turn_id, "turn-a");
+        assert_eq!(control.session_id, "session-a");
+
+        control.cancel_task();
+
+        assert!(token.is_cancelled());
     }
 }
