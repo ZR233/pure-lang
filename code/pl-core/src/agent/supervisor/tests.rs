@@ -60,6 +60,41 @@ fn test_run_spec(message: &str) -> AgentRunSpec {
     }
 }
 
+#[test]
+fn agent_input_turn_mode_maps_codex_flags_to_single_policy() {
+    assert_eq!(
+        AgentInputTurnMode::from_codex_flags(false, false),
+        AgentInputTurnMode::QueueOnly
+    );
+    assert_eq!(
+        AgentInputTurnMode::from_codex_flags(true, false),
+        AgentInputTurnMode::TriggerTurn
+    );
+    assert_eq!(
+        AgentInputTurnMode::from_codex_flags(false, true),
+        AgentInputTurnMode::Interrupt
+    );
+    assert_eq!(
+        AgentInputTurnMode::from_codex_flags(true, true),
+        AgentInputTurnMode::Interrupt
+    );
+}
+
+#[test]
+fn agent_input_turn_mode_exposes_queue_and_busy_semantics() {
+    assert!(AgentInputTurnMode::QueueOnly.queues_without_start());
+    assert!(!AgentInputTurnMode::QueueOnly.interrupts());
+    assert!(!AgentInputTurnMode::QueueOnly.queues_when_busy());
+
+    assert!(!AgentInputTurnMode::TriggerTurn.queues_without_start());
+    assert!(!AgentInputTurnMode::TriggerTurn.interrupts());
+    assert!(AgentInputTurnMode::TriggerTurn.queues_when_busy());
+
+    assert!(!AgentInputTurnMode::Interrupt.queues_without_start());
+    assert!(AgentInputTurnMode::Interrupt.interrupts());
+    assert!(!AgentInputTurnMode::Interrupt.queues_when_busy());
+}
+
 #[tokio::test]
 async fn followup_capacity_failure_does_not_mutate_agent_mailbox_or_status() {
     let supervisor = AgentSupervisor::default();

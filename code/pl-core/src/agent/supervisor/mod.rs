@@ -45,6 +45,41 @@ impl AgentMessageMode {
     }
 }
 
+/// `send_input` 的通用 turn 策略。
+///
+/// 该类型把模型可见的 `triggerTurn` / `interrupt` 标志收敛成一个明确模式，
+/// 宿主复用它决定是否只排队、启动新 turn，或先中断目标 agent 再启动。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentInputTurnMode {
+    QueueOnly,
+    TriggerTurn,
+    Interrupt,
+}
+
+impl AgentInputTurnMode {
+    pub fn from_codex_flags(trigger_turn: bool, interrupt: bool) -> Self {
+        if interrupt {
+            Self::Interrupt
+        } else if trigger_turn {
+            Self::TriggerTurn
+        } else {
+            Self::QueueOnly
+        }
+    }
+
+    pub fn queues_without_start(self) -> bool {
+        matches!(self, Self::QueueOnly)
+    }
+
+    pub fn interrupts(self) -> bool {
+        matches!(self, Self::Interrupt)
+    }
+
+    pub fn queues_when_busy(self) -> bool {
+        matches!(self, Self::TriggerTurn)
+    }
+}
+
 /// Operation submitted by `send_input`.
 pub struct AgentMessageRequest<'a> {
     pub current_path: &'a str,
