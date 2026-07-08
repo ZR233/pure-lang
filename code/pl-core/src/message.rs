@@ -62,14 +62,33 @@ pub fn completion_response_preview(response: &pl_model::CompletionResponse) -> S
 /// `pl_model::CompletionResponse` 的 reasoning、文本、tool call 和 usage 语义。
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompletionResponseSnapshot {
-    pub id: Option<String>,
-    pub output: Vec<CompletionResponseOutputSnapshot>,
-    pub usage: ModelTokenUsageSnapshot,
+    id: Option<String>,
+    output: Vec<CompletionResponseOutputSnapshot>,
+    usage: ModelTokenUsageSnapshot,
+}
+
+impl CompletionResponseSnapshot {
+    pub fn id(&self) -> Option<&str> {
+        self.id.as_deref()
+    }
+
+    pub fn output(&self) -> &[CompletionResponseOutputSnapshot] {
+        &self.output
+    }
+
+    pub fn usage(&self) -> &ModelTokenUsageSnapshot {
+        &self.usage
+    }
 }
 
 /// 模型完成响应中的结构化输出项。
 #[derive(Debug, Clone, PartialEq)]
-pub enum CompletionResponseOutputSnapshot {
+pub struct CompletionResponseOutputSnapshot {
+    kind: CompletionResponseOutputKind,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum CompletionResponseOutputKind {
     Reasoning {
         content: String,
     },
@@ -84,6 +103,97 @@ pub enum CompletionResponseOutputSnapshot {
     },
 }
 
+pub struct CompletionResponseFunctionCallSnapshot<'a> {
+    call_id: &'a str,
+    name: &'a str,
+    arguments: &'a serde_json::Value,
+    raw_arguments: &'a str,
+}
+
+impl<'a> CompletionResponseFunctionCallSnapshot<'a> {
+    pub fn call_id(&self) -> &'a str {
+        self.call_id
+    }
+
+    pub fn name(&self) -> &'a str {
+        self.name
+    }
+
+    pub fn arguments(&self) -> &'a serde_json::Value {
+        self.arguments
+    }
+
+    pub fn raw_arguments(&self) -> &'a str {
+        self.raw_arguments
+    }
+}
+
+impl CompletionResponseOutputSnapshot {
+    pub fn reasoning(content: impl Into<String>) -> Self {
+        Self {
+            kind: CompletionResponseOutputKind::Reasoning {
+                content: content.into(),
+            },
+        }
+    }
+
+    pub fn message(text: impl Into<String>) -> Self {
+        Self {
+            kind: CompletionResponseOutputKind::Message { text: text.into() },
+        }
+    }
+
+    pub fn function_call(
+        call_id: impl Into<String>,
+        name: impl Into<String>,
+        arguments: serde_json::Value,
+        raw_arguments: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind: CompletionResponseOutputKind::FunctionCall {
+                call_id: call_id.into(),
+                name: name.into(),
+                arguments,
+                raw_arguments: raw_arguments.into(),
+            },
+        }
+    }
+
+    pub fn as_reasoning(&self) -> Option<&str> {
+        match &self.kind {
+            CompletionResponseOutputKind::Reasoning { content } => Some(content.as_str()),
+            CompletionResponseOutputKind::Message { .. }
+            | CompletionResponseOutputKind::FunctionCall { .. } => None,
+        }
+    }
+
+    pub fn as_message(&self) -> Option<&str> {
+        match &self.kind {
+            CompletionResponseOutputKind::Message { text } => Some(text.as_str()),
+            CompletionResponseOutputKind::Reasoning { .. }
+            | CompletionResponseOutputKind::FunctionCall { .. } => None,
+        }
+    }
+
+    pub fn as_function_call(&self) -> Option<CompletionResponseFunctionCallSnapshot<'_>> {
+        match &self.kind {
+            CompletionResponseOutputKind::FunctionCall {
+                call_id,
+                name,
+                arguments,
+                raw_arguments,
+            } => Some(CompletionResponseFunctionCallSnapshot {
+                call_id,
+                name,
+                arguments,
+                raw_arguments,
+            }),
+            CompletionResponseOutputKind::Reasoning { .. }
+            | CompletionResponseOutputKind::Message { .. } => None,
+        }
+    }
+}
+
 /// 从模型完成响应生成结构化宿主快照。
 pub fn completion_response_snapshot(
     response: &pl_model::CompletionResponse,
@@ -94,26 +204,22 @@ pub fn completion_response_snapshot(
         .as_deref()
         .filter(|text| !text.trim().is_empty())
     {
-        output.push(CompletionResponseOutputSnapshot::Reasoning {
-            content: reasoning.to_string(),
-        });
+        output.push(CompletionResponseOutputSnapshot::reasoning(reasoning));
     }
     if let Some(content) = response
         .content
         .as_deref()
         .filter(|text| !text.trim().is_empty())
     {
-        output.push(CompletionResponseOutputSnapshot::Message {
-            text: content.to_string(),
-        });
+        output.push(CompletionResponseOutputSnapshot::message(content));
     }
     output.extend(response.tool_calls.iter().map(|call| {
-        CompletionResponseOutputSnapshot::FunctionCall {
-            call_id: call.call_id.clone().unwrap_or_else(|| call.id.clone()),
-            name: call.name.clone(),
-            arguments: call.arguments_for_tool(),
-            raw_arguments: call.payload_text(),
-        }
+        CompletionResponseOutputSnapshot::function_call(
+            call.call_id.clone().unwrap_or_else(|| call.id.clone()),
+            call.name.clone(),
+            call.arguments_for_tool(),
+            call.payload_text(),
+        )
     }));
 
     CompletionResponseSnapshot {
@@ -129,13 +235,10 @@ pub fn completion_response_snapshot(
 /// 纯文本用途时应使用该 helper，而不是重复解析 `CompletionResponse`。
 pub fn completion_response_message_text(response: &pl_model::CompletionResponse) -> String {
     completion_response_snapshot(response)
-        .output
-        .into_iter()
-        .filter_map(|item| match item {
-            CompletionResponseOutputSnapshot::Message { text } => Some(text),
-            CompletionResponseOutputSnapshot::Reasoning { .. }
-            | CompletionResponseOutputSnapshot::FunctionCall { .. } => None,
-        })
+        .output()
+        .iter()
+        .filter_map(CompletionResponseOutputSnapshot::as_message)
+        .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join("")
 }
@@ -419,41 +522,102 @@ mod tests {
             model: "test-model".to_string(),
         };
 
+        let snapshot = super::completion_response_snapshot(&response);
+        assert_eq!(snapshot.id(), Some("resp_1"));
         assert_eq!(
-            super::completion_response_snapshot(&response),
-            super::CompletionResponseSnapshot {
-                id: Some("resp_1".to_string()),
-                output: vec![
-                    super::CompletionResponseOutputSnapshot::Reasoning {
-                        content: "thinking".to_string(),
-                    },
-                    super::CompletionResponseOutputSnapshot::Message {
-                        text: "answer".to_string(),
-                    },
-                    super::CompletionResponseOutputSnapshot::FunctionCall {
-                        call_id: "call_1".to_string(),
-                        name: "read_file".to_string(),
-                        arguments: serde_json::json!({"path": "Cargo.toml"}),
-                        raw_arguments: r#"{"path":"Cargo.toml"}"#.to_string(),
-                    },
-                    super::CompletionResponseOutputSnapshot::FunctionCall {
-                        call_id: "custom_item".to_string(),
-                        name: "apply_patch".to_string(),
-                        arguments: serde_json::json!({
-                            "input": "*** Begin Patch",
-                            "patch": "*** Begin Patch",
-                        }),
-                        raw_arguments: "*** Begin Patch".to_string(),
-                    },
-                ],
-                usage: crate::ModelTokenUsageSnapshot {
-                    input_tokens: 10,
-                    cached_input_tokens: 4,
-                    output_tokens: 3,
-                    reasoning_output_tokens: 2,
-                    total_tokens: 13,
-                },
-            }
+            snapshot.output().to_vec(),
+            vec![
+                super::CompletionResponseOutputSnapshot::reasoning("thinking"),
+                super::CompletionResponseOutputSnapshot::message("answer"),
+                super::CompletionResponseOutputSnapshot::function_call(
+                    "call_1",
+                    "read_file",
+                    serde_json::json!({"path": "Cargo.toml"}),
+                    r#"{"path":"Cargo.toml"}"#,
+                ),
+                super::CompletionResponseOutputSnapshot::function_call(
+                    "custom_item",
+                    "apply_patch",
+                    serde_json::json!({
+                        "input": "*** Begin Patch",
+                        "patch": "*** Begin Patch",
+                    }),
+                    "*** Begin Patch",
+                ),
+            ]
+        );
+        assert_eq!(snapshot.usage().input_tokens(), 10);
+        assert_eq!(snapshot.usage().cached_input_tokens(), 4);
+        assert_eq!(snapshot.usage().output_tokens(), 3);
+        assert_eq!(snapshot.usage().reasoning_output_tokens(), 2);
+        assert_eq!(snapshot.usage().total_tokens(), 13);
+    }
+
+    #[test]
+    fn completion_response_snapshot_hides_fields_behind_accessors() {
+        let source =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/message.rs"))
+                .expect("message source");
+        let production = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source");
+
+        let snapshot_fields = production
+            .split("pub struct CompletionResponseSnapshot {")
+            .nth(1)
+            .expect("completion response snapshot struct")
+            .split("impl CompletionResponseSnapshot")
+            .next()
+            .expect("snapshot fields");
+        let snapshot_impl = production
+            .split("impl CompletionResponseSnapshot")
+            .nth(1)
+            .expect("snapshot impl")
+            .split("/// 模型完成响应中的结构化输出项。")
+            .next()
+            .expect("snapshot impl body");
+        for accessor in ["pub fn id(", "pub fn output(", "pub fn usage("] {
+            assert!(
+                snapshot_impl.contains(accessor),
+                "模型完成响应快照应由 pl-core accessor 暴露 `{accessor}`"
+            );
+        }
+        assert!(
+            !snapshot_fields.contains("pub id:")
+                && !snapshot_fields.contains("pub output:")
+                && !snapshot_fields.contains("pub usage:"),
+            "宿主不应直接读取 CompletionResponseSnapshot 字段"
+        );
+
+        let output_item_definition = production
+            .split("pub struct CompletionResponseOutputSnapshot")
+            .nth(1)
+            .expect("completion response output snapshot struct");
+        let output_item_impl = production
+            .split("impl CompletionResponseOutputSnapshot")
+            .nth(1)
+            .expect("output snapshot impl")
+            .split("/// 从模型完成响应生成结构化宿主快照。")
+            .next()
+            .expect("output snapshot impl body");
+        for accessor in [
+            "pub fn as_reasoning(",
+            "pub fn as_message(",
+            "pub fn as_function_call(",
+        ] {
+            assert!(
+                output_item_impl.contains(accessor),
+                "模型输出项应由 pl-core accessor 暴露 `{accessor}`"
+            );
+        }
+        assert!(
+            !production.contains("pub enum CompletionResponseOutputSnapshot"),
+            "模型输出项不应以 public enum 暴露内部结构"
+        );
+        assert!(
+            output_item_definition.contains("kind: CompletionResponseOutputKind"),
+            "模型输出项结构应由 pl-core 私有 kind 承载"
         );
     }
 
