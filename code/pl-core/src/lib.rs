@@ -6,6 +6,7 @@ mod context_compaction;
 mod core;
 mod first_run;
 mod instruction;
+mod interaction;
 #[cfg(feature = "studio")]
 pub mod interfaces;
 mod mcp;
@@ -66,6 +67,10 @@ pub use first_run::{
 pub use instruction::{
     InstructionAssembler, InstructionAssemblyRequest, InstructionBlock, InstructionBundle,
     InstructionProfile, InstructionSnapshot, InstructionSource, InstructionSourceKind,
+};
+pub use interaction::{
+    UserInputOptionProjection, UserInputProjection, UserInputQuestionProjection,
+    project_user_input_questions,
 };
 #[cfg(feature = "studio")]
 pub use interfaces::{
