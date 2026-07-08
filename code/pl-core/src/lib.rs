@@ -125,7 +125,9 @@ pub use tool::{
     TOOL_LIST_AGENTS, TOOL_LIST_FILES, TOOL_LIST_MCP_RESOURCE_TEMPLATES, TOOL_LIST_MCP_RESOURCES,
     TOOL_READ_FILE, TOOL_READ_MCP_RESOURCE, TOOL_RESUME_AGENT, TOOL_SEARCH_FILES, TOOL_SEND_INPUT,
     TOOL_SPAWN_AGENT, TOOL_UPDATE_TODO_LIST, TOOL_WAIT_AGENT, TodoListTool, Tool, ToolContext,
-    ToolInput, ToolOutput, ToolRegistry, ToolRuntimeEvent, ToolRuntimeLockPolicy, TruncatedOutput,
+    ToolInput, ToolOutput, ToolOutputArtifactDescriptor, ToolOutputArtifactPathRequest,
+    ToolOutputCapture, ToolOutputCaptureRequest, ToolOutputStream, ToolOutputStreamCapture,
+    ToolOutputStreamSizes, ToolRegistry, ToolRuntimeEvent, ToolRuntimeLockPolicy, TruncatedOutput,
     TruncationStrategy, WorkspaceAccess, WorkspaceFileBackend, WorkspaceFileListEntry,
     WorkspaceFileListRequest, WorkspaceFileListResult, WorkspaceFileReadRequest,
     WorkspaceFileRemoveRequest, WorkspaceFileSearchMatch, WorkspaceFileSearchRequest,
@@ -133,7 +135,7 @@ pub use tool::{
     WorkspaceFileToolExecution, WorkspaceFileToolKind, WorkspaceFileWriteRequest, WriteStdinTool,
     execute_container_tool, execute_workspace_file_tool, lsp_tool_for_language,
     model_visible_tool_output, model_visible_tool_output_with_tokens, redacted_trace_preview_value,
-    trace_preview_output, trace_preview_value,
+    tool_output_artifact_file_path, trace_preview_output, trace_preview_value,
 };
 pub use trace::TraceRecorder;
 pub use turn::{
