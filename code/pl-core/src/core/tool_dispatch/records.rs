@@ -40,6 +40,7 @@ pub(super) fn finalize_tool_item(
         tool.result = Some(record.display_result.clone());
         tool.exit_code = record.exit_code;
         tool.timed_out = record.timed_out;
+        tool.output_artifacts = output_artifacts(&record.runtime_events);
     }
     if let Some(revision) = record.revision {
         item.revision = item.revision.max(revision);
@@ -71,6 +72,7 @@ pub(super) fn finalize_tool_item(
                     });
                 }
                 ToolRuntimeEvent::ToolResultRevision { .. } => {}
+                ToolRuntimeEvent::OutputArtifacts { .. } => {}
                 ToolRuntimeEvent::EndTurn => {}
             }
         }
@@ -147,7 +149,9 @@ fn tool_execution_record_from_envelope(
     } = envelope;
     let revision = runtime_events.iter().find_map(|event| match event {
         ToolRuntimeEvent::ToolResultRevision { revision } => Some(*revision),
-        ToolRuntimeEvent::SkillActivated { .. } | ToolRuntimeEvent::EndTurn => None,
+        ToolRuntimeEvent::SkillActivated { .. }
+        | ToolRuntimeEvent::OutputArtifacts { .. }
+        | ToolRuntimeEvent::EndTurn => None,
     });
     let display_result = display_result_for_tool(&tool_call, &tool_name, &display_text, status);
     ToolExecutionRecord {
@@ -164,6 +168,20 @@ fn tool_execution_record_from_envelope(
         revision,
         runtime_events,
     }
+}
+
+fn output_artifacts(runtime_events: &[ToolRuntimeEvent]) -> Vec<serde_json::Value> {
+    runtime_events
+        .iter()
+        .filter_map(|event| match event {
+            ToolRuntimeEvent::OutputArtifacts { artifacts } => Some(artifacts.as_slice()),
+            ToolRuntimeEvent::SkillActivated { .. }
+            | ToolRuntimeEvent::ToolResultRevision { .. }
+            | ToolRuntimeEvent::EndTurn => None,
+        })
+        .flatten()
+        .cloned()
+        .collect()
 }
 
 pub(super) fn interrupted_tool_execution_record(

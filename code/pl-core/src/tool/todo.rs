@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use super::truncation::OutputTruncation;
 use super::{BoxFuture, Tool, ToolContext, ToolInput, ToolOutput};
 
+pub const TOOL_UPDATE_TODO_LIST: &str = "update_todo_list";
+
 #[derive(Debug, Default)]
 pub struct TodoListTool;
 
@@ -33,7 +35,7 @@ struct TodoListResult {
 
 impl Tool for TodoListTool {
     fn name(&self) -> &str {
-        "update_todo_list"
+        TOOL_UPDATE_TODO_LIST
     }
 
     fn description(&self) -> &str {

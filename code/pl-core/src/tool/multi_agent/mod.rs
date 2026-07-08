@@ -1,3 +1,4 @@
+mod host;
 mod schema;
 mod tools;
 mod types;
@@ -16,6 +17,12 @@ use super::{BoxFuture, Tool, ToolContext, ToolInput, ToolOutput};
 use crate::agent::AgentRecord;
 use types::{AgentToolRecord, CompactAgentRecord};
 
+pub use host::{
+    AgentControlAgentRecord, AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
+    AgentControlMessageOutput, AgentControlSendInputOutput, AgentControlSendInputRequest,
+    AgentControlSpawnOutput, AgentControlSpawnRequest, AgentControlTargetRequest, AgentControlTool,
+    AgentControlWaitOutput, AgentControlWaitRequest,
+};
 pub use schema::{
     AgentControlToolKind, TOOL_CLOSE_AGENT, TOOL_LIST_AGENTS, TOOL_RESUME_AGENT, TOOL_SEND_INPUT,
     TOOL_SPAWN_AGENT, TOOL_WAIT_AGENT,

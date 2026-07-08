@@ -24,7 +24,9 @@ pub use backend::{
 pub use container::ContainerWorkspaceFileBackend;
 pub use local::LocalWorkspaceFileBackend;
 pub use ops::{WorkspaceFileToolExecution, execute_workspace_file_tool};
-pub use schema::WorkspaceFileToolKind;
+pub use schema::{
+    TOOL_APPLY_PATCH, TOOL_LIST_FILES, TOOL_READ_FILE, TOOL_SEARCH_FILES, WorkspaceFileToolKind,
+};
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceFileTool<B> {

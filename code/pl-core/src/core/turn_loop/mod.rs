@@ -105,6 +105,7 @@ pub(super) async fn run_turn_with_trace(
     let mut last_reasoning_content = None;
     let mut last_model = model.clone();
     let mut last_context_tokens = None;
+    let mut context_compactions = Vec::new();
     let mut total_usage = pl_model::TokenUsage::default();
     let mut safe_message_count = session.len();
     let mut session_message_count = safe_message_count;
@@ -216,7 +217,7 @@ pub(super) async fn run_turn_with_trace(
             .await;
             match compaction_result {
                 Ok(CompactionOutcome::Skipped) => {}
-                Ok(CompactionOutcome::Compacted { usage }) => {
+                Ok(CompactionOutcome::Compacted { usage, snapshot }) => {
                     last_compacted_state = Some((session.revision(), session.len()));
                     safe_message_count = session.len();
                     session_message_count = safe_message_count;
@@ -235,6 +236,7 @@ pub(super) async fn run_turn_with_trace(
                             unix_seconds(),
                         ),
                     });
+                    context_compactions.push(snapshot);
                 }
                 Err(error) => {
                     let (error, severity) =
@@ -617,6 +619,7 @@ pub(super) async fn run_turn_with_trace(
         model: last_model,
         usage: total_usage,
         last_context_tokens,
+        context_compactions,
         mode: request.mode,
         session_message_count,
         status: TurnResultStatus::Completed,

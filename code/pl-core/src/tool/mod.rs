@@ -5,7 +5,9 @@ mod container;
 mod file;
 mod git;
 mod lsp;
+mod mcp_resource;
 mod multi_agent;
+mod output_format;
 mod path_policy;
 mod plan;
 mod skill;
@@ -47,26 +49,41 @@ pub use git::{
     GitCredentialOperation, GitCredentialProvider, GitCredentialRequest, GitPolicy, GitTool,
     GitToolKind, GitWorkspaceConfig, LocalExecutionBackend, NoGitCredentialProvider,
     TOOL_GIT_BRANCH, TOOL_GIT_COMMIT, TOOL_GIT_DIFF, TOOL_GIT_FETCH, TOOL_GIT_PUSH,
-    TOOL_GIT_STATUS, TOOL_GIT_WORKSPACE_INFO,
+    TOOL_GIT_STATUS, TOOL_GIT_SYNC_DEFAULT_BRANCH, TOOL_GIT_WORKSPACE_INFO,
 };
 pub use lsp::{LspLanguageTool, LspQueryTool, lsp_tool_for_language};
+pub use mcp_resource::{
+    McpListResourceTemplatesRequest, McpListResourcesRequest, McpReadResourceRequest,
+    McpResourceBackend, McpResourceTool, McpResourceToolKind, TOOL_LIST_MCP_RESOURCE_TEMPLATES,
+    TOOL_LIST_MCP_RESOURCES, TOOL_READ_MCP_RESOURCE,
+};
 pub use multi_agent::{
-    AgentControlToolKind, CloseAgentTool, ListAgentsTool, ResumeAgentTool, SendInputTool,
-    SpawnAgentTool, TOOL_CLOSE_AGENT, TOOL_LIST_AGENTS, TOOL_RESUME_AGENT, TOOL_SEND_INPUT,
-    TOOL_SPAWN_AGENT, TOOL_WAIT_AGENT, WaitAgentTool,
+    AgentControlAgentRecord, AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
+    AgentControlMessageOutput, AgentControlSendInputOutput, AgentControlSendInputRequest,
+    AgentControlSpawnOutput, AgentControlSpawnRequest, AgentControlTargetRequest, AgentControlTool,
+    AgentControlToolKind, AgentControlWaitOutput, AgentControlWaitRequest, CloseAgentTool,
+    ListAgentsTool, ResumeAgentTool, SendInputTool, SpawnAgentTool, TOOL_CLOSE_AGENT,
+    TOOL_LIST_AGENTS, TOOL_RESUME_AGENT, TOOL_SEND_INPUT, TOOL_SPAWN_AGENT, TOOL_WAIT_AGENT,
+    WaitAgentTool,
+};
+pub use output_format::{
+    DEFAULT_MODEL_TOOL_OUTPUT_TOKENS, model_visible_tool_output,
+    model_visible_tool_output_with_tokens, redacted_trace_preview_value, trace_preview_output,
+    trace_preview_value,
 };
 pub(crate) use path_policy::{PathAccess, ToolPathPolicy};
 pub use plan::PlanExitTool;
 pub use skill::{SkillManageTool, SkillViewTool, SkillsListTool};
-pub use todo::TodoListTool;
+pub use todo::{TOOL_UPDATE_TODO_LIST, TodoListTool};
 pub use truncation::{OutputTruncation, TruncatedOutput, TruncationStrategy};
 pub use workspace_file::{
-    ContainerWorkspaceFileBackend, LocalWorkspaceFileBackend, WorkspaceFileBackend,
-    WorkspaceFileListEntry, WorkspaceFileListRequest, WorkspaceFileListResult,
-    WorkspaceFileReadRequest, WorkspaceFileRemoveRequest, WorkspaceFileSearchMatch,
-    WorkspaceFileSearchRequest, WorkspaceFileSearchResult, WorkspaceFileStat,
-    WorkspaceFileStatRequest, WorkspaceFileTool, WorkspaceFileToolExecution, WorkspaceFileToolKind,
-    WorkspaceFileWriteRequest, execute_workspace_file_tool,
+    ContainerWorkspaceFileBackend, LocalWorkspaceFileBackend, TOOL_APPLY_PATCH, TOOL_LIST_FILES,
+    TOOL_READ_FILE, TOOL_SEARCH_FILES, WorkspaceFileBackend, WorkspaceFileListEntry,
+    WorkspaceFileListRequest, WorkspaceFileListResult, WorkspaceFileReadRequest,
+    WorkspaceFileRemoveRequest, WorkspaceFileSearchMatch, WorkspaceFileSearchRequest,
+    WorkspaceFileSearchResult, WorkspaceFileStat, WorkspaceFileStatRequest, WorkspaceFileTool,
+    WorkspaceFileToolExecution, WorkspaceFileToolKind, WorkspaceFileWriteRequest,
+    execute_workspace_file_tool,
 };
 
 /// 便捷类型别名：boxed future。
@@ -102,6 +119,39 @@ pub trait Tool: fmt::Debug + Send + Sync {
 
     fn to_schema(&self) -> ToolSchema {
         ToolSchema::function(self.name(), self.description(), self.input_schema())
+    }
+}
+
+impl<T> Tool for Arc<T>
+where
+    T: Tool + ?Sized + 'static,
+{
+    fn name(&self) -> &str {
+        (**self).name()
+    }
+
+    fn description(&self) -> &str {
+        (**self).description()
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        (**self).input_schema()
+    }
+
+    fn supports_parallel_tool_calls(&self) -> bool {
+        (**self).supports_parallel_tool_calls()
+    }
+
+    fn runtime_lock_policy(&self) -> ToolRuntimeLockPolicy {
+        (**self).runtime_lock_policy()
+    }
+
+    fn execute<'a>(
+        &'a self,
+        input: ToolInput,
+        context: ToolContext,
+    ) -> BoxFuture<'a, Result<ToolOutput, PureError>> {
+        (**self).execute(input, context)
     }
 }
 
@@ -363,6 +413,7 @@ impl ToolOutput {
 pub enum ToolRuntimeEvent {
     SkillActivated { activation: SkillActivation },
     ToolResultRevision { revision: u64 },
+    OutputArtifacts { artifacts: Vec<serde_json::Value> },
     EndTurn,
 }
 
@@ -553,6 +604,44 @@ mod tests {
         assert!(reg.unregister("echo"));
         assert!(!reg.unregister("echo"));
         assert!(reg.get("echo").is_none());
+    }
+
+    #[test]
+    fn model_visible_tool_output_truncates_json_with_codex_shape() {
+        let long_stdout = "x".repeat(65);
+        let output = model_visible_tool_output_with_tokens(
+            &serde_json::json!({ "status": 0, "stdout": long_stdout, "stderr": "" }).to_string(),
+            8,
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&output).unwrap();
+
+        assert_eq!(value["truncated"], true);
+        assert!(value.pointer("/bytesReturned").is_some());
+        assert!(value.pointer("/bytesOmitted").is_some());
+        assert!(value.pointer("/nextOffset").is_some());
+        assert!(value.pointer("/bytes_returned").is_none());
+        let visible = value
+            .get("stdout")
+            .or_else(|| value.get("jsonPreview"))
+            .and_then(serde_json::Value::as_str)
+            .expect("visible output");
+        assert!(visible.len() <= 32);
+    }
+
+    #[test]
+    fn trace_preview_redacts_sensitive_values() {
+        let value = serde_json::json!({
+            "token": "secret-token",
+            "nested": { "api_key": "secret-key", "normal": "visible" },
+            "payload": "YWJj".repeat(90),
+        });
+        let preview = trace_preview_value(&value, 1_000);
+
+        assert!(preview.contains("<redacted>"));
+        assert!(preview.contains("visible"));
+        assert!(!preview.contains("secret-token"));
+        assert!(!preview.contains("secret-key"));
+        assert!(!preview.contains(&"YWJj".repeat(30)));
     }
 
     #[test]
