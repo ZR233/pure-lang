@@ -66,6 +66,27 @@ fn hosted_container_workspace_capabilities_match_hosted_agent_surface() {
 }
 
 #[test]
+fn git_workspace_capabilities_match_git_only_tool_surface() {
+    let capabilities = ToolCapabilityConfig::git_workspace();
+
+    assert_eq!(
+        capabilities,
+        ToolCapabilityConfig {
+            bash: false,
+            workspace_files: false,
+            skills: false,
+            mcp: false,
+            lsp: false,
+            subagents: false,
+            ask_user: false,
+            git: true,
+            docker: false,
+            container: false,
+        }
+    );
+}
+
+#[test]
 fn default_path_uses_pure_directory_under_home() {
     let paths = ConfigPaths::from_home("C:/Users/example");
 
