@@ -490,6 +490,64 @@ pub struct TurnResult {
     pub trace_events: Vec<TraceEvent>,
 }
 
+/// 宿主可投影到自身状态机的单轮归一化结果。
+///
+/// `pl-core` 负责解释通用 turn 终态和中止原因；宿主仍负责把该结果映射到
+/// 自己的持久化状态、Web 事件和产品错误类型。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnOutcome {
+    pub status: TurnOutcomeStatus,
+    pub final_text: Option<String>,
+    pub error: Option<String>,
+    pub return_error: Option<TurnReturnError>,
+}
+
+impl TurnOutcome {
+    pub fn from_result(result: &TurnResult) -> Self {
+        let final_text = (!result.content.trim().is_empty()).then_some(result.content.clone());
+        let status = match result.status {
+            TurnResultStatus::Completed => TurnOutcomeStatus::Completed,
+            TurnResultStatus::Aborted
+                if result.abort_reason == Some(TurnAbortReason::Interrupted) =>
+            {
+                TurnOutcomeStatus::Cancelled
+            }
+            TurnResultStatus::Aborted | TurnResultStatus::Errored => TurnOutcomeStatus::Failed,
+        };
+        let return_error = match status {
+            TurnOutcomeStatus::Completed => None,
+            TurnOutcomeStatus::Cancelled => Some(TurnReturnError::Cancelled),
+            TurnOutcomeStatus::Failed => Some(TurnReturnError::Failed(
+                result
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "pl-core turn failed".to_string()),
+            )),
+        };
+        Self {
+            status,
+            final_text,
+            error: result.error.clone(),
+            return_error,
+        }
+    }
+}
+
+/// 宿主无关的单轮完成分类。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnOutcomeStatus {
+    Completed,
+    Cancelled,
+    Failed,
+}
+
+/// 宿主在完成持久化和事件投影后应向调用方返回的通用错误分类。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TurnReturnError {
+    Cancelled,
+    Failed(String),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -523,6 +581,61 @@ mod tests {
     #[test]
     fn compile_mode_default_is_auto() {
         assert_eq!(CompileMode::default(), CompileMode::Auto);
+    }
+
+    fn turn_result(status: TurnResultStatus, abort_reason: Option<TurnAbortReason>) -> TurnResult {
+        TurnResult {
+            content: "  final text  ".to_string(),
+            reasoning_content: None,
+            model: "deepseek-v4".to_string(),
+            usage: TokenUsage::default(),
+            last_context_tokens: None,
+            context_compactions: Vec::new(),
+            mode: CompileMode::Auto,
+            session_message_count: 0,
+            status,
+            abort_reason,
+            error: None,
+            budget_limit_kind: None,
+            budget_usage: None,
+            trace_events: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn turn_outcome_classifies_completed_cancelled_and_failed_results() {
+        assert_eq!(
+            TurnOutcome::from_result(&turn_result(TurnResultStatus::Completed, None)),
+            TurnOutcome {
+                status: TurnOutcomeStatus::Completed,
+                final_text: Some("  final text  ".to_string()),
+                error: None,
+                return_error: None,
+            }
+        );
+
+        assert_eq!(
+            TurnOutcome::from_result(&turn_result(
+                TurnResultStatus::Aborted,
+                Some(TurnAbortReason::Interrupted),
+            )),
+            TurnOutcome {
+                status: TurnOutcomeStatus::Cancelled,
+                final_text: Some("  final text  ".to_string()),
+                error: None,
+                return_error: Some(TurnReturnError::Cancelled),
+            }
+        );
+
+        assert_eq!(
+            TurnOutcome::from_result(&turn_result(TurnResultStatus::Errored, None)),
+            TurnOutcome {
+                status: TurnOutcomeStatus::Failed,
+                final_text: Some("  final text  ".to_string()),
+                error: None,
+                return_error: Some(TurnReturnError::Failed("pl-core turn failed".to_string(),)),
+            }
+        );
     }
 
     #[test]

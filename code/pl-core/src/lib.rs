@@ -145,7 +145,7 @@ pub use turn::{
     AGENT_MAX_COUNT, AGENT_MAX_DEPTH, AgentBudget, BudgetPolicy, CompileMode,
     DEFAULT_WALL_CLOCK_MS, InteractionCallback, InteractionFuture, PermissionMode,
     ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest, ToolExecutionMode,
-    TurnAbortReason, TurnBudget, TurnOptions, TurnRequest, TurnResult, TurnResultStatus,
-    UserInputMode,
+    TurnAbortReason, TurnBudget, TurnOptions, TurnOutcome, TurnOutcomeStatus, TurnRequest,
+    TurnResult, TurnResultStatus, TurnReturnError, UserInputMode,
 };
 pub use workspace::{load_workspace_instructions, resolve_workspace_root};
