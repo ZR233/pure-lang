@@ -410,12 +410,36 @@ fn duration_ms(created_at: i64, updated_at: i64) -> Option<u64> {
 /// 空流清理语义，避免本地/容器 backend 各自维护一套路径协议。
 #[derive(Debug, Clone, Copy)]
 pub struct ToolOutputCaptureRequest<'a> {
-    pub artifact_files_root: &'a Path,
-    pub namespace: Option<&'a str>,
-    pub call_id: &'a str,
-    pub stdout_id: &'a str,
-    pub stderr_id: &'a str,
-    pub command: &'a str,
+    artifact_files_root: &'a Path,
+    namespace: Option<&'a str>,
+    call_id: &'a str,
+    stdout_id: &'a str,
+    stderr_id: &'a str,
+    command: &'a str,
+}
+
+impl<'a> ToolOutputCaptureRequest<'a> {
+    pub fn new(
+        artifact_files_root: &'a Path,
+        call_id: &'a str,
+        stdout_id: &'a str,
+        stderr_id: &'a str,
+        command: &'a str,
+    ) -> Self {
+        Self {
+            artifact_files_root,
+            namespace: None,
+            call_id,
+            stdout_id,
+            stderr_id,
+            command,
+        }
+    }
+
+    pub fn with_namespace(mut self, namespace: &'a str) -> Self {
+        self.namespace = Some(namespace);
+        self
+    }
 }
 
 /// 工具输出 artifact 的路径计算请求。
@@ -767,14 +791,13 @@ mod tests {
     #[tokio::test]
     async fn tool_output_capture_keeps_non_empty_streams_and_removes_empty_files() {
         let dir = test_temp_dir();
-        let capture = super::ToolOutputCapture::prepare(super::ToolOutputCaptureRequest {
-            artifact_files_root: &dir,
-            namespace: None,
-            call_id: "call/id",
-            stdout_id: "stdout-id",
-            stderr_id: "stderr-id",
-            command: "cargo test",
-        })
+        let capture = super::ToolOutputCapture::prepare(super::ToolOutputCaptureRequest::new(
+            &dir,
+            "call/id",
+            "stdout-id",
+            "stderr-id",
+            "cargo test",
+        ))
         .await
         .expect("capture");
         tokio::fs::write(&capture.stdout.path, b"ok")
@@ -842,6 +865,35 @@ mod tests {
                 .join("stdout.txt")
         );
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[test]
+    fn tool_output_capture_request_hides_fields_behind_constructor() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tool/output_format.rs"
+        ))
+        .expect("source");
+        let request_fields = source
+            .split("pub struct ToolOutputCaptureRequest")
+            .nth(1)
+            .expect("request struct")
+            .split("/// 工具输出 artifact 的路径计算请求。")
+            .next()
+            .expect("request fields");
+        assert!(
+            request_fields.contains("pub fn new("),
+            "工具输出捕获请求应由 pl-core constructor 承载字段形状"
+        );
+        assert!(
+            !request_fields.contains("pub artifact_files_root:")
+                && !request_fields.contains("pub namespace:")
+                && !request_fields.contains("pub call_id:")
+                && !request_fields.contains("pub stdout_id:")
+                && !request_fields.contains("pub stderr_id:")
+                && !request_fields.contains("pub command:"),
+            "宿主不应直接手写 ToolOutputCaptureRequest 字段"
+        );
     }
 
     #[test]
