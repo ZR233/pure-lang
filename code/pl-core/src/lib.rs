@@ -159,9 +159,9 @@ pub use tool::{
     WorkspaceFileToolKind, WorkspaceFileWriteRequest, WriteStdinTool, execute_container_tool,
     execute_workspace_file_tool, host_mcp_tool_schema, host_mcp_tool_schemas,
     lsp_tool_for_language, model_visible_tool_output, model_visible_tool_output_with_tokens,
-    redacted_trace_preview_value, tool_history_projection, tool_lifecycle_projection,
-    tool_lifecycle_projections, tool_output_artifact_file_path, trace_preview_output,
-    trace_preview_value,
+    redacted_trace_preview_value, run_tool_backend_with_cancellation, tool_history_projection,
+    tool_lifecycle_projection, tool_lifecycle_projections, tool_output_artifact_file_path,
+    trace_preview_output, trace_preview_value,
 };
 pub use trace::TraceRecorder;
 pub use turn::{

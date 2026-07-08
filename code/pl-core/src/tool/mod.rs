@@ -101,6 +101,32 @@ type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 type RegisteredToolFuture = Pin<Box<dyn Future<Output = Result<ToolOutput, PureError>> + Send>>;
 type RegisteredToolHandler = dyn Fn(ToolInput, ToolContext) -> RegisteredToolFuture + Send + Sync;
 
+/// 等待宿主工具后端 future，并统一响应 turn cancellation。
+///
+/// 宿主 adapter 仍负责业务调用和错误类型；pl-core 负责维护工具执行过程中
+/// cancellation token 与后台 future 的竞争语义，避免每个产品后端重复手写
+/// `tokio::select!`。
+pub async fn run_tool_backend_with_cancellation<F, T, E>(
+    future: F,
+    cancellation_token: Option<tokio_util::sync::CancellationToken>,
+    cancelled_error: impl FnOnce() -> E,
+) -> std::result::Result<T, E>
+where
+    F: Future<Output = std::result::Result<T, E>> + Send,
+{
+    if let Some(token) = cancellation_token {
+        if token.is_cancelled() {
+            return Err(cancelled_error());
+        }
+        return tokio::select! {
+            result = future => result,
+            _ = token.cancelled() => Err(cancelled_error()),
+        };
+    }
+
+    future.await
+}
+
 /// 工具执行抽象（dyn-compatible）。
 ///
 /// `execute` 返回 `BoxFuture` 以支持 trait object。
@@ -1130,6 +1156,42 @@ mod tests {
             Err(PureError::ToolExecutionFailed { tool, error })
                 if tool == "product_tool" && error == "boom"
         ));
+    }
+
+    #[tokio::test]
+    async fn tool_backend_future_returns_cancelled_error_before_running() {
+        let token = tokio_util::sync::CancellationToken::new();
+        token.cancel();
+
+        let result = run_tool_backend_with_cancellation(
+            async { Ok::<_, &'static str>("ran") },
+            Some(token),
+            || "cancelled",
+        )
+        .await;
+
+        assert_eq!(result, Err("cancelled"));
+    }
+
+    #[tokio::test]
+    async fn tool_backend_future_returns_cancelled_error_while_running() {
+        let token = tokio_util::sync::CancellationToken::new();
+        let task_token = token.clone();
+        let task = tokio::spawn(async move {
+            run_tool_backend_with_cancellation(
+                async {
+                    std::future::pending::<()>().await;
+                    Ok::<_, &'static str>("ran")
+                },
+                Some(task_token),
+                || "cancelled",
+            )
+            .await
+        });
+
+        token.cancel();
+
+        assert_eq!(task.await.expect("task joins"), Err("cancelled"));
     }
 
     #[test]
