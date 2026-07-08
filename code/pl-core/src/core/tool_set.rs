@@ -21,7 +21,7 @@ use super::PureCore;
 /// 该结构只描述模型可见工具目录，不创建 runtime backend。执行路径仍由
 /// `ToolSetBuilder` 和显式注册的 backend 决定，因此 git/container/docker
 /// 能力可以保持默认关闭。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SharedToolSchemaOptions {
     pub bash: bool,
     pub workspace_files: bool,
@@ -46,22 +46,6 @@ impl SharedToolSchemaOptions {
             mcp_resources: false,
             todo: true,
             plan_exit: true,
-        }
-    }
-}
-
-impl Default for SharedToolSchemaOptions {
-    fn default() -> Self {
-        Self {
-            bash: false,
-            workspace_files: false,
-            ask_user: false,
-            subagents: false,
-            git: false,
-            container: false,
-            mcp_resources: false,
-            todo: false,
-            plan_exit: false,
         }
     }
 }
