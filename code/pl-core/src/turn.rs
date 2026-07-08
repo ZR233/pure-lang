@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::future::{AbortHandle, AbortRegistration, Abortable};
@@ -567,6 +567,83 @@ impl<TurnId, SessionId> ActiveTurnControl<TurnId, SessionId> {
     }
 }
 
+/// 活动 turn 控制记录的并发 slot。
+///
+/// 宿主使用该类型保存“当前活动 turn”时，可以复用 pl-core 的匹配、读取和清理
+/// 语义，而不必在产品层重复维护 `Mutex<Option<...>>`。
+#[derive(Clone)]
+pub struct ActiveTurnSlot<TurnId, SessionId> {
+    inner: Arc<Mutex<Option<ActiveTurnControl<TurnId, SessionId>>>>,
+}
+
+impl<TurnId, SessionId> ActiveTurnSlot<TurnId, SessionId> {
+    /// 创建一个空的活动 turn slot。
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// 创建一个已安装活动 turn 的 slot。
+    pub fn with_active(control: ActiveTurnControl<TurnId, SessionId>) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(Some(control))),
+        }
+    }
+
+    /// 安装新的活动 turn，返回被替换的旧记录。
+    pub fn set(
+        &self,
+        control: ActiveTurnControl<TurnId, SessionId>,
+    ) -> Option<ActiveTurnControl<TurnId, SessionId>> {
+        self.inner
+            .lock()
+            .expect("active turn slot lock")
+            .replace(control)
+    }
+
+    /// 清空活动 turn，返回原记录。
+    pub fn clear(&self) -> Option<ActiveTurnControl<TurnId, SessionId>> {
+        self.inner.lock().expect("active turn slot lock").take()
+    }
+}
+
+impl<TurnId, SessionId> Default for ActiveTurnSlot<TurnId, SessionId> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<TurnId, SessionId> ActiveTurnSlot<TurnId, SessionId>
+where
+    TurnId: Clone,
+    SessionId: Clone,
+{
+    /// 读取当前活动 turn。
+    pub fn current(&self) -> Option<ActiveTurnControl<TurnId, SessionId>> {
+        self.inner.lock().expect("active turn slot lock").clone()
+    }
+}
+
+impl<TurnId, SessionId> ActiveTurnSlot<TurnId, SessionId>
+where
+    TurnId: Clone + PartialEq,
+    SessionId: Clone,
+{
+    /// 仅当 turn id 匹配时取出并清空活动 turn。
+    pub fn take_if_turn(&self, turn_id: &TurnId) -> Option<ActiveTurnControl<TurnId, SessionId>> {
+        let mut current = self.inner.lock().expect("active turn slot lock");
+        if current
+            .as_ref()
+            .is_some_and(|control| control.turn_id == *turn_id)
+        {
+            current.take()
+        } else {
+            None
+        }
+    }
+}
+
 /// 单轮运行的最终状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnResultStatus {
@@ -885,5 +962,30 @@ mod tests {
         control.cancel_task();
 
         assert!(token.is_cancelled());
+    }
+
+    #[test]
+    fn active_turn_slot_installs_reads_and_takes_matching_turn() {
+        let slot = ActiveTurnSlot::new();
+        let control = ActiveTurnControl::new(
+            "turn-a".to_string(),
+            "session-a".to_string(),
+            TurnTaskHandle::from_external_token(CancellationToken::new()),
+        );
+
+        assert!(slot.current().is_none());
+        slot.set(control);
+
+        assert_eq!(
+            slot.current().map(|control| control.session_id),
+            Some("session-a".to_string())
+        );
+        assert!(slot.take_if_turn(&"turn-b".to_string()).is_none());
+        assert!(slot.current().is_some());
+
+        let taken = slot.take_if_turn(&"turn-a".to_string()).unwrap();
+
+        assert_eq!(taken.session_id, "session-a");
+        assert!(slot.current().is_none());
     }
 }
