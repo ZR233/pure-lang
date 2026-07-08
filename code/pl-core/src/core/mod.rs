@@ -22,7 +22,7 @@ use crate::tool::{
     SubagentContext, ToolContext, ToolRegistry,
 };
 #[cfg(test)]
-use crate::tool::{ReadFileTool, WorkspaceAccess, WriteFileTool};
+use crate::tool::{LocalWorkspaceFileTool, WorkspaceAccess, WorkspaceFileToolKind, WriteFileTool};
 use crate::trace::TraceRecorder;
 #[cfg(test)]
 use crate::turn::{BudgetTracker, TurnResultStatus};

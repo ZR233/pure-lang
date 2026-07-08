@@ -157,9 +157,9 @@ fn file_tool_schemas_do_not_expose_legacy_bool_fields() {
 
 #[test]
 fn file_tool_schemas_use_unified_camel_case_inputs() {
-    let read_schema = ReadFileTool::new().input_schema();
-    let list_schema = ListFilesTool.input_schema();
-    let search_schema = SearchFilesTool.input_schema();
+    let read_schema = read_file_tool().input_schema();
+    let list_schema = list_files_tool().input_schema();
+    let search_schema = search_files_tool().input_schema();
 
     assert!(read_schema["properties"].get("lineStart").is_some());
     assert!(read_schema["properties"].get("line_start").is_none());
@@ -182,7 +182,7 @@ async fn list_files_directory_glob_matches_entries_relative_to_path() {
     tokio::fs::create_dir_all(root.join("code/pl-model"))
         .await
         .unwrap();
-    let tool = ListFilesTool;
+    let tool = list_files_tool();
 
     let output = tool
         .execute(
@@ -216,7 +216,7 @@ async fn list_files_globstar_matches_files_directly_under_prefix() {
     tokio::fs::write(root.join("design/nested/report.md"), "# Report\n")
         .await
         .unwrap();
-    let tool = ListFilesTool;
+    let tool = list_files_tool();
 
     let output = tool
         .execute(
@@ -244,7 +244,7 @@ async fn search_files_accepts_pattern_as_search_text() {
     tokio::fs::write(root.join("src/args.rs"), "fn parse_args() {}\n")
         .await
         .unwrap();
-    let tool = SearchFilesTool;
+    let tool = search_files_tool();
 
     let output = tool
         .execute(
@@ -282,7 +282,7 @@ async fn search_files_file_pattern_filters_paths() {
     tokio::fs::write(root.join("src/readme.txt"), "needle\n")
         .await
         .unwrap();
-    let tool = SearchFilesTool;
+    let tool = search_files_tool();
 
     let output = tool
         .execute(

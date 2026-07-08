@@ -8,16 +8,15 @@ use crate::tool::{
     AgentControlMessageOutput, AgentControlPolicy, AgentControlSendInputOutput,
     AgentControlSendInputRequest, AgentControlSpawnOutput, AgentControlSpawnRequest,
     AgentControlTargetRequest, AgentControlTool, AgentControlToolKind, AgentControlWaitOutput,
-    AgentControlWaitRequest, AllowAllAgentControlPolicy, ApplyPatchTool, AskUserTool,
-    CloseAgentTool, ContainerBackend, ContainerToolKind, ContainerWorkspaceFileBackend,
-    CopyPathTool, CreateDirectoryTool, DeletePathTool, ExecutionBackend, GitCredentialProvider,
-    GitToolKind, GitWorkspaceConfig, ListAgentsTool, ListFilesTool, LocalExecutionBackend,
+    AgentControlWaitRequest, AllowAllAgentControlPolicy, AskUserTool, CloseAgentTool,
+    ContainerBackend, ContainerToolKind, ContainerWorkspaceFileBackend, CopyPathTool,
+    CreateDirectoryTool, DeletePathTool, ExecutionBackend, GitCredentialProvider, GitToolKind,
+    GitWorkspaceConfig, ListAgentsTool, LocalExecutionBackend, LocalWorkspaceFileTool,
     McpListResourceTemplatesRequest, McpListResourcesRequest, McpReadResourceRequest,
     McpResourceBackend, McpResourceTool, McpResourceToolKind, McpTool, McpToolBackend,
     McpToolRequest, MovePathTool, NoContainerBackend, NoGitCredentialProvider, PlanExitTool,
-    ReadFileTool, ResumeAgentTool, SearchFilesTool, SendInputTool, SpawnAgentTool, StatPathTool,
-    TodoListTool, Tool, WaitAgentTool, WorkspaceFileTool, WorkspaceFileToolKind, WriteFileTool,
-    command_tool_pair,
+    ResumeAgentTool, SendInputTool, SpawnAgentTool, StatPathTool, TodoListTool, Tool,
+    WaitAgentTool, WorkspaceFileTool, WorkspaceFileToolKind, WriteFileTool, command_tool_pair,
 };
 use pl_model::ToolSchema;
 use serde_json::Value;
@@ -702,16 +701,15 @@ fn register_if_allowed(
 }
 
 fn register_file_tools(core: &mut PureCore, allowed: impl Fn(&str) -> bool + Copy) {
-    register_if_allowed(core, ReadFileTool::new(), allowed);
+    for kind in WorkspaceFileToolKind::all() {
+        register_if_allowed(core, LocalWorkspaceFileTool::new(*kind), allowed);
+    }
     register_if_allowed(core, WriteFileTool, allowed);
-    register_if_allowed(core, ListFilesTool, allowed);
-    register_if_allowed(core, SearchFilesTool, allowed);
     register_if_allowed(core, StatPathTool, allowed);
     register_if_allowed(core, CreateDirectoryTool, allowed);
     register_if_allowed(core, DeletePathTool, allowed);
     register_if_allowed(core, CopyPathTool, allowed);
     register_if_allowed(core, MovePathTool, allowed);
-    register_if_allowed(core, ApplyPatchTool, allowed);
 }
 
 fn register_container_file_tools<C>(

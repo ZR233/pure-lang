@@ -920,6 +920,23 @@ async fn profiled_local_workspace_registers_default_tools() {
 }
 
 #[tokio::test]
+async fn profiled_local_workspace_uses_unified_workspace_file_tools() {
+    let runtime = CoreRuntimeProfile::local_workspace(std::env::temp_dir())
+        .with_workspace_instructions("rules");
+    let mut core = PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
+        .unwrap()
+        .with_runtime_profile(runtime)
+        .build();
+
+    core.register_profile_tools().await;
+
+    let read_tool = core.tools.get("read_file").expect("read_file tool");
+    let patch_tool = core.tools.get("apply_patch").expect("apply_patch tool");
+    assert!(format!("{read_tool:?}").contains("LocalWorkspaceFileTool"));
+    assert!(format!("{patch_tool:?}").contains("LocalWorkspaceFileTool"));
+}
+
+#[tokio::test]
 async fn profiled_host_tools_do_not_register_local_workspace_tools() {
     let runtime = CoreRuntimeProfile::host_provided(std::env::temp_dir())
         .with_workspace_instructions("rules");
