@@ -132,6 +132,13 @@ pub struct ToolHistoryProjection {
     pub output_preview: String,
 }
 
+impl ToolHistoryProjection {
+    /// 根据历史投影中恢复出的模型可见输出推断工具是否成功。
+    pub fn inferred_success(&self) -> bool {
+        !self.output.is_empty()
+    }
+}
+
 pub fn tool_history_projection(
     messages: &[pl_protocol::Message],
     call_id: &str,
@@ -859,6 +866,26 @@ mod tests {
                         .to_string(),
             }
         );
+    }
+
+    #[test]
+    fn tool_history_projection_reports_inferred_success() {
+        let successful = super::ToolHistoryProjection {
+            call_id: "call-1".to_string(),
+            tool_name: "container_exec".to_string(),
+            arguments: json!({}),
+            arguments_preview: "{}".to_string(),
+            output: "visible output".to_string(),
+            output_preview: "visible output".to_string(),
+        };
+        let empty = super::ToolHistoryProjection {
+            output: String::new(),
+            output_preview: String::new(),
+            ..successful.clone()
+        };
+
+        assert!(successful.inferred_success());
+        assert!(!empty.inferred_success());
     }
 
     fn test_temp_dir() -> std::path::PathBuf {
