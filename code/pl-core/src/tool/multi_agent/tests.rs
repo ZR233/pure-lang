@@ -120,6 +120,23 @@ fn agent_control_spawn_request_exposes_shared_agent_type_policy() {
 }
 
 #[test]
+fn agent_control_spawn_request_normalizes_initial_message() {
+    let empty: crate::tool::AgentControlSpawnRequest =
+        serde_json::from_value(serde_json::json!({ "taskName": "inspect", "message": "   \n\t" }))
+            .unwrap();
+    let message: crate::tool::AgentControlSpawnRequest = serde_json::from_value(
+        serde_json::json!({ "taskName": "inspect", "message": "  keep spacing  " }),
+    )
+    .unwrap();
+
+    assert_eq!(empty.initial_message(), None);
+    assert_eq!(
+        message.initial_message(),
+        Some("  keep spacing  ".to_string())
+    );
+}
+
+#[test]
 fn agent_control_wait_request_normalizes_timeout_duration() {
     let default_timeout: crate::tool::AgentControlWaitRequest =
         serde_json::from_value(serde_json::json!({})).unwrap();

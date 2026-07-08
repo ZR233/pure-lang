@@ -156,6 +156,14 @@ pub struct AgentControlSpawnRequest {
 }
 
 impl AgentControlSpawnRequest {
+    /// 返回可注入子 agent 首轮输入的初始消息。
+    ///
+    /// 模型可能用空白字符串表示只创建 agent、不立刻发起协作输入；该归一化属于
+    /// `spawn_agent` 的共享输入语义，由 pl-core 统一提供给宿主 adapter。
+    pub fn initial_message(&self) -> Option<String> {
+        (!self.message.trim().is_empty()).then(|| self.message.clone())
+    }
+
     /// 返回共享 agent 类型策略。
     ///
     /// 省略、空值和历史 alias 都按 executor 执行，但只有模型可见 canonical
