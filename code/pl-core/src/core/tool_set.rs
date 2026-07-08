@@ -166,6 +166,13 @@ impl<B, P, C, A, M> ToolSetBuilder<B, P, C, A, M> {
         schemas
     }
 
+    pub fn shared_tool_names(&self) -> Vec<String> {
+        self.shared_tool_schemas()
+            .into_iter()
+            .map(|schema| schema.name().to_string())
+            .collect()
+    }
+
     fn tool_allowed(&self, name: &str) -> bool {
         self.allowed_tools
             .as_ref()
@@ -331,6 +338,13 @@ pub fn shared_tool_schemas(options: SharedToolSchemaOptions) -> Vec<ToolSchema> 
     }
 
     schemas
+}
+
+pub fn shared_tool_names(options: SharedToolSchemaOptions) -> Vec<String> {
+    shared_tool_schemas(options)
+        .into_iter()
+        .map(|schema| schema.name().to_string())
+        .collect()
 }
 
 #[derive(Debug, Clone)]

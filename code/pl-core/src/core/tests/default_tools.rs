@@ -48,6 +48,27 @@ fn shared_tool_schemas_can_describe_hosted_workspace_surface() {
 }
 
 #[test]
+fn shared_tool_names_match_shared_schema_order() {
+    let options = SharedToolSchemaOptions {
+        bash: false,
+        workspace_files: true,
+        ask_user: true,
+        subagents: true,
+        git: true,
+        container: true,
+        mcp_resources: true,
+        todo: true,
+        plan_exit: false,
+    };
+    let schema_names = shared_tool_schemas(options)
+        .into_iter()
+        .map(|schema| schema.name().to_string())
+        .collect::<Vec<_>>();
+
+    assert_eq!(shared_tool_names(options), schema_names);
+}
+
+#[test]
 fn shared_tool_schemas_can_include_mcp_resource_tools() {
     let names = shared_tool_schemas(SharedToolSchemaOptions {
         mcp_resources: true,
