@@ -1088,6 +1088,20 @@ impl TurnErrorProjection {
     }
 }
 
+/// 检查 turn 取消信号并返回宿主无关的 turn 错误分类。
+///
+/// 宿主在 turn 编排中的任意 checkpoint 都应复用该函数，把取消语义统一投影
+/// 为 `TurnReturnError::Cancelled`，再由产品 adapter 映射到自身错误类型。
+pub fn ensure_turn_not_cancelled(
+    cancellation_token: &CancellationToken,
+) -> Result<(), TurnReturnError> {
+    if cancellation_token.is_cancelled() {
+        Err(TurnReturnError::Cancelled)
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1198,6 +1212,20 @@ mod tests {
                 error_message: Some("model stream disconnected".to_string()),
                 should_publish_error: true,
             }
+        );
+    }
+
+    #[test]
+    fn ensure_turn_not_cancelled_returns_shared_turn_error() {
+        let token = CancellationToken::new();
+
+        assert_eq!(ensure_turn_not_cancelled(&token), Ok(()));
+
+        token.cancel();
+
+        assert_eq!(
+            ensure_turn_not_cancelled(&token),
+            Err(TurnReturnError::Cancelled)
         );
     }
 

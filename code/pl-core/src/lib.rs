@@ -175,5 +175,6 @@ pub use turn::{
     ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest, ToolExecutionMode,
     TurnAbortReason, TurnBudget, TurnErrorProjection, TurnOptions, TurnOutcome, TurnOutcomeStatus,
     TurnRequest, TurnResult, TurnResultStatus, TurnReturnError, TurnTaskHandle, UserInputMode,
+    ensure_turn_not_cancelled,
 };
 pub use workspace::{load_workspace_instructions, resolve_workspace_root};
