@@ -19,6 +19,8 @@ class McpServerSettingsView {
     required this.endpoint,
     required this.enabled,
     required this.status,
+    this.sourceKind = 'user',
+    this.mutationPolicy = 'userEditable',
   });
 
   final String id;
@@ -26,6 +28,10 @@ class McpServerSettingsView {
   final String endpoint;
   final bool enabled;
   final String status;
+  final String sourceKind;
+  final String mutationPolicy;
+
+  bool get hasLockedIdentity => mutationPolicy == 'lockedIdentity';
 }
 
 class InstructionsSettingsView {

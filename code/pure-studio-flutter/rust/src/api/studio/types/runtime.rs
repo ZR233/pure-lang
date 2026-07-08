@@ -91,7 +91,9 @@ pub struct BridgeMcpServerDto {
     pub command: Option<String>,
     pub url: Option<String>,
     pub endpoint: String,
+    pub source_kind: String,
     pub status_kind: String,
+    pub mutation_policy: String,
     pub availability_kind: String,
 }
 

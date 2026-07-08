@@ -306,6 +306,8 @@ McpServerSettingsView _mcpServerFromFrb(frb.BridgeMcpServerDto server) {
     status: server.statusKind.isEmpty
         ? server.availabilityKind
         : server.statusKind,
+    sourceKind: server.sourceKind,
+    mutationPolicy: server.mutationPolicy,
   );
 }
 
