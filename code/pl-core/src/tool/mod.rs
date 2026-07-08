@@ -622,13 +622,31 @@ impl RegisteredTool {
         F: Fn(ToolInput, ToolContext) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<ToolOutput, PureError>> + Send + 'static,
     {
+        let name = name.into();
+        let tool_name = name.clone();
         Self {
-            name: name.into(),
+            name,
             description: description.into(),
             input_schema,
             supports_parallel_tool_calls: false,
             runtime_lock_policy: None,
-            handler: Arc::new(move |input, context| Box::pin(handler(input, context))),
+            handler: Arc::new(move |input, context| {
+                if context
+                    .options
+                    .cancellation_token
+                    .as_ref()
+                    .is_some_and(|token| token.is_cancelled())
+                {
+                    let tool = tool_name.clone();
+                    return Box::pin(async move {
+                        Err(PureError::ToolExecutionFailed {
+                            tool,
+                            error: "tool execution cancelled".to_string(),
+                        })
+                    }) as RegisteredToolFuture;
+                }
+                Box::pin(handler(input, context)) as RegisteredToolFuture
+            }),
         }
     }
 
@@ -920,6 +938,63 @@ mod tests {
                 runtime_events: vec![ToolRuntimeEvent::EndTurn],
             }
         );
+    }
+
+    #[tokio::test]
+    async fn registered_tool_from_execution_result_honors_cancelled_context() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let tool_calls = calls.clone();
+        let tool = RegisteredTool::from_execution_result(
+            "product_tool",
+            "Product tool",
+            serde_json::json!({ "type": "object" }),
+            move |_input, _context| {
+                let tool_calls = tool_calls.clone();
+                async move {
+                    tool_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok(ToolExecutionResult::<serde_json::Value>::new(
+                        true,
+                        "ran".to_string(),
+                        false,
+                    ))
+                }
+            },
+        );
+        let token = tokio_util::sync::CancellationToken::new();
+        token.cancel();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let result = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({}),
+                    session_id: "session".to_string(),
+                    tool_id: "tool-call".to_string(),
+                    revision_base: 0,
+                },
+                ToolContext {
+                    event_tx,
+                    options: TurnOptions::default().with_cancellation(token),
+                    workspace_access: WorkspaceAccess::WorkspaceOnly,
+                    mode: crate::turn::CompileMode::Auto,
+                    workspace_root: PathBuf::new(),
+                    workspace_instructions: None,
+                    instruction_snapshot: None,
+                    provider_call_id: None,
+                    active_subagent: None,
+                    agent_supervisor: AgentSupervisor::default(),
+                    agent_tool_registrar: None,
+                    lsp_runtime: None,
+                    parent_session: Arc::new(crate::session::CoreSession::new()),
+                },
+            )
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(PureError::ToolExecutionFailed { tool, error })
+                if tool == "product_tool" && error.contains("cancel")
+        ));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
     #[test]
