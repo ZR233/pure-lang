@@ -426,6 +426,15 @@ pub struct ToolExecutionResult<Artifact = serde_json::Value> {
 }
 
 impl<Artifact> ToolExecutionResult<Artifact> {
+    pub fn json(value: impl Serialize) -> Result<Self, PureError> {
+        let output =
+            serde_json::to_string(&value).map_err(|error| PureError::ToolExecutionFailed {
+                tool: "registered_tool".to_string(),
+                error: format!("failed to serialize JSON output: {error}"),
+            })?;
+        Ok(Self::new(true, output, false))
+    }
+
     pub fn new(success: bool, output: String, ends_turn: bool) -> Self {
         Self::with_model_tokens(
             success,
@@ -968,6 +977,27 @@ mod tests {
                 exit_code: Some(0),
                 timed_out: false,
                 runtime_events: vec![ToolRuntimeEvent::EndTurn],
+            }
+        );
+    }
+
+    #[test]
+    fn tool_execution_result_serializes_json_model_output() {
+        let execution = ToolExecutionResult::<serde_json::Value>::json(serde_json::json!({
+            "queued": [1],
+            "deduped": [2],
+            "ignored": []
+        }))
+        .expect("serialize JSON tool output");
+
+        assert_eq!(
+            execution,
+            ToolExecutionResult {
+                success: true,
+                output: "{\"deduped\":[2],\"ignored\":[],\"queued\":[1]}".to_string(),
+                model_output: "{\"deduped\":[2],\"ignored\":[],\"queued\":[1]}".to_string(),
+                ends_turn: false,
+                output_artifacts: Vec::new(),
             }
         );
     }
