@@ -121,8 +121,10 @@ pub(crate) fn bridge_mcp_health(health: StudioMcpHealth) -> BridgeMcpHealthDto {
                 command: server.command,
                 url: server.url,
                 endpoint: server.endpoint,
-                status_kind: server.status_kind.as_str().to_string(),
-                availability_kind: server.availability_kind.as_str().to_string(),
+                source_kind: server.source_kind,
+                status_kind: server.status_kind,
+                mutation_policy: server.mutation_policy,
+                availability_kind: server.availability_kind,
             })
             .collect(),
     }

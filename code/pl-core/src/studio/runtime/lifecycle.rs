@@ -40,6 +40,7 @@ impl StudioRuntime {
             store,
             config_store,
             mcp_runtime: McpRuntimeRegistry::new(),
+            mcp_health_watcher: Default::default(),
             lsp_runtime: pl_lsp::LspRuntimeRegistry::new(),
             runtime_state: runtime_state.clone(),
             active_turns: StudioActiveTurns::new(runtime_state),
@@ -108,6 +109,7 @@ impl StudioRuntime {
         if !matches!(self.runtime_snapshot().status, StudioRuntimeStatus::Ready) {
             let _ = self.initialize_runtime().await?;
         }
+        self.start_mcp_health_watcher().await;
         if let Err(error) = self.reconcile_mcp_runtime().await {
             let message = format!("{error:#}");
             let _ = self
@@ -130,6 +132,7 @@ impl StudioRuntime {
             .runtime_state
             .transition(StudioRuntimeStatus::ShuttingDown, None)?;
         self.active_turns.cancel_all_and_clear().await;
+        self.stop_mcp_health_watcher().await;
         self.mcp_runtime.shutdown().await;
         self.lsp_runtime.shutdown().await;
         self.runtime_state
@@ -138,22 +141,6 @@ impl StudioRuntime {
 
     pub async fn shutdown(&self) {
         let _ = self.shutdown_runtime().await;
-    }
-
-    pub async fn reconcile_mcp_runtime(&self) -> Result<()> {
-        let config = self.config_store.load_or_default()?;
-        self.mcp_runtime
-            .reconcile(crate::config::effective_mcp_servers(&config))
-            .await;
-        Ok(())
-    }
-
-    pub async fn recheck_mcp_runtime(&self) -> Result<()> {
-        let config = self.config_store.load_or_default()?;
-        self.mcp_runtime
-            .recheck(crate::config::effective_mcp_servers(&config))
-            .await;
-        Ok(())
     }
 
     pub async fn reconcile_lsp_runtime_for_project(&self, project_id: &str) -> Result<()> {

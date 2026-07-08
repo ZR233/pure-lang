@@ -14,6 +14,7 @@ use crate::studio::{
 use crate::{InteractionCallback, TurnOptions};
 
 mod lifecycle;
+mod mcp_health;
 mod plan_confirmation;
 mod projection;
 mod prompt_runner;
@@ -126,6 +127,7 @@ pub struct StudioRuntime {
     store: StudioStore,
     config_store: ConfigStore,
     mcp_runtime: McpRuntimeRegistry,
+    mcp_health_watcher: std::sync::Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
     lsp_runtime: pl_lsp::LspRuntimeRegistry,
     interactions: InteractionRuntime,
     events: StudioEventRuntime,

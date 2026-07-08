@@ -32,6 +32,7 @@ pub fn save_provider_settings(settings_json: String) -> Result<BridgeStudioSnaps
         let current = bridge.studio.config_store().load_or_default()?;
         let next = provider_settings_edit(input, &current)?.to_config(&current)?;
         bridge.studio.config_store().save(&next)?;
+        bridge.studio.reconcile_mcp_runtime().await?;
         studio_snapshot_inner(bridge, None, None).await
     })
 }
@@ -122,6 +123,7 @@ pub fn save_mcp_settings(settings_json: String) -> Result<BridgeStudioSnapshotRe
         config.builtin_mcp_servers = next_builtin;
         config.validate()?;
         bridge.studio.config_store().save(&config)?;
+        bridge.studio.reconcile_mcp_runtime().await?;
         studio_snapshot_inner(bridge, None, None).await
     })
 }

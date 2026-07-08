@@ -279,14 +279,20 @@ class _McpTabState extends ConsumerState<_McpTab> {
                 ),
                 const SizedBox(height: 10),
                 TextFormField(
+                  key: ValueKey(
+                    '${server.id}:${server.endpoint}:${server.mutationPolicy}',
+                  ),
                   initialValue: server.endpoint,
+                  readOnly: server.hasLockedIdentity,
                   decoration: InputDecoration(
                     labelText: context.l10n.settingsEndpoint,
                   ),
-                  onChanged: (value) => setState(() {
-                    _endpointByServer[server.id] = value;
-                    _scheduleSave();
-                  }),
+                  onChanged: server.hasLockedIdentity
+                      ? null
+                      : (value) => setState(() {
+                          _endpointByServer[server.id] = value;
+                          _scheduleSave();
+                        }),
                 ),
               ],
             ),
@@ -313,7 +319,9 @@ class _McpTabState extends ConsumerState<_McpTab> {
               'id': server.id,
               'enabled': _enabledByServer[server.id] ?? server.enabled,
               'transport': server.transport,
-              'endpoint': _endpointByServer[server.id] ?? server.endpoint,
+              'endpoint': server.hasLockedIdentity
+                  ? server.endpoint
+                  : _endpointByServer[server.id] ?? server.endpoint,
             },
         ],
       });

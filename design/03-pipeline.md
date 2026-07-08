@@ -151,6 +151,8 @@ Flutter/FRB 端使用两类订阅：
 - `subscribeSessionEvents(sessionId)`：只转发当前会话的 timeline、turn、interaction、session runtime、agent 与高频 `messagePartDelta`。
 - `subscribeGlobalEvents()`：只转发项目、配置、Provider usage、MCP/LSP health 等低频全局变化。
 
+Studio runtime 在启动、保存 Provider 设置和保存 MCP 设置后都必须刷新同一份 effective MCP server 列表并广播 `McpHealthChanged`。Provider 保存包含 Zhipu Coding Plan token 时，内置 Zhipu MCP server 立即进入后台 health 检查，不依赖下一轮 turn 或下一次应用启动触发。
+
 `subscribe_session(session_id)` 和 `subscribe_global()` 必须在 `pl-core` 内过滤；Flutter 切换会话时取消旧 session stream，只保留当前打开会话的高频监听。
 
 `StudioRuntime::drain_agent_events` 在 `pl-core` 内使用显式分支处理内部 broadcast 通道状态：
@@ -203,4 +205,4 @@ Flutter/FRB 输出使用同一语义，桥接层统一包成：
 
 Dart FRB adapter 从 `BridgeEventPayload` sealed union 归一出 app 内部 typed `StudioBridgeEventPayload`；Riverpod reducer 只按 payload 类型更新 store，不再读取 `event.payload[...]` Map。实时 stream 与 `loadStudioEvents` backfill 必须共用这套 typed envelope。命令与 snapshot 返回不使用 `JsonResponse` 外壳；Dart 只在 adapter 边界解 `configJson`、`generalSettingsJson` 和工具参数这类开放 JSON 标量。agent timeline 在 FRB 边界使用 typed payload union；Flutter 不解析历史 `payloadJson` agent event 记录，持久层必须在进入 Flutter 前投影为 typed `BridgeAgentTimelineEventDto`。
 
-Flutter 桥接动作按同一 runtime 边界命名：`bootstrapStudio`、`openProject`、`selectProject`、`createSession` 和 `archiveSession` 返回新的 Studio 快照，`setSessionMode` 持久化当前 session 的下一轮协作模式，`setModelRole` 写回 provider/role 配置并返回 canonical config view，`submitPrompt`/`stopPrompt`/`resolveInteraction` 只表示请求已提交，`loadSessionState`/`loadStudioEvents` 用于会话恢复与 stale backfill，`saveRuntimePermissionMode` 写回 runtime config，`saveStudioSettingsDraft` 持久化尚未 typed 化的设置页草稿。
+Flutter 桥接动作按同一 runtime 边界命名：`bootstrapStudio`、`openProject`、`selectProject`、`createSession` 和 `archiveSession` 返回新的 Studio 快照，`setSessionMode` 持久化当前 session 的下一轮协作模式，`setModelRole` 写回 provider/role 配置并返回 canonical config view，`submitPrompt`/`stopPrompt`/`resolveInteraction` 只表示请求已提交，`loadSessionState`/`loadStudioEvents` 用于会话恢复与 stale backfill，`saveProviderSettings` 与 `saveMcpSettings` 写回配置后必须同步刷新 MCP runtime health，`saveRuntimePermissionMode` 写回 runtime config，`saveStudioSettingsDraft` 持久化尚未 typed 化的设置页草稿。

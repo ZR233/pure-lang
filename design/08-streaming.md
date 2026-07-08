@@ -88,6 +88,8 @@ pl-model provider
 - `sessionListChanged` 是会话元状态的事实事件，payload 必须包含 `projectId` 和该项目最新 root `sessions`。创建会话、归档会话、归档项目、切换 session mode、Plan 实施把当前 session 切回 `auto` 等会话列表或会话摘要变化，都必须在持久写入后广播该事件；命令返回值只作为请求确认或冷启动 snapshot，不作为 UI 唯一刷新路径。
 - `sessionHandoffChanged` 不再作为 Flutter 前端协议入口；Plan 实施在当前 `sessionId` 内启动新 turn，不再依赖 handoff target child session 展示实施过程。`sessionListChanged` 只驱动 root 会话列表可见性，legacy child/archived session 不计入 root session 列表。
 
+`mcpHealthChanged` 是全局 health snapshot，必须在 Studio 启动、Provider 保存、MCP 设置保存和异步 probe 状态变化时广播。snapshot 中的 server DTO 要携带 source 与 mutation policy，使 Flutter 能区分用户可编辑 server 和内置 locked identity server；内置 Zhipu MCP endpoint 只能展示，不作为可编辑配置提交。
+
 `TextDelta`、`ThinkingDelta`、`ToolCallDelta`、`ToolCallComplete` 不再是 Studio 的协议或兼容入口。
 
 ## 8.2.1 Flutter/FRB 订阅边界

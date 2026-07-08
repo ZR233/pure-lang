@@ -105,3 +105,34 @@ async fn initialize_runtime_cancels_recovered_transient_interactions() {
     assert_eq!(cancelled_interactions, 2);
     let _ = tokio::fs::remove_dir_all(home).await;
 }
+
+#[tokio::test]
+async fn start_runtime_emits_mcp_health_snapshot() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let home = std::env::temp_dir().join(format!("pure-mcp-health-runtime-home-{unique}"));
+    let runtime = StudioRuntime::new(
+        StudioStore::open_memory().await.unwrap(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(&home)),
+    );
+    let mut events = runtime.events().subscribe_global();
+
+    runtime.start_runtime().await.unwrap();
+
+    let event = tokio::time::timeout(TEST_RUNTIME_TIMEOUT, events.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let StudioEventKind::McpHealthChanged { health } = event.kind else {
+        panic!("expected McpHealthChanged event");
+    };
+    assert!(health.active_mcp_servers.is_empty());
+    assert!(health.mcp_servers.iter().any(|server| {
+        server.source_kind == "builtIn" && server.availability_kind == "missingCredential"
+    }));
+
+    runtime.shutdown().await;
+    let _ = tokio::fs::remove_dir_all(home).await;
+}

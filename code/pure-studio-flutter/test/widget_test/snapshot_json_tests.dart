@@ -169,6 +169,62 @@ void registerSnapshotJsonTests() {
     );
   });
 
+  test('config snapshot restores built-in Zhipu MCP metadata', () {
+    final state = studioStateFromSessionJson({
+      'sessionId': 'session-1',
+      'session': {
+        'id': 'session-1',
+        'projectId': 'project-1',
+        'title': 'Session',
+        'mode': 'auto',
+        'updatedAt': 1,
+      },
+      'sessions': [
+        {
+          'id': 'session-1',
+          'projectId': 'project-1',
+          'title': 'Session',
+          'mode': 'auto',
+          'updatedAt': 1,
+        },
+      ],
+      'config': {
+        'providers': {
+          'zhipu-coding-plan': {
+            'provider_kind': 'zhipu',
+            'base_url': 'https://open.bigmodel.cn/api/coding/paas/v4',
+            'bearer_token': 'token',
+            'name': 'Zhipu Coding Plan',
+            'default_model': 'glm-5',
+            'models': [],
+          },
+        },
+        'builtinMcpServers': {
+          'zhipu_search': {'enabled': true},
+          'zhipu_vision': {'enabled': false},
+        },
+      },
+    });
+
+    final search = state.mcpServers.singleWhere(
+      (server) => server.id == 'zhipu_search',
+    );
+    final vision = state.mcpServers.singleWhere(
+      (server) => server.id == 'zhipu_vision',
+    );
+
+    expect(
+      search.endpoint,
+      'https://open.bigmodel.cn/api/mcp/web_search_prime/mcp',
+    );
+    expect(search.status, 'enabled');
+    expect(search.sourceKind, 'builtIn');
+    expect(search.mutationPolicy, 'lockedIdentity');
+    expect(vision.transport, 'stdio');
+    expect(vision.endpoint, 'npx');
+    expect(vision.status, 'disabled');
+  });
+
   test('session JSON accepts legacy type and snake case timeline fields', () {
     final state = studioStateFromSessionJson({
       'sessionId': 'session-1',

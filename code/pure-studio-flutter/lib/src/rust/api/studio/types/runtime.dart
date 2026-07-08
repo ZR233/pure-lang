@@ -70,7 +70,9 @@ class BridgeMcpServerDto {
   final String? command;
   final String? url;
   final String endpoint;
+  final String sourceKind;
   final String statusKind;
+  final String mutationPolicy;
   final String availabilityKind;
 
   const BridgeMcpServerDto({
@@ -80,7 +82,9 @@ class BridgeMcpServerDto {
     this.command,
     this.url,
     required this.endpoint,
+    required this.sourceKind,
     required this.statusKind,
+    required this.mutationPolicy,
     required this.availabilityKind,
   });
 
@@ -92,7 +96,9 @@ class BridgeMcpServerDto {
       command.hashCode ^
       url.hashCode ^
       endpoint.hashCode ^
+      sourceKind.hashCode ^
       statusKind.hashCode ^
+      mutationPolicy.hashCode ^
       availabilityKind.hashCode;
 
   @override
@@ -106,7 +112,9 @@ class BridgeMcpServerDto {
           command == other.command &&
           url == other.url &&
           endpoint == other.endpoint &&
+          sourceKind == other.sourceKind &&
           statusKind == other.statusKind &&
+          mutationPolicy == other.mutationPolicy &&
           availabilityKind == other.availabilityKind;
 }
 

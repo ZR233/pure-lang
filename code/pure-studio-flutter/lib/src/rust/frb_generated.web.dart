@@ -104,6 +104,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTodoListSnapshotDto
+  dco_decode_box_autoadd_bridge_todo_list_snapshot_dto(dynamic raw);
+
+  @protected
   DeepSeekBalanceDto dco_decode_box_autoadd_deep_seek_balance_dto(dynamic raw);
 
   @protected
@@ -147,14 +151,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeAgentTimelinePayloadDto dco_decode_bridge_agent_timeline_payload_dto(
     dynamic raw,
   );
-
-  @protected
-  BridgeTodoListSnapshotDto dco_decode_bridge_todo_list_snapshot_dto(
-    dynamic raw,
-  );
-
-  @protected
-  BridgeTodoItemDto dco_decode_bridge_todo_item_dto(dynamic raw);
 
   @protected
   BridgeEventEnvelope dco_decode_bridge_event_envelope(dynamic raw);
@@ -244,6 +240,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeStudioTurnDto dco_decode_bridge_studio_turn_dto(dynamic raw);
 
   @protected
+  BridgeTodoItemDto dco_decode_bridge_todo_item_dto(dynamic raw);
+
+  @protected
+  BridgeTodoListSnapshotDto dco_decode_bridge_todo_list_snapshot_dto(
+    dynamic raw,
+  );
+
+  @protected
   BridgeUserQuestionDto dco_decode_bridge_user_question_dto(dynamic raw);
 
   @protected
@@ -285,9 +289,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_list_bridge_agent_timeline_event_dto(dynamic raw);
 
   @protected
-  List<BridgeTodoItemDto> dco_decode_list_bridge_todo_item_dto(dynamic raw);
-
-  @protected
   List<BridgeEventEnvelope> dco_decode_list_bridge_event_envelope(dynamic raw);
 
   @protected
@@ -308,6 +309,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   List<BridgeStudioPartProjectionDto>
   dco_decode_list_bridge_studio_part_projection_dto(dynamic raw);
+
+  @protected
+  List<BridgeTodoItemDto> dco_decode_list_bridge_todo_item_dto(dynamic raw);
 
   @protected
   List<BridgeUserQuestionDto> dco_decode_list_bridge_user_question_dto(
@@ -527,6 +531,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTodoListSnapshotDto
+  sse_decode_box_autoadd_bridge_todo_list_snapshot_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   DeepSeekBalanceDto sse_decode_box_autoadd_deep_seek_balance_dto(
     SseDeserializer deserializer,
   );
@@ -576,16 +586,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeAgentTimelinePayloadDto sse_decode_bridge_agent_timeline_payload_dto(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  BridgeTodoListSnapshotDto sse_decode_bridge_todo_list_snapshot_dto(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  BridgeTodoItemDto sse_decode_bridge_todo_item_dto(
     SseDeserializer deserializer,
   );
 
@@ -709,6 +709,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTodoItemDto sse_decode_bridge_todo_item_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeTodoListSnapshotDto sse_decode_bridge_todo_list_snapshot_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeUserQuestionDto sse_decode_bridge_user_question_dto(
     SseDeserializer deserializer,
   );
@@ -760,11 +770,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   sse_decode_list_bridge_agent_timeline_event_dto(SseDeserializer deserializer);
 
   @protected
-  List<BridgeTodoItemDto> sse_decode_list_bridge_todo_item_dto(
-    SseDeserializer deserializer,
-  );
-
-  @protected
   List<BridgeEventEnvelope> sse_decode_list_bridge_event_envelope(
     SseDeserializer deserializer,
   );
@@ -791,6 +796,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   List<BridgeStudioPartProjectionDto>
   sse_decode_list_bridge_studio_part_projection_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeTodoItemDto> sse_decode_list_bridge_todo_item_dto(
     SseDeserializer deserializer,
   );
 
@@ -1058,6 +1068,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_todo_list_snapshot_dto(
+    BridgeTodoListSnapshotDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_deep_seek_balance_dto(
     DeepSeekBalanceDto self,
     SseSerializer serializer,
@@ -1120,18 +1136,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_agent_timeline_payload_dto(
     BridgeAgentTimelinePayloadDto self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_bridge_todo_list_snapshot_dto(
-    BridgeTodoListSnapshotDto self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_bridge_todo_item_dto(
-    BridgeTodoItemDto self,
     SseSerializer serializer,
   );
 
@@ -1280,6 +1284,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_todo_item_dto(
+    BridgeTodoItemDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_todo_list_snapshot_dto(
+    BridgeTodoListSnapshotDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_user_question_dto(
     BridgeUserQuestionDto self,
     SseSerializer serializer,
@@ -1340,12 +1356,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_list_bridge_todo_item_dto(
-    List<BridgeTodoItemDto> self,
-    SseSerializer serializer,
-  );
-
-  @protected
   void sse_encode_list_bridge_event_envelope(
     List<BridgeEventEnvelope> self,
     SseSerializer serializer,
@@ -1378,6 +1388,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_studio_part_projection_dto(
     List<BridgeStudioPartProjectionDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_todo_item_dto(
+    List<BridgeTodoItemDto> self,
     SseSerializer serializer,
   );
 

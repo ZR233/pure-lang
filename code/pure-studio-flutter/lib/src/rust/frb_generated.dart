@@ -1265,6 +1265,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeTodoListSnapshotDto
+  dco_decode_box_autoadd_bridge_todo_list_snapshot_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_todo_list_snapshot_dto(raw);
+  }
+
+  @protected
   DeepSeekBalanceDto dco_decode_box_autoadd_deep_seek_balance_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_deep_seek_balance_dto(raw);
@@ -1391,41 +1398,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         );
       case 1:
         return BridgeAgentTimelinePayloadDto_TodoListUpdated(
-          snapshot: dco_decode_bridge_todo_list_snapshot_dto(raw[1]),
+          snapshot: dco_decode_box_autoadd_bridge_todo_list_snapshot_dto(
+            raw[1],
+          ),
         );
       default:
         throw Exception("unreachable");
     }
-  }
-
-  @protected
-  BridgeTodoListSnapshotDto dco_decode_bridge_todo_list_snapshot_dto(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
-    return BridgeTodoListSnapshotDto(
-      callId: dco_decode_String(arr[0]),
-      agentId: dco_decode_opt_String(arr[1]),
-      path: dco_decode_opt_String(arr[2]),
-      parentPath: dco_decode_opt_String(arr[3]),
-      explanation: dco_decode_opt_String(arr[4]),
-      items: dco_decode_list_bridge_todo_item_dto(arr[5]),
-    );
-  }
-
-  @protected
-  BridgeTodoItemDto dco_decode_bridge_todo_item_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
-    return BridgeTodoItemDto(
-      step: dco_decode_String(arr[0]),
-      status: dco_decode_String(arr[1]),
-    );
   }
 
   @protected
@@ -1595,8 +1574,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeMcpServerDto dco_decode_bridge_mcp_server_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return BridgeMcpServerDto(
       id: dco_decode_String(arr[0]),
       enabled: dco_decode_bool(arr[1]),
@@ -1604,8 +1583,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       command: dco_decode_opt_String(arr[3]),
       url: dco_decode_opt_String(arr[4]),
       endpoint: dco_decode_String(arr[5]),
-      statusKind: dco_decode_String(arr[6]),
-      availabilityKind: dco_decode_String(arr[7]),
+      sourceKind: dco_decode_String(arr[6]),
+      statusKind: dco_decode_String(arr[7]),
+      mutationPolicy: dco_decode_String(arr[8]),
+      availabilityKind: dco_decode_String(arr[9]),
     );
   }
 
@@ -1908,6 +1889,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeTodoItemDto dco_decode_bridge_todo_item_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return BridgeTodoItemDto(
+      step: dco_decode_String(arr[0]),
+      status: dco_decode_String(arr[1]),
+    );
+  }
+
+  @protected
+  BridgeTodoListSnapshotDto dco_decode_bridge_todo_list_snapshot_dto(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    return BridgeTodoListSnapshotDto(
+      callId: dco_decode_String(arr[0]),
+      agentId: dco_decode_opt_String(arr[1]),
+      path: dco_decode_opt_String(arr[2]),
+      parentPath: dco_decode_opt_String(arr[3]),
+      explanation: dco_decode_opt_String(arr[4]),
+      items: dco_decode_list_bridge_todo_item_dto(arr[5]),
+    );
+  }
+
+  @protected
   BridgeUserQuestionDto dco_decode_bridge_user_question_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -2022,12 +2033,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  List<BridgeTodoItemDto> dco_decode_list_bridge_todo_item_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return (raw as List<dynamic>).map(dco_decode_bridge_todo_item_dto).toList();
-  }
-
-  @protected
   List<BridgeEventEnvelope> dco_decode_list_bridge_event_envelope(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>)
@@ -2077,6 +2082,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return (raw as List<dynamic>)
         .map(dco_decode_bridge_studio_part_projection_dto)
         .toList();
+  }
+
+  @protected
+  List<BridgeTodoItemDto> dco_decode_list_bridge_todo_item_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_bridge_todo_item_dto).toList();
   }
 
   @protected
@@ -2593,6 +2604,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeTodoListSnapshotDto
+  sse_decode_box_autoadd_bridge_todo_list_snapshot_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_todo_list_snapshot_dto(deserializer));
+  }
+
+  @protected
   DeepSeekBalanceDto sse_decode_box_autoadd_deep_seek_balance_dto(
     SseDeserializer deserializer,
   ) {
@@ -2746,7 +2766,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           error: var_error,
         );
       case 1:
-        var var_snapshot = sse_decode_bridge_todo_list_snapshot_dto(
+        var var_snapshot = sse_decode_box_autoadd_bridge_todo_list_snapshot_dto(
           deserializer,
         );
         return BridgeAgentTimelinePayloadDto_TodoListUpdated(
@@ -2755,37 +2775,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       default:
         throw UnimplementedError('');
     }
-  }
-
-  @protected
-  BridgeTodoListSnapshotDto sse_decode_bridge_todo_list_snapshot_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_callId = sse_decode_String(deserializer);
-    var var_agentId = sse_decode_opt_String(deserializer);
-    var var_path = sse_decode_opt_String(deserializer);
-    var var_parentPath = sse_decode_opt_String(deserializer);
-    var var_explanation = sse_decode_opt_String(deserializer);
-    var var_items = sse_decode_list_bridge_todo_item_dto(deserializer);
-    return BridgeTodoListSnapshotDto(
-      callId: var_callId,
-      agentId: var_agentId,
-      path: var_path,
-      parentPath: var_parentPath,
-      explanation: var_explanation,
-      items: var_items,
-    );
-  }
-
-  @protected
-  BridgeTodoItemDto sse_decode_bridge_todo_item_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_step = sse_decode_String(deserializer);
-    var var_status = sse_decode_String(deserializer);
-    return BridgeTodoItemDto(step: var_step, status: var_status);
   }
 
   @protected
@@ -3000,7 +2989,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_command = sse_decode_opt_String(deserializer);
     var var_url = sse_decode_opt_String(deserializer);
     var var_endpoint = sse_decode_String(deserializer);
+    var var_sourceKind = sse_decode_String(deserializer);
     var var_statusKind = sse_decode_String(deserializer);
+    var var_mutationPolicy = sse_decode_String(deserializer);
     var var_availabilityKind = sse_decode_String(deserializer);
     return BridgeMcpServerDto(
       id: var_id,
@@ -3009,7 +3000,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       command: var_command,
       url: var_url,
       endpoint: var_endpoint,
+      sourceKind: var_sourceKind,
       statusKind: var_statusKind,
+      mutationPolicy: var_mutationPolicy,
       availabilityKind: var_availabilityKind,
     );
   }
@@ -3419,6 +3412,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeTodoItemDto sse_decode_bridge_todo_item_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_step = sse_decode_String(deserializer);
+    var var_status = sse_decode_String(deserializer);
+    return BridgeTodoItemDto(step: var_step, status: var_status);
+  }
+
+  @protected
+  BridgeTodoListSnapshotDto sse_decode_bridge_todo_list_snapshot_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_callId = sse_decode_String(deserializer);
+    var var_agentId = sse_decode_opt_String(deserializer);
+    var var_path = sse_decode_opt_String(deserializer);
+    var var_parentPath = sse_decode_opt_String(deserializer);
+    var var_explanation = sse_decode_opt_String(deserializer);
+    var var_items = sse_decode_list_bridge_todo_item_dto(deserializer);
+    return BridgeTodoListSnapshotDto(
+      callId: var_callId,
+      agentId: var_agentId,
+      path: var_path,
+      parentPath: var_parentPath,
+      explanation: var_explanation,
+      items: var_items,
+    );
+  }
+
+  @protected
   BridgeUserQuestionDto sse_decode_bridge_user_question_dto(
     SseDeserializer deserializer,
   ) {
@@ -3567,20 +3591,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  List<BridgeTodoItemDto> sse_decode_list_bridge_todo_item_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var len_ = sse_decode_i_32(deserializer);
-    var ans_ = <BridgeTodoItemDto>[];
-    for (var idx_ = 0; idx_ < len_; ++idx_) {
-      ans_.add(sse_decode_bridge_todo_item_dto(deserializer));
-    }
-    return ans_;
-  }
-
-  @protected
   List<BridgeEventEnvelope> sse_decode_list_bridge_event_envelope(
     SseDeserializer deserializer,
   ) {
@@ -3660,6 +3670,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <BridgeStudioPartProjectionDto>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_bridge_studio_part_projection_dto(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<BridgeTodoItemDto> sse_decode_list_bridge_todo_item_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeTodoItemDto>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_todo_item_dto(deserializer));
     }
     return ans_;
   }
@@ -4333,6 +4357,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_bridge_todo_list_snapshot_dto(
+    BridgeTodoListSnapshotDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_todo_list_snapshot_dto(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_deep_seek_balance_dto(
     DeepSeekBalanceDto self,
     SseSerializer serializer,
@@ -4476,32 +4509,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         snapshot: final snapshot,
       ):
         sse_encode_i_32(1, serializer);
-        sse_encode_bridge_todo_list_snapshot_dto(snapshot, serializer);
+        sse_encode_box_autoadd_bridge_todo_list_snapshot_dto(
+          snapshot,
+          serializer,
+        );
     }
-  }
-
-  @protected
-  void sse_encode_bridge_todo_list_snapshot_dto(
-    BridgeTodoListSnapshotDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.callId, serializer);
-    sse_encode_opt_String(self.agentId, serializer);
-    sse_encode_opt_String(self.path, serializer);
-    sse_encode_opt_String(self.parentPath, serializer);
-    sse_encode_opt_String(self.explanation, serializer);
-    sse_encode_list_bridge_todo_item_dto(self.items, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_todo_item_dto(
-    BridgeTodoItemDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.step, serializer);
-    sse_encode_String(self.status, serializer);
   }
 
   @protected
@@ -4675,7 +4687,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.command, serializer);
     sse_encode_opt_String(self.url, serializer);
     sse_encode_String(self.endpoint, serializer);
+    sse_encode_String(self.sourceKind, serializer);
     sse_encode_String(self.statusKind, serializer);
+    sse_encode_String(self.mutationPolicy, serializer);
     sse_encode_String(self.availabilityKind, serializer);
   }
 
@@ -4965,6 +4979,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_todo_item_dto(
+    BridgeTodoItemDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.step, serializer);
+    sse_encode_String(self.status, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_todo_list_snapshot_dto(
+    BridgeTodoListSnapshotDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.callId, serializer);
+    sse_encode_opt_String(self.agentId, serializer);
+    sse_encode_opt_String(self.path, serializer);
+    sse_encode_opt_String(self.parentPath, serializer);
+    sse_encode_opt_String(self.explanation, serializer);
+    sse_encode_list_bridge_todo_item_dto(self.items, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_user_question_dto(
     BridgeUserQuestionDto self,
     SseSerializer serializer,
@@ -5086,18 +5124,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_list_bridge_todo_item_dto(
-    List<BridgeTodoItemDto> self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.length, serializer);
-    for (var item in self) {
-      sse_encode_bridge_todo_item_dto(item, serializer);
-    }
-  }
-
-  @protected
   void sse_encode_list_bridge_event_envelope(
     List<BridgeEventEnvelope> self,
     SseSerializer serializer,
@@ -5166,6 +5192,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_bridge_studio_part_projection_dto(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_bridge_todo_item_dto(
+    List<BridgeTodoItemDto> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_todo_item_dto(item, serializer);
     }
   }
 

@@ -264,9 +264,11 @@ GeneralSettingsView _generalFromJson(Object? value) {
 
 List<McpServerSettingsView> _mcpServersFromConfig(Map<String, Object?> config) {
   final servers = <McpServerSettingsView>[];
+  final hasZhipuMcpCredential = _hasZhipuMcpCredential(config);
   void addServers(Object? value, {required bool builtin}) {
     for (final entry in _map(value).entries) {
       final server = _map(entry.value);
+      final builtinEndpoint = builtin ? _builtinMcpEndpoint(entry.key) : '';
       final transport = _string(
         server['transport'],
         fallback: _string(server['type']),
@@ -282,11 +284,17 @@ List<McpServerSettingsView> _mcpServersFromConfig(Map<String, Object?> config) {
         McpServerSettingsView(
           id: entry.key,
           transport: transport.isEmpty
-              ? (builtin ? 'builtin' : 'stdio')
+              ? (builtin ? _builtinMcpTransport(entry.key) : 'stdio')
               : transport,
-          endpoint: url.isEmpty ? command : url,
+          endpoint: builtinEndpoint.isNotEmpty
+              ? builtinEndpoint
+              : (url.isEmpty ? command : url),
           enabled: enabled,
-          status: enabled ? 'enabled' : 'disabled',
+          status: builtin
+              ? _builtinMcpStatus(enabled, hasZhipuMcpCredential)
+              : (enabled ? 'enabled' : 'disabled'),
+          sourceKind: builtin ? 'builtIn' : 'user',
+          mutationPolicy: builtin ? 'lockedIdentity' : 'userEditable',
         ),
       );
     }
@@ -301,4 +309,50 @@ List<McpServerSettingsView> _mcpServersFromConfig(Map<String, Object?> config) {
     builtin: true,
   );
   return servers;
+}
+
+String _builtinMcpEndpoint(String serverId) {
+  return switch (serverId) {
+    'zhipu_search' => 'https://open.bigmodel.cn/api/mcp/web_search_prime/mcp',
+    'zhipu_reader' => 'https://open.bigmodel.cn/api/mcp/web_reader/mcp',
+    'zhipu_zread' => 'https://open.bigmodel.cn/api/mcp/zread/mcp',
+    'zhipu_vision' => 'npx',
+    _ => '',
+  };
+}
+
+String _builtinMcpTransport(String serverId) {
+  return serverId == 'zhipu_vision' ? 'stdio' : 'streamableHttp';
+}
+
+String _builtinMcpStatus(bool enabled, bool hasCredential) {
+  if (!enabled) {
+    return 'disabled';
+  }
+  return hasCredential ? 'enabled' : 'missingCredential';
+}
+
+bool _hasZhipuMcpCredential(Map<String, Object?> config) {
+  final providers = _map(config['providers']);
+  bool hasToken(MapEntry<String, Object?> entry) {
+    final provider = _map(entry.value);
+    return _string(
+      _firstValue(provider, const ['bearerToken', 'bearer_token']),
+    ).trim().isNotEmpty;
+  }
+
+  if (providers.entries.any(
+    (entry) =>
+        hasToken(entry) &&
+        _providerTemplateKind(entry.key, _map(entry.value)) ==
+            'zhipu-coding-plan',
+  )) {
+    return true;
+  }
+  return providers.entries.any(
+    (entry) =>
+        hasToken(entry) &&
+        _providerKindName(_string(_map(entry.value)['provider_kind'])) ==
+            'zhipu',
+  );
 }

@@ -8,7 +8,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'agent.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class BridgeAgentSnapshotDto {
   final String id;
@@ -108,6 +108,45 @@ class BridgeAgentTimelineEventDto {
           payload == other.payload;
 }
 
+@freezed
+sealed class BridgeAgentTimelinePayloadDto
+    with _$BridgeAgentTimelinePayloadDto {
+  const BridgeAgentTimelinePayloadDto._();
+
+  const factory BridgeAgentTimelinePayloadDto.subAgentActivity({
+    required String callId,
+    String? agentId,
+    String? path,
+    String? parentPath,
+    required String kind,
+    String? status,
+    String? message,
+    required bool timedOut,
+    String? error,
+  }) = BridgeAgentTimelinePayloadDto_SubAgentActivity;
+  const factory BridgeAgentTimelinePayloadDto.todoListUpdated({
+    required BridgeTodoListSnapshotDto snapshot,
+  }) = BridgeAgentTimelinePayloadDto_TodoListUpdated;
+}
+
+class BridgeTodoItemDto {
+  final String step;
+  final String status;
+
+  const BridgeTodoItemDto({required this.step, required this.status});
+
+  @override
+  int get hashCode => step.hashCode ^ status.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTodoItemDto &&
+          runtimeType == other.runtimeType &&
+          step == other.step &&
+          status == other.status;
+}
+
 class BridgeTodoListSnapshotDto {
   final String callId;
   final String? agentId;
@@ -145,44 +184,4 @@ class BridgeTodoListSnapshotDto {
           parentPath == other.parentPath &&
           explanation == other.explanation &&
           items == other.items;
-}
-
-class BridgeTodoItemDto {
-  final String step;
-  final String status;
-
-  const BridgeTodoItemDto({required this.step, required this.status});
-
-  @override
-  int get hashCode => step.hashCode ^ status.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeTodoItemDto &&
-          runtimeType == other.runtimeType &&
-          step == other.step &&
-          status == other.status;
-}
-
-@freezed
-sealed class BridgeAgentTimelinePayloadDto
-    with _$BridgeAgentTimelinePayloadDto {
-  const BridgeAgentTimelinePayloadDto._();
-
-  const factory BridgeAgentTimelinePayloadDto.subAgentActivity({
-    required String callId,
-    String? agentId,
-    String? path,
-    String? parentPath,
-    required String kind,
-    String? status,
-    String? message,
-    required bool timedOut,
-    String? error,
-  }) = BridgeAgentTimelinePayloadDto_SubAgentActivity;
-
-  const factory BridgeAgentTimelinePayloadDto.todoListUpdated({
-    required BridgeTodoListSnapshotDto snapshot,
-  }) = BridgeAgentTimelinePayloadDto_TodoListUpdated;
 }
