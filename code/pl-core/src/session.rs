@@ -179,6 +179,65 @@ impl CoreSession {
     }
 }
 
+/// 构造包含 assistant tool_calls metadata 的历史消息。
+///
+/// 宿主测试或迁移工具需要手工构造历史时，应复用该 helper，而不是直接拼
+/// `tool_calls` metadata JSON。生产 turn loop 仍应优先通过 `CoreSession`
+/// 记录模型返回的真实 `ToolCall`。
+pub fn tool_call_history_message(
+    call_id: String,
+    tool_name: String,
+    raw_arguments: String,
+) -> Message {
+    let arguments =
+        serde_json::from_str(&raw_arguments).unwrap_or(serde_json::Value::String(raw_arguments));
+    let tool_calls = serde_json::json!([{
+        "id": call_id,
+        "name": tool_name,
+        "payload": {
+            "kind": "function",
+            "arguments": arguments
+        },
+        "call_id": call_id
+    }])
+    .to_string();
+    let mut metadata = HashMap::new();
+    ToolCallHistoryMetadata::new(tool_calls).insert_into(&mut metadata);
+    Message {
+        role: MessageRole::Assistant,
+        content: MessageContent::Text(String::new()),
+        reasoning_content: None,
+        metadata,
+    }
+}
+
+/// 构造包含 tool result metadata 的历史消息。
+///
+/// 该函数集中维护模型历史里工具结果的 metadata 形状，避免宿主产品在测试或
+/// 历史修复场景复制 pl-core 的协议细节。
+pub fn tool_result_history_message(
+    call_id: String,
+    tool_name: String,
+    raw_arguments: String,
+    output: String,
+) -> Message {
+    let mut metadata = HashMap::new();
+    ToolResultMetadata::new(
+        call_id,
+        None,
+        tool_name,
+        ToolCallKind::Function,
+        raw_arguments,
+    )
+    .insert_into(&mut metadata);
+    Message {
+        role: MessageRole::Tool,
+        content: MessageContent::Text(output),
+        reasoning_content: None,
+        metadata,
+    }
+}
+
 /// 修复不完整的工具调用历史。
 ///
 /// 宿主恢复中断 turn 时，历史里可能保留 assistant tool call，但缺少对应 tool
@@ -424,6 +483,45 @@ mod tests {
                 .get("tool_call_arguments")
                 .unwrap(),
             r#"{"command":"echo hi"}"#
+        );
+    }
+
+    #[test]
+    fn tool_call_history_message_parses_arguments_into_metadata() {
+        let message = tool_call_history_message(
+            "call-1".to_string(),
+            "read_file".to_string(),
+            r#"{"path":"README.md"}"#.to_string(),
+        );
+
+        assert_eq!(message.role, MessageRole::Assistant);
+        let metadata =
+            ToolCallHistoryMetadata::from_metadata(&message.metadata).expect("tool calls");
+        let value: serde_json::Value =
+            serde_json::from_str(&metadata.tool_calls_json).expect("tool call json");
+        assert_eq!(value[0]["id"], "call-1");
+        assert_eq!(value[0]["name"], "read_file");
+        assert_eq!(value[0]["payload"]["arguments"]["path"], "README.md");
+    }
+
+    #[test]
+    fn tool_result_history_message_stores_result_metadata() {
+        let message = tool_result_history_message(
+            "call-1".to_string(),
+            "read_file".to_string(),
+            r#"{"path":"README.md"}"#.to_string(),
+            "ok".to_string(),
+        );
+
+        assert_eq!(message.role, MessageRole::Tool);
+        assert_eq!(message.content, MessageContent::Text("ok".to_string()));
+        let metadata =
+            ToolResultMetadata::from_metadata(&message.metadata).expect("tool result metadata");
+        assert_eq!(metadata.tool_call_id, "call-1");
+        assert_eq!(metadata.tool_name, "read_file");
+        assert_eq!(
+            metadata.tool_call_arguments.as_deref(),
+            Some(r#"{"path":"README.md"}"#)
         );
     }
 
