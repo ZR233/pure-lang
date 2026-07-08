@@ -98,7 +98,7 @@ impl AgentSupervisor {
             let mut state = self.state.lock().await;
             if state.activity_seq > state.observed_activity_seq {
                 state.observed_activity_seq = state.activity_seq;
-                return AgentWaitOutcome { timed_out: false };
+                return AgentWaitOutcome::new(false);
             }
             state.observed_activity_seq
         };
@@ -111,11 +111,11 @@ impl AgentSupervisor {
                 let mut state = self.state.lock().await;
                 if state.activity_seq > start_seq {
                     state.observed_activity_seq = state.activity_seq;
-                    return AgentWaitOutcome { timed_out: false };
+                    return AgentWaitOutcome::new(false);
                 }
             }
             if tokio::time::timeout_at(deadline, notified).await.is_err() {
-                return AgentWaitOutcome { timed_out: true };
+                return AgentWaitOutcome::new(true);
             }
         }
     }

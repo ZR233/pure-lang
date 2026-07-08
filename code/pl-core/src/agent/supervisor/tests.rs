@@ -135,7 +135,7 @@ fn agent_input_submission_builds_send_input_output() {
 
 #[test]
 fn agent_wait_outcome_builds_wait_agent_output() {
-    let output = AgentWaitOutcome { timed_out: true }
+    let output = AgentWaitOutcome::new(true)
         .into_wait_agent_output("{\"pending\":[\"worker\"]}".to_string());
 
     assert_eq!(
@@ -148,8 +148,27 @@ fn agent_wait_outcome_builds_wait_agent_output() {
 }
 
 #[test]
+fn agent_wait_outcome_hides_shared_fields_behind_constructor() {
+    let source = include_str!("mod.rs");
+    let outcome_fields = source
+        .split("pub struct AgentWaitOutcome")
+        .nth(1)
+        .and_then(|text| text.split("impl AgentWaitOutcome").next())
+        .expect("AgentWaitOutcome definition");
+
+    assert!(
+        source.contains("impl AgentWaitOutcome {\n    /// 使用 timeout 标记创建 wait 输出结果。\n    pub fn new("),
+        "AgentWaitOutcome 应通过构造器承载共享输出字段形状"
+    );
+    assert!(
+        !outcome_fields.contains("pub timed_out:"),
+        "AgentWaitOutcome 字段不应公开给宿主 adapter 手写"
+    );
+}
+
+#[test]
 fn agent_wait_outcome_builds_group_wait_agent_output() {
-    let output = AgentWaitOutcome { timed_out: true }.into_group_wait_agent_output(
+    let output = AgentWaitOutcome::new(true).into_group_wait_agent_output(
         vec![json!({ "agentId": "done" })],
         vec![json!({ "agentId": "pending" })],
     );

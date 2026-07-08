@@ -269,10 +269,20 @@ pub struct AgentHandle {
 /// Result of waiting for agent activity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentWaitOutcome {
-    pub timed_out: bool,
+    timed_out: bool,
 }
 
 impl AgentWaitOutcome {
+    /// 使用 timeout 标记创建 wait 输出结果。
+    pub fn new(timed_out: bool) -> Self {
+        Self { timed_out }
+    }
+
+    /// wait 是否因超时返回。
+    pub fn timed_out(&self) -> bool {
+        self.timed_out
+    }
+
     /// 将共享 wait 结果投影为模型可见的 `wait_agent` 输出。
     ///
     /// 宿主仍可决定 message 中包含哪些产品诊断信息；`timedOut` 字段和输出形状
