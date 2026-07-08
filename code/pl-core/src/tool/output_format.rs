@@ -158,20 +158,64 @@ pub enum ToolLifecyclePhase {
 /// call id、参数 JSON、预览截断、输出 artifact 和耗时计算。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolLifecycleProjection {
-    pub phase: ToolLifecyclePhase,
-    pub call_id: String,
-    pub tool_name: String,
-    pub arguments: Value,
-    pub arguments_preview: String,
-    pub output: String,
-    pub output_preview: String,
-    pub output_artifacts: Vec<Value>,
-    pub duration_ms: Option<u64>,
-    pub started_at_unix: i64,
-    pub completed_at_unix: Option<i64>,
+    phase: ToolLifecyclePhase,
+    call_id: String,
+    tool_name: String,
+    arguments: Value,
+    arguments_preview: String,
+    output: String,
+    output_preview: String,
+    output_artifacts: Vec<Value>,
+    duration_ms: Option<u64>,
+    started_at_unix: i64,
+    completed_at_unix: Option<i64>,
 }
 
 impl ToolLifecycleProjection {
+    pub fn phase(&self) -> &ToolLifecyclePhase {
+        &self.phase
+    }
+
+    pub fn call_id(&self) -> &str {
+        &self.call_id
+    }
+
+    pub fn tool_name(&self) -> &str {
+        &self.tool_name
+    }
+
+    pub fn arguments(&self) -> &Value {
+        &self.arguments
+    }
+
+    pub fn arguments_preview(&self) -> &str {
+        &self.arguments_preview
+    }
+
+    pub fn output(&self) -> &str {
+        &self.output
+    }
+
+    pub fn output_preview(&self) -> &str {
+        &self.output_preview
+    }
+
+    pub fn output_artifacts(&self) -> &[Value] {
+        &self.output_artifacts
+    }
+
+    pub fn duration_ms(&self) -> Option<u64> {
+        self.duration_ms
+    }
+
+    pub fn started_at_unix(&self) -> i64 {
+        self.started_at_unix
+    }
+
+    pub fn completed_at_unix(&self) -> Option<i64> {
+        self.completed_at_unix
+    }
+
     /// 返回工具完成时间；缺失时回退到开始时间。
     pub fn completed_at_unix_or_started(&self) -> i64 {
         self.completed_at_unix.unwrap_or(self.started_at_unix)
@@ -972,6 +1016,58 @@ mod tests {
                 && !capture_fields.contains("pub stderr:")
                 && !capture_fields.contains("pub call_id:"),
             "宿主不应直接读取 ToolOutputCapture 内部字段"
+        );
+    }
+
+    #[test]
+    fn tool_lifecycle_projection_hides_fields_behind_accessors() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tool/output_format.rs"
+        ))
+        .expect("source");
+        let projection_fields = source
+            .split("pub struct ToolLifecycleProjection {")
+            .nth(1)
+            .expect("lifecycle projection struct")
+            .split("impl ToolLifecycleProjection")
+            .next()
+            .expect("projection fields");
+        let projection_impl = source
+            .split("impl ToolLifecycleProjection")
+            .nth(1)
+            .expect("projection impl");
+        for accessor in [
+            "pub fn phase(",
+            "pub fn call_id(",
+            "pub fn tool_name(",
+            "pub fn arguments(",
+            "pub fn arguments_preview(",
+            "pub fn output(",
+            "pub fn output_preview(",
+            "pub fn output_artifacts(",
+            "pub fn duration_ms(",
+            "pub fn started_at_unix(",
+            "pub fn completed_at_unix(",
+        ] {
+            assert!(
+                projection_impl.contains(accessor),
+                "工具生命周期投影字段应由 pl-core accessor 暴露 `{accessor}`"
+            );
+        }
+        assert!(
+            !projection_fields.contains("pub phase:")
+                && !projection_fields.contains("pub call_id:")
+                && !projection_fields.contains("pub tool_name:")
+                && !projection_fields.contains("pub arguments:")
+                && !projection_fields.contains("pub arguments_preview:")
+                && !projection_fields.contains("pub output:")
+                && !projection_fields.contains("pub output_preview:")
+                && !projection_fields.contains("pub output_artifacts:")
+                && !projection_fields.contains("pub duration_ms:")
+                && !projection_fields.contains("pub started_at_unix:")
+                && !projection_fields.contains("pub completed_at_unix:"),
+            "宿主不应直接读取 ToolLifecycleProjection 内部字段"
         );
     }
 
