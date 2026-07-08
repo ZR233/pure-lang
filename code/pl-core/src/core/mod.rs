@@ -45,7 +45,8 @@ pub use kernel::{
     NoAgentKernelToolSet,
 };
 pub use model_turn::{
-    CoreModelTurnOptions, CoreModelTurnRequest, stream_session_completion_response,
+    CoreModelTurnClient, CoreModelTurnOptions, CoreModelTurnRequest,
+    stream_session_completion_response,
 };
 pub use profile::{
     AgentBackendProfile, CoreRuntimeOptions, CoreRuntimeProfile, PureCoreBuilder, ToolProfile,

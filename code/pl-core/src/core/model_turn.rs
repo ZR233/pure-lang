@@ -1,9 +1,13 @@
+use std::collections::HashSet;
+use std::sync::Arc;
+
 use pl_model::{
     CompletionRequest, CompletionResponse, ModelProvider, ReasoningConfig, SharedModelProvider,
     ToolSchema, is_continuation_unsupported_error,
 };
 use pl_protocol::{PureError, Result};
 use pl_trace::AgentEventSender;
+use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use crate::CoreSession;
@@ -22,6 +26,7 @@ pub struct CoreModelTurnRequest {
     max_tokens: Option<u64>,
     reasoning: Option<ReasoningConfig>,
     use_continuation: bool,
+    continuation_cache_key: Option<String>,
 }
 
 impl CoreModelTurnRequest {
@@ -34,6 +39,7 @@ impl CoreModelTurnRequest {
             max_tokens: None,
             reasoning: None,
             use_continuation: false,
+            continuation_cache_key: None,
         }
     }
 
@@ -66,6 +72,11 @@ impl CoreModelTurnRequest {
         self.use_continuation = use_continuation;
         self
     }
+
+    pub fn with_continuation_cache_key(mut self, key: impl Into<String>) -> Self {
+        self.continuation_cache_key = Some(key.into());
+        self
+    }
 }
 
 /// 单次模型 completion 执行选项。
@@ -84,6 +95,51 @@ impl CoreModelTurnOptions {
     pub fn with_event_sender(mut self, event_tx: AgentEventSender) -> Self {
         self.event_tx = Some(event_tx);
         self
+    }
+}
+
+/// 带跨会话 continuation fallback 缓存的模型回合客户端。
+///
+/// `stream_session_completion_response` 负责单次请求内的 fallback；
+/// 该客户端额外记住已知不支持 `previous_response_id` 的 provider/model key，
+/// 让后续会话直接走完整历史，避免宿主重复实现 provider 级缓存。
+#[derive(Debug, Clone, Default)]
+pub struct CoreModelTurnClient {
+    unsupported_continuations: Arc<Mutex<HashSet<String>>>,
+}
+
+impl CoreModelTurnClient {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub async fn stream_session_completion_response(
+        &self,
+        provider: SharedModelProvider,
+        session: &mut CoreSession,
+        request: CoreModelTurnRequest,
+        options: CoreModelTurnOptions,
+    ) -> Result<CompletionResponse> {
+        if let Some(key) = request.continuation_cache_key.as_deref()
+            && self.continuation_is_unsupported(key).await
+        {
+            session.mark_continuation_unsupported();
+        }
+        let cache_key = request.continuation_cache_key.clone();
+        let used_continuation = request.use_continuation && !session.continuation_disabled();
+        let response =
+            stream_session_completion_response(provider, session, request, options).await?;
+        if used_continuation
+            && session.continuation_disabled()
+            && let Some(key) = cache_key
+        {
+            self.unsupported_continuations.lock().await.insert(key);
+        }
+        Ok(response)
+    }
+
+    async fn continuation_is_unsupported(&self, key: &str) -> bool {
+        self.unsupported_continuations.lock().await.contains(key)
     }
 }
 
