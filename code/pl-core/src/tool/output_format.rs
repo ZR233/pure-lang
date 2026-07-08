@@ -257,7 +257,7 @@ pub fn tool_history_projection(
             {
                 arguments = Some(arguments_value(raw_arguments));
             }
-            output = Some(message_content_text(&message.content));
+            output = Some(crate::message_content_text(&message.content));
         }
     }
 
@@ -387,24 +387,6 @@ fn tool_call_arguments(tool_call: &Value) -> Option<Value> {
             .map(|input| json!({ "input": input })),
         Some(_other) => payload.get("arguments").cloned(),
         None => payload.get("arguments").cloned(),
-    }
-}
-
-fn message_content_text(content: &pl_protocol::MessageContent) -> String {
-    match content {
-        pl_protocol::MessageContent::Text(text) => text.clone(),
-        pl_protocol::MessageContent::MultiPart(parts) => parts
-            .iter()
-            .filter_map(|part| match part {
-                pl_protocol::ContentPart::Text { text } => Some(text.as_str()),
-                pl_protocol::ContentPart::Image {
-                    source: _source,
-                    media_type: _media_type,
-                    filename: _filename,
-                } => None,
-            })
-            .collect::<Vec<_>>()
-            .join(""),
     }
 }
 

@@ -9,6 +9,7 @@ mod instruction;
 #[cfg(feature = "studio")]
 pub mod interfaces;
 mod mcp;
+mod message;
 mod permission;
 mod process;
 mod provider_error;
@@ -68,6 +69,7 @@ pub use interfaces::{
     ConfigRepository, EventSink, RuntimeEventEmitter, SessionRepository, TurnSnapshotRepository,
 };
 pub use mcp::{McpAvailabilityKind, McpAvailabilitySnapshot, McpRuntimeRegistry};
+pub use message::{append_message_fragment_text, message_content_text};
 pub use pl_lsp::{
     LspActivityKind, LspAvailabilityKind, LspDiagnostic, LspPosition, LspQuery, LspQueryOperation,
     LspQueryResult, LspRange, LspRuntimeRegistry, LspServerSnapshot,
