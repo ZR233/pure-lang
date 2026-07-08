@@ -296,6 +296,42 @@ fn workspace_file_schemas_use_codex_camel_case_fields() {
 }
 
 #[test]
+fn workspace_file_tool_kind_rejects_dot_aliases() {
+    assert_eq!(
+        crate::tool::WorkspaceFileToolKind::from_name("read_file"),
+        Some(crate::tool::WorkspaceFileToolKind::ReadFile)
+    );
+    assert_eq!(
+        crate::tool::WorkspaceFileToolKind::from_name("list_files"),
+        Some(crate::tool::WorkspaceFileToolKind::ListFiles)
+    );
+    assert_eq!(
+        crate::tool::WorkspaceFileToolKind::from_name("search_files"),
+        Some(crate::tool::WorkspaceFileToolKind::SearchFiles)
+    );
+    assert_eq!(
+        crate::tool::WorkspaceFileToolKind::from_name("apply_patch"),
+        Some(crate::tool::WorkspaceFileToolKind::ApplyPatch)
+    );
+    assert_eq!(
+        crate::tool::WorkspaceFileToolKind::from_name("read.file"),
+        None
+    );
+    assert_eq!(
+        crate::tool::WorkspaceFileToolKind::from_name("list.files"),
+        None
+    );
+    assert_eq!(
+        crate::tool::WorkspaceFileToolKind::from_name("search.files"),
+        None
+    );
+    assert_eq!(
+        crate::tool::WorkspaceFileToolKind::from_name("apply.patch"),
+        None
+    );
+}
+
+#[test]
 fn agent_control_schemas_use_codex_camel_case_fields() {
     let spawn_schema = crate::tool::AgentControlToolKind::SpawnAgent.input_schema();
     assert!(spawn_schema.pointer("/properties/taskName").is_some());
