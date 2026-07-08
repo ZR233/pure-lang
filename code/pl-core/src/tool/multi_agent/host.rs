@@ -3,13 +3,14 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use pl_protocol::{AgentStatus, PureError, Result};
+use pl_protocol::{AgentStatus, Message, PureError, Result};
 use serde::{Deserialize, Serialize};
 
 use super::super::{
     BoxFuture, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeLockPolicy,
 };
 use super::schema::AgentControlToolKind;
+use super::{ForkTurns, fork_session};
 
 /// 宿主产品提供的 agent-control 执行后端。
 ///
@@ -59,6 +60,8 @@ pub struct AgentControlSpawnRequest {
     pub fork_turns: Option<String>,
     #[serde(default)]
     pub skill_mentions: Vec<String>,
+    #[serde(skip)]
+    pub forked_messages: Option<Vec<Message>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -193,15 +196,23 @@ where
     fn execute<'a>(
         &'a self,
         input: ToolInput,
-        _context: ToolContext,
+        context: ToolContext,
     ) -> BoxFuture<'a, Result<ToolOutput>> {
         Box::pin(async move {
             match self.kind {
-                AgentControlToolKind::SpawnAgent => json_output(
-                    self.backend
-                        .spawn_agent(parse_input(self.name(), input)?)
-                        .await?,
-                ),
+                AgentControlToolKind::SpawnAgent => {
+                    let mut request: AgentControlSpawnRequest = parse_input(self.name(), input)?;
+                    let fork_turns = ForkTurns::parse(request.fork_turns.as_deref())?;
+                    request.forked_messages = match fork_turns {
+                        ForkTurns::None => None,
+                        ForkTurns::All | ForkTurns::Last(_) => Some(
+                            fork_session(&context.parent_session, fork_turns)
+                                .messages()
+                                .to_vec(),
+                        ),
+                    };
+                    json_output(self.backend.spawn_agent(request).await?)
+                }
                 AgentControlToolKind::SendInput => json_output(
                     self.backend
                         .send_input(parse_input(self.name(), input)?)

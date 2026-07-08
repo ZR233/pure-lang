@@ -1,6 +1,6 @@
 use pl_protocol::{AgentStatus, InteractionResolution};
 use pretty_assertions::assert_eq;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use super::ForkTurns;
 use super::ResumeAgentTool;
@@ -368,6 +368,63 @@ impl crate::tool::AgentControlBackend for FakeHostAgentControlBackend {
     }
 }
 
+#[derive(Debug, Clone)]
+struct RecordingHostAgentControlBackend {
+    forked_messages: Arc<Mutex<Option<Vec<pl_protocol::Message>>>>,
+}
+
+impl crate::tool::AgentControlBackend for RecordingHostAgentControlBackend {
+    async fn spawn_agent(
+        &self,
+        request: crate::tool::AgentControlSpawnRequest,
+    ) -> crate::Result<crate::tool::AgentControlSpawnOutput> {
+        *self.forked_messages.lock().expect("record forked messages") =
+            request.forked_messages.clone();
+        Ok(crate::tool::AgentControlSpawnOutput {
+            agent_id: "agent-1".to_string(),
+            task_name: request.task_name,
+            path: "/root/agent-1".to_string(),
+            status: AgentStatus::Queued,
+            turn_id: None,
+        })
+    }
+
+    async fn send_input(
+        &self,
+        _request: crate::tool::AgentControlSendInputRequest,
+    ) -> crate::Result<crate::tool::AgentControlSendInputOutput> {
+        unreachable!("send_input is not used by this test")
+    }
+
+    async fn wait_agent(
+        &self,
+        _request: crate::tool::AgentControlWaitRequest,
+    ) -> crate::Result<crate::tool::AgentControlWaitOutput> {
+        unreachable!("wait_agent is not used by this test")
+    }
+
+    async fn list_agents(
+        &self,
+        _request: crate::tool::AgentControlListRequest,
+    ) -> crate::Result<crate::tool::AgentControlListOutput> {
+        unreachable!("list_agents is not used by this test")
+    }
+
+    async fn close_agent(
+        &self,
+        _request: crate::tool::AgentControlTargetRequest,
+    ) -> crate::Result<crate::tool::AgentControlMessageOutput> {
+        unreachable!("close_agent is not used by this test")
+    }
+
+    async fn resume_agent(
+        &self,
+        _request: crate::tool::AgentControlTargetRequest,
+    ) -> crate::Result<crate::tool::AgentControlMessageOutput> {
+        unreachable!("resume_agent is not used by this test")
+    }
+}
+
 #[tokio::test]
 async fn host_agent_control_tool_uses_shared_schema_parse_output_and_lock_policy() {
     let spawn_tool = crate::tool::AgentControlTool::new(
@@ -466,6 +523,118 @@ async fn host_agent_control_tool_uses_shared_schema_parse_output_and_lock_policy
             "queued": false,
             "turnId": "turn-2"
         })
+    );
+}
+
+#[tokio::test]
+async fn host_spawn_agent_receives_pl_core_filtered_fork_history() {
+    use std::collections::HashMap;
+
+    use pl_protocol::{Message, MessageContent, MessageRole};
+
+    let mut tool_metadata = HashMap::new();
+    tool_metadata.insert("tool_calls".to_string(), "[]".to_string());
+    let parent_session = crate::CoreSession::from_messages(vec![
+        Message {
+            role: MessageRole::User,
+            content: MessageContent::Text("first".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        },
+        Message {
+            role: MessageRole::Assistant,
+            content: MessageContent::Text("first answer".to_string()),
+            reasoning_content: Some("hidden reasoning".to_string()),
+            metadata: HashMap::new(),
+        },
+        Message {
+            role: MessageRole::Assistant,
+            content: MessageContent::Text("calling tool".to_string()),
+            reasoning_content: None,
+            metadata: tool_metadata,
+        },
+        Message {
+            role: MessageRole::Tool,
+            content: MessageContent::Text("tool output".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        },
+        Message {
+            role: MessageRole::User,
+            content: MessageContent::Text("second".to_string()),
+            reasoning_content: None,
+            metadata: HashMap::new(),
+        },
+        Message {
+            role: MessageRole::Assistant,
+            content: MessageContent::Text("second answer".to_string()),
+            reasoning_content: Some("more hidden reasoning".to_string()),
+            metadata: HashMap::new(),
+        },
+    ]);
+    let recorded = Arc::new(Mutex::new(None));
+    let spawn_tool = crate::tool::AgentControlTool::new(
+        crate::tool::AgentControlToolKind::SpawnAgent,
+        Arc::new(RecordingHostAgentControlBackend {
+            forked_messages: Arc::clone(&recorded),
+        }),
+    );
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let context = ToolContext {
+        event_tx,
+        options: crate::TurnOptions::default(),
+        workspace_access: WorkspaceAccess::WorkspaceOnly,
+        mode: CompileMode::Auto,
+        workspace_root: std::env::temp_dir(),
+        workspace_instructions: None,
+        instruction_snapshot: None,
+        provider_call_id: None,
+        active_subagent: None,
+        agent_supervisor: crate::AgentSupervisor::default(),
+        agent_tool_registrar: None,
+        lsp_runtime: None,
+        parent_session: Arc::new(parent_session),
+    };
+
+    spawn_tool
+        .execute(
+            crate::tool::ToolInput {
+                arguments: serde_json::json!({
+                    "taskName": "inspect_runtime",
+                    "message": "inspect",
+                    "forkTurns": "1"
+                }),
+                session_id: "session-1".to_string(),
+                tool_id: "call-1".to_string(),
+                revision_base: 0,
+            },
+            context,
+        )
+        .await
+        .unwrap();
+
+    let forked_messages = recorded
+        .lock()
+        .expect("recorded forked messages")
+        .clone()
+        .expect("forked messages");
+
+    assert_eq!(
+        forked_messages,
+        vec![
+            Message {
+                role: MessageRole::User,
+                content: MessageContent::Text("second".to_string()),
+                reasoning_content: None,
+                metadata: HashMap::new(),
+            },
+            Message {
+                role: MessageRole::Assistant,
+                content: MessageContent::Text("second answer".to_string()),
+                reasoning_content: None,
+                metadata: HashMap::new(),
+            },
+        ]
     );
 }
 
