@@ -39,6 +39,14 @@ impl AgentKernel {
         &mut self.core
     }
 
+    pub fn tool(&self, name: &str) -> Option<&dyn Tool> {
+        self.core.tools.get(name)
+    }
+
+    pub fn agent_tool_registrar(&self) -> Option<Arc<dyn crate::AgentToolRegistrar>> {
+        self.core.agent_tool_registrar.clone()
+    }
+
     pub fn tool_names(&self) -> Vec<String> {
         self.core
             .tools

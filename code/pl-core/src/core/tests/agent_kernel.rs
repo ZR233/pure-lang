@@ -69,9 +69,7 @@ async fn agent_kernel_registers_dynamic_tools() {
 
     assert_eq!(kernel.tool_names(), vec!["dynamic_echo".to_string()]);
     let registered = kernel
-        .core()
-        .tools
-        .get("dynamic_echo")
+        .tool("dynamic_echo")
         .expect("dynamic tool registered");
     assert_eq!(
         registered.runtime_lock_policy(),
@@ -111,9 +109,7 @@ async fn agent_kernel_registers_and_routes_product_tools_as_registered_tools() {
     assert_eq!(kernel.tool_names(), vec!["product_echo".to_string()]);
 
     let tool = kernel
-        .core()
-        .tools
-        .get("product_echo")
+        .tool("product_echo")
         .expect("product tool registered");
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
     let output = tool
@@ -183,11 +179,7 @@ async fn agent_kernel_registrar_rebuilds_product_tools_for_child_core() {
     .with_registered_tool(tool)
     .build()
     .await;
-    let registrar = kernel
-        .core()
-        .agent_tool_registrar
-        .as_ref()
-        .expect("agent tool registrar");
+    let registrar = kernel.agent_tool_registrar().expect("agent tool registrar");
     let mut child_core =
         PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
             .unwrap()
