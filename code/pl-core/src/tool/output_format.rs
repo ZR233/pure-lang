@@ -6,6 +6,77 @@ use serde_json::{Value, json};
 const TOKEN_ESTIMATE_BYTES: usize = 4;
 
 pub const DEFAULT_MODEL_TOOL_OUTPUT_TOKENS: usize = 10_000;
+pub const SECRET_REDACTION_REPLACEMENT: &str = "<redacted>";
+
+/// 对产品层注入的明确 secret 做稳定遮蔽。
+///
+/// pl-core 的 trace preview 会根据字段名做启发式遮蔽；该类型用于 Git token、
+/// MCP token 等产品层已知 secret。构造时会过滤空 secret，并按长度从长到短替换，
+/// 避免重叠 token 被短前缀提前部分遮蔽。
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct SecretRedaction {
+    secrets: Vec<String>,
+}
+
+impl std::fmt::Debug for SecretRedaction {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SecretRedaction")
+            .field("secret_count", &self.secrets.len())
+            .finish()
+    }
+}
+
+impl SecretRedaction {
+    pub fn new<S>(secrets: impl IntoIterator<Item = S>) -> Self
+    where
+        S: AsRef<str>,
+    {
+        let mut collected = Vec::new();
+        for secret in secrets {
+            let secret = secret.as_ref();
+            if secret.is_empty() || collected.iter().any(|existing: &String| existing == secret) {
+                continue;
+            }
+            collected.push(secret.to_string());
+        }
+        collected.sort_by(|left, right| right.len().cmp(&left.len()).then_with(|| left.cmp(right)));
+        Self { secrets: collected }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.secrets.is_empty()
+    }
+
+    pub fn redact_str(&self, value: &str) -> String {
+        if self.secrets.is_empty() {
+            return value.to_string();
+        }
+        let mut redacted = value.to_string();
+        for secret in &self.secrets {
+            redacted = redacted.replace(secret, SECRET_REDACTION_REPLACEMENT);
+        }
+        redacted
+    }
+
+    pub fn redact_json_value(&self, value: Value) -> Value {
+        match value {
+            Value::Object(map) => Value::Object(
+                map.into_iter()
+                    .map(|(key, value)| (self.redact_str(&key), self.redact_json_value(value)))
+                    .collect(),
+            ),
+            Value::Array(items) => Value::Array(
+                items
+                    .into_iter()
+                    .map(|value| self.redact_json_value(value))
+                    .collect(),
+            ),
+            Value::String(value) => Value::String(self.redact_str(&value)),
+            Value::Null | Value::Bool(_) | Value::Number(_) => value,
+        }
+    }
+}
 
 pub fn model_visible_tool_output(output: &str) -> String {
     model_visible_tool_output_with_tokens(output, DEFAULT_MODEL_TOOL_OUTPUT_TOKENS)

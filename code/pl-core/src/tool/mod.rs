@@ -72,13 +72,13 @@ pub use multi_agent::{
     TOOL_RESUME_AGENT, TOOL_SEND_INPUT, TOOL_SPAWN_AGENT, TOOL_WAIT_AGENT, WaitAgentTool,
 };
 pub use output_format::{
-    DEFAULT_MODEL_TOOL_OUTPUT_TOKENS, ToolHistoryProjection, ToolLifecyclePhase,
-    ToolLifecycleProjection, ToolOutputArtifactDescriptor, ToolOutputArtifactPathRequest,
-    ToolOutputCapture, ToolOutputCaptureRequest, ToolOutputStream, ToolOutputStreamCapture,
-    ToolOutputStreamSizes, model_visible_tool_output, model_visible_tool_output_with_tokens,
-    redacted_trace_preview_value, tool_history_projection, tool_lifecycle_projection,
-    tool_lifecycle_projections, tool_output_artifact_file_path, trace_preview_output,
-    trace_preview_value,
+    DEFAULT_MODEL_TOOL_OUTPUT_TOKENS, SECRET_REDACTION_REPLACEMENT, SecretRedaction,
+    ToolHistoryProjection, ToolLifecyclePhase, ToolLifecycleProjection,
+    ToolOutputArtifactDescriptor, ToolOutputArtifactPathRequest, ToolOutputCapture,
+    ToolOutputCaptureRequest, ToolOutputStream, ToolOutputStreamCapture, ToolOutputStreamSizes,
+    model_visible_tool_output, model_visible_tool_output_with_tokens, redacted_trace_preview_value,
+    tool_history_projection, tool_lifecycle_projection, tool_lifecycle_projections,
+    tool_output_artifact_file_path, trace_preview_output, trace_preview_value,
 };
 pub(crate) use path_policy::{PathAccess, ToolPathPolicy};
 pub use plan::PlanExitTool;
@@ -1136,6 +1136,26 @@ mod tests {
         assert!(!preview.contains("secret-token"));
         assert!(!preview.contains("secret-key"));
         assert!(!preview.contains(&"YWJj".repeat(30)));
+    }
+
+    #[test]
+    fn explicit_secret_redaction_handles_text_and_json() {
+        let redaction = SecretRedaction::new(["secret", "secret-token", ""]);
+
+        assert_eq!(
+            redaction.redact_str("secret-token and secret"),
+            "<redacted> and <redacted>"
+        );
+        assert_eq!(
+            redaction.redact_json_value(serde_json::json!({
+                "secret-token": "visible",
+                "items": ["secret-token", { "value": "secret" }],
+            })),
+            serde_json::json!({
+                "<redacted>": "visible",
+                "items": ["<redacted>", { "value": "<redacted>" }],
+            })
+        );
     }
 
     #[test]
