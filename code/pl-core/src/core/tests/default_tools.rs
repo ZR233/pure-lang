@@ -650,6 +650,23 @@ async fn tool_set_builder_registers_host_mcp_tools() {
             "arguments": { "query": "agent kernel" },
         })
     );
+
+    let kernel = AgentKernel::builder(
+        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+    )
+    .with_profile(CoreAgentProfile::host_provided(std::env::temp_dir()))
+    .with_tool_set(
+        ToolSetBuilder::from_capabilities(crate::config::ToolCapabilityConfig {
+            mcp: true,
+            ..Default::default()
+        })
+        .with_allowed_tools(["mcp__docs__lookup"])
+        .with_mcp_tools(vec![schema], std::sync::Arc::new(FakeMcpToolBackend)),
+    )
+    .build()
+    .await;
+
+    assert!(kernel.tool("mcp__docs__lookup").is_some());
 }
 
 #[tokio::test]
