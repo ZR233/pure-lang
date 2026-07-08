@@ -53,17 +53,16 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 add_subdirectory("runner")
 
 set(PURE_LANG_WORKSPACE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
-set(RUST_BRIDGE_BUILD_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/build_rust_bridge.ps1")
 if("$ENV{PURE_STUDIO_DEMO}" STREQUAL "true")
   message(STATUS "PURE_STUDIO_DEMO=true; skipping Rust bridge DLL build.")
 else()
   add_custom_target(pl_studio_bridge_dll
-    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
-      -File "${RUST_BRIDGE_BUILD_SCRIPT}"
-      -WorkspaceRoot "${PURE_LANG_WORKSPACE_ROOT}"
-      -Configuration "$<CONFIG>"
-      -OutputDir "${CMAKE_BINARY_DIR}/runner/$<CONFIG>"
-      -TargetDir "${CMAKE_BINARY_DIR}/rust-target"
+    COMMAND cargo xtask build-rust-bridge
+      --workspace-root "${PURE_LANG_WORKSPACE_ROOT}"
+      --configuration "$<CONFIG>"
+      --output-dir "${CMAKE_BINARY_DIR}/runner/$<CONFIG>"
+      --target-dir "${CMAKE_BINARY_DIR}/rust-target"
+    WORKING_DIRECTORY "${PURE_LANG_WORKSPACE_ROOT}"
     VERBATIM
   )
   add_dependencies(${BINARY_NAME} pl_studio_bridge_dll)

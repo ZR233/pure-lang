@@ -9,15 +9,15 @@ platforms: [windows, linux, macos]
 
 ## 快速构建
 
-项目根目录的 `build-pure-studio-flutter-release.ps1` 一键执行 release 构建：
+项目根目录的 `cargo xtask build-gui` 一键执行 release 构建：
 
 ```powershell
-.\build-pure-studio-flutter-release.ps1         # 正常 release 构建
-.\build-pure-studio-flutter-release.ps1 -Demo   # Demo 模式（无需 Rust 后端）
-.\build-pure-studio-flutter-release.ps1 -NoClean # 保留已存在的 release 输出目录
+cargo xtask build-gui            # 正常 release 构建
+cargo xtask build-gui --demo     # Demo 模式（无需 Rust 后端）
+cargo xtask build-gui --no-clean # 保留已存在的 release 输出目录
 ```
 
-脚本自动检测当前 OS 并执行对应 `flutter build <platform> --release`，产物收集到 `dist/pure-studio-flutter-release/`。
+`pl-xtask` 自动检测当前 OS，并在 `code/pure-studio-flutter/` 目录下执行对应 `flutter build <platform> --release`，产物收集到 `dist/pure-studio-flutter-release/`。
 
 ### 产物结构（Windows）
 
@@ -41,14 +41,9 @@ dist/pure-studio-flutter-release/
 | macOS | `flutter build macos --release` | `code/pure-studio-flutter/build/macos/Build/Products/Release/` |
 | Linux | `flutter build linux --release` | `code/pure-studio-flutter/build/linux/x64/release/bundle/` |
 
-### Flutter SDK 解析
+### Flutter 命令解析
 
-脚本按以下顺序查找 Flutter SDK：
-1. PATH 上的 `flutter` / `flutter.bat`
-2. `$env:FLUTTER_ROOT/bin/flutter.bat`（Windows）或 `$env:FLUTTER_ROOT/bin/flutter`（Unix）
-3. 常见安装路径：`D:\sdk\flutter\bin\`、`C:\src\flutter\bin\`、`$HOME/flutter/bin/`
-
-优先通过 `$env:FLUTTER_ROOT` 环境变量指定 SDK 位置。
+`pl-xtask` 不查找 SDK 安装目录，直接调用 PATH 中的 `flutter`。Windows 下通过 `cmd /c flutter ...` 运行，以匹配终端对 `flutter.bat` 的解析行为。
 
 ## 常见故障模式
 
@@ -95,7 +90,7 @@ flutter_rust_bridge_codegen generate
 - 后端 bridge 代码尚未完成时预览 UI
 - CI 中分离前后端验证
 
-`run-pure-studio-flutter.ps1` 中的 `-DemoFallback` 参数提供自动回退：优先尝试 native 构建，失败时自动切到 Demo 模式并清理 `build/windows/` 缓存。
+`cargo xtask run-gui --demo-fallback` 提供自动回退：优先尝试 native 运行，失败时自动切到 Demo 模式并清理当前平台的 `build/<platform>/` 缓存。
 
 ## CI 参考
 
@@ -115,9 +110,9 @@ flutter_rust_bridge_codegen generate
 
 ## 开发构建 vs Release 构建
 
-| 方面 | `run-pure-studio-flutter.ps1` | `build-pure-studio-flutter-release.ps1` |
+| 方面 | `cargo xtask run-gui` | `cargo xtask build-gui` |
 |------|-------------------------------|----------------------------------------|
 | 用途 | 开发运行/调试 | 产出 release 包 |
 | 构建模式 | `flutter run -d windows`（debug） | `flutter build windows --release` |
 | 产物 | 不收集，在 `build/` 下就地运行 | 收集到 `dist/pure-studio-flutter-release/` |
-| Demo 回退 | 支持 `-DemoFallback` 自动回退 | 无回退，失败即报错 |
+| Demo 回退 | 支持 `--demo-fallback` 自动回退 | 无回退，失败即报错 |

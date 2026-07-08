@@ -1,1 +1,4 @@
 include = [{ path = "config.local.toml", optional = true }]
+
+[alias]
+xtask = "run -p pl-xtask --"
