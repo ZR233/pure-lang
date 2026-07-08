@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
 const TOKEN_ESTIMATE_BYTES: usize = 4;
@@ -98,6 +98,23 @@ pub struct ToolLifecycleProjection {
     pub duration_ms: Option<u64>,
     pub started_at_unix: i64,
     pub completed_at_unix: Option<i64>,
+}
+
+impl ToolLifecycleProjection {
+    /// 将 trace 中保存的 artifact JSON 解码为产品层的 artifact 类型。
+    ///
+    /// pl-core 统一负责生命周期投影里的 JSON 解码策略；产品层只需要选择自身
+    /// 持久化或 UI 协议使用的目标类型。无法解码的条目会被忽略，和 trace
+    /// artifact 作为附加信息的容错语义保持一致。
+    pub fn output_artifacts_as<T>(&self) -> Vec<T>
+    where
+        T: DeserializeOwned,
+    {
+        self.output_artifacts
+            .iter()
+            .filter_map(|value| serde_json::from_value(value.clone()).ok())
+            .collect()
+    }
 }
 
 /// 从会话历史中抽出的工具调用详情。
@@ -652,6 +669,7 @@ mod tests {
         TraceToolPart,
     };
     use pretty_assertions::assert_eq;
+    use serde::Deserialize;
     use serde_json::json;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -791,6 +809,18 @@ mod tests {
                     completed_at_unix: Some(12),
                 },
             ]
+        );
+
+        #[derive(Debug, Deserialize, PartialEq, Eq)]
+        struct ArtifactRecord {
+            id: String,
+        }
+
+        assert_eq!(
+            projections[1].output_artifacts_as::<ArtifactRecord>(),
+            vec![ArtifactRecord {
+                id: "artifact-1".to_string(),
+            }]
         );
     }
 
