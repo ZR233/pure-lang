@@ -877,6 +877,15 @@ where
             AgentTurnCurrentOutcome::Current
         }
     }
+
+    /// 根据取消 token 和宿主当前 turn id 判断流程是否还能继续。
+    pub fn evaluate_with_token(
+        &self,
+        cancellation_token: &CancellationToken,
+        current_turn: Option<&TurnId>,
+    ) -> AgentTurnCurrentOutcome {
+        self.evaluate(cancellation_token.is_cancelled(), current_turn)
+    }
 }
 
 /// 当前 turn 保护的判断结果。
@@ -1585,6 +1594,25 @@ mod tests {
 
         assert_eq!(
             guard.evaluate(true, current_turn.as_ref()),
+            AgentTurnCurrentOutcome::Interrupted
+        );
+    }
+
+    #[test]
+    fn agent_turn_current_guard_evaluates_cancellation_token() {
+        let guard = AgentTurnCurrentGuard::new("turn-a".to_string());
+        let current_turn = Some("turn-a".to_string());
+        let token = CancellationToken::new();
+
+        assert_eq!(
+            guard.evaluate_with_token(&token, current_turn.as_ref()),
+            AgentTurnCurrentOutcome::Current
+        );
+
+        token.cancel();
+
+        assert_eq!(
+            guard.evaluate_with_token(&token, current_turn.as_ref()),
             AgentTurnCurrentOutcome::Interrupted
         );
     }
