@@ -5,6 +5,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use pl_model::ToolSchema;
 use pl_protocol::PureError;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
@@ -320,6 +321,43 @@ impl GitToolKind {
             Self::WorkspaceInfo => "Show information about this git workspace.",
         }
     }
+
+    pub fn input_schema(self) -> Value {
+        match self {
+            Self::Status | Self::WorkspaceInfo => object_schema(vec![]),
+            Self::Diff => object_schema(vec![
+                ("staged", json!({ "type": "boolean" }), false),
+                ("path", json!({ "type": "string" }), false),
+            ]),
+            Self::Branch => object_schema(vec![
+                (
+                    "action",
+                    json!({ "type": "string", "enum": ["list", "switch", "create"] }),
+                    false,
+                ),
+                ("name", json!({ "type": "string" }), false),
+                ("startPoint", json!({ "type": "string" }), false),
+            ]),
+            Self::Fetch => object_schema(vec![
+                ("remote", json!({ "type": "string" }), false),
+                ("refspec", json!({ "type": "string" }), false),
+                ("prune", json!({ "type": "boolean" }), false),
+            ]),
+            Self::Commit => object_schema(vec![
+                ("message", json!({ "type": "string" }), true),
+                ("all", json!({ "type": "boolean" }), false),
+            ]),
+            Self::Push => object_schema(vec![
+                ("remote", json!({ "type": "string" }), false),
+                ("branch", json!({ "type": "string" }), false),
+                ("setUpstream", json!({ "type": "boolean" }), false),
+            ]),
+        }
+    }
+
+    pub fn to_schema(self) -> ToolSchema {
+        ToolSchema::function(self.name(), self.description(), self.input_schema())
+    }
 }
 
 /// 单个 git tool 适配器。
@@ -361,36 +399,7 @@ where
     }
 
     fn input_schema(&self) -> Value {
-        match self.kind {
-            GitToolKind::Status | GitToolKind::WorkspaceInfo => object_schema(vec![]),
-            GitToolKind::Diff => object_schema(vec![
-                ("staged", json!({ "type": "boolean" }), false),
-                ("path", json!({ "type": "string" }), false),
-            ]),
-            GitToolKind::Branch => object_schema(vec![
-                (
-                    "action",
-                    json!({ "type": "string", "enum": ["list", "switch", "create"] }),
-                    false,
-                ),
-                ("name", json!({ "type": "string" }), false),
-                ("start_point", json!({ "type": "string" }), false),
-            ]),
-            GitToolKind::Fetch => object_schema(vec![
-                ("remote", json!({ "type": "string" }), false),
-                ("refspec", json!({ "type": "string" }), false),
-                ("prune", json!({ "type": "boolean" }), false),
-            ]),
-            GitToolKind::Commit => object_schema(vec![
-                ("message", json!({ "type": "string" }), true),
-                ("all", json!({ "type": "boolean" }), false),
-            ]),
-            GitToolKind::Push => object_schema(vec![
-                ("remote", json!({ "type": "string" }), false),
-                ("branch", json!({ "type": "string" }), false),
-                ("set_upstream", json!({ "type": "boolean" }), false),
-            ]),
-        }
+        self.kind.input_schema()
     }
 
     fn execute<'a>(
@@ -613,6 +622,7 @@ where
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct GitDiffInput {
     #[serde(default)]
     staged: bool,
@@ -620,6 +630,7 @@ struct GitDiffInput {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct GitBranchInput {
     action: Option<String>,
     name: Option<String>,
@@ -627,6 +638,7 @@ struct GitBranchInput {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct GitFetchInput {
     remote: Option<String>,
     refspec: Option<String>,
@@ -635,6 +647,7 @@ struct GitFetchInput {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct GitCommitInput {
     message: String,
     #[serde(default)]
@@ -642,6 +655,7 @@ struct GitCommitInput {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct GitPushInput {
     remote: Option<String>,
     branch: Option<String>,

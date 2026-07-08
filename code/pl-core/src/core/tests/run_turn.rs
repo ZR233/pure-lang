@@ -334,3 +334,61 @@ async fn run_turn_retries_full_history_when_continuation_is_unsupported() {
     assert!(retry_input.contains("old answer"));
     assert!(retry_input.contains("new prompt"));
 }
+
+#[tokio::test]
+async fn model_turn_helper_retries_full_history_when_continuation_is_unsupported() {
+    let retry_sse = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_retry\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_retry\",\"delta\":\"retry ok\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_retry\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"retry ok\"}]}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_retry\",\"usage\":{\"input_tokens\":4,\"output_tokens\":2,\"total_tokens\":6}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let unsupported = serde_json::json!({
+        "error": {
+            "message": "previous_response_id is only supported on Responses WebSocket v2"
+        }
+    })
+    .to_string();
+    let (base_url, bodies, handle) = serve_http_sequence(vec![
+        TestHttpResponse::json(400, unsupported),
+        TestHttpResponse::sse(retry_sse),
+    ])
+    .await;
+    let mut provider_info = ProviderInfo::openai(Some(base_url));
+    provider_info.bearer_token = Some("test-token".to_string());
+    provider_info.default_model = "local-responses".to_string();
+    let provider = pl_model::create_provider(provider_info).unwrap();
+    let mut session = CoreSession::new();
+    session.push_user_prompt("old prompt".to_string());
+    session.push_assistant_response("old answer".to_string(), None);
+    session.set_prompt_cache_key("cache-session".to_string());
+    session.acknowledge_model_response(session.len(), Some("resp_old".to_string()));
+
+    let response = stream_session_completion_response(
+        provider,
+        &mut session,
+        CoreModelTurnRequest::new("local-responses")
+            .with_instructions("reply briefly")
+            .with_continuation(true),
+        CoreModelTurnOptions::default(),
+    )
+    .await
+    .unwrap();
+    handle.await.unwrap();
+
+    assert_eq!(response.content.as_deref(), Some("retry ok"));
+    assert!(session.continuation_disabled());
+    assert_eq!(session.previous_response_id(), None);
+    let bodies = bodies.lock().unwrap();
+    assert_eq!(bodies.len(), 2);
+    assert_eq!(
+        bodies[0]["previous_response_id"],
+        serde_json::json!("resp_old")
+    );
+    assert!(bodies[1].get("previous_response_id").is_none());
+    let retry_input = serde_json::to_string(&bodies[1]["input"]).unwrap();
+    assert!(retry_input.contains("old prompt"));
+    assert!(retry_input.contains("old answer"));
+}

@@ -3,15 +3,64 @@ use std::sync::Arc;
 
 use crate::config::ToolCapabilityConfig;
 use crate::tool::{
-    ApplyPatchTool, AskUserTool, CloseAgentTool, ContainerBackend, ContainerWorkspaceFileBackend,
-    CopyPathTool, CreateDirectoryTool, DeletePathTool, ExecutionBackend, GitCredentialProvider,
-    GitWorkspaceConfig, ListAgentsTool, ListFilesTool, LocalExecutionBackend, MovePathTool,
-    NoContainerBackend, NoGitCredentialProvider, PlanExitTool, ReadFileTool, ResumeAgentTool,
-    SearchFilesTool, SendInputTool, SpawnAgentTool, StatPathTool, TodoListTool, WaitAgentTool,
+    AgentControlToolKind, ApplyPatchTool, AskUserTool, CloseAgentTool, ContainerBackend,
+    ContainerToolKind, ContainerWorkspaceFileBackend, CopyPathTool, CreateDirectoryTool,
+    DeletePathTool, ExecutionBackend, GitCredentialProvider, GitToolKind, GitWorkspaceConfig,
+    ListAgentsTool, ListFilesTool, LocalExecutionBackend, MovePathTool, NoContainerBackend,
+    NoGitCredentialProvider, PlanExitTool, ReadFileTool, ResumeAgentTool, SearchFilesTool,
+    SendInputTool, SpawnAgentTool, StatPathTool, TodoListTool, Tool, WaitAgentTool,
     WorkspaceFileTool, WorkspaceFileToolKind, WriteFileTool, command_tool_pair,
 };
+use pl_model::ToolSchema;
 
 use super::PureCore;
+
+/// 共享工具 schema 导出选项。
+///
+/// 该结构只描述模型可见工具目录，不创建 runtime backend。执行路径仍由
+/// `ToolSetBuilder` 和显式注册的 backend 决定，因此 git/container/docker
+/// 能力可以保持默认关闭。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SharedToolSchemaOptions {
+    pub bash: bool,
+    pub workspace_files: bool,
+    pub ask_user: bool,
+    pub subagents: bool,
+    pub git: bool,
+    pub container: bool,
+    pub todo: bool,
+    pub plan_exit: bool,
+}
+
+impl SharedToolSchemaOptions {
+    pub fn from_capabilities(capabilities: &ToolCapabilityConfig) -> Self {
+        Self {
+            bash: capabilities.bash,
+            workspace_files: capabilities.workspace_files,
+            ask_user: capabilities.ask_user,
+            subagents: capabilities.subagents,
+            git: capabilities.git,
+            container: capabilities.container,
+            todo: true,
+            plan_exit: true,
+        }
+    }
+}
+
+impl Default for SharedToolSchemaOptions {
+    fn default() -> Self {
+        Self {
+            bash: false,
+            workspace_files: false,
+            ask_user: false,
+            subagents: false,
+            git: false,
+            container: false,
+            todo: false,
+            plan_exit: false,
+        }
+    }
+}
 
 /// 按能力开关组装 pl-core 的共享工具集合。
 #[derive(Debug, Clone, Default)]
@@ -63,6 +112,13 @@ impl<B, P, C> ToolSetBuilder<B, P, C> {
 
     pub fn capabilities(&self) -> &ToolCapabilityConfig {
         &self.capabilities
+    }
+
+    pub fn shared_tool_schemas(&self) -> Vec<ToolSchema> {
+        let mut options = SharedToolSchemaOptions::from_capabilities(&self.capabilities);
+        options.git = options.git && self.git_runtime.is_some();
+        options.container = options.container && self.container_runtime.is_some();
+        shared_tool_schemas(options)
     }
 }
 
@@ -132,6 +188,59 @@ where
         core.register_tool(TodoListTool);
         core.register_tool(PlanExitTool);
     }
+}
+
+pub fn shared_tool_schemas(options: SharedToolSchemaOptions) -> Vec<ToolSchema> {
+    let mut schemas = Vec::new();
+
+    if options.bash {
+        let (bash, write_stdin) = command_tool_pair(PathBuf::new());
+        schemas.push(bash.to_schema());
+        schemas.push(write_stdin.to_schema());
+    }
+    if options.workspace_files {
+        schemas.extend(
+            WorkspaceFileToolKind::all()
+                .iter()
+                .copied()
+                .map(WorkspaceFileToolKind::to_schema),
+        );
+    }
+    if options.ask_user {
+        schemas.push(AskUserTool.to_schema());
+    }
+    if options.todo {
+        schemas.push(TodoListTool.to_schema());
+    }
+    if options.subagents {
+        schemas.extend(
+            AgentControlToolKind::all()
+                .iter()
+                .copied()
+                .map(AgentControlToolKind::to_schema),
+        );
+    }
+    if options.git {
+        schemas.extend(
+            GitToolKind::all()
+                .iter()
+                .copied()
+                .map(GitToolKind::to_schema),
+        );
+    }
+    if options.container {
+        schemas.extend(
+            ContainerToolKind::all()
+                .iter()
+                .copied()
+                .map(ContainerToolKind::to_schema),
+        );
+    }
+    if options.plan_exit {
+        schemas.push(PlanExitTool.to_schema());
+    }
+
+    schemas
 }
 
 #[derive(Debug, Clone)]

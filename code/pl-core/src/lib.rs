@@ -45,9 +45,11 @@ pub use context_compaction::{
     ContextCompactionConfig, ContextCompactionReplacement, RecentInteractionTailConfig,
 };
 pub use core::{
-    AgentBackendProfile, AgentKernel, AgentKernelBuilder, CoreAgentProfile, CoreRuntimeOptions,
-    CoreRuntimeProfile, ProductToolDefinition, ProductToolRequest, ProductToolRouter, PureCore,
-    PureCoreBuilder, ToolProfile, ToolSetBuilder, WorkspaceProfile,
+    AgentBackendProfile, AgentKernel, AgentKernelBuilder, CoreAgentProfile, CoreModelTurnOptions,
+    CoreModelTurnRequest, CoreRuntimeOptions, CoreRuntimeProfile, ProductToolDefinition,
+    ProductToolRequest, ProductToolRouter, PureCore, PureCoreBuilder, SharedToolSchemaOptions,
+    ToolProfile, ToolSetBuilder, WorkspaceProfile, shared_tool_schemas,
+    stream_session_completion_response,
 };
 pub use first_run::{
     FirstRunConfigDraft, FirstRunModelDraft, FirstRunProviderDraft, ProviderTemplateKind,
@@ -103,9 +105,13 @@ pub use studio::{
 #[cfg(feature = "docker-tools")]
 pub use tool::DockerCliContainerBackend;
 pub use tool::{
-    AgentControlToolKind, AskUserTool, BashInput, BashTool, ContainerBackend,
-    ContainerCopyFromRequest, ContainerCopyToRequest, ContainerExecOutput, ContainerExecRequest,
-    ContainerTool, ContainerToolExecution, ContainerToolKind, ContainerWorkspaceFileBackend,
+    AgentControlAgentRecord, AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
+    AgentControlMessageOutput, AgentControlSendInputOutput, AgentControlSendInputRequest,
+    AgentControlSpawnOutput, AgentControlSpawnRequest, AgentControlTargetRequest, AgentControlTool,
+    AgentControlToolKind, AgentControlWaitOutput, AgentControlWaitRequest, AskUserTool, BashInput,
+    BashTool, ContainerBackend, ContainerCopyFromRequest, ContainerCopyToRequest,
+    ContainerExecOutput, ContainerExecRequest, ContainerTool, ContainerToolExecution,
+    ContainerToolKind, ContainerWorkspaceFileBackend, DEFAULT_MODEL_TOOL_OUTPUT_TOKENS,
     ExecutionBackend, ExecutionOutput, ExecutionRequest, GIT_TOKEN_ENV, GitCredential,
     GitCredentialOperation, GitCredentialProvider, GitCredentialRequest, GitPolicy, GitTool,
     GitToolKind, GitWorkspaceConfig, LocalExecutionBackend, LocalWorkspaceFileBackend,
@@ -121,7 +127,8 @@ pub use tool::{
     WorkspaceFileSearchRequest, WorkspaceFileSearchResult, WorkspaceFileStat,
     WorkspaceFileStatRequest, WorkspaceFileTool, WorkspaceFileToolExecution, WorkspaceFileToolKind,
     WorkspaceFileWriteRequest, WriteStdinTool, execute_container_tool, execute_workspace_file_tool,
-    lsp_tool_for_language,
+    lsp_tool_for_language, model_visible_tool_output, model_visible_tool_output_with_tokens,
+    redacted_trace_preview_value, trace_preview_output, trace_preview_value,
 };
 pub use trace::TraceRecorder;
 pub use turn::{

@@ -31,6 +31,7 @@ use crate::turn::{
 };
 
 mod kernel;
+mod model_turn;
 mod permission;
 mod profile;
 pub(crate) mod progress;
@@ -43,11 +44,14 @@ pub use kernel::{
     AgentKernel, AgentKernelBuilder, CoreAgentProfile, ProductToolDefinition, ProductToolRequest,
     ProductToolRouter,
 };
+pub use model_turn::{
+    CoreModelTurnOptions, CoreModelTurnRequest, stream_session_completion_response,
+};
 pub use profile::{
     AgentBackendProfile, CoreRuntimeOptions, CoreRuntimeProfile, PureCoreBuilder, ToolProfile,
     WorkspaceProfile,
 };
-pub use tool_set::ToolSetBuilder;
+pub use tool_set::{SharedToolSchemaOptions, ToolSetBuilder, shared_tool_schemas};
 pub(crate) use turn_result::compact_text;
 /// 生成唯一的 turn ID（毫秒时间戳 + 序列号），用于隔离每个 turn 的 trace part id。
 fn generate_turn_id() -> String {

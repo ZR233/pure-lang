@@ -1,6 +1,70 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+#[test]
+fn shared_tool_schemas_can_describe_hosted_workspace_surface() {
+    let names = shared_tool_schemas(SharedToolSchemaOptions {
+        bash: false,
+        workspace_files: true,
+        ask_user: true,
+        subagents: true,
+        git: true,
+        container: true,
+        todo: true,
+        plan_exit: false,
+    })
+    .into_iter()
+    .map(|schema| schema.name().to_string())
+    .collect::<Vec<_>>();
+
+    assert_eq!(
+        names,
+        vec![
+            "read_file",
+            "list_files",
+            "search_files",
+            "apply_patch",
+            "request_user_input",
+            "update_todo_list",
+            "spawn_agent",
+            "send_input",
+            "wait_agent",
+            "list_agents",
+            "close_agent",
+            "resume_agent",
+            "git_status",
+            "git_diff",
+            "git_branch",
+            "git_fetch",
+            "git_commit",
+            "git_push",
+            "git_workspace_info",
+            "container_exec",
+            "container_copy",
+        ]
+    );
+}
+
+#[test]
+fn shared_tool_schemas_keep_git_and_container_opt_in() {
+    let names = shared_tool_schemas(SharedToolSchemaOptions {
+        workspace_files: true,
+        ask_user: true,
+        todo: true,
+        ..Default::default()
+    })
+    .into_iter()
+    .map(|schema| schema.name().to_string())
+    .collect::<Vec<_>>();
+
+    assert!(names.contains(&"read_file".to_string()));
+    assert!(names.contains(&"request_user_input".to_string()));
+    assert!(names.contains(&"update_todo_list".to_string()));
+    assert!(!names.contains(&"git_status".to_string()));
+    assert!(!names.contains(&"container_exec".to_string()));
+    assert!(!names.contains(&"spawn_agent".to_string()));
+}
+
 #[tokio::test]
 async fn default_tools_register_bash_and_agent_tools() {
     let mut core = PureCore::default_provider().unwrap();
@@ -157,6 +221,17 @@ fn agent_control_schemas_use_codex_camel_case_fields() {
         resume_schema.pointer("/required"),
         Some(&serde_json::json!(["target"]))
     );
+}
+
+#[test]
+fn git_schemas_use_codex_camel_case_fields() {
+    let branch_schema = crate::tool::GitToolKind::Branch.input_schema();
+    assert!(branch_schema.pointer("/properties/startPoint").is_some());
+    assert!(branch_schema.pointer("/properties/start_point").is_none());
+
+    let push_schema = crate::tool::GitToolKind::Push.input_schema();
+    assert!(push_schema.pointer("/properties/setUpstream").is_some());
+    assert!(push_schema.pointer("/properties/set_upstream").is_none());
 }
 
 #[tokio::test]

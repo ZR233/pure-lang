@@ -51,6 +51,11 @@ impl ModelContinuationState {
         response_id: Option<String>,
         current_message_count: usize,
     ) {
+        if self.disabled {
+            self.previous_response_id = None;
+            self.acknowledged_message_count = 0;
+            return;
+        }
         if let Some(response_id) = response_id.filter(|id| !id.trim().is_empty()) {
             self.previous_response_id = Some(response_id);
             self.acknowledged_message_count = acknowledged_message_count.min(current_message_count);
@@ -126,6 +131,21 @@ mod tests {
         state.acknowledge_response(1, Some("resp-1".to_string()), 1);
 
         state.mark_unsupported();
+
+        assert!(state.disabled());
+        assert_eq!(state.prompt_cache_key(), Some("cache-1"));
+        assert_eq!(state.previous_response_id(), None);
+        assert_eq!(state.continuation_start_index(), None);
+    }
+
+    #[test]
+    fn unsupported_continuation_ignores_later_response_ids() {
+        let mut state = ModelContinuationState::default();
+        state.set_prompt_cache_key("cache-1".to_string());
+        state.acknowledge_response(1, Some("resp-1".to_string()), 1);
+        state.mark_unsupported();
+
+        state.acknowledge_response(2, Some("resp-retry".to_string()), 2);
 
         assert!(state.disabled());
         assert_eq!(state.prompt_cache_key(), Some("cache-1"));

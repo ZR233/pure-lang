@@ -3,8 +3,6 @@ use std::fmt;
 use pl_protocol::{PureError, Result};
 use serde_json::{Value, json};
 
-const TOKEN_ESTIMATE_BYTES: usize = 4;
-
 pub(crate) fn object_schema(fields: Vec<(&str, Value, bool)>) -> Value {
     let mut properties = serde_json::Map::new();
     let mut required = Vec::new();
@@ -79,22 +77,6 @@ pub(crate) fn bounded_text(
     let text = value[..end].to_string();
     let omitted = value.len().saturating_sub(end);
     (text, true, omitted, Some(offset.saturating_add(end)))
-}
-
-pub(crate) fn bounded_model_tool_output_with_tokens(output: &str, max_tokens: usize) -> String {
-    let max_bytes = max_tokens.saturating_mul(TOKEN_ESTIMATE_BYTES).max(1);
-    if output.len() <= max_bytes {
-        return output.to_string();
-    }
-    let mut end = max_bytes;
-    while !output.is_char_boundary(end) {
-        end = end.saturating_sub(1);
-    }
-    format!(
-        "{}\n...[truncated {} bytes]",
-        &output[..end],
-        output.len().saturating_sub(end)
-    )
 }
 
 pub(crate) fn tool_error(tool: &str, error: impl fmt::Display) -> PureError {
