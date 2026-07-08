@@ -96,6 +96,53 @@ fn agent_input_turn_mode_exposes_queue_and_busy_semantics() {
 }
 
 #[test]
+fn agent_input_turn_mode_exposes_dispatch_actions() {
+    assert_eq!(
+        AgentInputTurnMode::QueueOnly.initial_action(),
+        AgentInputInitialAction::Queue
+    );
+    assert_eq!(
+        AgentInputTurnMode::TriggerTurn.initial_action(),
+        AgentInputInitialAction::StartTurn
+    );
+    assert_eq!(
+        AgentInputTurnMode::Interrupt.initial_action(),
+        AgentInputInitialAction::InterruptThenStart
+    );
+
+    assert_eq!(
+        AgentInputTurnMode::QueueOnly.busy_action(),
+        AgentInputBusyAction::ReturnBusy
+    );
+    assert_eq!(
+        AgentInputTurnMode::TriggerTurn.busy_action(),
+        AgentInputBusyAction::Queue
+    );
+    assert_eq!(
+        AgentInputTurnMode::Interrupt.busy_action(),
+        AgentInputBusyAction::ReturnBusy
+    );
+}
+
+#[test]
+fn agent_input_queue_preserves_fifo_and_restore_front_order() {
+    let mut queue = AgentInputQueue::default();
+
+    assert!(queue.is_empty());
+    queue.push("first");
+    queue.push("second");
+
+    assert_eq!(queue.len(), 2);
+    assert_eq!(queue.pop(), Some("first"));
+
+    queue.restore_front("retry");
+
+    assert_eq!(queue.pop(), Some("retry"));
+    assert_eq!(queue.pop(), Some("second"));
+    assert_eq!(queue.pop(), None);
+}
+
+#[test]
 fn agent_wait_completion_completes_without_active_turn() {
     let snapshot = AgentWaitSnapshot {
         turn_presence: AgentTurnPresence::NoActiveTurn,

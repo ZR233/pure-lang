@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -67,16 +68,91 @@ impl AgentInputTurnMode {
         }
     }
 
+    /// 计算收到输入后的第一步动作。
+    pub fn initial_action(self) -> AgentInputInitialAction {
+        match self {
+            Self::QueueOnly => AgentInputInitialAction::Queue,
+            Self::TriggerTurn => AgentInputInitialAction::StartTurn,
+            Self::Interrupt => AgentInputInitialAction::InterruptThenStart,
+        }
+    }
+
+    /// 计算启动 turn 时遇到 busy 的处理方式。
+    pub fn busy_action(self) -> AgentInputBusyAction {
+        match self {
+            Self::QueueOnly | Self::Interrupt => AgentInputBusyAction::ReturnBusy,
+            Self::TriggerTurn => AgentInputBusyAction::Queue,
+        }
+    }
+
     pub fn queues_without_start(self) -> bool {
-        matches!(self, Self::QueueOnly)
+        matches!(self.initial_action(), AgentInputInitialAction::Queue)
     }
 
     pub fn interrupts(self) -> bool {
-        matches!(self, Self::Interrupt)
+        matches!(
+            self.initial_action(),
+            AgentInputInitialAction::InterruptThenStart
+        )
     }
 
     pub fn queues_when_busy(self) -> bool {
-        matches!(self, Self::TriggerTurn)
+        matches!(self.busy_action(), AgentInputBusyAction::Queue)
+    }
+}
+
+/// `send_input` 收到输入后的共享第一步动作。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentInputInitialAction {
+    Queue,
+    StartTurn,
+    InterruptThenStart,
+}
+
+/// `send_input` 启动 turn 时遇到 busy 的共享处理方式。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentInputBusyAction {
+    Queue,
+    ReturnBusy,
+}
+
+/// agent 输入队列，负责保持 pending input 的 FIFO 与重试顺序。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentInputQueue<Input> {
+    pending: VecDeque<Input>,
+}
+
+impl<Input> AgentInputQueue<Input> {
+    pub fn new() -> Self {
+        Self {
+            pending: VecDeque::new(),
+        }
+    }
+
+    pub fn push(&mut self, input: Input) {
+        self.pending.push_back(input);
+    }
+
+    pub fn pop(&mut self) -> Option<Input> {
+        self.pending.pop_front()
+    }
+
+    pub fn restore_front(&mut self, input: Input) {
+        self.pending.push_front(input);
+    }
+
+    pub fn len(&self) -> usize {
+        self.pending.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.pending.is_empty()
+    }
+}
+
+impl<Input> Default for AgentInputQueue<Input> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
