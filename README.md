@@ -43,6 +43,7 @@ pure-studio-flutter       Flutter Windows 桌面应用
 | `pl-core` | `code/pl-core/` | 核心编译引擎与 Studio runtime：turn/session、配置、工具、MCP、SQLite projection，并通过 `interfaces` 等模块逐步端口化 |
 | `pl-studio-bridge` | `code/pure-studio-flutter/rust/` | Flutter Rust Bridge v2 桥接 crate：把 Flutter API 转为 `pl-core` runtime 调用 |
 | `pure-studio-flutter` | `code/pure-studio-flutter/` | Flutter Windows 桌面应用：Material 3、Riverpod、会话级事件订阅 |
+| `pl-xtask` | `xtask/` | 本仓库开发任务入口：GUI 运行、发布构建、Flutter Windows Rust bridge 构建 |
 
 ### 依赖规则
 
@@ -57,14 +58,14 @@ pl-protocol  ←  pl-trace  ←  pl-model  ←  pl-core  ←  pl-studio-bridge  
 ### 前置条件
 
 - [Rust](https://rustup.rs/)（edition 2024）
-- [Flutter](https://docs.flutter.dev/get-started/install)（Windows 桌面端）
+- [Flutter](https://docs.flutter.dev/get-started/install)（Windows 桌面端，`flutter` 需在 PATH 中）
 - Windows
 
 ### 启动 Pure Studio 桌面应用
 
 ```powershell
 # Windows（Flutter + flutter_rust_bridge v2）
-./run-pure-studio-flutter.ps1
+cargo xtask run-gui
 
 # 或手动启动
 cd code/pure-studio-flutter
@@ -119,9 +120,9 @@ pure-lang/
 │   └── 13-tool-calling-runtime.md
 ├── .claude/skills/           # 项目技能（Codex 协作规则）
 ├── .cargo/config.toml        # Cargo 配置
+├── xtask/                    # pl-xtask 开发任务入口
 ├── CLAUDE.md                 # 项目规范
-├── Agents.md                 # Codex 项目记忆
-└── run-pure-studio-flutter.ps1 # Windows 启动脚本
+└── Agents.md                 # Codex 项目记忆
 ```
 
 ## 技术栈
@@ -196,6 +197,12 @@ cargo test --workspace
 ### Flutter 开发
 
 ```bash
+# 从仓库根目录运行 GUI
+cargo xtask run-gui
+
+# 从仓库根目录构建当前 OS 的 release 产物
+cargo xtask build-gui
+
 cd code/pure-studio-flutter
 flutter_rust_bridge_codegen generate
 flutter analyze
@@ -206,7 +213,7 @@ flutter build windows
 Markdown/timeline 视觉检查可以使用本地 demo 数据启动，不连接 runtime：
 
 ```powershell
-.\run-pure-studio-flutter.ps1 -Demo
+cargo xtask run-gui --demo
 ```
 
 本仓库要求 Flutter 端使用 `flutter_rust_bridge` v2.12.x；本机 codegen 版本应与 Dart/Rust 依赖保持同一小版本。

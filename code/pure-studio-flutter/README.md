@@ -13,6 +13,12 @@ Windows-first Flutter desktop client for Pure Studio.
 ## Commands
 
 ```powershell
+# Run from repository root. xtask invokes Flutter with
+# code/pure-studio-flutter as the working directory.
+cargo xtask run-gui
+cargo xtask build-gui
+
+# Run from this Flutter project directory.
 flutter pub get
 flutter_rust_bridge_codegen generate
 flutter analyze

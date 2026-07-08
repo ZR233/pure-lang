@@ -75,7 +75,7 @@ config：
 新增 CI：
 
 - PR 质量门：fmt / clippy / test / Flutter analyze / Flutter test
-- RC 打包：Windows Flutter 桌面构建产物
+- RC 打包：通过 `cargo xtask build-gui` 生成当前 OS 的 Flutter 桌面构建产物
 
 ## 7. 验收口径
 

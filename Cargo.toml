@@ -9,6 +9,7 @@ members = [
     "code/pl-skill-core",
     "code/pl-core",
     "code/pure-studio-flutter/rust",
+    "xtask",
 ]
 resolver = "3"
 

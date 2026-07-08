@@ -11,6 +11,7 @@
 - `pl-core`：应用编排、领域模型、端口定义、基础设施适配器
 - `pl-studio-bridge`：Flutter Rust Bridge v2 桥接 crate
 - `pure-studio-flutter`：Flutter Windows 桌面端
+- `pl-xtask`：本仓库开发任务入口，不参与运行时依赖链
 
 ## 2.2 pl-protocol
 
@@ -116,7 +117,19 @@
 
 Flutter store 不直接读取 SQLite 或配置文件，只通过 `pl-studio-bridge` 调用 `pl-core`。打开会话时订阅该会话事件流，切换会话时取消旧订阅；全局事件流只承载低频配置、项目和 health 变化。
 
-## 2.9 本地数据版本
+## 2.9 pl-xtask（开发任务入口）
+
+`pl-xtask` 位于 `xtask/`，通过 `.cargo/config.toml` 暴露 `cargo xtask ...`。它只封装本仓库开发、运行和发布任务，不承载运行时业务逻辑，也不被任何 runtime crate 依赖。
+
+公开命令：
+
+- `cargo xtask run-gui [--demo] [--demo-fallback]`
+- `cargo xtask build-gui [--demo] [--no-clean]`
+- `cargo xtask build-rust-bridge --workspace-root <path> --configuration <Debug|Profile|Release> --output-dir <path> [--target-dir <path>]`
+
+GUI 命令从仓库根目录调用，但所有 Flutter 子命令都以 `code/pure-studio-flutter/` 为工作目录执行。`build-rust-bridge` 是 Flutter Windows CMake 内部入口，负责构建并复制 `pl_studio_bridge.dll`/`.pdb`。
+
+## 2.10 本地数据版本
 
 方案乙采用破坏性升级，运行期不再保留迁移与兼容读取路径：
 
@@ -126,9 +139,9 @@ Flutter store 不直接读取 SQLite 或配置文件，只通过 `pl-studio-brid
 
 Flutter 桌面端不做额外 SQLite 或 `~/.pure/config.toml` 破坏性迁移。
 
-## 2.10 Workspace
+## 2.11 Workspace
 
-workspace crate 组成保持不变：
+workspace crate 组成：
 
 ```toml
 [workspace]
@@ -137,8 +150,12 @@ members = [
     "code/pl-trace",
     "code/pl-model",
     "code/pl-lsp",
+    "code/pl-output",
+    "code/pl-patch",
+    "code/pl-skill-core",
     "code/pl-core",
     "code/pure-studio-flutter/rust",
+    "xtask",
 ]
 resolver = "3"
 ```
