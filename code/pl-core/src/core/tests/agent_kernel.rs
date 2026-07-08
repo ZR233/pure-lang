@@ -96,6 +96,49 @@ async fn agent_kernel_registers_dynamic_tools() {
 }
 
 #[tokio::test]
+async fn registered_tool_from_execution_result_uses_core_output_mapping() {
+    let tool = RegisteredTool::from_execution_result(
+        "product_finish",
+        "Finish with a product result.",
+        serde_json::json!({
+            "type": "object",
+            "additionalProperties": false
+        }),
+        |_input, _context| async {
+            Ok(
+                crate::tool::ToolExecutionResult::<serde_json::Value>::with_model_output(
+                    false,
+                    "full internal output".to_string(),
+                    "visible output".to_string(),
+                    true,
+                    vec![serde_json::json!({"id": "artifact-1"})],
+                ),
+            )
+        },
+    );
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let output = tool
+        .execute(
+            ToolInput {
+                arguments: serde_json::json!({}),
+                session_id: "session-1".to_string(),
+                tool_id: "tool-1".to_string(),
+                revision_base: 0,
+            },
+            test_tool_context(event_tx),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(output.description, "visible output");
+    assert_eq!(output.exit_code, Some(1));
+    assert_eq!(
+        output.runtime_events,
+        vec![crate::tool::ToolRuntimeEvent::EndTurn]
+    );
+}
+
+#[tokio::test]
 async fn agent_kernel_registers_and_routes_product_tools_as_registered_tools() {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let tool = product_echo_tool(calls.clone());
