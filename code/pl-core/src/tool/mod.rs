@@ -432,7 +432,15 @@ impl<Artifact> ToolExecutionResult<Artifact> {
                 tool: "registered_tool".to_string(),
                 error: format!("failed to serialize JSON output: {error}"),
             })?;
-        Ok(Self::new(true, output, false))
+        Ok(Self::success(output))
+    }
+
+    pub fn success(output: impl Into<String>) -> Self {
+        Self::new(true, output.into(), false)
+    }
+
+    pub fn failure(output: impl Into<String>) -> Self {
+        Self::new(false, output.into(), false)
     }
 
     pub fn new(success: bool, output: String, ends_turn: bool) -> Self {
@@ -999,6 +1007,18 @@ mod tests {
                 ends_turn: false,
                 output_artifacts: Vec::new(),
             }
+        );
+    }
+
+    #[test]
+    fn tool_execution_result_exposes_explicit_success_and_failure_constructors() {
+        assert_eq!(
+            ToolExecutionResult::<serde_json::Value>::success("ok"),
+            ToolExecutionResult::new(true, "ok".to_string(), false)
+        );
+        assert_eq!(
+            ToolExecutionResult::<serde_json::Value>::failure("bad"),
+            ToolExecutionResult::new(false, "bad".to_string(), false)
         );
     }
 
