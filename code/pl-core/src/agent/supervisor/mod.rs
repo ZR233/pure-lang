@@ -114,6 +114,67 @@ pub struct AgentWaitOutcome {
     pub timed_out: bool,
 }
 
+/// 宿主 agent 当前是否仍持有 active turn。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentTurnPresence {
+    ActiveTurn,
+    NoActiveTurn,
+}
+
+/// wait 判断所需的宿主无关 agent 状态分类。
+///
+/// 不同产品可拥有自己的状态 enum；接入层只需要把产品状态映射到该分类，
+/// wait 的完成规则则由 pl-core 统一维护。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentWaitStatusKind {
+    Active,
+    Idle,
+    Completed,
+    Failed,
+    Cancelled,
+    Deleted,
+}
+
+impl AgentWaitStatusKind {
+    fn is_completion_status(self) -> bool {
+        matches!(
+            self,
+            Self::Idle | Self::Completed | Self::Failed | Self::Cancelled | Self::Deleted
+        )
+    }
+}
+
+/// wait_agent 观察到的最小状态快照。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentWaitSnapshot {
+    pub turn_presence: AgentTurnPresence,
+    pub status: AgentWaitStatusKind,
+}
+
+impl AgentWaitSnapshot {
+    /// 根据当前 turn presence 和状态分类判断 wait 是否可以返回。
+    pub fn completion(self) -> AgentWaitCompletion {
+        if matches!(self.turn_presence, AgentTurnPresence::NoActiveTurn)
+            || self.status.is_completion_status()
+        {
+            AgentWaitCompletion::Complete
+        } else {
+            AgentWaitCompletion::Pending
+        }
+    }
+
+    pub fn is_complete(self) -> bool {
+        matches!(self.completion(), AgentWaitCompletion::Complete)
+    }
+}
+
+/// wait_agent 的通用完成判断结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentWaitCompletion {
+    Complete,
+    Pending,
+}
+
 #[derive(Debug, Clone)]
 pub struct AgentStatusUpdate {
     pub status: AgentStatus,

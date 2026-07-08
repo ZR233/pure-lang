@@ -26,7 +26,8 @@ mod workspace;
 pub use agent::{
     AgentHandle, AgentInputTurnMode, AgentMessage, AgentMessageMode, AgentMessageRequest,
     AgentPath, AgentRecord, AgentRunSpec, AgentSpawnInput, AgentStatus, AgentStatusUpdate,
-    AgentSupervisor, AgentToolRegistrar, AgentWaitOutcome,
+    AgentSupervisor, AgentToolRegistrar, AgentTurnPresence, AgentWaitCompletion, AgentWaitOutcome,
+    AgentWaitSnapshot, AgentWaitStatusKind,
 };
 pub use attachment::MaterializedAttachment;
 pub use config::{

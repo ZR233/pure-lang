@@ -9,5 +9,6 @@ pub(crate) use supervisor::emit_subagent_activity;
 pub use supervisor::{
     AgentHandle, AgentInputTurnMode, AgentMessage, AgentMessageMode, AgentMessageRequest,
     AgentRunSpec, AgentSpawnInput, AgentStatusUpdate, AgentSupervisor, AgentToolRegistrar,
-    AgentWaitOutcome,
+    AgentTurnPresence, AgentWaitCompletion, AgentWaitOutcome, AgentWaitSnapshot,
+    AgentWaitStatusKind,
 };

@@ -95,6 +95,44 @@ fn agent_input_turn_mode_exposes_queue_and_busy_semantics() {
     assert!(!AgentInputTurnMode::Interrupt.queues_when_busy());
 }
 
+#[test]
+fn agent_wait_completion_completes_without_active_turn() {
+    let snapshot = AgentWaitSnapshot {
+        turn_presence: AgentTurnPresence::NoActiveTurn,
+        status: AgentWaitStatusKind::Active,
+    };
+
+    assert_eq!(snapshot.completion(), AgentWaitCompletion::Complete);
+}
+
+#[test]
+fn agent_wait_completion_completes_for_terminal_or_idle_status() {
+    for status in [
+        AgentWaitStatusKind::Idle,
+        AgentWaitStatusKind::Completed,
+        AgentWaitStatusKind::Failed,
+        AgentWaitStatusKind::Cancelled,
+        AgentWaitStatusKind::Deleted,
+    ] {
+        let snapshot = AgentWaitSnapshot {
+            turn_presence: AgentTurnPresence::ActiveTurn,
+            status,
+        };
+
+        assert_eq!(snapshot.completion(), AgentWaitCompletion::Complete);
+    }
+}
+
+#[test]
+fn agent_wait_completion_keeps_active_turn_pending() {
+    let snapshot = AgentWaitSnapshot {
+        turn_presence: AgentTurnPresence::ActiveTurn,
+        status: AgentWaitStatusKind::Active,
+    };
+
+    assert_eq!(snapshot.completion(), AgentWaitCompletion::Pending);
+}
+
 #[tokio::test]
 async fn followup_capacity_failure_does_not_mutate_agent_mailbox_or_status() {
     let supervisor = AgentSupervisor::default();
