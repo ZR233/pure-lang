@@ -224,6 +224,28 @@ pub struct AgentControlSpawnOutput {
     pub turn_id: Option<String>,
 }
 
+impl AgentControlSpawnOutput {
+    /// 创建 `spawn_agent` 的共享模型可见输出。
+    ///
+    /// 宿主只提供自己的 agent identity、路径和启动状态；字段命名、wire
+    /// 形状和 turn metadata 由 pl-core 类型统一维护。
+    pub fn new(
+        agent_id: impl Into<String>,
+        task_name: impl Into<String>,
+        path: impl Into<String>,
+        status: AgentStatus,
+        turn_id: Option<String>,
+    ) -> Self {
+        Self {
+            agent_id: agent_id.into(),
+            task_name: task_name.into(),
+            path: path.into(),
+            status,
+            turn_id,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentControlSendInputRequest {
@@ -307,6 +329,19 @@ impl AgentControlWaitRequest {
 pub struct AgentControlWaitOutput {
     pub message: String,
     pub timed_out: bool,
+}
+
+impl AgentControlWaitOutput {
+    /// 创建 `wait_agent` 的共享模型可见输出。
+    ///
+    /// `message` 可以承载宿主产品侧的紧凑诊断文本；`timedOut` 字段和
+    /// camelCase wire 形状由该共享类型统一维护。
+    pub fn message(message: impl Into<String>, timed_out: bool) -> Self {
+        Self {
+            message: message.into(),
+            timed_out,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

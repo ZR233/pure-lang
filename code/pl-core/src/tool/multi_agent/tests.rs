@@ -299,6 +299,37 @@ fn agent_control_target_request_builds_message_output() {
 }
 
 #[test]
+fn agent_control_outputs_have_shared_constructors() {
+    let spawned = crate::tool::AgentControlSpawnOutput::new(
+        "agent-1",
+        "inspect",
+        "/root/agent-1",
+        AgentStatus::Queued,
+        Some("turn-1".to_string()),
+    );
+    let waited =
+        crate::tool::AgentControlWaitOutput::message("no managed sub-agents to wait for", false);
+
+    assert_eq!(
+        spawned,
+        crate::tool::AgentControlSpawnOutput {
+            agent_id: "agent-1".to_string(),
+            task_name: "inspect".to_string(),
+            path: "/root/agent-1".to_string(),
+            status: AgentStatus::Queued,
+            turn_id: Some("turn-1".to_string()),
+        }
+    );
+    assert_eq!(
+        waited,
+        crate::tool::AgentControlWaitOutput {
+            message: "no managed sub-agents to wait for".to_string(),
+            timed_out: false,
+        }
+    );
+}
+
+#[test]
 fn spawn_agent_result_serializes_turn_metadata() {
     let output = json_output(SpawnAgentResult {
         agent_id: "agent-1".to_string(),
