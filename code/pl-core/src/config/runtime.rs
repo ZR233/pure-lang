@@ -69,6 +69,31 @@ impl Default for ToolCapabilityConfig {
 }
 
 impl ToolCapabilityConfig {
+    /// Host 提供容器 workspace/backend 时使用的共享 agent 工具能力预设。
+    ///
+    /// 该预设关闭 pure-studio 本地 shell、skills、LSP 和 Docker 管理能力，
+    /// 保留 workspace file、MCP、subagent、用户输入、git 与 container 工具。
+    /// 宿主仍可在注册工具集时按实际 backend 可用性进一步关闭单项能力。
+    pub fn hosted_container_workspace() -> Self {
+        Self {
+            bash: false,
+            workspace_files: true,
+            skills: false,
+            mcp: true,
+            lsp: false,
+            subagents: true,
+            ask_user: true,
+            git: true,
+            docker: false,
+            container: true,
+        }
+    }
+
+    pub fn with_git(mut self, enabled: bool) -> Self {
+        self.git = enabled;
+        self
+    }
+
     pub fn is_default(&self) -> bool {
         self == &Self::default()
     }

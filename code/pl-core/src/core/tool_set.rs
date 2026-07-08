@@ -56,6 +56,11 @@ impl SharedToolSchemaOptions {
             plan_exit: true,
         }
     }
+
+    pub fn with_plan_exit(mut self, enabled: bool) -> Self {
+        self.plan_exit = enabled;
+        self
+    }
 }
 
 /// 按能力开关组装 pl-core 的共享工具集合。

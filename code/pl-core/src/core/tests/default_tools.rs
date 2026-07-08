@@ -69,6 +69,19 @@ fn shared_tool_names_match_shared_schema_order() {
 }
 
 #[test]
+fn shared_tool_schema_options_can_disable_plan_exit_fluently() {
+    let options = SharedToolSchemaOptions::from_capabilities(
+        &crate::config::ToolCapabilityConfig::hosted_container_workspace(),
+    )
+    .with_plan_exit(false);
+    let names = shared_tool_names(options);
+
+    assert!(names.contains(&"container_exec".to_string()));
+    assert!(names.contains(&"git_status".to_string()));
+    assert!(!names.contains(&"plan_exit".to_string()));
+}
+
+#[test]
 fn shared_tool_schemas_can_include_mcp_resource_tools() {
     let names = shared_tool_schemas(SharedToolSchemaOptions {
         mcp_resources: true,
