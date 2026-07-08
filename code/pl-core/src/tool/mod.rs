@@ -101,6 +101,64 @@ type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 type RegisteredToolFuture = Pin<Box<dyn Future<Output = Result<ToolOutput, PureError>> + Send>>;
 type RegisteredToolHandler = dyn Fn(ToolInput, ToolContext) -> RegisteredToolFuture + Send + Sync;
 
+/// 严格 object 输入 schema 中的字段。
+///
+/// 产品层和共享工具都应通过 `required` / `optional` 命名构造器声明字段，
+/// 避免在不同仓库里重复维护 `required` 数组和 `additionalProperties` 形状。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolInputSchemaField {
+    name: String,
+    schema: serde_json::Value,
+    required: bool,
+}
+
+impl ToolInputSchemaField {
+    pub fn required(name: impl Into<String>, schema: serde_json::Value) -> Self {
+        Self {
+            name: name.into(),
+            schema,
+            required: true,
+        }
+    }
+
+    pub fn optional(name: impl Into<String>, schema: serde_json::Value) -> Self {
+        Self {
+            name: name.into(),
+            schema,
+            required: false,
+        }
+    }
+}
+
+/// 构造工具统一使用的严格 object 输入 schema。
+pub fn strict_tool_input_schema(
+    fields: impl IntoIterator<Item = ToolInputSchemaField>,
+) -> serde_json::Value {
+    let mut properties = serde_json::Map::new();
+    let mut required = Vec::new();
+    for field in fields {
+        if field.required {
+            required.push(serde_json::Value::String(field.name.clone()));
+        }
+        properties.insert(field.name, field.schema);
+    }
+    serde_json::json!({
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": false,
+    })
+}
+
+/// 构造 function tool schema，并统一使用严格 object 输入 schema。
+pub fn function_tool_schema(
+    name: impl Into<String>,
+    description: impl Into<String>,
+    fields: impl IntoIterator<Item = ToolInputSchemaField>,
+) -> ToolSchema {
+    ToolSchema::function(name, description, strict_tool_input_schema(fields))
+}
+
 /// 等待宿主工具后端 future，并统一响应 turn cancellation。
 ///
 /// 宿主 adapter 仍负责业务调用和错误类型；pl-core 负责维护工具执行过程中
@@ -1093,6 +1151,64 @@ mod tests {
         assert_eq!(
             ToolExecutionResult::<serde_json::Value>::failure("bad"),
             ToolExecutionResult::new(false, "bad".to_string(), false)
+        );
+    }
+
+    #[test]
+    fn function_tool_schema_builds_strict_object_input_schema() {
+        let schema = function_tool_schema(
+            "save_task_plan",
+            "Save a task plan.",
+            [
+                ToolInputSchemaField::required("title", serde_json::json!({ "type": "string" })),
+                ToolInputSchemaField::required("markdown", serde_json::json!({ "type": "string" })),
+                ToolInputSchemaField::optional("metadata", serde_json::json!({ "type": "object" })),
+            ],
+        );
+
+        let ToolSchema::Function {
+            name,
+            description,
+            input_schema,
+        } = schema
+        else {
+            panic!("function tool schema");
+        };
+        assert_eq!(name, "save_task_plan");
+        assert_eq!(description, "Save a task plan.");
+        assert_eq!(
+            input_schema,
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string" },
+                    "markdown": { "type": "string" },
+                    "metadata": { "type": "object" }
+                },
+                "required": ["title", "markdown"],
+                "additionalProperties": false
+            })
+        );
+    }
+
+    #[test]
+    fn strict_tool_input_schema_uses_named_field_constructors() {
+        let schema = strict_tool_input_schema([
+            ToolInputSchemaField::required("path", serde_json::json!({ "type": "string" })),
+            ToolInputSchemaField::optional("name", serde_json::json!({ "type": "string" })),
+        ]);
+
+        assert_eq!(
+            schema,
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "name": { "type": "string" }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+            })
         );
     }
 
