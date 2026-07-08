@@ -77,6 +77,35 @@ pub trait AgentControlPolicy: fmt::Debug + Send + Sync {
     ) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
 }
 
+/// agent-control 工具模型可见状态的共享分类。
+///
+/// 宿主可以把自己的产品生命周期状态映射到该分类；pl-core 负责再转换成
+/// `pl_protocol::AgentStatus` wire 形状，避免每个产品 adapter 直接维护模型协议枚举。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentControlStatusKind {
+    Queued,
+    Running,
+    Waiting,
+    Completed,
+    Errored,
+    Interrupted,
+    Shutdown,
+}
+
+impl AgentControlStatusKind {
+    pub fn to_agent_status(self) -> AgentStatus {
+        match self {
+            Self::Queued => AgentStatus::Queued,
+            Self::Running => AgentStatus::Running,
+            Self::Waiting => AgentStatus::Waiting,
+            Self::Completed => AgentStatus::Completed,
+            Self::Errored => AgentStatus::Errored,
+            Self::Interrupted => AgentStatus::Interrupted,
+            Self::Shutdown => AgentStatus::Shutdown,
+        }
+    }
+}
+
 /// 共享 `spawn_agent.agentType` 可识别的 agent 类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

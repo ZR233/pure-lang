@@ -66,10 +66,11 @@ pub use multi_agent::{
     AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
     AgentControlMessageOutput, AgentControlPolicy, AgentControlSendInputOutput,
     AgentControlSendInputRequest, AgentControlSpawnOutput, AgentControlSpawnRequest,
-    AgentControlTargetRequest, AgentControlTool, AgentControlToolKind, AgentControlWaitOutput,
-    AgentControlWaitRequest, AllowAllAgentControlPolicy, CloseAgentTool, ListAgentsTool,
-    ResumeAgentTool, SendInputTool, SpawnAgentTool, TOOL_CLOSE_AGENT, TOOL_LIST_AGENTS,
-    TOOL_RESUME_AGENT, TOOL_SEND_INPUT, TOOL_SPAWN_AGENT, TOOL_WAIT_AGENT, WaitAgentTool,
+    AgentControlStatusKind, AgentControlTargetRequest, AgentControlTool, AgentControlToolKind,
+    AgentControlWaitOutput, AgentControlWaitRequest, AllowAllAgentControlPolicy, CloseAgentTool,
+    ListAgentsTool, ResumeAgentTool, SendInputTool, SpawnAgentTool, TOOL_CLOSE_AGENT,
+    TOOL_LIST_AGENTS, TOOL_RESUME_AGENT, TOOL_SEND_INPUT, TOOL_SPAWN_AGENT, TOOL_WAIT_AGENT,
+    WaitAgentTool,
 };
 pub use output_format::{
     DEFAULT_MODEL_TOOL_OUTPUT_TOKENS, SECRET_REDACTION_REPLACEMENT, SecretRedaction,

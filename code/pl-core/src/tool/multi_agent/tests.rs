@@ -35,6 +35,40 @@ fn agent_record(id: &str, status: AgentStatus, error: Option<&str>) -> AgentReco
 }
 
 #[test]
+fn agent_control_status_kind_maps_to_protocol_status() {
+    use crate::tool::AgentControlStatusKind;
+
+    assert_eq!(
+        AgentControlStatusKind::Queued.to_agent_status(),
+        AgentStatus::Queued
+    );
+    assert_eq!(
+        AgentControlStatusKind::Running.to_agent_status(),
+        AgentStatus::Running
+    );
+    assert_eq!(
+        AgentControlStatusKind::Waiting.to_agent_status(),
+        AgentStatus::Waiting
+    );
+    assert_eq!(
+        AgentControlStatusKind::Completed.to_agent_status(),
+        AgentStatus::Completed
+    );
+    assert_eq!(
+        AgentControlStatusKind::Errored.to_agent_status(),
+        AgentStatus::Errored
+    );
+    assert_eq!(
+        AgentControlStatusKind::Interrupted.to_agent_status(),
+        AgentStatus::Interrupted
+    );
+    assert_eq!(
+        AgentControlStatusKind::Shutdown.to_agent_status(),
+        AgentStatus::Shutdown
+    );
+}
+
+#[test]
 fn wait_agent_result_serializes_activity_message() {
     let output = json_output(WaitAgentResult {
         message: "wait_agent observed agent activity.".to_string(),
