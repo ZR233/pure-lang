@@ -8,9 +8,10 @@ pub use record::AgentRecord;
 pub(crate) use supervisor::emit_subagent_activity;
 pub use supervisor::{
     AgentHandle, AgentInputBusyAction, AgentInputInitialAction, AgentInputQueue,
-    AgentInputSubmission, AgentInputTurnMode, AgentLifecycleStatusKind, AgentMessage,
-    AgentMessageMode, AgentMessageRequest, AgentRunSpec, AgentSpawnInput, AgentStatusUpdate,
-    AgentSupervisor, AgentToolRegistrar, AgentTurnPresence, AgentTurnStartReadiness,
-    AgentTurnStartSnapshot, AgentWaitCompletion, AgentWaitLoopError, AgentWaitLoopOptions,
-    AgentWaitLoopResult, AgentWaitOutcome, AgentWaitSnapshot, wait_for_agent_completion,
+    AgentInputStartAttempt, AgentInputSubmission, AgentInputTurnMode, AgentLifecycleStatusKind,
+    AgentMessage, AgentMessageMode, AgentMessageRequest, AgentRunSpec, AgentSpawnInput,
+    AgentStatusUpdate, AgentSupervisor, AgentToolRegistrar, AgentTurnPresence,
+    AgentTurnStartReadiness, AgentTurnStartSnapshot, AgentWaitCompletion, AgentWaitLoopError,
+    AgentWaitLoopOptions, AgentWaitLoopResult, AgentWaitOutcome, AgentWaitSnapshot,
+    wait_for_agent_completion,
 };

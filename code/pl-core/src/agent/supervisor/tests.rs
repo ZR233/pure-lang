@@ -194,6 +194,24 @@ fn agent_input_queue_preserves_fifo_and_restore_front_order() {
 }
 
 #[test]
+fn agent_input_queue_start_attempt_restores_busy_input_to_front() {
+    let mut queue = AgentInputQueue::default();
+    queue.push("first");
+    queue.push("second");
+
+    let attempt = queue
+        .take_start_attempt()
+        .expect("start attempt should contain first input");
+    assert_eq!(attempt.input(), &"first");
+    assert_eq!(queue.len(), 1);
+
+    queue.restore_start_attempt(attempt);
+
+    assert_eq!(queue.pop(), Some("first"));
+    assert_eq!(queue.pop(), Some("second"));
+}
+
+#[test]
 fn agent_wait_completion_completes_without_active_turn() {
     let snapshot = AgentWaitSnapshot {
         turn_presence: AgentTurnPresence::NoActiveTurn,

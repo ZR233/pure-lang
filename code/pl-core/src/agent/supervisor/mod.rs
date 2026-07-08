@@ -174,6 +174,26 @@ pub struct AgentInputQueue<Input> {
     pending: VecDeque<Input>,
 }
 
+/// 从 pending input 队列取出的启动尝试。
+///
+/// 宿主可以在不持有队列锁的情况下解析 session、准备 turn 或执行产品检查；
+/// 如果启动发现目标仍忙，应把该 attempt 交回 `restore_start_attempt`，
+/// 由 pl-core 统一恢复到队首，保持重试顺序。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentInputStartAttempt<Input> {
+    input: Input,
+}
+
+impl<Input> AgentInputStartAttempt<Input> {
+    pub fn input(&self) -> &Input {
+        &self.input
+    }
+
+    pub fn into_input(self) -> Input {
+        self.input
+    }
+}
+
 impl<Input> AgentInputQueue<Input> {
     pub fn new() -> Self {
         Self {
@@ -191,6 +211,16 @@ impl<Input> AgentInputQueue<Input> {
 
     pub fn restore_front(&mut self, input: Input) {
         self.pending.push_front(input);
+    }
+
+    pub fn take_start_attempt(&mut self) -> Option<AgentInputStartAttempt<Input>> {
+        self.pending
+            .pop_front()
+            .map(|input| AgentInputStartAttempt { input })
+    }
+
+    pub fn restore_start_attempt(&mut self, attempt: AgentInputStartAttempt<Input>) {
+        self.pending.push_front(attempt.into_input());
     }
 
     pub fn len(&self) -> usize {
