@@ -29,6 +29,64 @@ pub struct CoreModelTurnRequest {
     continuation_cache_key: Option<String>,
 }
 
+/// 模型 provider 的 continuation 策略族。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoreModelProviderFamily {
+    OpenAi,
+    Other,
+}
+
+/// 模型请求使用的 wire API 族。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoreModelWireApi {
+    Responses,
+    Chat,
+    Other,
+}
+
+/// 用于推导模型 continuation 策略的宿主输入。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoreModelContinuationProfile {
+    pub provider_family: CoreModelProviderFamily,
+    pub wire_api: CoreModelWireApi,
+    pub model_supports_continuation: bool,
+    pub base_url: String,
+    pub model: String,
+}
+
+/// pl-core 模型 continuation 执行配置。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoreModelContinuationConfig {
+    enabled: bool,
+    cache_key: Option<String>,
+}
+
+impl CoreModelContinuationConfig {
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            cache_key: None,
+        }
+    }
+
+    pub fn from_profile(profile: CoreModelContinuationProfile) -> Self {
+        if profile.provider_family != CoreModelProviderFamily::OpenAi
+            || profile.wire_api != CoreModelWireApi::Responses
+            || !profile.model_supports_continuation
+        {
+            return Self::disabled();
+        }
+        Self {
+            enabled: true,
+            cache_key: Some(format!(
+                "openai|{}|{}",
+                profile.base_url.trim_end_matches('/'),
+                profile.model
+            )),
+        }
+    }
+}
+
 impl CoreModelTurnRequest {
     pub fn new(model: impl Into<String>) -> Self {
         Self {
@@ -75,6 +133,12 @@ impl CoreModelTurnRequest {
 
     pub fn with_continuation_cache_key(mut self, key: impl Into<String>) -> Self {
         self.continuation_cache_key = Some(key.into());
+        self
+    }
+
+    pub fn with_continuation_config(mut self, config: CoreModelContinuationConfig) -> Self {
+        self.use_continuation = config.enabled;
+        self.continuation_cache_key = config.cache_key;
         self
     }
 }
@@ -217,5 +281,69 @@ async fn stream_completion(
             }
         }
         None => provider.stream_complete(request, event_tx).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CoreModelContinuationConfig, CoreModelContinuationProfile, CoreModelProviderFamily,
+        CoreModelTurnRequest, CoreModelWireApi,
+    };
+
+    #[test]
+    fn continuation_profile_enables_openai_responses_with_stable_cache_key() {
+        let config = CoreModelContinuationConfig::from_profile(CoreModelContinuationProfile {
+            provider_family: CoreModelProviderFamily::OpenAi,
+            wire_api: CoreModelWireApi::Responses,
+            model_supports_continuation: true,
+            base_url: "https://api.openai.com/v1/".to_string(),
+            model: "gpt-5.5".to_string(),
+        });
+
+        assert!(config.enabled);
+        assert_eq!(
+            config.cache_key.as_deref(),
+            Some("openai|https://api.openai.com/v1|gpt-5.5")
+        );
+
+        let request = CoreModelTurnRequest::new("gpt-5.5").with_continuation_config(config);
+
+        assert!(request.use_continuation);
+        assert_eq!(
+            request.continuation_cache_key.as_deref(),
+            Some("openai|https://api.openai.com/v1|gpt-5.5")
+        );
+    }
+
+    #[test]
+    fn continuation_profile_disables_non_openai_responses_capability() {
+        for profile in [
+            CoreModelContinuationProfile {
+                provider_family: CoreModelProviderFamily::Other,
+                wire_api: CoreModelWireApi::Responses,
+                model_supports_continuation: true,
+                base_url: "https://example.com/v1".to_string(),
+                model: "gpt-5.5".to_string(),
+            },
+            CoreModelContinuationProfile {
+                provider_family: CoreModelProviderFamily::OpenAi,
+                wire_api: CoreModelWireApi::Chat,
+                model_supports_continuation: true,
+                base_url: "https://api.openai.com/v1".to_string(),
+                model: "gpt-5.5".to_string(),
+            },
+            CoreModelContinuationProfile {
+                provider_family: CoreModelProviderFamily::OpenAi,
+                wire_api: CoreModelWireApi::Responses,
+                model_supports_continuation: false,
+                base_url: "https://api.openai.com/v1".to_string(),
+                model: "gpt-5.5".to_string(),
+            },
+        ] {
+            let config = CoreModelContinuationConfig::from_profile(profile);
+            assert!(!config.enabled);
+            assert_eq!(config.cache_key, None);
+        }
     }
 }
