@@ -503,6 +503,14 @@ impl ToolOutput {
         })
     }
 
+    /// 消费工具输出并返回模型可见文本。
+    ///
+    /// `ToolOutput` 内部目前用 `description` 存储模型可见输出；产品层应通过该
+    /// 语义方法读取，避免把字段名当作共享协议。
+    pub fn into_model_output(self) -> String {
+        self.description
+    }
+
     /// 从工具运行时事件中提取并解码输出 artifact。
     ///
     /// `OutputArtifacts` 是 pl-core 的工具执行事件细节，产品层应通过这个方法
@@ -781,6 +789,17 @@ mod tests {
                 runtime_events: vec![ToolRuntimeEvent::EndTurn],
             }
         );
+    }
+
+    #[test]
+    fn tool_output_consumes_model_visible_output() {
+        let output = ToolOutput::from_model_output(ToolOutputModelOutputRequest {
+            model_output: "visible".to_string(),
+            success: true,
+            ends_turn: false,
+        });
+
+        assert_eq!(output.into_model_output(), "visible");
     }
 
     #[test]
