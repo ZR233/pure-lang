@@ -551,6 +551,21 @@ impl crate::tool::McpResourceBackend for FakeMcpResourceBackend {
     }
 }
 
+#[derive(Debug)]
+struct FakeMcpToolBackend;
+
+impl crate::tool::McpToolBackend for FakeMcpToolBackend {
+    async fn call_tool(
+        &self,
+        request: crate::tool::McpToolRequest,
+    ) -> crate::Result<serde_json::Value> {
+        Ok(serde_json::json!({
+            "tool": request.name,
+            "arguments": request.arguments,
+        }))
+    }
+}
+
 #[tokio::test]
 async fn tool_set_builder_registers_mcp_resource_backend() {
     let capabilities = crate::config::ToolCapabilityConfig {
@@ -577,6 +592,64 @@ async fn tool_set_builder_registers_mcp_resource_backend() {
     assert!(core.tools.get("list_mcp_resources").is_some());
     assert!(core.tools.get("list_mcp_resource_templates").is_none());
     assert!(core.tools.get("read_mcp_resource").is_some());
+}
+
+#[tokio::test]
+async fn tool_set_builder_registers_host_mcp_tools() {
+    let capabilities = crate::config::ToolCapabilityConfig {
+        mcp: true,
+        ..Default::default()
+    };
+    let mut core = PureCore::default_provider().unwrap();
+    let schema = pl_model::ToolSchema::function(
+        "mcp__docs__lookup",
+        "Lookup docs.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string" }
+            },
+            "required": ["query"]
+        }),
+    );
+
+    ToolSetBuilder::from_capabilities(capabilities)
+        .with_allowed_tools(["mcp__docs__lookup"])
+        .with_mcp_tools(
+            vec![schema.clone()],
+            std::sync::Arc::new(FakeMcpToolBackend),
+        )
+        .register(&mut core, std::env::temp_dir(), None)
+        .await;
+
+    let schemas = core.tools.schemas();
+    assert_eq!(schemas.len(), 1);
+    assert_eq!(schemas[0].name(), schema.name());
+    assert_eq!(schemas[0].description(), schema.description());
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let output = core
+        .tools
+        .get("mcp__docs__lookup")
+        .expect("mcp tool")
+        .execute(
+            crate::tool::ToolInput {
+                arguments: serde_json::json!({ "query": "agent kernel" }),
+                session_id: "session_mcp".to_string(),
+                tool_id: "call_mcp".to_string(),
+                revision_base: 0,
+            },
+            test_tool_context(event_tx),
+        )
+        .await
+        .expect("execute mcp tool");
+
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&output.description).expect("json output"),
+        serde_json::json!({
+            "tool": "mcp__docs__lookup",
+            "arguments": { "query": "agent kernel" },
+        })
+    );
 }
 
 #[tokio::test]

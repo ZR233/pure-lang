@@ -6,6 +6,7 @@ mod file;
 mod git;
 mod lsp;
 mod mcp_resource;
+mod mcp_tool;
 mod multi_agent;
 mod output_format;
 mod path_policy;
@@ -57,6 +58,7 @@ pub use mcp_resource::{
     McpResourceBackend, McpResourceTool, McpResourceToolKind, TOOL_LIST_MCP_RESOURCE_TEMPLATES,
     TOOL_LIST_MCP_RESOURCES, TOOL_READ_MCP_RESOURCE,
 };
+pub use mcp_tool::{McpTool, McpToolBackend, McpToolRequest};
 pub use multi_agent::{
     AgentControlAgentRecord, AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
     AgentControlMessageOutput, AgentControlSendInputOutput, AgentControlSendInputRequest,

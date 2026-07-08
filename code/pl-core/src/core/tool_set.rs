@@ -12,10 +12,11 @@ use crate::tool::{
     ContainerWorkspaceFileBackend, CopyPathTool, CreateDirectoryTool, DeletePathTool,
     ExecutionBackend, GitCredentialProvider, GitToolKind, GitWorkspaceConfig, ListAgentsTool,
     ListFilesTool, LocalExecutionBackend, McpListResourceTemplatesRequest, McpListResourcesRequest,
-    McpReadResourceRequest, McpResourceBackend, McpResourceTool, McpResourceToolKind, MovePathTool,
-    NoContainerBackend, NoGitCredentialProvider, PlanExitTool, ReadFileTool, ResumeAgentTool,
-    SearchFilesTool, SendInputTool, SpawnAgentTool, StatPathTool, TodoListTool, Tool,
-    WaitAgentTool, WorkspaceFileTool, WorkspaceFileToolKind, WriteFileTool, command_tool_pair,
+    McpReadResourceRequest, McpResourceBackend, McpResourceTool, McpResourceToolKind, McpTool,
+    McpToolBackend, McpToolRequest, MovePathTool, NoContainerBackend, NoGitCredentialProvider,
+    PlanExitTool, ReadFileTool, ResumeAgentTool, SearchFilesTool, SendInputTool, SpawnAgentTool,
+    StatPathTool, TodoListTool, Tool, WaitAgentTool, WorkspaceFileTool, WorkspaceFileToolKind,
+    WriteFileTool, command_tool_pair,
 };
 use pl_model::ToolSchema;
 use pl_protocol::{PureError, Result};
@@ -65,12 +66,14 @@ pub struct ToolSetBuilder<
     C = NoContainerBackend,
     A = NoAgentControlBackend,
     M = NoMcpResourceBackend,
+    T = NoMcpToolBackend,
 > {
     capabilities: ToolCapabilityConfig,
     git_runtime: Option<GitToolRuntime<B, P>>,
     container_runtime: Option<ContainerToolRuntime<C>>,
     agent_control_runtime: Option<AgentControlToolRuntime<A>>,
     mcp_resource_runtime: Option<McpResourceToolRuntime<M>>,
+    mcp_tool_runtime: Option<McpToolRuntime<T>>,
     allowed_tools: Option<HashSet<String>>,
 }
 
@@ -82,12 +85,13 @@ impl ToolSetBuilder {
             container_runtime: None,
             agent_control_runtime: None,
             mcp_resource_runtime: None,
+            mcp_tool_runtime: None,
             allowed_tools: None,
         }
     }
 }
 
-impl<B, P, C, A, M> ToolSetBuilder<B, P, C, A, M> {
+impl<B, P, C, A, M, T> ToolSetBuilder<B, P, C, A, M, T> {
     pub fn with_allowed_tools<I, S>(mut self, allowed_tools: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -102,7 +106,7 @@ impl<B, P, C, A, M> ToolSetBuilder<B, P, C, A, M> {
         config: GitWorkspaceConfig,
         backend: Arc<NB>,
         credential_provider: Arc<NP>,
-    ) -> ToolSetBuilder<NB, NP, C, A, M> {
+    ) -> ToolSetBuilder<NB, NP, C, A, M, T> {
         ToolSetBuilder {
             capabilities: self.capabilities,
             git_runtime: Some(GitToolRuntime {
@@ -113,39 +117,65 @@ impl<B, P, C, A, M> ToolSetBuilder<B, P, C, A, M> {
             container_runtime: self.container_runtime,
             agent_control_runtime: self.agent_control_runtime,
             mcp_resource_runtime: self.mcp_resource_runtime,
+            mcp_tool_runtime: self.mcp_tool_runtime,
             allowed_tools: self.allowed_tools,
         }
     }
 
-    pub fn with_container_tools<NC>(self, backend: Arc<NC>) -> ToolSetBuilder<B, P, NC, A, M> {
+    pub fn with_container_tools<NC>(self, backend: Arc<NC>) -> ToolSetBuilder<B, P, NC, A, M, T> {
         ToolSetBuilder {
             capabilities: self.capabilities,
             git_runtime: self.git_runtime,
             container_runtime: Some(ContainerToolRuntime { backend }),
             agent_control_runtime: self.agent_control_runtime,
             mcp_resource_runtime: self.mcp_resource_runtime,
+            mcp_tool_runtime: self.mcp_tool_runtime,
             allowed_tools: self.allowed_tools,
         }
     }
 
-    pub fn with_agent_control_tools<NA>(self, backend: Arc<NA>) -> ToolSetBuilder<B, P, C, NA, M> {
+    pub fn with_agent_control_tools<NA>(
+        self,
+        backend: Arc<NA>,
+    ) -> ToolSetBuilder<B, P, C, NA, M, T> {
         ToolSetBuilder {
             capabilities: self.capabilities,
             git_runtime: self.git_runtime,
             container_runtime: self.container_runtime,
             agent_control_runtime: Some(AgentControlToolRuntime { backend }),
             mcp_resource_runtime: self.mcp_resource_runtime,
+            mcp_tool_runtime: self.mcp_tool_runtime,
             allowed_tools: self.allowed_tools,
         }
     }
 
-    pub fn with_mcp_resource_tools<NM>(self, backend: Arc<NM>) -> ToolSetBuilder<B, P, C, A, NM> {
+    pub fn with_mcp_resource_tools<NM>(
+        self,
+        backend: Arc<NM>,
+    ) -> ToolSetBuilder<B, P, C, A, NM, T> {
         ToolSetBuilder {
             capabilities: self.capabilities,
             git_runtime: self.git_runtime,
             container_runtime: self.container_runtime,
             agent_control_runtime: self.agent_control_runtime,
             mcp_resource_runtime: Some(McpResourceToolRuntime { backend }),
+            mcp_tool_runtime: self.mcp_tool_runtime,
+            allowed_tools: self.allowed_tools,
+        }
+    }
+
+    pub fn with_mcp_tools<NT>(
+        self,
+        schemas: Vec<ToolSchema>,
+        backend: Arc<NT>,
+    ) -> ToolSetBuilder<B, P, C, A, M, NT> {
+        ToolSetBuilder {
+            capabilities: self.capabilities,
+            git_runtime: self.git_runtime,
+            container_runtime: self.container_runtime,
+            agent_control_runtime: self.agent_control_runtime,
+            mcp_resource_runtime: self.mcp_resource_runtime,
+            mcp_tool_runtime: Some(McpToolRuntime { schemas, backend }),
             allowed_tools: self.allowed_tools,
         }
     }
@@ -160,6 +190,11 @@ impl<B, P, C, A, M> ToolSetBuilder<B, P, C, A, M> {
         options.container = options.container && self.container_runtime.is_some();
         options.mcp_resources = options.mcp_resources && self.mcp_resource_runtime.is_some();
         let mut schemas = shared_tool_schemas(options);
+        if self.capabilities.mcp
+            && let Some(runtime) = &self.mcp_tool_runtime
+        {
+            schemas.extend(runtime.schemas.clone());
+        }
         if let Some(allowed) = &self.allowed_tools {
             schemas.retain(|schema| allowed.contains(schema.name()));
         }
@@ -180,13 +215,14 @@ impl<B, P, C, A, M> ToolSetBuilder<B, P, C, A, M> {
     }
 }
 
-impl<B, P, C, A, M> ToolSetBuilder<B, P, C, A, M>
+impl<B, P, C, A, M, T> ToolSetBuilder<B, P, C, A, M, T>
 where
     B: ExecutionBackend + 'static,
     P: GitCredentialProvider + 'static,
     C: ContainerBackend + 'static,
     A: AgentControlBackend + 'static,
     M: McpResourceBackend + 'static,
+    T: McpToolBackend + 'static,
 {
     pub async fn register(
         &self,
@@ -273,6 +309,16 @@ where
             register_mcp_resource_tools(core, runtime.backend.clone(), |name| {
                 self.tool_allowed(name)
             });
+        }
+        if self.capabilities.mcp
+            && let Some(runtime) = &self.mcp_tool_runtime
+        {
+            register_mcp_tools(
+                core,
+                runtime.schemas.clone(),
+                runtime.backend.clone(),
+                |name| self.tool_allowed(name),
+            );
         }
         register_if_allowed(core, TodoListTool, |name| self.tool_allowed(name));
         register_if_allowed(core, PlanExitTool, |name| self.tool_allowed(name));
@@ -369,6 +415,12 @@ struct McpResourceToolRuntime<M> {
     backend: Arc<M>,
 }
 
+#[derive(Debug, Clone)]
+struct McpToolRuntime<T> {
+    schemas: Vec<ToolSchema>,
+    backend: Arc<T>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct NoAgentControlBackend;
 
@@ -436,6 +488,15 @@ impl McpResourceBackend for NoMcpResourceBackend {
 
     async fn read_resource(&self, _request: McpReadResourceRequest) -> Result<Value> {
         Err(missing_backend_error("read_mcp_resource", "MCP resource"))
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct NoMcpToolBackend;
+
+impl McpToolBackend for NoMcpToolBackend {
+    async fn call_tool(&self, request: McpToolRequest) -> Result<Value> {
+        Err(missing_backend_error(&request.name, "MCP tool"))
     }
 }
 
@@ -508,6 +569,21 @@ fn register_mcp_resource_tools<M>(
     for kind in McpResourceToolKind::all() {
         if allowed(kind.name()) {
             core.register_tool(McpResourceTool::new(*kind, backend.clone()));
+        }
+    }
+}
+
+fn register_mcp_tools<T>(
+    core: &mut PureCore,
+    schemas: Vec<ToolSchema>,
+    backend: Arc<T>,
+    allowed: impl Fn(&str) -> bool,
+) where
+    T: McpToolBackend + 'static,
+{
+    for schema in schemas {
+        if allowed(schema.name()) {
+            core.register_tool(McpTool::new(schema, backend.clone()));
         }
     }
 }
