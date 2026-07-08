@@ -405,6 +405,67 @@ pub struct ToolOutputModelOutputRequest {
     pub ends_turn: bool,
 }
 
+/// 工具执行结果的通用中间形态。
+///
+/// handler 可以保留完整输出和 artifact 元数据，同时由 pl-core 统一生成模型可见
+/// 输出、成功状态和结束回合事件，避免产品层各自维护一套截断和 `ToolOutput`
+/// 映射规则。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolExecutionResult<Artifact = serde_json::Value> {
+    pub success: bool,
+    pub output: String,
+    pub model_output: String,
+    pub ends_turn: bool,
+    pub output_artifacts: Vec<Artifact>,
+}
+
+impl<Artifact> ToolExecutionResult<Artifact> {
+    pub fn new(success: bool, output: String, ends_turn: bool) -> Self {
+        Self::with_model_tokens(
+            success,
+            output,
+            ends_turn,
+            DEFAULT_MODEL_TOOL_OUTPUT_TOKENS,
+            Vec::new(),
+        )
+    }
+
+    pub fn with_model_tokens(
+        success: bool,
+        output: String,
+        ends_turn: bool,
+        max_output_tokens: usize,
+        output_artifacts: Vec<Artifact>,
+    ) -> Self {
+        let model_output = model_visible_tool_output_with_tokens(&output, max_output_tokens);
+        Self::with_model_output(success, output, model_output, ends_turn, output_artifacts)
+    }
+
+    pub fn with_model_output(
+        success: bool,
+        output: String,
+        model_output: String,
+        ends_turn: bool,
+        output_artifacts: Vec<Artifact>,
+    ) -> Self {
+        Self {
+            success,
+            output,
+            model_output,
+            ends_turn,
+            output_artifacts,
+        }
+    }
+
+    pub fn into_tool_output(self) -> ToolOutput {
+        ToolOutput::from_model_output(ToolOutputModelOutputRequest {
+            model_output: self.model_output,
+            success: self.success,
+            ends_turn: self.ends_turn,
+        })
+    }
+}
+
 impl ToolOutput {
     pub fn from_model_output(request: ToolOutputModelOutputRequest) -> Self {
         Self {
@@ -632,6 +693,39 @@ mod tests {
                 truncated: OutputTruncation::empty(),
                 output_file: PathBuf::new(),
                 exit_code: Some(1),
+                timed_out: false,
+                runtime_events: vec![ToolRuntimeEvent::EndTurn],
+            }
+        );
+    }
+
+    #[test]
+    fn tool_execution_result_keeps_full_output_and_builds_tool_output() {
+        let execution = ToolExecutionResult::with_model_tokens(
+            true,
+            "full output".to_string(),
+            true,
+            10_000,
+            vec![serde_json::json!({"id": "artifact-1"})],
+        );
+
+        assert_eq!(
+            execution,
+            ToolExecutionResult {
+                success: true,
+                output: "full output".to_string(),
+                model_output: "full output".to_string(),
+                ends_turn: true,
+                output_artifacts: vec![serde_json::json!({"id": "artifact-1"})],
+            }
+        );
+        assert_eq!(
+            execution.into_tool_output(),
+            ToolOutput {
+                description: "full output".to_string(),
+                truncated: OutputTruncation::empty(),
+                output_file: PathBuf::new(),
+                exit_code: Some(0),
                 timed_out: false,
                 runtime_events: vec![ToolRuntimeEvent::EndTurn],
             }
