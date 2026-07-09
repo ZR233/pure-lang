@@ -1,3 +1,4 @@
+use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -1107,6 +1108,23 @@ pub enum TurnReturnError {
     Failed(String),
 }
 
+/// 宿主错误在 turn 边界上的通用分类。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnReturnErrorKind {
+    Cancelled,
+    Failed,
+}
+
+impl TurnReturnError {
+    /// 从宿主错误文本和宿主提供的通用分类构造 `pl-core` turn 返回错误。
+    pub fn from_host_error(error: impl fmt::Display, kind: TurnReturnErrorKind) -> Self {
+        match kind {
+            TurnReturnErrorKind::Cancelled => Self::Cancelled,
+            TurnReturnErrorKind::Failed => Self::Failed(error.to_string()),
+        }
+    }
+}
+
 /// 宿主可投影到自身状态机的单轮错误终止语义。
 ///
 /// `pl-core` 负责把取消、失败等通用返回错误解释为稳定的 turn 终态、
@@ -1272,6 +1290,21 @@ mod tests {
                 error_message: Some("model stream disconnected".to_string()),
                 should_publish_error: true,
             }
+        );
+    }
+
+    #[test]
+    fn turn_return_error_builds_from_host_error_classification() {
+        assert_eq!(
+            TurnReturnError::from_host_error("cancelled by user", TurnReturnErrorKind::Cancelled),
+            TurnReturnError::Cancelled
+        );
+        assert_eq!(
+            TurnReturnError::from_host_error(
+                "model stream disconnected",
+                TurnReturnErrorKind::Failed
+            ),
+            TurnReturnError::Failed("model stream disconnected".to_string())
         );
     }
 

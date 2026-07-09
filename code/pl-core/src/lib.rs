@@ -185,7 +185,7 @@ pub use turn::{
     DEFAULT_WALL_CLOCK_MS, InteractionCallback, InteractionFuture, PermissionMode,
     ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest, ToolExecutionMode,
     TurnAbortReason, TurnBudget, TurnErrorProjection, TurnOptions, TurnOutcome, TurnOutcomeStatus,
-    TurnRequest, TurnResult, TurnResultStatus, TurnReturnError, TurnTaskHandle, UserInputMode,
-    ensure_turn_not_cancelled,
+    TurnRequest, TurnResult, TurnResultStatus, TurnReturnError, TurnReturnErrorKind,
+    TurnTaskHandle, UserInputMode, ensure_turn_not_cancelled,
 };
 pub use workspace::{load_workspace_instructions, resolve_workspace_root};
