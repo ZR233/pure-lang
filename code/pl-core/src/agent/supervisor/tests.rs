@@ -63,6 +63,14 @@ fn test_run_spec(message: &str) -> AgentRunSpec {
     }
 }
 
+fn normalize_supervisor_source(source: &str) -> String {
+    source.replace("\r\n", "\n")
+}
+
+fn supervisor_source() -> String {
+    normalize_supervisor_source(include_str!("mod.rs"))
+}
+
 #[test]
 fn agent_input_turn_mode_maps_codex_flags_to_single_policy() {
     assert_eq!(
@@ -149,7 +157,7 @@ fn agent_wait_outcome_builds_wait_agent_output() {
 
 #[test]
 fn agent_wait_outcome_hides_shared_fields_behind_constructor() {
-    let source = include_str!("mod.rs");
+    let source = supervisor_source();
     let outcome_fields = source
         .split("pub struct AgentWaitOutcome")
         .nth(1)
@@ -164,6 +172,17 @@ fn agent_wait_outcome_hides_shared_fields_behind_constructor() {
         !outcome_fields.contains("pub timed_out:"),
         "AgentWaitOutcome 字段不应公开给宿主 adapter 手写"
     );
+}
+
+#[test]
+fn supervisor_source_normalizes_windows_line_endings_for_shape_checks() {
+    let source = normalize_supervisor_source(
+        "impl AgentWaitOutcome {\r\n    /// 使用 timeout 标记创建 wait 输出结果。\r\n    pub fn new(",
+    );
+
+    assert!(source.contains(
+        "impl AgentWaitOutcome {\n    /// 使用 timeout 标记创建 wait 输出结果。\n    pub fn new("
+    ));
 }
 
 #[test]
@@ -264,7 +283,7 @@ fn agent_wait_completion_completes_without_active_turn() {
 
 #[test]
 fn agent_wait_snapshot_hides_shared_fields_behind_constructor() {
-    let source = include_str!("mod.rs");
+    let source = supervisor_source();
     let wait_snapshot_fields = source
         .split("pub struct AgentWaitSnapshot")
         .nth(1)
@@ -489,7 +508,7 @@ fn agent_turn_start_readiness_allows_idle_and_restartable_statuses() {
 
 #[test]
 fn agent_turn_start_snapshot_hides_shared_fields_behind_constructor() {
-    let source = include_str!("mod.rs");
+    let source = supervisor_source();
     let turn_start_fields = source
         .split("pub struct AgentTurnStartSnapshot")
         .nth(1)
