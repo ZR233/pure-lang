@@ -5,6 +5,7 @@
 //! 透传写入 API 请求体，不包含任何 provider 特定代码。
 
 use std::collections::BTreeMap;
+use std::fmt;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -39,7 +40,116 @@ impl ModelParameter {
     pub fn wire_for(&self, selected: &str) -> Option<&ParameterWire> {
         self.wire.get(selected)
     }
+
+    /// 判断候选值是否在该参数声明的值域中。
+    pub fn has_candidate(&self, candidate: &str) -> bool {
+        self.candidates.iter().any(|item| item == candidate)
+    }
+
+    /// 返回参数的默认候选值。
+    ///
+    /// 若调用方传入的默认值存在且属于候选值域，优先返回该值；否则回退到
+    /// candidates 首项。这样宿主产品可以保留配置文件里的显式默认值，同时仍由
+    /// pl-model 统一维护回退规则。
+    pub fn default_candidate(&self, configured_default: Option<&str>) -> Option<String> {
+        configured_default
+            .filter(|candidate| self.has_candidate(candidate))
+            .map(ToString::to_string)
+            .or_else(|| self.candidates.first().cloned())
+    }
+
+    /// 解析一次模型参数选择，统一处理显式选择、缺省默认值和禁用值。
+    pub fn resolve_candidate(
+        &self,
+        request: ModelParameterCandidateRequest<'_>,
+    ) -> Result<Option<String>, ModelParameterCandidateError> {
+        if let Some(candidate) = request.requested {
+            if candidate.trim().is_empty()
+                || request
+                    .disabled_values
+                    .iter()
+                    .any(|disabled| *disabled == candidate)
+            {
+                return Ok(None);
+            }
+            if self.has_candidate(candidate) {
+                return Ok(Some(candidate.to_string()));
+            }
+            return Err(ModelParameterCandidateError::UnsupportedCandidate {
+                parameter: self.name.clone(),
+                candidate: candidate.to_string(),
+            });
+        }
+
+        match request.missing {
+            MissingCandidatePolicy::UseDefault => {
+                Ok(self.default_candidate(request.default_candidate))
+            }
+            MissingCandidatePolicy::Omit => Ok(None),
+        }
+    }
 }
+
+/// 未显式选择参数值时的处理策略。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MissingCandidatePolicy {
+    /// 使用参数默认候选值。
+    UseDefault,
+    /// 不写入该参数。
+    Omit,
+}
+
+/// 一次模型参数候选值解析请求。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModelParameterCandidateRequest<'a> {
+    /// 用户或上层策略显式指定的候选值。
+    pub requested: Option<&'a str>,
+    /// 配置中声明的默认候选值；若不存在或无效则回退到候选值首项。
+    pub default_candidate: Option<&'a str>,
+    /// 没有显式选择时采用的策略。
+    pub missing: MissingCandidatePolicy,
+    /// 表示禁用/清空该参数的特殊输入值。
+    pub disabled_values: &'a [&'a str],
+}
+
+impl Default for ModelParameterCandidateRequest<'_> {
+    fn default() -> Self {
+        Self {
+            requested: None,
+            default_candidate: None,
+            missing: MissingCandidatePolicy::Omit,
+            disabled_values: &[],
+        }
+    }
+}
+
+/// 模型参数候选值解析错误。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelParameterCandidateError {
+    /// 显式候选值不属于参数声明的值域。
+    UnsupportedCandidate {
+        parameter: String,
+        candidate: String,
+    },
+}
+
+impl fmt::Display for ModelParameterCandidateError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedCandidate {
+                parameter,
+                candidate,
+            } => {
+                write!(
+                    formatter,
+                    "candidate `{candidate}` is not supported by parameter `{parameter}`"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for ModelParameterCandidateError {}
 
 /// 选中某候选值时对请求体的修改动作。
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -342,6 +452,125 @@ mod tests {
         assert_eq!(wire.set[0].value, json!("high"));
 
         assert!(param.wire_for("unknown").is_none());
+    }
+
+    fn candidate_request<'a>(
+        requested: Option<&'a str>,
+        default_candidate: Option<&'a str>,
+        missing: MissingCandidatePolicy,
+    ) -> ModelParameterCandidateRequest<'a> {
+        ModelParameterCandidateRequest {
+            requested,
+            default_candidate,
+            missing,
+            disabled_values: &["none"],
+        }
+    }
+
+    #[test]
+    fn resolve_candidate_accepts_requested_candidate() {
+        let param = ModelParameter {
+            name: "effort".to_string(),
+            label: None,
+            candidates: vec!["high".to_string(), "max".to_string()],
+            wire: BTreeMap::new(),
+        };
+
+        assert_eq!(
+            param.resolve_candidate(candidate_request(
+                Some("max"),
+                Some("high"),
+                MissingCandidatePolicy::UseDefault
+            )),
+            Ok(Some("max".to_string()))
+        );
+    }
+
+    #[test]
+    fn resolve_candidate_uses_valid_default_candidate() {
+        let param = ModelParameter {
+            name: "effort".to_string(),
+            label: None,
+            candidates: vec!["high".to_string(), "medium".to_string()],
+            wire: BTreeMap::new(),
+        };
+
+        assert_eq!(
+            param.resolve_candidate(candidate_request(
+                None,
+                Some("medium"),
+                MissingCandidatePolicy::UseDefault
+            )),
+            Ok(Some("medium".to_string()))
+        );
+    }
+
+    #[test]
+    fn resolve_candidate_falls_back_to_first_candidate_when_default_is_unknown() {
+        let param = ModelParameter {
+            name: "effort".to_string(),
+            label: None,
+            candidates: vec!["high".to_string(), "medium".to_string()],
+            wire: BTreeMap::new(),
+        };
+
+        assert_eq!(
+            param.resolve_candidate(candidate_request(
+                None,
+                Some("low"),
+                MissingCandidatePolicy::UseDefault
+            )),
+            Ok(Some("high".to_string()))
+        );
+    }
+
+    #[test]
+    fn resolve_candidate_returns_none_for_disabled_or_blank_values() {
+        let param = ModelParameter {
+            name: "effort".to_string(),
+            label: None,
+            candidates: vec!["high".to_string(), "none".to_string()],
+            wire: BTreeMap::new(),
+        };
+
+        assert_eq!(
+            param.resolve_candidate(candidate_request(
+                Some("none"),
+                Some("high"),
+                MissingCandidatePolicy::UseDefault
+            )),
+            Ok(None)
+        );
+        assert_eq!(
+            param.resolve_candidate(candidate_request(
+                Some("  "),
+                Some("high"),
+                MissingCandidatePolicy::UseDefault
+            )),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn resolve_candidate_rejects_unknown_requested_candidate() {
+        let param = ModelParameter {
+            name: "effort".to_string(),
+            label: None,
+            candidates: vec!["high".to_string(), "max".to_string()],
+            wire: BTreeMap::new(),
+        };
+
+        assert_eq!(
+            param.resolve_candidate(candidate_request(
+                Some("low"),
+                Some("high"),
+                MissingCandidatePolicy::UseDefault
+            )),
+            Err(ModelParameterCandidateError::UnsupportedCandidate {
+                parameter: "effort".to_string(),
+                candidate: "low".to_string(),
+            })
+        );
     }
 
     #[test]
