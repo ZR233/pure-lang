@@ -26,8 +26,6 @@ pub(super) struct ResponsesRequestBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    max_output_tokens: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     store: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     previous_response_id: Option<String>,
@@ -103,7 +101,6 @@ impl ResponsesRequestBody {
             parallel_tool_calls: request.parallel_tool_calls,
             tools,
             temperature: request.temperature,
-            max_output_tokens: request.max_tokens,
             store: request.store,
             previous_response_id: request.previous_response_id.clone(),
             prompt_cache_key: request.prompt_cache_key.clone(),
@@ -172,7 +169,7 @@ impl ResponsesInputItem {
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum ResponsesRole {
-    System,
+    Developer,
     User,
     Assistant,
     Tool,
@@ -181,7 +178,7 @@ enum ResponsesRole {
 impl ResponsesRole {
     fn from_message_role(role: MessageRole) -> Self {
         match role {
-            MessageRole::System => Self::System,
+            MessageRole::System => Self::Developer,
             MessageRole::User => Self::User,
             MessageRole::Assistant => Self::Assistant,
             MessageRole::Tool => Self::Tool,

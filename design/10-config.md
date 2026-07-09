@@ -238,6 +238,8 @@ Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-
 
 Bundled OpenAI/GPT 模型参数以本地 Codex 仓库 `codex-rs/models-manager/models.json` 的修改为准，不按公开 API 文档臆造价格、最大输出或上下文窗口。当前 OpenAI 模板顺序为 `gpt-5.5`、`gpt-5.4`、`gpt-5.4-mini`。Pure 当前 `ModelInfo` 不持久化 Codex 的 `default_reasoning_level` 字段，因此 OpenAI 模型 effort 参数候选值的首项表示 Codex 默认 reasoning level，后续项表示其他支持档位；选中值通过 wire 写入 Responses 的 `reasoning.effort`。
 
+`request_profile.responses_max_tokens_field` 控制 Responses endpoint 如何序列化 `CompletionRequest::max_tokens`，可选值为 `omit`、`max_output_tokens`、`max_tokens` 和 `max_completion_tokens`。默认值为 `omit`，与 Codex 常规 Responses 请求保持一致；只有兼容代理明确要求输出 token 限制字段时才应在模型 profile 中显式设置。
+
 Bundled Zhipu 模型 effort 候选值默认为 `enabled` / `none`，直接映射到 Chat 的 `thinking.type`；`glm-5.2` 例外，候选值为 `high` / `max` / `none`，wire 层 `high` / `max` 同时写入 `reasoning_effort` 并设置 `thinking.type = enabled`，`none` 设置 `thinking.type = disabled` 并移除 `reasoning_effort`。
 
 配置里的模型按字段级合并覆盖 bundled model：用户只需写差异字段，缺失字段从 bundled 默认值继承（Option 字段未提供即继承，`parameters` / `capabilities` / `truncation_policy` 为空或默认时也继承 bundled）。角色引用的 model 必须存在于对应 provider 的 `models` 中。

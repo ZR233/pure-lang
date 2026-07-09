@@ -26,7 +26,8 @@ pub use default_models::{
 pub use manager::{DefaultModelsManager, ModelsManager};
 pub use model_family::{ModelFamily, ModelPricing};
 pub use model_info::{
-    MaxTokensField, ModelInfo, ModelRequestProfile, TruncationMode, TruncationPolicy,
+    MaxTokensField, ModelInfo, ModelRequestProfile, ResponsesMaxTokensField, TruncationMode,
+    TruncationPolicy,
 };
 pub use parameter::{
     MissingCandidatePolicy, ModelParameter, ModelParameterCandidateError,
