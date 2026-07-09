@@ -11,6 +11,7 @@ mod multi_agent;
 mod output_format;
 mod path_policy;
 mod plan;
+mod shell;
 mod skill;
 mod text_escape;
 mod todo;
@@ -51,7 +52,7 @@ pub use git::{
     LocalExecutionBackend, NoGitCredentialProvider, TOOL_GIT_BRANCH, TOOL_GIT_COMMIT,
     TOOL_GIT_DIFF, TOOL_GIT_FETCH, TOOL_GIT_PUSH, TOOL_GIT_STATUS, TOOL_GIT_SYNC_DEFAULT_BRANCH,
     TOOL_GIT_WORKSPACE_INFO, git_askpass_script, git_shell_command, git_shell_credential_prelude,
-    git_shell_retry_function, shell_quote_word,
+    git_shell_retry_function,
 };
 pub use lsp::{LspLanguageTool, LspQueryTool, lsp_tool_for_language};
 pub use mcp_resource::{
@@ -85,6 +86,7 @@ pub use output_format::{
 };
 pub(crate) use path_policy::{PathAccess, ToolPathPolicy};
 pub use plan::PlanExitTool;
+pub use shell::{ShellCommandTimeout, shell_command_with_timeout, shell_quote_word};
 pub use skill::{SkillManageTool, SkillViewTool, SkillsListTool};
 pub use todo::{TOOL_UPDATE_TODO_LIST, TodoListTool};
 pub use truncation::{OutputTruncation, TruncatedOutput, TruncationStrategy};

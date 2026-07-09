@@ -8,6 +8,7 @@ use super::backend::{
     ContainerExecRequest,
 };
 use super::helpers::shell_quote;
+use crate::tool::shell::{ShellCommandTimeout, shell_command_with_timeout};
 
 /// 基于 Docker CLI 的通用容器后端。
 ///
@@ -154,13 +155,10 @@ impl ContainerBackend for DockerCliContainerBackend {
 }
 
 fn shell_command_with_optional_timeout(command: &str, timeout_secs: Option<u64>) -> String {
-    match timeout_secs {
-        Some(seconds) => format!(
-            "timeout --preserve-status {seconds}s /bin/sh -lc {}",
-            shell_quote(command)
-        ),
-        None => command.to_string(),
-    }
+    shell_command_with_timeout(
+        command,
+        ShellCommandTimeout::from_optional_seconds(timeout_secs),
+    )
 }
 
 fn decode_and_limit(bytes: Vec<u8>, cap: usize) -> (String, bool) {

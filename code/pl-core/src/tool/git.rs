@@ -12,6 +12,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::process::Command;
 
+use super::shell::shell_quote_word;
 use super::{BoxFuture, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput};
 
 pub const TOOL_GIT_STATUS: &str = "git_status";
@@ -98,19 +99,6 @@ pub fn git_shell_retry_function() -> &'static str {
          sleep $((attempts * 2))\n\
        done\n\
      }\n"
-}
-
-/// 对单个 shell word 做 POSIX 风格转义。
-pub fn shell_quote_word(value: &str) -> String {
-    if value.is_empty() {
-        return "''".to_string();
-    }
-    if value.bytes().all(|byte| {
-        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'/' | b':' | b'=')
-    }) {
-        return value.to_string();
-    }
-    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 /// 通用命令执行请求。
