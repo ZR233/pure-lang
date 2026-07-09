@@ -50,7 +50,8 @@ pub use git::{
     GitShellCommandRequest, GitShellCredential, GitTool, GitToolKind, GitWorkspaceConfig,
     LocalExecutionBackend, NoGitCredentialProvider, TOOL_GIT_BRANCH, TOOL_GIT_COMMIT,
     TOOL_GIT_DIFF, TOOL_GIT_FETCH, TOOL_GIT_PUSH, TOOL_GIT_STATUS, TOOL_GIT_SYNC_DEFAULT_BRANCH,
-    TOOL_GIT_WORKSPACE_INFO, git_shell_command,
+    TOOL_GIT_WORKSPACE_INFO, git_shell_command, git_shell_credential_prelude,
+    git_shell_retry_function, shell_quote_word,
 };
 pub use lsp::{LspLanguageTool, LspQueryTool, lsp_tool_for_language};
 pub use mcp_resource::{

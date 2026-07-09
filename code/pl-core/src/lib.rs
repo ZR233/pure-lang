@@ -164,12 +164,13 @@ pub use tool::{
     WorkspaceFileSearchMatch, WorkspaceFileSearchRequest, WorkspaceFileSearchResult,
     WorkspaceFileStat, WorkspaceFileStatRequest, WorkspaceFileTool, WorkspaceFileToolExecution,
     WorkspaceFileToolKind, WorkspaceFileWriteRequest, WriteStdinTool, execute_container_tool,
-    execute_workspace_file_tool, function_tool_schema, git_shell_command, host_mcp_tool_schema,
+    execute_workspace_file_tool, function_tool_schema, git_shell_command,
+    git_shell_credential_prelude, git_shell_retry_function, host_mcp_tool_schema,
     host_mcp_tool_schemas, lsp_tool_for_language, model_visible_tool_output,
     model_visible_tool_output_with_tokens, redacted_trace_preview_value,
-    run_tool_backend_with_cancellation, strict_tool_input_schema, tool_history_projection,
-    tool_lifecycle_projection, tool_lifecycle_projections, tool_output_artifact_file_path,
-    trace_preview_output, trace_preview_value,
+    run_tool_backend_with_cancellation, shell_quote_word, strict_tool_input_schema,
+    tool_history_projection, tool_lifecycle_projection, tool_lifecycle_projections,
+    tool_output_artifact_file_path, trace_preview_output, trace_preview_value,
 };
 pub use trace::TraceRecorder;
 pub use turn::{

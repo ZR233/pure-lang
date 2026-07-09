@@ -53,18 +53,64 @@ pub fn git_shell_command(request: GitShellCommandRequest<'_>) -> String {
     let mut command_parts = vec![
         "git".to_string(),
         "-c".to_string(),
-        quote_shell_word("core.hooksPath=/dev/null"),
+        shell_quote_word("core.hooksPath=/dev/null"),
         "-c".to_string(),
-        quote_shell_word(&format!("safe.directory={}", request.safe_directory)),
+        shell_quote_word(&format!("safe.directory={}", request.safe_directory)),
         "-c".to_string(),
-        quote_shell_word("credential.helper="),
+        shell_quote_word("credential.helper="),
     ];
-    command_parts.extend(request.args.iter().map(|arg| quote_shell_word(arg)));
+    command_parts.extend(request.args.iter().map(|arg| shell_quote_word(arg)));
     let git_command = command_parts.join(" ");
     match request.credential {
         GitShellCredential::Disabled => git_command,
         GitShellCredential::EnvToken => git_shell_command_with_askpass(&git_command),
     }
+}
+
+/// 生成 shell 脚本片段，为后续 git 命令安装统一 askpass 凭据环境。
+///
+/// 该片段不会设置 `set -e`，调用方可把它嵌入更大的 sidecar 脚本，并通过
+/// [`GIT_TOKEN_ENV`] 环境变量传入 token。
+pub fn git_shell_credential_prelude() -> String {
+    format!(
+        "askpass=/tmp/pl-git-askpass-$$.sh\n\
+         trap 'rm -f \"$askpass\"' EXIT\n\
+         cat > \"$askpass\" <<'PL_GIT_ASKPASS'\n\
+         {}PL_GIT_ASKPASS\n\
+         chmod 700 \"$askpass\"\n\
+         export GIT_ASKPASS=\"$askpass\"\n\
+         export GIT_TERMINAL_PROMPT=0\n",
+        git_askpass_script()
+    )
+}
+
+/// 生成 sidecar shell 脚本中可复用的 `git_with_retry` 函数。
+pub fn git_shell_retry_function() -> &'static str {
+    "git_with_retry() {\n\
+       attempts=0\n\
+       while :; do\n\
+         attempts=$((attempts + 1))\n\
+         git -c credential.helper= -c http.version=HTTP/1.1 \"$@\" && return 0\n\
+         status=$?\n\
+         if [ \"$attempts\" -ge 3 ]; then\n\
+           return \"$status\"\n\
+         fi\n\
+         sleep $((attempts * 2))\n\
+       done\n\
+     }\n"
+}
+
+/// 对单个 shell word 做 POSIX 风格转义。
+pub fn shell_quote_word(value: &str) -> String {
+    if value.is_empty() {
+        return "''".to_string();
+    }
+    if value.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'/' | b':' | b'=')
+    }) {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 /// 通用命令执行请求。
@@ -938,18 +984,6 @@ fn git_shell_command_with_askpass(git_command: &str) -> String {
     )
 }
 
-fn quote_shell_word(value: &str) -> String {
-    if value.is_empty() {
-        return "''".to_string();
-    }
-    if value.bytes().all(|byte| {
-        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'/' | b':' | b'=')
-    }) {
-        return value.to_string();
-    }
-    format!("'{}'", value.replace('\'', "'\"'\"'"))
-}
-
 fn default_true() -> bool {
     true
 }
@@ -1153,6 +1187,27 @@ mod tests {
         assert!(command.contains("git -c core.hooksPath=/dev/null"));
         assert!(command.contains("safe.directory=/workspace/repo"));
         assert!(command.contains("push origin HEAD:mai-agent/test"));
+    }
+
+    #[test]
+    fn git_shell_credential_prelude_installs_pl_token_askpass() {
+        let prelude = git_shell_credential_prelude();
+
+        assert!(prelude.contains("GIT_ASKPASS"));
+        assert!(prelude.contains("GIT_TERMINAL_PROMPT"));
+        assert!(prelude.contains("$PL_GIT_TOKEN"));
+        assert!(prelude.contains("x-access-token"));
+        assert!(!prelude.contains("MAI_GITHUB_INSTALLATION_TOKEN"));
+    }
+
+    #[test]
+    fn git_shell_retry_function_defines_generic_retry_wrapper() {
+        let function = git_shell_retry_function();
+
+        assert!(function.contains("git_with_retry()"));
+        assert!(function.contains("credential.helper="));
+        assert!(function.contains("http.version=HTTP/1.1"));
+        assert!(function.contains("attempts"));
     }
 
     fn test_context() -> ToolContext {
