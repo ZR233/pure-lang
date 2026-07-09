@@ -22,7 +22,7 @@ async fn tool_execution_reuses_streamed_trace_part() {
         .await
         .unwrap();
     let mut core = PureCore::default_provider().unwrap();
-    core.register_tool(ReadFileTool::new());
+    core.register_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
     let tool_call = ToolCall::function(
         "provider-item-1",
         "read_file",
@@ -118,7 +118,7 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
         .await
         .unwrap();
     let mut core = PureCore::default_provider().unwrap();
-    core.register_tool(ReadFileTool::new());
+    core.register_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
     let tool_call = ToolCall::function(
         "provider-item-1",
         "read_file",

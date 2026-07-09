@@ -3,6 +3,8 @@ use std::fmt;
 use pl_protocol::{PureError, Result};
 use serde_json::{Value, json};
 
+use crate::tool::shell::shell_quote_word;
+
 pub(crate) fn object_schema(fields: Vec<(&str, Value, bool)>) -> Value {
     let mut properties = serde_json::Map::new();
     let mut required = Vec::new();
@@ -36,15 +38,7 @@ pub(crate) fn shell_command(args: &[String]) -> String {
 }
 
 pub(crate) fn shell_quote(value: &str) -> String {
-    if value.is_empty() {
-        return "''".to_string();
-    }
-    if value.bytes().all(|byte| {
-        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'/' | b':')
-    }) {
-        return value.to_string();
-    }
-    format!("'{}'", value.replace('\'', "'\"'\"'"))
+    shell_quote_word(value)
 }
 
 pub(crate) fn preview_error(stderr: &str, stdout: &str) -> String {
@@ -83,5 +77,28 @@ pub(crate) fn tool_error(tool: &str, error: impl fmt::Display) -> PureError {
     PureError::ToolExecutionFailed {
         tool: tool.to_string(),
         error: error.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use crate::{ShellCommandTimeout, shell_command_with_timeout};
+
+    #[test]
+    fn shell_command_timeout_helper_wraps_only_positive_timeout() {
+        assert_eq!(
+            shell_command_with_timeout("sleep 1000", ShellCommandTimeout::Disabled),
+            "sleep 1000"
+        );
+        assert_eq!(
+            shell_command_with_timeout("sleep 1000", ShellCommandTimeout::Seconds(0)),
+            "sleep 1000"
+        );
+        assert_eq!(
+            shell_command_with_timeout("sleep 1000", ShellCommandTimeout::Seconds(5)),
+            "timeout --preserve-status 5s /bin/sh -lc 'sleep 1000'"
+        );
     }
 }

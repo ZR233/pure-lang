@@ -12,6 +12,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::process::Command;
 
+use super::shell::shell_quote_word;
 use super::{BoxFuture, OutputTruncation, Tool, ToolContext, ToolInput, ToolOutput};
 
 pub const TOOL_GIT_STATUS: &str = "git_status";
@@ -25,6 +26,80 @@ pub const TOOL_GIT_SYNC_DEFAULT_BRANCH: &str = "git_sync_default_branch";
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(600);
 pub const GIT_TOKEN_ENV: &str = "PL_GIT_TOKEN";
+
+/// git shell 命令的凭据注入模式。
+///
+/// 容器或 sidecar backend 需要把 git 命令序列化成 shell 字符串时，用该枚举选择是否
+/// 通过统一 askpass 脚本读取 `PL_GIT_TOKEN`。token 值只应通过环境变量传入，不能拼进
+/// 命令文本。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GitShellCredential {
+    Disabled,
+    EnvToken,
+}
+
+/// 生成可在 shell backend 中执行的 git 命令。
+///
+/// 该请求面向容器、sidecar 等只能接收 shell 字符串的执行后端。调用方负责把工作区挂载
+/// 到 `safe_directory`，并在 `credential` 为 [`GitShellCredential::EnvToken`] 时注入
+/// [`GIT_TOKEN_ENV`] 环境变量。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GitShellCommandRequest<'a> {
+    pub safe_directory: &'a str,
+    pub args: &'a [&'a str],
+    pub credential: GitShellCredential,
+}
+
+pub fn git_shell_command(request: GitShellCommandRequest<'_>) -> String {
+    let mut command_parts = vec![
+        "git".to_string(),
+        "-c".to_string(),
+        shell_quote_word("core.hooksPath=/dev/null"),
+        "-c".to_string(),
+        shell_quote_word(&format!("safe.directory={}", request.safe_directory)),
+        "-c".to_string(),
+        shell_quote_word("credential.helper="),
+    ];
+    command_parts.extend(request.args.iter().map(|arg| shell_quote_word(arg)));
+    let git_command = command_parts.join(" ");
+    match request.credential {
+        GitShellCredential::Disabled => git_command,
+        GitShellCredential::EnvToken => git_shell_command_with_askpass(&git_command),
+    }
+}
+
+/// 生成 shell 脚本片段，为后续 git 命令安装统一 askpass 凭据环境。
+///
+/// 该片段不会设置 `set -e`，调用方可把它嵌入更大的 sidecar 脚本，并通过
+/// [`GIT_TOKEN_ENV`] 环境变量传入 token。
+pub fn git_shell_credential_prelude() -> String {
+    format!(
+        "askpass=/tmp/pl-git-askpass-$$.sh\n\
+         trap 'rm -f \"$askpass\"' EXIT\n\
+         cat > \"$askpass\" <<'PL_GIT_ASKPASS'\n\
+         {}PL_GIT_ASKPASS\n\
+         chmod 700 \"$askpass\"\n\
+         export GIT_ASKPASS=\"$askpass\"\n\
+         export GIT_TERMINAL_PROMPT=0\n",
+        git_askpass_script()
+    )
+}
+
+/// 生成 sidecar shell 脚本中可复用的 `git_with_retry` 函数。
+pub fn git_shell_retry_function() -> &'static str {
+    "git_with_retry() {\n\
+       attempts=0\n\
+       while :; do\n\
+         attempts=$((attempts + 1))\n\
+         git -c credential.helper= -c http.version=HTTP/1.1 \"$@\" && return 0\n\
+         status=$?\n\
+         if [ \"$attempts\" -ge 3 ]; then\n\
+           return \"$status\"\n\
+         fi\n\
+         sleep $((attempts * 2))\n\
+       done\n\
+     }\n"
+}
 
 /// 通用命令执行请求。
 #[derive(Clone, PartialEq, Eq)]
@@ -72,10 +147,12 @@ pub struct ExecutionOutput {
 ///
 /// 实现方负责在指定工作目录运行命令，并遵守请求中给出的环境和超时。
 pub trait ExecutionBackend: fmt::Debug + Send + Sync {
+    type Error: fmt::Display + Send + 'static;
+
     fn run(
         &self,
         request: ExecutionRequest,
-    ) -> impl Future<Output = Result<ExecutionOutput, PureError>> + Send;
+    ) -> impl Future<Output = std::result::Result<ExecutionOutput, Self::Error>> + Send;
 }
 
 /// 本地进程执行后端。
@@ -83,7 +160,12 @@ pub trait ExecutionBackend: fmt::Debug + Send + Sync {
 pub struct LocalExecutionBackend;
 
 impl ExecutionBackend for LocalExecutionBackend {
-    async fn run(&self, request: ExecutionRequest) -> Result<ExecutionOutput, PureError> {
+    type Error = String;
+
+    async fn run(
+        &self,
+        request: ExecutionRequest,
+    ) -> std::result::Result<ExecutionOutput, Self::Error> {
         let mut command = Command::new(&request.program);
         command.args(&request.args);
         command.current_dir(&request.cwd);
@@ -91,10 +173,10 @@ impl ExecutionBackend for LocalExecutionBackend {
         let output = match request.timeout {
             Some(timeout) => tokio::time::timeout(timeout, command.output())
                 .await
-                .map_err(|_| tool_error("execution", "command timed out"))?,
+                .map_err(|_| "command timed out".to_string())?,
             None => command.output().await,
         }
-        .map_err(|error| tool_error("execution", format!("failed to run command: {error}")))?;
+        .map_err(|error| format!("failed to run command: {error}"))?;
         Ok(ExecutionOutput {
             status: output.status.code().unwrap_or(-1),
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
@@ -142,10 +224,12 @@ impl GitCredential {
 /// 实现方只返回当前 workspace 可用的短期 token；不得把 token 放进工具 schema、
 /// 参数回显或错误文本。返回 `None` 表示该操作没有可用凭据。
 pub trait GitCredentialProvider: fmt::Debug + Send + Sync {
+    type Error: fmt::Display + Send + 'static;
+
     fn credential(
         &self,
         request: GitCredentialRequest,
-    ) -> impl Future<Output = Result<Option<GitCredential>, PureError>> + Send;
+    ) -> impl Future<Output = std::result::Result<Option<GitCredential>, Self::Error>> + Send;
 }
 
 /// 不提供任何 git 凭据的 provider。
@@ -153,10 +237,12 @@ pub trait GitCredentialProvider: fmt::Debug + Send + Sync {
 pub struct NoGitCredentialProvider;
 
 impl GitCredentialProvider for NoGitCredentialProvider {
+    type Error = String;
+
     async fn credential(
         &self,
         _request: GitCredentialRequest,
-    ) -> Result<Option<GitCredential>, PureError> {
+    ) -> std::result::Result<Option<GitCredential>, Self::Error> {
         Ok(None)
     }
 }
@@ -577,16 +663,7 @@ where
         for (key, value) in &self.config.workspace_info {
             payload.insert(key.clone(), value.clone());
         }
-        let description = serde_json::to_string(&payload).map_err(|error| {
-            tool_error(
-                self.name(),
-                format!("failed to serialize workspace info: {error}"),
-            )
-        })?;
-        Ok(GitToolOutcome {
-            description,
-            exit_code: Some(0),
-        })
+        GitToolOutcome::json(self.name(), Value::Object(payload), Some(0))
     }
 
     async fn run_sync_default_branch(&self, arguments: Value) -> Result<GitToolOutcome, PureError> {
@@ -599,7 +676,7 @@ where
         }
 
         let status = self.run_plain(vec!["status", "--porcelain"]).await?;
-        let dirty = !status.description.trim().is_empty();
+        let dirty = !status.stdout.trim().is_empty();
         if dirty && !input.force && !input.preserve_changes {
             return Err(tool_error(
                 self.name(),
@@ -644,22 +721,16 @@ where
             self.run_plain(vec!["stash", "pop"]).await?;
         }
 
-        let description = serde_json::to_string(&json!({
+        GitToolOutcome::json(
+            self.name(),
+            json!({
             "clone": self.config.worktree,
             "worktree": self.config.worktree,
             "preservedChanges": dirty && input.preserve_changes,
             "forced": input.force,
-        }))
-        .map_err(|error| {
-            tool_error(
-                self.name(),
-                format!("failed to serialize sync result: {error}"),
-            )
-        })?;
-        Ok(GitToolOutcome {
-            description,
-            exit_code: Some(0),
-        })
+            }),
+            Some(0),
+        )
     }
 
     async fn run_plain<S>(&self, args: Vec<S>) -> Result<GitToolOutcome, PureError>
@@ -682,7 +753,8 @@ where
         let credential = self
             .credential_provider
             .credential(GitCredentialRequest { operation, remote })
-            .await?
+            .await
+            .map_err(|error| tool_error(self.name(), error))?
             .ok_or_else(|| {
                 tool_error(self.name(), "project git account token is not configured")
             })?;
@@ -721,14 +793,15 @@ where
         request: ExecutionRequest,
         credential: Option<&GitCredential>,
     ) -> Result<GitToolOutcome, PureError> {
-        let output = self.backend.run(request).await?;
+        let output = self
+            .backend
+            .run(request)
+            .await
+            .map_err(|error| tool_error(self.name(), error))?;
         let stdout = redact(output.stdout, credential);
         let stderr = redact(output.stderr, credential);
         if output.status == 0 {
-            return Ok(GitToolOutcome {
-                description: stdout,
-                exit_code: Some(output.status),
-            });
+            return GitToolOutcome::command(self.name(), output.status, stdout, stderr);
         }
         let combined = format!("{stderr}\n{stdout}");
         Err(tool_error(
@@ -792,6 +865,38 @@ struct GitSyncDefaultBranchInput {
 struct GitToolOutcome {
     description: String,
     exit_code: Option<i32>,
+    stdout: String,
+}
+
+impl GitToolOutcome {
+    fn command(tool: &str, status: i32, stdout: String, stderr: String) -> Result<Self, PureError> {
+        let description = json_description(
+            tool,
+            json!({
+                "status": status,
+                "stdout": stdout,
+                "stderr": stderr,
+            }),
+        )?;
+        Ok(Self {
+            description,
+            exit_code: Some(status),
+            stdout,
+        })
+    }
+
+    fn json(tool: &str, value: Value, exit_code: Option<i32>) -> Result<Self, PureError> {
+        Ok(Self {
+            description: json_description(tool, value)?,
+            exit_code,
+            stdout: String::new(),
+        })
+    }
+}
+
+fn json_description(tool: &str, value: Value) -> Result<String, PureError> {
+    serde_json::to_string(&value)
+        .map_err(|error| tool_error(tool, format!("failed to serialize git output: {error}")))
 }
 
 fn object_schema(properties: Vec<(&'static str, Value, bool)>) -> Value {
@@ -856,8 +961,19 @@ async fn write_askpass_script(tool: &str) -> Result<PathBuf, PureError> {
     Ok(path)
 }
 
-fn git_askpass_script() -> &'static str {
+/// 返回统一的 git askpass 脚本文本。
+///
+/// 调用方可把该脚本写入临时文件并将路径配置到 `GIT_ASKPASS`，token 值通过
+/// [`GIT_TOKEN_ENV`] 环境变量读取。
+pub fn git_askpass_script() -> &'static str {
     "#!/bin/sh\ncase \"$1\" in\n  *Username*) printf '%s\\n' x-access-token ;;\n  *Password*) printf '%s\\n' \"$PL_GIT_TOKEN\" ;;\n  *) printf '\\n' ;;\nesac\n"
+}
+
+fn git_shell_command_with_askpass(git_command: &str) -> String {
+    format!(
+        "askpass=$(mktemp) && cat > \"$askpass\" <<'PL_GIT_ASKPASS'\n{}PL_GIT_ASKPASS\nchmod 700 \"$askpass\" && GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=\"$askpass\" {git_command}; status=$?; rm -f \"$askpass\"; exit $status",
+        git_askpass_script()
+    )
 }
 
 fn default_true() -> bool {
@@ -916,13 +1032,27 @@ mod tests {
     use super::*;
     use crate::tool::{Tool, ToolContext, ToolInput};
 
+    #[derive(Debug, Clone)]
+    struct DisplayGitError(&'static str);
+
+    impl fmt::Display for DisplayGitError {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str(self.0)
+        }
+    }
+
     #[derive(Debug, Default)]
     struct RecordingBackend {
         requests: Mutex<Vec<ExecutionRequest>>,
     }
 
     impl ExecutionBackend for RecordingBackend {
-        async fn run(&self, request: ExecutionRequest) -> Result<ExecutionOutput, PureError> {
+        type Error = DisplayGitError;
+
+        async fn run(
+            &self,
+            request: ExecutionRequest,
+        ) -> std::result::Result<ExecutionOutput, Self::Error> {
             self.requests.lock().unwrap().push(request);
             Ok(ExecutionOutput {
                 status: 0,
@@ -948,9 +1078,28 @@ mod tests {
     }
 
     impl ExecutionBackend for ScriptedBackend {
-        async fn run(&self, request: ExecutionRequest) -> Result<ExecutionOutput, PureError> {
+        type Error = DisplayGitError;
+
+        async fn run(
+            &self,
+            request: ExecutionRequest,
+        ) -> std::result::Result<ExecutionOutput, Self::Error> {
             self.requests.lock().unwrap().push(request);
             Ok(self.outputs.lock().unwrap().remove(0))
+        }
+    }
+
+    #[derive(Debug)]
+    struct BackendErrorExecutionBackend;
+
+    impl ExecutionBackend for BackendErrorExecutionBackend {
+        type Error = DisplayGitError;
+
+        async fn run(
+            &self,
+            _request: ExecutionRequest,
+        ) -> std::result::Result<ExecutionOutput, Self::Error> {
+            Err(DisplayGitError("git backend offline"))
         }
     }
 
@@ -958,11 +1107,27 @@ mod tests {
     struct StaticCredentialProvider;
 
     impl GitCredentialProvider for StaticCredentialProvider {
+        type Error = DisplayGitError;
+
         async fn credential(
             &self,
             _request: GitCredentialRequest,
-        ) -> Result<Option<GitCredential>, PureError> {
+        ) -> std::result::Result<Option<GitCredential>, Self::Error> {
             Ok(Some(GitCredential::new("secret-token".to_string())))
+        }
+    }
+
+    #[derive(Debug)]
+    struct CredentialErrorProvider;
+
+    impl GitCredentialProvider for CredentialErrorProvider {
+        type Error = DisplayGitError;
+
+        async fn credential(
+            &self,
+            _request: GitCredentialRequest,
+        ) -> std::result::Result<Option<GitCredential>, Self::Error> {
+            Err(DisplayGitError("token unavailable"))
         }
     }
 
@@ -983,6 +1148,58 @@ mod tests {
             stdout: stdout.to_string(),
             stderr: String::new(),
         }
+    }
+
+    #[test]
+    fn git_shell_command_without_credential_uses_safe_git_flags() {
+        let command = git_shell_command(GitShellCommandRequest {
+            safe_directory: "/workspace/repo",
+            args: &["fetch", "origin", "feature branch"],
+            credential: GitShellCredential::Disabled,
+        });
+
+        assert_eq!(
+            command,
+            "git -c core.hooksPath=/dev/null -c safe.directory=/workspace/repo -c credential.helper= fetch origin 'feature branch'"
+        );
+    }
+
+    #[test]
+    fn git_shell_command_with_credential_installs_askpass() {
+        let command = git_shell_command(GitShellCommandRequest {
+            safe_directory: "/workspace/repo",
+            args: &["push", "origin", "HEAD:mai-agent/test"],
+            credential: GitShellCredential::EnvToken,
+        });
+
+        assert!(command.contains("GIT_ASKPASS=\"$askpass\""));
+        assert!(command.contains("GIT_TERMINAL_PROMPT=0"));
+        assert!(command.contains("$PL_GIT_TOKEN"));
+        assert!(command.contains("x-access-token"));
+        assert!(command.contains("git -c core.hooksPath=/dev/null"));
+        assert!(command.contains("safe.directory=/workspace/repo"));
+        assert!(command.contains("push origin HEAD:mai-agent/test"));
+    }
+
+    #[test]
+    fn git_shell_credential_prelude_installs_pl_token_askpass() {
+        let prelude = git_shell_credential_prelude();
+
+        assert!(prelude.contains("GIT_ASKPASS"));
+        assert!(prelude.contains("GIT_TERMINAL_PROMPT"));
+        assert!(prelude.contains("$PL_GIT_TOKEN"));
+        assert!(prelude.contains("x-access-token"));
+        assert!(!prelude.contains("MAI_GITHUB_INSTALLATION_TOKEN"));
+    }
+
+    #[test]
+    fn git_shell_retry_function_defines_generic_retry_wrapper() {
+        let function = git_shell_retry_function();
+
+        assert!(function.contains("git_with_retry()"));
+        assert!(function.contains("credential.helper="));
+        assert!(function.contains("http.version=HTTP/1.1"));
+        assert!(function.contains("attempts"));
     }
 
     fn test_context() -> ToolContext {
@@ -1093,6 +1310,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn git_status_returns_json_output() {
+        let backend = Arc::new(RecordingBackend::default());
+        let provider = Arc::new(StaticCredentialProvider);
+        let tool = GitTool::new(GitToolKind::Status, workspace_config(), backend, provider);
+
+        let output = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({}),
+                    session_id: "session".to_string(),
+                    tool_id: "tool".to_string(),
+                    revision_base: 0,
+                },
+                test_context(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&output.description).unwrap(),
+            serde_json::json!({
+                "status": 0,
+                "stdout": "secret-token fetched",
+                "stderr": ""
+            })
+        );
+        assert_eq!(output.exit_code, Some(0));
+    }
+
+    #[tokio::test]
     async fn git_fetch_uses_provider_token_and_redacts_output() {
         let backend = Arc::new(RecordingBackend::default());
         let provider = Arc::new(StaticCredentialProvider);
@@ -1116,7 +1363,14 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(output.description, "[redacted] fetched");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&output.description).unwrap(),
+            serde_json::json!({
+                "status": 0,
+                "stdout": "[redacted] fetched",
+                "stderr": ""
+            })
+        );
         let requests = backend.requests.lock().unwrap();
         assert_eq!(requests.len(), 1);
         assert_eq!(
@@ -1159,6 +1413,58 @@ mod tests {
 
         assert!(error.to_string().contains("unsafe git branch"));
         assert!(backend.requests.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn git_tool_maps_backend_display_error_to_current_tool() {
+        let backend = Arc::new(BackendErrorExecutionBackend);
+        let provider = Arc::new(StaticCredentialProvider);
+        let tool = GitTool::new(GitToolKind::Status, workspace_config(), backend, provider);
+
+        let error = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({}),
+                    session_id: "session".to_string(),
+                    tool_id: "tool".to_string(),
+                    revision_base: 0,
+                },
+                test_context(),
+            )
+            .await
+            .expect_err("backend should fail");
+
+        assert!(matches!(
+            error,
+            PureError::ToolExecutionFailed { tool, error }
+                if tool == TOOL_GIT_STATUS && error == "git backend offline"
+        ));
+    }
+
+    #[tokio::test]
+    async fn git_tool_maps_credential_display_error_to_current_tool() {
+        let backend = Arc::new(RecordingBackend::default());
+        let provider = Arc::new(CredentialErrorProvider);
+        let tool = GitTool::new(GitToolKind::Fetch, workspace_config(), backend, provider);
+
+        let error = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({ "remote": "origin" }),
+                    session_id: "session".to_string(),
+                    tool_id: "tool".to_string(),
+                    revision_base: 0,
+                },
+                test_context(),
+            )
+            .await
+            .expect_err("credential provider should fail");
+
+        assert!(matches!(
+            error,
+            PureError::ToolExecutionFailed { tool, error }
+                if tool == TOOL_GIT_FETCH && error == "token unavailable"
+        ));
     }
 
     #[tokio::test]

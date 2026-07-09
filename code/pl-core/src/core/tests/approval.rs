@@ -172,7 +172,7 @@ async fn request_approval_allows_external_path_after_user_approval() {
         .await
         .unwrap();
     let mut core = PureCore::default_provider().unwrap();
-    core.register_tool(ReadFileTool::new());
+    core.register_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
     let tool_call = ToolCall::function(
         "call-1",
         "read_file",
@@ -372,7 +372,7 @@ async fn plan_disabled_tool_records_one_terminal_event_and_tool_result() {
 #[tokio::test]
 async fn policy_denied_tool_records_one_terminal_event_and_tool_result() {
     let mut core = PureCore::default_provider().unwrap();
-    core.register_tool(ReadFileTool::new());
+    core.register_tool(LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile));
     let tool_call = ToolCall::function(
         "provider-item-1",
         "read_file",

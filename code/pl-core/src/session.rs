@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use pl_model::{ModelContinuationState, ToolCall};
+use pl_model::{CompletionResponse, ModelContinuationState, ToolCall};
 use pl_protocol::{
     Message, MessageContent, MessageRole, TOOL_CALLS_METADATA_KEY, ToolCallHistoryMetadata,
     ToolCallKind, ToolResultMetadata,
@@ -99,6 +99,30 @@ impl CoreSession {
         });
     }
 
+    /// 将模型完成响应追加为 assistant 历史消息。
+    ///
+    /// 该方法集中维护 completion response 到会话历史的映射：普通响应写入
+    /// assistant 文本消息，带 tool call 的响应写入带 metadata 的 assistant
+    /// tool_calls 消息，并在写入后用 response id 更新 continuation ack。
+    pub fn push_assistant_completion_response(&mut self, response: &CompletionResponse) {
+        if response.tool_calls.is_empty() {
+            self.push_assistant_response(
+                response.content.clone().unwrap_or_default(),
+                response.reasoning_content.clone(),
+            );
+        } else {
+            self.push_assistant_tool_calls(
+                response
+                    .content
+                    .clone()
+                    .filter(|content| !content.is_empty()),
+                response.tool_calls.clone(),
+                response.reasoning_content.clone(),
+            );
+        }
+        self.acknowledge_model_response(self.messages.len(), response.response_id.clone());
+    }
+
     /// 推入 tool result 消息。
     pub fn push_tool_result(
         &mut self,
@@ -176,6 +200,65 @@ impl CoreSession {
 
     pub fn reset_continuation(&mut self) {
         self.continuation.reset();
+    }
+}
+
+/// 构造包含 assistant tool_calls metadata 的历史消息。
+///
+/// 宿主测试或迁移工具需要手工构造历史时，应复用该 helper，而不是直接拼
+/// `tool_calls` metadata JSON。生产 turn loop 仍应优先通过 `CoreSession`
+/// 记录模型返回的真实 `ToolCall`。
+pub fn tool_call_history_message(
+    call_id: String,
+    tool_name: String,
+    raw_arguments: String,
+) -> Message {
+    let arguments =
+        serde_json::from_str(&raw_arguments).unwrap_or(serde_json::Value::String(raw_arguments));
+    let tool_calls = serde_json::json!([{
+        "id": call_id,
+        "name": tool_name,
+        "payload": {
+            "kind": "function",
+            "arguments": arguments
+        },
+        "call_id": call_id
+    }])
+    .to_string();
+    let mut metadata = HashMap::new();
+    ToolCallHistoryMetadata::new(tool_calls).insert_into(&mut metadata);
+    Message {
+        role: MessageRole::Assistant,
+        content: MessageContent::Text(String::new()),
+        reasoning_content: None,
+        metadata,
+    }
+}
+
+/// 构造包含 tool result metadata 的历史消息。
+///
+/// 该函数集中维护模型历史里工具结果的 metadata 形状，避免宿主产品在测试或
+/// 历史修复场景复制 pl-core 的协议细节。
+pub fn tool_result_history_message(
+    call_id: String,
+    tool_name: String,
+    raw_arguments: String,
+    output: String,
+) -> Message {
+    let mut metadata = HashMap::new();
+    ToolResultMetadata::new(
+        call_id,
+        None,
+        tool_name,
+        ToolCallKind::Function,
+        raw_arguments,
+    )
+    .insert_into(&mut metadata);
+    Message {
+        role: MessageRole::Tool,
+        content: MessageContent::Text(output),
+        reasoning_content: None,
+        metadata,
     }
 }
 
@@ -319,7 +402,7 @@ fn tool_call_arguments(value: &serde_json::Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use pl_model::{ToolCall, ToolCallKind};
+    use pl_model::{CompletionResponse, FinishReason, TokenUsage, ToolCall, ToolCallKind};
 
     use super::*;
     use pretty_assertions::assert_eq;
@@ -383,6 +466,83 @@ mod tests {
     }
 
     #[test]
+    fn push_assistant_completion_response_adds_text_message() {
+        let mut session = CoreSession::new();
+        let response = CompletionResponse {
+            content: Some("reply".to_string()),
+            raw_content: Some("reply".to_string()),
+            reasoning_content: Some("thinking".to_string()),
+            tool_calls: Vec::new(),
+            trace_events: Vec::new(),
+            next_sequence: 0,
+            usage: TokenUsage::default(),
+            finish_reason: FinishReason::Stop,
+            model: "test-model".to_string(),
+            response_id: Some("resp-1".to_string()),
+        };
+
+        session.push_assistant_completion_response(&response);
+
+        assert_eq!(
+            session.messages(),
+            &[Message {
+                role: MessageRole::Assistant,
+                content: MessageContent::Text("reply".to_string()),
+                reasoning_content: Some("thinking".to_string()),
+                metadata: HashMap::new(),
+            }]
+        );
+        assert_eq!(session.previous_response_id(), Some("resp-1"));
+        assert_eq!(session.acknowledged_message_count(), 1);
+        assert_eq!(session.continuation_start_index(), Some(1));
+    }
+
+    #[test]
+    fn push_assistant_completion_response_preserves_tool_call_history() {
+        let mut session = CoreSession::new();
+        let tool_calls = vec![ToolCall::function(
+            "call-1",
+            "bash",
+            serde_json::json!({"command": "pwd"}),
+            Some("call-1".to_string()),
+        )];
+        let response = CompletionResponse {
+            content: Some("running".to_string()),
+            raw_content: Some("running".to_string()),
+            reasoning_content: Some("thinking".to_string()),
+            tool_calls: tool_calls.clone(),
+            trace_events: Vec::new(),
+            next_sequence: 0,
+            usage: TokenUsage::default(),
+            finish_reason: FinishReason::ToolCalls,
+            model: "test-model".to_string(),
+            response_id: Some("resp-1".to_string()),
+        };
+
+        session.push_assistant_completion_response(&response);
+
+        assert_eq!(session.len(), 1);
+        assert_eq!(session.messages()[0].role, MessageRole::Assistant);
+        assert_eq!(
+            session.messages()[0].content,
+            MessageContent::Text("running".to_string())
+        );
+        assert_eq!(
+            session.messages()[0].reasoning_content,
+            Some("thinking".to_string())
+        );
+        let metadata = ToolCallHistoryMetadata::from_metadata(&session.messages()[0].metadata)
+            .expect("tool calls");
+        assert_eq!(
+            metadata.tool_calls_json,
+            serde_json::to_string(&tool_calls).expect("tool call json")
+        );
+        assert_eq!(session.previous_response_id(), Some("resp-1"));
+        assert_eq!(session.acknowledged_message_count(), 1);
+        assert_eq!(session.continuation_start_index(), Some(1));
+    }
+
+    #[test]
     fn push_tool_result_stores_metadata() {
         let mut session = CoreSession::new();
         session.push_tool_result(
@@ -424,6 +584,45 @@ mod tests {
                 .get("tool_call_arguments")
                 .unwrap(),
             r#"{"command":"echo hi"}"#
+        );
+    }
+
+    #[test]
+    fn tool_call_history_message_parses_arguments_into_metadata() {
+        let message = tool_call_history_message(
+            "call-1".to_string(),
+            "read_file".to_string(),
+            r#"{"path":"README.md"}"#.to_string(),
+        );
+
+        assert_eq!(message.role, MessageRole::Assistant);
+        let metadata =
+            ToolCallHistoryMetadata::from_metadata(&message.metadata).expect("tool calls");
+        let value: serde_json::Value =
+            serde_json::from_str(&metadata.tool_calls_json).expect("tool call json");
+        assert_eq!(value[0]["id"], "call-1");
+        assert_eq!(value[0]["name"], "read_file");
+        assert_eq!(value[0]["payload"]["arguments"]["path"], "README.md");
+    }
+
+    #[test]
+    fn tool_result_history_message_stores_result_metadata() {
+        let message = tool_result_history_message(
+            "call-1".to_string(),
+            "read_file".to_string(),
+            r#"{"path":"README.md"}"#.to_string(),
+            "ok".to_string(),
+        );
+
+        assert_eq!(message.role, MessageRole::Tool);
+        assert_eq!(message.content, MessageContent::Text("ok".to_string()));
+        let metadata =
+            ToolResultMetadata::from_metadata(&message.metadata).expect("tool result metadata");
+        assert_eq!(metadata.tool_call_id, "call-1");
+        assert_eq!(metadata.tool_name, "read_file");
+        assert_eq!(
+            metadata.tool_call_arguments.as_deref(),
+            Some(r#"{"path":"README.md"}"#)
         );
     }
 

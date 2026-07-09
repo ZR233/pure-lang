@@ -45,6 +45,48 @@ fn without_section(content: &str, section: &str) -> String {
 }
 
 #[test]
+fn hosted_container_workspace_capabilities_match_hosted_agent_surface() {
+    let capabilities = ToolCapabilityConfig::hosted_container_workspace();
+
+    assert_eq!(
+        capabilities,
+        ToolCapabilityConfig {
+            bash: false,
+            workspace_files: true,
+            skills: false,
+            mcp: true,
+            lsp: false,
+            subagents: true,
+            ask_user: true,
+            git: true,
+            docker: false,
+            container: true,
+        }
+    );
+}
+
+#[test]
+fn git_workspace_capabilities_match_git_only_tool_surface() {
+    let capabilities = ToolCapabilityConfig::git_workspace();
+
+    assert_eq!(
+        capabilities,
+        ToolCapabilityConfig {
+            bash: false,
+            workspace_files: false,
+            skills: false,
+            mcp: false,
+            lsp: false,
+            subagents: false,
+            ask_user: false,
+            git: true,
+            docker: false,
+            container: false,
+        }
+    );
+}
+
+#[test]
 fn default_path_uses_pure_directory_under_home() {
     let paths = ConfigPaths::from_home("C:/Users/example");
 

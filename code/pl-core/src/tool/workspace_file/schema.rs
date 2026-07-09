@@ -25,13 +25,6 @@ impl WorkspaceFileToolKind {
     }
 
     pub fn from_name(name: &str) -> Option<Self> {
-        let normalized;
-        let name = if name.contains('.') {
-            normalized = name.replace('.', "_");
-            normalized.as_str()
-        } else {
-            name
-        };
         match name {
             TOOL_READ_FILE => Some(Self::ReadFile),
             TOOL_LIST_FILES => Some(Self::ListFiles),

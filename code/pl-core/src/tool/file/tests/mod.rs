@@ -1,12 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use crate::tool::{Tool, ToolContext, ToolInput};
+use crate::tool::{LocalWorkspaceFileTool, Tool, ToolContext, ToolInput, WorkspaceFileToolKind};
 use crate::turn::TurnOptions;
 
-use super::read::{ListFilesTool, ReadFileTool, SearchFilesTool};
 use super::write::WriteFileTool;
-use super::{ApplyPatchTool, CopyPathTool, DeletePathTool, MovePathTool};
+use super::{CopyPathTool, DeletePathTool, MovePathTool};
 
 fn unique_temp_dir(name: &str) -> PathBuf {
     let id = std::time::SystemTime::now()
@@ -43,6 +42,22 @@ fn input(arguments: serde_json::Value) -> ToolInput {
         tool_id: "tool".to_string(),
         revision_base: 0,
     }
+}
+
+fn read_file_tool() -> LocalWorkspaceFileTool {
+    LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile)
+}
+
+fn list_files_tool() -> LocalWorkspaceFileTool {
+    LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ListFiles)
+}
+
+fn search_files_tool() -> LocalWorkspaceFileTool {
+    LocalWorkspaceFileTool::new(WorkspaceFileToolKind::SearchFiles)
+}
+
+fn apply_patch_tool() -> LocalWorkspaceFileTool {
+    LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ApplyPatch)
 }
 
 mod apply_patch;

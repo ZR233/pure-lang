@@ -115,6 +115,7 @@ pub(super) struct SpawnAgentResult {
     pub task_name: String,
     pub path: String,
     pub status: AgentStatus,
+    pub turn_id: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,4 +157,6 @@ pub(super) struct SendInputResult {
     pub target: String,
     pub status: AgentStatus,
     pub interrupt: bool,
+    pub queued: bool,
+    pub turn_id: Option<String>,
 }

@@ -52,7 +52,8 @@ impl Tool for WaitAgentTool {
                         .unwrap_or(super::super::types::DEFAULT_WAIT_TIMEOUT_MS),
                 )
                 .await;
-            let message = if outcome.timed_out {
+            let timed_out = outcome.timed_out();
+            let message = if timed_out {
                 "wait_agent timed out before new agent activity.".to_string()
             } else {
                 "wait_agent observed agent activity.".to_string()
@@ -63,13 +64,10 @@ impl Tool for WaitAgentTool {
                 None,
                 SubAgentActivityKind::WaitCompleted,
                 Some(format!("{sender_path}: {message}")),
-                Some(outcome.timed_out),
+                Some(timed_out),
                 None,
             );
-            json_output(WaitAgentResult {
-                message,
-                timed_out: outcome.timed_out,
-            })
+            json_output(WaitAgentResult { message, timed_out })
         })
     }
 }
