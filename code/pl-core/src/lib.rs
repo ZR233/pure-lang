@@ -106,6 +106,7 @@ pub use pl_protocol::{
     StudioToolPart, StudioTurn, StudioTurnStatus, TokenUsageSnapshot, ToolApprovalResolution,
     UserInputAnswer, UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
 };
+pub use provider_error::is_retryable_model_error;
 pub use provider_usage::{
     ProviderUsageData, ProviderUsageRecord, ProviderUsageState, provider_usage_records,
 };
