@@ -210,6 +210,11 @@ impl AgentKernelToolRequest {
         self.parent_session = session;
         self
     }
+
+    pub fn with_parent_history(mut self, history: Vec<pl_protocol::Message>) -> Self {
+        self.parent_session = Arc::new(crate::CoreSession::from_messages(history));
+        self
+    }
 }
 
 /// 可随 `AgentKernelBuilder` 注册并由子 agent registrar 重放的工具集合。
