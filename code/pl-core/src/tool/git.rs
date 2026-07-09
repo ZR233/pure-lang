@@ -973,7 +973,11 @@ async fn write_askpass_script(tool: &str) -> Result<PathBuf, PureError> {
     Ok(path)
 }
 
-fn git_askpass_script() -> &'static str {
+/// 返回统一的 git askpass 脚本文本。
+///
+/// 调用方可把该脚本写入临时文件并将路径配置到 `GIT_ASKPASS`，token 值通过
+/// [`GIT_TOKEN_ENV`] 环境变量读取。
+pub fn git_askpass_script() -> &'static str {
     "#!/bin/sh\ncase \"$1\" in\n  *Username*) printf '%s\\n' x-access-token ;;\n  *Password*) printf '%s\\n' \"$PL_GIT_TOKEN\" ;;\n  *) printf '\\n' ;;\nesac\n"
 }
 
