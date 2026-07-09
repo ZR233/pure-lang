@@ -69,6 +69,7 @@ impl Tool for SpawnAgentTool {
                 path: handle.path,
                 status: AgentStatus::Queued,
                 turn_id: None,
+                worktree: handle.worktree.clone(),
             })
         })
     }

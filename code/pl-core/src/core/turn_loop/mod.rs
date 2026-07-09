@@ -60,6 +60,13 @@ pub(super) async fn run_turn_with_trace(
     agent_supervisor
         .configure_limits(AGENT_MAX_COUNT, AGENT_MAX_DEPTH)
         .await;
+    // root turn 启动时基于主 workspace 启用 per-subagent worktree 隔离（幂等，
+    // 首次启用时清理上次进程残留的孤儿 worktree）。
+    if active_subagent.is_none()
+        && let Ok(repo_root) = crate::workspace::resolve_workspace_root(&workspace_root)
+    {
+        agent_supervisor.enable_worktrees(repo_root).await;
+    }
     let cancellation_token = options.cancellation_token.clone();
     let tool_schemas = core
         .tools

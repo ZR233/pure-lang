@@ -596,6 +596,7 @@ async fn close_agent_waits_for_cancelled_task_to_finish() {
             "test close",
             &event_tx,
             "call-1".to_string(),
+            crate::agent::worktree::CloseDisposition::Discard,
         )
         .await
         .unwrap();

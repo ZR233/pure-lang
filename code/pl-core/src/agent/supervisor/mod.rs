@@ -7,6 +7,7 @@ use pl_model::SharedModelProvider;
 use pl_protocol::{BudgetLimitKind, BudgetUsage, PureError};
 use tokio::sync::{Mutex, Notify};
 
+use super::worktree::{WorktreeManager, WorktreeRef};
 use super::{AgentPath, AgentRecord, AgentStatus};
 use crate::config::{PureConfig, ReasoningEffort};
 use crate::turn::{CompileMode, TurnBudget, TurnOptions};
@@ -264,6 +265,8 @@ pub struct AgentHandle {
     pub id: String,
     pub path: String,
     pub depth: u32,
+    /// subagent 专属 worktree（启用 worktree 隔离时）；root agent 为 `None`。
+    pub worktree: Option<WorktreeRef>,
 }
 
 /// Result of waiting for agent activity.
@@ -528,6 +531,7 @@ pub struct AgentSupervisor {
     state: Arc<Mutex<state::AgentSupervisorState>>,
     notify: Arc<Notify>,
     execution: Arc<execution::AgentExecutionLimiter>,
+    worktree: WorktreeManager,
 }
 
 impl Default for AgentSupervisor {
@@ -536,6 +540,7 @@ impl Default for AgentSupervisor {
             state: Arc::new(Mutex::new(state::AgentSupervisorState::default())),
             notify: Arc::new(Notify::new()),
             execution: Arc::new(execution::AgentExecutionLimiter::default()),
+            worktree: WorktreeManager::disabled(),
         }
     }
 }
@@ -546,6 +551,14 @@ impl AgentSupervisor {
         state.max_agents = max_agents;
         state.max_depth = max_depth;
         self.execution.configure(max_agents);
+    }
+
+    /// 幂等启用 per-subagent worktree 隔离。
+    ///
+    /// 在 root turn 启动时基于主 `workspace_root` 解析出的 repo_root 调用；内部首次
+    /// 启用时清理上次进程残留的孤儿 worktree。默认 disabled，保持既有共享 workspace 行为。
+    pub async fn enable_worktrees(&self, repo_root: PathBuf) {
+        self.worktree.enable(repo_root).await;
     }
 
     fn notify_activity(&self) {

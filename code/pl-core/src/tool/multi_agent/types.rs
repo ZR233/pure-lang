@@ -106,6 +106,8 @@ pub(super) struct AgentMessageArgs {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct CloseAgentArgs {
     pub target: String,
+    #[serde(default)]
+    pub merge: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,6 +118,7 @@ pub(super) struct SpawnAgentResult {
     pub path: String,
     pub status: AgentStatus,
     pub turn_id: Option<String>,
+    pub worktree: Option<crate::agent::WorktreeRef>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -337,6 +337,7 @@ fn spawn_agent_result_serializes_turn_metadata() {
         path: "/root/agent-1".to_string(),
         status: AgentStatus::Queued,
         turn_id: None,
+        worktree: None,
     })
     .unwrap();
 
@@ -347,7 +348,8 @@ fn spawn_agent_result_serializes_turn_metadata() {
             "taskName": "inspect",
             "path": "/root/agent-1",
             "status": "queued",
-            "turnId": null
+            "turnId": null,
+            "worktree": null
         })
     );
 }

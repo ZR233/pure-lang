@@ -1,6 +1,7 @@
 mod path;
 mod record;
 mod supervisor;
+pub mod worktree;
 
 pub use path::AgentPath;
 pub use pl_protocol::AgentStatus;
@@ -14,4 +15,8 @@ pub use supervisor::{
     AgentTurnStartReadiness, AgentTurnStartSnapshot, AgentWaitCompletion, AgentWaitLoopError,
     AgentWaitLoopOptions, AgentWaitLoopResult, AgentWaitOutcome, AgentWaitSnapshot,
     wait_for_agent_completion,
+};
+pub use worktree::{
+    CloseDisposition, CloseOutcome, LocalWorktreeBackend, MergeOutcome, WorktreeBackend,
+    WorktreeError, WorktreeHandle, WorktreeManager, WorktreeRef,
 };

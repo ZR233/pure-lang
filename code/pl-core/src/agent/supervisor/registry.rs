@@ -2,6 +2,7 @@ use pl_protocol::PureError;
 
 use super::snapshot::unix_seconds;
 use super::state::AgentEntry;
+use crate::agent::worktree::{CloseDisposition, WorktreeRef};
 use pl_protocol::SubAgentActivityKind;
 
 use super::{
@@ -13,12 +14,12 @@ impl AgentSupervisor {
     pub async fn spawn_agent(
         &self,
         input: AgentSpawnInput,
-        run_spec: AgentRunSpec,
+        mut run_spec: AgentRunSpec,
     ) -> Result<AgentHandle, PureError> {
         let parent_path = input
             .parent_path
             .unwrap_or_else(|| AgentPath::ROOT.to_string());
-        let (handle, record) = {
+        let (mut handle, record) = {
             let mut state = self.state.lock().await;
             let parent = state
                 .path_to_id
@@ -79,6 +80,7 @@ impl AgentSupervisor {
                     id,
                     path: path.to_string(),
                     depth,
+                    worktree: None,
                 },
                 record,
             )
@@ -86,13 +88,32 @@ impl AgentSupervisor {
         let event_tx = run_spec.event_tx.clone();
         let call_id = run_spec.call_id.clone();
         self.notify_activity();
+
+        // 为 subagent 分配独立 worktree（启用 worktree 隔离时），并把 subagent 的
+        // 工具世界钉到 worktree 路径，实现文件级物理隔离。
+        if self.worktree.is_enabled() {
+            match self.worktree.create(&handle.id).await {
+                Ok(worktree_handle) => {
+                    let workspace_root = worktree_handle.path.clone();
+                    let worktree_ref = WorktreeRef::from(&worktree_handle);
+                    {
+                        let mut state = self.state.lock().await;
+                        if let Some(entry) = state.agents.get_mut(&handle.id) {
+                            entry.worktree = Some(worktree_handle);
+                        }
+                    }
+                    run_spec.workspace_root = workspace_root;
+                    handle.worktree = Some(worktree_ref);
+                }
+                Err(error) => {
+                    self.rollback_spawn(&record.path, &handle.id).await;
+                    return Err(error.into());
+                }
+            }
+        }
+
         if let Err(error) = self.start_agent_turn(handle.id.clone(), run_spec).await {
-            let mut state = self.state.lock().await;
-            state.path_to_id.remove(&record.path);
-            state.agents.remove(&handle.id);
-            state.mark_activity();
-            drop(state);
-            self.notify_activity();
+            self.rollback_spawn(&record.path, &handle.id).await;
             return Err(error);
         }
         super::events::emit_agent_record(&event_tx, &record);
@@ -106,6 +127,28 @@ impl AgentSupervisor {
             None,
         );
         Ok(handle)
+    }
+
+    /// spawn 失败回滚：移除已注册 entry，并释放已分配的 worktree。
+    async fn rollback_spawn(&self, path: &str, agent_id: &str) {
+        let worktree = {
+            let mut state = self.state.lock().await;
+            let worktree = state
+                .agents
+                .get(agent_id)
+                .and_then(|entry| entry.worktree.clone());
+            state.path_to_id.remove(path);
+            state.agents.remove(agent_id);
+            state.mark_activity();
+            worktree
+        };
+        self.notify_activity();
+        if let Some(handle) = worktree {
+            let _ = self
+                .worktree
+                .close(&handle, CloseDisposition::Discard)
+                .await;
+        }
     }
 
     pub async fn list_agents(&self, path_prefix: Option<&str>) -> Vec<AgentRecord> {

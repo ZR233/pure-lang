@@ -214,7 +214,25 @@ impl AgentControlToolKind {
                 }),
                 false,
             )]),
-            Self::CloseAgent | Self::ResumeAgent => object_schema(vec![(
+            Self::CloseAgent => object_schema(vec![
+                (
+                    "target",
+                    json!({
+                        "type": "string",
+                        "description": "Agent id, relative path, or canonical path."
+                    }),
+                    true,
+                ),
+                (
+                    "merge",
+                    json!({
+                        "type": "boolean",
+                        "description": "When true and worktree isolation is enabled, merge the sub-agent's worktree branch back into the main workspace before releasing it. Defaults to false, which discards the worktree changes. Ignored when worktree isolation is disabled."
+                    }),
+                    false,
+                ),
+            ]),
+            Self::ResumeAgent => object_schema(vec![(
                 "target",
                 json!({
                     "type": "string",
