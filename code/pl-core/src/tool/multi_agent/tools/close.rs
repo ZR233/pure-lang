@@ -1,5 +1,7 @@
 use pl_protocol::PureError;
 
+use crate::agent::worktree::CloseDisposition;
+
 use super::super::schema::AgentControlToolKind;
 use super::super::types::{CloseAgentArgs, CloseAgentTool, MessageResult, ResumeAgentTool};
 use super::super::{
@@ -12,7 +14,9 @@ impl Tool for CloseAgentTool {
     }
 
     fn description(&self) -> &str {
-        "Close an existing managed sub-agent. The root agent cannot be closed."
+        "Close an existing managed sub-agent. The root agent cannot be closed. \
+         Set merge=true to merge the sub-agent's worktree branch back into the main \
+         workspace; otherwise its changes are discarded."
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -33,6 +37,13 @@ impl Tool for CloseAgentTool {
                     }
                 })?;
             let sender_path = current_agent_path(&context);
+            let disposition = if args.merge {
+                CloseDisposition::Merge {
+                    target_branch: None,
+                }
+            } else {
+                CloseDisposition::Discard
+            };
             let record = context
                 .agent_supervisor
                 .close_agent(
@@ -41,6 +52,7 @@ impl Tool for CloseAgentTool {
                     "closed by close_agent",
                     &context.event_tx,
                     input.tool_id,
+                    disposition,
                 )
                 .await?;
             json_output(MessageResult {

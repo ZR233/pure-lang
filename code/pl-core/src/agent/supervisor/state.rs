@@ -6,6 +6,7 @@ use tokio_util::sync::CancellationToken;
 use super::snapshot::unix_seconds;
 use super::{AgentMessage, AgentPath, AgentRecord, AgentStatus};
 use crate::CoreSession;
+use crate::agent::worktree::WorktreeHandle;
 
 #[derive(Debug)]
 pub(super) struct AgentEntry {
@@ -14,6 +15,8 @@ pub(super) struct AgentEntry {
     pub(super) mailbox: VecDeque<AgentMessage>,
     pub(super) cancellation_token: Option<CancellationToken>,
     pub(super) task: Option<JoinHandle<()>>,
+    /// subagent 专属 worktree 句柄；root agent 为 `None`，随 agent 条目同生共死。
+    pub(super) worktree: Option<WorktreeHandle>,
 }
 
 impl AgentEntry {
@@ -24,6 +27,7 @@ impl AgentEntry {
             mailbox: VecDeque::new(),
             cancellation_token: None,
             task: None,
+            worktree: None,
         }
     }
 }
