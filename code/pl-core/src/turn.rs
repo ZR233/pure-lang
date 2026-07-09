@@ -1545,7 +1545,7 @@ mod tests {
             token.cancelled().await;
         });
 
-        assert_eq!(started_rx.await.unwrap(), false);
+        assert!(!started_rx.await.unwrap());
 
         handle.cancel();
 

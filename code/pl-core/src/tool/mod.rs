@@ -1079,7 +1079,7 @@ mod tests {
             timed_out: false,
             runtime_events: vec![ToolRuntimeEvent::ToolResultRevision { revision: 1 }],
         };
-        assert_eq!(output.ends_turn(), false);
+        assert!(!output.ends_turn());
 
         let output = ToolOutput {
             runtime_events: vec![
@@ -1088,7 +1088,7 @@ mod tests {
             ],
             ..output
         };
-        assert_eq!(output.ends_turn(), true);
+        assert!(output.ends_turn());
     }
 
     #[test]

@@ -64,12 +64,7 @@ impl ModelParameter {
         request: ModelParameterCandidateRequest<'_>,
     ) -> Result<Option<String>, ModelParameterCandidateError> {
         if let Some(candidate) = request.requested {
-            if candidate.trim().is_empty()
-                || request
-                    .disabled_values
-                    .iter()
-                    .any(|disabled| *disabled == candidate)
-            {
+            if candidate.trim().is_empty() || request.disabled_values.contains(&candidate) {
                 return Ok(None);
             }
             if self.has_candidate(candidate) {
