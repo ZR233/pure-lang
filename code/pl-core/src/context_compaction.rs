@@ -182,7 +182,7 @@ pub(crate) async fn maybe_compact_session(
         progress.milestone("上下文接近上限，正在压缩历史。");
     }
     let mut messages = session.messages().to_vec();
-    let max_tokens = Some(model_info.max_output_tokens.unwrap_or(4096).min(4096));
+    let mut max_tokens = Some(model_info.max_output_tokens.unwrap_or(4096).min(4096));
     loop {
         let completion_request = CompletionRequest::builder(model)
             .instructions(config.instructions.clone())
@@ -199,6 +199,15 @@ pub(crate) async fn maybe_compact_session(
             .await
         {
             Ok(response) => response,
+            Err(error) if max_tokens.is_some() && is_unsupported_max_output_tokens(&error) => {
+                max_tokens = None;
+                if let Some(progress) = progress.as_deref_mut() {
+                    progress.milestone(
+                        "模型不支持压缩请求的 max_output_tokens 参数，正在不带该参数重试。",
+                    );
+                }
+                continue;
+            }
             Err(error) if can_retry_compaction(&error, &mut messages) => {
                 if let Some(progress) = progress.as_deref_mut() {
                     progress.milestone("上下文压缩请求过大，正在缩小历史后重试。");
@@ -275,6 +284,14 @@ fn can_retry_compaction(error: &PureError, messages: &mut Vec<Message>) -> bool 
         return false;
     }
     remove_oldest_retriable_message(messages)
+}
+
+fn is_unsupported_max_output_tokens(error: &PureError) -> bool {
+    let text = error.to_string().to_ascii_lowercase();
+    text.contains("max_output_tokens")
+        && (text.contains("unsupported parameter")
+            || text.contains("unknown parameter")
+            || text.contains("unrecognized parameter"))
 }
 
 fn is_context_pressure_error(error: &PureError) -> bool {
@@ -689,6 +706,43 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn context_compaction_retries_without_max_output_tokens_when_provider_rejects_parameter()
+    {
+        let mut model = ModelInfo::fallback("compact-test");
+        model.context_window = Some(100);
+        model.max_context_window = Some(100);
+        model.auto_compact_token_limit = Some(1);
+        model.max_output_tokens = Some(4096);
+        let provider = FakeCompactionProvider::new(model)
+            .with_first_failure(FakeCompactionFailure::UnsupportedMaxOutputTokens);
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+        let mut session = CoreSession::new();
+        session.push_user_prompt("old request ".repeat(20));
+        session.push_assistant_response("old answer ".repeat(20), None);
+        session.push_user_prompt("latest request ".repeat(20));
+
+        let outcome = maybe_compact_session(
+            &mut session,
+            ContextCompactionRequest {
+                provider: &provider,
+                model: "compact-test",
+                config: &ContextCompactionConfig::default(),
+                request_instructions: "",
+                request_messages: &[],
+                trigger: CompactionTrigger::EstimatedTokens,
+                event_tx,
+                progress: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(outcome, CompactionOutcome::Compacted { .. }));
+        assert_eq!(provider.recorded_message_counts(), vec![4, 4]);
+        assert_eq!(provider.recorded_max_tokens(), vec![Some(4096), None]);
+    }
+
     fn message_text(message: &Message) -> &str {
         match &message.content {
             MessageContent::Text(text) => text,
@@ -715,6 +769,7 @@ mod tests {
         info: ProviderInfo,
         model: ModelInfo,
         calls: Arc<Mutex<Vec<CompletionRequest>>>,
+        first_failure: FakeCompactionFailure,
     }
 
     impl FakeCompactionProvider {
@@ -725,7 +780,13 @@ mod tests {
                 info,
                 model,
                 calls: Arc::new(Mutex::new(Vec::new())),
+                first_failure: FakeCompactionFailure::ContextPressure,
             }
+        }
+
+        fn with_first_failure(mut self, first_failure: FakeCompactionFailure) -> Self {
+            self.first_failure = first_failure;
+            self
         }
 
         fn recorded_message_counts(&self) -> Vec<usize> {
@@ -736,6 +797,21 @@ mod tests {
                 .map(|request| request.messages.len())
                 .collect()
         }
+
+        fn recorded_max_tokens(&self) -> Vec<Option<u64>> {
+            self.calls
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|request| request.max_tokens)
+                .collect()
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    enum FakeCompactionFailure {
+        ContextPressure,
+        UnsupportedMaxOutputTokens,
     }
 
     impl ModelProvider for FakeCompactionProvider {
@@ -764,9 +840,17 @@ mod tests {
             let mut calls = self.calls.lock().unwrap();
             calls.push(request);
             if calls.len() == 1 {
-                return Err(PureError::LlmError(
-                    "context token limit exceeded".to_string(),
-                ));
+                return match self.first_failure {
+                    FakeCompactionFailure::ContextPressure => Err(PureError::LlmError(
+                        "context token limit exceeded".to_string(),
+                    )),
+                    FakeCompactionFailure::UnsupportedMaxOutputTokens => Err(
+                        PureError::LlmError(
+                            "HTTP error: missing field `error` at line 1 column 53: {\"detail\":\"Unsupported parameter: max_output_tokens\"}"
+                                .to_string(),
+                        ),
+                    ),
+                };
             }
             Ok(CompletionResponse {
                 response_id: None,

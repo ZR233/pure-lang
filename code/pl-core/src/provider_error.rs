@@ -9,20 +9,27 @@ pub(crate) fn is_provider_429_error(error: &str) -> bool {
 /// 队列、业务状态错误应在产品层继续单独判断。
 pub fn is_retryable_model_error(error: &str) -> bool {
     let error = error.trim();
-    if let Some(stream_error) = error.strip_prefix("model error: stream error: ") {
+    let Some(model_error) = error.strip_prefix("model error: ") else {
+        return false;
+    };
+    let model_error = model_error
+        .strip_prefix("LLM provider error: ")
+        .unwrap_or(model_error);
+
+    if let Some(stream_error) = model_error.strip_prefix("stream error: ") {
         return is_retryable_model_stream_error(stream_error);
     }
 
-    if !error.starts_with("model error: request to ") {
+    if !model_error.starts_with("request to ") {
         return false;
     }
 
-    error.contains(" failed: error decoding response body")
-        || contains_standalone_status_code(error, "429")
-        || contains_standalone_status_code(error, "500")
-        || contains_standalone_status_code(error, "502")
-        || contains_standalone_status_code(error, "503")
-        || contains_standalone_status_code(error, "504")
+    model_error.contains(" failed: error decoding response body")
+        || contains_standalone_status_code(model_error, "429")
+        || contains_standalone_status_code(model_error, "500")
+        || contains_standalone_status_code(model_error, "502")
+        || contains_standalone_status_code(model_error, "503")
+        || contains_standalone_status_code(model_error, "504")
 }
 
 fn is_retryable_model_stream_error(error: &str) -> bool {
@@ -70,6 +77,7 @@ mod tests {
             "model error: stream error: stream closed with incomplete SSE frame",
             "model error: stream error: stream closed before response.completed",
             "model error: stream error: idle timeout waiting for SSE",
+            "model error: LLM provider error: stream error: idle timeout waiting for SSE",
             "model error: stream error: response.incomplete event received: max_output_tokens",
         ] {
             assert!(is_retryable_model_error(error), "{error}");

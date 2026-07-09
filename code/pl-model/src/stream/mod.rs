@@ -5,6 +5,7 @@ use pl_protocol::{PureError, Result};
 use pl_trace::{AgentEventSender, TraceTextChannel};
 use std::collections::{HashMap, VecDeque};
 use std::pin::Pin;
+use std::time::Duration;
 
 pub(crate) mod event;
 mod lifecycle;
@@ -31,6 +32,7 @@ pub use event::{
 };
 
 pub type CompletionEventStream = Pin<Box<dyn Stream<Item = Result<CompletionStreamEvent>> + Send>>;
+const COMPLETION_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
 
 pub type CompletionStreamAccumulator = StreamCompletionAccumulator;
 
@@ -84,13 +86,37 @@ struct ProviderStreamDecodeState {
 }
 
 pub async fn collect_completion_event_stream(
-    mut stream: CompletionEventStream,
+    stream: CompletionEventStream,
     event_tx: &AgentEventSender,
     trace: Option<CompletionTraceContext>,
 ) -> Result<CompletionResponse> {
+    collect_completion_event_stream_with_idle_timeout(
+        stream,
+        event_tx,
+        trace,
+        COMPLETION_STREAM_IDLE_TIMEOUT,
+    )
+    .await
+}
+
+async fn collect_completion_event_stream_with_idle_timeout(
+    mut stream: CompletionEventStream,
+    event_tx: &AgentEventSender,
+    trace: Option<CompletionTraceContext>,
+    idle_timeout: Duration,
+) -> Result<CompletionResponse> {
     let mut accumulator = StreamCompletionAccumulator::new(trace);
 
-    while let Some(event) = stream.next().await {
+    loop {
+        let event = match tokio::time::timeout(idle_timeout, stream.next()).await {
+            Ok(Some(event)) => event,
+            Ok(None) => break,
+            Err(_) => {
+                return Err(PureError::LlmError(
+                    "stream error: idle timeout waiting for SSE".to_string(),
+                ));
+            }
+        };
         accumulator.apply(event?, event_tx)?;
     }
 

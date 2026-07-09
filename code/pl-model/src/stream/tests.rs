@@ -192,3 +192,24 @@ fn tagged_text_decoder_keeps_raw_reasoning_tags_hidden() {
             if delta == "<commentary>hidden</commentary><final>hidden</final>"
     ));
 }
+
+#[tokio::test]
+async fn collect_completion_event_stream_returns_idle_timeout_when_stream_stalls() {
+    let stream: CompletionEventStream =
+        Box::pin(futures::stream::pending::<Result<CompletionStreamEvent>>());
+    let (event_tx, _) = tokio::sync::broadcast::channel(1);
+
+    let error = collect_completion_event_stream_with_idle_timeout(
+        stream,
+        &event_tx,
+        None,
+        std::time::Duration::from_millis(10),
+    )
+    .await
+    .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "LLM provider error: stream error: idle timeout waiting for SSE"
+    );
+}
