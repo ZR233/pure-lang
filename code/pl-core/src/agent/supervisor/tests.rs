@@ -175,7 +175,7 @@ fn agent_wait_outcome_builds_group_wait_agent_output() {
     let message: serde_json::Value =
         serde_json::from_str(&output.message).expect("wait message json");
 
-    assert_eq!(output.timed_out, true);
+    assert!(output.timed_out);
     assert_eq!(
         message,
         json!({
