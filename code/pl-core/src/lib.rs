@@ -179,16 +179,9 @@ pub use tool::{
 };
 pub use trace::TraceRecorder;
 pub use turn::{
-    AGENT_MAX_COUNT, AGENT_MAX_DEPTH, ActiveTurnControl, ActiveTurnSlot, AgentBudget,
-    AgentTurnCancellationGuard, AgentTurnCancellationOutcome, AgentTurnCompletionMutation,
-    AgentTurnCompletionOutcome, AgentTurnCompletionTransition, AgentTurnCurrentGuard,
-    AgentTurnCurrentOutcome, AgentTurnStartMutation, AgentTurnStartOutcome,
-    AgentTurnStartTransition, AgentTurnStatusGuard, AgentTurnStatusMutation,
-    AgentTurnStatusOutcome, AgentTurnStatusTransition, BudgetPolicy, CompileMode,
-    DEFAULT_WALL_CLOCK_MS, InteractionCallback, InteractionFuture, PermissionMode,
-    ToolApprovalDecision, ToolApprovalPolicy, ToolApprovalRequest, ToolExecutionMode,
-    TurnAbortReason, TurnBudget, TurnErrorProjection, TurnOptions, TurnOutcome, TurnOutcomeStatus,
-    TurnRequest, TurnResult, TurnResultStatus, TurnReturnError, TurnReturnErrorKind,
-    TurnTaskHandle, UserInputMode, ensure_turn_not_cancelled,
+    AGENT_MAX_COUNT, AGENT_MAX_DEPTH, CompileMode, DEFAULT_WALL_CLOCK_MS, InteractionCallback,
+    InteractionFuture, PermissionMode, ToolApprovalDecision, ToolApprovalPolicy,
+    ToolApprovalRequest, ToolExecutionMode, TurnAbortReason, TurnBudget, TurnOptions, TurnRequest,
+    TurnResult, TurnResultStatus, UserInputMode,
 };
 pub use workspace::{load_workspace_instructions, resolve_workspace_root};
