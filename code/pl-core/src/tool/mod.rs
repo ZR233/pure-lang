@@ -6,10 +6,12 @@ mod file;
 mod git;
 mod lsp;
 mod mcp_resource;
+mod mcp_tool;
 mod multi_agent;
 mod output_format;
 mod path_policy;
 mod plan;
+mod shell;
 mod skill;
 mod text_escape;
 mod todo;
@@ -19,7 +21,7 @@ mod workspace_file;
 use pl_model::ToolSchema;
 use pl_protocol::{PureError, SkillActivation};
 use pl_trace::AgentEventSender;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::fmt;
 use std::future::Future;
 use std::path::PathBuf;
@@ -41,15 +43,16 @@ pub use container::{
     NoContainerBackend, TOOL_CONTAINER_COPY, TOOL_CONTAINER_EXEC, execute_container_tool,
 };
 pub use file::{
-    ApplyPatchTool, CopyPathTool, CreateDirectoryTool, DeletePathTool, ListFilesTool, MovePathTool,
-    ReadFileTool, SearchFilesTool, StatPathTool, WriteFileTool,
+    CopyPathTool, CreateDirectoryTool, DeletePathTool, MovePathTool, StatPathTool, WriteFileTool,
 };
 pub use git::{
     ExecutionBackend, ExecutionOutput, ExecutionRequest, GIT_TOKEN_ENV, GitCredential,
-    GitCredentialOperation, GitCredentialProvider, GitCredentialRequest, GitPolicy, GitTool,
-    GitToolKind, GitWorkspaceConfig, LocalExecutionBackend, NoGitCredentialProvider,
-    TOOL_GIT_BRANCH, TOOL_GIT_COMMIT, TOOL_GIT_DIFF, TOOL_GIT_FETCH, TOOL_GIT_PUSH,
-    TOOL_GIT_STATUS, TOOL_GIT_SYNC_DEFAULT_BRANCH, TOOL_GIT_WORKSPACE_INFO,
+    GitCredentialOperation, GitCredentialProvider, GitCredentialRequest, GitPolicy,
+    GitShellCommandRequest, GitShellCredential, GitTool, GitToolKind, GitWorkspaceConfig,
+    LocalExecutionBackend, NoGitCredentialProvider, TOOL_GIT_BRANCH, TOOL_GIT_COMMIT,
+    TOOL_GIT_DIFF, TOOL_GIT_FETCH, TOOL_GIT_PUSH, TOOL_GIT_STATUS, TOOL_GIT_SYNC_DEFAULT_BRANCH,
+    TOOL_GIT_WORKSPACE_INFO, git_askpass_script, git_shell_command, git_shell_credential_prelude,
+    git_shell_retry_function,
 };
 pub use lsp::{LspLanguageTool, LspQueryTool, lsp_tool_for_language};
 pub use mcp_resource::{
@@ -57,43 +60,158 @@ pub use mcp_resource::{
     McpResourceBackend, McpResourceTool, McpResourceToolKind, TOOL_LIST_MCP_RESOURCE_TEMPLATES,
     TOOL_LIST_MCP_RESOURCES, TOOL_READ_MCP_RESOURCE,
 };
+pub use mcp_tool::{
+    HostMcpToolSpec, McpTool, McpToolBackend, McpToolRequest, host_mcp_tool_schema,
+    host_mcp_tool_schemas,
+};
 pub use multi_agent::{
-    AgentControlAgentRecord, AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
-    AgentControlMessageOutput, AgentControlSendInputOutput, AgentControlSendInputRequest,
-    AgentControlSpawnOutput, AgentControlSpawnRequest, AgentControlTargetRequest, AgentControlTool,
-    AgentControlToolKind, AgentControlWaitOutput, AgentControlWaitRequest, CloseAgentTool,
+    AgentControlAgentRecord, AgentControlAgentType, AgentControlAgentTypePolicy,
+    AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
+    AgentControlMessageOutput, AgentControlPolicy, AgentControlSendInputOutput,
+    AgentControlSendInputRequest, AgentControlSpawnOutput, AgentControlSpawnRequest,
+    AgentControlStatusKind, AgentControlTargetRequest, AgentControlTool, AgentControlToolKind,
+    AgentControlWaitOutput, AgentControlWaitRequest, AllowAllAgentControlPolicy, CloseAgentTool,
     ListAgentsTool, ResumeAgentTool, SendInputTool, SpawnAgentTool, TOOL_CLOSE_AGENT,
     TOOL_LIST_AGENTS, TOOL_RESUME_AGENT, TOOL_SEND_INPUT, TOOL_SPAWN_AGENT, TOOL_WAIT_AGENT,
     WaitAgentTool,
 };
 pub use output_format::{
-    DEFAULT_MODEL_TOOL_OUTPUT_TOKENS, ToolHistoryProjection, ToolLifecyclePhase,
-    ToolLifecycleProjection, ToolOutputArtifactDescriptor, ToolOutputArtifactPathRequest,
-    ToolOutputCapture, ToolOutputCaptureRequest, ToolOutputStream, ToolOutputStreamCapture,
-    ToolOutputStreamSizes, model_visible_tool_output, model_visible_tool_output_with_tokens,
-    redacted_trace_preview_value, tool_history_projection, tool_lifecycle_projection,
-    tool_lifecycle_projections, tool_output_artifact_file_path, trace_preview_output,
-    trace_preview_value,
+    DEFAULT_MODEL_TOOL_OUTPUT_TOKENS, SECRET_REDACTION_REPLACEMENT, SecretRedaction,
+    ToolHistoryProjection, ToolLifecyclePhase, ToolLifecycleProjection,
+    ToolOutputArtifactDescriptor, ToolOutputArtifactPathRequest, ToolOutputCapture,
+    ToolOutputCaptureRequest, ToolOutputStream, ToolOutputStreamCapture, ToolOutputStreamSizes,
+    model_visible_tool_output, model_visible_tool_output_with_tokens, redacted_trace_preview_value,
+    tool_history_projection, tool_lifecycle_projection, tool_lifecycle_projections,
+    tool_output_artifact_file_path, trace_preview_output, trace_preview_value,
 };
 pub(crate) use path_policy::{PathAccess, ToolPathPolicy};
 pub use plan::PlanExitTool;
+pub use shell::{ShellCommandTimeout, shell_command_with_timeout, shell_quote_word};
 pub use skill::{SkillManageTool, SkillViewTool, SkillsListTool};
 pub use todo::{TOOL_UPDATE_TODO_LIST, TodoListTool};
 pub use truncation::{OutputTruncation, TruncatedOutput, TruncationStrategy};
 pub use workspace_file::{
-    ContainerWorkspaceFileBackend, LocalWorkspaceFileBackend, TOOL_APPLY_PATCH, TOOL_LIST_FILES,
-    TOOL_READ_FILE, TOOL_SEARCH_FILES, WorkspaceFileBackend, WorkspaceFileListEntry,
-    WorkspaceFileListRequest, WorkspaceFileListResult, WorkspaceFileReadRequest,
-    WorkspaceFileRemoveRequest, WorkspaceFileSearchMatch, WorkspaceFileSearchRequest,
-    WorkspaceFileSearchResult, WorkspaceFileStat, WorkspaceFileStatRequest, WorkspaceFileTool,
-    WorkspaceFileToolExecution, WorkspaceFileToolKind, WorkspaceFileWriteRequest,
-    execute_workspace_file_tool,
+    ContainerWorkspaceFileBackend, LocalWorkspaceFileBackend, LocalWorkspaceFileTool,
+    TOOL_APPLY_PATCH, TOOL_LIST_FILES, TOOL_READ_FILE, TOOL_SEARCH_FILES, WorkspaceFileBackend,
+    WorkspaceFileListEntry, WorkspaceFileListRequest, WorkspaceFileListResult,
+    WorkspaceFileReadRequest, WorkspaceFileRemoveRequest, WorkspaceFileSearchMatch,
+    WorkspaceFileSearchRequest, WorkspaceFileSearchResult, WorkspaceFileStat,
+    WorkspaceFileStatRequest, WorkspaceFileTool, WorkspaceFileToolExecution, WorkspaceFileToolKind,
+    WorkspaceFileWriteRequest, execute_workspace_file_tool,
 };
 
 /// 便捷类型别名：boxed future。
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 type RegisteredToolFuture = Pin<Box<dyn Future<Output = Result<ToolOutput, PureError>> + Send>>;
 type RegisteredToolHandler = dyn Fn(ToolInput, ToolContext) -> RegisteredToolFuture + Send + Sync;
+
+/// 严格 object 输入 schema 中的字段。
+///
+/// 产品层和共享工具都应通过 `required` / `optional` 命名构造器声明字段，
+/// 避免在不同仓库里重复维护 `required` 数组和 `additionalProperties` 形状。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolInputSchemaField {
+    name: String,
+    schema: serde_json::Value,
+    required: bool,
+}
+
+impl ToolInputSchemaField {
+    pub fn required(name: impl Into<String>, schema: serde_json::Value) -> Self {
+        Self {
+            name: name.into(),
+            schema,
+            required: true,
+        }
+    }
+
+    pub fn optional(name: impl Into<String>, schema: serde_json::Value) -> Self {
+        Self {
+            name: name.into(),
+            schema,
+            required: false,
+        }
+    }
+}
+
+/// 构造工具统一使用的严格 object 输入 schema。
+pub fn strict_tool_input_schema(
+    fields: impl IntoIterator<Item = ToolInputSchemaField>,
+) -> serde_json::Value {
+    let mut properties = serde_json::Map::new();
+    let mut required = Vec::new();
+    for field in fields {
+        if field.required {
+            required.push(serde_json::Value::String(field.name.clone()));
+        }
+        properties.insert(field.name, field.schema);
+    }
+    serde_json::json!({
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": false,
+    })
+}
+
+/// 构造 function tool schema，并统一使用严格 object 输入 schema。
+pub fn function_tool_schema(
+    name: impl Into<String>,
+    description: impl Into<String>,
+    fields: impl IntoIterator<Item = ToolInputSchemaField>,
+) -> ToolSchema {
+    ToolSchema::function(name, description, strict_tool_input_schema(fields))
+}
+
+/// 动态注册工具 schema 不符合 pl-core typed handler 入口时的错误。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisteredToolSchemaError {
+    name: String,
+}
+
+impl RegisteredToolSchemaError {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl fmt::Display for RegisteredToolSchemaError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "registered tool `{}` must use a function schema",
+            self.name
+        )
+    }
+}
+
+impl std::error::Error for RegisteredToolSchemaError {}
+
+/// 等待宿主工具后端 future，并统一响应 turn cancellation。
+///
+/// 宿主 adapter 仍负责业务调用和错误类型；pl-core 负责维护工具执行过程中
+/// cancellation token 与后台 future 的竞争语义，避免每个产品后端重复手写
+/// `tokio::select!`。
+pub async fn run_tool_backend_with_cancellation<F, T, E>(
+    future: F,
+    cancellation_token: Option<tokio_util::sync::CancellationToken>,
+    cancelled_error: impl FnOnce() -> E,
+) -> std::result::Result<T, E>
+where
+    F: Future<Output = std::result::Result<T, E>> + Send,
+{
+    if let Some(token) = cancellation_token {
+        if token.is_cancelled() {
+            return Err(cancelled_error());
+        }
+        return tokio::select! {
+            result = future => result,
+            _ = token.cancelled() => Err(cancelled_error()),
+        };
+    }
+
+    future.await
+}
 
 /// 工具执行抽象（dyn-compatible）。
 ///
@@ -420,6 +538,23 @@ pub struct ToolExecutionResult<Artifact = serde_json::Value> {
 }
 
 impl<Artifact> ToolExecutionResult<Artifact> {
+    pub fn json(value: impl Serialize) -> Result<Self, PureError> {
+        let output =
+            serde_json::to_string(&value).map_err(|error| PureError::ToolExecutionFailed {
+                tool: "registered_tool".to_string(),
+                error: format!("failed to serialize JSON output: {error}"),
+            })?;
+        Ok(Self::success(output))
+    }
+
+    pub fn success(output: impl Into<String>) -> Self {
+        Self::new(true, output.into(), false)
+    }
+
+    pub fn failure(output: impl Into<String>) -> Self {
+        Self::new(false, output.into(), false)
+    }
+
     pub fn new(success: bool, output: String, ends_turn: bool) -> Self {
         Self::with_model_tokens(
             success,
@@ -497,6 +632,76 @@ impl ToolOutput {
             runtime_events: Vec::new(),
         })
     }
+
+    /// 消费工具输出并返回模型可见文本。
+    ///
+    /// `ToolOutput` 内部目前用 `description` 存储模型可见输出；产品层应通过该
+    /// 语义方法读取，避免把字段名当作共享协议。
+    pub fn into_model_output(self) -> String {
+        self.description
+    }
+
+    /// 从工具运行时事件中提取并解码输出 artifact。
+    ///
+    /// `OutputArtifacts` 是 pl-core 的工具执行事件细节，产品层应通过这个方法
+    /// 取得自身协议需要的 artifact 类型，而不是直接匹配 `ToolRuntimeEvent`。
+    /// 无法解码的条目会被忽略，和生命周期投影的 artifact 容错语义保持一致。
+    pub fn output_artifacts_as<T>(&self) -> Vec<T>
+    where
+        T: DeserializeOwned,
+    {
+        self.runtime_events
+            .iter()
+            .filter_map(|event| match event {
+                ToolRuntimeEvent::OutputArtifacts { artifacts } => Some(artifacts.as_slice()),
+                ToolRuntimeEvent::SkillActivated {
+                    activation: _activation,
+                } => None,
+                ToolRuntimeEvent::ToolResultRevision {
+                    revision: _revision,
+                } => None,
+                ToolRuntimeEvent::EndTurn => None,
+            })
+            .flatten()
+            .filter_map(|value| serde_json::from_value(value.clone()).ok())
+            .collect()
+    }
+
+    /// 判断工具输出是否要求当前 turn 结束。
+    ///
+    /// 结束回合是 pl-core 工具运行时事件的一种语义；产品层应调用该方法，而不是
+    /// 直接匹配 `ToolRuntimeEvent::EndTurn`。
+    pub fn ends_turn(&self) -> bool {
+        self.runtime_events.iter().any(|event| match event {
+            ToolRuntimeEvent::EndTurn => true,
+            ToolRuntimeEvent::SkillActivated {
+                activation: _activation,
+            } => false,
+            ToolRuntimeEvent::ToolResultRevision {
+                revision: _revision,
+            } => false,
+            ToolRuntimeEvent::OutputArtifacts {
+                artifacts: _artifacts,
+            } => false,
+        })
+    }
+
+    /// 将 canonical 工具输出投影回产品层常用的执行结果形态。
+    ///
+    /// 该方法统一 `ToolOutput` 的成功判定、模型可见输出、结束回合语义和 artifact
+    /// 解码，避免产品 adapter 直接读取 `exit_code`、`description` 或运行时事件。
+    pub fn to_execution_result<T>(&self) -> ToolExecutionResult<T>
+    where
+        T: DeserializeOwned,
+    {
+        ToolExecutionResult::with_model_output(
+            self.exit_code.unwrap_or(0) == 0,
+            self.description.clone(),
+            self.description.clone(),
+            self.ends_turn(),
+            self.output_artifacts_as(),
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -547,14 +752,168 @@ impl RegisteredTool {
         F: Fn(ToolInput, ToolContext) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<ToolOutput, PureError>> + Send + 'static,
     {
+        let name = name.into();
+        let tool_name = name.clone();
         Self {
-            name: name.into(),
+            name,
             description: description.into(),
             input_schema,
             supports_parallel_tool_calls: false,
             runtime_lock_policy: None,
-            handler: Arc::new(move |input, context| Box::pin(handler(input, context))),
+            handler: Arc::new(move |input, context| {
+                if context
+                    .options
+                    .cancellation_token
+                    .as_ref()
+                    .is_some_and(|token| token.is_cancelled())
+                {
+                    let tool = tool_name.clone();
+                    return Box::pin(async move {
+                        Err(PureError::ToolExecutionFailed {
+                            tool,
+                            error: "tool execution cancelled".to_string(),
+                        })
+                    }) as RegisteredToolFuture;
+                }
+                Box::pin(handler(input, context)) as RegisteredToolFuture
+            }),
         }
+    }
+
+    pub fn from_execution_result<F, Fut, Artifact>(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        input_schema: serde_json::Value,
+        handler: F,
+    ) -> Self
+    where
+        F: Fn(ToolInput, ToolContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<ToolExecutionResult<Artifact>, PureError>> + Send + 'static,
+        Artifact: Send + 'static,
+    {
+        Self::new(name, description, input_schema, move |input, context| {
+            let future = handler(input, context);
+            async move { future.await.map(ToolExecutionResult::into_tool_output) }
+        })
+    }
+
+    pub fn from_fallible_execution_result<F, Fut, Artifact, Error>(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        input_schema: serde_json::Value,
+        handler: F,
+    ) -> Self
+    where
+        F: Fn(ToolInput, ToolContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = std::result::Result<ToolExecutionResult<Artifact>, Error>>
+            + Send
+            + 'static,
+        Artifact: Send + 'static,
+        Error: fmt::Display + Send + 'static,
+    {
+        let name = name.into();
+        let tool_name = name.clone();
+        Self::new(name, description, input_schema, move |input, context| {
+            let future = handler(input, context);
+            let tool_name = tool_name.clone();
+            async move {
+                future
+                    .await
+                    .map(ToolExecutionResult::into_tool_output)
+                    .map_err(|error| PureError::ToolExecutionFailed {
+                        tool: tool_name,
+                        error: error.to_string(),
+                    })
+            }
+        })
+    }
+
+    /// 从模型可见 function schema 注册带强类型输入的产品工具。
+    ///
+    /// 产品层只需传入自己已经声明的 `ToolSchema` 和业务 handler；pl-core 统一
+    /// 解包 function schema 的 name/description/input schema，并复用 typed
+    /// 输入解析、错误映射和 `ToolExecutionResult` 输出投影。
+    pub fn from_schema_typed_fallible_execution_result<Input, F, Fut, Artifact, Error>(
+        schema: ToolSchema,
+        handler: F,
+    ) -> std::result::Result<Self, RegisteredToolSchemaError>
+    where
+        Input: DeserializeOwned + Send + 'static,
+        F: Fn(Input, ToolContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = std::result::Result<ToolExecutionResult<Artifact>, Error>>
+            + Send
+            + 'static,
+        Artifact: Send + 'static,
+        Error: fmt::Display + Send + 'static,
+    {
+        match schema {
+            ToolSchema::Function {
+                name,
+                description,
+                input_schema,
+            } => Ok(Self::from_typed_fallible_execution_result(
+                name,
+                description,
+                input_schema,
+                handler,
+            )),
+            ToolSchema::Custom {
+                name,
+                description,
+                format,
+            } => {
+                let _ = (description, format);
+                Err(RegisteredToolSchemaError { name })
+            }
+        }
+    }
+
+    /// 注册带强类型输入的产品工具。
+    ///
+    /// 宿主只提供产品输入类型和业务 handler；`pl-core` 负责把模型传入的
+    /// JSON arguments 反序列化为该类型，并把输入解析错误、业务错误和
+    /// `ToolExecutionResult` 统一映射成 canonical `ToolOutput`。
+    pub fn from_typed_fallible_execution_result<Input, F, Fut, Artifact, Error>(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        input_schema: serde_json::Value,
+        handler: F,
+    ) -> Self
+    where
+        Input: DeserializeOwned + Send + 'static,
+        F: Fn(Input, ToolContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = std::result::Result<ToolExecutionResult<Artifact>, Error>>
+            + Send
+            + 'static,
+        Artifact: Send + 'static,
+        Error: fmt::Display + Send + 'static,
+    {
+        let name = name.into();
+        let tool_name = name.clone();
+        Self::new(name, description, input_schema, move |input, context| {
+            let tool_name = tool_name.clone();
+            let arguments = match serde_json::from_value::<Input>(input.arguments) {
+                Ok(arguments) => arguments,
+                Err(error) => {
+                    return Box::pin(async move {
+                        Err(PureError::ToolExecutionFailed {
+                            tool: tool_name,
+                            error: format!("invalid input: {error}"),
+                        })
+                    }) as RegisteredToolFuture;
+                }
+            };
+            let future = handler(arguments, context);
+            Box::pin(async move {
+                future
+                    .await
+                    .map(ToolExecutionResult::into_tool_output)
+                    .map_err(|error| PureError::ToolExecutionFailed {
+                        tool: tool_name,
+                        error: error.to_string(),
+                    })
+            }) as RegisteredToolFuture
+        })
     }
 
     pub fn with_parallel_tool_calls(mut self) -> Self {
@@ -700,6 +1059,104 @@ mod tests {
     }
 
     #[test]
+    fn tool_output_consumes_model_visible_output() {
+        let output = ToolOutput::from_model_output(ToolOutputModelOutputRequest {
+            model_output: "visible".to_string(),
+            success: true,
+            ends_turn: false,
+        });
+
+        assert_eq!(output.into_model_output(), "visible");
+    }
+
+    #[test]
+    fn tool_output_reports_end_turn_runtime_event() {
+        let output = ToolOutput {
+            description: "saved".to_string(),
+            truncated: OutputTruncation::empty(),
+            output_file: PathBuf::new(),
+            exit_code: Some(0),
+            timed_out: false,
+            runtime_events: vec![ToolRuntimeEvent::ToolResultRevision { revision: 1 }],
+        };
+        assert_eq!(output.ends_turn(), false);
+
+        let output = ToolOutput {
+            runtime_events: vec![
+                ToolRuntimeEvent::ToolResultRevision { revision: 1 },
+                ToolRuntimeEvent::EndTurn,
+            ],
+            ..output
+        };
+        assert_eq!(output.ends_turn(), true);
+    }
+
+    #[test]
+    fn tool_output_decodes_runtime_output_artifacts() {
+        #[derive(Debug, Deserialize, PartialEq, Eq)]
+        struct ArtifactRecord {
+            id: String,
+        }
+
+        let output = ToolOutput {
+            description: "saved".to_string(),
+            truncated: OutputTruncation::empty(),
+            output_file: PathBuf::new(),
+            exit_code: Some(0),
+            timed_out: false,
+            runtime_events: vec![
+                ToolRuntimeEvent::ToolResultRevision { revision: 1 },
+                ToolRuntimeEvent::OutputArtifacts {
+                    artifacts: vec![serde_json::json!({"id": "artifact-1"})],
+                },
+                ToolRuntimeEvent::EndTurn,
+            ],
+        };
+
+        assert_eq!(
+            output.output_artifacts_as::<ArtifactRecord>(),
+            vec![ArtifactRecord {
+                id: "artifact-1".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn tool_output_projects_execution_result_for_product_adapters() {
+        #[derive(Debug, Deserialize, PartialEq, Eq)]
+        struct ArtifactRecord {
+            id: String,
+        }
+
+        let output = ToolOutput {
+            description: "model output".to_string(),
+            truncated: OutputTruncation::empty(),
+            output_file: PathBuf::new(),
+            exit_code: Some(1),
+            timed_out: false,
+            runtime_events: vec![
+                ToolRuntimeEvent::OutputArtifacts {
+                    artifacts: vec![serde_json::json!({"id": "artifact-1"})],
+                },
+                ToolRuntimeEvent::EndTurn,
+            ],
+        };
+
+        assert_eq!(
+            output.to_execution_result::<ArtifactRecord>(),
+            ToolExecutionResult {
+                success: false,
+                output: "model output".to_string(),
+                model_output: "model output".to_string(),
+                ends_turn: true,
+                output_artifacts: vec![ArtifactRecord {
+                    id: "artifact-1".to_string(),
+                }],
+            }
+        );
+    }
+
+    #[test]
     fn tool_execution_result_keeps_full_output_and_builds_tool_output() {
         let execution = ToolExecutionResult::with_model_tokens(
             true,
@@ -730,6 +1187,408 @@ mod tests {
                 runtime_events: vec![ToolRuntimeEvent::EndTurn],
             }
         );
+    }
+
+    #[test]
+    fn tool_execution_result_serializes_json_model_output() {
+        let execution = ToolExecutionResult::<serde_json::Value>::json(serde_json::json!({
+            "queued": [1],
+            "deduped": [2],
+            "ignored": []
+        }))
+        .expect("serialize JSON tool output");
+
+        assert_eq!(
+            execution,
+            ToolExecutionResult {
+                success: true,
+                output: "{\"deduped\":[2],\"ignored\":[],\"queued\":[1]}".to_string(),
+                model_output: "{\"deduped\":[2],\"ignored\":[],\"queued\":[1]}".to_string(),
+                ends_turn: false,
+                output_artifacts: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn tool_execution_result_exposes_explicit_success_and_failure_constructors() {
+        assert_eq!(
+            ToolExecutionResult::<serde_json::Value>::success("ok"),
+            ToolExecutionResult::new(true, "ok".to_string(), false)
+        );
+        assert_eq!(
+            ToolExecutionResult::<serde_json::Value>::failure("bad"),
+            ToolExecutionResult::new(false, "bad".to_string(), false)
+        );
+    }
+
+    #[test]
+    fn function_tool_schema_builds_strict_object_input_schema() {
+        let schema = function_tool_schema(
+            "save_task_plan",
+            "Save a task plan.",
+            [
+                ToolInputSchemaField::required("title", serde_json::json!({ "type": "string" })),
+                ToolInputSchemaField::required("markdown", serde_json::json!({ "type": "string" })),
+                ToolInputSchemaField::optional("metadata", serde_json::json!({ "type": "object" })),
+            ],
+        );
+
+        let ToolSchema::Function {
+            name,
+            description,
+            input_schema,
+        } = schema
+        else {
+            panic!("function tool schema");
+        };
+        assert_eq!(name, "save_task_plan");
+        assert_eq!(description, "Save a task plan.");
+        assert_eq!(
+            input_schema,
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string" },
+                    "markdown": { "type": "string" },
+                    "metadata": { "type": "object" }
+                },
+                "required": ["title", "markdown"],
+                "additionalProperties": false
+            })
+        );
+    }
+
+    #[test]
+    fn strict_tool_input_schema_uses_named_field_constructors() {
+        let schema = strict_tool_input_schema([
+            ToolInputSchemaField::required("path", serde_json::json!({ "type": "string" })),
+            ToolInputSchemaField::optional("name", serde_json::json!({ "type": "string" })),
+        ]);
+
+        assert_eq!(
+            schema,
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "name": { "type": "string" }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn registered_tool_from_execution_result_honors_cancelled_context() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let tool_calls = calls.clone();
+        let tool = RegisteredTool::from_execution_result(
+            "product_tool",
+            "Product tool",
+            serde_json::json!({ "type": "object" }),
+            move |_input, _context| {
+                let tool_calls = tool_calls.clone();
+                async move {
+                    tool_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok(ToolExecutionResult::<serde_json::Value>::new(
+                        true,
+                        "ran".to_string(),
+                        false,
+                    ))
+                }
+            },
+        );
+        let token = tokio_util::sync::CancellationToken::new();
+        token.cancel();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let result = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({}),
+                    session_id: "session".to_string(),
+                    tool_id: "tool-call".to_string(),
+                    revision_base: 0,
+                },
+                ToolContext {
+                    event_tx,
+                    options: TurnOptions::default().with_cancellation(token),
+                    workspace_access: WorkspaceAccess::WorkspaceOnly,
+                    mode: crate::turn::CompileMode::Auto,
+                    workspace_root: PathBuf::new(),
+                    workspace_instructions: None,
+                    instruction_snapshot: None,
+                    provider_call_id: None,
+                    active_subagent: None,
+                    agent_supervisor: AgentSupervisor::default(),
+                    agent_tool_registrar: None,
+                    lsp_runtime: None,
+                    parent_session: Arc::new(crate::session::CoreSession::new()),
+                },
+            )
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(PureError::ToolExecutionFailed { tool, error })
+                if tool == "product_tool" && error.contains("cancel")
+        ));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn registered_tool_from_fallible_execution_result_maps_display_error() {
+        #[derive(Debug)]
+        struct DisplayError(&'static str);
+
+        impl fmt::Display for DisplayError {
+            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str(self.0)
+            }
+        }
+
+        let tool = RegisteredTool::from_fallible_execution_result(
+            "product_tool",
+            "Product tool",
+            serde_json::json!({ "type": "object" }),
+            |_input, _context| async move {
+                Err::<ToolExecutionResult<serde_json::Value>, DisplayError>(DisplayError("boom"))
+            },
+        );
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let result = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({}),
+                    session_id: "session".to_string(),
+                    tool_id: "tool-call".to_string(),
+                    revision_base: 0,
+                },
+                ToolContext {
+                    event_tx,
+                    options: TurnOptions::default(),
+                    workspace_access: WorkspaceAccess::WorkspaceOnly,
+                    mode: crate::turn::CompileMode::Auto,
+                    workspace_root: PathBuf::new(),
+                    workspace_instructions: None,
+                    instruction_snapshot: None,
+                    provider_call_id: None,
+                    active_subagent: None,
+                    agent_supervisor: AgentSupervisor::default(),
+                    agent_tool_registrar: None,
+                    lsp_runtime: None,
+                    parent_session: Arc::new(crate::session::CoreSession::new()),
+                },
+            )
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(PureError::ToolExecutionFailed { tool, error })
+                if tool == "product_tool" && error == "boom"
+        ));
+    }
+
+    #[tokio::test]
+    async fn registered_tool_from_typed_fallible_execution_result_deserializes_input() {
+        #[derive(Debug, Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct ProductInput {
+            item_id: String,
+        }
+
+        let tool = RegisteredTool::from_typed_fallible_execution_result(
+            "product_tool",
+            "Product tool",
+            serde_json::json!({ "type": "object" }),
+            |input: ProductInput, _context| async move {
+                Ok::<_, &'static str>(
+                    ToolExecutionResult::<serde_json::Value>::json(serde_json::json!({
+                        "itemId": input.item_id
+                    }))
+                    .expect("json output"),
+                )
+            },
+        );
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let output = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({ "itemId": "task-1" }),
+                    session_id: "session".to_string(),
+                    tool_id: "tool-call".to_string(),
+                    revision_base: 0,
+                },
+                ToolContext {
+                    event_tx,
+                    options: TurnOptions::default(),
+                    workspace_access: WorkspaceAccess::WorkspaceOnly,
+                    mode: crate::turn::CompileMode::Auto,
+                    workspace_root: PathBuf::new(),
+                    workspace_instructions: None,
+                    instruction_snapshot: None,
+                    provider_call_id: None,
+                    active_subagent: None,
+                    agent_supervisor: AgentSupervisor::default(),
+                    agent_tool_registrar: None,
+                    lsp_runtime: None,
+                    parent_session: Arc::new(crate::session::CoreSession::new()),
+                },
+            )
+            .await
+            .expect("typed product tool output");
+
+        assert_eq!(output.description, "{\"itemId\":\"task-1\"}");
+    }
+
+    #[test]
+    fn registered_tool_from_schema_uses_function_schema_metadata() {
+        #[derive(Debug, Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct ProductInput {
+            _item_id: String,
+        }
+
+        let schema = function_tool_schema(
+            "product_tool",
+            "Product tool",
+            [ToolInputSchemaField::required(
+                "itemId",
+                serde_json::json!({ "type": "string" }),
+            )],
+        );
+
+        let tool = RegisteredTool::from_schema_typed_fallible_execution_result(
+            schema,
+            |_input: ProductInput, _context| async move {
+                Ok::<_, &'static str>(ToolExecutionResult::<serde_json::Value>::success("ok"))
+            },
+        )
+        .expect("function schema");
+
+        assert_eq!(tool.name(), "product_tool");
+        assert_eq!(tool.description(), "Product tool");
+        assert_eq!(
+            tool.input_schema(),
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "itemId": { "type": "string" }
+                },
+                "required": ["itemId"],
+                "additionalProperties": false,
+            })
+        );
+    }
+
+    #[test]
+    fn registered_tool_from_schema_rejects_custom_schema() {
+        #[derive(Debug, Deserialize)]
+        struct ProductInput;
+
+        let result = RegisteredTool::from_schema_typed_fallible_execution_result(
+            ToolSchema::custom_grammar("custom_tool", "Custom tool", "lark", "start: /x/"),
+            |_input: ProductInput, _context| async move {
+                Ok::<_, &'static str>(ToolExecutionResult::<serde_json::Value>::success("ok"))
+            },
+        );
+
+        assert_eq!(
+            result
+                .expect_err("custom schema must be rejected")
+                .to_string(),
+            "registered tool `custom_tool` must use a function schema"
+        );
+    }
+
+    #[tokio::test]
+    async fn registered_tool_from_typed_fallible_execution_result_rejects_invalid_input() {
+        #[derive(Debug, Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct ProductInput {
+            #[serde(rename = "itemId")]
+            _item_id: String,
+        }
+
+        let tool = RegisteredTool::from_typed_fallible_execution_result(
+            "product_tool",
+            "Product tool",
+            serde_json::json!({ "type": "object" }),
+            |_input: ProductInput, _context| async move {
+                Ok::<_, &'static str>(ToolExecutionResult::<serde_json::Value>::success("ok"))
+            },
+        );
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let result = tool
+            .execute(
+                ToolInput {
+                    arguments: serde_json::json!({ "item_id": "task-1" }),
+                    session_id: "session".to_string(),
+                    tool_id: "tool-call".to_string(),
+                    revision_base: 0,
+                },
+                ToolContext {
+                    event_tx,
+                    options: TurnOptions::default(),
+                    workspace_access: WorkspaceAccess::WorkspaceOnly,
+                    mode: crate::turn::CompileMode::Auto,
+                    workspace_root: PathBuf::new(),
+                    workspace_instructions: None,
+                    instruction_snapshot: None,
+                    provider_call_id: None,
+                    active_subagent: None,
+                    agent_supervisor: AgentSupervisor::default(),
+                    agent_tool_registrar: None,
+                    lsp_runtime: None,
+                    parent_session: Arc::new(crate::session::CoreSession::new()),
+                },
+            )
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(PureError::ToolExecutionFailed { tool, error })
+                if tool == "product_tool"
+                    && error.contains("invalid input")
+                    && error.contains("itemId")
+        ));
+    }
+
+    #[tokio::test]
+    async fn tool_backend_future_returns_cancelled_error_before_running() {
+        let token = tokio_util::sync::CancellationToken::new();
+        token.cancel();
+
+        let result = run_tool_backend_with_cancellation(
+            async { Ok::<_, &'static str>("ran") },
+            Some(token),
+            || "cancelled",
+        )
+        .await;
+
+        assert_eq!(result, Err("cancelled"));
+    }
+
+    #[tokio::test]
+    async fn tool_backend_future_returns_cancelled_error_while_running() {
+        let token = tokio_util::sync::CancellationToken::new();
+        let task_token = token.clone();
+        let task = tokio::spawn(async move {
+            run_tool_backend_with_cancellation(
+                async {
+                    std::future::pending::<()>().await;
+                    Ok::<_, &'static str>("ran")
+                },
+                Some(task_token),
+                || "cancelled",
+            )
+            .await
+        });
+
+        token.cancel();
+
+        assert_eq!(task.await.expect("task joins"), Err("cancelled"));
     }
 
     #[test]
@@ -787,6 +1646,26 @@ mod tests {
         assert!(!preview.contains("secret-token"));
         assert!(!preview.contains("secret-key"));
         assert!(!preview.contains(&"YWJj".repeat(30)));
+    }
+
+    #[test]
+    fn explicit_secret_redaction_handles_text_and_json() {
+        let redaction = SecretRedaction::new(["secret", "secret-token", ""]);
+
+        assert_eq!(
+            redaction.redact_str("secret-token and secret"),
+            "<redacted> and <redacted>"
+        );
+        assert_eq!(
+            redaction.redact_json_value(serde_json::json!({
+                "secret-token": "visible",
+                "items": ["secret-token", { "value": "secret" }],
+            })),
+            serde_json::json!({
+                "<redacted>": "visible",
+                "items": ["<redacted>", { "value": "<redacted>" }],
+            })
+        );
     }
 
     #[test]

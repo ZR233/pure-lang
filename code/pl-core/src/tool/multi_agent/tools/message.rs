@@ -80,5 +80,7 @@ async fn handle_message_tool(
         target: record.path,
         status: record.status,
         interrupt: args.interrupt,
+        queued: !args.trigger_turn,
+        turn_id: None,
     })
 }

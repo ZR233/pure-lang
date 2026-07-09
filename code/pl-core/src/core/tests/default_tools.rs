@@ -48,6 +48,114 @@ fn shared_tool_schemas_can_describe_hosted_workspace_surface() {
 }
 
 #[test]
+fn shared_tool_names_match_shared_schema_order() {
+    let options = SharedToolSchemaOptions {
+        bash: false,
+        workspace_files: true,
+        ask_user: true,
+        subagents: true,
+        git: true,
+        container: true,
+        mcp_resources: true,
+        todo: true,
+        plan_exit: false,
+    };
+    let schema_names = shared_tool_schemas(options)
+        .into_iter()
+        .map(|schema| schema.name().to_string())
+        .collect::<Vec<_>>();
+
+    assert_eq!(shared_tool_names(options), schema_names);
+}
+
+#[test]
+fn shared_tool_schema_options_can_disable_plan_exit_fluently() {
+    let options = SharedToolSchemaOptions::from_capabilities(
+        &crate::config::ToolCapabilityConfig::hosted_container_workspace(),
+    )
+    .with_plan_exit(false);
+    let names = shared_tool_names(options);
+
+    assert!(names.contains(&"container_exec".to_string()));
+    assert!(names.contains(&"git_status".to_string()));
+    assert!(!names.contains(&"plan_exit".to_string()));
+}
+
+#[test]
+fn hosted_container_shared_tool_names_apply_visibility_toggles() {
+    let names = hosted_container_shared_tool_names(HostedSharedToolVisibility::default());
+
+    assert!(names.contains(&"read_file".to_string()));
+    assert!(names.contains(&"container_exec".to_string()));
+    assert!(names.contains(&"list_mcp_resources".to_string()));
+    assert!(names.contains(&"send_input".to_string()));
+    assert!(names.contains(&"wait_agent".to_string()));
+    assert!(!names.contains(&"spawn_agent".to_string()));
+    assert!(!names.contains(&"close_agent".to_string()));
+    assert!(!names.contains(&"git_status".to_string()));
+    assert!(!names.contains(&"plan_exit".to_string()));
+
+    let elevated = hosted_container_shared_tool_names(
+        HostedSharedToolVisibility::default()
+            .with_git(true)
+            .with_spawn_agent(true)
+            .with_close_agent(true),
+    );
+
+    assert!(elevated.contains(&"git_status".to_string()));
+    assert!(elevated.contains(&"git_workspace_info".to_string()));
+    assert!(elevated.contains(&"spawn_agent".to_string()));
+    assert!(elevated.contains(&"close_agent".to_string()));
+}
+
+#[test]
+fn tool_visibility_set_combines_shared_product_and_dynamic_tools() {
+    let visibility = ToolVisibilitySet::hosted_container(
+        HostedSharedToolVisibility::default().with_spawn_agent(true),
+    )
+    .with_tool_names(["github_api_request", "mcp__docs__lookup"]);
+
+    assert!(visibility.contains("read_file"));
+    assert!(visibility.contains("spawn_agent"));
+    assert!(visibility.contains("github_api_request"));
+    assert!(visibility.contains("mcp__docs__lookup"));
+    assert!(!visibility.contains("git_status"));
+    assert_eq!(visibility.len(), visibility.to_btree_set().len());
+
+    let schemas = visibility.filter_schemas([
+        pl_model::ToolSchema::function("github_api_request", "GitHub", serde_json::json!({})),
+        pl_model::ToolSchema::function("hidden_product_tool", "Hidden", serde_json::json!({})),
+    ]);
+
+    assert_eq!(
+        schemas
+            .into_iter()
+            .map(|schema| schema.name().to_string())
+            .collect::<Vec<_>>(),
+        vec!["github_api_request".to_string()]
+    );
+}
+
+#[test]
+fn hosted_container_visibility_combines_product_and_dynamic_names() {
+    let visibility = ToolVisibilitySet::hosted_container_with_tool_names(
+        HostedSharedToolVisibility::default()
+            .with_git(true)
+            .with_spawn_agent(true),
+        ["github_api_request", "save_artifact"],
+        ["mcp__docs__lookup"],
+    );
+
+    assert!(visibility.contains("read_file"));
+    assert!(visibility.contains("git_status"));
+    assert!(visibility.contains("spawn_agent"));
+    assert!(visibility.contains("github_api_request"));
+    assert!(visibility.contains("save_artifact"));
+    assert!(visibility.contains("mcp__docs__lookup"));
+    assert!(!visibility.contains("close_agent"));
+}
+
+#[test]
 fn shared_tool_schemas_can_include_mcp_resource_tools() {
     let names = shared_tool_schemas(SharedToolSchemaOptions {
         mcp_resources: true,
@@ -207,6 +315,42 @@ fn workspace_file_schemas_use_codex_camel_case_fields() {
 }
 
 #[test]
+fn workspace_file_tool_kind_rejects_dot_aliases() {
+    assert_eq!(
+        crate::tool::WorkspaceFileToolKind::from_name("read_file"),
+        Some(crate::tool::WorkspaceFileToolKind::ReadFile)
+    );
+    assert_eq!(
+        crate::tool::WorkspaceFileToolKind::from_name("list_files"),
+        Some(crate::tool::WorkspaceFileToolKind::ListFiles)
+    );
+    assert_eq!(
+        crate::tool::WorkspaceFileToolKind::from_name("search_files"),
+        Some(crate::tool::WorkspaceFileToolKind::SearchFiles)
+    );
+    assert_eq!(
+        crate::tool::WorkspaceFileToolKind::from_name("apply_patch"),
+        Some(crate::tool::WorkspaceFileToolKind::ApplyPatch)
+    );
+    assert_eq!(
+        crate::tool::WorkspaceFileToolKind::from_name("read.file"),
+        None
+    );
+    assert_eq!(
+        crate::tool::WorkspaceFileToolKind::from_name("list.files"),
+        None
+    );
+    assert_eq!(
+        crate::tool::WorkspaceFileToolKind::from_name("search.files"),
+        None
+    );
+    assert_eq!(
+        crate::tool::WorkspaceFileToolKind::from_name("apply.patch"),
+        None
+    );
+}
+
+#[test]
 fn agent_control_schemas_use_codex_camel_case_fields() {
     let spawn_schema = crate::tool::AgentControlToolKind::SpawnAgent.input_schema();
     assert!(spawn_schema.pointer("/properties/taskName").is_some());
@@ -347,10 +491,12 @@ async fn tool_set_builder_registers_git_only_with_runtime_config() {
 struct FakeContainerBackend;
 
 impl crate::tool::ContainerBackend for FakeContainerBackend {
+    type Error = String;
+
     async fn exec(
         &self,
         _request: crate::tool::ContainerExecRequest,
-    ) -> crate::Result<crate::tool::ContainerExecOutput> {
+    ) -> std::result::Result<crate::tool::ContainerExecOutput, Self::Error> {
         Ok(crate::tool::ContainerExecOutput {
             status: 0,
             stdout: String::new(),
@@ -366,11 +512,14 @@ impl crate::tool::ContainerBackend for FakeContainerBackend {
     async fn copy_from(
         &self,
         _request: crate::tool::ContainerCopyFromRequest,
-    ) -> crate::Result<Vec<u8>> {
+    ) -> std::result::Result<Vec<u8>, Self::Error> {
         Ok(Vec::new())
     }
 
-    async fn copy_to(&self, _request: crate::tool::ContainerCopyToRequest) -> crate::Result<()> {
+    async fn copy_to(
+        &self,
+        _request: crate::tool::ContainerCopyToRequest,
+    ) -> std::result::Result<(), Self::Error> {
         Ok(())
     }
 }
@@ -381,14 +530,26 @@ async fn tool_set_builder_registers_container_only_with_backend() {
         container: true,
         ..Default::default()
     };
+    let schema_names_without_backend =
+        ToolSetBuilder::from_capabilities(capabilities.clone()).shared_tool_names();
     let mut core = PureCore::default_provider().unwrap();
 
     ToolSetBuilder::from_capabilities(capabilities.clone())
         .register(&mut core, std::env::temp_dir(), None)
         .await;
 
+    assert!(!schema_names_without_backend.contains(&"container_exec".to_string()));
+    assert!(!schema_names_without_backend.contains(&"container_copy".to_string()));
+    assert!(!schema_names_without_backend.contains(&"read_file".to_string()));
+    assert!(!schema_names_without_backend.contains(&"list_files".to_string()));
+    assert!(!schema_names_without_backend.contains(&"search_files".to_string()));
+    assert!(!schema_names_without_backend.contains(&"apply_patch".to_string()));
     assert!(core.tools.get("container_exec").is_none());
     assert!(core.tools.get("container_copy").is_none());
+    assert!(core.tools.get("read_file").is_none());
+    assert!(core.tools.get("list_files").is_none());
+    assert!(core.tools.get("search_files").is_none());
+    assert!(core.tools.get("apply_patch").is_none());
 
     let mut core = PureCore::default_provider().unwrap();
     ToolSetBuilder::from_capabilities(capabilities)
@@ -402,6 +563,320 @@ async fn tool_set_builder_registers_container_only_with_backend() {
     assert!(core.tools.get("search_files").is_some());
     assert!(core.tools.get("apply_patch").is_some());
     assert!(core.tools.get("container_copy").is_some());
+}
+
+#[derive(Debug, Clone, Default)]
+struct FakeAgentControlBackend;
+
+impl crate::tool::AgentControlBackend for FakeAgentControlBackend {
+    type Error = String;
+
+    async fn spawn_agent(
+        &self,
+        request: crate::tool::AgentControlSpawnRequest,
+    ) -> std::result::Result<crate::tool::AgentControlSpawnOutput, Self::Error> {
+        Ok(crate::tool::AgentControlSpawnOutput {
+            agent_id: "agent-1".to_string(),
+            task_name: request.task_name,
+            path: "agent-1".to_string(),
+            status: pl_protocol::AgentStatus::Running,
+            turn_id: None,
+        })
+    }
+
+    async fn send_input(
+        &self,
+        request: crate::tool::AgentControlSendInputRequest,
+    ) -> std::result::Result<crate::tool::AgentControlSendInputOutput, Self::Error> {
+        Ok(crate::tool::AgentControlSendInputOutput {
+            target: request.target,
+            status: pl_protocol::AgentStatus::Running,
+            interrupt: request.interrupt,
+            queued: !request.trigger_turn,
+            turn_id: None,
+        })
+    }
+
+    async fn wait_agent(
+        &self,
+        _request: crate::tool::AgentControlWaitRequest,
+    ) -> std::result::Result<crate::tool::AgentControlWaitOutput, Self::Error> {
+        Ok(crate::tool::AgentControlWaitOutput {
+            message: String::new(),
+            timed_out: false,
+        })
+    }
+
+    async fn list_agents(
+        &self,
+        _request: crate::tool::AgentControlListRequest,
+    ) -> std::result::Result<crate::tool::AgentControlListOutput, Self::Error> {
+        Ok(crate::tool::AgentControlListOutput { agents: Vec::new() })
+    }
+
+    async fn close_agent(
+        &self,
+        request: crate::tool::AgentControlTargetRequest,
+    ) -> std::result::Result<crate::tool::AgentControlMessageOutput, Self::Error> {
+        Ok(crate::tool::AgentControlMessageOutput {
+            target: request.target,
+            status: pl_protocol::AgentStatus::Shutdown,
+        })
+    }
+
+    async fn resume_agent(
+        &self,
+        request: crate::tool::AgentControlTargetRequest,
+    ) -> std::result::Result<crate::tool::AgentControlMessageOutput, Self::Error> {
+        Ok(crate::tool::AgentControlMessageOutput {
+            target: request.target,
+            status: pl_protocol::AgentStatus::Running,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DenyAgentControlTargetPolicy;
+
+impl crate::tool::AgentControlPolicy for DenyAgentControlTargetPolicy {
+    type Error = String;
+
+    async fn check_tool(
+        &self,
+        _kind: crate::tool::AgentControlToolKind,
+    ) -> std::result::Result<(), Self::Error> {
+        Ok(())
+    }
+
+    async fn check_target(
+        &self,
+        kind: crate::tool::AgentControlToolKind,
+        _target: &str,
+    ) -> std::result::Result<(), Self::Error> {
+        Err(format!("target denied by builder policy: {}", kind.name()))
+    }
+}
+
+#[tokio::test]
+async fn tool_set_builder_registers_host_agent_control_backend() {
+    let capabilities = crate::config::ToolCapabilityConfig {
+        subagents: true,
+        ..Default::default()
+    };
+    let mut core = PureCore::default_provider().unwrap();
+
+    ToolSetBuilder::from_capabilities(capabilities.clone())
+        .with_allowed_tools(["spawn_agent", "send_input"])
+        .register(&mut core, std::env::temp_dir(), None)
+        .await;
+
+    assert!(core.tools.get("spawn_agent").is_some());
+    assert!(core.tools.get("send_input").is_some());
+    assert!(core.tools.get("wait_agent").is_none());
+
+    let mut core = PureCore::default_provider().unwrap();
+    ToolSetBuilder::from_capabilities(capabilities)
+        .with_allowed_tools(["spawn_agent", "send_input"])
+        .with_agent_control_tools(std::sync::Arc::new(FakeAgentControlBackend))
+        .register(&mut core, std::env::temp_dir(), None)
+        .await;
+
+    assert!(core.tools.get("spawn_agent").is_some());
+    assert!(core.tools.get("send_input").is_some());
+    assert!(core.tools.get("wait_agent").is_none());
+}
+
+#[tokio::test]
+async fn tool_set_builder_registers_host_agent_control_policy() {
+    let capabilities = crate::config::ToolCapabilityConfig {
+        subagents: true,
+        ..Default::default()
+    };
+    let mut core = PureCore::default_provider().unwrap();
+
+    ToolSetBuilder::from_capabilities(capabilities)
+        .with_allowed_tools(["send_input"])
+        .with_agent_control_tools(std::sync::Arc::new(FakeAgentControlBackend))
+        .with_agent_control_policy(std::sync::Arc::new(DenyAgentControlTargetPolicy))
+        .register(&mut core, std::env::temp_dir(), None)
+        .await;
+
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let error = core
+        .tools
+        .get("send_input")
+        .expect("send_input")
+        .execute(
+            crate::tool::ToolInput {
+                arguments: serde_json::json!({
+                    "target": "agent-1",
+                    "message": "continue"
+                }),
+                session_id: "session-1".to_string(),
+                tool_id: "call-1".to_string(),
+                revision_base: 0,
+            },
+            test_tool_context(event_tx),
+        )
+        .await
+        .expect_err("policy should deny target before backend");
+
+    assert!(
+        error
+            .to_string()
+            .contains("target denied by builder policy")
+    );
+}
+
+#[derive(Debug, Clone, Default)]
+struct FakeMcpResourceBackend;
+
+impl crate::tool::McpResourceBackend for FakeMcpResourceBackend {
+    type Error = crate::PureError;
+
+    async fn list_resources(
+        &self,
+        _request: crate::tool::McpListResourcesRequest,
+    ) -> std::result::Result<serde_json::Value, Self::Error> {
+        Ok(serde_json::json!({ "resources": [] }))
+    }
+
+    async fn list_resource_templates(
+        &self,
+        _request: crate::tool::McpListResourceTemplatesRequest,
+    ) -> std::result::Result<serde_json::Value, Self::Error> {
+        Ok(serde_json::json!({ "resourceTemplates": [] }))
+    }
+
+    async fn read_resource(
+        &self,
+        request: crate::tool::McpReadResourceRequest,
+    ) -> std::result::Result<serde_json::Value, Self::Error> {
+        Ok(serde_json::json!({
+            "server": request.server,
+            "uri": request.uri,
+        }))
+    }
+}
+
+#[derive(Debug)]
+struct FakeMcpToolBackend;
+
+impl crate::tool::McpToolBackend for FakeMcpToolBackend {
+    type Error = crate::PureError;
+
+    async fn call_tool(
+        &self,
+        request: crate::tool::McpToolRequest,
+    ) -> std::result::Result<serde_json::Value, Self::Error> {
+        Ok(serde_json::json!({
+            "tool": request.name,
+            "arguments": request.arguments,
+        }))
+    }
+}
+
+#[tokio::test]
+async fn tool_set_builder_registers_mcp_resource_backend() {
+    let capabilities = crate::config::ToolCapabilityConfig {
+        mcp: true,
+        ..Default::default()
+    };
+    let mut core = PureCore::default_provider().unwrap();
+
+    ToolSetBuilder::from_capabilities(capabilities.clone())
+        .with_allowed_tools(["list_mcp_resources", "read_mcp_resource"])
+        .register(&mut core, std::env::temp_dir(), None)
+        .await;
+
+    assert!(core.tools.get("list_mcp_resources").is_none());
+    assert!(core.tools.get("read_mcp_resource").is_none());
+
+    let mut core = PureCore::default_provider().unwrap();
+    ToolSetBuilder::from_capabilities(capabilities)
+        .with_allowed_tools(["list_mcp_resources", "read_mcp_resource"])
+        .with_mcp_resource_tools(std::sync::Arc::new(FakeMcpResourceBackend))
+        .register(&mut core, std::env::temp_dir(), None)
+        .await;
+
+    assert!(core.tools.get("list_mcp_resources").is_some());
+    assert!(core.tools.get("list_mcp_resource_templates").is_none());
+    assert!(core.tools.get("read_mcp_resource").is_some());
+}
+
+#[tokio::test]
+async fn tool_set_builder_registers_host_mcp_tools() {
+    let capabilities = crate::config::ToolCapabilityConfig {
+        mcp: true,
+        ..Default::default()
+    };
+    let mut core = PureCore::default_provider().unwrap();
+    let schema = pl_model::ToolSchema::function(
+        "mcp__docs__lookup",
+        "Lookup docs.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string" }
+            },
+            "required": ["query"]
+        }),
+    );
+
+    ToolSetBuilder::from_capabilities(capabilities)
+        .with_allowed_tools(["mcp__docs__lookup"])
+        .with_mcp_tools(
+            vec![schema.clone()],
+            std::sync::Arc::new(FakeMcpToolBackend),
+        )
+        .register(&mut core, std::env::temp_dir(), None)
+        .await;
+
+    let schemas = core.tools.schemas();
+    assert_eq!(schemas.len(), 1);
+    assert_eq!(schemas[0].name(), schema.name());
+    assert_eq!(schemas[0].description(), schema.description());
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+    let output = core
+        .tools
+        .get("mcp__docs__lookup")
+        .expect("mcp tool")
+        .execute(
+            crate::tool::ToolInput {
+                arguments: serde_json::json!({ "query": "agent kernel" }),
+                session_id: "session_mcp".to_string(),
+                tool_id: "call_mcp".to_string(),
+                revision_base: 0,
+            },
+            test_tool_context(event_tx),
+        )
+        .await
+        .expect("execute mcp tool");
+
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&output.description).expect("json output"),
+        serde_json::json!({
+            "tool": "mcp__docs__lookup",
+            "arguments": { "query": "agent kernel" },
+        })
+    );
+
+    let kernel = AgentKernel::builder(
+        PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None)).unwrap(),
+    )
+    .with_profile(CoreAgentProfile::host_provided(std::env::temp_dir()))
+    .with_tool_set(
+        ToolSetBuilder::from_capabilities(crate::config::ToolCapabilityConfig {
+            mcp: true,
+            ..Default::default()
+        })
+        .with_allowed_tools(["mcp__docs__lookup"])
+        .with_mcp_tools(vec![schema], std::sync::Arc::new(FakeMcpToolBackend)),
+    )
+    .build()
+    .await;
+
+    assert!(kernel.tool("mcp__docs__lookup").is_some());
 }
 
 #[tokio::test]
@@ -473,6 +948,23 @@ async fn profiled_local_workspace_registers_default_tools() {
     assert!(core.tools.get("bash").is_some());
     assert!(core.tools.get("read_file").is_some());
     assert!(core.tools.get("spawn_agent").is_some());
+}
+
+#[tokio::test]
+async fn profiled_local_workspace_uses_unified_workspace_file_tools() {
+    let runtime = CoreRuntimeProfile::local_workspace(std::env::temp_dir())
+        .with_workspace_instructions("rules");
+    let mut core = PureCoreBuilder::from_provider_info(pl_model::ProviderInfo::deepseek(None))
+        .unwrap()
+        .with_runtime_profile(runtime)
+        .build();
+
+    core.register_profile_tools().await;
+
+    let read_tool = core.tools.get("read_file").expect("read_file tool");
+    let patch_tool = core.tools.get("apply_patch").expect("apply_patch tool");
+    assert!(format!("{read_tool:?}").contains("LocalWorkspaceFileTool"));
+    assert!(format!("{patch_tool:?}").contains("LocalWorkspaceFileTool"));
 }
 
 #[tokio::test]

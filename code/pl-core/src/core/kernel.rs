@@ -7,13 +7,11 @@ use std::sync::Arc;
 use pl_protocol::{PureError, Result};
 use serde_json::Value;
 
-use crate::tool::{
-    RegisteredTool, Tool, ToolContext, ToolInput, ToolOutput, ToolRuntimeLockPolicy,
-};
+use crate::tool::{RegisteredTool, Tool, ToolContext, ToolInput, ToolOutput, WorkspaceAccess};
 use crate::trace::TraceRecorder;
-use crate::turn::{TurnOptions, TurnRequest, TurnResult};
+use crate::turn::{CompileMode, TurnOptions, TurnRequest, TurnResult};
 
-use super::{CoreRuntimeProfile, PureCore, PureCoreBuilder, ToolProfile};
+use super::{CoreRuntimeProfile, PureCore, PureCoreBuilder, ToolProfile, ToolSetBuilder};
 
 /// 产品 agent 运行 profile。
 ///
@@ -21,100 +19,9 @@ use super::{CoreRuntimeProfile, PureCore, PureCoreBuilder, ToolProfile};
 /// 用于表达宿主产品的定制化 agent，而不是在宿主侧重新实现底层 turn loop。
 pub type CoreAgentProfile = CoreRuntimeProfile;
 
-/// 产品工具定义。
-///
-/// 宿主只通过该结构向 `AgentKernel` 暴露产品语义工具；通用 file、git、
-/// container、subagent 工具应由 pl-core 自身的 tool set 注册。
-#[derive(Debug, Clone, PartialEq)]
-pub struct ProductToolDefinition {
-    pub name: String,
-    pub description: String,
-    pub input_schema: Value,
-    pub supports_parallel_tool_calls: bool,
-    pub runtime_lock_policy: Option<ToolRuntimeLockPolicy>,
-}
-
-impl ProductToolDefinition {
-    pub fn new(
-        name: impl Into<String>,
-        description: impl Into<String>,
-        input_schema: Value,
-    ) -> Self {
-        Self {
-            name: name.into(),
-            description: description.into(),
-            input_schema,
-            supports_parallel_tool_calls: false,
-            runtime_lock_policy: None,
-        }
-    }
-
-    pub fn with_parallel_tool_calls(mut self) -> Self {
-        self.supports_parallel_tool_calls = true;
-        self
-    }
-
-    pub fn with_runtime_lock_policy(mut self, policy: ToolRuntimeLockPolicy) -> Self {
-        self.runtime_lock_policy = Some(policy);
-        self
-    }
-}
-
-/// 产品工具执行请求。
-///
-/// `AgentKernel` 已经完成模型 tool call 到 `ToolInput` 的转换、trace 记录和
-/// 权限上下文注入；产品层只需要执行自身业务并返回模型可见的工具输出。
-#[derive(Clone)]
-pub struct ProductToolRequest {
-    pub definition: ProductToolDefinition,
-    pub input: ToolInput,
-    pub context: ToolContext,
-}
-
-impl fmt::Debug for ProductToolRequest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ProductToolRequest")
-            .field("tool", &self.definition.name)
-            .field("input", &self.input)
-            .field("context", &self.context)
-            .finish()
-    }
-}
-
-/// 产品工具路由器。
-///
-/// 宿主实现该 trait 来注入 GitHub、review queue、artifact、task plan 等
-/// 产品工具。实现必须保持无共享底层 turn loop 责任：tool call 生命周期、
-/// trace、subagent 控制和通用 backend 均由 `AgentKernel` / pl-core 负责。
-pub trait ProductToolRouter: fmt::Debug + Clone + Send + Sync {
-    fn tool_definitions(&self) -> Vec<ProductToolDefinition>;
-
-    fn execute(
-        &self,
-        request: ProductToolRequest,
-    ) -> impl std::future::Future<Output = Result<ToolOutput>> + Send;
-}
-
-/// 不暴露任何产品工具的默认 router。
-#[derive(Debug, Clone, Default)]
-pub struct EmptyProductToolRouter;
-
-impl ProductToolRouter for EmptyProductToolRouter {
-    fn tool_definitions(&self) -> Vec<ProductToolDefinition> {
-        Vec::new()
-    }
-
-    async fn execute(&self, request: ProductToolRequest) -> Result<ToolOutput> {
-        Err(PureError::ToolExecutionFailed {
-            tool: request.definition.name,
-            error: "product tool router is not configured".to_string(),
-        })
-    }
-}
-
 /// pl-core agent runtime kernel。
 ///
-/// 该类型统一持有 `PureCore`、profile 注册出的共享工具和产品工具 router，
+/// 该类型统一持有 `PureCore`、profile 注册出的共享工具和宿主动态工具，
 /// 让宿主只配置定制化 agent，不再复刻模型 turn loop 与通用 tool dispatch。
 #[derive(Debug)]
 pub struct AgentKernel {
@@ -122,7 +29,7 @@ pub struct AgentKernel {
 }
 
 impl AgentKernel {
-    pub fn builder(core_builder: PureCoreBuilder) -> AgentKernelBuilder<EmptyProductToolRouter> {
+    pub fn builder(core_builder: PureCoreBuilder) -> AgentKernelBuilder<NoAgentKernelToolSet> {
         AgentKernelBuilder::new(core_builder)
     }
 
@@ -134,6 +41,14 @@ impl AgentKernel {
         &mut self.core
     }
 
+    pub fn tool(&self, name: &str) -> Option<&dyn Tool> {
+        self.core.tools.get(name)
+    }
+
+    pub fn agent_tool_registrar(&self) -> Option<Arc<dyn crate::AgentToolRegistrar>> {
+        self.core.agent_tool_registrar.clone()
+    }
+
     pub fn tool_names(&self) -> Vec<String> {
         self.core
             .tools
@@ -141,6 +56,42 @@ impl AgentKernel {
             .into_iter()
             .map(str::to_string)
             .collect()
+    }
+
+    pub async fn execute_tool(&self, request: AgentKernelToolRequest) -> Result<ToolOutput> {
+        let tool = self
+            .tool(&request.name)
+            .ok_or_else(|| PureError::ToolExecutionFailed {
+                tool: request.name.clone(),
+                error: format!("Unknown tool: {}", request.name),
+            })?;
+        let workspace_root = self
+            .core
+            .workspace_root
+            .clone()
+            .unwrap_or_else(default_workspace_root);
+        let input = ToolInput {
+            arguments: request.arguments,
+            session_id: request.session_id,
+            tool_id: request.tool_id,
+            revision_base: request.revision_base,
+        };
+        let context = ToolContext {
+            event_tx: request.event_tx,
+            options: request.options,
+            workspace_access: request.workspace_access,
+            mode: request.mode,
+            workspace_root,
+            workspace_instructions: self.core.workspace_instructions.clone(),
+            instruction_snapshot: request.instruction_snapshot,
+            provider_call_id: request.provider_call_id,
+            active_subagent: self.core.active_subagent.clone(),
+            agent_supervisor: self.core.agent_supervisor.clone(),
+            agent_tool_registrar: self.core.agent_tool_registrar.clone(),
+            lsp_runtime: self.core.lsp_runtime.clone(),
+            parent_session: request.parent_session,
+        };
+        Tool::execute(tool, input, context).await
     }
 
     pub fn run_turn<'a>(
@@ -177,34 +128,181 @@ impl AgentKernel {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct AgentKernelBuilder<R = EmptyProductToolRouter> {
+/// 单次通过 `AgentKernel` 执行工具的请求。
+///
+/// 产品层用于测试、host facade 或非模型 turn 的单工具调用场景。请求只描述
+/// 本次调用的可变输入；workspace、agent registrar、LSP runtime 等稳定上下文
+/// 由 kernel 根据当前 profile 和已注册工具集统一注入。
+#[derive(Clone)]
+pub struct AgentKernelToolRequest {
+    name: String,
+    arguments: Value,
+    session_id: String,
+    tool_id: String,
+    revision_base: u64,
+    event_tx: pl_trace::AgentEventSender,
+    options: TurnOptions,
+    workspace_access: WorkspaceAccess,
+    mode: CompileMode,
+    instruction_snapshot: Option<crate::instruction::InstructionSnapshot>,
+    provider_call_id: Option<String>,
+    parent_session: Arc<crate::CoreSession>,
+}
+
+impl AgentKernelToolRequest {
+    pub fn new(
+        name: impl Into<String>,
+        arguments: Value,
+        session_id: impl Into<String>,
+        tool_id: impl Into<String>,
+        event_tx: pl_trace::AgentEventSender,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            arguments,
+            session_id: session_id.into(),
+            tool_id: tool_id.into(),
+            revision_base: 0,
+            event_tx,
+            options: TurnOptions::default(),
+            workspace_access: WorkspaceAccess::WorkspaceOnly,
+            mode: CompileMode::Auto,
+            instruction_snapshot: None,
+            provider_call_id: None,
+            parent_session: Arc::new(crate::CoreSession::new()),
+        }
+    }
+
+    pub fn with_revision_base(mut self, revision_base: u64) -> Self {
+        self.revision_base = revision_base;
+        self
+    }
+
+    pub fn with_options(mut self, options: TurnOptions) -> Self {
+        self.options = options;
+        self
+    }
+
+    pub fn with_workspace_access(mut self, access: WorkspaceAccess) -> Self {
+        self.workspace_access = access;
+        self
+    }
+
+    pub fn with_mode(mut self, mode: CompileMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    pub fn with_instruction_snapshot(
+        mut self,
+        snapshot: crate::instruction::InstructionSnapshot,
+    ) -> Self {
+        self.instruction_snapshot = Some(snapshot);
+        self
+    }
+
+    pub fn with_provider_call_id(mut self, call_id: impl Into<String>) -> Self {
+        self.provider_call_id = Some(call_id.into());
+        self
+    }
+
+    pub fn with_parent_session(mut self, session: Arc<crate::CoreSession>) -> Self {
+        self.parent_session = session;
+        self
+    }
+}
+
+/// 可随 `AgentKernelBuilder` 注册并由子 agent registrar 重放的工具集合。
+///
+/// 宿主通常直接使用 `ToolSetBuilder` 实现。自定义实现必须只注册共享 runtime
+/// 工具，不应把产品业务工具混入该层；产品工具继续通过 `RegisteredTool`
+/// 动态注册。
+pub trait AgentKernelToolSet: fmt::Debug + Send + Sync + 'static {
+    fn register_tools<'a>(
+        &'a self,
+        core: &'a mut PureCore,
+        workspace_root: PathBuf,
+        workspace_instructions: Option<String>,
+    ) -> impl Future<Output = ()> + Send + 'a;
+}
+
+/// 空工具集合，用作未配置共享工具集时的 `AgentKernelBuilder` 默认状态。
+#[derive(Debug, Clone, Default)]
+pub struct NoAgentKernelToolSet;
+
+impl AgentKernelToolSet for NoAgentKernelToolSet {
+    async fn register_tools(
+        &self,
+        _core: &mut PureCore,
+        _workspace_root: PathBuf,
+        _workspace_instructions: Option<String>,
+    ) {
+    }
+}
+
+impl<B, P, C, A, Q, M, T> AgentKernelToolSet for ToolSetBuilder<B, P, C, A, Q, M, T>
+where
+    B: crate::tool::ExecutionBackend + 'static,
+    P: crate::tool::GitCredentialProvider + 'static,
+    C: crate::tool::ContainerBackend + 'static,
+    A: crate::tool::AgentControlBackend + 'static,
+    Q: crate::tool::AgentControlPolicy + 'static,
+    M: crate::tool::McpResourceBackend + 'static,
+    T: crate::tool::McpToolBackend + 'static,
+{
+    async fn register_tools(
+        &self,
+        core: &mut PureCore,
+        workspace_root: PathBuf,
+        workspace_instructions: Option<String>,
+    ) {
+        self.register(core, workspace_root, workspace_instructions)
+            .await;
+    }
+}
+
+#[derive(Debug)]
+pub struct AgentKernelBuilder<T = NoAgentKernelToolSet> {
     core_builder: PureCoreBuilder,
     profile: CoreAgentProfile,
-    product_tool_router: R,
+    tool_set: T,
     runtime_tools: Vec<Arc<dyn Tool>>,
     registered_tools: Vec<RegisteredTool>,
 }
 
-impl AgentKernelBuilder<EmptyProductToolRouter> {
+fn default_workspace_root() -> PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+impl AgentKernelBuilder<NoAgentKernelToolSet> {
     fn new(core_builder: PureCoreBuilder) -> Self {
         Self {
             core_builder,
             profile: CoreAgentProfile::minimal(),
-            product_tool_router: EmptyProductToolRouter,
+            tool_set: NoAgentKernelToolSet,
             runtime_tools: Vec::new(),
             registered_tools: Vec::new(),
         }
     }
 }
 
-impl<R> AgentKernelBuilder<R>
-where
-    R: ProductToolRouter + 'static,
-{
+impl<T> AgentKernelBuilder<T> {
     pub fn with_profile(mut self, profile: CoreAgentProfile) -> Self {
         self.profile = profile;
         self
+    }
+
+    pub fn with_tool_set<NT>(self, tool_set: NT) -> AgentKernelBuilder<NT>
+    where
+        NT: AgentKernelToolSet,
+    {
+        AgentKernelBuilder {
+            core_builder: self.core_builder,
+            profile: self.profile,
+            tool_set,
+            runtime_tools: self.runtime_tools,
+            registered_tools: self.registered_tools,
+        }
     }
 
     pub fn with_registered_tool(mut self, tool: RegisteredTool) -> Self {
@@ -229,41 +327,37 @@ where
         self.registered_tools.extend(tools);
         self
     }
+}
 
-    pub fn with_product_tool_router<N>(self, product_tool_router: N) -> AgentKernelBuilder<N>
-    where
-        N: ProductToolRouter + 'static,
-    {
-        AgentKernelBuilder {
-            core_builder: self.core_builder,
-            profile: self.profile,
-            product_tool_router,
-            runtime_tools: self.runtime_tools,
-            registered_tools: self.registered_tools,
-        }
-    }
-
+impl<T> AgentKernelBuilder<T>
+where
+    T: AgentKernelToolSet,
+{
     pub async fn build(self) -> AgentKernel {
+        let workspace_root = self
+            .profile
+            .workspace_profile
+            .root
+            .clone()
+            .unwrap_or_else(default_workspace_root);
+        let workspace_instructions = self.profile.workspace_profile.instructions.clone();
         let mut core = self
             .core_builder
             .with_runtime_profile(self.profile.clone())
             .build();
         core.register_profile_tools().await;
+        self.tool_set
+            .register_tools(&mut core, workspace_root, workspace_instructions)
+            .await;
         for tool in &self.runtime_tools {
             core.register_tool(tool.clone());
         }
         for tool in &self.registered_tools {
             core.register_tool(tool.clone());
         }
-        for definition in self.product_tool_router.tool_definitions() {
-            core.register_tool(ProductTool::new(
-                definition,
-                self.product_tool_router.clone(),
-            ));
-        }
-        core.agent_tool_registrar = Some(Arc::new(ProductToolRegistrar {
+        core.agent_tool_registrar = Some(Arc::new(KernelToolRegistrar {
             profile: self.profile,
-            router: self.product_tool_router,
+            tool_set: self.tool_set,
             runtime_tools: self.runtime_tools,
             registered_tools: self.registered_tools,
         }));
@@ -271,17 +365,17 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
-struct ProductToolRegistrar<R> {
+#[derive(Debug)]
+struct KernelToolRegistrar<T> {
     profile: CoreAgentProfile,
-    router: R,
+    tool_set: T,
     runtime_tools: Vec<Arc<dyn Tool>>,
     registered_tools: Vec<RegisteredTool>,
 }
 
-impl<R> crate::AgentToolRegistrar for ProductToolRegistrar<R>
+impl<T> crate::AgentToolRegistrar for KernelToolRegistrar<T>
 where
-    R: ProductToolRouter + 'static,
+    T: AgentKernelToolSet,
 {
     fn register_tools<'a>(
         &'a self,
@@ -292,85 +386,27 @@ where
         Box::pin(async move {
             match self.profile.tool_profile {
                 ToolProfile::LocalWorkspace => {
-                    core.register_default_tools(workspace_root, workspace_instructions)
-                        .await;
+                    core.register_default_tools(
+                        workspace_root.clone(),
+                        workspace_instructions.clone(),
+                    )
+                    .await;
                 }
                 ToolProfile::HostProvided | ToolProfile::Minimal => {
-                    core.workspace_root = Some(workspace_root);
-                    core.workspace_instructions = workspace_instructions;
+                    core.workspace_root = Some(workspace_root.clone());
+                    core.workspace_instructions = workspace_instructions.clone();
                 }
             }
+            self.tool_set
+                .register_tools(core, workspace_root.clone(), workspace_instructions.clone())
+                .await;
             for tool in &self.runtime_tools {
                 core.register_tool(tool.clone());
             }
             for tool in &self.registered_tools {
                 core.register_tool(tool.clone());
             }
-            for definition in self.router.tool_definitions() {
-                core.register_tool(ProductTool::new(definition, self.router.clone()));
-            }
             Ok(())
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
-struct ProductTool<R> {
-    definition: ProductToolDefinition,
-    router: R,
-}
-
-impl<R> ProductTool<R> {
-    fn new(definition: ProductToolDefinition, router: R) -> Self {
-        Self { definition, router }
-    }
-}
-
-impl<R> Tool for ProductTool<R>
-where
-    R: ProductToolRouter + 'static,
-{
-    fn name(&self) -> &str {
-        &self.definition.name
-    }
-
-    fn description(&self) -> &str {
-        &self.definition.description
-    }
-
-    fn input_schema(&self) -> Value {
-        self.definition.input_schema.clone()
-    }
-
-    fn supports_parallel_tool_calls(&self) -> bool {
-        self.definition.supports_parallel_tool_calls
-    }
-
-    fn runtime_lock_policy(&self) -> ToolRuntimeLockPolicy {
-        self.definition.runtime_lock_policy.unwrap_or_else(|| {
-            if self.supports_parallel_tool_calls() {
-                ToolRuntimeLockPolicy::Shared
-            } else {
-                ToolRuntimeLockPolicy::Exclusive
-            }
-        })
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
-        context: ToolContext,
-    ) -> Pin<Box<dyn Future<Output = Result<ToolOutput>> + Send + 'a>> {
-        let router = self.router.clone();
-        let definition = self.definition.clone();
-        Box::pin(async move {
-            router
-                .execute(ProductToolRequest {
-                    definition,
-                    input,
-                    context,
-                })
-                .await
         })
     }
 }

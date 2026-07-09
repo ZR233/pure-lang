@@ -74,20 +74,22 @@ impl McpResourceToolKind {
 /// pl-core 负责 schema、输入解析、trace 和 tool result history；宿主只提供
 /// 当前 agent 可见的 MCP/skill resource 查询能力。
 pub trait McpResourceBackend: fmt::Debug + Send + Sync {
+    type Error: fmt::Display + Send + 'static;
+
     fn list_resources(
         &self,
         request: McpListResourcesRequest,
-    ) -> impl Future<Output = pl_protocol::Result<Value>> + Send;
+    ) -> impl Future<Output = std::result::Result<Value, Self::Error>> + Send;
 
     fn list_resource_templates(
         &self,
         request: McpListResourceTemplatesRequest,
-    ) -> impl Future<Output = pl_protocol::Result<Value>> + Send;
+    ) -> impl Future<Output = std::result::Result<Value, Self::Error>> + Send;
 
     fn read_resource(
         &self,
         request: McpReadResourceRequest,
-    ) -> impl Future<Output = pl_protocol::Result<Value>> + Send;
+    ) -> impl Future<Output = std::result::Result<Value, Self::Error>> + Send;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,7 +155,8 @@ where
                             server: args.server,
                             cursor: args.cursor,
                         })
-                        .await?
+                        .await
+                        .map_err(|error| tool_error(self.kind.name(), error))?
                 }
                 McpResourceToolKind::ListResourceTemplates => {
                     let args: ListResourcesArgs =
@@ -165,7 +168,8 @@ where
                             server: args.server,
                             cursor: args.cursor,
                         })
-                        .await?
+                        .await
+                        .map_err(|error| tool_error(self.kind.name(), error))?
                 }
                 McpResourceToolKind::ReadResource => {
                     let args: ReadResourceArgs =
@@ -177,7 +181,8 @@ where
                             server: args.server,
                             uri: args.uri,
                         })
-                        .await?
+                        .await
+                        .map_err(|error| tool_error(self.kind.name(), error))?
                 }
             };
             json_output(self.kind.name(), value)
@@ -200,11 +205,12 @@ struct ReadResourceArgs {
 }
 
 fn json_output(tool: &str, value: Value) -> pl_protocol::Result<ToolOutput> {
-    let description =
-        serde_json::to_string(&value).map_err(|error| PureError::ToolExecutionFailed {
-            tool: tool.to_string(),
-            error: format!("failed to serialize MCP resource output: {error}"),
-        })?;
+    let description = serde_json::to_string(&value).map_err(|error| {
+        tool_error(
+            tool,
+            format!("failed to serialize MCP resource output: {error}"),
+        )
+    })?;
     Ok(ToolOutput {
         description,
         truncated: OutputTruncation::empty(),
@@ -213,6 +219,13 @@ fn json_output(tool: &str, value: Value) -> pl_protocol::Result<ToolOutput> {
         timed_out: false,
         runtime_events: Vec::new(),
     })
+}
+
+fn tool_error(tool: &str, error: impl fmt::Display) -> PureError {
+    PureError::ToolExecutionFailed {
+        tool: tool.to_string(),
+        error: error.to_string(),
+    }
 }
 
 fn invalid_input(tool: &str, error: impl Into<String>) -> PureError {
@@ -252,13 +265,28 @@ mod tests {
     #[derive(Debug, Default)]
     struct FakeBackend {
         calls: Mutex<Vec<String>>,
+        fail: Option<DisplayError>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct DisplayError(&'static str);
+
+    impl std::fmt::Display for DisplayError {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.0)
+        }
     }
 
     impl McpResourceBackend for FakeBackend {
+        type Error = DisplayError;
+
         async fn list_resources(
             &self,
             request: McpListResourcesRequest,
-        ) -> pl_protocol::Result<Value> {
+        ) -> std::result::Result<Value, Self::Error> {
+            if let Some(error) = self.fail.clone() {
+                return Err(error);
+            }
             self.calls
                 .lock()
                 .expect("lock")
@@ -269,7 +297,10 @@ mod tests {
         async fn list_resource_templates(
             &self,
             request: McpListResourceTemplatesRequest,
-        ) -> pl_protocol::Result<Value> {
+        ) -> std::result::Result<Value, Self::Error> {
+            if let Some(error) = self.fail.clone() {
+                return Err(error);
+            }
             self.calls.lock().expect("lock").push(format!(
                 "templates:{:?}:{:?}",
                 request.server, request.cursor
@@ -280,7 +311,10 @@ mod tests {
         async fn read_resource(
             &self,
             request: McpReadResourceRequest,
-        ) -> pl_protocol::Result<Value> {
+        ) -> std::result::Result<Value, Self::Error> {
+            if let Some(error) = self.fail.clone() {
+                return Err(error);
+            }
             self.calls
                 .lock()
                 .expect("lock")
@@ -332,6 +366,32 @@ mod tests {
             .expect_err("invalid input");
 
         assert!(error.to_string().contains("unknown field"));
+    }
+
+    #[tokio::test]
+    async fn maps_backend_display_error_to_current_resource_tool() {
+        let backend = Arc::new(FakeBackend {
+            calls: Mutex::new(Vec::new()),
+            fail: Some(DisplayError("broker unavailable")),
+        });
+        let error = McpResourceTool::new(McpResourceToolKind::ReadResource, backend)
+            .execute(
+                ToolInput {
+                    arguments: json!({ "server": "docs", "uri": "mcp://one" }),
+                    session_id: "session".to_string(),
+                    tool_id: "tool".to_string(),
+                    revision_base: 0,
+                },
+                test_context(),
+            )
+            .await
+            .expect_err("backend should fail");
+
+        assert!(matches!(
+            error,
+            PureError::ToolExecutionFailed { tool, error }
+                if tool == TOOL_READ_MCP_RESOURCE && error == "broker unavailable"
+        ));
     }
 
     fn test_context() -> ToolContext {

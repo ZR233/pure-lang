@@ -1,11 +1,8 @@
 use std::fmt;
 use std::future::Future;
 
-use pl_protocol::Result;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
-
-use super::helpers::tool_error;
 
 /// 容器内 shell 执行请求。
 ///
@@ -70,17 +67,22 @@ pub struct ContainerCopyToRequest {
 /// `pl-core` 负责解析工具参数、执行通用 file/container 语义和生成模型可见输出；
 /// 产品层只实现该 trait，把请求投递到 Docker、远程沙箱或其它 workspace。
 pub trait ContainerBackend: fmt::Debug + Send + Sync {
+    type Error: fmt::Display + Send + 'static;
+
     fn exec(
         &self,
         request: ContainerExecRequest,
-    ) -> impl Future<Output = Result<ContainerExecOutput>> + Send;
+    ) -> impl Future<Output = std::result::Result<ContainerExecOutput, Self::Error>> + Send;
 
     fn copy_from(
         &self,
         request: ContainerCopyFromRequest,
-    ) -> impl Future<Output = Result<Vec<u8>>> + Send;
+    ) -> impl Future<Output = std::result::Result<Vec<u8>, Self::Error>> + Send;
 
-    fn copy_to(&self, request: ContainerCopyToRequest) -> impl Future<Output = Result<()>> + Send;
+    fn copy_to(
+        &self,
+        request: ContainerCopyToRequest,
+    ) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
 }
 
 /// 空容器后端，仅作为 `ToolSetBuilder` 的默认类型占位。
@@ -88,24 +90,26 @@ pub trait ContainerBackend: fmt::Debug + Send + Sync {
 pub struct NoContainerBackend;
 
 impl ContainerBackend for NoContainerBackend {
-    async fn exec(&self, _request: ContainerExecRequest) -> Result<ContainerExecOutput> {
-        Err(tool_error(
-            "container",
-            "container backend is not configured",
-        ))
+    type Error = String;
+
+    async fn exec(
+        &self,
+        _request: ContainerExecRequest,
+    ) -> std::result::Result<ContainerExecOutput, Self::Error> {
+        Err("container backend is not configured".to_string())
     }
 
-    async fn copy_from(&self, _request: ContainerCopyFromRequest) -> Result<Vec<u8>> {
-        Err(tool_error(
-            "container",
-            "container backend is not configured",
-        ))
+    async fn copy_from(
+        &self,
+        _request: ContainerCopyFromRequest,
+    ) -> std::result::Result<Vec<u8>, Self::Error> {
+        Err("container backend is not configured".to_string())
     }
 
-    async fn copy_to(&self, _request: ContainerCopyToRequest) -> Result<()> {
-        Err(tool_error(
-            "container",
-            "container backend is not configured",
-        ))
+    async fn copy_to(
+        &self,
+        _request: ContainerCopyToRequest,
+    ) -> std::result::Result<(), Self::Error> {
+        Err("container backend is not configured".to_string())
     }
 }

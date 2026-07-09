@@ -4,7 +4,7 @@ use pretty_assertions::assert_eq;
 #[tokio::test]
 async fn apply_patch_uses_unified_input_and_json_output() {
     let root = unique_temp_dir("patch-unified-output");
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch = "*** Begin Patch\n*** Add File: src/lib.rs\n+pub fn ok() {}\n*** End Patch";
 
     let output = tool
@@ -29,7 +29,7 @@ async fn apply_patch_uses_unified_input_and_json_output() {
 #[tokio::test]
 async fn apply_patch_adds_file() {
     let root = unique_temp_dir("patch-add");
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch = "*** Begin Patch\n*** Add File: src/lib.rs\n+pub fn ok() {}\n*** End Patch";
 
     let output = tool
@@ -59,7 +59,7 @@ async fn apply_patch_context_mismatch_does_not_write() {
     tokio::fs::write(root.join("src/lib.rs"), "old\n")
         .await
         .unwrap();
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch = "*** Begin Patch\n*** Update File: src/lib.rs\n@@\n-missing\n+new\n*** End Patch";
 
     let result = tool
@@ -85,7 +85,7 @@ async fn apply_patch_context_mismatch_does_not_write() {
 #[tokio::test]
 async fn apply_patch_accepts_wrapped_single_patch_block() {
     let root = unique_temp_dir("patch-wrapper");
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch = "Here is the patch:\n```patch\n*** Begin Patch\n*** Add File: wrapped.txt\n+ok\n*** End Patch\n```";
 
     tool.execute(
@@ -107,7 +107,7 @@ async fn apply_patch_accepts_wrapped_single_patch_block() {
 #[tokio::test]
 async fn apply_patch_accepts_heredoc_wrappers() {
     let root = unique_temp_dir("patch-heredoc-wrapper");
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     for (index, start) in ["<<EOF", "<<'EOF'", "<<\"EOF\""].into_iter().enumerate() {
         let path = format!("wrapped-{index}.txt");
         let patch =
@@ -131,7 +131,7 @@ async fn apply_patch_accepts_heredoc_wrappers() {
 #[tokio::test]
 async fn apply_patch_rejects_mismatched_heredoc_wrapper() {
     let root = unique_temp_dir("patch-mismatched-heredoc");
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let result = tool
         .execute(
             input(serde_json::json!({
@@ -150,7 +150,7 @@ async fn apply_patch_rejects_mismatched_heredoc_wrapper() {
 #[tokio::test]
 async fn apply_patch_accepts_environment_id_preamble() {
     let root = unique_temp_dir("patch-environment-id");
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch =
         "*** Begin Patch\n*** Environment ID: remote\n*** Add File: env.txt\n+ok\n*** End Patch";
 
@@ -173,7 +173,7 @@ async fn apply_patch_accepts_environment_id_preamble() {
 #[tokio::test]
 async fn apply_patch_rejects_empty_environment_id_preamble() {
     let root = unique_temp_dir("patch-empty-environment-id");
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let result = tool
         .execute(
             input(serde_json::json!({
@@ -196,7 +196,7 @@ async fn apply_patch_rejects_empty_environment_id_preamble() {
 #[tokio::test]
 async fn apply_patch_adds_empty_file() {
     let root = unique_temp_dir("patch-empty-add");
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch = "*** Begin Patch\n*** Add File: empty.txt\n*** End Patch";
 
     tool.execute(
@@ -222,7 +222,7 @@ async fn apply_patch_accepts_whitespace_padded_markers() {
     tokio::fs::write(root.join("file.txt"), "one\n")
         .await
         .unwrap();
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch = " *** Begin Patch\n  *** Update File: file.txt\n@@\n-one\n+two\n *** End Patch ";
 
     tool.execute(
@@ -251,7 +251,7 @@ async fn apply_patch_matches_unicode_punctuation_context() {
     )
     .await
     .unwrap();
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch = "*** Begin Patch\n*** Update File: unicode.txt\n@@\n-import asyncio  # local import - avoids top-level dep\n-let quote = \"ok\"\n-space = \"a b\"\n+done\n*** End Patch";
 
     tool.execute(
@@ -277,7 +277,7 @@ async fn apply_patch_skips_blank_lines_between_update_chunks() {
     tokio::fs::write(root.join("file.txt"), "one\n")
         .await
         .unwrap();
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch = "*** Begin Patch\n*** Update File: file.txt\n\n@@\n-one\n+two\n*** End Patch";
 
     tool.execute(
@@ -306,7 +306,7 @@ async fn apply_patch_supports_deletion_only_update_and_eof_marker() {
     tokio::fs::write(root.join("tail.txt"), "first\nsecond\n")
         .await
         .unwrap();
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch = "*** Begin Patch\n*** Update File: lines.txt\n@@\n line1\n-line2\n line3\n*** Update File: tail.txt\n@@\n first\n-second\n+second updated\n\n*** End of File\n*** End Patch";
 
     tool.execute(
@@ -334,7 +334,7 @@ async fn apply_patch_supports_deletion_only_update_and_eof_marker() {
 #[tokio::test]
 async fn apply_patch_rejects_missing_end_marker() {
     let root = unique_temp_dir("patch-missing-end");
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let result = tool
         .execute(
             input(serde_json::json!({
@@ -359,7 +359,7 @@ async fn apply_patch_eof_marker_falls_back_to_normal_search() {
     tokio::fs::write(root.join("lines.txt"), "first\nmiddle\nlast\n")
         .await
         .unwrap();
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch = "*** Begin Patch\n*** Update File: lines.txt\n@@\n-middle\n+updated\n*** End of File\n*** End Patch";
 
     tool.execute(
@@ -381,7 +381,7 @@ async fn apply_patch_eof_marker_falls_back_to_normal_search() {
 #[tokio::test]
 async fn apply_patch_rejects_unified_diff_header() {
     let root = unique_temp_dir("patch-unified");
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let result = tool
         .execute(
             input(serde_json::json!({
@@ -402,7 +402,7 @@ async fn apply_patch_rejects_unified_diff_header() {
 #[tokio::test]
 async fn apply_patch_rejects_file_metadata_header() {
     let root = unique_temp_dir("patch-file-header");
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let result = tool
         .execute(
             input(serde_json::json!({
@@ -423,7 +423,7 @@ async fn apply_patch_rejects_file_metadata_header() {
 #[tokio::test]
 async fn apply_patch_rejects_natural_language_instruction_with_recovery_guidance() {
     let root = unique_temp_dir("patch-natural-language");
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let result = tool
         .execute(
             input(serde_json::json!({
@@ -448,7 +448,7 @@ async fn apply_patch_move_only_update_moves_file() {
     tokio::fs::write(root.join("old/name.txt"), "same\n")
         .await
         .unwrap();
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch =
         "*** Begin Patch\n*** Update File: old/name.txt\n*** Move to: new/name.txt\n*** End Patch";
 
@@ -483,7 +483,7 @@ async fn apply_patch_appends_pure_addition_chunk_to_eof() {
     )
     .await
     .unwrap();
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch =
         "*** Begin Patch\n*** Update File: page.html\n@@ <head>\n+<script></script>\n*** End Patch";
 
@@ -510,7 +510,7 @@ async fn apply_patch_accepts_indented_context_without_extra_control_space() {
     tokio::fs::write(root.join("style.html"), "<style>\n    </style>\n")
         .await
         .unwrap();
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch =
         "*** Begin Patch\n*** Update File: style.html\n@@\n   </style>\n+tail\n*** End Patch";
 
@@ -537,7 +537,7 @@ async fn apply_patch_accepts_unprefixed_zero_indent_context_line() {
     tokio::fs::write(root.join("page.html"), "<body>\nold\n</body>\n")
         .await
         .unwrap();
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch =
         "*** Begin Patch\n*** Update File: page.html\n@@\n-old\n+new\n</body>\n*** End Patch";
 
@@ -567,7 +567,7 @@ async fn apply_patch_accepts_html_insert_before_unprefixed_body_context() {
     )
     .await
     .unwrap();
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch = "*** Begin Patch\n*** Update File: page.html\n@@\n <footer>\n   <p>done</p>\n </footer>\n\n+<script type=\"module\">\n+console.log('ready');\n+</script>\n</body>\n*** End Patch";
 
     tool.execute(
@@ -593,7 +593,7 @@ async fn apply_patch_collapses_duplicated_edge_context_for_insert_before() {
     tokio::fs::write(root.join("deepseek-intro.html"), "<style>\n    </style>\n")
         .await
         .unwrap();
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch = "*** Begin Patch\n*** Update File: deepseek-intro.html\n@@\n    </style>\n+        .cube { display: block; }\n     </style>\n*** End Patch";
 
     tool.execute(
@@ -619,7 +619,7 @@ async fn apply_patch_applies_repeated_update_hunks_in_order() {
     tokio::fs::write(root.join("src.rs"), "one\ntwo\nthree\n")
         .await
         .unwrap();
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch = "*** Begin Patch\n*** Update File: src.rs\n@@\n-one\n+first\n*** Update File: src.rs\n@@\n-first\n+second\n*** End Patch";
 
     tool.execute(
@@ -645,7 +645,7 @@ async fn apply_patch_add_overwrites_existing_file() {
     tokio::fs::write(root.join("duplicate.txt"), "old\n")
         .await
         .unwrap();
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch = "*** Begin Patch\n*** Add File: duplicate.txt\n+new\n*** End Patch";
 
     let output = tool
@@ -677,7 +677,7 @@ async fn apply_patch_move_overwrites_existing_target() {
     tokio::fs::write(root.join("new/name.txt"), "existing\n")
         .await
         .unwrap();
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch = "*** Begin Patch\n*** Update File: old/name.txt\n*** Move to: new/name.txt\n@@\n-from\n+to\n*** End Patch";
 
     tool.execute(
@@ -705,7 +705,7 @@ async fn apply_patch_move_overwrites_existing_target() {
 async fn apply_patch_failure_keeps_committed_prefix() {
     let root = unique_temp_dir("patch-prefix-failure");
     tokio::fs::create_dir_all(&root).await.unwrap();
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch = "*** Begin Patch\n*** Add File: created.txt\n+hello\n*** Update File: missing.txt\n@@\n-old\n+new\n*** End Patch";
 
     let result = tool
@@ -736,7 +736,7 @@ async fn apply_patch_applies_add_then_update_in_order() {
     tokio::fs::write(root.join("notes.txt"), "old\n")
         .await
         .unwrap();
-    let tool = ApplyPatchTool;
+    let tool = apply_patch_tool();
     let patch = "*** Begin Patch\n*** Add File: notes.txt\n+new\n*** Update File: notes.txt\n@@\n-new\n+newer\n*** End Patch";
 
     let output = tool

@@ -1,7 +1,10 @@
+use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use pl_protocol::{AgentStatus, PureError};
-use tokio::sync::oneshot;
+use serde_json::json;
+use tokio::sync::{Mutex, oneshot};
 use tokio::time::{Duration, timeout};
 use tokio_util::sync::CancellationToken;
 
@@ -57,6 +60,461 @@ fn test_run_spec(message: &str) -> AgentRunSpec {
         mode: CompileMode::Auto,
         budget: TurnBudget::child_default(),
         initial_session: crate::CoreSession::new(),
+    }
+}
+
+#[test]
+fn agent_input_turn_mode_maps_codex_flags_to_single_policy() {
+    assert_eq!(
+        AgentInputTurnMode::from_codex_flags(false, false),
+        AgentInputTurnMode::QueueOnly
+    );
+    assert_eq!(
+        AgentInputTurnMode::from_codex_flags(true, false),
+        AgentInputTurnMode::TriggerTurn
+    );
+    assert_eq!(
+        AgentInputTurnMode::from_codex_flags(false, true),
+        AgentInputTurnMode::Interrupt
+    );
+    assert_eq!(
+        AgentInputTurnMode::from_codex_flags(true, true),
+        AgentInputTurnMode::Interrupt
+    );
+}
+
+#[test]
+fn agent_input_turn_mode_exposes_queue_and_busy_semantics() {
+    assert!(AgentInputTurnMode::QueueOnly.queues_without_start());
+    assert!(!AgentInputTurnMode::QueueOnly.interrupts());
+    assert!(!AgentInputTurnMode::QueueOnly.queues_when_busy());
+
+    assert!(!AgentInputTurnMode::TriggerTurn.queues_without_start());
+    assert!(!AgentInputTurnMode::TriggerTurn.interrupts());
+    assert!(AgentInputTurnMode::TriggerTurn.queues_when_busy());
+
+    assert!(!AgentInputTurnMode::Interrupt.queues_without_start());
+    assert!(AgentInputTurnMode::Interrupt.interrupts());
+    assert!(!AgentInputTurnMode::Interrupt.queues_when_busy());
+}
+
+#[test]
+fn agent_input_submission_builds_send_input_output() {
+    let queued = AgentInputSubmission::queued().into_send_input_output(
+        "/root/worker".to_string(),
+        AgentStatus::Waiting,
+        false,
+    );
+    let started = AgentInputSubmission::started("turn-1").into_send_input_output(
+        "/root/worker".to_string(),
+        AgentStatus::Running,
+        true,
+    );
+
+    assert_eq!(
+        queued,
+        crate::tool::AgentControlSendInputOutput {
+            target: "/root/worker".to_string(),
+            status: AgentStatus::Waiting,
+            interrupt: false,
+            queued: true,
+            turn_id: None,
+        }
+    );
+    assert_eq!(
+        started,
+        crate::tool::AgentControlSendInputOutput {
+            target: "/root/worker".to_string(),
+            status: AgentStatus::Running,
+            interrupt: true,
+            queued: false,
+            turn_id: Some("turn-1".to_string()),
+        }
+    );
+}
+
+#[test]
+fn agent_wait_outcome_builds_wait_agent_output() {
+    let output = AgentWaitOutcome::new(true)
+        .into_wait_agent_output("{\"pending\":[\"worker\"]}".to_string());
+
+    assert_eq!(
+        output,
+        crate::tool::AgentControlWaitOutput {
+            message: "{\"pending\":[\"worker\"]}".to_string(),
+            timed_out: true,
+        }
+    );
+}
+
+#[test]
+fn agent_wait_outcome_hides_shared_fields_behind_constructor() {
+    let source = include_str!("mod.rs");
+    let outcome_fields = source
+        .split("pub struct AgentWaitOutcome")
+        .nth(1)
+        .and_then(|text| text.split("impl AgentWaitOutcome").next())
+        .expect("AgentWaitOutcome definition");
+
+    assert!(
+        source.contains("impl AgentWaitOutcome {\n    /// 使用 timeout 标记创建 wait 输出结果。\n    pub fn new("),
+        "AgentWaitOutcome 应通过构造器承载共享输出字段形状"
+    );
+    assert!(
+        !outcome_fields.contains("pub timed_out:"),
+        "AgentWaitOutcome 字段不应公开给宿主 adapter 手写"
+    );
+}
+
+#[test]
+fn agent_wait_outcome_builds_group_wait_agent_output() {
+    let output = AgentWaitOutcome::new(true).into_group_wait_agent_output(
+        vec![json!({ "agentId": "done" })],
+        vec![json!({ "agentId": "pending" })],
+    );
+    let message: serde_json::Value =
+        serde_json::from_str(&output.message).expect("wait message json");
+
+    assert_eq!(output.timed_out, true);
+    assert_eq!(
+        message,
+        json!({
+            "completed": [{ "agentId": "done" }],
+            "pending": [{ "agentId": "pending" }],
+            "timedOut": true,
+        })
+    );
+    assert!(message.get("timed_out").is_none());
+}
+
+#[test]
+fn agent_input_turn_mode_exposes_dispatch_actions() {
+    assert_eq!(
+        AgentInputTurnMode::QueueOnly.initial_action(),
+        AgentInputInitialAction::Queue
+    );
+    assert_eq!(
+        AgentInputTurnMode::TriggerTurn.initial_action(),
+        AgentInputInitialAction::StartTurn
+    );
+    assert_eq!(
+        AgentInputTurnMode::Interrupt.initial_action(),
+        AgentInputInitialAction::InterruptThenStart
+    );
+
+    assert_eq!(
+        AgentInputTurnMode::QueueOnly.busy_action(),
+        AgentInputBusyAction::ReturnBusy
+    );
+    assert_eq!(
+        AgentInputTurnMode::TriggerTurn.busy_action(),
+        AgentInputBusyAction::Queue
+    );
+    assert_eq!(
+        AgentInputTurnMode::Interrupt.busy_action(),
+        AgentInputBusyAction::ReturnBusy
+    );
+}
+
+#[test]
+fn agent_input_queue_preserves_fifo_and_restore_front_order() {
+    let mut queue = AgentInputQueue::default();
+
+    assert!(queue.is_empty());
+    queue.push("first");
+    queue.push("second");
+
+    assert_eq!(queue.len(), 2);
+    assert_eq!(queue.pop(), Some("first"));
+
+    queue.restore_front("retry");
+
+    assert_eq!(queue.pop(), Some("retry"));
+    assert_eq!(queue.pop(), Some("second"));
+    assert_eq!(queue.pop(), None);
+}
+
+#[test]
+fn agent_input_queue_start_attempt_restores_busy_input_to_front() {
+    let mut queue = AgentInputQueue::default();
+    queue.push("first");
+    queue.push("second");
+
+    let attempt = queue
+        .take_start_attempt()
+        .expect("start attempt should contain first input");
+    assert_eq!(attempt.input(), &"first");
+    assert_eq!(queue.len(), 1);
+
+    queue.restore_start_attempt(attempt);
+
+    assert_eq!(queue.pop(), Some("first"));
+    assert_eq!(queue.pop(), Some("second"));
+}
+
+#[test]
+fn agent_wait_completion_completes_without_active_turn() {
+    let snapshot = AgentWaitSnapshot::new(
+        AgentTurnPresence::NoActiveTurn,
+        AgentLifecycleStatusKind::Active,
+    );
+
+    assert_eq!(snapshot.completion(), AgentWaitCompletion::Complete);
+}
+
+#[test]
+fn agent_wait_snapshot_hides_shared_fields_behind_constructor() {
+    let source = include_str!("mod.rs");
+    let wait_snapshot_fields = source
+        .split("pub struct AgentWaitSnapshot")
+        .nth(1)
+        .and_then(|text| text.split("impl AgentWaitSnapshot").next())
+        .expect("AgentWaitSnapshot definition");
+
+    assert!(
+        source.contains("pub fn new("),
+        "AgentWaitSnapshot 应通过构造器承载共享字段形状"
+    );
+    assert!(
+        !wait_snapshot_fields.contains("pub turn_presence:")
+            && !wait_snapshot_fields.contains("pub status:"),
+        "AgentWaitSnapshot 字段不应公开给宿主 adapter 手写"
+    );
+}
+
+#[test]
+fn agent_wait_completion_completes_for_terminal_or_idle_status() {
+    for status in [
+        AgentLifecycleStatusKind::Idle,
+        AgentLifecycleStatusKind::Completed,
+        AgentLifecycleStatusKind::Failed,
+        AgentLifecycleStatusKind::Cancelled,
+        AgentLifecycleStatusKind::Deleted,
+    ] {
+        let snapshot = AgentWaitSnapshot {
+            turn_presence: AgentTurnPresence::ActiveTurn,
+            status,
+        };
+
+        assert_eq!(snapshot.completion(), AgentWaitCompletion::Complete);
+    }
+}
+
+#[test]
+fn agent_wait_completion_keeps_active_turn_pending() {
+    let snapshot = AgentWaitSnapshot {
+        turn_presence: AgentTurnPresence::ActiveTurn,
+        status: AgentLifecycleStatusKind::Active,
+    };
+
+    assert_eq!(snapshot.completion(), AgentWaitCompletion::Pending);
+}
+
+#[test]
+fn agent_wait_snapshot_projects_group_progress() {
+    assert_eq!(
+        AgentWaitSnapshot::from_group_counts(0, 2),
+        AgentWaitSnapshot {
+            turn_presence: AgentTurnPresence::ActiveTurn,
+            status: AgentLifecycleStatusKind::Active,
+        }
+    );
+    assert_eq!(
+        AgentWaitSnapshot::from_group_counts(1, 1),
+        AgentWaitSnapshot {
+            turn_presence: AgentTurnPresence::NoActiveTurn,
+            status: AgentLifecycleStatusKind::Completed,
+        }
+    );
+    assert_eq!(
+        AgentWaitSnapshot::from_group_counts(0, 0),
+        AgentWaitSnapshot {
+            turn_presence: AgentTurnPresence::NoActiveTurn,
+            status: AgentLifecycleStatusKind::Completed,
+        }
+    );
+}
+
+#[tokio::test]
+async fn agent_wait_loop_returns_first_complete_snapshot() {
+    let snapshots = Arc::new(Mutex::new(VecDeque::from([
+        (
+            AgentWaitSnapshot {
+                turn_presence: AgentTurnPresence::ActiveTurn,
+                status: AgentLifecycleStatusKind::Active,
+            },
+            "pending".to_string(),
+        ),
+        (
+            AgentWaitSnapshot {
+                turn_presence: AgentTurnPresence::NoActiveTurn,
+                status: AgentLifecycleStatusKind::Completed,
+            },
+            "done".to_string(),
+        ),
+    ])));
+
+    let result = wait_for_agent_completion(
+        {
+            let snapshots = Arc::clone(&snapshots);
+            move || {
+                let snapshots = Arc::clone(&snapshots);
+                async move { Ok::<_, ()>(snapshots.lock().await.pop_front().expect("snapshot")) }
+            }
+        },
+        AgentWaitLoopOptions::new(Duration::from_secs(1))
+            .with_poll_interval(Duration::from_millis(1)),
+        &CancellationToken::new(),
+    )
+    .await
+    .expect("wait result");
+
+    assert_eq!(
+        result,
+        AgentWaitLoopResult {
+            value: "done".to_string(),
+            timed_out: false,
+        }
+    );
+    assert!(snapshots.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn agent_wait_loop_returns_last_snapshot_on_timeout() {
+    let result = wait_for_agent_completion(
+        || async {
+            Ok::<_, ()>((
+                AgentWaitSnapshot {
+                    turn_presence: AgentTurnPresence::ActiveTurn,
+                    status: AgentLifecycleStatusKind::Active,
+                },
+                "pending".to_string(),
+            ))
+        },
+        AgentWaitLoopOptions::new(Duration::ZERO),
+        &CancellationToken::new(),
+    )
+    .await
+    .expect("wait result");
+
+    assert_eq!(
+        result,
+        AgentWaitLoopResult {
+            value: "pending".to_string(),
+            timed_out: true,
+        }
+    );
+}
+
+#[tokio::test]
+async fn agent_wait_loop_can_wait_without_timeout() {
+    let snapshots = Arc::new(Mutex::new(VecDeque::from([
+        (
+            AgentWaitSnapshot {
+                turn_presence: AgentTurnPresence::ActiveTurn,
+                status: AgentLifecycleStatusKind::Active,
+            },
+            "pending".to_string(),
+        ),
+        (
+            AgentWaitSnapshot {
+                turn_presence: AgentTurnPresence::NoActiveTurn,
+                status: AgentLifecycleStatusKind::Completed,
+            },
+            "done".to_string(),
+        ),
+    ])));
+
+    let result = wait_for_agent_completion(
+        {
+            let snapshots = Arc::clone(&snapshots);
+            move || {
+                let snapshots = Arc::clone(&snapshots);
+                async move { Ok::<_, ()>(snapshots.lock().await.pop_front().expect("snapshot")) }
+            }
+        },
+        AgentWaitLoopOptions::until_complete().with_poll_interval(Duration::from_millis(1)),
+        &CancellationToken::new(),
+    )
+    .await
+    .expect("wait result");
+
+    assert_eq!(
+        result,
+        AgentWaitLoopResult {
+            value: "done".to_string(),
+            timed_out: false,
+        }
+    );
+    assert!(snapshots.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn agent_wait_loop_reports_cancelled() {
+    let cancellation = CancellationToken::new();
+    cancellation.cancel();
+
+    let err = wait_for_agent_completion(
+        || async {
+            Ok::<_, ()>((
+                AgentWaitSnapshot {
+                    turn_presence: AgentTurnPresence::ActiveTurn,
+                    status: AgentLifecycleStatusKind::Active,
+                },
+                "pending".to_string(),
+            ))
+        },
+        AgentWaitLoopOptions::new(Duration::from_secs(1)),
+        &cancellation,
+    )
+    .await
+    .expect_err("cancelled");
+
+    assert_eq!(err, AgentWaitLoopError::Cancelled);
+}
+
+#[test]
+fn agent_turn_start_readiness_allows_idle_and_restartable_statuses() {
+    for status in [
+        AgentLifecycleStatusKind::Idle,
+        AgentLifecycleStatusKind::Completed,
+        AgentLifecycleStatusKind::Failed,
+        AgentLifecycleStatusKind::Cancelled,
+    ] {
+        let snapshot = AgentTurnStartSnapshot::new(status);
+
+        assert_eq!(snapshot.readiness(), AgentTurnStartReadiness::Ready);
+    }
+}
+
+#[test]
+fn agent_turn_start_snapshot_hides_shared_fields_behind_constructor() {
+    let source = include_str!("mod.rs");
+    let turn_start_fields = source
+        .split("pub struct AgentTurnStartSnapshot")
+        .nth(1)
+        .and_then(|text| text.split("impl AgentTurnStartSnapshot").next())
+        .expect("AgentTurnStartSnapshot definition");
+
+    assert!(
+        source.contains("impl AgentTurnStartSnapshot {\n    /// 使用生命周期状态创建 turn start 快照。\n    pub fn new("),
+        "AgentTurnStartSnapshot 应通过构造器承载共享字段形状"
+    );
+    assert!(
+        !turn_start_fields.contains("pub status:"),
+        "AgentTurnStartSnapshot 字段不应公开给宿主 adapter 手写"
+    );
+}
+
+#[test]
+fn agent_turn_start_readiness_rejects_active_and_deleted_statuses() {
+    for status in [
+        AgentLifecycleStatusKind::Active,
+        AgentLifecycleStatusKind::Deleted,
+    ] {
+        let snapshot = AgentTurnStartSnapshot::new(status);
+
+        assert_eq!(snapshot.readiness(), AgentTurnStartReadiness::Busy);
     }
 }
 

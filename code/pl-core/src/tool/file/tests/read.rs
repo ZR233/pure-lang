@@ -17,7 +17,7 @@ fn read_output_json(output: &crate::tool::ToolOutput) -> serde_json::Value {
 #[tokio::test]
 async fn read_file_uses_unified_camel_case_json_output() {
     let root = unique_temp_dir("unified-read");
-    let tool = ReadFileTool::new();
+    let tool = read_file_tool();
     tokio::fs::create_dir_all(&root).await.unwrap();
     tokio::fs::write(root.join("a.txt"), "one\ntwo\nthree\n")
         .await
@@ -54,7 +54,7 @@ async fn read_file_uses_unified_camel_case_json_output() {
 #[tokio::test]
 async fn read_file_rejects_workspace_escape() {
     let root = unique_temp_dir("escape");
-    let tool = ReadFileTool::new();
+    let tool = read_file_tool();
     tokio::fs::create_dir_all(&root).await.unwrap();
     let result = tool
         .execute(
@@ -71,7 +71,7 @@ async fn read_file_rejects_workspace_escape() {
 async fn write_and_read_file_roundtrip() {
     let root = unique_temp_dir("roundtrip");
     let write = WriteFileTool;
-    let read = ReadFileTool::new();
+    let read = read_file_tool();
     write
         .execute(
             input(serde_json::json!({
@@ -103,7 +103,7 @@ async fn write_and_read_file_roundtrip() {
 #[tokio::test]
 async fn read_file_default_reads_whole_file() {
     let root = unique_temp_dir("default-read");
-    let tool = ReadFileTool::new();
+    let tool = read_file_tool();
     tokio::fs::create_dir_all(&root).await.unwrap();
     tokio::fs::write(root.join("a.txt"), "hello\nworld\n")
         .await
@@ -123,7 +123,7 @@ async fn read_file_default_reads_whole_file() {
 #[tokio::test]
 async fn read_file_line_offset_starts_at_given_line() {
     let root = unique_temp_dir("line-offset");
-    let tool = ReadFileTool::new();
+    let tool = read_file_tool();
     tokio::fs::create_dir_all(&root).await.unwrap();
     tokio::fs::write(root.join("a.txt"), "one\ntwo\nthree\n")
         .await
@@ -143,7 +143,7 @@ async fn read_file_line_offset_starts_at_given_line() {
 #[tokio::test]
 async fn read_file_max_lines_limits_output() {
     let root = unique_temp_dir("max-lines");
-    let tool = ReadFileTool::new();
+    let tool = read_file_tool();
     tokio::fs::create_dir_all(&root).await.unwrap();
     tokio::fs::write(root.join("a.txt"), "one\ntwo\nthree\n")
         .await
@@ -167,7 +167,7 @@ async fn read_file_max_lines_limits_output() {
 #[tokio::test]
 async fn read_file_line_offset_out_of_range_errors() {
     let root = unique_temp_dir("offset-oob");
-    let tool = ReadFileTool::new();
+    let tool = read_file_tool();
     tokio::fs::create_dir_all(&root).await.unwrap();
     tokio::fs::write(root.join("a.txt"), "one\ntwo\n")
         .await
@@ -188,7 +188,7 @@ async fn read_file_line_offset_out_of_range_errors() {
 async fn read_file_trailing_newline_offset_at_end_returns_empty() {
     // "one\ntwo\n" 有 2 行；lineStart=3（行数+1）返回空切片，不报错（对齐 codex）
     let root = unique_temp_dir("offset-end");
-    let tool = ReadFileTool::new();
+    let tool = read_file_tool();
     tokio::fs::create_dir_all(&root).await.unwrap();
     tokio::fs::write(root.join("a.txt"), "one\ntwo\n")
         .await
@@ -208,7 +208,7 @@ async fn read_file_trailing_newline_offset_at_end_returns_empty() {
 #[tokio::test]
 async fn read_file_rejects_directory() {
     let root = unique_temp_dir("reject-dir");
-    let tool = ReadFileTool::new();
+    let tool = read_file_tool();
     tokio::fs::create_dir_all(&root).await.unwrap();
     tokio::fs::create_dir(root.join("subdir")).await.unwrap();
     let result = tool
@@ -226,7 +226,7 @@ async fn read_file_rejects_directory() {
 #[tokio::test]
 async fn read_file_rejects_non_utf8() {
     let root = unique_temp_dir("reject-nonutf8");
-    let tool = ReadFileTool::new();
+    let tool = read_file_tool();
     tokio::fs::create_dir_all(&root).await.unwrap();
     tokio::fs::write(root.join("a.bin"), [0xffu8, 0xfe, 0x00, 0x01])
         .await
@@ -245,7 +245,7 @@ async fn read_file_rejects_non_utf8() {
 #[tokio::test]
 async fn read_file_empty_file() {
     let root = unique_temp_dir("empty");
-    let tool = ReadFileTool::new();
+    let tool = read_file_tool();
     tokio::fs::create_dir_all(&root).await.unwrap();
     tokio::fs::write(root.join("empty.txt"), "").await.unwrap();
     let output = tool
@@ -263,7 +263,7 @@ async fn read_file_empty_file() {
 #[tokio::test]
 async fn read_file_truncates_large_output() {
     let root = unique_temp_dir("trunc");
-    let tool = ReadFileTool::new();
+    let tool = read_file_tool();
     tokio::fs::create_dir_all(&root).await.unwrap();
     let big = "a".repeat(2500);
     tokio::fs::write(root.join("big.txt"), &big).await.unwrap();
@@ -287,7 +287,7 @@ async fn read_file_truncates_large_output() {
 async fn read_file_rejects_symlink() {
     use std::os::unix::fs::symlink;
     let root = unique_temp_dir("reject-symlink");
-    let tool = ReadFileTool::new();
+    let tool = read_file_tool();
     tokio::fs::create_dir_all(&root).await.unwrap();
     tokio::fs::write(root.join("real.txt"), "content")
         .await

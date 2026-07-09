@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use pl_protocol::Result;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
@@ -16,7 +15,12 @@ struct RecordingBackend {
 }
 
 impl ContainerBackend for RecordingBackend {
-    async fn exec(&self, _request: ContainerExecRequest) -> Result<ContainerExecOutput> {
+    type Error = DisplayContainerError;
+
+    async fn exec(
+        &self,
+        _request: ContainerExecRequest,
+    ) -> std::result::Result<ContainerExecOutput, Self::Error> {
         Ok(ContainerExecOutput {
             status: 0,
             stdout: String::new(),
@@ -29,11 +33,17 @@ impl ContainerBackend for RecordingBackend {
         })
     }
 
-    async fn copy_from(&self, _request: ContainerCopyFromRequest) -> Result<Vec<u8>> {
+    async fn copy_from(
+        &self,
+        _request: ContainerCopyFromRequest,
+    ) -> std::result::Result<Vec<u8>, Self::Error> {
         Ok(Vec::new())
     }
 
-    async fn copy_to(&self, request: ContainerCopyToRequest) -> Result<()> {
+    async fn copy_to(
+        &self,
+        request: ContainerCopyToRequest,
+    ) -> std::result::Result<(), Self::Error> {
         *self.copied_to.lock().unwrap() = Some(request);
         Ok(())
     }
@@ -43,7 +53,12 @@ impl ContainerBackend for RecordingBackend {
 struct FailingExecBackend;
 
 impl ContainerBackend for FailingExecBackend {
-    async fn exec(&self, _request: ContainerExecRequest) -> Result<ContainerExecOutput> {
+    type Error = DisplayContainerError;
+
+    async fn exec(
+        &self,
+        _request: ContainerExecRequest,
+    ) -> std::result::Result<ContainerExecOutput, Self::Error> {
         Ok(ContainerExecOutput {
             status: 7,
             stdout: "visible stdout".to_string(),
@@ -56,11 +71,54 @@ impl ContainerBackend for FailingExecBackend {
         })
     }
 
-    async fn copy_from(&self, _request: ContainerCopyFromRequest) -> Result<Vec<u8>> {
+    async fn copy_from(
+        &self,
+        _request: ContainerCopyFromRequest,
+    ) -> std::result::Result<Vec<u8>, Self::Error> {
         Ok(Vec::new())
     }
 
-    async fn copy_to(&self, _request: ContainerCopyToRequest) -> Result<()> {
+    async fn copy_to(
+        &self,
+        _request: ContainerCopyToRequest,
+    ) -> std::result::Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DisplayContainerError(&'static str);
+
+impl std::fmt::Display for DisplayContainerError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.0)
+    }
+}
+
+#[derive(Debug)]
+struct BackendErrorContainerBackend;
+
+impl ContainerBackend for BackendErrorContainerBackend {
+    type Error = DisplayContainerError;
+
+    async fn exec(
+        &self,
+        _request: ContainerExecRequest,
+    ) -> std::result::Result<ContainerExecOutput, Self::Error> {
+        Err(DisplayContainerError("container offline"))
+    }
+
+    async fn copy_from(
+        &self,
+        _request: ContainerCopyFromRequest,
+    ) -> std::result::Result<Vec<u8>, Self::Error> {
+        Ok(Vec::new())
+    }
+
+    async fn copy_to(
+        &self,
+        _request: ContainerCopyToRequest,
+    ) -> std::result::Result<(), Self::Error> {
         Ok(())
     }
 }
@@ -83,7 +141,12 @@ impl FakeWorkspaceContainerBackend {
 }
 
 impl ContainerBackend for FakeWorkspaceContainerBackend {
-    async fn exec(&self, request: ContainerExecRequest) -> Result<ContainerExecOutput> {
+    type Error = DisplayContainerError;
+
+    async fn exec(
+        &self,
+        request: ContainerExecRequest,
+    ) -> std::result::Result<ContainerExecOutput, Self::Error> {
         let mut status = 0;
         let mut stdout = String::new();
         if request.command.contains("wc -c") {
@@ -123,7 +186,10 @@ impl ContainerBackend for FakeWorkspaceContainerBackend {
         })
     }
 
-    async fn copy_from(&self, request: ContainerCopyFromRequest) -> Result<Vec<u8>> {
+    async fn copy_from(
+        &self,
+        request: ContainerCopyFromRequest,
+    ) -> std::result::Result<Vec<u8>, Self::Error> {
         Ok(self
             .files
             .lock()
@@ -134,7 +200,10 @@ impl ContainerBackend for FakeWorkspaceContainerBackend {
             .into_bytes())
     }
 
-    async fn copy_to(&self, request: ContainerCopyToRequest) -> Result<()> {
+    async fn copy_to(
+        &self,
+        request: ContainerCopyToRequest,
+    ) -> std::result::Result<(), Self::Error> {
         self.files.lock().unwrap().insert(
             request.path,
             String::from_utf8(request.content).expect("utf8 content"),
@@ -160,6 +229,32 @@ async fn tool_context() -> ToolContext {
         lsp_runtime: None,
         parent_session: Arc::new(CoreSession::new()),
     }
+}
+
+#[tokio::test]
+async fn container_tool_maps_backend_display_error_to_tool_error() {
+    let tool = ContainerTool::new(
+        ContainerToolKind::Exec,
+        Arc::new(BackendErrorContainerBackend),
+    );
+    let error = tool
+        .execute(
+            ToolInput {
+                arguments: json!({ "command": "true" }),
+                session_id: "session".to_string(),
+                tool_id: "tool".to_string(),
+                revision_base: 0,
+            },
+            tool_context().await,
+        )
+        .await
+        .expect_err("backend should fail");
+
+    assert!(matches!(
+        error,
+        pl_protocol::PureError::ToolExecutionFailed { tool, error }
+            if tool == "container_exec" && error == "container offline"
+    ));
 }
 
 #[tokio::test]

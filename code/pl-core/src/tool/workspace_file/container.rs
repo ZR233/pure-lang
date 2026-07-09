@@ -47,7 +47,8 @@ where
                 output_bytes_cap: None,
                 cancellation_token: None,
             })
-            .await?;
+            .await
+            .map_err(|error| tool_error("file", error))?;
         if output.status != 0 {
             return Err(tool_error(
                 "file",
@@ -74,7 +75,8 @@ where
                 output_bytes_cap: None,
                 cancellation_token: None,
             })
-            .await?;
+            .await
+            .map_err(|error| tool_error("file", error))?;
         if output.status != 0 {
             return Err(tool_error(
                 "file",
@@ -151,7 +153,8 @@ where
                 output_bytes_cap: None,
                 cancellation_token: None,
             })
-            .await?;
+            .await
+            .map_err(|error| tool_error("apply_patch", error))?;
         if output.status != 0 {
             return Err(tool_error(
                 "apply_patch",
@@ -182,7 +185,8 @@ where
                 output_bytes_cap: None,
                 cancellation_token: None,
             })
-            .await?;
+            .await
+            .map_err(|error| tool_error("list_files", error))?;
         if output.status == 127 {
             let type_filter = if request.include_dirs { "" } else { "-type f " };
             let command = format!(
@@ -201,7 +205,8 @@ where
                     output_bytes_cap: None,
                     cancellation_token: None,
                 })
-                .await?;
+                .await
+                .map_err(|error| tool_error("list_files", error))?;
         } else if request.include_dirs {
             let dir_command = format!(
                 "find {path} -type d -name {glob} | sort | head -n {limit}",
@@ -218,7 +223,8 @@ where
                     output_bytes_cap: None,
                     cancellation_token: None,
                 })
-                .await?;
+                .await
+                .map_err(|error| tool_error("list_files", error))?;
             if dirs.status == 0 {
                 output.stdout.push_str(&dirs.stdout);
             }
@@ -288,7 +294,8 @@ where
                 output_bytes_cap: None,
                 cancellation_token: None,
             })
-            .await?;
+            .await
+            .map_err(|error| tool_error("search_files", error))?;
         if output.status == 1 {
             return Ok(WorkspaceFileSearchResult {
                 matches: Vec::new(),
@@ -381,7 +388,8 @@ where
                 output_bytes_cap: None,
                 cancellation_token: None,
             })
-            .await?;
+            .await
+            .map_err(|error| tool_error("search_files", error))?;
         if output.status != 0 && output.stdout.trim().is_empty() {
             return Ok(WorkspaceFileSearchResult {
                 matches: Vec::new(),

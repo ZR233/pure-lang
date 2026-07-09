@@ -52,7 +52,8 @@ where
             path: input.path.clone(),
             content: bytes.clone(),
         })
-        .await?;
+        .await
+        .map_err(|error| tool_error(TOOL_CONTAINER_COPY, error))?;
     Ok(json!({ "direction": "upload", "path": input.path, "bytes": bytes.len() }))
 }
 
@@ -65,7 +66,8 @@ where
             path: input.path.clone(),
             archive: true,
         })
-        .await?;
+        .await
+        .map_err(|error| tool_error(TOOL_CONTAINER_COPY, error))?;
     Ok(json!({
         "direction": "download",
         "path": input.path,

@@ -1,11 +1,82 @@
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
 const TOKEN_ESTIMATE_BYTES: usize = 4;
 
 pub const DEFAULT_MODEL_TOOL_OUTPUT_TOKENS: usize = 10_000;
+pub const SECRET_REDACTION_REPLACEMENT: &str = "<redacted>";
+
+/// 对产品层注入的明确 secret 做稳定遮蔽。
+///
+/// pl-core 的 trace preview 会根据字段名做启发式遮蔽；该类型用于 Git token、
+/// MCP token 等产品层已知 secret。构造时会过滤空 secret，并按长度从长到短替换，
+/// 避免重叠 token 被短前缀提前部分遮蔽。
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct SecretRedaction {
+    secrets: Vec<String>,
+}
+
+impl std::fmt::Debug for SecretRedaction {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SecretRedaction")
+            .field("secret_count", &self.secrets.len())
+            .finish()
+    }
+}
+
+impl SecretRedaction {
+    pub fn new<S>(secrets: impl IntoIterator<Item = S>) -> Self
+    where
+        S: AsRef<str>,
+    {
+        let mut collected = Vec::new();
+        for secret in secrets {
+            let secret = secret.as_ref();
+            if secret.is_empty() || collected.iter().any(|existing: &String| existing == secret) {
+                continue;
+            }
+            collected.push(secret.to_string());
+        }
+        collected.sort_by(|left, right| right.len().cmp(&left.len()).then_with(|| left.cmp(right)));
+        Self { secrets: collected }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.secrets.is_empty()
+    }
+
+    pub fn redact_str(&self, value: &str) -> String {
+        if self.secrets.is_empty() {
+            return value.to_string();
+        }
+        let mut redacted = value.to_string();
+        for secret in &self.secrets {
+            redacted = redacted.replace(secret, SECRET_REDACTION_REPLACEMENT);
+        }
+        redacted
+    }
+
+    pub fn redact_json_value(&self, value: Value) -> Value {
+        match value {
+            Value::Object(map) => Value::Object(
+                map.into_iter()
+                    .map(|(key, value)| (self.redact_str(&key), self.redact_json_value(value)))
+                    .collect(),
+            ),
+            Value::Array(items) => Value::Array(
+                items
+                    .into_iter()
+                    .map(|value| self.redact_json_value(value))
+                    .collect(),
+            ),
+            Value::String(value) => Value::String(self.redact_str(&value)),
+            Value::Null | Value::Bool(_) | Value::Number(_) => value,
+        }
+    }
+}
 
 pub fn model_visible_tool_output(output: &str) -> String {
     model_visible_tool_output_with_tokens(output, DEFAULT_MODEL_TOOL_OUTPUT_TOKENS)
@@ -87,17 +158,83 @@ pub enum ToolLifecyclePhase {
 /// call id、参数 JSON、预览截断、输出 artifact 和耗时计算。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolLifecycleProjection {
-    pub phase: ToolLifecyclePhase,
-    pub call_id: String,
-    pub tool_name: String,
-    pub arguments: Value,
-    pub arguments_preview: String,
-    pub output: String,
-    pub output_preview: String,
-    pub output_artifacts: Vec<Value>,
-    pub duration_ms: Option<u64>,
-    pub started_at_unix: i64,
-    pub completed_at_unix: Option<i64>,
+    phase: ToolLifecyclePhase,
+    call_id: String,
+    tool_name: String,
+    arguments: Value,
+    arguments_preview: String,
+    output: String,
+    output_preview: String,
+    output_artifacts: Vec<Value>,
+    duration_ms: Option<u64>,
+    started_at_unix: i64,
+    completed_at_unix: Option<i64>,
+}
+
+impl ToolLifecycleProjection {
+    pub fn phase(&self) -> &ToolLifecyclePhase {
+        &self.phase
+    }
+
+    pub fn call_id(&self) -> &str {
+        &self.call_id
+    }
+
+    pub fn tool_name(&self) -> &str {
+        &self.tool_name
+    }
+
+    pub fn arguments(&self) -> &Value {
+        &self.arguments
+    }
+
+    pub fn arguments_preview(&self) -> &str {
+        &self.arguments_preview
+    }
+
+    pub fn output(&self) -> &str {
+        &self.output
+    }
+
+    pub fn output_preview(&self) -> &str {
+        &self.output_preview
+    }
+
+    pub fn output_artifacts(&self) -> &[Value] {
+        &self.output_artifacts
+    }
+
+    pub fn duration_ms(&self) -> Option<u64> {
+        self.duration_ms
+    }
+
+    pub fn started_at_unix(&self) -> i64 {
+        self.started_at_unix
+    }
+
+    pub fn completed_at_unix(&self) -> Option<i64> {
+        self.completed_at_unix
+    }
+
+    /// 返回工具完成时间；缺失时回退到开始时间。
+    pub fn completed_at_unix_or_started(&self) -> i64 {
+        self.completed_at_unix.unwrap_or(self.started_at_unix)
+    }
+
+    /// 将 trace 中保存的 artifact JSON 解码为产品层的 artifact 类型。
+    ///
+    /// pl-core 统一负责生命周期投影里的 JSON 解码策略；产品层只需要选择自身
+    /// 持久化或 UI 协议使用的目标类型。无法解码的条目会被忽略，和 trace
+    /// artifact 作为附加信息的容错语义保持一致。
+    pub fn output_artifacts_as<T>(&self) -> Vec<T>
+    where
+        T: DeserializeOwned,
+    {
+        self.output_artifacts
+            .iter()
+            .filter_map(|value| serde_json::from_value(value.clone()).ok())
+            .collect()
+    }
 }
 
 /// 从会话历史中抽出的工具调用详情。
@@ -107,12 +244,43 @@ pub struct ToolLifecycleProjection {
 /// 等业务标识和持久化事件 metadata。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolHistoryProjection {
-    pub call_id: String,
-    pub tool_name: String,
-    pub arguments: Value,
-    pub arguments_preview: String,
-    pub output: String,
-    pub output_preview: String,
+    call_id: String,
+    tool_name: String,
+    arguments: Value,
+    arguments_preview: String,
+    output: String,
+    output_preview: String,
+}
+
+impl ToolHistoryProjection {
+    pub fn call_id(&self) -> &str {
+        &self.call_id
+    }
+
+    pub fn tool_name(&self) -> &str {
+        &self.tool_name
+    }
+
+    pub fn arguments(&self) -> &Value {
+        &self.arguments
+    }
+
+    pub fn arguments_preview(&self) -> &str {
+        &self.arguments_preview
+    }
+
+    pub fn output(&self) -> &str {
+        &self.output
+    }
+
+    pub fn output_preview(&self) -> &str {
+        &self.output_preview
+    }
+
+    /// 根据历史投影中恢复出的模型可见输出推断工具是否成功。
+    pub fn inferred_success(&self) -> bool {
+        !self.output.is_empty()
+    }
 }
 
 pub fn tool_history_projection(
@@ -157,7 +325,7 @@ pub fn tool_history_projection(
             {
                 arguments = Some(arguments_value(raw_arguments));
             }
-            output = Some(message_content_text(&message.content));
+            output = Some(crate::message_content_text(&message.content));
         }
     }
 
@@ -290,24 +458,6 @@ fn tool_call_arguments(tool_call: &Value) -> Option<Value> {
     }
 }
 
-fn message_content_text(content: &pl_protocol::MessageContent) -> String {
-    match content {
-        pl_protocol::MessageContent::Text(text) => text.clone(),
-        pl_protocol::MessageContent::MultiPart(parts) => parts
-            .iter()
-            .filter_map(|part| match part {
-                pl_protocol::ContentPart::Text { text } => Some(text.as_str()),
-                pl_protocol::ContentPart::Image {
-                    source: _source,
-                    media_type: _media_type,
-                    filename: _filename,
-                } => None,
-            })
-            .collect::<Vec<_>>()
-            .join(""),
-    }
-}
-
 fn tool_call_id(tool: &pl_trace::TraceToolPart) -> String {
     tool.call_id
         .clone()
@@ -328,30 +478,76 @@ fn duration_ms(created_at: i64, updated_at: i64) -> Option<u64> {
 /// 空流清理语义，避免本地/容器 backend 各自维护一套路径协议。
 #[derive(Debug, Clone, Copy)]
 pub struct ToolOutputCaptureRequest<'a> {
-    pub artifact_files_root: &'a Path,
-    pub namespace: Option<&'a str>,
-    pub call_id: &'a str,
-    pub stdout_id: &'a str,
-    pub stderr_id: &'a str,
-    pub command: &'a str,
+    artifact_files_root: &'a Path,
+    namespace: Option<&'a str>,
+    call_id: &'a str,
+    stdout_id: &'a str,
+    stderr_id: &'a str,
+    command: &'a str,
+}
+
+impl<'a> ToolOutputCaptureRequest<'a> {
+    pub fn new(
+        artifact_files_root: &'a Path,
+        call_id: &'a str,
+        stdout_id: &'a str,
+        stderr_id: &'a str,
+        command: &'a str,
+    ) -> Self {
+        Self {
+            artifact_files_root,
+            namespace: None,
+            call_id,
+            stdout_id,
+            stderr_id,
+            command,
+        }
+    }
+
+    pub fn with_namespace(mut self, namespace: &'a str) -> Self {
+        self.namespace = Some(namespace);
+        self
+    }
 }
 
 /// 工具输出 artifact 的路径计算请求。
 #[derive(Debug, Clone, Copy)]
 pub struct ToolOutputArtifactPathRequest<'a> {
-    pub artifact_files_root: &'a Path,
-    pub namespace: Option<&'a str>,
-    pub call_id: &'a str,
-    pub artifact_id: &'a str,
-    pub name: &'a str,
+    artifact_files_root: &'a Path,
+    namespace: Option<&'a str>,
+    call_id: &'a str,
+    artifact_id: &'a str,
+    name: &'a str,
+}
+
+impl<'a> ToolOutputArtifactPathRequest<'a> {
+    pub fn new(
+        artifact_files_root: &'a Path,
+        call_id: &'a str,
+        artifact_id: &'a str,
+        name: &'a str,
+    ) -> Self {
+        Self {
+            artifact_files_root,
+            namespace: None,
+            call_id,
+            artifact_id,
+            name,
+        }
+    }
+
+    pub fn with_namespace(mut self, namespace: &'a str) -> Self {
+        self.namespace = Some(namespace);
+        self
+    }
 }
 
 /// stdout/stderr 捕获文件集合。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolOutputCapture {
-    pub call_id: String,
-    pub stdout: ToolOutputStreamCapture,
-    pub stderr: ToolOutputStreamCapture,
+    call_id: String,
+    stdout: ToolOutputStreamCapture,
+    stderr: ToolOutputStreamCapture,
 }
 
 /// 单个输出流的捕获文件。
@@ -383,39 +579,94 @@ impl ToolOutputStream {
 /// 工具输出流的实际写入字节数。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ToolOutputStreamSizes {
-    pub stdout_bytes: u64,
-    pub stderr_bytes: u64,
+    stdout_bytes: u64,
+    stderr_bytes: u64,
+}
+
+impl ToolOutputStreamSizes {
+    pub fn new(stdout_bytes: u64, stderr_bytes: u64) -> Self {
+        Self {
+            stdout_bytes,
+            stderr_bytes,
+        }
+    }
+
+    pub fn stdout_bytes(&self) -> u64 {
+        self.stdout_bytes
+    }
+
+    pub fn stderr_bytes(&self) -> u64 {
+        self.stderr_bytes
+    }
 }
 
 /// 与产品无关的工具输出 artifact 描述。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolOutputArtifactDescriptor {
-    pub id: String,
-    pub call_id: String,
-    pub name: String,
-    pub stream: ToolOutputStream,
-    pub path: PathBuf,
-    pub size_bytes: u64,
+    id: String,
+    call_id: String,
+    name: String,
+    stream: ToolOutputStream,
+    path: PathBuf,
+    size_bytes: u64,
+}
+
+impl ToolOutputArtifactDescriptor {
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub fn call_id(&self) -> &str {
+        &self.call_id
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn stream(&self) -> ToolOutputStream {
+        self.stream
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn size_bytes(&self) -> u64 {
+        self.size_bytes
+    }
 }
 
 impl ToolOutputCapture {
+    pub fn stdout_path(&self) -> &Path {
+        &self.stdout.path
+    }
+
+    pub fn stderr_path(&self) -> &Path {
+        &self.stderr.path
+    }
+
     pub async fn prepare(request: ToolOutputCaptureRequest<'_>) -> crate::Result<Self> {
         let stdout_name = tool_output_file_name(request.command, ToolOutputStream::Stdout);
         let stderr_name = tool_output_file_name(request.command, ToolOutputStream::Stderr);
-        let stdout_path = tool_output_artifact_file_path(ToolOutputArtifactPathRequest {
-            artifact_files_root: request.artifact_files_root,
-            namespace: request.namespace,
-            call_id: request.call_id,
-            artifact_id: request.stdout_id,
-            name: &stdout_name,
-        });
-        let stderr_path = tool_output_artifact_file_path(ToolOutputArtifactPathRequest {
-            artifact_files_root: request.artifact_files_root,
-            namespace: request.namespace,
-            call_id: request.call_id,
-            artifact_id: request.stderr_id,
-            name: &stderr_name,
-        });
+        let mut stdout_request = ToolOutputArtifactPathRequest::new(
+            request.artifact_files_root,
+            request.call_id,
+            request.stdout_id,
+            &stdout_name,
+        );
+        let mut stderr_request = ToolOutputArtifactPathRequest::new(
+            request.artifact_files_root,
+            request.call_id,
+            request.stderr_id,
+            &stderr_name,
+        );
+        if let Some(namespace) = request.namespace {
+            stdout_request = stdout_request.with_namespace(namespace);
+            stderr_request = stderr_request.with_namespace(namespace);
+        }
+        let stdout_path = tool_output_artifact_file_path(stdout_request);
+        let stderr_path = tool_output_artifact_file_path(stderr_request);
         if let Some(parent) = stdout_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
@@ -448,14 +699,14 @@ impl ToolOutputCapture {
             &mut artifacts,
             &self.call_id,
             &self.stdout,
-            sizes.stdout_bytes,
+            sizes.stdout_bytes(),
         )
         .await?;
         push_or_remove_artifact(
             &mut artifacts,
             &self.call_id,
             &self.stderr,
-            sizes.stderr_bytes,
+            sizes.stderr_bytes(),
         )
         .await?;
         Ok(artifacts)
@@ -652,34 +903,31 @@ mod tests {
         TraceToolPart,
     };
     use pretty_assertions::assert_eq;
+    use serde::Deserialize;
     use serde_json::json;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[tokio::test]
     async fn tool_output_capture_keeps_non_empty_streams_and_removes_empty_files() {
         let dir = test_temp_dir();
-        let capture = super::ToolOutputCapture::prepare(super::ToolOutputCaptureRequest {
-            artifact_files_root: &dir,
-            namespace: None,
-            call_id: "call/id",
-            stdout_id: "stdout-id",
-            stderr_id: "stderr-id",
-            command: "cargo test",
-        })
+        let capture = super::ToolOutputCapture::prepare(super::ToolOutputCaptureRequest::new(
+            &dir,
+            "call/id",
+            "stdout-id",
+            "stderr-id",
+            "cargo test",
+        ))
         .await
         .expect("capture");
-        tokio::fs::write(&capture.stdout.path, b"ok")
+        tokio::fs::write(capture.stdout_path(), b"ok")
             .await
             .expect("stdout");
-        tokio::fs::write(&capture.stderr.path, b"")
+        tokio::fs::write(capture.stderr_path(), b"")
             .await
             .expect("stderr");
 
         let artifacts = capture
-            .collect_artifacts(super::ToolOutputStreamSizes {
-                stdout_bytes: 2,
-                stderr_bytes: 0,
-            })
+            .collect_artifacts(super::ToolOutputStreamSizes::new(2, 0))
             .await
             .expect("artifacts");
 
@@ -698,16 +946,18 @@ mod tests {
                 size_bytes: 2,
             }]
         );
-        assert!(capture.stdout.path.exists());
-        assert!(!capture.stderr.path.exists());
+        assert!(capture.stdout_path().exists());
+        assert!(!capture.stderr_path().exists());
         assert_eq!(
-            super::tool_output_artifact_file_path(super::ToolOutputArtifactPathRequest {
-                artifact_files_root: &dir,
-                namespace: Some("agent/id"),
-                call_id: "call/id",
-                artifact_id: "artifact-id",
-                name: "cargo-stdout.txt",
-            }),
+            super::tool_output_artifact_file_path(
+                super::ToolOutputArtifactPathRequest::new(
+                    &dir,
+                    "call/id",
+                    "artifact-id",
+                    "cargo-stdout.txt"
+                )
+                .with_namespace("agent/id")
+            ),
             dir.join("tool-output")
                 .join("agent_id")
                 .join("call_id")
@@ -715,13 +965,15 @@ mod tests {
                 .join("cargo-stdout.txt")
         );
         assert_eq!(
-            super::tool_output_artifact_file_path(super::ToolOutputArtifactPathRequest {
-                artifact_files_root: &dir,
-                namespace: Some("../agent"),
-                call_id: "...",
-                artifact_id: "artifact/id",
-                name: "../stdout.txt",
-            }),
+            super::tool_output_artifact_file_path(
+                super::ToolOutputArtifactPathRequest::new(
+                    &dir,
+                    "...",
+                    "artifact/id",
+                    "../stdout.txt"
+                )
+                .with_namespace("../agent")
+            ),
             dir.join("tool-output")
                 .join("agent")
                 .join("tool-call")
@@ -729,6 +981,250 @@ mod tests {
                 .join("stdout.txt")
         );
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[test]
+    fn tool_output_capture_request_hides_fields_behind_constructor() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tool/output_format.rs"
+        ))
+        .expect("source");
+        let request_fields = source
+            .split("pub struct ToolOutputCaptureRequest")
+            .nth(1)
+            .expect("request struct")
+            .split("/// 工具输出 artifact 的路径计算请求。")
+            .next()
+            .expect("request fields");
+        assert!(
+            request_fields.contains("pub fn new("),
+            "工具输出捕获请求应由 pl-core constructor 承载字段形状"
+        );
+        assert!(
+            !request_fields.contains("pub artifact_files_root:")
+                && !request_fields.contains("pub namespace:")
+                && !request_fields.contains("pub call_id:")
+                && !request_fields.contains("pub stdout_id:")
+                && !request_fields.contains("pub stderr_id:")
+                && !request_fields.contains("pub command:"),
+            "宿主不应直接手写 ToolOutputCaptureRequest 字段"
+        );
+    }
+
+    #[test]
+    fn tool_output_capture_hides_stream_fields_behind_accessors() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tool/output_format.rs"
+        ))
+        .expect("source");
+        let capture_fields = source
+            .split("pub struct ToolOutputCapture {")
+            .nth(1)
+            .expect("capture struct")
+            .split("/// 单个输出流的捕获文件。")
+            .next()
+            .expect("capture fields");
+        let capture_impl = source
+            .split("impl ToolOutputCapture")
+            .nth(1)
+            .expect("capture impl");
+        assert!(
+            capture_impl.contains("pub fn stdout_path(")
+                && capture_impl.contains("pub fn stderr_path("),
+            "工具输出捕获文件路径应由 pl-core accessor 暴露"
+        );
+        assert!(
+            !capture_fields.contains("pub stdout:")
+                && !capture_fields.contains("pub stderr:")
+                && !capture_fields.contains("pub call_id:"),
+            "宿主不应直接读取 ToolOutputCapture 内部字段"
+        );
+    }
+
+    #[test]
+    fn tool_lifecycle_projection_hides_fields_behind_accessors() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tool/output_format.rs"
+        ))
+        .expect("source");
+        let projection_fields = source
+            .split("pub struct ToolLifecycleProjection {")
+            .nth(1)
+            .expect("lifecycle projection struct")
+            .split("impl ToolLifecycleProjection")
+            .next()
+            .expect("projection fields");
+        let projection_impl = source
+            .split("impl ToolLifecycleProjection")
+            .nth(1)
+            .expect("projection impl");
+        for accessor in [
+            "pub fn phase(",
+            "pub fn call_id(",
+            "pub fn tool_name(",
+            "pub fn arguments(",
+            "pub fn arguments_preview(",
+            "pub fn output(",
+            "pub fn output_preview(",
+            "pub fn output_artifacts(",
+            "pub fn duration_ms(",
+            "pub fn started_at_unix(",
+            "pub fn completed_at_unix(",
+        ] {
+            assert!(
+                projection_impl.contains(accessor),
+                "工具生命周期投影字段应由 pl-core accessor 暴露 `{accessor}`"
+            );
+        }
+        assert!(
+            !projection_fields.contains("pub phase:")
+                && !projection_fields.contains("pub call_id:")
+                && !projection_fields.contains("pub tool_name:")
+                && !projection_fields.contains("pub arguments:")
+                && !projection_fields.contains("pub arguments_preview:")
+                && !projection_fields.contains("pub output:")
+                && !projection_fields.contains("pub output_preview:")
+                && !projection_fields.contains("pub output_artifacts:")
+                && !projection_fields.contains("pub duration_ms:")
+                && !projection_fields.contains("pub started_at_unix:")
+                && !projection_fields.contains("pub completed_at_unix:"),
+            "宿主不应直接读取 ToolLifecycleProjection 内部字段"
+        );
+    }
+
+    #[test]
+    fn tool_history_projection_hides_fields_behind_accessors() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tool/output_format.rs"
+        ))
+        .expect("source");
+        let projection_fields = source
+            .split("pub struct ToolHistoryProjection {")
+            .nth(1)
+            .expect("history projection struct")
+            .split("impl ToolHistoryProjection")
+            .next()
+            .expect("projection fields");
+        let projection_impl = source
+            .split("impl ToolHistoryProjection")
+            .nth(1)
+            .expect("projection impl")
+            .split("pub fn tool_history_projection")
+            .next()
+            .expect("projection impl body");
+        for accessor in [
+            "pub fn call_id(",
+            "pub fn tool_name(",
+            "pub fn arguments(",
+            "pub fn arguments_preview(",
+            "pub fn output(",
+            "pub fn output_preview(",
+        ] {
+            assert!(
+                projection_impl.contains(accessor),
+                "工具历史投影字段应由 pl-core accessor 暴露 `{accessor}`"
+            );
+        }
+        assert!(
+            !projection_fields.contains("pub call_id:")
+                && !projection_fields.contains("pub tool_name:")
+                && !projection_fields.contains("pub arguments:")
+                && !projection_fields.contains("pub arguments_preview:")
+                && !projection_fields.contains("pub output:")
+                && !projection_fields.contains("pub output_preview:"),
+            "宿主不应直接读取 ToolHistoryProjection 内部字段"
+        );
+    }
+
+    #[test]
+    fn tool_output_artifact_descriptor_hides_fields_behind_accessors() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tool/output_format.rs"
+        ))
+        .expect("source");
+        let descriptor_fields = source
+            .split("pub struct ToolOutputArtifactDescriptor")
+            .nth(1)
+            .expect("descriptor struct")
+            .split("impl ToolOutputCapture")
+            .next()
+            .expect("descriptor fields");
+        assert!(
+            descriptor_fields.contains("pub fn id(")
+                && descriptor_fields.contains("pub fn call_id(")
+                && descriptor_fields.contains("pub fn name(")
+                && descriptor_fields.contains("pub fn stream(")
+                && descriptor_fields.contains("pub fn path(")
+                && descriptor_fields.contains("pub fn size_bytes("),
+            "工具输出 artifact 描述应由 pl-core accessor 暴露"
+        );
+        assert!(
+            !descriptor_fields.contains("pub id:")
+                && !descriptor_fields.contains("pub call_id:")
+                && !descriptor_fields.contains("pub name:")
+                && !descriptor_fields.contains("pub stream:")
+                && !descriptor_fields.contains("pub path:")
+                && !descriptor_fields.contains("pub size_bytes:"),
+            "宿主不应直接读取 ToolOutputArtifactDescriptor 字段"
+        );
+    }
+
+    #[test]
+    fn tool_output_stream_sizes_hides_fields_behind_constructor() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tool/output_format.rs"
+        ))
+        .expect("source");
+        let stream_size_fields = source
+            .split("pub struct ToolOutputStreamSizes")
+            .nth(1)
+            .expect("stream sizes struct")
+            .split("/// 与产品无关的工具输出 artifact 描述。")
+            .next()
+            .expect("stream sizes fields");
+        assert!(
+            stream_size_fields.contains("pub fn new("),
+            "工具输出流大小应由 pl-core constructor 承载字段形状"
+        );
+        assert!(
+            !stream_size_fields.contains("pub stdout_bytes:")
+                && !stream_size_fields.contains("pub stderr_bytes:"),
+            "宿主不应直接手写 ToolOutputStreamSizes 字段"
+        );
+    }
+
+    #[test]
+    fn tool_output_artifact_path_request_hides_fields_behind_constructor() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tool/output_format.rs"
+        ))
+        .expect("source");
+        let request_fields = source
+            .split("pub struct ToolOutputArtifactPathRequest")
+            .nth(1)
+            .expect("request struct")
+            .split("/// stdout/stderr 捕获文件集合。")
+            .next()
+            .expect("request fields");
+        assert!(
+            request_fields.contains("pub fn new("),
+            "工具输出 artifact 路径请求应由 pl-core constructor 承载字段形状"
+        );
+        assert!(
+            !request_fields.contains("pub artifact_files_root:")
+                && !request_fields.contains("pub namespace:")
+                && !request_fields.contains("pub call_id:")
+                && !request_fields.contains("pub artifact_id:")
+                && !request_fields.contains("pub name:"),
+            "宿主不应直接手写 ToolOutputArtifactPathRequest 字段"
+        );
     }
 
     #[test]
@@ -792,6 +1288,20 @@ mod tests {
                 },
             ]
         );
+
+        #[derive(Debug, Deserialize, PartialEq, Eq)]
+        struct ArtifactRecord {
+            id: String,
+        }
+
+        assert_eq!(
+            projections[1].output_artifacts_as::<ArtifactRecord>(),
+            vec![ArtifactRecord {
+                id: "artifact-1".to_string(),
+            }]
+        );
+        assert_eq!(projections[0].completed_at_unix_or_started(), 10);
+        assert_eq!(projections[1].completed_at_unix_or_started(), 12);
     }
 
     #[test]
@@ -829,6 +1339,26 @@ mod tests {
                         .to_string(),
             }
         );
+    }
+
+    #[test]
+    fn tool_history_projection_reports_inferred_success() {
+        let successful = super::ToolHistoryProjection {
+            call_id: "call-1".to_string(),
+            tool_name: "container_exec".to_string(),
+            arguments: json!({}),
+            arguments_preview: "{}".to_string(),
+            output: "visible output".to_string(),
+            output_preview: "visible output".to_string(),
+        };
+        let empty = super::ToolHistoryProjection {
+            output: String::new(),
+            output_preview: String::new(),
+            ..successful.clone()
+        };
+
+        assert!(successful.inferred_success());
+        assert!(!empty.inferred_success());
     }
 
     fn test_temp_dir() -> std::path::PathBuf {

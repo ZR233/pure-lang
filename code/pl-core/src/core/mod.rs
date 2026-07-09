@@ -22,7 +22,7 @@ use crate::tool::{
     SubagentContext, ToolContext, ToolRegistry,
 };
 #[cfg(test)]
-use crate::tool::{ReadFileTool, WorkspaceAccess, WriteFileTool};
+use crate::tool::{LocalWorkspaceFileTool, WorkspaceAccess, WorkspaceFileToolKind, WriteFileTool};
 use crate::trace::TraceRecorder;
 #[cfg(test)]
 use crate::turn::{BudgetTracker, TurnResultStatus};
@@ -41,17 +41,22 @@ mod turn_loop;
 mod turn_result;
 
 pub use kernel::{
-    AgentKernel, AgentKernelBuilder, CoreAgentProfile, ProductToolDefinition, ProductToolRequest,
-    ProductToolRouter,
+    AgentKernel, AgentKernelBuilder, AgentKernelToolRequest, AgentKernelToolSet, CoreAgentProfile,
+    NoAgentKernelToolSet,
 };
 pub use model_turn::{
-    CoreModelTurnOptions, CoreModelTurnRequest, stream_session_completion_response,
+    CoreModelContinuationConfig, CoreModelContinuationProfile, CoreModelProviderFamily,
+    CoreModelTurnClient, CoreModelTurnOptions, CoreModelTurnRequest, CoreModelWireApi,
+    stream_session_completion_message_text, stream_session_completion_response,
 };
 pub use profile::{
     AgentBackendProfile, CoreRuntimeOptions, CoreRuntimeProfile, PureCoreBuilder, ToolProfile,
     WorkspaceProfile,
 };
-pub use tool_set::{SharedToolSchemaOptions, ToolSetBuilder, shared_tool_schemas};
+pub use tool_set::{
+    HostedSharedToolVisibility, SharedToolSchemaOptions, ToolSetBuilder, ToolVisibilitySet,
+    hosted_container_shared_tool_names, shared_tool_names, shared_tool_schemas,
+};
 pub(crate) use turn_result::compact_text;
 /// 生成唯一的 turn ID（毫秒时间戳 + 序列号），用于隔离每个 turn 的 trace part id。
 fn generate_turn_id() -> String {

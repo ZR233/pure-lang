@@ -450,3 +450,120 @@ async fn model_turn_helper_retries_full_history_when_continuation_is_unsupported
     assert!(retry_input.contains("old prompt"));
     assert!(retry_input.contains("old answer"));
 }
+
+#[tokio::test]
+async fn model_turn_text_helper_returns_assistant_message_text() {
+    let sse_body = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"title\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"title\"}]}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_title\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let (base_url, handle) = serve_sse_once(sse_body).await;
+    let mut provider_info = ProviderInfo::openai(Some(base_url));
+    provider_info.bearer_token = Some("test-token".to_string());
+    provider_info.default_model = "local-responses".to_string();
+    let provider = pl_model::create_provider(provider_info).unwrap();
+    let mut session = CoreSession::new();
+    session.push_user_prompt("summarize this".to_string());
+
+    let text = stream_session_completion_message_text(
+        provider,
+        &mut session,
+        CoreModelTurnRequest::new("local-responses").with_instructions("title only"),
+        CoreModelTurnOptions::default(),
+    )
+    .await
+    .unwrap();
+    handle.await.unwrap();
+
+    assert_eq!(text, "title");
+    assert_eq!(session.previous_response_id(), Some("resp_title"));
+}
+
+#[tokio::test]
+async fn model_turn_client_caches_unsupported_continuation_by_key() {
+    let retry_sse = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_retry\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_retry\",\"delta\":\"retry ok\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_retry\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"retry ok\"}]}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_retry\",\"usage\":{\"input_tokens\":4,\"output_tokens\":2,\"total_tokens\":6}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let second_sse = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_second\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_second\",\"delta\":\"second ok\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_second\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"second ok\"}]}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_second\",\"usage\":{\"input_tokens\":5,\"output_tokens\":2,\"total_tokens\":7}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let unsupported = serde_json::json!({
+        "error": {
+            "message": "previous_response_id is not supported"
+        }
+    })
+    .to_string();
+    let (base_url, bodies, handle) = serve_http_sequence(vec![
+        TestHttpResponse::json(400, unsupported),
+        TestHttpResponse::sse(retry_sse),
+        TestHttpResponse::sse(second_sse),
+    ])
+    .await;
+    let mut provider_info = ProviderInfo::openai(Some(base_url));
+    provider_info.bearer_token = Some("test-token".to_string());
+    provider_info.default_model = "local-responses".to_string();
+    let provider = pl_model::create_provider(provider_info).unwrap();
+    let client = CoreModelTurnClient::new();
+
+    let mut first_session = CoreSession::new();
+    first_session.push_user_prompt("old prompt".to_string());
+    first_session.push_assistant_response("old answer".to_string(), None);
+    first_session.acknowledge_model_response(first_session.len(), Some("resp_old".to_string()));
+    let first = client
+        .stream_session_completion_response(
+            provider.clone(),
+            &mut first_session,
+            CoreModelTurnRequest::new("local-responses")
+                .with_instructions("reply briefly")
+                .with_continuation(true)
+                .with_continuation_cache_key("openai|local-responses"),
+            CoreModelTurnOptions::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.content.as_deref(), Some("retry ok"));
+
+    let mut second_session = CoreSession::new();
+    second_session.push_user_prompt("new prompt".to_string());
+    second_session.push_assistant_response("new answer".to_string(), None);
+    second_session
+        .acknowledge_model_response(second_session.len(), Some("resp_second_old".to_string()));
+    let second = client
+        .stream_session_completion_response(
+            provider,
+            &mut second_session,
+            CoreModelTurnRequest::new("local-responses")
+                .with_instructions("reply briefly")
+                .with_continuation(true)
+                .with_continuation_cache_key("openai|local-responses"),
+            CoreModelTurnOptions::default(),
+        )
+        .await
+        .unwrap();
+    handle.await.unwrap();
+
+    assert_eq!(second.content.as_deref(), Some("second ok"));
+    let bodies = bodies.lock().unwrap();
+    assert_eq!(bodies.len(), 3);
+    assert_eq!(
+        bodies[0]["previous_response_id"],
+        serde_json::json!("resp_old")
+    );
+    assert!(bodies[1].get("previous_response_id").is_none());
+    assert!(bodies[2].get("previous_response_id").is_none());
+    assert_eq!(bodies[2]["store"], serde_json::json!(false));
+}

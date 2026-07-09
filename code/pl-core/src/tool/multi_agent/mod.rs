@@ -18,10 +18,12 @@ use crate::agent::AgentRecord;
 use types::{AgentToolRecord, CompactAgentRecord};
 
 pub use host::{
-    AgentControlAgentRecord, AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
-    AgentControlMessageOutput, AgentControlSendInputOutput, AgentControlSendInputRequest,
-    AgentControlSpawnOutput, AgentControlSpawnRequest, AgentControlTargetRequest, AgentControlTool,
-    AgentControlWaitOutput, AgentControlWaitRequest,
+    AgentControlAgentRecord, AgentControlAgentType, AgentControlAgentTypePolicy,
+    AgentControlBackend, AgentControlListOutput, AgentControlListRequest,
+    AgentControlMessageOutput, AgentControlPolicy, AgentControlSendInputOutput,
+    AgentControlSendInputRequest, AgentControlSpawnOutput, AgentControlSpawnRequest,
+    AgentControlStatusKind, AgentControlTargetRequest, AgentControlTool, AgentControlWaitOutput,
+    AgentControlWaitRequest, AllowAllAgentControlPolicy,
 };
 pub use schema::{
     AgentControlToolKind, TOOL_CLOSE_AGENT, TOOL_LIST_AGENTS, TOOL_RESUME_AGENT, TOOL_SEND_INPUT,
