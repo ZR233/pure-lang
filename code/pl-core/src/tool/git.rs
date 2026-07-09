@@ -26,6 +26,47 @@ pub const TOOL_GIT_SYNC_DEFAULT_BRANCH: &str = "git_sync_default_branch";
 const GIT_TIMEOUT: Duration = Duration::from_secs(600);
 pub const GIT_TOKEN_ENV: &str = "PL_GIT_TOKEN";
 
+/// git shell 命令的凭据注入模式。
+///
+/// 容器或 sidecar backend 需要把 git 命令序列化成 shell 字符串时，用该枚举选择是否
+/// 通过统一 askpass 脚本读取 `PL_GIT_TOKEN`。token 值只应通过环境变量传入，不能拼进
+/// 命令文本。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GitShellCredential {
+    Disabled,
+    EnvToken,
+}
+
+/// 生成可在 shell backend 中执行的 git 命令。
+///
+/// 该请求面向容器、sidecar 等只能接收 shell 字符串的执行后端。调用方负责把工作区挂载
+/// 到 `safe_directory`，并在 `credential` 为 [`GitShellCredential::EnvToken`] 时注入
+/// [`GIT_TOKEN_ENV`] 环境变量。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GitShellCommandRequest<'a> {
+    pub safe_directory: &'a str,
+    pub args: &'a [&'a str],
+    pub credential: GitShellCredential,
+}
+
+pub fn git_shell_command(request: GitShellCommandRequest<'_>) -> String {
+    let mut command_parts = vec![
+        "git".to_string(),
+        "-c".to_string(),
+        quote_shell_word("core.hooksPath=/dev/null"),
+        "-c".to_string(),
+        quote_shell_word(&format!("safe.directory={}", request.safe_directory)),
+        "-c".to_string(),
+        quote_shell_word("credential.helper="),
+    ];
+    command_parts.extend(request.args.iter().map(|arg| quote_shell_word(arg)));
+    let git_command = command_parts.join(" ");
+    match request.credential {
+        GitShellCredential::Disabled => git_command,
+        GitShellCredential::EnvToken => git_shell_command_with_askpass(&git_command),
+    }
+}
+
 /// 通用命令执行请求。
 #[derive(Clone, PartialEq, Eq)]
 pub struct ExecutionRequest {
@@ -890,6 +931,25 @@ fn git_askpass_script() -> &'static str {
     "#!/bin/sh\ncase \"$1\" in\n  *Username*) printf '%s\\n' x-access-token ;;\n  *Password*) printf '%s\\n' \"$PL_GIT_TOKEN\" ;;\n  *) printf '\\n' ;;\nesac\n"
 }
 
+fn git_shell_command_with_askpass(git_command: &str) -> String {
+    format!(
+        "askpass=$(mktemp) && cat > \"$askpass\" <<'PL_GIT_ASKPASS'\n{}PL_GIT_ASKPASS\nchmod 700 \"$askpass\" && GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=\"$askpass\" {git_command}; status=$?; rm -f \"$askpass\"; exit $status",
+        git_askpass_script()
+    )
+}
+
+fn quote_shell_word(value: &str) -> String {
+    if value.is_empty() {
+        return "''".to_string();
+    }
+    if value.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'/' | b':' | b'=')
+    }) {
+        return value.to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
 fn default_true() -> bool {
     true
 }
@@ -1062,6 +1122,37 @@ mod tests {
             stdout: stdout.to_string(),
             stderr: String::new(),
         }
+    }
+
+    #[test]
+    fn git_shell_command_without_credential_uses_safe_git_flags() {
+        let command = git_shell_command(GitShellCommandRequest {
+            safe_directory: "/workspace/repo",
+            args: &["fetch", "origin", "feature branch"],
+            credential: GitShellCredential::Disabled,
+        });
+
+        assert_eq!(
+            command,
+            "git -c core.hooksPath=/dev/null -c safe.directory=/workspace/repo -c credential.helper= fetch origin 'feature branch'"
+        );
+    }
+
+    #[test]
+    fn git_shell_command_with_credential_installs_askpass() {
+        let command = git_shell_command(GitShellCommandRequest {
+            safe_directory: "/workspace/repo",
+            args: &["push", "origin", "HEAD:mai-agent/test"],
+            credential: GitShellCredential::EnvToken,
+        });
+
+        assert!(command.contains("GIT_ASKPASS=\"$askpass\""));
+        assert!(command.contains("GIT_TERMINAL_PROMPT=0"));
+        assert!(command.contains("$PL_GIT_TOKEN"));
+        assert!(command.contains("x-access-token"));
+        assert!(command.contains("git -c core.hooksPath=/dev/null"));
+        assert!(command.contains("safe.directory=/workspace/repo"));
+        assert!(command.contains("push origin HEAD:mai-agent/test"));
     }
 
     fn test_context() -> ToolContext {

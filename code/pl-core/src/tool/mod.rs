@@ -46,10 +46,11 @@ pub use file::{
 };
 pub use git::{
     ExecutionBackend, ExecutionOutput, ExecutionRequest, GIT_TOKEN_ENV, GitCredential,
-    GitCredentialOperation, GitCredentialProvider, GitCredentialRequest, GitPolicy, GitTool,
-    GitToolKind, GitWorkspaceConfig, LocalExecutionBackend, NoGitCredentialProvider,
-    TOOL_GIT_BRANCH, TOOL_GIT_COMMIT, TOOL_GIT_DIFF, TOOL_GIT_FETCH, TOOL_GIT_PUSH,
-    TOOL_GIT_STATUS, TOOL_GIT_SYNC_DEFAULT_BRANCH, TOOL_GIT_WORKSPACE_INFO,
+    GitCredentialOperation, GitCredentialProvider, GitCredentialRequest, GitPolicy,
+    GitShellCommandRequest, GitShellCredential, GitTool, GitToolKind, GitWorkspaceConfig,
+    LocalExecutionBackend, NoGitCredentialProvider, TOOL_GIT_BRANCH, TOOL_GIT_COMMIT,
+    TOOL_GIT_DIFF, TOOL_GIT_FETCH, TOOL_GIT_PUSH, TOOL_GIT_STATUS, TOOL_GIT_SYNC_DEFAULT_BRANCH,
+    TOOL_GIT_WORKSPACE_INFO, git_shell_command,
 };
 pub use lsp::{LspLanguageTool, LspQueryTool, lsp_tool_for_language};
 pub use mcp_resource::{
