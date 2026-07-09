@@ -74,7 +74,7 @@ impl AgentToolRuntime {
             call_id,
             message,
             mode: context.mode,
-            budget: TurnBudget::child_default(),
+            budget: TurnBudget::default(),
             initial_session,
         }
     }

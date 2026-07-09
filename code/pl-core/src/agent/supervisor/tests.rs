@@ -58,7 +58,7 @@ fn test_run_spec(message: &str) -> AgentRunSpec {
         call_id: "call-1".to_string(),
         message: message.to_string(),
         mode: CompileMode::Auto,
-        budget: TurnBudget::child_default(),
+        budget: TurnBudget::default(),
         initial_session: crate::CoreSession::new(),
     }
 }
