@@ -146,6 +146,7 @@ mod approval;
 mod configuration;
 mod default_tools;
 mod errors;
+mod hosted_agent;
 mod progress_emitter;
 mod run_turn;
 mod subagent;

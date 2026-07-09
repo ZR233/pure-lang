@@ -30,6 +30,7 @@ use crate::turn::{
     ToolApprovalDecision, ToolApprovalRequest, TurnOptions, TurnRequest, TurnResult,
 };
 
+mod hosted_agent;
 mod kernel;
 mod model_turn;
 mod permission;
@@ -40,6 +41,10 @@ mod tool_set;
 mod turn_loop;
 mod turn_result;
 
+pub use hosted_agent::{
+    HostedAgentRunError, HostedAgentRunner, HostedAgentRuntime, HostedProductToolRegistrar,
+    HostedTurnCompletion, HostedTurnPreparation, HostedTurnRequest,
+};
 pub use kernel::{
     AgentKernel, AgentKernelBuilder, AgentKernelToolRequest, AgentKernelToolSet, CoreAgentProfile,
     NoAgentKernelToolSet,
@@ -47,7 +52,8 @@ pub use kernel::{
 pub use model_turn::{
     CoreModelContinuationConfig, CoreModelContinuationProfile, CoreModelProviderFamily,
     CoreModelTurnClient, CoreModelTurnOptions, CoreModelTurnRequest, CoreModelWireApi,
-    stream_session_completion_message_text, stream_session_completion_response,
+    stream_history_completion_message_text, stream_session_completion_message_text,
+    stream_session_completion_response,
 };
 pub use profile::{
     AgentBackendProfile, CoreRuntimeOptions, CoreRuntimeProfile, PureCoreBuilder, ToolProfile,

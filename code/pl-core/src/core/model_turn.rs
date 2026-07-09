@@ -5,7 +5,7 @@ use pl_model::{
     CompletionRequest, CompletionResponse, ModelProvider, ReasoningConfig, SharedModelProvider,
     ToolSchema, is_continuation_unsupported_error,
 };
-use pl_protocol::{PureError, Result};
+use pl_protocol::{Message, PureError, Result};
 use pl_trace::AgentEventSender;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -261,6 +261,16 @@ pub async fn stream_session_completion_message_text(
 ) -> Result<String> {
     let response = stream_session_completion_response(provider, session, request, options).await?;
     Ok(completion_response_message_text(&response))
+}
+
+pub async fn stream_history_completion_message_text(
+    provider: SharedModelProvider,
+    history: Vec<Message>,
+    request: CoreModelTurnRequest,
+    options: CoreModelTurnOptions,
+) -> Result<String> {
+    let mut session = CoreSession::from_messages(history);
+    stream_session_completion_message_text(provider, &mut session, request, options).await
 }
 
 fn completion_request(
