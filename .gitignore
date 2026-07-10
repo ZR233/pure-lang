@@ -21,6 +21,7 @@ Thumbs.db
 
 # Brainstorming companion
 /.superpowers
+/.worktrees
 
 # Environment
 .env
