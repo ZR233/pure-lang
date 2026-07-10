@@ -123,6 +123,7 @@ void registerShellSettingsTests() {
     expect(find.byTooltip('Reasoning effort'), findsOneWidget);
     expect(find.byType(StatusBarItem), findsWidgets);
     expect(find.bySemanticsLabel('Context'), findsOneWidget);
+    expect(find.text('42%'), findsOneWidget);
     expect(find.text('42/100'), findsNothing);
     expect(find.text('CNY 0.16'), findsOneWidget);
     expect(find.text('1 skill · 1 MCP · 1 LSP · 2 agents'), findsOneWidget);
@@ -140,6 +141,12 @@ void registerShellSettingsTests() {
     await gesture.moveTo(Offset.zero);
     await tester.pumpAndSettle();
     await gesture.removePointer();
+
+    await tester.tap(find.text('CNY 0.16'));
+    await tester.pumpAndSettle();
+    expect(find.text('2 agents'), findsNothing);
+    await tester.tapAt(Offset.zero);
+    await tester.pumpAndSettle();
 
     final activityFinder = find.text('1 skill · 1 MCP · 1 LSP · 2 agents');
     final activityCenter = tester.getCenter(activityFinder);
@@ -228,7 +235,34 @@ void registerShellSettingsTests() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final api = _FakeStudioApi(_stateWithPlannerModels());
+    final api = _FakeStudioApi(
+      _stateWithPlannerModels().copyWith(
+        runtime: const SessionRuntimeView(
+          model: 'planner/local',
+          contextTokens: 42000,
+          contextWindow: 100000,
+          totalTokens: 128000,
+          costLabel: 'CNY 12.34',
+          activeSkills: ['flutter-ui'],
+          activeMcpServers: ['dart'],
+          activeLspServers: ['rust-analyzer'],
+          agentCount: 1,
+        ),
+        agentsBySession: {
+          'session-1': {
+            'agent-reviewer': StudioAgentView(
+              id: 'agent-reviewer',
+              sessionId: 'session-1',
+              path: 'root/reviewer',
+              role: 'reviewer',
+              task: 'Audit compact status layout',
+              status: 'running',
+              updatedAt: DateTime.fromMillisecondsSinceEpoch(1),
+            ),
+          },
+        },
+      ),
+    );
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],

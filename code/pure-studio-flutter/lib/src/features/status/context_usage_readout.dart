@@ -7,16 +7,16 @@ import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import 'status_detail_popover.dart';
 
-class ContextUsageRing extends StatefulWidget {
-  const ContextUsageRing({required this.runtime, super.key});
+class ContextUsageReadout extends StatefulWidget {
+  const ContextUsageReadout({required this.runtime, super.key});
 
   final SessionRuntimeView runtime;
 
   @override
-  State<ContextUsageRing> createState() => _ContextUsageRingState();
+  State<ContextUsageReadout> createState() => _ContextUsageReadoutState();
 }
 
-class _ContextUsageRingState extends State<ContextUsageRing> {
+class _ContextUsageReadoutState extends State<ContextUsageReadout> {
   bool _hovering = false;
 
   @override
@@ -25,6 +25,7 @@ class _ContextUsageRingState extends State<ContextUsageRing> {
     final progress = runtime.contextWindow <= 0
         ? 0.0
         : (runtime.contextTokens / runtime.contextWindow).clamp(0.0, 1.0);
+    final percent = (progress * 100).round();
     return StatusDetailPopover(
       width: 314,
       detailBuilder: (context) => _ContextDetail(
@@ -39,23 +40,25 @@ class _ContextUsageRingState extends State<ContextUsageRing> {
           onExit: (_) => setState(() => _hovering = false),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
-            height: 28,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            height: 26,
+            padding: const EdgeInsets.symmetric(horizontal: 7),
             decoration: BoxDecoration(
-              color: _hovering ? context.studioPaper : Colors.transparent,
-              borderRadius: BorderRadius.circular(StudioRadii.sm),
+              color: _hovering
+                  ? context.studioPaper.withValues(alpha: 0.76)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(StudioRadii.xs),
             ),
             child: Semantics(
               label: context.l10n.statusContextLabel,
-              value: '${(progress * 100).round()}%',
-              child: SizedBox.square(
-                dimension: 18,
-                child: CustomPaint(
-                  painter: _ContextUsagePainter(
-                    progress: progress,
-                    trackColor: context.studioLine,
-                    progressColor: _progressColor(progress),
-                  ),
+              value: '$percent%',
+              excludeSemantics: true,
+              child: Text(
+                '$percent%',
+                maxLines: 1,
+                style: context.text.labelSmall?.copyWith(
+                  color: _progressColor(progress),
+                  fontWeight: FontWeight.w600,
+                  height: 1,
                 ),
               ),
             ),

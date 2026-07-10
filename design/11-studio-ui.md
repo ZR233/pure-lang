@@ -143,7 +143,7 @@ Flutter 状态栏保留模式切换、planner 模型选择、reasoning effort、
 
 Flutter `SessionStatusBar` 展示同一组信息，并使用 Material 3 的 compact controls、tooltip 和 hover/focus 可达的弹层承载详情。Flutter 状态栏只消费 Riverpod selector，不直接订阅 bridge stream 或解析 raw JSON。
 
-Flutter context readout 对齐 Codex 桌面 app 的圆形用量 ring：状态栏中只显示无数字圆形进度，不直接显示 `contextTokens/contextWindow`；hover/focus 详情中展示上下文数字、百分比、总 token 和模型。费用、active skills、MCP、LSP 与 subagent 活动必须继续作为独立状态 chip/readout 展示，不能合并进 context tooltip 后从状态栏消失。
+Flutter context readout 使用紧凑百分比文字，不直接显示 `contextTokens/contextWindow`；hover/focus 详情中可以使用圆形进度并展示上下文数字、百分比、总 token 和模型。费用继续作为独立文字 readout；active skills、MCP、LSP 与 subagent 统一进入一个活动摘要和分区弹层，不能合并进 context 或费用详情，也不能在其他状态弹层重复展示 agent 数量。
 
 状态栏、interaction dock、timeline 工具/计划/提问摘要中的 UI 文案必须走 i18n；模型名称、provider 名称、模型 slug、tool 名称、agent 路径、reasoning effort 等来自配置或运行时的领域值按原始字符串透传展示，不做翻译或本地化映射。这样 zh-CN/en 只负责固定 UI 标签与状态说明，不改变用户配置、provider 返回值或协议枚举的可辨识性。
 
