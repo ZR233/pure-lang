@@ -14,6 +14,7 @@ import 'package:pure_studio_flutter/src/data/repositories/studio_repository.dart
 import 'package:pure_studio_flutter/src/domain/models/studio_models.dart';
 import 'package:pure_studio_flutter/src/features/settings/settings_page.dart';
 import 'package:pure_studio_flutter/src/features/shell/studio_shell.dart';
+import 'package:pure_studio_flutter/src/features/status/status_bar_item.dart';
 import 'package:pure_studio_flutter/src/features/timeline/markdown_repair.dart';
 import 'package:pure_studio_flutter/src/features/timeline/timeline_view.dart';
 import 'package:pure_studio_flutter/src/l10n/app_localizations.dart';

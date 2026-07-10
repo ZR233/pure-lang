@@ -121,11 +121,13 @@ void registerShellSettingsTests() {
     expect(find.byTooltip('Session mode'), findsOneWidget);
     expect(find.byTooltip('Planner model'), findsOneWidget);
     expect(find.byTooltip('Reasoning effort'), findsOneWidget);
+    expect(find.byType(StatusBarItem), findsWidgets);
     expect(find.bySemanticsLabel('Context'), findsOneWidget);
     expect(find.text('42/100'), findsNothing);
     expect(find.text('CNY 0.16'), findsOneWidget);
-    expect(find.text('1 skill · 1 MCP · 1 LSP'), findsOneWidget);
-    expect(find.text('2 agents · 1 running'), findsOneWidget);
+    expect(find.text('1 skill · 1 MCP · 1 LSP · 2 agents'), findsOneWidget);
+    expect(find.text('1 skill · 1 MCP · 1 LSP'), findsNothing);
+    expect(find.text('2 agents · 1 running'), findsNothing);
 
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     addTearDown(gesture.removePointer);
@@ -139,10 +141,15 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
     await gesture.removePointer();
 
-    final agentsCenter = tester.getCenter(find.text('2 agents · 1 running'));
-    final agentsRect = tester.getRect(find.text('2 agents · 1 running'));
-    await tester.tapAt(Offset(agentsRect.left + 8, agentsCenter.dy));
+    final activityFinder = find.text('1 skill · 1 MCP · 1 LSP · 2 agents');
+    final activityCenter = tester.getCenter(activityFinder);
+    final activityRect = tester.getRect(activityFinder);
+    await tester.tapAt(Offset(activityRect.left + 8, activityCenter.dy));
     await tester.pumpAndSettle();
+    expect(find.text('ACTIVE CAPABILITIES'), findsOneWidget);
+    expect(find.textContaining('Skills · flutter-ui'), findsOneWidget);
+    expect(find.textContaining('MCP · dart'), findsOneWidget);
+    expect(find.textContaining('LSP · rust-analyzer'), findsOneWidget);
     expect(find.text('SUBAGENTS'), findsOneWidget);
     expect(find.text('reviewer'), findsOneWidget);
     expect(find.text('worker'), findsOneWidget);
@@ -151,19 +158,6 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
     expect(find.textContaining('Checking status projection'), findsOneWidget);
     await tester.tapAt(Offset.zero);
-    await tester.pumpAndSettle();
-
-    final capabilityCenter = tester.getCenter(
-      find.text('1 skill · 1 MCP · 1 LSP'),
-    );
-    final capabilityRect = tester.getRect(find.text('1 skill · 1 MCP · 1 LSP'));
-    await tester.tapAt(Offset(capabilityRect.left + 8, capabilityCenter.dy));
-    await tester.pumpAndSettle();
-    expect(find.text('ACTIVE CAPABILITIES'), findsOneWidget);
-    expect(find.textContaining('Skills · flutter-ui'), findsOneWidget);
-    expect(find.textContaining('MCP · dart'), findsOneWidget);
-    expect(find.textContaining('LSP · rust-analyzer'), findsOneWidget);
-    await tester.tapAt(Offset(capabilityRect.left + 8, capabilityCenter.dy));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('Session mode'));
@@ -204,6 +198,50 @@ void registerShellSettingsTests() {
     expect(api.roleUpdate?.providerId, 'deepseek');
     expect(api.roleUpdate?.model, 'deepseek-reasoner');
     expect(api.roleUpdate?.effort, 'max');
+  });
+
+  testWidgets('header does not duplicate the running phase', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(
+      _stateWithPlannerModels().copyWith(turnPhase: TurnPhase.streaming),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text(TurnPhase.streaming.name), findsOneWidget);
+  });
+
+  testWidgets('dense shell uses a compact rail without overflow', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(760, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_stateWithPlannerModels());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.getSize(find.byKey(const ValueKey('studio-sidebar'))).width,
+      StudioLayout.compactRailWidth,
+    );
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('zh Hans localizes session and permission mode labels', (

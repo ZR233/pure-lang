@@ -5,8 +5,8 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/studio_tokens.dart';
 
-class StatusBarChip extends StatefulWidget {
-  const StatusBarChip({
+class StatusBarItem extends StatefulWidget {
+  const StatusBarItem({
     required this.label,
     this.icon,
     this.trailingIcon,
@@ -32,15 +32,16 @@ class StatusBarChip extends StatefulWidget {
   final double maxWidth;
 
   @override
-  State<StatusBarChip> createState() => _StatusBarChipState();
+  State<StatusBarItem> createState() => _StatusBarItemState();
 }
 
-class _StatusBarChipState extends State<StatusBarChip> {
+class _StatusBarItemState extends State<StatusBarItem> {
   final GlobalKey _targetKey = GlobalKey();
   final Object _tapRegionGroup = Object();
   OverlayEntry? _entry;
   Timer? _hideTimer;
   bool _hovering = false;
+  bool _focused = false;
 
   @override
   void dispose() {
@@ -111,26 +112,31 @@ class _StatusBarChipState extends State<StatusBarChip> {
         ],
       );
     }
+    final highlighted = (_hovering || _focused) && widget.enabled;
     final content = AnimatedContainer(
       key: _targetKey,
       duration: const Duration(milliseconds: 120),
-      height: 28,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
+      height: 26,
+      padding: const EdgeInsets.symmetric(horizontal: 7),
       decoration: BoxDecoration(
-        color: _hovering && widget.enabled
-            ? context.studioPaper
+        color: highlighted
+            ? context.studioPaper.withValues(alpha: 0.76)
             : Colors.transparent,
-        borderRadius: BorderRadius.circular(StudioRadii.sm),
+        borderRadius: BorderRadius.circular(StudioRadii.xs),
       ),
       child: row,
     );
-    var interactive = widget.enableHover
+    final hoverable = widget.enableHover
         ? MouseRegion(
             onEnter: (_) => setState(() => _hovering = true),
             onExit: (_) => setState(() => _hovering = false),
             child: content,
           )
         : content;
+    final interactive = Focus(
+      onFocusChange: _handleFocusChange,
+      child: hoverable,
+    );
     final chip = Padding(
       padding: const EdgeInsets.only(right: 2),
       child: interactive,
@@ -150,6 +156,15 @@ class _StatusBarChipState extends State<StatusBarChip> {
       _showDetail();
     } else {
       _hideDetail();
+    }
+  }
+
+  void _handleFocusChange(bool focused) {
+    setState(() => _focused = focused);
+    if (focused && widget.detailBuilder != null) {
+      _showDetail();
+    } else if (!focused) {
+      _scheduleHideDetail();
     }
   }
 
@@ -233,7 +248,7 @@ class _StatusBarChipState extends State<StatusBarChip> {
         decoration: BoxDecoration(
           color: theme.colorScheme.surfaceContainerLowest,
           border: Border.all(color: theme.colorScheme.outlineVariant),
-          borderRadius: BorderRadius.circular(11),
+          borderRadius: BorderRadius.circular(StudioRadii.md),
           boxShadow: StudioShadows.lifted(theme.colorScheme.shadow),
         ),
         child: Padding(
