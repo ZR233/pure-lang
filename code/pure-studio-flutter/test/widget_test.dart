@@ -31,6 +31,7 @@ part 'widget_test/markdown_render_tests.dart';
 part 'widget_test/timeline_tool_tests.dart';
 part 'widget_test/timeline_scroll_tests.dart';
 part 'widget_test/visual_foundation_tests.dart';
+part 'widget_test/responsive_layout_tests.dart';
 part 'widget_test/shell_settings_tests.dart';
 part 'widget_test/interaction_tests.dart';
 part 'widget_test/skills_tests.dart';
@@ -52,6 +53,7 @@ void main() {
   registerTimelineToolTests();
   registerTimelineScrollTests();
   registerVisualFoundationTests();
+  registerResponsiveLayoutTests();
   registerShellSettingsTests();
   registerInteractionTests();
   registerSkillsTests();
