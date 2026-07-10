@@ -197,9 +197,13 @@ String _modelPriceLabel(ProviderModelView model) {
 }
 
 String _trimNumber(double value) {
+  if (value.truncateToDouble() == value) {
+    return value.toStringAsFixed(0);
+  }
   return value
-      .toStringAsFixed(value.truncateToDouble() == value ? 0 : 3)
-      .replaceFirst(RegExp(r'\.?0+$'), '');
+      .toStringAsFixed(3)
+      .replaceFirst(RegExp(r'0+$'), '')
+      .replaceFirst(RegExp(r'\.$'), '');
 }
 
 bool _providerSupportsUsage(ProviderSettingsView provider) {
