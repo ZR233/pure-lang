@@ -276,6 +276,7 @@
   "settingsDefaultProvider": "Default provider",
   "settingsSetAsDefaultProvider": "Set as default",
   "settingsOpenDetails": "Open details",
+  "settingsProviderActions": "Provider actions",
   "settingsEditProvider": "Edit provider",
   "settingsDeleteProvider": "Delete provider",
   "settingsNoProviderSelected": "No provider selected",

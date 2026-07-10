@@ -996,6 +996,12 @@ abstract class AppLocalizations {
   /// **'Open details'**
   String get settingsOpenDetails;
 
+  /// No description provided for @settingsProviderActions.
+  ///
+  /// In en, this message translates to:
+  /// **'Provider actions'**
+  String get settingsProviderActions;
+
   /// No description provided for @settingsEditProvider.
   ///
   /// In en, this message translates to:

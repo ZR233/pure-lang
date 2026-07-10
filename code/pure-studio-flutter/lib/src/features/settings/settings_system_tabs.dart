@@ -24,44 +24,32 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
           subtitle: context.l10n.settingsRolesSubtitle,
         ),
         const SizedBox(height: 16),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final twoColumns = constraints.maxWidth >= 760;
-            return Wrap(
-              spacing: 14,
-              runSpacing: 14,
-              children: [
-                for (final role in roles)
-                  SizedBox(
-                    width: twoColumns
-                        ? (constraints.maxWidth - 14) / 2
-                        : constraints.maxWidth,
-                    child: _RoleSettingsCard(
-                      role: role,
-                      selectedValue: _selectedRoleModelKey(role, options),
-                      options: options,
-                      onChanged: (value) {
-                        if (value == null) {
-                          return;
-                        }
-                        setState(() => _selectionByRole[role] = value);
-                        final option = options.firstWhere(
-                          (option) => option.key == value,
-                        );
-                        ref
-                            .read(studioControllerProvider.notifier)
-                            .setModelRole(
-                              roleKey: role,
-                              providerId: option.providerId,
-                              model: option.model,
-                              effort: option.effort,
-                            );
-                      },
-                    ),
-                  ),
-              ],
-            );
-          },
+        _SettingsGroup(
+          children: [
+            for (final role in roles)
+              _RoleSettingsRow(
+                role: role,
+                selectedValue: _selectedRoleModelKey(role, options),
+                options: options,
+                onChanged: (value) {
+                  if (value == null) {
+                    return;
+                  }
+                  setState(() => _selectionByRole[role] = value);
+                  final option = options.firstWhere(
+                    (option) => option.key == value,
+                  );
+                  ref
+                      .read(studioControllerProvider.notifier)
+                      .setModelRole(
+                        roleKey: role,
+                        providerId: option.providerId,
+                        model: option.model,
+                        effort: option.effort,
+                      );
+                },
+              ),
+          ],
         ),
       ],
     );
@@ -121,8 +109,8 @@ class _RolesTabState extends ConsumerState<_RolesTab> {
   }
 }
 
-class _RoleSettingsCard extends StatelessWidget {
-  const _RoleSettingsCard({
+class _RoleSettingsRow extends StatelessWidget {
+  const _RoleSettingsRow({
     required this.role,
     required this.selectedValue,
     required this.options,
@@ -136,52 +124,80 @@ class _RoleSettingsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _SectionPanel(
-      title: role,
+    final title = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Text(
+          role,
+          style: context.text.bodyMedium?.copyWith(
+            color: context.studioInk,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 2),
         Text(
           _roleDescription(context, role),
           style: context.text.bodySmall?.copyWith(color: context.studioInkSoft),
         ),
-        const SizedBox(height: 10),
-        DropdownButtonFormField<String>(
-          initialValue: selectedValue,
-          isExpanded: true,
-          decoration: InputDecoration(
-            labelText: context.l10n.settingsModelField,
-          ),
-          selectedItemBuilder: (context) {
-            final entries = options.isEmpty
-                ? const [_RoleModelOption.defaultOption()]
-                : options;
-            return [
-              for (final option in entries)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    option.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-            ];
-          },
-          items: [
-            if (options.isEmpty)
-              const DropdownMenuItem(
-                value: 'default::default',
-                child: Text('default'),
-              )
-            else
-              for (final option in options)
-                DropdownMenuItem(
-                  value: option.key,
-                  child: Text(option.label, overflow: TextOverflow.ellipsis),
-                ),
-          ],
-          onChanged: onChanged,
-        ),
       ],
+    );
+    final selector = DropdownButtonFormField<String>(
+      initialValue: selectedValue,
+      isExpanded: true,
+      decoration: InputDecoration(
+        labelText: context.l10n.settingsModelField,
+        isDense: true,
+      ),
+      selectedItemBuilder: (context) {
+        final entries = options.isEmpty
+            ? const [_RoleModelOption.defaultOption()]
+            : options;
+        return [
+          for (final option in entries)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                option.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+        ];
+      },
+      items: [
+        if (options.isEmpty)
+          const DropdownMenuItem(
+            value: 'default::default',
+            child: Text('default'),
+          )
+        else
+          for (final option in options)
+            DropdownMenuItem(
+              value: option.key,
+              child: Text(option.label, overflow: TextOverflow.ellipsis),
+            ),
+      ],
+      onChanged: onChanged,
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 620) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [title, const SizedBox(height: 10), selector],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: title),
+              const SizedBox(width: 20),
+              SizedBox(width: 380, child: selector),
+            ],
+          );
+        },
+      ),
     );
   }
 }
@@ -248,54 +264,25 @@ class _McpTabState extends ConsumerState<_McpTab> {
           subtitle: context.l10n.settingsMcpSubtitle,
         ),
         const SizedBox(height: 16),
-        for (final server in widget.servers)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _SectionPanel(
-              title: server.id,
-              trailing: Switch(
-                value: _enabledByServer[server.id] ?? server.enabled,
-                onChanged: (value) {
-                  setState(() {
-                    _enabledByServer[server.id] = value;
-                  });
-                  unawaited(_save());
-                },
-              ),
-              children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _InfoPill(
-                      icon: Icons.hub_outlined,
-                      label: server.transport,
-                    ),
-                    _InfoPill(
-                      icon: Icons.circle_outlined,
-                      label: server.status,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                TextFormField(
-                  key: ValueKey(
-                    '${server.id}:${server.endpoint}:${server.mutationPolicy}',
-                  ),
-                  initialValue: server.endpoint,
-                  readOnly: server.hasLockedIdentity,
-                  decoration: InputDecoration(
-                    labelText: context.l10n.settingsEndpoint,
-                  ),
-                  onChanged: server.hasLockedIdentity
+        if (widget.servers.isNotEmpty)
+          _SettingsGroup(
+            children: [
+              for (final server in widget.servers)
+                _McpSettingsRow(
+                  server: server,
+                  enabled: _enabledByServer[server.id] ?? server.enabled,
+                  onEnabledChanged: (value) {
+                    setState(() => _enabledByServer[server.id] = value);
+                    unawaited(_save());
+                  },
+                  onEndpointChanged: server.hasLockedIdentity
                       ? null
                       : (value) => setState(() {
                           _endpointByServer[server.id] = value;
                           _scheduleSave();
                         }),
                 ),
-              ],
-            ),
+            ],
           ),
         if (_error != null) _InlineError(message: _error!),
       ],
@@ -333,6 +320,69 @@ class _McpTabState extends ConsumerState<_McpTab> {
   }
 }
 
+class _McpSettingsRow extends StatelessWidget {
+  const _McpSettingsRow({
+    required this.server,
+    required this.enabled,
+    required this.onEnabledChanged,
+    required this.onEndpointChanged,
+  });
+
+  final McpServerSettingsView server;
+  final bool enabled;
+  final ValueChanged<bool> onEnabledChanged;
+  final ValueChanged<String>? onEndpointChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  server.id,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.text.bodyMedium?.copyWith(
+                    color: context.studioInk,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Switch(value: enabled, onChanged: onEnabledChanged),
+            ],
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              _InfoPill(icon: Icons.hub_outlined, label: server.transport),
+              _InfoPill(icon: Icons.circle_outlined, label: server.status),
+            ],
+          ),
+          const SizedBox(height: 9),
+          TextFormField(
+            key: ValueKey(
+              '${server.id}:${server.endpoint}:${server.mutationPolicy}',
+            ),
+            initialValue: server.endpoint,
+            readOnly: server.hasLockedIdentity,
+            decoration: InputDecoration(
+              labelText: context.l10n.settingsEndpoint,
+              isDense: true,
+            ),
+            onChanged: onEndpointChanged,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _SecurityTab extends ConsumerWidget {
   const _SecurityTab({required this.mode});
 
@@ -348,45 +398,69 @@ class _SecurityTab extends ConsumerWidget {
           subtitle: context.l10n.settingsSecurityModeSubtitle,
         ),
         const SizedBox(height: 16),
-        SegmentedButton<PermissionMode>(
-          showSelectedIcon: false,
-          segments: [
-            ButtonSegment(
-              value: PermissionMode.requestApproval,
-              icon: const Icon(Icons.verified_user_outlined),
-              label: Text(
-                context.permissionModeLabel(PermissionMode.requestApproval),
-              ),
-            ),
-            ButtonSegment(
-              value: PermissionMode.autoReview,
-              icon: const Icon(Icons.rule_folder_outlined),
-              label: Text(
-                context.permissionModeLabel(PermissionMode.autoReview),
-              ),
-            ),
-            ButtonSegment(
-              value: PermissionMode.fullAccess,
-              icon: const Icon(Icons.lock_open_outlined),
-              label: Text(
-                context.permissionModeLabel(PermissionMode.fullAccess),
+        _SettingsGroup(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SegmentedButton<PermissionMode>(
+                        direction: constraints.maxWidth < 520
+                            ? Axis.vertical
+                            : Axis.horizontal,
+                        showSelectedIcon: false,
+                        segments: [
+                          ButtonSegment(
+                            value: PermissionMode.requestApproval,
+                            icon: const Icon(Icons.verified_user_outlined),
+                            label: Text(
+                              context.permissionModeLabel(
+                                PermissionMode.requestApproval,
+                              ),
+                            ),
+                          ),
+                          ButtonSegment(
+                            value: PermissionMode.autoReview,
+                            icon: const Icon(Icons.rule_folder_outlined),
+                            label: Text(
+                              context.permissionModeLabel(
+                                PermissionMode.autoReview,
+                              ),
+                            ),
+                          ),
+                          ButtonSegment(
+                            value: PermissionMode.fullAccess,
+                            icon: const Icon(Icons.lock_open_outlined),
+                            label: Text(
+                              context.permissionModeLabel(
+                                PermissionMode.fullAccess,
+                              ),
+                            ),
+                          ),
+                        ],
+                        selected: {mode},
+                        onSelectionChanged: (selection) {
+                          ref
+                              .read(studioControllerProvider.notifier)
+                              .setPermissionMode(selection.first);
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        context.l10n.settingsWorkspaceBoundary,
+                        style: context.text.bodySmall?.copyWith(
+                          color: context.studioInkSoft,
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
           ],
-          selected: {mode},
-          onSelectionChanged: (selection) {
-            ref
-                .read(studioControllerProvider.notifier)
-                .setPermissionMode(selection.first);
-          },
-        ),
-        const SizedBox(height: 12),
-        _SettingsRow(
-          icon: Icons.security_outlined,
-          title: context.l10n.settingsCurrentMode(
-            context.permissionModeLabel(mode),
-          ),
-          subtitle: context.l10n.settingsWorkspaceBoundary,
         ),
       ],
     );
@@ -414,31 +488,33 @@ class _GeneralTabState extends ConsumerState<_GeneralTab> {
           subtitle: context.l10n.settingsGeneralSubtitle,
         ),
         const SizedBox(height: 16),
-        _SettingsToggleRow(
-          icon: Icons.dark_mode_outlined,
-          title: context.l10n.settingsFollowSystemTheme,
-          subtitle: context.l10n.settingsFollowSystemThemeSubtitle,
-          value: widget.settings.followSystemTheme,
-          onChanged: (value) =>
-              _save(widget.settings.copyWith(followSystemTheme: value)),
-        ),
-        const SizedBox(height: 10),
-        _SettingsToggleRow(
-          icon: Icons.vertical_align_bottom,
-          title: context.l10n.settingsFollowActiveTurn,
-          subtitle: context.l10n.settingsFollowActiveTurnSubtitle,
-          value: widget.settings.followActiveTurn,
-          onChanged: (value) =>
-              _save(widget.settings.copyWith(followActiveTurn: value)),
-        ),
-        const SizedBox(height: 10),
-        _SettingsToggleRow(
-          icon: Icons.view_agenda_outlined,
-          title: context.l10n.settingsCompactTimeline,
-          subtitle: context.l10n.settingsCompactTimelineSubtitle,
-          value: widget.settings.compactTimeline,
-          onChanged: (value) =>
-              _save(widget.settings.copyWith(compactTimeline: value)),
+        _SettingsGroup(
+          children: [
+            _SettingsToggleRow(
+              icon: Icons.dark_mode_outlined,
+              title: context.l10n.settingsFollowSystemTheme,
+              subtitle: context.l10n.settingsFollowSystemThemeSubtitle,
+              value: widget.settings.followSystemTheme,
+              onChanged: (value) =>
+                  _save(widget.settings.copyWith(followSystemTheme: value)),
+            ),
+            _SettingsToggleRow(
+              icon: Icons.vertical_align_bottom,
+              title: context.l10n.settingsFollowActiveTurn,
+              subtitle: context.l10n.settingsFollowActiveTurnSubtitle,
+              value: widget.settings.followActiveTurn,
+              onChanged: (value) =>
+                  _save(widget.settings.copyWith(followActiveTurn: value)),
+            ),
+            _SettingsToggleRow(
+              icon: Icons.view_agenda_outlined,
+              title: context.l10n.settingsCompactTimeline,
+              subtitle: context.l10n.settingsCompactTimelineSubtitle,
+              value: widget.settings.compactTimeline,
+              onChanged: (value) =>
+                  _save(widget.settings.copyWith(compactTimeline: value)),
+            ),
+          ],
         ),
         if (_error != null) _InlineError(message: _error!),
       ],

@@ -19,6 +19,7 @@ import 'package:pure_studio_flutter/src/features/timeline/markdown_repair.dart';
 import 'package:pure_studio_flutter/src/features/timeline/timeline_view.dart';
 import 'package:pure_studio_flutter/src/l10n/app_localizations.dart';
 import 'package:pure_studio_flutter/src/rust/api/studio.dart' as frb;
+import 'package:pure_studio_flutter/src/shared/studio_chrome.dart';
 
 part 'widget_test/controller_stream_tests.dart';
 part 'widget_test/reducer_recovery_tests.dart';
