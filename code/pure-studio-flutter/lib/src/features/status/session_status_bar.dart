@@ -7,7 +7,7 @@ import '../../app/theme/studio_tokens.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/upward_popup_menu.dart';
 import 'agent_detail_panel.dart';
-import 'context_usage_ring.dart';
+import 'context_usage_readout.dart';
 import 'status_bar_item.dart';
 import 'status_detail_popover.dart';
 
@@ -59,7 +59,7 @@ class SessionStatusBar extends ConsumerWidget {
                             _PlannerModelSelector(state: state),
                           if (_plannerEffortsForState(state).isNotEmpty)
                             _ReasoningEffortSelector(state: state),
-                          ContextUsageRing(runtime: runtime),
+                          ContextUsageReadout(runtime: runtime),
                           if (runtime.costLabel.isNotEmpty)
                             _StatusReadout(
                               label: runtime.costLabel,
@@ -402,11 +402,6 @@ class _CostDetail extends StatelessWidget {
           label: context.l10n.statusTotalTokensLabel,
           value: _formatStatusCount(runtime.totalTokens),
         ),
-        if (runtime.agentCount > 0)
-          StatusDetailRow(
-            label: context.l10n.statusSubagentsSection,
-            value: context.l10n.statusAgentsCount(runtime.agentCount),
-          ),
       ],
     );
   }
