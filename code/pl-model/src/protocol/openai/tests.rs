@@ -4,7 +4,7 @@ use pl_protocol::{ContentPart, ImageSource, Message, MessageContent, MessageRole
 use pretty_assertions::assert_eq;
 
 use super::*;
-use crate::model_info::MaxTokensField;
+use crate::model_info::{MaxTokensField, ResponsesMaxTokensField};
 use crate::request::{ReasoningConfig, ReasoningSummary, ToolCall, ToolCallPayload, ToolSchema};
 
 fn text_message(role: MessageRole, content: &str) -> Message {
@@ -59,7 +59,7 @@ fn request_with_effort(effort: &str) -> CompletionRequest {
 }
 
 #[test]
-fn responses_use_top_level_instructions_and_chat_prepends_system_message() {
+fn responses_use_top_level_instructions_and_developer_messages() {
     let request = CompletionRequest {
         model: "gpt-5.5".to_string(),
         instructions: Some("base".to_string()),
@@ -92,7 +92,7 @@ fn responses_use_top_level_instructions_and_chat_prepends_system_message() {
             .iter()
             .map(|item| item["role"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        vec!["system", "user", "user"],
+        vec!["developer", "user", "user"],
     );
     assert_eq!(
         chat_body["messages"]
@@ -314,6 +314,61 @@ fn responses_body_writes_continuation_fields() {
     assert!(chat_body.get("store").is_none());
     assert!(chat_body.get("previous_response_id").is_none());
     assert!(chat_body.get("prompt_cache_key").is_none());
+}
+
+#[test]
+fn responses_body_omits_profiled_max_tokens_by_default() {
+    let mut request = request_with_effort("medium");
+    request.max_tokens = Some(8192);
+
+    let body = OpenAiProtocol::responses().build_request_body(&request);
+
+    assert!(body.get("max_output_tokens").is_none());
+    assert!(body.get("max_tokens").is_none());
+    assert!(body.get("max_completion_tokens").is_none());
+}
+
+#[test]
+fn responses_body_can_use_profiled_max_output_tokens_field() {
+    let mut model = ModelInfo::fallback("responses-like");
+    model.request_profile.responses_max_tokens_field = ResponsesMaxTokensField::MaxOutputTokens;
+    let mut request = request_with_effort("medium");
+    request.model = "responses-like".to_string();
+    request.max_tokens = Some(8192);
+
+    let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
+
+    assert_eq!(body["max_output_tokens"], serde_json::json!(8192));
+    assert!(body.get("max_tokens").is_none());
+    assert!(body.get("max_completion_tokens").is_none());
+}
+
+#[test]
+fn responses_body_can_use_profiled_compatible_max_tokens_fields() {
+    let mut request = request_with_effort("medium");
+    request.model = "responses-like".to_string();
+    request.max_tokens = Some(8192);
+
+    let mut max_tokens_model = ModelInfo::fallback("responses-like");
+    max_tokens_model.request_profile.responses_max_tokens_field =
+        ResponsesMaxTokensField::MaxTokens;
+    let max_tokens_body =
+        OpenAiProtocol::responses().build_request_body_with_model(&request, &max_tokens_model);
+
+    let mut max_completion_model = ModelInfo::fallback("responses-like");
+    max_completion_model
+        .request_profile
+        .responses_max_tokens_field = ResponsesMaxTokensField::MaxCompletionTokens;
+    let max_completion_body =
+        OpenAiProtocol::responses().build_request_body_with_model(&request, &max_completion_model);
+
+    assert_eq!(max_tokens_body["max_tokens"], serde_json::json!(8192));
+    assert!(max_tokens_body.get("max_output_tokens").is_none());
+    assert_eq!(
+        max_completion_body["max_completion_tokens"],
+        serde_json::json!(8192)
+    );
+    assert!(max_completion_body.get("max_output_tokens").is_none());
 }
 
 #[test]

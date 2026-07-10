@@ -3,7 +3,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 use super::OpenAiEndpoint;
-use crate::model_info::ModelInfo;
+use crate::model_info::{ModelInfo, ResponsesMaxTokensField};
 use crate::request::CompletionRequest;
 
 mod body;
@@ -37,6 +37,11 @@ pub(crate) fn build_openai_request_body(
     match endpoint {
         OpenAiEndpoint::Responses => {
             let mut body = to_object_map(&ResponsesRequestBody::from_request(request)?)?;
+            apply_responses_max_tokens_field(
+                &mut body,
+                request.max_tokens,
+                model.request_profile.responses_max_tokens_field,
+            );
             finalize_body(&mut body, model, &request.reasoning);
             Ok(OpenAiRequestBody::Responses(body))
         }
@@ -46,6 +51,23 @@ pub(crate) fn build_openai_request_body(
             Ok(OpenAiRequestBody::Chat(body))
         }
     }
+}
+
+fn apply_responses_max_tokens_field(
+    body: &mut Map<String, Value>,
+    max_tokens: Option<u64>,
+    field: ResponsesMaxTokensField,
+) {
+    let Some(max_tokens) = max_tokens else {
+        return;
+    };
+    let key = match field {
+        ResponsesMaxTokensField::Omit => return,
+        ResponsesMaxTokensField::MaxOutputTokens => "max_output_tokens",
+        ResponsesMaxTokensField::MaxTokens => "max_tokens",
+        ResponsesMaxTokensField::MaxCompletionTokens => "max_completion_tokens",
+    };
+    body.insert(key.to_string(), Value::from(max_tokens));
 }
 
 fn protocol_error(message: impl Into<String>) -> PureError {
