@@ -28,7 +28,7 @@ class StudioShell extends ConsumerWidget {
           Scaffold(body: Center(child: Text(error.toString()))),
       data: (state) => LayoutBuilder(
         builder: (context, constraints) {
-          final compact = constraints.maxWidth < 900;
+          final compact = constraints.maxWidth < StudioLayout.compactBreakpoint;
           return Scaffold(
             backgroundColor: context.studioPaper,
             body: Row(
