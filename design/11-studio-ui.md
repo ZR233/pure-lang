@@ -188,6 +188,12 @@ Flutter 主聊天界面视觉应靠拢 Codex 桌面版的工作台气质：中�
 
 Flutter shell 的二级视觉层级继续收敛：顶部 header 只展示当前会话标题、项目名和短路径，不放大图标或重复品牌；侧栏底部操作使用低饱和按钮，只有发送按钮保留明显主操作色；session row 用 mode 小图标和轻量选中底色表达状态。Composer 的底部控制行承载权限、附件/后续工具入口和发送/停止，输入区域保持单一视觉焦点，不再把状态栏和输入控件混成一排同等权重按钮。
 
+Studio 采用紧凑控制台密度，但紧凑不等于堆叠入口。面板圆角不得超过 `8px`，阴影只用于 Composer、interaction dock 和 popover；普通设置分组、timeline 结构化行与 Provider 列表使用单层边框，不在卡片中继续嵌套卡片。聊天阅读流、状态区和 Composer 共享同一内容宽度，侧栏与设置导航使用统一布局 token，窗口变窄时按可用宽度切换为 icon rail。
+
+状态栏使用无边框、无常驻底色的文字控件和读数。模式、Planner 模型与 reasoning effort 是可点击选择器，只在 hover/focus 时显示轻背景；context、费用、活动与 phase 是文字读数，通过 popover 展示详情。Skills、MCP、LSP 与 agent 只保留一个活动摘要入口，header 不再重复显示 phase 或 busy spinner。权限模式仍可在 Composer 快捷切换，Security 页提供完整配置说明，但不得再用第二张“当前模式”卡片重复同一状态。
+
+设置页保持 Providers、Instructions、Skills、Roles、MCP、Security、General 七个领域入口。普通设置使用单层 group + divider；重复实体才使用紧凑列表。Provider 列表整行进入详情，不再额外显示“打开”按钮，默认、刷新、编辑、删除统一进入 row overflow menu。列表只承载可扫描摘要，完整模型、凭据和工具明细留在详情页；Zhipu Coding Plan 例外地在列表中直接按 `fiveHour -> weekly -> mcpMonthly` 展示三条细进度，包括剩余比例和重置时间，缺失的 quota 不得伪造。
+
 Flutter 交互组件优先使用 Material 3 原生控件，按业务领域组织：shell 负责双栏、header、footer 与侧栏，status 负责状态栏 select/readout/popover，interaction 负责不同 pending interaction 的 dock，timeline 负责消息 part 与计划卡。`MaterialApp.router` 只负责路由和顶层主题组合，业务 wiring 由 Riverpod controller 与 feature widget 承担。
 
 视觉参考以 `output/design` 中的 Pure Studio chat 状态图为准：默认聊天、流式响应、计划确认、环境弹层、select 菜单与窄屏响应式。实现时必须保持低对比侧栏、居中阅读流、底部同宽状态栏与 dock、计划卡渐隐预览、以及窄屏 icon rail，不得新增常驻右侧环境信息栏。

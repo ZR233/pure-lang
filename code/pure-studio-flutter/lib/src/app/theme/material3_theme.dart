@@ -87,7 +87,7 @@ ThemeData pureStudioTheme(Brightness brightness) {
       margin: EdgeInsets.zero,
       color: scheme.surface,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(StudioRadii.sm),
+        borderRadius: BorderRadius.circular(StudioRadii.md),
         side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.78)),
       ),
     ),
