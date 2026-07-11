@@ -10,7 +10,7 @@ mod manager;
 #[cfg(test)]
 mod tests;
 
-pub use backend::{LocalWorktreeBackend, MergeOutcome, WorktreeBackend};
+pub use backend::{LocalWorktreeBackend, MergeOutcome, WorktreeBackend, WorktreeCreateFailure};
 pub use error::WorktreeError;
 pub(crate) use manager::git_compatible_path;
 pub use manager::{
