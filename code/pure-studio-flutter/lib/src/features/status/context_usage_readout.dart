@@ -52,13 +52,16 @@ class _ContextUsageReadoutState extends State<ContextUsageReadout> {
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(StudioRadii.xs),
             ),
-            child: Text(
-              '$percent%',
-              maxLines: 1,
-              style: context.text.labelSmall?.copyWith(
-                color: _progressColor(progress),
-                fontWeight: FontWeight.w600,
-                height: 1,
+            child: SizedBox.square(
+              dimension: 16,
+              child: CustomPaint(
+                painter: _ContextUsagePainter(
+                  progress: progress,
+                  trackColor: context.studioLine,
+                  progressColor: _progressColor(progress),
+                  strokeWidth: 2.2,
+                  radiusInset: 1.8,
+                ),
               ),
             ),
           ),

@@ -134,6 +134,45 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusContextLabel => '上下文';
 
   @override
+  String get statusTurnIdle => '空闲';
+
+  @override
+  String get statusTurnQueued => '排队中';
+
+  @override
+  String get statusTurnContextLoading => '加载上下文';
+
+  @override
+  String get statusTurnWaitingForModel => '等待模型';
+
+  @override
+  String get statusTurnStreaming => '正在生成';
+
+  @override
+  String get statusTurnWaitingForInteraction => '等待交互';
+
+  @override
+  String get statusTurnRunningTool => '运行工具';
+
+  @override
+  String get statusTurnCompleted => '已完成';
+
+  @override
+  String get statusTurnFailed => '失败';
+
+  @override
+  String get statusTurnCancelled => '已取消';
+
+  @override
+  String get statusInteractionToolApproval => '等待工具授权';
+
+  @override
+  String get statusInteractionUserInput => '等待输入';
+
+  @override
+  String get statusInteractionPlanConfirmation => '等待计划确认';
+
+  @override
   String statusContextTooltip(
     int contextTokens,
     int contextWindow,
@@ -995,6 +1034,45 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get statusContextLabel => '上下文';
+
+  @override
+  String get statusTurnIdle => '空闲';
+
+  @override
+  String get statusTurnQueued => '排队中';
+
+  @override
+  String get statusTurnContextLoading => '加载上下文';
+
+  @override
+  String get statusTurnWaitingForModel => '等待模型';
+
+  @override
+  String get statusTurnStreaming => '正在生成';
+
+  @override
+  String get statusTurnWaitingForInteraction => '等待交互';
+
+  @override
+  String get statusTurnRunningTool => '运行工具';
+
+  @override
+  String get statusTurnCompleted => '已完成';
+
+  @override
+  String get statusTurnFailed => '失败';
+
+  @override
+  String get statusTurnCancelled => '已取消';
+
+  @override
+  String get statusInteractionToolApproval => '等待工具授权';
+
+  @override
+  String get statusInteractionUserInput => '等待输入';
+
+  @override
+  String get statusInteractionPlanConfirmation => '等待计划确认';
 
   @override
   String statusContextTooltip(
