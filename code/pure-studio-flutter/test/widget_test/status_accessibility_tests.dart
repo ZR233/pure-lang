@@ -23,6 +23,7 @@ void registerStatusAccessibilityTests() {
       var flags = semantics.getSemanticsData().flagsCollection;
       expect(flags.isButton, isTrue);
       expect(flags.isFocused, isNot(Tristate.none));
+      expect(semantics.getSemanticsData().value, '42%');
       expect(
         semantics.getSemanticsData().hasAction(SemanticsAction.tap),
         isTrue,
