@@ -270,12 +270,11 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
           onChanged: (value) => setState(() => _query = value),
         ),
         const SizedBox(height: 14),
-        Column(
-          children: [
-            for (final skill in filteredSkills)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _SettingsToggleRow(
+        if (filteredSkills.isNotEmpty)
+          _SettingsGroup(
+            children: [
+              for (final skill in filteredSkills)
+                _SettingsToggleRow(
                   icon: Icons.extension_outlined,
                   title: skill,
                   subtitle: disabledSkills.contains(skill)
@@ -292,9 +291,8 @@ class _SkillsTabState extends ConsumerState<_SkillsTab> {
                     unawaited(_saveDisabled(disabled));
                   },
                 ),
-              ),
-          ],
-        ),
+            ],
+          ),
         if (filteredSkills.isEmpty) ...[
           const SizedBox(height: 12),
           _EmptySettingsMessage(

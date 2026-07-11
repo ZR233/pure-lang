@@ -108,6 +108,30 @@ class _SectionPanel extends StatelessWidget {
   }
 }
 
+class _SettingsGroup extends StatelessWidget {
+  const _SettingsGroup({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return StudioPanel(
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerLowest,
+      radius: StudioRadii.md,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var index = 0; index < children.length; index++) ...[
+            children[index],
+            if (index < children.length - 1)
+              Divider(height: 1, color: context.studioLine),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _TextEdit extends StatelessWidget {
   const _TextEdit({
     required this.label,
@@ -386,10 +410,8 @@ class _SettingsRow extends StatelessWidget {
         ],
       ),
     );
-    return StudioPanel(
-      backgroundColor: context.colors.surfaceContainerLowest,
-      borderColor: context.studioLine,
-      radius: StudioRadii.md,
+    return Material(
+      color: Colors.transparent,
       child: onTap == null ? content : InkWell(onTap: onTap, child: content),
     );
   }

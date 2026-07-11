@@ -121,11 +121,14 @@ void registerShellSettingsTests() {
     expect(find.byTooltip('Session mode'), findsOneWidget);
     expect(find.byTooltip('Planner model'), findsOneWidget);
     expect(find.byTooltip('Reasoning effort'), findsOneWidget);
+    expect(find.byType(StatusBarItem), findsWidgets);
     expect(find.bySemanticsLabel('Context'), findsOneWidget);
+    expect(find.text('42%'), findsOneWidget);
     expect(find.text('42/100'), findsNothing);
     expect(find.text('CNY 0.16'), findsOneWidget);
-    expect(find.text('1 skill · 1 MCP · 1 LSP'), findsOneWidget);
-    expect(find.text('2 agents · 1 running'), findsOneWidget);
+    expect(find.text('1 skill · 1 MCP · 1 LSP · 2 agents'), findsOneWidget);
+    expect(find.text('1 skill · 1 MCP · 1 LSP'), findsNothing);
+    expect(find.text('2 agents · 1 running'), findsNothing);
 
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     addTearDown(gesture.removePointer);
@@ -139,10 +142,21 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
     await gesture.removePointer();
 
-    final agentsCenter = tester.getCenter(find.text('2 agents · 1 running'));
-    final agentsRect = tester.getRect(find.text('2 agents · 1 running'));
-    await tester.tapAt(Offset(agentsRect.left + 8, agentsCenter.dy));
+    await tester.tap(find.text('CNY 0.16'));
     await tester.pumpAndSettle();
+    expect(find.text('2 agents'), findsNothing);
+    await tester.tapAt(Offset.zero);
+    await tester.pumpAndSettle();
+
+    final activityFinder = find.text('1 skill · 1 MCP · 1 LSP · 2 agents');
+    final activityCenter = tester.getCenter(activityFinder);
+    final activityRect = tester.getRect(activityFinder);
+    await tester.tapAt(Offset(activityRect.left + 8, activityCenter.dy));
+    await tester.pumpAndSettle();
+    expect(find.text('ACTIVE CAPABILITIES'), findsOneWidget);
+    expect(find.textContaining('Skills · flutter-ui'), findsOneWidget);
+    expect(find.textContaining('MCP · dart'), findsOneWidget);
+    expect(find.textContaining('LSP · rust-analyzer'), findsOneWidget);
     expect(find.text('SUBAGENTS'), findsOneWidget);
     expect(find.text('reviewer'), findsOneWidget);
     expect(find.text('worker'), findsOneWidget);
@@ -151,19 +165,6 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
     expect(find.textContaining('Checking status projection'), findsOneWidget);
     await tester.tapAt(Offset.zero);
-    await tester.pumpAndSettle();
-
-    final capabilityCenter = tester.getCenter(
-      find.text('1 skill · 1 MCP · 1 LSP'),
-    );
-    final capabilityRect = tester.getRect(find.text('1 skill · 1 MCP · 1 LSP'));
-    await tester.tapAt(Offset(capabilityRect.left + 8, capabilityCenter.dy));
-    await tester.pumpAndSettle();
-    expect(find.text('ACTIVE CAPABILITIES'), findsOneWidget);
-    expect(find.textContaining('Skills · flutter-ui'), findsOneWidget);
-    expect(find.textContaining('MCP · dart'), findsOneWidget);
-    expect(find.textContaining('LSP · rust-analyzer'), findsOneWidget);
-    await tester.tapAt(Offset(capabilityRect.left + 8, capabilityCenter.dy));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('Session mode'));
@@ -204,6 +205,77 @@ void registerShellSettingsTests() {
     expect(api.roleUpdate?.providerId, 'deepseek');
     expect(api.roleUpdate?.model, 'deepseek-reasoner');
     expect(api.roleUpdate?.effort, 'max');
+  });
+
+  testWidgets('header does not duplicate the running phase', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(
+      _stateWithPlannerModels().copyWith(turnPhase: TurnPhase.streaming),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text(TurnPhase.streaming.name), findsOneWidget);
+  });
+
+  testWidgets('dense shell uses a compact rail without overflow', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(760, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(
+      _stateWithPlannerModels().copyWith(
+        runtime: const SessionRuntimeView(
+          model: 'planner/local',
+          contextTokens: 42000,
+          contextWindow: 100000,
+          totalTokens: 128000,
+          costLabel: 'CNY 12.34',
+          activeSkills: ['flutter-ui'],
+          activeMcpServers: ['dart'],
+          activeLspServers: ['rust-analyzer'],
+          agentCount: 1,
+        ),
+        agentsBySession: {
+          'session-1': {
+            'agent-reviewer': StudioAgentView(
+              id: 'agent-reviewer',
+              sessionId: 'session-1',
+              path: 'root/reviewer',
+              role: 'reviewer',
+              task: 'Audit compact status layout',
+              status: 'running',
+              updatedAt: DateTime.fromMillisecondsSinceEpoch(1),
+            ),
+          },
+        },
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.getSize(find.byKey(const ValueKey('studio-sidebar'))).width,
+      StudioLayout.compactRailWidth,
+    );
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('zh Hans localizes session and permission mode labels', (
@@ -314,7 +386,8 @@ void registerShellSettingsTests() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Available balance'), findsOneWidget);
+    expect(find.text('CNY 88.00'), findsOneWidget);
+    expect(find.text('Available balance'), findsNothing);
 
     await tester.tap(find.widgetWithText(FilledButton, 'Add provider'));
     await tester.pumpAndSettle();
@@ -465,13 +538,310 @@ void registerShellSettingsTests() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Edit provider').last);
+    await tester.tap(find.byTooltip('Provider actions').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit provider').last);
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
     await tester.pumpAndSettle();
 
     expect(api.savedProviderSettings?['defaultProviderId'], 'deepseek');
   });
+
+  testWidgets(
+    'provider list uses one compact column and opens details from the row',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      final api = _FakeStudioApi(
+        _providerListState(),
+        providerUsages: _providerListUsages,
+      );
+      await _pumpSettingsPage(tester, api);
+
+      expect(find.byType(StudioPanel), findsOneWidget);
+      expect(find.byTooltip('Open details'), findsNothing);
+      final deepSeekOrigin = tester.getTopLeft(find.text('DeepSeek'));
+      final zhipuOrigin = tester.getTopLeft(find.text('Zhipu Coding Plan'));
+      expect(zhipuOrigin.dx, closeTo(deepSeekOrigin.dx, 1));
+      expect(zhipuOrigin.dy, greaterThan(deepSeekOrigin.dy));
+
+      await tester.tap(find.text('Zhipu Coding Plan'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Search providers'), findsNothing);
+      expect(find.widgetWithText(FilledButton, 'Edit'), findsOneWidget);
+      expect(find.text('Usage'), findsOneWidget);
+    },
+  );
+
+  testWidgets('provider row actions share one accessible overflow menu', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    final api = _FakeStudioApi(
+      _providerListState(),
+      providerUsages: _providerListUsages,
+    );
+    await _pumpSettingsPage(tester, api);
+
+    expect(find.byTooltip('Provider actions'), findsNWidgets(2));
+    expect(find.byTooltip('Edit provider'), findsNothing);
+    expect(find.byTooltip('Delete provider'), findsNothing);
+    final initialUsageLoads = api.loadProviderUsagesCount;
+
+    await tester.tap(find.byTooltip('Provider actions').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Set as default'), findsOneWidget);
+    expect(find.text('Refresh usage'), findsWidgets);
+    expect(find.text('Edit provider'), findsOneWidget);
+    expect(find.text('Delete provider'), findsOneWidget);
+    await tester.tap(find.text('Refresh usage').last);
+    await tester.pumpAndSettle();
+    expect(api.loadProviderUsagesCount, initialUsageLoads + 1);
+
+    await tester.tap(find.byTooltip('Provider actions').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Set as default'));
+    await tester.pumpAndSettle();
+    expect(
+      api.savedProviderSettings?['defaultProviderId'],
+      'zhipu-coding-plan',
+    );
+  });
+
+  testWidgets('provider list shows compact DeepSeek and ordered Zhipu usage', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    final api = _FakeStudioApi(
+      _providerListState(),
+      providerUsages: _providerListUsages,
+    );
+    await _pumpSettingsPage(tester, api);
+
+    expect(find.text('CNY 88.00'), findsOneWidget);
+    expect(find.text('Available balance'), findsNothing);
+    expect(find.text('Granted 8.00'), findsNothing);
+    expect(find.text('Topped up 80.00'), findsNothing);
+    final fiveHour = tester.getCenter(find.text('5 hour quota'));
+    final weekly = tester.getCenter(find.text('Weekly quota'));
+    final mcp = tester.getCenter(find.text('MCP quota'));
+    expect(fiveHour.dy, lessThan(weekly.dy));
+    expect(weekly.dy, lessThan(mcp.dy));
+    expect(find.text('Other injected quota'), findsNothing);
+    expect(find.text('25% remaining'), findsOneWidget);
+    expect(find.text('50% remaining'), findsOneWidget);
+    expect(find.text('80% remaining'), findsOneWidget);
+    expect(find.text('25%'), findsNothing);
+    expect(find.text('50%'), findsNothing);
+    expect(find.text('80%'), findsNothing);
+    expect(find.textContaining('Reset '), findsNWidgets(3));
+
+    final progress = find.byType(LinearProgressIndicator);
+    expect(progress, findsNWidgets(3));
+    expect(
+      tester
+          .widgetList<LinearProgressIndicator>(progress)
+          .map((bar) => bar.value),
+      orderedEquals(const [0.25, 0.5, 0.8]),
+    );
+    for (final bar in progress.evaluate()) {
+      expect(
+        tester.getSize(find.byElementPredicate((item) => item == bar)).height,
+        5,
+      );
+    }
+
+    await tester.tap(find.text('DeepSeek'));
+    await tester.pumpAndSettle();
+    expect(find.text('Available balance'), findsOneWidget);
+    expect(find.text('Granted 8.00'), findsOneWidget);
+    expect(find.text('Topped up 80.00'), findsOneWidget);
+  });
+
+  testWidgets('provider list localizes remaining quota semantics in zh Hans', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    final api = _FakeStudioApi(
+      _providerListState(zhipuOnly: true),
+      providerUsages: _providerListUsages,
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(
+          locale: const Locale.fromSubtags(
+            languageCode: 'zh',
+            scriptCode: 'Hans',
+          ),
+          home: const SettingsPage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('剩余 25%'), findsOneWidget);
+    expect(find.text('剩余 50%'), findsOneWidget);
+    expect(find.text('剩余 80%'), findsOneWidget);
+    expect(find.text('25%'), findsNothing);
+    expect(find.text('50%'), findsNothing);
+    expect(find.text('80%'), findsNothing);
+  });
+
+  testWidgets('provider list omits absent Zhipu quotas', (tester) async {
+    _configureSettingsTestView(tester);
+    final api = _FakeStudioApi(
+      _providerListState(zhipuOnly: true),
+      providerUsages: const [
+        ProviderUsageView(
+          providerId: 'zhipu-coding-plan',
+          updatedAt: 1,
+          status: 'ready',
+          usageKind: 'zhipuCodingPlan',
+          codingPlan: ZhipuCodingPlanUsageView(
+            limits: [
+              ZhipuQuotaLimitView(
+                window: 'weekly',
+                label: 'weekly',
+                percentage: 40,
+                total: 100,
+                remaining: 60,
+                nextResetAt: 1735689600,
+                usageDetails: [],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    await _pumpSettingsPage(tester, api);
+
+    expect(find.text('5 hour quota'), findsNothing);
+    expect(find.text('Weekly quota'), findsOneWidget);
+    expect(find.text('MCP quota'), findsNothing);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+  });
+
+  testWidgets('provider list shows compact loading hint without fake quota', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    final staleUsage = _providerListUsages.last;
+    final api = _FakeStudioApi(
+      _providerListState(
+        zhipuOnly: true,
+      ).copyWith(providerUsages: [staleUsage]),
+      providerUsages: [staleUsage],
+    );
+    final blocked = Completer<List<ProviderUsageView>>();
+    api.blockedProviderUsageLoad = blocked;
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const SettingsPage()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Checking usage'), findsOneWidget);
+    expect(find.text('Checking usage...'), findsNothing);
+    expect(find.text('5 hour quota'), findsNothing);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+
+    blocked.complete(const []);
+    await tester.pumpAndSettle();
+  });
+
+  for (final usageState in const [
+    (
+      status: 'missingCredential',
+      shortMessage: 'Missing key',
+      verboseMessage: 'Provider API key is not configured',
+    ),
+    (
+      status: 'failed',
+      shortMessage: 'Usage failed',
+      verboseMessage: 'Usage query failed',
+    ),
+  ]) {
+    testWidgets(
+      'provider list shows compact ${usageState.status} hint without quota',
+      (tester) async {
+        _configureSettingsTestView(tester);
+        final api = _FakeStudioApi(
+          _providerListState(zhipuOnly: true),
+          providerUsages: [
+            ProviderUsageView(
+              providerId: 'zhipu-coding-plan',
+              updatedAt: 1,
+              status: usageState.status,
+              usageKind: 'zhipuCodingPlan',
+            ),
+          ],
+        );
+        await _pumpSettingsPage(tester, api);
+
+        expect(find.text(usageState.shortMessage), findsOneWidget);
+        expect(find.text(usageState.verboseMessage), findsNothing);
+        expect(find.byType(LinearProgressIndicator), findsNothing);
+      },
+    );
+  }
+
+  testWidgets(
+    'settings tabs use one group and Security has no duplicate mode',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      final base = _stateWithPlannerModels();
+      final api = _FakeStudioApi(
+        base.copyWith(
+          runtime: base.runtime.copyWith(
+            activeSkills: ['flutter-ui-polish', 'rust-review'],
+          ),
+          skills: const SkillsSettingsView(disabled: []),
+          mcpServers: const [
+            McpServerSettingsView(
+              id: 'local',
+              transport: 'stdio',
+              endpoint: 'npx',
+              enabled: true,
+              status: 'enabled',
+            ),
+            McpServerSettingsView(
+              id: 'remote',
+              transport: 'http',
+              endpoint: 'https://example.test/mcp',
+              enabled: false,
+              status: 'disabled',
+            ),
+          ],
+        ),
+      );
+      await _pumpSettingsPage(tester, api);
+
+      for (final tab in const ['Roles', 'Skills', 'MCP', 'General']) {
+        await tester.tap(find.text(tab));
+        await tester.pumpAndSettle();
+        expect(
+          find.byType(StudioPanel),
+          findsOneWidget,
+          reason: '$tab should use one outer settings group',
+        );
+      }
+
+      await tester.tap(find.text('Security'));
+      await tester.pumpAndSettle();
+      expect(find.byType(StudioPanel), findsOneWidget);
+      expect(find.text('Current: Request'), findsNothing);
+      expect(
+        find.text('Workspace boundary policy remains unchanged.'),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets(
     'settings ordinary controls save immediately without draft buttons',
@@ -618,3 +988,121 @@ void registerShellSettingsTests() {
     },
   );
 }
+
+void _configureSettingsTestView(WidgetTester tester) {
+  tester.view.physicalSize = const Size(1280, 900);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+}
+
+Future<void> _pumpSettingsPage(WidgetTester tester, _FakeStudioApi api) async {
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+      child: _localizedApp(home: const SettingsPage()),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+StudioState _providerListState({bool zhipuOnly = false}) {
+  final base = _stateWithPlannerModels();
+  const zhipu = ProviderSettingsView(
+    id: 'zhipu-coding-plan',
+    templateKind: 'zhipu-coding-plan',
+    name: 'Zhipu Coding Plan',
+    subtitle: 'Zhipu Platform',
+    baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
+    hasBearerToken: true,
+    defaultModel: 'glm-5.2',
+    models: [
+      ProviderModelView(
+        slug: 'glm-5.2',
+        displayName: 'GLM-5.2',
+        reasoningEfforts: ['enabled'],
+      ),
+    ],
+    status: 'ready',
+    usageLabel: '1 model',
+    modelCount: '1',
+    providerKind: 'zhipu',
+  );
+  if (zhipuOnly) {
+    return base.copyWith(defaultProviderId: zhipu.id, providers: const [zhipu]);
+  }
+  final deepSeek = base.providers.single.copyWith(
+    templateKind: 'deepseek',
+    subtitle: 'DeepSeek Platform',
+    hasBearerToken: true,
+    modelCount: '2',
+    providerKind: 'deep_seek',
+  );
+  return base.copyWith(
+    defaultProviderId: deepSeek.id,
+    providers: [deepSeek, zhipu],
+  );
+}
+
+const _providerListUsages = [
+  ProviderUsageView(
+    providerId: 'deepseek',
+    updatedAt: 1735689600,
+    status: 'ready',
+    usageKind: 'deepseekBalance',
+    balance: DeepSeekBalanceUsageView(
+      isAvailable: true,
+      balances: [
+        DeepSeekBalanceInfoView(
+          currency: 'CNY',
+          totalBalance: '88.00',
+          grantedBalance: '8.00',
+          toppedUpBalance: '80.00',
+        ),
+      ],
+    ),
+  ),
+  ProviderUsageView(
+    providerId: 'zhipu-coding-plan',
+    updatedAt: 1735689600,
+    status: 'ready',
+    usageKind: 'zhipuCodingPlan',
+    codingPlan: ZhipuCodingPlanUsageView(
+      level: 'Pro',
+      limits: [
+        ZhipuQuotaLimitView(
+          window: 'mcpMonthly',
+          label: 'mcp',
+          percentage: 20,
+          nextResetAt: 1735689600,
+          usageDetails: [],
+        ),
+        ZhipuQuotaLimitView(
+          window: 'other',
+          label: 'Other injected quota',
+          percentage: 10,
+          nextResetAt: 1735689600,
+          usageDetails: [],
+        ),
+        ZhipuQuotaLimitView(
+          window: 'weekly',
+          label: 'weekly',
+          percentage: 50,
+          total: 200,
+          remaining: 100,
+          nextResetAt: 1735689600,
+          usageDetails: [],
+        ),
+        ZhipuQuotaLimitView(
+          window: 'fiveHour',
+          label: 'five hour',
+          percentage: 75,
+          total: 100,
+          remaining: 25,
+          nextResetAt: 1735689600,
+          usageDetails: [],
+        ),
+      ],
+    ),
+  ),
+];

@@ -43,6 +43,7 @@ class _ProviderList extends StatelessWidget {
           subtitle: context.l10n.settingsProvidersSubtitle,
           trailing: Wrap(
             spacing: 8,
+            runSpacing: 8,
             children: [
               OutlinedButton.icon(
                 icon: const Icon(Icons.refresh),
@@ -76,42 +77,28 @@ class _ProviderList extends StatelessWidget {
                         : context.l10n.settingsNoProvidersMessage,
                   ),
                 )
-              : LayoutBuilder(
-                  builder: (context, constraints) {
-                    final twoColumns = constraints.maxWidth >= 840;
-                    final cardWidth = twoColumns
-                        ? (constraints.maxWidth - 14) / 2
-                        : constraints.maxWidth;
-                    return SingleChildScrollView(
-                      child: Wrap(
-                        spacing: 14,
-                        runSpacing: 14,
-                        children: [
-                          for (final provider in providers)
-                            SizedBox(
-                              width: cardWidth,
-                              child: _ProviderCard(
-                                provider: provider,
-                                isDefault: provider.id == defaultProviderId,
-                                usage: usageByProvider[provider.id],
-                                usageLoading: loadingProviderIds.contains(
-                                  provider.id,
-                                ),
-                                usageError: usageError,
-                                onOpen: () => onSelect(provider),
-                                onSetDefault: () => onSetDefault(provider),
-                                onRefreshUsage: () =>
-                                    onRefreshProvider(provider),
-                                onEdit: () => onEdit(provider),
-                                onDelete: onDelete == null
-                                    ? null
-                                    : () => onDelete!(provider),
-                              ),
-                            ),
-                        ],
-                      ),
-                    );
-                  },
+              : SingleChildScrollView(
+                  child: _SettingsGroup(
+                    children: [
+                      for (final provider in providers)
+                        _ProviderListRow(
+                          provider: provider,
+                          isDefault: provider.id == defaultProviderId,
+                          usage: usageByProvider[provider.id],
+                          usageLoading: loadingProviderIds.contains(
+                            provider.id,
+                          ),
+                          usageError: usageError,
+                          onOpen: () => onSelect(provider),
+                          onSetDefault: () => onSetDefault(provider),
+                          onRefreshUsage: () => onRefreshProvider(provider),
+                          onEdit: () => onEdit(provider),
+                          onDelete: onDelete == null
+                              ? null
+                              : () => onDelete!(provider),
+                        ),
+                    ],
+                  ),
                 ),
         ),
       ],
@@ -119,8 +106,8 @@ class _ProviderList extends StatelessWidget {
   }
 }
 
-class _ProviderCard extends StatelessWidget {
-  const _ProviderCard({
+class _ProviderListRow extends StatelessWidget {
+  const _ProviderListRow({
     required this.provider,
     required this.isDefault,
     required this.usage,
@@ -146,91 +133,68 @@ class _ProviderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final models = provider.allModels;
-    return StudioPanel(
-      backgroundColor: colors.surfaceContainerLowest,
-      borderColor: isDefault
-          ? StudioColors.clay.withValues(alpha: 0.62)
-          : context.studioLine,
-      radius: StudioRadii.md,
-      shadow: true,
+    return Material(
+      color: Colors.transparent,
       child: InkWell(
         onTap: onOpen,
         child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _ProviderLogo(provider: provider, active: isDefault),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _ProviderCardTitle(
-                      provider: provider,
-                      isDefault: isDefault,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  _ProviderCardActions(
-                    isDefault: isDefault,
-                    onOpen: onOpen,
-                    onSetDefault: onSetDefault,
-                    onRefreshUsage: onRefreshUsage,
-                    onEdit: onEdit,
-                    onDelete: onDelete,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  _MiniMeta(icon: Icons.key_outlined, label: provider.id),
-                  _ProviderStatusChip(provider: provider),
-                  _MiniMeta(
-                    icon: Icons.smart_toy_outlined,
-                    label: provider.defaultModel,
-                  ),
-                  _MiniMeta(
-                    icon: Icons.account_balance_wallet_outlined,
-                    label: _providerUsageSummary(
-                      context,
-                      provider,
-                      usage,
-                      usageLoading,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _ProviderUsagePanel(
-                provider: provider,
-                usage: usage,
-                loading: usageLoading,
-                error: usageError,
-                onRefresh: onRefreshUsage,
-              ),
-              if (models.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
+              _ProviderLogo(provider: provider, active: isDefault),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    for (final model in models.take(4))
-                      StudioPill(
-                        label: model.slug,
-                        backgroundColor: context.studioPaper2,
-                        borderColor: context.studioLine,
+                    _ProviderRowTitle(provider: provider, isDefault: isDefault),
+                    const SizedBox(height: 7),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        _MiniMeta(icon: Icons.key_outlined, label: provider.id),
+                        _ProviderStatusChip(provider: provider),
+                      ],
+                    ),
+                    if (provider.allModels.isNotEmpty) ...[
+                      const SizedBox(height: 7),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (final model in provider.allModels.take(4))
+                            StudioPill(
+                              label: model.slug,
+                              backgroundColor: context.studioPaper2,
+                              borderColor: context.studioLine,
+                            ),
+                          if (provider.allModels.length > 4)
+                            StudioPill(
+                              label: '+${provider.allModels.length - 4}',
+                            ),
+                        ],
                       ),
-                    if (models.length > 4)
-                      StudioPill(label: '+${models.length - 4}'),
+                    ],
+                    const SizedBox(height: 9),
+                    _ProviderListUsage(
+                      provider: provider,
+                      usage: usage,
+                      loading: usageLoading,
+                      error: usageError,
+                    ),
                   ],
                 ),
-              ],
+              ),
+              const SizedBox(width: 8),
+              _ProviderRowMenu(
+                isDefault: isDefault,
+                onSetDefault: onSetDefault,
+                onRefreshUsage: onRefreshUsage,
+                onEdit: onEdit,
+                onDelete: onDelete,
+              ),
             ],
           ),
         ),
@@ -249,17 +213,17 @@ class _ProviderLogo extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return SizedBox.square(
-      dimension: 46,
+      dimension: 40,
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: active ? StudioColors.clay : context.studioPaper2,
-          borderRadius: BorderRadius.circular(11),
+          borderRadius: BorderRadius.circular(StudioRadii.sm),
           border: Border.all(color: colors.outlineVariant),
         ),
         child: Center(
           child: Text(
             _initials(provider.name),
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
               color: active ? Colors.white : context.studioInk,
               fontWeight: FontWeight.w800,
             ),
@@ -270,8 +234,8 @@ class _ProviderLogo extends StatelessWidget {
   }
 }
 
-class _ProviderCardTitle extends StatelessWidget {
-  const _ProviderCardTitle({required this.provider, required this.isDefault});
+class _ProviderRowTitle extends StatelessWidget {
+  const _ProviderRowTitle({required this.provider, required this.isDefault});
 
   final ProviderSettingsView provider;
   final bool isDefault;
@@ -283,12 +247,12 @@ class _ProviderCardTitle extends StatelessWidget {
       children: [
         Row(
           children: [
-            Expanded(
+            Flexible(
               child: Text(
                 provider.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
                   color: context.studioInk,
                   fontWeight: FontWeight.w700,
                 ),
@@ -321,10 +285,163 @@ class _ProviderCardTitle extends StatelessWidget {
   }
 }
 
-class _ProviderCardActions extends StatelessWidget {
-  const _ProviderCardActions({
+class _ProviderListUsage extends StatelessWidget {
+  const _ProviderListUsage({
+    required this.provider,
+    required this.usage,
+    required this.loading,
+    required this.error,
+  });
+
+  final ProviderSettingsView provider;
+  final ProviderUsageView? usage;
+  final bool loading;
+  final String? error;
+
+  @override
+  Widget build(BuildContext context) {
+    final usage = this.usage;
+    if (error?.isNotEmpty ?? false) {
+      return _ProviderUsageMessage(
+        icon: Icons.error_outline,
+        message: error!,
+        tone: _UsageTone.failed,
+      );
+    }
+    if (loading) {
+      return _ProviderUsageMessage(
+        icon: Icons.hourglass_empty,
+        message: context.l10n.settingsUsageCheckingShort,
+        tone: _UsageTone.neutral,
+      );
+    }
+    if (usage == null || usage.status != 'ready') {
+      final message = usage == null
+          ? _providerUsageSummary(context, provider, null, loading)
+          : _providerUsageSummary(context, provider, usage, loading);
+      final tone = usage?.status == 'failed'
+          ? _UsageTone.failed
+          : usage?.status == 'missingCredential'
+          ? _UsageTone.warning
+          : _UsageTone.muted;
+      return _ProviderUsageMessage(
+        icon: usage?.status == 'failed'
+            ? Icons.error_outline
+            : Icons.info_outline,
+        message: message,
+        tone: tone,
+      );
+    }
+    if (usage.usageKind == 'zhipuCodingPlan' && usage.codingPlan != null) {
+      return _ProviderQuotaList(limits: usage.codingPlan!.limits);
+    }
+    return _ProviderUsageMessage(
+      icon: Icons.account_balance_wallet_outlined,
+      message: _providerUsageSummary(context, provider, usage, loading),
+      tone: _UsageTone.muted,
+    );
+  }
+}
+
+class _ProviderQuotaList extends StatelessWidget {
+  const _ProviderQuotaList({required this.limits});
+
+  final List<ZhipuQuotaLimitView> limits;
+
+  @override
+  Widget build(BuildContext context) {
+    final ordered = [
+      _findQuotaLimit(limits, 'fiveHour'),
+      _findQuotaLimit(limits, 'weekly'),
+      _findQuotaLimit(limits, 'mcpMonthly'),
+    ].whereType<ZhipuQuotaLimitView>().toList();
+    if (ordered.isEmpty) {
+      return _ProviderUsageMessage(
+        icon: Icons.info_outline,
+        message: context.l10n.settingsUsageUnavailable,
+        tone: _UsageTone.muted,
+      );
+    }
+    return Column(
+      children: [
+        for (var index = 0; index < ordered.length; index++) ...[
+          _ProviderQuotaRow(limit: ordered[index]),
+          if (index < ordered.length - 1) const SizedBox(height: 8),
+        ],
+      ],
+    );
+  }
+}
+
+class _ProviderQuotaRow extends StatelessWidget {
+  const _ProviderQuotaRow({required this.limit});
+
+  final ZhipuQuotaLimitView limit;
+
+  @override
+  Widget build(BuildContext context) {
+    final percent = _quotaRemainingPercent(limit);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                _quotaTitle(context, limit),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.text.labelMedium?.copyWith(
+                  color: context.studioInk,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              context.l10n.settingsUsagePercentRemaining(
+                _formatPercent(percent),
+              ),
+              style: context.text.labelMedium?.copyWith(
+                color: context.studioInk,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            if (_resetLabel(context, limit.nextResetAt).isNotEmpty) ...[
+              const SizedBox(width: 10),
+              Text(
+                _resetLabel(context, limit.nextResetAt),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.text.labelSmall?.copyWith(
+                  color: context.studioInkSoft,
+                ),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 5),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(StudioRadii.xs),
+          child: SizedBox(
+            height: 5,
+            child: LinearProgressIndicator(
+              value: percent / 100,
+              backgroundColor: context.studioPaper3,
+              color: percent >= 65 ? StudioColors.sage : StudioColors.clay,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+enum _ProviderRowAction { setDefault, refresh, edit, delete }
+
+class _ProviderRowMenu extends StatelessWidget {
+  const _ProviderRowMenu({
     required this.isDefault,
-    required this.onOpen,
     required this.onSetDefault,
     required this.onRefreshUsage,
     required this.onEdit,
@@ -332,7 +449,6 @@ class _ProviderCardActions extends StatelessWidget {
   });
 
   final bool isDefault;
-  final VoidCallback onOpen;
   final VoidCallback onSetDefault;
   final VoidCallback onRefreshUsage;
   final VoidCallback onEdit;
@@ -340,65 +456,73 @@ class _ProviderCardActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 2,
-      runSpacing: 2,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        Tooltip(
-          message: isDefault
-              ? context.l10n.settingsDefaultProvider
-              : context.l10n.settingsSetAsDefaultProvider,
-          child: IconButton(
-            style: IconButton.styleFrom(
-              minimumSize: const Size.square(30),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    return PopupMenuButton<_ProviderRowAction>(
+      tooltip: context.l10n.settingsProviderActions,
+      icon: const Icon(Icons.more_horiz),
+      iconSize: 20,
+      constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+      onSelected: (action) {
+        switch (action) {
+          case _ProviderRowAction.setDefault:
+            onSetDefault();
+          case _ProviderRowAction.refresh:
+            onRefreshUsage();
+          case _ProviderRowAction.edit:
+            onEdit();
+          case _ProviderRowAction.delete:
+            onDelete?.call();
+        }
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: _ProviderRowAction.setDefault,
+          enabled: !isDefault,
+          child: _ProviderMenuLabel(
+            icon: isDefault
+                ? Icons.check_circle_outline
+                : Icons.radio_button_unchecked,
+            label: isDefault
+                ? context.l10n.settingsDefaultProvider
+                : context.l10n.settingsSetAsDefaultProvider,
+          ),
+        ),
+        PopupMenuItem(
+          value: _ProviderRowAction.refresh,
+          child: _ProviderMenuLabel(
+            icon: Icons.refresh,
+            label: context.l10n.settingsRefreshUsage,
+          ),
+        ),
+        PopupMenuItem(
+          value: _ProviderRowAction.edit,
+          child: _ProviderMenuLabel(
+            icon: Icons.edit_outlined,
+            label: context.l10n.settingsEditProvider,
+          ),
+        ),
+        if (onDelete != null)
+          PopupMenuItem(
+            value: _ProviderRowAction.delete,
+            child: _ProviderMenuLabel(
+              icon: Icons.delete_outline,
+              label: context.l10n.settingsDeleteProvider,
             ),
-            icon: Icon(
-              isDefault
-                  ? Icons.check_circle_outline
-                  : Icons.radio_button_unchecked,
-            ),
-            onPressed: isDefault ? null : onSetDefault,
           ),
-        ),
-        IconButton(
-          style: IconButton.styleFrom(
-            minimumSize: const Size.square(30),
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          ),
-          tooltip: context.l10n.settingsOpenDetails,
-          icon: const Icon(Icons.open_in_new),
-          onPressed: onOpen,
-        ),
-        IconButton(
-          style: IconButton.styleFrom(
-            minimumSize: const Size.square(30),
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          ),
-          tooltip: context.l10n.settingsRefreshUsage,
-          icon: const Icon(Icons.refresh),
-          onPressed: onRefreshUsage,
-        ),
-        IconButton(
-          style: IconButton.styleFrom(
-            minimumSize: const Size.square(30),
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          ),
-          tooltip: context.l10n.settingsEditProvider,
-          icon: const Icon(Icons.edit_outlined),
-          onPressed: onEdit,
-        ),
-        IconButton(
-          style: IconButton.styleFrom(
-            minimumSize: const Size.square(30),
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          ),
-          tooltip: context.l10n.settingsDeleteProvider,
-          icon: const Icon(Icons.delete_outline),
-          onPressed: onDelete,
-        ),
       ],
+    );
+  }
+}
+
+class _ProviderMenuLabel extends StatelessWidget {
+  const _ProviderMenuLabel({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [Icon(icon, size: 18), const SizedBox(width: 10), Text(label)],
     );
   }
 }

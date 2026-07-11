@@ -8,15 +8,18 @@ class _Sidebar extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final width = compact ? 68.0 : 262.0;
+    final width = compact
+        ? StudioLayout.compactRailWidth
+        : StudioLayout.sidebarWidth;
     return SizedBox(
+      key: const ValueKey('studio-sidebar'),
       width: width,
       child: Material(
         color: context.studioPaper2,
         child: Column(
           children: [
             SizedBox(
-              height: 62,
+              height: 52,
               child: Center(
                 child: compact
                     ? const StudioIconBadge(
@@ -111,7 +114,7 @@ class _SidebarSectionLabel extends StatelessWidget {
           fontFamily: 'Consolas',
           fontSize: 10,
           fontWeight: FontWeight.w600,
-          letterSpacing: 1.2,
+          letterSpacing: 0,
         ),
       ),
     );
@@ -136,27 +139,16 @@ class _ProjectTile extends ConsumerWidget {
     final colors = Theme.of(context).colorScheme;
     final controller = ref.read(studioControllerProvider.notifier);
     if (compact) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Tooltip(
-            message: project.path,
-            child: IconButton(
-              isSelected: selected,
-              tooltip: project.name,
-              icon: const Icon(Icons.folder_open),
-              selectedIcon: Icon(Icons.folder, color: colors.onSurface),
-              onPressed: () => controller.selectProject(project.id),
-            ),
-          ),
-          IconButton(
-            tooltip: context.l10n.sidebarCloseProject,
-            icon: const Icon(Icons.close, size: 18),
-            onPressed: canArchive
-                ? () => controller.archiveProject(project.id)
-                : null,
-          ),
-        ],
+      return _CompactSidebarTile(
+        selected: selected,
+        tooltip: project.path.isEmpty ? project.name : project.path,
+        icon: selected ? Icons.folder : Icons.folder_open,
+        onTap: () => controller.selectProject(project.id),
+        actionTooltip: context.l10n.sidebarCloseProject,
+        actionIcon: Icons.close,
+        onAction: canArchive
+            ? () => controller.archiveProject(project.id)
+            : null,
       );
     }
     return _SidebarTile(
@@ -164,7 +156,7 @@ class _ProjectTile extends ConsumerWidget {
       icon: selected ? Icons.folder : Icons.folder_open,
       title: project.name,
       subtitle: project.path,
-      dense: false,
+      dense: true,
       iconColor: selected ? StudioColors.clayDeep : colors.onSurfaceVariant,
       onTap: () => controller.selectProject(project.id),
       trailing: IconButton(
@@ -202,15 +194,20 @@ class _SessionTile extends ConsumerWidget {
         : Icons.flash_on;
     final colors = Theme.of(context).colorScheme;
     if (compact) {
-      return Tooltip(
-        message: session.title,
-        child: IconButton(
-          isSelected: selected,
-          icon: Icon(modeIcon),
-          onPressed: () => ref
-              .read(studioControllerProvider.notifier)
-              .selectSession(session.id),
-        ),
+      return _CompactSidebarTile(
+        selected: selected,
+        tooltip: session.title,
+        icon: modeIcon,
+        onTap: () => ref
+            .read(studioControllerProvider.notifier)
+            .selectSession(session.id),
+        actionTooltip: context.l10n.sidebarArchiveSession,
+        actionIcon: Icons.archive_outlined,
+        onAction: canArchive
+            ? () => ref
+                  .read(studioControllerProvider.notifier)
+                  .archiveSession(session.id)
+            : null,
       );
     }
     return _SidebarTile(
@@ -237,6 +234,82 @@ class _SessionTile extends ConsumerWidget {
                   .read(studioControllerProvider.notifier)
                   .archiveSession(session.id)
             : null,
+      ),
+    );
+  }
+}
+
+class _CompactSidebarTile extends StatefulWidget {
+  const _CompactSidebarTile({
+    required this.selected,
+    required this.tooltip,
+    required this.icon,
+    required this.onTap,
+    required this.actionTooltip,
+    required this.actionIcon,
+    required this.onAction,
+  });
+
+  final bool selected;
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onTap;
+  final String actionTooltip;
+  final IconData actionIcon;
+  final VoidCallback? onAction;
+
+  @override
+  State<_CompactSidebarTile> createState() => _CompactSidebarTileState();
+}
+
+class _CompactSidebarTileState extends State<_CompactSidebarTile> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final actionVisible = widget.selected || _hovering;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: SizedBox(
+        width: 44,
+        height: 44,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: Tooltip(
+                message: widget.tooltip,
+                child: IconButton(
+                  isSelected: widget.selected,
+                  icon: Icon(widget.icon),
+                  onPressed: widget.onTap,
+                ),
+              ),
+            ),
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: IgnorePointer(
+                ignoring: !actionVisible,
+                child: AnimatedOpacity(
+                  opacity: actionVisible ? 1 : 0,
+                  duration: const Duration(milliseconds: 120),
+                  child: IconButton(
+                    tooltip: widget.actionTooltip,
+                    style: IconButton.styleFrom(
+                      minimumSize: const Size.square(20),
+                      maximumSize: const Size.square(20),
+                      padding: EdgeInsets.zero,
+                      backgroundColor: context.studioPaper,
+                    ),
+                    icon: Icon(widget.actionIcon, size: 12),
+                    onPressed: widget.onAction,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -286,7 +359,7 @@ class _SidebarTileState extends State<_SidebarTile> {
         child: Material(
           color: widget.selected ? context.studioPaper : Colors.transparent,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(9),
+            borderRadius: BorderRadius.circular(StudioRadii.md),
             side: BorderSide(
               color: widget.selected ? context.studioLine2 : Colors.transparent,
             ),

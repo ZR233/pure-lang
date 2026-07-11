@@ -5,8 +5,8 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/studio_tokens.dart';
 
-class StatusBarChip extends StatefulWidget {
-  const StatusBarChip({
+class StatusBarItem extends StatefulWidget {
+  const StatusBarItem({
     required this.label,
     this.icon,
     this.trailingIcon,
@@ -32,15 +32,16 @@ class StatusBarChip extends StatefulWidget {
   final double maxWidth;
 
   @override
-  State<StatusBarChip> createState() => _StatusBarChipState();
+  State<StatusBarItem> createState() => _StatusBarItemState();
 }
 
-class _StatusBarChipState extends State<StatusBarChip> {
+class _StatusBarItemState extends State<StatusBarItem> {
   final GlobalKey _targetKey = GlobalKey();
   final Object _tapRegionGroup = Object();
   OverlayEntry? _entry;
   Timer? _hideTimer;
   bool _hovering = false;
+  bool _focused = false;
 
   @override
   void dispose() {
@@ -111,26 +112,31 @@ class _StatusBarChipState extends State<StatusBarChip> {
         ],
       );
     }
+    final highlighted = (_hovering || _focused) && widget.enabled;
     final content = AnimatedContainer(
       key: _targetKey,
       duration: const Duration(milliseconds: 120),
-      height: 28,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
+      height: 26,
+      padding: const EdgeInsets.symmetric(horizontal: 7),
       decoration: BoxDecoration(
-        color: _hovering && widget.enabled
-            ? context.studioPaper
+        color: highlighted
+            ? context.studioPaper.withValues(alpha: 0.76)
             : Colors.transparent,
-        borderRadius: BorderRadius.circular(StudioRadii.sm),
+        borderRadius: BorderRadius.circular(StudioRadii.xs),
       ),
       child: row,
     );
-    var interactive = widget.enableHover
+    final hoverable = widget.enableHover
         ? MouseRegion(
             onEnter: (_) => setState(() => _hovering = true),
             onExit: (_) => setState(() => _hovering = false),
             child: content,
           )
         : content;
+    final interactive = Focus(
+      onFocusChange: _handleFocusChange,
+      child: hoverable,
+    );
     final chip = Padding(
       padding: const EdgeInsets.only(right: 2),
       child: interactive,
@@ -150,6 +156,15 @@ class _StatusBarChipState extends State<StatusBarChip> {
       _showDetail();
     } else {
       _hideDetail();
+    }
+  }
+
+  void _handleFocusChange(bool focused) {
+    setState(() => _focused = focused);
+    if (focused && widget.detailBuilder != null) {
+      _showDetail();
+    } else if (!focused) {
+      _scheduleHideDetail();
     }
   }
 
@@ -180,12 +195,13 @@ class _StatusBarChipState extends State<StatusBarChip> {
     final maxLeft = math.max(8.0, overlaySize.width - widget.detailWidth - 8);
     final left = targetTopLeft.dx.clamp(8.0, maxLeft).toDouble();
     final bottom = math.max(8.0, overlaySize.height - targetTopLeft.dy + 8);
+    final maxDetailHeight = math.max(0.0, targetTopLeft.dy - 16);
     final theme = Theme.of(context);
     final detailBuilder = widget.detailBuilder!;
     final interactive = widget.interactive;
     _entry = OverlayEntry(
       builder: (context) {
-        final card = _detailCard(theme, detailBuilder);
+        final card = _detailCard(theme, detailBuilder, maxDetailHeight);
         final positioned = Positioned(
           left: left,
           bottom: bottom,
@@ -226,19 +242,26 @@ class _StatusBarChipState extends State<StatusBarChip> {
     _entry = null;
   }
 
-  Widget _detailCard(ThemeData theme, WidgetBuilder detailBuilder) {
-    return Material(
-      color: Colors.transparent,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerLowest,
-          border: Border.all(color: theme.colorScheme.outlineVariant),
-          borderRadius: BorderRadius.circular(11),
-          boxShadow: StudioShadows.lifted(theme.colorScheme.shadow),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: detailBuilder(context),
+  Widget _detailCard(
+    ThemeData theme,
+    WidgetBuilder detailBuilder,
+    double maxHeight,
+  ) {
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      child: Material(
+        color: Colors.transparent,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerLowest,
+            border: Border.all(color: theme.colorScheme.outlineVariant),
+            borderRadius: BorderRadius.circular(StudioRadii.md),
+            boxShadow: StudioShadows.lifted(theme.colorScheme.shadow),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: SingleChildScrollView(child: detailBuilder(context)),
+          ),
         ),
       ),
     );
