@@ -1,16 +1,93 @@
 use anyhow::{Context, Result};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder,
+    TransactionTrait,
 };
 
 use crate::studio::entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentOutcomeRecord, AgentOutcomeStatus, CreateAgentOutcome, UpdateAgentOutcome,
+    AgentOutcomeRecord, AgentOutcomeStatus, CreateAgentOutcome, TaskRunPhase, UpdateAgentOutcome,
 };
 
 impl StudioStore {
+    pub(crate) async fn create_explorer_outcome(
+        &self,
+        session_id: &str,
+        input: CreateAgentOutcome,
+    ) -> Result<Option<AgentOutcomeRecord>> {
+        if input.work_unit_id.is_some() {
+            anyhow::bail!("explorer outcome must not reference a work unit");
+        }
+        let tx = self.db.begin().await?;
+        let Some(run) = entities::task_run::Entity::find()
+            .filter(entities::task_run::Column::SessionId.eq(session_id.to_string()))
+            .filter(entities::task_run::Column::Phase.is_not_in([
+                TaskRunPhase::Completed.as_str(),
+                TaskRunPhase::Blocked.as_str(),
+                TaskRunPhase::Failed.as_str(),
+                TaskRunPhase::Cancelled.as_str(),
+            ]))
+            .order_by_desc(entities::task_run::Column::UpdatedAt)
+            .order_by_desc(entities::task_run::Column::Id)
+            .one(&tx)
+            .await?
+        else {
+            tx.rollback().await?;
+            return Ok(None);
+        };
+        if run.id != input.task_run_id {
+            tx.rollback().await?;
+            anyhow::bail!("explorer outcome task run does not match active session task");
+        }
+        let now = unix_seconds();
+        let outcome = agent_outcome_record(
+            entities::agent_outcome::ActiveModel {
+                id: Set(new_id("agent-outcome")),
+                task_run_id: Set(input.task_run_id),
+                work_unit_id: Set(None),
+                agent_id: Set(input.agent_id),
+                owner_path: Set(input.owner_path),
+                initiated_by: Set(input.initiated_by),
+                requested_by_call_id: Set(input.requested_by_call_id),
+                role: Set(input.role),
+                status: Set(input.status.as_str().to_string()),
+                attempt: Set(input.attempt as i32),
+                summary: Set(None),
+                error: Set(None),
+                delivery_json: Set(None),
+                review_json: Set(None),
+                created_at: Set(now),
+                updated_at: Set(now),
+            }
+            .insert(&tx)
+            .await?,
+        )?;
+        tx.commit().await?;
+        Ok(Some(outcome))
+    }
+
+    pub(crate) async fn update_spawned_outcome(
+        &self,
+        outcome_id: &str,
+        agent_id: &str,
+        status: AgentOutcomeStatus,
+        error: Option<String>,
+    ) -> Result<()> {
+        let outcome = entities::agent_outcome::Entity::find_by_id(outcome_id.to_string())
+            .filter(entities::agent_outcome::Column::AgentId.eq(agent_id.to_string()))
+            .one(&self.db)
+            .await?
+            .context("spawned agent outcome not found")?;
+        let mut active: entities::agent_outcome::ActiveModel = outcome.into();
+        active.status = Set(status.as_str().to_string());
+        active.error = Set(error);
+        active.updated_at = Set(unix_seconds());
+        active.update(&self.db).await?;
+        Ok(())
+    }
+
     pub(crate) async fn create_agent_outcome(
         &self,
         input: CreateAgentOutcome,

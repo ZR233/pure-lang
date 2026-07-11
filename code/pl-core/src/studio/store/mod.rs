@@ -20,4 +20,19 @@ pub struct StudioStore {
 }
 
 #[cfg(test)]
+impl StudioStore {
+    pub(crate) async fn execute_test_sql(&self, sql: &str) {
+        use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+
+        self.db
+            .execute(Statement::from_string(
+                DatabaseBackend::Sqlite,
+                sql.to_string(),
+            ))
+            .await
+            .unwrap();
+    }
+}
+
+#[cfg(test)]
 mod tests;

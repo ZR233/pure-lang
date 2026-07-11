@@ -10,9 +10,10 @@ pub(crate) use supervisor::emit_subagent_activity;
 pub use supervisor::{
     AgentCloseDispositionKind, AgentCloseLifecycleRequest, AgentHandle, AgentInputBusyAction,
     AgentInputInitialAction, AgentInputQueue, AgentInputStartAttempt, AgentInputSubmission,
-    AgentInputTurnMode, AgentLifecycleHook, AgentLifecycleStatusKind, AgentMessage,
-    AgentMessageMode, AgentMessageRequest, AgentRunSpec, AgentSpawnInput,
-    AgentSpawnLifecycleRequest, AgentSpawnPreparation, AgentStatusUpdate, AgentSupervisor,
+    AgentInputTurnMode, AgentLifecycleHook, AgentLifecycleProjection,
+    AgentLifecycleProjectionRequest, AgentLifecycleStatusKind, AgentMessage, AgentMessageMode,
+    AgentMessageRequest, AgentRunSpec, AgentSpawnInput, AgentSpawnLifecycleRequest,
+    AgentSpawnPreparation, AgentStatusUpdate, AgentSupervisor, AgentTerminalStateChange,
     AgentToolRegistrar, AgentTurnPresence, AgentTurnStartReadiness, AgentTurnStartSnapshot,
     AgentWaitCompletion, AgentWaitLoopError, AgentWaitLoopOptions, AgentWaitLoopResult,
     AgentWaitOutcome, AgentWaitSnapshot, wait_for_agent_completion,

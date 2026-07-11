@@ -102,6 +102,217 @@ async fn invalid_retry_after_success_does_not_downgrade_or_record_error() {
 }
 
 #[tokio::test]
+async fn completed_executor_event_without_delivery_waits_for_delivery() {
+    let fixture = DeliveryFixture::new("terminal-without-delivery", vec!["src/**"]).await;
+    drain_agent_state(
+        &fixture,
+        pl_protocol::AgentStatus::Completed,
+        Some("implementation finished"),
+        None,
+    )
+    .await;
+
+    fixture.assert_waiting().await;
+    drain_agent_state(
+        &fixture,
+        pl_protocol::AgentStatus::Completed,
+        Some("duplicate completion"),
+        None,
+    )
+    .await;
+    let outcome = fixture.outcome().await;
+    assert_eq!(outcome.summary.as_deref(), Some("implementation finished"));
+    assert_eq!(
+        outcome.error.as_deref(),
+        Some("executor completed without a successful delivery")
+    );
+    let agent = fixture
+        .store
+        .list_agents(&fixture.session_id)
+        .await
+        .unwrap()[0]
+        .clone();
+    assert_eq!(agent.status, pl_protocol::AgentStatus::Waiting);
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn completed_event_preserves_successful_delivery_and_studio_snapshot() {
+    let fixture = DeliveryFixture::new("terminal-after-delivery", vec!["src/**"]).await;
+    fixture.commit_file("src/lib.rs");
+    let head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+    let delivery = fixture.submit(&head).await.unwrap();
+
+    drain_agent_state(
+        &fixture,
+        pl_protocol::AgentStatus::Completed,
+        Some("turn completed"),
+        None,
+    )
+    .await;
+
+    assert_eq!(
+        fixture.outcome().await.status,
+        AgentOutcomeStatus::Completed
+    );
+    assert_eq!(fixture.outcome().await.delivery, Some(delivery));
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Delivered);
+    let agent = fixture
+        .store
+        .list_agents(&fixture.session_id)
+        .await
+        .unwrap()[0]
+        .clone();
+    assert_eq!(agent.status, pl_protocol::AgentStatus::Completed);
+    assert_eq!(agent.summary.as_deref(), Some("cargo test passed"));
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn errored_and_interrupted_events_persist_terminal_task_states() {
+    for (name, agent_status, outcome_status, work_unit_status) in [
+        (
+            "terminal-error",
+            pl_protocol::AgentStatus::Errored,
+            AgentOutcomeStatus::Failed,
+            WorkUnitStatus::Failed,
+        ),
+        (
+            "terminal-interrupted",
+            pl_protocol::AgentStatus::Interrupted,
+            AgentOutcomeStatus::Cancelled,
+            WorkUnitStatus::Cancelled,
+        ),
+    ] {
+        let fixture = DeliveryFixture::new(name, vec!["src/**"]).await;
+        drain_agent_state(
+            &fixture,
+            agent_status,
+            Some("terminal summary"),
+            Some("boom"),
+        )
+        .await;
+
+        let outcome = fixture.outcome().await;
+        assert_eq!(outcome.status, outcome_status);
+        assert_eq!(outcome.summary.as_deref(), Some("terminal summary"));
+        assert_eq!(outcome.error.as_deref(), Some("boom"));
+        assert_eq!(fixture.work_unit().await.status, work_unit_status);
+        fixture.cleanup();
+    }
+}
+
+#[tokio::test]
+async fn duplicate_terminal_event_does_not_reopen_or_duplicate_outcome() {
+    let fixture = DeliveryFixture::new("duplicate-terminal", vec!["src/**"]).await;
+    drain_agent_state(
+        &fixture,
+        pl_protocol::AgentStatus::Errored,
+        Some("first"),
+        Some("first error"),
+    )
+    .await;
+    drain_agent_state(
+        &fixture,
+        pl_protocol::AgentStatus::Completed,
+        Some("second"),
+        None,
+    )
+    .await;
+
+    let outcomes = fixture
+        .store
+        .list_agent_outcomes(&fixture.task_run_id)
+        .await
+        .unwrap();
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].status, AgentOutcomeStatus::Failed);
+    assert_eq!(outcomes[0].summary.as_deref(), Some("first"));
+    assert_eq!(outcomes[0].error.as_deref(), Some("first error"));
+    assert_eq!(fixture.work_unit().await.status, WorkUnitStatus::Failed);
+    fixture.cleanup();
+}
+
+#[tokio::test]
+async fn terminal_persistence_failure_blocks_task_and_suppresses_memory_snapshot() {
+    let fixture = DeliveryFixture::new("terminal-store-failure", vec!["src/**"]).await;
+    fixture
+        .store
+        .execute_test_sql("DROP TABLE agent_outcomes")
+        .await;
+    let config_store = crate::config::ConfigStore::new(crate::config::ConfigPaths::from_home(
+        std::env::temp_dir().join("pure-terminal-store-failure"),
+    ));
+    let runtime = crate::studio::StudioRuntime::new(fixture.store.clone(), config_store);
+    let mut studio_events = runtime.events().subscribe();
+    let (event_tx, event_rx) = tokio::sync::broadcast::channel(8);
+    let drain = {
+        let runtime = runtime.clone();
+        let session_id = fixture.session_id.clone();
+        tokio::spawn(async move {
+            runtime.drain_agent_events(session_id, event_rx).await;
+        })
+    };
+    event_tx
+        .send(pl_trace::AgentEvent::AgentStateChanged {
+            id: fixture.subagent.id.clone(),
+            path: "/root/executor".to_string(),
+            parent_path: Some("/root".to_string()),
+            role: "executor".to_string(),
+            task: "Implement delivery".to_string(),
+            status: pl_protocol::AgentStatus::Completed,
+            summary: Some("memory completion".to_string()),
+            depth: 1,
+            error: None,
+            reason: None,
+            budget_limit_kind: None,
+            budget_usage: None,
+            updated_at: 10,
+        })
+        .unwrap();
+    drop(event_tx);
+    drain.await.unwrap();
+
+    let run = fixture
+        .store
+        .read_task_run(&fixture.task_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.phase, TaskRunPhase::Blocked);
+    assert!(!fixture.coordinator.process_lease_is_held(&run));
+    assert!(
+        run.status_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("terminal agent state persistence failed")
+    );
+    assert!(
+        fixture
+            .store
+            .list_agents(&fixture.session_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let diagnostic = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let event = studio_events.recv().await.unwrap();
+            if let pl_protocol::StudioEventKind::TurnChanged { turn } = event.kind
+                && turn.reason.as_deref().is_some_and(|reason| {
+                    reason.contains("terminal agent state persistence failed")
+                })
+            {
+                break;
+            }
+        }
+    })
+    .await;
+    assert!(diagnostic.is_ok());
+    fixture.cleanup();
+}
+
+#[tokio::test]
 async fn dirty_tracked_and_untracked_deliveries_wait_for_retry() {
     for (name, untracked) in [("dirty-tracked", false), ("dirty-untracked", true)] {
         let fixture = DeliveryFixture::new(name, vec!["src/**"]).await;
@@ -529,6 +740,7 @@ async fn child_dispatch_resolves_delivery_without_task_session_in_tool_input() {
 struct DeliveryFixture {
     coordinator: Arc<TaskCoordinator>,
     store: StudioStore,
+    session_id: String,
     task_run_id: String,
     work_unit_id: String,
     outcome_id: String,
@@ -629,6 +841,7 @@ impl DeliveryFixture {
         Self {
             coordinator,
             store,
+            session_id: session.id,
             task_run_id,
             work_unit_id: work_unit.id,
             outcome_id: outcome.id,
@@ -694,6 +907,51 @@ impl DeliveryFixture {
         remove_repository(self.worktree);
         remove_repository(self.repository);
     }
+}
+
+async fn drain_agent_state(
+    fixture: &DeliveryFixture,
+    status: pl_protocol::AgentStatus,
+    summary: Option<&str>,
+    error: Option<&str>,
+) {
+    let config_store = crate::config::ConfigStore::new(crate::config::ConfigPaths::from_home(
+        std::env::temp_dir().join(format!(
+            "pure-terminal-outcome-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        )),
+    ));
+    let runtime = crate::studio::StudioRuntime::new(fixture.store.clone(), config_store);
+    let (event_tx, event_rx) = tokio::sync::broadcast::channel(8);
+    let drain = {
+        let runtime = runtime.clone();
+        let session_id = fixture.session_id.clone();
+        tokio::spawn(async move {
+            runtime.drain_agent_events(session_id, event_rx).await;
+        })
+    };
+    event_tx
+        .send(pl_trace::AgentEvent::AgentStateChanged {
+            id: fixture.subagent.id.clone(),
+            path: "/root/executor".to_string(),
+            parent_path: Some("/root".to_string()),
+            role: "executor".to_string(),
+            task: "Implement delivery".to_string(),
+            status,
+            summary: summary.map(str::to_string),
+            depth: 1,
+            error: error.map(str::to_string),
+            reason: None,
+            budget_limit_kind: None,
+            budget_usage: None,
+            updated_at: 10,
+        })
+        .unwrap();
+    drop(event_tx);
+    drain.await.unwrap();
 }
 
 #[tokio::test]

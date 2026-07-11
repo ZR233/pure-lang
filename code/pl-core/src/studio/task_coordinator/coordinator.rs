@@ -167,12 +167,25 @@ impl TaskCoordinator {
         }
     }
 
-    async fn block_run(&self, run: &TaskRunRecord, reason: String) -> Result<()> {
+    pub(super) async fn block_run(&self, run: &TaskRunRecord, reason: String) -> Result<()> {
         self.store
             .transition_task_run(&run.id, TaskRunPhase::Blocked, Some(reason))
             .await?;
         self.release_owned_process_lease(&run.id);
+        release_process_lease(
+            &BranchKey::new(Path::new(&run.git_common_dir), &run.branch),
+            &run.id,
+        );
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn process_lease_is_held(&self, run: &TaskRunRecord) -> bool {
+        process_leases()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&BranchKey::new(Path::new(&run.git_common_dir), &run.branch))
+            .is_some_and(|owner| owner == &run.id)
     }
 
     fn release_owned_process_lease(&self, task_run_id: &str) {
