@@ -10,6 +10,23 @@ use super::super::git::{changed_files_between, inspect_repository};
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(30);
 
+#[derive(Clone, Copy)]
+pub(super) struct ExactRepositoryScope<'a> {
+    pub(super) workspace_root: &'a Path,
+    pub(super) git_common_dir: &'a Path,
+    pub(super) branch: &'a str,
+    pub(super) head: &'a str,
+}
+
+impl ExactRepositoryScope<'_> {
+    pub(super) fn matches(&self, snapshot: &super::super::git::RepositorySnapshot) -> bool {
+        normalized_path(&snapshot.workspace_root) == normalized_path(self.workspace_root)
+            && normalized_path(&snapshot.git_common_dir) == normalized_path(self.git_common_dir)
+            && snapshot.branch == self.branch
+            && snapshot.head == self.head
+    }
+}
+
 pub(super) async fn git_path_is_ignored(workspace: &Path, path: &str) -> Result<bool> {
     let output = run_git(workspace, &["check-ignore", "--no-index", "-q", "--", path]).await?;
     match output.status.code() {
@@ -64,13 +81,31 @@ pub(super) async fn read_head(workspace: &Path) -> Result<String> {
     Ok(String::from_utf8(output.stdout)?.trim().to_string())
 }
 
+pub(super) async fn write_tree(workspace: &Path) -> Result<String> {
+    let output = run_git_checked(workspace, &["write-tree"]).await?;
+    Ok(String::from_utf8(output.stdout)?.trim().to_string())
+}
+
+pub(super) async fn read_tree(workspace: &Path, revision: &str) -> Result<String> {
+    let tree_revision = format!("{revision}^{{tree}}");
+    let output = run_git_checked(workspace, &["rev-parse", &tree_revision]).await?;
+    Ok(String::from_utf8(output.stdout)?.trim().to_string())
+}
+
 pub(super) async fn validate_exact_commit(
     workspace: &Path,
     commit: &str,
     previous_head: &str,
     expected_paths: &[String],
+    expected_tree: &str,
 ) -> Result<Vec<String>> {
     ensure_single_parent(workspace, commit, previous_head).await?;
+    let committed_tree = read_tree(workspace, commit).await?;
+    if committed_tree != expected_tree {
+        bail!(
+            "commit tree does not match the validated staged tree: expected {expected_tree}, actual {committed_tree}"
+        );
+    }
     let changed_files = changed_files_between(workspace, previous_head, commit).await?;
     let actual = changed_files.iter().collect::<BTreeSet<_>>();
     let expected = expected_paths.iter().collect::<BTreeSet<_>>();
@@ -113,17 +148,16 @@ pub(super) async fn ensure_single_parent(
 }
 
 pub(super) async fn compensate_commit(
-    workspace: &Path,
-    commit: &str,
+    scope: ExactRepositoryScope<'_>,
     previous_head: &str,
 ) -> Result<()> {
-    let snapshot = inspect_repository(workspace, true).await?;
-    if snapshot.head != commit {
-        bail!("cannot compensate commit because task HEAD changed");
+    let snapshot = inspect_repository(scope.workspace_root, true).await?;
+    if !scope.matches(&snapshot) {
+        bail!("cannot compensate commit because the exact task repository scope changed");
     }
-    run_git_checked(workspace, &["reset", "--mixed", previous_head]).await?;
+    run_git_checked(scope.workspace_root, &["reset", "--mixed", previous_head]).await?;
     run_git_checked(
-        workspace,
+        scope.workspace_root,
         &[
             "restore",
             "--source",

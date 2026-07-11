@@ -39,6 +39,9 @@ pub(crate) struct TaskCoordinator {
     #[cfg(test)]
     pub(super) design_after_commit_barrier: Mutex<Option<super::design::DesignCommitTestBarrier>>,
     #[cfg(test)]
+    pub(super) design_before_head_persist_barrier:
+        Mutex<Option<super::design::DesignCommitTestBarrier>>,
+    #[cfg(test)]
     pub(super) fail_design_compensation: std::sync::atomic::AtomicBool,
 }
 
@@ -56,6 +59,8 @@ impl TaskCoordinator {
             branch_mutation_lock: tokio::sync::Mutex::new(()),
             #[cfg(test)]
             design_after_commit_barrier: Mutex::new(None),
+            #[cfg(test)]
+            design_before_head_persist_barrier: Mutex::new(None),
             #[cfg(test)]
             fail_design_compensation: std::sync::atomic::AtomicBool::new(false),
         }

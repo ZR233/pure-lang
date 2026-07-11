@@ -577,6 +577,84 @@ async fn commit_hook_staged_source_injection_blocks_without_accepting_mixed_comm
 }
 
 #[tokio::test]
+async fn commit_hook_cannot_replace_validated_design_content() {
+    let fixture = DesignFixture::new("hook-design-content-injection").await;
+    let hook = fixture.repository.join(".git/hooks/pre-commit");
+    std::fs::write(
+        &hook,
+        "#!/bin/sh\nprintf 'hook-mutated\\n' > design/spec.md\ngit add -- design/spec.md\n",
+    )
+    .unwrap();
+    make_executable(&hook);
+
+    assert!(fixture.update(DESIGN_PATCH).await.is_err());
+
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.phase, TaskRunPhase::Blocked);
+    assert!(run.design_commit.is_none());
+    assert_eq!(fixture.design_text(), "hook-mutated\n");
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
+async fn same_commit_on_another_branch_is_not_safe_to_compensate() {
+    let fixture = DesignFixture::new("same-commit-other-branch").await;
+    inject_design_transaction_failure(&fixture.store).await;
+    let barrier = DesignCommitTestBarrier::new();
+    fixture
+        .coordinator
+        .set_design_before_head_persist_barrier(barrier.clone());
+    let coordinator = fixture.coordinator.clone();
+    let session_id = fixture.session_id.clone();
+    let repository = fixture.repository.clone();
+    let update = tokio::spawn(async move {
+        coordinator
+            .update_design(&session_id, &repository, DESIGN_PATCH)
+            .await
+    });
+    barrier.wait_until_committed().await;
+    let exact_commit = fixture.head();
+    git(
+        &fixture.repository,
+        &["switch", "-c", "external-same-commit"],
+    );
+    barrier.release().await;
+
+    assert!(update.await.unwrap().is_err());
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.phase, TaskRunPhase::Blocked);
+    assert_eq!(fixture.head(), exact_commit);
+    assert_eq!(
+        git_output(
+            &fixture.repository,
+            &["symbolic-ref", "--quiet", "--short", "HEAD"]
+        ),
+        "external-same-commit"
+    );
+    fixture.cleanup().await;
+}
+
+#[tokio::test]
+async fn revert_pre_commit_hook_failure_blocks_and_preserves_git_state() {
+    assert_revert_hook_failure("revert-pre-commit-failure", "pre-commit").await;
+}
+
+#[tokio::test]
+async fn revert_commit_msg_hook_failure_blocks_and_preserves_git_state() {
+    assert_revert_hook_failure("revert-commit-msg-failure", "commit-msg").await;
+}
+
+#[tokio::test]
 async fn revert_post_commit_dirty_failure_blocks_and_preserves_external_content() {
     let fixture = DesignFixture::new("revert-post-commit-dirty").await;
     fixture.update(DESIGN_PATCH).await.unwrap();
@@ -996,6 +1074,46 @@ async fn inject_design_transaction_failure(store: &StudioStore) {
              BEGIN SELECT RAISE(FAIL, 'injected design transaction failure'); END;",
         )
         .await;
+}
+
+async fn assert_revert_hook_failure(name: &str, hook_name: &str) {
+    let fixture = DesignFixture::new(name).await;
+    let design = fixture.update(DESIGN_PATCH).await.unwrap();
+    let hook = fixture.repository.join(format!(".git/hooks/{hook_name}"));
+    std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+    make_executable(&hook);
+
+    assert!(
+        fixture
+            .coordinator
+            .revert_design_for_no_source_cancel(&fixture.run.id)
+            .await
+            .is_err()
+    );
+
+    let run = fixture
+        .store
+        .read_task_run(&fixture.run.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.phase, TaskRunPhase::Blocked);
+    assert!(
+        run.status_message
+            .as_deref()
+            .is_some_and(|message| message.contains("Git state was preserved"))
+    );
+    assert_eq!(fixture.head(), design.design_commit);
+    assert_eq!(
+        git_output(
+            &fixture.repository,
+            &["rev-parse", "--verify", "REVERT_HEAD"]
+        ),
+        design.design_commit
+    );
+    assert_eq!(fixture.design_text().replace("\r\n", "\n"), "before\n");
+    assert_eq!(fixture.status(), "M  design/spec.md");
+    fixture.cleanup().await;
 }
 
 fn init_repository(name: &str) -> PathBuf {

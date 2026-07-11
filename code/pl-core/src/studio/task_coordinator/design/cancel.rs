@@ -69,12 +69,27 @@ impl TaskCoordinator {
         )
         .await?;
         ensure_only_validated_design_changes(&design_paths, &design_paths)?;
+        let reverted_tree = read_tree(Path::new(&run.workspace_root), &run.base_commit).await?;
 
-        run_git_checked(
-            Path::new(&run.workspace_root),
-            &["revert", "--no-edit", design_commit],
-        )
-        .await?;
+        let workspace = Path::new(&run.workspace_root);
+        let revert_result = async {
+            run_git_checked(workspace, &["revert", "--no-commit", design_commit])
+                .await
+                .context("failed to apply the focused design revert")?;
+            run_git_checked(workspace, &["commit", "-m", "撤销任务设计提交"])
+                .await
+                .context("failed to commit the focused design revert")?;
+            Ok::<_, anyhow::Error>(())
+        }
+        .await;
+        if let Err(error) = revert_result {
+            self.block_run(
+                &run,
+                format!("design revert failed and Git state was preserved: {error}"),
+            )
+            .await?;
+            return Err(error).context("design revert failed; Git state was preserved");
+        }
         let revert_commit = match read_head(Path::new(&run.workspace_root)).await {
             Ok(commit) => commit,
             Err(error) => {
@@ -89,7 +104,13 @@ impl TaskCoordinator {
         #[cfg(test)]
         self.wait_after_design_commit().await;
         let _reverted_paths = match self
-            .validate_captured_branch_commit(&run, &revert_commit, design_commit, &design_paths)
+            .validate_captured_branch_commit(
+                &run,
+                &revert_commit,
+                design_commit,
+                &design_paths,
+                &reverted_tree,
+            )
             .await
         {
             Ok(exact) => exact,
