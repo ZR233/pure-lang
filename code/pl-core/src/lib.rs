@@ -33,8 +33,8 @@ pub use agent::{
     AgentTurnPresence, AgentTurnStartReadiness, AgentTurnStartSnapshot, AgentWaitCompletion,
     AgentWaitLoopError, AgentWaitLoopOptions, AgentWaitLoopResult, AgentWaitOutcome,
     AgentWaitSnapshot, CloseDisposition, CloseOutcome, LocalWorktreeBackend, MergeOutcome,
-    WorktreeBackend, WorktreeError, WorktreeHandle, WorktreeManager, WorktreeRef,
-    wait_for_agent_completion,
+    WorktreeBackend, WorktreeCreateFailure, WorktreeError, WorktreeHandle, WorktreeManager,
+    WorktreeRef, wait_for_agent_completion,
 };
 pub use attachment::MaterializedAttachment;
 pub use config::{

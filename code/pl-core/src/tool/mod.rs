@@ -45,6 +45,7 @@ pub use container::{
 pub use file::{
     CopyPathTool, CreateDirectoryTool, DeletePathTool, MovePathTool, StatPathTool, WriteFileTool,
 };
+pub(crate) use git::LocalExecutionFailure;
 pub use git::{
     ExecutionBackend, ExecutionOutput, ExecutionRequest, GIT_TOKEN_ENV, GitCredential,
     GitCredentialOperation, GitCredentialProvider, GitCredentialRequest, GitPolicy,

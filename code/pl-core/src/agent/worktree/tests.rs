@@ -7,8 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::backend::BoxFuture;
 use super::{
-    CloseDisposition, CloseOutcome, MergeOutcome, WorktreeBackend, WorktreeCreateSpec,
-    WorktreeError, WorktreeHandle, WorktreeManager,
+    CloseDisposition, CloseOutcome, MergeOutcome, WorktreeBackend, WorktreeCreateFailure,
+    WorktreeCreateSpec, WorktreeError, WorktreeHandle, WorktreeManager,
 };
 
 #[derive(Debug)]
@@ -24,14 +24,14 @@ impl WorktreeBackend for FailingCleanupBackend {
         _branch: &'a str,
         _target_path: &'a Path,
         _base_commit: &'a str,
-    ) -> BoxFuture<'a, Result<(), WorktreeError>> {
+    ) -> BoxFuture<'a, Result<(), WorktreeCreateFailure>> {
         Box::pin(async move {
             self.calls.lock().unwrap().push("create".to_string());
             if self.create_fails {
-                Err(git_error(
+                Err(WorktreeCreateFailure::may_have_created(git_error(
                     "worktree add",
                     "create failed after partial setup",
-                ))
+                )))
             } else {
                 Ok(())
             }
@@ -226,6 +226,63 @@ async fn create_failure_reports_all_cleanup_failures() {
             "missing `{expected}` in `{error}`"
         );
     }
+    fs::remove_dir_all(repo).ok();
+}
+
+#[tokio::test]
+async fn create_failure_preserves_preexisting_branch() {
+    let repo = temp_git_repo();
+    let branch = "pure-agent-preexisting";
+    let original_head = git_output(&repo, &["rev-parse", "HEAD"]);
+    run_git(&repo, &["branch", branch, &original_head]);
+    let manager = WorktreeManager::local(repo.clone());
+
+    manager
+        .create_from_spec(WorktreeCreateSpec {
+            repo_root: repo.clone(),
+            path: repo.join(".pure/worktrees/new-target"),
+            branch: branch.to_string(),
+            base_commit: original_head.clone(),
+        })
+        .await
+        .expect_err("an existing branch must reject create");
+
+    assert_eq!(git_output(&repo, &["branch", "--list", branch]), branch);
+    assert_eq!(git_output(&repo, &["rev-parse", branch]), original_head);
+    fs::remove_dir_all(repo).ok();
+}
+
+#[tokio::test]
+async fn create_failure_preserves_preexisting_target_worktree() {
+    let repo = temp_git_repo();
+    let target = repo.join(".pure/worktrees/existing-target");
+    let target_text = target.to_string_lossy().to_string();
+    run_git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "pure-agent-existing-target",
+            &target_text,
+            "HEAD",
+        ],
+    );
+    let original_head = git_output(&target, &["rev-parse", "HEAD"]);
+    let manager = WorktreeManager::local(repo.clone());
+
+    manager
+        .create_from_spec(WorktreeCreateSpec {
+            repo_root: repo.clone(),
+            path: target.clone(),
+            branch: "pure-agent-new-target".to_string(),
+            base_commit: original_head.clone(),
+        })
+        .await
+        .expect_err("an existing target worktree must reject create");
+
+    assert!(target.is_dir(), "preexisting worktree was removed");
+    assert_eq!(git_output(&target, &["rev-parse", "HEAD"]), original_head);
     fs::remove_dir_all(repo).ok();
 }
 

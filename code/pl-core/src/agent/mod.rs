@@ -19,5 +19,6 @@ pub use supervisor::{
 };
 pub use worktree::{
     CloseDisposition, CloseOutcome, LocalWorktreeBackend, MergeOutcome, WorktreeBackend,
-    WorktreeCreateSpec, WorktreeError, WorktreeHandle, WorktreeManager, WorktreeRef,
+    WorktreeCreateFailure, WorktreeCreateSpec, WorktreeError, WorktreeHandle, WorktreeManager,
+    WorktreeRef,
 };

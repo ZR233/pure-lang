@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::future::Future;
 use std::path::{Component, Path, PathBuf};
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -159,6 +160,56 @@ pub trait ExecutionBackend: fmt::Debug + Send + Sync {
 #[derive(Debug, Clone, Default)]
 pub struct LocalExecutionBackend;
 
+/// 本地命令失败发生在进程启动前还是启动后。
+#[derive(Debug)]
+pub(crate) enum LocalExecutionFailure {
+    BeforeSpawn(String),
+    AfterSpawn(String),
+    TimedOut,
+}
+
+impl fmt::Display for LocalExecutionFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::BeforeSpawn(error) | Self::AfterSpawn(error) => formatter.write_str(error),
+            Self::TimedOut => formatter.write_str("command timed out"),
+        }
+    }
+}
+
+impl LocalExecutionBackend {
+    pub(crate) async fn run_classified(
+        &self,
+        request: ExecutionRequest,
+    ) -> std::result::Result<ExecutionOutput, LocalExecutionFailure> {
+        let mut command = Command::new(&request.program);
+        command.args(&request.args);
+        command.current_dir(&request.cwd);
+        command.envs(&request.env);
+        command.stdin(Stdio::null());
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::piped());
+        command.kill_on_drop(true);
+        let child = command.spawn().map_err(|error| {
+            LocalExecutionFailure::BeforeSpawn(format!("failed to run command: {error}"))
+        })?;
+        let output = match request.timeout {
+            Some(timeout) => tokio::time::timeout(timeout, child.wait_with_output())
+                .await
+                .map_err(|_| LocalExecutionFailure::TimedOut)?,
+            None => child.wait_with_output().await,
+        }
+        .map_err(|error| {
+            LocalExecutionFailure::AfterSpawn(format!("failed to run command: {error}"))
+        })?;
+        Ok(ExecutionOutput {
+            status: output.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        })
+    }
+}
+
 impl ExecutionBackend for LocalExecutionBackend {
     type Error = String;
 
@@ -166,22 +217,9 @@ impl ExecutionBackend for LocalExecutionBackend {
         &self,
         request: ExecutionRequest,
     ) -> std::result::Result<ExecutionOutput, Self::Error> {
-        let mut command = Command::new(&request.program);
-        command.args(&request.args);
-        command.current_dir(&request.cwd);
-        command.envs(&request.env);
-        let output = match request.timeout {
-            Some(timeout) => tokio::time::timeout(timeout, command.output())
-                .await
-                .map_err(|_| "command timed out".to_string())?,
-            None => command.output().await,
-        }
-        .map_err(|error| format!("failed to run command: {error}"))?;
-        Ok(ExecutionOutput {
-            status: output.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        })
+        self.run_classified(request)
+            .await
+            .map_err(|error| error.to_string())
     }
 }
 

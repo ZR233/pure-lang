@@ -82,6 +82,10 @@ released = git worktree remove + 删除分支 + 清空 AgentEntry.worktree
 - spawn 失败回滚（包括 worktree 创建部分成功、持久化激活失败或
   `start_agent_turn` 失败）必须同步尝试移除 worktree、删除分支并撤销宿主生命周期
   事实。主错误与所有回滚失败必须一并返回，不能把失败的清理报告成成功。
+- `WorktreeBackend::create` 必须用结构化 disposition 声明失败是否可能已创建本次 spec
+  的资源。参数校验、进程启动前 IO 失败和明确的 Git 非零退出不得 cleanup；只有超时、
+  启动后状态不确定或 backend 明确报告 `MayHaveCreated` 时，manager 才能按本次 spec
+  补偿清理，避免删除调用前已存在的 branch 或 worktree。
 
 ## 路径与命名约定
 

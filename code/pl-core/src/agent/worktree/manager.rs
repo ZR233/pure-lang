@@ -5,7 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 
-use super::backend::{LocalWorktreeBackend, MergeOutcome, WorktreeBackend};
+use super::backend::{
+    CreateFailureDisposition, LocalWorktreeBackend, MergeOutcome, WorktreeBackend,
+};
 use super::error::WorktreeError;
 
 /// worktree 目录在 repo 根下的相对位置。
@@ -190,7 +192,7 @@ impl WorktreeManager {
                 .map_err(|error| WorktreeError::Io(error.to_string()))?;
         }
         let handle = WorktreeHandle { path, branch };
-        if let Err(operation) = self
+        if let Err(failure) = self
             .inner
             .backend
             .create(
@@ -201,6 +203,11 @@ impl WorktreeManager {
             )
             .await
         {
+            let disposition = failure.disposition();
+            let operation = failure.into_error();
+            if disposition == CreateFailureDisposition::NoSideEffects {
+                return Err(operation);
+            }
             return match self.discard(&handle).await {
                 Ok(()) => Err(operation),
                 Err(cleanup) => Err(WorktreeError::OperationFailedWithCleanup {

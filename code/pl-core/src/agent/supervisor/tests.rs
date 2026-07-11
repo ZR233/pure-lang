@@ -11,7 +11,8 @@ use tokio_util::sync::CancellationToken;
 use super::state::AgentEntry;
 use super::*;
 use crate::agent::worktree::{
-    MergeOutcome, WorktreeBackend, WorktreeCreateSpec, WorktreeError, WorktreeManager,
+    MergeOutcome, WorktreeBackend, WorktreeCreateFailure, WorktreeCreateSpec, WorktreeError,
+    WorktreeManager,
 };
 use crate::turn::{CompileMode, TurnBudget, TurnOptions};
 
@@ -94,7 +95,8 @@ impl WorktreeBackend for FailingSupervisorWorktreeBackend {
         _branch: &'a str,
         _target_path: &'a std::path::Path,
         _base_commit: &'a str,
-    ) -> Pin<Box<dyn std::future::Future<Output = Result<(), WorktreeError>> + Send + 'a>> {
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<(), WorktreeCreateFailure>> + Send + 'a>>
+    {
         Box::pin(async move {
             self.calls.lock().await.push("create".to_string());
             Ok(())
