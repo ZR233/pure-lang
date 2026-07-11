@@ -221,12 +221,14 @@ impl StudioRuntime {
                     } else {
                         None
                     };
-                    if let Some(turn_id) = turn_id.as_deref()
-                        && (!matches!(self.runtime_snapshot().status, StudioRuntimeStatus::Ready)
-                            || !self.active_turns.contains_exact(&session_id, turn_id).await)
-                    {
-                        continue;
-                    }
+                    let visible = match turn_id.as_deref() {
+                        Some(turn_id) => {
+                            matches!(self.runtime_snapshot().status, StudioRuntimeStatus::Ready)
+                                && self.active_turns.contains_exact(&session_id, turn_id).await
+                        }
+                        None => true,
+                    };
+                    let mut terminal_recording = None;
                     if let AgentEvent::AgentStateChanged {
                         id,
                         role,
@@ -260,25 +262,27 @@ impl StudioRuntime {
                                         &error.to_string(),
                                     )
                                     .await;
-                                let _ = self
-                                    .events
-                                    .emit_agent_event(
-                                        &session_id,
-                                        AgentEvent::Error {
-                                            message: diagnostic,
-                                            severity: ErrorSeverity::Recoverable,
-                                        },
-                                    )
-                                    .await;
+                                if visible {
+                                    let _ = self
+                                        .events
+                                        .emit_agent_event(
+                                            &session_id,
+                                            AgentEvent::Error {
+                                                message: diagnostic,
+                                                severity: ErrorSeverity::Recoverable,
+                                            },
+                                        )
+                                        .await;
+                                }
                                 continue;
                             }
                         };
-                        if matches!(
-                            recording,
-                            crate::studio::task_coordinator::TerminalAgentStateRecording::Suppressed
-                        ) {
-                            continue;
-                        }
+                        terminal_recording = Some(recording);
+                    }
+                    if !visible {
+                        continue;
+                    }
+                    if let Some(recording) = terminal_recording {
                         let (projection, continuation_task_run_id) = match recording {
                             crate::studio::task_coordinator::TerminalAgentStateRecording::Changed {
                                 task_run_id,
@@ -287,8 +291,12 @@ impl StudioRuntime {
                             crate::studio::task_coordinator::TerminalAgentStateRecording::Projected(
                                 projection,
                             ) => (Some(projection), None),
-                            crate::studio::task_coordinator::TerminalAgentStateRecording::Unhandled
-                            | crate::studio::task_coordinator::TerminalAgentStateRecording::Suppressed => (None, None),
+                            crate::studio::task_coordinator::TerminalAgentStateRecording::Unhandled => {
+                                (None, None)
+                            }
+                            crate::studio::task_coordinator::TerminalAgentStateRecording::Suppressed => {
+                                continue;
+                            }
                         };
                         if let Some(projection) = projection
                             && let AgentEvent::AgentStateChanged {
@@ -385,7 +393,21 @@ impl StudioRuntime {
                     }
                 }
                 Err(RecvError::Lagged(skipped)) => {
-                    let _ = self.events.emit_stale(&session_id, skipped).await;
+                    let _post_turn_guard = if turn_id.is_some() {
+                        Some(self.post_turn_lock.lock().await)
+                    } else {
+                        None
+                    };
+                    let visible = match turn_id.as_deref() {
+                        Some(turn_id) => {
+                            matches!(self.runtime_snapshot().status, StudioRuntimeStatus::Ready)
+                                && self.active_turns.contains_exact(&session_id, turn_id).await
+                        }
+                        None => true,
+                    };
+                    if visible {
+                        let _ = self.events.emit_stale(&session_id, skipped).await;
+                    }
                 }
                 Err(RecvError::Closed) => break,
             }
