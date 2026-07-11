@@ -254,7 +254,70 @@ fn wait_projection_error(error: PureError) -> PureError {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+    use std::pin::Pin;
+    use std::sync::Arc;
+
+    use tokio::sync::Notify;
+
     use super::*;
+    use crate::agent::{
+        AgentCloseLifecycleRequest, AgentLifecycleHook, AgentRunSpec, AgentSpawnInput,
+        AgentSpawnLifecycleRequest, AgentSpawnPreparation,
+    };
+    use crate::{CompileMode, TurnBudget, TurnOptions};
+
+    #[derive(Debug)]
+    struct BlockingFailedSpawnHook {
+        entered: Arc<Notify>,
+        release: Arc<Notify>,
+    }
+
+    impl AgentLifecycleHook for BlockingFailedSpawnHook {
+        fn prepare_spawn<'a>(
+            &'a self,
+            _request: &'a AgentSpawnLifecycleRequest,
+        ) -> Pin<
+            Box<
+                dyn std::future::Future<Output = Result<AgentSpawnPreparation, PureError>>
+                    + Send
+                    + 'a,
+            >,
+        > {
+            Box::pin(async move {
+                self.entered.notify_one();
+                self.release.notified().await;
+                Err(PureError::ToolExecutionFailed {
+                    tool: "spawn_agent".to_string(),
+                    error: "intentional rollback".to_string(),
+                })
+            })
+        }
+
+        fn activate_spawn<'a>(
+            &'a self,
+            _request: &'a AgentSpawnLifecycleRequest,
+            _preparation: &'a AgentSpawnPreparation,
+        ) -> Pin<Box<dyn std::future::Future<Output = Result<(), PureError>> + Send + 'a>> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn rollback_spawn<'a>(
+            &'a self,
+            _request: &'a AgentSpawnLifecycleRequest,
+            _preparation: &'a AgentSpawnPreparation,
+            _error: &'a str,
+        ) -> Pin<Box<dyn std::future::Future<Output = Result<(), PureError>> + Send + 'a>> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn validate_close<'a>(
+            &'a self,
+            _request: &'a AgentCloseLifecycleRequest,
+        ) -> Pin<Box<dyn std::future::Future<Output = Result<(), PureError>> + Send + 'a>> {
+            Box::pin(async { Ok(()) })
+        }
+    }
 
     #[tokio::test]
     async fn explicit_unknown_wait_target_returns_actionable_error() {
@@ -310,28 +373,79 @@ mod tests {
         assert_eq!(groups.completed[0].id, "completed");
     }
 
-    #[test]
-    fn resolved_wait_target_missing_from_poll_is_not_an_empty_success() {
-        let target = AgentRecord {
-            id: "agent-closed".to_string(),
-            path: "/root/closed".to_string(),
-            parent_path: Some("/root".to_string()),
-            role: "executor".to_string(),
-            task: "implement".to_string(),
-            status: AgentStatus::Running,
-            summary: None,
-            error: None,
-            reason: None,
-            budget_limit_kind: None,
-            budget_usage: None,
-            depth: 1,
-            updated_at: 1,
-        };
-        let groups = partition_agents(Vec::new(), &[target]);
+    #[tokio::test]
+    async fn resolved_wait_target_removed_before_poll_is_not_an_empty_success() {
+        let entered = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let supervisor = crate::AgentSupervisor::default();
+        supervisor.set_lifecycle_hook(Arc::new(BlockingFailedSpawnHook {
+            entered: Arc::clone(&entered),
+            release: Arc::clone(&release),
+        }));
+        let spawning_supervisor = supervisor.clone();
+        let spawn = tokio::spawn(async move {
+            spawning_supervisor
+                .spawn_agent(
+                    AgentSpawnInput {
+                        task_name: "closed".to_string(),
+                        message: "implement".to_string(),
+                        role: "executor".to_string(),
+                        parent_path: Some("/root".to_string()),
+                        session_id: "session".to_string(),
+                        owned_paths: vec!["code/pl-core/**".to_string()],
+                    },
+                    test_run_spec(),
+                )
+                .await
+        });
+        entered.notified().await;
+        let initial = supervisor.list_agents(None).await.unwrap();
+        let targets = resolve_wait_targets(
+            &WaitAgentArgs {
+                target: Some("/root/closed".to_string()),
+                targets: Vec::new(),
+                timeout_ms: Some(250),
+            },
+            &supervisor,
+            "/root",
+            &initial,
+        )
+        .await
+        .unwrap();
+        release.notify_one();
+        assert!(spawn.await.unwrap().is_err());
+
+        let polled = supervisor.list_agents(None).await.unwrap();
+        assert!(polled.is_empty(), "spawn rollback must remove the target");
+        let groups = partition_agents(polled, &targets);
 
         assert_eq!(groups.completed.len(), 1);
-        assert_eq!(groups.completed[0].id, "agent-closed");
+        assert_eq!(groups.completed[0].path, "/root/closed");
         assert_eq!(groups.completed[0].status, AgentStatus::NotFound);
         assert!(groups.pending.is_empty());
+    }
+
+    fn test_run_spec() -> AgentRunSpec {
+        let mut provider_info =
+            pl_model::ProviderInfo::openai(Some("http://example.invalid".into()));
+        provider_info.default_model = "test-model".to_string();
+        AgentRunSpec {
+            provider: pl_model::create_provider(provider_info).unwrap(),
+            reasoning_effort: None,
+            config: None,
+            mcp_runtime: None,
+            lsp_runtime: None,
+            workspace_instructions: None,
+            instruction_snapshot: None,
+            tool_registrar: None,
+            workspace_root: PathBuf::from("."),
+            options: TurnOptions::default(),
+            event_tx: tokio::sync::broadcast::channel(8).0,
+            call_id: "call-spawn".to_string(),
+            message: "implement".to_string(),
+            mode: CompileMode::Simple,
+            budget: TurnBudget::default(),
+            initial_session: crate::CoreSession::new(),
+        }
     }
 }

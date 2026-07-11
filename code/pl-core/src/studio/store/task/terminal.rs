@@ -122,7 +122,9 @@ impl StudioStore {
                     | TaskRunPhase::Failed
                     | TaskRunPhase::Cancelled
             ) {
-                return Ok(TerminalAgentStateRecording::Unhandled);
+                return Ok(TerminalAgentStateRecording::Projected(
+                    projection_from_outcome(outcome)?,
+                ));
             }
             let current = AgentOutcomeStatus::from_str(&outcome.status)
                 .with_context(|| format!("invalid agent outcome status: {}", outcome.status))?;
