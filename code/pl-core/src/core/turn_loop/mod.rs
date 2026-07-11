@@ -59,8 +59,8 @@ pub(super) async fn run_turn_with_trace(
     agent_supervisor
         .configure_limits(AGENT_MAX_COUNT, AGENT_MAX_DEPTH)
         .await;
-    // root turn 启动时基于主 workspace 启用 per-subagent worktree 隔离（幂等，
-    // 首次启用时清理上次进程残留的孤儿 worktree）。
+    // root turn 启动时基于主 workspace 幂等绑定 per-subagent worktree 仓库；
+    // durable-aware 孤儿对账只在 Studio 启动恢复阶段执行。
     if active_subagent.is_none()
         && let Ok(repo_root) = crate::workspace::resolve_workspace_root(&workspace_root)
     {

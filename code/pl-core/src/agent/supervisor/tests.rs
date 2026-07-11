@@ -12,7 +12,7 @@ use super::state::AgentEntry;
 use super::*;
 use crate::agent::worktree::{
     MergeOutcome, WorktreeBackend, WorktreeCreateFailure, WorktreeCreateSpec, WorktreeError,
-    WorktreeManager,
+    WorktreeHandle, WorktreeManager,
 };
 use crate::turn::{CompileMode, TurnBudget, TurnOptions};
 
@@ -937,6 +937,43 @@ async fn close_agent_waits_for_cancelled_task_to_finish() {
     let entry = state.agents.get("worker").unwrap();
     assert_eq!(entry.record.status, AgentStatus::Shutdown);
     assert!(entry.task.is_none());
+}
+
+#[tokio::test]
+async fn task_runtime_quiesce_waits_and_preserves_worktree() {
+    let supervisor = AgentSupervisor::default();
+    let token = CancellationToken::new();
+    let task_token = token.clone();
+    let handle = tokio::spawn(async move {
+        task_token.cancelled().await;
+    });
+    let record = agent_record("durable-worker", AgentStatus::Running);
+    let worktree = WorktreeHandle {
+        path: PathBuf::from("C:/repo/.pure/worktrees/run/agent"),
+        branch: "pure-task-run-agent".to_string(),
+    };
+    {
+        let mut state = supervisor.state.lock().await;
+        state
+            .path_to_id
+            .insert(record.path.clone(), record.id.clone());
+        let mut entry = AgentEntry::new(record);
+        entry.cancellation_token = Some(token);
+        entry.task = Some(handle);
+        entry.worktree = Some(worktree.clone());
+        state.agents.insert("durable-worker".to_string(), entry);
+    }
+
+    supervisor
+        .quiesce_preserving_worktrees("runtime shutdown")
+        .await
+        .unwrap();
+
+    let state = supervisor.state.lock().await;
+    let entry = state.agents.get("durable-worker").unwrap();
+    assert_eq!(entry.record.status, AgentStatus::Shutdown);
+    assert!(entry.task.is_none());
+    assert_eq!(entry.worktree.as_ref(), Some(&worktree));
 }
 
 #[tokio::test]

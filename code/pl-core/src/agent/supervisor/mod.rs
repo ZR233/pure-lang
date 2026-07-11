@@ -553,6 +553,10 @@ impl Default for AgentSupervisor {
 }
 
 impl AgentSupervisor {
+    pub(crate) fn shares_runtime_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.state, &other.state)
+    }
+
     pub fn set_lifecycle_hook(&self, hook: Arc<dyn AgentLifecycleHook>) {
         *self
             .lifecycle_hook

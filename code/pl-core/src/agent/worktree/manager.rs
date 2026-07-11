@@ -119,13 +119,10 @@ impl WorktreeManager {
         }
     }
 
-    /// 幂等启用 worktree 支持：设置 repo_root 并在首次启用时清理孤儿。
+    /// 幂等启用 worktree 支持，仅绑定 repo_root。
     pub async fn enable(&self, repo_root: PathBuf) {
-        let is_new = self.inner.repo_root.set(repo_root.clone()).is_ok();
+        let _ = self.inner.repo_root.set(repo_root);
         self.inner.enabled.store(true, Ordering::Release);
-        if is_new {
-            self.gc_orphans(&repo_root).await;
-        }
     }
 
     /// worktree 支持是否已启用。
@@ -305,25 +302,6 @@ impl WorktreeManager {
                 context: format!("worktree `{}`", handle.path.display()),
                 failures,
             })
-        }
-    }
-
-    /// 扫描 `.pure/worktrees/` 删除全部残留目录（会话刚启动时不存在存活 worktree）。
-    async fn gc_orphans(&self, repo_root: &Path) {
-        let dir = repo_root.join(WORKTREE_DIR);
-        let mut entries = match tokio::fs::read_dir(&dir).await {
-            Ok(entries) => entries,
-            Err(_) => return,
-        };
-        while let Ok(Some(entry)) = entries.next_entry().await {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let _ = self.inner.backend.remove(repo_root, &path, true).await;
-            if path.exists() {
-                let _ = tokio::fs::remove_dir_all(&path).await;
-            }
         }
     }
 

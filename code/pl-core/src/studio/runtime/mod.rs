@@ -26,9 +26,11 @@ mod projection;
 mod prompt_runner;
 mod self_learning;
 mod session_service;
+mod task_agent_runtime;
 
 use continuation::{ContinuationReason, ContinuationScheduler, SharedContinuationLauncher};
 use projection::{studio_agent_snapshot, studio_session_runtime};
+use task_agent_runtime::TaskAgentRuntimeRegistry;
 
 pub struct RunPromptRequest {
     pub session_id: String,
@@ -149,6 +151,7 @@ pub struct StudioRuntime {
     runtime_state: StudioRuntimeState,
     active_turns: StudioActiveTurns,
     task_coordinator: std::sync::Arc<TaskCoordinator>,
+    task_agent_runtimes: TaskAgentRuntimeRegistry,
     lifecycle_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     lifecycle_epoch: std::sync::Arc<std::sync::atomic::AtomicU64>,
     post_turn_lock: std::sync::Arc<tokio::sync::Mutex<()>>,

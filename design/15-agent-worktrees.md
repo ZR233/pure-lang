@@ -44,8 +44,8 @@ merge 在既有文档中零提及（`merge` 一词此前全部指 snapshot / con
 
 `AgentSupervisor` 持有 `Arc<WorktreeManager>`。默认 `WorktreeManager::disabled()` 为
 no-op，保持既有「subagent 共享 `workspace_root`」行为与全部既有测试不变；显式
-`enable_worktrees(repo_root)` 后才为 subagent 分配 worktree。enable 在 root turn
-启动时基于主 `workspace_root` 解析出的 repo_root 幂等完成（见「启用时机」）。
+`enable_worktrees(repo_root)` 后才为 subagent 分配 worktree。enable 只幂等绑定主
+`workspace_root` 解析出的 repo_root，不扫描或清理磁盘；孤儿对账只属于 Studio 启动恢复。
 
 ## 关键类型（接口契约）
 
@@ -98,8 +98,19 @@ released = git worktree remove + 删除分支 + 清空 AgentEntry.worktree
 
 ## 启用时机
 
-孤儿 GC 只在 Studio 启动恢复阶段运行，并跳过持久化 registry 中仍属于非终态任务的
-worktree。普通 root turn 不得扫描和删除其他 session 的 worktree。
+孤儿 GC 只在 Studio 启动恢复阶段运行，并以持久化 `TaskRun`、`WorkUnit`、
+`AgentOutcome` 为唯一所有权来源。普通 root turn、continuation turn、会话选择切换和
+`enable_worktrees` 都不得扫描或删除其他 session 的 worktree。
+
+启动对账必须逐个 leaf registration/path/branch 精确处理，禁止递归删除
+`.pure/worktrees/<taskRunId>` 父目录：
+
+- active、blocked、因重启收束为 cancelled、delivered 的资源继续保护；merged 但尚未
+  清理的资源进入 cleanup-pending 重试。
+- 只有没有 durable owner，或 durable owner 已终态且明确可清理的 leaf 才允许删除。
+- durable 记录声明资源存在而 registration、path、branch 部分缺失时，关联 run 进入
+  blocked，保留现场；无 owner 的清理失败使初始化显式失败，均不得吞错。
+- 对账幂等；重复启动不得误删已保护资源，也不得重新报告已经观察过的 terminal 事件。
 
 subagent turn（`active_subagent.is_some()`）不再 enable；其 `workspace_root` 已被
 替换为自身 worktree 路径。
@@ -115,13 +126,15 @@ subagent turn（`active_subagent.is_some()`）不再 enable；其 `workspace_roo
 
 遵循仓库现有风格（显式 async 清理为主，Drop 同步 best-effort 为辅）：
 
-- 主路径：`close_agent` / `shutdown_descendants` / spawn 失败回滚里 async 释放。
+- 主路径：`close_agent` / 明确 discard / spawn 失败回滚里 async 释放。Task runtime
+  shutdown 不调用 `shutdown_descendants`，而是 cancel-and-wait/quiesce agent task 并
+  保留 durable worktree、session 与 entry，供重启对账和审计。
 - spawn 失败回滚必须尝试全部独立步骤并聚合错误；单个 `git worktree remove` 失败
   不得阻止删除分支或宿主 rollback hook。
 - 兜底：进程异常退出留下的孤儿 worktree 由下次启动 GC 清理（不依赖 `Drop` await）。
 
-`shutdown_descendants` 级联关闭后代时，后代默认走 `Discard`（不应自动 merge 未
-验收的子树产物）。
+通用 `shutdown_descendants` 级联关闭后代时仍默认走 `Discard`，但它不属于 Task
+runtime shutdown 路径；Task shutdown 的清理错误必须显式返回，不能吞掉后继续销毁资源。
 
 ## crate 边界
 

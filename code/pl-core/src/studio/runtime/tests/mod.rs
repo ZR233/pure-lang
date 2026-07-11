@@ -19,6 +19,8 @@ use crate::config::{ModelRole, ProviderConfig, RoleConfig, RoleConfigs};
 use crate::studio::runtime::self_learning::{started_tool_snapshot_count, tool_call_count};
 use crate::{CompileMode, StudioRuntimeStatus, TurnResultStatus};
 
+mod task_agent_runtime;
+
 const TEST_RUNTIME_TIMEOUT: Duration = Duration::from_secs(20);
 
 async fn serve_sse_once(sse_body: String) -> (String, tokio::task::JoinHandle<()>) {

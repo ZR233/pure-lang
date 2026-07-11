@@ -13,6 +13,57 @@ use crate::agent::worktree::{CloseDisposition, WorktreeHandle};
 const AGENT_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 
 impl AgentSupervisor {
+    /// 停止当前 supervisor 的内存任务，但保留 durable agent entry、session 与 worktree。
+    pub(crate) async fn quiesce_preserving_worktrees(&self, reason: &str) -> Result<(), PureError> {
+        let handles = {
+            let mut state = self.state.lock().await;
+            let mut handles = Vec::new();
+            for entry in state.agents.values_mut() {
+                if entry.record.path == super::AgentPath::ROOT {
+                    continue;
+                }
+                if !entry.record.status.is_final() {
+                    entry.record.status = AgentStatus::Shutdown;
+                    entry.record.reason = Some(reason.to_string());
+                    entry.record.updated_at = super::snapshot::unix_seconds();
+                }
+                if let Some(token) = entry.cancellation_token.take() {
+                    token.cancel();
+                }
+                if let Some(handle) = entry.task.take() {
+                    handles.push((entry.record.id.clone(), handle));
+                }
+            }
+            if !handles.is_empty() {
+                state.mark_activity();
+            }
+            handles
+        };
+        if !handles.is_empty() {
+            self.notify_activity();
+        }
+
+        let mut timed_out = Vec::new();
+        for (agent_id, mut handle) in handles {
+            if timeout(AGENT_SHUTDOWN_WAIT_TIMEOUT, &mut handle)
+                .await
+                .is_err()
+            {
+                handle.abort();
+                let _ = handle.await;
+                timed_out.push(agent_id);
+            }
+        }
+        if timed_out.is_empty() {
+            Ok(())
+        } else {
+            Err(PureError::ToolExecutionFailed {
+                tool: "agent_runtime_shutdown".to_string(),
+                error: format!("timed out while quiescing agents: {}", timed_out.join(", ")),
+            })
+        }
+    }
+
     pub async fn update_status(
         &self,
         agent_id: &str,
