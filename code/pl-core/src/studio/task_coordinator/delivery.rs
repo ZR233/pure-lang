@@ -1,5 +1,5 @@
 use std::future::Future;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -7,6 +7,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 
 use super::git::{changed_files_between, inspect_repository, is_ancestor};
+use super::owned_path::OwnedPath;
 use super::{
     AgentDelivery, AgentOutcomeStatus, AgentWorktreeDelivery, DeliveryScope,
     DeliveryScopeResolution, TaskCoordinator, WorkUnitStatus,
@@ -279,7 +280,7 @@ fn ensure_delivery_scope_is_open(scope: &DeliveryScope) -> Result<()> {
 fn validate_owned_paths(owned_paths: &[String], changed_files: &[String]) -> Result<()> {
     let owned_paths = owned_paths
         .iter()
-        .map(|path| normalize_owned_path(path))
+        .map(|path| OwnedPath::parse(path))
         .collect::<Result<Vec<_>>>()?;
     for changed_file in changed_files {
         if !owned_paths.iter().any(|owned| owned.matches(changed_file)) {
@@ -287,42 +288,6 @@ fn validate_owned_paths(owned_paths: &[String], changed_files: &[String]) -> Res
         }
     }
     Ok(())
-}
-
-#[derive(Debug)]
-enum OwnedPath {
-    Exact(String),
-    Directory(String),
-}
-
-impl OwnedPath {
-    fn matches(&self, changed_file: &str) -> bool {
-        match self {
-            Self::Exact(path) => changed_file == path,
-            Self::Directory(path) => changed_file.starts_with(&format!("{path}/")),
-        }
-    }
-}
-
-fn normalize_owned_path(path: &str) -> Result<OwnedPath> {
-    let normalized = path.trim().replace('\\', "/");
-    let (path, directory) = normalized
-        .strip_suffix("/**")
-        .map_or((normalized.as_str(), false), |path| (path, true));
-    if path.is_empty()
-        || path.starts_with('/')
-        || path.as_bytes().get(1) == Some(&b':')
-        || Path::new(path)
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        bail!("invalid owned path `{normalized}`: use a relative normalized path");
-    }
-    Ok(if directory {
-        OwnedPath::Directory(path.to_string())
-    } else {
-        OwnedPath::Exact(path.to_string())
-    })
 }
 
 fn normalized_path(path: &Path) -> String {

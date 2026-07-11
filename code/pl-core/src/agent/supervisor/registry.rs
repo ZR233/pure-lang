@@ -105,9 +105,13 @@ impl AgentSupervisor {
             Some(hook) => match hook.prepare_spawn(&lifecycle_request).await {
                 Ok(preparation) => Some(preparation),
                 Err(error) => {
-                    self.rollback_registered_spawn(&record.path, &handle.id)
-                        .await;
-                    return Err(error);
+                    let rollback_failures = self
+                        .rollback_registered_spawn(&record.path, &handle.id)
+                        .await
+                        .err()
+                        .into_iter()
+                        .collect();
+                    return Err(combine_spawn_and_rollback_errors(error, rollback_failures));
                 }
             },
             None => None,
@@ -138,17 +142,16 @@ impl AgentSupervisor {
                     handle.worktree = Some(worktree_ref);
                 }
                 Err(error) => {
-                    let lifecycle_error = error.to_string();
-                    self.rollback_spawn_lifecycle(
-                        &record.path,
-                        &handle.id,
-                        lifecycle_hook.as_ref(),
-                        &lifecycle_request,
-                        preparation.as_ref(),
-                        &lifecycle_error,
-                    )
-                    .await;
-                    return Err(error.into());
+                    return Err(self
+                        .rollback_spawn_lifecycle(
+                            &record.path,
+                            &handle.id,
+                            lifecycle_hook.as_ref(),
+                            &lifecycle_request,
+                            preparation.as_ref(),
+                            error.into(),
+                        )
+                        .await);
                 }
             }
         }
@@ -156,31 +159,29 @@ impl AgentSupervisor {
         if let (Some(hook), Some(preparation)) = (&lifecycle_hook, &preparation)
             && let Err(error) = hook.activate_spawn(&lifecycle_request, preparation).await
         {
-            let lifecycle_error = error.to_string();
-            self.rollback_spawn_lifecycle(
-                &record.path,
-                &handle.id,
-                lifecycle_hook.as_ref(),
-                &lifecycle_request,
-                Some(preparation),
-                &lifecycle_error,
-            )
-            .await;
-            return Err(error);
+            return Err(self
+                .rollback_spawn_lifecycle(
+                    &record.path,
+                    &handle.id,
+                    lifecycle_hook.as_ref(),
+                    &lifecycle_request,
+                    Some(preparation),
+                    error,
+                )
+                .await);
         }
 
         if let Err(error) = self.start_agent_turn(handle.id.clone(), run_spec).await {
-            let lifecycle_error = error.to_string();
-            self.rollback_spawn_lifecycle(
-                &record.path,
-                &handle.id,
-                lifecycle_hook.as_ref(),
-                &lifecycle_request,
-                preparation.as_ref(),
-                &lifecycle_error,
-            )
-            .await;
-            return Err(error);
+            return Err(self
+                .rollback_spawn_lifecycle(
+                    &record.path,
+                    &handle.id,
+                    lifecycle_hook.as_ref(),
+                    &lifecycle_request,
+                    preparation.as_ref(),
+                    error,
+                )
+                .await);
         }
         super::events::emit_agent_record(&event_tx, &record);
         super::events::emit_subagent_activity(
@@ -203,15 +204,24 @@ impl AgentSupervisor {
         hook: Option<&std::sync::Arc<dyn super::AgentLifecycleHook>>,
         request: &AgentSpawnLifecycleRequest,
         preparation: Option<&super::AgentSpawnPreparation>,
-        error: &str,
-    ) {
-        self.rollback_registered_spawn(path, agent_id).await;
-        if let (Some(hook), Some(preparation)) = (hook, preparation) {
-            let _ = hook.rollback_spawn(request, preparation, error).await;
+        error: PureError,
+    ) -> PureError {
+        let lifecycle_error = error.to_string();
+        let mut rollback_failures = Vec::new();
+        if let Err(error) = self.rollback_registered_spawn(path, agent_id).await {
+            rollback_failures.push(error);
         }
+        if let (Some(hook), Some(preparation)) = (hook, preparation)
+            && let Err(error) = hook
+                .rollback_spawn(request, preparation, &lifecycle_error)
+                .await
+        {
+            rollback_failures.push(error);
+        }
+        combine_spawn_and_rollback_errors(error, rollback_failures)
     }
 
-    async fn rollback_registered_spawn(&self, path: &str, agent_id: &str) {
+    async fn rollback_registered_spawn(&self, path: &str, agent_id: &str) -> Result<(), PureError> {
         let worktree = {
             let mut state = self.state.lock().await;
             let worktree = state
@@ -225,11 +235,12 @@ impl AgentSupervisor {
         };
         self.notify_activity();
         if let Some(handle) = worktree {
-            let _ = self
-                .worktree
+            self.worktree
                 .close(&handle, CloseDisposition::Discard)
-                .await;
+                .await
+                .map_err(PureError::from)?;
         }
+        Ok(())
     }
 
     pub async fn list_agents(&self, path_prefix: Option<&str>) -> Vec<AgentRecord> {
@@ -273,5 +284,23 @@ impl AgentSupervisor {
             .agents
             .get(agent_id)
             .map(|entry| entry.record.clone())
+    }
+}
+
+fn combine_spawn_and_rollback_errors(
+    error: PureError,
+    rollback_failures: Vec<PureError>,
+) -> PureError {
+    if rollback_failures.is_empty() {
+        return error;
+    }
+    let rollback_failures = rollback_failures
+        .into_iter()
+        .map(|failure| failure.to_string())
+        .collect::<Vec<_>>()
+        .join("; ");
+    PureError::ToolExecutionFailed {
+        tool: "spawn_agent".to_string(),
+        error: format!("spawn failed: {error}; rollback failed: {rollback_failures}"),
     }
 }

@@ -1,4 +1,4 @@
-use std::path::{Component, Path, PathBuf};
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -10,6 +10,7 @@ use crate::agent::{
     AgentCloseDispositionKind, AgentCloseLifecycleRequest, AgentLifecycleHook,
     AgentSpawnLifecycleRequest, AgentSpawnPreparation, WorktreeCreateSpec,
 };
+use crate::studio::task_coordinator::owned_path::OwnedPath;
 
 #[derive(Clone)]
 struct TaskAgentLifecycleHook {
@@ -161,12 +162,18 @@ impl TaskAgentLifecycleHook {
     }
 }
 
-pub(crate) fn owned_paths_overlap(left: &[String], right: &[String]) -> bool {
-    left.iter().any(|left| {
-        right.iter().any(|right| {
-            OwnedPath::parse_normalized(left).overlaps(&OwnedPath::parse_normalized(right))
-        })
-    })
+pub(crate) fn owned_paths_overlap(left: &[String], right: &[String]) -> Result<bool> {
+    let left = left
+        .iter()
+        .map(|path| OwnedPath::parse(path))
+        .collect::<Result<Vec<_>>>()?;
+    let right = right
+        .iter()
+        .map(|path| OwnedPath::parse(path))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(left
+        .iter()
+        .any(|left| right.iter().any(|right| left.overlaps(right))))
 }
 
 fn normalize_owned_paths(paths: &[String]) -> Result<Vec<String>> {
@@ -175,7 +182,7 @@ fn normalize_owned_paths(paths: &[String]) -> Result<Vec<String>> {
     }
     let normalized = paths
         .iter()
-        .map(|path| normalize_owned_path(path))
+        .map(|path| OwnedPath::parse(path))
         .collect::<Result<Vec<_>>>()?;
     for (index, path) in normalized.iter().enumerate() {
         if normalized[index + 1..]
@@ -185,66 +192,10 @@ fn normalize_owned_paths(paths: &[String]) -> Result<Vec<String>> {
             bail!("ownedPaths entries must not overlap");
         }
     }
-    Ok(normalized.into_iter().map(OwnedPath::into_string).collect())
-}
-
-fn normalize_owned_path(path: &str) -> Result<OwnedPath> {
-    let normalized = path.trim().replace('\\', "/");
-    let (path, directory) = normalized
-        .strip_suffix("/**")
-        .map_or((normalized.as_str(), false), |path| (path, true));
-    if path.is_empty()
-        || path.starts_with('/')
-        || path.as_bytes().get(1) == Some(&b':')
-        || path.contains('*')
-        || Path::new(path)
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        bail!("invalid owned path `{normalized}`: use a relative normalized path");
-    }
-    Ok(if directory {
-        OwnedPath::Directory(path.to_string())
-    } else {
-        OwnedPath::Exact(path.to_string())
-    })
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum OwnedPath {
-    Exact(String),
-    Directory(String),
-}
-
-impl OwnedPath {
-    fn parse_normalized(path: &str) -> Self {
-        path.strip_suffix("/**").map_or_else(
-            || Self::Exact(path.to_string()),
-            |path| Self::Directory(path.to_string()),
-        )
-    }
-
-    fn overlaps(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Exact(left), Self::Exact(right)) => left == right,
-            (Self::Exact(path), Self::Directory(directory))
-            | (Self::Directory(directory), Self::Exact(path)) => {
-                path.starts_with(&format!("{directory}/"))
-            }
-            (Self::Directory(left), Self::Directory(right)) => {
-                left == right
-                    || left.starts_with(&format!("{right}/"))
-                    || right.starts_with(&format!("{left}/"))
-            }
-        }
-    }
-
-    fn into_string(self) -> String {
-        match self {
-            Self::Exact(path) => path,
-            Self::Directory(path) => format!("{path}/**"),
-        }
-    }
+    Ok(normalized
+        .into_iter()
+        .map(OwnedPath::into_canonical)
+        .collect())
 }
 
 fn spawn_error(error: impl Into<String>) -> PureError {
@@ -270,6 +221,9 @@ mod tests {
     use crate::studio::task_coordinator::{
         AgentOutcomeStatus, TaskCoordinator, TaskRunPhase, WorkUnitStatus,
     };
+
+    use super::{normalize_owned_paths, owned_paths_overlap};
+    use crate::studio::task_coordinator::owned_path::OwnedPath;
 
     #[tokio::test]
     async fn prepare_activate_and_rollback_persist_exact_executor_allocation() {
@@ -396,6 +350,27 @@ mod tests {
                 .is_empty()
         );
         fixture.cleanup();
+    }
+
+    #[test]
+    fn owned_paths_reject_trailing_separators_without_directory_glob() {
+        for path in ["src/", r"src\"] {
+            let error =
+                OwnedPath::parse(path).expect_err("a directory must use the explicit /** suffix");
+            assert!(error.to_string().contains("invalid owned path"));
+        }
+    }
+
+    #[test]
+    fn owned_path_case_comparison_follows_platform_semantics() {
+        let upper = vec!["Src/**".to_string()];
+        let lower = vec!["src/**".to_string()];
+
+        assert_eq!(owned_paths_overlap(&upper, &lower).unwrap(), cfg!(windows));
+        assert_eq!(
+            normalize_owned_paths(&upper).unwrap(),
+            vec!["Src/**".to_string()]
+        );
     }
 
     #[tokio::test]

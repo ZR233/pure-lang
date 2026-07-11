@@ -1,6 +1,7 @@
 mod coordinator;
 mod delivery;
 mod git;
+mod owned_path;
 mod spawn;
 mod types;
 

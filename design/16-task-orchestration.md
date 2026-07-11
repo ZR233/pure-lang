@@ -73,6 +73,11 @@ branch；交付校验不得改用随后可能因其他 executor 合并而推进�
 与 destination，delete 校验被删除的原路径。单个 work unit 最多尝试三次，同时运行
 的 executor 最多四个。
 
+`ownedPaths` 只接受相对规范路径或唯一的目录后缀 `/**`；裸尾随 `/`、`\` 与其他
+通配符均拒绝。持久化和展示保留规范原文大小写，比较键遵循平台文件系统语义：
+Windows 转为小写后进行 overlap 与交付匹配，Unix 保持大小写敏感。allocation 与
+delivery 必须复用同一个解析模型，避免两条路径产生不同边界判断。
+
 Task executor 的通用 `close_agent merge=true` 必须在进入 worktree merge 路径前拒绝；
 关闭或取消只允许丢弃 worktree。Task worktree 不得调用通用的隐式 `commit_all`。
 
