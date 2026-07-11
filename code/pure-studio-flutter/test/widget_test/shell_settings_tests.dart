@@ -122,8 +122,13 @@ void registerShellSettingsTests() {
     expect(find.byTooltip('Planner model'), findsOneWidget);
     expect(find.byTooltip('Reasoning effort'), findsOneWidget);
     expect(find.byType(StatusBarItem), findsWidgets);
-    expect(find.bySemanticsLabel('Context'), findsOneWidget);
-    expect(find.text('42%'), findsOneWidget);
+    final contextReadout = find.bySemanticsLabel('Context');
+    expect(contextReadout, findsOneWidget);
+    expect(
+      find.descendant(of: contextReadout, matching: find.byType(CustomPaint)),
+      findsOneWidget,
+    );
+    expect(find.text('42%'), findsNothing);
     expect(find.text('42/100'), findsNothing);
     expect(find.text('CNY 0.16'), findsOneWidget);
     expect(find.text('1 skill · 1 MCP · 1 LSP · 2 agents'), findsOneWidget);
@@ -135,6 +140,7 @@ void registerShellSettingsTests() {
     await gesture.addPointer();
     await gesture.moveTo(tester.getCenter(find.bySemanticsLabel('Context')));
     await tester.pumpAndSettle();
+    expect(find.text('42%'), findsOneWidget);
     expect(find.text('42 / 100'), findsOneWidget);
     expect(find.text('128'), findsOneWidget);
     expect(find.text('planner/local'), findsOneWidget);
@@ -207,7 +213,66 @@ void registerShellSettingsTests() {
     expect(api.roleUpdate?.effort, 'max');
   });
 
-  testWidgets('header does not duplicate the running phase', (tester) async {
+  testWidgets('status bar localizes every turn phase', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final labelsByLocale = {
+      const Locale('en'): const {
+        TurnPhase.idle: 'Idle',
+        TurnPhase.queued: 'Queued',
+        TurnPhase.contextLoading: 'Loading context',
+        TurnPhase.waitingForModel: 'Waiting for model',
+        TurnPhase.streaming: 'Streaming',
+        TurnPhase.waitingForInteraction: 'Waiting for interaction',
+        TurnPhase.runningTool: 'Running tool',
+        TurnPhase.completed: 'Completed',
+        TurnPhase.failed: 'Failed',
+        TurnPhase.cancelled: 'Cancelled',
+      },
+      const Locale('zh', 'Hans'): const {
+        TurnPhase.idle: '空闲',
+        TurnPhase.queued: '排队中',
+        TurnPhase.contextLoading: '加载上下文',
+        TurnPhase.waitingForModel: '等待模型',
+        TurnPhase.streaming: '正在生成',
+        TurnPhase.waitingForInteraction: '等待交互',
+        TurnPhase.runningTool: '运行工具',
+        TurnPhase.completed: '已完成',
+        TurnPhase.failed: '失败',
+        TurnPhase.cancelled: '已取消',
+      },
+    };
+
+    for (final localeEntry in labelsByLocale.entries) {
+      for (final phaseEntry in localeEntry.value.entries) {
+        await tester.pumpWidget(
+          ProviderScope(
+            child: _localizedApp(
+              locale: localeEntry.key,
+              home: SessionStatusBar(
+                state: _emptyState().copyWith(turnPhase: phaseEntry.key),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text(phaseEntry.value),
+          findsOneWidget,
+          reason: '${localeEntry.key} ${phaseEntry.key}',
+        );
+        expect(find.text(phaseEntry.key.name), findsNothing);
+      }
+    }
+  });
+
+  testWidgets('header does not duplicate the localized running phase', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -224,7 +289,65 @@ void registerShellSettingsTests() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text(TurnPhase.streaming.name), findsOneWidget);
+    expect(find.text('Streaming'), findsOneWidget);
+    expect(find.text(TurnPhase.streaming.name), findsNothing);
+  });
+
+  testWidgets('status bar localizes active interaction before turn phase', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final labelsByLocale = {
+      const Locale('en'): const {
+        InteractionKind.toolApproval: 'Waiting for tool approval',
+        InteractionKind.userInput: 'Waiting for input',
+        InteractionKind.planConfirmation: 'Waiting for plan confirmation',
+      },
+      const Locale('zh', 'Hans'): const {
+        InteractionKind.toolApproval: '等待工具授权',
+        InteractionKind.userInput: '等待输入',
+        InteractionKind.planConfirmation: '等待计划确认',
+      },
+    };
+
+    for (final localeEntry in labelsByLocale.entries) {
+      for (final interactionEntry in localeEntry.value.entries) {
+        final state = _emptyState().copyWith(
+          turnPhase: TurnPhase.streaming,
+          pendingInteractions: [
+            PendingInteraction(
+              id: 'interaction-${interactionEntry.key.name}',
+              sessionId: 'session-1',
+              kind: interactionEntry.key,
+              title: 'Pending',
+              body: 'Pending interaction',
+            ),
+          ],
+        );
+        await tester.pumpWidget(
+          ProviderScope(
+            child: _localizedApp(
+              locale: localeEntry.key,
+              home: SessionStatusBar(state: state),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text(interactionEntry.value),
+          findsOneWidget,
+          reason: '${localeEntry.key} ${interactionEntry.key}',
+        );
+        expect(find.text(interactionEntry.key.name), findsNothing);
+        expect(find.text('Streaming'), findsNothing);
+        expect(find.text('正在生成'), findsNothing);
+      }
+    }
   });
 
   testWidgets('dense shell uses a compact rail without overflow', (

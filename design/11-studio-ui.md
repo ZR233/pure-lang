@@ -143,11 +143,13 @@ Flutter 状态栏保留模式切换、planner 模型选择、reasoning effort、
 
 Flutter `SessionStatusBar` 展示同一组信息，并使用 Material 3 的 compact controls、tooltip 和 hover/focus 可达的弹层承载详情。Flutter 状态栏只消费 Riverpod selector，不直接订阅 bridge stream 或解析 raw JSON。
 
-Flutter context readout 使用紧凑百分比文字，不直接显示 `contextTokens/contextWindow`；hover/focus 详情中可以使用圆形进度并展示上下文数字、百分比、总 token 和模型。费用继续作为独立文字 readout；active skills、MCP、LSP 与 subagent 统一进入一个活动摘要和分区弹层，不能合并进 context 或费用详情，也不能在其他状态弹层重复展示 agent 数量。
+Flutter context readout 使用紧凑圆形进度环，不显示百分比文字，也不直接显示 `contextTokens/contextWindow`；hover/focus 详情继续使用圆形进度，并展示上下文数字、百分比、总 token 和模型。费用继续作为独立文字 readout；active skills、MCP、LSP 与 subagent 统一进入一个活动摘要和分区弹层，不能合并进 context 或费用详情，也不能在其他状态弹层重复展示 agent 数量。
 
 状态栏、interaction dock、timeline 工具/计划/提问摘要中的 UI 文案必须走 i18n；模型名称、provider 名称、模型 slug、tool 名称、agent 路径、reasoning effort 等来自配置或运行时的领域值按原始字符串透传展示，不做翻译或本地化映射。这样 zh-CN/en 只负责固定 UI 标签与状态说明，不改变用户配置、provider 返回值或协议枚举的可辨识性。
 
 状态栏的 waiting 状态以 active interaction 为一等输入。`busy` 表示 turn 是否仍在运行，`activeInteraction` 表示 UI 是否必须等待用户响应；Plan confirmation 可以在 `busy=false` 时仍阻塞 composer。状态栏 phase 优先级为 `toolApproval -> userInput -> planConfirmation -> turnPhase`。
+
+状态栏 phase 必须对 `TurnPhase` 与 `InteractionKind` 使用穷尽的本地化映射，不得直接展示协议或 Dart enum 的 `.name`。英文使用自然短语，简体中文使用简洁状态说明；active interaction 的本地化标签仍按上述优先级覆盖 turn phase。
 
 会话列表是独立滚动区域，row 采用 opencode 式单行 flex 布局：图标/状态固定宽度，标题 `min-width:0` 且 `truncate`，列表项 `flex-shrink:0`。Sessions 区域过长时只滚动列表，不挤压 project 区、settings 按钮或相邻 session row。
 
@@ -190,7 +192,7 @@ Flutter shell 的二级视觉层级继续收敛：顶部 header 只展示当前�
 
 Studio 采用紧凑控制台密度，但紧凑不等于堆叠入口。面板圆角不得超过 `8px`，阴影只用于 Composer、interaction dock 和 popover；普通设置分组、timeline 结构化行与 Provider 列表使用单层边框，不在卡片中继续嵌套卡片。聊天阅读流、状态区和 Composer 共享同一内容宽度，侧栏与设置导航使用统一布局 token，窗口变窄时按可用宽度切换为 icon rail。
 
-状态栏使用无边框、无常驻底色的文字控件和读数。模式、Planner 模型与 reasoning effort 是可点击选择器，只在 hover/focus 时显示轻背景；context、费用、活动与 phase 是文字读数，通过 popover 展示详情。Skills、MCP、LSP 与 agent 只保留一个活动摘要入口，header 不再重复显示 phase 或 busy spinner。权限模式仍可在 Composer 快捷切换，Security 页提供完整配置说明，但不得再用第二张“当前模式”卡片重复同一状态。
+状态栏使用无边框、无常驻底色的紧凑控件和读数。模式、Planner 模型与 reasoning effort 是可点击选择器，只在 hover/focus 时显示轻背景；context 使用无文字圆形进度环，费用、活动与 phase 使用文字读数，并通过 popover 展示详情。Skills、MCP、LSP 与 agent 只保留一个活动摘要入口，header 不再重复显示 phase 或 busy spinner。权限模式仍可在 Composer 快捷切换，Security 页提供完整配置说明，但不得再用第二张“当前模式”卡片重复同一状态。
 
 设置页保持 Providers、Instructions、Skills、Roles、MCP、Security、General 七个领域入口。普通设置使用单层 group + divider；重复实体才使用紧凑列表。Provider 使用紧凑单列列表，整行进入详情，不再额外显示“打开”按钮，默认、刷新、编辑、删除统一进入 row overflow menu。列表只承载可扫描摘要，完整模型、凭据和工具明细留在详情页；Zhipu Coding Plan 例外地在列表中直接按 `fiveHour -> weekly -> mcpMonthly` 展示三条细进度，包括剩余比例和重置时间，缺失的 quota 不得伪造。
 

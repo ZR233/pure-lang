@@ -345,6 +345,84 @@ abstract class AppLocalizations {
   /// **'Context'**
   String get statusContextLabel;
 
+  /// No description provided for @statusTurnIdle.
+  ///
+  /// In en, this message translates to:
+  /// **'Idle'**
+  String get statusTurnIdle;
+
+  /// No description provided for @statusTurnQueued.
+  ///
+  /// In en, this message translates to:
+  /// **'Queued'**
+  String get statusTurnQueued;
+
+  /// No description provided for @statusTurnContextLoading.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading context'**
+  String get statusTurnContextLoading;
+
+  /// No description provided for @statusTurnWaitingForModel.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for model'**
+  String get statusTurnWaitingForModel;
+
+  /// No description provided for @statusTurnStreaming.
+  ///
+  /// In en, this message translates to:
+  /// **'Streaming'**
+  String get statusTurnStreaming;
+
+  /// No description provided for @statusTurnWaitingForInteraction.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for interaction'**
+  String get statusTurnWaitingForInteraction;
+
+  /// No description provided for @statusTurnRunningTool.
+  ///
+  /// In en, this message translates to:
+  /// **'Running tool'**
+  String get statusTurnRunningTool;
+
+  /// No description provided for @statusTurnCompleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Completed'**
+  String get statusTurnCompleted;
+
+  /// No description provided for @statusTurnFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed'**
+  String get statusTurnFailed;
+
+  /// No description provided for @statusTurnCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancelled'**
+  String get statusTurnCancelled;
+
+  /// No description provided for @statusInteractionToolApproval.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for tool approval'**
+  String get statusInteractionToolApproval;
+
+  /// No description provided for @statusInteractionUserInput.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for input'**
+  String get statusInteractionUserInput;
+
+  /// No description provided for @statusInteractionPlanConfirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for plan confirmation'**
+  String get statusInteractionPlanConfirmation;
+
   /// No description provided for @statusContextTooltip.
   ///
   /// In en, this message translates to:
