@@ -132,6 +132,50 @@ planner 调用 `task_merge_agent { agentId, expectedHeadCommit }`。runtime 校�
 通过后才创建 merge commit。成功后更新 `expectedHead`、关闭 agent 并释放 worktree；
 executor 完成一个即可合并。
 
+`task_merge_agent` 只对 Task 根 planner 开放，并绑定工具安装时的 Studio session；工具
+执行上下文中的 turn id 或 workspace 不能替代该身份。开始合并前，coordinator 在一个
+事务中固定来源 phase、WorkUnit、AgentOutcome、delivery commit、主分支旧 HEAD、index
+tree 与 executor worktree 身份，创建唯一 active `MergeRecord` 并进入 `merging`。随后在
+共享 branch mutation lock 内重新验证进程 lease、`BranchLease`、named branch、Git
+common directory、clean workspace、caller `expectedHeadCommit`，以及 executor worktree
+的 path、branch、HEAD、base ancestry 和 changed-file scope。任何不一致都不得产生 Git
+合并副作用。同一 delivery 只允许产生一个 merge；planner 可查询已持久化结果，但不能
+重复消费。
+
+coordinator 使用有界、非交互、结构化参数启动 Git，并以实际 changed-file class 选择
+相关验证：Rust 变更至少执行 workspace formatting check，Flutter 变更至少执行 Flutter
+analyze。executor 的验证摘要只作为审计输入，不能替代 coordinator 验证。无冲突且验证
+通过后创建 focused merge commit；commit message 记录 task run、agent、旧 HEAD、来源
+commit 和 coordinator 验证结果。`TaskRun.expectedHead`、`BranchLease.expectedHead`、
+`MergeRecord`、`WorkUnit` 与恢复到来源 phase 必须在一个事务中以旧 HEAD、精确 delivery
+身份和 active merge 为 CAS 原子推进。若验证失败，runtime abort merge 并证明 HEAD、
+index 和 worktree 恢复 prestate，然后把 merge 标记为失败、任务标记为 blocked，且不
+消费 delivery。
+
+Git merge commit 已创建而 durable CAS 失败时，只有在当前 named branch、HEAD、parent、
+commit diff、index 和 worktree 仍精确属于本次 clean merge 时才允许补偿回旧 HEAD；无法
+证明安全时保留现场并 block 精确任务。durable 接受后不再回滚 merge。此时先释放 branch
+mutation lock，再通过持久 Task supervisor 以 discard 语义关闭 executor；若内存 registry
+已丢失，则使用精确 durable worktree owner 做幂等清理。清理失败写入 merge evidence 供
+后续重试，不改变 `MergeRecord=Merged`、`WorkUnit=Merged` 或 completed delivery。迟到的
+agent terminal 事件也不得把已合并 WorkUnit 降级。
+
+Git 返回冲突时不得 abort。runtime 从 unmerged index 固定 `MERGE_HEAD`、merge base、
+pre-merge index tree、每个冲突 path 的 stage 1/2/3 mode 与 object id、rename source /
+destination、binary 标记，以及 Git 已自动合并的 index entries。冲突按 text、add/add、
+rename/delete、modify/delete、binary 等 typed kind 持久化；路径必须是规范仓库相对路径，
+worktree/index 不得包含与该 merge 无关的修改。随后 `MergeRecord=Conflicted`、任务进入
+`resolvingConflict`，保留 MERGE_HEAD、index 与 worktree，只通过 coalescing scheduler
+请求一次 `MergeConflict` planner continuation，executor worktree 继续受 durable owner
+保护。
+
+重启恢复按 merge phase 判断 Git 状态：`Pending | Verifying` 必须依据持久 prestate、
+当前 HEAD、MERGE_HEAD 和 index 判断可安全继续、补偿还是 block；`Conflicted` 加
+`resolvingConflict` 且现场与 conflict manifest 一致时是合法恢复状态，不得被普通 dirty
+workspace 检查误判为外部漂移。`MergeRecord.verification_json` 承载版本化 `MergeEvidence`，
+包含来源 phase、prestate、delivery identity、验证、commit、冲突 manifest、补偿与 cleanup
+状态；保持现有六张 coordinator 表，不为 transient tool trace 新增协议或数据表。
+
 冲突时持久化 `MergeRecord`，暂停其他 merge，由 planner 使用以下受限工具亲自解决：
 
 - `merge_list_conflicts`
