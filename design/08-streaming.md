@@ -118,17 +118,17 @@ BridgeEventEnvelope {
 
 模型 provider 流的成功边界由 canonical `ModelStreamEvent::Completed` 明确表示。protocol mapper 可以把 provider 私有终止 chunk 转换为该事件；如果底层 SSE parse、transport 或 EOF 在 completed 之前发生，`pl-model` 必须返回错误，并由 turn 层发出 failed turn、`Error` 和 `Done`，不得把局部内容当作成功消息落库。completed 之后的 usage、文本、思考和工具调用 snapshot 才能进入最终 `CompletionResponse`。
 
-Plan Mode 下计划确认的主触发源是 `plan_exit` 工具。模型完成可执行计划后调用 `plan_exit({ content })`，`pl-core` 使用工具参数中的 Markdown 计划补齐或覆盖同一 turn 的 `plan` part，并在 turn 完成后创建 `PlanConfirmation` interaction。`plan_exit` 只提交计划，不在工具内部等待用户选择，也不写入 opencode 风格计划文件。
+Task planning 阶段的计划确认主触发源是 `plan_exit`。模型完成可执行计划后调用 `plan_exit({ content })`，并在 turn 完成后创建 `PlanConfirmation` interaction；该工具只提交计划，不实施任务。
 
 Chat provider 不再通过 `<proposed_plan>...</proposed_plan>` 提交或展示计划；该旧标签按普通未标记文本处理，不生成 `plan` part，也不能触发计划确认。计划正文写入 `StudioPart.plan.content`，增量使用 `StudioPartDelta(field=planContent)`，来源只能是 `plan_exit.content` 或后续明确的 Plan lifecycle 事件。
 
-Auto 与 Plan Mode 下模型可见输出优先使用 provider 原生可见 phase；Chat 兼容 provider 使用显式标签：`<commentary>...</commentary>` 表示中间进展，`<final>...</final>` 表示最终正文；Plan Mode 的最终计划必须通过 `plan_exit` 提交。`pl-model` visible output decoder 负责按 endpoint 协议跨 chunk 解析或归属这些可见输出，标签本身不得进入 timeline。未标记的普通输出默认进入 `final` 文本通道并写入 assistant 正文，不能导致 turn 失败；Plan Mode 下未标记文本也不伪造 `plan` part。
+Simple 与 Task 下模型可见输出优先使用 provider 原生可见 phase；Chat 兼容 provider 使用显式标签：`<commentary>...</commentary>` 表示中间进展，`<final>...</final>` 表示最终正文；Task planning 阶段的最终计划必须通过 `plan_exit` 提交。`pl-model` visible output decoder 负责按 endpoint 协议跨 chunk 解析或归属这些可见输出，标签本身不得进入 timeline。未标记的普通输出默认进入 `final` 文本通道并写入 assistant 正文，不能导致 turn 失败；Task planning 下未标记文本也不伪造 `plan` part。
 
 Chat tagged decoder 必须把显式可见标签建模为 block lifecycle，而不是把同一通道的所有标签段合并到固定 provider id：每个 `<commentary>` 或 `<final>` 开标签创建新的 provider-local text block，闭标签立即完成该 block；连续出现的同通道标签也必须得到不同 block id。未标记普通 `content` 可作为 fallback `final` block 继续流式展示，直到遇到显式标签、工具边界或 stream 完成；进入 Studio trace 前仍由 trace projection 映射为 turn/inference 作用域内的稳定 semantic part id。
 
 部分 OpenAI-compatible Chat provider 会把带可见标签的输出放入 `reasoning_content`。Chat tagged decoder 必须保留这部分原始内容作为 raw reasoning，同时只把其中显式 `<commentary>` 和 `<final>` 标签段投影到可见 timeline；无标签 `reasoning_content` 不得变成 assistant 正文、plan 或 reasoning summary row。
 
-计划的采纳与实施状态不改变 `plan` part 本身，而是通过 `StudioEventKind::PlanLifecycleChanged` 写入 durable `studio_events` 并广播。事件包含 `planId`、`state`、可选 `turnId`、可选 `reason` 和 `updatedAt`；Studio 从 durable events 中按 `planId` 折叠 latest plan state。Plan turn 完成后需要用户确认实施时，后端创建 `InteractionKind::PlanConfirmation`，前端不再从历史 timeline 自行恢复旧确认 composer。确认 resolution 固定为 `implementFreshContext | continuePlanning | dismiss`；`continuePlanning` 的 `content` 是确认 composer 同次提交的用户补充内容，resolution 成功后由前端立即作为普通 prompt 发送；`implementFreshContext` 保留 wire 名称但不再创建 fresh session，后端必须在当前 session 内解决 interaction、把当前 session mode 持久切换为 `auto`、广播 `accepted/implementing`，并用同一 `sessionId` 启动实施 turn。前端在提交 `implementFreshContext` 后应立即把当前 session mode 乐观投影为 `auto`，避免状态栏在实施 turn 已启动时仍显示 Plan。实施 turn 的实时 `turnChanged/messageUpdated/messagePartUpdated/messagePartDelta/sessionRuntimeChanged` 直接更新当前会话，不能通过 `sessionHandoffChanged` 切换目标会话。
+计划的采纳与实施状态不改变 `plan` part 本身，而是通过 durable plan lifecycle 与 TaskCoordinator 事实表达。Task planning turn 完成后创建 `PlanConfirmation`；`implementFreshContext` 保留既有 wire 名称，但语义是当前 session 保持 `task` 并进入 `designUpdating`。后续 planner continuation、agent outcome、merge、review 和完成状态均通过 Studio event 更新当前会话。
 
 Studio 前端的实时事件、`load_session_state` projection snapshot 和 `load_studio_events` 补拉结果必须进入同一个 StudioEvent reducer：
 
@@ -140,7 +140,7 @@ Studio 前端的实时事件、`load_session_state` projection snapshot 和 `loa
 - Plan lifecycle 与 interaction 状态均通过 `StudioEvent` 实时更新，并在 `bootstrap`、`select_session`、`load_session_state` 和 `load_studio_events` 中恢复。
 - `SkillActivated` 是 skill runtime fact 的实时通知与可追踪记录。它不渲染成普通 timeline row；Studio 收到后从后端 runtime snapshot 更新 `activeSkills`，历史恢复以结构化 session skill 表为准，而不是解析 `skill_view` 的 tool result 文本。
 - `Done` 只表示 turn 状态完成，不携带 timeline 内容；最终正文必须通过 `textChannel=final` 的 `text` part 表达。
-- Plan Mode 的最终可执行计划必须通过 `plan_exit.content` 生成 `plan` part。如果模型只提交计划而没有普通正文，不应生成空 assistant `text` part。
+- Task planning 阶段的最终可执行计划必须通过 `plan_exit.content` 生成 `plan` part。如果模型只提交计划而没有普通正文，不应生成空 assistant `text` part。
 
 Studio 渲染使用 opencode app 同款 timeline 框架语义：`virtua` 虚拟列表、自写 row algebra、stable row key、bottom spacer、row cache、part group 和 delta overlay。虚拟滚动层不得改变 Message/Part 协议语义、事件游标或 reducer 合并规则。动态高度、流式 delta overlay 和自动跟随底部属于前端渲染适配层职责；协议层仍只表达 message/part snapshot 与 live delta。
 

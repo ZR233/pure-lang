@@ -10,9 +10,9 @@
 - subagent 的工作产物直接混入主工作区，无法原子性地「采纳或丢弃」。
 - 没有「交付 → 合并」的结构化边界，父 agent 难以审查 subagent 的修改后再决定是否接受。
 
-本设计为每个 subagent 分配独立的 git worktree，使其修改物理隔离；subagent 关闭时
-由调用方选择把产物 `merge` 回主工作区或 `discard` 丢弃，worktree 随 subagent 释放。
-worktree 生命周期严格绑定到 subagent 生命周期。
+本设计为每个 subagent 分配独立的 git worktree，使其修改物理隔离。Task executor
+必须显式提交 delivery；planner 消费结果后再选择 merge 或 discard。worktree 在交付
+被合并、丢弃或任务终结后释放，不再与单次 agent turn 终态绑定。
 
 ## 与既有约定的关系
 
@@ -56,10 +56,8 @@ no-op，保持既有「subagent 共享 `workspace_root`」行为与全部既有�
   暴露给调用方；`close_agent` 的 `merge` 入参（`CloseAgentArgs`）选择 disposition。
   `AgentControlBackend` 共享类型（宿主扩展路径）不携带 worktree，避免破坏性对外
   API 变更，宿主可经 `AgentSupervisor` 自行接入。
-- `CloseDisposition`：
-  - `Merge { target_branch: Option<String> }`：把 subagent 分支 merge 回主工作区
-    当前分支（或指定目标），成功后释放 worktree。
-  - `Discard`：放弃修改，直接释放 worktree。
+- `CloseDisposition::Discard` 只负责放弃未采纳产物；Task merge 由 coordinator 的
+  `task_merge_agent` 负责，不通过 `close_agent` 隐式合并。
 - `MergeOutcome { Merged, Conflict }`：merge 结果，`Conflict` 时不释放 worktree。
 - `WorktreeError`：`manager` 内部错误类型，向 `PureError::ToolExecutionFailed`
   `{ tool: "worktree", error }` 映射，不跨 crate 新增枚举变体。
@@ -67,9 +65,8 @@ no-op，保持既有「subagent 共享 `workspace_root`」行为与全部既有�
 ## 生命周期状态机
 
 ```
-spawn ──► running ──┬── close(Merge)   ──► commit兜底 ──► merge ──► released
-                    │                                     └─ Conflict ──► 保留 worktree，返回错误
-                    └── close(Discard) ───────────────────────────────────► released
+spawn -> running -> waitingForDelivery -> delivered -> planner merge -> released
+                                   \-> discard / task terminal -> released
 
 released = git worktree remove + 删除分支 + 清空 AgentEntry.worktree
 ```
@@ -79,9 +76,8 @@ released = git worktree remove + 删除分支 + 清空 AgentEntry.worktree
 - worktree 生命周期 = agent 生命周期。`close_agent` 是唯一释放点，且必须带
   `CloseDisposition`。单次 turn 完成不释放 worktree（agent 可经 `send_input`
   多轮），与既有「turn 完成 ≠ agent 释放」语义一致。
-- `close(Merge)`：系统先在 worktree 内兜底提交未提交改动（若 subagent 未自行
-  commit），再在主工作区执行 `git merge <branch>`。冲突时不释放 worktree、返回
-  `MergeConflict`，调用方可调整后重试或改用 `Discard`。
+- runtime 不兜底 `git add -A` 或 commit。executor 必须自行提交并用
+  `submit_delivery` 交付干净 worktree；planner 通过 task coordinator 合并。
 - `close(Discard)` 或级联关闭：`git worktree remove --force` + 删除 subagent 分支。
 - spawn 失败回滚（`start_agent_turn` 失败）必须同步释放已分配的 worktree。
 
@@ -90,17 +86,14 @@ released = git worktree remove + 删除分支 + 清空 AgentEntry.worktree
 - worktree 根：`resolve_workspace_root`（`workspace.rs`）所得 repo 根下
   `.pure/worktrees/`。注意区分语义：用户级 `~/.pure`（`config/mod.rs`）是配置；
   项目级 `<repo_root>/.pure/` 是运行态产物。
-- 命名：`<repo_root>/.pure/worktrees/<agent_id>/`。`agent_id` 由
-  `AgentSupervisorState::next_id` 生成（`agent-1`、`agent-2`…），天然唯一不重名。
-- 分支：`pure-agent-<agent_id>`，经 `GitPolicy::validate_branch` 校验。
+- 命名：`<repo_root>/.pure/worktrees/<task_run_id>/<agent_id>/`。
+- 分支：`pure-task-<task_run_id>-<agent_id>`，经 `GitPolicy::validate_branch` 校验。
 - **`.gitignore` 必须忽略 `.pure/`**，否则 worktree 会污染主仓库索引；启用时检测并提示。
 
 ## 启用时机
 
-`run_turn_with_trace`（root turn，`active_subagent.is_none()`）启动时，用主
-`workspace_root` 经 `resolve_workspace_root` 解析 repo_root，幂等调用
-`AgentSupervisor::enable_worktrees(repo_root)`。enable 内部跑一次启动 GC，扫描
-`.pure/worktrees/` 删除注册表中不存在的残留目录（处理上次进程异常退出留下的孤儿）。
+孤儿 GC 只在 Studio 启动恢复阶段运行，并跳过持久化 registry 中仍属于非终态任务的
+worktree。普通 root turn 不得扫描和删除其他 session 的 worktree。
 
 subagent turn（`active_subagent.is_some()`）不再 enable；其 `workspace_root` 已被
 替换为自身 worktree 路径。

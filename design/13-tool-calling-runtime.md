@@ -42,13 +42,13 @@ Chat Completions provider 如果没有 Responses 风格的 completed event，pro
 
 `list_files` 的 `glob` 既可以匹配 workspace-relative 路径，也可以匹配 `path` 参数之下的相对条目；`includeDirs=true` 时目录候选按带尾随 `/` 的形式参与匹配。`**/` 表示零层或多层目录，因此 `**/Cargo.toml` 必须同时匹配 workspace 根下和子目录下的 `Cargo.toml`。
 
-MCP tools 由进程内 MCP runtime registry 的当前可用快照注册，工具名固定为 `mcp__{server_id}__{tool_name}`。effective MCP server 包含用户配置的 `[mcp_servers]` 和运行时合成的内置 server；`enabled` 只表示用户启用意图，不表示本轮一定可调用。Studio 启动、保存 provider 或 MCP 配置后，后台对配置启用且凭据完整的 server 执行 connect、initialize、initialized、tools/list 探测，并把结果记录为内存 availability，同时广播 `McpHealthChanged`；probe 从 `checking` 进入 `available` 或 `unavailable` 时也必须继续广播。普通 turn 和 subagent runner 不等待探测完成，只加载当前 `available` server 的缓存 tools；`checking`、`unavailable`、`disabled`、`missingCredential` 都不会在本轮暴露给模型。启用 MCP server 表示用户显式信任该 server，因此已可用 MCP tools 在 Auto Mode 和 Plan Mode 中直接暴露并执行，不再触发额外审批或 reviewer 审批。MCP tool 的注册、执行和错误仍复用同一生命周期与 tool result 规则。
+MCP tools 由进程内 registry 的当前可用快照注册。Simple executor 可以使用 available tools；Task planner、explorer、reviewer 只暴露 effect 策略明确允许的动态工具，未知 effect 默认拒绝。
 
 内置 Zhipu Coding Plan MCP server 优先复用 Zhipu Coding Plan provider 的 `bearer_token`，并兼容回退到普通 Zhipu provider 的 `bearer_token`。缺少 token 时内置 server 处于 `missingCredential`，不参与后台探测，也不应导致普通 turn 或 subagent 启动失败；检测到 token 后进入后台探测流程，只有探测成功的 server 会被主会话和 subagent runner 注册。HTTP 内置 server 在 transport 层直接发送 bearer token；stdio Vision server 在启动进程时注入 `Z_AI_API_KEY` 和 `Z_AI_MODE=ZHIPU`。
 
 每个 turn 开始时，运行时会把经过当前模式过滤后实际暴露给模型的工具名快照保留为 core 内部 `TracePart`，并在需要时通过 typed Studio part snapshot 展示。该记录只包含 turn id、模式和工具名列表，用于诊断工具可见性，不进入模型上下文；旧 `timeline_events` 表及其 migration、运行期读写路径均已删除。
 
-`plan_exit` 是 Plan Mode 专用的内置协调工具，schema 只包含 `content: string`。它表示“计划已完成，请 Studio 发起确认交互”，不是普通执行工具：运行时只在 Plan Mode 暴露它，Auto Mode 不暴露；工具执行成功后返回紧凑状态文本，不在工具内部等待用户、不切换模式、不写计划文件。`pl-core` 在工具成功后从原始参数读取 `content`，生成或补齐当前 turn 的 plan part snapshot。Plan turn 完成后，Studio runtime 继续复用既有 `PlanConfirmation` pending interaction；用户确认实施时在当前 session 内启动实施 turn，不再走 fresh-context handoff 实时事件。`<proposed_plan>` 不再是协议入口，按普通未标记文本处理，不生成 plan part，也不能触发计划确认。
+`plan_exit` 是 Task planning 阶段专用的内置协调工具，schema 只包含 `content: string`。它表示“计划已完成，请 Studio 发起确认交互”，不是执行工具；确认实施后会话保持 Task，由 coordinator 推进后续阶段。`<proposed_plan>` 不再是协议入口。
 
 后台 stdio 子进程（MCP server、`bash` 命令、LSP server）由运行时显式持有生命周期。正常路径必须通过 async shutdown / terminate 请求关闭 stdin、终止进程树并等待退出；Drop 只能做 best-effort 兜底。Windows GUI 进程中启动这些后台子进程和兜底终止命令时不得显示额外终端窗口。
 
