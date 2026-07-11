@@ -10,11 +10,143 @@ use tokio_util::sync::CancellationToken;
 
 use super::state::AgentEntry;
 use super::*;
+use crate::agent::worktree::{
+    MergeOutcome, WorktreeBackend, WorktreeCreateSpec, WorktreeError, WorktreeManager,
+};
 use crate::turn::{CompileMode, TurnBudget, TurnOptions};
 
 #[derive(Debug)]
 struct RecordingSpawnLifecycleHook {
     calls: Arc<Mutex<Vec<String>>>,
+}
+
+#[derive(Debug)]
+struct FailingRollbackLifecycleHook {
+    calls: Arc<Mutex<Vec<String>>>,
+    worktree: WorktreeCreateSpec,
+}
+
+impl AgentLifecycleHook for FailingRollbackLifecycleHook {
+    fn prepare_spawn<'a>(
+        &'a self,
+        request: &'a AgentSpawnLifecycleRequest,
+    ) -> Pin<
+        Box<dyn std::future::Future<Output = Result<AgentSpawnPreparation, PureError>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            self.calls
+                .lock()
+                .await
+                .push(format!("prepare:{}", request.agent_id));
+            Ok(AgentSpawnPreparation::with_worktree(self.worktree.clone()))
+        })
+    }
+
+    fn activate_spawn<'a>(
+        &'a self,
+        request: &'a AgentSpawnLifecycleRequest,
+        _preparation: &'a AgentSpawnPreparation,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<(), PureError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.calls
+                .lock()
+                .await
+                .push(format!("activate:{}", request.agent_id));
+            Ok(())
+        })
+    }
+
+    fn rollback_spawn<'a>(
+        &'a self,
+        request: &'a AgentSpawnLifecycleRequest,
+        _preparation: &'a AgentSpawnPreparation,
+        _error: &'a str,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<(), PureError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.calls
+                .lock()
+                .await
+                .push(format!("hook_rollback:{}", request.agent_id));
+            Err(PureError::ToolExecutionFailed {
+                tool: "task_coordinator".to_string(),
+                error: "hook rollback failed".to_string(),
+            })
+        })
+    }
+
+    fn validate_close<'a>(
+        &'a self,
+        _request: &'a AgentCloseLifecycleRequest,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<(), PureError>> + Send + 'a>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+#[derive(Debug)]
+struct FailingSupervisorWorktreeBackend {
+    calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl WorktreeBackend for FailingSupervisorWorktreeBackend {
+    fn create<'a>(
+        &'a self,
+        _repo_root: &'a std::path::Path,
+        _branch: &'a str,
+        _target_path: &'a std::path::Path,
+        _base_commit: &'a str,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<(), WorktreeError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.calls.lock().await.push("create".to_string());
+            Ok(())
+        })
+    }
+
+    fn remove<'a>(
+        &'a self,
+        _repo_root: &'a std::path::Path,
+        _target_path: &'a std::path::Path,
+        force: bool,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<(), WorktreeError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.calls.lock().await.push(format!("remove:{force}"));
+            Err(supervisor_git_error("remove cleanup failed"))
+        })
+    }
+
+    fn delete_branch<'a>(
+        &'a self,
+        _repo_root: &'a std::path::Path,
+        _branch: &'a str,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<(), WorktreeError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.calls.lock().await.push("delete_branch".to_string());
+            Err(supervisor_git_error("branch cleanup failed"))
+        })
+    }
+
+    fn commit_all<'a>(
+        &'a self,
+        _worktree_path: &'a std::path::Path,
+        _message: &'a str,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<(), WorktreeError>> + Send + 'a>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn merge_branch<'a>(
+        &'a self,
+        _main_workspace: &'a std::path::Path,
+        _branch: &'a str,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<MergeOutcome, WorktreeError>> + Send + 'a>>
+    {
+        Box::pin(async { Ok(MergeOutcome::Merged) })
+    }
+}
+
+fn supervisor_git_error(stderr: &str) -> WorktreeError {
+    WorktreeError::GitCommand {
+        args: "cleanup".to_string(),
+        stderr: stderr.to_string(),
+    }
 }
 
 impl AgentLifecycleHook for RecordingSpawnLifecycleHook {
@@ -657,6 +789,76 @@ async fn spawn_start_failure_rolls_back_lifecycle_and_supervisor_entry() {
             "rollback:agent-1".to_string(),
         ]
     );
+}
+
+#[tokio::test]
+async fn spawn_start_failure_reports_every_rollback_failure() {
+    let repo_root = std::env::temp_dir().join("pure-supervisor-spawn-rollback");
+    let worktree = WorktreeCreateSpec {
+        repo_root: repo_root.clone(),
+        path: repo_root.join(".pure/worktrees/agent-1"),
+        branch: "pure-agent-agent-1".to_string(),
+        base_commit: "HEAD".to_string(),
+    };
+    let backend_calls = Arc::new(Mutex::new(Vec::new()));
+    let hook_calls = Arc::new(Mutex::new(Vec::new()));
+    let supervisor = AgentSupervisor {
+        worktree: WorktreeManager::with_backend(
+            repo_root.clone(),
+            Arc::new(FailingSupervisorWorktreeBackend {
+                calls: Arc::clone(&backend_calls),
+            }),
+        ),
+        ..AgentSupervisor::default()
+    };
+    supervisor.set_lifecycle_hook(Arc::new(FailingRollbackLifecycleHook {
+        calls: Arc::clone(&hook_calls),
+        worktree,
+    }));
+    supervisor.configure_limits(1, 1).await;
+    let _active_guard = supervisor.reserve_agent_execution().unwrap();
+
+    let error = supervisor
+        .spawn_agent(
+            AgentSpawnInput {
+                task_name: "implement".to_string(),
+                message: "implement".to_string(),
+                role: "executor".to_string(),
+                parent_path: Some(AgentPath::ROOT.to_string()),
+                session_id: "session-1".to_string(),
+                owned_paths: vec!["code/pl-core/**".to_string()],
+            },
+            test_run_spec("implement"),
+        )
+        .await
+        .expect_err("spawn must surface rollback failures");
+
+    assert!(supervisor.list_agents(None).await.is_empty());
+    assert_eq!(
+        backend_calls.lock().await.as_slice(),
+        ["create", "remove:true", "delete_branch"]
+    );
+    assert_eq!(
+        hook_calls.lock().await.as_slice(),
+        [
+            "prepare:agent-1",
+            "activate:agent-1",
+            "hook_rollback:agent-1"
+        ]
+    );
+    let error = error.to_string();
+    for expected in [
+        PureError::AgentLimitReached { max_agents: 1 }.to_string(),
+        "remove cleanup failed".to_string(),
+        "branch cleanup failed".to_string(),
+        "hook rollback failed".to_string(),
+    ] {
+        assert!(
+            error.contains(&expected),
+            "missing `{expected}` in `{error}`"
+        );
+    }
+    std::fs::remove_dir_all(repo_root).ok();
 }
 
 #[tokio::test]

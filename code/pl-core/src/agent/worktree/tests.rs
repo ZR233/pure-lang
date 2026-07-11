@@ -2,9 +2,88 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{CloseDisposition, CloseOutcome, WorktreeCreateSpec, WorktreeError, WorktreeManager};
+use super::backend::BoxFuture;
+use super::{
+    CloseDisposition, CloseOutcome, MergeOutcome, WorktreeBackend, WorktreeCreateSpec,
+    WorktreeError, WorktreeHandle, WorktreeManager,
+};
+
+#[derive(Debug)]
+struct FailingCleanupBackend {
+    calls: Arc<Mutex<Vec<String>>>,
+    create_fails: bool,
+}
+
+impl WorktreeBackend for FailingCleanupBackend {
+    fn create<'a>(
+        &'a self,
+        _repo_root: &'a Path,
+        _branch: &'a str,
+        _target_path: &'a Path,
+        _base_commit: &'a str,
+    ) -> BoxFuture<'a, Result<(), WorktreeError>> {
+        Box::pin(async move {
+            self.calls.lock().unwrap().push("create".to_string());
+            if self.create_fails {
+                Err(git_error(
+                    "worktree add",
+                    "create failed after partial setup",
+                ))
+            } else {
+                Ok(())
+            }
+        })
+    }
+
+    fn remove<'a>(
+        &'a self,
+        _repo_root: &'a Path,
+        _target_path: &'a Path,
+        force: bool,
+    ) -> BoxFuture<'a, Result<(), WorktreeError>> {
+        Box::pin(async move {
+            self.calls.lock().unwrap().push(format!("remove:{force}"));
+            Err(git_error("worktree remove", "remove cleanup failed"))
+        })
+    }
+
+    fn delete_branch<'a>(
+        &'a self,
+        _repo_root: &'a Path,
+        _branch: &'a str,
+    ) -> BoxFuture<'a, Result<(), WorktreeError>> {
+        Box::pin(async move {
+            self.calls.lock().unwrap().push("delete_branch".to_string());
+            Err(git_error("branch -D", "branch cleanup failed"))
+        })
+    }
+
+    fn commit_all<'a>(
+        &'a self,
+        _worktree_path: &'a Path,
+        _message: &'a str,
+    ) -> BoxFuture<'a, Result<(), WorktreeError>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn merge_branch<'a>(
+        &'a self,
+        _main_workspace: &'a Path,
+        _branch: &'a str,
+    ) -> BoxFuture<'a, Result<MergeOutcome, WorktreeError>> {
+        Box::pin(async { Ok(MergeOutcome::Merged) })
+    }
+}
+
+fn git_error(args: &str, stderr: &str) -> WorktreeError {
+    WorktreeError::GitCommand {
+        args: args.to_string(),
+        stderr: stderr.to_string(),
+    }
+}
 
 /// 临时仓库目录序号，避免并发测试因时间戳碰撞命中同一目录。
 static REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -106,6 +185,82 @@ async fn create_from_spec_uses_exact_path_branch_and_base_commit() {
         .close(&handle, CloseDisposition::Discard)
         .await
         .unwrap();
+    fs::remove_dir_all(repo).ok();
+}
+
+#[tokio::test]
+async fn create_failure_reports_all_cleanup_failures() {
+    let repo = std::env::temp_dir().join("pure-worktree-create-rollback");
+    let path = repo.join(".pure/worktrees/agent-1");
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let manager = WorktreeManager::with_backend(
+        repo.clone(),
+        Arc::new(FailingCleanupBackend {
+            calls: Arc::clone(&calls),
+            create_fails: true,
+        }),
+    );
+
+    let error = manager
+        .create_from_spec(WorktreeCreateSpec {
+            repo_root: repo.clone(),
+            path,
+            branch: "pure-agent-agent-1".to_string(),
+            base_commit: "HEAD".to_string(),
+        })
+        .await
+        .expect_err("partial create must report rollback failures");
+
+    assert_eq!(
+        calls.lock().unwrap().as_slice(),
+        ["create", "remove:true", "delete_branch"]
+    );
+    let error = error.to_string();
+    for expected in [
+        "create failed after partial setup",
+        "remove cleanup failed",
+        "branch cleanup failed",
+    ] {
+        assert!(
+            error.contains(expected),
+            "missing `{expected}` in `{error}`"
+        );
+    }
+    fs::remove_dir_all(repo).ok();
+}
+
+#[tokio::test]
+async fn discard_reports_remove_and_branch_cleanup_failures() {
+    let repo = std::env::temp_dir().join("pure-worktree-discard-rollback");
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let manager = WorktreeManager::with_backend(
+        repo.clone(),
+        Arc::new(FailingCleanupBackend {
+            calls: Arc::clone(&calls),
+            create_fails: false,
+        }),
+    );
+    let handle = WorktreeHandle {
+        path: repo.join(".pure/worktrees/agent-1"),
+        branch: "pure-agent-agent-1".to_string(),
+    };
+
+    let error = manager
+        .close(&handle, CloseDisposition::Discard)
+        .await
+        .expect_err("discard cleanup failures must be returned");
+
+    assert_eq!(
+        calls.lock().unwrap().as_slice(),
+        ["remove:true", "delete_branch"]
+    );
+    let error = error.to_string();
+    for expected in ["remove cleanup failed", "branch cleanup failed"] {
+        assert!(
+            error.contains(expected),
+            "missing `{expected}` in `{error}`"
+        );
+    }
     fs::remove_dir_all(repo).ok();
 }
 

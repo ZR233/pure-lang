@@ -189,11 +189,27 @@ impl WorktreeManager {
                 .await
                 .map_err(|error| WorktreeError::Io(error.to_string()))?;
         }
-        self.inner
+        let handle = WorktreeHandle { path, branch };
+        if let Err(operation) = self
+            .inner
             .backend
-            .create(&configured_root, &branch, &path, &spec.base_commit)
-            .await?;
-        Ok(WorktreeHandle { path, branch })
+            .create(
+                &configured_root,
+                &handle.branch,
+                &handle.path,
+                &spec.base_commit,
+            )
+            .await
+        {
+            return match self.discard(&handle).await {
+                Ok(()) => Err(operation),
+                Err(cleanup) => Err(WorktreeError::OperationFailedWithCleanup {
+                    operation: Box::new(operation),
+                    cleanup: Box::new(cleanup),
+                }),
+            };
+        }
+        Ok(handle)
     }
 
     /// 按 disposition 释放 worktree；merge 冲突时不释放并返回错误。
@@ -238,28 +254,51 @@ impl WorktreeManager {
             .await
     }
 
-    /// 删除 worktree 与其分支；best-effort，不因 git worktree remove 失败而中断。
+    /// 删除 worktree 与其分支，并聚合所有失败的清理步骤。
     async fn discard(&self, handle: &WorktreeHandle) -> Result<(), WorktreeError> {
         let repo_root = self.require_repo_root()?;
-        if self
+        let mut failures = Vec::new();
+        if let Err(error) = self
             .inner
             .backend
             .remove(&repo_root, &handle.path, true)
             .await
-            .is_err()
         {
-            let _ = tokio::fs::remove_dir_all(&handle.path).await;
+            failures.push(error);
         }
-        // 分支可能已随 worktree remove 删除；失败可忽略。
-        let _ = self
+
+        match tokio::fs::try_exists(&handle.path).await {
+            Ok(true) => {
+                if let Err(error) = tokio::fs::remove_dir_all(&handle.path).await {
+                    failures.push(WorktreeError::Io(format!(
+                        "failed to remove {}: {error}",
+                        handle.path.display()
+                    )));
+                }
+            }
+            Ok(false) => {}
+            Err(error) => failures.push(WorktreeError::Io(format!(
+                "failed to inspect {}: {error}",
+                handle.path.display()
+            ))),
+        }
+
+        if let Err(error) = self
             .inner
             .backend
             .delete_branch(&repo_root, &handle.branch)
-            .await;
-        if handle.path.exists() {
-            let _ = tokio::fs::remove_dir_all(&handle.path).await;
+            .await
+        {
+            failures.push(error);
         }
-        Ok(())
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(WorktreeError::CleanupFailed {
+                context: format!("worktree `{}`", handle.path.display()),
+                failures,
+            })
+        }
     }
 
     /// 扫描 `.pure/worktrees/` 删除全部残留目录（会话刚启动时不存在存活 worktree）。

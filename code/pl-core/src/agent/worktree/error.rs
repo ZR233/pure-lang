@@ -19,6 +19,16 @@ pub enum WorktreeError {
     Disabled,
     /// merge 冲突，worktree 未释放。
     MergeConflict { branch: String, detail: String },
+    /// 一个资源操作失败，且其补偿清理也失败。
+    OperationFailedWithCleanup {
+        operation: Box<WorktreeError>,
+        cleanup: Box<WorktreeError>,
+    },
+    /// 清理流程中的一个或多个独立步骤失败。
+    CleanupFailed {
+        context: String,
+        failures: Vec<WorktreeError>,
+    },
 }
 
 impl fmt::Display for WorktreeError {
@@ -43,6 +53,16 @@ impl fmt::Display for WorktreeError {
                 } else {
                     write!(f, "merge conflict on branch `{branch}`: {detail}")
                 }
+            }
+            Self::OperationFailedWithCleanup { operation, cleanup } => {
+                write!(f, "{operation}; rollback failed: {cleanup}")
+            }
+            Self::CleanupFailed { context, failures } => {
+                write!(f, "{context} cleanup failed")?;
+                for failure in failures {
+                    write!(f, "; {failure}")?;
+                }
+                Ok(())
             }
         }
     }

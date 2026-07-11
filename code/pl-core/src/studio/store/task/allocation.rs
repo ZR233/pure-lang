@@ -58,7 +58,7 @@ impl StudioStore {
         }
         for unit in &active {
             let active_paths = serde_json::from_str::<Vec<String>>(&unit.owned_paths_json)?;
-            if owned_paths_overlap(&input.owned_paths, &active_paths) {
+            if owned_paths_overlap(&input.owned_paths, &active_paths)? {
                 bail!("ownedPaths overlap active work unit {}", unit.id);
             }
         }

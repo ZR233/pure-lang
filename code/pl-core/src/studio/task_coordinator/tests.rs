@@ -416,6 +416,24 @@ async fn exact_and_backslash_directory_owned_paths_are_normalized() {
 }
 
 #[tokio::test]
+async fn delivery_owned_path_case_matching_follows_platform_semantics() {
+    let fixture = DeliveryFixture::new("owned-path-case", vec!["Src/**"]).await;
+    fixture.commit_file("src/lib.rs");
+    let head = git_output(&fixture.worktree, &["rev-parse", "HEAD"]);
+
+    let result = fixture.submit(&head).await;
+
+    if cfg!(windows) {
+        let delivery = result.expect("Windows ownedPaths matching is case-insensitive");
+        assert_eq!(delivery.changed_files, vec!["src/lib.rs".to_string()]);
+    } else {
+        let error = result.expect_err("Unix ownedPaths matching is case-sensitive");
+        assert!(error.to_string().contains("outside ownedPaths"));
+    }
+    fixture.cleanup();
+}
+
+#[tokio::test]
 async fn submit_delivery_tool_has_typed_schema_branch_effect_and_role_visibility() {
     let coordinator = Arc::new(TaskCoordinator::new(
         StudioStore::open_memory().await.unwrap(),

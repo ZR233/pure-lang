@@ -79,7 +79,9 @@ released = git worktree remove + 删除分支 + 清空 AgentEntry.worktree
 - runtime 不兜底 `git add -A` 或 commit。executor 必须自行提交并用
   `submit_delivery` 交付干净 worktree；planner 通过 task coordinator 合并。
 - `close(Discard)` 或级联关闭：`git worktree remove --force` + 删除 subagent 分支。
-- spawn 失败回滚（`start_agent_turn` 失败）必须同步释放已分配的 worktree。
+- spawn 失败回滚（包括 worktree 创建部分成功、持久化激活失败或
+  `start_agent_turn` 失败）必须同步尝试移除 worktree、删除分支并撤销宿主生命周期
+  事实。主错误与所有回滚失败必须一并返回，不能把失败的清理报告成成功。
 
 ## 路径与命名约定
 
@@ -110,6 +112,8 @@ subagent turn（`active_subagent.is_some()`）不再 enable；其 `workspace_roo
 遵循仓库现有风格（显式 async 清理为主，Drop 同步 best-effort 为辅）：
 
 - 主路径：`close_agent` / `shutdown_descendants` / spawn 失败回滚里 async 释放。
+- spawn 失败回滚必须尝试全部独立步骤并聚合错误；单个 `git worktree remove` 失败
+  不得阻止删除分支或宿主 rollback hook。
 - 兜底：进程异常退出留下的孤儿 worktree 由下次启动 GC 清理（不依赖 `Drop` await）。
 
 `shutdown_descendants` 级联关闭后代时，后代默认走 `Discard`（不应自动 merge 未
