@@ -556,6 +556,268 @@ async fn changed_terminal_fact_launches_once_with_current_durable_prompt() {
 }
 
 #[tokio::test]
+async fn queued_terminal_event_persists_for_stale_prompt_without_side_effects() {
+    let (store, run, outcome) = continuation_fixture("stale-prompt-terminal").await;
+    let launcher = RecordingLauncher::successful();
+    let runtime = test_runtime(store.clone(), launcher.clone());
+    let stale_turn_id = "turn-stale-terminal";
+    runtime
+        .active_turns
+        .insert(
+            run.session_id.clone(),
+            stale_turn_id.to_string(),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let (event_tx, event_rx) = tokio::sync::broadcast::channel(8);
+    event_tx.send(terminal_event(&outcome.agent_id)).unwrap();
+    drop(event_tx);
+
+    runtime
+        .active_turn_removed(&run.session_id, stale_turn_id)
+        .await;
+    runtime
+        .active_turns
+        .insert(
+            run.session_id.clone(),
+            "turn-current".to_string(),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let mut studio_events = runtime.events().subscribe();
+    runtime
+        .drain_prompt_agent_events(run.session_id.clone(), stale_turn_id.to_string(), event_rx)
+        .await;
+
+    assert_eq!(
+        store
+            .list_agent_outcomes(&run.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|record| record.id == outcome.id)
+            .unwrap()
+            .status,
+        AgentOutcomeStatus::Failed
+    );
+    assert_eq!(
+        store.list_work_units(&run.id).await.unwrap()[0].status,
+        WorkUnitStatus::Failed
+    );
+    assert!(launcher.launches.lock().await.is_empty());
+    assert!(
+        !runtime
+            .continuation_scheduler
+            .has_session(&run.session_id)
+            .await
+    );
+    assert!(
+        store
+            .load_studio_events(&run.session_id, None, None)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(matches!(
+        studio_events.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
+}
+
+#[tokio::test]
+async fn queued_terminal_event_persists_during_shutdown_without_side_effects() {
+    let (store, run, outcome) = continuation_fixture("shutdown-prompt-terminal").await;
+    let launcher = RecordingLauncher::successful();
+    let mut runtime = test_runtime(store.clone(), launcher.clone());
+    let shutdown_cancelled = ContinuationTestBarrier::new();
+    runtime.shutdown_after_cancel_barrier = Some(shutdown_cancelled.clone());
+    let turn_id = "turn-shutdown-terminal";
+    runtime
+        .active_turns
+        .insert(
+            run.session_id.clone(),
+            turn_id.to_string(),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let (event_tx, event_rx) = tokio::sync::broadcast::channel(8);
+    event_tx.send(terminal_event(&outcome.agent_id)).unwrap();
+    drop(event_tx);
+    let mut studio_events = runtime.events().subscribe();
+    let shutdown_runtime = runtime.clone();
+    let shutdown = tokio::spawn(async move { shutdown_runtime.shutdown_runtime().await });
+    shutdown_cancelled.wait_until_entered().await;
+    shutdown_cancelled.release().await;
+
+    runtime
+        .drain_prompt_agent_events(run.session_id.clone(), turn_id.to_string(), event_rx)
+        .await;
+    runtime.active_turn_removed(&run.session_id, turn_id).await;
+    assert_eq!(
+        shutdown.await.unwrap().unwrap().status,
+        StudioRuntimeStatus::Stopped
+    );
+
+    assert_eq!(
+        store
+            .list_agent_outcomes(&run.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|record| record.id == outcome.id)
+            .unwrap()
+            .status,
+        AgentOutcomeStatus::Failed
+    );
+    assert_eq!(
+        store.list_work_units(&run.id).await.unwrap()[0].status,
+        WorkUnitStatus::Failed
+    );
+    assert!(launcher.launches.lock().await.is_empty());
+    assert!(
+        store
+            .load_studio_events(&run.session_id, None, None)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(matches!(
+        studio_events.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
+}
+
+#[tokio::test]
+async fn stale_prompt_terminal_persistence_failure_blocks_run_without_diagnostic() {
+    let (store, run, outcome) = continuation_fixture("stale-terminal-failure").await;
+    let launcher = RecordingLauncher::successful();
+    let runtime = test_runtime(store.clone(), launcher.clone());
+    let stale_turn_id = "turn-stale-failure";
+    runtime
+        .active_turns
+        .insert(
+            run.session_id.clone(),
+            stale_turn_id.to_string(),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let (event_tx, event_rx) = tokio::sync::broadcast::channel(8);
+    event_tx.send(terminal_event(&outcome.agent_id)).unwrap();
+    drop(event_tx);
+    runtime
+        .active_turn_removed(&run.session_id, stale_turn_id)
+        .await;
+    runtime
+        .active_turns
+        .insert(
+            run.session_id.clone(),
+            "turn-current".to_string(),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    store
+        .execute_test_sql("ALTER TABLE agent_outcomes RENAME TO unavailable_agent_outcomes")
+        .await;
+    let mut studio_events = runtime.events().subscribe();
+
+    runtime
+        .drain_prompt_agent_events(run.session_id.clone(), stale_turn_id.to_string(), event_rx)
+        .await;
+
+    let blocked = store.read_task_run(&run.id).await.unwrap().unwrap();
+    assert_eq!(blocked.phase, TaskRunPhase::Blocked);
+    assert!(
+        blocked
+            .status_message
+            .as_deref()
+            .is_some_and(|message| message.contains("terminal agent state persistence failed"))
+    );
+    assert!(launcher.launches.lock().await.is_empty());
+    assert!(
+        store
+            .load_studio_events(&run.session_id, None, None)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(matches!(
+        studio_events.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
+}
+
+#[tokio::test]
+async fn lagged_standalone_drain_still_emits_stale() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let runtime = test_runtime(store, RecordingLauncher::successful());
+    let mut studio_events = runtime.events().subscribe();
+
+    runtime
+        .drain_agent_events(
+            "standalone-lagged".to_string(),
+            lagged_agent_event_receiver(),
+        )
+        .await;
+
+    let mut saw_stale = false;
+    while let Ok(event) = studio_events.try_recv() {
+        saw_stale |= matches!(event.kind, StudioEventKind::Stale { .. });
+    }
+    assert!(saw_stale);
+}
+
+#[tokio::test]
+async fn lagged_stale_and_shutdown_prompt_drains_emit_no_stale() {
+    let stale_store = StudioStore::open_memory().await.unwrap();
+    let stale_runtime = test_runtime(stale_store, RecordingLauncher::successful());
+    let mut stale_events = stale_runtime.events().subscribe();
+    stale_runtime
+        .drain_prompt_agent_events(
+            "stale-lagged".to_string(),
+            "turn-stale".to_string(),
+            lagged_agent_event_receiver(),
+        )
+        .await;
+    assert!(matches!(
+        stale_events.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
+
+    let shutdown_store = StudioStore::open_memory().await.unwrap();
+    let shutdown_runtime = test_runtime(shutdown_store, RecordingLauncher::successful());
+    shutdown_runtime
+        .active_turns
+        .insert(
+            "shutdown-lagged".to_string(),
+            "turn-shutdown".to_string(),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    shutdown_runtime
+        .runtime_state
+        .transition(StudioRuntimeStatus::ShuttingDown, None)
+        .unwrap();
+    let mut shutdown_events = shutdown_runtime.events().subscribe();
+    shutdown_runtime
+        .drain_prompt_agent_events(
+            "shutdown-lagged".to_string(),
+            "turn-shutdown".to_string(),
+            lagged_agent_event_receiver(),
+        )
+        .await;
+    assert!(matches!(
+        shutdown_events.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+    ));
+}
+
+#[tokio::test]
 async fn launch_failure_blocks_exact_run_and_emits_diagnostic() {
     let (store, run, _) = continuation_fixture("launch-failure").await;
     let launcher = RecordingLauncher::failing("injected launch failure");
@@ -2074,6 +2336,20 @@ fn terminal_event(agent_id: &str) -> pl_trace::AgentEvent {
         budget_usage: None,
         updated_at: 10,
     }
+}
+
+fn lagged_agent_event_receiver() -> tokio::sync::broadcast::Receiver<pl_trace::AgentEvent> {
+    let (event_tx, event_rx) = tokio::sync::broadcast::channel(1);
+    for index in 0..3 {
+        event_tx
+            .send(pl_trace::AgentEvent::Error {
+                message: format!("lagged event {index}"),
+                severity: pl_protocol::ErrorSeverity::Recoverable,
+            })
+            .unwrap();
+    }
+    drop(event_tx);
+    event_rx
 }
 
 async fn persisted_repository_run(
