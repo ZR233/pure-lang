@@ -145,7 +145,8 @@ impl StudioRuntime {
                     .await?;
             }
         }
-        if matches!(mode, CompileMode::Task)
+        if history_policy == PromptHistoryPolicy::Persist
+            && matches!(mode, CompileMode::Task)
             && matches!(result.status, TurnResultStatus::Completed)
             && let Some(plan) = completed_plan_item(&trace_events)
         {

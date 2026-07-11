@@ -61,6 +61,8 @@ impl StudioRuntime {
             #[cfg(test)]
             continuation_launch_error_barrier: None,
             #[cfg(test)]
+            prompt_completion_barrier: None,
+            #[cfg(test)]
             initialization_entry_barrier: None,
         }
     }
@@ -166,10 +168,7 @@ impl StudioRuntime {
     pub async fn shutdown_runtime(&self) -> Result<StudioRuntimeSnapshot> {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let status = self.runtime_snapshot().status;
-        if matches!(
-            status,
-            StudioRuntimeStatus::Stopped | StudioRuntimeStatus::Failed
-        ) {
+        if matches!(status, StudioRuntimeStatus::Stopped) {
             return Ok(self.runtime_snapshot());
         }
         let _ = self

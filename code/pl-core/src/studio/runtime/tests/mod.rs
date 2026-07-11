@@ -110,6 +110,62 @@ async fn serve_delayed_sse() -> (
     (format!("http://{addr}"), handle, accepted_rx, release_tx)
 }
 
+async fn serve_sse_then_delayed_sse(
+    first_sse_body: String,
+) -> (
+    String,
+    tokio::task::JoinHandle<()>,
+    oneshot::Receiver<()>,
+    oneshot::Sender<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (second_accepted_tx, second_accepted_rx) = oneshot::channel();
+    let (second_release_tx, second_release_rx) = oneshot::channel();
+    let handle = tokio::spawn(async move {
+        let mut second_accepted_tx = Some(second_accepted_tx);
+        let mut second_release_rx = Some(second_release_rx);
+        for (index, sse_body) in [first_sse_body, "data: [DONE]\n\n".to_string()]
+            .into_iter()
+            .enumerate()
+        {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = Vec::new();
+            let mut temp = [0_u8; 1024];
+            loop {
+                let n = socket.read(&mut temp).await.unwrap();
+                assert_ne!(n, 0);
+                buffer.extend_from_slice(&temp[..n]);
+                if buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            if index == 1 {
+                if let Some(sender) = second_accepted_tx.take() {
+                    let _ = sender.send(());
+                }
+                if let Some(receiver) = second_release_rx.take() {
+                    let _ = receiver.await;
+                }
+            }
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                sse_body.len(),
+                sse_body
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+            socket.shutdown().await.unwrap();
+        }
+    });
+
+    (
+        format!("http://{addr}"),
+        handle,
+        second_accepted_rx,
+        second_release_tx,
+    )
+}
+
 fn test_config(base_url: String) -> crate::config::PureConfig {
     let mut model = ModelInfo::fallback("local-responses");
     model.parameters = vec![crate::ModelParameter {

@@ -12,8 +12,8 @@ use crate::studio::runtime::{
 use crate::studio::task_coordinator::TaskContinuationSnapshot;
 
 use super::{
-    ContinuationLaunch, ContinuationLauncher, ContinuationReason, ContinuationRequest,
-    SessionTurnState,
+    ContinuationClaim, ContinuationLaunch, ContinuationLauncher, ContinuationReason,
+    ContinuationRequest, SessionTurnState,
 };
 
 impl StudioRuntime {
@@ -65,44 +65,50 @@ impl StudioRuntime {
             .continuation_scheduler
             .request(request.clone(), session_turn_state)
             .await;
-        if let Some(request) = launch {
-            self.spawn_task_continuation(request);
+        if let Some(claim) = launch {
+            self.spawn_task_continuation(claim);
         } else if !self.active_turns.contains(&request.session_id).await
-            && let Some(request) = self
+            && let Some(claim) = self
                 .continuation_scheduler
                 .claim_if_idle(&request.session_id)
                 .await
         {
-            self.spawn_task_continuation(request);
+            self.spawn_task_continuation(claim);
         }
     }
 
-    pub(crate) async fn active_turn_removed(&self, session_id: &str) {
-        self.active_turns.remove(session_id).await;
-        if let Some(request) = self.continuation_scheduler.turn_removed(session_id).await {
-            self.spawn_task_continuation(request);
+    pub(crate) async fn active_turn_removed(&self, session_id: &str, turn_id: &str) -> bool {
+        if !self.active_turns.remove(session_id, turn_id).await {
+            return false;
         }
+        if let Some(claim) = self
+            .continuation_scheduler
+            .turn_removed(session_id, turn_id)
+            .await
+        {
+            self.spawn_task_continuation(claim);
+        }
+        true
     }
 
-    fn spawn_task_continuation(&self, request: ContinuationRequest) {
+    fn spawn_task_continuation(&self, claim: ContinuationClaim) {
         let runtime = self.clone();
         tokio::spawn(async move {
-            runtime.launch_task_continuation(request).await;
+            runtime.launch_task_continuation(claim).await;
         });
     }
 
-    async fn launch_task_continuation(&self, request: ContinuationRequest) {
-        let result = self.prepare_task_continuation(&request).await;
+    async fn launch_task_continuation(&self, claim: ContinuationClaim) {
+        let request = &claim.request;
+        let result = self.prepare_task_continuation(request).await;
         let launch = match result {
             Ok(Some(launch)) => launch,
             Ok(None) => {
-                self.continuation_scheduler
-                    .cancel_session(&request.session_id)
-                    .await;
+                let _ = self.continuation_scheduler.cancel_claim(&claim).await;
                 return;
             }
             Err(error) => {
-                self.fail_task_continuation(request, error).await;
+                self.fail_claimed_task_continuation(claim, error).await;
                 return;
             }
         };
@@ -115,29 +121,32 @@ impl StudioRuntime {
             self.runtime_snapshot().status,
             crate::StudioRuntimeStatus::Ready
         ) {
-            self.continuation_scheduler
-                .cancel_session(&request.session_id)
-                .await;
+            let _ = self.continuation_scheduler.cancel_claim(&claim).await;
             return;
         }
-        match self.task_run_is_active(&request).await {
+        match self.task_run_is_active(request).await {
             Ok(true) => {}
             Ok(false) => {
-                self.continuation_scheduler
-                    .cancel_session(&request.session_id)
-                    .await;
+                let _ = self.continuation_scheduler.cancel_claim(&claim).await;
                 return;
             }
             Err(error) => {
-                self.fail_task_continuation(request, error).await;
+                self.fail_claimed_task_continuation(claim, error).await;
                 return;
             }
         }
         let result = match &self.continuation_launcher {
-            Some(launcher) => launcher.launch(launch.clone()).await,
-            None => self.launch_production_continuation(launch.clone()).await,
+            Some(launcher) => launcher.launch(launch.clone()).await.map(|_| None),
+            None => self
+                .launch_production_continuation(launch.clone())
+                .await
+                .map(Some),
         };
-        if let Err(error) = result {
+        if let Ok(Some(turn_id)) = &result {
+            if let Some(next_claim) = self.continuation_scheduler.bind_turn(&claim, turn_id).await {
+                self.spawn_task_continuation(next_claim);
+            }
+        } else if let Err(error) = result {
             #[cfg(test)]
             if let Some(barrier) = &self.continuation_launch_error_barrier {
                 barrier.pause_once().await;
@@ -146,17 +155,17 @@ impl StudioRuntime {
                 .downcast_ref::<SessionAlreadyHasActiveTurn>()
                 .is_some()
             {
-                self.continuation_scheduler.defer(request).await;
+                self.continuation_scheduler.defer(claim).await;
                 if !self.active_turns.contains(&launch.request.session_id).await
-                    && let Some(request) = self
+                    && let Some(claim) = self
                         .continuation_scheduler
                         .claim_if_idle(&launch.request.session_id)
                         .await
                 {
-                    self.spawn_task_continuation(request);
+                    self.spawn_task_continuation(claim);
                 }
             } else {
-                self.fail_task_continuation(request, error).await;
+                self.fail_claimed_task_continuation(claim, error).await;
             }
         }
     }
@@ -205,27 +214,31 @@ impl StudioRuntime {
         Ok(!run.phase.is_terminal())
     }
 
-    async fn launch_production_continuation(&self, launch: ContinuationLaunch) -> Result<()> {
-        self.submit_prompt(StudioSubmitPromptRequest {
-            session_id: launch.request.session_id,
-            prompt: launch.prompt,
-            attachment_ids: Vec::new(),
-            options: StudioSubmitPromptOptions {
-                user_prompt: StudioUserPromptPresentation::SyntheticIgnored {
-                    visible_prompt: "继续任务".to_string(),
+    async fn launch_production_continuation(&self, launch: ContinuationLaunch) -> Result<String> {
+        let response = self
+            .submit_prompt(StudioSubmitPromptRequest {
+                session_id: launch.request.session_id,
+                prompt: launch.prompt,
+                attachment_ids: Vec::new(),
+                options: StudioSubmitPromptOptions {
+                    user_prompt: StudioUserPromptPresentation::SyntheticIgnored {
+                        visible_prompt: "继续任务".to_string(),
+                    },
+                    lifecycle: None,
+                    history_policy: PromptHistoryPolicy::Ephemeral,
                 },
-                lifecycle: None,
-                history_policy: PromptHistoryPolicy::Ephemeral,
-            },
-        })
-        .await?;
-        Ok(())
+            })
+            .await?;
+        Ok(response.turn_id)
+    }
+
+    async fn fail_claimed_task_continuation(&self, claim: ContinuationClaim, error: anyhow::Error) {
+        if self.continuation_scheduler.cancel_claim(&claim).await {
+            self.fail_task_continuation(claim.request, error).await;
+        }
     }
 
     async fn fail_task_continuation(&self, request: ContinuationRequest, error: anyhow::Error) {
-        self.continuation_scheduler
-            .cancel_session(&request.session_id)
-            .await;
         let diagnostic = format!(
             "task continuation failed for {}: {error:#}",
             request.task_run_id

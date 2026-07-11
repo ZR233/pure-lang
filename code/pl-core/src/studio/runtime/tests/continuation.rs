@@ -5,13 +5,13 @@ use std::process::Command;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
-use pl_protocol::{AgentStatus, StudioEventKind};
+use pl_protocol::{AgentStatus, StudioEventKind, StudioPartType};
 use tokio::sync::Mutex;
 
 use super::*;
 use crate::studio::runtime::continuation::{
     ContinuationLaunch, ContinuationLauncher, ContinuationReason, ContinuationRequest,
-    ContinuationScheduler, ContinuationTestBarrier, SessionTurnState,
+    ContinuationScheduler, ContinuationTestBarrier, PromptCompletionTestBarrier, SessionTurnState,
 };
 use crate::studio::task_coordinator::{
     AgentOutcomeStatus, CreateAgentOutcome, CreateTaskRun, CreateWorkUnit, TaskRunPhase,
@@ -35,8 +35,18 @@ async fn active_root_turn_defers_and_coalesces_continuation_until_removal() {
             .await,
         None
     );
-    assert_eq!(scheduler.turn_removed("session-1").await, Some(request));
-    assert_eq!(scheduler.turn_removed("session-1").await, None);
+    let claim = scheduler
+        .turn_removed("session-1", "turn-user")
+        .await
+        .unwrap();
+    assert_eq!(claim.request, request);
+    assert_eq!(scheduler.bind_turn(&claim, "turn-continuation").await, None);
+    assert_eq!(
+        scheduler
+            .turn_removed("session-1", "turn-continuation")
+            .await,
+        None
+    );
 }
 
 #[tokio::test]
@@ -45,11 +55,17 @@ async fn durable_fact_during_active_continuation_launches_one_later_continuation
     let first = continuation_request("run-1", "session-1", ContinuationReason::AgentTerminal);
     let later = continuation_request("run-1", "session-1", ContinuationReason::ReviewReturned);
 
+    let first_claim = scheduler
+        .request(first.clone(), SessionTurnState::Idle)
+        .await
+        .unwrap();
+    assert_eq!(first_claim.request, first);
+    assert_eq!(scheduler.bind_turn(&first_claim, "turn-first").await, None);
     assert_eq!(
         scheduler
-            .request(first.clone(), SessionTurnState::Idle)
+            .request(later.clone(), SessionTurnState::Active)
             .await,
-        Some(first)
+        None
     );
     assert_eq!(
         scheduler
@@ -57,14 +73,16 @@ async fn durable_fact_during_active_continuation_launches_one_later_continuation
             .await,
         None
     );
+    let later_claim = scheduler
+        .turn_removed("session-1", "turn-first")
+        .await
+        .unwrap();
+    assert_eq!(later_claim.request, later);
+    assert_eq!(scheduler.bind_turn(&later_claim, "turn-later").await, None);
     assert_eq!(
-        scheduler
-            .request(later.clone(), SessionTurnState::Active)
-            .await,
+        scheduler.turn_removed("session-1", "turn-later").await,
         None
     );
-    assert_eq!(scheduler.turn_removed("session-1").await, Some(later));
-    assert_eq!(scheduler.turn_removed("session-1").await, None);
 }
 
 #[tokio::test]
@@ -74,26 +92,42 @@ async fn sessions_schedule_independently_without_concurrent_same_session_launche
     let first_later = continuation_request("run-1", "session-1", ContinuationReason::MergeConflict);
     let second = continuation_request("run-2", "session-2", ContinuationReason::Recovery);
 
-    assert_eq!(
-        scheduler
-            .request(first.clone(), SessionTurnState::Idle)
-            .await,
-        Some(first)
-    );
+    let first_claim = scheduler
+        .request(first.clone(), SessionTurnState::Idle)
+        .await
+        .unwrap();
+    assert_eq!(first_claim.request, first);
+    assert_eq!(scheduler.bind_turn(&first_claim, "turn-first").await, None);
     assert_eq!(
         scheduler
             .request(first_later.clone(), SessionTurnState::Active)
             .await,
         None
     );
+    let second_claim = scheduler
+        .request(second.clone(), SessionTurnState::Idle)
+        .await
+        .unwrap();
+    assert_eq!(second_claim.request, second);
+    assert_eq!(
+        scheduler.bind_turn(&second_claim, "turn-second").await,
+        None
+    );
+    let first_later_claim = scheduler
+        .turn_removed("session-1", "turn-first")
+        .await
+        .unwrap();
+    assert_eq!(first_later_claim.request, first_later);
     assert_eq!(
         scheduler
-            .request(second.clone(), SessionTurnState::Idle)
+            .bind_turn(&first_later_claim, "turn-first-later")
             .await,
-        Some(second)
+        None
     );
-    assert_eq!(scheduler.turn_removed("session-1").await, Some(first_later));
-    assert_eq!(scheduler.turn_removed("session-2").await, None);
+    assert_eq!(
+        scheduler.turn_removed("session-2", "turn-second").await,
+        None
+    );
 }
 
 #[tokio::test]
@@ -101,17 +135,135 @@ async fn duplicate_recovery_notification_does_not_queue_an_extra_turn() {
     let scheduler = ContinuationScheduler::new();
     let recovery = continuation_request("run-1", "session-1", ContinuationReason::Recovery);
 
+    let recovery_claim = scheduler
+        .request(recovery.clone(), SessionTurnState::Idle)
+        .await
+        .unwrap();
+    assert_eq!(recovery_claim.request, recovery.clone());
     assert_eq!(
-        scheduler
-            .request(recovery.clone(), SessionTurnState::Idle)
-            .await,
-        Some(recovery.clone())
+        scheduler.bind_turn(&recovery_claim, "turn-recovery").await,
+        None
     );
     assert_eq!(
         scheduler.request(recovery, SessionTurnState::Active).await,
         None
     );
-    assert_eq!(scheduler.turn_removed("session-1").await, None);
+    assert_eq!(
+        scheduler.turn_removed("session-1", "turn-recovery").await,
+        None
+    );
+}
+
+#[tokio::test]
+async fn stale_defer_cannot_replace_a_newer_claim() {
+    let scheduler = ContinuationScheduler::new();
+    let first = continuation_request("run-1", "session-1", ContinuationReason::AgentTerminal);
+    let second = continuation_request("run-1", "session-1", ContinuationReason::ReviewReturned);
+    let first_claim = scheduler
+        .request(first, SessionTurnState::Idle)
+        .await
+        .unwrap();
+    assert_eq!(
+        scheduler
+            .request(second.clone(), SessionTurnState::Active)
+            .await,
+        None
+    );
+    let second_claim = scheduler
+        .turn_removed("session-1", "turn-user")
+        .await
+        .unwrap();
+    assert_eq!(second_claim.request, second);
+    assert_eq!(
+        scheduler.bind_turn(&second_claim, "turn-second").await,
+        None
+    );
+
+    scheduler.defer(first_claim).await;
+
+    assert_eq!(
+        scheduler.turn_removed("session-1", "turn-second").await,
+        None
+    );
+}
+
+#[tokio::test]
+async fn stale_claim_cannot_cancel_a_newer_claim() {
+    let scheduler = ContinuationScheduler::new();
+    let first = continuation_request("run-1", "session-1", ContinuationReason::AgentTerminal);
+    let second = continuation_request("run-1", "session-1", ContinuationReason::ReviewReturned);
+    let first_claim = scheduler
+        .request(first, SessionTurnState::Idle)
+        .await
+        .unwrap();
+    assert_eq!(
+        scheduler.request(second, SessionTurnState::Active).await,
+        None
+    );
+    let second_claim = scheduler
+        .turn_removed("session-1", "turn-user")
+        .await
+        .unwrap();
+
+    assert!(!scheduler.cancel_claim(&first_claim).await);
+    assert_eq!(
+        scheduler.bind_turn(&second_claim, "turn-second").await,
+        None
+    );
+    assert!(scheduler.has_session("session-1").await);
+}
+
+#[tokio::test]
+async fn exact_claim_cancellation_clears_coalesced_pending_state() {
+    let scheduler = ContinuationScheduler::new();
+    let first = continuation_request("run-1", "session-1", ContinuationReason::AgentTerminal);
+    let second = continuation_request("run-1", "session-1", ContinuationReason::ReviewReturned);
+    let first_claim = scheduler
+        .request(first, SessionTurnState::Idle)
+        .await
+        .unwrap();
+    assert_eq!(
+        scheduler.request(second, SessionTurnState::Active).await,
+        None
+    );
+
+    assert!(scheduler.cancel_claim(&first_claim).await);
+    assert!(!scheduler.has_session("session-1").await);
+}
+
+#[tokio::test]
+async fn continuation_completion_before_turn_binding_does_not_requeue_claim() {
+    let scheduler = ContinuationScheduler::new();
+    let request = continuation_request("run-1", "session-1", ContinuationReason::AgentTerminal);
+    let claim = scheduler
+        .request(request, SessionTurnState::Idle)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        scheduler
+            .turn_removed("session-1", "turn-continuation")
+            .await,
+        None
+    );
+    assert_eq!(scheduler.bind_turn(&claim, "turn-continuation").await, None);
+    assert!(!scheduler.has_session("session-1").await);
+}
+
+#[tokio::test]
+async fn user_removal_before_busy_defer_requeues_exact_claim() {
+    let scheduler = ContinuationScheduler::new();
+    let request = continuation_request("run-1", "session-1", ContinuationReason::AgentTerminal);
+    let claim = scheduler
+        .request(request.clone(), SessionTurnState::Idle)
+        .await
+        .unwrap();
+
+    assert_eq!(scheduler.turn_removed("session-1", "turn-user").await, None);
+    scheduler.defer(claim).await;
+    let retried = scheduler.claim_if_idle("session-1").await.unwrap();
+
+    assert_eq!(retried.request, request);
 }
 
 #[tokio::test]
@@ -141,13 +293,54 @@ async fn removal_between_active_observation_and_enqueue_still_launches_once() {
     };
 
     barrier.wait_until_entered().await;
-    runtime.active_turn_removed(&run.session_id).await;
+    runtime
+        .active_turn_removed(&run.session_id, "turn-competing")
+        .await;
     barrier.release().await;
     request.await.unwrap();
     let launches = launcher.wait_for_count(1).await;
 
     assert_eq!(launches.len(), 1);
     assert_eq!(launches[0].request.task_run_id, run.id);
+}
+
+#[tokio::test]
+async fn stale_turn_removal_preserves_current_generation_and_pending_continuation() {
+    let (store, run, _) = continuation_fixture("stale-turn-removal").await;
+    let launcher = RecordingLauncher::successful();
+    let runtime = test_runtime(store, launcher.clone());
+    runtime
+        .active_turns
+        .insert(
+            run.session_id.clone(),
+            "turn-current".to_string(),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    runtime
+        .request_task_continuation(run.id, ContinuationReason::AgentTerminal)
+        .await;
+
+    runtime
+        .active_turn_removed(&run.session_id, "turn-stale")
+        .await;
+
+    assert!(runtime.active_turns.contains(&run.session_id).await);
+    assert!(
+        runtime
+            .runtime_snapshot()
+            .active_turns
+            .iter()
+            .any(|turn| turn.session_id == run.session_id && turn.turn_id == "turn-current")
+    );
+    assert!(
+        runtime
+            .continuation_scheduler
+            .has_session(&run.session_id)
+            .await
+    );
+    assert!(launcher.launches.lock().await.is_empty());
 }
 
 #[tokio::test]
@@ -180,7 +373,9 @@ async fn production_busy_collision_removed_before_defer_relaunches_once() {
         .unwrap();
     prepared.release().await;
     launch_error.wait_until_entered().await;
-    runtime.active_turn_removed(&run.session_id).await;
+    runtime
+        .active_turn_removed(&run.session_id, "turn-competing")
+        .await;
     launch_error.release().await;
 
     let part = tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
@@ -202,6 +397,80 @@ async fn production_busy_collision_removed_before_defer_relaunches_once() {
 
     assert!(part.synthetic);
     assert!(part.ignored);
+    assert_ne!(
+        store.read_task_run(&run.id).await.unwrap().unwrap().phase,
+        TaskRunPhase::Blocked
+    );
+    remove_repository(repository);
+}
+
+#[tokio::test]
+async fn stale_busy_claim_cannot_overwrite_new_fact_claimed_by_turn_removal() {
+    let repository = init_repository("continuation-stale-defer-full-race");
+    let store = StudioStore::open_memory().await.unwrap();
+    let run = persisted_repository_run(&store, &repository, "stale-defer-full-race").await;
+    let home = std::env::temp_dir().join(format!("pure-stale-defer-home-{}", unique_id()));
+    let mut runtime = StudioRuntime::new(
+        store.clone(),
+        ConfigStore::new(crate::config::ConfigPaths::from_home(home)),
+    );
+    let prepared = ContinuationTestBarrier::new();
+    let launch_error = ContinuationTestBarrier::new();
+    runtime.continuation_pre_submit_barrier = Some(prepared.clone());
+    runtime.continuation_launch_error_barrier = Some(launch_error.clone());
+
+    runtime
+        .request_task_continuation(run.id.clone(), ContinuationReason::Recovery)
+        .await;
+    prepared.wait_until_entered().await;
+    runtime
+        .active_turns
+        .insert(
+            run.session_id.clone(),
+            "turn-competing".to_string(),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    prepared.release().await;
+    launch_error.wait_until_entered().await;
+    runtime
+        .request_task_continuation(run.id.clone(), ContinuationReason::AgentTerminal)
+        .await;
+    runtime
+        .active_turn_removed(&run.session_id, "turn-competing")
+        .await;
+    launch_error.release().await;
+
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        loop {
+            let continuation_parts = store
+                .load_message_parts(&run.session_id)
+                .await
+                .unwrap()
+                .into_iter()
+                .filter(|record| record.part.text == "继续任务")
+                .count();
+            if continuation_parts == 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    tokio::task::yield_now().await;
+
+    assert_eq!(
+        store
+            .load_message_parts(&run.session_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|record| record.part.text == "继续任务")
+            .count(),
+        1
+    );
     assert_ne!(
         store.read_task_run(&run.id).await.unwrap().unwrap().phase,
         TaskRunPhase::Blocked
@@ -520,6 +789,66 @@ async fn production_continuation_does_not_persist_snapshot_turn_in_core_history(
 }
 
 #[tokio::test]
+async fn ephemeral_continuation_plan_part_does_not_create_plan_confirmation() {
+    let tool_sse = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"id\":\"fc_ephemeral\",\"call_id\":\"call_ephemeral\",\"name\":\"plan_exit\"}}\n\n",
+        "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_ephemeral\",\"call_id\":\"call_ephemeral\",\"delta\":\"{\\\"content\\\":\\\"# Ephemeral Plan\\\\n\\\\n- Continue task\\\"}\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"id\":\"fc_ephemeral\",\"call_id\":\"call_ephemeral\",\"name\":\"plan_exit\",\"arguments\":\"{\\\"content\\\":\\\"# Ephemeral Plan\\\\n\\\\n- Continue task\\\"}\"}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_ephemeral_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let final_sse = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_ephemeral\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_ephemeral\",\"delta\":\"continued\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_ephemeral\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"continued\"}]}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_ephemeral_2\",\"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let (base_url, server) = serve_sse_sequence(vec![tool_sse, final_sse]).await;
+    let repository = init_repository("continuation-ephemeral-plan");
+    let store = StudioStore::open_memory().await.unwrap();
+    let run = persisted_repository_run(&store, &repository, "ephemeral-plan").await;
+    let home = std::env::temp_dir().join(format!("pure-ephemeral-plan-home-{}", unique_id()));
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+    config_store.save(&test_config(base_url)).unwrap();
+    let runtime = StudioRuntime::new(store.clone(), config_store);
+
+    runtime
+        .request_task_continuation(run.id, ContinuationReason::Recovery)
+        .await;
+    server.await.unwrap();
+    wait_for_no_active_turn(&runtime).await;
+
+    let events = store
+        .load_studio_events(&run.session_id, None, None)
+        .await
+        .unwrap();
+    assert!(events.iter().any(|event| matches!(
+        &event.kind,
+        StudioEventKind::MessagePartUpdated { part }
+            if part.part_type == StudioPartType::Plan
+                && part.text.contains("Ephemeral Plan")
+    )));
+    assert!(
+        !store
+            .list_pending_interactions(&run.session_id)
+            .await
+            .unwrap()
+            .iter()
+            .any(|interaction| interaction.kind == InteractionKind::PlanConfirmation)
+    );
+    assert!(!events.iter().any(|event| matches!(
+        &event.kind,
+        StudioEventKind::PlanLifecycleChanged { event }
+            if event.state == PlanLifecycleState::PendingConfirmation
+    )));
+    remove_repository(repository);
+    let _ = tokio::fs::remove_dir_all(home).await;
+}
+
+#[tokio::test]
 async fn recovery_launches_once_after_ready_and_skips_head_drift() {
     let recovered_repository = init_repository("continuation-recovered");
     let drifted_repository = init_repository("continuation-drifted");
@@ -630,7 +959,9 @@ async fn shutdown_clears_pending_and_same_runtime_recovers_once() {
         .await;
 
     let stopped = runtime.shutdown_runtime().await.unwrap();
-    runtime.active_turn_removed(&run.session_id).await;
+    runtime
+        .active_turn_removed(&run.session_id, "turn-competing")
+        .await;
     assert_eq!(stopped.status, StudioRuntimeStatus::Stopped);
     assert!(
         !runtime
@@ -676,6 +1007,198 @@ async fn shutdown_discards_claimed_continuation_before_callback() {
 
     assert_eq!(stopped.status, StudioRuntimeStatus::Stopped);
     assert!(launcher.launches.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn failed_runtime_shutdown_clears_turns_scheduler_and_recovers_cleanly() {
+    let repository = init_repository("continuation-failed-shutdown");
+    let store = StudioStore::open_memory().await.unwrap();
+    let run = persisted_repository_run(&store, &repository, "failed-shutdown").await;
+    let launcher = RecordingLauncher::successful();
+    let runtime = test_runtime(store, launcher.clone());
+    let token = tokio_util::sync::CancellationToken::new();
+    runtime
+        .active_turns
+        .insert(
+            run.session_id.clone(),
+            "turn-before-failure".to_string(),
+            token.clone(),
+        )
+        .await
+        .unwrap();
+    runtime
+        .request_task_continuation(run.id, ContinuationReason::AgentTerminal)
+        .await;
+    runtime
+        .runtime_state
+        .transition(
+            StudioRuntimeStatus::Failed,
+            Some("injected runtime failure".to_string()),
+        )
+        .unwrap();
+
+    let stopped = runtime.shutdown_runtime().await.unwrap();
+
+    assert_eq!(stopped.status, StudioRuntimeStatus::Stopped);
+    assert!(token.is_cancelled());
+    assert!(!runtime.active_turns.contains(&run.session_id).await);
+    assert!(
+        !runtime
+            .continuation_scheduler
+            .has_session(&run.session_id)
+            .await
+    );
+    let ready = runtime.initialize_runtime().await.unwrap();
+    let launches = launcher.wait_for_count(1).await;
+    assert_eq!(ready.status, StudioRuntimeStatus::Ready);
+    assert_eq!(launches.len(), 1);
+    assert_eq!(launches[0].request.reason, ContinuationReason::Recovery);
+    remove_repository(repository);
+}
+
+#[tokio::test]
+async fn stale_background_turn_cannot_finalize_over_recovered_turn_generation() {
+    let old_sse = concat!(
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_old\",\"delta\":\"old done\"}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_old\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let (base_url, server, recovery_accepted, release_recovery) =
+        serve_sse_then_delayed_sse(old_sse).await;
+    let repository = init_repository("continuation-stale-background-restart");
+    let store = StudioStore::open_memory().await.unwrap();
+    let run = persisted_repository_run(&store, &repository, "stale-background-restart").await;
+    let home = std::env::temp_dir().join(format!("pure-stale-background-home-{}", unique_id()));
+    let config_store = ConfigStore::new(crate::config::ConfigPaths::from_home(&home));
+    config_store.save(&test_config(base_url)).unwrap();
+    let mut runtime = StudioRuntime::new(store.clone(), config_store);
+    let completion = PromptCompletionTestBarrier::new();
+    runtime.prompt_completion_barrier = Some(completion.clone());
+    let old_turn = runtime
+        .submit_prompt(StudioSubmitPromptRequest {
+            session_id: run.session_id.clone(),
+            prompt: "old background turn".to_string(),
+            attachment_ids: Vec::new(),
+            options: StudioSubmitPromptOptions {
+                user_prompt: StudioUserPromptPresentation::Normal,
+                lifecycle: Some(StudioPlanImplementationLifecycle {
+                    session_id: run.session_id.clone(),
+                    plan_id: "plan-old-generation".to_string(),
+                }),
+                history_policy: PromptHistoryPolicy::Persist,
+            },
+        })
+        .await
+        .unwrap();
+    completion.wait_until_entered().await;
+
+    assert_eq!(
+        runtime.shutdown_runtime().await.unwrap().status,
+        StudioRuntimeStatus::Stopped
+    );
+    assert_eq!(
+        runtime.initialize_runtime().await.unwrap().status,
+        StudioRuntimeStatus::Ready
+    );
+    tokio::time::timeout(TEST_RUNTIME_TIMEOUT, recovery_accepted)
+        .await
+        .unwrap()
+        .unwrap();
+    let recovered_turn = runtime.runtime_snapshot().active_turns[0].clone();
+    assert_ne!(recovered_turn.turn_id, old_turn.turn_id);
+    let mut current_interaction = pending_interaction(
+        "interaction-current-generation",
+        &run.session_id,
+        InteractionKind::UserInput,
+        InteractionPayload::UserInput {
+            questions: Vec::new(),
+        },
+    );
+    current_interaction.scope.turn_id = recovered_turn.turn_id.clone();
+    store
+        .upsert_interaction(&current_interaction)
+        .await
+        .unwrap();
+    let events_before = store
+        .load_studio_events(&run.session_id, None, None)
+        .await
+        .unwrap();
+    let old_turn_events_before = events_before
+        .iter()
+        .filter(|event| event.turn_id.as_deref() == Some(old_turn.turn_id.as_str()))
+        .count();
+    let old_lifecycle_events_before = events_before
+        .iter()
+        .filter(|event| {
+            matches!(
+                &event.kind,
+                StudioEventKind::PlanLifecycleChanged { event }
+                    if event.plan_id == "plan-old-generation"
+            )
+        })
+        .count();
+
+    completion.release().await;
+    completion.wait_until_finished().await;
+
+    assert_eq!(
+        runtime.runtime_snapshot().active_turns,
+        vec![recovered_turn]
+    );
+    assert!(
+        runtime
+            .continuation_scheduler
+            .has_session(&run.session_id)
+            .await
+    );
+    assert_eq!(
+        store
+            .read_interaction("interaction-current-generation")
+            .await
+            .unwrap()
+            .unwrap()
+            .status,
+        InteractionStatus::Pending
+    );
+    let events_after = store
+        .load_studio_events(&run.session_id, None, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        events_after
+            .iter()
+            .filter(|event| event.turn_id.as_deref() == Some(old_turn.turn_id.as_str()))
+            .count(),
+        old_turn_events_before
+    );
+    assert_eq!(
+        events_after
+            .iter()
+            .filter(|event| matches!(
+                &event.kind,
+                StudioEventKind::PlanLifecycleChanged { event }
+                    if event.plan_id == "plan-old-generation"
+            ))
+            .count(),
+        old_lifecycle_events_before
+    );
+    assert_eq!(
+        store
+            .load_message_parts(&run.session_id)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|record| record.part.text == "继续任务")
+            .count(),
+        1
+    );
+
+    let _ = release_recovery.send(());
+    wait_for_no_active_turn(&runtime).await;
+    server.await.unwrap();
+    remove_repository(repository);
+    let _ = tokio::fs::remove_dir_all(home).await;
 }
 
 fn continuation_request(
