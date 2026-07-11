@@ -18,6 +18,7 @@ class ContextUsageReadout extends StatefulWidget {
 
 class _ContextUsageReadoutState extends State<ContextUsageReadout> {
   bool _hovering = false;
+  bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
@@ -28,6 +29,9 @@ class _ContextUsageReadoutState extends State<ContextUsageReadout> {
     final percent = (progress * 100).round();
     return StatusDetailPopover(
       width: 314,
+      semanticsLabel: context.l10n.statusContextLabel,
+      semanticsValue: '$percent%',
+      onFocusChange: (focused) => setState(() => _focused = focused),
       detailBuilder: (context) => _ContextDetail(
         runtime: runtime,
         progress: progress,
@@ -43,23 +47,18 @@ class _ContextUsageReadoutState extends State<ContextUsageReadout> {
             height: 26,
             padding: const EdgeInsets.symmetric(horizontal: 7),
             decoration: BoxDecoration(
-              color: _hovering
+              color: _hovering || _focused
                   ? context.studioPaper.withValues(alpha: 0.76)
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(StudioRadii.xs),
             ),
-            child: Semantics(
-              label: context.l10n.statusContextLabel,
-              value: '$percent%',
-              excludeSemantics: true,
-              child: Text(
-                '$percent%',
-                maxLines: 1,
-                style: context.text.labelSmall?.copyWith(
-                  color: _progressColor(progress),
-                  fontWeight: FontWeight.w600,
-                  height: 1,
-                ),
+            child: Text(
+              '$percent%',
+              maxLines: 1,
+              style: context.text.labelSmall?.copyWith(
+                color: _progressColor(progress),
+                fontWeight: FontWeight.w600,
+                height: 1,
               ),
             ),
           ),

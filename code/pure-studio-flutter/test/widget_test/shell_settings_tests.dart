@@ -629,9 +629,12 @@ void registerShellSettingsTests() {
     expect(fiveHour.dy, lessThan(weekly.dy));
     expect(weekly.dy, lessThan(mcp.dy));
     expect(find.text('Other injected quota'), findsNothing);
-    expect(find.text('25%'), findsOneWidget);
-    expect(find.text('50%'), findsOneWidget);
-    expect(find.text('80%'), findsOneWidget);
+    expect(find.text('25% remaining'), findsOneWidget);
+    expect(find.text('50% remaining'), findsOneWidget);
+    expect(find.text('80% remaining'), findsOneWidget);
+    expect(find.text('25%'), findsNothing);
+    expect(find.text('50%'), findsNothing);
+    expect(find.text('80%'), findsNothing);
     expect(find.textContaining('Reset '), findsNWidgets(3));
 
     final progress = find.byType(LinearProgressIndicator);
@@ -654,6 +657,36 @@ void registerShellSettingsTests() {
     expect(find.text('Available balance'), findsOneWidget);
     expect(find.text('Granted 8.00'), findsOneWidget);
     expect(find.text('Topped up 80.00'), findsOneWidget);
+  });
+
+  testWidgets('provider list localizes remaining quota semantics in zh Hans', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    final api = _FakeStudioApi(
+      _providerListState(zhipuOnly: true),
+      providerUsages: _providerListUsages,
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(
+          locale: const Locale.fromSubtags(
+            languageCode: 'zh',
+            scriptCode: 'Hans',
+          ),
+          home: const SettingsPage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('剩余 25%'), findsOneWidget);
+    expect(find.text('剩余 50%'), findsOneWidget);
+    expect(find.text('剩余 80%'), findsOneWidget);
+    expect(find.text('25%'), findsNothing);
+    expect(find.text('50%'), findsNothing);
+    expect(find.text('80%'), findsNothing);
   });
 
   testWidgets('provider list omits absent Zhipu quotas', (tester) async {

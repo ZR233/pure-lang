@@ -8,8 +8,41 @@ const _responsiveViewports = [
   (name: '760x720', size: Size(760, 720)),
 ];
 
+const _activityStressViewports = [
+  (name: '900x700', size: Size(900, 700)),
+  (name: '760x720', size: Size(760, 720)),
+];
+
+const _activityStressLabel = '1 skill · 1 MCP · 1 LSP · 8 agents';
+
 void registerResponsiveLayoutTests() {
   group('responsive visual regression', () {
+    testWidgets('desktop settings navigation renders shared token width', (
+      tester,
+    ) async {
+      _configureResponsiveView(tester, const Size(1280, 800));
+      final api = _FakeStudioApi(responsiveVisualState());
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(home: const SettingsPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final settingsNavigation = find.ancestor(
+        of: find.text('Back to chat'),
+        matching: find.byType(ListView),
+      );
+      expect(settingsNavigation, findsOneWidget);
+      expect(
+        tester.getSize(settingsNavigation).width,
+        StudioLayout.settingsNavigationWidth,
+      );
+      expect(tester.takeException(), isNull);
+    });
+
     for (final viewport in _responsiveViewports) {
       testWidgets('chat page remains usable at ${viewport.name}', (
         tester,
@@ -226,6 +259,62 @@ void registerResponsiveLayoutTests() {
         expect(tester.takeException(), isNull);
       });
     }
+
+    for (final viewport in _activityStressViewports) {
+      testWidgets('expanded multi-agent popover is bounded and scrollable at '
+          '${viewport.name}', (tester) async {
+        _configureResponsiveView(tester, viewport.size);
+        final api = _FakeStudioApi(_responsiveActivityStressState());
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [studioApiProvider.overrideWithValue(api)],
+            child: _localizedApp(home: const StudioShell()),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final trigger = find.text(_activityStressLabel);
+        expect(trigger, findsOneWidget);
+        await tester.ensureVisible(trigger);
+        await tester.pumpAndSettle();
+        final triggerRect = tester.getRect(trigger);
+
+        await tester.tapAt(Offset(triggerRect.left + 8, triggerRect.center.dy));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('reviewer 1'));
+        await tester.pumpAndSettle();
+
+        final detailCard = find.ancestor(
+          of: find.text('ACTIVE CAPABILITIES'),
+          matching: find.byWidgetPredicate(_isLiftedDetailCard),
+        );
+        expect(detailCard, findsOneWidget);
+        final detailRect = tester.getRect(detailCard);
+        final stableTriggerRect = tester.getRect(trigger);
+        expect(_rectFitsViewport(detailRect, inset: 8), isTrue);
+        expect(detailRect.bottom, lessThanOrEqualTo(stableTriggerRect.top - 8));
+        expect(detailRect.overlaps(stableTriggerRect), isFalse);
+
+        final wholePopoverScrollable = find.ancestor(
+          of: find.text('ACTIVE CAPABILITIES'),
+          matching: find.byType(Scrollable),
+        );
+        expect(wholePopoverScrollable, findsOneWidget);
+        final position = tester
+            .state<ScrollableState>(wholePopoverScrollable)
+            .position;
+        expect(position.maxScrollExtent, greaterThan(0));
+        final initialOffset = position.pixels;
+        await tester.drag(
+          find.text('ACTIVE CAPABILITIES'),
+          const Offset(0, -120),
+        );
+        await tester.pumpAndSettle();
+        expect(position.pixels, greaterThan(initialOffset));
+        expect(tester.takeException(), isNull);
+      });
+    }
   });
 }
 
@@ -251,6 +340,36 @@ List<RenderParagraph> _renderParagraphs(Finder finder) {
     for (final element in finder.evaluate())
       if (element.renderObject case final RenderParagraph paragraph) paragraph,
   ];
+}
+
+StudioState _responsiveActivityStressState() {
+  final state = responsiveVisualState();
+  final updatedAt = DateTime.fromMillisecondsSinceEpoch(1735689600000);
+  final agents = <String, StudioAgentView>{
+    for (var index = 0; index < 8; index++)
+      'agent-$index': StudioAgentView(
+        id: 'agent-$index',
+        sessionId: 'session-1',
+        path: 'root/reviewer-${index + 1}',
+        role: 'reviewer ${index + 1}',
+        task:
+            'Audit the expanded activity popover at constrained desktop '
+            'heights without losing any agent details',
+        status: index.isEven ? 'running' : 'completed',
+        summary:
+            'Expanded summary ${index + 1} verifies that the complete popover '
+            'can move as one scrollable surface above the status trigger.',
+        reason:
+            'The responsive test intentionally supplies several detailed '
+            'agents so the content exceeds the available vertical space.',
+        depth: index % 3,
+        updatedAt: updatedAt,
+      ),
+  };
+  return state.copyWith(
+    runtime: state.runtime.copyWith(agentCount: agents.length),
+    agentsBySession: {'session-1': agents},
+  );
 }
 
 bool _rectFitsViewport(Rect rect, {double inset = 0}) {
