@@ -228,7 +228,7 @@ impl StudioRuntime {
                         }
                         None => true,
                     };
-                    let mut terminal_recording = None;
+                    let mut terminal_projection = None;
                     if let AgentEvent::AgentStateChanged {
                         id,
                         role,
@@ -277,46 +277,43 @@ impl StudioRuntime {
                                 continue;
                             }
                         };
-                        terminal_recording = Some(recording);
-                    }
-                    if !visible {
-                        continue;
-                    }
-                    if let Some(recording) = terminal_recording {
-                        let (projection, continuation_task_run_id) = match recording {
+                        terminal_projection = match recording {
                             crate::studio::task_coordinator::TerminalAgentStateRecording::Changed {
                                 task_run_id,
                                 projection,
-                            } => (Some(projection), Some(task_run_id)),
+                            } => {
+                                self.request_task_continuation(
+                                    task_run_id,
+                                    ContinuationReason::AgentTerminal,
+                                )
+                                .await;
+                                Some(projection)
+                            }
                             crate::studio::task_coordinator::TerminalAgentStateRecording::Projected(
                                 projection,
-                            ) => (Some(projection), None),
+                            ) => Some(projection),
                             crate::studio::task_coordinator::TerminalAgentStateRecording::Unhandled => {
-                                (None, None)
+                                None
                             }
                             crate::studio::task_coordinator::TerminalAgentStateRecording::Suppressed => {
                                 continue;
                             }
                         };
-                        if let Some(projection) = projection
-                            && let AgentEvent::AgentStateChanged {
-                                status,
-                                summary,
-                                error,
-                                ..
-                            } = &mut event
-                        {
-                            *status = projection.status;
-                            *summary = projection.summary;
-                            *error = projection.error;
-                        }
-                        if let Some(task_run_id) = continuation_task_run_id {
-                            self.request_task_continuation(
-                                task_run_id,
-                                ContinuationReason::AgentTerminal,
-                            )
-                            .await;
-                        }
+                    }
+                    if !visible {
+                        continue;
+                    }
+                    if let Some(projection) = terminal_projection
+                        && let AgentEvent::AgentStateChanged {
+                            status,
+                            summary,
+                            error,
+                            ..
+                        } = &mut event
+                    {
+                        *status = projection.status;
+                        *summary = projection.summary;
+                        *error = projection.error;
                     }
                     if let AgentEvent::SubAgentActivity {
                         agent_id: Some(agent_id),

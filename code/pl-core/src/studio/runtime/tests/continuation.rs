@@ -561,6 +561,7 @@ async fn queued_terminal_event_persists_for_stale_prompt_without_side_effects() 
     let launcher = RecordingLauncher::successful();
     let runtime = test_runtime(store.clone(), launcher.clone());
     let stale_turn_id = "turn-stale-terminal";
+    let current_turn_id = "turn-current";
     runtime
         .active_turns
         .insert(
@@ -581,7 +582,7 @@ async fn queued_terminal_event_persists_for_stale_prompt_without_side_effects() 
         .active_turns
         .insert(
             run.session_id.clone(),
-            "turn-current".to_string(),
+            current_turn_id.to_string(),
             tokio_util::sync::CancellationToken::new(),
         )
         .await
@@ -608,11 +609,36 @@ async fn queued_terminal_event_persists_for_stale_prompt_without_side_effects() 
     );
     assert!(launcher.launches.lock().await.is_empty());
     assert!(
-        !runtime
+        runtime
             .continuation_scheduler
             .has_session(&run.session_id)
             .await
     );
+    runtime
+        .active_turn_removed(&run.session_id, current_turn_id)
+        .await;
+    let launches = launcher.wait_for_count(1).await;
+    assert_eq!(launches.len(), 1);
+    assert_eq!(launches[0].request.task_run_id, run.id);
+    assert_eq!(
+        launches[0].request.reason,
+        ContinuationReason::AgentTerminal
+    );
+
+    let (duplicate_tx, duplicate_rx) = tokio::sync::broadcast::channel(8);
+    duplicate_tx
+        .send(terminal_event(&outcome.agent_id))
+        .unwrap();
+    drop(duplicate_tx);
+    runtime
+        .drain_prompt_agent_events(
+            run.session_id.clone(),
+            stale_turn_id.to_string(),
+            duplicate_rx,
+        )
+        .await;
+    tokio::task::yield_now().await;
+    assert_eq!(launcher.launches.lock().await.len(), 1);
     assert!(
         store
             .load_studio_events(&run.session_id, None, None)
@@ -647,19 +673,20 @@ async fn queued_terminal_event_persists_during_shutdown_without_side_effects() {
     event_tx.send(terminal_event(&outcome.agent_id)).unwrap();
     drop(event_tx);
     let mut studio_events = runtime.events().subscribe();
-    let shutdown_runtime = runtime.clone();
-    let shutdown = tokio::spawn(async move { shutdown_runtime.shutdown_runtime().await });
-    shutdown_cancelled.wait_until_entered().await;
-    shutdown_cancelled.release().await;
-
-    runtime
-        .drain_prompt_agent_events(run.session_id.clone(), turn_id.to_string(), event_rx)
-        .await;
-    runtime.active_turn_removed(&run.session_id, turn_id).await;
-    assert_eq!(
-        shutdown.await.unwrap().unwrap().status,
-        StudioRuntimeStatus::Stopped
-    );
+    let stopped = tokio::time::timeout(TEST_RUNTIME_TIMEOUT, async {
+        let shutdown_runtime = runtime.clone();
+        let shutdown = tokio::spawn(async move { shutdown_runtime.shutdown_runtime().await });
+        shutdown_cancelled.wait_until_entered().await;
+        shutdown_cancelled.release().await;
+        runtime
+            .drain_prompt_agent_events(run.session_id.clone(), turn_id.to_string(), event_rx)
+            .await;
+        runtime.active_turn_removed(&run.session_id, turn_id).await;
+        shutdown.await.unwrap().unwrap()
+    })
+    .await
+    .unwrap();
+    assert_eq!(stopped.status, StudioRuntimeStatus::Stopped);
 
     assert_eq!(
         store
