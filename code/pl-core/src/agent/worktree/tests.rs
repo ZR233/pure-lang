@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Barrier, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::backend::BoxFuture;
@@ -12,7 +12,7 @@ use super::{
 };
 use super::{
     DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
-    reconcile_task_worktrees,
+    reconcile_task_worktrees, set_after_registration_remove_barrier,
 };
 
 #[derive(Debug)]
@@ -325,6 +325,51 @@ async fn reconciliation_rejects_linked_parent_without_touching_external_leaf() {
         fs::read_to_string(external_leaf.join("keep.txt")).unwrap(),
         "keep"
     );
+    fs::remove_dir_all(repo).ok();
+    fs::remove_dir_all(external).ok();
+}
+
+#[tokio::test]
+async fn fallback_delete_revalidates_after_registration_remove_race() {
+    let repo = temp_git_repo();
+    let manager = WorktreeManager::local(repo.clone());
+    let orphan = task_worktree_spec(&repo, "run-race", "agent-race");
+    manager.create_from_spec(orphan.clone()).await.unwrap();
+    let external = std::env::temp_dir().join(format!(
+        "pure-worktree-race-external-{}",
+        REPO_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    let external_leaf = external.join("agent-race");
+    fs::create_dir_all(&external_leaf).unwrap();
+    fs::write(external_leaf.join("keep.txt"), "keep").unwrap();
+    let barrier = Arc::new(Barrier::new(2));
+    set_after_registration_remove_barrier(orphan.path.clone(), barrier.clone());
+
+    let reconcile_repo = repo.clone();
+    let reconcile =
+        tokio::spawn(async move { reconcile_task_worktrees(&reconcile_repo, &[]).await });
+    let run_parent = orphan.path.parent().unwrap().to_path_buf();
+    let race = tokio::task::spawn_blocking(move || {
+        barrier.wait();
+        if run_parent.exists() {
+            fs::remove_dir(&run_parent).unwrap();
+        }
+        create_directory_link(&external, &run_parent);
+        barrier.wait();
+        (external, run_parent)
+    });
+    let (external, linked_parent) = race.await.unwrap();
+    let error = reconcile
+        .await
+        .unwrap()
+        .expect_err("fallback delete must revalidate");
+
+    assert!(error.to_string().contains("link") || error.to_string().contains("reparse"));
+    assert_eq!(
+        fs::read_to_string(external_leaf.join("keep.txt")).unwrap(),
+        "keep"
+    );
+    fs::remove_dir(&linked_parent).ok();
     fs::remove_dir_all(repo).ok();
     fs::remove_dir_all(external).ok();
 }

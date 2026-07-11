@@ -18,6 +18,8 @@ pub use manager::{
     CloseDisposition, CloseOutcome, WorktreeCreateSpec, WorktreeHandle, WorktreeManager,
     WorktreeRef,
 };
+#[cfg(test)]
+pub(crate) use reconcile::set_after_registration_remove_barrier;
 pub(crate) use reconcile::{
     DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
     WorktreeReconciliation, reconcile_task_worktrees,
