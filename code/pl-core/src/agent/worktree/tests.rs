@@ -10,6 +10,7 @@ use super::{
     CloseDisposition, CloseOutcome, MergeOutcome, WorktreeBackend, WorktreeCreateFailure,
     WorktreeCreateSpec, WorktreeError, WorktreeHandle, WorktreeManager,
 };
+use super::{DurableWorktreeDisposition, DurableWorktreeResource, reconcile_task_worktrees};
 
 #[derive(Debug)]
 struct FailingCleanupBackend {
@@ -186,6 +187,89 @@ async fn create_from_spec_uses_exact_path_branch_and_base_commit() {
         .await
         .unwrap();
     fs::remove_dir_all(repo).ok();
+}
+
+#[tokio::test]
+async fn durable_reconciliation_preserves_owned_leaf_and_cleans_exact_orphan() {
+    let repo = temp_git_repo();
+    let manager = WorktreeManager::local(repo.clone());
+    let protected = task_worktree_spec(&repo, "run-protected", "agent-protected");
+    let orphan = task_worktree_spec(&repo, "run-orphan", "agent-orphan");
+    manager.create_from_spec(protected.clone()).await.unwrap();
+    manager.create_from_spec(orphan.clone()).await.unwrap();
+    let orphan_parent = orphan.path.parent().unwrap().to_path_buf();
+    fs::write(orphan_parent.join("audit.txt"), "keep parent").unwrap();
+
+    let first = reconcile_task_worktrees(
+        &repo,
+        &[DurableWorktreeResource {
+            task_run_id: "run-protected".to_string(),
+            path: protected.path.clone(),
+            branch: protected.branch.clone(),
+            expected_head: None,
+            disposition: DurableWorktreeDisposition::Protect,
+        }],
+    )
+    .await
+    .unwrap();
+    let second = reconcile_task_worktrees(
+        &repo,
+        &[DurableWorktreeResource {
+            task_run_id: "run-protected".to_string(),
+            path: protected.path.clone(),
+            branch: protected.branch.clone(),
+            expected_head: None,
+            disposition: DurableWorktreeDisposition::Protect,
+        }],
+    )
+    .await
+    .unwrap();
+
+    assert!(protected.path.is_dir());
+    assert!(!orphan.path.exists());
+    assert!(orphan_parent.join("audit.txt").exists());
+    assert_eq!(first.cleaned_registrations, 1);
+    assert_eq!(second.cleaned_registrations, 0);
+    assert!(git_output(&repo, &["branch", "--list", &orphan.branch]).is_empty());
+    fs::remove_dir_all(repo).ok();
+}
+
+#[tokio::test]
+async fn durable_reconciliation_rejects_partial_missing_without_cleanup() {
+    let repo = temp_git_repo();
+    let spec = task_worktree_spec(&repo, "run-partial", "agent-partial");
+    run_git(&repo, &["branch", &spec.branch]);
+
+    let error = reconcile_task_worktrees(
+        &repo,
+        &[DurableWorktreeResource {
+            task_run_id: "run-partial".to_string(),
+            path: spec.path.clone(),
+            branch: spec.branch.clone(),
+            expected_head: None,
+            disposition: DurableWorktreeDisposition::Protect,
+        }],
+    )
+    .await
+    .expect_err("a durable owner with only a branch must block reconciliation");
+
+    assert!(error.to_string().contains("run-partial"));
+    assert!(!git_output(&repo, &["branch", "--list", &spec.branch]).is_empty());
+    assert!(!spec.path.exists());
+    fs::remove_dir_all(repo).ok();
+}
+
+fn task_worktree_spec(repo: &Path, run_id: &str, agent_id: &str) -> WorktreeCreateSpec {
+    WorktreeCreateSpec {
+        repo_root: repo.to_path_buf(),
+        path: repo
+            .join(".pure")
+            .join("worktrees")
+            .join(run_id)
+            .join(agent_id),
+        branch: format!("pure-task-{run_id}-{agent_id}"),
+        base_commit: "HEAD".to_string(),
+    }
 }
 
 #[tokio::test]
@@ -379,14 +463,13 @@ async fn close_merge_conflict_keeps_worktree() {
 }
 
 #[tokio::test]
-async fn enable_cleans_orphan_worktrees() {
+async fn enable_never_scans_or_cleans_orphan_worktrees() {
     let repo = temp_git_repo();
     let orphan = repo.join(".pure").join("worktrees").join("orphan");
     fs::create_dir_all(&orphan).unwrap();
     fs::write(orphan.join("junk.txt"), "junk").unwrap();
     let manager = WorktreeManager::disabled();
-    // 首次 enable 会扫描并清理 .pure/worktrees/ 下的残留目录。
     manager.enable(repo.clone()).await;
-    assert!(!orphan.exists());
+    assert!(orphan.exists());
     fs::remove_dir_all(repo).ok();
 }

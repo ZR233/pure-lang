@@ -139,6 +139,13 @@ pub(crate) struct RestartAgentReconciliation {
     pub(crate) cancelled_outcomes: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskWorktreeOwnerSnapshot {
+    pub(crate) run: TaskRunRecord,
+    pub(crate) work_units: Vec<WorkUnitRecord>,
+    pub(crate) outcomes: Vec<AgentOutcomeRecord>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DesignUpdateOutput {

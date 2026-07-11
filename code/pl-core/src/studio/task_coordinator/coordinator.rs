@@ -161,6 +161,14 @@ impl TaskCoordinator {
                 .await?;
                 continue;
             }
+            if let Err(error) = self.reconcile_durable_worktrees(&run).await {
+                self.block_run(
+                    &run,
+                    format!("worktree restart reconciliation failed: {error}"),
+                )
+                .await?;
+                continue;
+            }
             let snapshot = match inspect_repository(&run.workspace_root, true).await {
                 Ok(snapshot) => snapshot,
                 Err(error) => {

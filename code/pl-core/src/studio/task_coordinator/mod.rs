@@ -4,6 +4,7 @@ mod delivery;
 mod design;
 mod git;
 mod owned_path;
+mod recovery;
 mod spawn;
 mod terminal;
 mod types;

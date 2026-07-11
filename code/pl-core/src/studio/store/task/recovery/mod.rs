@@ -9,12 +9,47 @@ use crate::studio::entities;
 use crate::studio::ids::unix_seconds;
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AgentOutcomeStatus, RestartAgentReconciliation, WorkUnitStatus,
+    AgentOutcomeStatus, RestartAgentReconciliation, TaskWorktreeOwnerSnapshot, WorkUnitStatus,
 };
+
+use super::{outcome::agent_outcome_record, task_run_record, work_unit::work_unit_record};
 
 const RESTART_DIAGNOSTIC: &str = "agent interrupted by application restart";
 
 impl StudioStore {
+    pub(crate) async fn list_task_worktree_owners(
+        &self,
+        workspace_root: &str,
+    ) -> Result<Vec<TaskWorktreeOwnerSnapshot>> {
+        let runs = entities::task_run::Entity::find()
+            .filter(entities::task_run::Column::WorkspaceRoot.eq(workspace_root.to_string()))
+            .all(&self.db)
+            .await?;
+        let mut snapshots = Vec::with_capacity(runs.len());
+        for run in runs {
+            let work_units = entities::work_unit::Entity::find()
+                .filter(entities::work_unit::Column::TaskRunId.eq(run.id.clone()))
+                .all(&self.db)
+                .await?
+                .into_iter()
+                .map(work_unit_record)
+                .collect::<Result<Vec<_>>>()?;
+            let outcomes = entities::agent_outcome::Entity::find()
+                .filter(entities::agent_outcome::Column::TaskRunId.eq(run.id.clone()))
+                .all(&self.db)
+                .await?
+                .into_iter()
+                .map(agent_outcome_record)
+                .collect::<Result<Vec<_>>>()?;
+            snapshots.push(TaskWorktreeOwnerSnapshot {
+                run: task_run_record(run)?,
+                work_units,
+                outcomes,
+            });
+        }
+        Ok(snapshots)
+    }
+
     pub(crate) async fn reconcile_task_agents_after_restart(
         &self,
         task_run_id: &str,

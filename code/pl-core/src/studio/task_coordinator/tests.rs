@@ -1660,6 +1660,111 @@ async fn recovery_blocks_run_before_continuation_when_agent_pairs_are_invalid() 
     remove_repository(repository);
 }
 
+#[tokio::test]
+async fn recovery_preserves_restart_cancelled_worktree_and_cleans_orphan_leaf() {
+    let repository = init_repository("recovery-worktree-reconcile");
+    std::fs::write(repository.join(".gitignore"), ".pure/\n").unwrap();
+    git(&repository, &["add", ".gitignore"]);
+    git(&repository, &["commit", "-m", "ignore runtime"]);
+    let store = task_store(&repository).await;
+    let session = task_session(&store, &repository).await;
+    let run = {
+        let coordinator = TaskCoordinator::new(store.clone());
+        coordinator
+            .start_confirmed_task(&session.id, "plan", &repository)
+            .await
+            .unwrap()
+    };
+    let protected_path = repository
+        .join(".pure/worktrees")
+        .join(&run.id)
+        .join("agent-owned");
+    let protected_branch = format!("pure-task-{}-agent-owned", run.id);
+    let protected_path_arg = protected_path.to_string_lossy().to_string();
+    git(
+        &repository,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            &protected_branch,
+            &protected_path_arg,
+            "HEAD",
+        ],
+    );
+    let unit = store
+        .create_work_unit(CreateWorkUnit {
+            task_run_id: run.id.clone(),
+            title: "owned".to_string(),
+            owned_paths: vec!["code/**".to_string()],
+            base_commit: run.base_commit.clone(),
+            worktree_path: protected_path_arg,
+            branch: protected_branch.clone(),
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    store
+        .update_work_unit(
+            &unit.id,
+            WorkUnitStatus::Running,
+            Some("agent-owned".to_string()),
+        )
+        .await
+        .unwrap();
+    store
+        .create_agent_outcome(CreateAgentOutcome {
+            task_run_id: run.id.clone(),
+            work_unit_id: Some(unit.id.clone()),
+            agent_id: "agent-owned".to_string(),
+            owner_path: "/root".to_string(),
+            initiated_by: "planner".to_string(),
+            requested_by_call_id: "call-owned".to_string(),
+            role: "executor".to_string(),
+            status: AgentOutcomeStatus::Running,
+            attempt: 1,
+        })
+        .await
+        .unwrap();
+    let orphan_parent = repository.join(".pure/worktrees/orphan-run");
+    let orphan_path = orphan_parent.join("orphan-agent");
+    let orphan_path_arg = orphan_path.to_string_lossy().to_string();
+    let orphan_branch = "pure-task-orphan-run-orphan-agent";
+    git(
+        &repository,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            orphan_branch,
+            &orphan_path_arg,
+            "HEAD",
+        ],
+    );
+    std::fs::write(orphan_parent.join("audit.txt"), "keep").unwrap();
+
+    let recovered = TaskCoordinator::new(store.clone())
+        .recover_active_tasks()
+        .await
+        .unwrap();
+
+    assert_eq!(recovered.len(), 1);
+    assert!(protected_path.is_dir());
+    assert!(!orphan_path.exists());
+    assert!(orphan_parent.join("audit.txt").exists());
+    assert!(git_output(&repository, &["branch", "--list", orphan_branch]).is_empty());
+    assert_eq!(
+        store
+            .read_work_unit(&unit.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .status,
+        WorkUnitStatus::Cancelled
+    );
+    remove_repository(repository);
+}
+
 async fn task_store(repository: &Path) -> StudioStore {
     let store = StudioStore::open_memory().await.unwrap();
     store.upsert_project(repository).await.unwrap();
